@@ -1,0 +1,24 @@
+# Requires Python >= 3.12 because vendored DeerFlow uses 3.12-era typing features.
+#
+# IMPORTANT: The vendored DeerFlow layer requires a DeerFlow-patched langchain build
+# (>=1.2) that provides langchain.agents.create_agent and related extensions.
+# Standard PyPI langchain 0.3.x will NOT work.
+langchain>=1.2
+langchain-core>=0.3
+langchain-openai>=0.3
+langgraph>=0.3
+pydantic>=2.0
+PyYAML>=6.0
+httpx>=0.25
+openai>=1.0
+python-dotenv>=1.0
+
+# Optional provider adapters
+# langchain-anthropic>=0.3
+# langchain-google-genai>=2.0
+
+# Optional: Google Gemini multimodal (image generation, video understanding)
+# google-genai>=1.0
+
+# Optional: Edge TTS fallback for speech synthesis
+# edge-tts>=6.0

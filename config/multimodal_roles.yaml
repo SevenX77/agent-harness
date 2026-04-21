@@ -1,0 +1,158 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# Multimodal Role → Model → Provider Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Three-tier structure (mirrors llm_roles.yaml):
+#   1. models    — Model registry (code → model details + provider name mappings)
+#   2. providers — Provider registry (code → connection details + type)
+#   3. roles     — Role registry (caller's entry point with fallback chains)
+#
+# Provider types:
+#   - ark_openai       : Volcengine ARK via OpenAI-compatible SDK
+#   - gemini_official   : Google genai SDK (generate_content)
+#   - wavespeed        : WaveSpeed async task API (submit + poll)
+#
+# Hot-reloading: changes take effect on next multimodal call without restart.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+models:
+  # ── Image Generation ─────────────────────────────────────────────────────
+  NB_PRO:
+    name: "Nano Banana Pro"
+    task_type: image
+    providers:
+      OC_GEMINI: "gemini-3-pro-image-preview"
+      GEMINI: "gemini-3-pro-image-preview"
+      WAVESPEED: "google/nano-banana-pro/text-to-image"
+    provider_options:
+      WAVESPEED:
+        edit_path: "google/nano-banana-pro/edit-ultra"
+
+  NB2:
+    name: "Nano Banana 2"
+    task_type: image
+    providers:
+      OC_GEMINI: "gemini-3.1-flash-image-preview"
+      GEMINI: "gemini-3.1-flash-image-preview"
+      WAVESPEED: "google/nano-banana-2/text-to-image"
+
+  # ── Video Generation ─────────────────────────────────────────────────────
+  SEEDANCE_V15:
+    name: "Seedance V1.5 Pro"
+    task_type: video
+    providers:
+      ARK: "doubao-seedance-1-5-pro-251215"
+      WAVESPEED: "bytedance/seedance-v1.5-pro/image-to-video"
+
+  VEO31_I2V:
+    name: "Veo 3.1 I2V"
+    task_type: video
+    providers:
+      WAVESPEED: "google/veo3.1/image-to-video"
+
+  VEO31_REF2V:
+    name: "Veo 3.1 Ref2V"
+    task_type: video
+    providers:
+      WAVESPEED: "google/veo3.1/reference-to-video"
+
+  # ── Video Understanding ──────────────────────────────────────────────────
+  SEED20_PRO:
+    name: "Seed 2.0 Pro"
+    task_type: video_understanding
+    providers:
+      ARK: "doubao-seed-2-0-pro-260215"
+      ONECHATS_ARK: "doubao-seed-2-0-pro-260215"
+
+  GEMINI_31_PRO:
+    name: "Gemini 3.1 Pro"
+    task_type: video_understanding
+    providers:
+      GEMINI: "gemini-3.1-pro-preview"
+
+
+providers:
+  ARK:
+    name: "Volcengine ARK"
+    type: ark_openai
+    api_key_env: ARK_API_KEY
+    base_url: "https://ark.cn-beijing.volces.com/api/v3"
+    proxy_env: GEMINI_PROXY
+    timeout: 120
+    poll_interval: 5
+
+  GEMINI:
+    name: "Gemini Official"
+    type: gemini_official
+    api_key_env: GEMINI_API_KEY
+    proxy_env: GEMINI_PROXY
+    timeout: 120
+
+  WAVESPEED:
+    name: "WaveSpeed"
+    type: wavespeed
+    api_key_env: WAVESPEED_API_KEY
+    base_url: "https://api.wavespeed.ai/api/v3"
+    proxy_env: GEMINI_PROXY
+    timeout: 600
+    poll_interval: 5
+
+  ONECHATS_ARK:
+    name: "OneChats ARK"
+    type: ark_openai
+    api_key_env: ONE_CHATS_ARK_API_KEY
+    base_url: "https://chatapi.onechats.ai/v1"
+    proxy_env: GEMINI_PROXY
+    timeout: 600
+    poll_interval: 5
+
+  OC_GEMINI:
+    name: "OneChats Gemini Image"
+    type: openai_compatible_image   # chat/completions → inline base64 image
+    api_key_env: ONE_CHATS_GEMINI_API_KEY
+    base_url: "https://chatapi.onechats.ai/v1"
+    timeout: 120
+
+
+roles:
+  # 生成初始参考图（纯文生图，无需图片输入）
+  ref_image_gen:
+    active_model: NB2
+    model_fallback: true
+    models:
+      NB2: { providers: [OC_GEMINI, GEMINI, WAVESPEED] }
+      NB_PRO: { providers: [OC_GEMINI, GEMINI, WAVESPEED] }
+
+  # 改图（在初始资产图基础上修改，换 look）
+  image_edit:
+    active_model: NB2
+    model_fallback: true
+    models:
+      NB2: { providers: [OC_GEMINI, GEMINI] }
+      NB_PRO: { providers: [OC_GEMINI, GEMINI, WAVESPEED] }
+
+  # 融图（场景 + 人物 + 道具 → 分镜图）
+  image_fuse:
+    active_model: NB2
+    model_fallback: true
+    models:
+      NB2: { providers: [OC_GEMINI, GEMINI] }
+      NB_PRO: { providers: [OC_GEMINI, GEMINI] }
+
+  # 视频生成
+  video_gen:
+    active_model: SEEDANCE_V15
+    model_fallback: true
+    models:
+      SEEDANCE_V15: { providers: [ARK, WAVESPEED] }
+      VEO31_I2V: { providers: [WAVESPEED] }
+      VEO31_REF2V: { providers: [WAVESPEED] }
+
+  # 视频理解
+  video_understanding:
+    active_model: SEED20_PRO
+    model_fallback: true
+    models:
+      SEED20_PRO: { providers: [ARK, ONECHATS_ARK] }
+      GEMINI_31_PRO: { providers: [GEMINI] }

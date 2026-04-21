@@ -1,0 +1,125 @@
+"""Cognitive prompt composer for GraphAgentHarness.
+
+This module turns framework-level methodology into the final system prompt seen
+by a phase agent. It merges:
+
+- the phase-local skill system prompt
+- optional role-level methodology prefixes from ``llm_roles.yaml``
+- optional ``data_architecture`` constraints
+- optional subagent usage policy
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+
+def _build_subagent_section(enabled: bool) -> str:
+    if not enabled:
+        return ""
+    return """<subagent_system>
+你可以使用子代理进行任务分解。仅在以下条件下使用：
+1. 任务可拆为 2 个及以上彼此独立的子任务
+2. 子任务适合并行，且不依赖前序结果
+3. 你已经明确每个子任务的输入和输出边界
+
+使用前先在思考中写明：
+- 子任务数量
+- 每个子任务目标
+- 结果如何汇总到当前阶段结论
+
+如果任务是强顺序依赖，请直接在当前代理内执行，不要为了“使用子代理”而使用子代理。
+</subagent_system>"""
+
+
+def _build_data_architecture_section(data_architecture: str | None) -> str:
+    if not data_architecture:
+        return ""
+    return f"""<data_architecture>
+{data_architecture}
+</data_architecture>"""
+
+
+def apply_cognitive_template(
+    *,
+    phase_name: str,
+    skill_system_prompt: str,
+    data_architecture: str | None,
+    subagent_enabled: bool = False,
+    context: dict[str, Any] | None = None,
+    role_prefix: str = "",
+) -> str:
+    """Compose final system prompt from cognitive template + skill prompt.
+
+    Args:
+        phase_name: Current phase name for contextual reminders.
+        skill_system_prompt: Domain-specific instructions defined by the skill.
+        data_architecture: Optional structural guidance about expected data
+            shapes, field meanings, and producer/consumer boundaries.
+        subagent_enabled: Whether to include the phase-level subagent policy.
+        context: Reserved extension point for future context-aware prompt
+            branching. Currently accepted for compatibility and ignored.
+        role_prefix: Optional methodology prefix resolved from
+            ``llm_roles.yaml.roles.<tier>.system_prompt_prefix``.
+
+    Returns:
+        One merged system prompt string consumed by ``create_agent()``.
+
+    """
+    _ = context
+    subagent_section = _build_subagent_section(subagent_enabled)
+    data_architecture_section = _build_data_architecture_section(data_architecture)
+    role_prefix_section = (
+        f"<role_prefix>\n{role_prefix.strip()}\n</role_prefix>\n"
+        if role_prefix and role_prefix.strip()
+        else ""
+    )
+
+    return f"""
+<role>
+你是 GraphAgent 的执行节点，当前阶段：{phase_name}。
+</role>
+
+{role_prefix_section}
+
+<thinking_style>
+- 行动前先做简短策略思考：目标是什么、输入是否充分、输出标准是什么
+- 区分“事实”与“推断”，不要把推断当作事实写入结果
+- 对关键判断给出依据，不要无依据臆测
+- 先规划后执行：明确步骤，再调用工具
+- 思考用于规划；对外输出必须给出可执行结果，而不是只描述计划
+</thinking_style>
+
+<ambiguity_feedback>
+当你发现规则不清晰、输入不足或存在多种合理解释时，不要静默跳过：
+1. 优先调用 log_ambiguity 记录问题、类型、你的决策和理由
+2. 然后继续按“最保守且可解释”的方案执行
+
+这不是阻塞流程的澄清请求，而是用于改进技能定义的反馈回路。
+</ambiguity_feedback>
+
+<protocol_citation>
+做判断时必须标注协议依据。推荐格式：
+- [protocol:P1] ...
+- [protocol:P6] ...
+- [protocol:P9] ...
+
+若无法对应到具体协议编号，必须在自检说明中写明“未找到明确协议条款”，并调用 log_ambiguity。
+</protocol_citation>
+
+{data_architecture_section}
+
+{subagent_section}
+
+<skill_section>
+{skill_system_prompt}
+</skill_section>
+
+<critical_reminders>
+- 调用 finish_task 前，先检查关键工具返回值是否与预期一致
+- 如果发现不一致，先修复再 finish
+- 对每个关键结论都给出规则依据或数据依据
+- 当你不确定规则边界时，先 log_ambiguity，再继续执行
+- finish_task 必须提供结构化自检：execution_summary、plan_checklist、unresolved_issues
+</critical_reminders>
+""".strip()

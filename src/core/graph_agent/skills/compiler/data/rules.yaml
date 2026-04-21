@@ -1,0 +1,180 @@
+# GraphAgent Skill Compiler — 规则唯一数据源
+# Python _compile_check() 和 IDE/Claude 均从此文件读取规则定义
+# 详细解释和修复示例见 references/rules_spec.md
+
+fatal:
+  F001:
+    scope: frontmatter
+    check: name_kebab_case
+    description: "name 必须存在且符合 kebab-case"
+    reason: "Skill 无法识别"
+
+  F002:
+    scope: frontmatter
+    check: description_exists
+    description: "description 必须存在，≤1024 字符"
+    reason: "Skill 无法触发"
+
+  F005:
+    scope: frontmatter
+    check: context_mapping_syntax
+    description: "context_mapping 表达式语法必须合法"
+    reason: "变量无法解析，下游必报错"
+
+  F006:
+    scope: frontmatter
+    check: no_func_in_context_mapping
+    description: "context_mapping 中禁止使用 $func() 语法（已废弃）"
+    reason: "framework 层不应执行 skill 业务代码；改用 setup phase + script/ tools 模式"
+
+  P003:
+    scope: phase
+    check: tool_path_resolvable
+    description: "tools / validator 引用路径必须可解析"
+    reason: "Agent 缺少工具，任务必失败"
+
+  P006:
+    scope: phase
+    check: placeholder_defined
+    description: "{key} 占位符必须在 context_mapping 中有定义"
+    reason: "模板回退为原始字符串（静默失效，最危险）"
+
+  P007:
+    scope: phase
+    check: no_inline_json
+    pattern: '\\{"'
+    description: "<system_prompt> 中严禁包含内联 JSON"
+    reason: "与模板引擎 {key} 冲突导致整段 Prompt 失效"
+
+  P008:
+    scope: graph
+    check: depends_on_valid
+    description: "Graph 模式 depends_on 引用必须指向已定义的 <node>"
+    reason: "拓扑断裂"
+
+  P009:
+    scope: graph
+    check: no_cycle
+    description: "Graph 模式不得存在循环依赖"
+    reason: "死循环"
+
+  P011:
+    scope: phase
+    check: retry_target_valid
+    description: "retry_target 必须指向已定义的 phase，且为非空字符串"
+    reason: "校验失败后的重试路由会在运行期崩溃或失效"
+
+warning:
+  S001:
+    scope: structure
+    check: no_scripts_in_references
+    description: "references/ 中不得存在可执行脚本（.py/.sh）"
+    impact: "职责混淆：规范应为文档，脚本应放 script/"
+
+  S002:
+    scope: structure
+    check: tools_must_have_callables
+    description: "script/ 中的 .py 文件必须含可调用函数"
+    impact: "纯规范内容应为文档放 references/"
+
+  S003:
+    scope: structure
+    check: no_rule_duplication
+    description: "规则只在 data/rules.yaml 定义一次，SKILL.md 不得重复列出规则表"
+    impact: "多源定义必然漂移"
+
+  S004:
+    scope: structure
+    check: no_helpers_file
+    description: "skill 目录中不应存在 helpers.py（已废弃模式）"
+    impact: "helpers.py 是旧架构产物；数据变换逻辑应放在 setup phase 的 script/ tools 中"
+
+  P002:
+    scope: phase
+    check: tier_known
+    description: "tier 值应为 llm_roles.yaml 中的已知角色"
+    impact: "可能回退到默认模型"
+
+  P004:
+    scope: phase
+    check: phase_config_keys_known
+    description: "phase_config 中不应出现未知 key"
+    impact: "拼写错误会被静默忽略，导致配置看似生效实则失效"
+
+  P005:
+    scope: phase
+    check: has_both_prompts
+    description: "LLM 阶段应同时具备 <system_prompt> 和 <user_prompt>"
+    impact: "缺少指引，Agent 输出质量下降"
+
+  P010:
+    scope: phase
+    check: llm_phase_mentions_finish
+    description: "LLM 阶段应在 prompt 中提及 finish_task（所有 LLM 阶段自动启用认知循环）"
+    impact: "Agent 不知道如何结束"
+
+  T001:
+    scope: tool
+    check: return_type_str
+    description: "工具函数返回类型应标注为 str"
+    impact: "类型安全"
+
+  T002:
+    scope: tool
+    check: has_docstring
+    description: "工具函数必须有 docstring"
+    impact: "Agent 无法理解工具用途"
+
+  T003:
+    scope: tool
+    check: docstring_first_para
+    description: "docstring 第一段必须非空"
+    impact: "空描述 = 工具不可用"
+
+  T005:
+    scope: tool
+    check: snake_case_name
+    description: "函数名应为 snake_case"
+    impact: "命名一致性"
+
+  T006:
+    scope: tool
+    check: json_params_use_normalize
+    description: "接收 JSON 参数的工具函数必须在入口处调用 _normalize_json_param"
+    impact: "dict/str 格式不统一导致下游崩溃"
+
+# ---------------------------------------------------------------------------
+# Anthropic Skill 兼容性规则 (A系列)
+# 确保 Skill 同时兼容 Anthropic 平台（Claude.ai / Claude Code / API）
+# 参考: The Complete Guide to Building Skills for Claude (Anthropic 2026)
+# ---------------------------------------------------------------------------
+
+  A001:
+    scope: frontmatter
+    check: description_has_trigger
+    description: "description 必须同时包含做什么(WHAT)和触发条件(WHEN)"
+    impact: "Anthropic 平台用 description 决定是否加载 Skill，缺少触发词会导致 Skill 不触发"
+
+  A002:
+    scope: frontmatter
+    check: no_xml_in_frontmatter
+    description: "frontmatter 中禁止出现 XML 角括号 (< >)"
+    impact: "Anthropic 安全限制：frontmatter 进入 system prompt，< > 可能注入指令"
+
+  A003:
+    scope: structure
+    check: no_readme_in_skill
+    description: "Skill 目录内不得包含 README.md"
+    impact: "Anthropic 规范：所有文档放 SKILL.md 或 references/，README.md 用于 GitHub 仓库级别"
+
+  A004:
+    scope: frontmatter
+    check: name_not_reserved
+    description: "name 不得包含 'claude' 或 'anthropic'（保留词）"
+    impact: "Anthropic 平台保留命名空间"
+
+  A005:
+    scope: structure
+    check: skill_md_size
+    description: "SKILL.md 建议控制在 5000 词以内，详细内容放 references/"
+    impact: "过大的 SKILL.md 增加 token 消耗，降低响应速度"

@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "graph-agent"
+version = "1.0.0"
+description = "Self-contained multi-phase Agent orchestration engine driven by SKILL.md"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+
+dependencies = [
+    # IMPORTANT: Requires DeerFlow-patched langchain (>=1.2), NOT standard PyPI langchain 0.3.x.
+    "langchain>=1.2",
+    "langchain-core>=0.3",
+    "langchain-openai>=0.3",
+    "langgraph>=0.3",
+    "pydantic>=2.0",
+    "PyYAML>=6.0",
+    "httpx>=0.25",
+    "openai>=1.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+anthropic = ["langchain-anthropic>=0.3"]
+google = ["langchain-google-genai>=2.0", "google-genai>=1.0"]
+tts = ["edge-tts>=6.0"]
+all = ["graph-agent[anthropic,google,tts]"]
+
+[project.scripts]
+graph-agent = "graph_agent.core.runner:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["graph_agent*", "deerflow*"]

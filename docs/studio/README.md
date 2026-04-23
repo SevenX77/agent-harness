@@ -1,9 +1,23 @@
 # Skill Studio — 项目对齐文档
 
+## 核心术语：graph skill
+
+**graph skill**（`graph_skill`，本项目里简称为 **skill**）：在 [Anthropic Skill](https://docs.anthropic.com/en/docs/agents-and-tools/skills) 约定的基础上加入 **graph 拓扑扩展**、专为**严谨 workflow** 设计的 skill 形态。
+
+- **继承 Anthropic Skill 的基础契约**：沿用同一份 `SKILL.md` 文件格式、同一套 YAML frontmatter（`name` / `description` / `tools` 等）、同一种目录结构（`script/`、`references/`）。因此一份 graph skill 可以被 Claude Code、Cursor 等任何支持 Anthropic Skill 的工具直接加载
+- **在此之上加入 graph 拓扑扩展**：原版 Anthropic Skill 定义的是"把一组 prompt 和 tools 打包成 agent 的一项能力"，适合一次对话一次回答的场景；graph skill 在 SKILL.md 里额外增加 `<phase>` / `<phase_config>` / `subgraph:` / `sub_skills:` / `context_mapping` 这些 XML 标签和 YAML 字段，把一个 skill 从"单次调用单元"扩展为"**多阶段可编排 workflow + 递归嵌套 + 严格 I/O 契约**"的工程化结构
+- **目标场景是严谨 workflow**：多步推理、长上下文、质量审核、递归分解、工程化落地；不是为了一轮对话回答一个问题
+
+简言之：**Anthropic Skill 解决的是"给 agent 一组打包好的能力"；graph skill 解决的是"把一套业务 workflow 沉淀成 agent 可以严格执行的说明书"**。同一份 graph skill 文件既可以像普通 Anthropic Skill 一样被 IDE 工具加载成 agent 能力扩展，也可以被 graph_agent 引擎当作完整 workflow 严格执行。
+
+本文档后文里提到的 "skill" 在没有特别说明时都指 graph skill。
+
+---
+
 > **本文档是 Skill Studio 项目的起点文档，写给两类读者：**
 >
-> - **产品经理（PM）**：只读"第一部分 Studio 是什么"和"第二部分 graph_agent 和 skill 基础概念（白话版）"。大约 15-20 分钟能看明白 Studio 能帮你做什么、一个 skill 长什么样、你以后怎么用它。
-> - **开发人员**：读完整文档，重点看"第三部分 MVP Roadmap"。你能知道要做什么、每个功能的边界、和 graph_agent 引擎交互的接口在哪里。
+> - **产品经理（PM）**：只读"第一部分 Studio 是什么"和"第二部分 graph_agent 和 graph skill 基础概念（白话版）"。大约 15-20 分钟能看明白 Studio 能帮你做什么、一个 graph skill 长什么样、你以后怎么用它。
+> - **开发人员**：读完整文档，重点看"第三部分 MVP Roadmap"。你能清楚知道要做哪些功能、每个功能的边界在哪里、以及 Studio 和 graph_agent 引擎之间该用哪些接口交互。
 >
 > **本文档不是**：
 > - 不是 Kiro spec（Kiro spec 在本文档确认后基于它写，更详细）
@@ -31,7 +45,7 @@
 
 **Skill Studio 让产品经理不写 Python 代码就能独立完成 graph_agent skill 的设计、修改、测试和交付。从 PM 有一个新想法到跑出第一个能用的 skill，全流程不需要工程师参与。**
 
-Studio 是 graph_agent 框架的配套工具。graph_agent 是底层引擎（负责把声明式的 SKILL.md 文件跑成一个多阶段 Agent），Studio 是给 PM 用的图形界面（负责让 PM 用对这个引擎）。
+Studio 是 graph_agent 框架的配套工具。graph_agent 是底层引擎，负责把一份声明式的 SKILL.md 文件驱动成一个多阶段 Agent；Studio 是给 PM 用的图形界面，负责引导 PM 用对这个引擎。
 
 ### 1.2 Studio 解决的核心问题
 
@@ -75,7 +89,7 @@ Copilot（在 Studio 侧边栏，或者在 PM 熟悉的 Cursor / Claude Code 里
 
 Studio 提示："在正式跑 skill 之前，建议先用这 3 份素材打磨一份你心目中的理想输出，之后每次跑都可以和它对比。"（这是 Studio 内置的方法论）
 
-张三同意。Copilot 带他一起打磨 iPhone 15 的理想说明书 — **不是让 LLM 生成**，而是 PM 和 Copilot 一起讨论"你希望这份说明书长什么样"，手工把期望的输出字面写出来。三份素材都打磨完后，Studio 存为 "golden baseline"。
+张三同意。Copilot 陪他一起打磨 iPhone 15 的理想说明书 — **这个环节不让 LLM 生成**，而是 PM 和 Copilot 一起讨论"你希望这份说明书长什么样"，由张三把期望输出的文字一字一句敲定。三份素材都打磨完后，Studio 把它们存为 "golden baseline"。
 
 **Day 1 - 第一次跑**
 
@@ -106,7 +120,7 @@ Studio 提示："在正式跑 skill 之前，建议先用这 3 份素材打磨�
 
 张三按 Copilot 建议改 prompt，又跑了 5-6 次，每次都更接近 baseline。有一次他非常满意 — 他给这次 run 的目录加 `.golden` 后缀，锁定为"new baseline"。Studio 的 history 自动清理机制不会删这个目录。
 
-期间有一次 Phase 3 因为 LLM 超时断了，张三不用重头跑 —— 在 History 面板点 [Resume]，skill 从 Phase 3 断点继续跑（前面 Phase 1/2 的产出保留），第二次成功。
+其中有一次 Phase 3 因为 LLM 超时断了，张三不用从头重跑 —— 他在 History 面板点 [Resume]，skill 从 Phase 3 的断点继续执行（Phase 1 和 Phase 2 的产出都保留着），第二次顺利跑完。
 
 **Day 3 - 交付**
 
@@ -161,7 +175,7 @@ Studio 提示："在正式跑 skill 之前，建议先用这 3 份素材打磨�
 
 那些工具的节点是**原子组件**（"调 API 的节点"、"调 LLM 的节点"、"条件判断的节点"），业务逻辑分散在各个节点的配置里，节点之间用数据线连。这种模式对简单流程（客服机器人、邮件处理）够用，但碰到需要复杂推理、递归嵌套、多阶段协作的任务就力不从心。
 
-Studio + graph_agent 的每个 phase 可以是一个完整的 Agent（有自己的 prompt、工具、validator、甚至可以递归嵌套另一个完整 skill），业务逻辑集中在 SKILL.md 声明 + Python 工具函数里，可以用 git 做版本管理。适合**复杂 Agent 工作流**（多步推理、长上下文、质量审核、递归分解）。
+Studio + graph_agent 里每个 phase 可以承载一整段 agent loop（带自己的 prompt 模板、tools、validator），也可以直接递归嵌套另一个完整的 skill 作为子模块。业务逻辑集中在 SKILL.md 声明 + Python 工具函数里，可以用 git 做版本管理。适合**复杂 Agent 工作流**（多步推理、长上下文、质量审核、递归分解）。
 
 **和直接让 PM 学 Python 写 Agent 的区别**：
 
@@ -169,7 +183,7 @@ PM 写 Python 有学习成本，而且写出来的代码往往不够工程化（
 
 **和在 Claude Code / Cursor 里直接编辑 SKILL.md 的区别**：
 
-Claude Code 和 Cursor 是通用代码编辑工具，能改 SKILL.md 但不能给 PM 这些能力：看 skill 拓扑图、看实时运行 trace、看 Prompt Inspector 三标签页、对比多次 run 的结果、管 history 和 golden baseline、断点重试和人工接入。
+Claude Code 和 Cursor 是通用代码编辑工具，能改 SKILL.md，但不具备下面这些 PM 视角的能力：看 skill 拓扑图、看实时运行 trace、看 Prompt Inspector 三标签页、对比多次 run 的结果、管 history 和 golden baseline、断点重试和人工接入。
 
 Studio 做的是**运行观察 + 测试 + 基准管理**层面的事，Copilot 做的是**编辑辅助**层面的事，两者互补。PM 既用 Studio，也用 Copilot，不是二选一。
 
@@ -192,19 +206,68 @@ Studio 做的是**运行观察 + 测试 + 基准管理**层面的事，Copilot �
 
 #### 什么是 graph_agent
 
-graph_agent 是一个跑多阶段 Agent 的引擎。你可以把它理解成一个"说明书执行器"——你写一份说明书（SKILL.md），告诉它"这个任务要分几步、每一步要做什么、用哪些工具、用什么模型、失败了怎么办"，它就按说明书一步一步执行。
+graph_agent 是一个**执行 graph skill 的引擎**。它把一份 SKILL.md 说明书驱动成一个真实的多阶段 agent workflow。你可以把它理解成一个"严谨的说明书执行器"——你写一份说明书，告诉它"这个任务要分几步、每一步做什么、用哪些工具、用什么模型、失败了怎么办"，引擎按说明书一步一步严格执行，并把每一步的过程完整记录下来供你观察。
 
-它和 ChatGPT 之类的"一次对话一次回答"不一样。graph_agent 适合**复杂任务**——任务需要拆成多步、每步的输出是下一步的输入、有些步骤要做质量审核、失败了要重试。
+**它的核心拓扑结构**：graph_agent 把一个 skill 的执行过程组织成一张 **LangGraph 状态图**。图的**横轴**是 phase 序列（一个 phase 接一个 phase 往下跑），每个 phase 内部的计算方式有**三种调用类型**：
 
-#### 什么是 skill
+```
+ 横轴（Phase 序列，从左到右执行）：
 
-一个 skill 就是一份 SKILL.md 文件 + 一些 Python 工具代码。SKILL.md 是**给 graph_agent 看的说明书**，Python 工具代码是**说明书里会被调用的具体功能**（比如"读取文件"、"调外部 API"）。
+    phase_1  ───►  phase_2  ───►  phase_3  ───►  ...
 
-一个 skill 放在自己的目录里。典型的 skill 目录长这样：
+ 每个 phase 的计算方式三选一（纵向展开）：
+
+ ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐
+ │   Agent-Loop 模式     │  │   Code-only 模式      │  │    Subgraph 模式      │
+ │  （终点节点）          │  │   （终点节点）         │  │   （扩展节点 / 套娃）  │
+ ├──────────────────────┤  ├──────────────────────┤  ├──────────────────────┤
+ │ 按 SKILL.md 里定义    │  │ 按 tools 列表顺序     │  │ 跳到另一个完整 skill  │
+ │ 的 step 一步一步走 +  │  │ 调用 Python 函数      │  │ 从头跑一遍子 skill    │
+ │ 必要时循环重试自检    │  │ 一次性给出结果        │  │ 的所有 phase         │
+ │                      │  │                      │  │                      │
+ │ 靠 LLM + tools 完成   │  │ 不调 LLM，纯计算      │  │ 子 skill 内部可以再   │
+ │                      │  │                      │  │ 嵌套 subgraph 无限    │
+ │                      │  │                      │  │ 套娃                  │
+ └──────────────────────┘  └──────────────────────┘  └──────────────────────┘
+```
+
+**"终点节点" vs "扩展节点"**：
+
+- **终点节点**（Agent-Loop 模式、Code-only 模式）：phase 执行到这里就是最底层，graph_agent 不再往下展开。Agent-Loop 在 phase 内部按 step 循环执行、Code-only 按 tools 顺序执行，**两种终点节点都不产生更深层次的 graph 结构**
+- **扩展节点**（Subgraph 模式）：phase 执行到这里会**展开成另一个完整的 graph**，跳过去跑子 skill 的所有 phase 再跳回来。子 skill 内部如果也用了 subgraph 就可以无限套娃递归（受循环保护最多 10 层）
+
+这张拓扑图是 graph_agent 的**思维模型**——你看到一个 skill 时脑子里画这张图就能很快理解它是怎么组织的。
+
+graph_agent 和 ChatGPT 之类"一次对话一次回答"的模式完全不同，它适合的是**严谨 workflow**——任务要拆成多步、每一步的输出是下一步的输入、中间有些步骤要做质量审核、遇到失败要能自动重试。
+
+#### 什么是 graph_skill
+
+一个 graph_skill（本文档里简称 "skill"）就是一份 SKILL.md 文件 + 一些 Python 工具代码。SKILL.md 是**给 graph_agent 看的说明书**，Python 工具代码是**说明书里会被调用的具体功能**（比如"读取文件"、"调外部 API"、"算一个分段算法"）。
+
+**graph_skill 和 Anthropic Skill 的关系**：
+
+graph_skill **继承** [Anthropic Skill](https://docs.anthropic.com/en/docs/agents-and-tools/skills) 的基础约定（同一份 SKILL.md 格式、同一种目录结构、同一种 `tools` 声明方式）。这意味着：
+
+- 一份 graph_skill 可以被 Claude Code、Cursor 等任何支持 Anthropic Skill 的 AI 编辑器**直接加载为普通 skill**（只用它的 frontmatter + system_prompt + tools 作为 agent 能力扩展）
+- 也可以被 graph_agent 引擎**作为完整 workflow 严格执行**（按 `<phase>` 标签描述的多阶段拓扑跑完整 graph）
+- 同一份文件在两种加载方式下都是"一等公民"，不需要维护两套
+
+**graph_skill 在 Anthropic Skill 基础上的扩展**：
+
+| 维度 | Anthropic Skill | graph_skill |
+|------|-----------------|-------------|
+| 结构 | 单一 system_prompt + tools | 多 phase 流水线，每个 phase 可以是 Agent-Loop / Code-only / Subgraph 三种模式之一 |
+| 适用任务 | 单次任务（客服、单轮问答、单个 agent 能力扩展）| 严谨 workflow（多步推理、长上下文、质量审核、递归分解）|
+| 状态管理 | 单次对话、基本无状态 | phase 间 context 严格传递 + retry + LangGraph Checkpoint 断点续跑 |
+| 组合能力 | 无原生组合 | subgraph 递归嵌套 + sub_skills 动态调度 + builtin parallel_map 并发调用 |
+| 工程能力 | 无 | validator 质量门、provider fallback、熔断、Prompt Capture、trace、golden baseline |
+| 配套工具 | 靠宿主 IDE（Claude Code / Cursor） | graph_agent 引擎提供 compiler / md2json / TracingCallback / StorageManager 等内置能力 |
+
+**一个 skill 放在自己的目录里**。典型目录结构：
 
 ```
 skills/my-skill/
-├── SKILL.md                    # 说明书
+├── SKILL.md                    # 说明书（兼容 Anthropic Skill 格式，加 graph 扩展字段）
 ├── script/                     # Python 工具代码
 │   └── my_tools.py
 ├── references/                 # （可选）参考资料，比如规则文档
@@ -278,20 +341,29 @@ tools:
 
 三种跑法：
 
-- **独立跑**：任何 skill 都可以独立运行 `run_skill("skills/my-skill/SKILL.md", input_data)`，不需要父 skill。独立跑的时候产出落到 Studio 约定的工作空间里
-- **被嵌入跑**：这个 skill 被另一个 skill 用 `subgraph:` 委派调用，作为父 skill 流程的一部分
-- **生产环境跑**：production 环境用同样的 `run_skill()` 接口，产出路径由 production 代码决定（比如写到数据库、写到 S3）
+- **独立跑**：任何 skill 都可以独立执行 `run_skill("skills/my-skill/SKILL.md", input_data)`，不需要父 skill。独立跑的时候产出会落到 Studio 约定的工作空间里
+- **被嵌入跑**：这个 skill 作为另一个 skill 的 `subgraph:` 节点被委派调用，在父 skill 的流程里作为其中一步运行
+- **生产环境跑**：生产环境用的是同一个 `run_skill()` 接口，产出路径由生产端代码决定（比如写数据库、写 S3）
 
-**同一份 SKILL.md 这三种场景下行为完全一致**，只是产出去哪不同。Studio 负责独立跑的场景，production 代码负责生产环境跑的场景。**这也是 Studio 最大的优势之一** — PM 在 Studio 里测试通过的 SKILL.md 就是生产直接跑的文件，不存在"测试版和生产版代码不一致"的问题。
+**同一份 SKILL.md 在这三种场景下的运行时行为完全一致**，区别只在产出落到哪里。Studio 负责"独立跑"这种场景，生产端代码负责"生产环境跑"。**这也是 Studio 最大的优势之一** — PM 在 Studio 里测试通过的那份 SKILL.md 就是生产环境直接跑的文件，不存在"测试版和生产版代码不一致"的问题。
 
-#### 两种把 SKILL.md 拆文件的方式的区别
+#### `<ref>` 和 `subgraph:`：两个容易被混淆的机制
 
-在 SKILL.md 里有两个机制看起来都像"引用另一个文件"，但作用完全不同：
+SKILL.md 里有两个机制听起来都像"引用另一个文件"，但它们做的事完全不同。**一句话抓住区别**：`<ref>` 只是把另一个文件的文本拷贝过来，拆成两个文件和写在一个文件里完全等价；`subgraph:` 是让当前 phase 跳去跑另一个独立 skill，拆出来的子 skill 可以独立测试、独立复用、被多个父 skill 共用。
 
-- **`<ref path="phases/01_setup.md" />`** 是**纯文件拼接**。parser 看到这个标签就去读那个文件的内容，**把文件内容整个贴进当前位置**，拼完一个大字符串后再交给 loader。它的作用只是"主 SKILL.md 太长不好读，拆到几个子文件"。拆和不拆**运行时行为完全一样**
-- **`subgraph: 另一个 skill 的路径`** 是**委派另一个独立 skill 跑**。loader 递归加载另一个完整 SKILL.md 成为一个子 harness，运行时这个 phase 跑起来会完整跑一遍子 skill 的所有 phase。子 skill 可以独立测试、独立复用
+**`<ref path="phases/01_setup.md" />`：纯文件拼接**
 
-**建议**：默认**不用** `<ref>`（所有 phase 直接 inline 写在主 SKILL.md 里），只有当某个 phase 的 prompt 特别长（超过 100 行）才用 `<ref>` 拆文件。这样 skill 结构最清楚，Copilot 生成也最稳定。**需要组合复用别的 skill 时用 `subgraph:` 或 `sub_skills:`**，不要用 `<ref>` 去模拟 skill 组合。
+当 graph_agent 加载 SKILL.md 时，这个标签会被替换成它指向文件的内容，就像你手动把那个文件的文字复制粘贴进来一样。拼完之后剩下的步骤和写在一个文件里毫无差别。它的唯一作用是帮你把一个太长的 SKILL.md 拆成几个子文件方便阅读，**纯粹是排版工具，没有任何运行时含义**。
+
+**`subgraph: 另一个 skill 的路径`：委派子 skill 完整跑一遍**
+
+graph_agent 加载时会把这个路径指向的文件当作**另一个完整独立的 skill** 加载进来。运行到这个 phase 的时候，引擎跳过去完整跑一遍子 skill 的所有 phase，跑完再跳回来继续父 skill 的后面。子 skill 可以独立跑、独立测试、被多个父 skill 嵌入复用。这是 graph_agent 拓扑结构里的"扩展节点"（上一节讲过的三种调用类型之一）。
+
+**怎么选用**：
+
+- 默认**不要用** `<ref>`，把所有 phase 直接 inline 写在主 SKILL.md 里。skill 结构一目了然，Copilot 生成也最稳定
+- 只有当某个 phase 的 prompt 特别长（比如超过 100 行），为了阅读方便才考虑用 `<ref>` 把这一段拆到独立文件
+- 需要**复用别的 skill** 的时候必须用 `subgraph:` 或 `sub_skills:`，**不要用 `<ref>` 去模拟 skill 组合**——`<ref>` 只能拷贝文本，它拷过来的文本不会作为独立 skill 被 graph_agent 识别，也拿不到独立运行、独立测试这些好处
 
 #### 系统级标准
 
@@ -299,7 +371,7 @@ graph_agent 在工程层面有几条硬性规定，帮 PM 省掉很多后期返�
 
 **① 输入输出严格定义 + phase 间 context 必须对得上**
 
-每个 skill 的 `io.inputs` 和 `io.outputs` 都要显式写清楚（字段名、类型、来源）。phase 之间通过一块叫 **context** 的"大黑板"传数据 —— 第一个 phase 把结果写在黑板上，第二个 phase 从黑板上读出来接着干活。**每个 phase 声明的输入字段必须在前面某个 phase 的输出里出现过**，否则 compiler 直接 Lint 失败（规则 P006）。这种严格匹配让 PM 不会写出"第二步要用一个第一步没产出的字段"这种运行时才暴露的隐蔽错误。
+每个 skill 的 `io.inputs` 和 `io.outputs` 都要显式写清楚（字段名、类型、来源）。phase 之间通过一块叫 **context** 的"大黑板"传数据 —— 第一个 phase 把结果写在黑板上，第二个 phase 从黑板上读出来接着干活。**每个 phase 声明的输入字段必须在前面某个 phase 的输出里出现过**，否则 compiler 直接 Lint 失败（规则 P006）。这种严格匹配让 PM 不会写出"第二步依赖第一步没产出的字段"这类要等到运行时才暴露的隐蔽错误。
 
 Studio 的画布会把 phase 间的 context 字段匹配关系可视化（哪个字段从哪个 phase 流到哪个 phase），PM 一眼就能看出数据流是否通畅。
 
@@ -335,15 +407,15 @@ Studio 的画布会把 phase 间的 context 字段匹配关系可视化（哪个
 
 agent loop 遇到**需要人判断的问题**时可以主动暂停等 PM 输入。skill 里的 Python 工具可以调用 `request_human_input()` 或 `ask_clarification()` 让 agent loop 暂停。Studio 检测到暂停后弹窗："agent 问你一个问题：XX。请回答："PM 输入答案后点 [Resume]，答案作为 ToolMessage 注入回 agent loop 继续跑。
 
-这个能力对"主观审美任务"特别关键 —— 比如 skill 处理到"从三个方向中选哪一个"时让 PM 决策，而不是 agent loop 自己瞎猜。
+这个能力对"主观审美任务"特别关键 —— 比如 skill 跑到"从三个方向里选哪一个"这步时暂停下来交给 PM 决策，而不是让 agent loop 替 PM 胡乱拍板。
 
-**PM 手动接入**：更进一步，PM 可以主动在某次 run 里暂停，手动改 context 里某个字段（比如改 prompt、替换某个 phase 的输出），然后 Resume 继续跑。这给 PM 提供了"快速测试不同参数对后续结果影响"的灵活性，特别适合 Golden Baseline 打磨阶段反复微调。
+**PM 手动接入**：PM 还可以主动在某次 run 过程中暂停，手动改 context 里的某个字段（比如替换某个 phase 的输出、或者临时改一段 prompt），然后点 Resume 继续往下跑。这让 PM 可以"快速测试不同参数对后续结果的影响"，特别适合在 Golden Baseline 打磨阶段反复微调。
 
 断点重试和人工接入点的 UI 在 **MVP2** 交付（底层机制 graph_agent 已完整提供，Studio 只做 UI 暴露）。
 
 #### 几个你会经常听到的词
 
-- **Phase**：skill 的一个执行阶段，是框架的最小执行单元。在 SKILL.md 里用 `<phase_config>` 标签声明；`type: graph` 的 skill 用 `<phase>` 标签把多个 phase 串起来，phase 之间通过 `depends_on` 声明依赖关系
+- **Phase**：skill 的一个执行阶段，是框架的最小执行单元。简单 skill（`type: simple`）直接写一个 `<phase_config>` 块即可；多阶段 skill（`type: graph`）用 `<phase>` 标签把各个 phase 串成拓扑，标签之间通过 `depends_on` 声明依赖关系
 - **Tool**：Python 函数，被 agent loop 在 Agent-Loop 模式的 phase 里调用
 - **Validator**：校验函数，检查 phase 输出是否合格，不合格就触发重试
 - **Context**：phase 之间传递数据的"大黑板"。每个 phase 读写这个 context
@@ -530,7 +602,7 @@ PM 能在 Studio 里完成以下事情：
 
 #### 3.3.2 MVP2 功能清单
 
-**测试类新增功能**：
+**新增：测试类功能**
 - 测试素材管理面板（`skills/{id}/test_inputs/`，上传 / 查看 / 命名 / 删除）
 - Golden baseline 打磨工作流
   - PM 选一份测试素材
@@ -552,13 +624,13 @@ PM 能在 Studio 里完成以下事情：
   - FileWatcher 检测到 SKILL.md 变更后，自动触发一次 Lint
   - 右下角 toast 显示 Lint 结果（绿/红）
 
-**断点重试和人工接入点（新增，三合一）**：
-底层机制 graph_agent 完整提供（LangGraph Checkpointer + `harness.resume()` + `request_human_input` / `ask_clarification` 工具），MVP2 做对应的 UI 层暴露。
+**新增：断点重试和人工接入点（三合一）**
+底层机制 graph_agent 已经完整提供（LangGraph Checkpointer + `harness.resume()` + `request_human_input` / `ask_clarification` 工具），MVP2 这一期只需要把这些能力在 UI 层暴露给 PM。
 - **Resume 按钮**：History 面板里看到失败或被中断的 run，点 Resume 从失败 phase 重新开始跑；前面成功 phase 的产出保留
 - **改 context 再 Resume**：PM 可以在 Resume 之前展开某个 phase 产出的 context 字段，手动修改某个值（比如改 LLM 上一轮输出的文本、替换某个 dict 字段），然后继续往下跑
 - **人工接入答题**：skill 里的 Python 工具调用 `request_human_input()` 或 `ask_clarification()` 暂停 agent loop 时，Studio 弹窗显示问题，PM 输入回答后点 Resume，答案作为 ToolMessage 注入回 agent loop
 
-**Copilot 进阶资产（MVP2 新增）**：
+**新增：Copilot 进阶资产**
 - `refactor-phase` skill — 重构某个 phase（改 prompt / 改 tools / 加 validator），保持 phase 的 input/output 契约
 - `convert-to-subgraph` skill — 把 code-only phase 里用 Python 胶水调用其他 skill 的代码改造成 `subgraph:` 声明式组合
 - `/lint` slash command — 一键跑 compiler，输出错误清单
@@ -715,11 +787,11 @@ Studio 永远不碰 graph_agent 的内部实现（不改 DeerFlow、不改 loade
 ### 4.3 术语表（按字母序）
 
 - **Agent Loop** — 一次 LLM 调用 → 看工具 → 决定调什么 → 调完看结果 → 再调 LLM → 直到完成的循环。graph_agent 里由 DeerFlow 实现
-- **Agent-Loop 模式** — Phase 的三种模式之一，有 `<system_prompt>` 且无 `subgraph:` 的 phase。agent loop 在最后一公里拿到比单次 LLM 调用更靠谱的结果
+- **Agent-Loop 模式** — Phase 的三种模式之一：有 `<system_prompt>` 且没有 `subgraph:` 字段的 phase。由 agent loop 按 SKILL.md 里定义的 step 循环执行，在最后一公里拿到比单次 LLM 调用更靠谱的结果
 - **Baseline** — 理想输出，作为之后运行结果的对比基准
 - **Callback** — graph_agent 在运行过程中发出事件的机制，Studio 订阅这些事件渲染 UI
 - **Checkpoint** — 某次 run 中某个 phase 完成后或 agent loop 某一轮后持久化的完整 state，可用于断点续跑
-- **Code-only 模式** — Phase 的三种模式之一，没有 `<system_prompt>` 也没有 `subgraph:` 的 phase，纯计算不调 LLM
+- **Code-only 模式** — Phase 的三种模式之一：既没有 `<system_prompt>` 也没有 `subgraph:` 字段的 phase，框架按顺序执行 tools 里的 Python 函数完成纯计算，全程不调 LLM
 - **Compiler** — graph_agent 的 Lint 工具，检查 SKILL.md 是否合法
 - **Context** — Phase 之间传递数据的"大黑板"，共享 dict
 - **Context Bridge** — 父子 skill 之间的 context 字段映射规则
@@ -743,7 +815,7 @@ Studio 永远不碰 graph_agent 的内部实现（不改 DeerFlow、不改 loade
 - **`sub_skills:` 字段** — 父 phase 声明里把子 skill 包成 LangChain Tool 给 agent loop 动态调用
 - **`subgraph:` 字段** — 父 phase 声明里委派给完整子 skill 跑
 - **StorageManager** — graph_agent 内置的 default artifact saver
-- **Subgraph 模式** — Phase 的三种模式之一，有 `subgraph:` 字段的 phase，委派子 skill 完整跑一遍
+- **Subgraph 模式** — Phase 的三种模式之一：phase_config 里写了 `subgraph: 子 skill 路径` 字段。运行到这一步时引擎把子 skill 作为完整 workflow 跑一遍，跑完把产出映射回父 skill 的 context
 - **Tier** — 模型角色（premium / balanced / fast），在 `llm_roles.yaml` 里映射到具体模型
 - **Trace** — 一次 run 的完整执行记录（一堆 CallbackEvent 组成）
 - **Workspace** — PM 的私人工作空间（`workspaces/<user_id>/`），P1.5 引入

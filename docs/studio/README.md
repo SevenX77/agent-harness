@@ -730,7 +730,7 @@ Studio 永远不碰 graph_agent 的内部实现（不改 DeerFlow、不改 loade
 - **Human-in-the-loop** — agent loop 运行中可以暂停等 PM 输入，PM 回答后继续跑的机制（靠 `request_human_input` / `ask_clarification` 工具）
 - **Kitchen-Pass** — graph_agent 的 I/O 设计原则：phase 先写 context，落盘由 IOManager + caller 注入的 saver 完成
 - **LangGraph** — Python 的 stateful graph 执行库，graph_agent 外层用它
-- **md2json** — graph_agent 内置工具，把 LLM 用 Markdown 输出的内容转成严谨 JSON；扩大了可用模型池（DeepSeek / Gemini 等）
+- **md2json** — graph_agent 内置工具，把 LLM 用 Markdown 输出的内容转成严谨 JSON；显著提升了 DeepSeek 等高性价比模型在严谨流程中的鲁棒性，扩大了框架可用的模型池
 - **md-patch** — md2json 解析失败时的局部外科手术式修复 skill
 - **Nudge** — 认知循环里对 LLM 的提示（比如"先调 update_working_memory 再执行"）
 - **Phase** — skill 的一个执行阶段，是框架的最小执行单元。三种模式：Agent-Loop / Subgraph / Code-only

@@ -104,12 +104,34 @@ class ResolvedRole:
     call_chain: list[ResolvedProvider] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class CircuitBreakerConfig:
+    """Tunable error-threshold + window for ModelResolver provider health."""
+
+    error_threshold: int = 30
+    window_seconds: int = 1800
+    # Per-provider overrides keyed on provider_code (e.g. OC_CL).
+    per_provider: dict[str, "CircuitBreakerConfig"] = field(default_factory=dict)
+
+
 @dataclass
 class RoleConfigData:
     """配置文件的完整解析结果。"""
     models: dict[str, ModelDef] = field(default_factory=dict)
     providers: dict[str, ProviderDef] = field(default_factory=dict)
     roles: dict[str, RoleDef] = field(default_factory=dict)
+    # Task 6.2 — same-tier peer model groups. Key = group id (e.g. "coding",
+    # "reasoning"), value = list of model_code in preference order. When
+    # a role's call_chain exhausts, ModelResolver looks up the active
+    # model's peer group (if any) and tries those models' chains in turn.
+    peer_model_groups: dict[str, list[str]] = field(default_factory=dict)
+    # Task 6.4 — circuit-breaker thresholds; read by ModelResolver instead
+    # of the former hard-coded 30/1800.
+    circuit_breaker: CircuitBreakerConfig = field(default_factory=CircuitBreakerConfig)
+    # Task 6.2 — roles that should NOT participate in peer fallback even
+    # if their active model belongs to a peer_model_group (e.g. a final
+    # validation step that must use one specific model or fail loudly).
+    single_model_roles: list[str] = field(default_factory=list)
 
     def resolve_role(self, role_name: str) -> ResolvedRole:
         """展开角色为完整调用链。"""
@@ -422,11 +444,120 @@ def _load_config_file(path: Path) -> tuple[RoleConfigData, int]:
             f"配置文件验证失败（{len(errors)} 个错误）: {'; '.join(errors[:5])}"
         )
 
-    logger.info(
-        "[LLMRoleConfig] 加载成功: %d 模型, %d provider, %d 角色",
-        len(models), len(providers), len(roles),
+    # Task 6.2 / 6.4 — new top-level sections, all optional
+    peer_groups = _parse_peer_model_groups(raw.get("peer_model_groups"), models)
+    circuit_breaker = _parse_circuit_breaker(raw.get("circuit_breaker"))
+    single_model_roles = _parse_single_model_roles(
+        raw.get("single_model_roles"), roles
     )
-    return RoleConfigData(models=models, providers=providers, roles=roles), source_mtime_ns
+
+    logger.info(
+        "[LLMRoleConfig] 加载成功: %d 模型, %d provider, %d 角色, "
+        "%d peer group, single_model_roles=%d",
+        len(models), len(providers), len(roles),
+        len(peer_groups), len(single_model_roles),
+    )
+    return RoleConfigData(
+        models=models,
+        providers=providers,
+        roles=roles,
+        peer_model_groups=peer_groups,
+        circuit_breaker=circuit_breaker,
+        single_model_roles=single_model_roles,
+    ), source_mtime_ns
+
+
+def _parse_peer_model_groups(
+    raw: Any, models: dict[str, ModelDef]
+) -> dict[str, list[str]]:
+    """Parse optional ``peer_model_groups`` section.
+
+    Format::
+
+        peer_model_groups:
+          coding:
+            - DeepSeek_Coder
+            - DeepSeek_Chat
+          reasoning:
+            - CL46T
+            - CLO46T
+
+    Unknown model codes are logged and dropped so a typo cannot silently
+    re-route production traffic.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        logger.warning(
+            "[LLMRoleConfig] peer_model_groups 格式错误（应为 dict），跳过"
+        )
+        return {}
+    result: dict[str, list[str]] = {}
+    for group_name, codes in raw.items():
+        if not isinstance(codes, list):
+            logger.warning(
+                "[LLMRoleConfig] peer_model_groups.%s 不是 list，跳过", group_name
+            )
+            continue
+        valid_codes: list[str] = []
+        for code in codes:
+            if code in models:
+                valid_codes.append(code)
+            else:
+                logger.warning(
+                    "[LLMRoleConfig] peer_model_groups.%s 引用未知模型 %r",
+                    group_name, code,
+                )
+        if valid_codes:
+            result[str(group_name)] = valid_codes
+    return result
+
+
+def _parse_circuit_breaker(raw: Any) -> CircuitBreakerConfig:
+    if raw is None:
+        return CircuitBreakerConfig()
+    if not isinstance(raw, dict):
+        logger.warning(
+            "[LLMRoleConfig] circuit_breaker 格式错误（应为 dict），回退到默认"
+        )
+        return CircuitBreakerConfig()
+
+    per_provider_raw = raw.get("per_provider") or {}
+    per_provider: dict[str, CircuitBreakerConfig] = {}
+    if isinstance(per_provider_raw, dict):
+        for prov_code, per_cfg in per_provider_raw.items():
+            if not isinstance(per_cfg, dict):
+                continue
+            per_provider[str(prov_code)] = CircuitBreakerConfig(
+                error_threshold=int(per_cfg.get("error_threshold", 30)),
+                window_seconds=int(per_cfg.get("window_seconds", 1800)),
+                per_provider={},  # no recursive override
+            )
+
+    return CircuitBreakerConfig(
+        error_threshold=int(raw.get("error_threshold", 30)),
+        window_seconds=int(raw.get("window_seconds", 1800)),
+        per_provider=per_provider,
+    )
+
+
+def _parse_single_model_roles(raw: Any, roles: dict[str, RoleDef]) -> list[str]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        logger.warning(
+            "[LLMRoleConfig] single_model_roles 格式错误（应为 list），跳过"
+        )
+        return []
+    out: list[str] = []
+    for role_name in raw:
+        if role_name in roles:
+            out.append(str(role_name))
+        else:
+            logger.warning(
+                "[LLMRoleConfig] single_model_roles 引用未知角色 %r", role_name
+            )
+    return out
 
 
 def load_config(config_path: Path | None = None) -> RoleConfigData:

@@ -220,14 +220,43 @@ class ModelResolver:
                 self._bump_stat("provider_failures")
                 errors.append((cid, exc))
 
-        if model_chain:
-            primary_provider, primary_model, primary = model_chain[0]
-            fallback_models = [entry[2] for entry in model_chain[1:]]
+        # Task 6.3 — peer_model_groups fallback. When the role's own call
+        # chain exhausts, look up the active model's peer group and append
+        # those models' chains so with_fallbacks can keep trying. Skipped
+        # for single_model_roles and when a model_override was specified
+        # (override semantics mean "use this exact model, don't peer-swap").
+        peer_chain_extras: list[tuple[str, str, BaseChatModel]] = []
+        if (
+            model_override is None
+            and role_name not in cfg.single_model_roles
+            and cfg.peer_model_groups
+        ):
+            peer_chain_extras = self._build_peer_fallback_chain(
+                cfg=cfg,
+                active_model_code=resolved.active_model_code,
+                already_tried=set((p, m) for p, m, _ in model_chain),
+                role_name=role_name,
+                thinking_enabled=thinking_enabled,
+                errors=errors,
+            )
+            if peer_chain_extras:
+                # Emit LLMFallbackEvent for each peer model swap so Studio
+                # timeline shows "primary X exhausted, fell back to peer Y".
+                self._emit_peer_fallback_events(
+                    resolved.active_model_code,
+                    peer_chain_extras,
+                )
+
+        full_chain = model_chain + peer_chain_extras
+
+        if full_chain:
+            primary_provider, primary_model, primary = full_chain[0]
+            fallback_models = [entry[2] for entry in full_chain[1:]]
             if fallback_models:
                 logger.info(
                     "[ModelResolver] Runtime fallback chain for role=%s: %s",
                     role_name,
-                    " -> ".join(f"{p}/{m}" for p, m, _ in model_chain),
+                    " -> ".join(f"{p}/{m}" for p, m, _ in full_chain),
                 )
                 return primary.with_fallbacks(
                     fallback_models,
@@ -243,6 +272,85 @@ class ModelResolver:
 
         from ..core.exceptions import AllProvidersFailedError
         raise AllProvidersFailedError(role_name, errors)
+
+    def _build_peer_fallback_chain(
+        self,
+        *,
+        cfg: Any,
+        active_model_code: str,
+        already_tried: set[tuple[str, str]],
+        role_name: str,
+        thinking_enabled: bool | None,
+        errors: list[tuple[str, Exception]],
+    ) -> list[tuple[str, str, BaseChatModel]]:
+        """Task 6.3 — find peer models for ``active_model_code`` and build
+        their provider chains, skipping (provider, model) pairs that the
+        primary role chain already tried.
+        """
+        peer_codes: list[str] = []
+        for group_codes in cfg.peer_model_groups.values():
+            if active_model_code not in group_codes:
+                continue
+            for code in group_codes:
+                if code != active_model_code and code not in peer_codes:
+                    peer_codes.append(code)
+
+        if not peer_codes:
+            return []
+
+        logger.info(
+            "[ModelResolver] peer fallback candidates for role=%s (active=%s): %s",
+            role_name, active_model_code, peer_codes,
+        )
+
+        extras: list[tuple[str, str, BaseChatModel]] = []
+        for code in peer_codes:
+            try:
+                peer_resolved = cfg.resolve_model(code)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "[ModelResolver] peer model %s resolution failed: %s", code, exc
+                )
+                continue
+            for rp in peer_resolved.call_chain:
+                if (rp.provider_code, rp.model_name) in already_tried:
+                    continue
+                if self._is_provider_down(rp.provider_code, rp.model_name):
+                    continue
+                try:
+                    peer_model_inst = self._create_langchain_model(
+                        rp, peer_resolved.temperature, thinking_enabled
+                    )
+                    extras.append((rp.provider_code, rp.model_name, peer_model_inst))
+                    already_tried.add((rp.provider_code, rp.model_name))
+                except Exception as exc:  # noqa: BLE001
+                    cid = f"{rp.provider_code}/{rp.model_name}"
+                    logger.warning(
+                        "[ModelResolver] peer %s creation failed: %s", cid, exc
+                    )
+                    errors.append((cid, exc))
+        return extras
+
+    @staticmethod
+    def _emit_peer_fallback_events(
+        from_code: str,
+        peer_chain: list[tuple[str, str, Any]],
+    ) -> None:
+        """Task 6.3 — emit LLMFallbackEvent for each peer in the chain.
+
+        We don't have a callbacks handle here (resolver is a singleton,
+        callbacks live on the harness per-run). This hook is a no-op
+        today but kept as the explicit anchor point for when the
+        RunContext-aware resolver lands in Task 7.0's follow-on work —
+        then peer fallback can push through the active run's callback
+        list directly. In the meantime the LLMFallback information is
+        recoverable from the WARNING log above.
+        """
+        logger.info(
+            "[ModelResolver] peer fallback built from %s: %s",
+            from_code,
+            ", ".join(f"{p}/{m}" for p, m, _ in peer_chain),
+        )
 
     def mark_provider_down(self, provider_code: str, model_name: str) -> None:
         """Manually mark a provider as down (called by harness on runtime failure)."""
@@ -446,10 +554,24 @@ class ModelResolver:
             return True
 
     def _mark_provider_down(self, provider_code: str, model_name: str) -> None:
+        # Task 6.4 — window_seconds now sourced from
+        # llm_roles.yaml.circuit_breaker (with per-provider override),
+        # replacing the former hard-coded _PROBE_DOWN_TTL. Fallback to
+        # _PROBE_DOWN_TTL when config can't be read so the mechanism
+        # still functions during tests that don't load the real YAML.
+        window = _PROBE_DOWN_TTL
+        try:
+            cfg = get_role_config()
+            cb = getattr(cfg, "circuit_breaker", None)
+            if cb is not None:
+                per = cb.per_provider.get(provider_code)
+                window = (per or cb).window_seconds
+        except Exception:  # noqa: BLE001
+            pass
         key = f"{provider_code}:{model_name}"
         with self._cache_lock:
-            self._provider_down_cache[key] = time.monotonic() + _PROBE_DOWN_TTL
-        logger.warning("[CircuitBreaker] Marked %s down for %.0fs", key, _PROBE_DOWN_TTL)
+            self._provider_down_cache[key] = time.monotonic() + window
+        logger.warning("[CircuitBreaker] Marked %s down for %.0fs", key, window)
 
     def _bump_stat(self, field_name: str, amount: int = 1) -> None:
         """Increment runtime stats under lock for concurrent safety."""

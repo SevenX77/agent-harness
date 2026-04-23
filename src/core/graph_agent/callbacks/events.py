@@ -312,6 +312,41 @@ class ParallelMapGroupEndedEvent(_EventBase):
     wall_time_seconds: float
 
 
+class InterruptedEvent(_EventBase):
+    """Fired when an agent middleware suspends execution awaiting HITL input.
+
+    Tier 2 (T-B11). Complements :func:`GraphAgentHarness.get_thread_status`:
+    the query surface lets Studio *ask* "is this thread paused?"; this
+    event tells Studio *when* the pause happened and why, so the UI can
+    highlight the exact timeline moment a pipeline went idle waiting on
+    a human.
+    """
+
+    event_type: Literal["interrupted"] = "interrupted"
+    phase_name: str
+    thread_id: str
+    # Mirrors the clarification payload shape returned by get_thread_status
+    # so the front-end can reuse the same rendering code path.
+    question: str | None = None
+    clarification_type: str | None = None
+    options: list[str] = Field(default_factory=list)
+
+
+class ResumedEvent(_EventBase):
+    """Fired by :meth:`GraphAgentHarness.resume` when a human-in-the-loop run restarts.
+
+    Tier 2 (T-B11).
+    """
+
+    event_type: Literal["resumed"] = "resumed"
+    thread_id: str
+    # Human-provided input that unblocked the interrupt. Kept verbatim so
+    # the replay is fully reproducible — no truncation beyond what the
+    # LLM prompt itself would already enforce downstream.
+    human_input: str
+    resumed_from_phase: str | None = None
+
+
 class HeartbeatEvent(_EventBase):
     """Periodic pulse during a long-running phase.
 
@@ -378,6 +413,9 @@ CallbackEvent = Annotated[
         ParallelMapGroupEndedEvent,
         # Tier 1 Commit D
         HeartbeatEvent,
+        # Tier 2 — HITL sync
+        InterruptedEvent,
+        ResumedEvent,
     ],
     Field(discriminator="event_type"),
 ]
@@ -412,4 +450,6 @@ __all__ = [
     "ParallelMapGroupStartedEvent",
     "ParallelMapGroupEndedEvent",
     "HeartbeatEvent",
+    "InterruptedEvent",
+    "ResumedEvent",
 ]

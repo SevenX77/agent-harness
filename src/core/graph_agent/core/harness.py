@@ -502,6 +502,31 @@ class GraphAgentHarness:
         try:
             result = self._graph.invoke(initial_state, config=config)
 
+            # Tier 2 — T-B11: if the run stopped because a middleware
+            # raised an interrupt (request_human_input / clarification),
+            # emit InterruptedEvent so tracing.jsonl carries the pause
+            # marker. We detect this by inspecting post-invoke state;
+            # `get_thread_status` uses the same shape.
+            try:
+                status = self.get_thread_status(tid)
+                if status.get("status") == "AWAITING_INPUT":
+                    from ..callbacks.events import InterruptedEvent
+                    clar = status.get("clarification", {}) or {}
+                    _safe_emit_event(
+                        active_callbacks,
+                        InterruptedEvent(
+                            phase_name=str(result.get("current_phase") or ""),
+                            thread_id=tid,
+                            question=clar.get("question"),
+                            clarification_type=clar.get("clarification_type"),
+                            options=list(clar.get("options") or []),
+                        ),
+                    )
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "[Harness] post-invoke interrupt detection failed"
+                )
+
             # Auto-save outputs via IOManager if configured
             if self._io_config and self._io_config.get("outputs"):
                 self._save_outputs_via_io(
@@ -795,6 +820,18 @@ class GraphAgentHarness:
             "artifact_saver": artifact_saver,
             "runtime_inputs": {},
         }
+
+        # Tier 2 — T-B11: announce the resume to the trace.
+        from ..callbacks.events import ResumedEvent
+        _safe_emit_event(
+            self.callbacks,
+            ResumedEvent(
+                thread_id=str(effective_thread_id or ""),
+                human_input=human_input,
+                resumed_from_phase=state.get("current_phase") or None,
+            ),
+        )
+
         try:
             result = self._graph.invoke(state, config=config)
             return result  # type: ignore[return-value]

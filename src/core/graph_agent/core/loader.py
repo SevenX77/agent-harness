@@ -53,13 +53,18 @@ def _resolve_tool_reference(
 
     The reference format is: module.submodule.function_name
     The last dot separates the module path from the function name.
-    Modules are resolved relative to base_dir.
+    Modules are resolved relative to base_dir, with one special case:
+    references that start with ``builtin.`` are resolved against the
+    framework-owned ``graph_agent.tools.builtin`` package so any SKILL.md
+    can write ``tools: [builtin.parallel_map]`` without copying the file
+    into the skill directory.
 
     Adapted from DeerFlow reflection/resolvers.py L25-70, with separator
     changed from ':' to '.' (last dot = function separator).
 
     Args:
         ref_path: Dot-separated path like 'tools.analysis_tools.inspect_entity'
+            or 'builtin.parallel_map' for framework-owned tools.
         base_dir: Base directory for relative imports (SKILL.md parent dir)
 
     Returns:
@@ -76,6 +81,36 @@ def _resolve_tool_reference(
         )
 
     module_path_str, func_name = parts
+
+    # Framework builtins live inside the graph_agent package itself so they
+    # can't live under the caller's skill directory. We import them via
+    # normal Python import path resolution instead of file-path loading.
+    if module_path_str == "builtin" or module_path_str.startswith("builtin."):
+        try:
+            import importlib as _importlib
+            from ..tools import builtin as _builtin_pkg  # noqa: F401
+            submod_name = module_path_str[len("builtin"):].lstrip(".")
+            full_module = "graph_agent.tools.builtin"
+            if submod_name:
+                full_module = f"{full_module}.{submod_name}"
+            module = _importlib.import_module(full_module)
+        except ImportError as exc:
+            raise SkillLoadError(
+                f"Cannot import builtin tool '{ref_path}': {exc}"
+            ) from exc
+
+        try:
+            func = getattr(module, func_name)
+        except AttributeError as exc:
+            raise SkillLoadError(
+                f"Builtin module '{full_module}' does not define '{func_name}'"
+            ) from exc
+
+        if not callable(func):
+            raise SkillLoadError(
+                f"'{ref_path}' is not callable (got {type(func).__name__})"
+            )
+        return func  # type: ignore[return-value]
 
     # Convert dot path to file path relative to base_dir
     module_file = base_dir / module_path_str.replace(".", "/")

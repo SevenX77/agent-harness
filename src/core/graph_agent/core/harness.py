@@ -64,6 +64,63 @@ __all__ = [
 ]
 
 
+def _resolve_studio_checkpointer_spec(spec: str) -> Any:
+    """Parse a ``STUDIO_CHECKPOINTER`` env-var value into a checkpointer.
+
+    Supported forms (Task 7.7):
+
+    * ``memory`` — LangGraph ``InMemorySaver``
+    * ``sqlite:<path>`` — ``SqliteSaver`` opened at ``<path>`` (the
+      ``:memory:`` sentinel and ``file:...`` URIs are passed through
+      untouched; bare paths are resolved via DeerFlow's
+      ``_resolve_sqlite_conn_str``)
+    * ``postgres://...`` or ``postgresql://...`` — ``PostgresSaver``
+      opened from the DSN
+    """
+    spec = spec.strip()
+    if not spec:
+        raise ValueError("empty spec")
+
+    if spec == "memory":
+        from langgraph.checkpoint.memory import InMemorySaver
+
+        logger.info("[Harness] STUDIO_CHECKPOINTER=memory → InMemorySaver")
+        return InMemorySaver()
+
+    if spec.startswith("sqlite:"):
+        raw = spec[len("sqlite:"):]
+        from deerflow.agents.checkpointer.provider import _resolve_sqlite_conn_str
+        from langgraph.checkpoint.sqlite import SqliteSaver
+
+        conn_str = _resolve_sqlite_conn_str(raw or "store.db")
+        saver_cm = SqliteSaver.from_conn_string(conn_str)
+        saver = saver_cm.__enter__()
+        saver.setup()
+        logger.info("[Harness] STUDIO_CHECKPOINTER=sqlite:%s → SqliteSaver", conn_str)
+        return saver
+
+    if spec.startswith(("postgres://", "postgresql://")):
+        from langgraph.checkpoint.postgres import PostgresSaver
+
+        saver_cm = PostgresSaver.from_conn_string(spec)
+        saver = saver_cm.__enter__()
+        saver.setup()
+        logger.info("[Harness] STUDIO_CHECKPOINTER=%s → PostgresSaver", _redact_dsn(spec))
+        return saver
+
+    raise ValueError(
+        f"unrecognised STUDIO_CHECKPOINTER value: {spec!r} "
+        "(expected 'memory', 'sqlite:<path>' or 'postgres://...')"
+    )
+
+
+def _redact_dsn(dsn: str) -> str:
+    """Strip the password from a DSN before logging it."""
+    import re
+
+    return re.sub(r"(://[^:]+):[^@]+@", r"\1:***@", dsn)
+
+
 def _ctx_text(ctx: dict[str, Any], key: str) -> str | None:
     """Read a context value as text, preserving None."""
     value = ctx.get(key)
@@ -173,8 +230,35 @@ class GraphAgentHarness:
 
     @staticmethod
     def _resolve_checkpointer(checkpointer: Any) -> Any:
-        """Resolve checkpointer parameter to a concrete instance."""
+        """Resolve checkpointer parameter to a concrete instance.
+
+        Task 7.7: when the ``STUDIO_CHECKPOINTER`` env var is set it
+        overrides the ``"auto"`` default so Studio runs can pick a
+        backend without editing the host config. Accepted values:
+
+        * ``memory`` — LangGraph's in-process ``InMemorySaver``
+        * ``sqlite:<path>`` — SQLite backend at the given path
+          (``sqlite:.studio/checkpoints.db`` is the Studio convention)
+        * ``postgres://...`` — full Postgres DSN
+
+        Any other ``checkpointer`` argument value (``None``, an explicit
+        saver instance, etc.) passes through unchanged — the env var only
+        applies when the caller has asked for auto resolution.
+        """
+        import os
+
         if checkpointer == "auto":
+            override = os.environ.get("STUDIO_CHECKPOINTER")
+            if override:
+                try:
+                    return _resolve_studio_checkpointer_spec(override)
+                except Exception as exc:
+                    logger.warning(
+                        "[Harness] STUDIO_CHECKPOINTER=%r could not be resolved (%s); "
+                        "falling back to default auto path",
+                        override,
+                        exc,
+                    )
             try:
                 from deerflow.agents.checkpointer.provider import get_checkpointer
                 cp = get_checkpointer()

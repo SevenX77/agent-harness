@@ -149,18 +149,30 @@ class Callback:
         # that never process typed events.
         from .events import (
             AmbiguityReportEvent,
+            ArtifactSavedEvent,
             CompactionEvent,
             DeadEndPrunedEvent,
             FinishTaskEvent,
+            HeartbeatEvent,
+            InternalErrorEvent,
             LLMCallEvent,
             LLMFallbackEvent,
+            ModelResolvedEvent,
             NudgeEvent,
+            ParallelMapGroupEndedEvent,
+            ParallelMapGroupStartedEvent,
             PhaseEndEvent,
             PhaseStartEvent,
             PromptCapturedEvent,
             RetryEvent,
+            RetryExhaustedEvent,
+            RunEndedEvent,
+            RunStartedEvent,
+            SubgraphEnterEvent,
+            SubgraphExitEvent,
             ToolCallEvent,
             ValidationFailEvent,
+            ValidationPassEvent,
             WorkingMemoryUpdateEvent,
         )
 
@@ -202,9 +214,25 @@ class Callback:
             self.on_ambiguity_report(
                 event.phase_name, event.ambiguity_type, event.question, event.decision
             )
-        elif isinstance(event, (PromptCapturedEvent, LLMFallbackEvent)):
+        elif isinstance(event, (
+            # Existing typed-only events (Task 3.4)
+            PromptCapturedEvent, LLMFallbackEvent,
+            # Tier 1 Commit A — core lifecycle
+            RunStartedEvent, RunEndedEvent,
+            ValidationPassEvent, RetryExhaustedEvent, InternalErrorEvent,
+            # Tier 1 Commit B — data + proxy enhancement
+            ModelResolvedEvent, ArtifactSavedEvent,
+            # Tier 1 Commit C — concurrency + subgraph boundary
+            SubgraphEnterEvent, SubgraphExitEvent,
+            ParallelMapGroupStartedEvent, ParallelMapGroupEndedEvent,
+            # Tier 1 Commit D — heartbeat
+            HeartbeatEvent,
+        )):
             # No legacy hook exists for these new event types. Subclasses that
-            # need to consume them must override `on_event` directly.
+            # need to consume them must override `on_event` directly. The
+            # default TracingCallback.on_event implementation already writes
+            # these events to tracing.jsonl, so the warning path below should
+            # never fire for framework-emitted events.
             logger.debug(
                 "Callback.on_event default dispatch: no legacy hook for %s; "
                 "override on_event in subclass to consume it.",

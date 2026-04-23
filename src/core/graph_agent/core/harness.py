@@ -667,6 +667,89 @@ class GraphAgentHarness:
         except Exception as exc:
             logger.warning("[Harness] Auto-save outputs failed: %s", exc)
 
+    def get_thread_status(self, thread_id: str) -> dict[str, Any]:
+        """Introspect a thread's LangGraph-level state without resuming it.
+
+        Task I-1 — the "Human-in-the-loop status sync protocol" Gemini
+        flagged as Studio's next missing surface. Lets Studio's UI ask
+        "is this thread waiting for my input / still running / done /
+        crashed?" without tailing tracing.jsonl.
+
+        Returns a dict with the shape::
+
+            {"status": "AWAITING_INPUT" | "COMPLETED" | "RUNNING" | "NOT_FOUND" | "CRASHED",
+             "clarification": {"question", "clarification_type", "options"}}  # only on AWAITING_INPUT
+             "error": str                                                      # only on CRASHED
+
+        Reads the checkpointer state directly so two processes cannot
+        disagree about which thread is paused.
+        """
+        if self._checkpointer is None:
+            return {"status": "NOT_FOUND", "reason": "no_checkpointer"}
+
+        config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+
+        try:
+            # LangGraph's official API — returns a StateSnapshot. Different
+            # versions spelled this differently, cover both.
+            if hasattr(self._graph, "get_state"):
+                snapshot = self._graph.get_state(config)
+            else:
+                get_tuple = getattr(self._checkpointer, "get_tuple", None)
+                if get_tuple is None:
+                    return {"status": "NOT_FOUND", "reason": "no_get_state"}
+                snapshot = get_tuple(config)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[Harness] get_thread_status(%s): snapshot read failed — %s",
+                thread_id,
+                exc,
+            )
+            return {"status": "NOT_FOUND", "reason": str(exc)}
+
+        if not snapshot:
+            return {"status": "NOT_FOUND"}
+
+        next_nodes = getattr(snapshot, "next", None) or ()
+        tasks = getattr(snapshot, "tasks", None) or ()
+
+        # Identify an outstanding clarification request. Each PregelTask
+        # carries an ``interrupts`` tuple populated by LangGraph when a
+        # middleware ``Command(goto=END)`` fires — our clarification +
+        # request_human_input middlewares both go through this.
+        for task in tasks:
+            interrupts = getattr(task, "interrupts", None) or ()
+            if not interrupts:
+                continue
+            last = interrupts[-1]
+            payload = getattr(last, "value", None)
+            clarification: dict[str, Any] = {}
+            if isinstance(payload, dict):
+                clarification = {
+                    "question": payload.get("question") or payload.get("message"),
+                    "clarification_type": payload.get("clarification_type")
+                    or payload.get("type")
+                    or "missing_info",
+                    "options": payload.get("options") or [],
+                }
+            else:
+                clarification = {
+                    "question": str(payload) if payload is not None else None,
+                    "clarification_type": "missing_info",
+                    "options": [],
+                }
+            return {"status": "AWAITING_INPUT", "clarification": clarification}
+
+        if not next_nodes:
+            return {"status": "COMPLETED"}
+
+        # ``next`` present but no interrupt → either still running in
+        # another process, or crashed and left the graph partially
+        # executed. We can't distinguish the two from a snapshot alone,
+        # so we surface RUNNING and leave CRASHED to callers that correlate
+        # with the InternalErrorEvent in tracing.jsonl.
+        return {"status": "RUNNING", "next": list(next_nodes)}
+
     def resume(
         self,
         state: WorkflowState,

@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src" / "core"))
 from graph_agent.callbacks.events import (  # noqa: E402
     SCHEMA_VERSION,
     AmbiguityReportEvent,
+    AgentLoopIterationEvent,
     ArtifactSavedEvent,
     CallbackEvent,
     HeartbeatEvent,
@@ -75,6 +76,8 @@ _ALL_EVENT_CLASSES = [
     # Tier 2 — HITL sync
     InterruptedEvent,
     ResumedEvent,
+    # Tier 2 — agent loop visibility
+    AgentLoopIterationEvent,
 ]
 
 
@@ -159,6 +162,7 @@ _MIN_CTOR: dict[type, dict] = {
     # Tier 2 — HITL sync
     InterruptedEvent: {"phase_name": "p", "thread_id": "t1"},
     ResumedEvent: {"thread_id": "t1", "human_input": "yes"},
+    AgentLoopIterationEvent: {"phase_name": "p", "iteration": 1},
 }
 
 

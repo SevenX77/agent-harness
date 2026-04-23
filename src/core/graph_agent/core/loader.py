@@ -680,12 +680,18 @@ def _build_phase_from_tags(
         max_iterations=_phase_int(phase_cfg, "max_iterations", label, default=20),
         max_tool_calls=_phase_int(phase_cfg, "max_tool_calls", label, default=0),
         tier=tier,
+        # Task 6.1: model_override is an optional per-phase pin into
+        # llm_roles.yaml's models: section. None = use tier → role → model
+        # resolution as before.
+        model_override=_phase_string(phase_cfg, "model_override", label),
         validator=validator,
         retry_target=retry_target,
         max_retries=_phase_int(phase_cfg, "max_retries", label, default=3),
         user_prompt_template=user_prompt_template,
         requires_llm=requires_llm,
-        max_nudges=_phase_int(phase_cfg, "max_nudges", label, default=3),
+        # Task 6.5: default budget drops from 3 to 1. Explicit phase_config
+        # values still win.
+        max_nudges=_phase_int(phase_cfg, "max_nudges", label, default=1),
         dead_end_threshold=_phase_int(phase_cfg, "dead_end_threshold", label, default=3),
         data_architecture=data_architecture,
         subagent_enabled=_phase_bool(phase_cfg, "subagent_enabled", label, default=False),

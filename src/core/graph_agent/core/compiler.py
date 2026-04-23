@@ -53,6 +53,8 @@ _PHASE_CONFIG_ALLOWED_KEYS = {
     "subagent_enabled",
     "subgraph",
     "context_bridge",
+    # Task 6.1: per-phase pin into llm_roles.yaml's models: section.
+    "model_override",
 }
 
 # These fields are set via XML tags, not phase_config YAML
@@ -571,7 +573,7 @@ def _check_phases(
         if not isinstance(phase_cfg, dict):
             continue
 
-        unknown_keys = sorted(set(phase_cfg.keys()) - _PHASE_CONFIG_ALLOWED_KEYS - _XML_ONLY_KEYS) - {"model_override"}
+        unknown_keys = sorted(set(phase_cfg.keys()) - _PHASE_CONFIG_ALLOWED_KEYS - _XML_ONLY_KEYS)
         for key in unknown_keys:
             result.issues.append(_issue("P004", loc, f"未知 phase_config key: '{key}'"))
         xml_misplaced = sorted(set(phase_cfg.keys()) & _XML_ONLY_KEYS)

@@ -118,6 +118,7 @@ class ModelResolver:
         role_name: str | None = None,
         *,
         thinking_enabled: bool | None = None,
+        model_override: str | None = None,
         **kwargs,
     ) -> BaseChatModel:
         """Resolve a role name to a BaseChatModel instance.
@@ -147,18 +148,44 @@ class ModelResolver:
         """
         self._bump_stat("total_resolves")
 
-        if role_name is None:
-            role_name = self._get_deerflow_default_name()
-
         cfg = get_role_config()
-        try:
-            resolved = cfg.resolve_role(role_name)
-        except KeyError:
-            logger.info(
-                "[ModelResolver] Role '%s' not in llm_roles.yaml, delegating to DeerFlow native",
-                role_name,
-            )
-            return self._fallback_to_deerflow_native(role_name, thinking_enabled, **kwargs)
+
+        # Task 6.1: phase-scoped model_override bypasses the tier → role →
+        # model mapping and pins the phase to a specific model code. We
+        # still go through the same chain-building path so circuit breaks,
+        # provider-down cache and logging all continue to work.
+        if model_override:
+            try:
+                resolved = cfg.resolve_model(model_override)
+                role_name = resolved.role_name  # synthetic "_model_override::<code>"
+                logger.info(
+                    "[ModelResolver] model_override=%s → chain=%s",
+                    model_override,
+                    " | ".join(f"{r.provider_code}/{r.model_name}" for r in resolved.call_chain),
+                )
+            except KeyError:
+                logger.warning(
+                    "[ModelResolver] model_override '%s' not in llm_roles.yaml models: section; "
+                    "falling back to role-based resolution for '%s'",
+                    model_override,
+                    role_name or "<default>",
+                )
+                # fall through to role-based path below
+                resolved = None
+        else:
+            resolved = None
+
+        if resolved is None:
+            if role_name is None:
+                role_name = self._get_deerflow_default_name()
+            try:
+                resolved = cfg.resolve_role(role_name)
+            except KeyError:
+                logger.info(
+                    "[ModelResolver] Role '%s' not in llm_roles.yaml, delegating to DeerFlow native",
+                    role_name,
+                )
+                return self._fallback_to_deerflow_native(role_name, thinking_enabled, **kwargs)
 
         errors: list[tuple[str, Exception]] = []
         model_chain: list[tuple[str, str, BaseChatModel]] = []

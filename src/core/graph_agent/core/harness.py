@@ -470,7 +470,11 @@ class GraphAgentHarness:
 
             # Step 4: Get model from Model Resolver
             # thinking_enabled=None → auto-detect from model's reasoning flag
-            model = resolver.resolve(phase.tier)
+            # Task 6.1: phase.model_override pins the phase to a specific
+            # model code from llm_roles.yaml's models: section, bypassing
+            # the tier → role → model mapping. When it's None the call
+            # behaves exactly as before.
+            model = resolver.resolve(phase.tier, model_override=phase.model_override)
             # Task 4.2: wrap with TracingClientProxy so every LLM round-trip
             # emits a prompt_captured event to the registered callbacks.
             from .tracing_proxy import TracingClientProxy

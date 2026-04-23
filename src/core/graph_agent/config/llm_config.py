@@ -169,6 +169,48 @@ class RoleConfigData:
             call_chain=call_chain,
         )
 
+    def resolve_model(self, model_code: str) -> ResolvedRole:
+        """Resolve a specific ``model_code`` directly into a ResolvedRole.
+
+        Builds a synthetic ResolvedRole whose call_chain covers every
+        provider that this model is registered under in
+        ``llm_roles.yaml``'s ``models:`` section. Used by the
+        ``model_override`` phase field (Task 6.1) to pin a phase to a
+        single model without going through the tier → role → model
+        lookup.
+
+        Raises KeyError when the model_code is not registered.
+        """
+        model_def = self.models.get(model_code)
+        if model_def is None:
+            raise KeyError(f"未知模型代号: {model_code}")
+
+        call_chain: list[ResolvedProvider] = []
+        for pc, model_name in (model_def.providers or {}).items():
+            prov_def = self.providers.get(pc)
+            if prov_def is None:
+                logger.warning(
+                    "model_override %s 引用了未注册的 provider 代号: %s", model_code, pc,
+                )
+                continue
+            prov_opts = model_def.provider_options.get(pc, {})
+            call_chain.append(ResolvedProvider(
+                provider_code=pc,
+                provider_def=prov_def,
+                model_name=model_name,
+                model_def=model_def,
+                provider_options=prov_opts,
+            ))
+
+        return ResolvedRole(
+            role_name=f"_model_override::{model_code}",
+            temperature=0.7,  # neutral default; no role-level temperature to inherit
+            system_prompt_prefix="",
+            active_model_code=model_code,
+            model_fallback=False,
+            call_chain=call_chain,
+        )
+
 
 # ── YAML 解析 ─────────────────────────────────────────────────────────────────
 

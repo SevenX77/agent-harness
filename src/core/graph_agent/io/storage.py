@@ -66,6 +66,11 @@ class StorageManager:
     Retention cleanup runs opportunistically on instantiation so a long-
     running workspace does not accumulate dead runs; ``.golden`` runs are
     excluded from the retention set entirely.
+
+    Tier 1 Commit B (T-B10): when the caller passes ``callbacks=`` to
+    :meth:`attach_callbacks`, each successful :meth:`save_artifact` emits
+    an ``ArtifactSavedEvent`` so Studio's artifact panel can populate
+    directly from the event stream without polling the filesystem.
     """
 
     def __init__(
@@ -91,6 +96,10 @@ class StorageManager:
         # to :meth:`get_output_dir` that declares one, so the same manager
         # can be reused across phases that share a prefix.
         self._pipeline_prefix: str | None = None
+        # Callbacks optionally attached by the harness so save_artifact can
+        # emit ArtifactSavedEvent. Empty by default — the manager works
+        # standalone even without a harness.
+        self._callbacks: list[Any] = []
 
         logger.info(
             "StorageManager init: workspace=%s skill_id=%s run_id=%s retention=%d",
@@ -103,6 +112,10 @@ class StorageManager:
     @property
     def run_id(self) -> str:
         return self._run_id
+
+    def attach_callbacks(self, callbacks: list[Any]) -> None:
+        """Attach a callback list so save_artifact can emit ArtifactSavedEvent."""
+        self._callbacks = list(callbacks or [])
 
     @property
     def skill_id(self) -> str:
@@ -157,6 +170,29 @@ class StorageManager:
                 json.dumps(content, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
+
+        # Tier 1 Commit B (T-B10): emit ArtifactSavedEvent so Studio can
+        # render the artifact panel from the event stream.
+        if self._callbacks:
+            try:
+                from ..callbacks.events import ArtifactSavedEvent
+
+                event = ArtifactSavedEvent(
+                    phase_name=phase,
+                    name=name,
+                    path=str(target),
+                    size_bytes=target.stat().st_size if target.exists() else 0,
+                )
+                for cb in self._callbacks:
+                    try:
+                        cb.on_event(event)
+                    except Exception:  # noqa: BLE001
+                        logger.exception(
+                            "StorageManager: callback %r raised on ArtifactSavedEvent",
+                            type(cb).__name__,
+                        )
+            except Exception:  # noqa: BLE001
+                logger.exception("StorageManager: failed to build ArtifactSavedEvent")
 
         logger.info(
             "StorageManager save: run_id=%s phase=%s name=%s path=%s",

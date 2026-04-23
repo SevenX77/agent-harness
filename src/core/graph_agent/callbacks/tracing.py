@@ -35,6 +35,21 @@ from .base import (
     EVENT_COMPACTION,
     EVENT_AMBIGUITY_REPORT,
 )
+from .events import (
+    AmbiguityReportEvent,
+    CallbackEvent,
+    CompactionEvent,
+    DeadEndPrunedEvent,
+    FinishTaskEvent,
+    LLMCallEvent,
+    NudgeEvent,
+    PhaseEndEvent,
+    PhaseStartEvent,
+    RetryEvent,
+    ToolCallEvent,
+    ValidationFailEvent,
+    WorkingMemoryUpdateEvent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,13 +74,16 @@ class TracingCallback(Callback):
             self.set_trace_dir(trace_dir)
 
     def set_trace_dir(self, trace_dir: str | Path) -> None:
-        """Set trace output directory and initialize JSONL file path."""
+        """Set trace output directory and initialize JSONL file paths."""
         self._trace_dir = Path(trace_dir)
         self._trace_dir.mkdir(parents=True, exist_ok=True)
         self._jsonl_path = self._trace_dir / f"{self._run_id}.jsonl"
+        # Task 3.6: fixed-name typed-event stream. One line per Pydantic
+        # CallbackEvent (model_dump_json), appended in timestamp order.
+        self._typed_jsonl_path = self._trace_dir / "tracing.jsonl"
 
     def _write_event(self, event_type: str, phase: str, data: dict[str, Any]) -> None:
-        """Append one structured event line to JSONL trace."""
+        """Append one structured event line to JSONL trace (legacy shape)."""
         if self._jsonl_path is None:
             return
         entry = {
@@ -77,6 +95,30 @@ class TracingCallback(Callback):
         }
         with self._jsonl_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
+
+    def _write_typed_event(self, event: CallbackEvent) -> None:
+        """Append one Pydantic CallbackEvent as JSON to the typed trace stream.
+
+        This is the Task 3.6 sink. The legacy per-run JSONL (``_write_event``)
+        stays intact for tooling that depends on the old shape; the fixed
+        ``tracing.jsonl`` filename is the new Studio-facing source of truth.
+        """
+        if self._typed_jsonl_path is None:
+            return
+        with self._typed_jsonl_path.open("a", encoding="utf-8") as f:
+            f.write(event.model_dump_json() + "\n")
+
+    def on_event(self, event: CallbackEvent) -> None:
+        """New-style sink: log the typed event to tracing.jsonl.
+
+        Emitters that call ``cb.on_event(event)`` directly (for example the
+        forthcoming ``TracingClientProxy`` in Step 4 and the ``parallel_map``
+        builtin in Task 4.3) bypass the legacy on_* dispatch entirely and
+        land here. We deliberately do NOT call the base-class dispatcher,
+        which would double-count events that also flow through the legacy
+        hooks below.
+        """
+        self._write_typed_event(event)
 
     def _active_phase(self) -> dict[str, Any] | None:
         """Return the innermost active phase segment, if any."""
@@ -99,6 +141,7 @@ class TracingCallback(Callback):
         self._write_event(
             EVENT_PHASE_START, phase_name, {"context_keys": list(context.keys())},
         )
+        self._write_typed_event(PhaseStartEvent(phase_name=phase_name, context=context))
 
     def on_phase_end(
         self,
@@ -121,6 +164,9 @@ class TracingCallback(Callback):
         self._phases.append(phase_data)
         self._write_event(
             EVENT_PHASE_END, phase_name, {"context_keys": list(context.keys()), "metrics": metrics},
+        )
+        self._write_typed_event(
+            PhaseEndEvent(phase_name=phase_name, context=context, metrics=metrics)
         )
 
     def on_llm_call(
@@ -155,6 +201,15 @@ class TracingCallback(Callback):
                 },
             },
         )
+        self._write_typed_event(
+            LLMCallEvent(
+                phase_name=phase_name,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                messages=messages,
+                response_data=response_data,
+            )
+        )
 
     def on_tool_call(
         self,
@@ -181,6 +236,15 @@ class TracingCallback(Callback):
                 "duration_ms": round(duration_ms, 2) if duration_ms is not None else None,
             },
         )
+        self._write_typed_event(
+            ToolCallEvent(
+                phase_name=phase_name,
+                tool_name=tool_name,
+                args=args,
+                result=result,
+                duration_ms=duration_ms,
+            )
+        )
 
     def on_validation_fail(
         self,
@@ -196,6 +260,9 @@ class TracingCallback(Callback):
         self._write_event(
             EVENT_VALIDATION_FAIL, phase_name, {"passed": False, "errors": errors, "retry_count": retry_count},
         )
+        self._write_typed_event(
+            ValidationFailEvent(phase_name=phase_name, errors=errors, retry_count=retry_count)
+        )
 
     def on_retry(
         self,
@@ -210,6 +277,9 @@ class TracingCallback(Callback):
         self._write_event(
             EVENT_RETRY, phase_name, {"target_phase": target_phase, "feedback": feedback},
         )
+        self._write_typed_event(
+            RetryEvent(phase_name=phase_name, target_phase=target_phase, feedback=feedback)
+        )
 
     def on_finish_task(
         self,
@@ -220,6 +290,9 @@ class TracingCallback(Callback):
         """Record finish_task output in the trace."""
         self._write_event(
             EVENT_FINISH_TASK, phase_name, {"reasoning": reasoning, "evidence": evidence},
+        )
+        self._write_typed_event(
+            FinishTaskEvent(phase_name=phase_name, reasoning=reasoning, evidence=evidence)
         )
 
     def on_nudge(
@@ -232,6 +305,9 @@ class TracingCallback(Callback):
         self._write_event(
             EVENT_NUDGE, phase_name, {"count": nudge_count, "type": nudge_type},
         )
+        self._write_typed_event(
+            NudgeEvent(phase_name=phase_name, nudge_count=nudge_count, nudge_type=nudge_type)
+        )
 
     def on_working_memory_update(
         self,
@@ -241,6 +317,9 @@ class TracingCallback(Callback):
         """Record working-memory update in the trace."""
         self._write_event(
             EVENT_WORKING_MEMORY_UPDATE, phase_name, {"content_length": content_length},
+        )
+        self._write_typed_event(
+            WorkingMemoryUpdateEvent(phase_name=phase_name, content_length=content_length)
         )
 
     def on_dead_end_pruned(
@@ -252,6 +331,9 @@ class TracingCallback(Callback):
         self._write_event(
             EVENT_DEAD_END_PRUNED, phase_name, {"summary": summary},
         )
+        self._write_typed_event(
+            DeadEndPrunedEvent(phase_name=phase_name, summary=summary)
+        )
 
     def on_compaction(
         self,
@@ -261,6 +343,9 @@ class TracingCallback(Callback):
         """Record history compaction in the trace."""
         self._write_event(
             EVENT_COMPACTION, phase_name, {"removed_pairs": removed_pairs},
+        )
+        self._write_typed_event(
+            CompactionEvent(phase_name=phase_name, removed_pairs=removed_pairs)
         )
 
     def on_ambiguity_report(
@@ -277,6 +362,14 @@ class TracingCallback(Callback):
                 "question": question,
                 "decision": decision,
             },
+        )
+        self._write_typed_event(
+            AmbiguityReportEvent(
+                phase_name=phase_name,
+                ambiguity_type=ambiguity_type,
+                question=question,
+                decision=decision,
+            )
         )
 
     def summary(self) -> dict[str, Any]:

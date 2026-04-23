@@ -260,6 +260,58 @@ class ArtifactSavedEvent(_EventBase):
     size_bytes: int
 
 
+# ---------------------------------------------------------------------------
+# Tier 1 Commit C — concurrency + subgraph boundary markers (T-B8 / T-B9)
+# ---------------------------------------------------------------------------
+
+
+class SubgraphEnterEvent(_EventBase):
+    """Fired by the parent harness right before a subgraph child run.
+
+    The child's events flow into the parent tracing.jsonl (per Gemini Q6),
+    so Studio needs this boundary marker to fold the child's events under
+    a single timeline segment.
+    """
+
+    event_type: Literal["subgraph_enter"] = "subgraph_enter"
+    phase_name: str            # the parent phase that hosts the subgraph
+    child_skill_path: str      # path to the child SKILL.md
+    child_thread_id: str | None = None
+
+
+class SubgraphExitEvent(_EventBase):
+    event_type: Literal["subgraph_exit"] = "subgraph_exit"
+    phase_name: str
+    child_skill_path: str
+    wall_time_seconds: float
+    # status == "crashed" when the child raised (InternalErrorEvent will
+    # carry the exception detail; this is just the boundary marker).
+    status: Literal["completed", "crashed"] = "completed"
+
+
+class ParallelMapGroupStartedEvent(_EventBase):
+    """Fired by builtin.parallel_map right before ThreadPoolExecutor fan-out.
+
+    Carries the group_key that every child sub-run stamps on its own
+    prompt_captured events so Studio can visually fold them.
+    """
+
+    event_type: Literal["parallel_map_group_started"] = "parallel_map_group_started"
+    group_key: str             # uuid shared across all siblings in this fan-out
+    skill_path: str            # child skill being fanned out
+    item_count: int
+    max_concurrent: int
+    item_as: str               # parameter name the children receive
+
+
+class ParallelMapGroupEndedEvent(_EventBase):
+    event_type: Literal["parallel_map_group_ended"] = "parallel_map_group_ended"
+    group_key: str
+    succeeded: int
+    failed: int
+    wall_time_seconds: float
+
+
 class InternalErrorEvent(_EventBase):
     """Non-business Python exception (OOM / NetworkTimeout / unexpected).
 
@@ -301,6 +353,11 @@ CallbackEvent = Annotated[
         # Tier 1 Commit B
         ModelResolvedEvent,
         ArtifactSavedEvent,
+        # Tier 1 Commit C
+        SubgraphEnterEvent,
+        SubgraphExitEvent,
+        ParallelMapGroupStartedEvent,
+        ParallelMapGroupEndedEvent,
     ],
     Field(discriminator="event_type"),
 ]
@@ -330,4 +387,8 @@ __all__ = [
     "InternalErrorEvent",
     "ModelResolvedEvent",
     "ArtifactSavedEvent",
+    "SubgraphEnterEvent",
+    "SubgraphExitEvent",
+    "ParallelMapGroupStartedEvent",
+    "ParallelMapGroupEndedEvent",
 ]

@@ -111,9 +111,18 @@ class NudgeEvent(_EventBase):
 
 
 class WorkingMemoryUpdateEvent(_EventBase):
+    """Fired when a phase writes ``_working_memory`` in the context.
+
+    Tier 1 Commit B (T-A1) — carries the full text content in addition to
+    the length, because Studio needs to replay exactly what the agent
+    planned. Older readers that only look at ``content_length`` keep
+    working; the ``content`` field is additive.
+    """
+
     event_type: Literal["working_memory_update"] = "working_memory_update"
     phase_name: str
     content_length: int
+    content: str | None = None  # T-A1: full working memory text
 
 
 class DeadEndPrunedEvent(_EventBase):
@@ -123,9 +132,20 @@ class DeadEndPrunedEvent(_EventBase):
 
 
 class CompactionEvent(_EventBase):
+    """History compaction occurred — some message pairs were dropped.
+
+    Tier 1 Commit B (T-A2) — Gemini Q3 external-link scheme: the event
+    itself carries a short ``removed_summary`` (human-readable, a few
+    hundred chars) and a ``content_ref`` pointing at a sidecar JSON file
+    holding the full dropped messages. The sidecar path is written by
+    StorageManager so it lives under the normal run-retention policy.
+    """
+
     event_type: Literal["compaction"] = "compaction"
     phase_name: str
     removed_pairs: int
+    removed_summary: str | None = None  # T-A2: short readable summary
+    content_ref: str | None = None      # T-A2: relative path to sidecar JSON
 
 
 class AmbiguityReportEvent(_EventBase):
@@ -208,6 +228,38 @@ class RetryExhaustedEvent(_EventBase):
     final_errors: list[str] = Field(default_factory=list)
 
 
+class ModelResolvedEvent(_EventBase):
+    """Fired by the harness after resolver.resolve() picks a model.
+
+    Tier 1 Commit B (T-B2). Lets Studio show *why* a phase ended up on a
+    specific model/provider (which tier, whether model_override was used,
+    which call chain the resolver actually picked).
+    """
+
+    event_type: Literal["model_resolved"] = "model_resolved"
+    phase_name: str
+    tier: str                         # phase.tier
+    role_name: str                    # tier or synthetic "_model_override::..."
+    resolved_model: str | None = None # model code from llm_roles.yaml
+    thinking_enabled: bool | None = None
+    model_override: str | None = None
+    call_chain: list[str] = Field(default_factory=list)  # ["OC_CL/claude-sonnet-4-6", ...]
+
+
+class ArtifactSavedEvent(_EventBase):
+    """Fired by StorageManager after persisting an artifact to disk.
+
+    Tier 1 Commit B (T-B10). Lets Studio's artifact panel render directly
+    from the event stream without polling the filesystem.
+    """
+
+    event_type: Literal["artifact_saved"] = "artifact_saved"
+    phase_name: str | None = None  # None when the save happens outside a phase
+    name: str
+    path: str                      # absolute or run-relative path
+    size_bytes: int
+
+
 class InternalErrorEvent(_EventBase):
     """Non-business Python exception (OOM / NetworkTimeout / unexpected).
 
@@ -240,11 +292,15 @@ CallbackEvent = Annotated[
         AmbiguityReportEvent,
         PromptCapturedEvent,
         LLMFallbackEvent,
+        # Tier 1 Commit A
         RunStartedEvent,
         RunEndedEvent,
         ValidationPassEvent,
         RetryExhaustedEvent,
         InternalErrorEvent,
+        # Tier 1 Commit B
+        ModelResolvedEvent,
+        ArtifactSavedEvent,
     ],
     Field(discriminator="event_type"),
 ]
@@ -272,4 +328,6 @@ __all__ = [
     "ValidationPassEvent",
     "RetryExhaustedEvent",
     "InternalErrorEvent",
+    "ModelResolvedEvent",
+    "ArtifactSavedEvent",
 ]

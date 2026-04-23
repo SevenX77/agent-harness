@@ -479,6 +479,43 @@ class GraphAgentHarness:
         options = getattr(self._runtime_local, "options", None)
         return dict(options) if isinstance(options, dict) else {}
 
+    @staticmethod
+    def _save_compaction_sidecar(
+        *,
+        run_id: str,
+        idx: int,
+        removed_messages: list[Any],
+        storage_manager: Any | None,
+    ) -> str | None:
+        """Write the compacted-out messages to a sidecar JSON file.
+
+        Tier 1 Commit B (T-A2). The path is returned as ``content_ref`` on
+        the CompactionEvent so Studio (or any JSONL reader) can inflate
+        the full history on demand. Uses StorageManager when one is
+        available (inherits retention); falls back to no-op + None ref
+        when the caller did not inject storage.
+        """
+        if storage_manager is None:
+            return None
+        try:
+            from ..callbacks.serialize import to_jsonable_dict
+
+            name = f"compaction_{idx}.json"
+            serialised = to_jsonable_dict(removed_messages)
+            path = storage_manager.save_artifact(
+                name,
+                serialised,
+                phase=f"_history/{run_id}",
+            )
+            return str(path)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "[Harness] failed to write compaction sidecar (run=%s idx=%d)",
+                run_id,
+                idx,
+            )
+            return None
+
     def _build_context_from_io(
         self,
         runtime_inputs: dict[str, Any],
@@ -706,6 +743,30 @@ class GraphAgentHarness:
                 or getattr(model, "model", None)
                 or getattr(model, "model_name", None)
             )
+
+            # Tier 1 Commit B (T-B2): record the tier → role → model
+            # resolution decision itself so Studio can show *why* this
+            # phase runs on this specific provider/model combo.
+            from ..callbacks.events import ModelResolvedEvent
+            _safe_emit_event(
+                active_callbacks,
+                ModelResolvedEvent(
+                    phase_name=phase.name,
+                    tier=phase.tier or "",
+                    role_name=(
+                        f"_model_override::{phase.model_override}"
+                        if phase.model_override
+                        else (phase.tier or "")
+                    ),
+                    resolved_model=(
+                        str(resolved_model_name) if resolved_model_name else None
+                    ),
+                    thinking_enabled=getattr(model, "thinking_enabled", None),
+                    model_override=phase.model_override,
+                    call_chain=[],
+                ),
+            )
+
             model = TracingClientProxy(
                 wrapped_client=model,
                 callbacks=active_callbacks,
@@ -950,15 +1011,47 @@ class GraphAgentHarness:
                     checkpoint_count += 1
                     wm_snapshot = wm_current
                     removed_pairs = max((len(current_messages) - 2) // 2, 0)
-                    for cb in active_callbacks:
-                        try:
-                            cb.on_working_memory_update(phase.name, len(str(wm_current)))
-                        except Exception as exc:
-                            logger.warning('[Harness] callback error: %s', exc)
-                        try:
-                            cb.on_compaction(phase.name, removed_pairs)
-                        except Exception as exc:
-                            logger.warning('[Harness] callback error: %s', exc)
+                    # Tier 1 Commit B (T-A1 + T-A2): emit with full content
+                    # and an optional sidecar ref for the compacted history.
+                    from ..callbacks.events import (
+                        CompactionEvent,
+                        WorkingMemoryUpdateEvent,
+                    )
+
+                    wm_text = str(wm_current or "")
+                    _safe_emit_event(
+                        active_callbacks,
+                        WorkingMemoryUpdateEvent(
+                            phase_name=phase.name,
+                            content_length=len(wm_text),
+                            content=wm_text,
+                        ),
+                    )
+                    # Sidecar write for compaction: see _save_compaction_sidecar
+                    removed_messages = (
+                        current_messages[:-2]
+                        if len(current_messages) > 2
+                        else []
+                    )
+                    sidecar_ref = self._save_compaction_sidecar(
+                        run_id=run_id,
+                        idx=checkpoint_count,
+                        removed_messages=removed_messages,
+                        storage_manager=storage_manager,
+                    )
+                    removed_summary = (
+                        f"Compacted {removed_pairs} message pair(s) at checkpoint "
+                        f"#{checkpoint_count} in phase '{phase.name}'."
+                    )
+                    _safe_emit_event(
+                        active_callbacks,
+                        CompactionEvent(
+                            phase_name=phase.name,
+                            removed_pairs=removed_pairs,
+                            removed_summary=removed_summary,
+                            content_ref=sidecar_ref,
+                        ),
+                    )
                     current_messages = _compact_messages(original_user_msg, str(wm_current))
                     logger.info(
                         "[CognitiveLoop] Phase '%s' checkpoint #%d — context compacted.",
@@ -1052,12 +1145,18 @@ class GraphAgentHarness:
 
             working_memory_after = _ctx_text(ctx, "_working_memory")
             if working_memory_after != working_memory_before:
-                content_len = len(str(working_memory_after or ""))
-                for cb in active_callbacks:
-                    try:
-                        cb.on_working_memory_update(phase.name, content_len)
-                    except Exception as exc:
-                        logger.warning('[Harness] callback error: %s', exc)
+                # Tier 1 Commit B (T-A1): emit the full wm text, not just length
+                from ..callbacks.events import WorkingMemoryUpdateEvent
+
+                wm_text = str(working_memory_after or "")
+                _safe_emit_event(
+                    active_callbacks,
+                    WorkingMemoryUpdateEvent(
+                        phase_name=phase.name,
+                        content_length=len(wm_text),
+                        content=wm_text,
+                    ),
+                )
 
             # Step 10: Clean up phase-local keys before returning state
             ctx.pop("_finish_task_result", None)

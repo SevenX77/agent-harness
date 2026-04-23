@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src" / "core"))
 from graph_agent.callbacks.events import (  # noqa: E402
     SCHEMA_VERSION,
     AmbiguityReportEvent,
+    ArtifactSavedEvent,
     CallbackEvent,
     CompactionEvent,
     DeadEndPrunedEvent,
@@ -17,6 +18,7 @@ from graph_agent.callbacks.events import (  # noqa: E402
     InternalErrorEvent,
     LLMCallEvent,
     LLMFallbackEvent,
+    ModelResolvedEvent,
     NudgeEvent,
     PhaseEndEvent,
     PhaseStartEvent,
@@ -53,6 +55,9 @@ _ALL_EVENT_CLASSES = [
     ValidationPassEvent,
     RetryExhaustedEvent,
     InternalErrorEvent,
+    # Tier 1 Commit B — data + proxy enhancement
+    ModelResolvedEvent,
+    ArtifactSavedEvent,
 ]
 
 
@@ -98,6 +103,17 @@ _MIN_CTOR: dict[type, dict] = {
         "error_type": "RuntimeError",
         "error_message": "boom",
         "traceback": "Traceback: ...",
+    },
+    # Tier 1 Commit B — data + proxy enhancement
+    ModelResolvedEvent: {
+        "phase_name": "p",
+        "tier": "balanced",
+        "role_name": "balanced",
+    },
+    ArtifactSavedEvent: {
+        "name": "x.json",
+        "path": "/tmp/x.json",
+        "size_bytes": 128,
     },
 }
 

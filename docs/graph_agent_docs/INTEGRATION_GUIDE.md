@@ -276,18 +276,21 @@ pytest tests/core/test_cognitive_loop.py -v --tb=short
 - [ ] Documentation updated (README.md, CONFIG_REFERENCE.md, COGNITIVE_LOOP_GUIDE.md)
 
 
-### Subagent Middleware 限制
+### Subagent Middleware 继承（Task 2.7 后的新行为）
 
-当 Phase 配置 subagent_enabled: true 时，DeerFlow 的 SubagentExecutor 通过内部的 make_lead_agent() 创建子 agent。该路径不经过 harness 的 create_agent(middleware=...) 调用，因此子 agent 不会注入 WorkingMemory 和 DeadEnd middleware。
+当 Phase 配置 `subagent_enabled: true` 时，`DeerFlow` 的 `SubagentExecutor` 默认以 `inherit_middlewares=True` 运行，子 agent 现在会**完整继承 lead agent 的中间件链**（包括 `WorkingMemory`、`DeadEnd`、`LoopDetection`、`Clarification` 等），与主 agent 享有相同的认知约束和安全护栏。
 
-子 agent 执行简单隔离任务，通常无需这些中间件。如需为子 agent 也启用自定义中间件，可在应用启动时注册全局 hook：
+这是对早前行为的改进——此前子 agent 走的是极简中间件路径（`build_subagent_runtime_middlewares`），只做工具错误处理，不做规划约束，在高并发任务下行为不可控。
+
+若某个业务场景确实需要让子 agent 跑在极简中间件下（例如一次性的轻量查询，担心 Token 预算），可以在构造 `SubagentExecutor` 时显式传入 `inherit_middlewares=False`：
 
 ```python
-from deerflow.agents.lead_agent.agent import set_custom_middlewares_hook
-from graph_agent.cognitive.middlewares import create_custom_middlewares
-
-set_custom_middlewares_hook(lambda: create_custom_middlewares(
-    working_memory=True,
-    dead_end_pruning=True,
-))
+executor = SubagentExecutor(
+    config=subagent_config,
+    tools=tools,
+    parent_model=parent_model,
+    inherit_middlewares=False,  # opt out of full middleware chain
+)
 ```
+
+**原来的全局 hook 工作流已被取代**——不再需要 `set_custom_middlewares_hook` 给子 agent 注入 `WorkingMemory` / `DeadEnd`，它们现在是默认的一部分。hook 仍然可用于注入 **业务自定义** 中间件（Host project 的分支插件），这些仍会自动流入所有走 `make_lead_agent` 的子 agent 中。

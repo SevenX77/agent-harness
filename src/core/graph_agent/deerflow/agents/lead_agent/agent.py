@@ -223,16 +223,37 @@ def set_custom_middlewares_hook(hook: Callable[[], list] | None) -> None:
     logger.info("Custom middlewares hook %s", "registered" if hook else "cleared")
 
 
-def _build_middlewares(config: RunnableConfig, model_name: str | None, agent_name: str | None = None):
+# MODIFIED: Task 2.7 — subagent middleware inheritance.
+# The inherit_middlewares flag lets subagent runs reuse the full lead-style
+# middleware chain (WorkingMemory, DeadEnd, Clarification, etc.) instead of
+# the minimal subagent_runtime set. Default True keeps existing lead behavior
+# unchanged; subagents opt in (or out) via SubagentExecutor.
+def _build_middlewares(
+    config: RunnableConfig,
+    model_name: str | None,
+    agent_name: str | None = None,
+    *,
+    inherit_middlewares: bool = True,
+):
     """Build middleware chain based on runtime configuration.
 
     Args:
         config: Runtime configuration containing configurable options like is_plan_mode.
         agent_name: If provided, MemoryMiddleware will use per-agent memory storage.
+        inherit_middlewares: When True (default) return the full lead-agent chain.
+            When False return only the minimal subagent_runtime middlewares so callers
+            that build thin subagents (no WorkingMemory, no Clarification) can opt out.
 
     Returns:
         List of middleware instances.
     """
+    # MODIFIED: Task 2.7 — early return for thin subagent chain.
+    if not inherit_middlewares:
+        from deerflow.agents.middlewares.tool_error_handling_middleware import (
+            build_subagent_runtime_middlewares,
+        )
+        return build_subagent_runtime_middlewares(lazy_init=True)
+
     middlewares = build_lead_runtime_middlewares(lazy_init=True)
 
     # Add summarization middleware if enabled
@@ -285,7 +306,10 @@ def _build_middlewares(config: RunnableConfig, model_name: str | None, agent_nam
     return middlewares
 
 
-def make_lead_agent(config: RunnableConfig):
+# MODIFIED: Task 2.7 — subagent middleware inheritance.
+# Passing inherit_middlewares=False lets callers (e.g. SubagentExecutor when
+# a thin subagent is desired) build an agent without the lead-only chain.
+def make_lead_agent(config: RunnableConfig, *, inherit_middlewares: bool = True):
     # Lazy import to avoid circular dependency
     from deerflow.tools import get_available_tools
     from deerflow.tools.builtins import setup_agent
@@ -349,7 +373,7 @@ def make_lead_agent(config: RunnableConfig):
         return create_agent(
             model=create_chat_model(name=model_name, thinking_enabled=thinking_enabled),
             tools=get_available_tools(model_name=model_name, subagent_enabled=subagent_enabled) + [setup_agent],
-            middleware=_build_middlewares(config, model_name=model_name),
+            middleware=_build_middlewares(config, model_name=model_name, inherit_middlewares=inherit_middlewares),
             system_prompt=apply_prompt_template(subagent_enabled=subagent_enabled, max_concurrent_subagents=max_concurrent_subagents, available_skills=set(["bootstrap"])),
             state_schema=ThreadState,
         )
@@ -358,7 +382,7 @@ def make_lead_agent(config: RunnableConfig):
     return create_agent(
         model=create_chat_model(name=model_name, thinking_enabled=thinking_enabled, reasoning_effort=reasoning_effort),
         tools=get_available_tools(model_name=model_name, groups=agent_config.tool_groups if agent_config else None, subagent_enabled=subagent_enabled),
-        middleware=_build_middlewares(config, model_name=model_name, agent_name=agent_name),
+        middleware=_build_middlewares(config, model_name=model_name, agent_name=agent_name, inherit_middlewares=inherit_middlewares),
         system_prompt=apply_prompt_template(subagent_enabled=subagent_enabled, max_concurrent_subagents=max_concurrent_subagents, agent_name=agent_name),
         state_schema=ThreadState,
     )

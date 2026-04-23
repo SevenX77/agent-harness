@@ -132,6 +132,12 @@ class SubagentExecutor:
         thread_data: ThreadDataState | None = None,
         thread_id: str | None = None,
         trace_id: str | None = None,
+        *,
+        # MODIFIED: Task 2.7 — subagent middleware inheritance.
+        # Default True means subagents now receive the full lead-style
+        # middleware chain (WorkingMemory, DeadEnd, Clarification, etc.).
+        # Pass False to keep the legacy minimal-middleware behavior.
+        inherit_middlewares: bool = True,
     ):
         """Initialize the executor.
 
@@ -143,12 +149,17 @@ class SubagentExecutor:
             thread_data: Thread data from parent agent.
             thread_id: Thread ID for sandbox operations.
             trace_id: Trace ID from parent for distributed tracing.
+            inherit_middlewares: When True (default) the subagent reuses the
+                lead agent's full middleware chain. When False it runs with
+                only the minimal subagent_runtime middlewares (legacy).
         """
         self.config = config
         self.parent_model = parent_model
         self.sandbox_state = sandbox_state
         self.thread_data = thread_data
         self.thread_id = thread_id
+        # MODIFIED: Task 2.7 — subagent middleware inheritance flag.
+        self.inherit_middlewares = inherit_middlewares
         # Generate trace_id if not provided (for top-level calls)
         self.trace_id = trace_id or str(uuid.uuid4())[:8]
 
@@ -166,10 +177,36 @@ class SubagentExecutor:
         model_name = _get_model_name(self.config, self.parent_model)
         model = create_chat_model(name=model_name, thinking_enabled=False)
 
-        from deerflow.agents.middlewares.tool_error_handling_middleware import build_subagent_runtime_middlewares
+        # MODIFIED: Task 2.7 — subagent middleware inheritance.
+        # When inherit_middlewares is True (the new default) the subagent
+        # reuses the lead agent's full middleware chain so it gets the same
+        # cognitive guardrails (WorkingMemory, DeadEnd, Clarification, etc.).
+        # When False we fall back to the minimal subagent_runtime chain, which
+        # is the pre-Task-2.7 behavior retained for callers that explicitly
+        # want a thin subagent.
+        if self.inherit_middlewares:
+            from deerflow.agents.lead_agent.agent import _build_middlewares
 
-        # Reuse shared middleware composition with lead agent.
-        middlewares = build_subagent_runtime_middlewares(lazy_init=True)
+            stub_config: RunnableConfig = {
+                "configurable": {
+                    "model_name": model_name,
+                    "agent_name": None,
+                    "thinking_enabled": False,
+                    "is_plan_mode": False,
+                    "subagent_enabled": False,
+                }
+            }
+            middlewares = _build_middlewares(
+                stub_config,
+                model_name,
+                agent_name=None,
+                inherit_middlewares=True,
+            )
+        else:
+            from deerflow.agents.middlewares.tool_error_handling_middleware import (
+                build_subagent_runtime_middlewares,
+            )
+            middlewares = build_subagent_runtime_middlewares(lazy_init=True)
 
         return create_agent(
             model=model,

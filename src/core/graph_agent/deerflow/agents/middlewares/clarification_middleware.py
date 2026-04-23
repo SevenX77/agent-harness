@@ -113,6 +113,7 @@ class ClarificationMiddleware(AgentMiddleware[ClarificationMiddlewareState]):
         # Create a ToolMessage with the formatted question
         # This will be added to the message history
         tool_message = ToolMessage(
+            id=self._stable_message_id(tool_call_id, formatted_message),
             content=formatted_message,
             tool_call_id=tool_call_id,
             name="ask_clarification",

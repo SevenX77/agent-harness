@@ -244,8 +244,9 @@ def _save_memory_to_file(memory_data: dict[str, Any], agent_name: str | None = N
         # Ensure directory exists
         file_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Update lastUpdated timestamp
-        memory_data["lastUpdated"] = datetime.now(timezone.utc).isoformat() + "Z"
+        # Shallow-copy so assigning lastUpdated below does not mutate the
+        # caller's dict, which would otherwise leak through into cached state.
+        memory_data = {**memory_data, "lastUpdated": datetime.now(timezone.utc).isoformat() + "Z"}
 
         # Write atomically using temp file
         temp_path = file_path.with_suffix(".tmp")
@@ -261,7 +262,8 @@ def _save_memory_to_file(memory_data: dict[str, Any], agent_name: str | None = N
         except OSError:
             mtime = None
 
-        _memory_cache[agent_name] = (memory_data, mtime)
+        with _cache_lock:
+            _memory_cache[agent_name] = (memory_data, mtime)
 
         logger.info("Memory saved to %s", file_path)
         return True
@@ -334,8 +336,10 @@ class MemoryUpdater:
 
             update_data = json.loads(response_text)
 
-            # Apply updates
-            updated_memory = self._apply_updates(current_memory, update_data, thread_id)
+            # Apply updates. Deep-copy so that if a downstream save() fails,
+            # the still-cached original object (held behind _cache_lock) is
+            # not corrupted by the in-place mutations inside _apply_updates.
+            updated_memory = self._apply_updates(copy.deepcopy(current_memory), update_data, thread_id)
 
             # Strip file-upload mentions from all summaries before saving.
             # Uploaded files are session-scoped and won't exist in future sessions,

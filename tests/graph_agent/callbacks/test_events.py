@@ -12,6 +12,7 @@ from graph_agent.callbacks.events import (  # noqa: E402
     AmbiguityReportEvent,
     ArtifactSavedEvent,
     CallbackEvent,
+    HeartbeatEvent,
     ParallelMapGroupEndedEvent,
     ParallelMapGroupStartedEvent,
     SubgraphEnterEvent,
@@ -67,6 +68,8 @@ _ALL_EVENT_CLASSES = [
     SubgraphExitEvent,
     ParallelMapGroupStartedEvent,
     ParallelMapGroupEndedEvent,
+    # Tier 1 Commit D — heartbeat
+    HeartbeatEvent,
 ]
 
 
@@ -147,6 +150,7 @@ _MIN_CTOR: dict[type, dict] = {
         "failed": 1,
         "wall_time_seconds": 12.3,
     },
+    HeartbeatEvent: {"elapsed_seconds": 30.0},
 }
 
 

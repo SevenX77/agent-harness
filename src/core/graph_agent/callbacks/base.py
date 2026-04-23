@@ -2,13 +2,23 @@
 
 Business layer can implement concrete callbacks to observe phase transitions,
 LLM calls, tool executions, validation failures, and retries.
+
+As of Task 3.5, subclasses may also override :meth:`Callback.on_event` to
+receive a typed :class:`~graph_agent.callbacks.events.CallbackEvent` union
+member instead of individual string-typed hook methods. The default
+``on_event`` dispatches back to the legacy ``on_*`` methods so existing
+callbacks keep working unchanged — emitters can gradually migrate to
+calling ``on_event(event)`` with a Pydantic payload.
 """
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from .events import CallbackEvent
 
 EVENT_PHASE_START = "phase_start"
 EVENT_PHASE_END = "phase_end"
@@ -124,6 +134,87 @@ class Callback:
         decision: str,
     ) -> None:
         """Handle one ambiguity report."""
+
+    def on_event(self, event: "CallbackEvent") -> None:
+        """Typed event sink — new-style entrypoint introduced by Task 3.5.
+
+        The default implementation dispatches a :class:`CallbackEvent` member
+        back to the matching legacy ``on_*`` hook so subclasses that only
+        override the old hooks keep working. Override this method directly
+        to receive the full typed payload (including the new
+        ``prompt_captured`` / ``llm_fallback`` events and the
+        ``sub_run_id`` / ``group_key`` grouping fields).
+        """
+        # Import here to avoid pulling Pydantic at module load for callbacks
+        # that never process typed events.
+        from .events import (
+            AmbiguityReportEvent,
+            CompactionEvent,
+            DeadEndPrunedEvent,
+            FinishTaskEvent,
+            LLMCallEvent,
+            LLMFallbackEvent,
+            NudgeEvent,
+            PhaseEndEvent,
+            PhaseStartEvent,
+            PromptCapturedEvent,
+            RetryEvent,
+            ToolCallEvent,
+            ValidationFailEvent,
+            WorkingMemoryUpdateEvent,
+        )
+
+        if isinstance(event, PhaseStartEvent):
+            self.on_phase_start(event.phase_name, event.context)
+        elif isinstance(event, PhaseEndEvent):
+            self.on_phase_end(event.phase_name, event.context, event.metrics)
+        elif isinstance(event, LLMCallEvent):
+            self.on_llm_call(
+                event.phase_name,
+                event.input_tokens,
+                event.output_tokens,
+                messages=event.messages,
+                response_data=event.response_data,
+            )
+        elif isinstance(event, ToolCallEvent):
+            self.on_tool_call(
+                event.phase_name,
+                event.tool_name,
+                event.args,
+                event.result,
+                duration_ms=event.duration_ms,
+            )
+        elif isinstance(event, ValidationFailEvent):
+            self.on_validation_fail(event.phase_name, event.errors, event.retry_count)
+        elif isinstance(event, RetryEvent):
+            self.on_retry(event.phase_name, event.target_phase, event.feedback)
+        elif isinstance(event, FinishTaskEvent):
+            self.on_finish_task(event.phase_name, event.reasoning, event.evidence)
+        elif isinstance(event, NudgeEvent):
+            self.on_nudge(event.phase_name, event.nudge_count, nudge_type=event.nudge_type)
+        elif isinstance(event, WorkingMemoryUpdateEvent):
+            self.on_working_memory_update(event.phase_name, event.content_length)
+        elif isinstance(event, DeadEndPrunedEvent):
+            self.on_dead_end_pruned(event.phase_name, event.summary)
+        elif isinstance(event, CompactionEvent):
+            self.on_compaction(event.phase_name, event.removed_pairs)
+        elif isinstance(event, AmbiguityReportEvent):
+            self.on_ambiguity_report(
+                event.phase_name, event.ambiguity_type, event.question, event.decision
+            )
+        elif isinstance(event, (PromptCapturedEvent, LLMFallbackEvent)):
+            # No legacy hook exists for these new event types. Subclasses that
+            # need to consume them must override `on_event` directly.
+            logger.debug(
+                "Callback.on_event default dispatch: no legacy hook for %s; "
+                "override on_event in subclass to consume it.",
+                type(event).__name__,
+            )
+        else:
+            logger.warning(
+                "Callback.on_event received unrecognised event type %s",
+                type(event).__name__,
+            )
 
 
 __all__ = [

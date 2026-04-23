@@ -28,6 +28,7 @@ from .parser import (
     _NODE_PATTERN,
     _REF_PATTERN,
     _extract_tags,
+    _normalise_phase_tags,
     _parse_frontmatter,
     _strip_frontmatter,
 )
@@ -486,6 +487,10 @@ def _check_phases(
     nodes_info: list[dict[str, Any]] = []
 
     if skill_type == "graph":
+        # Task 5.3: accept <phase> as a synonym for <node> on the compiler
+        # side too so W/F rules see a consistent document regardless of
+        # which tag the author used.
+        content = _normalise_phase_tags(content)
         for m in _NODE_PATTERN.finditer(content):
             node_id = m.group(1)
             depends_on = m.group(2)

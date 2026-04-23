@@ -28,6 +28,7 @@ import yaml
 from .parser import (
     _NODE_PATTERN,
     _extract_tags,
+    _normalise_phase_tags,
     _parse_frontmatter,
     _resolve_refs,
     _split_by_phase_headers,
@@ -435,9 +436,12 @@ def _parse_graph_mode(
     loading_stack: set[str],
 ) -> list[Phase]:
     """Parse SKILL.md in graph mode — ``<node>`` tags with optional ``<ref>``."""
+    # Task 5.3: accept <phase> as a synonym for <node> so authors can migrate
+    # without breaking existing skills that still use <node>.
+    content = _normalise_phase_tags(content)
     nodes = list(_NODE_PATTERN.finditer(content))
     if not nodes:
-        raise SkillLoadError("No '<node>' tags found (graph mode)")
+        raise SkillLoadError("No '<phase>' or '<node>' tags found (graph mode)")
 
     phases: list[Phase] = []
     import_errors: list[str] = []

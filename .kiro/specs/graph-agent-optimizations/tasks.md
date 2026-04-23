@@ -80,7 +80,8 @@
   - 实现 `StorageManager(workspace_root, skill_id, run_id, *, history_retention=10)` + `get_output_dir(pipeline_prefix=None)` + `save_artifact(name, content, phase=None)` + `load_latest(phase, name)` + `_cleanup_history()`
   - **签名不含 user_id**（设计不变量）
   - `.golden` 后缀目录永不删除
-  - 单测覆盖：默认路径、pipeline_prefix 注入、.golden 锁定、超限清理
+  - 清理时必须 INFO 日志：被删除目录的完整 `run_id` + 本次腾出的磁盘空间（字节或 MB）
+  - 单测覆盖：默认路径、pipeline_prefix 注入、.golden 锁定、超限清理、清理日志
   - _Requirements: 5, 6_
 
 - [ ] 3.2 IOManager 对接 StorageManager 作为 default saver
@@ -131,7 +132,8 @@
   - 内部用 `ThreadPoolExecutor(max_workers=max_concurrent)` 并发调用 `run_skill(...)`
   - 每个子 skill 走完整框架路径（不绕过认知循环）
   - 父 callbacks 通过 runtime_inputs propagate 到子 skill
-  - 单测：10 item 并发，验证 max_concurrent=3 限流 + callback 事件完整
+  - **分配并附带 sub_run_id + group_key**：每个子 skill run 拿到唯一的 `sub_run_id`，同一次 parallel_map 调用下所有子 skill 共享一个 `group_key`；子 skill 发出的 CallbackEvent 在 propagate 到父 callback 时自动加上这两个字段，让 Studio 前端能把并发事件归入同一个折叠组
+  - 单测：10 item 并发，验证 max_concurrent=3 限流 + callback 事件完整 + sub_run_id/group_key 正确标记
   - _Requirements: 4_
 
 - [ ] 4.4 parallel_map 注册为 builtin tool
@@ -153,7 +155,8 @@
 - [ ] 5.2 Compiler 新增 WARNING 规则 (P)
   - `W-node-to-phase-migration` — 检测 `<node id=...>` 建议改 `<phase id=...>`
   - `W-python-glue-orchestrator` — 检测 orchestrator 用 Python dispatcher 而非 subgraph/sub_skills
-  - _Requirements: 1, 12_
+  - `W-invalid-model-override` — 检测 `phase_config.model_override` 字符串是否在 `llm_roles.yaml` 的 `models` 段定义中，没定义就 Warning
+  - _Requirements: 1, 9, 12_
 
 - [ ] 5.3 Parser 支持 `<phase>` 标签
   - 修改 `src/core/graph_agent/core/parser.py` L162-165 的 `_NODE_PATTERN`
@@ -214,8 +217,16 @@
 
 ## Step 7: Harness 拆分 + 仓库结构整理
 
+- [ ] 7.0 引入 RunContext 显式上下文对象（拆分前置条件）
+  - 在 `core/types.py` 或新建 `core/run_context.py` 定义 `RunContext` dataclass
+  - 字段：`thread_id`、`callbacks`、`run_options`（含 `trace_dir` / `artifact_saver` / `runtime_inputs` 等）、`sub_run_id` / `group_key`（parallel_map 场景用）
+  - **不再依赖 `threading.local()` 传递**，显式通过参数流转
+  - 迁移现有 harness.py 里所有 `getattr(self._runtime_local, "options", ...)` 的用法
+  - _Requirements: 20_
+
 - [ ] 7.1 Harness.py 拆分 — GraphBuilder
   - 把 `core/harness.py` 的 `_build_graph()` 相关逻辑抽到新的 `core/graph_builder.py`
+  - `GraphBuilder` 接受 `RunContext` 作为构造参数
   - `GraphAgentHarness` 委派给 `GraphBuilder`
   - _Requirements: 20_
 

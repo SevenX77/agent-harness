@@ -818,6 +818,47 @@ def _check_structure(
                 "通过 requires_llm: false 节点写入 context，后续节点用 {key} 读取。",
             ))
 
+    # Task 5.2 — W-python-glue-orchestrator
+    # Detects the orchestrator / dispatcher anti-pattern: a Python file
+    # under the skill's ``script/`` or ``tools/`` dir that references a
+    # child SKILL.md AND does concurrent / orchestrated dispatch by
+    # hand (run_skill in a loop, ThreadPoolExecutor, asyncio.gather).
+    # The declarative alternative is ``subgraph:`` for serial composition
+    # or ``tools: [builtin.parallel_map]`` for fan-out.
+    _ORCHESTRATOR_SIGNALS = (
+        "ThreadPoolExecutor",
+        "asyncio.gather",
+        "multiprocessing.Pool",
+        "run_skill",
+    )
+    for script_dir_name in ("script", "tools"):
+        scripts_dir = skill_dir / script_dir_name
+        if not scripts_dir.is_dir():
+            continue
+        for f in scripts_dir.glob("*.py"):
+            # Skip init files and the framework's own parallel_map.
+            if f.name in ("__init__.py",) or f.name.startswith("_"):
+                continue
+            try:
+                text = f.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            if "SKILL.md" not in text:
+                continue
+            hits = [sig for sig in _ORCHESTRATOR_SIGNALS if sig in text]
+            if not hits:
+                continue
+            result.issues.append(_issue(
+                "W-python-glue-orchestrator",
+                f"{script_dir_name}/{f.name}",
+                (
+                    f"Python 胶水码检测：文件同时引用 SKILL.md 和 {', '.join(hits)}，"
+                    "疑似绕过 subgraph / builtin.parallel_map 的反模式。"
+                    "改写建议：串行组合用 <phase subgraph: 子 SKILL.md 路径>，"
+                    "并发扇出用 tools: [builtin.parallel_map]。"
+                ),
+            ))
+
 
 def _check_tools(
     skill_dir: Path,

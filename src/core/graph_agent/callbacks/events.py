@@ -312,6 +312,20 @@ class ParallelMapGroupEndedEvent(_EventBase):
     wall_time_seconds: float
 
 
+class AgentLoopIterationEvent(_EventBase):
+    """Fired by a middleware at the top of each DeerFlow agent-loop iteration.
+
+    Tier 2 (T-B4). Gives Studio a per-iteration anchor so subsequent
+    LLMCall / ToolCall events emitted during that iteration can be
+    grouped, rather than just relying on timestamp order (which breaks
+    once parallel_map sub-runs interleave events).
+    """
+
+    event_type: Literal["agent_loop_iteration"] = "agent_loop_iteration"
+    phase_name: str
+    iteration: int  # 1-based; incremented for every before_model hook
+
+
 class InterruptedEvent(_EventBase):
     """Fired when an agent middleware suspends execution awaiting HITL input.
 
@@ -416,6 +430,8 @@ CallbackEvent = Annotated[
         # Tier 2 — HITL sync
         InterruptedEvent,
         ResumedEvent,
+        # Tier 2 — agent loop visibility
+        AgentLoopIterationEvent,
     ],
     Field(discriminator="event_type"),
 ]
@@ -452,4 +468,5 @@ __all__ = [
     "HeartbeatEvent",
     "InterruptedEvent",
     "ResumedEvent",
+    "AgentLoopIterationEvent",
 ]

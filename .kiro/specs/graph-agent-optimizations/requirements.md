@@ -53,6 +53,7 @@ Scope：只覆盖 graph_agent 引擎层（`src/core/graph_agent/` 及嵌入的 `
 3. The system shall 让每个子 skill 走完整的 `run_skill()` 路径（包含认知循环约束、callback 事件、validator），**不允许**绕过框架直接调 LLM
 4. The system shall 支持通过参数覆盖 max_workers（允许 PM 在确认稳定后逐步放开）
 5. The system shall 把每个子 skill 的 CallbackEvent 正确 propagate 到父 skill 的 callback 系统（保证可观察性不断）
+6. When 多个子 skill 并发运行，the system shall 为每个子 skill 的 run 分配一个唯一的 `sub_run_id` 和共享的 `group_key`（标识同一次 parallel_map 调用）；所有子 skill 的 CallbackEvent 在 propagate 到父 callback 时**必须携带 `sub_run_id` + `group_key`** 字段。这样 Studio 前端可以把并发事件归入同一个折叠组展示，避免 Timeline 上 10 个子 skill 的 `phase_start` 挤在一起显示混乱
 
 ### Requirement 5: StorageManager 内置化（合并 DataManager + ArtifactManager）
 **Objective:** As a PM using Studio / a host project integrator, I want a default artifact storage mechanism built into graph_agent, so that PM 不写 Python 就能让产出自动落盘；host project 仍可注入自定义 `artifact_saver` 覆盖默认行为。
@@ -71,7 +72,7 @@ Scope：只覆盖 graph_agent 引擎层（`src/core/graph_agent/` 及嵌入的 `
 
 #### Acceptance Criteria
 1. When `StorageManager.get_output_dir()` 创建新 `run_id` 目录，the system shall 同步触发 `.history/` 下非 `.golden` 后缀目录数量检查
-2. If 检查发现超过 `history_retention` 个，the system shall **物理删除**最老的（按目录修改时间排序），**不做回收站**
+2. If 检查发现超过 `history_retention` 个，the system shall **物理删除**最老的（按目录修改时间排序），**不做回收站**；删除时必须在日志中 INFO 级别输出被删除目录的完整 `run_id` 和本次清理腾出的磁盘空间（字节数或 MB），方便管理员事后排查
 3. The system shall **永不删除** 任何后缀带 `.golden` 的目录
 4. The system shall 支持通过 SKILL.md 的 `io.history_retention: N` 字段覆盖 StorageManager 的默认保留数
 5. The system shall 默认保留数为 `10`（对 PM dogfood 阶段的试错 / 对比 prompt 场景足够）
@@ -105,6 +106,7 @@ Scope：只覆盖 graph_agent 引擎层（`src/core/graph_agent/` 及嵌入的 `
 3. The system shall 在 `config/llm_roles.yaml` 支持"单模型 role"配置格式 —— role 只绑定一个 model_code，没有 fallback 链（用于确定性测试）
 4. The system shall 在 tier 路由失败时，基于 `peer_model_groups` 配置自动切到同级别代码模型（比如 Claude Sonnet ↔ GPT-4o），emit `llm_fallback` 事件（见 R8.2）
 5. The system shall 把现在写死的熔断阈值（30min 窗口 + 30 次错误）从 `llm_roles.yaml` 读取，支持 per-provider 配置
+6. The system shall 在 compiler 规则里新增 Warning 规则 `W-invalid-model-override`：校验 `phase_config.model_override` 填写的字符串是否在 `llm_roles.yaml` 的 `models` 段定义中；未定义则 Lint 给出警告（防止 PM 填错模型名导致运行时失败）
 
 ### Requirement 10: Nudge 默认值降权
 **Objective:** As a skill author, I want Nudge to be less aggressive by default, so that agent loop 不会因为一个 text-only 输出就被疯狂打断。
@@ -202,6 +204,7 @@ Scope：只覆盖 graph_agent 引擎层（`src/core/graph_agent/` 及嵌入的 `
 1. The system shall 把 `core/harness.py` 拆成 `GraphBuilder`（`_build_graph` 相关）、`PhaseExecutor`（phase 执行节点）、`RetryRouter`（`_should_retry` 等）、`NudgeInjector`（planning/selfcheck nudge 逻辑）四个合作者
 2. The system shall 保持 `GraphAgentHarness` 作为对外的 Facade，内部委派给上述合作者
 3. The system shall 保证所有现有测试和业务 skill 在拆分后行为不变（回归测试）
+4. The system shall 引入一个显式的 `RunContext` dataclass 在 4 个合作者之间传递共享状态（`thread_id` / `callbacks` / `run_options` / `runtime_inputs`），**不再依赖 `threading.local()` 作隐式传递**。目的：在 parallel_map 的线程池场景下（R4），每个子 skill 跑在独立线程里，显式 RunContext 能避免上下文丢失或跨线程污染
 
 ### Requirement 21: 文档合并和清理
 **Objective:** As a reader, I want one authoritative set of graph_agent docs instead of two duplicate directories, so that 不用猜哪份是最新的。

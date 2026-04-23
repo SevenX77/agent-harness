@@ -191,6 +191,7 @@ class GraphAgentHarness:
         trace_dir: Path | None = None,
         thread_id: str | None = None,
         artifact_saver: Callable[..., Any] | None = None,
+        storage_manager: Any | None = None,
         runtime_inputs_map: dict[str, Any] | None = None,
         **runtime_inputs: Any,
     ) -> WorkflowState:
@@ -224,6 +225,7 @@ class GraphAgentHarness:
             "trace_dir": effective_trace_dir,
             "thread_id": tid,
             "artifact_saver": artifact_saver,
+            "storage_manager": storage_manager,
             "runtime_inputs": dict(effective_runtime_inputs),
         }
         try:
@@ -235,6 +237,7 @@ class GraphAgentHarness:
                     result["context"],
                     effective_runtime_inputs,
                     artifact_saver=artifact_saver,
+                    storage_manager=storage_manager,
                 )
 
             # Auto-save TracingCallback trace to output dir
@@ -299,6 +302,7 @@ class GraphAgentHarness:
         runtime_inputs: dict[str, Any],
         *,
         artifact_saver: Callable[..., Any] | None = None,
+        storage_manager: Any | None = None,
     ) -> None:
         """Auto-save outputs via IOManager."""
         from ..io.manager import IOManager
@@ -310,6 +314,7 @@ class GraphAgentHarness:
                 output_dir=context.get("output_dir"),
                 project_id=runtime_inputs.get("project_id"),
                 artifact_saver=artifact_saver,
+                storage_manager=storage_manager,
             )
         except Exception as exc:
             logger.warning("[Harness] Auto-save outputs failed: %s", exc)

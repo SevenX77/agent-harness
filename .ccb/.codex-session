@@ -14,10 +14,13 @@
   "start_dir": "/Users/sevenx/Documents/coding/agent-harness",
   "active": true,
   "started_at": "2026-04-20 16:13:40",
-  "codex_start_cmd": "codex resume 019d97ca-f33a-7571-ae96-a5ee20c27278",
+  "codex_start_cmd": "codex resume 019db33f-4cab-7cd3-b05f-131507531c40",
   "start_cmd": "export CCB_MANAGED=1; export CCB_PARENT_PID=72965; export CCB_RUN_DIR=/Users/sevenx/.cache/ccb/projects/b53177914f7a648c; export CCB_CALLER=codex; export http_proxy=http://127.0.0.1:7897; export https_proxy=http://127.0.0.1:7897; export all_proxy=http://127.0.0.1:7897; export PATH=/Users/sevenx/.local/share/codex-dual/bin:/Users/sevenx/.opencode/bin:/Users/sevenx/.bun/bin:/Users/sevenx/.nvm/versions/node/v22.22.2/bin:/Users/sevenx/.local/bin:/Library/Frameworks/Python.framework/Versions/3.10/bin:/Library/Frameworks/Python.framework/Versions/3.14/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/Users/sevenx/.opencode/bin:/Users/sevenx/.bun/bin:/Users/sevenx/.nvm/versions/node/v22.22.2/bin:/Users/sevenx/.local/bin:/Library/Frameworks/Python.framework/Versions/3.10/bin:/Library/Frameworks/Python.framework/Versions/3.14/bin:/Users/sevenx/.cargo/bin; codex -c disable_paste_burst=true -c trust_level=\"trusted\" -c approval_policy=\"never\" -c sandbox_mode=\"danger-full-access\" resume 019d97ca-f33a-7571-ae96-a5ee20c27278",
   "ended_at": "2026-04-17 06:34:36",
-  "codex_session_path": "/Users/sevenx/.codex/sessions/2026/04/16/rollout-2026-04-16T12-35-53-019d97ca-f33a-7571-ae96-a5ee20c27278.jsonl",
-  "codex_session_id": "019d97ca-f33a-7571-ae96-a5ee20c27278",
-  "updated_at": "2026-04-20 16:13:40"
+  "codex_session_path": "/Users/sevenx/.codex/sessions/2026/04/21/rollout-2026-04-21T20-32-43-019db33f-4cab-7cd3-b05f-131507531c40.jsonl",
+  "codex_session_id": "019db33f-4cab-7cd3-b05f-131507531c40",
+  "updated_at": "2026-04-21 20:42:23",
+  "old_codex_session_id": "019d97ca-f33a-7571-ae96-a5ee20c27278",
+  "old_codex_session_path": "/Users/sevenx/.codex/sessions/2026/04/16/rollout-2026-04-16T12-35-53-019d97ca-f33a-7571-ae96-a5ee20c27278.jsonl",
+  "old_updated_at": "2026-04-21 20:42:23"
 }

@@ -14,6 +14,7 @@ from graph_agent.callbacks.events import (  # noqa: E402
     CompactionEvent,
     DeadEndPrunedEvent,
     FinishTaskEvent,
+    InternalErrorEvent,
     LLMCallEvent,
     LLMFallbackEvent,
     NudgeEvent,
@@ -21,8 +22,12 @@ from graph_agent.callbacks.events import (  # noqa: E402
     PhaseStartEvent,
     PromptCapturedEvent,
     RetryEvent,
+    RetryExhaustedEvent,
+    RunEndedEvent,
+    RunStartedEvent,
     ToolCallEvent,
     ValidationFailEvent,
+    ValidationPassEvent,
     WorkingMemoryUpdateEvent,
 )
 
@@ -42,6 +47,12 @@ _ALL_EVENT_CLASSES = [
     AmbiguityReportEvent,
     PromptCapturedEvent,
     LLMFallbackEvent,
+    # Tier 1 Commit A — core lifecycle
+    RunStartedEvent,
+    RunEndedEvent,
+    ValidationPassEvent,
+    RetryExhaustedEvent,
+    InternalErrorEvent,
 ]
 
 
@@ -69,6 +80,24 @@ _MIN_CTOR: dict[type, dict] = {
         "from_provider": "a",
         "to_provider": "b",
         "reason": "r",
+    },
+    # Tier 1 Commit A — core lifecycle
+    RunStartedEvent: {
+        "run_id": "r1",
+        "thread_id": "t1",
+    },
+    RunEndedEvent: {
+        "run_id": "r1",
+        "thread_id": "t1",
+        "wall_time_seconds": 1.23,
+    },
+    ValidationPassEvent: {"phase_name": "p", "retry_count": 0},
+    RetryExhaustedEvent: {"phase_name": "p", "max_retries": 3},
+    InternalErrorEvent: {
+        "entry_point": "run",
+        "error_type": "RuntimeError",
+        "error_message": "boom",
+        "traceback": "Traceback: ...",
     },
 }
 

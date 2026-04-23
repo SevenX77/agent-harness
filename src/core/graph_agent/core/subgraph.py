@@ -106,6 +106,30 @@ def build_subgraph_node(
                     else {}
                 ),
             )
+        except Exception as exc:
+            # Tier 1 Commit A — T-B14 InternalErrorEvent at subgraph boundary
+            # (per Gemini Q2: three independent try/except entry points so a
+            # nested crash is attributed to the correct layer and doesn't let
+            # the parent die "不明不白").
+            import traceback as _tb
+            from ..callbacks.events import InternalErrorEvent
+
+            for cb in active_callbacks:
+                try:
+                    cb.on_event(
+                        InternalErrorEvent(
+                            entry_point="subgraph",
+                            error_type=type(exc).__name__,
+                            error_message=str(exc),
+                            traceback=_tb.format_exc(),
+                        )
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "[Subgraph] callback %r failed on InternalError; continuing",
+                        type(cb).__name__,
+                    )
+            raise
         finally:
             child.callbacks = original_child_callbacks
         child_ctx = child_state["context"]

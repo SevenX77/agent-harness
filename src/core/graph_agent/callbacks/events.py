@@ -163,6 +163,67 @@ class LLMFallbackEvent(_EventBase):
     reason: str
 
 
+# ---------------------------------------------------------------------------
+# Tier 1 Commit A — core lifecycle events (T-B1 / T-B5 / T-B12 / T-B14)
+# ---------------------------------------------------------------------------
+
+
+class RunStartedEvent(_EventBase):
+    """Fired once at harness.run() entry, after RunContext is constructed."""
+
+    event_type: Literal["run_started"] = "run_started"
+    run_id: str
+    thread_id: str
+    is_resume: bool = False
+    # Gemini Q5: full initial_context; goes through to_jsonable_dict once
+    # Commit B lands that helper. Until then callers pass already-JSONable dicts.
+    initial_context: dict[str, Any] = Field(default_factory=dict)
+
+
+class RunEndedEvent(_EventBase):
+    """Fired once at harness.run() exit (success or handled error)."""
+
+    event_type: Literal["run_ended"] = "run_ended"
+    run_id: str
+    thread_id: str
+    status: Literal["completed", "crashed", "interrupted"] = "completed"
+    final_context: dict[str, Any] = Field(default_factory=dict)
+    wall_time_seconds: float
+
+
+class ValidationPassEvent(_EventBase):
+    """Fired when a phase validator returns (True, []). Complements ValidationFail."""
+
+    event_type: Literal["validation_pass"] = "validation_pass"
+    phase_name: str
+    retry_count: int  # how many retries were consumed before the pass (0 = first-try)
+
+
+class RetryExhaustedEvent(_EventBase):
+    """Fired when `current_retries >= max_retries` and the phase is force-degraded."""
+
+    event_type: Literal["retry_exhausted"] = "retry_exhausted"
+    phase_name: str
+    max_retries: int
+    final_errors: list[str] = Field(default_factory=list)
+
+
+class InternalErrorEvent(_EventBase):
+    """Non-business Python exception (OOM / NetworkTimeout / unexpected).
+
+    Distinguishes engine-layer crashes from ValidationFail / RetryExhausted
+    which are business-domain failures. Emitted at the three harness entry
+    points Gemini flagged (Q2): ``harness.run`` / ``harness.resume`` /
+    ``subgraph.run``, right before the exception is re-raised.
+    """
+
+    event_type: Literal["internal_error"] = "internal_error"
+    entry_point: Literal["run", "resume", "subgraph"]
+    error_type: str           # exception class name (e.g. "RuntimeError")
+    error_message: str        # str(exc)
+    traceback: str            # traceback.format_exc()
+
+
 CallbackEvent = Annotated[
     Union[
         PhaseStartEvent,
@@ -179,6 +240,11 @@ CallbackEvent = Annotated[
         AmbiguityReportEvent,
         PromptCapturedEvent,
         LLMFallbackEvent,
+        RunStartedEvent,
+        RunEndedEvent,
+        ValidationPassEvent,
+        RetryExhaustedEvent,
+        InternalErrorEvent,
     ],
     Field(discriminator="event_type"),
 ]
@@ -201,4 +267,9 @@ __all__ = [
     "AmbiguityReportEvent",
     "PromptCapturedEvent",
     "LLMFallbackEvent",
+    "RunStartedEvent",
+    "RunEndedEvent",
+    "ValidationPassEvent",
+    "RetryExhaustedEvent",
+    "InternalErrorEvent",
 ]

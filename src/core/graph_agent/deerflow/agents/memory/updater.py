@@ -1,6 +1,8 @@
 """Memory updater for reading, writing, and updating memory data."""
 
+import copy
 import json
+import threading
 import logging
 import re
 import uuid
@@ -62,6 +64,8 @@ def _create_empty_memory() -> dict[str, Any]:
 # Per-agent memory cache: keyed by agent_name (None = global)
 # Value: (memory_data, file_mtime)
 _memory_cache: dict[str | None, tuple[dict[str, Any], float | None]] = {}
+# Guards all reads and writes to _memory_cache across concurrent callers.
+_cache_lock = threading.Lock()
 
 
 def get_memory_data(agent_name: str | None = None) -> dict[str, Any]:
@@ -84,15 +88,16 @@ def get_memory_data(agent_name: str | None = None) -> dict[str, Any]:
     except OSError:
         current_mtime = None
 
-    cached = _memory_cache.get(agent_name)
+    with _cache_lock:
+        cached = _memory_cache.get(agent_name)
+        if cached is not None and cached[1] == current_mtime:
+            # Deep-copy to prevent caller mutations from corrupting the cache.
+            return copy.deepcopy(cached[0])
 
-    # Invalidate cache if file has been modified or doesn't exist
-    if cached is None or cached[1] != current_mtime:
-        memory_data = _load_memory_from_file(agent_name)
+    memory_data = _load_memory_from_file(agent_name)
+    with _cache_lock:
         _memory_cache[agent_name] = (memory_data, current_mtime)
-        return memory_data
-
-    return cached[0]
+    return memory_data
 
 
 def reload_memory_data(agent_name: str | None = None) -> dict[str, Any]:
@@ -112,7 +117,8 @@ def reload_memory_data(agent_name: str | None = None) -> dict[str, Any]:
     except OSError:
         mtime = None
 
-    _memory_cache[agent_name] = (memory_data, mtime)
+    with _cache_lock:
+        _memory_cache[agent_name] = (memory_data, mtime)
     return memory_data
 
 

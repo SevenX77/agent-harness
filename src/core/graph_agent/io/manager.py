@@ -92,6 +92,7 @@ class IOManager:
         output_dir: str | Path | None = None,
         project_id: str | None = None,
         artifact_saver: Callable[..., Any] | None = None,
+        storage_manager: Any | None = None,
     ) -> list[str]:
         """Save output data based on declared output targets.
 
@@ -103,6 +104,11 @@ class IOManager:
                 ``artifact_manager`` outputs outside the framework layer.
                 This keeps graph_agent portable across projects that use
                 different artifact registries or file management abstractions.
+            storage_manager: Optional ``StorageManager`` instance used as a
+                *default* saver when ``artifact_saver`` is not provided. The
+                caller-supplied ``artifact_saver`` still wins if both are set,
+                preserving the Kitchen-Pass red line (host projects keep full
+                control over persistence).
 
         Returns:
             List of saved file paths.
@@ -125,14 +131,26 @@ class IOManager:
                 continue
 
             if target == "artifact_manager":
-                paths = self._save_via_artifact_saver(
-                    name,
-                    data,
-                    context=context,
-                    artifact_saver=artifact_saver,
-                    project_id=project_id,
-                )
-                saved_paths.extend(paths)
+                if artifact_saver is None and storage_manager is not None:
+                    # Kitchen-Pass default: no caller-supplied saver, so fall
+                    # back to the framework's built-in StorageManager.
+                    phase = context.get("current_phase") or context.get("phase")
+                    path = storage_manager.save_artifact(name, data, phase=phase)
+                    saved_paths.append(str(path))
+                    logger.info(
+                        "[IOManager] Output '%s' saved via StorageManager fallback: %s",
+                        name,
+                        path,
+                    )
+                else:
+                    paths = self._save_via_artifact_saver(
+                        name,
+                        data,
+                        context=context,
+                        artifact_saver=artifact_saver,
+                        project_id=project_id,
+                    )
+                    saved_paths.extend(paths)
 
             elif target == "file":
                 file_path = output_spec.get("path")

@@ -199,3 +199,63 @@ context_bridge:
 - 每个 `tools`/`validator` 引用都能解析
 - `retry_target` 指向真实 Phase
 - 所有关键输出在下游阶段中都有消费者或最终 `io.outputs`
+
+## 10. 优化后新增的写法（graph-agent-optimizations 交付）
+
+### 10.1 phase_config 新字段
+
+```yaml
+name: my_phase
+tier: balanced
+model_override: CL46T         # 可选。覆盖 tier → role → model 映射，直接指向
+                              # llm_roles.yaml 的 models: 代号。compiler 会用
+                              # W-invalid-model-override 校验代号是否注册。
+max_nudges: 3                 # 可选。默认值已从 3 降到 1，需要 3 轮 nudge
+                              # 预算的阶段请显式声明。
+```
+
+### 10.2 `<phase>` 标签
+
+SKILL.md 里的官方术语是 `<phase id="...">`：
+
+```xml
+<phase id="segmentation">
+<ref path="phases/01_segmentation.md" />
+</phase>
+
+<phase id="event_extraction" depends_on="segmentation">
+<ref path="phases/02_event_extraction.md" />
+</phase>
+```
+
+老的 `<node>` 依然解析（parser 入口归一），但 compiler 会发 `W-node-to-phase-migration` 提醒迁移。skill 的子目录也建议叫 `phases/`（仓内 6 个业务 skill 已统一迁移）。
+
+### 10.3 `builtin.parallel_map`
+
+声明式并发 fan-out：
+
+```yaml
+tools:
+  - builtin.parallel_map
+```
+
+调用示例：
+
+```python
+parallel_map(
+    skill_path="path/to/child/SKILL.md",
+    item_list=scenes,
+    item_as="scene",
+    max_concurrent=3,
+)
+```
+
+每个 item 触发一个独立子 skill run；框架自动加 `_sub_run_id` / `_group_key` 到 runtime_inputs，Studio 前端可以把同一次 parallel_map 的并发事件折叠成一组。
+
+### 10.4 IO：StorageManager 默认落盘
+
+当 SKILL.md 的 `io.outputs` 声明 `target: artifact_manager` 而 caller 没注入 `artifact_saver` 时，引擎自动走内置的 `StorageManager`，产出放在 `{workspace_root}/runs/{skill_id}/{run_id}/`，保留最新 10 次 run，`.golden` 后缀的 run 永不清理。Caller 仍可通过 `artifact_saver=` 或 `storage_manager=` 完全接管（Kitchen-Pass 红线）。
+
+### 10.5 完整的 subgraph 样板
+
+参见 `skills/examples/subgraph-sample/story-deconstruction/SKILL.md` — 用 `subgraph:` + `context_bridge` 把四个独立 skill（`text-segmentation` / `event-extraction` / `batch-analysis` / `global-synthesis`）组合成一条 pipeline，零 Python 胶水。

@@ -36,18 +36,18 @@ io:
       target: artifact
 ---
 
-<node id="global_analysis">
-<ref path="nodes/01_global_analysis.md" />
-</node>
+<phase id="global_analysis">
+<ref path="phases/01_global_analysis.md" />
+</phase>
 
-<node id="scene_assembly" depends_on="global_analysis">
-<ref path="nodes/02_scene_assembly.md" />
-</node>
+<phase id="scene_assembly" depends_on="global_analysis">
+<ref path="phases/02_scene_assembly.md" />
+</phase>
 
-<node id="retroactive" depends_on="scene_assembly">
-<ref path="nodes/03_retroactive.md" />
-</node>
+<phase id="retroactive" depends_on="scene_assembly">
+<ref path="phases/03_retroactive.md" />
+</phase>
 
-<node id="export" depends_on="retroactive">
-<ref path="nodes/04_export.md" />
-</node>
+<phase id="export" depends_on="retroactive">
+<ref path="phases/04_export.md" />
+</phase>

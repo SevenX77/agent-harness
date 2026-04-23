@@ -253,15 +253,31 @@ class TracingCallback(Callback):
         retry_count: int,
     ) -> None:
         """Record validator failure in the trace."""
+        # Harden against validators that return str / tuple / iterable
+        # instead of list[str] — surfaced from the first real story-
+        # deconstruction run; old behaviour silently appended a str which
+        # the typed event rightfully rejects.
+        if isinstance(errors, str):
+            errors_list = [errors]
+        elif errors is None:
+            errors_list = []
+        else:
+            try:
+                errors_list = [str(e) for e in errors]
+            except TypeError:
+                errors_list = [str(errors)]
+
         active_phase = self._active_phase()
         if active_phase:
             active_phase["validation"]["passed"] = False
-            active_phase["validation"]["errors"].extend(errors)
+            active_phase["validation"]["errors"].extend(errors_list)
         self._write_event(
-            EVENT_VALIDATION_FAIL, phase_name, {"passed": False, "errors": errors, "retry_count": retry_count},
+            EVENT_VALIDATION_FAIL, phase_name, {"passed": False, "errors": errors_list, "retry_count": retry_count},
         )
         self._write_typed_event(
-            ValidationFailEvent(phase_name=phase_name, errors=errors, retry_count=retry_count)
+            ValidationFailEvent(
+                phase_name=phase_name, errors=errors_list, retry_count=retry_count
+            )
         )
 
     def on_retry(

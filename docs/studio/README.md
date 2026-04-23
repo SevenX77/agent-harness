@@ -262,13 +262,13 @@ tools:
 </user_prompt>
 ```
 
-这个 skill 只有一个阶段（greet），要求 LLM 调用一个叫 `generate_greeting` 的 Python 工具函数来生成问候语。Python 工具函数在 `script/greet.py` 文件里，由工程师或 Copilot 写。
+这个 skill 只有一个阶段（greet），要求 LLM 调用一个叫 `generate_greeting` 的 Python 工具函数来生成问候语。Python 工具函数在 `script/greet.py` 文件里，由 Copilot 根据skill tools规范来写, 写完通过compiler编译保证格式正确。
 
 #### Skill 的三种阶段模式
 
 每个 phase 可以是三种模式之一：
 
-- **LLM 模式**：这一步需要 LLM 思考、调用工具、做决策。写了 `<system_prompt>` 标签就是这种模式。
+- **Agent-Loop 模式**(这里要根据agent loop改一下, 不是LLM单词调用,这么些会有歧义, 下面所有的LLM模式都要改成agent loop模式,范式不一样)：这一步需要 LLM 思考、调用工具、做决策。写了 `<system_prompt>` 标签就是这种模式。
 - **Subgraph 模式**：这一步直接委派给另一个完整的 skill 去做。`<phase_config>` 里写 `subgraph: 另一个skill的路径`。PM 做"pipeline 编排"的时候用这个，让每一步调用一个成熟的子 skill。
 - **Code-only 模式**：这一步只是纯计算（不需要 LLM），就直接跑一个 Python 工具函数。适合"准备数据"、"合并结果"这种不需要 LLM 判断的步骤。
 
@@ -286,7 +286,7 @@ tools:
 
 在父 skill 的某个 LLM 模式 phase 里声明子 skill 作为 "工具"，让 LLM 在对话中自己决定调不调、什么时候调、参数是什么。适合 "PM 也不确定要不要调子 skill、让 LLM 判断"的场景。
 
-`builtin parallel_map` 是 graph_agent 内置的一个工具，专门用于**并发调用同一个子 skill 多次**的场景 —— 比如"对一批 10 个 scene 分别提取 beats"，LLM 调一次这个内置工具就能并发跑 10 次子 skill，不用手写 Python 胶水。
+`builtin parallel_map` 是 graph_agent 内置的一个工具，专门用于**并发调用同一个子 skill 多次**的场景 —— 比如"对一批 10 个 scene 分别提取 beats"，LLM 调一次这个内置工具就能并发跑 10 次子 skill，不用手写 Python 胶水。 (并发不要那么多, 根据deerflow内置的subagent数量只给了3个并发, 那我们也先只给3个并发,保守一点,如果可以再慢慢加)
 
 #### 一个 skill 怎么跑
 
@@ -300,7 +300,7 @@ tools:
 
 #### 几个你会经常听到的词
 
-- **Phase**：skill 的一个阶段。
+- **Phase**：skill 的一个阶段。(有个很大的命名歧义, skill.md里写的都是node标签,文件夹也是node, 但是表述一直是phase,如果phase语意更加贴切,那就统一用phase,否则会混乱)
 - **Tool**：Python 函数，被 LLM 在 phase 里调用。
 - **Validator**：校验函数，检查 phase 输出是否合格，不合格就触发重试。
 - **Context**：phase 之间传递数据的 "黑板"。每个 phase 读写这个 context。

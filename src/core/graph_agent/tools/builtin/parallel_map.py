@@ -98,6 +98,32 @@ def parallel_map(
         group_key,
     )
 
+    # Tier 1 Commit C (T-B9): emit a visible group boundary so Studio
+    # can fold all the sibling sub-runs' events under one timeline block.
+    # Per Gemini Q7 sub-run events still merge into the parent tracing.jsonl
+    # via shared callbacks; the boundary events give the folding anchor.
+    import time as _time
+
+    group_start_monotonic = _time.monotonic()
+    if callbacks:
+        from ...callbacks.events import ParallelMapGroupStartedEvent
+
+        _start_event = ParallelMapGroupStartedEvent(
+            group_key=group_key,
+            skill_path=str(skill_path),
+            item_count=len(item_list),
+            max_concurrent=max_concurrent,
+            item_as=item_as,
+        )
+        for cb in callbacks:
+            try:
+                cb.on_event(_start_event)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "parallel_map: callback %r failed on GroupStarted",
+                    type(cb).__name__,
+                )
+
     with ThreadPoolExecutor(max_workers=max_concurrent) as pool:
         future_to_index: dict[Any, int] = {}
         for idx, item in enumerate(item_list):
@@ -133,13 +159,34 @@ def parallel_map(
                     raise
                 results[idx] = {"error": str(exc), "sub_run_id": sub_run_id}
 
+    succeeded = sum(1 for r in results if r and "error" not in r)
+    failed = sum(1 for r in results if r and "error" in r)
     logger.info(
         "parallel_map end: skill=%s group_key=%s succeeded=%d failed=%d",
         skill_path,
         group_key,
-        sum(1 for r in results if r and "error" not in r),
-        sum(1 for r in results if r and "error" in r),
+        succeeded,
+        failed,
     )
+
+    # Tier 1 Commit C (T-B9): close the visible group boundary.
+    if callbacks:
+        from ...callbacks.events import ParallelMapGroupEndedEvent
+
+        _end_event = ParallelMapGroupEndedEvent(
+            group_key=group_key,
+            succeeded=succeeded,
+            failed=failed,
+            wall_time_seconds=round(_time.monotonic() - group_start_monotonic, 3),
+        )
+        for cb in callbacks:
+            try:
+                cb.on_event(_end_event)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "parallel_map: callback %r failed on GroupEnded",
+                    type(cb).__name__,
+                )
 
     # Every slot was populated either by a result or an error placeholder.
     return [r for r in results if r is not None]

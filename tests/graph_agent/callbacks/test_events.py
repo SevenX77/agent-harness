@@ -12,6 +12,10 @@ from graph_agent.callbacks.events import (  # noqa: E402
     AmbiguityReportEvent,
     ArtifactSavedEvent,
     CallbackEvent,
+    ParallelMapGroupEndedEvent,
+    ParallelMapGroupStartedEvent,
+    SubgraphEnterEvent,
+    SubgraphExitEvent,
     CompactionEvent,
     DeadEndPrunedEvent,
     FinishTaskEvent,
@@ -58,6 +62,11 @@ _ALL_EVENT_CLASSES = [
     # Tier 1 Commit B — data + proxy enhancement
     ModelResolvedEvent,
     ArtifactSavedEvent,
+    # Tier 1 Commit C — concurrency + subgraph boundary
+    SubgraphEnterEvent,
+    SubgraphExitEvent,
+    ParallelMapGroupStartedEvent,
+    ParallelMapGroupEndedEvent,
 ]
 
 
@@ -114,6 +123,29 @@ _MIN_CTOR: dict[type, dict] = {
         "name": "x.json",
         "path": "/tmp/x.json",
         "size_bytes": 128,
+    },
+    # Tier 1 Commit C — concurrency + subgraph boundary
+    SubgraphEnterEvent: {
+        "phase_name": "segmentation",
+        "child_skill_path": "skills/text-segmentation/SKILL.md",
+    },
+    SubgraphExitEvent: {
+        "phase_name": "segmentation",
+        "child_skill_path": "skills/text-segmentation/SKILL.md",
+        "wall_time_seconds": 0.42,
+    },
+    ParallelMapGroupStartedEvent: {
+        "group_key": "abc123",
+        "skill_path": "skills/scene/SKILL.md",
+        "item_count": 10,
+        "max_concurrent": 3,
+        "item_as": "scene",
+    },
+    ParallelMapGroupEndedEvent: {
+        "group_key": "abc123",
+        "succeeded": 9,
+        "failed": 1,
+        "wall_time_seconds": 12.3,
     },
 }
 

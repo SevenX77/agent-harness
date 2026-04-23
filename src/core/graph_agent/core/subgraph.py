@@ -91,14 +91,45 @@ def build_subgraph_node(
                 merged_callbacks.append(cb)
         child.callbacks = merged_callbacks
 
+        # Tier 1 Commit C (T-B8): emit a subgraph boundary marker so
+        # Studio can fold the child's events (which flow into the parent
+        # tracing.jsonl per Gemini Q6) into one visual segment.
+        import time as _time
+
+        from ..callbacks.events import (
+            InternalErrorEvent,
+            SubgraphEnterEvent,
+            SubgraphExitEvent,
+        )
+
+        child_skill_path = str(
+            getattr(child, "_skill_dir", None) or phase.name
+        )
+        child_thread_id_str = _derive_child_thread_id(
+            run_options.get("thread_id") or parent_ctx.get("_thread_id"),
+            phase.name,
+        )
+        for cb in active_callbacks:
+            try:
+                cb.on_event(
+                    SubgraphEnterEvent(
+                        phase_name=phase.name,
+                        child_skill_path=child_skill_path,
+                        child_thread_id=child_thread_id_str,
+                    )
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "[Subgraph] callback %r failed on SubgraphEnter; continuing",
+                    type(cb).__name__,
+                )
+
+        subgraph_start = _time.monotonic()
         try:
             child_state = child.run(
                 initial_context=child_inputs,
                 trace_dir=child_trace_dir if isinstance(child_trace_dir, Path) else None,
-                thread_id=_derive_child_thread_id(
-                    run_options.get("thread_id") or parent_ctx.get("_thread_id"),
-                    phase.name,
-                ),
+                thread_id=child_thread_id_str,
                 artifact_saver=run_options.get("artifact_saver"),
                 runtime_inputs_map=(
                     dict(run_options.get("runtime_inputs"))
@@ -112,7 +143,6 @@ def build_subgraph_node(
             # nested crash is attributed to the correct layer and doesn't let
             # the parent die "不明不白").
             import traceback as _tb
-            from ..callbacks.events import InternalErrorEvent
 
             for cb in active_callbacks:
                 try:
@@ -129,9 +159,48 @@ def build_subgraph_node(
                         "[Subgraph] callback %r failed on InternalError; continuing",
                         type(cb).__name__,
                     )
+            # Still emit SubgraphExit with status="crashed" so the
+            # boundary pair is always balanced (Studio needs both sides
+            # to close the folded region).
+            for cb in active_callbacks:
+                try:
+                    cb.on_event(
+                        SubgraphExitEvent(
+                            phase_name=phase.name,
+                            child_skill_path=child_skill_path,
+                            wall_time_seconds=round(
+                                _time.monotonic() - subgraph_start, 3
+                            ),
+                            status="crashed",
+                        )
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "[Subgraph] callback %r failed on SubgraphExit; continuing",
+                        type(cb).__name__,
+                    )
             raise
         finally:
             child.callbacks = original_child_callbacks
+
+        # Success path — emit SubgraphExit with status="completed"
+        for cb in active_callbacks:
+            try:
+                cb.on_event(
+                    SubgraphExitEvent(
+                        phase_name=phase.name,
+                        child_skill_path=child_skill_path,
+                        wall_time_seconds=round(
+                            _time.monotonic() - subgraph_start, 3
+                        ),
+                        status="completed",
+                    )
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "[Subgraph] callback %r failed on SubgraphExit; continuing",
+                    type(cb).__name__,
+                )
         child_ctx = child_state["context"]
         child_metrics = child_state.get("metrics", {})
 

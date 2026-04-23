@@ -64,6 +64,24 @@ fatal:
     description: "retry_target 必须指向已定义的 phase，且为非空字符串"
     reason: "校验失败后的重试路由会在运行期崩溃或失效"
 
+  F-subgraph-exclusive-tools:
+    scope: phase
+    check: no_tools_when_subgraph
+    description: "Phase 声明 subgraph: 时不得再声明 tools"
+    reason: "subgraph phase 不跑 agent loop，tools 会被 loader 静默忽略，authoring 错误必须 fail-fast"
+
+  F-subgraph-exclusive-prompt:
+    scope: phase
+    check: no_prompt_when_subgraph
+    description: "Phase 声明 subgraph: 时不得包含 <system_prompt> 或 <user_prompt>"
+    reason: "subgraph phase 不跑 LLM，prompt 会被 loader 静默忽略；prompt 必须搬到子 skill"
+
+  F-subgraph-exclusive-sub-skills:
+    scope: phase
+    check: no_sub_skills_when_subgraph
+    description: "Phase 声明 subgraph: 时不得同时声明 sub_skills"
+    reason: "subgraph 是静态组合，sub_skills 是动态决策；同时声明语义不明，两种模式互斥"
+
 warning:
   S001:
     scope: structure
@@ -142,6 +160,18 @@ warning:
     check: json_params_use_normalize
     description: "接收 JSON 参数的工具函数必须在入口处调用 _normalize_json_param"
     impact: "dict/str 格式不统一导致下游崩溃"
+
+  W-invalid-model-override:
+    scope: phase
+    check: model_override_known
+    description: "phase_config.model_override 必须命中 llm_roles.yaml 的 models 段"
+    impact: "拼写错误会在运行期触发 ModelResolver 抛 'no model for role' 或静默回退到 tier 默认模型"
+
+  W-node-to-phase-migration:
+    scope: graph
+    check: prefer_phase_tag
+    description: "SKILL.md 建议使用 <phase id=\"...\"> 标签，不再使用旧的 <node>"
+    impact: "<node> 仍可解析但官方术语已统一为 phase，长期保留会让多人协作语义漂移"
 
 # ---------------------------------------------------------------------------
 # Anthropic Skill 兼容性规则 (A系列)

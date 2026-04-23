@@ -487,6 +487,15 @@ def _check_phases(
     nodes_info: list[dict[str, Any]] = []
 
     if skill_type == "graph":
+        # Task 5.2: nudge authors on the old <node> spelling before we
+        # normalise it away. Fires once per SKILL.md regardless of how
+        # many <node> tags are present; the goal is a migration hint,
+        # not a repeat warning.
+        if re.search(r'<node\s+id="', content):
+            result.issues.append(_issue(
+                "W-node-to-phase-migration", "SKILL.md",
+                "SKILL.md 仍使用 <node id=\"...\"> 标签；建议迁移到 <phase id=\"...\">（两种都解析，但 phase 是官方术语）",
+            ))
         # Task 5.3: accept <phase> as a synonym for <node> on the compiler
         # side too so W/F rules see a consistent document regardless of
         # which tag the author used.
@@ -562,12 +571,54 @@ def _check_phases(
         if not isinstance(phase_cfg, dict):
             continue
 
-        unknown_keys = sorted(set(phase_cfg.keys()) - _PHASE_CONFIG_ALLOWED_KEYS - _XML_ONLY_KEYS)
+        unknown_keys = sorted(set(phase_cfg.keys()) - _PHASE_CONFIG_ALLOWED_KEYS - _XML_ONLY_KEYS) - {"model_override"}
         for key in unknown_keys:
             result.issues.append(_issue("P004", loc, f"未知 phase_config key: '{key}'"))
         xml_misplaced = sorted(set(phase_cfg.keys()) & _XML_ONLY_KEYS)
         for key in xml_misplaced:
             result.issues.append(_issue("P004", loc, f"'{key}' 应在 XML tag 中定义，而非 phase_config YAML"))
+
+        # Task 5.1: subgraph phases are exclusive with tools/prompts/sub_skills.
+        # Prior to this check the loader silently dropped any such fields when
+        # subgraph was present, producing confusing "my tool never ran" bugs.
+        # Now we FAIL FAST so the authoring error surfaces at compile time.
+        if phase_cfg.get("subgraph"):
+            if phase_cfg.get("tools"):
+                result.issues.append(_issue(
+                    "F-subgraph-exclusive-tools", loc,
+                    "subgraph phase 不得声明 tools（loader 会静默忽略，改为在子 skill 里声明）",
+                ))
+            if tags.get("system_prompt") or tags.get("user_prompt"):
+                result.issues.append(_issue(
+                    "F-subgraph-exclusive-prompt", loc,
+                    "subgraph phase 不得包含 <system_prompt>/<user_prompt>（该 phase 不跑 LLM）",
+                ))
+            if phase_cfg.get("sub_skills"):
+                result.issues.append(_issue(
+                    "F-subgraph-exclusive-sub-skills", loc,
+                    "subgraph 与 sub_skills 互斥：subgraph 是静态组合，sub_skills 是动态决策",
+                ))
+
+        # Task 5.2 W-invalid-model-override: catch typo'd model_override strings
+        # so authors learn at compile time instead of at first run.
+        model_override = phase_cfg.get("model_override")
+        if model_override is not None:
+            if not isinstance(model_override, str) or not model_override.strip():
+                result.issues.append(_issue(
+                    "W-invalid-model-override", loc,
+                    "model_override 必须是非空字符串",
+                ))
+            else:
+                known_models = _known_model_names()
+                if known_models and model_override.strip() not in known_models:
+                    result.issues.append(_issue(
+                        "W-invalid-model-override", loc,
+                        (
+                            f"model_override '{model_override}' 未在 llm_roles.yaml 的 models 段定义；"
+                            f"已知模型: {sorted(known_models)[:8]}..."
+                        ),
+                    ))
+
         # P003: tool paths
         tool_refs = phase_cfg.get("tools", [])
         for ref in tool_refs:
@@ -816,6 +867,24 @@ def _get_known_tiers() -> set[str]:
         from ..config.llm_config import get_role_config
 
         return set(get_role_config().roles.keys())
+    except Exception:
+        return set()
+
+
+def _known_model_names() -> set[str]:
+    """Load known model codes from the ``models:`` section of llm_roles.yaml.
+
+    Falls back to the empty set when the config is missing or malformed —
+    the caller (W-invalid-model-override) treats that as "cannot validate"
+    and silently skips the check rather than emitting a false positive.
+    """
+    try:
+        from ..config.llm_config import get_role_config
+
+        cfg = get_role_config()
+        # RoleConfig exposes models via `.models` (dict of code → ModelConfig).
+        models = getattr(cfg, "models", None) or {}
+        return set(models.keys())
     except Exception:
         return set()
 

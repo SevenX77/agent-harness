@@ -471,6 +471,23 @@ class GraphAgentHarness:
             # Step 4: Get model from Model Resolver
             # thinking_enabled=None → auto-detect from model's reasoning flag
             model = resolver.resolve(phase.tier)
+            # Task 4.2: wrap with TracingClientProxy so every LLM round-trip
+            # emits a prompt_captured event to the registered callbacks.
+            from .tracing_proxy import TracingClientProxy
+            resolved_model_name = (
+                getattr(model, "name", None)
+                or getattr(model, "model", None)
+                or getattr(model, "model_name", None)
+            )
+            model = TracingClientProxy(
+                wrapped_client=model,
+                callbacks=active_callbacks,
+                phase_name=phase.name,
+                llm_role=phase.tier,
+                resolved_model=str(resolved_model_name) if resolved_model_name else None,
+                sub_run_id=ctx.get("_sub_run_id") if isinstance(ctx, dict) else None,
+                group_key=ctx.get("_group_key") if isinstance(ctx, dict) else None,
+            )
             role_prefix = ""
             try:
                 role_prefix = get_role_config().resolve_role(phase.tier).system_prompt_prefix

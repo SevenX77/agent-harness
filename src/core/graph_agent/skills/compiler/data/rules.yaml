@@ -82,6 +82,24 @@ fatal:
     description: "Phase 声明 subgraph: 时不得同时声明 sub_skills"
     reason: "subgraph 是静态组合，sub_skills 是动态决策；同时声明语义不明，两种模式互斥"
 
+  F-step-name-required:
+    scope: phase
+    check: step_tag_has_name
+    description: "<step> 标签必须含 name 属性"
+    reason: "Step 结构化片段的第一要素是命名，缺失意味着 LLM 无法识别步骤身份"
+
+  F-step-goal-required:
+    scope: phase
+    check: step_tag_has_goal
+    description: "<step> 标签必须含 goal 属性"
+    reason: "Step 存在的目的就是声明 goal（目标），没有 goal 等于没有 step 语义"
+
+  F-step-no-expression:
+    scope: phase
+    check: step_tag_no_expression_attrs
+    description: "<step> 标签不得含 when / skip_if / if / else 等表达式字段"
+    reason: "framework 不做表达式求值（与 F006 红线一致）；条件分支须用 code-only phase + validator + retry_target 表达"
+
 warning:
   S001:
     scope: structure

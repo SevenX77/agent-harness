@@ -39,6 +39,12 @@ logger = logging.getLogger(__name__)
 # Rules YAML lives inside the compiler skill — single source of truth.
 _RULES_PATH = Path(__file__).parent.parent / "skills" / "compiler" / "data" / "rules.yaml"
 
+# Task 5.4 — <step> tag regex (matches opening tag only; closing </step>
+# is ignored because we only validate the opening tag's attributes).
+_STEP_TAG_PATTERN = re.compile(r"<step\b([^>]*)>", re.IGNORECASE)
+_STEP_ATTR_RE = re.compile(r'(\w+)\s*=\s*"([^"]*)"')
+
+
 _PHASE_CONFIG_ALLOWED_KEYS = {
     "name",
     "tier",
@@ -699,6 +705,34 @@ def _check_phases(
         missing = placeholders - ctx_map_keys
         for key in sorted(missing):
             result.issues.append(_issue("P006", loc, f"占位符 '{{{key}}}' 未在 context_mapping 中定义"))
+
+        # Task 5.4 — <step> tag validation inside prompts. Pure structural
+        # check; the parser already leaves <step> as verbatim text inside
+        # prompt bodies. Three FATAL rules:
+        #   F-step-name-required     — every <step> must have name=""
+        #   F-step-goal-required     — every <step> must have goal=""
+        #   F-step-no-expression     — reject when/skip_if/if/else attrs
+        all_prompt_text = " ".join(sys_prompts + usr_prompts)
+        for step_match in _STEP_TAG_PATTERN.finditer(all_prompt_text):
+            attrs_raw = step_match.group(1) or ""
+            parsed_attrs = dict(_STEP_ATTR_RE.findall(attrs_raw))
+            if "name" not in parsed_attrs or not parsed_attrs["name"].strip():
+                result.issues.append(_issue(
+                    "F-step-name-required", loc,
+                    "<step> 缺少 name 属性"
+                ))
+            if "goal" not in parsed_attrs or not parsed_attrs["goal"].strip():
+                result.issues.append(_issue(
+                    "F-step-goal-required", loc,
+                    "<step> 缺少 goal 属性"
+                ))
+            banned = {"when", "skip_if", "if", "else"} & set(parsed_attrs.keys())
+            for attr in sorted(banned):
+                result.issues.append(_issue(
+                    "F-step-no-expression", loc,
+                    f"<step> 禁止使用表达式字段 '{attr}'；条件分支请用 "
+                    f"code-only phase + validator + retry_target",
+                ))
 
         # P007: no inline JSON in system_prompt
         for sp in sys_prompts:

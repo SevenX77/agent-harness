@@ -17,6 +17,8 @@ import copy
 import json
 import logging
 import threading
+import time
+import traceback
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -119,6 +121,59 @@ def _redact_dsn(dsn: str) -> str:
     import re
 
     return re.sub(r"(://[^:]+):[^@]+@", r"\1:***@", dsn)
+
+
+def _safe_emit_event(callbacks: list[Callback], event: Any) -> None:
+    """Dispatch a typed CallbackEvent to every callback, swallowing errors.
+
+    Mirrors TracingClientProxy._emit_prompt_captured's isolation pattern:
+    a broken callback must never take down the harness run. Each callback
+    is tried independently and any exception is logged + skipped.
+    """
+    for cb in callbacks or []:
+        try:
+            cb.on_event(event)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "[Harness] callback %r raised on %s; continuing with other callbacks",
+                type(cb).__name__,
+                type(event).__name__,
+            )
+
+
+def _safe_jsonable_dict(data: Any) -> dict[str, Any]:
+    """Minimal best-effort conversion of a context dict to JSON-safe values.
+
+    Proper structural conversion (T-A3 in deferred-items.md) lands with
+    Commit B and a dedicated ``callbacks/serialize.to_jsonable_dict()``
+    helper. Until then, lifecycle events use this shallow pass: drop
+    callables, convert Path/datetime to str, keep everything else.
+    """
+    if not isinstance(data, dict):
+        return {"_value": repr(data)}
+
+    out: dict[str, Any] = {}
+    for key, value in data.items():
+        try:
+            if callable(value):
+                out[str(key)] = f"<callable {getattr(value, '__name__', 'fn')}>"
+            elif isinstance(value, Path):
+                out[str(key)] = str(value)
+            elif isinstance(value, (str, int, float, bool)) or value is None:
+                out[str(key)] = value
+            elif isinstance(value, (list, tuple)):
+                out[str(key)] = [
+                    v if isinstance(v, (str, int, float, bool)) or v is None else repr(v)
+                    for v in value
+                ]
+            elif isinstance(value, dict):
+                # One level of recursion is enough for the payload shape we ship.
+                out[str(key)] = _safe_jsonable_dict(value)
+            else:
+                out[str(key)] = repr(value)
+        except Exception:  # noqa: BLE001
+            out[str(key)] = "<unserialisable>"
+    return out
 
 
 def _ctx_text(ctx: dict[str, Any], key: str) -> str | None:
@@ -298,7 +353,14 @@ class GraphAgentHarness:
         }
 
         tid = thread_id or str(uuid.uuid4())
+        # Tier 1 Commit A: run_id identifies a single harness.run invocation.
+        # thread_id may be reused across multiple runs (resume scenarios);
+        # run_id is always fresh so Studio can distinguish each execution.
+        run_id = uuid.uuid4().hex[:12]
+        is_resume = thread_id is not None
+        run_start_monotonic = time.monotonic()
         initial_state["context"]["_thread_id"] = tid
+        initial_state["context"]["_run_id"] = run_id
         config: dict[str, Any] = {
             "recursion_limit": self._calc_recursion_limit(),
             "configurable": {"thread_id": tid},
@@ -326,6 +388,23 @@ class GraphAgentHarness:
             artifact_saver=artifact_saver,
             callbacks=active_callbacks,
         )
+
+        # Tier 1 Commit A — T-B1 RunStartedEvent
+        from ..callbacks.events import (
+            InternalErrorEvent,
+            RunEndedEvent,
+            RunStartedEvent,
+        )
+        _safe_emit_event(
+            active_callbacks,
+            RunStartedEvent(
+                run_id=run_id,
+                thread_id=tid,
+                is_resume=is_resume,
+                initial_context=_safe_jsonable_dict(initial_state["context"]),
+            ),
+        )
+
         try:
             result = self._graph.invoke(initial_state, config=config)
 
@@ -354,7 +433,40 @@ class GraphAgentHarness:
                             logger.warning("[Harness] Trace save failed: %s", exc)
                         break
 
+            # Tier 1 Commit A — T-B1 RunEndedEvent on success
+            _safe_emit_event(
+                active_callbacks,
+                RunEndedEvent(
+                    run_id=run_id,
+                    thread_id=tid,
+                    status="completed",
+                    final_context=_safe_jsonable_dict(result["context"]),
+                    wall_time_seconds=round(time.monotonic() - run_start_monotonic, 3),
+                ),
+            )
             return result  # type: ignore[return-value]
+        except Exception as exc:
+            # Tier 1 Commit A — T-B14 InternalErrorEvent at harness.run entry
+            _safe_emit_event(
+                active_callbacks,
+                InternalErrorEvent(
+                    entry_point="run",
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                    traceback=traceback.format_exc(),
+                ),
+            )
+            _safe_emit_event(
+                active_callbacks,
+                RunEndedEvent(
+                    run_id=run_id,
+                    thread_id=tid,
+                    status="crashed",
+                    final_context={},
+                    wall_time_seconds=round(time.monotonic() - run_start_monotonic, 3),
+                ),
+            )
+            raise
         finally:
             if previous_options is None:
                 if hasattr(self._runtime_local, "options"):
@@ -465,6 +577,19 @@ class GraphAgentHarness:
         try:
             result = self._graph.invoke(state, config=config)
             return result  # type: ignore[return-value]
+        except Exception as exc:
+            # Tier 1 Commit A — T-B14 InternalErrorEvent at harness.resume
+            from ..callbacks.events import InternalErrorEvent
+            _safe_emit_event(
+                self.callbacks,
+                InternalErrorEvent(
+                    entry_point="resume",
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                    traceback=traceback.format_exc(),
+                ),
+            )
+            raise
         finally:
             if previous_options is None:
                 if hasattr(self._runtime_local, "options"):
@@ -971,8 +1096,20 @@ class GraphAgentHarness:
 
             if passed:
                 retry_key = phase.retry_target or phase.name
+                # Tier 1 Commit A — T-B5 ValidationPassEvent
+                # Capture the retry count BEFORE popping so "how many retries
+                # did this phase consume before passing" is observable.
+                retries_used = next_state["retry_counts"].get(retry_key, 0)
                 next_state["retry_counts"].pop(retry_key, None)
                 next_state["context"].pop("_validation_warnings", None)
+                from ..callbacks.events import ValidationPassEvent
+                _safe_emit_event(
+                    active_callbacks,
+                    ValidationPassEvent(
+                        phase_name=phase.name,
+                        retry_count=retries_used,
+                    ),
+                )
                 return next_state
 
             # Validation failed
@@ -987,6 +1124,16 @@ class GraphAgentHarness:
                     "Phase '%s' exceeded max retries (%d). Continuing with warnings.",
                     phase.name,
                     phase.max_retries,
+                )
+                # Tier 1 Commit A — T-B12 RetryExhaustedEvent
+                from ..callbacks.events import RetryExhaustedEvent
+                _safe_emit_event(
+                    active_callbacks,
+                    RetryExhaustedEvent(
+                        phase_name=phase.name,
+                        max_retries=phase.max_retries,
+                        final_errors=list(errors),
+                    ),
                 )
                 next_state["context"]["_validation_warnings"] = errors
                 return next_state

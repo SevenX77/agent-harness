@@ -51,3 +51,16 @@ Thumbs.db
 # Project specific
 e2e_*.log
 opencode.json
+
+# CCB runtime
+.ccb/
+.ccb-requests/
+
+# Studio runtime
+.studio_state/
+
+# DeerFlow
+.deer-flow/checkpoints.db
+
+# Workspaces
+workspaces/

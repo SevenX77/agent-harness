@@ -15,6 +15,7 @@ from .harness import GraphAgentHarness
 from .loader import load_workflow_from_md
 from .compiler import compile_skill
 from .runner import run_skill
+from .run_context import RunContext
 
 __all__ = [
     "ContextBridge",
@@ -30,4 +31,5 @@ __all__ = [
     "load_workflow_from_md",
     "compile_skill",
     "run_skill",
+    "RunContext",
 ]

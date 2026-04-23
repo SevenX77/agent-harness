@@ -312,6 +312,20 @@ class GraphAgentHarness:
             "storage_manager": storage_manager,
             "runtime_inputs": dict(effective_runtime_inputs),
         }
+
+        # Task 7.0: Create explicit RunContext for new emit sites
+        # (coexists with threading.local for backward compatibility)
+        from .run_context import RunContext
+
+        active_callbacks = list(self.callbacks) if hasattr(self, 'callbacks') else []
+        self._active_run_context = RunContext(
+            thread_id=tid,
+            trace_dir=effective_trace_dir,
+            runtime_inputs=dict(effective_runtime_inputs),
+            storage_manager=storage_manager,
+            artifact_saver=artifact_saver,
+            callbacks=active_callbacks,
+        )
         try:
             result = self._graph.invoke(initial_state, config=config)
 

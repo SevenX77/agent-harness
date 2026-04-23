@@ -212,18 +212,25 @@
 #### T-A2 CompactionEvent 缺被压缩内容（Gemini 给了方案）
 
 - [ ] 当前只存 `removed_pairs`；Gemini 反对"一行塞 250KB"，提出**外链模式**
-- **实现方案**（Gemini 建议）：事件本身记 `removed_summary`（摘要）和 `content_ref`（路径字符串）；被压缩的完整消息单独存到 `.artifacts/history/run_<run_id>/compaction_<idx>.json`
+- **Gemini 实现细节**（Q3 决议）：
+  - 事件字段：`removed_summary`（摘要）+ `content_ref`（相对路径）
+  - 外链文件路径：**通过 StorageManager 管理**（自动享受 retention 策略）
+  - 文件命名：`compaction_<idx>.json`，**idx 是全局递增**（而非 per-phase）——实现最简单，引用时无需感知 phase
+  - run 目录：用 **`run_id` (harness uuid4.hex[:12])** 做隔离
 - **估时**：1 小时（事件字段扩展 + 外链存储逻辑）
 
 #### T-A3 PhaseEndEvent.context 非 JSON 对象序列化
 
 - [ ] 当前直接 `model_dump_json` 可能把 BaseMessage / Pydantic 实例 / Path 序列化成 `str(obj)` 丢结构
-- **Gemini 建议**：在 emit 前统一调用一个 `to_jsonable_dict()` helper 强制转换。对每个已知类型：
+- **Gemini 最终类型表**（Q4 决议）：
   - `BaseMessage` → `{"_type": "BaseMessage", "role": ..., "content": ...}`
   - `BaseModel` → `obj.model_dump()`
   - `Path` → `str(path)`
   - `datetime` → ISO8601
-  - 未知对象 fallback 到 `repr(obj)` 并在 event 里打 warning flag
+  - **`UUID`** → `str(uuid)`
+  - **`Decimal`** → `str(decimal)`（保留精度）
+  - **`set` / `frozenset`** → `list(sorted)`（JSON 不支持 set）
+  - 未知对象兜底：`{"_repr": repr(obj), "_warning": "unsupported_type"}`（明确标识降级 + 保留文本形式）
 - **改动点**：新建 `callbacks/serialize.py` 放 `to_jsonable_dict()`；所有 emit context 的 event（PhaseStart/PhaseEnd/RunStarted/RunEnded）通过这个 helper
 - **估时**：1 小时
 
@@ -236,7 +243,9 @@
 ### 二-2 B 档 — 完全缺失的事件（**P1，Studio MVP 需要**）
 
 #### T-B1 RunStarted/RunEnded
-- [ ] harness.run() 边界。区分 fresh vs resume；记 run_id / thread_id / initial_context_summary / final_context_summary
+- [ ] harness.run() 边界。区分 fresh vs resume
+- **Gemini 决议**（Q5）：**全量保存** `initial_context` / `final_context`（已通过 T-A3 的 `to_jsonable_dict` 归一化）。理由：context 是任务执行唯一真源，磁盘成本 < 事后无法对齐的风险
+- 字段：`run_id` / `thread_id` / `is_resume: bool` / `initial_context` (全量) / `final_context` (全量, 仅 RunEnded)
 - **估时**：30 分钟
 
 #### T-B2 ModelResolvedEvent
@@ -267,10 +276,13 @@
 
 #### T-B8 Subgraph Boundary enter/exit
 - [ ] 父 harness 跑子 skill 前后。让 Studio 能按 subgraph 折叠 timeline
+- **Gemini 决议**（Q6）：**子 skill 的所有事件合并写到父 tracing.jsonl**（单文件结构让 Studio 渲染统一时间轴，避免多文件句柄带来的 timestamp 对齐难题）
+- 子 skill 的 harness 需要接收父的 `trace_dir` 做 append 模式；enter/exit 事件标记边界
 - **估时**：30 分钟
 
 #### T-B9 ParallelMapGroup start/end
 - [ ] `builtin/parallel_map.py` fan-out 前后。显式的 group 边界标记
+- **Gemini 决议**（Q7）：**全部合并到父 tracing.jsonl，以 group_key 做逻辑分类**（Studio 通过 group_key 可在 UI 上折叠/展开并发组；保证单次会话事件顺序性）
 - **估时**：15 分钟
 
 #### T-B10 ArtifactSavedEvent
@@ -287,13 +299,20 @@
 
 #### T-B13 HeartbeatEvent（Gemini 补充 — 必须）
 - [ ] 长耗时任务（视频生成、大长篇）需要心跳包，防止 Studio 前端因 WebSocket 长时间无消息误判任务挂掉
-- **发送策略**：harness 里加定时器，30-60 秒没有其他事件产生时发一个 heartbeat，字段含 `current_phase` + `elapsed_seconds`
+- **Gemini 设计**（Q1 决议）：
+  - 频率：**30 秒**（平衡 UI 存活反馈与日志冗余）
+  - 触发：**asyncio 后台任务**在 harness.run() 启动时拉起；不在 middleware（主 loop 被同步工具阻塞时心跳仍然要有）
+  - Payload：`current_phase` + `elapsed_seconds` + **`memory_usage_mb`**（内存膨胀比 phase 停滞更隐蔽致命）
 - **估时**：45 分钟
 
 #### T-B14 InternalErrorEvent（Gemini 补充 — 必须）
 - [ ] 捕获非业务逻辑的 Python 异常（OOM / NetworkTimeout / 未预期的框架层错误）。区分"任务业务失败"和"引擎崩溃"两种语义
-- **发送策略**：harness 最外层 try/except 捕获 `Exception`，在 re-raise 前 emit
-- **估时**：30 分钟
+- **Gemini 设计**（Q2 决议）：**三个入口点各加独立 try/except**
+  - `harness.run()`
+  - `harness.resume()`
+  - `subgraph.run()`（嵌套子图崩溃不能让父图"死得不明不白"）
+  在每个入口的 outermost try/except 里捕获 `Exception`，emit 后 re-raise
+- **估时**：30 分钟（因为三处而非一处）
 
 ### 二-3 C 档 — 可选增强（**P2，Studio 特殊需求再加**）
 
@@ -357,7 +376,9 @@
 
 ### 第一梯队（本轮必做）— 按 Gemini "骨架优先于肉" 调整
 
-1. **I-5** 跟用户确认 recap txt 去留（阻塞性清理，1 分钟）
+**Gemini Q8 commit 粒度决议**：tier 1 拆 **3 个 commits**（1. 核心生命周期 2. 数据 + Proxy 增强 3. 并发 + 子图边界），适中的粒度兼顾 review 效率和 regression 定位。
+
+1. **I-5** recap txt 归档到 `docs/archive/`（已完成 `b18bdcf`）✅
 2. **I-4** 写 pyproject.toml 锁定版本（20 分钟）
 3. **D-7.0** RunContext dataclass（1 小时，**Gemini 建议尽早引入，后续所有 emit 点都复用它**）
 4. **T-B 档骨架**（Gemini 建议先补骨架，后补肉）：

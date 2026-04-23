@@ -185,6 +185,12 @@ warning:
     description: "phase_config.model_override 必须命中 llm_roles.yaml 的 models 段"
     impact: "拼写错误会在运行期触发 ModelResolver 抛 'no model for role' 或静默回退到 tier 默认模型"
 
+  W-python-glue-orchestrator:
+    scope: structure
+    check: python_glue_child_skill_dispatch
+    description: "skill 的 script/ 或 tools/ 里有 Python 胶水码绕过 subgraph / builtin.parallel_map，直接用 run_skill / ThreadPoolExecutor 调子 skill"
+    impact: "失去了框架的声明式组合能力（subgraph）和并发管控能力（builtin.parallel_map）；应该改用 <phase subgraph: ...> 或 tools: [builtin.parallel_map]"
+
   W-node-to-phase-migration:
     scope: graph
     check: prefer_phase_tag

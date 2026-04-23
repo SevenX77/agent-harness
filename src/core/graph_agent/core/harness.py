@@ -16,6 +16,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import sys
 import threading
 import time
 import traceback
@@ -121,6 +122,92 @@ def _redact_dsn(dsn: str) -> str:
     import re
 
     return re.sub(r"(://[^:]+):[^@]+@", r"\1:***@", dsn)
+
+
+class _HeartbeatPulser:
+    """Background thread that emits periodic HeartbeatEvent during a run.
+
+    Tier 1 Commit D (T-B13). Uses a plain daemon thread rather than
+    asyncio because ``GraphAgentHarness.run`` is synchronous — LangGraph
+    ``invoke`` blocks the calling thread through every tool call, and an
+    asyncio-backed timer would starve in that window. The thread only
+    touches an ``Event`` for cancellation + a timestamp, so it never
+    races with the main phase loop.
+    """
+
+    def __init__(
+        self,
+        callbacks: list[Callback],
+        *,
+        interval_seconds: float = 30.0,
+    ) -> None:
+        self._callbacks = callbacks
+        self._interval = interval_seconds
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._started_monotonic = 0.0
+        # Mutable handle so external code can update current_phase on
+        # the pulser without having to pass the harness instance in.
+        self.current_phase: str | None = None
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._started_monotonic = time.monotonic()
+        self._stop.clear()
+        self._thread = threading.Thread(
+            target=self._run, name="graph_agent.heartbeat", daemon=True
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=self._interval + 1.0)
+            self._thread = None
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval):
+            try:
+                from ..callbacks.events import HeartbeatEvent
+
+                event = HeartbeatEvent(
+                    current_phase=self.current_phase,
+                    elapsed_seconds=round(
+                        time.monotonic() - self._started_monotonic, 3
+                    ),
+                    memory_usage_mb=_safe_memory_usage_mb(),
+                )
+                _safe_emit_event(self._callbacks, event)
+            except Exception:  # noqa: BLE001
+                logger.exception("[Heartbeat] tick failed; continuing")
+
+
+def _safe_memory_usage_mb() -> float | None:
+    """Best-effort resident-set-size in MiB; None when the read fails.
+
+    Tries ``resource.getrusage`` (stdlib, Unix) first because it's the
+    lightest read. Falls back to ``psutil`` when the platform makes
+    rusage unreliable (Windows, containers with cgroup quirks). Returns
+    None silently rather than raising so a bad reading never takes down
+    the heartbeat.
+    """
+    try:
+        import resource
+
+        usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # On Linux ru_maxrss is in kilobytes; on macOS it's bytes.
+        if sys.platform == "darwin":
+            return round(usage / (1024 * 1024), 2)
+        return round(usage / 1024, 2)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import psutil
+
+        return round(psutil.Process().memory_info().rss / (1024 * 1024), 2)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _safe_emit_event(callbacks: list[Callback], event: Any) -> None:
@@ -281,6 +368,8 @@ class GraphAgentHarness:
         self._resolver = get_model_resolver()
         self._checkpointer = self._resolve_checkpointer(checkpointer)
         self._runtime_local = threading.local()
+        # Tier 1 Commit D — heartbeat pulser handle; set during run()
+        self._active_heartbeat: _HeartbeatPulser | None = None
         self._graph = self._build_graph()
 
     @staticmethod
@@ -405,6 +494,11 @@ class GraphAgentHarness:
             ),
         )
 
+        # Tier 1 Commit D — T-B13 HeartbeatEvent daemon thread
+        heartbeat = _HeartbeatPulser(active_callbacks)
+        heartbeat.start()
+        self._active_heartbeat = heartbeat  # let subgraph_node update current_phase
+
         try:
             result = self._graph.invoke(initial_state, config=config)
 
@@ -468,6 +562,13 @@ class GraphAgentHarness:
             )
             raise
         finally:
+            # Always stop the heartbeat — don't leak daemon threads even
+            # after a crash; _HeartbeatPulser.stop is idempotent.
+            try:
+                heartbeat.stop()
+            except Exception:  # noqa: BLE001
+                logger.warning("[Harness] heartbeat stop failed", exc_info=True)
+            self._active_heartbeat = None
             if previous_options is None:
                 if hasattr(self._runtime_local, "options"):
                     delattr(self._runtime_local, "options")
@@ -713,6 +814,11 @@ class GraphAgentHarness:
 
             # Step 2: Determine if new phase or retry
             is_retry = state["current_phase"] == phase.name
+
+            # Tier 1 Commit D — update heartbeat's current_phase so
+            # subsequent HeartbeatEvents carry the correct phase name.
+            if harness._active_heartbeat is not None:
+                harness._active_heartbeat.current_phase = phase.name
 
             # Callbacks
             for cb in active_callbacks:

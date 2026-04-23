@@ -312,6 +312,24 @@ class ParallelMapGroupEndedEvent(_EventBase):
     wall_time_seconds: float
 
 
+class HeartbeatEvent(_EventBase):
+    """Periodic pulse during a long-running phase.
+
+    Tier 1 Commit D (T-B13). Gemini-approved purpose: keep Studio's
+    frontend WebSocket alive + surface memory-pressure symptoms on
+    tasks where 30+ seconds between "real" events is common (video
+    generation, multi-chapter long-form analysis, DeepSeek high-
+    reasoning turns). 30-second cadence, sourced from a threading-
+    based timer inside harness.run so it keeps ticking even while the
+    main loop is blocked in a synchronous tool call.
+    """
+
+    event_type: Literal["heartbeat"] = "heartbeat"
+    current_phase: str | None = None  # None when between phases / during startup
+    elapsed_seconds: float
+    memory_usage_mb: float | None = None  # None when psutil / resource reading fails
+
+
 class InternalErrorEvent(_EventBase):
     """Non-business Python exception (OOM / NetworkTimeout / unexpected).
 
@@ -358,6 +376,8 @@ CallbackEvent = Annotated[
         SubgraphExitEvent,
         ParallelMapGroupStartedEvent,
         ParallelMapGroupEndedEvent,
+        # Tier 1 Commit D
+        HeartbeatEvent,
     ],
     Field(discriminator="event_type"),
 ]
@@ -391,4 +411,5 @@ __all__ = [
     "SubgraphExitEvent",
     "ParallelMapGroupStartedEvent",
     "ParallelMapGroupEndedEvent",
+    "HeartbeatEvent",
 ]

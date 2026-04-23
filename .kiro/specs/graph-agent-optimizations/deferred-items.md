@@ -22,9 +22,26 @@
 | Step 4: 全部（4.1-4.4）| `9733beb` / `1f1832e` |
 | Step 5: 5.1 / 部分 5.2 / 5.3 / 5.5 | `1565cfd` / `dd085b4` / `b687bd4` |
 | Step 6: 6.1 + 6.5 | `df7b1db` |
-| Step 7: 7.7 STUDIO_CHECKPOINTER | `9b6672b` |
+| Step 7: 7.0 / 7.7 | `966dca0` / `9b6672b` |
 | Step 8: 8.2 subgraph 样板 | `46e7f43` |
 | Step 9: 9.2 文档更新 | `6b3258a` |
+| Tier-1 骨架（T-B1/B5/B12/B14）| `0e40c5c` |
+| Tier-1 数据（T-A1/A2/A3/A4 + T-B2/B10）| `e1a4171` |
+| Tier-1 并发/子图（T-B8/B9）| `b2ab2bb` |
+| Tier-1 D-2.8 cleanup_on_finish | `a296f3f` |
+| Tier-1 I-2 snapshot_diff | `3cb48df` |
+| Tier-1 T-B13 Heartbeat（threading）| `4a25d61` |
+| Tier-1 I-3 golden baseline（text-segmentation only）| `76ab95b` |
+| Tier-2 I-1 get_thread_status | `0d5fc19` |
+| Tier-2 T-B11 Interrupted/Resumed | `42c8329` |
+| Tier-2 D-6.2/6.3/6.4 peer_model_groups | `9a6564e` |
+| Tier-2 T-B4 AgentLoopIteration | `837ae72` |
+| Tier-3 D-9.1 多模态单测 | `45597a9` |
+| Tier-3 D-5.4 `<step>` 校验 | `7a5658d` |
+| Tier-3 D-5.6 bad-samples 回归 | `ba07e71` |
+| Tier-3 D-5.2 W-python-glue-orchestrator | `dd04f05` |
+| I-4 pyproject.toml 版本锁 | `ba50b18` |
+| I-5 recap 归档 | `b18bdcf` |
 
 ---
 
@@ -432,3 +449,41 @@
 - 第五梯队: 视 host 项目进度
 
 **一到三梯队全部做完约 2.5 天**，此时 graph_agent 的 Studio MVP 支撑能力完整就绪；Step 7 harness 拆分独立推。
+
+---
+
+## 六、Gemini 最终审阅结论（2026-04-23）
+
+**判定：总分 8.5/10，Studio MVP 对接可启动，无结构性 blocker**。
+
+### 6.1 分项评分
+- **trace 作为事后分析单一真源**：9/10（扣分：golden baseline 只录了 1/3）
+- **declarative composition 替代 Python 胶水码**：8/10（Compiler 规则已全部 landed，规范 + 强制校验双轨）
+- **HITL pause/resume 就绪度**：8.5/10
+
+### 6.2 7 个偏离点判定
+1. HeartbeatEvent threading 而非 asyncio — **接受**（harness.run 是同步）
+2. Golden baseline 只录 1/3 — **需改**（Gemini 怀疑线程池泄漏；实际是 dev 环境 claude/codex/gemini CLI 并存导致宿主线程耗尽，非框架 bug —— 需在干净环境补录）
+3. RunContext frozen=True 仅阻 rebind — **待观察**（业务若不主动 mutation 内部 dict，风险可控）
+4. Compaction sidecar per-run idx — **接受**
+5. ValidationFailEvent str payload 强转 — **接受**（务实兼容）
+6. AgentLoopIterationEvent 挂 before_model — **接受**（定位精确，侵入最小）
+7. Harness 拆分延后独立分支 — **接受**（没 baseline 覆盖就拆是灾难）
+
+### 6.3 Studio 对接四条军规（前端实施时遵守）
+1. **容错解析**：`tracing.jsonl` 中遇到未知 `event_type` 不得崩整条 timeline
+2. **心跳超时告警**：收不到 HeartbeatEvent 超 60 秒 → 前端告警 "worker 可能僵死"
+3. **大对象懒加载**：RunStartedEvent.initial_context / Compaction 外链 → 不要列表时全渲染
+4. **HITL 状态边界**：thread status=`CRASHED` → 不暴露 Resume 按钮
+
+### 6.4 Gemini 指出的新 gap（Q4 遗漏）
+**Artifact retention 与 ArtifactSavedEvent 的 staleness 问题**：
+- StorageManager 依据 `history_retention` 清理老目录；但 tracing.jsonl 里已发出的 ArtifactSavedEvent 仍持 path
+- 历史 run 被清理后，Studio 拿 path 请求会 404
+- **责任分配**：Studio 后端返回 trace 时做 `os.path.exists` 校验，不存在的 artifact 前端标注"已归档/清理"不可点
+- **引擎侧是否需要改**：暂时不需要；path 的"历史指针"语义是正确的，retention 清理是有意为之；但需要文档里明写这个契约
+
+### 6.5 剩余阻塞项（对 Studio MVP 影响）
+- **无结构性 blocker**（Gemini 原话）
+- golden baseline 补齐（I-3 剩两个 skill）可与 Studio 对接并行推进
+- Harness 拆分（D-7.1-7.4）独立分支，不阻塞对接

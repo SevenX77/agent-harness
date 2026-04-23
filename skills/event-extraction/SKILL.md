@@ -33,18 +33,18 @@ io:
       path: "chapter_{context.chapter_number}_events.json"
 ---
 
-<node id="setup">
-<ref path="nodes/01_setup.md" />
-</node>
+<phase id="setup">
+<ref path="phases/01_setup.md" />
+</phase>
 
-<node id="aggregate" depends_on="setup">
-<ref path="nodes/02_aggregate.md" />
-</node>
+<phase id="aggregate" depends_on="setup">
+<ref path="phases/02_aggregate.md" />
+</phase>
 
-<node id="review" depends_on="aggregate">
-<ref path="nodes/03_review.md" />
-</node>
+<phase id="review" depends_on="aggregate">
+<ref path="phases/03_review.md" />
+</phase>
 
-<node id="settings" depends_on="review">
-<ref path="nodes/04_settings.md" />
-</node>
+<phase id="settings" depends_on="review">
+<ref path="phases/04_settings.md" />
+</phase>

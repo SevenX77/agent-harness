@@ -31,18 +31,18 @@ io:
       target: artifact
 ---
 
-<node id="segmentation">
-<ref path="nodes/01_segmentation.md" />
-</node>
+<phase id="segmentation">
+<ref path="phases/01_segmentation.md" />
+</phase>
 
-<node id="event_extraction" depends_on="segmentation">
-<ref path="nodes/02_event_extraction.md" />
-</node>
+<phase id="event_extraction" depends_on="segmentation">
+<ref path="phases/02_event_extraction.md" />
+</phase>
 
-<node id="batch_loop" depends_on="event_extraction">
-<ref path="nodes/03_batch_loop.md" />
-</node>
+<phase id="batch_loop" depends_on="event_extraction">
+<ref path="phases/03_batch_loop.md" />
+</phase>
 
-<node id="global_synthesis" depends_on="batch_loop">
-<ref path="nodes/04_global_synthesis.md" />
-</node>
+<phase id="global_synthesis" depends_on="batch_loop">
+<ref path="phases/04_global_synthesis.md" />
+</phase>

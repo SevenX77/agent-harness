@@ -27,14 +27,14 @@ io:
       path: "output/text-segmentation/chapter_{context.chapter_number}_segments.json"
 ---
 
-<node id="setup">
-<ref path="nodes/01_setup.md" />
-</node>
+<phase id="setup">
+<ref path="phases/01_setup.md" />
+</phase>
 
-<node id="segment" depends_on="setup">
-<ref path="nodes/02_segment.md" />
-</node>
+<phase id="segment" depends_on="setup">
+<ref path="phases/02_segment.md" />
+</phase>
 
-<node id="review" depends_on="segment">
-<ref path="nodes/03_review.md" />
-</node>
+<phase id="review" depends_on="segment">
+<ref path="phases/03_review.md" />
+</phase>

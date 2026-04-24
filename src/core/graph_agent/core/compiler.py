@@ -944,7 +944,11 @@ def _get_known_tiers() -> set[str]:
         from ..config.llm_config import get_role_config
 
         return set(get_role_config().roles.keys())
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "[Compiler] llm_roles.yaml load failed (%s); tier-unknown check will be skipped",
+            exc,
+        )
         return set()
 
 
@@ -962,7 +966,12 @@ def _known_model_names() -> set[str]:
         # RoleConfig exposes models via `.models` (dict of code → ModelConfig).
         models = getattr(cfg, "models", None) or {}
         return set(models.keys())
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "[Compiler] llm_roles.yaml models read failed (%s); "
+            "W-invalid-model-override will be skipped for this compile",
+            exc,
+        )
         return set()
 
 

@@ -201,13 +201,20 @@ def _safe_memory_usage_mb() -> float | None:
         if sys.platform == "darwin":
             return round(usage / (1024 * 1024), 2)
         return round(usage / 1024, 2)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "[Harness] resource.getrusage failed: %s; falling back to psutil",
+            exc,
+        )
     try:
         import psutil
 
         return round(psutil.Process().memory_info().rss / (1024 * 1024), 2)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "[Harness] psutil memory read failed: %s; heartbeat will emit memory=None",
+            exc,
+        )
         return None
 
 

@@ -182,6 +182,7 @@ class LLMPhase(_BasePhase):
 
     mode: Literal["llm"]
     prompt: str | None = None
+    user_prompt_template: str | None = None
     agent_tools: list[str] = Field(default_factory=list)
     sub_skills: list[str] = Field(default_factory=list)
     subagent_enabled: bool = False
@@ -277,10 +278,13 @@ class AgentSkillDef(_BaseSkill):
 
     type: Literal["agent"]
     agent_profile: AgentProfile
+    tier: Literal["premium", "balanced", "fast"] | None = None
+    model_override: str | None = None
     agent_tools: list[str] = Field(default_factory=list)
     sub_skills: list[str] = Field(default_factory=list)
     subagent_enabled: bool = False
     adopted_persona: str | None = None
+    user_prompt_template: str | None = None
     context_mapping: dict[str, str] = Field(default_factory=dict)
 
 

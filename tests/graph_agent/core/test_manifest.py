@@ -231,6 +231,77 @@ class TestPersonaPurity:
 # =============================================================================
 
 
+class TestAgentSkillExtensions:
+    """Fields added for 1.x → 2.0 migration of production agent skills."""
+
+    def test_agent_tier_accepted(self):
+        data = _base_agent_dict()
+        data["tier"] = "balanced"
+        m = _SKILL_ADAPTER.validate_python(data)
+        assert isinstance(m, AgentSkillDef)
+        assert m.tier == "balanced"
+
+    def test_agent_tier_defaults_to_none(self):
+        m = _SKILL_ADAPTER.validate_python(_base_agent_dict())
+        assert isinstance(m, AgentSkillDef)
+        assert m.tier is None
+
+    def test_agent_user_prompt_template_accepted(self):
+        data = _base_agent_dict()
+        data["user_prompt_template"] = "Review the diff: {diff}"
+        m = _SKILL_ADAPTER.validate_python(data)
+        assert isinstance(m, AgentSkillDef)
+        assert m.user_prompt_template == "Review the diff: {diff}"
+
+    def test_agent_model_override_accepted(self):
+        data = _base_agent_dict()
+        data["model_override"] = "CL47T"
+        m = _SKILL_ADAPTER.validate_python(data)
+        assert isinstance(m, AgentSkillDef)
+        assert m.model_override == "CL47T"
+
+
+class TestLLMPhaseUserPromptTemplate:
+    """``user_prompt_template`` is per-turn template — separate from ``prompt``."""
+
+    def test_llm_phase_user_prompt_template_accepted(self):
+        m = _SKILL_ADAPTER.validate_python({
+            **_base_graph_dict(),
+            "phases": [{
+                "mode": "llm",
+                "name": "segment",
+                "prompt": "You are a segmenter.",
+                "user_prompt_template": "Segment: {chapter_content}",
+            }],
+        })
+        assert m.phases[0].user_prompt_template == "Segment: {chapter_content}"
+
+    def test_logic_phase_cannot_have_user_prompt_template(self):
+        data = _base_graph_dict()
+        data["phases"] = [{
+            "mode": "logic",
+            "name": "bad",
+            "execute_steps": ["x.y"],
+            "user_prompt_template": "Nope: {x}",
+        }]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "user_prompt_template" in str(exc.value)
+
+    def test_delegate_phase_cannot_have_user_prompt_template(self):
+        data = _base_graph_dict()
+        data["phases"] = [{
+            "mode": "delegate",
+            "name": "bad",
+            "subgraph": "./x",
+            "context_bridge": {"inputs": {}, "outputs": {}},
+            "user_prompt_template": "Nope: {x}",
+        }]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "user_prompt_template" in str(exc.value)
+
+
 class TestPhaseModeDiscriminator:
     """Each ``mode:`` value picks exactly one phase class."""
 

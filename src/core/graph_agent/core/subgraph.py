@@ -78,18 +78,10 @@ def build_subgraph_node(
         if child_trace_dir is not None and not isinstance(child_trace_dir, Path):
             child_trace_dir = Path(child_trace_dir)
 
-        # Forward parent callbacks to child harness for complete observability.
-        # NOTE: Direct mutation of child.callbacks is NOT thread-safe.
-        # GraphAgentHarness.run() does not accept a callbacks parameter, so we
-        # must mutate in place.  This is safe only when the same child harness
-        # is not executed concurrently from multiple threads.  The save/restore
-        # pattern below ensures we leave the child in its original state.
-        original_child_callbacks = child.callbacks
-        merged_callbacks = list(active_callbacks)
-        for cb in original_child_callbacks:
-            if cb not in merged_callbacks:
-                merged_callbacks.append(cb)
-        child.callbacks = merged_callbacks
+        # Forward parent callbacks to child harness via the ``extra_callbacks``
+        # parameter (added in P1-1 fix). Avoids the previous pattern of
+        # mutating ``child.callbacks`` in place, which cross-wired sibling
+        # concurrent invocations of the same child harness instance.
 
         # Tier 1 Commit C (T-B8): emit a subgraph boundary marker so
         # Studio can fold the child's events (which flow into the parent
@@ -136,6 +128,7 @@ def build_subgraph_node(
                     if isinstance(run_options.get("runtime_inputs"), dict)
                     else {}
                 ),
+                extra_callbacks=list(active_callbacks),
             )
         except Exception as exc:
             # Tier 1 Commit A — T-B14 InternalErrorEvent at subgraph boundary
@@ -180,8 +173,6 @@ def build_subgraph_node(
                         type(cb).__name__,
                     )
             raise
-        finally:
-            child.callbacks = original_child_callbacks
 
         # Success path — emit SubgraphExit with status="completed"
         for cb in active_callbacks:

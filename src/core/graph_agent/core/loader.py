@@ -703,3 +703,143 @@ def _build_phase_from_tags(
     )
 
     return phase, import_errors
+
+
+# ---------------------------------------------------------------------------
+# Schema 2.0 manifest-driven phase builders (PR #6 Commit 1 — DEAD CODE).
+#
+# Introduced as dead code so the shape can be reviewed in isolation. PR #6
+# Commit 2 wires them into ``load_workflow_from_md`` and deletes the 1.x
+# ``_parse_simple_mode`` / ``_parse_graph_mode`` / ``_build_phase_from_tags``
+# trio along with the XML body parsing helpers in ``parser.py``.
+# See ``docs/superpowers/plans/2026-04-24-pr6-migration-blueprint.md``.
+# ---------------------------------------------------------------------------
+
+
+def _compose_agent_system_prompt(manifest: "AgentSkillDef") -> str:
+    """Assemble an agent skill's System Prompt from its agent_profile.
+
+    Joins ``role`` + ``goal`` + ``steps`` + ``constraints`` into the prose
+    form the DeerFlow agent loop expects. Persona injection is layered
+    on top by the caller when ``adopted_persona`` is set.
+    """
+    profile = manifest.agent_profile
+    parts: list[str] = [f"你是{profile.role}。", f"你的目标:{profile.goal}"]
+    if profile.steps:
+        parts.append("## 工作流")
+        parts.extend(f"{i}. {step}" for i, step in enumerate(profile.steps, start=1))
+    if profile.constraints:
+        parts.append("## 约束")
+        parts.extend(f"- {c}" for c in profile.constraints)
+    return "\n\n".join(parts)
+
+
+def _phase_from_agent_skill(
+    manifest: "AgentSkillDef",
+    base_dir: Path,
+    callbacks: list[Any] | None,
+    loading_stack: set[str],
+) -> Phase:
+    """Build the single runtime Phase for a ``type: agent`` manifest.
+
+    Dead code until PR #6 Commit 2. The signature mirrors what
+    ``load_workflow_from_md`` will call once switched over.
+    """
+    del callbacks, loading_stack  # unused in agent path; reserved for persona resolution
+    system_prompt = _compose_agent_system_prompt(manifest)
+    tools = [_resolve_tool_reference(ref, base_dir) for ref in manifest.agent_tools]
+    return Phase(
+        name=manifest.name,
+        system_prompt=system_prompt,
+        user_prompt_template=manifest.user_prompt_template,
+        tools=tools,
+        tier=manifest.tier or "balanced",
+        model_override=manifest.model_override,
+        subagent_enabled=manifest.subagent_enabled,
+        requires_llm=True,
+    )
+
+
+def _phase_from_graph_phase(
+    phase_def: Any,  # PhaseDef (Annotated Union); runtime-typed to avoid pyright noise
+    base_dir: Path,
+    callbacks: list[Any] | None,
+    loading_stack: set[str],
+) -> Phase:
+    """Dispatch on ``mode`` to build one runtime Phase from a GraphSkillDef.phases entry.
+
+    Dead code until PR #6 Commit 2.
+    """
+    # Imported inside the function to keep the dead-code block self-contained
+    # until the Commit-2 switch; avoids polluting module-level imports.
+    from .manifest import DelegatePhase as _DelegatePhase
+    from .manifest import LLMPhase as _LLMPhase
+    from .manifest import LogicPhase as _LogicPhase
+
+    if isinstance(phase_def, _LLMPhase):
+        tools = [_resolve_tool_reference(ref, base_dir) for ref in phase_def.agent_tools]
+        return Phase(
+            name=phase_def.name,
+            system_prompt=phase_def.prompt,
+            user_prompt_template=phase_def.user_prompt_template,
+            tools=tools,
+            max_iterations=phase_def.max_iterations if phase_def.max_iterations is not None else 20,
+            tier=phase_def.tier or "balanced",
+            model_override=phase_def.model_override,
+            validator=(
+                _resolve_tool_reference(phase_def.validator, base_dir)
+                if phase_def.validator
+                else None
+            ),
+            retry_target=phase_def.retry_target,
+            max_retries=phase_def.max_retries if phase_def.max_retries is not None else 3,
+            max_nudges=phase_def.max_nudges if phase_def.max_nudges is not None else 1,
+            subagent_enabled=phase_def.subagent_enabled,
+            requires_llm=True,
+        )
+
+    if isinstance(phase_def, _LogicPhase):
+        tools = [_resolve_tool_reference(ref, base_dir) for ref in phase_def.execute_steps]
+        return Phase(
+            name=phase_def.name,
+            system_prompt=None,
+            tools=tools,
+            tier=phase_def.tier or "balanced",
+            model_override=phase_def.model_override,
+            validator=(
+                _resolve_tool_reference(phase_def.validator, base_dir)
+                if phase_def.validator
+                else None
+            ),
+            requires_llm=False,
+        )
+
+    if isinstance(phase_def, _DelegatePhase):
+        child_path = (base_dir / phase_def.subgraph).resolve()
+        if not child_path.exists():
+            raise SkillLoadError(
+                f"Delegate phase '{phase_def.name}' subgraph not found: {child_path}"
+            )
+        child_harness = load_workflow_from_md(
+            md_path=child_path,
+            callbacks=callbacks,
+            _loading_stack=loading_stack,
+        )
+        return Phase(
+            name=phase_def.name,
+            system_prompt=None,
+            tools=[],
+            tier=phase_def.tier or "balanced",
+            model_override=phase_def.model_override,
+            subgraph=child_harness,
+            context_bridge=ContextBridge(
+                inputs=dict(phase_def.context_bridge.inputs),
+                outputs=dict(phase_def.context_bridge.outputs),
+            ),
+            requires_llm=False,
+        )
+
+    raise SkillLoadError(
+        f"Unknown phase type for '{getattr(phase_def, 'name', '?')}': "
+        f"{type(phase_def).__name__}"
+    )

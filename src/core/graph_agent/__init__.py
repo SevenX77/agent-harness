@@ -36,6 +36,12 @@ from .models.resolver import ModelResolver, get_model_resolver  # noqa: E402
 from .core.runner import run_skill, clear_cache  # noqa: E402
 from .io.skill_analyzer import get_skill_type  # noqa: E402
 from .core.state import WorkflowState  # noqa: E402
+from .core.manifest import (  # noqa: E402
+    GraphSkillManifest,
+    PhaseConfig,
+    SimpleSkillManifest,
+    SkillManifest,
+)
 
 __all__ = [
     "run_skill",
@@ -61,4 +67,8 @@ __all__ = [
     "TemplateRenderError",
     "AllProvidersFailedError",
     "MaxRetriesExceededError",
+    "SkillManifest",
+    "GraphSkillManifest",
+    "SimpleSkillManifest",
+    "PhaseConfig",
 ]

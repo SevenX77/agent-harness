@@ -632,5 +632,43 @@
 | P2 | Harness 拆分 | 2-3 天（独立分支）| — |
 | P2 | Schema evolution 文档 | 30m | Studio 升级 |
 | P2 | events.py 注释 | 5m | — |
+| P2 | ModelResolver 熔断器并发竞态（见 §8）| 0.5-1 天 | 不阻塞 E-task（Golden Baseline 录制） |
 
 **P0 + P1 合计约 5-6 小时**；P2 harness 拆分是独立专项。
+
+---
+
+## 8. 2026-04-24 D-session 后辩论发现 — ModelResolver 熔断器并发竞态（P2 架构债）
+
+### 8.1 问题描述
+
+`src/core/graph_agent/models/resolver.py` 里的熔断器（Circuit Breaker）本质是**跨线程/跨协程的状态共享机器**。当前实现（2026-04-24 D-session 完成时的状态）没有显式加锁保护内部计数器和状态转换。
+
+具体风险场景：
+- **`parallel_map` 并发 50 子任务**同时触发某 provider 的 API Error（典型：OneChats 限流返回 429 或超时）
+- 多个并发的 `increment_failure` / `trip_breaker` 调用竞争同一块状态
+- 后果：计数错乱（明明 3 次失败被记成 1 次）或**雪崩式降级**（所有并发请求在同一时刻判断 "需要切换"，导致 fallback provider 瞬间被同样多的并发冲击）
+
+### 8.2 为什么定为 P2 不阻塞 E-task
+
+- **E-task（Golden Baseline 录制）是单线程顺序跑一遍 skill**，不走 `parallel_map` 50 并发，碰不到这个 race
+- **生产 parallel_map 场景早期并发度 ≤ 10**（用户确认当前 skill 都在这个量级），计数错乱的实际概率小但**存在**
+- 修复需要独立投入 **半天到 1 天**：审 resolver 全量读写点 + 引入 `threading.Lock`（或 `asyncio.Lock` 如果走异步）+ 补并发测试（pytest + `concurrent.futures.ThreadPoolExecutor`）
+
+### 8.3 需要的调查步骤（不在 D-session scope）
+
+1. **Grep 所有读写点**：`grep -rn "failure_count\|breaker_state\|tripped_at" src/core/graph_agent/models/resolver.py`
+2. **识别读-改-写序列**：任一 "检查状态 → 变更状态" 组合都是 race 点
+3. **选锁策略**：
+   - 如果 resolver 只在同步路径被调用 → `threading.Lock` 足够
+   - 如果有 async 调用路径 → 需要 `asyncio.Lock` 或 `anyio.Lock`
+   - 混合场景 → `threading.RLock` + 小心避免 deadlock
+4. **并发测试**：`concurrent.futures.ThreadPoolExecutor(max_workers=50)` 跑 N 次失败触发，assert 最终 `failure_count == N`
+
+### 8.4 Gemini 三轮辩论收敛结论（2026-04-24）
+
+**置信度**：A 级（问题存在），方案 B 级（加锁方向对，但具体锁粒度需要 0.5-1 天实地核查再定）
+
+**不做的事**：
+- 不在 D-session PR 里塞这个修复 —— scope 已经满了
+- 不做"加个警告日志了事"的假装修复 —— race 是真的 race，日志没用

@@ -244,7 +244,7 @@ class TestNewEventShapes:
     def test_llm_fallback_captures_provider_transition(self) -> None:
         ev = LLMFallbackEvent(
             phase_name="analyse",
-            from_provider="deepseek-coder",
+            from_provider="deepseek-reasoner",
             to_provider="deepseek-chat",
             reason="HTTP 429 rate limit",
         )

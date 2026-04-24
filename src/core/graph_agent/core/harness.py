@@ -828,8 +828,19 @@ class GraphAgentHarness:
         thread_id: str | None = None,
         trace_dir: Path | None = None,
         artifact_saver: Callable[..., Any] | None = None,
+        runtime_inputs_map: dict[str, Any] | None = None,
     ) -> WorkflowState:
-        """Resume execution after a request_human_input interrupt."""
+        """Resume execution after a request_human_input interrupt.
+
+        ``runtime_inputs_map`` lets the caller restore the per-run inputs
+        that the original ``run()`` received. The field is not persisted
+        in the LangGraph checkpointer (arbitrary runtime_inputs may carry
+        non-picklable values), so the caller that resumes a mid-run
+        interrupt must re-supply it if downstream components (e.g.
+        ``StorageManager`` resolving ``pipeline_prefix``) read it via
+        ``_get_active_run_options``. Passing ``None`` (the default)
+        preserves the pre-D-7.2 behaviour of an empty dict.
+        """
         from langchain_core.messages import ToolMessage
 
         state = _clone_state(state)
@@ -877,7 +888,7 @@ class GraphAgentHarness:
             thread_id=str(effective_thread_id or ""),
             run_id=inherited_run_id,
             trace_dir=trace_dir if isinstance(trace_dir, Path) else None,
-            runtime_inputs={},
+            runtime_inputs=dict(runtime_inputs_map) if runtime_inputs_map else {},
             storage_manager=None,
             artifact_saver=artifact_saver,
             callbacks=active_callbacks,

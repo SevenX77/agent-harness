@@ -12,9 +12,9 @@ wm_current``) would raise ``NameError``.
 
 The fix reads both values from ``harness._active_run_context`` at the
 call site. This test locks that in by statically parsing ``harness.py``
-with ``ast`` and asserting the kwargs passed to ``_save_compaction_sidecar``
-are attribute accesses (``active_ctx.run_id`` / ``.storage_manager``),
-NOT bare ``Name`` nodes.
+(and, post-D-7.2, ``phase_executor.py``) with ``ast`` and asserting the
+kwargs passed to ``_save_compaction_sidecar`` are attribute accesses
+(``active_ctx.run_id`` / ``.storage_manager``), NOT bare ``Name`` nodes.
 
 Why AST and not bytecode? ``inspect.getclosurevars`` can't tell a
 ``LOAD_GLOBAL run_id`` apart from a ``LOAD_ATTR run_id`` — both put
@@ -24,6 +24,12 @@ Why not a real runtime invocation? Driving ``execute`` to its compaction
 branch requires a mocked LLM, a real Phase resolver, and several steps
 of working-memory mutation — that's E2E integration territory (task
 I-3 golden baseline), not unit-test scope.
+
+Post-D-7.2 update: the call site moved out of ``harness.py`` and into
+``phase_executor.py``'s ``execute_llm_phase`` as part of the harness
+split. The test now scans both files and asserts the invariant holds
+at *every* found call site — if a future refactor adds another
+compaction call anywhere, it will be checked too.
 """
 from __future__ import annotations
 
@@ -31,39 +37,38 @@ import ast
 from pathlib import Path
 
 
-_HARNESS_PATH = (
+_CORE_DIR = (
     Path(__file__).resolve().parents[3]
     / "src"
     / "core"
     / "graph_agent"
     / "core"
-    / "harness.py"
 )
+_SCAN_PATHS = [_CORE_DIR / "harness.py", _CORE_DIR / "phase_executor.py"]
 
 
-def _find_save_compaction_sidecar_call() -> ast.Call:
-    """Locate the compaction-sidecar call inside ``_build_phase_node``.
+def _find_save_compaction_sidecar_calls() -> list[tuple[Path, ast.Call]]:
+    """Locate every ``_save_compaction_sidecar`` call across scanned modules.
 
-    Raises AssertionError if we can't find it — the call must exist and
-    must be exactly one (otherwise the test's invariant is ambiguous).
+    Returns (file_path, call_node) pairs. Asserts at least one call is
+    found so a silent rename / removal breaks loudly.
     """
-    source = _HARNESS_PATH.read_text(encoding="utf-8")
-    tree = ast.parse(source)
+    calls: list[tuple[Path, ast.Call]] = []
+    for path in _SCAN_PATHS:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if isinstance(func, ast.Attribute) and func.attr == "_save_compaction_sidecar":
+                calls.append((path, node))
 
-    matches: list[ast.Call] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        if isinstance(func, ast.Attribute) and func.attr == "_save_compaction_sidecar":
-            matches.append(node)
-
-    assert len(matches) == 1, (
-        f"expected exactly one call to _save_compaction_sidecar in harness.py, "
-        f"found {len(matches)}. If compaction site count changed, update this "
-        f"test to check each site."
+    assert calls, (
+        "expected at least one _save_compaction_sidecar call across "
+        f"{[p.name for p in _SCAN_PATHS]}, found 0. If the call site "
+        "moved to a new module, add it to _SCAN_PATHS."
     )
-    return matches[0]
+    return calls
 
 
 def _kwarg(call: ast.Call, name: str) -> ast.expr:
@@ -74,35 +79,37 @@ def _kwarg(call: ast.Call, name: str) -> ast.expr:
 
 
 class TestCompactionCallSiteScope:
-    """Static guards against the L1295 NameError regression."""
+    """Static guards against the L1295 NameError regression — at every call site."""
 
     def test_run_id_kwarg_is_not_a_bare_name(self) -> None:
         """``run_id=run_id`` (bare Name) is the exact bug. Post-fix the
         RHS is an expression reading ``active_ctx.run_id``."""
-        call = _find_save_compaction_sidecar_call()
-        rhs = _kwarg(call, "run_id")
-        assert not isinstance(rhs, ast.Name), (
-            "regression: run_id=<bare Name> at the compaction call site. "
-            "This is the L1295 NameError the Gemini audit caught on 2026-04-24. "
-            "Read it from harness._active_run_context.run_id instead."
-        )
+        for path, call in _find_save_compaction_sidecar_calls():
+            rhs = _kwarg(call, "run_id")
+            assert not isinstance(rhs, ast.Name), (
+                f"regression in {path.name}: run_id=<bare Name> at the "
+                "compaction call site. This is the L1295 NameError the "
+                "Gemini audit caught on 2026-04-24. Read it from "
+                "harness._active_run_context.run_id instead."
+            )
 
     def test_storage_manager_kwarg_is_not_a_bare_name(self) -> None:
         """Same class of bug as ``run_id`` — ``storage_manager`` wasn't
         in the closure's scope either."""
-        call = _find_save_compaction_sidecar_call()
-        rhs = _kwarg(call, "storage_manager")
-        assert not isinstance(rhs, ast.Name), (
-            "regression: storage_manager=<bare Name> at the compaction call "
-            "site. Read from harness._active_run_context.storage_manager."
-        )
+        for path, call in _find_save_compaction_sidecar_calls():
+            rhs = _kwarg(call, "storage_manager")
+            assert not isinstance(rhs, ast.Name), (
+                f"regression in {path.name}: storage_manager=<bare Name> "
+                "at the compaction call site. Read from "
+                "harness._active_run_context.storage_manager."
+            )
 
     def test_run_id_expression_mentions_active_run_context(self) -> None:
         """Belt-and-braces: the expression must textually reference
         ``_active_run_context`` so the fix direction can't drift."""
-        call = _find_save_compaction_sidecar_call()
-        rhs_src = ast.unparse(_kwarg(call, "run_id"))
-        assert "_active_run_context" in rhs_src or "active_ctx" in rhs_src, (
-            f"run_id kwarg at compaction site does not read from the active "
-            f"RunContext. Got: {rhs_src!r}"
-        )
+        for path, call in _find_save_compaction_sidecar_calls():
+            rhs_src = ast.unparse(_kwarg(call, "run_id"))
+            assert "_active_run_context" in rhs_src or "active_ctx" in rhs_src, (
+                f"run_id kwarg at compaction site in {path.name} does not "
+                f"read from the active RunContext. Got: {rhs_src!r}"
+            )

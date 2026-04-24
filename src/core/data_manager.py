@@ -1,10 +1,29 @@
 from __future__ import annotations
 
+import logging
 import re
+import warnings
 from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
+
+# DEPRECATED: DataManager is kept only to avoid breaking existing host
+# projects (story_forge) during the migration window. New code should use
+# graph_agent.io.storage.StorageManager instead — it does not depend on
+# story_forge's config/pipeline.yaml and has no user_id/project_id in its
+# signature. This module will be removed once all host projects have
+# migrated (see docs/graph_agent_docs/FRAMEWORK_UNDERSTANDING.md).
+logging.getLogger(__name__).warning(
+    "src.core.data_manager is deprecated; new code should use "
+    "graph_agent.io.storage.StorageManager."
+)
+warnings.warn(
+    "src.core.data_manager is deprecated; use graph_agent.io.storage."
+    "StorageManager. See docs/graph_agent_docs/FRAMEWORK_UNDERSTANDING.md.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 _TS_DIR_RE = re.compile(r"^\d{8}_\d{6}")
 

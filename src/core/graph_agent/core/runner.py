@@ -115,6 +115,7 @@ def run_skill(
     callbacks: list | None = None,
     artifact_saver: Any | None = None,
     initial_context: dict[str, Any] | None = None,
+    cleanup_checkpoints_on_finish: bool = True,
     **inputs: Any,
 ) -> dict[str, Any]:
     """Execute a SKILL.md with the given inputs. Pure document-driven.
@@ -125,6 +126,13 @@ def run_skill(
         thread_id: Optional thread_id for checkpoint resume.
         callbacks: Optional list of Callback instances. Defaults to [LoggingCallback, TracingCallback].
         artifact_saver: Optional callback for ``artifact_manager`` outputs.
+        cleanup_checkpoints_on_finish: When True (default) call
+            ``checkpointer.delete_thread(thread_id)`` after a successful
+            run so accumulated checkpoints do not pile up. Set to False
+            when you still want to resume from a specific earlier
+            checkpoint after the pipeline has technically finished
+            (e.g. human review loops, golden regression data gathering).
+            Task 2.8 (simplified) — see deferred-items.md D-2.8.
         **inputs: Runtime inputs matching SKILL.md io.inputs declarations.
             Each kwarg name must match an input's ``name`` field.
 
@@ -222,6 +230,40 @@ def run_skill(
     # Success — remove .run_id
     if run_id_file is not None and run_id_file.exists():
         run_id_file.unlink()
+
+    # Task 2.8 (simplified) — post-completion checkpoint cleanup.
+    # Gemini's "纸杯论": once finish_task has fired, no exception was
+    # raised, and no HITL interrupt is pending, checkpoints have no more
+    # resume value — the artifact layer already persists the valuable
+    # state. Default True; callers that want to keep checkpoints for
+    # human-review / golden-regression purposes pass False.
+    if cleanup_checkpoints_on_finish and effective_thread_id:
+        try:
+            checkpointer = getattr(harness, "_checkpointer", None)
+            if checkpointer is not None and hasattr(checkpointer, "delete_thread"):
+                checkpointer.delete_thread(effective_thread_id)
+                logger.info(
+                    "[Runner] Checkpoints cleaned up for thread_id=%s",
+                    effective_thread_id,
+                )
+                # Tier 1 T-B7: emit a visible marker so the trace records
+                # that resume is no longer possible from this thread.
+                try:
+                    from ..callbacks.events import _EventBase  # noqa: F401
+
+                    # We purposefully don't depend on a dedicated event
+                    # class here — Gemini flagged ThreadCleanedUpEvent as
+                    # optional (降级到 P2). A log INFO is enough for ops;
+                    # Studio's "thread archived" UI state can derive from
+                    # RunEnded(status=completed) + absence of checkpoint.
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[Runner] checkpoint cleanup failed for thread_id=%s: %s",
+                effective_thread_id,
+                exc,
+            )
 
     ctx = final_state["context"]
     metrics = final_state.get("metrics", {})

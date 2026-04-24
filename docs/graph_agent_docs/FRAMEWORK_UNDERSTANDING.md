@@ -455,14 +455,70 @@ type: graph
 
 这些是在深度阅读源码过程中发现的真实 bug，独立于任何具体功能扩展，都应该单独修复。
 
-### 10.1 subgraph phase 下的字段静默丢弃（P0 严重）
+### 10.1 subgraph phase 下的字段静默丢弃（已修复 — Task 5.1）
 
-**现状**：当 PM 在 subgraph phase 里误写了 `tools` / `sub_skills` / `<system_prompt>` / `<user_prompt>` 时，loader 会静默忽略这些字段（见 `core/loader.py` L578 / L587 / L639），既不报错也不警告。compiler 的 `skills/compiler/data/rules.yaml` 里也没有相关规则。PM 可能以为这些字段生效了，实际运行时完全不会用到。
+**历史问题**：当 PM 在 subgraph phase 里误写了 `tools` / `sub_skills` / `<system_prompt>` / `<user_prompt>` 时，loader 会静默忽略这些字段（见 `core/loader.py` L578 / L587 / L639）。compiler 里也没有相关规则，PM 可能以为这些字段生效了，实际运行时完全不会用到。
 
-**建议修复**：在 `skills/compiler/data/rules.yaml` 里新增两条 FATAL 级别的规则：
+**修复状态（Task 5.1 之后）**：compiler 现在在 `skills/compiler/data/rules.yaml` 里有三条 FATAL 规则把这种误写拦在编译期：
 
-- `F-subgraph-exclusive-tools`：当 phase 同时有 `subgraph:` 字段和非空 `tools:` 列表时，报 FATAL 错误并提示用户"subgraph 模式下 tools 无效，请把需要的 tools 挪到独立的 code-only phase 里"
-- `F-subgraph-exclusive-prompt`：当 phase 同时有 `subgraph:` 字段和 `<system_prompt>` 或 `<user_prompt>` 标签时，报 FATAL 错误并提示用户"subgraph 模式下 prompt 无效，请删除或改用 LLM 模式 phase"
+- `F-subgraph-exclusive-tools` — subgraph phase 禁止声明 `tools`。
+- `F-subgraph-exclusive-prompt` — subgraph phase 禁止包含 `<system_prompt>` / `<user_prompt>`。
+- `F-subgraph-exclusive-sub-skills` — subgraph（静态组合）与 sub_skills（动态决策）互斥。
+
+---
+
+## 11. 优化后新增的核心组件（graph-agent-optimizations spec 交付）
+
+以下章节覆盖 2026-04 一轮集中优化里落地的新能力，Studio 项目可以直接依赖：
+
+### 11.1 StorageManager（`graph_agent/io/storage.py`）
+
+默认的 artifact 落盘器。构造签名 `StorageManager(workspace_root, skill_id, run_id, *, history_retention=10)`，**没有 user_id**（Studio 侧 UI 层概念）。
+
+关键行为：
+
+- 目录布局：`{workspace_root}/runs/[{pipeline_prefix}/]{skill_id}/{run_id}/` + 可选 `phases/<phase_name>/` 子路径。
+- `get_output_dir(pipeline_prefix=None)` 懒触发 `_cleanup_history()`，按 `history_retention` 保留最新 N 次 run（默认 10）；**`.golden` 后缀目录永不计入且永不删除**。
+- 清理时每个被删除的 run 都落一条 INFO：`run_id=... path=... freed_bytes=...`。
+- IOManager 在 `target: artifact_manager` 且 caller 未注入 `artifact_saver` 时自动回落到 StorageManager（Kitchen-Pass 红线保留：caller 的 saver 永远优先）。
+
+### 11.2 TracingClientProxy（`graph_agent/core/tracing_proxy.py`）
+
+在 resolver 返回的 LangChain chat-model 外面包一层代理。每次 `.invoke()` 在转发给 wrapped client 之前会先给所有已注册 callback 发一个 `PromptCapturedEvent`（包含 `phase_name` / `llm_role` / `resolved_model` / `template_source` / `variables` / `resolved_prompt` / `sub_run_id` / `group_key`）。其他属性透明转发给 wrapped client，不影响 DeerFlow agent loop 的任何行为。harness 在 `resolver.resolve(...)` 之后、`create_agent(...)` 之前自动包装。
+
+### 11.3 builtin `parallel_map`（`graph_agent/tools/builtin/parallel_map.py`）
+
+声明式并发 fan-out 工具。SKILL.md 里写 `tools: [builtin.parallel_map]` 即可加载（loader 里有 `builtin.*` 特判）。调用形如：
+
+```python
+parallel_map(
+    skill_path="path/to/child/SKILL.md",
+    item_list=scenes,
+    item_as="scene",
+    max_concurrent=3,
+)
+```
+
+每个 item 触发一个独立的子 skill run（用 `run_skill` + 独立 harness 实例，绕过 cache 避免竞态）。框架自动给每个子 run 分配 `_sub_run_id`（group_key + idx）并共享一个 `_group_key`；TracingClientProxy 读这两个 key 后把它们盖到所有 `prompt_captured` 事件上，Studio 可以按 `group_key` 折叠同一次 parallel_map 的并发事件。
+
+默认 `max_concurrent=3` 和 DeerFlow SubagentExecutor 的默认一致；单个 item 出错只会在返回列表里留下 `{"error": "...", "sub_run_id": ...}` 条目，`stop_on_error=True` 可切成 fail-fast。
+
+### 11.4 CallbackEvent Pydantic 类型化（`graph_agent/callbacks/events.py`）
+
+14 个事件（12 旧 + `prompt_captured` / `llm_fallback` 两个新增）以 Pydantic 判别式联合 `CallbackEvent` 建模，`schema_version: Literal["1.0"]`，`extra=forbid`。`Callback.on_event(event)` 是新式入口；默认实现 dispatch 回老式 `on_phase_start` 等钩子，所以现有 Callback 子类零改动继续工作。`TracingCallback` 同时写 `{run_id}.jsonl`（旧格式）和 `tracing.jsonl`（每行一条 `event.model_dump_json()`），Studio 消费后者。
+
+### 11.5 Phase.model_override + Nudge 默认降权（Tasks 6.1 / 6.5）
+
+- `Phase.model_override: str | None = None`：指向 `llm_roles.yaml` 的 `models:` 代号；设置后 resolver 绕过 tier→role→model 映射直接用该模型。Compiler 有 `W-invalid-model-override` 校验代号存在性。
+- `Phase.max_nudges` 默认由 3 降到 1。现有 skill 如果依赖 3 轮 nudge 预算需在 `phase_config` 里显式写 `max_nudges: 3`。
+
+### 11.6 `<phase>` / `<node>` 术语迁移（Tasks 5.3 / 5.5）
+
+SKILL.md 正式术语是 `<phase id="...">`。`<node>` 仍被解析（`_normalise_phase_tags` 在 parser 入口把二者归一），但 compiler 会发 `W-node-to-phase-migration`。所有在仓业务 skill（6 个）+ compiler skill 都已迁移。
+
+### 11.7 Subagent 中间件继承（Task 2.7）
+
+`SubagentExecutor(inherit_middlewares=True)` 默认开启，子 agent 现在拿到 lead 的完整中间件链（WorkingMemory / DeadEnd / Clarification 等）。设为 `False` 可回到 pre-Task-2.7 的极简中间件路径。`make_lead_agent` 与 `_build_middlewares` 都加了对应的 `inherit_middlewares` 参数。
 
 ### 10.2 可能的其他待发现 bug
 

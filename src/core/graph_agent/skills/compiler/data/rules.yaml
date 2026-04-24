@@ -64,6 +64,48 @@ fatal:
     description: "retry_target 必须指向已定义的 phase，且为非空字符串"
     reason: "校验失败后的重试路由会在运行期崩溃或失效"
 
+  F-subgraph-exclusive-tools:
+    scope: phase
+    check: no_tools_when_subgraph
+    description: "Phase 声明 subgraph: 时不得再声明 tools"
+    reason: "subgraph phase 不跑 agent loop，tools 会被 loader 静默忽略，authoring 错误必须 fail-fast"
+
+  F-subgraph-exclusive-prompt:
+    scope: phase
+    check: no_prompt_when_subgraph
+    description: "Phase 声明 subgraph: 时不得包含 <system_prompt> 或 <user_prompt>"
+    reason: "subgraph phase 不跑 LLM，prompt 会被 loader 静默忽略；prompt 必须搬到子 skill"
+
+  F-subgraph-exclusive-sub-skills:
+    scope: phase
+    check: no_sub_skills_when_subgraph
+    description: "Phase 声明 subgraph: 时不得同时声明 sub_skills"
+    reason: "subgraph 是静态组合，sub_skills 是动态决策；同时声明语义不明，两种模式互斥"
+
+  F-step-name-required:
+    scope: phase
+    check: step_tag_has_name
+    description: "<step> 标签必须含 name 属性"
+    reason: "Step 结构化片段的第一要素是命名，缺失意味着 LLM 无法识别步骤身份"
+
+  F-step-goal-required:
+    scope: phase
+    check: step_tag_has_goal
+    description: "<step> 标签必须含 goal 属性"
+    reason: "Step 存在的目的就是声明 goal（目标），没有 goal 等于没有 step 语义"
+
+  F-step-no-expression:
+    scope: phase
+    check: step_tag_no_expression_attrs
+    description: "<step> 标签不得含 when / skip_if / if / else 等表达式字段"
+    reason: "framework 不做表达式求值（与 F006 红线一致）；条件分支须用 code-only phase + validator + retry_target 表达"
+
+  F-subgraph-cycle:
+    scope: graph
+    check: no_subgraph_cycle
+    description: "subgraph 引用链不得形成环（跨 SKILL.md 静态检测）"
+    reason: "运行时 loader.py 已有 SkillLoadError 防护，但 compile-time 提前报可以让作者在编排阶段就发现引用闭环，不用等到跑起来才崩"
+
 warning:
   S001:
     scope: structure
@@ -142,6 +184,24 @@ warning:
     check: json_params_use_normalize
     description: "接收 JSON 参数的工具函数必须在入口处调用 _normalize_json_param"
     impact: "dict/str 格式不统一导致下游崩溃"
+
+  W-invalid-model-override:
+    scope: phase
+    check: model_override_known
+    description: "phase_config.model_override 必须命中 llm_roles.yaml 的 models 段"
+    impact: "拼写错误会在运行期触发 ModelResolver 抛 'no model for role' 或静默回退到 tier 默认模型"
+
+  W-python-glue-orchestrator:
+    scope: structure
+    check: python_glue_child_skill_dispatch
+    description: "skill 的 script/ 或 tools/ 里有 Python 胶水码绕过 subgraph / builtin.parallel_map，直接用 run_skill / ThreadPoolExecutor 调子 skill"
+    impact: "失去了框架的声明式组合能力（subgraph）和并发管控能力（builtin.parallel_map）；应该改用 <phase subgraph: ...> 或 tools: [builtin.parallel_map]"
+
+  W-node-to-phase-migration:
+    scope: graph
+    check: prefer_phase_tag
+    description: "SKILL.md 建议使用 <phase id=\"...\"> 标签，不再使用旧的 <node>"
+    impact: "<node> 仍可解析但官方术语已统一为 phase，长期保留会让多人协作语义漂移"
 
 # ---------------------------------------------------------------------------
 # Anthropic Skill 兼容性规则 (A系列)

@@ -189,6 +189,49 @@ class DeadEndPruningMiddleware(AgentMiddleware[AgentState]):
         return {"messages": [HumanMessage(name="dead_end_warning", content=warning)]}
 
 
+class AgentLoopIterationMiddleware(AgentMiddleware[AgentState]):
+    """Emit one AgentLoopIterationEvent at the top of each agent-loop turn.
+
+    Tier 2 — T-B4. ``before_model`` fires once per LangGraph-controlled
+    iteration of the agent (between tool-calls), which is exactly the
+    "iteration" boundary Studio needs to group the LLMCall / ToolCall
+    events emitted during that turn.
+    """
+
+    def __init__(
+        self,
+        *,
+        phase_name: str,
+        callbacks: Sequence[Callback] | None = None,
+    ) -> None:
+        super().__init__()
+        self._phase_name = phase_name
+        self._callbacks = list(callbacks or [])
+        self._iteration = 0
+
+    @override
+    def before_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
+        self._iteration += 1
+        try:
+            from ..callbacks.events import AgentLoopIterationEvent
+
+            event = AgentLoopIterationEvent(
+                phase_name=self._phase_name,
+                iteration=self._iteration,
+            )
+            for cb in self._callbacks:
+                try:
+                    cb.on_event(event)
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "[AgentLoopIteration] callback %r raised; continuing",
+                        type(cb).__name__,
+                    )
+        except Exception:  # noqa: BLE001
+            logger.exception("[AgentLoopIteration] emit failed; continuing")
+        return None  # pass-through, no state mutation
+
+
 def create_custom_middlewares(
     *,
     working_memory: bool = True,
@@ -198,9 +241,21 @@ def create_custom_middlewares(
     context_ref: dict[str, Any] | None = None,
     callbacks: Sequence[Callback] | None = None,
     phase_name: str | None = None,
+    agent_loop_iteration: bool = True,
 ) -> list[AgentMiddleware]:
     """Create the middleware list for GraphAgent / DeerFlow integration."""
     middlewares: list[AgentMiddleware] = []
+
+    # T-B4: iteration counter goes *first* so its event lands before
+    # the WorkingMemory / DeadEnd middlewares' own before_model logic
+    # in the same iteration.
+    if agent_loop_iteration and phase_name:
+        middlewares.append(
+            AgentLoopIterationMiddleware(
+                phase_name=phase_name,
+                callbacks=callbacks,
+            )
+        )
 
     if working_memory:
         middlewares.append(

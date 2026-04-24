@@ -28,6 +28,7 @@ from .parser import (
     _NODE_PATTERN,
     _REF_PATTERN,
     _extract_tags,
+    _normalise_phase_tags,
     _parse_frontmatter,
     _strip_frontmatter,
 )
@@ -37,6 +38,12 @@ logger = logging.getLogger(__name__)
 
 # Rules YAML lives inside the compiler skill — single source of truth.
 _RULES_PATH = Path(__file__).parent.parent / "skills" / "compiler" / "data" / "rules.yaml"
+
+# Task 5.4 — <step> tag regex (matches opening tag only; closing </step>
+# is ignored because we only validate the opening tag's attributes).
+_STEP_TAG_PATTERN = re.compile(r"<step\b([^>]*)>", re.IGNORECASE)
+_STEP_ATTR_RE = re.compile(r'(\w+)\s*=\s*"([^"]*)"')
+
 
 _PHASE_CONFIG_ALLOWED_KEYS = {
     "name",
@@ -52,6 +59,8 @@ _PHASE_CONFIG_ALLOWED_KEYS = {
     "subagent_enabled",
     "subgraph",
     "context_bridge",
+    # Task 6.1: per-phase pin into llm_roles.yaml's models: section.
+    "model_override",
 }
 
 # These fields are set via XML tags, not phase_config YAML
@@ -486,6 +495,19 @@ def _check_phases(
     nodes_info: list[dict[str, Any]] = []
 
     if skill_type == "graph":
+        # Task 5.2: nudge authors on the old <node> spelling before we
+        # normalise it away. Fires once per SKILL.md regardless of how
+        # many <node> tags are present; the goal is a migration hint,
+        # not a repeat warning.
+        if re.search(r'<node\s+id="', content):
+            result.issues.append(_issue(
+                "W-node-to-phase-migration", "SKILL.md",
+                "SKILL.md 仍使用 <node id=\"...\"> 标签；建议迁移到 <phase id=\"...\">（两种都解析，但 phase 是官方术语）",
+            ))
+        # Task 5.3: accept <phase> as a synonym for <node> on the compiler
+        # side too so W/F rules see a consistent document regardless of
+        # which tag the author used.
+        content = _normalise_phase_tags(content)
         for m in _NODE_PATTERN.finditer(content):
             node_id = m.group(1)
             depends_on = m.group(2)
@@ -563,6 +585,48 @@ def _check_phases(
         xml_misplaced = sorted(set(phase_cfg.keys()) & _XML_ONLY_KEYS)
         for key in xml_misplaced:
             result.issues.append(_issue("P004", loc, f"'{key}' 应在 XML tag 中定义，而非 phase_config YAML"))
+
+        # Task 5.1: subgraph phases are exclusive with tools/prompts/sub_skills.
+        # Prior to this check the loader silently dropped any such fields when
+        # subgraph was present, producing confusing "my tool never ran" bugs.
+        # Now we FAIL FAST so the authoring error surfaces at compile time.
+        if phase_cfg.get("subgraph"):
+            if phase_cfg.get("tools"):
+                result.issues.append(_issue(
+                    "F-subgraph-exclusive-tools", loc,
+                    "subgraph phase 不得声明 tools（loader 会静默忽略，改为在子 skill 里声明）",
+                ))
+            if tags.get("system_prompt") or tags.get("user_prompt"):
+                result.issues.append(_issue(
+                    "F-subgraph-exclusive-prompt", loc,
+                    "subgraph phase 不得包含 <system_prompt>/<user_prompt>（该 phase 不跑 LLM）",
+                ))
+            if phase_cfg.get("sub_skills"):
+                result.issues.append(_issue(
+                    "F-subgraph-exclusive-sub-skills", loc,
+                    "subgraph 与 sub_skills 互斥：subgraph 是静态组合，sub_skills 是动态决策",
+                ))
+
+        # Task 5.2 W-invalid-model-override: catch typo'd model_override strings
+        # so authors learn at compile time instead of at first run.
+        model_override = phase_cfg.get("model_override")
+        if model_override is not None:
+            if not isinstance(model_override, str) or not model_override.strip():
+                result.issues.append(_issue(
+                    "W-invalid-model-override", loc,
+                    "model_override 必须是非空字符串",
+                ))
+            else:
+                known_models = _known_model_names()
+                if known_models and model_override.strip() not in known_models:
+                    result.issues.append(_issue(
+                        "W-invalid-model-override", loc,
+                        (
+                            f"model_override '{model_override}' 未在 llm_roles.yaml 的 models 段定义；"
+                            f"已知模型: {sorted(known_models)[:8]}..."
+                        ),
+                    ))
+
         # P003: tool paths
         tool_refs = phase_cfg.get("tools", [])
         for ref in tool_refs:
@@ -641,6 +705,34 @@ def _check_phases(
         missing = placeholders - ctx_map_keys
         for key in sorted(missing):
             result.issues.append(_issue("P006", loc, f"占位符 '{{{key}}}' 未在 context_mapping 中定义"))
+
+        # Task 5.4 — <step> tag validation inside prompts. Pure structural
+        # check; the parser already leaves <step> as verbatim text inside
+        # prompt bodies. Three FATAL rules:
+        #   F-step-name-required     — every <step> must have name=""
+        #   F-step-goal-required     — every <step> must have goal=""
+        #   F-step-no-expression     — reject when/skip_if/if/else attrs
+        all_prompt_text = " ".join(sys_prompts + usr_prompts)
+        for step_match in _STEP_TAG_PATTERN.finditer(all_prompt_text):
+            attrs_raw = step_match.group(1) or ""
+            parsed_attrs = dict(_STEP_ATTR_RE.findall(attrs_raw))
+            if "name" not in parsed_attrs or not parsed_attrs["name"].strip():
+                result.issues.append(_issue(
+                    "F-step-name-required", loc,
+                    "<step> 缺少 name 属性"
+                ))
+            if "goal" not in parsed_attrs or not parsed_attrs["goal"].strip():
+                result.issues.append(_issue(
+                    "F-step-goal-required", loc,
+                    "<step> 缺少 goal 属性"
+                ))
+            banned = {"when", "skip_if", "if", "else"} & set(parsed_attrs.keys())
+            for attr in sorted(banned):
+                result.issues.append(_issue(
+                    "F-step-no-expression", loc,
+                    f"<step> 禁止使用表达式字段 '{attr}'；条件分支请用 "
+                    f"code-only phase + validator + retry_target",
+                ))
 
         # P007: no inline JSON in system_prompt
         for sp in sys_prompts:
@@ -724,6 +816,47 @@ def _check_structure(
                 "S004", str(rel),
                 "helpers.py 已废弃。请将数据变换逻辑迁移到 setup phase 的 script/ tools 中，"
                 "通过 requires_llm: false 节点写入 context，后续节点用 {key} 读取。",
+            ))
+
+    # Task 5.2 — W-python-glue-orchestrator
+    # Detects the orchestrator / dispatcher anti-pattern: a Python file
+    # under the skill's ``script/`` or ``tools/`` dir that references a
+    # child SKILL.md AND does concurrent / orchestrated dispatch by
+    # hand (run_skill in a loop, ThreadPoolExecutor, asyncio.gather).
+    # The declarative alternative is ``subgraph:`` for serial composition
+    # or ``tools: [builtin.parallel_map]`` for fan-out.
+    _ORCHESTRATOR_SIGNALS = (
+        "ThreadPoolExecutor",
+        "asyncio.gather",
+        "multiprocessing.Pool",
+        "run_skill",
+    )
+    for script_dir_name in ("script", "tools"):
+        scripts_dir = skill_dir / script_dir_name
+        if not scripts_dir.is_dir():
+            continue
+        for f in scripts_dir.glob("*.py"):
+            # Skip init files and the framework's own parallel_map.
+            if f.name in ("__init__.py",) or f.name.startswith("_"):
+                continue
+            try:
+                text = f.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            if "SKILL.md" not in text:
+                continue
+            hits = [sig for sig in _ORCHESTRATOR_SIGNALS if sig in text]
+            if not hits:
+                continue
+            result.issues.append(_issue(
+                "W-python-glue-orchestrator",
+                f"{script_dir_name}/{f.name}",
+                (
+                    f"Python 胶水码检测：文件同时引用 SKILL.md 和 {', '.join(hits)}，"
+                    "疑似绕过 subgraph / builtin.parallel_map 的反模式。"
+                    "改写建议：串行组合用 <phase subgraph: 子 SKILL.md 路径>，"
+                    "并发扇出用 tools: [builtin.parallel_map]。"
+                ),
             ))
 
 
@@ -811,8 +944,126 @@ def _get_known_tiers() -> set[str]:
         from ..config.llm_config import get_role_config
 
         return set(get_role_config().roles.keys())
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "[Compiler] llm_roles.yaml load failed (%s); tier-unknown check will be skipped",
+            exc,
+        )
         return set()
+
+
+def _known_model_names() -> set[str]:
+    """Load known model codes from the ``models:`` section of llm_roles.yaml.
+
+    Falls back to the empty set when the config is missing or malformed —
+    the caller (W-invalid-model-override) treats that as "cannot validate"
+    and silently skips the check rather than emitting a false positive.
+    """
+    try:
+        from ..config.llm_config import get_role_config
+
+        cfg = get_role_config()
+        # RoleConfig exposes models via `.models` (dict of code → ModelConfig).
+        models = getattr(cfg, "models", None) or {}
+        return set(models.keys())
+    except Exception as exc:
+        logger.warning(
+            "[Compiler] llm_roles.yaml models read failed (%s); "
+            "W-invalid-model-override will be skipped for this compile",
+            exc,
+        )
+        return set()
+
+
+_PHASE_CONFIG_BLOCK = re.compile(
+    r"<phase_config[^>]*>\s*(.+?)\s*</phase_config>",
+    re.DOTALL,
+)
+
+
+def _extract_subgraph_refs(skill_md_path: Path) -> list[Path]:
+    """Return absolute paths of child SKILL.md referenced via ``subgraph:``.
+
+    Uses a lightweight scan (regex + ``yaml.safe_load`` on each
+    ``<phase_config>`` block) instead of the full parser so cycle
+    detection does not incur tool binding / env var side effects.
+    Malformed skills return an empty list — they fail compile on
+    other rules anyway.
+    """
+    try:
+        text = skill_md_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return []
+
+    base_dir = skill_md_path.parent
+    refs: list[Path] = []
+    for match in _PHASE_CONFIG_BLOCK.finditer(text):
+        try:
+            cfg = yaml.safe_load(match.group(1))
+        except yaml.YAMLError:
+            continue
+        if not isinstance(cfg, dict):
+            continue
+        sub_path = cfg.get("subgraph")
+        if isinstance(sub_path, str) and sub_path.strip():
+            try:
+                refs.append((base_dir / sub_path).resolve())
+            except (OSError, RuntimeError):
+                continue
+    return refs
+
+
+def _detect_subgraph_cycle(start: Path) -> list[Path] | None:
+    """DFS cycle detection across ``subgraph:`` references.
+
+    Returns the cyclic path (list of resolved ``Path`` objects starting
+    and ending with the same node) when a cycle is present, otherwise
+    ``None``. Visits each SKILL.md at most once so pathological deep
+    graphs remain bounded.
+    """
+    visited: set[Path] = set()
+
+    def dfs(node: Path, stack: list[Path]) -> list[Path] | None:
+        resolved = node.resolve()
+        if resolved in stack:
+            cycle_start = stack.index(resolved)
+            return stack[cycle_start:] + [resolved]
+        if resolved in visited:
+            return None
+        visited.add(resolved)
+        stack.append(resolved)
+        for child in _extract_subgraph_refs(resolved):
+            if not child.exists():
+                continue
+            result = dfs(child, stack)
+            if result is not None:
+                return result
+        stack.pop()
+        return None
+
+    return dfs(start, [])
+
+
+def _check_subgraph_cycle(skill_md_path: Path, result: CompileResult) -> None:
+    """F-subgraph-cycle compile-time check (P1-3).
+
+    loader.py:288 has a runtime guard that raises ``SkillLoadError`` on
+    cyclic ``subgraph:`` loading, but surfacing the issue at compile
+    time lets the author see it in IDE / CI before the skill ever runs.
+    """
+    cycle = _detect_subgraph_cycle(skill_md_path)
+    if cycle is None:
+        return
+    # Show parent/<file> so sibling skills sharing the SKILL.md filename
+    # stay distinguishable in the error message.
+    chain = " -> ".join(f"{p.parent.name}/{p.name}" for p in cycle)
+    result.issues.append(_issue(
+        "F-subgraph-cycle",
+        "frontmatter",
+        f"检测到 subgraph 循环引用：{chain}。"
+        "subgraph 引用链必须是 DAG；作为替代，考虑把共用的步骤抽成一个独立子 skill，"
+        "由上层通过 sub_skills 工具按需调用。",
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -875,6 +1126,7 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
     _check_phases(content, frontmatter, skill_dir, result)
     _check_structure(skill_dir, body, result)
     _check_tools(skill_dir, result)
+    _check_subgraph_cycle(skill_path, result)
 
     logger.info(
         "Compiled '%s': %d FATAL, %d WARNING",

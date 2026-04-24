@@ -258,13 +258,39 @@ class _HarnessCallbackBridge(BaseCallbackHandler):
 
     @staticmethod
     def _extract_response_data(response: Any) -> dict[str, Any]:
-        """Extract assistant content, thinking blocks, and tool calls from results."""
+        """Extract assistant content, thinking blocks, tool calls + llm metadata.
+
+        Tier 1 Commit B (T-A4): always populates the usage / model_name /
+        provider keys even when the response shape is non-standard so
+        Studio's cost-and-latency view has something to render. Fields
+        default to ``None`` rather than being absent to keep the JSON
+        shape stable across providers.
+        """
         data: dict[str, Any] = {
             "content": "",
             "thinking": None,
             "tool_calls": [],
             "stop_reason": None,
+            # T-A4: fill in provider-side metadata from response.llm_output
+            "usage": None,
+            "model_name": None,
+            "response_metadata": None,
         }
+
+        # Provider-side metadata: usage / model_name / finish_reason often
+        # arrive on response.llm_output or message.response_metadata.
+        llm_output = getattr(response, "llm_output", None) or {}
+        if isinstance(llm_output, dict):
+            data["usage"] = (
+                llm_output.get("usage")
+                or llm_output.get("token_usage")
+                or llm_output.get("usage_metadata")
+            )
+            data["model_name"] = (
+                llm_output.get("model_name")
+                or llm_output.get("model")
+            )
+
         generations = getattr(response, "generations", None)
         if not generations or not generations[0]:
             return data
@@ -279,6 +305,15 @@ class _HarnessCallbackBridge(BaseCallbackHandler):
             if data["thinking"] is None:
                 addl = getattr(msg, "additional_kwargs", {}) or {}
                 data["thinking"] = addl.get("reasoning_content") or addl.get("thinking")
+            # Per-message metadata often carries the richer usage breakdown
+            # that llm_output sometimes misses (e.g. Anthropic cache stats).
+            rm = getattr(msg, "response_metadata", None)
+            if rm:
+                data["response_metadata"] = rm
+                if data["usage"] is None:
+                    data["usage"] = rm.get("usage") or rm.get("token_usage")
+                if data["model_name"] is None:
+                    data["model_name"] = rm.get("model_name") or rm.get("model")
         else:
             data["content"] = getattr(gen, "text", "") or ""
 

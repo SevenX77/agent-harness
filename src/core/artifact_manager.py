@@ -6,10 +6,29 @@ import logging
 import os
 import re
 import shutil
+import warnings
 from datetime import UTC, datetime
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# DEPRECATED: ArtifactManager is kept only to avoid breaking existing host
+# projects during the migration window. New code should use
+# graph_agent.io.storage.StorageManager.save_artifact(...) which follows
+# the same responsibility but without the project_id coupling. This module
+# will be removed once callers have migrated (see
+# docs/graph_agent_docs/FRAMEWORK_UNDERSTANDING.md).
+logger.warning(
+    "src.core.artifact_manager is deprecated; new code should use "
+    "graph_agent.io.storage.StorageManager.save_artifact."
+)
+warnings.warn(
+    "src.core.artifact_manager is deprecated; use graph_agent.io.storage."
+    "StorageManager.save_artifact. See docs/graph_agent_docs/"
+    "FRAMEWORK_UNDERSTANDING.md.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 _TS_DIR_RE = re.compile(r"^\d{8}_\d{6}")
 

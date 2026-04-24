@@ -78,36 +78,132 @@ def build_subgraph_node(
         if child_trace_dir is not None and not isinstance(child_trace_dir, Path):
             child_trace_dir = Path(child_trace_dir)
 
-        # Forward parent callbacks to child harness for complete observability.
-        # NOTE: Direct mutation of child.callbacks is NOT thread-safe.
-        # GraphAgentHarness.run() does not accept a callbacks parameter, so we
-        # must mutate in place.  This is safe only when the same child harness
-        # is not executed concurrently from multiple threads.  The save/restore
-        # pattern below ensures we leave the child in its original state.
-        original_child_callbacks = child.callbacks
-        merged_callbacks = list(active_callbacks)
-        for cb in original_child_callbacks:
-            if cb not in merged_callbacks:
-                merged_callbacks.append(cb)
-        child.callbacks = merged_callbacks
+        # Forward parent callbacks to child harness via the ``extra_callbacks``
+        # parameter (added in P1-1 fix). Avoids the previous pattern of
+        # mutating ``child.callbacks`` in place, which cross-wired sibling
+        # concurrent invocations of the same child harness instance.
 
+        # Tier 1 Commit C (T-B8): emit a subgraph boundary marker so
+        # Studio can fold the child's events (which flow into the parent
+        # tracing.jsonl per Gemini Q6) into one visual segment.
+        import time as _time
+
+        from ..callbacks.events import (
+            InternalErrorEvent,
+            SubgraphEnterEvent,
+            SubgraphExitEvent,
+        )
+
+        child_skill_path = str(
+            getattr(child, "_skill_dir", None) or phase.name
+        )
+        child_thread_id_str = _derive_child_thread_id(
+            run_options.get("thread_id") or parent_ctx.get("_thread_id"),
+            phase.name,
+        )
+        for cb in active_callbacks:
+            try:
+                cb.on_event(
+                    SubgraphEnterEvent(
+                        phase_name=phase.name,
+                        child_skill_path=child_skill_path,
+                        child_thread_id=child_thread_id_str,
+                    )
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "[Subgraph] callback %r failed on SubgraphEnter; continuing",
+                    type(cb).__name__,
+                )
+
+        subgraph_start = _time.monotonic()
+        # FIXME(D-7.2 PhaseExecutor): child harness instance-level state
+        # (``_active_heartbeat`` / ``_active_run_context``) is overwritten on
+        # every ``child.run`` call. If the same ``child`` instance is invoked
+        # concurrently — e.g. a parallel_map fans out two siblings into the
+        # same subgraph reference — the second invocation clobbers the first's
+        # run state. The P1-1 fix (this file, 2026-04-24) handled the
+        # ``callbacks`` list racing via ``extra_callbacks`` but did not touch
+        # the instance attributes; Gemini audit 2026-04-24 flagged it as a
+        # latent concurrency bug. The clean fix is to move the run-state to a
+        # per-invocation ``PhaseExecutor`` object during the harness split
+        # (D-7.2). Until then, do NOT share one ``child`` instance across
+        # concurrent parallel_map branches.
         try:
             child_state = child.run(
                 initial_context=child_inputs,
                 trace_dir=child_trace_dir if isinstance(child_trace_dir, Path) else None,
-                thread_id=_derive_child_thread_id(
-                    run_options.get("thread_id") or parent_ctx.get("_thread_id"),
-                    phase.name,
-                ),
+                thread_id=child_thread_id_str,
                 artifact_saver=run_options.get("artifact_saver"),
                 runtime_inputs_map=(
                     dict(run_options.get("runtime_inputs"))
                     if isinstance(run_options.get("runtime_inputs"), dict)
                     else {}
                 ),
+                extra_callbacks=list(active_callbacks),
             )
-        finally:
-            child.callbacks = original_child_callbacks
+        except Exception as exc:
+            # Tier 1 Commit A — T-B14 InternalErrorEvent at subgraph boundary
+            # (per Gemini Q2: three independent try/except entry points so a
+            # nested crash is attributed to the correct layer and doesn't let
+            # the parent die "不明不白").
+            import traceback as _tb
+
+            for cb in active_callbacks:
+                try:
+                    cb.on_event(
+                        InternalErrorEvent(
+                            entry_point="subgraph",
+                            error_type=type(exc).__name__,
+                            error_message=str(exc),
+                            traceback=_tb.format_exc(),
+                        )
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "[Subgraph] callback %r failed on InternalError; continuing",
+                        type(cb).__name__,
+                    )
+            # Still emit SubgraphExit with status="crashed" so the
+            # boundary pair is always balanced (Studio needs both sides
+            # to close the folded region).
+            for cb in active_callbacks:
+                try:
+                    cb.on_event(
+                        SubgraphExitEvent(
+                            phase_name=phase.name,
+                            child_skill_path=child_skill_path,
+                            wall_time_seconds=round(
+                                _time.monotonic() - subgraph_start, 3
+                            ),
+                            status="crashed",
+                        )
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "[Subgraph] callback %r failed on SubgraphExit; continuing",
+                        type(cb).__name__,
+                    )
+            raise
+
+        # Success path — emit SubgraphExit with status="completed"
+        for cb in active_callbacks:
+            try:
+                cb.on_event(
+                    SubgraphExitEvent(
+                        phase_name=phase.name,
+                        child_skill_path=child_skill_path,
+                        wall_time_seconds=round(
+                            _time.monotonic() - subgraph_start, 3
+                        ),
+                        status="completed",
+                    )
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "[Subgraph] callback %r failed on SubgraphExit; continuing",
+                    type(cb).__name__,
+                )
         child_ctx = child_state["context"]
         child_metrics = child_state.get("metrics", {})
 

@@ -14,7 +14,6 @@ of the old ToolExecutor + LLMGateway.
 from __future__ import annotations
 
 import copy
-import json
 import logging
 import sys
 import threading
@@ -31,6 +30,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
 
 from .run_context import RunContext
+from .nudge_injector import NudgeInjector
 from .retry_router import RetryRouter
 from .callback_bridge import (
     _HarnessCallbackBridge,
@@ -48,13 +48,7 @@ from ..models.resolver import get_model_resolver
 from ..cognitive.prompt import apply_cognitive_template
 from .state import WorkflowState
 from ..cognitive.ambiguity import log_ambiguity
-from ..cognitive.finish import (
-    MIN_FINISH_REASONING_LEN as _MIN_FINISH_REASONING_LEN,
-    PLANNING_NUDGE as _PLANNING_NUDGE,
-    SELFCHECK_NUDGE as _SELFCHECK_NUDGE,
-    build_standard_nudge_text as _build_standard_nudge_text,
-    finish_task,
-)
+from ..cognitive.finish import finish_task
 from ..cognitive.memory import update_working_memory
 from .tool_wrapper import _wrap_tool_for_langchain
 
@@ -1143,34 +1137,6 @@ class GraphAgentHarness:
                         return _extract_text_content(_msg.content)
                 return ""
 
-            def _has_structured_selfcheck(payload: dict[str, Any]) -> bool:
-                checklist = payload.get("plan_checklist", [])
-                if isinstance(checklist, str):
-                    try:
-                        parsed = json.loads(checklist)
-                        checklist = parsed if isinstance(parsed, list) else []
-                    except Exception as exc:
-                        logger.warning('[Harness] plan_checklist JSON parse failed: %s', exc)
-                        checklist = []
-                if isinstance(checklist, list) and checklist:
-                    complete_items = 0
-                    for item in checklist:
-                        if not isinstance(item, dict):
-                            continue
-                        step = str(item.get("step", "")).strip()
-                        quality_check = str(item.get("quality_check", "")).strip()
-                        if step and quality_check:
-                            complete_items += 1
-                    if complete_items > 0:
-                        return True
-
-                # Backward compatibility fallback.
-                reasoning_text = str(payload.get("reasoning", ""))
-                evidence_raw = payload.get("evidence", [])
-                if isinstance(evidence_raw, str):
-                    evidence_raw = [evidence_raw]
-                return len(reasoning_text) >= _MIN_FINISH_REASONING_LEN and bool(evidence_raw)
-
             def _compact_messages(
                 original_user_msg: HumanMessage,
                 working_memory: str,
@@ -1184,10 +1150,10 @@ class GraphAgentHarness:
                 return [original_user_msg, HumanMessage(content=checkpoint_text)]
 
             ctx.pop("_finish_task_result", None)
-            planning_nudge_count = 0
-            selfcheck_nudge_count = 0
-            standard_nudge_count = 0
-            total_nudge_count = 0
+            # D-7.4: nudge policy + counter state moved to NudgeInjector.
+            # Pass active_callbacks (= harness.callbacks, not RunContext.callbacks)
+            # to preserve the legacy narrower callback scope for nudge events.
+            nudge_injector = NudgeInjector(phase, active_callbacks)
             plan_verified = False
             wm_snapshot = _ctx_text(ctx, "_working_memory")
             checkpoint_count = 0
@@ -1195,18 +1161,6 @@ class GraphAgentHarness:
             original_user_msg = messages[0] if messages else HumanMessage(content="")
             max_outer_iterations = max(20, phase.max_iterations * 2)
             outer_iterations = 0
-
-            def _emit_nudge(nudge_type: str, nudge_count: int) -> None:
-                for cb in active_callbacks:
-                    try:
-                        cb.on_nudge(phase.name, nudge_count, nudge_type=nudge_type)
-                    except TypeError:
-                        try:
-                            cb.on_nudge(phase.name, nudge_count)
-                        except Exception as exc:
-                            logger.warning('[Harness] callback error: %s', exc)
-                    except Exception as exc:
-                        logger.warning('[Harness] callback error: %s', exc)
 
             while True:
                 outer_iterations += 1
@@ -1239,18 +1193,10 @@ class GraphAgentHarness:
                 # --- Finish gate: self-check enforcement ---
                 finish_result = ctx.get("_finish_task_result")
                 if finish_result:
-                    if (
-                        not _has_structured_selfcheck(finish_result)
-                        and selfcheck_nudge_count < phase.max_nudges
-                        and total_nudge_count < phase.max_nudges * 2
-                    ):
+                    outcome = nudge_injector.try_selfcheck(finish_result)
+                    if outcome.message is not None:
                         ctx.pop("_finish_task_result", None)
-                        selfcheck_nudge_count += 1
-                        total_nudge_count += 1
-                        _emit_nudge("selfcheck", selfcheck_nudge_count)
-                        current_messages = list(result_messages) + [
-                            HumanMessage(content=_SELFCHECK_NUDGE)
-                        ]
+                        current_messages = list(result_messages) + [outcome.message]
                         continue
                     break
 
@@ -1269,15 +1215,12 @@ class GraphAgentHarness:
                             isinstance(m, AIMessage) and getattr(m, "tool_calls", None)
                             for m in result_messages
                         )
-                        if latest_content and not has_tool_calls:
-                            planning_nudge_count += 1
-                            total_nudge_count += 1
-                            if planning_nudge_count <= phase.max_nudges and total_nudge_count < phase.max_nudges * 2:
-                                _emit_nudge("planning", planning_nudge_count)
-                                current_messages = list(result_messages) + [
-                                    HumanMessage(content=_PLANNING_NUDGE)
-                                ]
-                                continue
+                        outcome = nudge_injector.try_planning(
+                            latest_content, has_tool_calls=has_tool_calls
+                        )
+                        if outcome.message is not None:
+                            current_messages = list(result_messages) + [outcome.message]
+                            continue
                         plan_verified = True
 
                 # --- Checkpoint: compact context when working memory updates ---
@@ -1349,18 +1292,13 @@ class GraphAgentHarness:
                     isinstance(m, AIMessage) and getattr(m, "tool_calls", None)
                     for m in result_messages
                 )
-                if latest_content and not has_tool_calls:
-                    standard_nudge_count += 1
-                    total_nudge_count += 1
-                    if standard_nudge_count <= phase.max_nudges and total_nudge_count < phase.max_nudges * 2:
-                        _emit_nudge("standard", standard_nudge_count)
-                        nudge_text = _build_standard_nudge_text(
-                            standard_nudge_count,
-                            latest_content,
-                        )
-                        current_messages = list(result_messages) + [HumanMessage(content=nudge_text)]
-                        continue
-
+                outcome = nudge_injector.try_standard(
+                    latest_content, has_tool_calls=has_tool_calls
+                )
+                if outcome.message is not None:
+                    current_messages = list(result_messages) + [outcome.message]
+                    continue
+                if outcome.budget_exhausted:
                     warning = (
                         f"[CognitiveLoop] Phase '{phase.name}' exceeded max_nudges="
                         f"{phase.max_nudges}; forced degrade without finish_task."

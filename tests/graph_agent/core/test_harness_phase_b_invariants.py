@@ -139,3 +139,61 @@ class TestSubgraphFixmeGone:
             "subgraph.py still carries the D-7.2 FIXME — Phase B was meant "
             "to delete it once the underlying race was fixed."
         )
+
+
+class TestSubgraphRequiresRunContext:
+    """Subgraph nodes raise if RunContext is missing from RunnableConfig.
+
+    After D-7.2 Phase B, every subgraph invocation reaches its node
+    through ``harness.run()`` / ``.resume()``, which install the
+    parent's RunContext into ``config['configurable']['_run_context']``.
+    A missing key means either (a) a future refactor forgot to thread
+    RunContext through a new entry point, or (b) a caller invoked the
+    compiled graph directly bypassing ``run()``. Silent fallback to
+    ``{}`` would re-open the correctness gap Phase B closed (subgraph
+    trace_dir / storage_manager / runtime_inputs diverging from the
+    parent). This test guards that the fallback was replaced with a
+    RuntimeError.
+    """
+
+    def test_subgraph_execute_raises_when_run_context_missing(self):
+        import logging
+
+        import pytest
+        from unittest.mock import MagicMock
+
+        from graph_agent.core.subgraph import build_subgraph_node
+        from graph_agent.core.types import Phase
+
+        child = MagicMock()
+        parent_phase = Phase(name="render", subgraph=child, requires_llm=False)
+        parent_harness = MagicMock()
+        parent_harness.callbacks = []
+
+        node = build_subgraph_node(
+            parent_harness, parent_phase, logging.getLogger("test_subgraph"),
+        )
+
+        state = {"context": {}, "messages": [], "current_phase": "",
+                 "retry_counts": {}, "metrics": {}}
+
+        # No ``_run_context`` in configurable — invariant violation.
+        bad_config = {"configurable": {"thread_id": "t"}}
+
+        with pytest.raises(RuntimeError, match="RunContext"):
+            node(state, bad_config)  # type: ignore[arg-type]
+
+    def test_subgraph_source_no_silent_none_fallback(self):
+        """Defense in depth: grep-level check that the fallback branch
+        was removed. Catches a well-meaning future edit that re-introduces
+        the ``if parent_run_context is not None else {}`` shape.
+        """
+        subgraph_path = (
+            Path(__file__).resolve().parents[3]
+            / "src" / "core" / "graph_agent" / "core" / "subgraph.py"
+        )
+        content = subgraph_path.read_text(encoding="utf-8")
+        assert "if parent_run_context is not None" not in content, (
+            "subgraph.py still contains the silent-fallback conditional. "
+            "Post-Phase-B, missing RunContext must raise RuntimeError."
+        )

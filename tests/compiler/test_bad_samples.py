@@ -52,6 +52,30 @@ def test_step_expression_attribute_triggers_fatal() -> None:
     )
 
 
+def test_subgraph_cycle_triggers_fatal() -> None:
+    """P1-3: compile-time cycle detection across subgraph references.
+
+    cycle-a -> cycle-b -> cycle-a forms a 2-node cycle through two
+    separate SKILL.md files. runtime loader has a guard at load time,
+    but this rule surfaces the issue at compile time so the author sees
+    it before attempting to run.
+    """
+    skill_path = _BAD_SAMPLES_ROOT / "subgraph-cycle-a" / "SKILL.md"
+    assert skill_path.exists(), f"bad-sample missing: {skill_path}"
+
+    result = compile_skill(skill_path)
+
+    fatal_ids = [i.rule_id for i in result.fatals]
+    assert "F-subgraph-cycle" in fatal_ids, (
+        f"expected F-subgraph-cycle in fatals; got {fatal_ids}"
+    )
+    cycle_issue = next(i for i in result.fatals if i.rule_id == "F-subgraph-cycle")
+    # Error message must trace both legs of the cycle so the author
+    # can find the offending references.
+    assert "subgraph-cycle-a" in cycle_issue.message
+    assert "subgraph-cycle-b" in cycle_issue.message
+
+
 def test_bad_samples_dir_has_at_least_four_samples() -> None:
     """Guard against accidentally removing samples — the parametrized
     tests above would silently go away if the directory were emptied.

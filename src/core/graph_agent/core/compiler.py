@@ -975,6 +975,97 @@ def _known_model_names() -> set[str]:
         return set()
 
 
+_PHASE_CONFIG_BLOCK = re.compile(
+    r"<phase_config[^>]*>\s*(.+?)\s*</phase_config>",
+    re.DOTALL,
+)
+
+
+def _extract_subgraph_refs(skill_md_path: Path) -> list[Path]:
+    """Return absolute paths of child SKILL.md referenced via ``subgraph:``.
+
+    Uses a lightweight scan (regex + ``yaml.safe_load`` on each
+    ``<phase_config>`` block) instead of the full parser so cycle
+    detection does not incur tool binding / env var side effects.
+    Malformed skills return an empty list — they fail compile on
+    other rules anyway.
+    """
+    try:
+        text = skill_md_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return []
+
+    base_dir = skill_md_path.parent
+    refs: list[Path] = []
+    for match in _PHASE_CONFIG_BLOCK.finditer(text):
+        try:
+            cfg = yaml.safe_load(match.group(1))
+        except yaml.YAMLError:
+            continue
+        if not isinstance(cfg, dict):
+            continue
+        sub_path = cfg.get("subgraph")
+        if isinstance(sub_path, str) and sub_path.strip():
+            try:
+                refs.append((base_dir / sub_path).resolve())
+            except (OSError, RuntimeError):
+                continue
+    return refs
+
+
+def _detect_subgraph_cycle(start: Path) -> list[Path] | None:
+    """DFS cycle detection across ``subgraph:`` references.
+
+    Returns the cyclic path (list of resolved ``Path`` objects starting
+    and ending with the same node) when a cycle is present, otherwise
+    ``None``. Visits each SKILL.md at most once so pathological deep
+    graphs remain bounded.
+    """
+    visited: set[Path] = set()
+
+    def dfs(node: Path, stack: list[Path]) -> list[Path] | None:
+        resolved = node.resolve()
+        if resolved in stack:
+            cycle_start = stack.index(resolved)
+            return stack[cycle_start:] + [resolved]
+        if resolved in visited:
+            return None
+        visited.add(resolved)
+        stack.append(resolved)
+        for child in _extract_subgraph_refs(resolved):
+            if not child.exists():
+                continue
+            result = dfs(child, stack)
+            if result is not None:
+                return result
+        stack.pop()
+        return None
+
+    return dfs(start, [])
+
+
+def _check_subgraph_cycle(skill_md_path: Path, result: CompileResult) -> None:
+    """F-subgraph-cycle compile-time check (P1-3).
+
+    loader.py:288 has a runtime guard that raises ``SkillLoadError`` on
+    cyclic ``subgraph:`` loading, but surfacing the issue at compile
+    time lets the author see it in IDE / CI before the skill ever runs.
+    """
+    cycle = _detect_subgraph_cycle(skill_md_path)
+    if cycle is None:
+        return
+    # Show parent/<file> so sibling skills sharing the SKILL.md filename
+    # stay distinguishable in the error message.
+    chain = " -> ".join(f"{p.parent.name}/{p.name}" for p in cycle)
+    result.issues.append(_issue(
+        "F-subgraph-cycle",
+        "frontmatter",
+        f"检测到 subgraph 循环引用：{chain}。"
+        "subgraph 引用链必须是 DAG；作为替代，考虑把共用的步骤抽成一个独立子 skill，"
+        "由上层通过 sub_skills 工具按需调用。",
+    ))
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -1035,6 +1126,7 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
     _check_phases(content, frontmatter, skill_dir, result)
     _check_structure(skill_dir, body, result)
     _check_tools(skill_dir, result)
+    _check_subgraph_cycle(skill_path, result)
 
     logger.info(
         "Compiled '%s': %d FATAL, %d WARNING",

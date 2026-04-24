@@ -82,8 +82,75 @@ class PhaseExecutor:
         raise NotImplementedError("D-7.2 step 4.3: migrate LLM execution body from _build_phase_node")
 
     def execute_validation_phase(self, phase: Phase, state: WorkflowState) -> WorkflowState:
-        """Run the phase's validator and emit retry / pass state updates."""
-        raise NotImplementedError("D-7.2 step 4.2: migrate from _build_validation_node")
+        """Run the phase's validator and emit retry / pass state updates.
+
+        Control-flow shape (preserved verbatim from ``_build_validation_node``):
+
+          * no ``phase.validator`` → clone and return unchanged
+          * validator returns ``(True, ...)`` → pop the phase's retry
+            bucket, pop ``_validation_warnings``, emit
+            ``ValidationPassEvent`` with the pre-pop retry count
+          * validator returns ``(False, errors)`` →
+            - fire ``on_validation_fail(phase, errors, current_retries)``
+            - if ``current_retries >= max_retries``: emit
+              ``RetryExhaustedEvent``, set ``_validation_warnings=errors``
+            - else: set ``_retry_feedback=errors``, increment the retry
+              bucket, fire ``on_retry(phase, target, errors)``
+
+        Retry bucket key is ``phase.retry_target or phase.name`` on both
+        the pass and fail paths — the same rule as the pre-refactor code.
+        """
+        from .harness import _clone_state, _safe_emit_event  # lazy: avoid import cycle
+        from ..callbacks.events import RetryExhaustedEvent, ValidationPassEvent
+
+        if phase.validator is None:
+            return _clone_state(state)
+
+        next_state = _clone_state(state)
+        passed, errors = phase.validator(next_state["context"])
+        retry_key = phase.retry_target or phase.name
+
+        if passed:
+            retries_used = next_state["retry_counts"].get(retry_key, 0)
+            next_state["retry_counts"].pop(retry_key, None)
+            next_state["context"].pop("_validation_warnings", None)
+            _safe_emit_event(
+                self._callbacks,
+                ValidationPassEvent(
+                    phase_name=phase.name,
+                    retry_count=retries_used,
+                ),
+            )
+            return next_state
+
+        current_retries = next_state["retry_counts"].get(retry_key, 0)
+        for cb in self._callbacks:
+            cb.on_validation_fail(phase.name, errors, current_retries)
+
+        if current_retries >= phase.max_retries:
+            logger.warning(
+                "Phase '%s' exceeded max retries (%d). Continuing with warnings.",
+                phase.name,
+                phase.max_retries,
+            )
+            _safe_emit_event(
+                self._callbacks,
+                RetryExhaustedEvent(
+                    phase_name=phase.name,
+                    max_retries=phase.max_retries,
+                    final_errors=list(errors),
+                ),
+            )
+            next_state["context"]["_validation_warnings"] = errors
+            return next_state
+
+        next_state["context"]["_retry_feedback"] = errors
+        next_state["retry_counts"][retry_key] = current_retries + 1
+
+        for cb in self._callbacks:
+            cb.on_retry(phase.name, retry_key, errors)
+
+        return next_state
 
     def execute_subgraph_phase(self, phase: Phase, state: WorkflowState) -> WorkflowState:
         """Invoke a child harness for a subgraph phase."""

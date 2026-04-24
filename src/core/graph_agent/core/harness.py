@@ -1407,70 +1407,11 @@ class GraphAgentHarness:
         self,
         phase: Phase,
     ) -> Callable[[WorkflowState], WorkflowState]:
-        """Build a ValidationNode that runs the phase validator and routes."""
-        harness = self
+        """Build a validation node that delegates to ``PhaseExecutor`` (D-7.2 step 4.2)."""
+        executor = self._phase_executor
 
         def validate(state: WorkflowState) -> WorkflowState:
-            active_callbacks = harness.callbacks
-            if phase.validator is None:
-                return _clone_state(state)
-
-            next_state = _clone_state(state)
-            passed, errors = phase.validator(next_state["context"])
-
-            if passed:
-                retry_key = phase.retry_target or phase.name
-                # Tier 1 Commit A — T-B5 ValidationPassEvent
-                # Capture the retry count BEFORE popping so "how many retries
-                # did this phase consume before passing" is observable.
-                retries_used = next_state["retry_counts"].get(retry_key, 0)
-                next_state["retry_counts"].pop(retry_key, None)
-                next_state["context"].pop("_validation_warnings", None)
-                from ..callbacks.events import ValidationPassEvent
-                _safe_emit_event(
-                    active_callbacks,
-                    ValidationPassEvent(
-                        phase_name=phase.name,
-                        retry_count=retries_used,
-                    ),
-                )
-                return next_state
-
-            # Validation failed
-            retry_key = phase.retry_target or phase.name
-            current_retries = next_state["retry_counts"].get(retry_key, 0)
-
-            for cb in active_callbacks:
-                cb.on_validation_fail(phase.name, errors, current_retries)
-
-            if current_retries >= phase.max_retries:
-                logger.warning(
-                    "Phase '%s' exceeded max retries (%d). Continuing with warnings.",
-                    phase.name,
-                    phase.max_retries,
-                )
-                # Tier 1 Commit A — T-B12 RetryExhaustedEvent
-                from ..callbacks.events import RetryExhaustedEvent
-                _safe_emit_event(
-                    active_callbacks,
-                    RetryExhaustedEvent(
-                        phase_name=phase.name,
-                        max_retries=phase.max_retries,
-                        final_errors=list(errors),
-                    ),
-                )
-                next_state["context"]["_validation_warnings"] = errors
-                return next_state
-
-            # Inject retry feedback
-            next_state["context"]["_retry_feedback"] = errors
-            next_state["retry_counts"][retry_key] = current_retries + 1
-
-            for cb in active_callbacks:
-                target = phase.retry_target or phase.name
-                cb.on_retry(phase.name, target, errors)
-
-            return next_state
+            return executor.execute_validation_phase(phase, state)
 
         return validate
 

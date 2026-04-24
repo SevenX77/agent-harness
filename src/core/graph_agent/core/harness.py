@@ -16,7 +16,10 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import sys
 import threading
+import time
+import traceback
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -27,6 +30,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
 
+from .run_context import RunContext
 from .callback_bridge import (
     _HarnessCallbackBridge,
     _extract_text_content,
@@ -62,6 +66,209 @@ __all__ = [
     "finish_task",
     "update_working_memory",
 ]
+
+
+def _resolve_studio_checkpointer_spec(spec: str) -> Any:
+    """Parse a ``STUDIO_CHECKPOINTER`` env-var value into a checkpointer.
+
+    Supported forms (Task 7.7):
+
+    * ``memory`` — LangGraph ``InMemorySaver``
+    * ``sqlite:<path>`` — ``SqliteSaver`` opened at ``<path>`` (the
+      ``:memory:`` sentinel and ``file:...`` URIs are passed through
+      untouched; bare paths are resolved via DeerFlow's
+      ``_resolve_sqlite_conn_str``)
+    * ``postgres://...`` or ``postgresql://...`` — ``PostgresSaver``
+      opened from the DSN
+    """
+    spec = spec.strip()
+    if not spec:
+        raise ValueError("empty spec")
+
+    if spec == "memory":
+        from langgraph.checkpoint.memory import InMemorySaver
+
+        logger.info("[Harness] STUDIO_CHECKPOINTER=memory → InMemorySaver")
+        return InMemorySaver()
+
+    if spec.startswith("sqlite:"):
+        raw = spec[len("sqlite:"):]
+        from deerflow.agents.checkpointer.provider import _resolve_sqlite_conn_str
+        from langgraph.checkpoint.sqlite import SqliteSaver
+
+        conn_str = _resolve_sqlite_conn_str(raw or "store.db")
+        saver_cm = SqliteSaver.from_conn_string(conn_str)
+        saver = saver_cm.__enter__()
+        saver.setup()
+        logger.info("[Harness] STUDIO_CHECKPOINTER=sqlite:%s → SqliteSaver", conn_str)
+        return saver
+
+    if spec.startswith(("postgres://", "postgresql://")):
+        from langgraph.checkpoint.postgres import PostgresSaver
+
+        saver_cm = PostgresSaver.from_conn_string(spec)
+        saver = saver_cm.__enter__()
+        saver.setup()
+        logger.info("[Harness] STUDIO_CHECKPOINTER=%s → PostgresSaver", _redact_dsn(spec))
+        return saver
+
+    raise ValueError(
+        f"unrecognised STUDIO_CHECKPOINTER value: {spec!r} "
+        "(expected 'memory', 'sqlite:<path>' or 'postgres://...')"
+    )
+
+
+def _redact_dsn(dsn: str) -> str:
+    """Strip the password from a DSN before logging it."""
+    import re
+
+    return re.sub(r"(://[^:]+):[^@]+@", r"\1:***@", dsn)
+
+
+class _HeartbeatPulser:
+    """Background thread that emits periodic HeartbeatEvent during a run.
+
+    Tier 1 Commit D (T-B13). Uses a plain daemon thread rather than
+    asyncio because ``GraphAgentHarness.run`` is synchronous — LangGraph
+    ``invoke`` blocks the calling thread through every tool call, and an
+    asyncio-backed timer would starve in that window. The thread only
+    touches an ``Event`` for cancellation + a timestamp, so it never
+    races with the main phase loop.
+    """
+
+    def __init__(
+        self,
+        callbacks: list[Callback],
+        *,
+        interval_seconds: float = 30.0,
+    ) -> None:
+        self._callbacks = callbacks
+        self._interval = interval_seconds
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._started_monotonic = 0.0
+        # Mutable handle so external code can update current_phase on
+        # the pulser without having to pass the harness instance in.
+        self.current_phase: str | None = None
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._started_monotonic = time.monotonic()
+        self._stop.clear()
+        self._thread = threading.Thread(
+            target=self._run, name="graph_agent.heartbeat", daemon=True
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=self._interval + 1.0)
+            self._thread = None
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval):
+            try:
+                from ..callbacks.events import HeartbeatEvent
+
+                event = HeartbeatEvent(
+                    current_phase=self.current_phase,
+                    elapsed_seconds=round(
+                        time.monotonic() - self._started_monotonic, 3
+                    ),
+                    memory_usage_mb=_safe_memory_usage_mb(),
+                )
+                _safe_emit_event(self._callbacks, event)
+            except Exception:  # noqa: BLE001
+                logger.exception("[Heartbeat] tick failed; continuing")
+
+
+def _safe_memory_usage_mb() -> float | None:
+    """Best-effort resident-set-size in MiB; None when the read fails.
+
+    Tries ``resource.getrusage`` (stdlib, Unix) first because it's the
+    lightest read. Falls back to ``psutil`` when the platform makes
+    rusage unreliable (Windows, containers with cgroup quirks). Returns
+    None silently rather than raising so a bad reading never takes down
+    the heartbeat.
+    """
+    try:
+        import resource
+
+        usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # On Linux ru_maxrss is in kilobytes; on macOS it's bytes.
+        if sys.platform == "darwin":
+            return round(usage / (1024 * 1024), 2)
+        return round(usage / 1024, 2)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "[Harness] resource.getrusage failed: %s; falling back to psutil",
+            exc,
+        )
+    try:
+        import psutil
+
+        return round(psutil.Process().memory_info().rss / (1024 * 1024), 2)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "[Harness] psutil memory read failed: %s; heartbeat will emit memory=None",
+            exc,
+        )
+        return None
+
+
+def _safe_emit_event(callbacks: list[Callback], event: Any) -> None:
+    """Dispatch a typed CallbackEvent to every callback, swallowing errors.
+
+    Mirrors TracingClientProxy._emit_prompt_captured's isolation pattern:
+    a broken callback must never take down the harness run. Each callback
+    is tried independently and any exception is logged + skipped.
+    """
+    for cb in callbacks or []:
+        try:
+            cb.on_event(event)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "[Harness] callback %r raised on %s; continuing with other callbacks",
+                type(cb).__name__,
+                type(event).__name__,
+            )
+
+
+def _safe_jsonable_dict(data: Any) -> dict[str, Any]:
+    """Minimal best-effort conversion of a context dict to JSON-safe values.
+
+    Proper structural conversion (T-A3 in deferred-items.md) lands with
+    Commit B and a dedicated ``callbacks/serialize.to_jsonable_dict()``
+    helper. Until then, lifecycle events use this shallow pass: drop
+    callables, convert Path/datetime to str, keep everything else.
+    """
+    if not isinstance(data, dict):
+        return {"_value": repr(data)}
+
+    out: dict[str, Any] = {}
+    for key, value in data.items():
+        try:
+            if callable(value):
+                out[str(key)] = f"<callable {getattr(value, '__name__', 'fn')}>"
+            elif isinstance(value, Path):
+                out[str(key)] = str(value)
+            elif isinstance(value, (str, int, float, bool)) or value is None:
+                out[str(key)] = value
+            elif isinstance(value, (list, tuple)):
+                out[str(key)] = [
+                    v if isinstance(v, (str, int, float, bool)) or v is None else repr(v)
+                    for v in value
+                ]
+            elif isinstance(value, dict):
+                # One level of recursion is enough for the payload shape we ship.
+                out[str(key)] = _safe_jsonable_dict(value)
+            else:
+                out[str(key)] = repr(value)
+        except Exception:  # noqa: BLE001
+            out[str(key)] = "<unserialisable>"
+    return out
 
 
 def _ctx_text(ctx: dict[str, Any], key: str) -> str | None:
@@ -168,13 +375,46 @@ class GraphAgentHarness:
         self._skill_dir = skill_dir
         self._resolver = get_model_resolver()
         self._checkpointer = self._resolve_checkpointer(checkpointer)
-        self._runtime_local = threading.local()
+        # Active RunContext for the current run/resume invocation.
+        # Nested subgraph/parallel_map execution reads this via
+        # _get_active_run_options. Replaces the old threading.local
+        # options dict (they stored identical fields).
+        self._active_run_context: RunContext | None = None
+        # Tier 1 Commit D — heartbeat pulser handle; set during run()
+        self._active_heartbeat: _HeartbeatPulser | None = None
         self._graph = self._build_graph()
 
     @staticmethod
     def _resolve_checkpointer(checkpointer: Any) -> Any:
-        """Resolve checkpointer parameter to a concrete instance."""
+        """Resolve checkpointer parameter to a concrete instance.
+
+        Task 7.7: when the ``STUDIO_CHECKPOINTER`` env var is set it
+        overrides the ``"auto"`` default so Studio runs can pick a
+        backend without editing the host config. Accepted values:
+
+        * ``memory`` — LangGraph's in-process ``InMemorySaver``
+        * ``sqlite:<path>`` — SQLite backend at the given path
+          (``sqlite:.studio/checkpoints.db`` is the Studio convention)
+        * ``postgres://...`` — full Postgres DSN
+
+        Any other ``checkpointer`` argument value (``None``, an explicit
+        saver instance, etc.) passes through unchanged — the env var only
+        applies when the caller has asked for auto resolution.
+        """
+        import os
+
         if checkpointer == "auto":
+            override = os.environ.get("STUDIO_CHECKPOINTER")
+            if override:
+                try:
+                    return _resolve_studio_checkpointer_spec(override)
+                except Exception as exc:
+                    logger.warning(
+                        "[Harness] STUDIO_CHECKPOINTER=%r could not be resolved (%s); "
+                        "falling back to default auto path",
+                        override,
+                        exc,
+                    )
             try:
                 from deerflow.agents.checkpointer.provider import get_checkpointer
                 cp = get_checkpointer()
@@ -191,10 +431,20 @@ class GraphAgentHarness:
         trace_dir: Path | None = None,
         thread_id: str | None = None,
         artifact_saver: Callable[..., Any] | None = None,
+        storage_manager: Any | None = None,
         runtime_inputs_map: dict[str, Any] | None = None,
+        extra_callbacks: list[Callback] | None = None,
         **runtime_inputs: Any,
     ) -> WorkflowState:
-        """Execute the complete multi-phase workflow."""
+        """Execute the complete multi-phase workflow.
+
+        ``extra_callbacks`` are appended to ``self.callbacks`` for the
+        duration of this run without mutating the attribute. Used by
+        ``subgraph.execute`` to forward parent callbacks into a child
+        harness concurrency-safely (a child harness instance may be
+        invoked from multiple parent runs in parallel; mutating
+        ``child.callbacks`` directly would cross-wire them).
+        """
         effective_runtime_inputs = dict(runtime_inputs_map or {})
         effective_runtime_inputs.update(runtime_inputs)
         if initial_context is None:
@@ -213,21 +463,90 @@ class GraphAgentHarness:
         }
 
         tid = thread_id or str(uuid.uuid4())
+        # Tier 1 Commit A: run_id identifies a single harness.run invocation.
+        # thread_id may be reused across multiple runs (resume scenarios);
+        # run_id is always fresh so Studio can distinguish each execution.
+        run_id = uuid.uuid4().hex[:12]
+        is_resume = thread_id is not None
+        run_start_monotonic = time.monotonic()
         initial_state["context"]["_thread_id"] = tid
+        initial_state["context"]["_run_id"] = run_id
         config: dict[str, Any] = {
             "recursion_limit": self._calc_recursion_limit(),
             "configurable": {"thread_id": tid},
         }
 
-        previous_options = getattr(self._runtime_local, "options", None)
-        self._runtime_local.options = {
-            "trace_dir": effective_trace_dir,
-            "thread_id": tid,
-            "artifact_saver": artifact_saver,
-            "runtime_inputs": dict(effective_runtime_inputs),
-        }
+        # D-7.0 follow-through: save previous context (nested run / subgraph
+        # entry), install the new RunContext for the duration of this call,
+        # and restore in finally. Replaces the old _runtime_local.options
+        # dict — it stored identical fields.
+        previous_run_context = self._active_run_context
+        active_callbacks = list(self.callbacks) if hasattr(self, 'callbacks') else []
+        # Merge extra_callbacks (from subgraph parent forwarding) without
+        # mutating self.callbacks — concurrency-safe because the merged
+        # list is local to this invocation.
+        if extra_callbacks:
+            for cb in extra_callbacks:
+                if cb not in active_callbacks:
+                    active_callbacks.append(cb)
+        self._active_run_context = RunContext(
+            thread_id=tid,
+            run_id=run_id,
+            trace_dir=effective_trace_dir,
+            runtime_inputs=dict(effective_runtime_inputs),
+            storage_manager=storage_manager,
+            artifact_saver=artifact_saver,
+            callbacks=active_callbacks,
+        )
+
+        # Tier 1 Commit A — T-B1 RunStartedEvent
+        from ..callbacks.events import (
+            InternalErrorEvent,
+            RunEndedEvent,
+            RunStartedEvent,
+        )
+        _safe_emit_event(
+            active_callbacks,
+            RunStartedEvent(
+                run_id=run_id,
+                thread_id=tid,
+                is_resume=is_resume,
+                initial_context=_safe_jsonable_dict(initial_state["context"]),
+            ),
+        )
+
+        # Tier 1 Commit D — T-B13 HeartbeatEvent daemon thread
+        heartbeat = _HeartbeatPulser(active_callbacks)
+        heartbeat.start()
+        self._active_heartbeat = heartbeat  # let subgraph_node update current_phase
+
         try:
             result = self._graph.invoke(initial_state, config=config)
+
+            # Tier 2 — T-B11: if the run stopped because a middleware
+            # raised an interrupt (request_human_input / clarification),
+            # emit InterruptedEvent so tracing.jsonl carries the pause
+            # marker. We detect this by inspecting post-invoke state;
+            # `get_thread_status` uses the same shape.
+            try:
+                status = self.get_thread_status(tid)
+                if status.get("status") == "AWAITING_INPUT":
+                    from ..callbacks.events import InterruptedEvent
+                    clar = status.get("clarification", {}) or {}
+                    _safe_emit_event(
+                        active_callbacks,
+                        InterruptedEvent(
+                            phase_name=str(result.get("current_phase") or ""),
+                            thread_id=tid,
+                            question=clar.get("question"),
+                            clarification_type=clar.get("clarification_type"),
+                            options=list(clar.get("options") or []),
+                        ),
+                    )
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "[Harness] post-invoke interrupt detection failed"
+                )
 
             # Auto-save outputs via IOManager if configured
             if self._io_config and self._io_config.get("outputs"):
@@ -235,6 +554,7 @@ class GraphAgentHarness:
                     result["context"],
                     effective_runtime_inputs,
                     artifact_saver=artifact_saver,
+                    storage_manager=storage_manager,
                 )
 
             # Auto-save TracingCallback trace to output dir
@@ -253,18 +573,104 @@ class GraphAgentHarness:
                             logger.warning("[Harness] Trace save failed: %s", exc)
                         break
 
+            # Tier 1 Commit A — T-B1 RunEndedEvent on success
+            _safe_emit_event(
+                active_callbacks,
+                RunEndedEvent(
+                    run_id=run_id,
+                    thread_id=tid,
+                    status="completed",
+                    final_context=_safe_jsonable_dict(result["context"]),
+                    wall_time_seconds=round(time.monotonic() - run_start_monotonic, 3),
+                ),
+            )
             return result  # type: ignore[return-value]
+        except Exception as exc:
+            # Tier 1 Commit A — T-B14 InternalErrorEvent at harness.run entry
+            _safe_emit_event(
+                active_callbacks,
+                InternalErrorEvent(
+                    entry_point="run",
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                    traceback=traceback.format_exc(),
+                ),
+            )
+            _safe_emit_event(
+                active_callbacks,
+                RunEndedEvent(
+                    run_id=run_id,
+                    thread_id=tid,
+                    status="crashed",
+                    final_context={},
+                    wall_time_seconds=round(time.monotonic() - run_start_monotonic, 3),
+                ),
+            )
+            raise
         finally:
-            if previous_options is None:
-                if hasattr(self._runtime_local, "options"):
-                    delattr(self._runtime_local, "options")
-            else:
-                self._runtime_local.options = previous_options
+            # Always stop the heartbeat — don't leak daemon threads even
+            # after a crash; _HeartbeatPulser.stop is idempotent.
+            try:
+                heartbeat.stop()
+            except Exception:  # noqa: BLE001
+                logger.warning("[Harness] heartbeat stop failed", exc_info=True)
+            self._active_heartbeat = None
+            self._active_run_context = previous_run_context
 
     def _get_active_run_options(self) -> dict[str, Any]:
-        """Return thread-local run options for nested subgraph execution."""
-        options = getattr(self._runtime_local, "options", None)
-        return dict(options) if isinstance(options, dict) else {}
+        """Return active-run options for nested subgraph / parallel_map.
+
+        Projects the current ``_active_run_context`` back into the legacy
+        dict shape that ``subgraph.execute`` still expects. When no run
+        is active returns an empty dict.
+        """
+        ctx = self._active_run_context
+        if ctx is None:
+            return {}
+        return {
+            "trace_dir": ctx.trace_dir,
+            "thread_id": ctx.thread_id,
+            "artifact_saver": ctx.artifact_saver,
+            "storage_manager": ctx.storage_manager,
+            "runtime_inputs": dict(ctx.runtime_inputs),
+        }
+
+    @staticmethod
+    def _save_compaction_sidecar(
+        *,
+        run_id: str,
+        idx: int,
+        removed_messages: list[Any],
+        storage_manager: Any | None,
+    ) -> str | None:
+        """Write the compacted-out messages to a sidecar JSON file.
+
+        Tier 1 Commit B (T-A2). The path is returned as ``content_ref`` on
+        the CompactionEvent so Studio (or any JSONL reader) can inflate
+        the full history on demand. Uses StorageManager when one is
+        available (inherits retention); falls back to no-op + None ref
+        when the caller did not inject storage.
+        """
+        if storage_manager is None:
+            return None
+        try:
+            from ..callbacks.serialize import to_jsonable_dict
+
+            name = f"compaction_{idx}.json"
+            serialised = to_jsonable_dict(removed_messages)
+            path = storage_manager.save_artifact(
+                name,
+                serialised,
+                phase=f"_history/{run_id}",
+            )
+            return str(path)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "[Harness] failed to write compaction sidecar (run=%s idx=%d)",
+                run_id,
+                idx,
+            )
+            return None
 
     def _build_context_from_io(
         self,
@@ -299,6 +705,7 @@ class GraphAgentHarness:
         runtime_inputs: dict[str, Any],
         *,
         artifact_saver: Callable[..., Any] | None = None,
+        storage_manager: Any | None = None,
     ) -> None:
         """Auto-save outputs via IOManager."""
         from ..io.manager import IOManager
@@ -310,9 +717,93 @@ class GraphAgentHarness:
                 output_dir=context.get("output_dir"),
                 project_id=runtime_inputs.get("project_id"),
                 artifact_saver=artifact_saver,
+                storage_manager=storage_manager,
             )
         except Exception as exc:
             logger.warning("[Harness] Auto-save outputs failed: %s", exc)
+
+    def get_thread_status(self, thread_id: str) -> dict[str, Any]:
+        """Introspect a thread's LangGraph-level state without resuming it.
+
+        Task I-1 — the "Human-in-the-loop status sync protocol" Gemini
+        flagged as Studio's next missing surface. Lets Studio's UI ask
+        "is this thread waiting for my input / still running / done /
+        crashed?" without tailing tracing.jsonl.
+
+        Returns a dict with the shape::
+
+            {"status": "AWAITING_INPUT" | "COMPLETED" | "RUNNING" | "NOT_FOUND" | "CRASHED",
+             "clarification": {"question", "clarification_type", "options"}}  # only on AWAITING_INPUT
+             "error": str                                                      # only on CRASHED
+
+        Reads the checkpointer state directly so two processes cannot
+        disagree about which thread is paused.
+        """
+        if self._checkpointer is None:
+            return {"status": "NOT_FOUND", "reason": "no_checkpointer"}
+
+        config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+
+        try:
+            # LangGraph's official API — returns a StateSnapshot. Different
+            # versions spelled this differently, cover both.
+            if hasattr(self._graph, "get_state"):
+                snapshot = self._graph.get_state(config)
+            else:
+                get_tuple = getattr(self._checkpointer, "get_tuple", None)
+                if get_tuple is None:
+                    return {"status": "NOT_FOUND", "reason": "no_get_state"}
+                snapshot = get_tuple(config)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[Harness] get_thread_status(%s): snapshot read failed — %s",
+                thread_id,
+                exc,
+            )
+            return {"status": "NOT_FOUND", "reason": str(exc)}
+
+        if not snapshot:
+            return {"status": "NOT_FOUND"}
+
+        next_nodes = getattr(snapshot, "next", None) or ()
+        tasks = getattr(snapshot, "tasks", None) or ()
+
+        # Identify an outstanding clarification request. Each PregelTask
+        # carries an ``interrupts`` tuple populated by LangGraph when a
+        # middleware ``Command(goto=END)`` fires — our clarification +
+        # request_human_input middlewares both go through this.
+        for task in tasks:
+            interrupts = getattr(task, "interrupts", None) or ()
+            if not interrupts:
+                continue
+            last = interrupts[-1]
+            payload = getattr(last, "value", None)
+            clarification: dict[str, Any] = {}
+            if isinstance(payload, dict):
+                clarification = {
+                    "question": payload.get("question") or payload.get("message"),
+                    "clarification_type": payload.get("clarification_type")
+                    or payload.get("type")
+                    or "missing_info",
+                    "options": payload.get("options") or [],
+                }
+            else:
+                clarification = {
+                    "question": str(payload) if payload is not None else None,
+                    "clarification_type": "missing_info",
+                    "options": [],
+                }
+            return {"status": "AWAITING_INPUT", "clarification": clarification}
+
+        if not next_nodes:
+            return {"status": "COMPLETED"}
+
+        # ``next`` present but no interrupt → either still running in
+        # another process, or crashed and left the graph partially
+        # executed. We can't distinguish the two from a snapshot alone,
+        # so we surface RUNNING and leave CRASHED to callers that correlate
+        # with the InternalErrorEvent in tracing.jsonl.
+        return {"status": "RUNNING", "next": list(next_nodes)}
 
     def resume(
         self,
@@ -352,22 +843,62 @@ class GraphAgentHarness:
             "configurable": {"thread_id": effective_thread_id},
         }
 
-        previous_options = getattr(self._runtime_local, "options", None)
-        self._runtime_local.options = {
-            "trace_dir": trace_dir,
-            "thread_id": effective_thread_id,
-            "artifact_saver": artifact_saver,
-            "runtime_inputs": {},
-        }
+        # D-7.0 follow-through: install RunContext for resume path too
+        # (previously only run() built one; resume left it stale).
+        # run_id is inherited from the paused state so compaction sidecars
+        # written during the resumed run share the same _history/{run_id}/
+        # directory as sidecars from the original run — Studio can then
+        # fold pre-pause and post-resume sidecars under one thread.
+        previous_run_context = self._active_run_context
+        active_callbacks = list(self.callbacks) if hasattr(self, "callbacks") else []
+        inherited_run_id = ""
+        try:
+            raw = state["context"].get("_run_id") if isinstance(state.get("context"), dict) else None
+            if isinstance(raw, str):
+                inherited_run_id = raw
+        except Exception:  # noqa: BLE001
+            logger.warning("[Harness] resume could not read _run_id from state; continuing with empty run_id")
+        self._active_run_context = RunContext(
+            thread_id=str(effective_thread_id or ""),
+            run_id=inherited_run_id,
+            trace_dir=trace_dir if isinstance(trace_dir, Path) else None,
+            runtime_inputs={},
+            storage_manager=(
+                previous_run_context.storage_manager if previous_run_context else None
+            ),
+            artifact_saver=artifact_saver,
+            callbacks=active_callbacks,
+        )
+
+        # Tier 2 — T-B11: announce the resume to the trace.
+        from ..callbacks.events import ResumedEvent
+        _safe_emit_event(
+            self.callbacks,
+            ResumedEvent(
+                thread_id=str(effective_thread_id or ""),
+                human_input=human_input,
+                resumed_from_phase=state.get("current_phase") or None,
+            ),
+        )
+
         try:
             result = self._graph.invoke(state, config=config)
             return result  # type: ignore[return-value]
+        except Exception as exc:
+            # Tier 1 Commit A — T-B14 InternalErrorEvent at harness.resume
+            from ..callbacks.events import InternalErrorEvent
+            _safe_emit_event(
+                self.callbacks,
+                InternalErrorEvent(
+                    entry_point="resume",
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                    traceback=traceback.format_exc(),
+                ),
+            )
+            raise
         finally:
-            if previous_options is None:
-                if hasattr(self._runtime_local, "options"):
-                    delattr(self._runtime_local, "options")
-            else:
-                self._runtime_local.options = previous_options
+            self._active_run_context = previous_run_context
 
     # -----------------------------------------------------------------------
     # Graph construction
@@ -449,6 +980,11 @@ class GraphAgentHarness:
             # Step 2: Determine if new phase or retry
             is_retry = state["current_phase"] == phase.name
 
+            # Tier 1 Commit D — update heartbeat's current_phase so
+            # subsequent HeartbeatEvents carry the correct phase name.
+            if harness._active_heartbeat is not None:
+                harness._active_heartbeat.current_phase = phase.name
+
             # Callbacks
             for cb in active_callbacks:
                 cb.on_phase_start(phase.name, dict(ctx))
@@ -465,7 +1001,52 @@ class GraphAgentHarness:
 
             # Step 4: Get model from Model Resolver
             # thinking_enabled=None → auto-detect from model's reasoning flag
-            model = resolver.resolve(phase.tier)
+            # Task 6.1: phase.model_override pins the phase to a specific
+            # model code from llm_roles.yaml's models: section, bypassing
+            # the tier → role → model mapping. When it's None the call
+            # behaves exactly as before.
+            model = resolver.resolve(phase.tier, model_override=phase.model_override)
+            # Task 4.2: wrap with TracingClientProxy so every LLM round-trip
+            # emits a prompt_captured event to the registered callbacks.
+            from .tracing_proxy import TracingClientProxy
+            resolved_model_name = (
+                getattr(model, "name", None)
+                or getattr(model, "model", None)
+                or getattr(model, "model_name", None)
+            )
+
+            # Tier 1 Commit B (T-B2): record the tier → role → model
+            # resolution decision itself so Studio can show *why* this
+            # phase runs on this specific provider/model combo.
+            from ..callbacks.events import ModelResolvedEvent
+            _safe_emit_event(
+                active_callbacks,
+                ModelResolvedEvent(
+                    phase_name=phase.name,
+                    tier=phase.tier or "",
+                    role_name=(
+                        f"_model_override::{phase.model_override}"
+                        if phase.model_override
+                        else (phase.tier or "")
+                    ),
+                    resolved_model=(
+                        str(resolved_model_name) if resolved_model_name else None
+                    ),
+                    thinking_enabled=getattr(model, "thinking_enabled", None),
+                    model_override=phase.model_override,
+                    call_chain=[],
+                ),
+            )
+
+            model = TracingClientProxy(
+                wrapped_client=model,
+                callbacks=active_callbacks,
+                phase_name=phase.name,
+                llm_role=phase.tier,
+                resolved_model=str(resolved_model_name) if resolved_model_name else None,
+                sub_run_id=ctx.get("_sub_run_id") if isinstance(ctx, dict) else None,
+                group_key=ctx.get("_group_key") if isinstance(ctx, dict) else None,
+            )
             role_prefix = ""
             try:
                 role_prefix = get_role_config().resolve_role(phase.tier).system_prompt_prefix
@@ -701,15 +1282,55 @@ class GraphAgentHarness:
                     checkpoint_count += 1
                     wm_snapshot = wm_current
                     removed_pairs = max((len(current_messages) - 2) // 2, 0)
-                    for cb in active_callbacks:
-                        try:
-                            cb.on_working_memory_update(phase.name, len(str(wm_current)))
-                        except Exception as exc:
-                            logger.warning('[Harness] callback error: %s', exc)
-                        try:
-                            cb.on_compaction(phase.name, removed_pairs)
-                        except Exception as exc:
-                            logger.warning('[Harness] callback error: %s', exc)
+                    # Tier 1 Commit B (T-A1 + T-A2): emit with full content
+                    # and an optional sidecar ref for the compacted history.
+                    from ..callbacks.events import (
+                        CompactionEvent,
+                        WorkingMemoryUpdateEvent,
+                    )
+
+                    wm_text = str(wm_current or "")
+                    _safe_emit_event(
+                        active_callbacks,
+                        WorkingMemoryUpdateEvent(
+                            phase_name=phase.name,
+                            content_length=len(wm_text),
+                            content=wm_text,
+                        ),
+                    )
+                    # Sidecar write for compaction: see _save_compaction_sidecar.
+                    # Read run_id / storage_manager from the active RunContext —
+                    # they're NOT in this closure's scope (the closure is built
+                    # at __init__ time, before any run_id exists). Gemini audit
+                    # 2026-04-24 caught this as a latent NameError that only
+                    # fired when compaction actually triggered at runtime.
+                    removed_messages = (
+                        current_messages[:-2]
+                        if len(current_messages) > 2
+                        else []
+                    )
+                    active_ctx = harness._active_run_context
+                    sidecar_ref = harness._save_compaction_sidecar(
+                        run_id=(active_ctx.run_id if active_ctx else ""),
+                        idx=checkpoint_count,
+                        removed_messages=removed_messages,
+                        storage_manager=(
+                            active_ctx.storage_manager if active_ctx else None
+                        ),
+                    )
+                    removed_summary = (
+                        f"Compacted {removed_pairs} message pair(s) at checkpoint "
+                        f"#{checkpoint_count} in phase '{phase.name}'."
+                    )
+                    _safe_emit_event(
+                        active_callbacks,
+                        CompactionEvent(
+                            phase_name=phase.name,
+                            removed_pairs=removed_pairs,
+                            removed_summary=removed_summary,
+                            content_ref=sidecar_ref,
+                        ),
+                    )
                     current_messages = _compact_messages(original_user_msg, str(wm_current))
                     logger.info(
                         "[CognitiveLoop] Phase '%s' checkpoint #%d — context compacted.",
@@ -803,12 +1424,18 @@ class GraphAgentHarness:
 
             working_memory_after = _ctx_text(ctx, "_working_memory")
             if working_memory_after != working_memory_before:
-                content_len = len(str(working_memory_after or ""))
-                for cb in active_callbacks:
-                    try:
-                        cb.on_working_memory_update(phase.name, content_len)
-                    except Exception as exc:
-                        logger.warning('[Harness] callback error: %s', exc)
+                # Tier 1 Commit B (T-A1): emit the full wm text, not just length
+                from ..callbacks.events import WorkingMemoryUpdateEvent
+
+                wm_text = str(working_memory_after or "")
+                _safe_emit_event(
+                    active_callbacks,
+                    WorkingMemoryUpdateEvent(
+                        phase_name=phase.name,
+                        content_length=len(wm_text),
+                        content=wm_text,
+                    ),
+                )
 
             # Step 10: Clean up phase-local keys before returning state
             ctx.pop("_finish_task_result", None)
@@ -847,8 +1474,20 @@ class GraphAgentHarness:
 
             if passed:
                 retry_key = phase.retry_target or phase.name
+                # Tier 1 Commit A — T-B5 ValidationPassEvent
+                # Capture the retry count BEFORE popping so "how many retries
+                # did this phase consume before passing" is observable.
+                retries_used = next_state["retry_counts"].get(retry_key, 0)
                 next_state["retry_counts"].pop(retry_key, None)
                 next_state["context"].pop("_validation_warnings", None)
+                from ..callbacks.events import ValidationPassEvent
+                _safe_emit_event(
+                    active_callbacks,
+                    ValidationPassEvent(
+                        phase_name=phase.name,
+                        retry_count=retries_used,
+                    ),
+                )
                 return next_state
 
             # Validation failed
@@ -863,6 +1502,16 @@ class GraphAgentHarness:
                     "Phase '%s' exceeded max retries (%d). Continuing with warnings.",
                     phase.name,
                     phase.max_retries,
+                )
+                # Tier 1 Commit A — T-B12 RetryExhaustedEvent
+                from ..callbacks.events import RetryExhaustedEvent
+                _safe_emit_event(
+                    active_callbacks,
+                    RetryExhaustedEvent(
+                        phase_name=phase.name,
+                        max_retries=phase.max_retries,
+                        final_errors=list(errors),
+                    ),
                 )
                 next_state["context"]["_validation_warnings"] = errors
                 return next_state

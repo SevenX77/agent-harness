@@ -41,7 +41,27 @@ def get_available_tools(
         List of available tools.
     """
     config = get_app_config()
-    loaded_tools = [resolve_variable(tool.use, BaseTool) for tool in config.tools if groups is None or tool.group in groups]
+    loaded_tools_raw = [
+        (tool, resolve_variable(tool.use, BaseTool))
+        for tool in config.tools
+        if groups is None or tool.group in groups
+    ]
+
+    # Warn when the config ``name`` field and the tool object's ``.name``
+    # attribute diverge — this mismatch is the root cause of upstream
+    # issue #1803 where the LLM receives one name in its tool schema but the
+    # runtime router recognises a different name, producing "not a valid
+    # tool" errors.  The tool's own ``.name`` wins at binding time.
+    for cfg, loaded in loaded_tools_raw:
+        if cfg.name != loaded.name:
+            logger.warning(
+                "Tool name mismatch: config name %r does not match tool .name %r (use: %s). The tool's own .name will be used for binding.",
+                cfg.name,
+                loaded.name,
+                cfg.use,
+            )
+
+    loaded_tools = [t for _, t in loaded_tools_raw]
 
     # Conditionally add tools based on config
     builtin_tools = BUILTIN_TOOLS.copy()
@@ -98,4 +118,21 @@ def get_available_tools(
             logger.error(f"Failed to get cached MCP tools: {e}")
 
     logger.info(f"Total tools loaded: {len(loaded_tools)}, built-in tools: {len(builtin_tools)}, MCP tools: {len(mcp_tools)}")
-    return loaded_tools + builtin_tools + mcp_tools
+
+    # Deduplicate by tool name — config-loaded tools take priority, followed
+    # by built-ins and then MCP tools.  Duplicate names cause the LLM to
+    # receive ambiguous or concatenated function schemas (upstream issue
+    # #1803).
+    all_tools = loaded_tools + builtin_tools + mcp_tools
+    seen_names: set[str] = set()
+    unique_tools: list[BaseTool] = []
+    for t in all_tools:
+        if t.name not in seen_names:
+            unique_tools.append(t)
+            seen_names.add(t.name)
+        else:
+            logger.warning(
+                "Duplicate tool name %r detected and skipped — check your config.yaml and MCP server registrations (upstream issue #1803).",
+                t.name,
+            )
+    return unique_tools

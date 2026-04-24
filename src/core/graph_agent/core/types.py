@@ -34,12 +34,23 @@ class Phase:
     max_iterations: int = 20
     max_tool_calls: int = 0
     tier: str = "balanced"
+    # Task 6.1: when a phase wants to bypass the tier → role → model
+    # resolution and pin itself to a specific registered model (for A/B
+    # experiments or a single-model-role phase), it sets
+    # ``model_override`` to a code from llm_roles.yaml's ``models:``
+    # section. The resolver reads this **before** falling back to tier.
+    model_override: str | None = None
     validator: Callable[..., tuple[bool, list[str]]] | None = None
     retry_target: str | None = None
     max_retries: int = 3
     user_prompt_template: str | None = None
     requires_llm: bool = True
-    max_nudges: int = 3
+    # Task 6.5: nudge budget default drops from 3 to 1 — the cognitive
+    # guardrails are already strong, and three rounds of nudges per phase
+    # was accumulating far more latency than it recovered in practice.
+    # Skills that genuinely need the old behaviour can set
+    # ``max_nudges: 3`` in their phase_config.
+    max_nudges: int = 1
     dead_end_threshold: int = 3
     data_architecture: str | None = None
     subagent_enabled: bool = False

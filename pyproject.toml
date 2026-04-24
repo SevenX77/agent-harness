@@ -1,0 +1,66 @@
+[project]
+name = "graph-agent-harness"
+version = "0.1.0"
+description = "GraphAgent: SKILL.md-driven workflow harness layered on DeerFlow + LangGraph"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+# --- Version pins ----------------------------------------------------------
+# Upper bounds are mandatory, not cosmetic:
+#
+# * langchain<1.2.11  — langchain 1.2.11+ requires langgraph>=1.1.5, which
+#   conflicts with DeerFlow's own pyproject (langgraph<1.0.10). See
+#   .kiro/specs/graph-agent-optimizations/deferred-items.md §I-4.
+# * langgraph<1.0.10  — matches bytedance/deer-flow's harness constraint
+#   added in commit d7e51076 (2026-03-25, "tighten langgraph constraint").
+# * langgraph-prebuilt<1.0.9  — 1.0.9+ imports ExecutionInfo / ServerInfo
+#   from langgraph.runtime which do not exist in langgraph 1.0.x.
+#
+# Verified combo (runs the full 78-test pytest suite cleanly):
+#   langchain 1.2.4, langgraph 1.0.9, langgraph-prebuilt 1.0.8,
+#   langchain-core 1.3.1, pydantic 2.13.3
+# ---------------------------------------------------------------------------
+dependencies = [
+    "langchain>=1.2.3,<1.2.11",
+    "langchain-core>=1.3.1,<1.4.0",
+    "langchain-anthropic>=1.3.4,<1.5.0",
+    "langchain-deepseek>=1.0.1,<1.1.0",
+    "langchain-openai>=1.1.7,<1.3.0",
+    "langgraph>=1.0.6,<1.0.10",
+    "langgraph-prebuilt>=1.0.6,<1.0.9",
+    "langgraph-checkpoint>=4.0.0,<5.0.0",
+    "langgraph-checkpoint-sqlite>=3.0.3,<4.0.0",
+    "pydantic>=2.12.5,<3.0.0",
+    "pyyaml>=6.0.3,<7.0.0",
+    "httpx>=0.28.0,<0.29.0",
+    "anthropic>=0.96.0,<1.0.0",
+    "openai>=2.0.0,<3.0.0",
+    "markdownify>=1.2.2,<2.0.0",
+    "readabilipy>=0.3.0,<1.0.0",
+    "python-dotenv>=1.0.0,<2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.0,<10.0.0",
+    "pytest-asyncio>=0.24.0,<1.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# Source currently lives at src/core/graph_agent/ (pending Task 7.6 physical
+# move to packages/graph-agent/src/graph_agent/). The package maps to the
+# legacy path via the `sources` remap below so `import graph_agent.*` keeps
+# working regardless.
+packages = ["src/core/graph_agent"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src/core/graph_agent" = "graph_agent"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src/core"]
+addopts = "-ra"

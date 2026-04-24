@@ -53,22 +53,22 @@ io:
       target: artifact
 ---
 
-<node id="prepare">
-<ref path="nodes/01_prepare.md" />
-</node>
+<phase id="prepare">
+<ref path="phases/01_prepare.md" />
+</phase>
 
-<node id="entity_and_characters" depends_on="prepare">
-<ref path="nodes/02_entity_and_characters.md" />
-</node>
+<phase id="entity_and_characters" depends_on="prepare">
+<ref path="phases/02_entity_and_characters.md" />
+</phase>
 
-<node id="parallel_analysis" depends_on="entity_and_characters">
-<ref path="nodes/03_parallel_analysis.md" />
-</node>
+<phase id="parallel_analysis" depends_on="entity_and_characters">
+<ref path="phases/03_parallel_analysis.md" />
+</phase>
 
-<node id="continuity" depends_on="parallel_analysis">
-<ref path="nodes/04_continuity.md" />
-</node>
+<phase id="continuity" depends_on="parallel_analysis">
+<ref path="phases/04_continuity.md" />
+</phase>
 
-<node id="assemble" depends_on="continuity">
-<ref path="nodes/05_assemble.md" />
-</node>
+<phase id="assemble" depends_on="continuity">
+<ref path="phases/05_assemble.md" />
+</phase>

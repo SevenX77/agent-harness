@@ -154,8 +154,13 @@ def _split_by_phase_headers(content: str) -> list[tuple[str, str]]:
 
 
 # ---------------------------------------------------------------------------
-# Graph mode: <node> + <ref> patterns
+# Graph mode: <phase> / <node> + <ref> patterns
 # ---------------------------------------------------------------------------
+# Task 5.3: SKILL.md now accepts <phase id="..."> as the canonical spelling;
+# <node id="..."> stays supported so older skills keep loading during the
+# terminology migration (see COGNITIVE_LOOP_GUIDE.md and Task 5.5). The
+# compiler emits W-node-to-phase-migration to nudge authors toward the
+# phase form.
 
 _REF_PATTERN = re.compile(r'<ref\s+path="([^"]+)"\s*/>')
 
@@ -163,6 +168,27 @@ _NODE_PATTERN = re.compile(
     r'<node\s+id="([^"]+)"(?:\s+depends_on="([^"]+)")?\s*>(.*?)</node>',
     re.DOTALL,
 )
+
+# Task 5.3: SKILL.md now accepts <phase id="..."> as the canonical spelling;
+# <node id="..."> stays supported for backwards compatibility during the
+# terminology migration (see Task 5.5). Rather than branch the _NODE_PATTERN
+# regex — which would shift its positional capture groups and break the two
+# call sites in compiler.py / loader.py — we preprocess <phase> into <node>
+# once at load time. Callers never see the original tag name.
+_PHASE_OPEN_RE = re.compile(r'<phase(\s[^>]*)>')
+_PHASE_CLOSE_RE = re.compile(r'</phase>')
+
+
+def _normalise_phase_tags(content: str) -> str:
+    """Rewrite ``<phase ...>...</phase>`` to ``<node ...>...</node>``.
+
+    Keeps the two spellings semantically identical and lets the rest of
+    the parser stay unchanged. Attributes (``id``, ``depends_on``) and
+    whitespace are preserved verbatim.
+    """
+    content = _PHASE_OPEN_RE.sub(r'<node\1>', content)
+    content = _PHASE_CLOSE_RE.sub(r'</node>', content)
+    return content
 
 
 def _resolve_refs(content: str, base_dir: Path, *, _depth: int = 0) -> str:

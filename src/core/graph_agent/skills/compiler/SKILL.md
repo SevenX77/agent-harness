@@ -73,10 +73,10 @@ result = run_skill("src/core/graph_agent/skills/compiler/SKILL.md", target_skill
 
 ---
 
-<node id="compile_check">
-<ref path="nodes/01_compile_check.md" />
-</node>
+<phase id="compile_check">
+<ref path="phases/01_compile_check.md" />
+</phase>
 
-<node id="auto_fix" depends_on="compile_check">
-<ref path="nodes/02_auto_fix.md" />
-</node>
+<phase id="auto_fix" depends_on="compile_check">
+<ref path="phases/02_auto_fix.md" />
+</phase>

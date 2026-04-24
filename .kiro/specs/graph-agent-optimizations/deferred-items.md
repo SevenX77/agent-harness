@@ -154,14 +154,30 @@
 
 #### D-7.1 - D-7.4 Harness 拆 4 合作者
 
-- [ ] **原 Task**：7.1/7.2/7.3/7.4
-- **依赖**：D-7.0 必须先进；最好在 D-Golden-Baseline（见四）录好快照之后再拆
-- **下一步**：
-  - 7.1 GraphBuilder 抽 `_build_graph()`
-  - 7.2 PhaseExecutor 抽 `_build_phase_node` / `_build_code_only_node` / `_build_subgraph_node`
-  - 7.3 RetryRouter 抽 `_should_retry` + routing
-  - 7.4 NudgeInjector 抽 planning/selfcheck/standard nudge
-- **估时**：1-2 天，独立分支 `refactor/harness-split`
+- [x] **7.1 GraphBuilder** — done 2026-04-24（`refactor/harness-split` 分支，commit `bf5c33a`）。从 `harness.py` 抽出 `_build_graph` + `_calc_recursion_limit` 到 `src/core/graph_agent/core/graph_builder.py`。4 个薄 wrapper `_build_llm_node` / `_build_validation_node` / `_build_code_only_node` 同步删除（GraphBuilder 用内联 `_make_*_node` 代替）；`_build_subgraph_node` 保留在 harness 上，作为 `subgraph_node_factory` 注入给 GraphBuilder。Compile-time collaborator，不接 RunContext（lifecycle mismatch，同 RetryRouter）。新增 9 个单测。
+- [x] **7.2 PhaseExecutor** — **Phase A** done 2026-04-24（commits `219c3da` / `cf1bea6` / `8e91bfc`）。三个 execute method 全部迁移到 `phase_executor.py`：`execute_code_only_phase`（step 4.1）、`execute_validation_phase`（step 4.2）、`execute_llm_phase`（step 4.3，440 行 DeerFlow agent loop）。新增 7+8 个单测 + 更新 `test_compaction_closure_scope.py` 扫 harness+phase_executor 两个文件。**Phase B 未做**：把 `_active_heartbeat` / `_active_run_context` 搬离 harness 实例 + 用 LangGraph `RunnableConfig["configurable"]` 透传 PhaseExecutor + 删 `subgraph.py` FIXME — 作为独立任务跟踪（见 deferred-items 新增的 D-7.2 Phase B）。
+- [x] **7.3 RetryRouter** — done 2026-04-24（commit `0dd51b0`）。`_should_retry` + `_get_next_phase_node` 搬到 `src/core/graph_agent/core/retry_router.py`。API 形状保留闭包工厂（`build_route_callback`），跟 LangGraph `add_conditional_edges` idiomatic 对齐。Compile-time collaborator，构造只吃 `phases: list[Phase]`；Gemini 指出加 RunContext 是 lifecycle mismatch（图在 `__init__` 时就编译，那时 RunContext 还没创建）。新增 9 个单测（含 late-binding 回归守卫）。
+- [x] **7.4 NudgeInjector** — done 2026-04-24（commit `a7f85b5`）。3 种 nudge 的 counter + policy + `_has_structured_selfcheck` 都搬到 `src/core/graph_agent/core/nudge_injector.py`。Option β API（`NudgeOutcome` dataclass + `try_selfcheck` / `try_planning` / `try_standard`）。保留原 increment-before-check quirk（加 FIXME 注释，Gemini 二轮辩论确认不等价、不能"顺便清理"）。构造接 explicit `callbacks: list[Callback]`（而非 RunContext），以保留原 nudge callback 作用域（只 `harness.callbacks`，不含 subgraph 转发的 extra_callbacks）。新增 19 个单测。
+- **分支**：`refactor/harness-split`（尚未合并到 main）。
+- **状态**：D-7.1 / 7.3 / 7.4 完整落地；D-7.2 Phase A 完成，Phase B 列为独立任务（见下）。
+- **baseline**：200 → 252 tests passing（+52 新单测）。
+- **harness.py 瘦身**：1580 → 927 行（-653）。目标 300-400 行没达到——剩余行是 `run()` / `resume()` / `get_thread_status()` / HITL / IO / checkpointer 解析这些 facade 职责，Phase B 会再瘦 ~100 行。
+
+#### D-7.2 Phase B — fix subgraph race (新增)
+
+- [ ] **原 Task**：7.2 的并发修复部分（context.md §12.2 明确要求）
+- **依赖**：D-7.1 / D-7.2 Phase A 完成（即 `refactor/harness-split` 分支当前状态）
+- **动作**：
+  1. 把 `_active_heartbeat` + `_active_run_context` 字段从 `GraphAgentHarness` 实例移到 `PhaseExecutor` 实例
+  2. `run()` / `resume()` 每次新建 `PhaseExecutor(callbacks, heartbeat=..., run_context=...)`，作为 per-run 对象
+  3. 通过 LangGraph `RunnableConfig["configurable"]["_phase_executor"]` 透传给 graph nodes（Gemini 明确方案 D）
+  4. GraphBuilder 里的 `_make_*_node` 改签名 `def execute(state, config)`，从 config 取 executor
+  5. `_get_active_run_options` 改为接收 run_context 作为参数（唯一调用者是 `subgraph.py` L61）
+  6. 删除 `phase_executor.py` 的 `self._harness` scaffolding
+  7. 删除 `subgraph.py` L120-131 的 FIXME 注释
+- **原因**：当前并发 `child.run()` 调用同一 child 实例会互相覆盖 `_active_heartbeat` / `_active_run_context`（parallel_map 场景触发）。Phase B 是真正消除这个 race 的提交。
+- **估时**：半天到一天
+- **风险**：改动跨 harness.py / phase_executor.py / subgraph.py / 相关测试；cross-file 联动需要仔细 pytest。
 
 #### D-7.5 全量回归
 

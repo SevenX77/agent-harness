@@ -180,12 +180,10 @@
 
 #### D-Resume-RuntimeInputs 恢复缺陷（pre-existing, Gemini audit 2026-04-24）
 
-- [ ] **问题**：`harness.resume()` 重建 RunContext 时 `runtime_inputs={}` 写死为空（harness.py 约 L862-L891）
+- [x] **第一步** (2026-04-24 post-merge, `fix/post-merge-d-cleanup` 分支): `resume()` 接口新增 `runtime_inputs_map: dict | None = None` 参数（Gemini 建议方向 b）。默认 None → 原来的 `{}` 行为保留，不破坏现有 caller；有状态恢复需求的 caller 传回原 run 的 map 即可。
+- [ ] **第二步**（未做，等 E）: 自动持久化 runtime_inputs 到 checkpointer，让 caller 不用手动重传。阻塞原因：runtime_inputs 可能包含非 picklable 值（Path / open handle / callable），LangGraph 的 msgpack checkpointer 会挂或截断。需要先定义"可持久化子集"或引入 opt-in 标记；等 E 任务的 golden baseline 揭露哪些字段实际被下游依赖后再定。
 - **严重程度**：中。中断恢复（尤其跨进程 / 跨天）时，原始 `runtime_inputs_map` 已丢失。下游组件如 `StorageManager` 寻找 `pipeline_prefix` 等若依赖它，恢复后行为会与原始 run 不一致。
 - **非 D 引入**：main baseline 上的 `resume()` 也是 `runtime_inputs={}`。D-7.2 Phase B 保持了原语义。不是 refactor regression。
-- **Gemini 建议方向**：（a）关键 `runtime_inputs` 字段在 `run()` 时写入 `WorkflowState["context"]` 一起持久化到 checkpointer；（b）`resume()` 接口新增 `runtime_inputs_map` 参数要求调用方重传
-- **估时**：半天（含选型 + 测）
-- **后续**：等 E 任务的 Golden Baseline 跑通后，从 HITL + subgraph 复合场景验证是否真会触发，再决定修复优先级
 
 #### D-7.5 全量回归
 

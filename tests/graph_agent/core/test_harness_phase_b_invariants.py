@@ -80,6 +80,52 @@ class TestGraphBuilderNoPhaseExecutor:
         )
 
 
+class TestResumeRuntimeInputsRestore:
+    """resume() accepts `runtime_inputs_map` so mid-run state recovery is possible.
+
+    Pre-D-7.2 baseline had this hardcoded to {} — Gemini flagged it as a
+    correctness gap on 2026-04-24 (downstream components like
+    ``StorageManager.pipeline_prefix`` read runtime_inputs via
+    ``_get_active_run_options``, so the empty-dict on resume silently
+    diverges from the original run). This commit exposes the knob; the
+    default (None → {}) preserves the historical behaviour.
+    """
+
+    def test_resume_signature_accepts_runtime_inputs_map(self):
+        import inspect
+        from graph_agent.core.harness import GraphAgentHarness
+
+        sig = inspect.signature(GraphAgentHarness.resume)
+        assert "runtime_inputs_map" in sig.parameters, (
+            "resume() must accept runtime_inputs_map= so callers can restore "
+            "per-run inputs across a HITL resume."
+        )
+        # Keyword-only default (None) preserves the historical {} behaviour.
+        assert sig.parameters["runtime_inputs_map"].default is None
+
+    def test_get_active_run_options_projects_runtime_inputs(self):
+        from graph_agent.core.harness import GraphAgentHarness
+        from graph_agent.core.run_context import RunContext
+        from graph_agent.core.types import Phase
+
+        harness = GraphAgentHarness(phases=[Phase(name="only", requires_llm=False)])
+        ctx = RunContext(thread_id="t", runtime_inputs={"pipeline": "p1", "batch": 3})
+
+        options = harness._get_active_run_options(ctx)
+
+        # The dict is a shallow copy (mutating the projection must not leak back).
+        assert options["runtime_inputs"] == {"pipeline": "p1", "batch": 3}
+        options["runtime_inputs"]["mutation"] = "leak"
+        assert "mutation" not in ctx.runtime_inputs
+
+    def test_get_active_run_options_returns_empty_dict_when_no_run_context(self):
+        from graph_agent.core.harness import GraphAgentHarness
+        from graph_agent.core.types import Phase
+
+        harness = GraphAgentHarness(phases=[Phase(name="only", requires_llm=False)])
+        assert harness._get_active_run_options(None) == {}
+
+
 class TestSubgraphFixmeGone:
     """The concurrent-child.run() race FIXME was removed from subgraph.py."""
 

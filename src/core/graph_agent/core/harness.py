@@ -433,9 +433,18 @@ class GraphAgentHarness:
         artifact_saver: Callable[..., Any] | None = None,
         storage_manager: Any | None = None,
         runtime_inputs_map: dict[str, Any] | None = None,
+        extra_callbacks: list[Callback] | None = None,
         **runtime_inputs: Any,
     ) -> WorkflowState:
-        """Execute the complete multi-phase workflow."""
+        """Execute the complete multi-phase workflow.
+
+        ``extra_callbacks`` are appended to ``self.callbacks`` for the
+        duration of this run without mutating the attribute. Used by
+        ``subgraph.execute`` to forward parent callbacks into a child
+        harness concurrency-safely (a child harness instance may be
+        invoked from multiple parent runs in parallel; mutating
+        ``child.callbacks`` directly would cross-wire them).
+        """
         effective_runtime_inputs = dict(runtime_inputs_map or {})
         effective_runtime_inputs.update(runtime_inputs)
         if initial_context is None:
@@ -473,6 +482,13 @@ class GraphAgentHarness:
         # dict — it stored identical fields.
         previous_run_context = self._active_run_context
         active_callbacks = list(self.callbacks) if hasattr(self, 'callbacks') else []
+        # Merge extra_callbacks (from subgraph parent forwarding) without
+        # mutating self.callbacks — concurrency-safe because the merged
+        # list is local to this invocation.
+        if extra_callbacks:
+            for cb in extra_callbacks:
+                if cb not in active_callbacks:
+                    active_callbacks.append(cb)
         self._active_run_context = RunContext(
             thread_id=tid,
             trace_dir=effective_trace_dir,

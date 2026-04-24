@@ -491,6 +491,7 @@ class GraphAgentHarness:
                     active_callbacks.append(cb)
         self._active_run_context = RunContext(
             thread_id=tid,
+            run_id=run_id,
             trace_dir=effective_trace_dir,
             runtime_inputs=dict(effective_runtime_inputs),
             storage_manager=storage_manager,
@@ -844,10 +845,22 @@ class GraphAgentHarness:
 
         # D-7.0 follow-through: install RunContext for resume path too
         # (previously only run() built one; resume left it stale).
+        # run_id is inherited from the paused state so compaction sidecars
+        # written during the resumed run share the same _history/{run_id}/
+        # directory as sidecars from the original run — Studio can then
+        # fold pre-pause and post-resume sidecars under one thread.
         previous_run_context = self._active_run_context
         active_callbacks = list(self.callbacks) if hasattr(self, "callbacks") else []
+        inherited_run_id = ""
+        try:
+            raw = state["context"].get("_run_id") if isinstance(state.get("context"), dict) else None
+            if isinstance(raw, str):
+                inherited_run_id = raw
+        except Exception:  # noqa: BLE001
+            logger.warning("[Harness] resume could not read _run_id from state; continuing with empty run_id")
         self._active_run_context = RunContext(
             thread_id=str(effective_thread_id or ""),
+            run_id=inherited_run_id,
             trace_dir=trace_dir if isinstance(trace_dir, Path) else None,
             runtime_inputs={},
             storage_manager=(
@@ -1285,17 +1298,25 @@ class GraphAgentHarness:
                             content=wm_text,
                         ),
                     )
-                    # Sidecar write for compaction: see _save_compaction_sidecar
+                    # Sidecar write for compaction: see _save_compaction_sidecar.
+                    # Read run_id / storage_manager from the active RunContext —
+                    # they're NOT in this closure's scope (the closure is built
+                    # at __init__ time, before any run_id exists). Gemini audit
+                    # 2026-04-24 caught this as a latent NameError that only
+                    # fired when compaction actually triggered at runtime.
                     removed_messages = (
                         current_messages[:-2]
                         if len(current_messages) > 2
                         else []
                     )
-                    sidecar_ref = self._save_compaction_sidecar(
-                        run_id=run_id,
+                    active_ctx = harness._active_run_context
+                    sidecar_ref = harness._save_compaction_sidecar(
+                        run_id=(active_ctx.run_id if active_ctx else ""),
                         idx=checkpoint_count,
                         removed_messages=removed_messages,
-                        storage_manager=storage_manager,
+                        storage_manager=(
+                            active_ctx.storage_manager if active_ctx else None
+                        ),
                     )
                     removed_summary = (
                         f"Compacted {removed_pairs} message pair(s) at checkpoint "

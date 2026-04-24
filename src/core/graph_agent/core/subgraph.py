@@ -117,6 +117,18 @@ def build_subgraph_node(
                 )
 
         subgraph_start = _time.monotonic()
+        # FIXME(D-7.2 PhaseExecutor): child harness instance-level state
+        # (``_active_heartbeat`` / ``_active_run_context``) is overwritten on
+        # every ``child.run`` call. If the same ``child`` instance is invoked
+        # concurrently — e.g. a parallel_map fans out two siblings into the
+        # same subgraph reference — the second invocation clobbers the first's
+        # run state. The P1-1 fix (this file, 2026-04-24) handled the
+        # ``callbacks`` list racing via ``extra_callbacks`` but did not touch
+        # the instance attributes; Gemini audit 2026-04-24 flagged it as a
+        # latent concurrency bug. The clean fix is to move the run-state to a
+        # per-invocation ``PhaseExecutor`` object during the harness split
+        # (D-7.2). Until then, do NOT share one ``child`` instance across
+        # concurrent parallel_map branches.
         try:
             child_state = child.run(
                 initial_context=child_inputs,

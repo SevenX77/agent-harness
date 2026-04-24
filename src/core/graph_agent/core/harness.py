@@ -31,6 +31,7 @@ from langgraph.graph import END, StateGraph
 
 from .run_context import RunContext
 from .nudge_injector import NudgeInjector
+from .phase_executor import PhaseExecutor
 from .retry_router import RetryRouter
 from .callback_bridge import (
     _HarnessCallbackBridge,
@@ -379,6 +380,10 @@ class GraphAgentHarness:
         self._active_heartbeat: _HeartbeatPulser | None = None
         # D-7.3 — compile-time routing collaborator; reused across runs.
         self._retry_router = RetryRouter(phases)
+        # D-7.2 step 4.1 — PhaseExecutor bound to ``self.callbacks``
+        # reference. Phase B (step 4.4) will switch this to a per-run
+        # executor created in ``run()`` + passed through RunnableConfig.
+        self._phase_executor = PhaseExecutor(self.callbacks)
         self._graph = self._build_graph()
 
     @staticmethod
@@ -1470,36 +1475,16 @@ class GraphAgentHarness:
         return validate
 
     def _build_code_only_node(self, phase: Phase) -> Callable[[WorkflowState], WorkflowState]:
-        """Build a pure code node (requires_llm=False)."""
-        harness = self
+        """Build a pure code node (``requires_llm=False``).
+
+        Body migrated to ``PhaseExecutor.execute_code_only_phase`` (D-7.2
+        step 4.1); this stays as a thin factory so ``_build_graph``'s
+        ``add_node`` calls keep their current shape.
+        """
+        executor = self._phase_executor
 
         def execute(state: WorkflowState) -> WorkflowState:
-            next_state = _clone_state(state)
-            active_callbacks = harness.callbacks
-            for cb in active_callbacks:
-                cb.on_phase_start(phase.name, dict(next_state["context"]))
-
-            if phase.tools:
-                logger.info(
-                    "[CodeOnly] Executing %d tool(s) for phase=%s",
-                    len(phase.tools),
-                    phase.name,
-                )
-                for fn in phase.tools:
-                    result = fn(next_state["context"])
-                    if isinstance(result, str):
-                        next_state["context"]["_last_output"] = result
-
-            # Discard retry feedback AFTER tools execute so tools can inspect it,
-            # but before the state is returned to prevent leaking to the next phase.
-            next_state["context"].pop("_retry_feedback", None)
-
-            next_state["current_phase"] = phase.name
-
-            for cb in active_callbacks:
-                cb.on_phase_end(phase.name, dict(next_state["context"]), dict(next_state["metrics"]))
-
-            return next_state
+            return executor.execute_code_only_phase(phase, state)
 
         return execute
 

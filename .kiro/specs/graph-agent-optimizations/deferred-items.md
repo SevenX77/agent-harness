@@ -178,6 +178,15 @@
 - **pytest**：258 passing（200 baseline + 58 新单测总和）
 - **why 这次能真正消除 race**：concurrent `child.run()` on same child instance 现在各自在栈上持有自己的 `PhaseExecutor`（per-invocation 对象），通过 LangGraph 的 config 字典透传进 graph nodes；两个并发调用各有独立的 config dict，不共享任何实例字段，所以不存在旧的"第二次 `self._active_heartbeat = ...` 覆盖第一次"问题。
 
+#### D-Resume-RuntimeInputs 恢复缺陷（pre-existing, Gemini audit 2026-04-24）
+
+- [ ] **问题**：`harness.resume()` 重建 RunContext 时 `runtime_inputs={}` 写死为空（harness.py 约 L862-L891）
+- **严重程度**：中。中断恢复（尤其跨进程 / 跨天）时，原始 `runtime_inputs_map` 已丢失。下游组件如 `StorageManager` 寻找 `pipeline_prefix` 等若依赖它，恢复后行为会与原始 run 不一致。
+- **非 D 引入**：main baseline 上的 `resume()` 也是 `runtime_inputs={}`。D-7.2 Phase B 保持了原语义。不是 refactor regression。
+- **Gemini 建议方向**：（a）关键 `runtime_inputs` 字段在 `run()` 时写入 `WorkflowState["context"]` 一起持久化到 checkpointer；（b）`resume()` 接口新增 `runtime_inputs_map` 参数要求调用方重传
+- **估时**：半天（含选型 + 测）
+- **后续**：等 E 任务的 Golden Baseline 跑通后，从 HITL + subgraph 复合场景验证是否真会触发，再决定修复优先级
+
 #### D-7.5 全量回归
 
 - [ ] **原 Task**：7.5

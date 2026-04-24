@@ -37,9 +37,14 @@ from .core.runner import run_skill, clear_cache  # noqa: E402
 from .io.skill_analyzer import get_skill_type  # noqa: E402
 from .core.state import WorkflowState  # noqa: E402
 from .core.manifest import (  # noqa: E402
-    GraphSkillManifest,
-    PhaseConfig,
-    SimpleSkillManifest,
+    AgentProfile,
+    AgentSkillDef,
+    DelegatePhase,
+    GraphSkillDef,
+    LLMPhase,
+    LogicPhase,
+    PersonaSkillDef,
+    PhaseDef,
     SkillManifest,
 )
 
@@ -68,7 +73,12 @@ __all__ = [
     "AllProvidersFailedError",
     "MaxRetriesExceededError",
     "SkillManifest",
-    "GraphSkillManifest",
-    "SimpleSkillManifest",
-    "PhaseConfig",
+    "AgentProfile",
+    "AgentSkillDef",
+    "GraphSkillDef",
+    "PersonaSkillDef",
+    "PhaseDef",
+    "LLMPhase",
+    "LogicPhase",
+    "DelegatePhase",
 ]

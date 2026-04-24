@@ -5,38 +5,81 @@ sites (``core/parser.py``, ``core/loader.py``, ``core/compiler.py``,
 ``deerflow/skills/parser.py`` — see Studio Phase 0 plan at
 ``docs/superpowers/plans/2026-04-22-graph-agent-studio.md``).
 
-Scope of *this* module (Task 0.1): define the shape. The integration
-with the parsers (Task 0.3) and the reverse-serialisation (Task 0.2)
-ship as separate PRs so the diff surface stays reviewable.
+Three-axis taxonomy
+===================
 
-Vocabulary decisions
+After a 3-round Claude/Gemini architectural debate (2026-04-24), the
+skill ecosystem is modelled on **three orthogonal axes**:
+
+1. **Artifact Level** (file-level, discriminated by ``type:``):
+   - ``type: agent``   — single-turn agent, DeerFlow Agent Loop driven,
+                         has an ``agent_profile``, no phases/io.
+   - ``type: graph``   — state-machine orchestration, declared ``io:``
+                         and ordered ``phases:``.
+   - ``type: persona`` — pure knowledge injection (no execution engine),
+                         embedded into other skills via ``adopted_persona``
+                         and compiled to ``Prompt -> LLM -> StructuredOutput``
+                         (single-shot chain, NOT a ReAct loop).
+
+2. **Phase Execution Level** (node-level, discriminated by ``mode:``
+   inside each ``GraphSkillDef.phases`` entry, strictly mutually
+   exclusive):
+   - ``mode: llm``      — LLM-driven ReAct loop with ``agent_tools``.
+   - ``mode: logic``    — deterministic Python runtime with
+                          ``execute_steps`` (Python callable import paths).
+   - ``mode: delegate`` — invokes another Graph/Agent skill via
+                          ``subgraph:`` + ``context_bridge``; the child
+                          skill owns its own iteration, so
+                          ``max_iterations`` is forbidden on this mode.
+
+3. **Delegation Mechanism** (tool-level, how a phase reaches other
+   skills — these three are *mutually exclusive* per phase, not new
+   artifact types):
+   - ``subgraph:`` — compile-time composition (Edge control flow).
+   - ``sub_skills:`` — semantic routing: the LLM picks at runtime
+                       which registered skill to Tool-Call into.
+   - ``subagent_enabled:`` — ad-hoc generation: the LLM spawns an
+                             anonymous sub-agent with no SKILL.md.
+
+Reference resolution
 ====================
 
-The plan's first draft proposed ``type: graph|code`` and
-``target: file|artifact_manager``. Every existing production skill
-actually uses ``type: simple`` (not ``code``) and ``target: artifact``
-(not ``artifact_manager``). Acceptance criterion for this module ("5
-business skills all validate") requires the real vocabulary; the plan's
-future-vocabulary proposal is deferred until an explicit migration.
+``subgraph``, ``sub_skills[*]``, and ``adopted_persona`` are all plain
+strings that follow the Hybrid resolver rules:
 
-Real phase_config fields (discovered by grep'ing ``skills/*/phases/``)
-that the plan missed:
+- ``"./subskills/format_scene"`` → strict nested (relative to the
+  current SKILL.md file).
+- ``"producer"`` (bare name) → **global registry only**; shadow copies
+  at ``./subskills/producer`` are ignored. Bare name never falls back
+  to local lookup (WYSIWYG, prevents silent behaviour drift on copy-paste).
 
-* ``max_iterations`` — agent-loop iteration cap (plan wrote ``max_retries``)
-* ``subgraph`` — path to a child SKILL.md for composition
-* ``context_bridge`` — input/output wiring for subgraph phases
-* ``subagent_enabled`` — toggle for DeerFlow subagent middleware
+The resolver itself lives in the compiler (not in this schema). This
+module only declares the reference type.
 
-Plan-originated *new* fields (not in any real skill yet) kept here as
-optional so Studio can start writing them without a schema bump:
+Compiler rules enforced here
+============================
 
-* ``Step`` entries with ``goal`` / ``when`` / ``skip_if`` / ``tools``
-* ``PhaseConfig.model_override`` — phase-level model override by codename
-* ``PhaseConfig.output_schema`` — Pydantic schema name for output validation
+Constraints that can be expressed structurally are enforced by
+``extra='forbid'`` + the discriminated unions. Rules requiring cross-
+field inspection use ``@model_validator``:
 
-``extra="forbid"`` is set at every level so a typo'd key
-(``max_iteration`` vs ``max_iterations``) fails loudly rather than
-silently dropping the value.
+- Rule 1 (node-engine exclusivity): automatic via ``PhaseDef`` discriminator.
+- Rule 2 (delegate determinism): ``DelegatePhase`` simply lacks the
+  forbidden fields (``max_iterations``, ``prompt``, ``agent_tools``, ...).
+- Rule 3 (top-level structure): automatic via ``SkillManifest``
+  discriminator + each variant's field surface.
+- Rule 4 (persona purity): ``PersonaSkillDef`` declares only knowledge
+  fields; ``extra='forbid'`` kills any attempt to add ``phases``,
+  ``tools``, or execution-bearing keys.
+- Rule 5 (context_bridge static type check) — deferred to a dedicated
+  ``validators/context_bridge.py`` module that consumes manifests; it
+  is not a Pydantic validator because it needs the child manifest
+  loaded (cross-file information).
+
+Schema is version ``2.0``. The ``1.x`` vocabulary (``type: simple``,
+untagged phases, ``tools:``) is intentionally removed — Phase 0 is an
+all-at-once rewrite. Production SKILL.md files migrate in Task 0.3
+(parser refactor).
 """
 
 from __future__ import annotations
@@ -44,6 +87,11 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+# =============================================================================
+# Atomic structures (reused across artifact types / phase modes)
+# =============================================================================
 
 
 class IoInput(BaseModel):
@@ -69,7 +117,7 @@ class IoOutput(BaseModel):
 
 
 class IoDeclaration(BaseModel):
-    """Top-level ``io:`` block on graph-type skills."""
+    """Top-level ``io:`` block — required on ``type: graph`` skills."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -78,7 +126,7 @@ class IoDeclaration(BaseModel):
 
 
 class Step(BaseModel):
-    """A single step inside a phase — Studio-introduced, not in legacy skills.
+    """A single conditional step inside an ``LLMPhase.steps``.
 
     ``when`` and ``skip_if`` are simpleeval expressions evaluated at
     run time with the phase's context as the namespace.
@@ -95,7 +143,13 @@ class Step(BaseModel):
 
 
 class ContextBridge(BaseModel):
-    """Input/output wiring for a subgraph-delegating phase."""
+    """Input/output wiring for a ``DelegatePhase``.
+
+    Only valid on ``mode: delegate``. The compiler's
+    ``validators/context_bridge.py`` (Rule 5) statically type-checks
+    these mappings against the child skill's ``io:`` declaration at
+    load time.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -103,97 +157,164 @@ class ContextBridge(BaseModel):
     outputs: dict[str, str] = Field(default_factory=dict)
 
 
-class SubSkillSpec(BaseModel):
-    """A dynamically-dispatchable sub-skill declared inside a phase.
-
-    LLM-driven dispatch (the phase's agent chooses which named sub_skill
-    to call) — contrast with ``subgraph:``, which is static composition
-    decided at compile time. The two are mutually exclusive
-    (F-subgraph-exclusive-sub-skills).
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(min_length=1)
-    path: str = Field(min_length=1)
+# =============================================================================
+# Phase multi-mode (discriminated union on ``mode:``)
+# =============================================================================
 
 
-class PhaseConfig(BaseModel):
-    """One ``<phase_config>`` block's worth of declarations.
-
-    Every field is optional because a phase_config can be sparse in
-    legitimate ways:
-
-    * A code-only phase has just ``name`` + ``tools``.
-    * A subgraph phase has ``name`` + ``subgraph`` + ``context_bridge``.
-    * A full LLM phase has ``name`` + ``tier`` + ``tools`` +
-      ``validator`` + loop caps.
-
-    Business rules (e.g. "subgraph + tools mutually exclusive") live in
-    the compiler, not in this schema.
-    """
+class _BasePhase(BaseModel):
+    """Fields shared by all three phase engines."""
 
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1)
     tier: Literal["premium", "balanced", "fast"] | None = None
     model_override: str | None = None
-    type: str | None = None
-    tools: list[str] = Field(default_factory=list)
-    steps: list[Step] = Field(default_factory=list)
-    sub_skills: list[SubSkillSpec] = Field(default_factory=list)
+
+
+class LLMPhase(_BasePhase):
+    """LLM-driven phase with a ReAct/Tool-calling loop.
+
+    All three delegation mechanisms (``sub_skills``, ``subagent_enabled``)
+    plus ``adopted_persona`` live here. ``subgraph:`` does NOT — static
+    composition is a different phase mode (``DelegatePhase``).
+    """
+
+    mode: Literal["llm"]
+    prompt: str | None = None
+    agent_tools: list[str] = Field(default_factory=list)
+    sub_skills: list[str] = Field(default_factory=list)
+    subagent_enabled: bool = False
+    adopted_persona: str | None = None
+    max_iterations: int | None = None
+    max_retries: int | None = None
+    max_nudges: int | None = None
     validator: str | None = None
     retry_target: str | None = None
-    max_retries: int | None = None
-    max_iterations: int | None = None
-    max_nudges: int | None = None
     output_schema: str | None = None
-    subgraph: str | None = None
-    context_bridge: ContextBridge | None = None
-    subagent_enabled: bool | None = None
+    steps: list[Step] = Field(default_factory=list)
 
 
-class _SkillManifestBase(BaseModel):
-    """Shared fields across graph / simple skill types.
+class LogicPhase(_BasePhase):
+    """Deterministic Python-runtime phase, no LLM involvement.
 
-    Not exported — callers discriminate on ``type`` via ``SkillManifest``.
+    ``execute_steps`` holds Python callable import paths (e.g.
+    ``"script.segmenter.prepare_chapter"``) which are invoked in order.
+    This is NOT the ``LLMPhase.tools`` field — those entries need JSON
+    Schema + Description for Function Calling, whereas ``execute_steps``
+    only needs import paths. Conflating them was the core design flaw
+    the 1.x vocabulary carried.
     """
+
+    mode: Literal["logic"]
+    execute_steps: list[str] = Field(min_length=1)
+    validator: str | None = None
+
+
+class DelegatePhase(_BasePhase):
+    """Static-composition phase: invokes another Graph/Agent skill.
+
+    The child skill owns its own iteration and prompt machinery, so
+    ``max_iterations``, ``prompt``, ``agent_tools``, ``sub_skills``,
+    and ``subagent_enabled`` are all *absent by construction* —
+    ``extra='forbid'`` on ``_BasePhase`` rejects them.
+    """
+
+    mode: Literal["delegate"]
+    subgraph: str = Field(min_length=1)
+    context_bridge: ContextBridge
+
+
+PhaseDef = Annotated[
+    Union[LLMPhase, LogicPhase, DelegatePhase],
+    Field(discriminator="mode"),
+]
+"""Discriminated union over ``mode``. Use
+``pydantic.TypeAdapter(PhaseDef).validate_python(data)`` or reference
+through ``GraphSkillDef.phases``."""
+
+
+# =============================================================================
+# Artifact-level types (discriminated union on ``type:``)
+# =============================================================================
+
+
+class _BaseSkill(BaseModel):
+    """Shared metadata fields across all three artifact types."""
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["2.0"] = "2.0"
     name: str = Field(min_length=1, max_length=64)
     description: str = Field(max_length=1024)
-    phases: list[PhaseConfig] = Field(default_factory=list)
-    context_mapping: dict[str, str] = Field(default_factory=dict)
     license: str | None = None
     version: str | None = None
     author: str | None = None
     metadata: dict[str, Any] | None = None
 
 
-class GraphSkillManifest(_SkillManifestBase):
-    """A ``type: graph`` skill — multi-phase orchestration with declared io."""
+class AgentProfile(BaseModel):
+    """Anthropic-compatible role/goal/steps declaration for agent skills.
+
+    The compiler assembles ``role`` + ``goal`` + ``steps`` + ``constraints``
+    into the final System Prompt sent to DeerFlow's agent loop.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: str = Field(min_length=1)
+    goal: str = Field(min_length=1)
+    steps: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+
+
+class AgentSkillDef(_BaseSkill):
+    """A ``type: agent`` skill — single-turn DeerFlow Agent Loop.
+
+    Replaces the 1.x ``type: simple``. The rename signals the
+    Anthropic-compatible surface area (role/goal/steps/constraints).
+    """
+
+    type: Literal["agent"]
+    agent_profile: AgentProfile
+    agent_tools: list[str] = Field(default_factory=list)
+    sub_skills: list[str] = Field(default_factory=list)
+    subagent_enabled: bool = False
+    adopted_persona: str | None = None
+    context_mapping: dict[str, str] = Field(default_factory=dict)
+
+
+class GraphSkillDef(_BaseSkill):
+    """A ``type: graph`` skill — multi-phase state-machine orchestration."""
 
     type: Literal["graph"]
     io: IoDeclaration
+    phases: list[PhaseDef] = Field(min_length=1)
+    context_mapping: dict[str, str] = Field(default_factory=dict)
 
 
-class SimpleSkillManifest(_SkillManifestBase):
-    """A ``type: simple`` skill — single-turn agent, no formal io block.
+class PersonaSkillDef(_BaseSkill):
+    """A ``type: persona`` skill — pure knowledge injection, no execution.
 
-    Simple skills read inputs through ``context_mapping`` template
-    variables and emit their result via the agent's final tool call
-    (``finish_task``). They have exactly one phase_config in practice
-    but the schema does not enforce cardinality — the compiler does.
+    Compiled to a single-shot ``Prompt -> LLM -> StructuredOutput`` chain
+    when referenced via ``adopted_persona``. Crucially lacks ``phases``,
+    ``tools``, ``sub_skills``, and any other execution-bearing fields —
+    ``extra='forbid'`` enforces purity.
+
+    ``few_shot_examples`` is a list (not a concatenated string) so the
+    compiler can materialise them as pre-filled ``messages`` history on
+    providers that support it (e.g. Anthropic API), rather than wedging
+    them into the System Prompt.
     """
 
-    type: Literal["simple"]
-    io: IoDeclaration | None = None
+    type: Literal["persona"]
+    role_profile: str = Field(min_length=1)
+    evaluation_rubrics: str | None = None
+    few_shot_examples: list[str] = Field(default_factory=list)
 
 
 SkillManifest = Annotated[
-    Union[GraphSkillManifest, SimpleSkillManifest],
+    Union[AgentSkillDef, GraphSkillDef, PersonaSkillDef],
     Field(discriminator="type"),
 ]
 """Discriminated union over ``type``. Use ``pydantic.TypeAdapter`` to
@@ -201,14 +322,18 @@ validate: ``TypeAdapter(SkillManifest).validate_python(data)``."""
 
 
 __all__ = [
+    "AgentProfile",
+    "AgentSkillDef",
     "ContextBridge",
-    "GraphSkillManifest",
+    "DelegatePhase",
+    "GraphSkillDef",
     "IoDeclaration",
     "IoInput",
     "IoOutput",
-    "PhaseConfig",
-    "SimpleSkillManifest",
+    "LLMPhase",
+    "LogicPhase",
+    "PersonaSkillDef",
+    "PhaseDef",
     "SkillManifest",
     "Step",
-    "SubSkillSpec",
 ]

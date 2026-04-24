@@ -1,45 +1,70 @@
 """Schema validation tests for ``SkillManifest`` (Studio Phase 0 Task 0.1).
 
 The manifest is the single source of truth for SKILL.md shape. These
-tests lock in:
+tests lock in the three-axis taxonomy agreed on 2026-04-24:
 
-* canonical dict shapes for ``graph`` and ``simple`` skills validate
-* the discriminator picks the right subclass off ``type``
-* ``extra="forbid"`` rejects typos at every level
-* the three real ``phase_config`` shapes (code-only / subgraph / LLM)
-  survive validation
-* a real production SKILL.md's frontmatter round-trips through the
-  schema (smoke test — full body parsing arrives in Task 0.3 when
-  ``core/parser.py`` is refactored to emit manifest-shaped dicts)
+* Three artifact types (``agent`` / ``graph`` / ``persona``) validate
+  and discriminate correctly.
+* Three phase modes (``llm`` / ``logic`` / ``delegate``) are mutually
+  exclusive by construction.
+* ``extra="forbid"`` rejects typos and cross-mode contamination at
+  every level.
+* The compiler rules that can be expressed structurally (Rules 1–4
+  from ``manifest.py``'s docstring) fire as ``ValidationError`` at
+  parse time — no silent drop.
+
+Rule 5 (``context_bridge`` static type check across parent/child skill
+``io:`` schemas) is deferred to a dedicated validators module and is
+NOT covered here.
+
+Production SKILL.md round-trip tests are deferred to Task 0.3 when
+``core/parser.py`` is refactored to emit manifest-shaped dicts — the
+1.x vocabulary those files currently use is intentionally invalid
+against schema_version 2.0.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
-import yaml
 from pydantic import TypeAdapter, ValidationError
 
 from graph_agent.core.manifest import (
+    AgentProfile,
+    AgentSkillDef,
     ContextBridge,
-    GraphSkillManifest,
-    IoDeclaration,
-    IoInput,
-    IoOutput,
-    PhaseConfig,
-    SimpleSkillManifest,
+    DelegatePhase,
+    GraphSkillDef,
+    LLMPhase,
+    LogicPhase,
+    PersonaSkillDef,
     SkillManifest,
     Step,
-    SubSkillSpec,
 )
 
 
 _SKILL_ADAPTER = TypeAdapter(SkillManifest)
 
 
+# =============================================================================
+# Fixtures — minimal well-formed dicts for each artifact type
+# =============================================================================
+
+
+def _base_agent_dict() -> dict:
+    return {
+        "name": "sample-agent",
+        "description": "A fixture agent skill for manifest validation tests.",
+        "type": "agent",
+        "agent_profile": {
+            "role": "Senior code reviewer",
+            "goal": "Identify defects in staged changes and propose minimal fixes.",
+            "steps": ["Read diff", "Check invariants", "Emit report"],
+            "constraints": ["No speculative refactors."],
+        },
+    }
+
+
 def _base_graph_dict() -> dict:
-    """Minimal well-formed ``graph`` manifest."""
     return {
         "name": "sample-graph",
         "description": "A fixture graph skill for manifest validation tests.",
@@ -48,181 +73,579 @@ def _base_graph_dict() -> dict:
             "inputs": [{"name": "input_a", "source": "runtime", "type": "str"}],
             "outputs": [{"name": "out_a", "target": "file", "path": "out.json"}],
         },
-        "phases": [{"name": "phase_one", "tier": "balanced"}],
+        "phases": [
+            {
+                "mode": "llm",
+                "name": "phase_one",
+                "tier": "balanced",
+                "prompt": "Do the thing.",
+            }
+        ],
     }
 
 
-def _base_simple_dict() -> dict:
-    """Minimal well-formed ``simple`` manifest."""
+def _base_persona_dict() -> dict:
     return {
-        "name": "sample-simple",
-        "description": "A fixture simple skill for manifest validation tests.",
-        "type": "simple",
-        "phases": [{"name": "only_phase", "tier": "fast"}],
-        "context_mapping": {"chapter_text": "{input.chapter_text}"},
+        "name": "sample-persona",
+        "description": "A fixture persona for manifest validation tests.",
+        "type": "persona",
+        "role_profile": "You are a senior producer with ten years in short drama.",
     }
 
 
-class TestGraphManifestShape:
-    """Canonical shape + field-level semantics for graph skills."""
+# =============================================================================
+# Artifact-level discriminator
+# =============================================================================
 
-    def test_minimal_graph_validates(self):
+
+class TestArtifactDiscriminator:
+    """The ``type`` field drives which variant the union picks."""
+
+    def test_type_agent_yields_agent_class(self):
+        m = _SKILL_ADAPTER.validate_python(_base_agent_dict())
+        assert isinstance(m, AgentSkillDef)
+        assert m.type == "agent"
+        assert m.schema_version == "2.0"
+        assert isinstance(m.agent_profile, AgentProfile)
+
+    def test_type_graph_yields_graph_class(self):
         m = _SKILL_ADAPTER.validate_python(_base_graph_dict())
-        assert isinstance(m, GraphSkillManifest)
+        assert isinstance(m, GraphSkillDef)
         assert m.type == "graph"
-        assert m.schema_version == "1.0"
-        assert m.io.inputs[0].name == "input_a"
-        assert m.io.outputs[0].target == "file"
+        assert len(m.phases) == 1
 
-    def test_schema_version_defaults_to_1_0(self):
-        # Real SKILL.md files never declare schema_version today;
-        # it must default so existing skills validate unchanged.
+    def test_type_persona_yields_persona_class(self):
+        m = _SKILL_ADAPTER.validate_python(_base_persona_dict())
+        assert isinstance(m, PersonaSkillDef)
+        assert m.type == "persona"
+        assert m.few_shot_examples == []
+
+    def test_legacy_simple_type_rejected(self):
+        """``type: simple`` was removed in schema 2.0 — must not validate."""
+        data = _base_agent_dict()
+        data["type"] = "simple"
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "type" in str(exc.value).lower()
+
+    def test_unknown_type_rejected(self):
         data = _base_graph_dict()
-        assert "schema_version" not in data
-        m = _SKILL_ADAPTER.validate_python(data)
-        assert m.schema_version == "1.0"
+        data["type"] = "script"
+        with pytest.raises(ValidationError):
+            _SKILL_ADAPTER.validate_python(data)
 
-    def test_graph_io_is_required(self):
+
+# =============================================================================
+# Rule 3 — top-level structure enforcement
+# =============================================================================
+
+
+class TestTopLevelStructureRules:
+    """Each artifact type's field surface is distinct; cross-contamination fails."""
+
+    def test_agent_cannot_have_phases(self):
+        data = _base_agent_dict()
+        data["phases"] = [{"mode": "llm", "name": "x", "prompt": "p"}]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "phases" in str(exc.value)
+
+    def test_agent_cannot_have_io(self):
+        data = _base_agent_dict()
+        data["io"] = {"inputs": [], "outputs": []}
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "io" in str(exc.value)
+
+    def test_graph_requires_io(self):
         data = _base_graph_dict()
         del data["io"]
         with pytest.raises(ValidationError) as exc:
             _SKILL_ADAPTER.validate_python(data)
         assert "io" in str(exc.value).lower()
 
-
-class TestSimpleManifestShape:
-    """Canonical shape + field-level semantics for simple skills."""
-
-    def test_minimal_simple_validates(self):
-        m = _SKILL_ADAPTER.validate_python(_base_simple_dict())
-        assert isinstance(m, SimpleSkillManifest)
-        assert m.type == "simple"
-        assert m.context_mapping == {"chapter_text": "{input.chapter_text}"}
-        # Simple skills may omit `io`.
-        assert m.io is None
-
-
-class TestTypeDiscriminator:
-    """The ``type`` field drives the concrete class choice."""
-
-    def test_type_graph_yields_graph_class(self):
-        m = _SKILL_ADAPTER.validate_python(_base_graph_dict())
-        assert isinstance(m, GraphSkillManifest)
-
-    def test_type_simple_yields_simple_class(self):
-        m = _SKILL_ADAPTER.validate_python(_base_simple_dict())
-        assert isinstance(m, SimpleSkillManifest)
-
-    def test_unknown_type_is_rejected(self):
+    def test_graph_requires_at_least_one_phase(self):
         data = _base_graph_dict()
-        data["type"] = "script"  # neither graph nor simple
+        data["phases"] = []
         with pytest.raises(ValidationError) as exc:
             _SKILL_ADAPTER.validate_python(data)
-        assert "type" in str(exc.value).lower()
+        assert "phases" in str(exc.value).lower()
+
+    def test_agent_requires_agent_profile(self):
+        data = _base_agent_dict()
+        del data["agent_profile"]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "agent_profile" in str(exc.value)
+
+
+# =============================================================================
+# Rule 4 — persona purity (no execution-bearing fields)
+# =============================================================================
+
+
+class TestPersonaPurity:
+    """Persona skills must not carry execution fields."""
+
+    def test_persona_cannot_have_phases(self):
+        data = _base_persona_dict()
+        data["phases"] = [{"mode": "llm", "name": "x", "prompt": "p"}]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "phases" in str(exc.value)
+
+    def test_persona_cannot_have_agent_tools(self):
+        data = _base_persona_dict()
+        data["agent_tools"] = ["some.tool"]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "agent_tools" in str(exc.value)
+
+    def test_persona_cannot_have_sub_skills(self):
+        data = _base_persona_dict()
+        data["sub_skills"] = ["producer"]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "sub_skills" in str(exc.value)
+
+    def test_persona_cannot_have_io(self):
+        data = _base_persona_dict()
+        data["io"] = {"inputs": [], "outputs": []}
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "io" in str(exc.value)
+
+    def test_persona_few_shot_examples_is_list(self):
+        data = _base_persona_dict()
+        data["few_shot_examples"] = [
+            "Input: chapter 1 --- Output: [critical feedback]",
+            "Input: chapter 2 --- Output: [praise + 2 tweaks]",
+        ]
+        m = _SKILL_ADAPTER.validate_python(data)
+        assert isinstance(m, PersonaSkillDef)
+        assert len(m.few_shot_examples) == 2
+
+
+# =============================================================================
+# Phase mode discriminator
+# =============================================================================
+
+
+class TestPhaseModeDiscriminator:
+    """Each ``mode:`` value picks exactly one phase class."""
+
+    def test_llm_mode_yields_llm_phase(self):
+        m = _SKILL_ADAPTER.validate_python({
+            **_base_graph_dict(),
+            "phases": [{
+                "mode": "llm",
+                "name": "plan",
+                "prompt": "You are a planner.",
+                "agent_tools": ["read_file", "write_file"],
+                "max_iterations": 5,
+            }],
+        })
+        phase = m.phases[0]
+        assert isinstance(phase, LLMPhase)
+        assert phase.max_iterations == 5
+
+    def test_logic_mode_yields_logic_phase(self):
+        m = _SKILL_ADAPTER.validate_python({
+            **_base_graph_dict(),
+            "phases": [{
+                "mode": "logic",
+                "name": "setup",
+                "execute_steps": ["script.segmenter.prepare_chapter"],
+            }],
+        })
+        phase = m.phases[0]
+        assert isinstance(phase, LogicPhase)
+        assert phase.execute_steps == ["script.segmenter.prepare_chapter"]
+
+    def test_delegate_mode_yields_delegate_phase(self):
+        m = _SKILL_ADAPTER.validate_python({
+            **_base_graph_dict(),
+            "phases": [{
+                "mode": "delegate",
+                "name": "delegate_segmentation",
+                "subgraph": "./subskills/segmenter",
+                "context_bridge": {
+                    "inputs": {"chapters": "{context.chapters}"},
+                    "outputs": {"segments": "{subgraph.segmentation_result}"},
+                },
+            }],
+        })
+        phase = m.phases[0]
+        assert isinstance(phase, DelegatePhase)
+        assert isinstance(phase.context_bridge, ContextBridge)
+        assert phase.subgraph == "./subskills/segmenter"
+
+    def test_unknown_mode_rejected(self):
+        data = _base_graph_dict()
+        data["phases"] = [{"mode": "python", "name": "x"}]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "mode" in str(exc.value).lower()
+
+    def test_missing_mode_rejected(self):
+        data = _base_graph_dict()
+        data["phases"] = [{"name": "x", "prompt": "p"}]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "mode" in str(exc.value).lower()
+
+
+# =============================================================================
+# Rule 1 — phase engines are mutually exclusive
+# =============================================================================
+
+
+class TestPhaseEngineExclusivity:
+    """A phase declared as one mode cannot carry another mode's fields."""
+
+    def test_logic_phase_cannot_have_prompt(self):
+        data = _base_graph_dict()
+        data["phases"] = [{
+            "mode": "logic",
+            "name": "bad",
+            "execute_steps": ["x.y.z"],
+            "prompt": "You are...",
+        }]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "prompt" in str(exc.value)
+
+    def test_logic_phase_cannot_have_agent_tools(self):
+        data = _base_graph_dict()
+        data["phases"] = [{
+            "mode": "logic",
+            "name": "bad",
+            "execute_steps": ["x.y.z"],
+            "agent_tools": ["t1"],
+        }]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "agent_tools" in str(exc.value)
+
+    def test_logic_phase_cannot_have_sub_skills(self):
+        data = _base_graph_dict()
+        data["phases"] = [{
+            "mode": "logic",
+            "name": "bad",
+            "execute_steps": ["x.y.z"],
+            "sub_skills": ["producer"],
+        }]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "sub_skills" in str(exc.value)
+
+    def test_logic_phase_requires_execute_steps(self):
+        data = _base_graph_dict()
+        data["phases"] = [{"mode": "logic", "name": "bad"}]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "execute_steps" in str(exc.value)
+
+    def test_llm_phase_cannot_have_execute_steps(self):
+        data = _base_graph_dict()
+        data["phases"] = [{
+            "mode": "llm",
+            "name": "bad",
+            "prompt": "p",
+            "execute_steps": ["x.y"],
+        }]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "execute_steps" in str(exc.value)
+
+    def test_llm_phase_cannot_have_subgraph(self):
+        data = _base_graph_dict()
+        data["phases"] = [{
+            "mode": "llm",
+            "name": "bad",
+            "prompt": "p",
+            "subgraph": "./x",
+        }]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "subgraph" in str(exc.value)
+
+
+# =============================================================================
+# Rule 2 — delegate determinism (no iteration / prompt / tools)
+# =============================================================================
+
+
+class TestDelegateDeterminism:
+    """DelegatePhase must not carry iteration caps or LLM machinery."""
+
+    def test_delegate_cannot_have_max_iterations(self):
+        data = _base_graph_dict()
+        data["phases"] = [{
+            "mode": "delegate",
+            "name": "bad",
+            "subgraph": "./x",
+            "context_bridge": {"inputs": {}, "outputs": {}},
+            "max_iterations": 10,
+        }]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "max_iterations" in str(exc.value)
+
+    def test_delegate_cannot_have_prompt(self):
+        data = _base_graph_dict()
+        data["phases"] = [{
+            "mode": "delegate",
+            "name": "bad",
+            "subgraph": "./x",
+            "context_bridge": {"inputs": {}, "outputs": {}},
+            "prompt": "p",
+        }]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "prompt" in str(exc.value)
+
+    def test_delegate_cannot_have_agent_tools(self):
+        data = _base_graph_dict()
+        data["phases"] = [{
+            "mode": "delegate",
+            "name": "bad",
+            "subgraph": "./x",
+            "context_bridge": {"inputs": {}, "outputs": {}},
+            "agent_tools": ["t"],
+        }]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "agent_tools" in str(exc.value)
+
+    def test_delegate_requires_context_bridge(self):
+        data = _base_graph_dict()
+        data["phases"] = [{
+            "mode": "delegate",
+            "name": "bad",
+            "subgraph": "./x",
+        }]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "context_bridge" in str(exc.value)
+
+
+# =============================================================================
+# Delegation mechanisms — three mutually exclusive pathways
+# =============================================================================
+
+
+class TestDelegationMechanisms:
+    """LLM phases expose three ways to reach other skills."""
+
+    def test_sub_skills_as_list_of_strings(self):
+        """Semantic routing — bare name or ``./`` relative path.
+
+        The resolver rules (bare name = global registry, ``./`` =
+        strict nested) live in the compiler; at schema level we only
+        lock in that the field is ``list[str]``.
+        """
+        m = _SKILL_ADAPTER.validate_python({
+            **_base_graph_dict(),
+            "phases": [{
+                "mode": "llm",
+                "name": "dispatcher",
+                "prompt": "Route to the right tool.",
+                "sub_skills": ["producer", "./subskills/format_scene"],
+            }],
+        })
+        phase = m.phases[0]
+        assert phase.sub_skills == ["producer", "./subskills/format_scene"]
+
+    def test_subagent_enabled_default_false(self):
+        m = _SKILL_ADAPTER.validate_python({
+            **_base_graph_dict(),
+            "phases": [{
+                "mode": "llm",
+                "name": "x",
+                "prompt": "p",
+            }],
+        })
+        assert m.phases[0].subagent_enabled is False
+
+    def test_subagent_enabled_true(self):
+        m = _SKILL_ADAPTER.validate_python({
+            **_base_graph_dict(),
+            "phases": [{
+                "mode": "llm",
+                "name": "x",
+                "prompt": "p",
+                "subagent_enabled": True,
+            }],
+        })
+        assert m.phases[0].subagent_enabled is True
+
+
+# =============================================================================
+# Persona injection — adopted_persona field
+# =============================================================================
+
+
+class TestAdoptedPersonaInjection:
+    """LLM phases and agent skills can inject a persona."""
+
+    def test_llm_phase_adopted_persona(self):
+        m = _SKILL_ADAPTER.validate_python({
+            **_base_graph_dict(),
+            "phases": [{
+                "mode": "llm",
+                "name": "review",
+                "prompt": "Review this plan.",
+                "adopted_persona": "producer",
+            }],
+        })
+        assert m.phases[0].adopted_persona == "producer"
+
+    def test_llm_phase_adopted_persona_relative_path(self):
+        m = _SKILL_ADAPTER.validate_python({
+            **_base_graph_dict(),
+            "phases": [{
+                "mode": "llm",
+                "name": "review",
+                "prompt": "Review this plan.",
+                "adopted_persona": "./subskills/villain_designer",
+            }],
+        })
+        assert m.phases[0].adopted_persona == "./subskills/villain_designer"
+
+    def test_agent_skill_adopted_persona(self):
+        data = _base_agent_dict()
+        data["adopted_persona"] = "producer"
+        m = _SKILL_ADAPTER.validate_python(data)
+        assert isinstance(m, AgentSkillDef)
+        assert m.adopted_persona == "producer"
+
+    def test_logic_phase_cannot_have_adopted_persona(self):
+        data = _base_graph_dict()
+        data["phases"] = [{
+            "mode": "logic",
+            "name": "bad",
+            "execute_steps": ["x.y"],
+            "adopted_persona": "producer",
+        }]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "adopted_persona" in str(exc.value)
+
+    def test_delegate_phase_cannot_have_adopted_persona(self):
+        data = _base_graph_dict()
+        data["phases"] = [{
+            "mode": "delegate",
+            "name": "bad",
+            "subgraph": "./x",
+            "context_bridge": {"inputs": {}, "outputs": {}},
+            "adopted_persona": "producer",
+        }]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "adopted_persona" in str(exc.value)
+
+
+# =============================================================================
+# extra='forbid' at every level
+# =============================================================================
 
 
 class TestExtraForbid:
-    """Unknown keys fail loudly at every level, catching silent typos."""
+    """Unknown keys fail loudly at every level — catches typos & drift."""
 
     def test_unknown_top_level_key_rejected(self):
         data = _base_graph_dict()
-        data["descriptionx"] = "typo'd description"
+        data["descriptionx"] = "typo"
         with pytest.raises(ValidationError) as exc:
             _SKILL_ADAPTER.validate_python(data)
         assert "descriptionx" in str(exc.value)
 
-    def test_unknown_phase_key_rejected(self):
-        data = _base_graph_dict()
-        data["phases"] = [{"name": "p", "max_iteration": 3}]  # typo: missing "s"
+    def test_unknown_agent_profile_key_rejected(self):
+        data = _base_agent_dict()
+        data["agent_profile"]["persona"] = "x"
         with pytest.raises(ValidationError) as exc:
             _SKILL_ADAPTER.validate_python(data)
-        assert "max_iteration" in str(exc.value)
+        assert "persona" in str(exc.value)
 
     def test_unknown_io_input_key_rejected(self):
         data = _base_graph_dict()
-        data["io"]["inputs"] = [
-            {"name": "x", "source": "runtime", "kind": "str"}  # should be "type"
-        ]
+        data["io"]["inputs"] = [{"name": "x", "source": "runtime", "kind": "str"}]
         with pytest.raises(ValidationError):
             _SKILL_ADAPTER.validate_python(data)
 
     def test_unknown_context_bridge_key_rejected(self):
-        # Phase-level nested model also forbids extras.
         data = _base_graph_dict()
         data["phases"] = [{
+            "mode": "delegate",
             "name": "p",
-            "subgraph": "child/SKILL.md",
+            "subgraph": "./x",
             "context_bridge": {"inputs": {}, "outputs": {}, "extras": {}},
         }]
         with pytest.raises(ValidationError) as exc:
             _SKILL_ADAPTER.validate_python(data)
         assert "extras" in str(exc.value)
 
+    def test_typo_in_phase_field_name(self):
+        """``max_iteration`` without trailing ``s`` used to silently drop."""
+        data = _base_graph_dict()
+        data["phases"] = [{
+            "mode": "llm",
+            "name": "p",
+            "prompt": "p",
+            "max_iteration": 3,  # missing "s"
+        }]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "max_iteration" in str(exc.value)
 
-class TestRealPhaseShapes:
-    """The three phase_config shapes actually found in production skills."""
 
-    def test_code_only_phase(self):
-        """E.g. ``text-segmentation``'s ``setup`` phase."""
+# =============================================================================
+# io: field validation
+# =============================================================================
+
+
+class TestIoFieldValidation:
+    def test_target_artifact_accepted(self):
         m = _SKILL_ADAPTER.validate_python({
             **_base_graph_dict(),
-            "phases": [{
-                "name": "setup",
-                "tools": ["script.segmenter.prepare_chapter"],
-            }],
+            "io": {
+                "inputs": [{"name": "x", "source": "runtime"}],
+                "outputs": [{"name": "y", "target": "artifact"}],
+            },
         })
-        phase = m.phases[0]
-        assert phase.tier is None
-        assert phase.tools == ["script.segmenter.prepare_chapter"]
+        assert m.io.outputs[0].target == "artifact"
 
-    def test_llm_phase_with_validator_and_loop_caps(self):
-        """E.g. ``text-segmentation``'s ``segment`` phase."""
+    def test_target_file_accepted(self):
         m = _SKILL_ADAPTER.validate_python({
             **_base_graph_dict(),
-            "phases": [{
-                "name": "segment",
-                "tier": "balanced",
-                "tools": [
-                    "script.segmenter.parse_segmentation_output",
-                    "script.segmenter.store_segments",
-                ],
-                "validator": "script.validators.validate_segmentation_structure",
-                "max_iterations": 10,
-                "max_nudges": 2,
-            }],
+            "io": {
+                "inputs": [{"name": "x", "source": "runtime"}],
+                "outputs": [{"name": "y", "target": "file", "path": "out.md"}],
+            },
         })
-        phase = m.phases[0]
-        assert phase.max_iterations == 10
-        assert phase.max_nudges == 2
-        assert phase.validator == "script.validators.validate_segmentation_structure"
+        assert m.io.outputs[0].target == "file"
 
-    def test_subgraph_phase_with_context_bridge(self):
-        """E.g. ``examples/subgraph-sample``'s delegating phases."""
-        m = _SKILL_ADAPTER.validate_python({
-            **_base_graph_dict(),
-            "phases": [{
-                "name": "delegate_segmentation",
-                "subgraph": "../../../text-segmentation/SKILL.md",
-                "context_bridge": {
-                    "inputs": {"chapters": "{context.chapters}"},
-                    "outputs": {"segmented_chapters": "{subgraph.segmentation_result}"},
-                },
-            }],
-        })
-        phase = m.phases[0]
-        assert phase.subgraph == "../../../text-segmentation/SKILL.md"
-        assert isinstance(phase.context_bridge, ContextBridge)
-        assert phase.context_bridge.inputs == {"chapters": "{context.chapters}"}
+    def test_target_unknown_rejected(self):
+        data = _base_graph_dict()
+        data["io"]["outputs"] = [{"name": "y", "target": "s3_bucket"}]
+        with pytest.raises(ValidationError):
+            _SKILL_ADAPTER.validate_python(data)
 
 
-class TestStudioNewFields:
-    """Fields the plan introduced but no legacy skill uses yet."""
+# =============================================================================
+# Step (conditional execution inside LLMPhase)
+# =============================================================================
 
+
+class TestStep:
     def test_step_with_conditional_expressions(self):
         m = _SKILL_ADAPTER.validate_python({
             **_base_graph_dict(),
             "phases": [{
+                "mode": "llm",
                 "name": "conditional_phase",
+                "prompt": "p",
                 "steps": [
                     {
                         "name": "maybe_run",
@@ -239,106 +662,30 @@ class TestStudioNewFields:
         assert step.when == "context.prev_ok == True"
         assert step.skip_if == "context.force_skip"
 
-    def test_phase_model_override(self):
-        m = _SKILL_ADAPTER.validate_python({
-            **_base_graph_dict(),
-            "phases": [{
-                "name": "override_phase",
-                "model_override": "CL46T",  # llm_roles.yaml model code
-            }],
-        })
-        assert m.phases[0].model_override == "CL46T"
 
-    def test_phase_sub_skills_dynamic_dispatch(self):
-        m = _SKILL_ADAPTER.validate_python({
-            **_base_graph_dict(),
-            "phases": [{
-                "name": "dispatcher",
-                "sub_skills": [
-                    {"name": "render", "path": "../subskills/render/SKILL.md"},
-                ],
-            }],
-        })
-        sub_skill = m.phases[0].sub_skills[0]
-        assert isinstance(sub_skill, SubSkillSpec)
-        assert sub_skill.path == "../subskills/render/SKILL.md"
-
-
-class TestIoFieldValidation:
-    """Output ``target`` enum + input ``source`` enum match real vocabulary."""
-
-    def test_target_artifact_accepted(self):
-        # Real skill: story-deconstruction uses target: artifact.
-        m = _SKILL_ADAPTER.validate_python({
-            **_base_graph_dict(),
-            "io": {
-                "inputs": [{"name": "x", "source": "runtime"}],
-                "outputs": [{"name": "y", "target": "artifact"}],
-            },
-        })
-        assert m.io.outputs[0].target == "artifact"
-
-    def test_target_unknown_rejected(self):
-        data = _base_graph_dict()
-        data["io"]["outputs"] = [{"name": "y", "target": "s3_bucket"}]
-        with pytest.raises(ValidationError):
-            _SKILL_ADAPTER.validate_python(data)
-
-
-class TestRealFrontmatterSmoke:
-    """Integration smoke: real SKILL.md frontmatters validate once a
-    minimal ``phases`` list is spliced in (full body parsing lands in
-    Task 0.3 when ``core/parser.py`` emits manifest-shaped dicts).
-    """
-
-    @pytest.mark.parametrize(
-        "skill_relpath,expected_type,expected_name",
-        [
-            ("skills/text-segmentation/SKILL.md", "graph", "text-segmentation"),
-            ("skills/story-deconstruction/SKILL.md", "graph", "story-deconstruction"),
-            ("skills/batch-analysis/SKILL.md", "graph", "batch-analysis"),
-            ("skills/adaptation_v1/SKILL.md", "simple", "plan-scenes"),
-            ("skills/adaptation_v1/subskills/beat_extractor/SKILL.md",
-             "simple", "beat-extractor"),
-        ],
-    )
-    def test_real_skill_frontmatter_validates(
-        self, skill_relpath: str, expected_type: str, expected_name: str,
-    ):
-        root = Path(__file__).resolve().parents[3]
-        skill_path = root / skill_relpath
-        text = skill_path.read_text(encoding="utf-8")
-        frontmatter_block = text.split("---", 2)[1]
-        frontmatter = yaml.safe_load(frontmatter_block)
-
-        # Splice in a minimal phases list so the manifest is well-formed
-        # without needing the full phase_config body parser.
-        manifest_dict = {**frontmatter, "phases": [{"name": "dummy"}]}
-        m = _SKILL_ADAPTER.validate_python(manifest_dict)
-
-        assert m.type == expected_type
-        assert m.name == expected_name
+# =============================================================================
+# Public surface
+# =============================================================================
 
 
 class TestSubmodelExports:
-    """Sanity check on the public surface — all submodels are importable."""
-
     def test_all_expected_symbols_exportable(self):
-        # If any of these imports silently drop, a caller trying to
-        # construct dicts in code would hit an AttributeError at the
-        # call site; catching it here is cheaper.
         from graph_agent.core import manifest as m
 
         for sym in (
+            "AgentProfile",
+            "AgentSkillDef",
             "ContextBridge",
-            "GraphSkillManifest",
+            "DelegatePhase",
+            "GraphSkillDef",
             "IoDeclaration",
             "IoInput",
             "IoOutput",
-            "PhaseConfig",
-            "SimpleSkillManifest",
+            "LLMPhase",
+            "LogicPhase",
+            "PersonaSkillDef",
+            "PhaseDef",
             "SkillManifest",
             "Step",
-            "SubSkillSpec",
         ):
             assert hasattr(m, sym), f"manifest.py missing public export: {sym}"

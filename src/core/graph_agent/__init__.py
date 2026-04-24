@@ -47,6 +47,7 @@ from .core.manifest import (  # noqa: E402
     PhaseDef,
     SkillManifest,
 )
+from .core.parser import parse_skill_file  # noqa: E402
 from .core.serialize import serialize_skill  # noqa: E402
 
 __all__ = [
@@ -83,4 +84,5 @@ __all__ = [
     "LogicPhase",
     "DelegatePhase",
     "serialize_skill",
+    "parse_skill_file",
 ]

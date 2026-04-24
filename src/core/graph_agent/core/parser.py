@@ -3,6 +3,26 @@
 Extracted from loader.py to allow shared use by both loader.py and compiler.py
 without circular imports. All functions here are side-effect-free (except file reads
 for ``<ref>`` resolution) and perform no dynamic module imports.
+
+Schema 2.0 entry: ``parse_skill_file``
+======================================
+
+``parse_skill_file(path)`` returns the manifest as ``{"frontmatter": dict,
+"human_body": str}`` and performs *only* file I/O + YAML decoding — no
+schema validation, no XML extraction. Callers pass ``frontmatter`` to
+``SkillManifest.model_validate()`` for semantic checking. ``human_body``
+is the raw markdown after the closing ``---`` fence; downstream tools
+may preserve it verbatim on re-serialisation (see ``core/serialize.py``).
+
+Pairs with ``serialize_skill`` for byte-stable round-trip; the pair is
+what Studio UI ↔ Git synchronisation relies on.
+
+The rest of this module (XML tag extraction, ``<phase>/<node>``
+normalisation, ``<ref>`` resolution, legacy ``_validate_frontmatter``)
+is **schema 1.0 scaffolding** still required by the current
+``loader.py`` / ``compiler.py`` pipeline. Task 0.3 Steps 2–4 will
+migrate those call sites to the Manifest-driven flow and then this
+scaffolding can be deleted.
 """
 
 from __future__ import annotations
@@ -209,3 +229,38 @@ def _resolve_refs(content: str, base_dir: Path, *, _depth: int = 0) -> str:
         return _resolve_refs(ref_content, ref_path.parent, _depth=_depth + 1)
 
     return _REF_PATTERN.sub(replacer, content)
+
+
+# ---------------------------------------------------------------------------
+# Schema 2.0 entry — pairs with core/serialize.py's ``serialize_skill``
+# ---------------------------------------------------------------------------
+
+
+def parse_skill_file(path: Path | str) -> dict[str, Any]:
+    """Read and decode a schema-2.0 SKILL.md file into its raw parts.
+
+    Does *only* file I/O + YAML decoding. No semantic validation, no
+    XML extraction, no ``<ref>`` resolution. Those concerns belong to
+    ``SkillManifest.model_validate()`` and the compiler's rule pass.
+
+    Args:
+        path: Absolute or project-relative path to a ``SKILL.md``.
+
+    Returns:
+        ``{"frontmatter": dict, "human_body": str}`` where
+        ``frontmatter`` is the YAML-decoded dict between the ``---``
+        fences (ready to feed to ``SkillManifest.model_validate``) and
+        ``human_body`` is the markdown text after the closing fence
+        (may be empty).
+
+    Raises:
+        SkillLoadError: Missing/malformed frontmatter or unreadable file.
+    """
+    p = Path(path)
+    content = p.read_text(encoding="utf-8")
+
+    frontmatter = _parse_frontmatter(content)
+    body = _strip_frontmatter(content)
+
+    return {"frontmatter": frontmatter, "human_body": body}
+

@@ -113,6 +113,30 @@ class TestRunContextShallowImmutability:
             ctx.callbacks.append(object())  # type: ignore[attr-defined]
 
 
+class TestPhaseExecutorPickleGuard:
+    """PhaseExecutor raises TypeError if pickled — protects against
+    accidental LangGraph checkpointer persistence of the per-run object.
+
+    Rationale: ``config['configurable']['_phase_executor']`` is threaded
+    into LangGraph for in-memory propagation. If a future checkpointer
+    upgrade (or a caller that wraps ``graph.invoke`` with its own
+    persistence) tries to pickle the whole config, the executor's live
+    references (heartbeat thread, bound sidecar method, callback list)
+    would either fail opaquely or — worse — silently succeed with stale
+    references on resume. ``__getstate__`` raising up-front turns this
+    into an immediate TypeError with a clear message.
+    """
+
+    def test_pickling_phase_executor_raises_typeerror(self):
+        import pickle
+        import pytest
+
+        executor = PhaseExecutor([])
+
+        with pytest.raises(TypeError, match="per-run runtime object"):
+            pickle.dumps(executor)
+
+
 class TestGraphBuilderNoPhaseExecutor:
     """GraphBuilder receives PhaseExecutor per-invocation via config, not at init."""
 
@@ -168,6 +192,94 @@ class TestResumeRuntimeInputsRestore:
 
         harness = GraphAgentHarness(phases=[Phase(name="only", requires_llm=False)])
         assert harness._get_active_run_options(None) == {}
+
+
+class TestPersistentRuntimeInputsOptIn:
+    """P0-2.1 post-D: ``run(persistent_runtime_inputs=, persistent_storage_config=)``
+    opts a caller into checkpoint-durable state that ``resume()`` can rebuild
+    from, closing the hardcoded ``storage_manager=None`` gap PR #3 left open.
+
+    We verify the surface shape (signatures + pre-flight validation) with
+    cheap static tests. End-to-end checkpoint round-trip is covered by the
+    E-task golden baseline (integration territory, not unit scope).
+    """
+
+    def test_run_signature_accepts_persistent_kwargs(self):
+        import inspect
+        from graph_agent.core.harness import GraphAgentHarness
+
+        sig = inspect.signature(GraphAgentHarness.run)
+        assert "persistent_runtime_inputs" in sig.parameters, (
+            "run() must accept persistent_runtime_inputs= for "
+            "checkpoint-durable resume rehydration."
+        )
+        assert "persistent_storage_config" in sig.parameters, (
+            "run() must accept persistent_storage_config= so resume() can "
+            "rebuild StorageManager from the persisted workflow state."
+        )
+        assert sig.parameters["persistent_runtime_inputs"].default is None
+        assert sig.parameters["persistent_storage_config"].default is None
+
+    def test_non_serialisable_persistent_inputs_raise_at_run_entry(self):
+        """Pre-flight json.dumps ensures a non-serialisable payload fails
+        loudly at run() entry rather than silently later at checkpoint
+        write (where the error path is deeper + harder to correlate).
+
+        We use a minimal harness and push a ``set`` (json.dumps rejects
+        sets) via persistent_runtime_inputs. The check must fire before
+        the graph is invoked.
+        """
+        import pytest
+        from graph_agent.core.harness import GraphAgentHarness
+        from graph_agent.core.types import Phase
+
+        harness = GraphAgentHarness(phases=[Phase(name="only", requires_llm=False)])
+
+        with pytest.raises(ValueError, match="JSON-serialisable"):
+            harness.run(
+                initial_context={"thread_id": "t"},
+                persistent_runtime_inputs={"bad": {1, 2, 3}},
+            )
+
+    def test_resume_rehydrates_runtime_inputs_from_state(self):
+        """When resume() receives ``runtime_inputs_map=None`` but the
+        replayed state carries ``_persistent_runtime_inputs`` (stashed by
+        the original run()), resume() must pick it up.
+        """
+        from unittest.mock import patch
+        from graph_agent.core.harness import GraphAgentHarness
+        from graph_agent.core.types import Phase
+
+        harness = GraphAgentHarness(phases=[Phase(name="only", requires_llm=False)])
+
+        captured: dict[str, object] = {}
+
+        class _FakeGraph:
+            def invoke(self, state, config):
+                # Capture the run_context threaded into config so the
+                # assertion can inspect it.
+                captured["run_context"] = config["configurable"]["_run_context"]
+                return state
+
+        with patch.object(harness, "_graph", _FakeGraph()):
+            harness.resume(
+                state={
+                    "messages": [],
+                    "context": {
+                        "_thread_id": "t",
+                        "_run_id": "r-42",
+                        "_persistent_runtime_inputs": {"pipeline": "p", "n": 3},
+                    },
+                    "current_phase": "",
+                    "retry_counts": {},
+                    "metrics": {"total_input_tokens": 0, "total_output_tokens": 0},
+                },
+                human_input="go",
+            )
+
+        rc = captured["run_context"]
+        # runtime_inputs is MappingProxyType; == works against dicts.
+        assert dict(rc.runtime_inputs) == {"pipeline": "p", "n": 3}
 
 
 class TestSubgraphFixmeGone:

@@ -438,6 +438,8 @@ class GraphAgentHarness:
         storage_manager: Any | None = None,
         runtime_inputs_map: dict[str, Any] | None = None,
         extra_callbacks: list[Callback] | None = None,
+        persistent_runtime_inputs: dict[str, Any] | None = None,
+        persistent_storage_config: dict[str, Any] | None = None,
         **runtime_inputs: Any,
     ) -> WorkflowState:
         """Execute the complete multi-phase workflow.
@@ -448,6 +450,31 @@ class GraphAgentHarness:
         harness concurrency-safely (a child harness instance may be
         invoked from multiple parent runs in parallel; mutating
         ``child.callbacks`` directly would cross-wire them).
+
+        ``persistent_runtime_inputs`` and ``persistent_storage_config``
+        are the opt-in knobs that let a HITL ``resume()`` rehydrate
+        per-run state from the LangGraph checkpointer. Both are stashed
+        into ``initial_state["context"]`` so they ride along the
+        checkpointed workflow state; both are pre-flighted through
+        ``json.dumps`` at ``run()`` entry so a non-serialisable payload
+        fails loudly here, not later at checkpoint-write time.
+
+        * ``persistent_runtime_inputs`` — the caller-declared safe
+          subset of ``runtime_inputs``; a common pattern is to pass
+          ``{"pipeline": "p1", "project_id": "x"}`` here and pass
+          arbitrary-python objects (database handles, model clients) via
+          ``runtime_inputs`` that shouldn't cross a checkpoint boundary.
+        * ``persistent_storage_config`` — kwargs for rebuilding a
+          ``StorageManager`` on resume. ``run_id`` / ``skill_id`` are
+          auto-filled from the current run if the caller omits them, so
+          the minimal call is ``{"workspace_root": ...}``. Callers who
+          already passed ``storage_manager=`` above get the runtime
+          instance for this run; ``persistent_storage_config`` only
+          affects what ``resume()`` sees after a checkpoint reload.
+
+        Passing neither preserves the pre-D-7.2 behaviour: ``resume()``
+        rebuilds with ``storage_manager=None`` and whatever
+        ``runtime_inputs_map`` the caller re-supplies.
         """
         effective_runtime_inputs = dict(runtime_inputs_map or {})
         effective_runtime_inputs.update(runtime_inputs)
@@ -466,6 +493,23 @@ class GraphAgentHarness:
             "metrics": {"total_input_tokens": 0, "total_output_tokens": 0},
         }
 
+        if persistent_runtime_inputs is not None or persistent_storage_config is not None:
+            import json
+            payload: dict[str, Any] = {}
+            if persistent_runtime_inputs is not None:
+                payload["runtime_inputs"] = persistent_runtime_inputs
+            if persistent_storage_config is not None:
+                payload["storage_config"] = persistent_storage_config
+            try:
+                json.dumps(payload)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "persistent_runtime_inputs / persistent_storage_config "
+                    "must be JSON-serialisable so resume() can read them "
+                    "back from the LangGraph checkpointer. Pre-flight "
+                    f"json.dumps failed: {exc}"
+                ) from exc
+
         tid = thread_id or str(uuid.uuid4())
         # Tier 1 Commit A: run_id identifies a single harness.run invocation.
         # thread_id may be reused across multiple runs (resume scenarios);
@@ -475,6 +519,23 @@ class GraphAgentHarness:
         run_start_monotonic = time.monotonic()
         initial_state["context"]["_thread_id"] = tid
         initial_state["context"]["_run_id"] = run_id
+
+        # D-post session: stash the opt-in persistent knobs into the
+        # workflow state so the LangGraph checkpointer persists them and
+        # resume() can rebuild runtime_inputs / storage_manager from them.
+        if persistent_runtime_inputs is not None:
+            initial_state["context"]["_persistent_runtime_inputs"] = dict(persistent_runtime_inputs)
+        if persistent_storage_config is not None:
+            effective_storage_config = dict(persistent_storage_config)
+            # Auto-fill run_id so the caller doesn't have to know the
+            # freshly-minted UUID up front. ``skill_id`` is filled from
+            # the harness's loaded skill if the caller omitted it.
+            effective_storage_config.setdefault("run_id", run_id)
+            if "skill_id" not in effective_storage_config:
+                derived_skill_id = getattr(self, "_skill_id", "") or "unknown"
+                effective_storage_config["skill_id"] = derived_skill_id
+            initial_state["context"]["_persistent_storage_config"] = effective_storage_config
+
         config: dict[str, Any] = {
             "recursion_limit": self._graph_builder.recursion_limit(),
             "configurable": {"thread_id": tid},
@@ -838,8 +899,21 @@ class GraphAgentHarness:
         non-picklable values), so the caller that resumes a mid-run
         interrupt must re-supply it if downstream components (e.g.
         ``StorageManager`` resolving ``pipeline_prefix``) read it via
-        ``_get_active_run_options``. Passing ``None`` (the default)
-        preserves the pre-D-7.2 behaviour of an empty dict.
+        ``_get_active_run_options``. Passing ``None`` (the default) causes
+        ``resume()`` to look for a persisted copy in
+        ``state['context']['_persistent_runtime_inputs']`` that an
+        earlier ``run(persistent_runtime_inputs=...)`` may have stashed;
+        if that key is absent too, the behaviour falls back to the
+        pre-D-7.2 empty dict.
+
+        The ``StorageManager`` is rebuilt from
+        ``state['context']['_persistent_storage_config']`` when present
+        (stashed by an earlier ``run(persistent_storage_config=...)``) so
+        sidecar writes after resume land under the same
+        ``_history/{run_id}/`` directory as pre-pause artifacts. When
+        the stashed config is absent or rebuild fails, the executor
+        runs with ``storage_manager=None`` and sidecar writes degrade
+        to a no-op (matching pre-PR-#3 behaviour).
         """
         from langchain_core.messages import ToolMessage
 
@@ -884,12 +958,56 @@ class GraphAgentHarness:
                 inherited_run_id = raw
         except Exception:  # noqa: BLE001
             logger.warning("[Harness] resume could not read _run_id from state; continuing with empty run_id")
+
+        # D-post session P0-2.1: rehydrate runtime_inputs / storage_manager
+        # from the state the checkpointer replayed, when an earlier run()
+        # opted in via ``persistent_runtime_inputs`` /
+        # ``persistent_storage_config``. Explicit caller-supplied
+        # ``runtime_inputs_map`` still wins (e.g. test harness overrides).
+        state_context = state.get("context") if isinstance(state.get("context"), dict) else {}
+        restored_runtime_inputs: dict[str, Any] = {}
+        if runtime_inputs_map:
+            restored_runtime_inputs = dict(runtime_inputs_map)
+        else:
+            persisted = state_context.get("_persistent_runtime_inputs") if state_context else None
+            if isinstance(persisted, dict):
+                restored_runtime_inputs = dict(persisted)
+
+        restored_storage_manager: Any | None = None
+        persisted_sc = state_context.get("_persistent_storage_config") if state_context else None
+        if isinstance(persisted_sc, dict) and persisted_sc:
+            sc_kwargs = dict(persisted_sc)
+            # Prefer the inherited run_id so artifacts land in the
+            # original ``_history/{run_id}/`` tree; fall back to whatever
+            # the persisted config declared, or "unknown" as last resort
+            # (StorageManager's constructor rejects empty run_id, so we
+            # must pass a non-empty string).
+            sc_kwargs["run_id"] = (
+                inherited_run_id
+                or str(sc_kwargs.get("run_id") or "")
+                or "unknown"
+            )
+            try:
+                from ..io.storage import StorageManager
+                restored_storage_manager = StorageManager(**sc_kwargs)
+            except Exception as exc:  # noqa: BLE001
+                # Fail soft so an otherwise-recoverable resume isn't
+                # killed by a malformed persisted config; the run
+                # continues with sidecar writes no-op'd.
+                logger.warning(
+                    "[Harness] resume could not rebuild StorageManager from "
+                    "_persistent_storage_config=%r: %s; continuing with "
+                    "storage_manager=None (compaction sidecars will no-op)",
+                    sc_kwargs,
+                    exc,
+                )
+
         run_context = RunContext(
             thread_id=str(effective_thread_id or ""),
             run_id=inherited_run_id,
             trace_dir=trace_dir if isinstance(trace_dir, Path) else None,
-            runtime_inputs=dict(runtime_inputs_map) if runtime_inputs_map else {},
-            storage_manager=None,
+            runtime_inputs=restored_runtime_inputs,
+            storage_manager=restored_storage_manager,
             artifact_saver=artifact_saver,
             callbacks=active_callbacks,
         )

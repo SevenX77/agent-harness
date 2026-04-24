@@ -30,6 +30,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
 
 from .run_context import RunContext
+from .graph_builder import GraphBuilder
 from .nudge_injector import NudgeInjector
 from .phase_executor import PhaseExecutor
 from .retry_router import RetryRouter
@@ -388,7 +389,15 @@ class GraphAgentHarness:
         # instance. Step 4.4 (Phase B) replaces both with a per-run
         # executor passed via LangGraph RunnableConfig.
         self._phase_executor = PhaseExecutor(self.callbacks, harness=self)
-        self._graph = self._build_graph()
+        # D-7.1 — compile-time topology builder, reused across runs.
+        self._graph_builder = GraphBuilder(
+            phases,
+            phase_executor=self._phase_executor,
+            retry_router=self._retry_router,
+            checkpointer=self._checkpointer,
+            subgraph_node_factory=self._build_subgraph_node,
+        )
+        self._graph = self._graph_builder.build()
 
     @staticmethod
     def _resolve_checkpointer(checkpointer: Any) -> Any:
@@ -478,7 +487,7 @@ class GraphAgentHarness:
         initial_state["context"]["_thread_id"] = tid
         initial_state["context"]["_run_id"] = run_id
         config: dict[str, Any] = {
-            "recursion_limit": self._calc_recursion_limit(),
+            "recursion_limit": self._graph_builder.recursion_limit(),
             "configurable": {"thread_id": tid},
         }
 
@@ -845,7 +854,7 @@ class GraphAgentHarness:
 
         effective_thread_id = thread_id or state["context"].get("_thread_id")
         config: dict[str, Any] = {
-            "recursion_limit": self._calc_recursion_limit(),
+            "recursion_limit": self._graph_builder.recursion_limit(),
             "configurable": {"thread_id": effective_thread_id},
         }
 
@@ -910,96 +919,9 @@ class GraphAgentHarness:
     # Graph construction
     # -----------------------------------------------------------------------
 
-    def _build_graph(self) -> Any:
-        """Build the LangGraph StateGraph from Phase definitions."""
-        graph = StateGraph(WorkflowState)
-
-        for _i, phase in enumerate(self.phases):
-            execute_name = f"{phase.name}_execute"
-            validate_name = f"{phase.name}_validate"
-
-            if phase.subgraph is not None:
-                graph.add_node(execute_name, self._build_subgraph_node(phase))
-                graph.add_node(validate_name, self._build_validation_node(phase))
-                graph.add_edge(execute_name, validate_name)
-
-                graph.add_conditional_edges(
-                    validate_name,
-                    self._retry_router.build_route_callback(phase),
-                )
-            elif phase.requires_llm:
-                graph.add_node(execute_name, self._build_phase_node(phase))
-                graph.add_node(validate_name, self._build_validation_node(phase))
-                graph.add_edge(execute_name, validate_name)
-
-                graph.add_conditional_edges(
-                    validate_name,
-                    self._retry_router.build_route_callback(phase),
-                )
-            else:
-                graph.add_node(execute_name, self._build_code_only_node(phase))
-                next_node = self._retry_router.next_phase_node(phase)
-                if next_node == END:
-                    graph.add_edge(execute_name, END)
-                else:
-                    graph.add_edge(execute_name, next_node)
-
-        if self.phases:
-            graph.set_entry_point(f"{self.phases[0].name}_execute")
-
-        return graph.compile(checkpointer=self._checkpointer)
-
     def _build_subgraph_node(self, phase: Phase) -> Callable[[WorkflowState], WorkflowState]:
         """Build a node that executes a nested GraphAgentHarness."""
         return build_subgraph_node(self, phase, logger)
-
-    def _build_phase_node(self, phase: Phase) -> Callable[[WorkflowState], WorkflowState]:
-        """Build an LLM phase node that delegates to ``PhaseExecutor`` (D-7.2 step 4.3)."""
-        executor = self._phase_executor
-
-        def execute(state: WorkflowState) -> WorkflowState:
-            return executor.execute_llm_phase(phase, state)
-
-        return execute
-
-    def _build_validation_node(
-        self,
-        phase: Phase,
-    ) -> Callable[[WorkflowState], WorkflowState]:
-        """Build a validation node that delegates to ``PhaseExecutor`` (D-7.2 step 4.2)."""
-        executor = self._phase_executor
-
-        def validate(state: WorkflowState) -> WorkflowState:
-            return executor.execute_validation_phase(phase, state)
-
-        return validate
-
-    def _build_code_only_node(self, phase: Phase) -> Callable[[WorkflowState], WorkflowState]:
-        """Build a pure code node (``requires_llm=False``).
-
-        Body migrated to ``PhaseExecutor.execute_code_only_phase`` (D-7.2
-        step 4.1); this stays as a thin factory so ``_build_graph``'s
-        ``add_node`` calls keep their current shape.
-        """
-        executor = self._phase_executor
-
-        def execute(state: WorkflowState) -> WorkflowState:
-            return executor.execute_code_only_phase(phase, state)
-
-        return execute
-
-    def _calc_recursion_limit(self) -> int:
-        """Calculate LangGraph recursion limit.
-
-        Accounts for cross-phase retries via retry_target: a phase retrying
-        to an earlier phase effectively doubles both phases' node visits.
-        """
-        cross_phase_retries = sum(
-            1 for p in self.phases if p.retry_target and p.retry_target != p.name
-        )
-        base = sum(p.max_retries for p in self.phases) * 2
-        linear = len(self.phases) * 2
-        return base + linear + cross_phase_retries * 4 + 10
 
 
 

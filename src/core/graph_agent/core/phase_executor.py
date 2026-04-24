@@ -653,7 +653,3 @@ class PhaseExecutor:
             cb.on_phase_end(phase.name, dict(ctx), dict(new_state["metrics"]))
 
         return new_state
-
-    def execute_subgraph_phase(self, phase: Phase, state: WorkflowState) -> WorkflowState:
-        """Invoke a child harness for a subgraph phase."""
-        raise NotImplementedError("D-7.2: subgraph node factory stays in harness for now")

@@ -69,6 +69,50 @@ class TestPhaseExecutorNoHarnessReference:
         )
 
 
+class TestRunContextShallowImmutability:
+    """Post-D session blind-spot-1: RunContext fields that collaborators
+    receive by reference are shallowly immutable.
+
+    Rationale: before this fix, ``ctx.runtime_inputs["x"] = 1`` and
+    ``ctx.callbacks.append(cb)`` both silently succeeded — a surprise
+    because the dataclass itself was ``frozen=True``. Runtime
+    collaborators (``PhaseExecutor``, ``NudgeInjector``, subgraph nodes)
+    hold the same reference, so a well-intentioned ``cache the lookup``
+    line could clobber a sibling concurrent run. Freezing the containers
+    (MappingProxyType + tuple) closes 99% of foot-guns at zero runtime
+    cost; deep freeze is explicitly out of scope.
+    """
+
+    def test_runtime_inputs_is_mapping_proxy(self):
+        import types
+        from graph_agent.core.run_context import RunContext
+
+        ctx = RunContext(thread_id="t", runtime_inputs={"k": "v"})
+        assert isinstance(ctx.runtime_inputs, types.MappingProxyType)
+
+    def test_callbacks_is_tuple(self):
+        from graph_agent.core.run_context import RunContext
+
+        ctx = RunContext(thread_id="t", callbacks=[])
+        assert isinstance(ctx.callbacks, tuple)
+
+    def test_runtime_inputs_top_level_mutation_raises(self):
+        import pytest
+        from graph_agent.core.run_context import RunContext
+
+        ctx = RunContext(thread_id="t", runtime_inputs={"k": "v"})
+        with pytest.raises(TypeError):
+            ctx.runtime_inputs["new"] = "leak"  # type: ignore[index]
+
+    def test_callbacks_has_no_append(self):
+        import pytest
+        from graph_agent.core.run_context import RunContext
+
+        ctx = RunContext(thread_id="t", callbacks=[])
+        with pytest.raises(AttributeError):
+            ctx.callbacks.append(object())  # type: ignore[attr-defined]
+
+
 class TestGraphBuilderNoPhaseExecutor:
     """GraphBuilder receives PhaseExecutor per-invocation via config, not at init."""
 

@@ -30,6 +30,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
 
+from .run_context import RunContext
 from .callback_bridge import (
     _HarnessCallbackBridge,
     _extract_text_content,
@@ -367,7 +368,11 @@ class GraphAgentHarness:
         self._skill_dir = skill_dir
         self._resolver = get_model_resolver()
         self._checkpointer = self._resolve_checkpointer(checkpointer)
-        self._runtime_local = threading.local()
+        # Active RunContext for the current run/resume invocation.
+        # Nested subgraph/parallel_map execution reads this via
+        # _get_active_run_options. Replaces the old threading.local
+        # options dict (they stored identical fields).
+        self._active_run_context: RunContext | None = None
         # Tier 1 Commit D — heartbeat pulser handle; set during run()
         self._active_heartbeat: _HeartbeatPulser | None = None
         self._graph = self._build_graph()
@@ -455,19 +460,11 @@ class GraphAgentHarness:
             "configurable": {"thread_id": tid},
         }
 
-        previous_options = getattr(self._runtime_local, "options", None)
-        self._runtime_local.options = {
-            "trace_dir": effective_trace_dir,
-            "thread_id": tid,
-            "artifact_saver": artifact_saver,
-            "storage_manager": storage_manager,
-            "runtime_inputs": dict(effective_runtime_inputs),
-        }
-
-        # Task 7.0: Create explicit RunContext for new emit sites
-        # (coexists with threading.local for backward compatibility)
-        from .run_context import RunContext
-
+        # D-7.0 follow-through: save previous context (nested run / subgraph
+        # entry), install the new RunContext for the duration of this call,
+        # and restore in finally. Replaces the old _runtime_local.options
+        # dict — it stored identical fields.
+        previous_run_context = self._active_run_context
         active_callbacks = list(self.callbacks) if hasattr(self, 'callbacks') else []
         self._active_run_context = RunContext(
             thread_id=tid,
@@ -594,16 +591,25 @@ class GraphAgentHarness:
             except Exception:  # noqa: BLE001
                 logger.warning("[Harness] heartbeat stop failed", exc_info=True)
             self._active_heartbeat = None
-            if previous_options is None:
-                if hasattr(self._runtime_local, "options"):
-                    delattr(self._runtime_local, "options")
-            else:
-                self._runtime_local.options = previous_options
+            self._active_run_context = previous_run_context
 
     def _get_active_run_options(self) -> dict[str, Any]:
-        """Return thread-local run options for nested subgraph execution."""
-        options = getattr(self._runtime_local, "options", None)
-        return dict(options) if isinstance(options, dict) else {}
+        """Return active-run options for nested subgraph / parallel_map.
+
+        Projects the current ``_active_run_context`` back into the legacy
+        dict shape that ``subgraph.execute`` still expects. When no run
+        is active returns an empty dict.
+        """
+        ctx = self._active_run_context
+        if ctx is None:
+            return {}
+        return {
+            "trace_dir": ctx.trace_dir,
+            "thread_id": ctx.thread_id,
+            "artifact_saver": ctx.artifact_saver,
+            "storage_manager": ctx.storage_manager,
+            "runtime_inputs": dict(ctx.runtime_inputs),
+        }
 
     @staticmethod
     def _save_compaction_sidecar(
@@ -813,13 +819,20 @@ class GraphAgentHarness:
             "configurable": {"thread_id": effective_thread_id},
         }
 
-        previous_options = getattr(self._runtime_local, "options", None)
-        self._runtime_local.options = {
-            "trace_dir": trace_dir,
-            "thread_id": effective_thread_id,
-            "artifact_saver": artifact_saver,
-            "runtime_inputs": {},
-        }
+        # D-7.0 follow-through: install RunContext for resume path too
+        # (previously only run() built one; resume left it stale).
+        previous_run_context = self._active_run_context
+        active_callbacks = list(self.callbacks) if hasattr(self, "callbacks") else []
+        self._active_run_context = RunContext(
+            thread_id=str(effective_thread_id or ""),
+            trace_dir=trace_dir if isinstance(trace_dir, Path) else None,
+            runtime_inputs={},
+            storage_manager=(
+                previous_run_context.storage_manager if previous_run_context else None
+            ),
+            artifact_saver=artifact_saver,
+            callbacks=active_callbacks,
+        )
 
         # Tier 2 — T-B11: announce the resume to the trace.
         from ..callbacks.events import ResumedEvent
@@ -849,11 +862,7 @@ class GraphAgentHarness:
             )
             raise
         finally:
-            if previous_options is None:
-                if hasattr(self._runtime_local, "options"):
-                    delattr(self._runtime_local, "options")
-            else:
-                self._runtime_local.options = previous_options
+            self._active_run_context = previous_run_context
 
     # -----------------------------------------------------------------------
     # Graph construction

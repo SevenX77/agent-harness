@@ -1,24 +1,23 @@
 """GraphBuilder — compiles a phase list + collaborators into a LangGraph StateGraph.
 
 Extracted from ``GraphAgentHarness._build_graph`` / ``_calc_recursion_limit``
-(the last two graph-topology methods on the harness) as D-7.1 of the
-harness split.
+as D-7.1 of the harness split.
 
 Compile-time collaborator — like ``RetryRouter``, the builder is
 instantiated once at ``GraphAgentHarness.__init__`` time and reused for
 every ``run()`` / ``resume()``. It deliberately does **not** accept a
-``RunContext``: graph topology is a static function of ``phases`` plus
-the (stateless) collaborator dependencies, and a ``RunContext`` does not
-exist when the graph is being compiled. See the D-7.3 Gemini debate
-recorded in context.md and the earlier ``RetryRouter`` docstring for the
-full rationale — the "lifecycle mismatch" rule applies here too.
+``RunContext`` **or** a ``PhaseExecutor``: graph topology is a static
+function of ``phases``, and the per-run ``PhaseExecutor`` is passed
+through at invoke time via LangGraph's ``RunnableConfig["configurable"]``
+and extracted inside each node closure. This per-invocation threading
+(Gemini's Option D on 2026-04-24) is what closes the concurrent-
+``child.run()`` race: no mutable per-run state lives on the harness
+instance or inside GraphBuilder.
 
-Per-phase execute node functions live on ``PhaseExecutor``; GraphBuilder
-only wires them into the StateGraph. Subgraph nodes come from a
-caller-supplied ``subgraph_node_factory`` so GraphBuilder stays
-independent of the subgraph module (which itself still reads some legacy
-state off the parent harness during Phase A — that will be cleaned up in
-D-7.2 Phase B).
+Per-phase execute bodies live on ``PhaseExecutor``; GraphBuilder only
+wires them into the StateGraph. Subgraph nodes come from a caller-
+supplied ``subgraph_node_factory`` so GraphBuilder stays independent
+of the subgraph module.
 """
 
 from __future__ import annotations
@@ -26,12 +25,30 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
 
 from .phase_executor import PhaseExecutor
 from .retry_router import RetryRouter
 from .state import WorkflowState
 from .types import Phase
+
+
+def _executor_from_config(config: RunnableConfig) -> PhaseExecutor:
+    """Extract the per-run ``PhaseExecutor`` injected into LangGraph config.
+
+    Raises ``RuntimeError`` with a specific message when the config is
+    missing the executor — this is always a programming error (harness
+    built the config wrong), never a runtime configuration issue.
+    """
+    configurable = (config or {}).get("configurable") or {}
+    executor = configurable.get("_phase_executor")
+    if executor is None:
+        raise RuntimeError(
+            "graph node invoked without _phase_executor in config['configurable']. "
+            "GraphAgentHarness.run/resume must inject PhaseExecutor before .invoke()."
+        )
+    return executor
 
 
 class GraphBuilder:
@@ -41,13 +58,11 @@ class GraphBuilder:
         self,
         phases: list[Phase],
         *,
-        phase_executor: PhaseExecutor,
         retry_router: RetryRouter,
         checkpointer: Any = None,
-        subgraph_node_factory: Callable[[Phase], Callable[[WorkflowState], WorkflowState]],
+        subgraph_node_factory: Callable[[Phase], Callable[..., WorkflowState]],
     ) -> None:
         self._phases = phases
-        self._phase_executor = phase_executor
         self._retry_router = retry_router
         self._checkpointer = checkpointer
         self._subgraph_node_factory = subgraph_node_factory
@@ -103,26 +118,20 @@ class GraphBuilder:
         linear = len(self._phases) * 2
         return base + linear + cross_phase_retries * 4 + 10
 
-    def _make_llm_node(self, phase: Phase) -> Callable[[WorkflowState], WorkflowState]:
-        executor = self._phase_executor
-
-        def execute(state: WorkflowState) -> WorkflowState:
-            return executor.execute_llm_phase(phase, state)
+    def _make_llm_node(self, phase: Phase) -> Callable[..., WorkflowState]:
+        def execute(state: WorkflowState, config: RunnableConfig) -> WorkflowState:
+            return _executor_from_config(config).execute_llm_phase(phase, state)
 
         return execute
 
-    def _make_validation_node(self, phase: Phase) -> Callable[[WorkflowState], WorkflowState]:
-        executor = self._phase_executor
-
-        def validate(state: WorkflowState) -> WorkflowState:
-            return executor.execute_validation_phase(phase, state)
+    def _make_validation_node(self, phase: Phase) -> Callable[..., WorkflowState]:
+        def validate(state: WorkflowState, config: RunnableConfig) -> WorkflowState:
+            return _executor_from_config(config).execute_validation_phase(phase, state)
 
         return validate
 
-    def _make_code_only_node(self, phase: Phase) -> Callable[[WorkflowState], WorkflowState]:
-        executor = self._phase_executor
-
-        def execute(state: WorkflowState) -> WorkflowState:
-            return executor.execute_code_only_phase(phase, state)
+    def _make_code_only_node(self, phase: Phase) -> Callable[..., WorkflowState]:
+        def execute(state: WorkflowState, config: RunnableConfig) -> WorkflowState:
+            return _executor_from_config(config).execute_code_only_phase(phase, state)
 
         return execute

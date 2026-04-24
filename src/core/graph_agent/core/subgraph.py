@@ -8,6 +8,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from langchain_core.runnables import RunnableConfig
+
 from .types import ContextBridge, Phase
 from .state import WorkflowState
 
@@ -39,15 +41,25 @@ def build_subgraph_node(
     harness: Any,
     phase: Phase,
     logger: logging.Logger,
-) -> Callable[[WorkflowState], WorkflowState]:
-    """Build a node that executes a nested GraphAgentHarness."""
+) -> Callable[..., WorkflowState]:
+    """Build a node that executes a nested GraphAgentHarness.
+
+    Post-Phase-B signature change: the returned closure now accepts
+    ``(state, config)`` and reads the parent's ``RunContext`` from
+    ``config["configurable"]["_run_context"]`` rather than from a mutable
+    ``harness._active_run_context`` slot. This is what closes the
+    concurrent-``child.run()`` race that the pre-Phase-B code carried —
+    two parallel_map siblings invoking the same child harness instance
+    now each carry their own RunContext through their own config, with
+    no shared instance state to clobber.
+    """
     if phase.subgraph is None:
         raise ValueError(f"Phase '{phase.name}' has no subgraph configured")
 
     bridge = phase.context_bridge or ContextBridge()
     child = phase.subgraph
 
-    def execute(state: WorkflowState) -> WorkflowState:
+    def execute(state: WorkflowState, config: RunnableConfig) -> WorkflowState:
         parent_ctx = copy.deepcopy(state["context"])
         active_callbacks = harness.callbacks
         retry_feedback: list[str] | None = None
@@ -57,9 +69,13 @@ def build_subgraph_node(
         for cb in active_callbacks:
             cb.on_phase_start(phase.name, dict(parent_ctx))
 
-        run_options = {}
-        if hasattr(harness, "_get_active_run_options"):
-            run_options = harness._get_active_run_options()
+        configurable = (config or {}).get("configurable") or {}
+        parent_run_context = configurable.get("_run_context")
+        run_options = (
+            harness._get_active_run_options(parent_run_context)
+            if parent_run_context is not None
+            else {}
+        )
 
         child_inputs: dict[str, Any] = {}
         for parent_key, child_input in bridge.inputs.items():
@@ -117,18 +133,6 @@ def build_subgraph_node(
                 )
 
         subgraph_start = _time.monotonic()
-        # FIXME(D-7.2 PhaseExecutor): child harness instance-level state
-        # (``_active_heartbeat`` / ``_active_run_context``) is overwritten on
-        # every ``child.run`` call. If the same ``child`` instance is invoked
-        # concurrently — e.g. a parallel_map fans out two siblings into the
-        # same subgraph reference — the second invocation clobbers the first's
-        # run state. The P1-1 fix (this file, 2026-04-24) handled the
-        # ``callbacks`` list racing via ``extra_callbacks`` but did not touch
-        # the instance attributes; Gemini audit 2026-04-24 flagged it as a
-        # latent concurrency bug. The clean fix is to move the run-state to a
-        # per-invocation ``PhaseExecutor`` object during the harness split
-        # (D-7.2). Until then, do NOT share one ``child`` instance across
-        # concurrent parallel_map branches.
         try:
             child_state = child.run(
                 initial_context=child_inputs,

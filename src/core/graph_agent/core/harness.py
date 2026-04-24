@@ -372,27 +372,16 @@ class GraphAgentHarness:
         self._skill_dir = skill_dir
         self._resolver = get_model_resolver()
         self._checkpointer = self._resolve_checkpointer(checkpointer)
-        # Active RunContext for the current run/resume invocation.
-        # Nested subgraph/parallel_map execution reads this via
-        # _get_active_run_options. Replaces the old threading.local
-        # options dict (they stored identical fields).
-        self._active_run_context: RunContext | None = None
-        # Tier 1 Commit D — heartbeat pulser handle; set during run()
-        self._active_heartbeat: _HeartbeatPulser | None = None
         # D-7.3 — compile-time routing collaborator; reused across runs.
         self._retry_router = RetryRouter(phases)
-        # D-7.2 steps 4.1-4.3 — PhaseExecutor bound to ``self.callbacks``
-        # reference; for step 4.3 it also holds a harness reference so
-        # ``execute_llm_phase`` can read ``_active_heartbeat`` /
-        # ``_active_run_context`` / ``_resolver`` /
-        # ``_save_compaction_sidecar`` from the still-stateful harness
-        # instance. Step 4.4 (Phase B) replaces both with a per-run
-        # executor passed via LangGraph RunnableConfig.
-        self._phase_executor = PhaseExecutor(self.callbacks, harness=self)
         # D-7.1 — compile-time topology builder, reused across runs.
+        # D-7.2 Phase B: GraphBuilder no longer needs PhaseExecutor at
+        # construction; the executor is built per-run inside ``run()`` /
+        # ``resume()`` and passed through LangGraph
+        # ``RunnableConfig["configurable"]``. Graph node closures extract
+        # it from the config on each invocation.
         self._graph_builder = GraphBuilder(
             phases,
-            phase_executor=self._phase_executor,
             retry_router=self._retry_router,
             checkpointer=self._checkpointer,
             subgraph_node_factory=self._build_subgraph_node,
@@ -491,11 +480,11 @@ class GraphAgentHarness:
             "configurable": {"thread_id": tid},
         }
 
-        # D-7.0 follow-through: save previous context (nested run / subgraph
-        # entry), install the new RunContext for the duration of this call,
-        # and restore in finally. Replaces the old _runtime_local.options
-        # dict — it stored identical fields.
-        previous_run_context = self._active_run_context
+        # D-7.2 Phase B: build per-run RunContext + PhaseExecutor as
+        # locals. No harness-instance state carries run-specific data —
+        # concurrent ``run()`` calls on the same harness instance now
+        # work because the executor lives on this call's stack and
+        # propagates through LangGraph config["configurable"].
         active_callbacks = list(self.callbacks) if hasattr(self, 'callbacks') else []
         # Merge extra_callbacks (from subgraph parent forwarding) without
         # mutating self.callbacks — concurrency-safe because the merged
@@ -504,7 +493,7 @@ class GraphAgentHarness:
             for cb in extra_callbacks:
                 if cb not in active_callbacks:
                     active_callbacks.append(cb)
-        self._active_run_context = RunContext(
+        run_context = RunContext(
             thread_id=tid,
             run_id=run_id,
             trace_dir=effective_trace_dir,
@@ -533,7 +522,19 @@ class GraphAgentHarness:
         # Tier 1 Commit D — T-B13 HeartbeatEvent daemon thread
         heartbeat = _HeartbeatPulser(active_callbacks)
         heartbeat.start()
-        self._active_heartbeat = heartbeat  # let subgraph_node update current_phase
+
+        # D-7.2 Phase B: per-run PhaseExecutor threaded through LangGraph
+        # config — graph node closures extract it from
+        # ``config["configurable"]["_phase_executor"]`` on each invocation.
+        phase_executor = PhaseExecutor(
+            active_callbacks,
+            run_context=run_context,
+            heartbeat=heartbeat,
+            resolver=self._resolver,
+            save_compaction_sidecar=type(self)._save_compaction_sidecar,
+        )
+        config["configurable"]["_phase_executor"] = phase_executor
+        config["configurable"]["_run_context"] = run_context
 
         try:
             result = self._graph.invoke(initial_state, config=config)
@@ -629,25 +630,25 @@ class GraphAgentHarness:
                 heartbeat.stop()
             except Exception:  # noqa: BLE001
                 logger.warning("[Harness] heartbeat stop failed", exc_info=True)
-            self._active_heartbeat = None
-            self._active_run_context = previous_run_context
 
-    def _get_active_run_options(self) -> dict[str, Any]:
+    def _get_active_run_options(self, run_context: RunContext | None) -> dict[str, Any]:
         """Return active-run options for nested subgraph / parallel_map.
 
-        Projects the current ``_active_run_context`` back into the legacy
-        dict shape that ``subgraph.execute`` still expects. When no run
-        is active returns an empty dict.
+        Projects the caller-supplied RunContext back into the legacy dict
+        shape that ``subgraph.execute`` still consumes. ``run_context``
+        is threaded through LangGraph's
+        ``config["configurable"]["_run_context"]`` so this method never
+        reads mutable harness-instance state. ``None`` returns an empty
+        dict (defensive default for tests / callers that forgot to pass).
         """
-        ctx = self._active_run_context
-        if ctx is None:
+        if run_context is None:
             return {}
         return {
-            "trace_dir": ctx.trace_dir,
-            "thread_id": ctx.thread_id,
-            "artifact_saver": ctx.artifact_saver,
-            "storage_manager": ctx.storage_manager,
-            "runtime_inputs": dict(ctx.runtime_inputs),
+            "trace_dir": run_context.trace_dir,
+            "thread_id": run_context.thread_id,
+            "artifact_saver": run_context.artifact_saver,
+            "storage_manager": run_context.storage_manager,
+            "runtime_inputs": dict(run_context.runtime_inputs),
         }
 
     @staticmethod
@@ -858,13 +859,12 @@ class GraphAgentHarness:
             "configurable": {"thread_id": effective_thread_id},
         }
 
-        # D-7.0 follow-through: install RunContext for resume path too
-        # (previously only run() built one; resume left it stale).
-        # run_id is inherited from the paused state so compaction sidecars
-        # written during the resumed run share the same _history/{run_id}/
-        # directory as sidecars from the original run — Studio can then
-        # fold pre-pause and post-resume sidecars under one thread.
-        previous_run_context = self._active_run_context
+        # D-7.2 Phase B: build per-run RunContext + PhaseExecutor as
+        # locals here too, matching run()'s pattern. run_id is inherited
+        # from the paused state so compaction sidecars written during the
+        # resumed run share the same ``_history/{run_id}/`` directory as
+        # sidecars from the original run — Studio folds pre-pause and
+        # post-resume sidecars under one thread.
         active_callbacks = list(self.callbacks) if hasattr(self, "callbacks") else []
         inherited_run_id = ""
         try:
@@ -873,17 +873,27 @@ class GraphAgentHarness:
                 inherited_run_id = raw
         except Exception:  # noqa: BLE001
             logger.warning("[Harness] resume could not read _run_id from state; continuing with empty run_id")
-        self._active_run_context = RunContext(
+        run_context = RunContext(
             thread_id=str(effective_thread_id or ""),
             run_id=inherited_run_id,
             trace_dir=trace_dir if isinstance(trace_dir, Path) else None,
             runtime_inputs={},
-            storage_manager=(
-                previous_run_context.storage_manager if previous_run_context else None
-            ),
+            storage_manager=None,
             artifact_saver=artifact_saver,
             callbacks=active_callbacks,
         )
+
+        # D-7.2 Phase B: per-run PhaseExecutor threaded through config.
+        # resume() has no heartbeat (it inherits from paused state).
+        phase_executor = PhaseExecutor(
+            active_callbacks,
+            run_context=run_context,
+            heartbeat=None,
+            resolver=self._resolver,
+            save_compaction_sidecar=type(self)._save_compaction_sidecar,
+        )
+        config["configurable"]["_phase_executor"] = phase_executor
+        config["configurable"]["_run_context"] = run_context
 
         # Tier 2 — T-B11: announce the resume to the trace.
         from ..callbacks.events import ResumedEvent
@@ -912,8 +922,6 @@ class GraphAgentHarness:
                 ),
             )
             raise
-        finally:
-            self._active_run_context = previous_run_context
 
     # -----------------------------------------------------------------------
     # Graph construction

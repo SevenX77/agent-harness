@@ -104,12 +104,17 @@ class TestCompactionCallSiteScope:
                 "harness._active_run_context.storage_manager."
             )
 
-    def test_run_id_expression_mentions_active_run_context(self) -> None:
-        """Belt-and-braces: the expression must textually reference
-        ``_active_run_context`` so the fix direction can't drift."""
+    def test_run_id_expression_reads_from_per_run_context(self) -> None:
+        """Belt-and-braces: the expression must textually reference the
+        per-run context — either the legacy ``_active_run_context`` /
+        ``active_ctx`` alias or, post-Phase-B, the executor's own
+        ``_run_context`` field (``self._run_context`` typically aliased
+        as ``active_ctx`` in the executor's closure)."""
+        accepted_fragments = ("_active_run_context", "active_ctx", "_run_context")
         for path, call in _find_save_compaction_sidecar_calls():
             rhs_src = ast.unparse(_kwarg(call, "run_id"))
-            assert "_active_run_context" in rhs_src or "active_ctx" in rhs_src, (
+            assert any(f in rhs_src for f in accepted_fragments), (
                 f"run_id kwarg at compaction site in {path.name} does not "
-                f"read from the active RunContext. Got: {rhs_src!r}"
+                f"read from a per-run RunContext-derived expression. "
+                f"Got: {rhs_src!r}. Accepted fragments: {accepted_fragments}"
             )

@@ -487,3 +487,128 @@
 - **无结构性 blocker**（Gemini 原话）
 - golden baseline 补齐（I-3 剩两个 skill）可与 Studio 对接并行推进
 - Harness 拆分（D-7.1-7.4）独立分支，不阻塞对接
+
+---
+
+## 七、2026-04-24 联合审阅：后续问题清单
+
+由 Claude（代码落地质量审计，via Explore agent）+ Gemini（设计层面后续动作审阅）并行审出，本节为下一阶段 action list，按 P0/P1/P2 + backlog 分档。
+
+### 7.1 P0 — 必修项（阻塞 Studio MVP 正式对接或下阶段 refactor）
+
+#### P0-1 Golden baseline 全量覆盖缺失（I-3 补齐）
+- **现状**：只录了 `text-segmentation` 56 events，`batch-analysis` / `adaptation_v1` 缺失
+- **阻塞**：D-7.1-7.4 harness 拆分没有回归安全网 → 拆了是盲飞
+- **根因争议**：Gemini 怀疑 `parallel_map` 线程池未 shutdown，但实际是 dev 环境 claude/codex/gemini CLI 并存耗尽宿主线程 —— **需先 verify**（跑一次 htop 看 python 进程 thread 数）
+- **动作**：
+  1. 新建干净 shell（退出其他 CLI）或用 docker 隔离
+  2. 跑 `batch-analysis` + `adaptation_v1` 各一次，录制 golden
+  3. 若仍崩，查 `parallel_map` / DeerFlow subagent executor 线程池 shutdown 路径
+- **估时**：2-4 小时
+
+#### P0-2 RunContext 实际未投入使用（D-7.0 半成品）
+- **现状**：`harness.py:472` 构造了 `RunContext` 赋值到 `self._active_run_context`，但**代码全局无读取点** → 14 个 tier-1 event 的 emit 仍走老的 `self._runtime_local.options` 字典
+- **风险**：D-7.1-7.4 harness 拆分启动时会发现 RunContext 渗透不完整，拆分时还得先补齐
+- **动作**：
+  1. `harness.py` 所有 emit 点改用 `self._active_run_context.thread_id / trace_dir / runtime_inputs` 读值
+  2. 或者：明确声明 RunContext 只是"预留容器"，拆分 PR 里再统一切
+- **估时**：2 小时（如果现在做）；否则列入 D-7.1 开工前第一件事
+- **责任人建议**：和 D-7.1-7.4 同分支做更自然
+
+### 7.2 P1 — 应尽快修但不阻塞对接
+
+#### P1-1 HeartbeatPulser 生命周期健壮性
+- **Gemini 发现**：`HeartbeatPulser` 非 daemon 线程 + `stop()` 仅 flag，Ctrl+C 时解释器可能挂起
+- **Claude 补充**：`_safe_memory_usage_mb()` `except Exception: pass` 无日志（违反 logging.md 铁律）
+- **动作**：
+  1. `threading.Thread(daemon=True)` 确认或改
+  2. `harness.run` / `harness.resume` 的 finally 加 `pulser.stop(); pulser.join(timeout=1.0)`
+  3. 所有 silent swallow 补 `logger.debug()` 说明降级原因
+- **估时**：30 分钟
+
+#### P1-2 Silent swallow 扫盘（logging.md 铁律）
+- **Claude 发现**：3 处 `except Exception: pass` 无日志
+  - `src/core/graph_agent/core/harness.py:637` — `_safe_memory_usage_mb`
+  - `src/core/graph_agent/core/compiler.py:947,965` — `_known_roles` / `_known_models`
+  - `src/core/graph_agent/callbacks/serialize.py:81,97` — `to_jsonable_dict` 的 fallback 分支
+- **动作**：各加 `logger.debug("<场景> failed: %s, degrading to <fallback>", e)`
+- **估时**：20 分钟
+
+#### P1-3 子图 compile-time cycle detection（Gemini D1 变体）
+- **现状**：`loader.py:288-290` 有 runtime guard（cyclic 加载时抛 `SkillLoadError`），但 compile-time 未扫 `subgraph:` 字段静态图 → 作者无法在 compile 时提前发现
+- **动作**：compiler `_check_structure` 扫所有 `subgraph:` 字段构图，DFS 检测环，抛 `F-subgraph-cycle` FATAL
+- **估时**：1 小时
+- **注**：优先级低于 P0（因为运行时已有安全网），但对作者体验 valuable
+
+#### P1-4 harness.py 两个巨型函数拆分
+- **Claude 发现**：
+  - `_build_phase_node()` 502 行（阈值 40）
+  - `_build_context_from_io()` 187 行
+- **风险**：D-7.1-7.4 harness 拆分的第一步，目前的 monolithic 结构是真正的债
+- **动作**：作为 D-7.1-7.4 的前置拆分项目，不单独改
+- **估时**：计入 D-7.1-7.4 的 2-3 天整体
+
+#### P1-5 测试覆盖补齐
+- **Claude 发现空洞**：
+  - `_HeartbeatPulser`（timer / stop 机制）
+  - `_save_compaction_sidecar()`（外链写入）
+  - `AgentLoopIterationMiddleware`（before_model hook + 计数器）
+  - `to_jsonable_dict()` 已有 18 tests 覆盖 ✅
+  - `RunContext` 已有 4 tests 覆盖 ✅
+  - `get_thread_status` 已有 7 tests 覆盖 ✅
+- **动作**：补前三个的单测，每个 1-2 个 happy-path test 即可
+- **估时**：1-1.5 小时
+
+### 7.3 P2 — 长期架构债（可进 backlog）
+
+#### P2-1 Harness 拆分（D-7.1-7.4，独立分支）
+- 2-3 天 refactor/harness-split 分支
+- 前置：P0-1 golden baseline 补齐 + I-2 snapshot_diff 已 landed ✅
+- 目标：GraphBuilder / PhaseExecutor / RetryRouter / NudgeInjector 剥离 + RunContext 全链路透传 + 彻底干掉 `threading.local`
+
+#### P2-2 Pydantic event schema 向前兼容策略
+- **Gemini 发现**：`schema_version: Literal["1.0"]` 硬编码，未来加字段时 Studio 旧版本 DB 解析会崩
+- **动作**：写一份 `docs/event-schema-evolution.md`，规定：
+  - 只允许新增 Optional 字段，不升 version
+  - Breaking change 必须升 `schema_version` 至 `"1.1"` + Studio 写 migration
+- **估时**：30 分钟（纯文档）
+
+#### P2-3 events.py 的 `__future__ import annotations` 省略注释
+- **Claude 发现**：故意跳是为了让 Pydantic discriminator 类定义时求值，但维护者看不出来
+- **动作**：模块头加 3 行注释说明
+- **估时**：5 分钟
+
+### 7.4 P3 — 需验证是否是真问题（Gemini D 档原始盲点）
+
+| 盲点 | 验证结论 | 是否需处理 |
+|------|---------|-----------|
+| D1 嵌套 subgraph 循环 | `loader.py:288-290` 有 runtime guard，但 compile-time 未检测 | ✅ 真 gap，列入 P1-3 |
+| D2 `model_override` 透传到 parallel_map 子 agent | **误判**：parallel_map 故意不透传，子 skill 自己决定 model —— 这是正确的语义隔离 | ❌ 无需处理 |
+| D3 HITL resume 导致 checkpointer DB 膨胀 | LangGraph 内部机制（sqlite/postgres backend），不在引擎 scope 内 | ⚠️ 长期监控，不列 action |
+
+### 7.5 Studio 侧责任清单（非引擎代码，但需明确契约）
+
+下列是**引擎层不处理、由 Studio 后端或前端承担**的事项。写在这里以确保对接时不漏：
+
+1. **Artifact retention staleness**（6.4 重复强调）— `/api/traces/{run_id}` 返回时对 `ArtifactSavedEvent.path` 和 `CompactionEvent.content_ref` 做 `os.path.exists` 校验
+2. **未知 event_type 容错**— 解析 `tracing.jsonl` 不得因单个未识别事件崩整条 timeline
+3. **心跳超时告警**— 60 秒收不到 HeartbeatEvent → UI 标 "worker 可能僵死"
+4. **大对象懒加载**— RunStartedEvent.initial_context / Compaction 外链，列表不预渲染
+5. **HITL 状态边界**— thread status=`CRASHED` 不暴露 Resume 按钮
+6. **W-python-glue-orchestrator 警告透传**— 编排 UI 对含此 Warning 的 Skill 给出"不保证并发安全"提示
+
+### 7.6 总览表（用于看板追踪）
+
+| 优先级 | 项 | 估时 | 阻塞范围 |
+|--------|----|------|---------|
+| P0 | Golden baseline 2/3 补齐 | 2-4h | harness 拆分 |
+| P0 | RunContext 渗透式投入使用 | 2h（或并入 P2-1）| harness 拆分 |
+| P1 | HeartbeatPulser daemon + join | 30m | — |
+| P1 | Silent swallow 扫盘 | 20m | — |
+| P1 | 子图 compile-time cycle | 1h | — |
+| P1 | 测试覆盖补齐（3 项）| 1-1.5h | — |
+| P2 | Harness 拆分 | 2-3 天（独立分支）| — |
+| P2 | Schema evolution 文档 | 30m | Studio 升级 |
+| P2 | events.py 注释 | 5m | — |
+
+**P0 + P1 合计约 5-6 小时**；P2 harness 拆分是独立专项。

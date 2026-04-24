@@ -78,6 +78,26 @@ class PhaseExecutor:
         self._resolver = resolver
         self._save_compaction_sidecar = save_compaction_sidecar
 
+    def __getstate__(self) -> Any:
+        # Fail-fast guard for the LangGraph checkpointer (and any other
+        # path that tries to pickle RunnableConfig). ``PhaseExecutor``
+        # deliberately holds live per-run references (heartbeat thread,
+        # bound method to the harness's sidecar writer, callback list
+        # with open trace files); these are not serialisable and even if
+        # they were, a resumed run would be wrong to reuse stale
+        # instances. We thread the executor through
+        # ``config["configurable"]`` for in-memory access only. If the
+        # checkpointer tries to persist the config, raising here surfaces
+        # the design violation immediately rather than letting a silent
+        # data-corruption bug reach production.
+        raise TypeError(
+            "PhaseExecutor is a per-run runtime object and must not be "
+            "pickled. Its presence in RunnableConfig['configurable'] is "
+            "for in-memory propagation only — ensure your checkpointer "
+            "excludes '_phase_executor' or do not persist the config that "
+            "carries it."
+        )
+
     # Read-only accessors for callers that need the fields (e.g. subgraph).
     @property
     def run_context(self) -> RunContext | None:
@@ -517,8 +537,21 @@ class PhaseExecutor:
                     else []
                 )
                 active_ctx = self._run_context
+                # P1-1.1 post-D: ``active_ctx.run_id`` is an empty string
+                # for code paths that never populate the RunContext (older
+                # test fixtures, bare PhaseExecutor([]) use cases). Empty
+                # string produces a ``_history//<idx>.json`` path — a
+                # filesystem-valid but semantically broken dir. Fall back
+                # to "unknown" so the sidecar lands somewhere greppable.
+                # NOTE: the ``run_id=`` kwarg expression is kept inline as
+                # an IfExp/BoolOp (not extracted to a local) so the
+                # test_compaction_closure_scope AST regression guard
+                # still sees a non-bare-Name RHS.
                 sidecar_ref = self._save_compaction_sidecar(
-                    run_id=(active_ctx.run_id if active_ctx else ""),
+                    run_id=(
+                        (active_ctx.run_id if active_ctx else "")
+                        or "unknown"
+                    ),
                     idx=checkpoint_count,
                     removed_messages=removed_messages,
                     storage_manager=(

@@ -71,11 +71,24 @@ def build_subgraph_node(
 
         configurable = (config or {}).get("configurable") or {}
         parent_run_context = configurable.get("_run_context")
-        run_options = (
-            harness._get_active_run_options(parent_run_context)
-            if parent_run_context is not None
-            else {}
-        )
+        if parent_run_context is None:
+            # After D-7.2 Phase B, every subgraph node is reached via a
+            # parent ``harness.run`` / ``harness.resume`` that installs its
+            # RunContext into ``config["configurable"]["_run_context"]``.
+            # A missing key here means either (a) a future refactor forgot
+            # to thread the context through a new entry point, or (b) a
+            # caller invoked ``self._graph.invoke`` directly without going
+            # through ``run()``. Silently falling back to ``{}`` would
+            # re-open the class of bug that Phase B was meant to close —
+            # subgraph trace dir / storage_manager / runtime_inputs would
+            # silently diverge from the parent's. Fail fast instead.
+            raise RuntimeError(
+                f"Subgraph phase '{phase.name}' invoked without "
+                "RunContext in RunnableConfig['configurable']['_run_context']. "
+                "This indicates a broken entry point — all subgraph invocations "
+                "must originate from GraphAgentHarness.run() or .resume()."
+            )
+        run_options = harness._get_active_run_options(parent_run_context)
 
         child_inputs: dict[str, Any] = {}
         for parent_key, child_input in bridge.inputs.items():

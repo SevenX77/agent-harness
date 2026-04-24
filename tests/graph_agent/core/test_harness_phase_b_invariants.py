@@ -69,6 +69,74 @@ class TestPhaseExecutorNoHarnessReference:
         )
 
 
+class TestRunContextShallowImmutability:
+    """Post-D session blind-spot-1: RunContext fields that collaborators
+    receive by reference are shallowly immutable.
+
+    Rationale: before this fix, ``ctx.runtime_inputs["x"] = 1`` and
+    ``ctx.callbacks.append(cb)`` both silently succeeded — a surprise
+    because the dataclass itself was ``frozen=True``. Runtime
+    collaborators (``PhaseExecutor``, ``NudgeInjector``, subgraph nodes)
+    hold the same reference, so a well-intentioned ``cache the lookup``
+    line could clobber a sibling concurrent run. Freezing the containers
+    (MappingProxyType + tuple) closes 99% of foot-guns at zero runtime
+    cost; deep freeze is explicitly out of scope.
+    """
+
+    def test_runtime_inputs_is_mapping_proxy(self):
+        import types
+        from graph_agent.core.run_context import RunContext
+
+        ctx = RunContext(thread_id="t", runtime_inputs={"k": "v"})
+        assert isinstance(ctx.runtime_inputs, types.MappingProxyType)
+
+    def test_callbacks_is_tuple(self):
+        from graph_agent.core.run_context import RunContext
+
+        ctx = RunContext(thread_id="t", callbacks=[])
+        assert isinstance(ctx.callbacks, tuple)
+
+    def test_runtime_inputs_top_level_mutation_raises(self):
+        import pytest
+        from graph_agent.core.run_context import RunContext
+
+        ctx = RunContext(thread_id="t", runtime_inputs={"k": "v"})
+        with pytest.raises(TypeError):
+            ctx.runtime_inputs["new"] = "leak"  # type: ignore[index]
+
+    def test_callbacks_has_no_append(self):
+        import pytest
+        from graph_agent.core.run_context import RunContext
+
+        ctx = RunContext(thread_id="t", callbacks=[])
+        with pytest.raises(AttributeError):
+            ctx.callbacks.append(object())  # type: ignore[attr-defined]
+
+
+class TestPhaseExecutorPickleGuard:
+    """PhaseExecutor raises TypeError if pickled — protects against
+    accidental LangGraph checkpointer persistence of the per-run object.
+
+    Rationale: ``config['configurable']['_phase_executor']`` is threaded
+    into LangGraph for in-memory propagation. If a future checkpointer
+    upgrade (or a caller that wraps ``graph.invoke`` with its own
+    persistence) tries to pickle the whole config, the executor's live
+    references (heartbeat thread, bound sidecar method, callback list)
+    would either fail opaquely or — worse — silently succeed with stale
+    references on resume. ``__getstate__`` raising up-front turns this
+    into an immediate TypeError with a clear message.
+    """
+
+    def test_pickling_phase_executor_raises_typeerror(self):
+        import pickle
+        import pytest
+
+        executor = PhaseExecutor([])
+
+        with pytest.raises(TypeError, match="per-run runtime object"):
+            pickle.dumps(executor)
+
+
 class TestGraphBuilderNoPhaseExecutor:
     """GraphBuilder receives PhaseExecutor per-invocation via config, not at init."""
 
@@ -126,6 +194,94 @@ class TestResumeRuntimeInputsRestore:
         assert harness._get_active_run_options(None) == {}
 
 
+class TestPersistentRuntimeInputsOptIn:
+    """P0-2.1 post-D: ``run(persistent_runtime_inputs=, persistent_storage_config=)``
+    opts a caller into checkpoint-durable state that ``resume()`` can rebuild
+    from, closing the hardcoded ``storage_manager=None`` gap PR #3 left open.
+
+    We verify the surface shape (signatures + pre-flight validation) with
+    cheap static tests. End-to-end checkpoint round-trip is covered by the
+    E-task golden baseline (integration territory, not unit scope).
+    """
+
+    def test_run_signature_accepts_persistent_kwargs(self):
+        import inspect
+        from graph_agent.core.harness import GraphAgentHarness
+
+        sig = inspect.signature(GraphAgentHarness.run)
+        assert "persistent_runtime_inputs" in sig.parameters, (
+            "run() must accept persistent_runtime_inputs= for "
+            "checkpoint-durable resume rehydration."
+        )
+        assert "persistent_storage_config" in sig.parameters, (
+            "run() must accept persistent_storage_config= so resume() can "
+            "rebuild StorageManager from the persisted workflow state."
+        )
+        assert sig.parameters["persistent_runtime_inputs"].default is None
+        assert sig.parameters["persistent_storage_config"].default is None
+
+    def test_non_serialisable_persistent_inputs_raise_at_run_entry(self):
+        """Pre-flight json.dumps ensures a non-serialisable payload fails
+        loudly at run() entry rather than silently later at checkpoint
+        write (where the error path is deeper + harder to correlate).
+
+        We use a minimal harness and push a ``set`` (json.dumps rejects
+        sets) via persistent_runtime_inputs. The check must fire before
+        the graph is invoked.
+        """
+        import pytest
+        from graph_agent.core.harness import GraphAgentHarness
+        from graph_agent.core.types import Phase
+
+        harness = GraphAgentHarness(phases=[Phase(name="only", requires_llm=False)])
+
+        with pytest.raises(ValueError, match="JSON-serialisable"):
+            harness.run(
+                initial_context={"thread_id": "t"},
+                persistent_runtime_inputs={"bad": {1, 2, 3}},
+            )
+
+    def test_resume_rehydrates_runtime_inputs_from_state(self):
+        """When resume() receives ``runtime_inputs_map=None`` but the
+        replayed state carries ``_persistent_runtime_inputs`` (stashed by
+        the original run()), resume() must pick it up.
+        """
+        from unittest.mock import patch
+        from graph_agent.core.harness import GraphAgentHarness
+        from graph_agent.core.types import Phase
+
+        harness = GraphAgentHarness(phases=[Phase(name="only", requires_llm=False)])
+
+        captured: dict[str, object] = {}
+
+        class _FakeGraph:
+            def invoke(self, state, config):
+                # Capture the run_context threaded into config so the
+                # assertion can inspect it.
+                captured["run_context"] = config["configurable"]["_run_context"]
+                return state
+
+        with patch.object(harness, "_graph", _FakeGraph()):
+            harness.resume(
+                state={
+                    "messages": [],
+                    "context": {
+                        "_thread_id": "t",
+                        "_run_id": "r-42",
+                        "_persistent_runtime_inputs": {"pipeline": "p", "n": 3},
+                    },
+                    "current_phase": "",
+                    "retry_counts": {},
+                    "metrics": {"total_input_tokens": 0, "total_output_tokens": 0},
+                },
+                human_input="go",
+            )
+
+        rc = captured["run_context"]
+        # runtime_inputs is MappingProxyType; == works against dicts.
+        assert dict(rc.runtime_inputs) == {"pipeline": "p", "n": 3}
+
+
 class TestSubgraphFixmeGone:
     """The concurrent-child.run() race FIXME was removed from subgraph.py."""
 
@@ -138,4 +294,62 @@ class TestSubgraphFixmeGone:
         assert "FIXME(D-7.2" not in content, (
             "subgraph.py still carries the D-7.2 FIXME — Phase B was meant "
             "to delete it once the underlying race was fixed."
+        )
+
+
+class TestSubgraphRequiresRunContext:
+    """Subgraph nodes raise if RunContext is missing from RunnableConfig.
+
+    After D-7.2 Phase B, every subgraph invocation reaches its node
+    through ``harness.run()`` / ``.resume()``, which install the
+    parent's RunContext into ``config['configurable']['_run_context']``.
+    A missing key means either (a) a future refactor forgot to thread
+    RunContext through a new entry point, or (b) a caller invoked the
+    compiled graph directly bypassing ``run()``. Silent fallback to
+    ``{}`` would re-open the correctness gap Phase B closed (subgraph
+    trace_dir / storage_manager / runtime_inputs diverging from the
+    parent). This test guards that the fallback was replaced with a
+    RuntimeError.
+    """
+
+    def test_subgraph_execute_raises_when_run_context_missing(self):
+        import logging
+
+        import pytest
+        from unittest.mock import MagicMock
+
+        from graph_agent.core.subgraph import build_subgraph_node
+        from graph_agent.core.types import Phase
+
+        child = MagicMock()
+        parent_phase = Phase(name="render", subgraph=child, requires_llm=False)
+        parent_harness = MagicMock()
+        parent_harness.callbacks = []
+
+        node = build_subgraph_node(
+            parent_harness, parent_phase, logging.getLogger("test_subgraph"),
+        )
+
+        state = {"context": {}, "messages": [], "current_phase": "",
+                 "retry_counts": {}, "metrics": {}}
+
+        # No ``_run_context`` in configurable — invariant violation.
+        bad_config = {"configurable": {"thread_id": "t"}}
+
+        with pytest.raises(RuntimeError, match="RunContext"):
+            node(state, bad_config)  # type: ignore[arg-type]
+
+    def test_subgraph_source_no_silent_none_fallback(self):
+        """Defense in depth: grep-level check that the fallback branch
+        was removed. Catches a well-meaning future edit that re-introduces
+        the ``if parent_run_context is not None else {}`` shape.
+        """
+        subgraph_path = (
+            Path(__file__).resolve().parents[3]
+            / "src" / "core" / "graph_agent" / "core" / "subgraph.py"
+        )
+        content = subgraph_path.read_text(encoding="utf-8")
+        assert "if parent_run_context is not None" not in content, (
+            "subgraph.py still contains the silent-fallback conditional. "
+            "Post-Phase-B, missing RunContext must raise RuntimeError."
         )

@@ -1,0 +1,368 @@
+{
+  "CHARACTER_STANCE": {
+    "character_arc_overview": "姜宁的弧线本质是：从'被命运剥夺的孤独求生者'到'主动掌控末世规则的秩序建立者'。情感上不是传统意义的'从冷漠到温柔'，而是'从被动受害到主动分配信任'——她始终保持理性与情感克制，但逐步学会了在可控范围内接纳盟友。",
+    "key_relationships": [
+      {
+        "character": "杨伟聪",
+        "dynamic": "虚伪自私，骗取玉石空间转送他人；重生后姜宁对其零感情，纯粹的复仇对象",
+        "function_in_story": "前世创伤具象化载体，虐渣的首要目标，反衬主角成长",
+        "relationship_tone": "冷漠→蔑视→当众清算",
+        "role": "前世暗恋对象/主要仇人"
+      },
+      {
+        "character": "苏梦瑶",
+        "dynamic": "凭姜宁的空间在末世活得光鲜，象征'不劳而获的恶意受益者'",
+        "function_in_story": "虐渣线第二目标，前世不公正的代表",
+        "relationship_tone": "嫉恨（前世）→清算（今世）",
+        "role": "校花/空间得利者/仇人"
+      },
+      {
+        "character": "张超",
+        "dynamic": "医药公司业务员，帮助筹备紧缺药品；情感上安全可靠的边界内合作者",
+        "function_in_story": "资源获取的合法渠道，提供少量情感温度，展示主角有选择性的信任能力",
+        "relationship_tone": "务实信任，互利协作",
+        "role": "发小/可信盟友"
+      },
+      {
+        "character": "霍一深",
+        "dynamic": "能力强，背景神秘，与姜宁形成战略协作；关系模糊留有后续发展空间",
+        "function_in_story": "Act 1-C起安全区建立的关键伙伴，可能的未来情感线（需克制处理）",
+        "relationship_tone": "互相试探→战略互信",
+        "role": "神秘邻居/潜在核心盟友"
+      },
+      {
+        "character": "郑薇丽",
+        "dynamic": "姜宁主动收留，建立小型可信同盟",
+        "function_in_story": "展示主角有恩必报的另一面，软化纯复仇叙事",
+        "relationship_tone": "单向庇护→互相依靠",
+        "role": "前世友人/被保护者"
+      },
+      {
+        "character": "宠物狗",
+        "dynamic": "前世救命恩犬，重生后首要寻回目标之一",
+        "function_in_story": "末世暗黑基调中的情感锚点，提供跨受众群体的情感吸引力",
+        "relationship_tone": "无条件情感依附",
+        "role": "情感核心/精神寄托"
+      }
+    ],
+    "protagonist": {
+      "arc_trajectory": "孤身重生冷静者 → 末世初期强硬生存者 → 小型安全区守护者 → （预判）末世秩序重建者",
+      "background": "孤儿院长大，医学系学生，前世末世中挣扎三年后惨死——孤独成长经历塑造了极强的自我依赖与警惕性",
+      "core_contradiction": "渴望信任（收留朋友/与邻居结盟）VS 高度警惕（不轻易相信任何人）——孤儿院背景造成的矛盾底色",
+      "core_motivation": "前世：在末世中活下去（失败）→今世：提前掌控资源，独立生存，向背叛者复仇，绝不再依赖任何人",
+      "core_traits": [
+        "务实坚韧",
+        "精明果断",
+        "有仇必报",
+        "情感克制",
+        "高度自律"
+      ],
+      "name": "姜宁",
+      "special_ability": "祖传玉石空间（可收纳海量物资）+ 前世末世三年生存记忆 + 医学专业知识",
+      "stance_declaration": "'要什么男人，我要活命'——物质独立先于情感依附的核心价值观"
+    }
+  },
+  "CORE_LOGIC": {
+    "act_structure": {
+      "acts": [
+        {
+          "act_id": "Act 1",
+          "chapters": "1-10+",
+          "sub_acts": [
+            {
+              "core_satisfaction": "清单式囤货带来的掌控感与安全感极致释放",
+              "id": "A段",
+              "title": "疯狂囤货（Ch 1-3）"
+            },
+            {
+              "core_satisfaction": "信息差俯视爽+当众虐渣的复仇快感",
+              "id": "B段",
+              "title": "台风降临与初步冲突（Ch 4-7）"
+            },
+            {
+              "core_satisfaction": "秩序建立感+初步信任关系带来的情感温度",
+              "id": "C段",
+              "title": "建立安全区与早期联盟（Ch 8-10）"
+            }
+          ],
+          "title": "超级台风——重生与备战",
+          "transition_hook": "台风洪水仅是序章，水位持续上涨，粮食危机与邻里冲突即将升级，末世真正考验才刚开始"
+        }
+      ],
+      "total_acts_analyzed": 1
+    },
+    "core_engine": "信息差驱动的重生逆袭引擎——主角凭借前世三年末世记忆，在灾难降临前72小时内以超前认知碾压所有角色，将'知道别人不知道的事'转化为物资、安全与复仇筹码，以高密度的行动流持续释放爽感",
+    "genre": {
+      "platform_genre_label": "末世+重生+空间+囤货+日常向",
+      "primary": "末世重生（Apocalypse Rebirth）",
+      "secondary": [
+        "空间囤货",
+        "虐渣爽文",
+        "科幻灾难",
+        "独立女性逆袭"
+      ]
+    },
+    "hard_axis": {
+      "description": "物理世界/环境灾难进程轴",
+      "progression": [
+        {
+          "environment": "沿海城市繁荣日常，台风预警初起，街头人群懵懂无感",
+          "stage": "Act 1-A（天灾前72h）",
+          "state": "末世前正常都市",
+          "threat_level": "潜伏期"
+        },
+        {
+          "environment": "基础设施（电力/通信/供水）开始瘫痪，龙卷风出现，灾情远超历史预测",
+          "stage": "Act 1-B（台风登陆）",
+          "state": "超强台风+初级洪涝",
+          "threat_level": "爆发期"
+        },
+        {
+          "environment": "公寓楼被困孤岛，电梯停运，抢劫与冲突频发",
+          "stage": "Act 1-C（洪水围困）",
+          "state": "洪水漫城，社会秩序瓦解",
+          "threat_level": "持续高压期"
+        },
+        {
+          "environment": "城市废墟，长期生存战，人性博弈升级",
+          "stage": "后续Act（预判）",
+          "state": "极寒/地震/虫灾/酸雨轮番叠加",
+          "threat_level": "深度末世期"
+        }
+      ]
+    },
+    "soft_axis": {
+      "description": "人物动机/关系/心理成长轴",
+      "progression": [
+        {
+          "dynamic": "孤身重生，果断切割前世软弱自我；退男友礼物换物资，宣告'不要爱情要活命'的立场",
+          "emotional_tone": "冷静决绝，压抑兴奋",
+          "stage": "Act 1-A",
+          "state": "归零重建期"
+        },
+        {
+          "dynamic": "正面对峙渣男杨伟聪与苏梦瑶，当众摧毁玉坠断绝利用关系；暴力驱逐抢食者，树立末世威慑",
+          "emotional_tone": "强硬爽快，复仇快感",
+          "stage": "Act 1-B",
+          "state": "复仇宣言期"
+        },
+        {
+          "dynamic": "与神秘邻居霍一深形成战略协作，收留前世友人郑薇丽，从独狼转向小型可信同盟构建",
+          "emotional_tone": "谨慎信任，策略温情",
+          "stage": "Act 1-C",
+          "state": "初步结盟期"
+        }
+      ]
+    }
+  },
+  "METADATA_TAGS": {
+    "content_tags": {
+      "audience_rating": "15+ / 适合成熟青少年及成人",
+      "comparable_titles": [
+        "末世囤货流爽文",
+        "重生空间系短剧",
+        "独立女性末日生存题材"
+      ],
+      "content_warnings": [
+        "暴力场景（驱逐抢食者/自卫冲突）",
+        "极端灾难描写",
+        "轻度血腥（刀械威胁）"
+      ],
+      "genre_tags": [
+        "末世",
+        "重生",
+        "空间",
+        "囤货",
+        "科幻",
+        "灾难",
+        "虐渣",
+        "爽文"
+      ],
+      "theme_tags": [
+        "女性独立",
+        "生存博弈",
+        "复仇",
+        "末日备灾",
+        "人性考验",
+        "信息差逆袭",
+        "小型社会秩序建立"
+      ],
+      "tone_tags": [
+        "暗黑",
+        "爽快",
+        "务实",
+        "日常向",
+        "反恋爱脑"
+      ]
+    },
+    "downstream_pipeline_hints": {
+      "character_dev_priority": [
+        "姜宁立场宣言场景（Act 1-A）",
+        "霍一深神秘感建立（Act 1-C）"
+      ],
+      "hook_for_episode_1": "退AJ换囤粮（前30秒）+ 空间首次开启（第1集结尾钩子）",
+      "risk_flags": [
+        "末世特效成本需分级控制",
+        "男性角色需避免工具人扁平化",
+        "宠物狗线需早期建立避免观众遗忘"
+      ],
+      "script_focus": "优先开发Act 1-A囤货节奏 + Act 1-B虐渣爆发集，作为前置种草集",
+      "visual_dev_priority": [
+        "空间吞噬特效标准化",
+        "信息差平行剪辑模板",
+        "虐渣三连镜头模板"
+      ]
+    },
+    "production_tags": {
+      "adaptation_type": "短剧（微短剧/竖屏剧）",
+      "author": "程加加",
+      "ip_validation": "实体出版+动态漫已上线，IP价值已验证",
+      "pipeline_stage": "drama_dna",
+      "platform_targets": [
+        "抖音",
+        "快手",
+        "微短剧平台"
+      ],
+      "project_id": "013_躺赢",
+      "setting_location": "沿海城市（未指定），公寓/批发市场/大学城",
+      "setting_time": "近未来 2029年",
+      "title": "开局天灾，我靠囤百亿物资躺赢",
+      "total_acts_analyzed": 1,
+      "total_chapters_analyzed": 10
+    }
+  },
+  "SHUANG_DIAN_ENGINE": {
+    "emotional_payoff_pattern": {
+      "delivery_rhythm": "每3-5分钟（一集）至少一个爽点引爆，A段以囤货爽为主，B段以虐渣爽为主，C段以安全感建立为主",
+      "escalation_pattern": "爽感层层递进：物资安全感→复仇快感→社会秩序掌控感→末世生存胜利感",
+      "layer_1_emotion_relief": "情绪爽——退礼物、无视渣男、夺回空间，精准击中被辜负/被剥夺的现实痛点",
+      "layer_2_competence_fantasy": "能力爽——主角医学知识+商业思维+严密囤货逻辑，提供'高智商女主'的安全感代入",
+      "layer_3_cognitive_superiority": "认知爽——信息差设定让观众与主角同步俯视茫然大众，产生强烈智力优越感"
+    },
+    "primary_hooks": [
+      {
+        "description": "退还男友限量版AJ球鞋换取囤货资金，用一个利落动作完成人物立场宣言：'我不要爱情要活命'",
+        "emotional_effect": "强烈价值观共鸣，瞬间锁定目标受众",
+        "hook_id": "H1",
+        "name": "退AJ换囤粮——立场宣言钩",
+        "trigger_timing": "开场3秒内",
+        "visual_potential": "高——球鞋特写→退货单→物资清单的快剪"
+      },
+      {
+        "description": "货车装满→一键收进空间的视觉奇观，配合数字跳动（物资价值/重量/种类计数）制造持续多巴胺刺激",
+        "emotional_effect": "替代性满足感，囤货焦虑共鸣族的核心爽点",
+        "hook_id": "H2",
+        "name": "空间囤货可视化——多巴胺节奏引擎",
+        "trigger_timing": "贯穿全剧，每集至少一次囤货节奏",
+        "visual_potential": "极高——特效成本可控，重复使用强化品牌记忆"
+      },
+      {
+        "description": "台风预警短信+手机时间特写+街头正常人懵懂对比，用信息差制造'她知道，别人不知道'的强烈观看张力",
+        "emotional_effect": "智力优越感+追剧驱动力",
+        "hook_id": "H3",
+        "name": "末世前3天倒计时——信息差张力钩",
+        "trigger_timing": "Act 1-A贯穿，Act 1-B爆发",
+        "visual_potential": "高——平行剪辑：主角备战VS普通人娱乐"
+      },
+      {
+        "description": "当面摧毁玉坠、冷笑挂断渣男电话、暴力驱逐抢食者，每个动作精准击中被辜负/被背叛的情感痛点",
+        "emotional_effect": "情绪代偿性满足，核心粉的最强共鸣点",
+        "hook_id": "H4",
+        "name": "当众虐渣——复仇快感钩",
+        "trigger_timing": "Act 1-B集中爆发，后续持续",
+        "visual_potential": "高——表情特写+反应镜头剪辑"
+      },
+      {
+        "description": "找回前世救命狗，宠物与主角的生死羁绊在末世暗黑基调中注入情感温度",
+        "emotional_effect": "跨性别受众吸引，软化整体紧张氛围",
+        "hook_id": "H5",
+        "name": "宠物狗情感线——软性黏合钩",
+        "trigger_timing": "早期建立，持续点缀",
+        "visual_potential": "中高——宠物镜头天然高互动"
+      }
+    ],
+    "target_audience": {
+      "primary": "18-35岁女性用户，抖音/快手/微短剧平台",
+      "segments": [
+        {
+          "age_range": "25-35岁女性",
+          "key_appeal": "前世惨死→重生开挂极致反转，退AJ/夺回空间/无视渣男的利落操作",
+          "name": "重生爽文核心粉"
+        },
+        {
+          "age_range": "18-40岁（疫情后遗症人群）",
+          "key_appeal": "疯狂囤货行为贴近现实焦虑，产生强烈替代性满足",
+          "name": "囤货焦虑共鸣族"
+        },
+        {
+          "age_range": "22-30岁职场女性",
+          "key_appeal": "经济独立、靠自己的女性自主叙事，反感恋爱脑",
+          "name": "独立女性价值观认同者"
+        },
+        {
+          "age_range": "20-30岁男性",
+          "key_appeal": "多灾种设定+硬核物资清单，满足备灾战术幻想",
+          "name": "末世灾难猎奇男性用户"
+        }
+      ]
+    }
+  },
+  "VISUAL_STYLE": {
+    "color_palette": {
+      "accent_palette": "暖琥珀金（空间特效/物资数字HUD）+ 荧光橙黄（预警信号/危险提示）",
+      "base_palette": "冷灰蓝（末世环境底色）+ 暗绿棕（废土物资质感）",
+      "emotional_contrast": "灾难场景偏冷脱饱和度 | 主角囤货得手/虐渣成功时短暂暖色提亮，强化爽感节奏",
+      "reference_aesthetic": "《釜山行》城市现实感 + 《我是传奇》孤独废土感 + 国产短剧逆袭美学"
+    },
+    "key_visual_motifs": [
+      {
+        "description": "货车/仓库满载物资→主角触碰玉坠→货物瞬间消失的视觉奇观；数字HUD叠加（总价值/重量/品类数）强化囤货量级感",
+        "frequency": "贯穿全片，每集核心视觉锚点",
+        "motif": "空间吞噬镜头",
+        "production_note": "特效成本可控，建议统一粒子消散风格强化品牌记忆"
+      },
+      {
+        "description": "平行剪辑：主角独自备战的冷静侧影 VS 街头人群正常生活/娱乐的热闹画面；末世前繁华霓虹 VS 主角手中的物资清单",
+        "frequency": "Act 1-A/B集中使用",
+        "motif": "信息差对比剪辑",
+        "production_note": "零特效成本，纯靠剪辑节奏实现强张力"
+      },
+      {
+        "description": "台风前夜城市霓虹灯下独自囤货的主角背影——封面级标志性画面，孤独清醒感",
+        "frequency": "阶段性标志镜头，用于集首/集尾",
+        "motif": "孤独英雄背影",
+        "production_note": "短剧封面首选构图，建议作为系列视觉标识"
+      },
+      {
+        "description": "祖传玉石空间道具的反复特写——重生觉醒时、启用空间时、当众摧毁假玉坠时",
+        "frequency": "关键情节节点",
+        "motif": "玉坠特写",
+        "production_note": "道具成本低，情绪标记价值高"
+      },
+      {
+        "description": "渣男/贱女的乞求表情 → 主角冷笑/转身/挂电话 → 渣男崩溃反应的快节奏三镜头剪辑",
+        "frequency": "每次虐渣场景标准模板",
+        "motif": "虐渣表情三连",
+        "production_note": "表情特写+反应剪辑，零特效高情绪密度"
+      }
+    ],
+    "overall_tone": "暗黑末日现实感 × 反抗斗志暖光——以冷灰色末世基调为底，在主角行动时注入利落果断的暖金/荧光点缀，形成'废土中的清醒者'美学",
+    "pacing_style": {
+      "editing_tempo": "囤货段：快剪清单感（节奏欢快）| 灾难场景：慢剪压迫感 | 虐渣场景：中速+表情特写停顿",
+      "rhythm": "极高密度行动流——每3-5分钟（一集）必须有一个可截图/可分享的爽点画面",
+      "sound_design_note": "囤货场景建议配合物资入库音效+计数音效强化满足感；台风场景需强风声压迫感"
+    },
+    "production_constraints_notes": "前期建议聚焦室内囤货与人物关系博弈（低成本），台风+洪水作为主要视觉奇观（外景成本相对可控）；极寒/地震/虫灾等多灾种场景建议后期逐步加码，避免前期特效成本超支"
+  },
+  "project_info": {
+    "author": "程加加",
+    "generation_stage": "drama_dna",
+    "output_directory": "/Users/sevenx/Documents/coding/AI-story-forge/data/projects/013_躺赢/01_material-prep/20260416_030517",
+    "source_inputs": [
+      "metadata",
+      "synopsis",
+      "framework"
+    ],
+    "title": "开局天灾，我靠囤百亿物资躺赢"
+  }
+}

@@ -1,0 +1,322 @@
+{
+  "run_id": "2fab67d15f58",
+  "start_time": "2026-04-16T03:05:17.824582+00:00",
+  "end_time": "2026-04-16T03:18:16.952572+00:00",
+  "total_duration_sec": 779.13,
+  "total_input_tokens": 195136,
+  "total_output_tokens": 17149,
+  "total_llm_calls": 21,
+  "total_tool_calls": 23,
+  "phases": [
+    {
+      "name": "ingest",
+      "start_time": "2026-04-16T03:05:17.984861+00:00",
+      "input_tokens": 47046,
+      "output_tokens": 2436,
+      "llm_calls": [
+        {
+          "input_tokens": 2656,
+          "output_tokens": 427,
+          "timestamp": "2026-04-16T03:05:26.157382+00:00"
+        },
+        {
+          "input_tokens": 3350,
+          "output_tokens": 144,
+          "timestamp": "2026-04-16T03:05:31.552059+00:00"
+        },
+        {
+          "input_tokens": 3599,
+          "output_tokens": 81,
+          "timestamp": "2026-04-16T03:05:41.823857+00:00"
+        },
+        {
+          "input_tokens": 3971,
+          "output_tokens": 72,
+          "timestamp": "2026-04-16T03:05:46.143359+00:00"
+        },
+        {
+          "input_tokens": 4127,
+          "output_tokens": 78,
+          "timestamp": "2026-04-16T03:05:50.382284+00:00"
+        },
+        {
+          "input_tokens": 4548,
+          "output_tokens": 120,
+          "timestamp": "2026-04-16T03:06:03.795255+00:00"
+        },
+        {
+          "input_tokens": 5295,
+          "output_tokens": 71,
+          "timestamp": "2026-04-16T03:06:54.454229+00:00"
+        },
+        {
+          "input_tokens": 6032,
+          "output_tokens": 289,
+          "timestamp": "2026-04-16T03:07:20.322828+00:00"
+        },
+        {
+          "input_tokens": 6453,
+          "output_tokens": 304,
+          "timestamp": "2026-04-16T03:07:27.280094+00:00"
+        },
+        {
+          "input_tokens": 7015,
+          "output_tokens": 850,
+          "timestamp": "2026-04-16T03:07:44.956061+00:00"
+        }
+      ],
+      "tool_calls": [
+        {
+          "name": "update_working_memory",
+          "timestamp": "2026-04-16T03:05:26.159724+00:00"
+        },
+        {
+          "name": "import_novel",
+          "timestamp": "2026-04-16T03:05:31.589199+00:00"
+        },
+        {
+          "name": "detect_chapters",
+          "timestamp": "2026-04-16T03:05:41.878107+00:00"
+        },
+        {
+          "name": "standardize_novel",
+          "timestamp": "2026-04-16T03:05:46.157625+00:00"
+        },
+        {
+          "name": "extract_intro",
+          "timestamp": "2026-04-16T03:05:58.872456+00:00"
+        },
+        {
+          "name": "analyze_audience",
+          "timestamp": "2026-04-16T03:06:51.494124+00:00"
+        },
+        {
+          "name": "extract_synopsis",
+          "timestamp": "2026-04-16T03:07:09.300982+00:00"
+        },
+        {
+          "name": "log_ambiguity",
+          "timestamp": "2026-04-16T03:07:20.324760+00:00"
+        },
+        {
+          "name": "save_output",
+          "timestamp": "2026-04-16T03:07:20.326683+00:00"
+        },
+        {
+          "name": "update_working_memory",
+          "timestamp": "2026-04-16T03:07:27.282532+00:00"
+        },
+        {
+          "name": "finish_task",
+          "timestamp": "2026-04-16T03:07:44.958871+00:00"
+        }
+      ],
+      "validation": {
+        "passed": true,
+        "retries": 0,
+        "errors": []
+      },
+      "end_time": "2026-04-16T03:07:44.960058+00:00",
+      "duration_sec": 146.98
+    },
+    {
+      "name": "ingest",
+      "start_time": "2026-04-16T03:05:17.984322+00:00",
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "llm_calls": [],
+      "tool_calls": [],
+      "validation": {
+        "passed": true,
+        "retries": 0,
+        "errors": []
+      },
+      "end_time": "2026-04-16T03:07:44.966697+00:00",
+      "duration_sec": 146.98
+    },
+    {
+      "name": "analyze",
+      "start_time": "2026-04-16T03:07:44.971911+00:00",
+      "input_tokens": 101026,
+      "output_tokens": 5534,
+      "llm_calls": [
+        {
+          "input_tokens": 23955,
+          "output_tokens": 2908,
+          "timestamp": "2026-04-16T03:08:42.035691+00:00"
+        },
+        {
+          "input_tokens": 24877,
+          "output_tokens": 853,
+          "timestamp": "2026-04-16T03:08:54.371522+00:00"
+        },
+        {
+          "input_tokens": 25866,
+          "output_tokens": 1058,
+          "timestamp": "2026-04-16T03:09:08.518885+00:00"
+        },
+        {
+          "input_tokens": 26328,
+          "output_tokens": 715,
+          "timestamp": "2026-04-16T03:09:16.886256+00:00"
+        }
+      ],
+      "tool_calls": [
+        {
+          "name": "save_methodology",
+          "timestamp": "2026-04-16T03:08:42.039144+00:00"
+        },
+        {
+          "name": "save_framework",
+          "timestamp": "2026-04-16T03:08:54.373911+00:00"
+        },
+        {
+          "name": "finish_task",
+          "timestamp": "2026-04-16T03:09:08.521303+00:00"
+        },
+        {
+          "name": "finish_task",
+          "timestamp": "2026-04-16T03:09:16.888045+00:00"
+        }
+      ],
+      "validation": {
+        "passed": true,
+        "retries": 0,
+        "errors": []
+      },
+      "end_time": "2026-04-16T03:09:16.888766+00:00",
+      "duration_sec": 91.92
+    },
+    {
+      "name": "framework_analysis",
+      "start_time": "2026-04-16T03:07:44.970517+00:00",
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "llm_calls": [],
+      "tool_calls": [],
+      "validation": {
+        "passed": true,
+        "retries": 0,
+        "errors": []
+      },
+      "end_time": "2026-04-16T03:09:16.900550+00:00",
+      "duration_sec": 91.93
+    },
+    {
+      "name": "drama_dna",
+      "start_time": "2026-04-16T03:09:16.902604+00:00",
+      "input_tokens": 34977,
+      "output_tokens": 8079,
+      "llm_calls": [
+        {
+          "input_tokens": 5585,
+          "output_tokens": 426,
+          "timestamp": "2026-04-16T03:09:50.313185+00:00"
+        },
+        {
+          "input_tokens": 6352,
+          "output_tokens": 6520,
+          "timestamp": "2026-04-16T03:14:59.461677+00:00"
+        },
+        {
+          "input_tokens": 23040,
+          "output_tokens": 1133,
+          "timestamp": "2026-04-16T03:15:25.369220+00:00"
+        }
+      ],
+      "tool_calls": [
+        {
+          "name": "update_working_memory",
+          "timestamp": "2026-04-16T03:09:50.317359+00:00"
+        },
+        {
+          "name": "generate_drama_dna",
+          "timestamp": "2026-04-16T03:14:59.472140+00:00"
+        },
+        {
+          "name": "finish_task",
+          "timestamp": "2026-04-16T03:15:25.370668+00:00"
+        }
+      ],
+      "validation": {
+        "passed": true,
+        "retries": 0,
+        "errors": []
+      },
+      "end_time": "2026-04-16T03:15:25.371473+00:00",
+      "duration_sec": 368.47
+    },
+    {
+      "name": "quality_check",
+      "start_time": "2026-04-16T03:15:25.375733+00:00",
+      "input_tokens": 12087,
+      "output_tokens": 1100,
+      "llm_calls": [
+        {
+          "input_tokens": 2073,
+          "output_tokens": 483,
+          "timestamp": "2026-04-16T03:16:19.319045+00:00"
+        },
+        {
+          "input_tokens": 3158,
+          "output_tokens": 96,
+          "timestamp": "2026-04-16T03:17:09.127631+00:00"
+        },
+        {
+          "input_tokens": 3359,
+          "output_tokens": 52,
+          "timestamp": "2026-04-16T03:18:04.211386+00:00"
+        },
+        {
+          "input_tokens": 3497,
+          "output_tokens": 469,
+          "timestamp": "2026-04-16T03:18:16.944359+00:00"
+        }
+      ],
+      "tool_calls": [
+        {
+          "name": "update_working_memory",
+          "timestamp": "2026-04-16T03:16:19.325823+00:00"
+        },
+        {
+          "name": "validate_structure",
+          "timestamp": "2026-04-16T03:16:19.328703+00:00"
+        },
+        {
+          "name": "assess_quality",
+          "timestamp": "2026-04-16T03:17:14.575674+00:00"
+        },
+        {
+          "name": "save_report",
+          "timestamp": "2026-04-16T03:18:04.217326+00:00"
+        },
+        {
+          "name": "finish_task",
+          "timestamp": "2026-04-16T03:18:16.946269+00:00"
+        }
+      ],
+      "validation": {
+        "passed": true,
+        "retries": 0,
+        "errors": []
+      },
+      "end_time": "2026-04-16T03:18:16.947258+00:00",
+      "duration_sec": 171.57
+    },
+    {
+      "name": "quality_check",
+      "start_time": "2026-04-16T03:15:25.374283+00:00",
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "llm_calls": [],
+      "tool_calls": [],
+      "validation": {
+        "passed": true,
+        "retries": 0,
+        "errors": []
+      },
+      "end_time": "2026-04-16T03:18:16.950056+00:00",
+      "duration_sec": 171.58
+    }
+  ]
+}

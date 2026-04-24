@@ -31,6 +31,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
 
 from .run_context import RunContext
+from .retry_router import RetryRouter
 from .callback_bridge import (
     _HarnessCallbackBridge,
     _extract_text_content,
@@ -382,6 +383,8 @@ class GraphAgentHarness:
         self._active_run_context: RunContext | None = None
         # Tier 1 Commit D — heartbeat pulser handle; set during run()
         self._active_heartbeat: _HeartbeatPulser | None = None
+        # D-7.3 — compile-time routing collaborator; reused across runs.
+        self._retry_router = RetryRouter(phases)
         self._graph = self._build_graph()
 
     @staticmethod
@@ -919,7 +922,7 @@ class GraphAgentHarness:
 
                 graph.add_conditional_edges(
                     validate_name,
-                    self._should_retry(phase),
+                    self._retry_router.build_route_callback(phase),
                 )
             elif phase.requires_llm:
                 graph.add_node(execute_name, self._build_phase_node(phase))
@@ -928,11 +931,11 @@ class GraphAgentHarness:
 
                 graph.add_conditional_edges(
                     validate_name,
-                    self._should_retry(phase),
+                    self._retry_router.build_route_callback(phase),
                 )
             else:
                 graph.add_node(execute_name, self._build_code_only_node(phase))
-                next_node = self._get_next_phase_node(phase)
+                next_node = self._retry_router.next_phase_node(phase)
                 if next_node == END:
                     graph.add_edge(execute_name, END)
                 else:
@@ -1561,28 +1564,6 @@ class GraphAgentHarness:
             return next_state
 
         return execute
-
-    def _should_retry(self, phase: Phase) -> Callable[[WorkflowState], str]:
-        """Build a conditional edge routing function."""
-        next_node = self._get_next_phase_node(phase)
-
-        def route(state: WorkflowState) -> str:
-            if "_retry_feedback" in state["context"]:
-                target = phase.retry_target or phase.name
-                return f"{target}_execute"
-            return next_node
-
-        return route
-
-    def _get_next_phase_node(self, phase: Phase) -> str:
-        """Get the execute node name of the next phase, or END."""
-        idx = next(
-            (i for i, p in enumerate(self.phases) if p.name == phase.name),
-            -1,
-        )
-        if idx < 0 or idx >= len(self.phases) - 1:
-            return END
-        return f"{self.phases[idx + 1].name}_execute"
 
     def _calc_recursion_limit(self) -> int:
         """Calculate LangGraph recursion limit.

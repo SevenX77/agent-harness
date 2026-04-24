@@ -198,6 +198,32 @@ if p.adopted_persona:
     system_prompt = f"{persona_manifest.role_profile}\n\n---\n\n{system_prompt or ''}"
 ```
 
+## Compiler `_check_*` function audit (2026-04-24 inspection)
+
+`compile_skill` currently runs six check buckets on the raw file content +
+frontmatter dict (`src/core/graph_agent/core/compiler.py:1124-1129`).
+Classification for PR #6 Commit 2:
+
+| Check bucket              | Keep / drop | Rationale                                                                      |
+| ------------------------- | ----------- | ------------------------------------------------------------------------------ |
+| `_check_frontmatter`      | **Drop**    | Pydantic `extra="forbid"` + discriminator + `Field` constraints cover this.    |
+| `_check_anthropic_compat` | **Keep (rewrite)** | Still relevant for agent skills — ensure `agent_profile.role/goal` are Anthropic-compatible shape. Rewrite against `AgentSkillDef`. |
+| `_check_phases`           | **Drop**    | Pydantic `PhaseDef` discriminator + per-mode field surfaces already enforce mutual exclusion and required-field presence. |
+| `_check_structure`        | **Drop**    | 1.x body structure check; schema 2.0 has no XML body.                           |
+| `_check_tools`            | **Keep (rewrite)** | Tool-path resolvability is still real work — walk `agent_tools` / `execute_steps` / `validator` and attempt import. Any failure is a fatal. |
+| `_check_subgraph_cycle`   | **Keep (rewrite)** | Cross-file topology check — recursively resolve `DelegatePhase.subgraph` paths and detect cycles. Survives schema change. |
+
+Plus two **new** semantic checks introduced by the 2.0 vocabulary:
+
+- **Persona resolution** — every `adopted_persona` must resolve to an existing
+  `PersonaSkillDef` (either `./subskills/<name>/SKILL.md` or global
+  `skills/<name>/SKILL.md`). Ship with PR #6 Commit 4.
+- **`context_bridge` static type check** — the `inputs` / `outputs` dicts in
+  a `DelegatePhase.context_bridge` must resolve against the child skill's
+  `io.inputs` / `io.outputs` declarations. Lives in a dedicated
+  `validators/context_bridge.py` because it needs both parent and child
+  manifests loaded.
+
 ## Compiler rewrite — core algorithm
 
 Input: validated `SkillManifest` (not raw dict). Output: `CompileResult{status, errors, warnings}`.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+import types
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
@@ -23,12 +24,34 @@ class RunContext:
     about ``thread_id`` keep working without being rewritten; production
     call sites in ``run()`` and ``resume()`` MUST fill it so downstream sidecar
     writers (e.g. ``_save_compaction_sidecar``) can address the per-run dir.
+
+    ``runtime_inputs`` is normalised into a ``types.MappingProxyType`` and
+    ``callbacks`` into a ``tuple`` at construction time so that runtime
+    collaborators (``PhaseExecutor``, ``NudgeInjector``, subgraph nodes) that
+    only receive a reference cannot accidentally mutate them. Both are shallow
+    freezes — mutating *nested* objects inside ``runtime_inputs`` values is not
+    blocked (CPython has no cheap deep-freeze; enforcing it here would force
+    every caller to clone). Both callers currently pass freshly built locals,
+    so the conversion is zero-cost beyond the proxy/tuple wrapping.
     """
 
     thread_id: str
     run_id: str = ""
     trace_dir: Path | None = None
-    runtime_inputs: dict[str, Any] = field(default_factory=dict)
+    runtime_inputs: Mapping[str, Any] = field(default_factory=dict)
     storage_manager: Any | None = None
     artifact_saver: Callable[..., Any] | None = None
-    callbacks: list["Callback"] = field(default_factory=list)
+    callbacks: tuple["Callback", ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        # ``frozen=True`` blocks attribute *reassignment* but not container
+        # mutation; wrap the mutable defaults behind read-only shims so
+        # callers who hold a reference can't ``runtime_inputs["x"] = ...``
+        # or ``callbacks.append(cb)`` and silently corrupt a sibling run's
+        # state. ``object.__setattr__`` is the documented escape hatch for
+        # in-place init of frozen dataclasses.
+        if not isinstance(self.runtime_inputs, types.MappingProxyType):
+            source = self.runtime_inputs if isinstance(self.runtime_inputs, dict) else dict(self.runtime_inputs)
+            object.__setattr__(self, "runtime_inputs", types.MappingProxyType(source))
+        if not isinstance(self.callbacks, tuple):
+            object.__setattr__(self, "callbacks", tuple(self.callbacks))

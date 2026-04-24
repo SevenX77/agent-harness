@@ -163,21 +163,20 @@
 - **baseline**：200 → 252 tests passing（+52 新单测）。
 - **harness.py 瘦身**：1580 → 927 行（-653）。目标 300-400 行没达到——剩余行是 `run()` / `resume()` / `get_thread_status()` / HITL / IO / checkpointer 解析这些 facade 职责，Phase B 会再瘦 ~100 行。
 
-#### D-7.2 Phase B — fix subgraph race (新增)
+#### D-7.2 Phase B — fix subgraph race
 
-- [ ] **原 Task**：7.2 的并发修复部分（context.md §12.2 明确要求）
-- **依赖**：D-7.1 / D-7.2 Phase A 完成（即 `refactor/harness-split` 分支当前状态）
-- **动作**：
-  1. 把 `_active_heartbeat` + `_active_run_context` 字段从 `GraphAgentHarness` 实例移到 `PhaseExecutor` 实例
-  2. `run()` / `resume()` 每次新建 `PhaseExecutor(callbacks, heartbeat=..., run_context=...)`，作为 per-run 对象
-  3. 通过 LangGraph `RunnableConfig["configurable"]["_phase_executor"]` 透传给 graph nodes（Gemini 明确方案 D）
-  4. GraphBuilder 里的 `_make_*_node` 改签名 `def execute(state, config)`，从 config 取 executor
-  5. `_get_active_run_options` 改为接收 run_context 作为参数（唯一调用者是 `subgraph.py` L61）
-  6. 删除 `phase_executor.py` 的 `self._harness` scaffolding
-  7. 删除 `subgraph.py` L120-131 的 FIXME 注释
-- **原因**：当前并发 `child.run()` 调用同一 child 实例会互相覆盖 `_active_heartbeat` / `_active_run_context`（parallel_map 场景触发）。Phase B 是真正消除这个 race 的提交。
-- **估时**：半天到一天
-- **风险**：改动跨 harness.py / phase_executor.py / subgraph.py / 相关测试；cross-file 联动需要仔细 pytest。
+- [x] **原 Task**：7.2 的并发修复部分（context.md §12.2 明确要求） — done 2026-04-24
+- **动作完成情况**：
+  1. ✅ `_active_heartbeat` + `_active_run_context` 字段从 `GraphAgentHarness.__init__` 彻底移除，改为 `run()` / `resume()` 的局部变量
+  2. ✅ `run()` / `resume()` 每次新建 `PhaseExecutor(callbacks, run_context=..., heartbeat=..., resolver=..., save_compaction_sidecar=...)`
+  3. ✅ 通过 `RunnableConfig["configurable"]["_phase_executor"]` + `["_run_context"]` 透传给 graph nodes
+  4. ✅ GraphBuilder 里的 `_make_*_node` 签名改为 `def execute(state, config)`，用新辅助 `_executor_from_config(config)` 提取 executor；GraphBuilder 的构造器不再接 `phase_executor` 参数
+  5. ✅ `_get_active_run_options(run_context: RunContext | None)` 改签名；subgraph.py 的节点闭包签名改为 `(state, config)`，从 config 读 `_run_context` 并传入
+  6. ✅ `PhaseExecutor` 的 `self._harness` scaffolding 清除；构造器改为直接接 4 个 per-run/harness-lifetime 依赖（`run_context` / `heartbeat` / `resolver` / `save_compaction_sidecar`）
+  7. ✅ `subgraph.py` L120-131 的 FIXME 注释块删除
+- **新回归测试**：`tests/graph_agent/core/test_harness_phase_b_invariants.py` (6 cases) 静态守住：harness 实例无 `_active_heartbeat` / `_active_run_context`、PhaseExecutor 不接受 `harness=` kwarg 且无 `_harness` 字段、GraphBuilder 构造器不接 `phase_executor`、subgraph.py 无 `FIXME(D-7.2` 字样
+- **pytest**：258 passing（200 baseline + 58 新单测总和）
+- **why 这次能真正消除 race**：concurrent `child.run()` on same child instance 现在各自在栈上持有自己的 `PhaseExecutor`（per-invocation 对象），通过 LangGraph 的 config 字典透传进 graph nodes；两个并发调用各有独立的 config dict，不共享任何实例字段，所以不存在旧的"第二次 `self._active_heartbeat = ...` 覆盖第一次"问题。
 
 #### D-7.5 全量回归
 

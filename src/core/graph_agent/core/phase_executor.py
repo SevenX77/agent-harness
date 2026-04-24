@@ -1,27 +1,36 @@
 """PhaseExecutor — executes a single phase once (LLM / code-only / validation / subgraph).
 
-Extracted progressively from ``GraphAgentHarness._build_*_node`` factories
-as D-7.2 of the harness-split. Migration order per context.md §6.1 step 4:
+Per-run collaborator: one instance is built inside each call to
+``GraphAgentHarness.run()`` / ``.resume()`` and passed into the compiled
+LangGraph via ``RunnableConfig["configurable"]["_phase_executor"]``.
+The graph-node closures built by ``GraphBuilder`` extract it from the
+config on each invocation and delegate to the appropriate ``execute_*``
+method.
 
-  * step 4.1: ``execute_code_only_phase`` — smallest, no
-    heartbeat / run_context dependency.
-  * step 4.2: ``execute_validation_phase``.
-  * step 4.3 (this commit): ``execute_llm_phase`` — the DeerFlow agent
-    loop. Holds a ``harness`` reference during Phase A so it can read
-    ``_active_heartbeat`` / ``_active_run_context`` / ``_resolver`` /
-    ``_save_compaction_sidecar`` from the still-stateful harness
-    instance. The reference is explicitly marked as temporary here —
-    step 4.4 (Phase B) will switch to per-run PhaseExecutor passed via
-    LangGraph ``RunnableConfig["configurable"]``, delete ``self._harness``
-    and the mutable instance attrs on GraphAgentHarness.
-  * step 4.4 (Phase B): RunnableConfig-based per-run wiring, resolves
-    the concurrent-``child.run()`` race noted in subgraph.py's FIXME.
+This wiring replaces the Phase-A ``self._harness`` back-reference + the
+pre-D-7.2 ``harness._active_heartbeat`` / ``harness._active_run_context``
+instance slots. Because each ``run()`` now owns a fresh PhaseExecutor on
+the stack rather than on the harness instance, concurrent ``child.run()``
+calls on the same child harness instance no longer share mutable
+run-state — the race noted in the former ``subgraph.py`` FIXME is gone.
+
+Design notes:
+  - ``callbacks`` is kept explicit (not pulled from ``RunContext.callbacks``)
+    to preserve the pre-refactor nudge-callback scope; see
+    ``NudgeInjector``'s module docstring for the same reasoning.
+  - ``resolver`` and ``save_compaction_sidecar`` are harness-lifetime
+    objects that ``execute_llm_phase`` needs; ``run()`` injects them at
+    construction so PhaseExecutor no longer needs any harness reference.
+  - ``run_context`` and ``heartbeat`` are per-invocation; only
+    ``execute_llm_phase`` reads them (code_only / validation phases are
+    oblivious).
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
+from typing import Any
 
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
@@ -36,34 +45,51 @@ from ..cognitive.prompt import apply_cognitive_template
 from ..config.llm_config import get_role_config
 from .callback_bridge import _HarnessCallbackBridge, _extract_text_content
 from .nudge_injector import NudgeInjector
+from .run_context import RunContext
 from .state import WorkflowState
 from .template import _render_user_prompt, _safe_render_template
 from .tool_wrapper import _wrap_tool_for_langchain
 from .tracing_proxy import TracingClientProxy
 from .types import Phase
 
-if TYPE_CHECKING:
-    from .harness import GraphAgentHarness
-
 logger = logging.getLogger(__name__)
 
 
 class PhaseExecutor:
-    """Execute a single phase invocation; retry / routing is the graph's job."""
+    """Execute a single phase invocation; retry / routing is the graph's job.
+
+    Build one per ``harness.run()`` invocation. Pass it to
+    ``graph.invoke`` via ``config["configurable"]["_phase_executor"]``;
+    the graph-node closures extract it from the config on each call.
+    """
 
     def __init__(
         self,
         callbacks: list[Callback],
         *,
-        harness: "GraphAgentHarness | None" = None,
+        run_context: RunContext | None = None,
+        heartbeat: Any = None,
+        resolver: Any = None,
+        save_compaction_sidecar: Callable[..., Any] | None = None,
     ) -> None:
         self._callbacks = callbacks
-        # Phase-A scaffolding — ``harness`` is only needed by
-        # ``execute_llm_phase`` for reading ``_active_heartbeat`` /
-        # ``_active_run_context`` / ``_resolver`` /
-        # ``_save_compaction_sidecar``. Step 4.4 (Phase B) removes this
-        # reference once those attributes move off the harness instance.
-        self._harness = harness
+        self._run_context = run_context
+        self._heartbeat = heartbeat
+        self._resolver = resolver
+        self._save_compaction_sidecar = save_compaction_sidecar
+
+    # Read-only accessors for callers that need the fields (e.g. subgraph).
+    @property
+    def run_context(self) -> RunContext | None:
+        return self._run_context
+
+    @property
+    def heartbeat(self) -> Any:
+        return self._heartbeat
+
+    @property
+    def callbacks(self) -> list[Callback]:
+        return self._callbacks
 
     def execute_code_only_phase(self, phase: Phase, state: WorkflowState) -> WorkflowState:
         """Run a code-only phase (``requires_llm=False``).
@@ -176,13 +202,9 @@ class PhaseExecutor:
     def execute_llm_phase(self, phase: Phase, state: WorkflowState) -> WorkflowState:
         """Run an LLM-driven phase (DeerFlow create_agent + nudge-loop).
 
-        Migrated verbatim (behaviour-preserving) from the ``execute`` closure
-        that used to live inside ``GraphAgentHarness._build_phase_node``.
-        The outer while-loop orchestrates DeerFlow ``agent.invoke`` calls
-        with three nudge gates (selfcheck / planning / standard) via
-        ``NudgeInjector``, a compaction checkpoint when working memory
-        updates, and a degrade-to-warning exit when max iterations or
-        nudge budget are exhausted.
+        Reads per-run state (``_run_context``, ``_heartbeat``) and
+        harness-lifetime deps (``_resolver``, ``_save_compaction_sidecar``)
+        from its own fields. No harness back-reference.
         """
         from .harness import (  # lazy imports: harness module depends on us
             _append_validation_warning,
@@ -197,12 +219,11 @@ class PhaseExecutor:
             WorkingMemoryUpdateEvent,
         )
 
-        assert self._harness is not None, (
-            "execute_llm_phase requires a harness reference during Phase A. "
-            "Step 4.4 (Phase B) will remove this requirement."
+        assert self._resolver is not None, "execute_llm_phase requires a resolver"
+        assert self._save_compaction_sidecar is not None, (
+            "execute_llm_phase requires a save_compaction_sidecar callable"
         )
-        harness = self._harness
-        resolver = harness._resolver
+        resolver = self._resolver
         active_callbacks = self._callbacks
 
         state = _clone_state(state)
@@ -230,8 +251,8 @@ class PhaseExecutor:
 
         # Tier 1 Commit D — update heartbeat's current_phase so
         # subsequent HeartbeatEvents carry the correct phase name.
-        if harness._active_heartbeat is not None:
-            harness._active_heartbeat.current_phase = phase.name
+        if self._heartbeat is not None:
+            self._heartbeat.current_phase = phase.name
 
         # Callbacks
         for cb in active_callbacks:
@@ -484,19 +505,19 @@ class PhaseExecutor:
                         content=wm_text,
                     ),
                 )
-                # Sidecar write for compaction: see _save_compaction_sidecar.
-                # Read run_id / storage_manager from the active RunContext —
-                # they're NOT in this closure's scope (the closure is built
-                # at __init__ time, before any run_id exists). Gemini audit
-                # 2026-04-24 caught this as a latent NameError that only
-                # fired when compaction actually triggered at runtime.
+                # Sidecar write for compaction: runs through the
+                # harness-provided writer but reads run_id /
+                # storage_manager from this executor's own RunContext
+                # (not a harness instance attr) — eliminates the
+                # concurrent-child.run() race that the pre-Phase-B code
+                # carried.
                 removed_messages = (
                     current_messages[:-2]
                     if len(current_messages) > 2
                     else []
                 )
-                active_ctx = harness._active_run_context
-                sidecar_ref = harness._save_compaction_sidecar(
+                active_ctx = self._run_context
+                sidecar_ref = self._save_compaction_sidecar(
                     run_id=(active_ctx.run_id if active_ctx else ""),
                     idx=checkpoint_count,
                     removed_messages=removed_messages,
@@ -635,4 +656,4 @@ class PhaseExecutor:
 
     def execute_subgraph_phase(self, phase: Phase, state: WorkflowState) -> WorkflowState:
         """Invoke a child harness for a subgraph phase."""
-        raise NotImplementedError("D-7.2: migrate from _build_subgraph_node body")
+        raise NotImplementedError("D-7.2: subgraph node factory stays in harness for now")

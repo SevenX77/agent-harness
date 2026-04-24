@@ -1,18 +1,19 @@
-"""Tests for GraphBuilder (D-7.1)."""
+"""Tests for GraphBuilder (D-7.1 + D-7.2 Phase B)."""
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Callable
+
+from langchain_core.runnables import RunnableConfig
 
 from graph_agent.core.graph_builder import GraphBuilder
-from graph_agent.core.phase_executor import PhaseExecutor
 from graph_agent.core.retry_router import RetryRouter
 from graph_agent.core.state import WorkflowState
 from graph_agent.core.types import Phase
 
 
-def _noop_node(phase: Phase) -> Callable[[WorkflowState], WorkflowState]:
-    def _inner(state: WorkflowState) -> WorkflowState:
+def _noop_node(phase: Phase) -> Callable[..., WorkflowState]:
+    def _inner(state: WorkflowState, config: RunnableConfig) -> WorkflowState:
         return state
     return _inner
 
@@ -20,11 +21,10 @@ def _noop_node(phase: Phase) -> Callable[[WorkflowState], WorkflowState]:
 def _make_builder(
     phases: list[Phase],
     *,
-    subgraph_factory: Callable[[Phase], Callable[[WorkflowState], WorkflowState]] | None = None,
+    subgraph_factory: Callable[[Phase], Callable[..., WorkflowState]] | None = None,
 ) -> GraphBuilder:
     return GraphBuilder(
         phases,
-        phase_executor=PhaseExecutor([]),
         retry_router=RetryRouter(phases),
         checkpointer=None,
         subgraph_node_factory=subgraph_factory or _noop_node,
@@ -120,21 +120,23 @@ class TestBuild:
 
 
 class TestConstructor:
-    """No RunContext dependency — GraphBuilder is a compile-time collaborator."""
+    """Compile-time collaborator: no RunContext, no PhaseExecutor at __init__."""
 
-    def test_no_run_context_param_accepted(self):
-        """Regression guard: GraphBuilder.__init__ deliberately rejects RunContext.
+    def test_no_run_context_and_no_phase_executor_params(self):
+        """Regression guard: GraphBuilder.__init__ takes neither a
+        RunContext nor a PhaseExecutor.
 
-        Compile-time collaborators must not require a per-run object that
-        does not yet exist when `_build_graph` runs (the RetryRouter rule
-        from the D-7.3 Gemini debate applies here too).
+        RunContext is per-run (lifecycle mismatch with compile-time
+        construction — the RetryRouter rule from the D-7.3 Gemini debate).
+        PhaseExecutor is also per-run, threaded through each invocation
+        via LangGraph's ``RunnableConfig["configurable"]["_phase_executor"]``
+        (D-7.2 Phase B, Gemini's Option D on 2026-04-24). GraphBuilder
+        only needs the static topology dependencies.
         """
         phases = [Phase(name="only", requires_llm=False)]
 
-        # No TypeError = signature does not require RunContext.
         GraphBuilder(
             phases,
-            phase_executor=PhaseExecutor([]),
             retry_router=RetryRouter(phases),
             checkpointer=None,
             subgraph_node_factory=_noop_node,

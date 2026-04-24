@@ -119,6 +119,113 @@ class TestBuild:
         assert [p.name for p in factory_calls] == ["sub"]
 
 
+class TestExecutorFromConfig:
+    """The `_executor_from_config` helper is the load-bearing link in Phase B:
+    every LangGraph node extracts the per-run PhaseExecutor from
+    ``config["configurable"]["_phase_executor"]``. If it silently returns
+    the wrong thing (or None), the whole graph silently breaks at runtime.
+    These tests pin the contract end-to-end — missing config, empty config,
+    nested configurable, and happy path."""
+
+    def _make_llm_node_with_executor_assert(self, phase: Phase, marker: list[str]) -> Callable[..., WorkflowState]:
+        """Reach into GraphBuilder's private _make_llm_node to run the real
+        unwrap path. We verify the call reaches the executor passed via
+        config (not any ambient instance state)."""
+        from graph_agent.core.phase_executor import PhaseExecutor
+
+        class _SpyExecutor(PhaseExecutor):
+            def execute_llm_phase(self, p: Phase, state: WorkflowState) -> WorkflowState:
+                marker.append(p.name)
+                return state
+
+        builder = _make_builder([phase])
+        node = builder._make_llm_node(phase)  # type: ignore[attr-defined]
+        return node
+
+    def test_missing_config_raises_runtime_error(self):
+        from graph_agent.core.graph_builder import _executor_from_config
+        import pytest
+
+        with pytest.raises(RuntimeError, match="_phase_executor"):
+            _executor_from_config(None)  # type: ignore[arg-type]
+
+    def test_config_without_configurable_key_raises(self):
+        from graph_agent.core.graph_builder import _executor_from_config
+        import pytest
+
+        with pytest.raises(RuntimeError, match="_phase_executor"):
+            _executor_from_config({})
+
+    def test_configurable_missing_phase_executor_raises(self):
+        from graph_agent.core.graph_builder import _executor_from_config
+        import pytest
+
+        with pytest.raises(RuntimeError, match="_phase_executor"):
+            _executor_from_config({"configurable": {"thread_id": "x"}})
+
+    def test_happy_path_returns_the_injected_executor(self):
+        from graph_agent.core.graph_builder import _executor_from_config
+        from graph_agent.core.phase_executor import PhaseExecutor
+
+        sentinel = PhaseExecutor([])
+        got = _executor_from_config({"configurable": {"_phase_executor": sentinel}})
+        assert got is sentinel, (
+            "unwrap must return the exact object injected, not a copy or None"
+        )
+
+    def test_llm_node_dispatches_to_injected_executor(self):
+        """End-to-end through `_make_llm_node`: the closure must call the
+        executor present in config at invoke time (no ambient lookup)."""
+        from graph_agent.core.phase_executor import PhaseExecutor
+
+        recorded: list[str] = []
+
+        class _SpyExecutor(PhaseExecutor):
+            def execute_llm_phase(self, p: Phase, state: WorkflowState) -> WorkflowState:
+                recorded.append(p.name)
+                return state
+
+        phase = Phase(name="alpha")
+        builder = _make_builder([phase])
+        node = builder._make_llm_node(phase)  # type: ignore[attr-defined]
+        state: WorkflowState = {
+            "context": {},
+            "messages": [],
+            "current_phase": "",
+            "retry_counts": {},
+            "metrics": {},
+        }
+        spy = _SpyExecutor([])
+
+        node(state, {"configurable": {"_phase_executor": spy}})  # type: ignore[arg-type]
+        assert recorded == ["alpha"]
+
+    def test_code_only_node_dispatches_to_injected_executor(self):
+        from graph_agent.core.phase_executor import PhaseExecutor
+
+        recorded: list[str] = []
+
+        class _SpyExecutor(PhaseExecutor):
+            def execute_code_only_phase(self, p: Phase, state: WorkflowState) -> WorkflowState:
+                recorded.append(p.name)
+                return state
+
+        phase = Phase(name="beta", requires_llm=False)
+        builder = _make_builder([phase])
+        node = builder._make_code_only_node(phase)  # type: ignore[attr-defined]
+        state: WorkflowState = {
+            "context": {},
+            "messages": [],
+            "current_phase": "",
+            "retry_counts": {},
+            "metrics": {},
+        }
+        spy = _SpyExecutor([])
+
+        node(state, {"configurable": {"_phase_executor": spy}})  # type: ignore[arg-type]
+        assert recorded == ["beta"]
+
+
 class TestConstructor:
     """Compile-time collaborator: no RunContext, no PhaseExecutor at __init__."""
 

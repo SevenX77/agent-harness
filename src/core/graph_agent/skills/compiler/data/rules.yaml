@@ -100,6 +100,12 @@ fatal:
     description: "<step> 标签不得含 when / skip_if / if / else 等表达式字段"
     reason: "framework 不做表达式求值（与 F006 红线一致）；条件分支须用 code-only phase + validator + retry_target 表达"
 
+  F-subgraph-cycle:
+    scope: graph
+    check: no_subgraph_cycle
+    description: "subgraph 引用链不得形成环（跨 SKILL.md 静态检测）"
+    reason: "运行时 loader.py 已有 SkillLoadError 防护，但 compile-time 提前报可以让作者在编排阶段就发现引用闭环，不用等到跑起来才崩"
+
 warning:
   S001:
     scope: structure

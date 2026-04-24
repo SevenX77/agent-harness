@@ -22,6 +22,7 @@ Type-dispatch table comes from Gemini's Q4 review:
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -29,6 +30,8 @@ from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 try:
     # Lazy import so callbacks/serialize.py does not force a langchain load
@@ -78,7 +81,11 @@ def to_jsonable_dict(data: Any, *, _depth: int = 0) -> Any:
     if isinstance(data, (set, frozenset)):
         try:
             ordered = sorted(data, key=lambda x: str(x))
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "to_jsonable_dict: set/frozenset sort failed (%s); using unsorted list",
+                exc,
+            )
             ordered = list(data)
         return [to_jsonable_dict(item, _depth=_depth + 1) for item in ordered]
 
@@ -94,7 +101,12 @@ def to_jsonable_dict(data: Any, *, _depth: int = 0) -> Any:
     if isinstance(data, BaseModel):
         try:
             return data.model_dump(mode="json")
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "to_jsonable_dict: BaseModel %s model_dump failed (%s); using repr fallback",
+                type(data).__name__,
+                exc,
+            )
             return {"_repr": repr(data), "_warning": _UNSUPPORTED_FALLBACK}
 
     # callables — document rather than serialise

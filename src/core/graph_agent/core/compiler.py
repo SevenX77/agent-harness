@@ -33,10 +33,10 @@ reintroduced in PR #7 against the already-validated ``SkillManifest``:
   load-time only via ``_loading_stack``.)
 - **Persona resolution** — every ``adopted_persona`` must resolve to an
   existing ``PersonaSkillDef``. (Currently load-time only.)
-- **context_bridge static type check** — for each ``DelegatePhase``, load
-  the child manifest and confirm ``context_bridge.inputs`` / ``outputs``
-  align with the child's ``io.inputs`` / ``io.outputs``. (No load-time
-  fallback today — this is the first real gap.)
+- **context_bridge static type check** — shipped in PR #7 step 1.
+  See ``validators/context_bridge.py``. The remaining checks below
+  still have only load-time fallbacks (or no fallback at all in the
+  case of ``rules.yaml``).
 - **Custom rules.yaml** — the 1.x rules.yaml carried project-specific
   conventions (placeholder presence, prompt-length budgets). Decide
   whether to keep that authoring surface or absorb the rules into the
@@ -148,11 +148,12 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
     # Pydantic does the structural validation when the manifest is
     # constructed in load_workflow_from_md. Surface validation errors
     # as fatals here too so static compile catches them before runtime.
-    try:
-        from pydantic import TypeAdapter, ValidationError
-        from .manifest import SkillManifest
+    from pydantic import TypeAdapter, ValidationError
 
-        TypeAdapter(SkillManifest).validate_python(frontmatter)
+    from .manifest import GraphSkillDef, SkillManifest
+
+    try:
+        manifest = TypeAdapter(SkillManifest).validate_python(frontmatter)
     except ValidationError as ve:
         for err in ve.errors():
             loc = ".".join(str(p) for p in err.get("loc", ()))
@@ -162,8 +163,18 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
                 location=f"SKILL.md:{loc or 'frontmatter'}",
                 message=err.get("msg", "Pydantic validation failed"),
             ))
-        if not result.passed:
-            return result
+        return result
+
+    # PR #7 semantic checks (run only when Pydantic validation succeeds).
+    # Only GraphSkillDef carries phases (and therefore DelegatePhase);
+    # AgentSkillDef and PersonaSkillDef have no delegation surface so
+    # the context_bridge validator has nothing to check on them.
+    if isinstance(manifest, GraphSkillDef):
+        from .validators.context_bridge import check_context_bridge
+
+        result.issues.extend(
+            check_context_bridge(manifest, base_dir=skill_path.parent)
+        )
 
     logger.info(
         "Compiled '%s' (schema 2.0): %d FATAL, %d WARNING",

@@ -78,3 +78,123 @@ def test_returns_empty_when_no_cycle(tmp_path: Path) -> None:
     issues = check_subgraph_cycles(parent, skill_path=parent_path)
 
     assert issues == []
+
+
+def test_fatal_when_self_cycle(tmp_path: Path) -> None:
+    parent_path = _write_graph_skill(
+        tmp_path, name="parent", subgraphs=[("self_loop", "parent.md")],
+    )
+
+    parent = _load_parent(parent_path)
+    issues = check_subgraph_cycles(parent, skill_path=parent_path)
+
+    assert len(issues) == 1
+    assert issues[0].rule_id == "F-subgraph-cycle"
+    assert issues[0].severity == "FATAL"
+    assert "parent.md" in issues[0].message
+    assert issues[0].location.endswith("phases.self_loop.subgraph")
+
+
+def test_fatal_when_indirect_cycle(tmp_path: Path) -> None:
+    a_path = tmp_path / "a.md"
+    b_path = tmp_path / "b.md"
+    a_path.write_text(
+        "---\n"
+        'schema_version: "2.0"\n'
+        "type: graph\n"
+        "name: a\n"
+        "description: a\n"
+        "io:\n  inputs: []\n  outputs: []\n"
+        "phases:\n"
+        "  - name: to_b\n"
+        "    mode: delegate\n"
+        "    subgraph: b.md\n"
+        "    context_bridge:\n"
+        "      inputs: {}\n"
+        "      outputs: {}\n"
+        "---\n",
+        encoding="utf-8",
+    )
+    b_path.write_text(
+        "---\n"
+        'schema_version: "2.0"\n'
+        "type: graph\n"
+        "name: b\n"
+        "description: b\n"
+        "io:\n  inputs: []\n  outputs: []\n"
+        "phases:\n"
+        "  - name: to_a\n"
+        "    mode: delegate\n"
+        "    subgraph: a.md\n"
+        "    context_bridge:\n"
+        "      inputs: {}\n"
+        "      outputs: {}\n"
+        "---\n",
+        encoding="utf-8",
+    )
+
+    parent = _load_parent(a_path)
+    issues = check_subgraph_cycles(parent, skill_path=a_path)
+
+    assert len(issues) == 1
+    assert issues[0].rule_id == "F-subgraph-cycle"
+    assert "a.md" in issues[0].message
+    assert "b.md" in issues[0].message
+    # Cycle is closed at b's phase to_a, not a's phase to_b.
+    assert issues[0].location.endswith("phases.to_a.subgraph")
+
+
+def test_silently_skips_missing_child(tmp_path: Path) -> None:
+    parent_path = _write_graph_skill(
+        tmp_path,
+        name="parent",
+        subgraphs=[("dead_link", "nonexistent.md")],
+    )
+
+    parent = _load_parent(parent_path)
+    issues = check_subgraph_cycles(parent, skill_path=parent_path)
+
+    # Missing child is context_bridge's concern, not cycle validator's.
+    assert issues == []
+
+
+def test_silently_skips_agent_child(tmp_path: Path) -> None:
+    agent_path = tmp_path / "agent.md"
+    agent_path.write_text(
+        "---\n"
+        'schema_version: "2.0"\n'
+        "type: agent\n"
+        "name: agent_child\n"
+        "description: child agent\n"
+        "agent_profile:\n"
+        "  role: tester\n"
+        "  goal: be tested\n"
+        "---\n",
+        encoding="utf-8",
+    )
+    parent_path = _write_graph_skill(
+        tmp_path, name="parent", subgraphs=[("p", "agent.md")],
+    )
+
+    parent = _load_parent(parent_path)
+    issues = check_subgraph_cycles(parent, skill_path=parent_path)
+
+    # Agent has no phases → cannot participate in a cycle. Silent skip.
+    assert issues == []
+
+
+def test_cycle_reported_once_for_two_parent_phases(tmp_path: Path) -> None:
+    parent_path = _write_graph_skill(
+        tmp_path,
+        name="parent",
+        subgraphs=[
+            ("p1", "parent.md"),
+            ("p2", "parent.md"),
+        ],
+    )
+
+    parent = _load_parent(parent_path)
+    issues = check_subgraph_cycles(parent, skill_path=parent_path)
+
+    assert len(issues) == 1
+    assert issues[0].location.endswith("phases.p1.subgraph")

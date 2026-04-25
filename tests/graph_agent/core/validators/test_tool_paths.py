@@ -53,6 +53,28 @@ def _load(parent_path: Path):
     return TypeAdapter(SkillManifest).validate_python(raw)
 
 
+def _write_graph_with_phases(
+    parent_dir: Path,
+    *,
+    name: str,
+    phases_yaml: str,
+) -> Path:
+    body = (
+        "---\n"
+        'schema_version: "2.0"\n'
+        "type: graph\n"
+        f"name: {name}\n"
+        f"description: graph {name}\n"
+        "io:\n  inputs: []\n  outputs: []\n"
+        "phases:\n"
+        f"{phases_yaml}"
+        "---\n"
+    )
+    path = parent_dir / f"{name}.md"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
 def test_returns_empty_when_local_and_builtin_tools_resolve(tmp_path: Path) -> None:
     _stage_local_tool(tmp_path, dotted="tools.helpers")
     agent_path = _write_agent_with_tools(
@@ -65,3 +87,174 @@ def test_returns_empty_when_local_and_builtin_tools_resolve(tmp_path: Path) -> N
     issues = check_tool_paths(manifest, base_dir=tmp_path)
 
     assert issues == []
+
+
+def test_fatal_when_ref_lacks_dot(tmp_path: Path) -> None:
+    agent_path = _write_agent_with_tools(
+        tmp_path, name="my_agent", tools=["nodot"],
+    )
+
+    manifest = _load(agent_path)
+    issues = check_tool_paths(manifest, base_dir=tmp_path)
+
+    assert len(issues) == 1
+    assert issues[0].rule_id == "F-tool-path-invalid-format"
+    assert "nodot" in issues[0].message
+    assert issues[0].location == "SKILL.md:agent_tools.0"
+
+
+def test_fatal_when_local_module_missing(tmp_path: Path) -> None:
+    agent_path = _write_agent_with_tools(
+        tmp_path, name="my_agent", tools=["missing.fn"],
+    )
+
+    manifest = _load(agent_path)
+    issues = check_tool_paths(manifest, base_dir=tmp_path)
+
+    assert len(issues) == 1
+    assert issues[0].rule_id == "F-tool-path-not-found"
+    assert "missing.fn" in issues[0].message
+    assert issues[0].location == "SKILL.md:agent_tools.0"
+
+
+def test_fatal_when_builtin_module_missing(tmp_path: Path) -> None:
+    agent_path = _write_agent_with_tools(
+        tmp_path,
+        name="my_agent",
+        tools=["builtin.no_such_submodule.fn"],
+    )
+
+    manifest = _load(agent_path)
+    issues = check_tool_paths(manifest, base_dir=tmp_path)
+
+    assert len(issues) == 1
+    assert issues[0].rule_id == "F-tool-path-not-found"
+    assert "builtin.no_such_submodule.fn" in issues[0].message
+    assert "graph_agent.tools.builtin.no_such_submodule" in issues[0].message
+
+
+def test_fatal_when_llm_phase_agent_tools_missing(tmp_path: Path) -> None:
+    parent_path = _write_graph_with_phases(
+        tmp_path,
+        name="parent",
+        phases_yaml=(
+            "  - name: think\n"
+            "    mode: llm\n"
+            "    prompt: do it\n"
+            "    agent_tools:\n"
+            "      - missing.fn\n"
+        ),
+    )
+
+    manifest = _load(parent_path)
+    issues = check_tool_paths(manifest, base_dir=tmp_path)
+
+    assert len(issues) == 1
+    assert issues[0].rule_id == "F-tool-path-not-found"
+    assert issues[0].location == "SKILL.md:phases.think.agent_tools.0"
+
+
+def test_fatal_when_llm_phase_validator_missing(tmp_path: Path) -> None:
+    parent_path = _write_graph_with_phases(
+        tmp_path,
+        name="parent",
+        phases_yaml=(
+            "  - name: think\n"
+            "    mode: llm\n"
+            "    prompt: do it\n"
+            "    validator: missing.validate\n"
+        ),
+    )
+
+    manifest = _load(parent_path)
+    issues = check_tool_paths(manifest, base_dir=tmp_path)
+
+    assert len(issues) == 1
+    assert issues[0].rule_id == "F-tool-path-not-found"
+    assert issues[0].location == "SKILL.md:phases.think.validator"
+
+
+def test_fatal_when_step_tools_missing(tmp_path: Path) -> None:
+    parent_path = _write_graph_with_phases(
+        tmp_path,
+        name="parent",
+        phases_yaml=(
+            "  - name: think\n"
+            "    mode: llm\n"
+            "    prompt: do it\n"
+            "    steps:\n"
+            "      - name: sub\n"
+            "        tools:\n"
+            "          - missing.fn\n"
+        ),
+    )
+
+    manifest = _load(parent_path)
+    issues = check_tool_paths(manifest, base_dir=tmp_path)
+
+    assert len(issues) == 1
+    assert issues[0].rule_id == "F-tool-path-not-found"
+    assert issues[0].location == "SKILL.md:phases.think.steps.0.tools.0"
+
+
+def test_fatal_when_step_validator_missing(tmp_path: Path) -> None:
+    parent_path = _write_graph_with_phases(
+        tmp_path,
+        name="parent",
+        phases_yaml=(
+            "  - name: think\n"
+            "    mode: llm\n"
+            "    prompt: do it\n"
+            "    steps:\n"
+            "      - name: sub\n"
+            "        validator: missing.validate\n"
+        ),
+    )
+
+    manifest = _load(parent_path)
+    issues = check_tool_paths(manifest, base_dir=tmp_path)
+
+    assert len(issues) == 1
+    assert issues[0].rule_id == "F-tool-path-not-found"
+    assert issues[0].location == "SKILL.md:phases.think.steps.0.validator"
+
+
+def test_fatal_when_logic_phase_execute_steps_missing(tmp_path: Path) -> None:
+    parent_path = _write_graph_with_phases(
+        tmp_path,
+        name="parent",
+        phases_yaml=(
+            "  - name: render\n"
+            "    mode: logic\n"
+            "    execute_steps:\n"
+            "      - missing.fn\n"
+        ),
+    )
+
+    manifest = _load(parent_path)
+    issues = check_tool_paths(manifest, base_dir=tmp_path)
+
+    assert len(issues) == 1
+    assert issues[0].rule_id == "F-tool-path-not-found"
+    assert issues[0].location == "SKILL.md:phases.render.execute_steps.0"
+
+
+def test_fatal_when_logic_phase_validator_missing(tmp_path: Path) -> None:
+    parent_path = _write_graph_with_phases(
+        tmp_path,
+        name="parent",
+        phases_yaml=(
+            "  - name: render\n"
+            "    mode: logic\n"
+            "    execute_steps:\n"
+            "      - builtin.parallel_map\n"
+            "    validator: missing.validate\n"
+        ),
+    )
+
+    manifest = _load(parent_path)
+    issues = check_tool_paths(manifest, base_dir=tmp_path)
+
+    assert len(issues) == 1
+    assert issues[0].rule_id == "F-tool-path-not-found"
+    assert issues[0].location == "SKILL.md:phases.render.validator"

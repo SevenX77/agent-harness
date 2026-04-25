@@ -24,10 +24,11 @@ structural rule. The remaining *semantic* rules — the ones Pydantic cannot
 express because they cross files or need import side-effects — must be
 reintroduced in PR #7 against the already-validated ``SkillManifest``:
 
-- **Tool-path resolvability** — walk ``LLMPhase.agent_tools`` /
-  ``LogicPhase.execute_steps`` / ``LLMPhase.validator`` and confirm each
-  string resolves via ``loader._resolve_tool_reference``. (Currently
-  load-time only.)
+- **Tool-path resolvability** ✅ shipped in PR #7 step 4.
+  See ``validators/tool_paths.py``. Static, non-executing check —
+  validates file existence (local refs) or ``find_spec`` (builtin
+  refs); function-symbol existence stays at load-time to avoid running
+  user code during Studio "save validate".
 - **Subgraph cycle detection** ✅ shipped in PR #7 step 2.
   See ``validators/subgraph_cycle.py``. Independent of step 1 — both
   validators run unconditionally for ``GraphSkillDef`` manifests in the
@@ -170,12 +171,14 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
         return result
 
     # PR #7 semantic checks (run only when Pydantic validation succeeds).
-    # GraphSkillDef carries phases (DelegatePhase + LLMPhase) and so runs
-    # the full triple. AgentSkillDef has no phases but does carry a
-    # top-level ``adopted_persona`` field, so it runs persona_resolution
-    # only. PersonaSkillDef carries neither and falls through unchanged.
+    # GraphSkillDef carries phases (DelegatePhase + LLMPhase) so it runs
+    # the full quadruple. AgentSkillDef has no phases but does carry a
+    # top-level ``adopted_persona`` and ``agent_tools``, so it runs
+    # persona_resolution + tool_paths. PersonaSkillDef carries neither
+    # and falls through unchanged.
     from .manifest import AgentSkillDef
     from .validators.persona_resolution import check_persona_resolution
+    from .validators.tool_paths import check_tool_paths
 
     if isinstance(manifest, GraphSkillDef):
         from .validators.context_bridge import check_context_bridge
@@ -190,9 +193,15 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
         result.issues.extend(
             check_persona_resolution(manifest, base_dir=skill_path.parent)
         )
+        result.issues.extend(
+            check_tool_paths(manifest, base_dir=skill_path.parent)
+        )
     elif isinstance(manifest, AgentSkillDef):
         result.issues.extend(
             check_persona_resolution(manifest, base_dir=skill_path.parent)
+        )
+        result.issues.extend(
+            check_tool_paths(manifest, base_dir=skill_path.parent)
         )
 
     logger.info(

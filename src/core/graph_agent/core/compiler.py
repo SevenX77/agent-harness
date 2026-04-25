@@ -42,10 +42,27 @@ reintroduced in PR #7 against the already-validated ``SkillManifest``:
   See ``validators/context_bridge.py``. The remaining checks below
   still have only load-time fallbacks (or no fallback at all in the
   case of ``rules.yaml``).
-- **Custom rules.yaml** — the 1.x rules.yaml carried project-specific
-  conventions (placeholder presence, prompt-length budgets). Decide
-  whether to keep that authoring surface or absorb the rules into the
-  Pydantic schema.
+- **Custom rules.yaml** — DEFERRED to a follow-up PR. The 1.x
+  ``rules.yaml`` carried project-specific conventions (placeholder
+  presence, prompt-length budgets). Three options for the next
+  decision-maker:
+
+  A. **Re-introduce rules.yaml as a PM-facing authoring surface** —
+     parse a project-local YAML file at compile time, supports custom
+     placeholder/prompt-length checks. PMs author rules without
+     touching the framework.
+  B. **Absorb every rule into the Pydantic schema** — extend
+     ``manifest.py`` with first-class fields for the conventions that
+     matter; new rules require framework changes but live in one
+     place.
+  C. **Drop custom rules entirely** — the four shipped validators
+     (context_bridge / subgraph_cycle / persona_resolution /
+     tool_paths) catch the structural failure modes; PM-customisable
+     conventions can re-emerge organically as Pydantic fields when
+     real demand surfaces. Closes the ``rules.yaml`` discussion.
+
+  All four concrete validators above ship in PR #7 steps 1-4. Pick a
+  direction for option A/B/C in a follow-up PR rather than this one.
 """
 from __future__ import annotations
 

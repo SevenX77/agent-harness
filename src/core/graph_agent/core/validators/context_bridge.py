@@ -11,7 +11,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..compiler import CompileIssue
 from ..exceptions import SkillLoadError
-from ..manifest import GraphSkillDef, SkillManifest
+from ..manifest import AgentSkillDef, GraphSkillDef, PersonaSkillDef, SkillManifest
 from ..parser import parse_skill_file
 
 
@@ -71,9 +71,33 @@ def check_context_bridge(
                 message=str(exc),
             ))
             continue
-        if child_manifest.type != "graph":
-            # Handled in later tasks (agent → WARNING, persona → FATAL)
+        if isinstance(child_manifest, AgentSkillDef):
+            issues.append(CompileIssue(
+                rule_id="W-context-bridge-agent-child",
+                severity="WARNING",
+                location=f"SKILL.md:phases.{phase.name}.subgraph",
+                message=(
+                    f"DelegatePhase '{phase.name}' delegates to agent skill "
+                    f"'{child_path.name}', which has no io declaration. "
+                    f"context_bridge inputs/outputs cannot be statically "
+                    f"verified; runtime mismatches will surface as None values."
+                ),
+            ))
             continue
+        if isinstance(child_manifest, PersonaSkillDef):
+            issues.append(CompileIssue(
+                rule_id="F-context-bridge-persona-child",
+                severity="FATAL",
+                location=f"SKILL.md:phases.{phase.name}.subgraph",
+                message=(
+                    f"DelegatePhase '{phase.name}' delegates to persona "
+                    f"'{child_path.name}'. Persona skills carry no execution "
+                    f"semantics — delegation will fail at runtime. Use "
+                    f"adopted_persona on an llm phase instead."
+                ),
+            ))
+            continue
+        # otherwise child is GraphSkillDef — fall through to io check
         declared_inputs = {io.name for io in child_manifest.io.inputs}
         declared_outputs = {io.name for io in child_manifest.io.outputs}
         bridge = phase.context_bridge  # type: ignore[attr-defined]

@@ -1,6 +1,7 @@
 """Unit tests for the context_bridge validator."""
 from __future__ import annotations
 
+import textwrap
 from pathlib import Path
 
 from pydantic import TypeAdapter
@@ -122,6 +123,39 @@ def test_fatal_when_child_input_undeclared(tmp_path: Path) -> None:
     assert issue.location.endswith("inputs.parent_typo")
 
 
+def _write_child_agent(tmp_path: Path, *, name: str) -> Path:
+    body = (
+        "---\n"
+        'schema_version: "2.0"\n'
+        "type: agent\n"
+        f"name: {name}\n"
+        "description: child agent skill\n"
+        "agent_profile:\n"
+        "  role: tester\n"
+        "  goal: be tested\n"
+        "---\n"
+    )
+    path = tmp_path / f"{name}.md"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def _write_child_persona(tmp_path: Path, *, name: str) -> Path:
+    body = (
+        "---\n"
+        'schema_version: "2.0"\n'
+        "type: persona\n"
+        f"name: {name}\n"
+        "description: child persona skill\n"
+        "role_profile: |\n"
+        "  A test persona used as a (forbidden) delegate child.\n"
+        "---\n"
+    )
+    path = tmp_path / f"{name}.md"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
 def test_fatal_when_child_path_missing(tmp_path: Path) -> None:
     parent = _build_parent(
         child_path=tmp_path / "nonexistent.md",
@@ -135,6 +169,119 @@ def test_fatal_when_child_path_missing(tmp_path: Path) -> None:
     assert issues[0].rule_id == "F-context-bridge-child-missing"
     assert issues[0].severity == "FATAL"
     assert "nonexistent.md" in issues[0].message
+
+
+def test_fatal_when_child_frontmatter_invalid(tmp_path: Path) -> None:
+    bad_child = tmp_path / "bad.md"
+    bad_child.write_text(
+        textwrap.dedent(
+            """\
+            ---
+            schema_version: "2.0"
+            type: graph
+            name: bad
+            description: missing-required-io
+            phases:
+              - name: x
+                mode: logic
+                execute_steps:
+                  - some.path
+            ---
+            """
+        ),
+        encoding="utf-8",
+    )
+    parent = _build_parent(
+        child_path=bad_child,
+        bridge_inputs={"p": "x"},
+        bridge_outputs={"y": "p"},
+    )
+
+    issues = check_context_bridge(parent, base_dir=tmp_path)
+
+    assert any(i.rule_id == "F-context-bridge-child-invalid" for i in issues)
+    invalid = next(i for i in issues if i.rule_id == "F-context-bridge-child-invalid")
+    assert invalid.severity == "FATAL"
+    assert str(bad_child) in invalid.location
+
+
+def test_warning_when_child_is_agent_skill(tmp_path: Path) -> None:
+    child = _write_child_agent(tmp_path, name="agent_child")
+    parent = _build_parent(
+        child_path=child,
+        bridge_inputs={"parent_x": "anything"},
+        bridge_outputs={"anything_back": "parent_y"},
+    )
+
+    issues = check_context_bridge(parent, base_dir=tmp_path)
+
+    assert len(issues) == 1
+    assert issues[0].rule_id == "W-context-bridge-agent-child"
+    assert issues[0].severity == "WARNING"
+    assert "agent" in issues[0].message.lower()
+    assert "delegate_phase" in issues[0].location
+
+
+def test_fatal_when_child_is_persona_skill(tmp_path: Path) -> None:
+    child = _write_child_persona(tmp_path, name="persona_child")
+    parent = _build_parent(
+        child_path=child,
+        bridge_inputs={"parent_x": "anything"},
+        bridge_outputs={"anything_back": "parent_y"},
+    )
+
+    issues = check_context_bridge(parent, base_dir=tmp_path)
+
+    assert len(issues) == 1
+    assert issues[0].rule_id == "F-context-bridge-persona-child"
+    assert issues[0].severity == "FATAL"
+    assert "persona" in issues[0].message.lower()
+
+
+def test_returns_empty_when_parent_has_no_delegate_phases(tmp_path: Path) -> None:
+    raw = {
+        "schema_version": "2.0",
+        "type": "graph",
+        "name": "all_logic",
+        "description": "no delegate phases at all",
+        "io": {"inputs": [], "outputs": []},
+        "phases": [
+            {
+                "name": "logic_only",
+                "mode": "logic",
+                "execute_steps": ["some.module.fn"],
+            },
+            {
+                "name": "llm_only",
+                "mode": "llm",
+                "prompt": "do the thing",
+            },
+        ],
+    }
+    parent = TypeAdapter(SkillManifest).validate_python(raw)
+
+    issues = check_context_bridge(parent, base_dir=tmp_path)
+
+    assert issues == []
+
+
+def test_accumulates_input_and_output_issues_in_one_phase(tmp_path: Path) -> None:
+    child = _write_child_graph(
+        tmp_path, name="child", inputs=["alpha"], outputs=["gamma"],
+    )
+    parent = _build_parent(
+        child_path=child,
+        bridge_inputs={"p_a": "alpha", "p_typo": "alfa"},
+        bridge_outputs={"gamma": "p_g", "delta": "p_d"},
+    )
+
+    issues = check_context_bridge(parent, base_dir=tmp_path)
+
+    rule_ids = sorted(i.rule_id for i in issues)
+    assert rule_ids == [
+        "F-context-bridge-input-undeclared",
+        "F-context-bridge-output-undeclared",
+    ]
 
 
 def test_fatal_when_child_output_undeclared(tmp_path: Path) -> None:

@@ -101,6 +101,45 @@ def check_context_bridge(
         declared_inputs = {io.name for io in child_manifest.io.inputs}
         declared_outputs = {io.name for io in child_manifest.io.outputs}
         bridge = phase.context_bridge  # type: ignore[attr-defined]
+
+        # Detect parent_keys that map to the same child_input (last-wins
+        # silent overwrite at runtime; subgraph.py:94 iteration order).
+        seen_inputs: dict[str, list[str]] = {}
+        for parent_key, child_input in bridge.inputs.items():
+            seen_inputs.setdefault(child_input, []).append(parent_key)
+        for child_input, parent_keys in seen_inputs.items():
+            if len(parent_keys) > 1:
+                issues.append(CompileIssue(
+                    rule_id="W-context-bridge-duplicate-child-input",
+                    severity="WARNING",
+                    location=f"SKILL.md:phases.{phase.name}.context_bridge.inputs",
+                    message=(
+                        f"DelegatePhase '{phase.name}' maps parent keys "
+                        f"{sorted(parent_keys)} to the same child input "
+                        f"'{child_input}'. Runtime iterates the dict and "
+                        f"last-wins (subgraph.py:94); silent data loss."
+                    ),
+                ))
+
+        # Detect child_keys that map to the same parent_key (last-wins
+        # silent overwrite at runtime; subgraph.py:227).
+        seen_outputs: dict[str, list[str]] = {}
+        for child_key, parent_key in bridge.outputs.items():
+            seen_outputs.setdefault(parent_key, []).append(child_key)
+        for parent_key, child_keys in seen_outputs.items():
+            if len(child_keys) > 1:
+                issues.append(CompileIssue(
+                    rule_id="W-context-bridge-duplicate-parent-output",
+                    severity="WARNING",
+                    location=f"SKILL.md:phases.{phase.name}.context_bridge.outputs",
+                    message=(
+                        f"DelegatePhase '{phase.name}' maps child outputs "
+                        f"{sorted(child_keys)} to the same parent key "
+                        f"'{parent_key}'. Runtime iterates the dict and "
+                        f"last-wins (subgraph.py:227); silent data loss."
+                    ),
+                ))
+
         for parent_key, child_input in bridge.inputs.items():
             if child_input not in declared_inputs:
                 issues.append(CompileIssue(

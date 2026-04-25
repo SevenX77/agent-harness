@@ -265,6 +265,48 @@ def test_returns_empty_when_parent_has_no_delegate_phases(tmp_path: Path) -> Non
     assert issues == []
 
 
+def test_warning_when_duplicate_child_input(tmp_path: Path) -> None:
+    child = _write_child_graph(
+        tmp_path, name="child", inputs=["alpha"], outputs=["gamma"],
+    )
+    parent = _build_parent(
+        child_path=child,
+        bridge_inputs={"parent_a": "alpha", "parent_b": "alpha"},  # both → alpha
+        bridge_outputs={"gamma": "parent_g"},
+    )
+
+    issues = check_context_bridge(parent, base_dir=tmp_path)
+
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue.rule_id == "W-context-bridge-duplicate-child-input"
+    assert issue.severity == "WARNING"
+    assert "alpha" in issue.message
+    assert "parent_a" in issue.message
+    assert "parent_b" in issue.message
+
+
+def test_warning_when_duplicate_parent_output(tmp_path: Path) -> None:
+    child = _write_child_graph(
+        tmp_path, name="child", inputs=["alpha"], outputs=["gamma", "delta"],
+    )
+    parent = _build_parent(
+        child_path=child,
+        bridge_inputs={"parent_a": "alpha"},
+        bridge_outputs={"gamma": "parent_g", "delta": "parent_g"},  # both → parent_g
+    )
+
+    issues = check_context_bridge(parent, base_dir=tmp_path)
+
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue.rule_id == "W-context-bridge-duplicate-parent-output"
+    assert issue.severity == "WARNING"
+    assert "parent_g" in issue.message
+    assert "gamma" in issue.message
+    assert "delta" in issue.message
+
+
 def test_accumulates_input_and_output_issues_in_one_phase(tmp_path: Path) -> None:
     child = _write_child_graph(
         tmp_path, name="child", inputs=["alpha"], outputs=["gamma"],

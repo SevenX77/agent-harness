@@ -183,6 +183,28 @@ def test_silently_skips_agent_child(tmp_path: Path) -> None:
     assert issues == []
 
 
+def test_chain_uses_relative_paths_anchored_to_parent_dir(tmp_path: Path) -> None:
+    """Codex review NEEDS-FIX: chain must be relative to parent's dir,
+    not absolute, so PMs reading Studio output see basenames not full
+    project roots."""
+    parent_path = _write_graph_skill(
+        tmp_path, name="parent", subgraphs=[("self_loop", "parent.md")],
+    )
+
+    parent = _load_parent(parent_path)
+    issues = check_subgraph_cycles(parent, skill_path=parent_path)
+
+    assert len(issues) == 1
+    msg = issues[0].message
+    # The chain must NOT contain absolute-path tmp_path prefix; everything
+    # inside the parent directory should render as just its basename.
+    assert str(tmp_path) not in msg, (
+        f"chain leaked absolute path prefix {tmp_path}: {msg!r}"
+    )
+    # The chain renders as 'parent.md -> parent.md' for a self-cycle.
+    assert "parent.md -> parent.md" in msg
+
+
 def test_cycle_reported_once_for_two_parent_phases(tmp_path: Path) -> None:
     parent_path = _write_graph_skill(
         tmp_path,

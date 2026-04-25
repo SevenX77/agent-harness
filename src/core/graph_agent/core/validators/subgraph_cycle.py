@@ -41,8 +41,25 @@ def check_subgraph_cycles(
         path_stack=[parent_resolved],
         cycle_reported=set(),
         issues=issues,
+        chain_anchor=parent_resolved.parent,
     )
     return issues
+
+
+def _format_path_in_chain(p: Path, anchor: Path) -> str:
+    """Render `p` relative to `anchor` for compile-issue messages.
+
+    Falls back to the absolute path when `p` does not live underneath
+    `anchor` (e.g. a cycle that crosses skill-tree boundaries via
+    `../sibling-tree/SKILL.md`). PMs reading the cycle chain in Studio
+    care about basenames, not the full project root prefix; the
+    anchor-relative form keeps the message terse without losing
+    uniqueness inside the typical single-tree case.
+    """
+    try:
+        return str(p.relative_to(anchor))
+    except ValueError:
+        return str(p)
 
 
 def _walk(
@@ -52,6 +69,7 @@ def _walk(
     path_stack: list[Path],
     cycle_reported: set[Path],
     issues: list[CompileIssue],
+    chain_anchor: Path,
 ) -> None:
     base_dir = skill_path.parent
     for phase in skill_def.phases:
@@ -64,7 +82,9 @@ def _walk(
             cycle_reported.add(child_resolved)
             cycle_start = path_stack.index(child_resolved)
             chain = [*path_stack[cycle_start:], child_resolved]
-            chain_str = " -> ".join(str(p) for p in chain)
+            chain_str = " -> ".join(
+                _format_path_in_chain(p, chain_anchor) for p in chain
+            )
             issues.append(CompileIssue(
                 rule_id="F-subgraph-cycle",
                 severity="FATAL",
@@ -93,4 +113,5 @@ def _walk(
             path_stack=[*path_stack, child_resolved],
             cycle_reported=cycle_reported,
             issues=issues,
+            chain_anchor=chain_anchor,
         )

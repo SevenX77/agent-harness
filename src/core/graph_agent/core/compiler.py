@@ -32,8 +32,11 @@ reintroduced in PR #7 against the already-validated ``SkillManifest``:
   See ``validators/subgraph_cycle.py``. Independent of step 1 — both
   validators run unconditionally for ``GraphSkillDef`` manifests in the
   order context_bridge → subgraph_cycle (no shared state).
-- **Persona resolution** — every ``adopted_persona`` must resolve to an
-  existing ``PersonaSkillDef``. (Currently load-time only.)
+- **Persona resolution** ✅ shipped in PR #7 step 3.
+  See ``validators/persona_resolution.py``. Reuses
+  ``loader._resolve_persona`` so compile-time and load-time agree on
+  the search order; promoting that helper to a public registry remains
+  a separate refactor (loader.py TODO).
 - **context_bridge static type check** — shipped in PR #7 step 1.
   See ``validators/context_bridge.py``. The remaining checks below
   still have only load-time fallbacks (or no fallback at all in the
@@ -167,9 +170,13 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
         return result
 
     # PR #7 semantic checks (run only when Pydantic validation succeeds).
-    # Only GraphSkillDef carries phases (and therefore DelegatePhase);
-    # AgentSkillDef and PersonaSkillDef have no delegation surface so
-    # neither validator has anything to check on them.
+    # GraphSkillDef carries phases (DelegatePhase + LLMPhase) and so runs
+    # the full triple. AgentSkillDef has no phases but does carry a
+    # top-level ``adopted_persona`` field, so it runs persona_resolution
+    # only. PersonaSkillDef carries neither and falls through unchanged.
+    from .manifest import AgentSkillDef
+    from .validators.persona_resolution import check_persona_resolution
+
     if isinstance(manifest, GraphSkillDef):
         from .validators.context_bridge import check_context_bridge
         from .validators.subgraph_cycle import check_subgraph_cycles
@@ -179,6 +186,13 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
         )
         result.issues.extend(
             check_subgraph_cycles(manifest, skill_path=skill_path)
+        )
+        result.issues.extend(
+            check_persona_resolution(manifest, base_dir=skill_path.parent)
+        )
+    elif isinstance(manifest, AgentSkillDef):
+        result.issues.extend(
+            check_persona_resolution(manifest, base_dir=skill_path.parent)
         )
 
     logger.info(

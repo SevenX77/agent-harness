@@ -28,9 +28,10 @@ reintroduced in PR #7 against the already-validated ``SkillManifest``:
   ``LogicPhase.execute_steps`` / ``LLMPhase.validator`` and confirm each
   string resolves via ``loader._resolve_tool_reference``. (Currently
   load-time only.)
-- **Subgraph cycle detection** — recursively follow
-  ``DelegatePhase.subgraph`` paths and detect cycles statically. (Currently
-  load-time only via ``_loading_stack``.)
+- **Subgraph cycle detection** ✅ shipped in PR #7 step 2.
+  See ``validators/subgraph_cycle.py``. Independent of step 1 — both
+  validators run unconditionally for ``GraphSkillDef`` manifests in the
+  order context_bridge → subgraph_cycle (no shared state).
 - **Persona resolution** — every ``adopted_persona`` must resolve to an
   existing ``PersonaSkillDef``. (Currently load-time only.)
 - **context_bridge static type check** — shipped in PR #7 step 1.
@@ -168,12 +169,16 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
     # PR #7 semantic checks (run only when Pydantic validation succeeds).
     # Only GraphSkillDef carries phases (and therefore DelegatePhase);
     # AgentSkillDef and PersonaSkillDef have no delegation surface so
-    # the context_bridge validator has nothing to check on them.
+    # neither validator has anything to check on them.
     if isinstance(manifest, GraphSkillDef):
         from .validators.context_bridge import check_context_bridge
+        from .validators.subgraph_cycle import check_subgraph_cycles
 
         result.issues.extend(
             check_context_bridge(manifest, base_dir=skill_path.parent)
+        )
+        result.issues.extend(
+            check_subgraph_cycles(manifest, skill_path=skill_path)
         )
 
     logger.info(

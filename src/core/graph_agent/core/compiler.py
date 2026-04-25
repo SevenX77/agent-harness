@@ -33,11 +33,13 @@ reintroduced in PR #7 against the already-validated ``SkillManifest``:
   See ``validators/subgraph_cycle.py``. Independent of step 1 — both
   validators run unconditionally for ``GraphSkillDef`` manifests in the
   order context_bridge → subgraph_cycle (no shared state).
-- **Persona resolution** ✅ shipped in PR #7 step 3.
-  See ``validators/persona_resolution.py``. Reuses
-  ``loader._resolve_persona`` so compile-time and load-time agree on
-  the search order; promoting that helper to a public registry remains
-  a separate refactor (loader.py TODO).
+- **Persona resolution** ✅ shipped in PR #7 step 3 + step 5.
+  See ``validators/persona_resolution.py`` and ``personas.py``. The
+  loader's private ``_resolve_persona`` was promoted to the public
+  ``personas.resolve_persona`` and the implicit walk-up (which
+  searched parent dirs for ``skills/``) was replaced with the explicit
+  ``GRAPH_AGENT_PERSONA_PATH`` env-var registry — load-time and
+  compile-time share one resolver and one search order.
 - **context_bridge static type check** — shipped in PR #7 step 1.
   See ``validators/context_bridge.py``. The remaining checks below
   still have only load-time fallbacks (or no fallback at all in the

@@ -28,6 +28,7 @@ import yaml
 from .parser import _parse_frontmatter
 from .exceptions import SkillCompilationError, SkillLoadError
 from .harness import ContextBridge, GraphAgentHarness, Phase
+from .personas import resolve_persona
 
 logger = logging.getLogger(__name__)
 
@@ -379,52 +380,6 @@ def _compose_agent_system_prompt(manifest: "AgentSkillDef") -> str:
     return "\n\n".join(parts)
 
 
-def _resolve_persona(persona_name: str, base_dir: Path) -> "PersonaSkillDef":
-    """Resolve a persona name to a PersonaSkillDef manifest.
-
-    Search order:
-    1. ``<base_dir>/subskills/<persona_name>/SKILL.md`` (skill-local)
-    2. ``<repo_root>/skills/<persona_name>/SKILL.md`` (global registry)
-
-    The repo root is detected by walking up from ``base_dir`` until a directory
-    containing ``skills/`` is found.
-
-    TODO(PR#7): the walk-up is implicit and can shadow when the same persona
-    name exists at multiple levels of a monorepo. Replace with an explicit
-    persona registry (e.g. ``personas.yaml`` next to the project root, or a
-    ``GRAPH_AGENT_PERSONA_PATH`` env var) to make resolution deterministic.
-    """
-    from pydantic import TypeAdapter
-    from .manifest import PersonaSkillDef, SkillManifest
-    from .parser import parse_skill_file
-
-    candidates: list[Path] = []
-    local = base_dir / "subskills" / persona_name / "SKILL.md"
-    candidates.append(local)
-    cur = base_dir.resolve()
-    while cur != cur.parent:
-        if (cur / "skills").is_dir():
-            candidates.append(cur / "skills" / persona_name / "SKILL.md")
-            break
-        cur = cur.parent
-
-    for c in candidates:
-        if c.exists():
-            parsed = parse_skill_file(c)
-            manifest = TypeAdapter(SkillManifest).validate_python(parsed["frontmatter"])
-            if not isinstance(manifest, PersonaSkillDef):
-                raise SkillLoadError(
-                    f"adopted_persona '{persona_name}' resolved to {c}, but its "
-                    f"type is {type(manifest).__name__}, not PersonaSkillDef."
-                )
-            return manifest
-
-    raise SkillLoadError(
-        f"adopted_persona '{persona_name}' not found. Searched: "
-        + ", ".join(str(c) for c in candidates)
-    )
-
-
 def _inject_persona(
     persona: "PersonaSkillDef",
     system_prompt: str | None,
@@ -472,7 +427,9 @@ def _phase_from_agent_skill(
     del callbacks, loading_stack  # unused in agent path; reserved for persona resolution
     system_prompt = _compose_agent_system_prompt(manifest)
     if manifest.adopted_persona is not None:
-        persona_manifest = _resolve_persona(manifest.adopted_persona, base_dir)
+        persona_manifest = resolve_persona(
+            manifest.adopted_persona, base_dir=base_dir,
+        )
         system_prompt = _inject_persona(persona_manifest, system_prompt)
     tools = [_resolve_tool_reference(ref, base_dir) for ref in manifest.agent_tools]
     return Phase(
@@ -507,7 +464,9 @@ def _phase_from_graph_phase(
         tools = [_resolve_tool_reference(ref, base_dir) for ref in phase_def.agent_tools]
         system_prompt = phase_def.prompt
         if phase_def.adopted_persona is not None:
-            persona_manifest = _resolve_persona(phase_def.adopted_persona, base_dir)
+            persona_manifest = resolve_persona(
+                phase_def.adopted_persona, base_dir=base_dir,
+            )
             system_prompt = _inject_persona(persona_manifest, system_prompt)
         return Phase(
             name=phase_def.name,

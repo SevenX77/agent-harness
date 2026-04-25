@@ -9,12 +9,8 @@ from pathlib import Path
 
 from ..compiler import CompileIssue
 from ..exceptions import SkillLoadError
-# Cross-module private import is intentional: keeps the walk-up
-# resolver as a single source of truth between load-time and
-# compile-time. See plan "Scope decisions". Promoting _resolve_persona
-# to public is tracked separately in loader.py's TODO block.
-from ..loader import _resolve_persona
 from ..manifest import AgentSkillDef, GraphSkillDef, LLMPhase
+from ..personas import resolve_persona
 
 
 def check_persona_resolution(
@@ -66,7 +62,7 @@ def _check_one(
     issues: list[CompileIssue],
 ) -> None:
     try:
-        _resolve_persona(persona_name, base_dir)
+        resolve_persona(persona_name, base_dir=base_dir)
     except SkillLoadError as exc:
         issues.append(CompileIssue(
             rule_id="F-persona-not-resolved",

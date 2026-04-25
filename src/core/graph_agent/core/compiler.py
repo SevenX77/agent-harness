@@ -1120,6 +1120,15 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
 
     body = _strip_frontmatter(content)
 
+    # Schema 2.0 short-circuit: skip legacy 1.x checks, delegate to Pydantic
+    if (frontmatter.get("schema_version") or "").strip() == "2.0":
+        logger.info(
+            "Compiled '%s' (schema 2.0): structural checks delegated to Pydantic.",
+            skill_path.name,
+        )
+        return result
+
+
     # Run all checks
     _check_frontmatter(frontmatter, skill_dir, result)
     _check_anthropic_compat(frontmatter, skill_dir, content, result)

@@ -298,6 +298,75 @@ def load_workflow_from_md(
 
         # Step 1: Parse YAML frontmatter
         frontmatter = _parse_frontmatter(content)
+        # Schema 2.0 short-circuit (PR #6 Commit 2)
+        if (frontmatter.get("schema_version") or "").strip() == "2.0":
+            from pydantic import TypeAdapter
+            from .compiler import compile_skill as _compile_check
+            from .manifest import (
+                AgentSkillDef,
+                GraphSkillDef,
+                PersonaSkillDef,
+                SkillManifest,
+            )
+            from .parser import parse_skill_file as _parse_skill_file
+
+            compile_result = _compile_check(md_path)
+            for w in compile_result.warnings:
+                logger.warning(
+                    "[Compiler] %s @ %s — %s",
+                    w.rule_id,
+                    w.location,
+                    w.message,
+                )
+            if not compile_result.passed:
+                detail = "\n".join(
+                    f" [{f.rule_id}] {f.location}: {f.message}"
+                    for f in compile_result.fatals
+                )
+                raise SkillCompilationError(
+                    f"Skill has {len(compile_result.fatals)} FATAL error(s):\n{detail}",
+                    compile_result=compile_result,
+                )
+            parsed = _parse_skill_file(md_path)
+            manifest = TypeAdapter(SkillManifest).validate_python(
+                parsed["frontmatter"]
+            )
+            logger.info(
+                "Loading schema-2.0 skill '%s' (%s) from %s",
+                manifest.name,
+                type(manifest).__name__,
+                md_path,
+            )
+            if isinstance(manifest, PersonaSkillDef):
+                raise SkillLoadError(
+                    "Persona skills are not runnable on their own — they "
+                    "are injected via adopted_persona."
+                )
+            if isinstance(manifest, AgentSkillDef):
+                phases = [
+                    _phase_from_agent_skill(manifest, base_dir, callbacks, loading_stack)
+                ]
+            else:  # GraphSkillDef
+                phases = [
+                    _phase_from_graph_phase(p, base_dir, callbacks, loading_stack)
+                    for p in manifest.phases
+                ]
+            raw_io = (
+                manifest.io.model_dump() if isinstance(manifest, GraphSkillDef) else None
+            )
+            raw_context_mapping = (
+                dict(manifest.context_mapping)
+                if isinstance(manifest, GraphSkillDef) and manifest.context_mapping
+                else None
+            )
+            return GraphAgentHarness(
+                phases=phases,
+                callbacks=callbacks,
+                io_config=raw_io,
+                context_mapping=raw_context_mapping,
+                skill_dir=base_dir,
+            )
+
 
         # Step 2: Validate frontmatter
         valid, msg, skill_name = _validate_frontmatter(frontmatter)

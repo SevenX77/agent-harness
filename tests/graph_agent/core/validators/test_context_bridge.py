@@ -99,3 +99,45 @@ def test_returns_empty_when_inputs_and_outputs_align(tmp_path: Path) -> None:
     issues = check_context_bridge(parent, base_dir=tmp_path)
 
     assert issues == []
+
+
+def test_fatal_when_child_input_undeclared(tmp_path: Path) -> None:
+    child = _write_child_graph(
+        tmp_path, name="child", inputs=["alpha"], outputs=["gamma"],
+    )
+    parent = _build_parent(
+        child_path=child,
+        bridge_inputs={"parent_typo": "alphaa"},  # 'alphaa' not in child.io.inputs
+        bridge_outputs={"gamma": "parent_g"},
+    )
+
+    issues = check_context_bridge(parent, base_dir=tmp_path)
+
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue.rule_id == "F-context-bridge-input-undeclared"
+    assert issue.severity == "FATAL"
+    assert "alphaa" in issue.message
+    assert "alpha" in issue.message  # the available declared name appears in the help
+    assert issue.location.endswith("inputs.parent_typo")
+
+
+def test_fatal_when_child_output_undeclared(tmp_path: Path) -> None:
+    child = _write_child_graph(
+        tmp_path, name="child", inputs=["alpha"], outputs=["gamma"],
+    )
+    parent = _build_parent(
+        child_path=child,
+        bridge_inputs={"parent_a": "alpha"},
+        bridge_outputs={"gammma": "parent_g"},  # typo: child has 'gamma'
+    )
+
+    issues = check_context_bridge(parent, base_dir=tmp_path)
+
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue.rule_id == "F-context-bridge-output-undeclared"
+    assert issue.severity == "FATAL"
+    assert "gammma" in issue.message
+    assert "gamma" in issue.message
+    assert issue.location.endswith("outputs.gammma")

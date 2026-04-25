@@ -382,6 +382,48 @@ def _compose_agent_system_prompt(manifest: "AgentSkillDef") -> str:
     return "\n\n".join(parts)
 
 
+def _resolve_persona(persona_name: str, base_dir: Path) -> "PersonaSkillDef":
+    """Resolve a persona name to a PersonaSkillDef manifest.
+
+    Search order:
+    1. ``<base_dir>/subskills/<persona_name>/SKILL.md`` (skill-local)
+    2. ``<repo_root>/skills/<persona_name>/SKILL.md`` (global registry)
+
+    The repo root is detected by walking up from ``base_dir`` until a directory
+    containing ``skills/`` is found.
+    """
+    from pydantic import TypeAdapter
+    from .manifest import PersonaSkillDef, SkillManifest
+    from .parser import parse_skill_file
+
+    candidates: list[Path] = []
+    local = base_dir / "subskills" / persona_name / "SKILL.md"
+    candidates.append(local)
+    cur = base_dir.resolve()
+    while cur != cur.parent:
+        if (cur / "skills").is_dir():
+            candidates.append(cur / "skills" / persona_name / "SKILL.md")
+            break
+        cur = cur.parent
+
+    for c in candidates:
+        if c.exists():
+            parsed = parse_skill_file(c)
+            manifest = TypeAdapter(SkillManifest).validate_python(parsed["frontmatter"])
+            if not isinstance(manifest, PersonaSkillDef):
+                raise SkillLoadError(
+                    f"adopted_persona '{persona_name}' resolved to {c}, but its "
+                    f"type is {type(manifest).__name__}, not PersonaSkillDef."
+                )
+            return manifest
+
+    raise SkillLoadError(
+        f"adopted_persona '{persona_name}' not found. Searched: "
+        + ", ".join(str(c) for c in candidates)
+    )
+
+
+
 def _phase_from_agent_skill(
     manifest: "AgentSkillDef",
     base_dir: Path,
@@ -395,6 +437,9 @@ def _phase_from_agent_skill(
     """
     del callbacks, loading_stack  # unused in agent path; reserved for persona resolution
     system_prompt = _compose_agent_system_prompt(manifest)
+    if manifest.adopted_persona is not None:
+        persona_manifest = _resolve_persona(manifest.adopted_persona, base_dir)
+        system_prompt = persona_manifest.role_profile + "\n\n---\n\n" + system_prompt
     tools = [_resolve_tool_reference(ref, base_dir) for ref in manifest.agent_tools]
     return Phase(
         name=manifest.name,
@@ -426,9 +471,13 @@ def _phase_from_graph_phase(
 
     if isinstance(phase_def, _LLMPhase):
         tools = [_resolve_tool_reference(ref, base_dir) for ref in phase_def.agent_tools]
+        system_prompt = phase_def.prompt
+        if phase_def.adopted_persona is not None:
+            persona_manifest = _resolve_persona(phase_def.adopted_persona, base_dir)
+            system_prompt = persona_manifest.role_profile + "\n\n---\n\n" + system_prompt
         return Phase(
             name=phase_def.name,
-            system_prompt=phase_def.prompt,
+            system_prompt=system_prompt,
             user_prompt_template=phase_def.user_prompt_template,
             tools=tools,
             max_iterations=phase_def.max_iterations if phase_def.max_iterations is not None else 20,

@@ -213,3 +213,74 @@ class TestPhaseFromGraphPhase:
         from graph_agent.core.exceptions import SkillLoadError
         with pytest.raises(SkillLoadError, match="subgraph not found"):
             _phase_from_graph_phase(phase_def, tmp_path, callbacks=None, loading_stack=set())
+
+
+# =============================================================================
+# Persona injection tests (PR #6 Commit 4)
+# =============================================================================
+
+def test_phase_from_agent_skill_injects_persona(tmp_path: Path) -> None:
+    """Persona role_profile must be prepended to the composed system_prompt when an agent skill declares ``adopted_persona``."""
+    from pydantic import TypeAdapter
+    from graph_agent.core.loader import _phase_from_agent_skill
+    from graph_agent.core.manifest import AgentSkillDef, SkillManifest
+
+    base_dir = tmp_path / "skills" / "host"
+    (base_dir / "subskills" / "p1").mkdir(parents=True)
+    (base_dir / "subskills" / "p1" / "SKILL.md").write_text(
+        "---\n"
+        'schema_version: "2.0"\n'
+        "name: p1\n"
+        "description: tiny persona\n"
+        "type: persona\n"
+        'role_profile: "PERSONA-ROLE-MARKER"\n'
+        "---\n",
+        encoding="utf-8",
+    )
+
+    manifest = TypeAdapter(SkillManifest).validate_python({
+        "schema_version": "2.0",
+        "name": "host-agent",
+        "description": "host",
+        "type": "agent",
+        "agent_profile": {
+            "role": "测试角色",
+            "goal": "测试目标",
+        },
+        "adopted_persona": "p1",
+    })
+    assert isinstance(manifest, AgentSkillDef)
+    phase = _phase_from_agent_skill(manifest, base_dir, callbacks=None, loading_stack=set())
+    assert "PERSONA-ROLE-MARKER" in (phase.system_prompt or "")
+    assert phase.system_prompt.index("PERSONA-ROLE-MARKER") < phase.system_prompt.index("测试角色")
+
+
+def test_phase_from_graph_phase_injects_persona(tmp_path: Path) -> None:
+    """LLMPhase.adopted_persona must inject role_profile before the original prompt."""
+    from pydantic import TypeAdapter
+    from graph_agent.core.loader import _phase_from_graph_phase
+    from graph_agent.core.manifest import LLMPhase, PhaseDef
+
+    base_dir = tmp_path / "skills" / "host"
+    (base_dir / "subskills" / "p2").mkdir(parents=True)
+    (base_dir / "subskills" / "p2" / "SKILL.md").write_text(
+        "---\n"
+        'schema_version: "2.0"\n'
+        "name: p2\n"
+        "description: tiny persona\n"
+        "type: persona\n"
+        'role_profile: "GRAPH-PERSONA-MARKER"\n'
+        "---\n",
+        encoding="utf-8",
+    )
+
+    phase_def = TypeAdapter(PhaseDef).validate_python({
+        "name": "p",
+        "mode": "llm",
+        "prompt": "ORIGINAL-PROMPT-BODY",
+        "adopted_persona": "p2",
+    })
+    assert isinstance(phase_def, LLMPhase)
+    phase = _phase_from_graph_phase(phase_def, base_dir, callbacks=None, loading_stack=set())
+    assert "GRAPH-PERSONA-MARKER" in (phase.system_prompt or "")
+    assert phase.system_prompt.index("GRAPH-PERSONA-MARKER") < phase.system_prompt.index("ORIGINAL-PROMPT-BODY")

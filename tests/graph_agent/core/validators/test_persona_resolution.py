@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from pydantic import TypeAdapter
 
 from graph_agent.core.manifest import (
@@ -11,6 +12,7 @@ from graph_agent.core.manifest import (
     SkillManifest,
 )
 from graph_agent.core.parser import parse_skill_file
+from graph_agent.core.personas import PERSONA_PATH_ENV_VAR
 from graph_agent.core.validators.persona_resolution import (
     check_persona_resolution,
 )
@@ -205,5 +207,38 @@ def test_returns_empty_when_graph_has_no_llm_persona(tmp_path: Path) -> None:
 
     manifest = _load(parent_path)
     issues = check_persona_resolution(manifest, base_dir=tmp_path)
+
+    assert issues == []
+
+
+def test_validator_resolves_via_env_var_registry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Validator must use the same default search paths as the loader."""
+    base_dir = tmp_path / "skill_root"
+    base_dir.mkdir()
+    registry = tmp_path / "global_personas"
+    registry_persona = registry / "external_reviewer"
+    registry_persona.mkdir(parents=True)
+    (registry_persona / "SKILL.md").write_text(
+        "---\n"
+        'schema_version: "2.0"\n'
+        "type: persona\n"
+        "name: external_reviewer\n"
+        "description: persona only reachable via env var\n"
+        "role_profile: |\n"
+        "  External reviewer persona.\n"
+        "---\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(PERSONA_PATH_ENV_VAR, str(registry))
+
+    agent_path = _write_agent_skill(
+        base_dir, name="my_agent", adopted_persona="external_reviewer",
+    )
+    raw = parse_skill_file(agent_path)["frontmatter"]
+    manifest = TypeAdapter(SkillManifest).validate_python(raw)
+
+    issues = check_persona_resolution(manifest, base_dir=base_dir)
 
     assert issues == []

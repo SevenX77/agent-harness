@@ -122,6 +122,21 @@ def test_fatal_when_child_input_undeclared(tmp_path: Path) -> None:
     assert issue.location.endswith("inputs.parent_typo")
 
 
+def test_fatal_when_child_path_missing(tmp_path: Path) -> None:
+    parent = _build_parent(
+        child_path=tmp_path / "nonexistent.md",
+        bridge_inputs={"parent_a": "alpha"},
+        bridge_outputs={"gamma": "parent_g"},
+    )
+
+    issues = check_context_bridge(parent, base_dir=tmp_path)
+
+    assert len(issues) == 1
+    assert issues[0].rule_id == "F-context-bridge-child-missing"
+    assert issues[0].severity == "FATAL"
+    assert "nonexistent.md" in issues[0].message
+
+
 def test_fatal_when_child_output_undeclared(tmp_path: Path) -> None:
     child = _write_child_graph(
         tmp_path, name="child", inputs=["alpha"], outputs=["gamma"],

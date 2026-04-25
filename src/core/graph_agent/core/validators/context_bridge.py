@@ -36,6 +36,18 @@ def check_context_bridge(
             continue
         # phase is DelegatePhase here.
         child_path = (base_dir / phase.subgraph).resolve()  # type: ignore[attr-defined]
+        if not child_path.is_file():
+            issues.append(CompileIssue(
+                rule_id="F-context-bridge-child-missing",
+                severity="FATAL",
+                location=f"SKILL.md:phases.{phase.name}.subgraph",
+                message=(
+                    f"DelegatePhase '{phase.name}' subgraph not found: "
+                    f"{child_path} (resolved from '{phase.subgraph}'). "  # type: ignore[attr-defined]
+                    f"Check the path is relative to the parent SKILL.md."
+                ),
+            ))
+            continue
         try:
             parsed = parse_skill_file(child_path)
         except SkillLoadError as exc:

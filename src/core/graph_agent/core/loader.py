@@ -25,10 +25,7 @@ from typing import Any
 
 import yaml
 
-from .parser import (
-    _NODE_PATTERN,
-    _parse_frontmatter,
-)
+from .parser import _parse_frontmatter
 from .exceptions import SkillCompilationError, SkillLoadError
 from .harness import ContextBridge, GraphAgentHarness, Phase
 
@@ -391,6 +388,11 @@ def _resolve_persona(persona_name: str, base_dir: Path) -> "PersonaSkillDef":
 
     The repo root is detected by walking up from ``base_dir`` until a directory
     containing ``skills/`` is found.
+
+    TODO(PR#7): the walk-up is implicit and can shadow when the same persona
+    name exists at multiple levels of a monorepo. Replace with an explicit
+    persona registry (e.g. ``personas.yaml`` next to the project root, or a
+    ``GRAPH_AGENT_PERSONA_PATH`` env var) to make resolution deterministic.
     """
     from pydantic import TypeAdapter
     from .manifest import PersonaSkillDef, SkillManifest
@@ -423,6 +425,38 @@ def _resolve_persona(persona_name: str, base_dir: Path) -> "PersonaSkillDef":
     )
 
 
+def _inject_persona(
+    persona: "PersonaSkillDef",
+    system_prompt: str | None,
+) -> str:
+    """Combine a PersonaSkillDef with a phase's system prompt.
+
+    Persona's ``role_profile`` establishes the LLM's identity and is layered
+    *before* the phase-specific instructions. ``evaluation_rubrics`` (when
+    present) sit between the two as a self-evaluation lens the LLM should
+    apply. ``few_shot_examples`` would need a messages-history surface that
+    Phase doesn't yet expose; raising rather than silently dropping the field
+    forces authors to either remove it or wait for the runtime to land.
+
+    TODO(PR#7): wire ``few_shot_examples`` through the LLM client as
+    pre-filled assistant/user pairs, then drop the NotImplementedError.
+    """
+    if persona.few_shot_examples:
+        raise NotImplementedError(
+            f"Persona '{persona.name}' declares few_shot_examples, but the "
+            "runtime does not yet materialise them as pre-filled message "
+            "history. Leave the list empty until PR #7 lands the wiring."
+        )
+    parts: list[str] = [persona.role_profile]
+    if persona.evaluation_rubrics:
+        parts.append("---")
+        parts.append("## 评估标准")
+        parts.append(persona.evaluation_rubrics)
+    parts.append("---")
+    parts.append(system_prompt or "")
+    return "\n\n".join(parts)
+
+
 
 def _phase_from_agent_skill(
     manifest: "AgentSkillDef",
@@ -439,7 +473,7 @@ def _phase_from_agent_skill(
     system_prompt = _compose_agent_system_prompt(manifest)
     if manifest.adopted_persona is not None:
         persona_manifest = _resolve_persona(manifest.adopted_persona, base_dir)
-        system_prompt = persona_manifest.role_profile + "\n\n---\n\n" + system_prompt
+        system_prompt = _inject_persona(persona_manifest, system_prompt)
     tools = [_resolve_tool_reference(ref, base_dir) for ref in manifest.agent_tools]
     return Phase(
         name=manifest.name,
@@ -474,7 +508,7 @@ def _phase_from_graph_phase(
         system_prompt = phase_def.prompt
         if phase_def.adopted_persona is not None:
             persona_manifest = _resolve_persona(phase_def.adopted_persona, base_dir)
-            system_prompt = persona_manifest.role_profile + "\n\n---\n\n" + system_prompt
+            system_prompt = _inject_persona(persona_manifest, system_prompt)
         return Phase(
             name=phase_def.name,
             system_prompt=system_prompt,

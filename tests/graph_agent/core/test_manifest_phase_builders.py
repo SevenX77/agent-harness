@@ -284,3 +284,75 @@ def test_phase_from_graph_phase_injects_persona(tmp_path: Path) -> None:
     phase = _phase_from_graph_phase(phase_def, base_dir, callbacks=None, loading_stack=set())
     assert "GRAPH-PERSONA-MARKER" in (phase.system_prompt or "")
     assert phase.system_prompt.index("GRAPH-PERSONA-MARKER") < phase.system_prompt.index("ORIGINAL-PROMPT-BODY")
+
+
+def test_phase_from_agent_skill_injects_evaluation_rubrics(tmp_path: Path) -> None:
+    """``evaluation_rubrics`` on the persona must land between role_profile and the host prompt."""
+    from pydantic import TypeAdapter
+    from graph_agent.core.loader import _phase_from_agent_skill
+    from graph_agent.core.manifest import AgentSkillDef, SkillManifest
+
+    base_dir = tmp_path / "skills" / "host"
+    (base_dir / "subskills" / "rubric_persona").mkdir(parents=True)
+    (base_dir / "subskills" / "rubric_persona" / "SKILL.md").write_text(
+        "---\n"
+        'schema_version: "2.0"\n'
+        "name: rubric_persona\n"
+        "description: persona with rubric\n"
+        "type: persona\n"
+        'role_profile: "ROLE-MARKER"\n'
+        'evaluation_rubrics: "RUBRIC-MARKER"\n'
+        "---\n",
+        encoding="utf-8",
+    )
+
+    manifest = TypeAdapter(SkillManifest).validate_python({
+        "schema_version": "2.0",
+        "name": "host-agent",
+        "description": "host",
+        "type": "agent",
+        "agent_profile": {"role": "host-role", "goal": "host-goal"},
+        "adopted_persona": "rubric_persona",
+    })
+    assert isinstance(manifest, AgentSkillDef)
+    phase = _phase_from_agent_skill(manifest, base_dir, callbacks=None, loading_stack=set())
+    sp = phase.system_prompt or ""
+    assert "ROLE-MARKER" in sp and "RUBRIC-MARKER" in sp and "host-role" in sp
+    assert sp.index("ROLE-MARKER") < sp.index("RUBRIC-MARKER") < sp.index("host-role")
+    assert "## 评估标准" in sp
+
+
+def test_persona_few_shot_examples_raise_not_implemented(tmp_path: Path) -> None:
+    """Personas declaring few_shot_examples must hard-fail until messages-history wiring lands (PR#7)."""
+    import pytest
+    from pydantic import TypeAdapter
+    from graph_agent.core.loader import _phase_from_agent_skill
+    from graph_agent.core.manifest import AgentSkillDef, SkillManifest
+
+    base_dir = tmp_path / "skills" / "host"
+    (base_dir / "subskills" / "shotty").mkdir(parents=True)
+    (base_dir / "subskills" / "shotty" / "SKILL.md").write_text(
+        "---\n"
+        'schema_version: "2.0"\n'
+        "name: shotty\n"
+        "description: persona with examples\n"
+        "type: persona\n"
+        'role_profile: "ROLE"\n'
+        "few_shot_examples:\n"
+        "  - example one\n"
+        "  - example two\n"
+        "---\n",
+        encoding="utf-8",
+    )
+
+    manifest = TypeAdapter(SkillManifest).validate_python({
+        "schema_version": "2.0",
+        "name": "host-agent",
+        "description": "host",
+        "type": "agent",
+        "agent_profile": {"role": "r", "goal": "g"},
+        "adopted_persona": "shotty",
+    })
+    assert isinstance(manifest, AgentSkillDef)
+    with pytest.raises(NotImplementedError, match="few_shot_examples"):
+        _phase_from_agent_skill(manifest, base_dir, callbacks=None, loading_stack=set())

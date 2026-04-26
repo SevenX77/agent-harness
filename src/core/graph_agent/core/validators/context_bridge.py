@@ -35,7 +35,17 @@ def check_context_bridge(
         if phase.mode != "delegate":  # type: ignore[attr-defined]
             continue
         # phase is DelegatePhase here.
-        child_path = (base_dir / phase.subgraph).resolve()  # type: ignore[attr-defined]
+        try:
+            child_path = (base_dir / phase.subgraph).resolve()  # type: ignore[attr-defined]
+        except (OSError, RuntimeError) as exc:
+            unresolved_child_path = base_dir / phase.subgraph  # type: ignore[attr-defined]
+            issues.append(CompileIssue(
+                rule_id="F-context-bridge-child-invalid",
+                severity="FATAL",
+                location=f"{unresolved_child_path}:frontmatter",
+                message=str(exc),
+            ))
+            continue
         if not child_path.is_file():
             issues.append(CompileIssue(
                 rule_id="F-context-bridge-child-missing",

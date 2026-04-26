@@ -113,6 +113,83 @@ phases:
     ), [(i.rule_id, i.message) for i in result.issues]
 
 
+def test_compile_skill_with_symlink_loop_returns_fatal_not_raise(
+    tmp_path: Path,
+) -> None:
+    """Symlink-loop RuntimeError from Path.resolve must be aggregated."""
+    child_loop = tmp_path / "child_loop.md"
+    child_loop.symlink_to(child_loop)
+    child_parent = tmp_path / "child-parent.md"
+    child_parent.write_text(
+        """---
+schema_version: "2.0"
+type: graph
+name: parent
+description: parent for symlink-loop child test
+io:
+  inputs: []
+  outputs: []
+phases:
+  - name: delegate_phase
+    mode: delegate
+    subgraph: child_loop.md
+    context_bridge:
+      inputs: {}
+      outputs: {}
+---
+""",
+        encoding="utf-8",
+    )
+
+    tool_loop = tmp_path / "tools.py"
+    tool_loop.symlink_to(tool_loop)
+    tool_parent = tmp_path / "tool-parent.md"
+    tool_parent.write_text(
+        """---
+schema_version: "2.0"
+type: agent
+name: agent_with_loop_tool
+description: agent for symlink-loop tool test
+agent_profile:
+  role: tester
+  goal: be tested
+agent_tools:
+  - tools.fn
+---
+""",
+        encoding="utf-8",
+    )
+
+    persona_loop = tmp_path / "persona_loop"
+    persona_loop.symlink_to(persona_loop)
+    persona_parent = tmp_path / "SKILL.md"
+    persona_parent.write_text(
+        """---
+schema_version: "2.0"
+type: agent
+name: agent_with_loop_persona
+description: agent for symlink-loop persona test
+agent_profile:
+  role: tester
+  goal: be tested
+adopted_persona: ./persona_loop
+---
+""",
+        encoding="utf-8",
+    )
+
+    for path, expected_rule_id in (
+        (child_parent, "F-context-bridge-child-invalid"),
+        (tool_parent, "F-tool-path-not-found"),
+        (persona_parent, "F-persona-not-resolved"),
+    ):
+        result = compile_skill(path)
+        assert not result.passed
+        assert any(i.rule_id == expected_rule_id for i in result.fatals), [
+            (i.rule_id, i.message) for i in result.issues
+        ]
+
+
 def test_persona_resolution_with_oserror_returns_fatal_not_raise(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

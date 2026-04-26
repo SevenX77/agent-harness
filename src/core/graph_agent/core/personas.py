@@ -82,7 +82,7 @@ def resolve_persona(
         try:
             resolved_base = base_dir.resolve()
             resolved_candidate = candidate.resolve()
-        except OSError as exc:
+        except (OSError, RuntimeError) as exc:
             raise SkillLoadError(
                 f"adopted_persona '{name}' could not be resolved on disk: {exc}"
             ) from exc

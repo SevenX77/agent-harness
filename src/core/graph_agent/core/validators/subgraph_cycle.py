@@ -75,7 +75,11 @@ def _walk(
     for phase in skill_def.phases:
         if not isinstance(phase, DelegatePhase):
             continue
-        child_resolved = (base_dir / phase.subgraph).resolve()
+        try:
+            child_resolved = (base_dir / phase.subgraph).resolve()
+        except (OSError, RuntimeError):
+            # context_bridge validator owns child-invalid
+            continue
         if child_resolved in path_stack:
             if child_resolved in cycle_reported:
                 continue

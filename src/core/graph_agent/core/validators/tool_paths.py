@@ -154,12 +154,16 @@ def _check_one(
             py_file.resolve(),
             init_file.resolve(),
         ]
-    except OSError:
-        # Could not resolve (e.g. base_dir itself missing on disk).
-        # Fall through — existence check below will produce a
-        # not-found fatal with whatever path string we have.
-        resolved_base = base_dir
-        candidates_to_check = [module_file, py_file, init_file]
+    except (OSError, RuntimeError) as exc:
+        issues.append(CompileIssue(
+            rule_id="F-tool-path-not-found",
+            severity="FATAL",
+            location=location,
+            message=(
+                f"Tool reference '{ref}' could not be resolved on disk: {exc}"
+            ),
+        ))
+        return
     escape_target = next(
         (c for c in candidates_to_check if not _is_within(c, resolved_base)),
         None,

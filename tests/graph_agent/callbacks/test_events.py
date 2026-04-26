@@ -241,6 +241,15 @@ class TestNewEventShapes:
         assert ev.variables == {"scene": "intro"}
         assert ev.resolved_prompt[0]["role"] == "system"
 
+    def test_prompt_captured_loop_index_default(self) -> None:
+        ev = PromptCapturedEvent(phase_name="p")
+        assert ev.loop_index == 1
+
+    def test_prompt_captured_loop_index_rejects_zero(self) -> None:
+        for loop_index in (0, -1):
+            with pytest.raises(ValidationError):
+                PromptCapturedEvent(phase_name="p", loop_index=loop_index)
+
     def test_llm_fallback_captures_provider_transition(self) -> None:
         ev = LLMFallbackEvent(
             phase_name="analyse",

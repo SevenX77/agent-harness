@@ -201,12 +201,16 @@ class TestPersonaPurity:
             _SKILL_ADAPTER.validate_python(data)
         assert "agent_tools" in str(exc.value)
 
-    def test_persona_cannot_have_sub_skills(self):
+    def test_persona_cannot_have_agent_tools(self):
+        """Cohesion plan 方针 1.2 (2026-04-26): ``sub_skills`` was
+        removed from the schema because no production runtime ever
+        wired it. The persona-purity guarantee is now demonstrated via
+        ``agent_tools`` (also forbidden on personas)."""
         data = _base_persona_dict()
-        data["sub_skills"] = ["producer"]
+        data["agent_tools"] = ["pkg.f"]
         with pytest.raises(ValidationError) as exc:
             _SKILL_ADAPTER.validate_python(data)
-        assert "sub_skills" in str(exc.value)
+        assert "agent_tools" in str(exc.value)
 
     def test_persona_cannot_have_io(self):
         data = _base_persona_dict()
@@ -398,17 +402,21 @@ class TestPhaseEngineExclusivity:
             _SKILL_ADAPTER.validate_python(data)
         assert "agent_tools" in str(exc.value)
 
-    def test_logic_phase_cannot_have_sub_skills(self):
+    def test_logic_phase_cannot_have_agent_tools(self):
+        """Cohesion plan 方针 1.2 (2026-04-26): ``sub_skills`` was
+        removed from the schema because no production runtime ever
+        wired it. The logic-phase determinism guarantee is now
+        demonstrated via ``agent_tools`` (also forbidden on logic)."""
         data = _base_graph_dict()
         data["phases"] = [{
             "mode": "logic",
             "name": "bad",
             "execute_steps": ["x.y.z"],
-            "sub_skills": ["producer"],
+            "agent_tools": ["pkg.f"],
         }]
         with pytest.raises(ValidationError) as exc:
             _SKILL_ADAPTER.validate_python(data)
-        assert "sub_skills" in str(exc.value)
+        assert "agent_tools" in str(exc.value)
 
     def test_logic_phase_requires_execute_steps(self):
         data = _base_graph_dict()
@@ -509,24 +517,25 @@ class TestDelegateDeterminism:
 class TestDelegationMechanisms:
     """LLM phases expose three ways to reach other skills."""
 
-    def test_sub_skills_as_list_of_strings(self):
-        """Semantic routing — bare name or ``./`` relative path.
-
-        The resolver rules (bare name = global registry, ``./`` =
-        strict nested) live in the compiler; at schema level we only
-        lock in that the field is ``list[str]``.
-        """
-        m = _SKILL_ADAPTER.validate_python({
-            **_base_graph_dict(),
-            "phases": [{
-                "mode": "llm",
-                "name": "dispatcher",
-                "prompt": "Route to the right tool.",
-                "sub_skills": ["producer", "./subskills/format_scene"],
-            }],
-        })
-        phase = m.phases[0]
-        assert phase.sub_skills == ["producer", "./subskills/format_scene"]
+    def test_sub_skills_field_rejected(self):
+        """Cohesion plan 方针 1.2 (2026-04-26): ``sub_skills`` was
+        removed from the schema because no production skill ever set
+        it and the loader never wired it through to the runtime — i.e.
+        it was a documented field with zero observable behavior. Until
+        the runtime materialises (skill_tool_factory.build_skill_tool
+        injection into Phase.tools), the schema rejects the field
+        outright so authors can't write code that silently no-ops."""
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python({
+                **_base_graph_dict(),
+                "phases": [{
+                    "mode": "llm",
+                    "name": "dispatcher",
+                    "prompt": "Route to the right tool.",
+                    "sub_skills": ["producer"],
+                }],
+            })
+        assert "sub_skills" in str(exc.value)
 
     def test_subagent_enabled_default_false(self):
         m = _SKILL_ADAPTER.validate_python({
@@ -710,33 +719,236 @@ class TestIoFieldValidation:
 
 
 class TestStep:
-    def test_step_with_conditional_expressions(self):
-        m = _SKILL_ADAPTER.validate_python({
-            **_base_graph_dict(),
-            "phases": [{
-                "mode": "llm",
-                "name": "conditional_phase",
-                "prompt": "p",
-                "steps": [
-                    {
-                        "name": "maybe_run",
-                        "goal": "Run when upstream succeeded",
-                        "when": "context.prev_ok == True",
-                        "skip_if": "context.force_skip",
-                        "tools": ["t1", "t2"],
-                    },
-                ],
-            }],
-        })
-        step = m.phases[0].steps[0]
-        assert isinstance(step, Step)
-        assert step.when == "context.prev_ok == True"
-        assert step.skip_if == "context.force_skip"
+    def test_steps_field_rejected_on_llm_phase(self):
+        """Cohesion plan 方针 1.4 (2026-04-26): ``LLMPhase.steps`` was
+        removed because the conditional-step execution model (when /
+        skip_if / per-step tools / per-step validator) was never
+        implemented in the runtime — declared in the schema but
+        silently no-op. The schema now rejects the field outright; the
+        ``Step`` submodel itself is kept as a public symbol so a
+        future re-introduction can re-export it without churn."""
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python({
+                **_base_graph_dict(),
+                "phases": [{
+                    "mode": "llm",
+                    "name": "conditional_phase",
+                    "prompt": "p",
+                    "steps": [
+                        {"name": "maybe_run", "tools": ["t1"]},
+                    ],
+                }],
+            })
+        assert "steps" in str(exc.value)
+
+    def test_step_submodel_still_constructible(self):
+        """``Step`` itself stays a public symbol — useful for future
+        re-introduction and for documentation tools that walk the
+        manifest module."""
+        s = Step.model_validate(
+            {
+                "name": "maybe_run",
+                "when": "context.prev_ok == True",
+                "skip_if": "context.force_skip",
+                "tools": ["t1"],
+            }
+        )
+        assert isinstance(s, Step)
+        assert s.when == "context.prev_ok == True"
 
 
 # =============================================================================
 # Public surface
 # =============================================================================
+
+
+# =============================================================================
+# Cohesion plan 方针 1.6 / 1.7 / 1.8 (2026-04-26): cross-field validators
+# =============================================================================
+
+
+class TestLogicPhaseRetryFields:
+    """Cohesion plan 方针 1.1 (2026-04-26): a logic phase has a
+    ``validator``; on validator failure we want the same retry routing
+    as on an LLM phase. Without ``max_retries`` / ``retry_target``,
+    a logic phase with a failing validator just dies — the production
+    1.x vocabulary supported retries on logic phases too."""
+
+    def test_logic_phase_accepts_max_retries(self):
+        phase = LogicPhase.model_validate(
+            {
+                "mode": "logic",
+                "name": "deterministic",
+                "execute_steps": ["pkg.module.callable"],
+                "max_retries": 3,
+                "retry_target": "deterministic",
+            }
+        )
+        assert phase.max_retries == 3
+        assert phase.retry_target == "deterministic"
+
+    def test_logic_phase_negative_max_retries_rejected(self):
+        with pytest.raises(ValidationError):
+            LogicPhase.model_validate(
+                {
+                    "mode": "logic",
+                    "name": "p",
+                    "execute_steps": ["m.f"],
+                    "max_retries": -1,
+                }
+            )
+
+    def test_logic_phase_dangling_retry_target_rejected_at_graph_level(self):
+        """The cross-phase retry_target validator (1.6) must work for
+        logic phases too — not just LLM phases."""
+        data = _base_graph_dict()
+        data["phases"] = [
+            {
+                "mode": "logic",
+                "name": "compute",
+                "execute_steps": ["pkg.m.f"],
+                "retry_target": "ghost_phase",
+            }
+        ]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "ghost_phase" in str(exc.value)
+
+
+class TestRetryTargetReferenceValidation:
+    """``retry_target`` on an LLMPhase must point to another phase in the
+    same GraphSkillDef. A typo / dangling reference must fail at parse
+    time, not surprise the runtime when RetryRouter tries to look it up.
+    """
+
+    def test_dangling_retry_target_rejected(self):
+        data = _base_graph_dict()
+        data["phases"] = [
+            {
+                "mode": "llm",
+                "name": "draft",
+                "tier": "balanced",
+                "prompt": "draft something",
+                "retry_target": "nonexistent_phase",
+            },
+            {
+                "mode": "llm",
+                "name": "review",
+                "tier": "balanced",
+                "prompt": "review",
+            },
+        ]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        msg = str(exc.value)
+        assert "retry_target" in msg, (
+            "retry_target validator must mention the field by name; got "
+            f"{msg!r}"
+        )
+        assert "nonexistent_phase" in msg, (
+            "Error message must include the offending value so the author "
+            f"can locate the typo; got {msg!r}"
+        )
+
+    def test_valid_retry_target_accepted(self):
+        data = _base_graph_dict()
+        data["phases"] = [
+            {
+                "mode": "llm",
+                "name": "draft",
+                "tier": "balanced",
+                "prompt": "draft something",
+                "retry_target": "draft",  # self-loop is valid
+            }
+        ]
+        m = _SKILL_ADAPTER.validate_python(data)
+        assert isinstance(m, GraphSkillDef)
+
+
+class TestPhaseNameUniqueness:
+    """LangGraph nodes are keyed off ``f'{phase.name}_execute'``; duplicate
+    phase names silently overwrite each other's routing. Reject at parse
+    time."""
+
+    def test_duplicate_phase_names_rejected(self):
+        data = _base_graph_dict()
+        data["phases"] = [
+            {
+                "mode": "llm",
+                "name": "duplicated",
+                "tier": "balanced",
+                "prompt": "first",
+            },
+            {
+                "mode": "llm",
+                "name": "duplicated",
+                "tier": "balanced",
+                "prompt": "second",
+            },
+        ]
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        msg = str(exc.value)
+        assert "duplicated" in msg or "unique" in msg.lower() or "duplicate" in msg.lower(), (
+            "Phase-name uniqueness validator must mention either the "
+            "duplicated name or the word duplicate/unique so the author "
+            f"can fix the SKILL.md; got {msg!r}"
+        )
+
+
+class TestCountFieldsLowerBound:
+    """``max_iterations``, ``max_retries``, ``max_nudges`` must be >= 0
+    or >= 1 — zero and negative inputs were silently accepted before."""
+
+    def test_negative_max_iterations_rejected(self):
+        with pytest.raises(ValidationError):
+            LLMPhase.model_validate(
+                {
+                    "mode": "llm",
+                    "name": "p",
+                    "max_iterations": -1,
+                }
+            )
+
+    def test_zero_max_iterations_rejected(self):
+        """``max_iterations=0`` means the agent loop never runs — that is
+        almost certainly a typo, not an intent. Reject it."""
+        with pytest.raises(ValidationError):
+            LLMPhase.model_validate(
+                {
+                    "mode": "llm",
+                    "name": "p",
+                    "max_iterations": 0,
+                }
+            )
+
+    def test_negative_max_retries_rejected(self):
+        with pytest.raises(ValidationError):
+            LLMPhase.model_validate(
+                {
+                    "mode": "llm",
+                    "name": "p",
+                    "max_retries": -1,
+                }
+            )
+
+    def test_zero_max_retries_accepted(self):
+        """``max_retries=0`` is meaningful: the phase runs exactly once
+        with no retries. Distinct from None (which means default)."""
+        phase = LLMPhase.model_validate(
+            {"mode": "llm", "name": "p", "max_retries": 0}
+        )
+        assert phase.max_retries == 0
+
+    def test_negative_max_nudges_rejected(self):
+        with pytest.raises(ValidationError):
+            LLMPhase.model_validate(
+                {
+                    "mode": "llm",
+                    "name": "p",
+                    "max_nudges": -3,
+                }
+            )
 
 
 class TestSubmodelExports:

@@ -174,49 +174,11 @@ def test_fatal_when_llm_phase_validator_missing(tmp_path: Path) -> None:
     assert issues[0].location == "SKILL.md:phases.think.validator"
 
 
-def test_fatal_when_step_tools_missing(tmp_path: Path) -> None:
-    parent_path = _write_graph_with_phases(
-        tmp_path,
-        name="parent",
-        phases_yaml=(
-            "  - name: think\n"
-            "    mode: llm\n"
-            "    prompt: do it\n"
-            "    steps:\n"
-            "      - name: sub\n"
-            "        tools:\n"
-            "          - missing.fn\n"
-        ),
-    )
-
-    manifest = _load(parent_path)
-    issues = check_tool_paths(manifest, base_dir=tmp_path)
-
-    assert len(issues) == 1
-    assert issues[0].rule_id == "F-tool-path-not-found"
-    assert issues[0].location == "SKILL.md:phases.think.steps.0.tools.0"
-
-
-def test_fatal_when_step_validator_missing(tmp_path: Path) -> None:
-    parent_path = _write_graph_with_phases(
-        tmp_path,
-        name="parent",
-        phases_yaml=(
-            "  - name: think\n"
-            "    mode: llm\n"
-            "    prompt: do it\n"
-            "    steps:\n"
-            "      - name: sub\n"
-            "        validator: missing.validate\n"
-        ),
-    )
-
-    manifest = _load(parent_path)
-    issues = check_tool_paths(manifest, base_dir=tmp_path)
-
-    assert len(issues) == 1
-    assert issues[0].rule_id == "F-tool-path-not-found"
-    assert issues[0].location == "SKILL.md:phases.think.steps.0.validator"
+# Cohesion plan 方针 1.4 (2026-04-26): LLMPhase.steps was removed from
+# the schema (no production usage, no runtime wiring). The earlier
+# fixtures here exercised tool_paths walking through phase.steps; the
+# field no longer exists, so these regression cases collapse into the
+# normal phase-level agent_tools / validator walks above.
 
 
 def test_fatal_when_logic_phase_execute_steps_missing(tmp_path: Path) -> None:

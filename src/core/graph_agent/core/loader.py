@@ -499,6 +499,11 @@ def _phase_from_graph_phase(
             max_retries=phase_def.max_retries if phase_def.max_retries is not None else 3,
             max_nudges=phase_def.max_nudges if phase_def.max_nudges is not None else 1,
             subagent_enabled=phase_def.subagent_enabled,
+            # 方针 1.3: thread output_schema dotted path so PhaseExecutor
+            # can hand it to md_to_json. The runtime stores the path, not
+            # the resolved class, because LangGraph's msgpack checkpointer
+            # cannot serialise ModelMetaclass.
+            output_schema_path=phase_def.output_schema,
             requires_llm=True,
         )
 
@@ -515,6 +520,11 @@ def _phase_from_graph_phase(
                 if phase_def.validator
                 else None
             ),
+            # 方针 1.1: thread retry fields into runtime Phase so a
+            # logic-phase validator failure routes through RetryRouter the
+            # same way an LLM-phase validator failure does.
+            retry_target=phase_def.retry_target,
+            max_retries=phase_def.max_retries if phase_def.max_retries is not None else 3,
             requires_llm=False,
         )
 

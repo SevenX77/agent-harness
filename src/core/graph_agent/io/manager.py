@@ -130,7 +130,12 @@ class IOManager:
                 )
                 continue
 
-            if target == "artifact_manager":
+            # Cohesion plan 方针 1.5 (2026-04-26): the schema's canonical
+            # value is "artifact" (IoOutput.target: Literal["file", "artifact"]).
+            # The legacy "artifact_manager" wording is kept as an in-process
+            # alias so older io_config dicts and the docstring above keep
+            # working — but new SKILL.md files write "artifact".
+            if target in ("artifact", "artifact_manager"):
                 if artifact_saver is None and storage_manager is not None:
                     # Kitchen-Pass default: no caller-supplied saver, so fall
                     # back to the framework's built-in StorageManager.
@@ -168,7 +173,7 @@ class IOManager:
             else:
                 raise ValueError(
                     f"Unknown output target '{target}' for output '{name}'. "
-                    f"Supported: artifact_manager, file"
+                    f"Supported: file, artifact (legacy alias: artifact_manager)"
                 )
 
         return saved_paths

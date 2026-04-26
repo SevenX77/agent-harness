@@ -64,27 +64,10 @@ def check_tool_paths(
                         base_dir=base_dir,
                         issues=issues,
                     )
-                for s_idx, step in enumerate(phase.steps):
-                    for t_idx, ref in enumerate(step.tools):
-                        _check_one(
-                            ref,
-                            location=(
-                                f"SKILL.md:phases.{phase.name}.steps."
-                                f"{s_idx}.tools.{t_idx}"
-                            ),
-                            base_dir=base_dir,
-                            issues=issues,
-                        )
-                    if step.validator is not None:
-                        _check_one(
-                            step.validator,
-                            location=(
-                                f"SKILL.md:phases.{phase.name}.steps."
-                                f"{s_idx}.validator"
-                            ),
-                            base_dir=base_dir,
-                            issues=issues,
-                        )
+                # Cohesion plan 方针 1.4 (2026-04-26): LLMPhase.steps was
+                # removed from the schema (no production usage, no
+                # runtime wiring). Nothing more to walk for an LLM phase
+                # beyond agent_tools + validator.
             elif isinstance(phase, LogicPhase):
                 for idx, ref in enumerate(phase.execute_steps):
                     _check_one(

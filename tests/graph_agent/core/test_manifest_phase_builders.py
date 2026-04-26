@@ -136,6 +136,35 @@ class TestPhaseFromAgentSkill:
 class TestPhaseFromGraphPhase:
     """Graph phase (LLM/Logic/Delegate) → runtime Phase."""
 
+    def test_llm_phase_output_schema_threaded_to_runtime(self, tmp_path: Path):
+        """Cohesion plan 方针 1.3 (2026-04-26): the schema declares
+        ``LLMPhase.output_schema: str`` and the runtime PhaseExecutor
+        reads ``Phase.output_schema_path`` — but the loader was missing
+        the wire between them, so the field had no observable effect."""
+        manifest = _SKILL_ADAPTER.validate_python({
+            "name": "g",
+            "description": "d",
+            "type": "graph",
+            "io": {"inputs": [], "outputs": []},
+            "phases": [{
+                "mode": "llm",
+                "name": "extract",
+                "tier": "balanced",
+                "prompt": "extract",
+                "output_schema": "pkg.module.MyResult",
+            }],
+        })
+        phase_def = manifest.phases[0]
+        phase = _phase_from_graph_phase(
+            phase_def, tmp_path, callbacks=None, loading_stack=set()
+        )
+        assert phase.output_schema_path == "pkg.module.MyResult", (
+            "Loader must pass LLMPhase.output_schema through to "
+            "Phase.output_schema_path so PhaseExecutor can hand the "
+            "schema dotted path to md_to_json. Without this wire the "
+            "field is a documented no-op."
+        )
+
     def test_llm_phase_builds_reactive_phase(self, tmp_path: Path):
         manifest = _SKILL_ADAPTER.validate_python({
             "name": "g",
@@ -151,7 +180,7 @@ class TestPhaseFromGraphPhase:
                 "max_iterations": 12,
                 "max_nudges": 3,
                 "max_retries": 2,
-                "retry_target": "earlier_phase",
+                "retry_target": "segment",
             }],
         })
 
@@ -166,7 +195,7 @@ class TestPhaseFromGraphPhase:
         assert phase.max_iterations == 12
         assert phase.max_nudges == 3
         assert phase.max_retries == 2
-        assert phase.retry_target == "earlier_phase"
+        assert phase.retry_target == "segment"
         assert phase.requires_llm is True
 
     def test_logic_phase_builds_nonllm_phase(self, tmp_path: Path):

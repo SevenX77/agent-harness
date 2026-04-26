@@ -98,7 +98,6 @@ class TestRoundTripAgent:
                 "goal": "Validate plan feasibility.",
             },
             "agent_tools": ["read_plan", "write_review"],
-            "sub_skills": ["producer", "./subskills/audience_analyst"],
             "adopted_persona": "producer",
         })
         assert s1 == s2

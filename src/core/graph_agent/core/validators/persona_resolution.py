@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from ..compiler import CompileIssue
 from ..exceptions import SkillLoadError
 from ..manifest import AgentSkillDef, GraphSkillDef, LLMPhase
@@ -61,9 +63,16 @@ def _check_one(
     location: str,
     issues: list[CompileIssue],
 ) -> None:
+    # Cohesion plan 方针 4.1 (2026-04-26): ``resolve_persona`` calls
+    # Pydantic ``TypeAdapter`` directly, so a malformed sub-persona
+    # frontmatter raises ``ValidationError`` (not ``SkillLoadError``).
+    # Catching only the latter let the exception leak through
+    # ``compile_skill`` and crash the aggregation contract; both are
+    # legitimate "could not resolve" failures from the PM's
+    # perspective.
     try:
         resolve_persona(persona_name, base_dir=base_dir)
-    except SkillLoadError as exc:
+    except (SkillLoadError, ValidationError) as exc:
         issues.append(CompileIssue(
             rule_id="F-persona-not-resolved",
             severity="FATAL",

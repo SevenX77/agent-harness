@@ -114,13 +114,26 @@ class CompileResult:
 def compile_skill(skill_path: str | Path) -> CompileResult:
     """Run static compilation checks on a schema-2.0 SKILL.md file.
 
-    Most structural checks are now delegated to Pydantic at parse time
-    (the manifest's ``extra='forbid'`` + discriminated unions + per-mode field
-    constraints). This function is reduced to a thin wrapper that surfaces
-    parse errors as ``CompileResult`` issues.
+    Most structural checks are delegated to Pydantic at parse time
+    (the manifest's ``extra='forbid'`` + discriminated unions +
+    per-mode field constraints, plus the ``GraphSkillDef``
+    model_validators added by the 2026-04-26 cohesion plan: phase-name
+    uniqueness and retry_target reference resolution).
 
-    Semantic checks (tool resolvability, persona resolution, subgraph cycle)
-    for schema 2.0 are TODO — see PR #6 follow-up issue.
+    Semantic checks layered on top of Pydantic:
+
+    - ``check_persona_resolution`` (F-persona-not-resolved) —
+      ``adopted_persona`` references resolve to a real
+      ``PersonaSkillDef``.
+    - ``check_tool_paths`` (F-tool-path-*) — tool dot-references
+      resolve to importable modules and stay inside ``base_dir``.
+    - ``check_context_bridge`` (F-context-bridge-*) — Rule 5
+      type-checks parent/child IO mappings on DelegatePhase.
+    - ``check_subgraph_cycles`` (F-subgraph-cycle) — no DelegatePhase
+      chain forms a cycle.
+
+    All errors aggregate into ``CompileResult`` with ``SKILL.md:<line>:<dotted-loc>``
+    locations; nothing escapes as a Python exception.
     """
     skill_path = Path(skill_path)
     result = CompileResult()

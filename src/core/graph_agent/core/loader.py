@@ -1,15 +1,21 @@
 """SKILL.md loader for GraphAgentHarness.
 
-The loader turns a Markdown skill file into executable ``Phase`` objects and a
-ready-to-run ``GraphAgentHarness``. It is the only place that understands the
-full SKILL authoring surface:
+The loader turns a schema-2.0 SKILL.md file into a ready-to-run
+``GraphAgentHarness``. The authoring surface is the YAML frontmatter
+described by ``manifest.SkillManifest``:
 
-- YAML frontmatter: ``name`` / ``description`` / ``type`` / ``io`` / ``context_mapping``
-- body tags: ``<phase_config>``, ``<system_prompt>``, ``<user_prompt>``,
-  ``<user_prompt_builder>``, ``<data_architecture>``, ``<node>``, ``<ref>``
-- phase options: ``tier``, ``tools``, ``validator``, ``retry_target``,
-  ``max_iterations``, ``max_tool_calls``, ``max_retries``, ``max_nudges``,
-  ``dead_end_threshold``, ``subagent_enabled``, ``subgraph``, ``context_bridge``
+- top-level: ``schema_version`` / ``name`` / ``description`` / ``type``
+- artifact-specific: ``agent_profile`` (agent), ``io`` + ``phases``
+  (graph), ``role_profile`` (persona)
+- phase modes: ``llm`` (prompt + agent_tools + retry/output_schema),
+  ``logic`` (deterministic execute_steps + validator), ``delegate``
+  (subgraph + context_bridge)
+
+The 1.x XML body tags (``<phase_config>``, ``<system_prompt>``,
+``<user_prompt>``, ``<user_prompt_builder>``, ``<data_architecture>``,
+``<node>``, ``<ref>``) were removed when schema 2.0 landed — the
+manifest carries everything structurally and the markdown body is now
+purely human documentation.
 """
 
 from __future__ import annotations
@@ -440,8 +446,9 @@ def _phase_from_agent_skill(
 ) -> Phase:
     """Build the single runtime Phase for a ``type: agent`` manifest.
 
-    Dead code until PR #6 Commit 2. The signature mirrors what
-    ``load_workflow_from_md`` will call once switched over.
+    Dispatched from ``load_workflow_from_md`` for ``type: agent``; the
+    DeerFlow agent loop receives the composed system prompt and the
+    resolved tool callables.
     """
     del callbacks, loading_stack  # unused in agent path; reserved for persona resolution
     system_prompt = _compose_agent_system_prompt(manifest)
@@ -471,7 +478,9 @@ def _phase_from_graph_phase(
 ) -> Phase:
     """Dispatch on ``mode`` to build one runtime Phase from a GraphSkillDef.phases entry.
 
-    Dead code until PR #6 Commit 2.
+    Three branches matching the manifest's three phase modes:
+    ``llm`` (ReAct loop), ``logic`` (deterministic Python steps),
+    ``delegate`` (recursive load of a child SKILL.md).
     """
     # Imported inside the function to keep the dead-code block self-contained
     # until the Commit-2 switch; avoids polluting module-level imports.
@@ -535,9 +544,15 @@ def _phase_from_graph_phase(
 
     if isinstance(phase_def, _DelegatePhase):
         child_path = (base_dir / phase_def.subgraph).resolve()
-        if not child_path.exists():
+        # Cohesion plan 方针 4.4 (2026-04-26): a path that exists but is
+        # a directory used to slip past ``exists()`` and crash later in
+        # ``read_text`` with ``IsADirectoryError`` — far away from the
+        # author's typo. Match the compile-time validator's contract:
+        # the subgraph reference must point at a regular file.
+        if not child_path.is_file():
             raise SkillLoadError(
-                f"Delegate phase '{phase_def.name}' subgraph not found: {child_path}"
+                f"Delegate phase '{phase_def.name}' subgraph not found "
+                f"(or not a file): {child_path}"
             )
         child_harness = load_workflow_from_md(
             md_path=child_path,

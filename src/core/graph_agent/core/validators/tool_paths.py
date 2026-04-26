@@ -133,6 +133,37 @@ def _check_one(
     module_file = base_dir / module_path_str.replace(".", "/")
     py_file = module_file.with_suffix(".py")
     init_file = module_file / "__init__.py"
+
+    # Cohesion plan 方针 4.3 (2026-04-26): reject references whose
+    # resolved path escapes ``base_dir`` (e.g. via ``..`` segments
+    # collapsing through Path arithmetic, or via an absolute literal
+    # leaking in). Without this check, the compile pass would silently
+    # accept paths the load-time resolver later refuses, producing
+    # inconsistent behaviour across the static / dynamic boundary.
+    try:
+        resolved_base = base_dir.resolve()
+        resolved_candidate = module_file.resolve()
+    except OSError:
+        # Could not resolve (e.g. base_dir itself missing on disk).
+        # Fall through — existence check below will produce a
+        # not-found fatal with whatever path string we have.
+        resolved_base = base_dir
+        resolved_candidate = module_file
+    if not _is_within(resolved_candidate, resolved_base):
+        issues.append(CompileIssue(
+            rule_id="F-tool-path-escape",
+            severity="FATAL",
+            location=location,
+            message=(
+                f"Tool reference '{ref}' resolves to '{resolved_candidate}', "
+                f"which is outside the skill's base directory "
+                f"'{resolved_base}'. References that escape the skill tree "
+                f"are rejected to keep static-compile behaviour consistent "
+                f"with load-time path-anchored resolution."
+            ),
+        ))
+        return
+
     if not py_file.is_file() and not init_file.is_file():
         issues.append(CompileIssue(
             rule_id="F-tool-path-not-found",
@@ -144,3 +175,17 @@ def _check_one(
                 f"which exists."
             ),
         ))
+
+
+def _is_within(candidate: Path, root: Path) -> bool:
+    """Return True iff ``candidate`` is at or below ``root``.
+
+    ``Path.is_relative_to`` was added in Python 3.9; this wrapper makes
+    the intent explicit (and lets us swap implementation later if we
+    need to handle symlink semantics specially).
+    """
+    try:
+        candidate.relative_to(root)
+        return True
+    except ValueError:
+        return False

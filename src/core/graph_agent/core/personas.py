@@ -66,8 +66,17 @@ def resolve_persona(
     if search_paths is None:
         search_paths = default_persona_search_paths()
 
-    candidates: list[Path] = [base_dir / "subskills" / name / "SKILL.md"]
-    candidates.extend(root / name / "SKILL.md" for root in search_paths)
+    # Cohesion plan 方针 4.2 (2026-04-26): a relative path
+    # (``./...``) or a path containing a separator is anchored at
+    # ``base_dir`` directly — do NOT prepend the implicit
+    # ``subskills/`` convention prefix. Bare names (no slash, no
+    # leading ``./``) keep the skill-local convention.
+    is_relative_path = name.startswith("./") or "/" in name or "\\" in name
+    if is_relative_path:
+        candidates: list[Path] = [base_dir / name / "SKILL.md"]
+    else:
+        candidates = [base_dir / "subskills" / name / "SKILL.md"]
+        candidates.extend(root / name / "SKILL.md" for root in search_paths)
 
     for candidate in candidates:
         if not candidate.exists():

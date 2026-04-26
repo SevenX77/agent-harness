@@ -354,3 +354,11 @@ roles:
       SD16: { providers: [OC_ARK, ARK] }
       DS32C: { providers: [OC_DS, DS] }
       SD20L: { providers: [OC_ARK, ARK] }
+
+# Peer model groups: list model codes that may substitute for one
+# another when the active model's full provider chain is exhausted.
+# Scoped to same-capability/same-vendor only by convention. Studio
+# emits an LLMFallbackEvent every time the resolver crosses one of
+# these substitutions so Trace Timeline can render the swap.
+peer_model_groups:
+  claude_sonnet_tier: [CL46T, CLO46T]

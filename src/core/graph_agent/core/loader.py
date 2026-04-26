@@ -297,7 +297,12 @@ def load_workflow_from_md(
         # far away from the real cause. Reuse the compiler's
         # ``F-schema-version`` wording so authors see one consistent
         # message regardless of which entry point fires first.
-        schema_version = (frontmatter.get("schema_version") or "").strip()
+        # 方针 3.3: coerce via str() so unquoted YAML literals like
+        # ``schema_version: 2.0`` (parsed as float) don't crash with
+        # AttributeError before reaching the version check. Normalise
+        # back to the canonical string so downstream Pydantic
+        # ``Literal["2.0"]`` validation sees the right type.
+        schema_version = str(frontmatter.get("schema_version") or "").strip()
         if schema_version != "2.0":
             raise SkillLoadError(
                 f"Unsupported schema_version: {schema_version!r} in {md_path}. "

@@ -72,7 +72,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .parser import _parse_frontmatter
+from .parser import _parse_frontmatter, locate_line_for_pydantic_loc
 from .exceptions import SkillLoadError
 
 logger = logging.getLogger(__name__)
@@ -156,7 +156,13 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
         ))
         return result
 
-    schema_version = (frontmatter.get("schema_version") or "").strip()
+    # Cohesion plan 方针 3.3 (2026-04-26): ``schema_version: 2.0``
+    # without quotes parses as a float. Coerce via ``str(...)`` so the
+    # comparison succeeds for the valid case and falls through to the
+    # F-schema-version fatal for any other value. Then normalise the
+    # frontmatter value back to the canonical string form so the
+    # downstream Pydantic ``Literal["2.0"]`` check sees the right type.
+    schema_version = str(frontmatter.get("schema_version") or "").strip()
     if schema_version != "2.0":
         result.issues.append(CompileIssue(
             rule_id="F-schema-version",
@@ -168,6 +174,7 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
             ),
         ))
         return result
+    frontmatter["schema_version"] = "2.0"
 
     # Pydantic does the structural validation when the manifest is
     # constructed in load_workflow_from_md. Surface validation errors
@@ -180,11 +187,22 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
         manifest = TypeAdapter(SkillManifest).validate_python(frontmatter)
     except ValidationError as ve:
         for err in ve.errors():
-            loc = ".".join(str(p) for p in err.get("loc", ()))
+            loc_tuple = err.get("loc", ())
+            loc_dotted = ".".join(str(p) for p in loc_tuple)
+            # Cohesion plan 方针 3.2 (2026-04-26): translate the Pydantic
+            # ``loc`` tuple into the actual SKILL.md line number using
+            # ruamel.yaml's CommentedMap line metadata. Falls back to
+            # the dotted-path-only format when the location cannot be
+            # walked (e.g. a top-level field with no metadata).
+            line = locate_line_for_pydantic_loc(frontmatter, loc_tuple)
+            if line is not None:
+                location = f"SKILL.md:{line}:{loc_dotted or 'frontmatter'}"
+            else:
+                location = f"SKILL.md:{loc_dotted or 'frontmatter'}"
             result.issues.append(CompileIssue(
                 rule_id="F-pydantic",
                 severity="FATAL",
-                location=f"SKILL.md:{loc or 'frontmatter'}",
+                location=location,
                 message=err.get("msg", "Pydantic validation failed"),
             ))
         return result

@@ -4,8 +4,8 @@ After PR #6 the compiler is a thin shell: Pydantic discriminated unions on
 ``SkillManifest`` (``core/manifest.py``) carry the entire structural-validation
 load, so this module only re-runs Pydantic and surfaces validation errors as
 ``CompileResult`` issues for callers (loader.py, the compiler-skill agent loop,
-the Studio UI). Schema 1.x (``<phase>``/``<node>``/XML body) is rejected with
-``F-schema-version`` — there is no migration path inside the loader anymore.
+the Studio UI). Unsupported schema versions are rejected with
+``F-schema-version`` — there is no migration path inside the loader.
 
 Usage::
 
@@ -15,14 +15,13 @@ Usage::
         for f in result.fatals:
             print(f"[{f.rule_id}] {f.location}: {f.message}")
 
-TODO(PR#7) — schema-2.0 semantic checks
-=======================================
+Schema-2.0 semantic checks
+==========================
 
-The 1.x ``_check_*`` rules were rule-bound to the XML body and have no
-schema-2.0 equivalent worth porting verbatim. Pydantic now handles every
-structural rule. The remaining *semantic* rules — the ones Pydantic cannot
-express because they cross files or need import side-effects — must be
-reintroduced in PR #7 against the already-validated ``SkillManifest``:
+Pydantic now handles every structural rule through the
+``SkillManifest`` discriminated union. Semantic rules that cross files or
+need import metadata run after Pydantic succeeds against the already-
+validated manifest:
 
 - **Tool-path resolvability** ✅ shipped in PR #7 step 4.
   See ``validators/tool_paths.py``. Static, non-executing check —

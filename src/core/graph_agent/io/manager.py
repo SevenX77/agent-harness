@@ -274,7 +274,7 @@ class IOManager:
                 context,
                 f"artifact_saver failed for '{name}': {exc}",
             )
-            return []
+            raise
 
     @staticmethod
     def _normalize_saved_paths(result: Any) -> list[str]:

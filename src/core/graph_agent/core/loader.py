@@ -11,11 +11,8 @@ described by ``manifest.SkillManifest``:
   ``logic`` (deterministic execute_steps + validator), ``delegate``
   (subgraph + context_bridge)
 
-The 1.x XML body tags (``<phase_config>``, ``<system_prompt>``,
-``<user_prompt>``, ``<user_prompt_builder>``, ``<data_architecture>``,
-``<node>``, ``<ref>``) were removed when schema 2.0 landed — the
-manifest carries everything structurally and the markdown body is now
-purely human documentation.
+The manifest carries runtime fields structurally. The markdown body is
+purely human documentation and is not parsed for execution semantics.
 """
 
 from __future__ import annotations
@@ -260,9 +257,12 @@ def load_workflow_from_md(
 ) -> GraphAgentHarness:
     """Load a SKILL.md file and compile it into a GraphAgentHarness.
 
-    Supports two modes based on frontmatter ``type``:
-    - ``simple`` (default): single agent loop with at most one phase
-    - ``graph``: ``<node>`` + ``<ref>`` driven multi-node topology
+    Supports schema-2.0 frontmatter ``type`` values:
+    - ``agent``: single DeerFlow agent loop built from ``agent_profile``
+    - ``graph``: ordered ``phases`` using ``llm`` / ``logic`` /
+      ``delegate`` phase modes
+    - ``persona``: not runnable directly; injected through
+      ``adopted_persona``
 
     Args:
         md_path: Path to the SKILL.md file.

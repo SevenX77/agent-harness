@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from graph_agent.io.manager import IOManager
 
 
@@ -83,3 +85,29 @@ class TestIOManagerArtifactTargetAlignment:
         )
 
         assert save_calls == [("story_framework", {"x": 1})]
+
+    def test_artifact_saver_exception_propagates(self) -> None:
+        """A real artifact_saver write failure must not be swallowed."""
+        io_mgr = IOManager(
+            {
+                "outputs": [
+                    {"name": "story_framework", "target": "artifact"}
+                ]
+            }
+        )
+        context = {"story_framework": {"chapters": 3}}
+
+        def broken_saver(name: str, value: object, **_: object) -> str:
+            raise IOError(f"disk full while saving {name}")
+
+        with pytest.raises(IOError, match="disk full while saving story_framework"):
+            io_mgr.save_outputs(
+                context=context,
+                artifact_saver=broken_saver,
+                project_id="proj-x",
+            )
+
+        assert context["_io_errors"] == [
+            "artifact_saver failed for 'story_framework': "
+            "disk full while saving story_framework"
+        ]

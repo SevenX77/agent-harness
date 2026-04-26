@@ -201,11 +201,15 @@ class TestPersonaPurity:
             _SKILL_ADAPTER.validate_python(data)
         assert "agent_tools" in str(exc.value)
 
-    def test_persona_cannot_have_agent_tools(self):
+    def test_persona_purity_after_sub_skills_removal(self):
         """Cohesion plan 方针 1.2 (2026-04-26): ``sub_skills`` was
         removed from the schema because no production runtime ever
-        wired it. The persona-purity guarantee is now demonstrated via
-        ``agent_tools`` (also forbidden on personas)."""
+        wired it. The earlier ``test_persona_cannot_have_sub_skills``
+        regression test was reworked to cover ``agent_tools`` instead;
+        keep this second method (with a distinct name to avoid Python
+        silently overriding the first ``test_persona_cannot_have_agent_tools``
+        above) so the 1.2 motivation stays in the diff history.
+        """
         data = _base_persona_dict()
         data["agent_tools"] = ["pkg.f"]
         with pytest.raises(ValidationError) as exc:

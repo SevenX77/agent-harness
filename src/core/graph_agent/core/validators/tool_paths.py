@@ -137,29 +137,45 @@ def _check_one(
     # Cohesion plan 方针 4.3 (2026-04-26): reject references whose
     # resolved path escapes ``base_dir`` (e.g. via ``..`` segments
     # collapsing through Path arithmetic, or via an absolute literal
-    # leaking in). Without this check, the compile pass would silently
-    # accept paths the load-time resolver later refuses, producing
-    # inconsistent behaviour across the static / dynamic boundary.
+    # leaking in, or via a symlink inside the tree pointing out).
+    # Without this check, the compile pass would silently accept paths
+    # the load-time resolver later refuses, producing inconsistent
+    # behaviour across the static / dynamic boundary.
+    #
+    # Codex review follow-up (2026-04-26): the original check resolved
+    # only ``module_file`` (the no-extension directory form), but a
+    # symlinked ``foo.py`` or ``foo/__init__.py`` inside base_dir
+    # pointing outside slipped past unnoticed. Resolve all three
+    # candidate forms and reject if any of them escapes.
     try:
         resolved_base = base_dir.resolve()
-        resolved_candidate = module_file.resolve()
+        candidates_to_check = [
+            module_file.resolve(),
+            py_file.resolve(),
+            init_file.resolve(),
+        ]
     except OSError:
         # Could not resolve (e.g. base_dir itself missing on disk).
         # Fall through — existence check below will produce a
         # not-found fatal with whatever path string we have.
         resolved_base = base_dir
-        resolved_candidate = module_file
-    if not _is_within(resolved_candidate, resolved_base):
+        candidates_to_check = [module_file, py_file, init_file]
+    escape_target = next(
+        (c for c in candidates_to_check if not _is_within(c, resolved_base)),
+        None,
+    )
+    if escape_target is not None:
         issues.append(CompileIssue(
             rule_id="F-tool-path-escape",
             severity="FATAL",
             location=location,
             message=(
-                f"Tool reference '{ref}' resolves to '{resolved_candidate}', "
+                f"Tool reference '{ref}' resolves to '{escape_target}', "
                 f"which is outside the skill's base directory "
                 f"'{resolved_base}'. References that escape the skill tree "
-                f"are rejected to keep static-compile behaviour consistent "
-                f"with load-time path-anchored resolution."
+                f"(including via symlinks pointing out) are rejected to "
+                f"keep static-compile behaviour consistent with load-time "
+                f"path-anchored resolution."
             ),
         ))
         return

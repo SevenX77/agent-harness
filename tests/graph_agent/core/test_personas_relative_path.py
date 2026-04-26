@@ -90,3 +90,49 @@ def test_missing_relative_path_reports_correct_search_target(
         "Error message must not include doubled subskills prefix; "
         f"got: {msg}"
     )
+
+
+# Codex review (2026-04-26) flagged that the 4.2 fix opened a new escape
+# surface: ``./...``  / ``/``-containing relative paths anchor at base_dir
+# but with no containment check. ``adopted_persona: ../external`` then
+# escapes the skill tree, inconsistent with the new tool_paths escape
+# policy (4.3). Tests below lock the closed contract: relative paths
+# must stay inside base_dir.
+
+
+def test_parent_traversal_relative_path_rejected(tmp_path: Path) -> None:
+    """``adopted_persona: ../external`` must raise SkillLoadError —
+    references that escape the skill tree are rejected to keep
+    persona resolution consistent with tool_paths.F-tool-path-escape."""
+    # Set up a structure with a host skill at <tmp>/host and a persona
+    # one directory up at <tmp>/external (outside host's base_dir).
+    host_dir = tmp_path / "host"
+    host_dir.mkdir()
+    external_persona_dir = tmp_path / "external"
+    external_persona_dir.mkdir()
+    (external_persona_dir / "SKILL.md").write_text(
+        _persona_skill("ESCAPE-TARGET"), encoding="utf-8"
+    )
+
+    # ``../external`` from base_dir=host_dir resolves to tmp/external,
+    # which is outside host_dir.
+    with pytest.raises(SkillLoadError) as excinfo:
+        resolve_persona("../external", base_dir=host_dir)
+    msg = str(excinfo.value).lower()
+    assert "outside" in msg or "escape" in msg or "not found" in msg, (
+        f"Error must indicate the path escapes base_dir; got: {excinfo.value}"
+    )
+
+
+def test_absolute_path_persona_reference_rejected(tmp_path: Path) -> None:
+    """An absolute path in adopted_persona is also escape — the loader
+    contract is anchored-at-base_dir resolution, not arbitrary
+    filesystem traversal."""
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "SKILL.md").write_text(
+        _persona_skill("ABSOLUTE-TARGET"), encoding="utf-8"
+    )
+
+    with pytest.raises(SkillLoadError):
+        resolve_persona(str(elsewhere), base_dir=tmp_path / "host_no_exist")

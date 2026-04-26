@@ -71,9 +71,32 @@ def resolve_persona(
     # ``base_dir`` directly — do NOT prepend the implicit
     # ``subskills/`` convention prefix. Bare names (no slash, no
     # leading ``./``) keep the skill-local convention.
+    #
+    # Codex review follow-up (2026-04-26): direct anchoring without a
+    # containment check would let ``../external`` escape ``base_dir``,
+    # inconsistent with the tool_paths.F-tool-path-escape policy.
+    # Resolve the candidate and verify it stays inside ``base_dir``.
     is_relative_path = name.startswith("./") or "/" in name or "\\" in name
     if is_relative_path:
-        candidates: list[Path] = [base_dir / name / "SKILL.md"]
+        candidate = base_dir / name / "SKILL.md"
+        try:
+            resolved_base = base_dir.resolve()
+            resolved_candidate = candidate.resolve()
+        except OSError as exc:
+            raise SkillLoadError(
+                f"adopted_persona '{name}' could not be resolved on disk: {exc}"
+            ) from exc
+        try:
+            resolved_candidate.relative_to(resolved_base)
+        except ValueError as exc:
+            raise SkillLoadError(
+                f"adopted_persona '{name}' resolves to {resolved_candidate}, "
+                f"which is outside the skill's base directory "
+                f"{resolved_base}. References that escape the skill tree "
+                f"are rejected to stay consistent with tool_paths "
+                f"escape policy (F-tool-path-escape)."
+            ) from exc
+        candidates: list[Path] = [candidate]
     else:
         candidates = [base_dir / "subskills" / name / "SKILL.md"]
         candidates.extend(root / name / "SKILL.md" for root in search_paths)

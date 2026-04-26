@@ -50,7 +50,7 @@ def check_context_bridge(
             continue
         try:
             parsed = parse_skill_file(child_path)
-        except SkillLoadError as exc:
+        except (SkillLoadError, OSError, UnicodeDecodeError) as exc:
             issues.append(CompileIssue(
                 rule_id="F-context-bridge-child-invalid",
                 severity="FATAL",

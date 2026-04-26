@@ -115,7 +115,7 @@ def _check_one(
             full_module = f"{full_module}.{submod}"
         try:
             spec = importlib.util.find_spec(full_module)
-        except (ImportError, ValueError):
+        except (ImportError, ValueError, OSError):
             spec = None
         if spec is None:
             issues.append(CompileIssue(

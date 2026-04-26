@@ -72,7 +72,7 @@ def _check_one(
     # perspective.
     try:
         resolve_persona(persona_name, base_dir=base_dir)
-    except (SkillLoadError, ValidationError) as exc:
+    except (SkillLoadError, ValidationError, OSError, UnicodeDecodeError) as exc:
         issues.append(CompileIssue(
             rule_id="F-persona-not-resolved",
             severity="FATAL",

@@ -146,7 +146,16 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
         ))
         return result
 
-    content = skill_path.read_text(encoding="utf-8")
+    try:
+        content = skill_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        result.issues.append(CompileIssue(
+            rule_id="INTERNAL",
+            severity="FATAL",
+            location=str(skill_path),
+            message=f"Failed to read SKILL.md: {e}",
+        ))
+        return result
 
     if not content.strip():
         result.issues.append(CompileIssue(

@@ -36,6 +36,19 @@ from .models.resolver import ModelResolver, get_model_resolver  # noqa: E402
 from .core.runner import run_skill, clear_cache  # noqa: E402
 from .io.skill_analyzer import get_skill_type  # noqa: E402
 from .core.state import WorkflowState  # noqa: E402
+from .core.manifest import (  # noqa: E402
+    AgentProfile,
+    AgentSkillDef,
+    DelegatePhase,
+    GraphSkillDef,
+    LLMPhase,
+    LogicPhase,
+    PersonaSkillDef,
+    PhaseDef,
+    SkillManifest,
+)
+from .core.parser import parse_skill_file  # noqa: E402
+from .core.serialize import serialize_skill  # noqa: E402
 
 __all__ = [
     "run_skill",
@@ -61,4 +74,15 @@ __all__ = [
     "TemplateRenderError",
     "AllProvidersFailedError",
     "MaxRetriesExceededError",
+    "SkillManifest",
+    "AgentProfile",
+    "AgentSkillDef",
+    "GraphSkillDef",
+    "PersonaSkillDef",
+    "PhaseDef",
+    "LLMPhase",
+    "LogicPhase",
+    "DelegatePhase",
+    "serialize_skill",
+    "parse_skill_file",
 ]

@@ -87,12 +87,12 @@ class TestGetThreadStatusShapes:
 
 
 class TestGetThreadStatusExceptions:
-    def test_exception_during_get_state_becomes_not_found(self):
+    def test_exception_during_get_state_becomes_crashed(self):
         class _FailingGraph:
             def get_state(self, config):
                 raise RuntimeError("boom")
 
         h = _make_harness_stub(object(), _FailingGraph())
         result = h.get_thread_status("t1")
-        assert result["status"] == "NOT_FOUND"
+        assert result["status"] == "CRASHED"
         assert "boom" in result.get("reason", "")

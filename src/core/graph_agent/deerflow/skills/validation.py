@@ -1,6 +1,16 @@
 """Skill frontmatter validation utilities.
 
 Pure-logic validation of SKILL.md frontmatter — no FastAPI or HTTP dependencies.
+
+This module belongs to the **discovery layer** (deerflow registry / skill
+upload) — its only job is to surface skills' identity (name, description) and
+compatibility metadata. Orchestration-layer fields (``schema_version``,
+``type``, ``io``, ``phases``, ``agent_profile``, ...) are validated by
+``graph_agent.core.manifest.SkillManifest`` and are deliberately ignored
+here. Adding them to ``ALLOWED_FRONTMATTER_PROPERTIES`` would couple the
+discovery layer to every future orchestration-vocabulary change; instead
+this module silently passes through unknown keys and only enforces the
+discovery contract on its own keys.
 """
 
 import re
@@ -8,7 +18,11 @@ from pathlib import Path
 
 import yaml
 
-# Allowed properties in SKILL.md frontmatter
+# Discovery-layer keys this validator actively enforces (name, description,
+# compatibility, etc.). Orchestration-layer keys are intentionally not in
+# this set — the deerflow registry does not care about them, and the
+# orchestration layer (graph_agent.core.manifest.SkillManifest) validates
+# them in its own pipeline. Unknown keys are silently allowed.
 ALLOWED_FRONTMATTER_PROPERTIES = {"name", "description", "license", "allowed-tools", "metadata", "compatibility", "version", "author"}
 
 
@@ -44,10 +58,11 @@ def _validate_skill_frontmatter(skill_dir: Path) -> tuple[bool, str, str | None]
     except yaml.YAMLError as e:
         return False, f"Invalid YAML in frontmatter: {e}", None
 
-    # Check for unexpected properties
-    unexpected_keys = set(frontmatter.keys()) - ALLOWED_FRONTMATTER_PROPERTIES
-    if unexpected_keys:
-        return False, f"Unexpected key(s) in SKILL.md frontmatter: {', '.join(sorted(unexpected_keys))}", None
+    # NOTE: Unknown keys are intentionally allowed (see module docstring) —
+    # schema 2.0 orchestration keys (schema_version, type, io, phases, ...)
+    # pass through this discovery-layer validator untouched. The orchestration
+    # layer (graph_agent.core.manifest.SkillManifest) is the authoritative
+    # validator for those keys.
 
     # Check required fields
     if "name" not in frontmatter:

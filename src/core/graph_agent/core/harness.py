@@ -65,7 +65,10 @@ __all__ = [
 ]
 
 
-def _resolve_studio_checkpointer_spec(spec: str) -> Any:
+def _resolve_studio_checkpointer_spec(
+    spec: str,
+    context_managers: list[Any] | None = None,
+) -> Any:
     """Parse a ``STUDIO_CHECKPOINTER`` env-var value into a checkpointer.
 
     Supported forms (Task 7.7):
@@ -96,6 +99,8 @@ def _resolve_studio_checkpointer_spec(spec: str) -> Any:
         conn_str = _resolve_sqlite_conn_str(raw or "store.db")
         saver_cm = SqliteSaver.from_conn_string(conn_str)
         saver = saver_cm.__enter__()
+        if context_managers is not None:
+            context_managers.append(saver_cm)
         saver.setup()
         logger.info("[Harness] STUDIO_CHECKPOINTER=sqlite:%s → SqliteSaver", conn_str)
         return saver
@@ -105,6 +110,8 @@ def _resolve_studio_checkpointer_spec(spec: str) -> Any:
 
         saver_cm = PostgresSaver.from_conn_string(spec)
         saver = saver_cm.__enter__()
+        if context_managers is not None:
+            context_managers.append(saver_cm)
         saver.setup()
         logger.info("[Harness] STUDIO_CHECKPOINTER=%s → PostgresSaver", _redact_dsn(spec))
         return saver
@@ -371,6 +378,7 @@ class GraphAgentHarness:
         self._context_mapping = context_mapping
         self._skill_dir = skill_dir
         self._resolver = get_model_resolver()
+        self._checkpointer_cms: list[Any] = []
         self._checkpointer = self._resolve_checkpointer(checkpointer)
         # D-7.3 — compile-time routing collaborator; reused across runs.
         self._retry_router = RetryRouter(phases)
@@ -388,8 +396,7 @@ class GraphAgentHarness:
         )
         self._graph = self._graph_builder.build()
 
-    @staticmethod
-    def _resolve_checkpointer(checkpointer: Any) -> Any:
+    def _resolve_checkpointer(self, checkpointer: Any) -> Any:
         """Resolve checkpointer parameter to a concrete instance.
 
         Task 7.7: when the ``STUDIO_CHECKPOINTER`` env var is set it
@@ -411,14 +418,14 @@ class GraphAgentHarness:
             override = os.environ.get("STUDIO_CHECKPOINTER")
             if override:
                 try:
-                    return _resolve_studio_checkpointer_spec(override)
-                except Exception as exc:
-                    logger.warning(
-                        "[Harness] STUDIO_CHECKPOINTER=%r could not be resolved (%s); "
-                        "falling back to default auto path",
+                    return _resolve_studio_checkpointer_spec(
                         override,
-                        exc,
+                        self._checkpointer_cms,
                     )
+                except Exception as exc:
+                    raise ValueError(
+                        f"STUDIO_CHECKPOINTER={override!r} could not be resolved: {exc}"
+                    ) from exc
             try:
                 from deerflow.agents.checkpointer.provider import get_checkpointer
                 cp = get_checkpointer()
@@ -428,6 +435,20 @@ class GraphAgentHarness:
                 logger.warning("[Harness] Auto-checkpointer failed, running without: %s", exc)
                 return None
         return checkpointer  # None or explicit instance
+
+    def close(self) -> None:
+        """Close any checkpointer context managers opened by this harness."""
+        errors: list[BaseException] = []
+        while self._checkpointer_cms:
+            cm = self._checkpointer_cms.pop()
+            try:
+                cm.__exit__(None, None, None)
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+        if errors:
+            raise RuntimeError(
+                f"Failed to close {len(errors)} checkpointer context manager(s)"
+            ) from errors[0]
 
     def run(
         self,
@@ -605,9 +626,17 @@ class GraphAgentHarness:
             # emit InterruptedEvent so tracing.jsonl carries the pause
             # marker. We detect this by inspecting post-invoke state;
             # `get_thread_status` uses the same shape.
+            #
+            # Cohesion plan 方针 2.1 (2026-04-26): when the run is paused
+            # on AWAITING_INPUT we must NOT auto-save outputs (the data
+            # the user is being asked for has not been provided yet) and
+            # the terminating RunEndedEvent must carry status="interrupted"
+            # so Studio's "needs input" queue keeps the run.
+            is_awaiting_input = False
             try:
                 status = self.get_thread_status(tid)
                 if status.get("status") == "AWAITING_INPUT":
+                    is_awaiting_input = True
                     from ..callbacks.events import InterruptedEvent
                     clar = status.get("clarification", {}) or {}
                     _safe_emit_event(
@@ -620,10 +649,42 @@ class GraphAgentHarness:
                             options=list(clar.get("options") or []),
                         ),
                     )
+                elif status.get("status") == "CRASHED":
+                    raise RuntimeError(
+                        "Post-invoke interrupt status check failed: "
+                        f"{status.get('reason') or 'unknown error'}"
+                    )
             except Exception:  # noqa: BLE001
                 logger.exception(
                     "[Harness] post-invoke interrupt detection failed"
                 )
+                raise RuntimeError(
+                    "Post-invoke interrupt detection failed; refusing to "
+                    "auto-save outputs or mark the run completed."
+                )
+
+            if is_awaiting_input:
+                # Skip outputs auto-save: the run is paused waiting for
+                # user input, the workflow has not produced final outputs.
+                # Trace save is also skipped — the run is still alive,
+                # resume() will append further trace records and save
+                # once the run actually terminates.
+                logger.info(
+                    "[Harness] run %s paused on AWAITING_INPUT; skipping "
+                    "outputs/trace auto-save until resume completes",
+                    run_id,
+                )
+                _safe_emit_event(
+                    active_callbacks,
+                    RunEndedEvent(
+                        run_id=run_id,
+                        thread_id=tid,
+                        status="interrupted",
+                        final_context=_safe_jsonable_dict(result["context"]),
+                        wall_time_seconds=round(time.monotonic() - run_start_monotonic, 3),
+                    ),
+                )
+                return result  # type: ignore[return-value]
 
             # Auto-save outputs via IOManager if configured
             if self._io_config and self._io_config.get("outputs"):
@@ -641,13 +702,22 @@ class GraphAgentHarness:
             if trace_output is None and result["context"].get("output_dir"):
                 trace_output = Path(result["context"]["output_dir"])
             if trace_output:
-                for cb in self.callbacks:
+                for cb in active_callbacks:
                     if isinstance(cb, TracingCallback):
                         try:
                             saved = cb.save(trace_output)
                             result["context"]["_trace_path"] = saved
                         except Exception as exc:
                             logger.warning("[Harness] Trace save failed: %s", exc)
+                            _append_validation_warning(
+                                result["context"],
+                                f"Trace save failed: {exc}",
+                            )
+                            io_errors = result["context"].get("_io_errors")
+                            if not isinstance(io_errors, list):
+                                io_errors = []
+                                result["context"]["_io_errors"] = io_errors
+                            io_errors.append(f"Trace save failed: {exc}")
                         break
 
             # Tier 1 Commit A — T-B1 RunEndedEvent on success
@@ -784,20 +854,30 @@ class GraphAgentHarness:
         artifact_saver: Callable[..., Any] | None = None,
         storage_manager: Any | None = None,
     ) -> None:
-        """Auto-save outputs via IOManager."""
+        """Auto-save outputs via IOManager.
+
+        Cohesion plan 方针 2.2 (2026-04-26): write failures (disk full,
+        permission denied, schema/target mismatch) used to be swallowed
+        by ``except Exception: logger.warning(...)`` here, so the run
+        was reported as ``completed`` even though the artifact never
+        landed. Failures now propagate — the outer ``run()`` try/except
+        converts them into ``RunEndedEvent(status="crashed")`` and
+        re-raises so callers know the data did not persist.
+        """
         from ..io.manager import IOManager
 
         io_mgr = IOManager(self._io_config)  # type: ignore[arg-type]
-        try:
-            io_mgr.save_outputs(
-                context,
-                output_dir=context.get("output_dir"),
-                project_id=runtime_inputs.get("project_id"),
-                artifact_saver=artifact_saver,
-                storage_manager=storage_manager,
-            )
-        except Exception as exc:
-            logger.warning("[Harness] Auto-save outputs failed: %s", exc)
+        logger.info(
+            "[Harness] auto-saving %d declared output(s)",
+            len(self._io_config.get("outputs", []) if self._io_config else []),
+        )
+        io_mgr.save_outputs(
+            context,
+            output_dir=context.get("output_dir"),
+            project_id=runtime_inputs.get("project_id"),
+            artifact_saver=artifact_saver,
+            storage_manager=storage_manager,
+        )
 
     def get_thread_status(self, thread_id: str) -> dict[str, Any]:
         """Introspect a thread's LangGraph-level state without resuming it.
@@ -837,7 +917,7 @@ class GraphAgentHarness:
                 thread_id,
                 exc,
             )
-            return {"status": "NOT_FOUND", "reason": str(exc)}
+            return {"status": "CRASHED", "reason": str(exc)}
 
         if not snapshot:
             return {"status": "NOT_FOUND"}
@@ -1059,6 +1139,3 @@ class GraphAgentHarness:
     def _build_subgraph_node(self, phase: Phase) -> Callable[[WorkflowState], WorkflowState]:
         """Build a node that executes a nested GraphAgentHarness."""
         return build_subgraph_node(self, phase, logger)
-
-
-

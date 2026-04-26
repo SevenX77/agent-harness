@@ -1,15 +1,18 @@
 """SKILL.md loader for GraphAgentHarness.
 
-The loader turns a Markdown skill file into executable ``Phase`` objects and a
-ready-to-run ``GraphAgentHarness``. It is the only place that understands the
-full SKILL authoring surface:
+The loader turns a schema-2.0 SKILL.md file into a ready-to-run
+``GraphAgentHarness``. The authoring surface is the YAML frontmatter
+described by ``manifest.SkillManifest``:
 
-- YAML frontmatter: ``name`` / ``description`` / ``type`` / ``io`` / ``context_mapping``
-- body tags: ``<phase_config>``, ``<system_prompt>``, ``<user_prompt>``,
-  ``<user_prompt_builder>``, ``<data_architecture>``, ``<node>``, ``<ref>``
-- phase options: ``tier``, ``tools``, ``validator``, ``retry_target``,
-  ``max_iterations``, ``max_tool_calls``, ``max_retries``, ``max_nudges``,
-  ``dead_end_threshold``, ``subagent_enabled``, ``subgraph``, ``context_bridge``
+- top-level: ``schema_version`` / ``name`` / ``description`` / ``type``
+- artifact-specific: ``agent_profile`` (agent), ``io`` + ``phases``
+  (graph), ``role_profile`` (persona)
+- phase modes: ``llm`` (prompt + agent_tools + retry/output_schema),
+  ``logic`` (deterministic execute_steps + validator), ``delegate``
+  (subgraph + context_bridge)
+
+The manifest carries runtime fields structurally. The markdown body is
+purely human documentation and is not parsed for execution semantics.
 """
 
 from __future__ import annotations
@@ -25,18 +28,10 @@ from typing import Any
 
 import yaml
 
-from .parser import (
-    _NODE_PATTERN,
-    _extract_tags,
-    _normalise_phase_tags,
-    _parse_frontmatter,
-    _resolve_refs,
-    _split_by_phase_headers,
-    _strip_frontmatter,
-    _validate_frontmatter,
-)
+from .parser import _parse_frontmatter
 from .exceptions import SkillCompilationError, SkillLoadError
 from .harness import ContextBridge, GraphAgentHarness, Phase
+from .personas import resolve_persona
 
 logger = logging.getLogger(__name__)
 
@@ -262,9 +257,12 @@ def load_workflow_from_md(
 ) -> GraphAgentHarness:
     """Load a SKILL.md file and compile it into a GraphAgentHarness.
 
-    Supports two modes based on frontmatter ``type``:
-    - ``simple`` (default): single agent loop with at most one phase
-    - ``graph``: ``<node>`` + ``<ref>`` driven multi-node topology
+    Supports schema-2.0 frontmatter ``type`` values:
+    - ``agent``: single DeerFlow agent loop built from ``agent_profile``
+    - ``graph``: ordered ``phases`` using ``llm`` / ``logic`` /
+      ``delegate`` phase modes
+    - ``persona``: not runnable directly; injected through
+      ``adopted_persona``
 
     Args:
         md_path: Path to the SKILL.md file.
@@ -298,63 +296,84 @@ def load_workflow_from_md(
 
         # Step 1: Parse YAML frontmatter
         frontmatter = _parse_frontmatter(content)
+        # Schema 2.0 is the only supported version. Cohesion plan 方针 2.3
+        # (2026-04-26): the loader used to fall off the end of this
+        # function for any other ``schema_version``, returning ``None`` —
+        # callers then crashed with ``NoneType has no attribute 'run'``
+        # far away from the real cause. Reuse the compiler's
+        # ``F-schema-version`` wording so authors see one consistent
+        # message regardless of which entry point fires first.
+        # 方针 3.3: coerce via str() so unquoted YAML literals like
+        # ``schema_version: 2.0`` (parsed as float) don't crash with
+        # AttributeError before reaching the version check. Normalise
+        # back to the canonical string so downstream Pydantic
+        # ``Literal["2.0"]`` validation sees the right type.
+        schema_version = str(frontmatter.get("schema_version") or "").strip()
+        if schema_version != "2.0":
+            raise SkillLoadError(
+                f"Unsupported schema_version: {schema_version!r} in {md_path}. "
+                'Only schema_version: "2.0" is supported.'
+            )
 
-        # Step 2: Validate frontmatter
-        valid, msg, skill_name = _validate_frontmatter(frontmatter)
-        if not valid:
-            raise SkillLoadError(f"Frontmatter validation failed: {msg}")
-
-        logger.info("Loading skill '%s' from %s", skill_name, md_path)
-
-        # Step 2.5: Static compilation check (fail-fast)
+        from pydantic import TypeAdapter
         from .compiler import compile_skill as _compile_check
+        from .manifest import (
+            AgentSkillDef,
+            GraphSkillDef,
+            PersonaSkillDef,
+            SkillManifest,
+        )
+        from .parser import parse_skill_file as _parse_skill_file
 
         compile_result = _compile_check(md_path)
         for w in compile_result.warnings:
             logger.warning(
-                "[Compiler] %s @ %s — %s", w.rule_id, w.location, w.message,
+                "[Compiler] %s @ %s — %s",
+                w.rule_id,
+                w.location,
+                w.message,
             )
         if not compile_result.passed:
             detail = "\n".join(
-                f"  [{f.rule_id}] {f.location}: {f.message}"
+                f" [{f.rule_id}] {f.location}: {f.message}"
                 for f in compile_result.fatals
             )
             raise SkillCompilationError(
-                f"Skill '{skill_name}' has {len(compile_result.fatals)} FATAL error(s):\n{detail}",
+                f"Skill has {len(compile_result.fatals)} FATAL error(s):\n{detail}",
                 compile_result=compile_result,
             )
-
-        # Step 3: Parse phases based on skill type
-        skill_type = frontmatter.get("type", "simple")
-
-        if skill_type == "simple":
-            phases = _parse_simple_mode(
-                content=content,
-                base_dir=base_dir,
-                callbacks=callbacks,
-                loading_stack=loading_stack,
-            )
-        elif skill_type == "graph":
-            phases = _parse_graph_mode(
-                content=content,
-                base_dir=base_dir,
-                callbacks=callbacks,
-                loading_stack=loading_stack,
-            )
-        else:
+        parsed = _parse_skill_file(md_path)
+        manifest = TypeAdapter(SkillManifest).validate_python(
+            parsed["frontmatter"]
+        )
+        logger.info(
+            "Loading schema-2.0 skill '%s' (%s) from %s",
+            manifest.name,
+            type(manifest).__name__,
+            md_path,
+        )
+        if isinstance(manifest, PersonaSkillDef):
             raise SkillLoadError(
-                f"Unknown skill type '{skill_type}'. Supported: simple, graph"
+                "Persona skills are not runnable on their own — they "
+                "are injected via adopted_persona."
             )
-
-        # Step 4: Build harness (no longer needs LLMGateway — uses Model Resolver)
-        raw_io = frontmatter.get("io")
-        if raw_io is not None and not isinstance(raw_io, dict):
-            logger.warning("[Loader] 'io' frontmatter is not a dict (got %s), ignoring", type(raw_io).__name__)
-            raw_io = None
-        raw_context_mapping = frontmatter.get("context_mapping")
-        if raw_context_mapping is not None and not isinstance(raw_context_mapping, dict):
-            logger.warning("[Loader] 'context_mapping' frontmatter is not a dict (got %s), ignoring", type(raw_context_mapping).__name__)
-            raw_context_mapping = None
+        if isinstance(manifest, AgentSkillDef):
+            phases = [
+                _phase_from_agent_skill(manifest, base_dir, callbacks, loading_stack)
+            ]
+        else:  # GraphSkillDef
+            phases = [
+                _phase_from_graph_phase(p, base_dir, callbacks, loading_stack)
+                for p in manifest.phases
+            ]
+        raw_io = (
+            manifest.io.model_dump() if isinstance(manifest, GraphSkillDef) else None
+        )
+        raw_context_mapping = (
+            dict(manifest.context_mapping)
+            if isinstance(manifest, GraphSkillDef) and manifest.context_mapping
+            else None
+        )
         return GraphAgentHarness(
             phases=phases,
             callbacks=callbacks,
@@ -362,344 +381,204 @@ def load_workflow_from_md(
             context_mapping=raw_context_mapping,
             skill_dir=base_dir,
         )
+
     finally:
         loading_stack.discard(md_resolved)
 
 
-# ---------------------------------------------------------------------------
-# Simple mode: single agent loop (at most one phase)
-# ---------------------------------------------------------------------------
 
+def _compose_agent_system_prompt(manifest: "AgentSkillDef") -> str:
+    """Assemble an agent skill's System Prompt from its agent_profile.
 
-def _parse_simple_mode(
-    content: str,
-    base_dir: Path,
-    callbacks: list[Any] | None,
-    loading_stack: set[str],
-) -> list[Phase]:
-    """Parse SKILL.md in simple mode — single agent loop, at most one phase.
-
-    Simple mode creates exactly ONE Phase for a single agent execution loop.
-    Three accepted formats (checked in order):
-
-    1. No ``## Phase N:`` headers → extract XML tags directly from body.
-    2. Exactly one ``## Phase N:`` header → parse that section.
-    3. Multiple ``## Phase N:`` headers → error (use ``type: graph`` instead).
-
-    If no ``<phase_config>`` tag is found in format 1, a sensible default is
-    generated so that minimal simple skills only need ``<system_prompt>``.
+    Joins ``role`` + ``goal`` + ``steps`` + ``constraints`` into the prose
+    form the DeerFlow agent loop expects. Persona injection is layered
+    on top by the caller when ``adopted_persona`` is set.
     """
-    phase_sections = _split_by_phase_headers(content)
+    profile = manifest.agent_profile
+    parts: list[str] = [f"你是{profile.role}。", f"你的目标:{profile.goal}"]
+    if profile.steps:
+        parts.append("## 工作流")
+        parts.extend(f"{i}. {step}" for i, step in enumerate(profile.steps, start=1))
+    if profile.constraints:
+        parts.append("## 约束")
+        parts.extend(f"- {c}" for c in profile.constraints)
+    return "\n\n".join(parts)
 
-    if len(phase_sections) > 1:
-        raise SkillLoadError(
-            f"Simple mode supports at most one phase, found {len(phase_sections)}. "
-            "Use type: graph for multi-phase workflows."
+
+def _inject_persona(
+    persona: "PersonaSkillDef",
+    system_prompt: str | None,
+) -> str:
+    """Combine a PersonaSkillDef with a phase's system prompt.
+
+    Persona's ``role_profile`` establishes the LLM's identity and is layered
+    *before* the phase-specific instructions. ``evaluation_rubrics`` (when
+    present) sit between the two as a self-evaluation lens the LLM should
+    apply. ``few_shot_examples`` would need a messages-history surface that
+    Phase doesn't yet expose; raising rather than silently dropping the field
+    forces authors to either remove it or wait for the runtime to land.
+
+    Future work: wire ``few_shot_examples`` through the LLM client as
+    pre-filled assistant/user pairs, then drop the NotImplementedError.
+    """
+    if persona.few_shot_examples:
+        raise NotImplementedError(
+            f"Persona '{persona.name}' declares few_shot_examples, but the "
+            "runtime does not yet materialise them as pre-filled message "
+            "history. Leave the list empty until the wiring lands."
         )
-
-    if len(phase_sections) == 1:
-        title, section_text = phase_sections[0]
-        tags = _extract_tags(section_text)
-    else:
-        body = _strip_frontmatter(content)
-        tags = _extract_tags(body)
-        title = "main"
-
-        if not tags.get("phase_config"):
-            tags["phase_config"] = ["name: main\ntier: balanced\nmax_iterations: 20"]
-
-    phase, errors = _build_phase_from_tags(
-        label=title,
-        tags=tags,
-        base_dir=base_dir,
-        callbacks=callbacks,
-        loading_stack=loading_stack,
-    )
-
-    if errors:
-        raise SkillLoadError(
-            f"Failed to resolve {len(errors)} tool reference(s):\n"
-            + "\n".join(f"  - {e}" for e in errors)
-        )
-
-    return [phase] if phase else []
+    parts: list[str] = [persona.role_profile]
+    if persona.evaluation_rubrics:
+        parts.append("---")
+        parts.append("## 评估标准")
+        parts.append(persona.evaluation_rubrics)
+    parts.append("---")
+    parts.append(system_prompt or "")
+    return "\n\n".join(parts)
 
 
-# ---------------------------------------------------------------------------
-# Graph mode: <node> + <ref> topology
-# ---------------------------------------------------------------------------
 
-def _parse_graph_mode(
-    content: str,
+def _phase_from_agent_skill(
+    manifest: "AgentSkillDef",
     base_dir: Path,
     callbacks: list[Any] | None,
     loading_stack: set[str],
-) -> list[Phase]:
-    """Parse SKILL.md in graph mode — ``<node>`` tags with optional ``<ref>``."""
-    # Task 5.3: accept <phase> as a synonym for <node> so authors can migrate
-    # without breaking existing skills that still use <node>.
-    content = _normalise_phase_tags(content)
-    nodes = list(_NODE_PATTERN.finditer(content))
-    if not nodes:
-        raise SkillLoadError("No '<phase>' or '<node>' tags found (graph mode)")
+) -> Phase:
+    """Build the single runtime Phase for a ``type: agent`` manifest.
 
-    phases: list[Phase] = []
-    import_errors: list[str] = []
-
-    for match in nodes:
-        node_id = match.group(1)
-        # depends_on = match.group(2)  # Reserved for future DAG execution
-        node_content = match.group(3).strip()
-
-        # Resolve <ref> tags within node content
-        resolved_content = _resolve_refs(node_content, base_dir)
-
-        # Extract XML tags from resolved content
-        tags = _extract_tags(resolved_content)
-
-        phase, errors = _build_phase_from_tags(
-            label=node_id,
-            tags=tags,
-            base_dir=base_dir,
-            callbacks=callbacks,
-            loading_stack=loading_stack,
+    Dispatched from ``load_workflow_from_md`` for ``type: agent``; the
+    DeerFlow agent loop receives the composed system prompt and the
+    resolved tool callables.
+    """
+    del callbacks, loading_stack  # unused in agent path; reserved for persona resolution
+    system_prompt = _compose_agent_system_prompt(manifest)
+    if manifest.adopted_persona is not None:
+        persona_manifest = resolve_persona(
+            manifest.adopted_persona, base_dir=base_dir,
         )
-        if errors:
-            import_errors.extend(errors)
-        if phase:
-            phases.append(phase)
-
-    if import_errors:
-        raise SkillLoadError(
-            f"Failed to resolve {len(import_errors)} tool reference(s):\n"
-            + "\n".join(f"  - {e}" for e in import_errors)
-        )
-
-    return phases
-
-
-# ---------------------------------------------------------------------------
-# Shared: build Phase from extracted XML tags
-# ---------------------------------------------------------------------------
-
-
-def _parse_sub_skill_decl(decl: dict[str, Any], *, base_dir: Path) -> "SubSkillSpec":
-    """Parse and validate a single sub_skill declaration dict."""
-    from .skill_tool_factory import SubSkillSpec
-
-    required = ("name", "description", "skill_path", "input_schema")
-    for key in required:
-        if key not in decl:
-            raise ValueError(f"sub_skill declaration missing required field: '{key}'")
-
-    return SubSkillSpec(
-        name=decl["name"],
-        description=decl["description"],
-        skill_path=decl["skill_path"],
-        input_schema=decl["input_schema"],
-        _parent_skill_dir=base_dir,
+        system_prompt = _inject_persona(persona_manifest, system_prompt)
+    tools = [_resolve_tool_reference(ref, base_dir) for ref in manifest.agent_tools]
+    return Phase(
+        name=manifest.name,
+        system_prompt=system_prompt,
+        user_prompt_template=manifest.user_prompt_template,
+        tools=tools,
+        tier=manifest.tier or "balanced",
+        model_override=manifest.model_override,
+        subagent_enabled=manifest.subagent_enabled,
+        requires_llm=True,
     )
 
 
-def _build_phase_from_tags(
-    label: str,
-    tags: dict[str, list[str]],
+def _phase_from_graph_phase(
+    phase_def: Any,  # PhaseDef (Annotated Union); runtime-typed to avoid pyright noise
     base_dir: Path,
     callbacks: list[Any] | None,
     loading_stack: set[str],
-) -> tuple[Phase | None, list[str]]:
-    """Build a Phase from extracted XML tags.
+) -> Phase:
+    """Dispatch on ``mode`` to build one runtime Phase from a GraphSkillDef.phases entry.
 
-    Args:
-        label: Phase title (simple mode) or node id (graph mode).
-        tags: Extracted XML tags from the section/node content.
-        base_dir: Base directory for resolving tool references.
-        callbacks: Callback list passed to nested subgraphs.
-        loading_stack: Recursion guard for nested ``subgraph`` loading.
-
-    Returns:
-        (Phase, []) on success, or (None, [error_messages]) on failure.
-
-    The resulting Phase may be populated from multiple sources:
-
-    - ``<phase_config>``: name, tier, tools, validator, retry_target,
-      max_iterations, max_tool_calls, max_retries, max_nudges,
-      dead_end_threshold, subagent_enabled, subgraph, context_bridge
-    - ``<system_prompt>``: ``Phase.system_prompt``
-    - ``<user_prompt>`` / ``<user_prompt_builder>``: ``Phase.user_prompt_template``
-    - ``<data_architecture>``: ``Phase.data_architecture``
-
+    Three branches matching the manifest's three phase modes:
+    ``llm`` (ReAct loop), ``logic`` (deterministic Python steps),
+    ``delegate`` (recursive load of a child SKILL.md).
     """
-    import_errors: list[str] = []
+    # Imported inside the function to keep the dead-code block self-contained
+    # until the Commit-2 switch; avoids polluting module-level imports.
+    from .manifest import DelegatePhase as _DelegatePhase
+    from .manifest import LLMPhase as _LLMPhase
+    from .manifest import LogicPhase as _LogicPhase
 
-    # Parse phase_config
-    phase_config_texts = tags.get("phase_config", [])
-    if not phase_config_texts:
-        raise SkillLoadError(f"Phase '{label}' missing <phase_config> tag")
-
-    try:
-        phase_cfg = yaml.safe_load(phase_config_texts[0])
-    except yaml.YAMLError as exc:
-        raise SkillLoadError(
-            f"Invalid YAML in <phase_config> of '{label}': {exc}"
-        ) from exc
-
-    if not isinstance(phase_cfg, dict):
-        raise SkillLoadError(f"<phase_config> in '{label}' must be a YAML dict")
-
-    default_phase_name = label.lower().replace(" ", "_")
-    phase_name = _phase_string(
-        phase_cfg,
-        "name",
-        label,
-        default=default_phase_name,
-    ) or default_phase_name
-
-    # Parse subgraph config first (mutually exclusive with LLM prompt/tool config).
-    subgraph_harness: GraphAgentHarness | None = None
-    context_bridge: ContextBridge | None = None
-    subgraph_path = phase_cfg.get("subgraph")
-    if subgraph_path is not None:
-        if not isinstance(subgraph_path, str) or not subgraph_path.strip():
-            raise SkillLoadError(
-                f"Phase '{label}' has invalid 'subgraph' value. Expected non-empty string path."
+    if isinstance(phase_def, _LLMPhase):
+        tools = [_resolve_tool_reference(ref, base_dir) for ref in phase_def.agent_tools]
+        system_prompt = phase_def.prompt
+        if phase_def.adopted_persona is not None:
+            persona_manifest = resolve_persona(
+                phase_def.adopted_persona, base_dir=base_dir,
             )
+            system_prompt = _inject_persona(persona_manifest, system_prompt)
+        return Phase(
+            name=phase_def.name,
+            system_prompt=system_prompt,
+            user_prompt_template=phase_def.user_prompt_template,
+            tools=tools,
+            max_iterations=phase_def.max_iterations if phase_def.max_iterations is not None else 20,
+            tier=phase_def.tier or "balanced",
+            model_override=phase_def.model_override,
+            validator=(
+                _resolve_tool_reference(phase_def.validator, base_dir)
+                if phase_def.validator
+                else None
+            ),
+            retry_target=phase_def.retry_target,
+            max_retries=phase_def.max_retries if phase_def.max_retries is not None else 3,
+            max_nudges=phase_def.max_nudges if phase_def.max_nudges is not None else 1,
+            dead_end_threshold=(
+                phase_def.dead_end_threshold
+                if phase_def.dead_end_threshold is not None
+                else 3
+            ),
+            subagent_enabled=phase_def.subagent_enabled,
+            # 方针 1.3: thread output_schema dotted path so PhaseExecutor
+            # can hand it to md_to_json. The runtime stores the path, not
+            # the resolved class, because LangGraph's msgpack checkpointer
+            # cannot serialise ModelMetaclass.
+            output_schema_path=phase_def.output_schema,
+            requires_llm=True,
+        )
 
-        child_skill_path = (base_dir / subgraph_path).resolve()
-        if not child_skill_path.exists():
+    if isinstance(phase_def, _LogicPhase):
+        tools = [_resolve_tool_reference(ref, base_dir) for ref in phase_def.execute_steps]
+        return Phase(
+            name=phase_def.name,
+            system_prompt=None,
+            tools=tools,
+            tier=phase_def.tier or "balanced",
+            model_override=phase_def.model_override,
+            validator=(
+                _resolve_tool_reference(phase_def.validator, base_dir)
+                if phase_def.validator
+                else None
+            ),
+            # 方针 1.1: thread retry fields into runtime Phase so a
+            # logic-phase validator failure routes through RetryRouter the
+            # same way an LLM-phase validator failure does.
+            retry_target=phase_def.retry_target,
+            max_retries=phase_def.max_retries if phase_def.max_retries is not None else 3,
+            requires_llm=False,
+        )
+
+    if isinstance(phase_def, _DelegatePhase):
+        child_path = (base_dir / phase_def.subgraph).resolve()
+        # Cohesion plan 方针 4.4 (2026-04-26): a path that exists but is
+        # a directory used to slip past ``exists()`` and crash later in
+        # ``read_text`` with ``IsADirectoryError`` — far away from the
+        # author's typo. Match the compile-time validator's contract:
+        # the subgraph reference must point at a regular file.
+        if not child_path.is_file():
             raise SkillLoadError(
-                f"Phase '{label}' subgraph not found: {child_skill_path}"
+                f"Delegate phase '{phase_def.name}' subgraph not found "
+                f"(or not a file): {child_path}"
             )
-
-        subgraph_harness = load_workflow_from_md(
-            md_path=child_skill_path,
+        child_harness = load_workflow_from_md(
+            md_path=child_path,
             callbacks=callbacks,
             _loading_stack=loading_stack,
         )
+        return Phase(
+            name=phase_def.name,
+            system_prompt=None,
+            tools=[],
+            tier=phase_def.tier or "balanced",
+            model_override=phase_def.model_override,
+            subgraph=child_harness,
+            context_bridge=ContextBridge(
+                inputs=dict(phase_def.context_bridge.inputs),
+                outputs=dict(phase_def.context_bridge.outputs),
+            ),
+            requires_llm=False,
+        )
 
-        bridge_cfg = phase_cfg.get("context_bridge") or {}
-        if not isinstance(bridge_cfg, dict):
-            raise SkillLoadError(
-                f"Phase '{label}' context_bridge must be a YAML dict"
-            )
-        bridge_inputs = bridge_cfg.get("inputs") or {}
-        bridge_outputs = bridge_cfg.get("outputs") or {}
-        if not isinstance(bridge_inputs, dict) or not isinstance(bridge_outputs, dict):
-            raise SkillLoadError(
-                f"Phase '{label}' context_bridge.inputs/outputs must be YAML dicts"
-            )
-        if not all(isinstance(k, str) and isinstance(v, str) for k, v in bridge_inputs.items()):
-            raise SkillLoadError(
-                f"Phase '{label}' context_bridge.inputs must map string->string"
-            )
-        if not all(isinstance(k, str) and isinstance(v, str) for k, v in bridge_outputs.items()):
-            raise SkillLoadError(
-                f"Phase '{label}' context_bridge.outputs must map string->string"
-            )
-        context_bridge = ContextBridge(inputs=bridge_inputs, outputs=bridge_outputs)
-
-    # Parse system_prompt
-    system_prompts = tags.get("system_prompt", [])
-    system_prompt = system_prompts[0] if system_prompts else None
-    requires_llm = (system_prompt is not None) and (subgraph_harness is None)
-
-    # Parse user_prompt_builder (also accept user_prompt as alias)
-    user_prompts = tags.get("user_prompt_builder", []) or tags.get("user_prompt", [])
-    user_prompt_template = user_prompts[0] if user_prompts else None
-
-    # Parse optional data_architecture section
-    data_architectures = tags.get("data_architecture", [])
-    data_architecture = data_architectures[0] if data_architectures else None
-
-    # Resolve tool references
-    tool_refs = _phase_string_list(phase_cfg, "tools", label)
-    tools: list[Callable[..., str]] = []
-    if subgraph_harness is None:
-        for ref in tool_refs:
-            try:
-                fn = _resolve_tool_reference(ref, base_dir)
-                tools.append(fn)
-            except SkillLoadError as exc:
-                import_errors.append(str(exc))
-
-    # Resolve sub_skill declarations (zero-Python cross-skill calling)
-    if subgraph_harness is None:
-        sub_skill_decls = phase_cfg.get("sub_skills", []) or []
-        for decl in sub_skill_decls:
-            try:
-                spec = _parse_sub_skill_decl(decl, base_dir=base_dir)
-                from .skill_tool_factory import build_skill_tool
-                tool = build_skill_tool(spec)
-                tools.append(tool)
-            except (KeyError, ValueError) as exc:
-                import_errors.append(f"sub_skill '{decl.get('name', '?')}': {exc}")
-
-    # Resolve validator reference
-    validator: Callable[..., tuple[bool, list[str]]] | None = None
-    validator_ref = _phase_string(phase_cfg, "validator", label)
-    if validator_ref:
-        try:
-            validator = _resolve_tool_reference(validator_ref, base_dir)  # type: ignore[assignment]
-        except SkillLoadError as exc:
-            import_errors.append(str(exc))
-
-    # Resolve optional schema tag for md_to_json type dict injection
-    output_schema: type[BaseModel] | None = None
-    output_schema_path: str | None = None
-    md_type_dict: str | None = None
-    schema_ref = _phase_string(phase_cfg, "schema", label)
-    if schema_ref:
-        try:
-            schema_cls = _resolve_tool_reference(schema_ref, base_dir)
-            from ..tools.md_to_json import schema_to_type_dict
-            from pydantic import BaseModel as _BaseModel
-            if isinstance(schema_cls, type) and issubclass(schema_cls, _BaseModel):
-                output_schema = schema_cls
-                # Fully-qualified path for checkpointer-safe ctx injection.
-                # _resolve_tool_reference registers the module in sys.modules under a
-                # namespaced name; __module__ on the class reflects that, making this
-                # path resolvable later via sys.modules lookup.
-                output_schema_path = f"{schema_cls.__module__}.{schema_cls.__name__}"
-                type_dict_str = schema_to_type_dict(schema_cls)
-                md_type_dict = type_dict_str
-                if system_prompt and "{md_type_dict}" in system_prompt:
-                    system_prompt = system_prompt.replace("{md_type_dict}", type_dict_str)
-                elif system_prompt:
-                    system_prompt = system_prompt + "\n\n" + type_dict_str
-            else:
-                logger.warning("schema tag %s is not a BaseModel subclass, skipping", schema_ref)
-        except SkillLoadError:
-            logger.warning("schema tag 解析失败: %s, 跳过 type dict 注入", schema_ref)
-
-    tier = _phase_string(phase_cfg, "tier", label, default="balanced") or "balanced"
-    retry_target = _phase_string(phase_cfg, "retry_target", label)
-    phase = Phase(
-        name=phase_name,
-        system_prompt=system_prompt if subgraph_harness is None else None,
-        tools=tools,
-        max_iterations=_phase_int(phase_cfg, "max_iterations", label, default=20),
-        max_tool_calls=_phase_int(phase_cfg, "max_tool_calls", label, default=0),
-        tier=tier,
-        # Task 6.1: model_override is an optional per-phase pin into
-        # llm_roles.yaml's models: section. None = use tier → role → model
-        # resolution as before.
-        model_override=_phase_string(phase_cfg, "model_override", label),
-        validator=validator,
-        retry_target=retry_target,
-        max_retries=_phase_int(phase_cfg, "max_retries", label, default=3),
-        user_prompt_template=user_prompt_template,
-        requires_llm=requires_llm,
-        # Task 6.5: default budget drops from 3 to 1. Explicit phase_config
-        # values still win.
-        max_nudges=_phase_int(phase_cfg, "max_nudges", label, default=1),
-        dead_end_threshold=_phase_int(phase_cfg, "dead_end_threshold", label, default=3),
-        data_architecture=data_architecture,
-        subagent_enabled=_phase_bool(phase_cfg, "subagent_enabled", label, default=False),
-        subgraph=subgraph_harness,
-        context_bridge=context_bridge,
-        output_schema=output_schema,
-        output_schema_path=output_schema_path,
-        md_type_dict=md_type_dict,
+    raise SkillLoadError(
+        f"Unknown phase type for '{getattr(phase_def, 'name', '?')}': "
+        f"{type(phase_def).__name__}"
     )
-
-    return phase, import_errors

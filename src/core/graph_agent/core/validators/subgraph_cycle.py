@@ -101,7 +101,7 @@ def _walk(
         try:
             child_raw = parse_skill_file(child_resolved)["frontmatter"]
             child_manifest = TypeAdapter(SkillManifest).validate_python(child_raw)
-        except (SkillLoadError, ValidationError):
+        except (SkillLoadError, ValidationError, OSError, UnicodeDecodeError):
             # context_bridge validator owns child-invalid
             continue
         if not isinstance(child_manifest, GraphSkillDef):

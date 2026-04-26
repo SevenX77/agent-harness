@@ -76,6 +76,43 @@ def test_context_bridge_child_with_invalid_utf8_returns_fatal_not_raise(
     ), [(i.rule_id, i.message) for i in issues]
 
 
+def test_compile_skill_with_invalid_utf8_child_returns_fatal_not_raise(
+    tmp_path: Path,
+) -> None:
+    """compile_skill must aggregate invalid child UTF-8 across all validators."""
+    child_path = tmp_path / "child.md"
+    child_path.write_bytes(b"---\n\xff\xfe\x00\n---\n")
+    parent_path = tmp_path / "SKILL.md"
+    parent_path.write_text(
+        """---
+schema_version: "2.0"
+type: graph
+name: parent
+description: parent for hostile child compile test
+io:
+  inputs: []
+  outputs: []
+phases:
+  - name: delegate_phase
+    mode: delegate
+    subgraph: child.md
+    context_bridge:
+      inputs: {}
+      outputs: {}
+---
+""",
+        encoding="utf-8",
+    )
+
+    result = compile_skill(parent_path)
+
+    assert not result.passed
+    assert any(
+        i.rule_id == "F-context-bridge-child-invalid"
+        for i in result.fatals
+    ), [(i.rule_id, i.message) for i in result.issues]
+
+
 def test_persona_resolution_with_oserror_returns_fatal_not_raise(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

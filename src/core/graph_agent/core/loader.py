@@ -418,14 +418,14 @@ def _inject_persona(
     Phase doesn't yet expose; raising rather than silently dropping the field
     forces authors to either remove it or wait for the runtime to land.
 
-    TODO(PR#7): wire ``few_shot_examples`` through the LLM client as
+    Future work: wire ``few_shot_examples`` through the LLM client as
     pre-filled assistant/user pairs, then drop the NotImplementedError.
     """
     if persona.few_shot_examples:
         raise NotImplementedError(
             f"Persona '{persona.name}' declares few_shot_examples, but the "
             "runtime does not yet materialise them as pre-filled message "
-            "history. Leave the list empty until PR #7 lands the wiring."
+            "history. Leave the list empty until the wiring lands."
         )
     parts: list[str] = [persona.role_profile]
     if persona.evaluation_rubrics:

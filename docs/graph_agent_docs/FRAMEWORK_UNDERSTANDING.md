@@ -204,7 +204,7 @@ Phase 三种模式互斥**不是程序员洁癖**，是框架的核心设计红�
 
 这个互斥由 `core/harness.py` L384 的执行器二分路由硬架构支撑：subgraph phase 走 `build_subgraph_node`，其他 phase 走 `_build_phase_node`，两条路径完全独立不交叉。
 
-**已知的框架 bug**：当用户在 subgraph phase 里误写了 tools / system_prompt / user_prompt 时，loader 是**静默忽略**的（不报错也不警告），compiler 的 `skills/compiler/data/rules.yaml` 里目前也没有相关规则。这应该在 compiler 规则里补两条 FATAL 级别的规则（`F-subgraph-exclusive-tools` 和 `F-subgraph-exclusive-prompt`），在编译阶段就阻止这种误写。
+schema 2.0 已用 Pydantic discriminated union + `extra='forbid'` 在 `core/manifest.py` 的 LLMPhase / LogicPhase / DelegatePhase 区分上彻底解决——subgraph 字段必须在 DelegatePhase，LLMPhase 才有 tools/prompt，Pydantic 直接拒绝混搭。
 
 ---
 
@@ -289,7 +289,7 @@ Phase 三种模式互斥**不是程序员洁癖**，是框架的核心设计红�
 
 ### 红线 2：框架层不执行业务逻辑
 
-`skills/compiler/data/rules.yaml` 的 F006 规则明确禁止在 `context_mapping` 里写 `$func()` 这种函数调用语法。规则的 reason 直译过来是：
+schema 2.0 的 `IoInput`/`IoOutput` Pydantic 模型直接禁止 `$func()` 语法（没有相应字段），一旦 PM 误写就被 `extra='forbid'` 拒绝。原规则的 reason 直译过来是：
 
 > framework 层不应执行 skill 业务代码；改用 setup phase + script/ tools 模式
 
@@ -434,8 +434,7 @@ type: graph
 | Phase 数据类 | `src/core/graph_agent/core/types.py` | `Phase` class |
 | 现有 Callback 事件清单 | `src/core/graph_agent/callbacks/base.py` | 12 个 `EVENT_*` 常量 |
 | IOManager 和 artifact_saver 桥 | `src/core/graph_agent/io/manager.py` | L94-152 |
-| compiler 规则清单 | `src/core/graph_agent/skills/compiler/data/rules.yaml` | F001-F006, P003-P012 |
-| compiler 规则详细说明 | `src/core/graph_agent/skills/compiler/references/rules_spec.md` | 全文 |
+| compiler 规则源 | `src/core/graph_agent/core/manifest.py` + `core/validators/*.py` | Pydantic schema（结构） + 4 个语义 validator（context_bridge / subgraph_cycle / persona_resolution / tool_paths） |
 | hello_world 最小例子 | `src/core/graph_agent/examples/hello_world/SKILL.md` | 全文 |
 
 ### 想知道某条规则细节，按下表查：
@@ -459,11 +458,7 @@ type: graph
 
 **历史问题**：当 PM 在 subgraph phase 里误写了 `tools` / `sub_skills` / `<system_prompt>` / `<user_prompt>` 时，loader 会静默忽略这些字段（见 `core/loader.py` L578 / L587 / L639）。compiler 里也没有相关规则，PM 可能以为这些字段生效了，实际运行时完全不会用到。
 
-**修复状态（Task 5.1 之后）**：compiler 现在在 `skills/compiler/data/rules.yaml` 里有三条 FATAL 规则把这种误写拦在编译期：
-
-- `F-subgraph-exclusive-tools` — subgraph phase 禁止声明 `tools`。
-- `F-subgraph-exclusive-prompt` — subgraph phase 禁止包含 `<system_prompt>` / `<user_prompt>`。
-- `F-subgraph-exclusive-sub-skills` — subgraph（静态组合）与 sub_skills（动态决策）互斥。
+**修复状态**：schema 2.0 已用 Pydantic discriminated union 把这种误写拦在 manifest 校验阶段，无需再维护独立 YAML 规则文件。
 
 ---
 

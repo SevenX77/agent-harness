@@ -14,7 +14,7 @@
 | **② 机制混淆**：`<ref>` 和 `subgraph:` 当成同一回事 | `<ref>` 是 parser 阶段字符串替换（`parser.py` L160-186），`subgraph:` 是 loader 阶段递归加载（`loader.py` L535），两者作用完全不同 | 扁平化方案杀死递归 subgraph 机制 |
 | **③ 设计意图背反**：扁平化合并 4 个独立 skill 到 story-deconstruction 里 | graph_agent 核心是"skill 独立可运行、互相即插拔"，扁平化等于**焊死**积木 | 彻底破坏模块化 |
 | **④ Callback 事件幻觉**：14 个事件（含 llm_fallback/validator_start/end/prompt_captured/tool_result/subgraph_start/end/checkpoint_compacted/finish_task_called） | `callbacks/base.py` 实际只有 12 个事件，名字也不对 | 所有基于"14 事件"的前端/类型化设计空中楼阁 |
-| **⑤ framework 越界**：`Step.when + simpleeval` 让 framework 执行条件表达式 | compiler skill `rules.yaml` F006 明确禁止："**framework 层不应执行 skill 业务代码**；条件判断改用 setup phase + script/ tools" | 违反 owner 的核心设计哲学 |
+| **⑤ framework 越界**：`Step.when + simpleeval` 让 framework 执行条件表达式 | schema 2.0 已删除 `LLMPhase.steps` 字段（PR #5 方针 1.2），framework 不再有 `when` / `simpleeval` 的 hook 点；`Step` 类作为 dead public symbol 保留 | 违反 owner 的核心设计哲学 |
 
 **根因**：我没读代码就开方案。Gemini 顺着我的叙述共谋，没交叉比对 loader.py。两个 LLM 基于幻觉对话了 3 轮。
 
@@ -105,7 +105,7 @@ requires_llm = (system_prompt is not None) and (subgraph_harness is None)
 ## 8. 框架的红线（从代码和文档里读出来的）
 
 1. **不改 DeerFlow 源码**（README 原则 1）— 所有增量靠外层 harness / callbacks / middleware / config
-2. **框架零业务逻辑**（README 原则 2 + rules.yaml F006）— 业务只写在 skill 目录。**条件分支/数据组装必须走 setup phase + script/ tools，不能在 SKILL.md 里写表达式**
+2. **框架零业务逻辑**（README 原则 2 + schema 2.0 manifest forbid 规则）— 业务只写在 skill 目录。**条件分支/数据组装必须走 setup phase + script/ tools，不能在 SKILL.md 里写表达式**
 3. **Kitchen-Pass 出餐口模式**（README 原则 3 + INTEGRATION_GUIDE §3）— phase 写 context → IOManager 经 `artifact_saver` 回调落盘，框架不依赖 host project
 4. **双层认知控制**（COGNITIVE_LOOP_GUIDE）— planning nudge / selfcheck / compaction / finish gate 是硬机制，不是可选
 5. **SKILL.md 是跨工具的知识契约**（compiler/SKILL.md 本身）— 同一个 skill 可作为 graph_agent 引擎 skill，也可作为 Claude Code / Cursor IDE 的 skill。**skill 格式是 portable 的**

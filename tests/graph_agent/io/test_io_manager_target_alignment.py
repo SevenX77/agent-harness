@@ -25,6 +25,11 @@ import pytest
 from graph_agent.io.manager import IOManager
 
 
+def test_io_manager_rejects_non_dict_io_config() -> None:
+    with pytest.raises(TypeError, match="IOManager io_config must be a dict, got list"):
+        IOManager([])  # type: ignore[arg-type]
+
+
 class TestIOManagerArtifactTargetAlignment:
     def test_save_outputs_accepts_target_artifact(self, tmp_path: Path) -> None:
         """``target: artifact`` (canonical schema value) must dispatch
@@ -110,4 +115,86 @@ class TestIOManagerArtifactTargetAlignment:
         assert context["_io_errors"] == [
             "artifact_saver failed for 'story_framework': "
             "disk full while saving story_framework"
+        ]
+
+    def test_missing_required_runtime_input_raises(self) -> None:
+        io_mgr = IOManager(
+            {
+                "inputs": [
+                    {"name": "project_id", "source": "runtime"}
+                ]
+            }
+        )
+
+        with pytest.raises(
+            ValueError, match="Required runtime input 'project_id' was not provided"
+        ):
+            io_mgr.load_inputs()
+
+    def test_missing_optional_runtime_input_keeps_none(self) -> None:
+        io_mgr = IOManager(
+            {
+                "inputs": [
+                    {"name": "project_id", "source": "runtime", "required": False}
+                ]
+            }
+        )
+
+        assert io_mgr.load_inputs() == {"project_id": None}
+
+    def test_missing_declared_output_raises_and_records_io_error(self) -> None:
+        io_mgr = IOManager(
+            {
+                "outputs": [
+                    {"name": "story_framework", "target": "file", "path": "out.json"}
+                ]
+            }
+        )
+        context: dict[str, object] = {}
+
+        with pytest.raises(
+            ValueError, match="Declared output 'story_framework' was not found"
+        ):
+            io_mgr.save_outputs(context=context)
+
+        assert context["_io_errors"] == [
+            "Declared output 'story_framework' was not found in context"
+        ]
+
+    def test_missing_path_template_placeholder_raises(self) -> None:
+        io_mgr = IOManager(
+            {
+                "outputs": [
+                    {
+                        "name": "story_framework",
+                        "target": "file",
+                        "path": "output/{context.project_id}/story.json",
+                    }
+                ]
+            }
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r"Path template placeholder \{context\.project_id\} not found",
+        ):
+            io_mgr.save_outputs(context={"story_framework": {"chapters": 3}})
+
+    def test_artifact_target_without_saver_raises_and_records_io_error(self) -> None:
+        io_mgr = IOManager(
+            {
+                "outputs": [
+                    {"name": "story_framework", "target": "artifact"}
+                ]
+            }
+        )
+        context = {"story_framework": {"chapters": 3}}
+
+        with pytest.raises(
+            ValueError, match="Artifact target output 'story_framework' has no saver"
+        ):
+            io_mgr.save_outputs(context=context)
+
+        assert context["_io_errors"] == [
+            "Artifact target output 'story_framework' has no saver"
         ]

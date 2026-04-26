@@ -84,6 +84,25 @@ def test_resolve_persona_finds_via_env_var(
     assert persona.name == "reviewer"
 
 
+def test_resolve_persona_skips_directory_candidate_and_uses_next_registry(
+    tmp_path: Path,
+) -> None:
+    base_dir = tmp_path / "skill_a"
+    base_dir.mkdir()
+    broken_registry = tmp_path / "broken_registry"
+    (broken_registry / "reviewer" / "SKILL.md").mkdir(parents=True)
+    valid_registry = tmp_path / "valid_registry"
+    _stage_persona(valid_registry, name="reviewer")
+
+    persona = resolve_persona(
+        "reviewer",
+        base_dir=base_dir,
+        search_paths=[broken_registry, valid_registry],
+    )
+
+    assert persona.name == "reviewer"
+
+
 def test_resolve_persona_skill_local_precedes_env_var(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

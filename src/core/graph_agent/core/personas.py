@@ -102,7 +102,7 @@ def resolve_persona(
         candidates.extend(root / name / "SKILL.md" for root in search_paths)
 
     for candidate in candidates:
-        if not candidate.exists():
+        if not candidate.is_file():
             continue
         parsed = parse_skill_file(candidate)
         manifest = TypeAdapter(SkillManifest).validate_python(parsed["frontmatter"])

@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from graph_agent.core.loader import (
     _compose_agent_system_prompt,
@@ -197,6 +197,62 @@ class TestPhaseFromGraphPhase:
         assert phase.max_retries == 2
         assert phase.retry_target == "segment"
         assert phase.requires_llm is True
+
+    def test_llm_phase_dead_end_threshold_default_and_override(self, tmp_path: Path):
+        default_manifest = _SKILL_ADAPTER.validate_python({
+            "name": "g",
+            "description": "d",
+            "type": "graph",
+            "io": {"inputs": [], "outputs": []},
+            "phases": [{
+                "mode": "llm",
+                "name": "segment",
+                "prompt": "p",
+            }],
+        })
+        default_phase = _phase_from_graph_phase(
+            default_manifest.phases[0], tmp_path, callbacks=None, loading_stack=set()
+        )
+        assert default_phase.dead_end_threshold == 3, (
+            "LLMPhase without an explicit dead_end_threshold must default to 3 "
+            "so the cognitive middleware's pruning behaviour matches the "
+            "documented runtime default."
+        )
+
+        overridden_manifest = _SKILL_ADAPTER.validate_python({
+            "name": "g",
+            "description": "d",
+            "type": "graph",
+            "io": {"inputs": [], "outputs": []},
+            "phases": [{
+                "mode": "llm",
+                "name": "segment",
+                "prompt": "p",
+                "dead_end_threshold": 7,
+            }],
+        })
+        overridden_phase = _phase_from_graph_phase(
+            overridden_manifest.phases[0], tmp_path, callbacks=None, loading_stack=set()
+        )
+        assert overridden_phase.dead_end_threshold == 7, (
+            "PM-supplied dead_end_threshold must thread through the loader "
+            "into the runtime Phase so the schema knob is not silently dead."
+        )
+
+    def test_llm_phase_dead_end_threshold_rejects_zero(self):
+        with pytest.raises(ValidationError):
+            _SKILL_ADAPTER.validate_python({
+                "name": "g",
+                "description": "d",
+                "type": "graph",
+                "io": {"inputs": [], "outputs": []},
+                "phases": [{
+                    "mode": "llm",
+                    "name": "segment",
+                    "prompt": "p",
+                    "dead_end_threshold": 0,
+                }],
+            })
 
     def test_logic_phase_builds_nonllm_phase(self, tmp_path: Path):
         # A real test of execute_steps resolution would require a module

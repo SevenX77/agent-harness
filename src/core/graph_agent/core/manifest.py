@@ -196,6 +196,7 @@ class LLMPhase(_BasePhase):
     max_iterations: int | None = Field(default=None, ge=1)
     max_retries: int | None = Field(default=None, ge=0)
     max_nudges: int | None = Field(default=None, ge=0)
+    dead_end_threshold: int | None = Field(default=None, ge=1)
     validator: str | None = None
     retry_target: str | None = None
     output_schema: str | None = None

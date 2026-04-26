@@ -38,7 +38,10 @@ class IOManager:
     def __init__(self, io_config: dict[str, Any]) -> None:
         """Cache declared input and output specifications."""
         if not isinstance(io_config, dict):
-            io_config = {}
+            raise TypeError(
+                "IOManager io_config must be a dict, "
+                f"got {type(io_config).__name__}"
+            )
         self._inputs = io_config.get("inputs", [])
         self._outputs = io_config.get("outputs", [])
 
@@ -63,8 +66,13 @@ class IOManager:
 
             if source == "runtime":
                 if name not in runtime_args:
+                    required = input_spec.get("required", True)
+                    if required:
+                        raise ValueError(
+                            f"Required runtime input '{name}' was not provided"
+                        )
                     logger.warning(
-                        "[IOManager] Runtime input '%s' not provided, using None",
+                        "[IOManager] Optional runtime input '%s' not provided, using None",
                         name,
                     )
                 result[name] = runtime_args.get(name)
@@ -124,13 +132,18 @@ class IOManager:
             data = context.get(name)
 
             if data is None:
-                logger.warning(
-                    "[IOManager] Output '%s' not found in context, skipping",
-                    name,
+                IOManager._record_io_error(
+                    context,
+                    f"Declared output '{name}' was not found in context",
                 )
-                continue
+                raise ValueError(f"Declared output '{name}' was not found in context")
 
-            if target == "artifact_manager":
+            # Cohesion plan 方针 1.5 (2026-04-26): the schema's canonical
+            # value is "artifact" (IoOutput.target: Literal["file", "artifact"]).
+            # The legacy "artifact_manager" wording is kept as an in-process
+            # alias so older io_config dicts and the docstring above keep
+            # working — but new SKILL.md files write "artifact".
+            if target in ("artifact", "artifact_manager"):
                 if artifact_saver is None and storage_manager is not None:
                     # Kitchen-Pass default: no caller-supplied saver, so fall
                     # back to the framework's built-in StorageManager.
@@ -168,7 +181,7 @@ class IOManager:
             else:
                 raise ValueError(
                     f"Unknown output target '{target}' for output '{name}'. "
-                    f"Supported: artifact_manager, file"
+                    f"Supported: file, artifact (legacy alias: artifact_manager)"
                 )
 
         return saved_paths
@@ -196,8 +209,11 @@ class IOManager:
                 key = placeholder[8:]  # Remove "context." prefix
                 value = context.get(key)
                 if value is None:
-                    logger.warning(f"Path template placeholder {{{placeholder}}} not found in context")
-                    return match.group(0)  # Keep original placeholder
+                    available = sorted(str(k) for k in context.keys())
+                    raise ValueError(
+                        f"Path template placeholder {{{placeholder}}} not found "
+                        f"in context. Available keys: {available}"
+                    )
                 return str(value)
             return match.group(0)
 
@@ -240,12 +256,14 @@ class IOManager:
     ) -> list[str]:
         """Save data via caller-injected artifact callback."""
         if artifact_saver is None:
-            logger.warning("[IOManager] Output '%s' will be lost: no artifact_saver provided", name)
             IOManager._record_io_error(
                 context,
-                f"Output '{name}' declared target=artifact_manager but no artifact_saver was provided",
+                f"Artifact target output '{name}' has no saver",
             )
-            return []
+            raise ValueError(
+                f"Artifact target output '{name}' has no saver; if this output "
+                "is optional, mark it so in IoOutput schema"
+            )
 
         try:
             sig = inspect.signature(artifact_saver)
@@ -269,7 +287,7 @@ class IOManager:
                 context,
                 f"artifact_saver failed for '{name}': {exc}",
             )
-            return []
+            raise
 
     @staticmethod
     def _normalize_saved_paths(result: Any) -> list[str]:

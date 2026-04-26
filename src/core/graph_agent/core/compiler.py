@@ -1,70 +1,80 @@
-"""Static compilation checker for GraphAgent SKILL.md files.
+"""Static compilation checker for GraphAgent SKILL.md files (schema 2.0 only).
 
-Reads rule definitions from ``skills/compiler/data/rules.yaml`` (the single
-source of truth) and performs static analysis without dynamic module imports.
+After PR #6 the compiler is a thin shell: Pydantic discriminated unions on
+``SkillManifest`` (``core/manifest.py``) carry the entire structural-validation
+load, so this module only re-runs Pydantic and surfaces validation errors as
+``CompileResult`` issues for callers (loader.py, the compiler-skill agent loop,
+the Studio UI). Unsupported schema versions are rejected with
+``F-schema-version`` — there is no migration path inside the loader.
 
 Usage::
 
-    from graph_agent.compiler import compile_skill
+    from graph_agent.core.compiler import compile_skill
     result = compile_skill(Path("path/to/SKILL.md"))
     if not result.passed:
         for f in result.fatals:
             print(f"[{f.rule_id}] {f.location}: {f.message}")
-"""
 
+Schema-2.0 semantic checks
+==========================
+
+Pydantic now handles every structural rule through the
+``SkillManifest`` discriminated union. Semantic rules that cross files or
+need import metadata run after Pydantic succeeds against the already-
+validated manifest:
+
+- **Tool-path resolvability** ✅ shipped in PR #7 step 4.
+  See ``validators/tool_paths.py``. Static, non-executing check —
+  validates file existence (local refs) or ``find_spec`` (builtin
+  refs); function-symbol existence stays at load-time to avoid running
+  user code during Studio "save validate".
+- **Subgraph cycle detection** ✅ shipped in PR #7 step 2.
+  See ``validators/subgraph_cycle.py``. Independent of step 1 — both
+  validators run unconditionally for ``GraphSkillDef`` manifests in the
+  order context_bridge → subgraph_cycle (no shared state).
+- **Persona resolution** ✅ shipped in PR #7 step 3 + step 5.
+  See ``validators/persona_resolution.py`` and ``personas.py``. The
+  loader's private ``_resolve_persona`` was promoted to the public
+  ``personas.resolve_persona`` and the implicit walk-up (which
+  searched parent dirs for ``skills/``) was replaced with the explicit
+  ``GRAPH_AGENT_PERSONA_PATH`` env-var registry — load-time and
+  compile-time share one resolver and one search order.
+- **context_bridge static type check** — shipped in PR #7 step 1.
+  See ``validators/context_bridge.py``. The remaining checks below
+  still have only load-time fallbacks (or no fallback at all in the
+  case of ``rules.yaml``).
+- **Custom rules.yaml** — DEFERRED to a follow-up PR. The 1.x
+  ``rules.yaml`` carried project-specific conventions (placeholder
+  presence, prompt-length budgets). Three options for the next
+  decision-maker:
+
+  A. **Re-introduce rules.yaml as a PM-facing authoring surface** —
+     parse a project-local YAML file at compile time, supports custom
+     placeholder/prompt-length checks. PMs author rules without
+     touching the framework.
+  B. **Absorb every rule into the Pydantic schema** — extend
+     ``manifest.py`` with first-class fields for the conventions that
+     matter; new rules require framework changes but live in one
+     place.
+  C. **Drop custom rules entirely** — the four shipped validators
+     (context_bridge / subgraph_cycle / persona_resolution /
+     tool_paths) catch the structural failure modes; PM-customisable
+     conventions can re-emerge organically as Pydantic fields when
+     real demand surfaces. Closes the ``rules.yaml`` discussion.
+
+  All four concrete validators above ship in PR #7 steps 1-4. Pick a
+  direction for option A/B/C in a follow-up PR rather than this one.
+"""
 from __future__ import annotations
 
-import ast
 import logging
-import re
-import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
-import yaml
-
-from .parser import (
-    _NODE_PATTERN,
-    _REF_PATTERN,
-    _extract_tags,
-    _normalise_phase_tags,
-    _parse_frontmatter,
-    _strip_frontmatter,
-)
+from .parser import _parse_frontmatter, locate_line_for_pydantic_loc
 from .exceptions import SkillLoadError
 
 logger = logging.getLogger(__name__)
-
-# Rules YAML lives inside the compiler skill — single source of truth.
-_RULES_PATH = Path(__file__).parent.parent / "skills" / "compiler" / "data" / "rules.yaml"
-
-# Task 5.4 — <step> tag regex (matches opening tag only; closing </step>
-# is ignored because we only validate the opening tag's attributes).
-_STEP_TAG_PATTERN = re.compile(r"<step\b([^>]*)>", re.IGNORECASE)
-_STEP_ATTR_RE = re.compile(r'(\w+)\s*=\s*"([^"]*)"')
-
-
-_PHASE_CONFIG_ALLOWED_KEYS = {
-    "name",
-    "tier",
-    "tools",
-    "validator",
-    "max_iterations",
-    "max_tool_calls",
-    "retry_target",
-    "max_retries",
-    "max_nudges",
-    "dead_end_threshold",
-    "subagent_enabled",
-    "subgraph",
-    "context_bridge",
-    # Task 6.1: per-phase pin into llm_roles.yaml's models: section.
-    "model_override",
-}
-
-# These fields are set via XML tags, not phase_config YAML
-_XML_ONLY_KEYS = {"user_prompt_template", "requires_llm"}
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -100,988 +110,29 @@ class CompileResult:
         return len(self.fatals) == 0
 
 
-# ---------------------------------------------------------------------------
-# Rules metadata cache
-# ---------------------------------------------------------------------------
-
-_rules_cache: dict[str, dict[str, Any]] | None = None
-_rules_cache_lock: threading.Lock = threading.Lock()
-
-
-def _load_rules_metadata() -> dict[str, dict[str, Any]]:
-    """Load rule definitions from rules.yaml. Returns {rule_id: {description, ...}}."""
-    global _rules_cache
-    if _rules_cache is not None:
-        return _rules_cache
-
-    with _rules_cache_lock:
-        if _rules_cache is not None:
-            return _rules_cache
-
-        if not _RULES_PATH.exists():
-            logger.warning("Rules file not found: %s", _RULES_PATH)
-            _rules_cache = {}
-            return _rules_cache
-
-        raw = yaml.safe_load(_RULES_PATH.read_text(encoding="utf-8"))
-        merged: dict[str, dict[str, Any]] = {}
-        for severity_key in ("fatal", "warning"):
-            section = raw.get(severity_key, {})
-            for rule_id, meta in section.items():
-                meta["_severity"] = "FATAL" if severity_key == "fatal" else "WARNING"
-                merged[rule_id] = meta
-
-        _rules_cache = merged
-        return _rules_cache
-
-
-def _issue(rule_id: str, location: str, message: str) -> CompileIssue:
-    """Create a CompileIssue, deriving severity from rules metadata."""
-    rules = _load_rules_metadata()
-    meta = rules.get(rule_id, {})
-    severity = meta.get("_severity", "WARNING")
-    return CompileIssue(rule_id=rule_id, severity=severity, location=location, message=message)
-
-
-# ---------------------------------------------------------------------------
-# AST helpers
-# ---------------------------------------------------------------------------
-
-
-def _parse_python_ast(py_path: Path) -> tuple[ast.Module | None, str | None]:
-    """Parse a Python file into AST, returning a human-readable error if it fails."""
-    try:
-        return ast.parse(py_path.read_text(encoding="utf-8"), filename=str(py_path)), None
-    except SyntaxError as exc:
-        line = exc.lineno or "?"
-        return None, f"{exc.msg} (line {line})"
-
-
-def _ast_function_names(py_path: Path) -> set[str]:
-    """Return names of top-level public functions defined in a .py file (via AST)."""
-    tree, _ = _parse_python_ast(py_path)
-    if tree is None:
-        return set()
-    return {
-        node.name
-        for node in ast.iter_child_nodes(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and not node.name.startswith("_")
-    }
-
-
-def _ast_has_any_function(py_path: Path) -> bool:
-    """Check if a .py file defines at least one function (public or private)."""
-    tree, _ = _parse_python_ast(py_path)
-    if tree is None:
-        return False
-    return any(
-        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        for node in ast.iter_child_nodes(tree)
-    )
-
-
-def _ast_function_info(py_path: Path) -> list[dict[str, Any]]:
-    """Extract function metadata (name, docstring, return annotation, snake_case) via AST."""
-    tree, _ = _parse_python_ast(py_path)
-    if tree is None:
-        return []
-    results = []
-    for node in ast.iter_child_nodes(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        if node.name.startswith("_"):
-            continue
-        # Docstring
-        docstring = ast.get_docstring(node)
-        # Return annotation
-        ret_ann = None
-        if node.returns:
-            if isinstance(node.returns, ast.Name):
-                ret_ann = node.returns.id
-            elif isinstance(node.returns, ast.Constant):
-                ret_ann = str(node.returns.value)
-        results.append({
-            "name": node.name,
-            "docstring": docstring,
-            "return_annotation": ret_ann,
-            "lineno": node.lineno,
-        })
-    return results
-
-
-_JSON_PARAM_NAME_RE = re.compile(
-    r"(json|diff|fields|appearance|body_features|changes|entities|directives)",
-    re.IGNORECASE,
-)
-
-
-
-
-def _ast_tool_signature_check(py_path: Path, func_name: str) -> tuple[bool, str]:
-    """Check if a tool function signature is valid for code-only phases.
-    
-    Returns (is_valid, error_message).
-    Valid signatures: 0 parameters, or 1 parameter named 'ctx' or 'context'.
-    """
-    tree, error = _parse_python_ast(py_path)
-    if tree is None:
-        return False, f"Cannot parse file: {error}"
-    
-    for node in ast.iter_child_nodes(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == func_name:
-            args = node.args
-            # Count all positional + keyword-only params (excluding *args, **kwargs)
-            all_positional = list(args.posonlyargs) + list(args.args)
-            args_count = len(all_positional)
-            kwonlyargs = len(args.kwonlyargs)
-            total_params = args_count + kwonlyargs
-
-            if total_params == 0:
-                return True, ""
-
-            if total_params == 1 and args_count >= 1:
-                # Check if the single argument is named 'ctx' or 'context'
-                arg_name = all_positional[0].arg
-                if arg_name in ("ctx", "context"):
-                    return True, ""
-                return False, f"Tool function '{func_name}' parameter must be named 'ctx' or 'context', got '{arg_name}'"
-            elif total_params > 1:
-                return False, f"Tool function '{func_name}' must accept 0 or 1 parameters, got {total_params}"
-            
-    return False, f"Function '{func_name}' not found in file"
-
-
-def _ast_json_normalize_violations(py_path: Path) -> list[dict[str, Any]]:
-    """Detect T006 violations: JSON-like str params used without _normalize_json_param()."""
-    tree, _ = _parse_python_ast(py_path)
-    if tree is None:
-        return []
-
-    def _is_str_annotation(node: ast.expr | None) -> bool:
-        if node is None:
-            return False
-        if isinstance(node, ast.Name):
-            return node.id == "str"
-        if isinstance(node, ast.Constant):
-            return node.value == "str"
-        return False
-
-    violations: list[dict[str, Any]] = []
-
-    for fn in ast.iter_child_nodes(tree):
-        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        if fn.name.startswith("_"):
-            continue
-
-        json_like_params: set[str] = set()
-        for arg in fn.args.args:
-            if arg.arg in {"context", "ctx"}:
-                continue
-            if _is_str_annotation(arg.annotation) and _JSON_PARAM_NAME_RE.search(arg.arg):
-                json_like_params.add(arg.arg)
-        if not json_like_params:
-            continue
-
-        normalized_params: set[str] = set()
-        parsed_params: set[str] = set()
-        dict_access_params: set[str] = set()
-
-        for node in ast.walk(fn):
-            if not isinstance(node, ast.Call):
-                continue
-            callee = node.func
-
-            if isinstance(callee, ast.Name) and callee.id == "_normalize_json_param":
-                first = node.args[0] if node.args else None
-                if isinstance(first, ast.Name):
-                    normalized_params.add(first.id)
-
-            if isinstance(callee, ast.Name) and callee.id in {"_safe_parse", "_safe_parse_json"}:
-                first = node.args[0] if node.args else None
-                if isinstance(first, ast.Name):
-                    parsed_params.add(first.id)
-
-            if (
-                isinstance(callee, ast.Attribute)
-                and isinstance(callee.value, ast.Name)
-                and isinstance(callee.value.id, str)
-                and callee.value.id == "json"
-                and callee.attr == "loads"
-            ):
-                first = node.args[0] if node.args else None
-                if isinstance(first, ast.Name):
-                    parsed_params.add(first.id)
-
-            if (
-                isinstance(callee, ast.Attribute)
-                and isinstance(callee.value, ast.Name)
-                and callee.attr in {"get", "keys", "items", "values"}
-            ):
-                dict_access_params.add(callee.value.id)
-
-        for param in sorted(json_like_params):
-            if param in normalized_params:
-                continue
-            if param in parsed_params or param in dict_access_params:
-                violations.append({
-                    "function": fn.name,
-                    "param": param,
-                    "lineno": fn.lineno,
-                })
-
-    return violations
-
-
-# ---------------------------------------------------------------------------
-# Placeholder extraction
-# ---------------------------------------------------------------------------
-
-_PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
-
-
-def _extract_placeholders(text: str) -> set[str]:
-    """Extract {key} placeholders from prompt text, filtering out JSON patterns."""
-    candidates = set()
-    for m in _PLACEHOLDER_RE.finditer(text):
-        key = m.group(1)
-        start = m.start()
-        # Skip if preceded by " (likely JSON: {"key": ...})
-        if start > 0 and text[start - 1] == '"':
-            continue
-        candidates.add(key)
-    return candidates
-
-
-# ---------------------------------------------------------------------------
-# Individual rule checkers
-# ---------------------------------------------------------------------------
-
-
-def _check_frontmatter(
-    frontmatter: dict[str, Any],
-    skill_dir: Path,
-    result: CompileResult,
-) -> None:
-    """F001, F002, F005, F006."""
-    loc = "SKILL.md:frontmatter"
-
-    # F001: name kebab-case
-    name = frontmatter.get("name")
-    if not name or not isinstance(name, str) or not name.strip():
-        result.issues.append(_issue("F001", loc, "name 缺失或为空"))
-    else:
-        name = name.strip()
-        if not re.match(r"^[a-z0-9]+(-[a-z0-9]+)*$", name):
-            result.issues.append(_issue("F001", loc, f"name '{name}' 不符合 kebab-case"))
-
-    # F002: description
-    desc = frontmatter.get("description")
-    if not desc:
-        result.issues.append(_issue("F002", loc, "description 缺失"))
-    elif isinstance(desc, str) and len(desc) > 1024:
-        result.issues.append(_issue("F002", loc, f"description 过长 ({len(desc)} > 1024)"))
-
-    # F005: context_mapping syntax
-    ctx_map = frontmatter.get("context_mapping", {})
-    if isinstance(ctx_map, dict):
-        for key, expr in ctx_map.items():
-            if not isinstance(expr, str):
-                continue
-            expr = expr.strip()
-            # Valid forms: "{path}", "$func(...)", "'literal'", plain string
-            if expr.startswith("$") and "(" not in expr:
-                result.issues.append(_issue(
-                    "F005", loc,
-                    f"context_mapping['{key}']: '$' 开头但缺少函数调用括号: {expr}",
-                ))
-            if expr.startswith("{") and not expr.endswith("}"):
-                result.issues.append(_issue(
-                    "F005", loc,
-                    f"context_mapping['{key}']: 未闭合的花括号: {expr}",
-                ))
-
-    # F006: $func() syntax is deprecated — use setup phase + script/ tools instead
-    if isinstance(ctx_map, dict):
-        func_pattern = re.compile(r"\$(\w+)\(")
-        func_names_used: set[str] = set()
-        for expr in ctx_map.values():
-            if isinstance(expr, str):
-                func_names_used.update(func_pattern.findall(expr))
-
-        for fname in sorted(func_names_used):
-            result.issues.append(_issue(
-                "F006", loc,
-                f"context_mapping 中禁止使用 $func() 语法（${fname}() 已废弃）。"
-                f"请改用 setup phase（requires_llm: false）+ script/ tools 模式："
-                f"在 setup 节点中调用工具准备数据，写入 context，后续节点通过 {{{{key}}}} 读取。",
-            ))
-
-
-def _check_anthropic_compat(
-    frontmatter: dict[str, Any],
-    skill_dir: Path,
-    content: str,
-    result: CompileResult,
-) -> None:
-    """A001, A002, A003, A004, A005 — Anthropic platform compatibility."""
-    loc = "SKILL.md:frontmatter"
-
-    # A001: description must include WHAT + WHEN (trigger phrases)
-    desc = frontmatter.get("description", "")
-    if isinstance(desc, str) and desc.strip():
-        trigger_patterns = [
-            "当", "use when", "use for", "使用", "时使用",
-            "trigger", "invoke", "activate",
-        ]
-        has_trigger = any(p in desc.lower() for p in trigger_patterns)
-        if not has_trigger:
-            result.issues.append(_issue(
-                "A001", loc,
-                "description 缺少触发条件（应包含'当...时使用'或'Use when'等触发词）",
-            ))
-
-    # A002: no XML angle brackets in frontmatter
-    # Check the raw YAML frontmatter section (only < is problematic;
-    # > is valid YAML folded-scalar syntax)
-    fm_match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
-    if fm_match:
-        fm_raw = fm_match.group(1)
-        if "<" in fm_raw:
-            result.issues.append(_issue(
-                "A002", loc,
-                "frontmatter 中包含 XML 角括号 (<)，Anthropic 平台禁止",
-            ))
-
-    # A003: no README.md inside skill directory
-    readme = skill_dir / "README.md"
-    if readme.exists():
-        result.issues.append(_issue(
-            "A003", "README.md",
-            "Skill 目录内不应包含 README.md（应放 SKILL.md 或 references/）",
-        ))
-
-    # A004: name must not contain reserved words
-    name = frontmatter.get("name", "")
-    if isinstance(name, str):
-        name_lower = name.lower()
-        if "claude" in name_lower or "anthropic" in name_lower:
-            result.issues.append(_issue(
-                "A004", loc,
-                f"name '{name}' 包含保留词 (claude/anthropic)",
-            ))
-
-    # A005: SKILL.md size check (recommend < 5000 words)
-    word_count = len(content.split())
-    if word_count > 5000:
-        result.issues.append(_issue(
-            "A005", "SKILL.md",
-            f"SKILL.md 过大 ({word_count} 词 > 5000)，建议将详细内容移到 references/",
-        ))
-
-
-def _check_phases(
-    content: str,
-    frontmatter: dict[str, Any],
-    skill_dir: Path,
-    result: CompileResult,
-) -> None:
-    """P003, P006, P007, P008, P009, P010, P002, P005, P012."""
-    skill_type = frontmatter.get("type", "simple")
-    ctx_map_keys = set((frontmatter.get("context_mapping") or {}).keys())
-
-    # Collect nodes for graph-mode checks
-    nodes_info: list[dict[str, Any]] = []
-
-    if skill_type == "graph":
-        # Task 5.2: nudge authors on the old <node> spelling before we
-        # normalise it away. Fires once per SKILL.md regardless of how
-        # many <node> tags are present; the goal is a migration hint,
-        # not a repeat warning.
-        if re.search(r'<node\s+id="', content):
-            result.issues.append(_issue(
-                "W-node-to-phase-migration", "SKILL.md",
-                "SKILL.md 仍使用 <node id=\"...\"> 标签；建议迁移到 <phase id=\"...\">（两种都解析，但 phase 是官方术语）",
-            ))
-        # Task 5.3: accept <phase> as a synonym for <node> on the compiler
-        # side too so W/F rules see a consistent document regardless of
-        # which tag the author used.
-        content = _normalise_phase_tags(content)
-        for m in _NODE_PATTERN.finditer(content):
-            node_id = m.group(1)
-            depends_on = m.group(2)
-            node_content = m.group(3).strip()
-            # Resolve <ref> inline (read file content)
-            resolved = _resolve_refs_safe(node_content, skill_dir)
-            tags = _extract_tags(resolved)
-            nodes_info.append({
-                "id": node_id,
-                "depends_on": depends_on,
-                "tags": tags,
-                "raw": resolved,
-            })
-    else:
-        # Simple mode: extract tags from body
-        body = _strip_frontmatter(content)
-        tags = _extract_tags(body)
-        if tags.get("phase_config"):
-            nodes_info.append({"id": "main", "depends_on": None, "tags": tags, "raw": body})
-
-    for node in nodes_info:
-        phase_cfg_texts = node["tags"].get("phase_config", [])
-        if not phase_cfg_texts:
-            continue
-        try:
-            phase_cfg = yaml.safe_load(phase_cfg_texts[0])
-        except yaml.YAMLError:
-            continue
-        if not isinstance(phase_cfg, dict):
-            continue
-        node["phase_cfg"] = phase_cfg
-        phase_name = phase_cfg.get("name") or node["id"]
-        node["phase_name"] = str(phase_name).strip() or node["id"]
-
-    known_phase_names = {
-        str(node["phase_name"])
-        for node in nodes_info
-        if isinstance(node.get("phase_name"), str)
-    }
-
-    # P008/P009: graph topology
-    if skill_type == "graph":
-        defined_node_ids = {n["id"] for n in nodes_info}
-        dep_graph: dict[str, list[str]] = {n["id"]: [] for n in nodes_info}
-
-        for n in nodes_info:
-            if n["depends_on"]:
-                deps = [d.strip() for d in n["depends_on"].split(",")]
-                for dep in deps:
-                    if dep not in defined_node_ids:
-                        result.issues.append(_issue(
-                            "P008", f"node:{n['id']}",
-                            f"depends_on '{dep}' 指向未定义的 node",
-                        ))
-                    else:
-                        dep_graph[n["id"]].append(dep)
-
-        # P009: cycle detection (simple DFS)
-        if not _is_dag(dep_graph):
-            result.issues.append(_issue("P009", "SKILL.md", "节点依赖存在循环"))
-
-    # Per-phase checks
-    for node in nodes_info:
-        node_id = node["id"]
-        tags = node["tags"]
-        loc = f"node:{node_id}"
-
-        phase_cfg = node.get("phase_cfg")
-        if not isinstance(phase_cfg, dict):
-            continue
-
-        unknown_keys = sorted(set(phase_cfg.keys()) - _PHASE_CONFIG_ALLOWED_KEYS - _XML_ONLY_KEYS)
-        for key in unknown_keys:
-            result.issues.append(_issue("P004", loc, f"未知 phase_config key: '{key}'"))
-        xml_misplaced = sorted(set(phase_cfg.keys()) & _XML_ONLY_KEYS)
-        for key in xml_misplaced:
-            result.issues.append(_issue("P004", loc, f"'{key}' 应在 XML tag 中定义，而非 phase_config YAML"))
-
-        # Task 5.1: subgraph phases are exclusive with tools/prompts/sub_skills.
-        # Prior to this check the loader silently dropped any such fields when
-        # subgraph was present, producing confusing "my tool never ran" bugs.
-        # Now we FAIL FAST so the authoring error surfaces at compile time.
-        if phase_cfg.get("subgraph"):
-            if phase_cfg.get("tools"):
-                result.issues.append(_issue(
-                    "F-subgraph-exclusive-tools", loc,
-                    "subgraph phase 不得声明 tools（loader 会静默忽略，改为在子 skill 里声明）",
-                ))
-            if tags.get("system_prompt") or tags.get("user_prompt"):
-                result.issues.append(_issue(
-                    "F-subgraph-exclusive-prompt", loc,
-                    "subgraph phase 不得包含 <system_prompt>/<user_prompt>（该 phase 不跑 LLM）",
-                ))
-            if phase_cfg.get("sub_skills"):
-                result.issues.append(_issue(
-                    "F-subgraph-exclusive-sub-skills", loc,
-                    "subgraph 与 sub_skills 互斥：subgraph 是静态组合，sub_skills 是动态决策",
-                ))
-
-        # Task 5.2 W-invalid-model-override: catch typo'd model_override strings
-        # so authors learn at compile time instead of at first run.
-        model_override = phase_cfg.get("model_override")
-        if model_override is not None:
-            if not isinstance(model_override, str) or not model_override.strip():
-                result.issues.append(_issue(
-                    "W-invalid-model-override", loc,
-                    "model_override 必须是非空字符串",
-                ))
-            else:
-                known_models = _known_model_names()
-                if known_models and model_override.strip() not in known_models:
-                    result.issues.append(_issue(
-                        "W-invalid-model-override", loc,
-                        (
-                            f"model_override '{model_override}' 未在 llm_roles.yaml 的 models 段定义；"
-                            f"已知模型: {sorted(known_models)[:8]}..."
-                        ),
-                    ))
-
-        # P003: tool paths
-        tool_refs = phase_cfg.get("tools", [])
-        for ref in tool_refs:
-            if not isinstance(ref, str):
-                continue
-            parts = ref.rsplit(".", 1)
-            if len(parts) != 2:
-                result.issues.append(_issue("P003", loc, f"工具引用格式无效: '{ref}'"))
-                continue
-            module_path_str, func_name = parts
-            py_file = skill_dir / module_path_str.replace(".", "/")
-            py_file = py_file.with_suffix(".py")
-            if not py_file.exists():
-                result.issues.append(_issue("P003", loc, f"工具文件不存在: {py_file.name}"))
-            else:
-                _, parse_error = _parse_python_ast(py_file)
-                if parse_error:
-                    result.issues.append(_issue(
-                        "P003",
-                        loc,
-                        f"工具文件无法解析: {py_file.name} ({parse_error})",
-                    ))
-                    continue
-                funcs = _ast_function_names(py_file)
-                if func_name not in funcs:
-                    result.issues.append(_issue(
-                        "P003", loc,
-                        f"函数 '{func_name}' 未在 {py_file.name} 中定义",
-                    ))
-
-        # Validator reference check (same logic as tools)
-        validator_ref = phase_cfg.get("validator")
-        if validator_ref and isinstance(validator_ref, str):
-            parts = validator_ref.rsplit(".", 1)
-            if len(parts) != 2:
-                result.issues.append(_issue("P003", loc, f"validator 引用格式无效: '{validator_ref}'"))
-            else:
-                module_path_str, func_name = parts
-                py_file = skill_dir / module_path_str.replace(".", "/")
-                py_file = py_file.with_suffix(".py")
-                if not py_file.exists():
-                    result.issues.append(_issue("P003", loc, f"validator 文件不存在: {py_file.name}"))
-                else:
-                    _, parse_error = _parse_python_ast(py_file)
-                    if parse_error:
-                        result.issues.append(_issue(
-                            "P003",
-                            loc,
-                            f"validator 文件无法解析: {py_file.name} ({parse_error})",
-                        ))
-                    else:
-                        funcs = _ast_function_names(py_file)
-                        if func_name not in funcs:
-                            result.issues.append(_issue(
-                                "P003",
-                                loc,
-                                f"validator 函数 '{func_name}' 未在 {py_file.name} 中定义",
-                            ))
-
-        retry_target = phase_cfg.get("retry_target")
-        if retry_target is not None:
-            if not isinstance(retry_target, str) or not retry_target.strip():
-                result.issues.append(_issue("P011", loc, "retry_target 必须是非空字符串"))
-            elif retry_target not in known_phase_names:
-                result.issues.append(_issue(
-                    "P011",
-                    loc,
-                    f"retry_target '{retry_target}' 指向未定义 phase",
-                ))
-
-        # P006: placeholders defined
-        sys_prompts = tags.get("system_prompt", [])
-        usr_prompts = tags.get("user_prompt_builder", []) or tags.get("user_prompt", [])
-        all_prompt_text = " ".join(sys_prompts + usr_prompts)
-        placeholders = _extract_placeholders(all_prompt_text)
-        missing = placeholders - ctx_map_keys
-        for key in sorted(missing):
-            result.issues.append(_issue("P006", loc, f"占位符 '{{{key}}}' 未在 context_mapping 中定义"))
-
-        # Task 5.4 — <step> tag validation inside prompts. Pure structural
-        # check; the parser already leaves <step> as verbatim text inside
-        # prompt bodies. Three FATAL rules:
-        #   F-step-name-required     — every <step> must have name=""
-        #   F-step-goal-required     — every <step> must have goal=""
-        #   F-step-no-expression     — reject when/skip_if/if/else attrs
-        all_prompt_text = " ".join(sys_prompts + usr_prompts)
-        for step_match in _STEP_TAG_PATTERN.finditer(all_prompt_text):
-            attrs_raw = step_match.group(1) or ""
-            parsed_attrs = dict(_STEP_ATTR_RE.findall(attrs_raw))
-            if "name" not in parsed_attrs or not parsed_attrs["name"].strip():
-                result.issues.append(_issue(
-                    "F-step-name-required", loc,
-                    "<step> 缺少 name 属性"
-                ))
-            if "goal" not in parsed_attrs or not parsed_attrs["goal"].strip():
-                result.issues.append(_issue(
-                    "F-step-goal-required", loc,
-                    "<step> 缺少 goal 属性"
-                ))
-            banned = {"when", "skip_if", "if", "else"} & set(parsed_attrs.keys())
-            for attr in sorted(banned):
-                result.issues.append(_issue(
-                    "F-step-no-expression", loc,
-                    f"<step> 禁止使用表达式字段 '{attr}'；条件分支请用 "
-                    f"code-only phase + validator + retry_target",
-                ))
-
-        # P007: no inline JSON in system_prompt
-        for sp in sys_prompts:
-            if re.search(r'\{"', sp):
-                result.issues.append(_issue("P007", loc, "system_prompt 中包含内联 JSON"))
-                break
-
-        # P002: tier known (WARNING)
-        tier = phase_cfg.get("tier")
-        if tier:
-            known_tiers = _get_known_tiers()
-            if known_tiers and tier not in known_tiers:
-                result.issues.append(_issue("P002", loc, f"tier '{tier}' 不在 llm_roles.yaml 已知角色中"))
-
-        # P005: both prompts (WARNING)
-        requires_llm = bool(sys_prompts) and not phase_cfg.get("subgraph")
-        if requires_llm and not usr_prompts:
-            result.issues.append(_issue("P005", loc, "LLM 阶段缺少 <user_prompt>"))
-
-        # P010: LLM phase must mention finish_task (WARNING)
-        if requires_llm and "finish_task" not in all_prompt_text:
-            result.issues.append(_issue("P010", loc, "LLM 阶段的 prompt 中未提及 finish_task（所有 LLM 阶段均自动启用认知循环）"))
-
-        # P012: code-only phase tool signature validation (WARNING)
-        # When phase has no system_prompt and no subgraph (code-only), check tool function AST
-        is_code_only = not sys_prompts and not phase_cfg.get("subgraph")
-        if is_code_only and tool_refs:
-            for ref in tool_refs:
-                if not isinstance(ref, str):
-                    continue
-                parts = ref.rsplit(".", 1)
-                if len(parts) != 2:
-                    continue
-                module_path_str, func_name = parts
-                py_file = skill_dir / module_path_str.replace(".", "/")
-                py_file = py_file.with_suffix(".py")
-                if py_file.exists():
-                    is_valid, error_msg = _ast_tool_signature_check(py_file, func_name)
-                    if not is_valid:
-                        result.issues.append(_issue("P012", loc, f"code-only phase tool signature invalid: {error_msg}"))
-
-
-def _check_structure(
-    skill_dir: Path,
-    body: str,
-    result: CompileResult,
-) -> None:
-    """S001, S002, S003, S004."""
-    # S001: no scripts in references/
-    refs_dir = skill_dir / "references"
-    if refs_dir.is_dir():
-        for f in refs_dir.iterdir():
-            if f.suffix in (".py", ".sh"):
-                result.issues.append(_issue("S001", f"references/{f.name}", "references/ 中存在可执行脚本"))
-
-    # S002: script/ files must have callables (also check legacy tools/)
-    for script_dir_name in ("script", "tools"):
-        scripts_dir = skill_dir / script_dir_name
-        if scripts_dir.is_dir():
-            for f in scripts_dir.glob("*.py"):
-                if f.name.startswith("_"):
-                    continue
-                if not _ast_has_any_function(f):
-                    result.issues.append(_issue("S002", f"{script_dir_name}/{f.name}", "工具文件中无可调用函数"))
-
-    # S003: no inline rule tables in SKILL.md
-    rule_id_pattern = re.compile(r"\|\s*([FPST]\d{3})\s*\|")
-    found_ids = set(rule_id_pattern.findall(body))
-    if len(found_ids) >= 3:
-        result.issues.append(_issue("S003", "SKILL.md", f"内联了 {len(found_ids)} 条规则定义，应引用 data/rules.yaml"))
-
-    # S004: helpers.py is deprecated
-    for helpers_path in [
-        skill_dir / "helpers.py",
-        skill_dir / "tools" / "helpers.py",
-        skill_dir / "script" / "helpers.py",
-    ]:
-        if helpers_path.exists():
-            rel = helpers_path.relative_to(skill_dir)
-            result.issues.append(_issue(
-                "S004", str(rel),
-                "helpers.py 已废弃。请将数据变换逻辑迁移到 setup phase 的 script/ tools 中，"
-                "通过 requires_llm: false 节点写入 context，后续节点用 {key} 读取。",
-            ))
-
-    # Task 5.2 — W-python-glue-orchestrator
-    # Detects the orchestrator / dispatcher anti-pattern: a Python file
-    # under the skill's ``script/`` or ``tools/`` dir that references a
-    # child SKILL.md AND does concurrent / orchestrated dispatch by
-    # hand (run_skill in a loop, ThreadPoolExecutor, asyncio.gather).
-    # The declarative alternative is ``subgraph:`` for serial composition
-    # or ``tools: [builtin.parallel_map]`` for fan-out.
-    _ORCHESTRATOR_SIGNALS = (
-        "ThreadPoolExecutor",
-        "asyncio.gather",
-        "multiprocessing.Pool",
-        "run_skill",
-    )
-    for script_dir_name in ("script", "tools"):
-        scripts_dir = skill_dir / script_dir_name
-        if not scripts_dir.is_dir():
-            continue
-        for f in scripts_dir.glob("*.py"):
-            # Skip init files and the framework's own parallel_map.
-            if f.name in ("__init__.py",) or f.name.startswith("_"):
-                continue
-            try:
-                text = f.read_text(encoding="utf-8", errors="ignore")
-            except OSError:
-                continue
-            if "SKILL.md" not in text:
-                continue
-            hits = [sig for sig in _ORCHESTRATOR_SIGNALS if sig in text]
-            if not hits:
-                continue
-            result.issues.append(_issue(
-                "W-python-glue-orchestrator",
-                f"{script_dir_name}/{f.name}",
-                (
-                    f"Python 胶水码检测：文件同时引用 SKILL.md 和 {', '.join(hits)}，"
-                    "疑似绕过 subgraph / builtin.parallel_map 的反模式。"
-                    "改写建议：串行组合用 <phase subgraph: 子 SKILL.md 路径>，"
-                    "并发扇出用 tools: [builtin.parallel_map]。"
-                ),
-            ))
-
-
-def _check_tools(
-    skill_dir: Path,
-    result: CompileResult,
-) -> None:
-    """T001, T002, T003, T005, T006 — checks both script/ and legacy tools/ directories."""
-    for script_dir_name in ("script", "tools"):
-        tools_dir = skill_dir / script_dir_name
-        if not tools_dir.is_dir():
-            continue
-
-        for py_file in tools_dir.glob("*.py"):
-            if py_file.name.startswith("_"):
-                continue
-            funcs = _ast_function_info(py_file)
-            for func in funcs:
-                loc = f"{script_dir_name}/{py_file.name}:{func['lineno']}"
-                # T001: return type str
-                if func["return_annotation"] and func["return_annotation"] != "str":
-                    result.issues.append(_issue("T001", loc, f"函数 '{func['name']}' 返回类型应为 str"))
-                # T002: has docstring
-                if not func["docstring"]:
-                    result.issues.append(_issue("T002", loc, f"函数 '{func['name']}' 缺少 docstring"))
-                # T003: docstring first para non-empty
-                elif not func["docstring"].strip().split("\n")[0].strip():
-                    result.issues.append(_issue("T003", loc, f"函数 '{func['name']}' docstring 第一段为空"))
-                # T005: snake_case
-                if not re.match(r"^[a-z][a-z0-9_]*$", func["name"]):
-                    result.issues.append(_issue("T005", loc, f"函数名 '{func['name']}' 不符合 snake_case"))
-
-            for violation in _ast_json_normalize_violations(py_file):
-                loc = f"{script_dir_name}/{py_file.name}:{violation['lineno']}"
-                result.issues.append(_issue(
-                    "T006",
-                    loc,
-                    (
-                        f"函数 '{violation['function']}' 的 JSON 参数 '{violation['param']}' "
-                        "在入口处未调用 _normalize_json_param"
-                    ),
-                ))
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _resolve_refs_safe(content: str, base_dir: Path) -> str:
-    """Resolve <ref> tags, returning original content on error."""
-    def replacer(m: re.Match[str]) -> str:
-        ref_path = base_dir / m.group(1)
-        if not ref_path.exists():
-            return m.group(0)
-        ref_content = ref_path.read_text(encoding="utf-8")
-        return _resolve_refs_safe(ref_content, ref_path.parent)
-    return _REF_PATTERN.sub(replacer, content)
-
-
-def _is_dag(graph: dict[str, list[str]]) -> bool:
-    """Check if a dependency graph is a DAG (no cycles)."""
-    visited: set[str] = set()
-    in_stack: set[str] = set()
-
-    def dfs(node: str) -> bool:
-        if node in in_stack:
-            return False  # cycle
-        if node in visited:
-            return True
-        visited.add(node)
-        in_stack.add(node)
-        for dep in graph.get(node, []):
-            if not dfs(dep):
-                return False
-        in_stack.discard(node)
-        return True
-
-    return all(dfs(n) for n in graph if n not in visited)
-
-
-def _get_known_tiers() -> set[str]:
-    """Load known tier names from llm_roles.yaml (returns empty set on failure)."""
-    try:
-        from ..config.llm_config import get_role_config
-
-        return set(get_role_config().roles.keys())
-    except Exception as exc:
-        logger.warning(
-            "[Compiler] llm_roles.yaml load failed (%s); tier-unknown check will be skipped",
-            exc,
-        )
-        return set()
-
-
-def _known_model_names() -> set[str]:
-    """Load known model codes from the ``models:`` section of llm_roles.yaml.
-
-    Falls back to the empty set when the config is missing or malformed —
-    the caller (W-invalid-model-override) treats that as "cannot validate"
-    and silently skips the check rather than emitting a false positive.
-    """
-    try:
-        from ..config.llm_config import get_role_config
-
-        cfg = get_role_config()
-        # RoleConfig exposes models via `.models` (dict of code → ModelConfig).
-        models = getattr(cfg, "models", None) or {}
-        return set(models.keys())
-    except Exception as exc:
-        logger.warning(
-            "[Compiler] llm_roles.yaml models read failed (%s); "
-            "W-invalid-model-override will be skipped for this compile",
-            exc,
-        )
-        return set()
-
-
-_PHASE_CONFIG_BLOCK = re.compile(
-    r"<phase_config[^>]*>\s*(.+?)\s*</phase_config>",
-    re.DOTALL,
-)
-
-
-def _extract_subgraph_refs(skill_md_path: Path) -> list[Path]:
-    """Return absolute paths of child SKILL.md referenced via ``subgraph:``.
-
-    Uses a lightweight scan (regex + ``yaml.safe_load`` on each
-    ``<phase_config>`` block) instead of the full parser so cycle
-    detection does not incur tool binding / env var side effects.
-    Malformed skills return an empty list — they fail compile on
-    other rules anyway.
-    """
-    try:
-        text = skill_md_path.read_text(encoding="utf-8", errors="ignore")
-    except OSError:
-        return []
-
-    base_dir = skill_md_path.parent
-    refs: list[Path] = []
-    for match in _PHASE_CONFIG_BLOCK.finditer(text):
-        try:
-            cfg = yaml.safe_load(match.group(1))
-        except yaml.YAMLError:
-            continue
-        if not isinstance(cfg, dict):
-            continue
-        sub_path = cfg.get("subgraph")
-        if isinstance(sub_path, str) and sub_path.strip():
-            try:
-                refs.append((base_dir / sub_path).resolve())
-            except (OSError, RuntimeError):
-                continue
-    return refs
-
-
-def _detect_subgraph_cycle(start: Path) -> list[Path] | None:
-    """DFS cycle detection across ``subgraph:`` references.
-
-    Returns the cyclic path (list of resolved ``Path`` objects starting
-    and ending with the same node) when a cycle is present, otherwise
-    ``None``. Visits each SKILL.md at most once so pathological deep
-    graphs remain bounded.
-    """
-    visited: set[Path] = set()
-
-    def dfs(node: Path, stack: list[Path]) -> list[Path] | None:
-        resolved = node.resolve()
-        if resolved in stack:
-            cycle_start = stack.index(resolved)
-            return stack[cycle_start:] + [resolved]
-        if resolved in visited:
-            return None
-        visited.add(resolved)
-        stack.append(resolved)
-        for child in _extract_subgraph_refs(resolved):
-            if not child.exists():
-                continue
-            result = dfs(child, stack)
-            if result is not None:
-                return result
-        stack.pop()
-        return None
-
-    return dfs(start, [])
-
-
-def _check_subgraph_cycle(skill_md_path: Path, result: CompileResult) -> None:
-    """F-subgraph-cycle compile-time check (P1-3).
-
-    loader.py:288 has a runtime guard that raises ``SkillLoadError`` on
-    cyclic ``subgraph:`` loading, but surfacing the issue at compile
-    time lets the author see it in IDE / CI before the skill ever runs.
-    """
-    cycle = _detect_subgraph_cycle(skill_md_path)
-    if cycle is None:
-        return
-    # Show parent/<file> so sibling skills sharing the SKILL.md filename
-    # stay distinguishable in the error message.
-    chain = " -> ".join(f"{p.parent.name}/{p.name}" for p in cycle)
-    result.issues.append(_issue(
-        "F-subgraph-cycle",
-        "frontmatter",
-        f"检测到 subgraph 循环引用：{chain}。"
-        "subgraph 引用链必须是 DAG；作为替代，考虑把共用的步骤抽成一个独立子 skill，"
-        "由上层通过 sub_skills 工具按需调用。",
-    ))
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
 def compile_skill(skill_path: str | Path) -> CompileResult:
-    """Run static compilation checks on a SKILL.md file.
+    """Run static compilation checks on a schema-2.0 SKILL.md file.
 
-    Reads rule definitions from ``skills/compiler/data/rules.yaml`` and
-    checks the target SKILL.md against all FATAL and WARNING rules.
+    Most structural checks are delegated to Pydantic at parse time
+    (the manifest's ``extra='forbid'`` + discriminated unions +
+    per-mode field constraints, plus the ``GraphSkillDef``
+    model_validators added by the 2026-04-26 cohesion plan: phase-name
+    uniqueness and retry_target reference resolution).
 
-    Args:
-        skill_path: Path to the SKILL.md file to check.
+    Semantic checks layered on top of Pydantic:
 
-    Returns:
-        CompileResult with all detected issues.
+    - ``check_persona_resolution`` (F-persona-not-resolved) —
+      ``adopted_persona`` references resolve to a real
+      ``PersonaSkillDef``.
+    - ``check_tool_paths`` (F-tool-path-*) — tool dot-references
+      resolve to importable modules and stay inside ``base_dir``.
+    - ``check_context_bridge`` (F-context-bridge-*) — Rule 5
+      type-checks parent/child IO mappings on DelegatePhase.
+    - ``check_subgraph_cycles`` (F-subgraph-cycle) — no DelegatePhase
+      chain forms a cycle.
+
+    All errors aggregate into ``CompileResult`` with ``SKILL.md:<line>:<dotted-loc>``
+    locations; nothing escapes as a Python exception.
     """
     skill_path = Path(skill_path)
     result = CompileResult()
@@ -1095,8 +146,17 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
         ))
         return result
 
-    content = skill_path.read_text(encoding="utf-8")
-    skill_dir = skill_path.parent
+    try:
+        content = skill_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        result.issues.append(CompileIssue(
+            rule_id="INTERNAL",
+            severity="FATAL",
+            location=str(skill_path),
+            message=f"Failed to read SKILL.md: {e}",
+        ))
+        return result
+
     if not content.strip():
         result.issues.append(CompileIssue(
             rule_id="INTERNAL",
@@ -1106,7 +166,6 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
         ))
         return result
 
-    # Parse frontmatter
     try:
         frontmatter = _parse_frontmatter(content)
     except SkillLoadError as e:
@@ -1118,18 +177,93 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
         ))
         return result
 
-    body = _strip_frontmatter(content)
+    # Cohesion plan 方针 3.3 (2026-04-26): ``schema_version: 2.0``
+    # without quotes parses as a float. Coerce via ``str(...)`` so the
+    # comparison succeeds for the valid case and falls through to the
+    # F-schema-version fatal for any other value. Then normalise the
+    # frontmatter value back to the canonical string form so the
+    # downstream Pydantic ``Literal["2.0"]`` check sees the right type.
+    schema_version = str(frontmatter.get("schema_version") or "").strip()
+    if schema_version != "2.0":
+        result.issues.append(CompileIssue(
+            rule_id="F-schema-version",
+            severity="FATAL",
+            location="SKILL.md:frontmatter",
+            message=(
+                f"Unsupported schema_version: {schema_version!r}. "
+                'Only schema_version: "2.0" is supported.'
+            ),
+        ))
+        return result
+    frontmatter["schema_version"] = "2.0"
 
-    # Run all checks
-    _check_frontmatter(frontmatter, skill_dir, result)
-    _check_anthropic_compat(frontmatter, skill_dir, content, result)
-    _check_phases(content, frontmatter, skill_dir, result)
-    _check_structure(skill_dir, body, result)
-    _check_tools(skill_dir, result)
-    _check_subgraph_cycle(skill_path, result)
+    # Pydantic does the structural validation when the manifest is
+    # constructed in load_workflow_from_md. Surface validation errors
+    # as fatals here too so static compile catches them before runtime.
+    from pydantic import TypeAdapter, ValidationError
+
+    from .manifest import GraphSkillDef, SkillManifest
+
+    try:
+        manifest = TypeAdapter(SkillManifest).validate_python(frontmatter)
+    except ValidationError as ve:
+        for err in ve.errors():
+            loc_tuple = err.get("loc", ())
+            loc_dotted = ".".join(str(p) for p in loc_tuple)
+            # Cohesion plan 方针 3.2 (2026-04-26): translate the Pydantic
+            # ``loc`` tuple into the actual SKILL.md line number using
+            # ruamel.yaml's CommentedMap line metadata. Falls back to
+            # the dotted-path-only format when the location cannot be
+            # walked (e.g. a top-level field with no metadata).
+            line = locate_line_for_pydantic_loc(frontmatter, loc_tuple)
+            if line is not None:
+                location = f"SKILL.md:{line}:{loc_dotted or 'frontmatter'}"
+            else:
+                location = f"SKILL.md:{loc_dotted or 'frontmatter'}"
+            result.issues.append(CompileIssue(
+                rule_id="F-pydantic",
+                severity="FATAL",
+                location=location,
+                message=err.get("msg", "Pydantic validation failed"),
+            ))
+        return result
+
+    # PR #7 semantic checks (run only when Pydantic validation succeeds).
+    # GraphSkillDef carries phases (DelegatePhase + LLMPhase) so it runs
+    # the full quadruple. AgentSkillDef has no phases but does carry a
+    # top-level ``adopted_persona`` and ``agent_tools``, so it runs
+    # persona_resolution + tool_paths. PersonaSkillDef carries neither
+    # and falls through unchanged.
+    from .manifest import AgentSkillDef
+    from .validators.persona_resolution import check_persona_resolution
+    from .validators.tool_paths import check_tool_paths
+
+    if isinstance(manifest, GraphSkillDef):
+        from .validators.context_bridge import check_context_bridge
+        from .validators.subgraph_cycle import check_subgraph_cycles
+
+        result.issues.extend(
+            check_context_bridge(manifest, base_dir=skill_path.parent)
+        )
+        result.issues.extend(
+            check_subgraph_cycles(manifest, skill_path=skill_path)
+        )
+        result.issues.extend(
+            check_persona_resolution(manifest, base_dir=skill_path.parent)
+        )
+        result.issues.extend(
+            check_tool_paths(manifest, base_dir=skill_path.parent)
+        )
+    elif isinstance(manifest, AgentSkillDef):
+        result.issues.extend(
+            check_persona_resolution(manifest, base_dir=skill_path.parent)
+        )
+        result.issues.extend(
+            check_tool_paths(manifest, base_dir=skill_path.parent)
+        )
 
     logger.info(
-        "Compiled '%s': %d FATAL, %d WARNING",
+        "Compiled '%s' (schema 2.0): %d FATAL, %d WARNING",
         skill_path.name,
         len(result.fatals),
         len(result.warnings),

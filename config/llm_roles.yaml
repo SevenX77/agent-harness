@@ -3,20 +3,18 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # 三段式结构：
-#   1. models    — 模型注册表（代号 → 模型详情）
-#   2. providers — Provider 注册表（代号 → 连接详情）
-#   3. roles     — 角色注册表（调用方唯一入口）
+# 1. models — 模型注册表（代号 → 模型详情）
+# 2. providers — Provider 注册表（代号 → 连接详情）
+# 3. roles — 角色注册表（调用方唯一入口）
 #
 # 代号规则：
-#   模型代号    — 大写缩写，如 CL46T = Claude 4.6 Thinking
-#   Provider 代号 — 大写缩写，如 OC_CL = OneChats Claude
+# 模型代号 — 大写缩写，如 CL46T = Claude 4.6 Thinking
+# Provider 代号 — 大写缩写，如 OC_CL = OneChats Claude
 #
 # 热加载：修改此文件后无需重启，下次 LLM 调用自动生效。
 # ═══════════════════════════════════════════════════════════════════════════════
 
-
 # ── 模型注册表 ────────────────────────────────────────────────────────────────
-
 models:
   CL46T:
     name: "Claude Sonnet 4.6 Thinking"
@@ -44,6 +42,19 @@ models:
       OC_CL:
         max_max_tokens: 8192
 
+  CLO47T:
+    name: "Claude Opus 4.7 Thinking"
+    reasoning: true
+    min_max_tokens: 8192
+    fc_supported: true
+    providers:
+      OC_CL_ANT: "claude-opus-4-7"
+      OC_CL: "claude-opus-4-7-thinking"
+      WS_LLM: "anthropic/claude-opus-4.7"
+    provider_options:
+      OC_CL:
+        max_max_tokens: 8192
+
   GM31P:
     name: "Gemini 3.1 Pro Preview"
     reasoning: false
@@ -55,22 +66,22 @@ models:
       WS_LLM: "google/gemini-3.1-pro-preview"
 
   DS32C:
-    name: "DeepSeek V3.2 Chat"
+    name: "DeepSeek-V4 Flash"
     reasoning: false
     min_max_tokens: 8192
     fc_supported: true
     providers:
       OC_DS: "deepseek-ai/DeepSeek-V3.2"
-      DS: "deepseek-chat"
+      DS: "deepseek-v4-flash"
 
   DS32R:
-    name: "DeepSeek V3.2 Reasoner"
+    name: "DeepSeek-V4 Pro"
     reasoning: true
     min_max_tokens: 24000
     fc_supported: true
     providers:
       OC_DS: "deepseek/deepseek-r1-0528"
-      DS: "deepseek-reasoner"
+      DS: "deepseek-v4-pro"
 
   SD20P:
     name: "Seed 2.0 Pro"
@@ -108,9 +119,7 @@ models:
       OC_CL_ANT: "claude-haiku-4-5-20251001"
       OC_CL: "claude-haiku-4-5-20251001"
 
-
 # ── Provider 注册表 ───────────────────────────────────────────────────────────
-
 providers:
   OC_CL:
     name: "OneChats Claude"
@@ -120,7 +129,7 @@ providers:
     base_url: "https://chatapi.onechats.ai/v1"
     timeout: 300
     trust_env: false
-    retry_strategy: timeout_escalation   # 300→600→900s
+    retry_strategy: timeout_escalation  # 300→600→900s
 
   OC_CL_ANT:
     name: "OneChats Claude (Anthropic Endpoint)"
@@ -189,36 +198,33 @@ providers:
     timeout: 120
     trust_env: false
 
-
 # ── 角色注册表 ────────────────────────────────────────────────────────────────
 #
 # 调用方只传 llm_role="analyst"，由此表驱动 model/provider 选择。
 #
 # 字段说明：
-#   active_model    — 默认使用的模型代号
-#   temperature     — 默认温度（调用方显式传入时覆盖）
-#   model_fallback  — 是否在 active_model 全部 provider 失败后切到下一个 model
-#   system_prompt_prefix — 注入到 system message 前的角色前缀（可选）
-#   models          — 此角色可用的模型列表，每个模型指定 provider 优先顺序
+# active_model — 默认使用的模型代号
+# temperature — 默认温度（调用方显式传入时覆盖）
+# model_fallback — 是否在 active_model 全部 provider 失败后切到下一个 model
+# system_prompt_prefix — 注入到 system message 前的角色前缀（可选）
+# models — 此角色可用的模型列表，每个模型指定 provider 优先顺序
 #
 # DeerFlow 模型集成说明：
-#   deerflow_config.yaml 定义了模型名: deerflow_default, deerflow_reasoning, deerflow_fast。
-#   DeerFlow 内部组件（lead agent、summarization、title、memory）调用
-#   create_chat_model(name=...) 时，hook 将 name 传给 ModelResolver.resolve()。
+# deerflow_config.yaml 定义了模型名: deerflow_default, deerflow_reasoning, deerflow_fast。
+# DeerFlow 内部组件（lead agent、summarization、title、memory）调用
+# create_chat_model(name=...) 时，hook 将 name 传给 ModelResolver.resolve()。
 #
-#   优先级链：
-#     1. Skill phase 指定 tier → 使用该角色（含 provider failover）
-#     2. name 在此文件 roles 中存在 → 使用该角色配置（provider/temperature）
-#     3. name 不在此文件中 → 回退到 DeerFlow 原生 create_chat_model
-#     4. name=None → 读取 deerflow_config.yaml 第一个模型名，再走上述链路
+# 优先级链：
+# 1. Skill phase 指定 tier → 使用该角色（含 provider failover）
+# 2. name 在此文件 roles 中存在 → 使用该角色配置（provider/temperature）
+# 3. name 不在此文件中 → 回退到 DeerFlow 原生 create_chat_model
+# 4. name=None → 读取 deerflow_config.yaml 第一个模型名，再走上述链路
 #
-#   DeerFlow 角色（deerflow_*）与 Skill 质量角色（balanced/premium/fast）独立。
-#   修改 deerflow_* 角色只影响 DeerFlow 组件，不影响 Skill phase 模型选择。
+# DeerFlow 角色（deerflow_*）与 Skill 质量角色（balanced/premium/fast）独立。
+# 修改 deerflow_* 角色只影响 DeerFlow 组件，不影响 Skill phase 模型选择。
 
 roles:
-
   # ── 质量角色（与原 ModelTier 一一对应）──
-
   gemini:
     temperature: 0.7
     model_fallback: false
@@ -229,8 +235,9 @@ roles:
   premium:
     temperature: 0.7
     model_fallback: true
-    active_model: CLO46T
+    active_model: CLO47T
     models:
+      CLO47T: { providers: [OC_CL_ANT, OC_CL, WS_LLM] }
       CLO46T: { providers: [OC_CL_ANT, OC_CL, WS_LLM] }
       CL46T: { providers: [OC_CL_ANT, OC_CL, WS_LLM] }
 
@@ -253,12 +260,12 @@ roles:
   # ── DeerFlow 角色（独立于 Skill phase 的 balanced/premium/fast）──
   # 在 deerflow_config.yaml 中 name 字段引用这些角色名。
   # 删除某条 → 回退到 deerflow_config.yaml 自带的模型定义。
-
   deerflow_default:
     temperature: 0.7
     model_fallback: true
-    active_model: CLO46T
+    active_model: CLO47T
     models:
+      CLO47T: { providers: [OC_CL_ANT, OC_CL, WS_LLM] }
       CLO46T: { providers: [OC_CL_ANT, OC_CL, WS_LLM] }
       CL46T: { providers: [OC_CL_ANT, OC_CL, WS_LLM] }
       DS32R: { providers: [DS, OC_DS] }
@@ -266,8 +273,9 @@ roles:
   deerflow_reasoning:
     temperature: 0.7
     model_fallback: true
-    active_model: CLO46T
+    active_model: CLO47T
     models:
+      CLO47T: { providers: [OC_CL_ANT, OC_CL, WS_LLM] }
       CLO46T: { providers: [OC_CL_ANT, OC_CL, WS_LLM] }
       CL46T: { providers: [OC_CL_ANT, OC_CL, WS_LLM] }
       DS32R: { providers: [DS, OC_DS] }
@@ -331,7 +339,7 @@ roles:
     model_fallback: false
     active_model: SD16
     models:
-      SD16:  { providers: [OC_ARK, ARK] }
+      SD16: { providers: [OC_ARK, ARK] }
       DS32C: { providers: [OC_DS, DS] }
       SD20L: { providers: [OC_ARK, ARK] }
 
@@ -343,6 +351,6 @@ roles:
     model_fallback: false
     active_model: SD16
     models:
-      SD16:  { providers: [OC_ARK, ARK] }
+      SD16: { providers: [OC_ARK, ARK] }
       DS32C: { providers: [OC_DS, DS] }
       SD20L: { providers: [OC_ARK, ARK] }

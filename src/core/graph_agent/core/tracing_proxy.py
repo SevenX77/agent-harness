@@ -62,6 +62,7 @@ class TracingClientProxy:
         self._resolved_model = resolved_model
         self._sub_run_id = sub_run_id
         self._group_key = group_key
+        self._loop_index = 0  # Incremented before emit, so the first call is 1.
 
     # ------------------------------------------------------------------
     # The one call we want to observe
@@ -82,6 +83,7 @@ class TracingClientProxy:
         captured event; DeerFlow's default agent loop omits them, and the
         event is still useful with them set to ``None`` / ``{}``.
         """
+        self._loop_index += 1
         self._emit_prompt_captured(messages, template_source, variables)
         # The wrapped client's real invoke signature is (input, config=None)
         # in langchain-core; forward all positional + keyword args verbatim
@@ -124,6 +126,7 @@ class TracingClientProxy:
                 resolved_prompt=_normalise_messages(messages),
                 sub_run_id=self._sub_run_id,
                 group_key=self._group_key,
+                loop_index=self._loop_index,
             )
         except Exception:
             # Swallow serialisation issues: a broken event must never take

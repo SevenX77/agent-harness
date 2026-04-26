@@ -40,30 +40,15 @@ validated manifest:
   ``GRAPH_AGENT_PERSONA_PATH`` env-var registry — load-time and
   compile-time share one resolver and one search order.
 - **context_bridge static type check** — shipped in PR #7 step 1.
-  See ``validators/context_bridge.py``. The remaining checks below
-  still have only load-time fallbacks (or no fallback at all in the
-  case of ``rules.yaml``).
-- **Custom rules.yaml** — DEFERRED to a follow-up PR. The 1.x
-  ``rules.yaml`` carried project-specific conventions (placeholder
-  presence, prompt-length budgets). Three options for the next
-  decision-maker:
-
-  A. **Re-introduce rules.yaml as a PM-facing authoring surface** —
-     parse a project-local YAML file at compile time, supports custom
-     placeholder/prompt-length checks. PMs author rules without
-     touching the framework.
-  B. **Absorb every rule into the Pydantic schema** — extend
-     ``manifest.py`` with first-class fields for the conventions that
-     matter; new rules require framework changes but live in one
-     place.
-  C. **Drop custom rules entirely** — the four shipped validators
-     (context_bridge / subgraph_cycle / persona_resolution /
-     tool_paths) catch the structural failure modes; PM-customisable
-     conventions can re-emerge organically as Pydantic fields when
-     real demand surfaces. Closes the ``rules.yaml`` discussion.
-
-  All four concrete validators above ship in PR #7 steps 1-4. Pick a
-  direction for option A/B/C in a follow-up PR rather than this one.
+  See ``validators/context_bridge.py``. All four validators ship in
+  PR #7 steps 1-4 with full compile-time coverage.
+- **Custom YAML rules** — REMOVED (2026-04-26 cleanup, B 方案). The
+  1.x compiler SKILL and its YAML rule file were dead config — schema
+  2.0's Pydantic discriminated union + the four validators
+  (``context_bridge`` / ``subgraph_cycle`` / ``persona_resolution`` /
+  ``tool_paths``) cover every structural rule that file carried.
+  Re-introduce a Python rule registry (option D) only when Studio P1
+  surfaces a real demand.
 """
 from __future__ import annotations
 

@@ -294,7 +294,12 @@ class PhaseExecutor:
         # model code from llm_roles.yaml's models: section, bypassing
         # the tier → role → model mapping. When it's None the call
         # behaves exactly as before.
-        model = resolver.resolve(phase.tier, model_override=phase.model_override)
+        model = resolver.resolve(
+            phase.tier,
+            model_override=phase.model_override,
+            callbacks=tuple(active_callbacks),
+            phase_name=phase.name,
+        )
         resolved_model_name = (
             getattr(model, "name", None)
             or getattr(model, "model", None)

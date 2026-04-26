@@ -14,6 +14,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass
+from typing import Any
 
 import httpx
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -29,6 +30,8 @@ except ImportError:
     AnthropicAPIConnectionError = None  # type: ignore[assignment,misc]
     AnthropicAPITimeoutError = None  # type: ignore[assignment,misc]
 
+from ..callbacks.base import Callback
+from ..callbacks.events import LLMFallbackEvent
 from ..config.llm_config import (
     ResolvedProvider,
     get_role_config,
@@ -119,7 +122,9 @@ class ModelResolver:
         *,
         thinking_enabled: bool | None = None,
         model_override: str | None = None,
-        **kwargs,
+        callbacks: tuple[Callback, ...] = (),
+        phase_name: str | None = None,
+        **kwargs: Any,
     ) -> BaseChatModel:
         """Resolve a role name to a BaseChatModel instance.
 
@@ -135,6 +140,11 @@ class ModelResolver:
                 None = auto-detect from the selected model's ``reasoning`` flag.
                 True = force enable reasoning mode when the provider supports it.
                 False = force disable reasoning mode even for reasoning models.
+            callbacks: Optional run callback list used to emit LLMFallbackEvent
+                when peer-model fallback entries are appended. Defaults to an
+                empty tuple for DeerFlow hook compatibility.
+            phase_name: Optional phase name stamped on emitted LLMFallbackEvent
+                payloads.
             **kwargs: Additional kwargs (passed through but mostly ignored
                 because ModelResolver creates its own LangChain model instances.
 
@@ -244,7 +254,14 @@ class ModelResolver:
                 # timeline shows "primary X exhausted, fell back to peer Y".
                 self._emit_peer_fallback_events(
                     resolved.active_model_code,
+                    (
+                        resolved.call_chain[0].provider_code
+                        if resolved.call_chain
+                        else "<unknown>"
+                    ),
                     peer_chain_extras,
+                    callbacks=callbacks,
+                    phase_name=phase_name,
                 )
 
         full_chain = model_chain + peer_chain_extras
@@ -331,26 +348,40 @@ class ModelResolver:
                     errors.append((cid, exc))
         return extras
 
-    @staticmethod
     def _emit_peer_fallback_events(
+        self,
         from_code: str,
+        from_provider: str,
         peer_chain: list[tuple[str, str, Any]],
+        *,
+        callbacks: tuple[Callback, ...],
+        phase_name: str | None,
     ) -> None:
-        """Task 6.3 — emit LLMFallbackEvent for each peer in the chain.
-
-        We don't have a callbacks handle here (resolver is a singleton,
-        callbacks live on the harness per-run). This hook is a no-op
-        today but kept as the explicit anchor point for when the
-        RunContext-aware resolver lands in Task 7.0's follow-on work —
-        then peer fallback can push through the active run's callback
-        list directly. In the meantime the LLMFallback information is
-        recoverable from the WARNING log above.
-        """
+        """Emit one LLMFallbackEvent per peer entry through callbacks."""
         logger.info(
             "[ModelResolver] peer fallback built from %s: %s",
             from_code,
             ", ".join(f"{p}/{m}" for p, m, _ in peer_chain),
         )
+        if not callbacks:
+            return
+
+        for peer_provider, peer_model, _ in peer_chain:
+            event = LLMFallbackEvent(
+                phase_name=phase_name or "<resolver>",
+                from_provider=f"{from_provider}/{from_code}",
+                to_provider=f"{peer_provider}/{peer_model}",
+                reason="peer_fallback:primary_chain_exhausted",
+            )
+            for cb in callbacks:
+                try:
+                    cb.on_event(event)
+                except Exception:
+                    logger.exception(
+                        "[ModelResolver] callback %r raised on llm_fallback; "
+                        "continuing",
+                        type(cb).__name__,
+                    )
 
     def mark_provider_down(self, provider_code: str, model_name: str) -> None:
         """Manually mark a provider as down (called by harness on runtime failure)."""

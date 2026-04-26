@@ -605,9 +605,17 @@ class GraphAgentHarness:
             # emit InterruptedEvent so tracing.jsonl carries the pause
             # marker. We detect this by inspecting post-invoke state;
             # `get_thread_status` uses the same shape.
+            #
+            # Cohesion plan 方针 2.1 (2026-04-26): when the run is paused
+            # on AWAITING_INPUT we must NOT auto-save outputs (the data
+            # the user is being asked for has not been provided yet) and
+            # the terminating RunEndedEvent must carry status="interrupted"
+            # so Studio's "needs input" queue keeps the run.
+            is_awaiting_input = False
             try:
                 status = self.get_thread_status(tid)
                 if status.get("status") == "AWAITING_INPUT":
+                    is_awaiting_input = True
                     from ..callbacks.events import InterruptedEvent
                     clar = status.get("clarification", {}) or {}
                     _safe_emit_event(
@@ -624,6 +632,29 @@ class GraphAgentHarness:
                 logger.exception(
                     "[Harness] post-invoke interrupt detection failed"
                 )
+
+            if is_awaiting_input:
+                # Skip outputs auto-save: the run is paused waiting for
+                # user input, the workflow has not produced final outputs.
+                # Trace save is also skipped — the run is still alive,
+                # resume() will append further trace records and save
+                # once the run actually terminates.
+                logger.info(
+                    "[Harness] run %s paused on AWAITING_INPUT; skipping "
+                    "outputs/trace auto-save until resume completes",
+                    run_id,
+                )
+                _safe_emit_event(
+                    active_callbacks,
+                    RunEndedEvent(
+                        run_id=run_id,
+                        thread_id=tid,
+                        status="interrupted",
+                        final_context=_safe_jsonable_dict(result["context"]),
+                        wall_time_seconds=round(time.monotonic() - run_start_monotonic, 3),
+                    ),
+                )
+                return result  # type: ignore[return-value]
 
             # Auto-save outputs via IOManager if configured
             if self._io_config and self._io_config.get("outputs"):
@@ -784,20 +815,30 @@ class GraphAgentHarness:
         artifact_saver: Callable[..., Any] | None = None,
         storage_manager: Any | None = None,
     ) -> None:
-        """Auto-save outputs via IOManager."""
+        """Auto-save outputs via IOManager.
+
+        Cohesion plan 方针 2.2 (2026-04-26): write failures (disk full,
+        permission denied, schema/target mismatch) used to be swallowed
+        by ``except Exception: logger.warning(...)`` here, so the run
+        was reported as ``completed`` even though the artifact never
+        landed. Failures now propagate — the outer ``run()`` try/except
+        converts them into ``RunEndedEvent(status="crashed")`` and
+        re-raises so callers know the data did not persist.
+        """
         from ..io.manager import IOManager
 
         io_mgr = IOManager(self._io_config)  # type: ignore[arg-type]
-        try:
-            io_mgr.save_outputs(
-                context,
-                output_dir=context.get("output_dir"),
-                project_id=runtime_inputs.get("project_id"),
-                artifact_saver=artifact_saver,
-                storage_manager=storage_manager,
-            )
-        except Exception as exc:
-            logger.warning("[Harness] Auto-save outputs failed: %s", exc)
+        logger.info(
+            "[Harness] auto-saving %d declared output(s)",
+            len(self._io_config.get("outputs", []) if self._io_config else []),
+        )
+        io_mgr.save_outputs(
+            context,
+            output_dir=context.get("output_dir"),
+            project_id=runtime_inputs.get("project_id"),
+            artifact_saver=artifact_saver,
+            storage_manager=storage_manager,
+        )
 
     def get_thread_status(self, thread_id: str) -> dict[str, Any]:
         """Introspect a thread's LangGraph-level state without resuming it.

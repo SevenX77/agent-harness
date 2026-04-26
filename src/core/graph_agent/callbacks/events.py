@@ -162,6 +162,11 @@ class PromptCapturedEvent(_EventBase):
     ``template_source`` is the filename / id of the prompt template when
     the caller tracks one; ``variables`` is the rendered placeholder dict;
     ``resolved_prompt`` is the final message list after template expansion.
+    ``loop_index`` is the 1-based count of this LLM call within the
+    phase's ReAct loop: the first call inside a phase emits
+    ``loop_index=1``, the second emits ``2``, and so on. The counter
+    naturally restarts at 1 in each phase because TracingClientProxy is
+    per-phase (see tracing_proxy.py module docstring).
     """
 
     event_type: Literal["prompt_captured"] = "prompt_captured"
@@ -171,6 +176,7 @@ class PromptCapturedEvent(_EventBase):
     template_source: str | None = None
     variables: dict[str, Any] = Field(default_factory=dict)
     resolved_prompt: list[dict[str, Any]] = Field(default_factory=list)
+    loop_index: int = Field(default=1, ge=1)
 
 
 class LLMFallbackEvent(_EventBase):

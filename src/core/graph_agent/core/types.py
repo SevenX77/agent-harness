@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
@@ -59,6 +60,8 @@ class Phase:
     subagent_enabled: bool = False
     subgraph: GraphAgentHarness | None = None
     context_bridge: ContextBridge | None = None
+    references: list[str] = field(default_factory=list)
+    skill_base_dir: Path | None = None
     output_schema: type[BaseModel] | None = None
     output_schema_path: str | None = None
     md_type_dict: str | None = None

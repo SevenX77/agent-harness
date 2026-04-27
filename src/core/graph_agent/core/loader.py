@@ -524,6 +524,8 @@ def _phase_from_agent_skill(
         llm_role=manifest.agent_profile.llm_role,
         model_override=manifest.model_override,
         subagent_enabled=manifest.subagent_enabled,
+        references=list(manifest.agent_profile.references),
+        skill_base_dir=base_dir,
         requires_llm=True,
     )
     return phase
@@ -583,6 +585,8 @@ def _phase_from_graph_phase(
                 else 3
             ),
             subagent_enabled=phase_def.subagent_enabled,
+            references=list(phase_def.references),
+            skill_base_dir=base_dir,
             # 方针 1.3: thread output_schema dotted path so PhaseExecutor
             # can hand it to md_to_json. The runtime stores the path, not
             # the resolved class, because LangGraph's msgpack checkpointer

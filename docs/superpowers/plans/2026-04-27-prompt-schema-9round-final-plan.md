@@ -359,6 +359,7 @@ def finish_task(
 - `phase_executor.py` 当 `references` 非空时自动挂载
 - `loader.py` 渲染 `<knowledge_base>` 标签
 - **依赖**：PR-1 (schema 字段)
+**实施状态（2026-04-27）**：read_file builtin tool 实现 + phase_executor 自动挂载（references 非空时）。Gemini quota 仍不可用，主控 self-review 通过。
 
 ### PR-5：Clarification 逃生舱（P1-5）
 - 默认挂 `ask_clarification` 工具

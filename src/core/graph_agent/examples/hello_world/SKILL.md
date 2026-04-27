@@ -8,7 +8,7 @@ type: simple
 
 <phase_config>
 name: greet
-tier: balanced
+llm_role: fast
 tools:
   - script.greet.greet
 </phase_config>

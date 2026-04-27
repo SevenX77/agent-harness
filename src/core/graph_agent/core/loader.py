@@ -654,7 +654,7 @@ def _phase_from_agent_skill(
         system_prompt=system_prompt,
         user_prompt_template=manifest.user_prompt_template,
         tools=tools,
-        tier=manifest.agent_profile.llm_role or manifest.tier or "balanced",
+        tier=manifest.agent_profile.llm_role or "balanced",
         llm_role=manifest.agent_profile.llm_role,
         model_override=manifest.model_override,
         subagent_enabled=manifest.subagent_enabled,
@@ -704,7 +704,7 @@ def _phase_from_graph_phase(
             user_prompt_template=phase_def.user_prompt_template,
             tools=tools,
             max_iterations=phase_def.max_iterations if phase_def.max_iterations is not None else 20,
-            tier=phase_def.tier or "balanced",
+            tier=phase_def.llm_role or "balanced",
             llm_role=phase_def.llm_role,
             model_override=phase_def.model_override,
             validator=(
@@ -739,7 +739,6 @@ def _phase_from_graph_phase(
             name=phase_def.name,
             system_prompt=None,
             tools=tools,
-            tier=phase_def.tier or "balanced",
             model_override=phase_def.model_override,
             validator=(
                 _resolve_tool_reference(phase_def.validator, base_dir)
@@ -770,7 +769,6 @@ def _phase_from_graph_phase(
             name=phase_def.name,
             system_prompt=None,
             tools=[],
-            tier=phase_def.tier or "balanced",
             model_override=phase_def.model_override,
             subgraph=child_harness,
             context_bridge=ContextBridge(
@@ -808,7 +806,6 @@ def _phase_from_graph_phase(
             name=phase_def.name,
             system_prompt=None,
             tools=[],
-            tier=phase_def.tier or "balanced",
             model_override=phase_def.model_override,
             context_bridge=ContextBridge(
                 inputs=dict(phase_def.context_bridge.inputs),

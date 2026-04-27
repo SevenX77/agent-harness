@@ -46,7 +46,7 @@ io:
 
 <phase_config>
 name: patch
-tier: balanced
+llm_role: fast
 tools:
   - script.patch_tools.get_diagnostics
   - script.patch_tools.apply_field_patch

@@ -63,8 +63,8 @@ Prompt Schema Extensions
 ``references`` declare local knowledge files the model may inspect later.
 ``few_shot_examples`` hold prompt-level examples; persona skills already
 carry the same concept for persona injection. ``context_access`` declares
-which prior-run context surfaces a prompt may request. ``llm_role`` is the
-new model-role selector; legacy ``tier`` remains accepted during migration.
+which prior-run context surfaces a prompt may request. Schema 2.0 only
+exposes ``llm_role``; ``tier`` was removed in PR-B (2026-04-27).
 
 Reference resolution
 ====================
@@ -109,7 +109,6 @@ all-at-once rewrite. Production SKILL.md files migrate in Task 0.3
 
 from __future__ import annotations
 
-import warnings
 from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -177,7 +176,6 @@ class _BasePhase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1)
-    tier: Literal["premium", "balanced", "fast"] | None = None
     model_override: str | None = None
 
 
@@ -213,19 +211,6 @@ class LLMPhase(_BasePhase):
     validator: str | None = None
     retry_target: str | None = None
     output_schema: str | None = None
-
-    @model_validator(mode="after")
-    def _migrate_tier_to_llm_role(self) -> "LLMPhase":
-        if self.tier is not None and self.llm_role is not None:
-            raise ValueError("can't set both tier and llm_role")
-        if self.tier is not None:
-            warnings.warn(
-                "tier is deprecated, use llm_role",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            self.llm_role = self.tier
-        return self
 
 
 class LogicPhase(_BasePhase):
@@ -331,26 +316,12 @@ class AgentSkillDef(_BaseSkill):
 
     type: Literal["agent"]
     agent_profile: AgentProfile
-    tier: Literal["premium", "balanced", "fast"] | None = None
     model_override: str | None = None
     agent_tools: list[str] = Field(default_factory=list)
     subagent_enabled: bool = False
     adopted_persona: str | None = None
     user_prompt_template: str | None = None
     context_mapping: dict[str, str] = Field(default_factory=dict)
-
-    @model_validator(mode="after")
-    def _migrate_tier_to_profile_llm_role(self) -> "AgentSkillDef":
-        if self.tier is not None and self.agent_profile.llm_role is not None:
-            raise ValueError("can't set both tier and llm_role")
-        if self.tier is not None:
-            warnings.warn(
-                "tier is deprecated, use llm_role",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            self.agent_profile.llm_role = self.tier
-        return self
 
 
 class GraphSkillDef(_BaseSkill):

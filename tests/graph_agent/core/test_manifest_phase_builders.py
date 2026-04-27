@@ -51,8 +51,12 @@ class TestComposeAgentSystemPrompt:
         assert isinstance(manifest, AgentSkillDef)
 
         prompt = _compose_agent_system_prompt(manifest)
-        assert "你是专业的影视剧本拆解员" in prompt
-        assert "你的目标:客观地将小说原著切分为动作节拍。" in prompt
+        assert "<domain_expertise>" in prompt
+        assert "专业的影视剧本拆解员" in prompt
+        assert "</domain_expertise>" in prompt
+        assert "<task_objective>" in prompt
+        assert "客观地将小说原著切分为动作节拍。" in prompt
+        assert "</task_objective>" in prompt
 
     def test_steps_render_as_numbered_workflow(self):
         manifest = _SKILL_ADAPTER.validate_python({
@@ -72,9 +76,11 @@ class TestComposeAgentSystemPrompt:
         assert isinstance(manifest, AgentSkillDef)
 
         prompt = _compose_agent_system_prompt(manifest)
+        assert "<steps>" in prompt
         assert "1. 调用 build_objective_scenes" in prompt
         assert "2. 调用 extract_beats_concurrently" in prompt
         assert "3. 调用 dispatch_producer_strategy" in prompt
+        assert "</steps>" in prompt
 
     def test_constraints_render_as_bullet_list(self):
         manifest = _SKILL_ADAPTER.validate_python({
@@ -90,8 +96,10 @@ class TestComposeAgentSystemPrompt:
         assert isinstance(manifest, AgentSkillDef)
 
         prompt = _compose_agent_system_prompt(manifest)
+        assert "<constraints>" in prompt
         assert "- 不加入改编创意" in prompt
         assert "- 严禁寒暄" in prompt
+        assert "</constraints>" in prompt
 
 
 class TestPhaseFromAgentSkill:
@@ -217,9 +225,9 @@ class TestPhaseFromGraphPhase:
 
         assert phase.system_prompt is not None
         assert phase.system_prompt.endswith(
-            "## 工作流\n1. 调用 X 工具\n2. 验证 Y\n3. 返回结果"
+            "<steps>\n  1. 调用 X 工具\n  2. 验证 Y\n  3. 返回结果\n</steps>"
         )
-        assert "## 工作流" in phase.system_prompt
+        assert "<steps>" in phase.system_prompt
         assert "1. 调用 X 工具" in phase.system_prompt
         assert "2. 验证 Y" in phase.system_prompt
 
@@ -241,7 +249,7 @@ class TestPhaseFromGraphPhase:
         )
 
         assert phase.system_prompt == "Plan carefully."
-        assert "## 工作流" not in phase.system_prompt
+        assert "<steps>" not in phase.system_prompt
 
     def test_llm_phase_dead_end_threshold_default_and_override(self, tmp_path: Path):
         default_manifest = _SKILL_ADAPTER.validate_python({

@@ -521,11 +521,11 @@ def _phase_from_agent_skill(
         user_prompt_template=manifest.user_prompt_template,
         tools=tools,
         tier=manifest.agent_profile.llm_role or manifest.tier or "balanced",
+        llm_role=manifest.agent_profile.llm_role,
         model_override=manifest.model_override,
         subagent_enabled=manifest.subagent_enabled,
         requires_llm=True,
     )
-    phase.llm_role = manifest.agent_profile.llm_role
     return phase
 
 
@@ -566,7 +566,8 @@ def _phase_from_graph_phase(
             user_prompt_template=phase_def.user_prompt_template,
             tools=tools,
             max_iterations=phase_def.max_iterations if phase_def.max_iterations is not None else 20,
-            tier=phase_def.llm_role or phase_def.tier or "balanced",
+            tier=phase_def.tier or "balanced",
+            llm_role=phase_def.llm_role,
             model_override=phase_def.model_override,
             validator=(
                 _resolve_tool_reference(phase_def.validator, base_dir)
@@ -589,7 +590,6 @@ def _phase_from_graph_phase(
             output_schema_path=phase_def.output_schema,
             requires_llm=True,
         )
-        phase.llm_role = phase_def.llm_role
         return phase
 
     if isinstance(phase_def, _LogicPhase):

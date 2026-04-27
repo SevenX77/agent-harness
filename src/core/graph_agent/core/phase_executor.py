@@ -330,7 +330,7 @@ class PhaseExecutor:
             ),
         )
 
-        effective_llm_role = getattr(phase, "llm_role", None) or phase.tier
+        effective_llm_role = phase.llm_role or phase.tier
 
         model = TracingClientProxy(
             wrapped_client=model,

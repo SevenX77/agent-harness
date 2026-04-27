@@ -31,6 +31,9 @@ import yaml
 from .parser import _parse_frontmatter
 from .exceptions import SkillCompilationError, SkillLoadError
 from .harness import ContextBridge, GraphAgentHarness, Phase
+from .parallel_delegate import (
+    default_parallel_delegate_validator as _default_parallel_delegate_validator,
+)
 from .personas import resolve_persona
 
 logger = logging.getLogger(__name__)
@@ -820,6 +823,13 @@ def _phase_from_graph_phase(
             reducer_path=phase_def.reducer,
             tolerance=phase_def.tolerance,
             requires_llm=False,
+            validator=(
+                _resolve_tool_reference(phase_def.validator, base_dir)
+                if getattr(phase_def, "validator", None)
+                else _default_parallel_delegate_validator
+            ),
+            retry_target=getattr(phase_def, "retry_target", None),
+            max_retries=getattr(phase_def, "max_retries", None) or 3,
         )
 
     raise SkillLoadError(

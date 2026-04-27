@@ -6,7 +6,7 @@ Per PR-7 design (Gemini-reviewed 2026-04-27):
 - context_bridge is broadcast to all children (Q5.1)
 - Each child collects either a child_state or an exception
 - Reducer + tolerance (Q2c, Q3d) aggregate successful child outputs and
-  raise CompositeFailure when the failure ratio exceeds phase tolerance.
+  mark retryable failure when the failure ratio exceeds phase tolerance.
 """
 from __future__ import annotations
 
@@ -21,6 +21,33 @@ from langchain_core.runnables import RunnableConfig
 
 from .state import WorkflowState
 from .types import ContextBridge, Phase
+
+
+# Marker key written to ctx by execute closure when CompositeFailure
+# is caught. Default validator (`default_parallel_delegate_validator`)
+# pops this marker and returns retry feedback so RetryRouter can route
+# to retry_target.
+_FAILURE_MARKER_KEY = "_parallel_delegate_failed"
+
+
+def default_parallel_delegate_validator(
+    ctx: dict[str, Any],
+) -> tuple[bool, list[str]]:
+    """Default validator auto-installed on parallel_delegate phases.
+
+    Reads the failure marker written by the execute closure when
+    CompositeFailure is caught. Returns (False, summaries) for retry
+    routing; (True, []) when no failure flag is present (clean run).
+
+    The marker is popped on access so subsequent retries start from a
+    clean slate.
+    """
+    summaries = ctx.pop(_FAILURE_MARKER_KEY, None)
+    if summaries is None:
+        return (True, [])
+    if isinstance(summaries, list):
+        return (False, [str(item) for item in summaries])
+    return (False, [str(summaries)])
 
 
 class CompositeFailure(Exception):
@@ -247,49 +274,9 @@ def build_parallel_delegate_node(
             phase.name, len(child_outputs), len(failures), fail_ratio, phase.tolerance,
         )
 
-        # Apply tolerance check (Q3d): if fail_ratio > tolerance, abort the phase.
-        # Note: == is allowed (e.g., tolerance=0.0 + 0 failures works).
-        if fail_ratio > phase.tolerance:
-            raise CompositeFailure(phase.name, failures, total_children)
-
-        # Resolve reducer dotted path to callable (per Gemini Q1c: stored as path,
-        # imported at execute time to avoid checkpointer serialization issues).
-        reducer_callable = _resolve_reducer_callable(phase.reducer_path)
-
-        # Build errors-as-list for reducer signature (Q2c).
-        errors_for_reducer: list[Exception] = [exc for _, exc in failures]
-
-        # Call reducer(parent_ctx, child_outputs, errors) -> merge dict.
-        # Reducer is responsible for combining N child outputs into a single
-        # business-data dict that the parent phase can merge into ctx.
-        try:
-            reduced = reducer_callable(parent_ctx, child_outputs, errors_for_reducer)
-        except Exception as exc:
-            raise CompositeFailure(
-                phase.name,
-                [(-1, exc)],
-                total_children,
-            ) from exc
-
-        if not isinstance(reduced, dict):
-            raise CompositeFailure(
-                phase.name,
-                [(-1, TypeError(f"reducer must return dict, got {type(reduced).__name__}"))],
-                total_children,
-            )
-
-        # Merge reducer output into parent ctx.
-        # Note: reducer is responsible for namespacing - it returns dict keys
-        # that will be set on parent_ctx directly. Framework keys ('_'-prefixed)
-        # are not filtered (reducer trust contract).
-        parent_ctx.update(reduced)
-
         # Aggregate metrics from ALL children that produced a state (successful
         # AND semantically-failed-but-completed). Only true exception cases
         # (child_state is None) are skipped because there's no metrics to read.
-        # _io_errors merging stays per-successful_states because the failure modes
-        # are already captured in failures/errors_for_reducer; we don't want to
-        # double-count them as ctx-level io errors on the parent.
         merged_metrics = dict(state["metrics"])
         for child_state, _exc in outcomes:
             if not isinstance(child_state, dict):
@@ -304,12 +291,68 @@ def build_parallel_delegate_node(
                 + int(child_metrics.get("total_output_tokens", 0))
             )
 
-        # _io_errors merge restricted to successful children: failed ones already
-        # surfaced via failures/errors_for_reducer.
-        for child_state in successful_states:
-            child_ctx = child_state.get("context", {}) if isinstance(child_state, dict) else {}
-            if isinstance(child_ctx, dict):
-                _merge_child_io_errors(parent_ctx, child_ctx)
+        try:
+            # Apply tolerance check (Q3d): if fail_ratio > tolerance, abort the phase.
+            # Note: == is allowed (e.g., tolerance=0.0 + 0 failures works).
+            if fail_ratio > phase.tolerance:
+                raise CompositeFailure(phase.name, failures, total_children)
+
+            # Resolve reducer dotted path to callable (per Gemini Q1c: stored as path,
+            # imported at execute time to avoid checkpointer serialization issues).
+            reducer_callable = _resolve_reducer_callable(phase.reducer_path)
+
+            # Build errors-as-list for reducer signature (Q2c).
+            errors_for_reducer: list[Exception] = [exc for _, exc in failures]
+
+            # Call reducer(parent_ctx, child_outputs, errors) -> merge dict.
+            # Reducer is responsible for combining N child outputs into a single
+            # business-data dict that the parent phase can merge into ctx.
+            try:
+                reduced = reducer_callable(parent_ctx, child_outputs, errors_for_reducer)
+            except Exception as exc:
+                raise CompositeFailure(
+                    phase.name,
+                    [(-1, exc)],
+                    total_children,
+                ) from exc
+
+            if not isinstance(reduced, dict):
+                raise CompositeFailure(
+                    phase.name,
+                    [(-1, TypeError(f"reducer must return dict, got {type(reduced).__name__}"))],
+                    total_children,
+                )
+
+            # Merge reducer output into parent ctx.
+            # Note: reducer is responsible for namespacing - it returns dict keys
+            # that will be set on parent_ctx directly. Framework keys ('_'-prefixed)
+            # are not filtered (reducer trust contract).
+            parent_ctx.update(reduced)
+
+            # _io_errors merge restricted to successful children: failed ones already
+            # surfaced via failures/errors_for_reducer.
+            for child_state in successful_states:
+                child_ctx = child_state.get("context", {}) if isinstance(child_state, dict) else {}
+                if isinstance(child_ctx, dict):
+                    _merge_child_io_errors(parent_ctx, child_ctx)
+
+        except CompositeFailure as composite_exc:
+            # Convert to ctx state for default validator (PR-7.2): write failure
+            # summaries to _parallel_delegate_failed marker, _io_errors for ctx
+            # observability. Do NOT raise - let validate_node + RetryRouter route
+            # the retry through the standard pipeline.
+            failure_summaries = [
+                f"child {idx}: {type(child_exc).__name__}: {child_exc}"
+                for idx, child_exc in composite_exc.failures
+            ]
+            parent_ctx[_FAILURE_MARKER_KEY] = failure_summaries
+            existing_io_errors = parent_ctx.get("_io_errors", []) or []
+            parent_ctx["_io_errors"] = list(existing_io_errors) + failure_summaries
+            logger.warning(
+                "[ParallelDelegate] phase=%s caught CompositeFailure (%d failures); "
+                "marking ctx for RetryRouter (will retry if max_retries not exhausted)",
+                phase.name, len(composite_exc.failures),
+            )
 
         new_state: WorkflowState = {
             "context": parent_ctx,
@@ -327,4 +370,9 @@ def build_parallel_delegate_node(
     return execute
 
 
-__all__ = ["CompositeFailure", "build_parallel_delegate_node"]
+__all__ = [
+    "CompositeFailure",
+    "_FAILURE_MARKER_KEY",
+    "build_parallel_delegate_node",
+    "default_parallel_delegate_validator",
+]

@@ -9,6 +9,7 @@ import pytest
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.harness import GraphAgentHarness
 from graph_agent.core.loader import load_workflow_from_md
+from graph_agent.core.parallel_delegate import default_parallel_delegate_validator
 
 
 def _write_agent_skill(path: Path, name: str) -> None:
@@ -94,6 +95,33 @@ def test_loader_resolves_parallel_delegate_children(
     assert phase.reducer_path == "reducers.reduce_outputs"
     assert phase.tolerance == 0.2
     assert phase.requires_llm is False
+
+
+def test_loader_injects_default_validator_on_parallel_delegate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_agent_skill(tmp_path / "a" / "SKILL.md", "child_a")
+    _write_agent_skill(tmp_path / "b" / "SKILL.md", "child_b")
+    (tmp_path / "reducers.py").write_text(
+        "def reduce_outputs(ctx, child_outputs, errors):\n"
+        "    return {'ok': True}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    parent = tmp_path / "parent.md"
+    _write_parent_skill(
+        parent,
+        subgraphs=["./a/SKILL.md", "./b/SKILL.md"],
+        reducer="reducers.reduce_outputs",
+    )
+
+    harness = load_workflow_from_md(parent)
+
+    phase = harness.phases[0]
+    assert phase.validator is default_parallel_delegate_validator
+    assert phase.retry_target is None
+    assert phase.max_retries == 3
 
 
 def test_loader_raises_when_subgraph_path_missing(

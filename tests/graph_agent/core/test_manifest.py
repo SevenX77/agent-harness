@@ -76,7 +76,7 @@ def _base_graph_dict() -> dict:
             {
                 "mode": "llm",
                 "name": "phase_one",
-                "tier": "balanced",
+                "llm_role": "balanced",
                 "prompt": "Do the thing.",
             }
         ],
@@ -244,9 +244,11 @@ class TestAgentSkillExtensions:
     def test_agent_tier_accepted(self):
         data = _base_agent_dict()
         data["tier"] = "balanced"
-        m = _SKILL_ADAPTER.validate_python(data)
+        with pytest.warns(DeprecationWarning, match="tier is deprecated"):
+            m = _SKILL_ADAPTER.validate_python(data)
         assert isinstance(m, AgentSkillDef)
         assert m.tier == "balanced"
+        assert m.agent_profile.llm_role == "balanced"
 
     def test_agent_tier_defaults_to_none(self):
         m = _SKILL_ADAPTER.validate_python(_base_agent_dict())
@@ -769,6 +771,138 @@ class TestLLMPhaseSteps:
             from graph_agent.core.manifest import Step  # noqa: F401
 
 
+class TestLLMPhaseExtendedFields:
+    def test_domain_protocols_default_empty(self):
+        phase = LLMPhase.model_validate({"mode": "llm", "name": "p"})
+        assert phase.domain_protocols == []
+
+    def test_references_default_empty(self):
+        phase = LLMPhase.model_validate({"mode": "llm", "name": "p"})
+        assert phase.references == []
+
+    def test_few_shot_examples_default_empty(self):
+        phase = LLMPhase.model_validate({"mode": "llm", "name": "p"})
+        assert phase.few_shot_examples == []
+
+    def test_context_access_default_empty(self):
+        phase = LLMPhase.model_validate({"mode": "llm", "name": "p"})
+        assert phase.context_access == []
+
+    def test_context_access_only_accepts_literal_values(self):
+        phase = LLMPhase.model_validate({
+            "mode": "llm",
+            "name": "p",
+            "context_access": ["artifact", "working_memory"],
+        })
+        assert phase.context_access == ["artifact", "working_memory"]
+
+        with pytest.raises(ValidationError):
+            LLMPhase.model_validate({
+                "mode": "llm",
+                "name": "p",
+                "context_access": ["database"],
+            })
+
+    def test_llm_role_optional_string(self):
+        phase = LLMPhase.model_validate({
+            "mode": "llm",
+            "name": "p",
+            "llm_role": "architect",
+        })
+        assert phase.llm_role == "architect"
+
+
+class TestAgentProfileExtendedFields:
+    def test_domain_protocols_default_empty(self):
+        profile = AgentProfile(role="r", goal="g")
+        assert profile.domain_protocols == []
+
+    def test_references_default_empty(self):
+        profile = AgentProfile(role="r", goal="g")
+        assert profile.references == []
+
+    def test_few_shot_examples_default_empty(self):
+        profile = AgentProfile(role="r", goal="g")
+        assert profile.few_shot_examples == []
+
+    def test_context_access_default_empty(self):
+        profile = AgentProfile(role="r", goal="g")
+        assert profile.context_access == []
+
+    def test_context_access_only_accepts_literal_values(self):
+        profile = AgentProfile.model_validate({
+            "role": "r",
+            "goal": "g",
+            "context_access": ["artifact", "working_memory"],
+        })
+        assert profile.context_access == ["artifact", "working_memory"]
+
+        with pytest.raises(ValidationError):
+            AgentProfile.model_validate({
+                "role": "r",
+                "goal": "g",
+                "context_access": ["database"],
+            })
+
+    def test_llm_role_optional_string(self):
+        profile = AgentProfile(role="r", goal="g", llm_role="architect")
+        assert profile.llm_role == "architect"
+
+
+class TestTierDeprecation:
+    def test_tier_alone_maps_to_llm_role(self):
+        with pytest.warns(DeprecationWarning, match="tier is deprecated"):
+            phase = LLMPhase.model_validate({
+                "mode": "llm",
+                "name": "p",
+                "tier": "balanced",
+            })
+        assert phase.llm_role == "balanced"
+
+    def test_llm_role_alone_works_normally(self):
+        phase = LLMPhase.model_validate({
+            "mode": "llm",
+            "name": "p",
+            "llm_role": "architect",
+        })
+        assert phase.tier is None
+        assert phase.llm_role == "architect"
+
+    def test_tier_and_llm_role_both_set_raises(self):
+        with pytest.raises(ValidationError) as exc:
+            LLMPhase.model_validate({
+                "mode": "llm",
+                "name": "p",
+                "tier": "balanced",
+                "llm_role": "architect",
+            })
+        assert "can't set both tier and llm_role" in str(exc.value)
+
+    def test_agent_tier_alone_maps_to_profile_llm_role(self):
+        data = _base_agent_dict()
+        data["tier"] = "balanced"
+        with pytest.warns(DeprecationWarning, match="tier is deprecated"):
+            manifest = _SKILL_ADAPTER.validate_python(data)
+        assert isinstance(manifest, AgentSkillDef)
+        assert manifest.agent_profile.llm_role == "balanced"
+
+    def test_agent_profile_llm_role_alone_works_normally(self):
+        data = _base_agent_dict()
+        data["agent_profile"]["llm_role"] = "architect"
+        manifest = _SKILL_ADAPTER.validate_python(data)
+        assert isinstance(manifest, AgentSkillDef)
+        assert manifest.tier is None
+        assert manifest.agent_profile.llm_role == "architect"
+
+    def test_agent_tier_and_profile_llm_role_both_set_raises(self):
+        data = _base_agent_dict()
+        data["tier"] = "balanced"
+        data["agent_profile"]["llm_role"] = "architect"
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python(data)
+        assert "can't set both tier and llm_role" in str(exc.value)
+
+
 # =============================================================================
 # Public surface
 # =============================================================================
@@ -839,14 +973,14 @@ class TestRetryTargetReferenceValidation:
             {
                 "mode": "llm",
                 "name": "draft",
-                "tier": "balanced",
+                "llm_role": "balanced",
                 "prompt": "draft something",
                 "retry_target": "nonexistent_phase",
             },
             {
                 "mode": "llm",
                 "name": "review",
-                "tier": "balanced",
+                "llm_role": "balanced",
                 "prompt": "review",
             },
         ]
@@ -868,7 +1002,7 @@ class TestRetryTargetReferenceValidation:
             {
                 "mode": "llm",
                 "name": "draft",
-                "tier": "balanced",
+                "llm_role": "balanced",
                 "prompt": "draft something",
                 "retry_target": "draft",  # self-loop is valid
             }
@@ -888,13 +1022,13 @@ class TestPhaseNameUniqueness:
             {
                 "mode": "llm",
                 "name": "duplicated",
-                "tier": "balanced",
+                "llm_role": "balanced",
                 "prompt": "first",
             },
             {
                 "mode": "llm",
                 "name": "duplicated",
-                "tier": "balanced",
+                "llm_role": "balanced",
                 "prompt": "second",
             },
         ]

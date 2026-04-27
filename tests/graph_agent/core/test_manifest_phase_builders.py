@@ -102,9 +102,8 @@ class TestPhaseFromAgentSkill:
             "name": "sample-agent",
             "description": "d",
             "type": "agent",
-            "tier": "premium",
             "model_override": "CL47T",
-            "agent_profile": {"role": "r", "goal": "g"},
+            "agent_profile": {"role": "r", "goal": "g", "llm_role": "premium"},
             "agent_tools": [],
             "subagent_enabled": True,
             "user_prompt_template": "Process: {input}",
@@ -149,7 +148,7 @@ class TestPhaseFromGraphPhase:
             "phases": [{
                 "mode": "llm",
                 "name": "extract",
-                "tier": "balanced",
+                "llm_role": "balanced",
                 "prompt": "extract",
                 "output_schema": "pkg.module.MyResult",
             }],
@@ -174,7 +173,7 @@ class TestPhaseFromGraphPhase:
             "phases": [{
                 "mode": "llm",
                 "name": "segment",
-                "tier": "balanced",
+                "llm_role": "balanced",
                 "prompt": "You are a segmenter.",
                 "user_prompt_template": "Segment: {text}",
                 "max_iterations": 12,
@@ -453,9 +452,8 @@ def test_phase_from_agent_skill_injects_evaluation_rubrics(tmp_path: Path) -> No
     assert "## 评估标准" in sp
 
 
-def test_persona_few_shot_examples_raise_not_implemented(tmp_path: Path) -> None:
-    """Personas declaring few_shot_examples must hard-fail until messages-history wiring lands (PR#7)."""
-    import pytest
+def test_persona_few_shot_examples_render_as_examples_tag(tmp_path: Path) -> None:
+    """Persona few_shot_examples now render into the prompt <examples> tag."""
     from pydantic import TypeAdapter
     from graph_agent.core.loader import _phase_from_agent_skill
     from graph_agent.core.manifest import AgentSkillDef, SkillManifest
@@ -485,5 +483,8 @@ def test_persona_few_shot_examples_raise_not_implemented(tmp_path: Path) -> None
         "adopted_persona": "shotty",
     })
     assert isinstance(manifest, AgentSkillDef)
-    with pytest.raises(NotImplementedError, match="few_shot_examples"):
-        _phase_from_agent_skill(manifest, base_dir, callbacks=None, loading_stack=set())
+    phase = _phase_from_agent_skill(manifest, base_dir, callbacks=None, loading_stack=set())
+    sp = phase.system_prompt or ""
+    assert "<examples>" in sp
+    assert '<example id="1">example one</example>' in sp
+    assert '<example id="2">example two</example>' in sp

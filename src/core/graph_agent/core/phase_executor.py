@@ -41,8 +41,10 @@ from ..cognitive.ambiguity import log_ambiguity
 from ..cognitive.finish import finish_task
 from ..cognitive.memory import update_working_memory
 from ..cognitive.middlewares import create_custom_middlewares
-from ..cognitive.prompt import apply_cognitive_template
-from ..config.llm_config import get_role_config
+from ..cognitive.prompt import (
+    apply_cognitive_template,
+    resolve_role_prefix_from_llm_role,
+)
 from .callback_bridge import _HarnessCallbackBridge, _extract_text_content
 from .nudge_injector import NudgeInjector
 from .run_context import RunContext
@@ -328,21 +330,25 @@ class PhaseExecutor:
             ),
         )
 
+        effective_llm_role = phase.llm_role or phase.tier
+
         model = TracingClientProxy(
             wrapped_client=model,
             callbacks=active_callbacks,
             phase_name=phase.name,
-            llm_role=phase.tier,
+            llm_role=effective_llm_role,
             resolved_model=str(resolved_model_name) if resolved_model_name else None,
             sub_run_id=ctx.get("_sub_run_id") if isinstance(ctx, dict) else None,
             group_key=ctx.get("_group_key") if isinstance(ctx, dict) else None,
         )
-        role_prefix = ""
-        try:
-            role_prefix = get_role_config().resolve_role(phase.tier).system_prompt_prefix
-        except Exception as exc:
-            logger.warning('[Harness] role config resolution failed for tier=%s: %s', phase.tier, exc)
-            role_prefix = ""
+        llm_role = effective_llm_role or "deerflow_default"
+        role_prefix = resolve_role_prefix_from_llm_role(llm_role)
+        logger.info(
+            "phase=%s llm_role=%s -> role_prefix injected (len=%d)",
+            phase.name,
+            llm_role,
+            len(role_prefix),
+        )
 
         # Step 5: Create callback bridge and wrap tools with limiter.
         bridge = _HarnessCallbackBridge(

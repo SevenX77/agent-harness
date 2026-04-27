@@ -399,6 +399,57 @@ def _append_steps_to_prompt(prompt: str, steps: list[str]) -> str:
     return f"{prompt}\n\n{workflow}"
 
 
+def _render_skill_section_xml_tags(phase_or_profile: Any) -> str:
+    """Render optional prompt-schema fields as XML-ish skill-section tags."""
+    sections: list[str] = []
+
+    domain_protocols = list(getattr(phase_or_profile, "domain_protocols", []) or [])
+    if domain_protocols:
+        lines = ["<domain_protocols>"]
+        lines.extend(
+            f"  [protocol:P{i}] {protocol}"
+            for i, protocol in enumerate(domain_protocols, start=1)
+        )
+        lines.append("</domain_protocols>")
+        sections.append("\n".join(lines))
+
+    few_shot_examples = list(getattr(phase_or_profile, "few_shot_examples", []) or [])
+    if few_shot_examples:
+        lines = ["<examples>"]
+        lines.extend(
+            f'  <example id="{i}">{example}</example>'
+            for i, example in enumerate(few_shot_examples, start=1)
+        )
+        lines.append("</examples>")
+        sections.append("\n".join(lines))
+
+    references = list(getattr(phase_or_profile, "references", []) or [])
+    if references:
+        lines = [
+            "<knowledge_base>",
+            "  本地有以下参考文件，请在需要时调用 read_file 查阅：",
+        ]
+        lines.extend(f"  - {reference}" for reference in references)
+        lines.append("</knowledge_base>")
+        sections.append("\n".join(lines))
+
+    context_access = list(getattr(phase_or_profile, "context_access", []) or [])
+    if context_access:
+        tool_names = {
+            "artifact": "read_artifact",
+            "working_memory": "read_working_memory",
+        }
+        lines = [
+            "<context_access>",
+            "  如果在当前输入中发现信息缺失，你被授权使用以下工具追溯前序上下文：",
+        ]
+        lines.extend(f"  - {tool_names[item]}" for item in context_access)
+        lines.append("</context_access>")
+        sections.append("\n".join(lines))
+
+    return "\n\n".join(sections)
+
+
 def _compose_agent_system_prompt(manifest: "AgentSkillDef") -> str:
     """Assemble an agent skill's System Prompt from its agent_profile.
 
@@ -408,6 +459,9 @@ def _compose_agent_system_prompt(manifest: "AgentSkillDef") -> str:
     """
     profile = manifest.agent_profile
     prompt = "\n\n".join([f"你是{profile.role}。", f"你的目标:{profile.goal}"])
+    xml_tags = _render_skill_section_xml_tags(profile)
+    if xml_tags:
+        prompt = f"{prompt}\n\n{xml_tags}"
     prompt = _append_steps_to_prompt(prompt, profile.steps)
     if profile.constraints:
         constraints = "## 约束\n" + "\n".join(f"- {c}" for c in profile.constraints)
@@ -424,24 +478,17 @@ def _inject_persona(
     Persona's ``role_profile`` establishes the LLM's identity and is layered
     *before* the phase-specific instructions. ``evaluation_rubrics`` (when
     present) sit between the two as a self-evaluation lens the LLM should
-    apply. ``few_shot_examples`` would need a messages-history surface that
-    Phase doesn't yet expose; raising rather than silently dropping the field
-    forces authors to either remove it or wait for the runtime to land.
-
-    Future work: wire ``few_shot_examples`` through the LLM client as
-    pre-filled assistant/user pairs, then drop the NotImplementedError.
+    apply. ``few_shot_examples`` are rendered into the same ``<examples>``
+    tag used by AgentProfile / LLMPhase prompt-schema fields.
     """
-    if persona.few_shot_examples:
-        raise NotImplementedError(
-            f"Persona '{persona.name}' declares few_shot_examples, but the "
-            "runtime does not yet materialise them as pre-filled message "
-            "history. Leave the list empty until the wiring lands."
-        )
     parts: list[str] = [persona.role_profile]
     if persona.evaluation_rubrics:
         parts.append("---")
         parts.append("## 评估标准")
         parts.append(persona.evaluation_rubrics)
+    xml_tags = _render_skill_section_xml_tags(persona)
+    if xml_tags:
+        parts.append(xml_tags)
     parts.append("---")
     parts.append(system_prompt or "")
     return "\n\n".join(parts)
@@ -468,16 +515,18 @@ def _phase_from_agent_skill(
         )
         system_prompt = _inject_persona(persona_manifest, system_prompt)
     tools = [_resolve_tool_reference(ref, base_dir) for ref in manifest.agent_tools]
-    return Phase(
+    phase = Phase(
         name=manifest.name,
         system_prompt=system_prompt,
         user_prompt_template=manifest.user_prompt_template,
         tools=tools,
-        tier=manifest.tier or "balanced",
+        tier=manifest.agent_profile.llm_role or manifest.tier or "balanced",
+        llm_role=manifest.agent_profile.llm_role,
         model_override=manifest.model_override,
         subagent_enabled=manifest.subagent_enabled,
         requires_llm=True,
     )
+    return phase
 
 
 def _phase_from_graph_phase(
@@ -501,6 +550,9 @@ def _phase_from_graph_phase(
     if isinstance(phase_def, _LLMPhase):
         tools = [_resolve_tool_reference(ref, base_dir) for ref in phase_def.agent_tools]
         system_prompt = phase_def.prompt
+        xml_tags = _render_skill_section_xml_tags(phase_def)
+        if xml_tags:
+            system_prompt = f"{system_prompt}\n\n{xml_tags}" if system_prompt else xml_tags
         if phase_def.steps:
             system_prompt = _append_steps_to_prompt(system_prompt or "", phase_def.steps)
         if phase_def.adopted_persona is not None:
@@ -508,13 +560,14 @@ def _phase_from_graph_phase(
                 phase_def.adopted_persona, base_dir=base_dir,
             )
             system_prompt = _inject_persona(persona_manifest, system_prompt)
-        return Phase(
+        phase = Phase(
             name=phase_def.name,
             system_prompt=system_prompt,
             user_prompt_template=phase_def.user_prompt_template,
             tools=tools,
             max_iterations=phase_def.max_iterations if phase_def.max_iterations is not None else 20,
             tier=phase_def.tier or "balanced",
+            llm_role=phase_def.llm_role,
             model_override=phase_def.model_override,
             validator=(
                 _resolve_tool_reference(phase_def.validator, base_dir)
@@ -537,6 +590,7 @@ def _phase_from_graph_phase(
             output_schema_path=phase_def.output_schema,
             requires_llm=True,
         )
+        return phase
 
     if isinstance(phase_def, _LogicPhase):
         tools = [_resolve_tool_reference(ref, base_dir) for ref in phase_def.execute_steps]

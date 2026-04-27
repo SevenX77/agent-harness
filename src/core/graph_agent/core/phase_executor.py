@@ -685,24 +685,14 @@ class PhaseExecutor:
         finish_result = ctx.get("_finish_task_result")
         if isinstance(finish_result, dict):
             reasoning = str(
-                finish_result.get("execution_summary")
+                finish_result.get("diagnostics_md", "")
                 or finish_result.get("reasoning", "")
             )
-            evidence_raw = finish_result.get("evidence", [])
-            evidence = evidence_raw if isinstance(evidence_raw, list) else [str(evidence_raw)]
-            checklist = finish_result.get("plan_checklist", [])
-            if isinstance(checklist, list):
-                for item in checklist:
-                    if isinstance(item, dict):
-                        evidence.append(
-                            "checklist:"
-                            f"{item.get('step', '')}|"
-                            f"completed={item.get('completed', False)}|"
-                            f"quality={item.get('quality_check', '')}"
-                        )
+            business_data = str(finish_result.get("business_data_md", "")).strip()
+            callback_payload = [business_data] if business_data else []
             for cb in active_callbacks:
                 try:
-                    cb.on_finish_task(phase.name, reasoning, [str(item) for item in evidence])
+                    cb.on_finish_task(phase.name, reasoning, callback_payload)
                 except Exception as exc:
                     logger.warning('[Harness] callback error: %s', exc)
 

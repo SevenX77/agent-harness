@@ -39,7 +39,7 @@ phases:
       - script.extractor.format_segments_for_prompt
   - name: aggregate
     mode: llm
-    tier: balanced
+    llm_role: analyst
     max_iterations: 10
     max_nudges: 2
     agent_tools:
@@ -104,7 +104,7 @@ phases:
       5. 时间括号内只放原文原词，禁止填写自造补注
   - name: review
     mode: llm
-    tier: balanced
+    llm_role: analyst
     max_iterations: 10
     max_nudges: 2
     agent_tools:
@@ -155,7 +155,7 @@ phases:
       每个事件须填写**审查备注**（若无修改写"无变化"）。
   - name: settings
     mode: llm
-    tier: balanced
+    llm_role: analyst
     max_iterations: 10
     max_nudges: 2
     max_retries: 2
@@ -213,4 +213,3 @@ phases:
       2. 核心知识点简洁完整（50-100字）
       3. 如发现事件问题，给出修正建议
 ---
-

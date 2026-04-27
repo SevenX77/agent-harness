@@ -32,7 +32,7 @@ phases:
       - script.segmenter.prepare_chapter
   - name: segment
     mode: llm
-    tier: balanced
+    llm_role: analyst
     max_iterations: 10
     max_nudges: 2
     agent_tools:
@@ -136,7 +136,7 @@ phases:
       - 只有系统性讲解才是A类："XX体系是..."、"XX规则：..." → A类
   - name: review
     mode: llm
-    tier: balanced
+    llm_role: analyst
     max_iterations: 10
     max_nudges: 2
     max_retries: 2
@@ -266,4 +266,3 @@ phases:
       - 段落必须连续覆盖所有行，不能跳过任何行
       - 按优先级处理：C类边界 > A/B混合 > B类连续性 > 基础分类
 ---
-

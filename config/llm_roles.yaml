@@ -297,11 +297,12 @@ roles:
   # ── 功能角色 ──
   analyst:
     temperature: 0.2
-    model_fallback: false
+    model_fallback: true
     active_model: CL46T
     models:
       CL46T: { providers: [OC_CL_ANT, OC_CL, WS_LLM] }
-      GM31P: { providers: [OC_GM] }
+      DS32R: { providers: [DS, OC_DS] }
+      GM31P: { providers: [GM_OFF, OC_GM] }
 
   architect:
     temperature: 0.2

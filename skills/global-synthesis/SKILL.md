@@ -37,7 +37,7 @@ io:
 phases:
   - name: global_analysis
     mode: llm
-    tier: balanced
+    llm_role: gemini
     max_iterations: 15
     max_nudges: 3
     agent_tools:
@@ -76,7 +76,7 @@ phases:
       - script.scene_builder.build_unified_event_stream
   - name: retroactive
     mode: llm
-    tier: balanced
+    llm_role: gemini
     max_iterations: 10
     max_nudges: 2
     agent_tools:
@@ -110,4 +110,3 @@ phases:
 
 ---
 <!-- TODO(schema-2.0): export phase lost max_retries=1 / retry_target=global_analysis (LogicPhase has no retry semantics in 2.0). -->
-

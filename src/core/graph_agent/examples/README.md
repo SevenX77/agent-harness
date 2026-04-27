@@ -77,7 +77,7 @@ type: simple
 
 <phase_config>
 name: my_phase
-tier: balanced
+llm_role: analyst
 tools:
   - script.my_tools.my_function
 </phase_config>

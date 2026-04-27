@@ -40,7 +40,7 @@ phases:
       - script.orchestrator.extract_all_events
   - name: batch_loop
     mode: llm
-    tier: balanced
+    llm_role: analyst
     max_iterations: 50
     max_nudges: 5
     agent_tools:
@@ -78,4 +78,3 @@ phases:
         story_framework: story_framework
 
 ---
-

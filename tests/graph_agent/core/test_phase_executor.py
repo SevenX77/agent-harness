@@ -7,6 +7,8 @@ subsequent steps will add coverage for validation and llm phases.
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from typing import Any
 
 from graph_agent.callbacks.base import Callback
@@ -45,6 +47,61 @@ def _make_state(
         "retry_counts": {},
         "metrics": dict(metrics or {}),
     }
+
+
+def _capture_execute_llm_phase(
+    monkeypatch: Any,
+    phase: Phase,
+) -> dict[str, Any]:
+    from graph_agent.core import phase_executor as phase_executor_module
+
+    class _ResolvedModel:
+        name = "fake-model"
+        profile = {"max_input_tokens": 100_000}
+        _llm_type = "fake-chat"
+
+        def _get_ls_params(self) -> dict[str, str]:
+            return {"ls_provider": "fake"}
+
+    class _Resolver:
+        def __init__(self) -> None:
+            self.model = _ResolvedModel()
+
+        def resolve(self, *_args: Any, **_kwargs: Any) -> _ResolvedModel:
+            return self.model
+
+    class _Agent:
+        def invoke(self, *_args: Any, **_kwargs: Any) -> dict[str, list[Any]]:
+            return {"messages": []}
+
+    captured: dict[str, Any] = {}
+
+    def fake_create_custom_middlewares(**kwargs: Any) -> list[Any]:
+        captured["middleware_kwargs"] = kwargs
+        return []
+
+    def fake_create_agent(**kwargs: Any) -> _Agent:
+        captured["create_agent_kwargs"] = kwargs
+        return _Agent()
+
+    monkeypatch.setattr(
+        phase_executor_module,
+        "create_custom_middlewares",
+        fake_create_custom_middlewares,
+    )
+    monkeypatch.setattr(phase_executor_module, "create_agent", fake_create_agent)
+
+    resolver = _Resolver()
+    executor = PhaseExecutor(
+        [],
+        resolver=resolver,
+        save_compaction_sidecar=lambda **_kwargs: "sidecar",
+    )
+
+    executor.execute_llm_phase(phase, _make_state())
+
+    captured["resolver_model"] = resolver.model
+    return captured
 
 
 class TestExecuteCodeOnlyPhase:
@@ -138,53 +195,9 @@ class TestExecuteCodeOnlyPhase:
 
 class TestExecuteLLMPhaseMiddlewareIntegration:
     def test_passes_resolved_model_to_summarization_middleware(self, monkeypatch):
-        from graph_agent.core import phase_executor as phase_executor_module
-
-        class _ResolvedModel:
-            name = "fake-model"
-            profile = {"max_input_tokens": 100_000}
-            _llm_type = "fake-chat"
-
-            def _get_ls_params(self) -> dict[str, str]:
-                return {"ls_provider": "fake"}
-
-        class _Resolver:
-            def __init__(self) -> None:
-                self.model = _ResolvedModel()
-
-            def resolve(self, *_args: Any, **_kwargs: Any) -> _ResolvedModel:
-                return self.model
-
-        class _Agent:
-            def invoke(self, *_args: Any, **_kwargs: Any) -> dict[str, list[Any]]:
-                return {"messages": []}
-
-        captured: dict[str, Any] = {}
-
-        def fake_create_custom_middlewares(**kwargs: Any) -> list[Any]:
-            captured["middleware_kwargs"] = kwargs
-            return []
-
-        def fake_create_agent(**kwargs: Any) -> _Agent:
-            captured["create_agent_kwargs"] = kwargs
-            return _Agent()
-
-        monkeypatch.setattr(
-            phase_executor_module,
-            "create_custom_middlewares",
-            fake_create_custom_middlewares,
-        )
-        monkeypatch.setattr(phase_executor_module, "create_agent", fake_create_agent)
-
-        resolver = _Resolver()
-        executor = PhaseExecutor(
-            [],
-            resolver=resolver,
-            save_compaction_sidecar=lambda **_kwargs: "sidecar",
-        )
         phase = Phase(name="llm", max_iterations=1, max_nudges=0)
 
-        executor.execute_llm_phase(phase, _make_state())
+        captured = _capture_execute_llm_phase(monkeypatch, phase)
 
         middleware_kwargs = captured["middleware_kwargs"]
         agent_model = captured["create_agent_kwargs"]["model"]
@@ -193,4 +206,71 @@ class TestExecuteLLMPhaseMiddlewareIntegration:
         assert middleware_kwargs["summarization_model"] is agent_model
         assert middleware_kwargs["summarization_trigger_fraction"] == 0.8
         assert middleware_kwargs["summarization_keep_messages"] == 20
-        assert getattr(agent_model, "_wrapped") is resolver.model
+        assert getattr(agent_model, "_wrapped") is captured["resolver_model"]
+
+
+class TestExecuteLLMPhaseReadFileIntegration:
+    def test_mounts_read_file_when_references_non_empty(
+        self,
+        monkeypatch,
+        tmp_path: Path,
+    ) -> None:
+        phase = Phase(
+            name="llm",
+            max_iterations=1,
+            max_nudges=0,
+            references=["references/guide.md"],
+            skill_base_dir=tmp_path,
+        )
+
+        captured = _capture_execute_llm_phase(monkeypatch, phase)
+        tool_names = [
+            getattr(tool, "name", getattr(tool, "__name__", ""))
+            for tool in captured["create_agent_kwargs"]["tools"]
+        ]
+
+        assert "read_file" in tool_names
+
+    def test_does_not_mount_read_file_when_references_empty(
+        self,
+        monkeypatch,
+        tmp_path: Path,
+    ) -> None:
+        phase = Phase(
+            name="llm",
+            max_iterations=1,
+            max_nudges=0,
+            references=[],
+            skill_base_dir=tmp_path,
+        )
+
+        captured = _capture_execute_llm_phase(monkeypatch, phase)
+        tool_names = [
+            getattr(tool, "name", getattr(tool, "__name__", ""))
+            for tool in captured["create_agent_kwargs"]["tools"]
+        ]
+
+        assert "read_file" not in tool_names
+
+    def test_missing_skill_base_dir_warns_and_skips_read_file(
+        self,
+        monkeypatch,
+        caplog,
+    ) -> None:
+        caplog.set_level(logging.WARNING)
+        phase = Phase(
+            name="llm",
+            max_iterations=1,
+            max_nudges=0,
+            references=["references/guide.md"],
+            skill_base_dir=None,
+        )
+
+        captured = _capture_execute_llm_phase(monkeypatch, phase)
+        tool_names = [
+            getattr(tool, "name", getattr(tool, "__name__", ""))
+            for tool in captured["create_agent_kwargs"]["tools"]
+        ]
+
+        assert "read_file" not in tool_names
+        assert "read_file tool not mounted" in caplog.text

@@ -57,7 +57,9 @@ export default function App() {
       .then(data => {
         setSkills(data.skills);
         if (data.skills.length > 0) {
-          loadSkill(data.skills[0].id);
+          // Check if story-deconstruction exists, otherwise load the first one
+          const targetSkill = data.skills.find((s: any) => s.id === 'story-deconstruction') || data.skills[0];
+          loadSkill(targetSkill.id);
         }
       })
       .catch(err => console.error("Failed to fetch skills", err));
@@ -91,111 +93,157 @@ export default function App() {
       style: { background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '10px', minWidth: '200px', textAlign: 'center', fontWeight: 'bold', color: '#475569' }
     });
 
-    // 2. Parse phase_configs
+    // 2. Parse nodes and phase_configs
+    // Support both <node> wrapping <phase_config> and direct <phase_config>
+    const nodeRegex = /<node\s+id="([^"]+)"(?:.*?depends_on="([^"]+)")?>([\s\S]*?)<\/node>/g;
     const phaseRegex = /<phase_config>([\s\S]*?)<\/phase_config>/g;
+    
     let match;
     let yPos = 150;
-    const phases = [];
-
-    while ((match = phaseRegex.exec(code)) !== null) {
-      try {
-        const phaseConfig: any = yaml.load(match[1]);
-        if (phaseConfig && phaseConfig.name) {
-          phases.push(phaseConfig);
-          
-          const isSubgraph = !!phaseConfig.subgraph;
-          const isExpanded = expandedNodes.has(phaseConfig.name);
-          
-          newNodes.push({
-            id: phaseConfig.name,
-            type: isSubgraph ? 'subgraph' : 'agent',
-            data: { 
-              label: phaseConfig.name,
-              isExpanded: isExpanded,
-              subgraphPath: phaseConfig.subgraph,
-              tier: phaseConfig.tier,
-              onToggleExpand: () => toggleSubgraph(phaseConfig.name)
-            },
-            position: { x: 250, y: yPos }
-          });
-
-          // Add edges based on depends_on
-          if (phaseConfig.depends_on) {
-            const deps = Array.isArray(phaseConfig.depends_on) ? phaseConfig.depends_on : [phaseConfig.depends_on];
-            deps.forEach((dep: string) => {
-              newEdges.push({
-                id: `e-${dep}-${phaseConfig.name}`,
-                source: dep,
-                target: phaseConfig.name,
-                animated: true,
-                markerEnd: { type: MarkerType.ArrowClosed },
-                style: { stroke: '#94a3b8', strokeWidth: 2 }
-              });
-            });
-          } else if (phases.length === 1) {
-             // Connect first phase to input
-             newEdges.push({
-              id: `e-input-${phaseConfig.name}`,
-              source: 'input',
-              target: phaseConfig.name,
-              animated: true,
-              markerEnd: { type: MarkerType.ArrowClosed },
-              style: { stroke: '#94a3b8', strokeWidth: 2 }
-            });
+    const phases: any[] = [];
+    
+    // First, try to parse <node> tags
+    let hasNodes = false;
+    while ((match = nodeRegex.exec(code)) !== null) {
+      hasNodes = true;
+      const nodeId = match[1];
+      const dependsOnAttr = match[2];
+      const nodeContent = match[3];
+      
+      const phaseMatch = phaseRegex.exec(nodeContent);
+      if (phaseMatch) {
+        try {
+          const phaseConfig: any = yaml.load(phaseMatch[1]);
+          if (phaseConfig) {
+            phaseConfig.name = phaseConfig.name || nodeId; // Use node id if name is missing
+            if (dependsOnAttr) {
+              phaseConfig.depends_on = dependsOnAttr.split(',').map(d => d.trim());
+            }
+            phases.push(phaseConfig);
           }
-
-          // If expanded, add mock child nodes and adjust yPos
-          if (isSubgraph && isExpanded) {
-            yPos += 140;
-            
-            // Mock child nodes for expanded subgraph
-            const child1Id = `${phaseConfig.name}_child1`;
-            const child2Id = `${phaseConfig.name}_child2`;
-            
-            newNodes.push({
-              id: child1Id,
-              type: 'agent',
-              data: { label: 'sub_phase_1', tier: 'balanced' },
-              position: { x: 250, y: yPos },
-              style: { opacity: 0.8, transform: 'scale(0.9)' }
-            });
-            
-            newEdges.push({
-              id: `e-${phaseConfig.name}-${child1Id}`,
-              source: phaseConfig.name,
-              target: child1Id,
-              animated: true,
-              style: { stroke: '#c084fc', strokeDasharray: '5,5' }
-            });
-            
-            yPos += 120;
-            
-            newNodes.push({
-              id: child2Id,
-              type: 'agent',
-              data: { label: 'sub_phase_2', tier: 'premium' },
-              position: { x: 250, y: yPos },
-              style: { opacity: 0.8, transform: 'scale(0.9)' }
-            });
-            
-            newEdges.push({
-              id: `e-${child1Id}-${child2Id}`,
-              source: child1Id,
-              target: child2Id,
-              animated: true,
-              style: { stroke: '#c084fc', strokeDasharray: '5,5' }
-            });
-            
-            // The next main node should connect from child2Id
-            phaseConfig._lastChildId = child2Id;
-          }
-
-          yPos += 140;
+        } catch (e) {
+          console.error("Failed to parse phase_config inside node", e);
         }
-      } catch (e) {
-        console.error("Failed to parse phase_config", e);
+      } else {
+        // If there's no <phase_config> inside <node>, it might be just a ref or empty.
+        // We still need to represent the node in the graph.
+        phases.push({
+          name: nodeId,
+          depends_on: dependsOnAttr ? dependsOnAttr.split(',').map(d => d.trim()) : undefined
+        });
+      }
+      // Reset phaseRegex for next node
+      phaseRegex.lastIndex = 0;
+    }
+    
+    // If no <node> tags found, fallback to parsing direct <phase_config> tags
+    if (!hasNodes) {
+      while ((match = phaseRegex.exec(code)) !== null) {
+        try {
+          const phaseConfig: any = yaml.load(match[1]);
+          if (phaseConfig && phaseConfig.name) {
+            phases.push(phaseConfig);
+          }
+        } catch (e) {
+          console.error("Failed to parse phase_config", e);
+        }
       }
     }
+
+    phases.forEach((phaseConfig, index) => {
+      const isSubgraph = !!phaseConfig.subgraph;
+      const isExpanded = expandedNodes.has(phaseConfig.name);
+      
+      newNodes.push({
+        id: phaseConfig.name,
+        type: isSubgraph ? 'subgraph' : 'agent',
+        data: { 
+          label: phaseConfig.name,
+          isExpanded: isExpanded,
+          subgraphPath: phaseConfig.subgraph,
+          tier: phaseConfig.tier,
+          onToggleExpand: () => toggleSubgraph(phaseConfig.name)
+        },
+        position: { x: 250, y: yPos }
+      });
+
+      // Add edges based on depends_on
+      if (phaseConfig.depends_on && phaseConfig.depends_on.length > 0) {
+        const deps = Array.isArray(phaseConfig.depends_on) ? phaseConfig.depends_on : [phaseConfig.depends_on];
+        deps.forEach((dep: string) => {
+          // If the dependency was an expanded subgraph, connect from its last child
+          const depPhase = phases.find(p => p.name === dep);
+          const sourceId = depPhase && depPhase._lastChildId ? depPhase._lastChildId : dep;
+          
+          newEdges.push({
+            id: `e-${sourceId}-${phaseConfig.name}`,
+            source: sourceId,
+            target: phaseConfig.name,
+            animated: true,
+            markerEnd: { type: MarkerType.ArrowClosed },
+            style: { stroke: '#94a3b8', strokeWidth: 2 }
+          });
+        });
+      } else if (index === 0 || !phaseConfig.depends_on || phaseConfig.depends_on.length === 0) {
+         // Connect first phase or phase without dependencies to input
+         newEdges.push({
+          id: `e-input-${phaseConfig.name}`,
+          source: 'input',
+          target: phaseConfig.name,
+          animated: true,
+          markerEnd: { type: MarkerType.ArrowClosed },
+          style: { stroke: '#94a3b8', strokeWidth: 2 }
+        });
+      }
+
+      // If expanded, add mock child nodes and adjust yPos
+      if (isSubgraph && isExpanded) {
+        yPos += 140;
+            
+        // Mock child nodes for expanded subgraph
+        const child1Id = `${phaseConfig.name}_child1`;
+        const child2Id = `${phaseConfig.name}_child2`;
+        
+        newNodes.push({
+          id: child1Id,
+          type: 'agent',
+          data: { label: 'sub_phase_1', tier: 'balanced' },
+          position: { x: 250, y: yPos },
+          style: { opacity: 0.8, transform: 'scale(0.9)' }
+        });
+        
+        newEdges.push({
+          id: `e-${phaseConfig.name}-${child1Id}`,
+          source: phaseConfig.name,
+          target: child1Id,
+          animated: true,
+          style: { stroke: '#c084fc', strokeDasharray: '5,5' }
+        });
+        
+        yPos += 120;
+        
+        newNodes.push({
+          id: child2Id,
+          type: 'agent',
+          data: { label: 'sub_phase_2', tier: 'premium' },
+          position: { x: 250, y: yPos },
+          style: { opacity: 0.8, transform: 'scale(0.9)' }
+        });
+        
+        newEdges.push({
+          id: `e-${child1Id}-${child2Id}`,
+          source: child1Id,
+          target: child2Id,
+          animated: true,
+          style: { stroke: '#c084fc', strokeDasharray: '5,5' }
+        });
+        
+        // The next main node should connect from child2Id
+        phaseConfig._lastChildId = child2Id;
+      }
+
+      yPos += 140;
+    });
 
     // Add Output Node
     newNodes.push({
@@ -209,7 +257,8 @@ export default function App() {
     // Connect last phases to output
     const sources = new Set(newEdges.map(e => e.source));
     phases.forEach(p => {
-      if (!sources.has(p.name) && !sources.has(p._lastChildId)) {
+      // A phase is a leaf if neither its name nor its last child is a source for any edge
+      if (!sources.has(p.name) && (!p._lastChildId || !sources.has(p._lastChildId))) {
         const sourceId = p._lastChildId || p.name;
         newEdges.push({
           id: `e-${sourceId}-output`,

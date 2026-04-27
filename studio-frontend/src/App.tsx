@@ -1,8 +1,9 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { ReactFlow, MiniMap, Controls, Background, useNodesState, useEdgesState, addEdge, MarkerType, Node, Edge } from 'reactflow';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { ReactFlow, MiniMap, Controls, Background, useNodesState, useEdgesState, addEdge, MarkerType } from 'reactflow';
+import type { Node, Edge } from 'reactflow';
 import 'reactflow/dist/style.css';
 import Editor from '@monaco-editor/react';
-import { Play, CheckCircle, AlertCircle, FileText, Settings, Terminal, Copy, FolderOpen, Save, HardDrive, ChevronDown, ChevronRight, Clock, Hash, MessageSquare } from 'lucide-react';
+import { Play, CheckCircle, AlertCircle, FileText, Settings, Terminal, Copy, FolderOpen, Save, HardDrive, ChevronRight, Hash, MessageSquare } from 'lucide-react';
 import yaml from 'js-yaml';
 import { SubgraphNode, AgentNode } from './CustomNodes';
 
@@ -51,7 +52,7 @@ export default function App() {
 
   // Fetch skills list on load
   useEffect(() => {
-    fetch(\`\${API_BASE_URL}/skills\`)
+    fetch(`${API_BASE_URL}/skills`)
       .then(res => res.json())
       .then(data => {
         setSkills(data.skills);
@@ -85,7 +86,7 @@ export default function App() {
     newNodes.push({
       id: 'input',
       type: 'input',
-      data: { label: \`Input: \${inputs.map((i: any) => i.name).join(', ') || 'None'}\` },
+      data: { label: `Input: ${inputs.map((i: any) => i.name).join(', ') || 'None'}` },
       position: { x: 250, y: 50 },
       style: { background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '10px', minWidth: '200px', textAlign: 'center', fontWeight: 'bold', color: '#475569' }
     });
@@ -123,7 +124,7 @@ export default function App() {
             const deps = Array.isArray(phaseConfig.depends_on) ? phaseConfig.depends_on : [phaseConfig.depends_on];
             deps.forEach((dep: string) => {
               newEdges.push({
-                id: \`e-\${dep}-\${phaseConfig.name}\`,
+                id: `e-${dep}-${phaseConfig.name}`,
                 source: dep,
                 target: phaseConfig.name,
                 animated: true,
@@ -134,7 +135,7 @@ export default function App() {
           } else if (phases.length === 1) {
              // Connect first phase to input
              newEdges.push({
-              id: \`e-input-\${phaseConfig.name}\`,
+              id: `e-input-${phaseConfig.name}`,
               source: 'input',
               target: phaseConfig.name,
               animated: true,
@@ -148,8 +149,8 @@ export default function App() {
             yPos += 140;
             
             // Mock child nodes for expanded subgraph
-            const child1Id = \`\${phaseConfig.name}_child1\`;
-            const child2Id = \`\${phaseConfig.name}_child2\`;
+            const child1Id = `${phaseConfig.name}_child1`;
+            const child2Id = `${phaseConfig.name}_child2`;
             
             newNodes.push({
               id: child1Id,
@@ -160,7 +161,7 @@ export default function App() {
             });
             
             newEdges.push({
-              id: \`e-\${phaseConfig.name}-\${child1Id}\`,
+              id: `e-${phaseConfig.name}-${child1Id}`,
               source: phaseConfig.name,
               target: child1Id,
               animated: true,
@@ -178,7 +179,7 @@ export default function App() {
             });
             
             newEdges.push({
-              id: \`e-\${child1Id}-\${child2Id}\`,
+              id: `e-${child1Id}-${child2Id}`,
               source: child1Id,
               target: child2Id,
               animated: true,
@@ -200,7 +201,7 @@ export default function App() {
     newNodes.push({
       id: 'output',
       type: 'output',
-      data: { label: \`Output: \${outputs.map((o: any) => o.name).join(', ') || 'None'}\` },
+      data: { label: `Output: ${outputs.map((o: any) => o.name).join(', ') || 'None'}` },
       position: { x: 250, y: yPos },
       style: { background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '10px', minWidth: '200px', textAlign: 'center', fontWeight: 'bold', color: '#166534' }
     });
@@ -211,7 +212,7 @@ export default function App() {
       if (!sources.has(p.name) && !sources.has(p._lastChildId)) {
         const sourceId = p._lastChildId || p.name;
         newEdges.push({
-          id: \`e-\${sourceId}-output\`,
+          id: `e-${sourceId}-output`,
           source: sourceId,
           target: 'output',
           animated: true,
@@ -246,7 +247,7 @@ export default function App() {
   // Load specific skill
   const loadSkill = async (skillId: string) => {
     try {
-      const res = await fetch(\`\${API_BASE_URL}/skills/\${skillId}\`);
+      const res = await fetch(`${API_BASE_URL}/skills/${skillId}`);
       const data = await res.json();
       setActiveSkillId(skillId);
       setSkillCode(data.content);
@@ -266,7 +267,7 @@ export default function App() {
     
     setCompileStatus('compiling');
     try {
-      const res = await fetch(\`\${API_BASE_URL}/skills/\${activeSkillId}/compile\`, {
+      const res = await fetch(`${API_BASE_URL}/skills/${activeSkillId}/compile`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: skillCode })
@@ -296,13 +297,13 @@ export default function App() {
     setTraceLogs([]);
     setSelectedPromptIndex(null);
     
-    const runId = \`run_\${Date.now()}\`;
+    const runId = `run_${Date.now()}`;
     
     if (wsRef.current) {
       wsRef.current.close();
     }
     
-    const ws = new WebSocket(\`ws://localhost:8787/ws/run/\${runId}\`);
+    const ws = new WebSocket(`ws://localhost:8787/ws/run/${runId}`);
     wsRef.current = ws;
     
     ws.onmessage = (event) => {
@@ -334,27 +335,27 @@ export default function App() {
     if (!log || log.type !== 'llm_call') return null;
 
     // Mock prompt data
-    const template = \`你是一个产品专家。请从参数表中提取3-5个核心亮点。
+    const template = `你是一个产品专家。请从参数表中提取3-5个核心亮点。
 输入数据：
-{product_specs}\`;
+{product_specs}`;
     
-    const variables = \`{
+    const variables = `{
   "product_specs": {
     "name": "iPhone 15",
     "chip": "A16 Bionic",
     "camera": "48MP Main",
     "material": "Color-infused glass and aluminum"
   }
-}\`;
+}`;
 
-    const finalPrompt = \`你是一个产品专家。请从参数表中提取3-5个核心亮点。
+    const finalPrompt = `你是一个产品专家。请从参数表中提取3-5个核心亮点。
 输入数据：
 {
   "name": "iPhone 15",
   "chip": "A16 Bionic",
   "camera": "48MP Main",
   "material": "Color-infused glass and aluminum"
-}\`;
+}`;
 
     return (
       <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-8">
@@ -419,11 +420,11 @@ export default function App() {
               <li 
                 key={skill.id}
                 onClick={() => loadSkill(skill.id)}
-                className={\`p-2 rounded-md cursor-pointer flex items-center gap-2 font-medium transition-colors \${
+                className={`p-2 rounded-md cursor-pointer flex items-center gap-2 font-medium transition-colors ${
                   activeSkillId === skill.id 
                     ? 'bg-blue-50 text-blue-700 border border-blue-100' 
                     : 'hover:bg-gray-100 text-gray-600 border border-transparent'
-                }\`}
+                }`}
               >
                 <FileText className="w-4 h-4" />
                 {skill.name}
@@ -436,9 +437,9 @@ export default function App() {
         <div className="p-4 border-t border-gray-200">
           <button 
             onClick={() => setActiveTab('settings')}
-            className={\`w-full p-2 rounded-md flex items-center justify-center gap-2 font-medium transition-colors \${
+            className={`w-full p-2 rounded-md flex items-center justify-center gap-2 font-medium transition-colors ${
               activeTab === 'settings' ? 'bg-gray-200 text-gray-800' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }\`}
+            }`}
           >
             <Settings className="w-4 h-4" />
             Settings
@@ -516,11 +517,11 @@ export default function App() {
             <button 
               onClick={handleRun}
               disabled={compileStatus !== 'success' || runStatus === 'running'}
-              className={\`px-4 py-1.5 rounded-md font-medium flex items-center gap-2 transition-colors \${
+              className={`px-4 py-1.5 rounded-md font-medium flex items-center gap-2 transition-colors ${
                 compileStatus === 'success' && runStatus !== 'running'
                   ? 'bg-blue-600 hover:bg-blue-700 text-white' 
                   : 'bg-blue-300 text-white cursor-not-allowed'
-              }\`}
+              }`}
             >
               <Play className="w-4 h-4" />
               {runStatus === 'running' ? 'Running...' : 'Run'}
@@ -555,14 +556,14 @@ export default function App() {
           <div className="w-[500px] flex flex-col bg-white z-10">
             <div className="flex border-b border-gray-200 shrink-0">
               <button 
-                className={\`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-2 \${activeTab === 'code' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}\`}
+                className={`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-2 ${activeTab === 'code' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
                 onClick={() => setActiveTab('code')}
               >
                 <FileText className="w-4 h-4" />
                 SKILL.md
               </button>
               <button 
-                className={\`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-2 \${activeTab === 'trace' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}\`}
+                className={`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-2 ${activeTab === 'trace' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
                 onClick={() => setActiveTab('trace')}
               >
                 <Terminal className="w-4 h-4" />
@@ -664,29 +665,29 @@ export default function App() {
                         {traceLogs.map((log, i) => (
                           <div key={i} className="relative pl-6">
                             {/* Timeline Dot */}
-                            <div className={\`absolute -left-[9px] top-1 w-4 h-4 rounded-full border-2 border-white \${
+                            <div className={`absolute -left-[9px] top-1 w-4 h-4 rounded-full border-2 border-white ${
                               log.type === 'system' ? 'bg-green-500' :
                               log.type === 'phase_start' ? 'bg-blue-500' :
                               log.type === 'llm_call' ? 'bg-purple-500' :
                               log.type === 'phase_end' ? 'bg-gray-400' : 'bg-green-600'
-                            }\`} />
+                            }`} />
                             
                             {/* Content Card */}
-                            <div className={\`p-3 rounded-lg border shadow-sm \${
+                            <div className={`p-3 rounded-lg border shadow-sm ${
                               log.type === 'system' ? 'bg-green-50 border-green-200' :
                               log.type === 'phase_start' ? 'bg-blue-50 border-blue-200' :
                               log.type === 'llm_call' ? 'bg-white border-purple-200 hover:border-purple-400 cursor-pointer transition-colors' :
                               log.type === 'phase_end' ? 'bg-gray-50 border-gray-200' : 'bg-green-100 border-green-300'
-                            }\`}
+                            }`}
                             onClick={() => log.type === 'llm_call' && setSelectedPromptIndex(i)}
                             >
                               <div className="flex items-center justify-between mb-1">
-                                <span className={\`text-sm font-bold \${
+                                <span className={`text-sm font-bold ${
                                   log.type === 'system' ? 'text-green-800' :
                                   log.type === 'phase_start' ? 'text-blue-800' :
                                   log.type === 'llm_call' ? 'text-purple-800 flex items-center gap-1' :
                                   log.type === 'phase_end' ? 'text-gray-700' : 'text-green-900'
-                                }\`}>
+                                }`}>
                                   {log.type === 'llm_call' && <MessageSquare className="w-3.5 h-3.5" />}
                                   {log.type === 'llm_call' ? 'LLM Call' : log.phase || 'System'}
                                 </span>

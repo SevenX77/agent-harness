@@ -1,10 +1,10 @@
-import React, { memo } from 'react';
+import { memo } from 'react';
 import { Handle, Position } from 'reactflow';
 import { Layers, ChevronDown, ChevronRight, Cpu } from 'lucide-react';
 
 export const SubgraphNode = memo(({ data, isConnectable }: any) => {
   return (
-    <div className={\`px-4 py-3 shadow-md rounded-md bg-purple-50 border-2 \${data.isExpanded ? 'border-purple-500' : 'border-purple-200'} min-w-[220px]\`}>
+    <div className={`px-4 py-3 shadow-md rounded-md bg-purple-50 border-2 ${data.isExpanded ? 'border-purple-500' : 'border-purple-200'} min-w-[220px]`}>
       <Handle type="target" position={Position.Top} isConnectable={isConnectable} className="w-3 h-3 bg-purple-400" />
       
       <div className="flex items-center justify-between">

@@ -296,8 +296,12 @@ class TestExecuteLLMPhaseContextAccessIntegration:
         monkeypatch,
         context_access: list[str],
     ) -> list[str]:
-        phase = Phase(name="llm", max_iterations=1, max_nudges=0)
-        phase.context_access = context_access  # type: ignore[attr-defined]
+        phase = Phase(
+            name="llm",
+            max_iterations=1,
+            max_nudges=0,
+            context_access=context_access,
+        )
 
         captured = _capture_execute_llm_phase(monkeypatch, phase)
         return [
@@ -337,28 +341,6 @@ class TestExecuteLLMPhaseContextAccessIntegration:
             monkeypatch,
             ["artifact", "working_memory"],
         )
-
-        assert "read_artifact" in tool_names
-        assert "query_working_memory" in tool_names
-
-    def test_context_access_prompt_fallback_mounts_tools(self, monkeypatch) -> None:
-        phase = Phase(
-            name="llm",
-            max_iterations=1,
-            max_nudges=0,
-            system_prompt=(
-                "<context_access>\n"
-                "  - read_artifact\n"
-                "  - query_working_memory\n"
-                "</context_access>"
-            ),
-        )
-
-        captured = _capture_execute_llm_phase(monkeypatch, phase)
-        tool_names = [
-            getattr(tool, "name", getattr(tool, "__name__", ""))
-            for tool in captured["create_agent_kwargs"]["tools"]
-        ]
 
         assert "read_artifact" in tool_names
         assert "query_working_memory" in tool_names

@@ -58,23 +58,6 @@ from .types import Phase
 logger = logging.getLogger(__name__)
 
 
-def _context_access_from_prompt(system_prompt: str | None) -> list[str]:
-    """Infer context-access opt-ins from loader-rendered prompt tags."""
-    if not system_prompt or "<context_access>" not in system_prompt:
-        return []
-    start = system_prompt.find("<context_access>")
-    end = system_prompt.find("</context_access>", start)
-    if end == -1:
-        return []
-    section = system_prompt[start:end]
-    access: list[str] = []
-    if "working_memory" in section or "query_working_memory" in section:
-        access.append("working_memory")
-    if "artifact" in section or "read_artifact" in section:
-        access.append("artifact")
-    return access
-
-
 class PhaseExecutor:
     """Execute a single phase invocation; retry / routing is the graph's job.
 
@@ -412,9 +395,7 @@ class PhaseExecutor:
                     phase.name,
                     len(references),
                 )
-        context_access = list(getattr(phase, "context_access", []) or [])
-        if not context_access:
-            context_access = _context_access_from_prompt(phase.system_prompt)
+        context_access = list(phase.context_access)
         if context_access:
             from ..tools.builtin.context_access import (
                 query_working_memory,

@@ -464,15 +464,22 @@ def _render_skill_section_xml_tags(phase_or_profile: Any) -> str:
 
 
 def _render_output_format_markdown(output_schema_path: str) -> str:
-    """Render output schema as Markdown field list for LLM consumption.
+    """Render output schema as Markdown template + field reference.
+
+    The template explicitly shows the ``##`` block + bullet structure
+    that md_to_json expects, so the LLM doesn't have to infer it from
+    field metadata alone. Falls back to empty string + log warning when
+    the schema can't be resolved (graceful degradation).
 
     Args:
-        output_schema_path: Dotted path to a Pydantic BaseModel class
-            (e.g., 'myapp.schemas.MyModel').
+        output_schema_path: Dotted path to a Pydantic BaseModel class.
 
     Returns:
-        Markdown string describing the schema fields, or empty string if
-        the schema cannot be resolved.
+        Markdown string with two sections:
+          1. Template skeleton showing ``## <id>`` + bullet fields with
+             placeholders.
+          2. Field reference listing required/optional + type + description.
+        Empty string on resolution failure.
 
     """
     try:
@@ -488,9 +495,20 @@ def _render_output_format_markdown(output_schema_path: str) -> str:
             )
             return ""
 
-        lines = [
-            "请按以下字段结构输出 business_data_md（每个字段一段 Markdown）：",
+        template_lines = [
+            "请按以下结构输出 business_data_md（一个或多个 `##` 块，每块对应一个 "
+            f"{class_name} 实例）：",
             "",
+            "```markdown",
+            "## <item_id 标识符>",
+        ]
+        for field_name in model_cls.model_fields:
+            template_lines.append(f"- {field_name}: <值>")
+        template_lines.append("```")
+
+        reference_lines = [
+            "",
+            "字段说明：",
         ]
         for field_name, field_info in model_cls.model_fields.items():
             field_type = getattr(
@@ -500,12 +518,12 @@ def _render_output_format_markdown(output_schema_path: str) -> str:
             )
             description = field_info.description or "（无描述）"
             required_marker = "（必填）" if field_info.is_required() else "（可选）"
-            lines.append(
+            reference_lines.append(
                 f"- **{field_name}** {required_marker}: "
                 f"`{field_type}` — {description}"
             )
 
-        return "\n".join(lines)
+        return "\n".join(template_lines + reference_lines)
 
     except (ImportError, AttributeError, ValueError) as exc:
         logger.warning(

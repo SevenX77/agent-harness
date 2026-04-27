@@ -227,6 +227,11 @@ def test_output_format_rendered_when_output_schema_set(tmp_path: Path) -> None:
 
     assert "<output_format>" in prompt
     assert "business_data_md" in prompt
+    assert "## <item_id 标识符>" in prompt
+    assert "- title: <值>" in prompt
+    assert "- score: <值>" in prompt
+    assert "- notes: <值>" in prompt
+    assert "字段说明：" in prompt
     assert "**title**" in prompt
     assert "**score**" in prompt
     assert "**notes**" in prompt

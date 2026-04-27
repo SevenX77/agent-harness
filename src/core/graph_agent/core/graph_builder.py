@@ -15,9 +15,9 @@ and extracted inside each node closure. This per-invocation threading
 instance or inside GraphBuilder.
 
 Per-phase execute bodies live on ``PhaseExecutor``; GraphBuilder only
-wires them into the StateGraph. Subgraph nodes come from a caller-
-supplied ``subgraph_node_factory`` so GraphBuilder stays independent
-of the subgraph module.
+wires them into the StateGraph. Subgraph / parallel-delegate nodes come
+from caller-supplied factories so GraphBuilder stays independent of those
+modules.
 """
 
 from __future__ import annotations
@@ -61,11 +61,14 @@ class GraphBuilder:
         retry_router: RetryRouter,
         checkpointer: Any = None,
         subgraph_node_factory: Callable[[Phase], Callable[..., WorkflowState]],
+        parallel_delegate_node_factory: Callable[[Phase], Callable[..., WorkflowState]]
+        | None = None,
     ) -> None:
         self._phases = phases
         self._retry_router = retry_router
         self._checkpointer = checkpointer
         self._subgraph_node_factory = subgraph_node_factory
+        self._parallel_delegate_node_factory = parallel_delegate_node_factory
 
     def build(self) -> Any:
         """Build and compile the LangGraph StateGraph for the phase pipeline."""
@@ -75,7 +78,23 @@ class GraphBuilder:
             execute_name = f"{phase.name}_execute"
             validate_name = f"{phase.name}_validate"
 
-            if phase.subgraph is not None:
+            if phase.parallel_subgraphs:
+                if self._parallel_delegate_node_factory is None:
+                    raise ValueError(
+                        "GraphBuilder requires parallel_delegate_node_factory "
+                        f"for phase '{phase.name}'"
+                    )
+                graph.add_node(
+                    execute_name,
+                    self._parallel_delegate_node_factory(phase),
+                )
+                graph.add_node(validate_name, self._make_validation_node(phase))
+                graph.add_edge(execute_name, validate_name)
+                graph.add_conditional_edges(
+                    validate_name,
+                    self._retry_router.build_route_callback(phase),
+                )
+            elif phase.subgraph is not None:
                 graph.add_node(execute_name, self._subgraph_node_factory(phase))
                 graph.add_node(validate_name, self._make_validation_node(phase))
                 graph.add_edge(execute_name, validate_name)

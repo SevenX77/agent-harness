@@ -61,7 +61,7 @@ phases:
       - script.paths.format_batch_events
   - name: entity_and_characters
     mode: llm
-    tier: balanced
+    llm_role: analyst
     max_iterations: 15
     max_nudges: 3
     agent_tools:
@@ -107,7 +107,7 @@ phases:
       请完成实体注册和角色状态分析。
   - name: parallel_analysis
     mode: llm
-    tier: balanced
+    llm_role: analyst
     max_iterations: 20
     max_nudges: 3
     agent_tools:
@@ -144,7 +144,7 @@ phases:
       请依次调用 6 个分析工具完成多维度分析。
   - name: continuity
     mode: llm
-    tier: balanced
+    llm_role: analyst
     max_iterations: 10
     max_nudges: 2
     agent_tools:
@@ -182,4 +182,3 @@ phases:
 
 ---
 <!-- TODO(schema-2.0): assemble phase lost max_retries=1 / retry_target=parallel_analysis (LogicPhase has no retry semantics in 2.0). -->
-

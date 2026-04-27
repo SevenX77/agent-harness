@@ -243,20 +243,6 @@ class TestPersonaPurity:
 class TestAgentSkillExtensions:
     """Fields added for 1.x → 2.0 migration of production agent skills."""
 
-    def test_agent_tier_accepted(self):
-        data = _base_agent_dict()
-        data["tier"] = "balanced"
-        with pytest.warns(DeprecationWarning, match="tier is deprecated"):
-            m = _SKILL_ADAPTER.validate_python(data)
-        assert isinstance(m, AgentSkillDef)
-        assert m.tier == "balanced"
-        assert m.agent_profile.llm_role == "balanced"
-
-    def test_agent_tier_defaults_to_none(self):
-        m = _SKILL_ADAPTER.validate_python(_base_agent_dict())
-        assert isinstance(m, AgentSkillDef)
-        assert m.tier is None
-
     def test_agent_user_prompt_template_accepted(self):
         data = _base_agent_dict()
         data["user_prompt_template"] = "Review the diff: {diff}"
@@ -941,15 +927,15 @@ class TestAgentProfileExtendedFields:
         assert profile.llm_role == "architect"
 
 
-class TestTierDeprecation:
-    def test_tier_alone_maps_to_llm_role(self):
-        with pytest.warns(DeprecationWarning, match="tier is deprecated"):
-            phase = LLMPhase.model_validate({
-                "mode": "llm",
-                "name": "p",
-                "tier": "balanced",
-            })
-        assert phase.llm_role == "balanced"
+class TestTierRemoval:
+    def test_llm_phase_rejects_tier_field(self):
+        """Q3 decision 2026-04-27: schema tier was removed."""
+        with pytest.raises(ValidationError, match="tier"):
+            LLMPhase(
+                name="test",
+                mode="llm",
+                tier="balanced",
+            )
 
     def test_llm_role_alone_works_normally(self):
         phase = LLMPhase.model_validate({
@@ -957,42 +943,35 @@ class TestTierDeprecation:
             "name": "p",
             "llm_role": "architect",
         })
-        assert phase.tier is None
         assert phase.llm_role == "architect"
 
-    def test_tier_and_llm_role_both_set_raises(self):
-        with pytest.raises(ValidationError) as exc:
-            LLMPhase.model_validate({
-                "mode": "llm",
-                "name": "p",
-                "tier": "balanced",
-                "llm_role": "architect",
-            })
-        assert "can't set both tier and llm_role" in str(exc.value)
+    def test_logic_phase_rejects_tier_field(self):
+        """LogicPhase also rejects tier through inherited extra='forbid'."""
+        with pytest.raises(ValidationError, match="tier"):
+            LogicPhase(
+                name="test",
+                mode="logic",
+                execute_steps=["mod.func"],
+                tier="balanced",
+            )
 
-    def test_agent_tier_alone_maps_to_profile_llm_role(self):
-        data = _base_agent_dict()
-        data["tier"] = "balanced"
-        with pytest.warns(DeprecationWarning, match="tier is deprecated"):
-            manifest = _SKILL_ADAPTER.validate_python(data)
-        assert isinstance(manifest, AgentSkillDef)
-        assert manifest.agent_profile.llm_role == "balanced"
+    def test_agent_skill_def_rejects_tier_field(self):
+        """Top-level AgentSkillDef no longer accepts tier."""
+        with pytest.raises(ValidationError, match="tier"):
+            AgentSkillDef(
+                type="agent",
+                name="test",
+                description="t",
+                agent_profile=AgentProfile(role="r", goal="g"),
+                tier="balanced",
+            )
 
     def test_agent_profile_llm_role_alone_works_normally(self):
         data = _base_agent_dict()
         data["agent_profile"]["llm_role"] = "architect"
         manifest = _SKILL_ADAPTER.validate_python(data)
         assert isinstance(manifest, AgentSkillDef)
-        assert manifest.tier is None
         assert manifest.agent_profile.llm_role == "architect"
-
-    def test_agent_tier_and_profile_llm_role_both_set_raises(self):
-        data = _base_agent_dict()
-        data["tier"] = "balanced"
-        data["agent_profile"]["llm_role"] = "architect"
-        with pytest.raises(ValidationError) as exc:
-            _SKILL_ADAPTER.validate_python(data)
-        assert "can't set both tier and llm_role" in str(exc.value)
 
 
 # =============================================================================

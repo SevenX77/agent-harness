@@ -1,7 +1,6 @@
 """Finish task and nudge utilities for cognitive control."""
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -50,21 +49,17 @@ def build_standard_nudge_text(nudge_count: int, latest_content: str) -> str:
 def finish_task(
     ctx: dict[str, Any],
     reasoning: str = "",
-    evidence: str = "[]",
-    execution_summary: str = "",
-    plan_checklist: str = "[]",
-    unresolved_issues: str = "",
     diagnostics_md: str = "",
     business_data_md: str = "",
 ) -> str:
     """完成当前 phase。
 
-    v2 契约（推荐使用）：
-    - diagnostics_md: 自检诊断 Markdown
-    - business_data_md: 业务输出 Markdown，会经 md_to_json 校验是否符合 output_schema
+    参数：
+    - diagnostics_md: 自检诊断 Markdown（推荐：逐条对照计划说明质量结论）
+    - business_data_md: 业务输出 Markdown，会经 md_to_json 校验是否符合 phase 的 output_schema
 
-    v1 契约（legacy，保留兼容，将在 PR-1.2 移除）：
-    - evidence / execution_summary / plan_checklist / unresolved_issues
+    最简调用：finish_task(reasoning="任务已完成")
+    （适用于无 output_schema 的 phase；不会触发 schema 验证）
     """
     if business_data_md:
         output_schema_path = ctx.get("output_schema_path") or ctx.get("_md_schema_path")
@@ -134,60 +129,17 @@ def finish_task(
         )
         return "PHASE_COMPLETE"
 
-    parsed_evidence: list[str] = []
-    raw_evidence = (evidence or "").strip()
-    if raw_evidence:
-        try:
-            parsed = json.loads(raw_evidence)
-            if isinstance(parsed, list):
-                parsed_evidence = [str(item) for item in parsed]
-            else:
-                parsed_evidence = [str(parsed)]
-        except (json.JSONDecodeError, ValueError, TypeError):
-            parsed_evidence = [raw_evidence]
-
-    parsed_checklist: list[dict[str, Any]] = []
-    raw_checklist = (plan_checklist or "").strip()
-    if raw_checklist:
-        try:
-            parsed = json.loads(raw_checklist)
-            if isinstance(parsed, list):
-                for item in parsed:
-                    if isinstance(item, dict):
-                        parsed_checklist.append({
-                            "step": str(item.get("step", "")),
-                            "completed": bool(item.get("completed", False)),
-                            "quality_check": str(item.get("quality_check", "")),
-                        })
-                    else:
-                        parsed_checklist.append(
-                            {"step": str(item), "completed": False, "quality_check": ""}
-                        )
-        except (json.JSONDecodeError, ValueError, TypeError):
-            parsed_checklist = [{"step": raw_checklist, "completed": False, "quality_check": ""}]
-
-    final_summary = (execution_summary or "").strip() or (reasoning or "").strip()
-    if not final_summary:
-        final_summary = "任务已结束。"
-
-    if not parsed_evidence and parsed_checklist:
-        parsed_evidence = [
-            f"{item.get('step', '')}: completed={item.get('completed', False)}"
-            for item in parsed_checklist
-        ]
-
     ctx["_finish_task_result"] = {
-        "execution_summary": final_summary,
-        "plan_checklist": parsed_checklist,
-        "unresolved_issues": (unresolved_issues or "").strip(),
         "reasoning": (reasoning or "").strip(),
-        "evidence": parsed_evidence,
+        "diagnostics_md": diagnostics_md.strip(),
+        "business_data_md": "",
+        "schema_validation": "skipped",
     }
     logger.info(
-        "finish_task: summary_len=%d, checklist_items=%d, evidence_items=%d",
-        len(final_summary),
-        len(parsed_checklist),
-        len(parsed_evidence),
+        "finish_task: no business_data_md, schema validation skipped "
+        "(reasoning_len=%d, diagnostics_len=%d)",
+        len(reasoning or ""),
+        len(diagnostics_md),
     )
     return "PHASE_COMPLETE"
 

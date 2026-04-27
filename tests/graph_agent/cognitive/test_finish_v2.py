@@ -36,22 +36,23 @@ def test_selfcheck_nudge_uses_finish_task_v2_contract() -> None:
 
 
 class TestFinishTaskV2:
-    def test_v1_signature_still_works(self) -> None:
+    def test_minimal_finish_with_only_reasoning(self) -> None:
         ctx: dict[str, object] = {}
 
         result = finish_task(
             ctx,  # type: ignore[arg-type]
-            reasoning="Reviewed all required evidence and completed the phase.",
-            evidence='["source-a"]',
-            execution_summary="done",
-            plan_checklist='[{"step":"s1","completed":true,"quality_check":"ok"}]',
-            unresolved_issues="none",
+            reasoning="Reviewed all required work and completed the phase.",
         )
 
         assert result == "PHASE_COMPLETE"
         payload = ctx["_finish_task_result"]
-        assert payload["execution_summary"] == "done"  # type: ignore[index]
-        assert payload["evidence"] == ["source-a"]  # type: ignore[index]
+        assert (
+            payload["reasoning"]  # type: ignore[index]
+            == "Reviewed all required work and completed the phase."
+        )
+        assert payload["diagnostics_md"] == ""  # type: ignore[index]
+        assert payload["business_data_md"] == ""  # type: ignore[index]
+        assert payload["schema_validation"] == "skipped"  # type: ignore[index]
 
     def test_v2_with_valid_business_data_md(self) -> None:
         ctx = {"output_schema_path": _schema_path()}

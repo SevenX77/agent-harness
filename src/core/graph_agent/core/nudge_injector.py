@@ -30,7 +30,6 @@ Design notes (Gemini-reviewed 2026-04-24):
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -212,37 +211,19 @@ class NudgeInjector:
     def _has_structured_selfcheck(self, payload: dict[str, Any]) -> bool:
         """True iff finish_task payload meets the structured-selfcheck bar.
 
-        Priority order:
-          1. ``plan_checklist`` has at least one dict item with non-empty
-             ``step`` AND ``quality_check`` fields.
-          2. Backward-compat fallback: ``reasoning`` is at least
-             ``MIN_FINISH_REASONING_LEN`` chars long AND ``evidence`` is
-             non-empty.
+        Accepted when either structured business output has passed schema
+        validation, diagnostics are substantive, or the minimal no-schema
+        completion text is substantive. Validation failures are intercepted
+        earlier in ``try_selfcheck``.
         """
-        checklist = payload.get("plan_checklist", [])
-        if isinstance(checklist, str):
-            try:
-                parsed = json.loads(checklist)
-                checklist = parsed if isinstance(parsed, list) else []
-            except Exception as exc:
-                logger.warning('[NudgeInjector] plan_checklist JSON parse failed: %s', exc)
-                checklist = []
-        if isinstance(checklist, list) and checklist:
-            complete_items = 0
-            for item in checklist:
-                if not isinstance(item, dict):
-                    continue
-                step = str(item.get("step", "")).strip()
-                quality_check = str(item.get("quality_check", "")).strip()
-                if step and quality_check:
-                    complete_items += 1
-            if complete_items > 0:
-                return True
-        reasoning_text = str(payload.get("reasoning", ""))
-        evidence_raw = payload.get("evidence", [])
-        if isinstance(evidence_raw, str):
-            evidence_raw = [evidence_raw]
-        return (
-            len(reasoning_text) >= MIN_FINISH_REASONING_LEN
-            and bool(evidence_raw)
-        )
+        schema_status = payload.get("schema_validation")
+        business_data_md = str(payload.get("business_data_md", "")).strip()
+        if business_data_md and schema_status == "passed":
+            return True
+
+        diagnostics_md = str(payload.get("diagnostics_md", "")).strip()
+        if len(diagnostics_md) >= MIN_FINISH_REASONING_LEN:
+            return True
+
+        reasoning_text = str(payload.get("reasoning", "")).strip()
+        return len(reasoning_text) >= MIN_FINISH_REASONING_LEN

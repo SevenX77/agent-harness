@@ -94,6 +94,16 @@ class NudgeInjector:
         branch (``selfcheck_nudge_count < max_nudges`` in the pre-refactor
         loop) and contrasts with ``try_planning`` / ``try_standard`` below.
         """
+        if finish_payload.get("schema_validation") == "failed":
+            error_text = finish_payload.get(
+                "validation_error_text",
+                "Schema validation failed.",
+            )
+            return NudgeOutcome(
+                message=HumanMessage(content=str(error_text)),
+                budget_exhausted=False,
+            )
+
         if self._has_structured_selfcheck(finish_payload):
             return NudgeOutcome(message=None, budget_exhausted=False)
         if (

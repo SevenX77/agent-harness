@@ -579,7 +579,7 @@ class TestParallelDelegateReducer:
             "missing beta",
         ]
 
-    def test_metrics_aggregated_only_from_successful_children(
+    def test_metrics_skip_exception_children_without_state(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -605,3 +605,38 @@ class TestParallelDelegateReducer:
         assert state_out["context"]["counts"] == (2, 1)
         assert state_out["metrics"]["total_input_tokens"] == 18
         assert state_out["metrics"]["total_output_tokens"] == 23
+
+    def test_metrics_aggregated_from_failed_but_completed_children(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _patch_reducer(monkeypatch, lambda _ctx, outputs, errors: {"counts": (len(outputs), len(errors))})
+        node = build_parallel_delegate_node(
+            _Harness(),
+            _phase(
+                [
+                    _Child("ok", metrics={"total_input_tokens": 100, "total_output_tokens": 50}),
+                    _Child(
+                        "bad_schema",
+                        finish_result={
+                            "schema_validation": "failed",
+                            "validation_error_text": "missing field",
+                        },
+                        metrics={"total_input_tokens": 200, "total_output_tokens": 80},
+                    ),
+                    _Child(
+                        "unfinished",
+                        include_finish=False,
+                        metrics={"total_input_tokens": 150, "total_output_tokens": 60},
+                    ),
+                ],
+                tolerance=1.0,
+            ),
+            logging.getLogger("test_parallel_delegate"),
+        )
+
+        state_out = node(_make_state(), _config())
+
+        assert state_out["context"]["counts"] == (1, 2)
+        assert state_out["metrics"]["total_input_tokens"] == 450
+        assert state_out["metrics"]["total_output_tokens"] == 190

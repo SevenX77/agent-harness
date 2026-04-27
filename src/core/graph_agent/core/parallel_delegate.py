@@ -284,15 +284,17 @@ def build_parallel_delegate_node(
         # are not filtered (reducer trust contract).
         parent_ctx.update(reduced)
 
-        # Merge child _io_errors and build aggregated metrics from successful states.
+        # Aggregate metrics from ALL children that produced a state (successful
+        # AND semantically-failed-but-completed). Only true exception cases
+        # (child_state is None) are skipped because there's no metrics to read.
+        # _io_errors merging stays per-successful_states because the failure modes
+        # are already captured in failures/errors_for_reducer; we don't want to
+        # double-count them as ctx-level io errors on the parent.
         merged_metrics = dict(state["metrics"])
-        for child_state in successful_states:
-            child_ctx = child_state.get("context", {}) if isinstance(child_state, dict) else {}
-            if isinstance(child_ctx, dict):
-                _merge_child_io_errors(parent_ctx, child_ctx)
-            child_metrics = (
-                child_state.get("metrics", {}) if isinstance(child_state, dict) else {}
-            )
+        for child_state, _exc in outcomes:
+            if not isinstance(child_state, dict):
+                continue  # exception case - no metrics available
+            child_metrics = child_state.get("metrics", {})
             merged_metrics["total_input_tokens"] = (
                 merged_metrics.get("total_input_tokens", 0)
                 + int(child_metrics.get("total_input_tokens", 0))
@@ -301,6 +303,13 @@ def build_parallel_delegate_node(
                 merged_metrics.get("total_output_tokens", 0)
                 + int(child_metrics.get("total_output_tokens", 0))
             )
+
+        # _io_errors merge restricted to successful children: failed ones already
+        # surfaced via failures/errors_for_reducer.
+        for child_state in successful_states:
+            child_ctx = child_state.get("context", {}) if isinstance(child_state, dict) else {}
+            if isinstance(child_ctx, dict):
+                _merge_child_io_errors(parent_ctx, child_ctx)
 
         new_state: WorkflowState = {
             "context": parent_ctx,

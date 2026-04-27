@@ -11,7 +11,27 @@ by a phase agent. It merges:
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+from ..config.llm_config import get_role_config
+
+logger = logging.getLogger(__name__)
+
+
+def resolve_role_prefix_from_llm_role(llm_role: str | None) -> str:
+    """Resolve ``llm_roles.yaml`` system_prompt_prefix for an LLM role."""
+    if llm_role is None:
+        return ""
+    try:
+        return get_role_config().resolve_role(llm_role).system_prompt_prefix
+    except Exception as exc:
+        logger.warning(
+            "Failed to resolve llm_role=%s system_prompt_prefix: %s",
+            llm_role,
+            exc,
+        )
+        return ""
 
 
 def _build_subagent_section(enabled: bool) -> str:

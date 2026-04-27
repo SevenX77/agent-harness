@@ -15,9 +15,6 @@ change inside a refactor-preserves-behaviour task.
 
 from __future__ import annotations
 
-from typing import Any
-
-import pytest
 from langchain_core.messages import HumanMessage
 
 from graph_agent.callbacks.base import Callback
@@ -57,62 +54,48 @@ def _make_phase(*, max_nudges: int = 1) -> Phase:
     return Phase(name="alpha", max_nudges=max_nudges)
 
 
-def _payload_with_checklist(n_complete: int) -> dict[str, Any]:
-    return {
-        "plan_checklist": [
-            {"step": f"s{i}", "quality_check": f"q{i}", "completed": True}
-            for i in range(n_complete)
-        ]
-    }
-
-
 class TestHasStructuredSelfcheck:
     """Via try_selfcheck: payload validation short-circuits to 'no nudge needed'."""
 
-    def test_structured_checklist_accepted_no_nudge(self):
+    def test_business_data_passed_skips_nudge(self):
         injector = NudgeInjector(_make_phase(), [])
-        outcome = injector.try_selfcheck(_payload_with_checklist(2))
+        outcome = injector.try_selfcheck({
+            "business_data_md": "## item\n- title: done",
+            "schema_validation": "passed",
+        })
         assert outcome.message is None
         assert outcome.budget_exhausted is False
 
-    def test_checklist_as_json_string_parses(self):
-        import json
-        payload = {"plan_checklist": json.dumps([
-            {"step": "a", "quality_check": "checked"}
-        ])}
+    def test_substantive_diagnostics_skips_nudge(self):
+        payload = {"diagnostics_md": "x" * (MIN_FINISH_REASONING_LEN + 1)}
         injector = NudgeInjector(_make_phase(), [])
         outcome = injector.try_selfcheck(payload)
         assert outcome.message is None
 
-    def test_checklist_items_missing_required_fields_trigger_nudge(self):
-        payload = {"plan_checklist": [{"step": "ok", "quality_check": ""}]}
-        injector = NudgeInjector(_make_phase(max_nudges=1), [])
-        outcome = injector.try_selfcheck(payload)
-        # No complete items; falls through to reasoning+evidence fallback which is empty.
-        # With budget available, nudge is injected.
-        assert outcome.message is not None
-        assert outcome.message.content == SELFCHECK_NUDGE
-
-    def test_reasoning_and_evidence_fallback_accepted(self):
+    def test_minimum_reasoning_fallback_skips_nudge(self):
         payload = {
             "reasoning": "x" * (MIN_FINISH_REASONING_LEN + 1),
-            "evidence": ["item"],
         }
         injector = NudgeInjector(_make_phase(), [])
         outcome = injector.try_selfcheck(payload)
         assert outcome.message is None
 
-    def test_reasoning_too_short_triggers_nudge(self):
-        payload = {"reasoning": "short", "evidence": ["x"]}
+    def test_thin_payload_triggers_nudge(self):
+        payload = {
+            "reasoning": "short",
+            "diagnostics_md": "",
+            "business_data_md": "",
+        }
         injector = NudgeInjector(_make_phase(), [])
         outcome = injector.try_selfcheck(payload)
         assert outcome.message is not None
+        assert outcome.message.content == SELFCHECK_NUDGE
 
 
 class TestTrySelfcheck:
     """Selfcheck budget gate: check-before-increment."""
 
-    def test_intercepts_v2_schema_validation_failed(self):
+    def test_schema_failed_takes_priority(self):
         injector = NudgeInjector(_make_phase(max_nudges=0), [])
         outcome = injector.try_selfcheck({
             "schema_validation": "failed",

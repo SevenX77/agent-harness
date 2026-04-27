@@ -7,6 +7,7 @@ import logging
 import pytest
 from pydantic import BaseModel
 
+import graph_agent.cognitive.finish as finish_mod
 from graph_agent.cognitive.finish import SELFCHECK_NUDGE, finish_task
 
 
@@ -113,6 +114,53 @@ class TestFinishTaskV2:
         assert payload["schema_validation"] == "failed"
         msg = payload["validation_error_text"]
         assert "failed to parse business_data_md or load schema does.not.Exist" in msg
+
+    def test_schema_validation_error_uses_template_constant(self) -> None:
+        ctx = {"output_schema_path": _schema_path()}
+        invalid_md = """## item-1
+- title: Scene plan
+- score: high
+"""
+
+        result = finish_task(ctx, business_data_md=invalid_md)
+
+        assert result == "PHASE_COMPLETE"
+        payload = ctx["_finish_task_result"]
+        assert payload["schema_validation"] == "failed"
+        msg = payload["validation_error_text"]
+        assert "business_data_md schema validation failed" in msg
+        assert "score" in msg
+
+    def test_parse_error_uses_template_constant(self) -> None:
+        ctx = {"output_schema_path": "does.not.Exist"}
+
+        result = finish_task(ctx, business_data_md=VALID_BUSINESS_MD)
+
+        assert result == "PHASE_COMPLETE"
+        payload = ctx["_finish_task_result"]
+        assert payload["schema_validation"] == "failed"
+        msg = payload["validation_error_text"]
+        assert "failed to parse business_data_md or load schema does.not.Exist" in msg
+
+    def test_template_constants_can_be_monkey_patched(self) -> None:
+        ctx = {"output_schema_path": _schema_path()}
+        invalid_md = """## item-1
+- title: Scene plan
+- score: high
+"""
+        original = finish_mod.SCHEMA_VALIDATION_ERROR_TEMPLATE
+        try:
+            finish_mod.SCHEMA_VALIDATION_ERROR_TEMPLATE = "english override: {exc}"
+
+            result = finish_task(ctx, business_data_md=invalid_md)
+
+            assert result == "PHASE_COMPLETE"
+            payload = ctx["_finish_task_result"]
+            assert payload["schema_validation"] == "failed"
+            assert "english override:" in payload["validation_error_text"]
+            assert "score" in payload["validation_error_text"]
+        finally:
+            finish_mod.SCHEMA_VALIDATION_ERROR_TEMPLATE = original
 
     def test_v2_logs_validation_summary(self, caplog: pytest.LogCaptureFixture) -> None:
         caplog.set_level(logging.INFO)

@@ -352,6 +352,7 @@ def finish_task(
 - 验证跟现有 `WorkingMemory` + `DeadEnd` 兼容
 - 测试长 phase token 控制 + 死循环阻止
 - **独立**：不依赖 PR-1/PR-2
+**实施状态（2026-04-27）**：B 选项落地，LoopDetection + Summarization middleware 已挂载到 create_custom_middlewares。Gemini quota 不可用，主控 self-review 通过。
 
 ### PR-4：references + read_file builtin tool（P1-4）
 - 实现 `read_file` builtin tool

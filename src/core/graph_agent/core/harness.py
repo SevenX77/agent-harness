@@ -32,6 +32,7 @@ from langgraph.graph import END, StateGraph
 from .run_context import RunContext
 from .graph_builder import GraphBuilder
 from .nudge_injector import NudgeInjector
+from .parallel_delegate import build_parallel_delegate_node
 from .phase_executor import PhaseExecutor
 from .retry_router import RetryRouter
 from .callback_bridge import (
@@ -393,6 +394,7 @@ class GraphAgentHarness:
             retry_router=self._retry_router,
             checkpointer=self._checkpointer,
             subgraph_node_factory=self._build_subgraph_node,
+            parallel_delegate_node_factory=self._build_parallel_delegate_node,
         )
         self._graph = self._graph_builder.build()
 
@@ -1139,3 +1141,9 @@ class GraphAgentHarness:
     def _build_subgraph_node(self, phase: Phase) -> Callable[[WorkflowState], WorkflowState]:
         """Build a node that executes a nested GraphAgentHarness."""
         return build_subgraph_node(self, phase, logger)
+
+    def _build_parallel_delegate_node(
+        self, phase: Phase
+    ) -> Callable[[WorkflowState], WorkflowState]:
+        """PR-7 Commit 2: factory for parallel_delegate execution nodes."""
+        return build_parallel_delegate_node(self, phase, logger)

@@ -125,14 +125,6 @@ class PhaseExecutor:
         """
         from .harness import _clone_state  # lazy: avoid import cycle at module load
 
-        # PR-7 Commit 2 will replace this raise with actual Send API execution.
-        if phase.parallel_subgraphs:
-            raise NotImplementedError(
-                f"Phase '{phase.name}': mode 'parallel_delegate' execution is "
-                "pending (PR-7 Commit 2 — Send API integration). Loader has "
-                "successfully resolved children and reducer, but runtime is not yet wired."
-            )
-
         next_state = _clone_state(state)
         for cb in self._callbacks:
             cb.on_phase_start(phase.name, dict(next_state["context"]))

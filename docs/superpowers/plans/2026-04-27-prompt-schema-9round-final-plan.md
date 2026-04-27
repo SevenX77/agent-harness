@@ -378,6 +378,7 @@ def finish_task(
 - `manifest.py` 新 `ParallelDelegatePhase` 子类
 - `loader.py` + `phase_executor.py` 用 LangGraph `Send` API 实现
 - **独立**：不依赖前面 PR
+**实施状态（2026-04-27）**：Schema 部分（ParallelDelegatePhase）已落地。Loader 见到该 mode 立刻 raise NotImplementedError 防止生产 SKILL 误用。Runtime（LangGraph Send API + reducer/tolerance）留作 followup PR。Gemini quota 仍不可用，主控 self-review 通过 schema 部分。
 
 （PR-8: producer/review 迁移留作 P2 后置 PR，依赖 PR-4 references 落地）
 

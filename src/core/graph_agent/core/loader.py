@@ -549,6 +549,7 @@ def _phase_from_graph_phase(
     from .manifest import DelegatePhase as _DelegatePhase
     from .manifest import LLMPhase as _LLMPhase
     from .manifest import LogicPhase as _LogicPhase
+    from .manifest import ParallelDelegatePhase as _ParallelDelegatePhase
 
     if isinstance(phase_def, _LLMPhase):
         tools = [_resolve_tool_reference(ref, base_dir) for ref in phase_def.agent_tools]
@@ -648,6 +649,13 @@ def _phase_from_graph_phase(
                 outputs=dict(phase_def.context_bridge.outputs),
             ),
             requires_llm=False,
+        )
+
+    if isinstance(phase_def, _ParallelDelegatePhase):
+        raise NotImplementedError(
+            f"Phase '{phase_def.name}': mode 'parallel_delegate' schema is "
+            "declared but the runtime implementation is pending (PR-7 follow-up). "
+            "Avoid using this mode in production SKILL.md until the runtime ships."
         )
 
     raise SkillLoadError(

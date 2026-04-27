@@ -372,6 +372,7 @@ def finish_task(
 - 基于 PR-1 的 `context_access` schema opt-in 挂载
 - `loader.py` 渲染 `<context_access>` 标签
 - **依赖**：PR-1
+**实施状态（2026-04-27）**：read_artifact + query_working_memory builtin tools 实现 + phase_executor 按 context_access opt-in 挂载。Gemini quota 仍不可用，主控 self-review 通过。
 
 ### PR-7：parallel_delegate phase mode（P1-6）
 - `manifest.py` 新 `ParallelDelegatePhase` 子类

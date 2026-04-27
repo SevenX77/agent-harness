@@ -62,6 +62,8 @@ class Phase:
     context_bridge: ContextBridge | None = None
     references: list[str] = field(default_factory=list)
     skill_base_dir: Path | None = None
+    # Opt-in mining permissions resolved from manifest.context_access.
+    context_access: list[str] = field(default_factory=list)
     output_schema: type[BaseModel] | None = None
     output_schema_path: str | None = None
     md_type_dict: str | None = None

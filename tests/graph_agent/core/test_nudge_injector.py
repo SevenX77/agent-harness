@@ -112,6 +112,47 @@ class TestHasStructuredSelfcheck:
 class TestTrySelfcheck:
     """Selfcheck budget gate: check-before-increment."""
 
+    def test_intercepts_v2_schema_validation_failed(self):
+        injector = NudgeInjector(_make_phase(max_nudges=0), [])
+        outcome = injector.try_selfcheck({
+            "schema_validation": "failed",
+            "validation_error_text": "test error",
+        })
+
+        assert isinstance(outcome.message, HumanMessage)
+        assert "test error" in str(outcome.message.content)
+        assert outcome.budget_exhausted is False
+        assert injector.counts() == {
+            "planning": 0,
+            "selfcheck": 0,
+            "standard": 0,
+            "total": 0,
+        }
+
+    def test_finish_gate_style_retry_message_appended_for_v2_schema_error(self):
+        result_messages = [HumanMessage(content="previous")]
+        ctx = {
+            "_finish_task_result": {
+                "schema_validation": "failed",
+                "validation_error_text": "schema boom",
+            }
+        }
+        injector = NudgeInjector(_make_phase(), [])
+
+        should_continue = False
+        finish_result = ctx.get("_finish_task_result")
+        if finish_result:
+            outcome = injector.try_selfcheck(finish_result)
+            if outcome.message is not None:
+                ctx.pop("_finish_task_result", None)
+                current_messages = list(result_messages) + [outcome.message]
+                should_continue = True
+
+        assert should_continue is True
+        assert "_finish_task_result" not in ctx
+        assert isinstance(current_messages[-1], HumanMessage)
+        assert "schema boom" in str(current_messages[-1].content)
+
     def test_first_call_injects_selfcheck_nudge(self):
         cb = _RecordingCallback()
         injector = NudgeInjector(_make_phase(max_nudges=1), [cb])

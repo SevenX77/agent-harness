@@ -55,8 +55,78 @@ def finish_task(
     execution_summary: str = "",
     plan_checklist: str = "[]",
     unresolved_issues: str = "",
+    diagnostics_md: str = "",
+    business_data_md: str = "",
 ) -> str:
     """Mark current cognitive phase as complete with structured self-review."""
+    if business_data_md:
+        output_schema_path = ctx.get("output_schema_path") or ctx.get("_md_schema_path")
+        if not output_schema_path:
+            ctx["_finish_task_result"] = {
+                "diagnostics_md": diagnostics_md.strip(),
+                "business_data_md": business_data_md.strip(),
+                "business_data_parsed": None,
+                "schema_validation": "skipped: no output_schema declared",
+            }
+            return "PHASE_COMPLETE"
+
+        try:
+            from ..tools.md_to_json import (
+                SemanticValidationError,
+                _resolve_schema_from_path,
+                md_to_json,
+            )
+
+            schema = _resolve_schema_from_path(str(output_schema_path))
+            validated_items = md_to_json(business_data_md, schema)
+        except SemanticValidationError as exc:
+            ctx["_finish_task_result"] = {
+                "schema_validation": "failed",
+                "validation_error_text": (
+                    "[finish_task] business_data_md schema validation failed:\n"
+                    f"{exc}\n"
+                    "请按上面的错误说明修正你的 business_data_md 后重新调用 finish_task。"
+                ),
+            }
+            logger.warning(
+                "finish_task v2: schema validation failed "
+                "(delegating to NudgeInjector retry loop)"
+            )
+            return "PHASE_COMPLETE"
+        except Exception as exc:
+            ctx["_finish_task_result"] = {
+                "schema_validation": "failed",
+                "validation_error_text": (
+                    "[finish_task] failed to parse business_data_md or load schema "
+                    f"{output_schema_path}: {exc}\n"
+                    "请确认 markdown 格式（## 分隔条目、字段用 - key: value）和 schema 路径正确。"
+                ),
+            }
+            logger.warning(
+                "finish_task v2: parse/import failed "
+                "(delegating to NudgeInjector retry loop): %s",
+                exc,
+            )
+            return "PHASE_COMPLETE"
+
+        ctx["_finish_task_result"] = {
+            "diagnostics_md": diagnostics_md.strip(),
+            "business_data_md": business_data_md.strip(),
+            "business_data_parsed": [
+                item.model_dump() if hasattr(item, "model_dump") else item
+                for item in validated_items
+            ],
+            "schema_validation": "passed",
+        }
+        logger.info(
+            "finish_task v2: diagnostics_len=%d business_data_len=%d items=%d schema=%s",
+            len(diagnostics_md),
+            len(business_data_md),
+            len(validated_items),
+            output_schema_path,
+        )
+        return "PHASE_COMPLETE"
+
     parsed_evidence: list[str] = []
     raw_evidence = (evidence or "").strip()
     if raw_evidence:

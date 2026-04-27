@@ -165,6 +165,38 @@ def _resolve_tool_reference(
     return func  # type: ignore[return-value]
 
 
+def _validate_reducer_path(reducer_path: str) -> None:
+    """Eagerly verify that a reducer dotted path resolves to a callable.
+
+    Raises SkillLoadError with a clear message if the path is malformed,
+    the module fails to import, or the resolved attribute is not callable.
+    """
+    if not reducer_path or "." not in reducer_path:
+        raise SkillLoadError(
+            f"ParallelDelegate reducer path malformed (must be dotted): "
+            f"{reducer_path!r}"
+        )
+    module_path, _, attr = reducer_path.rpartition(".")
+    try:
+        module = importlib.import_module(module_path)
+    except ImportError as exc:
+        raise SkillLoadError(
+            f"ParallelDelegate reducer module {module_path!r} cannot be "
+            f"imported: {exc}"
+        ) from exc
+    fn = getattr(module, attr, None)
+    if fn is None:
+        raise SkillLoadError(
+            f"ParallelDelegate reducer {reducer_path!r}: module {module_path!r} "
+            f"has no attribute {attr!r}"
+        )
+    if not callable(fn):
+        raise SkillLoadError(
+            f"ParallelDelegate reducer {reducer_path!r} is not callable "
+            f"(got {type(fn).__name__})"
+        )
+
+
 def _phase_string(
     phase_cfg: dict[str, Any],
     key: str,
@@ -751,10 +783,43 @@ def _phase_from_graph_phase(
         )
 
     if isinstance(phase_def, _ParallelDelegatePhase):
-        raise NotImplementedError(
-            f"Phase '{phase_def.name}': mode 'parallel_delegate' schema is "
-            "declared but the runtime implementation is pending (PR-7 follow-up). "
-            "Avoid using this mode in production SKILL.md until the runtime ships."
+        # PR-7 Commit 1: load all child harnesses at loader-time per Gemini
+        # design Q1c. Execution-side support is still pending Commit 2; the
+        # phase_executor branch raises NotImplementedError when it sees a
+        # phase with non-empty parallel_subgraphs.
+        child_harnesses: list[Any] = []  # list[GraphAgentHarness]
+        for child_ref in phase_def.subgraphs:
+            child_path = (base_dir / child_ref).resolve()
+            if not child_path.is_file():
+                raise SkillLoadError(
+                    f"ParallelDelegate phase '{phase_def.name}' subgraph not found "
+                    f"(or not a file): {child_path}"
+                )
+            child_harness = load_workflow_from_md(
+                md_path=child_path,
+                callbacks=callbacks,
+                _loading_stack=loading_stack,
+            )
+            child_harnesses.append(child_harness)
+
+        # Eager validation: reducer dotted path must be importable to a
+        # callable. Fail at load time, not at the first execute attempt.
+        _validate_reducer_path(phase_def.reducer)
+
+        return Phase(
+            name=phase_def.name,
+            system_prompt=None,
+            tools=[],
+            tier=phase_def.tier or "balanced",
+            model_override=phase_def.model_override,
+            context_bridge=ContextBridge(
+                inputs=dict(phase_def.context_bridge.inputs),
+                outputs=dict(phase_def.context_bridge.outputs),
+            ),
+            parallel_subgraphs=child_harnesses,
+            reducer_path=phase_def.reducer,
+            tolerance=phase_def.tolerance,
+            requires_llm=False,
         )
 
     raise SkillLoadError(

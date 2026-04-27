@@ -395,6 +395,19 @@ class PhaseExecutor:
                     phase.name,
                     len(references),
                 )
+        context_access = list(phase.context_access)
+        if context_access:
+            from ..tools.builtin.context_access import (
+                query_working_memory,
+                read_artifact,
+            )
+
+            if "working_memory" in context_access:
+                lc_tools.append(_wrap_tool_for_langchain(query_working_memory, ctx, bridge))
+                logger.info("phase=%s mounted query_working_memory tool", phase.name)
+            if "artifact" in context_access:
+                lc_tools.append(_wrap_tool_for_langchain(read_artifact, ctx, bridge))
+                logger.info("phase=%s mounted read_artifact tool", phase.name)
         if phase.subagent_enabled:
             try:
                 from deerflow.tools.builtins import task_tool as deerflow_task_tool

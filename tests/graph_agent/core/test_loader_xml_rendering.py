@@ -134,6 +134,54 @@ def test_agent_profile_references_thread_to_runtime_phase(tmp_path: Path) -> Non
     assert phase.skill_base_dir == tmp_path
 
 
+def test_graph_phase_context_access_threads_to_runtime_phase(tmp_path: Path) -> None:
+    manifest = _SKILL_ADAPTER.validate_python({
+        "schema_version": "2.0",
+        "name": "graph",
+        "description": "graph",
+        "type": "graph",
+        "io": {"inputs": [], "outputs": []},
+        "phases": [{
+            "mode": "llm",
+            "name": "phase",
+            "context_access": ["artifact", "working_memory"],
+        }],
+    })
+
+    phase = _phase_from_graph_phase(
+        manifest.phases[0],
+        tmp_path,
+        callbacks=None,
+        loading_stack=set(),
+    )
+
+    assert phase.context_access == ["artifact", "working_memory"]
+
+
+def test_agent_profile_context_access_threads_to_runtime_phase(tmp_path: Path) -> None:
+    manifest = _SKILL_ADAPTER.validate_python({
+        "schema_version": "2.0",
+        "name": "agent",
+        "description": "agent",
+        "type": "agent",
+        "agent_profile": {
+            "role": "Role",
+            "goal": "Goal",
+            "context_access": ["artifact"],
+        },
+    })
+    assert isinstance(manifest, AgentSkillDef)
+
+    phase = _phase_from_agent_skill(
+        manifest,
+        tmp_path,
+        callbacks=None,
+        loading_stack=set(),
+    )
+
+    assert phase.context_access == ["artifact"]
+
+
 def test_context_access_renders_to_context_access_tag(tmp_path: Path) -> None:
     prompt = _phase_prompt(
         tmp_path,

@@ -47,3 +47,13 @@ def test_unknown_llm_role_fallback(caplog) -> None:
     assert prefix == ""
     assert "<role_prefix>" not in prompt
     assert "does_not_exist" in caplog.text
+
+
+def test_critical_reminders_use_finish_task_v2_contract() -> None:
+    prompt = _compose_with_role_prefix("")
+
+    assert "diagnostics_md" in prompt
+    assert "business_data_md" in prompt
+    assert "execution_summary" not in prompt
+    assert "plan_checklist" not in prompt
+    assert "unresolved_issues" not in prompt

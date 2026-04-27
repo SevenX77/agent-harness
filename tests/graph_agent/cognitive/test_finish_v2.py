@@ -7,7 +7,7 @@ import logging
 import pytest
 from pydantic import BaseModel
 
-from graph_agent.cognitive.finish import finish_task
+from graph_agent.cognitive.finish import SELFCHECK_NUDGE, finish_task
 
 
 class BusinessItem(BaseModel):
@@ -25,6 +25,14 @@ VALID_BUSINESS_MD = """## item-1
 
 def _schema_path() -> str:
     return f"{BusinessItem.__module__}.{BusinessItem.__name__}"
+
+
+def test_selfcheck_nudge_uses_finish_task_v2_contract() -> None:
+    assert "diagnostics_md" in SELFCHECK_NUDGE
+    assert "business_data_md" in SELFCHECK_NUDGE
+    assert "execution_summary" not in SELFCHECK_NUDGE
+    assert "plan_checklist" not in SELFCHECK_NUDGE
+    assert "unresolved_issues" not in SELFCHECK_NUDGE
 
 
 class TestFinishTaskV2:

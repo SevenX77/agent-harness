@@ -382,6 +382,29 @@ def finish_task(
 
 （PR-8: producer/review 迁移留作 P2 后置 PR，依赖 PR-4 references 落地）
 
+### 追加 PR：Gemini retroactive review 后续 cleanup（2026-04-27）
+
+PR #16 合并后 Gemini 做了 retroactive review，flag 了 3 项架构债，全部已修复：
+
+#### PR-1.1：Prompt-Schema Alignment Cleanup（PR #17，已 merge）
+**Drift 修复**：`prompt.py` critical_reminders + `finish.py` SELFCHECK_NUDGE 还在告诉 LLM 用 v1 字段（`execution_summary` / `plan_checklist` / `unresolved_issues`），实际上已经走 v2 路径。
+**新增**：`loader.py` `_render_skill_section_xml_tags` 加 `<output_format>` 标签 + `_render_output_format_markdown(dotted_path)` 函数（importlib 解析 Pydantic BaseModel + 渲染 Markdown 字段列表，失败 graceful 降级）。
+**Review**：Gemini Pro daily quota 已耗尽，self-review fallback 通过；566 tests pass。
+
+#### PR-1.2：finish_task v1 参数清理（PR #18，已 merge）
+**改动**：删 finish_task 的 v1 参数（evidence / execution_summary / plan_checklist / unresolved_issues），signature 变成 `(ctx, reasoning, diagnostics_md, business_data_md)`；NudgeInjector `_has_structured_selfcheck` 重写为 v2 acceptance criteria；phase_executor 读 finish_result 用 v2 字段并 map 到 callback signature。
+**保留**：callback signature `on_finish_task(phase_name, reasoning, evidence)` 不动（observability concern 跟 LLM tool API 解耦）。
+**Review**：Gemini quota 不可用，self-review 通过；565 tests pass。
+
+#### PR-1.3：AgentProfile/LLMPhase prose → XML 标签（PR #19，已 merge）
+**Round 8 §C blueprint 收尾**：role/goal/steps/constraints 从 prose 模板切换到 `<domain_expertise>` / `<task_objective>` / `<steps>` / `<constraints>` XML 标签。`_append_steps_to_prompt` 函数也跟着把 `## 工作流` Markdown header 改成 `<steps>` 标签。
+**Review**：Gemini quota 不可用，self-review 通过；565 tests pass。
+
+#### 已知尚未解决的 Gemini-flagged 架构债（次要，可 deferred）
+
+- **32_000 magic number**（`middlewares.py` `_SUMMARIZATION_FALLBACK_MAX_INPUT_TOKENS`）：Gemini 标"次要"，建议改成读 ModelResolver 的 ModelConfig 真实 `max_input_tokens`，而不是硬编码常量。当前作为安全性垫片可接受。
+- **错误处理文案未国际化**：`finish.py` 写 ctx 的报错文案硬编码中文。Gemini 标"次要"，跨语言部署前可以缓做。
+
 ---
 
 ## 七、还没解决的开放问题（需要 SevenX 拍板）

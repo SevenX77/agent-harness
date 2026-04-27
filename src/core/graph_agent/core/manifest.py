@@ -39,11 +39,18 @@ skill ecosystem is modelled on **three orthogonal axes**:
    - ``subagent_enabled:`` — ad-hoc generation: the LLM spawns an
                              anonymous sub-agent with no SKILL.md.
 
-   The third originally-planned mechanism (``sub_skills:`` for runtime
-   semantic routing) was removed by 2026-04-26 cohesion plan 方针 1.2:
-   the schema field had no loader/runtime wiring, no production skill
-   ever set it, and leaving the documented-but-dead surface in the
-   schema mis-led authors. Re-add when the runtime ships.
+   - ``sub_skills`` field — removed by 2026-04-26 cohesion plan 方针 1.2:
+     the schema field had no loader/runtime wiring, no production skill
+     ever set it, and leaving the documented-but-dead surface in the
+     schema mis-led authors. Re-add when the runtime ships.
+   - ``LLMPhase.steps`` (and the former ``Step`` class) — historically
+     removed by mistake, restored on 2026-04-26 as ``list[str]`` aligned
+     with ``AgentProfile.steps``. This is prompt structure (the plan path
+     the LLM should read), not a framework runtime execution unit. The
+     loader renders it into the system_prompt body, like ``<reference>`` /
+     ``<example>`` prompt tags. The old ``Step`` object class is removed
+     to avoid implying false runtime contracts for per-step ``tools`` /
+     ``validator`` fields.
 
 Reference resolution
 ====================
@@ -129,23 +136,6 @@ class IoDeclaration(BaseModel):
     outputs: list[IoOutput] = Field(default_factory=list)
 
 
-class Step(BaseModel):
-    """A single conditional step inside an ``LLMPhase.steps``.
-
-    ``when`` and ``skip_if`` are simpleeval expressions evaluated at
-    run time with the phase's context as the namespace.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(min_length=1)
-    goal: str | None = None
-    tools: list[str] = Field(default_factory=list)
-    validator: str | None = None
-    when: str | None = None
-    skip_if: str | None = None
-
-
 class ContextBridge(BaseModel):
     """Input/output wiring for a ``DelegatePhase``.
 
@@ -191,6 +181,7 @@ class LLMPhase(_BasePhase):
     prompt: str | None = None
     user_prompt_template: str | None = None
     agent_tools: list[str] = Field(default_factory=list)
+    steps: list[str] = Field(default_factory=list)
     subagent_enabled: bool = False
     adopted_persona: str | None = None
     max_iterations: int | None = Field(default=None, ge=1)
@@ -395,5 +386,4 @@ __all__ = [
     "PersonaSkillDef",
     "PhaseDef",
     "SkillManifest",
-    "Step",
 ]

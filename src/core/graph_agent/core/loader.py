@@ -387,6 +387,18 @@ def load_workflow_from_md(
 
 
 
+def _append_steps_to_prompt(prompt: str, steps: list[str]) -> str:
+    """Append numbered prompt-structure steps using the shared workflow format."""
+    if not steps:
+        return prompt
+    workflow = "## 工作流\n" + "\n".join(
+        f"{i}. {step}" for i, step in enumerate(steps, start=1)
+    )
+    if not prompt:
+        return workflow
+    return f"{prompt}\n\n{workflow}"
+
+
 def _compose_agent_system_prompt(manifest: "AgentSkillDef") -> str:
     """Assemble an agent skill's System Prompt from its agent_profile.
 
@@ -395,14 +407,12 @@ def _compose_agent_system_prompt(manifest: "AgentSkillDef") -> str:
     on top by the caller when ``adopted_persona`` is set.
     """
     profile = manifest.agent_profile
-    parts: list[str] = [f"你是{profile.role}。", f"你的目标:{profile.goal}"]
-    if profile.steps:
-        parts.append("## 工作流")
-        parts.extend(f"{i}. {step}" for i, step in enumerate(profile.steps, start=1))
+    prompt = "\n\n".join([f"你是{profile.role}。", f"你的目标:{profile.goal}"])
+    prompt = _append_steps_to_prompt(prompt, profile.steps)
     if profile.constraints:
-        parts.append("## 约束")
-        parts.extend(f"- {c}" for c in profile.constraints)
-    return "\n\n".join(parts)
+        constraints = "## 约束\n" + "\n".join(f"- {c}" for c in profile.constraints)
+        prompt = f"{prompt}\n\n{constraints}"
+    return prompt
 
 
 def _inject_persona(
@@ -491,6 +501,8 @@ def _phase_from_graph_phase(
     if isinstance(phase_def, _LLMPhase):
         tools = [_resolve_tool_reference(ref, base_dir) for ref in phase_def.agent_tools]
         system_prompt = phase_def.prompt
+        if phase_def.steps:
+            system_prompt = _append_steps_to_prompt(system_prompt or "", phase_def.steps)
         if phase_def.adopted_persona is not None:
             persona_manifest = resolve_persona(
                 phase_def.adopted_persona, base_dir=base_dir,

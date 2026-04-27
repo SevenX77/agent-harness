@@ -64,9 +64,9 @@ def check_tool_paths(
                         base_dir=base_dir,
                         issues=issues,
                     )
-                # Cohesion plan 方针 1.4 (2026-04-26): LLMPhase.steps was
-                # removed from the schema (no production usage, no
-                # runtime wiring). Nothing more to walk for an LLM phase
+                # Cohesion plan follow-up (2026-04-26): LLMPhase.steps is
+                # restored as list[str] prompt structure, not executable
+                # tool references. Nothing more to walk for an LLM phase
                 # beyond agent_tools + validator.
             elif isinstance(phase, LogicPhase):
                 for idx, ref in enumerate(phase.execute_steps):

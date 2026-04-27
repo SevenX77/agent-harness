@@ -365,6 +365,7 @@ def finish_task(
 - 默认挂 `ask_clarification` 工具
 - 验证 `ClarificationMiddleware` 接入
 - **独立**
+**实施状态（2026-04-27）**：ask_clarification builtin + ClarificationMiddleware 已挂载。Gemini quota 仍不可用，主控 self-review 通过。
 
 ### PR-6：context_access + read_artifact / query_working_memory（P2-7）
 - 实现 `read_artifact` + `query_working_memory` builtin tools

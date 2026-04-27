@@ -206,7 +206,21 @@ class TestExecuteLLMPhaseMiddlewareIntegration:
         assert middleware_kwargs["summarization_model"] is agent_model
         assert middleware_kwargs["summarization_trigger_fraction"] == 0.8
         assert middleware_kwargs["summarization_keep_messages"] == 20
+        assert middleware_kwargs["clarification"] is True
         assert getattr(agent_model, "_wrapped") is captured["resolver_model"]
+
+
+class TestExecuteLLMPhaseClarificationIntegration:
+    def test_mounts_ask_clarification_tool_by_default(self, monkeypatch) -> None:
+        phase = Phase(name="llm", max_iterations=1, max_nudges=0)
+
+        captured = _capture_execute_llm_phase(monkeypatch, phase)
+        tool_names = [
+            getattr(tool, "name", getattr(tool, "__name__", ""))
+            for tool in captured["create_agent_kwargs"]["tools"]
+        ]
+
+        assert "ask_clarification" in tool_names
 
 
 class TestExecuteLLMPhaseReadFileIntegration:

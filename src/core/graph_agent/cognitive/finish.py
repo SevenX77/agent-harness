@@ -18,11 +18,10 @@ PLANNING_NUDGE = (
 )
 
 SELFCHECK_NUDGE = (
-    "[系统提示] 你调用了 finish_task，但自检结构不完整。"
-    "请重新调用 finish_task，并补全以下字段："
-    "execution_summary、plan_checklist（数组，每项含 step/completed/quality_check）、"
-    "unresolved_issues。"
-    "请逐条对照计划说明质量结论后再 finish。"
+    "[系统提示] 你调用了 finish_task，但缺少必要字段。"
+    "请重新调用 finish_task，并提供："
+    "diagnostics_md（自检诊断 Markdown，逐条对照计划说明质量结论）"
+    "+ business_data_md（业务输出 Markdown，遵循 phase 的 output_schema）。"
 )
 
 MIN_FINISH_REASONING_LEN = 30
@@ -58,7 +57,15 @@ def finish_task(
     diagnostics_md: str = "",
     business_data_md: str = "",
 ) -> str:
-    """Mark current cognitive phase as complete with structured self-review."""
+    """完成当前 phase。
+
+    v2 契约（推荐使用）：
+    - diagnostics_md: 自检诊断 Markdown
+    - business_data_md: 业务输出 Markdown，会经 md_to_json 校验是否符合 output_schema
+
+    v1 契约（legacy，保留兼容，将在 PR-1.2 移除）：
+    - evidence / execution_summary / plan_checklist / unresolved_issues
+    """
     if business_data_md:
         output_schema_path = ctx.get("output_schema_path") or ctx.get("_md_schema_path")
         if not output_schema_path:

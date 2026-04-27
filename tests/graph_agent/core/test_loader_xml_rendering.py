@@ -2,19 +2,35 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
-from pydantic import TypeAdapter
+from pydantic import BaseModel, Field, TypeAdapter
 
 from graph_agent.core.loader import (
     _compose_agent_system_prompt,
     _phase_from_agent_skill,
     _phase_from_graph_phase,
+    _render_skill_section_xml_tags,
 )
 from graph_agent.core.manifest import AgentSkillDef, SkillManifest
 
 
 _SKILL_ADAPTER = TypeAdapter(SkillManifest)
+
+
+class OutputFormatSchema(BaseModel):
+    title: str = Field(description="输出标题")
+    score: int = Field(description="质量分")
+    notes: str | None = Field(default=None, description="补充说明")
+
+
+class NotPydanticSchema:
+    title: str
+
+
+def _output_schema_path(schema_cls: type[object]) -> str:
+    return f"{schema_cls.__module__}.{schema_cls.__name__}"
 
 
 def _agent_prompt(**profile_fields: object) -> str:
@@ -200,6 +216,59 @@ def test_empty_fields_dont_render(tmp_path: Path) -> None:
     assert "<examples>" not in prompt
     assert "<knowledge_base>" not in prompt
     assert "<context_access>" not in prompt
+    assert "<output_format>" not in prompt
+
+
+def test_output_format_rendered_when_output_schema_set(tmp_path: Path) -> None:
+    prompt = _phase_prompt(
+        tmp_path,
+        output_schema=_output_schema_path(OutputFormatSchema),
+    )
+
+    assert "<output_format>" in prompt
+    assert "business_data_md" in prompt
+    assert "**title**" in prompt
+    assert "**score**" in prompt
+    assert "**notes**" in prompt
+    assert "输出标题" in prompt
+    assert "质量分" in prompt
+    assert "（必填）" in prompt
+    assert "（可选）" in prompt
+    assert "</output_format>" in prompt
+
+
+def test_output_format_skipped_when_no_output_schema() -> None:
+    rendered = _render_skill_section_xml_tags(object())
+
+    assert "<output_format>" not in rendered
+
+
+def test_output_format_skipped_when_schema_resolves_to_non_basemodel(
+    caplog,
+) -> None:
+    caplog.set_level(logging.WARNING)
+
+    rendered = _render_skill_section_xml_tags(
+        type(
+            "PhaseLike",
+            (),
+            {"output_schema": _output_schema_path(NotPydanticSchema)},
+        )()
+    )
+
+    assert "<output_format>" not in rendered
+    assert "not a Pydantic BaseModel" in caplog.text
+
+
+def test_output_format_skipped_on_import_error(caplog) -> None:
+    caplog.set_level(logging.WARNING)
+
+    rendered = _render_skill_section_xml_tags(
+        type("PhaseLike", (), {"output_schema": "does.not.Exist"})()
+    )
+
+    assert "<output_format>" not in rendered
+    assert "failed to resolve output_schema does.not.Exist" in caplog.text
 
 
 def test_steps_still_renders_as_markdown_after_new_xml_tags(tmp_path: Path) -> None:

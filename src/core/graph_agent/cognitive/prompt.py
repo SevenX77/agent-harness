@@ -140,6 +140,7 @@ def apply_cognitive_template(
 - 如果发现不一致，先修复再 finish
 - 对每个关键结论都给出规则依据或数据依据
 - 当你不确定规则边界时，先 log_ambiguity，再继续执行
-- finish_task 必须提供结构化自检：execution_summary、plan_checklist、unresolved_issues
+- finish_task 必须提供 diagnostics_md（自检诊断 Markdown）+ business_data_md（业务输出 Markdown，遵循 phase 的 output_schema）
+- business_data_md 会经 md_to_json 校验。如果校验失败，你会收到错误反馈消息——按反馈修正后重新调用 finish_task
 </critical_reminders>
 """.strip()

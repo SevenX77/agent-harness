@@ -447,7 +447,67 @@ def _render_skill_section_xml_tags(phase_or_profile: Any) -> str:
         lines.append("</context_access>")
         sections.append("\n".join(lines))
 
+    output_schema = getattr(phase_or_profile, "output_schema", None)
+    if output_schema:
+        format_md = _render_output_format_markdown(output_schema)
+        if format_md:
+            sections.append(f"<output_format>\n{format_md}\n</output_format>")
+
     return "\n\n".join(sections)
+
+
+def _render_output_format_markdown(output_schema_path: str) -> str:
+    """Render output schema as Markdown field list for LLM consumption.
+
+    Args:
+        output_schema_path: Dotted path to a Pydantic BaseModel class
+            (e.g., 'myapp.schemas.MyModel').
+
+    Returns:
+        Markdown string describing the schema fields, or empty string if
+        the schema cannot be resolved.
+
+    """
+    try:
+        module_path, class_name = output_schema_path.rsplit(".", 1)
+        module = importlib.import_module(module_path)
+        model_cls = getattr(module, class_name)
+
+        if not hasattr(model_cls, "model_fields"):
+            logger.warning(
+                "loader: output_schema %s is not a Pydantic BaseModel; "
+                "skipping <output_format>",
+                output_schema_path,
+            )
+            return ""
+
+        lines = [
+            "请按以下字段结构输出 business_data_md（每个字段一段 Markdown）：",
+            "",
+        ]
+        for field_name, field_info in model_cls.model_fields.items():
+            field_type = getattr(
+                field_info.annotation,
+                "__name__",
+                str(field_info.annotation),
+            )
+            description = field_info.description or "（无描述）"
+            required_marker = "（必填）" if field_info.is_required() else "（可选）"
+            lines.append(
+                f"- **{field_name}** {required_marker}: "
+                f"`{field_type}` — {description}"
+            )
+
+        return "\n".join(lines)
+
+    except (ImportError, AttributeError, ValueError) as exc:
+        logger.warning(
+            "loader: failed to resolve output_schema %s: %s; "
+            "skipping <output_format>",
+            output_schema_path,
+            exc,
+        )
+        return ""
 
 
 def _compose_agent_system_prompt(manifest: "AgentSkillDef") -> str:

@@ -174,11 +174,11 @@ def test_fatal_when_llm_phase_validator_missing(tmp_path: Path) -> None:
     assert issues[0].location == "SKILL.md:phases.think.validator"
 
 
-# Cohesion plan 方针 1.4 (2026-04-26): LLMPhase.steps was removed from
-# the schema (no production usage, no runtime wiring). The earlier
-# fixtures here exercised tool_paths walking through phase.steps; the
-# field no longer exists, so these regression cases collapse into the
-# normal phase-level agent_tools / validator walks above.
+# Cohesion plan follow-up (2026-04-26): LLMPhase.steps is restored as
+# list[str] prompt structure, not executable tool references. The earlier
+# fixtures here exercised tool_paths walking through object-shaped
+# phase.steps; those regression cases collapse into the normal phase-level
+# agent_tools / validator walks above.
 
 
 def test_fatal_when_logic_phase_execute_steps_missing(tmp_path: Path) -> None:

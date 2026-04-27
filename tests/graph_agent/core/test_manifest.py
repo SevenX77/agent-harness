@@ -38,7 +38,6 @@ from graph_agent.core.manifest import (
     LogicPhase,
     PersonaSkillDef,
     SkillManifest,
-    Step,
 )
 
 
@@ -718,47 +717,56 @@ class TestIoFieldValidation:
 
 
 # =============================================================================
-# Step (conditional execution inside LLMPhase)
+# LLMPhase.steps prompt structure
 # =============================================================================
 
 
-class TestStep:
-    def test_steps_field_rejected_on_llm_phase(self):
-        """Cohesion plan 方针 1.4 (2026-04-26): ``LLMPhase.steps`` was
-        removed because the conditional-step execution model (when /
-        skip_if / per-step tools / per-step validator) was never
-        implemented in the runtime — declared in the schema but
-        silently no-op. The schema now rejects the field outright; the
-        ``Step`` submodel itself is kept as a public symbol so a
-        future re-introduction can re-export it without churn."""
+class TestLLMPhaseSteps:
+    def test_llm_phase_accepts_steps_as_str_list(self):
+        """LLMPhase.steps accepts list[str], aligned with AgentProfile.steps."""
+        manifest = _SKILL_ADAPTER.validate_python({
+            **_base_graph_dict(),
+            "phases": [{
+                "mode": "llm",
+                "name": "planning_phase",
+                "prompt": "p",
+                "steps": ["read context", "call tools", "return answer"],
+            }],
+        })
+
+        phase = manifest.phases[0]
+        assert isinstance(phase, LLMPhase)
+        assert phase.steps == ["read context", "call tools", "return answer"]
+
+    def test_llm_phase_steps_default_empty_list(self):
+        """Omitting steps defaults to [], preserving existing manifests."""
+        phase = LLMPhase.model_validate({
+            "mode": "llm",
+            "name": "p",
+            "prompt": "p",
+        })
+
+        assert phase.steps == []
+
+    def test_llm_phase_steps_rejects_dict_object(self):
+        """Old Step-object shaped entries are rejected; schema is list[str]."""
         with pytest.raises(ValidationError) as exc:
             _SKILL_ADAPTER.validate_python({
                 **_base_graph_dict(),
                 "phases": [{
                     "mode": "llm",
-                    "name": "conditional_phase",
+                    "name": "planning_phase",
                     "prompt": "p",
-                    "steps": [
-                        {"name": "maybe_run", "tools": ["t1"]},
-                    ],
+                    "steps": [{"name": "maybe_run", "tools": ["t1"]}],
                 }],
             })
+
         assert "steps" in str(exc.value)
 
-    def test_step_submodel_still_constructible(self):
-        """``Step`` itself stays a public symbol — useful for future
-        re-introduction and for documentation tools that walk the
-        manifest module."""
-        s = Step.model_validate(
-            {
-                "name": "maybe_run",
-                "when": "context.prev_ok == True",
-                "skip_if": "context.force_skip",
-                "tools": ["t1"],
-            }
-        )
-        assert isinstance(s, Step)
-        assert s.when == "context.prev_ok == True"
+    def test_step_class_no_longer_importable(self):
+        """Step class is removed; import should fail."""
+        with pytest.raises(ImportError):
+            from graph_agent.core.manifest import Step  # noqa: F401
 
 
 # =============================================================================
@@ -973,6 +981,5 @@ class TestSubmodelExports:
             "PersonaSkillDef",
             "PhaseDef",
             "SkillManifest",
-            "Step",
         ):
             assert hasattr(m, sym), f"manifest.py missing public export: {sym}"

@@ -5,9 +5,8 @@ Per PR-7 design (Gemini-reviewed 2026-04-27):
   gets a deep-copied parent ctx -> write isolation, read shared baseline)
 - context_bridge is broadcast to all children (Q5.1)
 - Each child collects either a child_state or an exception
-- Reducer + tolerance (Q2c, Q3d) is wired in Commit 3; this commit raises
-  NotImplementedError after the parallel collection completes, so the
-  parallel mechanism is independently testable.
+- Reducer + tolerance (Q2c, Q3d) aggregate successful child outputs and
+  raise CompositeFailure when the failure ratio exceeds phase tolerance.
 """
 from __future__ import annotations
 
@@ -22,6 +21,24 @@ from langchain_core.runnables import RunnableConfig
 
 from .state import WorkflowState
 from .types import ContextBridge, Phase
+
+
+class CompositeFailure(Exception):
+    """Raised when too many parallel children fail relative to tolerance.
+
+    Carries the per-child failure list so RetryRouter / upstream observers
+    can inspect what went wrong without re-running.
+    """
+
+    def __init__(self, phase_name: str, failures: list[tuple[int, Exception]], total: int) -> None:
+        self.phase_name = phase_name
+        self.failures = failures
+        self.total = total
+        message = (
+            f"ParallelDelegate phase '{phase_name}' exceeded tolerance: "
+            f"{len(failures)}/{total} children failed"
+        )
+        super().__init__(message)
 
 
 def _derive_child_thread_id(parent_thread_id: Any, phase_name: str, idx: int) -> str:
@@ -47,6 +64,27 @@ def _merge_child_io_errors(parent_ctx: dict[str, Any], child_ctx: dict[str, Any]
     parent_ctx["_io_errors"] = [str(existing), *normalized]
 
 
+def _resolve_reducer_callable(reducer_path: str | None) -> Any:
+    """Import and return the reducer callable at execute time.
+
+    Loader-time validation (loader._validate_reducer_path) ensures the
+    path resolves and points at a callable, but we re-resolve here in
+    case the host process was restarted from a checkpoint and the import
+    cache is cold.
+    """
+    if not reducer_path:
+        raise RuntimeError(
+            "parallel_delegate phase has no reducer_path "
+            "(loader should have caught this - internal error)"
+        )
+    import importlib
+
+    module_path, _, attr = reducer_path.rpartition(".")
+    module = importlib.import_module(module_path)
+    fn = getattr(module, attr)
+    return fn
+
+
 def build_parallel_delegate_node(
     harness: Any,
     phase: Phase,
@@ -60,12 +98,7 @@ def build_parallel_delegate_node(
        (broadcast per Q5.1: same bridge to all children)
     3. Submits each child harness to ThreadPoolExecutor.run()
     4. Waits for all to complete; collects (child_state, exception) per slot
-    5. **(Commit 2 stops here, raises NotImplementedError)**
-       Commit 3 will:
-       - Resolve phase.reducer_path -> callable reducer
-       - Apply tolerance check on collected errors
-       - If too many failures -> raise CompositeFailure
-       - Else -> call reducer(parent_ctx, child_outputs, errors) -> merge
+    5. Applies tolerance, calls reducer, and merges reducer output
     """
     if not phase.parallel_subgraphs:
         raise ValueError(
@@ -162,15 +195,127 @@ def build_parallel_delegate_node(
             sum(1 for _, exc in outcomes if exc is not None),
         )
 
-        # Commit 3 will replace this raise with: resolve reducer, apply
-        # tolerance, raise CompositeFailure or call reducer.
-        raise NotImplementedError(
-            f"Phase '{phase.name}': parallel_delegate reducer/tolerance "
-            "is pending PR-7 Commit 3. Children completed in parallel "
-            f"({len(outcomes)} outcomes), but aggregation is not yet wired."
+        # Build child_outputs (successful) and errors (failed) lists per Gemini Q2c/Q3d.
+        # "Failure" definition (Q3d): any of -
+        #   1. child raised exception (collected in outcomes[idx][1])
+        #   2. child finished but schema_validation == "failed" in finish_result
+        #   3. child finished but no _finish_task_result at all (LLM didn't call finish_task)
+        child_outputs: list[dict[str, Any]] = []
+        failures: list[tuple[int, Exception]] = []  # (idx, exc) per failed child
+        successful_states: list[dict[str, Any]] = []  # full child_state for metrics + ctx merge
+        for idx, (child_state, exc) in enumerate(outcomes):
+            if exc is not None:
+                failures.append((idx, exc))
+                continue
+            if child_state is None:
+                failures.append(
+                    (idx, RuntimeError(f"child {idx} returned no state (no exception)"))
+                )
+                continue
+            child_ctx = child_state.get("context", {}) if isinstance(child_state, dict) else {}
+            finish_result = child_ctx.get("_finish_task_result") if isinstance(child_ctx, dict) else None
+            if not isinstance(finish_result, dict):
+                failures.append(
+                    (
+                        idx,
+                        RuntimeError(
+                            f"child {idx} (phase {phase.name}) did not call finish_task; "
+                            "no _finish_task_result in ctx"
+                        ),
+                    )
+                )
+                continue
+            if finish_result.get("schema_validation") == "failed":
+                failures.append(
+                    (
+                        idx,
+                        RuntimeError(
+                            f"child {idx} (phase {phase.name}) finish_task schema validation failed: "
+                            f"{finish_result.get('validation_error_text', '(no detail)')}"
+                        ),
+                    )
+                )
+                continue
+            child_outputs.append(dict(child_ctx))
+            successful_states.append(child_state)
+
+        total_children = len(outcomes)
+        fail_ratio = len(failures) / total_children if total_children else 0.0
+
+        logger.info(
+            "[ParallelDelegate] phase=%s success=%d failures=%d ratio=%.2f tolerance=%.2f",
+            phase.name, len(child_outputs), len(failures), fail_ratio, phase.tolerance,
         )
+
+        # Apply tolerance check (Q3d): if fail_ratio > tolerance, abort the phase.
+        # Note: == is allowed (e.g., tolerance=0.0 + 0 failures works).
+        if fail_ratio > phase.tolerance:
+            raise CompositeFailure(phase.name, failures, total_children)
+
+        # Resolve reducer dotted path to callable (per Gemini Q1c: stored as path,
+        # imported at execute time to avoid checkpointer serialization issues).
+        reducer_callable = _resolve_reducer_callable(phase.reducer_path)
+
+        # Build errors-as-list for reducer signature (Q2c).
+        errors_for_reducer: list[Exception] = [exc for _, exc in failures]
+
+        # Call reducer(parent_ctx, child_outputs, errors) -> merge dict.
+        # Reducer is responsible for combining N child outputs into a single
+        # business-data dict that the parent phase can merge into ctx.
+        try:
+            reduced = reducer_callable(parent_ctx, child_outputs, errors_for_reducer)
+        except Exception as exc:
+            raise CompositeFailure(
+                phase.name,
+                [(-1, exc)],
+                total_children,
+            ) from exc
+
+        if not isinstance(reduced, dict):
+            raise CompositeFailure(
+                phase.name,
+                [(-1, TypeError(f"reducer must return dict, got {type(reduced).__name__}"))],
+                total_children,
+            )
+
+        # Merge reducer output into parent ctx.
+        # Note: reducer is responsible for namespacing - it returns dict keys
+        # that will be set on parent_ctx directly. Framework keys ('_'-prefixed)
+        # are not filtered (reducer trust contract).
+        parent_ctx.update(reduced)
+
+        # Merge child _io_errors and build aggregated metrics from successful states.
+        merged_metrics = dict(state["metrics"])
+        for child_state in successful_states:
+            child_ctx = child_state.get("context", {}) if isinstance(child_state, dict) else {}
+            if isinstance(child_ctx, dict):
+                _merge_child_io_errors(parent_ctx, child_ctx)
+            child_metrics = (
+                child_state.get("metrics", {}) if isinstance(child_state, dict) else {}
+            )
+            merged_metrics["total_input_tokens"] = (
+                merged_metrics.get("total_input_tokens", 0)
+                + int(child_metrics.get("total_input_tokens", 0))
+            )
+            merged_metrics["total_output_tokens"] = (
+                merged_metrics.get("total_output_tokens", 0)
+                + int(child_metrics.get("total_output_tokens", 0))
+            )
+
+        new_state: WorkflowState = {
+            "context": parent_ctx,
+            "messages": [],
+            "current_phase": phase.name,
+            "retry_counts": dict(state["retry_counts"]),
+            "metrics": merged_metrics,
+        }
+
+        for cb in active_callbacks:
+            cb.on_phase_end(phase.name, dict(parent_ctx), dict(merged_metrics))
+
+        return new_state
 
     return execute
 
 
-__all__ = ["build_parallel_delegate_node"]
+__all__ = ["CompositeFailure", "build_parallel_delegate_node"]

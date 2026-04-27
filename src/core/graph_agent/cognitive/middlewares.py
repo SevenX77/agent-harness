@@ -8,7 +8,7 @@ consumer is `GraphAgentHarness`.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 try:
@@ -24,6 +24,50 @@ from langgraph.runtime import Runtime
 from ..callbacks.base import Callback
 
 logger = logging.getLogger(__name__)
+
+_SUMMARIZATION_FALLBACK_MAX_INPUT_TOKENS = 32_000
+
+
+class _ProfiledSummarizationModel:
+    """Delegate model calls while supplying a conservative LangChain profile."""
+
+    def __init__(self, wrapped: Any, *, max_input_tokens: int) -> None:
+        self._wrapped = wrapped
+        self.profile = {"max_input_tokens": max_input_tokens}
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._wrapped, name)
+
+    def invoke(self, *args: Any, **kwargs: Any) -> Any:
+        return self._wrapped.invoke(*args, **kwargs)
+
+    async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:
+        return await self._wrapped.ainvoke(*args, **kwargs)
+
+
+def _has_max_input_profile(model: Any) -> bool:
+    try:
+        profile = model.profile
+    except AttributeError:
+        return False
+    return (
+        isinstance(profile, Mapping)
+        and isinstance(profile.get("max_input_tokens"), int)
+    )
+
+
+def _ensure_summarization_profile(model: Any) -> Any:
+    if _has_max_input_profile(model):
+        return model
+    logger.warning(
+        "middleware: summarization model lacks profile.max_input_tokens; "
+        "using fallback max_input_tokens=%d",
+        _SUMMARIZATION_FALLBACK_MAX_INPUT_TOKENS,
+    )
+    return _ProfiledSummarizationModel(
+        model,
+        max_input_tokens=_SUMMARIZATION_FALLBACK_MAX_INPUT_TOKENS,
+    )
 
 
 class WorkingMemoryMiddleware(AgentMiddleware[AgentState]):
@@ -242,6 +286,13 @@ def create_custom_middlewares(
     callbacks: Sequence[Callback] | None = None,
     phase_name: str | None = None,
     agent_loop_iteration: bool = True,
+    loop_detection: bool = True,
+    loop_detection_warn_threshold: int = 3,
+    loop_detection_hard_limit: int = 5,
+    summarization: bool = False,
+    summarization_model: Any = None,
+    summarization_trigger_fraction: float = 0.8,
+    summarization_keep_messages: int = 20,
 ) -> list[AgentMiddleware]:
     """Create the middleware list for GraphAgent / DeerFlow integration."""
     middlewares: list[AgentMiddleware] = []
@@ -272,6 +323,56 @@ def create_custom_middlewares(
                 callbacks=callbacks,
                 phase_name=phase_name,
             )
+        )
+
+    if loop_detection:
+        try:
+            from ..deerflow.agents.middlewares.loop_detection_middleware import (
+                LoopDetectionMiddleware,
+            )
+
+            middlewares.append(
+                LoopDetectionMiddleware(
+                    warn_threshold=loop_detection_warn_threshold,
+                    hard_limit=loop_detection_hard_limit,
+                )
+            )
+            logger.info(
+                "middleware: enabled LoopDetection (warn=%d hard=%d)",
+                loop_detection_warn_threshold,
+                loop_detection_hard_limit,
+            )
+        except ImportError as exc:
+            logger.warning(
+                "middleware: failed to import LoopDetectionMiddleware: %s",
+                exc,
+            )
+
+    if summarization and summarization_model is not None:
+        try:
+            from langchain.agents.middleware import SummarizationMiddleware
+
+            middlewares.append(
+                SummarizationMiddleware(
+                    model=_ensure_summarization_profile(summarization_model),
+                    trigger=("fraction", summarization_trigger_fraction),
+                    keep=("messages", summarization_keep_messages),
+                )
+            )
+            logger.info(
+                "middleware: enabled Summarization "
+                "(trigger=fraction:%.1f keep=%d msgs)",
+                summarization_trigger_fraction,
+                summarization_keep_messages,
+            )
+        except ImportError as exc:
+            logger.warning(
+                "middleware: failed to import SummarizationMiddleware: %s",
+                exc,
+            )
+    elif summarization and summarization_model is None:
+        logger.warning(
+            "middleware: summarization=True but summarization_model is None; skipping"
         )
 
     return middlewares

@@ -59,6 +59,13 @@ class Phase:
     data_architecture: str | None = None
     subagent_enabled: bool = False
     subgraph: GraphAgentHarness | None = None
+    # Parallel delegate runtime fields (PR-7).
+    # Resolved at loader time per Gemini design Q1c: structures stay in
+    # memory, the reducer path is dotted-string and imported at execute time
+    # (Callable cannot be msgpack-serialised by LangGraph checkpointer).
+    parallel_subgraphs: list[GraphAgentHarness] = field(default_factory=list)
+    reducer_path: str | None = None
+    tolerance: float = 0.0
     context_bridge: ContextBridge | None = None
     references: list[str] = field(default_factory=list)
     skill_base_dir: Path | None = None

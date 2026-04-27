@@ -11,6 +11,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from graph_agent.callbacks.base import Callback
 from graph_agent.core.phase_executor import PhaseExecutor
 from graph_agent.core.state import WorkflowState
@@ -105,6 +107,17 @@ def _capture_execute_llm_phase(
 
 
 class TestExecuteCodeOnlyPhase:
+    def test_parallel_delegate_gate_raises_commit_2_not_implemented(self):
+        executor = PhaseExecutor([])
+        phase = Phase(
+            name="parallel_review",
+            requires_llm=False,
+            parallel_subgraphs=[object()],  # type: ignore[list-item]
+        )
+
+        with pytest.raises(NotImplementedError, match="Commit 2"):
+            executor.execute_code_only_phase(phase, _make_state())
+
     def test_input_state_not_mutated(self):
         cb = _RecordingCallback()
         executor = PhaseExecutor([cb])

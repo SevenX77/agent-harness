@@ -34,6 +34,9 @@ class Phase:
     max_iterations: int = 20
     max_tool_calls: int = 0
     tier: str = "balanced"
+    # Logical model role resolved from llm_roles.yaml, mapped from the
+    # manifest's ``llm_role`` field. ``tier`` remains for compatibility.
+    llm_role: str | None = None
     # Task 6.1: when a phase wants to bypass the tier → role → model
     # resolution and pin itself to a specific registered model (for A/B
     # experiments or a single-model-role phase), it sets

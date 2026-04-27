@@ -52,6 +52,16 @@ skill ecosystem is modelled on **three orthogonal axes**:
      to avoid implying false runtime contracts for per-step ``tools`` /
      ``validator`` fields.
 
+Prompt Schema Extensions
+========================
+
+``domain_protocols`` capture numbered domain rules the model should cite.
+``references`` declare local knowledge files the model may inspect later.
+``few_shot_examples`` hold prompt-level examples; persona skills already
+carry the same concept for persona injection. ``context_access`` declares
+which prior-run context surfaces a prompt may request. ``llm_role`` is the
+new model-role selector; legacy ``tier`` remains accepted during migration.
+
 Reference resolution
 ====================
 
@@ -95,6 +105,7 @@ all-at-once rewrite. Production SKILL.md files migrate in Task 0.3
 
 from __future__ import annotations
 
+import warnings
 from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -182,6 +193,13 @@ class LLMPhase(_BasePhase):
     user_prompt_template: str | None = None
     agent_tools: list[str] = Field(default_factory=list)
     steps: list[str] = Field(default_factory=list)
+    domain_protocols: list[str] = Field(default_factory=list)
+    references: list[str] = Field(default_factory=list)
+    few_shot_examples: list[str] = Field(default_factory=list)
+    context_access: list[Literal["artifact", "working_memory"]] = Field(
+        default_factory=list
+    )
+    llm_role: str | None = None
     subagent_enabled: bool = False
     adopted_persona: str | None = None
     max_iterations: int | None = Field(default=None, ge=1)
@@ -191,6 +209,19 @@ class LLMPhase(_BasePhase):
     validator: str | None = None
     retry_target: str | None = None
     output_schema: str | None = None
+
+    @model_validator(mode="after")
+    def _migrate_tier_to_llm_role(self) -> "LLMPhase":
+        if self.tier is not None and self.llm_role is not None:
+            raise ValueError("can't set both tier and llm_role")
+        if self.tier is not None:
+            warnings.warn(
+                "tier is deprecated, use llm_role",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self.llm_role = self.tier
+        return self
 
 
 class LogicPhase(_BasePhase):
@@ -269,6 +300,13 @@ class AgentProfile(BaseModel):
     goal: str = Field(min_length=1)
     steps: list[str] = Field(default_factory=list)
     constraints: list[str] = Field(default_factory=list)
+    domain_protocols: list[str] = Field(default_factory=list)
+    references: list[str] = Field(default_factory=list)
+    few_shot_examples: list[str] = Field(default_factory=list)
+    context_access: list[Literal["artifact", "working_memory"]] = Field(
+        default_factory=list
+    )
+    llm_role: str | None = None
 
 
 class AgentSkillDef(_BaseSkill):
@@ -287,6 +325,19 @@ class AgentSkillDef(_BaseSkill):
     adopted_persona: str | None = None
     user_prompt_template: str | None = None
     context_mapping: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _migrate_tier_to_profile_llm_role(self) -> "AgentSkillDef":
+        if self.tier is not None and self.agent_profile.llm_role is not None:
+            raise ValueError("can't set both tier and llm_role")
+        if self.tier is not None:
+            warnings.warn(
+                "tier is deprecated, use llm_role",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self.agent_profile.llm_role = self.tier
+        return self
 
 
 class GraphSkillDef(_BaseSkill):

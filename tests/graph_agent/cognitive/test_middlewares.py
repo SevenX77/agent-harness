@@ -108,5 +108,21 @@ class TestCreateCustomMiddlewaresPR3:
             "WorkingMemoryMiddleware",
             "DeadEndPruningMiddleware",
             "LoopDetectionMiddleware",
+            "ClarificationMiddleware",
             "SummarizationMiddleware",
         ]
+
+
+class TestCreateCustomMiddlewaresPR5:
+    def test_clarification_enabled_by_default(self) -> None:
+        middlewares = create_custom_middlewares(phase_name="test")
+
+        assert "ClarificationMiddleware" in _names(middlewares)
+
+    def test_clarification_can_be_disabled(self) -> None:
+        middlewares = create_custom_middlewares(
+            phase_name="test",
+            clarification=False,
+        )
+
+        assert "ClarificationMiddleware" not in _names(middlewares)

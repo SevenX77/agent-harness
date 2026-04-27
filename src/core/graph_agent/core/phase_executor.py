@@ -362,6 +362,19 @@ class PhaseExecutor:
         lc_tools.append(_wrap_tool_for_langchain(finish_task, ctx, bridge, return_direct=True))
         lc_tools.append(_wrap_tool_for_langchain(update_working_memory, ctx, bridge))
         lc_tools.append(_wrap_tool_for_langchain(log_ambiguity, ctx, bridge))
+        try:
+            from ..deerflow.tools.builtins.clarification_tool import (
+                ask_clarification_tool,
+            )
+
+            lc_tools.append(ask_clarification_tool)
+            logger.info("phase=%s: mounted ask_clarification tool", phase.name)
+        except ImportError as exc:
+            logger.warning(
+                "phase=%s: failed to mount ask_clarification: %s",
+                phase.name,
+                exc,
+            )
         references = list(getattr(phase, "references", []) or [])
         if references:
             base_dir = getattr(phase, "skill_base_dir", None) or ctx.get("_skill_base_dir")
@@ -402,6 +415,7 @@ class PhaseExecutor:
             summarization_model=model,
             summarization_trigger_fraction=0.8,
             summarization_keep_messages=20,
+            clarification=True,
         )
 
         # Step 6: Create DeerFlow Agent — render system_prompt with context

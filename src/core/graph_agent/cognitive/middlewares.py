@@ -289,6 +289,7 @@ def create_custom_middlewares(
     loop_detection: bool = True,
     loop_detection_warn_threshold: int = 3,
     loop_detection_hard_limit: int = 5,
+    clarification: bool = True,
     summarization: bool = False,
     summarization_model: Any = None,
     summarization_trigger_fraction: float = 0.8,
@@ -345,6 +346,20 @@ def create_custom_middlewares(
         except ImportError as exc:
             logger.warning(
                 "middleware: failed to import LoopDetectionMiddleware: %s",
+                exc,
+            )
+
+    if clarification:
+        try:
+            from ..deerflow.agents.middlewares.clarification_middleware import (
+                ClarificationMiddleware,
+            )
+
+            middlewares.append(ClarificationMiddleware())
+            logger.info("middleware: enabled Clarification (Human-in-the-Loop)")
+        except ImportError as exc:
+            logger.warning(
+                "middleware: failed to import ClarificationMiddleware: %s",
                 exc,
             )
 

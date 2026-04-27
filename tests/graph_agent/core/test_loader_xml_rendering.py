@@ -279,7 +279,7 @@ def test_steps_still_renders_as_markdown_after_new_xml_tags(tmp_path: Path) -> N
     )
 
     assert "[protocol:P1] 先检查输入" in prompt
-    assert "## 工作流" in prompt
+    assert "<steps>" in prompt
     assert "1. 调用工具" in prompt
     assert "2. 返回结果" in prompt
-    assert prompt.index("</domain_protocols>") < prompt.index("## 工作流")
+    assert prompt.index("</domain_protocols>") < prompt.index("<steps>")

@@ -388,15 +388,22 @@ def load_workflow_from_md(
 
 
 def _append_steps_to_prompt(prompt: str, steps: list[str]) -> str:
-    """Append numbered prompt-structure steps using the shared workflow format."""
+    """Append numbered prompt-structure steps as a ``<steps>`` XML tag.
+
+    Round 8 §C blueprint: discrete schema fields render as XML tags so
+    the LLM can attend to structure deterministically.
+    """
     if not steps:
         return prompt
-    workflow = "## 工作流\n" + "\n".join(
-        f"{i}. {step}" for i, step in enumerate(steps, start=1)
+    lines = ["<steps>"]
+    lines.extend(
+        f"  {i}. {step}" for i, step in enumerate(steps, start=1)
     )
+    lines.append("</steps>")
+    block = "\n".join(lines)
     if not prompt:
-        return workflow
-    return f"{prompt}\n\n{workflow}"
+        return block
+    return f"{prompt}\n\n{block}"
 
 
 def _render_skill_section_xml_tags(phase_or_profile: Any) -> str:
@@ -511,22 +518,36 @@ def _render_output_format_markdown(output_schema_path: str) -> str:
 
 
 def _compose_agent_system_prompt(manifest: "AgentSkillDef") -> str:
-    """Assemble an agent skill's System Prompt from its agent_profile.
+    """Assemble an agent skill's System Prompt using Round 8 §C XML tags.
 
-    Joins ``role`` + ``goal`` + ``steps`` + ``constraints`` into the prose
-    form the DeerFlow agent loop expects. Persona injection is layered
-    on top by the caller when ``adopted_persona`` is set.
+    Wraps role/goal/constraints in dedicated XML tags so the LLM attends
+    to structure deterministically. PM still writes natural-language
+    field values; the compiler is responsible for the wrapping.
+
+    Persona injection (when ``adopted_persona`` is set) is layered on
+    top by the caller.
     """
     profile = manifest.agent_profile
-    prompt = "\n\n".join([f"你是{profile.role}。", f"你的目标:{profile.goal}"])
+    sections: list[str] = [
+        f"<domain_expertise>\n  {profile.role}\n</domain_expertise>",
+        f"<task_objective>\n  {profile.goal}\n</task_objective>",
+    ]
     xml_tags = _render_skill_section_xml_tags(profile)
     if xml_tags:
-        prompt = f"{prompt}\n\n{xml_tags}"
-    prompt = _append_steps_to_prompt(prompt, profile.steps)
+        sections.append(xml_tags)
+    if profile.steps:
+        steps_lines = ["<steps>"]
+        steps_lines.extend(
+            f"  {i}. {step}" for i, step in enumerate(profile.steps, start=1)
+        )
+        steps_lines.append("</steps>")
+        sections.append("\n".join(steps_lines))
     if profile.constraints:
-        constraints = "## 约束\n" + "\n".join(f"- {c}" for c in profile.constraints)
-        prompt = f"{prompt}\n\n{constraints}"
-    return prompt
+        constraints_lines = ["<constraints>"]
+        constraints_lines.extend(f"  - {c}" for c in profile.constraints)
+        constraints_lines.append("</constraints>")
+        sections.append("\n".join(constraints_lines))
+    return "\n\n".join(sections)
 
 
 def _inject_persona(

@@ -20,6 +20,7 @@ models:
     name: "Claude Sonnet 4.6 Thinking"
     reasoning: true
     min_max_tokens: 8192
+    max_input_tokens: 200000
     fc_supported: true
     providers:
       OC_CL_ANT: "claude-sonnet-4-6-thinking"
@@ -33,6 +34,7 @@ models:
     name: "Claude Opus 4.6 Thinking"
     reasoning: true
     min_max_tokens: 8192
+    max_input_tokens: 200000
     fc_supported: true
     providers:
       OC_CL_ANT: "claude-opus-4-6-thinking"
@@ -46,6 +48,7 @@ models:
     name: "Claude Opus 4.7 Thinking"
     reasoning: true
     min_max_tokens: 8192
+    max_input_tokens: 200000
     fc_supported: true
     providers:
       OC_CL_ANT: "claude-opus-4-7"
@@ -59,6 +62,7 @@ models:
     name: "Gemini 3.1 Pro Preview"
     reasoning: false
     min_max_tokens: 8192
+    max_input_tokens: 1000000
     fc_supported: false
     providers:
       OC_GM: "gemini-3.1-pro-preview"
@@ -69,6 +73,7 @@ models:
     name: "DeepSeek-V4 Flash"
     reasoning: false
     min_max_tokens: 8192
+    max_input_tokens: 64000
     fc_supported: true
     providers:
       OC_DS: "deepseek-ai/DeepSeek-V3.2"
@@ -78,6 +83,7 @@ models:
     name: "DeepSeek-V4 Pro"
     reasoning: true
     min_max_tokens: 24000
+    max_input_tokens: 64000
     fc_supported: true
     providers:
       OC_DS: "deepseek/deepseek-r1-0528"
@@ -114,6 +120,7 @@ models:
     name: "Claude Code Haiku 4.6"
     reasoning: false
     min_max_tokens: 8192
+    max_input_tokens: 200000
     fc_supported: true
     providers:
       OC_CL_ANT: "claude-haiku-4-5-20251001"

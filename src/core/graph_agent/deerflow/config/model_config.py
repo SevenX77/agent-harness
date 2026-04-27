@@ -12,6 +12,7 @@ class ModelConfig(BaseModel):
         description="Class path of the model provider(e.g. langchain_openai.ChatOpenAI)",
     )
     model: str = Field(..., description="Model name")
+    max_input_tokens: int | None = Field(default=None, description="Maximum input context window for the model")
     model_config = ConfigDict(extra="allow")
     use_responses_api: bool | None = Field(
         default=None,

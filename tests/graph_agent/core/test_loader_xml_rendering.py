@@ -8,6 +8,7 @@ from pydantic import TypeAdapter
 
 from graph_agent.core.loader import (
     _compose_agent_system_prompt,
+    _phase_from_agent_skill,
     _phase_from_graph_phase,
 )
 from graph_agent.core.manifest import AgentSkillDef, SkillManifest
@@ -81,6 +82,56 @@ def test_references_renders_to_knowledge_base_tag(tmp_path: Path) -> None:
     assert "调用 read_file 查阅" in prompt
     assert "- docs/a.md" in prompt
     assert "- docs/b.md" in prompt
+
+
+def test_graph_phase_references_thread_to_runtime_phase(tmp_path: Path) -> None:
+    manifest = _SKILL_ADAPTER.validate_python({
+        "schema_version": "2.0",
+        "name": "graph",
+        "description": "graph",
+        "type": "graph",
+        "io": {"inputs": [], "outputs": []},
+        "phases": [{
+            "mode": "llm",
+            "name": "phase",
+            "references": ["references/guide.md"],
+        }],
+    })
+
+    phase = _phase_from_graph_phase(
+        manifest.phases[0],
+        tmp_path,
+        callbacks=None,
+        loading_stack=set(),
+    )
+
+    assert phase.references == ["references/guide.md"]
+    assert phase.skill_base_dir == tmp_path
+
+
+def test_agent_profile_references_thread_to_runtime_phase(tmp_path: Path) -> None:
+    manifest = _SKILL_ADAPTER.validate_python({
+        "schema_version": "2.0",
+        "name": "agent",
+        "description": "agent",
+        "type": "agent",
+        "agent_profile": {
+            "role": "Role",
+            "goal": "Goal",
+            "references": ["references/agent.md"],
+        },
+    })
+    assert isinstance(manifest, AgentSkillDef)
+
+    phase = _phase_from_agent_skill(
+        manifest,
+        tmp_path,
+        callbacks=None,
+        loading_stack=set(),
+    )
+
+    assert phase.references == ["references/agent.md"]
+    assert phase.skill_base_dir == tmp_path
 
 
 def test_context_access_renders_to_context_access_tag(tmp_path: Path) -> None:

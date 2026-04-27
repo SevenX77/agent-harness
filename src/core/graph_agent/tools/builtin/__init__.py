@@ -8,5 +8,6 @@ skill's directory.
 from __future__ import annotations
 
 from .parallel_map import parallel_map
+from .read_file import make_read_file_tool
 
-__all__ = ["parallel_map"]
+__all__ = ["parallel_map", "make_read_file_tool"]

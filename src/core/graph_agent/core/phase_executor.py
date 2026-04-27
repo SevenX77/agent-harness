@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from langchain.agents import create_agent
@@ -361,6 +362,26 @@ class PhaseExecutor:
         lc_tools.append(_wrap_tool_for_langchain(finish_task, ctx, bridge, return_direct=True))
         lc_tools.append(_wrap_tool_for_langchain(update_working_memory, ctx, bridge))
         lc_tools.append(_wrap_tool_for_langchain(log_ambiguity, ctx, bridge))
+        references = list(getattr(phase, "references", []) or [])
+        if references:
+            base_dir = getattr(phase, "skill_base_dir", None) or ctx.get("_skill_base_dir")
+            if base_dir is None:
+                logger.warning(
+                    "phase=%s has references=%s but no skill_base_dir; "
+                    "read_file tool not mounted",
+                    phase.name,
+                    references,
+                )
+            else:
+                from ..tools.builtin.read_file import make_read_file_tool
+
+                read_file_fn = make_read_file_tool(references, Path(base_dir))
+                lc_tools.append(_wrap_tool_for_langchain(read_file_fn, ctx, bridge))
+                logger.info(
+                    "phase=%s mounted read_file tool with %d references",
+                    phase.name,
+                    len(references),
+                )
         if phase.subagent_enabled:
             try:
                 from deerflow.tools.builtins import task_tool as deerflow_task_tool

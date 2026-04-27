@@ -746,11 +746,6 @@ def _phase_from_graph_phase(
                 if phase_def.validator
                 else None
             ),
-            # 方针 1.1: thread retry fields into runtime Phase so a
-            # logic-phase validator failure routes through RetryRouter the
-            # same way an LLM-phase validator failure does.
-            retry_target=phase_def.retry_target,
-            max_retries=phase_def.max_retries if phase_def.max_retries is not None else 3,
             requires_llm=False,
         )
 

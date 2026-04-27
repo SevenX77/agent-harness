@@ -1006,51 +1006,25 @@ class TestTierDeprecation:
 
 
 class TestLogicPhaseRetryFields:
-    """Cohesion plan 方针 1.1 (2026-04-26): a logic phase has a
-    ``validator``; on validator failure we want the same retry routing
-    as on an LLM phase. Without ``max_retries`` / ``retry_target``,
-    a logic phase with a failing validator just dies — the production
-    1.x vocabulary supported retries on logic phases too."""
+    """LogicPhase schema rejects retry fields — Q1 decision (2026-04-27)."""
 
-    def test_logic_phase_accepts_max_retries(self):
-        phase = LogicPhase.model_validate(
-            {
-                "mode": "logic",
-                "name": "deterministic",
-                "execute_steps": ["pkg.module.callable"],
-                "max_retries": 3,
-                "retry_target": "deterministic",
-            }
-        )
-        assert phase.max_retries == 3
-        assert phase.retry_target == "deterministic"
-
-    def test_logic_phase_negative_max_retries_rejected(self):
-        with pytest.raises(ValidationError):
-            LogicPhase.model_validate(
-                {
-                    "mode": "logic",
-                    "name": "p",
-                    "execute_steps": ["m.f"],
-                    "max_retries": -1,
-                }
+    def test_logic_phase_rejects_retry_target(self):
+        with pytest.raises(ValidationError, match="retry_target"):
+            LogicPhase(
+                name="test",
+                mode="logic",
+                execute_steps=["module.func"],
+                retry_target="other_phase",
             )
 
-    def test_logic_phase_dangling_retry_target_rejected_at_graph_level(self):
-        """The cross-phase retry_target validator (1.6) must work for
-        logic phases too — not just LLM phases."""
-        data = _base_graph_dict()
-        data["phases"] = [
-            {
-                "mode": "logic",
-                "name": "compute",
-                "execute_steps": ["pkg.m.f"],
-                "retry_target": "ghost_phase",
-            }
-        ]
-        with pytest.raises(ValidationError) as exc:
-            _SKILL_ADAPTER.validate_python(data)
-        assert "ghost_phase" in str(exc.value)
+    def test_logic_phase_rejects_max_retries(self):
+        with pytest.raises(ValidationError, match="max_retries"):
+            LogicPhase(
+                name="test",
+                mode="logic",
+                execute_steps=["module.func"],
+                max_retries=3,
+            )
 
 
 class TestRetryTargetReferenceValidation:

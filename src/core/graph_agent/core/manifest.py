@@ -231,22 +231,16 @@ class LLMPhase(_BasePhase):
 class LogicPhase(_BasePhase):
     """Deterministic Python-runtime phase, no LLM involvement.
 
-    ``execute_steps`` holds Python callable import paths (e.g.
-    ``"script.segmenter.prepare_chapter"``) which are invoked in order.
-    This is NOT the ``LLMPhase.tools`` field — those entries need JSON
-    Schema + Description for Function Calling, whereas ``execute_steps``
-    only needs import paths. Conflating them was the core design flaw
-    the 1.x vocabulary carried.
+    LogicPhase is a pure function from inputs to outputs. Retry has no
+    semantic meaning here — same input → same output. If transient
+    failures (HTTP, file IO) need retry, business code wraps it in
+    try/except. Framework does not provide retry routing for logic
+    phases.
     """
 
     mode: Literal["logic"]
     execute_steps: list[str] = Field(min_length=1)
     validator: str | None = None
-    # Cohesion plan 方针 1.1 (2026-04-26): production 1.x logic phases
-    # also need validator-driven retry routing — without max_retries /
-    # retry_target a logic phase whose validator fails just dies.
-    max_retries: int | None = Field(default=None, ge=0)
-    retry_target: str | None = None
 
 
 class DelegatePhase(_BasePhase):

@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Callable
+from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -24,6 +25,22 @@ def set_model_resolver_hook(hook: Callable[..., BaseChatModel] | None) -> None:
     global _model_resolver_hook
     _model_resolver_hook = hook
     logger.info("Model resolver hook %s", "registered" if hook else "cleared")
+
+
+def _attach_profile_from_deerflow_config(model: Any, model_config: "ModelConfig") -> None:
+    """Mirror ModelResolver profile attachment using deerflow's ModelConfig."""
+    max_input = getattr(model_config, "max_input_tokens", None)
+    if max_input is None:
+        return
+    try:
+        object.__setattr__(model, "profile", {"max_input_tokens": max_input})
+    except (AttributeError, TypeError) as exc:
+        logger.warning(
+            "deerflow factory: failed to attach profile to %s: %s. "
+            "SummarizationMiddleware will use 32k fallback.",
+            type(model).__name__,
+            exc,
+        )
 
 
 def create_chat_model(
@@ -69,6 +86,7 @@ def create_chat_model(
             "when_thinking_enabled",
             "thinking",
             "supports_vision",
+            "max_input_tokens",
         },
     )
     # Compute effective when_thinking_enabled by merging in the `thinking` shortcut field.
@@ -111,4 +129,5 @@ def create_chat_model(
             model_settings_from_config["reasoning_effort"] = "medium"
 
     model_instance = model_class(**kwargs, **model_settings_from_config)
+    _attach_profile_from_deerflow_config(model_instance, model_config)
     return model_instance

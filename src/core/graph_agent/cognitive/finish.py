@@ -80,17 +80,34 @@ def finish_task(
             schema = _resolve_schema_from_path(str(output_schema_path))
             validated_items = md_to_json(business_data_md, schema)
         except SemanticValidationError as exc:
-            raise ValueError(
-                "[finish_task] business_data_md schema validation failed:\n"
-                f"{exc}\n"
-                "请按上面的错误说明修正你的 business_data_md 后重新调用 finish_task。"
-            ) from exc
+            ctx["_finish_task_result"] = {
+                "schema_validation": "failed",
+                "validation_error_text": (
+                    "[finish_task] business_data_md schema validation failed:\n"
+                    f"{exc}\n"
+                    "请按上面的错误说明修正你的 business_data_md 后重新调用 finish_task。"
+                ),
+            }
+            logger.warning(
+                "finish_task v2: schema validation failed "
+                "(delegating to NudgeInjector retry loop)"
+            )
+            return "PHASE_COMPLETE"
         except Exception as exc:
-            raise ValueError(
-                "[finish_task] failed to parse business_data_md or load schema "
-                f"{output_schema_path}: {exc}\n"
-                "请确认 markdown 格式（## 分隔条目、字段用 - key: value）和 schema 路径正确。"
-            ) from exc
+            ctx["_finish_task_result"] = {
+                "schema_validation": "failed",
+                "validation_error_text": (
+                    "[finish_task] failed to parse business_data_md or load schema "
+                    f"{output_schema_path}: {exc}\n"
+                    "请确认 markdown 格式（## 分隔条目、字段用 - key: value）和 schema 路径正确。"
+                ),
+            }
+            logger.warning(
+                "finish_task v2: parse/import failed "
+                "(delegating to NudgeInjector retry loop): %s",
+                exc,
+            )
+            return "PHASE_COMPLETE"
 
         ctx["_finish_task_result"] = {
             "diagnostics_md": diagnostics_md.strip(),

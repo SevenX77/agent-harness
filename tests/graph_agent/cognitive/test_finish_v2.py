@@ -62,17 +62,19 @@ class TestFinishTaskV2:
             {"title": "Scene plan", "score": 3, "tags": ["scene", "plan"]}
         ]
 
-    def test_v2_with_invalid_business_data_md_raises(self) -> None:
+    def test_v2_with_invalid_business_data_md_writes_ctx_failed(self) -> None:
         ctx = {"output_schema_path": _schema_path()}
         invalid_md = """## item-1
 - title: Scene plan
 - score: high
 """
 
-        with pytest.raises(ValueError) as exc:
-            finish_task(ctx, business_data_md=invalid_md)
+        result = finish_task(ctx, business_data_md=invalid_md)
 
-        msg = str(exc.value)
+        assert result == "PHASE_COMPLETE"
+        payload = ctx["_finish_task_result"]
+        assert payload["schema_validation"] == "failed"
+        msg = payload["validation_error_text"]
         assert "business_data_md schema validation failed" in msg
         assert "score" in msg
         assert "语义错误" in msg
@@ -92,13 +94,15 @@ class TestFinishTaskV2:
         assert payload["business_data_parsed"] is None  # type: ignore[index]
         assert payload["schema_validation"] == "skipped: no output_schema declared"  # type: ignore[index]
 
-    def test_v2_with_unresolvable_schema_path_raises(self) -> None:
+    def test_v2_with_unresolvable_schema_path_writes_ctx_failed(self) -> None:
         ctx = {"output_schema_path": "does.not.Exist"}
 
-        with pytest.raises(ValueError) as exc:
-            finish_task(ctx, business_data_md=VALID_BUSINESS_MD)
+        result = finish_task(ctx, business_data_md=VALID_BUSINESS_MD)
 
-        msg = str(exc.value)
+        assert result == "PHASE_COMPLETE"
+        payload = ctx["_finish_task_result"]
+        assert payload["schema_validation"] == "failed"
+        msg = payload["validation_error_text"]
         assert "failed to parse business_data_md or load schema does.not.Exist" in msg
 
     def test_v2_logs_validation_summary(self, caplog: pytest.LogCaptureFixture) -> None:

@@ -33,6 +33,7 @@ except ImportError:
 from ..callbacks.base import Callback
 from ..callbacks.events import LLMFallbackEvent
 from ..config.llm_config import (
+    ModelDef,
     ResolvedProvider,
     get_role_config,
 )
@@ -78,6 +79,25 @@ def _is_network_failure(exc: Exception) -> bool:
     if isinstance(exc, RuntimeError) and _WS_HTTP_5XX_RE.search(str(exc)):
         return True
     return False
+
+
+def _attach_profile(model: Any, model_def: ModelDef) -> None:
+    """Attach max-input profile metadata for SummarizationMiddleware."""
+    if model_def.max_input_tokens is None:
+        return
+    try:
+        object.__setattr__(
+            model,
+            "profile",
+            {"max_input_tokens": model_def.max_input_tokens},
+        )
+    except (AttributeError, TypeError) as exc:
+        logger.warning(
+            "ModelResolver: failed to attach profile to %s: %s. "
+            "SummarizationMiddleware will use 32k fallback.",
+            type(model).__name__,
+            exc,
+        )
 
 
 # ── ModelResolver ────────────────────────────────────────────────────────────
@@ -493,7 +513,9 @@ class ModelResolver:
             kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
             kwargs["temperature"] = 1.0
 
-        return ChatOpenAI(**kwargs)
+        model = ChatOpenAI(**kwargs)
+        _attach_profile(model, rp.model_def)
+        return model
 
     def _create_anthropic_compatible(
         self,
@@ -543,7 +565,9 @@ class ModelResolver:
         if thinking_cfg:
             kwargs["thinking"] = thinking_cfg
 
-        return ChatAnthropic(**kwargs)
+        model = ChatAnthropic(**kwargs)
+        _attach_profile(model, rp.model_def)
+        return model
 
     def _create_gemini_official(
         self,
@@ -564,12 +588,14 @@ class ModelResolver:
                 "Install with: pip install langchain-google-genai"
             )
 
-        return ChatGoogleGenerativeAI(
+        model = ChatGoogleGenerativeAI(
             model=rp.model_name,
             google_api_key=api_key,
             temperature=temperature,
             max_output_tokens=rp.model_def.min_max_tokens,
         )
+        _attach_profile(model, rp.model_def)
+        return model
 
     # ── Circuit breaker ───────────────────────────────────────────────────
 

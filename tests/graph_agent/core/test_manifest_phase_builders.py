@@ -198,6 +198,52 @@ class TestPhaseFromGraphPhase:
         assert phase.retry_target == "segment"
         assert phase.requires_llm is True
 
+    def test_llm_phase_with_steps_renders_into_system_prompt(self, tmp_path: Path):
+        manifest = _SKILL_ADAPTER.validate_python({
+            "name": "g",
+            "description": "d",
+            "type": "graph",
+            "io": {"inputs": [], "outputs": []},
+            "phases": [{
+                "mode": "llm",
+                "name": "plan",
+                "prompt": "Plan carefully.",
+                "steps": ["调用 X 工具", "验证 Y", "返回结果"],
+            }],
+        })
+
+        phase = _phase_from_graph_phase(
+            manifest.phases[0], tmp_path, callbacks=None, loading_stack=set()
+        )
+
+        assert phase.system_prompt is not None
+        assert phase.system_prompt.endswith(
+            "## 工作流\n1. 调用 X 工具\n2. 验证 Y\n3. 返回结果"
+        )
+        assert "## 工作流" in phase.system_prompt
+        assert "1. 调用 X 工具" in phase.system_prompt
+        assert "2. 验证 Y" in phase.system_prompt
+
+    def test_llm_phase_without_steps_prompt_unchanged(self, tmp_path: Path):
+        manifest = _SKILL_ADAPTER.validate_python({
+            "name": "g",
+            "description": "d",
+            "type": "graph",
+            "io": {"inputs": [], "outputs": []},
+            "phases": [{
+                "mode": "llm",
+                "name": "plan",
+                "prompt": "Plan carefully.",
+            }],
+        })
+
+        phase = _phase_from_graph_phase(
+            manifest.phases[0], tmp_path, callbacks=None, loading_stack=set()
+        )
+
+        assert phase.system_prompt == "Plan carefully."
+        assert "## 工作流" not in phase.system_prompt
+
     def test_llm_phase_dead_end_threshold_default_and_override(self, tmp_path: Path):
         default_manifest = _SKILL_ADAPTER.validate_python({
             "name": "g",

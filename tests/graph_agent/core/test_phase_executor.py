@@ -288,3 +288,77 @@ class TestExecuteLLMPhaseReadFileIntegration:
 
         assert "read_file" not in tool_names
         assert "read_file tool not mounted" in caplog.text
+
+
+class TestExecuteLLMPhaseContextAccessIntegration:
+    def _tool_names_for_context_access(
+        self,
+        monkeypatch,
+        context_access: list[str],
+    ) -> list[str]:
+        phase = Phase(name="llm", max_iterations=1, max_nudges=0)
+        phase.context_access = context_access  # type: ignore[attr-defined]
+
+        captured = _capture_execute_llm_phase(monkeypatch, phase)
+        return [
+            getattr(tool, "name", getattr(tool, "__name__", ""))
+            for tool in captured["create_agent_kwargs"]["tools"]
+        ]
+
+    def test_context_access_empty_mounts_no_context_tools(self, monkeypatch) -> None:
+        tool_names = self._tool_names_for_context_access(monkeypatch, [])
+
+        assert "query_working_memory" not in tool_names
+        assert "read_artifact" not in tool_names
+
+    def test_context_access_working_memory_mounts_only_query_tool(
+        self,
+        monkeypatch,
+    ) -> None:
+        tool_names = self._tool_names_for_context_access(
+            monkeypatch,
+            ["working_memory"],
+        )
+
+        assert "query_working_memory" in tool_names
+        assert "read_artifact" not in tool_names
+
+    def test_context_access_artifact_mounts_only_read_artifact(
+        self,
+        monkeypatch,
+    ) -> None:
+        tool_names = self._tool_names_for_context_access(monkeypatch, ["artifact"])
+
+        assert "read_artifact" in tool_names
+        assert "query_working_memory" not in tool_names
+
+    def test_context_access_both_mounts_both_tools(self, monkeypatch) -> None:
+        tool_names = self._tool_names_for_context_access(
+            monkeypatch,
+            ["artifact", "working_memory"],
+        )
+
+        assert "read_artifact" in tool_names
+        assert "query_working_memory" in tool_names
+
+    def test_context_access_prompt_fallback_mounts_tools(self, monkeypatch) -> None:
+        phase = Phase(
+            name="llm",
+            max_iterations=1,
+            max_nudges=0,
+            system_prompt=(
+                "<context_access>\n"
+                "  - read_artifact\n"
+                "  - query_working_memory\n"
+                "</context_access>"
+            ),
+        )
+
+        captured = _capture_execute_llm_phase(monkeypatch, phase)
+        tool_names = [
+            getattr(tool, "name", getattr(tool, "__name__", ""))
+            for tool in captured["create_agent_kwargs"]["tools"]
+        ]
+
+        assert "read_artifact" in tool_names
+        assert "query_working_memory" in tool_names

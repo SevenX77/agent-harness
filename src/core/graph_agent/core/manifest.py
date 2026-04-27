@@ -31,6 +31,10 @@ skill ecosystem is modelled on **three orthogonal axes**:
                           ``subgraph:`` + ``context_bridge``; the child
                           skill owns its own iteration, so
                           ``max_iterations`` is forbidden on this mode.
+   - ``mode: parallel_delegate`` — fan-out N child skills concurrently via
+                          ``subgraphs`` + ``reducer`` + ``tolerance``.
+                          Schema added in PR-7; runtime implementation
+                          is pending.
 
 3. **Delegation Mechanism** (tool-level, how a phase reaches other
    skills — these are *mutually exclusive* per phase, not new
@@ -259,8 +263,23 @@ class DelegatePhase(_BasePhase):
     context_bridge: ContextBridge
 
 
+class ParallelDelegatePhase(_BasePhase):
+    """Parallel composition phase: fan-out N child skills concurrently.
+
+    Schema added in PR-7 (P1). Runtime support is deferred to a follow-up PR
+    because it requires LangGraph ``Send`` API integration and reducer plumbing.
+    Loader raises a clear NotImplementedError for this mode until then.
+    """
+
+    mode: Literal["parallel_delegate"]
+    subgraphs: list[str] = Field(min_length=2)
+    context_bridge: ContextBridge
+    tolerance: float = Field(default=0.0, ge=0.0, le=1.0)
+    reducer: str = Field(min_length=1)
+
+
 PhaseDef = Annotated[
-    Union[LLMPhase, LogicPhase, DelegatePhase],
+    Union[LLMPhase, LogicPhase, DelegatePhase, ParallelDelegatePhase],
     Field(discriminator="mode"),
 ]
 """Discriminated union over ``mode``. Use
@@ -434,6 +453,7 @@ __all__ = [
     "IoOutput",
     "LLMPhase",
     "LogicPhase",
+    "ParallelDelegatePhase",
     "PersonaSkillDef",
     "PhaseDef",
     "SkillManifest",

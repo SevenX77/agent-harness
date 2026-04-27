@@ -36,7 +36,9 @@ from graph_agent.core.manifest import (
     GraphSkillDef,
     LLMPhase,
     LogicPhase,
+    ParallelDelegatePhase,
     PersonaSkillDef,
+    PhaseDef,
     SkillManifest,
 )
 
@@ -512,6 +514,96 @@ class TestDelegateDeterminism:
         with pytest.raises(ValidationError) as exc:
             _SKILL_ADAPTER.validate_python(data)
         assert "context_bridge" in str(exc.value)
+
+
+class TestParallelDelegatePhase:
+    def test_minimal_valid_config(self):
+        phase = ParallelDelegatePhase.model_validate({
+            "mode": "parallel_delegate",
+            "name": "fanout",
+            "subgraphs": ["./a/SKILL.md", "./b/SKILL.md"],
+            "context_bridge": {"inputs": {}, "outputs": {}},
+            "reducer": "script.merge.reduce_outputs",
+        })
+
+        assert phase.subgraphs == ["./a/SKILL.md", "./b/SKILL.md"]
+        assert isinstance(phase.context_bridge, ContextBridge)
+        assert phase.tolerance == 0.0
+        assert phase.reducer == "script.merge.reduce_outputs"
+
+    def test_subgraphs_must_have_at_least_two(self):
+        with pytest.raises(ValidationError) as exc:
+            ParallelDelegatePhase.model_validate({
+                "mode": "parallel_delegate",
+                "name": "fanout",
+                "subgraphs": ["./only/SKILL.md"],
+                "context_bridge": {"inputs": {}, "outputs": {}},
+                "reducer": "script.merge.reduce_outputs",
+            })
+
+        assert "subgraphs" in str(exc.value)
+
+    def test_tolerance_bounds(self):
+        base = {
+            "mode": "parallel_delegate",
+            "name": "fanout",
+            "subgraphs": ["./a/SKILL.md", "./b/SKILL.md"],
+            "context_bridge": {"inputs": {}, "outputs": {}},
+            "reducer": "script.merge.reduce_outputs",
+        }
+
+        for tolerance in (-0.1, 1.1):
+            with pytest.raises(ValidationError) as exc:
+                ParallelDelegatePhase.model_validate({
+                    **base,
+                    "tolerance": tolerance,
+                })
+            assert "tolerance" in str(exc.value)
+
+    def test_reducer_required(self):
+        with pytest.raises(ValidationError) as exc:
+            ParallelDelegatePhase.model_validate({
+                "mode": "parallel_delegate",
+                "name": "fanout",
+                "subgraphs": ["./a/SKILL.md", "./b/SKILL.md"],
+                "context_bridge": {"inputs": {}, "outputs": {}},
+            })
+
+        assert "reducer" in str(exc.value)
+
+    def test_extra_fields_forbidden(self):
+        base = {
+            "mode": "parallel_delegate",
+            "name": "fanout",
+            "subgraphs": ["./a/SKILL.md", "./b/SKILL.md"],
+            "context_bridge": {"inputs": {}, "outputs": {}},
+            "reducer": "script.merge.reduce_outputs",
+        }
+
+        for extra_key, value in (
+            ("max_iterations", 10),
+            ("prompt", "Do not use LLM prompt fields here."),
+            ("agent_tools", ["tools.x"]),
+        ):
+            with pytest.raises(ValidationError) as exc:
+                ParallelDelegatePhase.model_validate({
+                    **base,
+                    extra_key: value,
+                })
+            assert extra_key in str(exc.value)
+
+    def test_mode_discriminator(self):
+        phase = TypeAdapter(PhaseDef).validate_python({
+            "mode": "parallel_delegate",
+            "name": "fanout",
+            "subgraphs": ["./a/SKILL.md", "./b/SKILL.md"],
+            "context_bridge": {"inputs": {}, "outputs": {}},
+            "tolerance": 0.2,
+            "reducer": "script.merge.reduce_outputs",
+        })
+
+        assert isinstance(phase, ParallelDelegatePhase)
+        assert phase.tolerance == 0.2
 
 
 # =============================================================================
@@ -1112,6 +1204,7 @@ class TestSubmodelExports:
             "IoOutput",
             "LLMPhase",
             "LogicPhase",
+            "ParallelDelegatePhase",
             "PersonaSkillDef",
             "PhaseDef",
             "SkillManifest",

@@ -376,6 +376,11 @@ class PhaseExecutor:
             context_ref=ctx,
             callbacks=active_callbacks,
             phase_name=phase.name,
+            loop_detection=True,
+            summarization=True,
+            summarization_model=model,
+            summarization_trigger_fraction=0.8,
+            summarization_keep_messages=20,
         )
 
         # Step 6: Create DeerFlow Agent — render system_prompt with context

@@ -11,7 +11,11 @@ from langchain_core.runnables import RunnableConfig
 
 from graph_agent.core import parallel_delegate as parallel_delegate_module
 from graph_agent.core.graph_builder import GraphBuilder
-from graph_agent.core.parallel_delegate import CompositeFailure, build_parallel_delegate_node
+from graph_agent.core.parallel_delegate import (
+    _FAILURE_MARKER_KEY,
+    build_parallel_delegate_node,
+    default_parallel_delegate_validator,
+)
 from graph_agent.core.retry_router import RetryRouter
 from graph_agent.core.state import WorkflowState
 from graph_agent.core.types import ContextBridge, Phase
@@ -310,6 +314,127 @@ class TestParallelDelegateExecution:
         assert calls == [phase]
 
 
+class TestParallelDelegateRetryIntegration:
+    def test_composite_failure_writes_marker_to_ctx(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        reducer_called = False
+
+        def reducer(
+            _ctx: dict[str, Any],
+            _child_outputs: list[dict[str, Any]],
+            _errors: list[Exception],
+        ) -> dict[str, Any]:
+            nonlocal reducer_called
+            reducer_called = True
+            return {}
+
+        _patch_reducer(monkeypatch, reducer)
+        node = build_parallel_delegate_node(
+            _Harness(),
+            _phase([_Child("ok"), _Child("boom", fail=True)], tolerance=0.0),
+            logging.getLogger("test_parallel_delegate"),
+        )
+
+        state_out = node(_make_state(), _config())
+
+        assert reducer_called is False
+        assert state_out["messages"] == []
+        assert state_out["context"][_FAILURE_MARKER_KEY] == [
+            "child 1: RuntimeError: boom failed"
+        ]
+
+    def test_default_validator_returns_failure_when_marker_set(self) -> None:
+        ctx = {_FAILURE_MARKER_KEY: ["child 1 failed"]}
+
+        assert default_parallel_delegate_validator(ctx) == (False, ["child 1 failed"])
+
+    def test_default_validator_returns_pass_when_no_marker(self) -> None:
+        assert default_parallel_delegate_validator({"ok": True}) == (True, [])
+
+    def test_default_validator_pops_marker_on_access(self) -> None:
+        ctx = {_FAILURE_MARKER_KEY: ["retry me"]}
+
+        default_parallel_delegate_validator(ctx)
+
+        assert _FAILURE_MARKER_KEY not in ctx
+
+    def test_reducer_crash_writes_marker_not_raise(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def reducer(
+            _ctx: dict[str, Any],
+            _child_outputs: list[dict[str, Any]],
+            _errors: list[Exception],
+        ) -> dict[str, Any]:
+            raise ValueError("reducer exploded")
+
+        _patch_reducer(monkeypatch, reducer)
+        node = build_parallel_delegate_node(
+            _Harness(),
+            _phase([_Child("ok")]),
+            logging.getLogger("test_parallel_delegate"),
+        )
+
+        state_out = node(_make_state(), _config())
+
+        assert state_out["context"][_FAILURE_MARKER_KEY] == [
+            "child -1: ValueError: reducer exploded"
+        ]
+
+    def test_reducer_returns_non_dict_writes_marker_not_raise(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _patch_reducer(monkeypatch, lambda _ctx, _outputs, _errors: ["not", "dict"])
+        node = build_parallel_delegate_node(
+            _Harness(),
+            _phase([_Child("ok")]),
+            logging.getLogger("test_parallel_delegate"),
+        )
+
+        state_out = node(_make_state(), _config())
+
+        assert state_out["context"][_FAILURE_MARKER_KEY] == [
+            "child -1: TypeError: reducer must return dict, got list"
+        ]
+
+    def test_metrics_aggregated_even_on_composite_failure(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _patch_reducer(monkeypatch, lambda _ctx, _outputs, _errors: {"should_not": "run"})
+        node = build_parallel_delegate_node(
+            _Harness(),
+            _phase(
+                [
+                    _Child("ok", metrics={"total_input_tokens": 10, "total_output_tokens": 5}),
+                    _Child(
+                        "bad_schema",
+                        finish_result={
+                            "schema_validation": "failed",
+                            "validation_error_text": "missing field",
+                        },
+                        metrics={"total_input_tokens": 20, "total_output_tokens": 8},
+                    ),
+                ],
+                tolerance=0.0,
+            ),
+            logging.getLogger("test_parallel_delegate"),
+        )
+
+        state_out = node(
+            _make_state(metrics={"total_input_tokens": 1, "total_output_tokens": 2}),
+            _config(),
+        )
+
+        assert _FAILURE_MARKER_KEY in state_out["context"]
+        assert state_out["metrics"]["total_input_tokens"] == 31
+        assert state_out["metrics"]["total_output_tokens"] == 15
+
+
 class TestParallelDelegateReducer:
     def test_all_children_succeed_reducer_called_with_outputs(
         self,
@@ -361,7 +486,7 @@ class TestParallelDelegateReducer:
         assert state_out["context"]["ok"] == (2, 0)
         assert state_out["current_phase"] == "parallel_review"
 
-    def test_zero_tolerance_one_failure_raises_composite(
+    def test_zero_tolerance_one_failure_writes_retry_marker(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -383,14 +508,15 @@ class TestParallelDelegateReducer:
             logging.getLogger("test_parallel_delegate"),
         )
 
-        with pytest.raises(CompositeFailure) as exc_info:
-            node(_make_state(), _config())
+        state_out = node(_make_state(), _config())
 
         assert reducer_called is False
-        assert exc_info.value.phase_name == "parallel_review"
-        assert exc_info.value.total == 2
-        assert [(idx, str(exc)) for idx, exc in exc_info.value.failures] == [
-            (1, "boom failed")
+        assert state_out["messages"] == []
+        assert state_out["context"][_FAILURE_MARKER_KEY] == [
+            "child 1: RuntimeError: boom failed"
+        ]
+        assert state_out["context"]["_io_errors"] == [
+            "child 1: RuntimeError: boom failed"
         ]
 
     def test_partial_failure_within_tolerance_proceeds(
@@ -421,7 +547,7 @@ class TestParallelDelegateReducer:
         assert state_out["context"]["error_count"] == 1
         assert [str(error) for error in captured["errors"]] == ["boom failed"]
 
-    def test_partial_failure_exceeds_tolerance_raises(
+    def test_partial_failure_exceeds_tolerance_writes_retry_marker(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -435,11 +561,12 @@ class TestParallelDelegateReducer:
             logging.getLogger("test_parallel_delegate"),
         )
 
-        with pytest.raises(CompositeFailure) as exc_info:
-            node(_make_state(), _config())
+        state_out = node(_make_state(), _config())
 
-        assert exc_info.value.total == 3
-        assert [idx for idx, _ in exc_info.value.failures] == [1, 2]
+        assert state_out["context"][_FAILURE_MARKER_KEY] == [
+            "child 1: RuntimeError: bad_a failed",
+            "child 2: RuntimeError: bad_b failed",
+        ]
 
     def test_child_no_finish_task_counts_as_failure(
         self,
@@ -495,7 +622,7 @@ class TestParallelDelegateReducer:
         assert len(captured["outputs"]) == 1
         assert "missing field" in str(captured["errors"][0])
 
-    def test_reducer_raises_wrapped_in_composite_failure(
+    def test_reducer_raises_writes_retry_marker(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -513,13 +640,13 @@ class TestParallelDelegateReducer:
             logging.getLogger("test_parallel_delegate"),
         )
 
-        with pytest.raises(CompositeFailure) as exc_info:
-            node(_make_state(), _config())
+        state_out = node(_make_state(), _config())
 
-        assert exc_info.value.failures[0][0] == -1
-        assert isinstance(exc_info.value.failures[0][1], ValueError)
+        assert state_out["context"][_FAILURE_MARKER_KEY] == [
+            "child -1: ValueError: reducer exploded"
+        ]
 
-    def test_reducer_returns_non_dict_raises_composite(
+    def test_reducer_returns_non_dict_writes_retry_marker(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -530,11 +657,11 @@ class TestParallelDelegateReducer:
             logging.getLogger("test_parallel_delegate"),
         )
 
-        with pytest.raises(CompositeFailure) as exc_info:
-            node(_make_state(), _config())
+        state_out = node(_make_state(), _config())
 
-        assert exc_info.value.failures[0][0] == -1
-        assert "reducer must return dict" in str(exc_info.value.failures[0][1])
+        assert state_out["context"][_FAILURE_MARKER_KEY] == [
+            "child -1: TypeError: reducer must return dict, got list"
+        ]
 
     def test_reducer_dict_merged_into_parent_ctx(
         self,

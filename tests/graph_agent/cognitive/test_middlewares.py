@@ -62,6 +62,45 @@ class TestCreateCustomMiddlewaresPR3:
         assert summary_mw.trigger == ("fraction", 0.8)
         assert summary_mw.keep == ("messages", 20)
 
+    def test_summarization_no_warning_when_model_has_profile_max_input_tokens(
+        self,
+        caplog: Any,
+    ) -> None:
+        mock_model = _FakeSummaryModel(profile={"max_input_tokens": 128_000})
+
+        with caplog.at_level("WARNING", logger="graph_agent.cognitive.middlewares"):
+            middlewares = create_custom_middlewares(
+                phase_name="test",
+                summarization=True,
+                summarization_model=mock_model,
+            )
+
+        summary_mw = next(
+            m for m in middlewares if type(m).__name__ == "SummarizationMiddleware"
+        )
+
+        assert summary_mw.model is mock_model
+        assert summary_mw.model.profile["max_input_tokens"] == 128_000
+        assert "using fallback max_input_tokens" not in caplog.text
+
+    def test_summarization_uses_32k_fallback_when_model_has_no_profile(
+        self,
+        caplog: Any,
+    ) -> None:
+        with caplog.at_level("WARNING", logger="graph_agent.cognitive.middlewares"):
+            middlewares = create_custom_middlewares(
+                phase_name="test",
+                summarization=True,
+                summarization_model=_FakeSummaryModel(),
+            )
+
+        summary_mw = next(
+            m for m in middlewares if type(m).__name__ == "SummarizationMiddleware"
+        )
+
+        assert summary_mw.model.profile["max_input_tokens"] == 32_000
+        assert "using fallback max_input_tokens=32000" in caplog.text
+
     def test_summarization_skipped_without_model(self) -> None:
         middlewares = create_custom_middlewares(
             phase_name="test",

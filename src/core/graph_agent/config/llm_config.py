@@ -43,6 +43,7 @@ class ModelDef:
     name: str                           # 人类可读名
     reasoning: bool = False
     min_max_tokens: int = 4096
+    max_input_tokens: int | None = None
     fc_supported: bool = False
     providers: dict[str, str] = field(default_factory=dict)       # provider_code → model_name
     provider_options: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -248,6 +249,11 @@ def _parse_models(raw: dict) -> dict[str, ModelDef]:
             name=data.get("name", code),
             reasoning=bool(data.get("reasoning", False)),
             min_max_tokens=int(data.get("min_max_tokens", 4096)),
+            max_input_tokens=(
+                int(data["max_input_tokens"])
+                if isinstance(data.get("max_input_tokens"), int)
+                else None
+            ),
             fc_supported=bool(data.get("fc_supported", False)),
             providers=dict(data.get("providers", {})),
             provider_options={

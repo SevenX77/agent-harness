@@ -25,6 +25,24 @@ SELFCHECK_NUDGE = (
 
 MIN_FINISH_REASONING_LEN = 30
 
+# Validation error templates emitted into ctx for LLM retry feedback.
+# These are intentionally exposed as module-level constants so downstream
+# applications can monkey-patch them at startup for English deployments
+# or brand-specific phrasing. Templates use .format() with named fields.
+SCHEMA_VALIDATION_ERROR_TEMPLATE = (
+    "[finish_task] business_data_md schema validation failed:\n"
+    "{exc}\n"
+    "请按上面的错误"
+    "说明修正你的 business_data_md 后重新调用 finish_task。"
+)
+
+PARSE_ERROR_TEMPLATE = (
+    "[finish_task] failed to parse business_data_md or load schema "
+    "{output_schema_path}: {exc}\n"
+    "请确认 markdown "
+    "格式（## 分隔条目、字段用 - key: value）和 schema 路径正确。"
+)
+
 
 def build_standard_nudge_text(nudge_count: int, latest_content: str) -> str:
     """Build escalating nudge text for plain-text model outputs."""
@@ -84,11 +102,7 @@ def finish_task(
         except SemanticValidationError as exc:
             ctx["_finish_task_result"] = {
                 "schema_validation": "failed",
-                "validation_error_text": (
-                    "[finish_task] business_data_md schema validation failed:\n"
-                    f"{exc}\n"
-                    "请按上面的错误说明修正你的 business_data_md 后重新调用 finish_task。"
-                ),
+                "validation_error_text": SCHEMA_VALIDATION_ERROR_TEMPLATE.format(exc=exc),
             }
             logger.warning(
                 "finish_task v2: schema validation failed "
@@ -98,10 +112,9 @@ def finish_task(
         except Exception as exc:
             ctx["_finish_task_result"] = {
                 "schema_validation": "failed",
-                "validation_error_text": (
-                    "[finish_task] failed to parse business_data_md or load schema "
-                    f"{output_schema_path}: {exc}\n"
-                    "请确认 markdown 格式（## 分隔条目、字段用 - key: value）和 schema 路径正确。"
+                "validation_error_text": PARSE_ERROR_TEMPLATE.format(
+                    output_schema_path=output_schema_path,
+                    exc=exc,
                 ),
             }
             logger.warning(
@@ -147,6 +160,8 @@ def finish_task(
 __all__ = [
     "PLANNING_NUDGE",
     "SELFCHECK_NUDGE",
+    "SCHEMA_VALIDATION_ERROR_TEMPLATE",
+    "PARSE_ERROR_TEMPLATE",
     "MIN_FINISH_REASONING_LEN",
     "build_standard_nudge_text",
     "finish_task",

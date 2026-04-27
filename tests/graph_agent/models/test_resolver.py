@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -17,7 +18,7 @@ from graph_agent.config.llm_config import (
     load_config,
 )
 from graph_agent.models import resolver as resolver_module
-from graph_agent.models.resolver import ModelResolver
+from graph_agent.models.resolver import ModelResolver, _attach_profile
 
 
 class RecordingCallback(Callback):
@@ -41,6 +42,49 @@ class _FakeModel:
     ) -> "_FakeModel":
         self.fallbacks = list(fallback_models)
         return self
+
+
+class _RejectsDynamicAttrs:
+    __slots__ = ()
+
+
+def test_attach_profile_when_max_input_tokens_set() -> None:
+    model = SimpleNamespace()
+    model_def = ModelDef(
+        code="BIG_MODEL",
+        name="Big Context Model",
+        max_input_tokens=200000,
+    )
+
+    _attach_profile(model, model_def)
+
+    assert model.profile == {"max_input_tokens": 200000}
+
+
+def test_attach_profile_no_op_when_max_input_tokens_none() -> None:
+    model = SimpleNamespace()
+    model_def = ModelDef(code="SMALL_MODEL", name="Small Model")
+
+    _attach_profile(model, model_def)
+
+    assert not hasattr(model, "profile")
+
+
+def test_attach_profile_logs_warning_on_setattr_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    model = _RejectsDynamicAttrs()
+    model_def = ModelDef(
+        code="STRICT_MODEL",
+        name="Strict Model",
+        max_input_tokens=200000,
+    )
+
+    with caplog.at_level("WARNING", logger=resolver_module.logger.name):
+        _attach_profile(model, model_def)
+
+    assert "failed to attach profile" in caplog.text
+    assert "SummarizationMiddleware will use 32k fallback" in caplog.text
 
 
 def _make_config(

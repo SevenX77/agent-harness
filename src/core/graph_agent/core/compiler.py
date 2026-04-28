@@ -225,6 +225,7 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
 
     if isinstance(manifest, GraphSkillDef):
         from .validators.context_bridge import check_context_bridge
+        from .validators.prompt_quality import check_prompt_quality
         from .validators.subgraph_cycle import check_subgraph_cycles
 
         result.issues.extend(
@@ -239,6 +240,7 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
         result.issues.extend(
             check_tool_paths(manifest, base_dir=skill_path.parent)
         )
+        result.issues.extend(check_prompt_quality(manifest))
     elif isinstance(manifest, AgentSkillDef):
         result.issues.extend(
             check_persona_resolution(manifest, base_dir=skill_path.parent)

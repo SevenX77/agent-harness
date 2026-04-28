@@ -36,7 +36,17 @@ phases:
     llm_role: analyst
     max_iterations: 10
     max_nudges: 2
-    output_schema: "script.schemas.Segment"
+    output_example: |
+      <output_example name="Segment">
+      ## segments
+      - index (int, required): 段落顺序编号，从 1 开始递增
+      - type (Literal[A,B,C], required): 段落类型，A=设定，B=事件，C=次元空间
+      - start_line (int, required): 该段落起始行号
+      - end_line (int, required): 该段落结束行号
+      - content (str, required): 段落剧情概括
+      - confidence (float, optional, default=1.0): 类型判断置信度
+      - notes (str, optional): 特殊边界记录
+      </output_example>
     validator: script.validators.validate_segmentation_structure
     references:
       - references/segmentation-guide.md
@@ -48,7 +58,7 @@ phases:
       调用 finish_task 时**必须**提供以下 3 个字段：
       - reasoning: 完成说明（至少 30 字）。
       - diagnostics_md: 自检诊断 markdown（请简述是否有拿不准的地方）。
-      - business_data_md: 完整分段结果，markdown 格式。框架会自动进行 Pydantic 校验并落盘，这是你上交结果的唯一途径。
+      - business_data_md: 完整分段结果，markdown 格式。框架会自动按输出范例校验并落盘，这是你上交结果的唯一途径。
 
       ## 核心任务
       你是专业的小说编辑。将章节内容严格切分为 A/B/C 三类段落。遇到不确定的边界，必须先通过 `read_file` 阅读 `references/segmentation-guide.md` 获取完整判例。
@@ -69,23 +79,6 @@ phases:
       ```
       {chapter_with_line_numbers}
       ```
-
-      **`business_data_md` 输出格式范例（必须严格遵守）**：
-      ## segments
-      - index: 1
-      - type: B
-      - start_line: 1
-      - end_line: 5
-      - content: 收音机播报上沪沦陷消息
-      - confidence: 0.95
-
-      ## segments
-      - index: 2
-      - type: A
-      - start_line: 6
-      - end_line: 9
-      - content: 诡异爆发背景设定
-      - confidence: 0.85
   - name: review
     mode: llm
     llm_role: analyst
@@ -94,7 +87,17 @@ phases:
     max_nudges: 2
     max_retries: 2
     retry_target: segment
-    output_schema: "script.schemas.Segment"
+    output_example: |
+      <output_example name="Segment">
+      ## segments
+      - index (int, required): 段落顺序编号，从 1 开始递增
+      - type (Literal[A,B,C], required): 段落类型，A=设定，B=事件，C=次元空间
+      - start_line (int, required): 该段落起始行号
+      - end_line (int, required): 该段落结束行号
+      - content (str, required): 段落剧情概括
+      - confidence (float, optional, default=1.0): 类型判断置信度
+      - notes (str, optional): 特殊边界记录
+      </output_example>
     validator: script.validators.validate_final_format
     references:
       - references/segmentation-guide.md
@@ -132,13 +135,4 @@ phases:
       ```
       {raw_segmentation}
       ```
-
-      **`business_data_md` 输出格式范例（需输出最终的全集）**：
-      ## segments
-      - index: 1
-      - type: B
-      - start_line: 1
-      - end_line: 5
-      - content: 收音机播报上沪沦陷消息
-      - confidence: 0.95
 ---

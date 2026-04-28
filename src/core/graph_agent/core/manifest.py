@@ -212,6 +212,7 @@ class LLMPhase(_BasePhase):
     validator: str | None = None
     retry_target: str | None = None
     output_schema: str | None = None
+    output_example: str | None = None
 
 
 class LogicPhase(_BasePhase):

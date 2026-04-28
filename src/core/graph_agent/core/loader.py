@@ -35,8 +35,28 @@ from .parallel_delegate import (
     default_parallel_delegate_validator as _default_parallel_delegate_validator,
 )
 from .personas import resolve_persona
+from ..tools.dynamic_schema import (
+    DynamicSchemaDef,
+    OutputExampleParseError,
+    parse_output_example,
+    render_dynamic_schema_output_format,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_output_example_or_raise(
+    output_example: str,
+    *,
+    location: str,
+) -> DynamicSchemaDef:
+    """Parse ``output_example`` or surface a compile-fatal loader error."""
+    try:
+        return parse_output_example(output_example)
+    except OutputExampleParseError as exc:
+        raise SkillCompilationError(
+            f"[F-output-example-invalid] {location}: {exc}"
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -530,15 +550,27 @@ def _render_skill_section_xml_tags(
         lines.append("</context_access>")
         sections.append("\n".join(lines))
 
-    output_schema = getattr(phase_or_profile, "output_schema", None)
-    if output_schema:
-        base_dir = skill_base_dir or getattr(phase_or_profile, "skill_base_dir", None)
-        format_md = _render_output_format_markdown(
-            output_schema,
-            skill_base_dir=base_dir,
+    output_example = getattr(phase_or_profile, "output_example", None)
+    if output_example:
+        schema = _parse_output_example_or_raise(
+            output_example,
+            location=f"SKILL.md:phases.{getattr(phase_or_profile, 'name', 'unknown')}.output_example",
         )
-        if format_md:
-            sections.append(f"<output_format>\n{format_md}\n</output_format>")
+        sections.append(
+            "<output_format>\n"
+            f"{render_dynamic_schema_output_format(schema)}\n"
+            "</output_format>"
+        )
+    else:
+        output_schema = getattr(phase_or_profile, "output_schema", None)
+        if output_schema:
+            base_dir = skill_base_dir or getattr(phase_or_profile, "skill_base_dir", None)
+            format_md = _render_output_format_markdown(
+                output_schema,
+                skill_base_dir=base_dir,
+            )
+            if format_md:
+                sections.append(f"<output_format>\n{format_md}\n</output_format>")
 
     return "\n\n".join(sections)
 
@@ -753,6 +785,19 @@ def _phase_from_graph_phase(
 
     if isinstance(phase_def, _LLMPhase):
         tools = [_resolve_tool_reference(ref, base_dir) for ref in phase_def.agent_tools]
+        if phase_def.output_example and phase_def.output_schema:
+            raise SkillCompilationError(
+                f"[F-output-example-conflict] SKILL.md:phases.{phase_def.name}: "
+                "output_example and output_schema are mutually exclusive"
+            )
+        dynamic_schema = (
+            _parse_output_example_or_raise(
+                phase_def.output_example,
+                location=f"SKILL.md:phases.{phase_def.name}.output_example",
+            )
+            if phase_def.output_example
+            else None
+        )
         system_prompt = phase_def.prompt
         xml_tags = _render_skill_section_xml_tags(phase_def, skill_base_dir=base_dir)
         if xml_tags:
@@ -794,7 +839,8 @@ def _phase_from_graph_phase(
             # can hand it to md_to_json. The runtime stores the path, not
             # the resolved class, because LangGraph's msgpack checkpointer
             # cannot serialise ModelMetaclass.
-            output_schema_path=phase_def.output_schema,
+            output_schema=dynamic_schema,
+            output_schema_path=None if dynamic_schema is not None else phase_def.output_schema,
             requires_llm=True,
         )
         return phase

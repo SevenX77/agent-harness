@@ -26,6 +26,11 @@ from langgraph.types import Command
 from pydantic import BaseModel
 
 from ..callbacks.base import Callback
+from ..tools.dynamic_schema import (
+    DynamicSchemaDef,
+    coerce_item_against_dynamic_schema,
+    parse_md_simple,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -297,7 +302,7 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
     def __init__(
         self,
         *,
-        output_schema: type[BaseModel] | None = None,
+        output_schema: type[BaseModel] | DynamicSchemaDef | None = None,
         output_schema_path: str | None = None,
         business_validator: Callable[..., tuple[bool, list[str]]] | None = None,
         ctx: dict[str, Any],
@@ -325,6 +330,8 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
         return {}
 
     def _resolve_output_schema(self) -> type[BaseModel] | None:
+        if isinstance(self.output_schema, DynamicSchemaDef):
+            return None
         if self.output_schema is not None:
             return self.output_schema
         if not self.output_schema_path:
@@ -414,6 +421,13 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
     def _validate_finish_task(self, request: ToolCallRequest) -> Command | None:
         args = self._args_dict(request)
         business_data_md = str(args.get("business_data_md") or "").strip()
+        if isinstance(self.output_schema, DynamicSchemaDef):
+            return self._validate_dynamic_finish_task(
+                request,
+                business_data_md=business_data_md,
+                schema=self.output_schema,
+            )
+
         try:
             schema = self._resolve_output_schema()
         except Exception as exc:  # noqa: BLE001
@@ -471,6 +485,59 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
             "business_data_parsed": [item.model_dump() for item in report.valid_items],
             "schema_validation": "passed",
         }
+        self._emit_validation_pass()
+        return None
+
+    def _validate_dynamic_finish_task(
+        self,
+        request: ToolCallRequest,
+        *,
+        business_data_md: str,
+        schema: DynamicSchemaDef,
+    ) -> Command | None:
+        if not business_data_md:
+            return self._reject(
+                request,
+                "你声明了 output_example 但 business_data_md 是空。必须填入完整 markdown 结果。",
+            )
+
+        parsed_blocks = parse_md_simple(business_data_md)
+        if not parsed_blocks:
+            return self._reject(
+                request,
+                "未能在 business_data_md 中检测到任何 ## 块。必须按 output_example 范例输出至少 1 个 ## 块。",
+            )
+
+        schema_errors: list[str] = []
+        coerced_items: list[dict[str, Any]] = []
+        for block in parsed_blocks:
+            coerced, errors = coerce_item_against_dynamic_schema(block.data, schema)
+            if errors:
+                schema_errors.extend(
+                    f"[DynamicSchema] {block.meta.id}: {error}" for error in errors
+                )
+            coerced_items.append(coerced)
+
+        business_errors = self._run_business_validator(coerced_items)
+        all_errors = schema_errors + business_errors
+        if all_errors:
+            return self._reject(
+                request,
+                ["校验错误如下（请一次性全部修复）：", *all_errors],
+            )
+
+        self.ctx["_finish_task_result"] = {
+            "business_data_parsed": coerced_items,
+            "schema_validation": "passed",
+            "schema_type": "dynamic",
+            "schema_name": schema.name,
+        }
+        logger.info(
+            "[ValidationMiddleware] dynamic schema validation passed phase=%s schema=%s items=%d",
+            self._phase_name,
+            schema.name,
+            len(coerced_items),
+        )
         self._emit_validation_pass()
         return None
 

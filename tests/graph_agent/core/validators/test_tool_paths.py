@@ -248,7 +248,7 @@ def test_fatal_when_logic_step_imports_run_skill(tmp_path: Path) -> None:
     assert issues[0].rule_id == "E-NESTED-RUN-SKILL"
     assert issues[0].severity == "FATAL"
     assert issues[0].location == "SKILL.md:phases.render.execute_steps.0"
-    assert "mode: delegate" in issues[0].message
+    assert "DelegatePhase" in issues[0].message
 
 
 def test_no_issue_when_logic_step_does_not_import_run_skill(tmp_path: Path) -> None:

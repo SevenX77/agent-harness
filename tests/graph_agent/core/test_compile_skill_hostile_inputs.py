@@ -2,15 +2,17 @@
 
 Cohesion plan 方针 4 follow-up (2026-04-26): the ``compile_skill``
 contract is "never raise — always aggregate diagnostics into
-``CompileResult.issues``". These four tests cover the previously
+``CompileResult.issues``". These tests cover the previously
 exposed escape paths where an OS- or import-level error could
 bypass that contract:
 
   - ``compiler.compile_skill`` reading SKILL.md
-  - ``validators.context_bridge`` parsing a child SKILL.md
   - ``validators.persona_resolution`` resolving an ``adopted_persona``
   - ``validators.tool_paths`` checking a ``builtin.*`` reference via
     ``importlib.util.find_spec``
+
+The 1.x ``validators.context_bridge`` coverage was removed in MVP-0 B1
+(2026-04-28) along with the DelegatePhase mode it validated.
 """
 from __future__ import annotations
 
@@ -20,8 +22,7 @@ import pytest
 from pydantic import TypeAdapter
 
 from graph_agent.core.compiler import compile_skill
-from graph_agent.core.manifest import GraphSkillDef, SkillManifest
-from graph_agent.core.validators.context_bridge import check_context_bridge
+from graph_agent.core.manifest import SkillManifest
 from graph_agent.core.validators.persona_resolution import check_persona_resolution
 from graph_agent.core.validators.tool_paths import check_tool_paths
 
@@ -44,103 +45,10 @@ def test_compile_skill_with_invalid_utf8_returns_fatal_not_raise(
     )
 
 
-def test_context_bridge_child_with_invalid_utf8_returns_fatal_not_raise(
-    tmp_path: Path,
-) -> None:
-    """Child SKILL.md with invalid UTF-8 must surface as F-context-bridge-child-invalid."""
-    child_path = tmp_path / "child.md"
-    child_path.write_bytes(b"---\n\xff\xfe\x00\n---\n")
-
-    parent_raw = {
-        "schema_version": "2.0",
-        "type": "graph",
-        "name": "parent",
-        "description": "parent for hostile child test",
-        "io": {"inputs": [], "outputs": []},
-        "phases": [
-            {
-                "name": "delegate_phase",
-                "mode": "delegate",
-                "subgraph": child_path.name,
-                "context_bridge": {"inputs": {}, "outputs": {}},
-            }
-        ],
-    }
-    parent = TypeAdapter(SkillManifest).validate_python(parent_raw)
-    assert isinstance(parent, GraphSkillDef)
-
-    issues = check_context_bridge(parent, base_dir=tmp_path)
-
-    assert any(
-        i.rule_id == "F-context-bridge-child-invalid" for i in issues
-    ), [(i.rule_id, i.message) for i in issues]
-
-
-def test_compile_skill_with_invalid_utf8_child_returns_fatal_not_raise(
-    tmp_path: Path,
-) -> None:
-    """compile_skill must aggregate invalid child UTF-8 across all validators."""
-    child_path = tmp_path / "child.md"
-    child_path.write_bytes(b"---\n\xff\xfe\x00\n---\n")
-    parent_path = tmp_path / "SKILL.md"
-    parent_path.write_text(
-        """---
-schema_version: "2.0"
-type: graph
-name: parent
-description: parent for hostile child compile test
-io:
-  inputs: []
-  outputs: []
-phases:
-  - name: delegate_phase
-    mode: delegate
-    subgraph: child.md
-    context_bridge:
-      inputs: {}
-      outputs: {}
----
-""",
-        encoding="utf-8",
-    )
-
-    result = compile_skill(parent_path)
-
-    assert not result.passed
-    assert any(
-        i.rule_id == "F-context-bridge-child-invalid"
-        for i in result.fatals
-    ), [(i.rule_id, i.message) for i in result.issues]
-
-
 def test_compile_skill_with_symlink_loop_returns_fatal_not_raise(
     tmp_path: Path,
 ) -> None:
     """Symlink-loop RuntimeError from Path.resolve must be aggregated."""
-    child_loop = tmp_path / "child_loop.md"
-    child_loop.symlink_to(child_loop)
-    child_parent = tmp_path / "child-parent.md"
-    child_parent.write_text(
-        """---
-schema_version: "2.0"
-type: graph
-name: parent
-description: parent for symlink-loop child test
-io:
-  inputs: []
-  outputs: []
-phases:
-  - name: delegate_phase
-    mode: delegate
-    subgraph: child_loop.md
-    context_bridge:
-      inputs: {}
-      outputs: {}
----
-""",
-        encoding="utf-8",
-    )
-
     tool_loop = tmp_path / "tools.py"
     tool_loop.symlink_to(tool_loop)
     tool_parent = tmp_path / "tool-parent.md"
@@ -179,7 +87,6 @@ adopted_persona: ./persona_loop
     )
 
     for path, expected_rule_id in (
-        (child_parent, "F-context-bridge-child-invalid"),
         (tool_parent, "F-tool-path-not-found"),
         (persona_parent, "F-persona-not-resolved"),
     ):

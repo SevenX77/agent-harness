@@ -8,8 +8,11 @@ described by ``manifest.SkillManifest``:
 - artifact-specific: ``agent_profile`` (agent), ``io`` + ``phases``
   (graph), ``role_profile`` (persona)
 - phase modes: ``llm`` (prompt + agent_tools + retry/output_schema),
-  ``logic`` (deterministic execute_steps + validator), ``delegate``
-  (subgraph + context_bridge)
+  ``logic`` (deterministic execute_steps + validator)
+
+The 1.x ``delegate`` / ``parallel_delegate`` phase modes (subgraph
+composition + fan-out) were removed in MVP-0 B1 (2026-04-28). Static
+cross-skill composition will return in V2 via LangGraph Send API.
 
 The manifest carries runtime fields structurally. The markdown body is
 purely human documentation and is not parsed for execution semantics.
@@ -24,16 +27,14 @@ import logging
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal
-
-import yaml
+from typing import TYPE_CHECKING, Any, Literal
 
 from .parser import _parse_frontmatter
+
+if TYPE_CHECKING:
+    from .manifest import AgentSkillDef, PersonaSkillDef
 from .exceptions import SkillCompilationError, SkillLoadError
-from .harness import ContextBridge, GraphAgentHarness, Phase
-from .parallel_delegate import (
-    default_parallel_delegate_validator as _default_parallel_delegate_validator,
-)
+from .harness import GraphAgentHarness, Phase
 from .personas import resolve_persona
 from ..tools.dynamic_schema import (
     DynamicSchemaDef,
@@ -238,38 +239,6 @@ def _resolve_tool_reference(
     return resolve_skill_resource(base_dir, ref_path, kind="tool")
 
 
-def _validate_reducer_path(reducer_path: str) -> None:
-    """Eagerly verify that a reducer dotted path resolves to a callable.
-
-    Raises SkillLoadError with a clear message if the path is malformed,
-    the module fails to import, or the resolved attribute is not callable.
-    """
-    if not reducer_path or "." not in reducer_path:
-        raise SkillLoadError(
-            f"ParallelDelegate reducer path malformed (must be dotted): "
-            f"{reducer_path!r}"
-        )
-    module_path, _, attr = reducer_path.rpartition(".")
-    try:
-        module = importlib.import_module(module_path)
-    except ImportError as exc:
-        raise SkillLoadError(
-            f"ParallelDelegate reducer module {module_path!r} cannot be "
-            f"imported: {exc}"
-        ) from exc
-    fn = getattr(module, attr, None)
-    if fn is None:
-        raise SkillLoadError(
-            f"ParallelDelegate reducer {reducer_path!r}: module {module_path!r} "
-            f"has no attribute {attr!r}"
-        )
-    if not callable(fn):
-        raise SkillLoadError(
-            f"ParallelDelegate reducer {reducer_path!r} is not callable "
-            f"(got {type(fn).__name__})"
-        )
-
-
 def _phase_string(
     phase_cfg: dict[str, Any],
     key: str,
@@ -364,16 +333,16 @@ def load_workflow_from_md(
 
     Supports schema-2.0 frontmatter ``type`` values:
     - ``agent``: single DeerFlow agent loop built from ``agent_profile``
-    - ``graph``: ordered ``phases`` using ``llm`` / ``logic`` /
-      ``delegate`` phase modes
+    - ``graph``: ordered ``phases`` using ``llm`` / ``logic`` phase modes
     - ``persona``: not runnable directly; injected through
       ``adopted_persona``
 
     Args:
         md_path: Path to the SKILL.md file.
         callbacks: Optional callback list injected into the resulting harness.
-        _loading_stack: Internal recursion guard used when skills reference
-            sub-skills via ``subgraph``. Callers should leave this as None.
+        _loading_stack: Reserved for future cross-skill composition; the
+            1.x subgraph-recursion consumer was removed in MVP-0 B1
+            (2026-04-28). Callers should leave this as None.
 
     Returns:
         A compiled GraphAgentHarness ready for .run().
@@ -788,16 +757,14 @@ def _phase_from_graph_phase(
 ) -> Phase:
     """Dispatch on ``mode`` to build one runtime Phase from a GraphSkillDef.phases entry.
 
-    Three branches matching the manifest's three phase modes:
-    ``llm`` (ReAct loop), ``logic`` (deterministic Python steps),
-    ``delegate`` (recursive load of a child SKILL.md).
+    Two branches matching the manifest's two phase modes:
+    ``llm`` (ReAct loop) and ``logic`` (deterministic Python steps).
+    The 1.x ``delegate`` / ``parallel_delegate`` modes were removed in
+    MVP-0 B1 (2026-04-28).
     """
-    # Imported inside the function to keep the dead-code block self-contained
-    # until the Commit-2 switch; avoids polluting module-level imports.
-    from .manifest import DelegatePhase as _DelegatePhase
+    del callbacks, loading_stack  # reserved for future cross-skill composition
     from .manifest import LLMPhase as _LLMPhase
     from .manifest import LogicPhase as _LogicPhase
-    from .manifest import ParallelDelegatePhase as _ParallelDelegatePhase
 
     if isinstance(phase_def, _LLMPhase):
         tools = [_resolve_tool_reference(ref, base_dir) for ref in phase_def.agent_tools]
@@ -883,82 +850,6 @@ def _phase_from_graph_phase(
                 else None
             ),
             requires_llm=False,
-        )
-
-    if isinstance(phase_def, _DelegatePhase):
-        child_path = (base_dir / phase_def.subgraph).resolve()
-        # Cohesion plan 方针 4.4 (2026-04-26): a path that exists but is
-        # a directory used to slip past ``exists()`` and crash later in
-        # ``read_text`` with ``IsADirectoryError`` — far away from the
-        # author's typo. Match the compile-time validator's contract:
-        # the subgraph reference must point at a regular file.
-        if not child_path.is_file():
-            raise SkillLoadError(
-                f"Delegate phase '{phase_def.name}' subgraph not found "
-                f"(or not a file): {child_path}"
-            )
-        child_harness = load_workflow_from_md(
-            md_path=child_path,
-            callbacks=callbacks,
-            _loading_stack=loading_stack,
-        )
-        return Phase(
-            name=phase_def.name,
-            system_prompt=None,
-            tools=[],
-            model_override=phase_def.model_override,
-            subgraph=child_harness,
-            context_bridge=ContextBridge(
-                inputs=dict(phase_def.context_bridge.inputs),
-                outputs=dict(phase_def.context_bridge.outputs),
-            ),
-            requires_llm=False,
-        )
-
-    if isinstance(phase_def, _ParallelDelegatePhase):
-        # PR-7 Commit 1: load all child harnesses at loader-time per Gemini
-        # design Q1c. Execution-side support is still pending Commit 2; the
-        # phase_executor branch raises NotImplementedError when it sees a
-        # phase with non-empty parallel_subgraphs.
-        child_harnesses: list[Any] = []  # list[GraphAgentHarness]
-        for child_ref in phase_def.subgraphs:
-            child_path = (base_dir / child_ref).resolve()
-            if not child_path.is_file():
-                raise SkillLoadError(
-                    f"ParallelDelegate phase '{phase_def.name}' subgraph not found "
-                    f"(or not a file): {child_path}"
-                )
-            child_harness = load_workflow_from_md(
-                md_path=child_path,
-                callbacks=callbacks,
-                _loading_stack=loading_stack,
-            )
-            child_harnesses.append(child_harness)
-
-        # Eager validation: reducer dotted path must be importable to a
-        # callable. Fail at load time, not at the first execute attempt.
-        _validate_reducer_path(phase_def.reducer)
-
-        return Phase(
-            name=phase_def.name,
-            system_prompt=None,
-            tools=[],
-            model_override=phase_def.model_override,
-            context_bridge=ContextBridge(
-                inputs=dict(phase_def.context_bridge.inputs),
-                outputs=dict(phase_def.context_bridge.outputs),
-            ),
-            parallel_subgraphs=child_harnesses,
-            reducer_path=phase_def.reducer,
-            tolerance=phase_def.tolerance,
-            requires_llm=False,
-            validator=(
-                _resolve_tool_reference(phase_def.validator, base_dir)
-                if getattr(phase_def, "validator", None)
-                else _default_parallel_delegate_validator
-            ),
-            retry_target=getattr(phase_def, "retry_target", None),
-            max_retries=getattr(phase_def, "max_retries", None) or 3,
         )
 
     raise SkillLoadError(

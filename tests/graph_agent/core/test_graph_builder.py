@@ -18,16 +18,11 @@ def _noop_node(phase: Phase) -> Callable[..., WorkflowState]:
     return _inner
 
 
-def _make_builder(
-    phases: list[Phase],
-    *,
-    subgraph_factory: Callable[[Phase], Callable[..., WorkflowState]] | None = None,
-) -> GraphBuilder:
+def _make_builder(phases: list[Phase]) -> GraphBuilder:
     return GraphBuilder(
         phases,
         retry_router=RetryRouter(phases),
         checkpointer=None,
-        subgraph_node_factory=subgraph_factory or _noop_node,
     )
 
 
@@ -101,23 +96,6 @@ class TestBuild:
         graph = builder.build()
         nodes = graph.get_graph().nodes
         assert {"prep_execute", "analyse_execute", "analyse_validate"}.issubset(nodes)
-
-    def test_build_with_subgraph_phase_uses_subgraph_factory(self):
-        """Phases with `subgraph` go through the supplied factory, not PhaseExecutor."""
-        factory_calls: list[Phase] = []
-
-        def factory(phase: Phase) -> Callable[[WorkflowState], WorkflowState]:
-            factory_calls.append(phase)
-            return _noop_node(phase)
-
-        # Use a sentinel (truthy) for subgraph field — the factory is what matters.
-        phases = [Phase(name="sub", subgraph=object())]  # type: ignore[arg-type]
-        builder = _make_builder(phases, subgraph_factory=factory)
-
-        builder.build()
-        # The subgraph factory was consulted for the one subgraph phase.
-        assert [p.name for p in factory_calls] == ["sub"]
-
 
 class TestExecutorFromConfig:
     """The `_executor_from_config` helper is the load-bearing link in Phase B:
@@ -246,5 +224,4 @@ class TestConstructor:
             phases,
             retry_router=RetryRouter(phases),
             checkpointer=None,
-            subgraph_node_factory=_noop_node,
         )

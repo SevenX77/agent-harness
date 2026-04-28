@@ -6,8 +6,9 @@ builders produce a runtime ``Phase`` dataclass whose fields match what the
 migrated SKILL.md files will declare once PR #6 Commit 2 lands.
 
 The fixtures are shaped as if they came from a migrated production skill
-(``beat_extractor`` → agent, a logic+llm+delegate graph). No filesystem I/O
-— every manifest is constructed via ``TypeAdapter(SkillManifest).validate_python``.
+(``beat_extractor`` → agent, a logic+llm graph). The 1.x ``delegate`` mode
+fixtures were removed in MVP-0 B1 (2026-04-28). No filesystem I/O — every
+manifest is constructed via ``TypeAdapter(SkillManifest).validate_python``.
 """
 
 from __future__ import annotations
@@ -24,7 +25,6 @@ from graph_agent.core.loader import (
 )
 from graph_agent.core.manifest import (
     AgentSkillDef,
-    DelegatePhase,
     LLMPhase,
     LogicPhase,
     SkillManifest,
@@ -331,26 +331,7 @@ class TestPhaseFromGraphPhase:
         with pytest.raises(SkillLoadError):
             _phase_from_graph_phase(phase_def, tmp_path, callbacks=None, loading_stack=set())
 
-    def test_delegate_phase_missing_subgraph_raises(self, tmp_path: Path):
-        """DelegatePhase with a path that doesn't exist → SkillLoadError."""
-        manifest = _SKILL_ADAPTER.validate_python({
-            "name": "g",
-            "description": "d",
-            "type": "graph",
-            "io": {"inputs": [], "outputs": []},
-            "phases": [{
-                "mode": "delegate",
-                "name": "delegate_step",
-                "subgraph": "./does/not/exist",
-                "context_bridge": {"inputs": {}, "outputs": {}},
-            }],
-        })
-        phase_def = manifest.phases[0]
-        assert isinstance(phase_def, DelegatePhase)
-
-        from graph_agent.core.exceptions import SkillLoadError
-        with pytest.raises(SkillLoadError, match="subgraph not found"):
-            _phase_from_graph_phase(phase_def, tmp_path, callbacks=None, loading_stack=set())
+# DelegatePhase coverage removed in MVP-0 B1 (2026-04-28).
 
 
 # =============================================================================

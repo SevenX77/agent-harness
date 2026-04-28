@@ -39,7 +39,6 @@ from .core.state import WorkflowState  # noqa: E402
 from .core.manifest import (  # noqa: E402
     AgentProfile,
     AgentSkillDef,
-    DelegatePhase,
     GraphSkillDef,
     LLMPhase,
     LogicPhase,
@@ -82,7 +81,6 @@ __all__ = [
     "PhaseDef",
     "LLMPhase",
     "LogicPhase",
-    "DelegatePhase",
     "serialize_skill",
     "parse_skill_file",
 ]

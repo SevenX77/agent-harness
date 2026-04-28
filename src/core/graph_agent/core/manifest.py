@@ -27,19 +27,14 @@ skill ecosystem is modelled on **three orthogonal axes**:
    - ``mode: llm``      — LLM-driven ReAct loop with ``agent_tools``.
    - ``mode: logic``    — deterministic Python runtime with
                           ``execute_steps`` (Python callable import paths).
-   - ``mode: delegate`` — invokes another Graph/Agent skill via
-                          ``subgraph:`` + ``context_bridge``; the child
-                          skill owns its own iteration, so
-                          ``max_iterations`` is forbidden on this mode.
-   - ``mode: parallel_delegate`` — fan-out N child skills concurrently via
-                          ``subgraphs`` + ``reducer`` + ``tolerance``.
-                          Schema added in PR-7; runtime implementation
-                          is pending.
+
+   The 1.x ``mode: delegate`` (subgraph composition) and
+   ``mode: parallel_delegate`` (fan-out) modes were removed in the
+   v1-reset MVP-0 cleanup (B1, 2026-04-28). Static cross-skill
+   composition will return in V2 via LangGraph's Send API.
 
 3. **Delegation Mechanism** (tool-level, how a phase reaches other
-   skills — these are *mutually exclusive* per phase, not new
-   artifact types):
-   - ``subgraph:`` — compile-time composition (Edge control flow).
+   skills):
    - ``subagent_enabled:`` — ad-hoc generation: the LLM spawns an
                              anonymous sub-agent with no SKILL.md.
 
@@ -69,8 +64,8 @@ exposes ``llm_role``; ``tier`` was removed in PR-B (2026-04-27).
 Reference resolution
 ====================
 
-``subgraph`` and ``adopted_persona`` are plain strings that follow the
-Hybrid resolver rules:
+``adopted_persona`` is a plain string that follows the Hybrid resolver
+rules:
 
 - ``"./subskills/format_scene"`` → strict nested (relative to the
   current SKILL.md file).
@@ -89,17 +84,11 @@ Constraints that can be expressed structurally are enforced by
 field inspection use ``@model_validator``:
 
 - Rule 1 (node-engine exclusivity): automatic via ``PhaseDef`` discriminator.
-- Rule 2 (delegate determinism): ``DelegatePhase`` simply lacks the
-  forbidden fields (``max_iterations``, ``prompt``, ``agent_tools``, ...).
 - Rule 3 (top-level structure): automatic via ``SkillManifest``
   discriminator + each variant's field surface.
 - Rule 4 (persona purity): ``PersonaSkillDef`` declares only knowledge
   fields; ``extra='forbid'`` kills any attempt to add ``phases``,
   ``tools``, or execution-bearing keys.
-- Rule 5 (context_bridge static type check) — deferred to a dedicated
-  ``validators/context_bridge.py`` module that consumes manifests; it
-  is not a Pydantic validator because it needs the child manifest
-  loaded (cross-file information).
 
 Schema is version ``2.0``. The ``1.x`` vocabulary (``type: simple``,
 untagged phases, ``tools:``) is intentionally removed — Phase 0 is an
@@ -151,12 +140,12 @@ class IoDeclaration(BaseModel):
 
 
 class ContextBridge(BaseModel):
-    """Input/output wiring for a ``DelegatePhase``.
+    """Input/output wiring between parent and child skills.
 
-    Only valid on ``mode: delegate``. The compiler's
-    ``validators/context_bridge.py`` (Rule 5) statically type-checks
-    these mappings against the child skill's ``io:`` declaration at
-    load time.
+    Retained for the upcoming A8 ContextBridge merge (T10), which will
+    consolidate this Pydantic version with the dataclass mirror in
+    ``core/types.py``. The 1.x DelegatePhase consumer was removed in
+    MVP-0 B1; new V2 delegation will reuse this same model.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -183,11 +172,12 @@ class LLMPhase(_BasePhase):
     """LLM-driven phase with a ReAct/Tool-calling loop.
 
     ``subagent_enabled`` (ad-hoc anonymous sub-agent) and
-    ``adopted_persona`` live here. ``subgraph:`` does NOT — static
-    composition is a different phase mode (``DelegatePhase``).
-    The originally-planned ``sub_skills`` field was dropped per
-    2026-04-26 cohesion plan 方针 1.2 (schema declared, runtime never
-    wired); re-add when the runtime ships.
+    ``adopted_persona`` live here. The originally-planned
+    ``sub_skills`` field was dropped per 2026-04-26 cohesion plan 方针
+    1.2 (schema declared, runtime never wired); re-add when the runtime
+    ships. Static cross-skill composition (1.x ``mode: delegate`` /
+    ``mode: parallel_delegate``) was removed in MVP-0 B1 (2026-04-28)
+    and will return in V2 via LangGraph Send API.
     """
 
     mode: Literal["llm"]
@@ -243,37 +233,8 @@ class LogicPhase(_BasePhase):
     validator: str | None = None
 
 
-class DelegatePhase(_BasePhase):
-    """Static-composition phase: invokes another Graph/Agent skill.
-
-    The child skill owns its own iteration and prompt machinery, so
-    ``max_iterations``, ``prompt``, ``agent_tools``, and
-    ``subagent_enabled`` are all *absent by construction* —
-    ``extra='forbid'`` on ``_BasePhase`` rejects them.
-    """
-
-    mode: Literal["delegate"]
-    subgraph: str = Field(min_length=1)
-    context_bridge: ContextBridge
-
-
-class ParallelDelegatePhase(_BasePhase):
-    """Parallel composition phase: fan-out N child skills concurrently.
-
-    Schema added in PR-7 (P1). Runtime support is deferred to a follow-up PR
-    because it requires LangGraph ``Send`` API integration and reducer plumbing.
-    Loader raises a clear NotImplementedError for this mode until then.
-    """
-
-    mode: Literal["parallel_delegate"]
-    subgraphs: list[str] = Field(min_length=2)
-    context_bridge: ContextBridge
-    tolerance: float = Field(default=0.0, ge=0.0, le=1.0)
-    reducer: str = Field(min_length=1)
-
-
 PhaseDef = Annotated[
-    Union[LLMPhase, LogicPhase, DelegatePhase, ParallelDelegatePhase],
+    Union[LLMPhase, LogicPhase],
     Field(discriminator="mode"),
 ]
 """Discriminated union over ``mode``. Use
@@ -426,14 +387,12 @@ __all__ = [
     "AgentProfile",
     "AgentSkillDef",
     "ContextBridge",
-    "DelegatePhase",
     "GraphSkillDef",
     "IoDeclaration",
     "IoInput",
     "IoOutput",
     "LLMPhase",
     "LogicPhase",
-    "ParallelDelegatePhase",
     "PersonaSkillDef",
     "PhaseDef",
     "SkillManifest",

@@ -168,8 +168,6 @@ class Callback:
             RetryExhaustedEvent,
             RunEndedEvent,
             RunStartedEvent,
-            SubgraphEnterEvent,
-            SubgraphExitEvent,
             ToolCallEvent,
             ValidationFailEvent,
             ValidationPassEvent,
@@ -222,8 +220,8 @@ class Callback:
             ValidationPassEvent, RetryExhaustedEvent, InternalErrorEvent,
             # Tier 1 Commit B — data + proxy enhancement
             ModelResolvedEvent, ArtifactSavedEvent,
-            # Tier 1 Commit C — concurrency + subgraph boundary
-            SubgraphEnterEvent, SubgraphExitEvent,
+            # Tier 1 Commit C — concurrency boundary (subgraph events
+            # removed in MVP-0 B1)
             ParallelMapGroupStartedEvent, ParallelMapGroupEndedEvent,
             # Tier 1 Commit D — heartbeat
             HeartbeatEvent,

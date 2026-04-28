@@ -32,15 +32,15 @@ from graph_agent.core.manifest import (
     AgentProfile,
     AgentSkillDef,
     ContextBridge,
-    DelegatePhase,
     GraphSkillDef,
     LLMPhase,
     LogicPhase,
-    ParallelDelegatePhase,
     PersonaSkillDef,
     PhaseDef,
     SkillManifest,
 )
+
+# DelegatePhase / ParallelDelegatePhase removed in MVP-0 B1 (2026-04-28).
 
 
 _SKILL_ADAPTER = TypeAdapter(SkillManifest)
@@ -285,20 +285,6 @@ class TestLLMPhaseUserPromptTemplate:
             _SKILL_ADAPTER.validate_python(data)
         assert "user_prompt_template" in str(exc.value)
 
-    def test_delegate_phase_cannot_have_user_prompt_template(self):
-        data = _base_graph_dict()
-        data["phases"] = [{
-            "mode": "delegate",
-            "name": "bad",
-            "subgraph": "./x",
-            "context_bridge": {"inputs": {}, "outputs": {}},
-            "user_prompt_template": "Nope: {x}",
-        }]
-        with pytest.raises(ValidationError) as exc:
-            _SKILL_ADAPTER.validate_python(data)
-        assert "user_prompt_template" in str(exc.value)
-
-
 class TestPhaseModeDiscriminator:
     """Each ``mode:`` value picks exactly one phase class."""
 
@@ -329,24 +315,6 @@ class TestPhaseModeDiscriminator:
         phase = m.phases[0]
         assert isinstance(phase, LogicPhase)
         assert phase.execute_steps == ["script.segmenter.prepare_chapter"]
-
-    def test_delegate_mode_yields_delegate_phase(self):
-        m = _SKILL_ADAPTER.validate_python({
-            **_base_graph_dict(),
-            "phases": [{
-                "mode": "delegate",
-                "name": "delegate_segmentation",
-                "subgraph": "./subskills/segmenter",
-                "context_bridge": {
-                    "inputs": {"chapters": "{context.chapters}"},
-                    "outputs": {"segments": "{subgraph.segmentation_result}"},
-                },
-            }],
-        })
-        phase = m.phases[0]
-        assert isinstance(phase, DelegatePhase)
-        assert isinstance(phase.context_bridge, ContextBridge)
-        assert phase.subgraph == "./subskills/segmenter"
 
     def test_unknown_mode_rejected(self):
         data = _base_graph_dict()
@@ -431,6 +399,8 @@ class TestPhaseEngineExclusivity:
         assert "execute_steps" in str(exc.value)
 
     def test_llm_phase_cannot_have_subgraph(self):
+        """Regression guard: 1.x ``subgraph:`` field must not slip back in
+        on LLMPhase via ``extra='forbid'``."""
         data = _base_graph_dict()
         data["phases"] = [{
             "mode": "llm",
@@ -444,156 +414,8 @@ class TestPhaseEngineExclusivity:
 
 
 # =============================================================================
-# Rule 2 — delegate determinism (no iteration / prompt / tools)
-# =============================================================================
-
-
-class TestDelegateDeterminism:
-    """DelegatePhase must not carry iteration caps or LLM machinery."""
-
-    def test_delegate_cannot_have_max_iterations(self):
-        data = _base_graph_dict()
-        data["phases"] = [{
-            "mode": "delegate",
-            "name": "bad",
-            "subgraph": "./x",
-            "context_bridge": {"inputs": {}, "outputs": {}},
-            "max_iterations": 10,
-        }]
-        with pytest.raises(ValidationError) as exc:
-            _SKILL_ADAPTER.validate_python(data)
-        assert "max_iterations" in str(exc.value)
-
-    def test_delegate_cannot_have_prompt(self):
-        data = _base_graph_dict()
-        data["phases"] = [{
-            "mode": "delegate",
-            "name": "bad",
-            "subgraph": "./x",
-            "context_bridge": {"inputs": {}, "outputs": {}},
-            "prompt": "p",
-        }]
-        with pytest.raises(ValidationError) as exc:
-            _SKILL_ADAPTER.validate_python(data)
-        assert "prompt" in str(exc.value)
-
-    def test_delegate_cannot_have_agent_tools(self):
-        data = _base_graph_dict()
-        data["phases"] = [{
-            "mode": "delegate",
-            "name": "bad",
-            "subgraph": "./x",
-            "context_bridge": {"inputs": {}, "outputs": {}},
-            "agent_tools": ["t"],
-        }]
-        with pytest.raises(ValidationError) as exc:
-            _SKILL_ADAPTER.validate_python(data)
-        assert "agent_tools" in str(exc.value)
-
-    def test_delegate_requires_context_bridge(self):
-        data = _base_graph_dict()
-        data["phases"] = [{
-            "mode": "delegate",
-            "name": "bad",
-            "subgraph": "./x",
-        }]
-        with pytest.raises(ValidationError) as exc:
-            _SKILL_ADAPTER.validate_python(data)
-        assert "context_bridge" in str(exc.value)
-
-
-class TestParallelDelegatePhase:
-    def test_minimal_valid_config(self):
-        phase = ParallelDelegatePhase.model_validate({
-            "mode": "parallel_delegate",
-            "name": "fanout",
-            "subgraphs": ["./a/SKILL.md", "./b/SKILL.md"],
-            "context_bridge": {"inputs": {}, "outputs": {}},
-            "reducer": "script.merge.reduce_outputs",
-        })
-
-        assert phase.subgraphs == ["./a/SKILL.md", "./b/SKILL.md"]
-        assert isinstance(phase.context_bridge, ContextBridge)
-        assert phase.tolerance == 0.0
-        assert phase.reducer == "script.merge.reduce_outputs"
-
-    def test_subgraphs_must_have_at_least_two(self):
-        with pytest.raises(ValidationError) as exc:
-            ParallelDelegatePhase.model_validate({
-                "mode": "parallel_delegate",
-                "name": "fanout",
-                "subgraphs": ["./only/SKILL.md"],
-                "context_bridge": {"inputs": {}, "outputs": {}},
-                "reducer": "script.merge.reduce_outputs",
-            })
-
-        assert "subgraphs" in str(exc.value)
-
-    def test_tolerance_bounds(self):
-        base = {
-            "mode": "parallel_delegate",
-            "name": "fanout",
-            "subgraphs": ["./a/SKILL.md", "./b/SKILL.md"],
-            "context_bridge": {"inputs": {}, "outputs": {}},
-            "reducer": "script.merge.reduce_outputs",
-        }
-
-        for tolerance in (-0.1, 1.1):
-            with pytest.raises(ValidationError) as exc:
-                ParallelDelegatePhase.model_validate({
-                    **base,
-                    "tolerance": tolerance,
-                })
-            assert "tolerance" in str(exc.value)
-
-    def test_reducer_required(self):
-        with pytest.raises(ValidationError) as exc:
-            ParallelDelegatePhase.model_validate({
-                "mode": "parallel_delegate",
-                "name": "fanout",
-                "subgraphs": ["./a/SKILL.md", "./b/SKILL.md"],
-                "context_bridge": {"inputs": {}, "outputs": {}},
-            })
-
-        assert "reducer" in str(exc.value)
-
-    def test_extra_fields_forbidden(self):
-        base = {
-            "mode": "parallel_delegate",
-            "name": "fanout",
-            "subgraphs": ["./a/SKILL.md", "./b/SKILL.md"],
-            "context_bridge": {"inputs": {}, "outputs": {}},
-            "reducer": "script.merge.reduce_outputs",
-        }
-
-        for extra_key, value in (
-            ("max_iterations", 10),
-            ("prompt", "Do not use LLM prompt fields here."),
-            ("agent_tools", ["tools.x"]),
-        ):
-            with pytest.raises(ValidationError) as exc:
-                ParallelDelegatePhase.model_validate({
-                    **base,
-                    extra_key: value,
-                })
-            assert extra_key in str(exc.value)
-
-    def test_mode_discriminator(self):
-        phase = TypeAdapter(PhaseDef).validate_python({
-            "mode": "parallel_delegate",
-            "name": "fanout",
-            "subgraphs": ["./a/SKILL.md", "./b/SKILL.md"],
-            "context_bridge": {"inputs": {}, "outputs": {}},
-            "tolerance": 0.2,
-            "reducer": "script.merge.reduce_outputs",
-        })
-
-        assert isinstance(phase, ParallelDelegatePhase)
-        assert phase.tolerance == 0.2
-
-
-# =============================================================================
-# Delegation mechanisms — three mutually exclusive pathways
+# Delegation mechanisms — DelegatePhase + ParallelDelegatePhase tests removed
+# in MVP-0 B1 (2026-04-28); the modes themselves are gone.
 # =============================================================================
 
 
@@ -695,20 +517,6 @@ class TestAdoptedPersonaInjection:
             _SKILL_ADAPTER.validate_python(data)
         assert "adopted_persona" in str(exc.value)
 
-    def test_delegate_phase_cannot_have_adopted_persona(self):
-        data = _base_graph_dict()
-        data["phases"] = [{
-            "mode": "delegate",
-            "name": "bad",
-            "subgraph": "./x",
-            "context_bridge": {"inputs": {}, "outputs": {}},
-            "adopted_persona": "producer",
-        }]
-        with pytest.raises(ValidationError) as exc:
-            _SKILL_ADAPTER.validate_python(data)
-        assert "adopted_persona" in str(exc.value)
-
-
 # =============================================================================
 # extra='forbid' at every level
 # =============================================================================
@@ -738,15 +546,10 @@ class TestExtraForbid:
             _SKILL_ADAPTER.validate_python(data)
 
     def test_unknown_context_bridge_key_rejected(self):
-        data = _base_graph_dict()
-        data["phases"] = [{
-            "mode": "delegate",
-            "name": "p",
-            "subgraph": "./x",
-            "context_bridge": {"inputs": {}, "outputs": {}, "extras": {}},
-        }]
+        """ContextBridge model still uses ``extra='forbid'``; verify directly
+        since the 1.x ``mode: delegate`` consumer was removed in MVP-0 B1."""
         with pytest.raises(ValidationError) as exc:
-            _SKILL_ADAPTER.validate_python(data)
+            ContextBridge.model_validate({"inputs": {}, "outputs": {}, "extras": {}})
         assert "extras" in str(exc.value)
 
     def test_typo_in_phase_field_name(self):
@@ -1150,14 +953,12 @@ class TestSubmodelExports:
             "AgentProfile",
             "AgentSkillDef",
             "ContextBridge",
-            "DelegatePhase",
             "GraphSkillDef",
             "IoDeclaration",
             "IoInput",
             "IoOutput",
             "LLMPhase",
             "LogicPhase",
-            "ParallelDelegatePhase",
             "PersonaSkillDef",
             "PhaseDef",
             "SkillManifest",

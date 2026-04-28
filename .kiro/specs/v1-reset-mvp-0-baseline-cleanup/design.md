@@ -135,7 +135,7 @@ class ArtifactError(PersistenceError):
 ```
 
 **Why this hierarchy**:
-- 5 大类别：`LoaderError` / `ValidationError` / `ExecutionError` / `ToolExecutionError` / `IOError` 对齐生命周期阶段
+- 5 大类别：`LoaderError` / `ValidationError` / `ExecutionError` / `ToolExecutionError` / `PersistenceError` 对齐生命周期阶段
 - 每类下有 2-4 个子类对应具体场景，让 catch 可以精确
 - `GraphAgentError` 作为 base 永远不直接 catch（避免吃掉所有错误）
 
@@ -162,7 +162,7 @@ ignore_missing_imports = true  # 上游 stubs 不全的临时豁免；MVP-5 改 
 
 每条按 `research.md` D4 决策实施。
 
-### 2.1 抛错类（IOError / LoaderError / ExecutionError）
+### 2.1 抛错类（PersistenceError / LoaderError / ExecutionError）
 
 **Pattern A — 抛错替换静默：**
 
@@ -177,7 +177,7 @@ except OSError:
 try:
     do_thing()
 except OSError as exc:
-    raise IOError(f"do_thing failed: {exc}", context={"path": ...}) from exc
+    raise PersistenceError(f"do_thing failed: {exc}", context={"path": ...}) from exc
 ```
 
 适用：

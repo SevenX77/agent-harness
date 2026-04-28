@@ -185,6 +185,36 @@ class TestValidationMiddleware:
         assert "business_data_md 是空" in str(message.content)
         assert "_finish_task_result" not in ctx
 
+    def test_invalid_json_args_returns_llm_feedback(self) -> None:
+        ctx: dict[str, Any] = {}
+        middleware = ValidationMiddleware(
+            output_schema=BusinessItem,
+            ctx=ctx,
+            phase_name="finish_phase",
+        )
+        request = ToolCallRequest(
+            tool_call={"name": "finish_task", "id": "call-1", "args": "{bad json"},
+            tool=None,
+            state={},
+            runtime=None,  # type: ignore[arg-type]
+        )
+
+        def handler(_request: ToolCallRequest) -> ToolMessage:
+            raise AssertionError("finish_task handler should not run")
+
+        result = middleware.wrap_tool_call(request, handler)
+
+        assert isinstance(result, Command)
+        assert result.goto == "model"
+        message = result.update["messages"][0]
+        assert isinstance(message, ToolMessage)
+        assert message.status == "error"
+        assert message.name == "finish_task"
+        assert message.tool_call_id == "call-1"
+        assert "JSON parse failed" in str(message.content)
+        assert "Please retry with valid JSON" in str(message.content)
+        assert "_finish_task_result" not in ctx
+
     def test_accepts_valid_schema_submission(self) -> None:
         ctx: dict[str, Any] = {}
         seen_payloads: list[Any] = []

@@ -209,6 +209,13 @@ class LLMPhase(_BasePhase):
     max_nudges: int | None = Field(default=None, ge=0)
     dead_end_threshold: int | None = Field(default=None, ge=1)
     validator: str | None = None
+    validator_optional: bool = Field(
+        default=False,
+        description=(
+            "Set True to explicitly opt out of business validation when "
+            "a phase declares output_schema/output_example."
+        ),
+    )
     retry_target: str | None = None
     hoist_to: str | None = Field(
         default=None,

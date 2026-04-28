@@ -228,6 +228,7 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
         from .validators.prompt_quality import check_prompt_quality
         from .validators.subgraph_cycle import check_subgraph_cycles
         from .validators.template_variables import check_template_variables
+        from .validators.validator_required import check_validator_required
 
         result.issues.extend(
             check_context_bridge(manifest, base_dir=skill_path.parent)
@@ -243,6 +244,7 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
         )
         result.issues.extend(check_prompt_quality(manifest))
         result.issues.extend(check_template_variables(manifest))
+        result.issues.extend(check_validator_required(manifest))
     elif isinstance(manifest, AgentSkillDef):
         result.issues.extend(
             check_persona_resolution(manifest, base_dir=skill_path.parent)

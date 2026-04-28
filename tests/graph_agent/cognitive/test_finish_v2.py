@@ -17,6 +17,8 @@ from graph_agent.cognitive.finish import SELFCHECK_NUDGE, finish_task
 from graph_agent.cognitive.middlewares import ValidationMiddleware
 from graph_agent.core.exceptions import SkillCompilationError
 from graph_agent.core.loader import load_workflow_from_md
+from graph_agent.core.manifest import GraphSkillDef
+from graph_agent.core.validators.validator_required import check_validator_required
 from graph_agent.tools.dynamic_schema import (
     DynamicSchemaDef,
     OutputExampleParseError,
@@ -57,6 +59,13 @@ VALID_DYNAMIC_MD = """## segments
 - end_line: 5
 - content: 收音机播报上沪沦陷消息
 - confidence: 0.95
+"""
+
+SIMPLE_DYNAMIC_EXAMPLE = """<output_example name="Summary">
+## summary
+- title (str, required): 标题
+- summary (str, required): 摘要
+</output_example>
 """
 
 
@@ -420,6 +429,89 @@ class TestSchemaByExample:
             load_workflow_from_md(skill)
 
 
+class TestValidatorRequiredRule:
+    def test_complex_schema_with_validator_has_no_issue(self) -> None:
+        manifest = _graph_manifest([
+            _validator_rule_phase(
+                output_example=VALID_DYNAMIC_EXAMPLE,
+                validator="script.validators.validate_segments",
+            )
+        ])
+
+        assert check_validator_required(manifest) == []
+
+    def test_simple_schema_without_validator_warns(self) -> None:
+        manifest = _graph_manifest([
+            _validator_rule_phase(output_example=SIMPLE_DYNAMIC_EXAMPLE)
+        ])
+
+        issues = check_validator_required(manifest)
+
+        assert len(issues) == 1
+        assert issues[0].rule_id == "W-VALIDATOR-MISSING"
+        assert issues[0].severity == "WARNING"
+
+    def test_simple_schema_with_validator_optional_silences_warning(self) -> None:
+        manifest = _graph_manifest([
+            _validator_rule_phase(
+                output_example=SIMPLE_DYNAMIC_EXAMPLE,
+                validator_optional=True,
+            )
+        ])
+
+        assert check_validator_required(manifest) == []
+
+    def test_complex_schema_without_validator_is_fatal(self) -> None:
+        manifest = _graph_manifest([
+            _validator_rule_phase(output_example=VALID_DYNAMIC_EXAMPLE)
+        ])
+
+        issues = check_validator_required(manifest)
+
+        assert len(issues) == 1
+        assert issues[0].rule_id == "F-VALIDATOR-MISSING-FOR-COMPLEX-SCHEMA"
+        assert issues[0].severity == "FATAL"
+        assert "start_line <= end_line" in issues[0].message
+
+    def test_phase_without_output_schema_is_exempt(self) -> None:
+        manifest = _graph_manifest([_validator_rule_phase(output_example=None)])
+
+        assert check_validator_required(manifest) == []
+
+
+def _graph_manifest(phases: list[dict[str, Any]]) -> GraphSkillDef:
+    return GraphSkillDef.model_validate(
+        {
+            "schema_version": "2.0",
+            "type": "graph",
+            "name": "validator-required-test",
+            "description": "validator-required-test",
+            "io": {"inputs": [], "outputs": []},
+            "phases": phases,
+        }
+    )
+
+
+def _validator_rule_phase(
+    *,
+    output_example: str | None,
+    validator: str | None = None,
+    validator_optional: bool = False,
+) -> dict[str, Any]:
+    phase: dict[str, Any] = {
+        "name": "segment",
+        "mode": "llm",
+        "prompt": "Do the work.",
+    }
+    if output_example is not None:
+        phase["output_example"] = output_example
+    if validator is not None:
+        phase["validator"] = validator
+    if validator_optional:
+        phase["validator_optional"] = True
+    return phase
+
+
 def _write_schema_by_example_skill(tmp_path: Path, output_example: str) -> Path:
     skill = tmp_path / "SKILL.md"
     indented_example = textwrap.indent(output_example.strip(), "      ")
@@ -436,6 +528,7 @@ phases:
   - name: segment
     mode: llm
     llm_role: analyst
+    validator_optional: true
     output_example: |
 {indented_example}
     prompt: |

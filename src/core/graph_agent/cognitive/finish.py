@@ -99,6 +99,23 @@ def finish_task(
 
             schema = _resolve_schema_from_path(str(output_schema_path))
             validated_items = md_to_json(business_data_md, schema)
+            if not validated_items:
+                ctx["_finish_task_result"] = {
+                    "schema_validation": "failed",
+                    "validation_error_text": (
+                        "[finish_task] business_data_md parsed to 0 items but "
+                        f"output_schema {output_schema_path!r} requires at least one. "
+                        "Check the markdown format: each item must be its own "
+                        "`## <id>` block followed by `- field: value` bullets. "
+                        "Re-call finish_task with a populated business_data_md."
+                    ),
+                }
+                logger.warning(
+                    "finish_task v2: 0 items parsed from business_data_md (schema=%s); "
+                    "delegating to NudgeInjector retry loop",
+                    output_schema_path,
+                )
+                return "PHASE_COMPLETE"
         except SemanticValidationError as exc:
             ctx["_finish_task_result"] = {
                 "schema_validation": "failed",

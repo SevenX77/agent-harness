@@ -36,7 +36,7 @@ phases:
     llm_role: analyst
     max_iterations: 10
     max_nudges: 2
-    output_schema: "script.schemas.SegmentationResult"
+    output_schema: "script.schemas.Segment"
     references:
       - references/segmentation-guide.md
     agent_tools: []
@@ -96,7 +96,7 @@ phases:
     max_nudges: 2
     max_retries: 2
     retry_target: segment
-    output_schema: "script.schemas.SegmentationResult"
+    output_schema: "script.schemas.Segment"
     references:
       - references/segmentation-guide.md
     agent_tools:

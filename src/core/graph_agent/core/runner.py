@@ -112,6 +112,7 @@ def run_skill(
     *,
     trace_dir: str | Path | None = None,
     thread_id: str | None = None,
+    unattended: bool = False,
     callbacks: list | None = None,
     artifact_saver: Any | None = None,
     initial_context: dict[str, Any] | None = None,
@@ -212,6 +213,7 @@ def run_skill(
         final_state: WorkflowState = harness.run(
             trace_dir=Path(effective_trace_dir) if effective_trace_dir else None,
             thread_id=effective_thread_id,
+            unattended=unattended,
             artifact_saver=artifact_saver,
             initial_context=initial_context,
             runtime_inputs_map=inputs,
@@ -309,6 +311,15 @@ def main():
     parser.add_argument("--inputs-file", type=str, default=None, help="JSON file of runtime inputs")
     parser.add_argument("--output", type=str, default=None, help="Output directory")
     parser.add_argument("--thread-id", type=str, default=None, help="Thread ID for checkpoint resume")
+    parser.add_argument(
+        "--unattended",
+        action="store_true",
+        help=(
+            "Run without human intervention. ask_clarification tool calls "
+            "are auto-answered with a best-effort instruction instead of "
+            "interrupting the run."
+        ),
+    )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -343,6 +354,7 @@ def main():
     result = run_skill(
         args.skill,
         thread_id=args.thread_id,
+        unattended=args.unattended,
         **inputs,
     )
 

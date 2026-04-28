@@ -460,6 +460,7 @@ class GraphAgentHarness:
         artifact_saver: Callable[..., Any] | None = None,
         storage_manager: Any | None = None,
         runtime_inputs_map: dict[str, Any] | None = None,
+        unattended: bool = False,
         extra_callbacks: list[Callback] | None = None,
         persistent_runtime_inputs: dict[str, Any] | None = None,
         persistent_storage_config: dict[str, Any] | None = None,
@@ -542,6 +543,7 @@ class GraphAgentHarness:
         run_start_monotonic = time.monotonic()
         initial_state["context"]["_thread_id"] = tid
         initial_state["context"]["_run_id"] = run_id
+        initial_state["context"]["_unattended"] = bool(unattended)
 
         # D-post session: stash the opt-in persistent knobs into the
         # workflow state so the LangGraph checkpointer persists them and
@@ -585,6 +587,7 @@ class GraphAgentHarness:
             storage_manager=storage_manager,
             artifact_saver=artifact_saver,
             callbacks=active_callbacks,
+            unattended=bool(unattended),
         )
 
         # Tier 1 Commit A — T-B1 RunStartedEvent
@@ -782,6 +785,7 @@ class GraphAgentHarness:
             "artifact_saver": run_context.artifact_saver,
             "storage_manager": run_context.storage_manager,
             "runtime_inputs": dict(run_context.runtime_inputs),
+            "unattended": run_context.unattended,
         }
 
     @staticmethod
@@ -1092,6 +1096,7 @@ class GraphAgentHarness:
             storage_manager=restored_storage_manager,
             artifact_saver=artifact_saver,
             callbacks=active_callbacks,
+            unattended=bool(state_context.get("_unattended")),
         )
 
         # D-7.2 Phase B: per-run PhaseExecutor threaded through config.

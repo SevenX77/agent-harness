@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from graph_agent.cognitive.middlewares import create_custom_middlewares
+from langchain_core.messages import ToolMessage
+from langgraph.prebuilt.tool_node import ToolCallRequest
+from langgraph.types import Command
+
+from graph_agent.cognitive.middlewares import (
+    UnattendedClarificationMiddleware,
+    create_custom_middlewares,
+)
 
 
 class _FakeSummaryModel:
@@ -165,3 +172,98 @@ class TestCreateCustomMiddlewaresPR5:
         )
 
         assert "ClarificationMiddleware" not in _names(middlewares)
+
+
+class TestUnattendedClarificationMiddleware:
+    def test_unattended_context_replaces_hitl_clarification(self) -> None:
+        middlewares = create_custom_middlewares(
+            phase_name="test",
+            context_ref={"_unattended": True},
+        )
+
+        names = _names(middlewares)
+        assert "UnattendedClarificationMiddleware" in names
+        assert "ClarificationMiddleware" not in names
+
+    def test_attended_mode_keeps_hitl_clarification(self) -> None:
+        middlewares = create_custom_middlewares(
+            phase_name="test",
+            context_ref={"_unattended": False},
+        )
+
+        names = _names(middlewares)
+        assert "ClarificationMiddleware" in names
+        assert "UnattendedClarificationMiddleware" not in names
+
+    def test_intercepts_ask_clarification_in_unattended_mode(self) -> None:
+        middleware = UnattendedClarificationMiddleware(unattended=True)
+        request = _clarification_request(
+            args={"question": "Which segmentation policy should I use?"}
+        )
+        called = False
+
+        def handler(_request: ToolCallRequest) -> ToolMessage:
+            nonlocal called
+            called = True
+            return ToolMessage(
+                content="should not run",
+                name="ask_clarification",
+                tool_call_id="call_1",
+            )
+
+        result = middleware.wrap_tool_call(request, handler)
+
+        assert called is False
+        assert isinstance(result, Command)
+        assert result.goto == "model"
+        message = result.update["messages"][0]
+        assert isinstance(message, ToolMessage)
+        assert message.tool_call_id == "call_1"
+        assert message.name == "ask_clarification"
+        assert "unattended=True" in str(message.content)
+        assert "Which segmentation policy" in str(message.content)
+
+    def test_attended_mode_passes_through(self) -> None:
+        middleware = UnattendedClarificationMiddleware(unattended=False)
+        request = _clarification_request()
+        expected = ToolMessage(
+            content="handled",
+            name="ask_clarification",
+            tool_call_id="call_1",
+        )
+
+        def handler(_request: ToolCallRequest) -> ToolMessage:
+            return expected
+
+        assert middleware.wrap_tool_call(request, handler) is expected
+
+    def test_other_tools_pass_through_in_unattended_mode(self) -> None:
+        middleware = UnattendedClarificationMiddleware(unattended=True)
+        request = _clarification_request(name="finish_task")
+        expected = ToolMessage(
+            content="handled",
+            name="finish_task",
+            tool_call_id="call_1",
+        )
+
+        def handler(_request: ToolCallRequest) -> ToolMessage:
+            return expected
+
+        assert middleware.wrap_tool_call(request, handler) is expected
+
+
+def _clarification_request(
+    *,
+    name: str = "ask_clarification",
+    args: dict[str, Any] | None = None,
+) -> ToolCallRequest:
+    return ToolCallRequest(
+        tool_call={
+            "name": name,
+            "args": args or {"question": "Need input?"},
+            "id": "call_1",
+        },
+        tool=None,
+        state={},
+        runtime=None,  # type: ignore[arg-type]
+    )

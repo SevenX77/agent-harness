@@ -591,6 +591,82 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
         return await handler(request)
 
 
+class UnattendedClarificationMiddleware(AgentMiddleware[AgentState]):
+    """Auto-answer clarification requests when human input is unavailable."""
+
+    _TOOL_NAME = "ask_clarification"
+
+    def __init__(self, *, unattended: bool) -> None:
+        super().__init__()
+        self.unattended = bool(unattended)
+
+    def _args_dict(self, request: ToolCallRequest) -> dict[str, Any]:
+        args = request.tool_call.get("args", {})
+        if isinstance(args, dict):
+            return args
+        if isinstance(args, str):
+            try:
+                parsed = json.loads(args)
+            except (TypeError, ValueError):
+                return {}
+            return parsed if isinstance(parsed, dict) else {}
+        return {}
+
+    def _auto_response(self, request: ToolCallRequest) -> Command:
+        args = self._args_dict(request)
+        question = str(args.get("question") or "").strip()
+        content = (
+            "[系统] 当前执行流为无人值守环境（unattended=True），不允许人类干预。"
+            "请基于当前已有上下文做出最保守、最合理的推测并继续执行任务。"
+            "务必在最终 finish_task 的 diagnostics_md 中明确记录：\n"
+            f"  - 你曾想问的问题：{question or '未提供'}\n"
+            "  - 你做出的推测：[你的推测]\n"
+            "  - 该推测的依据：[依据]\n"
+            "现在请继续执行后续步骤。"
+        )
+        logger.info(
+            "[UnattendedClarification] auto-answered ask_clarification"
+        )
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(
+                        content=content,
+                        name=self._TOOL_NAME,
+                        tool_call_id=request.tool_call["id"],
+                    )
+                ]
+            },
+            goto="model",
+        )
+
+    @override
+    def wrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], ToolMessage | Command],
+    ) -> ToolMessage | Command:
+        if (
+            not self.unattended
+            or request.tool_call.get("name") != self._TOOL_NAME
+        ):
+            return handler(request)
+        return self._auto_response(request)
+
+    @override
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+    ) -> ToolMessage | Command:
+        if (
+            not self.unattended
+            or request.tool_call.get("name") != self._TOOL_NAME
+        ):
+            return await handler(request)
+        return self._auto_response(request)
+
+
 def create_custom_middlewares(
     *,
     working_memory: bool = True,
@@ -605,6 +681,7 @@ def create_custom_middlewares(
     loop_detection_warn_threshold: int = 3,
     loop_detection_hard_limit: int = 5,
     clarification: bool = True,
+    unattended: bool | None = None,
     summarization: bool = False,
     summarization_model: Any = None,
     summarization_trigger_fraction: float = 0.8,
@@ -665,19 +742,34 @@ def create_custom_middlewares(
             )
 
     if clarification:
-        try:
-            from ..deerflow.agents.middlewares.clarification_middleware import (
-                ClarificationMiddleware,
+        effective_unattended = bool(
+            unattended
+            if unattended is not None
+            else (
+                context_ref.get("_unattended")
+                if isinstance(context_ref, dict)
+                else False
             )
-
-            middlewares.append(ClarificationMiddleware())
-            logger.info("middleware: enabled Clarification (Human-in-the-Loop)")
-        except ImportError as exc:
-            logger.warning(
-                "middleware: failed to import ClarificationMiddleware: %s",
-                exc,
+        )
+        if effective_unattended:
+            middlewares.append(UnattendedClarificationMiddleware(unattended=True))
+            logger.info(
+                "middleware: enabled UnattendedClarification "
+                "(auto-answer ask_clarification)"
             )
+        else:
+            try:
+                from ..deerflow.agents.middlewares.clarification_middleware import (
+                    ClarificationMiddleware,
+                )
 
+                middlewares.append(ClarificationMiddleware())
+                logger.info("middleware: enabled Clarification (Human-in-the-Loop)")
+            except ImportError as exc:
+                logger.warning(
+                    "middleware: failed to import ClarificationMiddleware: %s",
+                    exc,
+                )
     if summarization and summarization_model is not None:
         try:
             from langchain.agents.middleware import SummarizationMiddleware

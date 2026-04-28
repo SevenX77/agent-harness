@@ -178,6 +178,21 @@ class PhaseExecutor:
 
         next_state = _clone_state(state)
         passed, errors = phase.validator(next_state["context"])
+        if isinstance(errors, str):
+            logger.warning(
+                "phase=%s validator returned str instead of list[str]; "
+                "coercing to single-element list. Update validator to "
+                "match Callback.on_retry / RetryEvent.feedback contract.",
+                phase.name,
+            )
+            errors = [errors] if errors else []
+        elif not isinstance(errors, list):
+            logger.warning(
+                "phase=%s validator returned %s instead of list[str]; coercing.",
+                phase.name,
+                type(errors).__name__,
+            )
+            errors = [str(errors)] if errors else []
         retry_key = phase.retry_target or phase.name
 
         if passed:

@@ -6,7 +6,7 @@ import re
 logger = logging.getLogger(__name__)
 
 
-def validate_segmentation_structure(context: dict) -> tuple[bool, str]:
+def validate_segmentation_structure(context: dict) -> tuple[bool, list[str]]:
     """Node 02 结构 validator：行号连续性 + confidence 阈值"""
     errors: list[str] = []
     
@@ -14,7 +14,7 @@ def validate_segmentation_structure(context: dict) -> tuple[bool, str]:
     chapter_lines = context.get("chapter_lines", [])
     
     if not segments:
-        return (False, "No segments produced. Re-analyze the chapter text.")
+        return (False, ["No segments produced. Re-analyze the chapter text."])
     
     # Check 1: JSON format and required fields
     for seg in segments:
@@ -62,18 +62,18 @@ def validate_segmentation_structure(context: dict) -> tuple[bool, str]:
             )
     
     if errors:
-        return (False, "\n".join(errors))
-    return (True, "Structure validation passed")
+        return (False, errors)
+    return (True, [])
 
 
-def validate_final_format(context: dict) -> tuple[bool, str]:
+def validate_final_format(context: dict) -> tuple[bool, list[str]]:
     """Node 03 格式 validator：最终输出格式检查"""
     errors: list[str] = []
     
     segments = context.get("segments", [])
     
     if not segments:
-        return (False, "No segments in final output")
+        return (False, ["No segments in final output"])
     
     required_fields = ["index", "type", "content", "start_line", "end_line"]
     optional_fields = ["description", "confidence", "notes"]
@@ -133,5 +133,5 @@ def validate_final_format(context: dict) -> tuple[bool, str]:
             errors.append(f"Segment {seg_idx}: {len(sentences)} sentences - too long, must split")
     
     if errors:
-        return (False, "\n".join(errors))
-    return (True, "Final format validation passed")
+        return (False, errors)
+    return (True, [])

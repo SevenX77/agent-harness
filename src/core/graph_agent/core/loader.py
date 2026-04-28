@@ -24,7 +24,7 @@ import logging
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 
@@ -104,125 +104,138 @@ def _load_skill_local_module(module_path_str: str, base_dir: Path) -> Any | None
     return module
 
 
-def _resolve_tool_reference(
-    ref_path: str,
+def resolve_skill_resource(
     base_dir: Path,
-) -> Callable[..., str]:
-    """Resolve a dot-path tool reference to a Python callable.
+    resource_path: str,
+    *,
+    kind: Literal["tool", "reference", "schema"] = "tool",
+) -> Any:
+    """Resolve a SKILL-local resource through one sandboxed code path.
 
-    The reference format is: module.submodule.function_name
-    The last dot separates the module path from the function name.
-    Modules are resolved relative to base_dir, with one special case:
-    references that start with ``builtin.`` are resolved against the
-    framework-owned ``graph_agent.tools.builtin`` package so any SKILL.md
-    can write ``tools: [builtin.parallel_map]`` without copying the file
-    into the skill directory.
-
-    Adapted from DeerFlow reflection/resolvers.py L25-70, with separator
-    changed from ':' to '.' (last dot = function separator).
-
-    Args:
-        ref_path: Dot-separated path like 'tools.analysis_tools.inspect_entity'
-            or 'builtin.parallel_map' for framework-owned tools.
-        base_dir: Base directory for relative imports (SKILL.md parent dir)
-
-    Returns:
-        The resolved Python callable.
-
-    Raises:
-        SkillLoadError: If the import fails.
-
+    ``tool`` returns a callable, ``schema`` returns a module for legacy
+    Pydantic output_schema rendering, and ``reference`` returns a normalized
+    path relative to ``base_dir``. File-backed resources must stay under the
+    skill directory.
     """
-    parts = ref_path.rsplit(".", 1)
-    if len(parts) != 2:
+    if kind == "reference":
+        return _resolve_reference_resource(base_dir, resource_path)
+
+    if kind == "schema":
+        module_path_str = resource_path
+        attr_name = ""
+    else:
+        parts = resource_path.rsplit(".", 1)
+        if len(parts) != 2:
+            raise SkillLoadError(
+                f"Invalid {kind} reference '{resource_path}'. "
+                "Expected format: module.path.name"
+            )
+        module_path_str, attr_name = parts
+
+    if kind == "tool" and not attr_name:
         raise SkillLoadError(
-            f"Invalid tool reference '{ref_path}'. Expected format: module.path.function_name"
+            f"Invalid {kind} reference '{resource_path}'. "
+            "Expected format: module.path.name"
         )
 
-    module_path_str, func_name = parts
-
-    # Framework builtins live inside the graph_agent package itself so they
-    # can't live under the caller's skill directory. We import them via
-    # normal Python import path resolution instead of file-path loading.
-    if module_path_str == "builtin" or module_path_str.startswith("builtin."):
+    if kind == "tool" and (
+        module_path_str == "builtin" or module_path_str.startswith("builtin.")
+    ):
         try:
-            import importlib as _importlib
             from ..tools import builtin as _builtin_pkg  # noqa: F401
+
             submod_name = module_path_str[len("builtin"):].lstrip(".")
             full_module = "graph_agent.tools.builtin"
             if submod_name:
                 full_module = f"{full_module}.{submod_name}"
-            module = _importlib.import_module(full_module)
+            module = importlib.import_module(full_module)
         except ImportError as exc:
             raise SkillLoadError(
-                f"Cannot import builtin tool '{ref_path}': {exc}"
+                f"Cannot import builtin tool '{resource_path}': {exc}"
             ) from exc
 
         try:
-            func = getattr(module, func_name)
+            func = getattr(module, attr_name)
         except AttributeError as exc:
             raise SkillLoadError(
-                f"Builtin module '{full_module}' does not define '{func_name}'"
+                f"Builtin module '{full_module}' does not define '{attr_name}'"
             ) from exc
 
         if not callable(func):
             raise SkillLoadError(
-                f"'{ref_path}' is not callable (got {type(func).__name__})"
+                f"'{resource_path}' is not callable (got {type(func).__name__})"
             )
         return func  # type: ignore[return-value]
 
-    # Convert dot path to file path relative to base_dir
-    module_file = base_dir / module_path_str.replace(".", "/")
-    # Try as .py file
-    py_file = module_file.with_suffix(".py")
-    if not py_file.exists():
-        # Try as package __init__.py
-        init_file = module_file / "__init__.py"
-        if init_file.exists():
-            py_file = init_file
-        else:
-            raise SkillLoadError(
-                f"Cannot find module for '{ref_path}': tried {py_file} and {init_file}"
-            )
-
-    # Validate resolved path stays within skill directory
-    if not py_file.resolve().is_relative_to(base_dir.resolve()):
-        raise SkillLoadError(
-            f"Tool reference '{ref_path}' resolves outside skill directory: {py_file}"
-        )
-
-    # Dynamic import using importlib
-    module_name = f"_graph_agent_skill_.{_skill_namespace(base_dir)}.{module_path_str}"
-    try:
-        importlib.invalidate_caches()
-        spec = importlib.util.spec_from_file_location(module_name, py_file)
-        if spec is None or spec.loader is None:
-            raise SkillLoadError(f"Cannot load module spec for {py_file}")
-
-        module = importlib.util.module_from_spec(spec)
-        # Register in sys.modules before exec (needed for `from __future__` + dataclass)
-        sys.modules[module_name] = module
-        source = py_file.read_text(encoding="utf-8")
-        code = compile(source, str(py_file), "exec")
+    module = sys.modules.get(
+        f"_graph_agent_skill_.{_skill_namespace(base_dir)}.{module_path_str}"
+    )
+    if module is None:
+        module = _load_skill_local_module(module_path_str, base_dir)
+    if module is None:
         try:
-            exec(code, module.__dict__)
-        except Exception:
-            sys.modules.pop(module_name, None)
-            raise
-    except SkillLoadError:
-        raise
-    except Exception as exc:
-        raise SkillLoadError(f"Error importing '{ref_path}' from {py_file}: {exc}") from exc
+            module = importlib.import_module(module_path_str)
+        except ImportError as exc:
+            raise SkillLoadError(
+                f"Cannot import {kind} module '{module_path_str}' "
+                f"for '{resource_path}': {exc}"
+            ) from exc
+
+    if kind == "schema":
+        return module
 
     try:
-        func = getattr(module, func_name)
+        func = getattr(module, attr_name)
     except AttributeError as exc:
-        raise SkillLoadError(f"Module {py_file} does not define '{func_name}'") from exc
+        raise SkillLoadError(
+            f"Module for '{resource_path}' does not define '{attr_name}'"
+        ) from exc
 
     if not callable(func):
-        raise SkillLoadError(f"'{ref_path}' is not callable (got {type(func).__name__})")
+        raise SkillLoadError(
+            f"'{resource_path}' is not callable (got {type(func).__name__})"
+        )
 
     return func  # type: ignore[return-value]
+
+
+def _resolve_reference_resource(base_dir: Path, reference_path: str) -> str:
+    """Resolve and normalize one declared reference file path."""
+    clean = str(reference_path or "").strip().replace("\\", "/")
+    while clean.startswith("./"):
+        clean = clean[2:]
+    if not clean:
+        raise SkillLoadError("Reference path is empty")
+    if Path(clean).is_absolute():
+        raise SkillLoadError(f"Reference path must be relative: {reference_path!r}")
+
+    base_resolved = base_dir.resolve()
+    references_root = (base_resolved / "references").resolve()
+    candidates = [(base_resolved / clean).resolve()]
+    if not clean.startswith("references/"):
+        candidates.append((references_root / clean).resolve())
+    for candidate in candidates:
+        try:
+            candidate.relative_to(base_resolved)
+        except ValueError as exc:
+            raise SkillLoadError(
+                f"Reference '{reference_path}' resolves outside skill directory: "
+                f"{candidate}"
+            ) from exc
+        if candidate.is_file():
+            return candidate.relative_to(base_resolved).as_posix()
+
+    # Existence is checked by the read_file tool at runtime so tests and
+    # generated skills can declare references before materializing files.
+    return clean
+
+
+def _resolve_tool_reference(
+    ref_path: str,
+    base_dir: Path,
+) -> Callable[..., str]:
+    """Resolve a dot-path tool reference to a Python callable."""
+    return resolve_skill_resource(base_dir, ref_path, kind="tool")
 
 
 def _validate_reducer_path(reducer_path: str) -> None:
@@ -528,6 +541,11 @@ def _render_skill_section_xml_tags(
 
     references = list(getattr(phase_or_profile, "references", []) or [])
     if references:
+        if skill_base_dir is not None:
+            references = [
+                resolve_skill_resource(skill_base_dir, reference, kind="reference")
+                for reference in references
+            ]
         lines = [
             "<knowledge_base>",
             "  本地有以下参考文件，请在需要时调用 read_file 查阅：",
@@ -600,23 +618,14 @@ def _render_output_format_markdown(
     """
     try:
         module_path, class_name = output_schema_path.rsplit(".", 1)
-        module = None
-        try:
-            module = importlib.import_module(module_path)
-        except ImportError:
-            pass
-
-        if module is None and skill_base_dir is not None:
-            module_name = (
-                f"_graph_agent_skill_.{_skill_namespace(skill_base_dir)}.{module_path}"
+        if skill_base_dir is not None:
+            module = resolve_skill_resource(
+                skill_base_dir,
+                module_path,
+                kind="schema",
             )
-            module = sys.modules.get(module_name)
-
-        if module is None and skill_base_dir is not None:
-            module = _load_skill_local_module(module_path, skill_base_dir)
-
-        if module is None:
-            raise ImportError(f"Cannot find {module_path}")
+        else:
+            module = importlib.import_module(module_path)
 
         model_cls = getattr(module, class_name)
 
@@ -668,7 +677,11 @@ def _render_output_format_markdown(
         return ""
 
 
-def _compose_agent_system_prompt(manifest: "AgentSkillDef") -> str:
+def _compose_agent_system_prompt(
+    manifest: "AgentSkillDef",
+    *,
+    skill_base_dir: Path | None = None,
+) -> str:
     """Assemble an agent skill's System Prompt using Round 8 §C XML tags.
 
     Wraps role/goal/constraints in dedicated XML tags so the LLM attends
@@ -683,7 +696,7 @@ def _compose_agent_system_prompt(manifest: "AgentSkillDef") -> str:
         f"<domain_expertise>\n  {profile.role}\n</domain_expertise>",
         f"<task_objective>\n  {profile.goal}\n</task_objective>",
     ]
-    xml_tags = _render_skill_section_xml_tags(profile)
+    xml_tags = _render_skill_section_xml_tags(profile, skill_base_dir=skill_base_dir)
     if xml_tags:
         sections.append(xml_tags)
     if profile.steps:
@@ -740,7 +753,7 @@ def _phase_from_agent_skill(
     resolved tool callables.
     """
     del callbacks, loading_stack  # unused in agent path; reserved for persona resolution
-    system_prompt = _compose_agent_system_prompt(manifest)
+    system_prompt = _compose_agent_system_prompt(manifest, skill_base_dir=base_dir)
     if manifest.adopted_persona is not None:
         persona_manifest = resolve_persona(
             manifest.adopted_persona, base_dir=base_dir,
@@ -756,7 +769,10 @@ def _phase_from_agent_skill(
         llm_role=manifest.agent_profile.llm_role,
         model_override=manifest.model_override,
         subagent_enabled=manifest.subagent_enabled,
-        references=list(manifest.agent_profile.references),
+        references=[
+            resolve_skill_resource(base_dir, reference, kind="reference")
+            for reference in manifest.agent_profile.references
+        ],
         skill_base_dir=base_dir,
         context_access=list(manifest.agent_profile.context_access),
         requires_llm=True,
@@ -798,6 +814,8 @@ def _phase_from_graph_phase(
             if phase_def.output_example
             else None
         )
+        if dynamic_schema is not None:
+            setattr(dynamic_schema, "hoist_to", phase_def.hoist_to)
         system_prompt = phase_def.prompt
         xml_tags = _render_skill_section_xml_tags(phase_def, skill_base_dir=base_dir)
         if xml_tags:
@@ -809,6 +827,13 @@ def _phase_from_graph_phase(
                 phase_def.adopted_persona, base_dir=base_dir,
             )
             system_prompt = _inject_persona(persona_manifest, system_prompt)
+        validator = (
+            _resolve_tool_reference(phase_def.validator, base_dir)
+            if phase_def.validator
+            else None
+        )
+        if validator is not None and phase_def.hoist_to:
+            setattr(validator, "hoist_to", phase_def.hoist_to)
         phase = Phase(
             name=phase_def.name,
             system_prompt=system_prompt,
@@ -818,11 +843,7 @@ def _phase_from_graph_phase(
             tier=phase_def.llm_role or "balanced",
             llm_role=phase_def.llm_role,
             model_override=phase_def.model_override,
-            validator=(
-                _resolve_tool_reference(phase_def.validator, base_dir)
-                if phase_def.validator
-                else None
-            ),
+            validator=validator,
             retry_target=phase_def.retry_target,
             max_retries=phase_def.max_retries if phase_def.max_retries is not None else 3,
             max_nudges=phase_def.max_nudges if phase_def.max_nudges is not None else 1,
@@ -832,7 +853,10 @@ def _phase_from_graph_phase(
                 else 3
             ),
             subagent_enabled=phase_def.subagent_enabled,
-            references=list(phase_def.references),
+            references=[
+                resolve_skill_resource(base_dir, reference, kind="reference")
+                for reference in phase_def.references
+            ],
             skill_base_dir=base_dir,
             context_access=list(phase_def.context_access),
             # 方针 1.3: thread output_schema dotted path so PhaseExecutor
@@ -843,6 +867,7 @@ def _phase_from_graph_phase(
             output_schema_path=None if dynamic_schema is not None else phase_def.output_schema,
             requires_llm=True,
         )
+        setattr(phase, "hoist_to", phase_def.hoist_to)
         return phase
 
     if isinstance(phase_def, _LogicPhase):

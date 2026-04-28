@@ -316,6 +316,10 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
         self.ctx = ctx
         self._callbacks = list(callbacks or [])
         self._phase_name = phase_name
+        self.hoist_to = (
+            getattr(output_schema, "hoist_to", None)
+            or getattr(business_validator, "hoist_to", None)
+        )
 
     def _args_dict(self, request: ToolCallRequest) -> dict[str, Any]:
         args = request.tool_call.get("args", {})
@@ -391,6 +395,28 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
                     )
         except Exception as exc:  # noqa: BLE001
             logger.warning("[ValidationMiddleware] validation_pass emit failed: %s", exc)
+
+    def _store_validated_result(
+        self,
+        parsed_list: list[dict[str, Any]],
+        *,
+        schema_validation: str = "passed",
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        result = {
+            "business_data_parsed": parsed_list,
+            "schema_validation": schema_validation,
+        }
+        if extra:
+            result.update(extra)
+        self.ctx["_finish_task_result"] = result
+        if self.hoist_to:
+            self.ctx[str(self.hoist_to)] = parsed_list
+            logger.info(
+                "[ValidationMiddleware] hoisted %d items to ctx[%s]",
+                len(parsed_list),
+                self.hoist_to,
+            )
 
     def _reject(self, request: ToolCallRequest, errors: list[str] | str) -> Command:
         error_lines = [errors] if isinstance(errors, str) else errors
@@ -481,10 +507,9 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
                 ["校验错误如下（请一次性全部修复）：", *all_errors],
             )
 
-        self.ctx["_finish_task_result"] = {
-            "business_data_parsed": [item.model_dump() for item in report.valid_items],
-            "schema_validation": "passed",
-        }
+        self._store_validated_result(
+            [item.model_dump() for item in report.valid_items],
+        )
         self._emit_validation_pass()
         return None
 
@@ -526,12 +551,10 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
                 ["校验错误如下（请一次性全部修复）：", *all_errors],
             )
 
-        self.ctx["_finish_task_result"] = {
-            "business_data_parsed": coerced_items,
-            "schema_validation": "passed",
-            "schema_type": "dynamic",
-            "schema_name": schema.name,
-        }
+        self._store_validated_result(
+            coerced_items,
+            extra={"schema_type": "dynamic", "schema_name": schema.name},
+        )
         logger.info(
             "[ValidationMiddleware] dynamic schema validation passed phase=%s schema=%s items=%d",
             self._phase_name,

@@ -129,20 +129,22 @@ class IOManager:
             if not name:
                 raise ValueError(f"Output spec missing 'name' field: {output_spec}")
             target = output_spec.get("target", "file")
-            source_path = output_spec.get("source") or name
-            data = _resolve_ctx_path(context, source_path)
+            data = context.get(name)
 
             if data is None:
-                if output_spec.get("source"):
-                    message = (
-                        f"Declared output '{name}' (source='{source_path}') "
-                        "was not found in context"
-                    )
-                else:
-                    message = f"Declared output '{name}' was not found in context"
+                public_keys = sorted(
+                    str(key) for key in context.keys() if not str(key).startswith("_")
+                )
+                legacy_message = f"Declared output '{name}' was not found in context"
+                message = (
+                    f"{legacy_message}. "
+                    f"Did you forget to set 'hoist_to: {name}' on the producing "
+                    f"phase, or write to ctx[{name!r}] in a logic step? "
+                    f"Available ctx keys: {public_keys}"
+                )
                 IOManager._record_io_error(
                     context,
-                    message,
+                    legacy_message,
                 )
                 raise ValueError(message)
 
@@ -326,21 +328,3 @@ class IOManager:
             errors = []
             context["_io_errors"] = errors
         errors.append(message)
-
-
-def _resolve_ctx_path(ctx: dict[str, Any], path: str) -> Any:
-    """Resolve a dot-separated path against context dict/list values."""
-    cur: Any = ctx
-    for part in path.split("."):
-        if isinstance(cur, dict):
-            cur = cur.get(part)
-        elif isinstance(cur, list):
-            try:
-                cur = cur[int(part)]
-            except (ValueError, IndexError):
-                return None
-        else:
-            return None
-        if cur is None:
-            return None
-    return cur

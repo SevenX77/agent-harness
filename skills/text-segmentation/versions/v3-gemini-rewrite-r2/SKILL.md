@@ -21,11 +21,10 @@ io:
       type: int
       source: runtime
   outputs:
-    - name: segmentation_result
-      type: dict
+    - name: segments
+      type: list
       target: file
       path: "output/text-segmentation/chapter_{context.chapter_number}_segments.json"
-      source: "_finish_task_result.business_data_parsed"
 phases:
   - name: setup
     mode: logic
@@ -36,6 +35,7 @@ phases:
     llm_role: analyst
     max_iterations: 10
     max_nudges: 2
+    hoist_to: segments
     output_example: |
       <output_example name="Segment">
       ## segments
@@ -87,6 +87,7 @@ phases:
     max_nudges: 2
     max_retries: 2
     retry_target: segment
+    hoist_to: segments
     output_example: |
       <output_example name="Segment">
       ## segments

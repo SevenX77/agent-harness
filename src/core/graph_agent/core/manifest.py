@@ -139,7 +139,6 @@ class IoOutput(BaseModel):
     target: Literal["file", "artifact"]
     type: str | None = None
     path: str | None = None
-    source: str | None = None
 
 
 class IoDeclaration(BaseModel):
@@ -211,6 +210,13 @@ class LLMPhase(_BasePhase):
     dead_end_threshold: int | None = Field(default=None, ge=1)
     validator: str | None = None
     retry_target: str | None = None
+    hoist_to: str | None = Field(
+        default=None,
+        description=(
+            "Optional ctx key to inject validated business_data_parsed into "
+            "after finish_task succeeds."
+        ),
+    )
     output_schema: str | None = None
     output_example: str | None = None
 

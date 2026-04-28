@@ -32,7 +32,6 @@ from langgraph.graph import END, StateGraph
 from .run_context import RunContext
 from .graph_builder import GraphBuilder
 from .nudge_injector import NudgeInjector
-from .parallel_delegate import build_parallel_delegate_node
 from .phase_executor import PhaseExecutor
 from .retry_router import RetryRouter
 from .callback_bridge import (
@@ -40,12 +39,16 @@ from .callback_bridge import (
     _extract_text_content,
     _extract_thinking_content,
 )
-from .subgraph import build_subgraph_node
 from .template import _render_user_prompt, _safe_render_template
 from .types import ContextBridge, Phase
 from ..callbacks.base import Callback
 from ..config.llm_config import get_role_config
-from .exceptions import SkillLoadError
+from .exceptions import (
+    CheckpointError,
+    SkillLoadError,
+    StateTransformError,
+    TraceWriteError,
+)
 from ..cognitive.middlewares import create_custom_middlewares
 from ..models.resolver import get_model_resolver
 from ..cognitive.prompt import apply_cognitive_template
@@ -308,20 +311,18 @@ def _clone_state(state: WorkflowState) -> WorkflowState:
     """Return a deep-cloned workflow state to prevent cross-phase mutation."""
     try:
         cloned_ctx = copy.deepcopy(state["context"])
-    except TypeError:
-        logger.error(
-            "[Harness] deepcopy failed on context — shallow copy fallback weakens "
-            "state isolation. Non-serializable objects in context should be avoided."
-        )
-        cloned_ctx = dict(state["context"])
+    except TypeError as exc:
+        raise StateTransformError(
+            f"deepcopy failed for state field context: {exc}",
+            context={"field": "context", "type": type(state["context"]).__name__},
+        ) from exc
     try:
         cloned_msgs = copy.deepcopy(state["messages"])
-    except TypeError:
-        logger.error(
-            "[Harness] deepcopy failed on messages — shallow copy fallback weakens "
-            "state isolation."
-        )
-        cloned_msgs = list(state["messages"])
+    except TypeError as exc:
+        raise StateTransformError(
+            f"deepcopy failed for state field messages: {exc}",
+            context={"field": "messages", "type": type(state["messages"]).__name__},
+        ) from exc
     return {
         "context": cloned_ctx,
         "messages": cloned_msgs,
@@ -393,8 +394,6 @@ class GraphAgentHarness:
             phases,
             retry_router=self._retry_router,
             checkpointer=self._checkpointer,
-            subgraph_node_factory=self._build_subgraph_node,
-            parallel_delegate_node_factory=self._build_parallel_delegate_node,
         )
         self._graph = self._graph_builder.build()
 
@@ -434,8 +433,10 @@ class GraphAgentHarness:
                 logger.info("[Harness] Checkpointer: %s", type(cp).__name__)
                 return cp
             except Exception as exc:
-                logger.warning("[Harness] Auto-checkpointer failed, running without: %s", exc)
-                return None
+                raise CheckpointError(
+                    f"checkpointer init failed: {exc}",
+                    context={"checkpoint_dir": None, "checkpointer": "auto"},
+                ) from exc
         return checkpointer  # None or explicit instance
 
     def close(self) -> None:
@@ -713,16 +714,10 @@ class GraphAgentHarness:
                             saved = cb.save(trace_output)
                             result["context"]["_trace_path"] = saved
                         except Exception as exc:
-                            logger.warning("[Harness] Trace save failed: %s", exc)
-                            _append_validation_warning(
-                                result["context"],
-                                f"Trace save failed: {exc}",
-                            )
-                            io_errors = result["context"].get("_io_errors")
-                            if not isinstance(io_errors, list):
-                                io_errors = []
-                                result["context"]["_io_errors"] = io_errors
-                            io_errors.append(f"Trace save failed: {exc}")
+                            raise TraceWriteError(
+                                f"trace save failed: {exc}",
+                                context={"trace_path": str(trace_output)},
+                            ) from exc
                         break
 
             # Tier 1 Commit A — T-B1 RunEndedEvent on success
@@ -1138,17 +1133,3 @@ class GraphAgentHarness:
                 ),
             )
             raise
-
-    # -----------------------------------------------------------------------
-    # Graph construction
-    # -----------------------------------------------------------------------
-
-    def _build_subgraph_node(self, phase: Phase) -> Callable[[WorkflowState], WorkflowState]:
-        """Build a node that executes a nested GraphAgentHarness."""
-        return build_subgraph_node(self, phase, logger)
-
-    def _build_parallel_delegate_node(
-        self, phase: Phase
-    ) -> Callable[[WorkflowState], WorkflowState]:
-        """PR-7 Commit 2: factory for parallel_delegate execution nodes."""
-        return build_parallel_delegate_node(self, phase, logger)

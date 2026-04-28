@@ -10,7 +10,12 @@ import pytest
 from graph_agent.callbacks.base import Callback
 from graph_agent.callbacks.events import RunEndedEvent
 from graph_agent.callbacks.tracing import TracingCallback
-from graph_agent.core.harness import GraphAgentHarness
+from graph_agent.core.exceptions import (
+    CheckpointError,
+    StateTransformError,
+    TraceWriteError,
+)
+from graph_agent.core.harness import GraphAgentHarness, _clone_state
 from graph_agent.core.types import Phase
 
 
@@ -95,6 +100,52 @@ def test_invalid_studio_checkpointer_env_raises(monkeypatch: pytest.MonkeyPatch)
         GraphAgentHarness(phases=[Phase(name="phase_a", requires_llm=False)])
 
 
+def test_auto_checkpointer_init_failure_raises_checkpoint_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from deerflow.agents.checkpointer import provider
+
+    def _broken_get_checkpointer() -> object:
+        raise RuntimeError("checkpoint backend unavailable")
+
+    monkeypatch.delenv("STUDIO_CHECKPOINTER", raising=False)
+    monkeypatch.setattr(provider, "get_checkpointer", _broken_get_checkpointer)
+
+    with pytest.raises(CheckpointError) as exc_info:
+        GraphAgentHarness(phases=[Phase(name="phase_a", requires_llm=False)])
+
+    assert "checkpointer init failed: checkpoint backend unavailable" in str(
+        exc_info.value
+    )
+    assert exc_info.value.context == {
+        "checkpoint_dir": None,
+        "checkpointer": "auto",
+    }
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+
+
+class _Uncopyable:
+    def __deepcopy__(self, memo: dict[int, object]) -> object:
+        raise TypeError("cannot copy")
+
+
+def test_clone_state_deepcopy_failure_raises_state_transform_error() -> None:
+    state = {
+        "context": {"bad": _Uncopyable()},
+        "messages": [],
+        "current_phase": "phase_a",
+        "retry_counts": {},
+        "metrics": {},
+    }
+
+    with pytest.raises(StateTransformError) as exc_info:
+        _clone_state(state)
+
+    assert "deepcopy failed for state field context" in str(exc_info.value)
+    assert exc_info.value.context == {"field": "context", "type": "dict"}
+    assert isinstance(exc_info.value.__cause__, TypeError)
+
+
 def test_interrupt_detection_failure_crashes_without_autosave() -> None:
     capture = _CapturingCallback()
     harness = _build_harness_with_graph(_GetStateFailingGraph())
@@ -143,20 +194,19 @@ class _FailingTraceCallback(TracingCallback):
         raise IOError("trace disk full")
 
 
-def test_trace_save_failure_is_recorded_in_context(tmp_path: Path) -> None:
+def test_trace_save_failure_raises_trace_write_error(tmp_path: Path) -> None:
     tracer = _FailingTraceCallback()
     harness = _build_harness_with_graph(_CompletedFakeGraph())
-    result = harness.run(
-        initial_context={"input": "x", "output_dir": str(tmp_path)},
-        extra_callbacks=[tracer],
-    )
 
-    assert result["context"]["_io_errors"] == [
-        "Trace save failed: trace disk full"
-    ]
-    assert result["context"]["_validation_warnings"] == [
-        "Trace save failed: trace disk full"
-    ]
+    with pytest.raises(TraceWriteError) as exc_info:
+        harness.run(
+            initial_context={"input": "x", "output_dir": str(tmp_path)},
+            extra_callbacks=[tracer],
+        )
+
+    assert "trace save failed: trace disk full" in str(exc_info.value)
+    assert exc_info.value.context == {"trace_path": str(tmp_path)}
+    assert isinstance(exc_info.value.__cause__, OSError)
 
 
 def test_get_thread_status_snapshot_read_failure_is_crashed() -> None:

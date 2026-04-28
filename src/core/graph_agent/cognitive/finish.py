@@ -142,6 +142,30 @@ def finish_task(
         )
         return "PHASE_COMPLETE"
 
+    output_schema_path = ctx.get("output_schema_path") or ctx.get("_md_schema_path")
+    if output_schema_path:
+        # Phase declared output_schema but LLM submitted empty business_data_md.
+        # Reject with validation error so the NudgeInjector retry loop kicks in
+        # and forces a real submission. Without this gate, finish_task silently
+        # passes and the phase ends with no parsed business data, leaving
+        # downstream IO save with nothing to persist.
+        ctx["_finish_task_result"] = {
+            "schema_validation": "failed",
+            "validation_error_text": (
+                "[finish_task] business_data_md is empty but the phase declares "
+                f"output_schema {output_schema_path!r}. You must provide the "
+                "business_data_md argument with the full markdown payload that "
+                "matches the schema. Re-call finish_task with a populated "
+                "business_data_md (do not omit the argument)."
+            ),
+        }
+        logger.warning(
+            "finish_task v2: business_data_md empty but output_schema=%s; "
+            "delegating to NudgeInjector retry loop",
+            output_schema_path,
+        )
+        return "PHASE_COMPLETE"
+
     ctx["_finish_task_result"] = {
         "reasoning": (reasoning or "").strip(),
         "diagnostics_md": diagnostics_md.strip(),

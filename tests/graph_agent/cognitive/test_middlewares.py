@@ -223,6 +223,28 @@ class TestUnattendedClarificationMiddleware:
         assert "unattended=True" in str(message.content)
         assert "Which segmentation policy" in str(message.content)
 
+    def test_invalid_json_args_returns_llm_feedback(self) -> None:
+        middleware = UnattendedClarificationMiddleware(
+            unattended=True,
+            phase_name="clarify_phase",
+        )
+        request = _clarification_request(args="{bad json")
+
+        def handler(_request: ToolCallRequest) -> ToolMessage:
+            raise AssertionError("ask_clarification handler should not run")
+
+        result = middleware.wrap_tool_call(request, handler)
+
+        assert isinstance(result, Command)
+        assert result.goto == "model"
+        message = result.update["messages"][0]
+        assert isinstance(message, ToolMessage)
+        assert message.status == "error"
+        assert message.name == "ask_clarification"
+        assert message.tool_call_id == "call_1"
+        assert "JSON parse failed" in str(message.content)
+        assert "Please retry with valid JSON" in str(message.content)
+
     def test_attended_mode_passes_through(self) -> None:
         middleware = UnattendedClarificationMiddleware(unattended=False)
         request = _clarification_request()
@@ -255,7 +277,7 @@ class TestUnattendedClarificationMiddleware:
 def _clarification_request(
     *,
     name: str = "ask_clarification",
-    args: dict[str, Any] | None = None,
+    args: dict[str, Any] | str | None = None,
 ) -> ToolCallRequest:
     return ToolCallRequest(
         tool_call={

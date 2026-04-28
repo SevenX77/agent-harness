@@ -18,6 +18,7 @@ the module (defeats the no-side-effect invariant).
 from __future__ import annotations
 
 import ast
+import logging
 import importlib.util
 from pathlib import Path
 
@@ -28,6 +29,8 @@ from ..manifest import (
     LLMPhase,
     LogicPhase,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def check_tool_paths(
@@ -85,7 +88,6 @@ def check_tool_paths(
                         base_dir=base_dir,
                         issues=issues,
                     )
-            # DelegatePhase has no tool refs.
     return issues
 
 
@@ -225,7 +227,14 @@ def _check_for_nested_run_skill(file_path: Path, ref_name: str) -> CompileIssue 
     """E-NESTED-RUN-SKILL: reject logic steps that import run_skill."""
     try:
         tree = ast.parse(file_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, SyntaxError):
+    except (OSError, UnicodeDecodeError, SyntaxError) as exc:
+        logger.warning(
+            "phase=validator action=tool_paths fallback from=parse to=skip "
+            "path=%s ref=%s reason=%s",
+            file_path,
+            ref_name,
+            type(exc).__name__,
+        )
         return None
 
     for node in ast.walk(tree):
@@ -237,12 +246,12 @@ def _check_for_nested_run_skill(file_path: Path, ref_name: str) -> CompileIssue 
                     location=ref_name,
                     message=(
                         "Logic phase scripts cannot import 'run_skill' from "
-                        "graph_agent.core.runner. Nested sub-skill invocation "
-                        "must be expressed declaratively via DelegatePhase "
-                        "(mode: delegate) or ParallelDelegatePhase "
-                        "(mode: parallel_delegate) to preserve schema 2.0 "
-                        "static compilation, retry orchestration, and "
-                        "observability."
+                        "graph_agent.core.runner. The 1.x DelegatePhase / "
+                        "ParallelDelegatePhase escape hatches were removed "
+                        "in MVP-0 B1 (2026-04-28); declarative cross-skill "
+                        "composition will return in V2 via LangGraph Send "
+                        "API. For now, refactor nested invocation up into "
+                        "the parent skill's phase list."
                     ),
                 )
     return None

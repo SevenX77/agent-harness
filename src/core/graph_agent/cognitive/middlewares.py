@@ -321,15 +321,42 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
             or getattr(business_validator, "hoist_to", None)
         )
 
-    def _args_dict(self, request: ToolCallRequest) -> dict[str, Any]:
+    def _json_parse_retry(
+        self,
+        request: ToolCallRequest,
+        exc: TypeError | ValueError,
+    ) -> Command:
+        error_msg = f"JSON parse failed: {exc}. Please retry with valid JSON."
+        tool_name = str(request.tool_call.get("name") or "unknown")
+        logger.warning(
+            "phase=%s action=middleware_parse fallback "
+            "from=parse_json to=llm_retry reason=%s",
+            self._phase_name,
+            type(exc).__name__,
+        )
+        return Command(
+            goto="model",
+            update={
+                "messages": [
+                    ToolMessage(
+                        status="error",
+                        content=error_msg,
+                        name=tool_name,
+                        tool_call_id=request.tool_call["id"],
+                    )
+                ]
+            },
+        )
+
+    def _args_dict(self, request: ToolCallRequest) -> dict[str, Any] | Command:
         args = request.tool_call.get("args", {})
         if isinstance(args, dict):
             return args
         if isinstance(args, str):
             try:
                 parsed = json.loads(args)
-            except (TypeError, ValueError):
-                return {}
+            except (TypeError, ValueError) as exc:
+                return self._json_parse_retry(request, exc)
             return parsed if isinstance(parsed, dict) else {}
         return {}
 
@@ -446,6 +473,8 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
 
     def _validate_finish_task(self, request: ToolCallRequest) -> Command | None:
         args = self._args_dict(request)
+        if isinstance(args, Command):
+            return args
         business_data_md = str(args.get("business_data_md") or "").strip()
         if isinstance(self.output_schema, DynamicSchemaDef):
             return self._validate_dynamic_finish_task(
@@ -596,24 +625,54 @@ class UnattendedClarificationMiddleware(AgentMiddleware[AgentState]):
 
     _TOOL_NAME = "ask_clarification"
 
-    def __init__(self, *, unattended: bool) -> None:
+    def __init__(self, *, unattended: bool, phase_name: str = "unknown") -> None:
         super().__init__()
         self.unattended = bool(unattended)
+        self._phase_name = phase_name
 
-    def _args_dict(self, request: ToolCallRequest) -> dict[str, Any]:
+    def _json_parse_retry(
+        self,
+        request: ToolCallRequest,
+        exc: TypeError | ValueError,
+    ) -> Command:
+        error_msg = f"JSON parse failed: {exc}. Please retry with valid JSON."
+        tool_name = str(request.tool_call.get("name") or self._TOOL_NAME)
+        logger.warning(
+            "phase=%s action=middleware_parse fallback "
+            "from=parse_json to=llm_retry reason=%s",
+            self._phase_name,
+            type(exc).__name__,
+        )
+        return Command(
+            goto="model",
+            update={
+                "messages": [
+                    ToolMessage(
+                        status="error",
+                        content=error_msg,
+                        name=tool_name,
+                        tool_call_id=request.tool_call["id"],
+                    )
+                ]
+            },
+        )
+
+    def _args_dict(self, request: ToolCallRequest) -> dict[str, Any] | Command:
         args = request.tool_call.get("args", {})
         if isinstance(args, dict):
             return args
         if isinstance(args, str):
             try:
                 parsed = json.loads(args)
-            except (TypeError, ValueError):
-                return {}
+            except (TypeError, ValueError) as exc:
+                return self._json_parse_retry(request, exc)
             return parsed if isinstance(parsed, dict) else {}
         return {}
 
     def _auto_response(self, request: ToolCallRequest) -> Command:
         args = self._args_dict(request)
+        if isinstance(args, Command):
+            return args
         question = str(args.get("question") or "").strip()
         content = (
             "[系统] 当前执行流为无人值守环境（unattended=True），不允许人类干预。"
@@ -752,7 +811,12 @@ def create_custom_middlewares(
             )
         )
         if effective_unattended:
-            middlewares.append(UnattendedClarificationMiddleware(unattended=True))
+            middlewares.append(
+                UnattendedClarificationMiddleware(
+                    unattended=True,
+                    phase_name=phase_name,
+                )
+            )
             logger.info(
                 "middleware: enabled UnattendedClarification "
                 "(auto-answer ask_clarification)"

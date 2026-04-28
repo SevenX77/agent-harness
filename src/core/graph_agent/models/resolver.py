@@ -623,8 +623,12 @@ class ModelResolver:
             if cb is not None:
                 per = cb.per_provider.get(provider_code)
                 window = (per or cb).window_seconds
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "phase=circuit_breaker action=mark_down fallback "
+                "from=cb_config_lookup to=default_window reason=%s",
+                type(exc).__name__,
+            )
         key = f"{provider_code}:{model_name}"
         with self._cache_lock:
             self._provider_down_cache[key] = time.monotonic() + window

@@ -5,7 +5,7 @@ description: >
   Surgical LLM patch agent for MD parsing errors. Receives a diagnostic report
   and original MD excerpt, fixes only the flagged fields/items.
   Triggered by md_to_json() for the ~5-10% of items that fail Pydantic validation.
-type: simple
+type: agent
 context_mapping:
   original_md_excerpt: "{input.original_md_excerpt}"
   diagnostic_report: "{input.diagnostic_report}"

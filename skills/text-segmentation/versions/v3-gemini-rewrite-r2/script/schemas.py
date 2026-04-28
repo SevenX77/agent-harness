@@ -18,4 +18,10 @@ class SegmentationResult(BaseModel):
     """Complete segmentation list output format."""
     model_config = ConfigDict(extra="forbid")
     
-    segments: list[Segment] = Field(description="切分后的段落列表")
+    segments: list[Segment] = Field(
+        min_length=1,
+        description=(
+            "切分后的段落列表。**禁止提交空列表**——必须至少包含 1 个 segment。"
+            "若 LLM 提交空 segments 会导致 Pydantic 校验失败 + nudge retry。"
+        ),
+    )

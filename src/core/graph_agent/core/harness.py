@@ -1,13 +1,13 @@
 """GraphAgentHarness — multi-phase Agent orchestration engine based on LangGraph.
 
 Builds a LangGraph StateGraph from a list of Phase definitions. Each phase
-creates a DeerFlow Agent (via create_agent) that runs its own agent loop
+creates a LangChain agent that runs its own agent loop
 with the phase-specific model, tools, system prompt, and middleware.
 
 Key design: messages reset on new phase entry but are preserved during retries,
 so the LLM can see its previous errors and fix them.
 
-MODIFIED: Refactored to use DeerFlow create_agent + Model Resolver instead
+MODIFIED: Refactored to use LangChain create_agent + Model Resolver instead
 of the old ToolExecutor + LLMGateway.
 """
 
@@ -81,8 +81,7 @@ def _resolve_studio_checkpointer_spec(
     * ``memory`` — LangGraph ``InMemorySaver``
     * ``sqlite:<path>`` — ``SqliteSaver`` opened at ``<path>`` (the
       ``:memory:`` sentinel and ``file:...`` URIs are passed through
-      untouched; bare paths are resolved via DeerFlow's
-      ``_resolve_sqlite_conn_str``)
+      untouched; bare paths are resolved by GraphAgent's local helper)
     * ``postgres://...`` or ``postgresql://...`` — ``PostgresSaver``
       opened from the DSN
     """
@@ -98,7 +97,7 @@ def _resolve_studio_checkpointer_spec(
 
     if spec.startswith("sqlite:"):
         raw = spec[len("sqlite:"):]
-        from deerflow.agents.checkpointer.provider import _resolve_sqlite_conn_str
+        from .checkpointer import _resolve_sqlite_conn_str
         from langgraph.checkpoint.sqlite import SqliteSaver
 
         conn_str = _resolve_sqlite_conn_str(raw or "store.db")
@@ -429,8 +428,10 @@ class GraphAgentHarness:
                         f"STUDIO_CHECKPOINTER={override!r} could not be resolved: {exc}"
                     ) from exc
             try:
-                from deerflow.agents.checkpointer.provider import get_checkpointer
-                cp = get_checkpointer()
+                from .checkpointer import get_checkpointer
+
+                db_path = os.environ.get("GRAPH_AGENT_CHECKPOINTER_DB")
+                cp = get_checkpointer(db_path=db_path)
                 logger.info("[Harness] Checkpointer: %s", type(cp).__name__)
                 return cp
             except Exception as exc:

@@ -7,11 +7,13 @@ skill's directory.
 """
 from __future__ import annotations
 
+from .clarification_tool import ask_clarification_tool
 from .context_access import query_working_memory, read_artifact
 from .parallel_map import parallel_map
 from .read_file import make_read_file_tool
 
 __all__ = [
+    "ask_clarification_tool",
     "parallel_map",
     "make_read_file_tool",
     "query_working_memory",

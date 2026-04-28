@@ -442,7 +442,7 @@ class TestDelegationMechanisms:
             })
         assert "sub_skills" in str(exc.value)
 
-    def test_subagent_enabled_default_false(self):
+    def test_removed_subagent_enabled_rejected(self):
         m = _SKILL_ADAPTER.validate_python({
             **_base_graph_dict(),
             "phases": [{
@@ -451,19 +451,19 @@ class TestDelegationMechanisms:
                 "prompt": "p",
             }],
         })
-        assert m.phases[0].subagent_enabled is False
+        assert not hasattr(m.phases[0], "subagent_enabled")
 
-    def test_subagent_enabled_true(self):
-        m = _SKILL_ADAPTER.validate_python({
-            **_base_graph_dict(),
-            "phases": [{
-                "mode": "llm",
-                "name": "x",
-                "prompt": "p",
-                "subagent_enabled": True,
-            }],
-        })
-        assert m.phases[0].subagent_enabled is True
+        with pytest.raises(ValidationError) as exc:
+            _SKILL_ADAPTER.validate_python({
+                **_base_graph_dict(),
+                "phases": [{
+                    "mode": "llm",
+                    "name": "x",
+                    "prompt": "p",
+                    "subagent_enabled": True,
+                }],
+            })
+        assert "subagent_enabled" in str(exc.value)
 
 
 # =============================================================================

@@ -36,10 +36,10 @@ def _names(middlewares: list[Any]) -> list[str]:
 
 
 class TestCreateCustomMiddlewaresPR3:
-    def test_loop_detection_enabled_by_default(self) -> None:
+    def test_loop_detection_not_mounted_in_mvp0(self) -> None:
         middlewares = create_custom_middlewares(phase_name="test")
 
-        assert "LoopDetectionMiddleware" in _names(middlewares)
+        assert "LoopDetectionMiddleware" not in _names(middlewares)
 
     def test_loop_detection_can_be_disabled(self) -> None:
         middlewares = create_custom_middlewares(
@@ -54,7 +54,7 @@ class TestCreateCustomMiddlewaresPR3:
 
         assert "SummarizationMiddleware" not in _names(middlewares)
 
-    def test_summarization_enabled_with_model(self) -> None:
+    def test_summarization_requested_but_not_mounted_in_mvp0(self) -> None:
         mock_model = _FakeSummaryModel(profile={"max_input_tokens": 100_000})
 
         middlewares = create_custom_middlewares(
@@ -62,12 +62,7 @@ class TestCreateCustomMiddlewaresPR3:
             summarization=True,
             summarization_model=mock_model,
         )
-        summary_mw = next(
-            m for m in middlewares if type(m).__name__ == "SummarizationMiddleware"
-        )
-
-        assert summary_mw.trigger == ("fraction", 0.8)
-        assert summary_mw.keep == ("messages", 20)
+        assert "SummarizationMiddleware" not in _names(middlewares)
 
     def test_summarization_no_warning_when_model_has_profile_max_input_tokens(
         self,
@@ -82,12 +77,7 @@ class TestCreateCustomMiddlewaresPR3:
                 summarization_model=mock_model,
             )
 
-        summary_mw = next(
-            m for m in middlewares if type(m).__name__ == "SummarizationMiddleware"
-        )
-
-        assert summary_mw.model is mock_model
-        assert summary_mw.model.profile["max_input_tokens"] == 128_000
+        assert "SummarizationMiddleware" not in _names(middlewares)
         assert "using fallback max_input_tokens" not in caplog.text
 
     def test_summarization_uses_32k_fallback_when_model_has_no_profile(
@@ -101,12 +91,8 @@ class TestCreateCustomMiddlewaresPR3:
                 summarization_model=_FakeSummaryModel(),
             )
 
-        summary_mw = next(
-            m for m in middlewares if type(m).__name__ == "SummarizationMiddleware"
-        )
-
-        assert summary_mw.model.profile["max_input_tokens"] == 32_000
-        assert "using fallback max_input_tokens=32000" in caplog.text
+        assert "SummarizationMiddleware" not in _names(middlewares)
+        assert "using fallback max_input_tokens=32000" not in caplog.text
 
     def test_summarization_skipped_without_model(self) -> None:
         middlewares = create_custom_middlewares(
@@ -117,30 +103,23 @@ class TestCreateCustomMiddlewaresPR3:
 
         assert "SummarizationMiddleware" not in _names(middlewares)
 
-    def test_summarization_model_without_profile_gets_fallback_profile(self) -> None:
+    def test_summarization_model_without_profile_not_mounted(self) -> None:
         middlewares = create_custom_middlewares(
             phase_name="test",
             summarization=True,
             summarization_model=_FakeSummaryModel(),
         )
-        summary_mw = next(
-            m for m in middlewares if type(m).__name__ == "SummarizationMiddleware"
-        )
 
-        assert summary_mw.model.profile["max_input_tokens"] == 32_000
+        assert "SummarizationMiddleware" not in _names(middlewares)
 
-    def test_loop_detection_warn_and_hard_limit_passed(self) -> None:
+    def test_loop_detection_warn_and_hard_limit_ignored(self) -> None:
         middlewares = create_custom_middlewares(
             phase_name="test",
             loop_detection_warn_threshold=2,
             loop_detection_hard_limit=4,
         )
-        loop_mw = next(
-            m for m in middlewares if type(m).__name__ == "LoopDetectionMiddleware"
-        )
 
-        assert loop_mw.warn_threshold == 2
-        assert loop_mw.hard_limit == 4
+        assert "LoopDetectionMiddleware" not in _names(middlewares)
 
     def test_existing_middleware_order_is_preserved(self) -> None:
         middlewares = create_custom_middlewares(
@@ -153,9 +132,7 @@ class TestCreateCustomMiddlewaresPR3:
             "AgentLoopIterationMiddleware",
             "WorkingMemoryMiddleware",
             "DeadEndPruningMiddleware",
-            "LoopDetectionMiddleware",
             "ClarificationMiddleware",
-            "SummarizationMiddleware",
         ]
 
 

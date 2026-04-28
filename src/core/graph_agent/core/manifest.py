@@ -35,9 +35,6 @@ skill ecosystem is modelled on **three orthogonal axes**:
 
 3. **Delegation Mechanism** (tool-level, how a phase reaches other
    skills):
-   - ``subagent_enabled:`` — ad-hoc generation: the LLM spawns an
-                             anonymous sub-agent with no SKILL.md.
-
    - ``sub_skills`` field — removed by 2026-04-26 cohesion plan 方针 1.2:
      the schema field had no loader/runtime wiring, no production skill
      ever set it, and leaving the documented-but-dead surface in the
@@ -171,8 +168,7 @@ class _BasePhase(BaseModel):
 class LLMPhase(_BasePhase):
     """LLM-driven phase with a ReAct/Tool-calling loop.
 
-    ``subagent_enabled`` (ad-hoc anonymous sub-agent) and
-    ``adopted_persona`` live here. The originally-planned
+    ``adopted_persona`` lives here. The originally-planned
     ``sub_skills`` field was dropped per 2026-04-26 cohesion plan 方针
     1.2 (schema declared, runtime never wired); re-add when the runtime
     ships. Static cross-skill composition (1.x ``mode: delegate`` /
@@ -192,7 +188,6 @@ class LLMPhase(_BasePhase):
         default_factory=list
     )
     llm_role: str | None = None
-    subagent_enabled: bool = False
     adopted_persona: str | None = None
     max_iterations: int | None = Field(default=None, ge=1)
     max_retries: int | None = Field(default=None, ge=0)
@@ -294,7 +289,6 @@ class AgentSkillDef(_BaseSkill):
     agent_profile: AgentProfile
     model_override: str | None = None
     agent_tools: list[str] = Field(default_factory=list)
-    subagent_enabled: bool = False
     adopted_persona: str | None = None
     user_prompt_template: str | None = None
     context_mapping: dict[str, str] = Field(default_factory=dict)

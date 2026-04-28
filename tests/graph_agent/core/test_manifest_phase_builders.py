@@ -113,7 +113,6 @@ class TestPhaseFromAgentSkill:
             "model_override": "CL47T",
             "agent_profile": {"role": "r", "goal": "g", "llm_role": "premium"},
             "agent_tools": [],
-            "subagent_enabled": True,
             "user_prompt_template": "Process: {input}",
         })
         assert isinstance(manifest, AgentSkillDef)
@@ -123,7 +122,6 @@ class TestPhaseFromAgentSkill:
         assert phase.name == "sample-agent"
         assert phase.tier == "premium"
         assert phase.model_override == "CL47T"
-        assert phase.subagent_enabled is True
         assert phase.user_prompt_template == "Process: {input}"
         assert phase.requires_llm is True
 

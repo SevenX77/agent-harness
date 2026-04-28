@@ -657,7 +657,6 @@ def _phase_from_agent_skill(
         tier=manifest.agent_profile.llm_role or "balanced",
         llm_role=manifest.agent_profile.llm_role,
         model_override=manifest.model_override,
-        subagent_enabled=manifest.subagent_enabled,
         references=[
             resolve_skill_resource(base_dir, reference, kind="reference")
             for reference in manifest.agent_profile.references
@@ -739,7 +738,6 @@ def _phase_from_graph_phase(
                 if phase_def.dead_end_threshold is not None
                 else 3
             ),
-            subagent_enabled=phase_def.subagent_enabled,
             references=[
                 resolve_skill_resource(base_dir, reference, kind="reference")
                 for reference in phase_def.references

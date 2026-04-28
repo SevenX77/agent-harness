@@ -50,7 +50,6 @@ class Phase:
     max_nudges: int = 1
     dead_end_threshold: int = 3
     data_architecture: str | None = None
-    subagent_enabled: bool = False
     subgraph: GraphAgentHarness | None = None
     # Parallel delegate runtime fields (PR-7).
     # Resolved at loader time per Gemini design Q1c: structures stay in

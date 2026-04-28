@@ -1,8 +1,7 @@
 """Custom middlewares for GraphAgent agent execution.
 
 These middlewares are designed for `langchain.agents.create_agent(..., middleware=...)`.
-They may also be reused by DeerFlow's hook-based lead-agent path, but the primary
-consumer is `GraphAgentHarness`.
+The primary consumer is `GraphAgentHarness`.
 """
 
 from __future__ import annotations
@@ -746,7 +745,7 @@ def create_custom_middlewares(
     summarization_trigger_fraction: float = 0.8,
     summarization_keep_messages: int = 20,
 ) -> list[AgentMiddleware]:
-    """Create the middleware list for GraphAgent / DeerFlow integration."""
+    """Create the middleware list for GraphAgent integration."""
     middlewares: list[AgentMiddleware] = []
 
     # T-B4: iteration counter goes *first* so its event lands before
@@ -778,27 +777,12 @@ def create_custom_middlewares(
         )
 
     if loop_detection:
-        try:
-            from ..deerflow.agents.middlewares.loop_detection_middleware import (
-                LoopDetectionMiddleware,
-            )
-
-            middlewares.append(
-                LoopDetectionMiddleware(
-                    warn_threshold=loop_detection_warn_threshold,
-                    hard_limit=loop_detection_hard_limit,
-                )
-            )
-            logger.info(
-                "middleware: enabled LoopDetection (warn=%d hard=%d)",
-                loop_detection_warn_threshold,
-                loop_detection_hard_limit,
-            )
-        except ImportError as exc:
-            logger.warning(
-                "middleware: failed to import LoopDetectionMiddleware: %s",
-                exc,
-            )
+        logger.info(
+            "middleware: loop detection requested but disabled in MVP-0 cleanup "
+            "(warn=%d hard=%d)",
+            loop_detection_warn_threshold,
+            loop_detection_hard_limit,
+        )
 
     if clarification:
         effective_unattended = bool(
@@ -822,40 +806,17 @@ def create_custom_middlewares(
                 "(auto-answer ask_clarification)"
             )
         else:
-            try:
-                from ..deerflow.agents.middlewares.clarification_middleware import (
-                    ClarificationMiddleware,
-                )
+            from .clarification_middleware import ClarificationMiddleware
 
-                middlewares.append(ClarificationMiddleware())
-                logger.info("middleware: enabled Clarification (Human-in-the-Loop)")
-            except ImportError as exc:
-                logger.warning(
-                    "middleware: failed to import ClarificationMiddleware: %s",
-                    exc,
-                )
+            middlewares.append(ClarificationMiddleware())
+            logger.info("middleware: enabled Clarification (Human-in-the-Loop)")
     if summarization and summarization_model is not None:
-        try:
-            from langchain.agents.middleware import SummarizationMiddleware
-
-            middlewares.append(
-                SummarizationMiddleware(
-                    model=_ensure_summarization_profile(summarization_model),
-                    trigger=("fraction", summarization_trigger_fraction),
-                    keep=("messages", summarization_keep_messages),
-                )
-            )
-            logger.info(
-                "middleware: enabled Summarization "
-                "(trigger=fraction:%.1f keep=%d msgs)",
-                summarization_trigger_fraction,
-                summarization_keep_messages,
-            )
-        except ImportError as exc:
-            logger.warning(
-                "middleware: failed to import SummarizationMiddleware: %s",
-                exc,
-            )
+        logger.info(
+            "middleware: summarization requested but disabled in MVP-0 cleanup "
+            "(trigger=fraction:%.1f keep=%d msgs)",
+            summarization_trigger_fraction,
+            summarization_keep_messages,
+        )
     elif summarization and summarization_model is None:
         logger.warning(
             "middleware: summarization=True but summarization_model is None; skipping"

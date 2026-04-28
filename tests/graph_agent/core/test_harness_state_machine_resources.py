@@ -103,13 +103,13 @@ def test_invalid_studio_checkpointer_env_raises(monkeypatch: pytest.MonkeyPatch)
 def test_auto_checkpointer_init_failure_raises_checkpoint_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from deerflow.agents.checkpointer import provider
+    from graph_agent.core import checkpointer
 
-    def _broken_get_checkpointer() -> object:
+    def _broken_get_checkpointer(**_kwargs: object) -> object:
         raise RuntimeError("checkpoint backend unavailable")
 
     monkeypatch.delenv("STUDIO_CHECKPOINTER", raising=False)
-    monkeypatch.setattr(provider, "get_checkpointer", _broken_get_checkpointer)
+    monkeypatch.setattr(checkpointer, "get_checkpointer", _broken_get_checkpointer)
 
     with pytest.raises(CheckpointError) as exc_info:
         GraphAgentHarness(phases=[Phase(name="phase_a", requires_llm=False)])

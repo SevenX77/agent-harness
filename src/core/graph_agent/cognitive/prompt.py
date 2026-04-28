@@ -6,7 +6,6 @@ by a phase agent. It merges:
 - the phase-local skill system prompt
 - optional role-level methodology prefixes from ``llm_roles.yaml``
 - optional ``data_architecture`` constraints
-- optional subagent usage policy
 """
 
 from __future__ import annotations
@@ -34,24 +33,6 @@ def resolve_role_prefix_from_llm_role(llm_role: str | None) -> str:
         return ""
 
 
-def _build_subagent_section(enabled: bool) -> str:
-    if not enabled:
-        return ""
-    return """<subagent_system>
-你可以使用子代理进行任务分解。仅在以下条件下使用：
-1. 任务可拆为 2 个及以上彼此独立的子任务
-2. 子任务适合并行，且不依赖前序结果
-3. 你已经明确每个子任务的输入和输出边界
-
-使用前先在思考中写明：
-- 子任务数量
-- 每个子任务目标
-- 结果如何汇总到当前阶段结论
-
-如果任务是强顺序依赖，请直接在当前代理内执行，不要为了“使用子代理”而使用子代理。
-</subagent_system>"""
-
-
 def _build_data_architecture_section(data_architecture: str | None) -> str:
     if not data_architecture:
         return ""
@@ -65,7 +46,6 @@ def apply_cognitive_template(
     phase_name: str,
     skill_system_prompt: str,
     data_architecture: str | None,
-    subagent_enabled: bool = False,
     context: dict[str, Any] | None = None,
     role_prefix: str = "",
 ) -> str:
@@ -76,7 +56,6 @@ def apply_cognitive_template(
         skill_system_prompt: Domain-specific instructions defined by the skill.
         data_architecture: Optional structural guidance about expected data
             shapes, field meanings, and producer/consumer boundaries.
-        subagent_enabled: Whether to include the phase-level subagent policy.
         context: Reserved extension point for future context-aware prompt
             branching. Currently accepted for compatibility and ignored.
         role_prefix: Optional methodology prefix resolved from
@@ -87,7 +66,6 @@ def apply_cognitive_template(
 
     """
     _ = context
-    subagent_section = _build_subagent_section(subagent_enabled)
     data_architecture_section = _build_data_architecture_section(data_architecture)
     role_prefix_section = (
         f"<role_prefix>\n{role_prefix.strip()}\n</role_prefix>\n"
@@ -128,8 +106,6 @@ def apply_cognitive_template(
 </protocol_citation>
 
 {data_architecture_section}
-
-{subagent_section}
 
 <skill_section>
 {skill_system_prompt}

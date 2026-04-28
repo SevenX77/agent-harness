@@ -346,11 +346,6 @@ def main():
             context={"module": "dotenv"},
         ) from exc
 
-    # Register Model Resolver
-    from ..models.resolver import get_model_resolver
-    from deerflow.models.factory import set_model_resolver_hook
-    set_model_resolver_hook(get_model_resolver().resolve)
-
     # Parse inputs
     inputs: dict[str, Any] = {}
     if args.inputs:

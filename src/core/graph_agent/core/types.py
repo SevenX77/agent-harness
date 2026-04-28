@@ -9,20 +9,10 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
+from .manifest import ContextBridge
+
 if TYPE_CHECKING:
     from .harness import GraphAgentHarness
-
-
-@dataclass
-class ContextBridge:
-    """Declarative context mapping between parent and child skills.
-
-    - inputs: parent context key -> child runtime input name
-    - outputs: child context key -> parent context key
-    """
-
-    inputs: dict[str, str] = field(default_factory=dict)
-    outputs: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -79,4 +69,4 @@ class Phase:
     md_type_dict: str | None = None
 
 
-__all__ = ["ContextBridge", "Phase"]
+__all__ = ["Phase"]

@@ -28,7 +28,8 @@ from .core.exceptions import (  # noqa: E402
     TemplateRenderError,
 )
 from .core.harness import GraphAgentHarness  # noqa: E402
-from .core.types import ContextBridge, Phase  # noqa: E402
+from .core.manifest import ContextBridge  # noqa: E402
+from .core.types import Phase  # noqa: E402
 from .io.manager import IOManager  # noqa: E402
 from .core.loader import load_workflow_from_md  # noqa: E402
 from .core.compiler import compile_skill  # noqa: E402

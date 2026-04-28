@@ -1,7 +1,8 @@
 """Core orchestration engine sub-package."""
 from __future__ import annotations
 
-from .types import ContextBridge, Phase
+from .manifest import ContextBridge
+from .types import Phase
 from .state import WorkflowState
 from .exceptions import (
     GraphAgentError,

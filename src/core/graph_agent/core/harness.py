@@ -40,7 +40,8 @@ from .callback_bridge import (
     _extract_thinking_content,
 )
 from .template import _render_user_prompt, _safe_render_template
-from .types import ContextBridge, Phase
+from .manifest import ContextBridge
+from .types import Phase
 from ..callbacks.base import Callback
 from ..config.llm_config import get_role_config
 from .exceptions import (

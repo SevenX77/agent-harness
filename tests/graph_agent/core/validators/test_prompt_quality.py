@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from graph_agent.core.validators.prompt_quality import (
     _check_finish_task_visibility,
     _check_prompt_duplication,
+    _check_setup_anti_pattern,
 )
 
 
@@ -97,5 +98,35 @@ def test_finish_task_visibility_skips_short_step_list() -> None:
     ])
 
     issues = _check_finish_task_visibility(prompt, _phase("review"), 0)
+
+    assert issues == []
+
+
+def test_setup_anti_pattern_emits_for_first_logic_setup_phase() -> None:
+    manifest = SimpleNamespace(phases=[
+        SimpleNamespace(name="setup", mode="logic"),
+        SimpleNamespace(name="segment", mode="llm"),
+    ])
+
+    issues = _check_setup_anti_pattern(manifest)
+
+    assert len(issues) == 1
+    assert issues[0].rule_id == "W-SETUP-PHASE-ANTI-PATTERN"
+    assert issues[0].severity == "WARNING"
+    assert issues[0].location == "SKILL.md:phases[0]"
+
+
+def test_setup_anti_pattern_skips_setup_llm_phase() -> None:
+    manifest = SimpleNamespace(phases=[SimpleNamespace(name="setup", mode="llm")])
+
+    issues = _check_setup_anti_pattern(manifest)
+
+    assert issues == []
+
+
+def test_setup_anti_pattern_skips_non_setup_logic_phase() -> None:
+    manifest = SimpleNamespace(phases=[SimpleNamespace(name="segment", mode="logic")])
+
+    issues = _check_setup_anti_pattern(manifest)
 
     assert issues == []

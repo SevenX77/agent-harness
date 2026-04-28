@@ -1,4 +1,10 @@
-"""Prompt-quality validators (W-PROMPT-DUPLICATION + W-FINISH-TASK-VISIBILITY)."""
+"""Prompt-quality validators.
+
+Includes:
+- W-PROMPT-DUPLICATION
+- W-FINISH-TASK-VISIBILITY
+- W-SETUP-PHASE-ANTI-PATTERN
+"""
 from __future__ import annotations
 
 import re
@@ -45,7 +51,7 @@ _DUPLICATION_MARKERS = (
 
 
 def check_prompt_quality(manifest: "GraphSkillDef") -> list[CompileIssue]:
-    """Run prompt-quality warning checks on every LLM phase."""
+    """Run prompt-quality warning checks on the manifest."""
     from ..manifest import LLMPhase
 
     issues: list[CompileIssue] = []
@@ -65,6 +71,7 @@ def check_prompt_quality(manifest: "GraphSkillDef") -> list[CompileIssue]:
         if prompt:
             issues.extend(_check_finish_task_visibility(prompt, phase, phase_idx))
 
+    issues.extend(_check_setup_anti_pattern(manifest))
     return issues
 
 
@@ -153,6 +160,34 @@ def _check_finish_task_visibility(
                     "reaching the final step. Move finish_task into a dedicated "
                     "highlighted block (e.g. '## ⚠️ 退出契约') near the prompt head, "
                     "or to step 1-3 of the execute list."
+                ),
+            )
+        ]
+    return []
+
+
+def _check_setup_anti_pattern(manifest: "GraphSkillDef") -> list[CompileIssue]:
+    """W-SETUP-PHASE-ANTI-PATTERN: logic setup/prepare/init as first phase."""
+    if not manifest.phases:
+        return []
+
+    first = manifest.phases[0]
+    name_lower = (getattr(first, "name", "") or "").lower()
+    mode = getattr(first, "mode", None)
+
+    if name_lower in ("setup", "prepare", "init", "preprocess") and mode == "logic":
+        return [
+            CompileIssue(
+                rule_id="W-SETUP-PHASE-ANTI-PATTERN",
+                severity="WARNING",
+                location="SKILL.md:phases[0]",
+                message=(
+                    f"First phase '{first.name}' is a logic-mode preprocessing "
+                    "step. This is a code smell — most setup tasks (line numbering, "
+                    "format conversion, key extraction) can be expressed declaratively "
+                    "via io.inputs + context_mapping filters, eliminating an entire "
+                    "node and its tracing overhead. Consider whether this phase can "
+                    "be inlined into upstream context preparation."
                 ),
             )
         ]

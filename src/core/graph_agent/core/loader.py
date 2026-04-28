@@ -44,6 +44,46 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _skill_namespace(base_dir: Path) -> str:
+    """Return the stable module namespace for one skill directory."""
+    return hashlib.sha256(str(base_dir.resolve()).encode("utf-8")).hexdigest()[:20]
+
+
+def _load_skill_local_module(module_path_str: str, base_dir: Path) -> Any | None:
+    """Load a SKILL-local module under the same namespace used for tools."""
+    module_file = base_dir / module_path_str.replace(".", "/")
+    py_file = module_file.with_suffix(".py")
+    if not py_file.exists():
+        init_file = module_file / "__init__.py"
+        if init_file.exists():
+            py_file = init_file
+        else:
+            return None
+
+    if not py_file.resolve().is_relative_to(base_dir.resolve()):
+        raise SkillLoadError(
+            f"Module reference '{module_path_str}' resolves outside skill directory: {py_file}"
+        )
+
+    module_name = f"_graph_agent_skill_.{_skill_namespace(base_dir)}.{module_path_str}"
+    if module_name in sys.modules:
+        return sys.modules[module_name]
+
+    importlib.invalidate_caches()
+    spec = importlib.util.spec_from_file_location(module_name, py_file)
+    if spec is None or spec.loader is None:
+        raise SkillLoadError(f"Cannot load module spec for {py_file}")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(module_name, None)
+        raise
+    return module
+
+
 def _resolve_tool_reference(
     ref_path: str,
     base_dir: Path,
@@ -132,10 +172,7 @@ def _resolve_tool_reference(
         )
 
     # Dynamic import using importlib
-    skill_namespace = hashlib.sha256(
-        str(base_dir.resolve()).encode("utf-8")
-    ).hexdigest()[:20]
-    module_name = f"_graph_agent_skill_.{skill_namespace}.{module_path_str}"
+    module_name = f"_graph_agent_skill_.{_skill_namespace(base_dir)}.{module_path_str}"
     try:
         importlib.invalidate_caches()
         spec = importlib.util.spec_from_file_location(module_name, py_file)
@@ -441,7 +478,11 @@ def _append_steps_to_prompt(prompt: str, steps: list[str]) -> str:
     return f"{prompt}\n\n{block}"
 
 
-def _render_skill_section_xml_tags(phase_or_profile: Any) -> str:
+def _render_skill_section_xml_tags(
+    phase_or_profile: Any,
+    *,
+    skill_base_dir: Path | None = None,
+) -> str:
     """Render optional prompt-schema fields as XML-ish skill-section tags."""
     sections: list[str] = []
 
@@ -491,14 +532,22 @@ def _render_skill_section_xml_tags(phase_or_profile: Any) -> str:
 
     output_schema = getattr(phase_or_profile, "output_schema", None)
     if output_schema:
-        format_md = _render_output_format_markdown(output_schema)
+        base_dir = skill_base_dir or getattr(phase_or_profile, "skill_base_dir", None)
+        format_md = _render_output_format_markdown(
+            output_schema,
+            skill_base_dir=base_dir,
+        )
         if format_md:
             sections.append(f"<output_format>\n{format_md}\n</output_format>")
 
     return "\n\n".join(sections)
 
 
-def _render_output_format_markdown(output_schema_path: str) -> str:
+def _render_output_format_markdown(
+    output_schema_path: str,
+    *,
+    skill_base_dir: Path | None = None,
+) -> str:
     """Render output schema as Markdown template + field reference.
 
     The template explicitly shows the ``##`` block + bullet structure
@@ -519,7 +568,24 @@ def _render_output_format_markdown(output_schema_path: str) -> str:
     """
     try:
         module_path, class_name = output_schema_path.rsplit(".", 1)
-        module = importlib.import_module(module_path)
+        module = None
+        try:
+            module = importlib.import_module(module_path)
+        except ImportError:
+            pass
+
+        if module is None and skill_base_dir is not None:
+            module_name = (
+                f"_graph_agent_skill_.{_skill_namespace(skill_base_dir)}.{module_path}"
+            )
+            module = sys.modules.get(module_name)
+
+        if module is None and skill_base_dir is not None:
+            module = _load_skill_local_module(module_path, skill_base_dir)
+
+        if module is None:
+            raise ImportError(f"Cannot find {module_path}")
+
         model_cls = getattr(module, class_name)
 
         if not hasattr(model_cls, "model_fields"):
@@ -560,7 +626,7 @@ def _render_output_format_markdown(output_schema_path: str) -> str:
 
         return "\n".join(template_lines + reference_lines)
 
-    except (ImportError, AttributeError, ValueError) as exc:
+    except (ImportError, AttributeError, SkillLoadError, ValueError) as exc:
         logger.warning(
             "loader: failed to resolve output_schema %s: %s; "
             "skipping <output_format>",
@@ -688,7 +754,7 @@ def _phase_from_graph_phase(
     if isinstance(phase_def, _LLMPhase):
         tools = [_resolve_tool_reference(ref, base_dir) for ref in phase_def.agent_tools]
         system_prompt = phase_def.prompt
-        xml_tags = _render_skill_section_xml_tags(phase_def)
+        xml_tags = _render_skill_section_xml_tags(phase_def, skill_base_dir=base_dir)
         if xml_tags:
             system_prompt = f"{system_prompt}\n\n{xml_tags}" if system_prompt else xml_tags
         if phase_def.steps:

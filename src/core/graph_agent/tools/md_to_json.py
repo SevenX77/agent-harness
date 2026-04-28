@@ -44,7 +44,21 @@ def _resolve_schema_from_path(path: str) -> type[BaseModel]:
         raise ValueError(f"invalid schema path: {path!r}")
     module = sys.modules.get(module_str)
     if module is None:
-        module = importlib.import_module(module_str)
+        namespaced_suffix = f".{module_str}"
+        for key, mod in list(sys.modules.items()):
+            if key.startswith("_graph_agent_skill_.") and key.endswith(
+                namespaced_suffix
+            ):
+                module = mod
+                break
+    if module is None:
+        try:
+            module = importlib.import_module(module_str)
+        except ImportError as exc:
+            raise ValueError(
+                f"Cannot resolve schema path {path!r}: not found in sys.modules "
+                f"(absolute or namespaced) and importlib.import_module failed: {exc}"
+            ) from exc
     cls = getattr(module, cls_name, None)
     if cls is None:
         raise ValueError(f"schema path {path!r} resolved module has no attribute {cls_name!r}")

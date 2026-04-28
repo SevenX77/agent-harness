@@ -1,4 +1,5 @@
 ---
+schema_version: "2.0"
 name: md-patch
 description: >
   Surgical LLM patch agent for MD parsing errors. Receives a diagnostic report

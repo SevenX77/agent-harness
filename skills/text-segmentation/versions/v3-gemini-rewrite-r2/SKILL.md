@@ -134,6 +134,6 @@ phases:
 
       ## Pass 1 分段结果
       ```
-      {raw_segmentation}
+      {segments}
       ```
 ---

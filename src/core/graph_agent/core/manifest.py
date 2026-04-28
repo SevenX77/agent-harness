@@ -139,6 +139,7 @@ class IoOutput(BaseModel):
     target: Literal["file", "artifact"]
     type: str | None = None
     path: str | None = None
+    source: str | None = None
 
 
 class IoDeclaration(BaseModel):

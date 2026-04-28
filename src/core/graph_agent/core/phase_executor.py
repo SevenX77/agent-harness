@@ -738,8 +738,10 @@ class PhaseExecutor:
                 ),
             )
 
-        # Step 10: Clean up phase-local keys before returning state
-        ctx.pop("_finish_task_result", None)
+        # Step 10: Keep the successful finish_task payload in context so
+        # declarative io.outputs.source can persist parsed business data after
+        # the workflow completes. Each LLM phase clears any stale payload at
+        # entry, so retaining it here does not short-circuit later LLM phases.
 
         # Step 11: Update state
         new_state: WorkflowState = {

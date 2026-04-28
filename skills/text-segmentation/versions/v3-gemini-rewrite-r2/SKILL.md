@@ -25,6 +25,7 @@ io:
       type: dict
       target: file
       path: "output/text-segmentation/chapter_{context.chapter_number}_segments.json"
+      source: "_finish_task_result.business_data_parsed"
 phases:
   - name: setup
     mode: logic

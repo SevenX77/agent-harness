@@ -39,7 +39,9 @@ phases:
     references:
       - references/segmentation-guide.md
     agent_tools: []
-    validator: script.validators.validate_segmentation_structure
+    # validator removed: md_to_json + Pydantic SegmentationResult schema replaces
+    # the structural check (frame already validates business_data_md content
+    # via finish_task → md_to_json before exiting the phase)
     prompt: |
       ## ⚠️ 退出契约（最高优先级）
       本阶段**唯一**的退出方式是调用 `finish_task`。
@@ -98,7 +100,9 @@ phases:
       - references/segmentation-guide.md
     agent_tools:
       - script.segmenter.log_ambiguous_segments
-    validator: script.validators.validate_final_format
+    # validator removed: md_to_json + Pydantic schema is the structural gate;
+    # business_data_md from finish_task drives the segment list, no longer
+    # populated via parse_segmentation_output → ctx["segments"]
     prompt: |
       ## ⚠️ 退出契约（最高优先级）
       本阶段**唯一**的退出方式是调用 `finish_task`。

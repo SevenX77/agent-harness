@@ -112,19 +112,25 @@ class ToolExecutionError(GraphAgentError):
 
 # === IO errors (persistence / checkpoint / artifact) ===
 
-class IOError(GraphAgentError):  # noqa: A001 (intentional shadow of builtin to keep namespace consistent)
-    """Persistence layer failed (file / artifact / checkpoint / trace)."""
+class PersistenceError(GraphAgentError):
+    """Persistence layer failed (file / artifact / checkpoint / trace).
+    
+    Note: Named PersistenceError instead of IOError to avoid shadowing
+    Python builtin IOError (which is alias of OSError). Catching IOError
+    in user code would otherwise unintentionally catch graph_agent's
+    framework errors mixed with native filesystem errors.
+    """
 
 
-class CheckpointError(IOError):
+class CheckpointError(PersistenceError):
     """Checkpoint save/load failed."""
 
 
-class TraceWriteError(IOError):
+class TraceWriteError(PersistenceError):
     """Trace persistence failed."""
 
 
-class ArtifactError(IOError):
+class ArtifactError(PersistenceError):
     """Artifact save/load failed."""
 ```
 
@@ -175,7 +181,7 @@ except OSError as exc:
 ```
 
 适用：
-- `runner.py:227` (checkpoint cleanup) → `IOError`
+- `runner.py:227` (checkpoint cleanup) → `PersistenceError`
 - `runner.py:336` (import) → `LoaderError`
 - `core/harness.py:307` (deepcopy) → `StateTransformError`
 - `core/harness.py:431` (auto-checkpointer init) → `CheckpointError`
@@ -205,9 +211,45 @@ except (TypeError, ValueError) as exc:
 
 适用：
 - `models/resolver.py:626` (circuit breaker — 设计本意降级)
-- `cognitive/middlewares.py:336` & `:615` (parse JSON 失败的兜底)
 - `core/validators/tool_paths.py:228` (path 不存在是预期场景)
 - `config/llm_config.py:594` (LLM config OSError — 这条 design 时再确认是抛 vs 降级)
+
+### 2.3 LLM 错误反馈类（替代静默 sentinel — Gemini design review 修正）
+
+**Pattern C — Command(goto="model") + ToolMessage(status="error")：**
+
+适用于 middleware 在拦截 LLM 输出 / tool args 时遇到 parse 失败的场景。**不能**返回 `{}` 或 sentinel（实质是变相静默吞错；下游 tool 用空 dict 会抛更难懂的 KeyError），应该把 parse 失败信息**丢回给 LLM** 触发自我纠错。
+
+```python
+# Before
+try:
+    parsed = json.loads(tool_args)
+except (TypeError, ValueError):
+    return {}
+
+# After (Pattern C — LLM-feedback)
+from langgraph.types import Command
+from langchain_core.messages import ToolMessage
+
+try:
+    parsed = json.loads(tool_args)
+except (TypeError, ValueError) as exc:
+    error_msg = f"JSON parse failed: {exc}. Please retry with valid JSON."
+    logger.warning(
+        "phase=%s action=middleware fallback from=parse_json to=llm_retry reason=%s",
+        phase_name, type(exc).__name__,
+    )
+    return Command(
+        goto="model",
+        update={"messages": [ToolMessage(status="error", content=error_msg)]},
+    )
+```
+
+适用：
+- `cognitive/middlewares.py:336` (parse JSON 失败 — 改 Pattern C 让 LLM 重试)
+- `cognitive/middlewares.py:615` (同上)
+
+**Why Pattern C not Pattern B**: Gemini design review 2026-04-28 明确指出（`/tmp/gemini-mvp-0-design-reply.txt`）："显式降级 + 返回 sentinel 或 `{}`" 依然是变相静默吞错。返回 `{}` 后下游 tool 因为缺必填字段抛 `KeyError` / `TypeError`，错误信息更难追溯到根因。**Pattern C 让 LLM 自己看到"你的 JSON 不对，请重写"，能在 agent loop 内修复**，符合 framework 应有的错误反馈纪律。
 
 ### 2.3 顶层 catch + Result 包装（harness.run）
 
@@ -459,7 +501,7 @@ mypy --strict src/core/graph_agent/core/exceptions.py src/core/graph_agent/core/
 
 - A1 (MVP-1) WorkflowState 拆解 → 本 MVP 异常体系 + StateTransformError 用得上
 - A5 (MVP-2) SchemaEngine → 本 MVP 异常体系 SchemaValidationError 用得上
-- A7 (MVP-2) IOManager StorageAdapter → 本 MVP 异常体系 ArtifactError / IOError 用得上
+- A7 (MVP-2) IOManager StorageAdapter → 本 MVP 异常体系 ArtifactError / PersistenceError 用得上
 - A2 (MVP-3) loader 拆解 → 本 MVP 异常体系 LoaderError 用得上
 - A3 (MVP-4) phase_executor 拆解 → 本 MVP 异常体系 PhaseExecutionError 用得上
 - A4 (MVP-4) finish_task 重画 → 本 MVP 推迟的 tool_wrapper.py:138 在 MVP-4 一起改

@@ -104,7 +104,7 @@ MVP-0 是 v1 reset 的第 0 步：**地基清创**。范围 = Gemini reset plan 
    - `GraphAgentError` (base)
    - `ExecutionError` (运行时执行失败：phase 执行 / tool 调用 / state 转换)
    - `ValidationError` (校验失败：schema / contract / pre-flight)
-   - `IOError` (持久化失败：file / artifact / checkpoint)
+   - `PersistenceError` (持久化失败：file / artifact / checkpoint；改名避免压盖 Python 内建 IOError)
    - `ToolExecutionError` (工具调用失败：tool 自身抛错，框架感知)
    - `LoaderError` (SKILL 加载失败：parse / module / phase build)
 2. WHEN MVP-0 完成，THEN 以下已知 silent failure 全部消除（按 codex / 主控查证）：
@@ -116,9 +116,10 @@ MVP-0 是 v1 reset 的第 0 步：**地基清创**。范围 = Gemini reset plan 
    - `cognitive/middlewares.py:615` (`except (TypeError, ValueError): return {}`)
    - `core/validators/tool_paths.py:228` (`except (OSError, UnicodeDecodeError, SyntaxError): return None`)
    - `config/llm_config.py:594` (`except OSError: return None`)
-   - `core/harness.py:307` (deepcopy 失败浅拷继续 → 改抛 ExecutionError)
-   - `core/harness.py:431` (auto-checkpointer 初始化失败 warning 返回 None → 改抛 IOError，由顶层捕获)
-   - `core/harness.py:715` (trace 保存失败 warning 续 emit run_completed → 改抛 IOError)
+   - `core/harness.py:307` (deepcopy 失败浅拷继续 → 改抛 StateTransformError)
+   - `core/harness.py:431` (auto-checkpointer 初始化失败 warning 返回 None → 改抛 CheckpointError，由顶层捕获)
+   - `core/harness.py:715` (trace 保存失败 warning 续 emit run_completed → 改抛 TraceWriteError)
+   - `cognitive/middlewares.py:336` & `:615` (JSON parse 失败 → 改用 Pattern C：返回 Command(goto="model") + ToolMessage(status="error") 让 LLM 自我纠错；不允许返回 `{}` sentinel，按 Gemini design review)
 3. WHEN 任一 silent failure 在 fix 时发现"该位置确实需要降级而非抛错"，THEN 必须显式 `logger.warning("phase=X fallback from=Y to=Z reason=W", ...)` 并记录到 `_io_errors` / metrics，而不是 silent
 4. WHEN MVP-0 完成，THEN `python3 -c "import re,pathlib; ..."` (按上面 grep 模式) 命中数从 8 降到 0（或 explained warnings ≥ 0）
 5. WHEN MVP-0 完成，THEN `tool_wrapper.py:138` 的"tool 异常字符串化返回"在 MVP-0 范围内**不修改**（这是 A6 异常体系应用到 tool 层，归到 MVP-4 一起做，因为涉及 finish_task 重画）

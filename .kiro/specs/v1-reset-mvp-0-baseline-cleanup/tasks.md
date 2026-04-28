@@ -28,11 +28,12 @@
 1. 跑所有 7 个 SKILL `compile_skill()` 收集 FATAL/WARNING 状态
 2. 跑 `pytest tests/graph_agent/ -x --tb=no -q` 收集结果
 3. 跑 `find src -type f -name "*.py" | xargs wc -l` 收集行数
-4. 落盘到 `docs/v1-reset/mvp-0-baseline-snapshot.md`
-5. git commit: `docs(v1-reset): mvp-0 baseline snapshot`
+4. **跑 `python3 /tmp/e2e_chain.py` 收集核心 metrics**（Token 消耗 / 各 phase event 计数 / 最终落盘 SKILL 输出条数）— 防"悄悄退步"，按 Gemini design review P1
+5. 落盘到 `docs/v1-reset/mvp-0-baseline-snapshot.md`
+6. git commit: `docs(v1-reset): mvp-0 baseline snapshot`
 
 **Verification:**
-- baseline snapshot 文件存在 + 内容完整
+- baseline snapshot 文件存在 + 内容完整（含 metrics）
 - 主控读一遍确认数据可作为对比基准
 
 ---
@@ -216,11 +217,16 @@ claude-ccb-orchestrator start-task-scope v1-reset-mvp-0-baseline-cleanup \
 2. 字段对齐：dataclass 版本 vs Pydantic 版本逐字段
 3. 差异字段合并到 Pydantic 版本（manifest.py）
 4. 替换所有 import 到 `from graph_agent.core.manifest import ContextBridge`
-5. 删除 `types.py:17` 的 dataclass 定义（保留 types.py 文件其他内容）
+5. **替换 dataclass 专用函数调用**（按 Gemini design review P1 必做）：
+   - `dataclasses.asdict(bridge)` → `bridge.model_dump()`
+   - `dataclasses.replace(bridge, ...)` → `bridge.model_copy(update={...})`
+   - 在 grep 验证时**不仅查 import，还要 grep `asdict\|dataclasses.replace` 跟 ContextBridge 实例的所有交互点**
+6. 删除 `types.py:17` 的 dataclass 定义（保留 types.py 文件其他内容）
 
 **Acceptance:**
 - `grep -rn "class ContextBridge" src/core/graph_agent` 输出 1 行
 - `grep -rn "from .*types import.*ContextBridge\|from graph_agent.core.types import ContextBridge" src/` 0 hit
+- `grep -rn "asdict.*bridge\|dataclasses.replace.*bridge" src/` 0 hit（确认 Pydantic 函数已替换）
 - pytest 不退步
 - a3 commit → codex 审
 
@@ -267,15 +273,21 @@ claude-ccb-orchestrator start-task-scope v1-reset-mvp-0-baseline-cleanup \
 ## T13：MVP-0 收尾 + scope 关闭 — 主控
 **Owner:** 主控 Claude (PM)
 **Dependencies:** T12 通过
-**Estimated:** 30 min
+**Estimated:** 45 min
 
 **Steps:**
 1. 写 MVP-0 完成总结到 memory（learnings + 风险记录）
-2. squash 子任务 commit 到一个 feat/v1-reset-mvp-0 分支
-3. push + 创 PR + merge 到 main
-4. `claude-ccb-orchestrator stop-task-scope v1-reset-mvp-0-baseline-cleanup`
-5. 给 a1 codex / a2 gemini / a3 claude 各发一次 `/clear`
-6. 进入 MVP-1 spec 起草
+2. **写 `docs/v1-reset/CHANGELOG_MVP0.md`**（按 Gemini design review P1）：
+   - 移除了哪些 SKILL 内置工具（generate_image / generate_video / understand_video）
+   - 移除了哪些 SKILL.md 字段（subgraph / parallel_delegate / aggregate_to / parallel_outputs / multimodal 配置）
+   - 重命名 / 移动的模块路径（types.ContextBridge → manifest.ContextBridge）
+   - 异常类命名 (PersistenceError / CheckpointError 等可用)
+   - `pip install deerflow>=X.Y` 的依赖变化（如适用）
+3. squash 子任务 commit 到一个 feat/v1-reset-mvp-0 分支
+4. push + 创 PR + merge 到 main
+5. `claude-ccb-orchestrator stop-task-scope v1-reset-mvp-0-baseline-cleanup`
+6. 给 a1 codex / a2 gemini / a3 claude 各发一次 `/clear`
+7. 进入 MVP-1 spec 起草
 
 ---
 

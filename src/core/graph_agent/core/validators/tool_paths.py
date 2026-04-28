@@ -17,6 +17,7 @@ the module (defeats the no-side-effect invariant).
 """
 from __future__ import annotations
 
+import ast
 import importlib.util
 from pathlib import Path
 
@@ -75,6 +76,7 @@ def check_tool_paths(
                         location=f"SKILL.md:phases.{phase.name}.execute_steps.{idx}",
                         base_dir=base_dir,
                         issues=issues,
+                        check_nested_run_skill=True,
                     )
                 if phase.validator is not None:
                     _check_one(
@@ -93,6 +95,7 @@ def _check_one(
     location: str,
     base_dir: Path,
     issues: list[CompileIssue],
+    check_nested_run_skill: bool = False,
 ) -> None:
     if "." not in ref:
         issues.append(CompileIssue(
@@ -195,6 +198,13 @@ def _check_one(
                 f"which exists."
             ),
         ))
+        return
+
+    if check_nested_run_skill:
+        file_path = py_file if py_file.is_file() else init_file
+        issue = _check_for_nested_run_skill(file_path, location)
+        if issue is not None:
+            issues.append(issue)
 
 
 def _is_within(candidate: Path, root: Path) -> bool:
@@ -209,3 +219,30 @@ def _is_within(candidate: Path, root: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _check_for_nested_run_skill(file_path: Path, ref_name: str) -> CompileIssue | None:
+    """E-NESTED-RUN-SKILL: reject logic steps that import run_skill."""
+    try:
+        tree = ast.parse(file_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, SyntaxError):
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "graph_agent.core.runner":
+            if any(alias.name == "run_skill" for alias in node.names):
+                return CompileIssue(
+                    rule_id="E-NESTED-RUN-SKILL",
+                    severity="FATAL",
+                    location=ref_name,
+                    message=(
+                        "Logic phase scripts cannot import 'run_skill' from "
+                        "graph_agent.core.runner. Nested sub-skill invocation "
+                        "must be expressed declaratively via DelegatePhase "
+                        "(mode: delegate) or ParallelDelegatePhase "
+                        "(mode: parallel_delegate) to preserve schema 2.0 "
+                        "static compilation, retry orchestration, and "
+                        "observability."
+                    ),
+                )
+    return None

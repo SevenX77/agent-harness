@@ -437,8 +437,13 @@ def diagnose(
     errors: list[ItemError] = []
 
     for i, item in enumerate(items):
+        # Strip framework metadata (_md_id) before Pydantic validation so
+        # schemas using `extra="forbid"` don't reject the parser-injected
+        # header marker. The original item_id is still recorded on errors.
+        original_item_id = item.get("_md_id")
+        validation_item = {k: v for k, v in item.items() if k != "_md_id"}
         try:
-            valid_items.append(schema.model_validate(item))
+            valid_items.append(schema.model_validate(validation_item))
         except PydanticValidationError as exc:
             field_errors = [
                 FieldError(
@@ -451,7 +456,7 @@ def diagnose(
             errors.append(
                 ItemError(
                     index=i,
-                    item_id=item.get("_md_id"),  # type: ignore[arg-type]
+                    item_id=original_item_id,
                     fields=field_errors,
                 )
             )
@@ -572,7 +577,8 @@ def md_to_json(
         len(patched),
     )
     return list(report.valid_items) + [  # type: ignore[return-value]
-        schema.model_validate(p) for p in patched
+        schema.model_validate({k: v for k, v in p.items() if k != "_md_id"})
+        for p in patched
     ]
 
 

@@ -70,130 +70,27 @@ def finish_task(
     diagnostics_md: str = "",
     business_data_md: str = "",
 ) -> str:
-    """完成当前 phase。
+    """Mark the current phase complete.
 
-    参数：
-    - diagnostics_md: 自检诊断 Markdown（推荐：逐条对照计划说明质量结论）
-    - business_data_md: 业务输出 Markdown，会经 md_to_json 校验是否符合 phase 的 output_schema
-
-    最简调用：finish_task(reasoning="任务已完成")
-    （适用于无 output_schema 的 phase；不会触发 schema 验证）
+    ValidationMiddleware has already accepted or rejected this submission
+    inside the agent loop. This tool only records the accepted payload and
+    triggers the return-direct phase exit.
     """
-    if business_data_md:
-        output_schema_path = ctx.get("output_schema_path") or ctx.get("_md_schema_path")
-        if not output_schema_path:
-            ctx["_finish_task_result"] = {
-                "diagnostics_md": diagnostics_md.strip(),
-                "business_data_md": business_data_md.strip(),
-                "business_data_parsed": None,
-                "schema_validation": "skipped: no output_schema declared",
-            }
-            return "PHASE_COMPLETE"
-
-        try:
-            from ..tools.md_to_json import (
-                SemanticValidationError,
-                _resolve_schema_from_path,
-                md_to_json,
-            )
-
-            schema = _resolve_schema_from_path(str(output_schema_path))
-            validated_items = md_to_json(business_data_md, schema)
-            if not validated_items:
-                ctx["_finish_task_result"] = {
-                    "schema_validation": "failed",
-                    "validation_error_text": (
-                        "[finish_task] business_data_md parsed to 0 items but "
-                        f"output_schema {output_schema_path!r} requires at least one. "
-                        "Check the markdown format: each item must be its own "
-                        "`## <id>` block followed by `- field: value` bullets. "
-                        "Re-call finish_task with a populated business_data_md."
-                    ),
-                }
-                logger.warning(
-                    "finish_task v2: 0 items parsed from business_data_md (schema=%s); "
-                    "delegating to NudgeInjector retry loop",
-                    output_schema_path,
-                )
-                return "PHASE_COMPLETE"
-        except SemanticValidationError as exc:
-            ctx["_finish_task_result"] = {
-                "schema_validation": "failed",
-                "validation_error_text": SCHEMA_VALIDATION_ERROR_TEMPLATE.format(exc=exc),
-            }
-            logger.warning(
-                "finish_task v2: schema validation failed "
-                "(delegating to NudgeInjector retry loop)"
-            )
-            return "PHASE_COMPLETE"
-        except Exception as exc:
-            ctx["_finish_task_result"] = {
-                "schema_validation": "failed",
-                "validation_error_text": PARSE_ERROR_TEMPLATE.format(
-                    output_schema_path=output_schema_path,
-                    exc=exc,
-                ),
-            }
-            logger.warning(
-                "finish_task v2: parse/import failed "
-                "(delegating to NudgeInjector retry loop): %s",
-                exc,
-            )
-            return "PHASE_COMPLETE"
-
-        ctx["_finish_task_result"] = {
-            "diagnostics_md": diagnostics_md.strip(),
-            "business_data_md": business_data_md.strip(),
-            "business_data_parsed": [
-                item.model_dump() if hasattr(item, "model_dump") else item
-                for item in validated_items
-            ],
-            "schema_validation": "passed",
-        }
-        logger.info(
-            "finish_task v2: diagnostics_len=%d business_data_len=%d items=%d schema=%s",
-            len(diagnostics_md),
-            len(business_data_md),
-            len(validated_items),
-            output_schema_path,
-        )
-        return "PHASE_COMPLETE"
-
-    output_schema_path = ctx.get("output_schema_path") or ctx.get("_md_schema_path")
-    if output_schema_path:
-        # Phase declared output_schema but LLM submitted empty business_data_md.
-        # Reject with validation error so the NudgeInjector retry loop kicks in
-        # and forces a real submission. Without this gate, finish_task silently
-        # passes and the phase ends with no parsed business data, leaving
-        # downstream IO save with nothing to persist.
-        ctx["_finish_task_result"] = {
-            "schema_validation": "failed",
-            "validation_error_text": (
-                "[finish_task] business_data_md is empty but the phase declares "
-                f"output_schema {output_schema_path!r}. You must provide the "
-                "business_data_md argument with the full markdown payload that "
-                "matches the schema. Re-call finish_task with a populated "
-                "business_data_md (do not omit the argument)."
-            ),
-        }
-        logger.warning(
-            "finish_task v2: business_data_md empty but output_schema=%s; "
-            "delegating to NudgeInjector retry loop",
-            output_schema_path,
-        )
-        return "PHASE_COMPLETE"
-
-    ctx["_finish_task_result"] = {
+    prior = ctx.get("_finish_task_result")
+    result = dict(prior) if isinstance(prior, dict) else {}
+    result.update({
         "reasoning": (reasoning or "").strip(),
         "diagnostics_md": diagnostics_md.strip(),
-        "business_data_md": "",
-        "schema_validation": "skipped",
-    }
+        "business_data_md": business_data_md.strip(),
+    })
+    result.setdefault("schema_validation", "skipped")
+    ctx["_finish_task_result"] = result
     logger.info(
-        "finish_task: no business_data_md, schema validation skipped "
-        "(reasoning_len=%d, diagnostics_len=%d)",
+        "finish_task: accepted completion marker "
+        "(reasoning_len=%d, diagnostics_len=%d, business_data_len=%d)",
         len(reasoning or ""),
         len(diagnostics_md),
+        len(business_data_md or ""),
     )
     return "PHASE_COMPLETE"
 

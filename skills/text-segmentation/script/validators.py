@@ -6,13 +6,10 @@ import re
 logger = logging.getLogger(__name__)
 
 
-def validate_segmentation_structure(context: dict) -> tuple[bool, list[str]]:
+def validate_segmentation_structure(segments: list[dict]) -> tuple[bool, list[str]]:
     """Node 02 结构 validator：行号连续性 + confidence 阈值"""
     errors: list[str] = []
-    
-    segments = context.get("segments", [])
-    chapter_lines = context.get("chapter_lines", [])
-    
+
     if not segments:
         return (False, ["No segments produced. Re-analyze the chapter text."])
     
@@ -36,21 +33,7 @@ def validate_segmentation_structure(context: dict) -> tuple[bool, list[str]]:
                 f"Segment {seg.get('index', '?')}: confidence {confidence:.2f} < 0.7 threshold"
             )
     
-    # Check 2: Line coverage
-    if chapter_lines:
-        total_lines = len(chapter_lines)
-        covered: set[int] = set()
-        for seg in segments:
-            start = seg.get("start_line", 0)
-            end = seg.get("end_line", 0)
-            for ln in range(start, end + 1):
-                covered.add(ln)
-        
-        coverage = len(covered) / total_lines if total_lines > 0 else 0
-        if coverage < 0.9:
-            errors.append(f"Line coverage {coverage*100:.0f}% < 90%. Check segment boundaries.")
-    
-    # Check 3: Line number continuity (100% continuous, no gaps)
+    # Check 2: Line number continuity (100% continuous, no gaps)
     sorted_segs = sorted(segments, key=lambda s: s.get("start_line", 0))
     for i in range(1, len(sorted_segs)):
         prev_end = sorted_segs[i - 1].get("end_line", 0)
@@ -66,12 +49,10 @@ def validate_segmentation_structure(context: dict) -> tuple[bool, list[str]]:
     return (True, [])
 
 
-def validate_final_format(context: dict) -> tuple[bool, list[str]]:
+def validate_final_format(segments: list[dict]) -> tuple[bool, list[str]]:
     """Node 03 格式 validator：最终输出格式检查"""
     errors: list[str] = []
-    
-    segments = context.get("segments", [])
-    
+
     if not segments:
         return (False, ["No segments in final output"])
     

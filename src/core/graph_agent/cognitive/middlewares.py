@@ -8,7 +8,8 @@ consumer is `GraphAgentHarness`.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+import json
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
 try:
@@ -19,7 +20,10 @@ except ImportError:  # pragma: no cover - Python < 3.12
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
+from langgraph.types import Command
+from pydantic import BaseModel
 
 from ..callbacks.base import Callback
 
@@ -274,6 +278,227 @@ class AgentLoopIterationMiddleware(AgentMiddleware[AgentState]):
         except Exception:  # noqa: BLE001
             logger.exception("[AgentLoopIteration] emit failed; continuing")
         return None  # pass-through, no state mutation
+
+
+class ValidationMiddleware(AgentMiddleware[AgentState]):
+    """Validate ``finish_task`` submissions inside the agent loop.
+
+    Pydantic validation and business validators run before the return-direct
+    ``finish_task`` tool is allowed to execute. Rejections are returned as
+    tool results and routed back to the model node, so the LLM corrects its
+    submission in the same LangGraph agent loop instead of restarting the
+    whole phase.
+    """
+
+    _REJECTION_PREFIX = (
+        "[提交已被系统驳回] 当前任务仍未结束，请继续修正并重新提交！"
+    )
+
+    def __init__(
+        self,
+        *,
+        output_schema: type[BaseModel] | None = None,
+        output_schema_path: str | None = None,
+        business_validator: Callable[..., tuple[bool, list[str]]] | None = None,
+        ctx: dict[str, Any],
+        callbacks: Sequence[Callback] | None = None,
+        phase_name: str = "unknown",
+    ) -> None:
+        super().__init__()
+        self.output_schema = output_schema
+        self.output_schema_path = output_schema_path
+        self.business_validator = business_validator
+        self.ctx = ctx
+        self._callbacks = list(callbacks or [])
+        self._phase_name = phase_name
+
+    def _args_dict(self, request: ToolCallRequest) -> dict[str, Any]:
+        args = request.tool_call.get("args", {})
+        if isinstance(args, dict):
+            return args
+        if isinstance(args, str):
+            try:
+                parsed = json.loads(args)
+            except (TypeError, ValueError):
+                return {}
+            return parsed if isinstance(parsed, dict) else {}
+        return {}
+
+    def _resolve_output_schema(self) -> type[BaseModel] | None:
+        if self.output_schema is not None:
+            return self.output_schema
+        if not self.output_schema_path:
+            return None
+        from ..tools.md_to_json import _resolve_schema_from_path
+
+        self.output_schema = _resolve_schema_from_path(self.output_schema_path)
+        return self.output_schema
+
+    def _normalize_errors(self, errors: Any) -> list[str]:
+        if errors is None:
+            return []
+        if isinstance(errors, str):
+            return [errors] if errors else []
+        if isinstance(errors, list):
+            return [str(err) for err in errors if str(err)]
+        return [str(errors)] if errors else []
+
+    def _run_business_validator(self, payload: Any) -> list[str]:
+        if self.business_validator is None:
+            return []
+        try:
+            passed, errors = self.business_validator(payload)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[ValidationMiddleware] business validator failed in phase=%s: %s",
+                self._phase_name,
+                exc,
+            )
+            return [f"[Business] validator 异常：{type(exc).__name__}: {exc}"]
+        if passed:
+            return []
+        return [f"[Business] {err}" for err in self._normalize_errors(errors)]
+
+    def _emit_validation_fail(self, errors: list[str]) -> None:
+        for cb in self._callbacks:
+            try:
+                cb.on_validation_fail(self._phase_name, errors, 0)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "[ValidationMiddleware] callback validation_fail error: %s",
+                    exc,
+                )
+
+    def _emit_validation_pass(self) -> None:
+        try:
+            from ..callbacks.events import ValidationPassEvent
+
+            event = ValidationPassEvent(phase_name=self._phase_name, retry_count=0)
+            for cb in self._callbacks:
+                try:
+                    cb.on_event(event)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "[ValidationMiddleware] callback validation_pass error: %s",
+                        exc,
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[ValidationMiddleware] validation_pass emit failed: %s", exc)
+
+    def _reject(self, request: ToolCallRequest, errors: list[str] | str) -> Command:
+        error_lines = [errors] if isinstance(errors, str) else errors
+        content = self._REJECTION_PREFIX + "\n" + "\n".join(error_lines)
+        self._emit_validation_fail(error_lines)
+        logger.info(
+            "[ValidationMiddleware] Rejected finish_task in phase=%s with %d error(s)",
+            self._phase_name,
+            len(error_lines),
+        )
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(
+                        content=content,
+                        name="finish_task",
+                        tool_call_id=request.tool_call["id"],
+                        status="error",
+                    )
+                ]
+            },
+            # ``finish_task`` is return_direct=True. Without an explicit jump,
+            # LangChain routes the tools node to END. Jumping to model keeps the
+            # correction inside the same agent loop.
+            goto="model",
+        )
+
+    def _validate_finish_task(self, request: ToolCallRequest) -> Command | None:
+        args = self._args_dict(request)
+        business_data_md = str(args.get("business_data_md") or "").strip()
+        try:
+            schema = self._resolve_output_schema()
+        except Exception as exc:  # noqa: BLE001
+            return self._reject(
+                request,
+                f"Markdown 解析失败：无法加载 output_schema {self.output_schema_path!r}: "
+                f"{type(exc).__name__}: {exc}",
+            )
+
+        if schema is not None and not business_data_md:
+            return self._reject(
+                request,
+                "你声明了 output_schema 但 business_data_md 是空。必须填入完整 markdown 结果。",
+            )
+
+        if schema is None:
+            business_errors = self._run_business_validator(self.ctx)
+            if business_errors:
+                return self._reject(request, business_errors)
+            self._emit_validation_pass()
+            return None
+
+        from ..tools.md_to_json import diagnose, parse_md
+
+        try:
+            parsed_blocks = parse_md(business_data_md, schema)
+        except Exception as exc:  # noqa: BLE001
+            return self._reject(request, f"Markdown 解析失败：{type(exc).__name__}: {exc}")
+
+        if not parsed_blocks:
+            return self._reject(
+                request,
+                "未能在 business_data_md 中检测到任何 ## 块。必须按 output_schema 范例输出至少 1 个 ## 块。",
+            )
+
+        report = diagnose(parsed_blocks, schema)
+        pydantic_errors: list[str] = []
+        for item_error in report.errors:
+            fields = "; ".join(
+                f"{field.field}: {field.error}" for field in item_error.fields
+            )
+            item_id = item_error.item_id or f"index={item_error.index}"
+            pydantic_errors.append(f"[Pydantic] {item_id}: {fields}")
+
+        raw_items = [block.data for block in parsed_blocks]
+        business_errors = self._run_business_validator(raw_items)
+        all_errors = pydantic_errors + business_errors
+        if all_errors:
+            return self._reject(
+                request,
+                ["校验错误如下（请一次性全部修复）：", *all_errors],
+            )
+
+        self.ctx["_finish_task_result"] = {
+            "business_data_parsed": [item.model_dump() for item in report.valid_items],
+            "schema_validation": "passed",
+        }
+        self._emit_validation_pass()
+        return None
+
+    @override
+    def wrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], ToolMessage | Command],
+    ) -> ToolMessage | Command:
+        if request.tool_call.get("name") != "finish_task":
+            return handler(request)
+        rejection = self._validate_finish_task(request)
+        if rejection is not None:
+            return rejection
+        return handler(request)
+
+    @override
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+    ) -> ToolMessage | Command:
+        if request.tool_call.get("name") != "finish_task":
+            return await handler(request)
+        rejection = self._validate_finish_task(request)
+        if rejection is not None:
+            return rejection
+        return await handler(request)
 
 
 def create_custom_middlewares(

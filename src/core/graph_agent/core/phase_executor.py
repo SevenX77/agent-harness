@@ -41,7 +41,7 @@ from ..callbacks.base import Callback
 from ..cognitive.ambiguity import log_ambiguity
 from ..cognitive.finish import finish_task
 from ..cognitive.memory import update_working_memory
-from ..cognitive.middlewares import create_custom_middlewares
+from ..cognitive.middlewares import ValidationMiddleware, create_custom_middlewares
 from ..cognitive.prompt import (
     apply_cognitive_template,
     resolve_role_prefix_from_llm_role,
@@ -173,10 +173,16 @@ class PhaseExecutor:
         from .harness import _clone_state, _safe_emit_event  # lazy: avoid import cycle
         from ..callbacks.events import RetryExhaustedEvent, ValidationPassEvent
 
-        if phase.validator is None:
-            return _clone_state(state)
-
         next_state = _clone_state(state)
+        if next_state["context"].pop("_validation_middleware_phase", None) == phase.name:
+            # LLM phase validators have already run inside ValidationMiddleware,
+            # keeping rejected finish_task submissions in the same agent loop
+            # instead of restarting the whole phase through retry_target routing.
+            return next_state
+
+        if phase.validator is None:
+            return next_state
+
         passed, errors = phase.validator(next_state["context"])
         if isinstance(errors, str):
             logger.warning(
@@ -267,6 +273,7 @@ class PhaseExecutor:
         state = _clone_state(state)
         ctx = state["context"]
         ctx["_current_phase"] = phase.name
+        ctx["_validation_middleware_phase"] = phase.name
 
         # Inject md_to_json schema info if available.
         # Store the dotted path (string) instead of the Pydantic class itself —
@@ -444,6 +451,16 @@ class PhaseExecutor:
             summarization_trigger_fraction=0.8,
             summarization_keep_messages=20,
             clarification=True,
+        )
+        phase_middlewares.append(
+            ValidationMiddleware(
+                output_schema=phase.output_schema,
+                output_schema_path=phase.output_schema_path,
+                business_validator=phase.validator,
+                ctx=ctx,
+                callbacks=active_callbacks,
+                phase_name=phase.name,
+            )
         )
 
         # Step 6: Create DeerFlow Agent — render system_prompt with context

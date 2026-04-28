@@ -79,6 +79,11 @@
 3. **新代码 mypy strict 通过**（旧代码逐 MVP 收）
 4. **新代码 ruff 通过 + coverage ≥ 85%**
 
+**MVP-1 / MVP-4 高破坏期间的额外约束**（Gemini sanity check 提醒）：
+- 这两个 MVP 改动的是 v1 框架核心结构（state 重画 / finish_task 重画），中间态可能数小时 e2e 跑不通
+- 必须在 spec 中追加 `migration-guide.md` 章节：设计**过渡适配器**让"半新半旧"底座仍能跑通 4 SKILL e2e
+- 拆分子任务时**先实施过渡适配器、再实施真改造**，确保任一子任务完成时 e2e 可跑
+
 任一不变量破坏 = MVP 不能 ship，回滚到上一个 MVP head 重做。
 
 ## 5. 角色 + 协作 pipeline
@@ -163,6 +168,8 @@ mypy:
   strict: true
   禁止: Any
   强制: def 全部带类型签名
+  禁止: 第三方库的隐式 Any 推断回退（`disallow_any_generics`、`warn_return_any` 强开）
+  策略: 上游 stubs 不全时，要么自写 `stubs/` 模块，要么 inline `# type: ignore[attr-defined]` + 注释；禁止 file-level / module-level ignore
 
 ruff:
   rules: [E, F, B, I, UP, SIM, N]
@@ -178,6 +185,26 @@ unit_tests:
 
 pre-commit:
   hooks: [check-yaml, ruff format, mypy, ruff check]
+
+ci_pipeline:
+  # pre-commit 只约束本地，CI 是合入硬门禁（不能仅靠本地）
+  platform: GitHub Actions
+  triggers: [pull_request, push to main]
+  jobs:
+    - name: lint
+      run: ruff check + ruff format --check
+    - name: type
+      run: mypy --strict src/
+    - name: test
+      run: pytest tests/ --cov=src/core/graph_agent --cov-report=xml
+    - name: coverage_gate
+      run: 核心 ≥ 95% / 总体 ≥ 85% (硬卡，未达不允许 merge)
+
+docstring:
+  scope: 核心公开 API (harness.run, Phase, WorkflowState, IOManager, SchemaEngine 等所有暴露给 SKILL 作者的类/函数)
+  style: Google 或 NumPy 风格
+  enforcement: ruff D100/D101/D102/D103 + Sphinx build 不报 missing
+  range: v1 必达；非公开 internal 可豁免
 ```
 
 ## 8. 已知风险
@@ -190,6 +217,9 @@ pre-commit:
 | a3 编码质量与 codex 不一致 | 交叉验证不收敛 | 严格按 ccb-collaboration: a3 编码必须 codex 审；3 轮 review 不过升级 PM |
 | Gemini 在 design 审里 hallucinate | 偏离审失效 | 每次 design 审给完整文件路径 + 行号 + 具体接口形态；不要让 Gemini 凭印象审 |
 | daily ccb scope 同时跑 2+ MVP 撑爆 | 整库锁死 | 严格 1 MVP 1 scope；MVP 之间 `stop-task-scope` |
+| **上游 LangGraph / LangChain 类型 stubs 不全** | mypy strict 在 import 链上深层报错 | 三道防御：(1) 在 `stubs/` 自写 LangGraph subset stubs；(2) 必要处 inline `# type: ignore[attr-defined]` + 单行注释（禁止 file-level）；(3) `mypy.overrides` 块只在确认上游不可救时使用 |
+| **过度激进清理 + 向前兼容崩塌** | MVP-0 删 dead code / 砍 vendored deerflow 时打死 4 SKILL 之外的隐藏用例 | (1) MVP-0 删除前 snapshot diff（4 SKILL.md 解析结果 + pytest 输出）+ MVP-0 完成后比对一致；(2) 仓库里所有 SKILL.md（不只 4 个核心）每个都跑 `compile_skill()` 一遍，新 / 老结果对比；(3) 任何 SKILL.md 配置项被砍前必须 grep 确认无引用 |
+| **MVP-1 / MVP-4 是 e2e 高破坏 MVP** | state 重画 / finish_task 重画期间几个小时 e2e 跑不通 | 在 MVP-1 / MVP-4 spec 中**必须**追加 `migration-guide.md` 章节，设计过渡适配器（让半新半旧底座能跑），保住"每时每刻都能跑"铁律 |
 
 ## 9. 当前状态 / next step
 

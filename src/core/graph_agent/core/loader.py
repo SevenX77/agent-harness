@@ -20,29 +20,32 @@ purely human documentation and is not parsed for execution semantics.
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import importlib.util
-import hashlib
 import logging
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from .parser import _parse_frontmatter
 
 if TYPE_CHECKING:
+    from .io_manager import IODef, IOManager
     from .manifest import AgentSkillDef, PersonaSkillDef
-from .exceptions import SkillCompilationError, SkillLoadError
-from .harness import GraphAgentHarness, Phase
-from .personas import resolve_persona
-from .schema_engine import SchemaEngine
+    from .manifest import SkillManifest as SkillManifestType
 from ..tools.dynamic_schema import (
     DynamicSchemaDef,
     OutputExampleParseError,
     parse_output_example,
     render_dynamic_schema_output_format,
 )
+from .exceptions import SkillCompilationError, SkillLoadError
+from .harness import GraphAgentHarness, Phase
+from .personas import resolve_persona
+from .schema_engine import SchemaEngine
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +65,195 @@ _SCHEMA_ENGINE: SchemaEngine = SchemaEngine()
 def get_schema_engine() -> SchemaEngine:
     """Return the SchemaEngine shared across compile + runtime consumers."""
     return _SCHEMA_ENGINE
+
+
+@dataclass(frozen=True)
+class CompiledSkill:
+    """Phase 1+2 pipeline result; graph-node build lands in MVP-3 T5."""
+
+    raw: dict[str, Any]
+    manifest: SkillManifestType
+
+
+def parse_skill_md(text: str) -> dict[str, Any]:
+    """Phase 1: SKILL.md text to a plain raw manifest dict.
+
+    This function performs only textual/YAML splitting and field
+    normalisation. It does not instantiate Pydantic models and does not
+    call SchemaEngine.
+    """
+    if not text.strip():
+        raise SkillLoadError("SKILL.md is empty")
+
+    raw = _to_builtin_dict(_parse_frontmatter(text))
+    if "schema_version" in raw:
+        raw["schema_version"] = str(raw["schema_version"]).strip()
+    _mirror_phase_schema_markdown(raw)
+    return raw
+
+
+def validate_manifest(
+    raw: dict[str, Any],
+    schema_engine: SchemaEngine,
+    io_manager_factory: Callable[[list[IODef]], IOManager],
+) -> SkillManifestType:
+    """Phase 2: raw dict to typed manifest plus compiled schema cache."""
+    from pydantic import TypeAdapter, ValidationError
+
+    from .io_manager import IODef
+    from .manifest import GraphSkillDef, LLMPhase, SkillManifest
+    from .schema_engine import SchemaParseError
+
+    try:
+        manifest = TypeAdapter(SkillManifest).validate_python(raw)
+    except ValidationError as exc:
+        raise SkillCompilationError(f"SkillManifest validation failed: {exc}") from exc
+
+    if not isinstance(manifest, GraphSkillDef):
+        manifest.compiled_schemas = {}
+        return manifest
+
+    compiled: dict[str, Any] = {}
+    try:
+        for phase in manifest.phases:
+            if not isinstance(phase, LLMPhase):
+                continue
+            schema_text = (
+                phase.output_schema_md
+                or phase.output_example_md
+                or phase.output_example
+            )
+            if schema_text:
+                compiled[phase.name] = schema_engine.parse_from_md(schema_text)
+    except SchemaParseError as exc:
+        rule = (
+            "[F-output-example-invalid]"
+            if "output_example" in str(exc)
+            else "[F-schema-invalid]"
+        )
+        raise SkillCompilationError(
+            f"{rule} SchemaEngine validation failed: {exc}"
+        ) from exc
+
+    manifest.compiled_schemas = compiled
+
+    io_specs = _manifest_io_specs(manifest, IODef)
+    io_manager = io_manager_factory(io_specs)
+    errors: list[str] = []
+    for spec in io_specs:
+        ok, spec_errors = io_manager.validate_spec(
+            {
+                "source_field": spec.source_field,
+                "target_field": spec.target_field,
+                "hoist_path": spec.hoist_path,
+                "required": spec.required,
+            }
+        )
+        if not ok:
+            errors.extend(spec_errors)
+    if errors:
+        raise SkillCompilationError(
+            "[F-io-spec-invalid] " + "; ".join(errors)
+        )
+    return manifest
+
+
+class SkillLoader:
+    """Thin Phase 1+2 orchestrator for the MVP-3 loader pipeline."""
+
+    def __init__(
+        self,
+        schema_engine: SchemaEngine | None = None,
+        io_manager_factory: Callable[[list[IODef]], IOManager] | None = None,
+    ) -> None:
+        self._schema_engine = schema_engine or get_schema_engine()
+        if io_manager_factory is None:
+            from .io_manager import IOManager
+
+            def io_manager_factory(specs: list[IODef]) -> IOManager:
+                return IOManager(specs)
+
+        self._io_manager_factory = io_manager_factory
+
+    def compile_skill(self, skill_path: str | Path) -> CompiledSkill:
+        text = Path(skill_path).read_text(encoding="utf-8")
+        raw = parse_skill_md(text)
+        manifest = validate_manifest(
+            raw,
+            self._schema_engine,
+            self._io_manager_factory,
+        )
+        return CompiledSkill(raw=raw, manifest=manifest)
+
+
+def _to_builtin_dict(value: Any) -> dict[str, Any]:
+    converted = _to_builtin(value)
+    if not isinstance(converted, dict):
+        raise SkillLoadError("Frontmatter must be a YAML dictionary")
+    return converted
+
+
+def _to_builtin(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(k): _to_builtin(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_to_builtin(v) for v in value]
+    return value
+
+
+def _mirror_phase_schema_markdown(raw: dict[str, Any]) -> None:
+    phases = raw.get("phases")
+    if not isinstance(phases, list):
+        return
+    for phase in phases:
+        if not isinstance(phase, dict):
+            continue
+        output_example = phase.get("output_example")
+        if isinstance(output_example, str) and "output_example_md" not in phase:
+            phase["output_example_md"] = output_example
+        output_schema = phase.get("output_schema")
+        if (
+            isinstance(output_schema, str)
+            and "output_schema_md" not in phase
+            and _looks_like_schema_markdown(output_schema)
+        ):
+            phase["output_schema_md"] = output_schema
+            phase.pop("output_schema", None)
+
+
+def _looks_like_schema_markdown(value: str) -> bool:
+    stripped = value.strip()
+    return (
+        "\n" in stripped
+        or ":" in stripped
+        or stripped.startswith("{")
+        or "<output_example" in stripped
+    )
+
+
+def _manifest_io_specs(manifest: Any, io_def_cls: type[IODef]) -> list[IODef]:
+    from .manifest import LLMPhase
+
+    specs: list[Any] = []
+    for output in manifest.io.outputs:
+        specs.append(
+            io_def_cls(
+                source_field=output.name,
+                target_field=output.name,
+                hoist_path=output.path,
+                required=True,
+            )
+        )
+    for phase in manifest.phases:
+        if isinstance(phase, LLMPhase) and phase.hoist_to:
+            specs.append(
+                io_def_cls(
+                    source_field="business_data_parsed",
+                    target_field=phase.hoist_to,
+                    required=True,
+                )
+            )
+    return specs
 
 
 def _parse_output_example_or_raise(
@@ -324,8 +516,8 @@ def load_workflow_from_md(
         if not content.strip():
             raise SkillLoadError(f"SKILL.md is empty: {md_path}")
 
-        # Step 1: Parse YAML frontmatter
-        frontmatter = _parse_frontmatter(content)
+        # Phase 1: parse raw SKILL.md text into a plain manifest dict.
+        raw_manifest = parse_skill_md(content)
         # Schema 2.0 is the only supported version. Cohesion plan 方针 2.3
         # (2026-04-26): the loader used to fall off the end of this
         # function for any other ``schema_version``, returning ``None`` —
@@ -338,22 +530,20 @@ def load_workflow_from_md(
         # AttributeError before reaching the version check. Normalise
         # back to the canonical string so downstream Pydantic
         # ``Literal["2.0"]`` validation sees the right type.
-        schema_version = str(frontmatter.get("schema_version") or "").strip()
+        schema_version = str(raw_manifest.get("schema_version") or "").strip()
         if schema_version != "2.0":
             raise SkillLoadError(
                 f"Unsupported schema_version: {schema_version!r} in {md_path}. "
                 'Only schema_version: "2.0" is supported.'
             )
 
-        from pydantic import TypeAdapter
         from .compiler import compile_skill as _compile_check
+        from .io_manager import IOManager
         from .manifest import (
             AgentSkillDef,
             GraphSkillDef,
             PersonaSkillDef,
-            SkillManifest,
         )
-        from .parser import parse_skill_file as _parse_skill_file
 
         compile_result = _compile_check(md_path)
         for w in compile_result.warnings:
@@ -372,9 +562,10 @@ def load_workflow_from_md(
                 f"Skill has {len(compile_result.fatals)} FATAL error(s):\n{detail}",
                 compile_result=compile_result,
             )
-        parsed = _parse_skill_file(md_path)
-        manifest = TypeAdapter(SkillManifest).validate_python(
-            parsed["frontmatter"]
+        manifest = validate_manifest(
+            raw_manifest,
+            get_schema_engine(),
+            lambda specs: IOManager(specs),
         )
         logger.info(
             "Loading schema-2.0 skill '%s' (%s) from %s",
@@ -495,9 +686,10 @@ def _render_skill_section_xml_tags(
 
     output_example = getattr(phase_or_profile, "output_example", None)
     if output_example:
+        phase_name = getattr(phase_or_profile, "name", "unknown")
         schema = _parse_output_example_or_raise(
             output_example,
-            location=f"SKILL.md:phases.{getattr(phase_or_profile, 'name', 'unknown')}.output_example",
+            location=f"SKILL.md:phases.{phase_name}.output_example",
         )
         sections.append(
             "<output_format>\n"

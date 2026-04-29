@@ -97,7 +97,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 # =============================================================================
 # Atomic structures (reused across artifact types / phase modes)
@@ -253,6 +253,8 @@ class LLMPhase(_BasePhase):
     )
     output_schema: str | None = None
     output_example: str | None = None
+    output_schema_md: str | None = None
+    output_example_md: str | None = None
 
 
 class LogicPhase(_BasePhase):
@@ -288,6 +290,7 @@ class _BaseSkill(BaseModel):
     """Shared metadata fields across all three artifact types."""
 
     model_config = ConfigDict(extra="forbid")
+    _compiled_schemas: dict[str, Any] = PrivateAttr(default_factory=dict)
 
     schema_version: Literal["2.0"] = "2.0"
     name: str = Field(min_length=1, max_length=64)
@@ -296,6 +299,15 @@ class _BaseSkill(BaseModel):
     version: str | None = None
     author: str | None = None
     metadata: dict[str, Any] | None = None
+
+    @property
+    def compiled_schemas(self) -> dict[str, Any]:
+        """Phase-2 injected SchemaObject map, keyed by phase name."""
+        return self._compiled_schemas
+
+    @compiled_schemas.setter
+    def compiled_schemas(self, value: dict[str, Any]) -> None:
+        self._compiled_schemas = value
 
 
 class AgentProfile(BaseModel):

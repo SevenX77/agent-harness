@@ -49,12 +49,14 @@ def create_chat_model(
         openai_model = resolved_model or "gpt-4o-mini"
         openai_api_key = api_key or _first_env("OPENAI_API_KEY", "GRAPH_AGENT_API_KEY")
         openai_base_url = base_url or _first_env("OPENAI_BASE_URL", "GRAPH_AGENT_BASE_URL")
-        return ChatOpenAI(
-            model=openai_model,
-            api_key=openai_api_key,
-            base_url=openai_base_url,
+        openai_kwargs: dict[str, Any] = {
+            "model": openai_model,
+            "base_url": openai_base_url,
             **common_kwargs,
-        )
+        }
+        if openai_api_key is not None:
+            openai_kwargs["api_key"] = openai_api_key
+        return ChatOpenAI(**openai_kwargs)
 
     if resolved_provider in {"anthropic", "anthropic_compatible"}:
         try:
@@ -68,11 +70,13 @@ def create_chat_model(
         anthropic_model = resolved_model or "claude-3-5-sonnet-latest"
         anthropic_api_key = api_key or _first_env("ANTHROPIC_API_KEY", "GRAPH_AGENT_API_KEY")
         anthropic_base_url = base_url or _first_env("ANTHROPIC_BASE_URL", "GRAPH_AGENT_BASE_URL")
-        return ChatAnthropic(
-            model=anthropic_model,
-            api_key=anthropic_api_key,
-            base_url=anthropic_base_url,
+        anthropic_kwargs: dict[str, Any] = {
+            "model_name": anthropic_model,
+            "base_url": anthropic_base_url,
             **common_kwargs,
-        )
+        }
+        if anthropic_api_key is not None:
+            anthropic_kwargs["api_key"] = anthropic_api_key
+        return ChatAnthropic(**anthropic_kwargs)
 
     raise ValueError(f"Unsupported chat model provider: {resolved_provider!r}")

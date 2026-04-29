@@ -5,8 +5,9 @@ import re
 import warnings
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import yaml
+import yaml  # type: ignore[import-untyped]  # PyYAML runtime dependency has no local stubs.
 
 # DEPRECATED: DataManager is kept only to avoid breaking existing host
 # projects (story_forge) during the migration window. New code should use
@@ -27,7 +28,29 @@ warnings.warn(
 
 _TS_DIR_RE = re.compile(r"^\d{8}_\d{6}")
 
-from story_forge.core.config import OutputSpec, ProjectConfig
+if TYPE_CHECKING:
+    class OutputSpec:
+        def __init__(
+            self,
+            *,
+            aspect_ratio: str | None = None,
+            resolution: str | None = None,
+            frame_rate: int | None = None,
+        ) -> None: ...
+
+    class ProjectConfig:
+        aspect_ratio: str | None
+        resolution: str | None
+        frame_rate: int | None
+
+        def __init__(self) -> None: ...
+
+        @classmethod
+        def load(cls, path: Path) -> "ProjectConfig": ...
+
+        def save(self, path: Path) -> None: ...
+else:
+    from story_forge.core.config import OutputSpec, ProjectConfig
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _PIPELINE_PATH = _PROJECT_ROOT / "config" / "pipeline.yaml"

@@ -8,6 +8,7 @@ prompt.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,10 @@ def _clean_path(path: str) -> str:
     return cleaned.lstrip("/")
 
 
-def make_read_file_tool(allowed_paths: list[str], base_dir: Path):
+def make_read_file_tool(
+    allowed_paths: list[str],
+    base_dir: Path,
+) -> Callable[[dict[str, Any], str], str]:
     """Create a ``read_file`` callable bound to a skill directory.
 
     The returned tool allows reading explicitly declared reference files

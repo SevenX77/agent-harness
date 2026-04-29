@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from ..compiler import CompileIssue
 
 if TYPE_CHECKING:
-    from ..manifest import GraphSkillDef
+    from ..manifest import GraphSkillDef, LLMPhase
 
 
 _DUPLICATION_MARKERS = (
@@ -78,7 +78,7 @@ def check_prompt_quality(manifest: "GraphSkillDef") -> list[CompileIssue]:
 def _check_prompt_duplication(
     sys_prompt: str,
     user_prompt: str,
-    phase: object,
+    phase: "LLMPhase",
     phase_idx: int,
 ) -> list[CompileIssue]:
     """W-PROMPT-DUPLICATION: longest common substring exceeds 100 chars."""
@@ -127,7 +127,7 @@ def _check_prompt_duplication(
 
 def _check_finish_task_visibility(
     sys_prompt: str,
-    phase: object,
+    phase: "LLMPhase",
     phase_idx: int,
 ) -> list[CompileIssue]:
     """W-FINISH-TASK-VISIBILITY: finish_task buried at end of long step list."""

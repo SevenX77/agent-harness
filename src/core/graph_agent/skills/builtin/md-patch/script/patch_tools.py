@@ -32,7 +32,7 @@ def get_diagnostics(context: dict[str, Any]) -> str:
     """
     report = context.get("diagnostic_report", "")
     logger.info("get_diagnostics: report length=%d chars", len(report))
-    return report
+    return str(report)
 
 
 def apply_field_patch(item_id: str, field: str, value: Any, context: dict[str, Any]) -> str:

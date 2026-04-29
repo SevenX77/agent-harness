@@ -14,7 +14,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -213,6 +213,7 @@ class ModelResolver:
                     role_name,
                 )
                 return self._fallback_to_minimal_factory(role_name, thinking_enabled, **kwargs)
+        assert role_name is not None
 
         errors: list[tuple[str, Exception]] = []
         model_chain: list[tuple[str, str, BaseChatModel]] = []
@@ -292,9 +293,12 @@ class ModelResolver:
                     role_name,
                     " -> ".join(f"{p}/{m}" for p, m, _ in full_chain),
                 )
-                return primary.with_fallbacks(
-                    fallback_models,
-                    exceptions_to_handle=_RUNTIME_FAILOVER_EXCEPTIONS,
+                return cast(
+                    BaseChatModel,
+                    primary.with_fallbacks(
+                        fallback_models,
+                        exceptions_to_handle=_RUNTIME_FAILOVER_EXCEPTIONS,
+                    ),
                 )
             logger.info(
                 "[ModelResolver] Resolved role=%s → %s/%s (single provider)",
@@ -414,7 +418,7 @@ class ModelResolver:
         self,
         name: str | None,
         thinking_enabled: bool | None,
-        **kwargs,
+        **kwargs: Any,
     ) -> BaseChatModel:
         """Call the local minimal chat model factory."""
         from .factory import create_chat_model
@@ -483,7 +487,7 @@ class ModelResolver:
             "max_max_tokens", rp.model_def.min_max_tokens
         )
 
-        kwargs: dict = {
+        kwargs: dict[str, Any] = {
             "model": rp.model_name,
             "base_url": base_url,
             "api_key": api_key,
@@ -540,7 +544,7 @@ class ModelResolver:
             thinking_cfg = {"type": "enabled", "budget_tokens": max(1024, max_tokens // 2)}
             temperature = 1.0  # Anthropic requires temperature=1 when thinking is enabled
 
-        kwargs: dict = {
+        kwargs: dict[str, Any] = {
             "model": rp.model_name,
             "api_key": api_key,
             "base_url": pdef.base_url or None,
@@ -568,7 +572,7 @@ class ModelResolver:
             raise ValueError(f"API key not configured: {pdef.api_key_env}")
 
         try:
-            from langchain_google_genai import ChatGoogleGenerativeAI
+            from langchain_google_genai import ChatGoogleGenerativeAI  # type: ignore[import-not-found]  # Optional Gemini provider extra may be absent.
         except ImportError:
             raise ImportError(
                 "langchain_google_genai not installed. "
@@ -582,7 +586,7 @@ class ModelResolver:
             max_output_tokens=rp.model_def.min_max_tokens,
         )
         _attach_profile(model, rp.model_def)
-        return model
+        return cast(BaseChatModel, model)
 
     # ── Circuit breaker ───────────────────────────────────────────────────
 

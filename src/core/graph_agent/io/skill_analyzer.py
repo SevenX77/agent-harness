@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from ..core.parser import _parse_frontmatter
 
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 # ── Frontmatter parsing ──────────────────────────────────────────────────────
 
 
-def parse_frontmatter(skill_path: str | Path) -> dict:
+def parse_frontmatter(skill_path: str | Path) -> dict[str, Any]:
     """Parse YAML frontmatter from a SKILL.md file.
 
     Args:
@@ -42,4 +43,4 @@ def get_skill_type(skill_path: str | Path) -> str:
         "simple" or "graph"
     """
     fm = parse_frontmatter(skill_path)
-    return fm.get("type", "simple")
+    return str(fm.get("type", "simple"))

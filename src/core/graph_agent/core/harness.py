@@ -22,7 +22,7 @@ import traceback
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
@@ -217,9 +217,10 @@ def _safe_memory_usage_mb() -> float | None:
             exc,
         )
     try:
-        import psutil
+        import psutil  # type: ignore[import-untyped]  # psutil runtime dependency has no local stubs.
 
-        return round(psutil.Process().memory_info().rss / (1024 * 1024), 2)
+        rss = cast(float, psutil.Process().memory_info().rss)
+        return round(rss / (1024 * 1024), 2)
     except Exception as exc:  # noqa: BLE001
         logger.debug(
             "[Harness] psutil memory read failed: %s; heartbeat will emit memory=None",
@@ -602,7 +603,7 @@ class GraphAgentHarness:
             runtime_inputs=dict(effective_runtime_inputs),
             storage_manager=storage_manager,
             artifact_saver=artifact_saver,
-            callbacks=active_callbacks,
+            callbacks=tuple(active_callbacks),
             unattended=bool(unattended),
         )
 
@@ -706,7 +707,7 @@ class GraphAgentHarness:
                         wall_time_seconds=round(time.monotonic() - run_start_monotonic, 3),
                     ),
                 )
-                return result  # type: ignore[return-value]
+                return cast(WorkflowState, result)
 
             # Auto-save outputs via IOManager if configured
             if self._io_config and self._io_config.get("outputs"):
@@ -750,7 +751,7 @@ class GraphAgentHarness:
                     wall_time_seconds=round(time.monotonic() - run_start_monotonic, 3),
                 ),
             )
-            return result  # type: ignore[return-value]
+            return cast(WorkflowState, result)
         except Exception as exc:
             # Tier 1 Commit A — T-B14 InternalErrorEvent at harness.run entry
             _safe_emit_event(
@@ -1024,7 +1025,7 @@ class GraphAgentHarness:
             if hasattr(msg, "tool_calls") and msg.tool_calls:
                 for tc in msg.tool_calls:
                     if tc.get("name") == "request_human_input":
-                        tool_call_id = tc.get("id", "")
+                        tool_call_id = str(tc.get("id") or "")
                         break
                 if tool_call_id:
                     break
@@ -1101,7 +1102,7 @@ class GraphAgentHarness:
             runtime_inputs=restored_runtime_inputs,
             storage_manager=restored_storage_manager,
             artifact_saver=artifact_saver,
-            callbacks=active_callbacks,
+            callbacks=tuple(active_callbacks),
             unattended=state["flow"].unattended,
         )
 
@@ -1131,7 +1132,7 @@ class GraphAgentHarness:
 
         try:
             result = self._graph.invoke(state, config=config)
-            return result  # type: ignore[return-value]
+            return cast(WorkflowState, result)
         except Exception as exc:
             # Tier 1 Commit A — T-B14 InternalErrorEvent at harness.resume
             from ..callbacks.events import InternalErrorEvent

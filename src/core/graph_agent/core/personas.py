@@ -109,7 +109,9 @@ def resolve_persona(
         if not candidate.is_file():
             continue
         parsed = parse_skill_file(candidate)
-        manifest = TypeAdapter(SkillManifest).validate_python(parsed["frontmatter"])
+        manifest: SkillManifest = TypeAdapter(SkillManifest).validate_python(
+            parsed["frontmatter"]
+        )
         if not isinstance(manifest, PersonaSkillDef):
             raise SkillLoadError(
                 f"adopted_persona '{name}' resolved to {candidate}, but its "

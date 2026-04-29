@@ -112,7 +112,7 @@ def run_skill(
     trace_dir: str | Path | None = None,
     thread_id: str | None = None,
     unattended: bool = False,
-    callbacks: list | None = None,
+    callbacks: list[Any] | None = None,
     artifact_saver: Any | None = None,
     initial_context: dict[str, Any] | None = None,
     cleanup_checkpoints_on_finish: bool = True,
@@ -312,7 +312,7 @@ def clear_cache() -> None:
 # ---------------------------------------------------------------------------
 
 
-def main():
+def main() -> None:
     """CLI entry point for running a SKILL.md."""
     import argparse
 

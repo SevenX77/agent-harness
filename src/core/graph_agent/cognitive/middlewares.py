@@ -11,11 +11,6 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
-try:
-    from typing import override
-except ImportError:  # pragma: no cover - Python < 3.12
-    from typing_extensions import override
-
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -23,6 +18,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from pydantic import BaseModel
+from typing_extensions import override
 
 from ..callbacks.base import Callback
 from ..core.state import StateManager, WorkflowState
@@ -83,7 +79,7 @@ def _ensure_summarization_profile(model: Any) -> Any:
     )
 
 
-class WorkingMemoryMiddleware(AgentMiddleware[AgentState]):
+class WorkingMemoryMiddleware(AgentMiddleware[AgentState[Any]]):
     """Inject working memory into the next model call as a reminder message."""
 
     def __init__(
@@ -92,7 +88,7 @@ class WorkingMemoryMiddleware(AgentMiddleware[AgentState]):
         blackboard: dict[str, Any] | None = None,
         context_ref: dict[str, Any] | None = None,
         max_chars: int = 4000,
-    ):
+    ) -> None:
         super().__init__()
         self._blackboard = blackboard or {}
         self._context_ref = context_ref
@@ -107,7 +103,7 @@ class WorkingMemoryMiddleware(AgentMiddleware[AgentState]):
         """Update a blackboard entry."""
         self._blackboard[key] = value
 
-    def get_blackboard(self) -> dict:
+    def get_blackboard(self) -> dict[str, Any]:
         """Get the current blackboard state."""
         return dict(self._blackboard)
 
@@ -136,7 +132,11 @@ class WorkingMemoryMiddleware(AgentMiddleware[AgentState]):
         return "\n".join(wm_lines)
 
     @override
-    def before_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
+    def before_model(
+        self,
+        state: AgentState[Any],
+        runtime: Runtime[Any],
+    ) -> dict[str, Any] | None:
         wm_text = self._build_working_memory_text()
         if not wm_text:
             return None
@@ -161,7 +161,7 @@ class WorkingMemoryMiddleware(AgentMiddleware[AgentState]):
         return {"messages": [reminder]}
 
 
-class DeadEndPruningMiddleware(AgentMiddleware[AgentState]):
+class DeadEndPruningMiddleware(AgentMiddleware[AgentState[Any]]):
     """Detect repeated tool failures and inject a diagnostic warning."""
 
     def __init__(
@@ -170,7 +170,7 @@ class DeadEndPruningMiddleware(AgentMiddleware[AgentState]):
         *,
         callbacks: Sequence[Callback] | None = None,
         phase_name: str | None = None,
-    ):
+    ) -> None:
         super().__init__()
         self._threshold = max(1, threshold)
         self._callbacks = list(callbacks or [])
@@ -211,7 +211,11 @@ class DeadEndPruningMiddleware(AgentMiddleware[AgentState]):
         return tool_name, count, latest_error
 
     @override
-    def before_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
+    def before_model(
+        self,
+        state: AgentState[Any],
+        runtime: Runtime[Any],
+    ) -> dict[str, Any] | None:
         summary = self._summarize_recent_failures(list(state.get("messages", [])))
         if summary is None:
             return None
@@ -246,7 +250,7 @@ class DeadEndPruningMiddleware(AgentMiddleware[AgentState]):
         return {"messages": [HumanMessage(name="dead_end_warning", content=warning)]}
 
 
-class AgentLoopIterationMiddleware(AgentMiddleware[AgentState]):
+class AgentLoopIterationMiddleware(AgentMiddleware[AgentState[Any]]):
     """Emit one AgentLoopIterationEvent at the top of each agent-loop turn.
 
     Tier 2 — T-B4. ``before_model`` fires once per LangGraph-controlled
@@ -267,7 +271,11 @@ class AgentLoopIterationMiddleware(AgentMiddleware[AgentState]):
         self._iteration = 0
 
     @override
-    def before_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
+    def before_model(
+        self,
+        state: AgentState[Any],
+        runtime: Runtime[Any],
+    ) -> dict[str, Any] | None:
         self._iteration += 1
         try:
             from ..callbacks.events import AgentLoopIterationEvent
@@ -289,7 +297,7 @@ class AgentLoopIterationMiddleware(AgentMiddleware[AgentState]):
         return None  # pass-through, no state mutation
 
 
-class ValidationMiddleware(AgentMiddleware[AgentState]):
+class ValidationMiddleware(AgentMiddleware[AgentState[Any]]):
     """Validate ``finish_task`` submissions inside the agent loop.
 
     Pydantic validation and business validators run before the return-direct
@@ -340,7 +348,7 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
         self,
         request: ToolCallRequest,
         exc: TypeError | ValueError,
-    ) -> Command:
+    ) -> Command[Any]:
         error_msg = f"JSON parse failed: {exc}. Please retry with valid JSON."
         tool_name = str(request.tool_call.get("name") or "unknown")
         logger.warning(
@@ -363,7 +371,7 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
             },
         )
 
-    def _args_dict(self, request: ToolCallRequest) -> dict[str, Any] | Command:
+    def _args_dict(self, request: ToolCallRequest) -> dict[str, Any] | Command[Any]:
         args = request.tool_call.get("args", {})
         if isinstance(args, dict):
             return args
@@ -465,7 +473,11 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
                 self.hoist_to,
             )
 
-    def _reject(self, request: ToolCallRequest, errors: list[str] | str) -> Command:
+    def _reject(
+        self,
+        request: ToolCallRequest,
+        errors: list[str] | str,
+    ) -> Command[Any]:
         error_lines = [errors] if isinstance(errors, str) else errors
         content = self._REJECTION_PREFIX + "\n" + "\n".join(error_lines)
         self._emit_validation_fail(error_lines)
@@ -491,7 +503,7 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
             goto="model",
         )
 
-    def _validate_finish_task(self, request: ToolCallRequest) -> Command | None:
+    def _validate_finish_task(self, request: ToolCallRequest) -> Command[Any] | None:
         args = self._args_dict(request)
         if isinstance(args, Command):
             return args
@@ -568,7 +580,7 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
         *,
         business_data_md: str,
         schema: DynamicSchemaDef,
-    ) -> Command | None:
+    ) -> Command[Any] | None:
         if not business_data_md:
             return self._reject(
                 request,
@@ -617,8 +629,8 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
     def wrap_tool_call(
         self,
         request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], ToolMessage | Command],
-    ) -> ToolMessage | Command:
+        handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
+    ) -> ToolMessage | Command[Any]:
         if request.tool_call.get("name") != "finish_task":
             return handler(request)
         rejection = self._validate_finish_task(request)
@@ -630,8 +642,8 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
-    ) -> ToolMessage | Command:
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
+    ) -> ToolMessage | Command[Any]:
         if request.tool_call.get("name") != "finish_task":
             return await handler(request)
         rejection = self._validate_finish_task(request)
@@ -640,7 +652,7 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
         return await handler(request)
 
 
-class UnattendedClarificationMiddleware(AgentMiddleware[AgentState]):
+class UnattendedClarificationMiddleware(AgentMiddleware[AgentState[Any]]):
     """Auto-answer clarification requests when human input is unavailable."""
 
     _TOOL_NAME = "ask_clarification"
@@ -654,7 +666,7 @@ class UnattendedClarificationMiddleware(AgentMiddleware[AgentState]):
         self,
         request: ToolCallRequest,
         exc: TypeError | ValueError,
-    ) -> Command:
+    ) -> Command[Any]:
         error_msg = f"JSON parse failed: {exc}. Please retry with valid JSON."
         tool_name = str(request.tool_call.get("name") or self._TOOL_NAME)
         logger.warning(
@@ -677,7 +689,7 @@ class UnattendedClarificationMiddleware(AgentMiddleware[AgentState]):
             },
         )
 
-    def _args_dict(self, request: ToolCallRequest) -> dict[str, Any] | Command:
+    def _args_dict(self, request: ToolCallRequest) -> dict[str, Any] | Command[Any]:
         args = request.tool_call.get("args", {})
         if isinstance(args, dict):
             return args
@@ -689,7 +701,7 @@ class UnattendedClarificationMiddleware(AgentMiddleware[AgentState]):
             return parsed if isinstance(parsed, dict) else {}
         return {}
 
-    def _auto_response(self, request: ToolCallRequest) -> Command:
+    def _auto_response(self, request: ToolCallRequest) -> Command[Any]:
         args = self._args_dict(request)
         if isinstance(args, Command):
             return args
@@ -723,8 +735,8 @@ class UnattendedClarificationMiddleware(AgentMiddleware[AgentState]):
     def wrap_tool_call(
         self,
         request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], ToolMessage | Command],
-    ) -> ToolMessage | Command:
+        handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
+    ) -> ToolMessage | Command[Any]:
         if (
             not self.unattended
             or request.tool_call.get("name") != self._TOOL_NAME
@@ -736,8 +748,8 @@ class UnattendedClarificationMiddleware(AgentMiddleware[AgentState]):
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
-    ) -> ToolMessage | Command:
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
+    ) -> ToolMessage | Command[Any]:
         if (
             not self.unattended
             or request.tool_call.get("name") != self._TOOL_NAME
@@ -765,9 +777,9 @@ def create_custom_middlewares(
     summarization_model: Any = None,
     summarization_trigger_fraction: float = 0.8,
     summarization_keep_messages: int = 20,
-) -> list[AgentMiddleware]:
+) -> list[AgentMiddleware[AgentState[Any]]]:
     """Create the middleware list for GraphAgent integration."""
-    middlewares: list[AgentMiddleware] = []
+    middlewares: list[AgentMiddleware[AgentState[Any]]] = []
 
     # T-B4: iteration counter goes *first* so its event lands before
     # the WorkingMemory / DeadEnd middlewares' own before_model logic
@@ -819,7 +831,7 @@ def create_custom_middlewares(
             middlewares.append(
                 UnattendedClarificationMiddleware(
                     unattended=True,
-                    phase_name=phase_name,
+                    phase_name=phase_name or "unknown",
                 )
             )
             logger.info(

@@ -7,22 +7,18 @@ from collections.abc import Awaitable, Callable
 from hashlib import sha256
 from typing import Any
 
-try:
-    from typing import override
-except ImportError:  # pragma: no cover - Python < 3.12
-    from typing_extensions import override
-
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import ToolMessage
 from langgraph.graph import END
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
+from typing_extensions import override
 
 logger = logging.getLogger(__name__)
 
 
-class ClarificationMiddlewareState(AgentState):
+class ClarificationMiddlewareState(AgentState[Any]):
     """Compatible state schema for clarification-only middleware."""
 
 
@@ -67,7 +63,7 @@ class ClarificationMiddleware(AgentMiddleware[ClarificationMiddlewareState]):
 
         return "\n".join(message_parts)
 
-    def _handle_clarification(self, request: ToolCallRequest) -> Command:
+    def _handle_clarification(self, request: ToolCallRequest) -> Command[Any]:
         args = request.tool_call.get("args", {})
         if not isinstance(args, dict):
             args = {}
@@ -91,8 +87,8 @@ class ClarificationMiddleware(AgentMiddleware[ClarificationMiddlewareState]):
     def wrap_tool_call(
         self,
         request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], ToolMessage | Command],
-    ) -> ToolMessage | Command:
+        handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
+    ) -> ToolMessage | Command[Any]:
         if request.tool_call.get("name") != "ask_clarification":
             return handler(request)
         return self._handle_clarification(request)
@@ -101,8 +97,8 @@ class ClarificationMiddleware(AgentMiddleware[ClarificationMiddlewareState]):
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
-    ) -> ToolMessage | Command:
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
+    ) -> ToolMessage | Command[Any]:
         if request.tool_call.get("name") != "ask_clarification":
             return await handler(request)
         return self._handle_clarification(request)

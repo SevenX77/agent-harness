@@ -174,10 +174,12 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
     # as fatals here too so static compile catches them before runtime.
     from pydantic import TypeAdapter, ValidationError
 
-    from .manifest import GraphSkillDef, SkillManifest
+    from .manifest import AgentSkillDef, GraphSkillDef, PersonaSkillDef, SkillManifest
 
     try:
-        manifest = TypeAdapter(SkillManifest).validate_python(frontmatter)
+        manifest: AgentSkillDef | GraphSkillDef | PersonaSkillDef = TypeAdapter(
+            SkillManifest
+        ).validate_python(frontmatter)
     except ValidationError as ve:
         for err in ve.errors():
             loc_tuple = err.get("loc", ())

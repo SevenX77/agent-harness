@@ -229,7 +229,7 @@ class IOManager:
         """
         import re
 
-        def replace_placeholder(match):
+        def replace_placeholder(match: re.Match[str]) -> str:
             placeholder = match.group(1)
             if placeholder.startswith("context."):
                 key = placeholder[8:]  # Remove "context." prefix

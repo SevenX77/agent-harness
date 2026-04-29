@@ -11,6 +11,9 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import pytest
+from pydantic import BaseModel, Field
+
 from graph_agent.callbacks.base import Callback
 from graph_agent.core.phase_executor import PhaseExecutor
 from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
@@ -191,6 +194,208 @@ class TestExecuteCodeOnlyPhase:
         name, ctx_snap, metrics_snap = cb.ends[0]
         assert name == "prep"
         assert metrics_snap == {"tokens": 42}
+
+
+class TestExecuteCodeOnlyPhaseDictMergePhase2A3:
+    """Phase 2 A3 contract: code-only tool dict returns merge into BusinessData
+    (no longer silently dropped); ``_``-prefixed keys raise RuntimeError;
+    ``output_schema`` triggers Pydantic validation. See PHASE2_DESIGN.md §4.2.
+    """
+
+    def test_dict_result_merges_into_business_data(self):
+        def tool_dict(data: BusinessData) -> dict[str, Any]:
+            return {"title": "Opening", "score": 7}
+
+        phase = Phase(name="prep", requires_llm=False, tools=[tool_dict])  # type: ignore[list-item]
+        executor = PhaseExecutor([])
+        state_out = executor.execute_code_only_phase(phase, _make_state(data={"x": 1}))
+
+        merged = state_out["data"].model_dump()
+        # Pre-existing field preserved + tool dict fields merged.
+        assert merged["x"] == 1
+        assert merged["title"] == "Opening"
+        assert merged["score"] == 7
+        # Dict path leaves last_output untouched (str path is what sets it).
+        assert state_out["flow"].last_output is None
+
+    def test_dict_result_with_reserved_key_raises_runtime_error(self):
+        def tool_dict(data: BusinessData) -> dict[str, Any]:
+            return {"good": 1, "_metrics": {"tokens": 99}, "_phase_internal": True}
+
+        phase = Phase(name="prep", requires_llm=False, tools=[tool_dict])  # type: ignore[list-item]
+        executor = PhaseExecutor([])
+
+        with pytest.raises(RuntimeError) as exc_info:
+            executor.execute_code_only_phase(phase, _make_state())
+
+        message = str(exc_info.value)
+        assert "Phase 2 A3" in message
+        # Both reserved keys must surface in the diagnostic, sorted.
+        assert "_metrics" in message
+        assert "_phase_internal" in message
+        assert "tool_dict" in message  # function name included for debuggability
+        assert "prep" in message  # phase name included
+
+    def test_dict_result_with_output_schema_runs_pydantic_validate(self):
+        class CodePhaseOutput(BaseModel):
+            title: str = Field(min_length=1)
+            score: int = Field(ge=0, le=10)
+
+        def tool_dict(data: BusinessData) -> dict[str, Any]:
+            return {"title": "Opening", "score": 7}
+
+        phase = Phase(
+            name="prep",
+            requires_llm=False,
+            tools=[tool_dict],  # type: ignore[list-item]
+            output_schema=CodePhaseOutput,
+        )
+        executor = PhaseExecutor([])
+        state_out = executor.execute_code_only_phase(phase, _make_state())
+
+        merged = state_out["data"].model_dump()
+        assert merged["title"] == "Opening"
+        assert merged["score"] == 7
+
+    def test_dict_result_failing_output_schema_raises_validation(self):
+        class CodePhaseOutput(BaseModel):
+            title: str = Field(min_length=1)
+            score: int = Field(ge=0, le=10)
+
+        def tool_bad(data: BusinessData) -> dict[str, Any]:
+            return {"title": "", "score": 99}  # both fields violate constraints
+
+        phase = Phase(
+            name="prep",
+            requires_llm=False,
+            tools=[tool_bad],  # type: ignore[list-item]
+            output_schema=CodePhaseOutput,
+        )
+        executor = PhaseExecutor([])
+
+        # Pydantic raises ValidationError; the executor lets it propagate so
+        # callers can see the precise field-level diagnostic instead of a
+        # silent truncation of the offending dict.
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            executor.execute_code_only_phase(phase, _make_state())
+
+    def test_dict_with_output_schema_and_reserved_key_raises(self, caplog):
+        """PHASE2_DESIGN.md §4.4 must-pass case (a1 v1 NO_RAISE probe).
+
+        With ``output_schema`` configured, Pydantic's default ``extra='ignore'``
+        would silently drop ``_metrics`` if validation ran first. The A3 v2
+        contract orders the reserved-key check BEFORE validation so the
+        injection raises ``RuntimeError`` and never reaches the schema.
+        """
+
+        class CodeOut(BaseModel):
+            # extra defaults to "ignore" — exactly the trap §4.4 calls out.
+            title: str
+
+        def tool_attack(data: BusinessData) -> dict[str, Any]:
+            return {"title": "ok", "_metrics": {"latency": 100}}
+
+        phase = Phase(
+            name="prep",
+            requires_llm=False,
+            tools=[tool_attack],  # type: ignore[list-item]
+            output_schema=CodeOut,
+        )
+        executor = PhaseExecutor([])
+
+        with caplog.at_level(logging.ERROR, logger="graph_agent.core.phase_executor"):
+            with pytest.raises(RuntimeError) as exc_info:
+                executor.execute_code_only_phase(phase, _make_state())
+
+        message = str(exc_info.value)
+        assert "Phase 2 A3" in message
+        assert "_metrics" in message, (
+            "reserved-key diagnostic must surface '_metrics' even when "
+            "output_schema is set — Pydantic extra=ignore must not eat it."
+        )
+        assert "tool_attack" in message
+        assert "prep" in message
+
+        # The error log must record the reject decision before any
+        # ``code_only_dict_validate`` event — i.e. validate never ran.
+        decisions = [rec.message for rec in caplog.records]
+        reject_idx = next(
+            (i for i, m in enumerate(decisions) if "code_only_dict_merge" in m and "decision=reject" in m),
+            None,
+        )
+        validate_idx = next(
+            (i for i, m in enumerate(decisions) if "code_only_dict_validate" in m),
+            None,
+        )
+        assert reject_idx is not None, "reject decision must be logged"
+        assert validate_idx is None, (
+            "code_only_dict_validate must NOT log when reserved-key check "
+            "rejects the raw dict — validate is supposed to be skipped."
+        )
+
+    def test_non_dict_non_str_result_is_no_op(self):
+        # ``None`` / ``int`` / ``list`` returns must not touch state — only
+        # ``str`` (legacy ``last_output``) and ``dict`` (A3) have explicit
+        # contracts. Other types are a no-op so existing tools that mutate
+        # ``BusinessData`` directly remain unaffected.
+        def tool_none(data: BusinessData) -> None:
+            return None
+
+        def tool_int(data: BusinessData) -> int:
+            return 42
+
+        def tool_list(data: BusinessData) -> list[int]:
+            return [1, 2, 3]
+
+        phase = Phase(
+            name="prep",
+            requires_llm=False,
+            tools=[tool_none, tool_int, tool_list],  # type: ignore[list-item]
+        )
+        executor = PhaseExecutor([])
+        state_out = executor.execute_code_only_phase(phase, _make_state(data={"x": 1}))
+
+        assert state_out["data"].model_dump() == {"x": 1}
+        assert state_out["flow"].last_output is None
+
+    def test_dict_merge_logs_decision_for_observability(self, caplog):
+        def tool_dict(data: BusinessData) -> dict[str, Any]:
+            return {"title": "Opening"}
+
+        phase = Phase(name="prep", requires_llm=False, tools=[tool_dict])  # type: ignore[list-item]
+        executor = PhaseExecutor([])
+
+        with caplog.at_level(logging.INFO, logger="graph_agent.core.phase_executor"):
+            executor.execute_code_only_phase(phase, _make_state())
+
+        merge_log = next(
+            (rec for rec in caplog.records if "code_only_dict_merge" in rec.message),
+            None,
+        )
+        assert merge_log is not None, "merge decision must emit an info log"
+        assert "decision=apply" in merge_log.message
+        assert "tool=tool_dict" in merge_log.message
+
+    def test_reserved_key_rejection_logs_error(self, caplog):
+        def tool_dict(data: BusinessData) -> dict[str, Any]:
+            return {"_secret": "x"}
+
+        phase = Phase(name="prep", requires_llm=False, tools=[tool_dict])  # type: ignore[list-item]
+        executor = PhaseExecutor([])
+
+        with caplog.at_level(logging.ERROR, logger="graph_agent.core.phase_executor"):
+            with pytest.raises(RuntimeError):
+                executor.execute_code_only_phase(phase, _make_state())
+
+        reject_log = next(
+            (rec for rec in caplog.records if "code_only_dict_merge" in rec.message),
+            None,
+        )
+        assert reject_log is not None, "rejection must emit an error log"
+        assert "decision=reject" in reject_log.message
+        assert "_secret" in reject_log.message
 
 
 class TestPhaseExecutorIoHoistT7Bis:

@@ -110,24 +110,34 @@
 
 ### 4.2 修复契约
 **显式合并与越界拒绝**：
-- 如果 code-only phase 有 `output_schema`，返回的 `dict` 必须过一次 Pydantic Validate。
-- 如果没有 `output_schema`，返回的 `dict` 作为临时状态更新合并入 `ctx`。如果出现框架保留字（如以 `_` 开头）的越界写，必须抛出 `RuntimeError`，决不能直接 `pass` 或仅仅 `logger.debug`。
+- 如果 code-only phase 返回的 `dict` 包含框架保留字（如以 `_` 开头），这代表尝试越界覆写框架状态，必须抛出 `RuntimeError`，决不能直接 `pass` 或仅仅 `logger.debug`。
+- 如果配置了 `output_schema`，返回的 `dict` 还需通过 Pydantic Validate 强校验。
 
 ### 4.3 实施步骤 (a3 Action Items)
 1. **修改 Code Phase 处理** (`phase_executor.py` -> `execute_code_only_phase`)
+   必须严格遵循 §4.4 定义的检查顺序，确保保留字检查发生在 validate 之前。
    ```python
    result = code_func(ctx)
    if isinstance(result, dict):
-       # 1. 如果配置了 schema，走 schema 强校验
-       if phase.output_schema:
-           result = SchemaEngine.validate(result, phase.output_schema)
-       # 2. 防止破坏框架层保留字
+       # 1. 先检查 reserved key (必须在 validate 之前！)
        invalid_keys = [k for k in result.keys() if k.startswith('_')]
        if invalid_keys:
-           raise RuntimeError(f"Code phase returned invalid reserved keys: {invalid_keys}")
+           raise RuntimeError(f"Code phase '{phase.name}' returned reserved keys: {invalid_keys}")
+       
+       # 2. 再走 schema validate (Pydantic 默认 extra=ignore 不影响，因为 reserved 已 raise)
+       if phase.output_schema:
+           result = SchemaEngine.validate(result, phase.output_schema)
+           
        # 3. 合并到 State
        next_state = StateManager.update_business(state, **result)
    ```
+
+### 4.4 检查顺序契约 (Runtime Check Ordering)
+**强制契约**：对于 code-only phase 返回结果的校验，**保留字检查必须发生在 Pydantic schema validation 之前**。
+
+*   **理由**：Pydantic 的默认行为是 `extra='ignore'`。如果先执行 validate，所有不在 schema 定义中的字段（包括以 `_` 开头的非法越界字段如 `_metrics`）都会被 Pydantic 静默丢弃，导致后续的 reserved key 检查落空。这种 silent failure 严重违反了框架的 "fail-loud" 铁律。
+*   **保留字定义**：任何以单下划线 `_` 开头的 key（包括 dunder methods 如 `__xxx__`）均视为框架保留字，业务逻辑无权通过直接返回的方式覆盖它们。
+*   **Helper 入参签名**：处理提取和验证的辅助函数，其入参的类型提示必须使用精确签名如 `result: object` 或 `Callable[..., object]`，**严禁使用 `Any`**。
 
 ---
 
@@ -151,6 +161,7 @@ a1 进行验收时，需严格比对以下指标：
    - `pytest` 维持 baseline 全过 (870+，A1 v2 引入新 case 后期望 875+)。对于因 `SkillCompileError` (由于缺乏 Schema) 导致的不合规 SKILL 编译失败，视为**预期的正常阻断**，不计入 baseline 退步。
    - **每个 live SKILL 的 validator 必须有 runtime smoke test** (不止 compile gate)。a3 实施时必须为涉及的每个 live SKILL 写对应的 runtime smoke test。
    - smoke test 必须模拟 `ValidationMiddleware` schema 分支真实数据流，验证 validator 接到的 payload 形状跟 `SKILL.md` 声明的 `output_schema` 类型完全一致。
+   - **强制 A3 验证用例**：必须验证 **dict + output_schema + _reserved_key** 的组合 case。确保在存在 schema 的分支下，即使 Pydantic 的 extra=ignore 机制存在，非法注入 `_metrics` 等保留字的行为也必须 raise `RuntimeError`，决不能被静默丢弃。
    - 覆盖率 `pytest --cov` 不能低于 71.25%。
 3. **消除静默失败代码**：检索 `phase_executor.py`，不得存在任何空 `except:`。
 4. **无旧中间件残留**：`phase_executor.py` 执行流中不再出现遗留的 `ValidationMiddleware`。

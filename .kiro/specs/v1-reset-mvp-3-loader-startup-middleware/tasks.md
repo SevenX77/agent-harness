@@ -227,7 +227,7 @@ T2 (2h, a1) ─────────┴→ T3 (2h, a3) → T4 (2h, a1) → T5
   - middleware 改造后, 旧 mock middleware 的测试改为 mock 4 核心 middleware
   - `conftest.py` 加 middleware 拓扑序回归测试 (research D3 + design §5.6)
 - **验收**:
-  - pytest 全过 (--ignore test_strict_v2)
+  - pytest 全过 (--ignore=tests/graph_agent/core/validators/test_strict_v2.py)
   - test_strict_v2 14 pre-existing failures 仍 isolated
   - middleware 拓扑序测试 (`test_middleware_topological_order`) 在 conftest.py 存在并通过
 

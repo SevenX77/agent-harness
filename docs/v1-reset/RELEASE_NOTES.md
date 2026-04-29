@@ -1,49 +1,89 @@
-# graph_agent 1.0.0 — v1-reset Major Release
+# graph_agent v1-reset (Phase 1) — 核心引擎基建就绪
 
 ## TL;DR
-`graph_agent 1.0.0` 是框架自诞生以来最彻底的一次重构。通过 `v1-reset` 序列的 5 个 MVP 阶段，我们斩断了所有的架构债务，将框架从“动态字典脚本”进化为“强类型图引擎”。此版本确立了未来三年的核心接口契约，实现了 16 个工程/架构维度的全面达标。
+
+本次发布 (`feat/v1-reset-mvp-1` 分支, `5decd0a..HEAD` 共 38 commits) 落盘了 v1-reset 6-MVP roadmap 中的 **MVP-1 + MVP-2 + MVP-3** 三个阶段，对应"状态拆解 / 独立基础设施 / 加载与中间件模块边界"。这是一次**架构过渡期 (Phase 1)** 的中间发布——核心类型安全组件已就绪并就位，但执行控制流仍由 legacy `phase_executor` 驱动。**v1.0.0 的全盘替换将在 MVP-4 + MVP-5 完成**。
+
+请将本次发布理解为"地基稳了，上层结构未半"，不要按终态 1.0.0 期待。
 
 ---
 
-## 用户感知改变 (UX for Skill Authors)
+## 本次落盘的工作
 
-对于 SKILL 作者和调用方而言，1.0.0 版本标志着“黑盒调试时代”的终结：
+### MVP-1: WorkflowState 物理拆分
 
-1. **确定性命名空间**：你再也不用担心 `_md_id` 或 `_finish_task_result` 等下划线变量出现在你的业务逻辑中。业务数据（`BusinessData`）与框架状态（`FrameworkState`）已完成物理隔离。
-2. **工具签名强类型化**：自定义工具现在接收 `BusinessData` 对象而非 `dict`。你可以像操作 Pydantic 模型一样使用 `data.field`，并享受 IDE 的自动补全。
-3. **编译期全量校验**：Schema 解析从运行时提前到了加载期。如果你的 `output_schema` 或 `io.outputs` 路径写错，框架会在启动的第一秒告诉你，而不是在 LLM 运行半小时后崩溃。
-4. **纯净的系统提示词**：得益于 `SchemaEngine` 的重画，注入给 LLM 的 Schema 描述更紧凑、更符合 Markdown 规范，显著提升了 LLM 在复杂任务下的遵循率。
-5. **干净的异常输出**：告别数百行的 Python Traceback。当 Phase 失败或验证中断时，你会收到结构化的领域异常（如 `PhaseExecutionError`），精准定位问题 Phase 和原因。
+- 引入 `BusinessData` (extra=allow，承载 SKILL 业务字段) 与 `FrameworkState` (extra=forbid，23 字段，承载 finish_task_result / io_errors / retry_feedback / nudge_counts / history_results 等框架元数据)，与 `messages` 共同组成新的 3-key `WorkflowState` TypedDict
+- `StateManager` 提供 `update_business / update_framework / route_finish_task` 三类型化 helper 替代直接 `state["context"][...] = ...` dict mutation
+- 拦截层（`StateManager` + `ProtocolValidationMiddleware`）已就位，保证 `state["data"]` 内不再夹带 `_` 前缀的框架元数据
 
-### Breaking Changes
-- **SKILL.md 强制升级**：必须声明 `schema_version: "2.0"`。
-- **Mode 语义变更**：`mode: code_only` 已更名为 `mode: logic`；`validator` 字段现仅接受接收 `BusinessData` 对象的函数。
-- **API 变更**：`Harness.run()` 签名重画，不再支持散装的 `**kwargs` 透传，统一使用 `RunConfig`。
-- **状态不兼容**: 旧版本的 LangGraph Checkpoint 数据将无法在 1.0.0 模型下加载。
+### MVP-2: SchemaEngine + IOManager 抽出
 
-### Deprecation & Removal
-- **砍除功能**：暂时移除 `parallel_delegate`、`subgraph`、多模态工具（Multimodal）及实验性的 `Summarization` 逻辑。这些功能将在 v2 版本以更优雅的 LangGraph Send API 形式回归。
-- **文件清理**：`phase_executor.py` 上帝类已物理删除，被拆解为基于 LangGraph 节点多态的执行引擎；旧的 `StateManager` 辅助类已废弃。
+- `SchemaEngine.parse_from_md` → `SchemaObject` → `get_pydantic_model` / `validate` / `get_json_schema` 收口（lru_cache 128，`SchemaParseError` 统一异常出口）
+- `IOManager.io_specs` + `resolve_hoist` → `HoistResult`，`io_errors` 改为实例级累积器（替代之前散落在 `context["_io_errors"]` 的写法）
+- `ContextBridge.to_business_data_schema(schema_engine)` 让 `adopted_persona` 子树也走统一引擎
+- `finish.py` 接入 `SchemaEngine` + `IOManager`，`md_to_json.parse_md` 区分"格式合法的空"vs"解析失败"，`business_data_parsed: list[dict]` 取代之前直接把 markdown 字符串塞进 validator 的旧路径
 
----
+### MVP-3: Loader 三阶段 Pipeline + 4 middleware 模块化
 
-## 框架架构改进 (Maintainer's View)
-
-### 16-Dim Audit 进化
-- **起点状态 (2026-04-28)**: 综合评分 6.1/10。存在 God Module、无类型字典透传、魔法变量污染等 13 项 must-fix。
-- **最终状态 (1.0.0)**: **综合评分 ≥ 8.5/10**。核心维度（类型安全、接口一致性、数据流管理）实现 10/10 满分，所有 must-fix 清零。
-
-### 5 MVP 阶段成就回顾
-- **MVP-0 (基石清创)**: 删除了 5k+ 行冗余代码及 vendored 依赖，确立单一异常源。
-- **MVP-1 (状态拆解)**: 完成 WorkflowState 物理拆分，消除了 17 个魔法前缀字段，建立了 Pydantic 驱动的二级状态模型。
-- **MVP-2 (独立基础设施)**: 抽出 `SchemaEngine` 与 `IOManager`，实现 Schema 解析路径的 5 合 1 统一收口与安全的数据搬运。
-- **MVP-3 (加载与模块边界)**: Loader 演化为 3 阶段 Pipeline (parse → validate → build)，剥离高耦合的正则解析；建立 `ModuleSandbox` 隔离 `sys.modules`，清理了所有启动期的环境变量副作用。
-- **MVP-4 (执行核心重多态化)**: 彻底拆解上帝类，确立节点流转接口，将 `finish_task` 通道安全桥接到 `BusinessData`。
-- **MVP-5 (接口固化)**: 锁定 `harness.run` 契约，完成全库工程门禁的最后收敛。
+- `SkillLoader` god class 拆为三阶段 Pipeline (`parse_skill_md` → `validate_manifest` → `build_graph_nodes`)
+- 引入 `Bootstrap` 模块统一 `apply_patches() / load_settings()` / `Settings.from_env()`，`runner.main()` 启动期不再调散落的 `os.environ[...]` 副作用
+- 新增 `graph_agent.middleware` 包含 4 个单职责中间件类：
+  - `ProtocolValidationMiddleware` (T7) — 状态契约守卫 (BusinessData / FrameworkState / SchemaEngine.validate)
+  - `CognitiveFlowMiddleware` (T8) — finish_task 拦截 + Clarification 路由
+  - `ExecutionControlMiddleware` (T9) — 迭代计数 / dead-end pruning / 轻量 loop 检测 / metrics 聚合
+  - Logging slot 4 预留 (设计 §5.6)
+- `DEFAULT_MIDDLEWARE_ORDER: tuple[type, ...]` 拓扑序锁住 (`tests/graph_agent/middleware/test_chain_topology.py` 钉死)
 
 ---
 
-## Migration Guide
+## 真实指标 (限本次新增模块)
+
+| 指标 | 数据 | 备注 |
+| :--- | :--- | :--- |
+| `SchemaEngine` 单测覆盖率 | **95.20%** | `tests/graph_agent/core/test_schema_engine.py` 51+ tests |
+| `IOManager` 单测覆盖率 | **98%** | `tests/graph_agent/io/test_io_manager.py` 11 新 tests |
+| `BusinessData` / `FrameworkState` 物理拆分 | **完成** | 拦截层（StateManager + ProtocolValidationMiddleware）0 污染回退 |
+| Loader 三阶段拆分 | **完成** | `parse_skill_md / validate_manifest / build_graph_nodes` 三模块就位 |
+| 中间件 4-模块化 | **3/4 就位 + 1 slot 预留** | `DEFAULT_MIDDLEWARE_ORDER` 拓扑序锁住 |
+| 新增模块 mypy --strict | **zero issues** | 仅适用本次新增的 16 文件（`schema_engine.py` / `state.py` / `middleware/*.py` / `loader pipeline 三模块` 等） |
+| MVP-2 集成测试 | **14 tests** | `tests/graph_agent/integration/test_mvp2_schema_io.py` |
+| MVP-1 e2e smoke (compile + invariants 层) | **9 tests pass** | `tests/graph_agent/integration/test_mvp1_smoke.py` |
+
+> 这里的指标**只针对本次新增 / 重画的模块**。**全库 ruff / mypy / coverage 统计仍有历史 baseline 残留**，未在本次清零，不在此声称。
+
+---
+
+## Known Limitations / Pending MVP-4 & MVP-5
+
+当前版本为架构过渡期 (Phase 1)。新引擎的类型安全组件已就绪并处于影子/并行校验模式，实际控制流暂由 legacy `phase_executor` 驱动。v1.0.0 的全盘替换将在 MVP-4 + MVP-5 完成：
+
+### MVP-4 待办
+- 重画 `phase_executor.py` while 循环消费新 `PhaseNode` + Middleware
+- 物理抹除 `cognitive/middlewares.py` 与 `cognitive/clarification_middleware.py` (当前仍被 `phase_executor.py:610/625` 直接 import 使用，是 T11 砍除被推迟到 MVP-4 的根因)
+- `context["_X"]` 残留 12 处（分布在 `harness.py` / `cognitive/ambiguity.py` / `cognitive/memory.py` / `tools/builtin/context_access.py` / `tools/md_to_json.py` 等）随 phase_executor 重画一并迁移到 `FrameworkState`
+- T12 集成压测：4 SKILL e2e (text-segmentation / event-extraction / batch-analysis / global-synthesis) + Loop detection 边界 + 启动延迟 ≥ 20% 改善
+
+### MVP-5 待办
+- 全库 ruff 69 errors 拍平（`personas.py` F821 + UP037 已在本 PR 修，余 68 推 MVP-5）
+- 全库 mypy --strict (核心目录之外的非新增文件)
+- coverage 提升至全库 ≥ 95% 的目标
+- 最终 release notes 升级为 1.0.0，正式宣发"v1-reset 完整 ship"
+
+---
+
+## 不在本次发布范围内的事
+
+为避免误读，明确声明本次**没有**做以下事情，不要按 1.0.0 终态指标审核：
+
+- ❌ "全库 0 ruff warnings" — 全库 ruff 仍有 baseline warning，未清零
+- ❌ "全库 95% coverage" — 仅新增模块达标
+- ❌ "全库 0 `context['_X']` 残留" — 仍有 12 处残留，分布在 cognitive / tools / harness
+- ❌ "MVP-4 / MVP-5 已完成" — phase_executor 重画推 MVP-4
+- ❌ "1.0.0 final release" — 本次为 Phase 1 中间发布
+
+---
+
+## Migration Guide (本次落盘部分)
 
 ### 1. SKILL.md 升级路径
 ```yaml
@@ -51,7 +91,7 @@
 mode: code_only
 output_schema: ... # 散装解析
 
-# v3 (1.0.0 Standard)
+# v3 (本次落盘版本可消费的 schema_version 2.0)
 schema_version: "2.0"
 skill_type: graph
 phases:
@@ -60,54 +100,17 @@ phases:
 ```
 
 ### 2. 调用方升级 (Harness API)
-```python
-# 旧写法
-harness.run({"input": "data"}, unattended=True)
 
-# 1.0.0 写法
-from graph_agent.core import RunConfig
-config = RunConfig(thread_id="xxx", unattended=True)
-harness.run(config, initial_data=BusinessData(input="data"))
-```
+`Harness.run` 签名在本次重画中**未**最终锁定（这是 MVP-5 的工作）。当前调用方继续按既有 signature 使用即可，1.0.0 正式发布时会一次性宣发 API 契约。
 
 ### 3. 数据迁移警告
-由于 `WorkflowState` 的顶层字段从 `context` 彻底变更为 `data` 和 `flow`，旧版本的 msgpack checkpoint 将在反序列化时失败。升级后必须废弃或清空旧的检查点存储。
+
+由于 `WorkflowState` 顶层字段从 `context` 拆分为 `data` (业务) + `flow` (框架) + `messages`，旧版本 LangGraph checkpoint 在新模型下反序列化将失败。Phase 1 阶段建议清空旧 checkpoint 存储后再使用。
 
 ---
 
-## Internal 质量改进 & Release Checklist
+## AI 协作模式致谢
 
-v1.0.0 发布前已满足以下全部基线门禁（Ship Checklist）：
-- **E2E Smoke & 4 SKILL 编译**: 生产级 SKILL 双层架构回归测试通过（0 token cost 覆盖）。
-- **Dict-mutation 根除**: 核心逻辑中 `context["_X"] = ...` 站点数从 26 降至 **0**。
-- **Mypy Strict**: 全库（含核心目录 `src/core/graph_agent/core/`）100% type-safe。
-- **Ruff**: 全库 Lint 及 Format 校验零警告。
-- **Coverage**: 核心层（`core/`, `io/`, `cognitive/`）单测覆盖率 **≥ 95%**。
-- **CI 流水线**: 确立 fail-fast 机制，任何类型退化或覆盖率跌落的 PR 将无法合入主干。
+本次 38 commits 由 a1 (codex executor) / a2 (gemini analyst+reviewer) / a3 (claude executor 副) / 主控 Claude (orchestrator+designer) 通过 CCB 异步协作完成。
 
----
-
-## Known Issues & Future Work
-
-### 暂未包含的功能 (Deferred)
-- **Parallel Delegate v2**: 计划在 v1.1 通过 LangGraph 的原生分布式 Send API 重做。
-- **Multimodal 增强**: 多模态能力的结构化集成已列入 v1.2 规划。
-- **Studio 可视化**: 1.0.0 已提供完整的状态监听接口，Studio 适配器正在并行开发。
-
-### 长期演进
-- 动态 Schema 进化支持 (v1.5+)。
-- 跨 Agent 复杂协议栈 (v2.0 规划)。
-
----
-
-## AI 协作模式致谢 (Acknowledgements)
-
-`graph_agent 1.0.0` 是首个完全通过 **多 Agent 异步并行流水线** 重构的大型框架。共计执行 35+ 个精细化 Commits。
-
-- **Claude Opus 4.7 (Orchestrator)**: 负责全局调度、MVP 切分及规约编写。
-- **Codex GPT-5.5 xhigh (Heavy Impl)**: 完成了 Loader、Executor、SchemaEngine 等重型模块的万行代码重写。
-- **Gemini 3.1 Pro Preview (Architect)**: 提供了 5 次深度架构审计、独立设计方案及偏离度审查，守住了 10/10 的质量底线。
-
-**效能数据**：
-- **总工时**：从预估的 21 天（单人）缩短至实测的 4 天（AI 集群并行）。
-- **重构深度**：平均每个子任务触发了 4-5 轮交叉 Review，确保了 1.0.0 版本的工业级稳健性。
+`v1-reset (Phase 1)` 是首个完全通过 **多 Agent 异步并行流水线** 重构的 graph_agent 大版本。在 Phase 2 (MVP-4 + MVP-5) 完成后，将发布 1.0.0 final 时再做完整效能数据复盘。

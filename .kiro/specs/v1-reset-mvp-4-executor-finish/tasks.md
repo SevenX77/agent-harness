@@ -231,7 +231,7 @@ T1 (1h, a1) ────────┴→ T2 (3h, a1) ────────�
   - 4 SKILL e2e mock test 改造跟新 Node 接口
   - LoopDetection / Nudge 边界测试通过新 Command 路由还原 (Gemini Part G 验收 #3)
 - **验收**:
-  - pytest 全过 (--ignore test_strict_v2)
+  - pytest 全过 (--ignore=tests/graph_agent/core/validators/test_strict_v2.py)
   - test_strict_v2 14 pre-existing failures 仍 isolated
   - LoopDetection 测试通过新 Command 路由仍能检测同一 phase 连续重复 N 次的场景
   - Nudge 边界测试 (planning / selfcheck / standard 三场景) 全过

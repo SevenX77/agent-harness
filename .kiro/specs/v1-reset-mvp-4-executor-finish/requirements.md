@@ -113,7 +113,7 @@ Phase 结束前, **不**有任何其他模块写 `state["data"]` (单线路径)�
 - `phase_executor.py` 物理删除 (file 不存在)
 - `nodes/*.py` 总 SLOC ≤ 600 (vs 原 phase_executor 532 行 + 散落的 NudgeInjector / Compaction 等), 但每个 nodes/*.py 单文件 ≤ 250 行
 - `state["data"]` 在 finish.py / nodes / middleware 之外被赋值的位置 = 0 (single-write 路径)
-- pytest 全过 (--ignore test_strict_v2)
+- pytest 全过 (--ignore=tests/graph_agent/core/validators/test_strict_v2.py)
 - 4 SKILL compile 状态不变, e2e smoke 跑 1 chapter 不破裂
 - 4 SKILL persona 渲染 byte-equal (跟 MVP-3 baseline 比)
 - LoopDetection / Nudge 边界测试通过新 Command 路由还原 (Gemini Part G 验收 #3)

@@ -349,7 +349,7 @@ MVP-3 收尾后再跑同脚本, 中位数应 ≤ baseline × 0.8 (下降 ≥ 20%
 | `runner.py` 内 `sys.path.append` 站点 | T0-prep 测 | 0 | grep |
 | `_resolve_output_schema_path` 内 sys.modules 写入 | T0-prep 测 (≥ 1) | 0 | grep |
 | 启动延迟中位数 | T0-prep 测 | ≤ baseline × 0.8 | scripts/measure_startup_latency.py |
-| pytest 全过 (--ignore test_strict_v2) | MVP-2 baseline | ≥ MVP-2 baseline | pytest |
+| pytest 全过 (--ignore=tests/graph_agent/core/validators/test_strict_v2.py) | MVP-2 baseline | ≥ MVP-2 baseline | pytest |
 | 4 SKILL compile 状态 | WARN-only / 1 PASS | unchanged | scripts/compile_all.py |
 | 4 SKILL e2e smoke (1 chapter) | pass | pass | smoke 脚本 |
 | 4 SKILL persona 渲染 snapshot | T0-prep 存 | byte-equal | regression-by-snapshot |

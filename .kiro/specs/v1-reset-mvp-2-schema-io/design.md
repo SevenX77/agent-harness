@@ -289,7 +289,7 @@ initial_state["data"] = business_cls(**user_inputs)
 | `loader.py` 中 `re.compile.*output_schema` | (T0 prep 测) | 0 | grep |
 | `finish.py` 中 `state\["data"\]\[.*\] =` | (T0 prep 测) | 0 | grep |
 | `tools/md_to_json.py` 访问 Manifest 私有方法 | (T0 prep 测) | 0 (改用 SchemaEngine.get_json_schema) | grep |
-| pytest 全过 (--ignore test_strict_v2) | 599 (MVP-1 baseline) | ≥ 599 + 新单测 | pytest |
+| pytest 全过 (--ignore=tests/graph_agent/core/validators/test_strict_v2.py) | 599 (MVP-1 baseline) | ≥ 599 + 新单测 | pytest |
 | 4 SKILL compile 状态 | WARN-only / 1 PASS | unchanged | scripts/compile_all.py |
 | 4 SKILL e2e smoke (1 chapter) | pass | pass | smoke 脚本 |
 | SchemaEngine 单元测试覆盖 | N/A | ≥ 95% | coverage |

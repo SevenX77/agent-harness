@@ -216,7 +216,7 @@ grep -rn "\*\*state" src/core/graph_agent/ --include="*.py"
 | `state["flow"]` 通过 `model_validate(strict=True)` | N/A | pass | pytest |
 | dict-mutation `context["_X"] = ...` 站点数 | 26 | ≤ 5 | grep |
 | `**state` 解包模式数 | (待 grep) | 0 | grep |
-| pytest 全过 (--ignore test_strict_v2) | 599 | ≥ 599 | pytest |
+| pytest 全过 (--ignore=tests/graph_agent/core/validators/test_strict_v2.py) | 599 | ≥ 599 | pytest |
 | 4 SKILL compile 状态 | WARN-only / 1 PASS | unchanged | scripts/compile_all.py |
 | LangGraph checkpointer 序列化 round-trip | N/A | pass | 新单测 |
 

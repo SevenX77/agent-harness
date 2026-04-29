@@ -383,7 +383,7 @@ LLMPhaseNode (主) ──invoke agent──→ Agent finishes
 | `state_reducers.py` 文件存在 | no | yes | ls |
 | `state["data"][.] = ...` 在 finish.py / nodes / middleware 之外的赋值 | T0-prep 测 | 0 | grep |
 | `while True:` 在 nodes/*.py 内 | N/A | 0 | grep |
-| pytest 全过 (--ignore test_strict_v2) | MVP-3 baseline | ≥ MVP-3 baseline | pytest |
+| pytest 全过 (--ignore=tests/graph_agent/core/validators/test_strict_v2.py) | MVP-3 baseline | ≥ MVP-3 baseline | pytest |
 | 4 SKILL compile 状态 | WARN-only / 1 PASS | unchanged | scripts/compile_all.py |
 | 4 SKILL e2e smoke (1 chapter) | pass | pass | smoke 脚本 |
 | 4 SKILL persona 渲染 byte-equal | T0-prep 存 | byte-equal | snapshot 比对 |

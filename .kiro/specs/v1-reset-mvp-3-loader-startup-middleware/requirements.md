@@ -83,7 +83,7 @@ graph_agent v1-reset 序列 MVP-3。MVP-1 (state 物理拆分) + MVP-2 (SchemaEn
 - `runner.py` 内 `sys.path.append` / `os.environ.set` 站点数 = 0
 - `_resolve_output_schema_path` 内 `sys.modules[...] = ...` 写入 = 0
 - 启动延迟 (从 SkillLoader 实例化到第一个 phase 开始) 下降 ≥ 20% (T0-prep 测 baseline)
-- pytest 全过 (--ignore test_strict_v2), test_strict_v2 14 pre-existing failures 仍 isolated
+- pytest 全过 (--ignore=tests/graph_agent/core/validators/test_strict_v2.py), test_strict_v2 14 pre-existing failures 仍 isolated
 - 4 SKILL compile 状态不变, e2e smoke 跑 1 chapter 不破裂
 - 4 SKILL persona 渲染输出文本完全一致 (regression-by-snapshot)
 

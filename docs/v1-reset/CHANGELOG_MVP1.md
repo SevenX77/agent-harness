@@ -30,7 +30,7 @@
 | `state["flow"]` 通过 `model_validate(strict=False)` | N/A | **pass** (T8 invariant) | — |
 | dict-mutation `context["_X"] = ...` 站点 | 26 | **0** (T7 + T2/T4 改造) | **-26** |
 | `**state` 解包模式 | 0 (T0-prep 已确认) | 0 | — |
-| pytest passed (--ignore test_strict_v2) | 599 | **643** | **+44** (含 T1 9 + T4 5 + schema_engine 24 + T7 修复 4 + T8 invariants 6) |
+| pytest passed (--ignore=tests/graph_agent/core/validators/test_strict_v2.py) | 599 | **643** | **+44** (含 T1 9 + T4 5 + schema_engine 24 + T7 修复 4 + T8 invariants 6) |
 | 4 SKILL compile 状态 | WARN-only / 1 PASS | unchanged (T8 顶层 SKILL 验证) | — |
 | LangGraph checkpointer round-trip | 旧: pass | 新: pass (新 schema, 旧 checkpoint 不兼容) | breaking |
 | FrameworkState 字段数 | N/A | 21 字段 (含 a3 T0-prep 发现的 3 漏字段) | new |

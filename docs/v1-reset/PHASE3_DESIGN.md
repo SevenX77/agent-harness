@@ -335,6 +335,50 @@ a3 在实施完成后，必须验证 Pydantic Forward-Ref 不再崩溃。我们�
 
 ---
 
-## 6. Out-of-scope (推 v1.1+)
+## 6. M9 Mirror Refactor (收窄 Lift-and-Shift 偏离)
+
+### 6.1 当前 mirror 清单
+在 M6 的早期 lift-and-shift 实施中，为了保证所有的 executor 测试无缝迁移并维持 0 回归的基线，`PhaseNode` 的几个核心子类在基类 `__init__` 中 verbatim 复制了老 `PhaseExecutor` 的属性名。通过检索 `self._\w+`，我们识别出以下几个主要 mirror 候选：
+- `self._callbacks`
+- `self._resolver`
+- `self._save_compaction_sidecar`
+- `self._run_context`
+- `self._heartbeat`
+
+基于架构设计原则，`_run_context` 和 `_heartbeat` 作为 per-invocation 的调用期状态不需要纳入容器。但前 3 个属性是伴随 Harness 生命周期的依赖，这种 mirror 模式虽然降低了短期重构摩擦，但违背了面向对象设计中依赖应该通过明确的数据容器传递或直接委托的原则。
+
+### 6.2 收窄方案 — 通过 DependencyContainer
+为了收拢这层设计偏离，我们将完全依赖 `src/core/graph_agent/core/phase_nodes/base.py` 中定义的 `DependencyContainer` 数据类。
+- **字段映射 (Mapping)**：
+  - `self._callbacks` → 彻底废弃，统一使用 `self.container.callbacks`
+  - `self._resolver` → 彻底废弃，统一使用 `self.container.resolver`
+  - `self._save_compaction_sidecar` → 彻底废弃，统一使用 `self.container.save_compaction_sidecar`
+- **补全缺失的 IO 依赖**：
+  检查发现当前的 `DependencyContainer` 遗漏了 `io_manager` 字段。为了支持基类中的 `_apply_io_hoist` 等需要 IO 操作的方法，必须在 `DependencyContainer` 中新增 `io_manager: IOManager`。
+- **基类管理容器**：
+  基类 `PhaseNode` 只需维护单一的 `self.container = dependencies` 引用，而不再逐一拆解装载。
+
+### 6.3 实施步骤 (给 a3)
+为保证平滑迁移，要求 a3 按以下步骤执行：
+1. **扩充 DependencyContainer**：
+   打开 `base.py`，向 `DependencyContainer` `@dataclass` 中增加 `io_manager: IOManager` 字段，并在所有实例化容器的入口点（如 `factory.py` 或 builder 挂载点）补齐该入参。
+2. **清理基类与挂载容器**：
+   在 `PhaseNode.__init__` 中删除针对上述三个 harness-lifetime mirror 属性的逐一赋值（`self._callbacks = ...` 等），增加并只保留单一的 `self.container = dependencies` 赋值。
+3. **消除子类 Mirror 调用**：
+   全量替换 `LLMPhaseNode`、`CodePhaseNode`、`ValidationPhaseNode` 以及基类（如 `_apply_io_hoist`）中对老式 `self._\w+` 属性的引用。将例如 `self._callbacks` 统一修改为 `self.container.callbacks`。
+4. **验证正确性与回归基线**：
+   在修改完成后，运行 `pytest` 以验证所有测试用例继续保持全量通过（930+ case，0 回归）。
+5. **类型与风格严控**：
+   运行 `mypy --strict` 和 `ruff check` 确保新的属性委派没有引发意外的 Any 污染。然后可独立 commit。
+
+### 6.4 验证标准
+- **测试通过率**：`pytest` 维持 930+ passing，实现 0 回归。
+- **Mirror 彻底根除**：整个 `src/core/graph_agent/core/phase_nodes/` 目录下，子类无任何 `self._callbacks`, `self._resolver`, `self._save_compaction_sidecar` 等 mirror 老 `phase_executor` 的生命周期级属性遗留，对这些特定属性的全量 grep 命中数必须为 0。
+- **容器体量控制**：`DependencyContainer` 中的字段必须严格小于 10 个（包含新增的 `io_manager`），以防其过度膨胀为上帝对象 (God Container)。
+- **静态检查**：`mypy --strict` 0 error，`ruff check` 0 error。
+
+---
+
+## 7. Out-of-scope (推 v1.1+)
 - 彻底的插件化解耦以及 IoC 容器化改造（例如允许外部第三方动态注册新的 PhaseNode 类型或让 `SchemaEngine` 能够由不同实现的后端插件接管）。
 - OpenTelemetry (OTel) 链路跟踪标准的 context propagation 改造。

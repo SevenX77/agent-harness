@@ -95,10 +95,9 @@ all-at-once rewrite. Production SKILL.md files migrate in Task 0.3
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
 
 # =============================================================================
 # Atomic structures (reused across artifact types / phase modes)
@@ -184,9 +183,7 @@ class LLMPhase(_BasePhase):
     domain_protocols: list[str] = Field(default_factory=list)
     references: list[str] = Field(default_factory=list)
     few_shot_examples: list[str] = Field(default_factory=list)
-    context_access: list[Literal["artifact", "working_memory"]] = Field(
-        default_factory=list
-    )
+    context_access: list[Literal["artifact", "working_memory"]] = Field(default_factory=list)
     llm_role: str | None = None
     adopted_persona: str | None = None
     max_iterations: int | None = Field(default=None, ge=1)
@@ -229,7 +226,7 @@ class LogicPhase(_BasePhase):
 
 
 PhaseDef = Annotated[
-    Union[LLMPhase, LogicPhase],
+    LLMPhase | LogicPhase,
     Field(discriminator="mode"),
 ]
 """Discriminated union over ``mode``. Use
@@ -272,9 +269,7 @@ class AgentProfile(BaseModel):
     domain_protocols: list[str] = Field(default_factory=list)
     references: list[str] = Field(default_factory=list)
     few_shot_examples: list[str] = Field(default_factory=list)
-    context_access: list[Literal["artifact", "working_memory"]] = Field(
-        default_factory=list
-    )
+    context_access: list[Literal["artifact", "working_memory"]] = Field(default_factory=list)
     llm_role: str | None = None
 
 
@@ -303,7 +298,7 @@ class GraphSkillDef(_BaseSkill):
     context_mapping: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _check_phase_names_unique(self) -> "GraphSkillDef":
+    def _check_phase_names_unique(self) -> GraphSkillDef:
         """Cohesion plan 方针 1.7 (2026-04-26): LangGraph node names are
         keyed off ``f'{phase.name}_execute'``; duplicate phase names
         silently overwrite each other's routing edges, so the second
@@ -326,7 +321,7 @@ class GraphSkillDef(_BaseSkill):
         return self
 
     @model_validator(mode="after")
-    def _check_retry_targets_resolve(self) -> "GraphSkillDef":
+    def _check_retry_targets_resolve(self) -> GraphSkillDef:
         """Cohesion plan 方针 1.6 (2026-04-26): ``retry_target`` on an
         LLMPhase must point to a phase that exists in the same
         GraphSkillDef. A typo / dangling reference would crash the
@@ -370,7 +365,7 @@ class PersonaSkillDef(_BaseSkill):
 
 
 SkillManifest = Annotated[
-    Union[AgentSkillDef, GraphSkillDef, PersonaSkillDef],
+    AgentSkillDef | GraphSkillDef | PersonaSkillDef,
     Field(discriminator="type"),
 ]
 """Discriminated union over ``type``. Use ``pydantic.TypeAdapter`` to

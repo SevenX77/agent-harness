@@ -1,4 +1,4 @@
-"""Tests for ModuleSandbox skeleton."""
+"""Tests for ModuleSandbox."""
 
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ def test_import_class_does_not_write_public_module_to_sys_modules(tmp_path: Path
     ModuleSandbox(search_paths=[tmp_path]).import_class("schemas.OutputSchema")
 
     assert "schemas" not in sys.modules
+    assert not any(name.startswith("_graph_agent_sandbox_") for name in sys.modules)
 
 
 def test_import_class_caches_result(tmp_path: Path) -> None:
@@ -39,6 +40,49 @@ def test_import_class_caches_result(tmp_path: Path) -> None:
     second = sandbox.import_class("schemas.OutputSchema")
 
     assert first is second
+
+
+def test_import_callable_from_search_path(tmp_path: Path) -> None:
+    module_file = tmp_path / "tools.py"
+    module_file.write_text(
+        "def normalize(value):\n"
+        "    return value.strip().lower()\n",
+        encoding="utf-8",
+    )
+
+    func = ModuleSandbox(search_paths=[tmp_path]).import_callable("tools.normalize")
+
+    assert func("  Hello ") == "hello"
+
+
+def test_import_callable_rejects_non_callable(tmp_path: Path) -> None:
+    module_file = tmp_path / "tools.py"
+    module_file.write_text("VALUE = 1\n", encoding="utf-8")
+
+    with pytest.raises(ImportError, match="did not resolve to a callable"):
+        ModuleSandbox(search_paths=[tmp_path]).import_callable("tools.VALUE")
+
+
+def test_import_object_from_package_init(tmp_path: Path) -> None:
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("VALUE = 'ok'\n", encoding="utf-8")
+
+    value = ModuleSandbox(search_paths=[tmp_path]).import_object("pkg.VALUE")
+
+    assert value == "ok"
+
+
+def test_with_search_paths_returns_copy_with_additional_roots(tmp_path: Path) -> None:
+    module_file = tmp_path / "schemas.py"
+    module_file.write_text("class OutputSchema:\n    pass\n", encoding="utf-8")
+    base = ModuleSandbox()
+
+    extended = base.with_search_paths([tmp_path])
+
+    assert base.search_paths == ()
+    assert extended.search_paths == (tmp_path.resolve(),)
+    assert extended.import_class("schemas.OutputSchema").__name__ == "OutputSchema"
 
 
 def test_import_class_rejects_missing_module() -> None:

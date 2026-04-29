@@ -25,9 +25,8 @@ import importlib
 import importlib.util
 import logging
 import re
-import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -35,8 +34,11 @@ from .parser import _parse_frontmatter, _strip_frontmatter
 
 if TYPE_CHECKING:
     from .io_manager import IODef, IOManager
-    from .manifest import AgentSkillDef, PersonaSkillDef
+    from .manifest import AgentSkillDef, LLMPhase, LogicPhase, PersonaSkillDef
     from .manifest import SkillManifest as SkillManifestType
+    from .module_sandbox import ModuleSandbox
+    from .phase_node import PhaseNode
+    from .state import BusinessData, WorkflowState
 from ..tools.dynamic_schema import (
     DynamicSchemaDef,
     OutputExampleParseError,
@@ -60,6 +62,7 @@ _OUTPUT_EXAMPLE_TITLE_RE = re.compile(
     re.IGNORECASE,
 )
 _FENCE_RE = re.compile(r"^\s*(```+|~~~+)")
+_LOCAL_MODULE_CACHE: dict[str, Any] = {}
 
 
 # MVP-2 T6: shared SchemaEngine singleton.
@@ -81,10 +84,11 @@ def get_schema_engine() -> SchemaEngine:
 
 @dataclass(frozen=True)
 class CompiledSkill:
-    """Phase 1+2 pipeline result; graph-node build lands in MVP-3 T5."""
+    """Phase 1-3 pipeline result emitted by SkillLoader."""
 
     raw: dict[str, Any]
     manifest: SkillManifestType
+    nodes: list[PhaseNode] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -210,8 +214,14 @@ class SkillLoader:
         self,
         schema_engine: SchemaEngine | None = None,
         io_manager_factory: Callable[[list[IODef]], IOManager] | None = None,
+        module_sandbox: ModuleSandbox | None = None,
     ) -> None:
         self._schema_engine = schema_engine or get_schema_engine()
+        if module_sandbox is None:
+            from .module_sandbox import ModuleSandbox
+
+            module_sandbox = ModuleSandbox()
+        self._module_sandbox = module_sandbox
         if io_manager_factory is None:
             from .io_manager import IOManager
 
@@ -221,14 +231,331 @@ class SkillLoader:
         self._io_manager_factory = io_manager_factory
 
     def compile_skill(self, skill_path: str | Path) -> CompiledSkill:
-        text = Path(skill_path).read_text(encoding="utf-8")
+        path = Path(skill_path)
+        text = path.read_text(encoding="utf-8")
         raw = parse_skill_md(text)
         manifest = validate_manifest(
             raw,
             self._schema_engine,
             self._io_manager_factory,
         )
-        return CompiledSkill(raw=raw, manifest=manifest)
+        nodes = build_graph_nodes(
+            manifest,
+            self._schema_engine,
+            self._module_sandbox.with_search_paths([path.parent]),
+        )
+        return CompiledSkill(raw=raw, manifest=manifest, nodes=nodes)
+
+
+def build_graph_nodes(
+    manifest: SkillManifestType,
+    schema_engine: SchemaEngine,
+    module_sandbox: ModuleSandbox,
+) -> list[PhaseNode]:
+    """Phase 3: typed manifest to executable PhaseNode facades."""
+
+    from .manifest import AgentSkillDef, GraphSkillDef, LLMPhase, LogicPhase, PersonaSkillDef
+    from .phase_node import PhaseNode
+
+    if isinstance(manifest, PersonaSkillDef):
+        raise SkillLoadError(
+            "Persona skills are not runnable on their own — they are injected via adopted_persona."
+        )
+
+    business_data_cls = _build_business_data_for_manifest(manifest, schema_engine)
+    initial_state_factory = _initial_state_factory(business_data_cls)
+
+    if isinstance(manifest, AgentSkillDef):
+        phase = _phase_from_agent_manifest_for_nodes(manifest, module_sandbox)
+        return [
+            PhaseNode(
+                name=phase.name,
+                execute_fn=_phase_node_execute_fn(phase.name),
+                metadata={"type": manifest.type, "mode": "agent"},
+                phase=phase,
+                business_data_cls=business_data_cls,
+                initial_state_factory=initial_state_factory,
+            )
+        ]
+
+    if not isinstance(manifest, GraphSkillDef):
+        raise SkillLoadError(f"Unsupported manifest type: {type(manifest).__name__}")
+
+    nodes: list[PhaseNode] = []
+    for phase_def in manifest.phases:
+        if isinstance(phase_def, LLMPhase):
+            phase, output_schema_cls = _llm_phase_for_node(phase_def, module_sandbox)
+            compiled_schema = manifest.compiled_schemas.get(phase_def.name)
+            nodes.append(
+                PhaseNode(
+                    name=phase_def.name,
+                    execute_fn=_phase_node_execute_fn(phase_def.name),
+                    metadata={"type": manifest.type, "mode": phase_def.mode},
+                    phase=phase,
+                    business_data_cls=business_data_cls,
+                    initial_state_factory=initial_state_factory,
+                    compiled_schema=compiled_schema,
+                    output_schema_cls=output_schema_cls,
+                    validator=phase.validator,
+                )
+            )
+            continue
+
+        if isinstance(phase_def, LogicPhase):
+            phase = _logic_phase_for_node(phase_def, module_sandbox)
+            nodes.append(
+                PhaseNode(
+                    name=phase_def.name,
+                    execute_fn=_phase_node_execute_fn(phase_def.name),
+                    metadata={"type": manifest.type, "mode": phase_def.mode},
+                    phase=phase,
+                    business_data_cls=business_data_cls,
+                    initial_state_factory=initial_state_factory,
+                    validator=phase.validator,
+                )
+            )
+            continue
+
+        raise SkillLoadError(
+            f"Unsupported phase type for {getattr(phase_def, 'name', '?')!r}: "
+            f"{type(phase_def).__name__}"
+        )
+
+    return nodes
+
+
+def _build_business_data_for_manifest(
+    manifest: SkillManifestType,
+    schema_engine: SchemaEngine,
+) -> type[BusinessData]:
+    from . import state as state_module
+
+    factory = getattr(state_module, "build_business_data_for_skill", None)
+    if callable(factory):
+        typed_factory = cast(
+            Callable[[SkillManifestType, SchemaEngine], type[BusinessData]],
+            factory,
+        )
+        return typed_factory(manifest, schema_engine)
+    return _fallback_build_business_data_for_skill(manifest, schema_engine)
+
+
+def _fallback_build_business_data_for_skill(
+    manifest: SkillManifestType,
+    schema_engine: SchemaEngine,
+) -> type[BusinessData]:
+    from pydantic import create_model
+
+    from .manifest import GraphSkillDef, LLMPhase
+    from .state import BusinessData
+
+    fields: dict[str, Any] = {}
+    if isinstance(manifest, GraphSkillDef):
+        for input_def in manifest.io.inputs:
+            fields[input_def.name] = (Any, None)
+        for output_def in manifest.io.outputs:
+            fields[output_def.name] = (Any, None)
+        for phase in manifest.phases:
+            if isinstance(phase, LLMPhase) and phase.hoist_to:
+                fields[phase.hoist_to] = (Any, None)
+        for schema in manifest.compiled_schemas.values():
+            schema_engine.get_pydantic_model(schema)
+
+    model_name = "BusinessData_" + re.sub(r"\W+", "_", manifest.name).strip("_")
+    return cast(
+        type[BusinessData],
+        create_model(model_name or "BusinessData_Skill", __base__=BusinessData, **fields),
+    )
+
+
+def _initial_state_factory(
+    business_data_cls: type[BusinessData],
+) -> Callable[[dict[str, Any] | None], WorkflowState]:
+    from .state import FrameworkState, WorkflowState
+
+    def build(initial_data: dict[str, Any] | None = None) -> WorkflowState:
+        return WorkflowState(
+            data=business_data_cls.model_validate(initial_data or {}),
+            flow=FrameworkState(),
+            messages=[],
+        )
+
+    return build
+
+
+def _phase_node_execute_fn(phase_name: str) -> Callable[[WorkflowState], WorkflowState]:
+    from .state import StateManager
+
+    def execute(state: WorkflowState) -> WorkflowState:
+        return StateManager.update_framework(state, current_phase=phase_name)
+
+    return execute
+
+
+def _phase_from_agent_manifest_for_nodes(
+    manifest: AgentSkillDef,
+    module_sandbox: ModuleSandbox,
+) -> Phase:
+    tools = [
+        cast(Callable[..., str], module_sandbox.import_callable(ref))
+        for ref in manifest.agent_tools
+    ]
+    return Phase(
+        name=manifest.name,
+        system_prompt=_compose_agent_system_prompt(manifest),
+        user_prompt_template=manifest.user_prompt_template,
+        tools=tools,
+        tier=manifest.agent_profile.llm_role or "balanced",
+        llm_role=manifest.agent_profile.llm_role,
+        model_override=manifest.model_override,
+        context_access=list(manifest.agent_profile.context_access),
+        requires_llm=True,
+    )
+
+
+def _llm_phase_for_node(
+    phase_def: LLMPhase,
+    module_sandbox: ModuleSandbox,
+) -> tuple[Phase, type[Any] | None]:
+    output_schema_cls: type[Any] | None = None
+    if phase_def.output_example and phase_def.output_schema:
+        raise SkillCompilationError(
+            f"[F-output-example-conflict] SKILL.md:phases.{phase_def.name}: "
+            "output_example and output_schema are mutually exclusive"
+        )
+    dynamic_schema = (
+        _parse_output_example_or_raise(
+            phase_def.output_example,
+            location=f"SKILL.md:phases.{phase_def.name}.output_example",
+        )
+        if phase_def.output_example
+        else None
+    )
+    if dynamic_schema is not None:
+        dynamic_schema.hoist_to = phase_def.hoist_to  # type: ignore[attr-defined]
+
+    system_prompt = phase_def.prompt
+    if phase_def.output_schema and dynamic_schema is None:
+        output_schema_cls = module_sandbox.import_class(phase_def.output_schema)
+        format_md = _render_output_format_markdown_for_model(
+            output_schema_cls,
+            phase_def.output_schema,
+        )
+        if format_md:
+            system_prompt = (
+                f"{system_prompt}\n\n<output_format>\n{format_md}\n</output_format>"
+                if system_prompt
+                else f"<output_format>\n{format_md}\n</output_format>"
+            )
+    else:
+        xml_tags = _render_skill_section_xml_tags(phase_def)
+        if xml_tags:
+            system_prompt = f"{system_prompt}\n\n{xml_tags}" if system_prompt else xml_tags
+
+    if phase_def.steps:
+        system_prompt = _append_steps_to_prompt(system_prompt or "", phase_def.steps)
+
+    validator = cast(
+        Callable[..., tuple[bool, list[str]]] | None,
+        (
+            module_sandbox.import_callable(phase_def.validator)
+            if phase_def.validator
+            else None
+        ),
+    )
+    if validator is not None and phase_def.hoist_to:
+        validator.hoist_to = phase_def.hoist_to  # type: ignore[attr-defined]
+
+    phase = Phase(
+        name=phase_def.name,
+        system_prompt=system_prompt,
+        user_prompt_template=phase_def.user_prompt_template,
+        tools=[
+            cast(Callable[..., str], module_sandbox.import_callable(ref))
+            for ref in phase_def.agent_tools
+        ],
+        max_iterations=phase_def.max_iterations if phase_def.max_iterations is not None else 20,
+        tier=phase_def.llm_role or "balanced",
+        llm_role=phase_def.llm_role,
+        model_override=phase_def.model_override,
+        validator=validator,
+        retry_target=phase_def.retry_target,
+        max_retries=phase_def.max_retries if phase_def.max_retries is not None else 3,
+        max_nudges=phase_def.max_nudges if phase_def.max_nudges is not None else 1,
+        dead_end_threshold=(
+            phase_def.dead_end_threshold
+            if phase_def.dead_end_threshold is not None
+            else 3
+        ),
+        context_access=list(phase_def.context_access),
+        output_schema=cast(Any, output_schema_cls or dynamic_schema),
+        output_schema_path=phase_def.output_schema if output_schema_cls is not None else None,
+        requires_llm=True,
+    )
+    phase.hoist_to = phase_def.hoist_to  # type: ignore[attr-defined]
+    return phase, output_schema_cls
+
+
+def _logic_phase_for_node(
+    phase_def: LogicPhase,
+    module_sandbox: ModuleSandbox,
+) -> Phase:
+    return Phase(
+        name=phase_def.name,
+        system_prompt=None,
+        tools=[
+            cast(Callable[..., str], module_sandbox.import_callable(ref))
+            for ref in phase_def.execute_steps
+        ],
+        model_override=phase_def.model_override,
+        validator=cast(
+            Callable[..., tuple[bool, list[str]]] | None,
+            (
+                module_sandbox.import_callable(phase_def.validator)
+                if phase_def.validator
+                else None
+            ),
+        ),
+        requires_llm=False,
+    )
+
+
+def _render_output_format_markdown_for_model(
+    model_cls: type[Any],
+    output_schema_path: str,
+) -> str:
+    if not hasattr(model_cls, "model_fields"):
+        raise SkillLoadError(
+            f"output_schema {output_schema_path!r} is not a Pydantic BaseModel"
+        )
+
+    class_name = model_cls.__name__
+    template_lines = [
+        "请按以下结构输出 business_data_md（一个或多个 `##` 块，每块对应一个 "
+        f"{class_name} 实例）：",
+        "",
+        "```markdown",
+        "## <item_id 标识符>",
+    ]
+    for field_name in model_cls.model_fields:
+        template_lines.append(f"- {field_name}: <值>")
+    template_lines.append("```")
+
+    reference_lines = ["", "字段说明："]
+    for field_name, field_info in model_cls.model_fields.items():
+        field_type = getattr(
+            field_info.annotation,
+            "__name__",
+            str(field_info.annotation),
+        )
+        description = field_info.description or "（无描述）"
+        required_marker = "（必填）" if field_info.is_required() else "（可选）"
+        reference_lines.append(
+            f"- **{field_name}** {required_marker}: "
+            f"`{field_type}` — {description}"
+        )
+
+    return "\n".join(template_lines + reference_lines)
 
 
 def _to_builtin_dict(value: Any) -> dict[str, Any]:
@@ -588,8 +915,9 @@ def _load_skill_local_module(module_path_str: str, base_dir: Path) -> Any | None
         )
 
     module_name = f"_graph_agent_skill_.{_skill_namespace(base_dir)}.{module_path_str}"
-    if module_name in sys.modules:
-        return sys.modules[module_name]
+    cached = _LOCAL_MODULE_CACHE.get(module_name)
+    if cached is not None:
+        return cached
 
     importlib.invalidate_caches()
     spec = importlib.util.spec_from_file_location(module_name, py_file)
@@ -597,12 +925,12 @@ def _load_skill_local_module(module_path_str: str, base_dir: Path) -> Any | None
         raise SkillLoadError(f"Cannot load module spec for {py_file}")
 
     module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
     try:
         spec.loader.exec_module(module)
     except Exception:
-        sys.modules.pop(module_name, None)
+        _LOCAL_MODULE_CACHE.pop(module_name, None)
         raise
+    _LOCAL_MODULE_CACHE[module_name] = module
     return module
 
 
@@ -669,7 +997,7 @@ def resolve_skill_resource(
             )
         return cast(Callable[..., str], func)
 
-    resolved_module: Any = sys.modules.get(
+    resolved_module: Any = _LOCAL_MODULE_CACHE.get(
         f"_graph_agent_skill_.{_skill_namespace(base_dir)}.{module_path_str}"
     )
     if resolved_module is None:
@@ -1006,6 +1334,21 @@ def _render_output_format_markdown(
         Empty string on resolution failure.
 
     """
+    model_cls = _resolve_output_schema_class(
+        output_schema_path,
+        skill_base_dir=skill_base_dir,
+    )
+    if model_cls is None:
+        return ""
+    return _render_output_format_markdown_for_model(model_cls, output_schema_path)
+
+
+def _resolve_output_schema_class(
+    output_schema_path: str,
+    *,
+    skill_base_dir: Path | None = None,
+) -> type[Any] | None:
+    """Resolve a dotted output schema path to a Pydantic model class."""
     try:
         module_path, class_name = output_schema_path.rsplit(".", 1)
         if skill_base_dir is not None:
@@ -1025,37 +1368,9 @@ def _render_output_format_markdown(
                 "skipping <output_format>",
                 output_schema_path,
             )
-            return ""
+            return None
 
-        template_lines = [
-            "请按以下结构输出 business_data_md（一个或多个 `##` 块，每块对应一个 "
-            f"{class_name} 实例）：",
-            "",
-            "```markdown",
-            "## <item_id 标识符>",
-        ]
-        for field_name in model_cls.model_fields:
-            template_lines.append(f"- {field_name}: <值>")
-        template_lines.append("```")
-
-        reference_lines = [
-            "",
-            "字段说明：",
-        ]
-        for field_name, field_info in model_cls.model_fields.items():
-            field_type = getattr(
-                field_info.annotation,
-                "__name__",
-                str(field_info.annotation),
-            )
-            description = field_info.description or "（无描述）"
-            required_marker = "（必填）" if field_info.is_required() else "（可选）"
-            reference_lines.append(
-                f"- **{field_name}** {required_marker}: "
-                f"`{field_type}` — {description}"
-            )
-
-        return "\n".join(template_lines + reference_lines)
+        return cast(type[Any], model_cls)
 
     except (ImportError, AttributeError, SkillLoadError, ValueError) as exc:
         logger.warning(
@@ -1064,7 +1379,7 @@ def _render_output_format_markdown(
             output_schema_path,
             exc,
         )
-        return ""
+        return None
 
 
 def _compose_agent_system_prompt(
@@ -1203,6 +1518,14 @@ def _phase_from_graph_phase(
         )
         if dynamic_schema is not None:
             dynamic_schema.hoist_to = phase_def.hoist_to  # type: ignore[attr-defined]
+        output_schema_cls = (
+            _resolve_output_schema_class(
+                phase_def.output_schema,
+                skill_base_dir=base_dir,
+            )
+            if phase_def.output_schema and dynamic_schema is None
+            else None
+        )
         system_prompt = phase_def.prompt
         xml_tags = _render_skill_section_xml_tags(phase_def, skill_base_dir=base_dir)
         if xml_tags:
@@ -1248,11 +1571,9 @@ def _phase_from_graph_phase(
             ],
             skill_base_dir=base_dir,
             context_access=list(phase_def.context_access),
-            # 方针 1.3: thread output_schema dotted path so PhaseExecutor
-            # can hand it to md_to_json. The runtime stores the path, not
-            # the resolved class, because LangGraph's msgpack checkpointer
-            # cannot serialise ModelMetaclass.
-            output_schema=cast(Any, dynamic_schema),
+            # T5 keeps the resolved class on Phase for validation while
+            # retaining the dotted path as metadata for diagnostics.
+            output_schema=cast(Any, dynamic_schema or output_schema_cls),
             output_schema_path=None if dynamic_schema is not None else phase_def.output_schema,
             requires_llm=True,
         )

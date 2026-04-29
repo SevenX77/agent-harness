@@ -43,7 +43,14 @@ _CORE_DIR = (
     / "graph_agent"
     / "core"
 )
-_SCAN_PATHS = [_CORE_DIR / "harness.py", _CORE_DIR / "phase_executor.py"]
+_SCAN_PATHS = [
+    _CORE_DIR / "harness.py",
+    _CORE_DIR / "phase_executor.py",
+    # Phase 3 M6 (PHASE3_DESIGN.md §2): execute_llm_phase moved into
+    # the polymorphic LLMPhaseNode subclass; the compaction call site
+    # rides along, so the AST regression guard must scan there too.
+    _CORE_DIR / "phase_nodes" / "llm_phase_node.py",
+]
 
 
 def _find_save_compaction_sidecar_calls() -> list[tuple[Path, ast.Call]]:

@@ -269,8 +269,30 @@
 
 ### 3.5 实施步骤 (a3 Action Items)
 1. **修 4 SKILL.md**：按照 3.3 为 `event-extraction` 的 aggregate / review，`batch-analysis` 的各个 LLM phase 以及 `global-synthesis` 的 LLM Phase 补充最简 Schema。必须同步修改这 4 个 SKILL 内 LLM Phase 的 `prompt`，教导大模型输出与新添加 Schema 对应的结构。
-2. **清理 Fallback 路由**：在 `llm_phase_node.py` 挂载中间件时，移除 `if phase.output_schema is None:` 和 `DynamicSchemaDef` fallback 相关的 `ValidationMiddleware` 逻辑，强制全部使用 `CognitiveFlowMiddleware` 和 `ProtocolValidationMiddleware`。
-3. **终极清理**：
+2. **测试覆盖补全 (must-fix #1)**：由于 `src/core/graph_agent` 的覆盖率跌至 72.47%，要求补齐因删除 `ValidationMiddleware` 和修改 `phase_executor` 路由导致的覆盖率盲区。特别是针对新抽离的 `LLMPhaseNode` 和 `CodePhaseNode` 等执行路径，编写对应的单元测试，确保覆盖率回升至 73.25% 门槛之上。
+   - 运行 `pytest --cov=src/core/graph_agent --cov-report=term-missing`，定位所有 coverage 缺失的代码行。
+   - 为缺乏测试的特定分支（如 dynamic schema fallback 以外的其他异常路径）补充单元测试。
+   - 为代码拆分后的每个 Node 类（`LLMPhaseNode`, `CodePhaseNode`, `ValidationPhaseNode`）编写针对性的测试。
+   - 注意 `phase_executor.py` 内部对于状态更新逻辑的单元测试转移。原来位于 `tests/graph_agent/core/test_phase_executor.py` 中的测试，如果已经因为代码搬迁而失败，需要迁移到对应的 `test_llm_phase_node.py` 和 `test_code_phase_node.py` 等测试文件中。
+   - 保证至少新增 3 到 5 个高价值的单测用例，验证在缺失 Schema (被编译期阻断) 和带有正常 schema 的两种不同路线的组合覆盖。
+3. **修复 ModuleSandbox Pydantic Forward-Ref 缺陷 (must-fix #2)**：
+   在 `src/core/graph_agent/core/module_sandbox.py` (如 `_load_module` 或 `_load_from_file` 处执行完 `exec_module` 之后，或者更好在执行前)，必须执行以下两步契约：
+   - 1) 强制将模块注册到全局命名空间：`sys.modules[module_path] = module`，以便 forward-ref 解析时能从系统中命中。
+   - 2) 遍历模块中所有继承自 `BaseModel` 的类，调用 `cls.model_rebuild()`：
+     ```python
+     import sys
+     from pydantic import BaseModel
+     
+     # 在 exec_module 前或后（根据内部实现调整时机）：
+     sys.modules[module_path] = module
+     spec.loader.exec_module(module)
+     
+     for obj in vars(module).values():
+         if isinstance(obj, type) and issubclass(obj, BaseModel) and obj is not BaseModel:
+             obj.model_rebuild()
+     ```
+4. **清理 Fallback 路由**：在 `llm_phase_node.py` 挂载中间件时，移除 `if phase.output_schema is None:` 和 `DynamicSchemaDef` fallback 相关的 `ValidationMiddleware` 逻辑，强制全部使用 `CognitiveFlowMiddleware` 和 `ProtocolValidationMiddleware`。
+5. **终极清理**：
    - 从 `src/core/graph_agent/cognitive/middlewares.py` 删除 `ValidationMiddleware` 整个类定义。
    - 检索 `tests/` 目录，删除所有直接实例化或测试 `ValidationMiddleware` 相关方法（如 `_validate_finish_task` 且未使用 CognitiveFlow 等价逻辑）的废弃测试。由于我们放弃了旧系统的向下兼容，任何针对旧系统的单测也应当随着功能代码一并废弃。
    - 全库检索 `ValidationMiddleware`，确保没有任何挂载引用。
@@ -285,6 +307,14 @@
 为已有的自由文本生成添加 schema 可能会改变 LLM 返回的数据格式，这需要严格地验证在 prompt 中对应的 user example 和 schema 结构是否对齐。如果 LLM 持续返回原本的自由文本而忽略 Schema，将会触发 CognitiveFlow 的 Schema Validation Error。这要求在实施 3.3 迁移方案时，同步审视对应 Prompt，确保包含 `output_schema_md` 中定义的字段结构指引。这也可能对原有的 Token 开销造成不可避免的少量上升。
 同时注意 `tests/skills/event_extraction/test_cognitive_flow_smoke.py` 等 e2e smoke 测试文件，它们直接依赖于当前输出数据的形状（如对 `_finish_task_result` 字典结构的断言），迁移 Schema 后必须同步更新这些断言，否则 CI 将被直接阻断。
 
+### 3.8 PydanticUserError Forward-Ref 防退化 Regression (新加)
+a3 在实施完成后，必须验证 Pydantic Forward-Ref 不再崩溃。我们要求增加一个 `loader → schema → CognitiveFlow.model_validate → NO_RAISE` 的组合 case，通过 `ModuleSandbox` 加载一个带前向引用的 Pydantic schema，并确保它能无缝通过后续的管道验证，从而防御此类隐式 Forward-Ref 失败的幽灵 Bug 再次复活。
+具体的做法是，在测试目录下（例如 `tests/graph_agent/core/test_module_sandbox.py` 或者 `test_cognitive_flow_smoke.py` 中），编写一个微型的 Pydantic class，该类包含类似 `Literal["A", "B"]` 等 forward reference 声明。
+- 使用 `SkillLoader.compile_skill` 模拟读取并在 `ModuleSandbox` 中加载这个类。
+- 发送一个合理的字典格式 Mock 响应，让其流入 `CognitiveFlowMiddleware._validate_finish_args` 并触发 `model_rebuild` 和验证逻辑。
+- 只有这个断言在未来任何重构中始终成功时，我们的 `sys.modules` 以及 `model_rebuild` 的 workaround 才算是稳固合规的。
+- 请注意 `model_rebuild` 可能会触发更深层的 ImportError 或 TypeError，这必须在加载阶段 fail-loud 暴露，而不是等到运行时 CognitiveFlowMiddleware 调用 validate 时。因此 `sys.modules` 的写入和 `model_rebuild` 必须保持强原子性。
+
 ---
 
 ## 4. 实施依赖与顺序
@@ -298,9 +328,10 @@
 - Pytest 测试集 912+ passed 维持不破（涵盖新增加的多态节点分发测试与旧路由路径对齐）。
 - `mypy --strict` 0 error 不破。
 - `ruff check` 0 error 不破。
-- 测试覆盖率 `≥ 73.25%`（期望伴随单元测试增加进一步提升）。
+- 测试覆盖率 `≥ 73.25%`（必须补齐全覆盖率盲区，消除跌至 72.47% 的退步）。
 - `phase_executor.py` (或其直接替代的核心分发路由) ≤ 200 行，结束 God Class 时代。
 - 彻底清理双系统：全库 `grep "ValidationMiddleware"` 返回 0。
+- **Loader-based Smoke 覆盖 4 个 live SKILL (must-fix #3)**：不再仅仅依赖 `importlib.util` 的孤立 workaround。必须使用 `SkillLoader.compile_skill(...)` 真实加载 `batch-analysis` / `global-synthesis` / `event-extraction` / `text-segmentation`，并穿透整个 `CognitiveFlowMiddleware`，确保能够真实捕获运行时在生产路径下的模型反射崩溃与契约解析问题。这要求 a3 编写专门的 `test_loader_based_smoke.py` 测试文件，在测试中遍历上述四个 SKILL，执行模拟的完成动作并断言解析管道正常无异常。
 
 ---
 

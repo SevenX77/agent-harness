@@ -58,7 +58,11 @@ def _capture_execute_llm_phase(
     monkeypatch: Any,
     phase: Phase,
 ) -> dict[str, Any]:
-    from graph_agent.core import phase_executor as phase_executor_module
+    # Phase 3 M6 (PHASE3_DESIGN.md §2): execute_llm_phase delegates to
+    # ``LLMPhaseNode`` which now owns the ``create_custom_middlewares``
+    # + ``create_agent`` imports. Monkeypatch the new module instead of
+    # the legacy phase_executor module.
+    from graph_agent.core.phase_nodes import llm_phase_node as llm_phase_node_module
 
     class _ResolvedModel:
         name = "fake-model"
@@ -90,11 +94,13 @@ def _capture_execute_llm_phase(
         return _Agent()
 
     monkeypatch.setattr(
-        phase_executor_module,
+        llm_phase_node_module,
         "create_custom_middlewares",
         fake_create_custom_middlewares,
     )
-    monkeypatch.setattr(phase_executor_module, "create_agent", fake_create_agent)
+    monkeypatch.setattr(
+        llm_phase_node_module, "create_agent", fake_create_agent
+    )
 
     resolver = _Resolver()
     executor = PhaseExecutor(
@@ -306,7 +312,7 @@ class TestExecuteCodeOnlyPhaseDictMergePhase2A3:
         executor = PhaseExecutor([])
 
         with (
-            caplog.at_level(logging.ERROR, logger="graph_agent.core.phase_executor"),
+            caplog.at_level(logging.ERROR, logger="graph_agent.core.phase_nodes.code_phase_node"),
             pytest.raises(RuntimeError) as exc_info,
         ):
             executor.execute_code_only_phase(phase, _make_state())
@@ -369,7 +375,9 @@ class TestExecuteCodeOnlyPhaseDictMergePhase2A3:
         phase = Phase(name="prep", requires_llm=False, tools=[tool_dict])  # type: ignore[list-item]
         executor = PhaseExecutor([])
 
-        with caplog.at_level(logging.INFO, logger="graph_agent.core.phase_executor"):
+        with caplog.at_level(
+            logging.INFO, logger="graph_agent.core.phase_nodes.code_phase_node"
+        ):
             executor.execute_code_only_phase(phase, _make_state())
 
         merge_log = next(
@@ -388,7 +396,7 @@ class TestExecuteCodeOnlyPhaseDictMergePhase2A3:
         executor = PhaseExecutor([])
 
         with (
-            caplog.at_level(logging.ERROR, logger="graph_agent.core.phase_executor"),
+            caplog.at_level(logging.ERROR, logger="graph_agent.core.phase_nodes.code_phase_node"),
             pytest.raises(RuntimeError),
         ):
             executor.execute_code_only_phase(phase, _make_state())
@@ -530,7 +538,9 @@ class TestExecuteLLMPhaseSchemaRoutingPhase3M7:
             output_schema=_LiveSchema,
         )
 
-        with caplog.at_level(logging.INFO, logger="graph_agent.core.phase_executor"):
+        with caplog.at_level(
+            logging.INFO, logger="graph_agent.core.phase_nodes.llm_phase_node"
+        ):
             captured = _capture_execute_llm_phase(monkeypatch, phase)
 
         names = self._middleware_class_names(captured)

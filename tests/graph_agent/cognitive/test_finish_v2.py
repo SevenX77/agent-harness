@@ -18,6 +18,7 @@ from graph_agent.cognitive.middlewares import ValidationMiddleware
 from graph_agent.core.exceptions import SkillCompilationError
 from graph_agent.core.loader import load_workflow_from_md
 from graph_agent.core.manifest import GraphSkillDef
+from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
 from graph_agent.core.validators.validator_required import check_validator_required
 from graph_agent.tools.dynamic_schema import (
     DynamicSchemaDef,
@@ -88,6 +89,14 @@ def _handler(request: ToolCallRequest) -> ToolMessage:
         name="finish_task",
         tool_call_id=request.tool_call["id"],
     )
+
+
+def _workflow_state() -> WorkflowState:
+    return {
+        "data": BusinessData(),
+        "flow": FrameworkState(),
+        "messages": [],
+    }
 
 
 def test_selfcheck_nudge_uses_finish_task_v2_contract() -> None:
@@ -241,6 +250,31 @@ class TestValidationMiddleware:
             ],
             "schema_validation": "passed",
         }
+
+    def test_accepts_valid_schema_submission_updates_workflow_state(self) -> None:
+        ctx: dict[str, Any] = {}
+        state = _workflow_state()
+        middleware = ValidationMiddleware(
+            output_schema=BusinessItem,
+            ctx=ctx,
+            workflow_state=state,
+        )
+
+        result = middleware.wrap_tool_call(
+            _request({"business_data_md": VALID_BUSINESS_MD}),
+            _handler,
+        )
+
+        assert isinstance(result, ToolMessage)
+        assert middleware.workflow_state is not None
+        assert middleware.workflow_state is not state
+        assert middleware.workflow_state["flow"].finish_task_result == {
+            "business_data_parsed": [
+                {"title": "Scene plan", "score": 3, "tags": ["scene", "plan"]}
+            ],
+            "schema_validation": "passed",
+        }
+        assert state["flow"].finish_task_result is None
 
     def test_rejects_pydantic_errors(self) -> None:
         ctx: dict[str, Any] = {}

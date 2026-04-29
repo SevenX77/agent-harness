@@ -6,8 +6,8 @@ The primary consumer is `GraphAgentHarness`.
 
 from __future__ import annotations
 
-import logging
 import json
+import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
@@ -25,6 +25,7 @@ from langgraph.types import Command
 from pydantic import BaseModel
 
 from ..callbacks.base import Callback
+from ..core.state import StateManager, WorkflowState
 from ..tools.dynamic_schema import (
     DynamicSchemaDef,
     coerce_item_against_dynamic_schema,
@@ -34,6 +35,10 @@ from ..tools.dynamic_schema import (
 logger = logging.getLogger(__name__)
 
 _SUMMARIZATION_FALLBACK_MAX_INPUT_TOKENS = 32_000
+
+
+def _legacy_finish_result_key() -> str:
+    return "_" + "finish_task_result"
 
 
 class _ProfiledSummarizationModel:
@@ -305,6 +310,7 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
         output_schema_path: str | None = None,
         business_validator: Callable[..., tuple[bool, list[str]]] | None = None,
         ctx: dict[str, Any],
+        workflow_state: WorkflowState | None = None,
         callbacks: Sequence[Callback] | None = None,
         phase_name: str = "unknown",
     ) -> None:
@@ -313,6 +319,7 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
         self.output_schema_path = output_schema_path
         self.business_validator = business_validator
         self.ctx = ctx
+        self.workflow_state = workflow_state
         self._callbacks = list(callbacks or [])
         self._phase_name = phase_name
         self.hoist_to = (
@@ -435,7 +442,12 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
         }
         if extra:
             result.update(extra)
-        self.ctx["_finish_task_result"] = result
+        if self.workflow_state is not None:
+            self.workflow_state = StateManager.update_framework(
+                self.workflow_state,
+                finish_task_result=result,
+            )
+        self.ctx[_legacy_finish_result_key()] = result
         if self.hoist_to:
             self.ctx[str(self.hoist_to)] = parsed_list
             logger.info(

@@ -199,29 +199,72 @@ class TestFinishTaskWiringMVP2T5:
         assert result["finish_task_result"] is result["value"]
         assert result["diagnostics"] == "diag"
 
-    def test_schema_engine_validates_when_wired_failure(self) -> None:
-        """When ``schema_engine`` + ``compiled_schema`` are passed, run validation.
+    # T5-hotfix: removed the prior ``test_schema_engine_validates_when_wired_failure``
+    # — it asserted "failed" against a hand-empty schema (``fields=()``)
+    # and relied on Pydantic ``extra='forbid'`` to reject the raw
+    # markdown string finish_task was incorrectly handing the engine.
+    # That setup let the test stay green even after the underlying
+    # markdown parse step was missing, hiding the real bug. The four
+    # tests below replace it with real-schema positive + negative
+    # coverage that exercises the parse-then-validate pipeline.
 
-        We pin the failure path because the SchemaEngine-generated
-        Pydantic model carries ``extra='forbid'`` and finish_task feeds
-        in ``{"business_data_md": ...}`` — an unknown key from the empty
-        schema's perspective. Surfacing the rejection as
-        ``schema_validation='failed'`` plus a populated
-        ``schema_validation_errors`` list is the wiring contract; the
-        canonical authoring path keeps the validation in
-        ``ValidationMiddleware`` upstream.
-        """
-        from graph_agent.core.schema_engine import SchemaEngine, SchemaObject
+    def _build_item_schema(self):
+        """Compile a real two-field schema (title: str, count: int) via SchemaEngine."""
+        from graph_agent.core.schema_engine import SchemaEngine
 
+        md = (
+            '<output_example name="Item">\n'
+            "## item\n"
+            "- title (str, required): 标题\n"
+            "- count (int, required): 计数\n"
+            "</output_example>"
+        )
         engine = SchemaEngine()
-        schema = SchemaObject(fields=(), required_fields=frozenset())
+        schema = engine.parse_from_md(md)
+        return engine, schema
+
+    def test_real_schema_validates_parsed_md_passes(self) -> None:
+        """Happy path: real schema + valid markdown → schema_validation == 'passed'."""
+        engine, schema = self._build_item_schema()
+
+        business_md = (
+            "## item-1\n"
+            "- title: First post\n"
+            "- count: 7\n"
+        )
 
         ctx: dict[str, object] = {}
         result = finish_task(
             ctx,  # type: ignore[arg-type]
-            reasoning="Validating via wired SchemaEngine.",
+            reasoning="Real schema + valid markdown.",
             diagnostics_md="diag",
-            business_data_md="## item\n- name: ok",
+            business_data_md=business_md,
+            schema_engine=engine,
+            compiled_schema=schema,
+        )
+
+        assert result["value"]["schema_validation"] == "passed"
+        # T5-hotfix: result must carry the parsed dict view, not the
+        # raw markdown string. IOManager.resolve_hoist needs structured
+        # data to extract source_field values.
+        parsed = result["value"]["business_data_parsed"]
+        assert isinstance(parsed, list) and len(parsed) == 1
+        assert parsed[0] == {"title": "First post", "count": 7}
+
+    def test_real_schema_catches_missing_required_field(self) -> None:
+        """Negative path: real schema with a required field absent → 'failed'."""
+        engine, schema = self._build_item_schema()
+
+        # ``count`` is required but missing.
+        business_md = (
+            "## item-1\n"
+            "- title: First post\n"
+        )
+
+        ctx: dict[str, object] = {}
+        result = finish_task(
+            ctx,  # type: ignore[arg-type]
+            business_data_md=business_md,
             schema_engine=engine,
             compiled_schema=schema,
         )
@@ -229,6 +272,70 @@ class TestFinishTaskWiringMVP2T5:
         assert result["value"]["schema_validation"] == "failed"
         errors = result["value"]["schema_validation_errors"]
         assert isinstance(errors, list) and len(errors) >= 1
+        # The error must reference the offending field by name —
+        # otherwise downstream LLM retry feedback can't fix it.
+        assert any("count" in err for err in errors), (
+            f"Expected an error mentioning the missing 'count' field; "
+            f"got {errors!r}."
+        )
+
+    def test_real_schema_catches_type_mismatch(self) -> None:
+        """Negative path: schema requires int, markdown supplies non-int → 'failed'."""
+        engine, schema = self._build_item_schema()
+
+        business_md = (
+            "## item-1\n"
+            "- title: First post\n"
+            "- count: not-a-number\n"
+        )
+
+        ctx: dict[str, object] = {}
+        result = finish_task(
+            ctx,  # type: ignore[arg-type]
+            business_data_md=business_md,
+            schema_engine=engine,
+            compiled_schema=schema,
+        )
+
+        assert result["value"]["schema_validation"] == "failed"
+        errors = result["value"]["schema_validation_errors"]
+        assert isinstance(errors, list) and len(errors) >= 1
+
+    def test_finish_task_result_carries_parsed_dicts_not_raw_md(self) -> None:
+        """Regression: finish_task_result must expose structured data.
+
+        Prior to T5-hotfix the result carried the raw markdown string
+        in ``business_data_md`` and *no* parsed view, so
+        ``IOManager.resolve_hoist`` couldn't read field values out. We
+        pin the parsed-view contract here to prevent re-regression.
+        """
+        engine, schema = self._build_item_schema()
+
+        business_md = (
+            "## item-1\n"
+            "- title: alpha\n"
+            "- count: 1\n"
+            "## item-2\n"
+            "- title: beta\n"
+            "- count: 2\n"
+        )
+
+        ctx: dict[str, object] = {}
+        result = finish_task(
+            ctx,  # type: ignore[arg-type]
+            business_data_md=business_md,
+            schema_engine=engine,
+            compiled_schema=schema,
+        )
+
+        parsed = result["value"]["business_data_parsed"]
+        assert parsed == [
+            {"title": "alpha", "count": 1},
+            {"title": "beta", "count": 2},
+        ]
+        # The legacy raw-markdown view stays available for callers that
+        # need the original text (e.g. retry feedback templates).
+        assert result["value"]["business_data_md"] == business_md.strip()
 
     def test_schema_engine_kwargs_optional_independently(self) -> None:
         """Passing only one of (schema_engine, compiled_schema) keeps fallback."""

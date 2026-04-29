@@ -41,8 +41,37 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:  # avoid runtime import cycle
     from ..core.io_manager import IOManager
     from ..core.schema_engine import SchemaEngine, SchemaObject
+    from ..tools.md_to_json import ParsedBlock
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_business_md_to_blocks(
+    business_data_md: str,
+    schema_engine: SchemaEngine,
+    compiled_schema: SchemaObject,
+) -> tuple[list[ParsedBlock], type[Any]]:
+    """Markdown → list[ParsedBlock] using the schema's projected Pydantic class.
+
+    T5-hotfix: ``finish_task`` previously fed the raw markdown string
+    directly into ``SchemaEngine.validate`` (line 148 in T5 commit
+    5946638), which always failed because the engine's Pydantic model
+    expected the schema's declared field names, not a single
+    ``business_data_md`` key. The audit caught the test suite hiding
+    this with a hand-empty schema (``fields=()``) so ``extra='forbid'``
+    rejected the raw string and made the assertion pass for the wrong
+    reason.
+
+    The fix uses ``md_to_json.parse_md`` — the same canonical parser
+    ``ValidationMiddleware`` runs upstream — to split the markdown into
+    one ``ParsedBlock`` per ``##`` item. Each block's ``.data`` dict is
+    what ``schema_engine.validate`` actually expects.
+    """
+    from ..tools.md_to_json import parse_md
+
+    pydantic_cls = schema_engine.get_pydantic_model(compiled_schema)
+    blocks = parse_md(business_data_md, pydantic_cls)
+    return blocks, pydantic_cls
 
 PLANNING_NUDGE = (
     "[系统提示] 在执行任何业务工具之前，你必须先调用 update_working_memory "
@@ -145,13 +174,46 @@ def finish_task(
     # future MVP-4 callers); ValidationMiddleware remains the canonical
     # gate when these kwargs are absent.
     if schema_engine is not None and compiled_schema is not None and business_data_md:
-        validation = schema_engine.validate(
-            {"business_data_md": business_data_md.strip()},
-            compiled_schema,
-        )
-        result["schema_validation"] = "passed" if validation.ok else "failed"
-        if not validation.ok:
-            result["schema_validation_errors"] = list(validation.errors)
+        # T5-hotfix: parse markdown → list[ParsedBlock.data] before
+        # validating. The previous implementation skipped this step and
+        # fed the raw markdown string into ``validate`` as a single
+        # ``business_data_md`` key, which is not what any real schema
+        # declares. See ``_parse_business_md_to_blocks`` for the audit
+        # trail.
+        try:
+            blocks, _ = _parse_business_md_to_blocks(
+                business_data_md, schema_engine, compiled_schema
+            )
+        except Exception as exc:  # noqa: BLE001 — md parse failures surface here
+            blocks = []
+            result["schema_validation"] = "failed"
+            result["schema_validation_errors"] = [
+                f"markdown parse failed: {type(exc).__name__}: {exc}"
+            ]
+        else:
+            errors: list[str] = []
+            parsed_dicts: list[dict[str, Any]] = []
+            for block in blocks:
+                validation = schema_engine.validate(block.data, compiled_schema)
+                if validation.ok:
+                    parsed_dicts.append(
+                        validation.parsed if validation.parsed is not None else dict(block.data)
+                    )
+                else:
+                    errors.extend(
+                        f"item {block.meta.id}: {err}" for err in validation.errors
+                    )
+            if errors:
+                result["schema_validation"] = "failed"
+                result["schema_validation_errors"] = errors
+            else:
+                result["schema_validation"] = "passed"
+                # T5-hotfix: ``business_data_parsed`` carries the
+                # structured dict view downstream IOManager.resolve_hoist
+                # needs. Without this, finish_task_result was opaque
+                # markdown and ``source_field`` lookups returned None,
+                # breaking the A7 hoist contract.
+                result["business_data_parsed"] = parsed_dicts
     else:
         result.setdefault("schema_validation", "skipped")
 

@@ -71,20 +71,30 @@
    - `adaptation_v1`（用 `tier` + `subagent_enabled` 字段 — T9a 删除后失效）
    - **归口**: MVP-1 / MVP-3 期间根据新 manifest schema 重写
 
-3. **mypy strict 仅在 3 核心文件起步**
+3. **工程门禁仅在 3 核心文件 strict 起步**（mypy + ruff check + ruff format 同 scope）
    - `core/exceptions.py` / `core/manifest.py` / `core/checkpointer.py`
-   - 老代码全收敛 → MVP-5 主控验证时
-   - 当前 `[tool.mypy]` 配置上 strict=true，但 `pre-commit` 仅对这 3 文件 run（避免一上来全库报错）
+   - T11 codex 报告 ruff `src/ tests/` 全库 OK 是未 verify 的 implementation defect: 实测 316 ruff errors (老代码 modernization 债)
+   - 老代码全收敛 → MVP-5 主控验证时（含全库 `ruff format` + `ruff check --fix` + 41 处需手判 issue: B904 / N806 / SIM108 / E402 / F841 / F811 / F821 等）
+   - 当前 `[tool.mypy]` / `[tool.ruff]` 配置上是默认严格的，但 CI workflow + `pre-commit` 都只对这 3 文件 run
 
-4. **`tool_wrapper.py:138` silent fallback 站点**
+4. **Coverage gate 起步 baseline 65（实测 66%），不是 design.md §7 目标的 85**
+   - T11 brief 第 80 行其实写过"本任务设根 85%, 核心 95% 在 T13 主控验证时再 strict (避免 T11 卡 coverage 不达标)"，但 T11 codex 没实测当前 baseline 就把 85 落进 pyproject + ci.yml
+   - T13 主控验证时 baseline=66% 直接卡红，gate 降到 65（防退步）
+   - **归口**: MVP-5 全收敛到核心 95% / 整体 85%（design.md §7 目标），且需要先把覆盖率低的模块（resolver.py 54% / md_to_json.py 58% / parallel_map.py 13% / synthesize_speech.py 19% 等）补单测
+
+5. **`tool_wrapper.py:138` silent fallback 站点**
    - design.md §6 D6 决策: defer 到 MVP-4（Phase Executor 重画时同步处理，跟 finish_task 数据通道改造绑定）
 
-5. **`.claude/sessions/*` 23 个 session log 文件被 tracked**
+6. **`.claude/sessions/*` 23 个 session log 文件被 tracked**
    - T9b commit 时未 gitignore 误提交。**归口**: 单独 chore PR 清理（不在 MVP 序列内）
 
-6. **`f5b3fa4` 提交统计噪音**
+7. **`f5b3fa4` 提交统计噪音**
    - `git show f5b3fa4 --stat` 显示 251,698 insertions，是因为同时把 5 个 `.claude/sessions/2026-04-2*-session.md` 文件（每份 4-5k 行）误带入；deerflow/ 实际净删 13.3k 行
    - 不影响代码净效果，但 stat 数据失真
+
+8. **T11 codex implementation defect pattern**（写给未来主控的提醒）
+   - T11 codex 报告"ruff/coverage 配置 OK"但全程没实测 → CI 第 1/3/4 次红才暴露
+   - **教训**: 工程门禁配置类任务，必须要求 agent 报告里附 `ruff check src/ tests/` + `pytest --cov ... && coverage report` 的完整本地输出 evidence。光看配置文件存在不够。
 
 ## 学习 / 风险记录（写给未来 MVP-1～MVP-5 主控）
 

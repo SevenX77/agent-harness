@@ -10,7 +10,6 @@ verbatim; only the surrounding plumbing now lives on a polymorphic
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from ..state import StateManager, WorkflowState
 from ..types import Phase
@@ -56,22 +55,24 @@ class ValidationPhaseNode(PhaseNode):
             return next_state
 
         passed, errors_raw = phase.validator(next_state["data"])
-        errors: list[Any] = errors_raw
-        if isinstance(errors, str):
+        raw_errors: object = errors_raw
+        if isinstance(raw_errors, str):
             logger.warning(
                 "phase=%s validator returned str instead of list[str]; "
                 "coercing to single-element list. Update validator to "
                 "match Callback.on_retry / RetryEvent.feedback contract.",
                 phase.name,
             )
-            errors = [errors] if errors else []
-        elif not isinstance(errors, list):
+            errors = [raw_errors] if raw_errors else []
+        elif isinstance(raw_errors, list):
+            errors = [str(error) for error in raw_errors]
+        else:
             logger.warning(
                 "phase=%s validator returned %s instead of list[str]; coercing.",
                 phase.name,
-                type(errors).__name__,
+                type(raw_errors).__name__,
             )
-            errors = [str(errors)] if errors else []
+            errors = [str(raw_errors)] if raw_errors else []
         retry_key = phase.retry_target or phase.name
 
         retry_counts = dict(next_state["flow"].retry_counts)

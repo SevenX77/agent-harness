@@ -38,12 +38,13 @@ Design notes (carried forward from the pre-M6 implementation):
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
-from typing import Any
 
 from ..callbacks.base import Callback
 from .phase_nodes import (
     DependencyContainer,
+    HeartbeatProtocol,
+    ModelResolverProtocol,
+    SaveCompactionSidecar,
     build_code_phase_node,
     build_llm_phase_node,
     build_validation_phase_node,
@@ -68,9 +69,9 @@ class PhaseExecutor:
         callbacks: list[Callback],
         *,
         run_context: RunContext | None = None,
-        heartbeat: Any = None,
-        resolver: Any = None,
-        save_compaction_sidecar: Callable[..., Any] | None = None,
+        heartbeat: HeartbeatProtocol | None = None,
+        resolver: ModelResolverProtocol | None = None,
+        save_compaction_sidecar: SaveCompactionSidecar | None = None,
     ) -> None:
         self._callbacks = callbacks
         self._run_context = run_context
@@ -78,7 +79,7 @@ class PhaseExecutor:
         self._resolver = resolver
         self._save_compaction_sidecar = save_compaction_sidecar
 
-    def __getstate__(self) -> Any:
+    def __getstate__(self) -> object:
         # Fail-fast guard for the LangGraph checkpointer (and any other
         # path that tries to pickle RunnableConfig). ``PhaseExecutor``
         # deliberately holds live per-run references (heartbeat thread,
@@ -104,7 +105,7 @@ class PhaseExecutor:
         return self._run_context
 
     @property
-    def heartbeat(self) -> Any:
+    def heartbeat(self) -> HeartbeatProtocol | None:
         return self._heartbeat
 
     @property

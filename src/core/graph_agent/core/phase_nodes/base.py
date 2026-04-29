@@ -19,10 +19,36 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Protocol
 
+from langchain_core.language_models.chat_models import BaseChatModel
+
+from ...callbacks.base import Callback
+from ..run_context import RunContext
 from ..state import StateManager, WorkflowState
 from ..types import Phase
+
+SaveCompactionSidecar = Callable[..., str | None]
+
+
+class ModelResolverProtocol(Protocol):
+    """Minimal resolver surface consumed by ``LLMPhaseNode``."""
+
+    def resolve(
+        self,
+        role_name: str | None = None,
+        *,
+        model_override: str | None = None,
+        callbacks: tuple[Callback, ...] = (),
+        phase_name: str | None = None,
+    ) -> BaseChatModel:
+        """Return a LangChain-compatible model object for one phase."""
+
+
+class HeartbeatProtocol(Protocol):
+    """Mutable heartbeat handle updated with the active phase name."""
+
+    current_phase: str | None
 
 
 @dataclass(frozen=True)
@@ -35,9 +61,9 @@ class DependencyContainer:
     factory selects for that phase.
     """
 
-    callbacks: list[Any]  # list[Callback] — typed Any to avoid a circular import
-    resolver: Any = None
-    save_compaction_sidecar: Callable[..., Any] | None = None
+    callbacks: list[Callback]
+    resolver: ModelResolverProtocol | None = None
+    save_compaction_sidecar: SaveCompactionSidecar | None = None
 
 
 class PhaseNode(ABC):
@@ -53,8 +79,8 @@ class PhaseNode(ABC):
         self,
         dependencies: DependencyContainer,
         *,
-        run_context: Any = None,
-        heartbeat: Any = None,
+        run_context: RunContext | None = None,
+        heartbeat: HeartbeatProtocol | None = None,
     ) -> None:
         # Mirror the original ``PhaseExecutor`` attribute names so the
         # method bodies move from the executor verbatim — keeps the M6
@@ -76,7 +102,7 @@ class PhaseNode(ABC):
         state: WorkflowState,
         phase: Phase,
         *,
-        source_data: dict[str, Any] | None = None,
+        source_data: dict[str, object] | None = None,
     ) -> WorkflowState:
         """MVP-2 T7-bis: route declarative io.outputs into BusinessData.
 

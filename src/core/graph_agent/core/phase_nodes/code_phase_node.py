@@ -102,7 +102,7 @@ class CodePhaseNode(PhaseNode):
           reserved-key gate passes, ``phase.output_schema`` (if set) runs
           a Pydantic validate to normalise the dict into the declared
           shape.
-        * Anything else (``None`` / ``list`` / ``int`` / ...) → no state
+        * Other values (``None`` / ``list`` / ``int`` / ...) → no state
           change. Code-only tools that need side effects on
           ``BusinessData`` should mutate the passed-in instance directly
           (covered by the existing IO-hoist path).
@@ -111,7 +111,7 @@ class CodePhaseNode(PhaseNode):
             phase: The currently executing code-only phase.
             state: The workflow state cloned by the caller.
             result: The tool's return value, typed ``object`` per
-                PHASE2_DESIGN.md §4.4 (no ``Any``). Real shape is
+                PHASE2_DESIGN.md §4.4. Real shape is
                 inspected via ``isinstance`` checks below.
             fn: The tool callable; used to surface ``__name__`` in
                 log records and error messages so operators can identify

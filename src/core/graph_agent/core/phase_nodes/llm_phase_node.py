@@ -19,11 +19,13 @@ captured ``tool_state`` reference identical to the legacy code path.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import Protocol, cast
 
 from langchain.agents import create_agent
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 
 from ...cognitive.ambiguity import log_ambiguity
@@ -38,6 +40,7 @@ from ..callback_bridge import _extract_text_content, _HarnessCallbackBridge
 from ..nudge_injector import NudgeInjector
 from ..state import (
     StateManager,
+    StateMessage,
     WorkflowState,
     legacy_context_from_state,
 )
@@ -59,6 +62,16 @@ from ._helpers import (
 from .base import PhaseNode
 
 logger = logging.getLogger(__name__)
+
+
+class _AgentInvoker(Protocol):
+    def invoke(
+        self,
+        input: object,
+        *,
+        config: RunnableConfig,
+    ) -> Mapping[str, object]:
+        """Run the wrapped LangChain agent and return its message payload."""
 
 
 class LLMPhaseNode(PhaseNode):
@@ -84,7 +97,7 @@ class LLMPhaseNode(PhaseNode):
 
         state = _clone_state(state)
         is_retry = state["flow"].current_phase == phase.name
-        framework_updates: dict[str, Any] = {
+        framework_updates: dict[str, object] = {
             "current_phase": phase.name,
             "finish_task_result": None,
             "validation_middleware_phase": phase.name,
@@ -163,7 +176,7 @@ class LLMPhaseNode(PhaseNode):
 
         effective_llm_role = phase.llm_role or phase.tier
 
-        model = TracingClientProxy(
+        model = cast(BaseChatModel, TracingClientProxy(
             wrapped_client=model,
             callbacks=active_callbacks,
             phase_name=phase.name,
@@ -171,7 +184,7 @@ class LLMPhaseNode(PhaseNode):
             resolved_model=str(resolved_model_name) if resolved_model_name else None,
             sub_run_id=state["flow"].sub_run_id,
             group_key=state["flow"].group_key,
-        )
+        ))
         llm_role = effective_llm_role or "balanced"
         role_prefix = resolve_role_prefix_from_llm_role(llm_role)
         logger.info(
@@ -190,11 +203,11 @@ class LLMPhaseNode(PhaseNode):
         )
 
         def _finish_task_tool(
-            ctx: dict[str, Any],
+            ctx: dict[str, object],
             reasoning: str = "",
             diagnostics_md: str = "",
             business_data_md: str = "",
-        ) -> dict[str, Any]:
+        ) -> dict[str, object]:
             prior = _finish_result_from_tool_state(ctx)
             finish_input = {"finish_task_result": prior} if prior is not None else {}
             outcome = finish_task(
@@ -327,15 +340,15 @@ class LLMPhaseNode(PhaseNode):
             context=prompt_view,
             role_prefix=role_prefix,
         )
-        agent: Any = create_agent(
-            model=cast(Any, model),
+        agent = cast(_AgentInvoker, create_agent(
+            model=model,
             tools=lc_tools,
             system_prompt=system_prompt,
             middleware=phase_middlewares,
-        )
+        ))
 
         # Step 7: Build messages
-        messages: list[AnyMessage] = list(state["messages"]) if is_retry else []
+        messages: list[StateMessage] = list(state["messages"]) if is_retry else []
         messages.append(HumanMessage(content=user_message))
 
         # Step 8: Run agent with Callback Bridge + Phase metadata
@@ -359,9 +372,9 @@ class LLMPhaseNode(PhaseNode):
             },
             tags=[f"phase:{phase.name}", f"tier:{phase.tier}"],
         )
-        result_messages: list[AnyMessage] = []
+        result_messages: list[StateMessage] = []
 
-        def _latest_ai_content(msgs: list[AnyMessage]) -> str:
+        def _latest_ai_content(msgs: list[StateMessage]) -> str:
             for _msg in reversed(msgs):
                 if isinstance(_msg, AIMessage) and _msg.content:
                     return _extract_text_content(_msg.content)
@@ -370,7 +383,7 @@ class LLMPhaseNode(PhaseNode):
         def _compact_messages(
             original_user_msg: HumanMessage,
             working_memory: str,
-        ) -> list[AnyMessage]:
+        ) -> list[StateMessage]:
             """Checkpoint: compress accumulated messages into a compact context."""
             checkpoint_text = (
                 f"## 执行进度（Checkpoint）\n\n{working_memory}\n\n"
@@ -387,7 +400,7 @@ class LLMPhaseNode(PhaseNode):
         plan_verified = False
         wm_snapshot = _tool_text(tool_state, _WORKING_MEMORY_KEY)
         checkpoint_count = 0
-        current_messages: list[AnyMessage] = list(messages)
+        current_messages: list[StateMessage] = list(messages)
         original_user_msg = (
             messages[0]
             if messages and isinstance(messages[0], HumanMessage)
@@ -409,7 +422,7 @@ class LLMPhaseNode(PhaseNode):
 
             try:
                 result = agent.invoke(
-                    cast(Any, {"messages": current_messages}),
+                    {"messages": current_messages},
                     config=agent_config,
                 )
             except Exception as agent_err:
@@ -431,7 +444,7 @@ class LLMPhaseNode(PhaseNode):
                             "[Harness] on_phase_end callback error during cleanup: %s", cb_exc
                         )
                 raise
-            result_messages = list(cast(list[AnyMessage], result.get("messages", [])))
+            result_messages = list(cast(list[StateMessage], result.get("messages", [])))
 
             # --- Finish gate: self-check enforcement ---
             finish_result = _finish_result_from_tool_state(tool_state)
@@ -441,7 +454,7 @@ class LLMPhaseNode(PhaseNode):
                     tool_state.pop(_FINISH_TASK_RESULT_KEY, None)
                     current_messages = [
                         *result_messages,
-                        cast(AnyMessage, outcome.message),
+                        outcome.message,
                     ]
                     continue
                 break
@@ -467,7 +480,7 @@ class LLMPhaseNode(PhaseNode):
                     if outcome.message is not None:
                         current_messages = [
                             *result_messages,
-                            cast(AnyMessage, outcome.message),
+                            outcome.message,
                         ]
                         continue
                     plan_verified = True
@@ -541,7 +554,7 @@ class LLMPhaseNode(PhaseNode):
             if outcome.message is not None:
                 current_messages = [
                     *result_messages,
-                    cast(AnyMessage, outcome.message),
+                    outcome.message,
                 ]
                 continue
             if outcome.budget_exhausted:

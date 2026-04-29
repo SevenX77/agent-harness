@@ -10,11 +10,8 @@ lives on the corresponding :class:`PhaseNode` subclass instead.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
 
-from langchain_core.messages import AnyMessage
-
-from ..state import StateManager, WorkflowState
+from ..state import StateManager, StateMessage, WorkflowState
 
 _AMBIGUITY_REPORTS_KEY = "_ambiguity_reports"
 _FINISH_TASK_RESULT_KEY = "_finish_task_result"
@@ -24,17 +21,17 @@ _VALIDATION_WARNINGS_KEY = "_validation_warnings"
 _WORKING_MEMORY_KEY = "_working_memory"
 
 
-def _as_text(value: Any) -> str | None:
+def _as_text(value: object) -> str | None:
     if value is None:
         return None
     return value if isinstance(value, str) else str(value)
 
 
-def _tool_text(tool_state: dict[str, Any], key: str) -> str | None:
+def _tool_text(tool_state: dict[str, object], key: str) -> str | None:
     return _as_text(tool_state.get(key))
 
 
-def _normalize_string_list(value: Any) -> list[str]:
+def _normalize_string_list(value: object) -> list[str]:
     if value is None:
         return []
     if isinstance(value, list):
@@ -44,14 +41,14 @@ def _normalize_string_list(value: Any) -> list[str]:
     return [str(value)] if value else []
 
 
-def _tool_reports(tool_state: dict[str, Any]) -> list[dict[str, Any]]:
+def _tool_reports(tool_state: dict[str, object]) -> list[dict[str, object]]:
     raw = tool_state.get(_AMBIGUITY_REPORTS_KEY, [])
     if not isinstance(raw, list):
         return []
     return [item for item in raw if isinstance(item, dict)]
 
 
-def _append_tool_warning(tool_state: dict[str, Any], warning: str) -> None:
+def _append_tool_warning(tool_state: dict[str, object], warning: str) -> None:
     existing = tool_state.get(_VALIDATION_WARNINGS_KEY)
     if isinstance(existing, list):
         existing.append(warning)
@@ -63,24 +60,24 @@ def _append_tool_warning(tool_state: dict[str, Any], warning: str) -> None:
 
 
 def _finish_result_from_tool_state(
-    tool_state: dict[str, Any],
-) -> dict[str, Any] | None:
+    tool_state: dict[str, object],
+) -> dict[str, object] | None:
     value = tool_state.get(_FINISH_TASK_RESULT_KEY)
     return value if isinstance(value, dict) else None
 
 
 def _sync_tool_state(
     state: WorkflowState,
-    tool_state: dict[str, Any],
+    tool_state: dict[str, object],
     *,
-    messages: Sequence[AnyMessage] | None = None,
+    messages: Sequence[StateMessage] | None = None,
 ) -> WorkflowState:
     business_fields = {k: v for k, v in tool_state.items() if not k.startswith("_")}
     next_state = state
     if business_fields:
         next_state = StateManager.update_business(next_state, **business_fields)
 
-    flow_updates: dict[str, Any] = {}
+    flow_updates: dict[str, object] = {}
     if _VALIDATION_WARNINGS_KEY in tool_state:
         flow_updates["validation_warnings"] = _normalize_string_list(
             tool_state.get(_VALIDATION_WARNINGS_KEY)

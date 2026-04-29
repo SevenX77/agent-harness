@@ -15,10 +15,9 @@ The factory keeps the existing dispatch invariants visible:
 
 from __future__ import annotations
 
-from typing import Any
-
+from ..run_context import RunContext
 from ..types import Phase
-from .base import DependencyContainer, PhaseNode
+from .base import DependencyContainer, HeartbeatProtocol, PhaseNode
 from .code_phase_node import CodePhaseNode
 from .llm_phase_node import LLMPhaseNode
 from .validation_phase_node import ValidationPhaseNode
@@ -28,8 +27,8 @@ def build_llm_phase_node(
     phase: Phase,
     dependencies: DependencyContainer,
     *,
-    run_context: Any = None,
-    heartbeat: Any = None,
+    run_context: RunContext | None = None,
+    heartbeat: HeartbeatProtocol | None = None,
 ) -> PhaseNode:
     """Pick between LLMPhaseNode and CodePhaseNode based on ``phase.requires_llm``.
 
@@ -47,8 +46,8 @@ def build_code_phase_node(
     phase: Phase,
     dependencies: DependencyContainer,
     *,
-    run_context: Any = None,
-    heartbeat: Any = None,
+    run_context: RunContext | None = None,
+    heartbeat: HeartbeatProtocol | None = None,
 ) -> CodePhaseNode:
     """Always return a :class:`CodePhaseNode` for ``mode: logic`` phases.
 
@@ -63,8 +62,8 @@ def build_validation_phase_node(
     phase: Phase,
     dependencies: DependencyContainer,
     *,
-    run_context: Any = None,
-    heartbeat: Any = None,
+    run_context: RunContext | None = None,
+    heartbeat: HeartbeatProtocol | None = None,
 ) -> ValidationPhaseNode:
     """Always return a :class:`ValidationPhaseNode` for the validation graph node."""
     del phase  # accepted for API symmetry with the execute-side factories

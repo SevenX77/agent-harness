@@ -24,13 +24,14 @@ import hashlib
 import importlib
 import importlib.util
 import logging
+import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
-from .parser import _parse_frontmatter
+from .parser import _parse_frontmatter, _strip_frontmatter
 
 if TYPE_CHECKING:
     from .io_manager import IODef, IOManager
@@ -48,6 +49,17 @@ from .personas import resolve_persona
 from .schema_engine import SchemaEngine
 
 logger = logging.getLogger(__name__)
+
+_MARKDOWN_HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
+_OUTPUT_SCHEMA_TITLE_RE = re.compile(
+    r"\boutput[\s_-]*schema(?:[\s_-]*md)?\b",
+    re.IGNORECASE,
+)
+_OUTPUT_EXAMPLE_TITLE_RE = re.compile(
+    r"\boutput[\s_-]*example(?:[\s_-]*md)?\b",
+    re.IGNORECASE,
+)
+_FENCE_RE = re.compile(r"^\s*(```+|~~~+)")
 
 
 # MVP-2 T6: shared SchemaEngine singleton.
@@ -75,6 +87,17 @@ class CompiledSkill:
     manifest: SkillManifestType
 
 
+@dataclass(frozen=True)
+class _SchemaMarkdownBlock:
+    """One body markdown block that declares a phase output schema/example."""
+
+    phase_name: str
+    field_name: str
+    heading_line: int
+    heading_level: int
+    content_start: int
+
+
 def parse_skill_md(text: str) -> dict[str, Any]:
     """Phase 1: SKILL.md text to a plain raw manifest dict.
 
@@ -89,6 +112,7 @@ def parse_skill_md(text: str) -> dict[str, Any]:
     if "schema_version" in raw:
         raw["schema_version"] = str(raw["schema_version"]).strip()
     _mirror_phase_schema_markdown(raw)
+    _apply_markdown_schema_blocks(raw, _strip_frontmatter(text))
     return raw
 
 
@@ -105,7 +129,7 @@ def validate_manifest(
     from .schema_engine import SchemaParseError
 
     try:
-        manifest = TypeAdapter(SkillManifest).validate_python(raw)
+        manifest: SkillManifestType = TypeAdapter(SkillManifest).validate_python(raw)
     except ValidationError as exc:
         raise SkillCompilationError(f"SkillManifest validation failed: {exc}") from exc
 
@@ -219,6 +243,234 @@ def _mirror_phase_schema_markdown(raw: dict[str, Any]) -> None:
         ):
             phase["output_schema_md"] = output_schema
             phase.pop("output_schema", None)
+
+
+def _apply_markdown_schema_blocks(raw: dict[str, Any], body: str) -> None:
+    phases = raw.get("phases")
+    if not isinstance(phases, list) or not body.strip():
+        return
+
+    phase_by_name = _phase_dicts_by_name(phases)
+    blocks = _find_schema_markdown_blocks(body, list(phase_by_name))
+    if not blocks:
+        return
+
+    lines = body.splitlines(keepends=True)
+    for index, block in enumerate(blocks):
+        next_block_start = (
+            blocks[index + 1].heading_line
+            if index + 1 < len(blocks)
+            else len(lines)
+        )
+        raw_content = _extract_schema_block_content(
+            lines[block.content_start : next_block_start],
+            block.field_name,
+            block.heading_level,
+        )
+        content = raw_content.strip("\r\n")
+        if not content.strip():
+            raise SkillLoadError(
+                f"Markdown block for phase '{block.phase_name}' "
+                f"{block.field_name} is empty"
+            )
+
+        phase = phase_by_name[block.phase_name]
+        _set_phase_schema_markdown(phase, block, content)
+
+
+def _phase_dicts_by_name(phases: list[Any]) -> dict[str, dict[str, Any]]:
+    phase_by_name: dict[str, dict[str, Any]] = {}
+    for phase in phases:
+        if not isinstance(phase, dict):
+            continue
+        name = phase.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        if name in phase_by_name:
+            raise SkillLoadError(f"Duplicate phase name in raw manifest: {name!r}")
+        phase_by_name[name] = phase
+    return phase_by_name
+
+
+def _find_schema_markdown_blocks(
+    body: str,
+    phase_names: list[str],
+) -> list[_SchemaMarkdownBlock]:
+    lines = body.splitlines(keepends=True)
+    blocks: list[_SchemaMarkdownBlock] = []
+    current_phase: str | None = None
+
+    for line_index, raw_line in enumerate(lines):
+        heading = _parse_markdown_heading(raw_line)
+        if heading is None:
+            continue
+        level, title = heading
+        schema_field = _schema_field_from_title(title)
+        if schema_field is None:
+            context_phase = _phase_context_from_heading(title, phase_names)
+            if context_phase is not None:
+                current_phase = context_phase
+            continue
+
+        phase_name = _phase_name_from_schema_heading(
+            title,
+            phase_names,
+            current_phase,
+        )
+        blocks.append(
+            _SchemaMarkdownBlock(
+                phase_name=phase_name,
+                field_name=schema_field,
+                heading_line=line_index,
+                heading_level=level,
+                content_start=line_index + 1,
+            )
+        )
+    return blocks
+
+
+def _parse_markdown_heading(line: str) -> tuple[int, str] | None:
+    match = _MARKDOWN_HEADING_RE.match(line.rstrip("\r\n"))
+    if match is None:
+        return None
+    return len(match.group(1)), match.group(2).strip()
+
+
+def _schema_field_from_title(title: str) -> str | None:
+    if _OUTPUT_SCHEMA_TITLE_RE.search(title):
+        return "output_schema_md"
+    if _OUTPUT_EXAMPLE_TITLE_RE.search(title):
+        return "output_example_md"
+
+    normalized = _normalize_heading_text(title)
+    if normalized == "schema":
+        return "output_schema_md"
+    if normalized == "example":
+        return "output_example_md"
+    return None
+
+
+def _phase_context_from_heading(title: str, phase_names: list[str]) -> str | None:
+    cleaned = re.sub(r"^\s*phases?\s*[:#-]\s*", "", title, flags=re.IGNORECASE)
+    return _match_phase_name(cleaned, phase_names)
+
+
+def _phase_name_from_schema_heading(
+    title: str,
+    phase_names: list[str],
+    current_phase: str | None,
+) -> str:
+    remainder = _OUTPUT_SCHEMA_TITLE_RE.sub(" ", title)
+    remainder = _OUTPUT_EXAMPLE_TITLE_RE.sub(" ", remainder)
+    remainder = re.sub(r"\b(phases?|for|of|md)\b", " ", remainder, flags=re.IGNORECASE)
+    phase_name = _match_phase_name(remainder, phase_names)
+    if phase_name is not None:
+        return phase_name
+    if _normalize_heading_text(remainder):
+        raise SkillLoadError(
+            f"Markdown schema heading names an unknown phase: {title!r}"
+        )
+    if current_phase is not None:
+        return current_phase
+    if len(phase_names) == 1:
+        return phase_names[0]
+
+    field = _schema_field_from_title(title) or "schema block"
+    raise SkillLoadError(
+        f"Markdown {field} heading must name one phase when multiple phases exist: "
+        f"{title!r}"
+    )
+
+
+def _match_phase_name(candidate: str, phase_names: list[str]) -> str | None:
+    cleaned = _clean_heading_remainder(candidate)
+    normalized = _normalize_heading_text(cleaned)
+    if not normalized:
+        return None
+    for phase_name in phase_names:
+        if normalized == _normalize_heading_text(phase_name):
+            return phase_name
+    return None
+
+
+def _clean_heading_remainder(value: str) -> str:
+    cleaned = value.strip()
+    cleaned = cleaned.strip("`'\"[](){}")
+    cleaned = re.sub(r"^[\s:./\\|_-]+|[\s:./\\|_-]+$", "", cleaned)
+    return cleaned
+
+
+def _normalize_heading_text(value: str) -> str:
+    cleaned = _clean_heading_remainder(value).lower()
+    cleaned = re.sub(r"[^a-z0-9_-]+", " ", cleaned)
+    cleaned = re.sub(r"[\s_]+", "-", cleaned).strip("-")
+    return cleaned
+
+
+def _extract_schema_block_content(
+    lines: list[str],
+    field_name: str,
+    heading_level: int,
+) -> str:
+    if field_name == "output_example_md":
+        return _trim_after_output_example(lines)
+    return _trim_output_schema_lines(lines, heading_level)
+
+
+def _trim_after_output_example(lines: list[str]) -> str:
+    for index, line in enumerate(lines):
+        if "</output_example>" in line:
+            return "".join(lines[: index + 1])
+    return _trim_at_markdown_heading(lines, 2)
+
+
+def _trim_output_schema_lines(lines: list[str], heading_level: int) -> str:
+    first_content = _first_nonblank_line_index(lines)
+    if first_content is not None:
+        fence_match = _FENCE_RE.match(lines[first_content])
+        if fence_match is not None:
+            fence = fence_match.group(1)[0] * 3
+            for index in range(first_content + 1, len(lines)):
+                if lines[index].lstrip().startswith(fence):
+                    return "".join(lines[: index + 1])
+    return _trim_at_markdown_heading(lines, heading_level)
+
+
+def _first_nonblank_line_index(lines: list[str]) -> int | None:
+    for index, line in enumerate(lines):
+        if line.strip():
+            return index
+    return None
+
+
+def _trim_at_markdown_heading(lines: list[str], max_level: int) -> str:
+    for index, line in enumerate(lines):
+        heading = _parse_markdown_heading(line)
+        if heading is not None and heading[0] <= max_level:
+            return "".join(lines[:index])
+    return "".join(lines)
+
+
+def _set_phase_schema_markdown(
+    phase: dict[str, Any],
+    block: _SchemaMarkdownBlock,
+    content: str,
+) -> None:
+    if block.field_name in phase:
+        raise SkillLoadError(
+            f"Duplicate {block.field_name} for phase '{block.phase_name}'"
+        )
+    if block.field_name == "output_schema_md" and phase.get("output_schema"):
+        raise SkillLoadError(
+            f"Duplicate output_schema for phase '{block.phase_name}'"
+        )
+    if block.field_name == "output_example_md":
+        if phase.get("output_example"):
+            raise SkillLoadError(
+                f"Duplicate output_example for phase '{block.phase_name}'"
+            )
+        phase["output_example"] = content
+    phase[block.field_name] = content
 
 
 def _looks_like_schema_markdown(value: str) -> bool:
@@ -394,16 +646,16 @@ def resolve_skill_resource(
             raise SkillLoadError(
                 f"'{resource_path}' is not callable (got {type(func).__name__})"
             )
-        return func  # type: ignore[return-value]
+        return cast(Callable[..., str], func)
 
-    module = sys.modules.get(
+    resolved_module: Any = sys.modules.get(
         f"_graph_agent_skill_.{_skill_namespace(base_dir)}.{module_path_str}"
     )
-    if module is None:
-        module = _load_skill_local_module(module_path_str, base_dir)
-    if module is None:
+    if resolved_module is None:
+        resolved_module = _load_skill_local_module(module_path_str, base_dir)
+    if resolved_module is None:
         try:
-            module = importlib.import_module(module_path_str)
+            resolved_module = importlib.import_module(module_path_str)
         except ImportError as exc:
             raise SkillLoadError(
                 f"Cannot import {kind} module '{module_path_str}' "
@@ -411,10 +663,10 @@ def resolve_skill_resource(
             ) from exc
 
     if kind == "schema":
-        return module
+        return resolved_module
 
     try:
-        func = getattr(module, attr_name)
+        func = getattr(resolved_module, attr_name)
     except AttributeError as exc:
         raise SkillLoadError(
             f"Module for '{resource_path}' does not define '{attr_name}'"
@@ -425,7 +677,7 @@ def resolve_skill_resource(
             f"'{resource_path}' is not callable (got {type(func).__name__})"
         )
 
-    return func  # type: ignore[return-value]
+    return cast(Callable[..., str], func)
 
 
 def _resolve_reference_resource(base_dir: Path, reference_path: str) -> str:
@@ -464,7 +716,7 @@ def _resolve_tool_reference(
     base_dir: Path,
 ) -> Callable[..., str]:
     """Resolve a dot-path tool reference to a Python callable."""
-    return resolve_skill_resource(base_dir, ref_path, kind="tool")
+    return cast(Callable[..., str], resolve_skill_resource(base_dir, ref_path, kind="tool"))
 
 
 # ---------------------------------------------------------------------------
@@ -795,7 +1047,7 @@ def _render_output_format_markdown(
 
 
 def _compose_agent_system_prompt(
-    manifest: "AgentSkillDef",
+    manifest: AgentSkillDef,
     *,
     skill_base_dir: Path | None = None,
 ) -> str:
@@ -832,7 +1084,7 @@ def _compose_agent_system_prompt(
 
 
 def _inject_persona(
-    persona: "PersonaSkillDef",
+    persona: PersonaSkillDef,
     system_prompt: str | None,
 ) -> str:
     """Combine a PersonaSkillDef with a phase's system prompt.
@@ -858,7 +1110,7 @@ def _inject_persona(
 
 
 def _phase_from_agent_skill(
-    manifest: "AgentSkillDef",
+    manifest: AgentSkillDef,
     base_dir: Path,
     callbacks: list[Any] | None,
     loading_stack: set[str],
@@ -929,7 +1181,7 @@ def _phase_from_graph_phase(
             else None
         )
         if dynamic_schema is not None:
-            setattr(dynamic_schema, "hoist_to", phase_def.hoist_to)
+            dynamic_schema.hoist_to = phase_def.hoist_to  # type: ignore[attr-defined]
         system_prompt = phase_def.prompt
         xml_tags = _render_skill_section_xml_tags(phase_def, skill_base_dir=base_dir)
         if xml_tags:
@@ -941,13 +1193,16 @@ def _phase_from_graph_phase(
                 phase_def.adopted_persona, base_dir=base_dir,
             )
             system_prompt = _inject_persona(persona_manifest, system_prompt)
-        validator = (
-            _resolve_tool_reference(phase_def.validator, base_dir)
-            if phase_def.validator
-            else None
+        validator = cast(
+            Callable[..., tuple[bool, list[str]]] | None,
+            (
+                _resolve_tool_reference(phase_def.validator, base_dir)
+                if phase_def.validator
+                else None
+            ),
         )
         if validator is not None and phase_def.hoist_to:
-            setattr(validator, "hoist_to", phase_def.hoist_to)
+            validator.hoist_to = phase_def.hoist_to  # type: ignore[attr-defined]
         phase = Phase(
             name=phase_def.name,
             system_prompt=system_prompt,
@@ -976,11 +1231,11 @@ def _phase_from_graph_phase(
             # can hand it to md_to_json. The runtime stores the path, not
             # the resolved class, because LangGraph's msgpack checkpointer
             # cannot serialise ModelMetaclass.
-            output_schema=dynamic_schema,
+            output_schema=cast(Any, dynamic_schema),
             output_schema_path=None if dynamic_schema is not None else phase_def.output_schema,
             requires_llm=True,
         )
-        setattr(phase, "hoist_to", phase_def.hoist_to)
+        phase.hoist_to = phase_def.hoist_to  # type: ignore[attr-defined]
         return phase
 
     if isinstance(phase_def, _LogicPhase):
@@ -990,10 +1245,13 @@ def _phase_from_graph_phase(
             system_prompt=None,
             tools=tools,
             model_override=phase_def.model_override,
-            validator=(
-                _resolve_tool_reference(phase_def.validator, base_dir)
-                if phase_def.validator
-                else None
+            validator=cast(
+                Callable[..., tuple[bool, list[str]]] | None,
+                (
+                    _resolve_tool_reference(phase_def.validator, base_dir)
+                    if phase_def.validator
+                    else None
+                ),
             ),
             requires_llm=False,
         )

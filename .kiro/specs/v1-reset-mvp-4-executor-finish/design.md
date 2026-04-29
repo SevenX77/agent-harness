@@ -93,6 +93,12 @@ class LLMPhaseNode(BasePhaseNode):
 
         # 2. 创建 agent (含 4 middleware: ProtocolValidation / CognitiveFlow / 
         #    ExecutionControl / Logging — MVP-3 落地)
+        # ⚠️ 动态 Tool Schema 绑定: 必须根据 compiled_schema 动态组装 finish_task 的
+        #    args_schema, 用 SchemaEngine.get_pydantic_model 生成的强类型类包装 StructuredTool。
+        #    例如: finish_tool = StructuredTool.from_function(
+        #              func=finish_task,
+        #              args_schema=self._schema_engine.get_pydantic_model(self._phase.compiled_schema)
+        #          )
         agent = self._agent_factory(
             phase=self._phase,
             schema_engine=self._schema_engine,
@@ -103,23 +109,15 @@ class LLMPhaseNode(BasePhaseNode):
         #    不再 while True; 校验 / Nudge / 防环 全在 middleware 内)
         result = agent.invoke({"messages": state["messages"]}, config=config)
 
-        # 4. 检查 finish_task_result 是否被 ProtocolValidationMiddleware 写入
+        # 4. 检查 finish_task_result 是否被 CognitiveFlowMiddleware 写入
         finish_result = state["flow"].finish_task_result
         if finish_result is None:
             # 没拿到 finish_task → 走 retry / nudge 路径 (由 ExecutionControlMiddleware 决定)
             # middleware 通过 Command(goto="self") 触发重入, 不在这里判断
             return state
 
-        # 5. Phase 出口 hoist: 把 finish_task_result 搬到 BusinessData
-        new_data, io_errors = self._io_manager.resolve_hoist(
-            source_data=finish_result if isinstance(finish_result, dict) else finish_result.model_dump(),
-            target_data=state["data"],
-            target_schema=self._phase.compiled_schema,
-        )
-        state = update_business(state, **new_data.model_dump())
-        if io_errors:
-            existing = list(state["flow"].io_errors)
-            state = update_framework(state, io_errors=existing + io_errors)
+        # 5. (MVP-3 cognitive_flow.py 已实施 IO Hoist 拦截，MVP-4 不需要在此重新实施)
+        # LLMPhaseNode 出口只需确认 finish_task_result 存在即可，不必调 resolve_hoist。
 
         # 6. 归档 finish_task_result 到 history_results, 清空当前态
         state = self._archive_finish_task_result(state)
@@ -187,8 +185,8 @@ def finish_task(
     """语义终点工具。
     
     工具实现仅返回完成标志, 不做任何数据路由。
-    校验由 ProtocolValidationMiddleware 拦截时调 SchemaEngine.validate 完成。
-    搬运由 PhaseNode.execute 出口调 IOManager.resolve_hoist 完成。
+    校验与搬运已由 CognitiveFlowMiddleware (MVP-3 落地) 拦截时一次性完成。
+    MVP-4 不需要在此处或 PhaseNode 出口重新实施。
     """
     return "task completed"
 ```
@@ -198,18 +196,16 @@ def finish_task(
 ```
 LLM 生成 finish_task tool call
     ↓
-ProtocolValidationMiddleware 拦截 (intercept_tool_call)
+CognitiveFlowMiddleware 拦截 (intercept_tool_call)  # MVP-3 已落地
     ↓
 SchemaEngine.validate(business_data, phase.compiled_schema)
     ↓ (失败)                   ↓ (通过)
 Command(goto="model")           写 state["flow"].finish_task_result = business_data
-返回 LLM 重生成                  放行 tool call (返回 "task completed")
+返回 LLM 重生成                  并在 Middleware 内即刻执行 IOManager.resolve_hoist
                                 ↓
-                       LLMPhaseNode.execute 出口
+                       放行 tool call (返回 "task completed")
                                 ↓
-                       IOManager.resolve_hoist(source=flow.finish_task_result, target=state["data"])
-                                ↓
-                       update_business(state, **new_data.model_dump())
+                       LLMPhaseNode.execute 出口 (仅验证存在性)
                                 ↓
                        _archive_finish_task_result (封存到 flow.history_results[phase_name])
                                 ↓
@@ -220,7 +216,7 @@ Command(goto="model")           写 state["flow"].finish_task_result = business_
 
 | 阶段 | 谁负责 | 动作 |
 |---|---|---|
-| 创建 | ProtocolValidationMiddleware | 校验通过后写 `flow.finish_task_result` |
+| 创建 | CognitiveFlowMiddleware | 校验通过后写 `flow.finish_task_result` 并执行 Hoist |
 | 归档 | PhaseNode._archive_finish_task_result | 封存到 `flow.history_results[phase_name]` |
 | 清空 | LLMPhaseNode.execute 入口 | 进入下一 phase 前 `update_framework(state, finish_task_result=None)` |
 
@@ -297,7 +293,7 @@ class FrameworkState(BaseModel):
     """已完成 phase 的 finish_task_result 归档, key=phase_name。供下游 phase 引用历史输出。"""
 ```
 
-## §5 LangGraph interrupt + Checkpoint 兼容
+## §5 LangGraph interrupt + Checkpoint 不兼容声明
 
 ### §5.1 interrupt 触发
 
@@ -319,24 +315,15 @@ class CognitiveFlowMiddleware(AgentMiddleware):
         return None
 ```
 
-### §5.2 恢复时不重复触发校验
+### §5.2 恢复时不重复触发校验 (已废弃)
 
-按 research D5: ProtocolValidationMiddleware 校验通过后**立刻**把 `flow.finish_task_result` 写到 checkpoint。LangGraph 恢复时:
+`interrupt()` 挂起的 tool 由 LangGraph 原生在 resume 时直接返回人类输入给 LLM, 不会重新跑 `finish_task` 拦截, 因此本节无 anti-double-check 设计。
 
-```python
-class ProtocolValidationMiddleware(AgentMiddleware):
-    def before_tool_call(self, tool_name, args, state):
-        if tool_name != "finish_task":
-            return None
-        # 检查 checkpoint 恢复路径: finish_task_result 已存在就跳过校验
-        if state["flow"].finish_task_result is not None:
-            return None  # 直接放行, 由 LLMPhaseNode 出口走 hoist
-        result = self._schema_engine.validate(args["business_data"], self._schema)
-        if not result.ok:
-            return Command(goto="model", update={"messages": [...]})
-        # 校验通过, 写入 finish_task_result
-        return ("validated", args["business_data"])
-```
+### §5.3 旧 Checkpoint 强制清空声明 (无 backward-compat)
+
+Checkpoint **不向后兼容**。MVP-4 改变图节点拓扑 (删 `phase_executor` 内联 while + 拆出 `LLMPhaseNode`/`LogicPhaseNode`/`ValidationPhaseNode`), LangGraph Checkpoint 强绑定 Node 名 + 执行步数。旧 Checkpoint 在新图必硬 crash。
+
+**Migration 指南**: 测试 / 启动脚本必须先清除本地持久化 checkpoint state (例: SQLite 文件) 再跑, 否则会因拓扑破裂出现报错和假阴性。(注: 此内容也应在 RELEASE_NOTES 的 Known Limitations 段落做相应声明)。
 
 ## §6 NudgeInjector 重画为 LangGraph 路由
 

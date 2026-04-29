@@ -85,41 +85,69 @@ T1 (1h, a1) ────────┴→ T2 (3h, a1) ────────�
   - 单测覆盖率 ≥ 95%
   - pytest 不退步 (此时旧 phase_executor.py 仍在, GraphBuilder 仍用旧路径)
 
-### T2 — 重构 `finish_task` 工具签名 + ProtocolValidationMiddleware 拦截
+### T2 — `finish_task` 工具签名简化 + agent_factory 动态注入 StructuredTool
 
 - **Owner**: a1 codex
 - **依赖**: T1
-- **估时**: 3h
+- **估时**: 3-4h (从原 3h 略增, 新增 agent_factory 动态包装层)
+- **背景说明**: 原 brief "在 ProtocolValidationMiddleware 内拦截 finish_task 校验" **已由 MVP-3 cognitive_flow.py 完成** (CognitiveFlowMiddleware.intercept_tool_call 在 MVP-3 T8 已落地拦截 + 校验, 见 `src/core/graph_agent/middleware/cognitive_flow.py`). MVP-4 T2 不再做拦截层, 改做"agent_factory 动态注入强类型 finish_task tool"
 - **产物**:
-  - `cognitive/finish.py` finish_task 函数签名改为 `(reasoning, diagnostics_md, business_data: BaseModel)` (design §2.1)
-  - 工具实现仅返回 "task completed", 不写 ctx, 不做校验/hoist
-  - `middleware/protocol_validation.py` (MVP-3 落地) 扩展 `intercept_tool_call(tool_name, args, state)` 含 finish_task 拦截路径 (design §5.2)
-  - 校验失败返回 Command(goto="model"), 校验通过写 `flow.finish_task_result`
-  - LangChain 工具注册改为绑定 `build_business_data_for_skill(manifest, schema_engine)` 生成的强类型类
-  - 单测扩展含: 校验通过路径 + 校验失败路径 + checkpoint 恢复跳过校验路径
+  - `cognitive/finish.py` finish_task 函数签名改为 `(reasoning: str, diagnostics_md: str, business_data: BaseModel) -> str` (design §2.1), 工具实现仅返回 "task completed", **不**写 ctx, **不**做校验, **不**做 hoist (校验 + hoist 全在 cognitive_flow.py middleware 已做)
+  - **新模块/扩展**: `core/nodes/llm.py` 内 `agent_factory` 函数 (或 `core/agent_factory.py` 独立文件 — 实施时定) 在创建 LangChain agent 时, 用 `SchemaEngine.get_pydantic_model(phase.compiled_schema)` 生成的强类型 Pydantic 类作为 `finish_task` tool 的 `args_schema`, 而不是硬编码通用 `BusinessData` 父类。具体做法 (design §1.3 注释提示):
+    ```python
+    finish_tool = StructuredTool.from_function(
+        func=finish_task,
+        args_schema=schema_engine.get_pydantic_model(phase.compiled_schema),
+    )
+    ```
+  - 4 SKILL 各自调 finish_task 时 LLM 看到的 args_schema 应该是 SKILL 自己 compiled_schema 的 Pydantic 子类 (e.g. `TextSegmentationFinishArgs` / `EventExtractionFinishArgs` 等), 而不是泛型 `BusinessData`. 这让 LLM 在 tool call 自动补齐时拿到 SKILL 特定字段提示, 提升遵循率
+  - **不动 cognitive_flow.py 现有的拦截逻辑** (MVP-3 已落地, 改动属 scope leak)
+  - 单测扩展含: (1) finish_task 函数签名校验; (2) agent_factory 用不同 phase compiled_schema 时 finish_tool.args_schema 是不同 Pydantic 类 (per-SKILL 强类型); (3) finish_tool 调用时 LangChain 能用 args_schema 校验 LLM 输出 (回到 Pydantic ValidationError 时机)
+- **必读**:
+  - `.kiro/specs/v1-reset-mvp-4-executor-finish/design.md` §1.3 (LLMPhaseNode 内动态 Tool Schema 绑定注释 line 96-101) + §2.1 (finish_task 工具签名)
+  - `src/core/graph_agent/core/schema_engine.py` (`get_pydantic_model` 接口签名 + lru_cache 行为)
+  - `src/core/graph_agent/middleware/cognitive_flow.py` (确认拦截 + hoist 已做, 不要重复实施)
 - **验收**:
-  - `grep '_finish_task_result\|md_to_json' src/core/graph_agent/cognitive/finish.py` 0 hits
-  - 4 SKILL e2e smoke 跑 1 chapter 不破裂 (LangChain 工具能正确注入强类型 business_data)
+  - `grep '_finish_task_result\|md_to_json' src/core/graph_agent/cognitive/finish.py` 0 hits (finish.py 内已无 dict mutation / md 解析逻辑)
+  - 4 SKILL 各自启动 LLMPhaseNode 时, `agent.tools` 中 finish_task 的 args_schema 检查 (e.g. via `tool.args_schema.__name__`) 等于该 SKILL compiled_schema 派生的类名, 而不是通用 `BusinessData`
+  - 4 SKILL e2e smoke 跑 1 chapter 不破裂 (LangChain 工具能正确接受动态 args_schema 注入)
   - 单测覆盖率 ≥ 95%
   - pytest 不退步
+- **边界**:
+  - 不动 cognitive_flow.py / clarification_middleware 的拦截逻辑 (那是 MVP-3 范畴)
+  - 不动 schema_engine.py 内部 (本任务只调 get_pydantic_model 接口)
 
 ### T3 — 实现 `LLMPhaseNode.execute` (去 while 循环 + Command 路由)
 
 - **Owner**: a1 codex
 - **依赖**: T1
-- **估时**: 3h
+- **估时**: 2h (从原 3h 减, **不再写 IOManager.resolve_hoist 调用** — cognitive_flow.py middleware 已做)
 - **可与 T2 部分并行 (T2/T3 同主线但内部并行可行)**
+- **背景说明**: 按 a2 修订后的 design.md §1.3 + §2.2, IO Hoist 已由 MVP-3 cognitive_flow.py 在 finish_task 拦截通过时一并完成, **LLMPhaseNode 出口不再调 IOManager.resolve_hoist** (避免 double Hoist 把 BusinessData 字段写两次). 出口仅做存在性检查 + 归档 + 清空.
 - **产物**:
-  - `core/nodes/llm.py` 完整实现 (design §1.3)
+  - `core/nodes/llm.py` 完整实现 (design §1.3 line 90-125)
   - **不**包含任何 `while True` 硬循环
   - Nudge / 重试 / 防环 通过 4 middleware (MVP-3) + Command(goto) 实现
-  - LLMPhaseNode 出口调 `IOManager.resolve_hoist` 完成 hoist
-  - 单测 `tests/graph_agent/core/nodes/test_llm.py` 含 5+ 测试 (基本路径 / Command 路由 / hoist / 归档 / 清空)
+  - **execute 出口逻辑** (按 design §1.3 step 4-6):
+    - step 4: 检查 `state["flow"].finish_task_result` 是否为 None — 是则返回 state (走 retry / nudge 由 ExecutionControlMiddleware 决定)
+    - step 5: **(取消)** — 不再调 `IOManager.resolve_hoist` (cognitive_flow.py 已做, 见 design.md line 119-120 注释)
+    - step 6: 调 `_archive_finish_task_result(state)` 归档到 `flow.history_results[phase_name]`, 然后返回 state
+  - execute 入口逻辑: `update_framework(state, finish_task_result=None)` 清空上轮残留 (跨 phase 生命周期保护)
+  - 单测 `tests/graph_agent/core/nodes/test_llm.py` 含 5+ 测试:
+    - 基本路径 (finish_task_result 已被 middleware 写入 → 归档 → 清空)
+    - Command 路由路径 (finish_task_result 为 None → 返回 state 让 middleware 决定 retry / nudge)
+    - 归档检查 (history_results[phase_name] 内容跟 finish_task_result 一致)
+    - 清空检查 (phase 入口 finish_task_result == None)
+    - **不要测 IOManager.resolve_hoist 调用** (那是 cognitive_flow.py 单测的事)
 - **验收**:
   - `grep 'while True' src/core/graph_agent/core/nodes/llm.py` 0 hits
+  - **`grep 'resolve_hoist' src/core/graph_agent/core/nodes/llm.py` 0 hits** (确保没误调用 cognitive_flow.py 已做的逻辑)
   - LLMPhaseNode.execute 返回 WorkflowState 或 Command
+  - 4 SKILL e2e smoke 跑 1 chapter 不破裂 — **重点验证 state["data"] 字段不被 double Hoist 重复合并** (跑 baseline 跟新版 4 SKILL e2e 后比对 state["data"] 内容, 应一致, 不能多写)
   - 单测覆盖率 ≥ 95%
-  - 4 SKILL e2e smoke 跑 1 chapter 不破裂 (此时旧 phase_executor 仍在, GraphBuilder 还没切, T10 才切)
+- **边界**:
+  - 不调 IOManager.resolve_hoist (那是 cognitive_flow.py 拦截时的职责, MVP-3 已落地)
+  - 不动 cognitive_flow.py / IOManager.py (本任务只是 LLMPhaseNode 内部实现)
 
 ### T4 — 实现 `LogicPhaseNode` + `ValidationPhaseNode`
 
@@ -141,33 +169,43 @@ T1 (1h, a1) ────────┴→ T2 (3h, a1) ────────�
 
 - **Owner**: a3 claude
 - **依赖**: T1 + T3
-- **估时**: 2h
+- **估时**: 1.5h (从原 2h 减, **不再写 ProtocolValidationMiddleware checkpoint 恢复检测**)
+- **背景说明**: 按 a2 修订后的 design.md §5.2, "interrupt 恢复时不重复触发校验" 段已废弃 — `interrupt()` 挂起的 tool 由 LangGraph 原生在 resume 时直接返回人类输入给 LLM, 不会重新跑 finish_task 拦截, 因此**不需要任何 anti-double-check 设计**.
 - **产物**:
   - `middleware/cognitive_flow.py` (MVP-3 落地) 改造 `intercept_tool_call` 含 ask_clarification 分支 (design §5.1)
   - attended mode → LangGraph 原生 `interrupt({"question": ...})`
   - unattended mode → `_auto_resolve_clarification` (现有 UnattendedClarificationMiddleware 逻辑迁移)
-  - ProtocolValidationMiddleware 加 checkpoint 恢复检测 (design §5.2)
-  - 单测覆盖 attended interrupt 触发 / unattended auto-resolve / interrupt 恢复路径
+  - **(取消)** 原 brief "ProtocolValidationMiddleware 加 checkpoint 恢复检测 (design §5.2)" — 已废弃, LangGraph 原生 resume 不重复触发校验
+  - 单测覆盖 attended interrupt 触发 / unattended auto-resolve (interrupt 恢复路径单测**改为**: 验证 LangGraph 原生 resume 后 LLM 直接收到人类输入, 不重新触发 finish_task 拦截)
 - **验收**:
   - 4 SKILL attended + unattended 模式 e2e 不破裂
-  - LangGraph interrupt + checkpoint 恢复跑 1 SKILL 通过 (验证 finish_task_result 恢复后不重复校验)
+  - LangGraph interrupt + Clarification 恢复跑 1 SKILL 通过 (验证 resume 后 LLM 收到 human_response, 不二次拦截)
   - 单测覆盖率 ≥ 95%
+- **边界**:
+  - 不在 ProtocolValidationMiddleware 内加任何 checkpoint 恢复逻辑 (a2 修订后已声明该机制废弃)
 
-### T6 — 迁移 IOManager Hoist 到 Node 出口 + 状态归档/清空
+### T6 — 实现状态归档/清空 + history_results 字段 (Hoist 部分已废弃)
 
 - **Owner**: a3 claude
 - **依赖**: T2 + T3
-- **估时**: 2h
+- **估时**: 1h (从原 2h 减, **删除原 "迁移 IOManager Hoist 到 Node 出口" 段** — cognitive_flow.py middleware 已做 Hoist)
+- **背景说明**: 原 brief "迁移 IOManager Hoist 到 Node 出口" 跟 a2 修订后的 design.md §2.2 冲突 — Hoist 已在 CognitiveFlowMiddleware 完成 (MVP-3 落地). T6 重新定位为"实现 PhaseNode 出口归档 + 入口清空 + FrameworkState.history_results 字段", 不再写 Hoist 调用.
 - **产物**:
-  - `core/nodes/llm.py` 出口逻辑 (design §1.3 step 5+6) 完整实现
-  - `core/nodes/base.py:_archive_finish_task_result` 公共方法实现
-  - LLMPhaseNode 入口清空 `flow.finish_task_result`
-  - `core/state.py:FrameworkState` 加 `history_results: dict[str, dict[str, Any]]` 字段 (design §4)
-  - 单测 `tests/graph_agent/core/nodes/test_finish_task_lifecycle.py` 含: 归档 / 清空 / hoist / 跨 phase 不污染 4 个场景
+  - `core/nodes/base.py:_archive_finish_task_result` 公共方法实现 — 把 `state["flow"].finish_task_result` 封存到 `state["flow"].history_results[phase_name]`
+  - LLMPhaseNode 入口清空 `flow.finish_task_result` (跟 T3 step 1 协调一致)
+  - `core/state.py:FrameworkState` 加 `history_results: dict[str, dict[str, Any]] = Field(default_factory=dict)` 字段 (design §4)
+  - **(取消)** 原 brief "core/nodes/llm.py 出口逻辑 (design §1.3 step 5+6) 完整实现" 中 step 5 (resolve_hoist) — 已由 T3 边界声明不写
+  - 单测 `tests/graph_agent/core/nodes/test_finish_task_lifecycle.py` 含 3 场景:
+    - 归档 (phase 完成后 history_results[phase_name] 内容跟 finish_task_result 一致)
+    - 清空 (下一 phase 入口 finish_task_result == None)
+    - 跨 phase 不污染 (phase A 完成 → phase B 入口 → phase B 出口, history_results 含 A + B 两个 key, 不互相覆盖)
+  - **(取消)** 原 brief 第 4 个 hoist 场景测试 — 不在 T6 测试范围 (那是 cognitive_flow.py 单测的事)
 - **验收**:
   - phase 切换时 finish_task_result 正确归档 + 清空
   - history_results[phase_name] 含已完成 phase 的封存数据
   - 单测覆盖率 ≥ 95%
+- **边界**:
+  - 不写任何 IOManager.resolve_hoist 调用 (那是 cognitive_flow.py 拦截时的职责, MVP-3 已落地)
 
 ### T7 — 废弃 `route_finish_task` + 全局依赖更新
 
@@ -312,6 +350,8 @@ T1 (1h, a1) ────────┴→ T2 (3h, a1) ────────�
   - `grep -rn 'class StateManager\|route_finish_task' src/core/graph_agent/` 0 hits
   - `grep -rn 'while True:' src/core/graph_agent/core/nodes/` 0 hits
   - `grep -rn 'state\["data"\]\[' src/core/graph_agent/` 在 `core/nodes/` / `cognitive/finish.py` / `core/state_reducers.py` / `middleware/` 之外为 0 hits (single-write 路径验证)
+  - **`grep -rn 'resolve_hoist' src/core/graph_agent/core/nodes/` 0 hits** (确保 LLMPhaseNode 内没有错误重复调用 cognitive_flow.py 已做的 Hoist; 即不能 double Hoist)
+  - **double Hoist regression check**: 跟 T0-prep 存的 4 SKILL state["data"] snapshot 比对, 字段不能多写 (例如 segments 字段被合并两次形成长度 × 2)
   - 4 SKILL e2e 全过
   - persona snapshot byte-equal
   - 性能指标偏差 ≤ ±10%
@@ -361,7 +401,7 @@ t=20h   a1 整体 review done → 主控 squash + push + PR + CI green + merge
 
 ## 跟 MVP-3 / MVP-5 的衔接
 
-- **MVP-3 已就位 (前置依赖)**: Loader 三阶段 + 4 核心 middleware + ModuleSandbox + PhaseNode 框架 + Bootstrap/Settings
+- **MVP-3 已就位 (前置依赖)**: Loader 三阶段 + 4 核心 middleware + ModuleSandbox + PhaseNode 框架 + Bootstrap/Settings + **CognitiveFlowMiddleware 已实施 finish_task 拦截 + 校验 + IO Hoist 全套** (MVP-3 T8 落地, MVP-4 T2/T3/T6 直接消费, 不重复实施)
 - **MVP-5 接口约定 (后置)**: 
   - PhaseExecutionError / ValidationInterrupt 异常体系稳定 (MVP-5 在 Runner 层 try/catch 聚合)
   - harness.run(state) → state 强类型边界稳定 (MVP-5 拆 .compile/.prepare_state/.invoke_graph/.persist_outputs 时不能改这个签名)
@@ -371,3 +411,42 @@ t=20h   a1 整体 review done → 主控 squash + push + PR + CI green + merge
   - state.py:legacy_context_from_state / workflow_state_from_legacy_context 桥函数已物理删除 (T7a 或 T12), MVP-5 不需关心 ctx dict 兼容
   - 全库 ctx["_X"] / ctx.get("_X") 形式残留 = 0 (T7a 已扫干净), MVP-5 工程门禁 ruff 全局拍平时不会撞 cognitive / tools 残留
   - cognitive/test_*.py 测试 mock 路径已收口到 graph_agent/middleware/* (T10a + T11), MVP-5 加 mypy strict 不会撞旧 mock 残留
+
+## MVP-4 启动前必须做的 Migration (Checkpoint 不兼容)
+
+按 a2 修订后的 design.md §5.3, MVP-4 改图节点拓扑 (删 `phase_executor` 内联 while + 拆出 `LLMPhaseNode` / `LogicPhaseNode` / `ValidationPhaseNode`), LangGraph Checkpoint 强绑定 Node 名 + 执行步数, **旧 Checkpoint 在新图必硬 crash**, 无法做 backward-compat。
+
+### 强制清理动作
+
+MVP-4 实施期间和 4 SKILL e2e smoke 跑测试前, **必须**先做以下清理, 否则会因拓扑破裂出现"幽灵 Crash"和 假阴性 (测试失败但根因是 stale checkpoint, 不是新代码 bug):
+
+```bash
+# 1. 清本地默认 SQLite checkpoint (LangGraph 默认存储)
+#    路径在 graph_agent.config.Settings 内的 checkpoint_dir 字段; 默认是
+#    ~/.graph_agent/checkpoints/ 或类似. 需要按 Settings 实际位置确认
+rm -rf ~/.graph_agent/checkpoints/
+
+# 2. 清测试期间的临时 checkpoint
+rm -rf /tmp/graph_agent_test_*.sqlite
+rm -rf tests/graph_agent/.checkpoints/
+
+# 3. 清本地 e2e smoke 跑过的 _history sidecar (compaction 副产物, 跨 schema 不兼容)
+find . -name "_history" -type d -exec rm -rf {} +
+```
+
+### 哪些子任务期间需要清
+
+- **T0-prep 之前**: 清一次, 确保 baseline 测量是干净的
+- **T3 (LLMPhaseNode) 完成后**: 清一次, 因为这是新拓扑首次跑通, 旧 checkpoint 立即不兼容
+- **T10 (GraphBuilder 对接新 Node) 完成后**: 清一次, 因为 GraphBuilder 切换后整张图节点名彻底变了
+- **T12 (4 SKILL e2e smoke) 之前**: 必须清, 否则跟 T0-prep baseline 比对会得到误差很大的"性能退化" 假阴性
+
+### Doc 同步声明
+
+- `docs/v1-reset/RELEASE_NOTES.md` (Phase 2 升级版) Known Limitations 段必须明确写 "MVP-4 升级后旧 LangGraph checkpoint 不兼容, 升级时必须清空 checkpoint 存储"
+- 跟 MVP-1 引入的 Pydantic state schema 不兼容声明 (MVP-1 RELEASE_NOTES 已声明 "升级后必须废弃旧 checkpoint") 累加, 不替换 — 都是 ship-blocker 警告
+
+### 实施者风险提示
+
+- 若 T3 或 T10 跑测试时报 LangGraph "node not found" / "step out of range" / "checkpoint version mismatch", **立即停下来检查是不是没清 checkpoint**, 别先怀疑代码写错
+- 若 T12 比对 4 SKILL e2e baseline 性能指标偏差 > ±10%, 检查 `_history` sidecar 是不是有跨 schema 残留 (compaction 触发次数会因为旧 sidecar 误判为"已 compact" 而比 baseline 少)

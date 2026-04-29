@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from graph_agent.core.exceptions import SkillCompilationError
+from graph_agent.core.exceptions import SkillCompilationError, SkillCompileError
 from graph_agent.core.io_manager import IOManager
 from graph_agent.core.loader import parse_skill_md, validate_manifest
 from graph_agent.core.manifest import GraphSkillDef
@@ -160,3 +160,81 @@ def test_validate_manifest_rejects_io_manager_errors() -> None:
 
     with pytest.raises(SkillCompilationError, match="F-io-spec-invalid"):
         validate_manifest(raw, engine, lambda specs: IOManager(specs))
+
+
+def test_validate_manifest_rejects_validator_without_output_schema() -> None:
+    """Phase 2 A1 contract: an LLMPhase that mounts a `validator` must also
+    declare a structured output. Pre-A1 SKILLs would silently fall through
+    to `ValidationMiddleware` running the validator on the raw legacy ctx.
+    """
+    raw = parse_skill_md(
+        _graph_skill_yaml(
+            "  - name: draft\n"
+            "    mode: llm\n"
+            "    validator: script.validators.check_business\n"
+        )
+    )
+    engine = RecordingSchemaEngine()
+
+    with pytest.raises(SkillCompileError, match="F-validator-without-schema"):
+        validate_manifest(raw, engine, lambda specs: IOManager(specs))
+
+
+def test_validate_manifest_accepts_validator_with_output_schema() -> None:
+    raw = parse_skill_md(
+        _graph_skill_yaml(
+            "  - name: draft\n"
+            "    mode: llm\n"
+            "    validator: script.validators.check_business\n"
+            "    output_schema: |\n"
+            "      title: str\n"
+        )
+    )
+    engine = RecordingSchemaEngine()
+
+    manifest = validate_manifest(raw, engine, lambda specs: IOManager(specs))
+
+    assert isinstance(manifest, GraphSkillDef)
+
+
+def test_validate_manifest_accepts_validator_with_output_example() -> None:
+    example = (
+        '<output_example name="Item">\n'
+        "## items\n"
+        "- title (str, required): item title\n"
+        "</output_example>"
+    )
+    raw = parse_skill_md(
+        _graph_skill_yaml(
+            "  - name: draft\n"
+            "    mode: llm\n"
+            "    validator: script.validators.check_business\n"
+            "    output_example: |\n"
+            f"      {example.replace(chr(10), chr(10) + '      ')}\n"
+        )
+    )
+    engine = RecordingSchemaEngine()
+
+    manifest = validate_manifest(raw, engine, lambda specs: IOManager(specs))
+
+    assert isinstance(manifest, GraphSkillDef)
+
+
+def test_validate_manifest_accepts_logic_phase_validator_without_output_schema() -> None:
+    """LogicPhase has no output_schema field — its validator runs on the
+    deterministic Python output, so the A1 contract intentionally exempts it.
+    """
+    raw = parse_skill_md(
+        _graph_skill_yaml(
+            "  - name: ingest\n"
+            "    mode: logic\n"
+            "    execute_steps:\n"
+            "      - script.steps.run_ingest\n"
+            "    validator: script.validators.check_ingest\n"
+        )
+    )
+    engine = RecordingSchemaEngine()
+
+    manifest = validate_manifest(raw, engine, lambda specs: IOManager(specs))
+
+    assert isinstance(manifest, GraphSkillDef)

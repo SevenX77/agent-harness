@@ -503,9 +503,7 @@ def _extract_md_excerpt(md_text: str, error_indices: set[int]) -> str:
 
 def md_to_json(
     md_text: str,
-    schema: type[_T] | None = None,
-    *,
-    ctx: dict[str, object] | None = None,
+    schema: type[_T],
 ) -> list[_T]:
     """Parse MD text and return validated Pydantic model instances.
 
@@ -515,35 +513,22 @@ def md_to_json(
     Error path (~5-10% of calls): Extract MD excerpt for error items only → call Patch Agent
     → merge valid_items + patched_items → return.
 
+    Phase 2 A1 contract change (2026-04-29): ``schema`` is now a required
+    positional argument. Earlier revisions accepted ``schema=None`` and tried
+    to resolve a Pydantic class from a ``ctx["_md_schema"]`` /
+    ``ctx["_md_schema_path"]`` fallback so callers could rely on graph_agent
+    threading the schema through ``FrameworkState``. Nothing in the runtime
+    actually uses that path (the only ``md_to_json()`` call sites pass schema
+    explicitly), and silently letting callers omit ``schema`` violates the new
+    "fail loud" contract. Pass the Pydantic class directly.
+
     Args:
         md_text: Raw Markdown text from LLM output.
-        schema: Pydantic model class to validate against. If None, resolves from
-            ctx — preferring ctx["_md_schema"] (direct class) and falling back
-            to ctx["_md_schema_path"] (dotted path resolved via sys.modules).
-        ctx: Optional context dict containing schema info. The graph_agent
-            harness injects the path form to keep ctx msgpack-serializable
-            across LangGraph checkpoints.
+        schema: Pydantic model class to validate against. Required.
 
     Returns:
         list[schema]: All items as validated model instances.
     """
-    # Schema resolution: explicit arg > ctx["_md_schema"] (class) > ctx["_md_schema_path"] (string)
-    _missing_schema_msg = (
-        'md_to_json requires either schema= or ctx["_md_schema"]/["_md_schema_path"]'
-    )
-    if schema is None:
-        if ctx is None:
-            raise ValueError(_missing_schema_msg)
-        direct = ctx.get("_md_schema")
-        if direct is not None:
-            if not (isinstance(direct, type) and issubclass(direct, BaseModel)):
-                raise ValueError("ctx['_md_schema'] must be a BaseModel subclass")
-            schema = cast(type[_T], direct)
-        else:
-            path = ctx.get("_md_schema_path")
-            if not isinstance(path, str) or not path:
-                raise ValueError(_missing_schema_msg)
-            schema = cast(type[_T], _resolve_schema_from_path(path))
     schema_cls = schema
     blocks = parse_md(md_text, schema_cls)
     logger.info("md_to_json: schema=%s parsed=%d items", schema_cls.__name__, len(blocks))

@@ -24,10 +24,13 @@
 
 ### 2.3 实施步骤 (a3 Action Items)
 1. **修改 Schema/Manifest 验证** (预估位置：`src/core/graph_agent/core/skill_validator.py` 或 `manifest.py`)
-   - 在验证 `Phase` 配置时增加断言：
+   - 在验证 `Phase` 配置时增加断言，并**提供精确的类型签名**（禁止使用 `Any`）：
      ```python
-     if phase.validation and not phase.output_schema:
-         raise SkillCompileError(f"Phase '{phase.name}' defines validation but missing output_schema.")
+     from .manifest import GraphSkillDef # 请使用相对引入或对应的绝对路径
+
+     def _enforce_validator_requires_output_schema(manifest: GraphSkillDef) -> None:
+         # 遍历 manifest.phases, 发现 phase.validation 存在但缺少 schema 时抛出 SkillCompileError
+         pass
      ```
 2. **清理 Runtime 遗留逻辑 (共 5 处)** 
    - `src/core/graph_agent/middleware/cognitive_flow.py:251`: 彻底删除 fallback，若缺失直接 `raise ValueError` 或移除该分支让上游拦截。
@@ -37,8 +40,22 @@
 3. **修复现有 SKILL.md**
    - 检查 `find skills/ -name "SKILL.md"`。若有 Phase 挂载了 Validator 但缺少 schema，为其补齐 Pydantic 等价的 JSON Schema 定义。
 
-### 2.4 风险点
-此举会破坏不合规的存量 `SKILL.md`。但这是预期的（我们宁愿在加载时崩溃，也不要在 LLM 对话中死循环）。
+### 2.4 Validator 输入契约 (Runtime Data Shape)
+在旧的 `schema is None` fallback 路径下，Validator 接收的是包含所有上下文的完整字典 (`ctx: dict[str, Any]`)。在 A1 废弃 fallback 后，我们需要建立基于数据流的严格运行时契约：
+
+1. **当 phase (如 LLMPhase) 配置了 `output_schema` 时**：
+   - **强制契约 (选项 A 变体)**：Validator **只接收解析后的结构化数据列表**，即 `list[dict[str, Any]]`（当前中间件中提取出的 `raw_items`，或与之等价的 Pydantic 模型实例列表 `list[T]`），**坚决不传全局 `ctx`**。
+   - **理由**：符合 "Rust 式严格契约"。Validator 作为纯函数，只需也只能看到该 Phase 自己声明的输出结构。传入全局 `ctx` 是一种极易被滥用的隐式依赖（副作用），会导致类型签名模糊不清。
+2. **当 phase 不配 `output_schema` 时** (如 `LogicPhase` / `AgentPhase` / `PersonaPhase`)：
+   - **强制契约**：对于 `LLMPhase`，如果在没有 schema 的情况下挂载 Validator，走 `SkillCompileError` 阻断。
+   - **豁免情况**：仅对非 `LLMPhase` (如执行确定性 Python 逻辑的 `LogicPhase`) 豁免。这部分已在 `_enforce_validator_requires_output_schema` 逻辑中通过 `isinstance(phase, LLMPhase)` 进行精准过滤。
+3. **接口契约与现存代码重写**：
+   - Validator 的标准函数签名应统一为：`def validator(payload: list[dict[str, Any]]) -> tuple[bool, list[str]]:` （注意 payload 必须是一个结构化的列表，而不是全局字典 `context`）。
+   - **现存代码重写**：当前的 `validate_event_extraction`（位于 `skills/event-extraction/script/validators.py:14`）等仍按接收 `context: dict` 编写，执行 `context.get(...)` 获取数据。这与新的强类型契约**严重错配**。必须在实施 A1 时**一并重写这些 Validator**，修改其函数签名接收 `payload: list[dict[str, Any]]`，并调整内部的数据处理逻辑。
+   - **责任划分**：由 **a3** 在实施 A1 时一并重写所有的 live SKILL validator（如有），**a1** 在 review 时验证签名是否匹配。
+
+### 2.5 风险点
+此举会破坏不合规的存量 `SKILL.md`，并打破现存 Validator 的函数签名预期。但这是预期的（我们宁愿在加载时崩溃，也不要在 LLM 对话中死循环）。由 a3 顺手修复存量 validator 即可。
 
 ---
 
@@ -130,7 +147,11 @@ a3 在同一工作区中**依次完成**以上 3 步，并在本地确保 `pytes
 
 a1 进行验收时，需严格比对以下指标：
 1. **Mypy Strict 增量覆盖**：新引入及修改的 `phase_executor.py`、`schema_hoisting.py` 和相关中间件必须包含完整类型签名，不可新增 `Any` 或 `type: ignore`。
-2. **测试水位防退步**：`pytest` 必须维持 857+ 全量通过。对于因 `SkillCompileError` (由于缺乏 Schema) 导致的不合规 SKILL 编译失败，视为**预期的正常阻断**，不计入 baseline 退步。对新加入的 A3 `RuntimeError` 等需有对应 Unit Test，覆盖率 `pytest --cov` 不能低于 71.25%。
+2. **测试水位防退步 + runtime 签名验证**：
+   - `pytest` 维持 baseline 全过 (870+，A1 v2 引入新 case 后期望 875+)。对于因 `SkillCompileError` (由于缺乏 Schema) 导致的不合规 SKILL 编译失败，视为**预期的正常阻断**，不计入 baseline 退步。
+   - **每个 live SKILL 的 validator 必须有 runtime smoke test** (不止 compile gate)。a3 实施时必须为涉及的每个 live SKILL 写对应的 runtime smoke test。
+   - smoke test 必须模拟 `ValidationMiddleware` schema 分支真实数据流，验证 validator 接到的 payload 形状跟 `SKILL.md` 声明的 `output_schema` 类型完全一致。
+   - 覆盖率 `pytest --cov` 不能低于 71.25%。
 3. **消除静默失败代码**：检索 `phase_executor.py`，不得存在任何空 `except:`。
 4. **无旧中间件残留**：`phase_executor.py` 执行流中不再出现遗留的 `ValidationMiddleware`。
 

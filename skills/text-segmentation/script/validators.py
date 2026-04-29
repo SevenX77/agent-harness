@@ -1,12 +1,26 @@
+"""Text segmentation validators (ABC paragraph segmentation).
+
+Phase 2 A1 contract (2026-04-29): validators mounted on LLMPhases receive
+``payload: list[dict[str, Any]]`` parsed from the phase's declared
+``output_schema`` (``script.models.Segment`` for both ``segment`` and
+``review`` phases of ``skills/text-segmentation/SKILL.md``). The
+validators below already operated on a list of Segment dicts; this
+revision only tightens the type hints so they conform to the strict
+contract documented in PHASE2_DESIGN.md §2.4.
+"""
+
 from __future__ import annotations
 
 import logging
 import re
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-def validate_segmentation_structure(segments: list[dict]) -> tuple[bool, list[str]]:
+def validate_segmentation_structure(
+    segments: list[dict[str, Any]],
+) -> tuple[bool, list[str]]:
     """Node 02 结构 validator：行号连续性 + confidence 阈值"""
     errors: list[str] = []
 
@@ -49,7 +63,9 @@ def validate_segmentation_structure(segments: list[dict]) -> tuple[bool, list[st
     return (True, [])
 
 
-def validate_final_format(segments: list[dict]) -> tuple[bool, list[str]]:
+def validate_final_format(
+    segments: list[dict[str, Any]],
+) -> tuple[bool, list[str]]:
     """Node 03 格式 validator：最终输出格式检查"""
     errors: list[str] = []
 

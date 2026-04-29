@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
-from .exceptions import SkillCompilationError
+from .exceptions import SkillCompileError, SkillCompilationError
 from .schema_engine import SchemaEngine
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .io_manager import IODef, IOManager
+    from .manifest import GraphSkillDef
     from .manifest import SkillManifest as SkillManifestType
 
 
@@ -36,6 +40,8 @@ def validate_manifest(
         manifest.compiled_schemas = {}
         return manifest
 
+    _enforce_validator_requires_output_schema(manifest)
+
     compiled: dict[str, SchemaObject] = {}
     try:
         for phase in manifest.phases:
@@ -53,6 +59,57 @@ def validate_manifest(
     manifest.compiled_schemas = compiled
     _validate_io_specs(manifest, io_manager_factory, IODef)
     return manifest
+
+
+def _enforce_validator_requires_output_schema(manifest: GraphSkillDef) -> None:
+    """Phase 2 A1 contract: every LLMPhase that mounts a ``validator`` must
+    declare a structured output (``output_schema`` or ``output_example`` —
+    both raw-string and ``-_md`` pre-parsed forms count).
+
+    Pre-A1 SKILL.md authors could attach a business validator to an LLMPhase
+    that emitted free-form markdown; the ``ValidationMiddleware`` then handed
+    the validator the whole legacy ``ctx`` dict, which violated the validator's
+    declared signature (typically ``list[dict]``). This helper rejects the
+    misconfiguration at compile time so the runtime never reaches the broken
+    ``schema is None`` fallback path.
+
+    Raises:
+        SkillCompileError: if any LLMPhase declares ``validator`` without a
+            companion ``output_schema``/``output_example`` form. LogicPhase
+            validators run on the deterministic Python output and do not need
+            an LLM-output schema, so they are intentionally exempt.
+    """
+    from .manifest import LLMPhase
+
+    bad_phases: list[str] = []
+    for phase in manifest.phases:
+        if not isinstance(phase, LLMPhase):
+            continue
+        if phase.validator is None:
+            continue
+        has_schema_form = bool(
+            phase.output_schema
+            or phase.output_example
+            or phase.output_schema_md
+            or phase.output_example_md
+        )
+        if not has_schema_form:
+            bad_phases.append(f"{phase.name} (validator={phase.validator!r})")
+            logger.error(
+                "phase=%s decision=reject reason=validator_without_output_schema "
+                "validator=%s",
+                phase.name,
+                phase.validator,
+            )
+
+    if bad_phases:
+        raise SkillCompileError(
+            "[F-validator-without-schema] Phase 2 A1 contract violation: "
+            "every LLMPhase that mounts a `validator` must declare an "
+            "`output_schema` (or `output_example`) so the validator receives "
+            "structured, schema-validated business data instead of the raw "
+            "framework ctx. Offending phases: " + "; ".join(bad_phases)
+        )
 
 
 def _validate_raw_manifest_spec(

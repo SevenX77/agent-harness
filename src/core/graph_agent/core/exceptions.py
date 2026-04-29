@@ -62,6 +62,18 @@ class PhaseBuildError(LoaderError):
     """
 
 
+class SkillCompileError(LoaderError):
+    """A SKILL.md violates a v1.1+ compile-time contract.
+
+    Raise this when a manifest is syntactically valid but breaks one of the
+    Phase 2 architectural contracts that must hold before the SKILL can become
+    a runnable graph — for example, an ``LLMPhase`` that mounts a
+    ``validator`` without declaring an ``output_schema``/``output_example``.
+    Distinct from :class:`SkillCompilationError` (the older catch-all) so new
+    contract checks surface with a dedicated, fail-loud type.
+    """
+
+
 # === Validation errors (schema / contract / pre-flight) ===
 
 

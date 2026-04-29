@@ -181,10 +181,15 @@ class TestFinishTask:
 
     def test_finish_records_io_errors_in_framework_state(self) -> None:
         middleware = CognitiveFlowMiddleware(
-            IOManager([IODef(source_field="missing", target_field="target")])
+            IOManager([IODef(source_field="missing", target_field="target")]),
+            current_phase_schema=_schema(),
         )
         state = _state(flow=FrameworkState(io_errors=["prior"]))
-        request = _request(name="finish_task", args={}, state=state)
+        request = _request(
+            name="finish_task",
+            args={"business_data_md": VALID_BUSINESS_MD},
+            state=state,
+        )
 
         result = middleware.wrap_tool_call(request, _handler)
 
@@ -197,14 +202,37 @@ class TestFinishTask:
         ]
 
     def test_public_intercept_api_handles_finish_task(self) -> None:
-        middleware = CognitiveFlowMiddleware(IOManager([]))
+        middleware = CognitiveFlowMiddleware(
+            IOManager([]),
+            current_phase_schema=_schema(),
+        )
         state = _state()
 
-        handled, result = middleware.intercept_tool_call("finish_task", {}, state)
+        handled, result = middleware.intercept_tool_call(
+            "finish_task",
+            {"business_data_md": VALID_BUSINESS_MD},
+            state,
+        )
 
         assert handled is True
         assert isinstance(result, Command)
         assert result.goto == END
+
+    def test_finish_without_schema_raises_phase_2_a1(self) -> None:
+        import pytest
+
+        from graph_agent.middleware.cognitive_flow import CognitiveFlowError
+
+        middleware = CognitiveFlowMiddleware(IOManager([]), phase_name="segment")
+        state = _state()
+        request = _request(
+            name="finish_task",
+            args={"business_data_md": VALID_BUSINESS_MD},
+            state=state,
+        )
+
+        with pytest.raises(CognitiveFlowError, match="Phase 2 A1"):
+            middleware.wrap_tool_call(request, _handler)
 
 
 class TestClarification:

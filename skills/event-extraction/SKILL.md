@@ -164,6 +164,7 @@ phases:
       - script.extractor.parse_settings
       - script.extractor.merge_settings_into_events
       - script.extractor.finalize_event_timeline
+    output_schema: script.models.Setting
     validator: script.validators.validate_event_extraction
     prompt: |
       你是专业的小说编辑和知识管理专家。你的任务是从事件的段落中识别并提炼世界设定知识，并对之前的结果做校验。

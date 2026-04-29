@@ -38,6 +38,7 @@ phases:
     agent_tools:
       - script.segmenter.parse_segmentation_output
       - script.segmenter.store_segments
+    output_schema: script.models.Segment
     validator: script.validators.validate_segmentation_structure
     prompt: |
       你是专业的小说编辑。你的任务是将章节按叙事功能分段。
@@ -145,6 +146,7 @@ phases:
       - script.segmenter.parse_segmentation_output
       - script.segmenter.store_segments
       - script.segmenter.log_ambiguous_segments
+    output_schema: script.models.Segment
     validator: script.validators.validate_final_format
     prompt: |
       你是专业的小说编辑。你的任务是检查并修正已有的分段结果。

@@ -126,7 +126,9 @@ def validate_manifest(
 
     from .io_manager import IODef
     from .manifest import GraphSkillDef, LLMPhase, SkillManifest
-    from .schema_engine import SchemaParseError
+    from .schema_engine import SchemaObject, SchemaParseError
+
+    _validate_raw_manifest_spec(raw, schema_engine)
 
     try:
         manifest: SkillManifestType = TypeAdapter(SkillManifest).validate_python(raw)
@@ -137,16 +139,12 @@ def validate_manifest(
         manifest.compiled_schemas = {}
         return manifest
 
-    compiled: dict[str, Any] = {}
+    compiled: dict[str, SchemaObject] = {}
     try:
         for phase in manifest.phases:
             if not isinstance(phase, LLMPhase):
                 continue
-            schema_text = (
-                phase.output_schema_md
-                or phase.output_example_md
-                or phase.output_example
-            )
+            schema_text = phase.output_schema_md or phase.output_example_md
             if schema_text:
                 compiled[phase.name] = schema_engine.parse_from_md(schema_text)
     except SchemaParseError as exc:
@@ -180,6 +178,29 @@ def validate_manifest(
             "[F-io-spec-invalid] " + "; ".join(errors)
         )
     return manifest
+
+
+def _validate_raw_manifest_spec(
+    raw: dict[str, Any],
+    schema_engine: SchemaEngine,
+) -> None:
+    validator = getattr(schema_engine, "validate_spec_dict", None)
+    if validator is None:
+        return
+    if not callable(validator):
+        raise SkillCompilationError(
+            "[F-manifest-spec-invalid] SchemaEngine.validate_spec_dict is not callable"
+        )
+
+    ok, errors = cast(
+        Callable[[dict[str, Any]], tuple[bool, list[str]]],
+        validator,
+    )(raw)
+    if ok:
+        return
+
+    message = "; ".join(str(error) for error in errors) or "manifest spec invalid"
+    raise SkillCompilationError(f"[F-manifest-spec-invalid] {message}")
 
 
 class SkillLoader:

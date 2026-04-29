@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -32,7 +32,7 @@ class TestStdlibStructural:
         assert to_jsonable_dict(Path("/tmp/x")) == "/tmp/x"
 
     def test_datetime(self):
-        dt = datetime(2026, 4, 23, 12, 0, 0, tzinfo=timezone.utc)
+        dt = datetime(2026, 4, 23, 12, 0, 0, tzinfo=UTC)
         assert to_jsonable_dict(dt) == dt.isoformat()
 
     def test_uuid(self):
@@ -59,7 +59,7 @@ class TestRecursion:
     def test_nested_dict_and_list(self):
         data = {
             "pairs": [(1, "a"), (2, "b")],
-            "when": datetime(2026, 4, 23, tzinfo=timezone.utc),
+            "when": datetime(2026, 4, 23, tzinfo=UTC),
             "tags": {"beta", "alpha"},
         }
         out = to_jsonable_dict(data)

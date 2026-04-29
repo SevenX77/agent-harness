@@ -36,7 +36,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 _CORE_DIR = (
     Path(__file__).resolve().parents[3]
     / "src"

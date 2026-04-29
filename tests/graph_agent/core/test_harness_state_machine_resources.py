@@ -64,7 +64,7 @@ class _FakeCheckpointerContext:
         self.exited = False
         self.saver = _FakeSaver(self)
 
-    def __enter__(self) -> "_FakeSaver":
+    def __enter__(self) -> _FakeSaver:
         return self.saver
 
     def __exit__(self, exc_type, exc, tb) -> None:
@@ -192,7 +192,7 @@ def test_trace_callback_from_extra_callbacks_is_saved(tmp_path: Path) -> None:
 
 class _FailingTraceCallback(TracingCallback):
     def save(self, output_dir: str | Path) -> str:
-        raise IOError("trace disk full")
+        raise OSError("trace disk full")
 
 
 def test_trace_save_failure_raises_trace_write_error(tmp_path: Path) -> None:

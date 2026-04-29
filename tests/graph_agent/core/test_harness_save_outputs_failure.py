@@ -85,7 +85,7 @@ class TestSaveOutputsFailurePropagates:
         )
 
         def _broken_save(self, *args, **kwargs):
-            raise IOError("disk full")
+            raise OSError("disk full")
 
         from graph_agent.io.manager import IOManager
 

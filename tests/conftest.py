@@ -54,6 +54,7 @@ listed there so upstream sync stays auditable).
 """
 from __future__ import annotations
 
+import contextlib
 import sys
 
 import pytest
@@ -70,12 +71,8 @@ def _shutdown_deerflow_subagent_pools():
         pool = getattr(module, attr, None)
         if pool is None:
             continue
-        try:
+        with contextlib.suppress(Exception):
             # wait=False + cancel_futures=True drops pending work;
             # running workers still have to finish naturally (see
             # module docstring for why daemon=True doesn't help).
             pool.shutdown(wait=False, cancel_futures=True)
-        except Exception:
-            # Best-effort teardown; swallowing here doesn't hide a
-            # test failure, only keeps shutdown moving forward.
-            pass

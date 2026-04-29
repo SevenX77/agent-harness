@@ -72,9 +72,6 @@ def _resolve_skill_path(spec: SubSkillSpec) -> Path:
     return p.resolve()
 
 
-from .runner import run_skill
-
-
 def build_skill_tool(
     spec: SubSkillSpec,
     *,
@@ -94,6 +91,8 @@ def build_skill_tool(
     input_model = _build_input_model(spec.name, spec.input_schema)
 
     def _execute(**kwargs: Any) -> str:
+        from .runner import run_skill
+
         thread_id = f"sub_{parent_thread_id or 'root'}_{spec.name}_{uuid4().hex[:8]}"
         trace_dir = (parent_trace_dir / f"sub_{spec.name}") if parent_trace_dir else None
 

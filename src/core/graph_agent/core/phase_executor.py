@@ -325,7 +325,7 @@ class PhaseExecutor:
         # them, so a post-validate scan misses the attack entirely (a1 v1
         # NO_RAISE probe). Inspecting the raw dict closes that hole.
         invalid_keys = sorted(
-            k for k in raw.keys() if isinstance(k, str) and k.startswith("_")
+            k for k in raw if isinstance(k, str) and k.startswith("_")
         )
         if invalid_keys:
             logger.error(

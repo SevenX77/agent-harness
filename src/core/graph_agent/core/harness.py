@@ -24,34 +24,21 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
-from langchain.agents import create_agent
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
-from langchain_core.runnables import RunnableConfig
-from langgraph.graph import END, StateGraph
-
-from .run_context import RunContext
-from .graph_builder import GraphBuilder
-from .nudge_injector import NudgeInjector
-from .phase_executor import PhaseExecutor
-from .retry_router import RetryRouter
-from .callback_bridge import (
-    _HarnessCallbackBridge,
-    _extract_text_content,
-    _extract_thinking_content,
-)
-from .template import _render_user_prompt, _safe_render_template
-from .manifest import ContextBridge
-from .types import Phase
 from ..callbacks.base import Callback
-from ..config.llm_config import get_role_config
+from ..cognitive.finish import finish_task
+from ..cognitive.memory import update_working_memory
+from ..models.resolver import get_model_resolver
 from .exceptions import (
     CheckpointError,
     SkillLoadError,
     StateTransformError,
     TraceWriteError,
 )
-from ..models.resolver import get_model_resolver
-from ..cognitive.prompt import apply_cognitive_template
+from .graph_builder import GraphBuilder
+from .manifest import ContextBridge
+from .phase_executor import PhaseExecutor
+from .retry_router import RetryRouter
+from .run_context import RunContext
 from .state import (
     BusinessData,
     FrameworkState,
@@ -59,10 +46,7 @@ from .state import (
     WorkflowState,
     verify_state_invariants,
 )
-from ..cognitive.ambiguity import log_ambiguity
-from ..cognitive.finish import finish_task
-from ..cognitive.memory import update_working_memory
-from .tool_wrapper import _wrap_tool_for_langchain
+from .types import Phase
 
 logger = logging.getLogger(__name__)
 
@@ -103,8 +87,9 @@ def _resolve_studio_checkpointer_spec(
 
     if spec.startswith("sqlite:"):
         raw = spec[len("sqlite:") :]
-        from .checkpointer import _resolve_sqlite_conn_str
         from langgraph.checkpoint.sqlite import SqliteSaver
+
+        from .checkpointer import _resolve_sqlite_conn_str
 
         conn_str = _resolve_sqlite_conn_str(raw or "store.db")
         saver_cm = SqliteSaver.from_conn_string(conn_str)
@@ -679,12 +664,12 @@ class GraphAgentHarness:
                         "Post-invoke interrupt status check failed: "
                         f"{status.get('reason') or 'unknown error'}"
                     )
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 logger.exception("[Harness] post-invoke interrupt detection failed")
                 raise RuntimeError(
                     "Post-invoke interrupt detection failed; refusing to "
                     "auto-save outputs or mark the run completed."
-                )
+                ) from exc
 
             if is_awaiting_input:
                 # Skip outputs auto-save: the run is paused waiting for

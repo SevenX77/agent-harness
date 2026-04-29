@@ -18,8 +18,8 @@ the module (defeats the no-side-effect invariant).
 from __future__ import annotations
 
 import ast
-import logging
 import importlib.util
+import logging
 from pathlib import Path
 
 from ..compiler import CompileIssue
@@ -238,20 +238,23 @@ def _check_for_nested_run_skill(file_path: Path, ref_name: str) -> CompileIssue 
         return None
 
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == "graph_agent.core.runner":
-            if any(alias.name == "run_skill" for alias in node.names):
-                return CompileIssue(
-                    rule_id="E-NESTED-RUN-SKILL",
-                    severity="FATAL",
-                    location=ref_name,
-                    message=(
-                        "Logic phase scripts cannot import 'run_skill' from "
-                        "graph_agent.core.runner. The 1.x DelegatePhase / "
-                        "ParallelDelegatePhase escape hatches were removed "
-                        "in MVP-0 B1 (2026-04-28); declarative cross-skill "
-                        "composition will return in V2 via LangGraph Send "
-                        "API. For now, refactor nested invocation up into "
-                        "the parent skill's phase list."
-                    ),
-                )
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module == "graph_agent.core.runner"
+            and any(alias.name == "run_skill" for alias in node.names)
+        ):
+            return CompileIssue(
+                rule_id="E-NESTED-RUN-SKILL",
+                severity="FATAL",
+                location=ref_name,
+                message=(
+                    "Logic phase scripts cannot import 'run_skill' from "
+                    "graph_agent.core.runner. The 1.x DelegatePhase / "
+                    "ParallelDelegatePhase escape hatches were removed "
+                    "in MVP-0 B1 (2026-04-28); declarative cross-skill "
+                    "composition will return in V2 via LangGraph Send "
+                    "API. For now, refactor nested invocation up into "
+                    "the parent skill's phase list."
+                ),
+            )
     return None

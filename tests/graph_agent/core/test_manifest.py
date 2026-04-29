@@ -36,7 +36,6 @@ from graph_agent.core.manifest import (
     LLMPhase,
     LogicPhase,
     PersonaSkillDef,
-    PhaseDef,
     SkillManifest,
 )
 
@@ -351,7 +350,7 @@ class TestPhaseEngineExclusivity:
             _SKILL_ADAPTER.validate_python(data)
         assert "prompt" in str(exc.value)
 
-    def test_logic_phase_cannot_have_agent_tools(self):
+    def test_logic_phase_agent_tools_replaces_removed_sub_skills_contract(self):
         data = _base_graph_dict()
         data["phases"] = [{
             "mode": "logic",

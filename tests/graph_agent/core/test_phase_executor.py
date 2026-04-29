@@ -305,9 +305,11 @@ class TestExecuteCodeOnlyPhaseDictMergePhase2A3:
         )
         executor = PhaseExecutor([])
 
-        with caplog.at_level(logging.ERROR, logger="graph_agent.core.phase_executor"):
-            with pytest.raises(RuntimeError) as exc_info:
-                executor.execute_code_only_phase(phase, _make_state())
+        with (
+            caplog.at_level(logging.ERROR, logger="graph_agent.core.phase_executor"),
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            executor.execute_code_only_phase(phase, _make_state())
 
         message = str(exc_info.value)
         assert "Phase 2 A3" in message
@@ -385,9 +387,11 @@ class TestExecuteCodeOnlyPhaseDictMergePhase2A3:
         phase = Phase(name="prep", requires_llm=False, tools=[tool_dict])  # type: ignore[list-item]
         executor = PhaseExecutor([])
 
-        with caplog.at_level(logging.ERROR, logger="graph_agent.core.phase_executor"):
-            with pytest.raises(RuntimeError):
-                executor.execute_code_only_phase(phase, _make_state())
+        with (
+            caplog.at_level(logging.ERROR, logger="graph_agent.core.phase_executor"),
+            pytest.raises(RuntimeError),
+        ):
+            executor.execute_code_only_phase(phase, _make_state())
 
         reject_log = next(
             (rec for rec in caplog.records if "code_only_dict_merge" in rec.message),
@@ -493,7 +497,7 @@ class TestExecuteLLMPhaseMiddlewareIntegration:
         assert middleware_kwargs["summarization_trigger_fraction"] == 0.8
         assert middleware_kwargs["summarization_keep_messages"] == 20
         assert middleware_kwargs["clarification"] is True
-        assert getattr(agent_model, "_wrapped") is captured["resolver_model"]
+        assert agent_model._wrapped is captured["resolver_model"]
 
 
 class TestExecuteLLMPhaseSchemaRoutingPhase2A2v4:
@@ -602,9 +606,7 @@ class TestExecuteLLMPhaseSchemaRoutingPhase2A2v4:
     def test_static_pydantic_schema_routes_to_new_pipeline(
         self, monkeypatch, caplog
     ):
-        from pydantic import BaseModel as _BM
-
-        class _LiveSchema(_BM):
+        class _LiveSchema(BaseModel):
             title: str
             score: int
 

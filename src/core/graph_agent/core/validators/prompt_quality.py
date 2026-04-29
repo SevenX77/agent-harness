@@ -50,7 +50,7 @@ _DUPLICATION_MARKERS = (
 )
 
 
-def check_prompt_quality(manifest: "GraphSkillDef") -> list[CompileIssue]:
+def check_prompt_quality(manifest: GraphSkillDef) -> list[CompileIssue]:
     """Run prompt-quality warning checks on the manifest."""
     from ..manifest import LLMPhase
 
@@ -78,7 +78,7 @@ def check_prompt_quality(manifest: "GraphSkillDef") -> list[CompileIssue]:
 def _check_prompt_duplication(
     sys_prompt: str,
     user_prompt: str,
-    phase: "LLMPhase",
+    phase: LLMPhase,
     phase_idx: int,
 ) -> list[CompileIssue]:
     """W-PROMPT-DUPLICATION: longest common substring exceeds 100 chars."""
@@ -127,7 +127,7 @@ def _check_prompt_duplication(
 
 def _check_finish_task_visibility(
     sys_prompt: str,
-    phase: "LLMPhase",
+    phase: LLMPhase,
     phase_idx: int,
 ) -> list[CompileIssue]:
     """W-FINISH-TASK-VISIBILITY: finish_task buried at end of long step list."""
@@ -166,7 +166,7 @@ def _check_finish_task_visibility(
     return []
 
 
-def _check_setup_anti_pattern(manifest: "GraphSkillDef") -> list[CompileIssue]:
+def _check_setup_anti_pattern(manifest: GraphSkillDef) -> list[CompileIssue]:
     """W-SETUP-PHASE-ANTI-PATTERN: logic setup/prepare/init as first phase."""
     if not manifest.phases:
         return []

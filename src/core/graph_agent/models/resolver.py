@@ -22,9 +22,9 @@ from langchain_openai import ChatOpenAI
 from openai import APIConnectionError, APITimeoutError, BadRequestError, InternalServerError
 
 try:
-    from anthropic import InternalServerError as AnthropicInternalServerError
     from anthropic import APIConnectionError as AnthropicAPIConnectionError
     from anthropic import APITimeoutError as AnthropicAPITimeoutError
+    from anthropic import InternalServerError as AnthropicInternalServerError
 except ImportError:
     AnthropicInternalServerError = None  # type: ignore[assignment,misc]
     AnthropicAPIConnectionError = None  # type: ignore[assignment,misc]
@@ -76,9 +76,7 @@ def _is_network_failure(exc: Exception) -> bool:
     status_code = getattr(exc, "status_code", None)
     if isinstance(status_code, int) and status_code in {500, 502, 503, 504}:  # All server errors
         return True
-    if isinstance(exc, RuntimeError) and _WS_HTTP_5XX_RE.search(str(exc)):
-        return True
-    return False
+    return bool(isinstance(exc, RuntimeError) and _WS_HTTP_5XX_RE.search(str(exc)))
 
 
 def _attach_profile(model: Any, model_def: ModelDef) -> None:
@@ -521,11 +519,11 @@ class ModelResolver:
         """
         try:
             from langchain_anthropic import ChatAnthropic
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
                 "langchain_anthropic is required for anthropic_compatible providers. "
                 "Install: pip install langchain-anthropic"
-            )
+            ) from exc
 
         pdef = rp.provider_def
         api_key = os.getenv(pdef.api_key_env)
@@ -572,12 +570,15 @@ class ModelResolver:
             raise ValueError(f"API key not configured: {pdef.api_key_env}")
 
         try:
-            from langchain_google_genai import ChatGoogleGenerativeAI  # type: ignore[import-not-found]  # Optional Gemini provider extra may be absent.
-        except ImportError:
+            # Optional Gemini provider extra may be absent.
+            from langchain_google_genai import (  # type: ignore[import-not-found]
+                ChatGoogleGenerativeAI,
+            )
+        except ImportError as exc:
             raise ImportError(
                 "langchain_google_genai not installed. "
                 "Install with: pip install langchain-google-genai"
-            )
+            ) from exc
 
         model = ChatGoogleGenerativeAI(
             model=rp.model_name,

@@ -39,7 +39,7 @@ class _FakeModel:
         fallback_models: list[Any],
         *,
         exceptions_to_handle: tuple[type[BaseException], ...],
-    ) -> "_FakeModel":
+    ) -> _FakeModel:
         self.fallbacks = list(fallback_models)
         return self
 

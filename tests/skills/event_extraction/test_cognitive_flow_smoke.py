@@ -22,8 +22,9 @@ The validator script and Pydantic class live under hyphenated
 from __future__ import annotations
 
 import importlib.util
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from langchain_core.messages import ToolMessage
 from langgraph.graph import END
@@ -113,7 +114,7 @@ def test_setting_pydantic_class_round_trip_through_cognitive_flow() -> None:
         "skills/event-extraction/script/validators.py",
         "_event_extraction_validators_under_test",
     )
-    Setting: type = models_module.Setting
+    setting_cls: type = models_module.Setting
     validator: Callable[
         [list[dict[str, Any]]], tuple[bool, list[str]]
     ] = validators_module.validate_event_extraction
@@ -122,7 +123,7 @@ def test_setting_pydantic_class_round_trip_through_cognitive_flow() -> None:
         IOManager(
             [IODef(source_field="business_data_parsed", target_field="settings")]
         ),
-        current_phase_schema=Setting,
+        current_phase_schema=setting_cls,
         business_validator=validator,
         phase_name="settings",
     )
@@ -170,7 +171,7 @@ def test_setting_business_validator_failure_surfaces_to_llm() -> None:
         "skills/event-extraction/script/validators.py",
         "_event_extraction_validators_validator_smoke",
     )
-    Setting: type = models_module.Setting
+    setting_cls: type = models_module.Setting
     validator: Callable[
         [list[dict[str, Any]]], tuple[bool, list[str]]
     ] = validators_module.validate_event_extraction
@@ -185,7 +186,7 @@ def test_setting_business_validator_failure_surfaces_to_llm() -> None:
 
     middleware = CognitiveFlowMiddleware(
         IOManager([]),
-        current_phase_schema=Setting,
+        current_phase_schema=setting_cls,
         business_validator=validator,
         phase_name="settings",
     )

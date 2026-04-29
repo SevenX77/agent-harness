@@ -78,7 +78,7 @@ def _represent_str(dumper: _BlockScalarDumper, data: str) -> Any:
 _BlockScalarDumper.add_representer(str, _represent_str)
 
 
-def serialize_skill(manifest: "SkillManifest") -> str:
+def serialize_skill(manifest: SkillManifest) -> str:
     """Serialise a ``SkillManifest`` to a ``SKILL.md`` string.
 
     Args:

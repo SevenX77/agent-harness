@@ -33,8 +33,8 @@ def _apply_reasoning_content_patch() -> None:
 
         # Layer 1: OpenAI SDK — allow extra fields so reasoning_content is not dropped
         try:
-            from openai.types.chat.chat_completion_message import ChatCompletionMessage
             import openai
+            from openai.types.chat.chat_completion_message import ChatCompletionMessage
             sdk_version = getattr(openai, "__version__", "0.0.0")
             major = int(sdk_version.split(".")[0])
             if major > 1:

@@ -17,7 +17,6 @@ from pydantic import TypeAdapter
 from graph_agent.core.manifest import SkillManifest
 from graph_agent.core.serialize import serialize_skill
 
-
 _SKILL_ADAPTER = TypeAdapter(SkillManifest)
 
 

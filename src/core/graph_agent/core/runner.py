@@ -31,12 +31,13 @@ Usage (CLI)::
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
+import shutil
 import threading
 import time
 import uuid
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -261,7 +262,7 @@ def run_skill(
                 )
                 # Tier 1 T-B7: emit a visible marker so the trace records
                 # that resume is no longer possible from this thread.
-                try:
+                with contextlib.suppress(Exception):
                     from ..callbacks.events import _EventBase  # noqa: F401
 
                     # We purposefully don't depend on a dedicated event
@@ -269,8 +270,6 @@ def run_skill(
                     # optional (降级到 P2). A log INFO is enough for ops;
                     # Studio's "thread archived" UI state can derive from
                     # RunEnded(status=completed) + absence of checkpoint.
-                except Exception:  # noqa: BLE001
-                    pass
         except Exception as exc:  # noqa: BLE001
             raise PersistenceError(
                 f"checkpoint cleanup failed: {exc}",

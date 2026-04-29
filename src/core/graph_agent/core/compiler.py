@@ -47,8 +47,8 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .parser import _parse_frontmatter, locate_line_for_pydantic_loc
 from .exceptions import SkillLoadError
+from .parser import _parse_frontmatter, locate_line_for_pydantic_loc
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +207,6 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
     # has no phases but does carry a top-level ``adopted_persona`` and
     # ``agent_tools``, so it runs persona_resolution + tool_paths.
     # PersonaSkillDef carries neither and falls through unchanged.
-    from .manifest import AgentSkillDef
     from .validators.persona_resolution import check_persona_resolution
     from .validators.tool_paths import check_tool_paths
 

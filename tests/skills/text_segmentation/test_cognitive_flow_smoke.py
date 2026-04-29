@@ -12,8 +12,9 @@ Pydantic schemas.
 from __future__ import annotations
 
 import importlib.util
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from langchain_core.messages import ToolMessage
 from langgraph.graph import END
@@ -110,7 +111,7 @@ def test_segment_pydantic_class_round_trip_through_cognitive_flow() -> None:
         "skills/text-segmentation/script/validators.py",
         "_text_segmentation_validators_under_test",
     )
-    Segment: type = models_module.Segment
+    segment_cls: type = models_module.Segment
     validator: Callable[
         [list[dict[str, Any]]], tuple[bool, list[str]]
     ] = validators_module.validate_segmentation_structure
@@ -119,7 +120,7 @@ def test_segment_pydantic_class_round_trip_through_cognitive_flow() -> None:
         IOManager(
             [IODef(source_field="business_data_parsed", target_field="segments")]
         ),
-        current_phase_schema=Segment,
+        current_phase_schema=segment_cls,
         business_validator=validator,
         phase_name="segment",
     )
@@ -158,7 +159,7 @@ def test_segment_business_validator_catches_line_gap() -> None:
         "skills/text-segmentation/script/validators.py",
         "_text_segmentation_validators_gap_smoke",
     )
-    Segment: type = models_module.Segment
+    segment_cls: type = models_module.Segment
     validator: Callable[
         [list[dict[str, Any]]], tuple[bool, list[str]]
     ] = validators_module.validate_segmentation_structure
@@ -183,7 +184,7 @@ def test_segment_business_validator_catches_line_gap() -> None:
 
     middleware = CognitiveFlowMiddleware(
         IOManager([]),
-        current_phase_schema=Segment,
+        current_phase_schema=segment_cls,
         business_validator=validator,
         phase_name="segment",
     )

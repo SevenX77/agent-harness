@@ -31,7 +31,6 @@ from graph_agent.core.manifest import (
 )
 from graph_agent.core.types import Phase
 
-
 _SKILL_ADAPTER = TypeAdapter(SkillManifest)
 
 
@@ -339,6 +338,7 @@ class TestPhaseFromGraphPhase:
 def test_phase_from_agent_skill_injects_persona(tmp_path: Path) -> None:
     """Persona role_profile must be prepended to the composed system_prompt when an agent skill declares ``adopted_persona``."""
     from pydantic import TypeAdapter
+
     from graph_agent.core.loader import _phase_from_agent_skill
     from graph_agent.core.manifest import AgentSkillDef, SkillManifest
 
@@ -375,6 +375,7 @@ def test_phase_from_agent_skill_injects_persona(tmp_path: Path) -> None:
 def test_phase_from_graph_phase_injects_persona(tmp_path: Path) -> None:
     """LLMPhase.adopted_persona must inject role_profile before the original prompt."""
     from pydantic import TypeAdapter
+
     from graph_agent.core.loader import _phase_from_graph_phase
     from graph_agent.core.manifest import LLMPhase, PhaseDef
 
@@ -406,6 +407,7 @@ def test_phase_from_graph_phase_injects_persona(tmp_path: Path) -> None:
 def test_phase_from_agent_skill_injects_evaluation_rubrics(tmp_path: Path) -> None:
     """``evaluation_rubrics`` on the persona must land between role_profile and the host prompt."""
     from pydantic import TypeAdapter
+
     from graph_agent.core.loader import _phase_from_agent_skill
     from graph_agent.core.manifest import AgentSkillDef, SkillManifest
 
@@ -442,6 +444,7 @@ def test_phase_from_agent_skill_injects_evaluation_rubrics(tmp_path: Path) -> No
 def test_persona_few_shot_examples_render_as_examples_tag(tmp_path: Path) -> None:
     """Persona few_shot_examples now render into the prompt <examples> tag."""
     from pydantic import TypeAdapter
+
     from graph_agent.core.loader import _phase_from_agent_skill
     from graph_agent.core.manifest import AgentSkillDef, SkillManifest
 

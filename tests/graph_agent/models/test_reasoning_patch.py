@@ -1,8 +1,8 @@
 """Tests for reasoning_content LangChain monkey patches."""
 from __future__ import annotations
 
-from langchain_core.messages import AIMessage, HumanMessage
 import langchain_openai.chat_models.base as lc_openai_base
+from langchain_core.messages import AIMessage, HumanMessage
 
 from graph_agent.models.reasoning_patch import _apply_reasoning_content_patch
 

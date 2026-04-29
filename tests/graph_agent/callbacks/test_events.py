@@ -9,26 +9,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src" / "core"))
 
 from graph_agent.callbacks.events import (  # noqa: E402
     SCHEMA_VERSION,
-    AmbiguityReportEvent,
     AgentLoopIterationEvent,
+    AmbiguityReportEvent,
     ArtifactSavedEvent,
     CallbackEvent,
-    HeartbeatEvent,
-    InterruptedEvent,
-    ParallelMapGroupEndedEvent,
-    ParallelMapGroupStartedEvent,
-    ResumedEvent,
     CompactionEvent,
     DeadEndPrunedEvent,
     FinishTaskEvent,
+    HeartbeatEvent,
     InternalErrorEvent,
+    InterruptedEvent,
     LLMCallEvent,
     LLMFallbackEvent,
     ModelResolvedEvent,
     NudgeEvent,
+    ParallelMapGroupEndedEvent,
+    ParallelMapGroupStartedEvent,
     PhaseEndEvent,
     PhaseStartEvent,
     PromptCapturedEvent,
+    ResumedEvent,
     RetryEvent,
     RetryExhaustedEvent,
     RunEndedEvent,
@@ -38,7 +38,6 @@ from graph_agent.callbacks.events import (  # noqa: E402
     ValidationPassEvent,
     WorkingMemoryUpdateEvent,
 )
-
 
 _ALL_EVENT_CLASSES = [
     PhaseStartEvent,

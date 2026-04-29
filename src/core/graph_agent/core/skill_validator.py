@@ -6,7 +6,7 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
-from .exceptions import SkillCompileError, SkillCompilationError
+from .exceptions import SkillCompilationError, SkillCompileError
 from .schema_engine import SchemaEngine
 
 logger = logging.getLogger(__name__)

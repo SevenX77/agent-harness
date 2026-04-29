@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from graph_agent.core.state import (
     BusinessData,
@@ -31,7 +32,7 @@ class TestBusinessData:
 class TestFrameworkState:
     def test_framework_state_extra_forbid(self) -> None:
         """未声明字段被 Pydantic 拒."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             FrameworkState(undeclared_field="value")
 
     def test_framework_state_default_values(self) -> None:
@@ -106,7 +107,7 @@ class TestStateManager:
         assert new_state["flow"].hop_count == 5
         assert new_state["flow"].current_phase == "p1"
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             StateManager.update_framework(state, undeclared_xyz="value")
 
     def test_verify_state_invariants_rejects_business_underscore(self) -> None:

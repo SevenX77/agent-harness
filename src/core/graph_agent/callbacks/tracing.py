@@ -16,24 +16,24 @@ import json
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from .base import (
-    Callback,
-    EVENT_PHASE_START,
-    EVENT_PHASE_END,
+    EVENT_AMBIGUITY_REPORT,
+    EVENT_COMPACTION,
+    EVENT_DEAD_END_PRUNED,
+    EVENT_FINISH_TASK,
     EVENT_LLM_CALL,
+    EVENT_NUDGE,
+    EVENT_PHASE_END,
+    EVENT_PHASE_START,
+    EVENT_RETRY,
     EVENT_TOOL_CALL,
     EVENT_VALIDATION_FAIL,
-    EVENT_RETRY,
-    EVENT_FINISH_TASK,
-    EVENT_NUDGE,
     EVENT_WORKING_MEMORY_UPDATE,
-    EVENT_DEAD_END_PRUNED,
-    EVENT_COMPACTION,
-    EVENT_AMBIGUITY_REPORT,
+    Callback,
 )
 from .events import (
     AmbiguityReportEvent,
@@ -61,7 +61,7 @@ class TracingCallback(Callback):
         """Initialize in-memory trace state for one run."""
         self._run_id = uuid.uuid4().hex[:12]
         self._start_time: float = time.monotonic()
-        self._start_iso: str = datetime.now(timezone.utc).isoformat()
+        self._start_iso: str = datetime.now(UTC).isoformat()
         self._phases: list[dict[str, Any]] = []
         self._phase_stack: list[dict[str, Any]] = []
         self._total_input_tokens: int = 0
@@ -87,7 +87,7 @@ class TracingCallback(Callback):
         if self._jsonl_path is None:
             return
         entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "run_id": self._run_id,
             "event_type": event_type,
             "phase": phase,
@@ -130,7 +130,7 @@ class TracingCallback(Callback):
         """Start a new phase trace segment."""
         self._phase_stack.append({
             "name": phase_name,
-            "start_time": datetime.now(timezone.utc).isoformat(),
+            "start_time": datetime.now(UTC).isoformat(),
             "_start_mono": time.monotonic(),
             "input_tokens": 0,
             "output_tokens": 0,
@@ -159,7 +159,7 @@ class TracingCallback(Callback):
             return
         phase_data = self._phase_stack.pop(phase_index)
         start_mono = phase_data.pop("_start_mono", time.monotonic())
-        phase_data["end_time"] = datetime.now(timezone.utc).isoformat()
+        phase_data["end_time"] = datetime.now(UTC).isoformat()
         phase_data["duration_sec"] = round(time.monotonic() - start_mono, 2)
         self._phases.append(phase_data)
         self._write_event(
@@ -189,7 +189,7 @@ class TracingCallback(Callback):
             active_phase["llm_calls"].append({
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             })
         self._write_event(
             EVENT_LLM_CALL, phase_name, {
@@ -226,7 +226,7 @@ class TracingCallback(Callback):
         if active_phase:
             active_phase["tool_calls"].append({
                 "name": tool_name,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             })
         self._write_event(
             EVENT_TOOL_CALL, phase_name, {
@@ -408,7 +408,7 @@ class TracingCallback(Callback):
         trace = {
             "run_id": self._run_id,
             "start_time": self._start_iso,
-            "end_time": datetime.now(timezone.utc).isoformat(),
+            "end_time": datetime.now(UTC).isoformat(),
             "total_duration_sec": total_duration,
             "total_input_tokens": self._total_input_tokens,
             "total_output_tokens": self._total_output_tokens,

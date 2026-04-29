@@ -26,8 +26,8 @@ annotations`` — Pydantic needs the ``Literal`` tag expressions to be
 evaluated at class-definition time so the discriminated-union dispatch
 works without explicit ``model_rebuild`` calls at import.
 """
-from datetime import datetime, timezone
-from typing import Annotated, Any, Literal, Union
+from datetime import UTC, datetime
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -35,7 +35,7 @@ SCHEMA_VERSION: Literal["1.0"] = "1.0"
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class _EventBase(BaseModel):
@@ -380,41 +380,7 @@ class InternalErrorEvent(_EventBase):
 
 
 CallbackEvent = Annotated[
-    Union[
-        PhaseStartEvent,
-        PhaseEndEvent,
-        LLMCallEvent,
-        ToolCallEvent,
-        ValidationFailEvent,
-        RetryEvent,
-        FinishTaskEvent,
-        NudgeEvent,
-        WorkingMemoryUpdateEvent,
-        DeadEndPrunedEvent,
-        CompactionEvent,
-        AmbiguityReportEvent,
-        PromptCapturedEvent,
-        LLMFallbackEvent,
-        # Tier 1 Commit A
-        RunStartedEvent,
-        RunEndedEvent,
-        ValidationPassEvent,
-        RetryExhaustedEvent,
-        InternalErrorEvent,
-        # Tier 1 Commit B
-        ModelResolvedEvent,
-        ArtifactSavedEvent,
-        # Tier 1 Commit C
-        ParallelMapGroupStartedEvent,
-        ParallelMapGroupEndedEvent,
-        # Tier 1 Commit D
-        HeartbeatEvent,
-        # Tier 2 — HITL sync
-        InterruptedEvent,
-        ResumedEvent,
-        # Tier 2 — agent loop visibility
-        AgentLoopIterationEvent,
-    ],
+    PhaseStartEvent | PhaseEndEvent | LLMCallEvent | ToolCallEvent | ValidationFailEvent | RetryEvent | FinishTaskEvent | NudgeEvent | WorkingMemoryUpdateEvent | DeadEndPrunedEvent | CompactionEvent | AmbiguityReportEvent | PromptCapturedEvent | LLMFallbackEvent | RunStartedEvent | RunEndedEvent | ValidationPassEvent | RetryExhaustedEvent | InternalErrorEvent | ModelResolvedEvent | ArtifactSavedEvent | ParallelMapGroupStartedEvent | ParallelMapGroupEndedEvent | HeartbeatEvent | InterruptedEvent | ResumedEvent | AgentLoopIterationEvent,
     Field(discriminator="event_type"),
 ]
 

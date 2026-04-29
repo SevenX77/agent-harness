@@ -24,7 +24,6 @@ from graph_agent.core.manifest import SkillManifest
 from graph_agent.core.parser import parse_skill_file
 from graph_agent.core.serialize import serialize_skill
 
-
 _SKILL_ADAPTER = TypeAdapter(SkillManifest)
 
 

@@ -8,6 +8,7 @@ from langchain_core.messages import ToolMessage
 from langgraph.graph import END
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
+from pydantic import BaseModel, Field
 
 from graph_agent.core.io_manager import IODef, IOManager
 from graph_agent.core.schema_engine import SchemaEngine, SchemaObject, ValidationResult
@@ -315,12 +316,9 @@ class TestPhase2A2v3PydanticSchemaDispatch:
     """
 
     def test_pydantic_class_dispatch_validates_via_model_validate(self) -> None:
-        from pydantic import BaseModel as _BM
-        from pydantic import Field as _Field
-
-        class _LiveSchema(_BM):
-            title: str = _Field(min_length=1)
-            score: int = _Field(ge=0, le=10)
+        class _LiveSchema(BaseModel):
+            title: str = Field(min_length=1)
+            score: int = Field(ge=0, le=10)
 
         middleware = CognitiveFlowMiddleware(
             IOManager(
@@ -354,12 +352,9 @@ class TestPhase2A2v3PydanticSchemaDispatch:
     def test_pydantic_class_dispatch_rejects_invalid_block_with_per_field_error(
         self,
     ) -> None:
-        from pydantic import BaseModel as _BM
-        from pydantic import Field as _Field
-
-        class _LiveSchema(_BM):
-            title: str = _Field(min_length=1)
-            score: int = _Field(ge=0, le=10)
+        class _LiveSchema(BaseModel):
+            title: str = Field(min_length=1)
+            score: int = Field(ge=0, le=10)
 
         middleware = CognitiveFlowMiddleware(
             IOManager([]),

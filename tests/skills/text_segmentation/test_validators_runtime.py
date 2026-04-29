@@ -20,9 +20,10 @@ contains a hyphen), so we load it via ``importlib.util.spec_from_file_location``
 from __future__ import annotations
 
 import importlib.util
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable
+from typing import Any
 
 import pytest
 

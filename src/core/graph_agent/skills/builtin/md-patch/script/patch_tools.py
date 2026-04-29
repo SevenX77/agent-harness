@@ -140,7 +140,12 @@ def validate(context: dict[str, Any]) -> tuple[bool, str | list[str]]:
         (True, 'all items valid') on success.
         (False, diagnostic_report_str) on failure — triggers LLM retry.
     """
-    from graph_agent.tools.md_to_json import BlockMeta, DiagnosticReport, ParsedBlock, diagnose  # local import
+    from graph_agent.tools.md_to_json import (  # local import
+        BlockMeta,
+        DiagnosticReport,
+        ParsedBlock,
+        diagnose,
+    )
 
     if not context.get("finalized"):
         logger.warning("validate: called before finalize — rejecting")

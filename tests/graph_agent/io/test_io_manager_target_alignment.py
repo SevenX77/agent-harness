@@ -103,7 +103,7 @@ class TestIOManagerArtifactTargetAlignment:
         context = {"story_framework": {"chapters": 3}}
 
         def broken_saver(name: str, value: object, **_: object) -> str:
-            raise IOError(f"disk full while saving {name}")
+            raise OSError(f"disk full while saving {name}")
 
         with pytest.raises(IOError, match="disk full while saving story_framework"):
             io_mgr.save_outputs(

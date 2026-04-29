@@ -153,7 +153,7 @@ class IOManager:
 
             if data is None:
                 public_keys = sorted(
-                    str(key) for key in context.keys() if not str(key).startswith("_")
+                    str(key) for key in context if not str(key).startswith("_")
                 )
                 legacy_message = f"Declared output '{name}' was not found in context"
                 message = (
@@ -235,7 +235,7 @@ class IOManager:
                 key = placeholder[8:]  # Remove "context." prefix
                 value = context.get(key)
                 if value is None:
-                    available = sorted(str(k) for k in context.keys())
+                    available = sorted(str(k) for k in context)
                     raise ValueError(
                         f"Path template placeholder {{{placeholder}}} not found "
                         f"in context. Available keys: {available}"

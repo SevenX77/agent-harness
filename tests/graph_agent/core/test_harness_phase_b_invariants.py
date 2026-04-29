@@ -23,7 +23,6 @@ a full DeerFlow agent loop runnable in a test fixture — out of scope.
 from __future__ import annotations
 
 import inspect
-from pathlib import Path
 
 from graph_agent.core.graph_builder import GraphBuilder
 from graph_agent.core.harness import GraphAgentHarness
@@ -86,6 +85,7 @@ class TestRunContextShallowImmutability:
 
     def test_runtime_inputs_is_mapping_proxy(self):
         import types
+
         from graph_agent.core.run_context import RunContext
 
         ctx = RunContext(thread_id="t", runtime_inputs={"k": "v"})
@@ -99,6 +99,7 @@ class TestRunContextShallowImmutability:
 
     def test_runtime_inputs_top_level_mutation_raises(self):
         import pytest
+
         from graph_agent.core.run_context import RunContext
 
         ctx = RunContext(thread_id="t", runtime_inputs={"k": "v"})
@@ -107,6 +108,7 @@ class TestRunContextShallowImmutability:
 
     def test_callbacks_has_no_append(self):
         import pytest
+
         from graph_agent.core.run_context import RunContext
 
         ctx = RunContext(thread_id="t", callbacks=[])
@@ -130,6 +132,7 @@ class TestPhaseExecutorPickleGuard:
 
     def test_pickling_phase_executor_raises_typeerror(self):
         import pickle
+
         import pytest
 
         executor = PhaseExecutor([])
@@ -162,6 +165,7 @@ class TestResumeRuntimeInputsRestore:
 
     def test_resume_signature_accepts_runtime_inputs_map(self):
         import inspect
+
         from graph_agent.core.harness import GraphAgentHarness
 
         sig = inspect.signature(GraphAgentHarness.resume)
@@ -207,6 +211,7 @@ class TestPersistentRuntimeInputsOptIn:
 
     def test_run_signature_accepts_persistent_kwargs(self):
         import inspect
+
         from graph_agent.core.harness import GraphAgentHarness
 
         sig = inspect.signature(GraphAgentHarness.run)
@@ -231,6 +236,7 @@ class TestPersistentRuntimeInputsOptIn:
         the graph is invoked.
         """
         import pytest
+
         from graph_agent.core.harness import GraphAgentHarness
         from graph_agent.core.types import Phase
 
@@ -248,6 +254,7 @@ class TestPersistentRuntimeInputsOptIn:
         the original run()), resume() must pick it up.
         """
         from unittest.mock import patch
+
         from graph_agent.core.harness import GraphAgentHarness
         from graph_agent.core.types import Phase
 

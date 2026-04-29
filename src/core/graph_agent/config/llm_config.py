@@ -112,7 +112,7 @@ class CircuitBreakerConfig:
     error_threshold: int = 30
     window_seconds: int = 1800
     # Per-provider overrides keyed on provider_code (e.g. OC_CL).
-    per_provider: dict[str, "CircuitBreakerConfig"] = field(default_factory=dict)
+    per_provider: dict[str, CircuitBreakerConfig] = field(default_factory=dict)
 
 
 @dataclass
@@ -297,10 +297,7 @@ def _parse_roles(
 
         models_map: dict[str, RoleModelEntry] = {}
         for mc, mdata in (data.get("models") or {}).items():
-            if isinstance(mdata, dict):
-                providers_list = mdata.get("providers", [])
-            else:
-                providers_list = []
+            providers_list = mdata.get("providers", []) if isinstance(mdata, dict) else []
             models_map[mc] = RoleModelEntry(
                 model_code=mc,
                 provider_codes=list(providers_list),

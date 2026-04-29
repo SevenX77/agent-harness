@@ -53,12 +53,17 @@ class FrameworkState(BaseModel):
     current_phase: str = ""
     retry_counts: dict[str, int] = Field(default_factory=dict)
     metrics: dict[str, Any] = Field(default_factory=dict)
+    # retry 跨 phase 通信
+    retry_feedback: list[str] | None = None
     # 工作记忆
     working_memory: dict[str, Any] = Field(default_factory=dict)
     # 次要字段
     ambiguity_reports: list[dict[str, Any]] = Field(default_factory=list)
     last_output: Any = None
     group_key: str | None = None
+    trace_path: str | None = None
+    # validation middleware 内部 phase 标记，语义不同于 current_phase
+    validation_middleware_phase: str | None = None
     md_schema: dict[str, Any] | None = None
     md_schema_path: str | None = None
     md_type_dict: dict[str, Any] | None = None
@@ -109,3 +114,108 @@ class StateManager:
             flow=new_flow,
             messages=state["messages"],
         )
+
+
+def verify_state_invariants(state: WorkflowState) -> None:
+    """启动期检查 state 满足契约."""
+    bad = [k for k in state["data"].model_dump() if k.startswith("_")]
+    if bad:
+        raise ValueError(f"BusinessData 含禁止的 _ 前缀字段: {bad}")
+    # state["flow"] 在构造时已经被 Pydantic forbid 校验。
+
+
+def legacy_context_from_state(state: WorkflowState) -> dict[str, Any]:
+    """Return a T2 compatibility context dict for legacy runtime code."""
+    ctx = state["data"].model_dump()
+    flow = state["flow"]
+
+    if flow.finish_task_result is not None:
+        ctx["_finish_task_result"] = flow.finish_task_result
+    if flow.md_id is not None:
+        ctx["_md_id"] = flow.md_id
+    if flow.io_errors:
+        ctx["_io_errors"] = list(flow.io_errors)
+    if flow.validation_warnings:
+        ctx["_validation_warnings"] = list(flow.validation_warnings)
+    if flow.thread_id is not None:
+        ctx["_thread_id"] = flow.thread_id
+    if flow.run_id is not None:
+        ctx["_run_id"] = flow.run_id
+    ctx["_unattended"] = flow.unattended
+    if flow.persistent_runtime_inputs is not None:
+        ctx["_persistent_runtime_inputs"] = dict(flow.persistent_runtime_inputs)
+    if flow.persistent_storage_config is not None:
+        ctx["_persistent_storage_config"] = dict(flow.persistent_storage_config)
+    if flow.sub_run_id is not None:
+        ctx["_sub_run_id"] = flow.sub_run_id
+    if flow.retry_feedback is not None:
+        ctx["_retry_feedback"] = list(flow.retry_feedback)
+    if flow.working_memory:
+        ctx["_working_memory"] = dict(flow.working_memory)
+    if flow.ambiguity_reports:
+        ctx["_ambiguity_reports"] = list(flow.ambiguity_reports)
+    if flow.last_output is not None:
+        ctx["_last_output"] = flow.last_output
+    if flow.group_key is not None:
+        ctx["_group_key"] = flow.group_key
+    if flow.trace_path is not None:
+        ctx["_trace_path"] = flow.trace_path
+    if flow.validation_middleware_phase is not None:
+        ctx["_validation_middleware_phase"] = flow.validation_middleware_phase
+    if flow.current_phase:
+        ctx["_current_phase"] = flow.current_phase
+    if flow.md_schema is not None:
+        ctx["_md_schema"] = dict(flow.md_schema)
+    if flow.md_schema_path is not None:
+        ctx["_md_schema_path"] = flow.md_schema_path
+    if flow.md_type_dict is not None:
+        ctx["_md_type_dict"] = dict(flow.md_type_dict)
+    return ctx
+
+
+def workflow_state_from_legacy_context(
+    state: WorkflowState,
+    ctx: dict[str, Any],
+    *,
+    messages: list[AnyMessage] | None = None,
+    current_phase: str | None = None,
+    retry_counts: dict[str, int] | None = None,
+    metrics: dict[str, Any] | None = None,
+) -> WorkflowState:
+    """Build new WorkflowState from a T2 compatibility context dict."""
+    business_fields = {k: v for k, v in ctx.items() if not k.startswith("_")}
+    flow_updates: dict[str, Any] = {
+        "finish_task_result": ctx.get("_finish_task_result"),
+        "md_id": ctx.get("_md_id"),
+        "io_errors": list(ctx.get("_io_errors") or []),
+        "validation_warnings": list(ctx.get("_validation_warnings") or []),
+        "thread_id": ctx.get("_thread_id"),
+        "run_id": ctx.get("_run_id"),
+        "unattended": bool(ctx.get("_unattended", state["flow"].unattended)),
+        "persistent_runtime_inputs": ctx.get("_persistent_runtime_inputs"),
+        "persistent_storage_config": ctx.get("_persistent_storage_config"),
+        "sub_run_id": ctx.get("_sub_run_id"),
+        "retry_feedback": ctx.get("_retry_feedback"),
+        "working_memory": dict(ctx.get("_working_memory") or {}),
+        "ambiguity_reports": list(ctx.get("_ambiguity_reports") or []),
+        "last_output": ctx.get("_last_output"),
+        "group_key": ctx.get("_group_key"),
+        "trace_path": ctx.get("_trace_path"),
+        "validation_middleware_phase": ctx.get("_validation_middleware_phase"),
+        "md_schema": ctx.get("_md_schema"),
+        "md_schema_path": ctx.get("_md_schema_path"),
+        "md_type_dict": ctx.get("_md_type_dict"),
+        "current_phase": current_phase
+        if current_phase is not None
+        else str(ctx.get("_current_phase") or state["flow"].current_phase),
+        "retry_counts": retry_counts
+        if retry_counts is not None
+        else dict(state["flow"].retry_counts),
+        "metrics": metrics if metrics is not None else dict(state["flow"].metrics),
+    }
+    new_flow = FrameworkState.model_validate({**state["flow"].model_dump(), **flow_updates})
+    return WorkflowState(
+        data=BusinessData.model_validate(business_fields),
+        flow=new_flow,
+        messages=messages if messages is not None else state["messages"],
+    )

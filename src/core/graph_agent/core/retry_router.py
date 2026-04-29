@@ -28,19 +28,17 @@ class RetryRouter:
     def __init__(self, phases: list[Phase]) -> None:
         self._phases = phases
 
-    def build_route_callback(
-        self, phase: Phase
-    ) -> Callable[[WorkflowState], str]:
+    def build_route_callback(self, phase: Phase) -> Callable[[WorkflowState], str]:
         """Return the conditional-edge callback LangGraph invokes after ``phase``'s validate node.
 
-        The returned closure reads ``state["context"]`` at graph-invoke time
+        The returned closure reads ``state["flow"]`` at graph-invoke time
         and resolves to either ``"{retry_target}_execute"`` (retry branch)
         or the next phase's execute-node name / ``END``.
         """
         next_node = self.next_phase_node(phase)
 
         def route(state: WorkflowState) -> str:
-            if "_retry_feedback" in state["context"]:
+            if state["flow"].retry_feedback:
                 target = phase.retry_target or phase.name
                 return f"{target}_execute"
             return next_node

@@ -9,6 +9,7 @@ from graph_agent.core.state import (
     FrameworkState,
     StateManager,
     WorkflowState,
+    verify_state_invariants,
 )
 
 
@@ -49,6 +50,18 @@ class TestFrameworkState:
         dumped = fs1.model_dump(mode="json")
         fs2 = FrameworkState.model_validate(dumped)
         assert fs1 == fs2
+
+    def test_framework_state_retry_feedback_default(self) -> None:
+        fs = FrameworkState()
+        assert fs.retry_feedback is None
+
+    def test_framework_state_trace_path_default(self) -> None:
+        fs = FrameworkState()
+        assert fs.trace_path is None
+
+    def test_framework_state_validation_middleware_phase_default(self) -> None:
+        fs = FrameworkState()
+        assert fs.validation_middleware_phase is None
 
 
 class TestWorkflowStateTypedDict:
@@ -95,3 +108,20 @@ class TestStateManager:
 
         with pytest.raises(Exception):
             StateManager.update_framework(state, undeclared_xyz="value")
+
+    def test_verify_state_invariants_rejects_business_underscore(self) -> None:
+        state: WorkflowState = {
+            "data": BusinessData(_internal="x"),
+            "flow": FrameworkState(),
+            "messages": [],
+        }
+        with pytest.raises(ValueError, match="BusinessData 含禁止的 _ 前缀字段"):
+            verify_state_invariants(state)
+
+    def test_verify_state_invariants_accepts_split_state(self) -> None:
+        state: WorkflowState = {
+            "data": BusinessData(result="ok"),
+            "flow": FrameworkState(thread_id="t1"),
+            "messages": [],
+        }
+        verify_state_invariants(state)

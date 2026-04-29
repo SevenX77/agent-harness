@@ -12,20 +12,20 @@ honors the four design invariants from
 3. Business fields are non-empty (the workflow actually produced output).
 4. ``state["messages"]`` is non-empty (the LLM phase actually ran).
 
-The suite splits into two layers because LLM API credentials are not
-configured in this environment (``.env`` only carries ``WAVESPEED_*``,
-no ``OPENAI_API_KEY`` / ``ANTHROPIC_API_KEY`` / ``GEMINI_API_KEY``):
+The suite splits into two layers because LLM API credentials may not be
+configured in every environment:
 
 - **Compile + invariant layer (always runs)** — uses
   ``load_workflow_from_md`` to compile the v3 SKILL, then synthesizes a
   realistic post-run WorkflowState and asserts the four invariants. This
   exercises the same state-shape contracts the real run would produce
   while costing zero LLM tokens.
-- **Real-LLM layer (skipped by default)** — gated on
-  ``OPENAI_API_KEY`` / ``ANTHROPIC_API_KEY`` so the test is silent under
-  CI without credentials but turns on automatically once a key is
-  exported. Runs the full ``GraphAgentHarness.run`` and re-asserts the
-  four invariants on the live final state.
+- **Real-LLM layer** — gated on the provider ``api_key_env`` values
+  declared in ``config/llm_roles.yaml``. The test is silent under CI
+  without provider credentials but turns on automatically once any
+  configured provider key is exported or present in ``.env``. Runs the
+  full ``GraphAgentHarness.run`` and re-asserts the four invariants on
+  the live final state.
 
 Reference paths:
 - The canonical text-segmentation SKILL lives at ``skills/text-segmentation/SKILL.md``;
@@ -44,18 +44,55 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 
+from graph_agent.config.llm_config import load_config
 from graph_agent.core.harness import GraphAgentHarness
 from graph_agent.core.loader import load_workflow_from_md
 from graph_agent.core.state import (
     BusinessData,
     FrameworkState,
+    StateMessage,
     WorkflowState,
     verify_state_invariants,
 )
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+LLM_ROLES_PATH = REPO_ROOT / "config" / "llm_roles.yaml"
 V3_SKILL_PATH = "skills/text-segmentation/SKILL.md"
+REAL_LLM_SMOKE_ROLE_ENV = "GRAPH_AGENT_REAL_LLM_SMOKE_ROLE"
+DEFAULT_REAL_LLM_SMOKE_ROLE = "test_opus47_ws"
+
+
+def _load_dotenv_for_smoke() -> None:
+    """Load repo-local ``.env`` so provider keys participate in skip checks."""
+    dotenv_path = REPO_ROOT / ".env"
+    if dotenv_path.exists():
+        load_dotenv(dotenv_path=dotenv_path, override=False)
+
+
+def _any_llm_role_provider_key_present() -> bool:
+    """Return true when any llm_roles.yaml provider api_key_env is set."""
+    _load_dotenv_for_smoke()
+    cfg = load_config(LLM_ROLES_PATH)
+    return any(
+        bool(provider.api_key_env and os.environ.get(provider.api_key_env))
+        for provider in cfg.providers.values()
+    )
+
+
+def _real_llm_smoke_role() -> str:
+    """Single-model role used by the live smoke test."""
+    return os.environ.get(REAL_LLM_SMOKE_ROLE_ENV, DEFAULT_REAL_LLM_SMOKE_ROLE)
+
+
+def _force_llm_role(harness: GraphAgentHarness, role: str) -> None:
+    """Pin every LLM phase to a single-model test role for deterministic e2e."""
+    for phase in harness.phases:
+        if phase.requires_llm:
+            phase.tier = role
+            phase.llm_role = role
 
 
 @pytest.fixture
@@ -86,19 +123,21 @@ def synthetic_post_run_state() -> WorkflowState:
     flow field is deliberate so a regression in any single field's
     serialization shows up here.
     """
-    business = BusinessData(
-        chapter_number=1,
-        chapter_content="第一章 测试场景\n这是一段用于 MVP-1 状态拆分验证的样本文本。",
-        segments=[
-            {
-                "index": 1,
-                "type": "B",
-                "start_line": 1,
-                "end_line": 2,
-                "content": "测试场景开场",
-                "confidence": 0.95,
-            },
-        ],
+    business = BusinessData.model_validate(
+        {
+            "chapter_number": 1,
+            "chapter_content": "第一章 测试场景\n这是一段用于 MVP-1 状态拆分验证的样本文本。",
+            "segments": [
+                {
+                    "index": 1,
+                    "type": "B",
+                    "start_line": 1,
+                    "end_line": 2,
+                    "content": "测试场景开场",
+                    "confidence": 0.95,
+                },
+            ],
+        }
     )
     flow = FrameworkState(
         finish_task_result={
@@ -114,7 +153,7 @@ def synthetic_post_run_state() -> WorkflowState:
         validation_warnings=[],
         io_errors=[],
     )
-    messages = [HumanMessage(content="kickoff for MVP-1 smoke")]
+    messages: list[StateMessage] = [HumanMessage(content="kickoff for MVP-1 smoke")]
     return WorkflowState(data=business, flow=flow, messages=messages)
 
 
@@ -219,16 +258,10 @@ class TestStateInvariants:
 
 
 @pytest.mark.skipif(
-    not (
-        os.environ.get("OPENAI_API_KEY")
-        or os.environ.get("ANTHROPIC_API_KEY")
-        or os.environ.get("GRAPH_AGENT_API_KEY")
-    ),
+    not _any_llm_role_provider_key_present(),
     reason=(
-        "no LLM API key in environment "
-        "(OPENAI_API_KEY / ANTHROPIC_API_KEY / GRAPH_AGENT_API_KEY); "
-        "real-LLM smoke skipped by design — compile + synthetic-state layers"
-        " above already exercise every state contract MVP-1 introduced."
+        "no LLM provider api_key_env in environment per llm_roles.yaml; "
+        "real-LLM smoke skipped — compile + invariant layers above already exercise state contracts"
     ),
 )
 class TestRealLLMSmoke:
@@ -241,16 +274,16 @@ class TestRealLLMSmoke:
     """
 
     def test_v3_run_one_chapter_honors_invariants(self, tmp_path: Path) -> None:
+        role = _real_llm_smoke_role()
         sample_chapter = (
             "第一章 测试场景\n\n"
-            "这是一段用于 MVP-1 状态拆分验证的样本文本。"
-            "李雷走进了房间，发现桌上有一封信。\n"
-            "他打开信，里面写着关于次元空间的秘密 —— "
-            "这是一个由能量编织的非物理世界。\n"
-            "李雷决定调查这个空间。\n"
+            "李雷走进房间，看见桌上有一封信。\n"
+            "次元空间是一种由能量编织的非物理世界。\n"
+            "李雷合上信，决定继续调查。\n"
         )
         harness = load_workflow_from_md(Path(V3_SKILL_PATH))
         try:
+            _force_llm_role(harness, role)
             final_state = harness.run(
                 initial_context={
                     "chapter_content": sample_chapter,
@@ -258,6 +291,10 @@ class TestRealLLMSmoke:
                     "output_dir": str(tmp_path),
                 },
                 unattended=True,
+            )
+            (tmp_path / "real_llm_metrics.txt").write_text(
+                f"role={role}\nmetrics={final_state['flow'].metrics}\n",
+                encoding="utf-8",
             )
         finally:
             harness.close()

@@ -23,7 +23,7 @@
 
 | 视角 | Reviewer | 总评 | 主要硬伤 |
 |------|----------|------|---------|
-| 工程基线 | a1 (codex GPT-5.5) | **6.7/10** | CI 门禁局部 / License 冲突 / README 过期 / 覆盖率 / 依赖安全 |
+| 工程基线 | a1 (codex GPT-5.5) | **6.7/10** | CI 门禁局部 / License 元数据冲突 / README 过期 / 覆盖率 / 依赖安全 |
 | 架构设计 | a2 (gemini 3.1 Pro) | **6.2/10** | phase_executor God Class (1182 行) / 双系统并行 / 真 LLM e2e 缺失 |
 
 **双审一致结论**: 当前**未达大厂 1.0.0 出货标准**, 必须修复 must-fix 后才能 ship.
@@ -36,7 +36,7 @@
 | 2. 错误处理 | 8/10 | 关键路径已 raise/retry/log, 业务错误带上下文 |
 | 3. 测试质量 | 6.5/10 | 912 passed 但覆盖率 73.25% < 大厂 80%; 低覆盖模块: factory 17% / parallel_map 13% / synthesize_speech 22% |
 | 4. 日志可观测 | 7.5/10 | decision=... 风格日志可追踪, 缺统一 logging.md 标准 |
-| 5. 配置管理 | 6.5/10 | **LICENSE Apache-2.0 vs pyproject.toml MIT 冲突** |
+| 5. 配置管理 | 6.5/10 | **LICENSE Apache-2.0 vs pyproject.toml 旧 license metadata 冲突** |
 | 6. 文档与 API | 5.5/10 | **README 仍写 5.7/10 / 不可生产 / e2e 跑不通**; Public API 边界靠目录约定 |
 | 7. 依赖安全 | 5.5/10 | 无 lock/hash/SBOM/CVE audit/Dependabot/CodeQL |
 | 8. CI/CD 门禁 | 4/10 | **CI 只 gate 3 文件, coverage 65%** |
@@ -64,7 +64,7 @@
 - 影响: 防回归核心机制
 
 #### M2: License 元数据冲突 (a1 维度 5)
-- 现状: `LICENSE` Apache-2.0 vs `pyproject.toml:6` `license = { text = "MIT" }`
+- 现状: `LICENSE` Apache-2.0 vs `pyproject.toml:6` 旧 license metadata
 - 修法: 统一改 pyproject.toml 为 Apache-2.0 + classifier 同步 + README 表述
 - 影响: 发布合规阻塞
 
@@ -119,7 +119,7 @@
 按用户铁律 (不打补丁, a2 重出 design + 重走流程), 8 条 must-fix 分组处理:
 
 ### Group 1: 工程类 fix (a1 主笔)
-- M2 License 冲突 (1 行修)
+- M2 License 元数据冲突 (1 行修)
 - M3 README 重写
 - M1 CI 门禁全库化 (改 .github/workflows/ci.yml)
 - M5 依赖安全门禁 (加 Dependabot + pip-audit step)

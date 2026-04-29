@@ -47,7 +47,7 @@ title: v1-reset Phase 1 项目工程性能全量 Review (大厂对标)
 | 维度 | 大厂标杆 | 本项目 | 差距 | 置信度 |
 |------|---------|--------|------|--------|
 | **顶层 README.md** | 必有, quickstart + install + 简介 | ❌ **完全没有** | 严重 | A |
-| **顶层 LICENSE 文件** | 必有 | ❌ 顶层无 (pyproject 里有 MIT) | 中等 | A |
+| **顶层 LICENSE 文件** | 必有 | ❌ 顶层无 (pyproject 里有旧 license metadata) | 中等 | A |
 | **CONTRIBUTING.md** | 大型项目必有 | ❌ 没有 | 中等 | A |
 | **顶层 CHANGELOG** | 用户向变更日志 | ❌ 没有 (只有 docs/v1-reset/CHANGELOG_MVP*) | 严重 | A |
 | **CI 全库门禁** | ruff 0 / mypy strict 全库 / pytest 100% pass | ❌ CI 只跑 3 文件 ruff/mypy | 严重 | A |

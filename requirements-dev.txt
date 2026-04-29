@@ -33,6 +33,7 @@ openai==2.32.0
 orjson==3.11.8
 ormsgpack==1.12.2
 packaging==26.1
+pip-audit==2.7.3
 pluggy==1.6.0
 pydantic==2.13.3
 pydantic_core==2.46.3

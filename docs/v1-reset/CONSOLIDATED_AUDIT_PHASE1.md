@@ -166,7 +166,7 @@ a1 P0 #2 提: `src/visual_learning` 不可导入, 依赖不存在的 `src.core.c
 | # | Item | 工作量 | 来源 | 是否阻塞 ship |
 |---|------|--------|------|---------------|
 | E1 | 顶层加 README.md (项目介绍 + quickstart + install) | 2h | 主控 #1 | ❌ 不阻塞 (但大厂必有) |
-| E2 | 顶层加 LICENSE 文件 (MIT, 已在 pyproject) | 5min | 主控 #2 | ❌ 不阻塞 |
+| E2 | 顶层加 LICENSE 文件 (Apache-2.0, 与 pyproject 对齐) | 5min | 主控 #2 | ❌ 不阻塞 |
 | E3 | git hygiene: 清理 .venv/ .claude/ .coverage 出 git, 补 .gitignore | 30min | a1 P0 #3 | ⚠️ 严重需修 |
 | E4 | 砍 test/ 双目录残留 (vs tests/) | 30min | 主控 #10 | ❌ 不阻塞 |
 | E5 | plan.md 归档到 docs/archive/ | 5min | 主控 #11 | ❌ 不阻塞 |

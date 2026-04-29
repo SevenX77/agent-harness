@@ -3,7 +3,11 @@ name = "graph-agent-harness"
 version = "0.1.0"
 description = "GraphAgent: SKILL.md-driven workflow harness layered on DeerFlow + LangGraph"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.11",
+]
 
 # --- Version pins ----------------------------------------------------------
 # Upper bounds are mandatory, not cosmetic:
@@ -49,6 +53,7 @@ dev = [
     "mypy>=1.10",
     "ruff>=0.6",
     "pre-commit>=3.6",
+    "pip-audit>=2.7.3,<3.0.0",
 ]
 google = ["langchain-google-genai>=2.0", "google-genai>=1.0"]
 tts = ["edge-tts>=6.0"]
@@ -112,9 +117,9 @@ source = ["src/core/graph_agent"]
 omit = ["*/tests/*"]
 
 [tool.coverage.report]
-# MVP-0: 65 = current baseline (from `pytest --cov`). 全收敛到 85 见 MVP-5
-# (设计要求核心 95% / 整体 85%). 该 gate 仅防退步, 不阻塞 MVP-0 ship.
-fail_under = 65
+# Phase 3 RC baseline: current full-suite coverage is 73.25%. This gate prevents
+# regression while Group 3 raises critical-path coverage for the final 1.0.0 cut.
+fail_under = 73
 exclude_lines = [
     "pragma: no cover",
     "raise NotImplementedError",

@@ -302,7 +302,7 @@ MAX_CONCURRENT_TASKS=5
 
 ## 📄 许可证
 
-MIT License
+Apache-2.0
 
 ## 🙏 致谢
 

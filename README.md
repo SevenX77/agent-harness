@@ -2,62 +2,88 @@
 
 ## 1. 项目定位
 
-**GraphAgent Harness** 是一个专为**产品经理 (PM) 和内容创作者**设计的 Agent 工作流编排引擎。
+**GraphAgent Harness** 是面向产品经理 (PM) 和内容创作者的 Agent 工作流编排引擎。它把复杂的 LLM 流水线抽象成可审阅、可版本化的 Markdown 协议，让团队用 `SKILL.md` 描述业务流程，再由 Harness 编译成 LangGraph 执行图。
 
-它脱胎于 `deerflow 1.0` 的重构版本，并在底层基于 **LangGraph** 提供强健的图执行能力。它的核心定位是：**让非研发人员通过编写 Markdown (`SKILL.md`) 就能完成复杂的 Agent 流水线编排，而无需编写一行 Python 代码。**
+可以把它理解成 Agent 时代的"文本版生产线": PM 描述每个工位做什么、上游产物怎么流到下游、质检员如何判定合格；Harness 负责把这份 SOP 编译成可运行、可重试、可验证的图执行流程。
 
-在我们的工作流愿景中，PM 不需要直接手写这些 Markdown 文件，而是通过与 Copilot (如 Cursor 或 Claude) 的对话，由大模型将业务逻辑翻译为结构化的 `SKILL.md`。Harness 的职责就是在运行时将这份文本协议"编译"成工业级的 LangGraph `StateGraph` 并精准执行。
+项目源自 `deerflow 1.0` 的重构分支，当前重点已经从代码迁移转向严格契约、工程门禁和可发布质量线。
 
----
+## 2. 项目状态
 
-## 2. 核心概念
+当前状态: **Phase 3 ship-ready release candidate (RC)**。阶段 1 工程卫生、阶段 2 中间件/校验管道重构、阶段 3 mypy/ruff 全库收敛已完成；待 must-fix Group 2 + Group 3 关闭后正式切 1.0.0。
 
-为了让 AI 按照我们的心意工作，我们需要一套能清晰表达意图的"工程化提示词设计语言" (DSL)。我们将这些复杂的技术抽象转换为了以下直觉概念：
+当前分支已完成工程类 must-fix:
 
-*   **SKILL.md (技能配置文档)**: 这是整个框架的灵魂，相当于给大模型下发的"SOP (标准作业程序) 操作手册"。你用 Markdown 结构写下要完成什么任务、需要什么输入、产出什么格式的结果。Harness 的编译器能直接看懂并执行这份文档。
-*   **Phase (工作阶段)**: 复杂的任务不能指望 LLM 一口吃成胖子。Phase 就像是流水线上的"工位"。你可以把一个大任务拆成多个 Phase（比如：Phase 1 负责"提取大纲"，Phase 2 负责"扩写正文"，Phase 3 负责"校对排版"）。
-*   **State (状态流转)**: 上一个"工位"产出的半成品，怎么递给下一个"工位"？State 就是在 Phase 之间传递的"托盘"。前一个 Phase 的明确输出会自动放进 State 这个托盘里，供后续的 Phase 读取和消费。
-*   **Validator (验证器 / 质检员)**: 众所周知大模型存在幻觉。我们在 Phase 内部引入了 Validator 机制。这就好比每个工位末尾都站着一个质检员，如果大模型输出的 JSON 格式不对、或者遗漏了关键字段，Validator 会当场把它打回去，让大模型（Agent Loop）根据错误信息原地重试，直到合格才放行到下一个 Phase。
-*   **编译产物 (LangGraph)**: 你写的只是静态、易读的 Markdown 文本，但底层通过我们的引擎加载后，会被"编译"成 LangGraph 框架里复杂的有向无环图（甚至带循环重试的图）。你享受了 Markdown 的极其简单的编写体验，同时白嫖了 LangGraph 的工业级稳定性。
+- CI 门禁全库化: `ruff check src/ tests/`、`mypy src/`、`pytest tests/ -x --tb=short`、coverage gate、dependency audit。
+- License 元数据统一为 Apache-2.0。
+- README 从早期研发说明更新为 RC 状态说明。
+- Dependabot + `pip-audit` 进入依赖安全门禁。
 
----
+仍在 1.0.0 前收敛的项目:
 
-## 3. 适用场景
+- Group 2: `phase_executor` 架构拆解、旧 `ValidationMiddleware` 双系统退役。
+- Group 3: 覆盖率治理、真实 LLM 或高保真 LLM mock e2e 门禁。
 
-如果你遇到以下情况，这个项目会非常适合你：
+## 3. 工程质量门禁
 
-1.  **想用 LLM 自动化生成复杂长篇内容**: 直接让 LLM 写 10 万字小说会崩溃。你可以用 `SKILL.md` 编排一个流水线：世界观设定 -> 生成大纲 -> 拆分章节 -> 逐章生成 -> 角色一致性检查。
-2.  **构建多步骤的内容处理/审核流水线**: 比如输入一篇外文长报导，需要先提取事实核心，再进行翻译，最后基于翻译生成一段中文播客脚本。你可以轻松串联多个 Phase 来实现这种数据流转。
-3.  **想做可靠的 Agent 编排但不会写 Python**: 只要你会写 Markdown 和系统提示词 (System Prompt)，你就能构建出带有数据校验和容错重试机制的复杂应用，大大降低了 Agent 的工程门槛。
-4.  **作为 PM 想要快速验证产品原型**: 业务想法有了，不想等研发排期。打开 Copilot 对话，口述你的多步 Agent 逻辑，让它帮你生成 `SKILL.md`，直接在本地跑通业务闭环。
+当前本地基线:
 
----
+- `mypy src/`: 0 errors, `Success: no issues found in 86 source files`
+- `ruff check src/ tests/`: 0 errors
+- `pytest tests/ -x --tb=short -q`: 912 passed, 0 failed, 2 skipped
+- Coverage: 73.25%, CI gate 73%
 
-## 4. 与其他框架的区别
+跳过的测试是需要外部 API key 的真实 LLM smoke，以及一个明确标注的阈值边界 case。编译期、合成状态、runtime validator、routing、live SKILL smoke 已在常规测试套件中覆盖。
 
-*   **对比 Langflow / Dify (低代码/无代码 UI 平台)**:
-    Langflow 和 Dify 提供了极速上手的可视化拖拽界面。但在真实的业务落地中，当工作流变得极其复杂（例如包含几十个节点、复杂的循环重试和条件分支）时，"连线图"会变成难以维护的"意大利面条"，且很难进行 Git 版本控制和团队 Code Review。GraphAgent 采用 **Markdown DSL** (Docs-as-Code)，它是纯文本，天生完美支持 Git 版本控制，更适合沉淀为团队长期维护的数字资产。
-*   **对比 Anthropic Skills (或基础的 Tool Calling)**:
-    常规的 Skills 概念通常只是"一个 Prompt + 几个工具定义"的单点对话配置。而 GraphAgent 的 `SKILL.md` 不仅定义了这些，还宏观定义了 **Phase 阶段编排、State 依赖传递以及多轮次的 Validator 验证重试机制**。它不仅是单点技能，更是完整的系统级工作流抽象。
+Task #13 大厂双审结果已落库到 `docs/v1-reset/BIG_TECH_AUDIT_TASK13.md`: a1 工程基线 6.7/10，a2 架构设计 6.2/10。当前 Group 1 修复关闭的是配置、文档、CI 和依赖安全类 hard fail；架构和测试类 hard fail 仍按后续任务推进。
 
----
+## 4. 核心概念
 
-## 5. 项目状态
+- **SKILL.md**: 工作流配置文档，相当于给 Agent 的 SOP。它描述输入、阶段、输出、校验器和工具。
+- **Phase**: 工作阶段。复杂任务被拆成多个可验证的工位，例如提取、整理、审阅、合成。
+- **State**: 阶段之间传递的状态托盘。上游明确产物会进入 State，供下游消费。
+- **Validator**: 阶段末尾的质检员。输出不符合 Pydantic schema 或业务校验时，系统会给 LLM 可操作的 retry feedback。
+- **LangGraph 编译产物**: Harness 把 Markdown DSL 编译为 LangGraph 执行图，获得图执行、状态流转和重试控制能力。
 
-**⚠️ 警告：当前处于 v1-reset Phase 1 (0.x 阶段)，属于极早期研发状态，请勿用于生产环境。**
+## 5. 适用场景
 
-*   **重构阵痛期**: 本项目刚刚从 `deerflow 1.0` 中 fork 出来并进行了大幅清理（精简了近 50% 的冗余代码）。
-*   **不稳定 / 设计在收敛**: 当前架构仍在快速演进中，正从"基于副作用的契约"向"Rust式的严格数据流契约"转型。由于新老引擎（双系统）并行等历史遗留问题，部分真实的 LLM 端到端 (e2e) 测试目前是跑不通的。
-*   **工程质量建设中**: 虽然项目拥有极其详尽、超越多数开源项目的内部架构设计规范（Design Spec），但在工程卫生门禁（如全库 strict mypy 和 ruff errors）方面距离大厂 1.0.0 的出货标准仍有差距（当前处于 5.7/10 的建设中水平）。不建议现在用于线上业务。
+1. **长篇内容流水线**: 世界观设定 -> 大纲 -> 章节拆分 -> 逐章生成 -> 一致性检查。
+2. **多步骤信息处理**: 长文提取事实 -> 翻译 -> 生成播客脚本 -> 审核格式。
+3. **PM 原型验证**: 用 Copilot 口述业务流程，让模型生成 `SKILL.md`，本地跑通业务闭环。
+4. **团队沉淀 Agent SOP**: 使用纯文本协议接受 Git 版本控制、Code Review 和审计。
 
----
+## 6. 与其他框架的区别
 
-## 6. 项目结构概览
+- **对比 Langflow / Dify**: 可视化低代码适合快速试验，但复杂流程容易变成难以 review 的连线图。GraphAgent 采用 Docs-as-Code 的 Markdown DSL，更适合长期维护和团队协作。
+- **对比基础 Tool Calling / Skills**: 常规 Skills 多是单点 Prompt + 工具。GraphAgent 的 `SKILL.md` 还定义阶段编排、状态依赖、schema 校验和多轮 retry，是完整工作流协议。
 
-*   `src/core/graph_agent/`: 核心引擎源码（负责 `SKILL.md` 的解析、编译为图、以及认知执行的底层架构）。
-*   `skills/`: 存放具体的业务 Agent 编排文件（即各种 `SKILL.md`，如文本分段、事件提取等实例）。
-*   `docs/`: 存放详尽的项目演进文档，包括极其深度的历史架构审计、Phase 1 复盘与出货 CheckList。
-*   `docs/archive/`: 历史规划文档归档 (deerflow 1.0 时代的 plan.md 等已搬入此目录, 仅作历史参考)。
-*   `.kiro/specs/`: 存放本项目的高标准架构设计规范文档 (Design Specs)。
-*   `tests/`: 自动化测试目录 (单元测试 / 编译期 / 图执行测试均在此)。
-*   `pyproject.toml`: 项目的元数据与严格的依赖定义（基于 Python 3.11+）。
+## 7. 快速开始
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+pip install -e .[dev]
+ruff check src/ tests/
+mypy src/
+pytest tests/ -x --tb=short -q
+```
+
+运行 CLI:
+
+```bash
+graph-agent --help
+```
+
+## 8. 项目结构
+
+- `src/core/graph_agent/`: 核心引擎源码，负责 `SKILL.md` 解析、编译、执行和中间件管道。
+- `skills/`: 业务工作流样例和 live SKILL。
+- `tests/`: 单元测试、编译期测试、middleware/runtime smoke 和 live SKILL e2e smoke。
+- `docs/v1-reset/`: 阶段性设计、审计、复盘和后续修复计划。
+- `docs/archive/`: deerflow 时代历史规划文档归档。
+- `.github/workflows/ci.yml`: 全库质量门禁。
+- `pyproject.toml`: 包元数据、依赖、mypy/ruff/coverage 配置。
+
+## 9. License
+
+Apache-2.0. See `LICENSE`.

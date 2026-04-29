@@ -18,8 +18,6 @@ from graph_agent.callbacks.events import (  # noqa: E402
     ParallelMapGroupEndedEvent,
     ParallelMapGroupStartedEvent,
     ResumedEvent,
-    SubgraphEnterEvent,
-    SubgraphExitEvent,
     CompactionEvent,
     DeadEndPrunedEvent,
     FinishTaskEvent,
@@ -66,9 +64,8 @@ _ALL_EVENT_CLASSES = [
     # Tier 1 Commit B — data + proxy enhancement
     ModelResolvedEvent,
     ArtifactSavedEvent,
-    # Tier 1 Commit C — concurrency + subgraph boundary
-    SubgraphEnterEvent,
-    SubgraphExitEvent,
+    # Tier 1 Commit C — concurrency boundary (subgraph events removed
+    # in MVP-0 B1, 2026-04-28)
     ParallelMapGroupStartedEvent,
     ParallelMapGroupEndedEvent,
     # Tier 1 Commit D — heartbeat
@@ -135,16 +132,8 @@ _MIN_CTOR: dict[type, dict] = {
         "path": "/tmp/x.json",
         "size_bytes": 128,
     },
-    # Tier 1 Commit C — concurrency + subgraph boundary
-    SubgraphEnterEvent: {
-        "phase_name": "segmentation",
-        "child_skill_path": "skills/text-segmentation/SKILL.md",
-    },
-    SubgraphExitEvent: {
-        "phase_name": "segmentation",
-        "child_skill_path": "skills/text-segmentation/SKILL.md",
-        "wall_time_seconds": 0.42,
-    },
+    # Tier 1 Commit C — concurrency boundary (subgraph events removed
+    # in MVP-0 B1, 2026-04-28)
     ParallelMapGroupStartedEvent: {
         "group_key": "abc123",
         "skill_path": "skills/scene/SKILL.md",

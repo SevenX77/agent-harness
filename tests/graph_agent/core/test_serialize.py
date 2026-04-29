@@ -104,11 +104,12 @@ class TestRoundTripAgent:
 
 
 class TestRoundTripGraph:
-    def test_graph_with_three_phase_modes(self):
-        """Cover LLM + Logic + Delegate phases in one manifest."""
+    def test_graph_with_two_phase_modes(self):
+        """Cover LLM + Logic phases in one manifest. The 1.x ``delegate``
+        mode was removed in MVP-0 B1 (2026-04-28)."""
         s1, s2 = _round_trip({
             "name": "complex-pipeline",
-            "description": "A graph skill exercising all three phase modes.",
+            "description": "A graph skill exercising both phase modes.",
             "type": "graph",
             "io": {
                 "inputs": [{"name": "chapters", "source": "runtime", "type": "list[str]"}],
@@ -127,15 +128,6 @@ class TestRoundTripGraph:
                     "agent_tools": ["read_chapter", "store_beat"],
                     "max_iterations": 10,
                     "adopted_persona": "producer",
-                },
-                {
-                    "mode": "delegate",
-                    "name": "delegate_format",
-                    "subgraph": "./subskills/format_scene",
-                    "context_bridge": {
-                        "inputs": {"beats": "{context.segments}"},
-                        "outputs": {"formatted": "{subgraph.formatted_scene}"},
-                    },
                 },
             ],
         })
@@ -235,26 +227,31 @@ class TestFieldOrderingAndDicts:
         type_idx = out.find("type:")
         assert 0 < name_idx < desc_idx < type_idx
 
-    def test_context_bridge_nested_dict_preserved(self):
+    def test_io_nested_dict_preserved(self):
+        """Block-style nested dict survives round-trip. Original test used
+        DelegatePhase.context_bridge; with delegate mode removed in MVP-0
+        B1 (2026-04-28), exercise the analogous structure on
+        ``io.inputs`` / ``io.outputs`` instead."""
         s1, s2 = _round_trip({
             "name": "g",
             "description": "d",
             "type": "graph",
-            "io": {"inputs": [], "outputs": []},
+            "io": {
+                "inputs": [
+                    {"name": "a", "source": "runtime", "type": "str"},
+                    {"name": "b", "source": "runtime", "type": "str"},
+                ],
+                "outputs": [
+                    {"name": "c", "target": "artifact", "type": "str"},
+                ],
+            },
             "phases": [{
-                "mode": "delegate",
-                "name": "d",
-                "subgraph": "./x",
-                "context_bridge": {
-                    "inputs": {"a": "{context.a}", "b": "{context.b}"},
-                    "outputs": {"c": "{subgraph.c}"},
-                },
+                "mode": "logic",
+                "name": "only",
+                "execute_steps": ["m.fn"],
             }],
         })
         assert s1 == s2
-        # Dict survives as block style (not flow ``inputs: {a: ..., b: ...}``).
-        # Check the structural form, not values (which contain ``{context.a}``
-        # template markers).
         assert "inputs:\n" in s1
         assert "outputs:\n" in s1
         assert "inputs: {" not in s1

@@ -41,7 +41,7 @@ from ..callbacks.base import Callback
 from ..cognitive.ambiguity import log_ambiguity
 from ..cognitive.finish import finish_task
 from ..cognitive.memory import update_working_memory
-from ..cognitive.middlewares import create_custom_middlewares
+from ..cognitive.middlewares import ValidationMiddleware, create_custom_middlewares
 from ..cognitive.prompt import (
     apply_cognitive_template,
     resolve_role_prefix_from_llm_role,
@@ -173,11 +173,32 @@ class PhaseExecutor:
         from .harness import _clone_state, _safe_emit_event  # lazy: avoid import cycle
         from ..callbacks.events import RetryExhaustedEvent, ValidationPassEvent
 
-        if phase.validator is None:
-            return _clone_state(state)
-
         next_state = _clone_state(state)
+        if next_state["context"].pop("_validation_middleware_phase", None) == phase.name:
+            # LLM phase validators have already run inside ValidationMiddleware,
+            # keeping rejected finish_task submissions in the same agent loop
+            # instead of restarting the whole phase through retry_target routing.
+            return next_state
+
+        if phase.validator is None:
+            return next_state
+
         passed, errors = phase.validator(next_state["context"])
+        if isinstance(errors, str):
+            logger.warning(
+                "phase=%s validator returned str instead of list[str]; "
+                "coercing to single-element list. Update validator to "
+                "match Callback.on_retry / RetryEvent.feedback contract.",
+                phase.name,
+            )
+            errors = [errors] if errors else []
+        elif not isinstance(errors, list):
+            logger.warning(
+                "phase=%s validator returned %s instead of list[str]; coercing.",
+                phase.name,
+                type(errors).__name__,
+            )
+            errors = [str(errors)] if errors else []
         retry_key = phase.retry_target or phase.name
 
         if passed:
@@ -252,6 +273,7 @@ class PhaseExecutor:
         state = _clone_state(state)
         ctx = state["context"]
         ctx["_current_phase"] = phase.name
+        ctx["_validation_middleware_phase"] = phase.name
 
         # Inject md_to_json schema info if available.
         # Store the dotted path (string) instead of the Pydantic class itself —
@@ -342,7 +364,7 @@ class PhaseExecutor:
             sub_run_id=ctx.get("_sub_run_id") if isinstance(ctx, dict) else None,
             group_key=ctx.get("_group_key") if isinstance(ctx, dict) else None,
         )
-        llm_role = effective_llm_role or "deerflow_default"
+        llm_role = effective_llm_role or "balanced"
         role_prefix = resolve_role_prefix_from_llm_role(llm_role)
         logger.info(
             "phase=%s llm_role=%s -> role_prefix injected (len=%d)",
@@ -362,19 +384,10 @@ class PhaseExecutor:
         lc_tools.append(_wrap_tool_for_langchain(finish_task, ctx, bridge, return_direct=True))
         lc_tools.append(_wrap_tool_for_langchain(update_working_memory, ctx, bridge))
         lc_tools.append(_wrap_tool_for_langchain(log_ambiguity, ctx, bridge))
-        try:
-            from ..deerflow.tools.builtins.clarification_tool import (
-                ask_clarification_tool,
-            )
+        from ..tools.builtin.clarification_tool import ask_clarification_tool
 
-            lc_tools.append(ask_clarification_tool)
-            logger.info("phase=%s: mounted ask_clarification tool", phase.name)
-        except ImportError as exc:
-            logger.warning(
-                "phase=%s: failed to mount ask_clarification: %s",
-                phase.name,
-                exc,
-            )
+        lc_tools.append(ask_clarification_tool)
+        logger.info("phase=%s: mounted ask_clarification tool", phase.name)
         references = list(getattr(phase, "references", []) or [])
         if references:
             base_dir = getattr(phase, "skill_base_dir", None) or ctx.get("_skill_base_dir")
@@ -408,14 +421,6 @@ class PhaseExecutor:
             if "artifact" in context_access:
                 lc_tools.append(_wrap_tool_for_langchain(read_artifact, ctx, bridge))
                 logger.info("phase=%s mounted read_artifact tool", phase.name)
-        if phase.subagent_enabled:
-            try:
-                from deerflow.tools.builtins import task_tool as deerflow_task_tool
-
-                lc_tools.append(deerflow_task_tool)
-            except Exception as exc:
-                logger.warning("[Harness] Failed to enable task tool for phase '%s': %s", phase.name, exc)
-
         phase_middlewares = create_custom_middlewares(
             working_memory=True,
             dead_end_pruning=True,
@@ -430,8 +435,18 @@ class PhaseExecutor:
             summarization_keep_messages=20,
             clarification=True,
         )
+        phase_middlewares.append(
+            ValidationMiddleware(
+                output_schema=phase.output_schema,
+                output_schema_path=phase.output_schema_path,
+                business_validator=phase.validator,
+                ctx=ctx,
+                callbacks=active_callbacks,
+                phase_name=phase.name,
+            )
+        )
 
-        # Step 6: Create DeerFlow Agent — render system_prompt with context
+        # Step 6: Create LangChain agent — render system_prompt with context
         raw_skill_prompt = phase.system_prompt or "完成当前阶段的任务。"
         rendered_skill_prompt = _safe_render_template(raw_skill_prompt, ctx)
         rendered_data_architecture = (
@@ -443,7 +458,6 @@ class PhaseExecutor:
             phase_name=phase.name,
             skill_system_prompt=rendered_skill_prompt,
             data_architecture=rendered_data_architecture,
-            subagent_enabled=phase.subagent_enabled,
             context=ctx,
             role_prefix=role_prefix,
         )
@@ -723,8 +737,10 @@ class PhaseExecutor:
                 ),
             )
 
-        # Step 10: Clean up phase-local keys before returning state
-        ctx.pop("_finish_task_result", None)
+        # Step 10: Keep the successful finish_task payload in context so
+        # declarative io.outputs.source can persist parsed business data after
+        # the workflow completes. Each LLM phase clears any stale payload at
+        # entry, so retaining it here does not short-circuit later LLM phases.
 
         # Step 11: Update state
         new_state: WorkflowState = {

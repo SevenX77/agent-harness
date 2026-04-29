@@ -1,7 +1,7 @@
 """Model Resolver — role-based model selection with provider failover.
 
 Reads config/llm_roles.yaml, resolves role → model → provider chain,
-and returns LangChain BaseChatModel instances for DeerFlow's create_agent.
+and returns LangChain BaseChatModel instances for graph_agent phases.
 
 Migrated from LLMGateway's circuit-breaking logic, adapted to output
 BaseChatModel instead of raw API responses.
@@ -82,7 +82,7 @@ def _is_network_failure(exc: Exception) -> bool:
 
 
 def _attach_profile(model: Any, model_def: ModelDef) -> None:
-    """Attach max-input profile metadata for SummarizationMiddleware."""
+    """Attach max-input profile metadata used by summary-capable callers."""
     if model_def.max_input_tokens is None:
         return
     try:
@@ -94,7 +94,7 @@ def _attach_profile(model: Any, model_def: ModelDef) -> None:
     except (AttributeError, TypeError) as exc:
         logger.warning(
             "ModelResolver: failed to attach profile to %s: %s. "
-            "SummarizationMiddleware will use 32k fallback.",
+            "summary profile fallback will use 32k.",
             type(model).__name__,
             exc,
         )
@@ -148,21 +148,18 @@ class ModelResolver:
     ) -> BaseChatModel:
         """Resolve a role name to a BaseChatModel instance.
 
-        This is the hook function registered with DeerFlow's
-        set_model_resolver_hook(). All DeerFlow model creation calls
-        (Phase agents, summarization, memory, title) flow through here.
+        This function is used directly by GraphAgent phase execution.
 
         Args:
             role_name: Role name from llm_roles.yaml (e.g. "premium", "fast").
-                If None, reads DeerFlow config's default model alias and then
-                resolves that alias through ``llm_roles.yaml`` or DeerFlow native fallback.
+                If None, resolves the default role from environment or config.
             thinking_enabled: Whether to enable thinking/reasoning mode.
                 None = auto-detect from the selected model's ``reasoning`` flag.
                 True = force enable reasoning mode when the provider supports it.
                 False = force disable reasoning mode even for reasoning models.
             callbacks: Optional run callback list used to emit LLMFallbackEvent
                 when peer-model fallback entries are appended. Defaults to an
-                empty tuple for DeerFlow hook compatibility.
+                empty tuple for direct callers.
             phase_name: Optional phase name stamped on emitted LLMFallbackEvent
                 payloads.
             **kwargs: Additional kwargs (passed through but mostly ignored
@@ -207,15 +204,15 @@ class ModelResolver:
 
         if resolved is None:
             if role_name is None:
-                role_name = self._get_deerflow_default_name()
+                role_name = self._get_default_role_name()
             try:
                 resolved = cfg.resolve_role(role_name)
             except KeyError:
                 logger.info(
-                    "[ModelResolver] Role '%s' not in llm_roles.yaml, delegating to DeerFlow native",
+                    "[ModelResolver] Role '%s' not in llm_roles.yaml, delegating to minimal factory",
                     role_name,
                 )
-                return self._fallback_to_deerflow_native(role_name, thinking_enabled, **kwargs)
+                return self._fallback_to_minimal_factory(role_name, thinking_enabled, **kwargs)
 
         errors: list[tuple[str, Exception]] = []
         model_chain: list[tuple[str, str, BaseChatModel]] = []
@@ -407,39 +404,29 @@ class ModelResolver:
         """Manually mark a provider as down (called by harness on runtime failure)."""
         self._mark_provider_down(provider_code, model_name)
 
-    # ── DeerFlow integration ─────────────────────────────────────────────
+    # ── Minimal factory fallback ─────────────────────────────────────────
 
-    def _get_deerflow_default_name(self) -> str:
-        """读取 DeerFlow config 中第一个模型的名称作为默认值."""
-        try:
-            from deerflow.config import get_app_config
-            config = get_app_config()
-            if config.models:
-                return config.models[0].name
-        except Exception as exc:
-            logger.warning("[ModelResolver] Cannot read DeerFlow default: %s", exc)
-        return "deerflow_default"  # 最终兜底
+    def _get_default_role_name(self) -> str:
+        """Return the default role name when the caller does not provide one."""
+        return os.environ.get("GRAPH_AGENT_DEFAULT_ROLE", "balanced")
 
-    def _fallback_to_deerflow_native(
+    def _fallback_to_minimal_factory(
         self,
         name: str | None,
         thinking_enabled: bool | None,
         **kwargs,
     ) -> BaseChatModel:
-        """Call DeerFlow native create_chat_model bypassing the hook.
+        """Call the local minimal chat model factory."""
+        from .factory import create_chat_model
 
-        Uses the _bypass_hook parameter instead of toggling global state,
-        which is thread-safe for concurrent callers.
-        """
-        from deerflow.models.factory import create_chat_model
         effective_thinking = False if thinking_enabled is None else thinking_enabled
+        model_name = kwargs.pop("model", None) or name
         model = create_chat_model(
-            name=name,
+            model=model_name,
             thinking_enabled=effective_thinking,
-            _bypass_hook=True,
             **kwargs,
         )
-        logger.info("[ModelResolver] DeerFlow native resolved: %s", name)
+        logger.info("[ModelResolver] minimal factory resolved: %s", model_name)
         return model
 
     # ── Model creation ────────────────────────────────────────────────────
@@ -623,8 +610,12 @@ class ModelResolver:
             if cb is not None:
                 per = cb.per_provider.get(provider_code)
                 window = (per or cb).window_seconds
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "phase=circuit_breaker action=mark_down fallback "
+                "from=cb_config_lookup to=default_window reason=%s",
+                type(exc).__name__,
+            )
         key = f"{provider_code}:{model_name}"
         with self._cache_lock:
             self._provider_down_cache[key] = time.monotonic() + window

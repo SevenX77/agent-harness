@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from ..callbacks import LoggingCallback, TracingCallback
+from .exceptions import LoaderError, PersistenceError
 from .loader import load_workflow_from_md
 from .state import WorkflowState
 
@@ -77,11 +78,6 @@ def _collect_skill_dependency_snapshot(
                 except OSError:
                     snapshot[str(path.resolve())] = -1
 
-    for phase in getattr(harness, "phases", []):
-        child = getattr(phase, "subgraph", None)
-        if child is not None:
-            snapshot.update(_collect_skill_dependency_snapshot(child, _seen=_seen))
-
     return snapshot
 
 
@@ -91,7 +87,14 @@ def _refresh_callbacks_recursive(
     *,
     _seen: set[int] | None = None,
 ) -> None:
-    """Replace callback references on the cached harness and all nested subgraphs."""
+    """Replace callback references on the cached harness.
+
+    Pre-V1-reset this also walked ``phase.subgraph`` to refresh nested
+    child harnesses; the subgraph runtime is gone, so the walk reduces
+    to a flat assignment, but the recursion guard is kept so a future
+    runtime that reintroduces nesting can plug in here without changing
+    the call sites.
+    """
     if _seen is None:
         _seen = set()
 
@@ -101,10 +104,6 @@ def _refresh_callbacks_recursive(
     _seen.add(harness_id)
 
     harness.callbacks = callbacks
-    for phase in getattr(harness, "phases", []):
-        child = getattr(phase, "subgraph", None)
-        if child is not None:
-            _refresh_callbacks_recursive(child, callbacks, _seen=_seen)
 
 
 def run_skill(
@@ -112,6 +111,7 @@ def run_skill(
     *,
     trace_dir: str | Path | None = None,
     thread_id: str | None = None,
+    unattended: bool = False,
     callbacks: list | None = None,
     artifact_saver: Any | None = None,
     initial_context: dict[str, Any] | None = None,
@@ -212,6 +212,7 @@ def run_skill(
         final_state: WorkflowState = harness.run(
             trace_dir=Path(effective_trace_dir) if effective_trace_dir else None,
             thread_id=effective_thread_id,
+            unattended=unattended,
             artifact_saver=artifact_saver,
             initial_context=initial_context,
             runtime_inputs_map=inputs,
@@ -222,8 +223,14 @@ def run_skill(
             try:
                 run_id_file.unlink()
                 logger.info("[Runner] Cleaned up .run_id after failure")
-            except OSError:
-                pass
+            except OSError as exc:
+                raise PersistenceError(
+                    f"run_id cleanup failed: {exc}",
+                    context={
+                        "thread_id": effective_thread_id,
+                        "run_id_file": str(run_id_file),
+                    },
+                ) from exc
         raise
     wall_time = time.time() - t0
 
@@ -259,11 +266,13 @@ def run_skill(
                 except Exception:  # noqa: BLE001
                     pass
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "[Runner] checkpoint cleanup failed for thread_id=%s: %s",
-                effective_thread_id,
-                exc,
-            )
+            raise PersistenceError(
+                f"checkpoint cleanup failed: {exc}",
+                context={
+                    "thread_id": effective_thread_id,
+                    "cleanup_checkpoints_on_finish": cleanup_checkpoints_on_finish,
+                },
+            ) from exc
 
     ctx = final_state["context"]
     metrics = final_state.get("metrics", {})
@@ -309,6 +318,15 @@ def main():
     parser.add_argument("--inputs-file", type=str, default=None, help="JSON file of runtime inputs")
     parser.add_argument("--output", type=str, default=None, help="Output directory")
     parser.add_argument("--thread-id", type=str, default=None, help="Thread ID for checkpoint resume")
+    parser.add_argument(
+        "--unattended",
+        action="store_true",
+        help=(
+            "Run without human intervention. ask_clarification tool calls "
+            "are auto-answered with a best-effort instruction instead of "
+            "interrupting the run."
+        ),
+    )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -322,13 +340,11 @@ def main():
     try:
         from dotenv import load_dotenv
         load_dotenv()
-    except ImportError:
-        pass
-
-    # Register Model Resolver
-    from ..models.resolver import get_model_resolver
-    from deerflow.models.factory import set_model_resolver_hook
-    set_model_resolver_hook(get_model_resolver().resolve)
+    except ImportError as exc:
+        raise LoaderError(
+            f"required import failed: {exc}",
+            context={"module": "dotenv"},
+        ) from exc
 
     # Parse inputs
     inputs: dict[str, Any] = {}
@@ -343,6 +359,7 @@ def main():
     result = run_skill(
         args.skill,
         thread_id=args.thread_id,
+        unattended=args.unattended,
         **inputs,
     )
 

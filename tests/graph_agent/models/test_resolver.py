@@ -84,7 +84,7 @@ def test_attach_profile_logs_warning_on_setattr_failure(
         _attach_profile(model, model_def)
 
     assert "failed to attach profile" in caplog.text
-    assert "SummarizationMiddleware will use 32k fallback" in caplog.text
+    assert "summary profile fallback will use 32k" in caplog.text
 
 
 def _make_config(

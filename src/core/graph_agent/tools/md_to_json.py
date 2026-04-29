@@ -5,8 +5,8 @@ Pydantic model instances, with optional LLM surgical patching for the ~5-10% of
 items that fail validation.
 
 Public API:
-    parse_md(md_text, schema) → list[dict]  # raw field extraction
-    diagnose(items, schema) → DiagnosticReport  # per-item Pydantic check
+    parse_md(md_text, schema) → list[ParsedBlock]  # raw field extraction
+    diagnose(blocks, schema) → DiagnosticReport  # per-item Pydantic check
     md_to_json(md_text, schema) → list[T]  # unified: parse + diagnose + patch
 """
 from __future__ import annotations
@@ -44,7 +44,21 @@ def _resolve_schema_from_path(path: str) -> type[BaseModel]:
         raise ValueError(f"invalid schema path: {path!r}")
     module = sys.modules.get(module_str)
     if module is None:
-        module = importlib.import_module(module_str)
+        namespaced_suffix = f".{module_str}"
+        for key, mod in list(sys.modules.items()):
+            if key.startswith("_graph_agent_skill_.") and key.endswith(
+                namespaced_suffix
+            ):
+                module = mod
+                break
+    if module is None:
+        try:
+            module = importlib.import_module(module_str)
+        except ImportError as exc:
+            raise ValueError(
+                f"Cannot resolve schema path {path!r}: not found in sys.modules "
+                f"(absolute or namespaced) and importlib.import_module failed: {exc}"
+            ) from exc
     cls = getattr(module, cls_name, None)
     if cls is None:
         raise ValueError(f"schema path {path!r} resolved module has no attribute {cls_name!r}")
@@ -62,6 +76,27 @@ _PATCH_SKILL_MD: Path = (
 # ─── Diagnostic data structures ──────────────────────────────────────────────
 
 @dataclass
+class BlockMeta:
+    """Framework metadata for one parsed markdown block. Never seen by Pydantic."""
+
+    id: str  # the ## header text, e.g. "段落 1"
+
+
+@dataclass
+class ParsedBlock:
+    """One markdown block split into framework metadata and user data.
+
+    ``meta`` carries framework concerns (id used in diagnostic reports, future
+    line offsets, etc.). ``data`` carries only the user-domain fields parsed
+    from ``- key: value`` bullets, which is exactly what gets passed to
+    ``schema.model_validate()``.
+    """
+
+    meta: BlockMeta
+    data: dict[str, Any]
+
+
+@dataclass
 class FieldError:
     """One validation error for a single field within an item."""
 
@@ -75,7 +110,7 @@ class ItemError:
     """All validation errors for one parsed item."""
 
     index: int  # position in the items list
-    item_id: str | None  # ## header text stored as _md_id, may be None
+    item_id: str | None  # ## header text from ParsedBlock.meta, may be None
     fields: list[FieldError] = dc_field(default_factory=list)
 
 
@@ -121,7 +156,7 @@ class DiagnosticReport:
         ]
         for item_err in self.errors:
             id_label = (
-                f"_md_id={item_err.item_id!r}"
+                f"item_id={item_err.item_id!r}"
                 if item_err.item_id
                 else f"index={item_err.index}"
             )
@@ -250,15 +285,16 @@ _RE_INDENTED_CHILD = re.compile(r"^\s{2,}[-*•]\s+(.+)$")
 
 # ─── parse_md ─────────────────────────────────────────────────────────────────
 
-def parse_md(md_text: str, schema: type[BaseModel]) -> list[dict[str, Any]]:
-    """Parse structured Markdown text into raw item dicts.
+def parse_md(md_text: str, schema: type[BaseModel]) -> list[ParsedBlock]:
+    """Parse structured Markdown text into parsed blocks.
 
     Phase 1 — split md_text on ``## `` headers; each header becomes one item.
     Phase 2 — extract fields from each block's bullet lines.
     Phase 3 — coerce scalar values to schema-declared types (int/float/list).
 
-    Each output dict contains ``_md_id`` (the ``##`` header text) with an underscore
-    prefix that guarantees no collision with schema field names.
+    Each output block keeps framework metadata (the ``##`` header text) in
+    ``ParsedBlock.meta`` and parsed user fields in ``ParsedBlock.data``. Pydantic
+    validation only receives ``data``.
 
     Unrecognised lines are logged at WARNING level and skipped — never raised.
     """
@@ -266,13 +302,13 @@ def parse_md(md_text: str, schema: type[BaseModel]) -> list[dict[str, Any]]:
     blocks = _split_into_blocks(md_text)
     logger.debug("parse_md: schema=%s raw_blocks=%d", schema.__name__, len(blocks))
 
-    items: list[dict[str, Any]] = []
+    parsed: list[ParsedBlock] = []
     for item_id, block_lines in blocks:
-        item = _parse_block(item_id, block_lines, annotations)
-        items.append(item)
+        data = _parse_block_data(block_lines, annotations)
+        parsed.append(ParsedBlock(meta=BlockMeta(id=item_id), data=data))
 
-    logger.info("parse_md: schema=%s parsed=%d items", schema.__name__, len(items))
-    return items
+    logger.info("parse_md: schema=%s parsed=%d items", schema.__name__, len(parsed))
+    return parsed
 
 
 def _split_into_blocks(md_text: str) -> list[tuple[str, list[str]]]:
@@ -297,13 +333,12 @@ def _split_into_blocks(md_text: str) -> list[tuple[str, list[str]]]:
     return blocks
 
 
-def _parse_block(
-    item_id: str,
+def _parse_block_data(
     lines: list[str],
     annotations: dict[str, Any],
 ) -> dict[str, Any]:
     """Parse the body lines of one ## block into a flat field dict."""
-    item: dict[str, Any] = {"_md_id": item_id}
+    item: dict[str, Any] = {}
     current_nested_key: str | None = None
     nested_children: list[str] = []
 
@@ -411,9 +446,9 @@ _T = TypeVar("_T", bound=BaseModel)
 
 
 def diagnose(
-    items: list[dict[str, Any]], schema: type[_T]
+    blocks: list[ParsedBlock], schema: type[_T]
 ) -> DiagnosticReport:
-    """Validate each item dict against ``schema`` independently.
+    """Validate each parsed block against ``schema`` independently.
 
     One item failing validation does NOT affect any other item.
     Valid items are collected in ``DiagnosticReport.valid_items``;
@@ -422,9 +457,9 @@ def diagnose(
     valid_items: list[BaseModel] = []
     errors: list[ItemError] = []
 
-    for i, item in enumerate(items):
+    for i, block in enumerate(blocks):
         try:
-            valid_items.append(schema.model_validate(item))
+            valid_items.append(schema.model_validate(block.data))
         except PydanticValidationError as exc:
             field_errors = [
                 FieldError(
@@ -437,7 +472,7 @@ def diagnose(
             errors.append(
                 ItemError(
                     index=i,
-                    item_id=item.get("_md_id"),  # type: ignore[arg-type]
+                    item_id=block.meta.id,
                     fields=field_errors,
                 )
             )
@@ -445,7 +480,7 @@ def diagnose(
     logger.info(
         "diagnose: schema=%s total=%d valid=%d errors=%d",
         schema.__name__,
-        len(items),
+        len(blocks),
         len(valid_items),
         len(errors),
     )
@@ -513,10 +548,10 @@ def md_to_json(
             if not isinstance(path, str) or not path:
                 raise ValueError(_missing_schema_msg)
             schema = _resolve_schema_from_path(path)  # type: ignore[assignment]
-    items = parse_md(md_text, schema)
-    logger.info("md_to_json: schema=%s parsed=%d items", schema.__name__, len(items))
+    blocks = parse_md(md_text, schema)
+    logger.info("md_to_json: schema=%s parsed=%d items", schema.__name__, len(blocks))
 
-    report = diagnose(items, schema)
+    report = diagnose(blocks, schema)
     logger.info(
         "md_to_json: valid=%d errors=%d",
         len(report.valid_items),
@@ -536,6 +571,7 @@ def md_to_json(
 
     # Error path: extract only the failing MD blocks, run Patch Agent
     error_indices = {e.index for e in report.errors}
+    error_blocks = [blocks[e.index] for e in report.errors]
     md_excerpt = _extract_md_excerpt(md_text, error_indices)
     logger.info(
         "md_to_json: triggering Patch Agent for %d error items (schema=%s)",
@@ -548,18 +584,19 @@ def md_to_json(
         original_md_excerpt=md_excerpt,
         diagnostic_report=report.to_prompt_string(),
         valid_results=[item.model_dump() for item in report.valid_items],
-        error_items=[items[e.index] for e in report.errors],
+        error_items=[
+            {"item_id": block.meta.id, "fields": block.data}
+            for block in error_blocks
+        ],
         schema=schema,  # Python class object — safe inside graph_agent context dict
     )
 
-    patched: list[dict[str, Any]] = result["context"]["final_results"]
+    final_results: list[dict[str, Any]] = result["context"]["final_results"]
     logger.info(
-        "md_to_json: patch completed, %d patched items merged",
-        len(patched),
+        "md_to_json: patch completed, %d final items returned",
+        len(final_results),
     )
-    return list(report.valid_items) + [  # type: ignore[return-value]
-        schema.model_validate(p) for p in patched
-    ]
+    return [schema.model_validate(item) for item in final_results]
 
 
 # ─── Schema to Type Dict ─────────────────────────────────────────────────────

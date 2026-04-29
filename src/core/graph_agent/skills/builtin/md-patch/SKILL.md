@@ -1,10 +1,11 @@
 ---
+schema_version: "2.0"
 name: md-patch
 description: >
   Surgical LLM patch agent for MD parsing errors. Receives a diagnostic report
   and original MD excerpt, fixes only the flagged fields/items.
   Triggered by md_to_json() for the ~5-10% of items that fail Pydantic validation.
-type: simple
+type: agent
 context_mapping:
   original_md_excerpt: "{input.original_md_excerpt}"
   diagnostic_report: "{input.diagnostic_report}"
@@ -32,7 +33,7 @@ io:
     - name: error_items
       type: list
       source: runtime
-      description: "Failed items as list[dict] — apply patches to these"
+      description: "Failed items as list[{item_id: str, fields: dict}] — apply patches to fields only"
     - name: schema
       type: object
       source: runtime
@@ -41,7 +42,7 @@ io:
     - name: final_results
       type: list
       target: context
-      description: "Merged list of dicts: valid_results + patched error_items + added_items"
+      description: "Merged pure business dicts: valid_results + patched error item fields + added item fields"
 ---
 
 <phase_config>
@@ -94,7 +95,8 @@ Fix **only** the fields listed in the diagnostic report. Do not modify items tha
 
 ## Rules
 - **Only fix items listed in the diagnostic report** — never touch items not mentioned.
-- `item_id` in `apply_field_patch` must exactly match the `_md_id` shown in the diagnostic report (the `## Header` text).
+- `item_id` in `apply_field_patch` must exactly match the `item_id` shown in the diagnostic report (the `## Header` text).
+- `error_items` entries have the shape `{item_id: str, fields: dict}`. Patch only keys inside `fields`; do not invent or modify framework metadata.
 - Provide correct types: integers as integers (e.g., `8` not `"8"`), lists as comma-separated if the field expects a list.
 - If a required field is simply missing, add it with a sensible value derived from the Markdown excerpt.
 - Call `finalize` exactly once when done patching. Then wait for validation result.

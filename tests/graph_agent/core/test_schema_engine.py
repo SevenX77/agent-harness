@@ -283,3 +283,246 @@ class TestGetJsonSchema:
 
         assert "$defs" in json_schema
         assert json_schema["properties"]["metadata"]["$ref"].startswith("#/$defs/")
+
+
+class TestEdgeCaseInputsT8:
+    """MVP-2 T8: branch coverage for SchemaEngine edge cases.
+
+    Pin previously-uncovered branches surfaced by the T8 coverage report
+    (target ≥ 95%): empty fragments, ``output_schema`` named-block,
+    JSON Schema route, malformed JSON, duplicate fields, indent errors,
+    Optional/Literal/list[X] type variants, and ``Any`` descriptors.
+    """
+
+    def test_empty_fragment_returns_empty_schema_object(self) -> None:
+        engine = SchemaEngine()
+
+        result = engine.parse_from_md("")
+
+        assert result.fields == ()
+        assert result.required_fields == frozenset()
+
+    def test_whitespace_only_fragment_returns_empty_schema_object(self) -> None:
+        engine = SchemaEngine()
+
+        result = engine.parse_from_md("   \n   \n")
+
+        assert result.fields == ()
+
+    def test_named_output_schema_block_inline_value(self) -> None:
+        """``output_schema:`` with an inline (non-``|``) string value."""
+        engine = SchemaEngine()
+
+        md = 'output_schema: "title: str"\n'
+        # The inline-value path returns the bare string, not a structured
+        # schema, so re-feeding it as md_content yields a 1-field schema.
+        # Calling parse_from_md should still succeed without raising.
+        schema = engine.parse_from_md(md)
+        assert isinstance(schema, SchemaObject)
+
+    def test_named_output_schema_block_with_pipe_body(self) -> None:
+        engine = SchemaEngine()
+
+        md = "output_schema: |\n  title: str\n  score: int\n"
+        schema = engine.parse_from_md(md)
+
+        names = [n for n, _ in schema.fields]
+        assert "title" in names
+        assert "score" in names
+
+    def test_named_output_example_block_in_yaml(self) -> None:
+        """``output_example:`` named-yaml block path."""
+        engine = SchemaEngine()
+
+        md = (
+            "output_example: |\n"
+            '  <output_example name="Item">\n'
+            "  ## item\n"
+            "  - title (str, required): 标题\n"
+            "  </output_example>\n"
+        )
+        schema = engine.parse_from_md(md)
+
+        assert "title" in {n for n, _ in schema.fields}
+
+    def test_json_object_schema_via_properties(self) -> None:
+        engine = SchemaEngine()
+
+        md = '{"properties": {"title": "str", "score": "int"}, "required": ["title"]}'
+        schema = engine.parse_from_md(md)
+
+        assert {n for n, _ in schema.fields} == {"title", "score"}
+        assert schema.required_fields == frozenset({"title"})
+
+    def test_json_object_schema_inline_mapping(self) -> None:
+        """JSON object without ``properties`` wraps every key as required."""
+        engine = SchemaEngine()
+
+        schema = engine.parse_from_md('{"title": "str", "score": "int"}')
+
+        assert schema.required_fields == frozenset({"title", "score"})
+
+    def test_json_object_schema_with_list_shorthand(self) -> None:
+        engine = SchemaEngine()
+
+        schema = engine.parse_from_md('{"tags": ["str"]}')
+
+        assert {n for n, _ in schema.fields} == {"tags"}
+
+    def test_json_invalid_raises_schema_parse_error(self) -> None:
+        engine = SchemaEngine()
+
+        with pytest.raises(SchemaParseError, match="Invalid JSON"):
+            engine.parse_from_md('{"title": "str"')  # missing closing brace
+
+    # ``_try_parse_json_schema`` returns None unless the fragment begins
+    # with ``{``, so the "must be an object" branch (lines 270-272) is
+    # defensive against future callers that bypass the prefix gate.
+    # Not exercising it here keeps tests behavioural rather than
+    # white-box.
+
+    def test_json_required_must_be_list(self) -> None:
+        engine = SchemaEngine()
+
+        with pytest.raises(SchemaParseError, match="'required' must be a list"):
+            engine.parse_from_md('{"properties": {"title": "str"}, "required": "title"}')
+
+    def test_json_list_shorthand_must_have_one_item(self) -> None:
+        engine = SchemaEngine()
+
+        with pytest.raises(SchemaParseError, match="exactly one item"):
+            engine.parse_from_md('{"tags": ["str", "int"]}')
+
+    def test_json_unsupported_value_type_raises(self) -> None:
+        engine = SchemaEngine()
+
+        with pytest.raises(SchemaParseError, match="Unsupported schema value"):
+            engine.parse_from_md('{"oops": 42}')
+
+    def test_duplicate_field_in_output_example_raises(self) -> None:
+        engine = SchemaEngine()
+
+        md = (
+            '<output_example name="Item">\n'
+            "## item\n"
+            "- name (str, required): A\n"
+            "- name (int, required): duplicate\n"
+            "</output_example>"
+        )
+        with pytest.raises((SchemaParseError, ValueError)):
+            engine.parse_from_md(md)
+
+    def test_optional_question_mark_marker(self) -> None:
+        engine = SchemaEngine()
+
+        schema = engine.parse_from_md("title: str?")
+
+        assert schema.required_fields == frozenset()
+
+    def test_optional_via_pipe_none_suffix(self) -> None:
+        engine = SchemaEngine()
+
+        schema = engine.parse_from_md("title: str | None")
+
+        assert schema.required_fields == frozenset()
+
+    def test_optional_via_none_pipe_prefix(self) -> None:
+        engine = SchemaEngine()
+
+        schema = engine.parse_from_md("title: None | str")
+
+        assert schema.required_fields == frozenset()
+
+    def test_optional_via_typing_optional(self) -> None:
+        engine = SchemaEngine()
+
+        schema = engine.parse_from_md("title: Optional[str]")
+
+        assert schema.required_fields == frozenset()
+
+    def test_uppercase_list_alias(self) -> None:
+        engine = SchemaEngine()
+
+        schema = engine.parse_from_md("tags: List[str]")
+
+        # ListType wrapping str descriptor.
+        assert {n for n, _ in schema.fields} == {"tags"}
+
+    def test_empty_literal_raises(self) -> None:
+        engine = SchemaEngine()
+
+        with pytest.raises(SchemaParseError, match="Literal"):
+            engine.parse_from_md("status: Literal[]")
+
+    def test_empty_type_via_internal_parser_raises(self) -> None:
+        """``_parse_type_expr`` rejects an empty string — the public
+        ``parse_from_md`` path raises ``missing a type declaration``
+        before reaching this guard, so we exercise it directly."""
+        from graph_agent.core.schema_engine import _parse_type_expr
+
+        with pytest.raises(SchemaParseError, match="Empty type"):
+            _parse_type_expr("")
+
+    def test_unsupported_type_raises(self) -> None:
+        engine = SchemaEngine()
+
+        with pytest.raises(SchemaParseError, match="Unsupported schema type"):
+            engine.parse_from_md("title: Set[str]")
+
+    def test_unexpected_indentation_raises(self) -> None:
+        engine = SchemaEngine()
+
+        # second field is indented one space deeper than the first while
+        # still being at top-level — the parser must reject it.
+        md = "title: str\n score: int\n"
+        with pytest.raises(SchemaParseError, match="Unexpected indentation"):
+            engine.parse_from_md(md)
+
+    def test_invalid_schema_line_raises(self) -> None:
+        engine = SchemaEngine()
+
+        with pytest.raises(SchemaParseError, match="Invalid schema line"):
+            engine.parse_from_md("not a key value pair\n")
+
+    def test_field_missing_type_with_no_children_raises(self) -> None:
+        engine = SchemaEngine()
+
+        with pytest.raises(SchemaParseError, match="missing a type declaration"):
+            engine.parse_from_md("metadata:\n")
+
+    def test_any_type_descriptor_round_trip(self) -> None:
+        """``Any`` descriptor exercises the ``_optional_annotation``
+        identity and ``_descriptor_to_raw`` no-type branches."""
+        engine = SchemaEngine()
+
+        schema = engine.parse_from_md("payload?: Any")
+
+        json_schema = engine.get_json_schema(schema)
+        # Any descriptor is rendered as an open object schema.
+        assert "payload" in json_schema["properties"]
+
+    def test_list_inline_primitive(self) -> None:
+        engine = SchemaEngine()
+
+        schema = engine.parse_from_md("tags:\n  - str\n")
+
+        assert {n for n, _ in schema.fields} == {"tags"}
+
+    def test_validate_with_default_value_optional_field(self) -> None:
+        """A field with ``default=`` must carry that default through the
+        Pydantic model so omitted submissions accept the default."""
+        engine = SchemaEngine()
+        md = (
+            '<output_example name="Item">\n'
+            "## item\n"
+            "- title (str, required): A\n"
+            "- score (int, optional, default=5): B\n"
+            "</output_example>"
+        )
+        schema = engine.parse_from_md(md)
+
+        result = engine.validate({"title": "x"}, schema)
+
+        assert result.ok
+        assert result.parsed is not None
+        assert result.parsed["score"] == 5

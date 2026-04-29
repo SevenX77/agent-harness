@@ -27,22 +27,14 @@ skill ecosystem is modelled on **three orthogonal axes**:
    - ``mode: llm``      — LLM-driven ReAct loop with ``agent_tools``.
    - ``mode: logic``    — deterministic Python runtime with
                           ``execute_steps`` (Python callable import paths).
-   - ``mode: delegate`` — invokes another Graph/Agent skill via
-                          ``subgraph:`` + ``context_bridge``; the child
-                          skill owns its own iteration, so
-                          ``max_iterations`` is forbidden on this mode.
-   - ``mode: parallel_delegate`` — fan-out N child skills concurrently via
-                          ``subgraphs`` + ``reducer`` + ``tolerance``.
-                          Schema added in PR-7; runtime implementation
-                          is pending.
+
+   The 1.x ``mode: delegate`` (subgraph composition) and
+   ``mode: parallel_delegate`` (fan-out) modes were removed in the
+   v1-reset MVP-0 cleanup (B1, 2026-04-28). Static cross-skill
+   composition will return in V2 via LangGraph's Send API.
 
 3. **Delegation Mechanism** (tool-level, how a phase reaches other
-   skills — these are *mutually exclusive* per phase, not new
-   artifact types):
-   - ``subgraph:`` — compile-time composition (Edge control flow).
-   - ``subagent_enabled:`` — ad-hoc generation: the LLM spawns an
-                             anonymous sub-agent with no SKILL.md.
-
+   skills):
    - ``sub_skills`` field — removed by 2026-04-26 cohesion plan 方针 1.2:
      the schema field had no loader/runtime wiring, no production skill
      ever set it, and leaving the documented-but-dead surface in the
@@ -69,8 +61,8 @@ exposes ``llm_role``; ``tier`` was removed in PR-B (2026-04-27).
 Reference resolution
 ====================
 
-``subgraph`` and ``adopted_persona`` are plain strings that follow the
-Hybrid resolver rules:
+``adopted_persona`` is a plain string that follows the Hybrid resolver
+rules:
 
 - ``"./subskills/format_scene"`` → strict nested (relative to the
   current SKILL.md file).
@@ -89,17 +81,11 @@ Constraints that can be expressed structurally are enforced by
 field inspection use ``@model_validator``:
 
 - Rule 1 (node-engine exclusivity): automatic via ``PhaseDef`` discriminator.
-- Rule 2 (delegate determinism): ``DelegatePhase`` simply lacks the
-  forbidden fields (``max_iterations``, ``prompt``, ``agent_tools``, ...).
 - Rule 3 (top-level structure): automatic via ``SkillManifest``
   discriminator + each variant's field surface.
 - Rule 4 (persona purity): ``PersonaSkillDef`` declares only knowledge
   fields; ``extra='forbid'`` kills any attempt to add ``phases``,
   ``tools``, or execution-bearing keys.
-- Rule 5 (context_bridge static type check) — deferred to a dedicated
-  ``validators/context_bridge.py`` module that consumes manifests; it
-  is not a Pydantic validator because it needs the child manifest
-  loaded (cross-file information).
 
 Schema is version ``2.0``. The ``1.x`` vocabulary (``type: simple``,
 untagged phases, ``tools:``) is intentionally removed — Phase 0 is an
@@ -109,10 +95,9 @@ all-at-once rewrite. Production SKILL.md files migrate in Task 0.3
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
 
 # =============================================================================
 # Atomic structures (reused across artifact types / phase modes)
@@ -151,12 +136,12 @@ class IoDeclaration(BaseModel):
 
 
 class ContextBridge(BaseModel):
-    """Input/output wiring for a ``DelegatePhase``.
+    """Input/output wiring between parent and child skills.
 
-    Only valid on ``mode: delegate``. The compiler's
-    ``validators/context_bridge.py`` (Rule 5) statically type-checks
-    these mappings against the child skill's ``io:`` declaration at
-    load time.
+    Retained for the upcoming A8 ContextBridge merge (T10), which will
+    consolidate this Pydantic version with the dataclass mirror in
+    ``core/types.py``. The 1.x DelegatePhase consumer was removed in
+    MVP-0 B1; new V2 delegation will reuse this same model.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -182,12 +167,12 @@ class _BasePhase(BaseModel):
 class LLMPhase(_BasePhase):
     """LLM-driven phase with a ReAct/Tool-calling loop.
 
-    ``subagent_enabled`` (ad-hoc anonymous sub-agent) and
-    ``adopted_persona`` live here. ``subgraph:`` does NOT — static
-    composition is a different phase mode (``DelegatePhase``).
-    The originally-planned ``sub_skills`` field was dropped per
-    2026-04-26 cohesion plan 方针 1.2 (schema declared, runtime never
-    wired); re-add when the runtime ships.
+    ``adopted_persona`` lives here. The originally-planned
+    ``sub_skills`` field was dropped per 2026-04-26 cohesion plan 方针
+    1.2 (schema declared, runtime never wired); re-add when the runtime
+    ships. Static cross-skill composition (1.x ``mode: delegate`` /
+    ``mode: parallel_delegate``) was removed in MVP-0 B1 (2026-04-28)
+    and will return in V2 via LangGraph Send API.
     """
 
     mode: Literal["llm"]
@@ -198,19 +183,31 @@ class LLMPhase(_BasePhase):
     domain_protocols: list[str] = Field(default_factory=list)
     references: list[str] = Field(default_factory=list)
     few_shot_examples: list[str] = Field(default_factory=list)
-    context_access: list[Literal["artifact", "working_memory"]] = Field(
-        default_factory=list
-    )
+    context_access: list[Literal["artifact", "working_memory"]] = Field(default_factory=list)
     llm_role: str | None = None
-    subagent_enabled: bool = False
     adopted_persona: str | None = None
     max_iterations: int | None = Field(default=None, ge=1)
     max_retries: int | None = Field(default=None, ge=0)
     max_nudges: int | None = Field(default=None, ge=0)
     dead_end_threshold: int | None = Field(default=None, ge=1)
     validator: str | None = None
+    validator_optional: bool = Field(
+        default=False,
+        description=(
+            "Set True to explicitly opt out of business validation when "
+            "a phase declares output_schema/output_example."
+        ),
+    )
     retry_target: str | None = None
+    hoist_to: str | None = Field(
+        default=None,
+        description=(
+            "Optional ctx key to inject validated business_data_parsed into "
+            "after finish_task succeeds."
+        ),
+    )
     output_schema: str | None = None
+    output_example: str | None = None
 
 
 class LogicPhase(_BasePhase):
@@ -228,37 +225,8 @@ class LogicPhase(_BasePhase):
     validator: str | None = None
 
 
-class DelegatePhase(_BasePhase):
-    """Static-composition phase: invokes another Graph/Agent skill.
-
-    The child skill owns its own iteration and prompt machinery, so
-    ``max_iterations``, ``prompt``, ``agent_tools``, and
-    ``subagent_enabled`` are all *absent by construction* —
-    ``extra='forbid'`` on ``_BasePhase`` rejects them.
-    """
-
-    mode: Literal["delegate"]
-    subgraph: str = Field(min_length=1)
-    context_bridge: ContextBridge
-
-
-class ParallelDelegatePhase(_BasePhase):
-    """Parallel composition phase: fan-out N child skills concurrently.
-
-    Schema added in PR-7 (P1). Runtime support is deferred to a follow-up PR
-    because it requires LangGraph ``Send`` API integration and reducer plumbing.
-    Loader raises a clear NotImplementedError for this mode until then.
-    """
-
-    mode: Literal["parallel_delegate"]
-    subgraphs: list[str] = Field(min_length=2)
-    context_bridge: ContextBridge
-    tolerance: float = Field(default=0.0, ge=0.0, le=1.0)
-    reducer: str = Field(min_length=1)
-
-
 PhaseDef = Annotated[
-    Union[LLMPhase, LogicPhase, DelegatePhase, ParallelDelegatePhase],
+    LLMPhase | LogicPhase,
     Field(discriminator="mode"),
 ]
 """Discriminated union over ``mode``. Use
@@ -301,9 +269,7 @@ class AgentProfile(BaseModel):
     domain_protocols: list[str] = Field(default_factory=list)
     references: list[str] = Field(default_factory=list)
     few_shot_examples: list[str] = Field(default_factory=list)
-    context_access: list[Literal["artifact", "working_memory"]] = Field(
-        default_factory=list
-    )
+    context_access: list[Literal["artifact", "working_memory"]] = Field(default_factory=list)
     llm_role: str | None = None
 
 
@@ -318,7 +284,6 @@ class AgentSkillDef(_BaseSkill):
     agent_profile: AgentProfile
     model_override: str | None = None
     agent_tools: list[str] = Field(default_factory=list)
-    subagent_enabled: bool = False
     adopted_persona: str | None = None
     user_prompt_template: str | None = None
     context_mapping: dict[str, str] = Field(default_factory=dict)
@@ -333,7 +298,7 @@ class GraphSkillDef(_BaseSkill):
     context_mapping: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _check_phase_names_unique(self) -> "GraphSkillDef":
+    def _check_phase_names_unique(self) -> GraphSkillDef:
         """Cohesion plan 方针 1.7 (2026-04-26): LangGraph node names are
         keyed off ``f'{phase.name}_execute'``; duplicate phase names
         silently overwrite each other's routing edges, so the second
@@ -356,7 +321,7 @@ class GraphSkillDef(_BaseSkill):
         return self
 
     @model_validator(mode="after")
-    def _check_retry_targets_resolve(self) -> "GraphSkillDef":
+    def _check_retry_targets_resolve(self) -> GraphSkillDef:
         """Cohesion plan 方针 1.6 (2026-04-26): ``retry_target`` on an
         LLMPhase must point to a phase that exists in the same
         GraphSkillDef. A typo / dangling reference would crash the
@@ -400,7 +365,7 @@ class PersonaSkillDef(_BaseSkill):
 
 
 SkillManifest = Annotated[
-    Union[AgentSkillDef, GraphSkillDef, PersonaSkillDef],
+    AgentSkillDef | GraphSkillDef | PersonaSkillDef,
     Field(discriminator="type"),
 ]
 """Discriminated union over ``type``. Use ``pydantic.TypeAdapter`` to
@@ -411,14 +376,12 @@ __all__ = [
     "AgentProfile",
     "AgentSkillDef",
     "ContextBridge",
-    "DelegatePhase",
     "GraphSkillDef",
     "IoDeclaration",
     "IoInput",
     "IoOutput",
     "LLMPhase",
     "LogicPhase",
-    "ParallelDelegatePhase",
     "PersonaSkillDef",
     "PhaseDef",
     "SkillManifest",

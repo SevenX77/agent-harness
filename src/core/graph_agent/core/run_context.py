@@ -42,6 +42,7 @@ class RunContext:
     storage_manager: Any | None = None
     artifact_saver: Callable[..., Any] | None = None
     callbacks: tuple["Callback", ...] = field(default_factory=tuple)
+    unattended: bool = False
 
     def __post_init__(self) -> None:
         # ``frozen=True`` blocks attribute *reassignment* but not container

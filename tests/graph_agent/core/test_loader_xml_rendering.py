@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 
 from pydantic import BaseModel, Field, TypeAdapter
@@ -14,6 +15,7 @@ from graph_agent.core.loader import (
     _render_skill_section_xml_tags,
 )
 from graph_agent.core.manifest import AgentSkillDef, SkillManifest
+from graph_agent.tools.md_to_json import _resolve_schema_from_path
 
 
 _SKILL_ADAPTER = TypeAdapter(SkillManifest)
@@ -240,6 +242,42 @@ def test_output_format_rendered_when_output_schema_set(tmp_path: Path) -> None:
     assert "（必填）" in prompt
     assert "（可选）" in prompt
     assert "</output_format>" in prompt
+
+
+def test_output_format_resolves_skill_local_schema_from_file(tmp_path: Path) -> None:
+    schema_dir = tmp_path / "script"
+    schema_dir.mkdir()
+    (schema_dir / "schemas.py").write_text(
+        "\n".join([
+            "from pydantic import BaseModel, Field",
+            "",
+            "class SegmentationResult(BaseModel):",
+            "    chapter_title: str = Field(description='章节标题')",
+            "    segment_count: int = Field(description='分段数量')",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+
+    prompt = _phase_prompt(
+        tmp_path,
+        output_schema="script.schemas.SegmentationResult",
+    )
+
+    assert "<output_format>" in prompt
+    assert "- chapter_title: <值>" in prompt
+    assert "- segment_count: <值>" in prompt
+    assert "章节标题" in prompt
+    assert "分段数量" in prompt
+
+    namespaced_keys = [
+        key
+        for key in sys.modules
+        if key.startswith("_graph_agent_skill_.") and key.endswith(".script.schemas")
+    ]
+    assert namespaced_keys
+    schema_cls = _resolve_schema_from_path("script.schemas.SegmentationResult")
+    assert schema_cls.__name__ == "SegmentationResult"
 
 
 def test_output_format_skipped_when_no_output_schema() -> None:

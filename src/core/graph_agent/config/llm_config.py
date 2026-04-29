@@ -591,7 +591,13 @@ def _safe_get_mtime_ns(path: Path | None) -> int | None:
         return None
     try:
         return path.stat().st_mtime_ns
-    except OSError:
+    except OSError as exc:
+        logger.warning(
+            "phase=llm_config action=mtime_lookup fallback "
+            "from=stat to=unknown_mtime path=%s reason=%s",
+            path,
+            type(exc).__name__,
+        )
         return None
 
 

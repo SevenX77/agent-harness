@@ -28,10 +28,6 @@ validated manifest:
   validates file existence (local refs) or ``find_spec`` (builtin
   refs); function-symbol existence stays at load-time to avoid running
   user code during Studio "save validate".
-- **Subgraph cycle detection** ✅ shipped in PR #7 step 2.
-  See ``validators/subgraph_cycle.py``. Independent of step 1 — both
-  validators run unconditionally for ``GraphSkillDef`` manifests in the
-  order context_bridge → subgraph_cycle (no shared state).
 - **Persona resolution** ✅ shipped in PR #7 step 3 + step 5.
   See ``validators/persona_resolution.py`` and ``personas.py``. The
   loader's private ``_resolve_persona`` was promoted to the public
@@ -39,16 +35,11 @@ validated manifest:
   searched parent dirs for ``skills/``) was replaced with the explicit
   ``GRAPH_AGENT_PERSONA_PATH`` env-var registry — load-time and
   compile-time share one resolver and one search order.
-- **context_bridge static type check** — shipped in PR #7 step 1.
-  See ``validators/context_bridge.py``. All four validators ship in
-  PR #7 steps 1-4 with full compile-time coverage.
-- **Custom YAML rules** — REMOVED (2026-04-26 cleanup, B 方案). The
-  1.x compiler SKILL and its YAML rule file were dead config — schema
-  2.0's Pydantic discriminated union + the four validators
-  (``context_bridge`` / ``subgraph_cycle`` / ``persona_resolution`` /
-  ``tool_paths``) cover every structural rule that file carried.
-  Re-introduce a Python rule registry (option D) only when Studio P1
-  surfaces a real demand.
+
+The 1.x ``subgraph_cycle`` and ``context_bridge`` validators were
+removed in MVP-0 B1 (2026-04-28) along with the DelegatePhase /
+ParallelDelegatePhase modes they validated. V2 cross-skill composition
+will reintroduce equivalent checks for the new Send-API design.
 """
 from __future__ import annotations
 
@@ -111,10 +102,6 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
       ``PersonaSkillDef``.
     - ``check_tool_paths`` (F-tool-path-*) — tool dot-references
       resolve to importable modules and stay inside ``base_dir``.
-    - ``check_context_bridge`` (F-context-bridge-*) — Rule 5
-      type-checks parent/child IO mappings on DelegatePhase.
-    - ``check_subgraph_cycles`` (F-subgraph-cycle) — no DelegatePhase
-      chain forms a cycle.
 
     All errors aggregate into ``CompileResult`` with ``SKILL.md:<line>:<dotted-loc>``
     locations; nothing escapes as a Python exception.
@@ -214,31 +201,28 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
         return result
 
     # PR #7 semantic checks (run only when Pydantic validation succeeds).
-    # GraphSkillDef carries phases (DelegatePhase + LLMPhase) so it runs
-    # the full quadruple. AgentSkillDef has no phases but does carry a
-    # top-level ``adopted_persona`` and ``agent_tools``, so it runs
-    # persona_resolution + tool_paths. PersonaSkillDef carries neither
-    # and falls through unchanged.
+    # GraphSkillDef carries phases (LLMPhase / LogicPhase). AgentSkillDef
+    # has no phases but does carry a top-level ``adopted_persona`` and
+    # ``agent_tools``, so it runs persona_resolution + tool_paths.
+    # PersonaSkillDef carries neither and falls through unchanged.
     from .manifest import AgentSkillDef
     from .validators.persona_resolution import check_persona_resolution
     from .validators.tool_paths import check_tool_paths
 
     if isinstance(manifest, GraphSkillDef):
-        from .validators.context_bridge import check_context_bridge
-        from .validators.subgraph_cycle import check_subgraph_cycles
+        from .validators.prompt_quality import check_prompt_quality
+        from .validators.template_variables import check_template_variables
+        from .validators.validator_required import check_validator_required
 
-        result.issues.extend(
-            check_context_bridge(manifest, base_dir=skill_path.parent)
-        )
-        result.issues.extend(
-            check_subgraph_cycles(manifest, skill_path=skill_path)
-        )
         result.issues.extend(
             check_persona_resolution(manifest, base_dir=skill_path.parent)
         )
         result.issues.extend(
             check_tool_paths(manifest, base_dir=skill_path.parent)
         )
+        result.issues.extend(check_prompt_quality(manifest))
+        result.issues.extend(check_template_variables(manifest))
+        result.issues.extend(check_validator_required(manifest))
     elif isinstance(manifest, AgentSkillDef):
         result.issues.extend(
             check_persona_resolution(manifest, base_dir=skill_path.parent)

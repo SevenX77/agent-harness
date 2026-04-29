@@ -220,3 +220,83 @@ def test_fatal_when_logic_phase_validator_missing(tmp_path: Path) -> None:
     assert len(issues) == 1
     assert issues[0].rule_id == "F-tool-path-not-found"
     assert issues[0].location == "SKILL.md:phases.render.validator"
+
+
+def test_fatal_when_logic_step_imports_run_skill(tmp_path: Path) -> None:
+    py_file = _stage_local_tool(tmp_path, dotted="script.runner")
+    py_file.write_text(
+        "from graph_agent.core.runner import run_skill\n\n"
+        "def prepare(ctx):\n"
+        "    return run_skill('child/SKILL.md')\n",
+        encoding="utf-8",
+    )
+    parent_path = _write_graph_with_phases(
+        tmp_path,
+        name="parent",
+        phases_yaml=(
+            "  - name: render\n"
+            "    mode: logic\n"
+            "    execute_steps:\n"
+            "      - script.runner.prepare\n"
+        ),
+    )
+
+    manifest = _load(parent_path)
+    issues = check_tool_paths(manifest, base_dir=tmp_path)
+
+    assert len(issues) == 1
+    assert issues[0].rule_id == "E-NESTED-RUN-SKILL"
+    assert issues[0].severity == "FATAL"
+    assert issues[0].location == "SKILL.md:phases.render.execute_steps.0"
+    assert "DelegatePhase" in issues[0].message
+
+
+def test_no_issue_when_logic_step_does_not_import_run_skill(tmp_path: Path) -> None:
+    py_file = _stage_local_tool(tmp_path, dotted="script.runner")
+    py_file.write_text(
+        "def prepare(ctx):\n"
+        "    ctx['prepared'] = True\n",
+        encoding="utf-8",
+    )
+    parent_path = _write_graph_with_phases(
+        tmp_path,
+        name="parent",
+        phases_yaml=(
+            "  - name: render\n"
+            "    mode: logic\n"
+            "    execute_steps:\n"
+            "      - script.runner.prepare\n"
+        ),
+    )
+
+    manifest = _load(parent_path)
+    issues = check_tool_paths(manifest, base_dir=tmp_path)
+
+    assert issues == []
+
+
+def test_no_issue_for_runner_module_import_without_run_skill(
+    tmp_path: Path,
+) -> None:
+    py_file = _stage_local_tool(tmp_path, dotted="script.runner")
+    py_file.write_text(
+        "import graph_agent.core.runner\n\n"
+        "def prepare(ctx):\n"
+        "    ctx['prepared'] = True\n",
+        encoding="utf-8",
+    )
+    parent_path = _write_graph_with_phases(
+        tmp_path,
+        name="parent",
+        phases_yaml=(
+            "  - name: render\n"
+            "    mode: logic\n"
+            "    execute_steps:\n"
+            "      - script.runner.prepare\n"
+        ),
+    )
+
+    manifest = _load(parent_path)
+    issues = check_tool_paths(manifest, base_dir=tmp_path)
+
+    assert issues == []

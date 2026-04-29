@@ -132,11 +132,21 @@ class IOManager:
             data = context.get(name)
 
             if data is None:
+                public_keys = sorted(
+                    str(key) for key in context.keys() if not str(key).startswith("_")
+                )
+                legacy_message = f"Declared output '{name}' was not found in context"
+                message = (
+                    f"{legacy_message}. "
+                    f"Did you forget to set 'hoist_to: {name}' on the producing "
+                    f"phase, or write to ctx[{name!r}] in a logic step? "
+                    f"Available ctx keys: {public_keys}"
+                )
                 IOManager._record_io_error(
                     context,
-                    f"Declared output '{name}' was not found in context",
+                    legacy_message,
                 )
-                raise ValueError(f"Declared output '{name}' was not found in context")
+                raise ValueError(message)
 
             # Cohesion plan 方针 1.5 (2026-04-26): the schema's canonical
             # value is "artifact" (IoOutput.target: Literal["file", "artifact"]).

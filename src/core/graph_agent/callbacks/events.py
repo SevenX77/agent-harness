@@ -266,33 +266,11 @@ class ArtifactSavedEvent(_EventBase):
     size_bytes: int
 
 
-# ---------------------------------------------------------------------------
-# Tier 1 Commit C — concurrency + subgraph boundary markers (T-B8 / T-B9)
-# ---------------------------------------------------------------------------
-
-
-class SubgraphEnterEvent(_EventBase):
-    """Fired by the parent harness right before a subgraph child run.
-
-    The child's events flow into the parent tracing.jsonl (per Gemini Q6),
-    so Studio needs this boundary marker to fold the child's events under
-    a single timeline segment.
-    """
-
-    event_type: Literal["subgraph_enter"] = "subgraph_enter"
-    phase_name: str            # the parent phase that hosts the subgraph
-    child_skill_path: str      # path to the child SKILL.md
-    child_thread_id: str | None = None
-
-
-class SubgraphExitEvent(_EventBase):
-    event_type: Literal["subgraph_exit"] = "subgraph_exit"
-    phase_name: str
-    child_skill_path: str
-    wall_time_seconds: float
-    # status == "crashed" when the child raised (InternalErrorEvent will
-    # carry the exception detail; this is just the boundary marker).
-    status: Literal["completed", "crashed"] = "completed"
+# Tier 1 Commit C — Subgraph boundary marker events (SubgraphEnterEvent /
+# SubgraphExitEvent) were removed in MVP-0 B1 (2026-04-28) along with the
+# subgraph runtime that emitted them. The ParallelMapGroup events below
+# stay because they belong to ``builtin.parallel_map``, an unrelated tool
+# that survives MVP-0.
 
 
 class ParallelMapGroupStartedEvent(_EventBase):
@@ -427,8 +405,6 @@ CallbackEvent = Annotated[
         ModelResolvedEvent,
         ArtifactSavedEvent,
         # Tier 1 Commit C
-        SubgraphEnterEvent,
-        SubgraphExitEvent,
         ParallelMapGroupStartedEvent,
         ParallelMapGroupEndedEvent,
         # Tier 1 Commit D
@@ -467,8 +443,6 @@ __all__ = [
     "InternalErrorEvent",
     "ModelResolvedEvent",
     "ArtifactSavedEvent",
-    "SubgraphEnterEvent",
-    "SubgraphExitEvent",
     "ParallelMapGroupStartedEvent",
     "ParallelMapGroupEndedEvent",
     "HeartbeatEvent",

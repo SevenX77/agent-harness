@@ -9,10 +9,12 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Monkey-patch: preserve reasoning_content from DeepSeek/ARK models
 # ---------------------------------------------------------------------------
-# LangChain ChatOpenAI explicitly does NOT extract reasoning_content
-# (see langchain_openai/chat_models/base.py L8-11). We patch two layers:
+# LangChain ChatOpenAI explicitly does NOT preserve reasoning_content
+# (see langchain_openai/chat_models/base.py L8-11). We patch three layers:
 #   1. OpenAI SDK: allow extra fields on ChatCompletionMessage (Pydantic)
 #   2. LangChain: extract reasoning_content into AIMessage.additional_kwargs
+#   3. LangChain: echo AIMessage.additional_kwargs reasoning_content back out
+#      when converting message history into provider request dictionaries.
 
 _reasoning_patch_applied = False
 _reasoning_patch_lock = threading.Lock()
@@ -68,3 +70,23 @@ def _apply_reasoning_content_patch() -> None:
             logger.debug("[ReasoningPatch] LangChain _convert_dict_to_message: patched")
         except Exception as exc:
             logger.warning("[ReasoningPatch] Failed to patch LangChain: %s", exc)
+
+        # Layer 3: LangChain — wrap _convert_message_to_dict to echo reasoning_content
+        try:
+            import langchain_openai.chat_models.base as _lcob
+            _original_to_dict = _lcob._convert_message_to_dict
+
+            def _patched_to_dict(message, *args, **kwargs):
+                result = _original_to_dict(message, *args, **kwargs)
+                from langchain_core.messages import AIMessage
+
+                if isinstance(message, AIMessage):
+                    rc = message.additional_kwargs.get("reasoning_content")
+                    if rc and "reasoning_content" not in result:
+                        result["reasoning_content"] = rc
+                return result
+
+            _lcob._convert_message_to_dict = _patched_to_dict
+            logger.debug("[ReasoningPatch] LangChain _convert_message_to_dict: patched")
+        except Exception as exc:
+            logger.warning("[ReasoningPatch] Failed to patch LangChain send: %s", exc)

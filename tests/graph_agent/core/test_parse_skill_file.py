@@ -80,10 +80,13 @@ class TestRoundTripWithSerialize:
         m2 = _SKILL_ADAPTER.validate_python(parsed["frontmatter"])
         assert serialize_skill(m2) == s1
 
-    def test_graph_three_phase_modes_round_trip(self, tmp_path):
+    def test_graph_two_phase_modes_round_trip(self, tmp_path):
+        """Round-trip with both supported modes (``logic`` + ``llm``).
+        The 1.x ``delegate`` mode was removed in MVP-0 B1 (2026-04-28).
+        """
         manifest_dict = {
             "name": "pipeline",
-            "description": "Three-mode graph pipeline.",
+            "description": "Two-mode graph pipeline.",
             "type": "graph",
             "io": {
                 "inputs": [{"name": "x", "source": "runtime"}],
@@ -96,15 +99,6 @@ class TestRoundTripWithSerialize:
                     "name": "plan",
                     "prompt": "Line 1\nLine 2",
                     "agent_tools": ["t1"],
-                },
-                {
-                    "mode": "delegate",
-                    "name": "format",
-                    "subgraph": "./subskills/fmt",
-                    "context_bridge": {
-                        "inputs": {"a": "{context.a}"},
-                        "outputs": {"b": "{subgraph.b}"},
-                    },
                 },
             ],
         }

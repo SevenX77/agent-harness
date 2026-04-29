@@ -17,6 +17,8 @@ the module (defeats the no-side-effect invariant).
 """
 from __future__ import annotations
 
+import ast
+import logging
 import importlib.util
 from pathlib import Path
 
@@ -27,6 +29,8 @@ from ..manifest import (
     LLMPhase,
     LogicPhase,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def check_tool_paths(
@@ -75,6 +79,7 @@ def check_tool_paths(
                         location=f"SKILL.md:phases.{phase.name}.execute_steps.{idx}",
                         base_dir=base_dir,
                         issues=issues,
+                        check_nested_run_skill=True,
                     )
                 if phase.validator is not None:
                     _check_one(
@@ -83,7 +88,6 @@ def check_tool_paths(
                         base_dir=base_dir,
                         issues=issues,
                     )
-            # DelegatePhase has no tool refs.
     return issues
 
 
@@ -93,6 +97,7 @@ def _check_one(
     location: str,
     base_dir: Path,
     issues: list[CompileIssue],
+    check_nested_run_skill: bool = False,
 ) -> None:
     if "." not in ref:
         issues.append(CompileIssue(
@@ -195,6 +200,13 @@ def _check_one(
                 f"which exists."
             ),
         ))
+        return
+
+    if check_nested_run_skill:
+        file_path = py_file if py_file.is_file() else init_file
+        issue = _check_for_nested_run_skill(file_path, location)
+        if issue is not None:
+            issues.append(issue)
 
 
 def _is_within(candidate: Path, root: Path) -> bool:
@@ -209,3 +221,37 @@ def _is_within(candidate: Path, root: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _check_for_nested_run_skill(file_path: Path, ref_name: str) -> CompileIssue | None:
+    """E-NESTED-RUN-SKILL: reject logic steps that import run_skill."""
+    try:
+        tree = ast.parse(file_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, SyntaxError) as exc:
+        logger.warning(
+            "phase=validator action=tool_paths fallback from=parse to=skip "
+            "path=%s ref=%s reason=%s",
+            file_path,
+            ref_name,
+            type(exc).__name__,
+        )
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "graph_agent.core.runner":
+            if any(alias.name == "run_skill" for alias in node.names):
+                return CompileIssue(
+                    rule_id="E-NESTED-RUN-SKILL",
+                    severity="FATAL",
+                    location=ref_name,
+                    message=(
+                        "Logic phase scripts cannot import 'run_skill' from "
+                        "graph_agent.core.runner. The 1.x DelegatePhase / "
+                        "ParallelDelegatePhase escape hatches were removed "
+                        "in MVP-0 B1 (2026-04-28); declarative cross-skill "
+                        "composition will return in V2 via LangGraph Send "
+                        "API. For now, refactor nested invocation up into "
+                        "the parent skill's phase list."
+                    ),
+                )
+    return None

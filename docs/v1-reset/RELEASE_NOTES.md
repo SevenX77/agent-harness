@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-本次发布 (`feat/v1-reset-mvp-1` 分支, `5decd0a..HEAD` 共 40 commits) 落盘了 v1-reset 6-MVP roadmap 中的 **MVP-1 + MVP-2 + MVP-3** 三个阶段，对应"状态拆解 / 独立基础设施 / 加载与中间件模块边界"。这是一次**架构过渡期 (Phase 1)** 的中间发布——核心类型安全组件已就绪并就位，但执行控制流仍由 legacy `phase_executor` 驱动。**v1.0.0 的全盘替换将在 MVP-4 + MVP-5 完成**。
+本次发布 (`feat/v1-reset-mvp-1` 分支, `5decd0a..85bc4b8` 共 40 Phase 1 implementation commits — 即 RELEASE_NOTES 落盘前的 v1-reset MVP-1+2+3 实施 commit 范围, docs-only follow-up commits 不计入此 40) 落盘了 v1-reset 6-MVP roadmap 中的 **MVP-1 + MVP-2 + MVP-3** 三个阶段，对应"状态拆解 / 独立基础设施 / 加载与中间件模块边界"。这是一次**架构过渡期 (Phase 1)** 的中间发布——核心类型安全组件已就绪并就位，但执行控制流仍由 legacy `phase_executor` 驱动。**v1.0.0 的全盘替换将在 MVP-4 + MVP-5 完成**。
 
 请将本次发布理解为"地基稳了，上层结构未半"，不要按终态 1.0.0 期待。
 
@@ -111,6 +111,6 @@ phases:
 
 ## AI 协作模式致谢
 
-本次 40 commits 由 a1 (codex executor) / a2 (gemini analyst+reviewer) / a3 (claude executor 副) / 主控 Claude (orchestrator+designer) 通过 CCB 异步协作完成。
+本次 40 Phase 1 implementation commits (`5decd0a..85bc4b8` 实施范围) 由 a1 (codex executor) / a2 (gemini analyst+reviewer) / a3 (claude executor 副) / 主控 Claude (orchestrator+designer) 通过 CCB 异步协作完成。
 
 `v1-reset (Phase 1)` 是首个完全通过 **多 Agent 异步并行流水线** 重构的 graph_agent 大版本。在 Phase 2 (MVP-4 + MVP-5) 完成后，将发布 1.0.0 final 时再做完整效能数据复盘。

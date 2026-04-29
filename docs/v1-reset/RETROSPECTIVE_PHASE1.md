@@ -417,7 +417,7 @@ docs/v1-reset/RELEASE_NOTES.md                                (Pending MVP-4 段
 ### MVP-5 实施者必读
 
 MVP-5 spec 尚未起草. 按 RELEASE_NOTES "Pending MVP-5" 段, MVP-5 范畴:
-- 全库 ruff 69 errors 拍平 (本次 personas F821 + UP037 已修, 余 68 推 MVP-5)
+- 全库 ruff 69 errors 拍平 (本次 personas F821 + UP037 + harness dead import 已修, 余 66 推 MVP-5)
 - 全库 mypy --strict (核心目录之外的非新增文件)
 - 全库 coverage ≥ 95%
 - harness.run 拆解 (.compile / .prepare_state / .invoke_graph / .persist_outputs) — A10 范畴

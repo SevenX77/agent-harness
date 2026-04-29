@@ -344,7 +344,24 @@ def main():
         datefmt="%H:%M:%S",
     )
 
-    # Load .env
+    # MVP-3 T10: route framework startup through ``Bootstrap`` instead of
+    # leaking ``load_dotenv`` and reasoning_patch side effects across
+    # ``runner.main``. ``Bootstrap.apply_patches`` is the single
+    # documented entry point for monkey-patches; ``load_settings``
+    # produces an explicit ``Settings`` snapshot so downstream
+    # consumers can migrate off ``os.environ.get`` reads incrementally.
+    # ``load_dotenv`` is kept as a transitional sibling step — it lives
+    # outside ``Bootstrap`` because the ``.env`` file is a CLI/runtime
+    # convention, not a framework patch. Once every consumer reads from
+    # ``Settings``, the dotenv call moves into ``Bootstrap`` and exits
+    # ``runner.main`` entirely (deferred to MVP-5 工程门禁).
+    from ..bootstrap import Bootstrap
+
+    bootstrap = Bootstrap()
+    bootstrap.apply_patches()
+
+    # Load .env (transitional; reads cli-side .env so Settings.from_env
+    # sees user-supplied API keys).
     try:
         from dotenv import load_dotenv
 
@@ -354,6 +371,8 @@ def main():
             f"required import failed: {exc}",
             context={"module": "dotenv"},
         ) from exc
+
+    bootstrap.load_settings()
 
     # Parse inputs
     inputs: dict[str, Any] = {}

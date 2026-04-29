@@ -1,9 +1,46 @@
-"""Finish task and nudge utilities for cognitive control."""
+"""Finish task and nudge utilities for cognitive control.
+
+Architecture (post-MVP-2 T5)
+----------------------------
+
+``finish_task`` itself is intentionally a thin packager. The heavy
+work — schema validation and io.outputs hoisting — lives in two
+collaborators:
+
+* :class:`graph_agent.cognitive.middlewares.ValidationMiddleware`
+  intercepts the agent loop's ``finish_task`` tool call **before** the
+  return-direct tool runs, validates ``business_data_md`` against the
+  phase's ``output_schema``, and re-routes invalid submissions back to
+  the model in the same agent loop. It is the canonical schema gate.
+* :class:`graph_agent.core.phase_executor.PhaseExecutor`'s LLM phase
+  exit code (or, post-MVP-4, ``LLMPhaseNode.execute``) reads the
+  validated payload from ``state['flow'].finish_task_result`` and runs
+  :meth:`graph_agent.core.io_manager.IOManager.resolve_hoist` to move
+  named outputs into ``state['data']``.
+
+This function therefore does **not** call ``schema_engine`` or
+``io_manager`` synchronously today — by the time it executes the
+ValidationMiddleware has already accepted the payload. The optional
+``schema_engine`` / ``compiled_schema`` parameters exist as wiring
+hooks so a defense-in-depth path can be turned on by callers (e.g. a
+test harness running without the middleware, or a future MVP that
+relocates validation back into the tool itself); when the kwargs are
+omitted, behaviour is identical to the pre-MVP-2 packager.
+
+``SCHEMA_VALIDATION_ERROR_TEMPLATE`` and ``PARSE_ERROR_TEMPLATE`` stay
+as exported module constants because ``ValidationMiddleware`` formats
+its rejection messages from them — single source of truth for LLM
+retry feedback strings.
+"""
 
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # avoid runtime import cycle
+    from ..core.io_manager import IOManager
+    from ..core.schema_engine import SchemaEngine, SchemaObject
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +106,30 @@ def finish_task(
     reasoning: str = "",
     diagnostics_md: str = "",
     business_data_md: str = "",
+    *,
+    schema_engine: SchemaEngine | None = None,
+    compiled_schema: SchemaObject | None = None,
+    io_manager: IOManager | None = None,
 ) -> dict[str, Any]:
     """Mark the current phase complete.
 
-    ValidationMiddleware has already accepted or rejected this submission
-    inside the agent loop. This tool returns the accepted payload and
-    lets the phase executor route it into framework state.
+    ``ValidationMiddleware`` has typically already accepted or rejected
+    this submission inside the agent loop, so this function packages the
+    accepted payload and lets the phase executor route it into framework
+    state. The optional ``schema_engine`` / ``compiled_schema`` /
+    ``io_manager`` kwargs (added in MVP-2 T5) are wiring hooks for the
+    defense-in-depth path documented in the module header — when caller
+    supplies all three the function performs a final validation + hoist
+    pass; when omitted (the current production call site in
+    ``phase_executor._finish_task_tool``) behaviour matches the pre-MVP-2
+    packager exactly.
+
+    Returns a dict carrying the legacy ``value`` / ``duplicate`` keys
+    (read by ``phase_executor._finish_task_tool``) plus the design.md
+    §4.2 ``finish_task_result`` / ``diagnostics`` keys (introduced for
+    MVP-3 phase_executor adopters and MVP-4 ``LLMPhaseNode``).
     """
+
     prior = ctx.get("finish_task_result")
     result = dict(prior) if isinstance(prior, dict) else {}
     result.update(
@@ -85,15 +139,49 @@ def finish_task(
             "business_data_md": business_data_md.strip(),
         }
     )
-    result.setdefault("schema_validation", "skipped")
+
+    # Defense-in-depth schema validation. Active only when caller wires
+    # both ``schema_engine`` and ``compiled_schema`` (today: tests and
+    # future MVP-4 callers); ValidationMiddleware remains the canonical
+    # gate when these kwargs are absent.
+    if schema_engine is not None and compiled_schema is not None and business_data_md:
+        validation = schema_engine.validate(
+            {"business_data_md": business_data_md.strip()},
+            compiled_schema,
+        )
+        result["schema_validation"] = "passed" if validation.ok else "failed"
+        if not validation.ok:
+            result["schema_validation_errors"] = list(validation.errors)
+    else:
+        result.setdefault("schema_validation", "skipped")
+
+    # IOManager wiring. The actual hoist runs in phase_executor at phase
+    # exit (it knows the live BusinessData target); finish_task records
+    # the io.outputs spec count so callers can sanity-check that the
+    # phase declared any hoist mapping at all. The full IOManager.run
+    # path remains the phase_executor's responsibility per design §4.3.
+    if io_manager is not None:
+        result.setdefault(
+            "io_manifest", {"output_count": len(io_manager.io_specs)}
+        )
+
     logger.info(
         "finish_task: accepted completion marker "
-        "(reasoning_len=%d, diagnostics_len=%d, business_data_len=%d)",
+        "(reasoning_len=%d, diagnostics_len=%d, business_data_len=%d, "
+        "schema_validation=%s)",
         len(reasoning or ""),
         len(diagnostics_md),
         len(business_data_md or ""),
+        result.get("schema_validation"),
     )
-    return {"value": result, "duplicate": prior is not None}
+    return {
+        # Legacy keys consumed by ``phase_executor._finish_task_tool``.
+        "value": result,
+        "duplicate": prior is not None,
+        # design.md §4.2 keys for MVP-3+ adopters.
+        "finish_task_result": result,
+        "diagnostics": diagnostics_md.strip(),
+    }
 
 
 __all__ = [

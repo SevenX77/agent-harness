@@ -174,6 +174,122 @@ class TestFinishTaskV2:
         assert "business_data_len=" in caplog.text
 
 
+class TestFinishTaskWiringMVP2T5:
+    """T5 wires SchemaEngine + IOManager hooks into ``finish_task``.
+
+    Today the canonical schema gate is ``ValidationMiddleware``; these
+    tests pin the optional kwargs so a future caller (test harness or
+    MVP-4 ``LLMPhaseNode``) can opt into the defense-in-depth path
+    without breaking the existing thin-packager contract.
+    """
+
+    def test_default_call_remains_thin_packager(self) -> None:
+        """Without the optional kwargs, behaviour is the pre-MVP-2 packager."""
+        ctx: dict[str, object] = {}
+
+        result = finish_task(
+            ctx,  # type: ignore[arg-type]
+            reasoning="Defense-in-depth disabled by default.",
+            diagnostics_md="diag",
+            business_data_md="ignored body",
+        )
+
+        assert result["value"]["schema_validation"] == "skipped"
+        # Both legacy and design.md §4.2 keys are present.
+        assert result["finish_task_result"] is result["value"]
+        assert result["diagnostics"] == "diag"
+
+    def test_schema_engine_validates_when_wired_failure(self) -> None:
+        """When ``schema_engine`` + ``compiled_schema`` are passed, run validation.
+
+        We pin the failure path because the SchemaEngine-generated
+        Pydantic model carries ``extra='forbid'`` and finish_task feeds
+        in ``{"business_data_md": ...}`` — an unknown key from the empty
+        schema's perspective. Surfacing the rejection as
+        ``schema_validation='failed'`` plus a populated
+        ``schema_validation_errors`` list is the wiring contract; the
+        canonical authoring path keeps the validation in
+        ``ValidationMiddleware`` upstream.
+        """
+        from graph_agent.core.schema_engine import SchemaEngine, SchemaObject
+
+        engine = SchemaEngine()
+        schema = SchemaObject(fields=(), required_fields=frozenset())
+
+        ctx: dict[str, object] = {}
+        result = finish_task(
+            ctx,  # type: ignore[arg-type]
+            reasoning="Validating via wired SchemaEngine.",
+            diagnostics_md="diag",
+            business_data_md="## item\n- name: ok",
+            schema_engine=engine,
+            compiled_schema=schema,
+        )
+
+        assert result["value"]["schema_validation"] == "failed"
+        errors = result["value"]["schema_validation_errors"]
+        assert isinstance(errors, list) and len(errors) >= 1
+
+    def test_schema_engine_kwargs_optional_independently(self) -> None:
+        """Passing only one of (schema_engine, compiled_schema) keeps fallback."""
+        from graph_agent.core.schema_engine import SchemaEngine
+
+        engine = SchemaEngine()
+        ctx: dict[str, object] = {}
+
+        result = finish_task(
+            ctx,  # type: ignore[arg-type]
+            business_data_md="some body",
+            schema_engine=engine,
+            compiled_schema=None,
+        )
+
+        assert result["value"]["schema_validation"] == "skipped"
+
+    def test_io_manager_kwarg_records_manifest(self) -> None:
+        """``io_manager`` kwarg records the declared output count, doesn't hoist.
+
+        Actual hoisting stays in ``phase_executor`` per design §4.3 — this
+        test pins that ``finish_task`` only records the spec inventory.
+        """
+        from graph_agent.core.io_manager import IODef, IOManager
+
+        io_manager = IOManager(
+            [
+                IODef(source_field="segments", target_field="segments"),
+                IODef(source_field="meta", target_field="meta"),
+            ]
+        )
+
+        ctx: dict[str, object] = {}
+        result = finish_task(
+            ctx,  # type: ignore[arg-type]
+            business_data_md="anything",
+            io_manager=io_manager,
+        )
+
+        assert result["value"]["io_manifest"] == {"output_count": 2}
+
+    def test_design_md_4_2_return_shape(self) -> None:
+        """Return shape carries both legacy ``value`` keys and §4.2 keys."""
+        ctx: dict[str, object] = {}
+
+        result = finish_task(
+            ctx,  # type: ignore[arg-type]
+            reasoning="Shape lock-in.",
+            diagnostics_md="my diagnostics",
+            business_data_md="md body",
+        )
+
+        # Legacy keys (read by phase_executor._finish_task_tool).
+        assert "value" in result
+        assert "duplicate" in result
+        # design.md §4.2 keys (read by future MVP-3+ adopters).
+        assert "finish_task_result" in result
+        assert "diagnostics" in result
+        assert result["diagnostics"] == "my diagnostics"
+
+
 class TestValidationMiddleware:
     def test_rejects_empty_schema_submission(self) -> None:
         ctx: dict[str, Any] = {}

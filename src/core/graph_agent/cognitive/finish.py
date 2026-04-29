@@ -1,4 +1,5 @@
 """Finish task and nudge utilities for cognitive control."""
+
 from __future__ import annotations
 
 import logging
@@ -59,8 +60,7 @@ def build_standard_nudge_text(nudge_count: int, latest_content: str) -> str:
             f"\n你的无效输出: {latest_content[:600]}"
         )
     return (
-        "[严重警告] 你的行为已偏离规范！必须立即调用 finish_task 结束本阶段，"
-        "否则任务将被强制终止。"
+        "[严重警告] 你的行为已偏离规范！必须立即调用 finish_task 结束本阶段，否则任务将被强制终止。"
     )
 
 
@@ -69,22 +69,23 @@ def finish_task(
     reasoning: str = "",
     diagnostics_md: str = "",
     business_data_md: str = "",
-) -> str:
+) -> dict[str, Any]:
     """Mark the current phase complete.
 
     ValidationMiddleware has already accepted or rejected this submission
-    inside the agent loop. This tool only records the accepted payload and
-    triggers the return-direct phase exit.
+    inside the agent loop. This tool returns the accepted payload and
+    lets the phase executor route it into framework state.
     """
-    prior = ctx.get("_finish_task_result")
+    prior = ctx.get("finish_task_result")
     result = dict(prior) if isinstance(prior, dict) else {}
-    result.update({
-        "reasoning": (reasoning or "").strip(),
-        "diagnostics_md": diagnostics_md.strip(),
-        "business_data_md": business_data_md.strip(),
-    })
+    result.update(
+        {
+            "reasoning": (reasoning or "").strip(),
+            "diagnostics_md": diagnostics_md.strip(),
+            "business_data_md": business_data_md.strip(),
+        }
+    )
     result.setdefault("schema_validation", "skipped")
-    ctx["_finish_task_result"] = result
     logger.info(
         "finish_task: accepted completion marker "
         "(reasoning_len=%d, diagnostics_len=%d, business_data_len=%d)",
@@ -92,7 +93,7 @@ def finish_task(
         len(diagnostics_md),
         len(business_data_md or ""),
     )
-    return "PHASE_COMPLETE"
+    return {"value": result, "duplicate": prior is not None}
 
 
 __all__ = [

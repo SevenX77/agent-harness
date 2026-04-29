@@ -107,19 +107,17 @@ class TestFinishTaskV2:
             reasoning="Reviewed all required work and completed the phase.",
         )
 
-        assert result == "PHASE_COMPLETE"
-        payload = ctx["_finish_task_result"]
-        assert (
-            payload["reasoning"]  # type: ignore[index]
-            == "Reviewed all required work and completed the phase."
-        )
-        assert payload["diagnostics_md"] == ""  # type: ignore[index]
-        assert payload["business_data_md"] == ""  # type: ignore[index]
-        assert payload["schema_validation"] == "skipped"  # type: ignore[index]
+        assert result["duplicate"] is False
+        payload = result["value"]
+        assert payload["reasoning"] == "Reviewed all required work and completed the phase."
+        assert payload["diagnostics_md"] == ""
+        assert payload["business_data_md"] == ""
+        assert payload["schema_validation"] == "skipped"
+        assert ctx == {}
 
     def test_finish_preserves_validation_middleware_payload(self) -> None:
         ctx = {
-            "_finish_task_result": {
+            "finish_task_result": {
                 "schema_validation": "passed",
                 "business_data_parsed": [
                     {"title": "Scene plan", "score": 3, "tags": ["scene", "plan"]}
@@ -133,8 +131,8 @@ class TestFinishTaskV2:
             business_data_md=VALID_BUSINESS_MD,
         )
 
-        assert result == "PHASE_COMPLETE"
-        payload = ctx["_finish_task_result"]
+        assert result["duplicate"] is True
+        payload = result["value"]
         assert payload["schema_validation"] == "passed"
         assert payload["diagnostics_md"] == "## 自检\n- ok"
         assert payload["business_data_md"] == VALID_BUSINESS_MD.strip()
@@ -151,10 +149,11 @@ class TestFinishTaskV2:
             business_data_md=VALID_BUSINESS_MD,
         )
 
-        assert result == "PHASE_COMPLETE"
-        payload = ctx["_finish_task_result"]
-        assert payload["business_data_md"] == VALID_BUSINESS_MD.strip()  # type: ignore[index]
-        assert payload["schema_validation"] == "skipped"  # type: ignore[index]
+        assert result["duplicate"] is False
+        payload = result["value"]
+        assert payload["business_data_md"] == VALID_BUSINESS_MD.strip()
+        assert payload["schema_validation"] == "skipped"
+        assert ctx == {}
 
     def test_v2_logs_validation_summary(self, caplog: pytest.LogCaptureFixture) -> None:
         caplog.set_level(logging.INFO)
@@ -235,9 +234,7 @@ class TestValidationMiddleware:
         )
 
         assert isinstance(result, ToolMessage)
-        assert seen_payloads == [
-            [{"title": "Scene plan", "score": 3, "tags": ["scene", "plan"]}]
-        ]
+        assert seen_payloads == [[{"title": "Scene plan", "score": 3, "tags": ["scene", "plan"]}]]
         assert ctx["_finish_task_result"] == {
             "business_data_parsed": [
                 {"title": "Scene plan", "score": 3, "tags": ["scene", "plan"]}
@@ -461,19 +458,19 @@ class TestSchemaByExample:
 
 class TestValidatorRequiredRule:
     def test_complex_schema_with_validator_has_no_issue(self) -> None:
-        manifest = _graph_manifest([
-            _validator_rule_phase(
-                output_example=VALID_DYNAMIC_EXAMPLE,
-                validator="script.validators.validate_segments",
-            )
-        ])
+        manifest = _graph_manifest(
+            [
+                _validator_rule_phase(
+                    output_example=VALID_DYNAMIC_EXAMPLE,
+                    validator="script.validators.validate_segments",
+                )
+            ]
+        )
 
         assert check_validator_required(manifest) == []
 
     def test_simple_schema_without_validator_warns(self) -> None:
-        manifest = _graph_manifest([
-            _validator_rule_phase(output_example=SIMPLE_DYNAMIC_EXAMPLE)
-        ])
+        manifest = _graph_manifest([_validator_rule_phase(output_example=SIMPLE_DYNAMIC_EXAMPLE)])
 
         issues = check_validator_required(manifest)
 
@@ -482,19 +479,19 @@ class TestValidatorRequiredRule:
         assert issues[0].severity == "WARNING"
 
     def test_simple_schema_with_validator_optional_silences_warning(self) -> None:
-        manifest = _graph_manifest([
-            _validator_rule_phase(
-                output_example=SIMPLE_DYNAMIC_EXAMPLE,
-                validator_optional=True,
-            )
-        ])
+        manifest = _graph_manifest(
+            [
+                _validator_rule_phase(
+                    output_example=SIMPLE_DYNAMIC_EXAMPLE,
+                    validator_optional=True,
+                )
+            ]
+        )
 
         assert check_validator_required(manifest) == []
 
     def test_complex_schema_without_validator_is_fatal(self) -> None:
-        manifest = _graph_manifest([
-            _validator_rule_phase(output_example=VALID_DYNAMIC_EXAMPLE)
-        ])
+        manifest = _graph_manifest([_validator_rule_phase(output_example=VALID_DYNAMIC_EXAMPLE)])
 
         issues = check_validator_required(manifest)
 

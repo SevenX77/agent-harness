@@ -9,6 +9,7 @@ Public API:
     diagnose(blocks, schema) → DiagnosticReport  # per-item Pydantic check
     md_to_json(md_text, schema) → list[T]  # unified: parse + diagnose + patch
 """
+
 from __future__ import annotations
 
 import importlib
@@ -20,7 +21,7 @@ import typing
 from dataclasses import dataclass
 from dataclasses import field as dc_field
 from pathlib import Path
-from typing import Any, Literal, TypeVar
+from typing import Any, Literal, TypeVar, cast
 
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
@@ -46,9 +47,7 @@ def _resolve_schema_from_path(path: str) -> type[BaseModel]:
     if module is None:
         namespaced_suffix = f".{module_str}"
         for key, mod in list(sys.modules.items()):
-            if key.startswith("_graph_agent_skill_.") and key.endswith(
-                namespaced_suffix
-            ):
+            if key.startswith("_graph_agent_skill_.") and key.endswith(namespaced_suffix):
                 module = mod
                 break
     if module is None:
@@ -67,6 +66,7 @@ def _resolve_schema_from_path(path: str) -> type[BaseModel]:
         raise ValueError(f"schema path {path!r} is not a BaseModel subclass (got {got})")
     return cls
 
+
 # Path to Patch Agent SKILL.md — resolved once at module load
 _PATCH_SKILL_MD: Path = (
     Path(__file__).resolve().parent.parent / "skills" / "builtin" / "md-patch" / "SKILL.md"
@@ -74,6 +74,7 @@ _PATCH_SKILL_MD: Path = (
 
 
 # ─── Diagnostic data structures ──────────────────────────────────────────────
+
 
 @dataclass
 class BlockMeta:
@@ -127,19 +128,11 @@ class DiagnosticReport:
 
     @property
     def has_structural_errors(self) -> bool:
-        return any(
-            fe.error_kind == "structural"
-            for ie in self.errors
-            for fe in ie.fields
-        )
+        return any(fe.error_kind == "structural" for ie in self.errors for fe in ie.fields)
 
     @property
     def has_semantic_errors(self) -> bool:
-        return any(
-            fe.error_kind == "semantic"
-            for ie in self.errors
-            for fe in ie.fields
-        )
+        return any(fe.error_kind == "semantic" for ie in self.errors for fe in ie.fields)
 
     @property
     def semantic_only(self) -> bool:
@@ -156,9 +149,7 @@ class DiagnosticReport:
         ]
         for item_err in self.errors:
             id_label = (
-                f"item_id={item_err.item_id!r}"
-                if item_err.item_id
-                else f"index={item_err.index}"
+                f"item_id={item_err.item_id!r}" if item_err.item_id else f"index={item_err.index}"
             )
             lines.append(f"【错误 Item {item_err.index}】{id_label}")
             structural = [fe for fe in item_err.fields if fe.error_kind == "structural"]
@@ -190,6 +181,7 @@ class SemanticValidationError(ValueError):
 
 # ─── Type annotation helpers ──────────────────────────────────────────────────
 
+
 def _unwrap_optional(annotation: Any) -> Any:
     """For T | None or Optional[T], return T. Otherwise return annotation."""
     # typing.Optional[T] is typing.Union[T, None]
@@ -199,7 +191,7 @@ def _unwrap_optional(annotation: Any) -> Any:
             return args[0]
     # Python 3.10+ union syntax: X | Y
     if isinstance(annotation, types.UnionType):
-        args = [a for a in annotation.__args__ if a is not type(None)]  # type: ignore[union-attr]
+        args = [a for a in annotation.__args__ if a is not type(None)]
         if len(args) == 1:
             return args[0]
     return annotation
@@ -233,6 +225,7 @@ def _get_field_annotations(schema: type[BaseModel]) -> dict[str, Any]:
 
 
 # ─── @key sub-object parser ───────────────────────────────────────────────────
+
 
 def _parse_at_key_lines(raw_lines: list[str]) -> list[dict[str, str]]:
     """Parse ``@key: val`` indented lines into a list of dicts.
@@ -284,6 +277,7 @@ _RE_INDENTED_CHILD = re.compile(r"^\s{2,}[-*•]\s+(.+)$")
 
 
 # ─── parse_md ─────────────────────────────────────────────────────────────────
+
 
 def parse_md(md_text: str, schema: type[BaseModel]) -> list[ParsedBlock]:
     """Parse structured Markdown text into parsed blocks.
@@ -435,6 +429,7 @@ def _coerce_scalar(key: str, raw_val: str, annotations: dict[str, Any]) -> Any:
 
 # ─── diagnose ─────────────────────────────────────────────────────────────────
 
+
 def _classify_error_kind(pydantic_error_type: str) -> Literal["structural", "semantic"]:
     """Classify a Pydantic validation error as structural or semantic."""
     if pydantic_error_type == "missing":
@@ -445,9 +440,7 @@ def _classify_error_kind(pydantic_error_type: str) -> Literal["structural", "sem
 _T = TypeVar("_T", bound=BaseModel)
 
 
-def diagnose(
-    blocks: list[ParsedBlock], schema: type[_T]
-) -> DiagnosticReport:
+def diagnose(blocks: list[ParsedBlock], schema: type[_T]) -> DiagnosticReport:
     """Validate each parsed block against ``schema`` independently.
 
     One item failing validation does NOT affect any other item.
@@ -489,6 +482,7 @@ def diagnose(
 
 # ─── md_to_json ───────────────────────────────────────────────────────────────
 
+
 def _extract_md_excerpt(md_text: str, error_indices: set[int]) -> str:
     """Extract only the ## blocks at ``error_indices`` from ``md_text``.
 
@@ -511,7 +505,7 @@ def md_to_json(
     md_text: str,
     schema: type[_T] | None = None,
     *,
-    ctx: dict[str, object] | None = None
+    ctx: dict[str, object] | None = None,
 ) -> list[_T]:
     """Parse MD text and return validated Pydantic model instances.
 
@@ -542,16 +536,19 @@ def md_to_json(
             raise ValueError(_missing_schema_msg)
         direct = ctx.get("_md_schema")
         if direct is not None:
-            schema = direct  # type: ignore[assignment]
+            if not (isinstance(direct, type) and issubclass(direct, BaseModel)):
+                raise ValueError("ctx['_md_schema'] must be a BaseModel subclass")
+            schema = cast(type[_T], direct)
         else:
             path = ctx.get("_md_schema_path")
             if not isinstance(path, str) or not path:
                 raise ValueError(_missing_schema_msg)
-            schema = _resolve_schema_from_path(path)  # type: ignore[assignment]
-    blocks = parse_md(md_text, schema)
-    logger.info("md_to_json: schema=%s parsed=%d items", schema.__name__, len(blocks))
+            schema = cast(type[_T], _resolve_schema_from_path(path))
+    schema_cls = schema
+    blocks = parse_md(md_text, schema_cls)
+    logger.info("md_to_json: schema=%s parsed=%d items", schema_cls.__name__, len(blocks))
 
-    report = diagnose(blocks, schema)
+    report = diagnose(blocks, schema_cls)
     logger.info(
         "md_to_json: valid=%d errors=%d",
         len(report.valid_items),
@@ -559,7 +556,7 @@ def md_to_json(
     )
 
     if report.all_valid:
-        return list(report.valid_items)  # type: ignore[return-value]
+        return cast(list[_T], list(report.valid_items))
 
     # Check if all errors are semantic (md-patch cannot help)
     if report.semantic_only:
@@ -576,7 +573,7 @@ def md_to_json(
     logger.info(
         "md_to_json: triggering Patch Agent for %d error items (schema=%s)",
         len(report.errors),
-        schema.__name__,
+        schema_cls.__name__,
     )
 
     result = run_skill(
@@ -584,11 +581,8 @@ def md_to_json(
         original_md_excerpt=md_excerpt,
         diagnostic_report=report.to_prompt_string(),
         valid_results=[item.model_dump() for item in report.valid_items],
-        error_items=[
-            {"item_id": block.meta.id, "fields": block.data}
-            for block in error_blocks
-        ],
-        schema=schema,  # Python class object — safe inside graph_agent context dict
+        error_items=[{"item_id": block.meta.id, "fields": block.data} for block in error_blocks],
+        schema=schema_cls,  # Python class object — safe inside graph_agent context dict
     )
 
     final_results: list[dict[str, Any]] = result["context"]["final_results"]
@@ -596,7 +590,7 @@ def md_to_json(
         "md_to_json: patch completed, %d final items returned",
         len(final_results),
     )
-    return [schema.model_validate(item) for item in final_results]
+    return [schema_cls.model_validate(item) for item in final_results]
 
 
 # ─── Schema to Type Dict ─────────────────────────────────────────────────────
@@ -604,11 +598,7 @@ def md_to_json(
 
 def _type_to_constraint(annotation: Any, field_info: Any = None) -> str:
     """Convert a Python type annotation to a human-readable constraint string."""
-    import typing
-    from pydantic import BaseModel
-
     # Handle Optional[T] - both typing.Union and Python 3.10+ UnionType (X | Y)
-    import types
     origin = typing.get_origin(annotation)
     args = typing.get_args(annotation)
 
@@ -647,15 +637,11 @@ def _type_to_constraint(annotation: Any, field_info: Any = None) -> str:
         # Extract ge/le from field_info metadata (contains Ge/Le objects)
         ge_val = None
         le_val = None
-        if field_info and hasattr(field_info, 'metadata'):
+        if field_info and hasattr(field_info, "metadata"):
             for m in field_info.metadata:
-                if hasattr(m, 'ge'):
+                if hasattr(m, "ge") or (m.__class__.__name__ == "Ge" and hasattr(m, "ge")):
                     ge_val = m.ge
-                elif m.__class__.__name__ == 'Ge' and hasattr(m, 'ge'):
-                    ge_val = m.ge
-                if hasattr(m, 'le'):
-                    le_val = m.le
-                elif m.__class__.__name__ == 'Le' and hasattr(m, 'le'):
+                if hasattr(m, "le") or (m.__class__.__name__ == "Le" and hasattr(m, "le")):
                     le_val = m.le
         if ge_val is not None:
             constraint += f", >={ge_val}"
@@ -668,15 +654,11 @@ def _type_to_constraint(annotation: Any, field_info: Any = None) -> str:
         constraint = "[小数"
         ge_val = None
         le_val = None
-        if field_info and hasattr(field_info, 'metadata'):
+        if field_info and hasattr(field_info, "metadata"):
             for m in field_info.metadata:
-                if hasattr(m, 'ge'):
+                if hasattr(m, "ge") or (m.__class__.__name__ == "Ge" and hasattr(m, "ge")):
                     ge_val = m.ge
-                elif m.__class__.__name__ == 'Ge' and hasattr(m, 'ge'):
-                    ge_val = m.ge
-                if hasattr(m, 'le'):
-                    le_val = m.le
-                elif m.__class__.__name__ == 'Le' and hasattr(m, 'le'):
+                if hasattr(m, "le") or (m.__class__.__name__ == "Le" and hasattr(m, "le")):
                     le_val = m.le
         if ge_val is not None:
             constraint += f", >={ge_val}"

@@ -13,7 +13,7 @@ from typing import Any
 
 from graph_agent.callbacks.base import Callback
 from graph_agent.core.phase_executor import PhaseExecutor
-from graph_agent.core.state import WorkflowState
+from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
 from graph_agent.core.types import Phase
 
 
@@ -37,15 +37,17 @@ class _RecordingCallback(Callback):
 
 
 def _make_state(
-    context: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
+    flow: dict[str, Any] | None = None,
     metrics: dict[str, Any] | None = None,
 ) -> WorkflowState:
+    flow_fields = dict(flow or {})
+    if metrics is not None:
+        flow_fields["metrics"] = dict(metrics)
     return {
-        "context": dict(context or {}),
+        "data": BusinessData(**dict(data or {})),
+        "flow": FrameworkState(**flow_fields),
         "messages": [],
-        "current_phase": "",
-        "retry_counts": {},
-        "metrics": dict(metrics or {}),
     }
 
 
@@ -109,18 +111,18 @@ class TestExecuteCodeOnlyPhase:
         cb = _RecordingCallback()
         executor = PhaseExecutor([cb])
         phase = Phase(name="prep", requires_llm=False)
-        state_in = _make_state(context={"foo": 1})
+        state_in = _make_state(data={"foo": 1})
 
         executor.execute_code_only_phase(phase, state_in)
 
-        assert state_in["context"] == {"foo": 1}
-        assert state_in["current_phase"] == ""
+        assert state_in["data"].model_dump() == {"foo": 1}
+        assert state_in["flow"].current_phase == ""
 
     def test_on_phase_start_receives_name_and_context_snapshot(self):
         cb = _RecordingCallback()
         executor = PhaseExecutor([cb])
         phase = Phase(name="prep", requires_llm=False)
-        state_in = _make_state(context={"k": "v"})
+        state_in = _make_state(data={"k": "v"})
 
         executor.execute_code_only_phase(phase, state_in)
 
@@ -129,11 +131,11 @@ class TestExecuteCodeOnlyPhase:
     def test_tools_run_in_order_string_result_sets_last_output(self):
         calls: list[str] = []
 
-        def tool_a(ctx: dict[str, Any]) -> str:
+        def tool_a(data: BusinessData) -> str:
             calls.append("a")
             return "a_out"
 
-        def tool_b(ctx: dict[str, Any]) -> str:
+        def tool_b(data: BusinessData) -> str:
             calls.append("b")
             return "b_out"
 
@@ -143,43 +145,41 @@ class TestExecuteCodeOnlyPhase:
 
         assert calls == ["a", "b"]
         # Last string return wins.
-        assert state_out["context"]["_last_output"] == "b_out"
+        assert state_out["flow"].last_output == "b_out"
 
     def test_non_string_tool_result_does_not_set_last_output(self):
-        def tool_none(ctx: dict[str, Any]) -> None:
+        def tool_none(data: BusinessData) -> None:
             return None
 
-        def tool_dict(ctx: dict[str, Any]) -> dict[str, Any]:
+        def tool_dict(data: BusinessData) -> dict[str, Any]:
             return {"ignored": True}
 
         phase = Phase(name="prep", requires_llm=False, tools=[tool_none, tool_dict])  # type: ignore[list-item]
         executor = PhaseExecutor([])
         state_out = executor.execute_code_only_phase(phase, _make_state())
 
-        assert "_last_output" not in state_out["context"]
+        assert state_out["flow"].last_output is None
 
-    def test_retry_feedback_popped_after_tools_run(self):
+    def test_retry_feedback_cleared_after_tools_run(self):
         captured: list[dict[str, Any]] = []
 
-        def tool(ctx: dict[str, Any]) -> None:
-            captured.append(dict(ctx))
+        def tool(data: BusinessData) -> None:
+            captured.append(data.model_dump())
 
         phase = Phase(name="prep", requires_llm=False, tools=[tool])  # type: ignore[list-item]
         executor = PhaseExecutor([])
-        state_in = _make_state(context={"_retry_feedback": ["fix me"]})
+        state_in = _make_state(flow={"retry_feedback": ["fix me"]})
         state_out = executor.execute_code_only_phase(phase, state_in)
 
-        # Tool saw the retry feedback ...
-        assert captured[0].get("_retry_feedback") == ["fix me"]
-        # ... but the output state has it popped.
-        assert "_retry_feedback" not in state_out["context"]
+        assert "_retry_feedback" not in captured[0]
+        assert state_out["flow"].retry_feedback is None
 
     def test_current_phase_set_on_output_state(self):
         phase = Phase(name="prep", requires_llm=False)
         executor = PhaseExecutor([])
         state_out = executor.execute_code_only_phase(phase, _make_state())
 
-        assert state_out["current_phase"] == "prep"
+        assert state_out["flow"].current_phase == "prep"
 
     def test_on_phase_end_fires_after_current_phase_set(self):
         cb = _RecordingCallback()

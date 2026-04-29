@@ -31,10 +31,10 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from langchain.agents import create_agent
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 
 from ..callbacks.base import Callback
@@ -46,13 +46,13 @@ from ..cognitive.prompt import (
     apply_cognitive_template,
     resolve_role_prefix_from_llm_role,
 )
-from .callback_bridge import _HarnessCallbackBridge, _extract_text_content
+from .callback_bridge import _extract_text_content, _HarnessCallbackBridge
 from .nudge_injector import NudgeInjector
 from .run_context import RunContext
 from .state import (
+    StateManager,
     WorkflowState,
     legacy_context_from_state,
-    workflow_state_from_legacy_context,
 )
 from .template import _render_user_prompt, _safe_render_template
 from .tool_wrapper import _wrap_tool_for_langchain
@@ -60,6 +60,91 @@ from .tracing_proxy import TracingClientProxy
 from .types import Phase
 
 logger = logging.getLogger(__name__)
+
+_AMBIGUITY_REPORTS_KEY = "_ambiguity_reports"
+_FINISH_TASK_RESULT_KEY = "_finish_task_result"
+_RETRY_FEEDBACK_KEY = "_retry_feedback"
+_SKILL_BASE_DIR_KEY = "_skill_base_dir"
+_VALIDATION_WARNINGS_KEY = "_validation_warnings"
+_WORKING_MEMORY_KEY = "_working_memory"
+
+
+def _as_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    return value if isinstance(value, str) else str(value)
+
+
+def _tool_text(tool_state: dict[str, Any], key: str) -> str | None:
+    return _as_text(tool_state.get(key))
+
+
+def _normalize_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item)]
+    if isinstance(value, str):
+        return [value] if value else []
+    return [str(value)] if value else []
+
+
+def _tool_reports(tool_state: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = tool_state.get(_AMBIGUITY_REPORTS_KEY, [])
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, dict)]
+
+
+def _append_tool_warning(tool_state: dict[str, Any], warning: str) -> None:
+    existing = tool_state.get(_VALIDATION_WARNINGS_KEY)
+    if isinstance(existing, list):
+        existing.append(warning)
+        return
+    if existing is None:
+        tool_state[_VALIDATION_WARNINGS_KEY] = [warning]
+        return
+    tool_state[_VALIDATION_WARNINGS_KEY] = [str(existing), warning]
+
+
+def _finish_result_from_tool_state(tool_state: dict[str, Any]) -> dict[str, Any] | None:
+    value = tool_state.get(_FINISH_TASK_RESULT_KEY)
+    return value if isinstance(value, dict) else None
+
+
+def _sync_tool_state(
+    state: WorkflowState,
+    tool_state: dict[str, Any],
+    *,
+    messages: list[AnyMessage] | None = None,
+) -> WorkflowState:
+    business_fields = {k: v for k, v in tool_state.items() if not k.startswith("_")}
+    next_state = state
+    if business_fields:
+        next_state = StateManager.update_business(next_state, **business_fields)
+
+    flow_updates: dict[str, Any] = {}
+    if _VALIDATION_WARNINGS_KEY in tool_state:
+        flow_updates["validation_warnings"] = _normalize_string_list(
+            tool_state.get(_VALIDATION_WARNINGS_KEY)
+        )
+    if _RETRY_FEEDBACK_KEY in tool_state:
+        flow_updates["retry_feedback"] = _normalize_string_list(
+            tool_state.get(_RETRY_FEEDBACK_KEY)
+        )
+    if _WORKING_MEMORY_KEY in tool_state:
+        flow_updates["working_memory"] = tool_state.get(_WORKING_MEMORY_KEY)
+    if _AMBIGUITY_REPORTS_KEY in tool_state:
+        flow_updates["ambiguity_reports"] = _tool_reports(tool_state)
+
+    if flow_updates:
+        next_state = StateManager.update_framework(next_state, **flow_updates)
+
+    return WorkflowState(
+        data=next_state["data"],
+        flow=next_state["flow"],
+        messages=messages if messages is not None else next_state["messages"],
+    )
 
 
 class PhaseExecutor:
@@ -121,18 +206,15 @@ class PhaseExecutor:
     def execute_code_only_phase(self, phase: Phase, state: WorkflowState) -> WorkflowState:
         """Run a code-only phase (``requires_llm=False``).
 
-        Tools are invoked sequentially as plain callables receiving the
-        phase's mutable context dict. A tool that returns a string sets
-        ``context["_last_output"]`` (the last wins, matching pre-refactor
-        semantics). ``_retry_feedback`` is popped after tools run so the
-        feedback is visible to tools but does not leak to the next phase.
+        Tools are invoked sequentially as plain callables receiving
+        ``BusinessData``. A tool that returns a string updates framework
+        ``last_output``; retry feedback is cleared through ``FrameworkState``.
         """
         from .harness import _clone_state  # lazy: avoid import cycle at module load
 
         next_state = _clone_state(state)
-        ctx = legacy_context_from_state(next_state)
         for cb in self._callbacks:
-            cb.on_phase_start(phase.name, dict(ctx))
+            cb.on_phase_start(phase.name, next_state["data"].model_dump())
 
         if phase.tools:
             logger.info(
@@ -141,22 +223,22 @@ class PhaseExecutor:
                 phase.name,
             )
             for fn in phase.tools:
-                result = fn(ctx)
+                result = fn(next_state["data"])
                 if isinstance(result, str):
-                    ctx["_last_output"] = result
+                    next_state = StateManager.update_framework(next_state, last_output=result)
 
-        ctx.pop("_retry_feedback", None)
-        next_state = workflow_state_from_legacy_context(
+        next_state = StateManager.update_framework(
             next_state,
-            ctx,
             current_phase=phase.name,
+            retry_feedback=None,
+            validation_warnings=[],
         )
 
         for cb in self._callbacks:
             cb.on_phase_end(
                 phase.name,
-                dict(ctx),
-                dict(next_state["flow"].metrics),
+                next_state["data"].model_dump(),
+                next_state["flow"].metrics,
             )
         return next_state
 
@@ -167,33 +249,32 @@ class PhaseExecutor:
 
           * no ``phase.validator`` → clone and return unchanged
           * validator returns ``(True, ...)`` → pop the phase's retry
-            bucket, pop ``_validation_warnings``, emit
+            bucket, clear validation warnings, emit
             ``ValidationPassEvent`` with the pre-pop retry count
           * validator returns ``(False, errors)`` →
             - fire ``on_validation_fail(phase, errors, current_retries)``
             - if ``current_retries >= max_retries``: emit
-              ``RetryExhaustedEvent``, set ``_validation_warnings=errors``
-            - else: set ``_retry_feedback=errors``, increment the retry
+              ``RetryExhaustedEvent``, set framework validation warnings
+            - else: set framework retry feedback, increment the retry
               bucket, fire ``on_retry(phase, target, errors)``
 
         Retry bucket key is ``phase.retry_target or phase.name`` on both
         the pass and fail paths — the same rule as the pre-refactor code.
         """
-        from .harness import _clone_state, _safe_emit_event  # lazy: avoid import cycle
         from ..callbacks.events import RetryExhaustedEvent, ValidationPassEvent
+        from .harness import _clone_state, _safe_emit_event  # lazy: avoid import cycle
 
         next_state = _clone_state(state)
-        ctx = legacy_context_from_state(next_state)
-        if ctx.pop("_validation_middleware_phase", None) == phase.name:
+        if next_state["flow"].validation_middleware_phase == phase.name:
             # LLM phase validators have already run inside ValidationMiddleware,
             # keeping rejected finish_task submissions in the same agent loop
             # instead of restarting the whole phase through retry_target routing.
-            return workflow_state_from_legacy_context(next_state, ctx)
+            return StateManager.update_framework(next_state, validation_middleware_phase=None)
 
         if phase.validator is None:
             return next_state
 
-        passed, errors = phase.validator(ctx)
+        passed, errors = phase.validator(next_state["data"])
         if isinstance(errors, str):
             logger.warning(
                 "phase=%s validator returned str instead of list[str]; "
@@ -215,7 +296,6 @@ class PhaseExecutor:
         if passed:
             retries_used = retry_counts.get(retry_key, 0)
             retry_counts.pop(retry_key, None)
-            ctx.pop("_validation_warnings", None)
             _safe_emit_event(
                 self._callbacks,
                 ValidationPassEvent(
@@ -223,10 +303,11 @@ class PhaseExecutor:
                     retry_count=retries_used,
                 ),
             )
-            return workflow_state_from_legacy_context(
+            return StateManager.update_framework(
                 next_state,
-                ctx,
                 retry_counts=retry_counts,
+                retry_feedback=None,
+                validation_warnings=[],
             )
 
         current_retries = retry_counts.get(retry_key, 0)
@@ -247,23 +328,22 @@ class PhaseExecutor:
                     final_errors=list(errors),
                 ),
             )
-            ctx["_validation_warnings"] = errors
-            return workflow_state_from_legacy_context(
+            return StateManager.update_framework(
                 next_state,
-                ctx,
                 retry_counts=retry_counts,
+                retry_feedback=None,
+                validation_warnings=errors,
             )
 
-        ctx["_retry_feedback"] = errors
         retry_counts[retry_key] = current_retries + 1
 
         for cb in self._callbacks:
             cb.on_retry(phase.name, retry_key, errors)
 
-        return workflow_state_from_legacy_context(
+        return StateManager.update_framework(
             next_state,
-            ctx,
             retry_counts=retry_counts,
+            retry_feedback=errors,
         )
 
     def execute_llm_phase(self, phase: Phase, state: WorkflowState) -> WorkflowState:
@@ -273,17 +353,14 @@ class PhaseExecutor:
         harness-lifetime deps (``_resolver``, ``_save_compaction_sidecar``)
         from its own fields. No harness back-reference.
         """
-        from .harness import (  # lazy imports: harness module depends on us
-            _append_validation_warning,
-            _clone_state,
-            _ctx_reports,
-            _ctx_text,
-            _safe_emit_event,
-        )
         from ..callbacks.events import (
             CompactionEvent,
             ModelResolvedEvent,
             WorkingMemoryUpdateEvent,
+        )
+        from .harness import (  # lazy imports: harness module depends on us
+            _clone_state,
+            _safe_emit_event,
         )
 
         assert self._resolver is not None, "execute_llm_phase requires a resolver"
@@ -294,28 +371,25 @@ class PhaseExecutor:
         active_callbacks = self._callbacks
 
         state = _clone_state(state)
-        ctx = legacy_context_from_state(state)
-        ctx["_current_phase"] = phase.name
-        ctx["_validation_middleware_phase"] = phase.name
-
-        # Inject md_to_json schema info if available.
-        # Store the dotted path (string) instead of the Pydantic class itself —
-        # LangGraph's msgpack-based checkpointer cannot serialize ModelMetaclass.
-        # md_to_json resolves the path → class via sys.modules on demand.
-        if phase.output_schema_path is not None:
-            ctx["_md_schema_path"] = phase.output_schema_path
-        if phase.md_type_dict is not None:
-            ctx["_md_type_dict"] = phase.md_type_dict
-
-        working_memory_before = _ctx_text(ctx, "_working_memory")
-
-        # Step 1: Consume _retry_feedback
-        retry_feedback: list[str] | None = None
-        if "_retry_feedback" in ctx:
-            retry_feedback = ctx.pop("_retry_feedback")
-
-        # Step 2: Determine if new phase or retry
         is_retry = state["flow"].current_phase == phase.name
+        framework_updates: dict[str, Any] = {
+            "current_phase": phase.name,
+            "finish_task_result": None,
+            "validation_middleware_phase": phase.name,
+        }
+        if phase.output_schema_path is not None:
+            framework_updates["md_schema_path"] = phase.output_schema_path
+        if phase.md_type_dict is not None:
+            framework_updates["md_type_dict"] = phase.md_type_dict
+        state = StateManager.update_framework(state, **framework_updates)
+        tool_state = legacy_context_from_state(state)
+
+        working_memory_before = _tool_text(tool_state, _WORKING_MEMORY_KEY)
+
+        # Step 1: Consume retry feedback for this invoke.
+        retry_feedback = state["flow"].retry_feedback
+        state = StateManager.update_framework(state, retry_feedback=None)
+        tool_state.pop(_RETRY_FEEDBACK_KEY, None)
 
         # Tier 1 Commit D — update heartbeat's current_phase so
         # subsequent HeartbeatEvents carry the correct phase name.
@@ -324,10 +398,11 @@ class PhaseExecutor:
 
         # Callbacks
         for cb in active_callbacks:
-            cb.on_phase_start(phase.name, dict(ctx))
+            cb.on_phase_start(phase.name, state["data"].model_dump())
 
         # Step 3: Render user_prompt_template
-        user_message = _render_user_prompt(phase, ctx)
+        prompt_view = state["data"].model_dump()
+        user_message = _render_user_prompt(phase, prompt_view)
         if retry_feedback:
             feedback_text = "\n".join(f"- {e}" for e in retry_feedback)
             user_message += (
@@ -382,8 +457,8 @@ class PhaseExecutor:
             phase_name=phase.name,
             llm_role=effective_llm_role,
             resolved_model=str(resolved_model_name) if resolved_model_name else None,
-            sub_run_id=ctx.get("_sub_run_id") if isinstance(ctx, dict) else None,
-            group_key=ctx.get("_group_key") if isinstance(ctx, dict) else None,
+            sub_run_id=state["flow"].sub_run_id,
+            group_key=state["flow"].group_key,
         )
         llm_role = effective_llm_role or "balanced"
         role_prefix = resolve_role_prefix_from_llm_role(llm_role)
@@ -401,17 +476,44 @@ class PhaseExecutor:
             state["flow"].metrics,
             max_tool_calls=phase.max_tool_calls,
         )
-        lc_tools = [_wrap_tool_for_langchain(fn, ctx, bridge) for fn in phase.tools]
-        lc_tools.append(_wrap_tool_for_langchain(finish_task, ctx, bridge, return_direct=True))
-        lc_tools.append(_wrap_tool_for_langchain(update_working_memory, ctx, bridge))
-        lc_tools.append(_wrap_tool_for_langchain(log_ambiguity, ctx, bridge))
+
+        def _finish_task_tool(
+            ctx: dict[str, Any],
+            reasoning: str = "",
+            diagnostics_md: str = "",
+            business_data_md: str = "",
+        ) -> dict[str, Any]:
+            prior = _finish_result_from_tool_state(ctx)
+            finish_input = {"finish_task_result": prior} if prior is not None else {}
+            outcome = finish_task(
+                finish_input,
+                reasoning=reasoning,
+                diagnostics_md=diagnostics_md,
+                business_data_md=business_data_md,
+            )
+            payload = outcome.get("value") if isinstance(outcome, dict) else None
+            if isinstance(payload, dict):
+                ctx[_FINISH_TASK_RESULT_KEY] = {**prior, **payload} if prior else payload
+            return outcome
+
+        _finish_task_tool.__name__ = "finish_task"
+        _finish_task_tool.__doc__ = finish_task.__doc__
+
+        lc_tools = [_wrap_tool_for_langchain(fn, tool_state, bridge) for fn in phase.tools]
+        lc_tools.append(
+            _wrap_tool_for_langchain(_finish_task_tool, tool_state, bridge, return_direct=True)
+        )
+        lc_tools.append(_wrap_tool_for_langchain(update_working_memory, tool_state, bridge))
+        lc_tools.append(_wrap_tool_for_langchain(log_ambiguity, tool_state, bridge))
         from ..tools.builtin.clarification_tool import ask_clarification_tool
 
         lc_tools.append(ask_clarification_tool)
         logger.info("phase=%s: mounted ask_clarification tool", phase.name)
         references = list(getattr(phase, "references", []) or [])
         if references:
-            base_dir = getattr(phase, "skill_base_dir", None) or ctx.get("_skill_base_dir")
+            base_dir = getattr(phase, "skill_base_dir", None) or tool_state.get(
+                _SKILL_BASE_DIR_KEY
+            )
             if base_dir is None:
                 logger.warning(
                     "phase=%s has references=%s but no skill_base_dir; read_file tool not mounted",
@@ -422,7 +524,7 @@ class PhaseExecutor:
                 from ..tools.builtin.read_file import make_read_file_tool
 
                 read_file_fn = make_read_file_tool(references, Path(base_dir))
-                lc_tools.append(_wrap_tool_for_langchain(read_file_fn, ctx, bridge))
+                lc_tools.append(_wrap_tool_for_langchain(read_file_fn, tool_state, bridge))
                 logger.info(
                     "phase=%s mounted read_file tool with %d references",
                     phase.name,
@@ -436,16 +538,16 @@ class PhaseExecutor:
             )
 
             if "working_memory" in context_access:
-                lc_tools.append(_wrap_tool_for_langchain(query_working_memory, ctx, bridge))
+                lc_tools.append(_wrap_tool_for_langchain(query_working_memory, tool_state, bridge))
                 logger.info("phase=%s mounted query_working_memory tool", phase.name)
             if "artifact" in context_access:
-                lc_tools.append(_wrap_tool_for_langchain(read_artifact, ctx, bridge))
+                lc_tools.append(_wrap_tool_for_langchain(read_artifact, tool_state, bridge))
                 logger.info("phase=%s mounted read_artifact tool", phase.name)
         phase_middlewares = create_custom_middlewares(
             working_memory=True,
             dead_end_pruning=True,
             dead_end_threshold=phase.dead_end_threshold,
-            context_ref=ctx,
+            context_ref=tool_state,
             callbacks=active_callbacks,
             phase_name=phase.name,
             loop_detection=True,
@@ -460,38 +562,40 @@ class PhaseExecutor:
                 output_schema=phase.output_schema,
                 output_schema_path=phase.output_schema_path,
                 business_validator=phase.validator,
-                ctx=ctx,
+                ctx=tool_state,
                 callbacks=active_callbacks,
                 phase_name=phase.name,
             )
         )
 
-        # Step 6: Create LangChain agent — render system_prompt with context
+        # Step 6: Create LangChain agent — render system_prompt with business data
         raw_skill_prompt = phase.system_prompt or "完成当前阶段的任务。"
-        rendered_skill_prompt = _safe_render_template(raw_skill_prompt, ctx)
+        rendered_skill_prompt = _safe_render_template(raw_skill_prompt, prompt_view)
         rendered_data_architecture = (
-            _safe_render_template(phase.data_architecture, ctx) if phase.data_architecture else None
+            _safe_render_template(phase.data_architecture, prompt_view)
+            if phase.data_architecture
+            else None
         )
         system_prompt = apply_cognitive_template(
             phase_name=phase.name,
             skill_system_prompt=rendered_skill_prompt,
             data_architecture=rendered_data_architecture,
-            context=ctx,
+            context=prompt_view,
             role_prefix=role_prefix,
         )
-        agent = create_agent(
-            model=model,
+        agent: Any = create_agent(
+            model=cast(Any, model),
             tools=lc_tools,
             system_prompt=system_prompt,
             middleware=phase_middlewares,
         )
 
         # Step 7: Build messages
-        messages = list(state["messages"]) if is_retry else []
+        messages: list[AnyMessage] = list(state["messages"]) if is_retry else []
         messages.append(HumanMessage(content=user_message))
 
         # Step 8: Run agent with Callback Bridge + Phase metadata
-        outer_tid = _ctx_text(ctx, "_thread_id") or ""
+        outer_tid = state["flow"].thread_id or ""
         model_name = (
             getattr(model, "model_name", None) or getattr(model, "model", None) or phase.tier
         )
@@ -511,9 +615,9 @@ class PhaseExecutor:
             },
             tags=[f"phase:{phase.name}", f"tier:{phase.tier}"],
         )
-        result_messages: list[BaseMessage] = []
+        result_messages: list[AnyMessage] = []
 
-        def _latest_ai_content(msgs: list[BaseMessage]) -> str:
+        def _latest_ai_content(msgs: list[AnyMessage]) -> str:
             for _msg in reversed(msgs):
                 if isinstance(_msg, AIMessage) and _msg.content:
                     return _extract_text_content(_msg.content)
@@ -522,7 +626,7 @@ class PhaseExecutor:
         def _compact_messages(
             original_user_msg: HumanMessage,
             working_memory: str,
-        ) -> list[BaseMessage]:
+        ) -> list[AnyMessage]:
             """Checkpoint: compress accumulated messages into a compact context."""
             checkpoint_text = (
                 f"## 执行进度（Checkpoint）\n\n{working_memory}\n\n"
@@ -531,16 +635,20 @@ class PhaseExecutor:
             )
             return [original_user_msg, HumanMessage(content=checkpoint_text)]
 
-        ctx.pop("_finish_task_result", None)
+        tool_state.pop(_FINISH_TASK_RESULT_KEY, None)
         # D-7.4: nudge policy + counter state moved to NudgeInjector.
         # Pass active_callbacks (= harness.callbacks, not RunContext.callbacks)
         # to preserve the legacy narrower callback scope for nudge events.
         nudge_injector = NudgeInjector(phase, active_callbacks)
         plan_verified = False
-        wm_snapshot = _ctx_text(ctx, "_working_memory")
+        wm_snapshot = _tool_text(tool_state, _WORKING_MEMORY_KEY)
         checkpoint_count = 0
-        current_messages = list(messages)
-        original_user_msg = messages[0] if messages else HumanMessage(content="")
+        current_messages: list[AnyMessage] = list(messages)
+        original_user_msg = (
+            messages[0]
+            if messages and isinstance(messages[0], HumanMessage)
+            else HumanMessage(content="")
+        )
         max_outer_iterations = max(20, phase.max_iterations * 2)
         outer_iterations = 0
 
@@ -552,11 +660,14 @@ class PhaseExecutor:
                     f"{max_outer_iterations}; forced degrade to avoid infinite loop."
                 )
                 logger.warning(warning)
-                _append_validation_warning(ctx, warning)
+                _append_tool_warning(tool_state, warning)
                 break
 
             try:
-                result = agent.invoke({"messages": current_messages}, config=agent_config)
+                result = agent.invoke(
+                    cast(Any, {"messages": current_messages}),
+                    config=agent_config,
+                )
             except Exception as agent_err:
                 logger.error(
                     "[Harness] agent.invoke failed in phase '%s': %s",
@@ -566,26 +677,33 @@ class PhaseExecutor:
                 # Ensure on_phase_end fires even when agent.invoke raises
                 for cb in active_callbacks:
                     try:
-                        cb.on_phase_end(phase.name, dict(ctx), dict(state["flow"].metrics))
+                        cb.on_phase_end(
+                            phase.name,
+                            state["data"].model_dump(),
+                            state["flow"].metrics,
+                        )
                     except Exception as cb_exc:
                         logger.warning(
                             "[Harness] on_phase_end callback error during cleanup: %s", cb_exc
                         )
                 raise
-            result_messages = list(result.get("messages", []))
+            result_messages = list(cast(list[AnyMessage], result.get("messages", [])))
 
             # --- Finish gate: self-check enforcement ---
-            finish_result = ctx.get("_finish_task_result")
+            finish_result = _finish_result_from_tool_state(tool_state)
             if finish_result:
                 outcome = nudge_injector.try_selfcheck(finish_result)
                 if outcome.message is not None:
-                    ctx.pop("_finish_task_result", None)
-                    current_messages = list(result_messages) + [outcome.message]
+                    tool_state.pop(_FINISH_TASK_RESULT_KEY, None)
+                    current_messages = [
+                        *result_messages,
+                        cast(AnyMessage, outcome.message),
+                    ]
                     continue
                 break
 
             # --- Planning enforcement: first invoke must produce a plan ---
-            wm_current = _ctx_text(ctx, "_working_memory")
+            wm_current = _tool_text(tool_state, _WORKING_MEMORY_KEY)
             wm_updated = wm_current != wm_snapshot
 
             if not plan_verified:
@@ -603,7 +721,10 @@ class PhaseExecutor:
                         latest_content, has_tool_calls=has_tool_calls
                     )
                     if outcome.message is not None:
-                        current_messages = list(result_messages) + [outcome.message]
+                        current_messages = [
+                            *result_messages,
+                            cast(AnyMessage, outcome.message),
+                        ]
                         continue
                     plan_verified = True
 
@@ -674,7 +795,10 @@ class PhaseExecutor:
             )
             outcome = nudge_injector.try_standard(latest_content, has_tool_calls=has_tool_calls)
             if outcome.message is not None:
-                current_messages = list(result_messages) + [outcome.message]
+                current_messages = [
+                    *result_messages,
+                    cast(AnyMessage, outcome.message),
+                ]
                 continue
             if outcome.budget_exhausted:
                 warning = (
@@ -682,7 +806,7 @@ class PhaseExecutor:
                     f"{phase.max_nudges}; forced degrade without finish_task."
                 )
                 logger.warning(warning)
-                _append_validation_warning(ctx, warning)
+                _append_tool_warning(tool_state, warning)
             # No text, no finish_task, no working memory update — exit with warning
             if not latest_content:
                 exit_warning = (
@@ -690,7 +814,7 @@ class PhaseExecutor:
                     "and no finish_task. Output may be incomplete."
                 )
                 logger.warning(exit_warning)
-                _append_validation_warning(ctx, exit_warning)
+                _append_tool_warning(tool_state, exit_warning)
             break
 
         # Step 9: Extract results
@@ -700,9 +824,7 @@ class PhaseExecutor:
                 final_output = _extract_text_content(msg.content)
                 break
 
-        ctx["_last_output"] = final_output
-
-        finish_result = ctx.get("_finish_task_result")
+        finish_result = _finish_result_from_tool_state(tool_state)
         if isinstance(finish_result, dict):
             reasoning = str(
                 finish_result.get("diagnostics_md", "") or finish_result.get("reasoning", "")
@@ -715,7 +837,7 @@ class PhaseExecutor:
                 except Exception as exc:
                     logger.warning("[Harness] callback error: %s", exc)
 
-        all_reports = _ctx_reports(ctx)
+        all_reports = _tool_reports(tool_state)
         if all_reports:
             phase_reports = [r for r in all_reports if r.get("phase") == phase.name]
             for cb in active_callbacks:
@@ -730,7 +852,7 @@ class PhaseExecutor:
                     except Exception as exc:
                         logger.warning("[Harness] callback error: %s", exc)
 
-        working_memory_after = _ctx_text(ctx, "_working_memory")
+        working_memory_after = _tool_text(tool_state, _WORKING_MEMORY_KEY)
         if working_memory_after != working_memory_before:
             wm_text = str(working_memory_after or "")
             _safe_emit_event(
@@ -742,21 +864,29 @@ class PhaseExecutor:
                 ),
             )
 
-        # Step 10: Keep the successful finish_task payload in context so
-        # declarative io.outputs.source can persist parsed business data after
-        # the workflow completes. Each LLM phase clears any stale payload at
-        # entry, so retaining it here does not short-circuit later LLM phases.
+        # Step 10: Keep successful finish_task data in split state so
+        # declarative io.outputs.source can persist parsed business data.
 
         # Step 11: Update state
-        new_state = workflow_state_from_legacy_context(
+        new_state = _sync_tool_state(
             state,
-            ctx,
+            tool_state,
             messages=result_messages,
-            current_phase=phase.name,
         )
+        new_state = StateManager.update_framework(
+            new_state,
+            current_phase=phase.name,
+            last_output=final_output,
+        )
+        if isinstance(finish_result, dict):
+            new_state = StateManager.route_finish_task(new_state, finish_result)
 
         # Callbacks
         for cb in active_callbacks:
-            cb.on_phase_end(phase.name, dict(ctx), dict(new_state["flow"].metrics))
+            cb.on_phase_end(
+                phase.name,
+                new_state["data"].model_dump(),
+                new_state["flow"].metrics,
+            )
 
         return new_state

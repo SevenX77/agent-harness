@@ -26,6 +26,31 @@ class BusinessData(BaseModel):
 
     model_config = ConfigDict(extra="allow", frozen=False)
 
+    def __getitem__(self, key: str) -> Any:
+        values = self.model_dump()
+        if key not in values:
+            raise KeyError(key)
+        return values[key]
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        if key.startswith("_"):
+            raise ValueError(
+                f"BusinessData 不允许 _ 前缀字段: '{key}' (框架元字段必须用 update_framework)"
+            )
+        setattr(self, key, value)
+
+    def __contains__(self, key: object) -> bool:
+        return isinstance(key, str) and key in self.model_dump()
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.model_dump().get(key, default)
+
+    def setdefault(self, key: str, default: Any = None) -> Any:
+        if key in self:
+            return self[key]
+        self[key] = default
+        return default
+
 
 class FrameworkState(BaseModel):
     """Framework control namespace.
@@ -56,7 +81,7 @@ class FrameworkState(BaseModel):
     # retry 跨 phase 通信
     retry_feedback: list[str] | None = None
     # 工作记忆
-    working_memory: dict[str, Any] = Field(default_factory=dict)
+    working_memory: Any = Field(default_factory=dict)
     # 次要字段
     ambiguity_reports: list[dict[str, Any]] = Field(default_factory=list)
     last_output: Any = None
@@ -86,8 +111,8 @@ class WorkflowState(TypedDict):
 class StateManager:
     """State routing helpers + invariant checks.
 
-    T1: skeleton with update_business / update_framework only.
-    T4 will fill route_finish_task and other routing logic.
+    Centralizes BusinessData / FrameworkState writes so framework metadata
+    cannot leak into the business namespace.
     """
 
     @staticmethod
@@ -113,6 +138,19 @@ class StateManager:
             data=state["data"],
             flow=new_flow,
             messages=state["messages"],
+        )
+
+    @staticmethod
+    def route_finish_task(state: WorkflowState, llm_output: dict[str, Any]) -> WorkflowState:
+        """Route finish_task output into business data and framework metadata."""
+        business_fields = {k: v for k, v in llm_output.items() if not k.startswith("_")}
+        framework_meta = {k: v for k, v in llm_output.items() if k.startswith("_")}
+        next_state = state
+        if business_fields:
+            next_state = StateManager.update_business(next_state, **business_fields)
+        return StateManager.update_framework(
+            next_state,
+            finish_task_result={"meta": framework_meta, "raw": llm_output},
         )
 
 
@@ -151,7 +189,7 @@ def legacy_context_from_state(state: WorkflowState) -> dict[str, Any]:
     if flow.retry_feedback is not None:
         ctx["_retry_feedback"] = list(flow.retry_feedback)
     if flow.working_memory:
-        ctx["_working_memory"] = dict(flow.working_memory)
+        ctx["_working_memory"] = flow.working_memory
     if flow.ambiguity_reports:
         ctx["_ambiguity_reports"] = list(flow.ambiguity_reports)
     if flow.last_output is not None:
@@ -196,7 +234,7 @@ def workflow_state_from_legacy_context(
         "persistent_storage_config": ctx.get("_persistent_storage_config"),
         "sub_run_id": ctx.get("_sub_run_id"),
         "retry_feedback": ctx.get("_retry_feedback"),
-        "working_memory": dict(ctx.get("_working_memory") or {}),
+        "working_memory": ctx.get("_working_memory") or {},
         "ambiguity_reports": list(ctx.get("_ambiguity_reports") or []),
         "last_output": ctx.get("_last_output"),
         "group_key": ctx.get("_group_key"),

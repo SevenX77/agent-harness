@@ -35,7 +35,7 @@ class CodePhaseNode(PhaseNode):
         from ..harness import _clone_state  # lazy: avoid import cycle at module load
 
         next_state = _clone_state(state)
-        for cb in self._callbacks:
+        for cb in self.container.callbacks:
             cb.on_phase_start(phase.name, next_state["data"].model_dump())
 
         if phase.tools:
@@ -67,7 +67,7 @@ class CodePhaseNode(PhaseNode):
             source_data=next_state["data"].model_dump(),
         )
 
-        for cb in self._callbacks:
+        for cb in self.container.callbacks:
             cb.on_phase_end(
                 phase.name,
                 next_state["data"].model_dump(),

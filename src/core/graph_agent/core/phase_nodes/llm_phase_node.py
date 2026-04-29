@@ -88,12 +88,13 @@ class LLMPhaseNode(PhaseNode):
             _safe_emit_event,
         )
 
-        assert self._resolver is not None, "execute_llm_phase requires a resolver"
-        assert self._save_compaction_sidecar is not None, (
+        resolver = self.container.resolver
+        assert resolver is not None, "execute_llm_phase requires a resolver"
+        save_compaction_sidecar = self.container.save_compaction_sidecar
+        assert save_compaction_sidecar is not None, (
             "execute_llm_phase requires a save_compaction_sidecar callable"
         )
-        resolver = self._resolver
-        active_callbacks = self._callbacks
+        active_callbacks = self.container.callbacks
 
         state = _clone_state(state)
         is_retry = state["flow"].current_phase == phase.name
@@ -517,7 +518,7 @@ class LLMPhaseNode(PhaseNode):
                 # an IfExp/BoolOp (not extracted to a local) so the
                 # test_compaction_closure_scope AST regression guard
                 # still sees a non-bare-Name RHS.
-                sidecar_ref = self._save_compaction_sidecar(
+                sidecar_ref = save_compaction_sidecar(
                     run_id=((active_ctx.run_id if active_ctx else "") or "unknown"),
                     idx=checkpoint_count,
                     removed_messages=removed_messages,

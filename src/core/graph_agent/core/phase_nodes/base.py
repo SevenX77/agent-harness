@@ -5,8 +5,14 @@ PHASE3_DESIGN.md §2.2 introduces a multi-class architecture so each
 focused class. The :class:`PhaseNode` ABC pins the runtime contract
 the LangGraph node closures invoke; the :class:`DependencyContainer`
 ``@dataclass(frozen=True)`` carries the harness-lifetime services
-(callbacks list, model resolver, sidecar writer) so subclasses don't
-each duplicate a long ``__init__`` parameter list.
+(callbacks list, model resolver, sidecar writer, IO manager) so
+subclasses don't each duplicate a long ``__init__`` parameter list.
+
+PHASE3_DESIGN.md §6 (M9 Mirror Refactor) collapses the legacy
+per-attribute mirror pattern (the trio of underscore-prefixed
+callback/resolver/sidecar handles formerly assigned on every
+subclass ``__init__``) into a single ``self.container`` reference
+resolved through this dataclass.
 
 Per design §2.6, *per-invocation* state (``run_context`` and
 ``heartbeat``) is passed to the node constructor as keyword args
@@ -18,12 +24,13 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from ...callbacks.base import Callback
+from ..io_manager import IOManager
 from ..run_context import RunContext
 from ..state import StateManager, WorkflowState
 from ..types import Phase
@@ -59,11 +66,20 @@ class DependencyContainer:
     ``.resume()`` invocation in the thin ``PhaseExecutor`` shell, and
     the same container is handed to whichever PhaseNode subclass the
     factory selects for that phase.
+
+    PHASE3_DESIGN.md §6.2 added ``io_manager`` so the base class's
+    declarative-IO hoist path has an explicit injection point instead
+    of inlining ``IOManager(...)`` constructions inside subclass
+    bodies. The dataclass default is an empty ``IOManager([])`` so
+    legacy entry points that never carried an explicit io_manager
+    instance keep working without forcing every test fixture to pass
+    one.
     """
 
     callbacks: list[Callback]
     resolver: ModelResolverProtocol | None = None
     save_compaction_sidecar: SaveCompactionSidecar | None = None
+    io_manager: IOManager = field(default_factory=lambda: IOManager([]))
 
 
 class PhaseNode(ABC):
@@ -82,13 +98,13 @@ class PhaseNode(ABC):
         run_context: RunContext | None = None,
         heartbeat: HeartbeatProtocol | None = None,
     ) -> None:
-        # Mirror the original ``PhaseExecutor`` attribute names so the
-        # method bodies move from the executor verbatim — keeps the M6
-        # refactor a textual lift-and-shift instead of a rewrite, which
-        # in turn keeps the existing 28+ phase-executor tests green.
-        self._callbacks = dependencies.callbacks
-        self._resolver = dependencies.resolver
-        self._save_compaction_sidecar = dependencies.save_compaction_sidecar
+        # PHASE3_DESIGN.md §6.2: the harness-lifetime services live on
+        # ``self.container``; subclasses dereference through the
+        # dataclass instead of mirroring each attribute on ``self._*``.
+        # ``run_context`` / ``heartbeat`` remain per-invocation kwargs
+        # because they change every run and would bloat the otherwise
+        # stateless container.
+        self.container = dependencies
         self._run_context = run_context
         self._heartbeat = heartbeat
 

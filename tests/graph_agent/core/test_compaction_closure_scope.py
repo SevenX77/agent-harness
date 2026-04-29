@@ -30,6 +30,12 @@ Post-D-7.2 update: the call site moved out of ``harness.py`` and into
 split. The test now scans both files and asserts the invariant holds
 at *every* found call site — if a future refactor adds another
 compaction call anywhere, it will be checked too.
+
+Post-PHASE3 §6 (M9 Mirror Refactor): the call shape changed from
+``self._save_compaction_sidecar(...)`` (Attribute call) to a local
+variable ``save_compaction_sidecar(...)`` (Name call) sourced from
+``self.container.save_compaction_sidecar``. The matcher now accepts
+both patterns so the L1295 NameError guard survives the rename.
 """
 from __future__ import annotations
 
@@ -54,11 +60,19 @@ _SCAN_PATHS = [
 
 
 def _find_save_compaction_sidecar_calls() -> list[tuple[Path, ast.Call]]:
-    """Locate every ``_save_compaction_sidecar`` call across scanned modules.
+    """Locate every compaction-sidecar call across scanned modules.
 
     Returns (file_path, call_node) pairs. Asserts at least one call is
     found so a silent rename / removal breaks loudly.
+
+    Accepts either the legacy ``something._save_compaction_sidecar(...)``
+    pattern or the post-M9 ``save_compaction_sidecar(...)`` local-name
+    pattern (where the local is sourced from
+    ``self.container.save_compaction_sidecar``). The L1295 guard fires
+    on the kwargs of whichever form matches.
     """
+    accepted_attr_names = {"_save_compaction_sidecar", "save_compaction_sidecar"}
+    accepted_local_names = {"save_compaction_sidecar"}
     calls: list[tuple[Path, ast.Call]] = []
     for path in _SCAN_PATHS:
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -66,11 +80,15 @@ def _find_save_compaction_sidecar_calls() -> list[tuple[Path, ast.Call]]:
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
-            if isinstance(func, ast.Attribute) and func.attr == "_save_compaction_sidecar":
+            if (
+                isinstance(func, ast.Attribute) and func.attr in accepted_attr_names
+            ) or (
+                isinstance(func, ast.Name) and func.id in accepted_local_names
+            ):
                 calls.append((path, node))
 
     assert calls, (
-        "expected at least one _save_compaction_sidecar call across "
+        "expected at least one compaction-sidecar call across "
         f"{[p.name for p in _SCAN_PATHS]}, found 0. If the call site "
         "moved to a new module, add it to _SCAN_PATHS."
     )

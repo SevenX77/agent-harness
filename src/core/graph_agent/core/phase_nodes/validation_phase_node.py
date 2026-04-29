@@ -80,7 +80,7 @@ class ValidationPhaseNode(PhaseNode):
             retries_used = retry_counts.get(retry_key, 0)
             retry_counts.pop(retry_key, None)
             _safe_emit_event(
-                self._callbacks,
+                self.container.callbacks,
                 ValidationPassEvent(
                     phase_name=phase.name,
                     retry_count=retries_used,
@@ -99,7 +99,7 @@ class ValidationPhaseNode(PhaseNode):
             return self._apply_io_hoist(next_state, phase)
 
         current_retries = retry_counts.get(retry_key, 0)
-        for cb in self._callbacks:
+        for cb in self.container.callbacks:
             cb.on_validation_fail(phase.name, errors, current_retries)
 
         if current_retries >= phase.max_retries:
@@ -109,7 +109,7 @@ class ValidationPhaseNode(PhaseNode):
                 phase.max_retries,
             )
             _safe_emit_event(
-                self._callbacks,
+                self.container.callbacks,
                 RetryExhaustedEvent(
                     phase_name=phase.name,
                     max_retries=phase.max_retries,
@@ -125,7 +125,7 @@ class ValidationPhaseNode(PhaseNode):
 
         retry_counts[retry_key] = current_retries + 1
 
-        for cb in self._callbacks:
+        for cb in self.container.callbacks:
             cb.on_retry(phase.name, retry_key, errors)
 
         return StateManager.update_framework(

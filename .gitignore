@@ -1,4 +1,8 @@
 # Python
+.coverage
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
 __pycache__/
 *.py[cod]
 *$py.class
@@ -21,17 +25,19 @@ wheels/
 *.egg
 
 # Virtual Environment
-venv/
+.venv/
 ENV/
 env/
+venv/
 
 # Environment variables
 .env
 .env copy
 
 # IDE
-.vscode/
+.claude/sessions/
 .idea/
+.vscode/
 *.swp
 *.swo
 *~

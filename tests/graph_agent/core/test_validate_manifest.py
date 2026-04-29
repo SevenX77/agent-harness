@@ -165,7 +165,7 @@ def test_validate_manifest_rejects_io_manager_errors() -> None:
 def test_validate_manifest_rejects_validator_without_output_schema() -> None:
     """Phase 2 A1 contract: an LLMPhase that mounts a `validator` must also
     declare a structured output. Pre-A1 SKILLs would silently fall through
-    to `ValidationMiddleware` running the validator on the raw legacy ctx.
+    to the legacy parallel pipeline running the validator on the raw legacy ctx.
     """
     raw = parse_skill_md(
         _graph_skill_yaml(

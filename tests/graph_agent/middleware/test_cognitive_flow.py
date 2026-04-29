@@ -382,9 +382,9 @@ class TestPhase2A2v3PydanticSchemaDispatch:
 
 class TestPhase2A2v3BusinessValidatorDispatch:
     """PHASE2_DESIGN.md §3.2 #3: CognitiveFlow takes over the business-
-    validator dispatch responsibility from legacy ``ValidationMiddleware``
-    so the legacy can be retired for the static-schema pipeline.
-    Validators conform to A1 §2.4 (``payload: list[dict[str, Any]]``).
+    validator dispatch responsibility from the legacy parallel pipeline
+    (Phase 3 M7 retired the latter). Validators conform to A1 §2.4
+    (``payload: list[dict[str, Any]]``).
     """
 
     def test_business_validator_runs_after_pydantic_pass(self) -> None:

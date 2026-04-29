@@ -1,4 +1,4 @@
-"""Tests for finish_task marker and ValidationMiddleware."""
+"""Tests for finish_task marker (Phase 2/3 schema gate via CognitiveFlow)."""
 
 from __future__ import annotations
 
@@ -10,11 +10,9 @@ from typing import Any
 import pytest
 from langchain_core.messages import ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
-from langgraph.types import Command
 from pydantic import BaseModel, ConfigDict
 
 from graph_agent.cognitive.finish import SELFCHECK_NUDGE, finish_task
-from graph_agent.cognitive.middlewares import ValidationMiddleware
 from graph_agent.core.exceptions import SkillCompilationError
 from graph_agent.core.loader import load_workflow_from_md
 from graph_agent.core.manifest import GraphSkillDef
@@ -177,10 +175,11 @@ class TestFinishTaskV2:
 class TestFinishTaskWiringMVP2T5:
     """T5 wires SchemaEngine + IOManager hooks into ``finish_task``.
 
-    Today the canonical schema gate is ``ValidationMiddleware``; these
-    tests pin the optional kwargs so a future caller (test harness or
-    MVP-4 ``LLMPhaseNode``) can opt into the defense-in-depth path
-    without breaking the existing thin-packager contract.
+    Today the canonical schema gate is ``CognitiveFlowMiddleware`` (Phase 3
+    M7 retired the legacy parallel pipeline); these tests pin the optional
+    kwargs so a future caller (test harness or MVP-4 ``LLMPhaseNode``)
+    can opt into the defense-in-depth path without breaking the existing
+    thin-packager contract.
     """
 
     def test_default_call_remains_thin_packager(self) -> None:
@@ -395,247 +394,6 @@ class TestFinishTaskWiringMVP2T5:
         assert "finish_task_result" in result
         assert "diagnostics" in result
         assert result["diagnostics"] == "my diagnostics"
-
-
-class TestValidationMiddleware:
-    def test_rejects_empty_schema_submission(self) -> None:
-        ctx: dict[str, Any] = {}
-        middleware = ValidationMiddleware(output_schema=BusinessItem, ctx=ctx)
-
-        def handler(_request: ToolCallRequest) -> ToolMessage:
-            raise AssertionError("finish_task handler should not run")
-
-        result = middleware.wrap_tool_call(_request({"business_data_md": ""}), handler)
-
-        assert isinstance(result, Command)
-        assert result.goto == "model"
-        message = result.update["messages"][0]
-        assert isinstance(message, ToolMessage)
-        assert message.status == "error"
-        assert "提交已被系统驳回" in str(message.content)
-        assert "business_data_md 是空" in str(message.content)
-        assert "_finish_task_result" not in ctx
-
-    def test_invalid_json_args_returns_llm_feedback(self) -> None:
-        ctx: dict[str, Any] = {}
-        middleware = ValidationMiddleware(
-            output_schema=BusinessItem,
-            ctx=ctx,
-            phase_name="finish_phase",
-        )
-        request = ToolCallRequest(
-            tool_call={"name": "finish_task", "id": "call-1", "args": "{bad json"},
-            tool=None,
-            state={},
-            runtime=None,  # type: ignore[arg-type]
-        )
-
-        def handler(_request: ToolCallRequest) -> ToolMessage:
-            raise AssertionError("finish_task handler should not run")
-
-        result = middleware.wrap_tool_call(request, handler)
-
-        assert isinstance(result, Command)
-        assert result.goto == "model"
-        message = result.update["messages"][0]
-        assert isinstance(message, ToolMessage)
-        assert message.status == "error"
-        assert message.name == "finish_task"
-        assert message.tool_call_id == "call-1"
-        assert "JSON parse failed" in str(message.content)
-        assert "Please retry with valid JSON" in str(message.content)
-        assert "_finish_task_result" not in ctx
-
-    def test_accepts_valid_schema_submission(self) -> None:
-        ctx: dict[str, Any] = {}
-        seen_payloads: list[Any] = []
-
-        def business_validator(payload: list[dict[str, Any]]) -> tuple[bool, list[str]]:
-            seen_payloads.append(payload)
-            return True, []
-
-        middleware = ValidationMiddleware(
-            output_schema=BusinessItem,
-            business_validator=business_validator,
-            ctx=ctx,
-        )
-
-        result = middleware.wrap_tool_call(
-            _request({"business_data_md": VALID_BUSINESS_MD}),
-            _handler,
-        )
-
-        assert isinstance(result, ToolMessage)
-        assert seen_payloads == [[{"title": "Scene plan", "score": 3, "tags": ["scene", "plan"]}]]
-        assert ctx["_finish_task_result"] == {
-            "business_data_parsed": [
-                {"title": "Scene plan", "score": 3, "tags": ["scene", "plan"]}
-            ],
-            "schema_validation": "passed",
-        }
-
-    def test_accepts_valid_schema_submission_updates_workflow_state(self) -> None:
-        ctx: dict[str, Any] = {}
-        state = _workflow_state()
-        middleware = ValidationMiddleware(
-            output_schema=BusinessItem,
-            ctx=ctx,
-            workflow_state=state,
-        )
-
-        result = middleware.wrap_tool_call(
-            _request({"business_data_md": VALID_BUSINESS_MD}),
-            _handler,
-        )
-
-        assert isinstance(result, ToolMessage)
-        assert middleware.workflow_state is not None
-        assert middleware.workflow_state is not state
-        assert middleware.workflow_state["flow"].finish_task_result == {
-            "business_data_parsed": [
-                {"title": "Scene plan", "score": 3, "tags": ["scene", "plan"]}
-            ],
-            "schema_validation": "passed",
-        }
-        assert state["flow"].finish_task_result is None
-
-    def test_rejects_pydantic_errors(self) -> None:
-        ctx: dict[str, Any] = {}
-        middleware = ValidationMiddleware(output_schema=BusinessItem, ctx=ctx)
-        invalid_md = """## item-1
-- title: Scene plan
-- score: high
-"""
-
-        def handler(_request: ToolCallRequest) -> ToolMessage:
-            raise AssertionError("finish_task handler should not run")
-
-        result = middleware.wrap_tool_call(
-            _request({"business_data_md": invalid_md}),
-            handler,
-        )
-
-        assert isinstance(result, Command)
-        content = str(result.update["messages"][0].content)
-        assert "[Pydantic] item-1" in content
-        assert "score" in content
-        assert "_finish_task_result" not in ctx
-
-    def test_rejects_unresolvable_schema_path(self) -> None:
-        ctx: dict[str, Any] = {}
-        middleware = ValidationMiddleware(output_schema_path="does.not.Exist", ctx=ctx)
-
-        result = middleware.wrap_tool_call(
-            _request({"business_data_md": VALID_BUSINESS_MD}),
-            _handler,
-        )
-
-        assert isinstance(result, Command)
-        assert "无法加载 output_schema 'does.not.Exist'" in str(
-            result.update["messages"][0].content
-        )
-
-    def test_rejects_business_validator_errors(self) -> None:
-        ctx: dict[str, Any] = {}
-
-        def business_validator(_payload: list[dict[str, Any]]) -> tuple[bool, list[str]]:
-            return False, ["segment boundary gap"]
-
-        middleware = ValidationMiddleware(
-            output_schema=BusinessItem,
-            business_validator=business_validator,
-            ctx=ctx,
-        )
-
-        result = middleware.wrap_tool_call(
-            _request({"business_data_md": VALID_BUSINESS_MD}),
-            _handler,
-        )
-
-        assert isinstance(result, Command)
-        assert "[Business] segment boundary gap" in str(result.update["messages"][0].content)
-        assert "_finish_task_result" not in ctx
-
-    def test_runs_context_validator_without_schema(self) -> None:
-        ctx: dict[str, Any] = {"ready": False}
-
-        def business_validator(payload: dict[str, Any]) -> tuple[bool, list[str]]:
-            return bool(payload.get("ready")), ["context not ready"]
-
-        middleware = ValidationMiddleware(business_validator=business_validator, ctx=ctx)
-
-        rejected = middleware.wrap_tool_call(_request({}), _handler)
-        assert isinstance(rejected, Command)
-        assert "[Business] context not ready" in str(rejected.update["messages"][0].content)
-
-        ctx["ready"] = True
-        accepted = middleware.wrap_tool_call(_request({}), _handler)
-        assert isinstance(accepted, ToolMessage)
-
-    def test_accepts_dynamic_schema_submission(self) -> None:
-        ctx: dict[str, Any] = {}
-        seen_payloads: list[Any] = []
-        schema = parse_output_example(VALID_DYNAMIC_EXAMPLE)
-
-        def business_validator(payload: list[dict[str, Any]]) -> tuple[bool, list[str]]:
-            seen_payloads.append(payload)
-            return True, []
-
-        middleware = ValidationMiddleware(
-            output_schema=schema,
-            business_validator=business_validator,
-            ctx=ctx,
-        )
-
-        result = middleware.wrap_tool_call(
-            _request({"business_data_md": VALID_DYNAMIC_MD}),
-            _handler,
-        )
-
-        assert isinstance(result, ToolMessage)
-        assert seen_payloads == [
-            [
-                {
-                    "index": 1,
-                    "type": "B",
-                    "start_line": 1,
-                    "end_line": 5,
-                    "content": "收音机播报上沪沦陷消息",
-                    "confidence": 0.95,
-                }
-            ]
-        ]
-        assert ctx["_finish_task_result"] == {
-            "business_data_parsed": seen_payloads[0],
-            "schema_validation": "passed",
-            "schema_type": "dynamic",
-            "schema_name": "Segment",
-        }
-
-    def test_rejects_dynamic_schema_errors(self) -> None:
-        ctx: dict[str, Any] = {}
-        schema = parse_output_example(VALID_DYNAMIC_EXAMPLE)
-        middleware = ValidationMiddleware(output_schema=schema, ctx=ctx)
-        invalid_md = """## segments
-- index: 1
-- type: D
-- start_line: 1
-- end_line: 5
-- extra: no
-"""
-
-        result = middleware.wrap_tool_call(
-            _request({"business_data_md": invalid_md}),
-            _handler,
-        )
-
-        assert isinstance(result, Command)
-        content = str(result.update["messages"][0].content)
-        assert "[DynamicSchema] segments" in content
-        assert "not in ['A', 'B', 'C']" in content
-        assert "Unknown field 'extra'" in content
-        assert "Missing required field 'content'" in content
-        assert "_finish_task_result" not in ctx
 
 
 class TestSchemaByExample:

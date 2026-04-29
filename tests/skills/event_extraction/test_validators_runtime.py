@@ -1,7 +1,7 @@
 """Runtime smoke tests for skills/event-extraction/script/validators.py.
 
 Per PHASE2_DESIGN.md §6.2, every live SKILL validator must have a
-runtime smoke test that simulates the ValidationMiddleware schema branch
+runtime smoke test that simulates the CognitiveFlow schema branch
 real-data flow. The validator under test (``validate_event_extraction``)
 is mounted on the ``settings`` LLMPhase of
 ``skills/event-extraction/SKILL.md`` with

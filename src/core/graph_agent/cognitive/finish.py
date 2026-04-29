@@ -5,12 +5,15 @@ Architecture (post-MVP-2 T5)
 
 ``finish_task`` itself is intentionally a thin packager. The heavy
 work — schema validation and io.outputs hoisting — lives in two
-collaborators:
+collaborators (post-Phase-3 M7 the legacy parallel pipeline is gone;
+the modern owner is ``CognitiveFlowMiddleware``):
 
-* :class:`graph_agent.cognitive.middlewares.ValidationMiddleware`
+* :class:`graph_agent.middleware.cognitive_flow.CognitiveFlowMiddleware`
   intercepts the agent loop's ``finish_task`` tool call **before** the
   return-direct tool runs, validates ``business_data_md`` against the
-  phase's ``output_schema``, and re-routes invalid submissions back to
+  phase's ``output_schema`` (Pydantic ``type[BaseModel]`` or
+  ``SchemaObject``), dispatches the per-phase business validator on
+  the parsed items list, and re-routes invalid submissions back to
   the model in the same agent loop. It is the canonical schema gate.
 * :class:`graph_agent.core.phase_executor.PhaseExecutor`'s LLM phase
   exit code (or, post-MVP-4, ``LLMPhaseNode.execute``) reads the
@@ -19,8 +22,8 @@ collaborators:
   named outputs into ``state['data']``.
 
 This function therefore does **not** call ``schema_engine`` or
-``io_manager`` synchronously today — by the time it executes the
-ValidationMiddleware has already accepted the payload. The optional
+``io_manager`` synchronously today — by the time it executes
+CognitiveFlowMiddleware has already accepted the payload. The optional
 ``schema_engine`` / ``compiled_schema`` parameters exist as wiring
 hooks so a defense-in-depth path can be turned on by callers (e.g. a
 test harness running without the middleware, or a future MVP that
@@ -28,7 +31,7 @@ relocates validation back into the tool itself); when the kwargs are
 omitted, behaviour is identical to the pre-MVP-2 packager.
 
 ``SCHEMA_VALIDATION_ERROR_TEMPLATE`` and ``PARSE_ERROR_TEMPLATE`` stay
-as exported module constants because ``ValidationMiddleware`` formats
+as exported module constants because CognitiveFlowMiddleware formats
 its rejection messages from them — single source of truth for LLM
 retry feedback strings.
 """
@@ -63,7 +66,7 @@ def _parse_business_md_to_blocks(
     reason.
 
     The fix uses ``md_to_json.parse_md`` — the same canonical parser
-    ``ValidationMiddleware`` runs upstream — to split the markdown into
+    ``CognitiveFlowMiddleware`` runs upstream — to split the markdown into
     one ``ParsedBlock`` per ``##`` item. Each block's ``.data`` dict is
     what ``schema_engine.validate`` actually expects.
     """
@@ -142,16 +145,16 @@ def finish_task(
 ) -> dict[str, Any]:
     """Mark the current phase complete.
 
-    ``ValidationMiddleware`` has typically already accepted or rejected
-    this submission inside the agent loop, so this function packages the
-    accepted payload and lets the phase executor route it into framework
-    state. The optional ``schema_engine`` / ``compiled_schema`` /
-    ``io_manager`` kwargs (added in MVP-2 T5) are wiring hooks for the
-    defense-in-depth path documented in the module header — when caller
-    supplies all three the function performs a final validation + hoist
-    pass; when omitted (the current production call site in
-    ``phase_executor._finish_task_tool``) behaviour matches the pre-MVP-2
-    packager exactly.
+    ``CognitiveFlowMiddleware`` has typically already accepted or
+    rejected this submission inside the agent loop, so this function
+    packages the accepted payload and lets the phase executor route it
+    into framework state. The optional ``schema_engine`` /
+    ``compiled_schema`` / ``io_manager`` kwargs (added in MVP-2 T5) are
+    wiring hooks for the defense-in-depth path documented in the module
+    header — when caller supplies all three the function performs a
+    final validation + hoist pass; when omitted (the current production
+    call site in ``phase_executor._finish_task_tool``) behaviour matches
+    the pre-MVP-2 packager exactly.
 
     Returns a dict carrying the legacy ``value`` / ``duplicate`` keys
     (read by ``phase_executor._finish_task_tool``) plus the design.md
@@ -171,7 +174,7 @@ def finish_task(
 
     # Defense-in-depth schema validation. Active only when caller wires
     # both ``schema_engine`` and ``compiled_schema`` (today: tests and
-    # future MVP-4 callers); ValidationMiddleware remains the canonical
+    # future MVP-4 callers); CognitiveFlowMiddleware remains the canonical
     # gate when these kwargs are absent.
     if schema_engine is not None and compiled_schema is not None and business_data_md:
         # T5-hotfix: parse markdown → list[ParsedBlock.data] before

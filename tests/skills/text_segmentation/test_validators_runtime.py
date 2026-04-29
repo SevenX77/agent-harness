@@ -1,8 +1,8 @@
 """Runtime smoke tests for skills/text-segmentation/script/validators.py.
 
 Per PHASE2_DESIGN.md §6.2, every live SKILL validator needs a runtime
-smoke test that simulates the ValidationMiddleware schema branch real-
-data flow. The text-segmentation SKILL exposes two validators on its
+smoke test that simulates the CognitiveFlow schema branch real-data
+flow. The text-segmentation SKILL exposes two validators on its
 LLMPhases (both phases declare ``output_schema: script.models.Segment``):
 
 * ``segment`` phase → ``validate_segmentation_structure``

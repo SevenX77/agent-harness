@@ -46,6 +46,7 @@ phases:
       - script.extractor.parse_events
       - script.extractor.store_events
       - script.extractor.backup_event_timeline
+    output_schema: script.models.PhaseSummary
     prompt: |
       你是专业的小说编辑和叙事分析师。你的任务是分析已分段的小说章节，完成两个任务：
       ## 任务1：时间线重排
@@ -111,6 +112,7 @@ phases:
       - script.extractor.parse_events
       - script.extractor.safe_review_store_events
       - script.extractor.log_ambiguous_events
+    output_schema: script.models.PhaseSummary
     prompt: |
       你是专业的小说编辑。你的任务是审查已初步提取的事件时间线，做两项核验。
       ## 核验任务1：逐事件时间/地点核查

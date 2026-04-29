@@ -1,12 +1,12 @@
 """ProtocolValidationMiddleware — single owner of state-contract checks.
 
-MVP-3 T7 (B3 middleware simplification): the canonical, pre-MVP-4 site
-where the framework verifies its three state invariants on every LLM
-step boundary. Replaces the contract-validation slice that previously
-sat inside ``cognitive/middlewares.py:ValidationMiddleware`` (which
+MVP-3 T7 (B3 middleware simplification): the canonical site where the
+framework verifies its three state invariants on every LLM step
+boundary. Replaces the contract-validation slice that previously sat
+inside the legacy ``cognitive/middlewares.py`` parallel pipeline (which
 mixed contract validation with finish_task interception, schema
-hoisting, and rejection-message authoring). The legacy module stays
-wired during the transition — T8 retires it when CognitiveFlow lands.
+hoisting, and rejection-message authoring). Phase 3 M7 retired the
+legacy pipeline; this middleware now owns contract checks exclusively.
 
 Three contracts pinned here:
 

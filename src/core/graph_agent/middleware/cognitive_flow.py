@@ -74,25 +74,21 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         phase_name: str = "unknown",
         interrupt_fn: InterruptFn | None = None,
     ) -> None:
-        # Phase 2 A2 v3 (design v4 §3.4 step 1+2 + §3.2 #3 "彻底接管旧
-        # ValidationMiddleware 职责"): the schema parameter union was
-        # extended from ``SchemaObject | None`` to also accept a Pydantic
-        # ``type[BaseModel]``. ``_validate_finish_args`` dispatches on
-        # the schema kind: ``SchemaObject`` keeps the
-        # ``schema_engine.get_pydantic_model`` + ``schema_engine.validate``
-        # path; ``type[BaseModel]`` skips the schema-engine round-trip and
-        # validates each parsed block directly with
-        # ``schema_cls.model_validate``. This unblocks dotted-path SKILLs
-        # whose ``output_schema`` resolves to a Pydantic class at load time.
+        # Phase 2 A2 v3 + Phase 3 M7 (PHASE2_DESIGN.md §3.4, PHASE3_DESIGN.md §3):
+        # ``current_phase_schema`` accepts ``type[BaseModel] | SchemaObject |
+        # None``. ``_validate_finish_args`` dispatches on schema kind:
+        # ``SchemaObject`` walks ``schema_engine.get_pydantic_model`` +
+        # ``schema_engine.validate``; ``type[BaseModel]`` skips the engine
+        # round-trip and validates each parsed block directly with
+        # ``schema_cls.model_validate`` (unblocks dotted-path SKILLs whose
+        # ``output_schema`` resolves to a Pydantic class at load time).
         #
         # ``business_validator`` is the per-phase business-rule callable
         # mounted via the SKILL's ``validator:`` field. It receives the
         # parsed items list (``list[dict[str, Any]]`` per A1 §2.4) AFTER
-        # Pydantic validation succeeds; failures are routed back to the
-        # LLM as retry feedback. This was previously owned by
-        # ``cognitive.middlewares.ValidationMiddleware``; design v4 §3.2
-        # #3 explicitly transfers the responsibility here so the legacy
-        # middleware can be retired for the static-schema pipeline.
+        # Pydantic validation succeeds; failures route back to the LLM as
+        # retry feedback. M7 retired the legacy parallel pipeline so this
+        # middleware is now the sole owner of finish_task validation.
         super().__init__()
         self._io_manager = io_manager
         self._unattended = bool(unattended)

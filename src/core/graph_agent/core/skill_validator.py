@@ -67,7 +67,7 @@ def _enforce_validator_requires_output_schema(manifest: GraphSkillDef) -> None:
     both raw-string and ``-_md`` pre-parsed forms count).
 
     Pre-A1 SKILL.md authors could attach a business validator to an LLMPhase
-    that emitted free-form markdown; the ``ValidationMiddleware`` then handed
+    that emitted free-form markdown; the legacy validation pipeline then handed
     the validator the whole legacy ``ctx`` dict, which violated the validator's
     declared signature (typically ``list[dict]``). This helper rejects the
     misconfiguration at compile time so the runtime never reaches the broken

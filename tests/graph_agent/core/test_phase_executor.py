@@ -500,23 +500,14 @@ class TestExecuteLLMPhaseMiddlewareIntegration:
         assert agent_model._wrapped is captured["resolver_model"]
 
 
-class TestExecuteLLMPhaseSchemaRoutingPhase2A2v4:
-    """PHASE2_DESIGN.md §3.4 + §3.6 (design v5): execute_llm_phase routes
-    middleware assembly on three discriminating branches:
-
-      1. ``DynamicSchemaDef`` (output_example form) → legacy
-         ``ValidationMiddleware`` fallback.
-      2. ``None`` (schema-less LLM finish_task) → legacy fallback
-         (Strategy A — keeps live SKILLs alive while v1.1 lands the
-         dedicated raw_output phase type per Strategy C).
-      3. ``type[BaseModel]`` (Pydantic class) or ``SchemaObject`` →
-         new pipeline ``[ProtocolValidationMiddleware,
-         CognitiveFlowMiddleware]``.
-
-    The tests below assert each branch by inspecting the middleware
-    list ``execute_llm_phase`` hands to ``create_agent``. The legacy
-    middleware and the new-pipeline middlewares are never both present
-    on the same phase — the routing must be exclusive.
+class TestExecuteLLMPhaseSchemaRoutingPhase3M7:
+    """Phase 3 M7 (PHASE3_DESIGN.md §3.4): execute_llm_phase mounts a
+    single-responsibility middleware pair for every LLM phase. Strategy
+    C terminated the dual-system split — the legacy parallel pipeline
+    and its ``DynamicSchemaDef`` / schema-less fallbacks are gone, so
+    every phase now flows through
+    ``[ProtocolValidationMiddleware, CognitiveFlowMiddleware]`` regardless
+    of how its ``output_schema`` was declared.
     """
 
     def _middleware_class_names(self, captured: dict[str, Any]) -> list[str]:
@@ -524,84 +515,6 @@ class TestExecuteLLMPhaseSchemaRoutingPhase2A2v4:
             type(mw).__name__
             for mw in captured["create_agent_kwargs"]["middleware"]
         ]
-
-    def test_dynamic_schema_routes_to_legacy_validation_middleware(
-        self, monkeypatch, caplog
-    ):
-        from graph_agent.tools.dynamic_schema import DynamicSchemaDef
-
-        phase = Phase(
-            name="dynamic_skill",
-            max_iterations=1,
-            max_nudges=0,
-            # ``output_example`` form — schema_builder casts this into
-            # ``phase.output_schema`` per skill_builder.py:340.
-            output_schema=DynamicSchemaDef(
-                name="DynamicItem", item_header="items", fields=()
-            ),
-        )
-
-        with caplog.at_level(logging.WARNING, logger="graph_agent.core.phase_executor"):
-            captured = _capture_execute_llm_phase(monkeypatch, phase)
-
-        names = self._middleware_class_names(captured)
-        assert "ValidationMiddleware" in names, (
-            "dynamic-schema phase must mount the legacy ValidationMiddleware "
-            "fallback per design v5 §3.3 #2"
-        )
-        assert "CognitiveFlowMiddleware" not in names
-        assert "ProtocolValidationMiddleware" not in names
-
-        decision_log = next(
-            (
-                rec.message
-                for rec in caplog.records
-                if "middleware_pipeline" in rec.message
-                and rec.message.find(f"phase={phase.name}") != -1
-            ),
-            None,
-        )
-        assert decision_log is not None
-        assert "decision=legacy_fallback" in decision_log
-        assert "reason=dynamic_schema_output_example" in decision_log
-
-    def test_schema_less_phase_routes_to_legacy_validation_middleware(
-        self, monkeypatch, caplog
-    ):
-        # No ``output_schema`` — exactly what the live event-extraction
-        # ``aggregate``/``review``, ``batch-analysis``, and
-        # ``global-synthesis`` LLM phases ship with today.
-        phase = Phase(name="aggregate", max_iterations=1, max_nudges=0)
-        assert phase.output_schema is None
-
-        with caplog.at_level(logging.WARNING, logger="graph_agent.core.phase_executor"):
-            captured = _capture_execute_llm_phase(monkeypatch, phase)
-
-        names = self._middleware_class_names(captured)
-        assert "ValidationMiddleware" in names, (
-            "schema-less LLM phase must route to legacy ValidationMiddleware "
-            "(design v5 §3.6 Strategy A) so live SKILLs that finish_task "
-            "without an output_schema keep working through v1.0."
-        )
-        assert "CognitiveFlowMiddleware" not in names, (
-            "schema-less phase must NOT mount CognitiveFlowMiddleware — its "
-            "A1 contract raises CognitiveFlowError when schema is None."
-        )
-        assert "ProtocolValidationMiddleware" not in names
-
-        decision_log = next(
-            (
-                rec.message
-                for rec in caplog.records
-                if "middleware_pipeline" in rec.message
-                and "phase=aggregate" in rec.message
-            ),
-            None,
-        )
-        assert decision_log is not None
-        assert "decision=legacy_fallback" in decision_log
-        assert "reason=schema_less_finish_task" in decision_log
-        assert "Strategy A" in decision_log
 
     def test_static_pydantic_schema_routes_to_new_pipeline(
         self, monkeypatch, caplog
@@ -623,9 +536,6 @@ class TestExecuteLLMPhaseSchemaRoutingPhase2A2v4:
         names = self._middleware_class_names(captured)
         assert "ProtocolValidationMiddleware" in names
         assert "CognitiveFlowMiddleware" in names
-        assert "ValidationMiddleware" not in names, (
-            "static-schema phase must NOT mount the legacy ValidationMiddleware"
-        )
 
         decision_log = next(
             (
@@ -658,6 +568,28 @@ class TestExecuteLLMPhaseSchemaRoutingPhase2A2v4:
         names = self._middleware_class_names(captured)
         assert "ProtocolValidationMiddleware" in names
         assert "CognitiveFlowMiddleware" in names
+
+    def test_no_legacy_validation_middleware_anywhere_in_pipeline(
+        self, monkeypatch
+    ):
+        """PHASE3_DESIGN.md §3.6 ship-standard: the legacy parallel
+        pipeline must be physically gone. Even when assembling the
+        middleware list against an arbitrary phase shape, no class
+        with the literal name ``ValidationMiddleware`` should appear.
+        """
+
+        class _LiveSchema(BaseModel):
+            title: str
+
+        phase = Phase(
+            name="x",
+            max_iterations=1,
+            max_nudges=0,
+            output_schema=_LiveSchema,
+        )
+
+        captured = _capture_execute_llm_phase(monkeypatch, phase)
+        names = self._middleware_class_names(captured)
         assert "ValidationMiddleware" not in names
 
 

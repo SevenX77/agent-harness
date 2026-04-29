@@ -24,12 +24,13 @@ in ``tests/graph_agent/conftest.py`` pins the sequence — silently
 re-ordering middleware is precisely the kind of latent bug MVP-3 set
 out to make impossible.
 
-Note: the legacy ``cognitive/middlewares.py`` module remains wired
-into ``phase_executor.py`` and ``harness.py`` during the MVP-3 → MVP-4
-transition; the legacy module is scheduled for removal once MVP-4
-phase_executor finishes its rewrite (the legacy ``ValidationMiddleware``
-ctor signature is too entangled with the executor's runtime ctx for a
-T11-scope swap).
+Note: Phase 3 M7 retired the legacy ``cognitive/middlewares.py``
+parallel pipeline (PHASE3_DESIGN.md §3); after Strategy C gave every
+live LLM phase a strongly-typed ``output_schema``, all finish_task
+routing flows through this MVP-3 middleware chain exclusively. The
+remaining helpers in ``cognitive/middlewares.py`` are shared utilities
+only (working memory, dead-end pruning, agent-loop iteration,
+unattended clarification, ``create_custom_middlewares``).
 """
 
 from __future__ import annotations

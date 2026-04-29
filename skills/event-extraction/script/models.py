@@ -62,3 +62,22 @@ class Setting(BaseModel):
     core_knowledge: str = Field(
         description="核心知识点（50-100 字精炼）"
     )
+
+
+class PhaseSummary(BaseModel):
+    """Phase 3 M7 (PHASE3_DESIGN.md §3.3) — minimal schema for the
+    ``aggregate`` and ``review`` LLM phases.
+
+    These two phases historically called ``finish_task`` without
+    declaring an ``output_schema``: their real work happens via
+    ``parse_events`` / ``store_events`` agent_tools that mutate the ctx
+    directly, and ``finish_task`` was just a "done" signal. After M7
+    every LLM phase that uses ``finish_task`` must carry a strongly-
+    typed schema so the new ProtocolValidation+CognitiveFlow pipeline
+    can drop the ValidationMiddleware fallback. ``summary`` is the
+    catch-all field the LLM fills with its analysis narrative.
+    """
+
+    summary: str = Field(
+        description="本阶段的分析总结（自由文本，含关键判断）",
+    )

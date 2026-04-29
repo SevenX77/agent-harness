@@ -21,6 +21,7 @@ Fixed contract: a ``save_outputs`` failure must propagate. The outer
 ``RunEndedEvent(status="crashed")`` and re-raises, so callers know the
 data did not land.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -30,6 +31,7 @@ import pytest
 from graph_agent.callbacks.base import Callback
 from graph_agent.callbacks.events import RunEndedEvent
 from graph_agent.core.harness import GraphAgentHarness
+from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
 from graph_agent.core.types import Phase
 
 
@@ -45,19 +47,22 @@ class _CompletedFakeGraph:
     """Returns a normal final state with no outstanding tasks (run completed)."""
 
     def __init__(self) -> None:
-        self._final_state = {
-            "context": {"some_output": "value"},
-            "messages": [],
+        self._business_fields: dict[str, Any] = {"some_output": "value"}
+        self._flow_fields: dict[str, Any] = {
             "current_phase": "phase_a",
-            "retry_counts": {},
             "metrics": {"total_input_tokens": 0, "total_output_tokens": 0},
         }
 
-    def invoke(self, initial_state, config=None):
-        return dict(self._final_state)
+    def invoke(self, initial_state, config=None) -> WorkflowState:
+        return WorkflowState(
+            data=BusinessData(**self._business_fields),
+            flow=FrameworkState(**self._flow_fields),
+            messages=[],
+        )
 
     def get_state(self, config):
         from types import SimpleNamespace
+
         return SimpleNamespace(next=(), tasks=())
 
 

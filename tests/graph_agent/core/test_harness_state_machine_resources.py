@@ -1,4 +1,5 @@
 """Regression tests for harness state-machine edge cases and resources."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,6 +17,7 @@ from graph_agent.core.exceptions import (
     TraceWriteError,
 )
 from graph_agent.core.harness import GraphAgentHarness, _clone_state
+from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
 from graph_agent.core.types import Phase
 
 
@@ -29,19 +31,18 @@ class _CapturingCallback(Callback):
 
 class _CompletedFakeGraph:
     def __init__(self) -> None:
-        self._final_state = {
-            "context": {"some_output": "value", "output_dir": ""},
-            "messages": [],
+        self._business_fields: dict[str, Any] = {"some_output": "value", "output_dir": ""}
+        self._flow_fields: dict[str, Any] = {
             "current_phase": "phase_a",
-            "retry_counts": {},
             "metrics": {"total_input_tokens": 0, "total_output_tokens": 0},
         }
 
-    def invoke(self, initial_state, config=None):
-        return {
-            **self._final_state,
-            "context": dict(self._final_state["context"]),
-        }
+    def invoke(self, initial_state, config=None) -> WorkflowState:
+        return WorkflowState(
+            data=BusinessData(**self._business_fields),
+            flow=FrameworkState(**self._flow_fields),
+            messages=[],
+        )
 
     def get_state(self, config):
         return SimpleNamespace(next=(), tasks=())
@@ -114,9 +115,7 @@ def test_auto_checkpointer_init_failure_raises_checkpoint_error(
     with pytest.raises(CheckpointError) as exc_info:
         GraphAgentHarness(phases=[Phase(name="phase_a", requires_llm=False)])
 
-    assert "checkpointer init failed: checkpoint backend unavailable" in str(
-        exc_info.value
-    )
+    assert "checkpointer init failed: checkpoint backend unavailable" in str(exc_info.value)
     assert exc_info.value.context == {
         "checkpoint_dir": None,
         "checkpointer": "auto",
@@ -130,19 +129,21 @@ class _Uncopyable:
 
 
 def test_clone_state_deepcopy_failure_raises_state_transform_error() -> None:
-    state = {
-        "context": {"bad": _Uncopyable()},
-        "messages": [],
-        "current_phase": "phase_a",
-        "retry_counts": {},
-        "metrics": {},
-    }
+    # BusinessData has extra="allow"; planting an _Uncopyable in the data
+    # namespace makes BusinessData.model_copy(deep=True) raise during
+    # _clone_state and surfaces a StateTransformError mapped to the
+    # "data" field (the new schema's analogue of the old "context" key).
+    state = WorkflowState(
+        data=BusinessData(bad=_Uncopyable()),
+        flow=FrameworkState(current_phase="phase_a"),
+        messages=[],
+    )
 
     with pytest.raises(StateTransformError) as exc_info:
         _clone_state(state)
 
-    assert "deepcopy failed for state field context" in str(exc_info.value)
-    assert exc_info.value.context == {"field": "context", "type": "dict"}
+    assert "deepcopy failed for state field data" in str(exc_info.value)
+    assert exc_info.value.context == {"field": "data", "type": "BusinessData"}
     assert isinstance(exc_info.value.__cause__, TypeError)
 
 
@@ -186,7 +187,7 @@ def test_trace_callback_from_extra_callbacks_is_saved(tmp_path: Path) -> None:
     )
 
     assert tracer.saved_to == [tmp_path]
-    assert result["context"]["_trace_path"] == str(tmp_path / "trace.json")
+    assert result["flow"].trace_path == str(tmp_path / "trace.json")
 
 
 class _FailingTraceCallback(TracingCallback):

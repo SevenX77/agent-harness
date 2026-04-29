@@ -10,7 +10,7 @@ from __future__ import annotations
 from langgraph.graph import END
 
 from graph_agent.core.retry_router import RetryRouter
-from graph_agent.core.state import WorkflowState
+from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
 from graph_agent.core.types import Phase
 
 
@@ -18,14 +18,12 @@ def _make_phase(name: str, *, retry_target: str | None = None) -> Phase:
     return Phase(name=name, retry_target=retry_target)
 
 
-def _make_state(context: dict) -> WorkflowState:
-    return {
-        "context": context,
-        "messages": [],
-        "current_phase": "",
-        "retry_counts": {},
-        "metrics": {},
-    }
+def _make_state(*, retry_feedback: list[str] | None = None) -> WorkflowState:
+    return WorkflowState(
+        data=BusinessData(),
+        flow=FrameworkState(retry_feedback=retry_feedback),
+        messages=[],
+    )
 
 
 class TestNextPhaseNode:
@@ -67,7 +65,7 @@ class TestBuildRouteCallback:
         router = RetryRouter(phases)
 
         route = router.build_route_callback(phases[0])
-        state = _make_state({"_retry_feedback": "validator said no"})
+        state = _make_state(retry_feedback=["validator said no"])
 
         assert route(state) == "preflight_execute"
 
@@ -76,7 +74,7 @@ class TestBuildRouteCallback:
         router = RetryRouter(phases)
 
         route = router.build_route_callback(phases[0])
-        state = _make_state({"_retry_feedback": "try again"})
+        state = _make_state(retry_feedback=["try again"])
 
         assert route(state) == "alpha_execute"
 
@@ -85,7 +83,7 @@ class TestBuildRouteCallback:
         router = RetryRouter(phases)
 
         route = router.build_route_callback(phases[1])
-        state = _make_state({"some_other_field": 42})
+        state = _make_state()
 
         assert route(state) == "gamma_execute"
 
@@ -94,7 +92,7 @@ class TestBuildRouteCallback:
         router = RetryRouter(phases)
 
         route = router.build_route_callback(phases[-1])
-        state = _make_state({})
+        state = _make_state()
 
         assert route(state) == END
 
@@ -109,7 +107,7 @@ class TestBuildRouteCallback:
         router = RetryRouter(phases)
 
         callbacks = [router.build_route_callback(p) for p in phases]
-        state = _make_state({"_retry_feedback": "x"})
+        state = _make_state(retry_feedback=["x"])
 
         assert callbacks[0](state) == "a_execute"
         assert callbacks[1](state) == "b_execute"

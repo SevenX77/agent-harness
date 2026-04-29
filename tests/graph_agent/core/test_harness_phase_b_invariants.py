@@ -19,6 +19,7 @@ wrong shape ("a future refactor silently adds ``self._active_X = ...``
 back somewhere"). A real multi-threaded behavioural test would require
 a full DeerFlow agent loop runnable in a test fixture — out of scope.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -261,19 +262,24 @@ class TestPersistentRuntimeInputsOptIn:
                 captured["run_context"] = config["configurable"]["_run_context"]
                 return state
 
+        from graph_agent.core.state import (
+            BusinessData,
+            FrameworkState,
+            WorkflowState,
+        )
+
         with patch.object(harness, "_graph", _FakeGraph()):
             harness.resume(
-                state={
-                    "messages": [],
-                    "context": {
-                        "_thread_id": "t",
-                        "_run_id": "r-42",
-                        "_persistent_runtime_inputs": {"pipeline": "p", "n": 3},
-                    },
-                    "current_phase": "",
-                    "retry_counts": {},
-                    "metrics": {"total_input_tokens": 0, "total_output_tokens": 0},
-                },
+                state=WorkflowState(
+                    data=BusinessData(),
+                    flow=FrameworkState(
+                        thread_id="t",
+                        run_id="r-42",
+                        persistent_runtime_inputs={"pipeline": "p", "n": 3},
+                        metrics={"total_input_tokens": 0, "total_output_tokens": 0},
+                    ),
+                    messages=[],
+                ),
                 human_input="go",
             )
 

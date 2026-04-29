@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 from .exceptions import SkillCompilationError, SkillLoadError
 from .harness import GraphAgentHarness, Phase
 from .personas import resolve_persona
+from .schema_engine import SchemaEngine
 from ..tools.dynamic_schema import (
     DynamicSchemaDef,
     OutputExampleParseError,
@@ -46,18 +47,53 @@ from ..tools.dynamic_schema import (
 logger = logging.getLogger(__name__)
 
 
+# MVP-2 T6: shared SchemaEngine singleton.
+#
+# Loader stays the primary owner of ``parse_output_example`` because
+# ``Phase.output_schema`` is typed ``DynamicSchemaDef``; flipping it to
+# ``SchemaObject`` ripples through phase_executor / finish /
+# md_to_json. The singleton exists so downstream MVP-2 consumers
+# (T5 ``cognitive/finish.py``, T3 ``core/io_manager.py``) can fetch a
+# cache-warmed engine via :func:`get_schema_engine`. Full cut-over is
+# scheduled for MVP-3 (loader three-stage rewrite).
+_SCHEMA_ENGINE: SchemaEngine = SchemaEngine()
+
+
+def get_schema_engine() -> SchemaEngine:
+    """Return the SchemaEngine shared across compile + runtime consumers."""
+    return _SCHEMA_ENGINE
+
+
 def _parse_output_example_or_raise(
     output_example: str,
     *,
     location: str,
 ) -> DynamicSchemaDef:
-    """Parse ``output_example`` or surface a compile-fatal loader error."""
+    """Parse ``output_example`` or surface a compile-fatal loader error.
+
+    Side-effect: warms the shared SchemaEngine cache so finish.py
+    validation and IOManager hoist hit the cache later. A SchemaEngine
+    disagreement on input that ``parse_output_example`` already accepted
+    is logged as a warning — the canonical ``DynamicSchemaDef`` is the
+    source of truth for compile success.
+    """
     try:
-        return parse_output_example(output_example)
+        dynamic = parse_output_example(output_example)
     except OutputExampleParseError as exc:
         raise SkillCompilationError(
             f"[F-output-example-invalid] {location}: {exc}"
         ) from exc
+
+    try:
+        _SCHEMA_ENGINE.parse_from_md(output_example)
+    except Exception as exc:  # noqa: BLE001 — broad SchemaParseError surface
+        logger.warning(
+            "loader: SchemaEngine.parse_from_md disagreed with "
+            "parse_output_example at %s: %s; cache will be cold for this fragment",
+            location,
+            exc,
+        )
+    return dynamic
 
 
 # ---------------------------------------------------------------------------

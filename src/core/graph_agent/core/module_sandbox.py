@@ -5,9 +5,15 @@ from __future__ import annotations
 import hashlib
 import importlib.machinery
 import importlib.util
+import logging
+import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any
+
+from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 
 class ModuleSandbox:
@@ -96,7 +102,12 @@ class ModuleSandbox:
         if spec is None or spec.loader is None:
             raise ImportError(f"ModuleSandbox: cannot find module {module_path!r}")
         module = importlib.util.module_from_spec(spec)
+        # Phase 3 M7 follow-up (PHASE3_DESIGN.md v4 §3.5 step 3): register
+        # before exec_module so forward-ref resolution during class
+        # construction can find the module via ``sys.modules``.
+        sys.modules[spec.name] = module
         spec.loader.exec_module(module)
+        _rebuild_pydantic_models(module, spec.name)
         self._module_cache[module_path] = module
         return module
 
@@ -120,13 +131,68 @@ class ModuleSandbox:
         if spec is None or spec.loader is None:
             raise ImportError(f"ModuleSandbox: cannot create spec for {module_file}")
         module = importlib.util.module_from_spec(spec)
+        # Phase 3 M7 follow-up (PHASE3_DESIGN.md v4 §3.5 step 3): register
+        # the sandbox module in ``sys.modules`` BEFORE ``exec_module`` so
+        # any class declared with ``from __future__ import annotations``
+        # (which keeps annotations as forward-ref strings) can later
+        # resolve those strings via ``typing.get_type_hints`` /
+        # Pydantic's ``model_rebuild``. Without this registration
+        # ``Pydantic.BaseModel.model_validate`` raises
+        # ``PydanticUserError: <Class> is not fully defined`` on any
+        # SKILL-local class that uses ``Literal[...]`` or any other
+        # forward-ref annotation. The ``sys.modules`` write + the
+        # post-exec ``model_rebuild`` loop must stay atomic per design
+        # §3.5 / §3.8 so the rebuild surfaces errors at load time
+        # instead of at runtime.
+        sys.modules[sandbox_name] = module
         spec.loader.exec_module(module)
+        _rebuild_pydantic_models(module, sandbox_name)
         return module
 
     @staticmethod
     def _sandbox_module_name(module_path: str, module_file: Path) -> str:
         digest = hashlib.sha256(str(module_file.resolve()).encode("utf-8")).hexdigest()[:16]
         return f"_graph_agent_sandbox_{digest}_{module_path.replace('.', '_')}"
+
+
+def _rebuild_pydantic_models(module: ModuleType, module_name: str) -> None:
+    """Phase 3 M7 follow-up (PHASE3_DESIGN.md v4 §3.5 step 3, §3.8).
+
+    Iterate every Pydantic ``BaseModel`` subclass defined in ``module``
+    and call ``model_rebuild()`` on it. With ``from __future__ import
+    annotations`` (and Python 3.10+'s implicit annotation deferral),
+    Pydantic stores field annotations as forward-ref strings until a
+    consumer calls ``model_validate`` or ``model_rebuild``. Eagerly
+    rebuilding here makes those forward-refs resolve **at load time**
+    so any ``ImportError`` / ``TypeError`` surfaces fail-loud right
+    next to the offending SKILL, instead of silently lurking until
+    ``CognitiveFlowMiddleware._validate_finish_args`` calls
+    ``model_validate`` mid-run and crashes with the cryptic
+    ``PydanticUserError: <Class> is not fully defined``.
+
+    The companion ``sys.modules[module_name] = module`` registration
+    happens in the caller before ``exec_module``; both writes must
+    stay atomic per design §3.8 so a partial loader path never leaves
+    a class that resolves *some* refs but not others.
+    """
+    for attr_name, obj in vars(module).items():
+        if (
+            isinstance(obj, type)
+            and issubclass(obj, BaseModel)
+            and obj is not BaseModel
+        ):
+            try:
+                obj.model_rebuild()
+            except Exception as exc:
+                logger.error(
+                    "ModuleSandbox: model_rebuild failed for %s.%s "
+                    "(module=%s) reason=%s",
+                    module_name,
+                    attr_name,
+                    obj.__name__,
+                    type(exc).__name__,
+                )
+                raise
 
 
 def _ensure_under_root(path: Path, root: Path) -> None:

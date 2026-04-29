@@ -44,6 +44,26 @@ class IOManager:
             )
         self._inputs = io_config.get("inputs", [])
         self._outputs = io_config.get("outputs", [])
+        # MVP-2 T7: io_errors accumulate on the IOManager instance instead
+        # of leaking into ``context["_io_errors"]``. The caller (harness's
+        # ``_save_outputs_via_io``) reads ``io_mgr.io_errors`` after
+        # ``save_outputs`` returns or raises and routes them into
+        # ``state["flow"].io_errors`` via
+        # :meth:`StateManager.update_framework`. The MVP-1 ``_io_errors``
+        # ctx-dict path is gone; ``state["flow"].io_errors`` is the single
+        # source of truth.
+        self._io_errors: list[str] = []
+
+    @property
+    def io_errors(self) -> list[str]:
+        """Return the io_errors recorded during the last save_outputs run.
+
+        The list lives on the IOManager instance so a caller can lift the
+        errors into ``state["flow"].io_errors`` after ``save_outputs``
+        returns or raises. Returns a copy so callers cannot mutate the
+        accumulator from the outside.
+        """
+        return list(self._io_errors)
 
     def load_inputs(self, **runtime_args: Any) -> dict[str, Any]:
         """Load input data based on declared input sources.
@@ -142,10 +162,7 @@ class IOManager:
                     f"phase, or write to ctx[{name!r}] in a logic step? "
                     f"Available ctx keys: {public_keys}"
                 )
-                IOManager._record_io_error(
-                    context,
-                    legacy_message,
-                )
+                self._record_io_error(legacy_message)
                 raise ValueError(message)
 
             # Cohesion plan 方针 1.5 (2026-04-26): the schema's canonical
@@ -169,7 +186,6 @@ class IOManager:
                     paths = self._save_via_artifact_saver(
                         name,
                         data,
-                        context=context,
                         artifact_saver=artifact_saver,
                         project_id=project_id,
                     )
@@ -255,21 +271,17 @@ class IOManager:
 
         logger.info("[IOManager] Saved output to %s", path)
 
-    @staticmethod
     def _save_via_artifact_saver(
+        self,
         name: str,
         data: Any,
         *,
-        context: dict[str, Any],
         artifact_saver: Callable[..., Any] | None,
         project_id: str | None = None,
     ) -> list[str]:
         """Save data via caller-injected artifact callback."""
         if artifact_saver is None:
-            IOManager._record_io_error(
-                context,
-                f"Artifact target output '{name}' has no saver",
-            )
+            self._record_io_error(f"Artifact target output '{name}' has no saver")
             raise ValueError(
                 f"Artifact target output '{name}' has no saver; if this output "
                 "is optional, mark it so in IoOutput schema"
@@ -293,10 +305,7 @@ class IOManager:
             )
             return paths
         except Exception as exc:
-            IOManager._record_io_error(
-                context,
-                f"artifact_saver failed for '{name}': {exc}",
-            )
+            self._record_io_error(f"artifact_saver failed for '{name}': {exc}")
             raise
 
     @staticmethod
@@ -320,11 +329,13 @@ class IOManager:
             return normalized
         return [str(result)]
 
-    @staticmethod
-    def _record_io_error(context: dict[str, Any], message: str) -> None:
+    def _record_io_error(self, message: str) -> None:
+        """Append ``message`` to the instance-level io_errors accumulator.
+
+        MVP-2 T7: legacy versions of this method appended to
+        ``context["_io_errors"]`` (a snapshot dict the caller never read
+        back). The accumulator now lives on ``self`` so the caller can
+        lift it into ``state["flow"].io_errors`` after ``save_outputs``.
+        """
         logger.error("[IOManager] %s", message)
-        errors = context.get("_io_errors")
-        if not isinstance(errors, list):
-            errors = []
-            context["_io_errors"] = errors
-        errors.append(message)
+        self._io_errors.append(message)

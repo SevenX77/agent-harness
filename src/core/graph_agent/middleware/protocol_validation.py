@@ -45,10 +45,11 @@ from langgraph.runtime import Runtime
 from pydantic import BaseModel, ValidationError
 
 from ..core.exceptions import GraphAgentError
+from ..core.schema_engine import SchemaObject
 from ..core.state import FrameworkState
 
 if TYPE_CHECKING:
-    from ..core.schema_engine import SchemaEngine, SchemaObject
+    from ..core.schema_engine import SchemaEngine
 
 
 class ProtocolValidationError(GraphAgentError):
@@ -79,10 +80,20 @@ class ProtocolValidationMiddleware(AgentMiddleware[AgentState[Any]]):
     def __init__(
         self,
         schema_engine: SchemaEngine | None = None,
-        current_phase_schema: SchemaObject | None = None,
+        current_phase_schema: type[BaseModel] | SchemaObject | None = None,
         *,
         phase_name: str = "unknown",
     ) -> None:
+        # Phase 2 A2 v3 (design v4 §3.4 step 1): the schema parameter union
+        # was extended from ``SchemaObject | None`` to also accept a Pydantic
+        # ``type[BaseModel]`` so dotted-path SKILLs (e.g. text-segmentation
+        # pointing to ``script.models.Segment``) can mount this middleware
+        # without requiring a SchemaObject bridge. The schema-engine
+        # validation in ``_validate`` only fires for the SchemaObject form
+        # because that form historically described the BusinessData root;
+        # a Pydantic ``type[BaseModel]`` here describes a per-item shape
+        # (one ``## block``) and so cannot be validated against the whole
+        # BusinessData dump — see the ``_should_run_schema_check`` guard.
         super().__init__()
         self._schema_engine = schema_engine
         self._current_phase_schema = current_phase_schema
@@ -178,7 +189,17 @@ class ProtocolValidationMiddleware(AgentMiddleware[AgentState[Any]]):
             and self._schema_engine is not None
             and self._current_phase_schema is not None
             and data_dump is not None
+            and isinstance(self._current_phase_schema, SchemaObject)
         ):
+            # Phase 2 A2 v3: only run schema-engine validation against the
+            # BusinessData dump when the schema is a SchemaObject — that
+            # form historically describes the data root. A Pydantic
+            # ``type[BaseModel]`` here describes a per-item ``## block``
+            # shape (e.g. one ``Segment``) and cannot be validated against
+            # the aggregated BusinessData dump; the per-item check happens
+            # in CognitiveFlowMiddleware._validate_finish_args at
+            # finish_task time, where the markdown is parsed and each
+            # block is validated individually.
             result = self._schema_engine.validate(data_dump, self._current_phase_schema)
             if not result.ok:
                 violations.append(

@@ -297,6 +297,15 @@ class ValidationMiddleware(AgentMiddleware[AgentState]):
     tool results and routed back to the model node, so the LLM corrects its
     submission in the same LangGraph agent loop instead of restarting the
     whole phase.
+
+    .. deprecated:: Phase 2 A2 v3
+        Retained only as the fallback path for phases whose
+        ``output_schema`` resolves to a ``DynamicSchemaDef`` (the
+        ``output_example`` form). All static-schema phases (Pydantic
+        ``type[BaseModel]`` or ``SchemaObject``) now route through the
+        single-responsibility pipeline ``[ProtocolValidationMiddleware,
+        CognitiveFlowMiddleware]`` per PHASE2_DESIGN.md §3.4 step 4.
+        Plan: remove together with dynamic-schema migration in v1.1.
     """
 
     _REJECTION_PREFIX = (

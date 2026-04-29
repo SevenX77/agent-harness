@@ -303,3 +303,177 @@ class TestClarification:
         assert message.name == "ask_clarification"
         assert "unattended=True" in str(message.content)
         assert "Need a user choice?" in str(message.content)
+
+
+class TestPhase2A2v3PydanticSchemaDispatch:
+    """PHASE2_DESIGN.md §3.4 step 1+2: ``current_phase_schema`` accepts
+    ``type[BaseModel]`` for dotted-path SKILLs (e.g. text-segmentation
+    pointing to ``script.models.Segment``). The middleware dispatches:
+    ``SchemaObject`` keeps the schema-engine path; ``type[BaseModel]``
+    bypasses the engine and validates each parsed block via
+    ``schema_cls.model_validate`` directly.
+    """
+
+    def test_pydantic_class_dispatch_validates_via_model_validate(self) -> None:
+        from pydantic import BaseModel as _BM
+        from pydantic import Field as _Field
+
+        class _LiveSchema(_BM):
+            title: str = _Field(min_length=1)
+            score: int = _Field(ge=0, le=10)
+
+        middleware = CognitiveFlowMiddleware(
+            IOManager(
+                [IODef(source_field="business_data_parsed", target_field="items")]
+            ),
+            current_phase_schema=_LiveSchema,
+            phase_name="segment",
+        )
+        state = _state()
+        request = _request(
+            name="finish_task",
+            args={
+                "reasoning": "done",
+                "diagnostics_md": "ok",
+                "business_data_md": VALID_BUSINESS_MD,
+            },
+            state=state,
+        )
+
+        result = middleware.wrap_tool_call(request, _handler)
+
+        assert isinstance(result, Command)
+        assert result.goto == END
+        new_data = result.update["data"]
+        assert isinstance(new_data, BusinessData)
+        # The Pydantic dispatch path must have produced the same parsed
+        # items shape as the SchemaObject path so downstream consumers
+        # are agnostic to schema kind.
+        assert new_data["items"] == [{"title": "Scene plan", "score": 3}]
+
+    def test_pydantic_class_dispatch_rejects_invalid_block_with_per_field_error(
+        self,
+    ) -> None:
+        from pydantic import BaseModel as _BM
+        from pydantic import Field as _Field
+
+        class _LiveSchema(_BM):
+            title: str = _Field(min_length=1)
+            score: int = _Field(ge=0, le=10)
+
+        middleware = CognitiveFlowMiddleware(
+            IOManager([]),
+            current_phase_schema=_LiveSchema,
+            phase_name="segment",
+        )
+        request = _request(
+            name="finish_task",
+            args={"business_data_md": INVALID_BUSINESS_MD},  # score: high
+        )
+
+        result = middleware.wrap_tool_call(request, _handler)
+
+        assert isinstance(result, Command)
+        assert result.goto == "model"
+        message = result.update["messages"][0]
+        assert isinstance(message, ToolMessage)
+        assert message.status == "error"
+        text = str(message.content)
+        assert "提交已被系统驳回" in text
+        # The per-field diagnostic must surface the offending field name
+        # so the LLM can correct its markdown on retry.
+        assert "score" in text
+
+
+class TestPhase2A2v3BusinessValidatorDispatch:
+    """PHASE2_DESIGN.md §3.2 #3: CognitiveFlow takes over the business-
+    validator dispatch responsibility from legacy ``ValidationMiddleware``
+    so the legacy can be retired for the static-schema pipeline.
+    Validators conform to A1 §2.4 (``payload: list[dict[str, Any]]``).
+    """
+
+    def test_business_validator_runs_after_pydantic_pass(self) -> None:
+        seen: list[list[dict[str, Any]]] = []
+
+        def validator(payload: list[dict[str, Any]]) -> tuple[bool, list[str]]:
+            seen.append(payload)
+            return True, []
+
+        middleware = CognitiveFlowMiddleware(
+            IOManager(
+                [IODef(source_field="business_data_parsed", target_field="items")]
+            ),
+            current_phase_schema=_schema(),
+            business_validator=validator,
+            phase_name="segment",
+        )
+        state = _state()
+        request = _request(
+            name="finish_task",
+            args={"business_data_md": VALID_BUSINESS_MD},
+            state=state,
+        )
+
+        result = middleware.wrap_tool_call(request, _handler)
+
+        assert isinstance(result, Command)
+        assert result.goto == END
+        # Validator must have received the Pydantic-validated parsed
+        # items list (A1 §2.4 contract), not the raw markdown text or
+        # the legacy ctx dict.
+        assert seen == [[{"title": "Scene plan", "score": 3}]]
+
+    def test_business_validator_failure_routes_back_to_model(self) -> None:
+        def validator(
+            payload: list[dict[str, Any]],
+        ) -> tuple[bool, list[str]]:
+            return False, ["score is too low"]
+
+        middleware = CognitiveFlowMiddleware(
+            IOManager([]),
+            current_phase_schema=_schema(),
+            business_validator=validator,
+            phase_name="segment",
+        )
+        request = _request(
+            name="finish_task",
+            args={"business_data_md": VALID_BUSINESS_MD},
+        )
+
+        result = middleware.wrap_tool_call(request, _handler)
+
+        assert isinstance(result, Command)
+        assert result.goto == "model"
+        message = result.update["messages"][0]
+        assert isinstance(message, ToolMessage)
+        assert message.status == "error"
+        text = str(message.content)
+        assert "[Business] score is too low" in text
+
+    def test_business_validator_exception_surfaces_diagnostic_to_llm(self) -> None:
+        def validator(
+            payload: list[dict[str, Any]],
+        ) -> tuple[bool, list[str]]:
+            raise RuntimeError("oops")
+
+        middleware = CognitiveFlowMiddleware(
+            IOManager([]),
+            current_phase_schema=_schema(),
+            business_validator=validator,
+            phase_name="segment",
+        )
+        request = _request(
+            name="finish_task",
+            args={"business_data_md": VALID_BUSINESS_MD},
+        )
+
+        result = middleware.wrap_tool_call(request, _handler)
+
+        assert isinstance(result, Command)
+        assert result.goto == "model"
+        message = result.update["messages"][0]
+        assert isinstance(message, ToolMessage)
+        text = str(message.content)
+        assert "validator 异常" in text
+        assert "RuntimeError" in text
+        assert "oops" in text

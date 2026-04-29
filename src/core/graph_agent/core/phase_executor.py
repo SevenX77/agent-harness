@@ -754,8 +754,42 @@ class PhaseExecutor:
             summarization_keep_messages=20,
             clarification=True,
         )
-        phase_middlewares.append(
-            ValidationMiddleware(
+
+        # Phase 2 A2 v4 切轨 (design v5 §3.4 + §3.6): three-way routing
+        # for the LLM phase's finish_task pipeline. The legacy
+        # ``ValidationMiddleware`` is retained as the fallback path for
+        # two cases that the new ``[ProtocolValidationMiddleware,
+        # CognitiveFlowMiddleware]`` pipeline cannot handle today:
+        #
+        #   1. ``DynamicSchemaDef`` (``output_example`` form) — the new
+        #      pipeline only supports strongly-typed Pydantic classes
+        #      and ``SchemaObject``; dynamic-schema phases keep using
+        #      the legacy middleware until v1.1 retires the form.
+        #   2. ``None`` (schema-less LLM finish_task) — multiple live
+        #      SKILLs (``event-extraction`` aggregate/review,
+        #      ``batch-analysis``, ``global-synthesis``) call
+        #      ``finish_task`` without declaring an ``output_schema``.
+        #      The new pipeline's CognitiveFlow raises
+        #      ``CognitiveFlowError`` when the schema is None (A1
+        #      contract); routing these phases through the legacy
+        #      fallback keeps the live-SKILL surface alive while we
+        #      land long-term strategy C in v1.1+ (a dedicated
+        #      ``raw_output`` phase type that doesn't pretend to
+        #      validate against a schema).
+        #
+        # All other phases (Pydantic ``type[BaseModel]`` or
+        # ``SchemaObject``) flow through the new pipeline.
+        from ..middleware.cognitive_flow import CognitiveFlowMiddleware
+        from ..middleware.protocol_validation import ProtocolValidationMiddleware
+        from ..tools.dynamic_schema import DynamicSchemaDef
+        from .io_manager import IOManager
+        from .schema_engine import SchemaEngine
+
+        def _legacy_fallback_middleware() -> ValidationMiddleware:
+            """Build the deprecated ValidationMiddleware used for both
+            dynamic-schema and schema-less fallback paths. Sharing the
+            constructor avoids drift between the two branches."""
+            return ValidationMiddleware(
                 output_schema=phase.output_schema,
                 output_schema_path=phase.output_schema_path,
                 business_validator=phase.validator,
@@ -763,7 +797,58 @@ class PhaseExecutor:
                 callbacks=active_callbacks,
                 phase_name=phase.name,
             )
-        )
+
+        if isinstance(phase.output_schema, DynamicSchemaDef):
+            logger.warning(
+                "phase=%s action=middleware_pipeline decision=legacy_fallback "
+                "reason=dynamic_schema_output_example "
+                "note=ValidationMiddleware retained per design v5 §3.3 #2; "
+                "static-schema phases use the new "
+                "ProtocolValidation+CognitiveFlow pipeline.",
+                phase.name,
+            )
+            phase_middlewares.append(_legacy_fallback_middleware())
+        elif phase.output_schema is None:
+            # Strategy A (design v5 §3.6): schema-less LLM finish_task
+            # phases stay on the legacy middleware so the four live
+            # SKILLs that opted out of declaring output_schema continue
+            # to work without runtime crashes. v1.1 strategy C will
+            # migrate these to a dedicated phase type.
+            logger.warning(
+                "phase=%s action=middleware_pipeline decision=legacy_fallback "
+                "reason=schema_less_finish_task "
+                "note=Strategy A per design v5 §3.6; long-term plan is "
+                "to migrate via Strategy C in v1.1+. ValidationMiddleware "
+                "is the only middleware that tolerates schema=None.",
+                phase.name,
+            )
+            phase_middlewares.append(_legacy_fallback_middleware())
+        else:
+            schema_engine = SchemaEngine()
+            io_manager = IOManager(list(phase.io_specs))
+            logger.info(
+                "phase=%s action=middleware_pipeline decision=static_schema "
+                "schema=%s",
+                phase.name,
+                getattr(phase.output_schema, "__name__", type(phase.output_schema).__name__),
+            )
+            phase_middlewares.append(
+                ProtocolValidationMiddleware(
+                    schema_engine=schema_engine,
+                    current_phase_schema=phase.output_schema,
+                    phase_name=phase.name,
+                )
+            )
+            phase_middlewares.append(
+                CognitiveFlowMiddleware(
+                    io_manager=io_manager,
+                    unattended=state["flow"].unattended,
+                    schema_engine=schema_engine,
+                    current_phase_schema=phase.output_schema,
+                    business_validator=phase.validator,
+                    phase_name=phase.name,
+                )
+            )
 
         # Step 6: Create LangChain agent — render system_prompt with business data
         raw_skill_prompt = phase.system_prompt or "完成当前阶段的任务。"

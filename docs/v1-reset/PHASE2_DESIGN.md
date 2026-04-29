@@ -63,47 +63,100 @@
 
 ### 3.1 现状与问题
 当前的 `src/core/graph_agent/core/phase_executor.py` 是一个包含约 **964 行**的巨大上帝类 (god execution flow)，并且仍在硬编码使用旧版的 `ValidationMiddleware`。这个遗留类把协议层 JSON 解析、业务 Validator 调度、上下文合并全揉在了一起，导致极高的重构风险。
+更严重的是，MVP-3 已经实现了新的基于数据流的 `CognitiveFlowMiddleware`（已经内置了 Markdown 解析、Schema Validation 和解析后对象的组装），而 `phase_executor` 却处于双系统并行的“空转”状态。
 
-### 3.2 接口契约重构
-引入单一职责 Middleware 栈。其中 2 个 MVP-3 中间件已就绪，第 3 个需要新建：
-- `ProtocolValidationMiddleware` (已就绪)：只负责拦截 LLM Payload，进行基础的格式清洗与 JSON Load 验证。
-- `CognitiveFlowMiddleware` (已就绪)：负责业务 Validator 调度以及最终的 `StateMerge`（将结果合并至 `WorkflowState`）。
-- **`SchemaHoistingMiddleware` (需新建)**：负责基于 `output_schema` 解析并结构化 Payload。
-  - **接口契约**：
-    ```python
-    class SchemaHoistingMiddleware(BaseMiddleware):
-        def __init__(self, schema: type[BaseModel]):
-            self.schema = schema
+### 3.2 接口契约重构 (切轨至 CognitiveFlowMiddleware)
 
-        def __call__(self, state: WorkflowState, tool_call: dict[str, Any]) -> dict[str, Any]:
-            # 接收解析好的 raw JSON
-            # 走 SchemaEngine 校验与结构化
-            # 返回结构化的 dict 供下游 CognitiveFlow 使用
-            pass
-    ```
+**决断：放弃新建 `SchemaHoistingMiddleware`，直接切轨至 `CognitiveFlowMiddleware`，并通过扩展 `current_phase_schema` 联合类型（方向 2）解决类型错配和动态加载问题。**
 
-### 3.3 实施步骤 (a3 Action Items)
-1. **新建 Hoisting 中间件**：
-   - 新建 `src/core/graph_agent/middleware/schema_hoisting.py`，实现 `SchemaHoistingMiddleware` 接口。
-2. **修改执行引擎** (`src/core/graph_agent/core/phase_executor.py`)
-   - 引入并组装新的中间件管道：
-     ```python
-     middlewares = [
-         ProtocolValidationMiddleware(),
-         SchemaHoistingMiddleware(schema=phase.output_schema),
-         CognitiveFlowMiddleware(business_validator=...)
-     ]
-     ```
-3. **清理遗留基建**
-   - 从 `middlewares.py` 中标记 `ValidationMiddleware` 为 `@deprecated` 或在测试过关后删除。
+实证发现，`CognitiveFlowMiddleware._validate_finish_args` 已经完整实现了 Schema 解析和数据对象化（Hoisting）的职责。但是，当前 A1 `CognitiveFlowMiddleware` 的签名期望 `current_phase_schema: SchemaObject | None`，而 `phase.output_schema` 在运行时承载的是 `type[BaseModel]` (对于使用 dotted Pydantic 路径的 SKILL，如 `text-segmentation`) 或 `DynamicSchemaDef`，导致运行时的强硬崩溃。
 
-### 3.4 风险点
-- **重构范围大**：`phase_executor.py` 有 964 行，一次切轨风险极高，评估是否需要分两个子 PR（前置拆分解耦准备 + 最终切轨）。
-- 需确保 `WorkflowState` 在各层中间件中的不可变性（Immutable 更新），避免副作用覆盖。
+同时，由于 `compiled_schemas` 仅在编译期填充了使用内联 markdown 的 Phase，直接切轨会导致 live SKILL（使用了 dotted path Pydantic Schema）拿不到 schema 并引发 `CognitiveFlowError`。
+
+**实施方向 (选定方向 2)**：
+1. **修改 A1 中间件接口（显式授权）**：为了兼容使用 dotted path `type[BaseModel]` 的 `output_schema`，正式授权 A2 阶段可以修改 `protocol_validation.py` 和 `cognitive_flow.py` 中 `current_phase_schema` 的类型签名，从 `SchemaObject | None` 扩展为 `type[BaseModel] | SchemaObject | None`。
+2. **内部分派校验逻辑**：在 `CognitiveFlowMiddleware` 内部校验时进行分派：
+   - 如果是 `SchemaObject`，继续走 `SchemaEngine.get_pydantic_model()` 及后续逻辑。
+   - 如果是 `type[BaseModel]`，则无需通过 `SchemaEngine` 转换，直接利用该 Pydantic Class 进行 JSON/Markdown 解析和 validate。
+3. **彻底接管旧 ValidationMiddleware 职责**：新的单一职责管道由以下中间件组装（均继承自 `AgentMiddleware[AgentState[Any]]`）：
+   - `ProtocolValidationMiddleware`：负责状态完整性边界断言。
+   - `CognitiveFlowMiddleware`：独占接管 `finish_task`。
+
+### 3.3 旧版 ValidationMiddleware 独占能力的迁移路径
+旧版 `ValidationMiddleware` 承载了历史能力，它们将被按以下契约迁移：
+
+1. **dotted output_schema_path (静态 Pydantic 路径)**：
+   - **决策与迁移**：通过修改 `CognitiveFlowMiddleware` 的入参联合类型（见 3.2），直接原生支持 `type[BaseModel]` 的运行时注入。这就完全覆盖了旧版的 `_resolve_output_schema` 后加载行为。
+2. **output_example (Dynamic Schema)**：
+   - **决策**：**临时保留旧版 ValidationMiddleware 的 fallback 调用**。
+   - **迁移路径**：在装配时，通过判断 `phase.output_schema` 的实际承载类型（`DynamicSchemaDef`）来决定路由。如果是动态 Schema，就继续使用遗留的 `ValidationMiddleware`。`CognitiveFlowMiddleware` 仅服务于强类型（`type[BaseModel]` 或 `SchemaObject`）。
+3. **ctx-based Legacy 字典传递**：
+   - **决策**：**废弃**。在 A1 契约下，`business_validator` 的输入必须是强类型的结构化数据 `list[dict]`。
+
+### 3.4 实施步骤 (a3 Action Items)
+
+**授权声明：A2 实施阶段允许安全地修改 `protocol_validation.py` 和 `cognitive_flow.py` 以扩展 Union 类型，打破了之前不可触碰 A1 的假设。**
+
+1. **扩宽 Schema 参数类型**：
+   修改 `src/core/graph_agent/middleware/protocol_validation.py` (约 82 行) 和 `src/core/graph_agent/middleware/cognitive_flow.py` (约 67 行) 的构造函数：
+   ```python
+   from pydantic import BaseModel
+   from ..core.schema_engine import SchemaObject
+   # 修改为:
+   current_phase_schema: type[BaseModel] | SchemaObject | None = None
+   ```
+2. **CognitiveFlow 内部分派** (`src/core/graph_agent/middleware/cognitive_flow.py:280` 附近)：
+   ```python
+   # 改造 _validate_finish_args 中获取 model 和校验的过程
+   if isinstance(schema, SchemaObject):
+       model = self._schema_engine.get_pydantic_model(schema)
+       blocks = parse_md(business_data_md, model)
+       # 循环校验使用 self._schema_engine.validate(block.data, schema)
+   else: # type[BaseModel]
+       model = schema
+       blocks = parse_md(business_data_md, model)
+       # 循环校验直接使用 model.model_validate(block.data)
+   ```
+3. **修改执行引擎** (`src/core/graph_agent/core/phase_executor.py` 的 `execute_llm_phase` 约 783 行附近) 增加联合路由策略 (详见 3.6)：
+   ```python
+   from ..tools.dynamic_schema import DynamicSchemaDef
+   if isinstance(phase.output_schema, DynamicSchemaDef):
+       # 走旧的 ValidationMiddleware fallback，可加 warning 日志
+       phase_middlewares.append(ValidationMiddleware(...))
+   elif phase.output_schema is None:
+       # Schema-less fallback
+       phase_middlewares.append(ValidationMiddleware(...))
+   else:
+       # 走新的静态 Schema 管道
+       phase_middlewares.extend([
+           ProtocolValidationMiddleware(
+               schema_engine=resolver,
+               current_phase_schema=phase.output_schema,
+               phase_name=phase.name
+           ),
+           CognitiveFlowMiddleware(
+               io_manager=io_manager,
+               schema_engine=resolver,
+               current_phase_schema=phase.output_schema,
+               phase_name=phase.name
+           )
+       ])
+   ```
+4. **清理遗留基建**：在上述切轨稳定后，从 `middlewares.py` 中将 `ValidationMiddleware` 标记为 `@deprecated("保留仅供 dynamic schema 和 schema-less fallback 使用")`。
+
+### 3.5 风险点
+- **重构范围**：`phase_executor.py` 具有 964 行。尽管本方案没有引入新类，但修改 A1 中间件的签名，并在内部实现 Pydantic `BaseModel` 的原生支持仍然有一定风险。不过这种方案将 Pydantic 类的支持彻底下沉到了 Middleware 中，解决了编译与运行时契约不对齐的根本问题，一次合并是合理的。
+
+### 3.6 Schema-less LLM finish_task 路由策略 (v5 新增)
+**决断：策略 A (Legacy Fallback)。** 
+当前 live SKILLs (`event-extraction`, `batch-analysis`, `global-synthesis`) 中存在多个 LLM Phase 未声明 `output_schema` 但仍调用了 `finish_task`。如果在编译期或运行时强制拦截（策略 B），将导致大量现存 SKILL 直接不可用，爆炸半径过大。因此：
+- **短期 (Phase 2)**：当 `phase.output_schema is None` 时，执行遗留的 `ValidationMiddleware` Fallback，保证旧业务的存活。
+- **长期 (v1.1+)**：推行**策略 C** 重构，强制为这些输出自由文本但借用 `finish_task` 中断逻辑的 Phase 添加专门的类型（如 raw_output phase），最终彻底移除 `ValidationMiddleware` 的双系统并行问题。
 
 ---
 
 ## 4. A3 code-only phase dict 静默丢弃修详细设计
+
 
 ### 4.1 现状与问题
 如果一个 `type: code` 的 Phase 返回了一个 `dict`，而它没有明确定义 `output_schema`，底层的合并逻辑（位于 `phase_executor.py` **第 255 行** `execute_code_only_phase` 附近）可能只会捕获特定字段，而将 `dict` 的其他业务字段静默丢弃。这违反了 "零静默失败" 铁律。
@@ -161,7 +214,8 @@ a1 进行验收时，需严格比对以下指标：
    - `pytest` 维持 baseline 全过 (870+，A1 v2 引入新 case 后期望 875+)。对于因 `SkillCompileError` (由于缺乏 Schema) 导致的不合规 SKILL 编译失败，视为**预期的正常阻断**，不计入 baseline 退步。
    - **每个 live SKILL 的 validator 必须有 runtime smoke test** (不止 compile gate)。a3 实施时必须为涉及的每个 live SKILL 写对应的 runtime smoke test。
    - smoke test 必须模拟 `ValidationMiddleware` schema 分支真实数据流，验证 validator 接到的 payload 形状跟 `SKILL.md` 声明的 `output_schema` 类型完全一致。
-   - **强制 A3 验证用例**：必须验证 **dict + output_schema + _reserved_key** 的组合 case。确保在存在 schema 的分支下，即使 Pydantic 的 extra=ignore 机制存在，非法注入 `_metrics` 等保留字的行为也必须 raise `RuntimeError`，决不能被静默丢弃。
+   - **强制 A3 验证用例 1**：必须验证 **dict + output_schema + _reserved_key** 的组合 case。确保在存在 schema 的分支下，即使 Pydantic 的 extra=ignore 机制存在，非法注入 `_metrics` 等保留字的行为也必须 raise `RuntimeError`，决不能被静默丢弃。
+   - **强制 A3 验证用例 2 (v5 新增)**：必须增加 schema-less LLM finish_task 的 routing test，确保未声明 schema 但使用 finish_task 的 Phase 能够被正确路由至遗留的 `ValidationMiddleware` fallback，保证 live SKILL 不会挂掉。
    - 覆盖率 `pytest --cov` 不能低于 71.25%。
 3. **消除静默失败代码**：检索 `phase_executor.py`，不得存在任何空 `except:`。
 4. **无旧中间件残留**：`phase_executor.py` 执行流中不再出现遗留的 `ValidationMiddleware`。

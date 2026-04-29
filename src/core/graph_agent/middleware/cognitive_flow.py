@@ -30,6 +30,8 @@ from langchain_core.messages import ToolMessage
 from langgraph.graph import END
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command, interrupt
+from pydantic import BaseModel
+from pydantic import ValidationError as PydanticValidationError
 
 from ..core.exceptions import GraphAgentError
 from ..core.io_manager import IOManager
@@ -64,15 +66,39 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         unattended: bool = False,
         *,
         schema_engine: SchemaEngine | None = None,
-        current_phase_schema: SchemaObject | None = None,
+        current_phase_schema: type[BaseModel] | SchemaObject | None = None,
+        business_validator: Callable[
+            [list[dict[str, Any]]], tuple[bool, list[str]]
+        ]
+        | None = None,
         phase_name: str = "unknown",
         interrupt_fn: InterruptFn | None = None,
     ) -> None:
+        # Phase 2 A2 v3 (design v4 §3.4 step 1+2 + §3.2 #3 "彻底接管旧
+        # ValidationMiddleware 职责"): the schema parameter union was
+        # extended from ``SchemaObject | None`` to also accept a Pydantic
+        # ``type[BaseModel]``. ``_validate_finish_args`` dispatches on
+        # the schema kind: ``SchemaObject`` keeps the
+        # ``schema_engine.get_pydantic_model`` + ``schema_engine.validate``
+        # path; ``type[BaseModel]`` skips the schema-engine round-trip and
+        # validates each parsed block directly with
+        # ``schema_cls.model_validate``. This unblocks dotted-path SKILLs
+        # whose ``output_schema`` resolves to a Pydantic class at load time.
+        #
+        # ``business_validator`` is the per-phase business-rule callable
+        # mounted via the SKILL's ``validator:`` field. It receives the
+        # parsed items list (``list[dict[str, Any]]`` per A1 §2.4) AFTER
+        # Pydantic validation succeeds; failures are routed back to the
+        # LLM as retry feedback. This was previously owned by
+        # ``cognitive.middlewares.ValidationMiddleware``; design v4 §3.2
+        # #3 explicitly transfers the responsibility here so the legacy
+        # middleware can be retired for the static-schema pipeline.
         super().__init__()
         self._io_manager = io_manager
         self._unattended = bool(unattended)
         self._schema_engine = schema_engine or SchemaEngine()
         self._current_phase_schema = current_phase_schema
+        self._business_validator = business_validator
         self._phase_name = phase_name
         self._interrupt_fn = interrupt_fn or interrupt
 
@@ -276,8 +302,16 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
                 errors=("business_data_md 是空。必须填入完整 markdown 结果。",),
             )
 
+        # Phase 2 A2 v3 schema dispatch (design v4 §3.4 step 2): pick the
+        # Pydantic model class either by asking the schema engine to
+        # synthesize one from a SchemaObject, or — for SKILLs that
+        # declared ``output_schema`` as a dotted Python path — using the
+        # already-imported ``type[BaseModel]`` directly.
         try:
-            model = self._schema_engine.get_pydantic_model(schema)
+            if isinstance(schema, SchemaObject):
+                model = self._schema_engine.get_pydantic_model(schema)
+            else:
+                model = schema
             blocks = parse_md(business_data_md, model)
         except Exception as exc:  # noqa: BLE001 - returned to LLM as retry feedback
             return _FinishValidation(
@@ -299,12 +333,28 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         parsed_items: list[dict[str, Any]] = []
         errors: list[str] = []
         for block in blocks:
-            result = self._schema_engine.validate(block.data, schema)
-            if result.ok:
-                parsed_items.append(result.parsed or dict(block.data))
-                continue
             item_id = block.meta.id or "unknown"
-            errors.extend(f"item {item_id}: {error}" for error in result.errors)
+            if isinstance(schema, SchemaObject):
+                result = self._schema_engine.validate(block.data, schema)
+                if result.ok:
+                    parsed_items.append(result.parsed or dict(block.data))
+                else:
+                    errors.extend(f"item {item_id}: {error}" for error in result.errors)
+                continue
+            # Pydantic class path: validate the per-item dict directly
+            # against the imported BaseModel and surface any
+            # ValidationError as a per-item, per-field message so the LLM
+            # can correct the markdown on retry.
+            try:
+                instance = model.model_validate(block.data)
+            except PydanticValidationError as exc:
+                for detail in exc.errors():
+                    loc_parts = detail.get("loc", ())
+                    loc = ".".join(str(part) for part in loc_parts) or "__root__"
+                    msg = str(detail.get("msg", "validation error"))
+                    errors.append(f"item {item_id}: {loc}: {msg}")
+                continue
+            parsed_items.append(instance.model_dump())
 
         if errors:
             return _FinishValidation(
@@ -312,11 +362,73 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
                 schema_validation="failed",
                 errors=tuple(errors),
             )
+
+        # Phase 2 A2 v3 (design v4 §3.2 #3): run the per-phase business
+        # validator on the parsed items list. Pydantic has already
+        # asserted the per-item shape; the business validator owns
+        # cross-item / domain-specific rules (e.g. line-number continuity
+        # for text-segmentation, ID-uniqueness for event-extraction).
+        # Validators receive ``list[dict[str, Any]]`` per A1 §2.4.
+        business_errors = self._run_business_validator(parsed_items)
+        if business_errors:
+            return _FinishValidation(
+                ok=False,
+                schema_validation="failed",
+                errors=tuple(business_errors),
+            )
+
         return _FinishValidation(
             ok=True,
             schema_validation="passed",
             parsed_items=parsed_items,
         )
+
+    def _run_business_validator(
+        self, parsed_items: list[dict[str, Any]]
+    ) -> list[str]:
+        """Phase 2 A2 v3: invoke the optional business validator and
+        normalise its (passed, errors) return into a list of strings.
+
+        Validators must conform to A1 §2.4 — they take the parsed items
+        list and return ``(bool, list[str])``. Any unexpected exception
+        is captured and surfaced to the LLM as a single retry-feedback
+        line so the agent loop can recover instead of crashing the
+        whole run.
+        """
+        validator = self._business_validator
+        if validator is None:
+            return []
+        try:
+            passed, errors = validator(parsed_items)
+        except Exception as exc:  # noqa: BLE001 - returned to LLM as retry feedback
+            logger.warning(
+                "phase=%s action=cognitive_flow_business_validator decision=fail "
+                "reason=exception exc=%s",
+                self._phase_name,
+                type(exc).__name__,
+            )
+            return [
+                f"[Business] validator 异常：{type(exc).__name__}: {exc}",
+            ]
+        if passed:
+            logger.info(
+                "phase=%s action=cognitive_flow_business_validator decision=pass "
+                "items=%d",
+                self._phase_name,
+                len(parsed_items),
+            )
+            return []
+        if isinstance(errors, str):
+            errors = [errors] if errors else []
+        elif not isinstance(errors, list):
+            errors = [str(errors)] if errors else []
+        logger.warning(
+            "phase=%s action=cognitive_flow_business_validator decision=reject "
+            "issue_count=%d",
+            self._phase_name,
+            len(errors),
+        )
+        return [f"[Business] {err}" for err in errors]
 
     def _reject_finish(self, tool_call_id: str, errors: list[str]) -> Command[Any]:
         content = self._REJECTION_PREFIX + "\n" + "\n".join(errors)

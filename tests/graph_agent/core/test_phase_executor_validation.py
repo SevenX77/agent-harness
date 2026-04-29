@@ -202,3 +202,62 @@ class TestExecuteValidationPhase:
 
         assert state_in["data"].model_dump() == {"existing": "v"}
         assert state_in["flow"].retry_counts == {"analyse": 0}
+
+
+class TestValidationPhaseHoistT7Bis:
+    """MVP-2 T7-bis: validator-pass path applies declarative io.outputs.
+
+    A phase that declares ``io.outputs`` solely on the validation node
+    must still route hoisted fields to BusinessData and io_errors to
+    FrameworkState, matching the LLM and code-only entry-point
+    behaviour.
+    """
+
+    def test_validator_pass_routes_io_specs(self):
+        from graph_agent.core.io_manager import IODef
+
+        executor = PhaseExecutor([])
+        phase = Phase(
+            name="analyse",
+            validator=lambda data: (True, []),
+            io_specs=[IODef(source_field="title", target_field="story_title")],
+        )
+
+        # finish_task_result populated upstream by the LLM phase exit
+        # — validation phase consumes it for hoist.
+        state_in = _make_state(
+            flow={"finish_task_result": {"title": "Opening"}},
+        )
+        state_out = executor.execute_validation_phase(phase, state_in)
+
+        assert state_out["data"].model_dump()["story_title"] == "Opening"
+        assert state_out["flow"].io_errors == []
+
+    def test_validator_pass_no_io_specs_is_no_op(self):
+        executor = PhaseExecutor([])
+        phase = Phase(name="analyse", validator=lambda data: (True, []))
+
+        state_in = _make_state(
+            data={"existing": "v"},
+            flow={"finish_task_result": {"title": "Opening"}},
+        )
+        state_out = executor.execute_validation_phase(phase, state_in)
+
+        # No io_specs declared → BusinessData unchanged.
+        assert state_out["data"].model_dump() == {"existing": "v"}
+
+    def test_validator_pass_records_missing_required_field(self):
+        from graph_agent.core.io_manager import IODef
+
+        executor = PhaseExecutor([])
+        phase = Phase(
+            name="analyse",
+            validator=lambda data: (True, []),
+            io_specs=[IODef(source_field="absent", target_field="story_title")],
+        )
+        state_in = _make_state(flow={"finish_task_result": {"present": "x"}})
+        state_out = executor.execute_validation_phase(phase, state_in)
+
+        assert any(
+            "absent" in err for err in state_out["flow"].io_errors
+        )

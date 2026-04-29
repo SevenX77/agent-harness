@@ -203,6 +203,55 @@ class PhaseExecutor:
     def callbacks(self) -> list[Callback]:
         return self._callbacks
 
+    def _apply_io_hoist(
+        self,
+        state: WorkflowState,
+        phase: Phase,
+        *,
+        source_data: dict[str, Any] | None = None,
+    ) -> WorkflowState:
+        """MVP-2 T7-bis: route declarative io.outputs into BusinessData.
+
+        Called at phase exit from each of the three executor entry
+        points (LLM phase end, code-only phase end, validation phase
+        pass). When ``phase.io_specs`` is empty the call is a no-op,
+        which keeps phases without declarative io routing on the
+        legacy path.
+
+        ``source_data`` defaults to ``state['flow'].finish_task_result``
+        (the LLM phase exit case after ``StateManager.route_finish_task``
+        has populated it). Code-only phases pass the live BusinessData
+        dump so tool-returned dict keys can hoist directly. The IOManager
+        is constructed per-call from the phase's specs — re-construction
+        is cheap and lets the caller stay stateless.
+        """
+        if not phase.io_specs:
+            return state
+
+        from .io_manager import IOManager
+
+        if source_data is None:
+            ftr = state["flow"].finish_task_result
+            source_data = dict(ftr) if isinstance(ftr, dict) else {}
+
+        manager = IOManager(list(phase.io_specs))
+        result = manager.resolve_hoist(source_data, state["data"])
+
+        next_state = state
+        new_dump = result.new_business_data.model_dump()
+        # Only push BusinessData updates when the hoist produced new
+        # fields. Comparing against the live dump avoids a redundant
+        # ``model_copy`` round-trip when every spec was missing.
+        if new_dump != next_state["data"].model_dump():
+            next_state = StateManager.update_business(next_state, **new_dump)
+
+        if result.io_errors:
+            existing = list(next_state["flow"].io_errors)
+            next_state = StateManager.update_framework(
+                next_state, io_errors=existing + list(result.io_errors)
+            )
+        return next_state
+
     def execute_code_only_phase(self, phase: Phase, state: WorkflowState) -> WorkflowState:
         """Run a code-only phase (``requires_llm=False``).
 
@@ -232,6 +281,16 @@ class PhaseExecutor:
             current_phase=phase.name,
             retry_feedback=None,
             validation_warnings=[],
+        )
+
+        # MVP-2 T7-bis: apply declarative io.outputs hoist for code-only
+        # phases. Source is the live BusinessData dump because tools mutate
+        # ``state['data']`` directly during the loop above and there is
+        # no finish_task_result on this code path.
+        next_state = self._apply_io_hoist(
+            next_state,
+            phase,
+            source_data=next_state["data"].model_dump(),
         )
 
         for cb in self._callbacks:
@@ -303,12 +362,17 @@ class PhaseExecutor:
                     retry_count=retries_used,
                 ),
             )
-            return StateManager.update_framework(
+            next_state = StateManager.update_framework(
                 next_state,
                 retry_counts=retry_counts,
                 retry_feedback=None,
                 validation_warnings=[],
             )
+            # MVP-2 T7-bis: validator-pass is a phase-exit signal too —
+            # apply declarative io.outputs hoist here so a phase that
+            # only declares ``io.outputs`` on the validation node still
+            # routes BusinessData.
+            return self._apply_io_hoist(next_state, phase)
 
         current_retries = retry_counts.get(retry_key, 0)
         for cb in self._callbacks:
@@ -880,6 +944,14 @@ class PhaseExecutor:
         )
         if isinstance(finish_result, dict):
             new_state = StateManager.route_finish_task(new_state, finish_result)
+
+        # MVP-2 T7-bis: declarative io.outputs hoist runs at LLM phase
+        # exit, after route_finish_task has populated
+        # ``flow.finish_task_result``. The default source for hoist is
+        # that finish_task_result, so the helper picks it up from state
+        # without an explicit pass-through. No-op when phase.io_specs
+        # is empty (legacy phase without declarative io).
+        new_state = self._apply_io_hoist(new_state, phase)
 
         # Callbacks
         for cb in active_callbacks:

@@ -193,6 +193,87 @@ class TestExecuteCodeOnlyPhase:
         assert metrics_snap == {"tokens": 42}
 
 
+class TestPhaseExecutorIoHoistT7Bis:
+    """MVP-2 T7-bis: ``Phase.io_specs`` drives ``IOManager.resolve_hoist``
+    at phase exit and routes ``HoistResult.io_errors`` into
+    ``state['flow'].io_errors`` via ``StateManager.update_framework``.
+
+    Each test exercises one of the three phase entry points (code-only,
+    validation pass, LLM finish) plus the no-op fallback when
+    ``io_specs`` is empty (legacy phases must not be affected).
+    """
+
+    def test_code_only_phase_no_io_specs_is_no_op(self):
+        phase = Phase(name="prep", requires_llm=False)
+
+        def tool(data: BusinessData) -> None:
+            return None
+
+        phase.tools = [tool]  # type: ignore[list-item]
+        executor = PhaseExecutor([])
+        state_out = executor.execute_code_only_phase(phase, _make_state(data={"x": 1}))
+
+        # Empty io_specs → BusinessData unchanged + no io_errors.
+        assert state_out["data"].model_dump() == {"x": 1}
+        assert state_out["flow"].io_errors == []
+
+    def test_code_only_phase_hoist_routes_business_data(self):
+        from graph_agent.core.io_manager import IODef
+
+        phase = Phase(
+            name="prep",
+            requires_llm=False,
+            io_specs=[IODef(source_field="title", target_field="story_title")],
+        )
+
+        def tool(data: BusinessData) -> None:
+            data["title"] = "Opening"
+            return None
+
+        phase.tools = [tool]  # type: ignore[list-item]
+        executor = PhaseExecutor([])
+        state_out = executor.execute_code_only_phase(phase, _make_state())
+
+        # io_specs source ``title`` lands in target ``story_title``.
+        assert state_out["data"].model_dump()["story_title"] == "Opening"
+        assert state_out["flow"].io_errors == []
+
+    def test_code_only_phase_hoist_records_missing_required_field(self):
+        from graph_agent.core.io_manager import IODef
+
+        phase = Phase(
+            name="prep",
+            requires_llm=False,
+            io_specs=[IODef(source_field="absent", target_field="story_title")],
+        )
+        executor = PhaseExecutor([])
+        state_out = executor.execute_code_only_phase(phase, _make_state())
+
+        # Missing required source field surfaces as an io_error in flow.
+        assert any(
+            "absent" in err and "missing" in err.lower()
+            for err in state_out["flow"].io_errors
+        )
+
+    def test_code_only_phase_hoist_appends_to_existing_io_errors(self):
+        from graph_agent.core.io_manager import IODef
+
+        phase = Phase(
+            name="prep",
+            requires_llm=False,
+            io_specs=[IODef(source_field="absent", target_field="story_title")],
+        )
+        executor = PhaseExecutor([])
+        state_in = _make_state(flow={"io_errors": ["pre-existing"]})
+        state_out = executor.execute_code_only_phase(phase, state_in)
+
+        # ``StateManager.update_framework`` appends, doesn't replace.
+        assert state_out["flow"].io_errors[0] == "pre-existing"
+        assert any(
+            "absent" in err for err in state_out["flow"].io_errors[1:]
+        )
+
+
 class TestExecuteLLMPhaseMiddlewareIntegration:
     def test_passes_resolved_model_to_summarization_middleware(self, monkeypatch):
         phase = Phase(name="llm", max_iterations=1, max_nudges=0)

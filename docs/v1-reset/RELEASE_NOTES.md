@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-本次发布 (`feat/v1-reset-mvp-1` 分支, `5decd0a..HEAD` 共 38 commits) 落盘了 v1-reset 6-MVP roadmap 中的 **MVP-1 + MVP-2 + MVP-3** 三个阶段，对应"状态拆解 / 独立基础设施 / 加载与中间件模块边界"。这是一次**架构过渡期 (Phase 1)** 的中间发布——核心类型安全组件已就绪并就位，但执行控制流仍由 legacy `phase_executor` 驱动。**v1.0.0 的全盘替换将在 MVP-4 + MVP-5 完成**。
+本次发布 (`feat/v1-reset-mvp-1` 分支, `5decd0a..HEAD` 共 40 commits) 落盘了 v1-reset 6-MVP roadmap 中的 **MVP-1 + MVP-2 + MVP-3** 三个阶段，对应"状态拆解 / 独立基础设施 / 加载与中间件模块边界"。这是一次**架构过渡期 (Phase 1)** 的中间发布——核心类型安全组件已就绪并就位，但执行控制流仍由 legacy `phase_executor` 驱动。**v1.0.0 的全盘替换将在 MVP-4 + MVP-5 完成**。
 
 请将本次发布理解为"地基稳了，上层结构未半"，不要按终态 1.0.0 期待。
 
@@ -64,7 +64,7 @@
 - T12 集成压测：4 SKILL e2e (text-segmentation / event-extraction / batch-analysis / global-synthesis) + Loop detection 边界 + 启动延迟 ≥ 20% 改善
 
 ### MVP-5 待办
-- 全库 ruff 69 errors 拍平（`personas.py` F821 + UP037 已在本 PR 修，余 68 推 MVP-5）
+- 全库 ruff 69 errors 拍平（`personas.py` F821 + UP037 + `harness.py` dead import 已在本 PR 修, 余 66 errors 推 MVP-5）
 - 全库 mypy --strict (核心目录之外的非新增文件)
 - coverage 提升至全库 ≥ 95% 的目标
 - 最终 release notes 升级为 1.0.0，正式宣发"v1-reset 完整 ship"
@@ -111,6 +111,6 @@ phases:
 
 ## AI 协作模式致谢
 
-本次 38 commits 由 a1 (codex executor) / a2 (gemini analyst+reviewer) / a3 (claude executor 副) / 主控 Claude (orchestrator+designer) 通过 CCB 异步协作完成。
+本次 40 commits 由 a1 (codex executor) / a2 (gemini analyst+reviewer) / a3 (claude executor 副) / 主控 Claude (orchestrator+designer) 通过 CCB 异步协作完成。
 
 `v1-reset (Phase 1)` 是首个完全通过 **多 Agent 异步并行流水线** 重构的 graph_agent 大版本。在 Phase 2 (MVP-4 + MVP-5) 完成后，将发布 1.0.0 final 时再做完整效能数据复盘。

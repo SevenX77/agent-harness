@@ -34,6 +34,17 @@
 ### 2.1 Probe-based Circuit Breaker (探针与断路器)
 这是真正意义上的高可用网关防护网。对于支持探测的 Provider（例如 OpenAI 兼容层和 Anthropic），系统会主动发送 `max_tokens=1` 的空字符 Prompt 进行健康检查。
 比起依靠长达动辄 60s~120s 的主业务请求超时来触发被动的 Fallback，轻量级的 Active Probe 探针能以最小的代价（<1s）迅速熔断故障节点，并在配置的 `_PROBE_DOWN_TTL` 窗口期内彻底旁路该 Provider，避免发生级联故障拥堵。
+```python
+# Probe 探针示例逻辑
+def _probe_provider(cls, rp: ResolvedProvider) -> bool:
+    # 极低超时与 1 token 测试，快速 fail-fast
+    client = cls._get_openai_client(rp.provider_code, timeout=10.0)
+    try:
+        client.chat.completions.create(max_tokens=1, ...)
+        return True
+    except Exception:
+        return False
+```
 
 ### 2.2 Type-aware SDK Clients (原生 SDK 直连)
 彻底摒弃了 LangChain 粗糙的 `BaseChatModel` 包装封装，转而直接在底层持有 `openai.OpenAI`、`anthropic.Anthropic`、`google.genai.Client` 实例对象。
@@ -94,7 +105,27 @@
   4. 如果遇到明确的大模型级别或协议级别的异常网络失败，精准调用底层的 `_mark_provider_down` 以切断该服务商流量，并基于本次**确凿已经发生过的失败**，手动且精确地发出真实的 `LLMFallbackEvent` 日志事件。
   5. 如果调用成功，则拦截解析使用量（Tokens Usage），组装并向上传递最符合标准契约规范的 LangChain `ChatResult` 给 Agent Loop 继续执行。
 
-这种强有力的分层防御设计，使得我们既对上层业务代码保持了令人安心的零侵入特性，又对底层的异常重试循环、故障剔除和探针机制保持了令人振奋的百分之百可控能力。
+```python
+# 核心网关类架构示意（伪代码）
+class GatewayChatModel(BaseChatModel):
+    def _generate(self, messages, stop, run_manager, **kwargs) -> ChatResult:
+        for candidate in self.resolved_chain:
+            if LLMClientManager._is_provider_marked_down(candidate):
+                continue
+            
+            if should_probe and not LLMClientManager._probe_provider(candidate):
+                LLMClientManager._mark_provider_down(candidate)
+                continue
+                
+            try:
+                # 原生调用
+                response = LLMClientManager._dispatch_provider_call(candidate, messages)
+                return self._build_chat_result(response)
+            except Exception as e:
+                # 确凿异常后才发出 fallback
+                self._emit_real_fallback_event(e, candidate)
+                LLMClientManager._mark_provider_down(candidate)
+```
 
 ---
 
@@ -154,3 +185,17 @@
    身为重构的主导者，你必须绝对清醒且理智：绝对不能因为仅仅是看原本那套被重重封装过、依赖过深的 LangChain 的底座 `agent.invoke` 流程引擎的调度过程不顺眼，亦或者只是主观上排斥它那冗杂的 `BaseChatModel` 设计体系，就盲目产生企图顺带在本次区区 M3 等级的客户端迁移替换版本中，胆大妄为地去发起想要一并从源头完全推翻并重新打造属于自己定制化的一整套庞大复杂 Agent 循环状态机轮询运转系统的极度危险念头！要知道，目前的 Graph Agent 上层有着极为厚重沉淀的历史包袱与极为丰富强大的场景应用，光是当前平稳无忧地挂载且正源源不断执行大量业务推理流水线的**核心生产级应用大 SKILL 就已经有足足整整 18 个线上存量服务**之多！这些 SKILL 内部并非单纯简单的文字补全调用那么简单而已，它们其内部层层包裹且深度嵌合了包含了诸如作为关键生命周期阻断的 `finish_task` 数据验证回调退出关键挂钩点拦截、面向人机协同打断调度的 `ask_clarification` 反问收集机制打断设计，甚至是嵌套调用非常复杂的分步递进反馈的 Subgraph delegation 分散子图模型授权契约。它们全部都是过去漫长的时间和无以计数的业务 Case 千锤百炼测试才得以跑通闭环的极其精密且敏感的齿轮体系组合。若仅仅为了引入底层一套更加高可用、功能更为丰富的 LLM Client 客户端连接网关基础调度方案设施，而去强制且蛮横地要求让这牵一发而动全身所有的多达 18 个不同业务逻辑的庞大生产级 SKILL 全部跟着去配合你这一项偏门底层的重构而去重新全盘重写逻辑格式、重新做痛苦的覆盖联调兼容适配测试、并且经历重新验证上线灰度的地狱式折磨，那绝对将会是一场酿成彻底性崩溃、不可估量的惊天且彻头彻尾的毁灭性灾难架构技术大事故！
    - **绝对且无可妥协的强制红线约束条件**：在即将强力落地执行整个 Milestone 3 的那段严峻过程中，我们必须将测试的稳健程度和通过率视为最高级别的生死铁律。一切诸如 `test_loader_based_smoke.py` 等这种直接覆盖并深度检验了那上述这整整 18 个重要 SKILL 各类细节链路的核心级联烟雾综合验收测试套件，在经历核心网关切换之后，绝对必须、并且毫无商量余地在**业务 SKILL 定义脚本没有任何一丝一毫代码修改和妥协适应的情况下，必须依然能够原样地顺畅运行且成功断言通过（这就是我们必须要坚定把守且雷打不动的 100% 绝对零回归底线红线）**！
    - **唯一且最优的合理解法与出路**：通过并严格依赖我们在 Milestone 2 设计阶段精心雕琢、严丝合缝打磨设计出来的那一套能够完美充当上下桥梁粘合的 `GatewayChatModel` 透明中间适配器桥接外壳，在最底层通过我们自研高可用的控制流系统去替代那糟糕的 LangChain 底层客户端调度循环体系，而对上层接口完全伪装并完全且合规地适配暴露回那原原本本熟悉的原先那套 BaseChatModel 核心接口契约规范。这不仅能让我们在业务层毫无察觉的睡梦中，悄无声息、平滑无痛地完成底层网络引擎组件的心肺大规模大换血移植置换和强壮性提升；更是这次看似凶险万分但必须要推进迈出并跨越的重大演进战役，能够做到稳稳着陆、万无一失实现大一统平滑架构升级置换的唯一成功保障，没有任何其他激进和取巧的绕路手段可以替代！
+
+---
+
+## 7. 结语与附录补充说明
+
+本次重构提案，是我们从过去过度依赖第三方封装框架所积累的深重技术债中，进行的一次痛苦但绝对必要的彻底解脱与自我救赎。
+这不仅仅是一次代码文件的拆分和移动，更是一场将系统底层的控制权、网络资源的调度权以及异常数据的精准感知权，重新夺回并紧紧掌握在自己手中的战役。
+
+**后续迭代展望 (Out-of-scope for M3)**：
+1. **完全解耦 Pydantic 版本的绑定**：在 `GatewayChatModel` 完全接管业务流量之后，我们可以在未来彻底移除 LangChain `with_structured_output` 的依赖，改为在内部纯手工调用底层的原生 SDK 进行结构化数据请求，从而彻底摆脱不同框架对于 Pydantic V1/V2 混乱不一的兼容性纠缠。
+2. **多模态与异步客户端的全链路支持**：目前的重构重心放在纯文本和结构化同步调用上，在完成 Milestone 3 之后，`LLMClientManager` 将成为我们在图代理框架下引入原生多模态输入以及 `httpx.AsyncClient` 异步并发调用的最核心底座。
+3. **基于 Redis/分布式存储的 Token 共享计数**：随着我们的 `_usage_stats` 数据结构在单机环境跑通验证，下一步便可以轻松将其上报通道替换为分布式的 Redis 缓存集群，从而实现跨机器、跨容器的全局精准配额限流与熔断风暴抑制。
+
+这套方案的严谨性、克制性和务实性，必将成为我们在大模型网关多租户架构探索道路上的坚实灯塔。

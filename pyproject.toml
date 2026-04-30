@@ -59,6 +59,11 @@ studio = [
     "watchdog>=4.0",
     "ptyprocess>=0.7",
 ]
+e2e = [
+    "playwright>=1.40",
+    "pytest-playwright>=0.5",
+    "websockets>=12",
+]
 google = ["langchain-google-genai>=2.0", "google-genai>=1.0"]
 tts = ["edge-tts>=6.0"]
 all = ["graph-agent-harness[google,tts]"]

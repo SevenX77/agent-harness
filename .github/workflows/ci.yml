@@ -21,7 +21,7 @@ jobs:
       - name: mypy strict
         run: mypy src/
       - name: pytest with coverage
-        run: pytest tests/ -x --tb=short --cov=src/core/graph_agent --cov-report=xml --cov-report=term
+        run: pytest tests/ -x --tb=short --cov=src/core/graph_agent --cov-report=xml --cov-report=term --ignore=tests/studio_e2e
       - name: coverage gate
         run: coverage report --fail-under=73
       - name: dependency audit

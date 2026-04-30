@@ -1,0 +1,11 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.9, pytest-9.0.3, pluggy-1.6.0 -- /home/sevenx/coding/agent-harness/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/sevenx/coding/agent-harness
+configfile: pyproject.toml
+plugins: cov-6.3.0, anyio-4.13.0, langsmith-0.7.34
+collecting ... collected 1 item
+
+tests/graph_agent/integration/test_mvp1_smoke.py::TestRealLLMSmoke::test_v3_run_one_chapter_honors_invariants PASSED
+
+============================== 1 passed in 40.84s ==============================

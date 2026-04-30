@@ -39,7 +39,12 @@ Reference paths:
 
 from __future__ import annotations
 
+import json
 import os
+import shutil
+import time
+import traceback
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +68,8 @@ LLM_ROLES_PATH = REPO_ROOT / "config" / "llm_roles.yaml"
 V3_SKILL_PATH = "skills/text-segmentation/SKILL.md"
 REAL_LLM_SMOKE_ROLE_ENV = "GRAPH_AGENT_REAL_LLM_SMOKE_ROLE"
 DEFAULT_REAL_LLM_SMOKE_ROLE = "test_opus47_ws"
+E2E_TRACE_RUN_ENV = "GRAPH_AGENT_E2E_TRACE_RUN"
+E2E_TRACE_BASE = REPO_ROOT / "docs" / "v1-reset" / "e2e_traces"
 
 
 def _load_dotenv_for_smoke() -> None:
@@ -85,6 +92,162 @@ def _any_llm_role_provider_key_present() -> bool:
 def _real_llm_smoke_role() -> str:
     """Single-model role used by the live smoke test."""
     return os.environ.get(REAL_LLM_SMOKE_ROLE_ENV, DEFAULT_REAL_LLM_SMOKE_ROLE)
+
+
+def _resolve_e2e_trace_dir() -> Path | None:
+    """Resolve the per-run trace dump directory from the env var.
+
+    Returns ``None`` when ``GRAPH_AGENT_E2E_TRACE_RUN`` is unset so the
+    legacy test path stays a no-op for normal pytest invocations.
+    """
+    run_id = os.environ.get(E2E_TRACE_RUN_ENV)
+    if not run_id:
+        return None
+    out = E2E_TRACE_BASE / f"run_{run_id}"
+    out.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+def _serialize_message(message: object) -> dict[str, Any]:
+    """Best-effort dict form of a LangChain message for json.dumps."""
+    if hasattr(message, "model_dump"):
+        try:
+            return message.model_dump()  # type: ignore[no-any-return,attr-defined]
+        except Exception:  # noqa: BLE001 — fall through to dict()/str fallback
+            pass
+    if hasattr(message, "dict"):
+        try:
+            return message.dict()  # type: ignore[no-any-return,attr-defined]
+        except Exception:  # noqa: BLE001
+            pass
+    return {
+        "type": type(message).__name__,
+        "content": str(getattr(message, "content", "")),
+    }
+
+
+def _extract_tool_calls(messages: list[Any]) -> list[dict[str, Any]]:
+    """Pull every tool_call across messages into a flat list for analysis."""
+    out: list[dict[str, Any]] = []
+    for msg in messages:
+        tcs = getattr(msg, "tool_calls", None)
+        if not tcs:
+            continue
+        for tc in tcs:
+            if isinstance(tc, dict):
+                out.append(
+                    {
+                        "name": tc.get("name", ""),
+                        "args": tc.get("args", {}),
+                        "id": tc.get("id", ""),
+                    }
+                )
+            else:
+                out.append(
+                    {
+                        "name": getattr(tc, "name", ""),
+                        "args": getattr(tc, "args", {}),
+                        "id": getattr(tc, "id", ""),
+                    }
+                )
+    return out
+
+
+def _serialize_final_state(state: WorkflowState | None) -> dict[str, Any]:
+    if state is None:
+        return {}
+    return {
+        "data": state["data"].model_dump() if state.get("data") is not None else {},
+        "flow": state["flow"].model_dump() if state.get("flow") is not None else {},
+        "messages": [_serialize_message(m) for m in state.get("messages", [])],
+    }
+
+
+def _build_metrics_text(
+    *,
+    role: str,
+    final_state: WorkflowState | None,
+    duration_seconds: float,
+    error_text: str | None,
+) -> str:
+    lines = [
+        f"role={role}",
+        f"timestamp={datetime.now(tz=UTC).isoformat()}",
+        f"duration_seconds={duration_seconds:.2f}",
+    ]
+    if final_state is None:
+        lines.append("status=ERROR")
+    else:
+        flow = final_state["flow"]
+        data_dump = final_state["data"].model_dump()
+        lines.append("status=OK")
+        lines.append(f"messages_count={len(final_state.get('messages', []))}")
+        lines.append(f"data_keys={sorted(data_dump.keys())}")
+        lines.append(f"current_phase={flow.current_phase}")
+        lines.append(f"io_errors={list(flow.io_errors)}")
+        lines.append(f"validation_warnings={list(flow.validation_warnings)}")
+        lines.append(f"retry_counts={dict(flow.retry_counts)}")
+        lines.append(f"metrics={dict(flow.metrics)}")
+    if error_text:
+        lines.append("error=<see error.txt>")
+    return "\n".join(lines) + "\n"
+
+
+def _dump_e2e_trace(
+    trace_dir: Path,
+    *,
+    role: str,
+    final_state: WorkflowState | None,
+    duration_seconds: float,
+    error_text: str | None,
+    tmp_path: Path,
+) -> None:
+    """Write the trace bundle for one run into ``trace_dir``.
+
+    Always written (status=OK or status=ERROR):
+      - metrics.txt — role / duration / token metrics / data keys
+      - error.txt — full traceback when the run raised
+    Written when final_state is populated:
+      - final_state.json — pydantic.model_dump of data + flow + messages
+      - tool_calls.json — flat list of every tool_call across messages
+    Picked up from tmp_path when the run wrote them:
+      - tracing.jsonl — TracingCallback event log
+      - text-segmentation chapter_*_segments.json — SKILL declared output
+    """
+    (trace_dir / "metrics.txt").write_text(
+        _build_metrics_text(
+            role=role,
+            final_state=final_state,
+            duration_seconds=duration_seconds,
+            error_text=error_text,
+        ),
+        encoding="utf-8",
+    )
+    if error_text:
+        (trace_dir / "error.txt").write_text(error_text, encoding="utf-8")
+    if final_state is not None:
+        state_dump = _serialize_final_state(final_state)
+        (trace_dir / "final_state.json").write_text(
+            json.dumps(state_dump, indent=2, ensure_ascii=False, default=str),
+            encoding="utf-8",
+        )
+        tool_calls = _extract_tool_calls(list(final_state.get("messages", [])))
+        (trace_dir / "tool_calls.json").write_text(
+            json.dumps(tool_calls, indent=2, ensure_ascii=False, default=str),
+            encoding="utf-8",
+        )
+
+    # Copy harness/SKILL outputs that the run wrote into tmp_path.
+    for src_name in ("tracing.jsonl", "real_llm_metrics.txt"):
+        src = tmp_path / src_name
+        if src.exists():
+            shutil.copy2(src, trace_dir / src_name)
+    skill_outputs = tmp_path / "output" / "text-segmentation"
+    if skill_outputs.exists():
+        dst = trace_dir / "skill_outputs"
+        if dst.exists():
+            shutil.rmtree(dst)
+        shutil.copytree(skill_outputs, dst)
 
 
 def _force_llm_role(harness: GraphAgentHarness, role: str) -> None:
@@ -281,24 +444,43 @@ class TestRealLLMSmoke:
             "次元空间是一种由能量编织的非物理世界。\n"
             "李雷合上信，决定继续调查。\n"
         )
+        trace_dir = _resolve_e2e_trace_dir()
+        final_state: WorkflowState | None = None
+        error_text: str | None = None
+        run_start = time.monotonic()
+
         harness = load_workflow_from_md(Path(V3_SKILL_PATH))
         try:
-            _force_llm_role(harness, role)
-            final_state = harness.run(
-                initial_context={
-                    "chapter_content": sample_chapter,
-                    "chapter_number": 1,
-                    "output_dir": str(tmp_path),
-                },
-                unattended=True,
-            )
-            (tmp_path / "real_llm_metrics.txt").write_text(
-                f"role={role}\nmetrics={final_state['flow'].metrics}\n",
-                encoding="utf-8",
-            )
+            try:
+                _force_llm_role(harness, role)
+                final_state = harness.run(
+                    initial_context={
+                        "chapter_content": sample_chapter,
+                        "chapter_number": 1,
+                        "output_dir": str(tmp_path),
+                    },
+                    unattended=True,
+                )
+                (tmp_path / "real_llm_metrics.txt").write_text(
+                    f"role={role}\nmetrics={final_state['flow'].metrics}\n",
+                    encoding="utf-8",
+                )
+            except Exception:
+                error_text = traceback.format_exc()
+                raise
         finally:
             harness.close()
+            if trace_dir is not None:
+                _dump_e2e_trace(
+                    trace_dir,
+                    role=role,
+                    final_state=final_state,
+                    duration_seconds=time.monotonic() - run_start,
+                    error_text=error_text,
+                    tmp_path=tmp_path,
+                )
 
+        assert final_state is not None  # narrow for mypy after the try/finally
         # Invariant 1
         bad = [k for k in final_state["data"].model_dump() if k.startswith("_")]
         assert bad == [], f"BusinessData carries forbidden _-prefixed keys: {bad}"

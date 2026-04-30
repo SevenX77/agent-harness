@@ -1,0 +1,2 @@
+role=test_opus47_ws
+metrics={'total_input_tokens': 35565, 'total_output_tokens': 2751}

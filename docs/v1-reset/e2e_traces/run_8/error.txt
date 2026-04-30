@@ -1,0 +1,71 @@
+Traceback (most recent call last):
+  File "/home/sevenx/coding/agent-harness/tests/graph_agent/integration/test_mvp1_smoke.py", line 456, in test_v3_run_one_chapter_honors_invariants
+    final_state = harness.run(
+                  ^^^^^^^^^^^^
+  File "/home/sevenx/coding/agent-harness/src/core/graph_agent/core/harness.py", line 630, in run
+    result = self._graph.invoke(initial_state, config=config)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sevenx/coding/agent-harness/.venv/lib/python3.12/site-packages/langgraph/pregel/main.py", line 3071, in invoke
+    for chunk in self.stream(
+                 ^^^^^^^^^^^^
+  File "/home/sevenx/coding/agent-harness/.venv/lib/python3.12/site-packages/langgraph/pregel/main.py", line 2646, in stream
+    for _ in runner.tick(
+             ^^^^^^^^^^^^
+  File "/home/sevenx/coding/agent-harness/.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py", line 167, in tick
+    run_with_retry(
+  File "/home/sevenx/coding/agent-harness/.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py", line 42, in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sevenx/coding/agent-harness/.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py", line 656, in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sevenx/coding/agent-harness/.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py", line 400, in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sevenx/coding/agent-harness/src/core/graph_agent/core/graph_builder.py", line 116, in execute
+    return _executor_from_config(config).execute_llm_phase(phase, state)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sevenx/coding/agent-harness/src/core/graph_agent/core/phase_executor.py", line 131, in execute_llm_phase
+    return node.execute(phase, state)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sevenx/coding/agent-harness/src/core/graph_agent/core/phase_nodes/llm_phase_node.py", line 425, in execute
+    result = agent.invoke(
+             ^^^^^^^^^^^^^
+  File "/home/sevenx/coding/agent-harness/.venv/lib/python3.12/site-packages/langgraph/pregel/main.py", line 3071, in invoke
+    for chunk in self.stream(
+                 ^^^^^^^^^^^^
+  File "/home/sevenx/coding/agent-harness/.venv/lib/python3.12/site-packages/langgraph/pregel/main.py", line 2646, in stream
+    for _ in runner.tick(
+             ^^^^^^^^^^^^
+  File "/home/sevenx/coding/agent-harness/.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py", line 167, in tick
+    run_with_retry(
+  File "/home/sevenx/coding/agent-harness/.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py", line 42, in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sevenx/coding/agent-harness/.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py", line 656, in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sevenx/coding/agent-harness/.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py", line 400, in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sevenx/coding/agent-harness/.venv/lib/python3.12/site-packages/langchain/agents/factory.py", line 1141, in model_node
+    response = _execute_model_sync(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sevenx/coding/agent-harness/.venv/lib/python3.12/site-packages/langchain/agents/factory.py", line 1112, in _execute_model_sync
+    output = model_.invoke(messages)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sevenx/coding/agent-harness/.venv/lib/python3.12/site-packages/langchain_core/language_models/chat_models.py", line 455, in invoke
+    self.generate_prompt(
+  File "/home/sevenx/coding/agent-harness/.venv/lib/python3.12/site-packages/langchain_core/language_models/chat_models.py", line 1198, in generate_prompt
+    return self.generate(prompt_messages, stop=stop, callbacks=callbacks, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sevenx/coding/agent-harness/.venv/lib/python3.12/site-packages/langchain_core/language_models/chat_models.py", line 1005, in generate
+    self._generate_with_cache(
+  File "/home/sevenx/coding/agent-harness/.venv/lib/python3.12/site-packages/langchain_core/language_models/chat_models.py", line 1310, in _generate_with_cache
+    result = self._generate(
+             ^^^^^^^^^^^^^^^
+  File "/home/sevenx/coding/agent-harness/src/core/graph_agent/models/gateway_chat_model.py", line 190, in _generate
+    raise RuntimeError(f"All LLM fallback candidates failed for role={self.role_name}: {detail}")
+RuntimeError: All LLM fallback candidates failed for role=test_opus47_ws: WS_LLM/anthropic/claude-opus-4.7: APIConnectionError: Connection error.
+During task with name 'model' and id '02be17ac-864b-5a84-9b48-e851732a65d0'
+During task with name 'segment_execute' and id 'a7253e17-6389-4c37-58ef-d4cc871611d5'

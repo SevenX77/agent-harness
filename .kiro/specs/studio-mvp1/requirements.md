@@ -14,12 +14,15 @@
 - 接通真实的 `graph_agent` 引擎，替代 mvp0 的 Mock 数据。
 - 确立 API 全集契约（包含为 MVP2 预留的重试和人工接入端点）。
 - 提供 Monaco 与 CLI 双轨编辑模式，打通 Lint 与 Trace 实时流。
+- 确立标准化的文件系统工作区布局与运行产物落盘结构。
+- 提供基于 Git 的轻量级技能版本管理方案。
 
 **Non-Goals (Out of Scope):**
 - 暂不实现用户工作区隔离（P1.5 强制 Gate 任务）。
 - 暂不实现画图连线修改 DSL 的能力（画布保持纯只读）。
 - 暂不实现完整的意图偏离检测与双对话框 CCB（推迟至 MVP3）。
 - 暂不实现团队协作功能（评论、diff 审批，P2+ 考虑）。
+- **暂不在 Studio 内置复杂的版本回退 UI（依靠底层的 git 机制即可）。**
 
 ## Requirements List
 
@@ -64,6 +67,26 @@
 **Objective:** The system shall 在 API 与 WebSocket 契约中预留断点重试和人工接入点支持，为 MVP2 打下基础。
 1. **The system shall** 预留 `POST /api/skills/{id}/runs/{run_id}/resume` 接口的完整结构。
 2. **The system shall** 在 WebSocket 协议中定义双向数据流：服务端能推送 `ask_human_input` 事件，客户端能发送 `human_input_response` 负载。
+
+### Requirement 9: Workspace File System Layout
+**Objective:** The system shall 确立标准化的工作空间与公共模板库的文件目录布局。
+1. **When** Studio 启动时，the system shall 识别 `skills/` 为只读的公共模板库，并识别 `workspaces/<uid>/skills/` 为当前用户的私有读写区。
+2. **When** PM 对某个技能产生新的测试素材、历史运行记录或 Golden Baseline 时，the system shall 严格按照约定的子目录结构 (`test_inputs/`, `runs/`, `golden/`) 将其落盘，避免污染技能自身的业务代码。
+
+### Requirement 10: PM Skill Lifecycle Operations
+**Objective:** The system shall 提供支撑 PM 从新建到测试、分享的完整技能生命周期流转 API。
+1. **When** PM 需要新建技能时，the system shall 允许基于空白描述让 Copilot 初始化，或从公共库通过 `fork_from` 复制一个模板技能的全部目录内容。
+2. **When** PM 需要导出技能分享给其他人时，the system shall 提供 API 将该技能目录（含测试输入和 Golden，但不含大体积的历史运行产物）打包为 `.tar.gz` 供下载。
+
+### Requirement 11: Skill Version Management (light, git-based)
+**Objective:** The system shall 依赖底层的 Git 机制提供轻量级的文本版本追踪，不自造冗余的历史管理系统。
+1. **When** Studio 对私人技能目录进行第一次保存或初始化时，the system shall 提供快捷方式或自动执行 `git init`。
+2. **When** PM 通过 Monaco (调用 PUT 接口) 保存 `SKILL.md` 时，the system shall 自动执行 `git commit`（如 "Studio edit at <ts>"），让所有修改都有追溯源。
+
+### Requirement 12: Test IO + Schema Validation Pipeline
+**Objective:** The system shall 提供多阶的 Schema 校验机制，确保输入输出数据符合 `SKILL.md` 声明的 Pydantic 模型契约。
+1. **When** PM 上传一份测试输入 JSON，the system shall 立即读取该技能 `io.inputs` 的定义对其进行 Pydantic 校验，不通过则拒绝上传并返回 422 错误。
+2. **When** 技能被提交执行 (Run) 前，the system shall 再次校验选择的测试输入是否符合当前的 `io.inputs` 声明，防止因 `SKILL.md` 变动导致的隐式失效。
 
 ## R1~R37 Requirement Mapping
 

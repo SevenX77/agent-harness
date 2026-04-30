@@ -394,3 +394,96 @@ mvp0 到新 MVP 的过渡策略：
 - **MVP2 Golden Baseline & History**: 使用预留的 `/api/skills/{id}/golden` 获取基准数据。增加 `POST /api/skills/{id}/runs/{run_id}/compare` 接口实现输出与基准的差分比对。
 - **MVP3 CCB Multi-Copilot**: 新增 `POST /api/skills/{id}/copilot/dispatch`，请求体包含 `{target: "gemini" | "claude_code", context: dict}`，让后端的 Terminal Manager 将意图分发给相应的 Copilot 引擎。
 - **MVP3 Intent Drift Detection**: 新增 `GET /api/skills/{id}/runs/{run_id}/audit`，返回 `AuditResult`，包含根据 `plan_checklist` 和实际 `trace` 计算出的偏离度及详细指标。
+
+## 8. 文件系统布局 + Storage Architecture
+
+Studio 利用引擎内置的 `StorageManager` 体系和严格的目录约定来保证产物一致性，同时支持 P1.5 的多用户隔离。
+
+```text
+graph-agent-harness/
+├── skills/                     # [层: Engine] 公共模板库 (PM read-only) [进 git]
+│   ├── text-segmentation/
+│   │   ├── SKILL.md
+│   │   ├── script/...
+│   │   ├── references/...
+│   │   └── data/...           
+│   └── ...
+├── workspaces/                 # [层: Studio] 私人工作空间 (PM read-write) [gitignore]
+│   └── <user_id>/              # (P1.5 引入, 默认为 'default')
+│       ├── skills/             # PM fork 的私人 skill
+│       │   └── my-product-spec/
+│       │       ├── SKILL.md
+│       │       ├── script/
+│       │       ├── test_inputs/    # 测试素材 (PM 上传, 永久)
+│       │       │   ├── iphone15.json
+│       │       │   └── iphone15.meta.json
+│       │       ├── golden/         # Golden baseline (打磨好的理想输出, 永久)
+│       │       │   ├── <input_name>/
+│       │       │   │   ├── baseline.json
+│       │       │   │   └── _meta.json
+│       │       ├── runs/           # 历次运行产物 (按 run_id 归档, 受 TTL/数量 自动清理)
+│       │       │   ├── 2026-04-30T01-23-45_abc123/
+│       │       │   │   ├── final_state.json
+│       │       │   │   ├── tracing.jsonl
+│       │       │   │   ├── metrics.json
+│       │       │   │   ├── artifacts/      # phase 产出文件
+│       │       │   │   └── checkpoints.db  # LangGraph SQLite
+│       │       │   ├── 2026-04-30T...golden/  # .golden 后缀锁定，免疫清理
+│       │       │   └── ...
+│       │       └── .studio_state/  # Studio UI 偏好 / 临时 cache
+│       └── settings.json       # PM 个人配置 (API keys 等)
+└── .kiro/specs/studio-mvp1/    # 本 spec
+```
+
+## 9. PM 完整 Skill Lifecycle 操作流程
+
+| Lifecycle 阶段 | 用户行为 | API Call | 文件系统 |
+|---|---|---|---|
+| **新建 (从 0)** | PM 在 Studio 点 [+ 新建] → 跟 Copilot 对话 | `POST /api/skills` (CreateSkillReq) | 后端写 `workspaces/<uid>/skills/<new_id>/SKILL.md` (基于模板) |
+| **Fork (从模板)** | PM 在公共模板上点 [Fork] | `POST /api/skills` (含 fork_from: <template_id>) | 后端 cp -r `skills/<template_id>/` → `workspaces/<uid>/skills/<new_id>/` |
+| **导入 (从外部)** | PM 上传 .zip / 拖拽目录 | `POST /api/skills/import` (multipart/form-data) | 后端解压到 `workspaces/<uid>/skills/<imported_id>/`, validate SKILL.md, 不通过则 422 |
+| **打开 / 浏览** | PM 点列表里某个 skill | `GET /api/skills/{id}` | 读 `SKILL.md`, parse → `SkillManifest` |
+| **编辑 (Track A)** | PM 在 Monaco 改 prompt + Ctrl+S | `PUT /api/skills/{id}` | 后端写 `SKILL.md`, 自动 lint |
+| **编辑 (Track B)** | PM 在 Open CLI 里跟 Claude Code 对话 | (无 API call, 直接文件 IO) | Claude Code 写 `SKILL.md`, FileWatcher 推 `skill_changed` WS event |
+| **上传测试素材** | PM 拖拽 JSON 文件到测试面板 | `POST /api/skills/{id}/test_inputs` (multipart) | 后端写 `workspaces/<uid>/skills/<id>/test_inputs/<name>.json` |
+| **Run** | PM 选输入 + 点 [Run] | `POST /api/skills/{id}/runs` (RunRequest) | 后端 spawn subprocess, 创建 `runs/<run_id>/`, 实时写 `tracing.jsonl` |
+| **Run 中暂停/Resume**| PM History 选失败 run + 点 [Resume] | `POST /api/skills/{id}/runs/{run_id}/resume` | 后端 Checkpointer 拉 state 续跑, append 同一 `runs/<run_id>/` |
+| **锁定 Golden** | PM History 选满意 run + 点 [锁定 Golden] | `POST /api/skills/{id}/golden` (SetGoldenReq) | 后端 mv `runs/<run_id>/` → `runs/<run_id>.golden/`, cp 至 `golden/` |
+| **跑回归对比** | PM 点 [对比] | `POST /api/skills/{id}/runs/{run_id}/compare` | 后端读 `golden/` + `runs/<run_id>/` 进行 diff |
+| **分享 / 导出** | PM 点 [Export as ZIP] | `GET /api/skills/{id}/export` | 后端 tar.gz 整个 skill 目录 (含 test_inputs / golden, 不含 runs), 流式下载 |
+
+## 10. Skill 版本管理策略
+
+**核心决策**: **不在 Studio 里造内置版本管理**，而是利用底层机制的三维组合：SKILL.md 友好的文本格式 + `runs/` 自动历史 + `.golden` 强锁定。
+
+1. **历次 Run history**: `runs/` 目录天然按 `run_id` 字典排序 (自带 timestamp)。引擎的 `StorageManager` 会自动清理老旧目录，仅保留最近 N 个，但带有 `.golden` 后缀的免疫清理。
+2. **SKILL.md 编辑历史**: 鼓励 PM 把 `workspaces/<uid>/skills/<id>/` 当做标准的 Git Repo。Studio 将提供轻量的 `[Init Git]` 按钮，且在每次 Monaco 保存 (`PUT /api/skills/{id}`) 时触发自动提交 (`git commit -m "Studio edit at <ts>"`), 留下追溯源头。更复杂的回退则退让给命令行处理。
+3. **Skill 整体版本号**: `SKILL.md` frontmatter 提供 `version: "x.y.z"` 字段供业务自身进行 semver 标记。
+4. **跨 PM Fork 衍生关系**: 从公共库 fork 的技能将把 `fork_from: <source_skill_id>` 记入自身的 frontmatter，支持未来提供 `[跟踪 upstream]` 更新的 UI 提示。
+
+## 11. 测试产出物 + 输入输出文件 schema
+
+**Test Input 文件 schema**:
+- 内容采用 PM 自选格式 (JSON / YAML / Markdown)，对应后缀名。
+- **校验**: 上传阶段，基于 `SKILL.md` 中定义的 `io.inputs` 提取的 Pydantic 模型，对 input 数据调用 `model_validate()`。不通过产生 422 及结构化错误细节。
+- **元数据**: 伴生一个 `<input_name>.meta.json` 记录提交时间、摘要与用户引用信息。
+
+**Run 产出物 schema (`runs/<run_id>/`)**:
+- `final_state.json`: Pydantic 导出的完整 `WorkflowState`，包含 `data` (BusinessData) 和 `flow` (FrameworkState)。
+- `tracing.jsonl`: 引擎的 `CallbackEvent.model_dump_json()` 流水账。
+- `metrics.json`: `{total_input_tokens, total_output_tokens, duration_seconds, status, retry_counts, validation_warnings, io_errors}`
+- `artifacts/`: 依据 `io.outputs` 生成的纯业务产物。
+- `checkpoints.db`: LangGraph 断点存储。
+
+**Golden Baseline schema (`golden/<input_name>/baseline.json`)**:
+- 内容 Schema 完全对齐 `final_state.json`，是经过 PM 与 Copilot 调优的“理想化预期输出”。
+- 伴生元数据存放在 `golden/<input_name>/_meta.json`。
+
+## 12. 输入输出 schema 校验流水线
+
+为保证整个运行流的确定性，应用四个阶段的严密 Schema 校验策略：
+
+1. **Upload Time**: 上传 `test_inputs` 时，API `POST /test_inputs` 会直接比对 `io.inputs` Pydantic 定义，拦截残缺或类型错误的数据并直接返回 HTTP 422。
+2. **Run Time (前置)**: 发起 `RunRequest` 时，再次执行 input 数据的 Schema 校验（防止测试用例上次通过但今天 SKILL 契约已经被修改而变得不兼容）。失败则引发 422，标明字段不匹配。
+3. **Run Time (后置)**: Run 执行末尾，`IOManager` 根据 `io.outputs` 的声明校验业务侧产出的 Schema。若数据缺失或类型异常，触发 `CallbackEvent` 异常警告甚至回拨给 Agent Loop 请求修复。
+4. **Golden 锁定时**: 提取 `runs/` 中的产出并将其提升为 Baseline 前，验证其内容符合当前的 `io.outputs` Schema。若此时 Schema 恰好改变，UI 层给予用户“当前 Baseline 不兼容最新结构”的警告提示。

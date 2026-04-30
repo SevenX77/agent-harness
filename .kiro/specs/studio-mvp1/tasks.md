@@ -191,3 +191,51 @@
     1. 从触发 `skill_changed` 事件到出现 Toast，延迟符合期望，应用未发生崩溃。
   - _Requirements: 5_
   - blocked_by: 2.5, 2.6
+
+## Phase 4: IO Layer & PM Lifecycle
+
+- [ ] 4.1 (a1) FileSystem Standardization
+  - 在 Backend 中配置全局常量，明确规范 `SKILLS_DIR`, `WORKSPACES_DIR`, `RUNS_DIR`, `TEST_INPUTS_DIR` 等的绝对或相对寻址逻辑。
+  - **Acceptance Criteria**:
+    1. API 所有涉及路径访问的代码必须引用这些统一收口的常量，不存在硬编码组合路径。
+  - _Requirements: 9_
+  - blocked_by: 0.1
+
+- [ ] 4.2 (a1) Test Input 上传与管理端点 (P)
+  - 实现 `GET /api/skills/{id}/test_inputs` 与 `POST /api/skills/{id}/test_inputs` 及对应的 `DELETE` 方法。
+  - 上传的文件及其 `<input_name>.meta.json` 必须落入 `test_inputs/` 目录。
+  - **Acceptance Criteria**:
+    1. 文件成功落盘，且可被其他 API 正常读取。
+    2. 删除端点不仅删除数据文件也会连带移除其 metadata 描述文件。
+  - _Requirements: 10_
+  - blocked_by: 4.1
+
+- [ ] 4.3 (a1) Run Artifact 标准化落盘处理
+  - 拦截运行结束事件，确保在对应 `runs/<run_id>/` 目录产生标准的 `tracing.jsonl`, `final_state.json` 以及 `metrics.json`，业务侧输出需存放至 `artifacts/`。
+  - **Acceptance Criteria**:
+    1. 不管正常结束还是异常中断，均能尽力产生上述约定的历史快照骨架。
+  - _Requirements: 11_
+  - blocked_by: 1.4b
+
+- [ ] 4.4 (a1) Golden Baseline 锁定与拷贝逻辑
+  - 当调用 `POST /api/skills/{id}/golden` 时，将指定的 `<run_id>` 重命名追加 `.golden` 强锁定后缀防止自动清除，同时将特定核心业务文件拷入 `golden/<input_name>/` 并生成 `_meta.json`。
+  - **Acceptance Criteria**:
+    1. 源文件夹名成功重命名，且不可被框架普通的 TTL 策略删除。
+    2. 目标路径完整还原了理想的 Pydantic 数据流态。
+  - _Requirements: 11_
+  - blocked_by: 4.3
+
+- [ ] 4.5 (a1) 四阶段 Schema Validation Pipeline
+  - 在 Upload Time 对 test input、Run Time 发起前对已选输入、Run Time 后置针对业务产物 (Artifacts) 以及 Golden Lock 锁定前进行 `io.inputs` / `io.outputs` 的 Pydantic `model_validate()` 判断。
+  - **Acceptance Criteria**:
+    1. 对于错乱的 JSON 输入立刻返回 422 及结构化的 `LintError` 解析，并在前端指出错误源节点。
+  - _Requirements: 12_
+  - blocked_by: 4.2, 4.4
+
+- [ ] 4.6 (a1) Git-Based 轻量化版本基石集成 (P)
+  - 编写后台脚本，对新技能首次落盘时自动触发 `git init` (并在其私人 workspace/skill 目录进行)。
+  - `PUT /api/skills/{id}` Monaco 触发保存后，直接追加 `git add SKILL.md` 及 `git commit -m "Studio edit at <ts>"` 命令。
+  - **Acceptance Criteria**:
+    1. 可在 skill 目录内直接键入 `git log`，查看到由 Studio 自动创建的修改记录条目。
+  - _Requirements: 11_
+  - blocked_by: 1.3

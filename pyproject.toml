@@ -53,6 +53,12 @@ dev = [
     "pre-commit>=3.6",
     "pip-audit>=2.7.3,<3.0.0",
 ]
+studio = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "watchdog>=4.0",
+    "ptyprocess>=0.7",
+]
 google = ["langchain-google-genai>=2.0", "google-genai>=1.0"]
 tts = ["edge-tts>=6.0"]
 all = ["graph-agent-harness[google,tts]"]
@@ -69,10 +75,11 @@ build-backend = "hatchling.build"
 # move to packages/graph-agent/src/graph_agent/). The package maps to the
 # legacy path via the `sources` remap below so `import graph_agent.*` keeps
 # working regardless.
-packages = ["src/core/graph_agent"]
+packages = ["src/core/graph_agent", "studio-backend/app"]
 
 [tool.hatch.build.targets.wheel.sources]
 "src/core/graph_agent" = "graph_agent"
+"studio-backend/app" = "app"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -85,6 +92,7 @@ strict = true
 warn_return_any = true
 disallow_any_generics = true
 disallow_any_unimported = true
+mypy_path = ["src/core", "studio-backend"]
 
 [[tool.mypy.overrides]]
 module = [

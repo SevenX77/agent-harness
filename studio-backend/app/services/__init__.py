@@ -1,3 +1,3 @@
-"""Service layer placeholders for Studio backend."""
+"""Service layer for Studio backend integrations."""
 
 from __future__ import annotations

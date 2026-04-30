@@ -93,12 +93,17 @@ def standard_http_exception(
     return StudioHTTPException(error_code=error_code, message=message, details=details)
 
 
+def raise_error_response(response: ErrorResponse) -> NoReturn:
+    """Raise a FastAPI HTTPException that preserves a validated ErrorResponse."""
+    raise HTTPException(status_code=response.http_status, detail=response.model_dump())
+
+
 def raise_not_implemented(feature: str) -> NoReturn:
-    """Return the common Phase 0 placeholder response for deferred endpoints."""
+    """Return the common response for deferred endpoints."""
     response = error_response(
         error_code="NOT_IMPLEMENTED",
         http_status=501,
-        message=f"{feature} is not implemented in Studio MVP1 Phase 0",
+        message=f"{feature} is not implemented in this Studio backend phase",
         details={"feature": feature},
         retry_strategy="not_retryable",
     )

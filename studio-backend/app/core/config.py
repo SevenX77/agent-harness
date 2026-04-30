@@ -9,6 +9,7 @@ REPO_ROOT = STUDIO_BACKEND_DIR.parent
 
 SKILLS_DIR = REPO_ROOT / "skills"
 WORKSPACES_DIR = REPO_ROOT / "workspaces"
+DEFAULT_USER_ID = "default"
 STUDIO_PORT = 8787
 CORS_ORIGINS = [
     "http://localhost:5173",
@@ -16,3 +17,8 @@ CORS_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
+
+
+def default_workspace_skills_dir() -> Path:
+    """Return the current default user's writable skill directory."""
+    return WORKSPACES_DIR / DEFAULT_USER_ID / "skills"

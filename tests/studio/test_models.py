@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import app.models as models
 import pytest
-from app.models import ErrorResponse, RunRequest
-from app.services.placeholders import placeholder_skill_detail
+from app.models import ErrorResponse, RunRequest, SkillDetail
 from pydantic import ValidationError
+
+from graph_agent.core.manifest import AgentProfile, AgentSkillDef
 
 
 def test_model_exports_cover_phase0_contracts() -> None:
@@ -34,7 +35,13 @@ def test_model_exports_cover_phase0_contracts() -> None:
 
 
 def test_models_validate_fields_and_reuse_graph_agent_contracts() -> None:
-    detail = placeholder_skill_detail("demo-skill")
+    manifest = AgentSkillDef(
+        type="agent",
+        name="demo-skill",
+        description="demo",
+        agent_profile=AgentProfile(role="role", goal="goal"),
+    )
+    detail = SkillDetail(manifest=manifest, file_paths={"skill_md": "/tmp/SKILL.md"}, has_golden=False)
 
     assert detail.manifest.type == "agent"
     assert detail.manifest.name == "demo-skill"

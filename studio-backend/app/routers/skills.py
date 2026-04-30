@@ -7,33 +7,29 @@ from fastapi import APIRouter
 from app.core.exceptions import raise_not_implemented
 from app.models.errors import ErrorResponse
 from app.models.skills import CreateSkillReq, SkillDetail, SkillSummary, UpdateSkillReq
-from app.services.placeholders import placeholder_skill_detail, placeholder_skill_summary
+from app.services.skills import get_skill_detail, list_skill_summaries, update_skill_content
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
 
 
 @router.get("", response_model=list[SkillSummary])
 async def list_skills() -> list[SkillSummary]:
-    return [placeholder_skill_summary()]
+    return list_skill_summaries()
 
 
 @router.post("", response_model=SkillSummary, status_code=201)
 async def create_skill(request: CreateSkillReq) -> SkillSummary:
-    skill_id = request.template_id or "new-skill"
-    description = request.description or "Phase 0 Studio placeholder skill"
-    return placeholder_skill_summary(skill_id=skill_id, description=description)
+    raise_not_implemented(f"create skill from template {request.template_id or 'blank'}")
 
 
 @router.get("/{skill_id}", response_model=SkillDetail)
 async def get_skill(skill_id: str) -> SkillDetail:
-    return placeholder_skill_detail(skill_id)
+    return get_skill_detail(skill_id)
 
 
 @router.put("/{skill_id}", response_model=SkillDetail)
 async def update_skill(skill_id: str, request: UpdateSkillReq) -> SkillDetail:
-    if not request.content:
-        raise ValueError("Skill content must not be empty")
-    return placeholder_skill_detail(skill_id)
+    return update_skill_content(skill_id, request.content)
 
 
 @router.delete(

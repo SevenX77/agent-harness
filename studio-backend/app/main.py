@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from app.core.config import STUDIO_PORT
@@ -20,6 +24,24 @@ from app.routers import (
     test_inputs,
     websockets,
 )
+from app.services.event_bus import file_watcher
+from app.services.run_manager import run_manager
+from app.services.skills import ensure_workspace_layout
+from app.services.terminal_manager import terminal_manager
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Start and stop Studio background services."""
+    ensure_workspace_layout()
+    terminal_manager.start_reaper()
+    file_watcher.start(asyncio.get_running_loop())
+    try:
+        yield
+    finally:
+        file_watcher.stop()
+        await terminal_manager.shutdown()
+        await run_manager.shutdown()
 
 
 def create_app() -> FastAPI:
@@ -27,7 +49,8 @@ def create_app() -> FastAPI:
     studio_app = FastAPI(
         title="Skill Studio Backend",
         version="0.1.0",
-        description="Phase 0 API scaffold for graph-agent-harness Skill Studio.",
+        description="FastAPI backend for graph-agent-harness Skill Studio.",
+        lifespan=lifespan,
     )
     configure_cors(studio_app)
     register_exception_handlers(studio_app)

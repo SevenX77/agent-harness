@@ -1,4 +1,4 @@
-"""Hidden smoke endpoints for validating exception formatting in Phase 0."""
+"""Hidden smoke endpoints for validating exception formatting."""
 
 from __future__ import annotations
 

@@ -6,6 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
+from app.models.lint import LintResult
 from app.models.runs import RunMetadata
 from graph_agent.core.manifest import SkillManifest
 
@@ -28,6 +29,7 @@ class SkillDetail(BaseModel):
     file_paths: dict[str, str]
     has_golden: bool
     latest_run_metadata: RunMetadata | None = None
+    lint_result: LintResult | None = None
 
 
 class CreateSkillReq(BaseModel):

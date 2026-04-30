@@ -14,9 +14,7 @@ from graph_agent.core.loader import (
     _phase_from_graph_phase,
     _render_skill_section_xml_tags,
 )
-from graph_agent.core.manifest import AgentSkillDef, SkillManifest
-from graph_agent.tools.md_to_json import _resolve_schema_from_path
-
+from graph_agent.core.manifest import AgentSkillDef, GraphSkillDef, SkillManifest
 
 _SKILL_ADAPTER = TypeAdapter(SkillManifest)
 
@@ -259,25 +257,44 @@ def test_output_format_resolves_skill_local_schema_from_file(tmp_path: Path) -> 
         encoding="utf-8",
     )
 
-    prompt = _phase_prompt(
+    sys.modules.pop("script.schemas", None)
+    manifest = _SKILL_ADAPTER.validate_python({
+        "schema_version": "2.0",
+        "name": "graph",
+        "description": "graph",
+        "type": "graph",
+        "io": {"inputs": [], "outputs": []},
+        "phases": [{
+            "mode": "llm",
+            "name": "phase",
+            "prompt": "Base prompt.",
+            "output_schema": "script.schemas.SegmentationResult",
+        }],
+    })
+    assert isinstance(manifest, GraphSkillDef)
+    phase = _phase_from_graph_phase(
+        manifest.phases[0],
         tmp_path,
-        output_schema="script.schemas.SegmentationResult",
+        callbacks=None,
+        loading_stack=set(),
     )
+    prompt = phase.system_prompt or ""
 
     assert "<output_format>" in prompt
     assert "- chapter_title: <值>" in prompt
     assert "- segment_count: <值>" in prompt
     assert "章节标题" in prompt
     assert "分段数量" in prompt
+    assert phase.output_schema is not None
+    assert phase.output_schema.__name__ == "SegmentationResult"
 
     namespaced_keys = [
         key
         for key in sys.modules
         if key.startswith("_graph_agent_skill_.") and key.endswith(".script.schemas")
     ]
-    assert namespaced_keys
-    schema_cls = _resolve_schema_from_path("script.schemas.SegmentationResult")
-    assert schema_cls.__name__ == "SegmentationResult"
+    assert not namespaced_keys
+    assert "script.schemas" not in sys.modules
 
 
 def test_output_format_skipped_when_no_output_schema() -> None:

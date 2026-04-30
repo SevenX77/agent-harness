@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Literal
 
+from ...tools.dynamic_schema import parse_output_example
 from ..compiler import CompileIssue
 from ..manifest import GraphSkillDef, LLMPhase
-from ...tools.dynamic_schema import parse_output_example
 
 
 def check_validator_required(manifest: GraphSkillDef) -> list[CompileIssue]:

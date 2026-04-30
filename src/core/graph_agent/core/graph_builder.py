@@ -24,7 +24,7 @@ will route through the same StateGraph using LangGraph Send API.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
@@ -49,7 +49,7 @@ def _executor_from_config(config: RunnableConfig) -> PhaseExecutor:
             "graph node invoked without _phase_executor in config['configurable']. "
             "GraphAgentHarness.run/resume must inject PhaseExecutor before .invoke()."
         )
-    return executor
+    return cast(PhaseExecutor, executor)
 
 
 class GraphBuilder:
@@ -68,7 +68,9 @@ class GraphBuilder:
 
     def build(self) -> Any:
         """Build and compile the LangGraph StateGraph for the phase pipeline."""
-        graph: StateGraph = StateGraph(WorkflowState)
+        graph: StateGraph[WorkflowState, Any, WorkflowState, WorkflowState] = StateGraph(
+            WorkflowState
+        )
 
         for phase in self._phases:
             execute_name = f"{phase.name}_execute"

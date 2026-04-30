@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +33,8 @@ def _apply_reasoning_content_patch() -> None:
 
         # Layer 1: OpenAI SDK — allow extra fields so reasoning_content is not dropped
         try:
-            from openai.types.chat.chat_completion_message import ChatCompletionMessage
             import openai
+            from openai.types.chat.chat_completion_message import ChatCompletionMessage
             sdk_version = getattr(openai, "__version__", "0.0.0")
             major = int(sdk_version.split(".")[0])
             if major > 1:
@@ -56,7 +57,11 @@ def _apply_reasoning_content_patch() -> None:
             import langchain_openai.chat_models.base as _lcob
             _original_convert = _lcob._convert_dict_to_message
 
-            def _patched_convert(_dict, *args, **kwargs):
+            def _patched_convert(
+                _dict: dict[str, Any],
+                *args: Any,
+                **kwargs: Any,
+            ) -> Any:
                 msg = _original_convert(_dict, *args, **kwargs)
                 # For assistant messages, inject reasoning_content if present
                 from langchain_core.messages import AIMessage
@@ -66,7 +71,7 @@ def _apply_reasoning_content_patch() -> None:
                         msg.additional_kwargs["reasoning_content"] = rc
                 return msg
 
-            _lcob._convert_dict_to_message = _patched_convert
+            _lcob._convert_dict_to_message = _patched_convert  # type: ignore[assignment]  # Intentional LangChain monkey-patch with compatible runtime signature.
             logger.debug("[ReasoningPatch] LangChain _convert_dict_to_message: patched")
         except Exception as exc:
             logger.warning("[ReasoningPatch] Failed to patch LangChain: %s", exc)
@@ -76,7 +81,11 @@ def _apply_reasoning_content_patch() -> None:
             import langchain_openai.chat_models.base as _lcob
             _original_to_dict = _lcob._convert_message_to_dict
 
-            def _patched_to_dict(message, *args, **kwargs):
+            def _patched_to_dict(
+                message: Any,
+                *args: Any,
+                **kwargs: Any,
+            ) -> dict[str, Any]:
                 result = _original_to_dict(message, *args, **kwargs)
                 from langchain_core.messages import AIMessage
 

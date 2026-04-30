@@ -7,8 +7,6 @@ import pytest
 from pydantic import TypeAdapter
 
 from graph_agent.core.manifest import (
-    AgentSkillDef,
-    GraphSkillDef,
     SkillManifest,
 )
 from graph_agent.core.parser import parse_skill_file

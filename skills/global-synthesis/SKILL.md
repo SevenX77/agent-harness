@@ -44,6 +44,7 @@ phases:
       - script.synthesis.rank_climaxes
       - script.synthesis.close_foreshadowing
       - script.synthesis.rank_characters
+    output_schema: script.models.GlobalSynthesisReport
     prompt: |
       你是叙事全局分析专家。所有批次分析已完成，你需要从全局视角做 3 项综合分析。
       ## 分析1：高潮排名
@@ -82,6 +83,7 @@ phases:
     agent_tools:
       - script.retroactive.scan_anchor_points
       - script.retroactive.apply_corrections
+    output_schema: script.models.GlobalSynthesisReport
     prompt: |
       你是回溯修正专家。你的任务是用锚定事实修正之前批次中的推断值。
       ## 回溯修正逻辑

@@ -5,8 +5,6 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src" / "core"))
 
 from graph_agent.core.harness import GraphAgentHarness  # noqa: E402

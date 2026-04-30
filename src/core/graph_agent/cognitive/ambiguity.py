@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ def log_ambiguity(
         ctx["_ambiguity_reports"] = reports
 
     record = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "phase": ctx.get("_current_phase"),
         "type": ambiguity_type,
         "question": question,

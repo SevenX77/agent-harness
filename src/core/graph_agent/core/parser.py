@@ -36,7 +36,6 @@ from ruamel.yaml.error import YAMLError
 
 from .exceptions import SkillLoadError
 
-
 # 方针 3.2: lines reported by ruamel are 0-indexed *within* the
 # YAML stream we hand it. ``parse_skill_file`` strips the opening
 # ``---`` fence (line 1 of the SKILL.md) before parsing, so the YAML

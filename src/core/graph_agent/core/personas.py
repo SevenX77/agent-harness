@@ -21,8 +21,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .exceptions import SkillLoadError
+
+if TYPE_CHECKING:
+    from .manifest import PersonaSkillDef
 
 PERSONA_PATH_ENV_VAR = "GRAPH_AGENT_PERSONA_PATH"
 
@@ -40,7 +44,7 @@ def resolve_persona(
     *,
     base_dir: Path,
     search_paths: list[Path] | None = None,
-) -> "PersonaSkillDef":
+) -> PersonaSkillDef:
     """Resolve a persona ``name`` to a ``PersonaSkillDef`` manifest.
 
     Args:
@@ -105,7 +109,9 @@ def resolve_persona(
         if not candidate.is_file():
             continue
         parsed = parse_skill_file(candidate)
-        manifest = TypeAdapter(SkillManifest).validate_python(parsed["frontmatter"])
+        manifest: SkillManifest = TypeAdapter(SkillManifest).validate_python(
+            parsed["frontmatter"]
+        )
         if not isinstance(manifest, PersonaSkillDef):
             raise SkillLoadError(
                 f"adopted_persona '{name}' resolved to {candidate}, but its "

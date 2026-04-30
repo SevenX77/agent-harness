@@ -3,7 +3,11 @@ name = "graph-agent-harness"
 version = "0.1.0"
 description = "GraphAgent: SKILL.md-driven workflow harness layered on DeerFlow + LangGraph"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.11",
+]
 
 # --- Version pins ----------------------------------------------------------
 # Upper bounds are mandatory, not cosmetic:
@@ -11,14 +15,12 @@ license = { text = "MIT" }
 # * langchain<1.2.11  — langchain 1.2.11+ requires langgraph>=1.1.5, which
 #   conflicts with DeerFlow's own pyproject (langgraph<1.0.10). See
 #   .kiro/specs/graph-agent-optimizations/deferred-items.md §I-4.
-# * langgraph<1.0.10  — matches bytedance/deer-flow's harness constraint
-#   added in commit d7e51076 (2026-03-25, "tighten langgraph constraint").
+# * langgraph>=1.0.10  — bumped from <1.0.10 (DeerFlow 兼容约束) to fix
+#   CVE-2026-28277. DeerFlow has been removed in v1-reset (47.6% rm)
+#   so the old upper bound no longer applies. Upper bound <1.1.0 keeps
+#   langchain<1.2.11 compatibility (langchain 1.2.11+ needs langgraph>=1.1.5).
 # * langgraph-prebuilt<1.0.9  — 1.0.9+ imports ExecutionInfo / ServerInfo
 #   from langgraph.runtime which do not exist in langgraph 1.0.x.
-#
-# Verified combo (runs the full 78-test pytest suite cleanly):
-#   langchain 1.2.4, langgraph 1.0.9, langgraph-prebuilt 1.0.8,
-#   langchain-core 1.3.1, pydantic 2.13.3
 # ---------------------------------------------------------------------------
 dependencies = [
     "langchain>=1.2.3,<1.2.11",
@@ -26,7 +28,7 @@ dependencies = [
     "langchain-anthropic>=1.3.4,<1.5.0",
     "langchain-deepseek>=1.0.1,<1.1.0",
     "langchain-openai>=1.1.7,<1.3.0",
-    "langgraph>=1.0.6,<1.0.10",
+    "langgraph>=1.0.10,<1.1.0",
     "langgraph-prebuilt>=1.0.6,<1.0.9",
     "langgraph-checkpoint>=4.0.0,<5.0.0",
     "langgraph-checkpoint-sqlite>=3.0.3,<4.0.0",
@@ -49,6 +51,7 @@ dev = [
     "mypy>=1.10",
     "ruff>=0.6",
     "pre-commit>=3.6",
+    "pip-audit>=2.7.3,<3.0.0",
 ]
 google = ["langchain-google-genai>=2.0", "google-genai>=1.0"]
 tts = ["edge-tts>=6.0"]
@@ -112,9 +115,9 @@ source = ["src/core/graph_agent"]
 omit = ["*/tests/*"]
 
 [tool.coverage.report]
-# MVP-0: 65 = current baseline (from `pytest --cov`). 全收敛到 85 见 MVP-5
-# (设计要求核心 95% / 整体 85%). 该 gate 仅防退步, 不阻塞 MVP-0 ship.
-fail_under = 65
+# Phase 3 RC baseline: current full-suite coverage is 73.25%. This gate prevents
+# regression while Group 3 raises critical-path coverage for the final 1.0.0 cut.
+fail_under = 73
 exclude_lines = [
     "pragma: no cover",
     "raise NotImplementedError",

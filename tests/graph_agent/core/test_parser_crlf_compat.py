@@ -12,7 +12,6 @@ from pathlib import Path
 
 from graph_agent.core.parser import _parse_frontmatter, parse_skill_file
 
-
 _CRLF_FRONTMATTER = (
     "---\r\n"
     'schema_version: "2.0"\r\n'

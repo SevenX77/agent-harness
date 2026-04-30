@@ -5,15 +5,15 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from langchain_core.tools import StructuredTool
-from pydantic import Field, create_model
+from pydantic import BaseModel, Field, create_model
 
 logger = logging.getLogger(__name__)
 
-_TYPE_MAP: dict[str, type] = {
+_TYPE_MAP: dict[str, type[Any]] = {
     "string": str,
     "str": str,
     "int": int,
@@ -35,7 +35,7 @@ class SubSkillSpec:
     _parent_skill_dir: Path | None = None  # injected by loader for relative path resolution
 
 
-def _build_input_model(name: str, input_schema: dict[str, str]) -> type:
+def _build_input_model(name: str, input_schema: dict[str, str]) -> type[BaseModel]:
     """Dynamically create a Pydantic model from input_schema declarations.
 
     input_schema format: {"field_name": "type, description of field"}
@@ -56,7 +56,7 @@ def _build_input_model(name: str, input_schema: dict[str, str]) -> type:
 
         fields[field_name] = (py_type, Field(description=description))
 
-    return create_model(f"{name}_Input", **fields)
+    return cast(type[BaseModel], create_model(f"{name}_Input", **fields))
 
 
 def _resolve_skill_path(spec: SubSkillSpec) -> Path:
@@ -70,9 +70,6 @@ def _resolve_skill_path(spec: SubSkillSpec) -> Path:
     if spec._parent_skill_dir is not None:
         return (spec._parent_skill_dir / p).resolve()
     return p.resolve()
-
-
-from .runner import run_skill
 
 
 def build_skill_tool(
@@ -94,6 +91,8 @@ def build_skill_tool(
     input_model = _build_input_model(spec.name, spec.input_schema)
 
     def _execute(**kwargs: Any) -> str:
+        from .runner import run_skill
+
         thread_id = f"sub_{parent_thread_id or 'root'}_{spec.name}_{uuid4().hex[:8]}"
         trace_dir = (parent_trace_dir / f"sub_{spec.name}") if parent_trace_dir else None
 

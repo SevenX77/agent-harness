@@ -36,7 +36,6 @@ from graph_agent.core.manifest import (
     LLMPhase,
     LogicPhase,
     PersonaSkillDef,
-    PhaseDef,
     SkillManifest,
 )
 
@@ -351,7 +350,7 @@ class TestPhaseEngineExclusivity:
             _SKILL_ADAPTER.validate_python(data)
         assert "prompt" in str(exc.value)
 
-    def test_logic_phase_cannot_have_agent_tools(self):
+    def test_logic_phase_agent_tools_replaces_removed_sub_skills_contract(self):
         data = _base_graph_dict()
         data["phases"] = [{
             "mode": "logic",
@@ -551,6 +550,102 @@ class TestExtraForbid:
         with pytest.raises(ValidationError) as exc:
             ContextBridge.model_validate({"inputs": {}, "outputs": {}, "extras": {}})
         assert "extras" in str(exc.value)
+
+
+class TestContextBridgeSchemaEngineIntegration:
+    """MVP-2 T4: ContextBridge.to_business_data_schema must route through SchemaEngine.
+
+    These tests pin the bridge → SchemaEngine wiring so future
+    refactors can't quietly bring back an in-bridge schema parser.
+    """
+
+    def test_to_business_data_schema_returns_schema_object(self):
+        from graph_agent.core.schema_engine import SchemaEngine, SchemaObject
+
+        bridge = ContextBridge(
+            inputs={"chapter_text": "parent.text", "chapter_id": "parent.id"},
+        )
+        engine = SchemaEngine()
+
+        schema = bridge.to_business_data_schema(engine)
+
+        assert isinstance(schema, SchemaObject)
+        assert schema.schema_name == "ContextBridgeBusinessData"
+        # Both bridge inputs surface as fields on the resulting schema.
+        field_names = [name for name, _typ in schema.fields]
+        assert field_names == ["chapter_text", "chapter_id"]
+        # All bridge inputs are treated as required until V2 delegation
+        # ships per-input optional/default metadata.
+        assert schema.required_fields == frozenset({"chapter_text", "chapter_id"})
+
+    def test_to_business_data_schema_calls_schema_engine(self):
+        """The engine arg is exercised, not just stored — calling
+        ``get_pydantic_model`` warms the engine's lru cache so a later
+        engine call by the same caller hits a stable class identity."""
+        from graph_agent.core.schema_engine import SchemaEngine
+
+        bridge = ContextBridge(inputs={"x": "parent.x"})
+
+        calls: list[str] = []
+
+        class _SpyEngine(SchemaEngine):
+            def get_pydantic_model(self, schema):  # type: ignore[override]
+                calls.append("get_pydantic_model")
+                return super().get_pydantic_model(schema)
+
+        spy = _SpyEngine()
+        bridge.to_business_data_schema(spy)
+
+        assert calls == ["get_pydantic_model"], (
+            "ContextBridge.to_business_data_schema must touch SchemaEngine "
+            "(it's the proof the bridge no longer carries its own parser); "
+            f"got call sequence {calls!r}."
+        )
+
+    def test_to_business_data_schema_handles_empty_inputs(self):
+        from graph_agent.core.schema_engine import SchemaEngine
+
+        bridge = ContextBridge()  # no inputs declared
+        engine = SchemaEngine()
+
+        schema = bridge.to_business_data_schema(engine)
+
+        assert schema.fields == ()
+        assert schema.required_fields == frozenset()
+
+    def test_context_bridge_has_no_underscore_framework_fields(self):
+        """Invariant: ContextBridge surface declares only business wiring.
+
+        Framework metadata travels in ``state['flow']`` (FrameworkState);
+        ContextBridge wires *business* data only. A regression that adds
+        a ``_thread_id``-style attribute here would violate the
+        BusinessData purity invariant from MVP-1 design §1.
+        """
+        declared = set(ContextBridge.model_fields.keys())
+        assert declared == {"inputs", "outputs"}, (
+            f"ContextBridge surface drifted; expected {{inputs, outputs}}, "
+            f"got {declared!r}."
+        )
+
+    def test_to_business_data_schema_rejects_underscore_input_keys(self):
+        """A PM-authored ``_underscore`` key in ``inputs`` must surface as a
+        compile-time error rather than silently leaking into the child
+        BusinessData namespace.
+
+        ContextBridge passes the input dict verbatim into ``SchemaObject``;
+        Pydantic ``create_model`` refuses model fields whose names start
+        with ``_`` and raises :class:`NameError` from inside
+        ``SchemaEngine.get_pydantic_model``. We assert that raise here so a
+        future change that swallows the error (e.g. by stripping the
+        prefix) is caught by this regression test.
+        """
+        from graph_agent.core.schema_engine import SchemaEngine
+
+        bridge = ContextBridge(
+            inputs={"normal_field": "parent.x", "_sneaky_meta": "parent.y"},
+        )
+        with pytest.raises(NameError, match="leading underscores"):
+            bridge.to_business_data_schema(SchemaEngine())
 
     def test_typo_in_phase_field_name(self):
         """``max_iteration`` without trailing ``s`` used to silently drop."""

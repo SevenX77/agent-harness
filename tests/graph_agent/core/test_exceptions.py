@@ -21,7 +21,6 @@ from graph_agent.core.exceptions import (
     ValidationError,
 )
 
-
 DESIGN_EXCEPTIONS = (
     GraphAgentError,
     LoaderError,

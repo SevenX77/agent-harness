@@ -1,106 +1,134 @@
 """Event extraction validators for story deconstruction.
 
 This module provides validation functions for event extraction quality assurance.
+
+Phase 2 A1 contract (2026-04-29): every validator mounted on an LLMPhase
+must accept ``payload: list[dict[str, Any]]`` — the structured items
+parsed from the phase's declared ``output_schema``. The validator must
+not reach into the global ctx (that broken pattern is what the v1.1+
+``schema is None`` purge eliminated). See PHASE2_DESIGN.md §2.4.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-def validate_event_extraction(context: dict) -> tuple[bool, list[str]]:
-    """Validate event extraction quality and report issues.
-    
-    Performs comprehensive validation checks:
-    - Events list is not empty
-    - Each event has paragraph_indices
-    - Coverage ratio >= 50%
-    - No pure numeric time values
-    - Empty paragraph ratio <= 20%
-    
+# Setting IDs are expected to follow ``SET_<digits>`` per the SKILL.md
+# prompt and the Pydantic Setting class description ("如 SET_001").
+_SETTING_ID_PATTERN = re.compile(r"^SET_\d+$")
+
+# Empirical band for ``core_knowledge`` from the SKILL prompt:
+# "核心知识点（50-100 字精炼）". We allow a wider window to absorb
+# normal LLM variance but still flag obvious starvation / overrun.
+_CORE_KNOWLEDGE_MIN = 30
+_CORE_KNOWLEDGE_MAX = 200
+
+
+def validate_event_extraction(
+    payload: list[dict[str, Any]],
+) -> tuple[bool, list[str]]:
+    """Validate the ``settings`` LLMPhase output (a list of Setting dicts).
+
+    The settings phase is configured in ``skills/event-extraction/SKILL.md``
+    with ``output_schema: script.models.Setting``. After Phase 2 A1, the
+    framework's CognitiveFlow / Validation middleware parses the LLM
+    markdown into ``list[dict]`` of Setting fields and hands that list to
+    this validator. We therefore check semantic invariants over the
+    parsed list — Pydantic itself already enforces the field shape.
+
+    Checks:
+      - Non-empty list (a Settings phase must extract at least one setting;
+        the LLM is explicitly prompted for these).
+      - ``setting_id`` matches ``SET_<digits>`` and is unique across items.
+      - ``paragraph_indices`` is non-empty for every item.
+      - ``related_event_id`` is a non-empty string.
+      - ``core_knowledge`` length lands in a plausible band (30..200 chars);
+        too short or too long flags a quality regression.
+
+    Args:
+        payload: Parsed Setting items as ``list[dict[str, Any]]``. Each
+            dict carries ``setting_id``, ``paragraph_indices``,
+            ``related_event_id`` and ``core_knowledge``.
+
     Returns:
-        (is_valid, issues): Boolean validity and list of issue descriptions
+        ``(is_valid, issues)``: pass / fail flag plus a list of
+        human-readable issue strings (empty when ``is_valid``).
     """
-    event_timeline = context.get('event_timeline', {})
-    events = event_timeline.get('events', [])
-    segmentation = context.get('segmentation_result', {})
-    paragraphs = segmentation.get('paragraphs', [])
-    
     issues: list[str] = []
-    
-    # Check 1: Events list is not empty
-    if not events:
-        issues.append("No events extracted")
-        logger.error("Validation failed: No events extracted")
-        return False, issues
-    
-    # Check 2: Each event has paragraph_indices
-    empty_idx_count = 0
-    for event in events:
-        para_indices = event.get('paragraph_indices', [])
-        if not para_indices:
-            empty_idx_count += 1
-            event_id = event.get('event_id', '?')
-            issues.append(f"Event {event_id} has no paragraph indices")
-    
-    empty_ratio = empty_idx_count / len(events) if events else 0
-    if empty_ratio > 0.2:
-        issues.append(f"Empty paragraph ratio {empty_ratio:.1%} exceeds 20% threshold")
-        logger.warning(f"Empty paragraph ratio: {empty_ratio:.1%}")
-    
-    # Check 3: Coverage ratio >= 50%
-    covered = set()
-    for event in events:
-        for pi in event.get('paragraph_indices', []):
-            covered.add(pi)
-    
-    # Only count B/C paragraphs (A paragraphs may be settings)
-    b_c_paragraphs = [p for p in paragraphs if p.get('type') in ('B', 'C')]
-    b_c_count = len(b_c_paragraphs)
-    
-    coverage_ratio = len(covered) / b_c_count if b_c_count > 0 else 1.0
-    if coverage_ratio < 0.5:
-        issues.append(f"Coverage ratio {coverage_ratio:.1%} below 50% threshold")
-        logger.warning(f"Coverage ratio: {coverage_ratio:.1%}")
-    
-    # Check 4: No pure numeric time values
-    invalid_time_count = 0
-    for event in events:
-        time_val = event.get('time', '')
-        # Clean time value
-        clean = time_val.replace('[推断]', '').replace('[自动修正]', '').strip()
-        # Check if pure numeric (like "23")
-        if re.match(r'^\d+$', clean):
-            invalid_time_count += 1
-            event_id = event.get('event_id', '?')
-            issues.append(f"Event {event_id} has pure numeric time: {time_val}")
-            logger.warning(f"Event {event_id}: Pure numeric time detected")
-    
-    if invalid_time_count > 0:
-        issues.append(f"{invalid_time_count} events have invalid pure-numeric time values")
-    
-    # Determine overall validity
-    is_valid = (
-        len(events) > 0 and
-        empty_ratio <= 0.2 and
-        coverage_ratio >= 0.5 and
-        invalid_time_count == 0
+
+    logger.info(
+        "phase=settings action=validate_event_extraction settings_count=%d",
+        len(payload),
     )
-    
+
+    if not payload:
+        issues.append("settings 为空，settings phase 必须至少抽出 1 条世界观条目")
+        logger.error(
+            "phase=settings action=validate_event_extraction decision=reject "
+            "reason=empty_payload"
+        )
+        return False, issues
+
+    seen_ids: set[str] = set()
+    for index, item in enumerate(payload):
+        # ``index`` is the positional fallback when an LLM emits a malformed
+        # setting_id. Diagnostic strings always surface both for traceability.
+        setting_id = str(item.get("setting_id") or "").strip()
+        ref = setting_id or f"index={index}"
+
+        if not setting_id:
+            issues.append(f"item {ref}: 缺少 setting_id")
+        elif not _SETTING_ID_PATTERN.match(setting_id):
+            issues.append(
+                f"item {ref}: setting_id={setting_id!r} 不符合 SET_数字 格式"
+            )
+        elif setting_id in seen_ids:
+            issues.append(f"item {ref}: setting_id={setting_id!r} 重复")
+        else:
+            seen_ids.add(setting_id)
+
+        paragraph_indices = item.get("paragraph_indices")
+        if not isinstance(paragraph_indices, list) or not paragraph_indices:
+            issues.append(
+                f"item {ref}: paragraph_indices 必须是非空 list[int]，"
+                f"got {paragraph_indices!r}"
+            )
+
+        related_event_id = str(item.get("related_event_id") or "").strip()
+        if not related_event_id:
+            issues.append(f"item {ref}: related_event_id 缺失或为空")
+
+        core_knowledge = str(item.get("core_knowledge") or "")
+        ck_len = len(core_knowledge)
+        if ck_len < _CORE_KNOWLEDGE_MIN:
+            issues.append(
+                f"item {ref}: core_knowledge 长度 {ck_len} 字 < "
+                f"{_CORE_KNOWLEDGE_MIN} 字下限，判为信息密度不足"
+            )
+        elif ck_len > _CORE_KNOWLEDGE_MAX:
+            issues.append(
+                f"item {ref}: core_knowledge 长度 {ck_len} 字 > "
+                f"{_CORE_KNOWLEDGE_MAX} 字上限，判为冗长应精炼"
+            )
+
+    is_valid = not issues
     if is_valid:
-        logger.info(f"Event extraction validation passed: {len(events)} events, coverage={coverage_ratio:.1%}")
+        logger.info(
+            "phase=settings action=validate_event_extraction decision=pass "
+            "settings_count=%d unique_ids=%d",
+            len(payload),
+            len(seen_ids),
+        )
     else:
-        logger.warning(f"Event extraction validation failed: {len(issues)} issues")
-    
-    context['validation_issues'] = issues
-    context['validation_metrics'] = {
-        'event_count': len(events),
-        'empty_ratio': empty_ratio,
-        'coverage_ratio': coverage_ratio,
-        'invalid_time_count': invalid_time_count
-    }
-    
+        logger.warning(
+            "phase=settings action=validate_event_extraction decision=fail "
+            "settings_count=%d issue_count=%d",
+            len(payload),
+            len(issues),
+        )
     return is_valid, issues

@@ -50,15 +50,15 @@ Dumper configuration
 from __future__ import annotations
 
 from io import StringIO
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]  # PyYAML runtime dependency has no local stubs.
 
 if TYPE_CHECKING:
     from graph_agent.core.manifest import SkillManifest
 
 
-class _BlockScalarDumper(yaml.SafeDumper):
+class _BlockScalarDumper(yaml.SafeDumper):  # type: ignore[misc,no-any-unimported]  # PyYAML SafeDumper is Any without local stubs.
     """PyYAML dumper that forces multi-line strings to Block Scalar style.
 
     Strings without newlines fall through to default plain/quoted
@@ -67,7 +67,7 @@ class _BlockScalarDumper(yaml.SafeDumper):
     """
 
 
-def _represent_str(dumper: _BlockScalarDumper, data: str):  # noqa: ANN202
+def _represent_str(dumper: _BlockScalarDumper, data: str) -> Any:
     if "\n" in data:
         return dumper.represent_scalar(
             "tag:yaml.org,2002:str", data, style="|"
@@ -78,7 +78,7 @@ def _represent_str(dumper: _BlockScalarDumper, data: str):  # noqa: ANN202
 _BlockScalarDumper.add_representer(str, _represent_str)
 
 
-def serialize_skill(manifest: "SkillManifest") -> str:
+def serialize_skill(manifest: SkillManifest) -> str:
     """Serialise a ``SkillManifest`` to a ``SKILL.md`` string.
 
     Args:

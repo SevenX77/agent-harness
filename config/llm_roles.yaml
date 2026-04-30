@@ -26,6 +26,7 @@ models:
       OC_CL_ANT: "claude-sonnet-4-6-thinking"
       OC_CL: "claude-sonnet-4-6-thinking"
       WS_LLM: "anthropic/claude-sonnet-4.6"
+      JK_CL_ANT: "claude-sonnet-4-6"
     provider_options:
       OC_CL:
         max_max_tokens: 8192
@@ -144,6 +145,14 @@ providers:
     api_key_env: ONE_CHATS_CLAUDE_API_KEY
     api_key_env_fallback: ONE_CHATS_API_KEY
     base_url: "https://chatapi.onechats.ai"
+    timeout: 300
+    trust_env: false
+
+  JK_CL_ANT:
+    name: "Jiekou Claude (Anthropic Endpoint)"
+    type: anthropic_compatible
+    api_key_env: JIEKOU_API_KEY
+    base_url: "https://api.jiekou.ai/anthropic"
     timeout: 300
     trust_env: false
 
@@ -362,6 +371,33 @@ roles:
       SD16: { providers: [OC_ARK, ARK] }
       DS32C: { providers: [OC_DS, DS] }
       SD20L: { providers: [OC_ARK, ARK] }
+
+  # ── 测试单模型角色（不带 fallback，用于质量对比测试）──
+  test_dsv4:
+    temperature: 0.7
+    model_fallback: false
+    active_model: DS32C
+    models:
+      DS32C: { providers: [DS] }
+
+  test_opus47_ws:
+    temperature: 0.7
+    model_fallback: false
+    active_model: CLO47T
+    models:
+      CLO47T: { providers: [WS_LLM] }
+
+  test_sonnet46_jk:
+    temperature: 0.7
+    model_fallback: false
+    active_model: CL46T
+    models:
+      CL46T: { providers: [JK_CL_ANT] }
+
+single_model_roles:
+  - test_dsv4
+  - test_opus47_ws
+  - test_sonnet46_jk
 
 # Peer model groups: list model codes that may substitute for one
 # another when the active model's full provider chain is exhausted.

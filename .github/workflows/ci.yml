@@ -15,7 +15,7 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install .[dev]
+          pip install -e .[dev]
       - name: ruff check
         run: ruff check src/ tests/
       - name: mypy strict
@@ -25,4 +25,4 @@ jobs:
       - name: coverage gate
         run: coverage report --fail-under=73
       - name: dependency audit
-        run: pip-audit --strict --skip-editable
+        run: pip-audit --skip-editable

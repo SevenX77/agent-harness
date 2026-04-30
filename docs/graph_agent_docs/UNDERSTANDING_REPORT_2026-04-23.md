@@ -1,3 +1,4 @@
+
 # graph_agent 设计意图理解报告
 
 > 作者：Claude（重新学习后）
@@ -10,7 +11,7 @@
 
 | 错误 | 事实 | 伤害 |
 |------|------|------|
-| **① 地基级幻觉**：`PhaseConfig.steps: list[Step]` | 代码里**没有任何 steps 概念**。Phase 是最小执行单元，内部是 DeerFlow agent loop | SkillManifest 第一次 `model_validate()` 在 5 个现有 skill 上全炸 |
+| **① 地基级幻觉**：`PhaseConfig.steps: list[Step]` | 代码里**没有任何 steps 概念**。Phase 是最小执行单元，内部是 LangGraph agent loop | SkillManifest 第一次 `model_validate()` 在 5 个现有 skill 上全炸 |
 | **② 机制混淆**：`<ref>` 和 `subgraph:` 当成同一回事 | `<ref>` 是 parser 阶段字符串替换（`parser.py` L160-186），`subgraph:` 是 loader 阶段递归加载（`loader.py` L535），两者作用完全不同 | 扁平化方案杀死递归 subgraph 机制 |
 | **③ 设计意图背反**：扁平化合并 4 个独立 skill 到 story-deconstruction 里 | graph_agent 核心是"skill 独立可运行、互相即插拔"，扁平化等于**焊死**积木 | 彻底破坏模块化 |
 | **④ Callback 事件幻觉**：14 个事件（含 llm_fallback/validator_start/end/prompt_captured/tool_result/subgraph_start/end/checkpoint_compacted/finish_task_called） | `callbacks/base.py` 实际只有 12 个事件，名字也不对 | 所有基于"14 事件"的前端/类型化设计空中楼阁 |
@@ -22,12 +23,12 @@
 
 ## 2. graph_agent 是什么
 
-**一句话**：基于 LangGraph + vendored DeerFlow 的**声明式多阶段 Agent 编排引擎**，以 SKILL.md 为单一事实源，支持递归 subgraph 和细粒度 skill-as-tool 两种组合方式。
+**一句话**：基于 LangGraph 的**声明式多阶段 Agent 编排引擎**，以 SKILL.md 为单一事实源，支持递归 subgraph 和细粒度 skill-as-tool 两种组合方式。
 
 **双层控制**（`docs/COGNITIVE_LOOP_GUIDE.md`）：
 - 外层 `GraphAgentHarness`：phase 编排 / planning nudge / selfcheck nudge / checkpoint compaction / finish gate
 - 中间层 middleware：WorkingMemory / DeadEndPruning / Clarification / DanglingToolCall
-- 内层 DeerFlow agent loop：LLM 调用 / tool 执行 / 流式输出
+- 内层 LangGraph agent loop：LLM 调用 / tool 执行 / 流式输出
 
 ---
 
@@ -72,7 +73,7 @@ requires_llm = (system_prompt is not None) and (subgraph_harness is None)
 
 | 模式 | 触发条件 | 执行 |
 |------|---------|------|
-| **LLM phase** | 有 `<system_prompt>`，无 `subgraph:` | 跑 DeerFlow agent loop，LLM + tools |
+| **LLM phase** | 有 `<system_prompt>`，无 `subgraph:` | 跑 LangGraph agent loop，LLM + tools |
 | **Subgraph phase** | 有 `subgraph:`（**tools 被强制清空**，L578）| 递归执行子 skill 的 `child.run()` |
 | **Code-only phase** | 两者都没有 | 纯代码执行，只跑 `tools` 列表里的函数 |
 
@@ -85,7 +86,7 @@ requires_llm = (system_prompt is not None) and (subgraph_harness is None)
 | 方式 | 声明位置 | 粒度 | 编排者 | 场景 |
 |------|---------|------|--------|------|
 | **subgraph-as-phase** | `phase_config.subgraph: path/to/SKILL.md` + `context_bridge` | **粗**：整个 phase 委派给一个子 skill | **框架**（loader 递归，runner 执行子 harness） | 父 skill 知道确定的工作流顺序（pipeline） |
-| **sub_skills-as-tool** | `phase_config.sub_skills: [{name, skill_path}]`（`loader.py` L586-596）| **细**：子 skill 被包成 LangChain Tool 挂到父 phase 的 tools 列表 | **LLM**（在 agent loop 里按需调用）| 父 skill 让 LLM 基于情境动态选择调哪个 sub-skill |
+| **sub_skills-as-tool** | `phase_config.sub_skills: [{name, skill_path}]`（`loader.py` L586-596）| **细**：子 skill 被包成 LangGraph Tool 挂到父 phase 的 tools 列表 | **LLM**（在 agent loop 里按需调用）| 父 skill 让 LLM 基于情境动态选择调哪个 sub-skill |
 
 **两者都走框架原生机制**，不需要宿主项目写 Python 胶水。
 
@@ -104,7 +105,7 @@ requires_llm = (system_prompt is not None) and (subgraph_harness is None)
 
 ## 8. 框架的红线（从代码和文档里读出来的）
 
-1. **不改 DeerFlow 源码**（README 原则 1）— 所有增量靠外层 harness / callbacks / middleware / config
+1. **不改 LangGraph 源码**（README 原则 1）— 所有增量靠外层 harness / callbacks / middleware / config
 2. **框架零业务逻辑**（README 原则 2 + schema 2.0 manifest forbid 规则）— 业务只写在 skill 目录。**条件分支/数据组装必须走 setup phase + script/ tools，不能在 SKILL.md 里写表达式**
 3. **Kitchen-Pass 出餐口模式**（README 原则 3 + INTEGRATION_GUIDE §3）— phase 写 context → IOManager 经 `artifact_saver` 回调落盘，框架不依赖 host project
 4. **双层认知控制**（COGNITIVE_LOOP_GUIDE）— planning nudge / selfcheck / compaction / finish gate 是硬机制，不是可选
@@ -135,8 +136,8 @@ Studio 的使命之一：**让 PM 用好 DSL 级组合**（让 Copilot 生成正
 | **14 事件类型化** | 基于幻觉事件清单，完全跑偏 |
 | **Step.when + simpleeval** | 违反 F006（framework 不执行业务代码） |
 | **破坏性迁移现有 skill 成 inline** | 杀死独立验证、杀死 text-segmentation 等 skill 的可复用性 |
-| **Task 3.4 删除 deerflow/skills/parser.py** | 误判为重复（实际和 core/parser.py 互补）|
-| **Prompt Capture 要改 DeerFlow 源码** | 违反"不改 DeerFlow"红线 |
+| **Task 3.4 删除旧解析器** | 误判为重复（实际和 core/parser.py 互补）|
+| **Prompt Capture 越界** | 违反框架边界红线 |
 | **R7 AC5 gemini CLI 备选** | 和 R11 自相矛盾 |
 
 **全部作废**，不是"修订 Top 5"，是**整份 Kiro spec 推翻重做**。
@@ -148,7 +149,6 @@ Studio 的使命之一：**让 PM 用好 DSL 级组合**（让 Copilot 生成正
 **Studio 绝对不能做**（会破坏框架）：
 - 任何扁平化 DSL 的设计
 - 任何引入 step 层级的变更
-- 任何改 DeerFlow 源码的埋点
 - 任何让 framework 层执行业务表达式的字段（when/skip_if 求值）
 - 任何把"skill 独立性"削弱的机制（比如强制 sub-skill 必须和 parent 同目录）
 

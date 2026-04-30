@@ -25,7 +25,7 @@
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│                    核心代理 (DeerFlow)                        │
+│                    核心代理 (LangChain Agent)                  │
 │  - LLM 调用                                                  │
 │  - 工具执行                                                  │
 │  - 流式输出                                                  │
@@ -92,13 +92,12 @@ graph_agent/
 ├── models/                 # 模型管理
 │   ├── resolver.py         # 模型解析和选择
 │   └── reasoning_patch.py  # 推理内容补丁
-├── callbacks/              # 回调和日志
-│   ├── logging_cb.py       # 结构化日志
-│   └── callback_bridge.py  # 回调桥接
-└── deerflow/               # DeerFlow 集成
-    ├── config/             # 配置管理
-    └── reflection/         # 反射工具
+└── callbacks/              # 回调和日志
+    ├── logging_cb.py       # 结构化日志
+    └── callback_bridge.py  # 回调桥接
 ```
+
+> **历史说明**: 项目最初源自 deerflow 1.0 fork, 但在 v1-reset MVP-0 (2026-04-29, PR #30) 已剥离 vendored deerflow 子目录, 4 个净化组件 (clarification middleware / clarification tool / checkpointer factory / model factory) inline 进 `graph_agent`。当前不依赖 deerflow，agent loop 直接使用 `langchain.agents.create_agent()`。
 
 ### 技能系统
 

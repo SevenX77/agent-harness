@@ -3,20 +3,26 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from fastapi import WebSocket
 from ptyprocess import PtyProcess
 
+from app.core import config
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
 from app.models.terminal import TerminalSession
-from app.services.skills import resolve_skill_dir
 
-_TERMINAL_TTL_SECONDS = 3600
-_MAX_TERMINALS = 3
+_SKILL_ID_RE = re.compile(r"^[a-z0-9-]+$")
+_ALLOWED_COMMANDS = {
+    ("claude",),
+    ("gemini",),
+    ("bash", "--noprofile", "--norc"),
+}
 
 
 @dataclass
@@ -39,26 +45,27 @@ class TerminalManager:
 
     def create_terminal(self, skill_id: str) -> TerminalSession:
         self.reap_expired()
-        if len(self._sessions) >= _MAX_TERMINALS:
+        if len(self._sessions) >= config.MAX_CONCURRENT_TERMINALS:
             response = error_response(
-                error_code="TERMINAL_SPAWN_FAILED",
-                http_status=500,
+                error_code="TERMINAL_LIMIT_REACHED",
+                http_status=503,
                 message="Terminal session limit reached",
-                details={"limit": _MAX_TERMINALS},
-                retry_strategy="idempotent",
+                details={"limit": config.MAX_CONCURRENT_TERMINALS},
+                retry_strategy="backoff",
             )
             raise_error_response(response)
 
-        skill_dir = resolve_skill_dir(skill_id)
+        skill_dir = _resolve_terminal_cwd(skill_id)
+        command = _validated_command(self.command)
         term_id = uuid.uuid4().hex[:12]
         try:
-            process = PtyProcess.spawn(self.command, cwd=str(skill_dir))
+            process = PtyProcess.spawn(command, cwd=str(skill_dir))
         except Exception as exc:
             response = error_response(
                 error_code="TERMINAL_SPAWN_FAILED",
                 http_status=500,
                 message=f"Failed to spawn terminal for skill {skill_id}: {exc}",
-                details={"skill_id": skill_id, "command": self.command},
+                details={"skill_id": skill_id, "command": command},
                 retry_strategy="idempotent",
             )
             raise_error_response(response)
@@ -67,13 +74,13 @@ class TerminalManager:
             term_id=term_id,
             process=process,
             cwd=str(skill_dir),
-            expires_at=time.monotonic() + _TERMINAL_TTL_SECONDS,
+            expires_at=time.monotonic() + config.TERMINAL_SESSION_TTL_SECONDS,
         )
         return TerminalSession(
             term_id=term_id,
             ws_url=f"/ws/terminal/{term_id}",
             cwd=str(skill_dir),
-            ttl_seconds=_TERMINAL_TTL_SECONDS,
+            ttl_seconds=config.TERMINAL_SESSION_TTL_SECONDS,
         )
 
     async def bridge(self, websocket: WebSocket, term_id: str) -> None:
@@ -96,7 +103,7 @@ class TerminalManager:
         await asyncio.gather(*done, *pending, return_exceptions=True)
 
     def start_reaper(self) -> None:
-        if self._reaper_task is None:
+        if self._reaper_task is None or self._reaper_task.done():
             self._reaper_task = asyncio.create_task(self._reap_loop())
 
     async def shutdown(self) -> None:
@@ -128,7 +135,7 @@ class TerminalManager:
     async def _reap_loop(self) -> None:
         while True:
             self.reap_expired()
-            await asyncio.sleep(30)
+            await asyncio.sleep(config.TERMINAL_REAPER_INTERVAL_SECONDS)
 
     async def _read_pty_loop(self, websocket: WebSocket, record: TerminalRecord) -> None:
         while record.term_id in self._sessions:
@@ -162,6 +169,46 @@ def _read_nonblocking(process: Any) -> bytes | str | None:
     if isinstance(data, (bytes, str)):
         return data
     return None
+
+
+def _validated_command(command: list[str]) -> list[str]:
+    if tuple(command) not in _ALLOWED_COMMANDS:
+        response = error_response(
+            error_code="TERMINAL_SPAWN_FAILED",
+            http_status=500,
+            message="Terminal command is not allowed",
+            details={"command": command},
+            retry_strategy="idempotent",
+        )
+        raise_error_response(response)
+    return list(command)
+
+
+def _resolve_terminal_cwd(skill_id: str) -> Path:
+    if _SKILL_ID_RE.fullmatch(skill_id) is None:
+        raise ValueError(f"SKILL_NOT_FOUND: Skill not found: {skill_id}")
+
+    candidates = (
+        config.default_workspace_skills_dir() / skill_id,
+        config.SKILLS_DIR / skill_id,
+    )
+    allowed_roots = (
+        config.default_workspace_skills_dir().resolve(),
+        config.SKILLS_DIR.resolve(),
+    )
+
+    for candidate, root in zip(candidates, allowed_roots, strict=True):
+        resolved = candidate.resolve()
+        if not resolved.is_relative_to(root):
+            continue
+        if not resolved.is_relative_to(config.WORKSPACES_DIR.resolve()) and not resolved.is_relative_to(
+            config.SKILLS_DIR.resolve(),
+        ):
+            continue
+        if (resolved / "SKILL.md").is_file():
+            return resolved
+
+    raise ValueError(f"SKILL_NOT_FOUND: Skill not found: {skill_id}")
 
 
 terminal_manager = TerminalManager()

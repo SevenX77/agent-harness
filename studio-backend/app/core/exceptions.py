@@ -36,6 +36,7 @@ STANDARD_ERROR_MAP: dict[str, ErrorDefinition] = {
     "COMPILE_FAILED": ErrorDefinition(http_status=200, retry_strategy="not_retryable"),
     "RUN_SPAWN_FAILED": ErrorDefinition(http_status=500, retry_strategy="idempotent"),
     "TERMINAL_SPAWN_FAILED": ErrorDefinition(http_status=500, retry_strategy="idempotent"),
+    "TERMINAL_LIMIT_REACHED": ErrorDefinition(http_status=503, retry_strategy="backoff"),
     "WEBSOCKET_DISCONNECTED": ErrorDefinition(http_status=499, retry_strategy="backoff"),
     "LLM_FALLBACK_EXHAUSTED": ErrorDefinition(http_status=502, retry_strategy="backoff"),
     "RESUME_CHECKPOINT_NOT_FOUND": ErrorDefinition(
@@ -132,6 +133,10 @@ async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONR
 
 
 async def value_error_handler(_request: Request, exc: ValueError) -> JSONResponse:
+    standard_response = _standard_error_from_value_error(exc)
+    if standard_response is not None:
+        return _json_response(standard_response)
+
     response = error_response(
         error_code="MANIFEST_VALIDATION_FAILED",
         http_status=422,
@@ -140,6 +145,27 @@ async def value_error_handler(_request: Request, exc: ValueError) -> JSONRespons
         retry_strategy="not_retryable",
     )
     return _json_response(response)
+
+
+def _standard_error_from_value_error(exc: ValueError) -> ErrorResponse | None:
+    text = str(exc)
+    raw_code, separator, raw_message = text.partition(":")
+    error_code = raw_code.strip()
+    if error_code not in STANDARD_ERROR_MAP:
+        return None
+
+    definition = STANDARD_ERROR_MAP[error_code]
+    return error_response(
+        error_code=error_code,
+        http_status=definition.http_status,
+        message=raw_message.strip() if separator else _default_standard_error_message(error_code),
+        details=None,
+        retry_strategy=definition.retry_strategy,
+    )
+
+
+def _default_standard_error_message(error_code: str) -> str:
+    return error_code.lower().replace("_", " ").capitalize()
 
 
 async def file_not_found_handler(_request: Request, exc: FileNotFoundError) -> JSONResponse:

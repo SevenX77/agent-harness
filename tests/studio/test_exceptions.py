@@ -10,6 +10,7 @@ def test_standard_error_codes_map_to_http_exceptions() -> None:
         "COMPILE_FAILED": 200,
         "RUN_SPAWN_FAILED": 500,
         "TERMINAL_SPAWN_FAILED": 500,
+        "TERMINAL_LIMIT_REACHED": 503,
         "WEBSOCKET_DISCONNECTED": 499,
         "LLM_FALLBACK_EXHAUSTED": 502,
         "RESUME_CHECKPOINT_NOT_FOUND": 404,

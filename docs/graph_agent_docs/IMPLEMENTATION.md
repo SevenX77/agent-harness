@@ -23,11 +23,6 @@ graph_agent/
 │   └── reasoning_patch.py  # 推理内容补丁（100行）
 ├── callbacks/              # 回调和日志
 │   └── logging_cb.py       # 结构化日志（300行）
-├── deerflow/               # DeerFlow 集成
-│   ├── config/
-│   │   └── app_config.py   # 配置管理（200行）
-│   └── reflection/
-│       └── resolvers.py    # 反射工具（150行）
 └── utils/                  # 工具函数
     └── llm_utils.py        # LLM 工具（100行）
 ```

@@ -18,7 +18,7 @@ Deep dive into `graph_agent`'s dual-layer cognitive control architecture.
 │   Real-time intervention per agent.invoke():               │
 │   working memory, dead-end pruning, clarification            │
 ├─────────────────────────────────────────────────────────────┤
-│                    DEERFLOW AGENT                          │
+│                    LANGCHAIN AGENT                          │
 │   Core agent loop: LLM calls, tool execution, streaming      │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -268,62 +268,7 @@ dead_end_threshold: 10  # Dead end detection threshold
 
 ---
 
-## 10. DeerFlow `plan_mode` vs. `WorkingMemoryMiddleware`
-
-`graph_agent` carries two overlapping planning mechanisms; they must not be
-enabled simultaneously on the same run. This section documents why and
-records the framework-level default.
-
-### 10.1 The two mechanisms
-
-**DeerFlow `TodoListMiddleware`** (`plan_mode=True` on `DeerFlowClient`)
-- Gated by the `plan_mode` flag on `DeerFlowClient.__init__()` (default `False`).
-- When enabled, injects a `write_todos` tool and a matching middleware that
-  records a per-thread todo list the model can append to / tick off.
-- Designed for free-form conversational agents that *discover* their plan
-  mid-stream. The todo list is a scratchpad the model manages itself.
-
-**graph_agent `WorkingMemoryMiddleware`** (always on inside a phase run)
-- Built by the harness around every phase.
-- Enforces the *Planning Enforcement → Selfcheck → Compaction* cycle
-  described in sections 1–3 above: the model must call
-  `update_working_memory` before any business tool, and the harness injects
-  `PLANNING_NUDGE` until it does.
-- The working-memory blackboard is the authoritative plan record; checkpoint
-  compaction and dead-end pruning both read from it.
-
-### 10.2 Why they conflict
-
-The two mechanisms are trying to own the same slot — "where does the plan
-live?" — with incompatible semantics:
-
-| Question | TodoList (DeerFlow) | WorkingMemory (graph_agent) |
-|----------|---------------------|------------------------------|
-| Who writes the plan? | Model, on its own initiative | Model, forced by PLANNING_NUDGE |
-| Storage shape | Flat list of todo items | Free-text `<working_memory>` blackboard |
-| Who reads it for compaction? | Nobody | Outer harness |
-| Who reads it for selfcheck? | Nobody | `finish_task` structured review |
-
-Running both at once means the model sees two parallel plan prompts, the
-harness only acts on one of them, and tokens are spent on todos that no
-downstream step consumes.
-
-### 10.3 Default and override
-
-`graph_agent` leaves DeerFlow's `plan_mode` at its library default of `False`
-and never passes `plan_mode=True` from the harness. Skill authors should
-not enable it either — `WorkingMemoryMiddleware` already covers the use
-case the TodoList was built for, and with tighter integration into the
-phase loop.
-
-If a host project embeds `DeerFlowClient` outside a `graph_agent` harness
-and wants the upstream TodoList behavior for a purely conversational agent,
-it may still set `plan_mode=True` on its own client instance — but that
-client should not also run phases through `GraphAgentHarness`.
-
----
-
-## 11. Observability
+## 10. Observability
 
 Key callback events:
 

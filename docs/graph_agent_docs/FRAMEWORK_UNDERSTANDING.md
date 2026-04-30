@@ -1,3 +1,4 @@
+
 # graph_agent 框架快速理解
 
 > **本文档目的**：在动手改 graph_agent 或给它做配套工具（Studio、Lint、Visualization 等）之前，先读这一份文档，把框架的核心机制、红线、和现状与设计意图的缺口看清楚。避免基于脑补或基于字面理解就下判断。
@@ -18,7 +19,7 @@
 
 `graph_agent` 是一个**以 SKILL.md 文件为单一事实源的声明式多阶段 Agent 编排引擎**。
 
-它的核心价值有两层。**静态层面**，它把"多阶段任务的编排逻辑"从 Python 代码降级到声明式 Markdown 文档：PM 或 Copilot 可以用 YAML frontmatter + XML 风格标签描述一个任务怎么分阶段、每阶段用什么模型、用哪些工具、阶段之间怎么传数据、失败了怎么重试，而不需要写 Python 编排代码。**运行时层面**，它通过双层控制架构（外层 harness 管 phase 间 nudge/checkpoint/retry，内层 DeerFlow 管 LLM agent loop）强制 LLM 按"规划 → 执行 → 自检"三步走，不让 LLM 闷头干活或悄悄结束，而是必须留下可审计的行为痕迹。
+它的核心价值有两层。**静态层面**，它把"多阶段任务的编排逻辑"从 Python 代码降级到声明式 Markdown 文档：PM 或 Copilot 可以用 YAML frontmatter + XML 风格标签描述一个任务怎么分阶段、每阶段用什么模型、用哪些工具、阶段之间怎么传数据、失败了怎么重试，而不需要写 Python 编排代码。**运行时层面**，它通过双层控制架构（外层 harness 管 phase 间 nudge/checkpoint/retry，内层 LangChain 管 LLM agent loop）强制 LLM 按"规划 → 执行 → 自检"三步走，不让 LLM 闷头干活或悄悄结束，而是必须留下可审计的行为痕迹。
 
 框架的原生能力里最重要的一条是**把一个完整 skill 递归嵌入到另一个 skill 的某个 phase 里**，让 skill 像乐高积木一样可以组合、独立验证、即插拔。这条能力决定了 graph_agent 不只是"Python 编排的 Markdown 皮肤"，而是一个支持真正模块化 Agent 组合的引擎。
 
@@ -163,7 +164,7 @@ requires_llm = (system_prompt is not None) and (subgraph_harness is None)
 
 **触发条件**：当前 phase 的 `<phase_config>` 里**没有** `subgraph:` 字段，但**有** `<system_prompt>` 标签。此时 `requires_llm = True`。
 
-**执行路径**：在 `core/harness.py` L384 的分叉判断里，因为 `phase.subgraph is None`，走 `_build_phase_node(phase)` 这条路径。这条路径会启动 DeerFlow 的 agent loop，让 LLM 根据 system_prompt 做规划、调用 tools 列表里的工具函数、最后调用 `finish_task` 完成这个 phase。
+**执行路径**：在 `core/harness.py` L384 的分叉判断里，因为 `phase.subgraph is None`，走 `_build_phase_node(phase)` 这条路径。这条路径会启动 LangChain 的 agent loop，让 LLM 根据 system_prompt 做规划、调用 tools 列表里的工具函数、最后调用 `finish_task` 完成这个 phase。
 
 **生效的字段**：`system_prompt` / `user_prompt_template` / `tools` / `sub_skills` / `validator` / `retry_target` / `tier` / `max_iterations` / `max_nudges` / `dead_end_threshold`。
 
@@ -252,7 +253,7 @@ schema 2.0 已用 Pydantic discriminated union + `extra='forbid'` 在 `core/mani
 </system_prompt>
 ```
 
-**语义**：loader 会把 `render` / `refine` / `enhance` 这三个子 skill 各自通过 `skill_tool_factory.build_skill_tool()` 包装成一个 LangChain StructuredTool（见 `core/loader.py` L586-596），**加到当前父 phase 的 tools 列表里**。运行时这个父 phase 启动 DeerFlow agent loop，**LLM 看到这些子 skill 像看到普通 tool 一样**，根据 system_prompt 的指引和当前 context 自主判断要调哪个、什么时候调、调几次。可能只调一个，可能调所有，也可能一个都不调。
+**语义**：loader 会把 `render` / `refine` / `enhance` 这三个子 skill 各自通过 `skill_tool_factory.build_skill_tool()` 包装成一个 LangChain StructuredTool（见 `core/loader.py` L586-596），**加到当前父 phase 的 tools 列表里**。运行时这个父 phase 启动 LangChain agent loop，**LLM 看到这些子 skill 像看到普通 tool 一样**，根据 system_prompt 的指引和当前 context 自主判断要调哪个、什么时候调、调几次。可能只调一个，可能调所有，也可能一个都不调。
 
 **谁编排**：**LLM**。框架只是把子 skill 包成 tool 放进工具箱，决策权在 LLM 手里。
 
@@ -277,17 +278,11 @@ schema 2.0 已用 Pydantic discriminated union + `extra='forbid'` 在 `core/mani
 
 ---
 
-## 6. 框架的 6 条硬红线
+## 6. 框架的 5 条硬红线
 
 这些红线都是从源码和文档里能读出来的核心设计约束，违反任何一条都会破坏框架的完整性。
 
-### 红线 1：不改 DeerFlow 源码
-
-`src/core/graph_agent/deerflow/` 是从原始 DeerFlow 项目 vendored 进来的 11k 行代码。`src/core/graph_agent/README.md` 的"Core Principles"第 1 条明确规定："DeerFlow source code is not lightly modified"。所有框架层的增量能力（观测、中间件、验证循环、Prompt 拦截）都要通过**外层 harness、callbacks、middleware、config** 实现，不能改 DeerFlow 内部文件。
-
-**对实施方案的影响**：任何"在 LLM 调用前后做点什么"的需求，都不能通过改 DeerFlow 内部实现，必须通过 Proxy 模式（在注入 llm_client 时包一层）、callback 钩子、或者外层 wrapper 实现。
-
-### 红线 2：框架层不执行业务逻辑
+### 红线 1：框架层不执行业务逻辑
 
 schema 2.0 的 `IoInput`/`IoOutput` Pydantic 模型直接禁止 `$func()` 语法（没有相应字段），一旦 PM 误写就被 `extra='forbid'` 拒绝。原规则的 reason 直译过来是：
 
@@ -295,27 +290,27 @@ schema 2.0 的 `IoInput`/`IoOutput` Pydantic 模型直接禁止 `$func()` 语法
 
 **对实施方案的影响**：条件判断、数据组装、任何业务逻辑都应该写成 Python 函数放在 skill 的 `script/` 目录里，在一个独立的 code-only phase 里被调用，然后把结果写进 context 供后续 phase 使用。**不要让框架在 SKILL.md 里执行任何表达式**（包括假想的 `<step when="...">` 或 `skip_if:` 字段）。
 
-### 红线 3：Kitchen-Pass 出餐口模式（I/O 解耦）
+### 红线 2：Kitchen-Pass 出餐口模式（I/O 解耦）
 
 框架不直接往文件系统或数据库写数据。phase 的结果先写进 `WorkflowState.context`（内存里的 blackboard），真正落盘由 `io/manager.py` 里的 `IOManager` 处理。当 SKILL.md 的 `io.outputs` 声明 `target: artifact_manager` 时，框架会调用 caller 注入的 `artifact_saver` 回调函数，把数据交给 host project 决定怎么存。
 
 **对实施方案的影响**：框架**不依赖 host project 的文件管理实现**，可以跨项目复用。但同时意味着 PM 直接用框架时会遇到问题：他不写 Python 代码，怎么注入 `artifact_saver`？这是配套工具需要解决的问题。
 
-### 红线 4：双层认知控制架构
+### 红线 3：双层认知控制架构
 
-外层 `GraphAgentHarness` 的 while 循环管 phase 间的事情：planning nudge、selfcheck nudge、checkpoint compaction、finish gate。内层 DeerFlow 的 agent loop 管每次 LLM 调用内的事情：tool 执行、流式输出、中间件拦截（WorkingMemory / DeadEndPruning / Clarification / DanglingToolCall）。
+外层 `GraphAgentHarness` 的 while 循环管 phase 间的事情：planning nudge、selfcheck nudge、checkpoint compaction、finish gate。内层 LangChain 的 agent loop 管每次 LLM 调用内的事情：tool 执行、流式输出、中间件拦截（WorkingMemory / DeadEndPruning / Clarification / DanglingToolCall）。
 
 这是硬架构，不是可选设计。详细行为见 `docs/graph_agent_docs/COGNITIVE_LOOP_GUIDE.md`。
 
 **对实施方案的影响**：任何扩展不能破坏这个两层分工。
 
-### 红线 5：认知控制权必须唯一
+### 红线 4：认知控制权必须唯一
 
 Phase 三种模式互斥（见本文第 4 节）。"一个 Phase 不应有两个大脑"——要么委派给子 skill（subgraph 模式），要么让 LLM 思考（LLM 模式），要么纯计算（code 模式）。三种角色不能混搭在同一个 phase 里。
 
 **对实施方案的影响**：Studio 类工具在可视化 phase 时必须明确区分这三种模式，UI 上选择其中一种后应该禁止填写其他模式的字段。
 
-### 红线 6：SKILL.md 是跨工具可移植契约
+### 红线 5：SKILL.md 是跨工具可移植契约
 
 `compiler` skill 本身是一个 graph 类型的 skill，它同时可以部署为 Claude Code Skill 和 Cursor IDE Skill（见 `src/core/graph_agent/skills/compiler/SKILL.md` 开头的部署说明）。这意味着 SKILL.md 的格式设计不只服务 graph_agent 一个消费者，它是 graph_agent + Claude Code + Cursor 等**多个 Agent 工具共用的格式标准**。
 
@@ -479,7 +474,7 @@ type: graph
 
 ### 11.2 TracingClientProxy（`graph_agent/core/tracing_proxy.py`）
 
-在 resolver 返回的 LangChain chat-model 外面包一层代理。每次 `.invoke()` 在转发给 wrapped client 之前会先给所有已注册 callback 发一个 `PromptCapturedEvent`（包含 `phase_name` / `llm_role` / `resolved_model` / `template_source` / `variables` / `resolved_prompt` / `sub_run_id` / `group_key`）。其他属性透明转发给 wrapped client，不影响 DeerFlow agent loop 的任何行为。harness 在 `resolver.resolve(...)` 之后、`create_agent(...)` 之前自动包装。
+在 resolver 返回的 LangChain chat-model 外面包一层代理。每次 `.invoke()` 在转发给 wrapped client 之前会先给所有已注册 callback 发一个 `PromptCapturedEvent`（包含 `phase_name` / `llm_role` / `resolved_model` / `template_source` / `variables` / `resolved_prompt` / `sub_run_id` / `group_key`）。其他属性透明转发给 wrapped client，不影响 LangChain agent loop 的任何行为。harness 在 `resolver.resolve(...)` 之后、`create_agent(...)` 之前自动包装。
 
 ### 11.3 builtin `parallel_map`（`graph_agent/tools/builtin/parallel_map.py`）
 
@@ -496,7 +491,7 @@ parallel_map(
 
 每个 item 触发一个独立的子 skill run（用 `run_skill` + 独立 harness 实例，绕过 cache 避免竞态）。框架自动给每个子 run 分配 `_sub_run_id`（group_key + idx）并共享一个 `_group_key`；TracingClientProxy 读这两个 key 后把它们盖到所有 `prompt_captured` 事件上，Studio 可以按 `group_key` 折叠同一次 parallel_map 的并发事件。
 
-默认 `max_concurrent=3` 和 DeerFlow SubagentExecutor 的默认一致；单个 item 出错只会在返回列表里留下 `{"error": "...", "sub_run_id": ...}` 条目，`stop_on_error=True` 可切成 fail-fast。
+默认 `max_concurrent=3` 和 LangChain SubagentExecutor 的默认一致；单个 item 出错只会在返回列表里留下 `{"error": "...", "sub_run_id": ...}` 条目，`stop_on_error=True` 可切成 fail-fast。
 
 ### 11.4 CallbackEvent Pydantic 类型化（`graph_agent/callbacks/events.py`）
 

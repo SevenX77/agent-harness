@@ -167,7 +167,6 @@ graph_agent/
 │   └── resolver.py         # 模型解析和选择
 ├── callbacks/              # 回调和日志
 │   └── logging_cb.py       # 结构化日志
-├── deerflow/               # DeerFlow 集成
 └── docs/                   # 文档（你在这里）
     ├── README.md           # 文档索引
     ├── USER_GUIDE.md       # 使用指南

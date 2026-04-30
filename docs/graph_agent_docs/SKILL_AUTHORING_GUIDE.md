@@ -64,11 +64,10 @@
 | `validator` | `str` | `None` | 校验器引用，返回 `(passed, errors)` |
 | `retry_target` | `str` | `None` | 校验失败时回退到哪个 Phase |
 | `max_retries` | `int` | `3` | 校验失败最大重试次数 |
-| `max_iterations` | `int` | `20` | DeerFlow agent loop 的最大迭代次数 |
+| `max_iterations` | `int` | `20` | LangChain agent loop 的最大迭代次数 |
 | `max_tool_calls` | `int` | `0` | 0 表示不额外限制 |
 | `max_nudges` | `int` | `3` | 文本偏航提醒上限 |
 | `dead_end_threshold` | `int` | `3` | 连续失败多少次后注入 dead-end warning |
-| `subagent_enabled` | `bool` | `false` | 是否允许在该 Phase 使用 subagent |
 | `subgraph` | `str` | `None` | 子 skill 的 `SKILL.md` 路径 |
 | `context_bridge` | `dict` | `None` | 父子 skill 输入输出映射 |
 

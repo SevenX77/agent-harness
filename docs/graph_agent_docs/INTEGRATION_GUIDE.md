@@ -2,6 +2,8 @@
 
 本指南面向“把 `graph_agent` 迁移到另一个项目中继续使用”的集成场景。
 
+> **历史说明**: 项目最初源自 deerflow 1.0 fork, 但在 v1-reset MVP-0 (2026-04-29, PR #30) 已剥离 vendored deerflow 子目录, 4 个净化组件 (clarification middleware / clarification tool / checkpointer factory / model factory) inline 进 graph_agent. 当前完全不依赖 deerflow。
+
 ## 1. 最小集成路径
 
 > In the AI-narrated-recap-analyst parent project, use `from src.core.graph_agent import ...` instead.
@@ -12,14 +14,12 @@
 4. 在 `.env` 中配置至少一个 provider 的 API Key
 5. 把业务工具和 SKILL.md 一起迁移
 
-如果宿主项目需要 DeerFlow 原生全局入口，再额外提供 `config/deerflow_config.yaml`。
-
 ## 2. 集成边界
 
 ### framework 负责什么
 
 - 多阶段编排
-- DeerFlow agent loop 接入
+- LangChain agent loop 接入
 - 模型解析与 provider failover
 - 声明式 I/O
 - context blackboard
@@ -64,10 +64,6 @@
 - 在宿主项目中只换 provider 与 model 映射
 - 不要在 skill 里直接写死底层模型名
 
-### `deerflow_config.yaml`
-
-只在你需要 DeerFlow 全局工具入口、sandbox、summarization 等功能时提供。
-
 ### `multimodal_roles.yaml`
 
 仅当你要继续复用 `graph_agent/tools/` 下的多模态工具时需要。
@@ -89,22 +85,11 @@
 - 你想在代码中手动构造 `Phase`
 - 需要把 graph_agent 嵌到更大的编排系统里
 
-### DeerFlow 全局入口
-
-适合：
-
-- 你要复用 DeerFlow 原生的全局 agent 模式
-- 你已经有完整的 `deerflow_config.yaml`
-
 ## 6. 并发使用指南
 
 ### Phase 内并发
 
-优先走 DeerFlow subagent：
-
-- 在 `phase_config` 里开启 `subagent_enabled`
-- DeerFlow 当前线程池上限是 `3`
-- 适合一个 Phase 内存在多个边界清晰、彼此独立的子任务
+当前版本已移除了旧的 parallel_delegate 与 subagent 模式。对于子任务的并发执行，建议使用标准的 `LangGraph` parallel nodes 构建子图。
 
 ### Skill 外并发
 
@@ -202,7 +187,7 @@ print('✅ All imports successful')
 Run ruff to verify no import errors:
 
 ```bash
-ruff check src/core/graph_agent/ --exclude deerflow
+ruff check src/core/graph_agent/
 ```
 
 Expected: `All checks passed!`
@@ -274,23 +259,3 @@ pytest tests/core/test_cognitive_loop.py -v --tb=short
 - [ ] Tests pass with new import paths
 - [ ] Hello world example runs successfully
 - [ ] Documentation updated (README.md, CONFIG_REFERENCE.md, COGNITIVE_LOOP_GUIDE.md)
-
-
-### Subagent Middleware 继承（Task 2.7 后的新行为）
-
-当 Phase 配置 `subagent_enabled: true` 时，`DeerFlow` 的 `SubagentExecutor` 默认以 `inherit_middlewares=True` 运行，子 agent 现在会**完整继承 lead agent 的中间件链**（包括 `WorkingMemory`、`DeadEnd`、`LoopDetection`、`Clarification` 等），与主 agent 享有相同的认知约束和安全护栏。
-
-这是对早前行为的改进——此前子 agent 走的是极简中间件路径（`build_subagent_runtime_middlewares`），只做工具错误处理，不做规划约束，在高并发任务下行为不可控。
-
-若某个业务场景确实需要让子 agent 跑在极简中间件下（例如一次性的轻量查询，担心 Token 预算），可以在构造 `SubagentExecutor` 时显式传入 `inherit_middlewares=False`：
-
-```python
-executor = SubagentExecutor(
-    config=subagent_config,
-    tools=tools,
-    parent_model=parent_model,
-    inherit_middlewares=False,  # opt out of full middleware chain
-)
-```
-
-**原来的全局 hook 工作流已被取代**——不再需要 `set_custom_middlewares_hook` 给子 agent 注入 `WorkingMemory` / `DeadEnd`，它们现在是默认的一部分。hook 仍然可用于注入 **业务自定义** 中间件（Host project 的分支插件），这些仍会自动流入所有走 `make_lead_agent` 的子 agent 中。

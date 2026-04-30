@@ -15,7 +15,6 @@ import re
 import time
 from pathlib import Path
 
-import pytest
 from playwright.sync_api import Page, expect
 
 logger = logging.getLogger("e2e.cli_toast")

@@ -17,7 +17,6 @@ import shutil
 import signal
 import socket
 import subprocess
-import sys
 import textwrap
 import time
 from collections.abc import Iterator

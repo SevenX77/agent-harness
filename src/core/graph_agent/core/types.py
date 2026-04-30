@@ -13,6 +13,7 @@ from .manifest import ContextBridge
 
 if TYPE_CHECKING:
     from .harness import GraphAgentHarness
+    from .io_manager import IODef
 
 
 @dataclass
@@ -66,6 +67,15 @@ class Phase:
     output_schema: type[BaseModel] | None = None
     output_schema_path: str | None = None
     md_type_dict: str | None = None
+    # MVP-2 T7-bis: declarative io.outputs hoist routing.
+    #
+    # Populated by ``loader._phase_from_graph_phase`` (post-MVP-3 wiring)
+    # from ``manifest.SkillManifest.phases[i].io.outputs``. When non-empty
+    # the phase executor calls ``IOManager.resolve_hoist`` at phase exit
+    # and writes resulting ``io_errors`` into ``state['flow'].io_errors``
+    # via ``StateManager.update_framework``. Empty list = no hoist
+    # routing requested (legacy phases without declarative io).
+    io_specs: list[IODef] = field(default_factory=list)
 
 
 __all__ = ["Phase"]

@@ -4,7 +4,7 @@ import types
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..callbacks.base import Callback
@@ -41,7 +41,7 @@ class RunContext:
     runtime_inputs: Mapping[str, Any] = field(default_factory=dict)
     storage_manager: Any | None = None
     artifact_saver: Callable[..., Any] | None = None
-    callbacks: tuple["Callback", ...] = field(default_factory=tuple)
+    callbacks: tuple[Callback, ...] = field(default_factory=tuple)
     unattended: bool = False
 
     def __post_init__(self) -> None:

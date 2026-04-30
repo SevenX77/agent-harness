@@ -19,8 +19,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src" / "core"))
 
 from graph_agent.callbacks.base import Callback  # noqa: E402

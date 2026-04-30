@@ -103,7 +103,7 @@ class TestIOManagerArtifactTargetAlignment:
         context = {"story_framework": {"chapters": 3}}
 
         def broken_saver(name: str, value: object, **_: object) -> str:
-            raise IOError(f"disk full while saving {name}")
+            raise OSError(f"disk full while saving {name}")
 
         with pytest.raises(IOError, match="disk full while saving story_framework"):
             io_mgr.save_outputs(
@@ -112,7 +112,11 @@ class TestIOManagerArtifactTargetAlignment:
                 project_id="proj-x",
             )
 
-        assert context["_io_errors"] == [
+        # MVP-2 T7: io_errors accumulate on the IOManager instance instead
+        # of the (snapshot) context dict, so the caller can route them
+        # into ``state['flow'].io_errors``. Context dict stays clean.
+        assert "_io_errors" not in context
+        assert io_mgr.io_errors == [
             "artifact_saver failed for 'story_framework': "
             "disk full while saving story_framework"
         ]
@@ -157,7 +161,8 @@ class TestIOManagerArtifactTargetAlignment:
         ):
             io_mgr.save_outputs(context=context)
 
-        assert context["_io_errors"] == [
+        assert "_io_errors" not in context
+        assert io_mgr.io_errors == [
             "Declared output 'story_framework' was not found in context"
         ]
 
@@ -195,6 +200,7 @@ class TestIOManagerArtifactTargetAlignment:
         ):
             io_mgr.save_outputs(context=context)
 
-        assert context["_io_errors"] == [
+        assert "_io_errors" not in context
+        assert io_mgr.io_errors == [
             "Artifact target output 'story_framework' has no saver"
         ]

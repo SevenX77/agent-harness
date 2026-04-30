@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import types
-
-import pytest
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+
+import pytest
 
 from graph_agent.core.run_context import RunContext
 

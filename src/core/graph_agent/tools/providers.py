@@ -6,14 +6,14 @@ import asyncio
 import json
 import logging
 import threading
-from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar
+from collections.abc import Callable, Coroutine
+from typing import Any, TypeVar, cast
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
-def ok(data: dict) -> str:
+def ok(data: dict[str, Any]) -> str:
     return json.dumps(data, ensure_ascii=False)
 
 
@@ -28,7 +28,7 @@ def err(exc: Exception) -> str:
     )
 
 
-def run_async(factory: Callable[[], Awaitable[T]]) -> T:
+def run_async(factory: Callable[[], Coroutine[Any, Any, T]]) -> T:
     """Run an async factory from sync code, even inside an active event loop."""
     try:
         asyncio.get_running_loop()
@@ -51,4 +51,4 @@ def run_async(factory: Callable[[], Awaitable[T]]) -> T:
         raise TimeoutError("run_async: async factory did not complete within 300s")
     if "exc" in error:
         raise error["exc"]
-    return result["value"]  # type: ignore[return-value]
+    return cast(T, result["value"])

@@ -363,10 +363,7 @@ def _build_type_runtime(
 
 
 def _coerce_value(value: Any, field_def: DynamicFieldDef) -> Any:
-    if field_def.coerce_fn is None:
-        coerced = value
-    else:
-        coerced = field_def.coerce_fn(value)
+    coerced = value if field_def.coerce_fn is None else field_def.coerce_fn(value)
     if field_def.enum_values is not None and str(coerced) not in field_def.enum_values:
         raise ValueError(f"{coerced!r} not in {field_def.enum_values}")
     return coerced

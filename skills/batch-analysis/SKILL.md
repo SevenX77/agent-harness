@@ -69,6 +69,7 @@ phases:
       - script.entity.resolve_alias
       - script.entity.get_entity_registry_summary
       - script.paths.analyze_character_changes
+    output_schema: script.models.BatchAnalysisReport
     prompt: |
       你是角色分析和实体管理专家。你的任务是分析批次内所有事件中的角色，同时注册和消歧实体。
       ## 任务1：实体注册与消歧（星形拓扑中心）
@@ -117,6 +118,7 @@ phases:
       - script.paths.analyze_emotional_arcs
       - script.paths.analyze_foreshadowing
       - script.paths.analyze_spatiotemporal
+    output_schema: script.models.BatchAnalysisReport
     prompt: |
       你是叙事分析编排器。你的任务是调用 6 个分析工具，对批次内的事件做多维度分析。
       ## 需要调用的 6 个分析工具
@@ -150,6 +152,7 @@ phases:
     agent_tools:
       - script.continuity.check_continuity
       - script.continuity.log_continuity_warning
+    output_schema: script.models.BatchAnalysisReport
     prompt: |
       你是叙事连续性检查专家。你的任务是检查本批次的分析结果与前序批次之间是否存在矛盾。
       ## 检查维度

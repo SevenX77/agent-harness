@@ -97,7 +97,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 # =============================================================================
 # Atomic structures (reused across artifact types / phase modes)
@@ -142,12 +142,57 @@ class ContextBridge(BaseModel):
     consolidate this Pydantic version with the dataclass mirror in
     ``core/types.py``. The 1.x DelegatePhase consumer was removed in
     MVP-0 B1; new V2 delegation will reuse this same model.
+
+    MVP-2 T4: gained ``to_business_data_schema`` so child-skill
+    BusinessData construction routes through the shared SchemaEngine
+    instead of either side reaching for its own parser. Until V2
+    delegation lands, the bridge carries only field names (``inputs`` is
+    ``dict[str, str]`` mapping child field → parent path expression);
+    the bridge therefore has no intrinsic type information and yields a
+    permissive ``Any``-typed SchemaObject. Type-strict bridges arrive
+    when the V2 delegation contract picks up the full child manifest.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     inputs: dict[str, str] = Field(default_factory=dict)
     outputs: dict[str, str] = Field(default_factory=dict)
+
+    def to_business_data_schema(self, schema_engine: Any) -> Any:
+        """Project the bridge's ``inputs`` into a SchemaEngine SchemaObject.
+
+        The returned ``SchemaObject`` carries one declared field per
+        bridge input keyed by the child-skill business name; descriptors
+        are ``Any`` so the resulting Pydantic model accepts whatever the
+        parent skill emits (V2 delegation will tighten this once parent
+        and child manifests can be diffed for type compatibility).
+
+        ``schema_engine`` is taken as a parameter rather than imported at
+        module top to keep ``manifest.py`` a pure data layer (no
+        runtime dependency cycle with ``schema_engine.py``); callers
+        pass the loader's shared singleton via
+        ``graph_agent.core.loader.get_schema_engine``.
+        """
+        # Lazy import keeps manifest.py a pure schema module — no
+        # circular dependency with the schema_engine subsystem.
+        from .schema_engine import SchemaObject
+
+        fields = tuple((name, Any) for name in self.inputs)
+        # MVP-2 T4 surface: the engine arg threads in for two reasons.
+        #   1. It documents the contract (callers must own a SchemaEngine).
+        #   2. It primes the engine's lru cache so a downstream
+        #      ``schema_engine.get_pydantic_model(schema_obj)`` call returns
+        #      a stable class identity. Calling get_pydantic_model here
+        #      (rather than in the caller) keeps the caching policy local
+        #      to the bridge.
+        schema_obj = SchemaObject(
+            fields=fields,
+            required_fields=frozenset(self.inputs.keys()),
+            schema_name="ContextBridgeBusinessData",
+        )
+        # Touch the engine so the model class is built and cached.
+        schema_engine.get_pydantic_model(schema_obj)
+        return schema_obj
 
 
 # =============================================================================
@@ -208,6 +253,8 @@ class LLMPhase(_BasePhase):
     )
     output_schema: str | None = None
     output_example: str | None = None
+    output_schema_md: str | None = None
+    output_example_md: str | None = None
 
 
 class LogicPhase(_BasePhase):
@@ -243,6 +290,7 @@ class _BaseSkill(BaseModel):
     """Shared metadata fields across all three artifact types."""
 
     model_config = ConfigDict(extra="forbid")
+    _compiled_schemas: dict[str, Any] = PrivateAttr(default_factory=dict)
 
     schema_version: Literal["2.0"] = "2.0"
     name: str = Field(min_length=1, max_length=64)
@@ -251,6 +299,15 @@ class _BaseSkill(BaseModel):
     version: str | None = None
     author: str | None = None
     metadata: dict[str, Any] | None = None
+
+    @property
+    def compiled_schemas(self) -> dict[str, Any]:
+        """Phase-2 injected SchemaObject map, keyed by phase name."""
+        return self._compiled_schemas
+
+    @compiled_schemas.setter
+    def compiled_schemas(self, value: dict[str, Any]) -> None:
+        self._compiled_schemas = value
 
 
 class AgentProfile(BaseModel):

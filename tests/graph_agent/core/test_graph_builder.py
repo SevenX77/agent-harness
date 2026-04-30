@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from langchain_core.runnables import RunnableConfig
 
@@ -121,22 +121,25 @@ class TestExecutorFromConfig:
         return node
 
     def test_missing_config_raises_runtime_error(self):
-        from graph_agent.core.graph_builder import _executor_from_config
         import pytest
+
+        from graph_agent.core.graph_builder import _executor_from_config
 
         with pytest.raises(RuntimeError, match="_phase_executor"):
             _executor_from_config(None)  # type: ignore[arg-type]
 
     def test_config_without_configurable_key_raises(self):
-        from graph_agent.core.graph_builder import _executor_from_config
         import pytest
+
+        from graph_agent.core.graph_builder import _executor_from_config
 
         with pytest.raises(RuntimeError, match="_phase_executor"):
             _executor_from_config({})
 
     def test_configurable_missing_phase_executor_raises(self):
-        from graph_agent.core.graph_builder import _executor_from_config
         import pytest
+
+        from graph_agent.core.graph_builder import _executor_from_config
 
         with pytest.raises(RuntimeError, match="_phase_executor"):
             _executor_from_config({"configurable": {"thread_id": "x"}})

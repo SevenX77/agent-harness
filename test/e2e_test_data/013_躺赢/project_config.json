@@ -1,8 +1,0 @@
-{
-  "aspect_ratio": "9:16",
-  "resolution": "1080p",
-  "frame_rate": 24,
-  "visual_style": "live_action",
-  "visual_style_prompt": "",
-  "language": "zh-CN"
-}

@@ -9,7 +9,7 @@ from typing import Annotated, Any, Protocol
 
 from langchain.tools import BaseTool
 from langchain_core.tools import StructuredTool
-from pydantic import BeforeValidator, create_model, model_validator
+from pydantic import BaseModel, BeforeValidator, create_model, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ def _json_coerce(value: Any) -> Any:
 _JsonStr = BeforeValidator(_json_coerce)
 
 
-def _make_robust_schema(name: str, fields: dict[str, Any]) -> type:
+def _make_robust_schema(name: str, fields: dict[str, Any]) -> type[BaseModel]:
     """Create a schema that can unpack the raw_arguments JSON wrapper pattern."""
     normalized_fields: dict[str, Any] = {}
     for field_name, field_value in fields.items():
@@ -49,7 +49,7 @@ def _make_robust_schema(name: str, fields: dict[str, Any]) -> type:
     expected = set(normalized_fields)
     base = create_model(name, **normalized_fields)
 
-    class RobustSchema(base):  # type: ignore[valid-type]
+    class RobustSchema(base):  # type: ignore[misc,valid-type]  # create_model returns a runtime BaseModel subclass.
         @model_validator(mode="before")
         @classmethod
         def _unpack_raw_arguments(cls, data: Any) -> Any:

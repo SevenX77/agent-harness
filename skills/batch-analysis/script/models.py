@@ -30,3 +30,33 @@ class ContinuityWarning(BaseModel):
     suggested_fix: str | None = Field(
         default=None, description="建议修法（可选）"
     )
+
+
+class BatchAnalysisReport(BaseModel):
+    """Phase 3 M7 (PHASE3_DESIGN.md §3.3) — minimal schema for the three
+    batch-analysis LLM phases (``entity_and_characters``,
+    ``parallel_analysis``, ``continuity``).
+
+    These phases drive their real work through agent_tools that mutate
+    the ctx (``register_entity`` / ``analyze_*`` / ``check_continuity``
+    etc.), so historically ``finish_task`` was treated as a no-payload
+    "done" signal. After M7 every LLM phase that calls ``finish_task``
+    must carry a typed schema so the new ProtocolValidation+CognitiveFlow
+    pipeline drops the legacy ValidationMiddleware fallback. The schema
+    captures a concise narrative (``analysis_summary``), an enumerated
+    issue list (``identified_issues``), and a single-word execution
+    verdict (``status``) — enough structure for the LLM to acknowledge
+    its run completion without forcing a redesign of the per-phase
+    tool flow.
+    """
+
+    analysis_summary: str = Field(
+        description="批次分析的总结（自由文本，覆盖本阶段的核心判断）",
+    )
+    identified_issues: list[str] = Field(
+        default_factory=list,
+        description="本阶段识别出的问题清单，逐条说明（无问题时返回空列表）",
+    )
+    status: Literal["ok", "warning", "error"] = Field(
+        description="本阶段的整体执行状态：ok 全过 / warning 有可继续问题 / error 阻断",
+    )

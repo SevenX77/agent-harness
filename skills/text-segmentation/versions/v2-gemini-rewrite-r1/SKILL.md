@@ -1,4 +1,10 @@
 ---
+# TODO(phase-2-a1, archived): segment + review LLM phases declare a validator
+# without output_schema, which v1.1+ rejects as a compile-time contract violation
+# (see skill_validator._enforce_validator_requires_output_schema). This snapshot
+# is a frozen development baseline kept for benchmarking only — its `script/`
+# package is missing so it already fails to load (F-tool-path-not-found). Not
+# fixing here; the live SKILL at skills/text-segmentation/SKILL.md is compliant.
 schema_version: "2.0"
 name: text-segmentation
 description: >

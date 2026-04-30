@@ -135,7 +135,7 @@ class Callback:
     ) -> None:
         """Handle one ambiguity report."""
 
-    def on_event(self, event: "CallbackEvent") -> None:
+    def on_event(self, event: CallbackEvent) -> None:
         """Typed event sink — new-style entrypoint introduced by Task 3.5.
 
         The default implementation dispatches a :class:`CallbackEvent` member

@@ -31,12 +31,13 @@ Usage (CLI)::
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
+import shutil
 import threading
 import time
 import uuid
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -112,7 +113,7 @@ def run_skill(
     trace_dir: str | Path | None = None,
     thread_id: str | None = None,
     unattended: bool = False,
-    callbacks: list | None = None,
+    callbacks: list[Any] | None = None,
     artifact_saver: Any | None = None,
     initial_context: dict[str, Any] | None = None,
     cleanup_checkpoints_on_finish: bool = True,
@@ -167,7 +168,9 @@ def run_skill(
         if cached is None or _collect_skill_dependency_snapshot(cached[0]) != cached[1]:
             harness = load_workflow_from_md(str(skill_path), callbacks=callbacks)
             _harness_cache[cache_key] = (harness, _collect_skill_dependency_snapshot(harness))
-            logger.info("[Runner] Loaded SKILL: %s (%d phases)", skill_path.name, len(harness.phases))
+            logger.info(
+                "[Runner] Loaded SKILL: %s (%d phases)", skill_path.name, len(harness.phases)
+            )
         else:
             harness = cached[0]
             # Refresh callbacks while still holding _cache_lock to prevent
@@ -186,11 +189,15 @@ def run_skill(
             state_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(str(legacy_run_id), str(run_id_file))
             if not run_id_file.exists():
-                logger.error('[Runner] Checkpoint migration failed — copy did not produce %s', run_id_file)
+                logger.error(
+                    "[Runner] Checkpoint migration failed — copy did not produce %s", run_id_file
+                )
             else:
-                logger.info('[Runner] Migrated checkpoint from pipeline_state/ to graph_agent_state/')
+                logger.info(
+                    "[Runner] Migrated checkpoint from pipeline_state/ to graph_agent_state/"
+                )
         elif legacy_run_id.exists() and run_id_file.exists():
-            logger.info('[Runner] Both legacy and new checkpoint exist; using graph_agent_state/')
+            logger.info("[Runner] Both legacy and new checkpoint exist; using graph_agent_state/")
         if effective_thread_id is None and run_id_file.exists():
             saved_tid = run_id_file.read_text(encoding="utf-8").strip()
             if saved_tid:
@@ -255,7 +262,7 @@ def run_skill(
                 )
                 # Tier 1 T-B7: emit a visible marker so the trace records
                 # that resume is no longer possible from this thread.
-                try:
+                with contextlib.suppress(Exception):
                     from ..callbacks.events import _EventBase  # noqa: F401
 
                     # We purposefully don't depend on a dedicated event
@@ -263,8 +270,6 @@ def run_skill(
                     # optional (降级到 P2). A log INFO is enough for ops;
                     # Studio's "thread archived" UI state can derive from
                     # RunEnded(status=completed) + absence of checkpoint.
-                except Exception:  # noqa: BLE001
-                    pass
         except Exception as exc:  # noqa: BLE001
             raise PersistenceError(
                 f"checkpoint cleanup failed: {exc}",
@@ -274,11 +279,11 @@ def run_skill(
                 },
             ) from exc
 
-    ctx = final_state["context"]
-    metrics = final_state.get("metrics", {})
+    ctx = final_state["data"].model_dump()
+    metrics = final_state["flow"].metrics
 
     # Extract trace path
-    trace_path = ctx.pop("_trace_path", None)
+    trace_path = final_state["flow"].trace_path
 
     logger.info(
         "[Runner] Completed: wall=%.1fs, in_tokens=%d, out_tokens=%d",
@@ -306,7 +311,7 @@ def clear_cache() -> None:
 # ---------------------------------------------------------------------------
 
 
-def main():
+def main() -> None:
     """CLI entry point for running a SKILL.md."""
     import argparse
 
@@ -317,7 +322,9 @@ def main():
     parser.add_argument("--inputs", type=str, default=None, help="JSON string of runtime inputs")
     parser.add_argument("--inputs-file", type=str, default=None, help="JSON file of runtime inputs")
     parser.add_argument("--output", type=str, default=None, help="Output directory")
-    parser.add_argument("--thread-id", type=str, default=None, help="Thread ID for checkpoint resume")
+    parser.add_argument(
+        "--thread-id", type=str, default=None, help="Thread ID for checkpoint resume"
+    )
     parser.add_argument(
         "--unattended",
         action="store_true",
@@ -336,15 +343,35 @@ def main():
         datefmt="%H:%M:%S",
     )
 
-    # Load .env
+    # MVP-3 T10: route framework startup through ``Bootstrap`` instead of
+    # leaking ``load_dotenv`` and reasoning_patch side effects across
+    # ``runner.main``. ``Bootstrap.apply_patches`` is the single
+    # documented entry point for monkey-patches; ``load_settings``
+    # produces an explicit ``Settings`` snapshot so downstream
+    # consumers can migrate off ``os.environ.get`` reads incrementally.
+    # ``load_dotenv`` is kept as a transitional sibling step — it lives
+    # outside ``Bootstrap`` because the ``.env`` file is a CLI/runtime
+    # convention, not a framework patch. Once every consumer reads from
+    # ``Settings``, the dotenv call moves into ``Bootstrap`` and exits
+    # ``runner.main`` entirely (deferred to MVP-5 工程门禁).
+    from ..bootstrap import Bootstrap
+
+    bootstrap = Bootstrap()
+    bootstrap.apply_patches()
+
+    # Load .env (transitional; reads cli-side .env so Settings.from_env
+    # sees user-supplied API keys).
     try:
         from dotenv import load_dotenv
+
         load_dotenv()
     except ImportError as exc:
         raise LoaderError(
             f"required import failed: {exc}",
             context={"module": "dotenv"},
         ) from exc
+
+    bootstrap.load_settings()
 
     # Parse inputs
     inputs: dict[str, Any] = {}
@@ -365,11 +392,15 @@ def main():
 
     logger.info(
         "[Runner] Result: %s",
-        json.dumps({
-            "wall_time_sec": result["wall_time_sec"],
-            "metrics": result["metrics"],
-            "trace_path": result.get("trace_path"),
-        }, indent=2, default=str),
+        json.dumps(
+            {
+                "wall_time_sec": result["wall_time_sec"],
+                "metrics": result["metrics"],
+                "trace_path": result.get("trace_path"),
+            },
+            indent=2,
+            default=str,
+        ),
     )
 
 

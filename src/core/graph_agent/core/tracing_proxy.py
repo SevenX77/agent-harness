@@ -43,7 +43,7 @@ class TracingClientProxy:
     def __init__(
         self,
         wrapped_client: Any,
-        callbacks: "Iterable[Callback]",
+        callbacks: Iterable[Callback],
         *,
         phase_name: str,
         llm_role: str | None = None,

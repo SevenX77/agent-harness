@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import uuid
 from pathlib import Path
+from typing import Any, TypedDict, cast
 
 from .providers import err, ok, run_async
 
@@ -18,6 +19,11 @@ logger = logging.getLogger(__name__)
 _VOLCENGINE_TTS_URL = "https://openspeech.bytedance.com/api/v1/tts"
 _VOLCENGINE_MAX_BYTES = 1024
 _VOLCENGINE_SUCCESS_CODE = 3000
+
+
+class _TTSResult(TypedDict):
+    provider: str
+    duration_ms: int
 
 
 def _split_at_sentence_boundaries(
@@ -91,7 +97,7 @@ def _concat_audio_files(paths: list[str], output: str) -> None:
         Path(list_path).unlink(missing_ok=True)
 
 
-async def _tts_volcengine(text: str, output_path: str) -> dict:
+async def _tts_volcengine(text: str, output_path: str) -> _TTSResult:
     import httpx
 
     app_id = os.getenv("VOLCENGINE_TTS_APP_ID", "")
@@ -132,7 +138,7 @@ async def _tts_volcengine(text: str, output_path: str) -> dict:
             },
         )
         resp.raise_for_status()
-        data = resp.json()
+        data = cast(dict[str, Any], resp.json())
     if data.get("code") != _VOLCENGINE_SUCCESS_CODE:
         raise RuntimeError(
             f"Volcengine TTS error code={data.get('code')}: "
@@ -147,7 +153,7 @@ async def _tts_volcengine(text: str, output_path: str) -> dict:
     return {"provider": "volcengine", "duration_ms": duration_ms}
 
 
-async def _tts_edge(text: str, output_path: str) -> dict:
+async def _tts_edge(text: str, output_path: str) -> _TTSResult:
     try:
         import edge_tts  # type: ignore[import-not-found]
     except ImportError as exc:
@@ -160,7 +166,7 @@ async def _tts_edge(text: str, output_path: str) -> dict:
     return {"provider": "edge_tts", "duration_ms": duration_ms}
 
 
-async def _tts_single(text: str, output_path: str) -> dict:
+async def _tts_single(text: str, output_path: str) -> _TTSResult:
     """Synthesize one chunk with Volcengine -> Edge TTS fallback."""
     try:
         return await _tts_volcengine(text, output_path)
@@ -171,7 +177,7 @@ async def _tts_single(text: str, output_path: str) -> dict:
     return await _tts_edge(text, output_path)
 
 
-async def _tts_long(text: str, output_path: str) -> dict:
+async def _tts_long(text: str, output_path: str) -> _TTSResult:
     """Synthesize long text: split -> synthesize chunks -> concat."""
     chunks = _split_at_sentence_boundaries(text)
     if len(chunks) <= 1:

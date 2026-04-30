@@ -33,12 +33,15 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
+_BaseMessage: type[Any] | None
 try:
     # Lazy import so callbacks/serialize.py does not force a langchain load
     # on installs that never touch LangChain message objects (e.g. tests).
-    from langchain_core.messages import BaseMessage
+    from langchain_core.messages import BaseMessage as _ImportedBaseMessage
 except ImportError:  # pragma: no cover — exercised only without langchain
-    BaseMessage = ()  # type: ignore[assignment]
+    _BaseMessage = None
+else:
+    _BaseMessage = _ImportedBaseMessage
 
 
 _UNSUPPORTED_FALLBACK = "unsupported_type"
@@ -90,7 +93,7 @@ def to_jsonable_dict(data: Any, *, _depth: int = 0) -> Any:
         return [to_jsonable_dict(item, _depth=_depth + 1) for item in ordered]
 
     # LangChain message objects — preserve role / content structure
-    if BaseMessage and isinstance(data, BaseMessage):  # type: ignore[arg-type]
+    if _BaseMessage is not None and isinstance(data, _BaseMessage):
         return {
             "_type": "BaseMessage",
             "role": getattr(data, "type", None) or getattr(data, "role", None),

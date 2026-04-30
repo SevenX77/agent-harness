@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]  # PyYAML runtime dependency has no local stubs.
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +112,7 @@ class CircuitBreakerConfig:
     error_threshold: int = 30
     window_seconds: int = 1800
     # Per-provider overrides keyed on provider_code (e.g. OC_CL).
-    per_provider: dict[str, "CircuitBreakerConfig"] = field(default_factory=dict)
+    per_provider: dict[str, CircuitBreakerConfig] = field(default_factory=dict)
 
 
 @dataclass
@@ -238,7 +238,7 @@ class RoleConfigData:
 # ── YAML 解析 ─────────────────────────────────────────────────────────────────
 
 
-def _parse_models(raw: dict) -> dict[str, ModelDef]:
+def _parse_models(raw: dict[str, Any] | None) -> dict[str, ModelDef]:
     result: dict[str, ModelDef] = {}
     for code, data in (raw or {}).items():
         if not isinstance(data, dict):
@@ -263,7 +263,7 @@ def _parse_models(raw: dict) -> dict[str, ModelDef]:
     return result
 
 
-def _parse_providers(raw: dict) -> dict[str, ProviderDef]:
+def _parse_providers(raw: dict[str, Any] | None) -> dict[str, ProviderDef]:
     result: dict[str, ProviderDef] = {}
     for code, data in (raw or {}).items():
         if not isinstance(data, dict):
@@ -285,7 +285,10 @@ def _parse_providers(raw: dict) -> dict[str, ProviderDef]:
     return result
 
 
-def _parse_roles(raw: dict, models: dict[str, ModelDef]) -> dict[str, RoleDef]:
+def _parse_roles(
+    raw: dict[str, Any] | None,
+    models: dict[str, ModelDef],
+) -> dict[str, RoleDef]:
     result: dict[str, RoleDef] = {}
     for name, data in (raw or {}).items():
         if not isinstance(data, dict):
@@ -294,10 +297,7 @@ def _parse_roles(raw: dict, models: dict[str, ModelDef]) -> dict[str, RoleDef]:
 
         models_map: dict[str, RoleModelEntry] = {}
         for mc, mdata in (data.get("models") or {}).items():
-            if isinstance(mdata, dict):
-                providers_list = mdata.get("providers", [])
-            else:
-                providers_list = []
+            providers_list = mdata.get("providers", []) if isinstance(mdata, dict) else []
             models_map[mc] = RoleModelEntry(
                 model_code=mc,
                 provider_codes=list(providers_list),
@@ -383,7 +383,7 @@ def _resolve_config_path() -> Path | None:
 
 def _build_builtin_default_config() -> RoleConfigData:
     """Return a minimal built-in fallback config for portable imports."""
-    raw = {
+    raw: dict[str, Any] = {
         "models": {
             "OPENAI_DEFAULT": {
                 "name": "OpenAI Default",

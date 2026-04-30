@@ -1,0 +1,11 @@
+role=test_opus47_ws
+timestamp=2026-04-30T01:25:37.404256+00:00
+duration_seconds=48.16
+status=OK
+messages_count=14
+data_keys=['business_data_md', 'chapter_content', 'chapter_lines', 'chapter_number', 'chapter_with_line_numbers', 'diagnostics_md', 'output_dir', 'parsed_segments', 'raw_segmentation', 'reasoning', 'schema_validation', 'segmentation_result', 'segments']
+current_phase=review
+io_errors=[]
+validation_warnings=[]
+retry_counts={}
+metrics={'total_input_tokens': 35565, 'total_output_tokens': 2751}

@@ -316,6 +316,8 @@ def test_generate_passes_runtime_kwargs_and_reasoning_flag() -> None:
     assert dispatch.call_args.args[2] == 33
     assert dispatch.call_args.args[3] == 0.15
     assert dispatch.call_args.kwargs["reasoning"] is True
+    assert dispatch.call_args.kwargs["tools"] is None
+    assert dispatch.call_args.kwargs["tool_choice"] is None
 
 
 def test_generate_invalid_runtime_kwargs_fall_back_to_defaults() -> None:
@@ -454,7 +456,16 @@ def test_bind_tools_returns_runnable_with_tools() -> None:
 
     assert isinstance(bound, Runnable)
     assert isinstance(bound, GatewayChatModel)
-    assert bound.bound_tools == ({"name": "finish_task"},)
+    assert bound.bound_tools == (
+        {
+            "type": "function",
+            "function": {
+                "name": "finish_task",
+                "description": "",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+    )
     assert bound.tool_choice == "finish_task"
     assert bound.tool_kwargs == {"strict": True}
 
@@ -485,6 +496,29 @@ def test_bind_tools_invoke_with_tool_calls() -> None:
     assert message.response_metadata["finish_reason"] == "tool_calls"
 
 
+def test_bind_tools_forwards_tool_payload_to_dispatch() -> None:
+    rp = _rp("P1", "model-a")
+    model = _model_instance(rp)
+
+    with (
+        patch.object(LLMClientManager, "_probe_provider", return_value=True),
+        patch.object(LLMClientManager, "_dispatch_provider_call", return_value=_response("ok")) as dispatch,
+    ):
+        model.bind_tools([{"name": "finish_task"}], tool_choice="finish_task").invoke("finish")
+
+    assert dispatch.call_args.kwargs["tools"] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "finish_task",
+                "description": "",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+    ]
+    assert dispatch.call_args.kwargs["tool_choice"] == "finish_task"
+
+
 def test_langchain_message_conversion_preserves_roles_and_tool_fields() -> None:
     ai_message = AIMessage(
         content="assistant",
@@ -504,7 +538,13 @@ def test_langchain_message_conversion_preserves_roles_and_tool_fields() -> None:
     assert converted[0] == {"role": "system", "content": "rules"}
     assert converted[1] == {"role": "user", "content": "hello", "name": "user_name"}
     assert converted[2]["role"] == "assistant"
-    assert converted[2]["tool_calls"] == ai_message.tool_calls
+    assert converted[2]["tool_calls"] == [
+        {
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "finish_task", "arguments": "{}"},
+        }
+    ]
     assert converted[2]["reasoning_content"] == "why"
     assert converted[3] == {"role": "tool", "content": "tool result", "tool_call_id": "call_1"}
 

@@ -7,6 +7,7 @@ M2/M3 wire a ``GatewayChatModel`` on top of this module.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 MessageDict = dict[str, object]
 CallResult = dict[str, object]
 UsageStats = dict[str, int]
+ToolSchema = dict[str, object]
 
 _RETRYABLE_WAVESPEED_STATUS = {502, 503, 504}
 _TRUNCATED_FINISH_REASONS = {
@@ -255,14 +257,22 @@ class LLMClientManager:
         messages: list[MessageDict],
         max_tokens: int,
         temperature: float,
+        *,
+        tools: list[ToolSchema] | None = None,
+        tool_choice: str | None = None,
     ) -> CallResult:
         """Call an OpenAI-compatible chat completion endpoint."""
-        response = client.chat.completions.create(
-            model=model,
-            messages=cast(Iterable[ChatCompletionMessageParam], messages),
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
+        kwargs: dict[str, object] = {
+            "model": model,
+            "messages": cast(Iterable[ChatCompletionMessageParam], messages),
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        if tools:
+            kwargs["tools"] = tools
+        if tool_choice:
+            kwargs["tool_choice"] = tool_choice
+        response = cast(Callable[..., object], client.chat.completions.create)(**kwargs)
         usage_obj = _field(response, "usage")
         choice = _first_sequence_item(_field(response, "choices"))
         message = _field(choice, "message")
@@ -272,7 +282,7 @@ class LLMClientManager:
         total_tokens = _int_field(usage_obj, "total_tokens")
         if total_tokens == 0:
             total_tokens = prompt_tokens + completion_tokens
-        return {
+        result: CallResult = {
             "content": content,
             "usage": {
                 "prompt_tokens": prompt_tokens,
@@ -281,6 +291,10 @@ class LLMClientManager:
             },
             "finish_reason": _optional_string_field(choice, "finish_reason"),
         }
+        tool_calls = _openai_tool_calls(message)
+        if tool_calls:
+            result["tool_calls"] = tool_calls
+        return result
 
     @classmethod
     def _call_anthropic_compatible(
@@ -292,6 +306,7 @@ class LLMClientManager:
         temperature: float,
         *,
         reasoning: bool = False,
+        tools: list[ToolSchema] | None = None,
     ) -> CallResult:
         """Call an Anthropic-compatible messages endpoint."""
         system_text, api_messages = _split_anthropic_messages(messages)
@@ -302,6 +317,9 @@ class LLMClientManager:
         }
         if system_text:
             kwargs["system"] = system_text
+        anthropic_tools = _anthropic_tools_from_openai(tools)
+        if anthropic_tools:
+            kwargs["tools"] = anthropic_tools
 
         if reasoning:
             kwargs["temperature"] = 1.0
@@ -326,7 +344,7 @@ class LLMClientManager:
         usage_obj = _field(response, "usage")
         prompt_tokens = _int_field(usage_obj, "input_tokens")
         completion_tokens = _int_field(usage_obj, "output_tokens")
-        return {
+        result: CallResult = {
             "content": _anthropic_content_text(_field(response, "content")),
             "usage": {
                 "prompt_tokens": prompt_tokens,
@@ -335,6 +353,10 @@ class LLMClientManager:
             },
             "finish_reason": _optional_string_field(response, "stop_reason"),
         }
+        tool_calls = _anthropic_tool_calls(_field(response, "content"))
+        if tool_calls:
+            result["tool_calls"] = tool_calls
+        return result
 
     @classmethod
     def _call_wavespeed_any_llm(
@@ -346,6 +368,8 @@ class LLMClientManager:
         temperature: float,
         *,
         reasoning: bool,
+        tools: list[ToolSchema] | None = None,
+        tool_choice: str | None = None,
     ) -> CallResult:
         """Call WaveSpeed's Any-LLM endpoint with 5xx backoff retries."""
         api_key = cls._resolve_api_key(provider_def)
@@ -370,6 +394,10 @@ class LLMClientManager:
         }
         if system_prompt:
             payload["system_prompt"] = system_prompt
+        if tools:
+            payload["tools"] = tools
+        if tool_choice:
+            payload["tool_choice"] = tool_choice
 
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         response: httpx.Response | None = None
@@ -430,6 +458,8 @@ class LLMClientManager:
         temperature: float,
         *,
         reasoning: bool = False,
+        tools: list[ToolSchema] | None = None,
+        tool_choice: str | None = None,
     ) -> CallResult:
         """Route a provider call by configured provider type."""
         pdef = rp.provider_def
@@ -443,6 +473,8 @@ class LLMClientManager:
                     messages,
                     token_budget,
                     temperature,
+                    tools=tools,
+                    tool_choice=tool_choice,
                 )
 
             if pdef.type == "anthropic_compatible":
@@ -454,9 +486,21 @@ class LLMClientManager:
                     token_budget,
                     temperature,
                     reasoning=reasoning,
+                    tools=tools,
                 )
 
             if pdef.type == "wavespeed_any_llm":
+                if tools:
+                    client = cls._get_openai_client(rp.provider_code, pdef)
+                    return cls._call_openai_compatible(
+                        client,
+                        rp.model_name,
+                        messages,
+                        token_budget,
+                        temperature,
+                        tools=tools,
+                        tool_choice=tool_choice,
+                    )
                 return cls._call_wavespeed_any_llm(
                     pdef,
                     messages,
@@ -464,6 +508,8 @@ class LLMClientManager:
                     token_budget,
                     temperature,
                     reasoning=reasoning,
+                    tools=tools,
+                    tool_choice=tool_choice,
                 )
 
             raise ValueError(f"Unknown provider type: {pdef.type}")
@@ -607,6 +653,77 @@ def _anthropic_content_text(value: object) -> str:
         if block_type == "text":
             chunks.append(_string_field(block, "text"))
     return "".join(chunks)
+
+
+def _openai_tool_calls(message: object) -> list[ToolSchema]:
+    raw = _field(message, "tool_calls")
+    if not isinstance(raw, Sequence) or isinstance(raw, str | bytes):
+        return []
+    calls: list[ToolSchema] = []
+    for call in raw:
+        function = _field(call, "function")
+        name = _string_field(function, "name")
+        arguments = _string_field(function, "arguments")
+        if not name:
+            continue
+        calls.append(
+            {
+                "id": _optional_string_field(call, "id") or "",
+                "type": _optional_string_field(call, "type") or "function",
+                "function": {"name": name, "arguments": arguments},
+            }
+        )
+    return calls
+
+
+def _anthropic_tool_calls(value: object) -> list[ToolSchema]:
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+        return []
+    calls: list[ToolSchema] = []
+    for block in value:
+        if _field(block, "type") != "tool_use":
+            continue
+        name = _string_field(block, "name")
+        if not name:
+            continue
+        calls.append(
+            {
+                "id": _optional_string_field(block, "id") or "",
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": json.dumps(_field(block, "input") or {}),
+                },
+            }
+        )
+    return calls
+
+
+def _anthropic_tools_from_openai(
+    tools: list[ToolSchema] | None,
+) -> list[ToolSchema]:
+    if not tools:
+        return []
+    converted: list[ToolSchema] = []
+    for tool in tools:
+        function = tool.get("function")
+        if not isinstance(function, Mapping):
+            continue
+        name = function.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        input_schema = function.get("parameters")
+        if not isinstance(input_schema, Mapping):
+            input_schema = {"type": "object", "properties": {}}
+        item: ToolSchema = {
+            "name": name,
+            "input_schema": dict(input_schema),
+        }
+        description = function.get("description")
+        if isinstance(description, str) and description:
+            item["description"] = description
+        converted.append(item)
+    return converted
 
 
 __all__ = ["LLMClientManager"]

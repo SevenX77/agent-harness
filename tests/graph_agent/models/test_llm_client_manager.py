@@ -276,6 +276,52 @@ def test_call_openai_compatible_normal() -> None:
     }
 
 
+def test_call_openai_compatible_forwards_and_parses_tool_calls() -> None:
+    client = MagicMock()
+    client.chat.completions.create.return_value = SimpleNamespace(
+        usage=SimpleNamespace(prompt_tokens=2, completion_tokens=1, total_tokens=3),
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content="",
+                    tool_calls=[
+                        SimpleNamespace(
+                            id="call_1",
+                            type="function",
+                            function=SimpleNamespace(
+                                name="finish_task",
+                                arguments='{"ok": true}',
+                            ),
+                        )
+                    ],
+                ),
+                finish_reason="tool_calls",
+            )
+        ],
+    )
+
+    result = LLMClientManager._call_openai_compatible(
+        client,
+        "model",
+        [{"role": "user", "content": "hello"}],
+        128,
+        0.2,
+        tools=[{"type": "function", "function": {"name": "finish_task"}}],
+        tool_choice="finish_task",
+    )
+
+    kwargs = client.chat.completions.create.call_args.kwargs
+    assert kwargs["tools"] == [{"type": "function", "function": {"name": "finish_task"}}]
+    assert kwargs["tool_choice"] == "finish_task"
+    assert result["tool_calls"] == [
+        {
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "finish_task", "arguments": '{"ok": true}'},
+        }
+    ]
+
+
 def test_call_openai_compatible_handles_missing_usage() -> None:
     client = MagicMock()
     client.chat.completions.create.return_value = SimpleNamespace(
@@ -338,6 +384,56 @@ def test_call_anthropic_compatible_normal() -> None:
     kwargs = client.messages.create.call_args.kwargs
     assert kwargs["system"] == "rules"
     assert kwargs["temperature"] == 0.4
+
+
+def test_call_anthropic_compatible_forwards_and_parses_tool_calls() -> None:
+    client = MagicMock()
+    client.messages.create.return_value = SimpleNamespace(
+        content=[
+            SimpleNamespace(
+                type="tool_use",
+                id="toolu_1",
+                name="finish_task",
+                input={"ok": True},
+            )
+        ],
+        usage=SimpleNamespace(input_tokens=5, output_tokens=2),
+        stop_reason="tool_use",
+    )
+
+    result = LLMClientManager._call_anthropic_compatible(
+        client,
+        "claude",
+        [{"role": "user", "content": "hello"}],
+        128,
+        0.4,
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "finish_task",
+                    "description": "Finish",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ],
+    )
+
+    kwargs = client.messages.create.call_args.kwargs
+    assert kwargs["tools"] == [
+        {
+            "name": "finish_task",
+            "input_schema": {"type": "object", "properties": {}},
+            "description": "Finish",
+        }
+    ]
+    assert result["tool_calls"] == [
+        {
+            "id": "toolu_1",
+            "type": "function",
+            "function": {"name": "finish_task", "arguments": '{"ok": true}'},
+        }
+    ]
 
 
 def test_call_anthropic_compatible_thinking_adaptive_fallback() -> None:
@@ -614,6 +710,31 @@ def test_dispatch_provider_call_routes_wavespeed() -> None:
 
     assert result["content"] == "ws ok"
     call.assert_called_once()
+
+
+def test_dispatch_provider_call_routes_wavespeed_tools_through_openai_endpoint() -> None:
+    client = MagicMock()
+    client.chat.completions.create.return_value = _openai_response("tool ok")
+
+    with (
+        patch.object(LLMClientManager, "_get_openai_client", return_value=client) as get_client,
+        patch.object(LLMClientManager, "_call_wavespeed_any_llm") as wavespeed_call,
+    ):
+        result = LLMClientManager._dispatch_provider_call(
+            _rp("WS_LLM", "wavespeed_any_llm"),
+            [{"role": "user", "content": "hello"}],
+            64,
+            0.7,
+            tools=[{"type": "function", "function": {"name": "finish_task"}}],
+            tool_choice="finish_task",
+        )
+
+    assert result["content"] == "tool ok"
+    get_client.assert_called_once()
+    wavespeed_call.assert_not_called()
+    assert client.chat.completions.create.call_args.kwargs["tools"] == [
+        {"type": "function", "function": {"name": "finish_task"}}
+    ]
 
 
 def test_dispatch_provider_call_rejects_unknown_provider() -> None:

@@ -1,11 +1,12 @@
 """LangChain-compatible gateway adapter backed by ``LLMClientManager``.
 
-Phase 4 M2 adds the adapter only.  Existing execution code continues to use
-``ModelResolver`` until the M3 cutover wires this model into live traffic.
+Phase 4 M2 added the adapter; M3 wires ``ModelResolver`` to return it for
+live graph execution while preserving LangChain's ``BaseChatModel`` surface.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, cast
@@ -21,6 +22,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from openai import APIConnectionError, APITimeoutError, BadRequestError, InternalServerError
 from pydantic import ConfigDict, Field
 
@@ -61,7 +63,8 @@ class GatewayChatModel(BaseChatModel):
     phase_name: str | None = None
     event_callbacks: tuple[Callback, ...] = Field(default_factory=tuple)
     probe_before_call: bool = True
-    bound_tools: tuple[object, ...] = Field(default_factory=tuple)
+    thinking_enabled: bool | None = None
+    bound_tools: tuple[dict[str, object], ...] = Field(default_factory=tuple)
     tool_choice: str | None = None
     tool_kwargs: dict[str, object] = Field(default_factory=dict)
 
@@ -75,7 +78,8 @@ class GatewayChatModel(BaseChatModel):
         callbacks: Sequence[Callback] = (),
         phase_name: str | None = None,
         probe_before_call: bool = True,
-        bound_tools: Sequence[object] = (),
+        thinking_enabled: bool | None = None,
+        bound_tools: Sequence[Mapping[str, object]] = (),
         tool_choice: str | None = None,
         tool_kwargs: Mapping[str, object] | None = None,
         **kwargs: Any,
@@ -88,6 +92,7 @@ class GatewayChatModel(BaseChatModel):
             "phase_name": phase_name,
             "event_callbacks": tuple(callbacks),
             "probe_before_call": probe_before_call,
+            "thinking_enabled": thinking_enabled,
             "bound_tools": tuple(bound_tools),
             "tool_choice": tool_choice,
             "tool_kwargs": dict(tool_kwargs or {}),
@@ -150,8 +155,14 @@ class GatewayChatModel(BaseChatModel):
                     _float_kwarg(kwargs.get("temperature"), self.temperature),
                     reasoning=_bool_kwarg(
                         kwargs.get("reasoning"),
-                        candidate.model_def.reasoning,
+                        (
+                            self.thinking_enabled
+                            if self.thinking_enabled is not None
+                            else candidate.model_def.reasoning
+                        ),
                     ),
+                    tools=list(self.bound_tools) or None,
+                    tool_choice=self.tool_choice,
                 )
                 self._record_usage_if_needed(candidate.provider_code, before_calls, response)
                 logger.info(
@@ -194,7 +205,8 @@ class GatewayChatModel(BaseChatModel):
             callbacks=self.event_callbacks,
             phase_name=self.phase_name,
             probe_before_call=self.probe_before_call,
-            bound_tools=tuple(tools),
+            thinking_enabled=self.thinking_enabled,
+            bound_tools=tuple(_normalise_tool(tool) for tool in tools),
             tool_choice=tool_choice,
             tool_kwargs={key: cast(object, value) for key, value in kwargs.items()},
             name=self.name,
@@ -338,6 +350,22 @@ def _additional_kwargs_from_response(response: Mapping[str, object]) -> dict[str
     return additional_kwargs
 
 
+def _normalise_tool(tool: ToolSpec) -> dict[str, object]:
+    if isinstance(tool, Mapping):
+        if tool.get("type") == "function":
+            return {str(key): value for key, value in tool.items()}
+        if "name" in tool:
+            return {
+                "type": "function",
+                "function": {
+                    "name": str(tool["name"]),
+                    "description": str(tool.get("description", "")),
+                    "parameters": tool.get("parameters", {"type": "object", "properties": {}}),
+                },
+            }
+    return cast(dict[str, object], convert_to_openai_tool(tool))
+
+
 def _langchain_messages_to_dict(messages: Sequence[BaseMessage]) -> list[MessageDict]:
     converted: list[MessageDict] = []
     for message in messages:
@@ -352,19 +380,41 @@ def _langchain_messages_to_dict(messages: Sequence[BaseMessage]) -> list[Message
         if isinstance(tool_call_id, str):
             item["tool_call_id"] = tool_call_id
 
-        tool_calls = getattr(message, "tool_calls", None)
-        if tool_calls:
-            item["tool_calls"] = cast(object, tool_calls)
-
         reasoning_content = message.additional_kwargs.get("reasoning_content")
         if reasoning_content is not None:
             item["reasoning_content"] = reasoning_content
 
         raw_tool_calls = message.additional_kwargs.get("tool_calls")
-        if raw_tool_calls is not None and "tool_calls" not in item:
+        if raw_tool_calls is not None:
             item["tool_calls"] = raw_tool_calls
+        else:
+            tool_calls = getattr(message, "tool_calls", None)
+            if tool_calls:
+                item["tool_calls"] = _langchain_tool_calls_to_openai(tool_calls)
 
         converted.append(item)
+    return converted
+
+
+def _langchain_tool_calls_to_openai(tool_calls: Sequence[object]) -> list[dict[str, object]]:
+    converted: list[dict[str, object]] = []
+    for call in tool_calls:
+        if not isinstance(call, Mapping):
+            continue
+        name = call.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        args = call.get("args")
+        converted.append(
+            {
+                "id": str(call.get("id") or ""),
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": args if isinstance(args, str) else json.dumps(args or {}),
+                },
+            }
+        )
     return converted
 
 

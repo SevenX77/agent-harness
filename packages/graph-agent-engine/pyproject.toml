@@ -1,0 +1,79 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "graph-agent-engine"
+version = "0.1.0"
+description = "GraphAgent: SKILL.md-driven multi-phase workflow engine (extracted from agent-harness for downstream projects like video-analysis)"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+readme = "README.md"
+authors = [{ name = "agent-harness contributors" }]
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+# Version pins kept in sync with /pyproject.toml at repo root. The upper bounds
+# are mandatory (not cosmetic) for langchain/langgraph compatibility — see the
+# extensive comments in the root pyproject.toml.
+dependencies = [
+    "langchain>=1.2.3,<1.2.11",
+    "langchain-core>=1.3.1,<1.4.0",
+    "langchain-anthropic>=1.3.4,<1.5.0",
+    "langchain-deepseek>=1.0.1,<1.1.0",
+    "langchain-openai>=1.1.7,<1.3.0",
+    "langgraph>=1.0.10,<1.1.0",
+    "langgraph-prebuilt>=1.0.6,<1.0.9",
+    "langgraph-checkpoint>=4.0.0,<5.0.0",
+    "langgraph-checkpoint-sqlite>=3.0.3,<4.0.0",
+    "pydantic>=2.12.5,<3.0.0",
+    "pyyaml>=6.0.3,<7.0.0",
+    "ruamel.yaml>=0.18.0,<0.19.0",
+    "httpx>=0.28.0,<0.29.0",
+    "anthropic>=0.96.0,<1.0.0",
+    "openai>=2.0.0,<3.0.0",
+    "markdownify>=1.2.2,<2.0.0",
+    "readabilipy>=0.3.0,<1.0.0",
+    "python-dotenv>=1.0.0,<2.0.0",
+]
+
+[project.optional-dependencies]
+# Gemini (recommended for video understanding via tools/understand_video.py)
+google = ["langchain-google-genai>=2.0", "google-genai>=1.0"]
+# Edge TTS fallback for synthesize_speech tool
+tts = ["edge-tts>=6.0"]
+# Convenience meta
+all = ["graph-agent-engine[google,tts]"]
+
+[project.scripts]
+graph-agent = "graph_agent.core.runner:main"
+
+[project.urls]
+Homepage = "https://github.com/sevenx/agent-harness"
+Documentation = "https://github.com/sevenx/agent-harness/tree/main/src/core/graph_agent"
+
+# ---------------------------------------------------------------------------
+# Hatch build target.
+#
+# Source layout: graph_agent/ is a SYMLINK to ../../src/core/graph_agent/ so
+# that hatchling sees a normal local package without any `..` path tricks.
+# This keeps build deterministic and lets us bundle the engine without
+# depending on the studio-backend/app target that the root pyproject.toml
+# also includes.
+#
+# When Task 7.6 (physical move to packages/graph-agent/) lands upstream, the
+# symlink can be replaced with the real source tree and this file stays the
+# same.
+# ---------------------------------------------------------------------------
+[tool.hatch.build.targets.wheel]
+packages = ["graph_agent"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"graph_agent/py.typed" = "graph_agent/py.typed"
+
+[tool.hatch.build.targets.sdist]
+include = ["graph_agent/", "pyproject.toml", "README.md"]

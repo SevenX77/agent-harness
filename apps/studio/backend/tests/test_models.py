@@ -11,6 +11,10 @@ from graph_agent.core.manifest import AgentProfile, AgentSkillDef
 def test_model_exports_cover_phase0_contracts() -> None:
     expected_exports = {
         "AuditResult",
+        "BatchRunItem",
+        "BatchRunRequest",
+        "BatchRunResponse",
+        "BatchRunStatus",
         "CompareResult",
         "CopilotDispatchReq",
         "CopilotResponse",

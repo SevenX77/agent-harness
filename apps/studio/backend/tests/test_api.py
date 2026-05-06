@@ -31,6 +31,7 @@ def test_openapi_registers_phase0_rest_surface(client: TestClient) -> None:
         "/api/skills/{skill_id}",
         "/api/skills/{skill_id}/lint",
         "/api/skills/{skill_id}/runs",
+        "/api/skills/{skill_id}/runs/batch-run",
         "/api/skills/{skill_id}/runs/{run_id}",
         "/api/skills/{skill_id}/runs/{run_id}/resume",
         "/api/skills/{skill_id}/terminal",
@@ -42,6 +43,7 @@ def test_openapi_registers_phase0_rest_surface(client: TestClient) -> None:
         "/api/skills/{skill_id}/runs/{run_id}/diff",
         "/api/skills/{skill_id}/copilot/dispatch",
         "/api/skills/{skill_id}/runs/{run_id}/audit",
+        "/api/batch/{batch_id}",
     }
 
     assert expected_paths <= set(schema["paths"])
@@ -237,6 +239,46 @@ def test_run_history_lists_details_and_deletes_runs(
     assert delete_response.status_code == 204
     assert not older_dir.exists()
     assert newer_dir.exists()
+
+
+def test_batch_run_starts_runs_from_test_inputs(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skills_dir, workspaces_dir = studio_roots
+    skill_dir = copy_skill(skills_dir, workspaces_dir, "text-segmentation")
+    inputs_dir = skill_dir / "test_inputs"
+    inputs_dir.mkdir()
+    for index in range(3):
+        (inputs_dir / f"case-{index}.json").write_text(
+            json.dumps({"input_text": f"hello {index}"}),
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(run_manager, "process_factory", InlineProcess)
+    monkeypatch.setattr(run_manager, "queue_factory", queue.Queue)
+    monkeypatch.setattr(run_manager, "worker", fake_run_worker)
+
+    inputs_response = client.get("/api/skills/text-segmentation/test_inputs")
+
+    assert inputs_response.status_code == 200
+    assert [item["id"] for item in inputs_response.json()] == ["case-0", "case-1", "case-2"]
+
+    batch_response = client.post(
+        "/api/skills/text-segmentation/runs/batch-run",
+        json={"input_ids": ["case-0", "case-1", "case-2"]},
+    )
+
+    assert batch_response.status_code == 202
+    body = batch_response.json()
+    assert body["batch_id"].startswith("batch-")
+    assert len(body["sub_run_ids"]) == 3
+
+    status = client.get(f"/api/batch/{body['batch_id']}").json()
+
+    assert status["total"] == 3
+    assert 0 <= status["completed"] <= 3
+    assert [item["input_id"] for item in status["items"]] == ["case-0", "case-1", "case-2"]
 
 
 def test_set_golden_and_compare_run_diff(

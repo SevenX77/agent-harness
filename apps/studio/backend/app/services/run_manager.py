@@ -22,7 +22,16 @@ from app.core.backends import get_metadata, get_storage
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
-from app.models.runs import RunDetail, RunListResponse, RunMetadata, RunRequest, TokensMetrics
+from app.models.runs import (
+    BatchRunItem,
+    BatchRunResponse,
+    BatchRunStatus,
+    RunDetail,
+    RunListResponse,
+    RunMetadata,
+    RunRequest,
+    TokensMetrics,
+)
 from app.services.skills import ensure_workspace_skill_dir, run_dir_for
 from graph_agent import run_skill
 from graph_agent.callbacks import Callback
@@ -59,6 +68,15 @@ class RunRecord:
     ws_queue: asyncio.Queue[dict[str, Any] | None] = field(default_factory=asyncio.Queue)
     events: list[dict[str, Any]] = field(default_factory=list)
     drain_task: asyncio.Task[None] | None = None
+
+
+@dataclass
+class BatchRecord:
+    """In-memory metadata for one batch run request."""
+
+    batch_id: str
+    skill_id: str
+    items: list[tuple[str, str]]
 
 
 class StudioQueueCallback(Callback):
@@ -253,6 +271,7 @@ class RunManager:
 
     def __init__(self) -> None:
         self._runs: dict[str, RunRecord] = {}
+        self._batches: dict[str, BatchRecord] = {}
         self._tasks: set[asyncio.Task[None]] = set()
         self.process_factory: Any = multiprocessing.Process
         self.queue_factory: Any = multiprocessing.Queue
@@ -305,6 +324,63 @@ class RunManager:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return metadata
+
+    async def start_batch_run(self, skill_id: str, input_ids: list[str]) -> BatchRunResponse:
+        ensure_workspace_skill_dir(skill_id)
+        if not input_ids:
+            raise ValueError("input_ids must not be empty")
+
+        batch_id = f"batch-{_new_run_id()}"
+        items: list[tuple[str, str]] = []
+        for input_id in input_ids:
+            inputs = _load_test_input(skill_id, input_id)
+            metadata = await self.start_run(skill_id, RunRequest(input_data=inputs))
+            items.append((input_id, metadata.run_id))
+
+        self._batches[batch_id] = BatchRecord(
+            batch_id=batch_id,
+            skill_id=skill_id,
+            items=items,
+        )
+        return BatchRunResponse(batch_id=batch_id, sub_run_ids=[run_id for _, run_id in items])
+
+    def get_batch_status(self, batch_id: str) -> BatchRunStatus:
+        record = self._batches.get(batch_id)
+        if record is None:
+            raise standard_http_exception(
+                "RESUME_CHECKPOINT_NOT_FOUND",
+                f"Batch not found: {batch_id}",
+                {"batch_id": batch_id},
+            )
+
+        items: list[BatchRunItem] = []
+        for input_id, run_id in record.items:
+            metadata = self._metadata_for(record.skill_id, run_id)
+            items.append(
+                BatchRunItem(
+                    input_id=input_id,
+                    run_id=run_id,
+                    status=metadata.status,
+                    started_at=metadata.started_at,
+                    metrics=metadata.metrics,
+                ),
+            )
+        completed = sum(1 for item in items if item.status != "running")
+        status: Literal["running", "success", "failed"]
+        if completed < len(items):
+            status = "running"
+        elif any(item.status == "failed" for item in items):
+            status = "failed"
+        else:
+            status = "success"
+        return BatchRunStatus(
+            batch_id=record.batch_id,
+            skill_id=record.skill_id,
+            status=status,
+            total=len(items),
+            completed=completed,
+            items=items,
+        )
 
     def list_runs(self, skill_id: str) -> RunListResponse:
         ensure_workspace_skill_dir(skill_id)
@@ -498,6 +574,30 @@ def _read_optional_json(path: Path) -> dict[str, Any] | None:
         return None
     loaded = json.loads(path.read_text(encoding="utf-8"))
     return loaded if isinstance(loaded, dict) else {"value": loaded}
+
+
+def test_inputs_dir_for(skill_id: str) -> Path:
+    return config.default_workspace_skills_dir() / skill_id / "test_inputs"
+
+
+def _load_test_input(skill_id: str, input_id: str) -> dict[str, Any]:
+    candidates = [
+        test_inputs_dir_for(skill_id) / input_id,
+        test_inputs_dir_for(skill_id) / f"{input_id}.json",
+    ]
+    input_path = next((path for path in candidates if path.is_file()), None)
+    if input_path is None:
+        raise standard_http_exception(
+            "RESUME_CHECKPOINT_NOT_FOUND",
+            f"Test input not found: {input_id}",
+            {"skill_id": skill_id, "input_id": input_id},
+        )
+    loaded = json.loads(input_path.read_text(encoding="utf-8"))
+    if isinstance(loaded, dict) and isinstance(loaded.get("input_data"), dict):
+        return dict(loaded["input_data"])
+    if isinstance(loaded, dict):
+        return loaded
+    raise ValueError(f"Test input must be a JSON object: {input_id}")
 
 
 def _metadata_with_input_summary(metadata_path: Path) -> RunMetadata:

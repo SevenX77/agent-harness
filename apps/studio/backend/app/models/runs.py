@@ -27,6 +27,12 @@ class RunRequest(BaseModel):
     paste_json: str | None = None
 
 
+class BatchRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    input_ids: list[str]
+
+
 class RunMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -42,6 +48,34 @@ class RunListResponse(BaseModel):
 
     runs: list[RunMetadata]
     total: int
+
+
+class BatchRunResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    batch_id: str
+    sub_run_ids: list[str]
+
+
+class BatchRunItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    input_id: str
+    run_id: str
+    status: Literal["running", "success", "failed"]
+    started_at: datetime
+    metrics: TokensMetrics | None = None
+
+
+class BatchRunStatus(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    batch_id: str
+    skill_id: str
+    status: Literal["running", "success", "failed"]
+    total: int
+    completed: int
+    items: list[BatchRunItem]
 
 
 class RunDetail(BaseModel):

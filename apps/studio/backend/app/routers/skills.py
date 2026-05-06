@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 
 from app.core.backends import get_auth_user_id, get_metadata, get_storage
 from app.core.exceptions import raise_not_implemented
@@ -16,6 +18,7 @@ from app.models.skills import (
     SkillSummary,
     UpdateSkillReq,
 )
+from app.models.validation import ValidateInputReq, ValidateInputResponse
 from app.services.skills import (
     create_new_skill,
     fork_skill,
@@ -23,6 +26,7 @@ from app.services.skills import (
     list_skill_summaries,
     update_skill_content,
 )
+from app.services.validator import ValidationHttpError, validate_skill_input_file
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
 
@@ -76,6 +80,25 @@ async def fork_existing_skill(
     metadata: MetadataStore = Depends(get_metadata),
 ) -> SkillSummary:
     return await fork_skill(user_id, skill_id, request.new_skill_id, storage, metadata)
+
+
+@router.post("/{skill_id}/validate_input", response_model=ValidateInputResponse)
+async def validate_input(
+    skill_id: str,
+    request: ValidateInputReq,
+    user_id: str = Depends(get_auth_user_id),
+    storage: StorageBackend = Depends(get_storage),
+) -> ValidateInputResponse | JSONResponse:
+    try:
+        validated_data = await validate_skill_input_file(
+            user_id,
+            skill_id,
+            request.input_file_path,
+            storage,
+        )
+    except ValidationHttpError as exc:
+        return JSONResponse(status_code=exc.status_code, content=jsonable_encoder(exc.body))
+    return ValidateInputResponse(validated_data=validated_data)
 
 
 @router.delete(

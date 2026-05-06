@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 STUDIO_BACKEND_DIR = Path(__file__).resolve().parents[2]
-REPO_ROOT = STUDIO_BACKEND_DIR.parent
+REPO_ROOT = STUDIO_BACKEND_DIR.parents[2]
 
 SKILLS_DIR = REPO_ROOT / "skills"
 WORKSPACES_DIR = REPO_ROOT / "workspaces"

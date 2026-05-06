@@ -63,7 +63,7 @@ from graph_agent.core.state import (
     verify_state_invariants,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[4]
 LLM_ROLES_PATH = REPO_ROOT / "config" / "llm_roles.yaml"
 V3_SKILL_PATH = "skills/text-segmentation/SKILL.md"
 REAL_LLM_SMOKE_ROLE_ENV = "GRAPH_AGENT_REAL_LLM_SMOKE_ROLE"

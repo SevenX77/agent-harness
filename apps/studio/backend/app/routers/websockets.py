@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, WebSocket
+from fastapi import APIRouter, Depends, WebSocket
 from starlette.websockets import WebSocketDisconnect
 
-from app.services.event_bus import event_bus
+from app.core.backends import get_eventbus
+from app.core.ports.eventbus import EventBus
+from app.services.event_bus import STUDIO_EVENTS_TOPIC
 from app.services.run_manager import run_manager
 from app.services.terminal_manager import terminal_manager
 
@@ -30,13 +32,13 @@ async def terminal_stream(websocket: WebSocket, term_id: str) -> None:
 
 
 @router.websocket("/ws/events")
-async def studio_events(websocket: WebSocket) -> None:
+async def studio_events(
+    websocket: WebSocket,
+    eventbus: EventBus = Depends(get_eventbus),
+) -> None:
     await websocket.accept()
-    queue = event_bus.subscribe()
     try:
-        while True:
-            await websocket.send_json(await queue.get())
+        async for event in eventbus.subscribe(STUDIO_EVENTS_TOPIC):
+            await websocket.send_json(event)
     except WebSocketDisconnect:
         return
-    finally:
-        event_bus.unsubscribe(queue)

@@ -10,8 +10,15 @@ from typing import Any
 class InMemoryEventBus:
     """Topic-based pub/sub backed by asyncio queues."""
 
+    DEFAULT_TOPIC = "studio:events"
+
     def __init__(self) -> None:
         self._subscribers: dict[str, set[asyncio.Queue[dict[str, Any]]]] = {}
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Remember the event loop used by thread callbacks."""
+        self._loop = loop
 
     async def publish(self, topic: str, event: dict[str, Any]) -> None:
         """Publish one event to all current topic subscribers."""
@@ -44,3 +51,17 @@ class InMemoryEventBus:
     ) -> None:
         """Schedule publication from a non-async callback thread."""
         asyncio.run_coroutine_threadsafe(self.publish(topic, event), loop)
+
+    async def broadcast(self, event: dict[str, Any]) -> None:
+        """Publish one event to the default Studio event topic."""
+        await self.publish(self.DEFAULT_TOPIC, event)
+
+    def broadcast_from_thread(self, event: dict[str, Any]) -> None:
+        """Publish one default-topic event from a watchdog thread."""
+        if self._loop is None:
+            return
+        future = asyncio.run_coroutine_threadsafe(self.broadcast(event), self._loop)
+        try:
+            future.result(timeout=1)
+        except Exception:
+            return

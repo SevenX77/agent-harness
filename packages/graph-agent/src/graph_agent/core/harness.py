@@ -24,29 +24,29 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
-from ..callbacks.base import Callback
-from ..cognitive.finish import finish_task
-from ..cognitive.memory import update_working_memory
-from ..models.resolver import get_model_resolver
-from .exceptions import (
+from graph_agent.callbacks.base import Callback
+from graph_agent.cognitive.finish import finish_task
+from graph_agent.cognitive.memory import update_working_memory
+from graph_agent.models.resolver import get_model_resolver
+from graph_agent.core.exceptions import (
     CheckpointError,
     SkillLoadError,
     StateTransformError,
     TraceWriteError,
 )
-from .graph_builder import GraphBuilder
-from .manifest import ContextBridge
-from .phase_executor import PhaseExecutor
-from .retry_router import RetryRouter
-from .run_context import RunContext
-from .state import (
+from graph_agent.core.graph_builder import GraphBuilder
+from graph_agent.core.manifest import ContextBridge
+from graph_agent.core.phase_executor import PhaseExecutor
+from graph_agent.core.retry_router import RetryRouter
+from graph_agent.core.run_context import RunContext
+from graph_agent.core.state import (
     BusinessData,
     FrameworkState,
     StateManager,
     WorkflowState,
     verify_state_invariants,
 )
-from .types import Phase
+from graph_agent.core.types import Phase
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ def _resolve_studio_checkpointer_spec(
         raw = spec[len("sqlite:") :]
         from langgraph.checkpoint.sqlite import SqliteSaver
 
-        from .checkpointer import _resolve_sqlite_conn_str
+        from graph_agent.core.checkpointer import _resolve_sqlite_conn_str
 
         conn_str = _resolve_sqlite_conn_str(raw or "store.db")
         saver_cm = SqliteSaver.from_conn_string(conn_str)
@@ -167,7 +167,7 @@ class _HeartbeatPulser:
     def _run(self) -> None:
         while not self._stop.wait(self._interval):
             try:
-                from ..callbacks.events import HeartbeatEvent
+                from graph_agent.callbacks.events import HeartbeatEvent
 
                 event = HeartbeatEvent(
                     current_phase=self.current_phase,
@@ -417,7 +417,7 @@ class GraphAgentHarness:
                         f"STUDIO_CHECKPOINTER={override!r} could not be resolved: {exc}"
                     ) from exc
             try:
-                from .checkpointer import get_checkpointer
+                from graph_agent.core.checkpointer import get_checkpointer
 
                 db_path = os.environ.get("GRAPH_AGENT_CHECKPOINTER_DB")
                 cp = get_checkpointer(db_path=db_path)
@@ -593,7 +593,7 @@ class GraphAgentHarness:
         )
 
         # Tier 1 Commit A — T-B1 RunStartedEvent
-        from ..callbacks.events import (
+        from graph_agent.callbacks.events import (
             InternalErrorEvent,
             RunEndedEvent,
             RunStartedEvent,
@@ -646,7 +646,7 @@ class GraphAgentHarness:
                 status = self.get_thread_status(tid)
                 if status.get("status") == "AWAITING_INPUT":
                     is_awaiting_input = True
-                    from ..callbacks.events import InterruptedEvent
+                    from graph_agent.callbacks.events import InterruptedEvent
 
                     clar = status.get("clarification", {}) or {}
                     _safe_emit_event(
@@ -704,7 +704,7 @@ class GraphAgentHarness:
                 )
 
             # Auto-save TracingCallback trace to output dir
-            from ..callbacks.tracing import TracingCallback
+            from graph_agent.callbacks.tracing import TracingCallback
 
             trace_output = effective_trace_dir
             if trace_output is None and result_context.get("output_dir"):
@@ -807,7 +807,7 @@ class GraphAgentHarness:
         if storage_manager is None:
             return None
         try:
-            from ..callbacks.serialize import to_jsonable_dict
+            from graph_agent.callbacks.serialize import to_jsonable_dict
 
             name = f"compaction_{idx}.json"
             serialised = to_jsonable_dict(removed_messages)
@@ -836,13 +836,13 @@ class GraphAgentHarness:
                 "Either pass initial_context or configure io in SKILL.md frontmatter."
             )
 
-        from ..io.manager import IOManager
+        from graph_agent.io.manager import IOManager
 
         io_mgr = IOManager(self._io_config)
         raw_inputs = io_mgr.load_inputs(**runtime_inputs)
 
         if self._context_mapping:
-            from ..io.context_resolver import ContextResolver
+            from graph_agent.io.context_resolver import ContextResolver
 
             resolver = ContextResolver(
                 mapping=self._context_mapping,
@@ -870,7 +870,7 @@ class GraphAgentHarness:
         converts them into ``RunEndedEvent(status="crashed")`` and
         re-raises so callers know the data did not persist.
         """
-        from ..io.manager import IOManager
+        from graph_agent.io.manager import IOManager
 
         io_mgr = IOManager(self._io_config)  # type: ignore[arg-type]
         logger.info(
@@ -1065,7 +1065,7 @@ class GraphAgentHarness:
                 inherited_run_id or str(sc_kwargs.get("run_id") or "") or "unknown"
             )
             try:
-                from ..io.storage import StorageManager
+                from graph_agent.io.storage import StorageManager
 
                 restored_storage_manager = StorageManager(**sc_kwargs)
             except Exception as exc:  # noqa: BLE001
@@ -1104,7 +1104,7 @@ class GraphAgentHarness:
         config["configurable"]["_run_context"] = run_context
 
         # Tier 2 — T-B11: announce the resume to the trace.
-        from ..callbacks.events import ResumedEvent
+        from graph_agent.callbacks.events import ResumedEvent
 
         _safe_emit_event(
             self.callbacks,
@@ -1120,7 +1120,7 @@ class GraphAgentHarness:
             return cast(WorkflowState, result)
         except Exception as exc:
             # Tier 1 Commit A — T-B14 InternalErrorEvent at harness.resume
-            from ..callbacks.events import InternalErrorEvent
+            from graph_agent.callbacks.events import InternalErrorEvent
 
             _safe_emit_event(
                 self.callbacks,

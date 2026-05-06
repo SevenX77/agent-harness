@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..callbacks.base import Callback
+    from graph_agent.callbacks.base import Callback
 
 
 @dataclass(frozen=True)
@@ -52,7 +52,11 @@ class RunContext:
         # state. ``object.__setattr__`` is the documented escape hatch for
         # in-place init of frozen dataclasses.
         if not isinstance(self.runtime_inputs, types.MappingProxyType):
-            source = self.runtime_inputs if isinstance(self.runtime_inputs, dict) else dict(self.runtime_inputs)
+            source = (
+                self.runtime_inputs
+                if isinstance(self.runtime_inputs, dict)
+                else dict(self.runtime_inputs)
+            )
             object.__setattr__(self, "runtime_inputs", types.MappingProxyType(source))
         if not isinstance(self.callbacks, tuple):
             object.__setattr__(self, "callbacks", tuple(self.callbacks))

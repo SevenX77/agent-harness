@@ -10,6 +10,7 @@ Usage::
     result = harness.run(...)
     tracer.save("/path/to/output")
 """
+
 from __future__ import annotations
 
 import json
@@ -20,7 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .base import (
+from graph_agent.callbacks.base import (
     EVENT_AMBIGUITY_REPORT,
     EVENT_COMPACTION,
     EVENT_DEAD_END_PRUNED,
@@ -35,7 +36,7 @@ from .base import (
     EVENT_WORKING_MEMORY_UPDATE,
     Callback,
 )
-from .events import (
+from graph_agent.callbacks.events import (
     AmbiguityReportEvent,
     CallbackEvent,
     CompactionEvent,
@@ -128,18 +129,22 @@ class TracingCallback(Callback):
 
     def on_phase_start(self, phase_name: str, context: dict[str, Any]) -> None:
         """Start a new phase trace segment."""
-        self._phase_stack.append({
-            "name": phase_name,
-            "start_time": datetime.now(UTC).isoformat(),
-            "_start_mono": time.monotonic(),
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "llm_calls": [],
-            "tool_calls": [],
-            "validation": {"passed": True, "retries": 0, "errors": []},
-        })
+        self._phase_stack.append(
+            {
+                "name": phase_name,
+                "start_time": datetime.now(UTC).isoformat(),
+                "_start_mono": time.monotonic(),
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "llm_calls": [],
+                "tool_calls": [],
+                "validation": {"passed": True, "retries": 0, "errors": []},
+            }
+        )
         self._write_event(
-            EVENT_PHASE_START, phase_name, {"context_keys": list(context.keys())},
+            EVENT_PHASE_START,
+            phase_name,
+            {"context_keys": list(context.keys())},
         )
         self._write_typed_event(PhaseStartEvent(phase_name=phase_name, context=context))
 
@@ -151,8 +156,11 @@ class TracingCallback(Callback):
     ) -> None:
         """Finalize the active phase trace segment."""
         phase_index = next(
-            (idx for idx in range(len(self._phase_stack) - 1, -1, -1)
-             if self._phase_stack[idx]["name"] == phase_name),
+            (
+                idx
+                for idx in range(len(self._phase_stack) - 1, -1, -1)
+                if self._phase_stack[idx]["name"] == phase_name
+            ),
             -1,
         )
         if phase_index < 0:
@@ -163,7 +171,9 @@ class TracingCallback(Callback):
         phase_data["duration_sec"] = round(time.monotonic() - start_mono, 2)
         self._phases.append(phase_data)
         self._write_event(
-            EVENT_PHASE_END, phase_name, {"context_keys": list(context.keys()), "metrics": metrics},
+            EVENT_PHASE_END,
+            phase_name,
+            {"context_keys": list(context.keys()), "metrics": metrics},
         )
         self._write_typed_event(
             PhaseEndEvent(phase_name=phase_name, context=context, metrics=metrics)
@@ -186,13 +196,17 @@ class TracingCallback(Callback):
         if active_phase:
             active_phase["input_tokens"] += input_tokens
             active_phase["output_tokens"] += output_tokens
-            active_phase["llm_calls"].append({
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "timestamp": datetime.now(UTC).isoformat(),
-            })
+            active_phase["llm_calls"].append(
+                {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+            )
         self._write_event(
-            EVENT_LLM_CALL, phase_name, {
+            EVENT_LLM_CALL,
+            phase_name,
+            {
                 "messages": messages or [],
                 "response": response_data or {},
                 "usage": {
@@ -224,12 +238,16 @@ class TracingCallback(Callback):
         self._total_tool_calls += 1
         active_phase = self._active_phase()
         if active_phase:
-            active_phase["tool_calls"].append({
-                "name": tool_name,
-                "timestamp": datetime.now(UTC).isoformat(),
-            })
+            active_phase["tool_calls"].append(
+                {
+                    "name": tool_name,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+            )
         self._write_event(
-            EVENT_TOOL_CALL, phase_name, {
+            EVENT_TOOL_CALL,
+            phase_name,
+            {
                 "tool_name": tool_name,
                 "args": args,
                 "result": result,
@@ -272,12 +290,12 @@ class TracingCallback(Callback):
             active_phase["validation"]["passed"] = False
             active_phase["validation"]["errors"].extend(errors_list)
         self._write_event(
-            EVENT_VALIDATION_FAIL, phase_name, {"passed": False, "errors": errors_list, "retry_count": retry_count},
+            EVENT_VALIDATION_FAIL,
+            phase_name,
+            {"passed": False, "errors": errors_list, "retry_count": retry_count},
         )
         self._write_typed_event(
-            ValidationFailEvent(
-                phase_name=phase_name, errors=errors_list, retry_count=retry_count
-            )
+            ValidationFailEvent(phase_name=phase_name, errors=errors_list, retry_count=retry_count)
         )
 
     def on_retry(
@@ -291,7 +309,9 @@ class TracingCallback(Callback):
         if active_phase:
             active_phase["validation"]["retries"] += 1
         self._write_event(
-            EVENT_RETRY, phase_name, {"target_phase": target_phase, "feedback": feedback},
+            EVENT_RETRY,
+            phase_name,
+            {"target_phase": target_phase, "feedback": feedback},
         )
         self._write_typed_event(
             RetryEvent(phase_name=phase_name, target_phase=target_phase, feedback=feedback)
@@ -305,7 +325,9 @@ class TracingCallback(Callback):
     ) -> None:
         """Record finish_task output in the trace."""
         self._write_event(
-            EVENT_FINISH_TASK, phase_name, {"reasoning": reasoning, "evidence": evidence},
+            EVENT_FINISH_TASK,
+            phase_name,
+            {"reasoning": reasoning, "evidence": evidence},
         )
         self._write_typed_event(
             FinishTaskEvent(phase_name=phase_name, reasoning=reasoning, evidence=evidence)
@@ -319,7 +341,9 @@ class TracingCallback(Callback):
     ) -> None:
         """Record a cognitive nudge in the trace."""
         self._write_event(
-            EVENT_NUDGE, phase_name, {"count": nudge_count, "type": nudge_type},
+            EVENT_NUDGE,
+            phase_name,
+            {"count": nudge_count, "type": nudge_type},
         )
         self._write_typed_event(
             NudgeEvent(phase_name=phase_name, nudge_count=nudge_count, nudge_type=nudge_type)
@@ -332,7 +356,9 @@ class TracingCallback(Callback):
     ) -> None:
         """Record working-memory update in the trace."""
         self._write_event(
-            EVENT_WORKING_MEMORY_UPDATE, phase_name, {"content_length": content_length},
+            EVENT_WORKING_MEMORY_UPDATE,
+            phase_name,
+            {"content_length": content_length},
         )
         self._write_typed_event(
             WorkingMemoryUpdateEvent(phase_name=phase_name, content_length=content_length)
@@ -345,11 +371,11 @@ class TracingCallback(Callback):
     ) -> None:
         """Record dead-end pruning in the trace."""
         self._write_event(
-            EVENT_DEAD_END_PRUNED, phase_name, {"summary": summary},
+            EVENT_DEAD_END_PRUNED,
+            phase_name,
+            {"summary": summary},
         )
-        self._write_typed_event(
-            DeadEndPrunedEvent(phase_name=phase_name, summary=summary)
-        )
+        self._write_typed_event(DeadEndPrunedEvent(phase_name=phase_name, summary=summary))
 
     def on_compaction(
         self,
@@ -358,11 +384,11 @@ class TracingCallback(Callback):
     ) -> None:
         """Record history compaction in the trace."""
         self._write_event(
-            EVENT_COMPACTION, phase_name, {"removed_pairs": removed_pairs},
+            EVENT_COMPACTION,
+            phase_name,
+            {"removed_pairs": removed_pairs},
         )
-        self._write_typed_event(
-            CompactionEvent(phase_name=phase_name, removed_pairs=removed_pairs)
-        )
+        self._write_typed_event(CompactionEvent(phase_name=phase_name, removed_pairs=removed_pairs))
 
     def on_ambiguity_report(
         self,
@@ -373,7 +399,9 @@ class TracingCallback(Callback):
     ) -> None:
         """Record ambiguity feedback in the trace."""
         self._write_event(
-            EVENT_AMBIGUITY_REPORT, phase_name, {
+            EVENT_AMBIGUITY_REPORT,
+            phase_name,
+            {
                 "ambiguity_type": ambiguity_type,
                 "question": question,
                 "decision": decision,

@@ -5,16 +5,17 @@ Includes:
 - W-FINISH-TASK-VISIBILITY
 - W-SETUP-PHASE-ANTI-PATTERN
 """
+
 from __future__ import annotations
 
 import re
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
 
-from ..compiler import CompileIssue
+from graph_agent.core.compiler import CompileIssue
 
 if TYPE_CHECKING:
-    from ..manifest import GraphSkillDef, LLMPhase
+    from graph_agent.core.manifest import GraphSkillDef, LLMPhase
 
 
 _DUPLICATION_MARKERS = (
@@ -52,7 +53,7 @@ _DUPLICATION_MARKERS = (
 
 def check_prompt_quality(manifest: GraphSkillDef) -> list[CompileIssue]:
     """Run prompt-quality warning checks on the manifest."""
-    from ..manifest import LLMPhase
+    from graph_agent.core.manifest import LLMPhase
 
     issues: list[CompileIssue] = []
 
@@ -64,9 +65,7 @@ def check_prompt_quality(manifest: GraphSkillDef) -> list[CompileIssue]:
         user_prompt = (phase.user_prompt_template or "").strip()
 
         if prompt and user_prompt:
-            issues.extend(
-                _check_prompt_duplication(prompt, user_prompt, phase, phase_idx)
-            )
+            issues.extend(_check_prompt_duplication(prompt, user_prompt, phase, phase_idx))
 
         if prompt:
             issues.extend(_check_finish_task_visibility(prompt, phase, phase_idx))
@@ -117,8 +116,7 @@ def _check_prompt_duplication(
             severity="WARNING",
             location=f"SKILL.md:phases.{phase.name}.user_prompt_template",
             message=(
-                detail +
-                "Repeating instructions in both layers dilutes attention; keep the "
+                detail + "Repeating instructions in both layers dilutes attention; keep the "
                 "directive in system prompt and reference it from user prompt."
             ),
         )

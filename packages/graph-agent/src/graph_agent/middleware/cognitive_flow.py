@@ -33,11 +33,11 @@ from langgraph.types import Command, interrupt
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
-from ..core.exceptions import GraphAgentError
-from ..core.io_manager import IOManager
-from ..core.schema_engine import SchemaEngine, SchemaObject
-from ..core.state import BusinessData, FrameworkState, StateManager, WorkflowState
-from ..tools.md_to_json import parse_md
+from graph_agent.core.exceptions import GraphAgentError
+from graph_agent.core.io_manager import IOManager
+from graph_agent.core.schema_engine import SchemaEngine, SchemaObject
+from graph_agent.core.state import BusinessData, FrameworkState, StateManager, WorkflowState
+from graph_agent.tools.md_to_json import parse_md
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +56,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
 
     _FINISH_TOOL = "finish_task"
     _CLARIFICATION_TOOL = "ask_clarification"
-    _REJECTION_PREFIX = (
-        "[提交已被系统驳回] 当前任务仍未结束，请继续修正并重新提交！"
-    )
+    _REJECTION_PREFIX = "[提交已被系统驳回] 当前任务仍未结束，请继续修正并重新提交！"
 
     def __init__(
         self,
@@ -67,10 +65,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         *,
         schema_engine: SchemaEngine | None = None,
         current_phase_schema: type[BaseModel] | SchemaObject | None = None,
-        business_validator: Callable[
-            [list[dict[str, Any]]], tuple[bool, list[str]]
-        ]
-        | None = None,
+        business_validator: Callable[[list[dict[str, Any]]], tuple[bool, list[str]]] | None = None,
         phase_name: str = "unknown",
         interrupt_fn: InterruptFn | None = None,
     ) -> None:
@@ -138,9 +133,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
 
         state = _workflow_state_or_none(request.state)
         if state is None:
-            logger.debug(
-                "[CognitiveFlowMiddleware] finish_task pass-through without WorkflowState"
-            )
+            logger.debug("[CognitiveFlowMiddleware] finish_task pass-through without WorkflowState")
             return handler(request)
         return self._handle_finish_task(
             parsed_args,
@@ -199,8 +192,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
     ) -> Command[Any]:
         tool_name = str(request.tool_call.get("name") or "unknown")
         logger.warning(
-            "phase=%s action=cognitive_flow_parse fallback "
-            "from=parse_json to=llm_retry reason=%s",
+            "phase=%s action=cognitive_flow_parse fallback from=parse_json to=llm_retry reason=%s",
             self._phase_name,
             type(exc).__name__,
         )
@@ -210,10 +202,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
                 "messages": [
                     ToolMessage(
                         status="error",
-                        content=(
-                            f"JSON parse failed: {exc}. "
-                            "Please retry with valid JSON."
-                        ),
+                        content=(f"JSON parse failed: {exc}. Please retry with valid JSON."),
                         name=tool_name,
                         tool_call_id=_tool_call_id(request),
                     )
@@ -379,9 +368,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             parsed_items=parsed_items,
         )
 
-    def _run_business_validator(
-        self, parsed_items: list[dict[str, Any]]
-    ) -> list[str]:
+    def _run_business_validator(self, parsed_items: list[dict[str, Any]]) -> list[str]:
         """Phase 2 A2 v3: invoke the optional business validator and
         normalise its (passed, errors) return into a list of strings.
 
@@ -408,8 +395,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             ]
         if passed:
             logger.info(
-                "phase=%s action=cognitive_flow_business_validator decision=pass "
-                "items=%d",
+                "phase=%s action=cognitive_flow_business_validator decision=pass items=%d",
                 self._phase_name,
                 len(parsed_items),
             )
@@ -419,8 +405,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         elif not isinstance(errors, list):
             errors = [str(errors)] if errors else []
         logger.warning(
-            "phase=%s action=cognitive_flow_business_validator decision=reject "
-            "issue_count=%d",
+            "phase=%s action=cognitive_flow_business_validator decision=reject issue_count=%d",
             self._phase_name,
             len(errors),
         )
@@ -616,7 +601,11 @@ def _workflow_state_or_none(value: object) -> WorkflowState | None:
     data = value.get("data")
     flow = value.get("flow")
     messages = value.get("messages")
-    if isinstance(data, BusinessData) and isinstance(flow, FrameworkState) and isinstance(messages, list):
+    if (
+        isinstance(data, BusinessData)
+        and isinstance(flow, FrameworkState)
+        and isinstance(messages, list)
+    ):
         return WorkflowState(data=data, flow=flow, messages=messages)
     return None
 

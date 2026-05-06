@@ -77,10 +77,7 @@ def add_missing_item(item_md: str, context: dict[str, Any]) -> str:
         logger.warning("add_missing_item: parse_md failed: %s", exc)
         return f"ERROR: failed to parse MD snippet — {exc}"
 
-    new_items = [
-        {"item_id": block.meta.id, "fields": block.data}
-        for block in new_blocks
-    ]
+    new_items = [{"item_id": block.meta.id, "fields": block.data} for block in new_blocks]
     context.setdefault("added_items", []).extend(new_items)
     logger.info("add_missing_item: added %d item(s) from MD snippet", len(new_items))
     return f"OK: added {len(new_items)} item(s) from MD snippet"

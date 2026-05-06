@@ -13,9 +13,9 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
-from ..state import StateManager, WorkflowState
-from ..types import Phase
-from .base import PhaseNode
+from graph_agent.core.state import StateManager, WorkflowState
+from graph_agent.core.types import Phase
+from graph_agent.core.phase_nodes.base import PhaseNode
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class CodePhaseNode(PhaseNode):
     """
 
     def execute(self, phase: Phase, state: WorkflowState) -> WorkflowState:
-        from ..harness import _clone_state  # lazy: avoid import cycle at module load
+        from graph_agent.core.harness import _clone_state  # lazy: avoid import cycle at module load
 
         next_state = _clone_state(state)
         for cb in self.container.callbacks:
@@ -47,7 +47,10 @@ class CodePhaseNode(PhaseNode):
             for fn in phase.tools:
                 result = fn(next_state["data"])
                 next_state = self._merge_code_phase_tool_result(
-                    phase, next_state, result, fn=fn,
+                    phase,
+                    next_state,
+                    result,
+                    fn=fn,
                 )
 
         next_state = StateManager.update_framework(
@@ -147,9 +150,7 @@ class CodePhaseNode(PhaseNode):
         # ``_metrics`` / ``_phase_internal`` injection before we ever see
         # them, so a post-validate scan misses the attack entirely (a1 v1
         # NO_RAISE probe). Inspecting the raw dict closes that hole.
-        invalid_keys = sorted(
-            k for k in raw if isinstance(k, str) and k.startswith("_")
-        )
+        invalid_keys = sorted(k for k in raw if isinstance(k, str) and k.startswith("_"))
         if invalid_keys:
             logger.error(
                 "phase=%s action=code_only_dict_merge decision=reject "
@@ -186,8 +187,7 @@ class CodePhaseNode(PhaseNode):
                 raise
             merged = validated.model_dump()
             logger.info(
-                "phase=%s action=code_only_dict_validate decision=pass "
-                "tool=%s schema=%s fields=%d",
+                "phase=%s action=code_only_dict_validate decision=pass tool=%s schema=%s fields=%d",
                 phase.name,
                 fn_name,
                 schema_cls.__name__,
@@ -196,8 +196,7 @@ class CodePhaseNode(PhaseNode):
 
         # ---- Step 3: merge into BusinessData ----------------------------
         logger.info(
-            "phase=%s action=code_only_dict_merge decision=apply "
-            "tool=%s fields=%d",
+            "phase=%s action=code_only_dict_merge decision=apply tool=%s fields=%d",
             phase.name,
             fn_name,
             len(merged),

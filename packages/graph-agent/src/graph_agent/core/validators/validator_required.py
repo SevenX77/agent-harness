@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from ...tools.dynamic_schema import parse_output_example
-from ..compiler import CompileIssue
-from ..manifest import GraphSkillDef, LLMPhase
+from graph_agent.tools.dynamic_schema import parse_output_example
+from graph_agent.core.compiler import CompileIssue
+from graph_agent.core.manifest import GraphSkillDef, LLMPhase
 
 
 def check_validator_required(manifest: GraphSkillDef) -> list[CompileIssue]:
@@ -67,21 +67,16 @@ def _assess_schema_complexity(phase: LLMPhase) -> Literal["simple", "complex"]:
         except Exception:  # noqa: BLE001
             return "simple"
 
-        numeric_count = sum(
-            1 for field in schema_def.fields if field.type_hint in ("int", "float")
-        )
-        relational_count = sum(
-            1 for field in schema_def.fields if _looks_relational(field.name)
-        )
+        numeric_count = sum(1 for field in schema_def.fields if field.type_hint in ("int", "float"))
+        relational_count = sum(1 for field in schema_def.fields if _looks_relational(field.name))
         if numeric_count >= 2 or relational_count >= 1:
             return "complex"
     return "simple"
 
 
 def _looks_relational(field_name: str) -> bool:
-    return (
-        field_name.startswith(("start_", "end_"))
-        or field_name.endswith(("_index", "_count", "_offset"))
+    return field_name.startswith(("start_", "end_")) or field_name.endswith(
+        ("_index", "_count", "_offset")
     )
 
 

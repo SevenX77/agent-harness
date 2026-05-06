@@ -9,11 +9,11 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from .manifest import ContextBridge
+from graph_agent.core.manifest import ContextBridge
 
 if TYPE_CHECKING:
-    from .harness import GraphAgentHarness
-    from .io_manager import IODef
+    from graph_agent.core.harness import GraphAgentHarness
+    from graph_agent.core.io_manager import IODef
 
 
 @dataclass

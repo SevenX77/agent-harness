@@ -22,17 +22,18 @@ Design invariants:
   well-scoped prompt history without the harness having to reach into
   ``threading.local``.
 """
+
 from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Any
 
-from ..callbacks.events import PromptCapturedEvent
+from graph_agent.callbacks.events import PromptCapturedEvent
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from ..callbacks.base import Callback
+    from graph_agent.callbacks.base import Callback
 
 logger = logging.getLogger(__name__)
 

@@ -3,16 +3,17 @@
 See docs/superpowers/plans/2026-04-25-pr7-persona-resolution-validator.md
 for the full rule catalogue and rationale.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 
 from pydantic import ValidationError
 
-from ..compiler import CompileIssue
-from ..exceptions import SkillLoadError
-from ..manifest import AgentSkillDef, GraphSkillDef, LLMPhase
-from ..personas import resolve_persona
+from graph_agent.core.compiler import CompileIssue
+from graph_agent.core.exceptions import SkillLoadError
+from graph_agent.core.manifest import AgentSkillDef, GraphSkillDef, LLMPhase
+from graph_agent.core.personas import resolve_persona
 
 
 def check_persona_resolution(
@@ -73,9 +74,11 @@ def _check_one(
     try:
         resolve_persona(persona_name, base_dir=base_dir)
     except (SkillLoadError, ValidationError, OSError, UnicodeDecodeError) as exc:
-        issues.append(CompileIssue(
-            rule_id="F-persona-not-resolved",
-            severity="FATAL",
-            location=location,
-            message=str(exc),
-        ))
+        issues.append(
+            CompileIssue(
+                rule_id="F-persona-not-resolved",
+                severity="FATAL",
+                location=location,
+                message=str(exc),
+            )
+        )

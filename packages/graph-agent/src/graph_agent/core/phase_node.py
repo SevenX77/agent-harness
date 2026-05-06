@@ -6,9 +6,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from .harness import Phase
-from .schema_engine import SchemaObject
-from .state import WorkflowState
+from graph_agent.core.harness import Phase
+from graph_agent.core.schema_engine import SchemaObject
+from graph_agent.core.state import WorkflowState
 
 
 @dataclass(frozen=True)

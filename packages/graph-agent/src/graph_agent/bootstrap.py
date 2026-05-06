@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from . import patches
-from .settings import Settings
+from graph_agent import patches
+from graph_agent.settings import Settings
 
 
 class Bootstrap:

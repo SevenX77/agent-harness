@@ -35,9 +35,9 @@ unattended clarification, ``create_custom_middlewares``).
 
 from __future__ import annotations
 
-from .cognitive_flow import CognitiveFlowMiddleware
-from .execution_control import ExecutionControlMiddleware
-from .protocol_validation import ProtocolValidationMiddleware
+from graph_agent.middleware.cognitive_flow import CognitiveFlowMiddleware
+from graph_agent.middleware.execution_control import ExecutionControlMiddleware
+from graph_agent.middleware.protocol_validation import ProtocolValidationMiddleware
 
 # Fixed topological order for the MVP-3 middleware chain.
 #

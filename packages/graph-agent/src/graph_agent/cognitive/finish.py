@@ -42,9 +42,9 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # avoid runtime import cycle
-    from ..core.io_manager import IOManager
-    from ..core.schema_engine import SchemaEngine, SchemaObject
-    from ..tools.md_to_json import ParsedBlock
+    from graph_agent.core.io_manager import IOManager
+    from graph_agent.core.schema_engine import SchemaEngine, SchemaObject
+    from graph_agent.tools.md_to_json import ParsedBlock
 
 logger = logging.getLogger(__name__)
 
@@ -70,11 +70,12 @@ def _parse_business_md_to_blocks(
     one ``ParsedBlock`` per ``##`` item. Each block's ``.data`` dict is
     what ``schema_engine.validate`` actually expects.
     """
-    from ..tools.md_to_json import parse_md
+    from graph_agent.tools.md_to_json import parse_md
 
     pydantic_cls = schema_engine.get_pydantic_model(compiled_schema)
     blocks = parse_md(business_data_md, pydantic_cls)
     return blocks, pydantic_cls
+
 
 PLANNING_NUDGE = (
     "[系统提示] 在执行任何业务工具之前，你必须先调用 update_working_memory "
@@ -203,9 +204,7 @@ def finish_task(
                         validation.parsed if validation.parsed is not None else dict(block.data)
                     )
                 else:
-                    errors.extend(
-                        f"item {block.meta.id}: {err}" for err in validation.errors
-                    )
+                    errors.extend(f"item {block.meta.id}: {err}" for err in validation.errors)
             if errors:
                 result["schema_validation"] = "failed"
                 result["schema_validation_errors"] = errors
@@ -226,9 +225,7 @@ def finish_task(
     # phase declared any hoist mapping at all. The full IOManager.run
     # path remains the phase_executor's responsibility per design §4.3.
     if io_manager is not None:
-        result.setdefault(
-            "io_manifest", {"output_count": len(io_manager.io_specs)}
-        )
+        result.setdefault("io_manifest", {"output_count": len(io_manager.io_specs)})
 
     logger.info(
         "finish_task: accepted completion marker "

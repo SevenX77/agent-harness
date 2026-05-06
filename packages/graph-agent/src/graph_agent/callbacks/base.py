@@ -10,6 +10,7 @@ member instead of individual string-typed hook methods. The default
 callbacks keep working unchanged — emitters can gradually migrate to
 calling ``on_event(event)`` with a Pydantic payload.
 """
+
 from __future__ import annotations
 
 import logging
@@ -18,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from .events import CallbackEvent
+    from graph_agent.callbacks.events import CallbackEvent
 
 EVENT_PHASE_START = "phase_start"
 EVENT_PHASE_END = "phase_end"
@@ -147,7 +148,7 @@ class Callback:
         """
         # Import here to avoid pulling Pydantic at module load for callbacks
         # that never process typed events.
-        from .events import (
+        from graph_agent.callbacks.events import (
             AmbiguityReportEvent,
             ArtifactSavedEvent,
             CompactionEvent,
@@ -212,20 +213,29 @@ class Callback:
             self.on_ambiguity_report(
                 event.phase_name, event.ambiguity_type, event.question, event.decision
             )
-        elif isinstance(event, (
-            # Existing typed-only events (Task 3.4)
-            PromptCapturedEvent, LLMFallbackEvent,
-            # Tier 1 Commit A — core lifecycle
-            RunStartedEvent, RunEndedEvent,
-            ValidationPassEvent, RetryExhaustedEvent, InternalErrorEvent,
-            # Tier 1 Commit B — data + proxy enhancement
-            ModelResolvedEvent, ArtifactSavedEvent,
-            # Tier 1 Commit C — concurrency boundary (subgraph events
-            # removed in MVP-0 B1)
-            ParallelMapGroupStartedEvent, ParallelMapGroupEndedEvent,
-            # Tier 1 Commit D — heartbeat
-            HeartbeatEvent,
-        )):
+        elif isinstance(
+            event,
+            (
+                # Existing typed-only events (Task 3.4)
+                PromptCapturedEvent,
+                LLMFallbackEvent,
+                # Tier 1 Commit A — core lifecycle
+                RunStartedEvent,
+                RunEndedEvent,
+                ValidationPassEvent,
+                RetryExhaustedEvent,
+                InternalErrorEvent,
+                # Tier 1 Commit B — data + proxy enhancement
+                ModelResolvedEvent,
+                ArtifactSavedEvent,
+                # Tier 1 Commit C — concurrency boundary (subgraph events
+                # removed in MVP-0 B1)
+                ParallelMapGroupStartedEvent,
+                ParallelMapGroupEndedEvent,
+                # Tier 1 Commit D — heartbeat
+                HeartbeatEvent,
+            ),
+        ):
             # No legacy hook exists for these new event types. Subclasses that
             # need to consume them must override `on_event` directly. The
             # default TracingCallback.on_event implementation already writes

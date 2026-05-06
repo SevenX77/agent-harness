@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from typing import Any, TypedDict, cast
 
-from .providers import err, ok, run_async
+from graph_agent.tools.providers import err, ok, run_async
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +26,7 @@ class _TTSResult(TypedDict):
     duration_ms: int
 
 
-def _split_at_sentence_boundaries(
-    text: str, max_bytes: int = _VOLCENGINE_MAX_BYTES
-) -> list[str]:
+def _split_at_sentence_boundaries(text: str, max_bytes: int = _VOLCENGINE_MAX_BYTES) -> list[str]:
     if len(text.encode("utf-8")) <= max_bytes:
         return [text]
     delimiters = ("。", "！", "？", "；", "，", "、")
@@ -56,9 +54,14 @@ def _probe_duration_ms(file_path: str) -> int:
     try:
         result = subprocess.run(
             [
-                "ffprobe", "-v", "quiet",
-                "-show_entries", "format=duration",
-                "-of", "csv=p=0", file_path,
+                "ffprobe",
+                "-v",
+                "quiet",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "csv=p=0",
+                file_path,
             ],
             capture_output=True,
             text=True,
@@ -76,9 +79,7 @@ def _concat_audio_files(paths: list[str], output: str) -> None:
 
         shutil.copy2(paths[0], output)
         return
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".txt", delete=False
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
         for p in paths:
             f.write(f"file '{p}'\n")
         list_path = f.name
@@ -86,8 +87,17 @@ def _concat_audio_files(paths: list[str], output: str) -> None:
         Path(output).parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(
             [
-                "ffmpeg", "-y", "-f", "concat", "-safe", "0",
-                "-i", list_path, "-c", "copy", output,
+                "ffmpeg",
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                list_path,
+                "-c",
+                "copy",
+                output,
             ],
             capture_output=True,
             timeout=60,
@@ -141,8 +151,7 @@ async def _tts_volcengine(text: str, output_path: str) -> _TTSResult:
         data = cast(dict[str, Any], resp.json())
     if data.get("code") != _VOLCENGINE_SUCCESS_CODE:
         raise RuntimeError(
-            f"Volcengine TTS error code={data.get('code')}: "
-            f"{data.get('message', '')}"
+            f"Volcengine TTS error code={data.get('code')}: {data.get('message', '')}"
         )
     audio_b64 = data.get("data", "")
     if not audio_b64:
@@ -171,9 +180,7 @@ async def _tts_single(text: str, output_path: str) -> _TTSResult:
     try:
         return await _tts_volcengine(text, output_path)
     except Exception as e:
-        logger.warning(
-            "Volcengine TTS failed, falling back to Edge TTS: %s", e
-        )
+        logger.warning("Volcengine TTS failed, falling back to Edge TTS: %s", e)
     return await _tts_edge(text, output_path)
 
 
@@ -232,13 +239,15 @@ def synthesize_speech_tool(
 
     try:
         result = run_async(lambda: _tts_long(text, output_path))
-        return ok({
-            "status": "success",
-            "audio_path": output_path,
-            "duration_ms": result["duration_ms"],
-            "provider": result["provider"],
-            "text_bytes": len(text.encode("utf-8")),
-        })
+        return ok(
+            {
+                "status": "success",
+                "audio_path": output_path,
+                "duration_ms": result["duration_ms"],
+                "provider": result["provider"],
+                "text_bytes": len(text.encode("utf-8")),
+            }
+        )
     except Exception as exc:
         logger.error("synthesize_speech failed: %s", exc)
         return err(exc)

@@ -8,10 +8,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .exceptions import SkillLoadError
-from .harness import GraphAgentHarness, Phase
-from .schema_engine import SchemaEngine
-from .skill_builder import (
+from graph_agent.core.exceptions import SkillLoadError
+from graph_agent.core.harness import GraphAgentHarness, Phase
+from graph_agent.core.schema_engine import SchemaEngine
+from graph_agent.core.skill_builder import (
     _SCHEMA_ENGINE,
     _compose_agent_system_prompt,
     _phase_from_agent_skill,
@@ -19,14 +19,14 @@ from .skill_builder import (
     _render_skill_section_xml_tags,
     build_graph_nodes,
 )
-from .skill_parser import parse_skill_md
-from .skill_validator import validate_manifest
+from graph_agent.core.skill_parser import parse_skill_md
+from graph_agent.core.skill_validator import validate_manifest
 
 if TYPE_CHECKING:
-    from .io_manager import IODef, IOManager
-    from .manifest import SkillManifest as SkillManifestType
-    from .module_sandbox import ModuleSandbox
-    from .phase_node import PhaseNode
+    from graph_agent.core.io_manager import IODef, IOManager
+    from graph_agent.core.manifest import SkillManifest as SkillManifestType
+    from graph_agent.core.module_sandbox import ModuleSandbox
+    from graph_agent.core.phase_node import PhaseNode
 
 logger = logging.getLogger(__name__)
 
@@ -71,12 +71,12 @@ class SkillLoader:
     ) -> None:
         self._schema_engine = schema_engine or get_schema_engine()
         if module_sandbox is None:
-            from .module_sandbox import ModuleSandbox
+            from graph_agent.core.module_sandbox import ModuleSandbox
 
             module_sandbox = ModuleSandbox()
         self._module_sandbox = module_sandbox
         if io_manager_factory is None:
-            from .io_manager import IOManager
+            from graph_agent.core.io_manager import IOManager
 
             def io_manager_factory(specs: list[IODef]) -> IOManager:
                 return IOManager(specs)
@@ -146,13 +146,13 @@ def _phases_from_nodes(nodes: list[PhaseNode]) -> list[Phase]:
 
 
 def _raw_io_config(manifest: SkillManifestType) -> dict[str, Any] | None:
-    from .manifest import GraphSkillDef
+    from graph_agent.core.manifest import GraphSkillDef
 
     return manifest.io.model_dump() if isinstance(manifest, GraphSkillDef) else None
 
 
 def _raw_context_mapping(manifest: SkillManifestType) -> dict[str, str] | None:
-    from .manifest import GraphSkillDef
+    from graph_agent.core.manifest import GraphSkillDef
 
     if isinstance(manifest, GraphSkillDef) and manifest.context_mapping:
         return dict(manifest.context_mapping)

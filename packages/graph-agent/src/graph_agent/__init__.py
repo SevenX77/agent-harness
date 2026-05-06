@@ -8,11 +8,12 @@ WorkflowState — typed state flowing through the graph
 load_workflow_from_md — compile SKILL.md into a harness
 ModelResolver — role-based model selection with provider failover
 """
+
 from __future__ import annotations
 
-from .callbacks import Callback, LoggingCallback, MetricsCallback, TracingCallback
-from .core.compiler import compile_skill  # noqa: E402
-from .core.exceptions import (  # noqa: E402
+from graph_agent.callbacks import Callback, LoggingCallback, MetricsCallback, TracingCallback
+from graph_agent.core.compiler import compile_skill  # noqa: E402
+from graph_agent.core.exceptions import (  # noqa: E402
     AllProvidersFailedError,
     GraphAgentError,
     MaxRetriesExceededError,
@@ -20,9 +21,9 @@ from .core.exceptions import (  # noqa: E402
     SkillLoadError,
     TemplateRenderError,
 )
-from .core.harness import GraphAgentHarness  # noqa: E402
-from .core.loader import load_workflow_from_md  # noqa: E402
-from .core.manifest import (  # noqa: E402
+from graph_agent.core.harness import GraphAgentHarness  # noqa: E402
+from graph_agent.core.loader import load_workflow_from_md  # noqa: E402
+from graph_agent.core.manifest import (  # noqa: E402
     AgentProfile,
     AgentSkillDef,
     ContextBridge,  # noqa: E402
@@ -33,15 +34,15 @@ from .core.manifest import (  # noqa: E402
     PhaseDef,
     SkillManifest,
 )
-from .core.parser import parse_skill_file  # noqa: E402
-from .core.runner import clear_cache, run_skill  # noqa: E402
-from .core.serialize import serialize_skill  # noqa: E402
-from .core.state import WorkflowState  # noqa: E402
-from .core.types import Phase  # noqa: E402
-from .io.context_resolver import ContextResolver  # noqa: E402
-from .io.manager import IOManager  # noqa: E402
-from .io.skill_analyzer import get_skill_type  # noqa: E402
-from .models.resolver import ModelResolver, get_model_resolver  # noqa: E402
+from graph_agent.core.parser import parse_skill_file  # noqa: E402
+from graph_agent.core.runner import clear_cache, run_skill  # noqa: E402
+from graph_agent.core.serialize import serialize_skill  # noqa: E402
+from graph_agent.core.state import WorkflowState  # noqa: E402
+from graph_agent.core.types import Phase  # noqa: E402
+from graph_agent.io.context_resolver import ContextResolver  # noqa: E402
+from graph_agent.io.manager import IOManager  # noqa: E402
+from graph_agent.io.skill_analyzer import get_skill_type  # noqa: E402
+from graph_agent.models.resolver import ModelResolver, get_model_resolver  # noqa: E402
 
 __all__ = [
     "run_skill",

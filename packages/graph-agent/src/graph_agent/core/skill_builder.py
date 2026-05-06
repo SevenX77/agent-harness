@@ -11,23 +11,23 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-from ..tools.dynamic_schema import (
+from graph_agent.tools.dynamic_schema import (
     DynamicSchemaDef,
     OutputExampleParseError,
     parse_output_example,
     render_dynamic_schema_output_format,
 )
-from .exceptions import SkillCompilationError, SkillLoadError
-from .personas import resolve_persona
-from .schema_engine import SchemaEngine
-from .types import Phase
+from graph_agent.core.exceptions import SkillCompilationError, SkillLoadError
+from graph_agent.core.personas import resolve_persona
+from graph_agent.core.schema_engine import SchemaEngine
+from graph_agent.core.types import Phase
 
 if TYPE_CHECKING:
-    from .manifest import AgentSkillDef, LLMPhase, LogicPhase, PersonaSkillDef
-    from .manifest import SkillManifest as SkillManifestType
-    from .module_sandbox import ModuleSandbox
-    from .phase_node import PhaseNode
-    from .state import BusinessData, WorkflowState
+    from graph_agent.core.manifest import AgentSkillDef, LLMPhase, LogicPhase, PersonaSkillDef
+    from graph_agent.core.manifest import SkillManifest as SkillManifestType
+    from graph_agent.core.module_sandbox import ModuleSandbox
+    from graph_agent.core.phase_node import PhaseNode
+    from graph_agent.core.state import BusinessData, WorkflowState
 
 logger = logging.getLogger(__name__)
 _SCHEMA_ENGINE: SchemaEngine = SchemaEngine()
@@ -46,8 +46,14 @@ def build_graph_nodes(
 ) -> list[PhaseNode]:
     """Phase 3: typed manifest to executable PhaseNode facades."""
 
-    from .manifest import AgentSkillDef, GraphSkillDef, LLMPhase, LogicPhase, PersonaSkillDef
-    from .phase_node import PhaseNode
+    from graph_agent.core.manifest import (
+        AgentSkillDef,
+        GraphSkillDef,
+        LLMPhase,
+        LogicPhase,
+        PersonaSkillDef,
+    )
+    from graph_agent.core.phase_node import PhaseNode
 
     if isinstance(manifest, PersonaSkillDef):
         raise SkillLoadError(
@@ -138,7 +144,7 @@ def _build_business_data_for_manifest(
     manifest: SkillManifestType,
     schema_engine: SchemaEngine,
 ) -> type[BusinessData]:
-    from . import state as state_module
+    from graph_agent.core import state as state_module
 
     factory = getattr(state_module, "build_business_data_for_skill", None)
     if callable(factory):
@@ -156,8 +162,8 @@ def _fallback_build_business_data_for_skill(
 ) -> type[BusinessData]:
     from pydantic import create_model
 
-    from .manifest import GraphSkillDef, LLMPhase
-    from .state import BusinessData
+    from graph_agent.core.manifest import GraphSkillDef, LLMPhase
+    from graph_agent.core.state import BusinessData
 
     fields: dict[str, Any] = {}
     if isinstance(manifest, GraphSkillDef):
@@ -181,7 +187,7 @@ def _fallback_build_business_data_for_skill(
 def _initial_state_factory(
     business_data_cls: type[BusinessData],
 ) -> Callable[[dict[str, Any] | None], WorkflowState]:
-    from .state import FrameworkState, WorkflowState
+    from graph_agent.core.state import FrameworkState, WorkflowState
 
     def build(initial_data: dict[str, Any] | None = None) -> WorkflowState:
         return WorkflowState(
@@ -194,7 +200,7 @@ def _initial_state_factory(
 
 
 def _phase_node_execute_fn(phase_name: str) -> Callable[[WorkflowState], WorkflowState]:
-    from .state import StateManager
+    from graph_agent.core.state import StateManager
 
     def execute(state: WorkflowState) -> WorkflowState:
         return StateManager.update_framework(state, current_phase=phase_name)
@@ -513,7 +519,7 @@ def resolve_skill_resource(
 
     if kind == "tool" and (module_path_str == "builtin" or module_path_str.startswith("builtin.")):
         try:
-            from ..tools import builtin as _builtin_pkg  # noqa: F401
+            from graph_agent.tools import builtin as _builtin_pkg  # noqa: F401
 
             submod_name = module_path_str[len("builtin") :].lstrip(".")
             full_module = "graph_agent.tools.builtin"
@@ -879,8 +885,8 @@ def _phase_from_graph_phase(
     MVP-0 B1 (2026-04-28).
     """
     del callbacks, loading_stack  # reserved for future cross-skill composition
-    from .manifest import LLMPhase as _LLMPhase
-    from .manifest import LogicPhase as _LogicPhase
+    from graph_agent.core.manifest import LLMPhase as _LLMPhase
+    from graph_agent.core.manifest import LogicPhase as _LogicPhase
 
     if isinstance(phase_def, _LLMPhase):
         tools = [_resolve_tool_reference(ref, base_dir) for ref in phase_def.agent_tools]

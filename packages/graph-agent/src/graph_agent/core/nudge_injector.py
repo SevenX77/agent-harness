@@ -36,14 +36,14 @@ from typing import Any, Literal
 
 from langchain_core.messages import HumanMessage
 
-from ..callbacks.base import Callback
-from ..cognitive.finish import (
+from graph_agent.callbacks.base import Callback
+from graph_agent.cognitive.finish import (
     MIN_FINISH_REASONING_LEN,
     PLANNING_NUDGE,
     SELFCHECK_NUDGE,
     build_standard_nudge_text,
 )
-from .types import Phase
+from graph_agent.core.types import Phase
 
 logger = logging.getLogger(__name__)
 
@@ -105,10 +105,7 @@ class NudgeInjector:
 
         if self._has_structured_selfcheck(finish_payload):
             return NudgeOutcome(message=None, budget_exhausted=False)
-        if (
-            self._selfcheck < self._phase.max_nudges
-            and self._total < self._phase.max_nudges * 2
-        ):
+        if self._selfcheck < self._phase.max_nudges and self._total < self._phase.max_nudges * 2:
             self._selfcheck += 1
             self._total += 1
             self._emit("selfcheck", self._selfcheck)
@@ -204,9 +201,9 @@ class NudgeInjector:
                 try:
                     cb.on_nudge(self._phase.name, count_after)
                 except Exception as exc:
-                    logger.warning('[NudgeInjector] callback error: %s', exc)
+                    logger.warning("[NudgeInjector] callback error: %s", exc)
             except Exception as exc:
-                logger.warning('[NudgeInjector] callback error: %s', exc)
+                logger.warning("[NudgeInjector] callback error: %s", exc)
 
     def _has_structured_selfcheck(self, payload: dict[str, Any]) -> bool:
         """True iff finish_task payload meets the structured-selfcheck bar.

@@ -1,5 +1,4 @@
-"""Skill Analyzer utilities for SKILL.md frontmatter.
-"""
+"""Skill Analyzer utilities for SKILL.md frontmatter."""
 
 from __future__ import annotations
 
@@ -7,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from ..core.parser import _parse_frontmatter
+from graph_agent.core.parser import _parse_frontmatter
 
 logger = logging.getLogger(__name__)
 

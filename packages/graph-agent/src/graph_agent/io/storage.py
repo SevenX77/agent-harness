@@ -28,6 +28,7 @@ Design constraints (see ``.kiro/specs/graph-agent-optimizations/design.md``):
   directories for the same ``skill_id`` (and ``pipeline_prefix`` when set);
   it never walks other skills.
 """
+
 from __future__ import annotations
 
 import json
@@ -175,7 +176,7 @@ class StorageManager:
         # render the artifact panel from the event stream.
         if self._callbacks:
             try:
-                from ..callbacks.events import ArtifactSavedEvent
+                from graph_agent.callbacks.events import ArtifactSavedEvent
 
                 event = ArtifactSavedEvent(
                     phase_name=phase,

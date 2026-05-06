@@ -29,10 +29,10 @@ from typing import Any, cast
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
 
-from .phase_executor import PhaseExecutor
-from .retry_router import RetryRouter
-from .state import WorkflowState
-from .types import Phase
+from graph_agent.core.phase_executor import PhaseExecutor
+from graph_agent.core.retry_router import RetryRouter
+from graph_agent.core.state import WorkflowState
+from graph_agent.core.types import Phase
 
 
 def _executor_from_config(config: RunnableConfig) -> PhaseExecutor:

@@ -35,7 +35,9 @@ def create_chat_model(
     factory intentionally does not read application YAML.
     """
     _ = thinking_enabled
-    resolved_provider = (provider or os.environ.get("GRAPH_AGENT_MODEL_PROVIDER") or "openai").lower()
+    resolved_provider = (
+        provider or os.environ.get("GRAPH_AGENT_MODEL_PROVIDER") or "openai"
+    ).lower()
     resolved_model = model or os.environ.get("GRAPH_AGENT_MODEL") or os.environ.get("OPENAI_MODEL")
     common_kwargs: dict[str, Any] = dict(kwargs)
     if timeout is not None:

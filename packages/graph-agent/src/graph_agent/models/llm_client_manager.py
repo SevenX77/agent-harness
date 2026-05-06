@@ -20,7 +20,7 @@ from anthropic.types import MessageParam
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
-from ..config.llm_config import ProviderDef, ResolvedProvider
+from graph_agent.config.llm_config import ProviderDef, ResolvedProvider
 
 logger = logging.getLogger(__name__)
 
@@ -379,7 +379,9 @@ class LLMClientManager:
             role = str(msg.get("role", "user"))
             content = _coerce_text(msg.get("content", ""))
             if role == "system":
-                system_prompt = f"{system_prompt}\n\n{content}".strip() if system_prompt else content
+                system_prompt = (
+                    f"{system_prompt}\n\n{content}".strip() if system_prompt else content
+                )
             else:
                 prompt_parts.append(content)
 

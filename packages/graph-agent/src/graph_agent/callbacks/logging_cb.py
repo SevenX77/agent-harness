@@ -1,10 +1,11 @@
 """Built-in callback that logs all key events via Python logging."""
+
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from .base import Callback
+from graph_agent.callbacks.base import Callback
 
 logger = logging.getLogger(__name__)
 

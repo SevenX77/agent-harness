@@ -39,8 +39,8 @@ from __future__ import annotations
 
 import logging
 
-from ..callbacks.base import Callback
-from .phase_nodes import (
+from graph_agent.callbacks.base import Callback
+from graph_agent.core.phase_nodes import (
     DependencyContainer,
     HeartbeatProtocol,
     ModelResolverProtocol,
@@ -49,9 +49,9 @@ from .phase_nodes import (
     build_llm_phase_node,
     build_validation_phase_node,
 )
-from .run_context import RunContext
-from .state import WorkflowState
-from .types import Phase
+from graph_agent.core.run_context import RunContext
+from graph_agent.core.state import WorkflowState
+from graph_agent.core.types import Phase
 
 logger = logging.getLogger(__name__)
 
@@ -130,9 +130,7 @@ class PhaseExecutor:
         )
         return node.execute(phase, state)
 
-    def execute_code_only_phase(
-        self, phase: Phase, state: WorkflowState
-    ) -> WorkflowState:
+    def execute_code_only_phase(self, phase: Phase, state: WorkflowState) -> WorkflowState:
         """Dispatch a code-only (``requires_llm=False``) phase to :class:`CodePhaseNode`."""
         node = build_code_phase_node(
             phase,
@@ -142,9 +140,7 @@ class PhaseExecutor:
         )
         return node.execute(phase, state)
 
-    def execute_validation_phase(
-        self, phase: Phase, state: WorkflowState
-    ) -> WorkflowState:
+    def execute_validation_phase(self, phase: Phase, state: WorkflowState) -> WorkflowState:
         """Dispatch the standalone validation graph node to :class:`ValidationPhaseNode`."""
         node = build_validation_phase_node(
             phase,

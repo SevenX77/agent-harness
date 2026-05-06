@@ -26,7 +26,7 @@ from typing import Any, Literal, TypeVar, cast
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
-from ..core.runner import run_skill
+from graph_agent.core.runner import run_skill
 
 logger = logging.getLogger(__name__)
 

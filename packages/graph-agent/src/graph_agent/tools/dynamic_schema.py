@@ -80,8 +80,7 @@ def parse_output_example(block_text: str) -> DynamicSchemaDef:
     schema_name = match.group(1).strip()
     if not _SCHEMA_NAME_RE.match(schema_name):
         raise OutputExampleParseError(
-            f"Invalid output_example schema name {schema_name!r}. "
-            "Use a Python-style identifier."
+            f"Invalid output_example schema name {schema_name!r}. Use a Python-style identifier."
         )
 
     body = match.group(2)
@@ -195,8 +194,7 @@ def coerce_item_against_dynamic_schema(
             coerced[key] = _coerce_value(value, field_def)
         except (TypeError, ValueError) as exc:
             errors.append(
-                f"Field '{key}' value {value!r} cannot coerce to "
-                f"{field_def.type_hint}: {exc}"
+                f"Field '{key}' value {value!r} cannot coerce to {field_def.type_hint}: {exc}"
             )
 
     for field_def in schema.fields:
@@ -245,11 +243,7 @@ def render_dynamic_schema_output_format(schema: DynamicSchemaDef) -> str:
     reference_lines = ["", "字段说明："]
     for field_def in schema.fields:
         required_marker = "（必填）" if field_def.required else "（可选）"
-        default = (
-            f"，默认值 `{field_def.default}`"
-            if field_def.default is not None
-            else ""
-        )
+        default = f"，默认值 `{field_def.default}`" if field_def.default is not None else ""
         reference_lines.append(
             f"- **{field_def.name}** {required_marker}: "
             f"`{field_def.type_hint}`{default} — {field_def.description or '（无描述）'}"

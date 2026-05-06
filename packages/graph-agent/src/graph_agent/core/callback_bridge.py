@@ -11,7 +11,7 @@ from uuid import UUID
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
-from ..callbacks.base import Callback
+from graph_agent.callbacks.base import Callback
 
 logger = logging.getLogger(__name__)
 
@@ -100,8 +100,12 @@ class _HarnessCallbackBridge(BaseCallbackHandler):
         del kwargs
         input_tokens, output_tokens = self._extract_tokens(response)
 
-        self._metrics["total_input_tokens"] = self._metrics.get("total_input_tokens", 0) + input_tokens
-        self._metrics["total_output_tokens"] = self._metrics.get("total_output_tokens", 0) + output_tokens
+        self._metrics["total_input_tokens"] = (
+            self._metrics.get("total_input_tokens", 0) + input_tokens
+        )
+        self._metrics["total_output_tokens"] = (
+            self._metrics.get("total_output_tokens", 0) + output_tokens
+        )
 
         run_key = str(run_id) if run_id is not None else ""
         prompt_messages = self._pending_messages.pop(run_key, [])
@@ -140,7 +144,7 @@ class _HarnessCallbackBridge(BaseCallbackHandler):
             parsed = json.loads(input_str) if input_str else {}
             args = parsed if isinstance(parsed, dict) else {"input": parsed}
         except Exception as exc:
-            logger.warning('[Bridge] Tool input JSON parse failed in %s: %s', self.phase_name, exc)
+            logger.warning("[Bridge] Tool input JSON parse failed in %s: %s", self.phase_name, exc)
             args = {"input": input_str}
         self._pending_tools[str(run_id)] = {
             "tool_name": tool_name,
@@ -184,13 +188,17 @@ class _HarnessCallbackBridge(BaseCallbackHandler):
             except Exception as exc:
                 logger.warning("[Bridge] callback error in %s: %s", self.phase_name, exc)
 
-    def on_llm_error(self, error: BaseException, *, run_id: UUID | None = None, **kwargs: Any) -> None:
+    def on_llm_error(
+        self, error: BaseException, *, run_id: UUID | None = None, **kwargs: Any
+    ) -> None:
         del kwargs
         run_key = str(run_id) if run_id is not None else ""
         self._pending_messages.pop(run_key, None)
         logger.warning("[Bridge] LLM error in %s: %s", self.phase_name, error)
 
-    def on_tool_error(self, error: BaseException, *, run_id: UUID | None = None, **kwargs: Any) -> None:
+    def on_tool_error(
+        self, error: BaseException, *, run_id: UUID | None = None, **kwargs: Any
+    ) -> None:
         del kwargs
         run_key = str(run_id) if run_id is not None else ""
         self._pending_tools.pop(run_key, {})
@@ -231,8 +239,12 @@ class _HarnessCallbackBridge(BaseCallbackHandler):
                 if isinstance(response_metadata, dict):
                     usage = response_metadata.get("usage", {})
                     if isinstance(usage, dict):
-                        input_tokens = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
-                        output_tokens = int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
+                        input_tokens = int(
+                            usage.get("input_tokens") or usage.get("prompt_tokens") or 0
+                        )
+                        output_tokens = int(
+                            usage.get("output_tokens") or usage.get("completion_tokens") or 0
+                        )
                         if input_tokens or output_tokens:
                             return (input_tokens, output_tokens)
 
@@ -286,10 +298,7 @@ class _HarnessCallbackBridge(BaseCallbackHandler):
                 or llm_output.get("token_usage")
                 or llm_output.get("usage_metadata")
             )
-            data["model_name"] = (
-                llm_output.get("model_name")
-                or llm_output.get("model")
-            )
+            data["model_name"] = llm_output.get("model_name") or llm_output.get("model")
 
         generations = getattr(response, "generations", None)
         if not generations or not generations[0]:
@@ -320,9 +329,7 @@ class _HarnessCallbackBridge(BaseCallbackHandler):
         gen_info = getattr(gen, "generation_info", None) or {}
         if isinstance(gen_info, dict):
             data["stop_reason"] = (
-                gen_info.get("finish_reason")
-                or gen_info.get("stop_reason")
-                or gen_info.get("stop")
+                gen_info.get("finish_reason") or gen_info.get("stop_reason") or gen_info.get("stop")
             )
         return data
 

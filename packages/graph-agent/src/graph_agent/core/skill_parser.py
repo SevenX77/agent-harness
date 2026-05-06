@@ -6,8 +6,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from .exceptions import SkillLoadError
-from .parser import _parse_frontmatter, _strip_frontmatter
+from graph_agent.core.exceptions import SkillLoadError
+from graph_agent.core.parser import _parse_frontmatter, _strip_frontmatter
 
 _MARKDOWN_HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
 _OUTPUT_SCHEMA_TITLE_RE = re.compile(

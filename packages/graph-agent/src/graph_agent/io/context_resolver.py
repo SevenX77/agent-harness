@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ..core.exceptions import SkillLoadError
+from graph_agent.core.exceptions import SkillLoadError
 
 _MAX_CONTEXT_PATH_DEPTH = 32
 _SCALAR_TYPES = (str, bytes, int, float, bool)
@@ -54,8 +54,7 @@ class ContextResolver:
                 result[key] = self._resolve_expr(expr, raw_inputs)
             except Exception as exc:
                 raise SkillLoadError(
-                    f"Failed to resolve context_mapping key '{key}' "
-                    f"with expression '{expr}': {exc}"
+                    f"Failed to resolve context_mapping key '{key}' with expression '{expr}': {exc}"
                 ) from exc
         return result
 

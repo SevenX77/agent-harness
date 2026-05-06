@@ -1,4 +1,5 @@
 """Factory for converting SubSkill declarations into LangChain StructuredTools."""
+
 from __future__ import annotations
 
 import logging
@@ -91,7 +92,7 @@ def build_skill_tool(
     input_model = _build_input_model(spec.name, spec.input_schema)
 
     def _execute(**kwargs: Any) -> str:
-        from .runner import run_skill
+        from graph_agent.core.runner import run_skill
 
         thread_id = f"sub_{parent_thread_id or 'root'}_{spec.name}_{uuid4().hex[:8]}"
         trace_dir = (parent_trace_dir / f"sub_{spec.name}") if parent_trace_dir else None

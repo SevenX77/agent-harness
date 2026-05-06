@@ -19,7 +19,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from typing_extensions import override
 
-from ..callbacks.base import Callback
+from graph_agent.callbacks.base import Callback
 
 logger = logging.getLogger(__name__)
 
@@ -48,10 +48,7 @@ def _has_max_input_profile(model: Any) -> bool:
         profile = model.profile
     except AttributeError:
         return False
-    return (
-        isinstance(profile, Mapping)
-        and isinstance(profile.get("max_input_tokens"), int)
-    )
+    return isinstance(profile, Mapping) and isinstance(profile.get("max_input_tokens"), int)
 
 
 def _ensure_summarization_profile(model: Any) -> Any:
@@ -144,7 +141,11 @@ class WorkingMemoryMiddleware(AgentMiddleware[AgentState[Any]]):
             return {"messages": [reminder]}
 
         messages = list(state.get("messages", []))
-        if messages and isinstance(messages[-1], HumanMessage) and getattr(messages[-1], "name", "") == "working_memory_update":
+        if (
+            messages
+            and isinstance(messages[-1], HumanMessage)
+            and getattr(messages[-1], "name", "") == "working_memory_update"
+        ):
             return None
         reminder = HumanMessage(name="working_memory_update", content=wm_text)
         return {"messages": [reminder]}
@@ -267,7 +268,7 @@ class AgentLoopIterationMiddleware(AgentMiddleware[AgentState[Any]]):
     ) -> dict[str, Any] | None:
         self._iteration += 1
         try:
-            from ..callbacks.events import AgentLoopIterationEvent
+            from graph_agent.callbacks.events import AgentLoopIterationEvent
 
             event = AgentLoopIterationEvent(
                 phase_name=self._phase_name,
@@ -304,8 +305,7 @@ class UnattendedClarificationMiddleware(AgentMiddleware[AgentState[Any]]):
         error_msg = f"JSON parse failed: {exc}. Please retry with valid JSON."
         tool_name = str(request.tool_call.get("name") or self._TOOL_NAME)
         logger.warning(
-            "phase=%s action=middleware_parse fallback "
-            "from=parse_json to=llm_retry reason=%s",
+            "phase=%s action=middleware_parse fallback from=parse_json to=llm_retry reason=%s",
             self._phase_name,
             type(exc).__name__,
         )
@@ -349,9 +349,7 @@ class UnattendedClarificationMiddleware(AgentMiddleware[AgentState[Any]]):
             "  - 该推测的依据：[依据]\n"
             "现在请继续执行后续步骤。"
         )
-        logger.info(
-            "[UnattendedClarification] auto-answered ask_clarification"
-        )
+        logger.info("[UnattendedClarification] auto-answered ask_clarification")
         return Command(
             update={
                 "messages": [
@@ -371,10 +369,7 @@ class UnattendedClarificationMiddleware(AgentMiddleware[AgentState[Any]]):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
     ) -> ToolMessage | Command[Any]:
-        if (
-            not self.unattended
-            or request.tool_call.get("name") != self._TOOL_NAME
-        ):
+        if not self.unattended or request.tool_call.get("name") != self._TOOL_NAME:
             return handler(request)
         return self._auto_response(request)
 
@@ -384,10 +379,7 @@ class UnattendedClarificationMiddleware(AgentMiddleware[AgentState[Any]]):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
     ) -> ToolMessage | Command[Any]:
-        if (
-            not self.unattended
-            or request.tool_call.get("name") != self._TOOL_NAME
-        ):
+        if not self.unattended or request.tool_call.get("name") != self._TOOL_NAME:
             return await handler(request)
         return self._auto_response(request)
 
@@ -445,8 +437,7 @@ def create_custom_middlewares(
 
     if loop_detection:
         logger.info(
-            "middleware: loop detection requested but disabled in MVP-0 cleanup "
-            "(warn=%d hard=%d)",
+            "middleware: loop detection requested but disabled in MVP-0 cleanup (warn=%d hard=%d)",
             loop_detection_warn_threshold,
             loop_detection_hard_limit,
         )
@@ -455,11 +446,7 @@ def create_custom_middlewares(
         effective_unattended = bool(
             unattended
             if unattended is not None
-            else (
-                context_ref.get("_unattended")
-                if isinstance(context_ref, dict)
-                else False
-            )
+            else (context_ref.get("_unattended") if isinstance(context_ref, dict) else False)
         )
         if effective_unattended:
             middlewares.append(
@@ -469,11 +456,10 @@ def create_custom_middlewares(
                 )
             )
             logger.info(
-                "middleware: enabled UnattendedClarification "
-                "(auto-answer ask_clarification)"
+                "middleware: enabled UnattendedClarification (auto-answer ask_clarification)"
             )
         else:
-            from .clarification_middleware import ClarificationMiddleware
+            from graph_agent.cognitive.clarification_middleware import ClarificationMiddleware
 
             middlewares.append(ClarificationMiddleware())
             logger.info("middleware: enabled Clarification (Human-in-the-Loop)")
@@ -485,8 +471,6 @@ def create_custom_middlewares(
             summarization_keep_messages,
         )
     elif summarization and summarization_model is None:
-        logger.warning(
-            "middleware: summarization=True but summarization_model is None; skipping"
-        )
+        logger.warning("middleware: summarization=True but summarization_model is None; skipping")
 
     return middlewares

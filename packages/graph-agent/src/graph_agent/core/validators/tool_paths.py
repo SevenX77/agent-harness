@@ -15,6 +15,7 @@ named ``func``) stays at load time — covering it statically would require
 either AST-parsing (brittle on decorators / dynamic defs) or executing
 the module (defeats the no-side-effect invariant).
 """
+
 from __future__ import annotations
 
 import ast
@@ -22,8 +23,8 @@ import importlib.util
 import logging
 from pathlib import Path
 
-from ..compiler import CompileIssue
-from ..manifest import (
+from graph_agent.core.compiler import CompileIssue
+from graph_agent.core.manifest import (
     AgentSkillDef,
     GraphSkillDef,
     LLMPhase,
@@ -100,21 +101,23 @@ def _check_one(
     check_nested_run_skill: bool = False,
 ) -> None:
     if "." not in ref:
-        issues.append(CompileIssue(
-            rule_id="F-tool-path-invalid-format",
-            severity="FATAL",
-            location=location,
-            message=(
-                f"Tool reference '{ref}' has no '.' separator. "
-                f"Expected format: module.path.function_name."
-            ),
-        ))
+        issues.append(
+            CompileIssue(
+                rule_id="F-tool-path-invalid-format",
+                severity="FATAL",
+                location=location,
+                message=(
+                    f"Tool reference '{ref}' has no '.' separator. "
+                    f"Expected format: module.path.function_name."
+                ),
+            )
+        )
         return
 
     module_path_str, _func_name = ref.rsplit(".", 1)
 
     if module_path_str == "builtin" or module_path_str.startswith("builtin."):
-        submod = module_path_str[len("builtin"):].lstrip(".")
+        submod = module_path_str[len("builtin") :].lstrip(".")
         full_module = "graph_agent.tools.builtin"
         if submod:
             full_module = f"{full_module}.{submod}"
@@ -123,15 +126,17 @@ def _check_one(
         except (ImportError, ValueError, OSError):
             spec = None
         if spec is None:
-            issues.append(CompileIssue(
-                rule_id="F-tool-path-not-found",
-                severity="FATAL",
-                location=location,
-                message=(
-                    f"Builtin tool reference '{ref}' resolves to module "
-                    f"'{full_module}', which is not importable."
-                ),
-            ))
+            issues.append(
+                CompileIssue(
+                    rule_id="F-tool-path-not-found",
+                    severity="FATAL",
+                    location=location,
+                    message=(
+                        f"Builtin tool reference '{ref}' resolves to module "
+                        f"'{full_module}', which is not importable."
+                    ),
+                )
+            )
         return
 
     # Local path: derive base_dir/module/parts → .py file or package
@@ -160,46 +165,50 @@ def _check_one(
             init_file.resolve(),
         ]
     except (OSError, RuntimeError) as exc:
-        issues.append(CompileIssue(
-            rule_id="F-tool-path-not-found",
-            severity="FATAL",
-            location=location,
-            message=(
-                f"Tool reference '{ref}' could not be resolved on disk: {exc}"
-            ),
-        ))
+        issues.append(
+            CompileIssue(
+                rule_id="F-tool-path-not-found",
+                severity="FATAL",
+                location=location,
+                message=(f"Tool reference '{ref}' could not be resolved on disk: {exc}"),
+            )
+        )
         return
     escape_target = next(
         (c for c in candidates_to_check if not _is_within(c, resolved_base)),
         None,
     )
     if escape_target is not None:
-        issues.append(CompileIssue(
-            rule_id="F-tool-path-escape",
-            severity="FATAL",
-            location=location,
-            message=(
-                f"Tool reference '{ref}' resolves to '{escape_target}', "
-                f"which is outside the skill's base directory "
-                f"'{resolved_base}'. References that escape the skill tree "
-                f"(including via symlinks pointing out) are rejected to "
-                f"keep static-compile behaviour consistent with load-time "
-                f"path-anchored resolution."
-            ),
-        ))
+        issues.append(
+            CompileIssue(
+                rule_id="F-tool-path-escape",
+                severity="FATAL",
+                location=location,
+                message=(
+                    f"Tool reference '{ref}' resolves to '{escape_target}', "
+                    f"which is outside the skill's base directory "
+                    f"'{resolved_base}'. References that escape the skill tree "
+                    f"(including via symlinks pointing out) are rejected to "
+                    f"keep static-compile behaviour consistent with load-time "
+                    f"path-anchored resolution."
+                ),
+            )
+        )
         return
 
     if not py_file.is_file() and not init_file.is_file():
-        issues.append(CompileIssue(
-            rule_id="F-tool-path-not-found",
-            severity="FATAL",
-            location=location,
-            message=(
-                f"Tool reference '{ref}' resolves to module file "
-                f"'{py_file}' or package '{init_file}', neither of "
-                f"which exists."
-            ),
-        ))
+        issues.append(
+            CompileIssue(
+                rule_id="F-tool-path-not-found",
+                severity="FATAL",
+                location=location,
+                message=(
+                    f"Tool reference '{ref}' resolves to module file "
+                    f"'{py_file}' or package '{init_file}', neither of "
+                    f"which exists."
+                ),
+            )
+        )
         return
 
     if check_nested_run_skill:

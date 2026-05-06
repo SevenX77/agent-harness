@@ -13,7 +13,13 @@ export interface StudioNodeData {
 }
 
 export const SubgraphNode = memo(({ data, isConnectable, selected }: NodeProps<StudioNodeData>) => (
-  <div className={`min-w-[220px] rounded-md border-2 bg-violet-50 px-4 py-3 shadow-sm transition-all cursor-pointer hover:shadow-md dark:bg-violet-950/40 ${selected ? 'ring-2 ring-violet-500 shadow-lg border-violet-500 dark:border-violet-500' : data.isExpanded ? 'border-violet-500 dark:border-violet-600' : 'border-violet-200 dark:border-violet-800'}`}>
+  <div
+    role="button"
+    tabIndex={0}
+    aria-label={`Phase ${data.label}, subgraph node`}
+    aria-pressed={selected}
+    className={`min-w-[220px] rounded-md border-2 bg-violet-50 px-4 py-3 shadow-sm transition-all cursor-pointer hover:shadow-md focus:outline-none focus:ring-2 focus:ring-violet-500 dark:bg-violet-950/40 ${selected ? 'ring-2 ring-violet-500 shadow-lg border-violet-500 dark:border-violet-500' : data.isExpanded ? 'border-violet-500 dark:border-violet-600' : 'border-violet-200 dark:border-violet-800'}`}
+  >
     <Handle type="target" position={Position.Top} isConnectable={isConnectable} className="h-3 w-3 bg-violet-400 dark:bg-violet-500" />
 
     <div className="flex items-center justify-between gap-3">
@@ -29,6 +35,7 @@ export const SubgraphNode = memo(({ data, isConnectable, selected }: NodeProps<S
 
       <button
         type="button"
+        aria-label={data.isExpanded ? `Collapse subgraph ${data.label}` : `Expand subgraph ${data.label}`}
         onClick={data.onToggleExpand}
         className="rounded-full p-1 text-violet-500 transition-colors hover:bg-violet-100 dark:text-violet-400 dark:hover:bg-violet-900/60"
         title={data.isExpanded ? 'Collapse subgraph' : 'Expand subgraph'}
@@ -50,7 +57,13 @@ export const SubgraphNode = memo(({ data, isConnectable, selected }: NodeProps<S
 ))
 
 export const AgentNode = memo(({ data, isConnectable, selected }: NodeProps<StudioNodeData>) => (
-  <div className={`min-w-[220px] rounded-md border bg-sky-50 px-4 py-3 shadow-sm transition-all cursor-pointer hover:shadow-md dark:bg-sky-950/40 ${selected ? 'ring-2 ring-sky-500 shadow-lg border-sky-400 dark:border-sky-500' : 'border-sky-200 dark:border-sky-800'}`}>
+  <div
+    role="button"
+    tabIndex={0}
+    aria-label={`Phase ${data.label}, ${data.mode ?? 'llm'} node`}
+    aria-pressed={selected}
+    className={`min-w-[220px] rounded-md border bg-sky-50 px-4 py-3 shadow-sm transition-all cursor-pointer hover:shadow-md focus:outline-none focus:ring-2 focus:ring-sky-500 dark:bg-sky-950/40 ${selected ? 'ring-2 ring-sky-500 shadow-lg border-sky-400 dark:border-sky-500' : 'border-sky-200 dark:border-sky-800'}`}
+  >
     <Handle type="target" position={Position.Top} isConnectable={isConnectable} className="h-3 w-3 bg-sky-400 dark:bg-sky-500" />
 
     <div className="flex items-center justify-between gap-3">

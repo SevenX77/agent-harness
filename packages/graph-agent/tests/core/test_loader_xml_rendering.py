@@ -6,8 +6,6 @@ import logging
 import sys
 from pathlib import Path
 
-from pydantic import BaseModel, Field, TypeAdapter
-
 from graph_agent.core.loader import (
     _compose_agent_system_prompt,
     _phase_from_agent_skill,
@@ -15,6 +13,7 @@ from graph_agent.core.loader import (
     _render_skill_section_xml_tags,
 )
 from graph_agent.core.manifest import AgentSkillDef, GraphSkillDef, SkillManifest
+from pydantic import BaseModel, Field, TypeAdapter
 
 _SKILL_ADAPTER = TypeAdapter(SkillManifest)
 

@@ -12,10 +12,9 @@ from __future__ import annotations
 
 import pytest
 import yaml
-from pydantic import TypeAdapter
-
 from graph_agent.core.manifest import SkillManifest
 from graph_agent.core.serialize import serialize_skill
+from pydantic import TypeAdapter
 
 _SKILL_ADAPTER = TypeAdapter(SkillManifest)
 

@@ -12,12 +12,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from pydantic import BaseModel, Field
-
 from graph_agent.callbacks.base import Callback
 from graph_agent.core.phase_executor import PhaseExecutor
 from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
 from graph_agent.core.types import Phase
+from pydantic import BaseModel, Field
 
 
 class _RecordingCallback(Callback):

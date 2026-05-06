@@ -26,8 +26,6 @@ against schema_version 2.0.
 from __future__ import annotations
 
 import pytest
-from pydantic import TypeAdapter, ValidationError
-
 from graph_agent.core.manifest import (
     AgentProfile,
     AgentSkillDef,
@@ -38,6 +36,7 @@ from graph_agent.core.manifest import (
     PersonaSkillDef,
     SkillManifest,
 )
+from pydantic import TypeAdapter, ValidationError
 
 # DelegatePhase / ParallelDelegatePhase removed in MVP-0 B1 (2026-04-28).
 

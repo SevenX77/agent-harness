@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from graph_agent.tools.dynamic_schema import parse_output_example
 from graph_agent.core.compiler import CompileIssue
 from graph_agent.core.manifest import GraphSkillDef, LLMPhase
+from graph_agent.tools.dynamic_schema import parse_output_example
 
 
 def check_validator_required(manifest: GraphSkillDef) -> list[CompileIssue]:

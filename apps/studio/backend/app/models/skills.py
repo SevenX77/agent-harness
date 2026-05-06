@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from graph_agent.core.manifest import SkillManifest
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.lint import LintResult
 from app.models.runs import RunMetadata
-from graph_agent.core.manifest import SkillManifest
 
 
 class SkillSummary(BaseModel):

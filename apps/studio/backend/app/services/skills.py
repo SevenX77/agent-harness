@@ -10,6 +10,11 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi.encoders import jsonable_encoder
+from graph_agent import compile_skill
+from graph_agent.core.compiler import CompileIssue
+from graph_agent.core.loader import SkillLoader
+from graph_agent.core.manifest import AgentSkillDef, GraphSkillDef, PersonaSkillDef, SkillManifest
+from graph_agent.core.parser import parse_skill_file
 from pydantic import TypeAdapter
 
 from app.core import config
@@ -20,15 +25,14 @@ from app.models.errors import LintError
 from app.models.lint import LintResult
 from app.models.runs import RunMetadata
 from app.models.skills import SkillDetail, SkillSummary
-from graph_agent import compile_skill
-from graph_agent.core.compiler import CompileIssue
-from graph_agent.core.loader import SkillLoader
-from graph_agent.core.manifest import AgentSkillDef, GraphSkillDef, PersonaSkillDef, SkillManifest
-from graph_agent.core.parser import parse_skill_file
 
 _LOCATION_RE = re.compile(r"SKILL\.md:(?P<line>\d+)(?::(?P<loc>.*))?$")
-_NAME_LINE_RE = re.compile(r"(?m)^(?P<prefix>name:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\n]+)(?P=quote)\s*$")
-_ID_LINE_RE = re.compile(r"(?m)^(?P<prefix>id:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\n]+)(?P=quote)\s*$")
+_NAME_LINE_RE = re.compile(
+    r"(?m)^(?P<prefix>name:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\n]+)(?P=quote)\s*$"
+)
+_ID_LINE_RE = re.compile(
+    r"(?m)^(?P<prefix>id:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\n]+)(?P=quote)\s*$"
+)
 
 
 def ensure_workspace_layout() -> None:

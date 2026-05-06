@@ -11,16 +11,16 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from graph_agent.core.exceptions import SkillCompilationError, SkillLoadError
+from graph_agent.core.personas import resolve_persona
+from graph_agent.core.schema_engine import SchemaEngine
+from graph_agent.core.types import Phase
 from graph_agent.tools.dynamic_schema import (
     DynamicSchemaDef,
     OutputExampleParseError,
     parse_output_example,
     render_dynamic_schema_output_format,
 )
-from graph_agent.core.exceptions import SkillCompilationError, SkillLoadError
-from graph_agent.core.personas import resolve_persona
-from graph_agent.core.schema_engine import SchemaEngine
-from graph_agent.core.types import Phase
 
 if TYPE_CHECKING:
     from graph_agent.core.manifest import AgentSkillDef, LLMPhase, LogicPhase, PersonaSkillDef
@@ -225,7 +225,8 @@ def _phase_from_agent_manifest_for_nodes(
     if manifest.adopted_persona is not None:
         if skill_base_dir is None:
             raise SkillLoadError(
-                f"Cannot resolve adopted_persona {manifest.adopted_persona!r} without skill base dir"
+                f"Cannot resolve adopted_persona {manifest.adopted_persona!r} "
+                "without skill base dir"
             )
         persona_manifest = resolve_persona(
             manifest.adopted_persona,
@@ -301,7 +302,8 @@ def _llm_phase_for_node(
     if phase_def.adopted_persona is not None:
         if skill_base_dir is None:
             raise SkillLoadError(
-                f"Cannot resolve adopted_persona {phase_def.adopted_persona!r} without skill base dir"
+                f"Cannot resolve adopted_persona {phase_def.adopted_persona!r} "
+                "without skill base dir"
             )
         persona_manifest = resolve_persona(
             phase_def.adopted_persona,

@@ -15,12 +15,12 @@ The factory keeps the existing dispatch invariants visible:
 
 from __future__ import annotations
 
-from graph_agent.core.run_context import RunContext
-from graph_agent.core.types import Phase
 from graph_agent.core.phase_nodes.base import DependencyContainer, HeartbeatProtocol, PhaseNode
 from graph_agent.core.phase_nodes.code_phase_node import CodePhaseNode
 from graph_agent.core.phase_nodes.llm_phase_node import LLMPhaseNode
 from graph_agent.core.phase_nodes.validation_phase_node import ValidationPhaseNode
+from graph_agent.core.run_context import RunContext
+from graph_agent.core.types import Phase
 
 
 def build_llm_phase_node(

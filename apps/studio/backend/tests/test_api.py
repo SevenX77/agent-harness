@@ -12,7 +12,6 @@ from app.services.event_bus import event_bus
 from app.services.run_manager import run_manager
 from app.services.terminal_manager import terminal_manager
 from fastapi.testclient import TestClient
-
 from graph_agent.callbacks.events import (
     FinishTaskEvent,
     LLMCallEvent,
@@ -21,6 +20,7 @@ from graph_agent.callbacks.events import (
     RunEndedEvent,
     RunStartedEvent,
 )
+
 from tests.conftest import copy_skill
 
 

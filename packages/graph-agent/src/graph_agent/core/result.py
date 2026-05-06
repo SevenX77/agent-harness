@@ -20,7 +20,7 @@ class WorkflowMetrics(BaseModel):
     wall_time_sec: float = 0.0
 
     @classmethod
-    def from_mapping(cls, raw: dict[str, Any], *, wall_time_sec: float) -> "WorkflowMetrics":
+    def from_mapping(cls, raw: dict[str, Any], *, wall_time_sec: float) -> WorkflowMetrics:
         """Build metrics while preserving legacy token keys as extras."""
         input_tokens = int(raw.get("input_tokens", raw.get("total_input_tokens", 0)) or 0)
         output_tokens = int(raw.get("output_tokens", raw.get("total_output_tokens", 0)) or 0)

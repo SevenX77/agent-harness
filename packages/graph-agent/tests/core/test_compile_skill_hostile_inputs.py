@@ -19,12 +19,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from pydantic import TypeAdapter
-
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.manifest import SkillManifest
 from graph_agent.core.validators.persona_resolution import check_persona_resolution
 from graph_agent.core.validators.tool_paths import check_tool_paths
+from pydantic import TypeAdapter
 
 
 def test_compile_skill_with_invalid_utf8_returns_fatal_not_raise(

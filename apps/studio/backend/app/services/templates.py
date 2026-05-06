@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from app.models.templates import SkillTemplate
 from graph_agent.core.parser import parse_skill_file
+
+from app.models.templates import SkillTemplate
 
 TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "templates"
 

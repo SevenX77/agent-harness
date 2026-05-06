@@ -4,14 +4,13 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_core.runnables import Runnable
-
 from graph_agent.callbacks.base import Callback
 from graph_agent.callbacks.events import CallbackEvent, LLMFallbackEvent
 from graph_agent.config.llm_config import ModelDef, ProviderDef, ResolvedProvider, ResolvedRole
 from graph_agent.models.gateway_chat_model import GatewayChatModel, _langchain_messages_to_dict
 from graph_agent.models.llm_client_manager import LLMClientManager
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.runnables import Runnable
 
 
 class RecordingCallback(Callback):

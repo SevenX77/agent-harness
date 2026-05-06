@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from langchain_core.language_models.chat_models import BaseChatModel
-
 from graph_agent.callbacks.base import Callback
 from graph_agent.callbacks.events import CallbackEvent
 from graph_agent.config.llm_config import (
@@ -22,6 +20,7 @@ from graph_agent.models import resolver as resolver_module
 from graph_agent.models.gateway_chat_model import GatewayChatModel
 from graph_agent.models.llm_client_manager import LLMClientManager
 from graph_agent.models.resolver import ModelResolver
+from langchain_core.language_models.chat_models import BaseChatModel
 
 
 class RecordingCallback(Callback):

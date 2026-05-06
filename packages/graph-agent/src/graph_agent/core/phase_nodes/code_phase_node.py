@@ -13,9 +13,9 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
+from graph_agent.core.phase_nodes.base import PhaseNode
 from graph_agent.core.state import StateManager, WorkflowState
 from graph_agent.core.types import Phase
-from graph_agent.core.phase_nodes.base import PhaseNode
 
 logger = logging.getLogger(__name__)
 

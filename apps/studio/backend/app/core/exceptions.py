@@ -10,10 +10,10 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from graph_agent.core.exceptions import SkillCompileError
 from pydantic import ValidationError
 
 from app.models.errors import ErrorResponse
-from graph_agent.core.exceptions import SkillCompileError
 
 RetryStrategy = Literal["idempotent", "not_retryable", "backoff"]
 ExceptionHandler = Callable[[Request, Exception], JSONResponse | Awaitable[JSONResponse]]
@@ -227,4 +227,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         RequestValidationError,
         cast(ExceptionHandler, request_validation_error_handler),
     )
-    app.add_exception_handler(SkillCompileError, cast(ExceptionHandler, skill_compile_error_handler))
+    app.add_exception_handler(
+        SkillCompileError,
+        cast(ExceptionHandler, skill_compile_error_handler),
+    )

@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from graph_agent.core import runner
 from graph_agent.core.exceptions import LoaderError
 

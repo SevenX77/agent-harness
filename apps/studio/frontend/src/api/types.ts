@@ -49,6 +49,40 @@ export interface RunRequest {
   paste_json?: string | null
 }
 
+export interface TestInputMetadata {
+  id: string
+  name: string
+  created_at: string
+  size_bytes: number
+  content_preview: string
+}
+
+export interface BatchRunRequest {
+  input_ids: string[]
+}
+
+export interface BatchRunResponse {
+  batch_id: string
+  sub_run_ids: string[]
+}
+
+export interface BatchRunItem {
+  input_id: string
+  run_id: string
+  status: 'running' | 'success' | 'failed'
+  started_at: string
+  metrics: TokensMetrics | null
+}
+
+export interface BatchRunStatus {
+  batch_id: string
+  skill_id: string
+  status: 'running' | 'success' | 'failed'
+  total: number
+  completed: number
+  items: BatchRunItem[]
+}
+
 export interface RunMetadata {
   run_id: string
   status: 'running' | 'success' | 'failed'

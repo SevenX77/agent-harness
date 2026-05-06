@@ -1,5 +1,14 @@
-import { FileText, GitCompareArrows, History, MessageSquare, Terminal as TerminalIcon } from 'lucide-react'
-import type { CallbackEvent, CompareResult, GraphSkillDef, LintError, RunDetail, TerminalSession } from '../api/types'
+import { FileText, GitCompareArrows, History, ListChecks, MessageSquare, Terminal as TerminalIcon } from 'lucide-react'
+import type {
+  BatchRunStatus,
+  CallbackEvent,
+  CompareResult,
+  GraphSkillDef,
+  LintError,
+  RunDetail,
+  TerminalSession,
+  TestInputMetadata,
+} from '../api/types'
 import type { ActiveTab, ApiKeyName, ApiKeys, TerminalStatus, ToastKind } from '../types/studio'
 import { MonacoPanel } from './MonacoPanel'
 import type { EditorOnMount } from './MonacoPanel'
@@ -7,7 +16,9 @@ import { SettingsPanel } from './SettingsPanel'
 import { TerminalPanel } from './TerminalPanel'
 import { TracePanel } from './TracePanel'
 import { DiffView } from './diff/DiffView'
+import { BatchSummary } from './history/BatchSummary'
 import { HistoryPanel } from './history/HistoryPanel'
+import { BatchRunner } from './playground/BatchRunner'
 
 interface RightPanelProps {
   activeTab: ActiveTab
@@ -20,6 +31,12 @@ interface RightPanelProps {
   diffLoading: boolean
   diffError: string | null
   canDiffRun: boolean
+  batchInputs: TestInputMetadata[]
+  selectedBatchInputIds: string[]
+  batchStatus: BatchRunStatus | null
+  batchInputsLoading: boolean
+  batchRunning: boolean
+  batchError: string | null
   terminalSession: TerminalSession | null
   terminalStatus: TerminalStatus
   currentGraphSkill: GraphSkillDef | null
@@ -34,6 +51,10 @@ interface RightPanelProps {
   onPromoteToGolden: () => void
   onReplayRun: (detail: RunDetail) => void
   onCompareHistoryRun: (runId: string) => void
+  onToggleBatchInput: (inputId: string) => void
+  onRunBatch: () => void
+  onRefreshBatchInputs: () => void
+  onOpenBatchRun: (runId: string) => void
   selectedTracePhaseId: string | null
   selectedTraceEventId: string | null
   traceLinkEnabled: boolean
@@ -55,6 +76,12 @@ export function RightPanel({
   diffLoading,
   diffError,
   canDiffRun,
+  batchInputs,
+  selectedBatchInputIds,
+  batchStatus,
+  batchInputsLoading,
+  batchRunning,
+  batchError,
   terminalSession,
   terminalStatus,
   currentGraphSkill,
@@ -69,6 +96,10 @@ export function RightPanel({
   onPromoteToGolden,
   onReplayRun,
   onCompareHistoryRun,
+  onToggleBatchInput,
+  onRunBatch,
+  onRefreshBatchInputs,
+  onOpenBatchRun,
   selectedTracePhaseId,
   selectedTraceEventId,
   traceLinkEnabled,
@@ -86,6 +117,7 @@ export function RightPanel({
           ['trace', MessageSquare, 'Trace'],
           ['diff', GitCompareArrows, 'Diff'],
           ['history', History, 'History'],
+          ['batch', ListChecks, 'Batch'],
           ['terminal', TerminalIcon, 'CLI'],
         ] as const).map(([tab, Icon, label]) => (
           <button
@@ -164,6 +196,22 @@ export function RightPanel({
             onCompare={onCompareHistoryRun}
             pushToast={pushToast}
           />
+        ) : null}
+
+        {activeTab === 'batch' ? (
+          <div className="flex h-full flex-col">
+            <BatchRunner
+              inputs={batchInputs}
+              selectedIds={selectedBatchInputIds}
+              loading={batchInputsLoading}
+              running={batchRunning}
+              error={batchError}
+              onToggleInput={onToggleBatchInput}
+              onRunBatch={onRunBatch}
+              onRefresh={onRefreshBatchInputs}
+            />
+            <BatchSummary status={batchStatus} onOpenRun={onOpenBatchRun} />
+          </div>
         ) : null}
       </div>
 

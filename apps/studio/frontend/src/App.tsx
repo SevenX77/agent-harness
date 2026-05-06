@@ -460,12 +460,26 @@ export default function App() {
   }, [goldenDiff, lastRunId, mutateSkillDetail, mutateSkills, pushToast, selectedSkillId])
 
   const handleReplayHistoryRun = useCallback((detail: RunDetail) => {
-    pushToast(`Replay wiring pending for ${detail.metadata.run_id}`, 'info')
-  }, [pushToast])
+    if (!detail.input_data) {
+      pushToast('This run has no saved input data to replay.', 'error')
+      return
+    }
+    setPlaygroundPayload(detail.input_data)
+    void handleRun(detail.input_data)
+    pushToast(`Replaying ${detail.metadata.run_id}`, 'info')
+  }, [handleRun, pushToast])
 
-  const handleCompareHistoryRun = useCallback((runId: string) => {
-    pushToast(`Compare wiring pending for ${runId}`, 'info')
-  }, [pushToast])
+  const handleCompareHistoryRun = useCallback(async (runId: string) => {
+    if (!selectedSkillId) {
+      return
+    }
+    setLastRunId(runId)
+    setActiveTab('diff')
+    const result = await goldenDiff.compare(null, runId)
+    if (result) {
+      pushToast(`Loaded diff for ${runId}`, 'success')
+    }
+  }, [goldenDiff, pushToast, selectedSkillId])
 
   const handleApplyPhaseForm = useCallback(() => {
     const yamlBlock = phaseForm.buildYamlBlock()

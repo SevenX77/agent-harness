@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { AlertCircle, CheckCircle, HardDrive, Play, Save, Terminal as TerminalIcon } from 'lucide-react'
 import type { LintStatus, RunStatus } from '../types/studio'
+import { DirtyIndicator } from './draft/DirtyIndicator'
 
 interface HeaderBarProps {
   selectedSkillId: string | null
@@ -10,6 +11,7 @@ interface HeaderBarProps {
   isArtifactsMenuOpen: boolean
   lintStatus: LintStatus
   runStatus: RunStatus
+  dirty: boolean
   onToggleArtifactsMenu: () => void
   onLint: () => void
   onSave: () => void
@@ -25,6 +27,7 @@ export function HeaderBar({
   isArtifactsMenuOpen,
   lintStatus,
   runStatus,
+  dirty,
   onToggleArtifactsMenu,
   onLint,
   onSave,
@@ -48,7 +51,7 @@ export function HeaderBar({
         ) : null}
 
         <div className="flex flex-col text-xs text-gray-500">
-          <span><span className="font-semibold">Inputs:</span> {inputSummary}</span>
+          <span className="flex items-center gap-2"><DirtyIndicator dirty={dirty} /><span><span className="font-semibold">Inputs:</span> {inputSummary}</span></span>
           <span><span className="font-semibold">Mode:</span> Playground</span>
         </div>
       </div>

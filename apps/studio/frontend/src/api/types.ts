@@ -63,6 +63,36 @@ export interface RunDetail {
   artifacts: string[] | null
 }
 
+export interface GoldenBaseline {
+  id: string
+  linked_input_id: string
+  created_at: string
+  locked: boolean
+  content_path: string
+}
+
+export interface SetGoldenReq {
+  run_id: string
+  lock: boolean
+}
+
+export type FieldDiffType = 'text' | 'number' | 'bool' | 'list' | 'dict' | 'null' | 'unknown'
+
+export interface FieldDifference {
+  field_path: string
+  type: FieldDiffType
+  current_value: JsonValue
+  golden_value: JsonValue
+  score: number
+  changed: boolean
+}
+
+export interface CompareResult {
+  differences: FieldDifference[]
+  total_score: number
+  golden_run_id: string
+}
+
 export interface TerminalSession {
   term_id: string
   ws_url: string

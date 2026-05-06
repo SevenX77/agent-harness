@@ -115,9 +115,10 @@ def test_run_emits_trace_events_and_writes_artifacts(
     assert "internal_error" not in event_types, f"saw internal_error: {event_types}"
 
     timeline_count = page.locator(".relative.pl-6").count()
-    logger.info("trace timeline cards on page: %s", timeline_count)
-    assert timeline_count >= 5, (
-        f"expected >= 5 trace timeline entries on page, saw {timeline_count}"
+    logger.info("visible trace timeline cards on page: %s", timeline_count)
+    assert 1 <= timeline_count <= len(tracing_lines), (
+        "virtualized trace list should render the visible window, not every disk event; "
+        f"saw {timeline_count} visible rows for {len(tracing_lines)} events"
     )
 
     run_button = page.get_by_test_id("header-run")

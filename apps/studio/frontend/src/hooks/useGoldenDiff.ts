@@ -16,14 +16,15 @@ export function useGoldenDiff(skillId: string | null, runId: string | null) {
     error: null,
   })
 
-  const compare = useCallback(async (against?: string | null) => {
-    if (!skillId || !runId) {
+  const compare = useCallback(async (against?: string | null, runIdOverride?: string | null) => {
+    const targetRunId = runIdOverride ?? runId
+    if (!skillId || !targetRunId) {
       return null
     }
 
     setState((current) => ({ ...current, loading: true, error: null }))
     try {
-      const response = await api.get<CompareResult>(`/skills/${skillId}/runs/${runId}/diff`, {
+      const response = await api.get<CompareResult>(`/skills/${skillId}/runs/${targetRunId}/diff`, {
         params: against ? { against } : undefined,
       })
       setState({ result: response.data, loading: false, error: null })

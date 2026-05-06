@@ -6,6 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from fastapi import Depends, Request
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core import config
@@ -28,8 +29,8 @@ class BackendConfig(BaseSettings):
     metadata_type: str = "local"
     eventbus_type: str = "memory"
     auth_type: str = "none"
-    workspaces_root: Path = config.WORKSPACES_DIR
-    default_user_id: str = config.DEFAULT_USER_ID
+    workspaces_root: Path = Field(default_factory=lambda: config.WORKSPACES_DIR)
+    default_user_id: str = Field(default_factory=lambda: config.DEFAULT_USER_ID)
 
 
 @lru_cache
@@ -80,3 +81,12 @@ async def get_auth_user_id(
 ) -> str:
     """Resolve the current user id through the configured AuthProvider."""
     return await auth.get_current_user_id(request)
+
+
+def clear_backend_caches() -> None:
+    """Clear cached backend instances after config changes."""
+    get_backend_config.cache_clear()
+    get_storage.cache_clear()
+    get_metadata.cache_clear()
+    get_eventbus.cache_clear()
+    get_auth.cache_clear()

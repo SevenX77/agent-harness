@@ -25,6 +25,7 @@ import type {
   TerminalSession,
 } from './api/types'
 import { useRecentSkills } from './hooks/useRecentSkills'
+import { useGoldenDiff } from './hooks/useGoldenDiff'
 import { useSkills } from './hooks/useSkills'
 import { useTheme } from './hooks/useTheme'
 import { useToasts } from './hooks/useToasts'
@@ -89,6 +90,7 @@ export default function App() {
   const [isArtifactsMenuOpen, setIsArtifactsMenuOpen] = useState(false)
   const [apiKeys, setApiKeys] = useState<ApiKeys>({ openai: '', anthropic: '', gemini: '' })
   const [traceLogs, setTraceLogs] = useState<CallbackEvent[]>([])
+  const [lastRunId, setLastRunId] = useState<string | null>(null)
   const [expandedSubgraphs, setExpandedSubgraphs] = useState<Set<string>>(new Set())
   const [nestedManifests, setNestedManifests] = useState<Record<string, SkillManifest>>({})
   const [selectedPromptIndex, setSelectedPromptIndex] = useState<number | null>(null)
@@ -99,6 +101,7 @@ export default function App() {
   const editorRef = useRef<MonacoEditor | null>(null)
   const monacoRef = useRef<MonacoApi | null>(null)
   const runWsRef = useRef<WebSocket | null>(null)
+  const goldenDiff = useGoldenDiff(selectedSkillId, lastRunId)
 
   const canonicalSkillCode = skillDetail ? manifestToSkillMarkdown(skillDetail.manifest) : ''
   const editorOwnsSelectedSkill = editorDraft.skillId === selectedSkillId
@@ -207,10 +210,12 @@ export default function App() {
     setLintOverride(null)
     setRunStatus('idle')
     setTraceLogs([])
+    setLastRunId(null)
+    goldenDiff.clear()
     setSelectedPromptIndex(null)
     setActiveTab('code')
     rememberSkill(skillId)
-  }, [rememberSkill])
+  }, [goldenDiff, rememberSkill])
 
   const handleLint = useCallback(async () => {
     if (!selectedSkillId) {
@@ -288,6 +293,8 @@ export default function App() {
     setActiveTab('trace')
     setIsArtifactsMenuOpen(false)
     setTraceLogs([])
+    setLastRunId(null)
+    goldenDiff.clear()
     setSelectedPromptIndex(null)
     runWsRef.current?.close()
 
@@ -298,6 +305,7 @@ export default function App() {
 
     try {
       const response = await api.post<RunMetadata>(`/skills/${selectedSkillId}/runs`, request)
+      setLastRunId(response.data.run_id)
       const hydrateRunTrace = async () => {
         try {
           const detail = await api.get<RunDetail>(`/skills/${selectedSkillId}/runs/${response.data.run_id}`)
@@ -334,7 +342,7 @@ export default function App() {
       setRunStatus('error')
       pushToast(errorMessage(error), 'error')
     }
-  }, [playgroundPayload, pushToast, selectedSkillId])
+  }, [goldenDiff, playgroundPayload, pushToast, selectedSkillId])
 
   const openTerminal = useCallback(async () => {
     if (!selectedSkillId) {
@@ -398,6 +406,31 @@ export default function App() {
     }
   }, [skillCode, traceSelection])
 
+  const handleCompareToGolden = useCallback(async () => {
+    if (!selectedSkillId || !lastRunId) {
+      pushToast('Run a skill before comparing to golden.', 'info')
+      return
+    }
+    setActiveTab('diff')
+    const result = await goldenDiff.compare()
+    if (result) {
+      pushToast('Golden diff loaded', 'success')
+    }
+  }, [goldenDiff, lastRunId, pushToast, selectedSkillId])
+
+  const handlePromoteToGolden = useCallback(async () => {
+    if (!selectedSkillId || !lastRunId) {
+      pushToast('Run a skill before promoting a golden baseline.', 'info')
+      return
+    }
+    const baseline = await goldenDiff.promote()
+    if (baseline) {
+      await mutateSkills()
+      await mutateSkillDetail()
+      pushToast(`Promoted ${baseline.id} to golden`, 'success')
+    }
+  }, [goldenDiff, lastRunId, mutateSkillDetail, mutateSkills, pushToast, selectedSkillId])
+
   const promptEvent = selectedPromptIndex === null ? null : findPromptEvent(traceLogs, selectedPromptIndex)
   const currentGraphSkill = currentManifest ? graphSkill(currentManifest) : null
   const currentSkill = skills.find((skill) => skill.id === selectedSkillId)
@@ -405,6 +438,7 @@ export default function App() {
     ? manifestInputs.length > 0 ? `${manifestInputs.length} fields` : 'raw JSON'
     : 'loading'
   const canRun = Boolean(selectedSkillId && currentManifest && playgroundValid)
+  const canDiffRun = Boolean(selectedSkillId && lastRunId && runStatus !== 'running')
   return (
     <div className="flex h-screen w-full bg-gray-50 dark:bg-slate-950 font-sans text-slate-800 dark:text-slate-200">
       <SkillSidebar
@@ -474,6 +508,10 @@ export default function App() {
                 skillCode={skillCode}
                 lintErrors={lintErrors}
                 traceLogs={traceLogs}
+                diffResult={goldenDiff.result}
+                diffLoading={goldenDiff.loading}
+                diffError={goldenDiff.error}
+                canDiffRun={canDiffRun}
                 terminalSession={terminalSession}
                 terminalStatus={terminalStatus}
                 currentGraphSkill={currentGraphSkill}
@@ -486,6 +524,8 @@ export default function App() {
                 onJumpToLine={jumpToLine}
                 onCopyErrors={copyErrorToClipboard}
                 onSelectPrompt={setSelectedPromptIndex}
+                onCompareToGolden={handleCompareToGolden}
+                onPromoteToGolden={handlePromoteToGolden}
                 selectedTracePhaseId={traceSelection.selectedPhaseId}
                 selectedTraceEventId={traceSelection.selectedEventId}
                 traceLinkEnabled={traceSelection.linkEnabled}

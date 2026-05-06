@@ -1,11 +1,12 @@
-import { FileText, MessageSquare, Terminal as TerminalIcon } from 'lucide-react'
-import type { CallbackEvent, GraphSkillDef, LintError, TerminalSession } from '../api/types'
+import { FileText, GitCompareArrows, MessageSquare, Terminal as TerminalIcon } from 'lucide-react'
+import type { CallbackEvent, CompareResult, GraphSkillDef, LintError, TerminalSession } from '../api/types'
 import type { ActiveTab, ApiKeyName, ApiKeys, TerminalStatus } from '../types/studio'
 import { MonacoPanel } from './MonacoPanel'
 import type { EditorOnMount } from './MonacoPanel'
 import { SettingsPanel } from './SettingsPanel'
 import { TerminalPanel } from './TerminalPanel'
 import { TracePanel } from './TracePanel'
+import { DiffView } from './diff/DiffView'
 
 interface RightPanelProps {
   activeTab: ActiveTab
@@ -13,6 +14,10 @@ interface RightPanelProps {
   skillCode: string
   lintErrors: LintError[]
   traceLogs: CallbackEvent[]
+  diffResult: CompareResult | null
+  diffLoading: boolean
+  diffError: string | null
+  canDiffRun: boolean
   terminalSession: TerminalSession | null
   terminalStatus: TerminalStatus
   currentGraphSkill: GraphSkillDef | null
@@ -23,6 +28,8 @@ interface RightPanelProps {
   onJumpToLine: (line: number | null) => void
   onCopyErrors: (message: string) => void
   onSelectPrompt: (index: number) => void
+  onCompareToGolden: () => void
+  onPromoteToGolden: () => void
   selectedTracePhaseId: string | null
   selectedTraceEventId: string | null
   traceLinkEnabled: boolean
@@ -38,6 +45,10 @@ export function RightPanel({
   skillCode,
   lintErrors,
   traceLogs,
+  diffResult,
+  diffLoading,
+  diffError,
+  canDiffRun,
   terminalSession,
   terminalStatus,
   currentGraphSkill,
@@ -48,6 +59,8 @@ export function RightPanel({
   onJumpToLine,
   onCopyErrors,
   onSelectPrompt,
+  onCompareToGolden,
+  onPromoteToGolden,
   selectedTracePhaseId,
   selectedTraceEventId,
   traceLinkEnabled,
@@ -62,6 +75,7 @@ export function RightPanel({
         {([
           ['code', FileText, 'SKILL.md'],
           ['trace', MessageSquare, 'Trace'],
+          ['diff', GitCompareArrows, 'Diff'],
           ['terminal', TerminalIcon, 'CLI'],
         ] as const).map(([tab, Icon, label]) => (
           <button
@@ -105,8 +119,24 @@ export function RightPanel({
               onToggleLink={onTraceLinkEnabledChange}
               onSelectPrompt={onSelectPrompt}
               onSelectEvent={onTraceEventSelect}
+              canCompare={canDiffRun}
+              compareLoading={diffLoading}
+              onCompareToGolden={onCompareToGolden}
+              onPromoteToGolden={onPromoteToGolden}
             />
           </div>
+        ) : null}
+
+        {activeTab === 'diff' ? (
+          <DiffView
+            result={diffResult}
+            loading={diffLoading}
+            error={diffError}
+            canCompare={canDiffRun}
+            canPromote={canDiffRun}
+            onCompare={onCompareToGolden}
+            onPromote={onPromoteToGolden}
+          />
         ) : null}
 
         {activeTab === 'terminal' ? (

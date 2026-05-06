@@ -2,6 +2,7 @@ import type { CallbackEvent } from '../api/types'
 import { useTraceFilter } from '../hooks/useTraceFilter'
 import { traceEventId } from '../hooks/useTraceSelection'
 import { eventPhase } from '../utils/trace'
+import { BadgeCheck, GitCompareArrows } from 'lucide-react'
 import { TraceFilter } from './trace/TraceFilter'
 import { TraceEventRow } from './trace/TraceEventRow'
 import { TraceSearchBar } from './trace/TraceSearchBar'
@@ -14,6 +15,10 @@ interface TracePanelProps {
   onToggleLink?: (enabled: boolean) => void
   onSelectPrompt: (index: number) => void
   onSelectEvent?: (index: number, event: CallbackEvent) => void
+  canCompare?: boolean
+  compareLoading?: boolean
+  onCompareToGolden?: () => void
+  onPromoteToGolden?: () => void
 }
 
 export function TracePanel({
@@ -24,6 +29,10 @@ export function TracePanel({
   onToggleLink,
   onSelectPrompt,
   onSelectEvent,
+  canCompare = false,
+  compareLoading = false,
+  onCompareToGolden,
+  onPromoteToGolden,
 }: TracePanelProps) {
   const filter = useTraceFilter(traceLogs, linkEnabled ? activePhase : null)
 
@@ -40,15 +49,35 @@ export function TracePanel({
       <div className="mb-4 space-y-3 border-b border-gray-200 pb-4 dark:border-slate-800">
         <div className="flex items-center justify-between gap-3">
           <h3 className="font-bold text-gray-700 dark:text-gray-300">Trace Timeline</h3>
-          <label className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400">
-            <input
-              type="checkbox"
-              checked={linkEnabled}
-              onChange={(event) => onToggleLink?.(event.target.checked)}
-              className="h-3.5 w-3.5 rounded border-gray-300 text-sky-600 focus:ring-sky-500"
-            />
-            Link views
-          </label>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={!canCompare || compareLoading}
+              onClick={onCompareToGolden}
+              className="flex items-center gap-1 rounded-md border border-sky-200 px-2 py-1 text-xs font-semibold text-sky-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-sky-900 dark:text-sky-300 dark:hover:bg-sky-950/40"
+            >
+              <GitCompareArrows className="h-3.5 w-3.5" />
+              {compareLoading ? 'Comparing' : 'Compare'}
+            </button>
+            <button
+              type="button"
+              disabled={!canCompare}
+              onClick={onPromoteToGolden}
+              className="flex items-center gap-1 rounded-md border border-amber-200 px-2 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-900 dark:text-amber-300 dark:hover:bg-amber-950/40"
+            >
+              <BadgeCheck className="h-3.5 w-3.5" />
+              Golden
+            </button>
+            <label className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+              <input
+                type="checkbox"
+                checked={linkEnabled}
+                onChange={(event) => onToggleLink?.(event.target.checked)}
+                className="h-3.5 w-3.5 rounded border-gray-300 text-sky-600 focus:ring-sky-500"
+              />
+              Link views
+            </label>
+          </div>
         </div>
         <TraceSearchBar value={filter.searchTerm} onChange={filter.setSearchTerm} />
         <TraceFilter

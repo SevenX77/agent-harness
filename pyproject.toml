@@ -10,6 +10,7 @@ workspace = { members = ["packages/*", "apps/studio/backend"] }
 
 [tool.uv.sources]
 graph-agent = { workspace = true }
+studio-backend = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -19,6 +20,7 @@ dev = [
     "pre-commit>=3.6",
     "libcst>=1.8.6",
     "import-linter>=2.11",
+    "studio-backend",
 ]
 
 [tool.ruff]

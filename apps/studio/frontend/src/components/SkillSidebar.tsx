@@ -30,13 +30,22 @@ export function SkillSidebar({
   onForkSkill,
 }: SkillSidebarProps) {
   return (
-    <div className="z-10 flex w-64 shrink-0 flex-col border-r border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+    <nav
+      role="navigation"
+      aria-label="Skill List"
+      className="z-10 flex w-64 shrink-0 flex-col border-r border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900"
+    >
       <div className="flex items-center justify-between border-b border-gray-200 dark:border-slate-800 p-4 text-lg font-bold text-gray-800 dark:text-gray-100">
         <div className="flex items-center gap-2">
           <Settings className="h-5 w-5 text-sky-600 dark:text-sky-500" />
           Skill Studio
         </div>
-        <button type="button" onClick={onToggleDarkMode} className="text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100">
+        <button
+          type="button"
+          aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+          onClick={onToggleDarkMode}
+          className="text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
+        >
           {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </button>
       </div>
@@ -46,6 +55,7 @@ export function SkillSidebar({
           <h3 className="text-xs font-semibold uppercase text-gray-400 dark:text-gray-500">Project Skills</h3>
           <button
             type="button"
+            aria-label="Create new skill"
             onClick={onOpenCreator}
             className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-sky-600 dark:text-gray-500 dark:hover:bg-slate-800 dark:hover:text-sky-400"
             title="New Skill"
@@ -68,6 +78,7 @@ export function SkillSidebar({
                 >
                   <button
                     type="button"
+                    aria-label={`Select skill ${skill.name}`}
                     onClick={() => onSelectSkill(skill.id)}
                     className="flex min-w-0 flex-1 items-center gap-2 text-left"
                   >
@@ -85,6 +96,7 @@ export function SkillSidebar({
       <div className="border-t border-gray-200 dark:border-slate-800 p-4">
         <button
           type="button"
+          aria-label="Open settings"
           onClick={onOpenSettings}
           className={`flex w-full items-center justify-center gap-2 rounded-md p-2 font-medium transition-colors ${
             activeTab === 'settings'
@@ -96,6 +108,6 @@ export function SkillSidebar({
           Settings
         </button>
       </div>
-    </div>
+    </nav>
   )
 }

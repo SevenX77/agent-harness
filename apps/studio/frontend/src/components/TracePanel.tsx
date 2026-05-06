@@ -36,20 +36,26 @@ export function TracePanel({
 
   if (traceLogs.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center text-sm font-medium text-slate-400 dark:text-slate-500">
+      <div
+        role="log"
+        aria-live="polite"
+        aria-label="Trace Timeline"
+        className="flex h-full items-center justify-center text-sm font-medium text-slate-400 dark:text-slate-500"
+      >
         Waiting for run events
       </div>
     )
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div role="log" aria-live="polite" aria-label="Trace Timeline" className="flex h-full min-h-0 flex-col">
       <div className="mb-4 shrink-0 space-y-3 border-b border-gray-200 pb-4 dark:border-slate-800">
         <div className="flex items-center justify-between gap-3">
           <h3 className="font-bold text-gray-700 dark:text-gray-300">Trace Timeline</h3>
           <div className="flex items-center gap-2">
             <button
               type="button"
+              aria-label="Compare trace to golden baseline"
               disabled={!canCompare || compareLoading}
               onClick={onCompareToGolden}
               className="flex items-center gap-1 rounded-md border border-sky-200 px-2 py-1 text-xs font-semibold text-sky-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-sky-900 dark:text-sky-300 dark:hover:bg-sky-950/40"
@@ -59,6 +65,7 @@ export function TracePanel({
             </button>
             <button
               type="button"
+              aria-label="Promote run to golden baseline"
               disabled={!canCompare}
               onClick={onPromoteToGolden}
               className="flex items-center gap-1 rounded-md border border-amber-200 px-2 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-900 dark:text-amber-300 dark:hover:bg-amber-950/40"

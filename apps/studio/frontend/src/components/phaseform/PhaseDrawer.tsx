@@ -1,7 +1,7 @@
 import { RotateCcw, Save, X } from 'lucide-react'
-import { useEffect } from 'react'
 import type { PhaseFormData } from '../../hooks/usePhaseForm'
 import { phaseFormErrors } from '../../hooks/usePhaseForm'
+import { useFocusTrap } from '../../hooks/useFocusTrap'
 import { PhaseFormBody } from './PhaseFormBody'
 
 interface PhaseDrawerProps {
@@ -29,19 +29,7 @@ export function PhaseDrawer({
 }: PhaseDrawerProps) {
   const errors = phaseFormErrors(data)
   const canApply = Object.keys(errors).length === 0
-
-  useEffect(() => {
-    if (!open) {
-      return
-    }
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose()
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [onClose, open])
+  const trapRef = useFocusTrap<HTMLElement>(open, onClose)
 
   if (!open) {
     return null
@@ -49,13 +37,19 @@ export function PhaseDrawer({
 
   return (
     <div className="pointer-events-none fixed inset-0 z-40">
-      <aside className="pointer-events-auto absolute right-0 top-0 flex h-full w-[min(42rem,44vw)] min-w-[32rem] flex-col border-l border-slate-200 bg-slate-50 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+      <aside
+        ref={trapRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="phase-drawer-title"
+        className="pointer-events-auto absolute right-0 top-0 flex h-full w-[min(42rem,44vw)] min-w-[32rem] flex-col border-l border-slate-200 bg-slate-50 shadow-2xl dark:border-slate-800 dark:bg-slate-950"
+      >
         <div className="flex shrink-0 items-start justify-between border-b border-slate-200 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-900">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-400">
               Phase form
             </p>
-            <h2 className="mt-1 text-lg font-bold text-slate-900 dark:text-slate-50">
+            <h2 id="phase-drawer-title" className="mt-1 text-lg font-bold text-slate-900 dark:text-slate-50">
               {phaseId ?? 'Unknown phase'}
             </h2>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
@@ -64,6 +58,7 @@ export function PhaseDrawer({
           </div>
           <button
             type="button"
+            aria-label="Close phase form"
             onClick={onClose}
             className="rounded-md p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
             title="Close phase form"

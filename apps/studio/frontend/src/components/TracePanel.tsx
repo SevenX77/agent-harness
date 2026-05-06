@@ -1,11 +1,9 @@
 import type { CallbackEvent } from '../api/types'
 import { useTraceFilter } from '../hooks/useTraceFilter'
-import { traceEventId } from '../hooks/useTraceSelection'
-import { eventPhase } from '../utils/trace'
 import { BadgeCheck, GitCompareArrows } from 'lucide-react'
 import { TraceFilter } from './trace/TraceFilter'
-import { TraceEventRow } from './trace/TraceEventRow'
 import { TraceSearchBar } from './trace/TraceSearchBar'
+import { VirtualTraceList } from './trace/VirtualTraceList'
 
 interface TracePanelProps {
   traceLogs: CallbackEvent[]
@@ -45,8 +43,8 @@ export function TracePanel({
   }
 
   return (
-    <div>
-      <div className="mb-4 space-y-3 border-b border-gray-200 pb-4 dark:border-slate-800">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="mb-4 shrink-0 space-y-3 border-b border-gray-200 pb-4 dark:border-slate-800">
         <div className="flex items-center justify-between gap-3">
           <h3 className="font-bold text-gray-700 dark:text-gray-300">Trace Timeline</h3>
           <div className="flex items-center gap-2">
@@ -94,19 +92,14 @@ export function TracePanel({
           Showing {filter.filteredEvents.length} of {traceLogs.length} events
         </div>
       </div>
-      <div className="relative ml-3 space-y-5 border-l-2 border-gray-200 dark:border-slate-800">
-        {filter.filteredEvents.map(({ event, index }) => (
-          <TraceEventRow
-            key={`${event.timestamp}-${index}`}
-            event={event}
-            index={index}
-            selected={selectedEventId === traceEventId(event, index)}
-            highlighted={Boolean(linkEnabled && activePhase && activePhase === eventPhase(event))}
-            onSelectPrompt={onSelectPrompt}
-            onSelectEvent={onSelectEvent}
-          />
-        ))}
-      </div>
+      <VirtualTraceList
+        events={filter.filteredEvents}
+        activePhase={activePhase}
+        selectedEventId={selectedEventId}
+        linkEnabled={linkEnabled}
+        onSelectPrompt={onSelectPrompt}
+        onSelectEvent={onSelectEvent}
+      />
     </div>
   )
 }

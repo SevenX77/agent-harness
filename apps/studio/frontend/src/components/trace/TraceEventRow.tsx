@@ -13,6 +13,8 @@ interface TraceEventRowProps {
   onSelectEvent?: (index: number, event: CallbackEvent) => void
 }
 
+export const TRACE_EVENT_ROW_HEIGHT = 128
+
 export function TraceEventRow({
   event,
   index,
@@ -27,7 +29,7 @@ export function TraceEventRow({
   const isError = event.event_type === 'internal_error' || event.event_type === 'validation_fail'
 
   return (
-    <div className="relative pl-6">
+    <div className="relative pl-6" style={{ minHeight: TRACE_EVENT_ROW_HEIGHT - 20 }}>
       <div className={`absolute -left-[9px] top-1 h-4 w-4 rounded-full border-2 border-white dark:border-slate-900 ${eventColor(event.event_type)}`} />
       <button
         type="button"
@@ -87,7 +89,7 @@ export function TraceEventRow({
         ) : null}
       </button>
       {expanded ? (
-        <pre className="mt-2 max-h-72 overflow-auto rounded-md border border-gray-200 bg-slate-950 p-3 text-xs leading-relaxed text-slate-100 shadow-sm dark:border-slate-800">
+        <pre className="mt-2 max-h-40 overflow-auto rounded-md border border-gray-200 bg-slate-950 p-3 text-xs leading-relaxed text-slate-100 shadow-sm dark:border-slate-800">
           {JSON.stringify(event, null, 2)}
         </pre>
       ) : null}

@@ -1,101 +1,106 @@
 # graph_agent
 
-Self-contained multi-phase Agent orchestration engine, located at `src/core/graph_agent/`.
+Document-driven multi-phase Agent orchestration engine, distributed as the `graph-agent` Python package.
 
-Its sole responsibility: execute SKILL.md-described workflows reliably. The underlying agent loop reuses DeerFlow, while the outer layer is handled by `GraphAgentHarness` for phase orchestration, cognitive constraints, validation/retry, tracing, and I/O boundaries.
+Its sole responsibility: execute SKILL.md-described workflows reliably. The agent loop is built on **LangGraph + LangChain native `create_agent`**. The outer layer is `GraphAgentHarness` for phase orchestration, cognitive constraints, validation/retry, tracing, and I/O boundaries.
 
 ---
 
 ## Core Principles
 
-1. **DeerFlow source code is not lightly modified**
-   `graph_agent`'s core agent loop comes from the embedded DeerFlow. Unless it's an upstream bug or required compatibility fix, we solve problems through outer harness, callbacks, configuration, and skill design.
+1. **Document-driven, not code-driven**
+   PMs author skills as `SKILL.md` files (YAML frontmatter + Markdown body). The framework compiles these into LangGraph state machines at runtime.
 
 2. **Framework layer contains no business logic**
-   `graph_agent` only provides general orchestration: Phase, tool wrappers, model resolution, tracing, context compression, validation/retry. Business-specific tools, field semantics, and domain rules should be written in the skill directory.
+   `graph_agent` only provides general orchestration: Phase, tool wrappers, model resolution, tracing, context compression, validation/retry. Business-specific tools, field semantics, and domain rules belong in the skill directory.
 
 3. **Kitchen-pass pattern**
-   Phase results are written to `WorkflowState.context` first. Actual persistence is done by `IOManager` through `file` output or `artifact_saver` injected by the caller. The framework only prepares the "food", without directly depending on the host project's file management implementation.
+   Phase results are written to `WorkflowState.context` first. Persistence is delegated to `IOManager` through `file` output or `artifact_saver` injected by the caller. The framework prepares the "food" without depending on the host project's file-management implementation.
 
-4. **Dual-layer control architecture**
-   - Inner layer: DeerFlow middleware handles real-time intervention within each `agent.invoke()` (working memory, dead-end pruning, clarification)
-   - Outer layer: `GraphAgentHarness` while-loop handles planning nudges, selfcheck nudges, checkpoint compaction, and finish gates between invokes
+4. **Hexagonal SDK boundary**
+   Only 12 names are part of the public API surface (see "Public API" below). Internal modules (`core.*`, `io.*`, `models.*`, etc.) can be re-organised without breaking downstream consumers.
 
-5. **Concurrency via subagent**
-   Phase-level concurrency uses DeerFlow subagents, currently following DeerFlow's `SubagentExecutor(max_workers=3)`. `graph_agent` no longer maintains an independent `max_concurrent` parameter chain.
-
-6. **Multimodal tools are general capabilities**
-   Tools under `tools/` for images, video, and voice remain in the framework layer as they are cross-project reusable capabilities, not business-specific logic.
+5. **Multimodal tools are general capabilities**
+   Tools under `tools/` for images, video, and voice remain in the framework layer as cross-project reusable capabilities, not business-specific logic.
 
 ---
 
 ## Quick Start
 
-### 1. Install Dependencies
+### 1. Install (uv workspace)
 
-Use `src/core/graph_agent/requirements.txt` to install minimal runtime dependencies.
+In the agent-harness monorepo root:
 
-**Python Version Requirement**: Minimum **Python 3.12**.
-This is not due to `graph_agent` syntax itself, but because the embedded DeerFlow depends on `typing.Self`, `typing.override`, and newer typing behaviors. Below 3.12, the most common symptom is `checkpointer="auto"` automatically downgrading to no checkpoint.
+```bash
+uv sync
+```
+
+This installs `graph-agent` as a workspace member alongside `studio-backend`.
+
+For external host projects (downstream):
+
+```bash
+# Pin via git+ssh
+pip install git+ssh://git@github.com/SevenX77/agent-harness.git@v0.2.0#subdirectory=packages/graph-agent
+```
+
+**Python Version**: 3.11+.
 
 ### 2. Provide Configuration
 
-Minimum required files:
-- `config/llm_roles.yaml`
-- `.env`
-
-Optional:
-- `config/deerflow_config.yaml`
-- `config/multimodal_roles.yaml`
+Minimum required:
+- `config/llm_roles.yaml` — role-to-provider mapping
+- `.env` — API keys
 
 `llm_roles.yaml` lookup order:
 1. Environment variable `GRAPH_AGENT_ROLES_PATH`
-2. Upward search for `config/llm_roles.yaml`
+2. Upward search for `config/llm_roles.yaml` from CWD
 3. Built-in minimal default config
 
 ### 3. Verify Installation
 
-Run the hello_world example:
+Run the hello_world example from repo root:
 
 ```bash
-export PYTHONPATH="${PYTHONPATH}:./src"
-python3 -c "
-from src.core.graph_agent import run_skill
+uv run python3 -c "
+from graph_agent import run_skill
+
 result = run_skill(
-    'src/core/graph_agent/examples/hello_world/SKILL.md',
+    'packages/graph-agent/src/graph_agent/examples/hello_world/SKILL.md',
     initial_context={'user_name': 'Developer'}
 )
-print('Success:', result.get('greeting', 'No greeting'))
+print('Success:', result.context.get('greeting', 'No greeting'))
 "
 ```
 
 ### 4. Choose Entry Point
 
-- `run_skill()`: Most common entry point for direct SKILL.md execution
-- `load_workflow_from_md()`: When you need to compile a skill first and reuse the harness
-- `GraphAgentHarness`: When you want to hand-write Phase lists
+- `run_skill(...)` — Most common entry point for direct SKILL.md execution; returns a `WorkflowResult`.
+- `compile_skill(...)` — Static validation; used by Studio Frontend's lint flow.
+- `GraphAgentHarness` — Low-level orchestrator for advanced cases when you need to hand-write Phase lists or wire custom callbacks.
 
 ---
 
 ## Public API
 
-- `run_skill` — generic Skill runner
-- `clear_cache` — clear harness cache
-- `GraphAgentHarness` — main orchestrator
-- `Phase` — phase definition dataclass
-- `WorkflowState` — typed state
-- `load_workflow_from_md` — compile SKILL.md into a harness
-- `ModelResolver` — role-based model selection
-- `get_model_resolver` — singleton accessor
-- `get_skill_type` — detect skill type from SKILL.md
-- `ContextResolver` — context mapping resolver
-- `IOManager` — input/output management
-- `Callback` — base callback class
-- `LoggingCallback` — structured log output
-- `TracingCallback` — JSONL trace output
-- `MetricsCallback` — execution metrics
-- `GraphAgentError` — base exception
-- `SkillLoadError`, `SkillCompilationError`, `TemplateRenderError`, `AllProvidersFailedError`, `MaxRetriesExceededError`
+The 12 names re-exported from `graph_agent`:
+
+| Name | Purpose |
+|---|---|
+| `run_skill` | High-level entry point |
+| `WorkflowResult` | Pydantic-typed return contract |
+| `GraphAgentHarness` | Low-level orchestrator |
+| `compile_skill` | Static skill validation |
+| `SkillManifest` | Pydantic schema for SKILL.md |
+| `Callback` | Base class for extensibility |
+| `LoggingCallback` | Default structured-log callback |
+| `MetricsCallback` | Default metrics-recording callback |
+| `TracingCallback` | JSONL trace-emitting callback |
+| `GraphAgentError` | Base exception |
+| `SkillLoadError` | Subclass: SKILL.md load failures |
+| `SkillCompilationError` | Subclass: compile/validation failures with `skill_path/line/field_path/suggestion` context |
+
+Internal helpers (`Phase`, `WorkflowState`, `IOManager`, `ContextResolver`, `ModelResolver`, etc.) are reachable through their sub-module paths but are **not** part of the SDK contract.
 
 ---
 
@@ -103,122 +108,97 @@ print('Success:', result.get('greeting', 'No greeting'))
 
 ```text
 graph_agent/
-├── __init__.py              # Public API re-export
-├── py.typed                  # mypy type marker
-├── requirements.txt
-├── README.md
+├── __init__.py              # 12 public re-exports
+├── py.typed                 # PEP 561 type marker
 │
-├── core/                     # Core orchestration engine
+├── core/                    # Core orchestration engine
 │   ├── harness.py           # GraphAgentHarness
-│   ├── runner.py            # run_skill
-│   ├── loader.py            # load_workflow_from_md
+│   ├── runner.py            # run_skill + WorkflowResult
+│   ├── result.py            # WorkflowResult Pydantic schema
+│   ├── loader.py            # load_workflow_from_md (internal)
 │   ├── compiler.py          # compile_skill
-│   ├── state.py             # WorkflowState
-│   ├── types.py             # Phase, ContextBridge
+│   ├── manifest.py          # SkillManifest schema
 │   ├── exceptions.py        # GraphAgentError hierarchy
-│   ├── parser.py            # SKILL.md parser
-│   ├── template.py          # Template rendering
-│   ├── callback_bridge.py   # LangChain → GraphAgent bridge
-│   ├── subgraph.py          # Subgraph node builder
-│   └── tool_wrapper.py      # Tool → LangChain wrapper
+│   ├── checkpointer.py      # LangGraph checkpoint plumbing
+│   └── ...
 │
-├── callbacks/                # Observability callbacks
+├── callbacks/               # Observability callbacks
 │   ├── base.py              # Callback base class
 │   ├── logging_cb.py        # LoggingCallback
 │   ├── metrics.py           # MetricsCallback
 │   └── tracing.py           # TracingCallback
 │
-├── cognitive/                # Cognitive control
+├── cognitive/               # Cognitive control
 │   ├── finish.py            # finish_task + nudges
 │   ├── memory.py            # update_working_memory
-│   ├── ambiguity.py         # log_ambiguity
-│   ├── prompt.py            # apply_cognitive_template
-│   └── middlewares.py       # PAOR/WorkingMemory/DeadEnd
+│   ├── middlewares.py       # PAOR / WorkingMemory / DeadEnd
+│   └── ...
 │
-├── config/                   # Configuration loading
-│   ├── llm_config.py        # LLM role config
-│   └── multimodal_config.py # Multimodal config
-│
-├── models/                   # Model resolution
-│   ├── resolver.py          # ModelResolver
-│   └── reasoning_patch.py   # DeepSeek/ARK monkey-patch
-│
-├── io/                       # Declarative I/O
+├── io/                      # Declarative I/O
 │   ├── manager.py           # IOManager
-│   ├── context_resolver.py  # ContextResolver
-│   └── skill_analyzer.py  # get_skill_type
+│   └── context_resolver.py
 │
-├── tools/                    # Multimodal tools
-│   ├── providers.py         # Shared provider helpers
+├── models/                  # Model resolution
+│   └── resolver.py          # ModelResolver
+│
+├── tools/                   # Multimodal tools
 │   ├── generate_image.py
 │   ├── generate_video.py
-│   ├── understand_video.py
 │   └── synthesize_speech.py
 │
-├── skills/                   # Built-in skills
-│   └── compiler/
-│
-├── deerflow/                 # Embedded DeerFlow (unchanged)
-├── docs/                     # Documentation
-└── examples/                 # Runnable examples
+├── skills/                  # Built-in skills (compiler etc.)
+└── examples/                # Runnable examples
     └── hello_world/
 ```
 
 ---
 
-## Internal Naming Conventions
+## Migrating to a New Project (host integration)
 
-To prevent module bloat, internal helpers use consistent naming:
-- `_build_*`: Construct nodes, configurations, or composite structures
-- `_ctx_*`: Defensive read/normalization of context fields
-- `_phase_*`: Type narrowing when parsing `phase_config`
-- `_extract_*`: Extract structured fragments from messages, responses, or documents
-- `_normalize_*`: Unify external return values to internal framework format
+```python
+# 1. Install via uv workspace OR git+ssh pin
+# 2. Import only public API
+from graph_agent import (
+    run_skill,
+    WorkflowResult,
+    SkillManifest,
+    Callback,
+    GraphAgentError,
+)
 
-Exposed objects use nouns or clear verbs:
-- `GraphAgentHarness`
-- `Phase`
-- `run_skill`
-- `load_workflow_from_md`
+# 3. Run
+result: WorkflowResult = run_skill(
+    "path/to/SKILL.md",
+    initial_context={...},
+    callbacks=[MyCustomCallback()],
+)
+```
 
-Skill-local tools should use `verb_object` style:
-- `collect_scene_context`
-- `render_html_report`
-- `summarize_alignment`
-
----
-
-## Migrating to a New Project
-
-Minimal migration steps:
-1. Copy `src/core/graph_agent/`
-2. Install `requirements.txt`
-3. Provide `config/llm_roles.yaml` and `.env`
-4. Place business tools in skill directory, not in the framework layer
-5. If you need to connect to the host project's artifact system, inject via `artifact_saver`
-
----
-
-## Extended Documentation
-
-- `docs/SKILL_AUTHORING_GUIDE.md` — How to write SKILL.md
-- `docs/TOOL_DEVELOPMENT_GUIDE.md` — How to develop tools
-- `docs/INTEGRATION_GUIDE.md` — Integration guide
-- `docs/CONFIG_REFERENCE.md` — Configuration reference (llm_roles.yaml, multimodal_roles.yaml)
-- `docs/COGNITIVE_LOOP_GUIDE.md` — Cognitive control architecture
+Do not import from internal sub-modules (`graph_agent.core.*`, `graph_agent.io.*`, etc.) in production host code; those are subject to change.
 
 ---
 
 ## Type Safety
 
-`graph_agent` includes `py.typed` for PEP 561 compliance. Use with mypy:
+`graph_agent` ships `py.typed` for PEP 561 compliance. Use with `mypy --strict`:
 
 ```bash
-mypy src/core/graph_agent/ --exclude deerflow
+uv run mypy --strict packages/graph-agent/src
 ```
+
+The package is verified clean under `mypy --strict` (143 source files, 0 errors as of v0.2.0).
+
+---
+
+## Extended Documentation
+
+- `docs/graph_agent_docs/SKILL_AUTHORING_GUIDE.md` — How to write SKILL.md
+- `docs/graph_agent_docs/INTEGRATION_GUIDE.md` — Integration into host projects
+- `docs/graph_agent_docs/COGNITIVE_LOOP_GUIDE.md` — Cognitive control architecture
+- `docs/architecture/REPO_SPLIT_AND_SDK_PLAN.md` — V2 monorepo + SDK contract
 
 ---
 
 ## License
 
-See DeerFlow LICENSE in `deerflow/LICENSE`.
+Apache-2.0 (see repo root `LICENSE`).

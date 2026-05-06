@@ -6,6 +6,7 @@ specific class possible at boundaries; let unexpected errors bubble.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 
@@ -192,19 +193,40 @@ class SkillLoadError(LoaderError):
     """Compatibility loader error for existing load-time call sites."""
 
 
-class SkillCompilationError(ValidationError):
-    """Compatibility validation error for existing compiler call sites."""
+class SkillCompilationError(GraphAgentError):
+    """SKILL.md compile failure with detailed context."""
 
     def __init__(
         self,
         message: str,
         compile_result: object = None,
         *,
+        skill_path: Path | None = None,
+        line: int | None = None,
+        field_path: str | None = None,
+        suggestion: str | None = None,
         context: dict[str, Any] | None = None,
     ) -> None:
-        """Store compiler output alongside the surfaced error message."""
+        """Store compiler output and structured diagnostic context."""
         self.compile_result = compile_result
-        super().__init__(message, context=context)
+        self.skill_path = skill_path
+        self.line = line
+        self.field_path = field_path
+        self.suggestion = suggestion
+        super().__init__(self._format(message), context=context)
+
+    def _format(self, message: str) -> str:
+        parts = [message]
+        if self.skill_path:
+            loc = f"  at {self.skill_path}"
+            if self.line:
+                loc += f":{self.line}"
+            parts.append(loc)
+        if self.field_path:
+            parts.append(f"  field: {self.field_path}")
+        if self.suggestion:
+            parts.append(f"  suggestion: {self.suggestion}")
+        return "\n".join(parts)
 
 
 class TemplateRenderError(ValidationError):

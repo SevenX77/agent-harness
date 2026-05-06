@@ -8,6 +8,7 @@ import { PromptInspector } from './components/PromptInspector'
 import { RightPanel } from './components/RightPanel'
 import { SkillSidebar } from './components/SkillSidebar'
 import { SkillCreatorWizard } from './components/creator/SkillCreatorWizard'
+import { DraftRestoreModal } from './components/draft/DraftRestoreModal'
 import { InputPlayground } from './components/playground/InputPlayground'
 import { PhaseDrawer } from './components/phaseform/PhaseDrawer'
 import { CommandPalette } from './components/shortcuts/CommandPalette'
@@ -33,6 +34,7 @@ import type {
 import { useBatchRun } from './hooks/useBatchRun'
 import { useRecentSkills } from './hooks/useRecentSkills'
 import { useGoldenDiff } from './hooks/useGoldenDiff'
+import { useDraftPersist } from './hooks/useDraftPersist'
 import { usePhaseForm } from './hooks/usePhaseForm'
 import { usePhaseSync } from './hooks/usePhaseSync'
 import { useSkills } from './hooks/useSkills'
@@ -112,6 +114,8 @@ export default function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [skillPaletteOpen, setSkillPaletteOpen] = useState(false)
   const [cheatSheetOpen, setCheatSheetOpen] = useState(false)
+  const [restorePromptSkillId, setRestorePromptSkillId] = useState<string | null>(null)
+  const [dismissedDraftSkillId, setDismissedDraftSkillId] = useState<string | null>(null)
   const [pendingJumpLine, setPendingJumpLine] = useState<number | null>(null)
   const editorRef = useRef<MonacoEditor | null>(null)
   const monacoRef = useRef<MonacoApi | null>(null)
@@ -122,6 +126,18 @@ export default function App() {
   const canonicalSkillCode = skillDetail ? manifestToSkillMarkdown(skillDetail.manifest) : ''
   const editorOwnsSelectedSkill = editorDraft.skillId === selectedSkillId
   const skillCode = editorOwnsSelectedSkill ? editorDraft.code : canonicalSkillCode
+  const {
+    isDirty: isDraftDirty,
+    draft: storedDraft,
+    baseHash: draftBaseHash,
+    restoreDraft,
+    clearDraft,
+  } = useDraftPersist({
+    skillId: selectedSkillId,
+    content: skillCode,
+    baseContent: canonicalSkillCode,
+    dirty: editorOwnsSelectedSkill && editorDraft.dirty,
+  })
   const activeLintOverride = lintOverride?.skillId === selectedSkillId ? lintOverride : null
   const lintStatus = activeLintOverride?.status ?? skillDetail?.lint_result?.status ?? 'idle'
   const detailLintErrors = skillDetail?.lint_result?.errors
@@ -194,6 +210,28 @@ export default function App() {
       severity: error.severity === 'warning' ? monaco.MarkerSeverity.Warning : monaco.MarkerSeverity.Error,
     })))
   }, [lintErrors])
+
+  useEffect(() => {
+    if (!selectedSkillId || !skillDetail || !storedDraft || editorDraft.dirty) {
+      return
+    }
+    if (dismissedDraftSkillId === selectedSkillId) {
+      return
+    }
+    if (storedDraft.content === canonicalSkillCode) {
+      clearDraft()
+      return
+    }
+    setRestorePromptSkillId(selectedSkillId)
+  }, [
+    canonicalSkillCode,
+    clearDraft,
+    dismissedDraftSkillId,
+    editorDraft.dirty,
+    selectedSkillId,
+    skillDetail,
+    storedDraft,
+  ])
 
   useEffect(() => {
     const socket = new WebSocket(wsUrl('/ws/events'))
@@ -269,13 +307,14 @@ export default function App() {
         errors: response.data.lint_result?.errors ?? [],
       })
       setEditorDraft({ skillId: selectedSkillId, code: manifestToSkillMarkdown(response.data.manifest), dirty: false })
+      clearDraft()
       pushToast('Saved and linted successfully', 'success')
     } catch (error) {
       const errors = lintErrorsFromError(error)
       setLintOverride({ skillId: selectedSkillId, status: 'failed', errors })
       pushToast(errorMessage(error), 'error')
     }
-  }, [mutateSkillDetail, pushToast, selectedSkillId, skillCode])
+  }, [clearDraft, mutateSkillDetail, pushToast, selectedSkillId, skillCode])
 
   const handleEditorMount: EditorOnMount = useCallback((editor, monaco) => {
     editorRef.current = editor
@@ -406,6 +445,31 @@ export default function App() {
     await mutateSkills()
     handleSelectSkill(skillId)
   }, [handleSelectSkill, mutateSkills])
+
+  const handleRestoreDraft = useCallback(() => {
+    if (!selectedSkillId) {
+      return
+    }
+    const draft = restoreDraft()
+    if (!draft) {
+      setRestorePromptSkillId(null)
+      return
+    }
+    setEditorDraft({ skillId: selectedSkillId, code: draft.content, dirty: true })
+    setDismissedDraftSkillId(selectedSkillId)
+    setRestorePromptSkillId(null)
+    setActiveTab('code')
+    pushToast('Restored local draft', 'success')
+  }, [pushToast, restoreDraft, selectedSkillId])
+
+  const handleDiscardDraft = useCallback(() => {
+    if (selectedSkillId) {
+      setDismissedDraftSkillId(selectedSkillId)
+    }
+    clearDraft()
+    setRestorePromptSkillId(null)
+    pushToast('Discarded local draft', 'info')
+  }, [clearDraft, pushToast, selectedSkillId])
 
   const handleForkSkill = useCallback(async (sourceSkillId: string, newSkillId: string) => {
     const response = await api.post<SkillSummary>(`/skills/${sourceSkillId}/fork`, {
@@ -685,6 +749,7 @@ export default function App() {
               isArtifactsMenuOpen={isArtifactsMenuOpen}
               lintStatus={lintStatus}
               runStatus={runStatus}
+              dirty={isDraftDirty}
               onToggleArtifactsMenu={() => setIsArtifactsMenuOpen((open) => !open)}
               onLint={() => void handleLint()}
               onSave={() => void handleSave()}
@@ -759,6 +824,20 @@ export default function App() {
         onClose={() => setCreatorOpen(false)}
         onCreated={handleSkillCreated}
         pushToast={pushToast}
+      />
+      <DraftRestoreModal
+        open={restorePromptSkillId === selectedSkillId}
+        skillId={selectedSkillId}
+        draft={storedDraft}
+        baseHash={draftBaseHash}
+        onRestore={handleRestoreDraft}
+        onDiscard={handleDiscardDraft}
+        onCancel={() => {
+          if (selectedSkillId) {
+            setDismissedDraftSkillId(selectedSkillId)
+          }
+          setRestorePromptSkillId(null)
+        }}
       />
       <PhaseDrawer
         open={phaseDrawerPhaseId !== null && phaseForm.phase !== null}

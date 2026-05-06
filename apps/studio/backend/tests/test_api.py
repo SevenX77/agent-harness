@@ -19,7 +19,7 @@ from graph_agent.callbacks.events import (
     RunEndedEvent,
     RunStartedEvent,
 )
-from tests.studio.conftest import copy_skill
+from tests.conftest import copy_skill
 
 
 def test_openapi_registers_phase0_rest_surface(client: TestClient) -> None:

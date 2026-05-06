@@ -97,8 +97,8 @@ PM 在 Skill Studio 里完成 compile + predict + run 三关后, 按 "Publish" �
 └────────┬────────┘
          ↓
 ┌─────────────────┐
-│    Compile      │  ⚙️ 自动 (无按钮) — compile_skill() 在编辑过程中实时跑
-└────────┬────────┘  lint SKILL.md 自身合规, 错误实时高亮
+│    Compile      │  按钮 — PM 点击触发 compile_skill() lint SKILL.md 自身合规
+└────────┬────────┘  错误在 Monaco 编辑器里高亮; Compile 不过阻塞所有后续按钮
          ↓
 ┌─────────────────┐
 │  选 input 文件   │  PM 选本地 JSON/YAML 文件作为测试输入
@@ -118,7 +118,6 @@ PM 在 Skill Studio 里完成 compile + predict + run 三关后, 按 "Publish" �
 └─────────────────┘
 
 ⚙️ = 自动后台校验 (无 PM 按钮):
-  - Compile: 编辑过程中实时跑, 校验 SKILL.md 自身
   - Validate: 3 个触发点 — 上传 input 文件后 / 点 Predict 前 / 点 Run 前
               按 io.inputs schema 校验文件内容; 失败直接报错或阻塞按钮
               backend Service `services/validator.py` 提供, 3 个触发点共用
@@ -132,25 +131,23 @@ PM 在 Skill Studio 里完成 compile + predict + run 三关后, 按 "Publish" �
   - 研发端 (Skill Studio) 永远是 **Tauri Local-First 桌面应用** (FastAPI sidecar 跟前端同机, 见 `TAURI_KICKOFF_PLAN.md` + `LOCAL_FIRST_CLOUD_READY.md`)
   - 生产端 (agent-harness-cloud) 是**独立仓库下游消费者**, 部署到 Cloud (见 `REPO_SPLIT_AND_SDK_PLAN.md` §6 + `CLOUD_READINESS_AUDIT.md`), 不复用 Studio backend
   - 两者部署**完全独立**, 切不可把"API 覆盖原则"误用为"部署架构覆盖原则"
-- **PM 可点击的按钮只有 4 个**: Predict (V2) / Run / Publish + 选 input 文件的文件选择对话框。**没有 Compile 按钮、没有 Validate 按钮**——这两个都是后台自动跑的检查。
-- **自动校验 (Compile / Validate) 跟按钮门禁的关系**:
-  - **Compile 错** → 编辑器实时高亮 + 阻塞所有后续按钮 (Predict / Run / Publish 全灰)
-  - **Validate 错** → 在三个触发点都直接报错:
-    - 上传文件后立即报 (Schema 不匹配, 字段缺失等)
-    - 点 Predict 时自动复跑一次, 失败阻塞 Predict (V2 阶段)
-    - 点 Run 时自动复跑一次, 失败阻塞 Run
-  - **Run 失败** → Publish 按钮灰 (V1 + V2)
+- **PM 可点击的按钮**: Compile / Predict (V2) / Run / Publish + 选 input 文件的文件选择对话框。
+- **Validate 没有按钮**: 后台自动跑, 3 触发点 (选完文件 / Predict 前 / Run 前), 失败直接报错或阻塞按钮。
+- **门禁关系**:
+  - Compile 不过 → 阻塞所有后续按钮 (Validate 触发不了, Predict / Run / Publish 全灰)
+  - Validate 错 → 三个触发点对应行为如上
+  - Run 失败 → Publish 按钮灰
 - **后端 API 必须解耦无状态**:
   后端**不**维护"PM 是否已经跑过 Validate"这种状态; Run / Predict 内部独立调用 `services/validator.py` Service 做前置校验 (RESTful 无状态防穿透——PM 用 curl 绕过前端直接调 Run 也校验; 见 F1_T3_FILE_INPUT_SPEC.md §4 Task 1)。standalone `/api/skills/{id}/validate_input` endpoint 只是给前端 "选完文件立即报错" 这个 UX 触发点用的快路径,backend 内部 Predict / Run 不依赖它已经被前端调过。
 - **输入用文件不用表单**: 测试输入是一个本地 JSON/YAML 文件, 后端按 manifest.io.inputs schema 校验后下发。在 Tauri 桌面形态下后端可以直接接受**本地文件路径**(前后端同机),不用走 multipart 上传。生产端形态下不复用 Studio backend, 不存在跨机文件传输问题。
-- **V1 阶段 PM 实际操作步骤**: 打开 app → 选 skill → 编辑 (Compile 后台自动跑) → 选 input 文件 (Validate 后台自动跑) → 点 Run (Run 内部再自动 Validate 一次) → 点 Publish。Predict 按钮 V2 才出现。
+- **V1 阶段 PM 实际操作步骤**: 打开 app → 选 skill → 编辑 → 点 Compile → 选 input 文件 (Validate 后台自动跑) → 点 Run (Run 内部再自动 Validate 一次) → 点 Publish。Predict 按钮 V2 才出现。
 
 ### 3.2 各步骤跟 SDK 13-export 的关系
 
 | Step | 类型 | SDK 用到 | 新增需求 |
 |---|---|---|---|
 | 编辑 | PM action | `serialize_skill` | 0 |
-| **Compile** | ⚙️ 自动 (无按钮) | `compile_skill`, `CompileResult`, `SkillCompilationError` | 0 |
+| **Compile** | 按钮 | `compile_skill`, `CompileResult`, `SkillCompilationError` | 0 |
 | 选 input 文件 | PM action | — (走 Tauri `dialog.open()`) | 0 |
 | **Validate** | ⚙️ 自动 (无按钮, 3 触发点) | `SkillManifest.io.inputs` (反射 Pydantic), `compile_skill` | 0 (Studio backend 直接从 `graph_agent.core.manifest` 子模块 import, 实施在 commit `dcd81ac` 的 `services/validator.py`) |
 | Predict (V2) | 按钮 | `run_skill(mock_llm=True)`, `WorkflowResult`, `TracingCallback` | run_skill 加 mock_llm 参数 (不加新顶层 API) |

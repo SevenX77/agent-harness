@@ -1,13 +1,17 @@
 import { GitCompareArrows, RefreshCw, Trash2 } from 'lucide-react'
 import type { RunMetadata } from '../../api/types'
 import { runTokenTotal } from '../../hooks/useRunHistory'
+import { ExportButton } from '../export/ExportButton'
+import type { ExportFormat } from '../../utils/reportTemplates'
 
 interface RunHistoryRowProps {
   run: RunMetadata
   selected: boolean
+  filenameBase: string
   onSelect: (runId: string) => void
   onReplay: (runId: string) => void
   onCompare: (runId: string) => void
+  onExport: (runId: string, format: ExportFormat) => Promise<string> | string
   onDelete: (runId: string) => void
 }
 
@@ -48,9 +52,11 @@ function relativeTime(value: string): string {
 export function RunHistoryRow({
   run,
   selected,
+  filenameBase,
   onSelect,
   onReplay,
   onCompare,
+  onExport,
   onDelete,
 }: RunHistoryRowProps) {
   const totalTokens = runTokenTotal(run)
@@ -103,6 +109,14 @@ export function RunHistoryRow({
           >
             <GitCompareArrows className="h-3.5 w-3.5" />
           </button>
+          <span onClick={(event) => event.stopPropagation()}>
+            <ExportButton
+              compact
+              title="Export run report"
+              filenameBase={filenameBase}
+              buildContent={(format) => onExport(run.run_id, format)}
+            />
+          </span>
           <button
             type="button"
             onClick={(event) => {

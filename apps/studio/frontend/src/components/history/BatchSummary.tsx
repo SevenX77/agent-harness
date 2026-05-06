@@ -1,4 +1,6 @@
 import type { BatchRunStatus } from '../../api/types'
+import { renderBatchReport, reportFileBase } from '../../utils/reportTemplates'
+import { ExportButton } from '../export/ExportButton'
 
 interface BatchSummaryProps {
   status: BatchRunStatus | null
@@ -39,7 +41,13 @@ export function BatchSummary({ status, onOpenRun }: BatchSummaryProps) {
             <p className={`text-sm font-semibold ${statusClass(status.status)}`}>{status.status}</p>
           </div>
           <div className="text-right text-sm text-slate-500 dark:text-slate-400">
-            {status.completed}/{status.total} complete
+            <div>{status.completed}/{status.total} complete</div>
+            <ExportButton
+              label="Export Batch"
+              title="Export batch report"
+              filenameBase={reportFileBase(status.skill_id, status.batch_id)}
+              buildContent={(format) => renderBatchReport({ status }, format)}
+            />
           </div>
         </div>
         <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">

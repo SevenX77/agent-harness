@@ -172,6 +172,7 @@ export function RightPanel({
         {activeTab === 'diff' ? (
           <DiffView
             result={diffResult}
+            skillId={selectedSkillId}
             loading={diffLoading}
             error={diffError}
             canCompare={canDiffRun}

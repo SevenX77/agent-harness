@@ -1,11 +1,15 @@
 import { BadgeCheck, GitCompareArrows, RefreshCw } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { CompareResult, FieldDifference } from '../../api/types'
+import { renderCompareReport, reportFileBase } from '../../utils/reportTemplates'
+import { ExportButton } from '../export/ExportButton'
 import { DiffField } from './DiffField'
 import { DiffScore } from './DiffScore'
 
 interface DiffViewProps {
   result: CompareResult | null
+  skillId: string | null
+  runId?: string | null
   loading: boolean
   error: string | null
   canCompare: boolean
@@ -24,6 +28,8 @@ function visibleFields(result: CompareResult | null): FieldDifference[] {
 
 export function DiffView({
   result,
+  skillId,
+  runId = null,
   loading,
   error,
   canCompare,
@@ -86,6 +92,18 @@ export function DiffView({
           </div>
         </div>
         <div className="flex gap-2">
+          <ExportButton
+            label="Export Compare"
+            title="Export comparison report"
+            disabled={!result || !skillId}
+            filenameBase={reportFileBase(skillId, runId ?? 'compare', result?.golden_run_id)}
+            buildContent={(format) => {
+              if (!result || !skillId) {
+                throw new Error('Run a comparison before exporting.')
+              }
+              return renderCompareReport({ skillId, runId, result }, format)
+            }}
+          />
           <button
             type="button"
             disabled={!canCompare || loading}

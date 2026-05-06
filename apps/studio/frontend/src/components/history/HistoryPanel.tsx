@@ -3,6 +3,8 @@ import { useState } from 'react'
 import type { RunDetail } from '../../api/types'
 import { useRunHistory } from '../../hooks/useRunHistory'
 import { errorMessage } from '../../utils/errors'
+import type { ExportFormat } from '../../utils/reportTemplates'
+import { renderRunReport, reportFileBase } from '../../utils/reportTemplates'
 import { RunDetailDrawer } from './RunDetailDrawer'
 import { RunHistoryRow } from './RunHistoryRow'
 
@@ -58,6 +60,17 @@ export function HistoryPanel({ skillId, onReplay, onCompare, pushToast }: Histor
     }
   }
 
+  const exportRun = async (runId: string, format: ExportFormat): Promise<string> => {
+    if (!skillId) {
+      throw new Error('Select a skill before exporting.')
+    }
+    const nextDetail = detail?.metadata.run_id === runId ? detail : await history.fetchRunDetail(runId)
+    if (!nextDetail) {
+      throw new Error(`Run not found: ${runId}`)
+    }
+    return renderRunReport({ skillId, run: nextDetail }, format)
+  }
+
   return (
     <div className="relative flex h-full flex-col bg-slate-50 dark:bg-slate-950">
       <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
@@ -99,7 +112,7 @@ export function HistoryPanel({ skillId, onReplay, onCompare, pushToast }: Histor
                 <th className="w-36 px-3 py-2">Run</th>
                 <th className="px-3 py-2">Input</th>
                 <th className="w-20 px-3 py-2">Tokens</th>
-                <th className="w-28 px-3 py-2 text-right">Actions</th>
+                <th className="w-36 px-3 py-2 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -108,9 +121,11 @@ export function HistoryPanel({ skillId, onReplay, onCompare, pushToast }: Histor
                   key={run.run_id}
                   run={run}
                   selected={selectedRunId === run.run_id}
+                  filenameBase={reportFileBase(skillId, run.run_id)}
                   onSelect={(runId) => void selectRun(runId)}
                   onReplay={(runId) => void replayRun(runId)}
                   onCompare={onCompare}
+                  onExport={(runId, format) => exportRun(runId, format)}
                   onDelete={(runId) => void deleteRun(runId)}
                 />
               ))}
@@ -152,6 +167,7 @@ export function HistoryPanel({ skillId, onReplay, onCompare, pushToast }: Histor
           }
         }}
         onCompare={onCompare}
+        skillId={skillId}
       />
     </div>
   )

@@ -21,6 +21,7 @@ interface GraphCanvasProps {
   onEdgesChange: OnEdgesChange
   onConnect: (connection: Connection) => void
   onPhaseSelect?: (phaseId: string) => void
+  onPhaseDoubleClick?: (phaseId: string) => void
 }
 
 export function GraphCanvas({
@@ -34,6 +35,7 @@ export function GraphCanvas({
   onEdgesChange,
   onConnect,
   onPhaseSelect,
+  onPhaseDoubleClick,
 }: GraphCanvasProps) {
   const visibleNodes = useMemo(() => (
     nodes.map((node) => ({
@@ -60,6 +62,7 @@ export function GraphCanvas({
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onNodeClick={(_, node) => onPhaseSelect?.(node.data.label)}
+          onNodeDoubleClick={(_, node) => onPhaseDoubleClick?.(node.data.label)}
           fitView
           minZoom={0.4}
         >

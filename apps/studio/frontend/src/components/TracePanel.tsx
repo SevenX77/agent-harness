@@ -1,5 +1,7 @@
 import type { CallbackEvent } from '../api/types'
 import { useTraceFilter } from '../hooks/useTraceFilter'
+import { traceEventId } from '../hooks/useTraceSelection'
+import { eventPhase } from '../utils/trace'
 import { TraceFilter } from './trace/TraceFilter'
 import { TraceEventRow } from './trace/TraceEventRow'
 import { TraceSearchBar } from './trace/TraceSearchBar'
@@ -7,11 +9,23 @@ import { TraceSearchBar } from './trace/TraceSearchBar'
 interface TracePanelProps {
   traceLogs: CallbackEvent[]
   activePhase?: string | null
+  selectedEventId?: string | null
+  linkEnabled?: boolean
+  onToggleLink?: (enabled: boolean) => void
   onSelectPrompt: (index: number) => void
+  onSelectEvent?: (index: number, event: CallbackEvent) => void
 }
 
-export function TracePanel({ traceLogs, activePhase = null, onSelectPrompt }: TracePanelProps) {
-  const filter = useTraceFilter(traceLogs, activePhase)
+export function TracePanel({
+  traceLogs,
+  activePhase = null,
+  selectedEventId = null,
+  linkEnabled = true,
+  onToggleLink,
+  onSelectPrompt,
+  onSelectEvent,
+}: TracePanelProps) {
+  const filter = useTraceFilter(traceLogs, linkEnabled ? activePhase : null)
 
   if (traceLogs.length === 0) {
     return (
@@ -24,7 +38,18 @@ export function TracePanel({ traceLogs, activePhase = null, onSelectPrompt }: Tr
   return (
     <div>
       <div className="mb-4 space-y-3 border-b border-gray-200 pb-4 dark:border-slate-800">
-        <h3 className="font-bold text-gray-700 dark:text-gray-300">Trace Timeline</h3>
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="font-bold text-gray-700 dark:text-gray-300">Trace Timeline</h3>
+          <label className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+            <input
+              type="checkbox"
+              checked={linkEnabled}
+              onChange={(event) => onToggleLink?.(event.target.checked)}
+              className="h-3.5 w-3.5 rounded border-gray-300 text-sky-600 focus:ring-sky-500"
+            />
+            Link views
+          </label>
+        </div>
         <TraceSearchBar value={filter.searchTerm} onChange={filter.setSearchTerm} />
         <TraceFilter
           eventTypes={filter.eventTypes}
@@ -46,7 +71,10 @@ export function TracePanel({ traceLogs, activePhase = null, onSelectPrompt }: Tr
             key={`${event.timestamp}-${index}`}
             event={event}
             index={index}
+            selected={selectedEventId === traceEventId(event, index)}
+            highlighted={Boolean(linkEnabled && activePhase && activePhase === eventPhase(event))}
             onSelectPrompt={onSelectPrompt}
+            onSelectEvent={onSelectEvent}
           />
         ))}
       </div>

@@ -23,6 +23,11 @@ interface RightPanelProps {
   onJumpToLine: (line: number | null) => void
   onCopyErrors: (message: string) => void
   onSelectPrompt: (index: number) => void
+  selectedTracePhaseId: string | null
+  selectedTraceEventId: string | null
+  traceLinkEnabled: boolean
+  onTraceLinkEnabledChange: (enabled: boolean) => void
+  onTraceEventSelect: (index: number, event: CallbackEvent) => void
   onTerminalStatusChange: (status: TerminalStatus) => void
   onApiKeyChange: (key: ApiKeyName, value: string) => void
 }
@@ -43,6 +48,11 @@ export function RightPanel({
   onJumpToLine,
   onCopyErrors,
   onSelectPrompt,
+  selectedTracePhaseId,
+  selectedTraceEventId,
+  traceLinkEnabled,
+  onTraceLinkEnabledChange,
+  onTraceEventSelect,
   onTerminalStatusChange,
   onApiKeyChange,
 }: RightPanelProps) {
@@ -87,7 +97,15 @@ export function RightPanel({
 
         {activeTab === 'trace' ? (
           <div className="h-full overflow-y-auto bg-slate-50 dark:bg-slate-950 p-4">
-            <TracePanel traceLogs={traceLogs} onSelectPrompt={onSelectPrompt} />
+            <TracePanel
+              traceLogs={traceLogs}
+              activePhase={selectedTracePhaseId}
+              selectedEventId={selectedTraceEventId}
+              linkEnabled={traceLinkEnabled}
+              onToggleLink={onTraceLinkEnabledChange}
+              onSelectPrompt={onSelectPrompt}
+              onSelectEvent={onTraceEventSelect}
+            />
           </div>
         ) : null}
 

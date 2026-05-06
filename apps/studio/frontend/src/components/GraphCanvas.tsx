@@ -1,5 +1,6 @@
 import { Background, Controls, MiniMap, ReactFlow } from 'reactflow'
 import type { Connection, Edge, Node, NodeTypes, OnEdgesChange, OnNodesChange } from 'reactflow'
+import { useMemo } from 'react'
 import { AgentNode, SubgraphNode } from '../CustomNodes'
 import type { StudioNodeData } from '../CustomNodes'
 import { errorMessage } from '../utils/errors'
@@ -15,9 +16,11 @@ interface GraphCanvasProps {
   nodes: Node<StudioNodeData>[]
   edges: Edge[]
   isDarkMode: boolean
+  selectedPhaseId?: string | null
   onNodesChange: OnNodesChange
   onEdgesChange: OnEdgesChange
   onConnect: (connection: Connection) => void
+  onPhaseSelect?: (phaseId: string) => void
 }
 
 export function GraphCanvas({
@@ -26,10 +29,19 @@ export function GraphCanvas({
   nodes,
   edges,
   isDarkMode,
+  selectedPhaseId = null,
   onNodesChange,
   onEdgesChange,
   onConnect,
+  onPhaseSelect,
 }: GraphCanvasProps) {
+  const visibleNodes = useMemo(() => (
+    nodes.map((node) => ({
+      ...node,
+      selected: Boolean(selectedPhaseId && (node.id === selectedPhaseId || node.data.label === selectedPhaseId)),
+    }))
+  ), [nodes, selectedPhaseId])
+
   return (
     <div className="relative flex-1 border-r border-gray-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950">
       <div className="absolute left-4 top-4 z-10 rounded-md border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-sm font-semibold text-gray-700 dark:text-gray-300 shadow-sm">
@@ -41,12 +53,13 @@ export function GraphCanvas({
         </div>
       ) : (
         <ReactFlow
-          nodes={nodes}
+          nodes={visibleNodes}
           edges={edges}
           nodeTypes={nodeTypes}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onNodeClick={(_, node) => onPhaseSelect?.(node.data.label)}
           fitView
           minZoom={0.4}
         >

@@ -22,6 +22,11 @@ dev = [
     "import-linter>=2.11",
     "studio-backend",
 ]
+e2e = [
+    "playwright>=1.40",
+    "pytest-playwright>=0.4",
+    "websockets>=12",
+]
 
 [tool.ruff]
 line-length = 100

@@ -25,18 +25,10 @@ from pathlib import Path
 import httpx
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-STUDIO_BACKEND = REPO_ROOT / "studio-backend"
-STUDIO_FRONTEND = REPO_ROOT / "studio-frontend"
-SRC_CORE = REPO_ROOT / "src" / "core"
-
-BACKEND_PORT = 8787
-FRONTEND_PORT = 5173
-BACKEND_URL = f"http://127.0.0.1:{BACKEND_PORT}"
-FRONTEND_URL = f"http://127.0.0.1:{FRONTEND_PORT}"
-API_BASE_URL = f"{BACKEND_URL}/api"
-
-logger = logging.getLogger("e2e.conftest")
+REPO_ROOT = Path(__file__).resolve().parents[3]
+STUDIO_BACKEND = REPO_ROOT / "apps/studio/backend"
+STUDIO_FRONTEND = REPO_ROOT / "apps/studio/frontend"
+SRC_CORE = REPO_ROOT / "packages/graph-agent/src"
 
 
 def _is_port_free(port: int) -> bool:
@@ -44,6 +36,24 @@ def _is_port_free(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(0.2)
         return sock.connect_ex(("127.0.0.1", port)) != 0
+
+
+def _find_free_port(preferred: int) -> int:
+    """Return preferred when available, otherwise ask the OS for an ephemeral port."""
+    if _is_port_free(preferred):
+        return preferred
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+BACKEND_PORT = int(os.environ.get("STUDIO_TEST_BACKEND_PORT", _find_free_port(8787)))
+FRONTEND_PORT = int(os.environ.get("STUDIO_TEST_FRONTEND_PORT", _find_free_port(5173)))
+BACKEND_URL = f"http://127.0.0.1:{BACKEND_PORT}"
+FRONTEND_URL = f"http://127.0.0.1:{FRONTEND_PORT}"
+API_BASE_URL = f"{BACKEND_URL}/api"
+
+logger = logging.getLogger("e2e.conftest")
 
 
 def _wait_for_url(url: str, *, timeout: float, label: str) -> None:
@@ -233,6 +243,7 @@ def studio_servers(studio_workspace: dict[str, Path]) -> Iterator[dict[str, str]
     frontend_env = {
         **os.environ,
         "VITE_STUDIO_API_BASE_URL": f"{BACKEND_URL}/api",
+        "VITE_CACHE_DIR": str(studio_workspace["base"] / "vite-cache"),
     }
     frontend_log = studio_workspace["base"] / "frontend.log"
     logger.info("spawning frontend port=%s log=%s", FRONTEND_PORT, frontend_log)

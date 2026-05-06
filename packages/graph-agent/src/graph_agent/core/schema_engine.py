@@ -17,7 +17,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from graph_agent.tools.dynamic_schema import OutputExampleParseError, parse_output_example
 
-from .exceptions import SkillCompilationError
+from graph_agent.core.exceptions import SkillCompilationError
 
 logger = logging.getLogger(__name__)
 
@@ -308,7 +308,9 @@ def _parse_output_example_to_schema(block_text: str) -> SchemaObject:
     )
 
 
-def _schema_from_mapping(mapping: dict[str, Any], *, schema_name: str = "BusinessSchema") -> SchemaObject:
+def _schema_from_mapping(
+    mapping: dict[str, Any], *, schema_name: str = "BusinessSchema"
+) -> SchemaObject:
     fields: list[tuple[str, Any]] = []
     required: set[str] = set()
 

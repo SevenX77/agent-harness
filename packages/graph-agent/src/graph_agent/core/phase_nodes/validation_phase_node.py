@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import logging
 
-from ..state import StateManager, WorkflowState
-from ..types import Phase
-from .base import PhaseNode
+from graph_agent.core.state import StateManager, WorkflowState
+from graph_agent.core.types import Phase
+from graph_agent.core.phase_nodes.base import PhaseNode
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +40,11 @@ class ValidationPhaseNode(PhaseNode):
     """
 
     def execute(self, phase: Phase, state: WorkflowState) -> WorkflowState:
-        from ...callbacks.events import RetryExhaustedEvent, ValidationPassEvent
-        from ..harness import _clone_state, _safe_emit_event  # lazy: avoid import cycle
+        from graph_agent.callbacks.events import RetryExhaustedEvent, ValidationPassEvent
+        from graph_agent.core.harness import (
+            _clone_state,
+            _safe_emit_event,
+        )  # lazy: avoid import cycle
 
         next_state = _clone_state(state)
         if next_state["flow"].validation_middleware_phase == phase.name:

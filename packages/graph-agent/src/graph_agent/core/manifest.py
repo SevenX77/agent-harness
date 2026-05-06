@@ -175,7 +175,7 @@ class ContextBridge(BaseModel):
         """
         # Lazy import keeps manifest.py a pure schema module — no
         # circular dependency with the schema_engine subsystem.
-        from .schema_engine import SchemaObject
+        from graph_agent.core.schema_engine import SchemaObject
 
         fields = tuple((name, Any) for name in self.inputs)
         # MVP-2 T4 surface: the engine arg threads in for two reasons.

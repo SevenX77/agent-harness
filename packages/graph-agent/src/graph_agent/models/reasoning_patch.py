@@ -1,4 +1,5 @@
 """Reasoning content monkey-patch for DeepSeek/ARK models."""
+
 from __future__ import annotations
 
 import logging
@@ -35,6 +36,7 @@ def _apply_reasoning_content_patch() -> None:
         try:
             import openai
             from openai.types.chat.chat_completion_message import ChatCompletionMessage
+
             sdk_version = getattr(openai, "__version__", "0.0.0")
             major = int(sdk_version.split(".")[0])
             if major > 1:
@@ -43,7 +45,10 @@ def _apply_reasoning_content_patch() -> None:
                     "(only tested with v1.x). reasoning_content may not be preserved.",
                     sdk_version,
                 )
-            elif "extra" not in ChatCompletionMessage.model_config or ChatCompletionMessage.model_config.get("extra") != "allow":
+            elif (
+                "extra" not in ChatCompletionMessage.model_config
+                or ChatCompletionMessage.model_config.get("extra") != "allow"
+            ):
                 ChatCompletionMessage.model_config = {
                     **ChatCompletionMessage.model_config,
                     "extra": "allow",
@@ -55,6 +60,7 @@ def _apply_reasoning_content_patch() -> None:
         # Layer 2: LangChain — wrap _convert_dict_to_message to extract reasoning_content
         try:
             import langchain_openai.chat_models.base as _lcob
+
             _original_convert = _lcob._convert_dict_to_message
 
             def _patched_convert(
@@ -65,6 +71,7 @@ def _apply_reasoning_content_patch() -> None:
                 msg = _original_convert(_dict, *args, **kwargs)
                 # For assistant messages, inject reasoning_content if present
                 from langchain_core.messages import AIMessage
+
                 if isinstance(msg, AIMessage):
                     rc = _dict.get("reasoning_content")
                     if rc:
@@ -79,6 +86,7 @@ def _apply_reasoning_content_patch() -> None:
         # Layer 3: LangChain — wrap _convert_message_to_dict to echo reasoning_content
         try:
             import langchain_openai.chat_models.base as _lcob
+
             _original_to_dict = _lcob._convert_message_to_dict
 
             def _patched_to_dict(

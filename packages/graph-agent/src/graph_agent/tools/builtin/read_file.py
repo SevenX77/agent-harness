@@ -5,6 +5,7 @@ declares reference files, PhaseExecutor auto-mounts this tool so the LLM
 can read them on demand instead of forcing large knowledge files into the
 prompt.
 """
+
 from __future__ import annotations
 
 import logging

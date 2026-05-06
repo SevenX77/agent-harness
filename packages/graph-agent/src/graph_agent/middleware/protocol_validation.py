@@ -44,12 +44,12 @@ from langchain.agents.middleware import AgentMiddleware
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, ValidationError
 
-from ..core.exceptions import GraphAgentError
-from ..core.schema_engine import SchemaObject
-from ..core.state import FrameworkState
+from graph_agent.core.exceptions import GraphAgentError
+from graph_agent.core.schema_engine import SchemaObject
+from graph_agent.core.state import FrameworkState
 
 if TYPE_CHECKING:
-    from ..core.schema_engine import SchemaEngine
+    from graph_agent.core.schema_engine import SchemaEngine
 
 
 class ProtocolValidationError(GraphAgentError):
@@ -173,9 +173,7 @@ class ProtocolValidationMiddleware(AgentMiddleware[AgentState[Any]]):
                 try:
                     FrameworkState.model_validate(flow_dump)
                 except ValidationError as exc:
-                    violations.append(
-                        ("framework_state_extra_forbidden", str(exc))
-                    )
+                    violations.append(("framework_state_extra_forbidden", str(exc)))
             else:
                 violations.append(
                     (
@@ -202,9 +200,7 @@ class ProtocolValidationMiddleware(AgentMiddleware[AgentState[Any]]):
             # block is validated individually.
             result = self._schema_engine.validate(data_dump, self._current_phase_schema)
             if not result.ok:
-                violations.append(
-                    ("schema_engine_validate", "; ".join(result.errors))
-                )
+                violations.append(("schema_engine_validate", "; ".join(result.errors)))
 
         if violations:
             raise ProtocolValidationError(

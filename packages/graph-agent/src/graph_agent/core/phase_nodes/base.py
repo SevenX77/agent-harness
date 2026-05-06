@@ -29,11 +29,11 @@ from typing import Protocol
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from ...callbacks.base import Callback
-from ..io_manager import IOManager
-from ..run_context import RunContext
-from ..state import StateManager, WorkflowState
-from ..types import Phase
+from graph_agent.callbacks.base import Callback
+from graph_agent.core.io_manager import IOManager
+from graph_agent.core.run_context import RunContext
+from graph_agent.core.state import StateManager, WorkflowState
+from graph_agent.core.types import Phase
 
 SaveCompactionSidecar = Callable[..., str | None]
 
@@ -138,7 +138,7 @@ class PhaseNode(ABC):
         if not phase.io_specs:
             return state
 
-        from ..io_manager import IOManager
+        from graph_agent.core.io_manager import IOManager
 
         if source_data is None:
             ftr = state["flow"].finish_task_result

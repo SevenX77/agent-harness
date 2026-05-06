@@ -1,4 +1,5 @@
 """Working memory utilities for cognitive control."""
+
 from __future__ import annotations
 
 import logging

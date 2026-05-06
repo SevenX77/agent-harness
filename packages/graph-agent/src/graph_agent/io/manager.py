@@ -38,10 +38,7 @@ class IOManager:
     def __init__(self, io_config: dict[str, Any]) -> None:
         """Cache declared input and output specifications."""
         if not isinstance(io_config, dict):
-            raise TypeError(
-                "IOManager io_config must be a dict, "
-                f"got {type(io_config).__name__}"
-            )
+            raise TypeError(f"IOManager io_config must be a dict, got {type(io_config).__name__}")
         self._inputs = io_config.get("inputs", [])
         self._outputs = io_config.get("outputs", [])
         # MVP-2 T7: io_errors accumulate on the IOManager instance instead
@@ -88,9 +85,7 @@ class IOManager:
                 if name not in runtime_args:
                     required = input_spec.get("required", True)
                     if required:
-                        raise ValueError(
-                            f"Required runtime input '{name}' was not provided"
-                        )
+                        raise ValueError(f"Required runtime input '{name}' was not provided")
                     logger.warning(
                         "[IOManager] Optional runtime input '%s' not provided, using None",
                         name,
@@ -100,15 +95,12 @@ class IOManager:
             elif source == "file":
                 file_path = input_spec.get("path")
                 if not file_path:
-                    raise ValueError(
-                        f"Input '{name}' has source='file' but no 'path' specified"
-                    )
+                    raise ValueError(f"Input '{name}' has source='file' but no 'path' specified")
                 result[name] = self._load_file(Path(file_path))
 
             else:
                 raise ValueError(
-                    f"Unknown input source '{source}' for input '{name}'. "
-                    f"Supported: runtime, file"
+                    f"Unknown input source '{source}' for input '{name}'. Supported: runtime, file"
                 )
 
         return result
@@ -152,9 +144,7 @@ class IOManager:
             data = context.get(name)
 
             if data is None:
-                public_keys = sorted(
-                    str(key) for key in context if not str(key).startswith("_")
-                )
+                public_keys = sorted(str(key) for key in context if not str(key).startswith("_"))
                 legacy_message = f"Declared output '{name}' was not found in context"
                 message = (
                     f"{legacy_message}. "
@@ -243,7 +233,7 @@ class IOManager:
                 return str(value)
             return match.group(0)
 
-        return re.sub(r'\{([^}]+)\}', replace_placeholder, path)
+        return re.sub(r"\{([^}]+)\}", replace_placeholder, path)
 
     @staticmethod
     def _load_file(path: Path) -> Any:
@@ -290,8 +280,7 @@ class IOManager:
         try:
             sig = inspect.signature(artifact_saver)
             accepts_project_id = "project_id" in sig.parameters or any(
-                p.kind == inspect.Parameter.VAR_KEYWORD
-                for p in sig.parameters.values()
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
             )
             if accepts_project_id and project_id is not None:
                 raw_result = artifact_saver(name, data, project_id=project_id)

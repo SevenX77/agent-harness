@@ -76,10 +76,7 @@ def _make_robust_schema(name: str, fields: dict[str, Any]) -> type[BaseModel]:
 
 def _blocked_tool_message(tool_limiter: _ToolLimiter | None) -> str:
     max_calls = getattr(tool_limiter, "_max_tool_calls", 0)
-    return (
-        f"[系统] 工具调用次数已达上限({max_calls})，"
-        "请基于已获得信息直接给出最终结果。"
-    )
+    return f"[系统] 工具调用次数已达上限({max_calls})，请基于已获得信息直接给出最终结果。"
 
 
 def _wrap_tool_for_langchain(
@@ -109,9 +106,13 @@ def _wrap_tool_for_langchain(
     if has_context_param:
         ctx_param_name = params[context_idx].name
         remaining_params = [
-            p for i, p in enumerate(params)
-            if i != context_idx and p.kind not in (
-                inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD,
+            p
+            for i, p in enumerate(params)
+            if i != context_idx
+            and p.kind
+            not in (
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
             )
         ]
         fields: dict[str, Any] = {}
@@ -136,7 +137,9 @@ def _wrap_tool_for_langchain(
                 try:
                     return str(fn(**bound_kwargs))
                 except Exception as exc:
-                    logger.warning("[ToolWrap] Tool '%s' raised %s: %s", fn_name, type(exc).__name__, exc)
+                    logger.warning(
+                        "[ToolWrap] Tool '%s' raised %s: %s", fn_name, type(exc).__name__, exc
+                    )
                     return f"[Tool Error] {type(exc).__name__}: {exc}"
 
             return StructuredTool.from_function(
@@ -153,7 +156,9 @@ def _wrap_tool_for_langchain(
             try:
                 return str(fn(**{ctx_param_name: context}))
             except Exception as exc:
-                logger.warning("[ToolWrap] Tool '%s' raised %s: %s", fn_name, type(exc).__name__, exc)
+                logger.warning(
+                    "[ToolWrap] Tool '%s' raised %s: %s", fn_name, type(exc).__name__, exc
+                )
                 return f"[Tool Error] {type(exc).__name__}: {exc}"
 
         return StructuredTool.from_function(
@@ -180,7 +185,9 @@ def _wrap_tool_for_langchain(
             try:
                 return str(fn(**kwargs))
             except Exception as exc:
-                logger.warning("[ToolWrap] Tool '%s' raised %s: %s", fn_name, type(exc).__name__, exc)
+                logger.warning(
+                    "[ToolWrap] Tool '%s' raised %s: %s", fn_name, type(exc).__name__, exc
+                )
                 return f"[Tool Error] {type(exc).__name__}: {exc}"
 
         return StructuredTool.from_function(

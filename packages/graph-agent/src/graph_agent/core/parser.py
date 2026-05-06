@@ -34,7 +34,7 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-from .exceptions import SkillLoadError
+from graph_agent.core.exceptions import SkillLoadError
 
 # 方针 3.2: lines reported by ruamel are 0-indexed *within* the
 # YAML stream we hand it. ``parse_skill_file`` strips the opening
@@ -90,13 +90,11 @@ def _strip_frontmatter(content: str) -> str:
     """Return content after YAML frontmatter."""
     match = re.match(r"^---\r?\n.*?\r?\n---", content, re.DOTALL)
     if match:
-        return content[match.end():].lstrip("\r\n")
+        return content[match.end() :].lstrip("\r\n")
     return content
 
 
-def locate_line_for_pydantic_loc(
-    root: Any, loc: Sequence[Any]
-) -> int | None:
+def locate_line_for_pydantic_loc(root: Any, loc: Sequence[Any]) -> int | None:
     """Translate a Pydantic ``ValidationError.loc`` tuple into a
     1-indexed SKILL.md line number, or ``None`` if the path cannot be
     walked (e.g. mode-discriminator pseudo-segments like ``'graph'``

@@ -17,16 +17,17 @@ who want a project-wide registry export the env var at the top of their
 workflow; a YAML-driven registry can later be layered on top by
 extending ``default_persona_search_paths`` without changing callers.
 """
+
 from __future__ import annotations
 
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .exceptions import SkillLoadError
+from graph_agent.core.exceptions import SkillLoadError
 
 if TYPE_CHECKING:
-    from .manifest import PersonaSkillDef
+    from graph_agent.core.manifest import PersonaSkillDef
 
 PERSONA_PATH_ENV_VAR = "GRAPH_AGENT_PERSONA_PATH"
 
@@ -64,8 +65,8 @@ def resolve_persona(
     """
     from pydantic import TypeAdapter
 
-    from .manifest import PersonaSkillDef, SkillManifest
-    from .parser import parse_skill_file
+    from graph_agent.core.manifest import PersonaSkillDef, SkillManifest
+    from graph_agent.core.parser import parse_skill_file
 
     if search_paths is None:
         search_paths = default_persona_search_paths()
@@ -109,9 +110,7 @@ def resolve_persona(
         if not candidate.is_file():
             continue
         parsed = parse_skill_file(candidate)
-        manifest: SkillManifest = TypeAdapter(SkillManifest).validate_python(
-            parsed["frontmatter"]
-        )
+        manifest: SkillManifest = TypeAdapter(SkillManifest).validate_python(parsed["frontmatter"])
         if not isinstance(manifest, PersonaSkillDef):
             raise SkillLoadError(
                 f"adopted_persona '{name}' resolved to {candidate}, but its "
@@ -120,6 +119,5 @@ def resolve_persona(
         return manifest
 
     raise SkillLoadError(
-        f"adopted_persona '{name}' not found. Searched: "
-        + ", ".join(str(c) for c in candidates)
+        f"adopted_persona '{name}' not found. Searched: " + ", ".join(str(c) for c in candidates)
     )

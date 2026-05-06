@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import re
 
-from ..compiler import CompileIssue
-from ..manifest import GraphSkillDef, LLMPhase
+from graph_agent.core.compiler import CompileIssue
+from graph_agent.core.manifest import GraphSkillDef, LLMPhase
 
 TEMPLATE_VAR_RE = re.compile(r"(?<!\{)\{(\w+)\}(?!\})")
 

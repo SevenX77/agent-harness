@@ -4,6 +4,7 @@ These tools are auto-mounted when a phase opts in through
 ``context_access``. Phases otherwise keep strong isolation between agent
 loops; artifacts and working memory are exposed only by request.
 """
+
 from __future__ import annotations
 
 import logging

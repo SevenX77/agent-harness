@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from ..state import StateManager, StateMessage, WorkflowState
+from graph_agent.core.state import StateManager, StateMessage, WorkflowState
 
 _AMBIGUITY_REPORTS_KEY = "_ambiguity_reports"
 _FINISH_TASK_RESULT_KEY = "_finish_task_result"
@@ -83,9 +83,7 @@ def _sync_tool_state(
             tool_state.get(_VALIDATION_WARNINGS_KEY)
         )
     if _RETRY_FEEDBACK_KEY in tool_state:
-        flow_updates["retry_feedback"] = _normalize_string_list(
-            tool_state.get(_RETRY_FEEDBACK_KEY)
-        )
+        flow_updates["retry_feedback"] = _normalize_string_list(tool_state.get(_RETRY_FEEDBACK_KEY))
     if _WORKING_MEMORY_KEY in tool_state:
         flow_updates["working_memory"] = tool_state.get(_WORKING_MEMORY_KEY)
     if _AMBIGUITY_REPORTS_KEY in tool_state:

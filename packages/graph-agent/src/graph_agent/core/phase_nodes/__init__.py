@@ -17,21 +17,21 @@ factory complete the wiring.
 
 from __future__ import annotations
 
-from .base import (
+from graph_agent.core.phase_nodes.base import (
     DependencyContainer,
     HeartbeatProtocol,
     ModelResolverProtocol,
     PhaseNode,
     SaveCompactionSidecar,
 )
-from .code_phase_node import CodePhaseNode
-from .factory import (
+from graph_agent.core.phase_nodes.code_phase_node import CodePhaseNode
+from graph_agent.core.phase_nodes.factory import (
     build_code_phase_node,
     build_llm_phase_node,
     build_validation_phase_node,
 )
-from .llm_phase_node import LLMPhaseNode
-from .validation_phase_node import ValidationPhaseNode
+from graph_agent.core.phase_nodes.llm_phase_node import LLMPhaseNode
+from graph_agent.core.phase_nodes.validation_phase_node import ValidationPhaseNode
 
 __all__ = [
     "CodePhaseNode",

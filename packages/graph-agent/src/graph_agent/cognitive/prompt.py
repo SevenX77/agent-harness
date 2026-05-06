@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ..config.llm_config import get_role_config
+from graph_agent.config.llm_config import get_role_config
 
 logger = logging.getLogger(__name__)
 

@@ -26,6 +26,7 @@ annotations`` — Pydantic needs the ``Literal`` tag expressions to be
 evaluated at class-definition time so the discriminated-union dispatch
 works without explicit ``model_rebuild`` calls at import.
 """
+
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
@@ -145,7 +146,7 @@ class CompactionEvent(_EventBase):
     phase_name: str
     removed_pairs: int
     removed_summary: str | None = None  # T-A2: short readable summary
-    content_ref: str | None = None      # T-A2: relative path to sidecar JSON
+    content_ref: str | None = None  # T-A2: relative path to sidecar JSON
 
 
 class AmbiguityReportEvent(_EventBase):
@@ -244,9 +245,9 @@ class ModelResolvedEvent(_EventBase):
 
     event_type: Literal["model_resolved"] = "model_resolved"
     phase_name: str
-    tier: str                         # phase.tier
-    role_name: str                    # tier or synthetic "_model_override::..."
-    resolved_model: str | None = None # model code from llm_roles.yaml
+    tier: str  # phase.tier
+    role_name: str  # tier or synthetic "_model_override::..."
+    resolved_model: str | None = None  # model code from llm_roles.yaml
     thinking_enabled: bool | None = None
     model_override: str | None = None
     call_chain: list[str] = Field(default_factory=list)  # ["OC_CL/claude-sonnet-4-6", ...]
@@ -262,7 +263,7 @@ class ArtifactSavedEvent(_EventBase):
     event_type: Literal["artifact_saved"] = "artifact_saved"
     phase_name: str | None = None  # None when the save happens outside a phase
     name: str
-    path: str                      # absolute or run-relative path
+    path: str  # absolute or run-relative path
     size_bytes: int
 
 
@@ -281,11 +282,11 @@ class ParallelMapGroupStartedEvent(_EventBase):
     """
 
     event_type: Literal["parallel_map_group_started"] = "parallel_map_group_started"
-    group_key: str             # uuid shared across all siblings in this fan-out
-    skill_path: str            # child skill being fanned out
+    group_key: str  # uuid shared across all siblings in this fan-out
+    skill_path: str  # child skill being fanned out
     item_count: int
     max_concurrent: int
-    item_as: str               # parameter name the children receive
+    item_as: str  # parameter name the children receive
 
 
 class ParallelMapGroupEndedEvent(_EventBase):
@@ -374,13 +375,39 @@ class InternalErrorEvent(_EventBase):
 
     event_type: Literal["internal_error"] = "internal_error"
     entry_point: Literal["run", "resume", "subgraph"]
-    error_type: str           # exception class name (e.g. "RuntimeError")
-    error_message: str        # str(exc)
-    traceback: str            # traceback.format_exc()
+    error_type: str  # exception class name (e.g. "RuntimeError")
+    error_message: str  # str(exc)
+    traceback: str  # traceback.format_exc()
 
 
 CallbackEvent = Annotated[
-    PhaseStartEvent | PhaseEndEvent | LLMCallEvent | ToolCallEvent | ValidationFailEvent | RetryEvent | FinishTaskEvent | NudgeEvent | WorkingMemoryUpdateEvent | DeadEndPrunedEvent | CompactionEvent | AmbiguityReportEvent | PromptCapturedEvent | LLMFallbackEvent | RunStartedEvent | RunEndedEvent | ValidationPassEvent | RetryExhaustedEvent | InternalErrorEvent | ModelResolvedEvent | ArtifactSavedEvent | ParallelMapGroupStartedEvent | ParallelMapGroupEndedEvent | HeartbeatEvent | InterruptedEvent | ResumedEvent | AgentLoopIterationEvent,
+    PhaseStartEvent
+    | PhaseEndEvent
+    | LLMCallEvent
+    | ToolCallEvent
+    | ValidationFailEvent
+    | RetryEvent
+    | FinishTaskEvent
+    | NudgeEvent
+    | WorkingMemoryUpdateEvent
+    | DeadEndPrunedEvent
+    | CompactionEvent
+    | AmbiguityReportEvent
+    | PromptCapturedEvent
+    | LLMFallbackEvent
+    | RunStartedEvent
+    | RunEndedEvent
+    | ValidationPassEvent
+    | RetryExhaustedEvent
+    | InternalErrorEvent
+    | ModelResolvedEvent
+    | ArtifactSavedEvent
+    | ParallelMapGroupStartedEvent
+    | ParallelMapGroupEndedEvent
+    | HeartbeatEvent
+    | InterruptedEvent
+    | ResumedEvent
+    | AgentLoopIterationEvent,
     Field(discriminator="event_type"),
 ]
 

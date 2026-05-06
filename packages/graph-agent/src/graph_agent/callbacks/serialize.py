@@ -20,6 +20,7 @@ Type-dispatch table comes from Gemini's Q4 review:
     str/int/float/bool/None → passthrough
     anything else    →  {"_repr": repr(obj), "_warning": "unsupported_type"}
 """
+
 from __future__ import annotations
 
 import logging

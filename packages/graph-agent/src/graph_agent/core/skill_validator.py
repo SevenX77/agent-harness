@@ -6,15 +6,15 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
-from .exceptions import SkillCompilationError, SkillCompileError
-from .schema_engine import SchemaEngine
+from graph_agent.core.exceptions import SkillCompilationError, SkillCompileError
+from graph_agent.core.schema_engine import SchemaEngine
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from .io_manager import IODef, IOManager
-    from .manifest import GraphSkillDef
-    from .manifest import SkillManifest as SkillManifestType
+    from graph_agent.core.io_manager import IODef, IOManager
+    from graph_agent.core.manifest import GraphSkillDef
+    from graph_agent.core.manifest import SkillManifest as SkillManifestType
 
 
 def validate_manifest(
@@ -25,9 +25,9 @@ def validate_manifest(
     """Phase 2: raw dict to typed manifest plus compiled schema cache."""
     from pydantic import TypeAdapter, ValidationError
 
-    from .io_manager import IODef
-    from .manifest import GraphSkillDef, LLMPhase, SkillManifest
-    from .schema_engine import SchemaObject, SchemaParseError
+    from graph_agent.core.io_manager import IODef
+    from graph_agent.core.manifest import GraphSkillDef, LLMPhase, SkillManifest
+    from graph_agent.core.schema_engine import SchemaObject, SchemaParseError
 
     _validate_raw_manifest_spec(raw, schema_engine)
 
@@ -79,7 +79,7 @@ def _enforce_validator_requires_output_schema(manifest: GraphSkillDef) -> None:
             validators run on the deterministic Python output and do not need
             an LLM-output schema, so they are intentionally exempt.
     """
-    from .manifest import LLMPhase
+    from graph_agent.core.manifest import LLMPhase
 
     bad_phases: list[str] = []
     for phase in manifest.phases:
@@ -96,8 +96,7 @@ def _enforce_validator_requires_output_schema(manifest: GraphSkillDef) -> None:
         if not has_schema_form:
             bad_phases.append(f"{phase.name} (validator={phase.validator!r})")
             logger.error(
-                "phase=%s decision=reject reason=validator_without_output_schema "
-                "validator=%s",
+                "phase=%s decision=reject reason=validator_without_output_schema validator=%s",
                 phase.name,
                 phase.validator,
             )
@@ -159,7 +158,7 @@ def _validate_io_specs(
 
 
 def _manifest_io_specs(manifest: Any, io_def_cls: type[IODef]) -> list[IODef]:
-    from .manifest import LLMPhase
+    from graph_agent.core.manifest import LLMPhase
 
     specs: list[Any] = []
     for output in manifest.io.outputs:

@@ -39,35 +39,38 @@ _PACKAGE_DIR = Path(__file__).resolve().parent
 @dataclass(frozen=True)
 class ModelDef:
     """模型注册表条目。"""
-    code: str                           # 代号，如 CL46T
-    name: str                           # 人类可读名
+
+    code: str  # 代号，如 CL46T
+    name: str  # 人类可读名
     reasoning: bool = False
     min_max_tokens: int = 4096
     max_input_tokens: int | None = None
     fc_supported: bool = False
-    providers: dict[str, str] = field(default_factory=dict)       # provider_code → model_name
+    providers: dict[str, str] = field(default_factory=dict)  # provider_code → model_name
     provider_options: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class ProviderDef:
     """Provider 注册表条目。"""
-    code: str                           # 代号，如 OC_CL
+
+    code: str  # 代号，如 OC_CL
     name: str
-    type: str                           # openai_compatible | wavespeed_any_llm | gemini_official | anthropic_compatible
+    type: str  # openai_compatible | wavespeed_any_llm | gemini_official | anthropic_compatible
     api_key_env: str = ""
     api_key_env_fallback: str = ""
     base_url: str = ""
-    llm_base_url: str = ""              # WaveSpeed LLM 专用 OpenAI 兼容端点
+    llm_base_url: str = ""  # WaveSpeed LLM 专用 OpenAI 兼容端点
     proxy_env: str = ""
     timeout: int = 120
     trust_env: bool = False
-    retry_strategy: str = ""            # "" | "timeout_escalation"
+    retry_strategy: str = ""  # "" | "timeout_escalation"
 
 
 @dataclass(frozen=True)
 class RoleModelEntry:
     """角色内的单个模型配置。"""
+
     model_code: str
     provider_codes: list[str] = field(default_factory=list)
 
@@ -75,10 +78,11 @@ class RoleModelEntry:
 @dataclass(frozen=True)
 class RoleDef:
     """角色注册表条目。"""
+
     name: str
     temperature: float = 0.7
     model_fallback: bool = False
-    active_model: str = ""              # 模型代号
+    active_model: str = ""  # 模型代号
     system_prompt_prefix: str = ""
     models: dict[str, RoleModelEntry] = field(default_factory=dict)  # model_code → entry
 
@@ -86,9 +90,10 @@ class RoleDef:
 @dataclass
 class ResolvedProvider:
     """展开后的单个 provider 调用信息。"""
+
     provider_code: str
     provider_def: ProviderDef
-    model_name: str                     # 该 provider 下的实际模型名
+    model_name: str  # 该 provider 下的实际模型名
     model_def: ModelDef
     provider_options: dict[str, Any] = field(default_factory=dict)
 
@@ -96,6 +101,7 @@ class ResolvedProvider:
 @dataclass
 class ResolvedRole:
     """展开后的完整角色调用信息。"""
+
     role_name: str
     temperature: float
     system_prompt_prefix: str
@@ -118,6 +124,7 @@ class CircuitBreakerConfig:
 @dataclass
 class RoleConfigData:
     """配置文件的完整解析结果。"""
+
     models: dict[str, ModelDef] = field(default_factory=dict)
     providers: dict[str, ProviderDef] = field(default_factory=dict)
     roles: dict[str, RoleDef] = field(default_factory=dict)
@@ -167,17 +174,21 @@ class RoleConfigData:
                 model_name = model_def.providers.get(pc)
                 if model_name is None:
                     logger.warning(
-                        "模型 %s 在 provider %s 下无模型名映射", model_code, pc,
+                        "模型 %s 在 provider %s 下无模型名映射",
+                        model_code,
+                        pc,
                     )
                     continue
                 prov_opts = model_def.provider_options.get(pc, {})
-                call_chain.append(ResolvedProvider(
-                    provider_code=pc,
-                    provider_def=prov_def,
-                    model_name=model_name,
-                    model_def=model_def,
-                    provider_options=prov_opts,
-                ))
+                call_chain.append(
+                    ResolvedProvider(
+                        provider_code=pc,
+                        provider_def=prov_def,
+                        model_name=model_name,
+                        model_def=model_def,
+                        provider_options=prov_opts,
+                    )
+                )
 
             # 如果不启用 model_fallback，只用 active_model 这一个
             if not role.model_fallback and model_code == role.active_model:
@@ -213,17 +224,21 @@ class RoleConfigData:
             prov_def = self.providers.get(pc)
             if prov_def is None:
                 logger.warning(
-                    "model_override %s 引用了未注册的 provider 代号: %s", model_code, pc,
+                    "model_override %s 引用了未注册的 provider 代号: %s",
+                    model_code,
+                    pc,
                 )
                 continue
             prov_opts = model_def.provider_options.get(pc, {})
-            call_chain.append(ResolvedProvider(
-                provider_code=pc,
-                provider_def=prov_def,
-                model_name=model_name,
-                model_def=model_def,
-                provider_options=prov_opts,
-            ))
+            call_chain.append(
+                ResolvedProvider(
+                    provider_code=pc,
+                    provider_def=prov_def,
+                    model_name=model_name,
+                    model_def=model_def,
+                    provider_options=prov_opts,
+                )
+            )
 
         return ResolvedRole(
             role_name=f"_model_override::{model_code}",
@@ -256,9 +271,7 @@ def _parse_models(raw: dict[str, Any] | None) -> dict[str, ModelDef]:
             ),
             fc_supported=bool(data.get("fc_supported", False)),
             providers=dict(data.get("providers", {})),
-            provider_options={
-                k: dict(v) for k, v in (data.get("provider_options") or {}).items()
-            },
+            provider_options={k: dict(v) for k, v in (data.get("provider_options") or {}).items()},
         )
     return result
 
@@ -446,22 +459,21 @@ def _load_config_file(path: Path) -> tuple[RoleConfigData, int]:
     if errors:
         for e in errors:
             logger.error("[LLMRoleConfig] 验证错误: %s", e)
-        raise ValueError(
-            f"配置文件验证失败（{len(errors)} 个错误）: {'; '.join(errors[:5])}"
-        )
+        raise ValueError(f"配置文件验证失败（{len(errors)} 个错误）: {'; '.join(errors[:5])}")
 
     # Task 6.2 / 6.4 — new top-level sections, all optional
     peer_groups = _parse_peer_model_groups(raw.get("peer_model_groups"), models)
     circuit_breaker = _parse_circuit_breaker(raw.get("circuit_breaker"))
-    single_model_roles = _parse_single_model_roles(
-        raw.get("single_model_roles"), roles
-    )
+    single_model_roles = _parse_single_model_roles(raw.get("single_model_roles"), roles)
 
     logger.info(
         "[LLMRoleConfig] 加载成功: %d 模型, %d provider, %d 角色, "
         "%d peer group, single_model_roles=%d",
-        len(models), len(providers), len(roles),
-        len(peer_groups), len(single_model_roles),
+        len(models),
+        len(providers),
+        len(roles),
+        len(peer_groups),
+        len(single_model_roles),
     )
     return RoleConfigData(
         models=models,
@@ -473,9 +485,7 @@ def _load_config_file(path: Path) -> tuple[RoleConfigData, int]:
     ), source_mtime_ns
 
 
-def _parse_peer_model_groups(
-    raw: Any, models: dict[str, ModelDef]
-) -> dict[str, list[str]]:
+def _parse_peer_model_groups(raw: Any, models: dict[str, ModelDef]) -> dict[str, list[str]]:
     """Parse optional ``peer_model_groups`` section.
 
     Format::
@@ -494,16 +504,12 @@ def _parse_peer_model_groups(
     if raw is None:
         return {}
     if not isinstance(raw, dict):
-        logger.warning(
-            "[LLMRoleConfig] peer_model_groups 格式错误（应为 dict），跳过"
-        )
+        logger.warning("[LLMRoleConfig] peer_model_groups 格式错误（应为 dict），跳过")
         return {}
     result: dict[str, list[str]] = {}
     for group_name, codes in raw.items():
         if not isinstance(codes, list):
-            logger.warning(
-                "[LLMRoleConfig] peer_model_groups.%s 不是 list，跳过", group_name
-            )
+            logger.warning("[LLMRoleConfig] peer_model_groups.%s 不是 list，跳过", group_name)
             continue
         valid_codes: list[str] = []
         for code in codes:
@@ -512,7 +518,8 @@ def _parse_peer_model_groups(
             else:
                 logger.warning(
                     "[LLMRoleConfig] peer_model_groups.%s 引用未知模型 %r",
-                    group_name, code,
+                    group_name,
+                    code,
                 )
         if valid_codes:
             result[str(group_name)] = valid_codes
@@ -523,9 +530,7 @@ def _parse_circuit_breaker(raw: Any) -> CircuitBreakerConfig:
     if raw is None:
         return CircuitBreakerConfig()
     if not isinstance(raw, dict):
-        logger.warning(
-            "[LLMRoleConfig] circuit_breaker 格式错误（应为 dict），回退到默认"
-        )
+        logger.warning("[LLMRoleConfig] circuit_breaker 格式错误（应为 dict），回退到默认")
         return CircuitBreakerConfig()
 
     per_provider_raw = raw.get("per_provider") or {}
@@ -551,18 +556,14 @@ def _parse_single_model_roles(raw: Any, roles: dict[str, RoleDef]) -> list[str]:
     if raw is None:
         return []
     if not isinstance(raw, list):
-        logger.warning(
-            "[LLMRoleConfig] single_model_roles 格式错误（应为 list），跳过"
-        )
+        logger.warning("[LLMRoleConfig] single_model_roles 格式错误（应为 list），跳过")
         return []
     out: list[str] = []
     for role_name in raw:
         if role_name in roles:
             out.append(str(role_name))
         else:
-            logger.warning(
-                "[LLMRoleConfig] single_model_roles 引用未知角色 %r", role_name
-            )
+            logger.warning("[LLMRoleConfig] single_model_roles 引用未知角色 %r", role_name)
     return out
 
 
@@ -657,7 +658,8 @@ class _RoleConfigHolder:
             except Exception as e:
                 if self._config is not None:
                     logger.warning(
-                        "[LLMRoleConfig] 热加载失败，使用上次有效配置: %s", e,
+                        "[LLMRoleConfig] 热加载失败，使用上次有效配置: %s",
+                        e,
                     )
                     return self._config
                 raise

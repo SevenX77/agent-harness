@@ -69,9 +69,7 @@ class _BlockScalarDumper(yaml.SafeDumper):  # type: ignore[misc,no-any-unimporte
 
 def _represent_str(dumper: _BlockScalarDumper, data: str) -> Any:
     if "\n" in data:
-        return dumper.represent_scalar(
-            "tag:yaml.org,2002:str", data, style="|"
-        )
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
     return dumper.represent_scalar("tag:yaml.org,2002:str", data)
 
 

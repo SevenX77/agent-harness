@@ -26,6 +26,7 @@ Behaviour:
   halt the whole fan-out. Callers that want fail-fast semantics can
   set ``stop_on_error=True``.
 """
+
 from __future__ import annotations
 
 import logging
@@ -106,7 +107,7 @@ def parallel_map(
 
     group_start_monotonic = _time.monotonic()
     if callbacks:
-        from ...callbacks.events import ParallelMapGroupStartedEvent
+        from graph_agent.callbacks.events import ParallelMapGroupStartedEvent
 
         _start_event = ParallelMapGroupStartedEvent(
             group_key=group_key,
@@ -171,7 +172,7 @@ def parallel_map(
 
     # Tier 1 Commit C (T-B9): close the visible group boundary.
     if callbacks:
-        from ...callbacks.events import ParallelMapGroupEndedEvent
+        from graph_agent.callbacks.events import ParallelMapGroupEndedEvent
 
         _end_event = ParallelMapGroupEndedEvent(
             group_key=group_key,
@@ -206,7 +207,7 @@ def _run_one_item(
     """Execute one child-skill run under the shared group_key."""
     # Lazy import keeps tools/builtin/__init__.py import-light for callers
     # that just want the symbol.
-    from ...core.runner import run_skill
+    from graph_agent.core.runner import run_skill
 
     inputs = dict(base_inputs)
     inputs[item_as] = item

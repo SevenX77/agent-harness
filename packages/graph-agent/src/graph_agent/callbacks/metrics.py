@@ -1,11 +1,12 @@
 """Built-in callback that accumulates token usage and timing."""
+
 from __future__ import annotations
 
 import logging
 import time
 from typing import Any
 
-from .base import Callback
+from graph_agent.callbacks.base import Callback
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +43,7 @@ class MetricsCallback(Callback):
         """Record phase duration."""
         start = self._phase_start_times.pop(phase_name, None)
         if start is not None:
-            self.phase_durations.setdefault(phase_name, []).append(
-                time.monotonic() - start
-            )
+            self.phase_durations.setdefault(phase_name, []).append(time.monotonic() - start)
 
     def on_llm_call(
         self,

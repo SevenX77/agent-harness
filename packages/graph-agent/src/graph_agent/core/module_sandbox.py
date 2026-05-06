@@ -48,14 +48,10 @@ class ModuleSandbox:
             return cached
 
         if "." not in dotted_path:
-            raise ImportError(
-                f"ModuleSandbox: expected dotted class path, got {dotted_path!r}"
-            )
+            raise ImportError(f"ModuleSandbox: expected dotted class path, got {dotted_path!r}")
         candidate = self.import_object(dotted_path)
         if not isinstance(candidate, type):
-            raise ImportError(
-                f"ModuleSandbox: {dotted_path!r} did not resolve to a class"
-            )
+            raise ImportError(f"ModuleSandbox: {dotted_path!r} did not resolve to a class")
 
         self._cache[dotted_path] = candidate
         return candidate
@@ -65,9 +61,7 @@ class ModuleSandbox:
 
         candidate = self.import_object(dotted_path)
         if not callable(candidate):
-            raise ImportError(
-                f"ModuleSandbox: {dotted_path!r} did not resolve to a callable"
-            )
+            raise ImportError(f"ModuleSandbox: {dotted_path!r} did not resolve to a callable")
         return candidate
 
     def import_object(self, dotted_path: str) -> Any:
@@ -75,9 +69,7 @@ class ModuleSandbox:
 
         module_path, separator, class_name = dotted_path.rpartition(".")
         if not separator or not module_path or not class_name:
-            raise ImportError(
-                f"ModuleSandbox: expected dotted object path, got {dotted_path!r}"
-            )
+            raise ImportError(f"ModuleSandbox: expected dotted object path, got {dotted_path!r}")
 
         module = self._load_module(module_path)
         candidate = getattr(module, class_name, None)
@@ -176,17 +168,12 @@ def _rebuild_pydantic_models(module: ModuleType, module_name: str) -> None:
     a class that resolves *some* refs but not others.
     """
     for attr_name, obj in vars(module).items():
-        if (
-            isinstance(obj, type)
-            and issubclass(obj, BaseModel)
-            and obj is not BaseModel
-        ):
+        if isinstance(obj, type) and issubclass(obj, BaseModel) and obj is not BaseModel:
             try:
                 obj.model_rebuild()
             except Exception as exc:
                 logger.error(
-                    "ModuleSandbox: model_rebuild failed for %s.%s "
-                    "(module=%s) reason=%s",
+                    "ModuleSandbox: model_rebuild failed for %s.%s (module=%s) reason=%s",
                     module_name,
                     attr_name,
                     obj.__name__,

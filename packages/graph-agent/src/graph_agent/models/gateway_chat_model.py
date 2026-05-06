@@ -26,10 +26,10 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from openai import APIConnectionError, APITimeoutError, BadRequestError, InternalServerError
 from pydantic import ConfigDict, Field
 
-from ..callbacks.base import Callback
-from ..callbacks.events import LLMFallbackEvent
-from ..config.llm_config import ResolvedProvider, ResolvedRole
-from .llm_client_manager import LLMClientManager, MessageDict
+from graph_agent.callbacks.base import Callback
+from graph_agent.callbacks.events import LLMFallbackEvent
+from graph_agent.config.llm_config import ResolvedProvider, ResolvedRole
+from graph_agent.models.llm_client_manager import LLMClientManager, MessageDict
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +187,9 @@ class GatewayChatModel(BaseChatModel):
                 )
 
         detail = "; ".join(failures) if failures else "no available candidates"
-        raise RuntimeError(f"All LLM fallback candidates failed for role={self.role_name}: {detail}")
+        raise RuntimeError(
+            f"All LLM fallback candidates failed for role={self.role_name}: {detail}"
+        )
 
     def bind_tools(
         self,

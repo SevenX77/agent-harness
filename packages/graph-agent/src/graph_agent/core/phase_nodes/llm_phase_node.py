@@ -28,27 +28,27 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 
-from ...cognitive.ambiguity import log_ambiguity
-from ...cognitive.finish import finish_task
-from ...cognitive.memory import update_working_memory
-from ...cognitive.middlewares import create_custom_middlewares
-from ...cognitive.prompt import (
+from graph_agent.cognitive.ambiguity import log_ambiguity
+from graph_agent.cognitive.finish import finish_task
+from graph_agent.cognitive.memory import update_working_memory
+from graph_agent.cognitive.middlewares import create_custom_middlewares
+from graph_agent.cognitive.prompt import (
     apply_cognitive_template,
     resolve_role_prefix_from_llm_role,
 )
-from ..callback_bridge import _extract_text_content, _HarnessCallbackBridge
-from ..nudge_injector import NudgeInjector
-from ..state import (
+from graph_agent.core.callback_bridge import _extract_text_content, _HarnessCallbackBridge
+from graph_agent.core.nudge_injector import NudgeInjector
+from graph_agent.core.state import (
     StateManager,
     StateMessage,
     WorkflowState,
     legacy_context_from_state,
 )
-from ..template import _render_user_prompt, _safe_render_template
-from ..tool_wrapper import _wrap_tool_for_langchain
-from ..tracing_proxy import TracingClientProxy
-from ..types import Phase
-from ._helpers import (
+from graph_agent.core.template import _render_user_prompt, _safe_render_template
+from graph_agent.core.tool_wrapper import _wrap_tool_for_langchain
+from graph_agent.core.tracing_proxy import TracingClientProxy
+from graph_agent.core.types import Phase
+from graph_agent.core.phase_nodes._helpers import (
     _FINISH_TASK_RESULT_KEY,
     _RETRY_FEEDBACK_KEY,
     _SKILL_BASE_DIR_KEY,
@@ -59,7 +59,7 @@ from ._helpers import (
     _tool_reports,
     _tool_text,
 )
-from .base import PhaseNode
+from graph_agent.core.phase_nodes.base import PhaseNode
 
 logger = logging.getLogger(__name__)
 
@@ -78,12 +78,12 @@ class LLMPhaseNode(PhaseNode):
     """Run an LLM-driven phase (DeerFlow ``create_agent`` + nudge-loop)."""
 
     def execute(self, phase: Phase, state: WorkflowState) -> WorkflowState:
-        from ...callbacks.events import (
+        from graph_agent.callbacks.events import (
             CompactionEvent,
             ModelResolvedEvent,
             WorkingMemoryUpdateEvent,
         )
-        from ..harness import (  # lazy imports: harness module depends on us
+        from graph_agent.core.harness import (  # lazy imports: harness module depends on us
             _clone_state,
             _safe_emit_event,
         )
@@ -177,15 +177,18 @@ class LLMPhaseNode(PhaseNode):
 
         effective_llm_role = phase.llm_role or phase.tier
 
-        model = cast(BaseChatModel, TracingClientProxy(
-            wrapped_client=model,
-            callbacks=active_callbacks,
-            phase_name=phase.name,
-            llm_role=effective_llm_role,
-            resolved_model=str(resolved_model_name) if resolved_model_name else None,
-            sub_run_id=state["flow"].sub_run_id,
-            group_key=state["flow"].group_key,
-        ))
+        model = cast(
+            BaseChatModel,
+            TracingClientProxy(
+                wrapped_client=model,
+                callbacks=active_callbacks,
+                phase_name=phase.name,
+                llm_role=effective_llm_role,
+                resolved_model=str(resolved_model_name) if resolved_model_name else None,
+                sub_run_id=state["flow"].sub_run_id,
+                group_key=state["flow"].group_key,
+            ),
+        )
         llm_role = effective_llm_role or "balanced"
         role_prefix = resolve_role_prefix_from_llm_role(llm_role)
         logger.info(
@@ -231,15 +234,13 @@ class LLMPhaseNode(PhaseNode):
         )
         lc_tools.append(_wrap_tool_for_langchain(update_working_memory, tool_state, bridge))
         lc_tools.append(_wrap_tool_for_langchain(log_ambiguity, tool_state, bridge))
-        from ...tools.builtin.clarification_tool import ask_clarification_tool
+        from graph_agent.tools.builtin.clarification_tool import ask_clarification_tool
 
         lc_tools.append(ask_clarification_tool)
         logger.info("phase=%s: mounted ask_clarification tool", phase.name)
         references = list(getattr(phase, "references", []) or [])
         if references:
-            base_dir = getattr(phase, "skill_base_dir", None) or tool_state.get(
-                _SKILL_BASE_DIR_KEY
-            )
+            base_dir = getattr(phase, "skill_base_dir", None) or tool_state.get(_SKILL_BASE_DIR_KEY)
             if base_dir is None:
                 logger.warning(
                     "phase=%s has references=%s but no skill_base_dir; read_file tool not mounted",
@@ -247,7 +248,7 @@ class LLMPhaseNode(PhaseNode):
                     references,
                 )
             else:
-                from ...tools.builtin.read_file import make_read_file_tool
+                from graph_agent.tools.builtin.read_file import make_read_file_tool
 
                 read_file_fn = make_read_file_tool(references, Path(base_dir))
                 lc_tools.append(_wrap_tool_for_langchain(read_file_fn, tool_state, bridge))
@@ -258,7 +259,7 @@ class LLMPhaseNode(PhaseNode):
                 )
         context_access = list(phase.context_access)
         if context_access:
-            from ...tools.builtin.context_access import (
+            from graph_agent.tools.builtin.context_access import (
                 query_working_memory,
                 read_artifact,
             )
@@ -291,16 +292,15 @@ class LLMPhaseNode(PhaseNode):
         # ``SchemaObject``); the legacy parallel pipeline and its
         # ``DynamicSchemaDef`` / schema-less fallbacks are physically
         # retired together with this routing simplification.
-        from ...middleware.cognitive_flow import CognitiveFlowMiddleware
-        from ...middleware.protocol_validation import ProtocolValidationMiddleware
-        from ..io_manager import IOManager
-        from ..schema_engine import SchemaEngine
+        from graph_agent.middleware.cognitive_flow import CognitiveFlowMiddleware
+        from graph_agent.middleware.protocol_validation import ProtocolValidationMiddleware
+        from graph_agent.core.io_manager import IOManager
+        from graph_agent.core.schema_engine import SchemaEngine
 
         schema_engine = SchemaEngine()
         io_manager = IOManager(list(phase.io_specs))
         logger.info(
-            "phase=%s action=middleware_pipeline decision=static_schema "
-            "schema=%s",
+            "phase=%s action=middleware_pipeline decision=static_schema schema=%s",
             phase.name,
             getattr(
                 phase.output_schema,
@@ -341,12 +341,15 @@ class LLMPhaseNode(PhaseNode):
             context=prompt_view,
             role_prefix=role_prefix,
         )
-        agent = cast(_AgentInvoker, create_agent(
-            model=model,
-            tools=lc_tools,
-            system_prompt=system_prompt,
-            middleware=phase_middlewares,
-        ))
+        agent = cast(
+            _AgentInvoker,
+            create_agent(
+                model=model,
+                tools=lc_tools,
+                system_prompt=system_prompt,
+                middleware=phase_middlewares,
+            ),
+        )
 
         # Step 7: Build messages
         messages: list[StateMessage] = list(state["messages"]) if is_retry else []

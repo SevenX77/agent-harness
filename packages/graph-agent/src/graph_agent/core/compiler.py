@@ -41,14 +41,15 @@ removed in MVP-0 B1 (2026-04-28) along with the DelegatePhase /
 ParallelDelegatePhase modes they validated. V2 cross-skill composition
 will reintroduce equivalent checks for the new Send-API design.
 """
+
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .exceptions import SkillLoadError
-from .parser import _parse_frontmatter, locate_line_for_pydantic_loc
+from graph_agent.core.exceptions import SkillLoadError
+from graph_agent.core.parser import _parse_frontmatter, locate_line_for_pydantic_loc
 
 logger = logging.getLogger(__name__)
 
@@ -110,43 +111,51 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
     result = CompileResult()
 
     if not skill_path.exists():
-        result.issues.append(CompileIssue(
-            rule_id="INTERNAL",
-            severity="FATAL",
-            location=str(skill_path),
-            message="SKILL.md 文件不存在",
-        ))
+        result.issues.append(
+            CompileIssue(
+                rule_id="INTERNAL",
+                severity="FATAL",
+                location=str(skill_path),
+                message="SKILL.md 文件不存在",
+            )
+        )
         return result
 
     try:
         content = skill_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
-        result.issues.append(CompileIssue(
-            rule_id="INTERNAL",
-            severity="FATAL",
-            location=str(skill_path),
-            message=f"Failed to read SKILL.md: {e}",
-        ))
+        result.issues.append(
+            CompileIssue(
+                rule_id="INTERNAL",
+                severity="FATAL",
+                location=str(skill_path),
+                message=f"Failed to read SKILL.md: {e}",
+            )
+        )
         return result
 
     if not content.strip():
-        result.issues.append(CompileIssue(
-            rule_id="INTERNAL",
-            severity="FATAL",
-            location=str(skill_path),
-            message="SKILL.md 文件为空",
-        ))
+        result.issues.append(
+            CompileIssue(
+                rule_id="INTERNAL",
+                severity="FATAL",
+                location=str(skill_path),
+                message="SKILL.md 文件为空",
+            )
+        )
         return result
 
     try:
         frontmatter = _parse_frontmatter(content)
     except SkillLoadError as e:
-        result.issues.append(CompileIssue(
-            rule_id="INTERNAL",
-            severity="FATAL",
-            location="SKILL.md:frontmatter",
-            message=str(e),
-        ))
+        result.issues.append(
+            CompileIssue(
+                rule_id="INTERNAL",
+                severity="FATAL",
+                location="SKILL.md:frontmatter",
+                message=str(e),
+            )
+        )
         return result
 
     # Cohesion plan 方针 3.3 (2026-04-26): ``schema_version: 2.0``
@@ -157,15 +166,17 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
     # downstream Pydantic ``Literal["2.0"]`` check sees the right type.
     schema_version = str(frontmatter.get("schema_version") or "").strip()
     if schema_version != "2.0":
-        result.issues.append(CompileIssue(
-            rule_id="F-schema-version",
-            severity="FATAL",
-            location="SKILL.md:frontmatter",
-            message=(
-                f"Unsupported schema_version: {schema_version!r}. "
-                'Only schema_version: "2.0" is supported.'
-            ),
-        ))
+        result.issues.append(
+            CompileIssue(
+                rule_id="F-schema-version",
+                severity="FATAL",
+                location="SKILL.md:frontmatter",
+                message=(
+                    f"Unsupported schema_version: {schema_version!r}. "
+                    'Only schema_version: "2.0" is supported.'
+                ),
+            )
+        )
         return result
     frontmatter["schema_version"] = "2.0"
 
@@ -174,7 +185,12 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
     # as fatals here too so static compile catches them before runtime.
     from pydantic import TypeAdapter, ValidationError
 
-    from .manifest import AgentSkillDef, GraphSkillDef, PersonaSkillDef, SkillManifest
+    from graph_agent.core.manifest import (
+        AgentSkillDef,
+        GraphSkillDef,
+        PersonaSkillDef,
+        SkillManifest,
+    )
 
     try:
         manifest: AgentSkillDef | GraphSkillDef | PersonaSkillDef = TypeAdapter(
@@ -194,12 +210,14 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
                 location = f"SKILL.md:{line}:{loc_dotted or 'frontmatter'}"
             else:
                 location = f"SKILL.md:{loc_dotted or 'frontmatter'}"
-            result.issues.append(CompileIssue(
-                rule_id="F-pydantic",
-                severity="FATAL",
-                location=location,
-                message=err.get("msg", "Pydantic validation failed"),
-            ))
+            result.issues.append(
+                CompileIssue(
+                    rule_id="F-pydantic",
+                    severity="FATAL",
+                    location=location,
+                    message=err.get("msg", "Pydantic validation failed"),
+                )
+            )
         return result
 
     # PR #7 semantic checks (run only when Pydantic validation succeeds).
@@ -207,30 +225,22 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
     # has no phases but does carry a top-level ``adopted_persona`` and
     # ``agent_tools``, so it runs persona_resolution + tool_paths.
     # PersonaSkillDef carries neither and falls through unchanged.
-    from .validators.persona_resolution import check_persona_resolution
-    from .validators.tool_paths import check_tool_paths
+    from graph_agent.core.validators.persona_resolution import check_persona_resolution
+    from graph_agent.core.validators.tool_paths import check_tool_paths
 
     if isinstance(manifest, GraphSkillDef):
-        from .validators.prompt_quality import check_prompt_quality
-        from .validators.template_variables import check_template_variables
-        from .validators.validator_required import check_validator_required
+        from graph_agent.core.validators.prompt_quality import check_prompt_quality
+        from graph_agent.core.validators.template_variables import check_template_variables
+        from graph_agent.core.validators.validator_required import check_validator_required
 
-        result.issues.extend(
-            check_persona_resolution(manifest, base_dir=skill_path.parent)
-        )
-        result.issues.extend(
-            check_tool_paths(manifest, base_dir=skill_path.parent)
-        )
+        result.issues.extend(check_persona_resolution(manifest, base_dir=skill_path.parent))
+        result.issues.extend(check_tool_paths(manifest, base_dir=skill_path.parent))
         result.issues.extend(check_prompt_quality(manifest))
         result.issues.extend(check_template_variables(manifest))
         result.issues.extend(check_validator_required(manifest))
     elif isinstance(manifest, AgentSkillDef):
-        result.issues.extend(
-            check_persona_resolution(manifest, base_dir=skill_path.parent)
-        )
-        result.issues.extend(
-            check_tool_paths(manifest, base_dir=skill_path.parent)
-        )
+        result.issues.extend(check_persona_resolution(manifest, base_dir=skill_path.parent))
+        result.issues.extend(check_tool_paths(manifest, base_dir=skill_path.parent))
 
     logger.info(
         "Compiled '%s' (schema 2.0): %d FATAL, %d WARNING",

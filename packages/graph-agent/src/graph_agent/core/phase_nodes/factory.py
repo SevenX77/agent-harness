@@ -15,12 +15,12 @@ The factory keeps the existing dispatch invariants visible:
 
 from __future__ import annotations
 
-from ..run_context import RunContext
-from ..types import Phase
-from .base import DependencyContainer, HeartbeatProtocol, PhaseNode
-from .code_phase_node import CodePhaseNode
-from .llm_phase_node import LLMPhaseNode
-from .validation_phase_node import ValidationPhaseNode
+from graph_agent.core.run_context import RunContext
+from graph_agent.core.types import Phase
+from graph_agent.core.phase_nodes.base import DependencyContainer, HeartbeatProtocol, PhaseNode
+from graph_agent.core.phase_nodes.code_phase_node import CodePhaseNode
+from graph_agent.core.phase_nodes.llm_phase_node import LLMPhaseNode
+from graph_agent.core.phase_nodes.validation_phase_node import ValidationPhaseNode
 
 
 def build_llm_phase_node(
@@ -67,9 +67,7 @@ def build_validation_phase_node(
 ) -> ValidationPhaseNode:
     """Always return a :class:`ValidationPhaseNode` for the validation graph node."""
     del phase  # accepted for API symmetry with the execute-side factories
-    return ValidationPhaseNode(
-        dependencies, run_context=run_context, heartbeat=heartbeat
-    )
+    return ValidationPhaseNode(dependencies, run_context=run_context, heartbeat=heartbeat)
 
 
 __all__ = [

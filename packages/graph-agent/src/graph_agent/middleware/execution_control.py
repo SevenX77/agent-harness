@@ -47,7 +47,7 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.runtime import Runtime
 
-from ..callbacks.base import Callback
+from graph_agent.callbacks.base import Callback
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +181,7 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
 
     def _emit_iteration_event(self) -> None:
         try:
-            from ..callbacks.events import AgentLoopIterationEvent
+            from graph_agent.callbacks.events import AgentLoopIterationEvent
 
             event = AgentLoopIterationEvent(
                 phase_name=self._phase_name,
@@ -274,9 +274,7 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
             tool_name,
             count,
         )
-        return {
-            "messages": [HumanMessage(name="dead_end_warning", content=warning)]
-        }
+        return {"messages": [HumanMessage(name="dead_end_warning", content=warning)]}
 
     def _maybe_emit_loop_detected(self, messages: list[Any]) -> None:
         """Lightweight loop detection: same ``(tool, args_hash)`` repeating.
@@ -300,8 +298,10 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
         signatures: dict[str, int] = {}
         for msg in recent:
             name = str(getattr(msg, "name", None) or "unknown")
-            content = msg.content if isinstance(msg.content, str) else json.dumps(
-                msg.content, sort_keys=True, default=str
+            content = (
+                msg.content
+                if isinstance(msg.content, str)
+                else json.dumps(msg.content, sort_keys=True, default=str)
             )
             sig = f"{name}:{hash(content)}"
             signatures[sig] = signatures.get(sig, 0) + 1

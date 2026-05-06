@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .state import BusinessData
+from graph_agent.core.state import BusinessData
 
 
 @dataclass(frozen=True)

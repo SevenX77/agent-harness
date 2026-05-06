@@ -41,10 +41,10 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from ..callbacks import LoggingCallback, TracingCallback
-from .exceptions import LoaderError, PersistenceError
-from .loader import load_workflow_from_md
-from .state import WorkflowState
+from graph_agent.callbacks import LoggingCallback, TracingCallback
+from graph_agent.core.exceptions import LoaderError, PersistenceError
+from graph_agent.core.loader import load_workflow_from_md
+from graph_agent.core.state import WorkflowState
 
 logger = logging.getLogger(__name__)
 
@@ -263,7 +263,7 @@ def run_skill(
                 # Tier 1 T-B7: emit a visible marker so the trace records
                 # that resume is no longer possible from this thread.
                 with contextlib.suppress(Exception):
-                    from ..callbacks.events import _EventBase  # noqa: F401
+                    from graph_agent.callbacks.events import _EventBase  # noqa: F401
 
                     # We purposefully don't depend on a dedicated event
                     # class here — Gemini flagged ThreadCleanedUpEvent as
@@ -354,7 +354,7 @@ def main() -> None:
     # convention, not a framework patch. Once every consumer reads from
     # ``Settings``, the dotenv call moves into ``Bootstrap`` and exits
     # ``runner.main`` entirely (deferred to MVP-5 工程门禁).
-    from ..bootstrap import Bootstrap
+    from graph_agent.bootstrap import Bootstrap
 
     bootstrap = Bootstrap()
     bootstrap.apply_patches()

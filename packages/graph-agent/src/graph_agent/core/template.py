@@ -6,7 +6,7 @@ import logging
 import re
 from typing import Any
 
-from .types import Phase
+from graph_agent.core.types import Phase
 
 logger = logging.getLogger(__name__)
 

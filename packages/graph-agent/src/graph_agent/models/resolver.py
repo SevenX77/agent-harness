@@ -17,15 +17,15 @@ from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from ..callbacks.base import Callback
-from ..config.llm_config import (
+from graph_agent.callbacks.base import Callback
+from graph_agent.config.llm_config import (
     ResolvedProvider,
     ResolvedRole,
     RoleConfigData,
     get_role_config,
 )
-from .gateway_chat_model import GatewayChatModel
-from .llm_client_manager import LLMClientManager
+from graph_agent.models.gateway_chat_model import GatewayChatModel
+from graph_agent.models.llm_client_manager import LLMClientManager
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ class ModelResolver:
             model_override=model_override,
         )
         if not resolved.call_chain:
-            from ..core.exceptions import AllProvidersFailedError
+            from graph_agent.core.exceptions import AllProvidersFailedError
 
             raise AllProvidersFailedError(effective_role_name, [])
 
@@ -169,10 +169,7 @@ class ModelResolver:
             resolved.active_model_code,
             peer_codes,
         )
-        already_seen = {
-            (rp.provider_code, rp.model_name)
-            for rp in resolved.call_chain
-        }
+        already_seen = {(rp.provider_code, rp.model_name) for rp in resolved.call_chain}
         extras: list[ResolvedProvider] = []
         for code in peer_codes:
             try:
@@ -211,7 +208,7 @@ class ModelResolver:
         **kwargs: Any,
     ) -> BaseChatModel:
         """Call the local minimal chat model factory for explicit ad-hoc roles."""
-        from .factory import create_chat_model
+        from graph_agent.models.factory import create_chat_model
 
         effective_thinking = False if thinking_enabled is None else thinking_enabled
         model_name = kwargs.pop("model", None) or name

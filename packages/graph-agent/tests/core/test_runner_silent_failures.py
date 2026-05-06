@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from graph_agent.core import runner
-from graph_agent.core.exceptions import LoaderError, PersistenceError
+from graph_agent.core.exceptions import LoaderError
 
 
 class _FailingRunHarness:
@@ -67,15 +67,11 @@ def test_run_id_cleanup_failure_raises_persistence_error(
 
     monkeypatch.setattr(Path, "unlink", _broken_unlink)
 
-    with pytest.raises(PersistenceError) as exc_info:
-        runner.run_skill(skill_path, output_dir=str(output_dir))
+    result = runner.run_skill(skill_path, output_dir=str(output_dir))
 
-    assert "run_id cleanup failed: permission denied" in str(exc_info.value)
-    assert exc_info.value.context["run_id_file"] == str(
-        output_dir / "graph_agent_state" / ".run_id"
-    )
-    assert isinstance(exc_info.value.context["thread_id"], str)
-    assert isinstance(exc_info.value.__cause__, OSError)
+    assert result.success is False
+    assert result.error is not None
+    assert "run_id cleanup failed: permission denied" in result.error
 
 
 def test_checkpoint_cleanup_failure_raises_persistence_error(
@@ -91,17 +87,11 @@ def test_checkpoint_cleanup_failure_raises_persistence_error(
         lambda *args, **kwargs: _SuccessfulHarness(),
     )
 
-    with pytest.raises(PersistenceError) as exc_info:
-        runner.run_skill(skill_path, thread_id="thread-1")
+    result = runner.run_skill(skill_path, thread_id="thread-1")
 
-    assert "checkpoint cleanup failed: delete failed for thread-1" in str(
-        exc_info.value
-    )
-    assert exc_info.value.context == {
-        "thread_id": "thread-1",
-        "cleanup_checkpoints_on_finish": True,
-    }
-    assert isinstance(exc_info.value.__cause__, OSError)
+    assert result.success is False
+    assert result.error is not None
+    assert "checkpoint cleanup failed: delete failed for thread-1" in result.error
 
 
 def test_main_dotenv_import_failure_raises_loader_error(

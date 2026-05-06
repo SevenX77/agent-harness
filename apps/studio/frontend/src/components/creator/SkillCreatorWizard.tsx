@@ -6,13 +6,12 @@ import { useSkillCreator, validateStep } from '../../hooks/useSkillCreator'
 import type { ToastKind } from '../../types/studio'
 import { errorMessage } from '../../utils/errors'
 import type { WizardData, WizardInput } from '../../templates/skillMdGenerator'
-import type { SkillCreatorType } from '../../templates/skillMdGenerator'
+import { TemplatePicker } from '../templates/TemplatePicker'
 import { StepIndicator } from './StepIndicator'
 import { StepBasics } from './steps/StepBasics'
 import { StepFirstPhase } from './steps/StepFirstPhase'
 import { StepInputs } from './steps/StepInputs'
 import { StepPreview } from './steps/StepPreview'
-import { StepTypeChoice } from './steps/StepTypeChoice'
 
 interface SkillCreatorWizardProps {
   open: boolean
@@ -81,9 +80,9 @@ export function SkillCreatorWizard({ open, onClose, onCreated, pushToast }: Skil
 
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
           {state.stepIndex === 0 ? (
-            <StepTypeChoice
-              value={state.data.type}
-              onChange={(type: SkillCreatorType) => dispatch({ type: 'SET_FIELD', field: 'type', value: type })}
+            <TemplatePicker
+              selectedTemplateId={state.data.templateId}
+              onSelect={(data) => dispatch({ type: 'APPLY_TEMPLATE', data })}
             />
           ) : null}
           {state.stepIndex === 1 ? (

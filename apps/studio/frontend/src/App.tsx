@@ -25,6 +25,8 @@ import {
   Settings,
   Terminal as TerminalIcon,
   X,
+  Sun,
+  Moon,
 } from 'lucide-react'
 import { AgentNode, SubgraphNode } from './CustomNodes'
 import type { StudioNodeData } from './CustomNodes'
@@ -255,6 +257,7 @@ function buildGraph(
   expandedSubgraphs: Set<string>,
   nestedManifests: Record<string, SkillManifest>,
   onToggleSubgraph: (phase: VisualPhase) => void,
+  isDarkMode: boolean,
 ): GraphBuildResult {
   const nodes: Node<StudioNodeData>[] = [{
     id: 'input',
@@ -262,10 +265,10 @@ function buildGraph(
     data: { label: inputLabel(manifest) },
     position: { x: 240, y: 40 },
     style: {
-      background: '#f8fafc',
-      border: '1px solid #cbd5e1',
+      background: isDarkMode ? '#0f172a' : '#f8fafc',
+      border: isDarkMode ? '1px solid #334155' : '1px solid #cbd5e1',
       borderRadius: 8,
-      color: '#475569',
+      color: isDarkMode ? '#94a3b8' : '#475569',
       fontWeight: 700,
       minWidth: 220,
       padding: 10,
@@ -361,10 +364,10 @@ function buildGraph(
     data: { label: outputLabel(manifest) },
     position: { x: 240, y },
     style: {
-      background: '#f0fdf4',
-      border: '1px solid #bbf7d0',
+      background: isDarkMode ? '#052e16' : '#f0fdf4',
+      border: isDarkMode ? '1px solid #14532d' : '1px solid #bbf7d0',
       borderRadius: 8,
-      color: '#166534',
+      color: isDarkMode ? '#4ade80' : '#166534',
       fontWeight: 700,
       minWidth: 220,
       padding: 10,
@@ -523,13 +526,44 @@ export default function App() {
   const { data: skillList, error: skillListError } = useSWR<SkillSummary[]>('/skills', fetcher)
   const skills = useMemo(() => skillList ?? [], [skillList])
   const [activeSkillId, setActiveSkillId] = useState<string | null>(null)
-  const defaultSkillId = useMemo(() => {
-    if (skills.length === 0) {
-      return null
+  const selectedSkillId = activeSkillId
+
+  const [recentSkills, setRecentSkills] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      try { return JSON.parse(localStorage.getItem('recentSkills') || '[]') } catch { return [] }
     }
-    return (skills.find((skill) => skill.id === 'text-segmentation') ?? skills[0]).id
-  }, [skills])
-  const selectedSkillId = activeSkillId ?? defaultSkillId
+    return []
+  })
+
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('theme')
+      if (stored) return stored === 'dark'
+      return window.matchMedia('(prefers-color-scheme: dark)').matches
+    }
+    return false
+  })
+
+  useEffect(() => {
+    const root = document.documentElement
+    if (isDarkMode) {
+      root.classList.add('dark')
+      localStorage.setItem('theme', 'dark')
+    } else {
+      root.classList.remove('dark')
+      localStorage.setItem('theme', 'light')
+    }
+  }, [isDarkMode])
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    const handler = (e: MediaQueryListEvent) => {
+      if (!localStorage.getItem('theme')) setIsDarkMode(e.matches)
+    }
+    mediaQuery.addEventListener('change', handler)
+    return () => mediaQuery.removeEventListener('change', handler)
+  }, [])
+
   const {
     data: skillDetail,
     error: skillDetailError,
@@ -596,9 +630,9 @@ export default function App() {
 
   const graph = useMemo(() => (
     skillDetail
-      ? buildGraph(skillDetail.manifest, expandedSubgraphs, nestedManifests, toggleSubgraph)
+      ? buildGraph(skillDetail.manifest, expandedSubgraphs, nestedManifests, toggleSubgraph, isDarkMode)
       : { nodes: [], edges: [] }
-  ), [expandedSubgraphs, nestedManifests, skillDetail, toggleSubgraph])
+  ), [expandedSubgraphs, nestedManifests, skillDetail, toggleSubgraph, isDarkMode])
 
   useEffect(() => {
     setNodes(graph.nodes)
@@ -660,6 +694,11 @@ export default function App() {
     setTraceLogs([])
     setSelectedPromptIndex(null)
     setActiveTab('code')
+    setRecentSkills(prev => {
+      const next = [skillId, ...prev.filter(id => id !== skillId)].slice(0, 10)
+      localStorage.setItem('recentSkills', JSON.stringify(next))
+      return next
+    })
   }, [])
 
   const handleLint = useCallback(async () => {
@@ -800,17 +839,22 @@ export default function App() {
   const currentSkill = skills.find((skill) => skill.id === selectedSkillId)
 
   return (
-    <div className="flex h-screen w-full bg-gray-50 font-sans text-slate-800">
-      <div className="z-10 flex w-64 shrink-0 flex-col border-r border-gray-200 bg-white">
-        <div className="flex items-center gap-2 border-b border-gray-200 p-4 text-lg font-bold">
-          <Settings className="h-5 w-5 text-sky-600" />
-          Skill Studio
+    <div className="flex h-screen w-full bg-gray-50 dark:bg-slate-950 font-sans text-slate-800 dark:text-slate-200">
+      <div className="z-10 flex w-64 shrink-0 flex-col border-r border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+        <div className="flex items-center justify-between border-b border-gray-200 dark:border-slate-800 p-4 text-lg font-bold text-gray-800 dark:text-gray-100">
+          <div className="flex items-center gap-2">
+            <Settings className="h-5 w-5 text-sky-600 dark:text-sky-500" />
+            Skill Studio
+          </div>
+          <button type="button" onClick={() => setIsDarkMode(!isDarkMode)} className="text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100">
+            {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
-          <h3 className="mb-3 text-xs font-semibold uppercase text-gray-400">Skills</h3>
+          <h3 className="mb-3 text-xs font-semibold uppercase text-gray-400 dark:text-gray-500">Project Skills</h3>
           {skillListError ? (
-            <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{errorMessage(skillListError)}</div>
+            <div className="rounded border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 p-3 text-sm text-red-700 dark:text-red-400">{errorMessage(skillListError)}</div>
           ) : (
             <ul className="space-y-2">
               {skills.map((skill) => (
@@ -820,8 +864,8 @@ export default function App() {
                     onClick={() => handleSelectSkill(skill.id)}
                     className={`flex w-full items-center gap-2 rounded-md border p-2 text-left text-sm font-medium transition-colors ${
                       selectedSkillId === skill.id
-                        ? 'border-sky-100 bg-sky-50 text-sky-700'
-                        : 'border-transparent text-gray-600 hover:bg-gray-100'
+                        ? 'border-sky-100 dark:border-sky-900/50 bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400'
+                        : 'border-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800'
                     }`}
                   >
                     <FileText className="h-4 w-4 shrink-0" />
@@ -833,12 +877,12 @@ export default function App() {
           )}
         </div>
 
-        <div className="border-t border-gray-200 p-4">
+        <div className="border-t border-gray-200 dark:border-slate-800 p-4">
           <button
             type="button"
             onClick={() => setActiveTab('settings')}
             className={`flex w-full items-center justify-center gap-2 rounded-md p-2 font-medium transition-colors ${
-              activeTab === 'settings' ? 'bg-gray-200 text-gray-800' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              activeTab === 'settings' ? 'bg-gray-200 dark:bg-slate-800 text-gray-800 dark:text-gray-200' : 'bg-gray-100 dark:bg-slate-800/50 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-slate-800'
             }`}
           >
             <Settings className="h-4 w-4" />
@@ -848,20 +892,62 @@ export default function App() {
       </div>
 
       <div className="flex h-full flex-1 flex-col overflow-hidden">
-        <div className="z-20 flex h-16 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-6">
+        {!selectedSkillId ? (
+          <div className="flex h-full flex-col items-center justify-center bg-gray-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200">
+            <h1 className="text-5xl font-extrabold mb-12 text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-violet-500">Skill Studio</h1>
+            <div className="flex gap-16 max-w-4xl w-full px-8">
+              <div className="flex flex-col gap-6 flex-1">
+                <h2 className="text-xl font-bold border-b border-gray-200 dark:border-slate-800 pb-2">Start</h2>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const path = prompt('Enter skill path to import:')
+                    if (path) {
+                       pushToast('Importing skills from path is not implemented in the backend yet.', 'info')
+                    }
+                  }}
+                  className="flex items-center gap-3 text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 font-medium transition-colors"
+                >
+                  <FolderOpen className="h-6 w-6" /> Open / Import Skill Folder...
+                </button>
+              </div>
+              <div className="flex flex-col gap-6 flex-1">
+                <h2 className="text-xl font-bold border-b border-gray-200 dark:border-slate-800 pb-2">Recent</h2>
+                {recentSkills.length > 0 ? (
+                  <ul className="flex flex-col gap-3">
+                    {recentSkills.map(id => {
+                      const s = skills.find(sk => sk.id === id)
+                      return (
+                        <li key={id}>
+                          <button type="button" onClick={() => handleSelectSkill(id)} className="text-gray-600 dark:text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 font-medium transition-colors">
+                            {s ? s.name : id}
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                ) : (
+                  <div className="text-sm text-gray-500 dark:text-gray-500">No recent skills</div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="z-20 flex h-16 shrink-0 items-center justify-between border-b border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-6">
           <div className="relative flex items-center gap-5 text-sm">
             <button
               type="button"
               onClick={() => setIsArtifactsMenuOpen((open) => !open)}
-              className="flex items-center gap-2 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 font-medium text-indigo-700 transition-colors hover:bg-indigo-100"
+              className="flex items-center gap-2 rounded-md border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/30 px-3 py-1.5 font-medium text-indigo-700 dark:text-indigo-400 transition-colors hover:bg-indigo-100 dark:hover:bg-indigo-900/50"
             >
               <HardDrive className="h-4 w-4" />
               Artifacts
             </button>
 
             {isArtifactsMenuOpen ? (
-              <div className="absolute left-0 top-10 z-50 w-[26rem] rounded-md border border-gray-200 bg-white p-4 shadow-xl">
-                <h4 className="mb-3 border-b pb-2 font-bold text-gray-800">Run Input</h4>
+              <div className="absolute left-0 top-10 z-50 w-[26rem] rounded-md border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-xl">
+                <h4 className="mb-3 border-b border-gray-200 dark:border-slate-800 pb-2 font-bold text-gray-800 dark:text-gray-100">Run Input</h4>
                 <div className="space-y-4">
                   <label className="block">
                     <span className="mb-1 block text-xs font-medium uppercase text-gray-500">Input Source</span>
@@ -913,7 +999,7 @@ export default function App() {
               type="button"
               onClick={handleLint}
               disabled={!selectedSkillId || lintStatus === 'checking'}
-              className="flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-1.5 font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex items-center gap-2 rounded-md border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-1.5 font-medium text-gray-700 dark:text-gray-300 transition-colors hover:bg-gray-50 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {lintStatus === 'checking' ? 'Linting...' : 'Lint'}
               {lintStatus === 'passed' ? <CheckCircle className="h-4 w-4 text-green-500" /> : null}
@@ -924,7 +1010,7 @@ export default function App() {
               type="button"
               onClick={() => void handleSave()}
               disabled={!selectedSkillId || lintStatus === 'checking'}
-              className="flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-1.5 font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex items-center gap-2 rounded-md border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-1.5 font-medium text-gray-700 dark:text-gray-300 transition-colors hover:bg-gray-50 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Save className="h-4 w-4" />
               Save
@@ -934,7 +1020,7 @@ export default function App() {
               type="button"
               onClick={() => void openTerminal()}
               disabled={!selectedSkillId}
-              className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-1.5 font-medium text-emerald-700 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex items-center gap-2 rounded-md border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/30 px-4 py-1.5 font-medium text-emerald-700 dark:text-emerald-400 transition-colors hover:bg-emerald-100 dark:hover:bg-emerald-900/50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <TerminalIcon className="h-4 w-4" />
               Open CLI
@@ -944,7 +1030,7 @@ export default function App() {
               type="button"
               onClick={() => void handleRun()}
               disabled={!selectedSkillId || runStatus === 'running'}
-              className="flex items-center gap-2 rounded-md bg-sky-600 px-4 py-1.5 font-medium text-white transition-colors hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-sky-300"
+              className="flex items-center gap-2 rounded-md bg-sky-600 px-4 py-1.5 font-medium text-white transition-colors hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-sky-300 dark:disabled:bg-sky-900"
             >
               <Play className="h-4 w-4" />
               {runStatus === 'running' ? 'Running...' : 'Run'}
@@ -953,8 +1039,8 @@ export default function App() {
         </div>
 
         <div className="flex flex-1 overflow-hidden">
-          <div className="relative flex-1 border-r border-gray-200 bg-slate-50">
-            <div className="absolute left-4 top-4 z-10 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm font-semibold text-gray-700 shadow-sm">
+          <div className="relative flex-1 border-r border-gray-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950">
+            <div className="absolute left-4 top-4 z-10 rounded-md border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-sm font-semibold text-gray-700 dark:text-gray-300 shadow-sm">
               {currentSkill?.name ?? 'Graph'}
             </div>
             {skillDetailError ? (
@@ -973,14 +1059,18 @@ export default function App() {
                 minZoom={0.4}
               >
                 <Controls />
-                <MiniMap />
+                <MiniMap
+                  style={{ backgroundColor: isDarkMode ? '#0f172a' : '#fff' }}
+                  maskColor={isDarkMode ? 'rgba(0,0,0,0.4)' : 'rgba(240,240,240,0.6)'}
+                  nodeColor={isDarkMode ? '#334155' : '#e2e8f0'}
+                />
                 <Background gap={12} size={1} />
               </ReactFlow>
             )}
           </div>
 
-          <div className="z-10 flex w-[520px] flex-col bg-white">
-            <div className="flex shrink-0 border-b border-gray-200">
+          <div className="z-10 flex w-[520px] flex-col bg-white dark:bg-slate-900">
+            <div className="flex shrink-0 border-b border-gray-200 dark:border-slate-800">
               {([
                 ['code', FileText, 'SKILL.md'],
                 ['trace', MessageSquare, 'Trace'],
@@ -990,7 +1080,7 @@ export default function App() {
                   key={tab}
                   type="button"
                   className={`flex flex-1 items-center justify-center gap-2 py-3 text-sm font-medium ${
-                    activeTab === tab ? 'border-b-2 border-sky-600 text-sky-600' : 'text-gray-500 hover:text-gray-700'
+                    activeTab === tab ? 'border-b-2 border-sky-600 text-sky-600 dark:text-sky-400 dark:border-sky-400' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
                   }`}
                   onClick={() => setActiveTab(tab)}
                 >
@@ -1002,10 +1092,10 @@ export default function App() {
 
             <div className="flex-1 overflow-hidden">
               {activeTab === 'settings' ? (
-                <div className="h-full overflow-y-auto bg-gray-50 p-6">
-                  <h2 className="mb-6 text-xl font-bold text-gray-800">Settings</h2>
-                  <div className="rounded-md border border-gray-200 bg-white p-5 shadow-sm">
-                    <h3 className="mb-4 border-b pb-2 text-sm font-bold uppercase text-gray-700">LLM API Keys</h3>
+                <div className="h-full overflow-y-auto bg-gray-50 dark:bg-slate-950 p-6">
+                  <h2 className="mb-6 text-xl font-bold text-gray-800 dark:text-gray-100">Settings</h2>
+                  <div className="rounded-md border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
+                    <h3 className="mb-4 border-b border-gray-200 dark:border-slate-800 pb-2 text-sm font-bold uppercase text-gray-700 dark:text-gray-300">LLM API Keys</h3>
                     <div className="space-y-4">
                       {([
                         ['openai', 'OpenAI API Key', 'sk-...'],
@@ -1013,12 +1103,12 @@ export default function App() {
                         ['gemini', 'Google Gemini API Key', 'AIza...'],
                       ] as const).map(([key, label, placeholder]) => (
                         <label key={key} className="block">
-                          <span className="mb-1 block text-sm font-medium text-gray-700">{label}</span>
+                          <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{label}</span>
                           <input
                             type="password"
                             value={apiKeys[key]}
                             onChange={(event) => setApiKeys((current) => ({ ...current, [key]: event.target.value }))}
-                            className="w-full rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                            className="w-full rounded-md border border-gray-300 dark:border-slate-700 dark:bg-slate-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-500"
                             placeholder={placeholder}
                           />
                         </label>
@@ -1031,7 +1121,7 @@ export default function App() {
               {activeTab === 'code' ? (
                 <div className="flex h-full flex-col">
                   {lintErrors.length > 0 ? (
-                    <div className="shrink-0 border-b border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    <div className="shrink-0 border-b border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 p-3 text-sm text-red-700 dark:text-red-400">
                       <div className="mb-2 flex items-start gap-2 font-semibold">
                         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                         Manifest validation failed
@@ -1042,7 +1132,7 @@ export default function App() {
                             key={`${error.error_code}-${error.line ?? 'none'}-${index}`}
                             type="button"
                             onClick={() => jumpToLine(error.line)}
-                            className="block w-full rounded border border-red-200 bg-white px-2 py-1 text-left hover:bg-red-50"
+                            className="block w-full rounded border border-red-200 dark:border-red-900/50 bg-white dark:bg-slate-900 px-2 py-1 text-left hover:bg-red-50 dark:hover:bg-red-900/30"
                           >
                             <span className="font-mono text-xs text-red-500">
                               {error.line ? `Line ${error.line}` : 'No line'} / {error.error_code}
@@ -1054,7 +1144,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => copyErrorToClipboard(lintErrors.map((error) => error.message).join('\n'))}
-                        className="mt-2 flex items-center gap-1 rounded border border-red-200 bg-white px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                        className="mt-2 flex items-center gap-1 rounded border border-red-200 dark:border-red-900/50 bg-white dark:bg-slate-900 px-2 py-1 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
                       >
                         <Copy className="h-3 w-3" />
                         Copy
@@ -1066,6 +1156,7 @@ export default function App() {
                     <Editor
                       height="100%"
                       defaultLanguage="markdown"
+                      theme={isDarkMode ? 'vs-dark' : 'light'}
                       value={skillCode}
                       onMount={handleEditorMount}
                       onChange={(value) => {
@@ -1083,46 +1174,46 @@ export default function App() {
               ) : null}
 
               {activeTab === 'trace' ? (
-                <div className="h-full overflow-y-auto bg-slate-50 p-4">
+                <div className="h-full overflow-y-auto bg-slate-50 dark:bg-slate-950 p-4">
                   {traceLogs.length === 0 ? (
-                    <div className="flex h-full items-center justify-center text-sm font-medium text-slate-400">
+                    <div className="flex h-full items-center justify-center text-sm font-medium text-slate-400 dark:text-slate-500">
                       Waiting for run events
                     </div>
                   ) : (
                     <div>
-                      <h3 className="mb-4 border-b border-gray-200 pb-2 font-bold text-gray-700">Trace Timeline</h3>
-                      <div className="relative ml-3 space-y-5 border-l-2 border-gray-200">
+                      <h3 className="mb-4 border-b border-gray-200 dark:border-slate-800 pb-2 font-bold text-gray-700 dark:text-gray-300">Trace Timeline</h3>
+                      <div className="relative ml-3 space-y-5 border-l-2 border-gray-200 dark:border-slate-800">
                         {traceLogs.map((event, index) => {
                           const tokens = tokenText(event)
                           const inspectable = event.event_type === 'prompt_captured' || event.event_type === 'llm_call'
                           return (
                             <div key={`${event.timestamp}-${index}`} className="relative pl-6">
-                              <div className={`absolute -left-[9px] top-1 h-4 w-4 rounded-full border-2 border-white ${eventColor(event.event_type)}`} />
+                              <div className={`absolute -left-[9px] top-1 h-4 w-4 rounded-full border-2 border-white dark:border-slate-900 ${eventColor(event.event_type)}`} />
                               <button
                                 type="button"
                                 onClick={() => inspectable && setSelectedPromptIndex(index)}
                                 className={`block w-full rounded-md border p-3 text-left shadow-sm ${
                                   inspectable
-                                    ? 'cursor-pointer border-violet-200 bg-white hover:border-violet-400'
-                                    : 'cursor-default border-gray-200 bg-white'
+                                    ? 'cursor-pointer border-violet-200 dark:border-violet-800 bg-white dark:bg-slate-900 hover:border-violet-400 dark:hover:border-violet-600'
+                                    : 'cursor-default border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900'
                                 }`}
                               >
                                 <div className="mb-1 flex items-center justify-between gap-3">
-                                  <span className="flex items-center gap-1 text-sm font-bold text-gray-800">
-                                    {inspectable ? <MessageSquare className="h-3.5 w-3.5 text-violet-600" /> : null}
+                                  <span className="flex items-center gap-1 text-sm font-bold text-gray-800 dark:text-gray-200">
+                                    {inspectable ? <MessageSquare className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400" /> : null}
                                     {event.event_type}
                                   </span>
                                   {tokens ? (
-                                    <span className="flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-600">
+                                    <span className="flex items-center gap-1 rounded-full bg-violet-100 dark:bg-violet-900/40 px-2 py-0.5 text-xs font-medium text-violet-600 dark:text-violet-300">
                                       <Hash className="h-3 w-3" />
                                       {tokens}
                                     </span>
                                   ) : null}
                                 </div>
-                                <div className="text-xs font-medium uppercase text-gray-400">{eventPhase(event)}</div>
-                                <p className="mt-1 text-sm text-gray-600">{eventMessage(event)}</p>
+                                <div className="text-xs font-medium uppercase text-gray-400 dark:text-gray-500">{eventPhase(event)}</div>
+                                <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">{eventMessage(event)}</p>
                                 {inspectable ? (
-                                  <div className="mt-2 flex items-center gap-1 text-xs font-medium text-violet-500">
+                                  <div className="mt-2 flex items-center gap-1 text-xs font-medium text-violet-500 dark:text-violet-400">
                                     Inspect prompt <ChevronRight className="h-3 w-3" />
                                   </div>
                                 ) : null}
@@ -1138,7 +1229,7 @@ export default function App() {
 
               {activeTab === 'terminal' ? (
                 <div className="flex h-full flex-col">
-                  <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                  <div className="flex shrink-0 items-center justify-between border-b border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-950 px-3 py-2 text-xs text-gray-600 dark:text-gray-400">
                     <span>{terminalSession ? terminalSession.cwd : 'No CLI session'}</span>
                     <span className="font-medium">{terminalStatus}</span>
                   </div>
@@ -1156,42 +1247,44 @@ export default function App() {
             </div>
 
             {currentGraphSkill ? (
-              <div className="shrink-0 border-t border-gray-200 bg-gray-50 px-4 py-2 text-xs text-gray-500">
+              <div className="shrink-0 border-t border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-950 px-4 py-2 text-xs text-gray-500 dark:text-gray-400">
                 {currentGraphSkill.phases.length} phases / {currentGraphSkill.io.inputs.length} inputs / {currentGraphSkill.io.outputs.length} outputs
               </div>
             ) : null}
           </div>
         </div>
+        </>
+      )}
       </div>
 
       {promptEvent ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-8">
-          <div className="flex h-[80vh] w-full max-w-5xl flex-col overflow-hidden rounded-md bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-6 py-4">
-              <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800">
-                <MessageSquare className="h-5 w-5 text-violet-600" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 dark:bg-black/80 p-8">
+          <div className="flex h-[80vh] w-full max-w-5xl flex-col overflow-hidden rounded-md bg-white dark:bg-slate-900 shadow-2xl border dark:border-slate-800">
+            <div className="flex items-center justify-between border-b border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-950 px-6 py-4">
+              <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800 dark:text-gray-100">
+                <MessageSquare className="h-5 w-5 text-violet-600 dark:text-violet-400" />
                 Prompt Inspector: {eventPhase(promptEvent)}
               </h3>
-              <button type="button" onClick={() => setSelectedPromptIndex(null)} className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-800">
+              <button type="button" onClick={() => setSelectedPromptIndex(null)} className="rounded p-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-slate-800 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-100">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             <div className="grid flex-1 grid-cols-3 gap-4 overflow-hidden p-6">
-              <div className="flex flex-col overflow-hidden rounded-md border border-gray-200">
-                <div className="border-b border-gray-200 bg-gray-100 px-3 py-2 text-xs font-bold text-gray-600">Template Source</div>
-                <pre className="flex-1 overflow-y-auto bg-gray-50 p-3 text-sm whitespace-pre-wrap">{promptEvent.template_source ?? 'inline'}</pre>
+              <div className="flex flex-col overflow-hidden rounded-md border border-gray-200 dark:border-slate-800">
+                <div className="border-b border-gray-200 dark:border-slate-800 bg-gray-100 dark:bg-slate-800 px-3 py-2 text-xs font-bold text-gray-600 dark:text-gray-400">Template Source</div>
+                <pre className="flex-1 overflow-y-auto bg-gray-50 dark:bg-slate-950 p-3 text-sm whitespace-pre-wrap dark:text-gray-300">{promptEvent.template_source ?? 'inline'}</pre>
               </div>
-              <div className="flex flex-col overflow-hidden rounded-md border border-gray-200">
-                <div className="border-b border-gray-200 bg-gray-100 px-3 py-2 text-xs font-bold text-gray-600">Variables</div>
-                <pre className="flex-1 overflow-y-auto bg-gray-50 p-3 text-sm whitespace-pre-wrap text-sky-700">{jsonText(promptEvent.variables)}</pre>
+              <div className="flex flex-col overflow-hidden rounded-md border border-gray-200 dark:border-slate-800">
+                <div className="border-b border-gray-200 dark:border-slate-800 bg-gray-100 dark:bg-slate-800 px-3 py-2 text-xs font-bold text-gray-600 dark:text-gray-400">Variables</div>
+                <pre className="flex-1 overflow-y-auto bg-gray-50 dark:bg-slate-950 p-3 text-sm whitespace-pre-wrap text-sky-700 dark:text-sky-400">{jsonText(promptEvent.variables)}</pre>
               </div>
-              <div className="flex flex-col overflow-hidden rounded-md border border-violet-200">
-                <div className="flex items-center gap-1 border-b border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-700">
+              <div className="flex flex-col overflow-hidden rounded-md border border-violet-200 dark:border-violet-800/50">
+                <div className="flex items-center gap-1 border-b border-violet-200 dark:border-violet-800/50 bg-violet-50 dark:bg-violet-900/20 px-3 py-2 text-xs font-bold text-violet-700 dark:text-violet-400">
                   <CheckCircle className="h-3 w-3" />
                   Final Prompt
                 </div>
-                <pre className="flex-1 overflow-y-auto bg-white p-3 text-sm whitespace-pre-wrap text-gray-800">
+                <pre className="flex-1 overflow-y-auto bg-white dark:bg-slate-900 p-3 text-sm whitespace-pre-wrap text-gray-800 dark:text-gray-300">
                   {promptEvent.event_type === 'prompt_captured' ? jsonText(promptEvent.resolved_prompt) : jsonText(promptEvent.messages ?? undefined)}
                 </pre>
               </div>
@@ -1206,10 +1299,10 @@ export default function App() {
             key={toast.id}
             className={`rounded-md border px-4 py-3 text-sm shadow-lg ${
               toast.kind === 'success'
-                ? 'border-green-200 bg-green-50 text-green-800'
+                ? 'border-green-200 dark:border-green-900/50 bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-400'
                 : toast.kind === 'error'
-                  ? 'border-red-200 bg-red-50 text-red-800'
-                  : 'border-slate-200 bg-white text-slate-700'
+                  ? 'border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-400'
+                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300'
             }`}
           >
             {toast.message}

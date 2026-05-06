@@ -68,6 +68,9 @@ export interface IoInput {
   source: 'runtime'
   type: string | null
   default: JsonValue | null
+  description?: string | null
+  enum?: JsonValue[] | null
+  required?: boolean | null
 }
 
 export interface IoOutput {

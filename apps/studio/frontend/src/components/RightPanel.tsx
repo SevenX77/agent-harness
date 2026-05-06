@@ -152,7 +152,7 @@ export function RightPanel({
         ) : null}
 
         {activeTab === 'trace' ? (
-          <div className="h-full overflow-y-auto bg-slate-50 dark:bg-slate-950 p-4">
+          <div className="h-full bg-slate-50 p-4 dark:bg-slate-950">
             <TracePanel
               traceLogs={traceLogs}
               activePhase={selectedTracePhaseId}

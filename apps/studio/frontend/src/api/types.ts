@@ -56,6 +56,13 @@ export interface RunMetadata {
   metrics: TokensMetrics | null
 }
 
+export interface RunDetail {
+  metadata: RunMetadata
+  events: CallbackEvent[]
+  final_context: JsonObject | null
+  artifacts: string[] | null
+}
+
 export interface TerminalSession {
   term_id: string
   ws_url: string

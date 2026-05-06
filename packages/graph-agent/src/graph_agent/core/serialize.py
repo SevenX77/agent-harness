@@ -58,7 +58,7 @@ if TYPE_CHECKING:
     from graph_agent.core.manifest import SkillManifest
 
 
-class _BlockScalarDumper(yaml.SafeDumper):  # type: ignore[misc,no-any-unimported]  # PyYAML SafeDumper is Any without local stubs.
+class _BlockScalarDumper(yaml.SafeDumper):  # type: ignore[misc]  # PyYAML SafeDumper is Any without local stubs.
     """PyYAML dumper that forces multi-line strings to Block Scalar style.
 
     Strings without newlines fall through to default plain/quoted

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.core.backends import get_auth_user_id, get_metadata, get_storage
 from app.core.exceptions import raise_not_implemented
+from app.core.ports.metadata import MetadataStore
+from app.core.ports.storage import StorageBackend
 from app.models.errors import ErrorResponse
 from app.models.skills import CreateSkillReq, SkillDetail, SkillSummary, UpdateSkillReq
 from app.services.skills import get_skill_detail, list_skill_summaries, update_skill_content
@@ -13,8 +16,12 @@ router = APIRouter(prefix="/api/skills", tags=["skills"])
 
 
 @router.get("", response_model=list[SkillSummary])
-async def list_skills() -> list[SkillSummary]:
-    return list_skill_summaries()
+async def list_skills(
+    user_id: str = Depends(get_auth_user_id),
+    storage: StorageBackend = Depends(get_storage),
+    metadata: MetadataStore = Depends(get_metadata),
+) -> list[SkillSummary]:
+    return await list_skill_summaries(user_id, storage, metadata)
 
 
 @router.post("", response_model=SkillSummary, status_code=201)
@@ -23,13 +30,24 @@ async def create_skill(request: CreateSkillReq) -> SkillSummary:
 
 
 @router.get("/{skill_id}", response_model=SkillDetail)
-async def get_skill(skill_id: str) -> SkillDetail:
-    return get_skill_detail(skill_id)
+async def get_skill(
+    skill_id: str,
+    user_id: str = Depends(get_auth_user_id),
+    storage: StorageBackend = Depends(get_storage),
+    metadata: MetadataStore = Depends(get_metadata),
+) -> SkillDetail:
+    return await get_skill_detail(user_id, skill_id, storage, metadata)
 
 
 @router.put("/{skill_id}", response_model=SkillDetail)
-async def update_skill(skill_id: str, request: UpdateSkillReq) -> SkillDetail:
-    return update_skill_content(skill_id, request.content)
+async def update_skill(
+    skill_id: str,
+    request: UpdateSkillReq,
+    user_id: str = Depends(get_auth_user_id),
+    storage: StorageBackend = Depends(get_storage),
+    metadata: MetadataStore = Depends(get_metadata),
+) -> SkillDetail:
+    return await update_skill_content(user_id, skill_id, request.content, storage, metadata)
 
 
 @router.delete(

@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import re
-import shutil
-import tempfile
+import uuid
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Literal
@@ -15,6 +14,8 @@ from pydantic import TypeAdapter
 
 from app.core import config
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
+from app.core.ports.metadata import MetadataStore
+from app.core.ports.storage import StorageBackend
 from app.models.errors import LintError
 from app.models.lint import LintResult
 from app.models.runs import RunMetadata
@@ -33,26 +34,59 @@ def ensure_workspace_layout() -> None:
     config.default_workspace_skills_dir().mkdir(parents=True, exist_ok=True)
 
 
-def list_skill_summaries() -> list[SkillSummary]:
+async def list_skill_summaries(
+    user_id: str,
+    storage: StorageBackend,
+    metadata: MetadataStore,
+) -> list[SkillSummary]:
     """Return public and workspace skills, with workspace copies taking precedence."""
-    ensure_workspace_layout()
     summaries: dict[str, SkillSummary] = {}
-    for skill_dir in _iter_skill_dirs(config.SKILLS_DIR):
-        summaries[skill_dir.name] = _summary_for_skill_dir(skill_dir)
-    for skill_dir in _iter_skill_dirs(config.default_workspace_skills_dir()):
-        summaries[skill_dir.name] = _summary_for_skill_dir(skill_dir)
+    public_ids = await _list_skill_ids(config.SKILLS_DIR, storage)
+    workspace_root = _workspace_skills_dir_for(user_id)
+    workspace_ids = await _list_skill_ids(workspace_root, storage)
+    for skill_id in public_ids:
+        skill_dir = config.SKILLS_DIR / skill_id
+        summaries[skill_id] = await _summary_for_skill_dir_async(
+            user_id,
+            skill_dir,
+            storage,
+            metadata,
+        )
+    for skill_id in workspace_ids:
+        skill_dir = workspace_root / skill_id
+        summaries[skill_id] = await _summary_for_skill_dir_async(
+            user_id,
+            skill_dir,
+            storage,
+            metadata,
+        )
     return sorted(summaries.values(), key=lambda summary: summary.id)
 
 
-def get_skill_detail(skill_id: str, *, lint_result: LintResult | None = None) -> SkillDetail:
+async def get_skill_detail(
+    user_id: str,
+    skill_id: str,
+    storage: StorageBackend,
+    metadata: MetadataStore,
+    *,
+    lint_result: LintResult | None = None,
+) -> SkillDetail:
     """Compile one skill into a Studio SkillDetail response."""
-    skill_dir = resolve_skill_dir(skill_id)
+    skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage)
     skill_path = skill_dir / "SKILL.md"
     lint = lint_result or lint_skill_path(skill_path)
     if lint.status == "failed":
         _raise_manifest_validation_failed(lint)
     manifest = _load_manifest(skill_path)
-    return _detail_from_manifest(skill_id, skill_dir, manifest, lint)
+    return await _detail_from_manifest_async(
+        user_id,
+        skill_id,
+        skill_dir,
+        manifest,
+        lint,
+        storage,
+        metadata,
+    )
 
 
 def lint_skill(skill_id: str) -> LintResult:
@@ -71,7 +105,13 @@ def lint_skill_path(skill_path: Path) -> LintResult:
     )
 
 
-def update_skill_content(skill_id: str, content: str) -> SkillDetail:
+async def update_skill_content(
+    user_id: str,
+    skill_id: str,
+    content: str,
+    storage: StorageBackend,
+    metadata: MetadataStore,
+) -> SkillDetail:
     """Validate then atomically write SKILL.md into the default workspace."""
     if not content.strip():
         response = error_response(
@@ -83,20 +123,72 @@ def update_skill_content(skill_id: str, content: str) -> SkillDetail:
         )
         raise_error_response(response)
 
-    target_dir = ensure_workspace_skill_dir(skill_id)
+    target_dir = await ensure_workspace_skill_dir_async(user_id, skill_id, storage)
     target_path = target_dir / "SKILL.md"
-    candidate_path = _write_candidate(target_dir, content)
+    candidate_path = target_dir / f".SKILL.{uuid.uuid4().hex}.tmp"
+    await storage.write_text(str(candidate_path), content)
     try:
         lint = lint_skill_path(candidate_path)
         if lint.status == "failed":
             _raise_manifest_validation_failed(lint)
         _load_manifest(candidate_path)
-        candidate_path.replace(target_path)
+        await storage.move(str(candidate_path), str(target_path))
     finally:
-        if candidate_path.exists():
-            candidate_path.unlink()
+        await storage.delete(str(candidate_path))
 
-    return get_skill_detail(skill_id, lint_result=lint)
+    return await get_skill_detail(user_id, skill_id, storage, metadata, lint_result=lint)
+
+
+async def ensure_workspace_skill_dir_async(
+    user_id: str,
+    skill_id: str,
+    storage: StorageBackend,
+) -> Path:
+    """Return a writable skill dir, forking a public skill into workspace if needed."""
+    workspace_dir = _workspace_skills_dir_for(user_id) / skill_id
+    if await storage.exists(str(workspace_dir / "SKILL.md")):
+        return workspace_dir
+
+    public_dir = config.SKILLS_DIR / skill_id
+    if not await storage.exists(str(public_dir / "SKILL.md")):
+        raise standard_http_exception(
+            "SKILL_NOT_FOUND",
+            f"Skill not found: {skill_id}",
+            {"skill_id": skill_id},
+        )
+    await storage.copy_tree(str(public_dir), str(workspace_dir))
+    return workspace_dir
+
+
+async def resolve_skill_dir_async(
+    user_id: str,
+    skill_id: str,
+    storage: StorageBackend,
+) -> Path:
+    """Resolve a skill id through storage, preferring workspace copies."""
+    workspace_dir = _workspace_skills_dir_for(user_id) / skill_id
+    if await storage.exists(str(workspace_dir / "SKILL.md")):
+        return workspace_dir
+    public_dir = config.SKILLS_DIR / skill_id
+    if await storage.exists(str(public_dir / "SKILL.md")):
+        return public_dir
+    raise standard_http_exception(
+        "SKILL_NOT_FOUND",
+        f"Skill not found: {skill_id}",
+        {"skill_id": skill_id},
+    )
+
+
+async def latest_run_metadata_async(
+    user_id: str,
+    skill_id: str,
+    metadata: MetadataStore,
+) -> RunMetadata | None:
+    """Return the newest persisted run metadata for one skill via MetadataStore."""
+    candidates = await metadata.list_runs(user_id, skill_id)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: item.started_at)
 
 
 def ensure_workspace_skill_dir(skill_id: str) -> Path:
@@ -113,7 +205,7 @@ def ensure_workspace_skill_dir(skill_id: str) -> Path:
             f"Skill not found: {skill_id}",
             {"skill_id": skill_id},
         )
-    shutil.copytree(public_dir, workspace_dir)
+    _copy_tree(public_dir, workspace_dir)
     return workspace_dir
 
 
@@ -159,7 +251,9 @@ def latest_run_metadata(skill_id: str) -> RunMetadata | None:
     candidates: list[RunMetadata] = []
     for metadata_path in runs_dir.glob("*/run_metadata.json"):
         try:
-            candidates.append(RunMetadata.model_validate_json(metadata_path.read_text()))
+            candidates.append(
+                RunMetadata.model_validate_json(metadata_path.read_bytes().decode("utf-8")),
+            )
         except Exception:
             continue
     if not candidates:
@@ -196,6 +290,34 @@ def _summary_for_skill_dir(skill_dir: Path) -> SkillSummary:
     )
 
 
+async def _summary_for_skill_dir_async(
+    user_id: str,
+    skill_dir: Path,
+    storage: StorageBackend,
+    metadata: MetadataStore,
+) -> SkillSummary:
+    skill_id = skill_dir.name
+    lint = lint_skill_path(skill_dir / "SKILL.md")
+    if lint.status == "passed":
+        frontmatter = _frontmatter(skill_dir / "SKILL.md")
+        name = str(frontmatter.get("name") or skill_id)
+        description = str(frontmatter.get("description") or "")
+        phase_count = _phase_count_from_frontmatter(frontmatter)
+    else:
+        name = skill_id
+        description = lint.errors[0].message if lint.errors else "Invalid skill manifest"
+        phase_count = 0
+    latest = await latest_run_metadata_async(user_id, skill_id, metadata)
+    return SkillSummary(
+        id=skill_id,
+        name=name,
+        description=description,
+        phase_count=phase_count,
+        has_golden=await storage.exists(str(skill_dir / "golden")),
+        last_run_at=latest.started_at if latest else None,
+    )
+
+
 def _detail_from_manifest(
     skill_id: str,
     skill_dir: Path,
@@ -214,6 +336,32 @@ def _detail_from_manifest(
         },
         has_golden=_has_golden(skill_dir),
         latest_run_metadata=latest_run_metadata(skill_id),
+        lint_result=lint_result,
+    )
+
+
+async def _detail_from_manifest_async(
+    user_id: str,
+    skill_id: str,
+    skill_dir: Path,
+    manifest: AgentSkillDef | GraphSkillDef | PersonaSkillDef,
+    lint_result: LintResult,
+    storage: StorageBackend,
+    metadata: MetadataStore,
+) -> SkillDetail:
+    workspace_skill_dir = _workspace_skills_dir_for(user_id) / skill_id
+    latest = await latest_run_metadata_async(user_id, skill_id, metadata)
+    return SkillDetail(
+        manifest=manifest,
+        file_paths={
+            "skill_dir": str(skill_dir),
+            "skill_md": str(skill_dir / "SKILL.md"),
+            "runs_dir": str(workspace_skill_dir / "runs"),
+            "test_inputs_dir": str(workspace_skill_dir / "test_inputs"),
+            "golden_dir": str(workspace_skill_dir / "golden"),
+        },
+        has_golden=await storage.exists(str(skill_dir / "golden")),
+        latest_run_metadata=latest,
         lint_result=lint_result,
     )
 
@@ -305,20 +453,6 @@ def _phase_from_location(location: str | None) -> str | None:
     return f"phase[{match.group(1)}]" if match else None
 
 
-def _write_candidate(target_dir: Path, content: str) -> Path:
-    target_dir.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        "w",
-        encoding="utf-8",
-        dir=target_dir,
-        prefix=".SKILL.",
-        suffix=".tmp",
-        delete=False,
-    ) as temp_file:
-        temp_file.write(content)
-        return Path(temp_file.name)
-
-
 def _raise_manifest_validation_failed(lint: LintResult) -> None:
     response = error_response(
         error_code="MANIFEST_VALIDATION_FAILED",
@@ -328,3 +462,26 @@ def _raise_manifest_validation_failed(lint: LintResult) -> None:
         retry_strategy="not_retryable",
     )
     raise_error_response(response)
+
+
+async def _list_skill_ids(root: Path, storage: StorageBackend) -> list[str]:
+    skill_ids: list[str] = []
+    for child_name in await storage.list_dirs(str(root)):
+        if await storage.exists(str(root / child_name / "SKILL.md")):
+            skill_ids.append(child_name)
+    return sorted(skill_ids)
+
+
+def _workspace_skills_dir_for(user_id: str) -> Path:
+    return config.WORKSPACES_DIR / user_id / "skills"
+
+
+def _copy_tree(source: Path, target: Path) -> None:
+    target.mkdir(parents=True, exist_ok=True)
+    for source_path in source.rglob("*"):
+        target_path = target / source_path.relative_to(source)
+        if source_path.is_dir():
+            target_path.mkdir(parents=True, exist_ok=True)
+            continue
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_bytes(source_path.read_bytes())

@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.core.backends import clear_backend_caches
 from app.core.config import STUDIO_PORT
 from app.core.exceptions import register_exception_handlers
 from app.core.middleware import configure_cors
@@ -33,6 +34,7 @@ from app.services.terminal_manager import terminal_manager
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Start and stop Studio background services."""
+    clear_backend_caches()
     ensure_workspace_layout()
     terminal_manager.start_reaper()
     file_watcher.start(asyncio.get_running_loop())

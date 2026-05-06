@@ -46,7 +46,7 @@ from graph_agent.middleware.cognitive_flow import CognitiveFlowMiddleware
 # ---------- Helpers ----------------------------------------------------------
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[5]
 
 
 def _state(*, flow: FrameworkState | None = None) -> WorkflowState:

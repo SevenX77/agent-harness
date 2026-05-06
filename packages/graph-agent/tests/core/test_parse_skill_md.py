@@ -9,7 +9,7 @@ import pytest
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.loader import parse_skill_md
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[4]
 
 
 def _graph_skill_yaml(phases: str) -> str:

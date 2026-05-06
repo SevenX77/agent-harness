@@ -213,7 +213,7 @@ def test_loader_pipeline_resolves_skill_forward_ref_segment_class() -> None:
     """
     from graph_agent.core.loader import SkillLoader
 
-    repo_root = Path(__file__).resolve().parents[3]
+    repo_root = Path(__file__).resolve().parents[4]
     compiled = SkillLoader().compile_skill(
         repo_root / "skills/text-segmentation/SKILL.md"
     )

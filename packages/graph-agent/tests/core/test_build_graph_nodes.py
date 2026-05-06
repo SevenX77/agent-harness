@@ -16,7 +16,7 @@ from graph_agent.core.module_sandbox import ModuleSandbox
 from graph_agent.core.phase_node import PhaseNode
 from graph_agent.core.schema_engine import SchemaEngine
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[4]
 CORE_SKILLS = [
     ROOT / "skills/text-segmentation/SKILL.md",
     ROOT / "skills/event-extraction/SKILL.md",

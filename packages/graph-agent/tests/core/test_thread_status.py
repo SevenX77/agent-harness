@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src" / "core"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from graph_agent.core.harness import GraphAgentHarness  # noqa: E402
 

@@ -31,7 +31,7 @@ ValidatorFn = Callable[[list[dict[str, Any]]], tuple[bool, list[str]]]
 
 
 def _load_module() -> ModuleType:
-    repo_root = Path(__file__).resolve().parents[3]
+    repo_root = Path(__file__).resolve().parents[6]
     validators_path = repo_root / "skills/text-segmentation/script/validators.py"
     spec = importlib.util.spec_from_file_location(
         "_text_segmentation_validators_under_test", validators_path

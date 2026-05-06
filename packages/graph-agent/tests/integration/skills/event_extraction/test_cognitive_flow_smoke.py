@@ -37,7 +37,7 @@ from graph_agent.middleware.cognitive_flow import CognitiveFlowMiddleware
 
 
 def _load(path_from_repo_root: str, module_name: str) -> Any:
-    repo_root = Path(__file__).resolve().parents[3]
+    repo_root = Path(__file__).resolve().parents[6]
     target = repo_root / path_from_repo_root
     spec = importlib.util.spec_from_file_location(module_name, target)
     assert spec is not None

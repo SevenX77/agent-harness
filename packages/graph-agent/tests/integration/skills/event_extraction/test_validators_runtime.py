@@ -31,7 +31,7 @@ ValidatorFn = Callable[[list[dict[str, Any]]], tuple[bool, list[str]]]
 
 
 def _load_validator() -> ValidatorFn:
-    repo_root = Path(__file__).resolve().parents[3]
+    repo_root = Path(__file__).resolve().parents[6]
     validators_path = repo_root / "skills/event-extraction/script/validators.py"
     spec = importlib.util.spec_from_file_location(
         "_event_extraction_validators_under_test", validators_path

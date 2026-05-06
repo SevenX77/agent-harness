@@ -12,7 +12,7 @@ from graph_agent.core.loader import SkillLoader, parse_skill_md, validate_manife
 from graph_agent.core.manifest import GraphSkillDef
 from graph_agent.core.schema_engine import SchemaEngine
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[4]
 
 
 @pytest.mark.parametrize(

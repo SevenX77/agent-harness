@@ -43,9 +43,8 @@ import ast
 from pathlib import Path
 
 _CORE_DIR = (
-    Path(__file__).resolve().parents[3]
+    Path(__file__).resolve().parents[2]
     / "src"
-    / "core"
     / "graph_agent"
     / "core"
 )

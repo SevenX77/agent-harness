@@ -289,7 +289,7 @@ def test_singleton_get_and_reset() -> None:
 
 
 def test_peer_model_groups_parsed_from_yaml() -> None:
-    repo_root = Path(__file__).resolve().parents[3]
+    repo_root = Path(__file__).resolve().parents[4]
     cfg = load_config(repo_root / "config" / "llm_roles.yaml")
 
     assert cfg.peer_model_groups["claude_sonnet_tier"] == ["CL46T", "CLO46T"]

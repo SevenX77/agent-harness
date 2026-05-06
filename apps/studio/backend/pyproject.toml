@@ -1,0 +1,28 @@
+[project]
+name = "studio-backend"
+version = "0.1.0"
+description = "Skill Studio backend (FastAPI sidecar)"
+requires-python = ">=3.11"
+dependencies = [
+    "graph-agent",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "pydantic>=2.12,<3.0",
+    "pydantic-settings>=2.0.0",
+    "aiofiles>=23.0.0",
+    "sqlalchemy>=2.0.0",
+    "watchdog>=4.0.0",
+    "ptyprocess>=0.7.0",
+    "python-multipart>=0.0.5",
+    "starlette>=0.37.2",
+]
+
+[tool.uv.sources]
+graph-agent = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]

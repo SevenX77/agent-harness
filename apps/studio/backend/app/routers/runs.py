@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/skills/{skill_id}/runs", tags=["runs"])
 
 @router.post("", response_model=RunMetadata, status_code=202)
 async def create_run(skill_id: str, request: RunRequest) -> RunMetadata:
-    return run_manager.start_run(skill_id, request)
+    return await run_manager.start_run(skill_id, request)
 
 
 @router.get("", response_model=list[RunMetadata])

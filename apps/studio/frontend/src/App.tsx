@@ -9,6 +9,7 @@ import { RightPanel } from './components/RightPanel'
 import { SkillSidebar } from './components/SkillSidebar'
 import { SkillCreatorWizard } from './components/creator/SkillCreatorWizard'
 import { InputPlayground } from './components/playground/InputPlayground'
+import { PhaseDrawer } from './components/phaseform/PhaseDrawer'
 import { ToastStack } from './components/ToastStack'
 import { WelcomeScreen } from './components/WelcomeScreen'
 import type { EditorOnMount, MonacoApi, MonacoEditor } from './components/MonacoPanel'
@@ -26,6 +27,8 @@ import type {
 } from './api/types'
 import { useRecentSkills } from './hooks/useRecentSkills'
 import { useGoldenDiff } from './hooks/useGoldenDiff'
+import { usePhaseForm } from './hooks/usePhaseForm'
+import { usePhaseSync } from './hooks/usePhaseSync'
 import { useSkills } from './hooks/useSkills'
 import { useTheme } from './hooks/useTheme'
 import { useToasts } from './hooks/useToasts'
@@ -97,6 +100,7 @@ export default function App() {
   const [terminalSession, setTerminalSession] = useState<TerminalSession | null>(null)
   const [terminalStatus, setTerminalStatus] = useState<TerminalStatus>('idle')
   const [creatorOpen, setCreatorOpen] = useState(false)
+  const [phaseDrawerPhaseId, setPhaseDrawerPhaseId] = useState<string | null>(null)
   const [pendingJumpLine, setPendingJumpLine] = useState<number | null>(null)
   const editorRef = useRef<MonacoEditor | null>(null)
   const monacoRef = useRef<MonacoApi | null>(null)
@@ -118,6 +122,21 @@ export default function App() {
     () => currentManifest?.type === 'graph' ? currentManifest.io.inputs : [],
     [currentManifest],
   )
+  const handlePhaseMarkdownChange = useCallback((code: string) => {
+    if (!selectedSkillId) {
+      return
+    }
+    setEditorDraft({ skillId: selectedSkillId, code, dirty: true })
+  }, [selectedSkillId])
+  const phaseForm = usePhaseForm(skillCode, phaseDrawerPhaseId)
+  const phaseSync = usePhaseSync({
+    markdown: skillCode,
+    phaseId: phaseDrawerPhaseId,
+    editor: editorRef.current,
+    monaco: monacoRef.current,
+    enabled: phaseDrawerPhaseId !== null,
+    onMarkdownChange: handlePhaseMarkdownChange,
+  })
 
   const toggleSubgraph = useCallback(async (phase: VisualPhase) => {
     const shouldExpand = !expandedSubgraphs.has(phase.id)
@@ -212,6 +231,7 @@ export default function App() {
     setTraceLogs([])
     setLastRunId(null)
     goldenDiff.clear()
+    setPhaseDrawerPhaseId(null)
     setSelectedPromptIndex(null)
     setActiveTab('code')
     rememberSkill(skillId)
@@ -394,6 +414,14 @@ export default function App() {
     setActiveTab('trace')
   }, [traceSelection])
 
+  const handleOpenPhaseDrawer = useCallback((phaseId: string) => {
+    setPhaseDrawerPhaseId(phaseId)
+    if (traceSelection.linkEnabled) {
+      traceSelection.selectPhase(phaseId)
+    }
+    setActiveTab('code')
+  }, [traceSelection])
+
   const handleTraceEventSelect = useCallback((index: number, event: CallbackEvent) => {
     traceSelection.selectEvent(event, index)
     if (!traceSelection.linkEnabled || !isErrorTraceEvent(event)) {
@@ -430,6 +458,17 @@ export default function App() {
       pushToast(`Promoted ${baseline.id} to golden`, 'success')
     }
   }, [goldenDiff, lastRunId, mutateSkillDetail, mutateSkills, pushToast, selectedSkillId])
+
+  const handleApplyPhaseForm = useCallback(() => {
+    const yamlBlock = phaseForm.buildYamlBlock()
+    if (!phaseForm.phase || !yamlBlock) {
+      pushToast('Phase block is not available for this node.', 'error')
+      return
+    }
+    phaseSync.applyPhaseBlock(phaseForm.phase.phaseId, yamlBlock)
+    setPhaseDrawerPhaseId(phaseForm.data.name)
+    pushToast(`Applied phase ${phaseForm.data.name}`, 'success')
+  }, [phaseForm, phaseSync, pushToast])
 
   const promptEvent = selectedPromptIndex === null ? null : findPromptEvent(traceLogs, selectedPromptIndex)
   const currentGraphSkill = currentManifest ? graphSkill(currentManifest) : null
@@ -501,6 +540,7 @@ export default function App() {
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
                 onPhaseSelect={handleGraphPhaseSelect}
+                onPhaseDoubleClick={handleOpenPhaseDrawer}
               />
               <RightPanel
                 activeTab={activeTab}
@@ -518,9 +558,7 @@ export default function App() {
                 apiKeys={apiKeys}
                 onActiveTabChange={setActiveTab}
                 onEditorMount={handleEditorMount}
-                onDraftChange={(code) => {
-                  setEditorDraft({ skillId: selectedSkillId, code, dirty: true })
-                }}
+                onDraftChange={handlePhaseMarkdownChange}
                 onJumpToLine={jumpToLine}
                 onCopyErrors={copyErrorToClipboard}
                 onSelectPrompt={setSelectedPromptIndex}
@@ -544,6 +582,17 @@ export default function App() {
         onClose={() => setCreatorOpen(false)}
         onCreated={handleSkillCreated}
         pushToast={pushToast}
+      />
+      <PhaseDrawer
+        open={phaseDrawerPhaseId !== null && phaseForm.phase !== null}
+        phaseId={phaseDrawerPhaseId}
+        data={phaseForm.data}
+        availableTools={phaseForm.availableTools}
+        dirty={phaseForm.dirty}
+        onChange={phaseForm.setField}
+        onApply={handleApplyPhaseForm}
+        onReset={phaseForm.reset}
+        onClose={() => setPhaseDrawerPhaseId(null)}
       />
       <ToastStack toasts={toasts} />
     </div>

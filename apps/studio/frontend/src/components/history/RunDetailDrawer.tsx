@@ -1,8 +1,11 @@
 import { GitCompareArrows, RefreshCw, X } from 'lucide-react'
 import type { RunDetail } from '../../api/types'
+import { renderRunReport, reportFileBase } from '../../utils/reportTemplates'
+import { ExportButton } from '../export/ExportButton'
 
 interface RunDetailDrawerProps {
   detail: RunDetail | null
+  skillId: string | null
   open: boolean
   onClose: () => void
   onReplay: (runId: string) => void
@@ -15,6 +18,7 @@ function jsonBlock(value: unknown): string {
 
 export function RunDetailDrawer({
   detail,
+  skillId,
   open,
   onClose,
   onReplay,
@@ -63,6 +67,18 @@ export function RunDetailDrawer({
             <GitCompareArrows className="h-3.5 w-3.5" />
             Compare
           </button>
+          <ExportButton
+            label="Export"
+            title="Export run report"
+            disabled={!skillId}
+            filenameBase={reportFileBase(skillId, detail.metadata.run_id)}
+            buildContent={(format) => {
+              if (!skillId) {
+                throw new Error('Select a skill before exporting.')
+              }
+              return renderRunReport({ skillId, run: detail }, format)
+            }}
+          />
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4">

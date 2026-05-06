@@ -29,6 +29,7 @@ class ErrorDefinition:
 
 STANDARD_ERROR_MAP: dict[str, ErrorDefinition] = {
     "SKILL_NOT_FOUND": ErrorDefinition(http_status=404, retry_strategy="not_retryable"),
+    "SKILL_ALREADY_EXISTS": ErrorDefinition(http_status=409, retry_strategy="not_retryable"),
     "MANIFEST_VALIDATION_FAILED": ErrorDefinition(
         http_status=422,
         retry_strategy="not_retryable",

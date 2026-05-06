@@ -139,6 +139,40 @@ async def update_skill_content(
     return await get_skill_detail(user_id, skill_id, storage, metadata, lint_result=lint)
 
 
+async def create_new_skill(
+    user_id: str,
+    skill_id: str,
+    content: str,
+    storage: StorageBackend,
+    metadata: MetadataStore,
+) -> SkillSummary:
+    """Create a new workspace skill from fully rendered SKILL.md content."""
+    if not content.strip():
+        response = error_response(
+            error_code="MANIFEST_VALIDATION_FAILED",
+            http_status=422,
+            message="Skill content must not be empty",
+            details={"errors": []},
+            retry_strategy="not_retryable",
+        )
+        raise_error_response(response)
+
+    workspace_dir = _workspace_skills_dir_for(user_id) / skill_id
+    public_path = config.SKILLS_DIR / skill_id / "SKILL.md"
+    workspace_path = workspace_dir / "SKILL.md"
+    if await storage.exists(str(workspace_path)) or await storage.exists(str(public_path)):
+        raise standard_http_exception(
+            "SKILL_ALREADY_EXISTS",
+            f"Skill already exists: {skill_id}",
+            {"skill_id": skill_id},
+        )
+
+    await storage.write_text(str(workspace_path), content)
+    summary = await _summary_for_skill_dir_async(user_id, workspace_dir, storage, metadata)
+    await metadata.save_skill_summary(user_id, summary)
+    return summary
+
+
 async def ensure_workspace_skill_dir_async(
     user_id: str,
     skill_id: str,

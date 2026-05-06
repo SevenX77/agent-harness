@@ -1,6 +1,7 @@
 import { Background, Controls, MiniMap, ReactFlow } from 'reactflow'
 import type { Connection, Edge, Node, NodeTypes, OnEdgesChange, OnNodesChange } from 'reactflow'
 import { useMemo } from 'react'
+import type { KeyboardEvent } from 'react'
 import { AgentNode, SubgraphNode } from '../CustomNodes'
 import type { StudioNodeData } from '../CustomNodes'
 import { errorMessage } from '../utils/errors'
@@ -43,9 +44,60 @@ export function GraphCanvas({
       selected: Boolean(selectedPhaseId && (node.id === selectedPhaseId || node.data.label === selectedPhaseId)),
     }))
   ), [nodes, selectedPhaseId])
+  const selectedNodeIndex = useMemo(() => {
+    if (!selectedPhaseId) {
+      return -1
+    }
+    return visibleNodes.findIndex((node) => node.id === selectedPhaseId || node.data.label === selectedPhaseId)
+  }, [selectedPhaseId, visibleNodes])
+
+  const selectNodeAt = (index: number) => {
+    const target = visibleNodes[index]
+    if (!target) {
+      return
+    }
+    onPhaseSelect?.(target.data.label)
+  }
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft', 'Home', 'End', 'Enter', ' '].includes(event.key)) {
+      return
+    }
+    if (visibleNodes.length === 0) {
+      return
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      if (selectedNodeIndex >= 0) {
+        event.preventDefault()
+        onPhaseDoubleClick?.(visibleNodes[selectedNodeIndex].data.label)
+      }
+      return
+    }
+    event.preventDefault()
+    if (event.key === 'Home') {
+      selectNodeAt(0)
+      return
+    }
+    if (event.key === 'End') {
+      selectNodeAt(visibleNodes.length - 1)
+      return
+    }
+    const direction = event.key === 'ArrowDown' || event.key === 'ArrowRight' ? 1 : -1
+    const fallback = direction > 0 ? 0 : visibleNodes.length - 1
+    const nextIndex = selectedNodeIndex < 0
+      ? fallback
+      : Math.min(visibleNodes.length - 1, Math.max(0, selectedNodeIndex + direction))
+    selectNodeAt(nextIndex)
+  }
 
   return (
-    <div className="relative flex-1 border-r border-gray-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950">
+    <div
+      role="application"
+      aria-label="Skill graph canvas"
+      tabIndex={0}
+      onKeyDown={handleKeyDown}
+      className="relative flex-1 border-r border-gray-200 bg-slate-50 outline-none focus:ring-2 focus:ring-sky-300 dark:border-slate-800 dark:bg-slate-950 dark:focus:ring-sky-800"
+    >
       <div className="absolute left-4 top-4 z-10 rounded-md border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-sm font-semibold text-gray-700 dark:text-gray-300 shadow-sm">
         {currentSkillName}
       </div>

@@ -7,6 +7,7 @@ import type { ToastKind } from '../../types/studio'
 import { errorMessage } from '../../utils/errors'
 import type { WizardData, WizardInput } from '../../templates/skillMdGenerator'
 import { TemplatePicker } from '../templates/TemplatePicker'
+import { useFocusTrap } from '../../hooks/useFocusTrap'
 import { StepIndicator } from './StepIndicator'
 import { StepBasics } from './steps/StepBasics'
 import { StepFirstPhase } from './steps/StepFirstPhase'
@@ -22,6 +23,7 @@ interface SkillCreatorWizardProps {
 
 export function SkillCreatorWizard({ open, onClose, onCreated, pushToast }: SkillCreatorWizardProps) {
   const { state, dispatch, preview, canNext, isLastStep, stepCount, currentErrors } = useSkillCreator()
+  const trapRef = useFocusTrap<HTMLDivElement>(open, onClose)
 
   if (!open) {
     return null
@@ -65,13 +67,19 @@ export function SkillCreatorWizard({ open, onClose, onCreated, pushToast }: Skil
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6 dark:bg-black/80">
-      <div className="flex h-[82vh] w-full max-w-4xl flex-col overflow-hidden rounded-md border border-gray-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+      <div
+        ref={trapRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="skill-creator-title"
+        className="flex h-[82vh] w-full max-w-4xl flex-col overflow-hidden rounded-md border border-gray-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900"
+      >
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 dark:border-slate-800">
           <div>
-            <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">New Skill</h1>
+            <h1 id="skill-creator-title" className="text-xl font-bold text-gray-900 dark:text-gray-100">New Skill</h1>
             <p className="text-sm text-gray-500 dark:text-gray-400">Generate a valid SKILL.md from guided inputs.</p>
           </div>
-          <button type="button" onClick={onClose} className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-slate-800 dark:hover:text-gray-100">
+          <button type="button" aria-label="Close skill creator" onClick={onClose} className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-slate-800 dark:hover:text-gray-100">
             <X className="h-5 w-5" />
           </button>
         </div>

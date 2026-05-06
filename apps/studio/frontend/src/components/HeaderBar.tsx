@@ -39,6 +39,7 @@ export function HeaderBar({
       <div className="relative flex items-center gap-5 text-sm">
         <button
           type="button"
+          aria-label="Open artifacts menu"
           onClick={onToggleArtifactsMenu}
           className="flex items-center gap-2 rounded-md border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/30 px-3 py-1.5 font-medium text-indigo-700 dark:text-indigo-400 transition-colors hover:bg-indigo-100 dark:hover:bg-indigo-900/50"
         >
@@ -59,6 +60,7 @@ export function HeaderBar({
       <div className="flex items-center gap-3">
         <button
           type="button"
+          aria-label="Lint code"
           onClick={onLint}
           disabled={!selectedSkillId || lintStatus === 'checking'}
           className="flex items-center gap-2 rounded-md border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-1.5 font-medium text-gray-700 dark:text-gray-300 transition-colors hover:bg-gray-50 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
@@ -70,6 +72,7 @@ export function HeaderBar({
 
         <button
           type="button"
+          aria-label="Save skill"
           onClick={onSave}
           disabled={!selectedSkillId || lintStatus === 'checking'}
           className="flex items-center gap-2 rounded-md border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-1.5 font-medium text-gray-700 dark:text-gray-300 transition-colors hover:bg-gray-50 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
@@ -80,6 +83,7 @@ export function HeaderBar({
 
         <button
           type="button"
+          aria-label="Open CLI"
           onClick={onOpenTerminal}
           disabled={!selectedSkillId}
           className="flex items-center gap-2 rounded-md border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/30 px-4 py-1.5 font-medium text-emerald-700 dark:text-emerald-400 transition-colors hover:bg-emerald-100 dark:hover:bg-emerald-900/50 disabled:cursor-not-allowed disabled:opacity-60"
@@ -90,6 +94,7 @@ export function HeaderBar({
 
         <button
           type="button"
+          aria-label="Run skill"
           data-testid="header-run"
           onClick={onRun}
           disabled={!selectedSkillId || !canRun || runStatus === 'running'}

@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import multiprocessing
+import shutil
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -21,7 +22,7 @@ from app.core.backends import get_metadata, get_storage
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
-from app.models.runs import RunDetail, RunMetadata, RunRequest, TokensMetrics
+from app.models.runs import RunDetail, RunListResponse, RunMetadata, RunRequest, TokensMetrics
 from app.services.skills import ensure_workspace_skill_dir, run_dir_for
 from graph_agent import run_skill
 from graph_agent.callbacks import Callback
@@ -265,7 +266,13 @@ class RunManager:
         run_dir = run_dir_for(skill_id, run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "artifacts").mkdir(exist_ok=True)
-        metadata = RunMetadata(run_id=run_id, status="running", started_at=datetime.now(UTC))
+        _write_json(run_dir / "input_data.json", inputs)
+        metadata = RunMetadata(
+            run_id=run_id,
+            status="running",
+            started_at=datetime.now(UTC),
+            input_summary=_input_summary(inputs),
+        )
         await self._save_run_metadata(skill_id, metadata)
 
         process_queue = self.queue_factory()
@@ -299,28 +306,43 @@ class RunManager:
         task.add_done_callback(self._tasks.discard)
         return metadata
 
-    def list_runs(self, skill_id: str) -> list[RunMetadata]:
+    def list_runs(self, skill_id: str) -> RunListResponse:
         ensure_workspace_skill_dir(skill_id)
         runs_root = run_dir_for(skill_id, "_").parent
         if not runs_root.exists():
-            return []
+            return RunListResponse(runs=[], total=0)
         metadata: list[RunMetadata] = []
         for metadata_path in runs_root.glob("*/run_metadata.json"):
             try:
-                metadata.append(RunMetadata.model_validate_json(metadata_path.read_text()))
+                metadata.append(_metadata_with_input_summary(metadata_path))
             except Exception:
                 continue
-        return sorted(metadata, key=lambda item: item.started_at, reverse=True)
+        runs = sorted(metadata, key=lambda item: item.started_at, reverse=True)
+        return RunListResponse(runs=runs, total=len(runs))
 
     def get_run_detail(self, skill_id: str, run_id: str) -> RunDetail:
         metadata = self._metadata_for(skill_id, run_id)
         run_dir = run_dir_for(skill_id, run_id)
         return RunDetail(
             metadata=metadata,
+            input_data=_read_optional_json(run_dir / "input_data.json"),
             events=_read_events(run_dir / "tracing.jsonl"),
             final_context=_read_optional_json(run_dir / "final_state.json"),
             artifacts=[str(path) for path in sorted((run_dir / "artifacts").glob("*"))],
         )
+
+    def delete_run(self, skill_id: str, run_id: str) -> None:
+        record = self._runs.pop(run_id, None)
+        if record is not None and hasattr(record.process, "is_alive") and record.process.is_alive():
+            record.process.terminate()
+        run_dir = run_dir_for(skill_id, run_id)
+        if not run_dir.exists():
+            raise standard_http_exception(
+                "RESUME_CHECKPOINT_NOT_FOUND",
+                f"Run not found: {run_id}",
+                {"skill_id": skill_id, "run_id": run_id},
+            )
+        shutil.rmtree(run_dir)
 
     async def stream_run(self, run_id: str) -> asyncio.Queue[dict[str, Any] | None]:
         record = self._runs.get(run_id)
@@ -387,6 +409,7 @@ class RunManager:
                     status=status,
                     started_at=record.metadata.started_at,
                     metrics=metrics,
+                    input_summary=record.metadata.input_summary,
                 )
                 await self._save_run_metadata(record.skill_id, record.metadata)
                 break
@@ -401,6 +424,7 @@ class RunManager:
                 status=status_from_exit,
                 started_at=record.metadata.started_at,
                 metrics=record.metadata.metrics,
+                input_summary=record.metadata.input_summary,
             )
             await self._save_run_metadata(record.skill_id, record.metadata)
         await self._copy_final_state_to_storage(record)
@@ -474,6 +498,38 @@ def _read_optional_json(path: Path) -> dict[str, Any] | None:
         return None
     loaded = json.loads(path.read_text(encoding="utf-8"))
     return loaded if isinstance(loaded, dict) else {"value": loaded}
+
+
+def _metadata_with_input_summary(metadata_path: Path) -> RunMetadata:
+    metadata = RunMetadata.model_validate_json(metadata_path.read_text())
+    if metadata.input_summary:
+        return metadata
+    input_data = _read_optional_json(metadata_path.parent / "input_data.json") or {}
+    return metadata.model_copy(update={"input_summary": _input_summary(input_data)})
+
+
+def _input_summary(input_data: dict[str, Any]) -> str | None:
+    if not input_data:
+        return None
+    parts: list[str] = []
+    for key in sorted(input_data)[:2]:
+        parts.append(f"{key}={_summary_value(input_data[key])}")
+    remaining = len(input_data) - len(parts)
+    suffix = f", +{remaining}" if remaining > 0 else ""
+    return ", ".join(parts) + suffix
+
+
+def _summary_value(value: Any) -> str:
+    if isinstance(value, str):
+        compact = value.replace("\n", " ")
+        return compact[:32] + ("..." if len(compact) > 32 else "")
+    if isinstance(value, int | float | bool) or value is None:
+        return str(value)
+    if isinstance(value, list):
+        return f"[{len(value)} items]"
+    if isinstance(value, dict):
+        return f"{{{len(value)} keys}}"
+    return type(value).__name__
 
 
 run_manager = RunManager()

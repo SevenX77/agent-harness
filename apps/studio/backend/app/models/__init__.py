@@ -8,7 +8,7 @@ from app.models.copilot import CopilotDispatchReq, CopilotResponse
 from app.models.errors import ErrorResponse, LintError
 from app.models.golden import GoldenBaseline, SetGoldenReq
 from app.models.lint import LintResult
-from app.models.runs import ResumeReq, RunDetail, RunMetadata, RunRequest, TokensMetrics
+from app.models.runs import ResumeReq, RunDetail, RunListResponse, RunMetadata, RunRequest, TokensMetrics
 from app.models.skills import CreateSkillReq, SkillDetail, SkillSummary, UpdateSkillReq
 from app.models.terminal import TerminalSession
 from app.models.test_inputs import TestInputMetadata
@@ -25,6 +25,7 @@ __all__ = [
     "LintResult",
     "ResumeReq",
     "RunDetail",
+    "RunListResponse",
     "RunMetadata",
     "RunRequest",
     "SetGoldenReq",

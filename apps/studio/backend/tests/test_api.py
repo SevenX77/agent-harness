@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import queue
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
+from app.models.runs import RunMetadata
 from app.services.event_bus import event_bus
 from app.services.run_manager import run_manager
 from app.services.terminal_manager import terminal_manager
@@ -195,6 +197,46 @@ def test_run_endpoint_spawns_worker_and_ws_streams_events(
     assert (run_dir / "metrics.json").exists()
     assert (run_dir / "artifacts").is_dir()
     assert (run_dir / "checkpoints.db").exists()
+
+
+def test_run_history_lists_details_and_deletes_runs(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    _skills_dir, workspaces_dir = studio_roots
+    older_dir = _write_run_record(
+        workspaces_dir,
+        "text-segmentation",
+        "older-run",
+        started_at=datetime.now(UTC) - timedelta(minutes=5),
+        input_data={"chapter": "001", "count": 5, "extra": True},
+    )
+    newer_dir = _write_run_record(
+        workspaces_dir,
+        "text-segmentation",
+        "newer-run",
+        started_at=datetime.now(UTC),
+        input_data={"chapter": "002"},
+    )
+
+    list_response = client.get("/api/skills/text-segmentation/runs")
+
+    assert list_response.status_code == 200
+    body = list_response.json()
+    assert body["total"] == 2
+    assert [item["run_id"] for item in body["runs"]] == ["newer-run", "older-run"]
+    assert body["runs"][1]["input_summary"] == "chapter=001, count=5, +1"
+
+    detail_response = client.get("/api/skills/text-segmentation/runs/older-run")
+
+    assert detail_response.status_code == 200
+    assert detail_response.json()["input_data"] == {"chapter": "001", "count": 5, "extra": True}
+
+    delete_response = client.delete("/api/skills/text-segmentation/runs/older-run")
+
+    assert delete_response.status_code == 204
+    assert not older_dir.exists()
+    assert newer_dir.exists()
 
 
 def test_set_golden_and_compare_run_diff(
@@ -456,4 +498,19 @@ def _write_final_state(
     run_dir = workspaces_dir / "default" / "skills" / skill_id / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "final_state.json").write_text(json.dumps(payload), encoding="utf-8")
+    return run_dir
+
+
+def _write_run_record(
+    workspaces_dir: Path,
+    skill_id: str,
+    run_id: str,
+    *,
+    started_at: datetime,
+    input_data: dict[str, Any],
+) -> Path:
+    run_dir = _write_final_state(workspaces_dir, skill_id, run_id, {"ok": True})
+    metadata = RunMetadata(run_id=run_id, status="success", started_at=started_at)
+    (run_dir / "run_metadata.json").write_text(metadata.model_dump_json(), encoding="utf-8")
+    (run_dir / "input_data.json").write_text(json.dumps(input_data), encoding="utf-8")
     return run_dir

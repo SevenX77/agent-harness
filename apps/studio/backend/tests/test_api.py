@@ -37,6 +37,7 @@ def test_openapi_registers_phase0_rest_surface(client: TestClient) -> None:
         "/api/skills/{skill_id}/golden",
         "/api/skills/{skill_id}/golden/{golden_id}",
         "/api/skills/{skill_id}/runs/{run_id}/compare",
+        "/api/skills/{skill_id}/runs/{run_id}/diff",
         "/api/skills/{skill_id}/copilot/dispatch",
         "/api/skills/{skill_id}/runs/{run_id}/audit",
     }
@@ -196,6 +197,61 @@ def test_run_endpoint_spawns_worker_and_ws_streams_events(
     assert (run_dir / "checkpoints.db").exists()
 
 
+def test_set_golden_and_compare_run_diff(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    _skills_dir, workspaces_dir = studio_roots
+    _write_final_state(
+        workspaces_dir,
+        "text-segmentation",
+        "golden-run",
+        {"answer": "hello world", "score": 10, "ok": True},
+    )
+    _write_final_state(
+        workspaces_dir,
+        "text-segmentation",
+        "current-run",
+        {"answer": "hello studio", "score": 8, "ok": False},
+    )
+
+    promote_response = client.post(
+        "/api/skills/text-segmentation/golden",
+        json={"run_id": "golden-run", "lock": False},
+    )
+
+    assert promote_response.status_code == 200
+    assert promote_response.json()["id"] == "golden-run"
+
+    diff_response = client.get(
+        "/api/skills/text-segmentation/runs/current-run/diff?against=golden-run",
+    )
+
+    assert diff_response.status_code == 200
+    body = diff_response.json()
+    assert body["golden_run_id"] == "golden-run"
+    assert body["total_score"] < 100
+    answer_diff = next(
+        item for item in body["differences"] if item["field_path"] == "output.answer"
+    )
+    assert answer_diff["type"] == "text"
+    assert answer_diff["changed"] is True
+    assert answer_diff["score"] < 1
+
+
+def test_compare_missing_golden_returns_404(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    _skills_dir, workspaces_dir = studio_roots
+    _write_final_state(workspaces_dir, "text-segmentation", "current-run", {"answer": "hello"})
+
+    response = client.get("/api/skills/text-segmentation/runs/current-run/diff")
+
+    assert response.status_code == 404
+    assert response.json()["error_code"] == "RESUME_CHECKPOINT_NOT_FOUND"
+
+
 def test_run_spawn_failure_maps_to_500(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -243,7 +299,7 @@ def test_events_ws_broadcasts_to_multiple_clients(client: TestClient) -> None:
 
 
 def test_deferred_endpoints_return_structured_501(client: TestClient) -> None:
-    response = client.get("/api/skills/demo/golden")
+    response = client.delete("/api/skills/demo/golden/example")
 
     assert response.status_code == 501
     body = response.json()
@@ -389,3 +445,15 @@ user_prompt_template: |
 
 # {skill_id}
 """
+
+
+def _write_final_state(
+    workspaces_dir: Path,
+    skill_id: str,
+    run_id: str,
+    payload: dict[str, Any],
+) -> Path:
+    run_dir = workspaces_dir / "default" / "skills" / skill_id / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "final_state.json").write_text(json.dumps(payload), encoding="utf-8")
+    return run_dir

@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from app.core.exceptions import raise_not_implemented
 from app.models.errors import ErrorResponse
 from app.models.golden import GoldenBaseline, SetGoldenReq
+from app.services.golden_diff import list_golden_baselines_for_skill, set_golden_baseline_for_run
 
 router = APIRouter(prefix="/api/skills/{skill_id}/golden", tags=["golden"])
 
@@ -17,7 +18,7 @@ router = APIRouter(prefix="/api/skills/{skill_id}/golden", tags=["golden"])
     responses={501: {"model": ErrorResponse}},
 )
 async def list_golden_baselines(skill_id: str) -> list[GoldenBaseline]:
-    raise_not_implemented(f"list golden baselines for skill {skill_id}")
+    return list_golden_baselines_for_skill(skill_id)
 
 
 @router.post(
@@ -26,7 +27,7 @@ async def list_golden_baselines(skill_id: str) -> list[GoldenBaseline]:
     responses={501: {"model": ErrorResponse}},
 )
 async def set_golden_baseline(skill_id: str, request: SetGoldenReq) -> GoldenBaseline:
-    raise_not_implemented(f"set golden baseline for skill {skill_id}")
+    return set_golden_baseline_for_run(skill_id, request.run_id, lock=request.lock)
 
 
 @router.delete(

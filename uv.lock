@@ -12,7 +12,6 @@ resolution-markers = [
 members = [
     "agent-harness-workspace",
     "graph-agent",
-    "graph-agent-engine",
     "studio-backend",
 ]
 
@@ -1001,17 +1000,6 @@ requires-dist = [
     { name = "websockets", marker = "extra == 'e2e'", specifier = ">=12" },
 ]
 provides-extras = ["dev", "studio", "e2e", "google", "tts", "all"]
-
-[[package]]
-name = "graph-agent-engine"
-version = "0.2.0"
-source = { editable = "packages/graph-agent-engine" }
-dependencies = [
-    { name = "graph-agent" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "graph-agent", editable = "packages/graph-agent" }]
 
 [[package]]
 name = "greenlet"

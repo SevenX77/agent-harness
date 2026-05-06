@@ -34,12 +34,21 @@ class RunMetadata(BaseModel):
     status: Literal["running", "success", "failed"]
     started_at: datetime
     metrics: TokensMetrics | None = None
+    input_summary: str | None = None
+
+
+class RunListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    runs: list[RunMetadata]
+    total: int
 
 
 class RunDetail(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     metadata: RunMetadata
+    input_data: dict[str, Any] | None = None
     events: list[CallbackEvent]
     final_context: dict[str, Any] | None = None
     artifacts: list[str] | None = None

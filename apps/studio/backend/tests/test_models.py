@@ -21,6 +21,7 @@ def test_model_exports_cover_phase0_contracts() -> None:
         "LintResult",
         "ResumeReq",
         "RunDetail",
+        "RunListResponse",
         "RunMetadata",
         "RunRequest",
         "SetGoldenReq",

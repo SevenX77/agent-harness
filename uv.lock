@@ -28,6 +28,7 @@ dev = [
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "ruff" },
+    { name = "studio-backend" },
 ]
 
 [package.metadata]
@@ -40,6 +41,7 @@ dev = [
     { name = "pre-commit", specifier = ">=3.6" },
     { name = "pytest", specifier = ">=9.0.0" },
     { name = "ruff", specifier = ">=0.6" },
+    { name = "studio-backend", editable = "apps/studio/backend" },
 ]
 
 [[package]]

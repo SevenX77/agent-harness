@@ -54,10 +54,17 @@ export interface RunMetadata {
   status: 'running' | 'success' | 'failed'
   started_at: string
   metrics: TokensMetrics | null
+  input_summary: string | null
+}
+
+export interface RunListResponse {
+  runs: RunMetadata[]
+  total: number
 }
 
 export interface RunDetail {
   metadata: RunMetadata
+  input_data: JsonObject | null
   events: CallbackEvent[]
   final_context: JsonObject | null
   artifacts: string[] | null

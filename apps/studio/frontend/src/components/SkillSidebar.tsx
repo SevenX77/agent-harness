@@ -1,4 +1,4 @@
-import { FileText, Moon, Settings, Sun } from 'lucide-react'
+import { FileText, Moon, Plus, Settings, Sun } from 'lucide-react'
 import type { SkillSummary } from '../api/types'
 import type { ActiveTab } from '../types/studio'
 import { errorMessage } from '../utils/errors'
@@ -11,6 +11,7 @@ interface SkillSidebarProps {
   isDarkMode: boolean
   onSelectSkill: (skillId: string) => void
   onToggleDarkMode: () => void
+  onOpenCreator: () => void
   onOpenSettings: () => void
 }
 
@@ -22,6 +23,7 @@ export function SkillSidebar({
   isDarkMode,
   onSelectSkill,
   onToggleDarkMode,
+  onOpenCreator,
   onOpenSettings,
 }: SkillSidebarProps) {
   return (
@@ -37,7 +39,17 @@ export function SkillSidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
-        <h3 className="mb-3 text-xs font-semibold uppercase text-gray-400 dark:text-gray-500">Project Skills</h3>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-xs font-semibold uppercase text-gray-400 dark:text-gray-500">Project Skills</h3>
+          <button
+            type="button"
+            onClick={onOpenCreator}
+            className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-sky-600 dark:text-gray-500 dark:hover:bg-slate-800 dark:hover:text-sky-400"
+            title="New Skill"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+        </div>
         {skillListError ? (
           <div className="rounded border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 p-3 text-sm text-red-700 dark:text-red-400">{errorMessage(skillListError)}</div>
         ) : (

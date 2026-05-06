@@ -16,6 +16,7 @@ export interface SkillCreatorState {
 type SkillCreatorAction =
   | { type: 'NEXT' }
   | { type: 'PREV' }
+  | { type: 'GO_TO_STEP'; stepIndex: number }
   | { type: 'SET_FIELD'; field: keyof WizardData; value: WizardData[keyof WizardData] }
   | { type: 'SET_INPUT_FIELD'; inputId: string; field: keyof WizardInput; value: string }
   | { type: 'ADD_INPUT' }
@@ -62,6 +63,8 @@ function reducer(state: SkillCreatorState, action: SkillCreatorAction): SkillCre
       return { ...state, stepIndex: Math.min(state.stepIndex + 1, STEP_COUNT - 1), errors: {} }
     case 'PREV':
       return { ...state, stepIndex: Math.max(state.stepIndex - 1, 0), errors: {} }
+    case 'GO_TO_STEP':
+      return { ...state, stepIndex: Math.max(0, Math.min(action.stepIndex, STEP_COUNT - 1)) }
     case 'SET_FIELD':
       return { ...state, data: { ...state.data, [action.field]: action.value }, errors: {} }
     case 'SET_INPUT_FIELD':

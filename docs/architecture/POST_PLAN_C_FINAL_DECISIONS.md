@@ -115,11 +115,16 @@ PM 在 Skill Studio 里完成 compile + predict + run 三关后, 按 "Publish" �
 
 ### 3.1 关键设计原则
 
-- **研发端覆盖生产端**: PM 工作流是 cloud / video-analysis 的超集, 满足研发端 = 自动满足生产端
+- **研发端 PM 工作流 = 生产端所需 API 的超集 (仅 API 设计层面, 跟部署架构无关)**:
+  PM 在 Skill Studio 里要做的事 (编辑 / Compile / Predict / Run / Publish + 看 trace + metrics + log) 涵盖了 cloud / video-analysis 等生产端实际跑 LLM workflow 时所需的全部 API (生产端只用 `run_skill` + `WorkflowResult` + Callback 几个,是研发端的真子集)。所以 SDK 13-export 表面**只按 PM 工作流推导**就够,生产端自动覆盖,不需要单独审。
+  ⚠️ **这条原则只管 API 表面,不管部署形态**:
+  - 研发端 (Skill Studio) 永远是 **Tauri Local-First 桌面应用** (FastAPI sidecar 跟前端同机, 见 `TAURI_KICKOFF_PLAN.md` + `LOCAL_FIRST_CLOUD_READY.md`)
+  - 生产端 (agent-harness-cloud) 是**独立仓库下游消费者**, 部署到 Cloud (见 `REPO_SPLIT_AND_SDK_PLAN.md` §6 + `CLOUD_READINESS_AUDIT.md`), 不复用 Studio backend
+  - 两者部署**完全独立**, 切不可把"API 覆盖原则"误用为"部署架构覆盖原则"
 - **门禁是前端 UX 的事, 后端 API 必须解耦无状态**:
   - 前端按钮门禁强制顺序 (Compile 不过 → Validate 灰; Validate 不过 → Run 灰; Run 不过 → Publish 灰)
   - 后端**不**维护"PM 是否已经跑过 Validate"这种状态; 每个 API 各自包含必要的内部前置校验 (RESTful 无状态防穿透——比如 PM 用 curl 绕过前端直接调 Run, 后端 Run 内部应隐含一次 Validate, 不让畸形 input 进引擎)
-- **输入用文件不用表单**: 测试输入是一个本地 JSON/YAML 文件, 后端 schema validate 后下发 (用 manifest.io.inputs Pydantic 校验, 不需要 SDK 暴露专门 API)
+- **输入用文件不用表单**: 测试输入是一个本地 JSON/YAML 文件, 后端按 manifest.io.inputs schema 校验后下发。在 Tauri 桌面形态下后端可以直接接受**本地文件路径**(前后端同机),不用走 multipart 上传。生产端形态下不复用 Studio backend, 不存在跨机文件传输问题。
 - **V1 阶段流程实际是**: WelcomeScreen → 编辑 → Compile → Run → Publish (Predict 跳过, V2 阶段才会激活)
 
 ### 3.2 各步骤跟 SDK 13-export 的关系

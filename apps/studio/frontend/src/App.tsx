@@ -103,6 +103,9 @@ export default function App() {
   const [terminalStatus, setTerminalStatus] = useState<TerminalStatus>('idle')
   const [creatorOpen, setCreatorOpen] = useState(false)
   const [phaseDrawerPhaseId, setPhaseDrawerPhaseId] = useState<string | null>(null)
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
+  const [skillPaletteOpen, setSkillPaletteOpen] = useState(false)
+  const [cheatSheetOpen, setCheatSheetOpen] = useState(false)
   const [pendingJumpLine, setPendingJumpLine] = useState<number | null>(null)
   const editorRef = useRef<MonacoEditor | null>(null)
   const monacoRef = useRef<MonacoApi | null>(null)
@@ -203,8 +206,6 @@ export default function App() {
   }, [mutateSkillDetail, pushToast, selectedSkillId])
 
   useEffect(() => () => runWsRef.current?.close(), [])
-
-  useEffect(() => register('mod+n', () => setCreatorOpen(true)), [register])
 
   const onConnect = useCallback((params: Connection) => {
     setEdges((current) => addEdge({
@@ -485,13 +486,64 @@ export default function App() {
     pushToast(`Applied phase ${phaseForm.data.name}`, 'success')
   }, [phaseForm, phaseSync, pushToast])
 
+  const canRun = Boolean(selectedSkillId && currentManifest && playgroundValid)
+
+  const closeTopLayer = useCallback(() => {
+    if (cheatSheetOpen) {
+      setCheatSheetOpen(false)
+      return
+    }
+    if (commandPaletteOpen) {
+      setCommandPaletteOpen(false)
+      return
+    }
+    if (skillPaletteOpen) {
+      setSkillPaletteOpen(false)
+      return
+    }
+    if (creatorOpen) {
+      setCreatorOpen(false)
+      return
+    }
+    if (phaseDrawerPhaseId !== null) {
+      setPhaseDrawerPhaseId(null)
+      return
+    }
+    if (selectedPromptIndex !== null) {
+      setSelectedPromptIndex(null)
+    }
+  }, [
+    cheatSheetOpen,
+    commandPaletteOpen,
+    creatorOpen,
+    phaseDrawerPhaseId,
+    selectedPromptIndex,
+    skillPaletteOpen,
+  ])
+
+  useEffect(() => {
+    const unregister = [
+      register('mod+s', () => void handleSave()),
+      register('mod+enter', () => {
+        if (canRun && runStatus !== 'running') {
+          void handleRun()
+        }
+      }),
+      register('mod+n', () => setCreatorOpen(true)),
+      register('mod+k', () => setCommandPaletteOpen(true)),
+      register('mod+p', () => setSkillPaletteOpen(true)),
+      register('?', () => setCheatSheetOpen(true)),
+      register('escape', closeTopLayer, { allowInInputs: true }),
+    ]
+    return () => unregister.forEach((item) => item())
+  }, [canRun, closeTopLayer, handleRun, handleSave, register, runStatus])
+
   const promptEvent = selectedPromptIndex === null ? null : findPromptEvent(traceLogs, selectedPromptIndex)
   const currentGraphSkill = currentManifest ? graphSkill(currentManifest) : null
   const currentSkill = skills.find((skill) => skill.id === selectedSkillId)
   const inputSummary = currentManifest
     ? manifestInputs.length > 0 ? `${manifestInputs.length} fields` : 'raw JSON'
     : 'loading'
-  const canRun = Boolean(selectedSkillId && currentManifest && playgroundValid)
   const canDiffRun = Boolean(selectedSkillId && lastRunId && runStatus !== 'running')
   return (
     <div className="flex h-screen w-full bg-gray-50 dark:bg-slate-950 font-sans text-slate-800 dark:text-slate-200">

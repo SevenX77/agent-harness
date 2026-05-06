@@ -234,6 +234,18 @@ export default function App() {
   ])
 
   useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!isDraftDirty) {
+        return
+      }
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [isDraftDirty])
+
+  useEffect(() => {
     const socket = new WebSocket(wsUrl('/ws/events'))
     socket.onmessage = (message) => {
       const parsed: unknown = JSON.parse(String(message.data))
@@ -262,6 +274,12 @@ export default function App() {
   }, [setEdges])
 
   const handleSelectSkill = useCallback((skillId: string) => {
+    if (skillId === selectedSkillId) {
+      return
+    }
+    if (isDraftDirty && selectedSkillId && !window.confirm('You have an unsaved local draft. Switch skills anyway?')) {
+      return
+    }
     setActiveSkillId(skillId)
     setExpandedSubgraphs(new Set())
     setNestedManifests({})
@@ -274,7 +292,7 @@ export default function App() {
     setSelectedPromptIndex(null)
     setActiveTab('code')
     rememberSkill(skillId)
-  }, [goldenDiff, rememberSkill])
+  }, [goldenDiff, isDraftDirty, rememberSkill, selectedSkillId])
 
   const handleLint = useCallback(async () => {
     if (!selectedSkillId) {

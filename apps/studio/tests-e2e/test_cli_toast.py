@@ -53,7 +53,7 @@ def test_open_cli_status_and_skill_changed_toast(
     skill_changed_toast = page.get_by_text(
         re.compile(r"Skill changed: text-segmentation"),
         exact=False,
-    )
+    ).first
     expect(skill_changed_toast).to_be_visible(timeout=10_000)
     logger.info("skill_changed toast appeared")
 

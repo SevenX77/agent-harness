@@ -10,6 +10,10 @@ import { SkillSidebar } from './components/SkillSidebar'
 import { SkillCreatorWizard } from './components/creator/SkillCreatorWizard'
 import { InputPlayground } from './components/playground/InputPlayground'
 import { PhaseDrawer } from './components/phaseform/PhaseDrawer'
+import { CommandPalette } from './components/shortcuts/CommandPalette'
+import type { CommandAction } from './components/shortcuts/CommandPalette'
+import { ShortcutsCheatSheet } from './components/shortcuts/ShortcutsCheatSheet'
+import { SkillPalette } from './components/shortcuts/SkillPalette'
 import { ToastStack } from './components/ToastStack'
 import { WelcomeScreen } from './components/WelcomeScreen'
 import type { EditorOnMount, MonacoApi, MonacoEditor } from './components/MonacoPanel'
@@ -488,6 +492,66 @@ export default function App() {
 
   const canRun = Boolean(selectedSkillId && currentManifest && playgroundValid)
 
+  const commandActions = useMemo<CommandAction[]>(() => [
+    {
+      id: 'save',
+      label: 'Save and lint',
+      description: 'Persist SKILL.md and run backend lint validation.',
+      hotkey: 'mod+s',
+      disabled: !selectedSkillId,
+      run: () => void handleSave(),
+    },
+    {
+      id: 'run',
+      label: 'Run skill',
+      description: 'Start a run with the current playground input.',
+      hotkey: 'mod+enter',
+      disabled: !canRun || runStatus === 'running',
+      run: () => void handleRun(),
+    },
+    {
+      id: 'new-skill',
+      label: 'New skill',
+      description: 'Open the Skill Creator wizard.',
+      hotkey: 'mod+n',
+      run: () => setCreatorOpen(true),
+    },
+    {
+      id: 'switch-skill',
+      label: 'Switch skill',
+      description: 'Open quick skill search.',
+      hotkey: 'mod+p',
+      run: () => setSkillPaletteOpen(true),
+    },
+    {
+      id: 'toggle-dark-mode',
+      label: 'Toggle dark mode',
+      description: 'Switch Studio between light and dark themes.',
+      run: () => setIsDarkMode((current) => !current),
+    },
+    {
+      id: 'open-cli',
+      label: 'Open CLI',
+      description: 'Start an embedded CLI session for the selected skill.',
+      disabled: !selectedSkillId,
+      run: () => void openTerminal(),
+    },
+    {
+      id: 'show-history',
+      label: 'Show run history',
+      description: 'Open the History tab for previous runs.',
+      disabled: !selectedSkillId,
+      run: () => setActiveTab('history'),
+    },
+    {
+      id: 'show-shortcuts',
+      label: 'Show keyboard shortcuts',
+      description: 'Open the shortcut cheat sheet.',
+      hotkey: '?',
+      run: () => setCheatSheetOpen(true),
+    },
+  ], [canRun, handleRun, handleSave, openTerminal, runStatus, selectedSkillId, setIsDarkMode])
+
   const closeTopLayer = useCallback(() => {
     if (cheatSheetOpen) {
       setCheatSheetOpen(false)
@@ -664,6 +728,22 @@ export default function App() {
         onApply={handleApplyPhaseForm}
         onReset={phaseForm.reset}
         onClose={() => setPhaseDrawerPhaseId(null)}
+      />
+      <CommandPalette
+        open={commandPaletteOpen}
+        actions={commandActions}
+        onClose={() => setCommandPaletteOpen(false)}
+      />
+      <SkillPalette
+        open={skillPaletteOpen}
+        skills={skills}
+        selectedSkillId={selectedSkillId}
+        onSelect={handleSelectSkill}
+        onClose={() => setSkillPaletteOpen(false)}
+      />
+      <ShortcutsCheatSheet
+        open={cheatSheetOpen}
+        onClose={() => setCheatSheetOpen(false)}
       />
       <ToastStack toasts={toasts} />
     </div>

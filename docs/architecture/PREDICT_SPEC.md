@@ -38,10 +38,15 @@ Predict 功能致力于解决 PM 在日常 Prompt Engineering 和 Workflow 编�
 
 ### 3.1 Mock Provider 接入点
 
-当前 `graph_agent` 的模型解析与调用由 `models/resolver.py` 和底层的 LangChain/GatewayChatModel 负责。拦截的最佳位置在于 **Harness 的初始化阶段或 Context 注入阶段**，而不是去魔改底层的 Resolver。
+当前 `graph_agent` 的模型解析与调用由 `models/resolver.py` 和底层的 LangChain/GatewayChatModel 负责。
+
+**架构决策**：拦截位置在 **Harness 初始化 StateGraph builder 时通过依赖注入替换 `ModelResolver` 的底层实例**——而不是魔改底层 Resolver 内部实现，也不在 runtime 中途切换。这样:
+- StateGraph 编译期就锁定 mock 模式,Phase 节点构造时拿到的就是 `MockChatModel`
+- 节点不感知自己跑的是真还是假 (interface 一致),不需要每个 phase 自己判断
+- 不污染 Resolver 实现 (生产路径完全干净)
 
 **设计方案**：
-通过向 `run_skill` 暴露一个工厂函数或布尔开关，在 Harness 构造 StateGraph 节点时，将真实的 `ChatModel` 替换为自定义的 `MockChatModel`（继承自 `BaseChatModel` 或实现相同鸭子类型）。
+通过向 `run_skill` 暴露一个布尔开关 (或 dict 载荷), 在 Harness 构造 StateGraph 节点时,将真实的 `ChatModel` 替换为自定义的 `MockChatModel`（继承自 `BaseChatModel` 或实现相同鸭子类型）。
 
 ```python
 # 理想的 Mock 接口
@@ -61,6 +66,7 @@ class MockChatModel(BaseChatModel):
     *   *利弊*：真实度高；但依然有网络 Latency，且小模型经常不严格遵守强制的 JSON Schema 输出，容易导致 Workflow 意外崩溃（解析错误），偏离了“测逻辑流向”的初衷。
 *   **选项 B：纯规则与启发式模板 (Rule-based Heuristics)**
     *   *机制*：不发任何网络请求。拦截器读取当前 Phase 的 `io.outputs` Schema，利用 `Faker` 或 Pydantic 的 `BaseModel.model_construct()` 自动生成符合 Schema 的默认 JSON 字符串返回。如果要求输出纯文本，则返回 `"Lorem ipsum simulated response..."`。
+    *   *边界 case (Phase 没声明 `io.outputs` 时, 比如旧版未强制)*: Mock 降级为返回 `{"mock_response": "<phase_name> simulated output"}` 的 stub dict, 让流程能继续走。这种情况下 Predict 的"语义有效性"几乎为 0,但**至少能验证 phase 路由 + state transition 不崩**, 这就是核心价值。Studio 前端拿到这种 stub 应在 Trace 节点上额外标 "Schema 缺失, mock 极简" 警告。
     *   *利弊*：极速（毫秒级），绝对确定，Schema 绝对正确能保证流程跑通；但内容无语义价值。
 *   **选项 C：用户预设/注入输出 (Deterministically Injected Output)**
     *   *机制*：PM 可以在 Studio 或请求参数中显式提供一个映射表：`{"phase_1": "{"extracted_name": "John"}", "phase_2": "Error!"}`。系统严格按预设返回。
@@ -111,8 +117,8 @@ Predict 模式不能与真实的生产 Run 混淆。我们需要在数据的每�
 
 ### 3.5 跟 Compile 的边界与协同
 
-*   **分工明确**：`compile_skill` 是静态编译器，不感知输入数据；Predict 是动态推演器，必须提供真实的/测试用的 `inputs`。
-*   **执行顺序**：`run_skill` 内部（无论是真实跑还是 Predict 跑）的首个步骤**必须是并且一直是**调用 `compile_skill`（或 `load_workflow_from_md` 这类强校验器）。
+*   **分工明确**：`compile_skill` 是静态编译器（不感知输入数据，纯静态 lint）；`load_workflow_from_md` 是动态加载器（解析 + 构造 Harness 实例）；Predict 是动态推演器，需要 `inputs` 走完整 graph。三者职责不交叉。
+*   **执行顺序**：`run_skill` 内部（无论是真实跑还是 Predict 跑）的首个步骤**必须**是 `compile_skill` 静态校验; **第二个步骤**才是 `load_workflow_from_md` 把 manifest 编译成可执行 Harness。这两步顺序固定,不能互换或省略。
 *   Predict 额外能发现的动态错误：
     *   Jinja2 模板渲染错误（变量未定义等 `TemplateRenderError`）。
     *   `ContextBridge` (或同等机制) 在运行时传递类型不匹配。
@@ -139,8 +145,8 @@ Predict 功能被设计为 V2 储备，当被激活执行时，推荐按以下 4
 *   **依赖**: Task 1。
 
 ### Task 3: Studio 后端接入 (应用层 Backend)
-*   **目标**: 在 FastAPI 暴露给前端的 `/api/skills/{id}/runs` 接口中，支持接收 `is_predict=True` 标志，并透传给 `run_skill`。
-*   **涉及文件**: `apps/studio/backend/app/api/runs.py`, `apps/studio/backend/app/schemas/runs.py`。
+*   **目标**: 在 FastAPI 暴露给前端的 `/api/skills/{id}/runs` 接口中，支持接收 `is_predict=True` 标志，并透传给 `run_skill` (作为 `mock_llm=True`)。
+*   **涉及文件**: `apps/studio/backend/app/routers/runs.py` (现有), `apps/studio/backend/app/models/runs.py` (现有 — 跟 SDK manifest 无关, 是 Studio 自己的 request/response schema)。
 *   **估时**: 2h。
 *   **验收标准**: 通过 Swagger UI 发送 Predict 请求能成功触发后端并返回 Mock Trace ID。
 *   **依赖**: Task 2。
@@ -161,11 +167,11 @@ Predict 功能被设计为 V2 储备，当被激活执行时，推荐按以下 4
 2.  **重试风暴与 Gateway 交互**：真实的 `GatewayChatModel` 会处理 Provider 回退。Mock 模式完全绕过了这层壳。如果 PM 想测试的是“当 OpenAI 挂了转 Anthropic”的路由逻辑，Predict 将无能为力。
     *   *权衡*：保持 Predict 作为逻辑连通性工具的定位，不承担底层网络/网关级的容灾测试职责。
 3.  **循环结构死锁**：如果在 StateGraph 中配置了 `while len(items) > 0:` 的循环，且 Mock 生成的 Dummy 数据无法使条件收敛，Predict 会陷入无限死循环（直到触发 Max Iterations）。
-    *   *缓解策略*：当启用 `mock_llm=True` 时，底层 Harness 应该强制收紧循环控制，例如将默认的 `max_iterations` 从 100 压低至 5，防止长时间锁死 CPU。
+    *   *缓解策略*：**只在 `mock_llm=True` 模式下生效** —— 底层 Harness 启动时检测 mock 模式,把 phase 配置里的 `max_iterations` 上限**强制夹紧到 5**(原配置 100+ 也只跑 5 轮)。生产 (mock_llm=False) 模式下原配置不变。这条限制写在 Harness 初始化的 mock-mode 钩子里, 不需要修改任何 phase 业务代码。
 
 ---
 
-## 6. 跟 V3 路线对接与实施时点 (Roadmap Alignment)
+## 6. 跟 V2 路线对接与实施时点 (Roadmap Alignment)
 
 根据 `v1-reset-direction.md` 的战略规划，Predict 明确属于 **V2 版本** 的核心 Feature。
 

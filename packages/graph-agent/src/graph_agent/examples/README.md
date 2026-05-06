@@ -4,7 +4,7 @@ This directory contains example skills demonstrating `graph_agent` capabilities.
 
 ## Quick Start
 
-> In the AI-narrated-recap-analyst parent project, use `from src.core.graph_agent import ...` instead.
+> Public SDK: `from graph_agent import run_skill, GraphAgentHarness, SkillManifest, ...` (see `graph_agent/__init__.py` for the 12 public exports).
 
 ### 1. Hello World (Minimal Example)
 
@@ -22,14 +22,12 @@ hello_world/
 
 **Run**:
 ```bash
-# From project root
-export PYTHONPATH="${PYTHONPATH}:./src"
-
-python3 -c "
+# From project root (uv workspace handles the path)
+uv run python3 -c "
 from graph_agent import run_skill
 
 result = run_skill(
-    'src/core/graph_agent/examples/hello_world/SKILL.md',
+    'packages/graph-agent/src/graph_agent/examples/hello_world/SKILL.md',
     initial_context={'user_name': 'Developer'}
 )
 print('Result:', result)

@@ -7,6 +7,7 @@ import { HeaderBar } from './components/HeaderBar'
 import { PromptInspector } from './components/PromptInspector'
 import { RightPanel } from './components/RightPanel'
 import { SkillSidebar } from './components/SkillSidebar'
+import { SkillCreatorWizard } from './components/creator/SkillCreatorWizard'
 import { ToastStack } from './components/ToastStack'
 import { WelcomeScreen } from './components/WelcomeScreen'
 import type { EditorOnMount, MonacoApi, MonacoEditor } from './components/MonacoPanel'
@@ -48,6 +49,7 @@ export default function App() {
   const {
     skills,
     skillListError,
+    mutateSkills,
     skillDetail,
     skillDetailError,
     mutateSkillDetail,
@@ -70,6 +72,7 @@ export default function App() {
   const [selectedPromptIndex, setSelectedPromptIndex] = useState<number | null>(null)
   const [terminalSession, setTerminalSession] = useState<TerminalSession | null>(null)
   const [terminalStatus, setTerminalStatus] = useState<TerminalStatus>('idle')
+  const [creatorOpen, setCreatorOpen] = useState(false)
   const editorRef = useRef<MonacoEditor | null>(null)
   const monacoRef = useRef<MonacoApi | null>(null)
   const runWsRef = useRef<WebSocket | null>(null)
@@ -148,6 +151,17 @@ export default function App() {
   }, [mutateSkillDetail, pushToast, selectedSkillId])
 
   useEffect(() => () => runWsRef.current?.close(), [])
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') {
+        event.preventDefault()
+        setCreatorOpen(true)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
 
   const onConnect = useCallback((params: Connection) => {
     setEdges((current) => addEdge({
@@ -313,6 +327,11 @@ export default function App() {
     setApiKeys((current) => ({ ...current, [key]: value }))
   }, [])
 
+  const handleSkillCreated = useCallback(async (skillId: string) => {
+    await mutateSkills()
+    handleSelectSkill(skillId)
+  }, [handleSelectSkill, mutateSkills])
+
   const promptEvent = selectedPromptIndex === null ? null : findPromptEvent(traceLogs, selectedPromptIndex)
   const currentManifest = skillDetail?.manifest
   const currentGraphSkill = currentManifest ? graphSkill(currentManifest) : null
@@ -327,6 +346,7 @@ export default function App() {
         isDarkMode={isDarkMode}
         onSelectSkill={handleSelectSkill}
         onToggleDarkMode={() => setIsDarkMode((current) => !current)}
+        onOpenCreator={() => setCreatorOpen(true)}
         onOpenSettings={() => setActiveTab('settings')}
       />
       <div className="flex h-full flex-1 flex-col overflow-hidden">
@@ -393,6 +413,12 @@ export default function App() {
         )}
       </div>
       <PromptInspector promptEvent={promptEvent} onClose={() => setSelectedPromptIndex(null)} />
+      <SkillCreatorWizard
+        open={creatorOpen}
+        onClose={() => setCreatorOpen(false)}
+        onCreated={handleSkillCreated}
+        pushToast={pushToast}
+      />
       <ToastStack toasts={toasts} />
     </div>
   )

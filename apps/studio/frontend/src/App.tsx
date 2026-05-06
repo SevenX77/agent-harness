@@ -19,7 +19,6 @@ import { WelcomeScreen } from './components/WelcomeScreen'
 import type { EditorOnMount, MonacoApi, MonacoEditor } from './components/MonacoPanel'
 import { api, wsUrl } from './api/client'
 import type {
-  BatchRunStatus,
   CallbackEvent,
   JsonObject,
   RunDetail,
@@ -29,8 +28,8 @@ import type {
   SkillDetail,
   SkillManifest,
   TerminalSession,
-  TestInputMetadata,
 } from './api/types'
+import { useBatchRun } from './hooks/useBatchRun'
 import { useRecentSkills } from './hooks/useRecentSkills'
 import { useGoldenDiff } from './hooks/useGoldenDiff'
 import { usePhaseForm } from './hooks/usePhaseForm'
@@ -112,14 +111,12 @@ export default function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [skillPaletteOpen, setSkillPaletteOpen] = useState(false)
   const [cheatSheetOpen, setCheatSheetOpen] = useState(false)
-  const [batchInputs] = useState<TestInputMetadata[]>([])
-  const [selectedBatchInputIds, setSelectedBatchInputIds] = useState<string[]>([])
-  const [batchStatus] = useState<BatchRunStatus | null>(null)
   const [pendingJumpLine, setPendingJumpLine] = useState<number | null>(null)
   const editorRef = useRef<MonacoEditor | null>(null)
   const monacoRef = useRef<MonacoApi | null>(null)
   const runWsRef = useRef<WebSocket | null>(null)
   const goldenDiff = useGoldenDiff(selectedSkillId, lastRunId)
+  const batchRun = useBatchRun(selectedSkillId)
 
   const canonicalSkillCode = skillDetail ? manifestToSkillMarkdown(skillDetail.manifest) : ''
   const editorOwnsSelectedSkill = editorDraft.skillId === selectedSkillId
@@ -495,13 +492,24 @@ export default function App() {
     pushToast(`Applied phase ${phaseForm.data.name}`, 'success')
   }, [phaseForm, phaseSync, pushToast])
 
-  const handleToggleBatchInput = useCallback((inputId: string) => {
-    setSelectedBatchInputIds((current) => (
-      current.includes(inputId)
-        ? current.filter((item) => item !== inputId)
-        : [...current, inputId]
-    ))
-  }, [])
+  const handleOpenBatchRun = useCallback(async (runId: string) => {
+    if (!selectedSkillId) {
+      return
+    }
+    try {
+      const detail = await api.get<RunDetail>(`/skills/${selectedSkillId}/runs/${runId}`)
+      setTraceLogs(detail.data.events)
+      setRunStatus(
+        detail.data.metadata.status === 'success'
+          ? 'success'
+          : detail.data.metadata.status === 'failed' ? 'error' : 'running',
+      )
+      setLastRunId(runId)
+      setActiveTab('trace')
+    } catch (error) {
+      pushToast(errorMessage(error), 'error')
+    }
+  }, [pushToast, selectedSkillId])
 
   const canRun = Boolean(selectedSkillId && currentManifest && playgroundValid)
 
@@ -697,12 +705,12 @@ export default function App() {
                 diffLoading={goldenDiff.loading}
                 diffError={goldenDiff.error}
                 canDiffRun={canDiffRun}
-                batchInputs={batchInputs}
-                selectedBatchInputIds={selectedBatchInputIds}
-                batchStatus={batchStatus}
-                batchInputsLoading={false}
-                batchRunning={false}
-                batchError={null}
+                batchInputs={batchRun.inputs}
+                selectedBatchInputIds={batchRun.selectedInputIds}
+                batchStatus={batchRun.batchStatus}
+                batchInputsLoading={batchRun.inputsLoading}
+                batchRunning={batchRun.batchRunning}
+                batchError={batchRun.batchError}
                 terminalSession={terminalSession}
                 terminalStatus={terminalStatus}
                 currentGraphSkill={currentGraphSkill}
@@ -717,10 +725,10 @@ export default function App() {
                 onPromoteToGolden={handlePromoteToGolden}
                 onReplayRun={handleReplayHistoryRun}
                 onCompareHistoryRun={handleCompareHistoryRun}
-                onToggleBatchInput={handleToggleBatchInput}
-                onRunBatch={() => pushToast('Batch API wiring lands in Task 1.3', 'info')}
-                onRefreshBatchInputs={() => pushToast('Batch input refresh lands in Task 1.3', 'info')}
-                onOpenBatchRun={(runId) => pushToast(`Batch run detail pending: ${runId}`, 'info')}
+                onToggleBatchInput={batchRun.toggleInput}
+                onRunBatch={() => void batchRun.runBatch()}
+                onRefreshBatchInputs={() => void batchRun.refreshInputs()}
+                onOpenBatchRun={(runId) => void handleOpenBatchRun(runId)}
                 selectedTracePhaseId={traceSelection.selectedPhaseId}
                 selectedTraceEventId={traceSelection.selectedEventId}
                 traceLinkEnabled={traceSelection.linkEnabled}

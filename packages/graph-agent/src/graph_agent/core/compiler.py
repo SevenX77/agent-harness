@@ -48,7 +48,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from graph_agent.core.exceptions import SkillLoadError
+from graph_agent.core.exceptions import SkillCompilationError, SkillLoadError
 from graph_agent.core.parser import _parse_frontmatter, locate_line_for_pydantic_loc
 
 logger = logging.getLogger(__name__)
@@ -148,12 +148,23 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
     try:
         frontmatter = _parse_frontmatter(content)
     except SkillLoadError as e:
+        mark = getattr(getattr(e, "__cause__", None), "problem_mark", None)
+        line = int(mark.line) + 2 if mark is not None and mark.line is not None else None
+        diagnostic = SkillCompilationError(
+            str(e),
+            skill_path=skill_path,
+            line=line,
+            field_path="frontmatter",
+            suggestion="Fix the YAML frontmatter syntax.",
+        )
         result.issues.append(
             CompileIssue(
                 rule_id="INTERNAL",
                 severity="FATAL",
-                location="SKILL.md:frontmatter",
-                message=str(e),
+                location=f"SKILL.md:{line}:frontmatter"
+                if line is not None
+                else "SKILL.md:frontmatter",
+                message=str(diagnostic),
             )
         )
         return result
@@ -210,12 +221,18 @@ def compile_skill(skill_path: str | Path) -> CompileResult:
                 location = f"SKILL.md:{line}:{loc_dotted or 'frontmatter'}"
             else:
                 location = f"SKILL.md:{loc_dotted or 'frontmatter'}"
+            diagnostic = SkillCompilationError(
+                err.get("msg", "Pydantic validation failed"),
+                skill_path=skill_path,
+                line=line,
+                field_path=loc_dotted or "frontmatter",
+            )
             result.issues.append(
                 CompileIssue(
                     rule_id="F-pydantic",
                     severity="FATAL",
                     location=location,
-                    message=err.get("msg", "Pydantic validation failed"),
+                    message=str(diagnostic),
                 )
             )
         return result

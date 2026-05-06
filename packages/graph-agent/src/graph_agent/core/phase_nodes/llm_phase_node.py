@@ -38,16 +38,6 @@ from graph_agent.cognitive.prompt import (
 )
 from graph_agent.core.callback_bridge import _extract_text_content, _HarnessCallbackBridge
 from graph_agent.core.nudge_injector import NudgeInjector
-from graph_agent.core.state import (
-    StateManager,
-    StateMessage,
-    WorkflowState,
-    legacy_context_from_state,
-)
-from graph_agent.core.template import _render_user_prompt, _safe_render_template
-from graph_agent.core.tool_wrapper import _wrap_tool_for_langchain
-from graph_agent.core.tracing_proxy import TracingClientProxy
-from graph_agent.core.types import Phase
 from graph_agent.core.phase_nodes._helpers import (
     _FINISH_TASK_RESULT_KEY,
     _RETRY_FEEDBACK_KEY,
@@ -60,6 +50,16 @@ from graph_agent.core.phase_nodes._helpers import (
     _tool_text,
 )
 from graph_agent.core.phase_nodes.base import PhaseNode
+from graph_agent.core.state import (
+    StateManager,
+    StateMessage,
+    WorkflowState,
+    legacy_context_from_state,
+)
+from graph_agent.core.template import _render_user_prompt, _safe_render_template
+from graph_agent.core.tool_wrapper import _wrap_tool_for_langchain
+from graph_agent.core.tracing_proxy import TracingClientProxy
+from graph_agent.core.types import Phase
 
 logger = logging.getLogger(__name__)
 
@@ -292,10 +292,10 @@ class LLMPhaseNode(PhaseNode):
         # ``SchemaObject``); the legacy parallel pipeline and its
         # ``DynamicSchemaDef`` / schema-less fallbacks are physically
         # retired together with this routing simplification.
-        from graph_agent.middleware.cognitive_flow import CognitiveFlowMiddleware
-        from graph_agent.middleware.protocol_validation import ProtocolValidationMiddleware
         from graph_agent.core.io_manager import IOManager
         from graph_agent.core.schema_engine import SchemaEngine
+        from graph_agent.middleware.cognitive_flow import CognitiveFlowMiddleware
+        from graph_agent.middleware.protocol_validation import ProtocolValidationMiddleware
 
         schema_engine = SchemaEngine()
         io_manager = IOManager(list(phase.io_specs))

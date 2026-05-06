@@ -21,8 +21,8 @@ from app.routers import (
     lint,
     runs,
     skills,
-    terminal,
     templates,
+    terminal,
     test_inputs,
     websockets,
 )

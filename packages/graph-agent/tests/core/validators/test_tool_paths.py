@@ -3,13 +3,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import TypeAdapter
-
 from graph_agent.core.manifest import (
     SkillManifest,
 )
 from graph_agent.core.parser import parse_skill_file
 from graph_agent.core.validators.tool_paths import check_tool_paths
+from pydantic import TypeAdapter
 
 
 def _stage_local_tool(tmp_path: Path, *, dotted: str) -> Path:

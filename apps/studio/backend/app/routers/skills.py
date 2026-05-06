@@ -9,7 +9,13 @@ from app.core.exceptions import raise_not_implemented
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
 from app.models.errors import ErrorResponse
-from app.models.skills import CreateSkillReq, ForkSkillReq, SkillDetail, SkillSummary, UpdateSkillReq
+from app.models.skills import (
+    CreateSkillReq,
+    ForkSkillReq,
+    SkillDetail,
+    SkillSummary,
+    UpdateSkillReq,
+)
 from app.services.skills import (
     create_new_skill,
     fork_skill,

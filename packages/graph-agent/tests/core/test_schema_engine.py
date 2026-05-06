@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import BaseModel
-
 from graph_agent.core.schema_engine import (
     SchemaEngine,
     SchemaObject,
     SchemaParseError,
     ValidationResult,
 )
+from pydantic import BaseModel
 
 SIMPLE_SCHEMA = """
 title: str

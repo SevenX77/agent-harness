@@ -5,9 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
-
 from graph_agent.callbacks.events import CallbackEvent
+from pydantic import BaseModel, ConfigDict
 
 
 class TokensMetrics(BaseModel):

@@ -6,7 +6,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
-
 FieldDiffType = Literal["text", "number", "bool", "list", "dict", "null", "unknown"]
 
 

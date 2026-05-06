@@ -3,9 +3,8 @@ from __future__ import annotations
 import app.models as models
 import pytest
 from app.models import ErrorResponse, RunRequest, SkillDetail
-from pydantic import ValidationError
-
 from graph_agent.core.manifest import AgentProfile, AgentSkillDef
+from pydantic import ValidationError
 
 
 def test_model_exports_cover_phase0_contracts() -> None:

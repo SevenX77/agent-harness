@@ -47,6 +47,25 @@ line-length = 100
 target-version = "py311"
 lint.select = ["E", "F", "B", "I", "UP"]
 
+# Targeted exemptions for legitimate patterns that the default rule set
+# misclassifies. Both groups are intentional, not technical debt.
+[tool.ruff.lint.per-file-ignores]
+# Test files (incl. tests-e2e/) routinely embed long URL/JSON/SQL fixtures
+# and parametrise with payloads that simply do not fit in 100 columns;
+# rewrapping hurts readability without improving safety.
+"**/tests/**" = ["E501"]
+"apps/studio/tests-e2e/**" = ["E501"]
+# Cognitive prompt files contain Chinese natural-language directives
+# embedded as Python string literals; line-length is irrelevant to
+# how the LLM consumes them, and forcing line breaks risks distorting
+# the wording.
+"packages/graph-agent/src/graph_agent/cognitive/**" = ["E501"]
+# FastAPI's `Depends(...)`, `Query(...)`, `Body(...)`, etc. are designed
+# to be evaluated at request time, not at import time. The framework
+# expects them as default values — B008 is a false positive throughout
+# the FastAPI app, not just in routers/.
+"apps/studio/backend/app/**" = ["B008"]
+
 [tool.mypy]
 python_version = "3.11"
 strict = true

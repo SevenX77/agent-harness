@@ -546,7 +546,8 @@ def md_to_json(
     # Check if all errors are semantic (md-patch cannot help)
     if report.semantic_only:
         logger.warning(
-            "md_to_json: all %d errors are semantic, skipping md-patch, raising SemanticValidationError",
+            "md_to_json: all %d errors are semantic, skipping md-patch, "
+            "raising SemanticValidationError",
             len(report.errors),
         )
         raise SemanticValidationError(report)

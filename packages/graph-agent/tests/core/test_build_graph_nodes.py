@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.io_manager import IOManager
 from graph_agent.core.loader import build_graph_nodes, parse_skill_md, validate_manifest

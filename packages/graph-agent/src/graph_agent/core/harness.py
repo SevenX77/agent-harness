@@ -27,7 +27,6 @@ from typing import Any, cast
 from graph_agent.callbacks.base import Callback
 from graph_agent.cognitive.finish import finish_task
 from graph_agent.cognitive.memory import update_working_memory
-from graph_agent.models.resolver import get_model_resolver
 from graph_agent.core.exceptions import (
     CheckpointError,
     SkillLoadError,
@@ -47,6 +46,7 @@ from graph_agent.core.state import (
     verify_state_invariants,
 )
 from graph_agent.core.types import Phase
+from graph_agent.models.resolver import get_model_resolver
 
 logger = logging.getLogger(__name__)
 
@@ -896,8 +896,8 @@ class GraphAgentHarness:
         Returns a dict with the shape::
 
             {"status": "AWAITING_INPUT" | "COMPLETED" | "RUNNING" | "NOT_FOUND" | "CRASHED",
-             "clarification": {"question", "clarification_type", "options"}}  # only on AWAITING_INPUT
-             "error": str                                                      # only on CRASHED
+             "clarification": {"question", "clarification_type", "options"}}  # AWAITING_INPUT only
+             "error": str                                                      # CRASHED only
 
         Reads the checkpointer state directly so two processes cannot
         disagree about which thread is paused.

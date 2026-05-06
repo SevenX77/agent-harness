@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.exceptions import standard_http_exception
-from app.models.compare import CompareResult, FieldDiffType, FieldDifference
+from app.models.compare import CompareResult, FieldDifference, FieldDiffType
 from app.models.golden import GoldenBaseline
 from app.services.skills import run_dir_for
 

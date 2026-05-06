@@ -196,7 +196,8 @@ def _run_skill_dict(
         skill_path: Path to SKILL.md.
         trace_dir: Directory for trace output. If None, uses inputs["output_dir"] if available.
         thread_id: Optional thread_id for checkpoint resume.
-        callbacks: Optional list of Callback instances. Defaults to [LoggingCallback, TracingCallback].
+        callbacks: Optional list of Callback instances. Defaults to
+            ``[LoggingCallback, TracingCallback]``.
         artifact_saver: Optional callback for ``artifact_manager`` outputs.
         cleanup_checkpoints_on_finish: When True (default) call
             ``checkpointer.delete_thread(thread_id)`` after a successful

@@ -5,8 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from langchain_core.messages import HumanMessage, ToolMessage
-
 from graph_agent.callbacks.base import Callback
 from graph_agent.core.state import (
     BusinessData,
@@ -14,6 +12,7 @@ from graph_agent.core.state import (
     WorkflowState,
 )
 from graph_agent.middleware.execution_control import ExecutionControlMiddleware
+from langchain_core.messages import HumanMessage, ToolMessage
 
 
 class _RecordingCallback(Callback):

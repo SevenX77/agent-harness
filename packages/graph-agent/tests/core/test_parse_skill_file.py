@@ -17,12 +17,11 @@ that separation of concerns by feeding the raw dict through Pydantic
 from __future__ import annotations
 
 import pytest
-from pydantic import TypeAdapter
-
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.manifest import SkillManifest
 from graph_agent.core.parser import parse_skill_file
 from graph_agent.core.serialize import serialize_skill
+from pydantic import TypeAdapter
 
 _SKILL_ADAPTER = TypeAdapter(SkillManifest)
 

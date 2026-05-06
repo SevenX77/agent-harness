@@ -4,8 +4,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from pydantic import TypeAdapter
-
 from graph_agent.core.manifest import (
     SkillManifest,
 )
@@ -14,6 +12,7 @@ from graph_agent.core.personas import PERSONA_PATH_ENV_VAR
 from graph_agent.core.validators.persona_resolution import (
     check_persona_resolution,
 )
+from pydantic import TypeAdapter
 
 
 def _write_persona_skill(parent_dir: Path, *, name: str) -> Path:

@@ -5,8 +5,6 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
-
 import graph_agent.tools.md_to_json as md_to_json_module
 from graph_agent.tools.md_to_json import (
     BlockMeta,
@@ -15,6 +13,7 @@ from graph_agent.tools.md_to_json import (
     md_to_json,
     parse_md,
 )
+from pydantic import BaseModel, ConfigDict
 
 
 class StrictSegment(BaseModel):

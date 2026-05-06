@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.manifest import PersonaSkillDef
 from graph_agent.core.personas import (

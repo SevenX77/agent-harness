@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from graph_agent.core.manifest import GraphSkillDef
 from graph_agent.core.template import MissingContextError, _render_user_prompt
 from graph_agent.core.validators.template_variables import (

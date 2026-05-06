@@ -15,9 +15,8 @@ from typing import Any, Literal, cast
 from pydantic import BaseModel, ConfigDict, Field, create_model
 from pydantic import ValidationError as PydanticValidationError
 
-from graph_agent.tools.dynamic_schema import OutputExampleParseError, parse_output_example
-
 from graph_agent.core.exceptions import SkillCompilationError
+from graph_agent.tools.dynamic_schema import OutputExampleParseError, parse_output_example
 
 logger = logging.getLogger(__name__)
 

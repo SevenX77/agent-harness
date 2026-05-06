@@ -8,10 +8,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from langchain_core.messages import ToolMessage
-from langgraph.prebuilt.tool_node import ToolCallRequest
-from pydantic import BaseModel, ConfigDict
-
 from graph_agent.cognitive.finish import SELFCHECK_NUDGE, finish_task
 from graph_agent.core.exceptions import SkillCompilationError
 from graph_agent.core.loader import load_workflow_from_md
@@ -24,6 +20,9 @@ from graph_agent.tools.dynamic_schema import (
     coerce_item_against_dynamic_schema,
     parse_output_example,
 )
+from langchain_core.messages import ToolMessage
+from langgraph.prebuilt.tool_node import ToolCallRequest
+from pydantic import BaseModel, ConfigDict
 
 
 class BusinessItem(BaseModel):

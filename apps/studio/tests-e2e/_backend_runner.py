@@ -11,8 +11,8 @@ import os
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-for path in (REPO_ROOT / "studio-backend", REPO_ROOT / "src" / "core"):
+REPO_ROOT = Path(__file__).resolve().parents[3]
+for path in (REPO_ROOT / "apps/studio/backend", REPO_ROOT / "packages/graph-agent/src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 

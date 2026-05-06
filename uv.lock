@@ -30,6 +30,11 @@ dev = [
     { name = "ruff" },
     { name = "studio-backend" },
 ]
+e2e = [
+    { name = "playwright" },
+    { name = "pytest-playwright" },
+    { name = "websockets" },
+]
 
 [package.metadata]
 
@@ -42,6 +47,11 @@ dev = [
     { name = "pytest", specifier = ">=9.0.0" },
     { name = "ruff", specifier = ">=0.6" },
     { name = "studio-backend", editable = "apps/studio/backend" },
+]
+e2e = [
+    { name = "playwright", specifier = ">=1.40" },
+    { name = "pytest-playwright", specifier = ">=0.4" },
+    { name = "websockets", specifier = ">=12" },
 ]
 
 [[package]]

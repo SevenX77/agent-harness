@@ -36,6 +36,14 @@ export interface SkillSummary {
   last_run_at: string | null
 }
 
+export interface SkillTemplate {
+  id: string
+  name: string
+  description: string
+  type: string
+  content: string
+}
+
 export interface TokensMetrics {
   input_tokens: number
   output_tokens: number

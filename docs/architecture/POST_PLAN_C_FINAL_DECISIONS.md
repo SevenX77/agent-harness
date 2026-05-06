@@ -59,7 +59,7 @@ manifest.py 自己有 `__all__` 暴露这 12 个名字 (本身就是子模块层
 
 **Cut** (从顶层暴露面剔除, 源码暂留待 dead-code 后续清):
 - `AllProvidersFailedError`, `MaxRetriesExceededError` — 控制流异常不上 ABI
-- `ContextBridge` 顶层暴露 cut (源码在 manifest.py 留, 子类型层暴露)
+- `ContextBridge` — **从顶层 13-export 剔除**, 但允许从 `graph_agent.core.manifest` 子模块带 ascendence 引用 (跟其他子类型一样)
 - `clear_cache` — 全局副作用反模式
 - `get_model_resolver` — singleton getter 反模式
 - `get_skill_type` — trivial helper, 用 `compile_skill().manifest.type` 替代
@@ -101,9 +101,9 @@ PM 在 Skill Studio 里完成 compile + predict + run 三关后, 按 "Publish" �
 └────────┬────────┘
          ↓
 ┌─────────────────┐
-│    Predict      │  ★ 待实施 ★ 模拟跑 (不烧 token), 推算业务逻辑流
+│ Predict (V2 规划) │  ★ V2 储备 ★ 模拟跑 (不烧 token), 推算业务逻辑流
 └────────┬────────┘  实施: run_skill(mock_llm=True, ...) 见 PREDICT_SPEC.md
-         ↓
+         ↓          (V1 阶段不实施, V1 直接从 Run 走)
 ┌─────────────────┐
 │      Run        │  run_skill() 真 e2e 实测 (输入用文件), 部分实现需改造
 └────────┬────────┘  改造: F1_T3 spec 重写, InputPlayground 表单→文件
@@ -116,8 +116,11 @@ PM 在 Skill Studio 里完成 compile + predict + run 三关后, 按 "Publish" �
 ### 3.1 关键设计原则
 
 - **研发端覆盖生产端**: PM 工作流是 cloud / video-analysis 的超集, 满足研发端 = 自动满足生产端
-- **每步前一步通过才能进下一步**: compile 不过禁 predict, predict 不过禁 run, run 不过禁 publish
+- **门禁是前端 UX 的事, 后端 API 必须解耦无状态**:
+  - 前端按钮门禁强制顺序 (Compile 不过 → Validate 灰; Validate 不过 → Run 灰; Run 不过 → Publish 灰)
+  - 后端**不**维护"PM 是否已经跑过 Validate"这种状态; 每个 API 各自包含必要的内部前置校验 (RESTful 无状态防穿透——比如 PM 用 curl 绕过前端直接调 Run, 后端 Run 内部应隐含一次 Validate, 不让畸形 input 进引擎)
 - **输入用文件不用表单**: 测试输入是一个本地 JSON/YAML 文件, 后端 schema validate 后下发 (用 manifest.io.inputs Pydantic 校验, 不需要 SDK 暴露专门 API)
+- **V1 阶段流程实际是**: WelcomeScreen → 编辑 → Compile → Run → Publish (Predict 跳过, V2 阶段才会激活)
 
 ### 3.2 各步骤跟 SDK 13-export 的关系
 
@@ -138,7 +141,7 @@ PM 在 Skill Studio 里完成 compile + predict + run 三关后, 按 "Publish" �
 详见 `docs/architecture/PREDICT_SPEC.md` (Gemini 起草, 2026-05-06)。
 
 要点:
-- **复用 `run_skill()`** 加参数 `mock_llm=True` (或 `provider=MockProvider()`)
+- **复用 `run_skill()`** 加参数 `mock_llm: bool | dict[str, Any]` (单一参数, 不暴露 `MockProvider` 顶层 class)
 - **不加顶层 `predict_skill` API**, 避免污染 13-export
 - 实施时点: **v2 阶段** (v1-reset 后), 不在 PR #37 范围内
 - spec 起草是"储备", 不立刻开工
@@ -154,22 +157,27 @@ PM 在 Skill Studio 里完成 compile + predict + run 三关后, 按 "Publish" �
 | `docs/architecture/F3_T2_VIRTUAL_TRACE_SPEC.md` | **🟢 保留+澄清** | 是 DOM 滚动优化, **跟 Predict 完全无关**, 顶部加澄清段防混淆 |
 | `docs/architecture/F2_T2_PHASE_FORM_SPEC.md` | **🟢 保留** | PhaseDrawer 双向绑定跟"IDE 实时持久化"理念一致 |
 
-待新建:
-- `docs/architecture/PREDICT_SPEC.md` (Gemini 起草中)
-- `docs/architecture/F1_T3_FILE_INPUT_SPEC.md` (新 file-input spec, 替代旧 F1_T3)
+已随本次决策同时归档 (跟本文档同 commit 系列 ship):
+- ✅ `docs/architecture/PREDICT_SPEC.md` (Gemini 起草, V2 储备)
+- ✅ `docs/architecture/F1_T3_FILE_INPUT_SPEC.md` (Gemini 起草, V1 实施)
 
 ---
 
 ## 6. 已完成 + 已锁定
 
-到 2026-05-06 commit `03d0ae2` 为止:
+到 2026-05-06 (commit `dcd81ac` 系列) 为止:
 
-- ✅ 删 `packages/graph-agent-engine/` 整包
-- ✅ 删 14 lazy deprecated, 13 stable export 完整 ship
-- ✅ 删 4 份 obsolete docs (R1/R2 决策报告 + 2 份 video-analysis migration runbook)
-- ✅ Tauri T1 bootstrap (`apps/studio/tauri/`, cargo check 通过)
-- ✅ root pytest 1058 collected (importlib mode + namespace_packages)
-- ✅ CI: ruff / mypy / pytest-cov 全过 (剩 1 个 backend test CI 环境特有 fail, 已记 TD-001)
+- ✅ 删 `packages/graph-agent-engine/` 整包 (commit `c3de7d4`)
+- ✅ 删 14 lazy deprecated, 13 stable export 完整 ship (commit `c3de7d4`)
+- ✅ 删 4 份 obsolete docs (R1/R2 决策报告 + 2 份 video-analysis migration runbook) (commit `c3de7d4`)
+- ✅ Tauri T1 bootstrap (`apps/studio/tauri/`, cargo check 通过) (commit `d15a1dc`)
+- ✅ root pytest 1058 collected (importlib mode + namespace_packages) (commit `53d4c8a`)
+- ✅ ruff lint 全 clean + mypy strict no_implicit_reexport 修 (commits `6531b8c` + `0297aa2`)
+- ✅ pytest-cov + coverage 进 root deps (commit `03d0ae2`)
+- ✅ POST_PLAN_C + PREDICT_SPEC + 旧文档 OBSOLETE 标记 + tech debt 登记 (commit `0388d17`)
+- ✅ F1_T3_FILE_INPUT_SPEC.md (Gemini 起草) (commit `a99d2ad`)
+- ✅ F1_T3 Task 1: backend `/api/skills/{id}/validate_input` API (a1 codex 实施, commit `dcd81ac`)
+- ✅ CI: ruff / mypy / pytest-cov / pytest 全过 (剩 1 个 backend test 偶发 CI flaky, 已记 TD-S1)
 
 PR: <https://github.com/SevenX77/agent-harness/pull/37>
 

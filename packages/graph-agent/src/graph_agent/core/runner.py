@@ -38,12 +38,19 @@ import shutil
 import threading
 import time
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from graph_agent.callbacks import LoggingCallback, TracingCallback
-from graph_agent.core.exceptions import LoaderError, PersistenceError
+from graph_agent.core.exceptions import (
+    GraphAgentError,
+    LoaderError,
+    PersistenceError,
+    SkillLoadError,
+)
 from graph_agent.core.loader import load_workflow_from_md
+from graph_agent.core.result import WorkflowMetrics, WorkflowResult
 from graph_agent.core.state import WorkflowState
 
 logger = logging.getLogger(__name__)
@@ -118,6 +125,70 @@ def run_skill(
     initial_context: dict[str, Any] | None = None,
     cleanup_checkpoints_on_finish: bool = True,
     **inputs: Any,
+) -> WorkflowResult:
+    """Execute a SKILL.md and return a typed workflow result."""
+    started_at = datetime.now(UTC)
+    started_monotonic = time.monotonic()
+    skill_path_obj = Path(skill_path)
+    skill_id = (
+        skill_path_obj.parent.name if skill_path_obj.name == "SKILL.md" else skill_path_obj.stem
+    )
+
+    try:
+        raw = _run_skill_dict(
+            skill_path,
+            trace_dir=trace_dir,
+            thread_id=thread_id,
+            unattended=unattended,
+            callbacks=callbacks,
+            artifact_saver=artifact_saver,
+            initial_context=initial_context,
+            cleanup_checkpoints_on_finish=cleanup_checkpoints_on_finish,
+            **inputs,
+        )
+    except GraphAgentError as exc:
+        finished_at = datetime.now(UTC)
+        wall_time = round(time.monotonic() - started_monotonic, 3)
+        return WorkflowResult(
+            success=False,
+            run_id=thread_id or str(uuid.uuid4()),
+            skill_id=skill_id,
+            context={},
+            metrics=WorkflowMetrics(wall_time_sec=wall_time),
+            trace_path=None,
+            error=str(exc),
+            started_at=started_at,
+            finished_at=finished_at,
+            wall_time_sec=wall_time,
+        )
+
+    finished_at = datetime.now(UTC)
+    wall_time = float(raw.get("wall_time_sec", round(time.monotonic() - started_monotonic, 3)))
+    return WorkflowResult(
+        success=True,
+        run_id=str(raw.get("run_id") or thread_id or str(uuid.uuid4())),
+        skill_id=skill_id,
+        context=dict(raw.get("context", {})),
+        metrics=WorkflowMetrics.from_mapping(dict(raw.get("metrics", {})), wall_time_sec=wall_time),
+        trace_path=raw.get("trace_path"),
+        error=None,
+        started_at=started_at,
+        finished_at=finished_at,
+        wall_time_sec=wall_time,
+    )
+
+
+def _run_skill_dict(
+    skill_path: str | Path,
+    *,
+    trace_dir: str | Path | None = None,
+    thread_id: str | None = None,
+    unattended: bool = False,
+    callbacks: list[Any] | None = None,
+    artifact_saver: Any | None = None,
+    initial_context: dict[str, Any] | None = None,
+    cleanup_checkpoints_on_finish: bool = True,
+    **inputs: Any,
 ) -> dict[str, Any]:
     """Execute a SKILL.md with the given inputs. Pure document-driven.
 
@@ -146,7 +217,7 @@ def run_skill(
     """
     skill_path = Path(skill_path)
     if not skill_path.exists():
-        raise FileNotFoundError(f"SKILL.md not found: {skill_path}")
+        raise SkillLoadError(f"SKILL.md not found: {skill_path}")
 
     # Resolve trace_dir first so callback can be initialized with it.
     effective_trace_dir = trace_dir
@@ -293,6 +364,7 @@ def run_skill(
     )
 
     return {
+        "run_id": effective_thread_id or str(uuid.uuid4()),
         "context": ctx,
         "metrics": metrics,
         "trace_path": trace_path,

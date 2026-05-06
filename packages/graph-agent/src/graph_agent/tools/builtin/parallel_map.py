@@ -233,4 +233,4 @@ def _run_one_item(
         sub_run_id,
         group_key,
     )
-    return result
+    return result.model_dump()

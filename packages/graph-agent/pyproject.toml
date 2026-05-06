@@ -65,3 +65,7 @@ packages = ["src/graph_agent"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[[tool.mypy.overrides]]
+module = "langgraph.checkpoint.postgres.*"
+ignore_missing_imports = true

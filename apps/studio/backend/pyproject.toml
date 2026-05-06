@@ -30,3 +30,7 @@ packages = ["app"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[[tool.mypy.overrides]]
+module = "ptyprocess.*"
+ignore_missing_imports = true

@@ -29,6 +29,7 @@ def test_openapi_registers_phase0_rest_surface(client: TestClient) -> None:
     expected_paths = {
         "/api/skills",
         "/api/skills/{skill_id}",
+        "/api/skills/{skill_id}/fork",
         "/api/skills/{skill_id}/lint",
         "/api/skills/{skill_id}/runs",
         "/api/skills/{skill_id}/runs/batch-run",
@@ -44,6 +45,7 @@ def test_openapi_registers_phase0_rest_surface(client: TestClient) -> None:
         "/api/skills/{skill_id}/copilot/dispatch",
         "/api/skills/{skill_id}/runs/{run_id}/audit",
         "/api/batch/{batch_id}",
+        "/api/templates",
     }
 
     assert expected_paths <= set(schema["paths"])
@@ -147,6 +149,42 @@ def test_create_skill_collision_returns_409(client: TestClient) -> None:
     body = response.json()
     assert body["error_code"] == "SKILL_ALREADY_EXISTS"
     assert body["details"] == {"skill_id": "text-segmentation"}
+
+
+def test_templates_api_lists_builtin_skill_templates(client: TestClient) -> None:
+    response = client.get("/api/templates")
+
+    assert response.status_code == 200
+    templates = {item["id"]: item for item in response.json()}
+    assert {"blank-agent", "blank-graph", "data-extractor", "chained-reasoning"} <= set(templates)
+    assert templates["data-extractor"]["type"] == "graph"
+    assert "extracted_data" in templates["data-extractor"]["content"]
+
+
+def test_fork_skill_copies_directory_and_rewrites_identity(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, workspaces_dir = studio_roots
+    source_dir = skills_dir / "text-segmentation"
+    (source_dir / "golden").mkdir()
+    (source_dir / "golden" / "baseline.json").write_text('{"ok": true}', encoding="utf-8")
+
+    response = client.post(
+        "/api/skills/text-segmentation/fork",
+        json={"new_skill_id": "text-segmentation-copy"},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["id"] == "text-segmentation-copy"
+    assert body["name"] == "text-segmentation-copy"
+
+    target_dir = workspaces_dir / "default" / "skills" / "text-segmentation-copy"
+    assert (target_dir / "SKILL.md").exists()
+    assert (target_dir / "script" / "logic.py").exists()
+    assert (target_dir / "golden" / "baseline.json").exists()
+    assert "name: text-segmentation-copy" in (target_dir / "SKILL.md").read_text(encoding="utf-8")
 
 
 def test_request_validation_errors_use_error_response(client: TestClient) -> None:

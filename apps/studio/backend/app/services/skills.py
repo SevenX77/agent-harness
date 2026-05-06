@@ -27,6 +27,8 @@ from graph_agent.core.manifest import AgentSkillDef, GraphSkillDef, PersonaSkill
 from graph_agent.core.parser import parse_skill_file
 
 _LOCATION_RE = re.compile(r"SKILL\.md:(?P<line>\d+)(?::(?P<loc>.*))?$")
+_NAME_LINE_RE = re.compile(r"(?m)^(?P<prefix>name:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\n]+)(?P=quote)\s*$")
+_ID_LINE_RE = re.compile(r"(?m)^(?P<prefix>id:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\n]+)(?P=quote)\s*$")
 
 
 def ensure_workspace_layout() -> None:
@@ -171,6 +173,44 @@ async def create_new_skill(
     summary = await _summary_for_skill_dir_async(user_id, workspace_dir, storage, metadata)
     await metadata.save_skill_summary(user_id, summary)
     return summary
+
+
+async def fork_skill(
+    user_id: str,
+    skill_id: str,
+    new_skill_id: str,
+    storage: StorageBackend,
+    metadata: MetadataStore,
+) -> SkillSummary:
+    """Clone an existing skill into the user's workspace under a new id."""
+    workspace_root = _workspace_skills_dir_for(user_id)
+    target_dir = workspace_root / new_skill_id
+    target_path = target_dir / "SKILL.md"
+    public_collision = config.SKILLS_DIR / new_skill_id / "SKILL.md"
+    if await storage.exists(str(target_path)) or await storage.exists(str(public_collision)):
+        raise standard_http_exception(
+            "SKILL_ALREADY_EXISTS",
+            f"Skill already exists: {new_skill_id}",
+            {"skill_id": new_skill_id},
+        )
+
+    source_dir = await resolve_skill_dir_async(user_id, skill_id, storage)
+    await storage.copy_tree(str(source_dir), str(target_dir))
+    try:
+        content = await storage.read_text(str(target_path))
+        await storage.write_text(
+            str(target_path),
+            _rewrite_forked_skill_content(content, old_id=skill_id, new_id=new_skill_id),
+        )
+        lint = lint_skill_path(target_path)
+        if lint.status == "failed":
+            _raise_manifest_validation_failed(lint)
+        summary = await _summary_for_skill_dir_async(user_id, target_dir, storage, metadata)
+        await metadata.save_skill_summary(user_id, summary)
+        return summary
+    except Exception:
+        await storage.delete(str(target_dir))
+        raise
 
 
 async def ensure_workspace_skill_dir_async(
@@ -508,6 +548,20 @@ async def _list_skill_ids(root: Path, storage: StorageBackend) -> list[str]:
 
 def _workspace_skills_dir_for(user_id: str) -> Path:
     return config.WORKSPACES_DIR / user_id / "skills"
+
+
+def _rewrite_forked_skill_content(content: str, *, old_id: str, new_id: str) -> str:
+    """Update frontmatter identity fields that exactly match the source id."""
+
+    def replace_identity(match: re.Match[str]) -> str:
+        value = match.group("value").strip()
+        if value != old_id:
+            return match.group(0)
+        quote = match.group("quote")
+        return f"{match.group('prefix')}{quote}{new_id}{quote}"
+
+    rewritten = _ID_LINE_RE.sub(replace_identity, content)
+    return _NAME_LINE_RE.sub(replace_identity, rewritten)
 
 
 def _copy_tree(source: Path, target: Path) -> None:

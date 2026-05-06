@@ -16,7 +16,11 @@ from typing import Any, Literal
 
 from pydantic import TypeAdapter
 
+from app.core import config
+from app.core.backends import get_metadata, get_storage
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
+from app.core.ports.metadata import MetadataStore
+from app.core.ports.storage import StorageBackend
 from app.models.runs import RunDetail, RunMetadata, RunRequest, TokensMetrics
 from app.services.skills import ensure_workspace_skill_dir, run_dir_for
 from graph_agent import run_skill
@@ -232,7 +236,9 @@ def _run_worker_main(
 
 
 def _write_json(path: Path, payload: Any) -> None:
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
 
 
 def _ensure_run_files(run_dir: Path) -> None:
@@ -251,7 +257,7 @@ class RunManager:
         self.queue_factory: Any = multiprocessing.Queue
         self.worker: Any = _run_worker_main
 
-    def start_run(self, skill_id: str, request: RunRequest) -> RunMetadata:
+    async def start_run(self, skill_id: str, request: RunRequest) -> RunMetadata:
         skill_dir = ensure_workspace_skill_dir(skill_id)
         skill_path = skill_dir / "SKILL.md"
         inputs = _runtime_inputs_from_request(request)
@@ -260,7 +266,7 @@ class RunManager:
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "artifacts").mkdir(exist_ok=True)
         metadata = RunMetadata(run_id=run_id, status="running", started_at=datetime.now(UTC))
-        _write_run_metadata(run_dir, metadata)
+        await self._save_run_metadata(skill_id, metadata)
 
         process_queue = self.queue_factory()
         process = self.process_factory(
@@ -382,7 +388,7 @@ class RunManager:
                     started_at=record.metadata.started_at,
                     metrics=metrics,
                 )
-                _write_run_metadata(record.run_dir, record.metadata)
+                await self._save_run_metadata(record.skill_id, record.metadata)
                 break
 
         if record.metadata.status == "running":
@@ -396,10 +402,28 @@ class RunManager:
                 started_at=record.metadata.started_at,
                 metrics=record.metadata.metrics,
             )
-            _write_run_metadata(record.run_dir, record.metadata)
+            await self._save_run_metadata(record.skill_id, record.metadata)
+        await self._copy_final_state_to_storage(record)
         await record.ws_queue.put(None)
         with contextlib.suppress(Exception):
             record.process.join(timeout=0)
+
+    async def _save_run_metadata(self, skill_id: str, metadata: RunMetadata) -> None:
+        metadata_store = self._metadata_store()
+        await metadata_store.save_run_metadata(config.DEFAULT_USER_ID, skill_id, metadata)
+
+    async def _copy_final_state_to_storage(self, record: RunRecord) -> None:
+        final_state_path = record.run_dir / "final_state.json"
+        if not final_state_path.exists():
+            return
+        content = await asyncio.to_thread(final_state_path.read_text, encoding="utf-8")
+        await self._storage_backend().write_text(str(final_state_path), content)
+
+    def _metadata_store(self) -> MetadataStore:
+        return get_metadata()
+
+    def _storage_backend(self) -> StorageBackend:
+        return get_storage()
 
 
 def _runtime_inputs_from_request(request: RunRequest) -> dict[str, Any]:

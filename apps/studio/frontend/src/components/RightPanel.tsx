@@ -1,17 +1,19 @@
-import { FileText, GitCompareArrows, MessageSquare, Terminal as TerminalIcon } from 'lucide-react'
-import type { CallbackEvent, CompareResult, GraphSkillDef, LintError, TerminalSession } from '../api/types'
-import type { ActiveTab, ApiKeyName, ApiKeys, TerminalStatus } from '../types/studio'
+import { FileText, GitCompareArrows, History, MessageSquare, Terminal as TerminalIcon } from 'lucide-react'
+import type { CallbackEvent, CompareResult, GraphSkillDef, LintError, RunDetail, TerminalSession } from '../api/types'
+import type { ActiveTab, ApiKeyName, ApiKeys, TerminalStatus, ToastKind } from '../types/studio'
 import { MonacoPanel } from './MonacoPanel'
 import type { EditorOnMount } from './MonacoPanel'
 import { SettingsPanel } from './SettingsPanel'
 import { TerminalPanel } from './TerminalPanel'
 import { TracePanel } from './TracePanel'
 import { DiffView } from './diff/DiffView'
+import { HistoryPanel } from './history/HistoryPanel'
 
 interface RightPanelProps {
   activeTab: ActiveTab
   isDarkMode: boolean
   skillCode: string
+  selectedSkillId: string | null
   lintErrors: LintError[]
   traceLogs: CallbackEvent[]
   diffResult: CompareResult | null
@@ -30,6 +32,8 @@ interface RightPanelProps {
   onSelectPrompt: (index: number) => void
   onCompareToGolden: () => void
   onPromoteToGolden: () => void
+  onReplayRun: (detail: RunDetail) => void
+  onCompareHistoryRun: (runId: string) => void
   selectedTracePhaseId: string | null
   selectedTraceEventId: string | null
   traceLinkEnabled: boolean
@@ -37,12 +41,14 @@ interface RightPanelProps {
   onTraceEventSelect: (index: number, event: CallbackEvent) => void
   onTerminalStatusChange: (status: TerminalStatus) => void
   onApiKeyChange: (key: ApiKeyName, value: string) => void
+  pushToast: (message: string, kind?: ToastKind) => void
 }
 
 export function RightPanel({
   activeTab,
   isDarkMode,
   skillCode,
+  selectedSkillId,
   lintErrors,
   traceLogs,
   diffResult,
@@ -61,6 +67,8 @@ export function RightPanel({
   onSelectPrompt,
   onCompareToGolden,
   onPromoteToGolden,
+  onReplayRun,
+  onCompareHistoryRun,
   selectedTracePhaseId,
   selectedTraceEventId,
   traceLinkEnabled,
@@ -68,6 +76,7 @@ export function RightPanel({
   onTraceEventSelect,
   onTerminalStatusChange,
   onApiKeyChange,
+  pushToast,
 }: RightPanelProps) {
   return (
     <div className="z-10 flex w-[520px] flex-col bg-white dark:bg-slate-900">
@@ -76,6 +85,7 @@ export function RightPanel({
           ['code', FileText, 'SKILL.md'],
           ['trace', MessageSquare, 'Trace'],
           ['diff', GitCompareArrows, 'Diff'],
+          ['history', History, 'History'],
           ['terminal', TerminalIcon, 'CLI'],
         ] as const).map(([tab, Icon, label]) => (
           <button
@@ -144,6 +154,15 @@ export function RightPanel({
             session={terminalSession}
             status={terminalStatus}
             onStatusChange={onTerminalStatusChange}
+          />
+        ) : null}
+
+        {activeTab === 'history' ? (
+          <HistoryPanel
+            skillId={selectedSkillId}
+            onReplay={onReplayRun}
+            onCompare={onCompareHistoryRun}
+            pushToast={pushToast}
           />
         ) : null}
       </div>

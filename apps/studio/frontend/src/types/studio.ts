@@ -2,7 +2,7 @@ import type { Edge, Node } from 'reactflow'
 import type { StudioNodeData } from '../CustomNodes'
 import type { LintError } from '../api/types'
 
-export type ActiveTab = 'code' | 'trace' | 'diff' | 'terminal' | 'settings'
+export type ActiveTab = 'code' | 'trace' | 'diff' | 'history' | 'terminal' | 'settings'
 export type LintStatus = 'idle' | 'checking' | 'passed' | 'failed'
 export type RunStatus = 'idle' | 'running' | 'success' | 'error'
 export type ToastKind = 'info' | 'success' | 'error'

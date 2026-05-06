@@ -27,6 +27,7 @@ import type {
   RunRequest,
   SkillDetail,
   SkillManifest,
+  SkillSummary,
   TerminalSession,
 } from './api/types'
 import { useBatchRun } from './hooks/useBatchRun'
@@ -406,6 +407,15 @@ export default function App() {
     handleSelectSkill(skillId)
   }, [handleSelectSkill, mutateSkills])
 
+  const handleForkSkill = useCallback(async (sourceSkillId: string, newSkillId: string) => {
+    const response = await api.post<SkillSummary>(`/skills/${sourceSkillId}/fork`, {
+      new_skill_id: newSkillId,
+    })
+    await mutateSkills()
+    handleSelectSkill(response.data.id)
+    pushToast(`Forked ${sourceSkillId} to ${response.data.id}`, 'success')
+  }, [handleSelectSkill, mutateSkills, pushToast])
+
   const handleGraphPhaseSelect = useCallback((phaseId: string) => {
     if (!traceSelection.linkEnabled) {
       return
@@ -642,6 +652,7 @@ export default function App() {
         onToggleDarkMode={() => setIsDarkMode((current) => !current)}
         onOpenCreator={() => setCreatorOpen(true)}
         onOpenSettings={() => setActiveTab('settings')}
+        onForkSkill={handleForkSkill}
       />
       <div className="flex h-full flex-1 flex-col overflow-hidden">
         {!selectedSkillId ? (

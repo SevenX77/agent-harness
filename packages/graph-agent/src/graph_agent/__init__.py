@@ -16,16 +16,30 @@ Internal helpers (``Phase``, ``WorkflowState``, ``IOManager``,
 and are not part of the public ABI. Downstream code that depended on
 the previous lazy-deprecated re-exports must migrate to the 13-export
 surface.
+
+Each ``from X import Y as Y`` re-export is intentional — the explicit
+alias form satisfies ``mypy --strict``'s ``no_implicit_reexport`` rule.
+``WorkflowResult`` is imported directly from ``core.result`` (its
+canonical definition site) instead of from ``core.runner`` because
+``runner.py`` only re-imports it for internal use, which mypy correctly
+treats as an implicit re-export chain.
 """
 
 from __future__ import annotations
 
-from .callbacks import Callback, LoggingCallback, MetricsCallback, TracingCallback
-from .core.compiler import CompileResult, compile_skill
-from .core.exceptions import GraphAgentError, SkillCompilationError, SkillLoadError
-from .core.manifest import SkillManifest
-from .core.runner import WorkflowResult, run_skill
-from .core.serialize import serialize_skill
+from graph_agent.callbacks import Callback as Callback
+from graph_agent.callbacks import LoggingCallback as LoggingCallback
+from graph_agent.callbacks import MetricsCallback as MetricsCallback
+from graph_agent.callbacks import TracingCallback as TracingCallback
+from graph_agent.core.compiler import CompileResult as CompileResult
+from graph_agent.core.compiler import compile_skill as compile_skill
+from graph_agent.core.exceptions import GraphAgentError as GraphAgentError
+from graph_agent.core.exceptions import SkillCompilationError as SkillCompilationError
+from graph_agent.core.exceptions import SkillLoadError as SkillLoadError
+from graph_agent.core.manifest import SkillManifest as SkillManifest
+from graph_agent.core.result import WorkflowResult as WorkflowResult
+from graph_agent.core.runner import run_skill as run_skill
+from graph_agent.core.serialize import serialize_skill as serialize_skill
 
 __all__ = [
     "run_skill",

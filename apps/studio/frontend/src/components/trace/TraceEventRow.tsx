@@ -7,8 +7,11 @@ import { EventTypeBadge } from './EventTypeBadge'
 interface TraceEventRowProps {
   event: CallbackEvent
   index: number
+  eventId: string
   selected?: boolean
   highlighted?: boolean
+  expanded?: boolean
+  onToggleExpanded?: () => void
   onSelectPrompt: (index: number) => void
   onSelectEvent?: (index: number, event: CallbackEvent) => void
 }
@@ -18,12 +21,16 @@ export const TRACE_EVENT_ROW_HEIGHT = 128
 export function TraceEventRow({
   event,
   index,
+  eventId,
   selected = false,
   highlighted = false,
+  expanded,
+  onToggleExpanded,
   onSelectPrompt,
   onSelectEvent,
 }: TraceEventRowProps) {
-  const [expanded, setExpanded] = useState(false)
+  const [localExpanded, setLocalExpanded] = useState(false)
+  const isExpanded = expanded ?? localExpanded
   const tokens = tokenText(event)
   const inspectable = event.event_type === 'prompt_captured' || event.event_type === 'llm_call'
   const isError = event.event_type === 'internal_error' || event.event_type === 'validation_fail'
@@ -33,8 +40,15 @@ export function TraceEventRow({
       <div className={`absolute -left-[9px] top-1 h-4 w-4 rounded-full border-2 border-white dark:border-slate-900 ${eventColor(event.event_type)}`} />
       <button
         type="button"
+        data-trace-event-id={eventId}
+        aria-label={`Trace event ${event.event_type} in ${eventPhase(event)}`}
+        aria-expanded={isExpanded}
         onClick={() => {
-          setExpanded((open) => !open)
+          if (onToggleExpanded) {
+            onToggleExpanded()
+          } else {
+            setLocalExpanded((open) => !open)
+          }
           onSelectEvent?.(index, event)
         }}
         className={`block w-full rounded-md border p-3 text-left shadow-sm transition-colors ${
@@ -49,7 +63,7 @@ export function TraceEventRow({
       >
         <div className="mb-1 flex items-center justify-between gap-3">
           <span className="flex min-w-0 items-center gap-2">
-            {expanded ? <ChevronDown className="h-3.5 w-3.5 text-gray-400" /> : <ChevronRight className="h-3.5 w-3.5 text-gray-400" />}
+            {isExpanded ? <ChevronDown className="h-3.5 w-3.5 text-gray-400" /> : <ChevronRight className="h-3.5 w-3.5 text-gray-400" />}
             <EventTypeBadge eventType={event.event_type} />
           </span>
           {tokens ? (
@@ -88,7 +102,7 @@ export function TraceEventRow({
           </span>
         ) : null}
       </button>
-      {expanded ? (
+      {isExpanded ? (
         <pre className="mt-2 max-h-40 overflow-auto rounded-md border border-gray-200 bg-slate-950 p-3 text-xs leading-relaxed text-slate-100 shadow-sm dark:border-slate-800">
           {JSON.stringify(event, null, 2)}
         </pre>

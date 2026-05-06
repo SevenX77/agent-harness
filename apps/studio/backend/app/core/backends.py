@@ -88,5 +88,4 @@ def clear_backend_caches() -> None:
     get_backend_config.cache_clear()
     get_storage.cache_clear()
     get_metadata.cache_clear()
-    get_eventbus.cache_clear()
     get_auth.cache_clear()

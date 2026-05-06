@@ -3,60 +3,25 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from app.core import config
+from app.core.adapters.eventbus_memory import InMemoryEventBus
+from app.core.backends import get_eventbus
 from app.services.skills import ensure_workspace_layout, skill_id_from_changed_path
 
 StudioEvent = dict[str, str]
-
-
-class EventBus:
-    """Broadcast JSON events to all connected /ws/events clients."""
-
-    def __init__(self) -> None:
-        self._subscribers: set[asyncio.Queue[StudioEvent]] = set()
-        self._loop: asyncio.AbstractEventLoop | None = None
-
-    def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
-        self._loop = loop
-
-    def subscribe(self) -> asyncio.Queue[StudioEvent]:
-        self._loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[StudioEvent] = asyncio.Queue()
-        self._subscribers.add(queue)
-        return queue
-
-    def unsubscribe(self, queue: asyncio.Queue[StudioEvent]) -> None:
-        self._subscribers.discard(queue)
-
-    async def broadcast(self, event: StudioEvent) -> None:
-        stale: list[asyncio.Queue[StudioEvent]] = []
-        for queue in self._subscribers:
-            try:
-                queue.put_nowait(event)
-            except RuntimeError:
-                stale.append(queue)
-        for queue in stale:
-            self.unsubscribe(queue)
-
-    def broadcast_from_thread(self, event: StudioEvent) -> None:
-        if self._loop is None:
-            return
-        future = asyncio.run_coroutine_threadsafe(self.broadcast(event), self._loop)
-        with contextlib.suppress(Exception):
-            future.result(timeout=1)
+STUDIO_EVENTS_TOPIC = InMemoryEventBus.DEFAULT_TOPIC
 
 
 class _SkillChangeHandler(FileSystemEventHandler):
     """watchdog handler that converts file changes into skill_changed events."""
 
-    def __init__(self, bus: EventBus) -> None:
+    def __init__(self, bus: InMemoryEventBus) -> None:
         self._bus = bus
 
     def on_modified(self, event: FileSystemEvent) -> None:
@@ -83,7 +48,7 @@ class _SkillChangeHandler(FileSystemEventHandler):
 class FileWatcherManager:
     """Owns the watchdog observer lifecycle."""
 
-    def __init__(self, bus: EventBus) -> None:
+    def __init__(self, bus: InMemoryEventBus) -> None:
         self._bus = bus
         self._observer: Any | None = None
 
@@ -115,5 +80,5 @@ class FileWatcherManager:
             self._bus.broadcast_from_thread({"type": "skill_changed", "skill_id": skill_id})
 
 
-event_bus = EventBus()
+event_bus = cast(InMemoryEventBus, get_eventbus())
 file_watcher = FileWatcherManager(event_bus)

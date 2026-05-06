@@ -28,6 +28,20 @@ e2e = [
     "websockets>=12",
 ]
 
+[tool.pytest.ini_options]
+minversion = "9.0"
+testpaths = [
+    "packages/graph-agent/tests",
+    "apps/studio/backend/tests",
+    "apps/studio/tests-e2e",
+]
+pythonpath = [
+    "packages/graph-agent/src",
+    "apps/studio/backend",
+]
+addopts = ["--import-mode=importlib"]
+consider_namespace_packages = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

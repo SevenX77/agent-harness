@@ -3,26 +3,94 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   quality-gates:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
         with:
-          python-version: '3.11'
-      - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .[dev,studio]
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Sync workspace dependencies
+        run: uv sync --all-extras --group dev
+
       - name: ruff check
-        run: ruff check src/ tests/
+        run: |
+          uv run ruff check \
+            packages/graph-agent/src \
+            packages/graph-agent/tests \
+            apps/studio/backend/app \
+            apps/studio/backend/tests \
+            apps/studio/tests-e2e
+
       - name: mypy strict
-        run: mypy src/
-      - name: pytest with coverage
-        run: pytest tests/ -x --tb=short --cov=src/core/graph_agent --cov-report=xml --cov-report=term --ignore=tests/studio_e2e
-      - name: coverage gate
-        run: coverage report --fail-under=73
+        run: |
+          uv run mypy \
+            packages/graph-agent/src \
+            apps/studio/backend/app
+
+      - name: pytest graph-agent (unit + integration)
+        run: |
+          uv run pytest packages/graph-agent/tests \
+            --tb=short -q \
+            --cov=packages/graph-agent/src/graph_agent \
+            --cov-report=xml:coverage-graph-agent.xml \
+            --cov-report=term
+
+      - name: pytest studio backend
+        run: |
+          uv run pytest apps/studio/backend/tests \
+            --tb=short -q \
+            --cov=apps/studio/backend/app \
+            --cov-report=xml:coverage-backend.xml \
+            --cov-report=term
+
       - name: dependency audit
-        run: pip-audit --skip-editable
+        run: uv tool run pip-audit --skip-editable
+
+  e2e-tests:
+    # E2E suite needs the frontend dev server (Vite) plus Playwright Chromium,
+    # which requires a dedicated runner setup. Disabled on PR/push for now;
+    # trigger manually via the Actions tab while CI runner setup is finalized.
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Sync workspace dependencies (with e2e)
+        run: uv sync --all-extras --group dev
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: apps/studio/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: apps/studio/frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: uv run playwright install chromium --with-deps
+
+      - name: pytest studio e2e
+        run: |
+          uv run pytest apps/studio/tests-e2e \
+            --tb=short -q

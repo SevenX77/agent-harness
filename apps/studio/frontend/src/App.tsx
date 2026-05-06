@@ -459,6 +459,14 @@ export default function App() {
     }
   }, [goldenDiff, lastRunId, mutateSkillDetail, mutateSkills, pushToast, selectedSkillId])
 
+  const handleReplayHistoryRun = useCallback((detail: RunDetail) => {
+    pushToast(`Replay wiring pending for ${detail.metadata.run_id}`, 'info')
+  }, [pushToast])
+
+  const handleCompareHistoryRun = useCallback((runId: string) => {
+    pushToast(`Compare wiring pending for ${runId}`, 'info')
+  }, [pushToast])
+
   const handleApplyPhaseForm = useCallback(() => {
     const yamlBlock = phaseForm.buildYamlBlock()
     if (!phaseForm.phase || !yamlBlock) {
@@ -546,6 +554,7 @@ export default function App() {
                 activeTab={activeTab}
                 isDarkMode={isDarkMode}
                 skillCode={skillCode}
+                selectedSkillId={selectedSkillId}
                 lintErrors={lintErrors}
                 traceLogs={traceLogs}
                 diffResult={goldenDiff.result}
@@ -564,6 +573,8 @@ export default function App() {
                 onSelectPrompt={setSelectedPromptIndex}
                 onCompareToGolden={handleCompareToGolden}
                 onPromoteToGolden={handlePromoteToGolden}
+                onReplayRun={handleReplayHistoryRun}
+                onCompareHistoryRun={handleCompareHistoryRun}
                 selectedTracePhaseId={traceSelection.selectedPhaseId}
                 selectedTraceEventId={traceSelection.selectedEventId}
                 traceLinkEnabled={traceSelection.linkEnabled}
@@ -571,6 +582,7 @@ export default function App() {
                 onTraceEventSelect={handleTraceEventSelect}
                 onTerminalStatusChange={setTerminalStatus}
                 onApiKeyChange={handleApiKeyChange}
+                pushToast={pushToast}
               />
             </div>
           </>

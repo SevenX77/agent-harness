@@ -4,6 +4,17 @@
 **日期**: 2026-05-05
 **状态**: 待执行 (a1 codex)
 
+> ## ⚠️ 命名澄清 (2026-05-06 加)
+>
+> 这份 spec 里的 **"Virtual Trace"** 指的是**前端 DOM 渲染层的虚拟滚动 (Virtual Scrolling) 性能优化**——
+> 当 trace 事件多达数千条时, 浏览器只渲染当前可见视口内的 ~20-30 个节点, 滚出去的节点 unmount。
+>
+> **它不是** PM 工作流里的 **`Predict` 功能**(用 LLM 模拟跑 skill 推算业务逻辑流, 不烧真 token)。
+> Predict 设计在另一份 spec: `docs/architecture/PREDICT_SPEC.md` (Gemini 2026-05-06 起草)。
+>
+> 两件事完全无关, 只是中文翻译都用了"虚拟"二字, 容易混淆。
+> 决策上下文: `docs/architecture/POST_PLAN_C_FINAL_DECISIONS.md` 第 4 节。
+
 ## 1. Executive Summary
 
 本任务旨在解决大型技能在长时间运行后，Trace 面板产生的上千个 DOM 节点导致浏览器卡顿的问题。通过引入 **虚拟滚动 (Virtual Scrolling)** 技术，我们将 Trace 渲染限制在当前可见视口内（约 20-30 个节点），无论总事件数是 100 还是 10,000，内存占用和渲染性能都将保持恒定。核心挑战在于处理 Trace 事件可展开（Expandable）导致的动态高度计算。

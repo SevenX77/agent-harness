@@ -30,27 +30,35 @@
 
 ### 1.2 PM 工作流场景与 Gap 分析
 
+> **2026-05-06 更新**: 第 3 行"测试输入"理想 UX 由"自动生成表单"改为"文件关联+schema 验证"; 末尾追加 Predict / Publish 两行。User 在 PM 工作流校正中明确**测试输入用文件不是表单**, 且补上 Predict (compile→run 之间的模拟跑) + Publish (run 通过后 git commit&push) 两步缺失场景。决策上下文: `docs/architecture/POST_PLAN_C_FINAL_DECISIONS.md` 第 3 节。
+
 | 场景 | 现有 UX | 理想 UX | 核心 Gap |
 | :--- | :--- | :--- | :--- |
 | **新建技能** | 无入口，需手动在 OS 创建目录 | “New Skill” 按钮 + 类型选择向导 | 缺少创建向导 (Wizard) |
 | **编辑 Prompt** | 在 1000 行 Markdown 中寻找 | 侧边栏表单或点击流程节点直接编辑 | 缺少节点到代码的跳转 |
-| **测试输入** | 手写/粘贴 JSON 字符串 | 自动根据 `io.inputs` 生成表单表单 | 缺少 Input Playground |
+| **测试输入** | 手写/粘贴 JSON 字符串 (当前 `InputPlayground` 是动态表单, 跟 user 意图不符) | **选择本地 JSON/YAML 文件 + 后端按 `io.inputs` schema 校验合规后下发** | 当前 InputPlayground 形态需重构 (TD-S2 + 待 `F1_T3_FILE_INPUT_SPEC.md`) |
 | **调试 Fail** | 滚动长长的 Trace 列表 | 过滤错误事件，高亮异常节点 | 缺少 Trace 搜索与过滤 |
 | **质量评估** | 观察日志输出 | 与 Golden Baseline 左右分屏 Diff | 缺少 Diff 可视化 |
-| **提交代码** | 切换到外部终端 git push | UI 内置“一键同步/提交” | 缺少 Git 集成 |
+| **Predict (新增 2026-05-06)** | 没有 — PM 直接走 Run 烧真 token 才发现业务逻辑错 | compile 通过后, 一键 "Predict" 用 mock LLM 模拟跑, 推算 trace 让 PM 在烧 token 前发现逻辑漏洞 | 引擎层 + UI 层都缺失 (待 `PREDICT_SPEC.md`, v2 阶段实施) |
+| **Publish (新增 2026-05-06)** | 切换到外部终端 git push (旧描述: "提交代码") | UI 内置 "Publish" 按钮 → 后端 git commit & push, PM 不切终端 | 缺少 Git 集成 (后端责任, SDK 不暴露 git API) |
 
 ### 1.3 改进 Backlog
+
+> **2026-05-06 更新**: Input Playground 行已更新描述（表单 → 文件输入 + schema 校验）。新增 **File Input Replacement**, **Predict (Mock Run)**, **Publish (Git Push)** 三行。原 Input Playground 行也加 OBSOLETE 标记, 链到 `F1_T3_INPUT_PLAYGROUND_SPEC.md` 旧 spec。
 
 | 名称 | 描述 | 优先级 | 估算 | 涉及文件 | 依赖 |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Skill Creator** | 弹窗向导，设置技能名、类型 (Agent/Graph) 并生成模板 | P0 | 8h | `App.tsx`, 新建组件 | Backend API |
-| **Input Playground** | 解析 `SkillManifest` 自动生成输入表单，替代 JSON 粘贴 | P0 | 12h | `App.tsx`, `Playground.tsx` | - |
+| ~~**Input Playground (OBSOLETE)**~~ | ~~解析 `SkillManifest` 自动生成输入表单，替代 JSON 粘贴~~ → 见下面 **File Input** 替代 | — | — | `F1_T3_INPUT_PLAYGROUND_SPEC.md` (OBSOLETE) | — |
 | **Trace Filter** | 支持按 Phase 名、事件类型（LLM/Tool/Error）进行过滤 | P0 | 6h | `App.tsx` | - |
 | **Jump to Line** | 点击 ReactFlow 节点或 Trace 错误，Monaco 自动跳转至对应行 | P0 | 4h | `App.tsx` | - |
 | **Golden Diff** | 集成 `compare` API，展示当前 Run 与 Golden 的字段级对比 | P1 | 16h | `DiffView.tsx` | Backend API |
 | **Phase Form** | 点击节点弹出侧边栏，表单化修改 Phase 的 prompt/role/tools | P1 | 24h | `PhaseEditor.tsx` | - |
 | **Run History** | 侧边栏展示该技能的历史运行记录，支持一键重放 (Replay) | P1 | 8h | `App.tsx` | Backend API |
 | **Shortcuts** | `Cmd+S` 保存, `Cmd+Enter` 运行, `Cmd+P` 搜索技能 | P1 | 4h | `hooks/useShortcuts.ts` | - |
+| **File Input + Schema Validation (2026-05-06)** | 用文件选择代替表单填字段; 后端按 `io.inputs` schema (Pydantic) 验证文件; 校验通过才下发 run_skill | P1 | 4-6h | `playground/InputPlayground.tsx`, `apps/studio/backend/app/services/runs.py` | 待 `F1_T3_FILE_INPUT_SPEC.md` (Gemini 起草中) |
+| **Predict (Mock Run) (2026-05-06)** | UI 加 "Predict" 按钮; 后端调 `run_skill(mock_llm=True, ...)`; trace 标记 mock 事件 | P2 | 1-2 天 | `apps/studio/backend/app/services/runs.py`, frontend trace 视图 | `PREDICT_SPEC.md` (Gemini 起草中) + SDK 加 `mock_llm` 参数 (v2 阶段) |
+| **Publish (Git Push) (2026-05-06)** | UI 加 "Publish" 按钮 → 后端 `git add SKILL.md && git commit && git push origin <branch>` | P2 | 4-6h | `apps/studio/backend/app/services/publish.py` (新建) | - |
 
 ### 1.4 Phase 划分与 F1 Task Breakdown
 

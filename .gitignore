@@ -75,3 +75,9 @@ workspaces/
 
 # Playwright MCP
 .playwright-mcp/
+
+# pytest-cov outputs (CI artifact, do not commit)
+coverage-*.xml
+coverage.xml
+.coverage
+htmlcov/

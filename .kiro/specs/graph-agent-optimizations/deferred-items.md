@@ -672,3 +672,54 @@
 **不做的事**：
 - 不在 D-session PR 里塞这个修复 —— scope 已经满了
 - 不做"加个警告日志了事"的假装修复 —— race 是真的 race，日志没用
+
+---
+
+## 九、2026-05-06 新增条目（PR #37 final cleanup session）
+
+本节追加在 user "实验阶段最后一次大决断"会话里浮现但未阻塞主线的事项。决策上下文见 `docs/architecture/POST_PLAN_C_FINAL_DECISIONS.md`。
+
+### TD-S1 [open] [P2] CI backend test isolation：KeyError 'metadata'（仅 CI 复现）
+
+- [ ] **症状**：`apps/studio/backend/tests/test_api.py::test_run_endpoint_spawns_worker_and_ws_streams_events` 在 GitHub Actions runner 上 `KeyError: 'metadata'`；本地 vps 单跑 + 全套 36 都 0.21s PASS。
+- **首次发现**：2026-05-06，commit `03d0ae2` 的 GitHub Actions run `25448837900`
+- **已排除根因**：
+  - 不是 `pytest-cov` 缺（`03d0ae2` 已修）
+  - 不是 ruff / mypy 错（前两 commit 已修）
+  - 不是 13-export cleanup 引起（test 跟顶层 export 无关）
+- **怀疑方向**：runner 资源差 + 异步任务调度时序不同；TestClient + fastapi `lifespan` 在 runner 上初始化顺序差异；fastapi/pydantic 版本差。
+- **延后原因**：本地全过 + 不影响 PM 生产体验 + 不影响生产端 → CI 红勾不好看但功能没坏。需 GitHub Actions runner 内 debug，scope 较大。
+- **下一步**：
+  1. 在 CI 工作流加 `--log-cli-level=DEBUG` 重跑这个 test 拿完整 traceback
+  2. 在 KeyError 抛出处 monkey-patch `import traceback; traceback.print_stack()`
+  3. 如果是版本差异，固定到 root pyproject.toml 锁死
+- **估时**：2-4 小时
+
+### TD-S2 [open] [P3] InputPlayground 形态从表单改文件（设计层）
+
+- [ ] **来源**：2026-05-06 PM 工作流校正会话。`apps/studio/frontend/src/components/playground/InputPlayground.tsx` 当前是按 `io.inputs` schema 动态渲染表单；user 真实意图是**选本地 JSON/YAML 文件，后端先校验 schema 合规再 dispatch**。
+- **影响文件**：
+  - `apps/studio/frontend/src/components/playground/InputPlayground.tsx` — 改实现
+  - `apps/studio/frontend/src/hooks/useInputPlayground.ts` — 改 hook
+  - `docs/architecture/F1_T3_INPUT_PLAYGROUND_SPEC.md` — 已标 OBSOLETE
+  - `docs/architecture/F1_T3_FILE_INPUT_SPEC.md` — 待 Gemini 起草新 spec
+- **延后原因**：当前表单化 InputPlayground 仍能工作（PM 可手填 JSON），不是 bug，是设计偏好不齐。需先有新 spec 再实施。
+- **下一步**：
+  1. Gemini 起草 `F1_T3_FILE_INPUT_SPEC.md`（PREDICT_SPEC 之后）
+  2. a1 codex 按新 spec 实施前端 + 后端 schema validation
+- **估时**：spec 1 小时 + 实施 4-6 小时
+
+### TD-S3 [open] [P2] PREDICT_SPEC 起草 → v2 实施
+
+- [ ] **来源**：2026-05-06 PM 工作流校正确认 Predict 是 v2 阶段功能（仓里早有 reference：`docs/v1-reset/AUDIT_REPORT_2026-04-29.md` §4.2 "智能预测器" + `docs/superpowers/specs/2026-04-28-v1-reset-direction.md` 提的 `dry_run()/predict()` 工具层）。
+- **当前状态**：Gemini 起草 `docs/architecture/PREDICT_SPEC.md` 中（job_76f03aa0d325，2026-05-06）。
+- **设计基线**：
+  - 不加新顶层 SDK API（保持 13-export 不变）
+  - 复用 `run_skill()` 加 `mock_llm=True` 参数
+  - mock provider 形态待 spec 决定（廉价小模型 / 纯规则 / 用户预设）
+- **延后原因**：v2 阶段任务，不在 PR #37 范围内；需要 spec 先行，避免实施时反复重做
+- **下一步**：
+  1. ✅ Gemini 起草 spec
+  2. ⏸️ master + Gemini review spec
+  3. ⏸️ v2 阶段开工时拆 task 派 a1 实施
+- **估时**：spec 起草 2-4 小时（已在跑）+ v2 阶段实施 2-3 天

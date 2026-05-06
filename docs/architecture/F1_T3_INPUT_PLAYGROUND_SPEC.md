@@ -2,7 +2,20 @@
 
 **版本**: 1.0
 **日期**: 2026-05-05
-**状态**: 待执行 (a1 codex)
+**状态**: 🔴 **OBSOLETE** (2026-05-06)
+
+> ## ⚠️ 这份 spec 已废弃
+>
+> User 在 2026-05-06 PM 工作流校正中明确表态: **测试输入用文件, 不是表单**。
+> 这份 spec 整篇是"按 io.inputs schema 动态生成表单"的设计, 跟 user 真实意图根本冲突。
+>
+> 替代 spec: `docs/architecture/F1_T3_FILE_INPUT_SPEC.md` (Gemini 起草中, 2026-05-06)
+> 决策上下文: `docs/architecture/POST_PLAN_C_FINAL_DECISIONS.md` 第 5 节
+> Tech debt 跟踪: `.kiro/specs/graph-agent-optimizations/deferred-items.md` TD-S2
+>
+> 当前 `apps/studio/frontend/src/components/playground/InputPlayground.tsx` 实现仍是按本 spec 的表单设计落地的。**改造任务**已经登记到 deferred-items, 等新 spec ship 后由 a1 codex 实施。
+>
+> 本文件保留作为**历史参考** (展示 PM 表单 vs 文件输入两种设计的取舍), 内容**不要再继续按这个推进**。
 
 ## 1. Executive Summary
 

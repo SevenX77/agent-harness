@@ -2,6 +2,7 @@ import { FileText, Moon, Plus, Settings, Sun } from 'lucide-react'
 import type { SkillSummary } from '../api/types'
 import type { ActiveTab } from '../types/studio'
 import { errorMessage } from '../utils/errors'
+import { ForkButton } from './templates/ForkButton'
 
 interface SkillSidebarProps {
   skills: SkillSummary[]
@@ -13,6 +14,7 @@ interface SkillSidebarProps {
   onToggleDarkMode: () => void
   onOpenCreator: () => void
   onOpenSettings: () => void
+  onForkSkill: (sourceSkillId: string, newSkillId: string) => Promise<void>
 }
 
 export function SkillSidebar({
@@ -25,6 +27,7 @@ export function SkillSidebar({
   onToggleDarkMode,
   onOpenCreator,
   onOpenSettings,
+  onForkSkill,
 }: SkillSidebarProps) {
   return (
     <div className="z-10 flex w-64 shrink-0 flex-col border-r border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900">
@@ -56,18 +59,23 @@ export function SkillSidebar({
           <ul className="space-y-2">
             {skills.map((skill) => (
               <li key={skill.id}>
-                <button
-                  type="button"
-                  onClick={() => onSelectSkill(skill.id)}
-                  className={`flex w-full items-center gap-2 rounded-md border p-2 text-left text-sm font-medium transition-colors ${
+                <div
+                  className={`group flex w-full items-center gap-2 rounded-md border p-2 text-left text-sm font-medium transition-colors ${
                     selectedSkillId === skill.id
                       ? 'border-sky-100 dark:border-sky-900/50 bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400'
                       : 'border-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800'
                   }`}
                 >
-                  <FileText className="h-4 w-4 shrink-0" />
-                  <span className="truncate">{skill.name}</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => onSelectSkill(skill.id)}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  >
+                    <FileText className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{skill.name}</span>
+                  </button>
+                  <ForkButton skill={skill} onForkSkill={onForkSkill} />
+                </div>
               </li>
             ))}
           </ul>

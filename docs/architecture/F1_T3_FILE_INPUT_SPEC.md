@@ -47,7 +47,7 @@
 
 ### 3.2 后端：动态 Schema 校验流程 (Backend Validation)
 
-后端不再接收 inline JSON，而是接收一个 `input_file_path` 参数。
+后端不再接收 inline JSON，而是接收一个 `input_file_path` 参数 (利用 Tauri 前后端同机的优势, 后端直接按本地路径读文件, 不走 multipart form 这种常规 Web 上传方式; Studio 后端永远是 Tauri sidecar, 跟前端同机, 这是合理且最优的做法, 不要误以为是历史遗留)。
 
 **校验管道 (Pipeline)**：
 1.  **解析文件**：根据扩展名选择解析器。
@@ -107,10 +107,12 @@
 
 ## 4. 实施任务拆解 (Task Breakdown for a1 codex)
 
-### Task 1: 后端 `Validate` 接口开发 (4h)
-*   **目标**：在 `apps/studio/backend/app/api/skills.py` 增加 `/api/skills/{id}/validate_input` POST 接口。
-*   **涉及文件**：`backend/app/api/skills.py`, `backend/app/services/validator.py` (新建)。
+### Task 1: 后端 `Validate` 接口开发 (4h) — ✅ 已完成 (2026-05-06, commit `dcd81ac`)
+*   **目标**：在 `apps/studio/backend/app/routers/skills.py` 增加 `/api/skills/{id}/validate_input` POST 接口。
+*   **涉及文件**：`backend/app/routers/skills.py`, `backend/app/services/validator.py` (新建), `backend/app/models/validation.py` (新建)。
 *   **验收标准**：通过 API 传入一个本地路径，能正确识别 JSON/YAML 错误或类型不匹配。
+*   **关键设计** (Gemini R2 audit 强调): **Validate 逻辑必须封装为独立 Service 模块** (`services/validator.py`), 不要直接写在 router 里。这样未来 `/api/skills/{id}/runs` 接口内部也可以复用这个 Service 做"前置校验防穿透" (对应 `POST_PLAN_C_FINAL_DECISIONS.md` §3.1 的 RESTful 无状态门禁原则——前端按钮门禁可被 curl 绕过, 后端 Run 内部必须再调一次 Validate)。
+*   **实际交付**: a1 codex 实施的 `services/validator.py` 已经按 Service 模块封装, 暴露 `validate_skill_input_file()` 公共函数 + `ValidationHttpError` dataclass, /runs 内部可直接 import 复用。
 
 ### Task 2: `InputPlayground` 组件重构 (6h)
 *   **目标**：移除旧的动态表单生成代码，引入 Tauri 文件选择器和 Dropzone。

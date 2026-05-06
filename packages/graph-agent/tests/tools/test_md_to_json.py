@@ -132,9 +132,9 @@ def test_md_to_json_patch_path_sends_wrapped_error_items(monkeypatch) -> None:
 
 
 def test_md_patch_finalize_outputs_business_dicts_only() -> None:
-    repo_root = Path(__file__).resolve().parents[3]
+    package_root = Path(__file__).resolve().parents[2]
     patch_tools_path = (
-        repo_root / "src/core/graph_agent/skills/builtin/md-patch/script/patch_tools.py"
+        package_root / "src/graph_agent/skills/builtin/md-patch/script/patch_tools.py"
     )
     spec = importlib.util.spec_from_file_location("md_patch_tools_test", patch_tools_path)
     assert spec is not None

@@ -41,6 +41,7 @@ from graph_agent.core.state import (
     verify_state_invariants,
 )
 
+REPO_ROOT = Path(__file__).resolve().parents[4]
 SEGMENT_OUTPUT_EXAMPLE = """<output_example name="Segment">
 ## segments
 - index (int, required): 段落顺序编号
@@ -54,10 +55,10 @@ SEGMENT_OUTPUT_EXAMPLE = """<output_example name="Segment">
 
 
 PRODUCTION_SKILLS = [
-    "skills/text-segmentation/SKILL.md",
-    "skills/event-extraction/SKILL.md",
-    "skills/batch-analysis/SKILL.md",
-    "skills/global-synthesis/SKILL.md",
+    REPO_ROOT / "skills/text-segmentation/SKILL.md",
+    REPO_ROOT / "skills/event-extraction/SKILL.md",
+    REPO_ROOT / "skills/batch-analysis/SKILL.md",
+    REPO_ROOT / "skills/global-synthesis/SKILL.md",
 ]
 
 
@@ -206,8 +207,8 @@ class TestMVP1StateRoundTrip:
 class TestProductionSkillCompile:
     """4 production SKILLs must compile under MVP-2 wiring."""
 
-    def test_skill_compiles_with_loader_schema_engine_wired(self, skill_path: str) -> None:
-        path = Path(skill_path)
+    def test_skill_compiles_with_loader_schema_engine_wired(self, skill_path: Path) -> None:
+        path = skill_path
         assert path.exists(), f"Production SKILL missing at {skill_path}; verify MVP-0 baseline."
         harness = load_workflow_from_md(path)
         try:
@@ -220,12 +221,12 @@ class TestProductionSkillCompile:
         finally:
             harness.close()
 
-    def test_skill_singleton_schema_engine_unchanged(self, skill_path: str) -> None:
+    def test_skill_singleton_schema_engine_unchanged(self, skill_path: Path) -> None:
         """Compiling a SKILL must reuse the loader's shared SchemaEngine
         singleton — a regression that builds a per-compile engine would
         defeat the cache and break ContextBridge wiring."""
         engine_before = get_schema_engine()
-        harness = load_workflow_from_md(Path(skill_path))
+        harness = load_workflow_from_md(skill_path)
         engine_after = get_schema_engine()
         try:
             assert engine_before is engine_after

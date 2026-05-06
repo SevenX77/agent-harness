@@ -19,7 +19,7 @@ import pytest
 
 # Allow running the tests without the package installed: add the in-tree
 # source root that holds ``graph_agent/``.
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src" / "core"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from graph_agent.io.storage import StorageManager, sanitize_run_id  # noqa: E402
 

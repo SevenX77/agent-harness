@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src" / "core"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from graph_agent.callbacks.events import (  # noqa: E402
     SCHEMA_VERSION,

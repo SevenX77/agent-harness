@@ -65,7 +65,7 @@ from graph_agent.core.state import (
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 LLM_ROLES_PATH = REPO_ROOT / "config" / "llm_roles.yaml"
-V3_SKILL_PATH = "skills/text-segmentation/SKILL.md"
+V3_SKILL_PATH = REPO_ROOT / "skills/text-segmentation/SKILL.md"
 REAL_LLM_SMOKE_ROLE_ENV = "GRAPH_AGENT_REAL_LLM_SMOKE_ROLE"
 DEFAULT_REAL_LLM_SMOKE_ROLE = "test_opus47_ws"
 E2E_TRACE_RUN_ENV = "GRAPH_AGENT_E2E_TRACE_RUN"

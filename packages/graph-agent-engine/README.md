@@ -1,72 +1,44 @@
 # graph-agent-engine
 
-A standalone wheel of the **GraphAgent engine** extracted from
-[`agent-harness`](https://github.com/sevenx/agent-harness) so downstream
-projects (e.g. `video-analysis`) can depend on it without pulling in the
-Studio backend or any business-domain skills.
+**Meta-package alias** for `graph-agent`. Provides backward-compat
+pip-pinning for legacy downstream projects (e.g. `video-analysis`) that
+were originally built against `graph_agent_engine-0.1.0`.
 
-This subproject is a thin packaging shim:
+> **For new code**: depend on `graph-agent` directly.
+>
+> ```bash
+> pip install graph-agent  # recommended
+> # equivalent:
+> pip install graph-agent-engine  # legacy alias, installs graph-agent transitively
+> ```
 
-- `graph_agent/` is a **symlink** to `../../src/core/graph_agent/` — the real
-  source still lives in the main repo. The symlink lets `hatchling` see the
-  package locally without any `..` path tricks.
-- `pyproject.toml` here pins the same dependency versions as the root
-  `pyproject.toml` but only declares the engine package as a build target
-  (no `studio-backend/app`).
+This package contains **no Python module** - `pip install graph-agent-engine`
+just installs `graph-agent` as a transitive dep. Once installed, `import graph_agent`
+gives you the canonical SDK plus 14 lazy-loaded deprecated symbols
+(`IOManager`, `WorkflowState`, `Phase`, etc) for 1.0.0 backward compat.
 
-When the upstream Task 7.6 physical move lands (engine → `packages/graph-agent/`),
-this directory becomes the canonical home and the symlink is replaced with
-the real tree.
+## Why this exists
 
-## Build
+PR #37 of agent-harness moved `src/core/graph_agent/` -> `packages/graph-agent/`
+and collapsed the SDK from 26 exports to 12 stable public exports. To
+avoid breaking downstream projects vendoring 1.0.0 (notably
+`video-analysis`), the 14 demoted internal symbols are still importable
+from `graph_agent` via a lazy `__getattr__` shim - accessing them emits
+a `DeprecationWarning`.
 
-```bash
-# from repo root
-.build-venv/bin/python -m build packages/graph-agent-engine
-ls packages/graph-agent-engine/dist/
-# graph_agent_engine-0.1.0-py3-none-any.whl
-```
+This `graph-agent-engine` package itself just preserves the wheel name
+for downstream pinning convenience. The actual code is in `graph-agent`.
 
-## What's inside the wheel
+## Deprecation timeline
 
-The wheel ships **only** the GraphAgent engine:
+- `v0.2.0` (2026-05): Lazy aliases active in `graph_agent`, emit warnings on access
+- `v0.3.0` (Q3 2026): Warnings escalate to errors with `--error-on-deprecated`
+- `v1.0.0` (Q4 2026): Lazy aliases removed; only 12-export SDK remains, `graph-agent-engine` deprecated
 
-```
-graph_agent/
-├── core/                # harness, runner, loader, compiler
-├── callbacks/           # observability hooks (Tracing, Metrics, Logging)
-├── cognitive/           # working memory / dead-end pruning / finish gate
-├── config/              # llm_roles + multimodal_roles loaders
-├── io/                  # IOManager, ContextResolver, kitchen-pass saver
-├── models/              # ModelResolver with provider failover
-├── tools/               # multimodal tools (image / video / speech)
-├── skills/builtin/      # built-in compiler skill, md-patch
-└── examples/hello_world/
-```
+## Migration runbook
 
-## Public API
+See `docs/migration/PROMPT_FOR_VIDEO_ANALYSIS_AGENT.md` (Path B salvage merge recommended).
 
-```python
-from graph_agent import (
-    run_skill,
-    load_workflow_from_md,
-    GraphAgentHarness,
-    Phase,
-    WorkflowState,
-    ContextBridge,
-    ModelResolver,
-    IOManager,
-    ContextResolver,
-    Callback,
-    LoggingCallback,
-    MetricsCallback,
-    TracingCallback,
-    SkillManifest,
-    compile_skill,
-    parse_skill_file,
-    serialize_skill,
-)
-```
+## License
 
-See `docs/migration/2026-04-30-graph-agent-to-video-analysis.md` in the main
-repo for the migration runbook.
+Apache-2.0.

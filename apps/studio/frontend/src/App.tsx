@@ -28,6 +28,7 @@ import { useRecentSkills } from './hooks/useRecentSkills'
 import { useSkills } from './hooks/useSkills'
 import { useTheme } from './hooks/useTheme'
 import { useToasts } from './hooks/useToasts'
+import { useTraceSelection } from './hooks/useTraceSelection'
 import type {
   ActiveTab,
   ApiKeyName,
@@ -41,13 +42,32 @@ import type {
 import { errorMessage, isRecord, lintErrorsFromError } from './utils/errors'
 import { buildGraph, graphSkill, subgraphSkillId } from './utils/graph'
 import { manifestToSkillMarkdown } from './utils/skillMarkdown'
-import { findPromptEvent } from './utils/trace'
+import { eventPhase, findPromptEvent } from './utils/trace'
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function phaseLineFor(source: string, phaseName: string): number | null {
+  if (!phaseName || phaseName === 'system') {
+    return null
+  }
+  const pattern = new RegExp(`^\\s*(?:-\\s*)?name:\\s*['"]?${escapeRegExp(phaseName)}['"]?\\s*$`)
+  const lines = source.split('\n')
+  const index = lines.findIndex((line) => pattern.test(line))
+  return index >= 0 ? index + 1 : null
+}
+
+function isErrorTraceEvent(event: CallbackEvent): boolean {
+  return event.event_type === 'internal_error' || event.event_type === 'validation_fail'
+}
 
 export default function App() {
   const [activeSkillId, setActiveSkillId] = useState<string | null>(null)
   const selectedSkillId = activeSkillId
   const { isDarkMode, setIsDarkMode } = useTheme()
   const { toasts, pushToast } = useToasts()
+  const traceSelection = useTraceSelection()
   const { recentSkills, rememberSkill } = useRecentSkills()
   const {
     skills,
@@ -75,6 +95,7 @@ export default function App() {
   const [terminalSession, setTerminalSession] = useState<TerminalSession | null>(null)
   const [terminalStatus, setTerminalStatus] = useState<TerminalStatus>('idle')
   const [creatorOpen, setCreatorOpen] = useState(false)
+  const [pendingJumpLine, setPendingJumpLine] = useState<number | null>(null)
   const editorRef = useRef<MonacoEditor | null>(null)
   const monacoRef = useRef<MonacoApi | null>(null)
   const runWsRef = useRef<WebSocket | null>(null)
@@ -247,6 +268,17 @@ export default function App() {
     editorRef.current.focus()
   }, [])
 
+  useEffect(() => {
+    if (activeTab !== 'code' || pendingJumpLine === null) {
+      return
+    }
+    const timeout = window.setTimeout(() => {
+      jumpToLine(pendingJumpLine)
+      setPendingJumpLine(null)
+    }, 0)
+    return () => window.clearTimeout(timeout)
+  }, [activeTab, jumpToLine, pendingJumpLine])
+
   const handleRun = useCallback(async (values?: JsonObject) => {
     if (!selectedSkillId) {
       return
@@ -346,6 +378,26 @@ export default function App() {
     handleSelectSkill(skillId)
   }, [handleSelectSkill, mutateSkills])
 
+  const handleGraphPhaseSelect = useCallback((phaseId: string) => {
+    if (!traceSelection.linkEnabled) {
+      return
+    }
+    traceSelection.selectPhase(phaseId)
+    setActiveTab('trace')
+  }, [traceSelection])
+
+  const handleTraceEventSelect = useCallback((index: number, event: CallbackEvent) => {
+    traceSelection.selectEvent(event, index)
+    if (!traceSelection.linkEnabled || !isErrorTraceEvent(event)) {
+      return
+    }
+    const line = phaseLineFor(skillCode, eventPhase(event))
+    if (line !== null) {
+      setPendingJumpLine(line)
+      setActiveTab('code')
+    }
+  }, [skillCode, traceSelection])
+
   const promptEvent = selectedPromptIndex === null ? null : findPromptEvent(traceLogs, selectedPromptIndex)
   const currentGraphSkill = currentManifest ? graphSkill(currentManifest) : null
   const currentSkill = skills.find((skill) => skill.id === selectedSkillId)
@@ -410,9 +462,11 @@ export default function App() {
                 nodes={nodes}
                 edges={edges}
                 isDarkMode={isDarkMode}
+                selectedPhaseId={traceSelection.linkEnabled ? traceSelection.selectedPhaseId : null}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
+                onPhaseSelect={handleGraphPhaseSelect}
               />
               <RightPanel
                 activeTab={activeTab}
@@ -432,6 +486,11 @@ export default function App() {
                 onJumpToLine={jumpToLine}
                 onCopyErrors={copyErrorToClipboard}
                 onSelectPrompt={setSelectedPromptIndex}
+                selectedTracePhaseId={traceSelection.selectedPhaseId}
+                selectedTraceEventId={traceSelection.selectedEventId}
+                traceLinkEnabled={traceSelection.linkEnabled}
+                onTraceLinkEnabledChange={traceSelection.setLinkEnabled}
+                onTraceEventSelect={handleTraceEventSelect}
                 onTerminalStatusChange={setTerminalStatus}
                 onApiKeyChange={handleApiKeyChange}
               />

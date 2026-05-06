@@ -39,6 +39,12 @@ class CreateSkillReq(BaseModel):
     content: str
 
 
+class ForkSkillReq(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    new_skill_id: str = Field(..., pattern=r"^[a-z][a-z0-9-]+$")
+
+
 class UpdateSkillReq(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

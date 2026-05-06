@@ -22,6 +22,7 @@ from app.routers import (
     runs,
     skills,
     terminal,
+    templates,
     test_inputs,
     websockets,
 )
@@ -58,6 +59,7 @@ def create_app() -> FastAPI:
     register_exception_handlers(studio_app)
 
     studio_app.include_router(skills.router)
+    studio_app.include_router(templates.router)
     studio_app.include_router(lint.router)
     studio_app.include_router(runs.router)
     studio_app.include_router(runs.batch_router)

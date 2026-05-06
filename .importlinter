@@ -1,0 +1,24 @@
+[importlinter]
+root_packages =
+    graph_agent
+    app
+
+[importlinter:contract:1]
+name = SDK cannot depend on Studio application code
+type = forbidden
+source_modules =
+    graph_agent
+forbidden_modules =
+    app
+
+[importlinter:contract:2]
+name = Studio cannot bypass the public SDK boundary
+type = forbidden
+source_modules =
+    app
+allow_indirect_imports = True
+forbidden_modules =
+    graph_agent.io.manager
+    graph_agent.core.state
+    graph_agent.cognitive
+    graph_agent.models.resolver

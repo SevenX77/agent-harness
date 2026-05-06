@@ -33,6 +33,7 @@ import { useSkills } from './hooks/useSkills'
 import { useTheme } from './hooks/useTheme'
 import { useToasts } from './hooks/useToasts'
 import { useTraceSelection } from './hooks/useTraceSelection'
+import { useGlobalShortcuts } from './hooks/useGlobalShortcuts'
 import type {
   ActiveTab,
   ApiKeyName,
@@ -71,6 +72,7 @@ export default function App() {
   const selectedSkillId = activeSkillId
   const { isDarkMode, setIsDarkMode } = useTheme()
   const { toasts, pushToast } = useToasts()
+  const { register } = useGlobalShortcuts()
   const traceSelection = useTraceSelection()
   const { recentSkills, rememberSkill } = useRecentSkills()
   const {
@@ -202,16 +204,7 @@ export default function App() {
 
   useEffect(() => () => runWsRef.current?.close(), [])
 
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') {
-        event.preventDefault()
-        setCreatorOpen(true)
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [])
+  useEffect(() => register('mod+n', () => setCreatorOpen(true)), [register])
 
   const onConnect = useCallback((params: Connection) => {
     setEdges((current) => addEdge({

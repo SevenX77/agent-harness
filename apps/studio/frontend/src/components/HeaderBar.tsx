@@ -1,18 +1,16 @@
-import { AlertCircle, CheckCircle, FolderOpen, HardDrive, Play, Save, Terminal as TerminalIcon } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { AlertCircle, CheckCircle, HardDrive, Play, Save, Terminal as TerminalIcon } from 'lucide-react'
 import type { LintStatus, RunStatus } from '../types/studio'
 
 interface HeaderBarProps {
   selectedSkillId: string | null
-  inputPath: string
-  outputPath: string
-  pasteJson: string
+  inputSummary: string
+  inputPanel: ReactNode
+  canRun: boolean
   isArtifactsMenuOpen: boolean
   lintStatus: LintStatus
   runStatus: RunStatus
   onToggleArtifactsMenu: () => void
-  onInputPathChange: (value: string) => void
-  onOutputPathChange: (value: string) => void
-  onPasteJsonChange: (value: string) => void
   onLint: () => void
   onSave: () => void
   onOpenTerminal: () => void
@@ -21,16 +19,13 @@ interface HeaderBarProps {
 
 export function HeaderBar({
   selectedSkillId,
-  inputPath,
-  outputPath,
-  pasteJson,
+  inputSummary,
+  inputPanel,
+  canRun,
   isArtifactsMenuOpen,
   lintStatus,
   runStatus,
   onToggleArtifactsMenu,
-  onInputPathChange,
-  onOutputPathChange,
-  onPasteJsonChange,
   onLint,
   onSave,
   onOpenTerminal,
@@ -49,51 +44,12 @@ export function HeaderBar({
         </button>
 
         {isArtifactsMenuOpen ? (
-          <div className="absolute left-0 top-10 z-50 w-[26rem] rounded-md border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-xl">
-            <h4 className="mb-3 border-b border-gray-200 dark:border-slate-800 pb-2 font-bold text-gray-800 dark:text-gray-100">Run Input</h4>
-            <div className="space-y-4">
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium uppercase text-gray-500">Input Source</span>
-                <div className="flex items-center gap-2">
-                  <FolderOpen className="h-4 w-4 shrink-0 text-gray-400" />
-                  <input
-                    type="text"
-                    value={inputPath}
-                    onChange={(event) => onInputPathChange(event.target.value)}
-                    className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-              </label>
-
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium uppercase text-gray-500">Output Destination</span>
-                <div className="flex items-center gap-2">
-                  <Save className="h-4 w-4 shrink-0 text-gray-400" />
-                  <input
-                    type="text"
-                    value={outputPath}
-                    onChange={(event) => onOutputPathChange(event.target.value)}
-                    className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-              </label>
-
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium uppercase text-gray-500">Paste JSON</span>
-                <textarea
-                  value={pasteJson}
-                  onChange={(event) => onPasteJsonChange(event.target.value)}
-                  className="h-28 w-full resize-none rounded border border-gray-300 px-2 py-1.5 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder='{"chapter": "..."}'
-                />
-              </label>
-            </div>
-          </div>
+          <div className="absolute left-0 top-10 z-50">{inputPanel}</div>
         ) : null}
 
         <div className="flex flex-col text-xs text-gray-500">
-          <span><span className="font-semibold">In:</span> {inputPath.split('/').at(-1)}</span>
-          <span><span className="font-semibold">Out:</span> {outputPath.split('/').at(-1)}</span>
+          <span><span className="font-semibold">Inputs:</span> {inputSummary}</span>
+          <span><span className="font-semibold">Mode:</span> Playground</span>
         </div>
       </div>
 
@@ -131,8 +87,9 @@ export function HeaderBar({
 
         <button
           type="button"
+          data-testid="header-run"
           onClick={onRun}
-          disabled={!selectedSkillId || runStatus === 'running'}
+          disabled={!selectedSkillId || !canRun || runStatus === 'running'}
           className="flex items-center gap-2 rounded-md bg-sky-600 px-4 py-1.5 font-medium text-white transition-colors hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-sky-300 dark:disabled:bg-sky-900"
         >
           <Play className="h-4 w-4" />

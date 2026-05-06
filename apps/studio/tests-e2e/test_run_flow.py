@@ -27,7 +27,7 @@ RUN_TIMEOUT_S = 30.0
 
 def _select_skill(page: Page, skill_id: str) -> None:
     page.get_by_role("button", name=re.compile(rf"^{re.escape(skill_id)}$")).click()
-    expect(page.get_by_role("button", name=re.compile(r"^Run$"))).to_be_enabled(timeout=10_000)
+    expect(page.get_by_test_id("header-run")).to_be_enabled(timeout=10_000)
 
 
 def _open_artifacts_panel(page: Page) -> None:
@@ -35,9 +35,9 @@ def _open_artifacts_panel(page: Page) -> None:
     expect(page.get_by_text("Run Input", exact=False)).to_be_visible()
 
 
-def _paste_run_json(page: Page, payload: dict) -> None:
-    textarea = page.locator("textarea")
-    textarea.first.fill(json.dumps(payload))
+def _fill_playground_inputs(page: Page, payload: dict[str, str]) -> None:
+    for field_name, value in payload.items():
+        page.get_by_test_id(f"playground-field-{field_name}").locator("input").first.fill(value)
 
 
 def test_run_emits_trace_events_and_writes_artifacts(
@@ -51,8 +51,8 @@ def test_run_emits_trace_events_and_writes_artifacts(
     logger.info("selected e2e-fast skill")
 
     _open_artifacts_panel(page)
-    _paste_run_json(page, {"payload": "hello"})
-    logger.info("pasted run input")
+    _fill_playground_inputs(page, {"payload": "hello"})
+    logger.info("filled playground input")
 
     runs_root = (
         studio_workspace["workspaces_dir"]
@@ -63,7 +63,7 @@ def test_run_emits_trace_events_and_writes_artifacts(
     )
     pre_existing = set(runs_root.glob("*")) if runs_root.exists() else set()
 
-    page.get_by_role("button", name=re.compile(r"^Run$")).click()
+    page.get_by_test_id("input-playground-run").click()
     logger.info("triggered Run")
 
     timeline_heading = page.get_by_text("Trace Timeline", exact=False)
@@ -120,5 +120,5 @@ def test_run_emits_trace_events_and_writes_artifacts(
         f"expected >= 5 trace timeline entries on page, saw {timeline_count}"
     )
 
-    run_button = page.get_by_role("button", name=re.compile(r"^(Run|Running\.\.\.)$"))
+    run_button = page.get_by_test_id("header-run")
     expect(run_button).to_have_text(re.compile(r"^Run$"), timeout=10_000)

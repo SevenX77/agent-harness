@@ -4,8 +4,10 @@ import type { JsonObject } from '../../api/types'
 import { useInputPlayground } from '../../hooks/useInputPlayground'
 import type { PlaygroundInputSpec } from '../../hooks/useInputPlayground'
 import type { RunStatus } from '../../types/studio'
+import type { ToastKind } from '../../types/studio'
 import { isJsonObject } from '../../utils/errors'
 import { FieldRenderer } from './FieldRenderer'
+import { PresetToolbar } from './PresetToolbar'
 
 interface InputPlaygroundProps {
   skillId: string
@@ -13,7 +15,7 @@ interface InputPlaygroundProps {
   runStatus: RunStatus
   onRun: (values: JsonObject) => void
   onPayloadChange: (values: JsonObject, isValid: boolean) => void
-  toolbarSlot?: React.ReactNode
+  pushToast: (message: string, kind?: ToastKind) => void
 }
 
 export function InputPlayground({
@@ -22,7 +24,7 @@ export function InputPlayground({
   runStatus,
   onRun,
   onPayloadChange,
-  toolbarSlot,
+  pushToast,
 }: InputPlaygroundProps) {
   const playground = useInputPlayground(inputs)
   const [showPreview, setShowPreview] = useState(false)
@@ -54,7 +56,19 @@ export function InputPlayground({
           <p className="text-xs text-gray-500 dark:text-gray-400">{skillId}</p>
         </div>
         <div className="flex items-center gap-2">
-          {toolbarSlot}
+          <PresetToolbar
+            skillId={skillId}
+            values={payload ?? {}}
+            onLoad={(values) => {
+              if (hasDeclaredInputs) {
+                playground.setValues(values)
+              } else {
+                setRawJson(JSON.stringify(values, null, 2))
+                setRawError(null)
+              }
+            }}
+            pushToast={pushToast}
+          />
           <button
             type="button"
             onClick={() => {
@@ -124,6 +138,7 @@ export function InputPlayground({
         </span>
         <button
           type="button"
+          data-testid="input-playground-run"
           disabled={!isValid || runStatus === 'running'}
           onClick={() => {
             const submitted = hasDeclaredInputs ? playground.submitInputs() : rawPayload

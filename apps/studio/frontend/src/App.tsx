@@ -8,12 +8,15 @@ import { PromptInspector } from './components/PromptInspector'
 import { RightPanel } from './components/RightPanel'
 import { SkillSidebar } from './components/SkillSidebar'
 import { SkillCreatorWizard } from './components/creator/SkillCreatorWizard'
+import { InputPlayground } from './components/playground/InputPlayground'
 import { ToastStack } from './components/ToastStack'
 import { WelcomeScreen } from './components/WelcomeScreen'
 import type { EditorOnMount, MonacoApi, MonacoEditor } from './components/MonacoPanel'
 import { api, wsUrl } from './api/client'
 import type {
   CallbackEvent,
+  JsonObject,
+  RunDetail,
   LintResult,
   RunMetadata,
   RunRequest,
@@ -35,7 +38,7 @@ import type {
   TerminalStatus,
   VisualPhase,
 } from './types/studio'
-import { errorMessage, isJsonObject, isRecord, lintErrorsFromError } from './utils/errors'
+import { errorMessage, isRecord, lintErrorsFromError } from './utils/errors'
 import { buildGraph, graphSkill, subgraphSkillId } from './utils/graph'
 import { manifestToSkillMarkdown } from './utils/skillMarkdown'
 import { findPromptEvent } from './utils/trace'
@@ -61,9 +64,8 @@ export default function App() {
   const [lintOverride, setLintOverride] = useState<LintOverride | null>(null)
   const [runStatus, setRunStatus] = useState<RunStatus>('idle')
   const [activeTab, setActiveTab] = useState<ActiveTab>('code')
-  const [inputPath, setInputPath] = useState('workspaces/default/inputs/test.json')
-  const [outputPath, setOutputPath] = useState('workspaces/default/outputs/result.md')
-  const [pasteJson, setPasteJson] = useState('')
+  const [playgroundPayload, setPlaygroundPayload] = useState<JsonObject>({})
+  const [playgroundValid, setPlaygroundValid] = useState(true)
   const [isArtifactsMenuOpen, setIsArtifactsMenuOpen] = useState(false)
   const [apiKeys, setApiKeys] = useState<ApiKeys>({ openai: '', anthropic: '', gemini: '' })
   const [traceLogs, setTraceLogs] = useState<CallbackEvent[]>([])
@@ -86,6 +88,11 @@ export default function App() {
   const lintErrors = useMemo(
     () => activeLintOverride?.errors ?? detailLintErrors ?? [],
     [activeLintOverride, detailLintErrors],
+  )
+  const currentManifest = skillDetail?.manifest
+  const manifestInputs = useMemo(
+    () => currentManifest?.type === 'graph' ? currentManifest.io.inputs : [],
+    [currentManifest],
   )
 
   const toggleSubgraph = useCallback(async (phase: VisualPhase) => {
@@ -240,37 +247,36 @@ export default function App() {
     editorRef.current.focus()
   }, [])
 
-  const handleRun = useCallback(async () => {
+  const handleRun = useCallback(async (values?: JsonObject) => {
     if (!selectedSkillId) {
       return
     }
 
-    if (pasteJson.trim().length > 0) {
-      try {
-        const parsed: unknown = JSON.parse(pasteJson)
-        if (!isJsonObject(parsed)) {
-          pushToast('Run JSON must be an object', 'error')
-          return
-        }
-      } catch {
-        pushToast('Run JSON is invalid', 'error')
-        return
-      }
-    }
-
     setRunStatus('running')
     setActiveTab('trace')
+    setIsArtifactsMenuOpen(false)
     setTraceLogs([])
     setSelectedPromptIndex(null)
     runWsRef.current?.close()
 
     const request: RunRequest = {
-      input_data: pasteJson.trim().length > 0 ? null : {},
-      paste_json: pasteJson.trim().length > 0 ? pasteJson : null,
+      input_data: values ?? playgroundPayload,
+      paste_json: null,
     }
 
     try {
       const response = await api.post<RunMetadata>(`/skills/${selectedSkillId}/runs`, request)
+      const hydrateRunTrace = async () => {
+        try {
+          const detail = await api.get<RunDetail>(`/skills/${selectedSkillId}/runs/${response.data.run_id}`)
+          setTraceLogs(detail.data.events)
+          if (detail.data.metadata.status !== 'running') {
+            setRunStatus(detail.data.metadata.status === 'success' ? 'success' : 'error')
+          }
+        } catch {
+          // WebSocket events remain the primary live path; detail hydration is best-effort.
+        }
+      }
       const socket = new WebSocket(wsUrl(`/ws/runs/${response.data.run_id}`))
       runWsRef.current = socket
       socket.onmessage = (message) => {
@@ -285,6 +291,9 @@ export default function App() {
           socket.close()
         }
       }
+      socket.onclose = () => {
+        void hydrateRunTrace()
+      }
       socket.onerror = () => {
         setRunStatus('error')
         pushToast('Run WebSocket disconnected', 'error')
@@ -293,7 +302,7 @@ export default function App() {
       setRunStatus('error')
       pushToast(errorMessage(error), 'error')
     }
-  }, [pasteJson, pushToast, selectedSkillId])
+  }, [playgroundPayload, pushToast, selectedSkillId])
 
   const openTerminal = useCallback(async () => {
     if (!selectedSkillId) {
@@ -327,15 +336,23 @@ export default function App() {
     setApiKeys((current) => ({ ...current, [key]: value }))
   }, [])
 
+  const handlePlaygroundPayloadChange = useCallback((values: JsonObject, isValid: boolean) => {
+    setPlaygroundPayload(values)
+    setPlaygroundValid(isValid)
+  }, [])
+
   const handleSkillCreated = useCallback(async (skillId: string) => {
     await mutateSkills()
     handleSelectSkill(skillId)
   }, [handleSelectSkill, mutateSkills])
 
   const promptEvent = selectedPromptIndex === null ? null : findPromptEvent(traceLogs, selectedPromptIndex)
-  const currentManifest = skillDetail?.manifest
   const currentGraphSkill = currentManifest ? graphSkill(currentManifest) : null
   const currentSkill = skills.find((skill) => skill.id === selectedSkillId)
+  const inputSummary = currentManifest
+    ? manifestInputs.length > 0 ? `${manifestInputs.length} fields` : 'raw JSON'
+    : 'loading'
+  const canRun = Boolean(selectedSkillId && currentManifest && playgroundValid)
   return (
     <div className="flex h-screen w-full bg-gray-50 dark:bg-slate-950 font-sans text-slate-800 dark:text-slate-200">
       <SkillSidebar
@@ -361,16 +378,26 @@ export default function App() {
           <>
             <HeaderBar
               selectedSkillId={selectedSkillId}
-              inputPath={inputPath}
-              outputPath={outputPath}
-              pasteJson={pasteJson}
+              inputSummary={inputSummary}
+              inputPanel={currentManifest ? (
+                <InputPlayground
+                  skillId={selectedSkillId}
+                  inputs={manifestInputs}
+                  runStatus={runStatus}
+                  onRun={(values) => void handleRun(values)}
+                  onPayloadChange={handlePlaygroundPayloadChange}
+                  pushToast={pushToast}
+                />
+              ) : (
+                <div className="rounded-md border border-gray-200 bg-white p-4 text-sm text-gray-500 shadow-xl dark:border-slate-800 dark:bg-slate-900 dark:text-gray-400">
+                  Loading inputs...
+                </div>
+              )}
+              canRun={canRun}
               isArtifactsMenuOpen={isArtifactsMenuOpen}
               lintStatus={lintStatus}
               runStatus={runStatus}
               onToggleArtifactsMenu={() => setIsArtifactsMenuOpen((open) => !open)}
-              onInputPathChange={setInputPath}
-              onOutputPathChange={setOutputPath}
-              onPasteJsonChange={setPasteJson}
               onLint={() => void handleLint()}
               onSave={() => void handleSave()}
               onOpenTerminal={() => void openTerminal()}

@@ -6,6 +6,7 @@ from app.core.exceptions import STANDARD_ERROR_MAP, standard_http_exception
 def test_standard_error_codes_map_to_http_exceptions() -> None:
     expected = {
         "SKILL_NOT_FOUND": 404,
+        "SKILL_ALREADY_EXISTS": 409,
         "MANIFEST_VALIDATION_FAILED": 422,
         "COMPILE_FAILED": 200,
         "RUN_SPAWN_FAILED": 500,

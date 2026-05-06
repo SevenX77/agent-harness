@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.lint import LintResult
 from app.models.runs import RunMetadata
@@ -35,8 +35,8 @@ class SkillDetail(BaseModel):
 class CreateSkillReq(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    template_id: str | None = None
-    description: str | None = None
+    skill_id: str = Field(..., pattern=r"^[a-z][a-z0-9-]+$")
+    content: str
 
 
 class UpdateSkillReq(BaseModel):

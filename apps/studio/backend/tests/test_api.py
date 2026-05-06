@@ -109,6 +109,41 @@ def test_put_updates_workspace_atomically_and_invalid_content_preserves_file(
     assert "Updated text segments" in workspace_skill.read_text(encoding="utf-8")
 
 
+def test_create_skill_writes_workspace_skill_and_summary(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    _skills_dir, workspaces_dir = studio_roots
+
+    response = client.post(
+        "/api/skills",
+        json={"skill_id": "idea-generator", "content": _agent_skill_content("idea-generator")},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["id"] == "idea-generator"
+    assert body["name"] == "idea-generator"
+    assert body["description"] == "Draft structured ideas"
+    assert body["phase_count"] == 1
+
+    skill_dir = workspaces_dir / "default" / "skills" / "idea-generator"
+    assert (skill_dir / "SKILL.md").exists()
+    assert (skill_dir / "skill_summary.json").exists()
+
+
+def test_create_skill_collision_returns_409(client: TestClient) -> None:
+    response = client.post(
+        "/api/skills",
+        json={"skill_id": "text-segmentation", "content": _agent_skill_content("text-segmentation")},
+    )
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["error_code"] == "SKILL_ALREADY_EXISTS"
+    assert body["details"] == {"skill_id": "text-segmentation"}
+
+
 def test_request_validation_errors_use_error_response(client: TestClient) -> None:
     response = client.post("/api/skills/demo/runs", json={"unexpected": "field"})
 
@@ -329,3 +364,28 @@ class FakePtyFactory:
     def spawn(command: list[str], cwd: str) -> FakePty:
         del command, cwd
         return FakePty()
+
+
+def _agent_skill_content(skill_id: str) -> str:
+    return f"""---
+schema_version: "2.0"
+name: {skill_id}
+description: Draft structured ideas
+type: agent
+context_mapping:
+  topic: "{{input.topic}}"
+agent_profile:
+  role: Creative assistant
+  goal: Generate concise planning ideas
+  steps:
+    - Read the requested topic
+    - Return a short list of ideas
+  constraints:
+    - Keep the answer concise
+  llm_role: analyst
+user_prompt_template: |
+  Generate ideas for {{topic}}.
+---
+
+# {skill_id}
+"""

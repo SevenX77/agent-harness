@@ -22,11 +22,13 @@ source = { virtual = "." }
 
 [package.dev-dependencies]
 dev = [
+    { name = "coverage" },
     { name = "import-linter" },
     { name = "libcst" },
     { name = "mypy" },
     { name = "pre-commit" },
     { name = "pytest" },
+    { name = "pytest-cov" },
     { name = "ruff" },
     { name = "studio-backend" },
 ]
@@ -40,11 +42,13 @@ e2e = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "coverage", specifier = ">=7.0.0" },
     { name = "import-linter", specifier = ">=2.11" },
     { name = "libcst", specifier = ">=1.8.6" },
     { name = "mypy", specifier = ">=1.10" },
     { name = "pre-commit", specifier = ">=3.6" },
     { name = "pytest", specifier = ">=9.0.0" },
+    { name = "pytest-cov", specifier = ">=5.0.0" },
     { name = "ruff", specifier = ">=0.6" },
     { name = "studio-backend", editable = "apps/studio/backend" },
 ]

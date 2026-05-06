@@ -19,6 +19,7 @@ import { WelcomeScreen } from './components/WelcomeScreen'
 import type { EditorOnMount, MonacoApi, MonacoEditor } from './components/MonacoPanel'
 import { api, wsUrl } from './api/client'
 import type {
+  BatchRunStatus,
   CallbackEvent,
   JsonObject,
   RunDetail,
@@ -28,6 +29,7 @@ import type {
   SkillDetail,
   SkillManifest,
   TerminalSession,
+  TestInputMetadata,
 } from './api/types'
 import { useRecentSkills } from './hooks/useRecentSkills'
 import { useGoldenDiff } from './hooks/useGoldenDiff'
@@ -110,6 +112,9 @@ export default function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [skillPaletteOpen, setSkillPaletteOpen] = useState(false)
   const [cheatSheetOpen, setCheatSheetOpen] = useState(false)
+  const [batchInputs] = useState<TestInputMetadata[]>([])
+  const [selectedBatchInputIds, setSelectedBatchInputIds] = useState<string[]>([])
+  const [batchStatus] = useState<BatchRunStatus | null>(null)
   const [pendingJumpLine, setPendingJumpLine] = useState<number | null>(null)
   const editorRef = useRef<MonacoEditor | null>(null)
   const monacoRef = useRef<MonacoApi | null>(null)
@@ -490,6 +495,14 @@ export default function App() {
     pushToast(`Applied phase ${phaseForm.data.name}`, 'success')
   }, [phaseForm, phaseSync, pushToast])
 
+  const handleToggleBatchInput = useCallback((inputId: string) => {
+    setSelectedBatchInputIds((current) => (
+      current.includes(inputId)
+        ? current.filter((item) => item !== inputId)
+        : [...current, inputId]
+    ))
+  }, [])
+
   const canRun = Boolean(selectedSkillId && currentManifest && playgroundValid)
 
   const commandActions = useMemo<CommandAction[]>(() => [
@@ -684,6 +697,12 @@ export default function App() {
                 diffLoading={goldenDiff.loading}
                 diffError={goldenDiff.error}
                 canDiffRun={canDiffRun}
+                batchInputs={batchInputs}
+                selectedBatchInputIds={selectedBatchInputIds}
+                batchStatus={batchStatus}
+                batchInputsLoading={false}
+                batchRunning={false}
+                batchError={null}
                 terminalSession={terminalSession}
                 terminalStatus={terminalStatus}
                 currentGraphSkill={currentGraphSkill}
@@ -698,6 +717,10 @@ export default function App() {
                 onPromoteToGolden={handlePromoteToGolden}
                 onReplayRun={handleReplayHistoryRun}
                 onCompareHistoryRun={handleCompareHistoryRun}
+                onToggleBatchInput={handleToggleBatchInput}
+                onRunBatch={() => pushToast('Batch API wiring lands in Task 1.3', 'info')}
+                onRefreshBatchInputs={() => pushToast('Batch input refresh lands in Task 1.3', 'info')}
+                onOpenBatchRun={(runId) => pushToast(`Batch run detail pending: ${runId}`, 'info')}
                 selectedTracePhaseId={traceSelection.selectedPhaseId}
                 selectedTraceEventId={traceSelection.selectedEventId}
                 traceLinkEnabled={traceSelection.linkEnabled}

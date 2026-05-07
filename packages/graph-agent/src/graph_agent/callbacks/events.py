@@ -58,6 +58,11 @@ class PhaseStartEvent(_EventBase):
     context: dict[str, Any] = Field(default_factory=dict)
 
 
+class PredictChainStartEvent(_EventBase):
+    event_type: Literal["predict_chain_start"] = "predict_chain_start"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class PhaseEndEvent(_EventBase):
     event_type: Literal["phase_end"] = "phase_end"
     phase_name: str
@@ -382,6 +387,7 @@ class InternalErrorEvent(_EventBase):
 
 CallbackEvent = Annotated[
     PhaseStartEvent
+    | PredictChainStartEvent
     | PhaseEndEvent
     | LLMCallEvent
     | ToolCallEvent
@@ -416,6 +422,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "CallbackEvent",
     "PhaseStartEvent",
+    "PredictChainStartEvent",
     "PhaseEndEvent",
     "LLMCallEvent",
     "ToolCallEvent",

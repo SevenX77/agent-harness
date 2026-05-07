@@ -71,6 +71,7 @@ class TracingCallback(Callback):
         self._total_tool_calls: int = 0
         self._trace_dir: Path | None = None
         self._jsonl_path: Path | None = None
+        self._typed_jsonl_path: Path | None = None
         if trace_dir is not None:
             self.set_trace_dir(trace_dir)
 

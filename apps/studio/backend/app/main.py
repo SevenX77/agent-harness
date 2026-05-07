@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
+import threading
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -37,6 +40,7 @@ from app.services.terminal_manager import terminal_manager
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Start and stop Studio background services."""
+    start_orphan_parent_monitor()
     clear_backend_caches()
     ensure_workspace_layout()
     terminal_manager.start_reaper()
@@ -78,6 +82,20 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+
+def start_orphan_parent_monitor() -> None:
+    if os.environ.get("STUDIO_EXIT_ON_ORPHAN") != "1":
+        return
+
+    def monitor() -> None:
+        while True:
+            if os.getppid() == 1:
+                os._exit(1)
+            time.sleep(2)
+
+    thread = threading.Thread(target=monitor, name="studio-parent-monitor", daemon=True)
+    thread.start()
 
 
 def parse_main_args(argv: list[str] | None = None) -> argparse.Namespace:

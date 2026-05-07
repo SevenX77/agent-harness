@@ -85,7 +85,7 @@
     - e2e：由 T2.6 覆盖。
   - 依赖：T2.1。
 
-- [ ] T2.3 Rust sidecar runtime manager：动态端口、启动、健康检查、生命周期
+- [x] T2.3 Rust sidecar runtime manager：动态端口、启动、健康检查、生命周期
   - 目标：在 Tauri Rust 主进程中封装 Python sidecar manager，负责找端口、启动 uvicorn、等待 ready、退出清理。
   - 估时：18h
   - 涉及文件：

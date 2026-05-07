@@ -88,6 +88,24 @@ cd apps/studio/tauri && cargo tauri dev
 # 期望: 窗口出现, 1400×900, 显示 Skill Studio 现有 UI
 ```
 
+## T2.6 Desktop Lifecycle Checklist
+
+Headless CI / VPS:
+
+```bash
+DISABLE_GUI=1 uv run pytest apps/studio/tests-e2e/test_desktop_lifecycle.py -q
+cargo check --manifest-path apps/studio/tauri/Cargo.toml
+cargo test sidecar --lib --manifest-path apps/studio/tauri/Cargo.toml
+```
+
+Manual desktop smoke:
+
+1. Keep `127.0.0.1:8787` occupied, then run `cd apps/studio/tauri && cargo tauri dev`.
+2. Confirm the splash reaches the Studio UI and Network requests use `127.0.0.1:<dynamic>/api`, not `8787`.
+3. Confirm `/health` responds on the dynamic sidecar port.
+4. Close the window and verify `ps -eo pid,command | grep 'uvicorn app.main:app'` (or Task Manager on Windows) shows no sidecar Python process.
+5. Break Python startup intentionally and confirm Splash Error renders recent sidecar stderr instead of a blank screen.
+
 ## Phase 边界 (T1 不做)
 
 * **T2 (Python sidecar)**: 用 Tauri 的 sidecar 机制 / `std::process::Command` 拉起

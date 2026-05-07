@@ -26,6 +26,14 @@ class RunRequest(BaseModel):
     paste_json: str | None = None
 
 
+class PredictRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    input_data: dict[str, Any] | None = None
+    mock_llm: Any = None
+    current_hashes: dict[str, dict[str, str]] | None = None
+
+
 class BatchRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

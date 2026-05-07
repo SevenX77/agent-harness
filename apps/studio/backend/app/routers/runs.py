@@ -10,12 +10,14 @@ from app.models.runs import (
     BatchRunRequest,
     BatchRunResponse,
     BatchRunStatus,
+    PredictRunRequest,
     ResumeReq,
     RunDetail,
     RunListResponse,
     RunMetadata,
     RunRequest,
 )
+from app.services.predictor import predictor_service
 from app.services.run_manager import run_manager
 
 router = APIRouter(prefix="/api/skills/{skill_id}/runs", tags=["runs"])
@@ -25,6 +27,17 @@ batch_router = APIRouter(prefix="/api/batch", tags=["batch"])
 @router.post("", response_model=RunMetadata, status_code=202)
 async def create_run(skill_id: str, request: RunRequest) -> RunMetadata:
     return await run_manager.start_run(skill_id, request)
+
+
+@router.post("/predict")
+async def predict_run(skill_id: str, request: PredictRunRequest) -> dict[str, object]:
+    result = predictor_service.dispatch_predict_job(
+        skill_id,
+        request.mock_llm,
+        input_data=request.input_data,
+        current_hashes=request.current_hashes,
+    )
+    return result.model_dump(mode="json")
 
 
 @router.get("", response_model=RunListResponse)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -9,7 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.core.backends import clear_backend_caches
-from app.core.config import STUDIO_PORT
+from app.core.config import DEFAULT_STUDIO_PORT
 from app.core.exceptions import register_exception_handlers
 from app.core.middleware import configure_cors
 from app.routers import (
@@ -21,6 +22,7 @@ from app.routers import (
     lint,
     runs,
     skills,
+    system,
     templates,
     terminal,
     test_inputs,
@@ -71,13 +73,29 @@ def create_app() -> FastAPI:
     studio_app.include_router(audit.router)
     studio_app.include_router(debug.router)
     studio_app.include_router(websockets.router)
+    studio_app.include_router(system.router)
     return studio_app
 
 
 app = create_app()
 
 
-if __name__ == "__main__":
+def parse_main_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run the Skill Studio FastAPI sidecar")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=DEFAULT_STUDIO_PORT)
+    return parser.parse_args(argv)
+
+
+def run_sidecar(host: str, port: int) -> None:
     import uvicorn
 
-    uvicorn.run("app.main:app", host="0.0.0.0", port=STUDIO_PORT)
+    server_config = uvicorn.Config(app, host=host, port=port)
+    server = uvicorn.Server(server_config)
+    app.state.uvicorn_server = server
+    server.run()
+
+
+if __name__ == "__main__":
+    args = parse_main_args()
+    run_sidecar(args.host, args.port)

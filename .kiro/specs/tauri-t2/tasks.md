@@ -54,7 +54,7 @@
     - e2e：不负责 GUI。
   - 依赖：无。
 
-- [ ] T2.2 Backend sidecar 启动入口与依赖安装布局
+- [x] T2.2 Backend sidecar 启动入口与依赖安装布局
   - 目标：让 bundled Python 能以 sidecar 方式启动 Studio FastAPI backend，并支持 Rust 注入端口和本地数据目录。
   - 估时：14h
   - 涉及文件：

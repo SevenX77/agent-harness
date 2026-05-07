@@ -1,7 +1,15 @@
 import { ChevronDown, ChevronRight, Hash, MessageSquare } from 'lucide-react'
 import { useState } from 'react'
 import type { CallbackEvent } from '../../api/types'
-import { eventColor, eventMessage, eventPhase, tokenText } from '../../utils/trace'
+import {
+  eventColor,
+  eventMessage,
+  eventMockedSource,
+  eventPhase,
+  mockedSourceClass,
+  mockedSourceLabel,
+  tokenText,
+} from '../../utils/trace'
 import { EventTypeBadge } from './EventTypeBadge'
 
 interface TraceEventRowProps {
@@ -32,6 +40,7 @@ export function TraceEventRow({
   const [localExpanded, setLocalExpanded] = useState(false)
   const isExpanded = expanded ?? localExpanded
   const tokens = tokenText(event)
+  const mockedSource = eventMockedSource(event)
   const inspectable = event.event_type === 'prompt_captured' || event.event_type === 'llm_call'
   const isError = event.event_type === 'internal_error' || event.event_type === 'validation_fail'
 
@@ -70,6 +79,11 @@ export function TraceEventRow({
             <span className="flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-600 dark:bg-violet-900/40 dark:text-violet-300">
               <Hash className="h-3 w-3" />
               {tokens}
+            </span>
+          ) : null}
+          {mockedSource ? (
+            <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${mockedSourceClass(mockedSource)}`}>
+              {mockedSourceLabel(mockedSource)}
             </span>
           ) : null}
         </div>

@@ -4,7 +4,7 @@ import type { CallbackEvent } from '../../api/types'
 import type { IndexedTraceEvent } from '../../hooks/useTraceFilter'
 import { traceEventId } from '../../hooks/useTraceSelection'
 import { useVirtualScroll } from '../../hooks/useVirtualScroll'
-import { eventPhase } from '../../utils/trace'
+import { eventPhase, isPredictTrace } from '../../utils/trace'
 import { TRACE_EVENT_ROW_HEIGHT, TraceEventRow } from './TraceEventRow'
 
 interface VirtualTraceListProps {
@@ -32,6 +32,10 @@ export function VirtualTraceList({
     overscan: 8,
   })
   const visibleEvents = events.slice(virtual.startIdx, virtual.endIdx)
+  const predictTrace = useMemo(
+    () => isPredictTrace(events.map(({ event }) => event)),
+    [events],
+  )
   const selectedPosition = useMemo(
     () => selectedEventId ? events.findIndex(({ event, index }) => traceEventId(event, index) === selectedEventId) : -1,
     [events, selectedEventId],
@@ -94,7 +98,10 @@ export function VirtualTraceList({
       aria-activedescendant={selectedEventId ? `trace-event-${selectedEventId}` : undefined}
       tabIndex={0}
       onKeyDown={handleKeyDown}
-      className="min-h-0 flex-1 overflow-y-auto pr-1 outline-none focus:ring-2 focus:ring-sky-300 dark:focus:ring-sky-800"
+      data-predict-trace={predictTrace ? 'true' : undefined}
+      className={`min-h-0 flex-1 overflow-y-auto pr-1 outline-none focus:ring-2 focus:ring-sky-300 dark:focus:ring-sky-800 ${
+        predictTrace ? 'border-l border-amber-200 pl-2 dark:border-amber-900/50' : ''
+      }`}
     >
       <div className="relative ml-3 border-l-2 border-gray-200 dark:border-slate-800" style={{ height: virtual.totalHeight }}>
         <div

@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import Any
 
 from graph_agent import run_skill
+from graph_agent.core._predict_internal.exporter import assemble_phase_record
 from graph_agent.core._predict_internal.models import (
     GoldenCase,
     PathDiff,
@@ -22,6 +23,7 @@ from graph_agent.core._predict_internal.strategy import (
     MockStrategy,
 )
 
+from app.services.diagnostic_export import export_predict_diagnostics
 from app.services.skills import ensure_workspace_skill_dir
 
 logger = logging.getLogger(__name__)
@@ -89,6 +91,11 @@ class PredictorService:
         if path_diff and (path_diff.missing or path_diff.extra or path_diff.order_mismatch):
             status = "failed"
         return PredictResult(status=status, phases=phases, path_diff=path_diff)
+
+    def export_diagnostics(self, result: PredictResult):
+        """Expose PredictResult through the Studio in-process diagnostic contract."""
+
+        return export_predict_diagnostics(result)
 
     def _path_diff_for_strategy(
         self,
@@ -159,15 +166,7 @@ def _phase_records_from_raw(raw_result: Any) -> list[PhaseRecord]:
     for item in raw_phases:
         if not isinstance(item, dict):
             continue
-        phases.append(
-            PhaseRecord(
-                phase_name=str(item.get("phase_name") or item.get("name") or "<unknown>"),
-                type=item.get("type") if item.get("type") in {"logic", "llm"} else "logic",
-                inputs=_dict_or_empty(item.get("inputs")),
-                outputs=_dict_or_empty(item.get("outputs")),
-                mocked_source=item.get("mocked_source"),
-            )
-        )
+        phases.append(assemble_phase_record(item))
     return phases
 
 
@@ -186,10 +185,6 @@ def _context_from_raw(raw_result: Any) -> dict[str, Any]:
     else:
         context = getattr(raw_result, "context", {})
     return context if isinstance(context, dict) else {}
-
-
-def _dict_or_empty(value: object) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
 
 
 predictor_service = PredictorService()

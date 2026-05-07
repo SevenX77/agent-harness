@@ -12,6 +12,7 @@ from typing import Any
 from app.core.exceptions import standard_http_exception
 from app.models.compare import CompareResult, FieldDifference, FieldDiffType
 from app.models.golden import GoldenBaseline
+from app.services.diagnostic_export import assert_trace_can_be_promoted_to_golden
 from app.services.skills import run_dir_for
 
 
@@ -39,6 +40,11 @@ def set_golden_baseline_for_run(skill_id: str, run_id: str, *, lock: bool) -> Go
             f"Run final state not found: {run_id}",
             {"skill_id": skill_id, "run_id": run_id},
         )
+    assert_trace_can_be_promoted_to_golden(
+        _read_json(source_path),
+        skill_id=skill_id,
+        run_id=run_id,
+    )
 
     baseline_dir = _golden_dir_for(skill_id, run_id)
     baseline_dir.mkdir(parents=True, exist_ok=True)

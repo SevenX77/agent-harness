@@ -97,6 +97,23 @@ class ModelResolver:
             effective_role_name,
             " -> ".join(_candidate_id(rp) for rp in resolved.call_chain),
         )
+        mock_strategy = getattr(self, "_graph_agent_predict_mock_strategy", None)
+        if mock_strategy is not None:
+            from graph_agent.core._predict_internal.interception import PredictGatewayChatModel
+
+            return PredictGatewayChatModel(
+                effective_role_name,
+                resolved,
+                mock_strategy=mock_strategy,
+                max_tokens=_default_max_tokens(resolved.call_chain),
+                temperature=resolved.temperature,
+                callbacks=callbacks,
+                phase_name=phase_name,
+                thinking_enabled=thinking_enabled,
+                name=_display_model_name(resolved),
+                profile=_profile_for_chain(resolved.call_chain),
+            )
+
         return GatewayChatModel(
             effective_role_name,
             resolved,

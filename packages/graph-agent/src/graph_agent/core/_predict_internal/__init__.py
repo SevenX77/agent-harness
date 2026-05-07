@@ -16,12 +16,7 @@ _PREDICT_STRATEGY_ATTR = "_graph_agent_predict_mock_strategy"
 
 
 def bind_predictor(target: _T, mock_strategy: BaseMockStrategy) -> _T:
-    """Attach a Predict mock strategy to an internal SDK runtime object.
-
-    P-T1 only establishes the private binding surface.  Later Predict tasks
-    will decide which concrete runtime objects call this hook and how strategy
-    lookup works across a full graph run.
-    """
+    """Attach a Predict mock strategy to an internal SDK runtime object."""
 
     setattr(target, _PREDICT_STRATEGY_ATTR, mock_strategy)
     return target

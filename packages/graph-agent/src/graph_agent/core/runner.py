@@ -58,6 +58,7 @@ logger = logging.getLogger(__name__)
 # Cache loaded harnesses to avoid re-parsing SKILL.md on repeated calls
 _harness_cache: dict[str, tuple[Any, dict[str, int]]] = {}
 _cache_lock = threading.Lock()
+_NO_MOCK_LLM = object()
 
 
 def _collect_skill_dependency_snapshot(
@@ -117,6 +118,7 @@ def _refresh_callbacks_recursive(
 def run_skill(
     skill_path: str | Path,
     *,
+    mock_llm: Any = _NO_MOCK_LLM,
     trace_dir: str | Path | None = None,
     thread_id: str | None = None,
     unattended: bool = False,
@@ -138,6 +140,7 @@ def run_skill(
         raw = _run_skill_dict(
             skill_path,
             trace_dir=trace_dir,
+            mock_llm=mock_llm,
             thread_id=thread_id,
             unattended=unattended,
             callbacks=callbacks,
@@ -181,6 +184,7 @@ def run_skill(
 def _run_skill_dict(
     skill_path: str | Path,
     *,
+    mock_llm: Any = _NO_MOCK_LLM,
     trace_dir: str | Path | None = None,
     thread_id: str | None = None,
     unattended: bool = False,
@@ -287,30 +291,50 @@ def _run_skill_dict(
         if effective_thread_id is None:
             effective_thread_id = actual_tid
 
+    resolver = getattr(harness, "_resolver", None)
+    had_previous_predict_binding = False
+    previous_predict_strategy: Any = None
+    predict_attr = "_graph_agent_predict_mock_strategy"
+    if mock_llm is not _NO_MOCK_LLM and resolver is not None:
+        from graph_agent.core._predict_internal import bind_predictor
+        from graph_agent.core._predict_internal.strategy import MockStrategy
+
+        had_previous_predict_binding = hasattr(resolver, predict_attr)
+        previous_predict_strategy = getattr(resolver, predict_attr, None)
+        bind_predictor(resolver, MockStrategy.from_param(mock_llm))
+
     try:
-        final_state: WorkflowState = harness.run(
-            trace_dir=Path(effective_trace_dir) if effective_trace_dir else None,
-            thread_id=effective_thread_id,
-            unattended=unattended,
-            artifact_saver=artifact_saver,
-            initial_context=initial_context,
-            runtime_inputs_map=inputs,
-        )
-    except Exception:
-        # Clean up .run_id on unexpected failure to avoid corrupted resume
-        if run_id_file is not None and run_id_file.exists():
-            try:
-                run_id_file.unlink()
-                logger.info("[Runner] Cleaned up .run_id after failure")
-            except OSError as exc:
-                raise PersistenceError(
-                    f"run_id cleanup failed: {exc}",
-                    context={
-                        "thread_id": effective_thread_id,
-                        "run_id_file": str(run_id_file),
-                    },
-                ) from exc
-        raise
+        try:
+            final_state: WorkflowState = harness.run(
+                trace_dir=Path(effective_trace_dir) if effective_trace_dir else None,
+                thread_id=effective_thread_id,
+                unattended=unattended,
+                artifact_saver=artifact_saver,
+                initial_context=initial_context,
+                runtime_inputs_map=inputs,
+            )
+        except Exception:
+            # Clean up .run_id on unexpected failure to avoid corrupted resume
+            if run_id_file is not None and run_id_file.exists():
+                try:
+                    run_id_file.unlink()
+                    logger.info("[Runner] Cleaned up .run_id after failure")
+                except OSError as exc:
+                    raise PersistenceError(
+                        f"run_id cleanup failed: {exc}",
+                        context={
+                            "thread_id": effective_thread_id,
+                            "run_id_file": str(run_id_file),
+                        },
+                    ) from exc
+            raise
+    finally:
+        if mock_llm is not _NO_MOCK_LLM and resolver is not None:
+            if had_previous_predict_binding:
+                setattr(resolver, predict_attr, previous_predict_strategy)
+            else:
+                with contextlib.suppress(AttributeError):
+                    delattr(resolver, predict_attr)
     wall_time = time.time() - t0
 
     # Success — remove .run_id

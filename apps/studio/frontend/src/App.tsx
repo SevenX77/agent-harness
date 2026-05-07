@@ -55,6 +55,7 @@ import type {
 import { errorMessage, isRecord, lintErrorsFromError } from './utils/errors'
 import { buildGraph, graphSkill, subgraphSkillId } from './utils/graph'
 import { manifestToSkillMarkdown } from './utils/skillMarkdown'
+import { verifyTauriWindowIpc } from './utils/tauriIpc'
 import { eventPhase, findPromptEvent } from './utils/trace'
 
 function escapeRegExp(value: string): string {
@@ -122,6 +123,22 @@ export default function App() {
   const runWsRef = useRef<WebSocket | null>(null)
   const goldenDiff = useGoldenDiff(selectedSkillId, lastRunId)
   const batchRun = useBatchRun(selectedSkillId)
+
+  useEffect(() => {
+    let cancelled = false
+    void verifyTauriWindowIpc()
+      .then((connected) => {
+        if (!cancelled && connected) {
+          console.info('[studio] Tauri IPC verified via window.setTitle')
+        }
+      })
+      .catch((error: unknown) => {
+        console.debug('[studio] Tauri IPC unavailable', error)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const canonicalSkillCode = skillDetail ? manifestToSkillMarkdown(skillDetail.manifest) : ''
   const editorOwnsSelectedSkill = editorDraft.skillId === selectedSkillId

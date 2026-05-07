@@ -25,6 +25,32 @@
   color: #38bdf8;
 }
 
+.runtime-splash {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #f8fafc;
+  color: #0f172a;
+  font: 600 18px/1.4 Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+.runtime-splash-error {
+  gap: 12px;
+  align-content: center;
+  color: #991b1b;
+}
+
+.runtime-splash-error code {
+  max-width: min(720px, calc(100vw - 48px));
+  padding: 12px;
+  overflow-wrap: anywhere;
+  border: 1px solid #fecaca;
+  background: #fff1f2;
+  color: #7f1d1d;
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
 .phase-form-highlight {
   background: rgba(14, 165, 233, 0.12);
 }

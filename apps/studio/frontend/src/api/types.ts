@@ -112,6 +112,31 @@ export interface RunDetail {
   artifacts: string[] | null
 }
 
+export type MockedSource = 'golden_case' | 'copilot' | 'heuristic_stub' | 'manual'
+
+export interface PathDiff {
+  expected_path: string[]
+  actual_path: string[]
+  missing: string[]
+  extra: string[]
+  order_mismatch: boolean
+}
+
+export interface PhaseRecord {
+  phase_name: string
+  type: 'logic' | 'llm'
+  inputs: JsonObject
+  outputs: JsonObject
+  mocked_source: MockedSource | null
+}
+
+export interface PredictDiagnosticExport {
+  is_predict: boolean
+  status: 'success' | 'failed'
+  phases: PhaseRecord[]
+  path_diff: PathDiff | null
+}
+
 export interface GoldenBaseline {
   id: string
   linked_input_id: string
@@ -280,6 +305,9 @@ export interface CallbackEventBase {
   input_tokens?: number
   output_tokens?: number
   template_source?: string | null
+  mocked_source?: MockedSource | null
+  metadata?: JsonObject
+  metrics?: JsonObject
   variables?: JsonObject
   resolved_prompt?: JsonObject[]
   messages?: JsonObject[] | null

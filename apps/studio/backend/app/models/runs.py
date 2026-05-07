@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from graph_agent.callbacks.events import CallbackEvent
+from graph_agent.core._predict_internal.models import PathDiff, PhaseRecord
 from pydantic import BaseModel, ConfigDict
 
 
@@ -32,6 +33,15 @@ class PredictRunRequest(BaseModel):
     input_data: dict[str, Any] | None = None
     mock_llm: Any = None
     current_hashes: dict[str, dict[str, str]] | None = None
+
+
+class PredictDiagnosticExport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    is_predict: bool
+    status: Literal["success", "failed"]
+    phases: list[PhaseRecord]
+    path_diff: PathDiff | None = None
 
 
 class BatchRunRequest(BaseModel):

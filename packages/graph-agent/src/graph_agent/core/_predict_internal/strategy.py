@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from pathlib import Path
+from typing import Any
+
+from pydantic import TypeAdapter
+
+from graph_agent.core._predict_internal.models import GoldenCase
 
 
 class BaseMockStrategy(ABC):
@@ -13,4 +19,7 @@ class BaseMockStrategy(ABC):
         """Return whether this strategy has data or behavior for ``phase_name``."""
 
 
-__all__ = ["BaseMockStrategy"]
+MockLLMParam = TypeAdapter(None | dict[str, Any] | Path | list[GoldenCase])
+
+
+__all__ = ["BaseMockStrategy", "MockLLMParam"]

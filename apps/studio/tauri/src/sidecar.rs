@@ -14,7 +14,7 @@ use std::{
 };
 
 const MAX_STARTUP_ATTEMPTS: usize = 3;
-const STDERR_RING_LINES: usize = 200;
+const STDERR_RING_LINES: usize = 50;
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 #[derive(Debug)]
@@ -68,7 +68,7 @@ impl SidecarLaunchConfig {
             site_packages: resource_root.join("vendor").join("site-packages"),
             resource_dir: resource_root.join("vendor").join("resources"),
             startup_attempts: MAX_STARTUP_ATTEMPTS,
-            health_timeout: Duration::from_secs(10),
+            health_timeout: Duration::from_secs(5),
             shutdown_timeout: Duration::from_secs(2),
         }
     }
@@ -415,7 +415,10 @@ mod tests {
     #[test]
     fn launch_config_uses_resource_root_layout() {
         let config = SidecarLaunchConfig::from_resource_root(Path::new("/app/resources"));
-        assert_eq!(config.backend_dir, Path::new("/app/resources/vendor/backend"));
+        assert_eq!(
+            config.backend_dir,
+            Path::new("/app/resources/vendor/backend")
+        );
         assert_eq!(
             config.site_packages,
             Path::new("/app/resources/vendor/site-packages")

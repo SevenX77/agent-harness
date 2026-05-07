@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.sevenx.skill-studio",
   "build": {
+    "beforeBuildCommand": "node scripts/download_runtime.js",
     "frontendDist": "../frontend/dist",
     "devUrl": "http://127.0.0.1:5173"
   },

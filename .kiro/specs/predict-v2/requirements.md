@@ -70,8 +70,9 @@ Predict V2 旨在通过"高保真业务流推演沙盒"达成以下业务价值�
 *   **Requirement 4.1: 混合预测模式分发 (Hybrid Prediction Dispatching)**
     **The graph_agent SDK shall** 扩展 `run_skill` 的 `mock_llm` 参数以支持以下多级分发逻辑：
     - `None` (默认): 触发 **P2 启发式存根**，确保流程不中断，而不是默认挂起；
-    - `dict` / `Path` / `List`: 触发 **P0 Golden Case** 注入路径；
-    - 内部接口支持 **P1 Copilot 高质量预测**：当 Copilot 在线时，优先于 P2 使用其生成的语义占位。
+    - `dict`: 触发 **P1 临时覆盖** (PM 单 Phase 手填 / Studio backend 调 Copilot 后注入)；
+    - `Path` / `List`: 触发 **P0 Golden Case** 注入路径 (磁盘加载 .golden.json)；
+    - 内部接口支持 **P1 Copilot 高质量预测**：Studio backend 在 `mock_llm=None` 时可选择先调 Copilot 拿 prediction 再通过 dict 通道传入。
 
 *   **Requirement 4.2: 内部接入原则 (Internal Access Principle)**
     **The Predictor Service shall** 通过 `graph_agent.core` 内部子模块或现有的 13-export 公共接口与引擎交互，严禁为了实现 Predict 而向 `graph_agent` 顶层暴露新的类或方法。

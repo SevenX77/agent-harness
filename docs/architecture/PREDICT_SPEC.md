@@ -1,9 +1,23 @@
-# PREDICT_SPEC (智能预测与模拟执行)
+# PREDICT_SPEC (智能预测与模拟执行) — **OBSOLETE**
 
 **版本**: 1.0
 **日期**: 2026-05-06
 **作者**: a2 Gemini (全局长远架构顾问)
-**状态**: 设计草案 (V2 路线图储备)
+**状态**: ⚠️ **OBSOLETE (2026-05-07)** — 本文档已被推翻,仅作历史参考
+
+## ⚠️ OBSOLETE 说明
+
+2026-05-06 → 05-07 user 跟 a2 Gemini 二轮辩论后认定本草案 framing 错位:
+- 本文档过度强调"不烧 Token + 低延迟"的成本优化卖点
+- 真实设计目的是"PM 看 skill 在 graph_agent 上的整个操作流程,从中分析问题、发现问题"——是**研发诊断工具**,不是省钱工具
+- 本文档把 Predict 限定为 `run_skill` 的 mock 参数模式,缺失 user 真正想要的两条核心能力:
+  1. **静态语义预审** (扫 SKILL.md prompt 是否覆盖 io.outputs 期望的判定逻辑)
+  2. **黄金用例回测** (`.backtests/{case}.golden.json` 闭环)
+
+**新 spec 位置**: `.kiro/specs/predict-v2/` (kiro 流程标准 4 件套: requirements.md / research.md / design.md / tasks.md)
+
+新 Predict 定义(取代本文档 §1 Executive Summary):
+> Predict 是通过"静态语义预审"拦截设计缺陷、通过"黄金用例回测"确保逻辑确定性的研发护城河。
 
 ---
 

@@ -2,9 +2,20 @@ import axios, { AxiosHeaders } from 'axios'
 
 export const API_BASE_URL = import.meta.env.VITE_STUDIO_API_BASE_URL ?? 'http://localhost:8787/api'
 
+let currentApiBaseURL = API_BASE_URL
+
 export const api = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: currentApiBaseURL,
 })
+
+export function configureApiBaseURL(baseURL: string): void {
+  currentApiBaseURL = baseURL
+  api.defaults.baseURL = baseURL
+}
+
+export function getApiBaseURL(): string {
+  return currentApiBaseURL
+}
 
 api.interceptors.request.use((config) => {
   const headers = AxiosHeaders.from(config.headers)
@@ -19,7 +30,7 @@ export async function fetcher<T>(url: string): Promise<T> {
 }
 
 export function wsUrl(path: string): string {
-  const base = new URL(API_BASE_URL, window.location.origin)
+  const base = new URL(currentApiBaseURL, window.location.origin)
   const protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
   const normalizedPath = path.startsWith('/') ? path : `/${path}`
   return `${protocol}//${base.host}${normalizedPath}`

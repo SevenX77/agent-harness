@@ -78,11 +78,13 @@ impl SidecarLaunchConfig {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct SidecarRuntimeConfig {
     pub port: u16,
+    #[serde(rename = "baseURL")]
     pub base_url: String,
+    #[serde(rename = "wsURL")]
     pub ws_url: String,
+    #[serde(rename = "resourceDir")]
     pub resource_dir: String,
 }
 
@@ -381,22 +383,31 @@ mod tests {
     }
 
     #[test]
-  fn shutdown_uses_expected_token_header() {
-    assert_eq!(shutdown_header_name(), "x-studio-shutdown-token");
-  }
+    fn shutdown_uses_expected_token_header() {
+        assert_eq!(shutdown_header_name(), "x-studio-shutdown-token");
+    }
 
-  #[test]
-  fn health_wait_times_out_for_closed_port() {
-    let port = allocate_loopback_port().expect("port");
-    assert!(!wait_for_health(port, Duration::from_millis(20)));
-  }
+    #[test]
+    fn health_wait_times_out_for_closed_port() {
+        let port = allocate_loopback_port().expect("port");
+        assert!(!wait_for_health(port, Duration::from_millis(20)));
+    }
 
-  #[test]
-  fn runtime_config_uses_dynamic_http_and_ws_urls() {
+    #[test]
+    fn runtime_config_uses_dynamic_http_and_ws_urls() {
         let config = SidecarRuntimeConfig::new(45678, Path::new("/tmp/studio-resource"));
         assert_eq!(config.base_url, "http://127.0.0.1:45678/api");
         assert_eq!(config.ws_url, "ws://127.0.0.1:45678/ws");
         assert_eq!(config.resource_dir, "/tmp/studio-resource");
+    }
+
+    #[test]
+    fn runtime_config_serializes_frontend_contract_field_names() {
+        let config = SidecarRuntimeConfig::new(45678, Path::new("/tmp/studio-resource"));
+        let json = serde_json::to_value(config).expect("serialize config");
+        assert_eq!(json["baseURL"], "http://127.0.0.1:45678/api");
+        assert_eq!(json["wsURL"], "ws://127.0.0.1:45678/ws");
+        assert_eq!(json["resourceDir"], "/tmp/studio-resource");
     }
 
     #[cfg(unix)]

@@ -116,7 +116,7 @@
     - e2e：由 T2.6 覆盖真实 Tauri dev 流程。
   - 依赖：T2.1、T2.2。
 
-- [ ] T2.4 Frontend runtime API base 注入与 WebSocket 同步
+- [x] T2.4 Frontend runtime API base 注入与 WebSocket 同步
   - 目标：让 React 在 Tauri 桌面环境从 Rust 获取 sidecar API base，并动态更新 HTTP/WebSocket client。
   - 估时：10h
   - 涉及文件：

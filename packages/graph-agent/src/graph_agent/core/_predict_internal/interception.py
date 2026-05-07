@@ -19,6 +19,7 @@ from graph_agent.callbacks.base import Callback
 from graph_agent.config.llm_config import ResolvedRole
 from graph_agent.core._predict_internal.strategy import BaseMockStrategy, MockedSource
 from graph_agent.core._predict_internal.stub import generate_heuristic_stub
+from graph_agent.core._predict_internal.tracing import record_mock_source
 from graph_agent.models.gateway_chat_model import GatewayChatModel
 
 
@@ -147,6 +148,7 @@ class PredictGatewayChatModel(GatewayChatModel):
 
     def _mock_metadata(self, source: MockedSource) -> dict[str, object]:
         now = datetime.now(UTC)
+        record_mock_source(self._predict_phase_name, source)
         return {
             "id": f"mock_id_{source}_{_safe_identifier(self._predict_phase_name)}_{time.time_ns()}",
             "created": int(now.timestamp()),

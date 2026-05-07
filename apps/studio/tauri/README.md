@@ -44,6 +44,7 @@ cargo tauri dev      # 或 ~/.npm-global/bin/tauri dev
 ```bash
 cd apps/studio/tauri && node scripts/download_runtime.js  # T2: 下载并校验 portable Python
 cd ../backend && python scripts/build_vendor.py            # T2: pip install --target ../tauri/vendor/site-packages
+cd ../tauri && node scripts/sync_resources.js              # T2: 同步 backend/skills/config resources
 cd ../frontend && npm run build  # 先生成 dist/
 cd ../tauri && cargo tauri build      # 输出到 target/release/bundle/
 ```
@@ -51,11 +52,11 @@ cd ../tauri && cargo tauri build      # 输出到 target/release/bundle/
 Tauri sidecar 启动 backend 时使用 bundled Python 与 vendored dependencies:
 
 ```bash
-cd apps/studio/backend
-PYTHONPATH="../tauri/vendor/site-packages:$PWD" \
-STUDIO_RESOURCE_DIR="../tauri/vendor/resources" \
+cd apps/studio/tauri
+PYTHONPATH="vendor/site-packages:vendor/backend" \
+STUDIO_RESOURCE_DIR="vendor/resources" \
 STUDIO_SHUTDOWN_TOKEN="<runtime-token>" \
-python -m uvicorn app.main:app --host 127.0.0.1 --port <dynamic-port>
+vendor/python/<target-triple>/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port <dynamic-port>
 ```
 
 ## T2.1 Portable Python Runtime

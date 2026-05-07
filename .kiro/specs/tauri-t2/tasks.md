@@ -145,7 +145,7 @@
     - e2e：由 T2.6 覆盖桌面真实链路。
   - 依赖：T2.3 可先并行接口约定；最终集成依赖 T2.3 command/event。
 
-- [ ] T2.5 Tauri bundle resources 与 dev/build 流程串联
+- [x] T2.5 Tauri bundle resources 与 dev/build 流程串联
   - 目标：把 portable Python runtime、backend 代码和依赖纳入 Tauri dev/build 可定位的资源布局。
   - 估时：14h
   - 涉及文件：

@@ -4,4 +4,9 @@
 /gen/schemas
 /vendor/downloads/
 /vendor/python/
+/vendor/python_runtime/
 /vendor/site-packages/
+/vendor/backend/
+/vendor/resources/
+/python_runtime/*
+!/python_runtime/.keep

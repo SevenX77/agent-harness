@@ -6,6 +6,8 @@ import os
 from collections.abc import Mapping
 from pathlib import Path
 
+from app.core import paths
+
 STUDIO_BACKEND_DIR = Path(__file__).resolve().parents[2]
 REPO_ROOT = STUDIO_BACKEND_DIR.parents[2]
 
@@ -23,16 +25,15 @@ CORS_ORIGINS = [
 
 
 def resource_dir_from_env(environ: Mapping[str, str]) -> Path:
-    raw = environ.get("STUDIO_RESOURCE_DIR")
-    return Path(raw).resolve() if raw else REPO_ROOT
+    return paths.resource_dir_from_env(environ, REPO_ROOT)
 
 
 def default_skills_dir(resource_dir: Path) -> Path:
-    return resource_dir / "skills"
+    return paths.default_skills_dir(resource_dir)
 
 
 def default_workspaces_dir(resource_dir: Path) -> Path:
-    return resource_dir / "workspaces"
+    return paths.default_workspaces_dir(resource_dir)
 
 
 RESOURCE_DIR = resource_dir_from_env(os.environ)

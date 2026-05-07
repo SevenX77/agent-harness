@@ -22,6 +22,7 @@ from graph_agent.core._predict_internal.strategy import (
     HeuristicStubStrategy,
     MockStrategy,
 )
+from graph_agent.core._predict_internal.tracing import PredictTracingCallback
 
 from app.services.diagnostic_export import export_predict_diagnostics
 from app.services.skills import ensure_workspace_skill_dir
@@ -62,13 +63,17 @@ class PredictorService:
         skill_dir = ensure_workspace_skill_dir(skill_id)
         skill_path = skill_dir / "SKILL.md"
         self._warn_on_stale_golden_hashes(strategy, current_hashes or {})
+        tracing_callback = PredictTracingCallback()
+        tracing_callback.on_chain_start(metadata={})
 
         raw_result = self._run_skill(
             skill_path,
             mock_llm=mock_param,
             unattended=True,
+            callbacks=[tracing_callback],
             **(input_data or {}),
         )
+        raw_result = _attach_predict_trace(raw_result, tracing_callback.phases)
         actual_path = _actual_path_from_raw(raw_result)
         if _is_p2_strategy(strategy):
             self._raise_if_deadlocked(actual_path)
@@ -177,6 +182,20 @@ def _actual_path_from_raw(raw_result: Any) -> list[str]:
         return [str(item) for item in raw_path]
     phases = _phase_records_from_raw(raw_result)
     return [phase.phase_name for phase in phases]
+
+
+def _attach_predict_trace(raw_result: Any, trace_phases: list[dict[str, Any]]) -> Any:
+    if not trace_phases:
+        return raw_result
+    if isinstance(raw_result, dict):
+        context = raw_result.get("context", raw_result)
+        if isinstance(context, dict):
+            context.setdefault("predict_trace", trace_phases)
+        return raw_result
+    context = getattr(raw_result, "context", None)
+    if isinstance(context, dict):
+        context.setdefault("predict_trace", trace_phases)
+    return raw_result
 
 
 def _context_from_raw(raw_result: Any) -> dict[str, Any]:

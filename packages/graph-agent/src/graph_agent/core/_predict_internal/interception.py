@@ -6,21 +6,23 @@ import json
 import time
 from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from langchain_core.callbacks.manager import (
     AsyncCallbackManagerForLLMRun,
     CallbackManagerForLLMRun,
 )
+from langchain_core.language_models.base import LanguageModelInput
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
+from langchain_core.runnables import Runnable
 
 from graph_agent.callbacks.base import Callback
 from graph_agent.config.llm_config import ResolvedRole
 from graph_agent.core._predict_internal.strategy import BaseMockStrategy, MockedSource
 from graph_agent.core._predict_internal.stub import generate_heuristic_stub
 from graph_agent.core._predict_internal.tracing import record_mock_source
-from graph_agent.models.gateway_chat_model import GatewayChatModel
+from graph_agent.models.gateway_chat_model import GatewayChatModel, ToolSpec, _normalise_tool
 
 
 class PredictGatewayChatModel(GatewayChatModel):
@@ -100,6 +102,41 @@ class PredictGatewayChatModel(GatewayChatModel):
             ),
             generation_info=metadata,
         )
+
+    def bind_tools(
+        self,
+        tools: Sequence[ToolSpec],
+        *,
+        tool_choice: str | None = None,
+        **kwargs: Any,
+    ) -> Runnable[LanguageModelInput, AIMessage]:
+        """Keep Predict interception active after LangChain binds phase tools."""
+
+        bound = PredictGatewayChatModel(
+            self.role_name,
+            self.resolved_role,
+            mock_strategy=self.mock_strategy,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            callbacks=self.event_callbacks,
+            phase_name=self.phase_name,
+            probe_before_call=self.probe_before_call,
+            thinking_enabled=self.thinking_enabled,
+            bound_tools=tuple(_normalise_tool(tool) for tool in tools),
+            tool_choice=tool_choice,
+            tool_kwargs={key: cast(object, value) for key, value in kwargs.items()},
+            name=self.name,
+            cache=self.cache,
+            verbose=self.verbose,
+            tags=self.tags,
+            metadata=self.metadata,
+            custom_get_token_ids=self.custom_get_token_ids,
+            rate_limiter=self.rate_limiter,
+            disable_streaming=self.disable_streaming,
+            output_version=self.output_version,
+            profile=self.profile,
+        )
+        return cast(Runnable[LanguageModelInput, AIMessage], bound)
 
     def _select_mock_payload(self) -> tuple[dict[str, Any], MockedSource]:
         phase_name = self._predict_phase_name

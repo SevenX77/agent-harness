@@ -259,7 +259,7 @@
     - e2e：由 P-T10 覆盖。
   - 依赖：P-T7、P-T8。
 
-- [ ] P-T10 Predict V2 e2e + 集成测试收敛
+- [x] P-T10 Predict V2 e2e + 集成测试收敛
   - 目标：建立 Predict V2 完成标准，覆盖 P2、P1、P0 三模式、死锁防护、Path Diff 失败和真实 Run 共存。
   - 估时：12h
   - 涉及文件：

@@ -218,3 +218,24 @@ def test_astream_yields_single_complete_chunk() -> None:
     assert _payload(chunk.message.content) == {"text": "golden"}
     assert chunk.message.response_metadata["mocked_source"] == "golden_case"
     assert chunk.message.chunk_position == "last"
+
+
+def test_bind_tools_preserves_predict_gateway_and_mock_strategy() -> None:
+    strategy = MemoryMockStrategy(golden={"draft": {"text": "golden"}})
+    model = _model(strategy)
+
+    bound = model.bind_tools(
+        [
+            {
+                "name": "finish_task",
+                "description": "finish",
+                "parameters": {"type": "object", "properties": {}},
+            }
+        ]
+    )
+
+    assert isinstance(bound, PredictGatewayChatModel)
+    assert bound.mock_strategy is strategy
+    result = bound._generate([HumanMessage(content="hi")])
+    assert result.llm_output is not None
+    assert result.llm_output["mocked_source"] == "golden_case"

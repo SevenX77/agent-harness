@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "source": "astral-sh/python-build-standalone",
+  "tag": "20260414",
+  "python_version": "3.12.13",
+  "artifacts": {
+    "x86_64-apple-darwin": {
+      "filename": "cpython-3.12.13+20260414-x86_64-apple-darwin-install_only_stripped.tar.gz",
+      "variant": "install_only_stripped",
+      "sha256": "bf9e2eb4834272cae196e4a8473d48f15878114cedbc278fe53cd85ab28dc0ed",
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260414/cpython-3.12.13%2B20260414-x86_64-apple-darwin-install_only_stripped.tar.gz"
+    },
+    "aarch64-apple-darwin": {
+      "filename": "cpython-3.12.13+20260414-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "variant": "install_only_stripped",
+      "sha256": "38f71c324ae14ee5ef844c62e06b6faa5ba3040c898b4c1d03b8b6e88794356b",
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260414/cpython-3.12.13%2B20260414-aarch64-apple-darwin-install_only_stripped.tar.gz"
+    },
+    "x86_64-unknown-linux-gnu": {
+      "filename": "cpython-3.12.13+20260414-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "variant": "install_only_stripped",
+      "sha256": "3c3427e5628648478da2aa227472c350475a68bc58109f1b43849636a4aecb89",
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260414/cpython-3.12.13%2B20260414-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
+    },
+    "aarch64-unknown-linux-gnu": {
+      "filename": "cpython-3.12.13+20260414-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "variant": "install_only_stripped",
+      "sha256": "953dcf67ff395d5baff77ef60bc852aaadad4c169e9b8d65dbc40ab9461a13e3",
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260414/cpython-3.12.13%2B20260414-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz"
+    },
+    "x86_64-pc-windows-msvc": {
+      "filename": "cpython-3.12.13+20260414-x86_64-pc-windows-msvc-install_only.tar.gz",
+      "variant": "install_only",
+      "fallback_reason": "Windows runtime is pinned to install_only for initial T2 portability.",
+      "sha256": "c5a9e011e284c49c48106ca177342f3e3f64e95b4c6652d4a382cc7c9bb1cc46",
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260414/cpython-3.12.13%2B20260414-x86_64-pc-windows-msvc-install_only.tar.gz"
+    }
+  }
+}

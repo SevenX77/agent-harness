@@ -42,9 +42,27 @@ cargo tauri dev      # 或 ~/.npm-global/bin/tauri dev
 ## Build (生产)
 
 ```bash
+cd apps/studio/tauri && node scripts/download_runtime.js  # T2: 下载并校验 portable Python
 cd apps/studio/frontend && npm run build  # 先生成 dist/
 cd ../tauri && cargo tauri build      # 输出到 target/release/bundle/
 ```
+
+## T2.1 Portable Python Runtime
+
+T2 使用 Astral `python-build-standalone` 的 portable CPython distribution, 不采用
+PyInstaller/Nuitka，也不把 Python 解释器提交进仓库。runtime 由
+`python-runtime.lock.json` 固定到 CPython `3.12.13` / release tag `20260414`。
+
+```bash
+cd apps/studio/tauri
+node scripts/download_runtime.js
+vendor/python/$(node -e "console.log(require('./scripts/download_runtime').hostTargetTriple())")/bin/python --version
+```
+
+脚本按 target triple 选择 artifact，macOS/Linux 优先 `install_only_stripped`，Windows
+x86_64 固定 `install_only` fallback。下载后本地重新计算 SHA256；URL 或 hash 与 lock
+不一致会 fail closed 并阻断后续 Tauri build。动态产物写入 `vendor/downloads/` 与
+`vendor/python/`，由 `.gitignore` 排除。
 
 T3 阶段会在 GitHub Actions 加 macOS / Windows / Linux 的构建矩阵。
 

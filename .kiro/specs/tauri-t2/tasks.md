@@ -28,7 +28,7 @@
 
 ## Sub-tasks
 
-- [ ] T2.1 Python runtime artifact manifest + 下载校验脚本
+- [x] T2.1 Python runtime artifact manifest + 下载校验脚本
   - 目标：建立可复现的 Astral portable Python runtime 获取流程，按 OS/arch 下载并校验 `python-build-standalone` artifact。
   - 估时：12h
   - 涉及文件：

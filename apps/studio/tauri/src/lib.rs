@@ -34,8 +34,16 @@ pub fn run() {
                 )?;
             }
             if std::env::var("STUDIO_TAURI_DISABLE_SIDECAR").as_deref() != Ok("1") {
-                let config =
-                    sidecar::SidecarLaunchConfig::from_tauri_dir(sidecar::default_tauri_dir());
+                let resolved_resource_root = app
+                    .path()
+                    .resource_dir()
+                    .unwrap_or_else(|_| sidecar::default_tauri_dir());
+                let resource_root = if resolved_resource_root.join("vendor").exists() {
+                    resolved_resource_root
+                } else {
+                    sidecar::default_tauri_dir()
+                };
+                let config = sidecar::SidecarLaunchConfig::from_resource_root(resource_root);
                 let manager = sidecar::SidecarManager::start(config)
                     .map_err(|err| format!("failed to start Python sidecar: {err}"))?;
                 app.manage(manager);

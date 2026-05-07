@@ -60,16 +60,13 @@ pub struct SidecarLaunchConfig {
 }
 
 impl SidecarLaunchConfig {
-    pub fn from_tauri_dir(tauri_dir: impl AsRef<Path>) -> Self {
-        let tauri_dir = tauri_dir.as_ref();
+    pub fn from_resource_root(resource_root: impl AsRef<Path>) -> Self {
+        let resource_root = resource_root.as_ref();
         Self {
-            python: python_executable_path(tauri_dir),
-            backend_dir: tauri_dir
-                .parent()
-                .expect("tauri dir must live under apps/studio")
-                .join("backend"),
-            site_packages: tauri_dir.join("vendor").join("site-packages"),
-            resource_dir: tauri_dir.join("vendor").join("resources"),
+            python: python_executable_path(resource_root),
+            backend_dir: resource_root.join("vendor").join("backend"),
+            site_packages: resource_root.join("vendor").join("site-packages"),
+            resource_dir: resource_root.join("vendor").join("resources"),
             startup_attempts: MAX_STARTUP_ATTEMPTS,
             health_timeout: Duration::from_secs(10),
             shutdown_timeout: Duration::from_secs(2),
@@ -202,10 +199,7 @@ pub fn shutdown_header_name() -> &'static str {
 }
 
 pub fn python_executable_path(tauri_dir: &Path) -> PathBuf {
-    let runtime_dir = tauri_dir
-        .join("vendor")
-        .join("python")
-        .join(host_target_triple());
+    let runtime_dir = python_runtime_dir(tauri_dir);
     if cfg!(windows) {
         runtime_dir.join("python.exe")
     } else {
@@ -216,6 +210,23 @@ pub fn python_executable_path(tauri_dir: &Path) -> PathBuf {
             runtime_dir.join("bin").join("python")
         }
     }
+}
+
+pub fn python_runtime_dir(resource_root: &Path) -> PathBuf {
+    for candidate in [
+        resource_root.join("vendor").join("python"),
+        resource_root.join("vendor").join("python_runtime"),
+        resource_root.join("python_runtime"),
+    ] {
+        let runtime_dir = candidate.join(host_target_triple());
+        if runtime_dir.exists() {
+            return runtime_dir;
+        }
+    }
+    resource_root
+        .join("vendor")
+        .join("python")
+        .join(host_target_triple())
 }
 
 fn host_target_triple() -> &'static str {
@@ -399,6 +410,20 @@ mod tests {
         assert_eq!(config.base_url, "http://127.0.0.1:45678/api");
         assert_eq!(config.ws_url, "ws://127.0.0.1:45678/ws");
         assert_eq!(config.resource_dir, "/tmp/studio-resource");
+    }
+
+    #[test]
+    fn launch_config_uses_resource_root_layout() {
+        let config = SidecarLaunchConfig::from_resource_root(Path::new("/app/resources"));
+        assert_eq!(config.backend_dir, Path::new("/app/resources/vendor/backend"));
+        assert_eq!(
+            config.site_packages,
+            Path::new("/app/resources/vendor/site-packages")
+        );
+        assert_eq!(
+            config.resource_dir,
+            Path::new("/app/resources/vendor/resources")
+        );
     }
 
     #[test]

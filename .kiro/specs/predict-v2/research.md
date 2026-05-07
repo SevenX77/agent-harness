@@ -3,21 +3,24 @@
 > 本文档为 Predict V2 设计提供落地调研依据。
 > 向上承接 `requirements.md`，向下指导 `design.md` 的技术选型。
 
-## 1. LangGraph interrupt / Suspension 机制
+## 1. LLM 拦截后填充机制 (Filling Strategy on Interception)
 
 **现状调研**
-LangGraph 在近期版本中引入了原生的 `interrupt()` 函数与 `NodeInterrupt` 异常，并在 compiled graph 层面支持 `interrupt_before` 和 `interrupt_after`。原生机制依赖底层的 Checkpointer（如 `MemorySaver` 或 `SqliteSaver`）保存状态，通过抛出异常让 graph 执行挂起，调用方可通过传入 `Command(resume=...)` 恢复图的执行 (见 LangGraph 官方文档 Checkpoints & Human-in-the-loop)。
+根据 Round 8 新 framing，Predict 不再因遇到 LLM 节点而默认挂起。当在 `GatewayChatModel._generate` 等钩子处拦截外部 LLM 请求后，系统需要根据 Req 4.1 优先级（P0/P1/P2），直接构造并返回包含 Mock 数据的 `ChatResult` 对象，以实现控制流贯通，继续执行下游的所有 LogicPhase。
 
 **候选对比**
-*   **A. LangGraph 原生 `interrupt()` + Checkpoint**：符合框架原生范式，可无缝 resume。缺点是强依赖 Checkpoint 机制，如果在无持久化 Checkpoint 的内存模式下运行可能丢失状态，且与我们 `GraphAgentHarness` 现有的状态流转契约可能存在偶发冲突。
-*   **B. 抛出自定义 `SuspensionException` (外层拦截)**：在 LLM 调用前抛出特定异常，由 `run_skill` 外层 catch 并构建 `WorkflowResult(status="suspended")` 返回。优点是实现极简，不碰 LangGraph 内部拓扑和状态机；缺点是无法原生 "resume"，必须将挂起结果作为新的 Golden Case 注入并从头 Replay。
+*   **A. 返回构造好的 `ChatResult` 对象**：在 `_generate` 钩子内部，直接依据优先级注入对应数据，并将其包装为标准 `ChatResult(generations=[...])` 返回，完全绕过真实的远端 HTTP 请求。
+*   **B. Monkey-patch 整个 `GatewayChatModel`**：动态替换模型的 `_generate` 乃至 `_agenerate` 方法。
+*   **C. 在 ModelResolver 层注入 Fake Provider**：配置并实例化一个类似于 `FakeListChatModel` 的对象。
+
+*注：在旧 framing 中推荐的抛出 `SuspensionException` / LangGraph `interrupt()` 机制因不符合“确保流程不中断”的原则，已被淘汰。*
 
 **推荐 + 理由**
-**推荐方案 B (自定义 `SuspensionException`)。**
-由于 `requirements.md` Req 1.2 要求的是“挂起后暴露给 PM 审阅”，且后续是保存为 Golden Case 并开启 Backtest (Req 3.1)，这意味着我们不需要真正的“线程级断点续传（Resume）”，而是需要“确定性的 Replay（重播）”。抛异常拦截执行流足以满足，且工程最简单。
+**推荐方案 A (直接返回构造好的 `ChatResult` 对象)。**
+这种方式在当前执行栈最底层进行截断和伪造返回，实现最为直接、清晰，且完全不需要碰 13-export ABI，做到了最好的隔离。
 
 **未知 + 风险**
-挂起时的局部变量 (Local Context) 是否能被外层 `TracingCallback` 完整捕获并输出。
+在构造 `ChatResult` 时，如何合理填充相关的元字段（如 `id`, `created`, `usage` 等）以防止框架上层解析异常；此外，如果框架期待的是 Streaming 模式的 Chunk Iterator，直接返回整块数据是否需要额外适配。
 
 ---
 
@@ -35,7 +38,7 @@ LangGraph 在近期版本中引入了原生的 `interrupt()` 函数与 `NodeInte
 
 **推荐 + 理由**
 **推荐方案 B (`GatewayChatModel._generate` 钩子)。**
-它在 LangChain 的最后一层，既不破坏 13-export ABI，又不修改图结构。在此处拦截，可以拿到最完整的 `LanguageModelInput`，直接返回构造好的 `ChatResult` (Mock 数据)，或者抛出 `SuspensionException`。
+它在 LangChain 的最后一层，既不破坏 13-export ABI，又不修改图结构。在此处拦截，可以拿到最完整的 `LanguageModelInput`，直接返回构造好的启发式存根 `ChatResult` (按 Req 4.1 P0/P1/P2 优先级)，从而实现拦截后注入填充，确保流程不中断。
 
 **未知 + 风险**
 Streaming 模式下，注入 Mock 数据是否需要伪造一个完整的 AsyncIterator 来满足上层对于 Streaming chunk 的消费预期。
@@ -45,7 +48,7 @@ Streaming 模式下，注入 Mock 数据是否需要伪造一个完整的 AsyncI
 ## 3. mock_llm 多态参数 dispatch 模式
 
 **现状调研**
-`run_skill` 将扩展接受多模态的 `mock_llm` 参数。Python 处理 `Union` 类型的常用模式包括 `functools.singledispatch`、Pattern Matching (Python 3.10+) 和 Pydantic 的 Discriminator。
+`run_skill` 将扩展接受多模态的 `mock_llm` 参数 `Union[None, dict, Path, List[GoldenCase]]`。在新 framing 下，`None` 默认值将触发 **P2 启发式存根**，而其他类型触发 P0 Golden Case 注入路径。Python 处理 `Union` 类型的常用模式包括 `functools.singledispatch`、Pattern Matching (Python 3.10+) 和 Pydantic 的 Discriminator。
 
 **候选对比**
 *   **A. `functools.singledispatch`**：标准库提供，基于类型分发。缺点是对于 `List[GoldenCase]` 这种带泛型的类型注解支持极弱。
@@ -108,11 +111,11 @@ Copilot 需要消费 Predict 产生的执行追踪。业界现有的 Schema 比�
 **候选对比**
 *   **A. LangSmith Run Schema**：字段详尽，但携带了太多关于 Token、Latency、Server IP 等在 Predict 模式下无用的信息。
 *   **B. OpenTelemetry Trace**：过于底层，难以表达 `io.outputs` Schema 这种高阶业务概念。
-*   **C. 极简业务扁平 Schema (类似 W3C Trace 变体)**：仅保留：`trace_id`, `phases: List[PhaseRecord]`。其中 `PhaseRecord` 包含 `phase_name`, `type` (logic/llm), `inputs`, `outputs`, `mocked: bool`。
+*   **C. 极简业务扁平 Schema (类似 W3C Trace 变体)**：仅保留：`trace_id`, `phases: List[PhaseRecord]`。其中 `PhaseRecord` 包含 `phase_name`, `type` (logic/llm), `inputs`, `outputs`, `mocked_source: str | None` (取值 `golden_case` / `copilot` / `heuristic_stub` / `manual` / `null`)。
 
 **推荐 + 理由**
 **推荐方案 C (极简业务扁平 Schema)。**
-因为下游消费者（内置 Copilot）只需要业务流的高保真切片来进行语义推断。参考 LangSmith 的结构，但进行深度的字段裁剪，去掉所有耗时/网络/资源统计，只留强业务字段。
+因为下游消费者（内置 Copilot）只需要业务流的高保真切片来进行语义推断。参考 LangSmith 的结构，但进行深度的字段裁剪，去掉所有耗时/网络/资源统计，只留强业务字段，并与 Req 5.1 来源对齐。
 
 **未知 + 风险**
 大体积的 `inputs`/`outputs`（例如长文本、大数组）可能会导致序列化出的 JSON 突破 Copilot 的上下文窗口上限，需考虑是否引入截断机制 (Truncation)。
@@ -122,31 +125,31 @@ Copilot 需要消费 Predict 产生的执行追踪。业界现有的 Schema 比�
 ## 7. 副作用透明性 + 循环死锁
 
 **现状调研**
-v1.0 的 `PREDICT_SPEC` 为了防止 LLM 伪造假数据导致路由陷入死循环，强制引入了 `max_iterations=5` 的 hack 机制。在 v2 中，LLM 节点默认挂起，或注入完全确定的 Golden 数据。
+在新的 P2 启发式存根框架下，因存根是确定性的结构化占位符（如固定返回值 `category="C"`），某些基于 LLM 输出路由判断的 Graph 可能会无限期走入同一分支。
 
 **候选对比 (循环死锁)**
-*   由于注入的数据是确定性的 (Golden Case 记录了某次真实成功的运行载荷)，这意味着如果该载荷在真实运行时能让 Graph 跳出循环，那么在 Backtest 时也 **必定** 能跳出循环。
-*   LLM 挂起模式下，遇到 LLM 直接就 `SuspensionException` 停机了，根本无法产生循环。
+*   **A. 废除 `max_iterations=5` hack**：旧推荐。在 Backtest 模式下，因注入数据代表完整成功路径，此方案安全；但在 P2 存根模式下，存在高死循环风险。
+*   **B. 引入专门的“启发式存根迭代上限”**：取代粗暴的图执行限制，监控针对同一路由的反复访问次数，超过阈值则退出并暴露问题。
 
 **候选对比 (副作用透明性)**
 *   `LogicPhase` 如果有写库、发邮件操作，它无法被自动拦截。需要通过约定的观测点暴露。
 
 **推荐 + 理由**
-**死锁推荐：废除 `max_iterations=5` hack。**
-V2 的“挂起 + 确定性注入”从理论上根除了 LLM 随机性导致的死循环。废除 hack 能保持代码的纯粹性。对于纯 `LogicPhase` 代码本身的死循环 Bug（死 while 循环），那是业务代码故障，Predict 不需要为其兜底。
+**死锁推荐：废除原 `max_iterations=5` hack，并为 P2 存根模式引入专用的“启发式存根迭代/路由上限”。**
+在注入 Golden Case (P0) 时因数据真实性有保证可以放心放开限制；而在 P2 模式下，确定性的假数据极易产生逻辑卡死，引入专门的路由循环检测可以作为安全网，既保证后续节点覆盖，又不陷入死循环。
 **副作用透明性推荐：** 在 `TracingCallback` 中新增标准事件 `on_side_effect(action: str, payload: dict)`，建议 (但不强制) `LogicPhase` 的开发者在执行写库等危险操作前调用该回调，实现界面着色。
 
 **未知 + 风险**
-遗留包含假数据生成的测试 Skill 如果依赖了 `max_iterations=5` 来终止，移除后可能会超时。这属于预期内的业务修正范围。
+如果真实的图拓扑本身需要合法的高频循环，如何区分“正常的多次迭代”和“由于假数据引发的死锁”将是一个挑战。
 
 ---
 
 ## 总结
 
 ### 跨主题关键 Trade-off
-*   **拦截点 (主题2) vs 挂起机制 (主题1)**：选择在 `GatewayChatModel._generate` (主题2) 进行拦截，迫使我们必须采用抛出异常 (主题1方案B) 的方式来中断 LangGraph 控制流。因为底层的拦截点无法轻易访问到最顶层 LangGraph 的原生 `interrupt()` Command。这个 Trade-off 用丧失“原生断点续传能力”换取了“绝对的 13-export ABI 隔离”，符合我们业务目标（只需 Replay，无需 Resume）。
+*   **拦截点 (主题2) vs 注入填充机制 (主题1)**：选择在 `GatewayChatModel._generate` (主题2) 进行拦截，并直接返回构造的 ChatResult (主题1方案A)，从而确保流程贯通跑穿所有下游 Logic。这一调整消除了抛出异常导致的挂起现象，牺牲了部分动态状态捕获，但极大满足了“提前扫清 Logic 障碍”的业务目标。
 
 ### Research-driven Outline 修订建议 (针对 Round 1 Outline)
-1.  **明确拦截点定义**：Outline 第二节需要明确拦截点具体为 `GatewayChatModel._generate`，而不是 `ModelResolver` 替换。`ModelResolver` 太靠前，获取不到动态的 Runtime Prompt。
-2.  **废弃 `max_iterations=5`**：在 Outline 中必须补充一节（或合并到 Backtest 章节），显式宣告因 Deterministic Injection 原理，废除 V1.0 的强制迭代上限限制。
+1.  **明确拦截点定义**：Outline 第二节需要明确拦截点具体为 `GatewayChatModel._generate`，以便获取动态 Runtime Prompt 并注入 `ChatResult`。
+2.  **细化死循环防护机制**：Outline 必须补充一节说明，废除 V1.0 的强制 `max_iterations=5`，但在 P2 启发式存根模式下启用专门的“路由死循环上限防护”。
 3.  **细化 Hash 算法边界**：Outline 第四节需补充：Hash 算法**必须且仅能**包含经过空白符规范化 (Normalization) 的字符串，绝不可对原始文本直哈希。

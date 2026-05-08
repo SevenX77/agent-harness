@@ -23,7 +23,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from graph_agent.callbacks.base import Callback  # noqa: E402
 from graph_agent.callbacks.events import HeartbeatEvent  # noqa: E402
-from graph_agent.core.harness import _HeartbeatPulser  # noqa: E402
+from graph_agent.core import harness as harness_mod  # noqa: E402
+from graph_agent.core.harness import GraphAgentHarness, _HeartbeatPulser  # noqa: E402
+from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState  # noqa: E402
+from graph_agent.core.types import Phase  # noqa: E402
 
 
 class _RecordingCallback(Callback):
@@ -85,12 +88,13 @@ class TestHeartbeatPulser:
         assert pulser._thread is None
 
     def test_stop_joins_thread(self) -> None:
-        """After ``stop``, the worker thread must have exited."""
+        """After ``stop`` + ``join``, the worker thread must have exited."""
         pulser = _HeartbeatPulser(callbacks=[], interval_seconds=10.0)
         pulser.start()
         thread = pulser._thread
         assert thread is not None
         pulser.stop()
+        pulser.join(timeout=1.0)
         # Thread handle cleared after join.
         assert pulser._thread is None
         assert not thread.is_alive()
@@ -154,3 +158,67 @@ class TestHeartbeatPulser:
         # Both callbacks see the same events — ordering is safe because
         # ``_safe_emit_event`` iterates sequentially.
         assert len(good.events) >= 1
+
+    def test_harness_run_and_resume_stop_then_join_heartbeat(
+        self,
+        monkeypatch: Any,
+    ) -> None:
+        """run/resume finally paths stop the daemon pulser, then join with timeout."""
+        calls: list[str] = []
+
+        class FakePulser:
+            def __init__(self, callbacks: list[Callback]) -> None:
+                self._thread = threading.Thread(target=lambda: None, daemon=True)
+                self.current_phase: str | None = None
+
+            def start(self) -> None:
+                calls.append("start")
+
+            def stop(self) -> None:
+                calls.append("stop")
+
+            def join(self, timeout: float | None = None) -> None:
+                calls.append(f"join:{timeout}")
+
+        class FakeGraphBuilder:
+            def recursion_limit(self) -> int:
+                return 25
+
+        class FakeGraph:
+            def invoke(self, state: WorkflowState, *, config: dict[str, Any]) -> WorkflowState:
+                return state
+
+        monkeypatch.setattr(harness_mod, "_HeartbeatPulser", FakePulser)
+
+        harness = GraphAgentHarness.__new__(GraphAgentHarness)
+        harness.phases = [Phase(name="phase_a", requires_llm=False)]
+        harness.callbacks = []
+        harness._io_config = None
+        harness._context_mapping = None
+        harness._skill_dir = None
+        harness._resolver = None
+        harness._checkpointer = None
+        harness._graph_builder = FakeGraphBuilder()
+        harness._graph = FakeGraph()
+
+        state = WorkflowState(
+            data=BusinessData.model_validate({"input": "x"}),
+            flow=FrameworkState(
+                thread_id="thread-1",
+                run_id="run-1",
+                current_phase="phase_a",
+            ),
+            messages=[],
+        )
+
+        harness.run(initial_context={"input": "x"}, thread_id="thread-1")
+        harness.resume(state, "ok", thread_id="thread-1")
+
+        assert calls == [
+            "start",
+            "stop",
+            "join:1.0",
+            "start",
+            "stop",
+            "join:1.0",
+        ]

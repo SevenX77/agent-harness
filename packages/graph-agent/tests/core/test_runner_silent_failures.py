@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from graph_agent.callbacks.events import ThreadCleanedUpEvent
 from graph_agent.core import runner
 from graph_agent.core.exceptions import LoaderError
+from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
 
 
 class _FailingRunHarness:
@@ -23,19 +25,55 @@ class _FailingDeleteThreadCheckpointer:
         raise OSError(f"delete failed for {thread_id}")
 
 
+class _RecordingDeleteThreadCheckpointer:
+    def __init__(self) -> None:
+        self.deleted_thread_ids: list[str] = []
+
+    def list(self, config: dict[str, Any]) -> list[object]:
+        assert config == {"configurable": {"thread_id": "thread-1"}}
+        return [object(), object()]
+
+    def delete_thread(self, thread_id: str) -> None:
+        self.deleted_thread_ids.append(thread_id)
+
+
+class _RecordingCallback:
+    def __init__(self) -> None:
+        self.events: list[Any] = []
+
+    def on_event(self, event: Any) -> None:
+        self.events.append(event)
+
+
+def _final_state() -> WorkflowState:
+    return WorkflowState(
+        data=BusinessData.model_validate({"result": "ok"}),
+        flow=FrameworkState(
+            metrics={"total_input_tokens": 0, "total_output_tokens": 0},
+            trace_path=None,
+        ),
+        messages=[],
+    )
+
+
 class _SuccessfulHarness:
     phases: list[object] = []
     callbacks: list[object] = []
     _checkpointer = _FailingDeleteThreadCheckpointer()
 
-    def run(self, **kwargs: Any) -> dict[str, Any]:
-        return {
-            "context": {},
-            "messages": [],
-            "current_phase": "done",
-            "retry_counts": {},
-            "metrics": {"total_input_tokens": 0, "total_output_tokens": 0},
-        }
+    def run(self, **kwargs: Any) -> WorkflowState:
+        return _final_state()
+
+
+class _SuccessfulRecordingHarness:
+    phases: list[object] = []
+
+    def __init__(self, checkpointer: _RecordingDeleteThreadCheckpointer) -> None:
+        self.callbacks: list[object] = []
+        self._checkpointer = checkpointer
+
+    def run(self, **kwargs: Any) -> WorkflowState:
+        return _final_state()
 
 
 def _write_skill(tmp_path: Path) -> Path:
@@ -73,9 +111,10 @@ def test_run_id_cleanup_failure_raises_persistence_error(
     assert "run_id cleanup failed: permission denied" in result.error
 
 
-def test_checkpoint_cleanup_failure_raises_persistence_error(
+def test_checkpoint_cleanup_failure_warns_and_keeps_success(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     skill_path = _write_skill(tmp_path)
 
@@ -88,9 +127,57 @@ def test_checkpoint_cleanup_failure_raises_persistence_error(
 
     result = runner.run_skill(skill_path, thread_id="thread-1")
 
-    assert result.success is False
-    assert result.error is not None
-    assert "checkpoint cleanup failed: delete failed for thread-1" in result.error
+    assert result.success is True
+    assert result.error is None
+    assert "checkpoint cleanup failed: delete failed for thread-1" in caplog.text
+
+
+def test_cleanup_on_success_deletes_thread_and_emits_event(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skill_path = _write_skill(tmp_path)
+    checkpointer = _RecordingDeleteThreadCheckpointer()
+    callback = _RecordingCallback()
+
+    runner.clear_cache()
+    monkeypatch.setattr(
+        runner,
+        "load_workflow_from_md",
+        lambda *args, **kwargs: _SuccessfulRecordingHarness(checkpointer),
+    )
+
+    result = runner.run_skill(skill_path, callbacks=[callback], thread_id="thread-1")
+
+    assert result.success is True
+    assert checkpointer.deleted_thread_ids == ["thread-1"]
+    cleanup_events = [e for e in callback.events if isinstance(e, ThreadCleanedUpEvent)]
+    assert len(cleanup_events) == 1
+    assert cleanup_events[0].thread_id == "thread-1"
+    assert cleanup_events[0].checkpoint_count_at_cleanup == 2
+
+
+def test_no_cleanup_on_failure_preserves_checkpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skill_path = _write_skill(tmp_path)
+    checkpointer = _RecordingDeleteThreadCheckpointer()
+
+    failing_harness = _FailingRunHarness()
+    failing_harness._checkpointer = checkpointer
+
+    runner.clear_cache()
+    monkeypatch.setattr(
+        runner,
+        "load_workflow_from_md",
+        lambda *args, **kwargs: failing_harness,
+    )
+
+    with pytest.raises(RuntimeError, match="workflow failed"):
+        runner.run_skill(skill_path, thread_id="thread-1")
+
+    assert checkpointer.deleted_thread_ids == []
 
 
 def test_main_dotenv_import_failure_raises_loader_error(

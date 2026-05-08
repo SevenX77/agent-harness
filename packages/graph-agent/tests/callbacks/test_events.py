@@ -33,6 +33,7 @@ from graph_agent.callbacks.events import (  # noqa: E402
     RetryExhaustedEvent,
     RunEndedEvent,
     RunStartedEvent,
+    ThreadCleanedUpEvent,
     ToolCallEvent,
     ValidationFailEvent,
     ValidationPassEvent,
@@ -69,6 +70,7 @@ _ALL_EVENT_CLASSES = [
     ParallelMapGroupEndedEvent,
     # Tier 1 Commit D — heartbeat
     HeartbeatEvent,
+    ThreadCleanedUpEvent,
     # Tier 2 — HITL sync
     InterruptedEvent,
     ResumedEvent,
@@ -147,6 +149,7 @@ _MIN_CTOR: dict[type, dict] = {
         "wall_time_seconds": 12.3,
     },
     HeartbeatEvent: {"elapsed_seconds": 30.0},
+    ThreadCleanedUpEvent: {"thread_id": "t1"},
     # Tier 2 — HITL sync
     InterruptedEvent: {"phase_name": "p", "thread_id": "t1"},
     ResumedEvent: {"thread_id": "t1", "human_input": "yes"},

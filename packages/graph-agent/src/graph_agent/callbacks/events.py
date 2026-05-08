@@ -369,6 +369,14 @@ class HeartbeatEvent(_EventBase):
     memory_usage_mb: float | None = None  # None when psutil / resource reading fails
 
 
+class ThreadCleanedUpEvent(_EventBase):
+    """Fired after runner.run_skill deletes successful-run checkpoints."""
+
+    event_type: Literal["thread_cleaned_up"] = "thread_cleaned_up"
+    thread_id: str
+    checkpoint_count_at_cleanup: int | None = None
+
+
 class InternalErrorEvent(_EventBase):
     """Non-business Python exception (OOM / NetworkTimeout / unexpected).
 
@@ -411,6 +419,7 @@ CallbackEvent = Annotated[
     | ParallelMapGroupStartedEvent
     | ParallelMapGroupEndedEvent
     | HeartbeatEvent
+    | ThreadCleanedUpEvent
     | InterruptedEvent
     | ResumedEvent
     | AgentLoopIterationEvent,
@@ -446,6 +455,7 @@ __all__ = [
     "ParallelMapGroupStartedEvent",
     "ParallelMapGroupEndedEvent",
     "HeartbeatEvent",
+    "ThreadCleanedUpEvent",
     "InterruptedEvent",
     "ResumedEvent",
     "AgentLoopIterationEvent",

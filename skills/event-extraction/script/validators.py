@@ -69,8 +69,7 @@ def validate_event_extraction(
     if not payload:
         issues.append("settings 为空，settings phase 必须至少抽出 1 条世界观条目")
         logger.error(
-            "phase=settings action=validate_event_extraction decision=reject "
-            "reason=empty_payload"
+            "phase=settings action=validate_event_extraction decision=reject reason=empty_payload"
         )
         return False, issues
 
@@ -84,9 +83,7 @@ def validate_event_extraction(
         if not setting_id:
             issues.append(f"item {ref}: 缺少 setting_id")
         elif not _SETTING_ID_PATTERN.match(setting_id):
-            issues.append(
-                f"item {ref}: setting_id={setting_id!r} 不符合 SET_数字 格式"
-            )
+            issues.append(f"item {ref}: setting_id={setting_id!r} 不符合 SET_数字 格式")
         elif setting_id in seen_ids:
             issues.append(f"item {ref}: setting_id={setting_id!r} 重复")
         else:
@@ -95,8 +92,7 @@ def validate_event_extraction(
         paragraph_indices = item.get("paragraph_indices")
         if not isinstance(paragraph_indices, list) or not paragraph_indices:
             issues.append(
-                f"item {ref}: paragraph_indices 必须是非空 list[int]，"
-                f"got {paragraph_indices!r}"
+                f"item {ref}: paragraph_indices 必须是非空 list[int]，got {paragraph_indices!r}"
             )
 
         related_event_id = str(item.get("related_event_id") or "").strip()

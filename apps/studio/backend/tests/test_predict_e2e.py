@@ -46,7 +46,9 @@ def test_backend_p1_predict_job_uses_manual_or_copilot_source(
     skill_dir = _write_backend_skill(tmp_path)
     monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda skill_id: skill_dir)
 
-    result = PredictorService().dispatch_predict_job("skill", mock_llm, input_data={"topic": "mars"})
+    result = PredictorService().dispatch_predict_job(
+        "skill", mock_llm, input_data={"topic": "mars"}
+    )
 
     assert result.status == "success"
     assert result.phases[1].mocked_source == expected_source
@@ -106,9 +108,7 @@ def _write_backend_skill(tmp_path: Path) -> Path:
     script_dir.mkdir(parents=True)
     (script_dir / "__init__.py").write_text("", encoding="utf-8")
     (script_dir / "logic.py").write_text(
-        "def prepare(ctx):\n"
-        "    ctx['prepared'] = True\n"
-        "    return ctx\n",
+        "def prepare(ctx):\n    ctx['prepared'] = True\n    return ctx\n",
         encoding="utf-8",
     )
     (skill_dir / "SKILL.md").write_text(

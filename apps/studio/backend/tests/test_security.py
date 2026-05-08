@@ -68,7 +68,9 @@ def test_terminal_rejects_symlink_escape_from_skills_root(
     skills_dir, _workspaces_dir = studio_roots
     escaped_skill = tmp_path / "escaped-skill"
     escaped_skill.mkdir()
-    (escaped_skill / "SKILL.md").write_text("---\nname: escaped\ntype: graph\n---\n", encoding="utf-8")
+    (escaped_skill / "SKILL.md").write_text(
+        "---\nname: escaped\ntype: graph\n---\n", encoding="utf-8"
+    )
     try:
         (skills_dir / "evil").symlink_to(escaped_skill, target_is_directory=True)
     except OSError as exc:
@@ -125,7 +127,9 @@ def test_terminal_ttl_uses_config_and_reaps_expired_session(
 
     session = manager.create_terminal("text-segmentation")
     record = manager._sessions[session.term_id]
-    monkeypatch.setattr("app.services.terminal_manager.time.monotonic", lambda: record.expires_at + 0.1)
+    monkeypatch.setattr(
+        "app.services.terminal_manager.time.monotonic", lambda: record.expires_at + 0.1
+    )
 
     manager.reap_expired()
 

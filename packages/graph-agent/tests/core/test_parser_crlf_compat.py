@@ -6,6 +6,7 @@ not go through Python's universal-newline file IO) hit
 "Invalid frontmatter format" even though the YAML was perfectly valid.
 The parser now accepts both ``\\n`` and ``\\r\\n``.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

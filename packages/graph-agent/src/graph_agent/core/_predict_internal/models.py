@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -10,12 +10,12 @@ from pydantic import BaseModel, Field
 class GoldenCase(BaseModel):
     """Persisted backtest case anchored to LLM phase outputs."""
 
-    inputs: dict
-    metadata: dict = Field(
+    inputs: dict[str, Any]
+    metadata: dict[str, Any] = Field(
         ...,
         description="Contains phase_name, prompt_hash, and io_outputs_schema_hash",
     )
-    expected_traces: dict[str, dict] = Field(
+    expected_traces: dict[str, dict[str, Any]] = Field(
         ...,
         description="Mapping of phase_name to expected_output payload",
     )
@@ -26,12 +26,12 @@ class PhaseRecord(BaseModel):
 
     phase_name: str
     type: Literal["logic", "llm"]
-    inputs: dict
-    outputs: dict
+    inputs: dict[str, Any]
+    outputs: dict[str, Any]
     mocked_source: Literal["golden_case", "copilot", "heuristic_stub", "manual"] | None = None
 
 
-HeuristicStub = dict
+HeuristicStub = dict[str, Any]
 
 
 class PathDiff(BaseModel):

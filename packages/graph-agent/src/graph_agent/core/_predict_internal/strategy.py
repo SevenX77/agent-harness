@@ -46,7 +46,9 @@ class BaseMockStrategy(ABC):
         return None
 
 
-MockLLMParam = TypeAdapter(None | dict[str, Any] | Path | list[GoldenCase])
+MockLLMParam: TypeAdapter[None | dict[str, Any] | Path | list[GoldenCase]] = TypeAdapter(
+    None | dict[str, Any] | Path | list[GoldenCase]
+)
 
 
 class PredictMockStrategyError(ValueError):

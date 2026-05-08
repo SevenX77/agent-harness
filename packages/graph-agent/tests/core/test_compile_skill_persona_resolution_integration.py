@@ -1,4 +1,5 @@
 """End-to-end: compile_skill on an agent with a missing adopted_persona surfaces F-persona-not-resolved."""
+
 from __future__ import annotations
 
 from pathlib import Path

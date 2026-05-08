@@ -1,4 +1,5 @@
 """End-to-end: compile_skill on an agent with a missing tool ref surfaces F-tool-path-not-found."""
+
 from __future__ import annotations
 
 from pathlib import Path

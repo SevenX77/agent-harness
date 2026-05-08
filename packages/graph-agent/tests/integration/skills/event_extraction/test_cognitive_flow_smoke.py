@@ -114,14 +114,12 @@ def test_setting_pydantic_class_round_trip_through_cognitive_flow() -> None:
         "_event_extraction_validators_under_test",
     )
     setting_cls: type = models_module.Setting
-    validator: Callable[
-        [list[dict[str, Any]]], tuple[bool, list[str]]
-    ] = validators_module.validate_event_extraction
+    validator: Callable[[list[dict[str, Any]]], tuple[bool, list[str]]] = (
+        validators_module.validate_event_extraction
+    )
 
     middleware = CognitiveFlowMiddleware(
-        IOManager(
-            [IODef(source_field="business_data_parsed", target_field="settings")]
-        ),
+        IOManager([IODef(source_field="business_data_parsed", target_field="settings")]),
         current_phase_schema=setting_cls,
         business_validator=validator,
         phase_name="settings",
@@ -171,9 +169,9 @@ def test_setting_business_validator_failure_surfaces_to_llm() -> None:
         "_event_extraction_validators_validator_smoke",
     )
     setting_cls: type = models_module.Setting
-    validator: Callable[
-        [list[dict[str, Any]]], tuple[bool, list[str]]
-    ] = validators_module.validate_event_extraction
+    validator: Callable[[list[dict[str, Any]]], tuple[bool, list[str]]] = (
+        validators_module.validate_event_extraction
+    )
 
     bad_md = """
 ## not-a-set-id

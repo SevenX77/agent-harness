@@ -9,6 +9,7 @@ The validator now catches both, so any persona resolution issue
 (missing file, wrong type, malformed frontmatter) becomes a
 ``F-persona-not-resolved`` fatal in the CompileResult.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -56,11 +57,9 @@ def test_malformed_persona_frontmatter_yields_compile_fatal(tmp_path: Path) -> N
     # CompileResult with one F-persona-not-resolved fatal.
     result = compile_skill(host_skill)
     assert not result.passed, (
-        "Malformed persona frontmatter must produce a fatal, not a "
-        "passing result."
+        "Malformed persona frontmatter must produce a fatal, not a passing result."
     )
     rule_ids = [f.rule_id for f in result.fatals]
     assert "F-persona-not-resolved" in rule_ids, (
-        "Persona resolution failures must aggregate as "
-        f"F-persona-not-resolved; got {rule_ids}"
+        f"Persona resolution failures must aggregate as F-persona-not-resolved; got {rule_ids}"
     )

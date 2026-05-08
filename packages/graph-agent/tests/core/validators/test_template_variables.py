@@ -67,9 +67,11 @@ def test_template_vars_accept_inputs_context_mapping_and_prior_hoist() -> None:
 
 
 def test_template_vars_reject_missing_producer() -> None:
-    manifest = _manifest([
-        _llm_phase("segment", "Missing {raw_segmentation}"),
-    ])
+    manifest = _manifest(
+        [
+            _llm_phase("segment", "Missing {raw_segmentation}"),
+        ]
+    )
 
     issues = check_template_variables(manifest)
 
@@ -81,10 +83,12 @@ def test_template_vars_reject_missing_producer() -> None:
 
 
 def test_template_vars_reject_forward_reference() -> None:
-    manifest = _manifest([
-        _llm_phase("review", "Review {segments}"),
-        _llm_phase("segment", "Chapter {chapter_content}", hoist_to="segments"),
-    ])
+    manifest = _manifest(
+        [
+            _llm_phase("review", "Review {segments}"),
+            _llm_phase("segment", "Chapter {chapter_content}", hoist_to="segments"),
+        ]
+    )
 
     issues = check_template_variables(manifest)
 
@@ -93,9 +97,11 @@ def test_template_vars_reject_forward_reference() -> None:
 
 
 def test_render_user_prompt_raises_friendly_missing_context() -> None:
-    manifest = _manifest([
-        _llm_phase("segment", "Need {chapter_content} and {segments}"),
-    ])
+    manifest = _manifest(
+        [
+            _llm_phase("segment", "Need {chapter_content} and {segments}"),
+        ]
+    )
     phase = manifest.phases[0]
 
     with pytest.raises(MissingContextError) as exc_info:

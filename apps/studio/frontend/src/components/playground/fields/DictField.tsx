@@ -16,6 +16,7 @@ export function DictField({ input, value, error, onChange }: FieldProps) {
   const [parseError, setParseError] = useState<string | null>(null)
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRaw(textFor(value))
   }, [value])
 

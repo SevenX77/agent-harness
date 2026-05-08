@@ -132,7 +132,9 @@ def test_dispatch_path_warns_on_hash_mismatch_but_does_not_abort(
         result = service.dispatch_predict_job(
             "skill",
             golden_path,
-            current_hashes={"draft": {"prompt_hash": "new", "io_outputs_schema_hash": "schema-new"}},
+            current_hashes={
+                "draft": {"prompt_hash": "new", "io_outputs_schema_hash": "schema-new"}
+            },
         )
 
     assert result.status == "failed"

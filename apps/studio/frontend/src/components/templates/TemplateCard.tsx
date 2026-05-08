@@ -10,25 +10,28 @@ interface TemplateCardProps {
   onSelect: () => void
 }
 
-function iconFor(type: SkillCreatorType, id: string) {
+interface TemplateIconProps {
+  type: SkillCreatorType
+  id: string
+}
+
+function TemplateIcon({ type, id }: TemplateIconProps) {
   if (id.includes('reasoning')) {
-    return GitBranch
+    return <GitBranch className="h-4 w-4" />
   }
   if (type === 'graph') {
-    return Network
+    return <Network className="h-4 w-4" />
   }
   if (type === 'persona') {
-    return MessageSquare
+    return <MessageSquare className="h-4 w-4" />
   }
   if (id === 'empty-agent') {
-    return Sparkles
+    return <Sparkles className="h-4 w-4" />
   }
-  return Bot
+  return <Bot className="h-4 w-4" />
 }
 
 export function TemplateCard({ id, name, description, type, selected, onSelect }: TemplateCardProps) {
-  const Icon = iconFor(type, id)
-
   return (
     <button
       type="button"
@@ -41,7 +44,7 @@ export function TemplateCard({ id, name, description, type, selected, onSelect }
     >
       <div className="mb-3 flex items-center justify-between gap-3">
         <span className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-sky-600 dark:bg-slate-800 dark:text-sky-400">
-          <Icon className="h-4 w-4" />
+          <TemplateIcon type={type} id={id} />
         </span>
         <span className="rounded bg-gray-100 px-2 py-0.5 text-[11px] font-semibold uppercase text-gray-500 dark:bg-slate-800 dark:text-gray-400">
           {type}
@@ -52,4 +55,3 @@ export function TemplateCard({ id, name, description, type, selected, onSelect }
     </button>
   )
 }
-

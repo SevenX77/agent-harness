@@ -52,6 +52,7 @@ export function usePhaseForm(markdown: string, phaseId: string | null) {
 
   useEffect(() => {
     if (!phaseId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setState(null)
       setDirty(false)
       return

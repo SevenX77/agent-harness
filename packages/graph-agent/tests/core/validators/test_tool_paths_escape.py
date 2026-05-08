@@ -11,6 +11,7 @@ Fixed contract: any local tool reference whose ``base_dir / parts``
 form does not stay inside ``base_dir`` (after ``Path.resolve()``)
 fatals as ``F-tool-path-escape``.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -58,8 +59,7 @@ def test_escaping_tool_reference_yields_escape_fatal(tmp_path: Path) -> None:
     result = compile_skill(skill)
     rule_ids = [f.rule_id for f in result.fatals]
     assert "F-tool-path-escape" in rule_ids, (
-        "An escaping path must produce F-tool-path-escape; "
-        f"got: {rule_ids}"
+        f"An escaping path must produce F-tool-path-escape; got: {rule_ids}"
     )
 
 

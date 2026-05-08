@@ -3,156 +3,163 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from shared.llm_utils import safe_parse_json_list, clamp, safe_get_str, safe_get_list
+from shared.llm_utils import clamp  # noqa: E402
 
 
 def rank_climaxes(context: dict) -> str:
-    batch_outputs = context.get('batch_outputs', [])
+    batch_outputs = context.get("batch_outputs", [])
     climaxes = []
-    
+
     for batch in batch_outputs:
-        events = batch.get('events', [])
+        events = batch.get("events", [])
         for ev in events:
-            tension = ev.get('tension', {})
-            intensity = tension.get('climax_intensity', 0)
+            tension = ev.get("tension", {})
+            intensity = tension.get("climax_intensity", 0)
             if intensity and intensity > 0:
-                climaxes.append({
-                    'event_id': ev.get('event_id', ''),
-                    'climax_intensity': intensity,
-                    'climax_type': tension.get('climax_type', ''),
-                    'chapter_number': ev.get('chapter_number', 0)
-                })
-    
+                climaxes.append(
+                    {
+                        "event_id": ev.get("event_id", ""),
+                        "climax_intensity": intensity,
+                        "climax_type": tension.get("climax_type", ""),
+                        "chapter_number": ev.get("chapter_number", 0),
+                    }
+                )
+
     if not climaxes:
-        context['climax_ranking'] = []
-        return 'No climaxes found'
-    
-    max_intensity = max(c['climax_intensity'] for c in climaxes)
-    min_intensity = min(c['climax_intensity'] for c in climaxes)
-    
+        context["climax_ranking"] = []
+        return "No climaxes found"
+
+    max_intensity = max(c["climax_intensity"] for c in climaxes)
+    min_intensity = min(c["climax_intensity"] for c in climaxes)
+
     for c in climaxes:
         if max_intensity == min_intensity:
             normalized = 5
         else:
-            normalized = 1 + (c['climax_intensity'] - min_intensity) / (max_intensity - min_intensity) * 9
-        c['climax_intensity'] = clamp(round(normalized, 1), 1, 10)
-    
-    climaxes.sort(key=lambda x: (-x['climax_intensity'], x['chapter_number'], x['event_id']))
-    
+            normalized = (
+                1 + (c["climax_intensity"] - min_intensity) / (max_intensity - min_intensity) * 9
+            )
+        c["climax_intensity"] = clamp(round(normalized, 1), 1, 10)
+
+    climaxes.sort(key=lambda x: (-x["climax_intensity"], x["chapter_number"], x["event_id"]))
+
     for rank, c in enumerate(climaxes, 1):
-        c['global_rank'] = rank
-    
-    context['climax_ranking'] = climaxes
-    return f'Ranked {len(climaxes)} climaxes'
+        c["global_rank"] = rank
+
+    context["climax_ranking"] = climaxes
+    return f"Ranked {len(climaxes)} climaxes"
 
 
 def close_foreshadowing(context: dict) -> str:
-    acc = context.get('accumulated_context', {})
-    foreshadowing_list = acc.get('open_foreshadowing', [])
-    batch_outputs = context.get('batch_outputs', [])
-    
+    acc = context.get("accumulated_context", {})
+    foreshadowing_list = acc.get("open_foreshadowing", [])
+    batch_outputs = context.get("batch_outputs", [])
+
     closure_results = []
-    
+
     for fore in foreshadowing_list:
-        fore_id = fore.get('foreshadowing_id', '')
-        has_plant = fore.get('plant_event_id') is not None
-        
+        fore_id = fore.get("foreshadowing_id", "")
+        has_plant = fore.get("plant_event_id") is not None
+
         payoff_found = False
         for batch in batch_outputs:
-            events = batch.get('events', [])
+            events = batch.get("events", [])
             for ev in events:
-                fores = ev.get('foreshadowing', {})
-                if fores.get('resolves_foreshadowing_id') == fore_id:
+                fores = ev.get("foreshadowing", {})
+                if fores.get("resolves_foreshadowing_id") == fore_id:
                     payoff_found = True
                     break
             if payoff_found:
                 break
-        
+
         if payoff_found:
-            status = 'resolved'
+            status = "resolved"
         elif has_plant:
-            status = 'open'
+            status = "open"
         else:
-            status = 'abandoned'
-        
-        closure_results.append({
-            'foreshadowing_id': fore_id,
-            'description': fore.get('description', ''),
-            'status': status,
-            'plant_event_id': fore.get('plant_event_id'),
-            'payoff_found': payoff_found
-        })
-    
-    context['foreshadowing_closure'] = closure_results
-    return f'Processed {len(closure_results)} foreshadowing items'
+            status = "abandoned"
+
+        closure_results.append(
+            {
+                "foreshadowing_id": fore_id,
+                "description": fore.get("description", ""),
+                "status": status,
+                "plant_event_id": fore.get("plant_event_id"),
+                "payoff_found": payoff_found,
+            }
+        )
+
+    context["foreshadowing_closure"] = closure_results
+    return f"Processed {len(closure_results)} foreshadowing items"
 
 
 def rank_characters(context: dict) -> str:
-    batch_outputs = context.get('batch_outputs', [])
-    aliases = context.get('entity_aliases', {})
-    entity_registry = context.get('entity_registry', {})
-    
+    batch_outputs = context.get("batch_outputs", [])
+    aliases = context.get("entity_aliases", {})
+    entity_registry = context.get("entity_registry", {})
+
     char_stats = {}
-    
+
     for batch in batch_outputs:
-        events = batch.get('events', [])
+        events = batch.get("events", [])
         for ev in events:
-            char_changes = ev.get('character_changes', {})
-            chars = char_changes.get('characters_involved', []) if isinstance(char_changes, dict) else []
-            
+            char_changes = ev.get("character_changes", {})
+            chars = (
+                char_changes.get("characters_involved", [])
+                if isinstance(char_changes, dict)
+                else []
+            )
+
             for char_id in chars:
                 canonical_id = aliases.get(char_id, char_id)
                 if canonical_id not in char_stats:
-                    char_stats[canonical_id] = {
-                        'appearances': 0,
-                        'changes': 0,
-                        'name': char_id
-                    }
-                char_stats[canonical_id]['appearances'] += 1
-            
-            changes_list = char_changes.get('changes', []) if isinstance(char_changes, dict) else []
+                    char_stats[canonical_id] = {"appearances": 0, "changes": 0, "name": char_id}
+                char_stats[canonical_id]["appearances"] += 1
+
+            changes_list = char_changes.get("changes", []) if isinstance(char_changes, dict) else []
             for change in changes_list:
-                char_id = change.get('character_id', '')
+                char_id = change.get("character_id", "")
                 canonical_id = aliases.get(char_id, char_id)
                 if canonical_id in char_stats:
-                    char_stats[canonical_id]['changes'] += 1
-    
+                    char_stats[canonical_id]["changes"] += 1
+
     for char_id, stats in char_stats.items():
         if char_id in entity_registry:
-            stats['name'] = entity_registry[char_id].get('name', char_id)
-    
+            stats["name"] = entity_registry[char_id].get("name", char_id)
+
     scored_chars = []
     for char_id, stats in char_stats.items():
-        score = stats['appearances'] * 1.0 + stats['changes'] * 2.0
-        scored_chars.append({
-            'character_id': char_id,
-            'name': stats['name'],
-            'appearances': stats['appearances'],
-            'changes': stats['changes'],
-            'score': score
-        })
-    
-    scored_chars.sort(key=lambda x: -x['score'])
-    
+        score = stats["appearances"] * 1.0 + stats["changes"] * 2.0
+        scored_chars.append(
+            {
+                "character_id": char_id,
+                "name": stats["name"],
+                "appearances": stats["appearances"],
+                "changes": stats["changes"],
+                "score": score,
+            }
+        )
+
+    scored_chars.sort(key=lambda x: -x["score"])
+
     total = len(scored_chars)
     for rank, char in enumerate(scored_chars):
         percentile = (rank + 1) / total * 100 if total > 0 else 0
         if percentile <= 5:
-            char['role_tier'] = 'protagonist'
+            char["role_tier"] = "protagonist"
         elif percentile <= 20:
-            char['role_tier'] = 'main_cast'
+            char["role_tier"] = "main_cast"
         elif percentile <= 35:
-            char['role_tier'] = 'antagonist'
+            char["role_tier"] = "antagonist"
         elif percentile <= 70:
-            char['role_tier'] = 'supporting'
+            char["role_tier"] = "supporting"
         else:
-            char['role_tier'] = 'minor'
-        char['rank'] = rank + 1
-    
-    context['character_ranking'] = scored_chars
-    return f'Ranked {len(scored_chars)} characters'
+            char["role_tier"] = "minor"
+        char["rank"] = rank + 1
+
+    context["character_ranking"] = scored_chars
+    return f"Ranked {len(scored_chars)} characters"

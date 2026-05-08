@@ -131,9 +131,7 @@ class TestDeadEndDetection:
 
     def test_warning_injected_at_threshold(self) -> None:
         cb = _RecordingCallback()
-        mw = ExecutionControlMiddleware(
-            dead_end_threshold=3, phase_name="probe", callbacks=[cb]
-        )
+        mw = ExecutionControlMiddleware(dead_end_threshold=3, phase_name="probe", callbacks=[cb])
         messages = [
             _failing_tool_message("read_file", "permission denied"),
             _failing_tool_message("read_file", "permission denied"),
@@ -183,9 +181,7 @@ class TestDeadEndDetection:
 class TestLoopDetection:
     def test_no_callback_when_no_repetition(self) -> None:
         cb = _RecordingCallback()
-        mw = ExecutionControlMiddleware(
-            loop_window=5, loop_threshold=3, callbacks=[cb]
-        )
+        mw = ExecutionControlMiddleware(loop_window=5, loop_threshold=3, callbacks=[cb])
         # Three different tool calls — no repetition.
         messages = [
             ToolMessage(name="t1", content="a", tool_call_id="1"),
@@ -199,8 +195,11 @@ class TestLoopDetection:
     def test_loop_callback_fires_at_threshold(self) -> None:
         cb = _RecordingCallback()
         mw = ExecutionControlMiddleware(
-            loop_window=5, loop_threshold=3, dead_end_threshold=999,
-            phase_name="loopy", callbacks=[cb],
+            loop_window=5,
+            loop_threshold=3,
+            dead_end_threshold=999,
+            phase_name="loopy",
+            callbacks=[cb],
         )
         # Same (name, content) triple — loop_threshold met.
         messages = [

@@ -5,6 +5,7 @@ V2; ``global_analysis`` produces composite rankings via tool calls
 (rank_climaxes / close_foreshadowing / rank_characters) and stays on
 the legacy ctx-write pattern.
 """
+
 from __future__ import annotations
 
 from typing import Literal

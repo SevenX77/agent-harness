@@ -625,7 +625,9 @@ def test_call_wavespeed_task_failed_raises(monkeypatch: pytest.MonkeyPatch) -> N
 def test_call_wavespeed_unexpected_status_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "graph_agent.models.llm_client_manager.httpx.post",
-        MagicMock(return_value=httpx.Response(200, json={"code": 200, "data": {"status": "queued"}})),
+        MagicMock(
+            return_value=httpx.Response(200, json={"code": 200, "data": {"status": "queued"}})
+        ),
     )
 
     with pytest.raises(RuntimeError, match="unexpected status: queued"):
@@ -642,7 +644,11 @@ def test_call_wavespeed_unexpected_status_raises(monkeypatch: pytest.MonkeyPatch
 def test_call_wavespeed_no_outputs_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "graph_agent.models.llm_client_manager.httpx.post",
-        MagicMock(return_value=httpx.Response(200, json={"code": 200, "data": {"status": "completed", "outputs": []}})),
+        MagicMock(
+            return_value=httpx.Response(
+                200, json={"code": 200, "data": {"status": "completed", "outputs": []}}
+            )
+        ),
     )
 
     with pytest.raises(RuntimeError, match="returned no outputs"):

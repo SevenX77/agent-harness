@@ -31,10 +31,12 @@ def segment_all_chapters(context: dict) -> str:
         segmentation_ctx = result.get("context", {})
         segmentation_result = segmentation_ctx.get("segmentation_result", {})
 
-        all_segmentations.append({
-            "chapter_number": chapter_number,
-            "segmentation": segmentation_result,
-        })
+        all_segmentations.append(
+            {
+                "chapter_number": chapter_number,
+                "segmentation": segmentation_result,
+            }
+        )
 
     context["all_segmentations"] = all_segmentations
 
@@ -68,10 +70,12 @@ def extract_all_events(context: dict) -> str:
         chapter_events = event_timeline.get("events", [])
         para_lookup = event_ctx.get("para_text_lookup", {})
 
-        all_events.append({
-            "chapter_number": chapter_number,
-            "events": chapter_events,
-        })
+        all_events.append(
+            {
+                "chapter_number": chapter_number,
+                "events": chapter_events,
+            }
+        )
 
         para_text_lookup.update(para_lookup)
 
@@ -83,10 +87,7 @@ def extract_all_events(context: dict) -> str:
     context["total_events"] = sum(len(ch.get("events", [])) for ch in all_events)
     context["total_chapters"] = len(all_events)
 
-    return (
-        f"Extracted {context['total_events']} events "
-        f"from {context['total_chapters']} chapters"
-    )
+    return f"Extracted {context['total_events']} events from {context['total_chapters']} chapters"
 
 
 def discover_tracking_dimensions(context: dict) -> str:
@@ -111,9 +112,9 @@ def discover_tracking_dimensions(context: dict) -> str:
         prompt = (
             "Based on the following event summaries from a story, "
             "identify key dynamic dimensions that should be tracked "
-            "across the narrative:\n\n" +
-            "\n".join(f"- {s}" for s in event_summaries) +
-            "\n\nReturn a list of dimension names (e.g., 'plot_progression', "
+            "across the narrative:\n\n"
+            + "\n".join(f"- {s}" for s in event_summaries)
+            + "\n\nReturn a list of dimension names (e.g., 'plot_progression', "
             "'character_development', 'tension_level')."
         )
         response = llm_call(prompt)
@@ -136,10 +137,12 @@ def prepare_next_batch(context: dict) -> str:
     for ch in all_events:
         ch_num = ch.get("chapter_number")
         for event in ch.get("events", []):
-            flat_events.append({
-                **event,
-                "chapter_number": ch_num,
-            })
+            flat_events.append(
+                {
+                    **event,
+                    "chapter_number": ch_num,
+                }
+            )
 
     start_idx = batch_index * batch_size
     end_idx = start_idx + batch_size
@@ -184,11 +187,13 @@ def run_batch_analysis(context: dict) -> str:
     updated_accumulated = batch_ctx.get("updated_accumulated", {})
 
     all_batch_results = context.get("all_batch_results", [])
-    all_batch_results.append({
-        "batch_index": context.get("current_batch_index", 1),
-        "chapter_range": context.get("current_chapter_range", ""),
-        "result": batch_result,
-    })
+    all_batch_results.append(
+        {
+            "batch_index": context.get("current_batch_index", 1),
+            "chapter_range": context.get("current_chapter_range", ""),
+            "result": batch_result,
+        }
+    )
     context["all_batch_results"] = all_batch_results
     context["accumulated_context"] = updated_accumulated
 

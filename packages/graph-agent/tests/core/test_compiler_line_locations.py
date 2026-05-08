@@ -6,6 +6,7 @@ concrete SKILL.md line numbers in the ``CompileIssue.location`` string.
 Studio's UI gates "click error → jump to file line" on this format;
 locking it down with regression tests keeps the contract stable.
 """
+
 from __future__ import annotations
 
 import re
@@ -30,7 +31,7 @@ def test_compile_issue_carries_concrete_line_number(tmp_path: Path) -> None:
         "  outputs: []\n"  # line 8
         "phases:\n"  # line 9
         "  - mode: llm\n"  # line 10
-        "    name: \"\"\n"  # line 11 — empty string fails min_length=1
+        '    name: ""\n'  # line 11 — empty string fails min_length=1
         "    prompt: hi\n"  # line 12
         "---\n",
         encoding="utf-8",
@@ -42,7 +43,8 @@ def test_compile_issue_carries_concrete_line_number(tmp_path: Path) -> None:
 
     # Expect at least one location of the form SKILL.md:<digits>:phases.0.name
     matched = [
-        loc for loc in locations
+        loc
+        for loc in locations
         if re.match(r"^SKILL\.md:\d+:.*\.phases\.0(\..*)?\.name$", loc)
         or re.match(r"^SKILL\.md:\d+:phases\.0(\..*)?\.name$", loc)
     ]
@@ -80,9 +82,7 @@ def test_locate_line_returns_one_indexed_line(tmp_path: Path) -> None:
 
     # Nested-list field: phases[0].name is on line 9
     line_phase_name = locate_line_for_pydantic_loc(fm, ("phases", 0, "name"))
-    assert line_phase_name == 9, (
-        f"expected line 9 for 'phases.0.name', got {line_phase_name}"
-    )
+    assert line_phase_name == 9, f"expected line 9 for 'phases.0.name', got {line_phase_name}"
 
 
 def test_locate_line_returns_none_for_unknown_path() -> None:

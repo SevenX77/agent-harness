@@ -68,8 +68,7 @@ def test_import_class_caches_result(tmp_path: Path) -> None:
 def test_import_callable_from_search_path(tmp_path: Path) -> None:
     module_file = tmp_path / "tools.py"
     module_file.write_text(
-        "def normalize(value):\n"
-        "    return value.strip().lower()\n",
+        "def normalize(value):\n    return value.strip().lower()\n",
         encoding="utf-8",
     )
 
@@ -213,13 +212,9 @@ def test_loader_pipeline_resolves_skill_forward_ref_segment_class() -> None:
     from graph_agent.core.loader import SkillLoader
 
     repo_root = Path(__file__).resolve().parents[4]
-    compiled = SkillLoader().compile_skill(
-        repo_root / "skills/text-segmentation/SKILL.md"
-    )
+    compiled = SkillLoader().compile_skill(repo_root / "skills/text-segmentation/SKILL.md")
     segment_phase = next(
-        node.phase
-        for node in compiled.nodes
-        if node.name == "segment" and node.phase is not None
+        node.phase for node in compiled.nodes if node.name == "segment" and node.phase is not None
     )
     schema_cls = segment_phase.output_schema
     assert schema_cls is not None

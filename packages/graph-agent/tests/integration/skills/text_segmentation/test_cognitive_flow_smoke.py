@@ -111,14 +111,12 @@ def test_segment_pydantic_class_round_trip_through_cognitive_flow() -> None:
         "_text_segmentation_validators_under_test",
     )
     segment_cls: type = models_module.Segment
-    validator: Callable[
-        [list[dict[str, Any]]], tuple[bool, list[str]]
-    ] = validators_module.validate_segmentation_structure
+    validator: Callable[[list[dict[str, Any]]], tuple[bool, list[str]]] = (
+        validators_module.validate_segmentation_structure
+    )
 
     middleware = CognitiveFlowMiddleware(
-        IOManager(
-            [IODef(source_field="business_data_parsed", target_field="segments")]
-        ),
+        IOManager([IODef(source_field="business_data_parsed", target_field="segments")]),
         current_phase_schema=segment_cls,
         business_validator=validator,
         phase_name="segment",
@@ -159,9 +157,9 @@ def test_segment_business_validator_catches_line_gap() -> None:
         "_text_segmentation_validators_gap_smoke",
     )
     segment_cls: type = models_module.Segment
-    validator: Callable[
-        [list[dict[str, Any]]], tuple[bool, list[str]]
-    ] = validators_module.validate_segmentation_structure
+    validator: Callable[[list[dict[str, Any]]], tuple[bool, list[str]]] = (
+        validators_module.validate_segmentation_structure
+    )
 
     gappy_md = """
 ## 1

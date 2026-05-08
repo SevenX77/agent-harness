@@ -4,6 +4,7 @@ Each LLM phase declares ``output_schema:`` pointing to one of these
 classes; the loader injects ``<output_format>`` into the prompt and
 md_to_json parses LLM markdown into validated instances at finish_task.
 """
+
 from __future__ import annotations
 
 from typing import Literal
@@ -27,22 +28,16 @@ class Event(BaseModel):
         description="本事件包含的段落索引列表（来自 text-segmentation）"
     )
     location: str = Field(description="地点名（原文位置原词）")
-    location_change: str | None = Field(
-        default=None, description="相对上一事件的地点变化"
-    )
+    location_change: str | None = Field(default=None, description="相对上一事件的地点变化")
     time: str = Field(description="时间标记（原文时间原词或推断）")
-    time_change: str | None = Field(
-        default=None, description="相对上一事件的时间关系"
-    )
+    time_change: str | None = Field(default=None, description="相对上一事件的时间关系")
     summary: str = Field(description="事件概括，20-30 字")
 
 
 class ReviewedEvent(Event):
     """``review`` phase output — Event + audit note."""
 
-    review_notes: str | None = Field(
-        default=None, description="审查备注（无修改写'无变化'）"
-    )
+    review_notes: str | None = Field(default=None, description="审查备注（无修改写'无变化'）")
 
 
 class Setting(BaseModel):
@@ -53,15 +48,9 @@ class Setting(BaseModel):
     """
 
     setting_id: str = Field(description="设定条目 ID（如 SET_001）")
-    paragraph_indices: list[int] = Field(
-        description="设定知识所在段落索引"
-    )
-    related_event_id: str = Field(
-        description="关联的事件 ID（来自 aggregate/review 输出）"
-    )
-    core_knowledge: str = Field(
-        description="核心知识点（50-100 字精炼）"
-    )
+    paragraph_indices: list[int] = Field(description="设定知识所在段落索引")
+    related_event_id: str = Field(description="关联的事件 ID（来自 aggregate/review 输出）")
+    core_knowledge: str = Field(description="核心知识点（50-100 字精炼）")
 
 
 class PhaseSummary(BaseModel):

@@ -107,6 +107,7 @@ class TestExecuteValidationPhase:
 
     def test_validator_passes_retry_target_shapes_retry_key(self):
         """Retry key prefers retry_target over phase.name on pass path."""
+
         def validator(data: BusinessData) -> tuple[bool, list[str]]:
             return True, []
 
@@ -194,9 +195,7 @@ class TestExecuteValidationPhase:
 
         phase = Phase(name="analyse", validator=validator, max_retries=5)
         executor = PhaseExecutor([])
-        state_in = _make_state(
-            data={"existing": "v"}, retry_counts={"analyse": 0}
-        )
+        state_in = _make_state(data={"existing": "v"}, retry_counts={"analyse": 0})
 
         executor.execute_validation_phase(phase, state_in)
 
@@ -258,6 +257,4 @@ class TestValidationPhaseHoistT7Bis:
         state_in = _make_state(flow={"finish_task_result": {"present": "x"}})
         state_out = executor.execute_validation_phase(phase, state_in)
 
-        assert any(
-            "absent" in err for err in state_out["flow"].io_errors
-        )
+        assert any("absent" in err for err in state_out["flow"].io_errors)

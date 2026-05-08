@@ -1,4 +1,5 @@
 """Tests for GraphAgentHarness.get_thread_status (I-1)."""
+
 from __future__ import annotations
 
 import sys

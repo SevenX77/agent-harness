@@ -39,12 +39,14 @@ export function SkillPalette({
     if (!open) {
       return
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setQuery('')
     setActiveIndex(0)
     window.setTimeout(() => inputRef.current?.focus(), 0)
   }, [open])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setActiveIndex(0)
   }, [query])
 

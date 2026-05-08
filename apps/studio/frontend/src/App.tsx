@@ -177,8 +177,8 @@ export default function App() {
   const phaseSync = usePhaseSync({
     markdown: skillCode,
     phaseId: phaseDrawerPhaseId,
-    editor: editorRef.current,
-    monaco: monacoRef.current,
+    editorRef,
+    monacoRef,
     enabled: phaseDrawerPhaseId !== null,
     onMarkdownChange: handlePhaseMarkdownChange,
   })
@@ -239,6 +239,7 @@ export default function App() {
       clearDraft()
       return
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRestorePromptSkillId(selectedSkillId)
   }, [
     canonicalSkillCode,

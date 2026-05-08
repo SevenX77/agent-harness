@@ -8,6 +8,7 @@ Covered scenarios (match tasks.md Task 3.1):
 * retention trims oldest non-golden runs when the count exceeds the budget
 * cleanup emits an INFO log line naming the deleted run_id and its byte size
 """
+
 from __future__ import annotations
 
 import json
@@ -100,23 +101,25 @@ class TestRetention:
                 history_retention=2,
             ).get_output_dir()
 
-        surviving = sorted(
-            p.name for p in (workspace / "runs" / "s").iterdir() if p.is_dir()
-        )
+        surviving = sorted(p.name for p in (workspace / "runs" / "s").iterdir() if p.is_dir())
         assert surviving == ["20260301", "20260401"]
 
     def test_golden_runs_are_never_pruned(self, workspace: Path) -> None:
         # One regular + one golden run exist first. Then a newer regular run
         # is added with retention=1, so the older regular run must be
         # pruned while the golden directory is preserved regardless.
-        StorageManager(workspace, skill_id="s", run_id="20260101", history_retention=1).get_output_dir()
+        StorageManager(
+            workspace, skill_id="s", run_id="20260101", history_retention=1
+        ).get_output_dir()
         # Manually create a golden dir so we exercise the protection logic
         # without needing a dedicated API for promoting a run to golden.
         golden_dir = workspace / "runs" / "s" / "baseline.golden"
         golden_dir.mkdir(parents=True)
         (golden_dir / "note.md").write_text("keep me", encoding="utf-8")
 
-        StorageManager(workspace, skill_id="s", run_id="20260301", history_retention=1).get_output_dir()
+        StorageManager(
+            workspace, skill_id="s", run_id="20260301", history_retention=1
+        ).get_output_dir()
 
         surviving = sorted(p.name for p in (workspace / "runs" / "s").iterdir() if p.is_dir())
         assert "baseline.golden" in surviving

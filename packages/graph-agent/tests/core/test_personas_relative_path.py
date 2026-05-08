@@ -16,6 +16,7 @@ Fixed contract:
 - ``adopted_persona: ./other/foo`` → ``<base_dir>/other/foo/SKILL.md``
   (general relative paths anchored at the SKILL.md's directory)
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -86,8 +87,7 @@ def test_missing_relative_path_reports_correct_search_target(
         resolve_persona("./subskills/missing", base_dir=tmp_path)
     msg = str(excinfo.value)
     assert "subskills/subskills" not in msg, (
-        "Error message must not include doubled subskills prefix; "
-        f"got: {msg}"
+        f"Error message must not include doubled subskills prefix; got: {msg}"
     )
 
 
@@ -129,9 +129,7 @@ def test_absolute_path_persona_reference_rejected(tmp_path: Path) -> None:
     filesystem traversal."""
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    (elsewhere / "SKILL.md").write_text(
-        _persona_skill("ABSOLUTE-TARGET"), encoding="utf-8"
-    )
+    (elsewhere / "SKILL.md").write_text(_persona_skill("ABSOLUTE-TARGET"), encoding="utf-8")
 
     with pytest.raises(SkillLoadError):
         resolve_persona(str(elsewhere), base_dir=tmp_path / "host_no_exist")

@@ -95,9 +95,7 @@ def _write_predict_skill(tmp_path: Path) -> Path:
     script_dir.mkdir()
     (script_dir / "__init__.py").write_text("", encoding="utf-8")
     (script_dir / "logic.py").write_text(
-        "def prepare(ctx):\n"
-        "    ctx['prepared'] = True\n"
-        "    return ctx\n",
+        "def prepare(ctx):\n    ctx['prepared'] = True\n    return ctx\n",
         encoding="utf-8",
     )
     skill_path = tmp_path / "SKILL.md"

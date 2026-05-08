@@ -13,4 +13,3 @@ class SkillTemplate(BaseModel):
     description: str
     type: str
     content: str
-

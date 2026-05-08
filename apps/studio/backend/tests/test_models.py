@@ -45,7 +45,9 @@ def test_models_validate_fields_and_reuse_graph_agent_contracts() -> None:
         description="demo",
         agent_profile=AgentProfile(role="role", goal="goal"),
     )
-    detail = SkillDetail(manifest=manifest, file_paths={"skill_md": "/tmp/SKILL.md"}, has_golden=False)
+    detail = SkillDetail(
+        manifest=manifest, file_paths={"skill_md": "/tmp/SKILL.md"}, has_golden=False
+    )
 
     assert detail.manifest.type == "agent"
     assert detail.manifest.name == "demo-skill"

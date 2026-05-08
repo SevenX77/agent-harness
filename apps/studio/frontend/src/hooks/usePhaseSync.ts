@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { RefObject } from 'react'
 import type { MonacoApi, MonacoEditor } from '../components/MonacoPanel'
 import { phaseRange, replacePhaseBlock } from '../utils/yamlAst'
 
 interface UsePhaseSyncParams {
   markdown: string
   phaseId: string | null
-  editor: MonacoEditor | null
-  monaco: MonacoApi | null
+  editorRef: RefObject<MonacoEditor | null>
+  monacoRef: RefObject<MonacoApi | null>
   enabled: boolean
   onMarkdownChange: (markdown: string) => void
 }
@@ -16,8 +17,8 @@ type DecorationCollection = ReturnType<MonacoEditor['createDecorationsCollection
 export function usePhaseSync({
   markdown,
   phaseId,
-  editor,
-  monaco,
+  editorRef,
+  monacoRef,
   enabled,
   onMarkdownChange,
 }: UsePhaseSyncParams) {
@@ -40,6 +41,8 @@ export function usePhaseSync({
   }, [enabled, markdown, phaseId])
 
   useEffect(() => {
+    const editor = editorRef.current
+    const monaco = monacoRef.current
     decorationsRef.current?.clear()
     decorationsRef.current = null
     if (!enabled || !editor || !monaco || !range) {
@@ -63,7 +66,7 @@ export function usePhaseSync({
       decorationsRef.current?.clear()
       decorationsRef.current = null
     }
-  }, [editor, enabled, monaco, range])
+  }, [editorRef, enabled, monacoRef, range])
 
   const applyPhaseBlock = useCallback((sourcePhaseId: string, yamlBlock: string) => {
     applyingRef.current = true
@@ -78,7 +81,6 @@ export function usePhaseSync({
   return {
     range,
     syncedBlock,
-    applying: applyingRef.current,
     applyPhaseBlock,
   }
 }

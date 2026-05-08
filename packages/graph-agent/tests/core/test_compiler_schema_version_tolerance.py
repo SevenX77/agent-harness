@@ -7,6 +7,7 @@ Python crash. Both compile_skill (compiler.py) and load_workflow_from_md
 manifest either parses cleanly (when it really is "2.0") or fails with
 the documented F-schema-version fatal.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -70,9 +71,7 @@ class TestCompilerSchemaVersionWrongFloat:
             f"Python exception. Got: {fatal_rules}"
         )
 
-    def test_unquoted_1_5_loader_raises_skill_load_error(
-        self, tmp_path: Path
-    ) -> None:
+    def test_unquoted_1_5_loader_raises_skill_load_error(self, tmp_path: Path) -> None:
         skill = tmp_path / "SKILL.md"
         _write(skill, "1.5")
         with pytest.raises(SkillLoadError):

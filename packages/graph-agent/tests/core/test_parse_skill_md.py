@@ -72,8 +72,7 @@ def test_parse_skill_md_preserves_output_example_with_inner_markdown_heading() -
     )
 
     raw = parse_skill_md(
-        _graph_skill_yaml("  - name: draft\n    mode: llm\n")
-        + "\n"
+        _graph_skill_yaml("  - name: draft\n    mode: llm\n") + "\n"
         "## draft output_example\n"
         f"{example}\n\n"
         "## Notes\n"
@@ -86,8 +85,7 @@ def test_parse_skill_md_preserves_output_example_with_inner_markdown_heading() -
 
 def test_parse_skill_md_uses_phase_heading_context_for_schema_block() -> None:
     raw = parse_skill_md(
-        _graph_skill_yaml("  - name: draft\n    mode: llm\n")
-        + "\n"
+        _graph_skill_yaml("  - name: draft\n    mode: llm\n") + "\n"
         "## Phase: draft\n"
         "Phase docs.\n"
         "### Output Schema\n"
@@ -97,12 +95,7 @@ def test_parse_skill_md_uses_phase_heading_context_for_schema_block() -> None:
         "```\n"
     )
 
-    assert raw["phases"][0]["output_schema_md"] == (
-        "```yaml\n"
-        "title: str\n"
-        "score: int\n"
-        "```"
-    )
+    assert raw["phases"][0]["output_schema_md"] == ("```yaml\ntitle: str\nscore: int\n```")
 
 
 def test_parse_skill_md_infers_single_phase_for_unqualified_output_example() -> None:
@@ -114,8 +107,7 @@ def test_parse_skill_md_infers_single_phase_for_unqualified_output_example() -> 
     )
 
     raw = parse_skill_md(
-        _graph_skill_yaml("  - name: summarize\n    mode: llm\n")
-        + "\n"
+        _graph_skill_yaml("  - name: summarize\n    mode: llm\n") + "\n"
         "## Output Example\n"
         f"{example}\n"
     )
@@ -125,10 +117,7 @@ def test_parse_skill_md_infers_single_phase_for_unqualified_output_example() -> 
 
 def test_parse_skill_md_mirrors_yaml_output_example_to_md_field() -> None:
     example = (
-        '<output_example name="Item">\n'
-        "## items\n"
-        "- title (str, required): title\n"
-        "</output_example>"
+        '<output_example name="Item">\n## items\n- title (str, required): title\n</output_example>'
     )
 
     raw = parse_skill_md(
@@ -151,21 +140,14 @@ def test_parse_skill_md_missing_frontmatter_raises() -> None:
 def test_parse_skill_md_duplicate_yaml_key_raises() -> None:
     with pytest.raises(SkillLoadError, match="duplicate key"):
         parse_skill_md(
-            "---\n"
-            "name: one\n"
-            "name: two\n"
-            "description: d\n"
-            "type: persona\n"
-            "role_profile: r\n"
-            "---\n"
+            "---\nname: one\nname: two\ndescription: d\ntype: persona\nrole_profile: r\n---\n"
         )
 
 
 def test_parse_skill_md_unknown_phase_in_schema_heading_raises() -> None:
     with pytest.raises(SkillLoadError, match="unknown phase"):
         parse_skill_md(
-            _graph_skill_yaml("  - name: draft\n    mode: llm\n")
-            + "\n"
+            _graph_skill_yaml("  - name: draft\n    mode: llm\n") + "\n"
             "## missing output_schema\n"
             "title: str\n"
         )
@@ -174,12 +156,7 @@ def test_parse_skill_md_unknown_phase_in_schema_heading_raises() -> None:
 def test_parse_skill_md_ambiguous_schema_heading_raises() -> None:
     with pytest.raises(SkillLoadError, match="must name one phase"):
         parse_skill_md(
-            _graph_skill_yaml(
-                "  - name: draft\n"
-                "    mode: llm\n"
-                "  - name: review\n"
-                "    mode: llm\n"
-            )
+            _graph_skill_yaml("  - name: draft\n    mode: llm\n  - name: review\n    mode: llm\n")
             + "\n"
             "## output_schema\n"
             "title: str\n"
@@ -189,8 +166,7 @@ def test_parse_skill_md_ambiguous_schema_heading_raises() -> None:
 def test_parse_skill_md_duplicate_markdown_schema_block_raises() -> None:
     with pytest.raises(SkillLoadError, match="Duplicate output_schema_md"):
         parse_skill_md(
-            _graph_skill_yaml("  - name: draft\n    mode: llm\n")
-            + "\n"
+            _graph_skill_yaml("  - name: draft\n    mode: llm\n") + "\n"
             "## draft output_schema\n"
             "title: str\n"
             "## draft output_schema\n"
@@ -201,8 +177,7 @@ def test_parse_skill_md_duplicate_markdown_schema_block_raises() -> None:
 def test_parse_skill_md_empty_markdown_schema_block_raises() -> None:
     with pytest.raises(SkillLoadError, match="is empty"):
         parse_skill_md(
-            _graph_skill_yaml("  - name: draft\n    mode: llm\n")
-            + "\n"
+            _graph_skill_yaml("  - name: draft\n    mode: llm\n") + "\n"
             "## draft output_schema\n"
             "## Notes\n"
             "not schema\n"

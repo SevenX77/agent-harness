@@ -1,4 +1,5 @@
 """Tests for context_access builtin tools."""
+
 from __future__ import annotations
 
 from graph_agent.tools.builtin.context_access import (

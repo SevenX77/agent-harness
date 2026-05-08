@@ -5,6 +5,7 @@ Only LIST-shaped phase outputs use V2 schemas; composite-output phases
 tool pattern because their result is naturally an accumulating dict
 of multiple categories rather than a homogeneous list.
 """
+
 from __future__ import annotations
 
 from typing import Literal
@@ -27,9 +28,7 @@ class ContinuityWarning(BaseModel):
         description="严重程度：error 阻断、warning 提示、info 备查"
     )
     description: str = Field(description="具体矛盾描述（含涉及的 event_id）")
-    suggested_fix: str | None = Field(
-        default=None, description="建议修法（可选）"
-    )
+    suggested_fix: str | None = Field(default=None, description="建议修法（可选）")
 
 
 class BatchAnalysisReport(BaseModel):

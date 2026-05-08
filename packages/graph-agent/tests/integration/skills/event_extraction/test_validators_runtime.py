@@ -61,9 +61,7 @@ def _good_setting(setting_id: str = "SET_001") -> dict[str, Any]:
 
 
 class TestHappyPath:
-    def test_validator_accepts_list_of_well_formed_settings(
-        self, validate: ValidatorFn
-    ) -> None:
+    def test_validator_accepts_list_of_well_formed_settings(self, validate: ValidatorFn) -> None:
         payload = [_good_setting("SET_001"), _good_setting("SET_002")]
 
         is_valid, issues = validate(payload)
@@ -87,9 +85,7 @@ class TestFailPaths:
         assert is_valid is False
         assert any("settings 为空" in issue for issue in issues)
 
-    def test_validator_rejects_malformed_setting_id(
-        self, validate: ValidatorFn
-    ) -> None:
+    def test_validator_rejects_malformed_setting_id(self, validate: ValidatorFn) -> None:
         bad = _good_setting()
         bad["setting_id"] = "world-rule-1"  # not SET_<digits>
         payload = [bad]
@@ -99,9 +95,7 @@ class TestFailPaths:
         assert is_valid is False
         assert any("SET_数字" in issue for issue in issues)
 
-    def test_validator_rejects_duplicate_setting_ids(
-        self, validate: ValidatorFn
-    ) -> None:
+    def test_validator_rejects_duplicate_setting_ids(self, validate: ValidatorFn) -> None:
         payload = [_good_setting("SET_001"), _good_setting("SET_001")]
 
         is_valid, issues = validate(payload)
@@ -109,9 +103,7 @@ class TestFailPaths:
         assert is_valid is False
         assert any("重复" in issue for issue in issues)
 
-    def test_validator_rejects_empty_paragraph_indices(
-        self, validate: ValidatorFn
-    ) -> None:
+    def test_validator_rejects_empty_paragraph_indices(self, validate: ValidatorFn) -> None:
         bad = _good_setting()
         bad["paragraph_indices"] = []
         payload = [bad]
@@ -121,9 +113,7 @@ class TestFailPaths:
         assert is_valid is False
         assert any("paragraph_indices" in issue for issue in issues)
 
-    def test_validator_rejects_missing_related_event_id(
-        self, validate: ValidatorFn
-    ) -> None:
+    def test_validator_rejects_missing_related_event_id(self, validate: ValidatorFn) -> None:
         bad = _good_setting()
         bad["related_event_id"] = ""
         payload = [bad]
@@ -133,9 +123,7 @@ class TestFailPaths:
         assert is_valid is False
         assert any("related_event_id" in issue for issue in issues)
 
-    def test_validator_rejects_starvation_core_knowledge(
-        self, validate: ValidatorFn
-    ) -> None:
+    def test_validator_rejects_starvation_core_knowledge(self, validate: ValidatorFn) -> None:
         bad = _good_setting()
         bad["core_knowledge"] = "太短"  # well below the 30-char floor
         payload = [bad]
@@ -145,9 +133,7 @@ class TestFailPaths:
         assert is_valid is False
         assert any("信息密度不足" in issue for issue in issues)
 
-    def test_validator_rejects_overrun_core_knowledge(
-        self, validate: ValidatorFn
-    ) -> None:
+    def test_validator_rejects_overrun_core_knowledge(self, validate: ValidatorFn) -> None:
         bad = _good_setting()
         bad["core_knowledge"] = "啰嗦" * 200  # 400 chars >> 200-char ceiling
         payload = [bad]

@@ -1,4 +1,5 @@
 """Tests for scripts/snapshot_diff.py (I-2)."""
+
 from __future__ import annotations
 
 import json
@@ -42,9 +43,7 @@ class TestNormalisation:
             "12345678-1234-5678-1234-567812345678", uuid_map, in_id_field=False
         )
         assert a == b == "normalized_uuid_1"
-        c = snapshot_diff._normalise(
-            "abcdef123456-0001", uuid_map, in_id_field=False
-        )
+        c = snapshot_diff._normalise("abcdef123456-0001", uuid_map, in_id_field=False)
         assert c == "normalized_uuid_2"
 
     def test_id_field_name_forces_normalisation(self):
@@ -87,10 +86,13 @@ class TestNormalisation:
 class TestRecord:
     def test_saves_normalised_baseline(self, workdir: Path):
         run = workdir / "run.jsonl"
-        _write_jsonl(run, [
-            {"event_type": "phase_start", "timestamp": "t1", "run_id": "aaa111222333"},
-            {"event_type": "phase_end", "timestamp": "t2", "run_id": "aaa111222333"},
-        ])
+        _write_jsonl(
+            run,
+            [
+                {"event_type": "phase_start", "timestamp": "t1", "run_id": "aaa111222333"},
+                {"event_type": "phase_end", "timestamp": "t2", "run_id": "aaa111222333"},
+            ],
+        )
         out = workdir / "baseline.json"
         rc = snapshot_diff._record(run, out)
         assert rc == 0
@@ -117,10 +119,13 @@ class TestDiff:
         )
         # Fresh run with *different* real UUIDs + different timestamps:
         run = workdir / "run.jsonl"
-        _write_jsonl(run, [
-            {"event_type": "phase_start", "timestamp": "2026-...", "run_id": "bbb444555666"},
-            {"event_type": "phase_end", "timestamp": "2026-...", "run_id": "bbb444555666"},
-        ])
+        _write_jsonl(
+            run,
+            [
+                {"event_type": "phase_start", "timestamp": "2026-...", "run_id": "bbb444555666"},
+                {"event_type": "phase_end", "timestamp": "2026-...", "run_id": "bbb444555666"},
+            ],
+        )
         rc = snapshot_diff._diff(run, baseline)
         assert rc == 0
 
@@ -131,16 +136,17 @@ class TestDiff:
             encoding="utf-8",
         )
         run = workdir / "run.jsonl"
-        _write_jsonl(run, [
-            {"event_type": "phase_start", "timestamp": "t1", "phase_name": "renamed"},
-        ])
+        _write_jsonl(
+            run,
+            [
+                {"event_type": "phase_start", "timestamp": "t1", "phase_name": "renamed"},
+            ],
+        )
         rc = snapshot_diff._diff(run, baseline)
         assert rc == 1
         captured = capfd.readouterr()
         assert "setup" in captured.out or "renamed" in captured.out
 
     def test_missing_run_file_errors_out(self, workdir: Path):
-        rc = snapshot_diff._diff(
-            workdir / "nope.jsonl", workdir / "also_nope.json"
-        )
+        rc = snapshot_diff._diff(workdir / "nope.jsonl", workdir / "also_nope.json")
         assert rc == 2

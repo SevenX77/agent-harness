@@ -2,7 +2,7 @@ interface PhaseTokenCounterProps {
   text: string
 }
 
-export function estimatedTokens(text: string): number {
+function estimatedTokens(text: string): number {
   return Math.max(0, Math.ceil(text.length / 4))
 }
 

@@ -130,12 +130,7 @@ class TestHumanBodyPreservation:
             "- 2026-04-20: initial draft\n"
             "- 2026-04-22: rubrics tightened\n"
         )
-        content = (
-            "---\n"
-            "name: x\ndescription: d\ntype: persona\nrole_profile: r\n"
-            "---\n"
-            + body_text
-        )
+        content = "---\nname: x\ndescription: d\ntype: persona\nrole_profile: r\n---\n" + body_text
         skill_file = tmp_path / "SKILL.md"
         skill_file.write_text(content, encoding="utf-8")
 
@@ -158,17 +153,13 @@ class TestErrorPaths:
 
     def test_invalid_yaml_raises(self, tmp_path):
         skill_file = tmp_path / "SKILL.md"
-        skill_file.write_text(
-            "---\nname: x\n  bad: indent: here\n---\n", encoding="utf-8"
-        )
+        skill_file.write_text("---\nname: x\n  bad: indent: here\n---\n", encoding="utf-8")
         with pytest.raises(SkillLoadError):
             parse_skill_file(skill_file)
 
     def test_non_dict_frontmatter_raises(self, tmp_path):
         skill_file = tmp_path / "SKILL.md"
-        skill_file.write_text(
-            "---\n- just\n- a\n- list\n---\n", encoding="utf-8"
-        )
+        skill_file.write_text("---\n- just\n- a\n- list\n---\n", encoding="utf-8")
         with pytest.raises(SkillLoadError):
             parse_skill_file(skill_file)
 
@@ -180,9 +171,7 @@ class TestParserDoesNotValidate:
         """``type: nonsense`` should pass parse but fail validate."""
         skill_file = tmp_path / "SKILL.md"
         skill_file.write_text(
-            "---\n"
-            "name: x\ndescription: d\ntype: nonsense\n"
-            "---\n",
+            "---\nname: x\ndescription: d\ntype: nonsense\n---\n",
             encoding="utf-8",
         )
         parsed = parse_skill_file(skill_file)
@@ -190,5 +179,6 @@ class TestParserDoesNotValidate:
         assert parsed["frontmatter"]["type"] == "nonsense"
         # But Pydantic rejects unknown discriminator value.
         from pydantic import ValidationError
+
         with pytest.raises(ValidationError):
             _SKILL_ADAPTER.validate_python(parsed["frontmatter"])

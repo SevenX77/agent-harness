@@ -23,6 +23,7 @@ export function useBatchRun(skillId: string | null) {
   const [batchError, setBatchError] = useState<string | null>(null)
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedInputIds([])
     setBatchId(null)
     setBatchStatus(null)

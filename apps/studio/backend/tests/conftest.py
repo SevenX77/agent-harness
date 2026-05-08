@@ -50,9 +50,7 @@ def _write_graph_skill(skill_dir: Path, name: str, description: str) -> None:
     (skill_dir / "script").mkdir(parents=True)
     (skill_dir / "script" / "__init__.py").write_text("", encoding="utf-8")
     (skill_dir / "script" / "logic.py").write_text(
-        "def prepare(data):\n"
-        "    data['prepared'] = True\n"
-        "    return data\n",
+        "def prepare(data):\n    data['prepared'] = True\n    return data\n",
         encoding="utf-8",
     )
     (skill_dir / "SKILL.md").write_text(

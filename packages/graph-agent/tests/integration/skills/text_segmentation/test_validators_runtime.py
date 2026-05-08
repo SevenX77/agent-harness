@@ -88,9 +88,7 @@ def _continuous_segments() -> list[dict[str, Any]]:
 
 
 class TestValidateSegmentationStructure:
-    def test_accepts_continuous_segments(
-        self, validators: ModuleType
-    ) -> None:
+    def test_accepts_continuous_segments(self, validators: ModuleType) -> None:
         payload = _continuous_segments()
 
         is_valid, issues = validators.validate_segmentation_structure(payload)
@@ -135,9 +133,7 @@ class TestValidateSegmentationStructure:
 
 
 class TestValidateFinalFormat:
-    def test_accepts_well_formed_final_payload(
-        self, validators: ModuleType
-    ) -> None:
+    def test_accepts_well_formed_final_payload(self, validators: ModuleType) -> None:
         payload = _continuous_segments()
 
         is_valid, issues = validators.validate_final_format(payload)
@@ -151,9 +147,7 @@ class TestValidateFinalFormat:
         assert is_valid is False
         assert any("No segments" in issue for issue in issues)
 
-    def test_rejects_missing_required_field(
-        self, validators: ModuleType
-    ) -> None:
+    def test_rejects_missing_required_field(self, validators: ModuleType) -> None:
         bad = _segment(index=1)
         del bad["start_line"]  # required
         payload = [bad]
@@ -172,9 +166,7 @@ class TestValidateFinalFormat:
         assert is_valid is False
         assert any("type must be" in issue for issue in issues)
 
-    def test_rejects_inverted_line_range(
-        self, validators: ModuleType
-    ) -> None:
+    def test_rejects_inverted_line_range(self, validators: ModuleType) -> None:
         bad = _segment(index=1, start_line=20, end_line=10)
         payload = [bad]
 

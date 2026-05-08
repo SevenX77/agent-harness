@@ -32,4 +32,3 @@ def list_templates() -> list[SkillTemplate]:
 
 def _frontmatter(path: Path) -> dict[str, Any]:
     return dict(parse_skill_file(path)["frontmatter"])
-

@@ -1,10 +1,13 @@
 from __future__ import annotations
-import logging
+
 import json
+import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from story_forge.core.llm_client_manager import call_llm_with_fallback
 
 logger = logging.getLogger(__name__)
+
 
 def dispatch_writer_drafting(ctx: dict) -> str:
     """
@@ -15,10 +18,17 @@ def dispatch_writer_drafting(ctx: dict) -> str:
         return "ERROR: objective_scenes 为空。"
 
     producer_global_analysis = ctx.get("producer_global_analysis", "")
-    
+
     from pathlib import Path
-    rules_dir = Path(__file__).resolve().parent.parent / "subskills" / "producer_strategy" / "references"
-    voice_rhythm_rules = (rules_dir / "voice_and_rhythm_rules.md").read_text(encoding='utf-8') if (rules_dir / "voice_and_rhythm_rules.md").exists() else ""
+
+    rules_dir = (
+        Path(__file__).resolve().parent.parent / "subskills" / "producer_strategy" / "references"
+    )
+    voice_rhythm_rules = (
+        (rules_dir / "voice_and_rhythm_rules.md").read_text(encoding="utf-8")
+        if (rules_dir / "voice_and_rhythm_rules.md").exists()
+        else ""
+    )
 
     sys_prompt = f"""你是一个拥有千万粉丝的【爆款短剧解说大V】。
 你的任务是将原著小说的情节，改写为极具网感的“解说驱动型（Narration-Driven）”短剧分镜脚本。
@@ -42,8 +52,10 @@ def dispatch_writer_drafting(ctx: dict) -> str:
    - 对白是与物理世界互动：【对白】姜宁：“你确定？”
 
 3. **镜头时长的控制**
-   - 【情绪轰炸蒙太奇】只有在制片人明确要求时才能使用，时长必须在 0.5s - 1.5s 之间，配合极其碎裂的画面描述。
-   - 【稳态叙事长镜头】是绝大多数时间的常态，时长必须在 3.0s - 5.0s 左右。确保观众在听 VO 时画面足够稳定。
+   - 【情绪轰炸蒙太奇】只有在制片人明确要求时才能使用，时长必须在 0.5s - 1.5s 之间，
+     配合极其碎裂的画面描述。
+   - 【稳态叙事长镜头】是绝大多数时间的常态，时长必须在 3.0s - 5.0s 左右。
+     确保观众在听 VO 时画面足够稳定。
 
 ## 输出 Schema
 输出一段合法的 JSON 数组，包含该场戏的多个分镜。
@@ -59,9 +71,14 @@ def dispatch_writer_drafting(ctx: dict) -> str:
 
     def _run_subagent(scene: dict) -> dict:
         prod_strategy = scene.get("producer_strategy", {})
-        beats_text = "\n".join([f"- [{b['beat_id']}] {b['content']}" for b in scene.get("beats", [])])
-        prod_notes = f"【制片人宏观指导】\n{prod_strategy.get('producer_directives', '')}\n\n【武器库分配意见】\n{prod_strategy.get('beats_treatment', '')}"
-        
+        beats_text = "\n".join(
+            [f"- [{b['beat_id']}] {b['content']}" for b in scene.get("beats", [])]
+        )
+        prod_notes = (
+            f"【制片人宏观指导】\n{prod_strategy.get('producer_directives', '')}\n\n"
+            f"【武器库分配意见】\n{prod_strategy.get('beats_treatment', '')}"
+        )
+
         user_prompt = (
             f"当前场景：{scene['meta']['location']}\n\n"
             f"【原始动作节拍 (Beats)】\n{beats_text}\n\n"
@@ -72,30 +89,39 @@ def dispatch_writer_drafting(ctx: dict) -> str:
 
         try:
             output_dict = call_llm_with_fallback(
-                task_id=f"write_{scene['scene_id']}", 
-                messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_prompt}],
+                task_id=f"write_{scene['scene_id']}",
+                messages=[
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
                 llm_role="screenwriter",
-                temperature=0.7
+                temperature=0.7,
             )
             output_text = output_dict.get("content", "").strip()
-            
-            if output_text.startswith("```json"): output_text = output_text[7:]
-            elif output_text.startswith("```"): output_text = output_text[3:]
-            if output_text.endswith("```"): output_text = output_text[:-3]
+
+            if output_text.startswith("```json"):
+                output_text = output_text[7:]
+            elif output_text.startswith("```"):
+                output_text = output_text[3:]
+            if output_text.endswith("```"):
+                output_text = output_text[:-3]
             output_text = output_text.strip()
-            
+
             script_json = json.loads(output_text)
             return {"scene_id": scene["scene_id"], "script": script_json}
         except Exception as e:
             logger.error(f"编剧子技能执行失败 ({scene['scene_id']}): {e}")
-            return {"scene_id": scene["scene_id"], "script": [{"video_audio": f"ERROR: {e}", "voice_text": ""}]}
+            return {
+                "scene_id": scene["scene_id"],
+                "script": [{"video_audio": f"ERROR: {e}", "voice_text": ""}],
+            }
 
     logger.info(f"派发任务至 Writer，并发处理 {len(scenes)} 个场景...")
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {executor.submit(_run_subagent, sc): sc for sc in scenes}
         for future in as_completed(futures):
             results.append(future.result())
-            
+
     script_map = {r["scene_id"]: r["script"] for r in results}
     for sc in scenes:
         sc["script_draft"] = script_map.get(sc["scene_id"], [])

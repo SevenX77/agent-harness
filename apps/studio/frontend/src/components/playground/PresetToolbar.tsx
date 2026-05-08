@@ -19,8 +19,10 @@ export function PresetToolbar({ skillId, values, onLoad, pushToast }: PresetTool
   const refresh = () => setPresets(PresetManager.list(skillId))
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh()
     setSelectedId('')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [skillId])
 
   const selectedPreset = presets.find((preset) => preset.id === selectedId)

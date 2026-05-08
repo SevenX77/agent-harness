@@ -7,10 +7,12 @@ Run from repo root. Scans packages/graph-agent/src/**/*.py and converts
 all `from .x import y` and `from ..y import z` to absolute paths
 rooted at `graph_agent`.
 """
+
 from __future__ import annotations
 
-import libcst as cst
 from pathlib import Path
+
+import libcst as cst
 
 
 class RelativeToAbsoluteTransformer(cst.CSTTransformer):

@@ -56,7 +56,12 @@ def test_skills_list_and_detail_use_real_skill_files(client: TestClient) -> None
     skills_response = client.get("/api/skills")
     assert skills_response.status_code == 200
     skill_ids = {item["id"] for item in skills_response.json()}
-    assert {"text-segmentation", "event-extraction", "batch-analysis", "global-synthesis"} <= skill_ids
+    assert {
+        "text-segmentation",
+        "event-extraction",
+        "batch-analysis",
+        "global-synthesis",
+    } <= skill_ids
 
     detail_response = client.get("/api/skills/text-segmentation")
     assert detail_response.status_code == 200
@@ -142,7 +147,10 @@ def test_create_skill_writes_workspace_skill_and_summary(
 def test_create_skill_collision_returns_409(client: TestClient) -> None:
     response = client.post(
         "/api/skills",
-        json={"skill_id": "text-segmentation", "content": _agent_skill_content("text-segmentation")},
+        json={
+            "skill_id": "text-segmentation",
+            "content": _agent_skill_content("text-segmentation"),
+        },
     )
 
     assert response.status_code == 409

@@ -42,6 +42,7 @@ export function DiffView({
   const selectedField = fields.find((field) => field.field_path === selectedPath) ?? fields[0] ?? null
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedPath(fields[0]?.field_path ?? null)
   }, [fields])
 

@@ -33,35 +33,39 @@ def test_loader_forward_ref_schema_survives_cognitive_flow_validation(
     script_dir = tmp_path / "script"
     script_dir.mkdir()
     (script_dir / "models.py").write_text(
-        "\n".join([
-            "from __future__ import annotations",
-            "from typing import Literal",
-            "from pydantic import BaseModel, Field",
-            "",
-            "class ForwardRefResult(BaseModel):",
-            "    kind: Literal['A', 'B'] = Field(description='kind')",
-            "    title: str = Field(description='title')",
-        ]),
+        "\n".join(
+            [
+                "from __future__ import annotations",
+                "from typing import Literal",
+                "from pydantic import BaseModel, Field",
+                "",
+                "class ForwardRefResult(BaseModel):",
+                "    kind: Literal['A', 'B'] = Field(description='kind')",
+                "    title: str = Field(description='title')",
+            ]
+        ),
         encoding="utf-8",
     )
     skill_path = tmp_path / "SKILL.md"
     skill_path.write_text(
-        "\n".join([
-            "---",
-            'schema_version: "2.0"',
-            "name: forward-ref-smoke",
-            "description: forward ref smoke",
-            "type: graph",
-            "io:",
-            "  inputs: []",
-            "  outputs: []",
-            "phases:",
-            "  - name: draft",
-            "    mode: llm",
-            "    prompt: Write a structured result.",
-            "    output_schema: script.models.ForwardRefResult",
-            "---",
-        ]),
+        "\n".join(
+            [
+                "---",
+                'schema_version: "2.0"',
+                "name: forward-ref-smoke",
+                "description: forward ref smoke",
+                "type: graph",
+                "io:",
+                "  inputs: []",
+                "  outputs: []",
+                "phases:",
+                "  - name: draft",
+                "    mode: llm",
+                "    prompt: Write a structured result.",
+                "    output_schema: script.models.ForwardRefResult",
+                "---",
+            ]
+        ),
         encoding="utf-8",
     )
 

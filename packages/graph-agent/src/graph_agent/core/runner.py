@@ -61,6 +61,49 @@ _cache_lock = threading.Lock()
 _NO_MOCK_LLM = object()
 
 
+def _checkpoint_count_for_thread(checkpointer: Any, thread_id: str) -> int | None:
+    """Best-effort count of checkpoints for a thread before deletion."""
+    list_checkpoints = getattr(checkpointer, "list", None)
+    if list_checkpoints is None:
+        return None
+    try:
+        checkpoints = list_checkpoints({"configurable": {"thread_id": thread_id}})
+        return sum(1 for _ in checkpoints)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "[Runner] checkpoint count probe failed for thread_id=%s: %s; using None",
+            thread_id,
+            exc,
+        )
+        return None
+
+
+def _emit_thread_cleaned_up_event(
+    callbacks: list[Any],
+    *,
+    thread_id: str,
+    checkpoint_count_at_cleanup: int | None,
+) -> None:
+    """Emit ThreadCleanedUpEvent without letting callback failures affect success."""
+    from graph_agent.callbacks.events import ThreadCleanedUpEvent
+
+    event = ThreadCleanedUpEvent(
+        thread_id=thread_id,
+        checkpoint_count_at_cleanup=checkpoint_count_at_cleanup,
+    )
+    for callback in callbacks:
+        on_event = getattr(callback, "on_event", None)
+        if on_event is None:
+            continue
+        try:
+            on_event(event)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[Runner] ThreadCleanedUpEvent callback failed: %s; continuing",
+                exc,
+            )
+
+
 def _collect_skill_dependency_snapshot(
     harness: Any,
     *,
@@ -348,32 +391,31 @@ def _run_skill_dict(
     # state. Default True; callers that want to keep checkpoints for
     # human-review / golden-regression purposes pass False.
     if cleanup_checkpoints_on_finish and effective_thread_id:
-        try:
-            checkpointer = getattr(harness, "_checkpointer", None)
-            if checkpointer is not None and hasattr(checkpointer, "delete_thread"):
+        checkpointer = getattr(harness, "_checkpointer", None)
+        delete_thread = getattr(checkpointer, "delete_thread", None)
+        if checkpointer is None or delete_thread is None:
+            logger.warning(
+                "[Runner] checkpoint cleanup failed: checkpointer delete_thread unavailable; "
+                "continuing"
+            )
+        else:
+            checkpoint_count_at_cleanup = _checkpoint_count_for_thread(
+                checkpointer,
+                effective_thread_id,
+            )
+            try:
                 checkpointer.delete_thread(effective_thread_id)
                 logger.info(
                     "[Runner] Checkpoints cleaned up for thread_id=%s",
                     effective_thread_id,
                 )
-                # Tier 1 T-B7: emit a visible marker so the trace records
-                # that resume is no longer possible from this thread.
-                with contextlib.suppress(Exception):
-                    from graph_agent.callbacks.events import _EventBase  # noqa: F401
-
-                    # We purposefully don't depend on a dedicated event
-                    # class here — Gemini flagged ThreadCleanedUpEvent as
-                    # optional (降级到 P2). A log INFO is enough for ops;
-                    # Studio's "thread archived" UI state can derive from
-                    # RunEnded(status=completed) + absence of checkpoint.
-        except Exception as exc:  # noqa: BLE001
-            raise PersistenceError(
-                f"checkpoint cleanup failed: {exc}",
-                context={
-                    "thread_id": effective_thread_id,
-                    "cleanup_checkpoints_on_finish": cleanup_checkpoints_on_finish,
-                },
-            ) from exc
+                _emit_thread_cleaned_up_event(
+                    callbacks,
+                    thread_id=effective_thread_id,
+                    checkpoint_count_at_cleanup=checkpoint_count_at_cleanup,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("checkpoint cleanup failed: %s", exc)
 
     ctx = final_state["data"].model_dump()
     metrics = final_state["flow"].metrics

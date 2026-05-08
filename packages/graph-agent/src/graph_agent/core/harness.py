@@ -160,8 +160,10 @@ class _HeartbeatPulser:
 
     def stop(self) -> None:
         self._stop.set()
+
+    def join(self, timeout: float | None = None) -> None:
         if self._thread is not None:
-            self._thread.join(timeout=self._interval + 1.0)
+            self._thread.join(timeout=timeout)
             self._thread = None
 
     def _run(self) -> None:
@@ -764,6 +766,7 @@ class GraphAgentHarness:
             # after a crash; _HeartbeatPulser.stop is idempotent.
             try:
                 heartbeat.stop()
+                heartbeat.join(timeout=1.0)
             except Exception:  # noqa: BLE001
                 logger.warning("[Harness] heartbeat stop failed", exc_info=True)
 
@@ -1091,12 +1094,16 @@ class GraphAgentHarness:
             unattended=state["flow"].unattended,
         )
 
+        # Tier 1 Commit D — T-B13 HeartbeatEvent daemon thread.
+        heartbeat = _HeartbeatPulser(active_callbacks)
+        heartbeat.current_phase = state["flow"].current_phase or None
+        heartbeat.start()
+
         # D-7.2 Phase B: per-run PhaseExecutor threaded through config.
-        # resume() has no heartbeat (it inherits from paused state).
         phase_executor = PhaseExecutor(
             active_callbacks,
             run_context=run_context,
-            heartbeat=None,
+            heartbeat=heartbeat,
             resolver=self._resolver,
             save_compaction_sidecar=type(self)._save_compaction_sidecar,
         )
@@ -1132,6 +1139,12 @@ class GraphAgentHarness:
                 ),
             )
             raise
+        finally:
+            try:
+                heartbeat.stop()
+                heartbeat.join(timeout=1.0)
+            except Exception:  # noqa: BLE001
+                logger.warning("[Harness] heartbeat stop failed", exc_info=True)
 
 
 Harness = GraphAgentHarness

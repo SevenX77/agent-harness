@@ -49,7 +49,7 @@
   - 估时: 0.8h
   - 依赖: T0.1, T1.1
   - 可独立 commit: yes
-  - 实施细节: Claude 使用默认 Anthropic endpoint；DeepSeek 使用 `https://api.deepseek.com/anthropic`，依据 `design.md:18` 和 `design.md:31`；session cache key 不只是 `(skill_id + active_backend)`，必须在 PUT credentials 时也提供显式 `invalidate(skill_id)` hook (或 key 中加 `api_key_hash` 派生字段)；同 backend 但 key 换了也要 reset；切 backend 丢弃旧 session，view context 更新不丢 history。
+  - 实施细节: Claude 使用默认 Anthropic endpoint；DeepSeek 使用 `https://api.deepseek.com/anthropic`，依据 `design.md:18` 和 `design.md:31`；**依赖 T0.1 验证结论，必须通过 `ClaudeAgentOptions(env={"ANTHROPIC_BASE_URL": "...", "ANTHROPIC_API_KEY": "..."})` 进行配置注入。** session cache key 不只是 `(skill_id + active_backend)`，必须在 PUT credentials 时也提供显式 `invalidate(skill_id)` hook (或 key 中加 `api_key_hash` 派生字段)；同 backend 但 key 换了也要 reset；切 backend 丢弃旧 session，view context 更新不丢 history。
 
 - **T2.3 实现普通 dict session manager 与 cleanup hook**
   - 路径: `apps/studio/backend/app/services/copilot.py`
@@ -65,7 +65,7 @@
   - 估时: 0.8h
   - 依赖: T2.2
   - 可独立 commit: yes
-  - 实施细节: 设置 `ClaudeAgentOptions(cwd=<workspace_dir>, permission_mode="acceptEdits", allowed_tools=["Read", "Write", "Edit", "Bash"])`，对应 `design.md:51`；主控拍板为只依赖 SDK `cwd` 与 allowed_tools 限制，V1 不重写 Bash 校验。
+  - 实施细节: 设置 `ClaudeAgentOptions(cwd=<workspace_dir>, permission_mode="acceptEdits", allowed_tools=["Read", "Write", "Edit", "Bash"], env={"ANTHROPIC_BASE_URL": "...", "ANTHROPIC_API_KEY": "..."})`，对应 `design.md:51`；主控拍板为只依赖 SDK `cwd` 与 allowed_tools 限制，V1 不重写 Bash 校验。
 
 - **T2.5 实现 system prompt 与自动 context 拼装**
   - 路径: `apps/studio/backend/app/services/copilot.py`
@@ -81,7 +81,7 @@
   - 估时: 1.5h
   - 依赖: T2.4, T3.1
   - 可独立 commit: yes
-  - 实施细节: 将文本增量映射为 `text_delta`；将 Read/Write/Edit/Bash 调用映射为 `tool_use_start/result`，schema 对齐 `design.md:54`；未配置 key、timeout、backend 不支持、tool failure 均转为 `error` event；DeepSeek usage 字段差异按 `design.md:167` 在 service 层兼容。
+  - 实施细节: 将文本增量映射为 `text_delta`；将 Read/Write/Edit/Bash 调用映射为 `tool_use_start/result`，schema 对齐 `design.md:54`；未配置 key、timeout、backend 不支持、tool failure 均转为 `error` event；特别处理 CLI 子进程因 `ANTHROPIC_BASE_URL` 注入引发的网络超时或连接错误；DeepSeek usage 字段差异按 `design.md:167` 在 service 层兼容。
 
 ## Stage S3: WebSocket endpoint + CopilotEvent + POST /context (3.0h)
 - **T3.1 定义 CopilotEvent union 与 context models**

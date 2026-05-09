@@ -31,6 +31,7 @@ from app.routers import (
     test_inputs,
     websockets,
 )
+from app.services.copilot import cleanup_all_sessions
 from app.services.event_bus import file_watcher
 from app.services.run_manager import run_manager
 from app.services.skills import ensure_workspace_layout
@@ -49,6 +50,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         file_watcher.stop()
+        await cleanup_all_sessions()
         await terminal_manager.shutdown()
         await run_manager.shutdown()
 

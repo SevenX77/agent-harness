@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import queue
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -229,7 +230,13 @@ def test_run_endpoint_spawns_worker_and_ws_streams_events(
         "run_ended",
     ]
 
-    detail = client.get(f"/api/skills/text-segmentation/runs/{run_id}").json()
+    detail: dict[str, Any] = {}
+    for _ in range(20):
+        detail = client.get(f"/api/skills/text-segmentation/runs/{run_id}").json()
+        if detail.get("metadata", {}).get("status") == "success":
+            break
+        time.sleep(0.05)
+
     assert detail["metadata"]["status"] == "success"
     run_dir = workspaces_dir / "default" / "skills" / "text-segmentation" / "runs" / run_id
     assert (run_dir / "final_state.json").exists()

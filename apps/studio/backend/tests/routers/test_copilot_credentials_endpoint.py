@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import sys
-import types
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
+from app.routers import copilot as copilot_router
 from fastapi.testclient import TestClient
 
 
@@ -100,20 +100,14 @@ def test_put_credentials_rejects_extra_fields(client: TestClient, tmp_path: Path
     assert response.status_code == 422
 
 
-def test_put_credentials_calls_lazy_reset_session(
+def test_put_credentials_calls_reset_session(
     client: TestClient,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    calls: list[tuple[object, object]] = []
-    fake_module = types.ModuleType("app.services.copilot")
-
-    def reset_session(skill_id: object, backend: object) -> None:
-        calls.append((skill_id, backend))
-
-    fake_module.reset_session = reset_session  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "app.services.copilot", fake_module)
+    reset_session = AsyncMock(return_value=1)
+    monkeypatch.setattr(copilot_router, "reset_session", reset_session)
 
     response = client.put(
         "/api/copilot/credentials",
@@ -121,4 +115,4 @@ def test_put_credentials_calls_lazy_reset_session(
     )
 
     assert response.status_code == 200
-    assert calls == [(None, "claude")]
+    reset_session.assert_awaited_once_with(None, "claude")

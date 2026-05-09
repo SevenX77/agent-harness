@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from app.models.audit import AuditResult
 from app.models.compare import CompareResult
-from app.models.copilot import CopilotDispatchReq, CopilotResponse
+from app.models.copilot import (
+    BackendStatus,
+    ContextUpdateRequest,
+    CredentialsReadResponse,
+    CredentialsWriteRequest,
+)
 from app.models.errors import ErrorResponse, LintError
 from app.models.golden import GoldenBaseline, SetGoldenReq
 from app.models.lint import LintResult
@@ -31,8 +36,10 @@ __all__ = [
     "BatchRunResponse",
     "BatchRunStatus",
     "CompareResult",
-    "CopilotDispatchReq",
-    "CopilotResponse",
+    "BackendStatus",
+    "ContextUpdateRequest",
+    "CredentialsReadResponse",
+    "CredentialsWriteRequest",
     "CreateSkillReq",
     "ErrorResponse",
     "GoldenBaseline",

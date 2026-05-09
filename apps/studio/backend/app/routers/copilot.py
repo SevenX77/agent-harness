@@ -9,12 +9,14 @@ from fastapi import APIRouter
 from app.core.exceptions import error_response, raise_error_response, raise_not_implemented
 from app.models.copilot import (
     BackendStatus,
+    ContextUpdateRequest,
+    ContextUpdateResponse,
     CopilotBackend,
     CredentialsReadResponse,
     CredentialsWriteRequest,
 )
 from app.models.errors import ErrorResponse
-from app.services.copilot import reset_session
+from app.services.copilot import get_view_context, reset_session, set_view_context
 from app.services.copilot_credentials import (
     BackendCredentials,
     CredentialsData,
@@ -36,6 +38,37 @@ async def dispatch_copilot(skill_id: str, request: dict[str, Any]) -> None:
 
     del request
     raise_not_implemented(f"dispatch copilot for skill {skill_id}")
+
+
+@router.post(
+    "/api/skills/{skill_id}/copilot/context",
+    response_model=ContextUpdateResponse,
+)
+async def post_copilot_context(
+    skill_id: str,
+    request: ContextUpdateRequest,
+) -> ContextUpdateResponse:
+    """Update the cached Studio view context without starting an LLM query."""
+
+    accepted = await set_view_context(
+        skill_id=skill_id,
+        view=request.view,
+        context=request.context,
+        timestamp_ms=request.timestamp,
+    )
+    if accepted:
+        return ContextUpdateResponse(
+            accepted=True,
+            summary=f"{request.view} at {request.timestamp}",
+        )
+
+    cached = get_view_context(skill_id)
+    summary = f"{cached.view} at {cached.timestamp_ms}" if cached is not None else None
+    return ContextUpdateResponse(
+        accepted=False,
+        reason="out_of_order",
+        summary=summary,
+    )
 
 
 @router.get(

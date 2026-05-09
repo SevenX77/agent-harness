@@ -7,6 +7,7 @@ from app.models.compare import CompareResult
 from app.models.copilot import (
     BackendStatus,
     ContextUpdateRequest,
+    ContextUpdateResponse,
     CredentialsReadResponse,
     CredentialsWriteRequest,
 )
@@ -38,6 +39,7 @@ __all__ = [
     "CompareResult",
     "BackendStatus",
     "ContextUpdateRequest",
+    "ContextUpdateResponse",
     "CredentialsReadResponse",
     "CredentialsWriteRequest",
     "CreateSkillReq",

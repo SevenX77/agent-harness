@@ -17,6 +17,7 @@ def test_model_exports_cover_phase0_contracts() -> None:
         "BackendStatus",
         "CompareResult",
         "ContextUpdateRequest",
+        "ContextUpdateResponse",
         "CreateSkillReq",
         "CredentialsReadResponse",
         "CredentialsWriteRequest",

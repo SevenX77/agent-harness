@@ -14,14 +14,36 @@ import asyncio
 import hashlib
 import inspect
 import json
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
+from claude_agent_sdk import (
+    ClaudeAgentOptions,
+    ClaudeSDKClient,
+    ClaudeSDKError,
+    CLIConnectionError,
+    ProcessError,
+)
+from claude_agent_sdk.types import (
+    AssistantMessage,
+    ResultMessage,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+)
 
-from app.models.copilot import CopilotBackend
+from app.models.copilot import (
+    CopilotBackend,
+    CopilotEvent,
+    CopilotEventDone,
+    CopilotEventError,
+    CopilotEventText,
+    CopilotEventToolUseResult,
+    CopilotEventToolUseStart,
+    CopilotToolName,
+)
 
 SessionKey = tuple[str, CopilotBackend, str]
 
@@ -29,6 +51,7 @@ MAX_REFERENCE_BYTES = 5 * 1024
 _BODY_REFERENCE_CHARS = 300
 _DEEPSEEK_ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
 _ALLOWED_TOOLS = ["Read", "Write", "Edit", "Bash"]
+_ALLOWED_TOOL_SET = set(_ALLOWED_TOOLS)
 _FILE_CONTENT_KEYS = {
     "content",
     "file_content",
@@ -162,6 +185,44 @@ def build_system_prompt(skill_id: str) -> str:
     )
 
 
+async def stream_query(
+    skill_id: str,
+    backend: CopilotBackend,
+    api_key: str | None,
+    user_message: str,
+    workspace_dir: str | Path | None = None,
+) -> AsyncIterator[CopilotEvent]:
+    """Stream one Copilot query as Studio CopilotEvent objects."""
+
+    if not api_key:
+        yield CopilotEventError(message=f"未配置 {backend} backend 的 API key")
+        return
+
+    tool_names: dict[str, str] = {}
+    try:
+        if backend not in ("claude", "deepseek"):
+            raise NotImplementedError
+        client = await get_or_create_session(
+            skill_id=skill_id,
+            backend=backend,
+            api_key=api_key,
+            workspace_dir=workspace_dir or Path.cwd(),
+        )
+        await _ensure_client_connected(client)
+        await client.query(_prompt_with_system_context(skill_id, user_message))
+
+        yielded_done = False
+        async for sdk_message in client.receive_response():
+            for event in _translate_sdk_message(sdk_message, tool_names):
+                if isinstance(event, CopilotEventDone):
+                    yielded_done = True
+                yield event
+        if not yielded_done:
+            yield CopilotEventDone()
+    except Exception as exc:  # noqa: BLE001
+        yield _error_event_for_exception(backend, exc)
+
+
 async def get_or_create_session(
     skill_id: str,
     backend: CopilotBackend,
@@ -218,6 +279,83 @@ async def _close_session(session: ClaudeSDKClient) -> None:
     result = close_method()
     if inspect.isawaitable(result):
         await result
+
+
+async def _ensure_client_connected(client: ClaudeSDKClient) -> None:
+    if getattr(client, "_query", None) is not None:
+        return
+    await client.connect()
+
+
+def _prompt_with_system_context(skill_id: str, user_message: str) -> str:
+    return f"{build_system_prompt(skill_id)}\n\n## 用户消息\n{user_message}"
+
+
+def _translate_sdk_message(message: object, tool_names: dict[str, str]) -> list[CopilotEvent]:
+    if isinstance(message, AssistantMessage):
+        return _translate_assistant_message(message, tool_names)
+    if isinstance(message, ResultMessage):
+        if message.is_error:
+            details = "; ".join(message.errors or [])
+            suffix = f": {details}" if details else ""
+            return [CopilotEventError(message=f"SDK 返回错误{suffix}")]
+        return [CopilotEventDone()]
+    return []
+
+
+def _translate_assistant_message(
+    message: AssistantMessage,
+    tool_names: dict[str, str],
+) -> list[CopilotEvent]:
+    events: list[CopilotEvent] = []
+    for block in message.content:
+        if isinstance(block, TextBlock):
+            events.append(CopilotEventText(content=block.text))
+        elif isinstance(block, ToolUseBlock):
+            if block.name not in _ALLOWED_TOOL_SET:
+                events.append(CopilotEventError(message=f"V1 不支持工具 {block.name}"))
+                continue
+            tool_names[block.id] = block.name
+            events.append(
+                CopilotEventToolUseStart(
+                    tool_name=cast(CopilotToolName, block.name),
+                    tool_input=block.input,
+                )
+            )
+        elif isinstance(block, ToolResultBlock):
+            tool_name = tool_names.get(block.tool_use_id, block.tool_use_id)
+            result_summary = _tool_result_summary(block.content)
+            if block.is_error:
+                events.append(CopilotEventError(message=f"工具 {tool_name} 失败: {result_summary}"))
+            else:
+                events.append(
+                    CopilotEventToolUseResult(
+                        tool_name=tool_name,
+                        success=True,
+                        result_summary=result_summary,
+                    )
+                )
+    return events
+
+
+def _tool_result_summary(content: str | list[dict[str, Any]] | None) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    return json.dumps(content, ensure_ascii=False)
+
+
+def _error_event_for_exception(backend: CopilotBackend, exc: Exception) -> CopilotEventError:
+    if isinstance(exc, TimeoutError):
+        return CopilotEventError(message="请求超时, 检查网络 / 代理")
+    if isinstance(exc, NotImplementedError):
+        return CopilotEventError(message=f"V1.5 backend ({backend}) 暂不可用")
+    if isinstance(exc, (CLIConnectionError, ProcessError, ClaudeSDKError)):
+        return CopilotEventError(
+            message=f"后端连接失败 (DeepSeek 端点不可达 / 大陆需代理): {exc}"
+        )
+    return CopilotEventError(message=f"Copilot 请求失败: {exc}")
 
 
 def _context_for_prompt(context: dict[str, Any]) -> dict[str, Any]:

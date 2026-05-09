@@ -102,3 +102,13 @@ class ContextUpdateRequest(BaseModel):
     view: CopilotView
     context: dict[str, Any]
     timestamp: int
+
+
+class ContextUpdateResponse(BaseModel):
+    """Response for a Studio view context update."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    accepted: bool
+    reason: Literal["out_of_order"] | None = None
+    summary: str | None = None

@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import importlib
-from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter
 
-from app.core.exceptions import error_response, raise_error_response
+from app.core.exceptions import error_response, raise_error_response, raise_not_implemented
 from app.models.copilot import (
     BackendStatus,
     CopilotBackend,
@@ -16,6 +14,7 @@ from app.models.copilot import (
     CredentialsWriteRequest,
 )
 from app.models.errors import ErrorResponse
+from app.services.copilot import reset_session
 from app.services.copilot_credentials import (
     BackendCredentials,
     CredentialsData,
@@ -26,6 +25,17 @@ from app.services.copilot_credentials import (
 router = APIRouter(tags=["copilot"])
 
 _ACTIVE_BACKENDS: set[CopilotBackend] = {"claude", "deepseek"}
+
+
+@router.post(
+    "/api/skills/{skill_id}/copilot/dispatch",
+    responses={501: {"model": ErrorResponse}},
+)
+async def dispatch_copilot(skill_id: str, request: dict[str, Any]) -> None:
+    """Preserve the existing Copilot dispatch scaffold until T2.6 wires SDK events."""
+
+    del request
+    raise_not_implemented(f"dispatch copilot for skill {skill_id}")
 
 
 @router.get(
@@ -68,7 +78,7 @@ async def put_copilot_credentials(request: CredentialsWriteRequest) -> Credentia
         data.active_backend = request.backend
 
     write_credentials(data)
-    _reset_copilot_sessions(request.backend)
+    await reset_session(None, request.backend)
     return _to_read_response(data)
 
 
@@ -83,21 +93,3 @@ def _to_read_response(data: CredentialsData) -> CredentialsReadResponse:
         },
         active_backend=data.active_backend,
     )
-
-
-def _reset_copilot_sessions(backend: CopilotBackend) -> None:
-    """Call T2.3 reset hook when it exists."""
-
-    # TODO(T2.3): replace this optional hook with the concrete session manager API.
-    try:
-        copilot_service = importlib.import_module("app.services.copilot")
-    except ImportError:
-        return
-
-    reset_session = getattr(copilot_service, "reset_session", None)
-    if not callable(reset_session):
-        return
-
-    reset: Callable[[Any, CopilotBackend], None] = reset_session
-    # T2.3 will own reset_session; None means all skills for this backend.
-    reset(None, backend)

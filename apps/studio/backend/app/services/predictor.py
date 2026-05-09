@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections import Counter
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 from graph_agent import run_skill
 from graph_agent.core._predict_internal.exporter import assemble_phase_record
@@ -92,7 +92,7 @@ class PredictorService:
     ) -> PredictResult:
         """Convert raw graph result into PredictResult."""
         phases = _phase_records_from_raw(raw_result)
-        status = "success"
+        status: Literal["success", "failed"] = "success"
         if path_diff and (path_diff.missing or path_diff.extra or path_diff.order_mismatch):
             status = "failed"
         return PredictResult(status=status, phases=phases, path_diff=path_diff)

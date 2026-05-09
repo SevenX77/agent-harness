@@ -57,7 +57,7 @@ V1.5 引入 LiteLLM 时:
 
 **关键配置与 SDK 注入：**
 - **Tool use 启用**: 配置 `ClaudeAgentOptions(permission_mode='acceptEdits', allowed_tools=['Read', 'Write', 'Edit', 'Bash'])`。
-- **base_url 注入**: a1 实施时通过 `ClaudeSDKClient` 的构造参数注入（由于前期已验证底层 anthropic client 支持该参数），若确实不支持，使用 `contextvars` 注入 per-coroutine 的局部环境字典。
+- **base_url 注入**: `claude-agent-sdk` 内部通过 `SubprocessCLITransport` 启动 Claude Code CLI 子进程。`ClaudeAgentOptions` 提供了 `env: dict[str, str]` 参数，该字典会在拉起子进程时与继承的环境变量合并。因此，**必须通过 `ClaudeAgentOptions(env={"ANTHROPIC_BASE_URL": "...", "ANTHROPIC_API_KEY": "..."})` 进行注入**。这实现了安全的 per-invocation 隔离，绝不会污染全局 `os.environ`，也无需使用 Hacky 的 `contextvars` 机制。(挑刺 #1 修订, T0.1 verify 后)
 - **WebSocket 事件补充**:
 ```python
 from typing import Any, Literal, Union

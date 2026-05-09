@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 from app.core.exceptions import error_response, raise_error_response, raise_not_implemented
 from app.models.copilot import (
@@ -12,11 +12,12 @@ from app.models.copilot import (
     ContextUpdateRequest,
     ContextUpdateResponse,
     CopilotBackend,
+    CopilotEventError,
     CredentialsReadResponse,
     CredentialsWriteRequest,
 )
 from app.models.errors import ErrorResponse
-from app.services.copilot import get_view_context, reset_session, set_view_context
+from app.services.copilot import get_view_context, reset_session, set_view_context, stream_query
 from app.services.copilot_credentials import (
     BackendCredentials,
     CredentialsData,
@@ -27,6 +28,7 @@ from app.services.copilot_credentials import (
 router = APIRouter(tags=["copilot"])
 
 _ACTIVE_BACKENDS: set[CopilotBackend] = {"claude", "deepseek"}
+_POLICY_CLOSE_CODE = status.WS_1008_POLICY_VIOLATION
 
 
 @router.post(
@@ -38,6 +40,39 @@ async def dispatch_copilot(skill_id: str, request: dict[str, Any]) -> None:
 
     del request
     raise_not_implemented(f"dispatch copilot for skill {skill_id}")
+
+
+@router.websocket("/api/skills/{skill_id}/copilot/ws")
+async def copilot_ws(websocket: WebSocket, skill_id: str) -> None:
+    """Stream Copilot events for user messages over one persistent connection."""
+
+    await websocket.accept()
+    credentials = read_credentials()
+    backend = credentials.active_backend
+    api_key = credentials.backends[backend].api_key
+
+    if backend not in _ACTIVE_BACKENDS:
+        await websocket.send_json(
+            CopilotEventError(message=f"V1.5 backend ({backend}) 暂不可用").model_dump()
+        )
+        await websocket.close(code=_POLICY_CLOSE_CODE)
+        return
+
+    if not api_key:
+        await websocket.send_json(
+            CopilotEventError(message=f"未配置 {backend} 的 API key").model_dump()
+        )
+        await websocket.close(code=_POLICY_CLOSE_CODE)
+        return
+
+    try:
+        while True:
+            payload = await websocket.receive_json()
+            user_message = payload["user_message"]
+            async for event in stream_query(skill_id, backend, api_key, user_message):
+                await websocket.send_json(event.model_dump())
+    except WebSocketDisconnect:
+        await reset_session(skill_id=skill_id, backend=backend)
 
 
 @router.post(

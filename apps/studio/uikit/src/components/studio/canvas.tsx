@@ -27,7 +27,7 @@ function SkillNode({ data, selected }: { data: { label: string; type: string; st
   return (
     <div
       className={cn(
-        "relative bg-card dark:bg-card border rounded-md min-w-[180px] transition-all duration-150",
+        "relative bg-card border rounded-md min-w-[180px] transition-all duration-150",
         selected ? "border-primary shadow-[0_0_0_1px_var(--primary)]" : "border-border hover:border-muted-foreground"
       )}
     >
@@ -38,7 +38,7 @@ function SkillNode({ data, selected }: { data: { label: string; type: string; st
             "size-1.5 rounded-full",
             data.status === "active" ? "bg-primary" : "bg-muted-foreground"
           )} />
-          <span className="text-xs font-medium text-card-foreground dark:text-card-foreground">{data.label}</span>
+          <span className="text-xs font-medium text-foreground">{data.label}</span>
         </div>
         <Button variant="ghost" size="icon-xs">
           <MoreHorizontal />

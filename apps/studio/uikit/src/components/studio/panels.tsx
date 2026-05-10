@@ -10,18 +10,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Label } from "@/components/ui/label"
-import {
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubButton,
-  SidebarMenuSubItem,
-} from "@/components/ui/sidebar"
 
 interface PanelProps {
   onClose: () => void
@@ -32,7 +20,7 @@ function PanelHeader({ title, onClose, extra }: { title: string; onClose: () => 
   return (
     <div className="h-10 flex items-center justify-between px-3 border-b border-border shrink-0 bg-muted/30">
       <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-foreground">{title}</span>
+        <span className="text-xs font-medium text-foreground">{title}</span>
         {extra}
       </div>
       <Button variant="ghost" size="icon" className="size-6" onClick={onClose}>
@@ -57,76 +45,65 @@ export function AssetsPanel({ onClose }: PanelProps) {
     <div className="h-full bg-background flex flex-col">
       <PanelHeader title="Assets" onClose={onClose} />
 
-      <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Project files</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton className="text-sm font-medium">
-                  <FileText className="text-primary" strokeWidth={1.5} />
-                  <span>SKILL.md</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+      <ScrollArea className="flex-1">
+        <div className="py-2 px-2 text-sm">
+          {/* SKILL.md */}
+          <div className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors">
+            <FileText className="size-4 text-primary" strokeWidth={1.5} />
+            <span>SKILL.md</span>
+          </div>
 
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  onClick={() => toggleFolder("scripts")}
-                  className="text-sm font-medium"
-                >
-                  {expanded.scripts ? <ChevronDown /> : <ChevronRight />}
-                  <Folder strokeWidth={1.5} />
-                  <span>scripts</span>
-                </SidebarMenuButton>
-                {expanded.scripts && (
-                  <SidebarMenuSub>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton className="text-xs">
-                        <FileText strokeWidth={1.5} />
-                        <span>main.py</span>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton className="text-xs">
-                        <FileText strokeWidth={1.5} />
-                        <span>utils.py</span>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                  </SidebarMenuSub>
-                )}
-              </SidebarMenuItem>
+          {/* Scripts folder */}
+          <div>
+            <button
+              onClick={() => toggleFolder("scripts")}
+              className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors w-full text-left"
+            >
+              {expanded.scripts ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+              <Folder className="size-4" strokeWidth={1.5} />
+              <span>scripts</span>
+            </button>
+            {expanded.scripts && (
+              <div className="ml-4 border-l border-border pl-3">
+                <div className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors">
+                  <FileText className="size-4" strokeWidth={1.5} />
+                  <span>main.py</span>
+                </div>
+                <div className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors">
+                  <FileText className="size-4" strokeWidth={1.5} />
+                  <span>utils.py</span>
+                </div>
+              </div>
+            )}
+          </div>
 
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  onClick={() => toggleFolder("data")}
-                  className="text-sm font-medium"
-                >
-                  {expanded.data ? <ChevronDown /> : <ChevronRight />}
-                  <Folder strokeWidth={1.5} />
-                  <span>data</span>
-                </SidebarMenuButton>
-                {expanded.data && (
-                  <SidebarMenuSub>
-                    <SidebarMenuSubItem>
-                      <SidebarMenuSubButton className="text-xs">
-                        <FileText strokeWidth={1.5} />
-                        <span>golden_baseline.json</span>
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                  </SidebarMenuSub>
-                )}
-              </SidebarMenuItem>
+          {/* Data folder */}
+          <div>
+            <button
+              onClick={() => toggleFolder("data")}
+              className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors w-full text-left"
+            >
+              {expanded.data ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+              <Folder className="size-4" strokeWidth={1.5} />
+              <span>data</span>
+            </button>
+            {expanded.data && (
+              <div className="ml-4 border-l border-border pl-3">
+                <div className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors">
+                  <FileText className="size-4" strokeWidth={1.5} />
+                  <span>golden_baseline.json</span>
+                </div>
+              </div>
+            )}
+          </div>
 
-              <SidebarMenuItem>
-                <SidebarMenuButton className="text-sm font-medium">
-                  <FileText strokeWidth={1.5} />
-                  <span>config.yaml</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      </SidebarContent>
+          {/* Config */}
+          <div className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors">
+            <FileText className="size-4" strokeWidth={1.5} />
+            <span>config.yaml</span>
+          </div>
+        </div>
+      </ScrollArea>
     </div>
   )
 }
@@ -144,37 +121,31 @@ export function TimelinePanel({ onClose }: PanelProps) {
     <div className="h-full bg-background flex flex-col">
       <PanelHeader title="Timeline" onClose={onClose} />
 
-      <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Recent runs</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
+      <ScrollArea className="flex-1">
+        <div className="py-2 px-2">
           {traces.map((trace) => (
-            <SidebarMenuItem key={trace.id}>
-              <SidebarMenuButton className="h-auto items-start py-2 text-sm font-medium">
-                {trace.status === "success" ? (
-                  <CheckCircle2 className="mt-0.5 text-emerald-500" />
-                ) : (
-                  <AlertCircle className="mt-0.5 text-destructive" />
-                )}
-                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="flex items-center justify-between gap-2">
-                    <span className="truncate">{trace.name}</span>
-                    <span className="text-xs font-normal text-muted-foreground">
-                      {trace.time}
-                    </span>
-                  </span>
-                  <span className="text-xs font-normal text-muted-foreground">
-                    {trace.duration}
-                  </span>
-                </span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+            <div
+              key={trace.id}
+              className="px-2 py-2 rounded-md hover:bg-accent cursor-pointer transition-colors group"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {trace.status === "success" ? (
+                    <CheckCircle2 className="size-4 text-emerald-500" />
+                  ) : (
+                    <AlertCircle className="size-4 text-destructive" />
+                  )}
+                  <span className="text-sm text-muted-foreground group-hover:text-foreground">{trace.name}</span>
+                </div>
+                <span className="text-xs text-muted-foreground">{trace.time}</span>
+              </div>
+              <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground pl-6">
+                <span>{trace.duration}</span>
+              </div>
+            </div>
           ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      </SidebarContent>
+        </div>
+      </ScrollArea>
 
       <Separator />
       <div className="p-2">

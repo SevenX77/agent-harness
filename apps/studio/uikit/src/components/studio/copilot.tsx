@@ -4,12 +4,6 @@ import { X, Sparkles, ChevronRight, Plus, Paperclip, ArrowUp } from "lucide-reac
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarHeader,
-} from "@/components/ui/sidebar"
 import { cn } from "@/lib/utils"
 
 interface CopilotProps {
@@ -27,8 +21,9 @@ export function Copilot({ onClose }: CopilotProps) {
   const [message, setMessage] = useState("")
 
   return (
-    <Sidebar side="right" collapsible="none" className="h-full w-full border-l border-sidebar-border">
-      <SidebarHeader className="h-11 flex-row items-center justify-between border-b border-sidebar-border px-3 py-0">
+    <div className="h-full w-full bg-sidebar border-l border-sidebar-border flex flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 h-11 border-b border-sidebar-border shrink-0">
         <div className="flex items-center gap-1.5">
           <span className="text-sm font-medium text-foreground">New Chat</span>
           <ChevronRight className="size-3 text-muted-foreground" />
@@ -41,10 +36,10 @@ export function Copilot({ onClose }: CopilotProps) {
             <X />
           </Button>
         </div>
-      </SidebarHeader>
+      </div>
 
-      <SidebarContent>
-        <ScrollArea className="flex-1">
+      {/* Content */}
+      <ScrollArea className="flex-1">
         <div className="p-4">
           {/* Welcome */}
           <div className="mb-6">
@@ -69,16 +64,16 @@ export function Copilot({ onClose }: CopilotProps) {
             ))}
           </div>
         </div>
-        </ScrollArea>
-      </SidebarContent>
+      </ScrollArea>
 
-      <SidebarFooter className="border-t border-sidebar-border p-3">
-        <div className="flex items-center gap-2 bg-secondary dark:bg-secondary border border-border rounded-md px-2.5 py-2 focus-within:ring-1 focus-within:ring-ring transition-colors">
+      {/* Input */}
+      <div className="p-3 border-t border-sidebar-border shrink-0">
+        <div className="flex items-center gap-2 bg-secondary border border-border rounded-md px-2.5 py-2 focus-within:ring-1 focus-within:ring-ring transition-colors">
           <Input
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             placeholder="Use '@' to mention nodes..."
-            className="flex-1 border-0 bg-transparent h-auto p-0 text-xs text-foreground dark:text-foreground placeholder:text-muted-foreground dark:placeholder:text-muted-foreground focus-visible:ring-0"
+            className="flex-1 border-0 bg-transparent h-auto p-0 text-xs focus-visible:ring-0"
           />
           <div className="flex items-center gap-0.5">
             <Button variant="ghost" size="icon-xs">
@@ -96,8 +91,8 @@ export function Copilot({ onClose }: CopilotProps) {
             </Button>
           </div>
         </div>
-      </SidebarFooter>
-    </Sidebar>
+      </div>
+    </div>
   )
 }
 

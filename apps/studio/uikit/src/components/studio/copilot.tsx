@@ -96,3 +96,14 @@ export function Copilot({ onClose }: CopilotProps) {
   )
 }
 
+export function CopilotButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Button
+      onClick={onClick}
+      size="icon"
+      className="fixed right-5 bottom-5 size-10 rounded-full shadow-lg z-40"
+    >
+      <Sparkles strokeWidth={1.5} />
+    </Button>
+  )
+}

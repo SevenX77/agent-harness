@@ -42,6 +42,9 @@ venv/
 .vscode/
 *.swp
 *.swo
+
+# Superpowers brainstorm visual companion (per-session, ephemeral)
+.superpowers/
 *~
 
 # Logs

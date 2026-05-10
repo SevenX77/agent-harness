@@ -20,6 +20,7 @@ import { MoreHorizontal } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { useTheme } from "@/hooks/use-theme"
 
 // Custom Node Component
 function SkillNode({ data, selected }: { data: { label: string; type: string; status?: string; id: string }; selected: boolean }) {
@@ -128,13 +129,20 @@ const initialEdges: Edge[] = [
 ]
 
 export function Canvas() {
+  const { theme } = useTheme()
   const nodeTypes = useMemo(() => ({ skillNode: SkillNode }), [])
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
+  const [nodes, , onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
 
   const onConnect = useCallback(
-    (params: Connection) => setEdges((eds) => addEdge({ ...params, style: { stroke: "var(--muted-foreground)" } }, eds)),
-    [setEdges]
+    (params: Connection) =>
+      setEdges((eds) =>
+        addEdge(
+          { ...params, style: { stroke: "var(--muted-foreground)" } },
+          eds,
+        ),
+      ),
+    [setEdges],
   )
 
   return (
@@ -148,10 +156,9 @@ export function Canvas() {
         nodeTypes={nodeTypes}
         fitView
         fitViewOptions={{ padding: 0.3 }}
+        colorMode={theme}
         className="bg-background"
-        defaultEdgeOptions={{
-          type: "smoothstep",
-        }}
+        defaultEdgeOptions={{ type: "smoothstep" }}
       >
         <Background
           variant={BackgroundVariant.Dots}
@@ -163,7 +170,11 @@ export function Canvas() {
         <Controls showInteractive={false} />
         <MiniMap
           nodeColor="var(--secondary)"
-          maskColor="rgba(0,0,0,0.85)"
+          maskColor={
+            theme === "dark"
+              ? "rgba(255, 255, 255, 0.04)"
+              : "rgba(0, 0, 0, 0.06)"
+          }
           className="!rounded-md"
         />
       </ReactFlow>

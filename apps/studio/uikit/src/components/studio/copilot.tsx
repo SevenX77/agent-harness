@@ -7,7 +7,6 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 
 interface CopilotProps {
-  isOpen: boolean
   onClose: () => void
 }
 
@@ -18,13 +17,11 @@ const suggestions = [
   "Generate tests",
 ]
 
-export function Copilot({ isOpen, onClose }: CopilotProps) {
+export function Copilot({ onClose }: CopilotProps) {
   const [message, setMessage] = useState("")
 
-  if (!isOpen) return null
-
   return (
-    <div className="fixed right-0 top-0 h-full w-[340px] bg-sidebar border-l border-sidebar-border flex flex-col z-50 animate-in slide-in-from-right duration-200">
+    <div className="h-full w-full bg-sidebar border-l border-sidebar-border flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between px-3 h-11 border-b border-sidebar-border shrink-0">
         <div className="flex items-center gap-1.5">
@@ -99,15 +96,3 @@ export function Copilot({ isOpen, onClose }: CopilotProps) {
   )
 }
 
-// Floating Copilot Button
-export function CopilotButton({ onClick }: { onClick: () => void }) {
-  return (
-    <Button
-      onClick={onClick}
-      size="icon"
-      className="fixed right-5 bottom-5 size-10 rounded-full shadow-lg z-40"
-    >
-      <Sparkles strokeWidth={1.5} />
-    </Button>
-  )
-}

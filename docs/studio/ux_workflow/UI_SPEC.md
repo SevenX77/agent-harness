@@ -189,9 +189,58 @@ Avoid raw `z-[N]` everywhere; use named layers:
 
 ## §5 Layout shell
 
-> Locked at slice 2.
+> Locked at slice 2. Implementation: `apps/studio/uikit/src/components/studio/workspace.tsx`.
 
-- [ ] Header + Toolbar + Side panel + Canvas + Copilot rail grid contract.
+### §5.1 Shell grid (vertical stack inside `h-screen w-screen`)
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│ Header                                              44px       │
+├────┬─────────────────┬───────────────────────┬────────────────┤
+│ T  │   Left          │                       │   Copilot      │
+│ b  │   Panel         │     Canvas            │   rail         │
+│ 48 │  (resizable,    │   (resizable,         │  (resizable,   │
+│ px │   conditional)  │    always present)    │   togglable)   │
+│    │                 │                       │                │
+└────┴─────────────────┴───────────────────────┴────────────────┘
+```
+
+- **Header** — fixed `h-11` (44px), full width, never resizes. Owns project name, status badge, primary actions (Predict / Run), Copilot toggle, theme toggle, user menu.
+- **Toolbar rail** — fixed `w-12` (48px), full height of body row, never resizes. Vertical icon nav for left-panel switching + global Add Node + Help.
+- **Body row** — `flex-1 flex min-h-0`. Toolbar sits to the left of a `<ResizablePanelGroup direction="horizontal">`.
+
+### §5.2 ResizablePanelGroup (horizontal, `autoSaveId="studio-workspace-h"`)
+
+Three logical panels, conditionally mounted by stable `id` so `react-resizable-panels` can persist sizes across mount/unmount cycles:
+
+| `id`        | `order` | `defaultSize` | `minSize` | `maxSize` | Mount condition         |
+|-------------|---------|---------------|-----------|-----------|-------------------------|
+| `left-panel`| 1       | 20            | 14        | 35        | `activePanel !== null`  |
+| `canvas`    | 2       | 60            | 30        | —         | always                  |
+| `copilot`   | 3       | 20            | 18        | 35        | `copilotOpen`           |
+
+Sizes are **percent of the body row**, not pixels — `react-resizable-panels` API. Unit anchors:
+
+- Left panel at `defaultSize=20` ≈ 280px on a 1440px desktop (matches v0's 280px initial). minSize floor ≈ 200px, maxSize ceiling ≈ 500px.
+- Copilot rail at `defaultSize=20` ≈ 280px. minSize floor ≈ 250px, maxSize ceiling ≈ 500px.
+- Canvas always takes whatever's left, minimum ≈ 420px.
+
+### §5.3 Conditional mount contract
+
+- Each `<ResizablePanel>` has a stable `id` + `order` so the group can rehydrate sizes after `left-panel` or `copilot` is unmounted/remounted.
+- `<ResizableHandle>` is always rendered as a sibling **after** its preceding panel when both sides are mounted. Never render a handle adjacent to an unmounted panel.
+- No `withHandle` decoration in v1 — the 1px border-themed handle (built into shadcn primitive) is sufficient at this density.
+
+### §5.4 Toggle entry points (single source per toggle)
+
+- **Left panel** is opened/closed via the Toolbar rail buttons (`assets`/`timeline`/`properties`/`editor`). Clicking the same active tool toggles it off. The Panel's own `X` close button calls `onPanelChange(null)`.
+- **Copilot rail** is toggled via the Header right-side `Sparkles` button (replaces the v0 floating round button). The rail's own `X` button also closes it. Header button is `aria-pressed={copilotOpen}` and switches between `ghost`/`secondary` to indicate state.
+
+### §5.5 Drag handle behavior
+
+- Cursor: `col-resize` while hovering / dragging the handle (provided by primitive).
+- Focus ring: shadcn `ring`/`ring-1` on `focus-visible` (primitive default).
+- No body-wide cursor lock or `select-none` overlay needed — `react-resizable-panels` handles it internally.
 
 ## §6 Accessibility
 

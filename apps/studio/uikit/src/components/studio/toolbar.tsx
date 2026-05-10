@@ -38,42 +38,38 @@ export function Toolbar({ activePanel, onPanelChange }: ToolbarProps) {
 
       {/* Tools */}
       <div className="flex flex-col gap-1">
-        {tools.map((tool) => (
-          <div key={tool.id}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant={
-                    tool.id === "add"
-                      ? "default"
-                      : activePanel === tool.id
-                      ? "secondary"
-                      : "ghost"
-                  }
-                  size="icon"
-                  onClick={() =>
-                    tool.id === "add"
-                      ? null
-                      : onPanelChange(activePanel === tool.id ? null : tool.id)
-                  }
-                  className={cn(
-                    "size-8",
-                    activePanel === tool.id && tool.id !== "add" && "bg-accent text-accent-foreground"
-                  )}
-                >
-                  <tool.icon className="size-4" strokeWidth={1.75} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="right" sideOffset={8}>
-                <span>{tool.label}</span>
-                <span className="ml-2 text-muted-foreground text-xs">{tool.shortcut}</span>
-              </TooltipContent>
-            </Tooltip>
-            {tool.dividerAfter && (
-              <Separator className="my-2" />
-            )}
-          </div>
-        ))}
+        {tools.map((tool) => {
+          const isActive = activePanel === tool.id
+          const isAdd = tool.id === "add"
+          return (
+            <div key={tool.id}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={isActive ? "secondary" : "ghost"}
+                    size="icon"
+                    onClick={() =>
+                      isAdd
+                        ? undefined
+                        : onPanelChange(isActive ? null : tool.id)
+                    }
+                    className={cn("size-8", isAdd && "text-primary")}
+                    aria-pressed={isActive}
+                  >
+                    <tool.icon className="size-4" strokeWidth={1.75} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right" sideOffset={8}>
+                  <span>{tool.label}</span>
+                  <span className="ml-2 text-muted-foreground text-xs">
+                    {tool.shortcut}
+                  </span>
+                </TooltipContent>
+              </Tooltip>
+              {tool.dividerAfter && <Separator className="my-2" />}
+            </div>
+          )
+        })}
       </div>
 
       {/* Spacer */}

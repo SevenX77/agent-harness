@@ -1,5 +1,4 @@
-
-import { ChevronDown, Play, Zap, Sun, Moon } from "lucide-react"
+import { ChevronDown, Play, Zap, Sun, Moon, Sparkles } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -15,12 +14,30 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Separator } from "@/components/ui/separator"
 import { useTheme } from "@/hooks/use-theme"
 
+type Status = "draft" | "compiled" | "running"
+
 interface HeaderProps {
   projectName: string
-  status: "draft" | "compiled" | "running"
+  status: Status
+  copilotOpen: boolean
+  onCopilotToggle: () => void
 }
 
-export function Header({ projectName, status }: HeaderProps) {
+const STATUS_VARIANT: Record<
+  Status,
+  "default" | "secondary" | "outline"
+> = {
+  draft: "outline",
+  compiled: "secondary",
+  running: "default",
+}
+
+export function Header({
+  projectName,
+  status,
+  copilotOpen,
+  onCopilotToggle,
+}: HeaderProps) {
   const { theme, toggleTheme } = useTheme()
 
   return (
@@ -49,7 +66,7 @@ export function Header({ projectName, status }: HeaderProps) {
         <span className="text-xs text-muted-foreground">Workspace</span>
 
         <Badge
-          variant={status === "compiled" ? "default" : status === "running" ? "secondary" : "outline"}
+          variant={STATUS_VARIANT[status]}
           className="text-[10px] uppercase"
         >
           {status}
@@ -70,11 +87,28 @@ export function Header({ projectName, status }: HeaderProps) {
 
         <Separator orientation="vertical" className="h-4 mx-1" />
 
-        {/* Theme Toggle */}
+        {/* Copilot Toggle */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant={copilotOpen ? "secondary" : "ghost"}
+              size="icon-sm"
+              onClick={onCopilotToggle}
+              aria-pressed={copilotOpen}
+            >
+              <Sparkles />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {copilotOpen ? "Hide Copilot" : "Show Copilot"}
+          </TooltipContent>
+        </Tooltip>
+
+        {/* Theme Toggle: shows the target mode you'd switch to */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="icon-sm" onClick={toggleTheme}>
-              {theme === "dark" ? <Moon /> : <Sun />}
+              {theme === "dark" ? <Sun /> : <Moon />}
             </Button>
           </TooltipTrigger>
           <TooltipContent>

@@ -1,40 +1,23 @@
-
 import { useState } from "react"
 import { Header } from "./header"
 import { Toolbar } from "./toolbar"
 import { Canvas } from "./canvas"
-import { Copilot, CopilotButton } from "./copilot"
-import { AssetsPanel, TimelinePanel, PropertiesPanel, EditorPanel } from "./panels"
-import { cn } from "@/lib/utils"
+import { Copilot } from "./copilot"
+import {
+  AssetsPanel,
+  TimelinePanel,
+  PropertiesPanel,
+  EditorPanel,
+} from "./panels"
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "@/components/ui/resizable"
 
 export function Workspace() {
   const [activePanel, setActivePanel] = useState<string | null>("assets")
-  const [panelWidth, setPanelWidth] = useState(280)
-  const [copilotOpen, setCopilotOpen] = useState(false)
-  const [isResizing, setIsResizing] = useState(false)
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault()
-    setIsResizing(true)
-    
-    const startX = e.clientX
-    const startWidth = panelWidth
-    
-    const handleMouseMove = (e: MouseEvent) => {
-      const delta = e.clientX - startX
-      const newWidth = Math.min(Math.max(startWidth + delta, 200), 500)
-      setPanelWidth(newWidth)
-    }
-    
-    const handleMouseUp = () => {
-      setIsResizing(false)
-      document.removeEventListener("mousemove", handleMouseMove)
-      document.removeEventListener("mouseup", handleMouseUp)
-    }
-    
-    document.addEventListener("mousemove", handleMouseMove)
-    document.addEventListener("mouseup", handleMouseUp)
-  }
+  const [copilotOpen, setCopilotOpen] = useState(true)
 
   const renderPanel = () => {
     switch (activePanel) {
@@ -52,40 +35,55 @@ export function Workspace() {
   }
 
   return (
-    <div className={cn(
-      "h-screen w-screen flex flex-col bg-background overflow-hidden",
-      isResizing && "cursor-col-resize select-none"
-    )}>
-      <Header projectName="Text Generator Skill" status="compiled" />
+    <div className="h-screen w-screen flex flex-col bg-background overflow-hidden">
+      <Header
+        projectName="Text Generator Skill"
+        status="compiled"
+        copilotOpen={copilotOpen}
+        onCopilotToggle={() => setCopilotOpen((v) => !v)}
+      />
 
       <div className="flex-1 flex min-h-0">
         <Toolbar activePanel={activePanel} onPanelChange={setActivePanel} />
 
-        {/* Left Panel with manual resize */}
-        {activePanel && (
-          <div 
-            className="h-full border-r border-border flex"
-            style={{ width: panelWidth }}
-          >
-            <div className="flex-1 overflow-hidden">
-              {renderPanel()}
-            </div>
-            {/* Resize Handle */}
-            <div
-              className="w-1 hover:bg-primary/50 cursor-col-resize transition-colors flex-shrink-0"
-              onMouseDown={handleMouseDown}
-            />
-          </div>
-        )}
+        <ResizablePanelGroup
+          id="studio-workspace-h"
+          orientation="horizontal"
+          className="flex-1"
+        >
+          {activePanel && (
+            <>
+              <ResizablePanel
+                id="left-panel"
+                defaultSize="20%"
+                minSize="14%"
+                maxSize="35%"
+              >
+                {renderPanel()}
+              </ResizablePanel>
+              <ResizableHandle />
+            </>
+          )}
 
-        {/* Canvas */}
-        <div className="flex-1 min-w-0">
-          <Canvas />
-        </div>
+          <ResizablePanel id="canvas" defaultSize="60%" minSize="30%">
+            <Canvas />
+          </ResizablePanel>
+
+          {copilotOpen && (
+            <>
+              <ResizableHandle />
+              <ResizablePanel
+                id="copilot"
+                defaultSize="20%"
+                minSize="18%"
+                maxSize="35%"
+              >
+                <Copilot onClose={() => setCopilotOpen(false)} />
+              </ResizablePanel>
+            </>
+          )}
+        </ResizablePanelGroup>
       </div>
-
-      <CopilotButton onClick={() => setCopilotOpen(true)} />
-      <Copilot isOpen={copilotOpen} onClose={() => setCopilotOpen(false)} />
     </div>
   )
 }

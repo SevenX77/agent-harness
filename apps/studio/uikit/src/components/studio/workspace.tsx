@@ -14,6 +14,7 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable"
+import { SidebarProvider } from "@/components/ui/sidebar"
 
 export function Workspace() {
   const [activePanel, setActivePanel] = useState<string | null>("assets")
@@ -35,7 +36,10 @@ export function Workspace() {
   }
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-background overflow-hidden">
+    <SidebarProvider
+      defaultOpen={false}
+      className="h-screen w-screen min-h-0 flex flex-col bg-background overflow-hidden"
+    >
       <Header
         projectName="Text Generator Skill"
         status="compiled"
@@ -61,7 +65,7 @@ export function Workspace() {
               >
                 {renderPanel()}
               </ResizablePanel>
-              <ResizableHandle />
+              <ResizableHandle withHandle />
             </>
           )}
 
@@ -71,7 +75,7 @@ export function Workspace() {
 
           {copilotOpen && (
             <>
-              <ResizableHandle />
+              <ResizableHandle withHandle />
               <ResizablePanel
                 id="copilot"
                 defaultSize="20%"
@@ -88,6 +92,6 @@ export function Workspace() {
       {!copilotOpen && (
         <CopilotButton onClick={() => setCopilotOpen(true)} />
       )}
-    </div>
+    </SidebarProvider>
   )
 }

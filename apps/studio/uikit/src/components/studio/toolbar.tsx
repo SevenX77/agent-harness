@@ -1,5 +1,4 @@
 
-import { cn } from "@/lib/utils"
 import {
   Plus,
   Files,
@@ -10,9 +9,16 @@ import {
   HelpCircle,
   Layers,
 } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Separator } from "@/components/ui/separator"
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarSeparator,
+} from "@/components/ui/sidebar"
 
 interface ToolbarProps {
   activePanel: string | null
@@ -30,62 +36,58 @@ const tools = [
 
 export function Toolbar({ activePanel, onPanelChange }: ToolbarProps) {
   return (
-    <div className="flex flex-col items-center py-3 px-2 bg-sidebar border-r border-border w-12">
-      {/* Logo */}
-      <div className="size-7 rounded-md bg-foreground flex items-center justify-center mb-4">
-        <Layers className="size-4 text-background" strokeWidth={2} />
-      </div>
+    <Sidebar
+      collapsible="icon"
+      side="left"
+      className="top-11 h-[calc(100svh-2.75rem)]"
+    >
+      <SidebarHeader className="items-center py-3">
+        <div className="size-8 rounded-md bg-sidebar-primary flex items-center justify-center">
+          <Layers className="size-4 text-sidebar-primary-foreground" strokeWidth={2} />
+        </div>
+      </SidebarHeader>
 
-      {/* Tools */}
-      <div className="flex flex-col gap-1">
+      <SidebarContent>
+        <SidebarMenu className="items-center gap-1 px-2">
         {tools.map((tool) => {
           const isActive = activePanel === tool.id
           const isAdd = tool.id === "add"
           return (
-            <div key={tool.id}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant={isActive ? "secondary" : "ghost"}
-                    size="icon"
-                    onClick={() =>
-                      isAdd
-                        ? undefined
-                        : onPanelChange(isActive ? null : tool.id)
-                    }
-                    className={cn("size-8", isAdd && "text-primary")}
-                    aria-pressed={isActive}
-                  >
-                    <tool.icon className="size-4" strokeWidth={1.75} />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="right" sideOffset={8}>
-                  <span>{tool.label}</span>
-                  <span className="ml-2 text-muted-foreground text-xs">
-                    {tool.shortcut}
-                  </span>
-                </TooltipContent>
-              </Tooltip>
-              {tool.dividerAfter && <Separator className="my-2" />}
-            </div>
+            <SidebarMenuItem key={tool.id} className="w-8">
+              <SidebarMenuButton
+                isActive={isActive}
+                tooltip={`${tool.label} ${tool.shortcut}`}
+                onClick={() =>
+                  isAdd
+                    ? undefined
+                    : onPanelChange(isActive ? null : tool.id)
+                }
+                className="size-8 rounded-md justify-center text-sidebar-foreground dark:text-sidebar-foreground"
+                aria-pressed={isActive}
+              >
+                <tool.icon className="size-4" strokeWidth={1.75} />
+                <span>{tool.label}</span>
+              </SidebarMenuButton>
+              {tool.dividerAfter && <SidebarSeparator className="my-2" />}
+            </SidebarMenuItem>
           )
         })}
-      </div>
+        </SidebarMenu>
+      </SidebarContent>
 
-      {/* Spacer */}
-      <div className="flex-1" />
-
-      {/* Help */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon" className="size-8">
+      <SidebarFooter className="items-center py-3">
+        <SidebarMenu className="items-center">
+          <SidebarMenuItem className="w-8">
+            <SidebarMenuButton
+              tooltip="Help"
+              className="size-8 rounded-md justify-center text-sidebar-foreground dark:text-sidebar-foreground"
+            >
             <HelpCircle className="size-4" strokeWidth={1.75} />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="right" sideOffset={8}>
-          Help
-        </TooltipContent>
-      </Tooltip>
-    </div>
+              <span>Help</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
+    </Sidebar>
   )
 }

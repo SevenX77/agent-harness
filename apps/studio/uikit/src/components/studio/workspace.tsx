@@ -2,7 +2,7 @@ import { useState } from "react"
 import { Header } from "./header"
 import { Toolbar } from "./toolbar"
 import { Canvas } from "./canvas"
-import { Copilot } from "./copilot"
+import { Copilot, CopilotButton } from "./copilot"
 import {
   AssetsPanel,
   TimelinePanel,
@@ -84,6 +84,10 @@ export function Workspace() {
           )}
         </ResizablePanelGroup>
       </div>
+
+      {!copilotOpen && (
+        <CopilotButton onClick={() => setCopilotOpen(true)} />
+      )}
     </div>
   )
 }

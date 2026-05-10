@@ -46,11 +46,7 @@ export function Header({
       <div className="flex items-center gap-3">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-1.5 px-2 text-foreground dark:text-foreground"
-            >
+            <Button variant="ghost" size="sm" className="gap-1.5 px-2">
               <span className="text-sm font-medium">{projectName}</span>
               <ChevronDown className="text-muted-foreground" />
             </Button>

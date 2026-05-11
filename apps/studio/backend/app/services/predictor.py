@@ -24,8 +24,8 @@ from graph_agent.core._predict_internal.strategy import (
 )
 from graph_agent.core._predict_internal.tracing import PredictTracingCallback
 
-from app.services.diagnostic_export import export_predict_diagnostics
 from app.models.runs import PredictDiagnosticExport
+from app.services.diagnostic_export import export_predict_diagnostics
 from app.services.skills import ensure_workspace_skill_dir
 
 logger = logging.getLogger(__name__)

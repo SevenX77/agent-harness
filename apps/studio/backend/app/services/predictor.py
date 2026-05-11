@@ -25,6 +25,7 @@ from graph_agent.core._predict_internal.strategy import (
 from graph_agent.core._predict_internal.tracing import PredictTracingCallback
 
 from app.services.diagnostic_export import export_predict_diagnostics
+from app.models.runs import PredictDiagnosticExport
 from app.services.skills import ensure_workspace_skill_dir
 
 logger = logging.getLogger(__name__)
@@ -97,7 +98,7 @@ class PredictorService:
             status = "failed"
         return PredictResult(status=status, phases=phases, path_diff=path_diff)
 
-    def export_diagnostics(self, result: PredictResult):
+    def export_diagnostics(self, result: PredictResult) -> PredictDiagnosticExport:
         """Expose PredictResult through the Studio in-process diagnostic contract."""
 
         return export_predict_diagnostics(result)

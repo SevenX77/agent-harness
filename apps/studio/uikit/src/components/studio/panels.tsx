@@ -97,7 +97,7 @@ interface AssetsPanelProps extends PanelProps {
 // Panel Header Component
 function PanelHeader({ title, onClose, extra }: { title: string; onClose: () => void; extra?: React.ReactNode }) {
   return (
-    <div className="h-10 flex items-center justify-between px-3 border-b border-border shrink-0 bg-muted/30">
+    <div className="h-10 flex items-center justify-between px-3 shrink-0">
       <div className="flex items-center gap-2">
         <span className="text-xs font-medium text-foreground">{title}</span>
         {extra}

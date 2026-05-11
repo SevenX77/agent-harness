@@ -2,8 +2,9 @@ import { AlertTriangle, CheckCircle2, Loader2, Sparkles } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { postPredictRun, type PredictRunResponse } from '../../api/client'
-import type { JsonObject } from '../../api/types'
+import type { JsonObject, RunDetail } from '../../api/types'
 import { PredictInputDialog } from '../../components/playground/PredictInputDialog'
+import { PredictSplit } from '../../components/studio/predict-split'
 import { readLintStatus } from '../../hooks/useDebouncedLint'
 import { useSkills } from '../../hooks/useSkills'
 import { errorMessage } from '../../utils/errors'
@@ -14,6 +15,7 @@ export default function Predict() {
   const [inputOpen, setInputOpen] = useState(false)
   const [payload, setPayload] = useState<JsonObject | null>(null)
   const [predictResult, setPredictResult] = useState<PredictRunResponse | null>(null)
+  const [goldenDraft, setGoldenDraft] = useState('{}')
   const [running, setRunning] = useState(false)
   const [predictError, setPredictError] = useState<string | null>(null)
   const lintStatus = readLintStatus(skillId)
@@ -27,6 +29,16 @@ export default function Predict() {
     const manifest = skillDetail?.manifest
     return manifest?.type === 'graph' ? manifest.io.inputs : []
   }, [skillDetail])
+  const predictOutput = useMemo(() => {
+    if (!predictResult) {
+      return null
+    }
+    const runDetail = predictResult as RunDetail
+    if (runDetail.final_context) {
+      return runDetail.final_context
+    }
+    return predictResult.final_context ?? predictResult.output ?? null
+  }, [predictResult])
 
   const runPredict = async (nextPayload: JsonObject) => {
     setPayload(nextPayload)
@@ -36,6 +48,8 @@ export default function Predict() {
     try {
       const response = await postPredictRun(skillId, nextPayload)
       setPredictResult(response)
+      const output = 'final_context' in response && response.final_context ? response.final_context : 'output' in response ? response.output : null
+      setGoldenDraft(JSON.stringify(output ?? {}, null, 2))
     } catch (error) {
       setPredictResult(null)
       setPredictError(errorMessage(error))
@@ -98,18 +112,19 @@ export default function Predict() {
           </pre>
         </div>
 
-        <div className="mt-5 rounded-md border border-border bg-card p-4">
-          <h2 className="text-sm font-semibold text-foreground">Predict result</h2>
-          {predictError ? (
-            <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {predictError}
-            </div>
-          ) : (
-            <pre className="mt-3 max-h-96 overflow-auto rounded-md border border-border bg-muted/40 p-3 text-xs text-foreground">
-              {JSON.stringify(predictResult ?? { status: running ? 'running' : 'idle' }, null, 2)}
-            </pre>
-          )}
-        </div>
+        {predictError ? (
+          <div className="mt-5 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {predictError}
+          </div>
+        ) : (
+          <div className="mt-5">
+            <PredictSplit
+              output={predictOutput ?? (running ? { status: 'running' } : null)}
+              goldenDraft={goldenDraft}
+              onGoldenDraftChange={setGoldenDraft}
+            />
+          </div>
+        )}
 
         {inputOpen ? (
           <PredictInputDialog

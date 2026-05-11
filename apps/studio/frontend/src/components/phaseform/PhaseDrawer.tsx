@@ -42,7 +42,7 @@ export function PhaseDrawer({
         role="dialog"
         aria-modal="true"
         aria-labelledby="phase-drawer-title"
-        className="pointer-events-auto absolute right-0 top-0 flex h-full w-[min(42rem,44vw)] min-w-[32rem] flex-col border-l border-slate-200 bg-slate-50 shadow-2xl dark:border-slate-800 dark:bg-slate-950"
+        className="pointer-events-auto absolute end-0 top-0 flex h-full w-[min(42rem,44vw)] min-w-[32rem] flex-col border-s border-slate-200 bg-slate-50 shadow-2xl dark:border-slate-800 dark:bg-slate-950"
       >
         <div className="flex shrink-0 items-start justify-between border-b border-slate-200 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-900">
           <div>
@@ -60,7 +60,7 @@ export function PhaseDrawer({
             type="button"
             aria-label="Close phase form"
             onClick={onClose}
-            className="rounded-md p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+            className="min-h-8 min-w-8 rounded-md p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
             title="Close phase form"
           >
             <X className="h-5 w-5" />

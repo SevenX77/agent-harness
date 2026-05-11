@@ -17,7 +17,7 @@ export function PromptField({ label, value, error, onChange }: PromptFieldProps)
       <button
         type="button"
         onClick={() => setCollapsed((current) => !current)}
-        className="flex w-full items-center justify-between px-3 py-2 text-left"
+        className="flex w-full items-center justify-between px-3 py-2 text-start"
       >
         <span className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">{label}</span>
         {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}

@@ -107,7 +107,7 @@ export function CommandPalette({ open, actions, onClose }: CommandPaletteProps) 
                 action.run()
                 onClose()
               }}
-              className={`flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left disabled:cursor-not-allowed disabled:opacity-50 ${
+              className={`flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-start disabled:cursor-not-allowed disabled:opacity-50 ${
                 index === activeIndex
                   ? 'bg-sky-50 dark:bg-sky-950/40'
                   : 'hover:bg-slate-50 dark:hover:bg-slate-900'

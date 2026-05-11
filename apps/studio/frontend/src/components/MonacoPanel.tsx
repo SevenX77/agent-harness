@@ -40,12 +40,12 @@ export function MonacoPanel({
                 key={`${error.error_code}-${error.line ?? 'none'}-${index}`}
                 type="button"
                 onClick={() => onJumpToLine(error.line)}
-                className="block w-full rounded border border-red-200 dark:border-red-900/50 bg-white dark:bg-slate-900 px-2 py-1 text-left hover:bg-red-50 dark:hover:bg-red-900/30"
+                className="block w-full rounded border border-red-200 dark:border-red-900/50 bg-white dark:bg-slate-900 px-2 py-1 text-start hover:bg-red-50 dark:hover:bg-red-900/30"
               >
                 <span className="font-mono text-xs text-red-500">
                   {error.line ? `Line ${error.line}` : 'No line'} / {error.error_code}
                 </span>
-                <span className="ml-2">{error.message}</span>
+                <span className="ms-2">{error.message}</span>
               </button>
             ))}
           </div>

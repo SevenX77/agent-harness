@@ -44,7 +44,7 @@ export function SkillSidebar({
           type="button"
           aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
           onClick={onToggleDarkMode}
-          className="text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
+          className="min-h-8 min-w-8 text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
         >
           {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </button>
@@ -57,7 +57,7 @@ export function SkillSidebar({
             type="button"
             aria-label="Create new skill"
             onClick={onOpenCreator}
-            className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-sky-600 dark:text-gray-500 dark:hover:bg-slate-800 dark:hover:text-sky-400"
+            className="min-h-8 min-w-8 rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-sky-600 dark:text-gray-500 dark:hover:bg-slate-800 dark:hover:text-sky-400"
             title="New Skill"
           >
             <Plus className="h-4 w-4" />
@@ -70,7 +70,7 @@ export function SkillSidebar({
             {skills.map((skill) => (
               <li key={skill.id}>
                 <div
-                  className={`group flex w-full items-center gap-2 rounded-md border p-2 text-left text-sm font-medium transition-colors ${
+                  className={`group flex w-full items-center gap-2 rounded-md border p-2 text-start text-sm font-medium transition-colors ${
                     selectedSkillId === skill.id
                       ? 'border-sky-100 dark:border-sky-900/50 bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400'
                       : 'border-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800'
@@ -79,7 +79,7 @@ export function SkillSidebar({
                   <button
                     type="button"
                     onClick={() => onSelectSkill(skill.id)}
-                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                    className="flex min-w-0 flex-1 items-center gap-2 text-start"
                   >
                     <FileText className="h-4 w-4 shrink-0" />
                     <span className="truncate">{skill.name}</span>

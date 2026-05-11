@@ -36,7 +36,7 @@ export function Toolbar() {
   const lintLocked = lintStatus === 'checking' || lintStatus === 'failed'
 
   return (
-    <aside className="z-10 flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border bg-sidebar px-2 py-3 text-sidebar-foreground">
+    <aside className="z-10 flex w-12 shrink-0 flex-col items-center gap-1 border-e border-border bg-sidebar px-2 py-3 text-sidebar-foreground">
       <NavLink
         to="/"
         aria-label="Home"
@@ -58,7 +58,7 @@ export function Toolbar() {
           }}
           className={({ isActive }) =>
             [
-              'inline-flex size-8 items-center justify-center rounded-md transition-colors',
+              'inline-flex min-h-8 min-w-8 items-center justify-center rounded-md transition-colors',
               (item.id === 'predict' || item.id === 'run') && lintLocked ? 'pointer-events-auto opacity-45' : '',
               isActive
                 ? 'bg-secondary text-secondary-foreground'

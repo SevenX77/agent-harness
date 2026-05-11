@@ -101,6 +101,7 @@ export function HomeDashboard() {
       const skillId = skillIdFromPath(directory)
       const response = await api.post<SkillSummary>('/skills', {
         skill_id: skillId,
+        directory_path: directory,
         content: generateSkillMd({
           templateId: 'empty-agent',
           templateContent: null,

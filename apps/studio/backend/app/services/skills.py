@@ -45,11 +45,12 @@ async def list_skill_summaries(
     storage: StorageBackend,
     metadata: MetadataStore,
 ) -> list[SkillSummary]:
-    """Return public and workspace skills, with workspace copies taking precedence."""
+    """Return public, workspace, and imported directory skills."""
     summaries: dict[str, SkillSummary] = {}
     public_ids = await _list_skill_ids(config.SKILLS_DIR, storage)
     workspace_root = _workspace_skills_dir_for(user_id)
     workspace_ids = await _list_skill_ids(workspace_root, storage)
+    metadata_summaries = await metadata.list_skills(user_id)
     for skill_id in public_ids:
         skill_dir = config.SKILLS_DIR / skill_id
         summaries[skill_id] = await _summary_for_skill_dir_async(
@@ -66,6 +67,21 @@ async def list_skill_summaries(
             storage,
             metadata,
         )
+    for saved_summary in metadata_summaries:
+        if not saved_summary.directory_path:
+            continue
+        skill_dir = Path(saved_summary.directory_path)
+        if not await storage.exists(str(skill_dir / "SKILL.md")):
+            continue
+        summaries[saved_summary.id] = (
+            await _summary_for_skill_dir_async(
+                user_id,
+                skill_dir,
+                storage,
+                metadata,
+                skill_id=saved_summary.id,
+            )
+        ).model_copy(update={"directory_path": saved_summary.directory_path})
     return sorted(summaries.values(), key=lambda summary: summary.id)
 
 
@@ -78,7 +94,7 @@ async def get_skill_detail(
     lint_result: LintResult | None = None,
 ) -> SkillDetail:
     """Compile one skill into a Studio SkillDetail response."""
-    skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage)
+    skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
     skill_path = skill_dir / "SKILL.md"
     lint = lint_result or lint_skill_path(skill_path)
     if lint.status == "failed":
@@ -118,7 +134,7 @@ async def update_skill_content(
     storage: StorageBackend,
     metadata: MetadataStore,
 ) -> SkillDetail:
-    """Validate then atomically write SKILL.md into the default workspace."""
+    """Validate then atomically write SKILL.md into the skill's writable directory."""
     if not content.strip():
         response = error_response(
             error_code="MANIFEST_VALIDATION_FAILED",
@@ -129,7 +145,7 @@ async def update_skill_content(
         )
         raise_error_response(response)
 
-    target_dir = await ensure_workspace_skill_dir_async(user_id, skill_id, storage)
+    target_dir = await ensure_workspace_skill_dir_async(user_id, skill_id, storage, metadata)
     target_path = target_dir / "SKILL.md"
     candidate_path = target_dir / f".SKILL.{uuid.uuid4().hex}.tmp"
     await storage.write_text(str(candidate_path), content)
@@ -151,8 +167,9 @@ async def create_new_skill(
     content: str,
     storage: StorageBackend,
     metadata: MetadataStore,
+    directory_path: str | None = None,
 ) -> SkillSummary:
-    """Create a new workspace skill from fully rendered SKILL.md content."""
+    """Create a new skill from fully rendered SKILL.md content."""
     if not content.strip():
         response = error_response(
             error_code="MANIFEST_VALIDATION_FAILED",
@@ -163,18 +180,38 @@ async def create_new_skill(
         )
         raise_error_response(response)
 
-    workspace_dir = _workspace_skills_dir_for(user_id) / skill_id
-    public_path = config.SKILLS_DIR / skill_id / "SKILL.md"
-    workspace_path = workspace_dir / "SKILL.md"
-    if await storage.exists(str(workspace_path)) or await storage.exists(str(public_path)):
+    saved_summary = await metadata.get_skill_summary(user_id, skill_id)
+    if saved_summary is not None:
         raise standard_http_exception(
             "SKILL_ALREADY_EXISTS",
             f"Skill already exists: {skill_id}",
             {"skill_id": skill_id},
         )
 
-    await storage.write_text(str(workspace_path), content)
-    summary = await _summary_for_skill_dir_async(user_id, workspace_dir, storage, metadata)
+    skill_dir = (
+        await _validated_directory_path(user_id, skill_id, directory_path, metadata)
+        if directory_path
+        else _workspace_skills_dir_for(user_id) / skill_id
+    )
+    public_path = config.SKILLS_DIR / skill_id / "SKILL.md"
+    skill_path = skill_dir / "SKILL.md"
+    if await storage.exists(str(skill_path)) or await storage.exists(str(public_path)):
+        raise standard_http_exception(
+            "SKILL_ALREADY_EXISTS",
+            f"Skill already exists: {skill_id}",
+            {"skill_id": skill_id},
+        )
+
+    await storage.write_text(str(skill_path), content)
+    summary = await _summary_for_skill_dir_async(
+        user_id,
+        skill_dir,
+        storage,
+        metadata,
+        skill_id=skill_id,
+    )
+    if directory_path:
+        summary = summary.model_copy(update={"directory_path": str(skill_dir)})
     await metadata.save_skill_summary(user_id, summary)
     return summary
 
@@ -198,7 +235,7 @@ async def fork_skill(
             {"skill_id": new_skill_id},
         )
 
-    source_dir = await resolve_skill_dir_async(user_id, skill_id, storage)
+    source_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
     await storage.copy_tree(str(source_dir), str(target_dir))
     try:
         content = await storage.read_text(str(target_path))
@@ -221,8 +258,15 @@ async def ensure_workspace_skill_dir_async(
     user_id: str,
     skill_id: str,
     storage: StorageBackend,
+    metadata: MetadataStore,
 ) -> Path:
     """Return a writable skill dir, forking a public skill into workspace if needed."""
+    saved_summary = await metadata.get_skill_summary(user_id, skill_id)
+    if saved_summary and saved_summary.directory_path:
+        skill_dir = Path(saved_summary.directory_path)
+        if await storage.exists(str(skill_dir / "SKILL.md")):
+            return skill_dir
+
     workspace_dir = _workspace_skills_dir_for(user_id) / skill_id
     if await storage.exists(str(workspace_dir / "SKILL.md")):
         return workspace_dir
@@ -242,8 +286,13 @@ async def resolve_skill_dir_async(
     user_id: str,
     skill_id: str,
     storage: StorageBackend,
+    metadata: MetadataStore,
 ) -> Path:
-    """Resolve a skill id through storage, preferring workspace copies."""
+    """Resolve a skill id through storage, preferring imported directory paths."""
+    saved_summary = await metadata.get_skill_summary(user_id, skill_id)
+    if saved_summary and saved_summary.directory_path:
+        return Path(saved_summary.directory_path)
+
     workspace_dir = _workspace_skills_dir_for(user_id) / skill_id
     if await storage.exists(str(workspace_dir / "SKILL.md")):
         return workspace_dir
@@ -373,27 +422,70 @@ async def _summary_for_skill_dir_async(
     skill_dir: Path,
     storage: StorageBackend,
     metadata: MetadataStore,
+    *,
+    skill_id: str | None = None,
 ) -> SkillSummary:
-    skill_id = skill_dir.name
+    resolved_skill_id = skill_id or skill_dir.name
     lint = lint_skill_path(skill_dir / "SKILL.md")
     if lint.status == "passed":
         frontmatter = _frontmatter(skill_dir / "SKILL.md")
-        name = str(frontmatter.get("name") or skill_id)
+        name = str(frontmatter.get("name") or resolved_skill_id)
         description = str(frontmatter.get("description") or "")
         phase_count = _phase_count_from_frontmatter(frontmatter)
     else:
-        name = skill_id
+        name = resolved_skill_id
         description = lint.errors[0].message if lint.errors else "Invalid skill manifest"
         phase_count = 0
-    latest = await latest_run_metadata_async(user_id, skill_id, metadata)
+    latest = await latest_run_metadata_async(user_id, resolved_skill_id, metadata)
     return SkillSummary(
-        id=skill_id,
+        id=resolved_skill_id,
         name=name,
         description=description,
         phase_count=phase_count,
         has_golden=await storage.exists(str(skill_dir / "golden")),
         last_run_at=latest.started_at if latest else None,
     )
+
+
+async def _validated_directory_path(
+    user_id: str,
+    skill_id: str,
+    directory_path: str | None,
+    metadata: MetadataStore,
+) -> Path:
+    if not directory_path:
+        raise ValueError("directory_path is required")
+    skill_dir = Path(directory_path)
+    if not skill_dir.is_absolute():
+        _raise_invalid_directory_path(directory_path, "directory_path must be absolute")
+    if not skill_dir.parent.exists():
+        _raise_invalid_directory_path(directory_path, "directory_path parent must exist")
+
+    resolved_skill_dir = skill_dir.resolve()
+    for summary in await metadata.list_skills(user_id):
+        if summary.id == skill_id or not summary.directory_path:
+            continue
+        if Path(summary.directory_path).resolve() == resolved_skill_dir:
+            response = error_response(
+                error_code="SKILL_ALREADY_EXISTS",
+                http_status=409,
+                message=f"Directory path is already used by skill {summary.id}",
+                details={"skill_id": summary.id, "directory_path": str(resolved_skill_dir)},
+                retry_strategy="not_retryable",
+            )
+            raise_error_response(response)
+    return resolved_skill_dir
+
+
+def _raise_invalid_directory_path(directory_path: str, message: str) -> None:
+    response = error_response(
+        error_code="INVALID_DIRECTORY_PATH",
+        http_status=422,
+        message=message,
+        details={"directory_path": directory_path},
+        retry_strategy="not_retryable",
+    )
+    raise_error_response(response)
 
 
 def _detail_from_manifest(
@@ -428,15 +520,19 @@ async def _detail_from_manifest_async(
     metadata: MetadataStore,
 ) -> SkillDetail:
     workspace_skill_dir = _workspace_skills_dir_for(user_id) / skill_id
+    saved_summary = await metadata.get_skill_summary(user_id, skill_id)
+    writable_skill_dir = (
+        skill_dir if saved_summary and saved_summary.directory_path else workspace_skill_dir
+    )
     latest = await latest_run_metadata_async(user_id, skill_id, metadata)
     return SkillDetail(
         manifest=manifest,
         file_paths={
             "skill_dir": str(skill_dir),
             "skill_md": str(skill_dir / "SKILL.md"),
-            "runs_dir": str(workspace_skill_dir / "runs"),
-            "test_inputs_dir": str(workspace_skill_dir / "test_inputs"),
-            "golden_dir": str(workspace_skill_dir / "golden"),
+            "runs_dir": str(writable_skill_dir / "runs"),
+            "test_inputs_dir": str(writable_skill_dir / "test_inputs"),
+            "golden_dir": str(writable_skill_dir / "golden"),
         },
         has_golden=await storage.exists(str(skill_dir / "golden")),
         latest_run_metadata=latest,

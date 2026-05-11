@@ -47,7 +47,14 @@ async def create_skill(
     storage: StorageBackend = Depends(get_storage),
     metadata: MetadataStore = Depends(get_metadata),
 ) -> SkillSummary:
-    return await create_new_skill(user_id, request.skill_id, request.content, storage, metadata)
+    return await create_new_skill(
+        user_id,
+        request.skill_id,
+        request.content,
+        storage,
+        metadata,
+        directory_path=request.directory_path,
+    )
 
 
 @router.get("/{skill_id}", response_model=SkillDetail)
@@ -88,6 +95,7 @@ async def validate_input(
     request: ValidateInputReq,
     user_id: str = Depends(get_auth_user_id),
     storage: StorageBackend = Depends(get_storage),
+    metadata: MetadataStore = Depends(get_metadata),
 ) -> ValidateInputResponse | JSONResponse:
     try:
         validated_data = await validate_skill_input_file(
@@ -95,6 +103,7 @@ async def validate_input(
             skill_id,
             request.input_file_path,
             storage,
+            metadata,
         )
     except ValidationHttpError as exc:
         return JSONResponse(status_code=exc.status_code, content=jsonable_encoder(exc.body))

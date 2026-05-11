@@ -34,6 +34,17 @@ class LocalJsonMetadataStore:
                 continue
         return summaries
 
+    async def get_skill_summary(self, user_id: str, skill_id: str) -> SkillSummary | None:
+        """Return one persisted skill summary when present."""
+        summary_path = self._skills_root(user_id) / skill_id / "skill_summary.json"
+        if not await asyncio.to_thread(summary_path.exists):
+            return None
+        try:
+            async with aiofiles.open(summary_path, encoding="utf-8") as file:
+                return SkillSummary.model_validate_json(str(await file.read()))
+        except Exception:
+            return None
+
     async def save_skill_summary(self, user_id: str, summary: SkillSummary) -> None:
         """Persist one skill summary as JSON."""
         summary_path = self._skills_root(user_id) / summary.id / "skill_summary.json"

@@ -117,7 +117,7 @@ def test_put_updates_workspace_atomically_and_invalid_content_preserves_file(
     assert "Updated text segments" in workspace_skill.read_text(encoding="utf-8")
 
 
-def test_create_skill_writes_workspace_skill_and_summary(
+def test_create_skill_without_directory_path_uses_workspace(
     client: TestClient,
     studio_roots: tuple[Path, Path],
 ) -> None:
@@ -134,10 +134,121 @@ def test_create_skill_writes_workspace_skill_and_summary(
     assert body["name"] == "idea-generator"
     assert body["description"] == "Draft structured ideas"
     assert body["phase_count"] == 1
+    assert body["directory_path"] is None
 
     skill_dir = workspaces_dir / "default" / "skills" / "idea-generator"
     assert (skill_dir / "SKILL.md").exists()
     assert (skill_dir / "skill_summary.json").exists()
+
+
+def test_create_skill_with_directory_path_writes_to_user_dir(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+    tmp_path: Path,
+) -> None:
+    _skills_dir, workspaces_dir = studio_roots
+    parent_dir = tmp_path / "external-skills"
+    parent_dir.mkdir()
+    skill_dir = parent_dir / "idea-generator"
+
+    response = client.post(
+        "/api/skills",
+        json={
+            "skill_id": "idea-generator",
+            "content": _agent_skill_content("idea-generator"),
+            "directory_path": str(skill_dir),
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["id"] == "idea-generator"
+    assert body["directory_path"] == str(skill_dir)
+    assert (skill_dir / "SKILL.md").exists()
+    assert not (workspaces_dir / "default" / "skills" / "idea-generator" / "SKILL.md").exists()
+    assert "idea-generator" in {
+        item["id"] for item in client.get("/api/skills").json() if item["directory_path"]
+    }
+
+
+def test_create_skill_with_invalid_directory_path_returns_422(
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    responses = [
+        client.post(
+            "/api/skills",
+            json={
+                "skill_id": "relative-path",
+                "content": _agent_skill_content("relative-path"),
+                "directory_path": "relative/path",
+            },
+        ),
+        client.post(
+            "/api/skills",
+            json={
+                "skill_id": "missing-parent",
+                "content": _agent_skill_content("missing-parent"),
+                "directory_path": str(tmp_path / "missing" / "missing-parent"),
+            },
+        ),
+    ]
+
+    for response in responses:
+        assert response.status_code == 422
+        assert response.json()["error_code"] == "INVALID_DIRECTORY_PATH"
+
+
+def test_create_skill_directory_path_conflict_returns_409(
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    skill_dir = tmp_path / "shared-skill-dir"
+
+    first_response = client.post(
+        "/api/skills",
+        json={
+            "skill_id": "first-skill",
+            "content": _agent_skill_content("first-skill"),
+            "directory_path": str(skill_dir),
+        },
+    )
+    second_response = client.post(
+        "/api/skills",
+        json={
+            "skill_id": "second-skill",
+            "content": _agent_skill_content("second-skill"),
+            "directory_path": str(skill_dir),
+        },
+    )
+
+    assert first_response.status_code == 201
+    assert second_response.status_code == 409
+    assert second_response.json()["error_code"] == "SKILL_ALREADY_EXISTS"
+
+
+def test_resolve_skill_dir_uses_directory_path_when_set(
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    skill_dir = tmp_path / "external-skill"
+    create_response = client.post(
+        "/api/skills",
+        json={
+            "skill_id": "external-skill",
+            "content": _agent_skill_content("external-skill"),
+            "directory_path": str(skill_dir),
+        },
+    )
+
+    detail_response = client.get("/api/skills/external-skill")
+
+    assert create_response.status_code == 201
+    assert detail_response.status_code == 200
+    file_paths = detail_response.json()["file_paths"]
+    assert file_paths["skill_dir"] == str(skill_dir)
+    assert file_paths["skill_md"] == str(skill_dir / "SKILL.md")
+    assert file_paths["runs_dir"] == str(skill_dir / "runs")
 
 
 def test_create_skill_collision_returns_409(client: TestClient) -> None:

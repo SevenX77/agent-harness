@@ -15,6 +15,10 @@ class MetadataStore(Protocol):
         """Return saved skill summaries for one user."""
         ...
 
+    async def get_skill_summary(self, user_id: str, skill_id: str) -> SkillSummary | None:
+        """Return one saved skill summary when present."""
+        ...
+
     async def save_skill_summary(self, user_id: str, summary: SkillSummary) -> None:
         """Persist one skill summary for one user."""
         ...

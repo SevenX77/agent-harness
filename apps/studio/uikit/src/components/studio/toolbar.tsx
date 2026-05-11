@@ -53,7 +53,7 @@ export function Toolbar({ activePanel, onPanelChange }: ToolbarProps) {
                         ? undefined
                         : onPanelChange(isActive ? null : tool.id)
                     }
-                    className={cn("size-8", isAdd && "text-primary")}
+                    className={cn("size-8", isAdd && "text-foreground")}
                     aria-pressed={isActive}
                   >
                     <tool.icon className="size-4" strokeWidth={1.75} />

@@ -151,3 +151,35 @@
 | `input.tsx:11` | `h-7 rounded-md text-sm` | `h-7 rounded-md text-xs` | h-7 ✓ 28px; rounded-md (8px) ✓; **text-sm (14px) → text-xs (12px)** (demo input fontSize=12) |
 | `sidebar.tsx` 整体 bg/border | (token-driven, oklch 已对齐) | 不需要改 | 主控已 cat 验证 oklch token 全行对齐 |
 
+## §5 文字颜色规范 (Iron rule, 不可违反)
+
+shadcn token 系统的核心契约: **`-foreground` token 必须跟对应 `bg-` token 配对使用**。也就是说:
+
+| 用法 | token | 用在哪 |
+|---|---|---|
+| 普通正文 | `text-foreground` | 默认背景上的所有正文文字 |
+| 次要正文 / 辅助文字 / 图标 | `text-muted-foreground` | hint text, captions, inactive icons |
+| 错误正文 | `text-destructive` | error message (注意: 用在正常 bg 上, **不是**带 destructive bg 的) |
+| 主按钮内文字 | `text-primary-foreground` | **必须**跟 `bg-primary` 配对 |
+| 次按钮内文字 | `text-secondary-foreground` | 必须跟 `bg-secondary` 配对 |
+| 卡片内文字 | `text-card-foreground` | 必须跟 `bg-card` 配对 |
+| Accent 区域文字 | `text-accent-foreground` | 必须跟 `bg-accent` 配对 |
+
+**铁律: `text-primary` 永远不能用作"正文/图标在普通背景上"的颜色**。
+
+Why: `--primary` 在 demo 是紫色 (light: oklch(0.457 0.24 277), dark: oklch(0.398 0.195 277)), 是 brand 色, 设计目的是作为**填充色** (button bg, dot fill, selection ring) 而**不是文字色**。在 dark mode 普通背景 (`--background` 近黑) 上用 `text-primary` 紫色, 对比度低 (WCAG AAA 失败) + 跟 demo dashboard 的视觉语言不一致 (demo 没出现过 primary 作正文/图标色)。
+
+**允许使用 `text-primary`** 的唯二场景:
+1. shadcn primitive 内置的 `link` variant (Button / Badge `variant="link"` + `<a:hover>` 在 Card 内) — 这是 W3 link 标准, demo 也这么做
+2. 图标作为"selected/active 状态指示"且**只在 hover/focus 短暂出现**, 不是默认态
+
+**允许使用 `bg-primary`** 的场景:
+1. 主行动按钮 fill (`variant="default"`)
+2. 选中态 selection ring / border
+3. 小型 dot indicator (≤4px) 作 active fill
+4. react-flow edge animated stroke
+
+不算 "文字/图标" 的 primary 用法 (保留):
+- `border-primary` / `shadow-[0_0_0_1px_var(--primary)]` (选中态)
+- `stroke: var(--primary)` 在 ReactFlow edge animated style
+- `bg-primary` 在 SkillNode active dot indicator (1.5×1.5px fill)

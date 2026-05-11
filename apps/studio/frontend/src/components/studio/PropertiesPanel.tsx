@@ -1,6 +1,7 @@
 import { Braces, Info, Workflow } from 'lucide-react'
 import type { SkillDetail } from '../../api/types'
 import type { SkillGraphNodeData } from '../GraphCanvas'
+import { InputSchemaPanel } from './InputSchemaPanel'
 
 interface PropertiesPanelProps {
   skillDetail?: SkillDetail
@@ -49,6 +50,8 @@ export function PropertiesPanel({ skillDetail, selectedNode }: PropertiesPanelPr
             {!manifest ? <div className="text-sm text-muted-foreground">Loading metadata...</div> : null}
           </dl>
         </section>
+
+        <InputSchemaPanel />
 
         <section>
           <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">

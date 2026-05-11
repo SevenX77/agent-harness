@@ -25,6 +25,7 @@ from pydantic import (
     create_model,
 )
 
+from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
 from app.services.skills import resolve_skill_dir_async
 
@@ -55,9 +56,10 @@ async def validate_skill_input_file(
     skill_id: str,
     input_file_path: str,
     storage: StorageBackend,
+    metadata: MetadataStore,
 ) -> dict[str, Any]:
     """Validate a JSON/YAML file against a skill's declared runtime inputs."""
-    skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage)
+    skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
     skill_path = skill_dir / "SKILL.md"
     manifest = _compile_manifest_or_raise(skill_path)
     parsed_data = _parse_input_file(Path(input_file_path))

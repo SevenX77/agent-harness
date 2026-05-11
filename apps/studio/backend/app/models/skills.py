@@ -20,6 +20,7 @@ class SkillSummary(BaseModel):
     phase_count: int
     has_golden: bool
     last_run_at: datetime | None = None
+    directory_path: str | None = None
 
 
 class SkillDetail(BaseModel):
@@ -37,6 +38,7 @@ class CreateSkillReq(BaseModel):
 
     skill_id: str = Field(..., pattern=r"^[a-z][a-z0-9-]+$")
     content: str
+    directory_path: str | None = None
 
 
 class ForkSkillReq(BaseModel):

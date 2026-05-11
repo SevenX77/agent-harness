@@ -23,7 +23,39 @@ import { cn } from "@/lib/utils"
 import { useTheme } from "@/hooks/use-theme"
 
 // Custom Node Component
-function SkillNode({ data, selected }: { data: { label: string; type: string; status?: string; id: string }; selected: boolean }) {
+function SkillNode({ data, selected }: { data: { label: string; type: string; status?: string; id: string; compact?: boolean }; selected: boolean }) {
+  if (data.compact) {
+    return (
+      <div
+        className={cn(
+          "relative bg-card border rounded-md min-w-[120px] shadow-sm transition-all duration-150",
+          selected ? "border-primary" : "border-border hover:border-muted-foreground"
+        )}
+      >
+        <div className="flex items-center justify-between px-2 py-1 gap-2">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <div className={cn(
+              "size-1.5 rounded-full shrink-0",
+              data.status === "active" ? "bg-primary" : "bg-muted-foreground"
+            )} />
+            <span className="text-[11px] font-medium text-foreground truncate">{data.label}</span>
+          </div>
+          <Badge variant="secondary" className="text-[10px] shrink-0 px-1.5 py-0">{data.type}</Badge>
+        </div>
+        <Handle
+          type="target"
+          position={Position.Left}
+          className="!size-1.5 !bg-primary !border !border-primary !rounded-full"
+        />
+        <Handle
+          type="source"
+          position={Position.Right}
+          className="!size-1.5 !bg-primary !border !border-primary !rounded-full"
+        />
+      </div>
+    )
+  }
+
   return (
     <div
       className={cn(
@@ -126,10 +158,14 @@ const initialEdges: Edge[] = [
   },
 ]
 
-export function Canvas() {
+export function Canvas({ compact = false }: { compact?: boolean } = {}) {
   const { theme } = useTheme()
   const nodeTypes = useMemo(() => ({ skillNode: SkillNode }), [])
-  const [nodes, , onNodesChange] = useNodesState(initialNodes)
+  const compactNodes = useMemo(
+    () => initialNodes.map((node) => ({ ...node, data: { ...node.data, compact } })),
+    [compact],
+  )
+  const [nodes, , onNodesChange] = useNodesState(compactNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
 
   const onConnect = useCallback(
@@ -153,7 +189,7 @@ export function Canvas() {
         onConnect={onConnect}
         nodeTypes={nodeTypes}
         fitView
-        fitViewOptions={{ padding: 0.3 }}
+        fitViewOptions={{ padding: compact ? 0.15 : 0.3 }}
         colorMode={theme}
         className="bg-background"
         defaultEdgeOptions={{ type: "smoothstep" }}
@@ -166,19 +202,21 @@ export function Canvas() {
           style={{ opacity: 0.4 }}
           className="!bg-background"
         />
-        <Controls showInteractive={false} />
-        <MiniMap
-          nodeColor="var(--muted-foreground)"
-          nodeStrokeWidth={0}
-          maskColor={
-            theme === "dark"
-              ? "rgba(0, 0, 0, 0.5)"
-              : "rgba(255, 255, 255, 0.6)"
-          }
-          pannable
-          zoomable
-          className="!rounded-md"
-        />
+        {!compact && <Controls showInteractive={false} />}
+        {!compact && (
+          <MiniMap
+            nodeColor="var(--muted-foreground)"
+            nodeStrokeWidth={0}
+            maskColor={
+              theme === "dark"
+                ? "rgba(0, 0, 0, 0.5)"
+                : "rgba(255, 255, 255, 0.6)"
+            }
+            pannable
+            zoomable
+            className="!rounded-md"
+          />
+        )}
       </ReactFlow>
     </div>
   )

@@ -17,6 +17,83 @@ interface PanelProps {
   onClose: () => void
 }
 
+export type FileMeta = { path: string; content: string; language: string }
+
+export const MOCK_FILES: Record<string, { content: string; language: string }> = {
+  "SKILL.md": {
+    language: "markdown",
+    content: `# Text Generator Skill
+
+A skill that generates text using LLM with configurable model and temperature.
+
+## Inputs
+- prompt: string
+- system: string (optional)
+
+## Outputs
+- text: string
+- usage: object
+`,
+  },
+  "scripts/main.py": {
+    language: "python",
+    content: `import asyncio
+from skill import Skill
+
+
+class TextGenerator(Skill):
+    def __init__(self):
+        super().__init__()
+        self.model = "gpt-4o-mini"
+
+    async def run(self, input_data):
+        response = await self.llm.generate(
+            prompt=input_data.prompt,
+            model=self.model,
+            temperature=0.7,
+        )
+        return response.text
+`,
+  },
+  "scripts/utils.py": {
+    language: "python",
+    content: `def normalize_prompt(text: str) -> str:
+    return text.strip().lower()
+
+
+def truncate(text: str, max_len: int = 4000) -> str:
+    if len(text) <= max_len:
+        return text
+    return text[:max_len] + "..."
+`,
+  },
+  "data/golden_baseline.json": {
+    language: "json",
+    content: `{
+  "version": "1.0",
+  "samples": [
+    {
+      "input": "Hello, world",
+      "expected": "Greeting detected"
+    }
+  ]
+}
+`,
+  },
+  "config.yaml": {
+    language: "yaml",
+    content: `model: gpt-4o-mini
+temperature: 0.7
+max_tokens: 2000
+system_prompt: "You are a helpful assistant."
+`,
+  },
+}
+
+interface AssetsPanelProps extends PanelProps {
+  onFileOpen: (file: FileMeta) => void
+}
+
 // Panel Header Component
 function PanelHeader({ title, onClose, extra }: { title: string; onClose: () => void; extra?: React.ReactNode }) {
   return (
@@ -33,7 +110,7 @@ function PanelHeader({ title, onClose, extra }: { title: string; onClose: () => 
 }
 
 // Assets Panel
-export function AssetsPanel({ onClose }: PanelProps) {
+export function AssetsPanel({ onClose, onFileOpen }: AssetsPanelProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     scripts: true,
     data: false,
@@ -50,7 +127,10 @@ export function AssetsPanel({ onClose }: PanelProps) {
       <ScrollArea className="flex-1">
         <div className="py-2 px-2 text-xs">
           {/* SKILL.md */}
-          <div className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors">
+          <div
+            className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
+            onClick={() => onFileOpen({ path: "SKILL.md", ...MOCK_FILES["SKILL.md"] })}
+          >
             <FileText className="size-4 text-muted-foreground" strokeWidth={1.5} />
             <span>SKILL.md</span>
           </div>
@@ -67,11 +147,17 @@ export function AssetsPanel({ onClose }: PanelProps) {
             </button>
             {expanded.scripts && (
               <div className="ml-4 border-l border-border pl-3">
-                <div className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors">
+                <div
+                  className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={() => onFileOpen({ path: "scripts/main.py", ...MOCK_FILES["scripts/main.py"] })}
+                >
                   <FileText className="size-4" strokeWidth={1.5} />
                   <span>main.py</span>
                 </div>
-                <div className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors">
+                <div
+                  className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={() => onFileOpen({ path: "scripts/utils.py", ...MOCK_FILES["scripts/utils.py"] })}
+                >
                   <FileText className="size-4" strokeWidth={1.5} />
                   <span>utils.py</span>
                 </div>
@@ -91,7 +177,10 @@ export function AssetsPanel({ onClose }: PanelProps) {
             </button>
             {expanded.data && (
               <div className="ml-4 border-l border-border pl-3">
-                <div className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors">
+                <div
+                  className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={() => onFileOpen({ path: "data/golden_baseline.json", ...MOCK_FILES["data/golden_baseline.json"] })}
+                >
                   <FileText className="size-4" strokeWidth={1.5} />
                   <span>golden_baseline.json</span>
                 </div>
@@ -100,7 +189,10 @@ export function AssetsPanel({ onClose }: PanelProps) {
           </div>
 
           {/* Config */}
-          <div className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors">
+          <div
+            className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
+            onClick={() => onFileOpen({ path: "config.yaml", ...MOCK_FILES["config.yaml"] })}
+          >
             <FileText className="size-4" strokeWidth={1.5} />
             <span>config.yaml</span>
           </div>

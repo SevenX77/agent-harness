@@ -1,10 +1,13 @@
 import { AlertCircle, Clock3, FolderOpen, Layers3, Search, Sparkles } from 'lucide-react'
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLoaderData, useNavigate } from 'react-router-dom'
-import { fetcher } from '../api/client'
+import { api, fetcher } from '../api/client'
 import type { SkillSummary } from '../api/types'
 import { useRecentSkills } from '../hooks/useRecentSkills'
 import { useSkills } from '../hooks/useSkills'
+import { selectSkillDirectory } from '../lib/tauri'
+import { generateSkillMd } from '../templates/skillMdGenerator'
+import { errorMessage } from '../utils/errors'
 
 export async function homeLoader() {
   try {
@@ -62,8 +65,16 @@ function cleanupWorkspaceLayoutStorage(validSkillIds: string[]) {
   }
 }
 
+function skillIdFromPath(path: string) {
+  const name = path.split(/[\\/]/).filter(Boolean).pop() ?? 'imported-skill'
+  const normalized = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  const withLetter = /^[a-z]/.test(normalized) ? normalized : `skill-${normalized}`
+  return withLetter || 'imported-skill'
+}
+
 export function HomeDashboard() {
   const navigate = useNavigate()
+  const [importing, setImporting] = useState(false)
   const preloadedSkills = useLoaderData() as SkillSummary[] | undefined
   const { skills, skillListError } = useSkills(null, preloadedSkills ?? [])
   const skillIds = useMemo(() => skills.map((skill) => skill.id), [skills])
@@ -78,6 +89,39 @@ export function HomeDashboard() {
   const openSkill = (skillId: string) => {
     rememberSkill(skillId)
     void navigate(`/skill/${skillId}/edit`)
+  }
+
+  const importSkillDirectory = async () => {
+    setImporting(true)
+    try {
+      const directory = await selectSkillDirectory()
+      if (!directory) {
+        return
+      }
+      const skillId = skillIdFromPath(directory)
+      const response = await api.post<SkillSummary>('/skills', {
+        skill_id: skillId,
+        content: generateSkillMd({
+          templateId: 'empty-agent',
+          templateContent: null,
+          type: 'agent',
+          skillId,
+          name: skillId,
+          description: `Imported from ${directory}`,
+          tags: '',
+          inputs: [{ id: 'input', name: 'input_text', type: 'str', defaultValue: '' }],
+          phaseId: 'draft',
+          llmRole: 'analyst',
+          prompt: 'Use {input_text} to complete the task.',
+        }),
+      })
+      rememberSkill(response.data.id)
+      void navigate(`/skill/${response.data.id}/edit`)
+    } catch (error) {
+      window.alert(errorMessage(error))
+    } finally {
+      setImporting(false)
+    }
   }
 
   return (
@@ -97,10 +141,12 @@ export function HomeDashboard() {
             </div>
             <button
               type="button"
+              disabled={importing}
+              onClick={() => void importSkillDirectory()}
               className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:opacity-90"
             >
               <FolderOpen className="size-4" />
-              Import skill
+              {importing ? 'Importing' : 'Import skill'}
             </button>
           </div>
         </div>

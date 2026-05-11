@@ -34,3 +34,20 @@ export function openInTerminal(path: string) {
 export function openInCodex(path: string) {
   return invokeShell('open_in_codex', path)
 }
+
+export async function selectSkillDirectory(): Promise<string | null> {
+  if (!isTauriRuntime()) {
+    toast.info('桌面端 only')
+    return null
+  }
+
+  try {
+    const moduleName = '@tauri-apps/plugin-dialog'
+    const dialog = await import(/* @vite-ignore */ moduleName) as { open?: (options: { directory: boolean, multiple: boolean }) => Promise<string | string[] | null> }
+    const selected = await dialog.open?.({ directory: true, multiple: false })
+    return typeof selected === 'string' ? selected : null
+  } catch {
+    toast.error('Failed to open directory picker')
+    return null
+  }
+}

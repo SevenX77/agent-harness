@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { saveGoldenBaseline } from '../../api/client'
 import type { RunDetail } from '../../api/types'
+import { DiffView } from '../../components/diff/DiffView'
 import { useGoldenDiff } from '../../hooks/useGoldenDiff'
 import { useRunHistory } from '../../hooks/useRunHistory'
 import { useSkills } from '../../hooks/useSkills'
@@ -128,15 +129,17 @@ export default function Eval() {
           </pre>
         </div>
         <div className="flex min-h-0 flex-col">
-          <div className="border-b border-border px-4 py-3">
-            <h2 className="text-sm font-semibold text-foreground">Golden baseline</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {diff.result ? `Against ${diff.result.golden_run_id}, score ${Math.round(diff.result.total_score * 100)}%` : 'No comparison loaded.'}
-            </p>
-          </div>
-          <pre className="min-h-0 flex-1 overflow-auto bg-muted/30 p-4 text-xs text-foreground">
-            {JSON.stringify(diff.result ?? { differences: [] }, null, 2)}
-          </pre>
+          <DiffView
+            result={diff.result}
+            skillId={skillId}
+            runId={selectedRunId}
+            loading={diff.loading}
+            error={diff.error}
+            canCompare={Boolean(selectedRunId)}
+            canPromote={Boolean(selectedRunId)}
+            onCompare={() => void diff.compare()}
+            onPromote={() => void saveGolden()}
+          />
         </div>
       </section>
     </main>

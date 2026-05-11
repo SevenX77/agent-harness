@@ -1,6 +1,6 @@
 import React, { useEffect, useState, type FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { Bot, Loader2, Send } from 'lucide-react'
+import { Bot, CircleAlert, Loader2, Send } from 'lucide-react'
 import { useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { getCopilotCredentials, updateCopilotCredentials } from '../../api/copilot'
@@ -36,6 +36,27 @@ function ChatMessageItemBase({ message }: ChatMessageItemProps) {
               <ToolCallBubble event={event} />
               <DiffBubble event={event} />
             </div>
+          )
+        }
+        if (event.type === 'error') {
+          return (
+            <div key={event.id} className="mt-2 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
+              <div className="flex items-center gap-2 font-medium">
+                <CircleAlert className="size-3.5" />
+                Copilot error
+              </div>
+              <p className="mt-1 whitespace-pre-wrap">{event.message}</p>
+            </div>
+          )
+        }
+        if (event.type === 'unknown') {
+          return (
+            <details key={event.id} className="mt-2 rounded-md border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
+              <summary className="cursor-pointer font-medium text-foreground">Unknown Copilot event</summary>
+              <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-background/70 p-2">
+                {JSON.stringify(event.payload, null, 2)}
+              </pre>
+            </details>
           )
         }
         return null

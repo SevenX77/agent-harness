@@ -1,132 +1,216 @@
-import { Background, Controls, MiniMap, ReactFlow } from 'reactflow'
-import type { Connection, Edge, Node, NodeTypes, OnEdgesChange, OnNodesChange } from 'reactflow'
-import { useMemo } from 'react'
-import type { KeyboardEvent } from 'react'
-import { AgentNode, SubgraphNode } from '../CustomNodes'
-import type { StudioNodeData } from '../CustomNodes'
-import { errorMessage } from '../utils/errors'
+import '@xyflow/react/dist/style.css'
 
-const nodeTypes = {
-  subgraph: SubgraphNode,
-  agent: AgentNode,
-} satisfies NodeTypes
+import {
+  Background,
+  Controls,
+  MarkerType,
+  MiniMap,
+  ReactFlow,
+  addEdge,
+  useEdgesState,
+  useNodesState,
+  type Connection,
+  type Edge,
+  type Node,
+} from '@xyflow/react'
+import { useCallback, useEffect, useMemo } from 'react'
+import type { PhaseDef, SkillDetail, SkillManifest } from '../api/types'
 
-interface GraphCanvasProps {
-  currentSkillName: string
-  skillDetailError: unknown
-  nodes: Node<StudioNodeData>[]
-  edges: Edge[]
-  isDarkMode: boolean
-  selectedPhaseId?: string | null
-  onNodesChange: OnNodesChange
-  onEdgesChange: OnEdgesChange
-  onConnect: (connection: Connection) => void
-  onPhaseSelect?: (phaseId: string) => void
-  onPhaseDoubleClick?: (phaseId: string) => void
+export type SkillNodeStatus = 'idle' | 'running' | 'success' | 'error' | 'paused' | 'breakpoint'
+
+export interface SkillGraphNodeData extends Record<string, unknown> {
+  label: string
+  mode: string
+  role?: string | null
+  status: SkillNodeStatus
+  dependsOn: string[]
+  subgraphPath?: string | null
 }
 
-export function GraphCanvas({
-  currentSkillName,
-  skillDetailError,
-  nodes,
-  edges,
-  isDarkMode,
-  selectedPhaseId = null,
-  onNodesChange,
-  onEdgesChange,
-  onConnect,
-  onPhaseSelect,
-  onPhaseDoubleClick,
-}: GraphCanvasProps) {
-  const visibleNodes = useMemo(() => (
-    nodes.map((node) => ({
-      ...node,
-      selected: Boolean(selectedPhaseId && (node.id === selectedPhaseId || node.data.label === selectedPhaseId)),
+export type SkillGraphNode = Node<SkillGraphNodeData>
+
+interface GraphCanvasProps {
+  skillId: string
+  skillDetail?: SkillDetail
+  isLoading?: boolean
+  error?: unknown
+  selectedNodeId?: string | null
+  onNodeSelect?: (nodeId: string) => void
+}
+
+function normalizeDependsOn(value: string | string[] | undefined): string[] {
+  if (Array.isArray(value)) {
+    return value.filter(Boolean)
+  }
+  return value ? [value] : []
+}
+
+function phasesFromManifest(manifest: SkillManifest | undefined, skillId: string): PhaseDef[] {
+  if (manifest?.type === 'graph') {
+    return manifest.phases
+  }
+
+  if (manifest?.type === 'agent') {
+    return [{
+      name: manifest.name,
+      mode: 'llm',
+      model_override: manifest.model_override,
+      prompt: null,
+      user_prompt_template: manifest.user_prompt_template,
+      agent_tools: manifest.agent_tools,
+      steps: manifest.agent_profile.steps,
+      domain_protocols: manifest.agent_profile.domain_protocols,
+      references: manifest.agent_profile.references,
+      few_shot_examples: manifest.agent_profile.few_shot_examples,
+      context_access: manifest.agent_profile.context_access,
+      llm_role: manifest.agent_profile.llm_role,
+      adopted_persona: manifest.adopted_persona,
+      max_iterations: null,
+      max_retries: null,
+      max_nudges: null,
+      dead_end_threshold: null,
+      validator: null,
+      validator_optional: false,
+      retry_target: null,
+      hoist_to: null,
+      output_schema: null,
+      output_example: null,
+      output_schema_md: null,
+      output_example_md: null,
+    }]
+  }
+
+  return [
+    {
+      name: `${skillId}-draft`,
+      mode: 'llm',
+      model_override: null,
+      prompt: null,
+      user_prompt_template: null,
+      agent_tools: [],
+      steps: ['Draft prompt'],
+      domain_protocols: [],
+      references: [],
+      few_shot_examples: [],
+      context_access: ['working_memory'],
+      llm_role: 'Agent',
+      adopted_persona: null,
+      max_iterations: null,
+      max_retries: null,
+      max_nudges: null,
+      dead_end_threshold: null,
+      validator: null,
+      validator_optional: false,
+      retry_target: null,
+      hoist_to: null,
+      output_schema: null,
+      output_example: null,
+      output_schema_md: null,
+      output_example_md: null,
+    },
+    {
+      name: `${skillId}-review`,
+      mode: 'logic',
+      model_override: null,
+      depends_on: `${skillId}-draft`,
+      execute_steps: ['Validate output'],
+      validator: null,
+    },
+  ]
+}
+
+function buildNodes(skillId: string, detail?: SkillDetail): SkillGraphNode[] {
+  const phases = phasesFromManifest(detail?.manifest, skillId)
+  return phases.map((phase, index) => ({
+    id: phase.name,
+    type: 'default',
+    position: { x: 160 + (index % 2) * 320, y: 80 + index * 150 },
+    data: {
+      label: phase.name,
+      mode: phase.mode,
+      role: phase.mode === 'llm' ? phase.llm_role : 'Logic',
+      status: index === 0 ? 'success' : 'idle',
+      dependsOn: normalizeDependsOn(phase.depends_on),
+      subgraphPath: phase.subgraph ?? null,
+    },
+  }))
+}
+
+function buildEdges(nodes: SkillGraphNode[]): Edge[] {
+  return nodes.flatMap((node, index) => {
+    const dependencies = node.data.dependsOn.length > 0
+      ? node.data.dependsOn
+      : index > 0
+        ? [nodes[index - 1].id]
+        : []
+
+    return dependencies.map((source) => ({
+      id: `${source}->${node.id}`,
+      source,
+      target: node.id,
+      type: 'smoothstep',
+      markerEnd: { type: MarkerType.ArrowClosed },
+      style: { strokeWidth: 1.5 },
     }))
-  ), [nodes, selectedPhaseId])
-  const selectedNodeIndex = useMemo(() => {
-    if (!selectedPhaseId) {
-      return -1
-    }
-    return visibleNodes.findIndex((node) => node.id === selectedPhaseId || node.data.label === selectedPhaseId)
-  }, [selectedPhaseId, visibleNodes])
+  })
+}
 
-  const selectNodeAt = (index: number) => {
-    const target = visibleNodes[index]
-    if (!target) {
-      return
-    }
-    onPhaseSelect?.(target.data.label)
-  }
+export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, selectedNodeId, onNodeSelect }: GraphCanvasProps) {
+  const initialNodes = useMemo(() => buildNodes(skillId, skillDetail), [skillDetail, skillId])
+  const initialEdges = useMemo(() => buildEdges(initialNodes), [initialNodes])
+  const [nodes, setNodes, onNodesChange] = useNodesState<SkillGraphNode>(initialNodes)
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (!['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft', 'Home', 'End', 'Enter', ' '].includes(event.key)) {
-      return
-    }
-    if (visibleNodes.length === 0) {
-      return
-    }
-    if (event.key === 'Enter' || event.key === ' ') {
-      if (selectedNodeIndex >= 0) {
-        event.preventDefault()
-        onPhaseDoubleClick?.(visibleNodes[selectedNodeIndex].data.label)
-      }
-      return
-    }
-    event.preventDefault()
-    if (event.key === 'Home') {
-      selectNodeAt(0)
-      return
-    }
-    if (event.key === 'End') {
-      selectNodeAt(visibleNodes.length - 1)
-      return
-    }
-    const direction = event.key === 'ArrowDown' || event.key === 'ArrowRight' ? 1 : -1
-    const fallback = direction > 0 ? 0 : visibleNodes.length - 1
-    const nextIndex = selectedNodeIndex < 0
-      ? fallback
-      : Math.min(visibleNodes.length - 1, Math.max(0, selectedNodeIndex + direction))
-    selectNodeAt(nextIndex)
-  }
+  useEffect(() => {
+    setNodes(initialNodes)
+    setEdges(initialEdges)
+  }, [initialEdges, initialNodes, setEdges, setNodes])
+
+  const selectedNodes = useMemo(
+    () => nodes.map((node) => ({ ...node, selected: node.id === selectedNodeId })),
+    [nodes, selectedNodeId],
+  )
+
+  const onConnect = useCallback((connection: Connection) => {
+    setEdges((current) => addEdge({ ...connection, type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed } }, current))
+  }, [setEdges])
 
   return (
-    <div
-      role="application"
-      aria-label="Skill graph canvas"
-      tabIndex={0}
-      onKeyDown={handleKeyDown}
-      className="relative flex-1 border-r border-gray-200 bg-slate-50 outline-none focus:ring-2 focus:ring-sky-300 dark:border-slate-800 dark:bg-slate-950 dark:focus:ring-sky-800"
-    >
-      <div className="absolute left-4 top-4 z-10 rounded-md border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-sm font-semibold text-gray-700 dark:text-gray-300 shadow-sm">
-        {currentSkillName}
+    <section className="relative h-full min-h-0 bg-background">
+      <div className="absolute left-4 top-4 z-10 rounded-md border border-border bg-card px-3 py-2 shadow-sm">
+        <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Edit graph</div>
+        <div className="text-sm font-semibold text-foreground">{skillDetail?.manifest.name ?? skillId}</div>
       </div>
-      {skillDetailError ? (
-        <div className="absolute inset-0 flex items-center justify-center p-8">
-          <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">{errorMessage(skillDetailError)}</div>
+
+      {error ? (
+        <div className="absolute inset-0 z-10 grid place-items-center bg-background/80 p-8">
+          <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+            Failed to load skill graph.
+          </div>
         </div>
-      ) : (
-        <ReactFlow
-          nodes={visibleNodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          onNodeClick={(_, node) => onPhaseSelect?.(node.data.label)}
-          onNodeDoubleClick={(_, node) => onPhaseDoubleClick?.(node.data.label)}
-          fitView
-          minZoom={0.4}
-        >
-          <Controls />
-          <MiniMap
-            style={{ backgroundColor: isDarkMode ? '#0f172a' : '#fff' }}
-            maskColor={isDarkMode ? 'rgba(0,0,0,0.4)' : 'rgba(240,240,240,0.6)'}
-            nodeColor={isDarkMode ? '#334155' : '#e2e8f0'}
-          />
-          <Background gap={12} size={1} />
-        </ReactFlow>
-      )}
-    </div>
+      ) : null}
+
+      {isLoading ? (
+        <div className="absolute right-4 top-4 z-10 rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground shadow-sm">
+          Loading graph...
+        </div>
+      ) : null}
+
+      <ReactFlow
+        nodes={selectedNodes}
+        edges={edges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onConnect={onConnect}
+        onNodeClick={(_, node) => onNodeSelect?.(node.id)}
+        fitView
+        minZoom={0.35}
+        maxZoom={1.4}
+      >
+        <Background gap={18} size={1} />
+        <Controls position="bottom-left" />
+        <MiniMap pannable zoomable />
+      </ReactFlow>
+    </section>
   )
 }

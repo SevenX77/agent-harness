@@ -1,5 +1,7 @@
 import { Bug, GitCompare, Home, Play, Sparkles, Wand2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { NavLink, useParams } from 'react-router-dom'
+import { lintStatusEvent, readLintStatus } from '../../hooks/useDebouncedLint'
 
 const TOOLBAR_ITEMS = [
   { id: 'edit', label: 'Edit', icon: Wand2 },
@@ -12,6 +14,26 @@ const TOOLBAR_ITEMS = [
 export function Toolbar() {
   const { skillId } = useParams()
   const basePath = skillId ? `/skill/${skillId}` : '/'
+  const [lintStatus, setLintStatus] = useState(() => (skillId ? readLintStatus(skillId) : 'idle'))
+
+  useEffect(() => {
+    if (!skillId) {
+      setLintStatus('idle')
+      return undefined
+    }
+
+    setLintStatus(readLintStatus(skillId))
+    const listener = (event: Event) => {
+      const detail = (event as CustomEvent<{ skillId: string }>).detail
+      if (detail?.skillId === skillId) {
+        setLintStatus(readLintStatus(skillId))
+      }
+    }
+    window.addEventListener(lintStatusEvent, listener)
+    return () => window.removeEventListener(lintStatusEvent, listener)
+  }, [skillId])
+
+  const lintLocked = lintStatus === 'checking' || lintStatus === 'failed'
 
   return (
     <aside className="z-10 flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border bg-sidebar px-2 py-3 text-sidebar-foreground">
@@ -28,9 +50,16 @@ export function Toolbar() {
           key={item.id}
           to={`${basePath}/${item.id}`}
           aria-label={item.label}
+          aria-disabled={(item.id === 'predict' || item.id === 'run') && lintLocked}
+          onClick={(event) => {
+            if ((item.id === 'predict' || item.id === 'run') && lintLocked) {
+              event.preventDefault()
+            }
+          }}
           className={({ isActive }) =>
             [
               'inline-flex size-8 items-center justify-center rounded-md transition-colors',
+              (item.id === 'predict' || item.id === 'run') && lintLocked ? 'pointer-events-auto opacity-45' : '',
               isActive
                 ? 'bg-secondary text-secondary-foreground'
                 : 'text-muted-foreground hover:bg-accent hover:text-foreground',

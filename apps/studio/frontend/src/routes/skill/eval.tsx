@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { saveGoldenBaseline } from '../../api/client'
 import type { RunDetail } from '../../api/types'
+import { useGoldenDiff } from '../../hooks/useGoldenDiff'
 import { useRunHistory } from '../../hooks/useRunHistory'
 import { useSkills } from '../../hooks/useSkills'
 import { errorMessage } from '../../utils/errors'
@@ -13,6 +14,7 @@ export default function Eval() {
   const { skillDetail } = useSkills(skillId)
   const history = useRunHistory(skillId)
   const selectedRunId = searchParams.get('run_id') ?? history.runs[0]?.run_id ?? null
+  const diff = useGoldenDiff(skillId, selectedRunId)
   const [runDetail, setRunDetail] = useState<RunDetail | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [savingGolden, setSavingGolden] = useState(false)
@@ -38,6 +40,14 @@ export default function Eval() {
       cancelled = true
     }
   }, [history, selectedRunId])
+
+  useEffect(() => {
+    if (selectedRunId) {
+      void diff.compare()
+    } else {
+      diff.clear()
+    }
+  }, [diff.compare, diff.clear, selectedRunId])
 
   const artifact = useMemo(() => runDetail?.final_context ?? {}, [runDetail])
 
@@ -86,6 +96,14 @@ export default function Eval() {
             </select>
             <button
               type="button"
+              disabled={!selectedRunId || diff.loading}
+              onClick={() => void diff.compare()}
+              className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {diff.loading ? 'Comparing' : 'Compare'}
+            </button>
+            <button
+              type="button"
               disabled={!selectedRunId || savingGolden}
               onClick={() => void saveGolden()}
               className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
@@ -96,6 +114,7 @@ export default function Eval() {
           </div>
         </div>
         {message ? <div className="mt-3 rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground">{message}</div> : null}
+        {diff.error ? <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{diff.error}</div> : null}
       </header>
 
       <section className="grid min-h-0 overflow-hidden md:grid-cols-2">
@@ -111,11 +130,13 @@ export default function Eval() {
         <div className="flex min-h-0 flex-col">
           <div className="border-b border-border px-4 py-3">
             <h2 className="text-sm font-semibold text-foreground">Golden baseline</h2>
-            <p className="mt-1 text-xs text-muted-foreground">Compare output loads in T7.2.</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {diff.result ? `Against ${diff.result.golden_run_id}, score ${Math.round(diff.result.total_score * 100)}%` : 'No comparison loaded.'}
+            </p>
           </div>
-          <div className="min-h-0 flex-1 overflow-auto bg-muted/30 p-4 text-sm text-muted-foreground">
-            Select or save a golden baseline to compare this run.
-          </div>
+          <pre className="min-h-0 flex-1 overflow-auto bg-muted/30 p-4 text-xs text-foreground">
+            {JSON.stringify(diff.result ?? { differences: [] }, null, 2)}
+          </pre>
         </div>
       </section>
     </main>

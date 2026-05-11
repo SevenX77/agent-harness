@@ -6,6 +6,7 @@ import type { JsonObject, RunDetail, RunMetadata } from '../../api/types'
 import { TracePanel } from '../../components/TracePanel'
 import { readLintStatus } from '../../hooks/useDebouncedLint'
 import { useRunHistory } from '../../hooks/useRunHistory'
+import { useRunStream } from '../../hooks/useRunStream'
 import { useSkills } from '../../hooks/useSkills'
 import { useTraceSelection } from '../../hooks/useTraceSelection'
 import { errorMessage, isJsonObject } from '../../utils/errors'
@@ -15,6 +16,7 @@ export default function Run() {
   const navigate = useNavigate()
   const { skillDetail } = useSkills(skillId)
   const history = useRunHistory(skillId)
+  const stream = useRunStream(runId)
   const traceSelection = useTraceSelection()
   const compilePassed = readLintStatus(skillId) === 'passed'
   const [rawInput, setRawInput] = useState('{}')
@@ -36,7 +38,10 @@ export default function Run() {
       return null
     }
   }, [rawInput])
-  const traceEvents = runDetail?.events ?? []
+  const traceEvents = useMemo(() => {
+    const persisted = runDetail?.events ?? []
+    return stream.events.length > 0 ? [...persisted, ...stream.events] : persisted
+  }, [runDetail?.events, stream.events])
 
   useEffect(() => {
     if (!runId) {
@@ -180,6 +185,21 @@ export default function Run() {
                 <dt className="text-muted-foreground">Inputs</dt>
                 <dd className="font-medium text-foreground">{declaredInputs.length}</dd>
               </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-muted-foreground">Stream</dt>
+                <dd className="font-medium text-foreground">{stream.status}</dd>
+              </div>
+              {stream.reconnectInMs ? (
+                <div className="flex justify-between gap-3">
+                  <dt className="text-muted-foreground">Reconnect</dt>
+                  <dd className="font-medium text-foreground">{Math.round(stream.reconnectInMs / 1000)}s</dd>
+                </div>
+              ) : null}
+              {stream.error ? (
+                <div className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
+                  {stream.error}
+                </div>
+              ) : null}
             </dl>
             </div>
             <div className="rounded-md border border-border bg-card p-4">

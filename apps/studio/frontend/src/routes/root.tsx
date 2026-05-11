@@ -1,10 +1,12 @@
 import { isRouteErrorResponse, Outlet, useRouteError } from 'react-router-dom'
 import { Toaster } from 'sonner'
+import { GlobalShortcutShell } from '../components/studio/GlobalShortcutShell'
 
 export default function Root() {
   return (
     <>
       <Outlet />
+      <GlobalShortcutShell />
       <Toaster position="bottom-right" richColors closeButton />
     </>
   )
@@ -30,6 +32,7 @@ export function RootErrorBoundary() {
           <p className="mt-2 text-sm text-muted-foreground">{message}</p>
         </section>
       </main>
+      <GlobalShortcutShell />
       <Toaster position="bottom-right" richColors closeButton />
     </>
   )

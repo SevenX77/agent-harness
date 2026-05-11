@@ -9,6 +9,7 @@ import { PromptInspector } from '../../components/PromptInspector'
 import { MicroTopologyPanel } from '../../components/studio/micro-topology-panel'
 import { EdgeContextViewer } from '../../components/studio/edge-context-viewer'
 import { NetworkBanner } from '../../components/studio/network-banner'
+import { useCopilotContext } from '../../hooks/useCopilotContext'
 import { readLintStatus } from '../../hooks/useDebouncedLint'
 import { useRunHistory } from '../../hooks/useRunHistory'
 import { useRunStream } from '../../hooks/useRunStream'
@@ -70,6 +71,30 @@ export default function Run() {
     })
     return statuses
   }, [traceEvents])
+  const selectedTracePayload = useMemo(() => (
+    selectedTraceEvent ? JSON.parse(JSON.stringify(selectedTraceEvent)) as JsonObject : null
+  ), [selectedTraceEvent])
+
+  useCopilotContext({
+    skillId,
+    view: 'Run',
+    context: {
+      route_run_id: runId,
+      current_run_id: currentRun?.run_id ?? null,
+      run_status: currentRun?.status ?? null,
+      stream_status: stream.status,
+      selected_phase_id: traceSelection.selectedPhaseId,
+      selected_event_id: traceSelection.selectedEventId,
+      selected_trace_item: selectedTracePayload,
+      edge_context_summary: selectedTraceEvent ? {
+        event_type: selectedTraceEvent.event_type,
+        phase_name: selectedTraceEvent.phase_name ?? selectedTraceEvent.current_phase ?? null,
+        payload_keys: selectedTracePayload ? Object.keys(selectedTracePayload) : [],
+      } : null,
+      input: parsedInput,
+      trace_count: traceEvents.length,
+    },
+  })
 
   useEffect(() => {
     if (!runId) {

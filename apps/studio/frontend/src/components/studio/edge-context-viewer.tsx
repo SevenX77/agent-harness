@@ -30,7 +30,7 @@ export function EdgeContextViewer({ title, value, open, onClose, editable = fals
             <h2 className="text-sm font-semibold text-foreground">{title}</h2>
             <p className="mt-1 text-xs text-muted-foreground">{editable ? 'Editable local JSON draft' : 'Readonly edge context JSON'}</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close edge context viewer" className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
+          <button type="button" onClick={onClose} aria-label="Close edge context viewer" className="min-h-8 min-w-8 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
             <X className="size-4" />
           </button>
         </header>

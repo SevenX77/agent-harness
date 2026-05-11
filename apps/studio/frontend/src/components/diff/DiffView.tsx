@@ -132,7 +132,7 @@ export function DiffView({
       ) : null}
 
       <div className="grid min-h-0 flex-1 grid-cols-[14rem_1fr]">
-        <div className="overflow-y-auto border-r border-slate-200 p-3 dark:border-slate-800">
+        <div className="overflow-y-auto border-e border-slate-200 p-3 dark:border-slate-800">
           {fields.length === 0 ? (
             <div className="text-sm text-slate-500 dark:text-slate-400">
               {loading ? 'Loading diff...' : 'No fields to compare.'}
@@ -144,7 +144,7 @@ export function DiffView({
                 key={field.field_path}
                 type="button"
                 onClick={() => setSelectedPath(field.field_path)}
-                className={`block w-full rounded-md border px-2 py-2 text-left text-xs ${
+                className={`block w-full rounded-md border px-2 py-2 text-start text-xs ${
                   selectedField?.field_path === field.field_path
                     ? 'border-sky-400 bg-sky-50 text-sky-800 dark:border-sky-500 dark:bg-sky-950/40 dark:text-sky-200'
                     : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'

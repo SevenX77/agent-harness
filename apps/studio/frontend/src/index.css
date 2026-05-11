@@ -51,6 +51,12 @@
 }
 
 :root {
+    --z-canvas: 0;
+    --z-sidebar: 10;
+    --z-resize-handle: 20;
+    --z-copilot: 40;
+    --z-modal: 50;
+    --z-toast: 60;
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
@@ -83,6 +89,30 @@
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
+}
+
+.z-canvas {
+  z-index: var(--z-canvas);
+}
+
+.z-sidebar {
+  z-index: var(--z-sidebar);
+}
+
+.z-resize-handle {
+  z-index: var(--z-resize-handle);
+}
+
+.z-copilot {
+  z-index: var(--z-copilot);
+}
+
+.z-modal {
+  z-index: var(--z-modal);
+}
+
+.z-toast {
+  z-index: var(--z-toast);
 }
 
 .dark {

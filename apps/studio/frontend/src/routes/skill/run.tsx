@@ -4,9 +4,11 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { startRun } from '../../api/client'
 import type { CallbackEvent, JsonObject, RunDetail, RunMetadata } from '../../api/types'
 import { TracePanel } from '../../components/TracePanel'
+import { GraphCanvas, type SkillNodeStatus } from '../../components/GraphCanvas'
 import { PromptInspector } from '../../components/PromptInspector'
 import { MicroTopologyPanel } from '../../components/studio/micro-topology-panel'
 import { EdgeContextViewer } from '../../components/studio/edge-context-viewer'
+import { NetworkBanner } from '../../components/studio/network-banner'
 import { readLintStatus } from '../../hooks/useDebouncedLint'
 import { useRunHistory } from '../../hooks/useRunHistory'
 import { useRunStream } from '../../hooks/useRunStream'
@@ -49,6 +51,25 @@ export default function Run() {
     const persisted = runDetail?.events ?? []
     return stream.events.length > 0 ? [...persisted, ...stream.events] : persisted
   }, [runDetail?.events, stream.events])
+  const nodeStatuses = useMemo(() => {
+    const statuses: Record<string, SkillNodeStatus> = {}
+    traceEvents.forEach((event) => {
+      const phase = event.phase_name ?? event.current_phase
+      if (!phase) {
+        return
+      }
+      if (event.event_type === 'phase_start') {
+        statuses[phase] = 'running'
+      }
+      if (event.event_type === 'phase_end') {
+        statuses[phase] = 'success'
+      }
+      if (event.event_type === 'internal_error' || event.event_type === 'validation_fail') {
+        statuses[phase] = 'error'
+      }
+    })
+    return statuses
+  }, [traceEvents])
 
   useEffect(() => {
     if (!runId) {
@@ -119,6 +140,7 @@ export default function Run() {
           </button>
         </div>
       </header>
+      <NetworkBanner status={stream.status} reconnectInMs={stream.reconnectInMs} error={stream.error} />
 
       <section className="min-h-0 overflow-auto p-5">
         {!compilePassed ? (
@@ -131,6 +153,7 @@ export default function Run() {
         ) : null}
 
         <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)_320px]">
+          <div className="space-y-5">
           <label className="block rounded-md border border-border bg-card p-4">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-sm font-semibold text-foreground">Run input JSON</span>
@@ -158,6 +181,16 @@ export default function Run() {
             />
             {error ? <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div> : null}
           </label>
+          <div className="h-80 overflow-hidden rounded-md border border-border bg-card">
+            <GraphCanvas
+              skillId={skillId}
+              skillDetail={skillDetail}
+              selectedNodeId={traceSelection.selectedPhaseId}
+              onNodeSelect={(node) => traceSelection.selectPhase(node.id)}
+              statusByNodeId={nodeStatuses}
+            />
+          </div>
+          </div>
 
           <section className="min-h-[36rem] overflow-hidden rounded-md border border-border bg-card">
             <TracePanel

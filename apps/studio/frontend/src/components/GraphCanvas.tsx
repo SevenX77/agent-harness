@@ -43,6 +43,7 @@ interface GraphCanvasProps {
   error?: unknown
   selectedNodeId?: string | null
   onNodeSelect?: (node: { id: string, data: SkillGraphNodeData }) => void
+  statusByNodeId?: Record<string, SkillNodeStatus>
 }
 
 const STATUS_STYLE: Record<SkillNodeStatus, { label: string, className: string, icon: typeof Circle }> = {
@@ -221,6 +222,7 @@ function buildNodes(
   detail: SkillDetail | undefined,
   expandedSubgraphs: Set<string>,
   onToggleSubgraph: (nodeId: string) => void,
+  statusByNodeId: Record<string, SkillNodeStatus>,
 ): SkillGraphNode[] {
   const phases = phasesFromManifest(detail?.manifest, skillId)
   return phases.map((phase, index) => ({
@@ -231,7 +233,7 @@ function buildNodes(
       label: phase.name,
       mode: phase.mode,
       role: phase.mode === 'llm' ? phase.llm_role : 'Logic',
-      status: index === 0 ? 'success' : 'idle',
+      status: statusByNodeId[phase.name] ?? (index === 0 ? 'success' : 'idle'),
       dependsOn: normalizeDependsOn(phase.depends_on),
       subgraphPath: phase.subgraph ?? null,
       isExpanded: expandedSubgraphs.has(phase.name),
@@ -259,7 +261,7 @@ function buildEdges(nodes: SkillGraphNode[]): Edge[] {
   })
 }
 
-export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, selectedNodeId, onNodeSelect }: GraphCanvasProps) {
+export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, selectedNodeId, onNodeSelect, statusByNodeId = {} }: GraphCanvasProps) {
   const [expandedSubgraphs, setExpandedSubgraphs] = useState<Set<string>>(() => new Set())
   const toggleSubgraph = useCallback((nodeId: string) => {
     setExpandedSubgraphs((current) => {
@@ -274,8 +276,8 @@ export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, se
   }, [])
 
   const initialNodes = useMemo(
-    () => buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph),
-    [expandedSubgraphs, skillDetail, skillId, toggleSubgraph],
+    () => buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph, statusByNodeId),
+    [expandedSubgraphs, skillDetail, skillId, statusByNodeId, toggleSubgraph],
   )
   const initialEdges = useMemo(() => buildEdges(initialNodes), [initialNodes])
   const [nodes, setNodes, onNodesChange] = useNodesState<SkillGraphNode>(initialNodes)

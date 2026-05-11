@@ -2,12 +2,14 @@ import { useState } from "react"
 import { Header } from "./header"
 import { Toolbar } from "./toolbar"
 import { Canvas } from "./canvas"
+import { SplitEditor } from "./split-editor"
 import { Copilot, CopilotButton } from "./copilot"
 import {
   AssetsPanel,
   TimelinePanel,
   PropertiesPanel,
   EditorPanel,
+  type FileMeta,
 } from "./panels"
 import {
   ResizablePanelGroup,
@@ -15,14 +17,26 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable"
 
+type LayoutMode = "split" | "editor-only" | "mini-only"
+type TopViewMode = "code" | "node"
+
 export function Workspace() {
   const [activePanel, setActivePanel] = useState<string | null>("assets")
   const [copilotOpen, setCopilotOpen] = useState(true)
+  const [openFile, setOpenFile] = useState<FileMeta | null>(null)
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>("split")
+  const [topViewMode, setTopViewMode] = useState<TopViewMode>("code")
+
+  const handleFileOpen = (file: FileMeta) => {
+    setOpenFile(file)
+    setLayoutMode("split")
+    setTopViewMode("code")
+  }
 
   const renderPanel = () => {
     switch (activePanel) {
       case "assets":
-        return <AssetsPanel onClose={() => setActivePanel(null)} />
+        return <AssetsPanel onClose={() => setActivePanel(null)} onFileOpen={handleFileOpen} />
       case "timeline":
         return <TimelinePanel onClose={() => setActivePanel(null)} />
       case "properties":
@@ -66,7 +80,17 @@ export function Workspace() {
           )}
 
           <ResizablePanel id="canvas" defaultSize="60%" minSize="30%">
-            <Canvas />
+            {openFile ? (
+              <SplitEditor
+                file={openFile}
+                layoutMode={layoutMode}
+                topViewMode={topViewMode}
+                onLayoutModeChange={setLayoutMode}
+                onTopViewModeChange={setTopViewMode}
+              />
+            ) : (
+              <Canvas />
+            )}
           </ResizablePanel>
 
           {copilotOpen && (

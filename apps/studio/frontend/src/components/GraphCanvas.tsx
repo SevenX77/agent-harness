@@ -3,8 +3,10 @@ import '@xyflow/react/dist/style.css'
 import {
   Background,
   Controls,
+  Handle,
   MarkerType,
   MiniMap,
+  Position,
   ReactFlow,
   addEdge,
   useEdgesState,
@@ -12,8 +14,10 @@ import {
   type Connection,
   type Edge,
   type Node,
+  type NodeProps,
 } from '@xyflow/react'
 import { useCallback, useEffect, useMemo } from 'react'
+import { AlertTriangle, Bot, CheckCircle2, Circle, Pause, Radio, Workflow } from 'lucide-react'
 import type { PhaseDef, SkillDetail, SkillManifest } from '../api/types'
 
 export type SkillNodeStatus = 'idle' | 'running' | 'success' | 'error' | 'paused' | 'breakpoint'
@@ -36,6 +40,81 @@ interface GraphCanvasProps {
   error?: unknown
   selectedNodeId?: string | null
   onNodeSelect?: (nodeId: string) => void
+}
+
+const STATUS_STYLE: Record<SkillNodeStatus, { label: string, className: string, icon: typeof Circle }> = {
+  idle: {
+    label: 'Idle',
+    className: 'border-border bg-card text-muted-foreground',
+    icon: Circle,
+  },
+  running: {
+    label: 'Running',
+    className: 'animate-pulse-primary border-primary bg-primary/10 text-primary',
+    icon: Radio,
+  },
+  success: {
+    label: 'Success',
+    className: 'border-emerald-500/45 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+    icon: CheckCircle2,
+  },
+  error: {
+    label: 'Error',
+    className: 'border-destructive/50 bg-destructive/10 text-destructive',
+    icon: AlertTriangle,
+  },
+  paused: {
+    label: 'Paused',
+    className: 'border-amber-500/45 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+    icon: Pause,
+  },
+  breakpoint: {
+    label: 'Breakpoint',
+    className: 'border-fuchsia-500/45 bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-300',
+    icon: Workflow,
+  },
+}
+
+function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
+  const style = STATUS_STYLE[data.status]
+  const StatusIcon = style.icon
+
+  return (
+    <div
+      className={[
+        'min-w-[240px] rounded-md border bg-card p-3 text-card-foreground shadow-sm transition-colors',
+        selected ? 'border-primary ring-2 ring-primary/30' : 'border-border',
+      ].join(' ')}
+    >
+      <Handle type="target" position={Position.Top} className="!size-2.5 !border-background !bg-primary" />
+      <div className="flex items-start gap-3">
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
+          <Bot className="size-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-semibold text-foreground">{data.label}</div>
+          <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="uppercase">{data.mode}</span>
+            {data.role ? <span className="truncate">{data.role}</span> : null}
+          </div>
+        </div>
+        <span className={['inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium', style.className].join(' ')}>
+          <StatusIcon className="size-3" />
+          {style.label}
+        </span>
+      </div>
+      {data.dependsOn.length > 0 ? (
+        <div className="mt-3 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
+          depends_on: {data.dependsOn.join(', ')}
+        </div>
+      ) : null}
+      <Handle type="source" position={Position.Bottom} className="!size-2.5 !border-background !bg-primary" />
+    </div>
+  )
+}
+
+const nodeTypes = {
+  skill: SkillNode,
 }
 
 function normalizeDependsOn(value: string | string[] | undefined): string[] {
@@ -123,7 +202,7 @@ function buildNodes(skillId: string, detail?: SkillDetail): SkillGraphNode[] {
   const phases = phasesFromManifest(detail?.manifest, skillId)
   return phases.map((phase, index) => ({
     id: phase.name,
-    type: 'default',
+    type: 'skill',
     position: { x: 160 + (index % 2) * 320, y: 80 + index * 150 },
     data: {
       label: phase.name,
@@ -199,6 +278,7 @@ export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, se
       <ReactFlow
         nodes={selectedNodes}
         edges={edges}
+        nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}

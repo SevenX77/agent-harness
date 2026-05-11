@@ -24,6 +24,13 @@ export function useRunHistory(skillId: string | null) {
       : current, { revalidate: true })
   }, [mutate, skillId])
 
+  const startOptimisticRun = useCallback(async (run: RunMetadata) => {
+    await mutate((current) => ({
+      total: current ? current.total + 1 : 1,
+      runs: [run, ...(current?.runs ?? []).filter((item) => item.run_id !== run.run_id)],
+    }), { revalidate: true })
+  }, [mutate])
+
   const fetchRunDetail = useCallback(async (runId: string): Promise<RunDetail | null> => {
     if (!skillId) {
       return null
@@ -38,6 +45,7 @@ export function useRunHistory(skillId: string | null) {
     error,
     isLoading,
     refresh: mutate,
+    startOptimisticRun,
     deleteRun,
     fetchRunDetail,
   }

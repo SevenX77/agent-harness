@@ -2,21 +2,13 @@ import { Outlet, useParams } from 'react-router-dom'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 import { Header } from '../../components/studio/Header'
 import { Toolbar } from '../../components/studio/Toolbar'
+import { CopilotPanel } from '../../components/copilot/copilot-panel'
 
 function LeftPanelPlaceholder() {
   return (
     <section className="h-full bg-background p-3 text-sm text-muted-foreground">
       Workspace panel
     </section>
-  )
-}
-
-function CopilotRailPlaceholder() {
-  return (
-    <aside className="flex h-full flex-col bg-sidebar p-4 text-sidebar-foreground">
-      <p className="text-sm font-medium">Copilot</p>
-      <p className="mt-2 text-xs text-muted-foreground">Always-on assistant rail</p>
-    </aside>
   )
 }
 
@@ -41,7 +33,7 @@ export default function SkillLayout() {
           </Panel>
           <Separator className="z-20 w-px bg-border transition-colors hover:bg-ring" />
           <Panel id="workspace-copilot" defaultSize={22} minSize={18} maxSize={35}>
-            <CopilotRailPlaceholder />
+            <CopilotPanel />
           </Panel>
         </Group>
       </div>

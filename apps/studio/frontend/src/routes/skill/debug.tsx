@@ -4,6 +4,7 @@ import { useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { EdgeContextViewer } from '../../components/studio/edge-context-viewer'
 import { SkillNode } from '../../components/studio/skill-node'
+import { fingerprintText, useCopilotContext } from '../../hooks/useCopilotContext'
 import { clearEdgeDraft, readEdgeDraft, writeEdgeDraft } from '../../hooks/useDraftPersist'
 import { useSkills } from '../../hooks/useSkills'
 
@@ -20,12 +21,28 @@ export default function Debug() {
   const [edgeDraft, setEdgeDraft] = useState(() => readEdgeDraft(skillId, edgeId) ?? baseEdge)
   const [edgeViewerOpen, setEdgeViewerOpen] = useState(false)
   const edgeDirty = edgeDraft !== baseEdge
+  const overrideFingerprint = fingerprintText(edgeDraft)
+
+  useCopilotContext({
+    skillId,
+    view: 'Run',
+    context: {
+      debug_view: true,
+      paused_node: 'draft',
+      error_node: 'validate',
+      error_summary: 'Validator failed; backend resume is out of scope for V2.',
+      override_dirty: edgeDirty,
+      override_fingerprint: overrideFingerprint,
+      edge_context: edgeDraft,
+    },
+  })
 
   const showResumePlaceholder = () => {
     if (edgeDirty) {
       toast.warning('Edge draft changed; recompile before Resume placeholder is available.')
       return
     }
+    // Backend resume remains OOS for V2; this UI deliberately degrades to an informational toast.
     toast.info('HitL Resume 待 backend 实现 (V3 范围)')
   }
 

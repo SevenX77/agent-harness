@@ -1,21 +1,7 @@
 import { Outlet, useParams } from 'react-router-dom'
 import { Group, Panel, Separator } from 'react-resizable-panels'
-
-function WorkspaceHeaderPlaceholder() {
-  return (
-    <header className="flex h-11 shrink-0 items-center border-b border-border bg-background px-3">
-      <span className="text-sm font-medium text-foreground">Studio Workspace</span>
-    </header>
-  )
-}
-
-function ToolbarPlaceholder() {
-  return (
-    <aside className="flex w-12 shrink-0 items-center justify-center border-r border-border bg-sidebar text-sidebar-foreground">
-      <span className="sr-only">Workspace navigation</span>
-    </aside>
-  )
-}
+import { Header } from '../../components/studio/Header'
+import { Toolbar } from '../../components/studio/Toolbar'
 
 function LeftPanelPlaceholder() {
   return (
@@ -40,9 +26,9 @@ export default function SkillLayout() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
-      <WorkspaceHeaderPlaceholder />
+      <Header />
       <div className="flex min-h-0 flex-1">
-        <ToolbarPlaceholder />
+        <Toolbar />
         <Group orientation="horizontal" id={autoSaveId} className="min-w-0 flex-1">
           <Panel id="workspace-left" defaultSize={20} minSize={14} maxSize={35}>
             <LeftPanelPlaceholder />

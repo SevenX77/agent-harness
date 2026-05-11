@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import App from '../App'
+import { RouterProvider } from 'react-router-dom'
 import { initializeRuntimeConfig } from '../config/runtime'
+import { router } from '../routes/router'
 
 export function RuntimeGate() {
   const [runtimeState, setRuntimeState] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -38,5 +39,5 @@ export function RuntimeGate() {
     )
   }
 
-  return <App />
+  return <RouterProvider router={router} />
 }

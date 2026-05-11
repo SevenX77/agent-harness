@@ -1,5 +1,6 @@
 import { AxiosError } from 'axios'
 import { X } from 'lucide-react'
+import { useEffect, useRef } from 'react'
 import { api } from '../../api/client'
 import type { SkillSummary } from '../../api/types'
 import { useSkillCreator, validateStep } from '../../hooks/useSkillCreator'
@@ -7,7 +8,6 @@ import type { ToastKind } from '../../types/studio'
 import { errorMessage } from '../../utils/errors'
 import type { WizardData, WizardInput } from '../../templates/skillMdGenerator'
 import { TemplatePicker } from '../templates/TemplatePicker'
-import { useFocusTrap } from '../../hooks/useFocusTrap'
 import { StepIndicator } from './StepIndicator'
 import { StepBasics } from './steps/StepBasics'
 import { StepFirstPhase } from './steps/StepFirstPhase'
@@ -23,7 +23,26 @@ interface SkillCreatorWizardProps {
 
 export function SkillCreatorWizard({ open, onClose, onCreated, pushToast }: SkillCreatorWizardProps) {
   const { state, dispatch, preview, canNext, isLastStep, stepCount, currentErrors } = useSkillCreator()
-  const trapRef = useFocusTrap<HTMLDivElement>(open, onClose)
+  const trapRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!open) {
+      return undefined
+    }
+    const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    const focusTimer = window.setTimeout(() => trapRef.current?.querySelector<HTMLElement>('button, textarea, input, select, a[href]')?.focus(), 0)
+    return () => {
+      window.clearTimeout(focusTimer)
+      document.removeEventListener('keydown', handleKeyDown)
+      returnFocus?.focus()
+    }
+  }, [onClose, open])
 
   if (!open) {
     return null

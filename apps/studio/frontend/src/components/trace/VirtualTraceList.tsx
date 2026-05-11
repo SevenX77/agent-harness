@@ -3,7 +3,6 @@ import type { KeyboardEvent } from 'react'
 import type { CallbackEvent } from '../../api/types'
 import type { IndexedTraceEvent } from '../../hooks/useTraceFilter'
 import { traceEventId } from '../../hooks/useTraceSelection'
-import { useVirtualScroll } from '../../hooks/useVirtualScroll'
 import { eventPhase, isPredictTrace } from '../../utils/trace'
 import { TRACE_EVENT_ROW_HEIGHT, TraceEventRow } from './TraceEventRow'
 
@@ -26,11 +25,37 @@ export function VirtualTraceList({
 }: VirtualTraceListProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
-  const virtual = useVirtualScroll(viewportRef, {
-    itemCount: events.length,
-    itemHeight: TRACE_EVENT_ROW_HEIGHT,
-    overscan: 8,
-  })
+  const [viewportHeight, setViewportHeight] = useState(0)
+  const [scrollTop, setScrollTop] = useState(0)
+  useEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport) {
+      return undefined
+    }
+    const updateViewport = () => {
+      setViewportHeight(viewport.clientHeight)
+      setScrollTop(viewport.scrollTop)
+    }
+    updateViewport()
+    viewport.addEventListener('scroll', updateViewport, { passive: true })
+    window.addEventListener('resize', updateViewport)
+    return () => {
+      viewport.removeEventListener('scroll', updateViewport)
+      window.removeEventListener('resize', updateViewport)
+    }
+  }, [])
+  const virtual = useMemo(() => {
+    const visibleCount = Math.ceil(viewportHeight / TRACE_EVENT_ROW_HEIGHT)
+    const firstVisible = Math.floor(scrollTop / TRACE_EVENT_ROW_HEIGHT)
+    const startIdx = Math.max(0, firstVisible - 8)
+    const endIdx = Math.min(events.length, firstVisible + visibleCount + 9)
+    return {
+      startIdx,
+      endIdx,
+      totalHeight: events.length * TRACE_EVENT_ROW_HEIGHT,
+      offsetTop: startIdx * TRACE_EVENT_ROW_HEIGHT,
+    }
+  }, [events.length, scrollTop, viewportHeight])
   const visibleEvents = events.slice(virtual.startIdx, virtual.endIdx)
   const predictTrace = useMemo(
     () => isPredictTrace(events.map(({ event }) => event)),

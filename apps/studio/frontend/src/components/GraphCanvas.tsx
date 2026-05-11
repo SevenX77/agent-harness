@@ -39,7 +39,7 @@ interface GraphCanvasProps {
   isLoading?: boolean
   error?: unknown
   selectedNodeId?: string | null
-  onNodeSelect?: (nodeId: string) => void
+  onNodeSelect?: (node: { id: string, data: SkillGraphNodeData }) => void
 }
 
 const STATUS_STYLE: Record<SkillNodeStatus, { label: string, className: string, icon: typeof Circle }> = {
@@ -282,7 +282,7 @@ export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, se
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
-        onNodeClick={(_, node) => onNodeSelect?.(node.id)}
+        onNodeClick={(_, node) => onNodeSelect?.({ id: node.id, data: node.data })}
         fitView
         minZoom={0.35}
         maxZoom={1.4}

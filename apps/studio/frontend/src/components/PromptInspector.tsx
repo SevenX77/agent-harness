@@ -1,4 +1,5 @@
 import { CheckCircle, MessageSquare, X } from 'lucide-react'
+import { useState } from 'react'
 import type { CallbackEvent } from '../api/types'
 import { eventPhase, jsonText } from '../utils/trace'
 
@@ -8,9 +9,17 @@ interface PromptInspectorProps {
 }
 
 export function PromptInspector({ promptEvent, onClose }: PromptInspectorProps) {
+  const [tab, setTab] = useState<'template' | 'variables' | 'rendered'>('template')
+
   if (!promptEvent) {
     return null
   }
+
+  const tabs = [
+    ['template', 'Template'],
+    ['variables', 'Variables'],
+    ['rendered', 'Rendered'],
+  ] as const
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 dark:bg-black/80 p-8">
@@ -25,24 +34,36 @@ export function PromptInspector({ promptEvent, onClose }: PromptInspectorProps) 
           </button>
         </div>
 
-        <div className="grid flex-1 grid-cols-3 gap-4 overflow-hidden p-6">
-          <div className="flex flex-col overflow-hidden rounded-md border border-gray-200 dark:border-slate-800">
-            <div className="border-b border-gray-200 dark:border-slate-800 bg-gray-100 dark:bg-slate-800 px-3 py-2 text-xs font-bold text-gray-600 dark:text-gray-400">Template Source</div>
-            <pre className="flex-1 overflow-y-auto bg-gray-50 dark:bg-slate-950 p-3 text-sm whitespace-pre-wrap dark:text-gray-300">{promptEvent.template_source ?? 'inline'}</pre>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-6">
+          <div className="mb-4 flex gap-2">
+            {tabs.map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setTab(id)}
+                className={`h-9 rounded-md border px-3 text-sm font-medium ${
+                  tab === id
+                    ? 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-900/30 dark:text-violet-300'
+                    : 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-slate-800 dark:text-gray-300 dark:hover:bg-slate-800'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-          <div className="flex flex-col overflow-hidden rounded-md border border-gray-200 dark:border-slate-800">
-            <div className="border-b border-gray-200 dark:border-slate-800 bg-gray-100 dark:bg-slate-800 px-3 py-2 text-xs font-bold text-gray-600 dark:text-gray-400">Variables</div>
-            <pre className="flex-1 overflow-y-auto bg-gray-50 dark:bg-slate-950 p-3 text-sm whitespace-pre-wrap text-sky-700 dark:text-sky-400">{jsonText(promptEvent.variables)}</pre>
-          </div>
-          <div className="flex flex-col overflow-hidden rounded-md border border-violet-200 dark:border-violet-800/50">
-            <div className="flex items-center gap-1 border-b border-violet-200 dark:border-violet-800/50 bg-violet-50 dark:bg-violet-900/20 px-3 py-2 text-xs font-bold text-violet-700 dark:text-violet-400">
+          <pre className="min-h-0 flex-1 overflow-auto rounded-md border border-gray-200 bg-gray-50 p-4 text-sm whitespace-pre-wrap text-gray-800 dark:border-slate-800 dark:bg-slate-950 dark:text-gray-300">
+            {tab === 'template' ? (promptEvent.template_source ?? 'inline') : null}
+            {tab === 'variables' ? jsonText(promptEvent.variables) : null}
+            {tab === 'rendered' ? (
+              promptEvent.event_type === 'prompt_captured' ? jsonText(promptEvent.resolved_prompt) : jsonText(promptEvent.messages ?? undefined)
+            ) : null}
+          </pre>
+          {tab === 'rendered' ? (
+            <div className="mt-3 flex items-center gap-1 text-xs font-bold text-violet-700 dark:text-violet-400">
               <CheckCircle className="h-3 w-3" />
-              Final Prompt
+              Rendered prompt payload
             </div>
-            <pre className="flex-1 overflow-y-auto bg-white dark:bg-slate-900 p-3 text-sm whitespace-pre-wrap text-gray-800 dark:text-gray-300">
-              {promptEvent.event_type === 'prompt_captured' ? jsonText(promptEvent.resolved_prompt) : jsonText(promptEvent.messages ?? undefined)}
-            </pre>
-          </div>
+          ) : null}
         </div>
       </div>
     </div>

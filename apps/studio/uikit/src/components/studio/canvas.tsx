@@ -160,9 +160,10 @@ export function Canvas() {
       >
         <Background
           variant={BackgroundVariant.Dots}
-          gap={16}
-          size={0.5}
-          color="var(--border)"
+          gap={20}
+          size={1}
+          color="var(--muted-foreground)"
+          style={{ opacity: 0.4 }}
           className="!bg-background"
         />
         <Controls showInteractive={false} />

@@ -49,7 +49,7 @@ export function AssetsPanel({ onClose }: PanelProps) {
         <div className="py-2 px-2 text-xs">
           {/* SKILL.md */}
           <div className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors">
-            <FileText className="size-4 text-primary" strokeWidth={1.5} />
+            <FileText className="size-4 text-muted-foreground" strokeWidth={1.5} />
             <span>SKILL.md</span>
           </div>
 
@@ -131,7 +131,7 @@ export function TimelinePanel({ onClose }: PanelProps) {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   {trace.status === "success" ? (
-                    <CheckCircle2 className="size-4 text-primary" />
+                    <CheckCircle2 className="size-4 text-foreground" />
                   ) : (
                     <AlertCircle className="size-4 text-destructive" />
                   )}
@@ -279,13 +279,13 @@ export function EditorPanel({ onClose }: PanelProps) {
                 {line.type === "comment" && <span className="text-muted-foreground">{line.content}</span>}
                 {line.type === "import" && (
                   <>
-                    <span className="text-primary">{line.content.split(" ")[0]}</span>
+                    <span className="text-foreground">{line.content.split(" ")[0]}</span>
                     <span className="text-foreground">{" " + line.content.slice(line.content.indexOf(" ") + 1)}</span>
                   </>
                 )}
                 {line.type === "class" && (
                   <>
-                    <span className="text-primary">class</span>
+                    <span className="text-foreground">class</span>
                     <span className="text-foreground"> TextGenerator</span>
                     <span className="text-foreground">(Skill):</span>
                   </>
@@ -293,7 +293,7 @@ export function EditorPanel({ onClose }: PanelProps) {
                 {line.type === "def" && (
                   <>
                     <span className="text-foreground">{line.content.match(/^\s*/)?.[0]}</span>
-                    <span className="text-primary">{line.content.includes("async") ? "async def" : "def"}</span>
+                    <span className="text-foreground">{line.content.includes("async") ? "async def" : "def"}</span>
                     <span className="text-foreground"> {line.content.match(/def (\w+)/)?.[1]}</span>
                     <span className="text-foreground">{line.content.slice(line.content.indexOf("("))}</span>
                   </>

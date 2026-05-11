@@ -2,7 +2,6 @@
 import { useState } from "react"
 import { X, Sparkles, ChevronRight, Plus, Paperclip, ArrowUp } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 
@@ -58,7 +57,7 @@ export function Copilot({ onClose }: CopilotProps) {
                 key={i}
                 className="w-full flex items-center gap-2.5 px-2.5 py-2 text-left text-xs text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded-sm transition-colors group"
               >
-                <Sparkles className="size-3.5 text-muted-foreground group-hover:text-primary transition-colors" strokeWidth={1.5} />
+                <Sparkles className="size-3.5 text-muted-foreground group-hover:text-foreground transition-colors" strokeWidth={1.5} />
                 {suggestion}
               </button>
             ))}
@@ -68,20 +67,23 @@ export function Copilot({ onClose }: CopilotProps) {
 
       {/* Input */}
       <div className="p-3 border-t border-sidebar-border shrink-0">
-        <div className="flex items-center gap-2 bg-secondary border border-border rounded-md px-2.5 py-2 focus-within:ring-1 focus-within:ring-ring transition-colors">
-          <Input
+        <div className="flex flex-col gap-2 bg-secondary border border-border rounded-md px-2.5 py-2 focus-within:ring-1 focus-within:ring-ring transition-colors">
+          <textarea
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             placeholder="Use '@' to mention nodes..."
-            className="flex-1 border-0 bg-transparent h-auto p-0 text-xs focus-visible:ring-0"
+            rows={1}
+            className="w-full resize-none bg-transparent text-xs leading-relaxed outline-none placeholder:text-muted-foreground field-sizing-content min-h-[20px] max-h-[160px] overflow-y-auto"
           />
-          <div className="flex items-center gap-0.5">
-            <Button variant="ghost" className="h-7 w-7 p-0">
-              <Paperclip className="size-3.5" />
-            </Button>
-            <Button variant="ghost" className="h-7 w-7 p-0">
-              <Plus className="size-3.5" />
-            </Button>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-0.5">
+              <Button variant="ghost" className="h-7 w-7 p-0">
+                <Paperclip className="size-3.5" />
+              </Button>
+              <Button variant="ghost" className="h-7 w-7 p-0">
+                <Plus className="size-3.5" />
+              </Button>
+            </div>
             <Button
               className="h-7 w-7 p-0"
               variant={message ? "default" : "secondary"}

@@ -1,6 +1,7 @@
 import { api } from './client'
 import type { CopilotBackend, CopilotCredentials } from '../types/copilot'
 
+// Credential writes are intentionally backend HTTP only; do not use Tauri FS from the frontend.
 export async function getCopilotCredentials(): Promise<CopilotCredentials> {
   const response = await api.get<CopilotCredentials>('/copilot/credentials')
   return response.data

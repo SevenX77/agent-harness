@@ -40,7 +40,7 @@ export function Toolbar() {
       <NavLink
         to="/"
         aria-label="Home"
-        className="mb-3 inline-flex size-8 items-center justify-center rounded-md bg-foreground text-background transition-opacity hover:opacity-90"
+        className="mb-3 inline-flex min-h-8 min-w-8 items-center justify-center rounded-md bg-foreground text-background transition-opacity hover:opacity-90"
       >
         <Home className="size-4" />
       </NavLink>

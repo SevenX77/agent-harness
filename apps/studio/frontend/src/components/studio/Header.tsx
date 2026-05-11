@@ -1,8 +1,10 @@
-import { ArrowLeft, Circle } from 'lucide-react'
+import { ArrowLeft, Circle, Code2, SquareTerminal, WandSparkles } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
+import { openInCodex, openInCursor, openInTerminal } from '../../lib/tauri'
 
 export function Header() {
   const { skillId } = useParams()
+  const skillPath = skillId ?? ''
 
   return (
     <header
@@ -30,7 +32,35 @@ export function Header() {
         </span>
       </div>
 
-      <div className="flex items-center justify-end" />
+      <div className="flex items-center justify-end gap-1">
+        <button
+          type="button"
+          aria-label="Open in Cursor"
+          title="Open in Cursor"
+          onClick={() => void openInCursor(skillPath)}
+          className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <Code2 className="size-4" />
+        </button>
+        <button
+          type="button"
+          aria-label="Open in Terminal"
+          title="Open in Terminal"
+          onClick={() => void openInTerminal(skillPath)}
+          className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <SquareTerminal className="size-4" />
+        </button>
+        <button
+          type="button"
+          aria-label="Open in Codex"
+          title="Open in Codex"
+          onClick={() => void openInCodex(skillPath)}
+          className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <WandSparkles className="size-4" />
+        </button>
+      </div>
     </header>
   )
 }

@@ -1,7 +1,7 @@
-import { AlertTriangle, CheckCircle2, Loader2, Sparkles } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Loader2, Save, Sparkles } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { postPredictRun, type PredictRunResponse } from '../../api/client'
+import { postPredictRun, saveGoldenBaseline, type PredictRunResponse } from '../../api/client'
 import type { JsonObject, RunDetail } from '../../api/types'
 import { PredictInputDialog } from '../../components/playground/PredictInputDialog'
 import { PredictSplit } from '../../components/studio/predict-split'
@@ -17,7 +17,9 @@ export default function Predict() {
   const [predictResult, setPredictResult] = useState<PredictRunResponse | null>(null)
   const [goldenDraft, setGoldenDraft] = useState('{}')
   const [running, setRunning] = useState(false)
+  const [savingGolden, setSavingGolden] = useState(false)
   const [predictError, setPredictError] = useState<string | null>(null)
+  const [goldenMessage, setGoldenMessage] = useState<string | null>(null)
   const lintStatus = readLintStatus(skillId)
   const compilePassed = lintStatus === 'passed'
 
@@ -39,6 +41,13 @@ export default function Predict() {
     }
     return predictResult.final_context ?? predictResult.output ?? null
   }, [predictResult])
+  const runId = useMemo(() => {
+    if (!predictResult) {
+      return null
+    }
+    const runDetail = predictResult as RunDetail
+    return runDetail.metadata?.run_id ?? predictResult.run_id ?? null
+  }, [predictResult])
 
   const runPredict = async (nextPayload: JsonObject) => {
     setPayload(nextPayload)
@@ -50,11 +59,37 @@ export default function Predict() {
       setPredictResult(response)
       const output = 'final_context' in response && response.final_context ? response.final_context : 'output' in response ? response.output : null
       setGoldenDraft(JSON.stringify(output ?? {}, null, 2))
+      setGoldenMessage(null)
     } catch (error) {
       setPredictResult(null)
       setPredictError(errorMessage(error))
     } finally {
       setRunning(false)
+    }
+  }
+
+  const saveGolden = async () => {
+    if (!runId) {
+      setGoldenMessage('Predict run has no run_id to promote.')
+      return
+    }
+
+    try {
+      JSON.parse(goldenDraft)
+    } catch {
+      setGoldenMessage('Golden draft must be valid JSON before saving.')
+      return
+    }
+
+    setSavingGolden(true)
+    setGoldenMessage(null)
+    try {
+      const baseline = await saveGoldenBaseline(skillId, runId, false)
+      setGoldenMessage(`Saved golden baseline ${baseline.id}.`)
+    } catch (error) {
+      setGoldenMessage(errorMessage(error))
+    } finally {
+      setSavingGolden(false)
     }
   }
 
@@ -118,6 +153,25 @@ export default function Predict() {
           </div>
         ) : (
           <div className="mt-5">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="text-sm text-muted-foreground">
+                {runId ? `Predict run: ${runId}` : 'Run ID appears after predict completes.'}
+              </div>
+              <button
+                type="button"
+                disabled={!runId || savingGolden}
+                onClick={() => void saveGolden()}
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                {savingGolden ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+                Save as Golden
+              </button>
+            </div>
+            {goldenMessage ? (
+              <div className="mb-3 rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
+                {goldenMessage}
+              </div>
+            ) : null}
             <PredictSplit
               output={predictOutput ?? (running ? { status: 'running' } : null)}
               goldenDraft={goldenDraft}

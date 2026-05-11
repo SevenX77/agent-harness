@@ -1,5 +1,5 @@
 import axios, { AxiosHeaders } from 'axios'
-import type { JsonObject, RunDetail, RunMetadata } from './types'
+import type { GoldenBaseline, JsonObject, RunDetail, RunMetadata } from './types'
 
 export const API_BASE_URL = import.meta.env.VITE_STUDIO_API_BASE_URL ?? 'http://localhost:8787/api'
 
@@ -50,6 +50,14 @@ export interface PredictRunResponse {
 export async function postPredictRun(skillId: string, inputData: JsonObject): Promise<PredictRunResponse | RunDetail> {
   const response = await api.post<PredictRunResponse | RunDetail>(`/skills/${skillId}/runs/predict`, {
     input_data: inputData,
+  })
+  return response.data
+}
+
+export async function saveGoldenBaseline(skillId: string, runId: string, lock = false): Promise<GoldenBaseline> {
+  const response = await api.post<GoldenBaseline>(`/skills/${skillId}/golden`, {
+    run_id: runId,
+    lock,
   })
   return response.data
 }

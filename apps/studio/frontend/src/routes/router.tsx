@@ -1,8 +1,8 @@
 import { lazy, Suspense } from 'react'
 import { createHashRouter, Navigate } from 'react-router-dom'
+import Home, { homeLoader } from './home'
 import Root, { RootErrorBoundary } from './root'
 
-const Home = lazy(() => import('./home'))
 const Settings = lazy(() => import('./settings'))
 const SkillLayout = lazy(() => import('./skill/layout'))
 const Edit = lazy(() => import('./skill/edit'))
@@ -34,6 +34,7 @@ export const router = createHashRouter([
       {
         index: true,
         element: routeElement(<Home />),
+        loader: homeLoader,
       },
       {
         path: 'skill/:skillId',

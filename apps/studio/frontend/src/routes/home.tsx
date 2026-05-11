@@ -1,9 +1,18 @@
 import { AlertCircle, Clock3, FolderOpen, Layers3, Search, Sparkles } from 'lucide-react'
 import { useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLoaderData, useNavigate } from 'react-router-dom'
+import { fetcher } from '../api/client'
 import type { SkillSummary } from '../api/types'
 import { useRecentSkills } from '../hooks/useRecentSkills'
 import { useSkills } from '../hooks/useSkills'
+
+export async function homeLoader() {
+  try {
+    return await fetcher<SkillSummary[]>('/skills')
+  } catch {
+    return []
+  }
+}
 
 function formatLastRun(value: string | null) {
   if (!value) {
@@ -34,8 +43,10 @@ function sortRecent(skills: SkillSummary[], recentSkillIds: string[]) {
 
 export function HomeDashboard() {
   const navigate = useNavigate()
-  const { skills, skillListError } = useSkills(null)
-  const { recentSkills, rememberSkill } = useRecentSkills()
+  const preloadedSkills = useLoaderData() as SkillSummary[] | undefined
+  const { skills, skillListError } = useSkills(null, preloadedSkills ?? [])
+  const skillIds = useMemo(() => skills.map((skill) => skill.id), [skills])
+  const { recentSkills, rememberSkill } = useRecentSkills(skillIds)
 
   const visibleSkills = useMemo(() => sortRecent(skills, recentSkills), [recentSkills, skills])
 

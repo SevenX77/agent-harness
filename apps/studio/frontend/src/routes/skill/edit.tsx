@@ -4,6 +4,9 @@ import { GraphCanvas, type SkillGraphNodeData } from '../../components/GraphCanv
 import { CompilationWidget } from '../../components/studio/CompilationWidget'
 import { LazyMonacoPanel } from '../../components/studio/LazyMonacoPanel'
 import { PropertiesPanel } from '../../components/studio/PropertiesPanel'
+import { useCopilotContext } from '../../hooks/useCopilotContext'
+import { readLintStatus } from '../../hooks/useDebouncedLint'
+import { useDraftPersist } from '../../hooks/useDraftPersist'
 import { useSkills } from '../../hooks/useSkills'
 
 export default function Edit() {
@@ -14,7 +17,36 @@ export default function Edit() {
   const { skillDetail, skillDetailError } = useSkills(skillId)
   const isLoading = useMemo(() => !skillDetail && !skillDetailError, [skillDetail, skillDetailError])
   const promptKey = selectedNode?.id ?? 'skill'
-  const promptValue = promptDrafts[promptKey] ?? `# ${selectedNode?.data.label ?? skillId}\n\nDescribe the agent prompt here.`
+  const basePrompt = `# ${selectedNode?.data.label ?? skillId}\n\nDescribe the agent prompt here.`
+  const promptValue = promptDrafts[promptKey] ?? basePrompt
+  const draft = useDraftPersist({
+    skillId,
+    content: promptValue,
+    baseContent: basePrompt,
+    dirty: promptValue !== basePrompt,
+  })
+
+  useCopilotContext({
+    skillId,
+    view: 'Edit',
+    context: {
+      selected_node_id: selectedNodeId,
+      selected_node: selectedNode ? {
+        id: selectedNode.id,
+        label: selectedNode.data.label,
+        status: selectedNode.data.status,
+        summary: typeof selectedNode.data.summary === 'string' ? selectedNode.data.summary : null,
+      } : null,
+      current_file: promptKey,
+      prompt_preview: promptValue,
+      lint_status: readLintStatus(skillId),
+      local_draft: {
+        dirty: draft.isDirty,
+        base_hash: draft.baseHash,
+        saved_at: draft.draft?.timestamp ?? null,
+      },
+    },
+  })
 
   return (
     <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_320px] bg-background text-foreground">

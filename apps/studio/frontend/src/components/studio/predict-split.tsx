@@ -1,12 +1,11 @@
-import type { JsonObject } from '../../api/types'
+import type { GoldenBaseline, JsonObject } from '../../api/types'
 
 interface PredictSplitProps {
   output: JsonObject | null
-  goldenDraft: string
-  onGoldenDraftChange: (value: string) => void
+  baselines: GoldenBaseline[]
 }
 
-export function PredictSplit({ output, goldenDraft, onGoldenDraftChange }: PredictSplitProps) {
+export function PredictSplit({ output, baselines }: PredictSplitProps) {
   return (
     <section className="grid min-h-[28rem] overflow-hidden rounded-md border border-border bg-card md:grid-cols-2">
       <div className="flex min-h-0 flex-col border-b border-border md:border-b-0 md:border-r">
@@ -21,16 +20,29 @@ export function PredictSplit({ output, goldenDraft, onGoldenDraftChange }: Predi
 
       <div className="flex min-h-0 flex-col">
         <div className="border-b border-border px-4 py-3">
-          <h2 className="text-sm font-semibold text-foreground">Golden draft</h2>
-          <p className="mt-1 text-xs text-muted-foreground">Adjust the baseline before saving.</p>
+          <h2 className="text-sm font-semibold text-foreground">Golden baselines</h2>
+          <p className="mt-1 text-xs text-muted-foreground">Read-only references for comparison.</p>
         </div>
-        <textarea
-          value={goldenDraft}
-          onChange={(event) => onGoldenDraftChange(event.target.value)}
-          className="min-h-0 flex-1 resize-none bg-background p-4 font-mono text-xs text-foreground outline-none focus:ring-2 focus:ring-inset focus:ring-ring"
-          spellCheck={false}
-          aria-label="Golden draft JSON"
-        />
+        <div className="min-h-0 flex-1 overflow-auto bg-background p-4">
+          {baselines.length > 0 ? (
+            <div className="space-y-3">
+              {baselines.map((baseline) => (
+                <div key={baseline.id} className="rounded-md border border-border bg-card p-3 text-sm">
+                  <div className="font-mono text-xs font-semibold text-foreground">{baseline.id}</div>
+                  <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
+                    <div>linked input: {baseline.linked_input_id}</div>
+                    <div>locked: {baseline.locked ? 'yes' : 'no'}</div>
+                    <div className="break-all">path: {baseline.content_path}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+              No golden baselines found for this skill.
+            </div>
+          )}
+        </div>
       </div>
     </section>
   )

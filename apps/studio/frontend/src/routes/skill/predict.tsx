@@ -1,8 +1,8 @@
-import { AlertTriangle, CheckCircle2, Loader2, Save, Sparkles } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { AlertTriangle, CheckCircle2, Loader2, Sparkles } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { postPredictRun, saveGoldenBaseline, type PredictRunResponse } from '../../api/client'
-import type { JsonObject, RunDetail } from '../../api/types'
+import { listGoldenBaselines, postPredictRun, type PredictRunResponse } from '../../api/client'
+import type { GoldenBaseline, JsonObject, RunDetail } from '../../api/types'
 import { PredictInputDialog } from '../../components/playground/PredictInputDialog'
 import { PredictSplit } from '../../components/studio/predict-split'
 import { readLintStatus } from '../../hooks/useDebouncedLint'
@@ -15,11 +15,10 @@ export default function Predict() {
   const [inputOpen, setInputOpen] = useState(false)
   const [payload, setPayload] = useState<JsonObject | null>(null)
   const [predictResult, setPredictResult] = useState<PredictRunResponse | null>(null)
-  const [goldenDraft, setGoldenDraft] = useState('{}')
+  const [baselines, setBaselines] = useState<GoldenBaseline[]>([])
   const [running, setRunning] = useState(false)
-  const [savingGolden, setSavingGolden] = useState(false)
   const [predictError, setPredictError] = useState<string | null>(null)
-  const [goldenMessage, setGoldenMessage] = useState<string | null>(null)
+  const [goldenError, setGoldenError] = useState<string | null>(null)
   const lintStatus = readLintStatus(skillId)
   const compilePassed = lintStatus === 'passed'
 
@@ -41,13 +40,30 @@ export default function Predict() {
     }
     return predictResult.final_context ?? predictResult.output ?? null
   }, [predictResult])
-  const runId = useMemo(() => {
-    if (!predictResult) {
-      return null
+  const runId = useMemo(() => predictResult ? ((predictResult as RunDetail).metadata?.run_id ?? predictResult.run_id ?? null) : null, [predictResult])
+
+  useEffect(() => {
+    if (!skillId) {
+      return
     }
-    const runDetail = predictResult as RunDetail
-    return runDetail.metadata?.run_id ?? predictResult.run_id ?? null
-  }, [predictResult])
+    let cancelled = false
+    listGoldenBaselines(skillId)
+      .then((nextBaselines) => {
+        if (!cancelled) {
+          setBaselines(nextBaselines)
+          setGoldenError(null)
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setBaselines([])
+          setGoldenError(errorMessage(error))
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [skillId])
 
   const runPredict = async (nextPayload: JsonObject) => {
     setPayload(nextPayload)
@@ -57,39 +73,11 @@ export default function Predict() {
     try {
       const response = await postPredictRun(skillId, nextPayload)
       setPredictResult(response)
-      const output = 'final_context' in response && response.final_context ? response.final_context : 'output' in response ? response.output : null
-      setGoldenDraft(JSON.stringify(output ?? {}, null, 2))
-      setGoldenMessage(null)
     } catch (error) {
       setPredictResult(null)
       setPredictError(errorMessage(error))
     } finally {
       setRunning(false)
-    }
-  }
-
-  const saveGolden = async () => {
-    if (!runId) {
-      setGoldenMessage('Predict run has no run_id to promote.')
-      return
-    }
-
-    try {
-      JSON.parse(goldenDraft)
-    } catch {
-      setGoldenMessage('Golden draft must be valid JSON before saving.')
-      return
-    }
-
-    setSavingGolden(true)
-    setGoldenMessage(null)
-    try {
-      const baseline = await saveGoldenBaseline(skillId, runId, false)
-      setGoldenMessage(`Saved golden baseline ${baseline.id}.`)
-    } catch (error) {
-      setGoldenMessage(errorMessage(error))
-    } finally {
-      setSavingGolden(false)
     }
   }
 
@@ -104,7 +92,7 @@ export default function Predict() {
             </div>
             <h1 className="text-xl font-semibold text-foreground">{skillDetail?.manifest.name ?? skillId}</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Run the compiled skill against one input and prepare a golden baseline draft.
+              Run the compiled skill against one input and compare against existing golden baselines.
             </p>
           </div>
           <button
@@ -157,25 +145,15 @@ export default function Predict() {
               <div className="text-sm text-muted-foreground">
                 {runId ? `Predict run: ${runId}` : 'Run ID appears after predict completes.'}
               </div>
-              <button
-                type="button"
-                disabled={!runId || savingGolden}
-                onClick={() => void saveGolden()}
-                className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-45"
-              >
-                {savingGolden ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-                Save as Golden
-              </button>
             </div>
-            {goldenMessage ? (
+            {goldenError ? (
               <div className="mb-3 rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
-                {goldenMessage}
+                Golden baselines unavailable: {goldenError}
               </div>
             ) : null}
             <PredictSplit
               output={predictOutput ?? (running ? { status: 'running' } : null)}
-              goldenDraft={goldenDraft}
-              onGoldenDraftChange={setGoldenDraft}
+              baselines={baselines}
             />
           </div>
         )}

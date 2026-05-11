@@ -1,12 +1,15 @@
 import { AlertTriangle, CheckCircle2, Loader2, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import { toast } from 'sonner'
 import { listGoldenBaselines, postPredictRun, type PredictRunResponse } from '../../api/client'
 import type { GoldenBaseline, JsonObject, RunDetail } from '../../api/types'
 import { PredictInputDialog } from '../../components/playground/PredictInputDialog'
 import { PredictSplit } from '../../components/studio/predict-split'
+import { fingerprintText, useCopilotContext } from '../../hooks/useCopilotContext'
 import { readLintStatus } from '../../hooks/useDebouncedLint'
 import { useSkills } from '../../hooks/useSkills'
+import { inferJsonSchema } from '../../lib/schema-infer'
 import { errorMessage } from '../../utils/errors'
 
 export default function Predict() {
@@ -41,6 +44,30 @@ export default function Predict() {
     return predictResult.final_context ?? predictResult.output ?? null
   }, [predictResult])
   const runId = useMemo(() => predictResult ? ((predictResult as RunDetail).metadata?.run_id ?? predictResult.run_id ?? null) : null, [predictResult])
+  const inputSchema = useMemo(() => (payload ? inferJsonSchema(payload) : null), [payload])
+  const goldenFingerprint = useMemo(() => fingerprintText(JSON.stringify(baselines)), [baselines])
+
+  useCopilotContext({
+    skillId,
+    view: 'Predict',
+    context: {
+      input_payload: payload,
+      input_schema: inputSchema,
+      declared_inputs: inputs.map((input) => ({
+        name: input.name,
+        source: input.source,
+        type: input.type,
+        default: input.default ?? null,
+      })),
+      predict_output: predictOutput,
+      predict_run_id: runId,
+      running,
+      golden: {
+        count: baselines.length,
+        fingerprint: goldenFingerprint,
+      },
+    },
+  })
 
   useEffect(() => {
     if (!skillId) {
@@ -81,6 +108,10 @@ export default function Predict() {
     }
   }
 
+  const cancelPredict = () => {
+    toast.info('Cancel endpoint unavailable; current predict request will finish or timeout.')
+  }
+
   return (
     <main className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-background text-foreground">
       <header className="border-b border-border bg-card px-5 py-4">
@@ -104,6 +135,15 @@ export default function Predict() {
             {running ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
             {running ? 'Predicting' : 'New predict'}
           </button>
+          {running ? (
+            <button
+              type="button"
+              onClick={cancelPredict}
+              className="inline-flex h-9 items-center justify-center rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground hover:bg-accent"
+            >
+              Cancel
+            </button>
+          ) : null}
         </div>
       </header>
 

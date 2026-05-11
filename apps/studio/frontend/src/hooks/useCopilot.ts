@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { wsUrl } from '../api/client'
+import { nextBackoffMs } from '../lib/websocket'
 import { copilotStore } from '../store/copilotStore'
 import type { CopilotBackend, CopilotEvent, CopilotMessage } from '../types/copilot'
 import { normalizeCopilotEvent } from '../types/copilot'
 
-type ConnectionStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'error'
+type ConnectionStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'reconnecting' | 'error'
 
 function nextId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -24,9 +25,11 @@ function createMessage(role: CopilotMessage['role'], content: string, status: Co
 export function useCopilot(skillId: string | null, backend: CopilotBackend = 'claude') {
   const snapshot = useSyncExternalStore(copilotStore.subscribe, copilotStore.getSnapshot)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('idle')
+  const [reconnectInMs, setReconnectInMs] = useState<number | null>(null)
   const [lastError, setLastError] = useState<string | null>(null)
   const socketRef = useRef<WebSocket | null>(null)
   const assistantMessageIdRef = useRef<string | null>(null)
+  const textQueueRef = useRef<Array<{ messageId: string, content: string, event: CopilotEvent }>>([])
 
   useEffect(() => {
     if (snapshot.skillId !== skillId || snapshot.backend !== backend) {
@@ -40,31 +43,76 @@ export function useCopilot(skillId: string | null, backend: CopilotBackend = 'cl
       return undefined
     }
 
-    setConnectionStatus('connecting')
-    const socket = new WebSocket(wsUrl(`/api/skills/${skillId}/copilot/ws`))
-    socketRef.current = socket
+    let closed = false
+    let attempt = 0
+    let reconnectTimer: number | undefined
 
-    socket.onopen = () => {
-      setConnectionStatus('open')
-      setLastError(null)
+    const flushTimer = window.setInterval(() => {
+      if (textQueueRef.current.length === 0) {
+        return
+      }
+      const batch = textQueueRef.current.splice(0)
+      const byMessage = new Map<string, { content: string, events: CopilotEvent[] }>()
+      batch.forEach((item) => {
+        const current = byMessage.get(item.messageId) ?? { content: '', events: [] }
+        current.content += item.content
+        current.events.push(item.event)
+        byMessage.set(item.messageId, current)
+      })
+      byMessage.forEach((value, messageId) => {
+        copilotStore.updateMessage(messageId, (message) => ({
+          ...message,
+          content: `${message.content}${value.content}`,
+          status: 'running',
+          events: [...message.events, ...value.events],
+        }))
+      })
+    }, 75)
+
+    const connect = () => {
+      attempt += 1
+      setConnectionStatus(attempt === 1 ? 'connecting' : 'reconnecting')
+      setReconnectInMs(null)
+      const socket = new WebSocket(wsUrl(`/api/skills/${skillId}/copilot/ws`))
+      socketRef.current = socket
+
+      socket.onopen = () => {
+        attempt = 0
+        setConnectionStatus('open')
+        setReconnectInMs(null)
+        setLastError(null)
+      }
+      socket.onerror = () => {
+        setConnectionStatus('error')
+        setLastError('Copilot WebSocket failed')
+      }
+      socket.onclose = () => {
+        if (closed) {
+          setConnectionStatus('closed')
+          return
+        }
+        const delay = nextBackoffMs(attempt + 1)
+        setConnectionStatus('reconnecting')
+        setReconnectInMs(delay)
+        reconnectTimer = window.setTimeout(connect, delay)
+      }
+      socket.onmessage = (message) => {
+        const event = normalizeCopilotEvent(JSON.parse(String(message.data)) as unknown, nextId('event'))
+        appendAssistantEvent(event)
+      }
     }
-    socket.onerror = () => {
-      setConnectionStatus('error')
-      setLastError('Copilot WebSocket failed')
-    }
-    socket.onclose = () => {
-      setConnectionStatus('closed')
-    }
-    socket.onmessage = (message) => {
-      const event = normalizeCopilotEvent(JSON.parse(String(message.data)) as unknown, nextId('event'))
-      appendAssistantEvent(event)
-    }
+
+    connect()
 
     return () => {
-      socket.close()
-      if (socketRef.current === socket) {
-        socketRef.current = null
+      closed = true
+      window.clearInterval(flushTimer)
+      if (reconnectTimer) {
+        window.clearTimeout(reconnectTimer)
       }
+      socketRef.current?.close()
+      socketRef.current = null
+      textQueueRef.current = []
     }
   }, [skillId])
 
@@ -77,12 +125,15 @@ export function useCopilot(skillId: string | null, backend: CopilotBackend = 'cl
       copilotStore.appendMessage(message)
     }
 
-    copilotStore.updateMessage(messageId, (message) => ({
-      ...message,
-      content: event.type === 'text_delta' ? `${message.content}${event.content}` : message.content,
-      status: event.status,
-      events: [...message.events, event],
-    }))
+    if (event.type === 'text_delta') {
+      textQueueRef.current.push({ messageId, content: event.content, event })
+    } else {
+      copilotStore.updateMessage(messageId, (message) => ({
+        ...message,
+        status: event.status,
+        events: [...message.events, event],
+      }))
+    }
 
     if (event.type === 'done' || event.type === 'error') {
       assistantMessageIdRef.current = null
@@ -105,6 +156,7 @@ export function useCopilot(skillId: string | null, backend: CopilotBackend = 'cl
     backend: snapshot.backend,
     messages: snapshot.messages,
     connectionStatus,
+    reconnectInMs,
     lastError,
     sendMessage,
     clearMessages: copilotStore.clearMessages,

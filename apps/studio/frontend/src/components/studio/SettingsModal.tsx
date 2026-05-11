@@ -1,16 +1,10 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { api } from '../../api/client'
+import { getCopilotCredentials, updateCopilotCredentials } from '../../api/copilot'
+import type { CopilotBackend, CopilotCredentials } from '../../types/copilot'
 
-type BackendId = 'claude' | 'deepseek' | 'gemini' | 'openai'
-
-interface CredentialStatus {
-  active_backend?: BackendId
-  backends?: Partial<Record<BackendId, { has_key: boolean }>>
-}
-
-const BACKENDS: Array<{ id: BackendId; label: string; disabled?: boolean }> = [
+const BACKENDS: Array<{ id: CopilotBackend; label: string; disabled?: boolean }> = [
   { id: 'claude', label: 'Claude' },
   { id: 'deepseek', label: 'DeepSeek' },
   { id: 'gemini', label: 'Gemini', disabled: true },
@@ -18,23 +12,21 @@ const BACKENDS: Array<{ id: BackendId; label: string; disabled?: boolean }> = [
 ]
 
 export function SettingsModal() {
-  const [status, setStatus] = useState<CredentialStatus | null>(null)
-  const [activeBackend, setActiveBackend] = useState<BackendId>('claude')
+  const [status, setStatus] = useState<CopilotCredentials | null>(null)
+  const [activeBackend, setActiveBackend] = useState<CopilotBackend>('claude')
   const [apiKey, setApiKey] = useState('')
   const [message, setMessage] = useState('')
 
   useEffect(() => {
     let cancelled = false
 
-    api.get<CredentialStatus>('/copilot/credentials')
-      .then((response) => {
+    getCopilotCredentials()
+      .then((credentials) => {
         if (cancelled) {
           return
         }
-        setStatus(response.data)
-        if (response.data.active_backend) {
-          setActiveBackend(response.data.active_backend)
-        }
+        setStatus(credentials)
+        setActiveBackend(credentials.active_backend)
       })
       .catch(() => {
         if (!cancelled) {
@@ -50,10 +42,8 @@ export function SettingsModal() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setMessage('Saving...')
-    await api.put('/copilot/credentials', {
-      active_backend: activeBackend,
-      api_key: apiKey || undefined,
-    })
+    const credentials = await updateCopilotCredentials(activeBackend, apiKey || undefined, true)
+    setStatus(credentials)
     setApiKey('')
     setMessage('Credentials saved through backend.')
   }
@@ -82,7 +72,7 @@ export function SettingsModal() {
             Backend
             <select
               value={activeBackend}
-              onChange={(event) => setActiveBackend(event.target.value as BackendId)}
+              onChange={(event) => setActiveBackend(event.target.value as CopilotBackend)}
               className="mt-1 h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
             >
               {BACKENDS.map((backend) => (

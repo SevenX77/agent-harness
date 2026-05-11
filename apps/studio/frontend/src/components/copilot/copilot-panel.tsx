@@ -1,10 +1,14 @@
-import React, { useState, type FormEvent } from 'react'
+import React, { useEffect, useState, type FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { Bot, Loader2, Send } from 'lucide-react'
 import { useParams } from 'react-router-dom'
+import { toast } from 'sonner'
+import { getCopilotCredentials, updateCopilotCredentials } from '../../api/copilot'
 import { useCopilot } from '../../hooks/useCopilot'
-import type { CopilotMessage } from '../../types/copilot'
+import type { CopilotBackend, CopilotCredentials, CopilotMessage } from '../../types/copilot'
+import { CopilotSettings } from './copilot-settings'
 import { DiffBubble } from './diff-bubble'
+import { ModelPicker } from './model-picker'
 import { ToolCallBubble } from './tool-call-bubble'
 
 interface ChatMessageItemProps {
@@ -45,7 +49,42 @@ export const ChatMessageItem = React.memo(ChatMessageItemBase)
 export function CopilotPanel() {
   const { skillId = null } = useParams()
   const [draft, setDraft] = useState('')
-  const copilot = useCopilot(skillId)
+  const [credentials, setCredentials] = useState<CopilotCredentials | null>(null)
+  const [activeBackend, setActiveBackend] = useState<CopilotBackend>('claude')
+  const copilot = useCopilot(skillId, activeBackend)
+
+  useEffect(() => {
+    let cancelled = false
+    getCopilotCredentials()
+      .then((next) => {
+        if (cancelled) {
+          return
+        }
+        setCredentials(next)
+        setActiveBackend(next.active_backend)
+      })
+      .catch(() => {
+        toast.error('Copilot credentials unavailable')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function selectBackend(backend: CopilotBackend) {
+    if (backend === activeBackend) {
+      return
+    }
+    try {
+      const next = await updateCopilotCredentials(backend, undefined, true)
+      setCredentials(next)
+      setActiveBackend(backend)
+      copilot.setBackend(backend)
+      toast.info('已切换模型, 聊天历史清空')
+    } catch {
+      toast.error('模型切换失败')
+    }
+  }
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -65,6 +104,9 @@ export function CopilotPanel() {
           {copilot.connectionStatus}
           {copilot.reconnectInMs ? `, retry ${Math.round(copilot.reconnectInMs / 1000)}s` : ''}
         </p>
+        <div className="mt-3">
+          <ModelPicker credentials={credentials} activeBackend={activeBackend} onSelect={selectBackend} />
+        </div>
       </header>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
@@ -83,6 +125,9 @@ export function CopilotPanel() {
       </div>
 
       <form onSubmit={submit} className="border-t border-sidebar-border p-3">
+        <div className="mb-3">
+          <CopilotSettings credentials={credentials} backend={activeBackend} onUpdated={setCredentials} />
+        </div>
         <textarea
           value={draft}
           onChange={(event) => setDraft(event.target.value)}

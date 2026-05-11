@@ -1,5 +1,5 @@
 import { AlertCircle, Clock3, FolderOpen, Layers3, Search, Sparkles } from 'lucide-react'
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useLoaderData, useNavigate } from 'react-router-dom'
 import { fetcher } from '../api/client'
 import type { SkillSummary } from '../api/types'
@@ -41,6 +41,27 @@ function sortRecent(skills: SkillSummary[], recentSkillIds: string[]) {
   return [...recent, ...remaining].slice(0, 6)
 }
 
+function cleanupWorkspaceLayoutStorage(validSkillIds: string[]) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const valid = new Set(validSkillIds)
+  for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+    const key = localStorage.key(index)
+    if (!key?.startsWith('workspace-layout-')) {
+      continue
+    }
+
+    const skillId = key.replace('workspace-layout-', '')
+    if (skillId === 'new' || valid.has(skillId)) {
+      continue
+    }
+
+    localStorage.removeItem(key)
+  }
+}
+
 export function HomeDashboard() {
   const navigate = useNavigate()
   const preloadedSkills = useLoaderData() as SkillSummary[] | undefined
@@ -49,6 +70,10 @@ export function HomeDashboard() {
   const { recentSkills, rememberSkill } = useRecentSkills(skillIds)
 
   const visibleSkills = useMemo(() => sortRecent(skills, recentSkills), [recentSkills, skills])
+
+  useEffect(() => {
+    cleanupWorkspaceLayoutStorage(skillIds)
+  }, [skillIds])
 
   const openSkill = (skillId: string) => {
     rememberSkill(skillId)

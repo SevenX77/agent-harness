@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
+    "playwright": "playwright test",
+    "bundle-analyze": "vite build --mode analyze",
     "test": "vitest run",
     "preview": "vite preview"
   },

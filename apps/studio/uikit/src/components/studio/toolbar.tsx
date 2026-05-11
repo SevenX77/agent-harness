@@ -5,7 +5,6 @@ import {
   Files,
   Clock,
   Settings2,
-  Code2,
   Search,
   HelpCircle,
   Layers,
@@ -24,7 +23,6 @@ const tools = [
   { id: "assets", icon: Files, label: "Assets", shortcut: "1" },
   { id: "timeline", icon: Clock, label: "Trace Timeline", shortcut: "2" },
   { id: "properties", icon: Settings2, label: "Properties", shortcut: "3" },
-  { id: "editor", icon: Code2, label: "Code Editor", shortcut: "4" },
   { id: "search", icon: Search, label: "Search", shortcut: "/" },
 ]
 

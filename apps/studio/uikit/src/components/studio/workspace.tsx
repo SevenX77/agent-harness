@@ -8,7 +8,6 @@ import {
   AssetsPanel,
   TimelinePanel,
   PropertiesPanel,
-  EditorPanel,
   type FileMeta,
 } from "./panels"
 import {
@@ -36,8 +35,6 @@ export function Workspace() {
         return <TimelinePanel onClose={() => setActivePanel(null)} />
       case "properties":
         return <PropertiesPanel onClose={() => setActivePanel(null)} />
-      case "editor":
-        return <EditorPanel onClose={() => setActivePanel(null)} />
       default:
         return null
     }

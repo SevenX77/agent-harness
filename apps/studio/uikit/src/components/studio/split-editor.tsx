@@ -18,30 +18,41 @@ interface SplitEditorProps {
 }
 
 export function SplitEditor({ file, viewMode, onViewModeChange }: SplitEditorProps) {
+  if (viewMode === "editor") {
+    return (
+      <div className="relative size-full">
+        <CodeEditor file={file} />
+        <ViewModeToolbar viewMode={viewMode} onChange={onViewModeChange} />
+      </div>
+    )
+  }
+
+  if (viewMode === "canvas") {
+    return (
+      <div className="relative size-full">
+        <Canvas />
+        <ViewModeToolbar viewMode={viewMode} onChange={onViewModeChange} />
+      </div>
+    )
+  }
+
   return (
-    <div className="relative size-full">
-      {viewMode === "editor" && <CodeEditor file={file} />}
-
-      {viewMode === "canvas" && <Canvas />}
-
-      {viewMode === "split" && (
-        <ResizablePanelGroup
-          id="studio-canvas-v"
-          orientation="vertical"
-          className="size-full"
-        >
-          <ResizablePanel id="top-editor" defaultSize="70%" minSize="30%">
-            <CodeEditor file={file} />
-          </ResizablePanel>
-          <ResizableHandle />
-          <ResizablePanel id="bottom-mini" defaultSize="30%" minSize="15%" maxSize="60%">
-            <Canvas compact />
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      )}
-
-      <ViewModeToolbar viewMode={viewMode} onChange={onViewModeChange} />
-    </div>
+    <ResizablePanelGroup
+      id="studio-canvas-v"
+      orientation="vertical"
+      className="size-full"
+    >
+      <ResizablePanel id="top-editor" defaultSize="70%" minSize="30%">
+        <CodeEditor file={file} />
+      </ResizablePanel>
+      <ResizableHandle />
+      <ResizablePanel id="bottom-mini" defaultSize="30%" minSize="15%" maxSize="60%">
+        <div className="relative size-full border-t border-border">
+          <Canvas compact />
+          <ViewModeToolbar viewMode={viewMode} onChange={onViewModeChange} />
+        </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   )
 }
 

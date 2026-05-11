@@ -1,7 +1,7 @@
 import React, { useEffect, useState, type FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { Bot, CircleAlert, Loader2, Send } from 'lucide-react'
-import { useParams } from 'react-router-dom'
+import { useLocation, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { getCopilotCredentials, updateCopilotCredentials } from '../../api/copilot'
 import { useCopilot } from '../../hooks/useCopilot'
@@ -70,11 +70,13 @@ export const ChatMessageItem = React.memo(ChatMessageItemBase)
 
 export function CopilotPanel() {
   const { skillId = null } = useParams()
+  const location = useLocation()
   const [draft, setDraft] = useState('')
   const [credentials, setCredentials] = useState<CopilotCredentials | null>(null)
   const [activeBackend, setActiveBackend] = useState<CopilotBackend>('claude')
   const { templates, templatesLoading } = useTemplates()
   const copilot = useCopilot(skillId, activeBackend)
+  const inEvalView = location.pathname.includes('/eval')
 
   useEffect(() => {
     let cancelled = false
@@ -140,10 +142,21 @@ export function CopilotPanel() {
             <div className="prose prose-sm max-w-none text-muted-foreground dark:prose-invert">
               <ReactMarkdown>
                 {skillId
-                  ? 'Ask about this skill, workflow, or current screen. General questions are allowed.'
+                  ? inEvalView
+                    ? '**Copilot Judge**\n\nAsk me to review the current artifact and golden diff. I use the Eval context endpoint, not a separate judge backend.'
+                    : 'Ask about this skill, workflow, or current screen. General questions are allowed.'
                   : '**Create a skill with Copilot**\n\nUse Templates as a scaffold, or describe the Skill you want me to help create.'}
               </ReactMarkdown>
             </div>
+            {inEvalView ? (
+              <button
+                type="button"
+                onClick={() => setDraft('Judge the current Eval diff. Explain the likely cause, risk, and whether this should become a new golden baseline.')}
+                className="mt-3 w-full rounded-md border border-sidebar-border bg-background px-2 py-1.5 text-start text-xs font-medium text-foreground hover:bg-accent"
+              >
+                Ask Copilot Judge
+              </button>
+            ) : null}
             {!skillId ? (
               <div className="mt-3 space-y-2">
                 <button

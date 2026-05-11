@@ -5,6 +5,7 @@ import { saveGoldenBaseline } from '../../api/client'
 import type { RunDetail } from '../../api/types'
 import { DiffView } from '../../components/diff/DiffView'
 import { PublishModal } from '../../components/studio/publish-modal'
+import { useCopilotContext } from '../../hooks/useCopilotContext'
 import { useGoldenDiff } from '../../hooks/useGoldenDiff'
 import { useRunHistory } from '../../hooks/useRunHistory'
 import { useSkills } from '../../hooks/useSkills'
@@ -54,6 +55,35 @@ export default function Eval() {
   }, [diff.compare, diff.clear, selectedRunId])
 
   const artifact = useMemo(() => runDetail?.final_context ?? {}, [runDetail])
+  const diffSummary = useMemo(() => {
+    const result = diff.result
+    if (!result) {
+      return null
+    }
+    return {
+      total_score: result.total_score,
+      golden_run_id: result.golden_run_id,
+      changed_fields: result.differences.filter((field) => field.changed).map((field) => ({
+        field_path: field.field_path,
+        type: field.type,
+        score: field.score,
+      })),
+    }
+  }, [diff.result])
+
+  useCopilotContext({
+    skillId,
+    view: 'Validate',
+    context: {
+      eval_judge: true,
+      selected_run_id: selectedRunId,
+      artifact,
+      diff_summary: diffSummary,
+      diff_loading: diff.loading,
+      diff_error: diff.error,
+      message,
+    },
+  })
 
   const saveGolden = async () => {
     if (!selectedRunId) {

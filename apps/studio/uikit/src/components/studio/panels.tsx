@@ -1,5 +1,5 @@
 
-import { ChevronRight, ChevronDown, FileText, Folder, X, Play, AlertCircle, CheckCircle2 } from "lucide-react"
+import { ChevronRight, ChevronDown, FileText, Folder, X, Play, AlertCircle, CheckCircle2, Check, ChevronsUpDown } from "lucide-react"
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -7,9 +7,11 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Label } from "@/components/ui/label"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
+import { cn } from "@/lib/utils"
 
 interface PanelProps {
   onClose: () => void
@@ -161,6 +163,13 @@ export function TimelinePanel({ onClose }: PanelProps) {
 // Properties Panel
 export function PropertiesPanel({ onClose }: PanelProps) {
   const [temperature, setTemperature] = useState([0.7])
+  const [modelOpen, setModelOpen] = useState(false)
+  const [modelValue, setModelValue] = useState("gpt-4o-mini")
+  const models = [
+    { value: "gpt-4o-mini", label: "GPT-4o Mini" },
+    { value: "gpt-4o", label: "GPT-4o" },
+    { value: "claude-3.5", label: "Claude 3.5 Sonnet" },
+  ]
 
   return (
     <div className="h-full bg-background flex flex-col">
@@ -188,18 +197,43 @@ export function PropertiesPanel({ onClose }: PanelProps) {
 
           <div className="space-y-2">
             <Label className="text-xs text-muted-foreground">Model</Label>
-            <Select defaultValue="gpt-4o-mini">
-              <SelectTrigger className="h-7 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
-                  <SelectItem value="gpt-4o">GPT-4o</SelectItem>
-                  <SelectItem value="claude-3.5">Claude 3.5 Sonnet</SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+            <Popover open={modelOpen} onOpenChange={setModelOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={modelOpen}
+                  className="h-7 w-full justify-between text-xs font-normal"
+                >
+                  {models.find((m) => m.value === modelValue)?.label ?? "Select model..."}
+                  <ChevronsUpDown className="ml-2 size-3.5 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Search model..." className="h-8 text-xs" />
+                  <CommandList>
+                    <CommandEmpty>No model found.</CommandEmpty>
+                    <CommandGroup>
+                      {models.map((m) => (
+                        <CommandItem
+                          key={m.value}
+                          value={m.value}
+                          onSelect={(currentValue) => {
+                            setModelValue(currentValue === modelValue ? "" : currentValue)
+                            setModelOpen(false)
+                          }}
+                          className="text-xs"
+                        >
+                          <Check className={cn("mr-2 size-3.5", modelValue === m.value ? "opacity-100" : "opacity-0")} />
+                          {m.label}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
 
           <div className="space-y-3">

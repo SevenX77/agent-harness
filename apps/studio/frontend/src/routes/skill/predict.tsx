@@ -1,6 +1,8 @@
 import { AlertTriangle, CheckCircle2, Sparkles } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import type { JsonObject } from '../../api/types'
+import { PredictInputDialog } from '../../components/playground/PredictInputDialog'
 import { readLintStatus } from '../../hooks/useDebouncedLint'
 import { useSkills } from '../../hooks/useSkills'
 
@@ -8,12 +10,17 @@ export default function Predict() {
   const { skillId = '' } = useParams()
   const { skillDetail } = useSkills(skillId)
   const [inputOpen, setInputOpen] = useState(false)
+  const [payload, setPayload] = useState<JsonObject | null>(null)
   const lintStatus = readLintStatus(skillId)
   const compilePassed = lintStatus === 'passed'
 
   const inputCount = useMemo(() => {
     const manifest = skillDetail?.manifest
     return manifest?.type === 'graph' ? manifest.io.inputs.length : 0
+  }, [skillDetail])
+  const inputs = useMemo(() => {
+    const manifest = skillDetail?.manifest
+    return manifest?.type === 'graph' ? manifest.io.inputs : []
   }, [skillDetail])
 
   return (
@@ -63,10 +70,23 @@ export default function Predict() {
           </div>
         </div>
 
+        <div className="mt-5 rounded-md border border-border bg-card p-4">
+          <h2 className="text-sm font-semibold text-foreground">Current input</h2>
+          <pre className="mt-3 max-h-72 overflow-auto rounded-md border border-border bg-muted/40 p-3 text-xs text-foreground">
+            {JSON.stringify(payload ?? {}, null, 2)}
+          </pre>
+        </div>
+
         {inputOpen ? (
-          <div className="mt-5 rounded-md border border-dashed border-border bg-card p-4 text-sm text-muted-foreground">
-            Input dialog arrives in T4.2.
-          </div>
+          <PredictInputDialog
+            skillId={skillId}
+            inputs={inputs}
+            onClose={() => setInputOpen(false)}
+            onSubmit={(nextPayload) => {
+              setPayload(nextPayload)
+              setInputOpen(false)
+            }}
+          />
         ) : null}
       </section>
     </main>

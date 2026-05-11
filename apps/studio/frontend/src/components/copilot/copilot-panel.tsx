@@ -4,6 +4,8 @@ import { Bot, Loader2, Send } from 'lucide-react'
 import { useParams } from 'react-router-dom'
 import { useCopilot } from '../../hooks/useCopilot'
 import type { CopilotMessage } from '../../types/copilot'
+import { DiffBubble } from './diff-bubble'
+import { ToolCallBubble } from './tool-call-bubble'
 
 interface ChatMessageItemProps {
   message: CopilotMessage
@@ -20,6 +22,20 @@ function ChatMessageItemBase({ message }: ChatMessageItemProps) {
       <div className="prose prose-sm max-w-none text-foreground dark:prose-invert">
         <ReactMarkdown>{message.content || (message.status === 'running' ? 'Thinking...' : '')}</ReactMarkdown>
       </div>
+      {message.events.map((event) => {
+        if (event.type === 'tool_use_start') {
+          return <ToolCallBubble key={event.id} event={event} />
+        }
+        if (event.type === 'tool_use_result') {
+          return (
+            <div key={event.id}>
+              <ToolCallBubble event={event} />
+              <DiffBubble event={event} />
+            </div>
+          )
+        }
+        return null
+      })}
     </article>
   )
 }

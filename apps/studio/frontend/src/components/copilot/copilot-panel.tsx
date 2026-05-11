@@ -5,6 +5,7 @@ import { useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { getCopilotCredentials, updateCopilotCredentials } from '../../api/copilot'
 import { useCopilot } from '../../hooks/useCopilot'
+import { useTemplates } from '../../hooks/useTemplates'
 import type { CopilotBackend, CopilotCredentials, CopilotMessage } from '../../types/copilot'
 import { CopilotSettings } from './copilot-settings'
 import { DiffBubble } from './diff-bubble'
@@ -72,6 +73,7 @@ export function CopilotPanel() {
   const [draft, setDraft] = useState('')
   const [credentials, setCredentials] = useState<CopilotCredentials | null>(null)
   const [activeBackend, setActiveBackend] = useState<CopilotBackend>('claude')
+  const { templates, templatesLoading } = useTemplates()
   const copilot = useCopilot(skillId, activeBackend)
 
   useEffect(() => {
@@ -135,7 +137,39 @@ export function CopilotPanel() {
           copilot.messages.map((message) => <ChatMessageItem key={message.id} message={message} />)
         ) : (
           <div className="rounded-md border border-dashed border-sidebar-border p-3 text-sm text-muted-foreground">
-            Ask about this skill, workflow, or current screen. General questions are allowed.
+            <div className="prose prose-sm max-w-none text-muted-foreground dark:prose-invert">
+              <ReactMarkdown>
+                {skillId
+                  ? 'Ask about this skill, workflow, or current screen. General questions are allowed.'
+                  : '**Create a skill with Copilot**\n\nUse Templates as a scaffold, or describe the Skill you want me to help create.'}
+              </ReactMarkdown>
+            </div>
+            {!skillId ? (
+              <div className="mt-3 space-y-2">
+                <button
+                  type="button"
+                  onClick={() => setDraft('Help me create a new Skill. Ask clarifying questions, then propose a minimal skill.md.')}
+                  className="w-full rounded-md border border-sidebar-border bg-background px-2 py-1.5 text-start text-xs font-medium text-foreground hover:bg-accent"
+                >
+                  Describe my Skill
+                </button>
+                <div className="text-xs">
+                  {templatesLoading ? 'Loading templates...' : 'Templates'}
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {templates.slice(0, 3).map((template) => (
+                      <button
+                        key={template.id}
+                        type="button"
+                        onClick={() => setDraft(`Use the "${template.name}" template as a scaffold and help me create a Skill.`)}
+                        className="rounded-md border border-sidebar-border bg-background px-2 py-1 text-xs text-foreground hover:bg-accent"
+                      >
+                        {template.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
         )}
         {copilot.lastError ? (

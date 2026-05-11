@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import type { CallbackEvent } from '../../api/types'
 import type { IndexedTraceEvent } from '../../hooks/useTraceFilter'
@@ -40,6 +40,22 @@ export function VirtualTraceList({
     () => selectedEventId ? events.findIndex(({ event, index }) => traceEventId(event, index) === selectedEventId) : -1,
     [events, selectedEventId],
   )
+
+  useEffect(() => {
+    if (selectedPosition < 0) {
+      return
+    }
+    const viewport = viewportRef.current
+    if (!viewport) {
+      return
+    }
+
+    const top = selectedPosition * TRACE_EVENT_ROW_HEIGHT
+    const bottom = top + TRACE_EVENT_ROW_HEIGHT
+    if (top < viewport.scrollTop || bottom > viewport.scrollTop + viewport.clientHeight) {
+      viewport.scrollTo({ top: Math.max(0, top - TRACE_EVENT_ROW_HEIGHT), behavior: 'smooth' })
+    }
+  }, [selectedPosition])
 
   const focusEventAt = (position: number) => {
     const target = events[position]
@@ -99,6 +115,7 @@ export function VirtualTraceList({
       tabIndex={0}
       onKeyDown={handleKeyDown}
       data-predict-trace={predictTrace ? 'true' : undefined}
+      data-virtualized-count={events.length}
       className={`min-h-0 flex-1 overflow-y-auto pr-1 outline-none focus:ring-2 focus:ring-sky-300 dark:focus:ring-sky-800 ${
         predictTrace ? 'border-l border-amber-200 pl-2 dark:border-amber-900/50' : ''
       }`}
@@ -110,12 +127,14 @@ export function VirtualTraceList({
         >
           {visibleEvents.map(({ event, index }) => {
             const eventId = traceEventId(event, index)
+            const absolutePosition = events.findIndex((item) => item.index === index)
             return (
             <div
               key={`${event.timestamp}-${index}`}
               id={`trace-event-${eventId}`}
               role="option"
               aria-selected={selectedEventId === eventId}
+              data-virtual-index={absolutePosition}
               style={{ minHeight: TRACE_EVENT_ROW_HEIGHT }}
             >
               <TraceEventRow

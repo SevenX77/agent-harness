@@ -27,7 +27,7 @@ function SkillNode({ data, selected }: { data: { label: string; type: string; st
   return (
     <div
       className={cn(
-        "relative bg-card border rounded-md min-w-[180px] transition-all duration-150",
+        "relative bg-card border rounded-md min-w-[180px] shadow-sm transition-all duration-150",
         selected ? "border-primary shadow-[0_0_0_1px_var(--primary)]" : "border-border hover:border-muted-foreground"
       )}
     >
@@ -57,12 +57,12 @@ function SkillNode({ data, selected }: { data: { label: string; type: string; st
       <Handle
         type="target"
         position={Position.Left}
-        className="!size-1.5 !bg-background !border !border-border hover:!border-primary !transition-colors !rounded-sm"
+        className="!size-2 !bg-primary !border !border-primary hover:!ring-2 hover:!ring-primary/30 !transition-all !rounded-full"
       />
       <Handle
         type="source"
         position={Position.Right}
-        className="!size-1.5 !bg-background !border !border-border hover:!border-primary !transition-colors !rounded-sm"
+        className="!size-2 !bg-primary !border !border-primary hover:!ring-2 hover:!ring-primary/30 !transition-all !rounded-full"
       />
     </div>
   )
@@ -160,7 +160,7 @@ export function Canvas() {
       >
         <Background
           variant={BackgroundVariant.Dots}
-          gap={20}
+          gap={12}
           size={1}
           color="var(--muted-foreground)"
           style={{ opacity: 0.4 }}
@@ -168,12 +168,15 @@ export function Canvas() {
         />
         <Controls showInteractive={false} />
         <MiniMap
-          nodeColor="var(--secondary)"
+          nodeColor="var(--primary)"
+          nodeStrokeWidth={0}
           maskColor={
             theme === "dark"
-              ? "rgba(255, 255, 255, 0.04)"
-              : "rgba(0, 0, 0, 0.06)"
+              ? "rgba(0, 0, 0, 0.5)"
+              : "rgba(255, 255, 255, 0.6)"
           }
+          pannable
+          zoomable
           className="!rounded-md"
         />
       </ReactFlow>

@@ -49,9 +49,9 @@ export function TracePanel({
 
   return (
     <div role="log" aria-live="polite" aria-label="Trace Timeline" className="flex h-full min-h-0 flex-col">
-      <div className="mb-4 shrink-0 space-y-3 border-b border-gray-200 pb-4 dark:border-slate-800">
+      <div className="shrink-0 space-y-3 border-b border-border bg-card p-4">
         <div className="flex items-center justify-between gap-3">
-          <h3 className="font-bold text-gray-700 dark:text-gray-300">Trace Timeline</h3>
+          <h3 className="font-semibold text-foreground">Trace Timeline</h3>
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -95,18 +95,20 @@ export function TracePanel({
           onTogglePhase={filter.togglePhase}
           onClear={filter.clearFilters}
         />
-        <div className="text-xs font-medium text-gray-400 dark:text-gray-500">
+        <div className="text-xs font-medium text-muted-foreground">
           Showing {filter.filteredEvents.length} of {traceLogs.length} events
         </div>
       </div>
-      <VirtualTraceList
-        events={filter.filteredEvents}
-        activePhase={activePhase}
-        selectedEventId={selectedEventId}
-        linkEnabled={linkEnabled}
-        onSelectPrompt={onSelectPrompt}
-        onSelectEvent={onSelectEvent}
-      />
+      <div className="min-h-0 flex-1 p-4">
+        <VirtualTraceList
+          events={filter.filteredEvents}
+          activePhase={activePhase}
+          selectedEventId={selectedEventId}
+          linkEnabled={linkEnabled}
+          onSelectPrompt={onSelectPrompt}
+          onSelectEvent={onSelectEvent}
+        />
+      </div>
     </div>
   )
 }

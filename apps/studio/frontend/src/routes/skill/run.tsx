@@ -1,19 +1,25 @@
-import { AlertTriangle, Loader2, Play, RotateCcw } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { AlertTriangle, Loader2, Play, RotateCcw, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { startRun } from '../../api/client'
-import type { JsonObject, RunMetadata } from '../../api/types'
+import type { JsonObject, RunDetail, RunMetadata } from '../../api/types'
+import { TracePanel } from '../../components/TracePanel'
 import { readLintStatus } from '../../hooks/useDebouncedLint'
+import { useRunHistory } from '../../hooks/useRunHistory'
 import { useSkills } from '../../hooks/useSkills'
+import { useTraceSelection } from '../../hooks/useTraceSelection'
 import { errorMessage, isJsonObject } from '../../utils/errors'
 
 export default function Run() {
   const { skillId = '', runId = null } = useParams()
   const navigate = useNavigate()
   const { skillDetail } = useSkills(skillId)
+  const history = useRunHistory(skillId)
+  const traceSelection = useTraceSelection()
   const compilePassed = readLintStatus(skillId) === 'passed'
   const [rawInput, setRawInput] = useState('{}')
   const [currentRun, setCurrentRun] = useState<RunMetadata | null>(null)
+  const [runDetail, setRunDetail] = useState<RunDetail | null>(null)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -30,6 +36,31 @@ export default function Run() {
       return null
     }
   }, [rawInput])
+  const traceEvents = runDetail?.events ?? []
+
+  useEffect(() => {
+    if (!runId) {
+      setRunDetail(null)
+      return
+    }
+
+    let cancelled = false
+    history.fetchRunDetail(runId)
+      .then((detail) => {
+        if (!cancelled) {
+          setRunDetail(detail)
+          setCurrentRun(detail?.metadata ?? null)
+        }
+      })
+      .catch((detailError: unknown) => {
+        if (!cancelled) {
+          setError(errorMessage(detailError))
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [history, runId])
 
   const handleStart = async () => {
     if (!parsedInput) {
@@ -42,6 +73,7 @@ export default function Run() {
     try {
       const run = await startRun(skillId, parsedInput as JsonObject)
       setCurrentRun(run)
+      await history.startOptimisticRun(run)
       void navigate(`/skill/${skillId}/run/${run.run_id}`)
     } catch (startError) {
       setError(errorMessage(startError))
@@ -86,7 +118,7 @@ export default function Run() {
           </div>
         ) : null}
 
-        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)_320px]">
           <label className="block rounded-md border border-border bg-card p-4">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-sm font-semibold text-foreground">Run input JSON</span>
@@ -115,7 +147,21 @@ export default function Run() {
             {error ? <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div> : null}
           </label>
 
-          <aside className="rounded-md border border-border bg-card p-4">
+          <section className="min-h-[36rem] overflow-hidden rounded-md border border-border bg-card">
+            <TracePanel
+              traceLogs={traceEvents}
+              activePhase={traceSelection.selectedPhaseId}
+              selectedEventId={traceSelection.selectedEventId}
+              linkEnabled={traceSelection.linkEnabled}
+              onToggleLink={traceSelection.setLinkEnabled}
+              onSelectPrompt={() => undefined}
+              onSelectEvent={(index, event) => traceSelection.selectEvent(event, index)}
+              canCompare={Boolean(runId)}
+            />
+          </section>
+
+          <aside className="space-y-5">
+            <div className="rounded-md border border-border bg-card p-4">
             <h2 className="text-sm font-semibold text-foreground">Run status</h2>
             <dl className="mt-4 space-y-3 text-sm">
               <div className="flex justify-between gap-3">
@@ -135,6 +181,40 @@ export default function Run() {
                 <dd className="font-medium text-foreground">{declaredInputs.length}</dd>
               </div>
             </dl>
+            </div>
+            <div className="rounded-md border border-border bg-card p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-foreground">History</h2>
+                <button type="button" onClick={() => void history.refresh()} className="text-xs font-medium text-muted-foreground hover:text-foreground">
+                  Refresh
+                </button>
+              </div>
+              <div className="max-h-72 space-y-2 overflow-auto">
+                {history.runs.map((run) => (
+                  <div key={run.run_id} className="rounded-md border border-border bg-background p-2">
+                    <button
+                      type="button"
+                      onClick={() => void navigate(`/skill/${skillId}/run/${run.run_id}`)}
+                      className="block w-full truncate text-left font-mono text-xs font-medium text-foreground hover:text-primary"
+                    >
+                      {run.run_id}
+                    </button>
+                    <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                      <span>{run.status}</span>
+                      <button
+                        type="button"
+                        aria-label={`Delete run ${run.run_id}`}
+                        onClick={() => void history.deleteRun(run.run_id)}
+                        className="rounded p-1 hover:bg-accent hover:text-destructive"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {history.runs.length === 0 ? <div className="text-sm text-muted-foreground">No runs yet.</div> : null}
+              </div>
+            </div>
           </aside>
         </div>
       </section>

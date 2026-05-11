@@ -16,9 +16,10 @@ import {
   type Node,
   type NodeProps,
 } from '@xyflow/react'
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Bot, CheckCircle2, Circle, Pause, Radio, Workflow } from 'lucide-react'
 import type { PhaseDef, SkillDetail, SkillManifest } from '../api/types'
+import { SubgraphInline } from './studio/SubgraphInline'
 
 export type SkillNodeStatus = 'idle' | 'running' | 'success' | 'error' | 'paused' | 'breakpoint'
 
@@ -29,6 +30,8 @@ export interface SkillGraphNodeData extends Record<string, unknown> {
   status: SkillNodeStatus
   dependsOn: string[]
   subgraphPath?: string | null
+  isExpanded?: boolean
+  onToggleSubgraph?: () => void
 }
 
 export type SkillGraphNode = Node<SkillGraphNodeData>
@@ -107,6 +110,21 @@ function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
         <div className="mt-3 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
           depends_on: {data.dependsOn.join(', ')}
         </div>
+      ) : null}
+      {data.subgraphPath ? (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation()
+            data.onToggleSubgraph?.()
+          }}
+          className="mt-3 inline-flex h-7 items-center justify-center rounded-md border border-border bg-background px-2 text-xs font-medium text-foreground hover:bg-accent"
+        >
+          {data.isExpanded ? 'Collapse subgraph' : 'Expand subgraph'}
+        </button>
+      ) : null}
+      {data.subgraphPath && data.isExpanded ? (
+        <SubgraphInline path={data.subgraphPath} parentLabel={data.label} />
       ) : null}
       <Handle type="source" position={Position.Bottom} className="!size-2.5 !border-background !bg-primary" />
     </div>
@@ -198,7 +216,12 @@ function phasesFromManifest(manifest: SkillManifest | undefined, skillId: string
   ]
 }
 
-function buildNodes(skillId: string, detail?: SkillDetail): SkillGraphNode[] {
+function buildNodes(
+  skillId: string,
+  detail: SkillDetail | undefined,
+  expandedSubgraphs: Set<string>,
+  onToggleSubgraph: (nodeId: string) => void,
+): SkillGraphNode[] {
   const phases = phasesFromManifest(detail?.manifest, skillId)
   return phases.map((phase, index) => ({
     id: phase.name,
@@ -211,6 +234,8 @@ function buildNodes(skillId: string, detail?: SkillDetail): SkillGraphNode[] {
       status: index === 0 ? 'success' : 'idle',
       dependsOn: normalizeDependsOn(phase.depends_on),
       subgraphPath: phase.subgraph ?? null,
+      isExpanded: expandedSubgraphs.has(phase.name),
+      onToggleSubgraph: phase.subgraph ? () => onToggleSubgraph(phase.name) : undefined,
     },
   }))
 }
@@ -235,7 +260,23 @@ function buildEdges(nodes: SkillGraphNode[]): Edge[] {
 }
 
 export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, selectedNodeId, onNodeSelect }: GraphCanvasProps) {
-  const initialNodes = useMemo(() => buildNodes(skillId, skillDetail), [skillDetail, skillId])
+  const [expandedSubgraphs, setExpandedSubgraphs] = useState<Set<string>>(() => new Set())
+  const toggleSubgraph = useCallback((nodeId: string) => {
+    setExpandedSubgraphs((current) => {
+      const next = new Set(current)
+      if (next.has(nodeId)) {
+        next.delete(nodeId)
+      } else {
+        next.add(nodeId)
+      }
+      return next
+    })
+  }, [])
+
+  const initialNodes = useMemo(
+    () => buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph),
+    [expandedSubgraphs, skillDetail, skillId, toggleSubgraph],
+  )
   const initialEdges = useMemo(() => buildEdges(initialNodes), [initialNodes])
   const [nodes, setNodes, onNodesChange] = useNodesState<SkillGraphNode>(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
@@ -252,7 +293,21 @@ export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, se
 
   const onConnect = useCallback((connection: Connection) => {
     setEdges((current) => addEdge({ ...connection, type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed } }, current))
-  }, [setEdges])
+    if (connection.source && connection.target) {
+      setNodes((current) => current.map((node) => {
+        if (node.id !== connection.target || node.data.dependsOn.includes(connection.source ?? '')) {
+          return node
+        }
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            dependsOn: [...node.data.dependsOn, connection.source],
+          },
+        }
+      }))
+    }
+  }, [setEdges, setNodes])
 
   return (
     <section className="relative h-full min-h-0 bg-background">

@@ -65,7 +65,7 @@ test.describe('Predict workflow smoke', () => {
     await expect(page.getByText('Input schema invalid')).toBeVisible()
   })
 
-  test('runs real predict path, saves golden, and renders dark mode', async ({ page }) => {
+  test('runs real predict path, shows read-only golden references, and renders dark mode', async ({ page }) => {
     await page.addInitScript(() => {
       window.sessionStorage.setItem('studio-lint-status-smoke', 'passed')
     })
@@ -88,13 +88,13 @@ test.describe('Predict workflow smoke', () => {
     await page.route('**/api/skills/smoke/golden', async (route) => {
       await route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify({
+        body: JSON.stringify([{
           id: 'predict-run-1',
           linked_input_id: 'predict-run-1',
           created_at: '2026-05-11T00:00:00Z',
           locked: false,
           content_path: '/tmp/golden/final_state.json',
-        }),
+        }]),
       })
     })
 
@@ -106,8 +106,8 @@ test.describe('Predict workflow smoke', () => {
     await page.getByRole('button', { name: /validate input/i }).click()
     await expect(page.getByRole('button', { name: /predicting/i })).toBeVisible()
     await expect(page.getByText('real predict output')).toBeVisible()
-
-    await page.getByRole('button', { name: /save as golden/i }).click()
-    await expect(page.getByText('Saved golden baseline predict-run-1.')).toBeVisible()
+    await expect(page.getByText('Golden baselines')).toBeVisible()
+    await expect(page.getByText('/tmp/golden/final_state.json')).toBeVisible()
+    await expect(page.getByRole('button', { name: /save as golden/i })).toHaveCount(0)
   })
 })

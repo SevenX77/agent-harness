@@ -1,4 +1,4 @@
-import { AlertTriangle, Loader2, Play, RotateCcw, Trash2 } from 'lucide-react'
+import { AlertTriangle, Braces, Loader2, Play, RotateCcw, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { startRun } from '../../api/client'
@@ -6,6 +6,7 @@ import type { CallbackEvent, JsonObject, RunDetail, RunMetadata } from '../../ap
 import { TracePanel } from '../../components/TracePanel'
 import { PromptInspector } from '../../components/PromptInspector'
 import { MicroTopologyPanel } from '../../components/studio/micro-topology-panel'
+import { EdgeContextViewer } from '../../components/studio/edge-context-viewer'
 import { readLintStatus } from '../../hooks/useDebouncedLint'
 import { useRunHistory } from '../../hooks/useRunHistory'
 import { useRunStream } from '../../hooks/useRunStream'
@@ -27,6 +28,7 @@ export default function Run() {
   const [runDetail, setRunDetail] = useState<RunDetail | null>(null)
   const [selectedTraceEvent, setSelectedTraceEvent] = useState<CallbackEvent | null>(null)
   const [promptEvent, setPromptEvent] = useState<CallbackEvent | null>(null)
+  const [edgeViewerOpen, setEdgeViewerOpen] = useState(false)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -176,6 +178,19 @@ export default function Run() {
           <aside className="space-y-5">
             <MicroTopologyPanel event={selectedTraceEvent} />
             <div className="rounded-md border border-border bg-card p-4">
+              <h2 className="text-sm font-semibold text-foreground">Edge context</h2>
+              <p className="mt-1 text-xs text-muted-foreground">Open selected trace payload as JSON.</p>
+              <button
+                type="button"
+                disabled={!selectedTraceEvent}
+                onClick={() => setEdgeViewerOpen(true)}
+                className="mt-3 inline-flex h-8 items-center gap-2 rounded-md border border-border bg-background px-3 text-xs font-medium text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <Braces className="size-3.5" />
+                View JSON
+              </button>
+            </div>
+            <div className="rounded-md border border-border bg-card p-4">
             <h2 className="text-sm font-semibold text-foreground">Run status</h2>
             <dl className="mt-4 space-y-3 text-sm">
               <div className="flex justify-between gap-3">
@@ -248,6 +263,12 @@ export default function Run() {
         </div>
       </section>
       <PromptInspector promptEvent={promptEvent} onClose={() => setPromptEvent(null)} />
+      <EdgeContextViewer
+        title={selectedTraceEvent ? `Edge context: ${selectedTraceEvent.event_type}` : 'Edge context'}
+        value={selectedTraceEvent}
+        open={edgeViewerOpen}
+        onClose={() => setEdgeViewerOpen(false)}
+      />
     </main>
   )
 }

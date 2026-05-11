@@ -57,12 +57,12 @@ function SkillNode({ data, selected }: { data: { label: string; type: string; st
       <Handle
         type="target"
         position={Position.Left}
-        className="!size-2 !bg-primary !border !border-primary hover:!ring-2 hover:!ring-primary/30 !transition-all !rounded-full"
+        className="!size-2 !bg-foreground !border !border-foreground hover:!ring-2 hover:!ring-primary/30 !transition-all !rounded-full"
       />
       <Handle
         type="source"
         position={Position.Right}
-        className="!size-2 !bg-primary !border !border-primary hover:!ring-2 hover:!ring-primary/30 !transition-all !rounded-full"
+        className="!size-2 !bg-foreground !border !border-foreground hover:!ring-2 hover:!ring-primary/30 !transition-all !rounded-full"
       />
     </div>
   )
@@ -168,7 +168,7 @@ export function Canvas() {
         />
         <Controls showInteractive={false} />
         <MiniMap
-          nodeColor="var(--primary)"
+          nodeColor="var(--muted-foreground)"
           nodeStrokeWidth={0}
           maskColor={
             theme === "dark"

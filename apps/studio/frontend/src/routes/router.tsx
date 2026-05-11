@@ -1,6 +1,6 @@
 import { createHashRouter, Navigate } from 'react-router-dom'
 import Home from './home'
-import Root from './root'
+import Root, { RootErrorBoundary } from './root'
 import Debug from './skill/debug'
 import Edit from './skill/edit'
 import Eval from './skill/eval'
@@ -16,6 +16,7 @@ export const router = createHashRouter([
   {
     path: '/',
     element: <Root />,
+    errorElement: <RootErrorBoundary />,
     children: [
       {
         index: true,

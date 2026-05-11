@@ -25,7 +25,7 @@ export function Copilot({ onClose }: CopilotProps) {
       {/* Header */}
       <div className="flex items-center justify-between px-3 h-11 border-b border-sidebar-border shrink-0">
         <div className="flex items-center gap-1.5">
-          <span className="text-sm font-medium text-foreground">New Chat</span>
+          <span className="text-xs font-medium text-foreground">New Chat</span>
           <ChevronRight className="size-3 text-muted-foreground" />
         </div>
         <div className="flex items-center gap-0.5">
@@ -43,10 +43,10 @@ export function Copilot({ onClose }: CopilotProps) {
         <div className="p-4">
           {/* Welcome */}
           <div className="mb-6">
-            <h2 className="text-xl font-semibold text-foreground mb-1">
+            <h2 className="text-sm font-medium text-foreground mb-1">
               Good afternoon.
             </h2>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               How can I help you today?
             </p>
           </div>
@@ -76,18 +76,17 @@ export function Copilot({ onClose }: CopilotProps) {
             className="flex-1 border-0 bg-transparent h-auto p-0 text-xs focus-visible:ring-0"
           />
           <div className="flex items-center gap-0.5">
-            <Button variant="ghost" size="icon-xs">
-              <Paperclip />
+            <Button variant="ghost" className="h-7 w-7 p-0">
+              <Paperclip className="size-3.5" />
             </Button>
-            <Button variant="ghost" size="icon-xs">
-              <Plus />
+            <Button variant="ghost" className="h-7 w-7 p-0">
+              <Plus className="size-3.5" />
             </Button>
             <Button
-              size="icon-xs"
+              className="h-7 w-7 p-0"
               variant={message ? "default" : "secondary"}
-              className={cn(!message && "text-muted-foreground")}
             >
-              <ArrowUp />
+              <ArrowUp className={cn("size-3.5", !message && "text-muted-foreground")} />
             </Button>
           </div>
         </div>

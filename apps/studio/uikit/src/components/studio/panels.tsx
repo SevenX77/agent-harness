@@ -23,8 +23,8 @@ function PanelHeader({ title, onClose, extra }: { title: string; onClose: () => 
         <span className="text-xs font-medium text-foreground">{title}</span>
         {extra}
       </div>
-      <Button variant="ghost" size="icon" className="size-6" onClick={onClose}>
-        <X className="size-3.5" />
+      <Button variant="ghost" size="icon-xs" onClick={onClose}>
+        <X className="size-2.5" strokeWidth={1.5} />
       </Button>
     </div>
   )
@@ -46,7 +46,7 @@ export function AssetsPanel({ onClose }: PanelProps) {
       <PanelHeader title="Assets" onClose={onClose} />
 
       <ScrollArea className="flex-1">
-        <div className="py-2 px-2 text-sm">
+        <div className="py-2 px-2 text-xs">
           {/* SKILL.md */}
           <div className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors">
             <FileText className="size-4 text-primary" strokeWidth={1.5} />
@@ -135,7 +135,7 @@ export function TimelinePanel({ onClose }: PanelProps) {
                   ) : (
                     <AlertCircle className="size-4 text-destructive" />
                   )}
-                  <span className="text-sm text-muted-foreground group-hover:text-foreground">{trace.name}</span>
+                  <span className="text-xs text-muted-foreground group-hover:text-foreground">{trace.name}</span>
                 </div>
                 <span className="text-xs text-muted-foreground">{trace.time}</span>
               </div>
@@ -149,7 +149,7 @@ export function TimelinePanel({ onClose }: PanelProps) {
 
       <Separator />
       <div className="p-2">
-        <Button variant="secondary" size="sm" className="w-full gap-2">
+        <Button variant="secondary" className="w-full gap-2">
           <Play className="size-3.5" />
           New Run
         </Button>
@@ -173,7 +173,7 @@ export function PropertiesPanel({ onClose }: PanelProps) {
             <Input
               readOnly
               value="node_text_gen_01"
-              className="h-8 text-sm font-mono bg-muted"
+              className="h-7 text-xs bg-muted"
             />
           </div>
 
@@ -189,7 +189,7 @@ export function PropertiesPanel({ onClose }: PanelProps) {
           <div className="space-y-2">
             <Label className="text-xs text-muted-foreground">Model</Label>
             <Select defaultValue="gpt-4o-mini">
-              <SelectTrigger className="h-8 text-sm">
+              <SelectTrigger className="h-7 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -205,7 +205,7 @@ export function PropertiesPanel({ onClose }: PanelProps) {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <Label className="text-xs text-muted-foreground">Temperature</Label>
-              <span className="text-sm font-mono text-foreground">{temperature[0]}</span>
+              <span className="text-xs text-foreground">{temperature[0]}</span>
             </div>
             <Slider
               value={temperature}
@@ -222,7 +222,7 @@ export function PropertiesPanel({ onClose }: PanelProps) {
           <div className="space-y-2">
             <Label className="text-xs text-muted-foreground">System Prompt</Label>
             <Textarea
-              className="text-sm resize-none min-h-[100px]"
+              className="text-xs resize-none min-h-[100px]"
               placeholder="Enter system prompt..."
               defaultValue="You are a helpful assistant."
             />
@@ -259,7 +259,7 @@ export function EditorPanel({ onClose }: PanelProps) {
       <PanelHeader
         title="Editor"
         onClose={onClose}
-        extra={<Badge variant="outline" className="text-xs font-mono">main.py</Badge>}
+        extra={<Badge variant="outline" className="text-xs">main.py</Badge>}
       />
 
       <ScrollArea className="flex-1">
@@ -273,7 +273,7 @@ export function EditorPanel({ onClose }: PanelProps) {
             ))}
           </div>
           {/* Code */}
-          <pre className="py-3 px-4 text-sm font-mono leading-6">
+          <pre className="py-3 px-4 text-xs font-mono leading-6">
             {codeLines.map((line) => (
               <div key={line.num} className="h-6">
                 {line.type === "comment" && <span className="text-muted-foreground">{line.content}</span>}

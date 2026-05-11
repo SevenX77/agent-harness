@@ -32,7 +32,7 @@ export function Toolbar({ activePanel, onPanelChange }: ToolbarProps) {
   return (
     <div className="flex flex-col items-center py-3 px-2 bg-sidebar border-r border-border w-12">
       {/* Logo */}
-      <div className="size-7 rounded-md bg-foreground flex items-center justify-center mb-4">
+      <div className="size-8 rounded-md bg-foreground flex items-center justify-center mb-4">
         <Layers className="size-4 text-background" strokeWidth={2} />
       </div>
 

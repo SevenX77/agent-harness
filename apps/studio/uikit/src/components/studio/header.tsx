@@ -46,8 +46,8 @@ export function Header({
       <div className="flex items-center gap-3">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="gap-1.5 px-2">
-              <span className="text-sm font-medium">{projectName}</span>
+            <Button variant="ghost" className="gap-1.5 px-2">
+              <span className="text-xs font-medium">{projectName}</span>
               <ChevronDown className="text-muted-foreground" />
             </Button>
           </DropdownMenuTrigger>
@@ -65,22 +65,19 @@ export function Header({
 
         <span className="text-xs text-muted-foreground">Workspace</span>
 
-        <Badge
-          variant={STATUS_VARIANT[status]}
-          className="text-[10px] uppercase"
-        >
+        <Badge variant={STATUS_VARIANT[status]} className="uppercase">
           {status}
         </Badge>
       </div>
 
       {/* Right: Actions */}
       <div className="flex items-center gap-1.5">
-        <Button variant="ghost" size="sm" className="gap-1.5">
+        <Button variant="ghost" className="gap-1.5">
           <Zap />
           Predict
         </Button>
 
-        <Button size="sm" className="gap-1.5">
+        <Button className="gap-1.5">
           <Play fill="currentColor" />
           Run
         </Button>
@@ -92,7 +89,7 @@ export function Header({
           <TooltipTrigger asChild>
             <Button
               variant={copilotOpen ? "secondary" : "ghost"}
-              size="icon-sm"
+              size="icon"
               onClick={onCopilotToggle}
               aria-pressed={copilotOpen}
             >
@@ -107,7 +104,7 @@ export function Header({
         {/* Theme Toggle: shows the target mode you'd switch to */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon-sm" onClick={toggleTheme}>
+            <Button variant="ghost" size="icon" onClick={toggleTheme}>
               {theme === "dark" ? <Sun /> : <Moon />}
             </Button>
           </TooltipTrigger>
@@ -119,7 +116,7 @@ export function Header({
         {/* User */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon-sm" className="rounded-full">
+            <Button variant="ghost" size="icon" className="rounded-full">
               <Avatar className="size-6">
                 <AvatarImage src="https://github.com/shadcn.png" />
                 <AvatarFallback>U</AvatarFallback>

@@ -48,10 +48,8 @@ function SkillNode({ data, selected }: { data: { label: string; type: string; st
       {/* Content */}
       <div className="px-2.5 py-1.5">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] text-muted-foreground font-mono">{data.id}</span>
-          <Badge variant="secondary" className="text-[10px]">
-            {data.type}
-          </Badge>
+          <span className="text-xs text-muted-foreground">{data.id}</span>
+          <Badge variant="secondary">{data.type}</Badge>
         </div>
       </div>
 

@@ -1,13 +1,29 @@
+import { lazy, Suspense } from 'react'
 import { createHashRouter, Navigate } from 'react-router-dom'
-import Home from './home'
 import Root, { RootErrorBoundary } from './root'
-import Settings from './settings'
-import Debug from './skill/debug'
-import Edit from './skill/edit'
-import Eval from './skill/eval'
-import SkillLayout from './skill/layout'
-import Predict from './skill/predict'
-import Run from './skill/run'
+
+const Home = lazy(() => import('./home'))
+const Settings = lazy(() => import('./settings'))
+const SkillLayout = lazy(() => import('./skill/layout'))
+const Edit = lazy(() => import('./skill/edit'))
+const Predict = lazy(() => import('./skill/predict'))
+const Run = lazy(() => import('./skill/run'))
+const Debug = lazy(() => import('./skill/debug'))
+const Eval = lazy(() => import('./skill/eval'))
+
+function routeElement(element: React.ReactNode) {
+  return (
+    <Suspense
+      fallback={(
+        <div className="grid min-h-screen place-items-center bg-background text-sm text-muted-foreground">
+          Loading Studio view...
+        </div>
+      )}
+    >
+      {element}
+    </Suspense>
+  )
+}
 
 export const router = createHashRouter([
   {
@@ -17,11 +33,11 @@ export const router = createHashRouter([
     children: [
       {
         index: true,
-        element: <Home />,
+        element: routeElement(<Home />),
       },
       {
         path: 'skill/:skillId',
-        element: <SkillLayout />,
+        element: routeElement(<SkillLayout />),
         children: [
           {
             index: true,
@@ -29,33 +45,33 @@ export const router = createHashRouter([
           },
           {
             path: 'edit',
-            element: <Edit />,
+            element: routeElement(<Edit />),
           },
           {
             path: 'predict',
-            element: <Predict />,
+            element: routeElement(<Predict />),
           },
           {
             path: 'run',
-            element: <Run />,
+            element: routeElement(<Run />),
           },
           {
             path: 'run/:runId',
-            element: <Run />,
+            element: routeElement(<Run />),
           },
           {
             path: 'debug',
-            element: <Debug />,
+            element: routeElement(<Debug />),
           },
           {
             path: 'eval',
-            element: <Eval />,
+            element: routeElement(<Eval />),
           },
         ],
       },
       {
         path: 'settings',
-        element: <Settings />,
+        element: routeElement(<Settings />),
       },
     ],
   },

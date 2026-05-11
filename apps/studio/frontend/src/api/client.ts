@@ -61,3 +61,10 @@ export async function saveGoldenBaseline(skillId: string, runId: string, lock = 
   })
   return response.data
 }
+
+export async function startRun(skillId: string, inputData: JsonObject): Promise<RunMetadata> {
+  const response = await api.post<RunMetadata>(`/skills/${skillId}/runs`, {
+    input_data: inputData,
+  })
+  return response.data
+}

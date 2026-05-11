@@ -2,14 +2,17 @@ import { AlertTriangle, Loader2, Play, RotateCcw, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { startRun } from '../../api/client'
-import type { JsonObject, RunDetail, RunMetadata } from '../../api/types'
+import type { CallbackEvent, JsonObject, RunDetail, RunMetadata } from '../../api/types'
 import { TracePanel } from '../../components/TracePanel'
+import { PromptInspector } from '../../components/PromptInspector'
+import { MicroTopologyPanel } from '../../components/studio/micro-topology-panel'
 import { readLintStatus } from '../../hooks/useDebouncedLint'
 import { useRunHistory } from '../../hooks/useRunHistory'
 import { useRunStream } from '../../hooks/useRunStream'
 import { useSkills } from '../../hooks/useSkills'
 import { useTraceSelection } from '../../hooks/useTraceSelection'
 import { errorMessage, isJsonObject } from '../../utils/errors'
+import { findPromptEvent } from '../../utils/trace'
 
 export default function Run() {
   const { skillId = '', runId = null } = useParams()
@@ -22,6 +25,8 @@ export default function Run() {
   const [rawInput, setRawInput] = useState('{}')
   const [currentRun, setCurrentRun] = useState<RunMetadata | null>(null)
   const [runDetail, setRunDetail] = useState<RunDetail | null>(null)
+  const [selectedTraceEvent, setSelectedTraceEvent] = useState<CallbackEvent | null>(null)
+  const [promptEvent, setPromptEvent] = useState<CallbackEvent | null>(null)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -159,13 +164,17 @@ export default function Run() {
               selectedEventId={traceSelection.selectedEventId}
               linkEnabled={traceSelection.linkEnabled}
               onToggleLink={traceSelection.setLinkEnabled}
-              onSelectPrompt={() => undefined}
-              onSelectEvent={(index, event) => traceSelection.selectEvent(event, index)}
+              onSelectPrompt={(index) => setPromptEvent(findPromptEvent(traceEvents, index))}
+              onSelectEvent={(index, event) => {
+                traceSelection.selectEvent(event, index)
+                setSelectedTraceEvent(event)
+              }}
               canCompare={Boolean(runId)}
             />
           </section>
 
           <aside className="space-y-5">
+            <MicroTopologyPanel event={selectedTraceEvent} />
             <div className="rounded-md border border-border bg-card p-4">
             <h2 className="text-sm font-semibold text-foreground">Run status</h2>
             <dl className="mt-4 space-y-3 text-sm">
@@ -238,6 +247,7 @@ export default function Run() {
           </aside>
         </div>
       </section>
+      <PromptInspector promptEvent={promptEvent} onClose={() => setPromptEvent(null)} />
     </main>
   )
 }

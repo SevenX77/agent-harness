@@ -1,11 +1,15 @@
 import { AlertTriangle } from 'lucide-react'
 import { useParams } from 'react-router-dom'
+import { toast } from 'sonner'
 import { SkillNode } from '../../components/studio/skill-node'
 import { useSkills } from '../../hooks/useSkills'
 
 export default function Debug() {
   const { skillId = '' } = useParams()
   const { skillDetail } = useSkills(skillId)
+  const showResumePlaceholder = () => {
+    toast.info('HitL Resume 待 backend 实现 (V3 范围)')
+  }
 
   return (
     <main className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-background text-foreground">
@@ -32,13 +36,13 @@ export default function Debug() {
             name="draft"
             state="paused"
             summary="Waiting for human review before continuing."
-            onResume={() => undefined}
+            onResume={showResumePlaceholder}
           />
           <SkillNode
             name="validate"
             state="error"
             summary="Validator failed; inspect edge context before recompiling."
-            onResume={() => undefined}
+            onResume={showResumePlaceholder}
           />
         </div>
       </section>

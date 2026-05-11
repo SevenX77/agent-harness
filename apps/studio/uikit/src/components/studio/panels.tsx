@@ -131,7 +131,7 @@ export function TimelinePanel({ onClose }: PanelProps) {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   {trace.status === "success" ? (
-                    <CheckCircle2 className="size-4 text-emerald-500" />
+                    <CheckCircle2 className="size-4 text-primary" />
                   ) : (
                     <AlertCircle className="size-4 text-destructive" />
                   )}
@@ -279,35 +279,35 @@ export function EditorPanel({ onClose }: PanelProps) {
                 {line.type === "comment" && <span className="text-muted-foreground">{line.content}</span>}
                 {line.type === "import" && (
                   <>
-                    <span className="text-blue-400">{line.content.split(" ")[0]}</span>
+                    <span className="text-primary">{line.content.split(" ")[0]}</span>
                     <span className="text-foreground">{" " + line.content.slice(line.content.indexOf(" ") + 1)}</span>
                   </>
                 )}
                 {line.type === "class" && (
                   <>
-                    <span className="text-blue-400">class</span>
-                    <span className="text-yellow-400"> TextGenerator</span>
+                    <span className="text-primary">class</span>
+                    <span className="text-foreground"> TextGenerator</span>
                     <span className="text-foreground">(Skill):</span>
                   </>
                 )}
                 {line.type === "def" && (
                   <>
                     <span className="text-foreground">{line.content.match(/^\s*/)?.[0]}</span>
-                    <span className="text-blue-400">{line.content.includes("async") ? "async def" : "def"}</span>
-                    <span className="text-green-400"> {line.content.match(/def (\w+)/)?.[1]}</span>
+                    <span className="text-primary">{line.content.includes("async") ? "async def" : "def"}</span>
+                    <span className="text-foreground"> {line.content.match(/def (\w+)/)?.[1]}</span>
                     <span className="text-foreground">{line.content.slice(line.content.indexOf("("))}</span>
                   </>
                 )}
                 {line.type === "string" && (
                   <>
                     <span className="text-foreground">{line.content.split('"')[0]}</span>
-                    <span className="text-amber-400">&quot;{line.content.split('"')[1]}&quot;</span>
+                    <span className="text-foreground">&quot;{line.content.split('"')[1]}&quot;</span>
                   </>
                 )}
                 {line.type === "number" && (
                   <>
                     <span className="text-foreground">{line.content.split("=")[0]}=</span>
-                    <span className="text-amber-400">{line.content.split("=")[1]}</span>
+                    <span className="text-foreground">{line.content.split("=")[1]}</span>
                   </>
                 )}
                 {line.type === "code" && <span className="text-foreground">{line.content}</span>}

@@ -1,16 +1,13 @@
 import { createHashRouter, Navigate } from 'react-router-dom'
 import Home from './home'
 import Root, { RootErrorBoundary } from './root'
+import Settings from './settings'
 import Debug from './skill/debug'
 import Edit from './skill/edit'
 import Eval from './skill/eval'
 import SkillLayout from './skill/layout'
 import Predict from './skill/predict'
 import Run from './skill/run'
-
-function SettingsPlaceholder() {
-  return <div>TODO settings.tsx</div>
-}
 
 export const router = createHashRouter([
   {
@@ -58,7 +55,7 @@ export const router = createHashRouter([
       },
       {
         path: 'settings',
-        element: <SettingsPlaceholder />,
+        element: <Settings />,
       },
     ],
   },

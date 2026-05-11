@@ -1,13 +1,15 @@
-import { BadgeCheck, GitCompare, Loader2 } from 'lucide-react'
+import { BadgeCheck, GitCompare, Loader2, Rocket } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { saveGoldenBaseline } from '../../api/client'
 import type { RunDetail } from '../../api/types'
 import { DiffView } from '../../components/diff/DiffView'
+import { PublishModal } from '../../components/studio/publish-modal'
 import { useGoldenDiff } from '../../hooks/useGoldenDiff'
 import { useRunHistory } from '../../hooks/useRunHistory'
 import { useSkills } from '../../hooks/useSkills'
 import { errorMessage } from '../../utils/errors'
+import { celebrateSuccess } from '../../lib/confetti'
 
 export default function Eval() {
   const { skillId = '' } = useParams()
@@ -19,6 +21,7 @@ export default function Eval() {
   const [runDetail, setRunDetail] = useState<RunDetail | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [savingGolden, setSavingGolden] = useState(false)
+  const [publishOpen, setPublishOpen] = useState(false)
 
   useEffect(() => {
     if (!selectedRunId) {
@@ -63,6 +66,7 @@ export default function Eval() {
     try {
       const baseline = await saveGoldenBaseline(skillId, selectedRunId, false)
       setMessage(`Saved golden baseline ${baseline.id}.`)
+      celebrateSuccess()
       await history.refresh()
     } catch (error) {
       setMessage(errorMessage(error))
@@ -112,6 +116,14 @@ export default function Eval() {
               {savingGolden ? <Loader2 className="size-4 animate-spin" /> : <BadgeCheck className="size-4" />}
               Save as Golden
             </button>
+            <button
+              type="button"
+              onClick={() => setPublishOpen(true)}
+              className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground hover:bg-accent"
+            >
+              <Rocket className="size-4" />
+              Publish
+            </button>
           </div>
         </div>
         {message ? <div className="mt-3 rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground">{message}</div> : null}
@@ -142,6 +154,7 @@ export default function Eval() {
           />
         </div>
       </section>
+      <PublishModal open={publishOpen} onClose={() => setPublishOpen(false)} />
     </main>
   )
 }

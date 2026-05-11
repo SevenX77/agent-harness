@@ -88,7 +88,7 @@ export function Header({
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              variant={copilotOpen ? "secondary" : "ghost"}
+              variant="ghost"
               size="icon"
               onClick={onCopilotToggle}
               aria-pressed={copilotOpen}

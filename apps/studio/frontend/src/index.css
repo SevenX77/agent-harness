@@ -164,6 +164,19 @@
     }
 }
 
+@keyframes pulse-primary {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 35%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 7px color-mix(in oklab, var(--primary) 0%, transparent);
+  }
+}
+
+.animate-pulse-primary {
+  animation: pulse-primary 1.4s ease-in-out infinite;
+}
+
 /* React Flow theme overrides (per tokens.md §1.6) */
 .react-flow .react-flow__controls {
   background: var(--color-card) !important;

@@ -2,7 +2,7 @@ import { useState } from "react"
 import { Header } from "./header"
 import { Toolbar } from "./toolbar"
 import { Canvas } from "./canvas"
-import { SplitEditor } from "./split-editor"
+import { SplitEditor, type ViewMode } from "./split-editor"
 import { Copilot, CopilotButton } from "./copilot"
 import {
   AssetsPanel,
@@ -17,20 +17,15 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable"
 
-type LayoutMode = "split" | "editor-only" | "mini-only"
-type TopViewMode = "code" | "node"
-
 export function Workspace() {
   const [activePanel, setActivePanel] = useState<string | null>("assets")
   const [copilotOpen, setCopilotOpen] = useState(true)
   const [openFile, setOpenFile] = useState<FileMeta | null>(null)
-  const [layoutMode, setLayoutMode] = useState<LayoutMode>("split")
-  const [topViewMode, setTopViewMode] = useState<TopViewMode>("code")
+  const [viewMode, setViewMode] = useState<ViewMode>("split")
 
   const handleFileOpen = (file: FileMeta) => {
     setOpenFile(file)
-    setLayoutMode("split")
-    setTopViewMode("code")
+    setViewMode("split")
   }
 
   const renderPanel = () => {
@@ -83,10 +78,8 @@ export function Workspace() {
             {openFile ? (
               <SplitEditor
                 file={openFile}
-                layoutMode={layoutMode}
-                topViewMode={topViewMode}
-                onLayoutModeChange={setLayoutMode}
-                onTopViewModeChange={setTopViewMode}
+                viewMode={viewMode}
+                onViewModeChange={setViewMode}
               />
             ) : (
               <Canvas />

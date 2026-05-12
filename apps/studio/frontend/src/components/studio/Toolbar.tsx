@@ -1,4 +1,4 @@
-import { Clock, FileInput, Files, Moon, Settings2, Sun } from 'lucide-react'
+import { Clock, FileInput, Files, Moon, Settings, Settings2, Sun } from 'lucide-react'
 import { toggleTheme, useThemeValue } from '../../store/themeStore'
 
 export type PanelKind = 'assets' | 'input' | 'timeline' | 'properties'
@@ -6,6 +6,7 @@ export type PanelKind = 'assets' | 'input' | 'timeline' | 'properties'
 interface ToolbarProps {
   activePanel: PanelKind | null
   onPanelChange: (panel: PanelKind | null) => void
+  onSettingsOpen: () => void
 }
 
 const TOOLBAR_ITEMS: Array<{ id: PanelKind, label: string, icon: typeof Files, shortcut: string }> = [
@@ -15,7 +16,7 @@ const TOOLBAR_ITEMS: Array<{ id: PanelKind, label: string, icon: typeof Files, s
   { id: 'properties', label: 'Properties', icon: Settings2, shortcut: '4' },
 ]
 
-export function Toolbar({ activePanel, onPanelChange }: ToolbarProps) {
+export function Toolbar({ activePanel, onPanelChange, onSettingsOpen }: ToolbarProps) {
   const theme = useThemeValue()
 
   return (
@@ -42,15 +43,26 @@ export function Toolbar({ activePanel, onPanelChange }: ToolbarProps) {
         })}
       </div>
 
-      <button
-        type="button"
-        aria-label="Toggle theme"
-        title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-        onClick={() => toggleTheme()}
-        className="mt-auto inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-      >
-        {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
-      </button>
+      <div className="mt-auto flex flex-col gap-1">
+        <button
+          type="button"
+          aria-label="Toggle theme"
+          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+          onClick={() => toggleTheme()}
+          className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
+        </button>
+        <button
+          type="button"
+          aria-label="Settings"
+          title="Settings"
+          onClick={onSettingsOpen}
+          className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <Settings className="size-4" />
+        </button>
+      </div>
     </aside>
   )
 }

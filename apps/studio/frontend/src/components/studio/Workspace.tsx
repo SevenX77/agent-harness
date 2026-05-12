@@ -6,7 +6,9 @@ import { useCopilotContext } from '../../hooks/useCopilotContext'
 import { readLintStatus } from '../../hooks/useDebouncedLint'
 import { useSkills } from '../../hooks/useSkills'
 import { Header } from './Header'
-import { Panels } from './Panels'
+import { Panels, type FileMeta } from './Panels'
+import { SettingsPage } from './SettingsPage'
+import { SplitEditor } from './SplitEditor'
 import { Toolbar, type PanelKind } from './Toolbar'
 
 interface WorkspaceProps {
@@ -17,6 +19,9 @@ interface WorkspaceProps {
 export function Workspace({ skillId }: WorkspaceProps) {
   const [activePanel, setActivePanel] = useState<PanelKind | null>('assets')
   const [copilotOpen, setCopilotOpen] = useState(true)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [openFile, setOpenFile] = useState<FileMeta | null>(null)
+  const [fileDrafts, setFileDrafts] = useState<Record<string, string>>({})
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedNode, setSelectedNode] = useState<{ id: string, data: SkillGraphNodeData } | null>(null)
   const { skillDetail, skillDetailError } = useSkills(skillId)
@@ -41,12 +46,21 @@ export function Workspace({ skillId }: WorkspaceProps) {
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
       <Header skillId={skillId} copilotOpen={copilotOpen} onCopilotToggle={() => setCopilotOpen((open) => !open)} />
       <div className="relative flex min-h-0 flex-1">
-        <Toolbar activePanel={activePanel} onPanelChange={setActivePanel} />
+        <Toolbar activePanel={activePanel} onPanelChange={setActivePanel} onSettingsOpen={() => setSettingsOpen(true)} />
         <Group id="studio-workspace-h" orientation="horizontal" className="min-w-0 flex-1">
           {activePanel ? (
             <>
               <Panel id="left-panel" defaultSize="20%" minSize="14%" maxSize="35%">
-                <Panels activePanel={activePanel} skillId={skillId} />
+                <Panels
+                  activePanel={activePanel}
+                  skillId={skillId}
+                  skillDetail={skillDetail}
+                  selectedNode={selectedNode}
+                  onFileOpen={(file) => {
+                    setOpenFile(file)
+                    setSettingsOpen(false)
+                  }}
+                />
               </Panel>
               <Separator className="z-20 w-px bg-border transition-colors hover:bg-ring" />
             </>
@@ -54,7 +68,25 @@ export function Workspace({ skillId }: WorkspaceProps) {
 
           <Panel id="canvas" defaultSize={copilotOpen ? '60%' : '80%'} minSize="30%">
             <div className="relative size-full">
-              {skillId ? (
+              {settingsOpen ? (
+                <SettingsPage onClose={() => setSettingsOpen(false)} />
+              ) : skillId && openFile ? (
+                <SplitEditor
+                  file={openFile}
+                  value={fileDrafts[openFile.path] ?? openFile.content}
+                  onChange={(value) => setFileDrafts((current) => ({ ...current, [openFile.path]: value }))}
+                  onCloseFile={() => setOpenFile(null)}
+                  skillId={skillId}
+                  skillDetail={skillDetail}
+                  isLoading={isLoading}
+                  error={skillDetailError}
+                  selectedNodeId={selectedNodeId}
+                  onNodeSelect={(node) => {
+                    setSelectedNodeId(node.id)
+                    setSelectedNode(node)
+                  }}
+                />
+              ) : skillId ? (
                 <GraphCanvas
                   skillId={skillId}
                   skillDetail={skillDetail}

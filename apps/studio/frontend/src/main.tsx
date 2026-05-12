@@ -1,10 +1,11 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
-import { RuntimeGate } from './components/RuntimeGate'
+import './store/themeStore'
+import { App } from './App'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <RuntimeGate />
+    <App />
   </StrictMode>,
 )

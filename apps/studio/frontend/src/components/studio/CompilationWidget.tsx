@@ -1,5 +1,4 @@
 import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react'
-import { Link } from 'react-router-dom'
 import { useDebouncedLint } from '../../hooks/useDebouncedLint'
 
 interface CompilationWidgetProps {
@@ -36,13 +35,13 @@ export function CompilationWidget({ skillId, markdown }: CompilationWidgetProps)
               {target}
             </span>
           ) : (
-            <Link
+            <button
               key={target}
-              to={`/skill/${skillId}/${target}`}
+              type="button"
               className="inline-flex h-8 items-center rounded-md border border-border bg-background px-3 text-xs font-medium text-foreground hover:bg-accent"
             >
               {target}
-            </Link>
+            </button>
           )
         ))}
       </div>

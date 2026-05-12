@@ -80,9 +80,9 @@ test.describe('Eval workflow smoke', () => {
     })
 
     await page.goto(`${baseURL}/#/skill/smoke/eval?run_id=run-1`)
-    await expect(page.getByText('Current artifact')).toBeVisible()
-    await expect(page.getByText('output.answer')).toBeVisible()
-    await expect(page.getByText('42%')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Current artifact' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'output.answer' })).toBeVisible()
+    await expect(page.getByRole('button', { name: /output\.answer text 42%/i })).toBeVisible()
 
     await page.getByRole('button', { name: /^Save as Golden$/ }).click()
     await expect(page.getByText('Saved golden baseline run-1.')).toBeVisible()

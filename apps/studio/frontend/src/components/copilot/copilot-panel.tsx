@@ -1,7 +1,6 @@
 import React, { useEffect, useState, type FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { ArrowUp, Bot, CircleAlert, Paperclip, Plus } from 'lucide-react'
-import { useLocation, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { getCopilotCredentials, updateCopilotCredentials } from '../../api/copilot'
 import { useCopilot } from '../../hooks/useCopilot'
@@ -67,15 +66,18 @@ function ChatMessageItemBase({ message }: ChatMessageItemProps) {
 
 export const ChatMessageItem = React.memo(ChatMessageItemBase)
 
-export function CopilotPanel() {
-  const { skillId = null } = useParams()
-  const location = useLocation()
+interface CopilotPanelProps {
+  skillId: string | null
+  view?: 'edit' | 'eval'
+}
+
+export function CopilotPanel({ skillId, view = 'edit' }: CopilotPanelProps) {
   const [draft, setDraft] = useState('')
   const [credentials, setCredentials] = useState<CopilotCredentials | null>(null)
   const [activeBackend, setActiveBackend] = useState<CopilotBackend>('claude')
   const { templates, templatesLoading } = useTemplates()
   const copilot = useCopilot(skillId, activeBackend)
-  const inEvalView = location.pathname.includes('/eval')
+  const inEvalView = view === 'eval'
 
   useEffect(() => {
     let cancelled = false

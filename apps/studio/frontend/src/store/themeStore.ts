@@ -7,6 +7,7 @@ const CHANNEL_NAME = 'studio-theme'
 const subscribers = new Set<() => void>()
 const sourceId = Math.random().toString(36).slice(2)
 let themeChannel: BroadcastChannel | null = null
+let listenersInstalled = false
 
 function systemTheme(): Theme {
   if (typeof window === 'undefined') {
@@ -83,6 +84,18 @@ function handleSystemThemeChange() {
   emitChange()
 }
 
+function installThemeListeners() {
+  if (listenersInstalled || typeof window === 'undefined') {
+    return
+  }
+
+  listenersInstalled = true
+  const media = window.matchMedia('(prefers-color-scheme: dark)')
+  media.addEventListener('change', handleSystemThemeChange)
+  window.addEventListener('storage', handleStorage)
+  getThemeChannel()?.addEventListener('message', handleBroadcast)
+}
+
 export function setTheme(theme: Theme) {
   window.localStorage.setItem(STORAGE_KEY, theme)
   emitChange()
@@ -96,21 +109,8 @@ export function toggleTheme() {
 export function subscribeTheme(callback: () => void) {
   subscribers.add(callback)
 
-  if (subscribers.size === 1 && typeof window !== 'undefined') {
-    const media = window.matchMedia('(prefers-color-scheme: dark)')
-    media.addEventListener('change', handleSystemThemeChange)
-    window.addEventListener('storage', handleStorage)
-    getThemeChannel()?.addEventListener('message', handleBroadcast)
-  }
-
   return () => {
     subscribers.delete(callback)
-    if (subscribers.size === 0 && typeof window !== 'undefined') {
-      const media = window.matchMedia('(prefers-color-scheme: dark)')
-      media.removeEventListener('change', handleSystemThemeChange)
-      window.removeEventListener('storage', handleStorage)
-      getThemeChannel()?.removeEventListener('message', handleBroadcast)
-    }
   }
 }
 
@@ -118,4 +118,5 @@ export function useThemeValue() {
   return useSyncExternalStore(subscribeTheme, currentTheme, () => 'light')
 }
 
+installThemeListeners()
 applyTheme(currentTheme())

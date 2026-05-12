@@ -1,14 +1,12 @@
 import { Layers, Sparkles } from 'lucide-react'
-import { useParams } from 'react-router-dom'
 
 interface HeaderProps {
+  skillId: string | null
   copilotOpen: boolean
   onCopilotToggle: () => void
 }
 
-export function Header({ copilotOpen, onCopilotToggle }: HeaderProps) {
-  const { skillId } = useParams()
-
+export function Header({ skillId, copilotOpen, onCopilotToggle }: HeaderProps) {
   return (
     <header
       data-tauri-drag-region

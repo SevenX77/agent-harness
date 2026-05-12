@@ -106,7 +106,7 @@ test.describe('Predict workflow smoke', () => {
     await page.getByRole('button', { name: /validate input/i }).click()
     await expect(page.getByRole('button', { name: /predicting/i })).toBeVisible()
     await expect(page.getByText('real predict output')).toBeVisible()
-    await expect(page.getByText('Golden baselines')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Golden baselines' })).toBeVisible()
     await expect(page.getByText('/tmp/golden/final_state.json')).toBeVisible()
     await expect(page.getByRole('button', { name: /save as golden/i })).toHaveCount(0)
   })

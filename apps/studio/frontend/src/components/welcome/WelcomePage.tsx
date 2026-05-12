@@ -8,8 +8,8 @@ import { selectSkillDirectory } from '../../lib/tauri'
 import { generateSkillMd } from '../../templates/skillMdGenerator'
 import { errorMessage } from '../../utils/errors'
 
-interface WelcomeOverlayProps {
-  onSelect: (skillId: string) => void
+interface WelcomePageProps {
+  onSelectSkill: (skillId: string) => void
 }
 
 function formatLastRun(value: string | null) {
@@ -73,7 +73,7 @@ function normalizeSkillId(value: string) {
   return withLetter || 'new-skill'
 }
 
-export function WelcomeOverlay({ onSelect }: WelcomeOverlayProps) {
+export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   const [importing, setImporting] = useState(false)
   const [creating, setCreating] = useState(false)
   const { skills, skillListError, mutateSkills } = useSkills(null)
@@ -87,7 +87,7 @@ export function WelcomeOverlay({ onSelect }: WelcomeOverlayProps) {
 
   const openSkill = (skillId: string) => {
     rememberSkill(skillId)
-    onSelect(skillId)
+    onSelectSkill(skillId)
   }
 
   const createSkill = async () => {
@@ -158,7 +158,7 @@ export function WelcomeOverlay({ onSelect }: WelcomeOverlayProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 p-6 backdrop-blur-sm">
+    <div className="flex size-full items-center justify-center bg-background p-6">
       <section className="w-full max-w-3xl">
         <div className="mb-8 flex items-center gap-3">
           <div className="flex size-10 items-center justify-center rounded-lg bg-foreground">

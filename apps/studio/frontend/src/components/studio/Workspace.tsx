@@ -5,6 +5,7 @@ import { CopilotPanel } from '../copilot/copilot-panel'
 import { useCopilotContext } from '../../hooks/useCopilotContext'
 import { readLintStatus } from '../../hooks/useDebouncedLint'
 import { useSkills } from '../../hooks/useSkills'
+import { WelcomePage } from '../welcome/WelcomePage'
 import { Header } from './Header'
 import { Panels, type FileMeta } from './Panels'
 import { SettingsPage } from './SettingsPage'
@@ -13,10 +14,11 @@ import { Toolbar, type PanelKind } from './Toolbar'
 
 interface WorkspaceProps {
   skillId: string | null
+  onSelectSkill: (skillId: string) => void
   onCloseSkill: () => void
 }
 
-export function Workspace({ skillId }: WorkspaceProps) {
+export function Workspace({ skillId, onSelectSkill }: WorkspaceProps) {
   const [activePanel, setActivePanel] = useState<PanelKind | null>('assets')
   const [copilotOpen, setCopilotOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -86,7 +88,9 @@ export function Workspace({ skillId }: WorkspaceProps) {
                     setSelectedNode(node)
                   }}
                 />
-              ) : skillId ? (
+              ) : skillId === null ? (
+                <WelcomePage onSelectSkill={onSelectSkill} />
+              ) : (
                 <GraphCanvas
                   skillId={skillId}
                   skillDetail={skillDetail}
@@ -98,10 +102,6 @@ export function Workspace({ skillId }: WorkspaceProps) {
                     setSelectedNode(node)
                   }}
                 />
-              ) : (
-                <div className="grid size-full place-items-center bg-background text-sm text-muted-foreground">
-                  Select a skill to start editing.
-                </div>
               )}
             </div>
           </Panel>

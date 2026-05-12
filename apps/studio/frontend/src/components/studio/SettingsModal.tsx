@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Link } from 'react-router-dom'
 import { getCopilotCredentials, updateCopilotCredentials } from '../../api/copilot'
 import type { CopilotBackend, CopilotCredentials } from '../../types/copilot'
 
@@ -59,12 +58,12 @@ export function SettingsModal() {
               API keys are sent to the Python backend for storage. The frontend does not write credential files.
             </p>
           </div>
-          <Link
-            to=".."
+          <button
+            type="button"
             className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
           >
             Close
-          </Link>
+          </button>
         </div>
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">

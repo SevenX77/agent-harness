@@ -16,9 +16,11 @@ import {
   type Node,
   type NodeProps,
 } from '@xyflow/react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Bot, CheckCircle2, Circle, Pause, Radio, Workflow } from 'lucide-react'
+import { toast } from 'sonner'
 import type { PhaseDef, SkillDetail, SkillManifest } from '../api/types'
+import { CycleDetectedError, getAutoLayoutedElements } from '../lib/layout'
 import { SubgraphInline } from './studio/SubgraphInline'
 
 export type SkillNodeStatus = 'idle' | 'running' | 'success' | 'error' | 'paused' | 'breakpoint'
@@ -90,7 +92,7 @@ function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
         selected ? 'border-primary ring-2 ring-primary/30' : 'border-border',
       ].join(' ')}
     >
-      <Handle type="target" position={Position.Top} className="!size-2.5 !border-background !bg-primary" />
+      <Handle type="target" position={Position.Left} className="!size-2.5 !border-background !bg-primary" />
       <div className="flex items-start gap-3">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
           <Bot className="size-4" />
@@ -127,7 +129,7 @@ function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
       {data.subgraphPath && data.isExpanded ? (
         <SubgraphInline path={data.subgraphPath} parentLabel={data.label} />
       ) : null}
-      <Handle type="source" position={Position.Bottom} className="!size-2.5 !border-background !bg-primary" />
+      <Handle type="source" position={Position.Right} className="!size-2.5 !border-background !bg-primary" />
     </div>
   )
 }
@@ -261,8 +263,14 @@ function buildEdges(nodes: SkillGraphNode[]): Edge[] {
   })
 }
 
-export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, selectedNodeId, onNodeSelect, statusByNodeId = {} }: GraphCanvasProps) {
+export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, selectedNodeId, onNodeSelect, statusByNodeId }: GraphCanvasProps) {
   const [expandedSubgraphs, setExpandedSubgraphs] = useState<Set<string>>(() => new Set())
+  const fitViewRef = useRef<(() => void) | null>(null)
+  const fitLayout = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      fitViewRef.current?.()
+    })
+  }, [])
   const toggleSubgraph = useCallback((nodeId: string) => {
     setExpandedSubgraphs((current) => {
       const next = new Set(current)
@@ -274,19 +282,40 @@ export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, se
       return next
     })
   }, [])
+  const safeStatusByNodeId = useMemo(() => statusByNodeId ?? {}, [statusByNodeId])
 
-  const initialNodes = useMemo(
-    () => buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph, statusByNodeId),
-    [expandedSubgraphs, skillDetail, skillId, statusByNodeId, toggleSubgraph],
+  const rawNodes = useMemo(
+    () => buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph, safeStatusByNodeId),
+    [expandedSubgraphs, safeStatusByNodeId, skillDetail, skillId, toggleSubgraph],
   )
-  const initialEdges = useMemo(() => buildEdges(initialNodes), [initialNodes])
-  const [nodes, setNodes, onNodesChange] = useNodesState<SkillGraphNode>(initialNodes)
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
+  const rawEdges = useMemo(() => buildEdges(rawNodes), [rawNodes])
+  const layoutResult = useMemo((): { nodes: SkillGraphNode[]; edges: Edge[]; error: CycleDetectedError | null } => {
+    try {
+      return { ...getAutoLayoutedElements(rawNodes, rawEdges), error: null }
+    } catch (layoutError) {
+      if (layoutError instanceof CycleDetectedError) {
+        return { nodes: [], edges: [], error: layoutError }
+      }
+      throw layoutError
+    }
+  }, [rawEdges, rawNodes])
+  const [nodes, setNodes, onNodesChange] = useNodesState<SkillGraphNode>(layoutResult.nodes)
+  const [edges, setEdges, onEdgesChange] = useEdgesState(layoutResult.edges)
 
   useEffect(() => {
-    setNodes(initialNodes)
-    setEdges(initialEdges)
-  }, [initialEdges, initialNodes, setEdges, setNodes])
+    setNodes(layoutResult.nodes)
+    setEdges(layoutResult.edges)
+    if (!layoutResult.error) {
+      fitLayout()
+    }
+  }, [fitLayout, layoutResult, setEdges, setNodes])
+
+  useEffect(() => {
+    if (layoutResult.error) {
+      toast.error('SKILL contains cyclic dependency - cannot render graph')
+      console.error(layoutResult.error)
+    }
+  }, [layoutResult.error])
 
   const selectedNodes = useMemo(
     () => nodes.map((node) => ({ ...node, selected: node.id === selectedNodeId })),
@@ -332,6 +361,14 @@ export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, se
         </div>
       ) : null}
 
+      {layoutResult.error ? (
+        <div className="absolute inset-0 z-10 grid place-items-center bg-background/80 p-8">
+          <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+            SKILL contains cyclic dependency - cannot render graph.
+          </div>
+        </div>
+      ) : null}
+
       <ReactFlow
         nodes={selectedNodes}
         edges={edges}
@@ -340,6 +377,10 @@ export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, se
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onNodeClick={(_, node) => onNodeSelect?.({ id: node.id, data: node.data })}
+        onInit={(instance) => {
+          fitViewRef.current = () => instance.fitView({ padding: 0.2 })
+          fitLayout()
+        }}
         fitView
         minZoom={0.35}
         maxZoom={1.4}

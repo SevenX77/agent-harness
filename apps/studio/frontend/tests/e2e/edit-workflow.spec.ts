@@ -100,22 +100,22 @@ test.describe('Edit workflow smoke', () => {
 
     await page.goto(`${baseURL}/#/skill/smoke/edit`)
     await expect(page.getByText('Edit graph')).toBeVisible()
-    await expect(page.getByText('draft')).toBeVisible()
+    await expect(page.getByTestId('rf__node-draft').getByText('draft', { exact: true })).toBeVisible()
     await expect(page.locator('.react-flow__edge')).toHaveCount(1)
 
-    await page.getByText('review').click()
+    await page.getByTestId('rf__node-review').getByText('review', { exact: true }).click()
     await page.getByRole('button', { name: /expand subgraph/i }).click()
-    await expect(page.getByText('./review.md')).toBeVisible()
+    await expect(page.getByRole('definition').filter({ hasText: './review.md' })).toBeVisible()
 
     await page.getByLabel('JSON input for schema inference').fill('{"topic":"demo","count":2,"ok":true}')
     await expect(page.getByText('"type": "object"')).toBeVisible()
 
-    await expect(page.getByText('Agent prompt')).toBeVisible()
+    await expect(page.getByText('Agent prompt', { exact: true })).toBeVisible()
     await page.locator('html').evaluate((node) => node.classList.add('dark'))
     await expect(page.locator('html')).toHaveClass(/dark/)
 
     await expect(page.getByText('Compile guard: Passed')).toBeVisible({ timeout: 3000 })
-    await page.locator('.monaco-editor textarea').click()
+    await page.locator('.monaco-editor .view-line').first().click()
     await page.keyboard.type(' fail')
     await expect(page.getByText('Compile guard: Failed')).toBeVisible({ timeout: 3000 })
     await expect(page.getByLabel('Predict')).toHaveAttribute('aria-disabled', 'true')

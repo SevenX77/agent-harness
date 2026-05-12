@@ -1,5 +1,5 @@
-import { HomeDashboard } from '../routes/home'
+import { WelcomeOverlay } from './welcome/WelcomeOverlay'
 
 export function WelcomeScreen() {
-  return <HomeDashboard />
+  return <WelcomeOverlay onSelect={() => undefined} />
 }

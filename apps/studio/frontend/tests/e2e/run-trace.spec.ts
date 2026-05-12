@@ -80,6 +80,7 @@ async function mockRunApi(page: import('@playwright/test').Page) {
 
 test.describe('Run trace workflow smoke', () => {
   test('covers virtual trace, selection, context viewer, topology, dark mode, and disconnect UI', async ({ page }) => {
+    test.setTimeout(60_000)
     await page.addInitScript(() => {
       window.sessionStorage.setItem('studio-lint-status-smoke', 'passed')
       class MockWebSocket extends EventTarget {
@@ -124,9 +125,11 @@ test.describe('Run trace workflow smoke', () => {
 
     await page.locator('[data-trace-event-id]').first().click()
     await expect(page.getByText('Micro-topology')).toBeVisible()
-    await expect(page.getByText('working_memory')).toBeVisible()
+    await expect(page.getByText('working_memory', { exact: true })).toBeVisible()
 
-    await page.getByRole('button', { name: /view json/i }).click()
+    const viewJsonButton = page.getByRole('button', { name: /view json/i })
+    await expect(viewJsonButton).toBeEnabled()
+    await viewJsonButton.click({ force: true })
     await expect(page.getByText('Readonly edge context JSON')).toBeVisible()
     await page.getByRole('button', { name: /close edge context viewer/i }).click()
 

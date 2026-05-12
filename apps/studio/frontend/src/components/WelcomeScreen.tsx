@@ -1,5 +1,5 @@
-import { WelcomeOverlay } from './welcome/WelcomeOverlay'
+import { WelcomePage } from './welcome/WelcomePage'
 
 export function WelcomeScreen() {
-  return <WelcomeOverlay onSelect={() => undefined} />
+  return <WelcomePage onSelectSkill={() => undefined} />
 }

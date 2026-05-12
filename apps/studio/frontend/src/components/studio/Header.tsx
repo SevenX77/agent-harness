@@ -1,33 +1,33 @@
-import { ArrowLeft, Circle, Code2, SquareTerminal, WandSparkles } from 'lucide-react'
-import { Link, useParams } from 'react-router-dom'
-import { openInCodex, openInCursor, openInTerminal } from '../../lib/tauri'
+import { Layers, Sparkles } from 'lucide-react'
+import { useParams } from 'react-router-dom'
 
-export function Header() {
+interface HeaderProps {
+  copilotOpen: boolean
+  onCopilotToggle: () => void
+}
+
+export function Header({ copilotOpen, onCopilotToggle }: HeaderProps) {
   const { skillId } = useParams()
-  const skillPath = skillId ?? ''
 
   return (
     <header
       data-tauri-drag-region
       className="grid h-11 shrink-0 grid-cols-3 items-center border-b border-border bg-background px-3"
     >
-      <div className="flex items-center">
-        <Link
-          to="/"
-          className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          aria-label="Back to Home"
-        >
-          <ArrowLeft className="size-3.5" />
-          Back to Home
-        </Link>
+      <div className="flex items-center gap-2">
+        <div className="flex size-6 items-center justify-center rounded-md bg-foreground">
+          <Layers className="size-3.5 text-background" strokeWidth={2} />
+        </div>
+        <span className="text-sm font-semibold tracking-tight text-foreground">
+          GSkill Studio
+        </span>
       </div>
 
       <div className="flex min-w-0 items-center justify-center gap-2">
-        <span className="truncate text-sm font-medium text-foreground">
+        <span className="truncate text-sm text-muted-foreground">
           {skillId ? `Skill ${skillId}` : 'Studio Workspace'}
         </span>
-        <span className="inline-flex h-5 items-center gap-1 rounded-full bg-secondary px-2 text-[0.625rem] font-medium uppercase text-secondary-foreground">
-          <Circle className="size-2 fill-current" />
+        <span className="inline-flex h-5 w-fit shrink-0 items-center justify-center rounded-full border border-border bg-input/20 px-2 py-0.5 text-[0.625rem] font-medium uppercase text-foreground dark:bg-input/30">
           Draft
         </span>
       </div>
@@ -35,30 +35,13 @@ export function Header() {
       <div className="flex items-center justify-end gap-1">
         <button
           type="button"
-          aria-label="Open in Cursor"
-          title="Open in Cursor"
-          onClick={() => void openInCursor(skillPath)}
-          className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          aria-label={copilotOpen ? 'Hide Copilot' : 'Show Copilot'}
+          aria-pressed={copilotOpen}
+          title={copilotOpen ? 'Hide Copilot' : 'Show Copilot'}
+          onClick={onCopilotToggle}
+          className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
-          <Code2 className="size-4" />
-        </button>
-        <button
-          type="button"
-          aria-label="Open in Terminal"
-          title="Open in Terminal"
-          onClick={() => void openInTerminal(skillPath)}
-          className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <SquareTerminal className="size-4" />
-        </button>
-        <button
-          type="button"
-          aria-label="Open in Codex"
-          title="Open in Codex"
-          onClick={() => void openInCodex(skillPath)}
-          className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <WandSparkles className="size-4" />
+          <Sparkles className="size-3.5" />
         </button>
       </div>
     </header>

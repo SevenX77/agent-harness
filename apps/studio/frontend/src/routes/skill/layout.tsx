@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Outlet, useParams } from 'react-router-dom'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 import { Header } from '../../components/studio/Header'
@@ -15,26 +16,31 @@ function LeftPanelPlaceholder() {
 export default function SkillLayout() {
   const { skillId } = useParams()
   const autoSaveId = skillId ? `workspace-layout-${skillId}` : 'workspace-layout-new'
+  const [copilotOpen, setCopilotOpen] = useState(true)
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
-      <Header />
+      <Header copilotOpen={copilotOpen} onCopilotToggle={() => setCopilotOpen((current) => !current)} />
       <div className="flex min-h-0 flex-1">
         <Toolbar />
         <Group orientation="horizontal" id={autoSaveId} className="min-w-0 flex-1">
-          <Panel id="workspace-left" defaultSize={20} minSize={14} maxSize={35}>
+          <Panel id="workspace-left" defaultSize="20%" minSize="14%" maxSize="35%">
             <LeftPanelPlaceholder />
           </Panel>
           <Separator className="z-20 w-px bg-border transition-colors hover:bg-ring" />
-          <Panel id="workspace-center" defaultSize={58} minSize={30}>
+          <Panel id="workspace-center" defaultSize="58%" minSize="30%">
             <main className="h-full overflow-hidden bg-background">
               <Outlet />
             </main>
           </Panel>
-          <Separator className="z-20 w-px bg-border transition-colors hover:bg-ring" />
-          <Panel id="workspace-copilot" defaultSize={22} minSize={18} maxSize={35}>
-            <CopilotPanel />
-          </Panel>
+          {copilotOpen ? (
+            <>
+              <Separator className="z-20 w-px bg-border transition-colors hover:bg-ring" />
+              <Panel id="workspace-copilot" defaultSize="22%" minSize="18%" maxSize="35%">
+                <CopilotPanel />
+              </Panel>
+            </>
+          ) : null}
         </Group>
       </div>
     </div>

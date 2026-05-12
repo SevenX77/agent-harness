@@ -1,7 +1,8 @@
-import { Bug, GitCompare, Home, Play, Sparkles, Wand2 } from 'lucide-react'
+import { Bug, GitCompare, Home, Moon, Play, Sparkles, Sun, Wand2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { NavLink, useParams } from 'react-router-dom'
 import { lintStatusEvent, readLintStatus } from '../../hooks/useDebouncedLint'
+import { toggleTheme, useThemeValue } from '../../store/themeStore'
 
 const TOOLBAR_ITEMS = [
   { id: 'edit', label: 'Edit', icon: Wand2 },
@@ -15,6 +16,7 @@ export function Toolbar() {
   const { skillId } = useParams()
   const basePath = skillId ? `/skill/${skillId}` : '/'
   const [lintStatus, setLintStatus] = useState(() => (skillId ? readLintStatus(skillId) : 'idle'))
+  const theme = useThemeValue()
 
   useEffect(() => {
     if (!skillId) {
@@ -69,6 +71,16 @@ export function Toolbar() {
           <item.icon className="size-4" strokeWidth={1.75} />
         </NavLink>
       ))}
+
+      <button
+        type="button"
+        aria-label="Toggle theme"
+        title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+        onClick={() => toggleTheme()}
+        className="mt-auto inline-flex min-h-8 min-w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      >
+        {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
+      </button>
     </aside>
   )
 }

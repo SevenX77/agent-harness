@@ -1,13 +1,12 @@
 import React, { useEffect, useState, type FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { Bot, CircleAlert, Loader2, Send } from 'lucide-react'
+import { ArrowUp, Bot, CircleAlert, Paperclip, Plus } from 'lucide-react'
 import { useLocation, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { getCopilotCredentials, updateCopilotCredentials } from '../../api/copilot'
 import { useCopilot } from '../../hooks/useCopilot'
 import { useTemplates } from '../../hooks/useTemplates'
 import type { CopilotBackend, CopilotCredentials, CopilotMessage } from '../../types/copilot'
-import { CopilotSettings } from './copilot-settings'
 import { DiffBubble } from './diff-bubble'
 import { ModelPicker } from './model-picker'
 import { ToolCallBubble } from './tool-call-bubble'
@@ -129,9 +128,6 @@ export function CopilotPanel() {
           {copilot.connectionStatus}
           {copilot.reconnectInMs ? `, retry ${Math.round(copilot.reconnectInMs / 1000)}s` : ''}
         </p>
-        <div className="mt-3">
-          <ModelPicker credentials={credentials} activeBackend={activeBackend} onSelect={selectBackend} />
-        </div>
       </header>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
@@ -192,24 +188,47 @@ export function CopilotPanel() {
         ) : null}
       </div>
 
-      <form onSubmit={submit} className="border-t border-sidebar-border p-3">
-        <div className="mb-3">
-          <CopilotSettings credentials={credentials} backend={activeBackend} onUpdated={setCredentials} />
+      <form onSubmit={submit} className="p-3 shrink-0">
+        <div className="flex flex-col gap-2 rounded-md border border-transparent bg-sidebar-accent/60 px-2.5 py-2 transition-colors focus-within:border-border">
+          <textarea
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            rows={1}
+            className="min-h-[20px] max-h-[160px] w-full resize-none overflow-y-auto bg-transparent text-xs leading-relaxed outline-none field-sizing-content placeholder:text-muted-foreground"
+            placeholder="Use '@' to mention nodes..."
+          />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                aria-label="Attach file"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <Paperclip className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                aria-label="Add context"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <Plus className="size-3.5" />
+              </button>
+              <ModelPicker credentials={credentials} activeBackend={activeBackend} onSelect={selectBackend} />
+            </div>
+            <button
+              type="submit"
+              disabled={!draft.trim() || copilot.connectionStatus !== 'open'}
+              aria-label="Send message"
+              className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
+                draft.trim() && copilot.connectionStatus === 'open'
+                  ? 'bg-primary text-primary-foreground hover:bg-primary/80'
+                  : 'bg-secondary text-secondary-foreground'
+              }`}
+            >
+              <ArrowUp className={`size-3.5 ${!draft.trim() ? 'text-muted-foreground' : ''}`} />
+            </button>
+          </div>
         </div>
-        <textarea
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          className="h-20 w-full resize-none rounded-md border border-input bg-background p-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
-          placeholder="Ask Copilot..."
-        />
-        <button
-          type="submit"
-          disabled={!draft.trim() || copilot.connectionStatus !== 'open'}
-          className="mt-2 inline-flex h-8 w-full items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-45"
-        >
-          {copilot.connectionStatus === 'connecting' ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-          Send
-        </button>
       </form>
     </aside>
   )

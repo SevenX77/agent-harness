@@ -25,8 +25,10 @@ from app.core.ports.storage import StorageBackend
 from app.models.errors import LintError
 from app.models.lint import LintResult
 from app.models.runs import RunMetadata
+from app.models.settings import AppSettings
 from app.models.skills import SkillDetail, SkillSummary
-from app.services.git_local import initialize_skill_repository
+from app.services.config_arbitration import detect_config_mismatch
+from app.services.git_local import GitLocalService, initialize_skill_repository
 
 _LOCATION_RE = re.compile(r"SKILL\.md:(?P<line>\d+)(?::(?P<loc>.*))?$")
 _NAME_LINE_RE = re.compile(
@@ -49,25 +51,37 @@ async def list_skill_summaries(
 ) -> list[SkillSummary]:
     """Return public, workspace, and imported directory skills."""
     summaries: dict[str, SkillSummary] = {}
+    app_settings = await metadata.read_app_settings()
+    local_git = GitLocalService()
     public_ids = await _list_skill_ids(config.SKILLS_DIR, storage)
     workspace_root = _workspace_skills_dir_for(user_id)
     workspace_ids = await _list_skill_ids(workspace_root, storage)
     metadata_summaries = await metadata.list_skills(user_id)
     for skill_id in public_ids:
         skill_dir = config.SKILLS_DIR / skill_id
-        summaries[skill_id] = await _summary_for_skill_dir_async(
-            user_id,
+        summaries[skill_id] = _attach_config_mismatch(
+            await _summary_for_skill_dir_async(
+                user_id,
+                skill_dir,
+                storage,
+                metadata,
+            ),
             skill_dir,
-            storage,
-            metadata,
+            app_settings,
+            local_git,
         )
     for skill_id in workspace_ids:
         skill_dir = workspace_root / skill_id
-        summaries[skill_id] = await _summary_for_skill_dir_async(
-            user_id,
+        summaries[skill_id] = _attach_config_mismatch(
+            await _summary_for_skill_dir_async(
+                user_id,
+                skill_dir,
+                storage,
+                metadata,
+            ),
             skill_dir,
-            storage,
-            metadata,
+            app_settings,
+            local_git,
         )
     for saved_summary in metadata_summaries:
         if not saved_summary.directory_path:
@@ -75,16 +89,39 @@ async def list_skill_summaries(
         skill_dir = Path(saved_summary.directory_path)
         if not await storage.exists(str(skill_dir / "SKILL.md")):
             continue
-        summaries[saved_summary.id] = (
-            await _summary_for_skill_dir_async(
-                user_id,
-                skill_dir,
-                storage,
-                metadata,
-                skill_id=saved_summary.id,
-            )
-        ).model_copy(update={"directory_path": saved_summary.directory_path})
+        summaries[saved_summary.id] = _attach_config_mismatch(
+            (
+                await _summary_for_skill_dir_async(
+                    user_id,
+                    skill_dir,
+                    storage,
+                    metadata,
+                    skill_id=saved_summary.id,
+                )
+            ).model_copy(update={"directory_path": saved_summary.directory_path}),
+            skill_dir,
+            app_settings,
+            local_git,
+        )
     return sorted(summaries.values(), key=lambda summary: summary.id)
+
+
+def _attach_config_mismatch(
+    summary: SkillSummary,
+    skill_dir: Path,
+    app_settings: AppSettings,
+    local_git: GitLocalService,
+) -> SkillSummary:
+    return summary.model_copy(
+        update={
+            "config_mismatch": detect_config_mismatch(
+                summary.id,
+                skill_dir,
+                app_settings,
+                local_git=local_git,
+            ),
+        },
+    )
 
 
 async def get_skill_detail(

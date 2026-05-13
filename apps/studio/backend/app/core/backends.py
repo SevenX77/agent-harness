@@ -18,6 +18,7 @@ from app.core.ports.auth import AuthProvider
 from app.core.ports.eventbus import EventBus
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
+from app.services.artifact_registry import ArtifactRegistryClient
 from app.services.git_collab import GiteaClient, GitCollaborateService
 from app.services.git_local import GitLocalService
 
@@ -36,6 +37,8 @@ class BackendConfig(BaseSettings):
     default_user_id: str = Field(default_factory=lambda: config.DEFAULT_USER_ID)
     gitea_host: str = ""
     gitea_token: str = ""
+    registry_host: str = ""
+    registry_token: str = ""
 
 
 @lru_cache
@@ -91,6 +94,13 @@ def get_gitea_client() -> GiteaClient:
 
 
 @lru_cache
+def get_registry_client() -> ArtifactRegistryClient:
+    """Return a cached Artifact Registry API client."""
+    cfg = get_backend_config()
+    return ArtifactRegistryClient(host=cfg.registry_host, token=cfg.registry_token)
+
+
+@lru_cache
 def get_git_collab() -> GitCollaborateService:
     """Return the configured L2 Git collaboration service."""
     cfg = get_backend_config()
@@ -116,4 +126,5 @@ def clear_backend_caches() -> None:
     get_metadata.cache_clear()
     get_auth.cache_clear()
     get_gitea_client.cache_clear()
+    get_registry_client.cache_clear()
     get_git_collab.cache_clear()

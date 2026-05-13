@@ -7,10 +7,11 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 from app.core.backends import get_auth_user_id, get_metadata, get_storage
-from app.core.exceptions import raise_not_implemented
+from app.core.exceptions import error_response, raise_error_response, raise_not_implemented
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
 from app.models.errors import ErrorResponse
+from app.models.git_history import GitHistoryItem, RevertSkillReq
 from app.models.skills import (
     CreateSkillReq,
     ForkSkillReq,
@@ -19,16 +20,24 @@ from app.models.skills import (
     UpdateSkillReq,
 )
 from app.models.validation import ValidateInputReq, ValidateInputResponse
+from app.services.git_local import (
+    GitCommandError,
+    GitLocalService,
+    GitObjectNotFoundError,
+    GitRevertConflictError,
+)
 from app.services.skills import (
     create_new_skill,
     fork_skill,
     get_skill_detail,
     list_skill_summaries,
     update_skill_content,
+    resolve_skill_dir_async,
 )
 from app.services.validator import ValidationHttpError, validate_skill_input_file
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
+git_service = GitLocalService()
 
 
 @router.get("", response_model=list[SkillSummary])
@@ -76,6 +85,52 @@ async def update_skill(
     metadata: MetadataStore = Depends(get_metadata),
 ) -> SkillDetail:
     return await update_skill_content(user_id, skill_id, request.content, storage, metadata)
+
+
+@router.get("/{skill_id}/history", response_model=list[GitHistoryItem])
+async def get_skill_history(
+    skill_id: str,
+    user_id: str = Depends(get_auth_user_id),
+    storage: StorageBackend = Depends(get_storage),
+    metadata: MetadataStore = Depends(get_metadata),
+) -> list[GitHistoryItem]:
+    skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
+    try:
+        return git_service.list_history(skill_dir)
+    except GitCommandError:
+        return []
+
+
+@router.post("/{skill_id}/revert", response_model=SkillDetail)
+async def revert_skill(
+    skill_id: str,
+    request: RevertSkillReq,
+    user_id: str = Depends(get_auth_user_id),
+    storage: StorageBackend = Depends(get_storage),
+    metadata: MetadataStore = Depends(get_metadata),
+) -> SkillDetail:
+    skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
+    try:
+        git_service.revert_to(skill_dir, request.sha)
+    except GitObjectNotFoundError:
+        response = error_response(
+            error_code="GIT_OBJECT_NOT_FOUND",
+            http_status=404,
+            message=f"Git commit not found: {request.sha}",
+            details={"skill_id": skill_id, "sha": request.sha},
+            retry_strategy="not_retryable",
+        )
+        raise_error_response(response)
+    except GitRevertConflictError:
+        response = error_response(
+            error_code="GIT_REVERT_CONFLICT",
+            http_status=409,
+            message=f"Git revert conflict for skill: {skill_id}",
+            details={"skill_id": skill_id, "sha": request.sha},
+            retry_strategy="not_retryable",
+        )
+        raise_error_response(response)
+    return await get_skill_detail(user_id, skill_id, storage, metadata)
 
 
 @router.post("/{skill_id}/fork", response_model=SkillSummary, status_code=201)

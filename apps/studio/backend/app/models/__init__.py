@@ -12,6 +12,7 @@ from app.models.copilot import (
     CredentialsWriteRequest,
 )
 from app.models.errors import ErrorResponse, LintError
+from app.models.git_history import GitHistoryItem, RevertSkillReq
 from app.models.golden import GoldenBaseline, SetGoldenReq
 from app.models.lint import LintResult
 from app.models.runs import (
@@ -45,9 +46,11 @@ __all__ = [
     "CreateSkillReq",
     "ErrorResponse",
     "GoldenBaseline",
+    "GitHistoryItem",
     "LintError",
     "LintResult",
     "ResumeReq",
+    "RevertSkillReq",
     "RunDetail",
     "RunListResponse",
     "RunMetadata",

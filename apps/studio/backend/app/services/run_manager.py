@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import multiprocessing
 import shutil
 import time
@@ -51,10 +52,11 @@ from app.models.runs import (
     RunRequest,
     TokensMetrics,
 )
-from app.services.git_local import GitLocalService
+from app.services.git_local import GitCommandError, GitFileLockedError, GitLocalService
 from app.services.skills import resolve_skill_dir, run_dir_for, test_inputs_dir_for_skill
 
 _EVENT_ADAPTER: TypeAdapter[Any] = TypeAdapter(CallbackEvent)
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -514,11 +516,7 @@ class RunManager:
         await self._copy_final_state_to_storage(record)
         if record.metadata.status == "success":
             await asyncio.to_thread(_sync_latest_run, record.run_dir)
-            await asyncio.to_thread(
-                self.git_service.auto_commit_run,
-                record.run_dir.parent.parent.parent,
-                record.metadata.run_id,
-            )
+            await self._auto_commit_successful_run(record)
         await record.ws_queue.put(None)
         with contextlib.suppress(Exception):
             record.process.join(timeout=0)
@@ -533,6 +531,26 @@ class RunManager:
             return
         content = await asyncio.to_thread(final_state_path.read_text, encoding="utf-8")
         await self._storage_backend().write_text(str(final_state_path), content)
+
+    async def _auto_commit_successful_run(self, record: RunRecord) -> None:
+        skill_dir = record.run_dir.parent.parent.parent
+        git_status: Literal["committed", "locked", "failed"]
+        try:
+            await asyncio.to_thread(
+                self.git_service.auto_commit_run,
+                skill_dir,
+                record.metadata.run_id,
+            )
+            git_status = "committed"
+        except GitFileLockedError as exc:
+            logger.warning("auto commit skipped due to git lock: %s", exc)
+            git_status = "locked"
+        except GitCommandError as exc:
+            logger.warning("auto commit failed: %s", exc)
+            git_status = "failed"
+        record.metadata = record.metadata.model_copy(update={"git_status": git_status})
+        _write_run_metadata(record.run_dir, record.metadata)
+        await self._save_run_metadata(record.skill_id, record.metadata)
 
     def _metadata_store(self) -> MetadataStore:
         return get_metadata()

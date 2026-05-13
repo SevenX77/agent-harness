@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
+import { useAppSettings } from "@/hooks/useAppSettings"
 import { cn } from "@/lib/utils"
 import { setTheme, useThemeValue, type Theme } from "@/store/themeStore"
 import { getCopilotCredentials, updateCopilotCredentials } from "../../api/copilot"
@@ -152,6 +153,8 @@ function SettingRow({
 }
 
 function AccountSection() {
+  const appSettings = useAppSettings()
+
   return (
     <div>
       <SectionTitle title="Account" description="Manage your profile and session." />
@@ -174,6 +177,30 @@ function AccountSection() {
 
       <Separator className="my-4" />
 
+      <SettingRow
+        label="Studio User ID"
+        description="Used as the local Git author and team owner."
+        control={
+          <div className="flex items-center gap-2">
+            <Input
+              value={appSettings.settings.user_id}
+              onChange={(event) => appSettings.setUserId(event.target.value)}
+              placeholder="your-username"
+              className="h-8 w-56 text-xs"
+              aria-label="Studio User ID"
+            />
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => void appSettings.save()}
+              disabled={appSettings.isLoading}
+              className="h-7 text-xs"
+            >
+              Save
+            </Button>
+          </div>
+        }
+      />
       <SettingRow
         label="Display name"
         control={<Input defaultValue="Studio User" className="h-8 w-56 text-xs" />}
@@ -321,6 +348,7 @@ function NotificationsSection() {
 }
 
 function IntegrationsSection() {
+  const appSettings = useAppSettings()
   const [status, setStatus] = useState<CopilotCredentials | null>(null)
   const [activeBackend, setActiveBackend] = useState<CopilotBackend>("claude")
   const [apiKey, setApiKey] = useState("")
@@ -361,6 +389,30 @@ function IntegrationsSection() {
           <Button variant="outline" size="sm">
             Connect
           </Button>
+        }
+      />
+      <SettingRow
+        label="Gitea Host"
+        description="Private Gitea host used for team collaboration."
+        control={
+          <div className="flex items-center gap-2">
+            <Input
+              value={appSettings.settings.gitea_host}
+              onChange={(event) => appSettings.setGiteaHost(event.target.value)}
+              placeholder="https://gitea.example.com"
+              className="h-8 w-56 text-xs"
+              aria-label="Gitea Host"
+            />
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => void appSettings.save()}
+              disabled={appSettings.isLoading}
+              className="h-7 text-xs"
+            >
+              Save
+            </Button>
+          </div>
         }
       />
       <Separator className="my-4" />

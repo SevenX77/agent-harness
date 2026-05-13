@@ -1,5 +1,5 @@
 import axios, { AxiosHeaders } from 'axios'
-import type { GitHistoryItem, GoldenBaseline, JsonObject, RunDetail, RunMetadata, SkillDetail } from './types'
+import type { AppSettings, GitHistoryItem, GoldenBaseline, JsonObject, RunDetail, RunMetadata, SkillDetail } from './types'
 
 export const API_BASE_URL = import.meta.env.VITE_STUDIO_API_BASE_URL ?? 'http://localhost:8787/api'
 
@@ -27,6 +27,16 @@ api.interceptors.request.use((config) => {
 
 export async function fetcher<T>(url: string): Promise<T> {
   const response = await api.get<T>(url)
+  return response.data
+}
+
+export async function getAppSettings(): Promise<AppSettings> {
+  const response = await api.get<AppSettings>('/settings')
+  return response.data
+}
+
+export async function updateAppSettings(settings: AppSettings): Promise<AppSettings> {
+  const response = await api.put<AppSettings>('/settings', settings)
   return response.data
 }
 

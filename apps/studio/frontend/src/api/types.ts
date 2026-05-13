@@ -45,6 +45,11 @@ export interface SkillTemplate {
   content: string
 }
 
+export interface AppSettings {
+  user_id: string
+  gitea_host: string
+}
+
 export interface TokensMetrics {
   input_tokens: number
   output_tokens: number

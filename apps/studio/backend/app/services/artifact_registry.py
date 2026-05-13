@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
+import io
 import json
 import logging
+import zipfile
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import httpx
 
+from app.models.settings import AppSettings
+
 logger = logging.getLogger(__name__)
+
+PUBLISH_EXCLUDE_DIRS = frozenset({".workspace", ".git", ".kiro", "__pycache__"})
+PUBLISH_EXCLUDE_FILES = frozenset({".DS_Store", "Thumbs.db"})
+PUBLISH_EXCLUDE_SUFFIXES = frozenset({".pyc"})
 
 
 class ArtifactRegistryApiError(RuntimeError):
@@ -74,3 +84,68 @@ class ArtifactRegistryClient:
 
         logger.info("artifact registry upload ok skill=%s status=%d", skill_id, response.status_code)
         return payload
+
+
+def build_publish_package(skill_dir: Path) -> bytes:
+    """Zip a skill directory into bytes for Artifact Registry upload."""
+    if not skill_dir.exists() or not skill_dir.is_dir():
+        raise ValueError(f"Publish skill_dir must be an existing directory: {skill_dir}")
+
+    logger.info("build publish package skill_dir=%s", skill_dir)
+    file_count = 0
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(skill_dir.rglob("*")):
+            rel_path = path.relative_to(skill_dir)
+            excluded, reason = _should_exclude(rel_path)
+            if excluded:
+                logger.debug("excluding from publish package path=%s reason=%s", rel_path, reason)
+                continue
+
+            if path.is_symlink():
+                target = path.readlink()
+                logger.warning("symlink skipped in publish package path=%s target=%s", rel_path, target)
+                continue
+            if not path.is_file():
+                continue
+
+            try:
+                archive.write(path, rel_path.as_posix())
+                file_count += 1
+            except OSError:
+                logger.exception("failed reading publish package path=%s", rel_path)
+                raise
+
+    result = buffer.getvalue()
+    logger.info("publish package built skill_dir=%s files=%d bytes=%d", skill_dir, file_count, len(result))
+    return result
+
+
+def build_publish_metadata(
+    skill_id: str,
+    app_settings: AppSettings,
+    *,
+    version: str = "1.0.0",
+) -> dict[str, Any]:
+    """Assemble Artifact Registry metadata for a publish request."""
+    author = app_settings.user_id.strip()
+    if not author:
+        raise ValueError("Publish requires non-empty user_id in app_settings")
+
+    return {
+        "skill_id": skill_id,
+        "author": author,
+        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+        "version": version,
+    }
+
+
+def _should_exclude(rel_path: Path) -> tuple[bool, str]:
+    for part in rel_path.parts:
+        if part in PUBLISH_EXCLUDE_DIRS:
+            return True, f"excluded-dir:{part}"
+    if rel_path.name in PUBLISH_EXCLUDE_FILES:
+        return True, f"excluded-file:{rel_path.name}"
+    if rel_path.suffix in PUBLISH_EXCLUDE_SUFFIXES:
+        return True, f"excluded-suffix:{rel_path.suffix}"
+    return False, ""

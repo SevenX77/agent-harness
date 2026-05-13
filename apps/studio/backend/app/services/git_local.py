@@ -120,6 +120,16 @@ class GitLocalService:
             lock_retry_delays=self.lock_retry_delays,
         )
 
+    def create_branch(self, skill_dir: Path, branch: str) -> GitCommandResult:
+        return run_git(
+            skill_dir,
+            "checkout",
+            "-b",
+            branch,
+            timeout_seconds=self.timeout_seconds,
+            lock_retry_delays=self.lock_retry_delays,
+        )
+
     def commit(self, skill_dir: Path, message: str, *, allow_empty: bool = False) -> GitCommandResult:
         args = ["commit", "-m", message]
         if allow_empty:

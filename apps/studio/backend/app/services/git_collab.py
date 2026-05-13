@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -12,6 +15,8 @@ from app.services.git_local import GitCommandError, GitLocalService
 
 LATEST_RUN_PATH = ".workspace/runs/latest"
 TEAM_SAVE_COMMIT_MESSAGE = "team-save: include latest snapshot"
+
+logger = logging.getLogger(__name__)
 
 CollaborateStatus = Literal["ok", "requires_review", "conflict", "error"]
 
@@ -125,10 +130,13 @@ class GitCollaborateService:
             self.local_git.push(skill_dir, "origin", branch)
         except GitCommandError as exc:
             if _is_permission_denied(exc):
-                return CollaborateResult(
-                    status="requires_review",
-                    message="Push requires review permissions",
-                    extra={"branch": branch, "remote": "origin", "latest_included": latest_included},
+                logger.warning("main push 403, fallback to dev branch + PR")
+                return self._fallback_to_review(
+                    skill_dir,
+                    owner=owner,
+                    repo=repo,
+                    base=branch,
+                    latest_included=latest_included,
                 )
             raise
         return CollaborateResult(
@@ -199,6 +207,7 @@ class GitCollaborateService:
     def _include_latest_snapshot(self, skill_dir: Path) -> bool:
         if not (skill_dir / LATEST_RUN_PATH).exists():
             return False
+        logger.info("force-adding latest run snapshot before team save")
         self.local_git.force_add_path(skill_dir, LATEST_RUN_PATH)
         try:
             self.local_git.commit(skill_dir, TEAM_SAVE_COMMIT_MESSAGE)
@@ -208,10 +217,57 @@ class GitCollaborateService:
             raise
         return True
 
+    def _fallback_to_review(
+        self,
+        skill_dir: Path,
+        *,
+        owner: str,
+        repo: str,
+        base: str,
+        latest_included: bool,
+    ) -> CollaborateResult:
+        dev_branch = _team_save_branch(owner)
+        title = _fallback_pr_title(owner)
+        try:
+            logger.info("creating fallback branch %s", dev_branch)
+            self.local_git.create_branch(skill_dir, dev_branch)
+            logger.info("pushing fallback branch %s", dev_branch)
+            self.local_git.push(skill_dir, "origin", dev_branch)
+            logger.info("creating fallback PR for %s -> %s", dev_branch, base)
+            pr = self.gitea.create_pull_request(
+                owner=owner,
+                repo=repo,
+                title=title,
+                head=dev_branch,
+                base=base,
+            )
+        except Exception as exc:
+            logger.exception("save_to_team fallback to review failed")
+            return CollaborateResult(
+                status="error",
+                message=f"Failed to open review fallback: {exc}",
+                extra={"dev_branch": dev_branch, "latest_included": latest_included},
+            )
+
+        return CollaborateResult(
+            status="requires_review",
+            message="Main protected, opened PR for review",
+            pr_url=_pr_url(pr),
+            extra={"dev_branch": dev_branch, "latest_included": latest_included},
+        )
+
 
 def _is_permission_denied(exc: GitCommandError) -> bool:
     text = f"{exc.result.stdout}\n{exc.result.stderr}".lower()
-    return "403" in text or "permission denied" in text or "forbidden" in text
+    return (
+        "403" in text
+        or "permission denied" in text
+        or "forbidden" in text
+        or "gh013" in text
+        or "protected branch" in text
+        or "repository rule violations" in text
+        or "remote rejected" in text
+    )
 
 
 def _is_conflict(exc: GitCommandError) -> bool:
@@ -222,6 +278,16 @@ def _is_conflict(exc: GitCommandError) -> bool:
 def _is_empty_commit(exc: GitCommandError) -> bool:
     text = f"{exc.result.stdout}\n{exc.result.stderr}".lower()
     return "nothing to commit" in text or "no changes added to commit" in text
+
+
+def _team_save_branch(owner: str) -> str:
+    safe_owner = "".join(char if char.isalnum() or char in "._-" else "-" for char in owner)
+    return f"team-save/{safe_owner}-{int(time.time())}"
+
+
+def _fallback_pr_title(owner: str) -> str:
+    timestamp = datetime.now(UTC).isoformat(timespec="seconds")
+    return f"[Save to Team] {owner} - {timestamp}"
 
 
 def _pr_url(payload: dict[str, Any]) -> str | None:

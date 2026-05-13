@@ -384,6 +384,65 @@ def test_run_endpoint_spawns_worker_and_ws_streams_events(
     assert (run_dir.parent / "latest" / "run_metadata.json").exists()
 
 
+def test_successful_run_triggers_auto_commit(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commits: list[tuple[Path, str]] = []
+    client.post(
+        "/api/skills",
+        json={"skill_id": "commit-skill", "content": _agent_skill_content("commit-skill")},
+    )
+    monkeypatch.setattr(run_manager, "process_factory", InlineProcess)
+    monkeypatch.setattr(run_manager, "queue_factory", queue.Queue)
+    monkeypatch.setattr(run_manager, "worker", fake_run_worker)
+    monkeypatch.setattr(
+        run_manager,
+        "git_service",
+        FakeGitService(commits),
+    )
+
+    response = client.post("/api/skills/commit-skill/runs", json={"input_data": {"topic": "ok"}})
+
+    assert response.status_code == 202
+    run_id = response.json()["run_id"]
+    for _ in range(20):
+        detail = client.get(f"/api/skills/commit-skill/runs/{run_id}").json()
+        if detail.get("metadata", {}).get("status") == "success":
+            break
+        time.sleep(0.05)
+    assert commits == [(config.DEFAULT_SKILLS_ROOT / "commit-skill", run_id)]
+
+
+def test_failed_run_does_not_auto_commit(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commits: list[tuple[Path, str]] = []
+    client.post(
+        "/api/skills",
+        json={"skill_id": "failed-commit-skill", "content": _agent_skill_content("failed-commit-skill")},
+    )
+    monkeypatch.setattr(run_manager, "process_factory", InlineProcess)
+    monkeypatch.setattr(run_manager, "queue_factory", queue.Queue)
+    monkeypatch.setattr(run_manager, "worker", fake_failed_run_worker)
+    monkeypatch.setattr(run_manager, "git_service", FakeGitService(commits))
+
+    response = client.post(
+        "/api/skills/failed-commit-skill/runs",
+        json={"input_data": {"topic": "fail"}},
+    )
+
+    assert response.status_code == 202
+    run_id = response.json()["run_id"]
+    for _ in range(20):
+        detail = client.get(f"/api/skills/failed-commit-skill/runs/{run_id}").json()
+        if detail.get("metadata", {}).get("status") == "failed":
+            break
+        time.sleep(0.05)
+    assert commits == []
+
+
 def test_run_history_lists_details_and_deletes_runs(
     client: TestClient,
     studio_roots: tuple[Path, Path],
@@ -665,6 +724,29 @@ def fake_run_worker(
     for event in events:
         process_queue.put({"type": "event", "event": event.model_dump(mode="json")})
     process_queue.put({"type": "status", "status": "success", "metrics": {}})
+
+
+def fake_failed_run_worker(
+    skill_id: str,
+    skill_path_raw: str,
+    run_dir_raw: str,
+    inputs: dict[str, Any],
+    process_queue: queue.Queue[dict[str, Any]],
+) -> None:
+    del skill_id, skill_path_raw, inputs
+    run_dir = Path(run_dir_raw)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "final_state.json").write_text(json.dumps({}), encoding="utf-8")
+    (run_dir / "metrics.json").write_text(json.dumps({"status": "failed"}), encoding="utf-8")
+    process_queue.put({"type": "status", "status": "failed", "metrics": {}})
+
+
+class FakeGitService:
+    def __init__(self, commits: list[tuple[Path, str]]) -> None:
+        self._commits = commits
+
+    def auto_commit_run(self, skill_dir: Path, run_id: str) -> None:
+        self._commits.append((skill_dir, run_id))
 
 
 class FakePty:

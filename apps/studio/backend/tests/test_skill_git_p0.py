@@ -83,6 +83,23 @@ def test_p0_skill_git_directory_index_and_workspace_flow(
     run_dir = workspace_dir / "runs" / run_id
     assert (run_dir / "final_state.json").exists()
     assert (workspace_dir / "runs" / "latest" / "run_metadata.json").exists()
+    git_log = subprocess.run(
+        ["git", "log", "--oneline"],
+        cwd=skill_dir,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "initial-skill" in git_log
+    assert f"auto-run-{run_id}" in git_log
+    committed_files = subprocess.run(
+        ["git", "show", "--name-only", "--format=", "HEAD"],
+        cwd=skill_dir,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert ".workspace/runs/latest" not in committed_files
 
     golden_response = client.post("/api/skills/p0-skill/golden", json={"run_id": run_id, "lock": False})
 

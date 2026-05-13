@@ -1,8 +1,8 @@
-import { Group, Panel, Separator } from 'react-resizable-panels'
-import { GraphCanvas, type SkillGraphNodeData } from '../GraphCanvas'
-import type { SkillDetail } from '../../api/types'
-import { LazyMonacoPanel } from './LazyMonacoPanel'
-import type { FileMeta } from './Panels'
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
+import { GraphCanvas, type SkillGraphNodeData } from "@/components/GraphCanvas"
+import type { SkillDetail } from "@/api/types"
+import { LazyMonacoPanel } from "./LazyMonacoPanel"
+import type { FileMeta } from "./Panels"
 
 interface SplitEditorProps {
   file: FileMeta
@@ -14,7 +14,7 @@ interface SplitEditorProps {
   isLoading?: boolean
   error?: unknown
   selectedNodeId?: string | null
-  onNodeSelect?: (node: { id: string, data: SkillGraphNodeData }) => void
+  onNodeSelect?: (node: { id: string; data: SkillGraphNodeData }) => void
 }
 
 export function SplitEditor({
@@ -30,8 +30,12 @@ export function SplitEditor({
   onNodeSelect,
 }: SplitEditorProps) {
   return (
-    <Group id="studio-canvas-v" orientation="vertical" className="size-full">
-      <Panel id="top-editor" defaultSize="70%" minSize="30%">
+    <ResizablePanelGroup
+      id="studio-canvas-v"
+      orientation="vertical"
+      className="size-full"
+    >
+      <ResizablePanel id="top-editor" defaultSize="70%" minSize="30%">
         <LazyMonacoPanel
           title={file.path}
           language={file.language}
@@ -39,10 +43,11 @@ export function SplitEditor({
           onChange={onChange}
           onClose={onCloseFile}
         />
-      </Panel>
-      <Separator className="z-20 h-px bg-border transition-colors hover:bg-ring" />
-      <Panel id="bottom-mini" defaultSize="30%" minSize="15%" maxSize="60%">
+      </ResizablePanel>
+      <ResizableHandle />
+      <ResizablePanel id="bottom-mini" defaultSize="30%" minSize="15%" maxSize="60%">
         <div className="size-full border-t border-border">
+          {/* TODO: switch to compact mode when GraphCanvas exposes a compact prop. */}
           <GraphCanvas
             skillId={skillId}
             skillDetail={skillDetail}
@@ -52,7 +57,7 @@ export function SplitEditor({
             onNodeSelect={onNodeSelect}
           />
         </div>
-      </Panel>
-    </Group>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   )
 }

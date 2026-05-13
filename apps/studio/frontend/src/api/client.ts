@@ -1,5 +1,5 @@
 import axios, { AxiosHeaders } from 'axios'
-import type { GoldenBaseline, JsonObject, RunDetail, RunMetadata } from './types'
+import type { GitHistoryItem, GoldenBaseline, JsonObject, RunDetail, RunMetadata, SkillDetail } from './types'
 
 export const API_BASE_URL = import.meta.env.VITE_STUDIO_API_BASE_URL ?? 'http://localhost:8787/api'
 
@@ -71,5 +71,15 @@ export async function startRun(skillId: string, inputData: JsonObject): Promise<
   const response = await api.post<RunMetadata>(`/skills/${skillId}/runs`, {
     input_data: inputData,
   })
+  return response.data
+}
+
+export async function getLocalHistory(skillId: string): Promise<GitHistoryItem[]> {
+  const response = await api.get<GitHistoryItem[]>(`/skills/${skillId}/history`)
+  return response.data
+}
+
+export async function revertSkill(skillId: string, sha: string): Promise<SkillDetail> {
+  const response = await api.post<SkillDetail>(`/skills/${skillId}/revert`, { sha })
   return response.data
 }

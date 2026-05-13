@@ -1,9 +1,32 @@
-import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, FileText, Folder, Upload } from 'lucide-react'
-import { useMemo, useState, type DragEvent } from 'react'
-import type { SkillDetail } from '../../api/types'
-import { inferJsonSchemaFromText } from '../../lib/schema-infer'
-import type { SkillGraphNodeData } from '../GraphCanvas'
-import type { PanelKind } from './Toolbar'
+import {
+  AlertCircle,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  ChevronsUpDown,
+  FileText,
+  Folder,
+  Upload,
+  type LucideIcon,
+} from "lucide-react"
+import { useMemo, useState, type DragEvent, type ReactNode } from "react"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Separator } from "@/components/ui/separator"
+import { Slider } from "@/components/ui/slider"
+import { Textarea } from "@/components/ui/textarea"
+import type { SkillDetail } from "@/api/types"
+import { HistoryPanel } from "@/components/history/HistoryPanel"
+import { inferJsonSchemaFromText } from "@/lib/schema-infer"
+import { cn } from "@/lib/utils"
+import type { SkillGraphNodeData } from "@/components/GraphCanvas"
+import type { PanelKind } from "./Toolbar"
 
 export interface FileMeta {
   path: string
@@ -15,14 +38,28 @@ interface PanelsProps {
   activePanel: PanelKind
   skillId: string | null
   skillDetail?: SkillDetail
-  selectedNode: { id: string, data: SkillGraphNodeData } | null
+  selectedNode: { id: string; data: SkillGraphNodeData } | null
   onFileOpen: (file: FileMeta) => void
 }
 
-function PanelHeader({ title }: { title: string }) {
+interface AssetsPanelProps {
+  skillDetail?: SkillDetail
+  selectedNode: { id: string; data: SkillGraphNodeData } | null
+  onFileOpen: (file: FileMeta) => void
+}
+
+interface InputPanelProps {
+  skillDetail?: SkillDetail
+  onFileOpen: (file: FileMeta) => void
+}
+
+function PanelHeader({ title, extra }: { title: string; extra?: ReactNode }) {
   return (
     <div className="flex h-10 shrink-0 items-center px-3">
-      <span className="text-xs font-medium text-foreground">{title}</span>
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-medium text-foreground">{title}</span>
+        {extra}
+      </div>
     </div>
   )
 }
@@ -35,25 +72,43 @@ function SectionHeading({ label }: { label: string }) {
   )
 }
 
-function FileRow({ file, onOpen, indent = false }: { file: FileMeta, onOpen: (file: FileMeta) => void, indent?: boolean }) {
-  const filename = file.path.split('/').pop() ?? file.path
+function FileRow({
+  file,
+  icon: Icon = FileText,
+  onOpen,
+  indent = false,
+}: {
+  file: FileMeta
+  icon?: LucideIcon
+  onOpen: (file: FileMeta) => void
+  indent?: boolean
+}) {
+  const filename = file.path.split("/").pop() ?? file.path
 
   return (
     <button
       type="button"
       onClick={() => onOpen(file)}
-      className={[
-        'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
-        indent ? 'ml-4 border-l border-border pl-3' : '',
-      ].join(' ')}
+      className={cn(
+        "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+        indent && "ml-4 border-l border-border pl-3",
+      )}
     >
-      <FileText className="size-4" strokeWidth={1.5} />
+      <Icon className="size-4" strokeWidth={1.5} />
       <span className="truncate">{filename}</span>
     </button>
   )
 }
 
-function FolderRow({ name, children, defaultExpanded = false }: { name: string, children: React.ReactNode, defaultExpanded?: boolean }) {
+function FolderRow({
+  name,
+  children,
+  defaultExpanded = false,
+}: {
+  name: string
+  children: ReactNode
+  defaultExpanded?: boolean
+}) {
   const [expanded, setExpanded] = useState(defaultExpanded)
 
   return (
@@ -61,7 +116,7 @@ function FolderRow({ name, children, defaultExpanded = false }: { name: string, 
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       >
         {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
         <Folder className="size-4" strokeWidth={1.5} />
@@ -72,19 +127,19 @@ function FolderRow({ name, children, defaultExpanded = false }: { name: string, 
   )
 }
 
-function manifestFiles(skillDetail?: SkillDetail, selectedNode?: { id: string, data: SkillGraphNodeData } | null): FileMeta[] {
+function manifestFiles(skillDetail?: SkillDetail, selectedNode?: { id: string; data: SkillGraphNodeData } | null): FileMeta[] {
   const manifest = skillDetail?.manifest
   const files: FileMeta[] = [
     {
-      path: 'SKILL.md',
-      language: 'markdown',
+      path: "SKILL.md",
+      language: "markdown",
       content: manifest
-        ? `# ${manifest.name}\n\n${manifest.description ?? 'No description.'}\n\nType: ${manifest.type}\n`
-        : '# Skill\n\nLoading skill metadata...\n',
+        ? `# ${manifest.name}\n\n${manifest.description ?? "No description."}\n\nType: ${manifest.type}\n`
+        : "# Skill\n\nLoading skill metadata...\n",
     },
     {
-      path: 'skill-manifest.json',
-      language: 'json',
+      path: "skill-manifest.json",
+      language: "json",
       content: JSON.stringify(manifest ?? {}, null, 2),
     },
   ]
@@ -92,7 +147,7 @@ function manifestFiles(skillDetail?: SkillDetail, selectedNode?: { id: string, d
   if (selectedNode) {
     files.push({
       path: `nodes/${selectedNode.id}.md`,
-      language: 'markdown',
+      language: "markdown",
       content: `# ${selectedNode.data.label}\n\nMode: ${selectedNode.data.mode}\nStatus: ${selectedNode.data.status}\n`,
     })
   }
@@ -102,29 +157,30 @@ function manifestFiles(skillDetail?: SkillDetail, selectedNode?: { id: string, d
 
 function inputFiles(skillDetail?: SkillDetail): FileMeta[] {
   const manifest = skillDetail?.manifest
-  const io = manifest?.type === 'graph' ? manifest.io : null
+  const io = manifest?.type === "graph" ? manifest.io : null
 
   return [
     {
-      path: 'input/schema.json',
-      language: 'json',
+      path: "input/schema.json",
+      language: "json",
       content: JSON.stringify({ inputs: io?.inputs ?? [], outputs: io?.outputs ?? [] }, null, 2),
     },
     {
-      path: 'input/sample.json',
-      language: 'json',
-      content: JSON.stringify(Object.fromEntries((io?.inputs ?? []).map((input) => [input.name, ''])), null, 2),
+      path: "input/sample.json",
+      language: "json",
+      content: JSON.stringify(Object.fromEntries((io?.inputs ?? []).map((input) => [input.name, ""])), null, 2),
     },
   ]
 }
 
-function AssetsPanel({ skillDetail, selectedNode, onFileOpen }: Pick<PanelsProps, 'skillDetail' | 'selectedNode' | 'onFileOpen'>) {
+export function AssetsPanel({ skillDetail, selectedNode, onFileOpen }: AssetsPanelProps) {
   const files = manifestFiles(skillDetail, selectedNode)
 
   return (
     <div className="flex h-full flex-col bg-background">
       <PanelHeader title="Assets" />
-      <div className="min-h-0 flex-1 overflow-y-auto">
+
+      <ScrollArea className="flex-1">
         <div className="space-y-3 px-2 py-2 text-xs">
           <SectionHeading label="Skill Files" />
           <FileRow file={files[0]} onOpen={onFileOpen} />
@@ -135,7 +191,7 @@ function AssetsPanel({ skillDetail, selectedNode, onFileOpen }: Pick<PanelsProps
             </FolderRow>
           ) : null}
         </div>
-      </div>
+      </ScrollArea>
     </div>
   )
 }
@@ -146,7 +202,7 @@ function SchemaInferPanel({ initialJson }: { initialJson: string }) {
     try {
       return { schema: inferJsonSchemaFromText(draft), error: null as string | null }
     } catch (error) {
-      return { schema: null, error: error instanceof Error ? error.message : 'Invalid JSON' }
+      return { schema: null, error: error instanceof Error ? error.message : "Invalid JSON" }
     }
   }, [draft])
 
@@ -158,7 +214,7 @@ function SchemaInferPanel({ initialJson }: { initialJson: string }) {
       return
     }
 
-    const text = event.dataTransfer.getData('text/plain')
+    const text = event.dataTransfer.getData("text/plain")
     if (text) {
       setDraft(text)
     }
@@ -171,12 +227,12 @@ function SchemaInferPanel({ initialJson }: { initialJson: string }) {
         Infer input schema
       </div>
       <div className="space-y-3 rounded-md border border-border bg-background p-3">
-        <textarea
+        <Textarea
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onDragOver={(event) => event.preventDefault()}
           onDrop={handleDrop}
-          className="h-28 w-full resize-none rounded-md border border-input bg-card p-2 font-mono text-xs text-foreground outline-none focus:ring-2 focus:ring-ring"
+          className="h-28 resize-none bg-card font-mono text-xs"
           spellCheck={false}
           aria-label="JSON input for schema inference"
         />
@@ -194,42 +250,48 @@ function SchemaInferPanel({ initialJson }: { initialJson: string }) {
   )
 }
 
-function InputPanel({ skillDetail, onFileOpen }: Pick<PanelsProps, 'skillDetail' | 'onFileOpen'>) {
+export function InputPanel({ skillDetail, onFileOpen }: InputPanelProps) {
   const files = inputFiles(skillDetail)
-  const sample = files.find((file) => file.path === 'input/sample.json')?.content ?? '{}'
+  const sample = files.find((file) => file.path === "input/sample.json")?.content ?? "{}"
 
   return (
     <div className="flex h-full flex-col bg-background">
       <PanelHeader title="Input" />
-      <div className="min-h-0 flex-1 overflow-y-auto">
+
+      <ScrollArea className="flex-1">
         <div className="space-y-3 px-2 py-2 text-xs">
           <SectionHeading label="Input Files" />
           <FileRow file={files[1]} onOpen={onFileOpen} />
+
           <SectionHeading label="Schema" />
           <FileRow file={files[0]} onOpen={onFileOpen} />
           <SchemaInferPanel initialJson={sample} />
         </div>
-      </div>
+      </ScrollArea>
     </div>
   )
 }
 
-function TimelinePanel() {
+export function TimelinePanel() {
   const traces = [
-    { id: 1, name: 'Latest run', status: 'success', duration: '2.3s', time: '2m ago' },
-    { id: 2, name: 'Previous run', status: 'error', duration: '0.8s', time: '5m ago' },
+    { id: 1, name: "Latest run", status: "success", duration: "2.3s", time: "2m ago" },
+    { id: 2, name: "Previous run", status: "error", duration: "0.8s", time: "5m ago" },
   ]
 
   return (
     <div className="flex h-full flex-col bg-background">
       <PanelHeader title="Timeline" />
-      <div className="min-h-0 flex-1 overflow-y-auto">
+
+      <ScrollArea className="flex-1">
         <div className="px-2 py-2">
           {traces.map((trace) => (
-            <div key={trace.id} className="group rounded-md px-2 py-2 transition-colors hover:bg-accent">
+            <div
+              key={trace.id}
+              className="group cursor-pointer rounded-md px-2 py-2 transition-colors hover:bg-accent"
+            >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  {trace.status === 'success' ? (
+                  {trace.status === "success" ? (
                     <CheckCircle2 className="size-4 text-foreground" />
                   ) : (
                     <AlertCircle className="size-4 text-destructive" />
@@ -244,69 +306,116 @@ function TimelinePanel() {
             </div>
           ))}
         </div>
-      </div>
+      </ScrollArea>
     </div>
   )
 }
 
-function PropertiesPanel({ skillDetail, selectedNode }: Pick<PanelsProps, 'skillDetail' | 'selectedNode'>) {
+export function PropertiesPanel({ skillDetail, selectedNode }: Pick<PanelsProps, "skillDetail" | "selectedNode">) {
   const manifest = skillDetail?.manifest
-  const selectedType = selectedNode?.data.mode ?? manifest?.type ?? 'Skill'
+  const selectedType = selectedNode?.data.mode ?? manifest?.type ?? "Skill"
+  const [temperature, setTemperature] = useState([0.7])
+  const [modelOpen, setModelOpen] = useState(false)
+  const [modelValue, setModelValue] = useState(selectedNode?.data.role ?? "default")
+  const models = [
+    { value: "default", label: "Default model" },
+    { value: "gpt-4o-mini", label: "GPT-4o Mini" },
+    { value: "gpt-4o", label: "GPT-4o" },
+    { value: "claude-3.5", label: "Claude 3.5 Sonnet" },
+  ]
 
   return (
     <div className="flex h-full flex-col bg-background">
       <PanelHeader title="Properties" />
-      <div className="min-h-0 flex-1 overflow-y-auto">
+
+      <ScrollArea className="flex-1">
         <div className="space-y-5 p-4">
           <div className="space-y-2">
-            <label className="text-xs text-muted-foreground">Node ID</label>
-            <input
+            <Label className="text-xs text-muted-foreground">Node ID</Label>
+            <Input
               readOnly
-              value={selectedNode?.id ?? manifest?.name ?? 'No node selected'}
-              className="h-7 w-full rounded-md border border-border bg-muted px-2 text-xs text-foreground"
+              value={selectedNode?.id ?? manifest?.name ?? "No node selected"}
+              className="h-7 bg-muted text-xs"
             />
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs text-muted-foreground">Type</label>
+            <Label className="text-xs text-muted-foreground">Type</Label>
             <div className="flex items-center gap-2">
-              <span className="inline-flex h-5 items-center rounded-full bg-secondary px-2 text-[0.625rem] font-medium text-secondary-foreground">
-                {selectedType}
-              </span>
+              <Badge variant="secondary">{selectedType}</Badge>
             </div>
           </div>
 
-          <div className="border-t border-border" />
+          <Separator />
 
           <div className="space-y-2">
-            <label className="text-xs text-muted-foreground">Model</label>
-            <button
-              type="button"
-              className="flex h-7 w-full items-center justify-between rounded-md border border-border bg-background px-2 text-xs font-normal text-foreground"
-            >
-              <span>{selectedNode?.data.role ?? 'Default model'}</span>
-              <ChevronDown className="size-3.5 text-muted-foreground" />
-            </button>
+            <Label className="text-xs text-muted-foreground">Model</Label>
+            <Popover open={modelOpen} onOpenChange={setModelOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={modelOpen}
+                  className="h-7 w-full justify-between text-xs font-normal"
+                >
+                  {models.find((model) => model.value === modelValue)?.label ?? selectedNode?.data.role ?? "Select model..."}
+                  <ChevronsUpDown className="ml-2 size-3.5 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Search model..." className="h-8 text-xs" />
+                  <CommandList>
+                    <CommandEmpty>No model found.</CommandEmpty>
+                    <CommandGroup>
+                      {models.map((model) => (
+                        <CommandItem
+                          key={model.value}
+                          value={model.value}
+                          onSelect={(currentValue) => {
+                            setModelValue(currentValue === modelValue ? "" : currentValue)
+                            setModelOpen(false)
+                          }}
+                          className="text-xs"
+                        >
+                          <Check className={cn("mr-2 size-3.5", modelValue === model.value ? "opacity-100" : "opacity-0")} />
+                          {model.label}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-xs text-muted-foreground">Temperature</label>
-              <span className="text-xs text-muted-foreground">0.7</span>
+              <Label className="text-xs text-muted-foreground">Temperature</Label>
+              <span className="text-xs text-foreground">{temperature[0]}</span>
             </div>
-            <input className="w-full accent-primary" type="range" min="0" max="2" step="0.1" defaultValue="0.7" />
+            <Slider
+              value={temperature}
+              onValueChange={setTemperature}
+              min={0}
+              max={1}
+              step={0.1}
+              className="w-full"
+            />
           </div>
 
+          <Separator />
+
           <div className="space-y-2">
-            <label className="text-xs text-muted-foreground">System Prompt</label>
-            <textarea
+            <Label className="text-xs text-muted-foreground">System Prompt</Label>
+            <Textarea
               readOnly
-              value={selectedNode ? `${selectedNode.data.label}\n\nDepends on: ${selectedNode.data.dependsOn.join(', ') || 'None'}` : 'Select a node on the canvas.'}
-              className="min-h-24 w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+              value={selectedNode ? `${selectedNode.data.label}\n\nDepends on: ${selectedNode.data.dependsOn.join(", ") || "None"}` : "Select a node on the canvas."}
+              className="min-h-[100px] resize-none text-xs"
             />
           </div>
         </div>
-      </div>
+      </ScrollArea>
     </div>
   )
 }
@@ -321,14 +430,17 @@ export function Panels({ activePanel, skillId, skillDetail, selectedNode, onFile
     )
   }
 
-  if (activePanel === 'assets') {
+  if (activePanel === "assets") {
     return <AssetsPanel skillDetail={skillDetail} selectedNode={selectedNode} onFileOpen={onFileOpen} />
   }
-  if (activePanel === 'input') {
+  if (activePanel === "input") {
     return <InputPanel skillDetail={skillDetail} onFileOpen={onFileOpen} />
   }
-  if (activePanel === 'timeline') {
+  if (activePanel === "timeline") {
     return <TimelinePanel />
+  }
+  if (activePanel === "local-history") {
+    return <HistoryPanel skillId={skillId} />
   }
   return <PropertiesPanel skillDetail={skillDetail} selectedNode={selectedNode} />
 }

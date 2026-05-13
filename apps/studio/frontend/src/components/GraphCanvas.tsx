@@ -22,6 +22,7 @@ import { toast } from 'sonner'
 import type { PhaseDef, SkillDetail, SkillManifest } from '../api/types'
 import { CycleDetectedError, getAutoLayoutedElements } from '../lib/layout'
 import { SubgraphInline } from './studio/SubgraphInline'
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
 
 export type SkillNodeStatus = 'idle' | 'running' | 'success' | 'error' | 'paused' | 'breakpoint'
 
@@ -98,10 +99,22 @@ function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
           <Bot className="size-4" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold text-foreground">{data.label}</div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="truncate text-sm font-semibold text-foreground">{data.label}</div>
+            </TooltipTrigger>
+            <TooltipContent side="top" align="start">{data.label}</TooltipContent>
+          </Tooltip>
           <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
             <span className="uppercase">{data.mode}</span>
-            {data.role ? <span className="truncate">{data.role}</span> : null}
+            {data.role ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="truncate">{data.role}</span>
+                </TooltipTrigger>
+                <TooltipContent side="top">{data.role}</TooltipContent>
+              </Tooltip>
+            ) : null}
           </div>
         </div>
         <span className={['inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium', style.className].join(' ')}>

@@ -1,7 +1,8 @@
 import { useCallback } from 'react'
+import { useSWRConfig } from 'swr'
 import useSWR from 'swr'
-import { api, fetcher } from '../api/client'
-import type { RunDetail, RunListResponse, RunMetadata } from '../api/types'
+import { api, fetcher, getLocalHistory, revertSkill } from '../api/client'
+import type { GitHistoryItem, RunDetail, RunListResponse, RunMetadata } from '../api/types'
 
 export function useRunHistory(skillId: string | null) {
   const {
@@ -48,6 +49,41 @@ export function useRunHistory(skillId: string | null) {
     startOptimisticRun,
     deleteRun,
     fetchRunDetail,
+  }
+}
+
+export function useLocalHistory(skillId: string | null) {
+  const { mutate: mutateGlobal } = useSWRConfig()
+  const {
+    data,
+    error,
+    isLoading,
+    mutate,
+  } = useSWR<GitHistoryItem[]>(skillId ? `/skills/${skillId}/history` : null, () => {
+    if (!skillId) {
+      return Promise.resolve([])
+    }
+    return getLocalHistory(skillId)
+  })
+
+  const revert = useCallback(async (sha: string) => {
+    if (!skillId) {
+      throw new Error('Select a skill before reverting.')
+    }
+    const detail = await revertSkill(skillId, sha)
+    await Promise.all([
+      mutate(undefined, { revalidate: true }),
+      mutateGlobal(`/skills/${skillId}`, detail, { revalidate: true }),
+    ])
+    return detail
+  }, [mutate, mutateGlobal, skillId])
+
+  return {
+    history: data ?? [],
+    isLoading,
+    error,
+    refresh: mutate,
+    revert,
   }
 }
 

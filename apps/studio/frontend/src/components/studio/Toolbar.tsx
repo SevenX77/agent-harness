@@ -1,7 +1,10 @@
-import { Clock, FileInput, Files, Moon, Settings, Settings2, Sun } from 'lucide-react'
-import { toggleTheme, useThemeValue } from '../../store/themeStore'
+import { Clock, FileInput, Files, History, Moon, Settings, Settings2, Sun } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
+import { toggleTheme, useThemeValue } from "@/store/themeStore"
 
-export type PanelKind = 'assets' | 'input' | 'timeline' | 'properties'
+export type PanelKind = "assets" | "input" | "timeline" | "properties" | "local-history"
 
 interface ToolbarProps {
   activePanel: PanelKind | null
@@ -9,59 +12,87 @@ interface ToolbarProps {
   onSettingsOpen: () => void
 }
 
-const TOOLBAR_ITEMS: Array<{ id: PanelKind, label: string, icon: typeof Files, shortcut: string }> = [
-  { id: 'assets', label: 'Assets', icon: Files, shortcut: '1' },
-  { id: 'input', label: 'Input', icon: FileInput, shortcut: '2' },
-  { id: 'timeline', label: 'Trace Timeline', icon: Clock, shortcut: '3' },
-  { id: 'properties', label: 'Properties', icon: Settings2, shortcut: '4' },
+const tools: Array<{ id: PanelKind; icon: typeof Files; label: string; shortcut: string }> = [
+  { id: "assets", icon: Files, label: "Assets", shortcut: "1" },
+  { id: "input", icon: FileInput, label: "Input", shortcut: "2" },
+  { id: "timeline", icon: Clock, label: "Trace Timeline", shortcut: "3" },
+  { id: "properties", icon: Settings2, label: "Properties", shortcut: "4" },
+  { id: "local-history", icon: History, label: "Local History", shortcut: "5" },
 ]
 
 export function Toolbar({ activePanel, onPanelChange, onSettingsOpen }: ToolbarProps) {
   const theme = useThemeValue()
 
   return (
-    <aside className="z-10 flex w-12 shrink-0 flex-col items-center border-e border-border bg-sidebar px-2 py-3 text-sidebar-foreground">
+    <aside className="z-10 flex w-12 shrink-0 flex-col items-center border-r border-border bg-sidebar px-2 py-3">
       <div className="flex flex-col gap-1">
-        {TOOLBAR_ITEMS.map((item) => {
-          const isActive = activePanel === item.id
+        {tools.map((tool) => {
+          const isActive = activePanel === tool.id
           return (
-            <button
-              key={item.id}
-              type="button"
-              aria-label={item.label}
-              aria-pressed={isActive}
-              title={`${item.label} ${item.shortcut}`}
-              onClick={() => onPanelChange(isActive ? null : item.id)}
-              className={[
-                'inline-flex size-8 items-center justify-center rounded-md transition-colors',
-                isActive ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground',
-              ].join(' ')}
-            >
-              <item.icon className="size-4" strokeWidth={1.75} />
-            </button>
+            <Tooltip key={tool.id}>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={isActive ? "secondary" : "ghost"}
+                  size="icon"
+                  onClick={() => onPanelChange(isActive ? null : tool.id)}
+                  className={cn("size-8")}
+                  aria-label={tool.label}
+                  aria-pressed={isActive}
+                >
+                  <tool.icon className="size-4" strokeWidth={1.75} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="right" sideOffset={8}>
+                <span>{tool.label}</span>
+                <span className="ml-2 text-xs text-muted-foreground">
+                  {tool.shortcut}
+                </span>
+              </TooltipContent>
+            </Tooltip>
           )
         })}
       </div>
 
-      <div className="mt-auto flex flex-col gap-1">
-        <button
-          type="button"
-          aria-label="Toggle theme"
-          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-          onClick={() => toggleTheme()}
-          className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
-        </button>
-        <button
-          type="button"
-          aria-label="Settings"
-          title="Settings"
-          onClick={onSettingsOpen}
-          className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <Settings className="size-4" />
-        </button>
+      <div className="flex-1" />
+
+      <div className="flex flex-col gap-1">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => toggleTheme()}
+              className="size-8"
+              aria-label="Toggle theme"
+            >
+              {theme === "dark" ? (
+                <Sun className="size-4" strokeWidth={1.75} />
+              ) : (
+                <Moon className="size-4" strokeWidth={1.75} />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right" sideOffset={8}>
+            {theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          </TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onSettingsOpen}
+              className="size-8"
+              aria-label="Settings"
+            >
+              <Settings className="size-4" strokeWidth={1.75} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right" sideOffset={8}>
+            Settings
+          </TooltipContent>
+        </Tooltip>
       </div>
     </aside>
   )

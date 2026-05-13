@@ -105,6 +105,20 @@ export interface RunListResponse {
   total: number
 }
 
+export type GitHistoryKind = 'auto_run' | 'manual' | 'other'
+
+export interface GitHistoryItem {
+  sha: string
+  message: string
+  author: string
+  timestamp: string
+  kind: GitHistoryKind
+}
+
+export interface RevertSkillReq {
+  sha: string
+}
+
 export interface RunDetail {
   metadata: RunMetadata
   input_data: JsonObject | null

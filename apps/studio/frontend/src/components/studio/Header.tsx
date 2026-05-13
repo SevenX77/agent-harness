@@ -1,4 +1,7 @@
-import { Layers, Sparkles } from 'lucide-react'
+import { Layers, Sparkles } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 interface HeaderProps {
   skillId: string | null
@@ -22,25 +25,31 @@ export function Header({ skillId, copilotOpen, onCopilotToggle }: HeaderProps) {
       </div>
 
       <div className="flex min-w-0 items-center justify-center gap-2">
-        <span className="truncate text-sm text-muted-foreground">
-          {skillId ? `Skill ${skillId}` : 'Studio Workspace'}
+        <span className="truncate text-sm font-medium text-foreground">
+          {skillId ? `Skill ${skillId}` : "Studio Workspace"}
         </span>
-        <span className="inline-flex h-5 w-fit shrink-0 items-center justify-center rounded-full border border-border bg-input/20 px-2 py-0.5 text-[0.625rem] font-medium uppercase text-foreground dark:bg-input/30">
+        <Badge variant="outline" className="uppercase">
           Draft
-        </span>
+        </Badge>
       </div>
 
-      <div className="flex items-center justify-end gap-1">
-        <button
-          type="button"
-          aria-label={copilotOpen ? 'Hide Copilot' : 'Show Copilot'}
-          aria-pressed={copilotOpen}
-          title={copilotOpen ? 'Hide Copilot' : 'Show Copilot'}
-          onClick={onCopilotToggle}
-          className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <Sparkles className="size-3.5" />
-        </button>
+      <div className="flex items-center justify-end">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onCopilotToggle}
+              aria-label={copilotOpen ? "Hide Copilot" : "Show Copilot"}
+              aria-pressed={copilotOpen}
+            >
+              <Sparkles />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {copilotOpen ? "Hide Copilot" : "Show Copilot"}
+          </TooltipContent>
+        </Tooltip>
       </div>
     </header>
   )

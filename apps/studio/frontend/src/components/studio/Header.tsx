@@ -2,6 +2,7 @@ import { Layers, Loader2, Sparkles } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { usePublishSkill } from "@/hooks/usePublishSkill"
 import { useSkillSync } from "@/hooks/useSkillSync"
 import type { CollaborateResult } from "@/api/types"
 
@@ -14,9 +15,11 @@ interface HeaderProps {
 
 export function Header({ skillId, copilotOpen, onCopilotToggle, onSyncSuccess }: HeaderProps) {
   const skillSync = useSkillSync(skillId, { onSyncSuccess })
+  const publish = usePublishSkill(skillId)
   const isSaving = skillSync.status === "saving"
   const isSyncing = skillSync.status === "syncing"
   const isSubmitting = skillSync.status === "submitting"
+  const isPublishing = publish.status === "publishing"
   const isBusy = isSaving || isSyncing || isSubmitting
 
   const handleSubmitForReview = () => {
@@ -86,6 +89,17 @@ export function Header({ skillId, copilotOpen, onCopilotToggle, onSyncSuccess }:
             >
               {isSubmitting ? <Loader2 className="mr-1 size-3 animate-spin" /> : null}
               {isSubmitting ? "Submitting" : "Submit for Review"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => void publish.publish()}
+              disabled={isPublishing}
+              aria-label="Release to Production"
+            >
+              {isPublishing ? <Loader2 className="mr-1 size-3 animate-spin" /> : null}
+              {isPublishing ? "Releasing" : "Release"}
             </Button>
           </>
         ) : null}

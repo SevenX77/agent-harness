@@ -5,6 +5,8 @@ import type {
   GitHistoryItem,
   GoldenBaseline,
   JsonObject,
+  PublishResult,
+  PublishSkillReq,
   RunDetail,
   RunMetadata,
   SkillDetail,
@@ -52,6 +54,11 @@ export async function updateAppSettings(settings: AppSettings): Promise<AppSetti
 
 export async function syncSkill(skillId: string, request: SyncSkillReq): Promise<CollaborateResult> {
   const response = await api.post<CollaborateResult>(`/skills/${skillId}/sync`, request)
+  return response.data
+}
+
+export async function publishSkill(skillId: string, request: PublishSkillReq = {}): Promise<PublishResult> {
+  const response = await api.post<PublishResult>(`/skills/${skillId}/publish`, request)
   return response.data
 }
 

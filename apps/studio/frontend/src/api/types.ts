@@ -73,6 +73,17 @@ export interface SyncSkillReq {
   pr_title?: string
 }
 
+export interface PublishSkillReq {
+  version?: string
+}
+
+export interface PublishResult {
+  status: 'ok' | 'error'
+  message: string
+  artifact_id?: string | null
+  extra?: Record<string, unknown>
+}
+
 export interface TokensMetrics {
   input_tokens: number
   output_tokens: number

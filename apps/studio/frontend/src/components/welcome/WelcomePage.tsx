@@ -1,5 +1,5 @@
 import { AlertCircle, Clock3, FolderOpen, Layers, Layers3, Plus, Sparkles } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { api } from '../../api/client'
 import type { SkillSummary } from '../../api/types'
 import { useRecentSkills } from '../../hooks/useRecentSkills'
@@ -39,27 +39,6 @@ function sortRecent(skills: SkillSummary[], recentSkillIds: string[]) {
   return [...recent, ...remaining]
 }
 
-function cleanupWorkspaceLayoutStorage(validSkillIds: string[]) {
-  if (typeof window === 'undefined') {
-    return
-  }
-
-  const valid = new Set(validSkillIds)
-  for (let index = localStorage.length - 1; index >= 0; index -= 1) {
-    const key = localStorage.key(index)
-    if (!key?.startsWith('workspace-layout-')) {
-      continue
-    }
-
-    const skillId = key.replace('workspace-layout-', '')
-    if (skillId === 'new' || valid.has(skillId)) {
-      continue
-    }
-
-    localStorage.removeItem(key)
-  }
-}
-
 function skillIdFromPath(path: string) {
   const name = path.split(/[\\/]/).filter(Boolean).pop() ?? 'imported-skill'
   const normalized = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
@@ -73,6 +52,14 @@ function normalizeSkillId(value: string) {
   return withLetter || 'new-skill'
 }
 
+function shortPath(path: string | null) {
+  if (!path) {
+    return 'AgentStudio/Skills'
+  }
+  const parts = path.split(/[\\/]/).filter(Boolean)
+  return parts.length > 3 ? `.../${parts.slice(-3).join('/')}` : path
+}
+
 export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   const [importing, setImporting] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -80,10 +67,6 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   const skillIds = useMemo(() => skills.map((skill) => skill.id), [skills])
   const { recentSkills, rememberSkill } = useRecentSkills(skillIds)
   const visibleSkills = useMemo(() => sortRecent(skills, recentSkills), [recentSkills, skills])
-
-  useEffect(() => {
-    cleanupWorkspaceLayoutStorage(skillIds)
-  }, [skillIds])
 
   const openSkill = (skillId: string) => {
     rememberSkill(skillId)
@@ -171,24 +154,30 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
         </div>
 
         <div className="mb-6 grid gap-3 sm:grid-cols-2">
-          <button
-            type="button"
-            disabled={creating}
-            onClick={() => void createSkill()}
-            className="flex h-11 items-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Plus className="size-4" />
-            {creating ? 'Creating' : 'New skill'}
-          </button>
-          <button
-            type="button"
-            disabled={importing}
-            onClick={() => void importSkillDirectory()}
-            className="flex h-11 items-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FolderOpen className="size-4" />
-            {importing ? 'Importing' : 'Import skill'}
-          </button>
+          <div>
+            <button
+              type="button"
+              disabled={creating}
+              onClick={() => void createSkill()}
+              className="flex h-11 w-full items-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Plus className="size-4" />
+              {creating ? 'Creating' : 'New skill'}
+            </button>
+            <p className="mt-1 truncate text-xs text-muted-foreground">Default: AgentStudio/Skills</p>
+          </div>
+          <div>
+            <button
+              type="button"
+              disabled={importing}
+              onClick={() => void importSkillDirectory()}
+              className="flex h-11 w-full items-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <FolderOpen className="size-4" />
+              {importing ? 'Importing' : 'Import skill'}
+            </button>
+            <p className="mt-1 truncate text-xs text-muted-foreground">Choose any local folder</p>
+          </div>
         </div>
 
         <div className="mb-3 flex items-center justify-between">
@@ -229,6 +218,9 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
                   {skill.name}
                 </h3>
                 <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">{skill.description}</p>
+                <p className="mt-2 truncate font-mono text-[11px] text-muted-foreground">
+                  {shortPath(skill.directory_path)}
+                </p>
               </div>
               <div className="mt-4 flex items-center justify-between gap-3 text-xs text-muted-foreground">
                 <span>{skill.phase_count} phases</span>

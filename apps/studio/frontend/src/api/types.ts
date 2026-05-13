@@ -34,6 +34,7 @@ export interface SkillSummary {
   phase_count: number
   has_golden: boolean
   last_run_at: string | null
+  directory_path: string | null
 }
 
 export interface SkillTemplate {

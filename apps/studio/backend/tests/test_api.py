@@ -147,6 +147,14 @@ def test_create_skill(
     assert body["directory_path"] == str(skill_dir)
 
     assert (skill_dir / "SKILL.md").exists()
+    assert (skill_dir / ".workspace").is_dir()
+    assert (skill_dir / ".git").is_dir()
+    assert (skill_dir / ".gitignore").read_text(encoding="utf-8").splitlines() == [
+        "/.workspace/*",
+        "!/.workspace/golden/",
+        "!/.workspace/predict/",
+        "/.workspace/local_settings.json",
+    ]
     assert not (workspaces_dir / "default" / "skills" / "idea-generator" / "SKILL.md").exists()
     index = json.loads(config.SKILL_INDEX_PATH.read_text(encoding="utf-8"))
     assert index["idea-generator"]["absolute_path"] == str(skill_dir)
@@ -176,6 +184,8 @@ def test_create_skill_with_directory_path_writes_to_user_dir(
     assert body["id"] == "idea-generator"
     assert body["directory_path"] == str(skill_dir)
     assert (skill_dir / "SKILL.md").exists()
+    assert (skill_dir / ".workspace").is_dir()
+    assert (skill_dir / ".git").is_dir()
     assert not (workspaces_dir / "default" / "skills" / "idea-generator" / "SKILL.md").exists()
     index = json.loads(config.SKILL_INDEX_PATH.read_text(encoding="utf-8"))
     assert index["idea-generator"]["absolute_path"] == str(skill_dir)

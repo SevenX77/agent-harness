@@ -27,6 +27,12 @@ export interface LintResult {
   phases_summary: JsonObject[] | null
 }
 
+export interface ConfigMismatchWarning {
+  actual_remote_url: string
+  expected_remote_url: string
+  recommendation: string
+}
+
 export interface SkillSummary {
   id: string
   name: string
@@ -35,6 +41,7 @@ export interface SkillSummary {
   has_golden: boolean
   last_run_at: string | null
   directory_path: string | null
+  config_mismatch?: ConfigMismatchWarning | null
 }
 
 export interface SkillTemplate {

@@ -1,4 +1,4 @@
-import { AlertCircle, Clock3, FolderOpen, Layers, Layers3, Plus, Sparkles } from 'lucide-react'
+import { AlertCircle, AlertTriangle, Clock3, FolderOpen, Layers, Layers3, Plus, Sparkles } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { api } from '../../api/client'
 import type { SkillSummary } from '../../api/types'
@@ -7,6 +7,7 @@ import { useSkills } from '../../hooks/useSkills'
 import { selectSkillDirectory } from '../../lib/tauri'
 import { generateSkillMd } from '../../templates/skillMdGenerator'
 import { errorMessage } from '../../utils/errors'
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 
 interface WelcomePageProps {
   onSelectSkill: (skillId: string) => void
@@ -210,9 +211,39 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
                   <div className="flex size-8 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
                     <Layers3 className="size-4" />
                   </div>
-                  {skill.has_golden ? (
-                    <span className="rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">Golden</span>
-                  ) : null}
+                  <div className="flex items-center gap-2">
+                    {skill.has_golden ? (
+                      <span className="rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">Golden</span>
+                    ) : null}
+                    {skill.config_mismatch ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            role="img"
+                            aria-label="Repo URL mismatch"
+                            onClick={(event) => event.stopPropagation()}
+                            className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-600 dark:text-amber-400"
+                          >
+                            <AlertTriangle className="size-3.5" />
+                            Config drift
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs text-xs">
+                          <div className="space-y-1.5">
+                            <div>
+                              <span className="font-medium">Actual:</span>{' '}
+                              <span className="break-all font-mono">{skill.config_mismatch.actual_remote_url}</span>
+                            </div>
+                            <div>
+                              <span className="font-medium">Expected:</span>{' '}
+                              <span className="break-all font-mono">{skill.config_mismatch.expected_remote_url}</span>
+                            </div>
+                            <div className="pt-1 text-muted-foreground">{skill.config_mismatch.recommendation}</div>
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : null}
+                  </div>
                 </div>
                 <h3 className="line-clamp-2 text-sm font-semibold text-foreground group-hover:text-primary">
                   {skill.name}

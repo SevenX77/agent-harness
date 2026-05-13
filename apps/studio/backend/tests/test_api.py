@@ -97,25 +97,33 @@ def test_lint_reports_failed_manifest_with_line_number(
     assert body["errors"][0]["error_code"]
 
 
-def test_put_updates_workspace_atomically_and_invalid_content_preserves_file(
+def test_put_updates_indexed_skill_atomically_and_invalid_content_preserves_file(
     client: TestClient,
     studio_roots: tuple[Path, Path],
 ) -> None:
-    skills_dir, workspaces_dir = studio_roots
-    original = (skills_dir / "text-segmentation" / "SKILL.md").read_text(encoding="utf-8")
-    updated = original.replace("description: Text segments", "description: Updated text segments")
+    _skills_dir, workspaces_dir = studio_roots
+    create_response = client.post(
+        "/api/skills",
+        json={"skill_id": "idea-generator", "content": _agent_skill_content("idea-generator")},
+    )
+    assert create_response.status_code == 201
+    skill_path = config.DEFAULT_SKILLS_ROOT / "idea-generator" / "SKILL.md"
+    updated = skill_path.read_text(encoding="utf-8").replace(
+        "description: Draft structured ideas",
+        "description: Updated ideas",
+    )
 
-    ok_response = client.put("/api/skills/text-segmentation", json={"content": updated})
+    ok_response = client.put("/api/skills/idea-generator", json={"content": updated})
 
     assert ok_response.status_code == 200
-    assert ok_response.json()["manifest"]["description"] == "Updated text segments"
-    workspace_skill = workspaces_dir / "default" / "skills" / "text-segmentation" / "SKILL.md"
-    assert "Updated text segments" in workspace_skill.read_text(encoding="utf-8")
+    assert ok_response.json()["manifest"]["description"] == "Updated ideas"
+    assert "Updated ideas" in skill_path.read_text(encoding="utf-8")
+    assert not (workspaces_dir / "default" / "skills" / "idea-generator" / "SKILL.md").exists()
 
-    bad_response = client.put("/api/skills/text-segmentation", json={"content": "not yaml"})
+    bad_response = client.put("/api/skills/idea-generator", json={"content": "not yaml"})
 
     assert bad_response.status_code == 422
-    assert "Updated text segments" in workspace_skill.read_text(encoding="utf-8")
+    assert "Updated ideas" in skill_path.read_text(encoding="utf-8")
 
 
 def test_create_skill(
@@ -253,7 +261,10 @@ def test_resolve_skill_dir_uses_directory_path_when_set(
     file_paths = detail_response.json()["file_paths"]
     assert file_paths["skill_dir"] == str(skill_dir)
     assert file_paths["skill_md"] == str(skill_dir / "SKILL.md")
-    assert file_paths["runs_dir"] == str(skill_dir / "runs")
+    assert file_paths["runs_dir"] == str(skill_dir / ".workspace" / "runs")
+    assert file_paths["golden_dir"] == str(skill_dir / ".workspace" / "golden")
+    assert file_paths["predict_dir"] == str(skill_dir / ".workspace" / "predict")
+    assert file_paths["local_settings"] == str(skill_dir / ".workspace" / "local_settings.json")
 
 
 def test_create_skill_collision_returns_409(client: TestClient) -> None:
@@ -354,12 +365,13 @@ def test_run_endpoint_spawns_worker_and_ws_streams_events(
         time.sleep(0.05)
 
     assert detail["metadata"]["status"] == "success"
-    run_dir = workspaces_dir / "default" / "skills" / "text-segmentation" / "runs" / run_id
+    run_dir = _skills_dir / "text-segmentation" / ".workspace" / "runs" / run_id
     assert (run_dir / "final_state.json").exists()
     assert (run_dir / "tracing.jsonl").exists()
     assert (run_dir / "metrics.json").exists()
     assert (run_dir / "artifacts").is_dir()
     assert (run_dir / "checkpoints.db").exists()
+    assert (run_dir.parent / "latest" / "run_metadata.json").exists()
 
 
 def test_run_history_lists_details_and_deletes_runs(
@@ -407,10 +419,9 @@ def test_batch_run_starts_runs_from_test_inputs(
     studio_roots: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    skills_dir, workspaces_dir = studio_roots
-    skill_dir = copy_skill(skills_dir, workspaces_dir, "text-segmentation")
-    inputs_dir = skill_dir / "test_inputs"
-    inputs_dir.mkdir()
+    skills_dir, _workspaces_dir = studio_roots
+    inputs_dir = skills_dir / "text-segmentation" / ".workspace" / "test_inputs"
+    inputs_dir.mkdir(parents=True)
     for index in range(3):
         (inputs_dir / f"case-{index}.json").write_text(
             json.dumps({"input_text": f"hello {index}"}),
@@ -467,6 +478,8 @@ def test_set_golden_and_compare_run_diff(
 
     assert promote_response.status_code == 200
     assert promote_response.json()["id"] == "golden-run"
+    golden_dir = _skills_dir / "text-segmentation" / ".workspace" / "golden" / "golden-run"
+    assert (golden_dir / "golden_metadata.json").exists()
 
     diff_response = client.get(
         "/api/skills/text-segmentation/runs/current-run/diff?against=golden-run",
@@ -698,7 +711,8 @@ def _write_final_state(
     run_id: str,
     payload: dict[str, Any],
 ) -> Path:
-    run_dir = workspaces_dir / "default" / "skills" / skill_id / "runs" / run_id
+    del workspaces_dir
+    run_dir = config.SKILLS_DIR / skill_id / ".workspace" / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "final_state.json").write_text(json.dumps(payload), encoding="utf-8")
     return run_dir

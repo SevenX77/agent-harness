@@ -13,7 +13,7 @@ from app.core.exceptions import standard_http_exception
 from app.models.compare import CompareResult, FieldDifference, FieldDiffType
 from app.models.golden import GoldenBaseline
 from app.services.diagnostic_export import assert_trace_can_be_promoted_to_golden
-from app.services.skills import run_dir_for
+from app.services.skills import golden_dir_for, resolve_skill_dir, run_dir_for
 
 
 def list_golden_baselines_for_skill(skill_id: str) -> list[GoldenBaseline]:
@@ -111,7 +111,7 @@ def compare_run_to_golden(
 
 
 def _golden_root_for(skill_id: str) -> Path:
-    return run_dir_for(skill_id, "_").parent.parent / "golden"
+    return golden_dir_for(resolve_skill_dir(skill_id))
 
 
 def _golden_dir_for(skill_id: str, run_id: str) -> Path:

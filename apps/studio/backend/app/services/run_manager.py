@@ -51,7 +51,7 @@ from app.models.runs import (
     RunRequest,
     TokensMetrics,
 )
-from app.services.skills import ensure_workspace_skill_dir, run_dir_for
+from app.services.skills import resolve_skill_dir, run_dir_for, test_inputs_dir_for_skill
 
 _EVENT_ADAPTER: TypeAdapter[Any] = TypeAdapter(CallbackEvent)
 
@@ -278,7 +278,7 @@ class RunManager:
         self.worker: Any = _run_worker_main
 
     async def start_run(self, skill_id: str, request: RunRequest) -> RunMetadata:
-        skill_dir = ensure_workspace_skill_dir(skill_id)
+        skill_dir = resolve_skill_dir(skill_id)
         skill_path = skill_dir / "SKILL.md"
         inputs = _runtime_inputs_from_request(request)
         run_id = _new_run_id()
@@ -292,6 +292,7 @@ class RunManager:
             started_at=datetime.now(UTC),
             input_summary=_input_summary(inputs),
         )
+        _write_run_metadata(run_dir, metadata)
         await self._save_run_metadata(skill_id, metadata)
 
         process_queue = self.queue_factory()
@@ -326,7 +327,7 @@ class RunManager:
         return metadata
 
     async def start_batch_run(self, skill_id: str, input_ids: list[str]) -> BatchRunResponse:
-        ensure_workspace_skill_dir(skill_id)
+        resolve_skill_dir(skill_id)
         if not input_ids:
             raise ValueError("input_ids must not be empty")
 
@@ -383,12 +384,14 @@ class RunManager:
         )
 
     def list_runs(self, skill_id: str) -> RunListResponse:
-        ensure_workspace_skill_dir(skill_id)
+        resolve_skill_dir(skill_id)
         runs_root = run_dir_for(skill_id, "_").parent
         if not runs_root.exists():
             return RunListResponse(runs=[], total=0)
         metadata: list[RunMetadata] = []
         for metadata_path in runs_root.glob("*/run_metadata.json"):
+            if metadata_path.parent.name == "latest":
+                continue
             try:
                 metadata.append(_metadata_with_input_summary(metadata_path))
             except Exception:
@@ -480,14 +483,18 @@ class RunManager:
                     "success" if message.get("status") == "success" else "failed"
                 )
                 metrics = _tokens_metrics(message.get("metrics"))
-                record.metadata = RunMetadata(
+                metadata = RunMetadata(
                     run_id=record.metadata.run_id,
                     status=status,
                     started_at=record.metadata.started_at,
                     metrics=metrics,
                     input_summary=record.metadata.input_summary,
                 )
-                await self._save_run_metadata(record.skill_id, record.metadata)
+                _write_run_metadata(record.run_dir, metadata)
+                await self._save_run_metadata(record.skill_id, metadata)
+                if metadata.status == "success":
+                    await asyncio.to_thread(_sync_latest_run, record.run_dir)
+                record.metadata = metadata
                 break
 
         if record.metadata.status == "running":
@@ -502,8 +509,13 @@ class RunManager:
                 metrics=record.metadata.metrics,
                 input_summary=record.metadata.input_summary,
             )
+            _write_run_metadata(record.run_dir, record.metadata)
             await self._save_run_metadata(record.skill_id, record.metadata)
+            if record.metadata.status == "success":
+                await asyncio.to_thread(_sync_latest_run, record.run_dir)
         await self._copy_final_state_to_storage(record)
+        if record.metadata.status == "success" and not (record.run_dir.parent / "latest").exists():
+            await asyncio.to_thread(_sync_latest_run, record.run_dir)
         await record.ws_queue.put(None)
         with contextlib.suppress(Exception):
             record.process.join(timeout=0)
@@ -577,7 +589,16 @@ def _read_optional_json(path: Path) -> dict[str, Any] | None:
 
 
 def test_inputs_dir_for(skill_id: str) -> Path:
-    return config.default_workspace_skills_dir() / skill_id / "test_inputs"
+    return test_inputs_dir_for_skill(resolve_skill_dir(skill_id))
+
+
+def _sync_latest_run(run_dir: Path) -> None:
+    latest_dir = run_dir.parent / "latest"
+    if latest_dir == run_dir:
+        return
+    if latest_dir.exists():
+        shutil.rmtree(latest_dir)
+    shutil.copytree(run_dir, latest_dir)
 
 
 def _load_test_input(skill_id: str, input_id: str) -> dict[str, Any]:

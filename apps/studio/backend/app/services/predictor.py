@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from collections import Counter
 from collections.abc import Callable
 from typing import Any, Literal
@@ -26,7 +27,7 @@ from graph_agent.core._predict_internal.tracing import PredictTracingCallback
 
 from app.models.runs import PredictDiagnosticExport
 from app.services.diagnostic_export import export_predict_diagnostics
-from app.services.skills import ensure_workspace_skill_dir
+from app.services.skills import ensure_workspace_skill_dir, predict_dir_for
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,9 @@ class PredictorService:
             self._raise_if_deadlocked(actual_path)
 
         path_diff = self._path_diff_for_strategy(strategy, actual_path)
-        return self.assemble_trace(raw_result, path_diff)
+        result = self.assemble_trace(raw_result, path_diff)
+        self._persist_predict_result(skill_dir, result)
+        return result
 
     def resolve_fill_strategy(self, mock_param: Any) -> BaseMockStrategy:
         """Convert polymorphic mock input into an internal strategy object."""
@@ -102,6 +105,14 @@ class PredictorService:
         """Expose PredictResult through the Studio in-process diagnostic contract."""
 
         return export_predict_diagnostics(result)
+
+    def _persist_predict_result(self, skill_dir: Path, result: PredictResult) -> None:
+        predict_root = predict_dir_for(skill_dir)
+        predict_root.mkdir(parents=True, exist_ok=True)
+        (predict_root / "latest_predict.json").write_text(
+            result.model_dump_json(),
+            encoding="utf-8",
+        )
 
     def _path_diff_for_strategy(
         self,

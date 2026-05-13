@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import re
 import uuid
 from collections.abc import Iterable
@@ -264,7 +265,13 @@ async def ensure_workspace_skill_dir_async(
     storage: StorageBackend,
     metadata: MetadataStore,
 ) -> Path:
-    """Return a writable skill dir, forking a public skill into workspace if needed."""
+    """Return the writable skill body directory without creating workspace forks."""
+    indexed = await metadata.get_skill_index_entry(skill_id)
+    if indexed:
+        skill_dir = Path(indexed["absolute_path"])
+        if await storage.exists(str(skill_dir / "SKILL.md")):
+            return skill_dir
+
     saved_summary = await metadata.get_skill_summary(user_id, skill_id)
     if saved_summary and saved_summary.directory_path:
         skill_dir = Path(saved_summary.directory_path)
@@ -276,14 +283,20 @@ async def ensure_workspace_skill_dir_async(
         return workspace_dir
 
     public_dir = config.SKILLS_DIR / skill_id
-    if not await storage.exists(str(public_dir / "SKILL.md")):
-        raise standard_http_exception(
-            "SKILL_NOT_FOUND",
-            f"Skill not found: {skill_id}",
-            {"skill_id": skill_id},
+    if await storage.exists(str(public_dir / "SKILL.md")):
+        response = error_response(
+            error_code="SKILL_READ_ONLY",
+            http_status=403,
+            message=f"Skill is read-only: {skill_id}",
+            details={"skill_id": skill_id},
+            retry_strategy="not_retryable",
         )
-    await storage.copy_tree(str(public_dir), str(workspace_dir))
-    return workspace_dir
+        raise_error_response(response)
+    raise standard_http_exception(
+        "SKILL_NOT_FOUND",
+        f"Skill not found: {skill_id}",
+        {"skill_id": skill_id},
+    )
 
 
 async def resolve_skill_dir_async(
@@ -292,7 +305,13 @@ async def resolve_skill_dir_async(
     storage: StorageBackend,
     metadata: MetadataStore,
 ) -> Path:
-    """Resolve a skill id through storage, preferring imported directory paths."""
+    """Resolve a skill id through the global index, then legacy and builtin paths."""
+    indexed = await metadata.get_skill_index_entry(skill_id)
+    if indexed:
+        skill_dir = Path(indexed["absolute_path"])
+        if await storage.exists(str(skill_dir / "SKILL.md")):
+            return skill_dir
+
     saved_summary = await metadata.get_skill_summary(user_id, skill_id)
     if saved_summary and saved_summary.directory_path:
         return Path(saved_summary.directory_path)
@@ -323,25 +342,42 @@ async def latest_run_metadata_async(
 
 
 def ensure_workspace_skill_dir(skill_id: str) -> Path:
-    """Return a writable skill dir, forking a public skill into workspace if needed."""
-    ensure_workspace_layout()
+    """Return a writable skill dir without creating workspace forks."""
+    indexed = _sync_skill_index_entry(skill_id)
+    if indexed:
+        skill_dir = Path(indexed["absolute_path"])
+        if (skill_dir / "SKILL.md").exists():
+            return skill_dir
+
     workspace_dir = config.default_workspace_skills_dir() / skill_id
     if workspace_dir.exists():
         return workspace_dir
 
     public_dir = config.SKILLS_DIR / skill_id
-    if not (public_dir / "SKILL.md").exists():
-        raise standard_http_exception(
-            "SKILL_NOT_FOUND",
-            f"Skill not found: {skill_id}",
-            {"skill_id": skill_id},
+    if (public_dir / "SKILL.md").exists():
+        response = error_response(
+            error_code="SKILL_READ_ONLY",
+            http_status=403,
+            message=f"Skill is read-only: {skill_id}",
+            details={"skill_id": skill_id},
+            retry_strategy="not_retryable",
         )
-    _copy_tree(public_dir, workspace_dir)
-    return workspace_dir
+        raise_error_response(response)
+    raise standard_http_exception(
+        "SKILL_NOT_FOUND",
+        f"Skill not found: {skill_id}",
+        {"skill_id": skill_id},
+    )
 
 
 def resolve_skill_dir(skill_id: str) -> Path:
-    """Resolve a skill id, preferring writable workspace copies."""
+    """Resolve a skill id, preferring the global index."""
+    indexed = _sync_skill_index_entry(skill_id)
+    if indexed:
+        skill_dir = Path(indexed["absolute_path"])
+        if (skill_dir / "SKILL.md").exists():
+            return skill_dir
+
     workspace_dir = config.default_workspace_skills_dir() / skill_id
     if (workspace_dir / "SKILL.md").exists():
         return workspace_dir
@@ -357,7 +393,31 @@ def resolve_skill_dir(skill_id: str) -> Path:
 
 def run_dir_for(skill_id: str, run_id: str) -> Path:
     """Return the Studio V3 run directory for a skill run."""
-    return config.default_workspace_skills_dir() / skill_id / "runs" / run_id
+    return runs_dir_for(resolve_skill_dir(skill_id)) / run_id
+
+
+def workspace_dir_for(skill_dir: Path) -> Path:
+    return skill_dir / ".workspace"
+
+
+def runs_dir_for(skill_dir: Path) -> Path:
+    return workspace_dir_for(skill_dir) / "runs"
+
+
+def golden_dir_for(skill_dir: Path) -> Path:
+    return workspace_dir_for(skill_dir) / "golden"
+
+
+def predict_dir_for(skill_dir: Path) -> Path:
+    return workspace_dir_for(skill_dir) / "predict"
+
+
+def local_settings_path_for(skill_dir: Path) -> Path:
+    return workspace_dir_for(skill_dir) / "local_settings.json"
+
+
+def test_inputs_dir_for_skill(skill_dir: Path) -> Path:
+    return workspace_dir_for(skill_dir) / "test_inputs"
 
 
 def skill_id_from_changed_path(path: Path) -> str | None:
@@ -376,11 +436,13 @@ def skill_id_from_changed_path(path: Path) -> str | None:
 
 def latest_run_metadata(skill_id: str) -> RunMetadata | None:
     """Return the newest persisted run metadata for one skill."""
-    runs_dir = config.default_workspace_skills_dir() / skill_id / "runs"
+    runs_dir = runs_dir_for(resolve_skill_dir(skill_id))
     if not runs_dir.exists():
         return None
     candidates: list[RunMetadata] = []
     for metadata_path in runs_dir.glob("*/run_metadata.json"):
+        if metadata_path.parent.name == "latest":
+            continue
         try:
             candidates.append(
                 RunMetadata.model_validate_json(metadata_path.read_bytes().decode("utf-8")),
@@ -446,7 +508,7 @@ async def _summary_for_skill_dir_async(
         name=name,
         description=description,
         phase_count=phase_count,
-        has_golden=await storage.exists(str(skill_dir / "golden")),
+        has_golden=await storage.exists(str(golden_dir_for(skill_dir))),
         last_run_at=latest.started_at if latest else None,
     )
 
@@ -510,15 +572,16 @@ def _detail_from_manifest(
     manifest: AgentSkillDef | GraphSkillDef | PersonaSkillDef,
     lint_result: LintResult,
 ) -> SkillDetail:
-    workspace_skill_dir = config.default_workspace_skills_dir() / skill_id
     return SkillDetail(
         manifest=manifest,
         file_paths={
             "skill_dir": str(skill_dir),
             "skill_md": str(skill_dir / "SKILL.md"),
-            "runs_dir": str(workspace_skill_dir / "runs"),
-            "test_inputs_dir": str(workspace_skill_dir / "test_inputs"),
-            "golden_dir": str(workspace_skill_dir / "golden"),
+            "runs_dir": str(runs_dir_for(skill_dir)),
+            "test_inputs_dir": str(test_inputs_dir_for_skill(skill_dir)),
+            "golden_dir": str(golden_dir_for(skill_dir)),
+            "predict_dir": str(predict_dir_for(skill_dir)),
+            "local_settings": str(local_settings_path_for(skill_dir)),
         },
         has_golden=_has_golden(skill_dir),
         latest_run_metadata=latest_run_metadata(skill_id),
@@ -535,22 +598,19 @@ async def _detail_from_manifest_async(
     storage: StorageBackend,
     metadata: MetadataStore,
 ) -> SkillDetail:
-    workspace_skill_dir = _workspace_skills_dir_for(user_id) / skill_id
-    saved_summary = await metadata.get_skill_summary(user_id, skill_id)
-    writable_skill_dir = (
-        skill_dir if saved_summary and saved_summary.directory_path else workspace_skill_dir
-    )
     latest = await latest_run_metadata_async(user_id, skill_id, metadata)
     return SkillDetail(
         manifest=manifest,
         file_paths={
             "skill_dir": str(skill_dir),
             "skill_md": str(skill_dir / "SKILL.md"),
-            "runs_dir": str(writable_skill_dir / "runs"),
-            "test_inputs_dir": str(writable_skill_dir / "test_inputs"),
-            "golden_dir": str(writable_skill_dir / "golden"),
+            "runs_dir": str(runs_dir_for(skill_dir)),
+            "test_inputs_dir": str(test_inputs_dir_for_skill(skill_dir)),
+            "golden_dir": str(golden_dir_for(skill_dir)),
+            "predict_dir": str(predict_dir_for(skill_dir)),
+            "local_settings": str(local_settings_path_for(skill_dir)),
         },
-        has_golden=await storage.exists(str(skill_dir / "golden")),
+        has_golden=await storage.exists(str(golden_dir_for(skill_dir))),
         latest_run_metadata=latest,
         lint_result=lint_result,
     )
@@ -619,7 +679,28 @@ def _phase_count_from_frontmatter(frontmatter: dict[str, Any]) -> int:
 
 
 def _has_golden(skill_dir: Path) -> bool:
-    return (skill_dir / "golden").exists()
+    return golden_dir_for(skill_dir).exists()
+
+
+def _sync_skill_index_entry(skill_id: str) -> dict[str, str] | None:
+    index_path = config.SKILL_INDEX_PATH
+    if not index_path.exists():
+        return None
+    try:
+        raw = json.loads(index_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    entry = raw.get(skill_id)
+    if not isinstance(entry, dict) or not isinstance(entry.get("absolute_path"), str):
+        return None
+    return {
+        "absolute_path": entry["absolute_path"],
+        "l2_remote_url": (
+            entry.get("l2_remote_url") if isinstance(entry.get("l2_remote_url"), str) else ""
+        ),
+    }
 
 
 def _lint_error_from_issue(issue: CompileIssue) -> LintError:

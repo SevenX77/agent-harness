@@ -106,7 +106,7 @@ class LocalJsonMetadataStore:
 
     async def list_runs(self, user_id: str, skill_id: str) -> list[RunMetadata]:
         """Load run metadata files for one skill."""
-        runs_root = self._skills_root(user_id) / skill_id / "runs"
+        runs_root = await self._runs_root(user_id, skill_id)
         if not await asyncio.to_thread(runs_root.exists):
             return []
 
@@ -115,6 +115,8 @@ class LocalJsonMetadataStore:
             lambda: sorted(runs_root.glob("*/run_metadata.json")),
         )
         for metadata_path in metadata_paths:
+            if metadata_path.parent.name == "latest":
+                continue
             try:
                 async with aiofiles.open(metadata_path, encoding="utf-8") as file:
                     runs.append(RunMetadata.model_validate_json(str(await file.read())))
@@ -130,7 +132,7 @@ class LocalJsonMetadataStore:
     ) -> None:
         """Persist one run metadata document."""
         metadata_path = (
-            self._skills_root(user_id) / skill_id / "runs" / metadata.run_id / "run_metadata.json"
+            (await self._runs_root(user_id, skill_id)) / metadata.run_id / "run_metadata.json"
         )
         await asyncio.to_thread(metadata_path.parent.mkdir, parents=True, exist_ok=True)
         async with aiofiles.open(metadata_path, "w", encoding="utf-8") as file:
@@ -138,6 +140,12 @@ class LocalJsonMetadataStore:
 
     def _skills_root(self, user_id: str) -> Path:
         return self._workspaces_root / user_id / "skills"
+
+    async def _runs_root(self, user_id: str, skill_id: str) -> Path:
+        entry = await self.get_skill_index_entry(skill_id)
+        if entry:
+            return Path(entry["absolute_path"]) / ".workspace" / "runs"
+        return self._skills_root(user_id) / skill_id / "runs"
 
     def _skill_index_path(self) -> Path:
         return self._global_config_dir / "skill_index.json"

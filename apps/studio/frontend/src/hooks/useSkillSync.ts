@@ -21,11 +21,16 @@ interface UseSkillSyncResult {
   submit: (devBranch: string, prTitle: string) => Promise<void>
 }
 
+interface UseSkillSyncOptions {
+  onSyncSuccess?: (result: CollaborateResult) => void
+}
+
 interface ExecuteSkillSyncOptions {
   skillId: string | null
   request: SyncSkillReq
   pendingStatus: SkillSyncStatus
   successMessage: (result: CollaborateResult) => string
+  onSuccess?: (result: CollaborateResult) => void
   setStatus: (status: SkillSyncStatus) => void
   setError: (error: string | null) => void
   setLastResult: (result: CollaborateResult | null) => void
@@ -44,6 +49,7 @@ export async function executeSkillSync({
   request,
   pendingStatus,
   successMessage,
+  onSuccess,
   setStatus,
   setError,
   setLastResult,
@@ -64,6 +70,7 @@ export async function executeSkillSync({
 
     if (result.status === 'ok') {
       setStatus('success')
+      onSuccess?.(result)
       toast.success(successMessage(result))
       scheduleReset(() => setStatus('idle'), resetDelayMs)
       return result
@@ -88,7 +95,7 @@ export async function executeSkillSync({
   }
 }
 
-export function useSkillSync(skillId: string | null): UseSkillSyncResult {
+export function useSkillSync(skillId: string | null, options?: UseSkillSyncOptions): UseSkillSyncResult {
   const [status, setStatus] = useState<SkillSyncStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const [lastResult, setLastResult] = useState<CollaborateResult | null>(null)
@@ -114,12 +121,14 @@ export function useSkillSync(skillId: string | null): UseSkillSyncResult {
       request: SyncSkillReq,
       pendingStatus: SkillSyncStatus,
       successMessage: (result: CollaborateResult) => string,
+      onSuccess?: (result: CollaborateResult) => void,
     ) => {
       await executeSkillSync({
         skillId,
         request,
         pendingStatus,
         successMessage,
+        onSuccess,
         setStatus,
         setError,
         setLastResult,
@@ -134,8 +143,14 @@ export function useSkillSync(skillId: string | null): UseSkillSyncResult {
   }, [run])
 
   const sync = useCallback(async () => {
-    await run({ action: 'sync_from_team' }, 'syncing', () => 'Synced from team')
-  }, [run])
+    await run(
+      { action: 'sync_from_team' },
+      'syncing',
+      (result) =>
+        result.extra?.latest_restored === true ? 'Synced from team — latest snapshot restored' : 'Synced from team',
+      options?.onSyncSuccess,
+    )
+  }, [options?.onSyncSuccess, run])
 
   const submit = useCallback(
     async (devBranch: string, prTitle: string) => {

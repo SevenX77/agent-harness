@@ -3,15 +3,17 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useSkillSync } from "@/hooks/useSkillSync"
+import type { CollaborateResult } from "@/api/types"
 
 interface HeaderProps {
   skillId: string | null
   copilotOpen: boolean
   onCopilotToggle: () => void
+  onSyncSuccess?: (result: CollaborateResult) => void
 }
 
-export function Header({ skillId, copilotOpen, onCopilotToggle }: HeaderProps) {
-  const skillSync = useSkillSync(skillId)
+export function Header({ skillId, copilotOpen, onCopilotToggle, onSyncSuccess }: HeaderProps) {
+  const skillSync = useSkillSync(skillId, { onSyncSuccess })
   const isSaving = skillSync.status === "saving"
   const isSyncing = skillSync.status === "syncing"
   const isSubmitting = skillSync.status === "submitting"

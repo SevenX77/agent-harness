@@ -27,7 +27,7 @@ export function Workspace({ skillId, onSelectSkill }: WorkspaceProps) {
   const [fileDrafts, setFileDrafts] = useState<Record<string, string>>({})
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedNode, setSelectedNode] = useState<{ id: string; data: SkillGraphNodeData } | null>(null)
-  const { skillDetail, skillDetailError } = useSkills(skillId)
+  const { skillDetail, skillDetailError, mutateSkillDetail } = useSkills(skillId)
   const isLoading = useMemo(() => Boolean(skillId && !skillDetail && !skillDetailError), [skillDetail, skillDetailError, skillId])
 
   useCopilotContext({
@@ -71,6 +71,9 @@ export function Workspace({ skillId, onSelectSkill }: WorkspaceProps) {
         skillId={skillId}
         copilotOpen={copilotOpen}
         onCopilotToggle={() => setCopilotOpen((open) => !open)}
+        onSyncSuccess={() => {
+          void mutateSkillDetail()
+        }}
       />
 
       <div className="relative flex min-h-0 flex-1">

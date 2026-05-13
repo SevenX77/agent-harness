@@ -11,6 +11,14 @@ from app.models.lint import LintResult
 from app.models.runs import RunMetadata
 
 
+class ConfigMismatchWarning(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    actual_remote_url: str
+    expected_remote_url: str
+    recommendation: str = "建议以 .git/config 为基准 (per design.md 决策 22), 在 Settings 调整 User ID / Gitea Host"
+
+
 class SkillSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -21,6 +29,7 @@ class SkillSummary(BaseModel):
     has_golden: bool
     last_run_at: datetime | None = None
     directory_path: str | None = None
+    config_mismatch: ConfigMismatchWarning | None = None
 
 
 class SkillDetail(BaseModel):

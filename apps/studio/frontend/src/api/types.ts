@@ -50,6 +50,22 @@ export interface AppSettings {
   gitea_host: string
 }
 
+export interface CollaborateResult {
+  status: 'ok' | 'requires_review' | 'conflict' | 'error'
+  message: string
+  pr_url?: string | null
+  extra?: Record<string, unknown>
+}
+
+export type SyncAction = 'save_to_team' | 'sync_from_team' | 'submit_for_review'
+
+export interface SyncSkillReq {
+  action: SyncAction
+  branch?: string
+  dev_branch?: string
+  pr_title?: string
+}
+
 export interface TokensMetrics {
   input_tokens: number
   output_tokens: number

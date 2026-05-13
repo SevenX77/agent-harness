@@ -1,5 +1,15 @@
 import axios, { AxiosHeaders } from 'axios'
-import type { AppSettings, GitHistoryItem, GoldenBaseline, JsonObject, RunDetail, RunMetadata, SkillDetail } from './types'
+import type {
+  AppSettings,
+  CollaborateResult,
+  GitHistoryItem,
+  GoldenBaseline,
+  JsonObject,
+  RunDetail,
+  RunMetadata,
+  SkillDetail,
+  SyncSkillReq,
+} from './types'
 
 export const API_BASE_URL = import.meta.env.VITE_STUDIO_API_BASE_URL ?? 'http://localhost:8787/api'
 
@@ -37,6 +47,11 @@ export async function getAppSettings(): Promise<AppSettings> {
 
 export async function updateAppSettings(settings: AppSettings): Promise<AppSettings> {
   const response = await api.put<AppSettings>('/settings', settings)
+  return response.data
+}
+
+export async function syncSkill(skillId: string, request: SyncSkillReq): Promise<CollaborateResult> {
+  const response = await api.post<CollaborateResult>(`/skills/${skillId}/sync`, request)
   return response.data
 }
 

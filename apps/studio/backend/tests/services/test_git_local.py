@@ -147,6 +147,7 @@ def test_git_service_wrappers_build_expected_commands(
     service.add(tmp_path)
     service.add(tmp_path, ".workspace/runs/latest", force=True)
     service.force_add_path(tmp_path, ".workspace/runs/latest")
+    service.create_branch(tmp_path, "team-save/tester-1")
     service.commit(tmp_path, "auto-run-1")
     assert service.log(tmp_path) == ["abc auto-run-1"]
     service.reset_hard(tmp_path, "abc")
@@ -154,6 +155,7 @@ def test_git_service_wrappers_build_expected_commands(
 
     assert ["git", "add", "-A"] in commands
     assert ["git", "add", "-f", ".workspace/runs/latest"] in commands
+    assert ["git", "checkout", "-b", "team-save/tester-1"] in commands
     assert ["git", "commit", "-m", "auto-run-1"] in commands
     assert ["git", "log", "--oneline", "-n50"] in commands
     assert ["git", "reset", "--hard", "abc"] in commands
@@ -217,6 +219,22 @@ def test_force_add_path_overrides_gitignore(tmp_path: Path) -> None:
     service.force_add_path(skill_dir, ".workspace/runs/latest")
 
     assert "A  .workspace/runs/latest/x.json" in service.status(skill_dir).stdout
+
+
+def test_create_branch_checks_out_new_branch(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("skill\n", encoding="utf-8")
+    service = GitLocalService()
+    service.init(skill_dir)
+    run_git(skill_dir, "config", "--local", "user.name", "tester")
+    run_git(skill_dir, "config", "--local", "user.email", "tester@studio.local")
+    service.add(skill_dir)
+    service.commit(skill_dir, "initial")
+
+    service.create_branch(skill_dir, "team-save/tester-1")
+
+    assert run_git(skill_dir, "branch", "--show-current").stdout.strip() == "team-save/tester-1"
 
 
 def test_studio_gitignore_template_is_exact(tmp_path: Path) -> None:

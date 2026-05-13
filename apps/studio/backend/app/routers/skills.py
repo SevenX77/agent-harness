@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from typing import NoReturn
+
 from fastapi import APIRouter, Depends
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
-from app.core.backends import get_auth_user_id, get_metadata, get_storage
+from app.core.backends import get_auth_user_id, get_git_collab, get_metadata, get_storage
 from app.core.exceptions import error_response, raise_error_response, raise_not_implemented
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
 from app.models.errors import ErrorResponse
+from app.models.git_collab import SyncSkillReq
 from app.models.git_history import GitHistoryItem, RevertSkillReq
 from app.models.skills import (
     CreateSkillReq,
@@ -26,6 +29,7 @@ from app.services.git_local import (
     GitObjectNotFoundError,
     GitRevertConflictError,
 )
+from app.services.git_collab import CollaborateResult, GiteaApiError, GitCollaborateService
 from app.services.skills import (
     create_new_skill,
     fork_skill,
@@ -74,6 +78,91 @@ async def get_skill(
     metadata: MetadataStore = Depends(get_metadata),
 ) -> SkillDetail:
     return await get_skill_detail(user_id, skill_id, storage, metadata)
+
+
+@router.post("/{skill_id}/sync", response_model=CollaborateResult)
+async def sync_skill(
+    skill_id: str,
+    request: SyncSkillReq,
+    user_id: str = Depends(get_auth_user_id),
+    storage: StorageBackend = Depends(get_storage),
+    metadata: MetadataStore = Depends(get_metadata),
+    git_collab: GitCollaborateService = Depends(get_git_collab),
+) -> CollaborateResult:
+    skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
+    app_settings = await metadata.read_app_settings()
+    owner = app_settings.user_id.strip()
+    gitea_host = app_settings.gitea_host.strip()
+    if not owner:
+        response = error_response(
+            error_code="APP_SETTINGS_INCOMPLETE",
+            http_status=400,
+            message="User ID 未配置, 请到 Settings 设置",
+            details={"field": "user_id"},
+            retry_strategy="not_retryable",
+        )
+        raise_error_response(response)
+    if not gitea_host:
+        response = error_response(
+            error_code="APP_SETTINGS_INCOMPLETE",
+            http_status=400,
+            message="Gitea Host 未配置, 请到 Settings 设置",
+            details={"field": "gitea_host"},
+            retry_strategy="not_retryable",
+        )
+        raise_error_response(response)
+
+    git_collab.gitea_host = gitea_host.rstrip("/")
+    git_collab.gitea.host = gitea_host.rstrip("/")
+
+    try:
+        if request.action == "save_to_team":
+            return git_collab.save_to_team(
+                skill_dir,
+                owner=owner,
+                repo=skill_id,
+                branch=request.branch,
+            )
+        if request.action == "sync_from_team":
+            return git_collab.sync_from_team(
+                skill_dir,
+                owner=owner,
+                repo=skill_id,
+                branch=request.branch,
+            )
+        if not request.dev_branch:
+            _raise_missing_required_field("dev_branch")
+        if not request.pr_title:
+            _raise_missing_required_field("pr_title")
+        return git_collab.submit_for_review(
+            skill_dir,
+            owner=owner,
+            repo=skill_id,
+            dev_branch=request.dev_branch,
+            pr_title=request.pr_title,
+        )
+    except GiteaApiError as exc:
+        response = error_response(
+            error_code="GITEA_API_ERROR",
+            http_status=502,
+            message=str(exc),
+            details={"status_code": exc.status_code, "body": exc.body},
+            retry_strategy="backoff",
+        )
+        raise_error_response(response)
+    except GitCommandError as exc:
+        response = error_response(
+            error_code="GIT_COMMAND_FAILED",
+            http_status=500,
+            message=str(exc),
+            details={
+                "args": list(exc.result.args),
+                "stdout": exc.result.stdout,
+                "stderr": exc.result.stderr,
+            },
+            retry_strategy="idempotent",
+        )
+        raise_error_response(response)
 
 
 @router.put("/{skill_id}", response_model=SkillDetail)
@@ -172,3 +261,14 @@ async def validate_input(
 )
 async def delete_skill(skill_id: str) -> ErrorResponse:
     raise_not_implemented(f"delete skill {skill_id}")
+
+
+def _raise_missing_required_field(field: str) -> NoReturn:
+    response = error_response(
+        error_code="MISSING_REQUIRED_FIELD",
+        http_status=400,
+        message=f"Missing required field: {field}",
+        details={"field": field},
+        retry_strategy="not_retryable",
+    )
+    raise_error_response(response)

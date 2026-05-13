@@ -51,6 +51,7 @@ from app.models.runs import (
     RunRequest,
     TokensMetrics,
 )
+from app.services.git_local import GitLocalService
 from app.services.skills import resolve_skill_dir, run_dir_for, test_inputs_dir_for_skill
 
 _EVENT_ADAPTER: TypeAdapter[Any] = TypeAdapter(CallbackEvent)
@@ -276,6 +277,7 @@ class RunManager:
         self.process_factory: Any = multiprocessing.Process
         self.queue_factory: Any = multiprocessing.Queue
         self.worker: Any = _run_worker_main
+        self.git_service: GitLocalService = GitLocalService()
 
     async def start_run(self, skill_id: str, request: RunRequest) -> RunMetadata:
         skill_dir = resolve_skill_dir(skill_id)
@@ -492,8 +494,6 @@ class RunManager:
                 )
                 _write_run_metadata(record.run_dir, metadata)
                 await self._save_run_metadata(record.skill_id, metadata)
-                if metadata.status == "success":
-                    await asyncio.to_thread(_sync_latest_run, record.run_dir)
                 record.metadata = metadata
                 break
 
@@ -511,11 +511,14 @@ class RunManager:
             )
             _write_run_metadata(record.run_dir, record.metadata)
             await self._save_run_metadata(record.skill_id, record.metadata)
-            if record.metadata.status == "success":
-                await asyncio.to_thread(_sync_latest_run, record.run_dir)
         await self._copy_final_state_to_storage(record)
-        if record.metadata.status == "success" and not (record.run_dir.parent / "latest").exists():
+        if record.metadata.status == "success":
             await asyncio.to_thread(_sync_latest_run, record.run_dir)
+            await asyncio.to_thread(
+                self.git_service.auto_commit_run,
+                record.run_dir.parent.parent.parent,
+                record.metadata.run_id,
+            )
         await record.ws_queue.put(None)
         with contextlib.suppress(Exception):
             record.process.join(timeout=0)

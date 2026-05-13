@@ -15,6 +15,9 @@ downloads/
 eggs/
 .eggs/
 lib/
+!apps/studio/frontend/src/lib/
+apps/studio/frontend/src/lib/*
+!apps/studio/frontend/src/lib/utils.ts
 lib64/
 parts/
 sdist/
@@ -37,7 +40,7 @@ venv/
 .env copy
 
 # IDE
-.claude/sessions/
+.claude/
 .idea/
 .vscode/
 *.swp
@@ -84,3 +87,17 @@ coverage-*.xml
 coverage.xml
 .coverage
 htmlcov/
+.ccb-scratch-*.md
+
+# Dev-time UI screenshots (root-level, generated during sweeps)
+/phase*.png
+/a1-ui-*.png
+
+# Playwright scratch run scripts + outputs
+apps/studio/uikit/run_pw*.mjs
+apps/studio/uikit/pw-*.mjs
+test-results/
+apps/studio/frontend/test-results/
+
+# Token-table generator scratch
+/update_tokens.py

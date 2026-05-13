@@ -23,6 +23,7 @@ function setupExecute(request: SyncSkillReq, pendingStatus: SkillSyncStatus) {
   const setError = vi.fn()
   const setLastResult = vi.fn()
   const scheduleReset = vi.fn()
+  const onSuccess = vi.fn()
 
   const execute = () =>
     executeSkillSync({
@@ -31,16 +32,21 @@ function setupExecute(request: SyncSkillReq, pendingStatus: SkillSyncStatus) {
       pendingStatus,
       successMessage: (result) => {
         if (request.action === 'save_to_team') return 'Saved to team'
-        if (request.action === 'sync_from_team') return 'Synced from team'
+        if (request.action === 'sync_from_team') {
+          return result.extra?.latest_restored === true
+            ? 'Synced from team — latest snapshot restored'
+            : 'Synced from team'
+        }
         return `PR opened: ${result.pr_url ?? 'review created'}`
       },
+      onSuccess: request.action === 'sync_from_team' ? onSuccess : undefined,
       setStatus: (status) => statusCalls.push(status),
       setError,
       setLastResult,
       scheduleReset,
     })
 
-  return { execute, statusCalls, setError, setLastResult, scheduleReset }
+  return { execute, statusCalls, setError, setLastResult, scheduleReset, onSuccess }
 }
 
 describe('executeSkillSync', () => {
@@ -70,6 +76,26 @@ describe('executeSkillSync', () => {
 
     expect(mockSyncSkill).toHaveBeenCalledWith('skill-1', { action: 'sync_from_team' })
     expect(mockToast.success).toHaveBeenCalledWith('Synced from team')
+  })
+
+  it('sync calls onSyncSuccess with result', async () => {
+    const result: CollaborateResult = { status: 'ok', message: 'synced', extra: { latest_restored: true } }
+    mockSyncSkill.mockResolvedValue(result)
+    const { execute, onSuccess } = setupExecute({ action: 'sync_from_team' }, 'syncing')
+
+    await execute()
+
+    expect(onSuccess).toHaveBeenCalledTimes(1)
+    expect(onSuccess).toHaveBeenCalledWith(result)
+  })
+
+  it('sync toast mentions latest snapshot when latest_restored is true', async () => {
+    mockSyncSkill.mockResolvedValue({ status: 'ok', message: 'synced', extra: { latest_restored: true } })
+    const { execute } = setupExecute({ action: 'sync_from_team' }, 'syncing')
+
+    await execute()
+
+    expect(mockToast.success).toHaveBeenCalledWith('Synced from team — latest snapshot restored')
   })
 
   it('submit calls submit_for_review with dev_branch and pr_title', async () => {

@@ -1,9 +1,10 @@
 import { AxiosError } from 'axios'
-import { X } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { FolderOpen, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../../api/client'
 import type { SkillSummary } from '../../api/types'
 import { useSkillCreator, validateStep } from '../../hooks/useSkillCreator'
+import { selectSkillDirectory } from '../../lib/tauri'
 import type { ToastKind } from '../../types/studio'
 import { errorMessage } from '../../utils/errors'
 import type { WizardData, WizardInput } from '../../templates/skillMdGenerator'
@@ -23,6 +24,7 @@ interface SkillCreatorWizardProps {
 
 export function SkillCreatorWizard({ open, onClose, onCreated, pushToast }: SkillCreatorWizardProps) {
   const { state, dispatch, preview, canNext, isLastStep, stepCount, currentErrors } = useSkillCreator()
+  const [directoryPath, setDirectoryPath] = useState<string | null>(null)
   const trapRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -68,10 +70,12 @@ export function SkillCreatorWizard({ open, onClose, onCreated, pushToast }: Skil
       const response = await api.post<SkillSummary>('/skills', {
         skill_id: state.data.skillId,
         content: preview,
+        directory_path: directoryPath,
       })
       pushToast(`Created skill: ${response.data.id}`, 'success')
       await onCreated(response.data.id)
       dispatch({ type: 'RESET' })
+      setDirectoryPath(null)
       onClose()
     } catch (error) {
       if (error instanceof AxiosError && error.response?.status === 409) {
@@ -81,6 +85,13 @@ export function SkillCreatorWizard({ open, onClose, onCreated, pushToast }: Skil
       pushToast(errorMessage(error), 'error')
     } finally {
       dispatch({ type: 'SET_SUBMITTING', submitting: false })
+    }
+  }
+
+  const chooseDirectory = async () => {
+    const selected = await selectSkillDirectory()
+    if (selected) {
+      setDirectoryPath(selected)
     }
   }
 
@@ -96,7 +107,9 @@ export function SkillCreatorWizard({ open, onClose, onCreated, pushToast }: Skil
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 dark:border-slate-800">
           <div>
             <h1 id="skill-creator-title" className="text-xl font-bold text-gray-900 dark:text-gray-100">New Skill</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">Generate a valid SKILL.md from guided inputs.</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Generate a valid SKILL.md from guided inputs.
+            </p>
           </div>
           <button type="button" aria-label="Close skill creator" onClick={onClose} className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-slate-800 dark:hover:text-gray-100">
             <X className="h-5 w-5" />
@@ -104,6 +117,20 @@ export function SkillCreatorWizard({ open, onClose, onCreated, pushToast }: Skil
         </div>
 
         <StepIndicator stepIndex={state.stepIndex} stepCount={stepCount} />
+
+        <div className="border-b border-gray-200 px-6 py-3 dark:border-slate-800">
+          <button
+            type="button"
+            onClick={() => void chooseDirectory()}
+            className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-slate-700 dark:text-gray-300 dark:hover:bg-slate-800"
+          >
+            <FolderOpen className="h-4 w-4" />
+            Choose folder
+          </button>
+          <span className="ml-3 align-middle text-xs text-gray-500 dark:text-gray-400">
+            {directoryPath ?? 'Default: AgentStudio/Skills'}
+          </span>
+        </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
           {state.stepIndex === 0 ? (
@@ -128,7 +155,7 @@ export function SkillCreatorWizard({ open, onClose, onCreated, pushToast }: Skil
             <StepFirstPhase data={state.data} errors={currentErrors} onChange={setField} />
           ) : null}
           {state.stepIndex === 4 ? (
-            <StepPreview data={state.data} preview={preview} />
+            <StepPreview data={state.data} preview={preview} directoryPath={directoryPath} />
           ) : null}
         </div>
 

@@ -26,6 +26,7 @@ from app.models.errors import LintError
 from app.models.lint import LintResult
 from app.models.runs import RunMetadata
 from app.models.skills import SkillDetail, SkillSummary
+from app.services.git_local import initialize_skill_repository
 
 _LOCATION_RE = re.compile(r"SKILL\.md:(?P<line>\d+)(?::(?P<loc>.*))?$")
 _NAME_LINE_RE = re.compile(
@@ -205,6 +206,8 @@ async def create_new_skill(
         )
 
     await storage.write_text(str(skill_path), content)
+    workspace_dir_for(skill_dir).mkdir(parents=True, exist_ok=True)
+    initialize_skill_repository(skill_dir)
     summary = await _summary_for_skill_dir_async(
         user_id,
         skill_dir,

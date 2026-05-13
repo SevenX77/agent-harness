@@ -34,6 +34,7 @@ def test_openapi_registers_phase0_rest_surface(client: TestClient) -> None:
         "/api/skills/{skill_id}/history",
         "/api/skills/{skill_id}/revert",
         "/api/skills/{skill_id}/sync",
+        "/api/skills/{skill_id}/publish",
         "/api/skills/{skill_id}/fork",
         "/api/skills/{skill_id}/lint",
         "/api/skills/{skill_id}/runs",

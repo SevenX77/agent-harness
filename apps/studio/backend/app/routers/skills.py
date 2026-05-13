@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import NoReturn
 
+import httpx
 from fastapi import APIRouter, Depends
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
-from app.core.backends import get_auth_user_id, get_git_collab, get_metadata, get_storage
+from app.core.backends import get_auth_user_id, get_git_collab, get_metadata, get_registry_client, get_storage
 from app.core.exceptions import error_response, raise_error_response, raise_not_implemented
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
 from app.models.errors import ErrorResponse
 from app.models.git_collab import SyncSkillReq
 from app.models.git_history import GitHistoryItem, RevertSkillReq
+from app.models.publish import PublishResult, PublishSkillReq
 from app.models.skills import (
     CreateSkillReq,
     ForkSkillReq,
@@ -23,6 +26,12 @@ from app.models.skills import (
     UpdateSkillReq,
 )
 from app.models.validation import ValidateInputReq, ValidateInputResponse
+from app.services.artifact_registry import (
+    ArtifactRegistryApiError,
+    ArtifactRegistryClient,
+    build_publish_metadata,
+    build_publish_package,
+)
 from app.services.git_local import (
     GitCommandError,
     GitLocalService,
@@ -163,6 +172,98 @@ async def sync_skill(
             retry_strategy="idempotent",
         )
         raise_error_response(response)
+
+
+@router.post("/{skill_id}/publish", response_model=PublishResult)
+async def publish_skill(
+    skill_id: str,
+    request: PublishSkillReq,
+    user_id: str = Depends(get_auth_user_id),
+    storage: StorageBackend = Depends(get_storage),
+    metadata: MetadataStore = Depends(get_metadata),
+    registry: ArtifactRegistryClient = Depends(get_registry_client),
+) -> PublishResult:
+    skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
+    app_settings = await metadata.read_app_settings()
+    if not app_settings.user_id.strip():
+        response = error_response(
+            error_code="APP_SETTINGS_INCOMPLETE",
+            http_status=400,
+            message="User ID 未配置, 请到 Settings 设置",
+            details={"field": "user_id"},
+            retry_strategy="not_retryable",
+        )
+        raise_error_response(response)
+    if not registry.host:
+        response = error_response(
+            error_code="REGISTRY_NOT_CONFIGURED",
+            http_status=400,
+            message="Artifact Registry Host 未配置",
+            details={"field": "registry_host"},
+            retry_strategy="not_retryable",
+        )
+        raise_error_response(response)
+    if not registry.token:
+        response = error_response(
+            error_code="REGISTRY_NOT_CONFIGURED",
+            http_status=400,
+            message="Artifact Registry Token 未配置",
+            details={"field": "registry_token"},
+            retry_strategy="not_retryable",
+        )
+        raise_error_response(response)
+
+    try:
+        package = await asyncio.to_thread(build_publish_package, skill_dir)
+        publish_metadata = build_publish_metadata(skill_id, app_settings, version=request.version)
+        server_response = await asyncio.to_thread(
+            registry.upload_artifact,
+            skill_id=skill_id,
+            package=package,
+            metadata=publish_metadata,
+        )
+    except ValueError as exc:
+        if "skill_dir" in str(exc) or "directory" in str(exc):
+            response = error_response(
+                error_code="SKILL_DIR_MISSING",
+                http_status=404,
+                message=f"Skill directory missing for publish: {skill_id}",
+                details={"skill_id": skill_id, "error": str(exc)},
+                retry_strategy="not_retryable",
+            )
+            raise_error_response(response)
+        raise
+    except ArtifactRegistryApiError as exc:
+        response = error_response(
+            error_code="REGISTRY_API_ERROR",
+            http_status=502,
+            message=str(exc),
+            details={"status_code": exc.status_code, "body": exc.body},
+            retry_strategy="backoff",
+        )
+        raise_error_response(response)
+    except httpx.RequestError as exc:
+        response = error_response(
+            error_code="REGISTRY_NETWORK_ERROR",
+            http_status=503,
+            message=str(exc),
+            details={"error": str(exc)},
+            retry_strategy="backoff",
+        )
+        raise_error_response(response)
+
+    artifact_id_value = server_response.get("artifact_id")
+    artifact_id = artifact_id_value if isinstance(artifact_id_value, str) else None
+    return PublishResult(
+        status="ok",
+        message="Published to registry",
+        artifact_id=artifact_id,
+        extra={
+            "version": request.version,
+            "package_bytes": len(package),
+            "skill_id": skill_id,
+        },
+    )
 
 
 @router.put("/{skill_id}", response_model=SkillDetail)

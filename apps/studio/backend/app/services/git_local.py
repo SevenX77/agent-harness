@@ -177,6 +177,59 @@ class GitLocalService:
             lock_retry_delays=self.lock_retry_delays,
         )
 
+    def remote_get_url(self, skill_dir: Path, remote: str) -> GitCommandResult:
+        return run_git(
+            skill_dir,
+            "remote",
+            "get-url",
+            remote,
+            timeout_seconds=self.timeout_seconds,
+            lock_retry_delays=self.lock_retry_delays,
+        )
+
+    def remote_add(self, skill_dir: Path, remote: str, url: str) -> GitCommandResult:
+        return run_git(
+            skill_dir,
+            "remote",
+            "add",
+            remote,
+            url,
+            timeout_seconds=self.timeout_seconds,
+            lock_retry_delays=self.lock_retry_delays,
+        )
+
+    def remote_set_url(self, skill_dir: Path, remote: str, url: str) -> GitCommandResult:
+        return run_git(
+            skill_dir,
+            "remote",
+            "set-url",
+            remote,
+            url,
+            timeout_seconds=self.timeout_seconds,
+            lock_retry_delays=self.lock_retry_delays,
+        )
+
+    def push(self, skill_dir: Path, remote: str, branch: str) -> GitCommandResult:
+        return run_git(
+            skill_dir,
+            "push",
+            remote,
+            branch,
+            timeout_seconds=self.timeout_seconds,
+            lock_retry_delays=self.lock_retry_delays,
+        )
+
+    def pull(self, skill_dir: Path, remote: str, branch: str) -> GitCommandResult:
+        return run_git(
+            skill_dir,
+            "pull",
+            "--ff-only",
+            remote,
+            branch,
+            timeout_seconds=self.timeout_seconds,
+            lock_retry_delays=self.lock_retry_delays,
+        )
+
     def revert_to(self, skill_dir: Path, sha: str) -> GitCommandResult:
         try:
             run_git(

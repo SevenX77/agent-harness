@@ -27,12 +27,14 @@ from app.models.runs import (
     RunRequest,
     TokensMetrics,
 )
+from app.models.settings import AppSettings
 from app.models.skills import CreateSkillReq, SkillDetail, SkillSummary, UpdateSkillReq
 from app.models.terminal import TerminalSession
 from app.models.test_inputs import TestInputMetadata
 
 __all__ = [
     "AuditResult",
+    "AppSettings",
     "BatchRunItem",
     "BatchRunRequest",
     "BatchRunResponse",

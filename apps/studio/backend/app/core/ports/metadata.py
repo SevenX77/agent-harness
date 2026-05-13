@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Protocol, TypedDict
 
 from app.models.runs import RunMetadata
+from app.models.settings import AppSettings
 from app.models.skills import SkillSummary
 
 
@@ -30,6 +31,14 @@ class MetadataStore(Protocol):
 
     async def remove_skill_index_entry(self, skill_id: str) -> None:
         """Remove one skill index entry if present."""
+        ...
+
+    async def read_app_settings(self) -> AppSettings:
+        """Return global Studio application settings."""
+        ...
+
+    async def write_app_settings(self, settings: AppSettings) -> None:
+        """Persist global Studio application settings."""
         ...
 
     async def list_skills(self, user_id: str) -> list[SkillSummary]:

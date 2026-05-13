@@ -210,6 +210,39 @@ def test_sync_from_team_pulls(tmp_path: Path) -> None:
     ]
 
 
+def test_sync_from_team_surfaces_latest_restored_true_when_present(tmp_path: Path) -> None:
+    skill_dir = _init_repo(tmp_path)
+
+    def restore_latest(pulled_skill_dir: Path) -> None:
+        latest_dir = pulled_skill_dir / ".workspace" / "runs" / "latest"
+        latest_dir.mkdir(parents=True)
+        (latest_dir / "x.json").write_text("{}", encoding="utf-8")
+
+    local_git = RecordingGit(
+        existing_remote="https://gitea.example.test/alice/skill-repo.git",
+        pull_hook=restore_latest,
+    )
+    service = _service(local_git)
+
+    result = service.sync_from_team(skill_dir, owner="alice", repo="skill-repo")
+
+    assert result.status == "ok"
+    assert result.extra["latest_restored"] is True
+    assert result.extra["branch"] == "main"
+
+
+def test_sync_from_team_surfaces_latest_restored_false_when_absent(tmp_path: Path) -> None:
+    skill_dir = _init_repo(tmp_path)
+    local_git = RecordingGit(existing_remote="https://gitea.example.test/alice/skill-repo.git")
+    service = _service(local_git)
+
+    result = service.sync_from_team(skill_dir, owner="alice", repo="skill-repo")
+
+    assert result.status == "ok"
+    assert result.extra["latest_restored"] is False
+    assert result.extra["branch"] == "main"
+
+
 def test_submit_for_review_creates_pr(tmp_path: Path) -> None:
     skill_dir = _init_repo(tmp_path)
     local_git = RecordingGit(existing_remote="https://gitea.example.test/alice/skill-repo.git")
@@ -255,10 +288,12 @@ class RecordingGit(GitLocalService):
         *,
         existing_remote: str | None = None,
         push_error: str | None = None,
+        pull_hook: object | None = None,
     ) -> None:
         super().__init__()
         self.existing_remote = existing_remote
         self.push_error = push_error
+        self.pull_hook = pull_hook
         self.calls: list[tuple[str, ...]] = []
 
     def remote_get_url(self, skill_dir: Path, remote: str) -> GitCommandResult:
@@ -299,6 +334,8 @@ class RecordingGit(GitLocalService):
 
     def pull(self, skill_dir: Path, remote: str, branch: str) -> GitCommandResult:
         self.calls.append(("pull", remote, branch))
+        if callable(self.pull_hook):
+            self.pull_hook(skill_dir)
         return _result(skill_dir, ("pull", "--ff-only", remote, branch))
 
 

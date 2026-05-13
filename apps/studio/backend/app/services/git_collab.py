@@ -155,12 +155,19 @@ class GitCollaborateService:
     ) -> CollaborateResult:
         self._ensure_origin(skill_dir, owner=owner, repo=repo)
         try:
+            logger.info("pulling team branch %s", branch)
             self.local_git.pull(skill_dir, "origin", branch)
         except GitCommandError as exc:
             if _is_conflict(exc):
                 return CollaborateResult(status="conflict", message="Pull requires conflict resolution")
             raise
-        return CollaborateResult(status="ok", message=f"Pulled {branch} from team")
+        latest_restored = self._latest_snapshot_present(skill_dir)
+        logger.debug("latest run snapshot restored after pull: %s", latest_restored)
+        return CollaborateResult(
+            status="ok",
+            message=f"Pulled {branch} from team",
+            extra={"latest_restored": latest_restored, "branch": branch},
+        )
 
     def submit_for_review(
         self,
@@ -216,6 +223,10 @@ class GitCollaborateService:
                 return True
             raise
         return True
+
+    def _latest_snapshot_present(self, skill_dir: Path) -> bool:
+        latest_dir = skill_dir / LATEST_RUN_PATH
+        return latest_dir.is_dir() and any(latest_dir.iterdir())
 
     def _fallback_to_review(
         self,

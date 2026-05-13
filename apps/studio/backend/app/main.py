@@ -24,6 +24,7 @@ from app.routers import (
     golden,
     lint,
     runs,
+    settings,
     skills,
     system,
     templates,
@@ -71,6 +72,7 @@ def create_app() -> FastAPI:
     studio_app.include_router(lint.router)
     studio_app.include_router(runs.router)
     studio_app.include_router(runs.batch_router)
+    studio_app.include_router(settings.router)
     studio_app.include_router(terminal.router)
     studio_app.include_router(test_inputs.router)
     studio_app.include_router(golden.router)

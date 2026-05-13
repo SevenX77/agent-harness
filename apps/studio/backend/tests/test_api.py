@@ -49,6 +49,7 @@ def test_openapi_registers_phase0_rest_surface(client: TestClient) -> None:
         "/api/skills/{skill_id}/copilot/dispatch",
         "/api/skills/{skill_id}/runs/{run_id}/audit",
         "/api/batch/{batch_id}",
+        "/api/settings",
         "/api/templates",
     }
 

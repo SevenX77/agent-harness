@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.services.git_local import GitCommandError, GitLocalService
 
+LATEST_RUN_PATH = ".workspace/runs/latest"
+TEAM_SAVE_COMMIT_MESSAGE = "team-save: include latest snapshot"
 
 CollaborateStatus = Literal["ok", "requires_review", "conflict", "error"]
 
@@ -118,6 +120,7 @@ class GitCollaborateService:
         branch: str = "main",
     ) -> CollaborateResult:
         self._ensure_origin(skill_dir, owner=owner, repo=repo)
+        latest_included = self._include_latest_snapshot(skill_dir)
         try:
             self.local_git.push(skill_dir, "origin", branch)
         except GitCommandError as exc:
@@ -125,10 +128,14 @@ class GitCollaborateService:
                 return CollaborateResult(
                     status="requires_review",
                     message="Push requires review permissions",
-                    extra={"branch": branch, "remote": "origin"},
+                    extra={"branch": branch, "remote": "origin", "latest_included": latest_included},
                 )
             raise
-        return CollaborateResult(status="ok", message=f"Pushed {branch} to team")
+        return CollaborateResult(
+            status="ok",
+            message=f"Pushed {branch} to team",
+            extra={"latest_included": latest_included},
+        )
 
     def sync_from_team(
         self,
@@ -189,6 +196,18 @@ class GitCollaborateService:
             raise ValueError("Gitea host is not configured")
         return f"{self.gitea_host}/{owner}/{repo}.git"
 
+    def _include_latest_snapshot(self, skill_dir: Path) -> bool:
+        if not (skill_dir / LATEST_RUN_PATH).exists():
+            return False
+        self.local_git.force_add_path(skill_dir, LATEST_RUN_PATH)
+        try:
+            self.local_git.commit(skill_dir, TEAM_SAVE_COMMIT_MESSAGE)
+        except GitCommandError as exc:
+            if _is_empty_commit(exc):
+                return True
+            raise
+        return True
+
 
 def _is_permission_denied(exc: GitCommandError) -> bool:
     text = f"{exc.result.stdout}\n{exc.result.stderr}".lower()
@@ -198,6 +217,11 @@ def _is_permission_denied(exc: GitCommandError) -> bool:
 def _is_conflict(exc: GitCommandError) -> bool:
     text = f"{exc.result.stdout}\n{exc.result.stderr}".lower()
     return "conflict" in text or "non-fast-forward" in text or "not possible to fast-forward" in text
+
+
+def _is_empty_commit(exc: GitCommandError) -> bool:
+    text = f"{exc.result.stdout}\n{exc.result.stderr}".lower()
+    return "nothing to commit" in text or "no changes added to commit" in text
 
 
 def _pr_url(payload: dict[str, Any]) -> str | None:

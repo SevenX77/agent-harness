@@ -71,6 +71,39 @@ def test_save_to_team_403_returns_requires_review(tmp_path: Path) -> None:
     assert result.extra["branch"] == "main"
 
 
+def test_save_to_team_force_adds_latest_when_present(tmp_path: Path) -> None:
+    skill_dir = _init_repo(tmp_path)
+    latest_dir = skill_dir / ".workspace" / "runs" / "latest"
+    latest_dir.mkdir(parents=True)
+    (latest_dir / "run_metadata.json").write_text("{}", encoding="utf-8")
+    local_git = RecordingGit(existing_remote="https://gitea.example.test/alice/skill-repo.git")
+    service = _service(local_git)
+
+    result = service.save_to_team(skill_dir, owner="alice", repo="skill-repo")
+
+    assert result.extra["latest_included"] is True
+    assert local_git.calls == [
+        ("remote_get_url", "origin"),
+        ("force_add_path", ".workspace/runs/latest"),
+        ("commit", "team-save: include latest snapshot", "allow_empty=False"),
+        ("push", "origin", "main"),
+    ]
+
+
+def test_save_to_team_skips_latest_when_absent(tmp_path: Path) -> None:
+    skill_dir = _init_repo(tmp_path)
+    local_git = RecordingGit(existing_remote="https://gitea.example.test/alice/skill-repo.git")
+    service = _service(local_git)
+
+    result = service.save_to_team(skill_dir, owner="alice", repo="skill-repo")
+
+    assert result.extra["latest_included"] is False
+    assert local_git.calls == [
+        ("remote_get_url", "origin"),
+        ("push", "origin", "main"),
+    ]
+
+
 def test_sync_from_team_pulls(tmp_path: Path) -> None:
     skill_dir = _init_repo(tmp_path)
     local_git = RecordingGit(existing_remote="https://gitea.example.test/alice/skill-repo.git")
@@ -151,6 +184,14 @@ class RecordingGit(GitLocalService):
         self.calls.append(("remote_set_url", remote, url))
         self.existing_remote = url
         return _result(skill_dir, ("remote", "set-url", remote, url))
+
+    def force_add_path(self, skill_dir: Path, path: str) -> GitCommandResult:
+        self.calls.append(("force_add_path", path))
+        return _result(skill_dir, ("add", "-f", path))
+
+    def commit(self, skill_dir: Path, message: str, *, allow_empty: bool = False) -> GitCommandResult:
+        self.calls.append(("commit", message, f"allow_empty={allow_empty}"))
+        return _result(skill_dir, ("commit", "-m", message))
 
     def push(self, skill_dir: Path, remote: str, branch: str) -> GitCommandResult:
         self.calls.append(("push", remote, branch))

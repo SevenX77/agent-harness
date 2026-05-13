@@ -146,6 +146,7 @@ def test_git_service_wrappers_build_expected_commands(
 
     service.add(tmp_path)
     service.add(tmp_path, ".workspace/runs/latest", force=True)
+    service.force_add_path(tmp_path, ".workspace/runs/latest")
     service.commit(tmp_path, "auto-run-1")
     assert service.log(tmp_path) == ["abc auto-run-1"]
     service.reset_hard(tmp_path, "abc")
@@ -192,6 +193,30 @@ def test_auto_commit_respects_gitignore_latest_but_commits_golden_and_predict(
     assert ".workspace/golden/run-1/golden_metadata.json" in committed_files
     assert ".workspace/predict/latest_predict.json" in committed_files
     assert ".workspace/runs/latest" not in committed_files
+
+
+def test_force_add_path_overrides_gitignore(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("skill\n", encoding="utf-8")
+    service = GitLocalService()
+    service.init(skill_dir)
+    run_git(skill_dir, "config", "--local", "user.name", "tester")
+    run_git(skill_dir, "config", "--local", "user.email", "tester@studio.local")
+    (skill_dir / ".gitignore").write_text("/.workspace/*\n", encoding="utf-8")
+    service.add(skill_dir)
+    service.commit(skill_dir, "initial")
+
+    latest_dir = skill_dir / ".workspace" / "runs" / "latest"
+    latest_dir.mkdir(parents=True)
+    (latest_dir / "x.json").write_text("data\n", encoding="utf-8")
+
+    service.add(skill_dir)
+    assert ".workspace/runs/latest/x.json" not in service.status(skill_dir).stdout
+
+    service.force_add_path(skill_dir, ".workspace/runs/latest")
+
+    assert "A  .workspace/runs/latest/x.json" in service.status(skill_dir).stdout
 
 
 def test_studio_gitignore_template_is_exact(tmp_path: Path) -> None:

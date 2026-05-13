@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
+import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +15,10 @@ import aiofiles  # type: ignore[import-untyped]
 
 from app.core.ports.metadata import SkillIndexEntry
 from app.models.runs import RunMetadata
+from app.models.settings import AppSettings
 from app.models.skills import SkillSummary
+
+logger = logging.getLogger(__name__)
 
 
 class LocalJsonMetadataStore:
@@ -20,6 +27,7 @@ class LocalJsonMetadataStore:
     def __init__(self, global_config_dir: Path, workspaces_root: Path) -> None:
         self._global_config_dir = global_config_dir
         self._workspaces_root = workspaces_root
+        self._app_settings_lock = threading.Lock()
 
     async def list_skill_index(self) -> dict[str, SkillIndexEntry]:
         """Return the global skill index, tolerating missing or invalid JSON."""
@@ -68,6 +76,14 @@ class LocalJsonMetadataStore:
             return
         del index[skill_id]
         await self._write_skill_index(index)
+
+    async def read_app_settings(self) -> AppSettings:
+        """Return global app settings, falling back to defaults for missing or bad files."""
+        return await asyncio.to_thread(self._read_app_settings_sync)
+
+    async def write_app_settings(self, settings: AppSettings) -> None:
+        """Atomically persist global app settings with user-only file permissions."""
+        await asyncio.to_thread(self._write_app_settings_sync, settings)
 
     async def list_skills(self, user_id: str) -> list[SkillSummary]:
         """Return persisted skill summaries when present."""
@@ -150,6 +166,9 @@ class LocalJsonMetadataStore:
     def _skill_index_path(self) -> Path:
         return self._global_config_dir / "skill_index.json"
 
+    def _app_settings_path(self) -> Path:
+        return self._global_config_dir / "app_settings.json"
+
     async def _write_skill_index(self, index: dict[str, SkillIndexEntry]) -> None:
         index_path = self._skill_index_path()
         await asyncio.to_thread(index_path.parent.mkdir, parents=True, exist_ok=True)
@@ -163,3 +182,42 @@ class LocalJsonMetadataStore:
         async with aiofiles.open(index_path, "w", encoding="utf-8") as file:
             await file.write(json.dumps(payload, indent=2, sort_keys=True))
             await file.write("\n")
+
+    def _read_app_settings_sync(self) -> AppSettings:
+        settings_path = self._app_settings_path()
+        with self._app_settings_lock:
+            if not settings_path.exists():
+                return AppSettings()
+            try:
+                raw = json.loads(settings_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                logger.warning("Invalid app settings JSON at %s; using defaults", settings_path)
+                return AppSettings()
+            return AppSettings.model_validate(raw)
+
+    def _write_app_settings_sync(self, settings: AppSettings) -> None:
+        settings_path = self._app_settings_path()
+        payload = settings.model_dump(mode="json")
+        serialized = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+
+        with self._app_settings_lock:
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.parent.chmod(0o700)
+            fd, tmp_name = tempfile.mkstemp(
+                prefix=f".{settings_path.name}.",
+                suffix=".tmp",
+                dir=settings_path.parent,
+            )
+            tmp_path = Path(tmp_name)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
+                    tmp_file.write(serialized)
+                    tmp_file.write("\n")
+                    tmp_file.flush()
+                    os.fsync(tmp_file.fileno())
+                tmp_path.chmod(0o600)
+                os.replace(tmp_path, settings_path)
+                settings_path.chmod(0o600)
+            finally:
+                if tmp_path.exists():
+                    tmp_path.unlink()

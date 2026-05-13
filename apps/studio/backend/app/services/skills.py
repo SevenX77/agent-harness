@@ -181,7 +181,8 @@ async def create_new_skill(
         raise_error_response(response)
 
     saved_summary = await metadata.get_skill_summary(user_id, skill_id)
-    if saved_summary is not None:
+    index_entry = await metadata.get_skill_index_entry(skill_id)
+    if saved_summary is not None or index_entry is not None:
         raise standard_http_exception(
             "SKILL_ALREADY_EXISTS",
             f"Skill already exists: {skill_id}",
@@ -191,7 +192,7 @@ async def create_new_skill(
     skill_dir = (
         await _validated_directory_path(user_id, skill_id, directory_path, metadata)
         if directory_path
-        else _workspace_skills_dir_for(user_id) / skill_id
+        else config.DEFAULT_SKILLS_ROOT / skill_id
     )
     public_path = config.SKILLS_DIR / skill_id / "SKILL.md"
     skill_path = skill_dir / "SKILL.md"
@@ -210,8 +211,11 @@ async def create_new_skill(
         metadata,
         skill_id=skill_id,
     )
-    if directory_path:
-        summary = summary.model_copy(update={"directory_path": str(skill_dir)})
+    summary = summary.model_copy(update={"directory_path": str(skill_dir)})
+    await metadata.save_skill_index_entry(
+        skill_id,
+        {"absolute_path": str(skill_dir), "l2_remote_url": ""},
+    )
     await metadata.save_skill_summary(user_id, summary)
     return summary
 
@@ -462,6 +466,18 @@ async def _validated_directory_path(
         _raise_invalid_directory_path(directory_path, "directory_path parent must exist")
 
     resolved_skill_dir = skill_dir.resolve()
+    for indexed_skill_id, entry in (await metadata.list_skill_index()).items():
+        if indexed_skill_id == skill_id:
+            continue
+        if Path(entry["absolute_path"]).resolve() == resolved_skill_dir:
+            response = error_response(
+                error_code="SKILL_ALREADY_EXISTS",
+                http_status=409,
+                message=f"Directory path is already used by skill {indexed_skill_id}",
+                details={"skill_id": indexed_skill_id, "directory_path": str(resolved_skill_dir)},
+                retry_strategy="not_retryable",
+            )
+            raise_error_response(response)
     for summary in await metadata.list_skills(user_id):
         if summary.id == skill_id or not summary.directory_path:
             continue

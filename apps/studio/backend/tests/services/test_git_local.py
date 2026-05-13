@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from app.services.git_local import (
     GitCommandError,
+    GitFileLockedError,
     GitCommandTimeoutError,
     GitLocalService,
     STUDIO_GITIGNORE,
@@ -61,6 +62,69 @@ def test_run_git_timeout_raises_timeout(monkeypatch: pytest.MonkeyPatch, tmp_pat
 def test_run_git_missing_cwd_raises_file_not_found(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         run_git(tmp_path / "missing", "status")
+
+
+def test_run_git_lock_error_retries_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls = 0
+
+    def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        del kwargs
+        calls += 1
+        if calls < 3:
+            return subprocess.CompletedProcess(command, 128, stdout="", stderr="Unable to create '.git/index.lock'")
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = run_git(tmp_path, "commit", "-m", "x", lock_retry_delays=(0, 0))
+
+    assert result.stdout == "ok"
+    assert calls == 3
+
+
+def test_run_git_lock_error_exhaustion_raises_file_locked(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls = 0
+
+    def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        del kwargs
+        calls += 1
+        return subprocess.CompletedProcess(command, 128, stdout="", stderr="fatal: .git/index.lock exists")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(GitFileLockedError) as exc_info:
+        run_git(tmp_path, "add", "-A", lock_retry_delays=(0, 0))
+
+    assert exc_info.value.error_code == "GIT_FILE_LOCKED"
+    assert calls == 3
+
+
+def test_run_git_non_lock_error_does_not_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls = 0
+
+    def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        del kwargs
+        calls += 1
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr="nothing to commit")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(GitCommandError):
+        run_git(tmp_path, "commit", "-m", "x", lock_retry_delays=(0, 0))
+
+    assert calls == 1
 
 
 def test_git_service_wrappers_build_expected_commands(

@@ -29,6 +29,7 @@ class BackendConfig(BaseSettings):
     metadata_type: str = "local"
     eventbus_type: str = "memory"
     auth_type: str = "none"
+    global_config_dir: Path = Field(default_factory=lambda: config.APP_SETTINGS_DIR)
     workspaces_root: Path = Field(default_factory=lambda: config.WORKSPACES_DIR)
     default_user_id: str = Field(default_factory=lambda: config.DEFAULT_USER_ID)
 
@@ -54,7 +55,10 @@ def get_metadata() -> MetadataStore:
     cfg = get_backend_config()
     if cfg.metadata_type != "local":
         raise ValueError(f"Unsupported metadata backend: {cfg.metadata_type}")
-    return LocalJsonMetadataStore(cfg.workspaces_root)
+    return LocalJsonMetadataStore(
+        global_config_dir=cfg.global_config_dir,
+        workspaces_root=cfg.workspaces_root,
+    )
 
 
 @lru_cache

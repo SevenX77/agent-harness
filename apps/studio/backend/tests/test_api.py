@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from app.core import config
 from app.models.runs import RunMetadata
 from app.services.event_bus import event_bus
 from app.services.run_manager import run_manager
@@ -117,7 +118,7 @@ def test_put_updates_workspace_atomically_and_invalid_content_preserves_file(
     assert "Updated text segments" in workspace_skill.read_text(encoding="utf-8")
 
 
-def test_create_skill_without_directory_path_uses_workspace(
+def test_create_skill(
     client: TestClient,
     studio_roots: tuple[Path, Path],
 ) -> None:
@@ -134,11 +135,13 @@ def test_create_skill_without_directory_path_uses_workspace(
     assert body["name"] == "idea-generator"
     assert body["description"] == "Draft structured ideas"
     assert body["phase_count"] == 1
-    assert body["directory_path"] is None
+    skill_dir = config.DEFAULT_SKILLS_ROOT / "idea-generator"
+    assert body["directory_path"] == str(skill_dir)
 
-    skill_dir = workspaces_dir / "default" / "skills" / "idea-generator"
     assert (skill_dir / "SKILL.md").exists()
-    assert (skill_dir / "skill_summary.json").exists()
+    assert not (workspaces_dir / "default" / "skills" / "idea-generator" / "SKILL.md").exists()
+    index = json.loads(config.SKILL_INDEX_PATH.read_text(encoding="utf-8"))
+    assert index["idea-generator"]["absolute_path"] == str(skill_dir)
 
 
 def test_create_skill_with_directory_path_writes_to_user_dir(
@@ -166,6 +169,8 @@ def test_create_skill_with_directory_path_writes_to_user_dir(
     assert body["directory_path"] == str(skill_dir)
     assert (skill_dir / "SKILL.md").exists()
     assert not (workspaces_dir / "default" / "skills" / "idea-generator" / "SKILL.md").exists()
+    index = json.loads(config.SKILL_INDEX_PATH.read_text(encoding="utf-8"))
+    assert index["idea-generator"]["absolute_path"] == str(skill_dir)
     assert "idea-generator" in {
         item["id"] for item in client.get("/api/skills").json() if item["directory_path"]
     }

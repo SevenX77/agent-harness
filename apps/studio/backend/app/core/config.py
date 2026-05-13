@@ -28,8 +28,16 @@ def resource_dir_from_env(environ: Mapping[str, str]) -> Path:
     return paths.resource_dir_from_env(environ, REPO_ROOT)
 
 
+def app_settings_dir(environ: Mapping[str, str]) -> Path:
+    return paths.app_settings_dir(environ)
+
+
 def default_skills_dir(resource_dir: Path) -> Path:
     return paths.default_skills_dir(resource_dir)
+
+
+def default_skills_root(settings_dir: Path) -> Path:
+    return paths.default_skills_root(settings_dir)
 
 
 def default_workspaces_dir(resource_dir: Path) -> Path:
@@ -37,7 +45,11 @@ def default_workspaces_dir(resource_dir: Path) -> Path:
 
 
 RESOURCE_DIR = resource_dir_from_env(os.environ)
+APP_SETTINGS_DIR = app_settings_dir(os.environ)
+SKILL_INDEX_PATH = paths.skill_index_path(APP_SETTINGS_DIR)
+APP_SETTINGS_PATH = paths.app_settings_path(APP_SETTINGS_DIR)
 SKILLS_DIR = default_skills_dir(RESOURCE_DIR)
+DEFAULT_SKILLS_ROOT = default_skills_root(APP_SETTINGS_DIR)
 WORKSPACES_DIR = default_workspaces_dir(RESOURCE_DIR)
 
 

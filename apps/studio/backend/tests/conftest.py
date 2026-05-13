@@ -17,6 +17,7 @@ for path in (STUDIO_BACKEND, SRC_CORE):
         sys.path.insert(0, path_str)
 
 from app.core import config  # noqa: E402
+from app.core.backends import clear_backend_caches  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.services.run_manager import run_manager  # noqa: E402
 from app.services.terminal_manager import terminal_manager  # noqa: E402
@@ -27,6 +28,8 @@ from fastapi.testclient import TestClient  # noqa: E402
 def studio_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
     skills_dir = tmp_path / "skills"
     workspaces_dir = tmp_path / "workspaces"
+    global_config_dir = tmp_path / "global-config"
+    default_skills_root = global_config_dir / "Skills"
     skills_dir.mkdir()
     _write_graph_skill(skills_dir / "text-segmentation", "text-segmentation", "Text segments")
     _write_graph_skill(skills_dir / "event-extraction", "event-extraction", "Events")
@@ -34,6 +37,10 @@ def studio_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path,
     _write_graph_skill(skills_dir / "global-synthesis", "global-synthesis", "Global")
     monkeypatch.setattr(config, "SKILLS_DIR", skills_dir)
     monkeypatch.setattr(config, "WORKSPACES_DIR", workspaces_dir)
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", global_config_dir)
+    monkeypatch.setattr(config, "SKILL_INDEX_PATH", global_config_dir / "skill_index.json")
+    monkeypatch.setattr(config, "DEFAULT_SKILLS_ROOT", default_skills_root)
+    clear_backend_caches()
     return skills_dir, workspaces_dir
 
 
@@ -44,6 +51,7 @@ def client(studio_roots: tuple[Path, Path]) -> Iterator[TestClient]:
         yield test_client
     run_manager._runs.clear()
     terminal_manager._sessions.clear()
+    clear_backend_caches()
 
 
 def _write_graph_skill(skill_dir: Path, name: str, description: str) -> None:

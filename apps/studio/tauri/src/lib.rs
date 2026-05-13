@@ -1,5 +1,6 @@
 mod sidecar;
 
+use std::process::Command;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -50,12 +51,79 @@ fn get_sidecar_stderr(state: tauri::State<'_, SidecarAppState>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn spawn_tool(bin: &str, path: &str) -> Result<(), String> {
+    Command::new(bin)
+        .arg(path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("failed to spawn {bin}: {error}"))
+}
+
+#[tauri::command]
+fn open_in_cursor(path: String) -> Result<(), String> {
+    spawn_tool("cursor", &path)
+}
+
+#[tauri::command]
+fn open_in_codex(path: String) -> Result<(), String> {
+    spawn_tool("codex", &path)
+}
+
+#[tauri::command]
+fn open_in_terminal(path: String) -> Result<(), String> {
+    if cfg!(target_os = "macos") {
+        return Command::new("open")
+            .args(["-a", "Terminal", &path])
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("failed to open Terminal: {error}"));
+    }
+
+    if cfg!(target_os = "linux") {
+        return Command::new("gnome-terminal")
+            .args(["--working-directory", &path])
+            .spawn()
+            .or_else(|_| {
+                Command::new("xterm")
+                    .args([
+                        "-e",
+                        "sh",
+                        "-lc",
+                        "cd \"$1\" && exec \"${SHELL:-sh}\"",
+                        "sh",
+                        &path,
+                    ])
+                    .spawn()
+            })
+            .map(|_| ())
+            .map_err(|error| format!("failed to open terminal: {error}"));
+    }
+
+    if cfg!(target_os = "windows") {
+        return Command::new("wt.exe")
+            .args(["-d", &path])
+            .spawn()
+            .or_else(|_| {
+                Command::new("cmd")
+                    .args(["/c", "start", "cmd", "/k", "cd", "/d", &path])
+                    .spawn()
+            })
+            .map(|_| ())
+            .map_err(|error| format!("failed to open terminal: {error}"));
+    }
+
+    Err("opening a terminal is not supported on this platform".to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             get_sidecar_config,
-            get_sidecar_stderr
+            get_sidecar_stderr,
+            open_in_cursor,
+            open_in_codex,
+            open_in_terminal
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

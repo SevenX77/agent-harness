@@ -22,6 +22,11 @@ CORS_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
+_extra_cors_origins = os.environ.get("STUDIO_CORS_EXTRA_ORIGINS", "").strip()
+if _extra_cors_origins:
+    CORS_ORIGINS = CORS_ORIGINS + [
+        origin.strip() for origin in _extra_cors_origins.split(",") if origin.strip()
+    ]
 
 
 def resource_dir_from_env(environ: Mapping[str, str]) -> Path:

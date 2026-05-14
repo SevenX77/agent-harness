@@ -83,15 +83,17 @@ pub struct SidecarRuntimeConfig {
     pub ws_url: String,
     #[serde(rename = "resourceDir")]
     pub resource_dir: String,
+    pub api_token: String,
 }
 
 impl SidecarRuntimeConfig {
-    fn new(port: u16, resource_dir: &Path) -> Self {
+    fn new(port: u16, resource_dir: &Path, api_token: &str) -> Self {
         Self {
             port,
             base_url: format!("http://127.0.0.1:{port}/api"),
             ws_url: format!("ws://127.0.0.1:{port}/ws"),
             resource_dir: resource_dir.display().to_string(),
+            api_token: api_token.to_string(),
         }
     }
 }
@@ -115,17 +117,17 @@ impl SidecarManager {
 
         for _ in 0..attempts {
             let port = allocate_loopback_port()?;
-            let token = generate_shutdown_token();
+            let api_token = generate_api_token();
             let stderr_lines = Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_RING_LINES)));
             let mut child =
-                spawn_sidecar_process(&config, port, &token, Arc::clone(&stderr_lines))?;
+                spawn_sidecar_process(&config, port, &api_token, Arc::clone(&stderr_lines))?;
 
             if wait_for_health(port, config.health_timeout) {
                 return Ok(Self {
                     state: Mutex::new(SidecarState {
                         child: Some(child),
-                        token,
-                        runtime_config: SidecarRuntimeConfig::new(port, &config.resource_dir),
+                        token: api_token.clone(),
+                        runtime_config: SidecarRuntimeConfig::new(port, &config.resource_dir, &api_token),
                         stderr_lines,
                         shutdown_timeout: config.shutdown_timeout,
                     }),
@@ -194,10 +196,6 @@ pub fn uvicorn_args(port: u16) -> Vec<String> {
     .collect()
 }
 
-pub fn shutdown_header_name() -> &'static str {
-    "x-studio-shutdown-token"
-}
-
 pub fn python_executable_path(tauri_dir: &Path) -> PathBuf {
     let runtime_dir = python_runtime_dir(tauri_dir);
     if cfg!(windows) {
@@ -243,7 +241,7 @@ fn host_target_triple() -> &'static str {
 fn spawn_sidecar_process(
     config: &SidecarLaunchConfig,
     port: u16,
-    token: &str,
+    api_token: &str,
     stderr_lines: Arc<Mutex<VecDeque<String>>>,
 ) -> Result<GroupChild, SidecarError> {
     let mut command = Command::new(&config.python);
@@ -255,7 +253,7 @@ fn spawn_sidecar_process(
             python_path_env(&config.site_packages, &config.backend_dir),
         )
         .env("STUDIO_RESOURCE_DIR", &config.resource_dir)
-        .env("STUDIO_SHUTDOWN_TOKEN", token)
+        .env("STUDIO_API_TOKEN", api_token)
         .env("STUDIO_EXIT_ON_ORPHAN", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -327,7 +325,7 @@ fn post_shutdown(port: u16, token: &str) -> Result<(), reqwest::Error> {
     let client = reqwest::blocking::Client::new();
     client
         .post(format!("http://127.0.0.1:{port}/shutdown"))
-        .header(shutdown_header_name(), token)
+        .bearer_auth(token)
         .timeout(Duration::from_millis(500))
         .send()
         .map(|_| ())
@@ -364,10 +362,10 @@ fn recent_stderr(stderr_lines: &Arc<Mutex<VecDeque<String>>>) -> Vec<String> {
         .collect()
 }
 
-fn generate_shutdown_token() -> String {
+fn generate_api_token() -> String {
     rand::rng()
         .sample_iter(Alphanumeric)
-        .take(48)
+        .take(64)
         .map(char::from)
         .collect()
 }
@@ -394,8 +392,10 @@ mod tests {
     }
 
     #[test]
-    fn shutdown_uses_expected_token_header() {
-        assert_eq!(shutdown_header_name(), "x-studio-shutdown-token");
+    fn api_token_is_generated_and_64_chars_alphanumeric() {
+        let token = generate_api_token();
+        assert_eq!(token.len(), 64);
+        assert!(token.chars().all(|ch| ch.is_ascii_alphanumeric()));
     }
 
     #[test]
@@ -406,10 +406,11 @@ mod tests {
 
     #[test]
     fn runtime_config_uses_dynamic_http_and_ws_urls() {
-        let config = SidecarRuntimeConfig::new(45678, Path::new("/tmp/studio-resource"));
+        let config = SidecarRuntimeConfig::new(45678, Path::new("/tmp/studio-resource"), "token");
         assert_eq!(config.base_url, "http://127.0.0.1:45678/api");
         assert_eq!(config.ws_url, "ws://127.0.0.1:45678/ws");
         assert_eq!(config.resource_dir, "/tmp/studio-resource");
+        assert_eq!(config.api_token, "token");
     }
 
     #[test]
@@ -431,11 +432,12 @@ mod tests {
 
     #[test]
     fn runtime_config_serializes_frontend_contract_field_names() {
-        let config = SidecarRuntimeConfig::new(45678, Path::new("/tmp/studio-resource"));
+        let config = SidecarRuntimeConfig::new(45678, Path::new("/tmp/studio-resource"), "token");
         let json = serde_json::to_value(config).expect("serialize config");
         assert_eq!(json["baseURL"], "http://127.0.0.1:45678/api");
         assert_eq!(json["wsURL"], "ws://127.0.0.1:45678/ws");
         assert_eq!(json["resourceDir"], "/tmp/studio-resource");
+        assert_eq!(json["api_token"], "token");
     }
 
     #[cfg(unix)]

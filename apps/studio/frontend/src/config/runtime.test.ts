@@ -18,6 +18,7 @@ describe('runtime config', () => {
       baseURL: 'http://localhost:8787/api',
       wsURL: 'ws://localhost:8787/ws',
       resourceDir: '',
+      api_token: null,
     })
   })
 
@@ -31,6 +32,7 @@ describe('runtime config', () => {
           baseURL: 'http://127.0.0.1:49152/api/',
           wsURL: 'ws://127.0.0.1:49152/ws/',
           resourceDir: '/tmp/studio',
+          api_token: 'secret-token',
         } as T
       },
     })
@@ -40,6 +42,7 @@ describe('runtime config', () => {
       baseURL: 'http://127.0.0.1:49152/api',
       wsURL: 'ws://127.0.0.1:49152/ws',
       resourceDir: '/tmp/studio',
+      api_token: 'secret-token',
     })
   })
 

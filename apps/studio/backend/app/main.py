@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hmac
+import logging
 import os
 import threading
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
 
 from app.core.backends import clear_backend_caches
 from app.core.config import DEFAULT_STUDIO_PORT
@@ -38,6 +41,8 @@ from app.services.run_manager import run_manager
 from app.services.skills import ensure_workspace_layout
 from app.services.terminal_manager import terminal_manager
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -56,6 +61,42 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await run_manager.shutdown()
 
 
+def configure_api_auth(studio_app: FastAPI) -> None:
+    api_token = os.environ.get("STUDIO_API_TOKEN", "").strip() or None
+    if api_token is None:
+        logger.warning(
+            "STUDIO_API_TOKEN not set, running in DEV MODE without authentication. "
+            "This is only safe for local single-user development."
+        )
+
+    @studio_app.middleware("http")
+    async def auth_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
+        if request.url.path in ("/health", "/api/health"):
+            return await call_next(request)
+        if api_token is None:
+            return await call_next(request)
+
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return JSONResponse(
+                {"error_code": "UNAUTHORIZED", "message": "Missing Bearer token"},
+                status_code=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        token = auth_header[7:]
+        if not _constant_time_compare(token, api_token):
+            return JSONResponse(
+                {"error_code": "INVALID_TOKEN", "message": "Invalid Bearer token"},
+                status_code=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        return await call_next(request)
+
+
+def _constant_time_compare(a: str, b: str) -> bool:
+    return hmac.compare_digest(a.encode(), b.encode())
+
+
 def create_app() -> FastAPI:
     """Create the Studio FastAPI application."""
     studio_app = FastAPI(
@@ -64,6 +105,7 @@ def create_app() -> FastAPI:
         description="FastAPI backend for graph-agent-harness Skill Studio.",
         lifespan=lifespan,
     )
+    configure_api_auth(studio_app)
     configure_cors(studio_app)
     register_exception_handlers(studio_app)
 

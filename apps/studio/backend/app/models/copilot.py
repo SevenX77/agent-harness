@@ -1,4 +1,4 @@
-"""Studio Copilot V1 API models."""
+"""Studio Copilot API models."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from typing import Annotated, Any, Literal, TypeAlias
 from pydantic import BaseModel, ConfigDict, Field
 
 CopilotBackend: TypeAlias = Literal["claude", "deepseek", "gemini", "openai"]
+ProviderKind: TypeAlias = Literal["anthropic", "openai-compat", "google"]
 CopilotToolName: TypeAlias = Literal["Read", "Write", "Edit", "Bash"]
 CopilotView: TypeAlias = Literal[
     "WelcomeScreen",
@@ -19,62 +20,33 @@ CopilotView: TypeAlias = Literal[
 ]
 
 
-class BackendStatus(BaseModel):
-    """Sanitized credential state for a backend."""
+class ProviderConfig(BaseModel):
+    """One configured Copilot provider."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
-    has_key: bool
-    last4: str | None = None
+    id: str
+    name: str
+    kind: ProviderKind
+    api_key: str = ""
     base_url: str = ""
+    active_model_id: str | None = None
 
 
-class CredentialsReadResponse(BaseModel):
-    """Sanitized credential response."""
+class CopilotCredentials(BaseModel):
+    """Credential file schema stored at ``~/.studio/copilot.json``."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
-    backends: dict[CopilotBackend, BackendStatus]
-    active_backend: CopilotBackend
-
-
-class CredentialsWriteRequest(BaseModel):
-    """Credential write or active backend switch request."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    backend: CopilotBackend
-    api_key: str | None
-    base_url: str | None = None
-    set_active: bool = False
+    active_provider_id: str
+    providers: list[ProviderConfig]
 
 
-class TestCredentialsRequest(BaseModel):
-    """Candidate Copilot backend credentials for connectivity testing."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    backend: CopilotBackend
-    api_key: str
-    base_url: str = ""
-
-
-class TestCredentialsResponse(BaseModel):
-    """Connectivity test result for candidate Copilot credentials."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    status: Literal[
-        "ok",
-        "invalid_key",
-        "rate_limited",
-        "quota_exceeded",
-        "network_error",
-        "timeout",
-    ]
-    latency_ms: int | None = None
-    model_seen: str | None = None
-    message: str | None = None
+BackendStatus = ProviderConfig
+CredentialsReadResponse = CopilotCredentials
+CredentialsWriteRequest = CopilotCredentials
+TestCredentialsRequest = ProviderConfig
+TestCredentialsResponse = CopilotCredentials
 
 
 class CopilotEventBase(BaseModel):

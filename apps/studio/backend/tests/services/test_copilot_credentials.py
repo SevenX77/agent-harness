@@ -6,10 +6,10 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+from app.models.copilot import CopilotCredentials, ProviderConfig
 from app.services.copilot_credentials import (
-    BackendCredentials,
-    CredentialsData,
     credentials_path,
+    default_credentials,
     read_credentials,
     write_credentials,
 )
@@ -24,11 +24,23 @@ def test_read_credentials_returns_default_when_file_missing(
 
     data = read_credentials()
 
-    assert data.active_backend == "claude"
-    assert set(data.backends) == {"claude", "deepseek", "gemini", "openai"}
-    assert all(backend.api_key == "" for backend in data.backends.values())
-    assert all(backend.base_url == "" for backend in data.backends.values())
-    assert "v1_5_placeholder" not in data.backends["gemini"].model_fields_set
+    assert data == default_credentials()
+    assert data.active_provider_id == "default-claude"
+    assert [provider.id for provider in data.providers] == [
+        "default-claude",
+        "default-openai",
+        "default-deepseek",
+        "default-gemini",
+    ]
+    assert [provider.kind for provider in data.providers] == [
+        "anthropic",
+        "openai-compat",
+        "openai-compat",
+        "google",
+    ]
+    assert all(provider.api_key == "" for provider in data.providers)
+    assert all(provider.base_url == "" for provider in data.providers)
+    assert all(provider.active_model_id is None for provider in data.providers)
 
 
 def test_write_credentials_is_atomic_and_chmod_600(
@@ -36,14 +48,12 @@ def test_write_credentials_is_atomic_and_chmod_600(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    data = CredentialsData(
-        backends={
-            "claude": BackendCredentials(api_key="claude-key"),
-            "deepseek": BackendCredentials(api_key="deepseek-key"),
-            "gemini": BackendCredentials(api_key=""),
-            "openai": BackendCredentials(api_key=""),
-        },
-        active_backend="deepseek",
+    data = CopilotCredentials(
+        active_provider_id="default-openai",
+        providers=[
+            ProviderConfig(id="default-claude", name="Claude", kind="anthropic", api_key="claude-key"),
+            ProviderConfig(id="default-openai", name="OpenAI", kind="openai-compat", api_key="openai-key"),
+        ],
     )
 
     write_credentials(data)
@@ -59,17 +69,25 @@ def test_read_after_write_round_trips(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    data = CredentialsData(
-        backends={
-            "claude": BackendCredentials(api_key="claude-key"),
-            "deepseek": BackendCredentials(
-                api_key="deepseek-key",
-                base_url="https://api.deepseek.example",
+    data = CopilotCredentials(
+        active_provider_id="custom-local",
+        providers=[
+            ProviderConfig(
+                id="default-claude",
+                name="Claude",
+                kind="anthropic",
+                api_key="claude-key",
+                active_model_id="claude-sonnet-4-5",
             ),
-            "gemini": BackendCredentials(api_key=""),
-            "openai": BackendCredentials(api_key=""),
-        },
-        active_backend="claude",
+            ProviderConfig(
+                id="custom-local",
+                name="Ollama Local",
+                kind="openai-compat",
+                api_key="ollama-key",
+                base_url="http://localhost:11434/v1",
+                active_model_id="llama3.2",
+            ),
+        ],
     )
 
     write_credentials(data)
@@ -82,23 +100,22 @@ def test_concurrent_writes_do_not_corrupt_file(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    first = CredentialsData(
-        backends={
-            "claude": BackendCredentials(api_key="first"),
-            "deepseek": BackendCredentials(api_key=""),
-            "gemini": BackendCredentials(api_key=""),
-            "openai": BackendCredentials(api_key=""),
-        },
-        active_backend="claude",
+    first = CopilotCredentials(
+        active_provider_id="default-claude",
+        providers=[ProviderConfig(id="default-claude", name="Claude", kind="anthropic", api_key="first")],
     )
-    second = CredentialsData(
-        backends={
-            "claude": BackendCredentials(api_key="second"),
-            "deepseek": BackendCredentials(api_key="deepseek", base_url="https://deepseek.local"),
-            "gemini": BackendCredentials(api_key=""),
-            "openai": BackendCredentials(api_key=""),
-        },
-        active_backend="deepseek",
+    second = CopilotCredentials(
+        active_provider_id="default-deepseek",
+        providers=[
+            ProviderConfig(id="default-claude", name="Claude", kind="anthropic", api_key=""),
+            ProviderConfig(
+                id="default-deepseek",
+                name="DeepSeek",
+                kind="openai-compat",
+                api_key="deepseek",
+                base_url="https://deepseek.local/v1",
+            ),
+        ],
     )
 
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -109,39 +126,43 @@ def test_concurrent_writes_do_not_corrupt_file(
     assert os.stat(credentials_path()).st_mode & 0o777 == 0o600
 
 
-def test_schema_validation_rejects_invalid_backend() -> None:
+def test_schema_validation_rejects_invalid_kind() -> None:
     with pytest.raises(ValidationError):
-        CredentialsData.model_validate(
+        CopilotCredentials.model_validate(
             {
-                "backends": {
-                    "claude": {"api_key": ""},
-                    "deepseek": {"api_key": ""},
-                    "gemini": {"api_key": ""},
-                    "openai": {"api_key": ""},
-                    "bad": {"api_key": ""},
-                },
-                "active_backend": "claude",
+                "active_provider_id": "default-claude",
+                "providers": [
+                    {
+                        "id": "default-claude",
+                        "name": "Claude",
+                        "kind": "bad-kind",
+                        "api_key": "",
+                    }
+                ],
             }
         )
 
 
-def test_schema_validation_rejects_missing_active_backend() -> None:
+def test_schema_validation_rejects_missing_active_provider_id() -> None:
     with pytest.raises(ValidationError):
-        CredentialsData.model_validate(
+        CopilotCredentials.model_validate(
             {
-                "backends": {
-                    "claude": {"api_key": ""},
-                    "deepseek": {"api_key": ""},
-                    "gemini": {"api_key": ""},
-                    "openai": {"api_key": ""},
-                }
+                "providers": [
+                    {
+                        "id": "default-claude",
+                        "name": "Claude",
+                        "kind": "anthropic",
+                        "api_key": "",
+                    }
+                ],
             }
         )
 
 
-def test_old_v1_5_placeholder_field_is_ignored(
+def test_legacy_backends_file_is_overwritten_with_defaults(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     path = credentials_path()
@@ -150,10 +171,10 @@ def test_old_v1_5_placeholder_field_is_ignored(
         json.dumps(
             {
                 "backends": {
-                    "claude": {"api_key": "key", "V1_5_PLACEHOLDER": False},
-                    "deepseek": {"api_key": "", "V1_5_PLACEHOLDER": False},
-                    "gemini": {"api_key": "", "V1_5_PLACEHOLDER": True},
-                    "openai": {"api_key": "", "V1_5_PLACEHOLDER": True},
+                    "claude": {"api_key": "legacy-key", "base_url": "https://legacy.example"},
+                    "deepseek": {"api_key": ""},
+                    "gemini": {"api_key": ""},
+                    "openai": {"api_key": ""},
                 },
                 "active_backend": "claude",
             }
@@ -161,37 +182,34 @@ def test_old_v1_5_placeholder_field_is_ignored(
         encoding="utf-8",
     )
 
-    data = read_credentials()
+    with caplog.at_level("WARNING"):
+        data = read_credentials()
 
-    assert data.backends["claude"].api_key == "key"
-    assert data.backends["claude"].base_url == ""
-    assert not hasattr(data.backends["gemini"], "v1_5_placeholder")
+    assert data == default_credentials()
+    assert "legacy format detected, overwriting with v2 defaults" in caplog.text
+    written = json.loads(path.read_text(encoding="utf-8"))
+    assert written == data.model_dump(mode="json")
+    assert "backends" not in written
+    assert "active_backend" not in written
+    assert all("api_key" in provider for provider in written["providers"])
 
 
-def test_base_url_is_persisted(
+def test_validation_error_file_is_overwritten_with_defaults(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    data = default_data_with_deepseek_base_url()
-
-    write_credentials(data)
-
-    stored = read_credentials()
-    assert stored.backends["deepseek"].base_url == "https://api.deepseek.example"
-    assert "V1_5_PLACEHOLDER" not in credentials_path().read_text(encoding="utf-8")
-
-
-def default_data_with_deepseek_base_url() -> CredentialsData:
-    return CredentialsData(
-        backends={
-            "claude": BackendCredentials(api_key=""),
-            "deepseek": BackendCredentials(
-                api_key="deepseek-key",
-                base_url="https://api.deepseek.example",
-            ),
-            "gemini": BackendCredentials(api_key=""),
-            "openai": BackendCredentials(api_key=""),
-        },
-        active_backend="deepseek",
+    path = credentials_path()
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps({"active_provider_id": "missing-providers"}),
+        encoding="utf-8",
     )
+
+    with caplog.at_level("WARNING"):
+        data = read_credentials()
+
+    assert data == default_credentials()
+    assert "legacy format detected, overwriting with v2 defaults" in caplog.text
+    assert json.loads(path.read_text(encoding="utf-8")) == data.model_dump(mode="json")

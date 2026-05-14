@@ -22,8 +22,9 @@ def test_get_credentials_returns_default_sanitized_schema(
     assert body["active_backend"] == "claude"
     assert set(body["backends"]) == {"claude", "deepseek", "gemini", "openai"}
     assert all(item["has_key"] is False for item in body["backends"].values())
-    assert body["backends"]["gemini"]["V1_5_PLACEHOLDER"] is True
-    assert body["backends"]["openai"]["V1_5_PLACEHOLDER"] is True
+    assert all(item["last4"] is None for item in body["backends"].values())
+    assert all(item["base_url"] == "" for item in body["backends"].values())
+    assert "V1_5_PLACEHOLDER" not in str(body)
     assert "api_key" not in str(body)
 
 

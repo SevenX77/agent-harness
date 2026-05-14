@@ -9,7 +9,7 @@ import threading
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 CopilotBackend = Literal["claude", "deepseek", "gemini", "openai"]
 
@@ -19,14 +19,10 @@ _WRITE_LOCK = threading.Lock()
 class BackendCredentials(BaseModel):
     """Credential payload for one Copilot backend."""
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     api_key: str = ""
-    v1_5_placeholder: bool = Field(
-        False,
-        validation_alias=AliasChoices("v1_5_placeholder", "V1_5_PLACEHOLDER"),
-        serialization_alias="V1_5_PLACEHOLDER",
-    )
+    base_url: str = ""
 
 
 class CredentialsData(BaseModel):
@@ -49,10 +45,10 @@ def default_credentials() -> CredentialsData:
 
     return CredentialsData(
         backends={
-            "claude": BackendCredentials(api_key="", v1_5_placeholder=False),
-            "deepseek": BackendCredentials(api_key="", v1_5_placeholder=False),
-            "gemini": BackendCredentials(api_key="", v1_5_placeholder=True),
-            "openai": BackendCredentials(api_key="", v1_5_placeholder=True),
+            "claude": BackendCredentials(api_key=""),
+            "deepseek": BackendCredentials(api_key=""),
+            "gemini": BackendCredentials(api_key=""),
+            "openai": BackendCredentials(api_key=""),
         },
         active_backend="claude",
     )

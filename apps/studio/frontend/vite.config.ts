@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { defineConfig } from 'vite'
+import { configDefaults, defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
@@ -48,6 +48,21 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5173,
     strictPort: true,
-    allowedHosts: true,
+    proxy: {
+      // Dev tunnel mode uses same-origin browser URLs and lets Vite forward to backend.
+      '/api': {
+        target: 'http://127.0.0.1:8787',
+        changeOrigin: false,
+      },
+      '/ws': {
+        target: 'ws://127.0.0.1:8787',
+        ws: true,
+        changeOrigin: false,
+      },
+    },
+    allowedHosts: ['.trycloudflare.com', 'localhost', '127.0.0.1'],
+  },
+  test: {
+    exclude: [...configDefaults.exclude, 'tests/e2e/**'],
   },
 })

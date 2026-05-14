@@ -3,6 +3,13 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import './store/themeStore'
 import { App } from './App'
+import { configureApiToken } from './api/client'
+import { bootstrapTunnelToken } from './config/tunnel-token'
+
+const token = bootstrapTunnelToken()
+if (token) {
+  configureApiToken(token)
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

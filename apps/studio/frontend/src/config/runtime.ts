@@ -1,4 +1,4 @@
-import { configureApiBaseURL, configureApiToken } from '../api/client'
+import { configureApiBaseURL, configureApiToken, currentApiTokenIsSet } from '../api/client'
 
 export interface SidecarConfig {
   port: number
@@ -52,7 +52,9 @@ export async function initializeRuntimeConfig(options: RuntimeOptions = {}): Pro
   const config = await resolveRuntimeConfig(options)
   runtimeConfig = config
   configureApiBaseURL(config.baseURL)
-  configureApiToken(config.api_token ?? null)
+  if (!currentApiTokenIsSet()) {
+    configureApiToken(config.api_token ?? null)
+  }
   return config
 }
 

@@ -35,6 +35,10 @@ export function configureApiToken(token: string | null): void {
   currentApiToken = token
 }
 
+export function currentApiTokenIsSet(): boolean {
+  return Boolean(currentApiToken)
+}
+
 api.interceptors.request.use((config) => {
   const headers = AxiosHeaders.from(config.headers)
   headers.set('X-Studio-User-ID', 'default')

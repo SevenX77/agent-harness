@@ -63,8 +63,8 @@ export interface CopilotMessage {
 
 export interface CopilotBackendStatus {
   has_key: boolean
-  V1_5_PLACEHOLDER?: boolean
-  v1_5_placeholder?: boolean
+  last4: string | null
+  base_url: string
 }
 
 export interface CopilotCredentials {

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
-import type { CopilotBackend, CopilotCredentials } from '../../types/copilot'
-import { updateCopilotCredentials } from '../../api/copilot'
+import { putCopilotCredentials, type CopilotCredentials } from '../../api/copilot'
+import type { CopilotBackend } from '../../types/copilot'
 
 interface CopilotSettingsProps {
   credentials: CopilotCredentials | null
@@ -8,11 +8,19 @@ interface CopilotSettingsProps {
   onUpdated: (credentials: CopilotCredentials) => void
 }
 
+const providerIdByBackend: Record<CopilotBackend, string> = {
+  claude: 'default-claude',
+  deepseek: 'default-deepseek',
+  gemini: 'default-gemini',
+  openai: 'default-openai',
+}
+
 export function CopilotSettings({ credentials, backend, onUpdated }: CopilotSettingsProps) {
   const [apiKey, setApiKey] = useState('')
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
-  const configured = Boolean(credentials?.backends[backend]?.has_key)
+  const providerId = providerIdByBackend[backend]
+  const configured = Boolean(credentials?.providers.find((provider) => provider.id === providerId)?.api_key)
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -22,7 +30,15 @@ export function CopilotSettings({ credentials, backend, onUpdated }: CopilotSett
     setSaving(true)
     setMessage('Saving...')
     try {
-      const next = await updateCopilotCredentials(backend, apiKey.trim(), true)
+      if (!credentials) return
+      const next = {
+        ...credentials,
+        active_provider_id: providerId,
+        providers: credentials.providers.map((provider) =>
+          provider.id === providerId ? { ...provider, api_key: apiKey.trim() } : provider,
+        ),
+      }
+      await putCopilotCredentials(next)
       onUpdated(next)
       setApiKey('')
       setMessage('Saved')

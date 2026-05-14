@@ -8,6 +8,7 @@ import json
 import logging
 import multiprocessing
 import shutil
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -57,6 +58,7 @@ from app.services.skills import resolve_skill_dir, run_dir_for, test_inputs_dir_
 
 _EVENT_ADAPTER: TypeAdapter[Any] = TypeAdapter(CallbackEvent)
 logger = logging.getLogger(__name__)
+_LATEST_SYNC_LOCK = threading.Lock()
 
 
 @dataclass
@@ -406,6 +408,8 @@ class RunManager:
     def get_run_detail(self, skill_id: str, run_id: str) -> RunDetail:
         metadata = self._metadata_for(skill_id, run_id)
         run_dir = run_dir_for(skill_id, run_id)
+        if metadata.status == "success" and not (run_dir.parent / "latest" / "run_metadata.json").exists():
+            _sync_latest_run(run_dir)
         return RunDetail(
             metadata=metadata,
             input_data=_read_optional_json(run_dir / "input_data.json"),
@@ -495,6 +499,8 @@ class RunManager:
                     input_summary=record.metadata.input_summary,
                 )
                 _write_run_metadata(record.run_dir, metadata)
+                if status == "success":
+                    await asyncio.to_thread(_sync_latest_run, record.run_dir)
                 await self._save_run_metadata(record.skill_id, metadata)
                 record.metadata = metadata
                 break
@@ -504,15 +510,18 @@ class RunManager:
             status_from_exit: Literal["success", "failed"] = (
                 "success" if exitcode == 0 else "failed"
             )
-            record.metadata = RunMetadata(
+            metadata = RunMetadata(
                 run_id=record.metadata.run_id,
                 status=status_from_exit,
                 started_at=record.metadata.started_at,
                 metrics=record.metadata.metrics,
                 input_summary=record.metadata.input_summary,
             )
-            _write_run_metadata(record.run_dir, record.metadata)
-            await self._save_run_metadata(record.skill_id, record.metadata)
+            _write_run_metadata(record.run_dir, metadata)
+            if status_from_exit == "success":
+                await asyncio.to_thread(_sync_latest_run, record.run_dir)
+            await self._save_run_metadata(record.skill_id, metadata)
+            record.metadata = metadata
         await self._copy_final_state_to_storage(record)
         if record.metadata.status == "success":
             await asyncio.to_thread(_sync_latest_run, record.run_dir)
@@ -614,12 +623,13 @@ def test_inputs_dir_for(skill_id: str) -> Path:
 
 
 def _sync_latest_run(run_dir: Path) -> None:
-    latest_dir = run_dir.parent / "latest"
-    if latest_dir == run_dir:
-        return
-    if latest_dir.exists():
-        shutil.rmtree(latest_dir)
-    shutil.copytree(run_dir, latest_dir)
+    with _LATEST_SYNC_LOCK:
+        latest_dir = run_dir.parent / "latest"
+        if latest_dir == run_dir:
+            return
+        if latest_dir.exists():
+            shutil.rmtree(latest_dir)
+        shutil.copytree(run_dir, latest_dir)
 
 
 def _load_test_input(skill_id: str, input_id: str) -> dict[str, Any]:

@@ -43,6 +43,7 @@ def test_put_credentials_writes_key_and_get_remains_sanitized(
     assert response.status_code == 200
     body = client.get("/api/copilot/credentials").json()
     assert body["backends"]["claude"]["has_key"] is True
+    assert body["backends"]["claude"]["last4"] == "cret"
     assert "secret" not in str(body)
     assert "api_key" not in str(body)
 
@@ -117,3 +118,92 @@ def test_put_credentials_calls_reset_session(
 
     assert response.status_code == 200
     reset_session.assert_awaited_once_with(None, "claude")
+
+
+def test_put_credentials_persists_base_url(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    response = client.put(
+        "/api/copilot/credentials",
+        json={
+            "backend": "deepseek",
+            "api_key": "deepseek-key",
+            "base_url": "https://deepseek.example",
+            "set_active": False,
+        },
+    )
+
+    assert response.status_code == 200
+    body = client.get("/api/copilot/credentials").json()
+    assert body["backends"]["deepseek"]["base_url"] == "https://deepseek.example"
+    assert body["backends"]["deepseek"]["last4"] == "-key"
+
+
+def test_put_credentials_none_values_do_not_change_existing_values(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    client.put(
+        "/api/copilot/credentials",
+        json={
+            "backend": "openai",
+            "api_key": "sk-abcd1234",
+            "base_url": "https://openai.example",
+            "set_active": False,
+        },
+    )
+
+    response = client.put(
+        "/api/copilot/credentials",
+        json={
+            "backend": "openai",
+            "api_key": None,
+            "base_url": None,
+            "set_active": False,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["backends"]["openai"]["has_key"] is True
+    assert body["backends"]["openai"]["last4"] == "1234"
+    assert body["backends"]["openai"]["base_url"] == "https://openai.example"
+
+
+def test_put_credentials_empty_strings_clear_key_and_base_url(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    client.put(
+        "/api/copilot/credentials",
+        json={
+            "backend": "claude",
+            "api_key": "sk-abcd1234",
+            "base_url": "https://claude.example",
+            "set_active": False,
+        },
+    )
+
+    response = client.put(
+        "/api/copilot/credentials",
+        json={
+            "backend": "claude",
+            "api_key": "",
+            "base_url": "",
+            "set_active": False,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["backends"]["claude"]["has_key"] is False
+    assert body["backends"]["claude"]["last4"] is None
+    assert body["backends"]["claude"]["base_url"] == ""

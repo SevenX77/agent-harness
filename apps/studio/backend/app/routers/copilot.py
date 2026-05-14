@@ -202,9 +202,10 @@ async def put_copilot_credentials(request: CredentialsWriteRequest) -> Credentia
 
     current = data.backends[request.backend]
     api_key = current.api_key if request.api_key is None else request.api_key
+    base_url = current.base_url if request.base_url is None else request.base_url
     data.backends[request.backend] = BackendCredentials(
         api_key=api_key,
-        base_url=current.base_url,
+        base_url=base_url,
     )
     if request.set_active:
         data.active_backend = request.backend
@@ -239,6 +240,8 @@ def _to_read_response(data: CredentialsData) -> CredentialsReadResponse:
         backends={
             backend: BackendStatus(
                 has_key=bool(credentials.api_key),
+                last4=credentials.api_key[-4:] if credentials.api_key else None,
+                base_url=credentials.base_url,
             )
             for backend, credentials in data.backends.items()
         },

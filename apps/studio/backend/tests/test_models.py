@@ -10,6 +10,7 @@ from pydantic import ValidationError
 def test_model_exports_cover_phase0_contracts() -> None:
     expected_exports = {
         "AuditResult",
+        "AppSettings",
         "BatchRunItem",
         "BatchRunRequest",
         "BatchRunResponse",
@@ -23,9 +24,11 @@ def test_model_exports_cover_phase0_contracts() -> None:
         "CredentialsWriteRequest",
         "ErrorResponse",
         "GoldenBaseline",
+        "GitHistoryItem",
         "LintError",
         "LintResult",
         "ResumeReq",
+        "RevertSkillReq",
         "RunDetail",
         "RunListResponse",
         "RunMetadata",

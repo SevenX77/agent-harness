@@ -1,10 +1,11 @@
-import { configureApiBaseURL } from '../api/client'
+import { configureApiBaseURL, configureApiToken } from '../api/client'
 
 export interface SidecarConfig {
   port: number
   baseURL: string
   wsURL: string
   resourceDir: string
+  api_token?: string | null
 }
 
 type RuntimeWindow = Partial<Window> & {
@@ -35,6 +36,7 @@ export function fallbackSidecarConfig(
     baseURL: parsed.toString().replace(/\/$/, ''),
     wsURL: `${wsProtocol}//${parsed.host}/ws`,
     resourceDir: '',
+    api_token: null,
   }
 }
 
@@ -50,6 +52,7 @@ export async function initializeRuntimeConfig(options: RuntimeOptions = {}): Pro
   const config = await resolveRuntimeConfig(options)
   runtimeConfig = config
   configureApiBaseURL(config.baseURL)
+  configureApiToken(config.api_token ?? null)
   return config
 }
 
@@ -68,6 +71,7 @@ function normalizeSidecarConfig(config: SidecarConfig): SidecarConfig {
     baseURL: config.baseURL.replace(/\/$/, ''),
     wsURL: config.wsURL.replace(/\/$/, ''),
     resourceDir: config.resourceDir,
+    api_token: config.api_token ?? null,
   }
 }
 

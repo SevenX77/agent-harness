@@ -16,6 +16,7 @@ import type {
 export const API_BASE_URL = import.meta.env.VITE_STUDIO_API_BASE_URL ?? 'http://localhost:8787/api'
 
 let currentApiBaseURL = API_BASE_URL
+let currentApiToken: string | null = null
 
 export const api = axios.create({
   baseURL: currentApiBaseURL,
@@ -30,9 +31,16 @@ export function getApiBaseURL(): string {
   return currentApiBaseURL
 }
 
+export function configureApiToken(token: string | null): void {
+  currentApiToken = token
+}
+
 api.interceptors.request.use((config) => {
   const headers = AxiosHeaders.from(config.headers)
   headers.set('X-Studio-User-ID', 'default')
+  if (currentApiToken) {
+    headers.set('Authorization', `Bearer ${currentApiToken}`)
+  }
   config.headers = headers
   return config
 })

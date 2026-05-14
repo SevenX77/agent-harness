@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, TypeAlias
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 CopilotBackend: TypeAlias = Literal["claude", "deepseek", "gemini", "openai"]
 CopilotToolName: TypeAlias = Literal["Read", "Write", "Edit", "Bash"]
@@ -22,14 +22,11 @@ CopilotView: TypeAlias = Literal[
 class BackendStatus(BaseModel):
     """Sanitized credential state for a backend."""
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid")
 
     has_key: bool
-    v1_5_placeholder: bool = Field(
-        False,
-        validation_alias=AliasChoices("v1_5_placeholder", "V1_5_PLACEHOLDER"),
-        serialization_alias="V1_5_PLACEHOLDER",
-    )
+    last4: str | None = None
+    base_url: str = ""
 
 
 class CredentialsReadResponse(BaseModel):
@@ -48,6 +45,7 @@ class CredentialsWriteRequest(BaseModel):
 
     backend: CopilotBackend
     api_key: str | None
+    base_url: str | None = None
     set_active: bool = False
 
 

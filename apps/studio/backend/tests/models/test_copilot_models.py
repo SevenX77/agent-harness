@@ -23,18 +23,19 @@ def test_copilot_backend_rejects_unknown_value() -> None:
 def test_credentials_read_response_is_sanitized() -> None:
     response = CredentialsReadResponse(
         backends={
-            "claude": BackendStatus(has_key=True),
+            "claude": BackendStatus(has_key=True, last4="1234"),
             "deepseek": BackendStatus(has_key=False),
-            "gemini": BackendStatus(has_key=False, V1_5_PLACEHOLDER=True),
-            "openai": BackendStatus(has_key=False, V1_5_PLACEHOLDER=True),
+            "gemini": BackendStatus(has_key=False),
+            "openai": BackendStatus(has_key=False),
         },
         active_backend="claude",
     )
 
-    dumped = response.model_dump(by_alias=True)
+    dumped = response.model_dump()
     assert dumped["backends"]["claude"] == {
         "has_key": True,
-        "V1_5_PLACEHOLDER": False,
+        "last4": "1234",
+        "base_url": "",
     }
     assert "api_key" not in str(dumped)
 
@@ -43,6 +44,7 @@ def test_credentials_write_request_accepts_none_and_default_set_active() -> None
     request = CredentialsWriteRequest(backend="claude", api_key=None)
 
     assert request.api_key is None
+    assert request.base_url is None
     assert request.set_active is False
 
 
@@ -56,8 +58,8 @@ def test_credentials_write_request_accepts_none_and_default_set_active() -> None
                 "backends": {
                     "claude": {"has_key": False},
                     "deepseek": {"has_key": False},
-                    "gemini": {"has_key": False, "V1_5_PLACEHOLDER": True},
-                    "openai": {"has_key": False, "V1_5_PLACEHOLDER": True},
+                    "gemini": {"has_key": False},
+                    "openai": {"has_key": False},
                 },
                 "active_backend": "claude",
                 "extra": "nope",

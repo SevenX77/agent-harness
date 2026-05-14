@@ -8,22 +8,20 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
-from app.core.exceptions import error_response, raise_error_response, raise_not_implemented
+from app.core.exceptions import raise_not_implemented
 from app.models.copilot import (
-    BackendStatus,
     ContextUpdateRequest,
     ContextUpdateResponse,
+    CopilotCredentials,
     CopilotBackend,
     CopilotEventError,
-    CredentialsReadResponse,
-    CredentialsWriteRequest,
+    ProviderConfig,
     TestProviderRequest,
     TestProviderResponse,
 )
 from app.models.errors import ErrorResponse
 from app.services.copilot import get_view_context, reset_session, set_view_context, stream_query
 from app.services.copilot_credentials import (
-    BackendCredentials,
     CredentialsData,
     read_credentials,
     write_credentials,
@@ -66,19 +64,27 @@ async def copilot_ws(websocket: WebSocket, skill_id: str) -> None:
 
     await websocket.accept()
     credentials = read_credentials()
-    backend = credentials.active_backend
-    api_key = credentials.backends[backend].api_key
-
-    if backend not in _ACTIVE_BACKENDS:
+    provider = _active_provider(credentials)
+    if provider is None:
         await websocket.send_json(
-            CopilotEventError(message=f"V1.5 backend ({backend}) 暂不可用").model_dump()
+            CopilotEventError(message=f"未找到 active provider: {credentials.active_provider_id}").model_dump()
+        )
+        await websocket.close(code=_POLICY_CLOSE_CODE)
+        return
+
+    backend = _provider_runtime_backend(provider)
+    api_key = provider.api_key
+
+    if backend is None or backend not in _ACTIVE_BACKENDS:
+        await websocket.send_json(
+            CopilotEventError(message=f"Provider ({provider.name}) 暂不可用").model_dump()
         )
         await websocket.close(code=_POLICY_CLOSE_CODE)
         return
 
     if not api_key:
         await websocket.send_json(
-            CopilotEventError(message=f"未配置 {backend} 的 API key").model_dump()
+            CopilotEventError(message=f"未配置 {provider.name} 的 API key").model_dump()
         )
         await websocket.close(code=_POLICY_CLOSE_CODE)
         return
@@ -126,12 +132,12 @@ async def post_copilot_context(
 
 @router.get(
     "/api/copilot/credentials",
-    response_model=CredentialsReadResponse,
+    response_model=CopilotCredentials,
 )
-async def get_copilot_credentials() -> CredentialsReadResponse:
-    """Return sanitized Copilot credential state."""
+async def get_copilot_credentials() -> CopilotCredentials:
+    """Return Copilot provider credentials, including plaintext API keys."""
 
-    return _to_read_response(read_credentials())
+    return read_credentials()
 
 
 @router.post(
@@ -183,37 +189,14 @@ async def test_copilot_provider(
 
 @router.put(
     "/api/copilot/credentials",
-    response_model=CredentialsReadResponse,
-    responses={400: {"model": ErrorResponse}},
+    response_model=CopilotCredentials,
 )
-async def put_copilot_credentials(request: CredentialsWriteRequest) -> CredentialsReadResponse:
-    """Update one backend credential and optionally switch the active backend."""
+async def put_copilot_credentials(request: CopilotCredentials) -> CopilotCredentials:
+    """Replace the complete Copilot provider credential config."""
 
-    data = read_credentials()
-    if request.set_active and request.backend not in _ACTIVE_BACKENDS:
-        raise_error_response(
-            error_response(
-                error_code="COPILOT_BACKEND_DISABLED",
-                http_status=400,
-                message=f"Backend '{request.backend}' is reserved for V1.5",
-                details={"backend": request.backend},
-                retry_strategy="not_retryable",
-            )
-        )
-
-    current = data.backends[request.backend]
-    api_key = current.api_key if request.api_key is None else request.api_key
-    base_url = current.base_url if request.base_url is None else request.base_url
-    data.backends[request.backend] = BackendCredentials(
-        api_key=api_key,
-        base_url=base_url,
-    )
-    if request.set_active:
-        data.active_backend = request.backend
-
-    write_credentials(data)
-    await reset_session(None, request.backend)
-    return _to_read_response(data)
+    write_credentials(request)
+    await reset_session(None, None)
+    return request
 
 
 def _elapsed_ms(started: float) -> int:
@@ -235,15 +218,16 @@ def _log_test_provider(
     )
 
 
-def _to_read_response(data: CredentialsData) -> CredentialsReadResponse:
-    return CredentialsReadResponse(
-        backends={
-            backend: BackendStatus(
-                has_key=bool(credentials.api_key),
-                last4=credentials.api_key[-4:] if credentials.api_key else None,
-                base_url=credentials.base_url,
-            )
-            for backend, credentials in data.backends.items()
-        },
-        active_backend=data.active_backend,
-    )
+def _active_provider(data: CredentialsData) -> ProviderConfig | None:
+    for provider in data.providers:
+        if provider.id == data.active_provider_id:
+            return provider
+    return None
+
+
+def _provider_runtime_backend(provider: ProviderConfig) -> CopilotBackend | None:
+    if provider.id == "default-deepseek":
+        return "deepseek"
+    if provider.kind == "anthropic":
+        return "claude"
+    return None

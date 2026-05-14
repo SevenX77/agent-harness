@@ -46,6 +46,12 @@ async def dispatch_copilot(skill_id: str, request: dict[str, Any]) -> None:
 async def copilot_ws(websocket: WebSocket, skill_id: str) -> None:
     """Stream Copilot events for user messages over one persistent connection."""
 
+    from app.main import _is_valid_token
+
+    if not _is_valid_token(websocket.query_params.get("token")):
+        await websocket.close(code=4401, reason="Unauthorized")
+        return
+
     await websocket.accept()
     credentials = read_credentials()
     backend = credentials.active_backend

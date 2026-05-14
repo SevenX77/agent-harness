@@ -22,7 +22,6 @@ from app.models.copilot import (
 from app.models.errors import ErrorResponse
 from app.services.copilot import get_view_context, reset_session, set_view_context, stream_query
 from app.services.copilot_credentials import (
-    CredentialsData,
     read_credentials,
     write_credentials,
 )
@@ -218,7 +217,7 @@ def _log_test_provider(
     )
 
 
-def _active_provider(data: CredentialsData) -> ProviderConfig | None:
+def _active_provider(data: CopilotCredentials) -> ProviderConfig | None:
     for provider in data.providers:
         if provider.id == data.active_provider_id:
             return provider

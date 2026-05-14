@@ -82,13 +82,6 @@ class TestProviderResponse(BaseModel):
     message: str | None = None
 
 
-BackendStatus = ProviderConfig
-CredentialsReadResponse = CopilotCredentials
-CredentialsWriteRequest = CopilotCredentials
-TestCredentialsRequest = TestProviderRequest
-TestCredentialsResponse = TestProviderResponse
-
-
 class CopilotEventBase(BaseModel):
     """Base model for streamed Copilot WebSocket events."""
 

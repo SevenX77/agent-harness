@@ -15,10 +15,9 @@ import {
   getCopilotCredentials,
   testCopilotCredentials,
   updateCopilotCredentials,
-  type CopilotCredentials,
   type TestCredentialsResponse,
 } from "../../api/copilot"
-import type { CopilotBackend } from "../../types/copilot"
+import type { CopilotBackend, CopilotCredentials } from "../../types/copilot"
 
 const BACKENDS: Array<{ id: CopilotBackend; label: string; defaultBaseUrl: string }> = [
   { id: "claude", label: "Claude", defaultBaseUrl: "https://api.anthropic.com" },

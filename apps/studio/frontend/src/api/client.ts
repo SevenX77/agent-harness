@@ -78,7 +78,9 @@ export function wsUrl(path: string): string {
   const base = new URL(currentApiBaseURL, window.location.origin)
   const protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
   const normalizedPath = path.startsWith('/') ? path : `/${path}`
-  return `${protocol}//${base.host}${normalizedPath}`
+  const separator = normalizedPath.includes('?') ? '&' : '?'
+  const tokenQuery = currentApiToken ? `${separator}token=${encodeURIComponent(currentApiToken)}` : ''
+  return `${protocol}//${base.host}${normalizedPath}${tokenQuery}`
 }
 
 export interface PredictRunResponse {

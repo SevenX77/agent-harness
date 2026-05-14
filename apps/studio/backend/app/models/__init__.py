@@ -10,6 +10,8 @@ from app.models.copilot import (
     ContextUpdateResponse,
     CredentialsReadResponse,
     CredentialsWriteRequest,
+    TestCredentialsRequest,
+    TestCredentialsResponse,
 )
 from app.models.errors import ErrorResponse, LintError
 from app.models.git_history import GitHistoryItem, RevertSkillReq
@@ -61,6 +63,8 @@ __all__ = [
     "SkillDetail",
     "SkillSummary",
     "TerminalSession",
+    "TestCredentialsRequest",
+    "TestCredentialsResponse",
     "TestInputMetadata",
     "TokensMetrics",
     "UpdateSkillReq",

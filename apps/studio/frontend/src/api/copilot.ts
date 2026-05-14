@@ -45,7 +45,7 @@ export async function updateCopilotCredentials(
 ): Promise<CopilotCredentials> {
   const request: CredentialsWriteRequest = {
     backend,
-    api_key: apiKey || undefined,
+    api_key: apiKey === undefined ? undefined : apiKey,
     set_active: setActive,
   }
   if (baseUrl !== undefined) {

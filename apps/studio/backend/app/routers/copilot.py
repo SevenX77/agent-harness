@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
@@ -15,6 +17,8 @@ from app.models.copilot import (
     CopilotEventError,
     CredentialsReadResponse,
     CredentialsWriteRequest,
+    TestCredentialsRequest,
+    TestCredentialsResponse,
 )
 from app.models.errors import ErrorResponse
 from app.services.copilot import get_view_context, reset_session, set_view_context, stream_query
@@ -24,8 +28,17 @@ from app.services.copilot_credentials import (
     read_credentials,
     write_credentials,
 )
+from app.services.copilot_test import (
+    DEFAULT_BASE_URLS,
+    _NetworkError,
+    _ping_provider,
+    _QuotaExceeded,
+    _RateLimited,
+    _Unauthorized,
+)
 
 router = APIRouter(tags=["copilot"])
+logger = logging.getLogger(__name__)
 
 _ACTIVE_BACKENDS: set[CopilotBackend] = {"claude", "deepseek"}
 _POLICY_CLOSE_CODE = status.WS_1008_POLICY_VIOLATION
@@ -122,6 +135,51 @@ async def get_copilot_credentials() -> CredentialsReadResponse:
     return _to_read_response(read_credentials())
 
 
+@router.post(
+    "/api/copilot/credentials/test",
+    response_model=TestCredentialsResponse,
+)
+async def test_copilot_credentials(
+    request: TestCredentialsRequest,
+) -> TestCredentialsResponse:
+    """Use candidate credentials to test provider connectivity without persisting them."""
+
+    started = asyncio.get_running_loop().time()
+    base_url = request.base_url or DEFAULT_BASE_URLS[request.backend]
+    try:
+        async with asyncio.timeout(8):
+            result = await _ping_provider(request.backend, request.api_key, base_url)
+        _log_test_credentials(request.backend, request.api_key, "ok", result.latency_ms)
+        return TestCredentialsResponse(
+            status="ok",
+            latency_ms=result.latency_ms,
+            model_seen=result.model_seen,
+        )
+    except TimeoutError:
+        latency_ms = _elapsed_ms(started)
+        _log_test_credentials(request.backend, request.api_key, "timeout", latency_ms)
+        return TestCredentialsResponse(status="timeout", message="Request exceeded 8s")
+    except _Unauthorized:
+        latency_ms = _elapsed_ms(started)
+        _log_test_credentials(request.backend, request.api_key, "invalid_key", latency_ms)
+        return TestCredentialsResponse(
+            status="invalid_key",
+            message="Provider rejected key (401)",
+        )
+    except _RateLimited:
+        latency_ms = _elapsed_ms(started)
+        _log_test_credentials(request.backend, request.api_key, "rate_limited", latency_ms)
+        return TestCredentialsResponse(status="rate_limited", message="Rate limit (429)")
+    except _QuotaExceeded:
+        latency_ms = _elapsed_ms(started)
+        _log_test_credentials(request.backend, request.api_key, "quota_exceeded", latency_ms)
+        return TestCredentialsResponse(status="quota_exceeded", message="Quota exceeded")
+    except _NetworkError as exc:
+        latency_ms = _elapsed_ms(started)
+        _log_test_credentials(request.backend, request.api_key, "network_error", latency_ms)
+        return TestCredentialsResponse(status="network_error", message=str(exc)[:200])
+
+
 @router.put(
     "/api/copilot/credentials",
     response_model=CredentialsReadResponse,
@@ -154,6 +212,26 @@ async def put_copilot_credentials(request: CredentialsWriteRequest) -> Credentia
     write_credentials(data)
     await reset_session(None, request.backend)
     return _to_read_response(data)
+
+
+def _elapsed_ms(started: float) -> int:
+    return max(0, round((asyncio.get_running_loop().time() - started) * 1000))
+
+
+def _log_test_credentials(
+    backend: CopilotBackend,
+    api_key: str,
+    status: str,
+    latency_ms: int,
+) -> None:
+    last4 = api_key[-4:] if api_key else ""
+    logger.info(
+        "test_credentials backend=%s last4=%s status=%s latency_ms=%d",
+        backend,
+        last4,
+        status,
+        latency_ms,
+    )
 
 
 def _to_read_response(data: CredentialsData) -> CredentialsReadResponse:

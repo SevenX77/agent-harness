@@ -41,12 +41,16 @@ def test_put_persists_across_app_restart(
     del studio_roots
     payload = {"user_id": "carol", "gitea_host": "https://gitea.example.net"}
 
-    with TestClient(create_app()) as first_client:
+    first_client = TestClient(create_app())
+    first_client.headers["Authorization"] = "Bearer studio-test-token"
+    with first_client:
         response = first_client.put("/api/settings", json=payload)
         assert response.status_code == 200
 
     clear_backend_caches()
-    with TestClient(create_app()) as fresh_client:
+    fresh_client = TestClient(create_app())
+    fresh_client.headers["Authorization"] = "Bearer studio-test-token"
+    with fresh_client:
         fresh_response = fresh_client.get("/api/settings")
 
     assert fresh_response.status_code == 200

@@ -1,50 +1,39 @@
 import { isValidElement, type ReactElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  BACKENDS,
-  BackendCredentialCard,
+  DEFAULT_CREDENTIALS,
+  ProviderCard,
   SettingsPageContent,
+  appendProvider,
+  buildCredentialsFromDrafts,
+  createDebouncedSaver,
+  customProvider,
   draftsFromCredentials,
-  type BackendDraft,
+  removeProvider,
 } from './SettingsPage'
-import type { CopilotCredentials } from '../../types/copilot'
-
-const credentials: CopilotCredentials = {
-  active_backend: 'claude',
-  backends: {
-    claude: { has_key: true, last4: 'abcd', base_url: '' },
-    openai: { has_key: false, last4: null, base_url: '' },
-    deepseek: { has_key: false, last4: null, base_url: 'https://deepseek.example' },
-    gemini: { has_key: false, last4: null, base_url: '' },
-  },
-}
+import type { ProviderConfig, TestProviderResponse } from '../../api/copilot'
 
 function baseViewProps(overrides: Partial<Parameters<typeof SettingsPageContent>[0]> = {}): Parameters<typeof SettingsPageContent>[0] {
   return {
-    activeTab: 'general',
-    credentials,
-    drafts: draftsFromCredentials(credentials),
-    testStates: {
-      claude: { status: 'idle' },
-      openai: { status: 'idle' },
-      deepseek: { status: 'idle' },
-      gemini: { status: 'idle' },
-    },
-    appSettings: {
-      userId: 'alice',
-      giteaHost: 'https://gitea.example.com',
-      isLoading: false,
-      setUserId: vi.fn(),
-      setGiteaHost: vi.fn(),
-      save: vi.fn(),
-    },
+    credentials: DEFAULT_CREDENTIALS,
+    drafts: draftsFromCredentials(DEFAULT_CREDENTIALS),
+    expandedIds: new Set(),
+    visibleKeyIds: new Set(),
+    testingIds: new Set(),
+    testResults: {},
+    addDialogOpen: false,
+    newProvider: { name: '', kind: 'openai-compat' },
     onClose: vi.fn(),
-    onTabChange: vi.fn(),
+    onActiveProviderChange: vi.fn(),
     onDraftChange: vi.fn(),
-    onSetActiveBackend: vi.fn(),
-    onTestBackend: vi.fn(),
-    onSaveBackend: vi.fn(),
+    onToggleExpanded: vi.fn(),
+    onToggleKeyVisible: vi.fn(),
+    onTestProvider: vi.fn(),
+    onDeleteProvider: vi.fn(),
+    onAddDialogOpenChange: vi.fn(),
+    onNewProviderChange: vi.fn(),
+    onConfirmAddProvider: vi.fn(),
     ...overrides,
   }
 }
@@ -63,92 +52,139 @@ function findByAriaLabel(node: ReactNode, label: string): ReactElement<Record<st
   return findByAriaLabel(children, label)
 }
 
-function cardElement(overrides: Partial<Parameters<typeof BackendCredentialCard>[0]> = {}) {
-  const backend = BACKENDS[0]
-  const props: Parameters<typeof BackendCredentialCard>[0] = {
-    backend,
-    active: true,
-    status: credentials.backends.claude,
-    draft: { apiKey: '', baseUrl: '', advancedOpen: false },
-    testState: { status: 'idle' },
-    onDraftChange: vi.fn(),
-    onTest: vi.fn(),
-    onSave: vi.fn(),
-    ...overrides,
+function findWithProp(node: ReactNode, prop: string): ReactElement<Record<string, unknown>> | null {
+  if (!isValidElement(node)) return null
+  const element = node as ReactElement<Record<string, unknown> & { children?: ReactNode }>
+  if (prop in element.props) return element
+  const children = element.props.children
+  if (Array.isArray(children)) {
+    for (const child of children) {
+      const match = findWithProp(child, prop)
+      if (match) return match
+    }
   }
-  return { props, element: BackendCredentialCard(props) }
+  return findWithProp(children, prop)
 }
 
-describe('SettingsPage', () => {
-  it('renders the three main tabs and general settings', () => {
-    const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
+function cardElement(overrides: Partial<Parameters<typeof ProviderCard>[0]> = {}) {
+  const provider = DEFAULT_CREDENTIALS.providers[0]
+  const props: Parameters<typeof ProviderCard>[0] = {
+    provider,
+    draft: { ...provider, api_key: 'sk-plaintext' },
+    active: true,
+    expanded: true,
+    keyVisible: false,
+    testing: false,
+    testResult: null,
+    onDraftChange: vi.fn(),
+    onToggleExpanded: vi.fn(),
+    onToggleKeyVisible: vi.fn(),
+    onTest: vi.fn(),
+    onDelete: vi.fn(),
+    ...overrides,
+  }
+  return { props, element: ProviderCard(props) }
+}
 
-    expect(html).toContain('General')
-    expect(html).toContain('AI &amp; Copilot')
-    expect(html).toContain('Advanced')
-    expect(html).toContain('Studio User ID')
-    expect(html).toContain('Gitea Host')
+describe('SettingsPage v2', () => {
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
-  it('renders four backend cards and masks configured keys', () => {
-    const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ activeTab: 'copilot' })} />)
+  it('renders four default provider cards', () => {
+    const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
 
+    expect(html).toContain('AI &amp; Copilot')
     expect(html).toContain('Claude')
     expect(html).toContain('OpenAI')
     expect(html).toContain('DeepSeek')
     expect(html).toContain('Gemini')
-    expect(html).toContain('••••abcd')
+    expect(html).toContain('Add Custom Provider')
   })
 
-  it('invokes the test handler from backend cards', () => {
-    const onTest = vi.fn()
-    const { element } = cardElement({ onTest })
-    const button = findByAriaLabel(element, 'Test Claude credentials')
-
-    ;(button?.props.onClick as (() => void) | undefined)?.()
-
-    expect(onTest).toHaveBeenCalledOnce()
-  })
-
-  it('renders successful and invalid key test states', () => {
-    const okHtml = renderToStaticMarkup(
-      <BackendCredentialCard
-        {...cardElement().props}
-        testState={{ status: 'ok', result: { status: 'ok', latency_ms: 42, model_seen: 'claude-sonnet' } }}
-      />,
-    )
-    const errorHtml = renderToStaticMarkup(
-      <BackendCredentialCard
-        {...cardElement().props}
-        testState={{ status: 'error', result: { status: 'invalid_key', message: 'Provider rejected key' } }}
-      />,
-    )
-
-    expect(okHtml).toContain('OK')
-    expect(okHtml).toContain('claude-sonnet')
-    expect(errorHtml).toContain('Invalid API key')
-  })
-
-  it('surfaces Save for dirty API key drafts', () => {
-    const onSave = vi.fn()
-    const draft: BackendDraft = { apiKey: 'sk-new', baseUrl: '', advancedOpen: false }
-    const { element } = cardElement({ draft, onSave })
-    const button = findByAriaLabel(element, 'Save Claude credentials')
-
-    ;(button?.props.onClick as (() => void) | undefined)?.()
-
-    expect(onSave).toHaveBeenCalledOnce()
-  })
-
-  it('passes changed API keys through draft updates', () => {
+  it('updates draft API keys and exposes the eye toggle', () => {
     const onDraftChange = vi.fn()
-    const { element } = cardElement({ onDraftChange })
+    const onToggleKeyVisible = vi.fn()
+    const { element } = cardElement({ onDraftChange, onToggleKeyVisible })
     const input = findByAriaLabel(element, 'Claude API key')
+    const eye = findByAriaLabel(element, 'Show Claude API key')
 
     ;(input?.props.onChange as ((event: { target: { value: string } }) => void) | undefined)?.({
       target: { value: 'sk-new' },
     })
+    ;(eye?.props.onClick as (() => void) | undefined)?.()
 
-    expect(onDraftChange).toHaveBeenCalledWith({ apiKey: 'sk-new' })
+    expect(onDraftChange).toHaveBeenCalledWith({ api_key: 'sk-new' })
+    expect(onToggleKeyVisible).toHaveBeenCalledOnce()
+  })
+
+  it('debounces PUT saves for 650ms', async () => {
+    vi.useFakeTimers()
+    const save = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
+    const saver = createDebouncedSaver(save, 650)
+
+    saver.schedule(DEFAULT_CREDENTIALS)
+    await vi.advanceTimersByTimeAsync(649)
+    expect(save).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(save).toHaveBeenCalledWith(DEFAULT_CREDENTIALS)
+  })
+
+  it('renders models and thinking chips after test', () => {
+    const result: TestProviderResponse = {
+      status: 'ok',
+      latency_ms: 234,
+      models: [
+        { id: 'claude-opus-4-7', supports_thinking: true, supports_vision: true },
+        { id: 'claude-haiku-4-5', supports_thinking: false, supports_vision: true },
+      ],
+      message: null,
+    }
+
+    const html = renderToStaticMarkup(<ProviderCard {...cardElement({ testResult: result }).props} />)
+
+    expect(html).toContain('Connected')
+    expect(html).toContain('latency_ms=234')
+    expect(html).toContain('Available Models (2)')
+    expect(html).toContain('claude-opus-4-7')
+    expect(html).toContain('🧠')
+  })
+
+  it('adds custom providers and deletes custom providers with active fallback', () => {
+    const custom = customProvider('Ollama Local', 'openai-compat')
+    const added = appendProvider(DEFAULT_CREDENTIALS, custom)
+    const activeCustom = { ...added, active_provider_id: custom.id }
+    const removed = removeProvider(activeCustom, custom.id)
+
+    expect(added.providers.some((provider) => provider.id === custom.id)).toBe(true)
+    expect(custom.id).toMatch(/^custom-[a-z0-9]{8}$/)
+    expect(removed.providers.some((provider) => provider.id === custom.id)).toBe(false)
+    expect(removed.active_provider_id).toBe('default-claude')
+  })
+
+  it('changes the default model from discovered model options', () => {
+    const onDraftChange = vi.fn()
+    const result: TestProviderResponse = {
+      status: 'ok',
+      models: [{ id: 'claude-sonnet-4-5', supports_thinking: true, supports_vision: true }],
+    }
+    const { element } = cardElement({ onDraftChange, testResult: result })
+    const select = findWithProp(element, 'onValueChange')
+
+    ;(select?.props.onValueChange as ((value: string) => void) | undefined)?.('claude-sonnet-4-5')
+
+    expect(onDraftChange).toHaveBeenCalledWith({ active_model_id: 'claude-sonnet-4-5' })
+  })
+
+  it('builds PUT payloads from drafts without masking plaintext keys', () => {
+    const drafts = draftsFromCredentials(DEFAULT_CREDENTIALS)
+    const claude: ProviderConfig = { ...drafts['default-claude'], api_key: 'sk-plaintext' }
+    const next = buildCredentialsFromDrafts(DEFAULT_CREDENTIALS, {
+      ...drafts,
+      'default-claude': claude,
+    })
+
+    expect(next.providers[0].api_key).toBe('sk-plaintext')
   })
 })

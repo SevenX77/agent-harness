@@ -42,11 +42,51 @@ class CopilotCredentials(BaseModel):
     providers: list[ProviderConfig]
 
 
+class ModelInfo(BaseModel):
+    """Model metadata discovered from a provider."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    id: str
+    supports_thinking: bool = False
+    supports_vision: bool = False
+
+
+class TestProviderRequest(BaseModel):
+    """Candidate provider credentials for connectivity testing."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    id: str
+    name: str
+    kind: ProviderKind
+    api_key: str
+    base_url: str = ""
+
+
+class TestProviderResponse(BaseModel):
+    """Connectivity test result with provider model discovery."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    status: Literal[
+        "ok",
+        "invalid_key",
+        "rate_limited",
+        "timeout",
+        "network_error",
+        "quota_exceeded",
+    ]
+    latency_ms: int | None = None
+    models: list[ModelInfo] = []
+    message: str | None = None
+
+
 BackendStatus = ProviderConfig
 CredentialsReadResponse = CopilotCredentials
 CredentialsWriteRequest = CopilotCredentials
-TestCredentialsRequest = ProviderConfig
-TestCredentialsResponse = CopilotCredentials
+TestCredentialsRequest = TestProviderRequest
+TestCredentialsResponse = TestProviderResponse
 
 
 class CopilotEventBase(BaseModel):

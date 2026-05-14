@@ -1,37 +1,20 @@
-"""Local credential storage for Studio Copilot backends."""
+"""Local credential storage for Studio Copilot providers."""
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 import threading
 from pathlib import Path
-from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import ValidationError
 
-CopilotBackend = Literal["claude", "deepseek", "gemini", "openai"]
+from app.models.copilot import CopilotCredentials, ProviderConfig, ProviderKind
 
 _WRITE_LOCK = threading.Lock()
-
-
-class BackendCredentials(BaseModel):
-    """Credential payload for one Copilot backend."""
-
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
-
-    api_key: str = ""
-    base_url: str = ""
-
-
-class CredentialsData(BaseModel):
-    """Credential file schema stored at ``~/.studio/copilot.json``."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    backends: dict[CopilotBackend, BackendCredentials]
-    active_backend: CopilotBackend
+logger = logging.getLogger(__name__)
 
 
 def credentials_path() -> Path:
@@ -40,30 +23,71 @@ def credentials_path() -> Path:
     return Path.home() / ".studio" / "copilot.json"
 
 
-def default_credentials() -> CredentialsData:
-    """Return the safe default credential config."""
+def default_credentials() -> CopilotCredentials:
+    """Return the default v2 provider config."""
 
-    return CredentialsData(
-        backends={
-            "claude": BackendCredentials(api_key=""),
-            "deepseek": BackendCredentials(api_key=""),
-            "gemini": BackendCredentials(api_key=""),
-            "openai": BackendCredentials(api_key=""),
-        },
-        active_backend="claude",
+    return CopilotCredentials(
+        active_provider_id="default-claude",
+        providers=[
+            ProviderConfig(
+                id="default-claude",
+                name="Claude",
+                kind="anthropic",
+                api_key="",
+                base_url="",
+                active_model_id=None,
+            ),
+            ProviderConfig(
+                id="default-openai",
+                name="OpenAI",
+                kind="openai-compat",
+                api_key="",
+                base_url="",
+                active_model_id=None,
+            ),
+            ProviderConfig(
+                id="default-deepseek",
+                name="DeepSeek",
+                kind="openai-compat",
+                api_key="",
+                base_url="",
+                active_model_id=None,
+            ),
+            ProviderConfig(
+                id="default-gemini",
+                name="Gemini",
+                kind="google",
+                api_key="",
+                base_url="",
+                active_model_id=None,
+            ),
+        ],
     )
 
 
-def read_credentials() -> CredentialsData:
-    """Read credentials from disk, returning defaults if the file is absent."""
+def read_credentials() -> CopilotCredentials:
+    """Read credentials from disk, replacing legacy files with v2 defaults."""
 
     path = credentials_path()
     if not path.exists():
         return default_credentials()
-    return CredentialsData.model_validate_json(path.read_text(encoding="utf-8"))
+
+    raw_text = path.read_text(encoding="utf-8")
+    try:
+        raw_data = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return _overwrite_legacy_defaults()
+
+    if isinstance(raw_data, dict) and "backends" in raw_data:
+        return _overwrite_legacy_defaults()
+
+    try:
+        return CopilotCredentials.model_validate(raw_data)
+    except ValidationError:
+        return _overwrite_legacy_defaults()
 
 
-def write_credentials(data: CredentialsData) -> None:
+def write_credentials(data: CopilotCredentials) -> None:
     """Atomically write credentials and force file permissions to ``0600``."""
 
     path = credentials_path()
@@ -89,10 +113,22 @@ def write_credentials(data: CredentialsData) -> None:
                 tmp_path.unlink()
 
 
+def _overwrite_legacy_defaults() -> CopilotCredentials:
+    logger.warning("legacy format detected, overwriting with v2 defaults")
+    credentials = default_credentials()
+    write_credentials(credentials)
+    return credentials
+
+
+CredentialsData = CopilotCredentials
+BackendCredentials = ProviderConfig
+
 __all__ = [
     "BackendCredentials",
-    "CopilotBackend",
+    "CopilotCredentials",
     "CredentialsData",
+    "ProviderConfig",
+    "ProviderKind",
     "credentials_path",
     "default_credentials",
     "read_credentials",

@@ -614,6 +614,7 @@ def test_terminal_endpoint_spawns_pty_and_reaps_expired_session(
     with client.websocket_connect(body["ws_url"]) as websocket:
         assert websocket.receive_text() == "claude>"
         websocket.send_text("help\n")
+        websocket.close()
     record = terminal_manager._sessions[body["term_id"]]
     record.expires_at = 0
     terminal_manager.reap_expired()

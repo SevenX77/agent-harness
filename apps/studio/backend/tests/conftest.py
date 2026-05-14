@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+
+os.environ.setdefault("STUDIO_API_TOKEN", "studio-test-token")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STUDIO_BACKEND = REPO_ROOT / "studio-backend"
@@ -22,6 +25,8 @@ from app.main import create_app  # noqa: E402
 from app.services.run_manager import run_manager  # noqa: E402
 from app.services.terminal_manager import terminal_manager  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+
+_TEST_TOKEN = "studio-test-token"
 
 
 @pytest.fixture
@@ -47,11 +52,30 @@ def studio_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path,
 @pytest.fixture
 def client(studio_roots: tuple[Path, Path]) -> Iterator[TestClient]:
     del studio_roots
-    with TestClient(create_app()) as test_client:
+    test_client = AuthenticatedTestClient(create_app())
+    test_client.headers["Authorization"] = f"Bearer {_TEST_TOKEN}"
+    with test_client:
         yield test_client
     run_manager._runs.clear()
     terminal_manager._sessions.clear()
     clear_backend_caches()
+
+
+class AuthenticatedTestClient(TestClient):
+    def websocket_connect(
+        self,
+        url: str,
+        subprotocols: list[str] | None = None,
+        **kwargs: object,
+    ):  # type: ignore[no-untyped-def]
+        return super().websocket_connect(_with_ws_token(url), subprotocols, **kwargs)
+
+
+def _with_ws_token(url: str) -> str:
+    if "token=" in url:
+        return url
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}token={_TEST_TOKEN}"
 
 
 def _write_graph_skill(skill_dir: Path, name: str, description: str) -> None:

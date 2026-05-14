@@ -120,13 +120,8 @@ def _overwrite_legacy_defaults() -> CopilotCredentials:
     return credentials
 
 
-CredentialsData = CopilotCredentials
-BackendCredentials = ProviderConfig
-
 __all__ = [
-    "BackendCredentials",
     "CopilotCredentials",
-    "CredentialsData",
     "ProviderConfig",
     "ProviderKind",
     "credentials_path",

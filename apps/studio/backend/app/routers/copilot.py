@@ -8,29 +8,33 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
-from app.core.exceptions import raise_not_implemented
+from app.core.exceptions import error_response, raise_error_response, raise_not_implemented
 from app.models.copilot import (
+    BackendStatus,
     ContextUpdateRequest,
     ContextUpdateResponse,
-    CopilotCredentials,
     CopilotBackend,
     CopilotEventError,
-    ProviderConfig,
-    TestProviderRequest,
-    TestProviderResponse,
+    CredentialsReadResponse,
+    CredentialsWriteRequest,
+    TestCredentialsRequest,
+    TestCredentialsResponse,
 )
 from app.models.errors import ErrorResponse
 from app.services.copilot import get_view_context, reset_session, set_view_context, stream_query
 from app.services.copilot_credentials import (
+    BackendCredentials,
+    CredentialsData,
     read_credentials,
     write_credentials,
 )
 from app.services.copilot_test import (
+    DEFAULT_BASE_URLS,
     _NetworkError,
+    _ping_provider,
     _QuotaExceeded,
     _RateLimited,
     _Unauthorized,
-    make_client,
 )
 
 router = APIRouter(tags=["copilot"])
@@ -63,27 +67,19 @@ async def copilot_ws(websocket: WebSocket, skill_id: str) -> None:
 
     await websocket.accept()
     credentials = read_credentials()
-    provider = _active_provider(credentials)
-    if provider is None:
-        await websocket.send_json(
-            CopilotEventError(message=f"未找到 active provider: {credentials.active_provider_id}").model_dump()
-        )
-        await websocket.close(code=_POLICY_CLOSE_CODE)
-        return
+    backend = credentials.active_backend
+    api_key = credentials.backends[backend].api_key
 
-    backend = _provider_runtime_backend(provider)
-    api_key = provider.api_key
-
-    if backend is None or backend not in _ACTIVE_BACKENDS:
+    if backend not in _ACTIVE_BACKENDS:
         await websocket.send_json(
-            CopilotEventError(message=f"Provider ({provider.name}) 暂不可用").model_dump()
+            CopilotEventError(message=f"V1.5 backend ({backend}) 暂不可用").model_dump()
         )
         await websocket.close(code=_POLICY_CLOSE_CODE)
         return
 
     if not api_key:
         await websocket.send_json(
-            CopilotEventError(message=f"未配置 {provider.name} 的 API key").model_dump()
+            CopilotEventError(message=f"未配置 {backend} 的 API key").model_dump()
         )
         await websocket.close(code=_POLICY_CLOSE_CODE)
         return
@@ -131,102 +127,123 @@ async def post_copilot_context(
 
 @router.get(
     "/api/copilot/credentials",
-    response_model=CopilotCredentials,
+    response_model=CredentialsReadResponse,
 )
-async def get_copilot_credentials() -> CopilotCredentials:
-    """Return Copilot provider credentials, including plaintext API keys."""
+async def get_copilot_credentials() -> CredentialsReadResponse:
+    """Return sanitized Copilot credential state."""
 
-    return read_credentials()
+    return _to_read_response(read_credentials())
 
 
 @router.post(
-    "/api/copilot/providers/test",
-    response_model=TestProviderResponse,
+    "/api/copilot/credentials/test",
+    response_model=TestCredentialsResponse,
 )
-async def test_copilot_provider(
-    request: TestProviderRequest,
-) -> TestProviderResponse:
+async def test_copilot_credentials(
+    request: TestCredentialsRequest,
+) -> TestCredentialsResponse:
     """Use candidate credentials to test provider connectivity without persisting them."""
 
     started = asyncio.get_running_loop().time()
-    client = make_client(request.kind, request.api_key, request.base_url)
+    base_url = request.base_url or DEFAULT_BASE_URLS[request.backend]
     try:
         async with asyncio.timeout(8):
-            await client.ping()
-            models = await client.get_models()
-        latency_ms = _elapsed_ms(started)
-        _log_test_provider(request.id, request.kind, "ok", latency_ms)
-        return TestProviderResponse(
+            result = await _ping_provider(request.backend, request.api_key, base_url)
+        _log_test_credentials(request.backend, request.api_key, "ok", result.latency_ms)
+        return TestCredentialsResponse(
             status="ok",
-            latency_ms=latency_ms,
-            models=models,
+            latency_ms=result.latency_ms,
+            model_seen=result.model_seen,
         )
     except TimeoutError:
         latency_ms = _elapsed_ms(started)
-        _log_test_provider(request.id, request.kind, "timeout", latency_ms)
-        return TestProviderResponse(status="timeout", message="Request exceeded 8s")
+        _log_test_credentials(request.backend, request.api_key, "timeout", latency_ms)
+        return TestCredentialsResponse(status="timeout", message="Request exceeded 8s")
     except _Unauthorized:
         latency_ms = _elapsed_ms(started)
-        _log_test_provider(request.id, request.kind, "invalid_key", latency_ms)
-        return TestProviderResponse(
+        _log_test_credentials(request.backend, request.api_key, "invalid_key", latency_ms)
+        return TestCredentialsResponse(
             status="invalid_key",
             message="Provider rejected key (401)",
         )
     except _RateLimited:
         latency_ms = _elapsed_ms(started)
-        _log_test_provider(request.id, request.kind, "rate_limited", latency_ms)
-        return TestProviderResponse(status="rate_limited", message="Rate limit (429)")
+        _log_test_credentials(request.backend, request.api_key, "rate_limited", latency_ms)
+        return TestCredentialsResponse(status="rate_limited", message="Rate limit (429)")
     except _QuotaExceeded:
         latency_ms = _elapsed_ms(started)
-        _log_test_provider(request.id, request.kind, "quota_exceeded", latency_ms)
-        return TestProviderResponse(status="quota_exceeded", message="Quota exceeded")
+        _log_test_credentials(request.backend, request.api_key, "quota_exceeded", latency_ms)
+        return TestCredentialsResponse(status="quota_exceeded", message="Quota exceeded")
     except _NetworkError as exc:
         latency_ms = _elapsed_ms(started)
-        _log_test_provider(request.id, request.kind, "network_error", latency_ms)
-        return TestProviderResponse(status="network_error", message=str(exc)[:200])
+        _log_test_credentials(request.backend, request.api_key, "network_error", latency_ms)
+        return TestCredentialsResponse(status="network_error", message=str(exc)[:200])
 
 
 @router.put(
     "/api/copilot/credentials",
-    response_model=CopilotCredentials,
+    response_model=CredentialsReadResponse,
+    responses={400: {"model": ErrorResponse}},
 )
-async def put_copilot_credentials(request: CopilotCredentials) -> CopilotCredentials:
-    """Replace the complete Copilot provider credential config."""
+async def put_copilot_credentials(request: CredentialsWriteRequest) -> CredentialsReadResponse:
+    """Update one backend credential and optionally switch the active backend."""
 
-    write_credentials(request)
-    await reset_session(None, None)
-    return request
+    data = read_credentials()
+    if request.set_active and request.backend not in _ACTIVE_BACKENDS:
+        raise_error_response(
+            error_response(
+                error_code="COPILOT_BACKEND_DISABLED",
+                http_status=400,
+                message=f"Backend '{request.backend}' is reserved for V1.5",
+                details={"backend": request.backend},
+                retry_strategy="not_retryable",
+            )
+        )
+
+    current = data.backends[request.backend]
+    api_key = current.api_key if request.api_key is None else request.api_key
+    base_url = current.base_url if request.base_url is None else request.base_url
+    data.backends[request.backend] = BackendCredentials(
+        api_key=api_key,
+        base_url=base_url,
+    )
+    if request.set_active:
+        data.active_backend = request.backend
+
+    write_credentials(data)
+    await reset_session(None, request.backend)
+    return _to_read_response(data)
 
 
 def _elapsed_ms(started: float) -> int:
     return max(0, round((asyncio.get_running_loop().time() - started) * 1000))
 
 
-def _log_test_provider(
-    provider_id: str,
-    kind: str,
+def _log_test_credentials(
+    backend: CopilotBackend,
+    api_key: str,
     status: str,
     latency_ms: int,
 ) -> None:
+    last4 = api_key[-4:] if api_key else ""
     logger.info(
-        "test_provider provider_id=%s kind=%s status=%s latency_ms=%d",
-        provider_id,
-        kind,
+        "test_credentials backend=%s last4=%s status=%s latency_ms=%d",
+        backend,
+        last4,
         status,
         latency_ms,
     )
 
 
-def _active_provider(data: CopilotCredentials) -> ProviderConfig | None:
-    for provider in data.providers:
-        if provider.id == data.active_provider_id:
-            return provider
-    return None
-
-
-def _provider_runtime_backend(provider: ProviderConfig) -> CopilotBackend | None:
-    if provider.id == "default-deepseek":
-        return "deepseek"
-    if provider.kind == "anthropic":
-        return "claude"
-    return None
+def _to_read_response(data: CredentialsData) -> CredentialsReadResponse:
+    return CredentialsReadResponse(
+        backends={
+            backend: BackendStatus(
+                has_key=bool(credentials.api_key),
+                last4=credentials.api_key[-4:] if credentials.api_key else None,
+                base_url=credentials.base_url,
+            )
+            for backend, credentials in data.backends.items()
+        },
+        active_backend=data.active_backend,
+    )

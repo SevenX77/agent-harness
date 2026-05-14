@@ -6,14 +6,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 from app.models.copilot import (
-    CopilotCredentials,
     CopilotEventDone,
     CopilotEventError,
     CopilotEventText,
     CopilotEventToolUseStart,
-    ProviderConfig,
 )
 from app.routers import copilot as copilot_router
+from app.services.copilot_credentials import BackendCredentials, CredentialsData
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
@@ -76,7 +75,7 @@ def test_copilot_ws_without_active_backend_key_sends_error_and_closes(
     with client.websocket_connect("/api/skills/text-segmentation/copilot/ws") as websocket:
         assert websocket.receive_json() == {
             "type": "error",
-            "message": "未配置 Claude 的 API key",
+            "message": "未配置 claude 的 API key",
         }
         with pytest.raises(WebSocketDisconnect):
             websocket.receive_json()
@@ -93,7 +92,7 @@ def test_copilot_ws_v1_5_backend_sends_error_and_closes(
     with client.websocket_connect("/api/skills/text-segmentation/copilot/ws") as websocket:
         assert websocket.receive_json() == {
             "type": "error",
-            "message": "Provider (Gemini) 暂不可用",
+            "message": "V1.5 backend (gemini) 暂不可用",
         }
         with pytest.raises(WebSocketDisconnect):
             websocket.receive_json()
@@ -172,39 +171,13 @@ async def _events(*items: object) -> AsyncIterator[object]:
         yield item
 
 
-def _credentials(active_backend: str, active_key: str) -> CopilotCredentials:
-    active_provider_id = {
-        "claude": "default-claude",
-        "deepseek": "default-deepseek",
-        "gemini": "default-gemini",
-        "openai": "default-openai",
-    }[active_backend]
-    return CopilotCredentials(
-        active_provider_id=active_provider_id,
-        providers=[
-            ProviderConfig(
-                id="default-claude",
-                name="Claude",
-                kind="anthropic",
-                api_key=active_key if active_backend == "claude" else "claude-key",
-            ),
-            ProviderConfig(
-                id="default-deepseek",
-                name="DeepSeek",
-                kind="openai-compat",
-                api_key=active_key if active_backend == "deepseek" else "deepseek-key",
-            ),
-            ProviderConfig(
-                id="default-gemini",
-                name="Gemini",
-                kind="google",
-                api_key=active_key if active_backend == "gemini" else "",
-            ),
-            ProviderConfig(
-                id="default-openai",
-                name="OpenAI",
-                kind="openai-compat",
-                api_key=active_key if active_backend == "openai" else "",
-            ),
-        ],
+def _credentials(active_backend: str, active_key: str) -> CredentialsData:
+    return CredentialsData(
+        active_backend=active_backend,
+        backends={
+            "claude": BackendCredentials(api_key=active_key if active_backend == "claude" else "claude-key"),
+            "deepseek": BackendCredentials(api_key=active_key if active_backend == "deepseek" else "deepseek-key"),
+            "gemini": BackendCredentials(api_key=active_key if active_backend == "gemini" else ""),
+            "openai": BackendCredentials(api_key=active_key if active_backend == "openai" else ""),
+        },
     )

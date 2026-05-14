@@ -1,52 +1,63 @@
 import { api } from './client'
+import type { CopilotBackend, CopilotBackendStatus, CopilotCredentials } from '../types/copilot'
 
-export type ProviderKind = 'anthropic' | 'openai-compat' | 'google'
+export type { CopilotBackend, CopilotBackendStatus, CopilotCredentials }
 
-export interface ProviderConfig {
-  id: string
-  name: string
-  kind: ProviderKind
+export interface CredentialsWriteRequest {
+  backend: CopilotBackend
+  api_key?: string | null
+  base_url?: string | null
+  set_active?: boolean
+}
+
+export interface TestCredentialsRequest {
+  backend: CopilotBackend
   api_key: string
-  base_url: string
-  active_model_id: string | null
+  base_url?: string
 }
 
-export interface CopilotCredentials {
-  active_provider_id: string
-  providers: ProviderConfig[]
-}
+export type TestCredentialsStatus =
+  | 'ok'
+  | 'invalid_key'
+  | 'rate_limited'
+  | 'quota_exceeded'
+  | 'network_error'
+  | 'timeout'
 
-export interface ModelInfo {
-  id: string
-  supports_thinking: boolean
-  supports_vision: boolean
-}
-
-export interface TestProviderRequest {
-  id: string
-  name: string
-  kind: ProviderKind
-  api_key: string
-  base_url: string
-}
-
-export interface TestProviderResponse {
-  status: 'ok' | 'invalid_key' | 'rate_limited' | 'timeout' | 'network_error' | 'quota_exceeded'
+export interface TestCredentialsResponse {
+  status: TestCredentialsStatus
   latency_ms?: number | null
-  models: ModelInfo[]
+  model_seen?: string | null
   message?: string | null
 }
 
+// Credential writes are intentionally backend HTTP only; do not use Tauri FS from the frontend.
 export async function getCopilotCredentials(): Promise<CopilotCredentials> {
   const response = await api.get<CopilotCredentials>('/copilot/credentials')
   return response.data
 }
 
-export async function putCopilotCredentials(credentials: CopilotCredentials): Promise<void> {
-  await api.put('/copilot/credentials', credentials)
+export async function updateCopilotCredentials(
+  backend: CopilotBackend,
+  apiKey?: string,
+  setActive = false,
+  baseUrl?: string | null,
+): Promise<CopilotCredentials> {
+  const request: CredentialsWriteRequest = {
+    backend,
+    api_key: apiKey || undefined,
+    set_active: setActive,
+  }
+  if (baseUrl !== undefined) {
+    request.base_url = baseUrl
+  }
+  const response = await api.put<CopilotCredentials>('/copilot/credentials', request)
+  return response.data
 }
 
-export async function testCopilotProvider(request: TestProviderRequest): Promise<TestProviderResponse> {
-  const response = await api.post<TestProviderResponse>('/copilot/providers/test', request)
+export async function testCopilotCredentials(
+  request: TestCredentialsRequest,
+): Promise<TestCredentialsResponse> {
+  const response = await api.post<TestCredentialsResponse>('/copilot/credentials/test', request)
   return response.data
 }

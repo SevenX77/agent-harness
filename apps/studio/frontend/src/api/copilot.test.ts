@@ -2,10 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api } from './client'
 import {
   getCopilotCredentials,
-  putCopilotCredentials,
-  testCopilotProvider,
+  testCopilotCredentials,
+  updateCopilotCredentials,
   type CopilotCredentials,
-  type TestProviderResponse,
 } from './copilot'
 
 vi.mock('./client', () => ({
@@ -17,74 +16,55 @@ vi.mock('./client', () => ({
 }))
 
 const credentials: CopilotCredentials = {
-  active_provider_id: 'default-claude',
-  providers: [
-    {
-      id: 'default-claude',
-      name: 'Claude',
-      kind: 'anthropic',
-      api_key: 'sk-claude',
-      base_url: '',
-      active_model_id: 'claude-sonnet-4-5',
-    },
-    {
-      id: 'default-openai',
-      name: 'OpenAI',
-      kind: 'openai-compat',
-      api_key: '',
-      base_url: 'https://openai.example/v1',
-      active_model_id: null,
-    },
-  ],
+  active_backend: 'claude',
+  backends: {
+    claude: { has_key: true, last4: '1234', base_url: '' },
+    deepseek: { has_key: false, last4: null, base_url: 'https://deepseek.example' },
+    gemini: { has_key: false, last4: null, base_url: '' },
+    openai: { has_key: false, last4: null, base_url: '' },
+  },
 }
 
-describe('copilot provider api', () => {
+describe('copilot credentials api', () => {
   afterEach(() => {
     vi.mocked(api.get).mockReset()
     vi.mocked(api.put).mockReset()
     vi.mocked(api.post).mockReset()
   })
 
-  it('passes plaintext provider credentials through GET', async () => {
+  it('passes through last4 and base_url from GET credentials', async () => {
     vi.mocked(api.get).mockResolvedValueOnce({ data: credentials })
 
     await expect(getCopilotCredentials()).resolves.toEqual(credentials)
     expect(api.get).toHaveBeenCalledWith('/copilot/credentials')
   })
 
-  it('PUTs the full credentials object', async () => {
+  it('passes base_url through PUT credentials', async () => {
     vi.mocked(api.put).mockResolvedValueOnce({ data: credentials })
 
-    await expect(putCopilotCredentials(credentials)).resolves.toBeUndefined()
+    await updateCopilotCredentials('deepseek', 'sk-key', false, 'https://deepseek.example')
 
-    expect(api.put).toHaveBeenCalledWith('/copilot/credentials', credentials)
+    expect(api.put).toHaveBeenCalledWith('/copilot/credentials', {
+      backend: 'deepseek',
+      api_key: 'sk-key',
+      set_active: false,
+      base_url: 'https://deepseek.example',
+    })
   })
 
-  it('tests a provider and passes discovered models through', async () => {
-    const result: TestProviderResponse = {
-      status: 'ok',
-      latency_ms: 42,
-      models: [
-        { id: 'claude-sonnet-4-5', supports_thinking: true, supports_vision: true },
-        { id: 'claude-haiku-4-5', supports_thinking: false, supports_vision: true },
-      ],
-      message: null,
-    }
+  it('tests candidate credentials successfully', async () => {
+    const result = { status: 'ok' as const, latency_ms: 42, model_seen: 'claude-sonnet' }
     vi.mocked(api.post).mockResolvedValueOnce({ data: result })
 
     await expect(
-      testCopilotProvider({
-        id: 'default-claude',
-        name: 'Claude',
-        kind: 'anthropic',
+      testCopilotCredentials({
+        backend: 'claude',
         api_key: 'sk-test',
         base_url: '',
       }),
     ).resolves.toEqual(result)
-    expect(api.post).toHaveBeenCalledWith('/copilot/providers/test', {
-      id: 'default-claude',
-      name: 'Claude',
-      kind: 'anthropic',
+    expect(api.post).toHaveBeenCalledWith('/copilot/credentials/test', {
+      backend: 'claude',
       api_key: 'sk-test',
       base_url: '',
     })
@@ -95,12 +75,9 @@ describe('copilot provider api', () => {
     vi.mocked(api.post).mockRejectedValueOnce(error)
 
     await expect(
-      testCopilotProvider({
-        id: 'default-openai',
-        name: 'OpenAI',
-        kind: 'openai-compat',
+      testCopilotCredentials({
+        backend: 'openai',
         api_key: 'bad-key',
-        base_url: '',
       }),
     ).rejects.toMatchObject({ response: { status: 400 } })
   })

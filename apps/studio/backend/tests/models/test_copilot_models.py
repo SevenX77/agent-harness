@@ -2,79 +2,75 @@ from __future__ import annotations
 
 import pytest
 from app.models.copilot import (
-    CopilotCredentials,
-    ModelInfo,
-    ProviderConfig,
-    TestProviderRequest as ProviderTestRequest,
-    TestProviderResponse as ProviderTestResponse,
+    BackendStatus,
+    CredentialsReadResponse,
+    CredentialsWriteRequest,
 )
 from pydantic import ValidationError
 
 
-def test_provider_config_accepts_v2_provider_kinds() -> None:
-    for kind in ("anthropic", "openai-compat", "google"):
-        provider = ProviderConfig(id=f"default-{kind}", name=kind, kind=kind, api_key="secret")
-        assert provider.kind == kind
-        assert provider.api_key == "secret"
+def test_copilot_backend_accepts_four_values() -> None:
+    for backend in ("claude", "deepseek", "gemini", "openai"):
+        request = CredentialsWriteRequest(backend=backend, api_key=None)
+        assert request.backend == backend
 
 
-def test_provider_config_rejects_unknown_kind() -> None:
+def test_copilot_backend_rejects_unknown_value() -> None:
     with pytest.raises(ValidationError):
-        ProviderConfig(id="bad", name="Bad", kind="bad-kind")
+        CredentialsWriteRequest(backend="bad", api_key=None)
 
 
-def test_copilot_credentials_keeps_plaintext_keys_and_no_sanitized_fields() -> None:
-    credentials = CopilotCredentials(
-        active_provider_id="default-claude",
-        providers=[
-            ProviderConfig(
-                id="default-claude",
-                name="Claude",
-                kind="anthropic",
-                api_key="sk-secret",
-                active_model_id="claude-sonnet-4-5",
-            )
-        ],
+def test_credentials_read_response_is_sanitized() -> None:
+    response = CredentialsReadResponse(
+        backends={
+            "claude": BackendStatus(has_key=True, last4="1234"),
+            "deepseek": BackendStatus(has_key=False),
+            "gemini": BackendStatus(has_key=False),
+            "openai": BackendStatus(has_key=False),
+        },
+        active_backend="claude",
     )
 
-    dumped = credentials.model_dump()
-    assert dumped["active_provider_id"] == "default-claude"
-    assert dumped["providers"][0]["api_key"] == "sk-secret"
-    assert dumped["providers"][0]["active_model_id"] == "claude-sonnet-4-5"
-    assert "has_key" not in str(dumped)
-    assert "last4" not in str(dumped)
-    assert "backends" not in str(dumped)
+    dumped = response.model_dump()
+    assert dumped["backends"]["claude"] == {
+        "has_key": True,
+        "last4": "1234",
+        "base_url": "",
+    }
+    assert "api_key" not in str(dumped)
 
 
-def test_copilot_credentials_requires_active_provider_id() -> None:
+def test_credentials_write_request_accepts_none_and_default_set_active() -> None:
+    request = CredentialsWriteRequest(backend="claude", api_key=None)
+
+    assert request.api_key is None
+    assert request.base_url is None
+    assert request.set_active is False
+
+
+@pytest.mark.parametrize(
+    ("model_cls", "payload"),
+    [
+        (BackendStatus, {"has_key": True, "extra": "nope"}),
+        (
+            CredentialsReadResponse,
+            {
+                "backends": {
+                    "claude": {"has_key": False},
+                    "deepseek": {"has_key": False},
+                    "gemini": {"has_key": False},
+                    "openai": {"has_key": False},
+                },
+                "active_backend": "claude",
+                "extra": "nope",
+            },
+        ),
+        (
+            CredentialsWriteRequest,
+            {"backend": "claude", "api_key": None, "set_active": False, "extra": "nope"},
+        ),
+    ],
+)
+def test_models_forbid_extra_fields(model_cls: type, payload: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
-        CopilotCredentials.model_validate({"providers": []})
-
-
-def test_models_ignore_extra_fields() -> None:
-    provider = ProviderConfig.model_validate(
-        {"id": "default-claude", "name": "Claude", "kind": "anthropic", "extra": "ignored"}
-    )
-    request = ProviderTestRequest.model_validate(
-        {
-            "id": "default-claude",
-            "name": "Claude",
-            "kind": "anthropic",
-            "api_key": "secret",
-            "extra": "ignored",
-        }
-    )
-
-    assert not hasattr(provider, "extra")
-    assert not hasattr(request, "extra")
-
-
-def test_test_provider_response_carries_models() -> None:
-    response = ProviderTestResponse(
-        status="ok",
-        latency_ms=42,
-        models=[ModelInfo(id="claude-opus-4-7", supports_thinking=True, supports_vision=True)],
-    )
-
-    assert response.models[0].id == "claude-opus-4-7"
-    assert response.models[0].supports_thinking is True
+        model_cls.model_validate(payload)

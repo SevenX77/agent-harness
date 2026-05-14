@@ -2,10 +2,10 @@ import React, { useEffect, useState, type FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { ArrowUp, Bot, CircleAlert, Paperclip, Plus } from 'lucide-react'
 import { toast } from 'sonner'
-import { getCopilotCredentials, putCopilotCredentials, type CopilotCredentials } from '../../api/copilot'
+import { getCopilotCredentials, updateCopilotCredentials } from '../../api/copilot'
 import { useCopilot } from '../../hooks/useCopilot'
 import { useTemplates } from '../../hooks/useTemplates'
-import type { CopilotBackend, CopilotMessage } from '../../types/copilot'
+import type { CopilotBackend, CopilotCredentials, CopilotMessage } from '../../types/copilot'
 import { DiffBubble } from './diff-bubble'
 import { ModelPicker } from './model-picker'
 import { ToolCallBubble } from './tool-call-bubble'
@@ -71,18 +71,6 @@ interface CopilotPanelProps {
   view?: 'edit' | 'eval'
 }
 
-const providerIdByBackend: Record<CopilotBackend, string> = {
-  claude: 'default-claude',
-  deepseek: 'default-deepseek',
-  gemini: 'default-gemini',
-  openai: 'default-openai',
-}
-
-function backendFromProviderId(providerId: string): CopilotBackend {
-  const match = Object.entries(providerIdByBackend).find(([, id]) => id === providerId)
-  return (match?.[0] as CopilotBackend | undefined) ?? 'claude'
-}
-
 export function CopilotPanel({ skillId, view = 'edit' }: CopilotPanelProps) {
   const [draft, setDraft] = useState('')
   const [credentials, setCredentials] = useState<CopilotCredentials | null>(null)
@@ -99,7 +87,7 @@ export function CopilotPanel({ skillId, view = 'edit' }: CopilotPanelProps) {
           return
         }
         setCredentials(next)
-        setActiveBackend(backendFromProviderId(next.active_provider_id))
+        setActiveBackend(next.active_backend)
       })
       .catch(() => {
         toast.error('Copilot credentials unavailable')
@@ -114,9 +102,7 @@ export function CopilotPanel({ skillId, view = 'edit' }: CopilotPanelProps) {
       return
     }
     try {
-      if (!credentials) return
-      const next = { ...credentials, active_provider_id: providerIdByBackend[backend] }
-      await putCopilotCredentials(next)
+      const next = await updateCopilotCredentials(backend, undefined, true)
       setCredentials(next)
       setActiveBackend(backend)
       copilot.setBackend(backend)

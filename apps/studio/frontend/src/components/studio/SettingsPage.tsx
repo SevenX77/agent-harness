@@ -1,122 +1,117 @@
-import { useEffect, useState, type ReactNode } from "react"
-import { CheckCircle2, ChevronDown, Plug, Settings, Sparkles, X, XCircle } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { CheckCircle2, ChevronDown, ChevronRight, Eye, EyeOff, Plus, Trash2, X, XCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
-import { useAppSettings } from "@/hooks/useAppSettings"
 import { cn } from "@/lib/utils"
 import {
   getCopilotCredentials,
-  testCopilotCredentials,
-  updateCopilotCredentials,
-  type TestCredentialsResponse,
+  putCopilotCredentials,
+  testCopilotProvider,
+  type CopilotCredentials,
+  type ProviderConfig,
+  type ProviderKind,
+  type TestProviderResponse,
 } from "../../api/copilot"
-import type { CopilotBackend, CopilotCredentials } from "../../types/copilot"
 
-const BACKENDS: Array<{ id: CopilotBackend; label: string; defaultBaseUrl: string }> = [
-  { id: "claude", label: "Claude", defaultBaseUrl: "https://api.anthropic.com" },
-  { id: "openai", label: "OpenAI", defaultBaseUrl: "https://api.openai.com" },
-  { id: "deepseek", label: "DeepSeek", defaultBaseUrl: "https://api.deepseek.com" },
-  { id: "gemini", label: "Gemini", defaultBaseUrl: "https://generativelanguage.googleapis.com" },
-]
+const AUTOSAVE_DELAY_MS = 650
 
-type SettingsTab = "general" | "copilot" | "advanced"
-type TestState =
-  | { status: "idle" }
-  | { status: "testing" }
-  | { status: "ok"; result: TestCredentialsResponse }
-  | { status: "error"; result: TestCredentialsResponse }
-
-export interface BackendDraft {
-  apiKey: string
-  baseUrl: string
-  advancedOpen: boolean
-}
-
-type Drafts = Record<CopilotBackend, BackendDraft>
-type TestStates = Record<CopilotBackend, TestState>
-
-const emptyCredentials: CopilotCredentials = {
-  active_backend: "claude",
-  backends: {
-    claude: { has_key: false, last4: null, base_url: "" },
-    openai: { has_key: false, last4: null, base_url: "" },
-    deepseek: { has_key: false, last4: null, base_url: "" },
-    gemini: { has_key: false, last4: null, base_url: "" },
-  },
+export const DEFAULT_CREDENTIALS: CopilotCredentials = {
+  active_provider_id: "default-claude",
+  providers: [
+    defaultProvider("default-claude", "Claude", "anthropic"),
+    defaultProvider("default-openai", "OpenAI", "openai-compat"),
+    defaultProvider("default-deepseek", "DeepSeek", "openai-compat"),
+    defaultProvider("default-gemini", "Gemini", "google"),
+  ],
 }
 
 interface SettingsPageProps {
   onClose: () => void
 }
 
+type Drafts = Record<string, ProviderConfig>
+type TestResults = Record<string, TestProviderResponse | null>
+
 interface SettingsPageContentProps {
-  activeTab: SettingsTab
   credentials: CopilotCredentials
   drafts: Drafts
-  testStates: TestStates
-  appSettings: {
-    userId: string
-    giteaHost: string
-    isLoading: boolean
-    setUserId: (value: string) => void
-    setGiteaHost: (value: string) => void
-    save: () => void | Promise<unknown>
-  }
+  expandedIds: Set<string>
+  visibleKeyIds: Set<string>
+  testingIds: Set<string>
+  testResults: TestResults
+  addDialogOpen: boolean
+  newProvider: { name: string; kind: ProviderKind }
   onClose: () => void
-  onTabChange: (tab: SettingsTab) => void
-  onDraftChange: (backend: CopilotBackend, patch: Partial<BackendDraft>) => void
-  onSetActiveBackend: (backend: CopilotBackend) => void
-  onTestBackend: (backend: CopilotBackend) => void
-  onSaveBackend: (backend: CopilotBackend) => void
-}
-
-const initialTestStates = (): TestStates => ({
-  claude: { status: "idle" },
-  openai: { status: "idle" },
-  deepseek: { status: "idle" },
-  gemini: { status: "idle" },
-})
-
-export function draftsFromCredentials(credentials: CopilotCredentials): Drafts {
-  return {
-    claude: { apiKey: "", baseUrl: credentials.backends.claude.base_url, advancedOpen: false },
-    openai: { apiKey: "", baseUrl: credentials.backends.openai.base_url, advancedOpen: false },
-    deepseek: { apiKey: "", baseUrl: credentials.backends.deepseek.base_url, advancedOpen: false },
-    gemini: { apiKey: "", baseUrl: credentials.backends.gemini.base_url, advancedOpen: false },
-  }
+  onActiveProviderChange: (providerId: string) => void
+  onDraftChange: (providerId: string, patch: Partial<ProviderConfig>) => void
+  onToggleExpanded: (providerId: string) => void
+  onToggleKeyVisible: (providerId: string) => void
+  onTestProvider: (providerId: string) => void
+  onDeleteProvider: (providerId: string) => void
+  onAddDialogOpenChange: (open: boolean) => void
+  onNewProviderChange: (patch: Partial<{ name: string; kind: ProviderKind }>) => void
+  onConfirmAddProvider: () => void
 }
 
 export function SettingsPage({ onClose }: SettingsPageProps) {
-  const appSettings = useAppSettings()
-  const [activeTab, setActiveTab] = useState<SettingsTab>("general")
-  const [credentials, setCredentials] = useState<CopilotCredentials>(emptyCredentials)
-  const [drafts, setDrafts] = useState<Drafts>(() => draftsFromCredentials(emptyCredentials))
-  const [testStates, setTestStates] = useState<TestStates>(() => initialTestStates())
+  const [credentials, setCredentials] = useState<CopilotCredentials>(DEFAULT_CREDENTIALS)
+  const [drafts, setDrafts] = useState<Drafts>(() => draftsFromCredentials(DEFAULT_CREDENTIALS))
+  const [dirtyIds, setDirtyIds] = useState<Set<string>>(new Set())
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  const [visibleKeyIds, setVisibleKeyIds] = useState<Set<string>>(new Set())
+  const [testingIds, setTestingIds] = useState<Set<string>>(new Set())
+  const [testResults, setTestResults] = useState<TestResults>({})
+  const [addDialogOpen, setAddDialogOpen] = useState(false)
+  const [newProvider, setNewProvider] = useState<{ name: string; kind: ProviderKind }>({
+    name: "",
+    kind: "openai-compat",
+  })
+  const credentialsRef = useRef(credentials)
+  const draftsRef = useRef(drafts)
+  const dirtyIdsRef = useRef(dirtyIds)
+
+  useEffect(() => {
+    credentialsRef.current = credentials
+  }, [credentials])
+
+  useEffect(() => {
+    draftsRef.current = drafts
+  }, [drafts])
+
+  useEffect(() => {
+    dirtyIdsRef.current = dirtyIds
+  }, [dirtyIds])
 
   useEffect(() => {
     let cancelled = false
     getCopilotCredentials()
-      .then((next) => {
+      .then((next: CopilotCredentials) => {
         if (cancelled) return
         setCredentials(next)
         setDrafts(draftsFromCredentials(next))
       })
       .catch(() => {
         if (!cancelled) {
-          setTestStates((current) => ({
-            ...current,
-            claude: {
-              status: "error",
-              result: { status: "network_error", message: "Credentials unavailable" },
-            },
-          }))
+          setCredentials(DEFAULT_CREDENTIALS)
+          setDrafts(draftsFromCredentials(DEFAULT_CREDENTIALS))
         }
       })
     return () => {
@@ -124,466 +119,496 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     }
   }, [])
 
-  function updateDraft(backend: CopilotBackend, patch: Partial<BackendDraft>) {
+  useEffect(() => {
+    if (dirtyIds.size === 0) return
+    const timer = window.setTimeout(() => {
+      void flushCredentials()
+    }, AUTOSAVE_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [dirtyIds, credentials, drafts])
+
+  async function flushCredentials() {
+    const next = buildCredentialsFromDrafts(credentialsRef.current, draftsRef.current)
+    await putCopilotCredentials(next)
+    setCredentials(next)
+    setDirtyIds(new Set())
+  }
+
+  function markDirty(providerId: string) {
+    setDirtyIds((current) => new Set(current).add(providerId))
+  }
+
+  function updateDraft(providerId: string, patch: Partial<ProviderConfig>) {
     setDrafts((current) => ({
       ...current,
-      [backend]: { ...current[backend], ...patch },
+      [providerId]: { ...current[providerId], ...patch },
     }))
-    setTestStates((current) => ({ ...current, [backend]: { status: "idle" } }))
+    setTestResults((current) => ({ ...current, [providerId]: null }))
+    markDirty(providerId)
   }
 
-  async function setActiveBackend(backend: CopilotBackend) {
-    setCredentials((current) => ({ ...current, active_backend: backend }))
-    const next = await updateCopilotCredentials(backend, undefined, true)
-    setCredentials(next)
-    setDrafts(draftsFromCredentials(next))
+  function setActiveProvider(providerId: string) {
+    setCredentials((current) => ({ ...current, active_provider_id: providerId }))
+    markDirty("__root__")
   }
 
-  async function testBackend(backend: CopilotBackend) {
-    const draft = drafts[backend]
-    setTestStates((current) => ({ ...current, [backend]: { status: "testing" } }))
-    const result = await testCopilotCredentials({
-      backend,
-      api_key: draft.apiKey.trim(),
-      base_url: draft.baseUrl.trim(),
+  async function runProviderTest(providerId: string) {
+    const draft = draftsRef.current[providerId]
+    if (!draft) return
+    setTestingIds((current) => new Set(current).add(providerId))
+    setTestResults((current) => ({ ...current, [providerId]: null }))
+    try {
+      const next = buildCredentialsFromDrafts(credentialsRef.current, draftsRef.current)
+      await putCopilotCredentials(next)
+      setCredentials(next)
+      setDirtyIds((current) => {
+        const copy = new Set(current)
+        copy.delete(providerId)
+        return copy
+      })
+      const result = await testCopilotProvider({
+        id: draft.id,
+        name: draft.name,
+        kind: draft.kind,
+        api_key: draft.api_key.trim(),
+        base_url: draft.base_url.trim(),
+      })
+      setTestResults((current) => ({ ...current, [providerId]: result }))
+    } finally {
+      setTestingIds((current) => {
+        const copy = new Set(current)
+        copy.delete(providerId)
+        return copy
+      })
+    }
+  }
+
+  function addProvider() {
+    const name = newProvider.name.trim()
+    if (!name) return
+    const provider = customProvider(name, newProvider.kind)
+    setCredentials((current) => appendProvider(current, provider))
+    setDrafts((current) => ({ ...current, [provider.id]: provider }))
+    markDirty(provider.id)
+    setNewProvider({ name: "", kind: "openai-compat" })
+    setAddDialogOpen(false)
+  }
+
+  function deleteProvider(providerId: string) {
+    if (isDefaultProvider(providerId) || !window.confirm("Delete this provider?")) return
+    setCredentials((current) => removeProvider(current, providerId))
+    setDrafts((current) => {
+      const next = { ...current }
+      delete next[providerId]
+      return next
     })
-    setTestStates((current) => ({
-      ...current,
-      [backend]: result.status === "ok" ? { status: "ok", result } : { status: "error", result },
-    }))
-  }
-
-  async function saveBackend(backend: CopilotBackend) {
-    const draft = drafts[backend]
-    const status = credentials.backends[backend]
-    const next = await updateCopilotCredentials(
-      backend,
-      draft.apiKey.trim() ? draft.apiKey.trim() : undefined,
-      credentials.active_backend === backend,
-      draft.baseUrl === status.base_url ? undefined : draft.baseUrl,
-    )
-    setCredentials(next)
-    setDrafts(draftsFromCredentials(next))
+    setTestResults((current) => ({ ...current, [providerId]: null }))
+    markDirty("__root__")
   }
 
   return (
     <SettingsPageContent
-      activeTab={activeTab}
       credentials={credentials}
       drafts={drafts}
-      testStates={testStates}
-      appSettings={{
-        userId: appSettings.settings.user_id,
-        giteaHost: appSettings.settings.gitea_host,
-        isLoading: appSettings.isLoading,
-        setUserId: appSettings.setUserId,
-        setGiteaHost: appSettings.setGiteaHost,
-        save: appSettings.save,
-      }}
+      expandedIds={expandedIds}
+      visibleKeyIds={visibleKeyIds}
+      testingIds={testingIds}
+      testResults={testResults}
+      addDialogOpen={addDialogOpen}
+      newProvider={newProvider}
       onClose={onClose}
-      onTabChange={setActiveTab}
+      onActiveProviderChange={setActiveProvider}
       onDraftChange={updateDraft}
-      onSetActiveBackend={(backend) => void setActiveBackend(backend)}
-      onTestBackend={(backend) => void testBackend(backend)}
-      onSaveBackend={(backend) => void saveBackend(backend)}
+      onToggleExpanded={(providerId) =>
+        setExpandedIds((current) => toggleSetValue(current, providerId))
+      }
+      onToggleKeyVisible={(providerId) =>
+        setVisibleKeyIds((current) => toggleSetValue(current, providerId))
+      }
+      onTestProvider={(providerId) => void runProviderTest(providerId)}
+      onDeleteProvider={deleteProvider}
+      onAddDialogOpenChange={setAddDialogOpen}
+      onNewProviderChange={(patch) => setNewProvider((current) => ({ ...current, ...patch }))}
+      onConfirmAddProvider={addProvider}
     />
   )
 }
 
 export function SettingsPageContent({
-  activeTab,
   credentials,
   drafts,
-  testStates,
-  appSettings,
+  expandedIds,
+  visibleKeyIds,
+  testingIds,
+  testResults,
+  addDialogOpen,
+  newProvider,
   onClose,
-  onTabChange,
+  onActiveProviderChange,
   onDraftChange,
-  onSetActiveBackend,
-  onTestBackend,
-  onSaveBackend,
+  onToggleExpanded,
+  onToggleKeyVisible,
+  onTestProvider,
+  onDeleteProvider,
+  onAddDialogOpenChange,
+  onNewProviderChange,
+  onConfirmAddProvider,
 }: SettingsPageContentProps) {
   return (
     <div className="flex size-full flex-col bg-background">
-      <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border pl-4 pr-2">
+      <div className="flex h-11 shrink-0 items-center justify-between border-b border-border pl-4 pr-2">
         <span className="text-sm font-semibold text-foreground">Settings</span>
         <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close settings" className="size-7">
           <X className="size-4" />
         </Button>
       </div>
 
-      <div className="flex min-h-0 flex-1">
-        <nav className="w-56 shrink-0 border-r border-border bg-sidebar/40 px-2 py-4">
-          <NavButton active={activeTab === "general"} icon={<Settings />} onClick={() => onTabChange("general")}>
-            General
-          </NavButton>
-          <NavButton active={activeTab === "copilot"} icon={<Sparkles />} onClick={() => onTabChange("copilot")}>
-            AI & Copilot
-          </NavButton>
-          <NavButton active={activeTab === "advanced"} icon={<Plug />} onClick={() => onTabChange("advanced")}>
-            Advanced
-          </NavButton>
-        </nav>
-
-        <ScrollArea className="flex-1">
-          <div className="max-w-3xl px-10 py-8">
-            {activeTab === "general" ? <GeneralTab appSettings={appSettings} /> : null}
-            {activeTab === "copilot" ? (
-              <CopilotTab
-                credentials={credentials}
-                drafts={drafts}
-                testStates={testStates}
-                onDraftChange={onDraftChange}
-                onSetActiveBackend={onSetActiveBackend}
-                onTestBackend={onTestBackend}
-                onSaveBackend={onSaveBackend}
-              />
-            ) : null}
-            {activeTab === "advanced" ? <AdvancedTab /> : null}
+      <div className="min-h-0 flex-1 overflow-y-auto px-8 py-7">
+        <div className="mx-auto max-w-4xl space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
+            <div>
+              <h2 className="text-xl font-semibold tracking-tight text-foreground">AI & Copilot</h2>
+              <p className="mt-1 text-xs text-muted-foreground">Changes are saved automatically.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="text-xs text-muted-foreground">Active Provider</Label>
+              <Select value={credentials.active_provider_id} onValueChange={onActiveProviderChange}>
+                <SelectTrigger className="h-8 w-48 text-xs" aria-label="Active Provider">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {credentials.providers.map((provider) => (
+                    <SelectItem key={provider.id} value={provider.id}>
+                      {provider.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button type="button" size="sm" onClick={() => onAddDialogOpenChange(true)} className="h-8 text-xs">
+                <Plus className="size-3.5" />
+                Add Custom Provider
+              </Button>
+            </div>
           </div>
-        </ScrollArea>
-      </div>
-    </div>
-  )
-}
 
-function NavButton({
-  active,
-  icon,
-  children,
-  onClick,
-}: {
-  active: boolean
-  icon: ReactNode
-  children: ReactNode
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "flex w-full items-center gap-2.5 rounded-sm px-2.5 py-1.5 text-xs transition-colors [&_svg]:size-3.5",
-        active
-          ? "bg-sidebar-accent text-foreground"
-          : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground",
-      )}
-    >
-      {icon}
-      {children}
-    </button>
-  )
-}
-
-function SectionTitle({ title, description }: { title: string; description?: string }) {
-  return (
-    <div className="mb-6">
-      <h2 className="text-base font-semibold text-foreground">{title}</h2>
-      {description ? <p className="mt-1 text-xs text-muted-foreground">{description}</p> : null}
-    </div>
-  )
-}
-
-function SettingRow({
-  label,
-  description,
-  control,
-}: {
-  label: string
-  description?: string
-  control: ReactNode
-}) {
-  return (
-    <div className="flex items-start justify-between gap-6 py-3">
-      <div className="min-w-0 flex-1">
-        <Label className="text-xs font-medium text-foreground">{label}</Label>
-        {description ? <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{description}</p> : null}
-      </div>
-      <div className="shrink-0">{control}</div>
-    </div>
-  )
-}
-
-function GeneralTab({ appSettings }: Pick<SettingsPageContentProps, "appSettings">) {
-  return (
-    <div>
-      <SectionTitle title="General" description="Application defaults and collaboration identity." />
-      <SettingRow
-        label="Studio User ID"
-        description="Used as the local Git author and team owner."
-        control={
-          <div className="flex items-center gap-2">
-            <Input
-              value={appSettings.userId}
-              onChange={(event) => appSettings.setUserId(event.target.value)}
-              placeholder="your-username"
-              className="h-8 w-56 text-xs"
-              aria-label="Studio User ID"
-            />
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => void appSettings.save()}
-              disabled={appSettings.isLoading}
-              className="h-7 text-xs"
-            >
-              Save
-            </Button>
+          <div className="space-y-3">
+            {credentials.providers.map((provider) => {
+              const draft = drafts[provider.id] ?? provider
+              return (
+                <ProviderCard
+                  key={provider.id}
+                  provider={provider}
+                  draft={draft}
+                  active={credentials.active_provider_id === provider.id}
+                  expanded={expandedIds.has(provider.id)}
+                  keyVisible={visibleKeyIds.has(provider.id)}
+                  testing={testingIds.has(provider.id)}
+                  testResult={testResults[provider.id] ?? null}
+                  onDraftChange={(patch) => onDraftChange(provider.id, patch)}
+                  onToggleExpanded={() => onToggleExpanded(provider.id)}
+                  onToggleKeyVisible={() => onToggleKeyVisible(provider.id)}
+                  onTest={() => onTestProvider(provider.id)}
+                  onDelete={() => onDeleteProvider(provider.id)}
+                />
+              )
+            })}
           </div>
-        }
-      />
-      <SettingRow
-        label="Gitea Host"
-        description="Private Gitea host used for team collaboration."
-        control={
-          <div className="flex items-center gap-2">
-            <Input
-              value={appSettings.giteaHost}
-              onChange={(event) => appSettings.setGiteaHost(event.target.value)}
-              placeholder="https://gitea.example.com"
-              className="h-8 w-56 text-xs"
-              aria-label="Gitea Host"
-            />
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => void appSettings.save()}
-              disabled={appSettings.isLoading}
-              className="h-7 text-xs"
-            >
-              Save
-            </Button>
-          </div>
-        }
-      />
-    </div>
-  )
-}
-
-function CopilotTab({
-  credentials,
-  drafts,
-  testStates,
-  onDraftChange,
-  onSetActiveBackend,
-  onTestBackend,
-  onSaveBackend,
-}: Omit<
-  SettingsPageContentProps,
-  "activeTab" | "appSettings" | "onClose" | "onTabChange"
->) {
-  return (
-    <div>
-      <SectionTitle
-        title="AI & Copilot"
-        description="Manage provider API keys, custom endpoints, and the active Copilot backend."
-      />
-      <div className="mb-5 rounded-md border border-border bg-card p-4">
-        <Label className="mb-3 block text-xs font-medium text-foreground">Active Backend</Label>
-        <RadioGroup
-          value={credentials.active_backend}
-          onValueChange={(value) => onSetActiveBackend(value as CopilotBackend)}
-          className="grid grid-cols-2 gap-2 md:grid-cols-4"
-        >
-          {BACKENDS.map((backend) => (
-            <label
-              key={backend.id}
-              className="flex h-8 items-center gap-2 rounded-md border border-border px-2 text-xs text-foreground"
-            >
-              <RadioGroupItem value={backend.id} />
-              {backend.label}
-            </label>
-          ))}
-        </RadioGroup>
-      </div>
-
-      <div className="space-y-3">
-        {BACKENDS.map((backend) => (
-          <BackendCredentialCard
-            key={backend.id}
-            backend={backend}
-            active={credentials.active_backend === backend.id}
-            status={credentials.backends[backend.id]}
-            draft={drafts[backend.id]}
-            testState={testStates[backend.id]}
-            onDraftChange={(patch) => onDraftChange(backend.id, patch)}
-            onTest={() => onTestBackend(backend.id)}
-            onSave={() => onSaveBackend(backend.id)}
-          />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-export function BackendCredentialCard({
-  backend,
-  active,
-  status,
-  draft,
-  testState,
-  onDraftChange,
-  onTest,
-  onSave,
-}: {
-  backend: (typeof BACKENDS)[number]
-  active: boolean
-  status: CopilotCredentials["backends"][CopilotBackend]
-  draft: BackendDraft
-  testState: TestState
-  onDraftChange: (patch: Partial<BackendDraft>) => void
-  onTest: () => void
-  onSave: () => void
-}) {
-  const keyMask = status.last4 ? `••••${status.last4}` : ""
-  const keyDirty = draft.apiKey.trim().length > 0
-  const baseUrlDirty = draft.baseUrl !== status.base_url
-  const dirty = keyDirty || baseUrlDirty
-
-  return (
-    <Card size="sm" className={cn(active ? "ring-primary/50" : "")}>
-      <CardHeader className="flex-row items-start justify-between gap-3">
-        <div>
-          <CardTitle className="flex items-center gap-2">
-            {backend.label}
-            {active ? <Badge>Active</Badge> : null}
-          </CardTitle>
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            {status.has_key ? "API key configured" : "No API key configured"}
-          </p>
         </div>
-        <TestBadge state={testState} />
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="grid gap-2 md:grid-cols-[1fr_auto]">
-          <div>
-            <Label htmlFor={`${backend.id}-api-key`} className="text-[11px] text-muted-foreground">
-              API Key
-            </Label>
-            <Input
-              id={`${backend.id}-api-key`}
-              name={`${backend.id}-api-key`}
-              type="password"
-              autoComplete="off"
-              value={draft.apiKey}
-              onChange={(event) => onDraftChange({ apiKey: event.target.value })}
-              placeholder={keyMask || "Enter API key"}
-              className="mt-1 h-8 text-xs"
-              aria-label={`${backend.label} API key`}
-            />
-            {keyMask ? <p className="mt-1 text-[11px] text-muted-foreground">{keyMask}</p> : null}
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onTest}
-            disabled={testState.status === "testing" || !draft.apiKey.trim()}
-            className="mt-5 h-8"
-            aria-label={`Test ${backend.label} credentials`}
-          >
-            {testState.status === "testing" ? <Spinner className="size-3.5" /> : null}
-            Test
-          </Button>
-        </div>
+      </div>
 
-        <Collapsible
-          open={draft.advancedOpen}
-          onOpenChange={(open) => onDraftChange({ advancedOpen: open })}
-        >
-          <CollapsibleTrigger asChild>
-            <Button type="button" variant="ghost" size="sm" className="h-7 px-0 text-xs">
-              <ChevronDown className="size-3.5" />
-              Advanced
-            </Button>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <div className="rounded-md border border-border bg-muted/20 p-3">
-              <Label htmlFor={`${backend.id}-base-url`} className="text-[11px] text-muted-foreground">
-                Custom Base URL
-              </Label>
+      <Dialog open={addDialogOpen} onOpenChange={onAddDialogOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Custom Provider</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label className="text-xs">Name</Label>
               <Input
-                id={`${backend.id}-base-url`}
-                value={draft.baseUrl}
-                onChange={(event) => onDraftChange({ baseUrl: event.target.value })}
-                placeholder={backend.defaultBaseUrl}
-                className="mt-1 h-8 text-xs"
-                aria-label={`${backend.label} Base URL`}
+                value={newProvider.name}
+                onChange={(event) => onNewProviderChange({ name: event.target.value })}
+                placeholder="Ollama Local"
+                aria-label="New provider name"
               />
             </div>
-          </CollapsibleContent>
-        </Collapsible>
-
-        <div className="flex min-h-7 items-center justify-between gap-3">
-          <TestMessage state={testState} />
-          {dirty ? (
-            <Button
-              type="button"
-              size="sm"
-              onClick={onSave}
-              className="h-7 text-xs"
-              aria-label={`Save ${backend.label} credentials`}
-            >
-              Save
+            <div className="space-y-2">
+              <Label className="text-xs">Kind</Label>
+              <Select
+                value={newProvider.kind}
+                onValueChange={(kind) => onNewProviderChange({ kind: kind as ProviderKind })}
+              >
+                <SelectTrigger aria-label="New provider kind">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="anthropic">anthropic</SelectItem>
+                  <SelectItem value="openai-compat">openai-compat</SelectItem>
+                  <SelectItem value="google">google</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" onClick={onConfirmAddProvider} disabled={!newProvider.name.trim()}>
+              Add Provider
             </Button>
-          ) : null}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+export function ProviderCard({
+  provider,
+  draft,
+  active,
+  expanded,
+  keyVisible,
+  testing,
+  testResult,
+  onDraftChange,
+  onToggleExpanded,
+  onToggleKeyVisible,
+  onTest,
+  onDelete,
+}: {
+  provider: ProviderConfig
+  draft: ProviderConfig
+  active: boolean
+  expanded: boolean
+  keyVisible: boolean
+  testing: boolean
+  testResult: TestProviderResponse | null
+  onDraftChange: (patch: Partial<ProviderConfig>) => void
+  onToggleExpanded: () => void
+  onToggleKeyVisible: () => void
+  onTest: () => void
+  onDelete: () => void
+}) {
+  const models = testResult?.status === "ok" ? testResult.models : []
+
+  return (
+    <Card size="sm" className={cn(active ? "ring-1 ring-primary/50" : "")}>
+      <CardHeader className="flex-row items-start justify-between gap-3">
+        <div>
+          <CardTitle className="flex flex-wrap items-center gap-2 text-sm">
+            <Input
+              value={draft.name}
+              onChange={(event) => onDraftChange({ name: event.target.value })}
+              className="h-7 w-44 border-transparent bg-transparent px-0 text-sm font-semibold shadow-none"
+              aria-label={`${provider.name} provider name`}
+            />
+            <Badge variant="outline">{draft.kind}</Badge>
+            {active ? <Badge>Active</Badge> : null}
+          </CardTitle>
         </div>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          onClick={onDelete}
+          disabled={isDefaultProvider(provider.id)}
+          aria-label={`Delete ${provider.name} provider`}
+          className="size-7"
+        >
+          <Trash2 className="size-3.5" />
+        </Button>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label className="text-xs text-muted-foreground">API Key</Label>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Input
+                type={keyVisible ? "text" : "password"}
+                value={draft.api_key}
+                onChange={(event) => onDraftChange({ api_key: event.target.value })}
+                placeholder="Enter API key"
+                autoComplete="new-password"
+                className="pr-10"
+                aria-label={`${provider.name} API key`}
+              />
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={onToggleKeyVisible}
+                aria-label={keyVisible ? `Hide ${provider.name} API key` : `Show ${provider.name} API key`}
+                className="absolute right-1.5 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                {keyVisible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </button>
+            </div>
+            <Button type="button" variant="secondary" onClick={onTest} disabled={testing} className="shrink-0">
+              {testing ? <Spinner className="size-3.5" /> : null}
+              Test Connection
+            </Button>
+          </div>
+        </div>
+
+        <Button type="button" variant="ghost" onClick={onToggleExpanded} className="h-7 px-0 text-xs">
+          {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+          Advanced Options
+        </Button>
+
+        {expanded ? (
+          <div className="space-y-2">
+            <Label className="text-xs text-muted-foreground">Base URL</Label>
+            <Input
+              value={draft.base_url}
+              onChange={(event) => onDraftChange({ base_url: event.target.value })}
+              placeholder={defaultBaseUrl(draft.kind)}
+              aria-label={`${provider.name} Base URL`}
+            />
+          </div>
+        ) : null}
+
+        <ProviderStatus result={testResult} />
+
+        {models.length > 0 ? (
+          <div className="space-y-3">
+            <div>
+              <div className="mb-2 text-xs font-medium text-foreground">Available Models ({models.length})</div>
+              <div className="flex flex-wrap gap-2">
+                {models.map((model) => (
+                  <Badge key={model.id} variant="outline">
+                    {model.id}
+                    {model.supports_thinking ? " 🧠" : ""}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground">Default Model</Label>
+              <Select
+                value={draft.active_model_id ?? ""}
+                onValueChange={(active_model_id) => onDraftChange({ active_model_id })}
+              >
+                <SelectTrigger aria-label={`Default model for ${provider.name}`} className="w-72">
+                  <SelectValue placeholder="Select model" />
+                </SelectTrigger>
+                <SelectContent>
+                  {models.map((model) => (
+                    <SelectItem key={model.id} value={model.id}>
+                      {model.id}
+                      {model.supports_thinking ? " 🧠" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   )
 }
 
-function TestBadge({ state }: { state: TestState }) {
-  if (state.status === "testing") {
+function ProviderStatus({ result }: { result: TestProviderResponse | null }) {
+  if (!result) return null
+  if (result.status === "ok") {
     return (
-      <Badge variant="outline">
-        <Spinner className="size-3" />
-        Testing
-      </Badge>
-    )
-  }
-  if (state.status === "ok") {
-    return (
-      <Badge className="bg-emerald-600 text-white">
-        <CheckCircle2 className="size-3" />
-        OK
-      </Badge>
-    )
-  }
-  if (state.status === "error") {
-    return (
-      <Badge variant="destructive">
-        <XCircle className="size-3" />
-        Error
-      </Badge>
-    )
-  }
-  return <Badge variant="outline">Idle</Badge>
-}
-
-function TestMessage({ state }: { state: TestState }) {
-  if (state.status === "ok") {
-    const details = [state.result.model_seen, state.result.latency_ms ? `${state.result.latency_ms}ms` : null]
-      .filter(Boolean)
-      .join(" · ")
-    return <span className="text-xs text-emerald-600">OK{details ? ` · ${details}` : ""}</span>
-  }
-  if (state.status === "error") {
-    const message = state.result.status === "invalid_key" ? "Invalid API key" : state.result.message || state.result.status
-    return <span className="text-xs text-destructive">{message}</span>
-  }
-  return <span className="text-xs text-muted-foreground"> </span>
-}
-
-function AdvancedTab() {
-  return (
-    <div>
-      <SectionTitle title="Advanced" description="More settings coming soon." />
-      <div className="rounded-md border border-dashed border-border p-6 text-xs text-muted-foreground">
-        More settings coming soon
+      <div className="flex items-center gap-2 rounded-md border border-emerald-500/20 bg-emerald-500/10 p-3 text-xs text-emerald-600">
+        <CheckCircle2 className="size-4" />
+        Connected{result.latency_ms != null ? `, latency_ms=${result.latency_ms}` : ""}
       </div>
+    )
+  }
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
+      <XCircle className="size-4" />
+      {result.message || result.status}
     </div>
   )
 }
 
-export { BACKENDS }
+export function draftsFromCredentials(credentials: CopilotCredentials): Drafts {
+  return Object.fromEntries(credentials.providers.map((provider) => [provider.id, { ...provider }]))
+}
+
+export function buildCredentialsFromDrafts(
+  credentials: CopilotCredentials,
+  drafts: Drafts,
+): CopilotCredentials {
+  return {
+    ...credentials,
+    providers: credentials.providers.map((provider) => drafts[provider.id] ?? provider),
+  }
+}
+
+export function appendProvider(credentials: CopilotCredentials, provider: ProviderConfig): CopilotCredentials {
+  return {
+    ...credentials,
+    providers: [...credentials.providers, provider],
+  }
+}
+
+export function removeProvider(credentials: CopilotCredentials, providerId: string): CopilotCredentials {
+  const providers = credentials.providers.filter((provider) => provider.id !== providerId)
+  return {
+    active_provider_id:
+      credentials.active_provider_id === providerId ? "default-claude" : credentials.active_provider_id,
+    providers,
+  }
+}
+
+export function createDebouncedSaver<T>(save: (snapshot: T) => void | Promise<void>, delayMs = AUTOSAVE_DELAY_MS) {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  return {
+    schedule(snapshot: T) {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => {
+        timer = null
+        void save(snapshot)
+      }, delayMs)
+    },
+    cancel() {
+      if (timer) clearTimeout(timer)
+      timer = null
+    },
+  }
+}
+
+export function isDefaultProvider(providerId: string) {
+  return providerId.startsWith("default-")
+}
+
+export function customProvider(name: string, kind: ProviderKind): ProviderConfig {
+  return {
+    id: `custom-${createId(8)}`,
+    name,
+    kind,
+    api_key: "",
+    base_url: "",
+    active_model_id: null,
+  }
+}
+
+function defaultProvider(id: string, name: string, kind: ProviderKind): ProviderConfig {
+  return { id, name, kind, api_key: "", base_url: "", active_model_id: null }
+}
+
+function defaultBaseUrl(kind: ProviderKind) {
+  if (kind === "anthropic") return "https://api.anthropic.com"
+  if (kind === "google") return "https://generativelanguage.googleapis.com/v1beta"
+  return "https://api.openai.com/v1"
+}
+
+function toggleSetValue<T>(set: Set<T>, value: T) {
+  const next = new Set(set)
+  if (next.has(value)) {
+    next.delete(value)
+  } else {
+    next.add(value)
+  }
+  return next
+}
+
+function createId(size: number) {
+  const chars = "0123456789abcdefghijklmnopqrstuvwxyz"
+  let id = ""
+  for (let index = 0; index < size; index += 1) {
+    id += chars[Math.floor(Math.random() * chars.length)]
+  }
+  return id
+}

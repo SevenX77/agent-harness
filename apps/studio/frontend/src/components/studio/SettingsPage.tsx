@@ -1,12 +1,11 @@
 import { useEffect, useState, type ReactNode } from "react"
-import { CheckCircle2, ChevronDown, Plug, Settings, Sparkles, X, XCircle } from "lucide-react"
+import { CheckCircle2, ChevronDown, Eye, EyeOff, Plug, Settings, Sparkles, X, XCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Spinner } from "@/components/ui/spinner"
 import { useAppSettings } from "@/hooks/useAppSettings"
@@ -42,6 +41,8 @@ export interface BackendDraft {
 
 type Drafts = Record<CopilotBackend, BackendDraft>
 type TestStates = Record<CopilotBackend, TestState>
+type DirtyBackends = Partial<Record<CopilotBackend, boolean>>
+type VisibleKeys = Partial<Record<CopilotBackend, boolean>>
 
 const emptyCredentials: CopilotCredentials = {
   active_backend: "claude",
@@ -73,9 +74,9 @@ interface SettingsPageContentProps {
   onClose: () => void
   onTabChange: (tab: SettingsTab) => void
   onDraftChange: (backend: CopilotBackend, patch: Partial<BackendDraft>) => void
-  onSetActiveBackend: (backend: CopilotBackend) => void
+  onToggleKeyVisible: (backend: CopilotBackend) => void
+  visibleKeys: VisibleKeys
   onTestBackend: (backend: CopilotBackend) => void
-  onSaveBackend: (backend: CopilotBackend) => void
 }
 
 const initialTestStates = (): TestStates => ({
@@ -100,6 +101,8 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const [credentials, setCredentials] = useState<CopilotCredentials>(emptyCredentials)
   const [drafts, setDrafts] = useState<Drafts>(() => draftsFromCredentials(emptyCredentials))
   const [testStates, setTestStates] = useState<TestStates>(() => initialTestStates())
+  const [dirtyBackends, setDirtyBackends] = useState<DirtyBackends>({})
+  const [visibleKeys, setVisibleKeys] = useState<VisibleKeys>({})
 
   useEffect(() => {
     let cancelled = false
@@ -130,14 +133,9 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       ...current,
       [backend]: { ...current[backend], ...patch },
     }))
-    setTestStates((current) => ({ ...current, [backend]: { status: "idle" } }))
-  }
-
-  async function setActiveBackend(backend: CopilotBackend) {
-    setCredentials((current) => ({ ...current, active_backend: backend }))
-    const next = await updateCopilotCredentials(backend, undefined, true)
-    setCredentials(next)
-    setDrafts(draftsFromCredentials(next))
+    if ("apiKey" in patch || "baseUrl" in patch) {
+      setDirtyBackends((current) => ({ ...current, [backend]: true }))
+    }
   }
 
   async function testBackend(backend: CopilotBackend) {
@@ -159,13 +157,22 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     const status = credentials.backends[backend]
     const next = await updateCopilotCredentials(
       backend,
-      draft.apiKey.trim() ? draft.apiKey.trim() : undefined,
+      draft.apiKey,
       credentials.active_backend === backend,
       draft.baseUrl === status.base_url ? undefined : draft.baseUrl,
     )
     setCredentials(next)
-    setDrafts(draftsFromCredentials(next))
+    setDirtyBackends((current) => ({ ...current, [backend]: false }))
   }
+
+  useEffect(() => {
+    const backends = BACKENDS.map((backend) => backend.id).filter((backend) => dirtyBackends[backend])
+    if (backends.length === 0) return
+    const timer = window.setTimeout(() => {
+      backends.forEach((backend) => void saveBackend(backend))
+    }, 650)
+    return () => window.clearTimeout(timer)
+  }, [dirtyBackends, drafts, credentials])
 
   return (
     <SettingsPageContent
@@ -184,9 +191,9 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       onClose={onClose}
       onTabChange={setActiveTab}
       onDraftChange={updateDraft}
-      onSetActiveBackend={(backend) => void setActiveBackend(backend)}
+      onToggleKeyVisible={(backend) => setVisibleKeys((current) => ({ ...current, [backend]: !current[backend] }))}
+      visibleKeys={visibleKeys}
       onTestBackend={(backend) => void testBackend(backend)}
-      onSaveBackend={(backend) => void saveBackend(backend)}
     />
   )
 }
@@ -200,9 +207,9 @@ export function SettingsPageContent({
   onClose,
   onTabChange,
   onDraftChange,
-  onSetActiveBackend,
+  onToggleKeyVisible,
+  visibleKeys,
   onTestBackend,
-  onSaveBackend,
 }: SettingsPageContentProps) {
   return (
     <div className="flex size-full flex-col bg-background">
@@ -235,9 +242,9 @@ export function SettingsPageContent({
                 drafts={drafts}
                 testStates={testStates}
                 onDraftChange={onDraftChange}
-                onSetActiveBackend={onSetActiveBackend}
+                onToggleKeyVisible={onToggleKeyVisible}
+                visibleKeys={visibleKeys}
                 onTestBackend={onTestBackend}
-                onSaveBackend={onSaveBackend}
               />
             ) : null}
             {activeTab === "advanced" ? <AdvancedTab /> : null}
@@ -366,9 +373,9 @@ function CopilotTab({
   drafts,
   testStates,
   onDraftChange,
-  onSetActiveBackend,
+  onToggleKeyVisible,
+  visibleKeys,
   onTestBackend,
-  onSaveBackend,
 }: Omit<
   SettingsPageContentProps,
   "activeTab" | "appSettings" | "onClose" | "onTabChange"
@@ -379,37 +386,19 @@ function CopilotTab({
         title="AI & Copilot"
         description="Manage provider API keys, custom endpoints, and the active Copilot backend."
       />
-      <div className="mb-5 rounded-md border border-border bg-card p-4">
-        <Label className="mb-3 block text-xs font-medium text-foreground">Active Backend</Label>
-        <RadioGroup
-          value={credentials.active_backend}
-          onValueChange={(value) => onSetActiveBackend(value as CopilotBackend)}
-          className="grid grid-cols-2 gap-2 md:grid-cols-4"
-        >
-          {BACKENDS.map((backend) => (
-            <label
-              key={backend.id}
-              className="flex h-8 items-center gap-2 rounded-md border border-border px-2 text-xs text-foreground"
-            >
-              <RadioGroupItem value={backend.id} />
-              {backend.label}
-            </label>
-          ))}
-        </RadioGroup>
-      </div>
 
       <div className="space-y-3">
         {BACKENDS.map((backend) => (
           <BackendCredentialCard
             key={backend.id}
             backend={backend}
-            active={credentials.active_backend === backend.id}
             status={credentials.backends[backend.id]}
             draft={drafts[backend.id]}
             testState={testStates[backend.id]}
+            keyVisible={Boolean(visibleKeys[backend.id])}
             onDraftChange={(patch) => onDraftChange(backend.id, patch)}
+            onToggleKeyVisible={() => onToggleKeyVisible(backend.id)}
             onTest={() => onTestBackend(backend.id)}
-            onSave={() => onSaveBackend(backend.id)}
           />
         ))}
       </div>
@@ -419,35 +408,29 @@ function CopilotTab({
 
 export function BackendCredentialCard({
   backend,
-  active,
   status,
   draft,
   testState,
+  keyVisible,
   onDraftChange,
+  onToggleKeyVisible,
   onTest,
-  onSave,
 }: {
   backend: (typeof BACKENDS)[number]
-  active: boolean
   status: CopilotCredentials["backends"][CopilotBackend]
   draft: BackendDraft
   testState: TestState
+  keyVisible: boolean
   onDraftChange: (patch: Partial<BackendDraft>) => void
+  onToggleKeyVisible: () => void
   onTest: () => void
-  onSave: () => void
 }) {
-  const keyMask = status.last4 ? `••••${status.last4}` : ""
-  const keyDirty = draft.apiKey.trim().length > 0
-  const baseUrlDirty = draft.baseUrl !== status.base_url
-  const dirty = keyDirty || baseUrlDirty
-
   return (
-    <Card size="sm" className={cn(active ? "ring-primary/50" : "")}>
+    <Card size="sm">
       <CardHeader className="flex-row items-start justify-between gap-3">
         <div>
           <CardTitle className="flex items-center gap-2">
             {backend.label}
-            {active ? <Badge>Active</Badge> : null}
           </CardTitle>
           <p className="mt-1 text-[11px] text-muted-foreground">
             {status.has_key ? "API key configured" : "No API key configured"}
@@ -457,22 +440,29 @@ export function BackendCredentialCard({
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="grid gap-2 md:grid-cols-[1fr_auto]">
-          <div>
+          <div className="relative">
             <Label htmlFor={`${backend.id}-api-key`} className="text-[11px] text-muted-foreground">
               API Key
             </Label>
             <Input
               id={`${backend.id}-api-key`}
-              name={`${backend.id}-api-key`}
-              type="password"
-              autoComplete="off"
+              type={keyVisible ? "text" : "password"}
+              autoComplete="new-password"
               value={draft.apiKey}
               onChange={(event) => onDraftChange({ apiKey: event.target.value })}
-              placeholder={keyMask || "Enter API key"}
-              className="mt-1 h-8 text-xs"
+              placeholder="Enter API key"
+              className="mt-1 h-8 pr-9 text-xs"
               aria-label={`${backend.label} API key`}
             />
-            {keyMask ? <p className="mt-1 text-[11px] text-muted-foreground">{keyMask}</p> : null}
+            <button
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={onToggleKeyVisible}
+              aria-label={keyVisible ? `Hide ${backend.label} API key` : `Show ${backend.label} API key`}
+              className="absolute right-1.5 top-[23px] flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              {keyVisible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </button>
           </div>
           <Button
             type="button"
@@ -517,17 +507,7 @@ export function BackendCredentialCard({
 
         <div className="flex min-h-7 items-center justify-between gap-3">
           <TestMessage state={testState} />
-          {dirty ? (
-            <Button
-              type="button"
-              size="sm"
-              onClick={onSave}
-              className="h-7 text-xs"
-              aria-label={`Save ${backend.label} credentials`}
-            >
-              Save
-            </Button>
-          ) : null}
+          <span className="text-xs text-muted-foreground">Auto-saved</span>
         </div>
       </CardContent>
     </Card>

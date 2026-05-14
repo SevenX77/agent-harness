@@ -1,6 +1,6 @@
 import { isValidElement, type ReactElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   BACKENDS,
   BackendCredentialCard,
@@ -42,9 +42,9 @@ function baseViewProps(overrides: Partial<Parameters<typeof SettingsPageContent>
     onClose: vi.fn(),
     onTabChange: vi.fn(),
     onDraftChange: vi.fn(),
-    onSetActiveBackend: vi.fn(),
+    onToggleKeyVisible: vi.fn(),
+    visibleKeys: {},
     onTestBackend: vi.fn(),
-    onSaveBackend: vi.fn(),
     ...overrides,
   }
 }
@@ -67,19 +67,23 @@ function cardElement(overrides: Partial<Parameters<typeof BackendCredentialCard>
   const backend = BACKENDS[0]
   const props: Parameters<typeof BackendCredentialCard>[0] = {
     backend,
-    active: true,
     status: credentials.backends.claude,
     draft: { apiKey: '', baseUrl: '', advancedOpen: false },
     testState: { status: 'idle' },
+    keyVisible: false,
     onDraftChange: vi.fn(),
+    onToggleKeyVisible: vi.fn(),
     onTest: vi.fn(),
-    onSave: vi.fn(),
     ...overrides,
   }
   return { props, element: BackendCredentialCard(props) }
 }
 
 describe('SettingsPage', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('renders the three main tabs and general settings', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
 
@@ -90,14 +94,16 @@ describe('SettingsPage', () => {
     expect(html).toContain('Gitea Host')
   })
 
-  it('renders four backend cards and masks configured keys', () => {
+  it('renders four backend cards without active backend controls or key masks', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ activeTab: 'copilot' })} />)
 
     expect(html).toContain('Claude')
     expect(html).toContain('OpenAI')
     expect(html).toContain('DeepSeek')
     expect(html).toContain('Gemini')
-    expect(html).toContain('••••abcd')
+    expect(html).not.toContain('Active Backend')
+    expect(html).not.toContain('••••abcd')
+    expect(html).not.toContain('Active</span>')
   })
 
   it('invokes the test handler from backend cards', () => {
@@ -129,15 +135,17 @@ describe('SettingsPage', () => {
     expect(errorHtml).toContain('Invalid API key')
   })
 
-  it('surfaces Save for dirty API key drafts', () => {
-    const onSave = vi.fn()
+  it('renders plaintext local draft behind a password field with an eye toggle', () => {
     const draft: BackendDraft = { apiKey: 'sk-new', baseUrl: '', advancedOpen: false }
-    const { element } = cardElement({ draft, onSave })
-    const button = findByAriaLabel(element, 'Save Claude credentials')
+    const { element } = cardElement({ draft })
+    const input = findByAriaLabel(element, 'Claude API key')
+    const button = findByAriaLabel(element, 'Show Claude API key')
 
-    ;(button?.props.onClick as (() => void) | undefined)?.()
-
-    expect(onSave).toHaveBeenCalledOnce()
+    expect(input?.props.value).toBe('sk-new')
+    expect(input?.props.type).toBe('password')
+    expect(input?.props.autoComplete).toBe('new-password')
+    expect(input?.props.name).toBeUndefined()
+    expect(button).not.toBeNull()
   })
 
   it('passes changed API keys through draft updates', () => {

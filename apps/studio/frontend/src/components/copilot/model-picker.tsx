@@ -16,11 +16,6 @@ const models: Array<{ id: CopilotBackend, label: string, v15?: boolean }> = [
   { id: 'openai', label: 'OpenAI', v15: true },
 ]
 
-function isPlaceholder(credentials: CopilotCredentials | null, backend: CopilotBackend) {
-  const status = credentials?.backends[backend]
-  return Boolean(status?.V1_5_PLACEHOLDER || status?.v1_5_placeholder)
-}
-
 export function ModelPicker({ credentials, activeBackend, onSelect, variant = 'icon' }: ModelPickerProps) {
   const [open, setOpen] = useState(false)
   const activeModel = models.find((model) => model.id === activeBackend)
@@ -30,7 +25,7 @@ export function ModelPicker({ credentials, activeBackend, onSelect, variant = 'i
       <div className="flex flex-wrap gap-1.5" aria-label="Copilot model picker">
         {models.map((model) => {
           const hasKey = Boolean(credentials?.backends[model.id]?.has_key)
-          const disabled = model.v15 || !hasKey || isPlaceholder(credentials, model.id)
+          const disabled = model.v15 || !hasKey
           return (
             <button
               key={model.id}
@@ -70,7 +65,7 @@ export function ModelPicker({ credentials, activeBackend, onSelect, variant = 'i
           <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground">Model</div>
           {models.map((model) => {
             const hasKey = Boolean(credentials?.backends[model.id]?.has_key)
-            const disabled = model.v15 || !hasKey || isPlaceholder(credentials, model.id)
+            const disabled = model.v15 || !hasKey
             return (
               <button
                 key={model.id}

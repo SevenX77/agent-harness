@@ -98,14 +98,16 @@ test.describe('Edit workflow smoke', () => {
       })
     })
 
-    await page.goto(`${baseURL}/#/skill/smoke/edit`)
-    await expect(page.getByText('Edit graph')).toBeVisible()
+    await page.goto(baseURL)
+    await expect(page.getByText('Smoke Skill').first()).toBeVisible()
+    await page.getByRole('button', { name: /Smoke Skill/ }).first().click()
+
     await expect(page.getByTestId('rf__node-draft').getByText('draft', { exact: true })).toBeVisible()
-    await expect(page.locator('.react-flow__edge')).toHaveCount(1)
+    await expect(page.locator('.react-flow__edge')).toHaveCount(3)
 
     await page.getByTestId('rf__node-review').getByText('review', { exact: true }).click()
-    await page.getByRole('button', { name: /expand subgraph/i }).click()
-    await expect(page.getByRole('definition').filter({ hasText: './review.md' })).toBeVisible()
+    await page.getByRole('button', { name: '展开子图' }).click()
+    await expect(page.getByText('./review.md')).toBeVisible()
 
     await page.getByLabel('JSON input for schema inference').fill('{"topic":"demo","count":2,"ok":true}')
     await expect(page.getByText('"type": "object"')).toBeVisible()

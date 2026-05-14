@@ -4,7 +4,6 @@ import {
   Background,
   Controls,
   Handle,
-  MarkerType,
   MiniMap,
   Position,
   ReactFlow,
@@ -17,10 +16,12 @@ import {
   type NodeProps,
 } from '@xyflow/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Bot, CheckCircle2, Circle, Pause, Radio, Workflow } from 'lucide-react'
+import { AlertTriangle, Bot, CheckCircle2, Circle, Minus, Pause, Plus, Radio, Workflow } from 'lucide-react'
 import { toast } from 'sonner'
-import type { PhaseDef, SkillDetail, SkillManifest } from '../api/types'
+import type { IoDeclaration, PhaseDef, SkillDetail, SkillManifest } from '../api/types'
 import { CycleDetectedError, getAutoLayoutedElements } from '../lib/layout'
+import { ContextEdge, type ContextEdgeData } from './edges/ContextEdge'
+import { GlobalInputNode, GlobalOutputNode } from './nodes/GlobalInputOutputNode'
 import { SubgraphInline } from './studio/SubgraphInline'
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
 
@@ -37,7 +38,17 @@ export interface SkillGraphNodeData extends Record<string, unknown> {
   onToggleSubgraph?: () => void
 }
 
-export type SkillGraphNode = Node<SkillGraphNodeData>
+export type SkillGraphNode = Node<SkillGraphNodeData, 'skill'>
+
+export interface GlobalNodeData extends Record<string, unknown> {
+  type: 'global-input' | 'global-output'
+  schema: IoDeclaration
+}
+
+export type GraphCanvasNode =
+  | Node<SkillGraphNodeData, 'skill'>
+  | Node<GlobalNodeData, 'globalInput'>
+  | Node<GlobalNodeData, 'globalOutput'>
 
 interface GraphCanvasProps {
   skillId: string
@@ -48,6 +59,10 @@ interface GraphCanvasProps {
   onNodeSelect?: (node: { id: string, data: SkillGraphNodeData }) => void
   statusByNodeId?: Record<string, SkillNodeStatus>
 }
+
+const INPUT_ID = '__global_input__'
+const OUTPUT_ID = '__global_output__'
+const EMPTY_IO: IoDeclaration = { inputs: [], outputs: [] }
 
 const STATUS_STYLE: Record<SkillNodeStatus, { label: string, className: string, icon: typeof Circle }> = {
   idle: {
@@ -82,16 +97,22 @@ const STATUS_STYLE: Record<SkillNodeStatus, { label: string, className: string, 
   },
 }
 
-function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
+export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
   const style = STATUS_STYLE[data.status]
   const StatusIcon = style.icon
 
   return (
     <div
       className={[
-        'min-w-[240px] rounded-md border bg-card p-3 text-card-foreground shadow-sm transition-colors',
+        'relative min-w-[240px] rounded-md border bg-card p-3 text-card-foreground shadow-sm transition-colors',
+        data.subgraphPath ? 'pb-5' : '',
         selected ? 'border-primary ring-2 ring-primary/30' : 'border-border',
       ].join(' ')}
+      onDoubleClick={(event) => {
+        if (data.subgraphPath) {
+          event.stopPropagation()
+        }
+      }}
     >
       <Handle type="target" position={Position.Left} className="!size-2.5 !border-background !bg-primary" />
       <div className="flex items-start gap-3">
@@ -130,13 +151,14 @@ function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
       {data.subgraphPath ? (
         <button
           type="button"
+          aria-label={data.isExpanded ? '收起子图' : '展开子图'}
           onClick={(event) => {
             event.stopPropagation()
             data.onToggleSubgraph?.()
           }}
-          className="mt-3 inline-flex h-7 items-center justify-center rounded-md border border-border bg-background px-2 text-xs font-medium text-foreground hover:bg-accent"
+          className="absolute bottom-0 left-1/2 inline-flex size-5 -translate-x-1/2 translate-y-1/2 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-sm transition-colors hover:border-primary"
         >
-          {data.isExpanded ? 'Collapse subgraph' : 'Expand subgraph'}
+          {data.isExpanded ? <Minus className="size-3" /> : <Plus className="size-3" />}
         </button>
       ) : null}
       {data.subgraphPath && data.isExpanded ? (
@@ -149,6 +171,12 @@ function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
 
 const nodeTypes = {
   skill: SkillNode,
+  globalInput: GlobalInputNode,
+  globalOutput: GlobalOutputNode,
+}
+
+const edgeTypes = {
+  contextEdge: ContextEdge,
 }
 
 function normalizeDependsOn(value: string | string[] | undefined): string[] {
@@ -232,15 +260,20 @@ function phasesFromManifest(manifest: SkillManifest | undefined, skillId: string
   ]
 }
 
+function ioFromManifest(manifest: SkillManifest | undefined): IoDeclaration {
+  return manifest?.type === 'graph' ? manifest.io : EMPTY_IO
+}
+
 function buildNodes(
   skillId: string,
   detail: SkillDetail | undefined,
   expandedSubgraphs: Set<string>,
   onToggleSubgraph: (nodeId: string) => void,
   statusByNodeId: Record<string, SkillNodeStatus>,
-): SkillGraphNode[] {
+): GraphCanvasNode[] {
   const phases = phasesFromManifest(detail?.manifest, skillId)
-  return phases.map((phase, index) => ({
+  const io = ioFromManifest(detail?.manifest)
+  const phaseNodes: SkillGraphNode[] = phases.map((phase, index) => ({
     id: phase.name,
     type: 'skill',
     position: { x: 160 + (index % 2) * 320, y: 80 + index * 150 },
@@ -255,25 +288,65 @@ function buildNodes(
       onToggleSubgraph: phase.subgraph ? () => onToggleSubgraph(phase.name) : undefined,
     },
   }))
+  return [
+    {
+      id: INPUT_ID,
+      type: 'globalInput',
+      position: { x: 0, y: 0 },
+      data: { type: 'global-input', schema: io } satisfies GlobalNodeData,
+    },
+    ...phaseNodes,
+    {
+      id: OUTPUT_ID,
+      type: 'globalOutput',
+      position: { x: 0, y: 0 },
+      data: { type: 'global-output', schema: io } satisfies GlobalNodeData,
+    },
+  ]
 }
 
-function buildEdges(nodes: SkillGraphNode[]): Edge[] {
-  return nodes.flatMap((node, index) => {
-    const dependencies = node.data.dependsOn.length > 0
-      ? node.data.dependsOn
-      : index > 0
-        ? [nodes[index - 1].id]
-        : []
+function contextEdge(source: string, target: string): Edge<ContextEdgeData> {
+  return {
+    id: `${source}->${target}`,
+    source,
+    target,
+    type: 'contextEdge',
+    data: {
+      hasTraceData: false,
+      sourcePhaseId: source,
+      targetPhaseId: target,
+    },
+    style: { strokeWidth: 1.5 },
+  }
+}
 
-    return dependencies.map((source) => ({
-      id: `${source}->${node.id}`,
-      source,
-      target: node.id,
-      type: 'smoothstep',
-      markerEnd: { type: MarkerType.ArrowClosed },
-      style: { strokeWidth: 1.5 },
-    }))
-  })
+export function buildEdges(phaseNodes: SkillGraphNode[]): Edge<ContextEdgeData>[] {
+  if (phaseNodes.length === 0) {
+    return [contextEdge(INPUT_ID, OUTPUT_ID)]
+  }
+
+  const dependents = new Map<string, Set<string>>()
+  for (const node of phaseNodes) {
+    for (const dependency of node.data.dependsOn) {
+      const targets = dependents.get(dependency) ?? new Set<string>()
+      targets.add(node.id)
+      dependents.set(dependency, targets)
+    }
+  }
+
+  const edges: Edge<ContextEdgeData>[] = []
+  for (const node of phaseNodes) {
+    for (const source of node.data.dependsOn) {
+      edges.push(contextEdge(source, node.id))
+    }
+    if (node.data.dependsOn.length === 0) {
+      edges.push(contextEdge(INPUT_ID, node.id))
+    }
+    if (!dependents.has(node.id) || dependents.get(node.id)?.size === 0) {
+      edges.push(contextEdge(node.id, OUTPUT_ID))
+    }
+  }
+  return edges
 }
 
 export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, selectedNodeId, onNodeSelect, statusByNodeId }: GraphCanvasProps) {
@@ -301,8 +374,12 @@ export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, se
     () => buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph, safeStatusByNodeId),
     [expandedSubgraphs, safeStatusByNodeId, skillDetail, skillId, toggleSubgraph],
   )
-  const rawEdges = useMemo(() => buildEdges(rawNodes), [rawNodes])
-  const layoutResult = useMemo((): { nodes: SkillGraphNode[]; edges: Edge[]; error: CycleDetectedError | null } => {
+  const phaseNodes = useMemo(
+    () => rawNodes.filter((node): node is SkillGraphNode => node.type === 'skill'),
+    [rawNodes],
+  )
+  const rawEdges = useMemo(() => buildEdges(phaseNodes), [phaseNodes])
+  const layoutResult = useMemo((): { nodes: GraphCanvasNode[]; edges: Edge<ContextEdgeData>[]; error: CycleDetectedError | null } => {
     try {
       return { ...getAutoLayoutedElements(rawNodes, rawEdges), error: null }
     } catch (layoutError) {
@@ -312,7 +389,7 @@ export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, se
       throw layoutError
     }
   }, [rawEdges, rawNodes])
-  const [nodes, setNodes, onNodesChange] = useNodesState<SkillGraphNode>(layoutResult.nodes)
+  const [nodes, setNodes, onNodesChange] = useNodesState<GraphCanvasNode>(layoutResult.nodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutResult.edges)
 
   useEffect(() => {
@@ -336,10 +413,10 @@ export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, se
   )
 
   const onConnect = useCallback((connection: Connection) => {
-    setEdges((current) => addEdge({ ...connection, type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed } }, current))
+    setEdges((current) => addEdge({ ...connection, type: 'contextEdge' }, current))
     if (connection.source && connection.target) {
       setNodes((current) => current.map((node) => {
-        if (node.id !== connection.target || node.data.dependsOn.includes(connection.source ?? '')) {
+        if (node.type !== 'skill' || node.id !== connection.target || node.data.dependsOn.includes(connection.source ?? '')) {
           return node
         }
         return {
@@ -355,11 +432,6 @@ export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, se
 
   return (
     <section className="relative h-full min-h-0 bg-background">
-      <div className="absolute left-4 top-4 z-10 rounded-md border border-border bg-card px-3 py-2 shadow-sm">
-        <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Edit graph</div>
-        <div className="text-sm font-semibold text-foreground">{skillDetail?.manifest.name ?? skillId}</div>
-      </div>
-
       {error ? (
         <div className="absolute inset-0 z-10 grid place-items-center bg-background/80 p-8">
           <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
@@ -386,10 +458,15 @@ export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, se
         nodes={selectedNodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
-        onNodeClick={(_, node) => onNodeSelect?.({ id: node.id, data: node.data })}
+        onNodeClick={(_, node) => {
+          if (node.type === 'skill') {
+            onNodeSelect?.({ id: node.id, data: node.data })
+          }
+        }}
         onInit={(instance) => {
           fitViewRef.current = () => instance.fitView({ padding: 0.2 })
           fitLayout()

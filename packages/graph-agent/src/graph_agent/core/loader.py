@@ -61,6 +61,15 @@ class CompiledSkill:
     nodes: list[PhaseDocument] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class _RawPhaseAttrs:
+    id: str | None
+    src: str | None
+    depends_on_raw: str | None
+    depends_on: list[str]
+    line: int
+
+
 class SkillLoader:
     """Thin V2.1 parser/route orchestrator."""
 
@@ -72,8 +81,10 @@ class SkillLoader:
         _guard_v21_root(root)
 
         graph_path = root / "GRAPH.md"
-        graph_frontmatter, graph_body, _ = parse_markdown_parts(graph_path)
-        manifest = _parse_graph_manifest(graph_path, graph_frontmatter, graph_body)
+        graph_frontmatter, graph_body, line_meta = parse_markdown_parts(graph_path)
+        raw_attrs = _extract_phase_attrs(graph_body, line_meta["body_start"])
+        manifest = _build_graph_manifest(graph_path, graph_frontmatter, graph_body, raw_attrs)
+        _validate_graph_topology(graph_path, raw_attrs, root)
         io_inputs = _validate_io_schema(root, manifest.io_inputs_ref, "input")
         io_outputs = _validate_io_schema(root, manifest.io_outputs_ref, "output")
 
@@ -131,6 +142,10 @@ def _fatal(path: Path, line: int, message: str) -> None:
 
 def _io_fatal(path: Path, line: int, message: str) -> None:
     raise SkillLoadError(f"[F-v21-io] {path}:{line} {message}")
+
+
+def _graph_fatal(path: Path, line: int, message: str) -> None:
+    raise SkillLoadError(f"[F-v21-graph] {path}:{line} {message}")
 
 
 def _guard_v21_root(skill_root: Path) -> None:
@@ -195,7 +210,12 @@ def _validate_mode_matches_filename(path: Path, yaml_mode: str) -> None:
         _fatal(path, line, f"mode {yaml_mode!r} does not match {path.name} filename")
 
 
-def _parse_graph_manifest(path: Path, frontmatter: dict[str, Any], body: str) -> GraphManifest:
+def _build_graph_manifest(
+    path: Path,
+    frontmatter: dict[str, Any],
+    body: str,
+    raw_attrs: list[_RawPhaseAttrs],
+) -> GraphManifest:
     data = dict(frontmatter)
     data.setdefault("schema_version", "2.1")
 
@@ -206,15 +226,15 @@ def _parse_graph_manifest(path: Path, frontmatter: dict[str, Any], body: str) ->
     if output_ref:
         data["io_outputs_ref"] = output_ref
 
-    phases = []
-    for attrs in _iter_self_closing_tag_attrs(body, "phase"):
-        if "id" not in attrs or "src" not in attrs:
+    phases: list[GraphPhaseRef] = []
+    for attrs in raw_attrs:
+        if attrs.id is None or attrs.src is None:
             continue
         phases.append(
             GraphPhaseRef(
-                id=attrs["id"],
-                src=attrs["src"],
-                depends_on=_split_depends_on(attrs.get("depends_on", "")),
+                id=attrs.id,
+                src=attrs.src,
+                depends_on=attrs.depends_on,
             )
         )
     data["phases"] = phases
@@ -223,6 +243,154 @@ def _parse_graph_manifest(path: Path, frontmatter: dict[str, Any], body: str) ->
         return GraphManifest.model_validate(data)
     except ValidationError as exc:
         _fatal(path, 1, f"GRAPH.md manifest validation failed: {exc}")
+
+
+def _extract_phase_attrs(body: str, body_start_line: int) -> list[_RawPhaseAttrs]:
+    pattern = re.compile(r"<phase\b([^>]*)/>", re.IGNORECASE | re.DOTALL)
+    raw_attrs: list[_RawPhaseAttrs] = []
+    for match in pattern.finditer(body):
+        attrs = _parse_attrs(match.group(1))
+        line = body_start_line + body[: match.start()].count("\n")
+        depends_on_raw = attrs.get("depends_on")
+        raw_attrs.append(
+            _RawPhaseAttrs(
+                id=attrs.get("id"),
+                src=attrs.get("src"),
+                depends_on_raw=depends_on_raw,
+                depends_on=_split_depends_on(depends_on_raw or ""),
+                line=line,
+            )
+        )
+    return raw_attrs
+
+
+def _validate_graph_topology(
+    graph_path: Path,
+    raw_attrs: list[_RawPhaseAttrs],
+    skill_root: Path,
+) -> None:
+    for attrs in raw_attrs:
+        if attrs.id is None:
+            _graph_fatal(graph_path, attrs.line, "phase tag missing required id")
+        if attrs.src is None:
+            _graph_fatal(graph_path, attrs.line, f"phase {attrs.id!r} missing required src")
+
+    phase_by_id: dict[str, _RawPhaseAttrs] = {}
+    for index, attrs in enumerate(raw_attrs):
+        assert attrs.id is not None
+        if attrs.id in phase_by_id:
+            _graph_fatal(graph_path, attrs.line, f"duplicate phase id {attrs.id!r}")
+        phase_by_id[attrs.id] = attrs
+        if index > 0 and attrs.depends_on_raw is None:
+            _graph_fatal(
+                graph_path,
+                attrs.line,
+                f"phase {attrs.id!r} missing required depends_on; "
+                'use depends_on="" for additional entry phases',
+            )
+
+    for attrs in raw_attrs:
+        assert attrs.id is not None
+        for dep in attrs.depends_on:
+            if dep not in phase_by_id:
+                _graph_fatal(
+                    graph_path,
+                    attrs.line,
+                    f"phase {attrs.id!r} depends_on unknown phase {dep!r}",
+                )
+            if dep == attrs.id:
+                _graph_fatal(graph_path, attrs.line, f"phase {attrs.id!r} cannot depend on itself")
+
+    _validate_acyclic_graph(graph_path, raw_attrs)
+    _validate_no_orphans(graph_path, raw_attrs)
+    for attrs in raw_attrs:
+        assert attrs.id is not None and attrs.src is not None
+        _validate_phase_src(graph_path, attrs, skill_root)
+
+
+def _validate_acyclic_graph(graph_path: Path, raw_attrs: list[_RawPhaseAttrs]) -> None:
+    adjacency: dict[str, list[str]] = {attrs.id or "": [] for attrs in raw_attrs}
+    line_by_id: dict[str, int] = {attrs.id or "": attrs.line for attrs in raw_attrs}
+    for attrs in raw_attrs:
+        assert attrs.id is not None
+        for dep in attrs.depends_on:
+            adjacency[dep].append(attrs.id)
+
+    state: dict[str, str] = {}
+    stack: list[str] = []
+
+    def visit(node: str) -> None:
+        state[node] = "gray"
+        stack.append(node)
+        for nxt in adjacency[node]:
+            if state.get(nxt) == "gray":
+                start = stack.index(nxt)
+                cycle = stack[start:] + [nxt]
+                _graph_fatal(
+                    graph_path,
+                    line_by_id.get(nxt, 1),
+                    "cycle detected: " + " -> ".join(cycle),
+                )
+            if state.get(nxt) is None:
+                visit(nxt)
+        stack.pop()
+        state[node] = "black"
+
+    for node in adjacency:
+        if state.get(node) is None:
+            visit(node)
+
+
+def _validate_no_orphans(graph_path: Path, raw_attrs: list[_RawPhaseAttrs]) -> None:
+    if len(raw_attrs) <= 1:
+        return
+    adjacency: dict[str, set[str]] = {attrs.id or "": set() for attrs in raw_attrs}
+    by_id = {attrs.id or "": attrs for attrs in raw_attrs}
+    for attrs in raw_attrs:
+        assert attrs.id is not None
+        for dep in attrs.depends_on:
+            adjacency[attrs.id].add(dep)
+            adjacency[dep].add(attrs.id)
+
+    start = raw_attrs[0].id
+    assert start is not None
+    visited: set[str] = set()
+    stack = [start]
+    while stack:
+        node = stack.pop()
+        if node in visited:
+            continue
+        visited.add(node)
+        stack.extend(sorted(adjacency[node] - visited))
+
+    for phase_id in adjacency:
+        if phase_id not in visited:
+            attrs = by_id[phase_id]
+            _graph_fatal(
+                graph_path,
+                attrs.line,
+                f"orphan phase {phase_id!r} is disconnected from the main graph",
+            )
+
+
+def _validate_phase_src(graph_path: Path, attrs: _RawPhaseAttrs, skill_root: Path) -> None:
+    assert attrs.id is not None and attrs.src is not None
+    src_path = Path(attrs.src)
+    if src_path.is_absolute():
+        _graph_fatal(graph_path, attrs.line, f"phase {attrs.id!r} src must stay inside skill root")
+    root_resolved = skill_root.resolve()
+    candidate = (skill_root / src_path).resolve()
+    try:
+        candidate.relative_to(root_resolved)
+    except ValueError:
+        _graph_fatal(graph_path, attrs.line, f"phase {attrs.id!r} src must stay inside skill root")
+
+    if not candidate.is_dir() or not any((candidate / name).is_file() for name in _PHASE_FILE_TO_MODE):
+        _graph_fatal(
+            graph_path,
+            attrs.line,
+            f"phase {attrs.id!r} src {attrs.src!r} has no LOGIC.md/SUBGRAPH.md/SKILL.md",
+        )
 
 
 def _resolve_io_ref(skill_root: Path, ref: str) -> Path:
@@ -344,9 +512,11 @@ __all__ = [
     "PhaseDocument",
     "SkillLoader",
     "_discover_phase_files",
+    "_extract_phase_attrs",
     "_guard_v21_root",
     "_resolve_io_ref",
     "_route_document",
+    "_validate_graph_topology",
     "_validate_io_schema",
     "_validate_mode_matches_filename",
     "load_workflow_from_md",

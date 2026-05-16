@@ -61,6 +61,44 @@ description: hello
     )
 
 
+def _write_graph_with_phase_lines(root: Path, phase_lines: list[str]) -> None:
+    _write(
+        root / "GRAPH.md",
+        """---
+schema_version: "2.1"
+name: hello-v21
+description: hello
+---
+<input src="io/inputs.json" />
+<output src="io/outputs.json" />
+"""
+        + "\n".join(phase_lines)
+        + "\n",
+    )
+
+
+def _write_skill_phase(root: Path, phase_dir: str) -> None:
+    _write(
+        root / phase_dir / "SKILL.md",
+        f"""---
+mode: skill
+name: {Path(phase_dir).name}
+---
+<system_prompt>
+Run {phase_dir}.
+</system_prompt>
+<exit_contract>
+Finish {phase_dir}.
+</exit_contract>
+""",
+    )
+
+
+def _base_v21_root(root: Path) -> None:
+    _write(root / "io" / "inputs.json", "{}\n")
+    _write(root / "io" / "outputs.json", "{}\n")
+
+
 def _assert_fatal(exc: pytest.ExceptionInfo[SkillLoadError], path_fragment: str) -> None:
     message = str(exc.value)
     assert "[F-v21-route]" in message
@@ -73,6 +111,12 @@ def _assert_io_fatal(exc: pytest.ExceptionInfo[SkillLoadError], path_fragment: s
     assert "[F-v21-io]" in message
     assert path_fragment in message
     assert ":1" in message or ":2" in message
+
+
+def _assert_graph_fatal(exc: pytest.ExceptionInfo[SkillLoadError]) -> None:
+    message = str(exc.value)
+    assert "[F-v21-graph]" in message
+    assert "GRAPH.md:" in message
 
 
 def test_v21_happy_path_routes_graph_and_skill_raw_blocks(tmp_path: Path) -> None:
@@ -192,6 +236,213 @@ def test_io_ref_escape_root(tmp_path: Path) -> None:
 
     _assert_io_fatal(exc, "../../etc/passwd")
     assert "IO schema ref must stay inside skill root" in str(exc.value)
+
+
+def test_topology_happy_path_chain(tmp_path: Path) -> None:
+    _base_v21_root(tmp_path)
+    _write_graph_with_phase_lines(
+        tmp_path,
+        [
+            '<phase id="prep" src="phases/prep" />',
+            '<phase id="draft" src="phases/draft" depends_on="prep" />',
+            '<phase id="review" src="phases/review" depends_on="draft" />',
+        ],
+    )
+    for phase in ["phases/prep", "phases/draft", "phases/review"]:
+        _write_skill_phase(tmp_path, phase)
+
+    compiled = SkillLoader().compile_skill(tmp_path)
+
+    assert [phase.id for phase in compiled.manifest.phases] == ["prep", "draft", "review"]
+
+
+def test_topology_multi_entry_happy_path(tmp_path: Path) -> None:
+    _base_v21_root(tmp_path)
+    _write_graph_with_phase_lines(
+        tmp_path,
+        [
+            '<phase id="left" src="phases/left" />',
+            '<phase id="right" src="phases/right" depends_on="" />',
+            '<phase id="join" src="phases/join" depends_on="left right" />',
+        ],
+    )
+    for phase in ["phases/left", "phases/right", "phases/join"]:
+        _write_skill_phase(tmp_path, phase)
+
+    compiled = SkillLoader().compile_skill(tmp_path)
+
+    assert compiled.manifest.phases[1].depends_on == []
+    assert compiled.manifest.phases[2].depends_on == ["left", "right"]
+
+
+def test_topology_missing_depends_on_non_entry(tmp_path: Path) -> None:
+    _base_v21_root(tmp_path)
+    _write_graph_with_phase_lines(
+        tmp_path,
+        [
+            '<phase id="prep" src="phases/prep" />',
+            '<phase id="draft" src="phases/draft" />',
+        ],
+    )
+    _write_skill_phase(tmp_path, "phases/prep")
+    _write_skill_phase(tmp_path, "phases/draft")
+
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path)
+
+    _assert_graph_fatal(exc)
+    assert "phase 'draft' missing required depends_on" in str(exc.value)
+    assert 'use depends_on="" for additional entry phases' in str(exc.value)
+
+
+def test_topology_duplicate_phase_id(tmp_path: Path) -> None:
+    _base_v21_root(tmp_path)
+    _write_graph_with_phase_lines(
+        tmp_path,
+        [
+            '<phase id="dup" src="phases/one" />',
+            '<phase id="dup" src="phases/two" depends_on="dup" />',
+        ],
+    )
+    _write_skill_phase(tmp_path, "phases/one")
+    _write_skill_phase(tmp_path, "phases/two")
+
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path)
+
+    _assert_graph_fatal(exc)
+    assert "duplicate phase id 'dup'" in str(exc.value)
+
+
+def test_topology_dep_unknown_phase(tmp_path: Path) -> None:
+    _base_v21_root(tmp_path)
+    _write_graph_with_phase_lines(
+        tmp_path,
+        [
+            '<phase id="prep" src="phases/prep" />',
+            '<phase id="draft" src="phases/draft" depends_on="missing" />',
+        ],
+    )
+    _write_skill_phase(tmp_path, "phases/prep")
+    _write_skill_phase(tmp_path, "phases/draft")
+
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path)
+
+    _assert_graph_fatal(exc)
+    assert "phase 'draft' depends_on unknown phase 'missing'" in str(exc.value)
+
+
+def test_topology_self_loop(tmp_path: Path) -> None:
+    _base_v21_root(tmp_path)
+    _write_graph_with_phase_lines(tmp_path, ['<phase id="loop" src="phases/loop" depends_on="loop" />'])
+    _write_skill_phase(tmp_path, "phases/loop")
+
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path)
+
+    _assert_graph_fatal(exc)
+    assert "phase 'loop' cannot depend on itself" in str(exc.value)
+
+
+def test_topology_cycle_detected(tmp_path: Path) -> None:
+    _base_v21_root(tmp_path)
+    _write_graph_with_phase_lines(
+        tmp_path,
+        [
+            '<phase id="a" src="phases/a" depends_on="c" />',
+            '<phase id="b" src="phases/b" depends_on="a" />',
+            '<phase id="c" src="phases/c" depends_on="b" />',
+        ],
+    )
+    for phase in ["phases/a", "phases/b", "phases/c"]:
+        _write_skill_phase(tmp_path, phase)
+
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path)
+
+    _assert_graph_fatal(exc)
+    assert "cycle detected:" in str(exc.value)
+    assert " -> " in str(exc.value)
+
+
+def test_topology_orphan_disconnected(tmp_path: Path) -> None:
+    _base_v21_root(tmp_path)
+    _write_graph_with_phase_lines(
+        tmp_path,
+        [
+            '<phase id="main" src="phases/main" />',
+            '<phase id="isolated" src="phases/isolated" depends_on="" />',
+        ],
+    )
+    _write_skill_phase(tmp_path, "phases/main")
+    _write_skill_phase(tmp_path, "phases/isolated")
+
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path)
+
+    _assert_graph_fatal(exc)
+    assert "orphan phase 'isolated' is disconnected from the main graph" in str(exc.value)
+
+
+def test_topology_src_escape_root(tmp_path: Path) -> None:
+    _base_v21_root(tmp_path)
+    _write_graph_with_phase_lines(tmp_path, ['<phase id="bad" src="../outside" />'])
+    (tmp_path / "phases" / "dummy").mkdir(parents=True)
+
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path)
+
+    _assert_graph_fatal(exc)
+    assert "phase 'bad' src must stay inside skill root" in str(exc.value)
+
+
+def test_topology_src_directory_missing(tmp_path: Path) -> None:
+    _base_v21_root(tmp_path)
+    _write_graph_with_phase_lines(tmp_path, ['<phase id="bad" src="phases/missing" />'])
+    (tmp_path / "phases" / "dummy").mkdir(parents=True)
+
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path)
+
+    _assert_graph_fatal(exc)
+    assert "phase 'bad' src 'phases/missing' has no LOGIC.md/SUBGRAPH.md/SKILL.md" in str(exc.value)
+
+
+def test_topology_src_no_node_file(tmp_path: Path) -> None:
+    _base_v21_root(tmp_path)
+    _write_graph_with_phase_lines(tmp_path, ['<phase id="bad" src="phases/empty" />'])
+    (tmp_path / "phases" / "empty").mkdir(parents=True)
+
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path)
+
+    _assert_graph_fatal(exc)
+    assert "phase 'bad' src 'phases/empty' has no LOGIC.md/SUBGRAPH.md/SKILL.md" in str(exc.value)
+
+
+def test_topology_phase_missing_id(tmp_path: Path) -> None:
+    _base_v21_root(tmp_path)
+    _write_graph_with_phase_lines(tmp_path, ['<phase src="phases/hello" />'])
+    _write_skill_phase(tmp_path, "phases/hello")
+
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path)
+
+    _assert_graph_fatal(exc)
+    assert "phase tag missing required id" in str(exc.value)
+
+
+def test_topology_phase_missing_src(tmp_path: Path) -> None:
+    _base_v21_root(tmp_path)
+    _write_graph_with_phase_lines(tmp_path, ['<phase id="hello" />'])
+    (tmp_path / "phases" / "dummy").mkdir(parents=True)
+
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path)
+
+    _assert_graph_fatal(exc)
+    assert "phase 'hello' missing required src" in str(exc.value)
 
 
 def test_root_skill_md_is_rejected(tmp_path: Path) -> None:

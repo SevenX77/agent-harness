@@ -4,17 +4,22 @@ from __future__ import annotations
 
 import logging
 import json
+import importlib.util
+import inspect
 import re
+import traceback
 from dataclasses import dataclass, field
 from json import JSONDecodeError
+from types import ModuleType
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from jsonschema.exceptions import SchemaError
 from jsonschema.validators import Draft202012Validator
 from pydantic import ValidationError
 
 from graph_agent.core.exceptions import SkillLoadError
+from graph_agent.core.actions import ActionDef, ActionRegistry, ToolDef, ToolRegistry
 from graph_agent.core.manifest import (
     GraphManifest,
     GraphPhaseRef,
@@ -27,6 +32,8 @@ from graph_agent.core.parser import (
     parse_markdown_parts,
     scan_forbidden_topology_tags,
 )
+from graph_agent.core.purity import scan_python_purity, scan_tool_imports_context
+from graph_agent.cognitive.context_facade import Context
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +66,8 @@ class CompiledSkill:
     raw: dict[str, Any]
     manifest: GraphManifest
     nodes: list[PhaseDocument] = field(default_factory=list)
+    actions: ActionRegistry = field(default_factory=ActionRegistry.empty)
+    tools: ToolRegistry = field(default_factory=ToolRegistry.empty)
 
 
 @dataclass(frozen=True)
@@ -88,13 +97,15 @@ class SkillLoader:
         io_inputs = _validate_io_schema(root, manifest.io_inputs_ref, "input")
         io_outputs = _validate_io_schema(root, manifest.io_outputs_ref, "output")
 
+        discovered = _discover_phase_files(root)
         phase_docs: list[PhaseDocument] = []
-        for phase_name, phase_file, mode in _discover_phase_files(root):
+        for phase_name, phase_file, mode in discovered:
             frontmatter, body, _ = parse_markdown_parts(phase_file)
             yaml_mode = str(frontmatter.get("mode") or "").strip()
             _validate_mode_matches_filename(phase_file, yaml_mode)
             scan_forbidden_topology_tags(phase_file, body)
             phase_docs.append(_build_phase_document(phase_name, phase_file, mode, frontmatter, body))
+        actions, tools = _discover_actions_and_tools(root, discovered)
 
         raw = {
             "graph": {"frontmatter": graph_frontmatter, "body": graph_body},
@@ -111,7 +122,7 @@ class SkillLoader:
             ],
         }
         logger.info("Compiled V2.1 graph skill root=%s phases=%d", root, len(phase_docs))
-        return CompiledSkill(raw=raw, manifest=manifest, nodes=phase_docs)
+        return CompiledSkill(raw=raw, manifest=manifest, nodes=phase_docs, actions=actions, tools=tools)
 
 
 def load_workflow_from_md(
@@ -148,6 +159,14 @@ def _graph_fatal(path: Path, line: int, message: str) -> None:
     raise SkillLoadError(f"[F-v21-graph] {path}:{line} {message}")
 
 
+def _actions_fatal(path: Path, line: int, message: str) -> None:
+    raise SkillLoadError(f"[F-v21-actions] {path}:{line} {message}")
+
+
+def _purity_fatal(path: Path, line: int, message: str) -> None:
+    raise SkillLoadError(f"[F-v21-purity] {path}:{line} {message}")
+
+
 def _guard_v21_root(skill_root: Path) -> None:
     if not skill_root.exists():
         _fatal(skill_root / "GRAPH.md", 1, "missing required GRAPH.md")
@@ -165,6 +184,8 @@ def _guard_v21_root(skill_root: Path) -> None:
     phases = skill_root / "phases"
     if not phases.is_dir() or not any(p.is_dir() for p in phases.iterdir()):
         _fatal(phases, 1, "missing phases directory or phase entries")
+    if (skill_root / "actions").exists():
+        _actions_fatal(skill_root / "actions", 1, "root-level actions/ is not allowed")
 
 
 def _discover_phase_files(skill_root: Path) -> list[tuple[str, Path, str]]:
@@ -188,6 +209,125 @@ def _discover_phase_files(skill_root: Path) -> list[tuple[str, Path, str]]:
     if not discovered:
         _fatal(phases_root, 1, "missing phases directory or phase entries")
     return discovered
+
+
+def _discover_actions_and_tools(
+    skill_root: Path,
+    discovered: list[tuple[str, Path, str]],
+) -> tuple[ActionRegistry, ToolRegistry]:
+    actions_by_phase: dict[str, dict[str, ActionDef]] = {}
+    tools_by_phase: dict[str, list[ToolDef]] = {}
+    root_tools = _load_tool_dir(skill_root / "tools", phase_id=None) if (skill_root / "tools").exists() else []
+
+    for phase_id, phase_file, mode in discovered:
+        phase_dir = phase_file.parent
+        actions_dir = phase_dir / "actions"
+        tools_dir = phase_dir / "tools"
+
+        if mode == "logic":
+            if tools_dir.exists():
+                _actions_fatal(tools_dir, 1, "tools/ is only allowed for SKILL phases")
+            if actions_dir.exists():
+                actions_by_phase[phase_id] = _load_action_dir(actions_dir, phase_id)
+        elif mode == "skill":
+            if actions_dir.exists():
+                _actions_fatal(actions_dir, 1, "actions/ is only allowed for LOGIC phases")
+            if tools_dir.exists():
+                tools_by_phase[phase_id] = _load_tool_dir(tools_dir, phase_id=phase_id)
+        else:
+            if actions_dir.exists():
+                _actions_fatal(actions_dir, 1, "actions/ is not allowed for SUBGRAPH phases")
+            if tools_dir.exists():
+                _actions_fatal(tools_dir, 1, "tools/ is not allowed for SUBGRAPH phases")
+
+    return ActionRegistry(actions_by_phase), ToolRegistry(root_tools=root_tools, by_phase=tools_by_phase)
+
+
+def _load_action_dir(actions_dir: Path, phase_id: str) -> dict[str, ActionDef]:
+    by_id: dict[str, ActionDef] = {}
+    for path in sorted(actions_dir.glob("*.py")):
+        if path.name == "__init__.py":
+            continue
+        _raise_on_purity_violations(path)
+        module = _load_python_module(path)
+        for func in _module_functions(module):
+            _validate_action_signature(path, func)
+            action_id = func.__name__
+            if action_id in by_id:
+                _actions_fatal(path, 1, f"duplicate action id {action_id!r} in phase {phase_id!r}")
+            by_id[action_id] = ActionDef(id=action_id, phase_id=phase_id, path=path, func=func)
+    return by_id
+
+
+def _load_tool_dir(tools_dir: Path, *, phase_id: str | None) -> list[ToolDef]:
+    tools: list[ToolDef] = []
+    for path in sorted(tools_dir.glob("*.py")):
+        if path.name == "__init__.py":
+            continue
+        _raise_on_purity_violations(path)
+        for violation in scan_tool_imports_context(path):
+            _actions_fatal(path, violation.line, violation.reason)
+        module = _load_python_module(path)
+        for func in _module_functions(module):
+            _validate_tool_signature(path, func)
+            tools.append(ToolDef(id=func.__name__, phase_id=phase_id, path=path, func=func))
+    return tools
+
+
+def _raise_on_purity_violations(path: Path) -> None:
+    for violation in scan_python_purity(path):
+        if violation.api == "python":
+            _actions_fatal(path, violation.line, f"module load failed: {violation.reason}")
+        _purity_fatal(path, violation.line, f"{violation.api} {violation.reason}")
+
+
+def _load_python_module(path: Path) -> ModuleType:
+    module_name = f"_graph_agent_v21_{abs(hash(path.resolve()))}"
+    try:
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        if spec is None or spec.loader is None:
+            _actions_fatal(path, 1, "could not create import spec")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        tb = traceback.format_exc()
+        line = getattr(exc, "lineno", 1) or 1
+        _actions_fatal(path, line, f"module load failed: {exc}\n{tb}")
+    return module
+
+
+def _module_functions(module: ModuleType) -> list[Callable[..., object]]:
+    return [
+        func
+        for _, func in inspect.getmembers(module, inspect.isfunction)
+        if getattr(func, "__module__", None) == module.__name__
+    ]
+
+
+def _validate_action_signature(path: Path, func: Callable[..., object]) -> None:
+    signature = inspect.signature(func)
+    params = list(signature.parameters.values())
+    if not params or params[0].name not in {"context", "ctx"}:
+        _actions_fatal(path, 1, f"action {func.__name__!r} must accept context/ctx as first parameter")
+    annotation = params[0].annotation
+    if annotation is inspect.Parameter.empty:
+        return
+    if annotation is Context:
+        return
+    if isinstance(annotation, str) and annotation in {"Context", "graph_agent.cognitive.context_facade.Context"}:
+        return
+    _actions_fatal(path, 1, f"action {func.__name__!r} first parameter must be Context-compatible")
+
+
+def _validate_tool_signature(path: Path, func: Callable[..., object]) -> None:
+    signature = inspect.signature(func)
+    for param in signature.parameters.values():
+        if param.name in {"context", "ctx", "state", "blackboard"}:
+            _actions_fatal(
+                path,
+                1,
+                f"tool {func.__name__!r} must not accept blackboard parameter {param.name!r}",
+            )
 
 
 def _route_document(file_path: Path) -> RouteKind:

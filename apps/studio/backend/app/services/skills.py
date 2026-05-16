@@ -512,6 +512,7 @@ def _detail_from_manifest(
             "test_inputs_dir": str(workspace_skill_dir / "test_inputs"),
             "golden_dir": str(workspace_skill_dir / "golden"),
         },
+        files=_read_skill_files(skill_dir),
         has_golden=_has_golden(skill_dir),
         latest_run_metadata=latest_run_metadata(skill_id),
         lint_result=lint_result,
@@ -541,10 +542,25 @@ async def _detail_from_manifest_async(
             "test_inputs_dir": str(workspace_skill_dir / "test_inputs"),
             "golden_dir": str(workspace_skill_dir / "golden"),
         },
+        files=_read_skill_files(skill_dir),
         has_golden=await storage.exists(str(skill_dir / "golden")),
         latest_run_metadata=latest,
         lint_result=lint_result,
     )
+
+
+def _read_skill_files(skill_dir: Path) -> dict[str, str]:
+    files: dict[str, str] = {}
+    for path in sorted(skill_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        rel_path = path.relative_to(skill_dir).as_posix()
+        try:
+            validate_skill_file_path(rel_path)
+        except HTTPException:
+            continue
+        files[rel_path] = path.read_text(encoding="utf-8")
+    return files
 
 
 def _load_compiled(skill_path: Path) -> CompiledSkill:

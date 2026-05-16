@@ -105,7 +105,7 @@ def test_lint_reports_failed_manifest_with_line_number(
     assert body["errors"][0]["error_code"]
 
 
-def test_put_single_file_edit_returns_v21_cutover_error(
+def test_update_skill_rejects_legacy_content_payload(
     client: TestClient,
 ) -> None:
     response = client.put("/api/skills/text-segmentation", json={"content": "name: updated"})
@@ -114,6 +114,27 @@ def test_put_single_file_edit_returns_v21_cutover_error(
     assert response.json()["error_code"] == "MANIFEST_VALIDATION_FAILED"
     error_types = {error["type"] for error in response.json()["details"]["errors"]}
     assert {"missing", "extra_forbidden"} <= error_types
+
+
+def test_update_skill_accepts_files_payload(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, workspaces_dir = studio_roots
+    files = _files_from_skill_dir(skills_dir / "text-segmentation")
+    files["phases/setup/LOGIC.md"] = files["phases/setup/LOGIC.md"].replace(
+        "name: setup",
+        "name: updated setup",
+    )
+
+    response = client.put("/api/skills/text-segmentation", json={"files": files})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["files"]["phases/setup/LOGIC.md"] == files["phases/setup/LOGIC.md"]
+    assert "updated setup" in (
+        workspaces_dir / "default" / "skills" / "text-segmentation" / "phases" / "setup" / "LOGIC.md"
+    ).read_text(encoding="utf-8")
 
 
 def test_create_skill_single_file_returns_v21_cutover_error(
@@ -147,11 +168,10 @@ def test_create_skill_uses_inline_v21_scaffold(
     assert "name: idea-generator" in (skill_dir / "GRAPH.md").read_text(encoding="utf-8")
 
 
-@pytest.mark.xfail(reason="T-A5 will route CreateSkillReq.files into create_new_skill")
 def test_create_skill_collision_returns_409(client: TestClient) -> None:
     response = client.post(
         "/api/skills",
-        json={"skill_id": "text-segmentation", "content": _agent_skill_content("text-segmentation")},
+        json={"skill_id": "text-segmentation", "files": {}},
     )
 
     assert response.status_code == 409
@@ -577,6 +597,14 @@ user_prompt_template: |
 
 # {skill_id}
 """
+
+
+def _files_from_skill_dir(skill_dir: Path) -> dict[str, str]:
+    files: dict[str, str] = {}
+    for path in sorted(skill_dir.rglob("*")):
+        if path.is_file():
+            files[path.relative_to(skill_dir).as_posix()] = path.read_text(encoding="utf-8")
+    return files
 
 
 def _write_final_state(

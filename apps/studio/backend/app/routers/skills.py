@@ -24,7 +24,7 @@ from app.services.skills import (
     fork_skill,
     get_skill_detail,
     list_skill_summaries,
-    update_skill_content,
+    update_skill_files,
 )
 from app.services.validator import ValidationHttpError, validate_skill_input_file
 
@@ -47,7 +47,7 @@ async def create_skill(
     storage: StorageBackend = Depends(get_storage),
     metadata: MetadataStore = Depends(get_metadata),
 ) -> SkillSummary:
-    return await create_new_skill(user_id, request.skill_id, request.content, storage, metadata)
+    return await create_new_skill(user_id, request.skill_id, request.files, storage, metadata)
 
 
 @router.get("/{skill_id}", response_model=SkillDetail)
@@ -68,7 +68,7 @@ async def update_skill(
     storage: StorageBackend = Depends(get_storage),
     metadata: MetadataStore = Depends(get_metadata),
 ) -> SkillDetail:
-    return await update_skill_content(user_id, skill_id, request.content, storage, metadata)
+    return await update_skill_files(user_id, skill_id, request.files, storage, metadata)
 
 
 @router.post("/{skill_id}/fork", response_model=SkillSummary, status_code=201)

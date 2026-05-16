@@ -52,6 +52,7 @@ def test_models_validate_fields_and_reuse_graph_agent_contracts() -> None:
         node_schema_v21={"graph_phase_ref": {}, "logic": {}, "skill": {}, "subgraph": {}},
         io_schema={"inputs": {}, "outputs": {}},
         file_paths={"graph_md": "/tmp/GRAPH.md"},
+        files={"GRAPH.md": "# Demo"},
         has_golden=False,
     )
 

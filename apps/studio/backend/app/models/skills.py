@@ -39,7 +39,7 @@ class CreateSkillReq(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     skill_id: str = Field(..., pattern=r"^[a-z][a-z0-9-]+$")
-    content: str
+    files: dict[str, str]
 
 
 class ForkSkillReq(BaseModel):
@@ -51,4 +51,4 @@ class ForkSkillReq(BaseModel):
 class UpdateSkillReq(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    content: str
+    files: dict[str, str]

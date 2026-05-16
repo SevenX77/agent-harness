@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn
 
+from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
 from graph_agent import CompiledSkill, compile_skill
 from graph_agent.core.exceptions import SkillCompilationError, SkillLoadError
@@ -29,6 +30,43 @@ _NAME_LINE_RE = re.compile(
 _ID_LINE_RE = re.compile(
     r"(?m)^(?P<prefix>id:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\n]+)(?P=quote)\s*$"
 )
+
+_ALLOWED_SKILL_FILE_SUFFIXES = {".md", ".json", ".py"}
+_PHASE_NODE_FILES = {"LOGIC.md", "SUBGRAPH.md", "SKILL.md"}
+
+
+def validate_skill_file_path(rel_path: str) -> None:
+    """Validate V2.1 authoring file paths before reading or writing skill files."""
+    invalid_message = f"invalid_skill_file_path: {rel_path}"
+    path = PurePosixPath(rel_path)
+    parts = path.parts
+
+    if (
+        not rel_path
+        or rel_path.startswith("/")
+        or "\\" in rel_path
+        or path.suffix not in _ALLOWED_SKILL_FILE_SUFFIXES
+        or any(part in {"", ".", ".."} for part in parts)
+    ):
+        raise HTTPException(status_code=422, detail=invalid_message)
+
+    if parts == ("GRAPH.md",):
+        return
+    if parts in {("io", "inputs.json"), ("io", "outputs.json")}:
+        return
+    if len(parts) == 2 and parts[0] == "tools" and parts[1].endswith(".py"):
+        return
+    if len(parts) == 3 and parts[0] == "phases" and parts[2] in _PHASE_NODE_FILES:
+        return
+    if (
+        len(parts) == 4
+        and parts[0] == "phases"
+        and parts[2] in {"actions", "tools"}
+        and parts[3].endswith(".py")
+    ):
+        return
+
+    raise HTTPException(status_code=422, detail=invalid_message)
 
 
 def ensure_workspace_layout() -> None:

@@ -70,15 +70,38 @@ def scan_tool_imports_context(path: Path) -> list[PurityViolation]:
         ]
     violations: list[PurityViolation] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == "graph_agent.cognitive.context_facade":
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "graph_agent.cognitive.context_facade":
+                    form = "form 3" if alias.asname else "form 2"
+                    violations.append(
+                        PurityViolation(
+                            path=path,
+                            line=node.lineno,
+                            api="graph_agent.cognitive.context_facade",
+                            reason=f"Tools must not import the Action Context facade ({form})",
+                        )
+                    )
+        elif isinstance(node, ast.ImportFrom) and node.module == "graph_agent.cognitive.context_facade":
             violations.append(
                 PurityViolation(
                     path=path,
                     line=node.lineno,
                     api="graph_agent.cognitive.context_facade",
-                    reason="Tools must not import the Action Context facade",
+                    reason="Tools must not import the Action Context facade (form 1)",
                 )
             )
+        elif isinstance(node, ast.ImportFrom) and node.module == "graph_agent.cognitive":
+            for alias in node.names:
+                if alias.name == "context_facade":
+                    violations.append(
+                        PurityViolation(
+                            path=path,
+                            line=node.lineno,
+                            api="graph_agent.cognitive.context_facade",
+                            reason="Tools must not import the Action Context facade (form 4)",
+                        )
+                    )
     return violations
 
 

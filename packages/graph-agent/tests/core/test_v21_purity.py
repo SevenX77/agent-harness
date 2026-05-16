@@ -4,7 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from graph_agent.core.purity import scan_python_purity
+from graph_agent.core.purity import scan_python_purity, scan_tool_imports_context
 
 _REPO_ROOT = Path(__file__).parents[4]
 _SCANNER = _REPO_ROOT / "scripts" / "ci_scan_v21_purity.py"
@@ -18,6 +18,10 @@ def _write(path: Path, text: str) -> Path:
 
 def _apis(path: Path) -> list[str]:
     return [violation.api for violation in scan_python_purity(path)]
+
+
+def _tool_context_violations(path: Path) -> list[str]:
+    return [violation.reason for violation in scan_tool_imports_context(path)]
 
 
 def test_purity_open_write_fatal(tmp_path: Path) -> None:
@@ -87,6 +91,30 @@ def test_purity_temporary_directory_fatal(tmp_path: Path) -> None:
 
 def test_purity_path_read_text_ok(tmp_path: Path) -> None:
     assert scan_python_purity(_write(tmp_path / "x.py", "from pathlib import Path\nPath('x').read_text()\n")) == []
+
+
+def test_scan_blocks_import_full_path(tmp_path: Path) -> None:
+    reasons = _tool_context_violations(
+        _write(tmp_path / "tool.py", "import graph_agent.cognitive.context_facade\n")
+    )
+
+    assert any("form 2" in reason for reason in reasons)
+
+
+def test_scan_blocks_import_aliased(tmp_path: Path) -> None:
+    reasons = _tool_context_violations(
+        _write(tmp_path / "tool.py", "import graph_agent.cognitive.context_facade as cf\n")
+    )
+
+    assert any("form 3" in reason for reason in reasons)
+
+
+def test_scan_blocks_from_cognitive_import_facade(tmp_path: Path) -> None:
+    reasons = _tool_context_violations(
+        _write(tmp_path / "tool.py", "from graph_agent.cognitive import context_facade\n")
+    )
+
+    assert any("form 4" in reason for reason in reasons)
 
 
 def test_purity_cli_clean_exit_0(tmp_path: Path) -> None:

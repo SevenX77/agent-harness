@@ -1,13 +1,31 @@
 from __future__ import annotations
 
+import difflib
+import shutil
 from pathlib import Path
+
+import pytest
 
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.graph_serializer import serialize_graph
+from graph_agent.core.loader import SkillLoader
 from graph_agent.core.manifest import GraphManifest, GraphPhaseRef
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
+CANVAS_SERIALIZER_FIXTURES = (
+    REPO_ROOT / "packages" / "graph-agent" / "tests" / "fixtures" / "canvas_serializer"
+)
+FAKE_CANVAS_FANOUT_ROOT = REPO_ROOT / "packages" / "graph-agent" / "tests" / "fixtures" / "fake_canvas_fanout"
+REAL_V21_SKILL_ROOTS = tuple(
+    path.parent
+    for path in sorted((REPO_ROOT / "skills").glob("*/GRAPH.md"))
+    if 'schema_version: "2.1"' in path.read_text(encoding="utf-8")
+)
+CANVAS_DOD_MATRIX_ROOTS = (
+    *REAL_V21_SKILL_ROOTS,
+    FAKE_CANVAS_FANOUT_ROOT,
+)
 
 
 def _skill_graph(skill: str) -> tuple[GraphManifest, str]:
@@ -16,8 +34,19 @@ def _skill_graph(skill: str) -> tuple[GraphManifest, str]:
 
 
 def _fixture_graph(name: str) -> tuple[GraphManifest, str]:
-    root = REPO_ROOT / "packages" / "graph-agent" / "tests" / "fixtures" / "canvas_serializer" / name
+    root = CANVAS_SERIALIZER_FIXTURES / name
     return compile_skill(root, cache=False).manifest, (root / "GRAPH.md").read_text(encoding="utf-8")
+
+
+def _copy_skill_with_graph(root: Path, graph_text: str, tmp_path: Path) -> Path:
+    copied = tmp_path / root.name
+    shutil.copytree(root, copied)
+    (copied / "GRAPH.md").write_text(graph_text, encoding="utf-8")
+    return copied
+
+
+def _compile_graph_for_serializer(root: Path) -> GraphManifest:
+    return SkillLoader(validate_context_writes=False).compile_skill(root).manifest
 
 
 def _line_diff_count(before: str, after: str) -> int:
@@ -26,6 +55,48 @@ def _line_diff_count(before: str, after: str) -> int:
     return sum(1 for old, new in zip(before_lines, after_lines) if old != new) + abs(
         len(after_lines) - len(before_lines)
     )
+
+
+def _diff_changed_lines(before: str, after: str) -> tuple[int, int]:
+    diff = difflib.unified_diff(
+        before.splitlines(),
+        after.splitlines(),
+        lineterm="",
+    )
+    removed = 0
+    added = 0
+    for line in diff:
+        if line.startswith(("---", "+++", "@@")):
+            continue
+        if line.startswith("-"):
+            removed += 1
+        elif line.startswith("+"):
+            added += 1
+    return removed, added
+
+
+@pytest.mark.parametrize(
+    "root",
+    CANVAS_DOD_MATRIX_ROOTS,
+    ids=lambda root: "skill:" + root.name if root.parent.name == "skills" else "fixture:" + root.name,
+)
+class TestCanvasV2SerializerDoDMatrix:
+    def test_parse_serialize_parse_equivalence(self, root: Path, tmp_path: Path) -> None:
+        manifest = _compile_graph_for_serializer(root)
+        original = (root / "GRAPH.md").read_text(encoding="utf-8")
+        serialized = serialize_graph(manifest, original)
+
+        reparsed = _compile_graph_for_serializer(_copy_skill_with_graph(root, serialized, tmp_path))
+
+        assert reparsed.model_dump() == manifest.model_dump()
+
+    def test_serialize_is_byte_idempotent(self, root: Path, tmp_path: Path) -> None:
+        manifest = _compile_graph_for_serializer(root)
+        original = (root / "GRAPH.md").read_text(encoding="utf-8")
+        first = serialize_graph(manifest, original)
+        reparsed = _compile_graph_for_serializer(_copy_skill_with_graph(root, first, tmp_path))
+
+        assert serialize_graph(reparsed, first) == first
 
 
 def test_single_phase_graph_round_trips_byte_exact() -> None:
@@ -49,7 +120,7 @@ def test_fanout_graph_round_trips_byte_exact() -> None:
 
 
 def test_depends_on_change_only_rewrites_target_phase_line() -> None:
-    root = REPO_ROOT / "packages" / "graph-agent" / "tests" / "fixtures" / "fake_canvas_fanout"
+    root = FAKE_CANVAS_FANOUT_ROOT
     manifest = compile_skill(root, cache=False).manifest
     original = (root / "GRAPH.md").read_text(encoding="utf-8")
     mutated = manifest.model_copy(
@@ -66,6 +137,7 @@ def test_depends_on_change_only_rewrites_target_phase_line() -> None:
     serialized = serialize_graph(mutated, original)
 
     assert _line_diff_count(original, serialized) == 1
+    assert _diff_changed_lines(original, serialized) == (1, 1)
     assert '<phase id="branch_b" src="phases/branch_b" depends_on="prepare,branch_a" />' in serialized
     assert 'schema_version: "2.1"' in serialized
     assert '<input src="io/inputs.json" />' in serialized
@@ -81,11 +153,12 @@ def test_new_phase_appends_one_phase_line() -> None:
 
     assert serialized.startswith(original)
     assert serialized.count("\n") == original.count("\n") + 1
+    assert _diff_changed_lines(original, serialized) == (0, 1)
     assert serialized.endswith('<phase id="review" src="phases/review" depends_on="greet" />\n')
 
 
 def test_deleted_phase_removes_only_that_phase_line() -> None:
-    root = REPO_ROOT / "packages" / "graph-agent" / "tests" / "fixtures" / "fake_canvas_fanout"
+    root = FAKE_CANVAS_FANOUT_ROOT
     manifest = compile_skill(root, cache=False).manifest
     original = (root / "GRAPH.md").read_text(encoding="utf-8")
     mutated = manifest.model_copy(
@@ -97,6 +170,27 @@ def test_deleted_phase_removes_only_that_phase_line() -> None:
     assert serialized.count("\n") == original.count("\n") - 1
     assert '<phase id="branch_b" src="phases/branch_b" depends_on="prepare" />' not in serialized
     assert '<phase id="branch_a" src="phases/branch_a" depends_on="prepare" />' in serialized
+    assert '<phase id="assemble" src="phases/assemble" depends_on="branch_a branch_b" />' in serialized
+
+
+def test_fanout_deleted_phase_removes_inserted_downward_attachment() -> None:
+    root = FAKE_CANVAS_FANOUT_ROOT
+    manifest = compile_skill(root, cache=False).manifest
+    original = (root / "GRAPH.md").read_text(encoding="utf-8")
+    branch_a_line = '<phase id="branch_a" src="phases/branch_a" depends_on="prepare" />'
+    original_with_attachment = original.replace(
+        branch_a_line,
+        "<!-- branch_a canvas note -->\nBranch A operator note.\n" + branch_a_line,
+    )
+    mutated = manifest.model_copy(
+        update={"phases": [phase for phase in manifest.phases if phase.id != "branch_a"]}
+    )
+
+    serialized = serialize_graph(mutated, original_with_attachment)
+
+    assert "<!-- branch_a canvas note -->" not in serialized
+    assert "Branch A operator note." not in serialized
+    assert '<phase id="branch_b" src="phases/branch_b" depends_on="prepare" />' in serialized
     assert '<phase id="assemble" src="phases/assemble" depends_on="branch_a branch_b" />' in serialized
 
 

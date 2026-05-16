@@ -61,13 +61,12 @@ class PredictorService:
         """Resolve strategy, run graph_agent in Predict mode, and assemble result."""
         strategy = self.resolve_fill_strategy(mock_param)
         skill_dir = ensure_workspace_skill_dir(skill_id)
-        skill_path = skill_dir / "SKILL.md"
         self._warn_on_stale_golden_hashes(strategy, current_hashes or {})
         tracing_callback = PredictTracingCallback()
         tracing_callback.on_chain_start(metadata={})
 
         raw_result = self._run_skill(
-            skill_path,
+            skill_dir,
             mock_llm=mock_param,
             unattended=True,
             callbacks=[tracing_callback],

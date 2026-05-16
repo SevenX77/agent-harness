@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "final_manual": {
+      "type": "string",
+      "description": "Consumer-facing product manual in Markdown."
+    }
+  },
+  "required": ["final_manual"],
+  "additionalProperties": true
+}

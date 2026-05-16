@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "product_specs": {
+      "type": "object",
+      "description": "Structured product specification data.",
+      "additionalProperties": true
+    }
+  },
+  "required": ["product_specs"],
+  "additionalProperties": true
+}

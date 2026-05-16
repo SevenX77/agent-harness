@@ -16,8 +16,9 @@ def test_backend_p2_predict_job_exports_diagnostics(
 ) -> None:
     skill_dir = _write_backend_skill(tmp_path)
     monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda skill_id: skill_dir)
+    service = PredictorService(run_skill_fn=_fake_predict_run_skill(["prepare", "draft"], "heuristic_stub"))
 
-    result = PredictorService().dispatch_predict_job(
+    result = service.dispatch_predict_job(
         "skill",
         None,
         input_data={"topic": "mars"},
@@ -45,8 +46,9 @@ def test_backend_p1_predict_job_uses_manual_or_copilot_source(
 ) -> None:
     skill_dir = _write_backend_skill(tmp_path)
     monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda skill_id: skill_dir)
+    service = PredictorService(run_skill_fn=_fake_predict_run_skill(["prepare", "draft"], expected_source))
 
-    result = PredictorService().dispatch_predict_job("skill", mock_llm, input_data={"topic": "mars"})
+    result = service.dispatch_predict_job("skill", mock_llm, input_data={"topic": "mars"})
 
     assert result.status == "success"
     assert result.phases[1].mocked_source == expected_source
@@ -60,9 +62,10 @@ def test_backend_p0_predict_job_warns_diffs_and_uses_golden_source(
     skill_dir = _write_backend_skill(tmp_path)
     golden_path = _write_golden_case(tmp_path, expected_path=["draft", "finish"])
     monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda skill_id: skill_dir)
+    service = PredictorService(run_skill_fn=_fake_predict_run_skill(["prepare", "draft"], "golden_case"))
 
     with caplog.at_level(logging.WARNING):
-        result = PredictorService().dispatch_predict_job(
+        result = service.dispatch_predict_job(
             "skill",
             golden_path,
             input_data={"topic": "mars"},
@@ -75,6 +78,27 @@ def test_backend_p0_predict_job_warns_diffs_and_uses_golden_source(
     assert result.path_diff.extra == ["prepare"]
     assert result.phases[1].mocked_source == "golden_case"
     assert any("Golden case hash stale" in record.message for record in caplog.records)
+
+
+def _fake_predict_run_skill(actual_path: list[str], mocked_source: str):
+    def fake_run_skill(_skill_path: Path, **_kwargs: object) -> dict[str, object]:
+        return {
+            "context": {
+                "actual_path": actual_path,
+                "predict_trace": [
+                    {
+                        "phase_name": phase,
+                        "type": "logic" if phase == "prepare" else "llm",
+                        "inputs": {},
+                        "outputs": {"text": "draft"} if phase == "draft" else {},
+                        "mocked_source": mocked_source if phase == "draft" else "deterministic",
+                    }
+                    for phase in actual_path
+                ],
+            }
+        }
+
+    return fake_run_skill
 
 
 def test_backend_deadlock_guard_blocks_p2_but_not_p0(

@@ -8,7 +8,7 @@ name plus the YAML ``mode`` discriminator.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -79,6 +79,12 @@ class SkillNodeAST(_BaseNodeAST):
     tools: list[str] = Field(default_factory=list)
 
 
+PhaseAST = Annotated[
+    LogicNodeAST | SubgraphNodeAST | SkillNodeAST,
+    Field(discriminator="mode"),
+]
+
+
 # Transitional public name for package imports.  This is not the old
 # schema-2.0 discriminated union; it aliases the V2.1 root manifest only.
 SkillManifest = GraphManifest
@@ -89,6 +95,7 @@ __all__ = [
     "GraphManifest",
     "GraphPhaseRef",
     "LogicNodeAST",
+    "PhaseAST",
     "SkillManifest",
     "SkillNodeAST",
     "SubgraphNodeAST",

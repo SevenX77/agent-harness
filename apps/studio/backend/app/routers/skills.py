@@ -30,6 +30,7 @@ from app.services.skills import (
     serialize_skill_graph_markdown,
     update_skill_files,
 )
+from app.services.canvas_errors import CanvasConflictError
 from app.services.validator import ValidationHttpError, validate_skill_input_file
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
@@ -71,13 +72,24 @@ async def serialize_skill_graph(
     request: SerializeGraphReq,
     user_id: str = Depends(get_auth_user_id),
     storage: StorageBackend = Depends(get_storage),
-) -> SerializeGraphRes:
-    return await serialize_skill_graph_markdown(
-        user_id,
-        skill_id,
-        request,
-        storage,
-    )
+) -> SerializeGraphRes | JSONResponse:
+    try:
+        return await serialize_skill_graph_markdown(
+            user_id,
+            skill_id,
+            request,
+            storage,
+        )
+    except CanvasConflictError as exc:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "code": "snapshot_conflict",
+                "current_hash": exc.current_hash,
+                "current_markdown_content": exc.current_markdown_content,
+                "current_phase_count": exc.current_phase_count,
+            },
+        )
 
 
 @router.put("/{skill_id}", response_model=SkillDetail)

@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import difflib
+import hashlib
 import statistics
 import time
+from typing import Any
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 
-def _phase_payload(depends_on: list[str] | None = None) -> dict[str, list[dict[str, object]]]:
+def _phase_payload(
+    depends_on: list[str] | None = None,
+    *,
+    expected_hash: str | None = None,
+) -> dict[str, Any]:
     return {
         "phases": [
             {"id": "setup", "src": "phases/setup", "depends_on": [], "mode": "logic"},
@@ -18,7 +24,8 @@ def _phase_payload(depends_on: list[str] | None = None) -> dict[str, list[dict[s
                 "depends_on": ["setup"] if depends_on is None else depends_on,
                 "mode": "logic",
             },
-        ]
+        ],
+        "expected_hash": expected_hash,
     }
 
 
@@ -56,6 +63,10 @@ def _changed_lines(before: str, after: str) -> tuple[int, int]:
     return removed, added
 
 
+def _graph_hash(skill_dir: Path) -> str:
+    return hashlib.sha256((skill_dir / "GRAPH.md").read_bytes()).hexdigest()
+
+
 def test_canvas_graph_serialize_returns_markdown_and_stays_fast(
     client: TestClient,
     studio_roots: tuple[Path, Path],
@@ -76,6 +87,7 @@ def test_canvas_graph_serialize_returns_markdown_and_stays_fast(
     assert isinstance(body["markdown_content"], str)
     assert body["phase_count"] == 2
     assert body["elapsed_ms"] >= 0
+    assert body["current_hash"] == _graph_hash(skills_dir / "text-segmentation")
     assert '<phase id="final" src="phases/final" depends_on="setup" />' in body["markdown_content"]
     assert statistics.quantiles(elapsed_ms, n=100, method="inclusive")[94] < 500
 
@@ -164,3 +176,81 @@ def test_canvas_graph_serialize_openapi_schema_is_generated(client: TestClient) 
     )
     assert "PhaseRef" in schema["components"]["schemas"]
     assert "SerializeGraphRes" in schema["components"]["schemas"]
+
+
+def test_canvas_graph_serialize_expected_hash_match_returns_current_hash(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, _workspaces_dir = studio_roots
+    skill_dir = skills_dir / "text-segmentation"
+    _add_final_phase(skill_dir)
+    expected_hash = _graph_hash(skill_dir)
+
+    response = client.post(
+        "/api/skills/text-segmentation/graph/serialize",
+        json=_phase_payload(expected_hash=expected_hash),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["current_hash"] == expected_hash
+
+
+def test_canvas_graph_serialize_expected_hash_mismatch_returns_latest_snapshot(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, _workspaces_dir = studio_roots
+    skill_dir = skills_dir / "text-segmentation"
+    _add_final_phase(skill_dir)
+    current_markdown = (skill_dir / "GRAPH.md").read_text(encoding="utf-8")
+
+    response = client.post(
+        "/api/skills/text-segmentation/graph/serialize",
+        json=_phase_payload(expected_hash="stale"),
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "code": "snapshot_conflict",
+        "current_hash": _graph_hash(skill_dir),
+        "current_markdown_content": current_markdown,
+        "current_phase_count": 2,
+    }
+
+
+def test_canvas_graph_serialize_without_expected_hash_skips_conflict_check(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, _workspaces_dir = studio_roots
+    skill_dir = skills_dir / "text-segmentation"
+    _add_final_phase(skill_dir)
+
+    response = client.post("/api/skills/text-segmentation/graph/serialize", json=_phase_payload())
+
+    assert response.status_code == 200
+    assert response.json()["current_hash"] == _graph_hash(skill_dir)
+
+
+def test_canvas_graph_serialize_hash_changes_after_graph_content_changes(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, _workspaces_dir = studio_roots
+    skill_dir = skills_dir / "text-segmentation"
+    original_hash = _graph_hash(skill_dir)
+    graph_path = skill_dir / "GRAPH.md"
+    graph_path.write_text(
+        graph_path.read_text(encoding="utf-8") + "<!-- external edit -->\n",
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        "/api/skills/text-segmentation/graph/serialize",
+        json=_phase_payload(depends_on=[], expected_hash=original_hash),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["current_hash"] != original_hash
+    assert "<!-- external edit -->" in response.json()["current_markdown_content"]

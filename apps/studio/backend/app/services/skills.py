@@ -396,7 +396,14 @@ async def serialize_skill_graph_markdown(
     skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage)
     graph_path = skill_dir / "GRAPH.md"
     original_md = await storage.read_text(str(graph_path))
+    current_hash = _graph_content_hash(original_md)
     compiled = _load_compiled_for_graph_serializer(skill_dir)
+    if request.expected_hash is not None and request.expected_hash != current_hash:
+        raise CanvasConflictError(
+            current_hash=current_hash,
+            current_markdown_content=original_md,
+            current_phase_count=len(compiled.manifest.phases),
+        )
     manifest = compiled.manifest.model_copy(
         update={
             "phases": [
@@ -414,6 +421,7 @@ async def serialize_skill_graph_markdown(
         markdown_content=markdown,
         phase_count=len(request.phases),
         elapsed_ms=(time.perf_counter() - started) * 1000,
+        current_hash=current_hash,
     )
 
 
@@ -700,6 +708,10 @@ def _load_compiled_for_graph_serializer(skill_path: Path) -> CompiledSkill:
             retry_strategy="not_retryable",
         )
         raise_error_response(response)
+
+
+def _graph_content_hash(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def _phase_summary_from_compiled(compiled: CompiledSkill) -> list[dict[str, Any]]:

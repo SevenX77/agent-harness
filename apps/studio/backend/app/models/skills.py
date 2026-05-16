@@ -52,6 +52,7 @@ class SerializeGraphReq(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     phases: list[PhaseRef]
+    expected_hash: str | None = None
 
     @model_validator(mode="after")
     def reject_duplicate_phase_ids(self) -> SerializeGraphReq:
@@ -72,6 +73,7 @@ class SerializeGraphRes(BaseModel):
     markdown_content: str
     phase_count: int
     elapsed_ms: float
+    current_hash: str
 
 
 class CreateSkillReq(BaseModel):

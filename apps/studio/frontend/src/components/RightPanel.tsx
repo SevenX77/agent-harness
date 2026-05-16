@@ -5,6 +5,7 @@ import type {
   CallbackEvent,
   CompareResult,
   GraphSkillDef,
+  JsonObject,
   LintError,
   RunDetail,
   TerminalSession,
@@ -29,6 +30,8 @@ interface RightPanelProps {
   activeFile: string | null
   files: Record<string, string>
   dirty: Record<string, boolean>
+  node_schema_v21?: Record<string, JsonObject>
+  io_schema?: Record<string, JsonObject>
   selectedSkillId: string | null
   lintErrors: LintError[]
   traceLogs: CallbackEvent[]
@@ -50,7 +53,7 @@ interface RightPanelProps {
   onEditorMount: EditorOnMount
   onActiveFileChange: (path: string | null) => void
   onFileChange: (path: string, content: string) => void
-  onJumpToLine: (line: number | null) => void
+  onJumpToLine: (line: number | null, file?: string | null) => void
   onCopyErrors: (message: string) => void
   onSelectPrompt: (index: number) => void
   onCompareToGolden: () => void
@@ -77,6 +80,8 @@ export function RightPanel({
   activeFile,
   files,
   dirty,
+  node_schema_v21,
+  io_schema,
   selectedSkillId,
   lintErrors,
   traceLogs,
@@ -203,6 +208,8 @@ export function RightPanel({
                 activeFile={activeFile}
                 files={files}
                 lintErrors={lintErrors}
+                node_schema_v21={node_schema_v21}
+                io_schema={io_schema}
                 onEditorMount={onEditorMount}
                 onContentChange={onFileChange}
                 onJumpToLine={onJumpToLine}

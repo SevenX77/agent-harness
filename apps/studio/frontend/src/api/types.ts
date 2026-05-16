@@ -293,6 +293,9 @@ export type SkillManifest = AgentSkillDef | GraphSkillDef | PersonaSkillDef
 
 export interface SkillDetail {
   manifest: SkillManifest
+  graph_topology: JsonObject[]
+  node_schema_v21: Record<string, JsonObject>
+  io_schema: Record<string, JsonObject>
   file_paths: Record<string, string>
   files: Record<string, string>
   has_golden: boolean

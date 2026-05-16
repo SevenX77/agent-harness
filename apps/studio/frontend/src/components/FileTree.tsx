@@ -63,7 +63,7 @@ function FileTreeRow({
 }: NodeRendererProps<FileTreeNode> & Pick<FileTreeProps, 'dirty' | 'errorFiles'>) {
   const Icon = node.isLeaf ? File : node.isOpen ? FolderOpen : Folder
   const isDirty = node.data.kind === 'file' && dirty[node.data.path] === true
-  const hasError = node.data.kind === 'file' && errorFiles?.[node.data.path] === true
+  const fileHasError = node.data.kind === 'file' && errorFiles?.[node.data.path] === true
 
   return (
     <div
@@ -76,7 +76,7 @@ function FileTreeRow({
       <Icon className="h-4 w-4 shrink-0 text-slate-500" />
       <span className="min-w-0 flex-1 truncate">{node.data.name}</span>
       {isDirty ? <span aria-label="dirty" className="h-2 w-2 shrink-0 rounded-full bg-red-500" /> : null}
-      {hasError ? <span aria-label="error" className="h-2 w-2 shrink-0 rounded-full bg-amber-500" /> : null}
+      {fileHasError ? <span aria-label="error" className="h-2 w-2 shrink-0 rounded-full bg-amber-500" /> : null}
     </div>
   )
 }

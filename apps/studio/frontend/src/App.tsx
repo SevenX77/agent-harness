@@ -235,23 +235,6 @@ export default function App() {
   }, [graph, setEdges, setNodes])
 
   useEffect(() => {
-    const model = editorRef.current?.getModel()
-    const monaco = monacoRef.current
-    if (!model || !monaco) {
-      return
-    }
-
-    monaco.editor.setModelMarkers(model, 'studio-lint', lintErrors.map((error) => ({
-      startLineNumber: error.line ?? 1,
-      startColumn: error.column ?? 1,
-      endLineNumber: error.line ?? 1,
-      endColumn: 120,
-      message: error.message,
-      severity: error.severity === 'warning' ? monaco.MarkerSeverity.Warning : monaco.MarkerSeverity.Error,
-    })))
-  }, [lintErrors])
-
-  useEffect(() => {
     if (!selectedSkillId || !skillDetail || !storedDraft || workspaceIsDirty) {
       return
     }
@@ -394,14 +377,20 @@ export default function App() {
     })
   }, [handleSave])
 
-  const jumpToLine = useCallback((line: number | null) => {
+  const jumpToLine = useCallback((line: number | null, file?: string | null) => {
+    if (file && file !== useWorkspaceStore.getState().activeFile) {
+      setWorkspaceActiveFile(file)
+      setPendingJumpLine(line)
+      setActiveTab('code')
+      return
+    }
     if (!line || !editorRef.current) {
       return
     }
     editorRef.current.revealLineInCenter(line)
     editorRef.current.setPosition({ lineNumber: line, column: 1 })
     editorRef.current.focus()
-  }, [])
+  }, [setWorkspaceActiveFile])
 
   useEffect(() => {
     if (activeTab !== 'code' || pendingJumpLine === null) {
@@ -847,6 +836,8 @@ export default function App() {
                 activeFile={workspaceActiveFile}
                 files={workspaceFiles}
                 dirty={workspaceDirty}
+                node_schema_v21={skillDetail?.node_schema_v21}
+                io_schema={skillDetail?.io_schema}
                 selectedSkillId={selectedSkillId}
                 lintErrors={lintErrors}
                 traceLogs={traceLogs}

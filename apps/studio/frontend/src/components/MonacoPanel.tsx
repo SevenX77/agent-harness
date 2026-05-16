@@ -1,13 +1,14 @@
 import { useEffect, useRef, type ComponentProps } from 'react'
 import Editor from '@monaco-editor/react'
 import { AlertCircle, Copy } from 'lucide-react'
-import type { LintError } from '../api/types'
+import type { JsonObject, LintError } from '../api/types'
 
 export type EditorOnMount = NonNullable<ComponentProps<typeof Editor>['onMount']>
 export type MonacoEditor = Parameters<EditorOnMount>[0]
 export type MonacoApi = Parameters<EditorOnMount>[1]
 type MonacoModel = ReturnType<MonacoApi['editor']['createModel']>
 type MonacoDisposable = ReturnType<MonacoModel['onDidChangeContent']>
+type MonacoMarker = Parameters<MonacoApi['editor']['setModelMarkers']>[2][number]
 
 const modelCache = new Map<string, MonacoModel>()
 
@@ -16,9 +17,11 @@ interface MonacoPanelProps {
   activeFile: string | null
   files: Record<string, string>
   lintErrors: LintError[]
+  node_schema_v21?: Record<string, JsonObject>
+  io_schema?: Record<string, JsonObject>
   onEditorMount?: EditorOnMount
   onContentChange: (path: string, content: string) => void
-  onJumpToLine: (line: number | null) => void
+  onJumpToLine: (line: number | null, file?: string | null) => void
   onCopyErrors: (message: string) => void
 }
 
@@ -47,6 +50,47 @@ function getOrCreateModel(monaco: MonacoApi, path: string, content: string): Mon
   return model
 }
 
+function configureJsonSchemas(
+  monaco: MonacoApi,
+  node_schema_v21?: Record<string, JsonObject>,
+  io_schema?: Record<string, JsonObject>,
+): void {
+  monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
+    validate: true,
+    allowComments: false,
+    schemas: [
+      {
+        uri: 'studio://schemas/io-inputs.json',
+        fileMatch: ['file:///io/inputs.json'],
+        schema: io_schema?.inputs ?? {},
+      },
+      {
+        uri: 'studio://schemas/io-outputs.json',
+        fileMatch: ['file:///io/outputs.json'],
+        schema: io_schema?.outputs ?? {},
+      },
+      ...Object.entries(node_schema_v21 ?? {}).map(([name, schema]) => ({
+        uri: `studio://schemas/node_schema_v21/${name}.json`,
+        fileMatch: [`file:///schema/${name}.json`],
+        schema,
+      })),
+    ],
+  })
+}
+
+function lintMarkersForPath(monaco: MonacoApi, path: string, lintErrors: LintError[]): MonacoMarker[] {
+  return lintErrors
+    .filter((error) => error.file === path)
+    .map((error) => ({
+      startLineNumber: error.line ?? 1,
+      startColumn: error.column ?? 1,
+      endLineNumber: error.line ?? 1,
+      endColumn: error.column ? error.column + 1 : 120,
+      message: error.message,
+      severity: error.severity === 'warning' ? monaco.MarkerSeverity.Warning : monaco.MarkerSeverity.Error,
+    }))
+}
+
 export function disposeMonacoModel(path: string): void {
   const model = modelCache.get(path)
   if (!model) {
@@ -61,6 +105,8 @@ export function MonacoPanel({
   activeFile,
   files,
   lintErrors,
+  node_schema_v21,
+  io_schema,
   onEditorMount,
   onContentChange,
   onJumpToLine,
@@ -83,6 +129,7 @@ export function MonacoPanel({
 
     const model = getOrCreateModel(monaco, activeFile, files[activeFile] ?? '')
     editor.setModel(model)
+    monaco.editor.setModelMarkers(model, 'studio-lint', lintMarkersForPath(monaco, activeFile, lintErrors))
     changeSubscriptionRef.current = model.onDidChangeContent(() => {
       onContentChange(activeFile, model.getValue())
     })
@@ -91,7 +138,25 @@ export function MonacoPanel({
       changeSubscriptionRef.current?.dispose()
       changeSubscriptionRef.current = null
     }
-  }, [activeFile, files, onContentChange])
+  }, [activeFile, files, lintErrors, onContentChange])
+
+  useEffect(() => {
+    const monaco = monacoRef.current
+    if (!monaco) {
+      return
+    }
+    configureJsonSchemas(monaco, node_schema_v21, io_schema)
+  }, [io_schema, node_schema_v21])
+
+  useEffect(() => {
+    const monaco = monacoRef.current
+    if (!monaco) {
+      return
+    }
+    for (const [path, model] of modelCache) {
+      monaco.editor.setModelMarkers(model, 'studio-lint', lintMarkersForPath(monaco, path, lintErrors))
+    }
+  }, [lintErrors])
 
   return (
     <div className="flex h-full flex-col">
@@ -106,7 +171,7 @@ export function MonacoPanel({
               <button
                 key={`${error.file ?? 'global'}-${error.error_code}-${error.line ?? 'none'}-${index}`}
                 type="button"
-                onClick={() => onJumpToLine(error.line)}
+                onClick={() => onJumpToLine(error.line, error.file)}
                 className="block w-full rounded border border-red-200 dark:border-red-900/50 bg-white dark:bg-slate-900 px-2 py-1 text-left hover:bg-red-50 dark:hover:bg-red-900/30"
               >
                 <span className="font-mono text-xs text-red-500">
@@ -135,6 +200,7 @@ export function MonacoPanel({
           onMount={(editor, monaco) => {
             editorRef.current = editor
             monacoRef.current = monaco
+            configureJsonSchemas(monaco, node_schema_v21, io_schema)
             onEditorMount?.(editor, monaco)
           }}
           options={{

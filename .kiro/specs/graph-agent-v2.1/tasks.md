@@ -28,7 +28,7 @@ V2.1 落实 R0：前端暂停到 Schema 冻结；pending 继续 pending；main �
 | 编号 | 任务 | DoD | 依赖 | 工时 | 关联 R |
 |---|---|---|---|---|---|
 | T2.1 | Tier 1 `text-segmentation`：拆为 GRAPH、phases、io，优先恢复高频链路。 | 原测试 + V2.1 e2e pass；GRAPH 无 Prompt；SKILL phase 含 `<exit_contract>`。 | T1.5 | M | R3/Q-5/R-6/Amendment #8 |
-| T2.2 | Tier 1 `story-deconstruction`：迁移拆解主流程，复杂 Prompt 留人工审查标记。 | 原测试 + e2e pass；审核用 critic Tool；IO 覆盖主要产物。 | T1.5/T2.1 | M | R3/Q-5/R-6/Amendment #8 |
+| ~~T2.2~~ **SKIP** | ~~Tier 1 `story-deconstruction`：迁移拆解主流程。~~ | **SKIP 理由**: `skills/story-deconstruction/` 顶层 source 在 V2.1 立项时 R0 决策 2 已移入 `skills/_v2_pending/` 维持 pending, 不属 V2.1 hard cutover in-scope. tasks.md 起草时未同步剥离, 实际执行阶段确认 SKIP. 与 R-6 "in-scope 全 break by design" 不冲突 (pending skill 不属 in-scope). | — | — | R0决策2 |
 | T2.3 | Tier 2 `batch-analysis`：批处理编排移入 `GRAPH.md depends_on`。 | 原测试 + e2e pass；批次输入输出走 `io/*.json`。 | T2.1/T2.2 | M | R3/Q-5/Axiom 2/Amendment #8 |
 | T2.4 | Tier 2 `event-extraction`：分离抽取 Prompt 与输出 schema。 | 原测试 + e2e pass；残缺 Markdown 可由 md-patch 修复。 | T1.4/T2.1 | M | R1.7/R3/Q-5/Amendment #8 |
 | T2.5 | Tier 2 `global-synthesis`：用全局黑板约定承接跨阶段变量。 | 原测试 + e2e pass；断言 `io/inputs.json` + `io/outputs.json` 显式声明全部上下游变量字段；核对 `GRAPH.md depends_on` 与 io schema 字段流向一致。 | T2.1/T2.2 | M | R3/Q-5/Axiom 4/Amendment #8 |
@@ -36,7 +36,7 @@ V2.1 落实 R0：前端暂停到 Schema 冻结；pending 继续 pending；main �
 | T2.7 | Tier 2 `product-manual`：中频迁移，恢复格式与 artifact 输出。 | 原测试 + e2e pass；输出由 `outputs.json` 声明。 | T2.3/T2.4/T2.5/T2.6 | S | R3/Q-5/R-6/Amendment #8 |
 | T2.8 | Tier 3 `hello-world`：迁移为最小 V2.1 示例与 smoke fixture。 | 原测试 + e2e pass；Python 单测验证 SKILL_AUTHORING_GUIDE 中 GRAPH.md 最小示例可被 parser 解析，且输出等价于 `skills/hello-world/`。 | T0.6/T1.5 | S | R1.1/R2.4/R3/Amendment #8 |
 | T2.9 | Tier 3 `producer/review` subskill 内化 phase。 | `skills/producer/review/SKILL.md` 迁入 producer phase 或 Tool；grep 断言全 codebase 内无 `skills/producer/review` 路径字符串调用；producer 原测试套件 + V2.1 e2e pass；不作为独立 skill 出现在 GRAPH。 | T2.6 | S | R1.6/R3/Q-5/Amendment #8 |
-| T2.10 | Tier 3 `examples/broken-fixtures/story-deconstruction-inline-phase` fixture 迁移。 | smoke + e2e pass；fixture 继续覆盖 inline-phase 破坏场景，一刀硬切后无 schema 2.0 残留。 | T2.2 | S | R3/Q-5/Amendment #8 |
+| ~~T2.10~~ **SKIP** | ~~Tier 3 `examples/broken-fixtures/story-deconstruction-inline-phase` fixture 迁移。~~ | **SKIP 理由**: `skills/examples/broken-fixtures/` source **不存在** (filesystem 实证 `git log --all -- 'skills/examples/broken-fixtures*'` 完全空, git history 从未 commit 过). 仅 `apps/studio/tauri/target/debug/_up_/_up_/_up_/skills/examples/broken-fixtures/` 这种 build artifact 残留. research.md §2.2 引用为 phantom. 与 R-6 不冲突 (in-scope 11 份 SKILL.md filesystem 实证不含此 fixture). | — | — | (phantom) |
 | T2.11 | Tier 3 `examples/subgraph-sample/story-deconstruction` fixture 迁移。 | smoke + e2e pass；保留 subgraph sample 覆盖；`GRAPH.md` 拓扑与 SUBGRAPH phase 可解析。 | T2.2/T0.3 | S | R1.2/R3/Q-5/Amendment #8 |
 
 # Section 5: Phase 3 — Studio 对接 + cutover
@@ -45,7 +45,7 @@ V2.1 落实 R0：前端暂停到 Schema 冻结；pending 继续 pending；main �
 |---|---|---|---|---|---|
 | T3.1 | Studio 后端 `compile_skill`/`run_skill` 改收 V2.1 skill root。 | backend 测试通过；preview 返回 GRAPH 拓扑、三类节点 schema、IO schema。 | T1.5/T0.5 | M | R3/Q-4/Q-6 |
 | T3.2 | canvas deferred work 中 `depends_on` Optional→Required，并以 GRAPH parser 为真源。 | 后端 schema、导出 JSON Schema、样例均 required；旧 Optional 输入报错。 | T0.3/T3.1 | M | R3/Amendment #10 |
-| T3.3 | feature branch 全量完成后一次性 PR 回 main，执行硬切。 | e2e 全过；11 skill 全迁；旧根 `SKILL.md` 全阻断；提供 dual-run 影子比对脚本且 Tier 1 强制跑；单 skill rollback CI SOP；PR 含停摆公告、验收 checklist、rollback 操作书。 | T2.1-T2.11/T3.1/T3.2 | L | R0/R5/Q-5/Q-6/R-6 |
+| T3.3 | feature branch 全量完成后一次性 PR 回 main，执行硬切。 | e2e 全过；11 skill 全迁 (实际 9 迁 + 2 SKIP-R0决策: T2.2 story-deconstruction 维持 pending, T2.10 broken-fixtures phantom)；旧根 `SKILL.md` 全阻断 (`find skills -maxdepth 2 -name SKILL.md` 0 命中)；提供 dual-run 影子比对脚本且 Tier 1 强制跑 (T3.3 prep `821da85` ✅)；单 skill rollback CI SOP (V21_ROLLBACK_SOP.md ✅)；PR 含停摆公告、验收 checklist、rollback 操作书 (V21_PR_META.md ✅)。 | T2.1/T2.3/T2.4/T2.5/T2.6/T2.7/T2.8/T2.11/T3.1/T3.2 (T2.2/T2.10 SKIP) | L | R0/R5/Q-5/Q-6/R-6 |
 
 # Section 6: 风险 + 应急
 

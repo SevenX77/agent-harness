@@ -140,11 +140,10 @@ def load_workflow_from_md(
     root = Path(md_path)
     if root.is_file():
         _fatal(root, 1, "load_workflow_from_md now accepts a V2.1 skill root directory")
-    SkillLoader().compile_skill(root)
-    raise SkillLoadError(
-        "[F-v21-route] "
-        f"{root}:1 V2.1 runtime harness assembly is not implemented until T1.5"
-    )
+    from graph_agent.core.compiler import compile_skill
+    from graph_agent.core.graph_assembler import assemble_graph
+
+    return assemble_graph(compile_skill(root)).graph
 
 
 def _fatal(path: Path, line: int, message: str) -> None:

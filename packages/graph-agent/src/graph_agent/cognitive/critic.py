@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+import json
 from typing import Any
 
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
@@ -59,13 +61,31 @@ class FakeCriticClient(CriticClient):
 class LLMCriticClient(CriticClient):
     """Placeholder for the T1.5 LangGraph-backed critic bridge."""
 
+    def __init__(self, chat_model: Any | None = None) -> None:
+        self.chat_model = chat_model
+
     def review(
         self,
         target_text: str,
         criteria: str,
         attempt: int = 1,
     ) -> CriticVerdict:
-        raise NotImplementedError("LLMCriticClient wired in T1.5 LangGraph build")
+        if self.chat_model is None:
+            raise NotImplementedError("LLMCriticClient wired in T1.5 LangGraph build")
+        prompt = (
+            "You are a critic. Review the text against the criteria. "
+            "Respond only as JSON with keys: passed (boolean), reasons (list), "
+            "suggestions (list).\n\n"
+            f"Text:\n{target_text}\n\nCriteria:\n{criteria}"
+        )
+        response = self.chat_model.invoke([HumanMessage(content=prompt)])
+        parsed = _parse_json_object(str(getattr(response, "content", "")))
+        return CriticVerdict(
+            passed=bool(parsed.get("passed", False)),
+            reasons=_string_list(parsed.get("reasons")),
+            suggestions=_string_list(parsed.get("suggestions")),
+            metadata={"attempt": attempt},
+        )
 
 
 class CriticToolInput(BaseModel):
@@ -119,6 +139,27 @@ def build_critic_tool(
         args_schema=CriticToolInput,
     )
     return tool, metrics
+
+
+def _parse_json_object(text: str) -> dict[str, Any]:
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if len(lines) >= 2 and lines[-1].strip() == "```":
+            stripped = "\n".join(lines[1:-1]).strip()
+    try:
+        value = json.loads(stripped)
+    except json.JSONDecodeError:
+        return {"passed": False, "reasons": [text], "suggestions": []}
+    return value if isinstance(value, dict) else {}
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    if value is None:
+        return []
+    return [str(value)]
 
 
 __all__ = [

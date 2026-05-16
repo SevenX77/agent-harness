@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
+import json
 from typing import Any
 
+from langchain_core.messages import HumanMessage
 
 class MdPatchClient(ABC):
     """Internal patcher protocol; not exposed as a phase ReAct tool."""
@@ -55,6 +57,9 @@ class FakeMdPatchClient(MdPatchClient):
 class LLMMdPatchClient(MdPatchClient):
     """Placeholder for the T1.5 LangGraph-backed md-patch bridge."""
 
+    def __init__(self, chat_model: Any | None = None) -> None:
+        self.chat_model = chat_model
+
     def patch(
         self,
         markdown: str,
@@ -62,7 +67,19 @@ class LLMMdPatchClient(MdPatchClient):
         validation_errors: list[dict[str, Any]],
         attempt: int,
     ) -> str:
-        raise NotImplementedError("LLMMdPatchClient wired in T1.5 LangGraph build")
+        if self.chat_model is None:
+            raise NotImplementedError("LLMMdPatchClient wired in T1.5 LangGraph build")
+        prompt = (
+            "You are a Markdown format repair tool. Fix only formatting and mechanical "
+            "type issues so the markdown matches the JSON Schema. Return only patched "
+            "Markdown.\n\n"
+            f"Attempt: {attempt}\n"
+            f"Schema:\n{json.dumps(output_schema or {}, ensure_ascii=False)}\n\n"
+            f"Validation errors:\n{json.dumps(validation_errors, ensure_ascii=False)}\n\n"
+            f"Markdown:\n{markdown}"
+        )
+        response = self.chat_model.invoke([HumanMessage(content=prompt)])
+        return str(getattr(response, "content", "")).strip()
 
 
 __all__ = ["FakeMdPatchClient", "LLMMdPatchClient", "MdPatchClient"]

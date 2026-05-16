@@ -3,10 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.loader import SkillLoader, load_workflow_from_md
-from graph_agent.core.manifest import SkillNodeAST
+from graph_agent.core.manifest import GraphPhaseRef, SkillNodeAST
 from graph_agent.core.parser import extract_raw_blocks
 
 
@@ -25,7 +26,7 @@ description: hello
 ---
 <input src="io/inputs.json" />
 <output src="io/outputs.json" />
-<phase id="hello" src="phases/hello" />
+<phase id="hello" src="phases/hello" depends_on="" />
 """,
     )
     _write(root / "io" / "inputs.json", "{}\n")
@@ -56,7 +57,7 @@ description: hello
 ---
 <input src="{input_ref}" />
 <output src="{output_ref}" />
-<phase id="hello" src="phases/hello" />
+<phase id="hello" src="phases/hello" depends_on="" />
 """,
     )
 
@@ -243,7 +244,7 @@ def test_topology_happy_path_chain(tmp_path: Path) -> None:
     _write_graph_with_phase_lines(
         tmp_path,
         [
-            '<phase id="prep" src="phases/prep" />',
+            '<phase id="prep" src="phases/prep" depends_on="" />',
             '<phase id="draft" src="phases/draft" depends_on="prep" />',
             '<phase id="review" src="phases/review" depends_on="draft" />',
         ],
@@ -261,7 +262,7 @@ def test_topology_multi_entry_happy_path(tmp_path: Path) -> None:
     _write_graph_with_phase_lines(
         tmp_path,
         [
-            '<phase id="left" src="phases/left" />',
+            '<phase id="left" src="phases/left" depends_on="" />',
             '<phase id="right" src="phases/right" depends_on="" />',
             '<phase id="join" src="phases/join" depends_on="left right" />',
         ],
@@ -280,7 +281,7 @@ def test_topology_missing_depends_on_non_entry(tmp_path: Path) -> None:
     _write_graph_with_phase_lines(
         tmp_path,
         [
-            '<phase id="prep" src="phases/prep" />',
+            '<phase id="prep" src="phases/prep" depends_on="" />',
             '<phase id="draft" src="phases/draft" />',
         ],
     )
@@ -292,7 +293,20 @@ def test_topology_missing_depends_on_non_entry(tmp_path: Path) -> None:
 
     _assert_graph_fatal(exc)
     assert "phase 'draft' missing required depends_on" in str(exc.value)
-    assert 'use depends_on="" for additional entry phases' in str(exc.value)
+    assert 'use depends_on="" for entry phases' in str(exc.value)
+
+
+def test_topology_missing_depends_on_entry_phase(tmp_path: Path) -> None:
+    _base_v21_root(tmp_path)
+    _write_graph_with_phase_lines(tmp_path, ['<phase id="prep" src="phases/prep" />'])
+    _write_skill_phase(tmp_path, "phases/prep")
+
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path)
+
+    _assert_graph_fatal(exc)
+    assert "phase 'prep' missing required depends_on" in str(exc.value)
+    assert 'use depends_on="" for entry phases' in str(exc.value)
 
 
 def test_topology_duplicate_phase_id(tmp_path: Path) -> None:
@@ -300,7 +314,7 @@ def test_topology_duplicate_phase_id(tmp_path: Path) -> None:
     _write_graph_with_phase_lines(
         tmp_path,
         [
-            '<phase id="dup" src="phases/one" />',
+            '<phase id="dup" src="phases/one" depends_on="" />',
             '<phase id="dup" src="phases/two" depends_on="dup" />',
         ],
     )
@@ -319,7 +333,7 @@ def test_topology_dep_unknown_phase(tmp_path: Path) -> None:
     _write_graph_with_phase_lines(
         tmp_path,
         [
-            '<phase id="prep" src="phases/prep" />',
+            '<phase id="prep" src="phases/prep" depends_on="" />',
             '<phase id="draft" src="phases/draft" depends_on="missing" />',
         ],
     )
@@ -371,7 +385,7 @@ def test_topology_orphan_disconnected(tmp_path: Path) -> None:
     _write_graph_with_phase_lines(
         tmp_path,
         [
-            '<phase id="main" src="phases/main" />',
+            '<phase id="main" src="phases/main" depends_on="" />',
             '<phase id="isolated" src="phases/isolated" depends_on="" />',
         ],
     )
@@ -387,7 +401,7 @@ def test_topology_orphan_disconnected(tmp_path: Path) -> None:
 
 def test_topology_src_escape_root(tmp_path: Path) -> None:
     _base_v21_root(tmp_path)
-    _write_graph_with_phase_lines(tmp_path, ['<phase id="bad" src="../outside" />'])
+    _write_graph_with_phase_lines(tmp_path, ['<phase id="bad" src="../outside" depends_on="" />'])
     (tmp_path / "phases" / "dummy").mkdir(parents=True)
 
     with pytest.raises(SkillLoadError) as exc:
@@ -399,7 +413,7 @@ def test_topology_src_escape_root(tmp_path: Path) -> None:
 
 def test_topology_src_directory_missing(tmp_path: Path) -> None:
     _base_v21_root(tmp_path)
-    _write_graph_with_phase_lines(tmp_path, ['<phase id="bad" src="phases/missing" />'])
+    _write_graph_with_phase_lines(tmp_path, ['<phase id="bad" src="phases/missing" depends_on="" />'])
     (tmp_path / "phases" / "dummy").mkdir(parents=True)
 
     with pytest.raises(SkillLoadError) as exc:
@@ -411,7 +425,7 @@ def test_topology_src_directory_missing(tmp_path: Path) -> None:
 
 def test_topology_src_no_node_file(tmp_path: Path) -> None:
     _base_v21_root(tmp_path)
-    _write_graph_with_phase_lines(tmp_path, ['<phase id="bad" src="phases/empty" />'])
+    _write_graph_with_phase_lines(tmp_path, ['<phase id="bad" src="phases/empty" depends_on="" />'])
     (tmp_path / "phases" / "empty").mkdir(parents=True)
 
     with pytest.raises(SkillLoadError) as exc:
@@ -443,6 +457,14 @@ def test_topology_phase_missing_src(tmp_path: Path) -> None:
 
     _assert_graph_fatal(exc)
     assert "phase 'hello' missing required src" in str(exc.value)
+
+
+def test_graph_phase_ref_schema_requires_depends_on() -> None:
+    schema = GraphPhaseRef.model_json_schema()
+
+    assert "depends_on" in schema["required"]
+    with pytest.raises(ValidationError, match="depends_on"):
+        GraphPhaseRef.model_validate({"id": "hello", "src": "phases/hello"})
 
 
 def test_root_skill_md_is_rejected(tmp_path: Path) -> None:

@@ -210,7 +210,7 @@ def _write_graph(
     body_lines = ['<input src="io/inputs.json" />', '<output src="io/outputs.json" />']
     previous: str | None = None
     for phase_id, src in phase_entries:
-        depends = "" if previous is None else f' depends_on="{previous}"'
+        depends = ' depends_on=""' if previous is None else f' depends_on="{previous}"'
         body_lines.append(f'<phase id="{phase_id}" src="{src}"{depends} />')
         previous = phase_id
     _write_markdown(out_dir / "GRAPH.md", graph_fm, "\n".join(body_lines) + "\n", report)

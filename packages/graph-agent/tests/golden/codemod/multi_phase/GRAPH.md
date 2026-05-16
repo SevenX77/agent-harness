@@ -34,7 +34,7 @@ metadata:
 ---
 <input src="io/inputs.json" />
 <output src="io/outputs.json" />
-<phase id="prepare" src="phases/prepare" />
+<phase id="prepare" src="phases/prepare" depends_on="" />
 <phase id="entity_and_characters" src="phases/entity_and_characters" depends_on="prepare" />
 <phase id="parallel_analysis" src="phases/parallel_analysis" depends_on="entity_and_characters" />
 <phase id="continuity" src="phases/continuity" depends_on="parallel_analysis" />

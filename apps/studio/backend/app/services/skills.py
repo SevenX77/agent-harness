@@ -11,7 +11,7 @@ from fastapi.encoders import jsonable_encoder
 from graph_agent import CompiledSkill, compile_skill
 from graph_agent.core.exceptions import SkillCompilationError, SkillLoadError
 from graph_agent.core.loader import SkillLoader
-from graph_agent.core.manifest import LogicNodeAST, SkillNodeAST, SubgraphNodeAST
+from graph_agent.core.manifest import GraphPhaseRef, LogicNodeAST, SkillNodeAST, SubgraphNodeAST
 
 from app.core import config
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
@@ -531,6 +531,7 @@ def _graph_topology(compiled: CompiledSkill) -> list[dict[str, object]]:
 
 def _node_schema_v21() -> dict[str, dict[str, object]]:
     return {
+        "graph_phase_ref": GraphPhaseRef.model_json_schema(),
         "logic": LogicNodeAST.model_json_schema(),
         "skill": SkillNodeAST.model_json_schema(),
         "subgraph": SubgraphNodeAST.model_json_schema(),

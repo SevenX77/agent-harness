@@ -8,4 +8,4 @@ metadata:
 ---
 <input src="io/inputs.json" />
 <output src="io/outputs.json" />
-<phase id="greet" src="phases/greet" />
+<phase id="greet" src="phases/greet" depends_on="" />

@@ -27,7 +27,7 @@ description: "Minimal V2.1 smoke fixture for parser, tools, and finish_task."
 ---
 <input src="io/inputs.json" />
 <output src="io/outputs.json" />
-<phase id="greet" src="phases/greet" />
+<phase id="greet" src="phases/greet" depends_on="" />
 """,
     )
     _write(

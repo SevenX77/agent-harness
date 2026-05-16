@@ -7,6 +7,6 @@ metadata:
 ---
 <input src="io/inputs.json" />
 <output src="io/outputs.json" />
-<phase id="setup" src="phases/setup" />
+<phase id="setup" src="phases/setup" depends_on="" />
 <phase id="segment" src="phases/segment" depends_on="setup" />
 <phase id="review" src="phases/review" depends_on="segment" />

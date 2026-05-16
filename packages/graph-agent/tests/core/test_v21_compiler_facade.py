@@ -12,7 +12,7 @@ from tests.core.test_v21_graph_assembly import _base, _logic
 
 
 def test_compile_skill_facade_returns_compiled(tmp_path: Path) -> None:
-    _base(tmp_path, '<phase id="logic" src="phases/logic" />\n')
+    _base(tmp_path, '<phase id="logic" src="phases/logic" depends_on="" />\n')
     _logic(tmp_path)
 
     compiled = compile_skill(tmp_path, cache=False)
@@ -21,7 +21,7 @@ def test_compile_skill_facade_returns_compiled(tmp_path: Path) -> None:
 
 
 def test_assemble_graph_facade_returns_compiled_state_graph(tmp_path: Path) -> None:
-    _base(tmp_path, '<phase id="logic" src="phases/logic" />\n')
+    _base(tmp_path, '<phase id="logic" src="phases/logic" depends_on="" />\n')
     _logic(tmp_path)
 
     assembled = assemble_graph(compile_skill(tmp_path, cache=False))
@@ -35,7 +35,7 @@ def test_blackboard_state_exported() -> None:
 
 
 def test_load_workflow_from_md_v21_root_ok(tmp_path: Path) -> None:
-    _base(tmp_path, '<phase id="logic" src="phases/logic" />\n')
+    _base(tmp_path, '<phase id="logic" src="phases/logic" depends_on="" />\n')
     _logic(tmp_path)
 
     graph = load_workflow_from_md(tmp_path)

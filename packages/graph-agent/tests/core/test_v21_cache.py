@@ -18,7 +18,7 @@ def _cache_root(tmp_path: Path, monkeypatch) -> Path:
 def test_cache_miss_then_hit(tmp_path: Path, monkeypatch) -> None:
     cache_dir = _cache_root(tmp_path, monkeypatch)
     skill = tmp_path / "skill"
-    _base(skill, '<phase id="logic" src="phases/logic" />\n')
+    _base(skill, '<phase id="logic" src="phases/logic" depends_on="" />\n')
     _logic(skill)
 
     first = compile_skill(skill, cache=True)
@@ -31,7 +31,7 @@ def test_cache_miss_then_hit(tmp_path: Path, monkeypatch) -> None:
 def test_cache_invalidate_on_graph_md_change(tmp_path: Path, monkeypatch) -> None:
     _cache_root(tmp_path, monkeypatch)
     skill = tmp_path / "skill"
-    _base(skill, '<phase id="logic" src="phases/logic" />\n')
+    _base(skill, '<phase id="logic" src="phases/logic" depends_on="" />\n')
     _logic(skill)
     key1 = compute_cache_key(skill)
     (skill / "GRAPH.md").write_text((skill / "GRAPH.md").read_text() + "\n", encoding="utf-8")
@@ -42,7 +42,7 @@ def test_cache_invalidate_on_graph_md_change(tmp_path: Path, monkeypatch) -> Non
 def test_cache_invalidate_on_phase_file_change(tmp_path: Path, monkeypatch) -> None:
     _cache_root(tmp_path, monkeypatch)
     skill = tmp_path / "skill"
-    _base(skill, '<phase id="logic" src="phases/logic" />\n')
+    _base(skill, '<phase id="logic" src="phases/logic" depends_on="" />\n')
     _logic(skill)
     key1 = compute_cache_key(skill)
     phase_file = skill / "phases" / "logic" / "LOGIC.md"
@@ -54,7 +54,7 @@ def test_cache_invalidate_on_phase_file_change(tmp_path: Path, monkeypatch) -> N
 def test_cache_invalidate_on_io_file_change(tmp_path: Path, monkeypatch) -> None:
     _cache_root(tmp_path, monkeypatch)
     skill = tmp_path / "skill"
-    _base(skill, '<phase id="logic" src="phases/logic" />\n')
+    _base(skill, '<phase id="logic" src="phases/logic" depends_on="" />\n')
     _logic(skill)
     key1 = compute_cache_key(skill)
     outputs = skill / "io" / "outputs.json"
@@ -66,7 +66,7 @@ def test_cache_invalidate_on_io_file_change(tmp_path: Path, monkeypatch) -> None
 def test_cache_performance_hit_under_200ms(tmp_path: Path, monkeypatch) -> None:
     _cache_root(tmp_path, monkeypatch)
     skill = tmp_path / "skill"
-    _base(skill, '<phase id="logic" src="phases/logic" />\n')
+    _base(skill, '<phase id="logic" src="phases/logic" depends_on="" />\n')
     _logic(skill)
     compile_skill(skill, cache=True)
 
@@ -80,7 +80,7 @@ def test_cache_performance_hit_under_200ms(tmp_path: Path, monkeypatch) -> None:
 def test_cache_cross_python_version_isolation(tmp_path: Path, monkeypatch) -> None:
     _cache_root(tmp_path, monkeypatch)
     skill = tmp_path / "skill"
-    _base(skill, '<phase id="logic" src="phases/logic" />\n')
+    _base(skill, '<phase id="logic" src="phases/logic" depends_on="" />\n')
     _logic(skill)
     key1 = compute_cache_key(skill)
     monkeypatch.setattr("graph_agent.core.cache.sys.version_info", (9, 9, 9))

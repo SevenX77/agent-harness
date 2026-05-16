@@ -78,12 +78,12 @@ skills/child
 
 
 def _single_logic(root: Path) -> None:
-    _base(root, ['<phase id="logic_phase" src="phases/logic_phase" />'])
+    _base(root, ['<phase id="logic_phase" src="phases/logic_phase" depends_on="" />'])
     _logic(root)
 
 
 def _single_skill(root: Path) -> None:
-    _base(root, ['<phase id="skill_phase" src="phases/skill_phase" />'])
+    _base(root, ['<phase id="skill_phase" src="phases/skill_phase" depends_on="" />'])
     _skill(root)
 
 
@@ -212,7 +212,7 @@ def test_tool_in_logic_phase_fatal(tmp_path: Path) -> None:
 
 
 def test_action_in_subgraph_phase_fatal(tmp_path: Path) -> None:
-    _base(tmp_path, ['<phase id="subgraph_phase" src="phases/subgraph_phase" />'])
+    _base(tmp_path, ['<phase id="subgraph_phase" src="phases/subgraph_phase" depends_on="" />'])
     _subgraph(tmp_path)
     _write(
         tmp_path / "phases" / "subgraph_phase" / "actions" / "foo.py",
@@ -224,7 +224,7 @@ def test_action_in_subgraph_phase_fatal(tmp_path: Path) -> None:
 
 
 def test_tool_in_subgraph_phase_fatal(tmp_path: Path) -> None:
-    _base(tmp_path, ['<phase id="subgraph_phase" src="phases/subgraph_phase" />'])
+    _base(tmp_path, ['<phase id="subgraph_phase" src="phases/subgraph_phase" depends_on="" />'])
     _subgraph(tmp_path)
     _write(tmp_path / "phases" / "subgraph_phase" / "tools" / "bar.py", "def bar():\n    return 'x'\n")
 

@@ -44,12 +44,12 @@ def test_models_validate_fields_and_reuse_graph_agent_contracts() -> None:
         description="demo",
         io_inputs_ref="io/inputs.json",
         io_outputs_ref="io/outputs.json",
-        phases=[GraphPhaseRef(id="setup", src="phases/setup")],
+        phases=[GraphPhaseRef(id="setup", src="phases/setup", depends_on=[])],
     )
     detail = SkillDetail(
         manifest=manifest,
         graph_topology=[{"id": "setup", "src": "phases/setup", "depends_on": [], "mode": "logic"}],
-        node_schema_v21={"logic": {}, "skill": {}, "subgraph": {}},
+        node_schema_v21={"graph_phase_ref": {}, "logic": {}, "skill": {}, "subgraph": {}},
         io_schema={"inputs": {}, "outputs": {}},
         file_paths={"graph_md": "/tmp/GRAPH.md"},
         has_golden=False,

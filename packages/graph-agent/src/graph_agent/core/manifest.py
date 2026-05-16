@@ -20,7 +20,7 @@ class GraphPhaseRef(BaseModel):
 
     id: str = Field(min_length=1)
     src: str = Field(min_length=1)
-    depends_on: list[str] = Field(default_factory=list)
+    depends_on: list[str] = Field(...)
 
 
 class ContextBridge(BaseModel):

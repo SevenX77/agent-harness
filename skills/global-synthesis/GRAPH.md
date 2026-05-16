@@ -20,7 +20,7 @@ metadata:
 ---
 <input src="io/inputs.json" />
 <output src="io/outputs.json" />
-<phase id="global_analysis" src="phases/global_analysis" />
+<phase id="global_analysis" src="phases/global_analysis" depends_on="" />
 <phase id="scene_assembly" src="phases/scene_assembly" depends_on="global_analysis" />
 <phase id="retroactive" src="phases/retroactive" depends_on="scene_assembly" />
 <phase id="export" src="phases/export" depends_on="retroactive" />

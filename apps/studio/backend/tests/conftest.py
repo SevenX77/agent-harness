@@ -63,7 +63,7 @@ schema_version: "2.1"
 ---
 <input src="io/inputs.json" />
 <output src="io/outputs.json" />
-<phase id="setup" src="phases/setup" />
+<phase id="setup" src="phases/setup" depends_on="" />
 """,
         encoding="utf-8",
     )

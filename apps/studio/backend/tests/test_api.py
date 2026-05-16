@@ -66,7 +66,8 @@ def test_skills_list_and_detail_use_real_skill_files(client: TestClient) -> None
     assert body["graph_topology"] == [
         {"id": "setup", "src": "phases/setup", "depends_on": [], "mode": "logic"}
     ]
-    assert set(body["node_schema_v21"]) == {"logic", "skill", "subgraph"}
+    assert set(body["node_schema_v21"]) == {"graph_phase_ref", "logic", "skill", "subgraph"}
+    assert "depends_on" in body["node_schema_v21"]["graph_phase_ref"]["required"]
     assert set(body["io_schema"]) == {"inputs", "outputs"}
     assert body["io_schema"]["inputs"]["properties"]["input_text"]["type"] == "string"
     assert body["lint_result"]["status"] == "passed"

@@ -98,7 +98,7 @@ mode: subgraph
 
 
 def test_assemble_single_logic_phase(tmp_path: Path) -> None:
-    _base(tmp_path, '<phase id="logic" src="phases/logic" />\n')
+    _base(tmp_path, '<phase id="logic" src="phases/logic" depends_on="" />\n')
     _logic(tmp_path)
 
     graph = assemble_graph(compile_skill(tmp_path, cache=False)).graph
@@ -110,7 +110,7 @@ def test_assemble_single_logic_phase(tmp_path: Path) -> None:
 def test_assemble_single_skill_phase_with_fake_llm(tmp_path: Path) -> None:
     _base(
         tmp_path,
-        '<phase id="skill" src="phases/skill" />\n',
+        '<phase id="skill" src="phases/skill" depends_on="" />\n',
         {"type": "object", "properties": {"result": {"type": "string"}}, "required": ["result"]},
     )
     _skill(tmp_path)
@@ -129,7 +129,7 @@ def test_assemble_single_skill_phase_with_fake_llm(tmp_path: Path) -> None:
 def test_assemble_logic_skill_dependency(tmp_path: Path) -> None:
     _base(
         tmp_path,
-        '<phase id="logic" src="phases/logic" />\n'
+        '<phase id="logic" src="phases/logic" depends_on="" />\n'
         '<phase id="skill" src="phases/skill" depends_on="logic" />\n',
     )
     _logic(tmp_path)
@@ -147,10 +147,10 @@ def test_assemble_logic_skill_dependency(tmp_path: Path) -> None:
 
 
 def test_assemble_subgraph_phase(tmp_path: Path) -> None:
-    _base(tmp_path, '<phase id="sub" src="phases/sub" />\n')
+    _base(tmp_path, '<phase id="sub" src="phases/sub" depends_on="" />\n')
     _subgraph(tmp_path)
     child = tmp_path / "phases" / "sub" / "child"
-    _base(child, '<phase id="logic" src="phases/logic" />\n')
+    _base(child, '<phase id="logic" src="phases/logic" depends_on="" />\n')
     _logic(child)
 
     result = assemble_graph(compile_skill(tmp_path, cache=False)).graph.invoke(
@@ -161,7 +161,7 @@ def test_assemble_subgraph_phase(tmp_path: Path) -> None:
 
 
 def test_critic_tool_wired_to_skill(tmp_path: Path) -> None:
-    _base(tmp_path, '<phase id="skill" src="phases/skill" />\n')
+    _base(tmp_path, '<phase id="skill" src="phases/skill" depends_on="" />\n')
     _skill(tmp_path, tools=["reviewer"])
     chat = FakeToolChatModel(
         [
@@ -180,7 +180,7 @@ def test_critic_tool_wired_to_skill(tmp_path: Path) -> None:
 
 
 def test_unknown_tool_in_skill_phase_fatal(tmp_path: Path) -> None:
-    _base(tmp_path, '<phase id="skill" src="phases/skill" />\n')
+    _base(tmp_path, '<phase id="skill" src="phases/skill" depends_on="" />\n')
     _skill(tmp_path, tools=["unknown_xyz"])
 
     with pytest.raises(SkillLoadError, match=r"\[F-v21-graph\].*unknown_xyz"):
@@ -190,7 +190,7 @@ def test_unknown_tool_in_skill_phase_fatal(tmp_path: Path) -> None:
 def test_terminal_phase_finish_task_validates(tmp_path: Path) -> None:
     _base(
         tmp_path,
-        '<phase id="skill" src="phases/skill" />\n',
+        '<phase id="skill" src="phases/skill" depends_on="" />\n',
         {"type": "object", "properties": {"count": {"type": "integer"}}, "required": ["count"]},
     )
     _skill(tmp_path)
@@ -208,7 +208,7 @@ def test_terminal_phase_finish_task_validates(tmp_path: Path) -> None:
 def test_non_terminal_phase_finish_task_no_validate(tmp_path: Path) -> None:
     _base(
         tmp_path,
-        '<phase id="skill" src="phases/skill" />\n'
+        '<phase id="skill" src="phases/skill" depends_on="" />\n'
         '<phase id="logic" src="phases/logic" depends_on="skill" />\n',
         {"type": "object", "properties": {"required_later": {"type": "string"}}, "required": ["required_later"]},
     )

@@ -420,12 +420,12 @@ def _validate_graph_topology(
         if attrs.id in phase_by_id:
             _graph_fatal(graph_path, attrs.line, f"duplicate phase id {attrs.id!r}")
         phase_by_id[attrs.id] = attrs
-        if index > 0 and attrs.depends_on_raw is None:
+        if attrs.depends_on_raw is None:
             _graph_fatal(
                 graph_path,
                 attrs.line,
                 f"phase {attrs.id!r} missing required depends_on; "
-                'use depends_on="" for additional entry phases',
+                'use depends_on="" for entry phases',
             )
 
     for attrs in raw_attrs:

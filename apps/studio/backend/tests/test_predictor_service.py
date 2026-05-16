@@ -89,7 +89,7 @@ def test_dispatch_p2_none_runs_with_mock_llm_and_returns_predict_result(
 ) -> None:
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir()
-    (skill_dir / "GRAPH.md").write_text("---\nname: skill\nschema_version: \"2.1\"\n---\n<input src=\"io/inputs.json\" />\n<output src=\"io/outputs.json\" />\n<phase id=\"draft\" src=\"phases/draft\" />\n", encoding="utf-8")
+    (skill_dir / "GRAPH.md").write_text("---\nname: skill\nschema_version: \"2.1\"\n---\n<input src=\"io/inputs.json\" />\n<output src=\"io/outputs.json\" />\n<phase id=\"draft\" src=\"phases/draft\" depends_on=\"\" />\n", encoding="utf-8")
     calls: list[dict[str, object]] = []
 
     monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda skill_id: skill_dir)
@@ -118,7 +118,7 @@ def test_dispatch_path_warns_on_hash_mismatch_but_does_not_abort(
 ) -> None:
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir()
-    (skill_dir / "GRAPH.md").write_text("---\nname: skill\nschema_version: \"2.1\"\n---\n<input src=\"io/inputs.json\" />\n<output src=\"io/outputs.json\" />\n<phase id=\"draft\" src=\"phases/draft\" />\n", encoding="utf-8")
+    (skill_dir / "GRAPH.md").write_text("---\nname: skill\nschema_version: \"2.1\"\n---\n<input src=\"io/inputs.json\" />\n<output src=\"io/outputs.json\" />\n<phase id=\"draft\" src=\"phases/draft\" depends_on=\"\" />\n", encoding="utf-8")
     golden_path = _golden_file(tmp_path)
     monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda skill_id: skill_dir)
 
@@ -148,7 +148,7 @@ def test_dispatch_p2_deadlock_raises_with_actual_path(
 ) -> None:
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir()
-    (skill_dir / "GRAPH.md").write_text("---\nname: skill\nschema_version: \"2.1\"\n---\n<input src=\"io/inputs.json\" />\n<output src=\"io/outputs.json\" />\n<phase id=\"draft\" src=\"phases/draft\" />\n", encoding="utf-8")
+    (skill_dir / "GRAPH.md").write_text("---\nname: skill\nschema_version: \"2.1\"\n---\n<input src=\"io/inputs.json\" />\n<output src=\"io/outputs.json\" />\n<phase id=\"draft\" src=\"phases/draft\" depends_on=\"\" />\n", encoding="utf-8")
     monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda skill_id: skill_dir)
     actual_path = ["draft"] * (MAX_PHASE_REVISITS + 1)
 
@@ -171,7 +171,7 @@ def test_dispatch_p0_does_not_apply_deadlock_guard(
 ) -> None:
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir()
-    (skill_dir / "GRAPH.md").write_text("---\nname: skill\nschema_version: \"2.1\"\n---\n<input src=\"io/inputs.json\" />\n<output src=\"io/outputs.json\" />\n<phase id=\"draft\" src=\"phases/draft\" />\n", encoding="utf-8")
+    (skill_dir / "GRAPH.md").write_text("---\nname: skill\nschema_version: \"2.1\"\n---\n<input src=\"io/inputs.json\" />\n<output src=\"io/outputs.json\" />\n<phase id=\"draft\" src=\"phases/draft\" depends_on=\"\" />\n", encoding="utf-8")
     golden_path = _golden_file(tmp_path)
     monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda skill_id: skill_dir)
 
@@ -193,7 +193,7 @@ def test_dispatch_p1_override_does_not_apply_deadlock_guard(
 ) -> None:
     skill_dir = tmp_path / "skill"
     skill_dir.mkdir()
-    (skill_dir / "GRAPH.md").write_text("---\nname: skill\nschema_version: \"2.1\"\n---\n<input src=\"io/inputs.json\" />\n<output src=\"io/outputs.json\" />\n<phase id=\"draft\" src=\"phases/draft\" />\n", encoding="utf-8")
+    (skill_dir / "GRAPH.md").write_text("---\nname: skill\nschema_version: \"2.1\"\n---\n<input src=\"io/inputs.json\" />\n<output src=\"io/outputs.json\" />\n<phase id=\"draft\" src=\"phases/draft\" depends_on=\"\" />\n", encoding="utf-8")
     monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda skill_id: skill_dir)
 
     def fake_run_skill(skill_path: Path, **kwargs: object) -> dict[str, object]:

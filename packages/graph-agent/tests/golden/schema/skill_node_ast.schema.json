@@ -1,0 +1,59 @@
+{
+  "additionalProperties": false,
+  "description": "LLM ReAct phase node parsed from ``SKILL.md``.",
+  "properties": {
+    "exit_contract": {
+      "minLength": 1,
+      "title": "Exit Contract",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    },
+    "mode": {
+      "const": "skill",
+      "title": "Mode",
+      "type": "string"
+    },
+    "name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Name"
+    },
+    "raw_blocks": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Raw Blocks",
+      "type": "object"
+    },
+    "system_prompt": {
+      "minLength": 1,
+      "title": "System Prompt",
+      "type": "string"
+    },
+    "tools": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Tools",
+      "type": "array"
+    }
+  },
+  "required": [
+    "mode",
+    "system_prompt",
+    "exit_contract"
+  ],
+  "title": "SkillNodeAST",
+  "type": "object"
+}

@@ -3,7 +3,7 @@ from __future__ import annotations
 import app.models as models
 import pytest
 from app.models import ErrorResponse, RunRequest, SkillDetail
-from graph_agent.core.manifest import AgentProfile, AgentSkillDef
+from graph_agent.core.manifest import GraphManifest, GraphPhaseRef
 from pydantic import ValidationError
 
 
@@ -39,17 +39,24 @@ def test_model_exports_cover_phase0_contracts() -> None:
 
 
 def test_models_validate_fields_and_reuse_graph_agent_contracts() -> None:
-    manifest = AgentSkillDef(
-        type="agent",
+    manifest = GraphManifest(
         name="demo-skill",
         description="demo",
-        agent_profile=AgentProfile(role="role", goal="goal"),
+        io_inputs_ref="io/inputs.json",
+        io_outputs_ref="io/outputs.json",
+        phases=[GraphPhaseRef(id="setup", src="phases/setup", depends_on=[])],
     )
-    detail = SkillDetail(manifest=manifest, file_paths={"skill_md": "/tmp/SKILL.md"}, has_golden=False)
+    detail = SkillDetail(
+        manifest=manifest,
+        graph_topology=[{"id": "setup", "src": "phases/setup", "depends_on": [], "mode": "logic"}],
+        node_schema_v21={"graph_phase_ref": {}, "logic": {}, "skill": {}, "subgraph": {}},
+        io_schema={"inputs": {}, "outputs": {}},
+        file_paths={"graph_md": "/tmp/GRAPH.md"},
+        has_golden=False,
+    )
 
-    assert detail.manifest.type == "agent"
     assert detail.manifest.name == "demo-skill"
-    assert detail.file_paths["skill_md"].endswith("SKILL.md")
+    assert detail.file_paths["graph_md"].endswith("GRAPH.md")
 
     with pytest.raises(ValidationError):
         ErrorResponse(

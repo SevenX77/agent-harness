@@ -12,7 +12,7 @@ from typing import Any, cast
 from fastapi.encoders import jsonable_encoder
 from graph_agent import compile_skill
 from graph_agent.core.loader import SkillLoader
-from graph_agent.core.manifest import GraphSkillDef, IoInput
+from graph_agent.core.exceptions import SkillCompilationError, SkillLoadError
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -41,6 +41,14 @@ _TYPE_MAP: dict[str, Any] = {
     "list": list[Any],
     "array": list[Any],
 }
+_JSON_TYPE_MAP: dict[str, Any] = {
+    "string": StrictStr,
+    "integer": StrictInt,
+    "number": StrictFloat,
+    "boolean": StrictBool,
+    "object": dict[str, Any],
+    "array": list[Any],
+}
 _YAML: Any = import_module("yaml")
 
 
@@ -58,10 +66,9 @@ async def validate_skill_input_file(
 ) -> dict[str, Any]:
     """Validate a JSON/YAML file against a skill's declared runtime inputs."""
     skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage)
-    skill_path = skill_dir / "SKILL.md"
-    manifest = _compile_manifest_or_raise(skill_path)
+    input_schema = _compile_input_schema_or_raise(skill_dir)
     parsed_data = _parse_input_file(Path(input_file_path))
-    input_model = _input_model_for_manifest(manifest)
+    input_model = _input_model_for_schema(input_schema)
 
     try:
         validated = input_model.model_validate(parsed_data)
@@ -73,21 +80,22 @@ async def validate_skill_input_file(
     return validated.model_dump()
 
 
-def _compile_manifest_or_raise(skill_path: Path) -> GraphSkillDef:
-    result = compile_skill(skill_path)
-    if not result.passed:
+def _compile_input_schema_or_raise(skill_path: Path) -> dict[str, Any]:
+    try:
+        compile_skill(skill_path)
+        compiled = SkillLoader().compile_skill(skill_path)
+    except (SkillLoadError, SkillCompilationError):
         raise ValidationHttpError(
             status_code=422,
             body={"detail": "skill itself failed to compile, fix it first"},
         )
-
-    manifest = SkillLoader().compile_skill(skill_path).manifest
-    if not isinstance(manifest, GraphSkillDef):
+    input_schema = compiled.raw.get("io", {}).get("inputs")
+    if not isinstance(input_schema, dict):
         raise ValidationHttpError(
             status_code=422,
             body={"detail": "skill does not declare graph runtime inputs"},
         )
-    return manifest
+    return input_schema
 
 
 def _parse_input_file(path: Path) -> Any:
@@ -122,11 +130,17 @@ def _parse_error(exc: Exception) -> ValidationHttpError:
     )
 
 
-def _input_model_for_manifest(manifest: GraphSkillDef) -> type[BaseModel]:
+def _input_model_for_schema(input_schema: dict[str, Any]) -> type[BaseModel]:
     fields: dict[str, tuple[Any, Any]] = {}
-    for input_decl in manifest.io.inputs:
-        default = _field_default(input_decl)
-        fields[input_decl.name] = (_python_type_from_input(input_decl), default)
+    properties = input_schema.get("properties", {})
+    required = set(input_schema.get("required", []))
+    if not isinstance(properties, dict):
+        properties = {}
+    for name, schema in properties.items():
+        if not isinstance(schema, dict):
+            schema = {}
+        default = Field(...) if name in required else schema.get("default", None)
+        fields[str(name)] = (_python_type_from_schema(schema), default)
     field_definitions = cast(Mapping[str, Any], fields)
     return cast(
         type[BaseModel],
@@ -138,13 +152,10 @@ def _input_model_for_manifest(manifest: GraphSkillDef) -> type[BaseModel]:
     )
 
 
-def _field_default(input_decl: IoInput) -> Any:
-    if input_decl.default is not None:
-        return input_decl.default
-    return Field(...)
-
-
-def _python_type_from_input(input_decl: IoInput) -> Any:
-    if input_decl.type is None:
+def _python_type_from_schema(schema: dict[str, Any]) -> Any:
+    schema_type = schema.get("type")
+    if isinstance(schema_type, list):
+        schema_type = next((item for item in schema_type if item != "null"), None)
+    if schema_type is None:
         return Any
-    return _TYPE_MAP.get(input_decl.type.strip().lower(), Any)
+    return _JSON_TYPE_MAP.get(str(schema_type).strip().lower(), Any)

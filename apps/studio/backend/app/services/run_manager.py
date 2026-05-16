@@ -279,7 +279,6 @@ class RunManager:
 
     async def start_run(self, skill_id: str, request: RunRequest) -> RunMetadata:
         skill_dir = ensure_workspace_skill_dir(skill_id)
-        skill_path = skill_dir / "SKILL.md"
         inputs = _runtime_inputs_from_request(request)
         run_id = _new_run_id()
         run_dir = run_dir_for(skill_id, run_id)
@@ -297,7 +296,7 @@ class RunManager:
         process_queue = self.queue_factory()
         process = self.process_factory(
             target=self.worker,
-            args=(skill_id, str(skill_path), str(run_dir), inputs, process_queue),
+            args=(skill_id, str(skill_dir), str(run_dir), inputs, process_queue),
         )
         try:
             process.start()

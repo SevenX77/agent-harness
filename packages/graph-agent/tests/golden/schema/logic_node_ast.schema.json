@@ -1,0 +1,46 @@
+{
+  "additionalProperties": false,
+  "description": "Deterministic Python phase node parsed from ``LOGIC.md``.",
+  "properties": {
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    },
+    "mode": {
+      "const": "logic",
+      "title": "Mode",
+      "type": "string"
+    },
+    "name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Name"
+    },
+    "python_callable": {
+      "minLength": 1,
+      "title": "Python Callable",
+      "type": "string"
+    },
+    "raw_blocks": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Raw Blocks",
+      "type": "object"
+    }
+  },
+  "required": [
+    "mode",
+    "python_callable"
+  ],
+  "title": "LogicNodeAST",
+  "type": "object"
+}

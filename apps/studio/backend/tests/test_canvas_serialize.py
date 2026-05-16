@@ -7,6 +7,7 @@ import time
 from typing import Any
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -326,3 +327,74 @@ def test_canvas_graph_serialize_unknown_dependency_returns_serializer_orphan(
     assert body["code"] == "serializer_orphan"
     assert body["skill_id"] == "text-segmentation"
     assert body["detail"] == {"phase_id": "final", "dependency": "missing-phase"}
+
+
+def test_canvas_graph_serialize_helper_does_not_write_graph_md(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, _workspaces_dir = studio_roots
+    skill_dir = skills_dir / "text-segmentation"
+    _add_branch_and_final_phase(skill_dir)
+    graph_path = skill_dir / "GRAPH.md"
+    original = graph_path.read_text(encoding="utf-8")
+
+    response = client.post(
+        "/api/skills/text-segmentation/graph/serialize",
+        json={
+            "phases": [
+                {"id": "setup", "src": "phases/setup", "depends_on": [], "mode": "logic"},
+                {"id": "branch", "src": "phases/branch", "depends_on": ["setup"], "mode": "logic"},
+                {
+                    "id": "final",
+                    "src": "phases/final",
+                    "depends_on": ["setup", "branch"],
+                    "mode": "logic",
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["markdown_content"] != original
+    assert graph_path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="T-apps-1 multi-file PUT is not present on this branch; Canvas must use it once merged.",
+)
+def test_canvas_save_flow_uses_t_apps_multi_file_put_contract(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, _workspaces_dir = studio_roots
+    skill_dir = skills_dir / "text-segmentation"
+    _add_branch_and_final_phase(skill_dir)
+
+    serialize_response = client.post(
+        "/api/skills/text-segmentation/graph/serialize",
+        json={
+            "phases": [
+                {"id": "setup", "src": "phases/setup", "depends_on": [], "mode": "logic"},
+                {"id": "branch", "src": "phases/branch", "depends_on": ["setup"], "mode": "logic"},
+                {
+                    "id": "final",
+                    "src": "phases/final",
+                    "depends_on": ["setup", "branch"],
+                    "mode": "logic",
+                },
+            ]
+        },
+    )
+    markdown = serialize_response.json()["markdown_content"]
+
+    put_response = client.put(
+        "/api/skills/text-segmentation/files",
+        json={"files": {"GRAPH.md": markdown}},
+    )
+
+    assert put_response.status_code == 200
+    assert (skill_dir / "GRAPH.md").read_text(encoding="utf-8") == markdown
+    detail = client.get("/api/skills/text-segmentation").json()
+    assert detail["graph_topology"][-1]["depends_on"] == ["setup", "branch"]

@@ -72,6 +72,8 @@ async def serialize_skill_graph(
     user_id: str = Depends(get_auth_user_id),
     storage: StorageBackend = Depends(get_storage),
 ) -> SerializeGraphRes | JSONResponse:
+    # Canvas save flow: POST here for markdown only, then persist GRAPH.md via
+    # the T-apps-1 multi-file PUT endpoint. This helper must not write files.
     try:
         return await serialize_skill_graph_markdown(
             user_id,

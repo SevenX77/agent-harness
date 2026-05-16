@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-import contextlib
 import re
-import uuid
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from fastapi.encoders import jsonable_encoder
-from graph_agent import compile_skill
-from graph_agent.core.compiler import CompileIssue
+from graph_agent import CompiledSkill, compile_skill
+from graph_agent.core.exceptions import SkillCompilationError, SkillLoadError
 from graph_agent.core.loader import SkillLoader
-from graph_agent.core.manifest import AgentSkillDef, GraphSkillDef, PersonaSkillDef, SkillManifest
-from graph_agent.core.parser import parse_skill_file
-from pydantic import TypeAdapter
+from graph_agent.core.manifest import LogicNodeAST, SkillNodeAST, SubgraphNodeAST
 
 from app.core import config
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
@@ -26,7 +22,7 @@ from app.models.lint import LintResult
 from app.models.runs import RunMetadata
 from app.models.skills import SkillDetail, SkillSummary
 
-_LOCATION_RE = re.compile(r"SKILL\.md:(?P<line>\d+)(?::(?P<loc>.*))?$")
+_LOCATION_RE = re.compile(r":(?P<line>\d+)(?::(?P<loc>.*))?")
 _NAME_LINE_RE = re.compile(
     r"(?m)^(?P<prefix>name:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\n]+)(?P=quote)\s*$"
 )
@@ -79,16 +75,15 @@ async def get_skill_detail(
 ) -> SkillDetail:
     """Compile one skill into a Studio SkillDetail response."""
     skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage)
-    skill_path = skill_dir / "SKILL.md"
-    lint = lint_result or lint_skill_path(skill_path)
+    lint = lint_result or lint_skill_path(skill_dir)
     if lint.status == "failed":
         _raise_manifest_validation_failed(lint)
-    manifest = _load_manifest(skill_path)
+    compiled = _load_compiled(skill_dir)
     return await _detail_from_manifest_async(
         user_id,
         skill_id,
         skill_dir,
-        manifest,
+        compiled,
         lint,
         storage,
         metadata,
@@ -97,18 +92,16 @@ async def get_skill_detail(
 
 def lint_skill(skill_id: str) -> LintResult:
     """Lint a resolved skill by id."""
-    return lint_skill_path(resolve_skill_dir(skill_id) / "SKILL.md")
+    return lint_skill_path(resolve_skill_dir(skill_id))
 
 
 def lint_skill_path(skill_path: Path) -> LintResult:
-    """Convert graph_agent CompileResult into Studio LintResult."""
-    result = compile_skill(skill_path)
-    errors = [_lint_error_from_issue(issue) for issue in result.issues]
-    return LintResult(
-        status="passed" if result.passed else "failed",
-        errors=errors,
-        phases_summary=_phase_summary_from_frontmatter(skill_path) if result.passed else None,
-    )
+    """Compile a V2.1 skill root into Studio lint diagnostics."""
+    try:
+        compiled = compile_skill(skill_path)
+    except (SkillLoadError, SkillCompilationError) as exc:
+        return LintResult(status="failed", errors=[_lint_error_from_exception(exc)])
+    return LintResult(status="passed", errors=[], phases_summary=_phase_summary_from_compiled(compiled))
 
 
 async def update_skill_content(
@@ -118,7 +111,7 @@ async def update_skill_content(
     storage: StorageBackend,
     metadata: MetadataStore,
 ) -> SkillDetail:
-    """Validate then atomically write SKILL.md into the default workspace."""
+    """Reject legacy single-file edits during the V2.1 backend cutover."""
     if not content.strip():
         response = error_response(
             error_code="MANIFEST_VALIDATION_FAILED",
@@ -129,20 +122,8 @@ async def update_skill_content(
         )
         raise_error_response(response)
 
-    target_dir = await ensure_workspace_skill_dir_async(user_id, skill_id, storage)
-    target_path = target_dir / "SKILL.md"
-    candidate_path = target_dir / f".SKILL.{uuid.uuid4().hex}.tmp"
-    await storage.write_text(str(candidate_path), content)
-    try:
-        lint = lint_skill_path(candidate_path)
-        if lint.status == "failed":
-            _raise_manifest_validation_failed(lint)
-        _load_manifest(candidate_path)
-        await storage.move(str(candidate_path), str(target_path))
-    finally:
-        await storage.delete(str(candidate_path))
-
-    return await get_skill_detail(user_id, skill_id, storage, metadata, lint_result=lint)
+    del user_id, skill_id, storage, metadata
+    _raise_v21_directory_authoring_required()
 
 
 async def create_new_skill(
@@ -152,7 +133,7 @@ async def create_new_skill(
     storage: StorageBackend,
     metadata: MetadataStore,
 ) -> SkillSummary:
-    """Create a new workspace skill from fully rendered SKILL.md content."""
+    """Reject legacy single-file creation during the V2.1 backend cutover."""
     if not content.strip():
         response = error_response(
             error_code="MANIFEST_VALIDATION_FAILED",
@@ -163,9 +144,8 @@ async def create_new_skill(
         )
         raise_error_response(response)
 
-    workspace_dir = _workspace_skills_dir_for(user_id) / skill_id
-    public_path = config.SKILLS_DIR / skill_id / "SKILL.md"
-    workspace_path = workspace_dir / "SKILL.md"
+    public_path = config.SKILLS_DIR / skill_id / "GRAPH.md"
+    workspace_path = _workspace_skills_dir_for(user_id) / skill_id / "GRAPH.md"
     if await storage.exists(str(workspace_path)) or await storage.exists(str(public_path)):
         raise standard_http_exception(
             "SKILL_ALREADY_EXISTS",
@@ -173,10 +153,8 @@ async def create_new_skill(
             {"skill_id": skill_id},
         )
 
-    await storage.write_text(str(workspace_path), content)
-    summary = await _summary_for_skill_dir_async(user_id, workspace_dir, storage, metadata)
-    await metadata.save_skill_summary(user_id, summary)
-    return summary
+    del metadata
+    _raise_v21_directory_authoring_required()
 
 
 async def fork_skill(
@@ -189,8 +167,8 @@ async def fork_skill(
     """Clone an existing skill into the user's workspace under a new id."""
     workspace_root = _workspace_skills_dir_for(user_id)
     target_dir = workspace_root / new_skill_id
-    target_path = target_dir / "SKILL.md"
-    public_collision = config.SKILLS_DIR / new_skill_id / "SKILL.md"
+    target_path = target_dir / "GRAPH.md"
+    public_collision = config.SKILLS_DIR / new_skill_id / "GRAPH.md"
     if await storage.exists(str(target_path)) or await storage.exists(str(public_collision)):
         raise standard_http_exception(
             "SKILL_ALREADY_EXISTS",
@@ -206,7 +184,7 @@ async def fork_skill(
             str(target_path),
             _rewrite_forked_skill_content(content, old_id=skill_id, new_id=new_skill_id),
         )
-        lint = lint_skill_path(target_path)
+        lint = lint_skill_path(target_dir)
         if lint.status == "failed":
             _raise_manifest_validation_failed(lint)
         summary = await _summary_for_skill_dir_async(user_id, target_dir, storage, metadata)
@@ -224,11 +202,11 @@ async def ensure_workspace_skill_dir_async(
 ) -> Path:
     """Return a writable skill dir, forking a public skill into workspace if needed."""
     workspace_dir = _workspace_skills_dir_for(user_id) / skill_id
-    if await storage.exists(str(workspace_dir / "SKILL.md")):
+    if await storage.exists(str(workspace_dir / "GRAPH.md")):
         return workspace_dir
 
     public_dir = config.SKILLS_DIR / skill_id
-    if not await storage.exists(str(public_dir / "SKILL.md")):
+    if not await storage.exists(str(public_dir / "GRAPH.md")):
         raise standard_http_exception(
             "SKILL_NOT_FOUND",
             f"Skill not found: {skill_id}",
@@ -245,10 +223,10 @@ async def resolve_skill_dir_async(
 ) -> Path:
     """Resolve a skill id through storage, preferring workspace copies."""
     workspace_dir = _workspace_skills_dir_for(user_id) / skill_id
-    if await storage.exists(str(workspace_dir / "SKILL.md")):
+    if await storage.exists(str(workspace_dir / "GRAPH.md")):
         return workspace_dir
     public_dir = config.SKILLS_DIR / skill_id
-    if await storage.exists(str(public_dir / "SKILL.md")):
+    if await storage.exists(str(public_dir / "GRAPH.md")):
         return public_dir
     raise standard_http_exception(
         "SKILL_NOT_FOUND",
@@ -273,11 +251,11 @@ def ensure_workspace_skill_dir(skill_id: str) -> Path:
     """Return a writable skill dir, forking a public skill into workspace if needed."""
     ensure_workspace_layout()
     workspace_dir = config.default_workspace_skills_dir() / skill_id
-    if workspace_dir.exists():
+    if (workspace_dir / "GRAPH.md").exists():
         return workspace_dir
 
     public_dir = config.SKILLS_DIR / skill_id
-    if not (public_dir / "SKILL.md").exists():
+    if not (public_dir / "GRAPH.md").exists():
         raise standard_http_exception(
             "SKILL_NOT_FOUND",
             f"Skill not found: {skill_id}",
@@ -290,10 +268,10 @@ def ensure_workspace_skill_dir(skill_id: str) -> Path:
 def resolve_skill_dir(skill_id: str) -> Path:
     """Resolve a skill id, preferring writable workspace copies."""
     workspace_dir = config.default_workspace_skills_dir() / skill_id
-    if (workspace_dir / "SKILL.md").exists():
+    if (workspace_dir / "GRAPH.md").exists():
         return workspace_dir
     public_dir = config.SKILLS_DIR / skill_id
-    if (public_dir / "SKILL.md").exists():
+    if (public_dir / "GRAPH.md").exists():
         return public_dir
     raise standard_http_exception(
         "SKILL_NOT_FOUND",
@@ -342,17 +320,17 @@ def latest_run_metadata(skill_id: str) -> RunMetadata | None:
 def _iter_skill_dirs(root: Path) -> Iterable[Path]:
     if not root.exists():
         return []
-    return sorted(path for path in root.iterdir() if (path / "SKILL.md").is_file())
+    return sorted(path for path in root.iterdir() if (path / "GRAPH.md").is_file())
 
 
 def _summary_for_skill_dir(skill_dir: Path) -> SkillSummary:
     skill_id = skill_dir.name
-    lint = lint_skill_path(skill_dir / "SKILL.md")
+    lint = lint_skill_path(skill_dir)
     if lint.status == "passed":
-        frontmatter = _frontmatter(skill_dir / "SKILL.md")
-        name = str(frontmatter.get("name") or skill_id)
-        description = str(frontmatter.get("description") or "")
-        phase_count = _phase_count_from_frontmatter(frontmatter)
+        compiled = _load_compiled(skill_dir)
+        name = compiled.manifest.name
+        description = str(compiled.manifest.description or "")
+        phase_count = len(compiled.manifest.phases)
     else:
         name = skill_id
         description = lint.errors[0].message if lint.errors else "Invalid skill manifest"
@@ -375,12 +353,12 @@ async def _summary_for_skill_dir_async(
     metadata: MetadataStore,
 ) -> SkillSummary:
     skill_id = skill_dir.name
-    lint = lint_skill_path(skill_dir / "SKILL.md")
+    lint = lint_skill_path(skill_dir)
     if lint.status == "passed":
-        frontmatter = _frontmatter(skill_dir / "SKILL.md")
-        name = str(frontmatter.get("name") or skill_id)
-        description = str(frontmatter.get("description") or "")
-        phase_count = _phase_count_from_frontmatter(frontmatter)
+        compiled = _load_compiled(skill_dir)
+        name = compiled.manifest.name
+        description = str(compiled.manifest.description or "")
+        phase_count = len(compiled.manifest.phases)
     else:
         name = skill_id
         description = lint.errors[0].message if lint.errors else "Invalid skill manifest"
@@ -399,15 +377,18 @@ async def _summary_for_skill_dir_async(
 def _detail_from_manifest(
     skill_id: str,
     skill_dir: Path,
-    manifest: AgentSkillDef | GraphSkillDef | PersonaSkillDef,
+    compiled: CompiledSkill,
     lint_result: LintResult,
 ) -> SkillDetail:
     workspace_skill_dir = config.default_workspace_skills_dir() / skill_id
     return SkillDetail(
-        manifest=manifest,
+        manifest=compiled.manifest,
+        graph_topology=_graph_topology(compiled),
+        node_schema_v21=_node_schema_v21(),
+        io_schema=_io_schema(compiled),
         file_paths={
             "skill_dir": str(skill_dir),
-            "skill_md": str(skill_dir / "SKILL.md"),
+            "graph_md": str(skill_dir / "GRAPH.md"),
             "runs_dir": str(workspace_skill_dir / "runs"),
             "test_inputs_dir": str(workspace_skill_dir / "test_inputs"),
             "golden_dir": str(workspace_skill_dir / "golden"),
@@ -422,7 +403,7 @@ async def _detail_from_manifest_async(
     user_id: str,
     skill_id: str,
     skill_dir: Path,
-    manifest: AgentSkillDef | GraphSkillDef | PersonaSkillDef,
+    compiled: CompiledSkill,
     lint_result: LintResult,
     storage: StorageBackend,
     metadata: MetadataStore,
@@ -430,10 +411,13 @@ async def _detail_from_manifest_async(
     workspace_skill_dir = _workspace_skills_dir_for(user_id) / skill_id
     latest = await latest_run_metadata_async(user_id, skill_id, metadata)
     return SkillDetail(
-        manifest=manifest,
+        manifest=compiled.manifest,
+        graph_topology=_graph_topology(compiled),
+        node_schema_v21=_node_schema_v21(),
+        io_schema=_io_schema(compiled),
         file_paths={
             "skill_dir": str(skill_dir),
-            "skill_md": str(skill_dir / "SKILL.md"),
+            "graph_md": str(skill_dir / "GRAPH.md"),
             "runs_dir": str(workspace_skill_dir / "runs"),
             "test_inputs_dir": str(workspace_skill_dir / "test_inputs"),
             "golden_dir": str(workspace_skill_dir / "golden"),
@@ -444,15 +428,10 @@ async def _detail_from_manifest_async(
     )
 
 
-def _load_manifest(skill_path: Path) -> AgentSkillDef | GraphSkillDef | PersonaSkillDef:
+def _load_compiled(skill_path: Path) -> CompiledSkill:
     try:
-        return SkillLoader().compile_skill(skill_path).manifest
+        return SkillLoader().compile_skill(skill_path)
     except Exception as exc:
-        with contextlib.suppress(Exception):
-            adapter: TypeAdapter[AgentSkillDef | GraphSkillDef | PersonaSkillDef] = TypeAdapter(
-                SkillManifest,
-            )
-            return adapter.validate_python(_frontmatter(skill_path))
         response = error_response(
             error_code="MANIFEST_VALIDATION_FAILED",
             http_status=422,
@@ -463,63 +442,32 @@ def _load_manifest(skill_path: Path) -> AgentSkillDef | GraphSkillDef | PersonaS
         raise_error_response(response)
 
 
-def _phase_summary_from_frontmatter(skill_path: Path) -> list[dict[str, Any]]:
-    frontmatter = _frontmatter(skill_path)
-    phases = frontmatter.get("phases")
-    if isinstance(phases, list):
-        return [
-            {
-                "name": str(phase.get("name", "")) if isinstance(phase, dict) else "",
-                "tier": _phase_tier(phase),
-                "has_validator": bool(phase.get("validator")) if isinstance(phase, dict) else False,
-            }
-            for phase in phases
-        ]
-    if frontmatter.get("type") == "agent":
-        return [
-            {
-                "name": str(frontmatter.get("name") or ""),
-                "tier": "agent",
-                "has_validator": False,
-            },
-        ]
-    return []
-
-
-def _frontmatter(skill_path: Path) -> dict[str, Any]:
-    raw = parse_skill_file(skill_path)["frontmatter"]
-    return dict(raw)
-
-
-def _phase_tier(phase: Any) -> str:
-    if not isinstance(phase, dict):
-        return ""
-    return str(phase.get("llm_role") or phase.get("mode") or "")
-
-
-def _phase_count_from_frontmatter(frontmatter: dict[str, Any]) -> int:
-    phases = frontmatter.get("phases")
-    if isinstance(phases, list):
-        return len(phases)
-    if frontmatter.get("type") == "agent":
-        return 1
-    return 0
+def _phase_summary_from_compiled(compiled: CompiledSkill) -> list[dict[str, Any]]:
+    mode_by_phase = {node.phase_name: node.mode for node in compiled.nodes}
+    return [
+        {
+            "name": phase.id,
+            "tier": mode_by_phase.get(phase.id, ""),
+            "has_validator": False,
+        }
+        for phase in compiled.manifest.phases
+    ]
 
 
 def _has_golden(skill_dir: Path) -> bool:
     return (skill_dir / "golden").exists()
 
 
-def _lint_error_from_issue(issue: CompileIssue) -> LintError:
-    match = _LOCATION_RE.search(issue.location)
+def _lint_error_from_exception(exc: Exception) -> LintError:
+    message = str(exc)
+    match = _LOCATION_RE.search(message)
     line = int(match.group("line")) if match else None
-    severity: Literal["error", "warning"] = "error" if issue.severity == "FATAL" else "warning"
     return LintError(
         line=line,
         column=None,
-        error_code=issue.rule_id,
-        severity=severity,
-        message=issue.message,
+        error_code=_error_code_from_message(message),
+        severity="error",
+        message=message,
         phase_name=_phase_from_location(match.group("loc") if match else None),
     )
 
@@ -545,7 +493,7 @@ def _raise_manifest_validation_failed(lint: LintResult) -> None:
 async def _list_skill_ids(root: Path, storage: StorageBackend) -> list[str]:
     skill_ids: list[str] = []
     for child_name in await storage.list_dirs(str(root)):
-        if await storage.exists(str(root / child_name / "SKILL.md")):
+        if await storage.exists(str(root / child_name / "GRAPH.md")):
             skill_ids.append(child_name)
     return sorted(skill_ids)
 
@@ -566,6 +514,50 @@ def _rewrite_forked_skill_content(content: str, *, old_id: str, new_id: str) -> 
 
     rewritten = _ID_LINE_RE.sub(replace_identity, content)
     return _NAME_LINE_RE.sub(replace_identity, rewritten)
+
+
+def _graph_topology(compiled: CompiledSkill) -> list[dict[str, object]]:
+    mode_by_phase = {node.phase_name: node.mode for node in compiled.nodes}
+    return [
+        {
+            "id": phase.id,
+            "src": phase.src,
+            "depends_on": list(phase.depends_on),
+            "mode": mode_by_phase.get(phase.id, ""),
+        }
+        for phase in compiled.manifest.phases
+    ]
+
+
+def _node_schema_v21() -> dict[str, dict[str, object]]:
+    return {
+        "logic": LogicNodeAST.model_json_schema(),
+        "skill": SkillNodeAST.model_json_schema(),
+        "subgraph": SubgraphNodeAST.model_json_schema(),
+    }
+
+
+def _io_schema(compiled: CompiledSkill) -> dict[str, dict[str, object]]:
+    return {
+        "inputs": dict(compiled.raw["io"]["inputs"]),
+        "outputs": dict(compiled.raw["io"]["outputs"]),
+    }
+
+
+def _error_code_from_message(message: str) -> str:
+    match = re.search(r"\[(F-[^\]]+)\]", message)
+    return match.group(1) if match else "F-v21-compile"
+
+
+def _raise_v21_directory_authoring_required() -> None:
+    response = error_response(
+        error_code="MANIFEST_VALIDATION_FAILED",
+        http_status=422,
+        message="V2.1 skills are directory-based; single-file SKILL.md authoring is not supported by this endpoint",
+        details={"required_entry": "GRAPH.md"},
+        retry_strategy="not_retryable",
+    )
+    raise_error_response(response)
 
 
 def _copy_tree(source: Path, target: Path) -> None:

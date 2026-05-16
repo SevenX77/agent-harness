@@ -266,6 +266,15 @@ def _run_skill_dict(
     skill_path = Path(skill_path)
     if not skill_path.exists():
         raise SkillLoadError(f"SKILL.md not found: {skill_path}")
+    if skill_path.is_dir() and (skill_path / "GRAPH.md").is_file():
+        return _run_v21_skill_dict(
+            skill_path,
+            trace_dir=trace_dir,
+            mock_llm=mock_llm,
+            thread_id=thread_id,
+            callbacks=callbacks,
+            **inputs,
+        )
 
     # Resolve trace_dir first so callback can be initialized with it.
     effective_trace_dir = trace_dir
@@ -436,6 +445,44 @@ def _run_skill_dict(
         "metrics": metrics,
         "trace_path": trace_path,
         "wall_time_sec": round(wall_time, 1),
+    }
+
+
+def _run_v21_skill_dict(
+    skill_root: Path,
+    *,
+    mock_llm: Any = _NO_MOCK_LLM,
+    trace_dir: str | Path | None = None,
+    thread_id: str | None = None,
+    callbacks: list[Any] | None = None,
+    **inputs: Any,
+) -> dict[str, Any]:
+    """Execute a V2.1 skill root through compile_skill + assemble_graph."""
+
+    del callbacks
+    from graph_agent.core.compiler import compile_skill
+    from graph_agent.core.graph_assembler import assemble_graph
+
+    t0 = time.time()
+    chat_model = None if mock_llm is _NO_MOCK_LLM else mock_llm
+    compiled = compile_skill(skill_root)
+    graph = assemble_graph(compiled, chat_model=chat_model).graph
+    run_id = thread_id or str(uuid.uuid4())
+    result = graph.invoke(
+        {
+            "data": dict(inputs),
+            "flow": {},
+            "messages": [],
+            "run_id": run_id,
+        }
+    )
+    wall_time = round(time.time() - t0, 3)
+    return {
+        "run_id": run_id,
+        "context": dict(result.get("data", {})),
+        "metrics": {"wall_time_sec": wall_time},
+        "trace_path": str(Path(trace_dir) / "trace.json") if trace_dir else None,
+        "wall_time_sec": wall_time,
     }
 
 

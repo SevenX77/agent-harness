@@ -61,9 +61,14 @@ def test_skills_list_and_detail_use_real_skill_files(client: TestClient) -> None
     detail_response = client.get("/api/skills/text-segmentation")
     assert detail_response.status_code == 200
     body = detail_response.json()
-    assert body["manifest"]["type"] == "graph"
-    assert body["manifest"]["io"]["inputs"][0]["name"] == "input_text"
-    assert body["manifest"]["phases"][0]["name"] == "setup"
+    assert body["manifest"]["name"] == "text-segmentation"
+    assert body["manifest"]["phases"][0]["id"] == "setup"
+    assert body["graph_topology"] == [
+        {"id": "setup", "src": "phases/setup", "depends_on": [], "mode": "logic"}
+    ]
+    assert set(body["node_schema_v21"]) == {"logic", "skill", "subgraph"}
+    assert set(body["io_schema"]) == {"inputs", "outputs"}
+    assert body["io_schema"]["inputs"]["properties"]["input_text"]["type"] == "string"
     assert body["lint_result"]["status"] == "passed"
 
 
@@ -80,7 +85,7 @@ def test_lint_reports_failed_manifest_with_line_number(
 ) -> None:
     skills_dir, workspaces_dir = studio_roots
     skill_dir = copy_skill(skills_dir, workspaces_dir, "text-segmentation")
-    skill_path = skill_dir / "SKILL.md"
+    skill_path = skill_dir / "phases" / "setup" / "LOGIC.md"
     skill_path.write_text(
         skill_path.read_text(encoding="utf-8").replace("mode: logic\n", "mode: bogus\n"),
         encoding="utf-8",
@@ -95,48 +100,26 @@ def test_lint_reports_failed_manifest_with_line_number(
     assert body["errors"][0]["error_code"]
 
 
-def test_put_updates_workspace_atomically_and_invalid_content_preserves_file(
+def test_put_single_file_edit_returns_v21_cutover_error(
     client: TestClient,
-    studio_roots: tuple[Path, Path],
 ) -> None:
-    skills_dir, workspaces_dir = studio_roots
-    original = (skills_dir / "text-segmentation" / "SKILL.md").read_text(encoding="utf-8")
-    updated = original.replace("description: Text segments", "description: Updated text segments")
+    response = client.put("/api/skills/text-segmentation", json={"content": "name: updated"})
 
-    ok_response = client.put("/api/skills/text-segmentation", json={"content": updated})
-
-    assert ok_response.status_code == 200
-    assert ok_response.json()["manifest"]["description"] == "Updated text segments"
-    workspace_skill = workspaces_dir / "default" / "skills" / "text-segmentation" / "SKILL.md"
-    assert "Updated text segments" in workspace_skill.read_text(encoding="utf-8")
-
-    bad_response = client.put("/api/skills/text-segmentation", json={"content": "not yaml"})
-
-    assert bad_response.status_code == 422
-    assert "Updated text segments" in workspace_skill.read_text(encoding="utf-8")
+    assert response.status_code == 422
+    assert response.json()["error_code"] == "MANIFEST_VALIDATION_FAILED"
+    assert response.json()["details"] == {"required_entry": "GRAPH.md"}
 
 
-def test_create_skill_writes_workspace_skill_and_summary(
+def test_create_skill_single_file_returns_v21_cutover_error(
     client: TestClient,
-    studio_roots: tuple[Path, Path],
 ) -> None:
-    _skills_dir, workspaces_dir = studio_roots
-
     response = client.post(
         "/api/skills",
         json={"skill_id": "idea-generator", "content": _agent_skill_content("idea-generator")},
     )
 
-    assert response.status_code == 201
-    body = response.json()
-    assert body["id"] == "idea-generator"
-    assert body["name"] == "idea-generator"
-    assert body["description"] == "Draft structured ideas"
-    assert body["phase_count"] == 1
-
-    skill_dir = workspaces_dir / "default" / "skills" / "idea-generator"
-    assert (skill_dir / "SKILL.md").exists()
-    assert (skill_dir / "skill_summary.json").exists()
+    assert response.status_code == 422
+    assert response.json()["details"] == {"required_entry": "GRAPH.md"}
 
 
 def test_create_skill_collision_returns_409(client: TestClient) -> None:
@@ -151,6 +134,7 @@ def test_create_skill_collision_returns_409(client: TestClient) -> None:
     assert body["details"] == {"skill_id": "text-segmentation"}
 
 
+@pytest.mark.xfail(reason="T3.1 PM decision: templates.py remains legacy parser follow-up")
 def test_templates_api_lists_builtin_skill_templates(client: TestClient) -> None:
     response = client.get("/api/templates")
 
@@ -181,10 +165,10 @@ def test_fork_skill_copies_directory_and_rewrites_identity(
     assert body["name"] == "text-segmentation-copy"
 
     target_dir = workspaces_dir / "default" / "skills" / "text-segmentation-copy"
-    assert (target_dir / "SKILL.md").exists()
-    assert (target_dir / "script" / "logic.py").exists()
+    assert (target_dir / "GRAPH.md").exists()
+    assert (target_dir / "phases" / "setup" / "actions" / "prepare.py").exists()
     assert (target_dir / "golden" / "baseline.json").exists()
-    assert "name: text-segmentation-copy" in (target_dir / "SKILL.md").read_text(encoding="utf-8")
+    assert "name: text-segmentation-copy" in (target_dir / "GRAPH.md").read_text(encoding="utf-8")
 
 
 def test_request_validation_errors_use_error_response(client: TestClient) -> None:

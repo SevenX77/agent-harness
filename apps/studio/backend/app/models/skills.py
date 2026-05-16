@@ -26,6 +26,9 @@ class SkillDetail(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     manifest: SkillManifest
+    graph_topology: list[dict[str, object]]
+    node_schema_v21: dict[str, dict[str, object]]
+    io_schema: dict[str, dict[str, object]]
     file_paths: dict[str, str]
     has_golden: bool
     latest_run_metadata: RunMetadata | None = None

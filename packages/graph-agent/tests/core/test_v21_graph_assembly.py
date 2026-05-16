@@ -8,7 +8,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from graph_agent.core.compiler import compile_skill
-from graph_agent.core.exceptions import GraphAgentError, SkillLoadError
+from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
 from graph_agent.core.graph_assembler import assemble_graph
 
 
@@ -194,7 +194,7 @@ def test_assemble_fanout_same_data_key_conflict_fatal(tmp_path: Path) -> None:
     _logic_action(tmp_path, "assemble", "assemble", "def assemble(context):\n    return None\n")
 
     graph = assemble_graph(compile_skill(tmp_path, cache=False)).graph
-    with pytest.raises(GraphAgentError, match=r"\[F-v21-state-conflict\].*key='shared'"):
+    with pytest.raises(GraphAgentFatalError, match=r"\[F-v21-state-conflict\].*key='shared'"):
         graph.invoke({"data": {}, "flow": {}, "messages": [], "run_id": "fanout-conflict"})
 
 

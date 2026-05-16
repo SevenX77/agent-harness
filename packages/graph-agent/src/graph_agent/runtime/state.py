@@ -7,7 +7,7 @@ from typing import Annotated, Any, TypedDict
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
 
-from graph_agent.core.exceptions import GraphAgentError
+from graph_agent.core.exceptions import GraphAgentFatalError
 
 
 def shallow_dict_merge(
@@ -24,7 +24,7 @@ def shallow_dict_merge(
     merged = dict(left)
     for key, value in right.items():
         if key in merged:
-            raise GraphAgentError(
+            raise GraphAgentFatalError(
                 f"[F-v21-state-conflict] key={key!r}: branches wrote same key "
                 f"(left={merged[key]!r}, right={value!r})"
             )

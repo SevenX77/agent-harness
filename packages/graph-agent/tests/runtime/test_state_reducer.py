@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from graph_agent.core.exceptions import GraphAgentError
+from graph_agent.core.exceptions import GraphAgentFatalError
 from graph_agent.runtime.state import shallow_dict_merge
 
 
@@ -23,5 +23,5 @@ def test_shallow_merge_both_none() -> None:
 
 
 def test_shallow_merge_conflict_raises_fatal() -> None:
-    with pytest.raises(GraphAgentError, match=r"\[F-v21-state-conflict\].*key='a'"):
+    with pytest.raises(GraphAgentFatalError, match=r"\[F-v21-state-conflict\].*key='a'"):
         shallow_dict_merge({"a": 1}, {"a": 2})

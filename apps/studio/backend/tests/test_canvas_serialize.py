@@ -36,14 +36,29 @@ def _add_final_phase(skill_dir: Path) -> None:
         encoding="utf-8",
     )
     phase_dir = skill_dir / "phases" / "final"
+    _write_logic_phase(phase_dir, "final")
+
+
+def _add_branch_and_final_phase(skill_dir: Path) -> None:
+    (skill_dir / "GRAPH.md").write_text(
+        (skill_dir / "GRAPH.md").read_text(encoding="utf-8")
+        + '<phase id="branch" src="phases/branch" depends_on="setup" />\n'
+        + '<phase id="final" src="phases/final" depends_on="setup" />\n',
+        encoding="utf-8",
+    )
+    _write_logic_phase(skill_dir / "phases" / "branch", "branch")
+    _write_logic_phase(skill_dir / "phases" / "final", "final")
+
+
+def _write_logic_phase(phase_dir: Path, callable_name: str) -> None:
     phase_dir.mkdir(parents=True)
     (phase_dir / "LOGIC.md").write_text(
-        """---
+        f"""---
 mode: logic
-name: final
+name: {callable_name}
 ---
 <python_callable>
-finalize
+{callable_name}
 </python_callable>
 """,
         encoding="utf-8",
@@ -98,18 +113,30 @@ def test_canvas_graph_serialize_depends_on_change_diffs_one_line(
 ) -> None:
     skills_dir, _workspaces_dir = studio_roots
     skill_dir = skills_dir / "text-segmentation"
-    _add_final_phase(skill_dir)
+    _add_branch_and_final_phase(skill_dir)
     original = (skill_dir / "GRAPH.md").read_text(encoding="utf-8")
+    payload = {
+        "phases": [
+            {"id": "setup", "src": "phases/setup", "depends_on": [], "mode": "logic"},
+            {"id": "branch", "src": "phases/branch", "depends_on": ["setup"], "mode": "logic"},
+            {
+                "id": "final",
+                "src": "phases/final",
+                "depends_on": ["setup", "branch"],
+                "mode": "logic",
+            },
+        ]
+    }
 
     response = client.post(
         "/api/skills/text-segmentation/graph/serialize",
-        json=_phase_payload(depends_on=[]),
+        json=payload,
     )
 
     assert response.status_code == 200
     markdown = response.json()["markdown_content"]
     assert _changed_lines(original, markdown) == (1, 1)
-    assert '<phase id="final" src="phases/final" depends_on="" />' in markdown
+    assert '<phase id="final" src="phases/final" depends_on="setup,branch" />' in markdown
 
 
 def test_canvas_graph_serialize_missing_skill_returns_404(client: TestClient) -> None:
@@ -152,15 +179,28 @@ def test_canvas_graph_serialize_accepts_fan_in_depends_on(
 ) -> None:
     skills_dir, _workspaces_dir = studio_roots
     _add_final_phase(skills_dir / "text-segmentation")
+    payload = {
+        "phases": [
+            {"id": "setup", "src": "phases/setup", "depends_on": [], "mode": "logic"},
+            {"id": "branch-a", "src": "phases/branch-a", "depends_on": ["setup"], "mode": "logic"},
+            {"id": "branch-b", "src": "phases/branch-b", "depends_on": ["setup"], "mode": "logic"},
+            {
+                "id": "final",
+                "src": "phases/final",
+                "depends_on": ["setup", "branch-a", "branch-b"],
+                "mode": "logic",
+            },
+        ]
+    }
 
     response = client.post(
         "/api/skills/text-segmentation/graph/serialize",
-        json=_phase_payload(depends_on=["setup", "branch-a", "branch-b"]),
+        json=payload,
     )
 
     assert response.status_code == 200
     body = response.json()
-    assert body["phase_count"] == 2
+    assert body["phase_count"] == 4
     assert '<phase id="final" src="phases/final" depends_on="setup,branch-a,branch-b" />' in body[
         "markdown_content"
     ]
@@ -254,3 +294,35 @@ def test_canvas_graph_serialize_hash_changes_after_graph_content_changes(
     assert response.status_code == 409
     assert response.json()["current_hash"] != original_hash
     assert "<!-- external edit -->" in response.json()["current_markdown_content"]
+
+
+def test_canvas_graph_serialize_cycle_returns_serializer_cycle(client: TestClient) -> None:
+    payload = {
+        "phases": [
+            {"id": "setup", "src": "phases/setup", "depends_on": ["final"], "mode": "logic"},
+            {"id": "final", "src": "phases/final", "depends_on": ["setup"], "mode": "logic"},
+        ]
+    }
+
+    response = client.post("/api/skills/text-segmentation/graph/serialize", json=payload)
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["code"] == "serializer_cycle"
+    assert body["skill_id"] == "text-segmentation"
+    assert body["elapsed_ms"] >= 0
+    assert body["detail"]["cycle"] == ["setup", "final", "setup"]
+
+
+def test_canvas_graph_serialize_unknown_dependency_returns_serializer_orphan(
+    client: TestClient,
+) -> None:
+    payload = _phase_payload(depends_on=["missing-phase"])
+
+    response = client.post("/api/skills/text-segmentation/graph/serialize", json=payload)
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["code"] == "serializer_orphan"
+    assert body["skill_id"] == "text-segmentation"
+    assert body["detail"] == {"phase_id": "final", "dependency": "missing-phase"}

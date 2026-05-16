@@ -21,7 +21,7 @@ from app.models.skills import (
     UpdateSkillReq,
 )
 from app.models.validation import ValidateInputReq, ValidateInputResponse
-from app.services.canvas_errors import CanvasConflictError
+from app.services.canvas_errors import CanvasConflictError, CanvasSerializerFatal
 from app.services.skills import (
     create_new_skill,
     fork_skill,
@@ -30,7 +30,6 @@ from app.services.skills import (
     serialize_skill_graph_markdown,
     update_skill_files,
 )
-from app.services.canvas_errors import CanvasConflictError
 from app.services.validator import ValidationHttpError, validate_skill_input_file
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
@@ -88,6 +87,17 @@ async def serialize_skill_graph(
                 "current_hash": exc.current_hash,
                 "current_markdown_content": exc.current_markdown_content,
                 "current_phase_count": exc.current_phase_count,
+            },
+        )
+    except CanvasSerializerFatal as exc:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "code": exc.code,
+                "message": exc.message,
+                "detail": exc.detail,
+                "skill_id": skill_id,
+                "elapsed_ms": exc.elapsed_ms,
             },
         )
 

@@ -14,7 +14,9 @@
 
 - **解读 1**: `studio-frontend-v2` 研发挂起，本 spec 的输出必须彻底冻结 V2.1 Schema 前端交互协议格式，作为恢复开发的前置契约。
 - **解读 2**: `skills/_v2_pending/` 目录从本次升级的技能重构范围中剥离，专注现役 10 个业务强相关技能的迁移。
-- **解读 3**: 解析层与图加载层不保留向下兼容分支（如 `schema_version: "2.0"` 单文件模式），现役 17 个文件全数阻断，一次性切至 V2.1 格式。
+- **解读 3**: 解析层与图加载层不保留向下兼容分支（如 `schema_version: "2.0"` 单文件模式），现役 in-scope 11 份文件全数阻断 (filesystem 实证 20 份 SKILL.md = in-scope 11 + 历史归档 4 + _v2_pending 5; 详 research.md §2.2)，一次性切至 V2.1 格式。
+
+> **PM Amendment #11 (2026-05-16)** — 旧 "17 份" 数字已 superseded by filesystem 实证 "20 份 = in-scope 11 + 历史 4 + pending 5" (research.md §2.2)。requirements R0/R3/R4/R5 全部统一引用 "in-scope 11 份" 表述; research §5.2 (改造清单) + §6 R-6 风险范围已同步修正。
 
 ## R1. 功能需求 (Functional Requirements)
 
@@ -81,7 +83,7 @@
 | 内容 | 范围 | 备注 |
 |---|---|---|
 | graph_agent 内核 V2.1 改造 | In | 编译器 / runtime / Schema 校验 / 认知中间件 / Action 加载 |
-| 现役 17 份 SKILL 重构 (老 schema 2.0 单 SKILL.md **拆解**为 `GRAPH.md` + `phases/*/(LOGIC\|SUBGRAPH\|SKILL).md` + `io/*.json`) | In (按 R-6 优先级排) | 高频先迁, 不是单文件翻新 |
+| 现役 in-scope 11 份 SKILL 重构 (实证 20 份 SKILL.md: in-scope 11 + 历史 4 + pending 5; 老 schema 2.0 单 SKILL.md **拆解**为 `GRAPH.md` + `phases/*/(LOGIC\|SUBGRAPH\|SKILL).md` + `io/*.json`) | In (按 R-6 优先级排) | 高频先迁, 不是单文件翻新 |
 | `skills/_v2_pending/` 迁移 | **Out** (user 决策 2: 维持 pending, engine 完工后再决定) | 跟 graph-agent-v2.1 不同期 |
 | studio-frontend-v2 适配 | **Out** (user 决策 1: 暂停, V2.1 定后再启) | 单独 spec |
 | graph-agent-studio 对接调整 | In (轻量, 只调接口签名) | 跟 V2.1 同步 |
@@ -114,10 +116,10 @@
   - 决议: **graph-agent 框架基于 Pydantic 自动 export JSON Schema**, 前端只消费不维护。
   - 用户评价 (verbatim 2026-05-15): "这和我们今天确立的 `io/inputs.json` 契约体系是吻合的 (单点真实源)。"
   - 对 design.md 的输入: V2.1 三种节点 Pydantic models (LOGIC/SUBGRAPH/SKILL) 必须支持 `.model_json_schema()` export; export 出的 JSON Schema 作为 `studio-frontend-v2` 配置表单的唯一数据源。
-- **Q-5: 现役 17 个 SKILL 改造的优先级与停摆窗口**
+- **Q-5: 现役 in-scope 11 份 SKILL 改造的优先级与停摆窗口**
   - 状态: **Resolved (User 2026-05-15 默认接受 Gemini 推荐, 未提出异议)**
   - 决议: **容忍 3-5 天停摆 + 高频先迁 (`text-segmentation` / `story-deconstruction`) → 冷门后排 (`product-manual`)**。
-  - 对 design.md 的输入: 排期表必须列出 17 份 skill 的优先级 (Tier 1 / Tier 2 / Tier 3), Tier 1 在 V2.1 内核冒烟通过的第 1 个工作日完成迁移。
+  - 对 design.md 的输入: 排期表必须列出 in-scope 11 份 skill 的优先级 (Tier 1 / Tier 2 / Tier 3), Tier 1 在 V2.1 内核冒烟通过的第 1 个工作日完成迁移。
 - **Q-6: 新引擎开发模式**
   - 状态: **Resolved (User 2026-05-15 默认接受 Gemini 推荐, 未提出异议)**
   - 决议: **in-place 改造 `packages/graph-agent` + long-running feature branch `feat/graph-agent-v2.1` 并发推进**。
@@ -145,6 +147,6 @@
 
 ## R5. 实施纪律 (Process Requirements)
 
-- 一刀硬切**意味着** master 分支会有一个"V2.1 大爆破" PR 不会拆细 (不可能小步迭代, 因为内核 + 17 个 skill 必须同步切)。
+- 一刀硬切**意味着** master 分支会有一个"V2.1 大爆破" PR 不会拆细 (不可能小步迭代, 因为内核 + in-scope 11 份 skill 必须同步切)。
 - 但**可以**先开一条 long-running feature branch (e.g., `feat/graph-agent-v2.1`) 让内核改造 + skill 迁移并发推进, 全部跑通 e2e 再回 main。
 - 一切 in-scope 改动**必须**走 Kiro spec → tasks.md → 一对应 PR 的链路, 不允许 ad-hoc 修 (避免补丁思维)。

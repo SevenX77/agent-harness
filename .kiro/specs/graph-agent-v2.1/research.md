@@ -92,7 +92,7 @@ V2.1 旨在引入 YAML / XML / JSON Schema 三层解耦与多目录 (`phases/`) 
 - **Tools/Actions**: 重构工具加载框架，强行削减 Tools 获取全局 `context` 的接口，为 `actions/*.py` 单辟一套读写门面。
 
 ### 5.2 SKILL 库
-- **现役 skills/ 全数改造清单**: 17 份 SKILL.md (全部 `schema_version: "2.0"`) 需重构为 V2.1 结构 (10 个现役 + 2 个 _v2_pending + 5 个 examples/* 待 verify), 工作量 L 级 (按 user 决策 3 硬切, 全数 break by design)。
+- **现役 skills/ 改造清单**: in-scope 11 份 (filesystem 实证 20 份 SKILL.md 全部 `schema_version: "2.0"`: in-scope 11 + 历史归档 4 + _v2_pending 5; 详 §2.2), 工作量 L 级 (按 user 决策 3 硬切, in-scope 全数 break by design; 历史/pending 不动)。
 - **_v2_pending/**: 遵照决策 2 维持不动，等待引擎完工。
 
 ### 5.3 测试 + CI
@@ -145,8 +145,8 @@ V2.1 旨在引入 YAML / XML / JSON Schema 三层解耦与多目录 (`phases/`) 
 > - 影响: Low (本地磁盘对小目录加载损耗极小)
 > - 方案置信度: A (解耦获得的工程红利远大于解析耗时)
 
-> **R-6: 现役 17 份 SKILL 全数 break by design, 用户业务即时停摆**
-> - 证据: High (PM 跑 `grep -rh "^schema_version:" skills/` 显示 17 份 SKILL 全是 schema "2.0"; user 业务跑的 `story-deconstruction / text-segmentation / event-extraction / producer / batch-analysis` 全部 in scope)
+> **R-6: 现役 in-scope 11 份 SKILL 全数 break by design, 用户业务即时停摆**
+> - 证据: High (PM 跑 `find skills/ -name SKILL.md` 实证 20 份 SKILL.md 全是 schema "2.0"; in-scope 11 份, 详 §2.2; user 业务跑的 `story-deconstruction / text-segmentation / event-extraction / producer / batch-analysis` 全部 in scope)
 > - 影响: High (一刀切后短剧分析等业务管线即刻全数停摆, 直到对应 skill 同步重构完成)
 > - 方案置信度: B (符合 user 决策 3 "一刀硬切"; 但 design.md 阶段必须明确停摆窗口期 + skill  迁移优先级 — 高频用的 text-segmentation 先迁, 低频用的 product-manual 排后)
 
@@ -156,7 +156,7 @@ V2.1 旨在引入 YAML / XML / JSON Schema 三层解耦与多目录 (`phases/`) 
 2. **exit_contract 注入点及权重定义** [影响范围: 内核 认知流; 需要 User 决策]：强切入的 `<exit_contract>` 到底是被编入顶级 System Prompt 的最开头，还是作为独立且不断复现的最后一条 User Message，以避免上下文窗口衰减？
 3. **老技能强制改造期的人力投入** [影响范围: SKILL 库; 需要 User 决策]：因为实施一刀切阻断 (V1 break by design)，改造现役 `skills/`（大约几十个）的工程量谁来承担，还是通过大模型自动化 Codemod？
 4. **前端配置 JSON Schema 定义职责** [影响范围: Studio; 需要 User 决策]：最终前端渲染用的 V2.1 Schema Definition 表单是从 graph-agent 框架自动生成 (Pydantic export JSON Schema) 还是前后端独立维护？
-5. **现役 17 个 SKILL 改造的优先级与停摆窗口** [影响范围: 用户业务; 需要 User 决策]：是否允许“老 skill 全 break，新 skill 全重写”时的业务停摆？停摆窗口容忍多长？需排迁移优先级吗？
+5. **现役 in-scope 11 份 SKILL 改造的优先级与停摆窗口** [影响范围: 用户业务; 需要 User 决策]：是否允许“老 skill 全 break，新 skill 全重写”时的业务停摆？停摆窗口容忍多长？需排迁移优先级吗？
 6. **新引擎开发模式** [影响范围: 工程规范; 需要 User 决策]：是 fork rewrite (新建包) 还是 in-place 直接在 `packages/graph-agent` 改造？
 7. **三种节点识别字段** [影响范围: Schema 规范; 需要 User 决策]：LOGIC/SUBGRAPH/SKILL 的区分 Pydantic discriminator 字段命名用什么？(`mode` / `type` / `kind`?)
 

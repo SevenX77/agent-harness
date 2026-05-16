@@ -9,6 +9,8 @@ from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import GraphAgentFatalError
 from graph_agent.core.graph_assembler import assemble_graph
 
+REPO_ROOT = Path(__file__).resolve().parents[4]
+
 
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -91,3 +93,16 @@ def test_context_write_intermediate_state_is_not_output_key_checked(tmp_path: Pa
     result = graph.invoke({"data": {}, "flow": {}, "messages": [], "run_id": "keys"})
 
     assert result["data"]["missing"] == 1
+
+
+def test_context_update_key_must_be_declared(tmp_path: Path) -> None:
+    _base(tmp_path, _outputs("foo"))
+    _action(tmp_path, "def write_value(context):\n    context.update(missing=1)\n")
+
+    with pytest.raises(GraphAgentFatalError, match=r"\[F-v21-actions-keys\].*missing"):
+        compile_skill(tmp_path, cache=False)
+
+
+def test_text_segmentation_broken_skill_fails_compile_on_context_update() -> None:
+    with pytest.raises(GraphAgentFatalError, match=r"\[F-v21-actions-keys\].*chapter_lines"):
+        compile_skill(REPO_ROOT / "skills" / "text-segmentation", cache=False)

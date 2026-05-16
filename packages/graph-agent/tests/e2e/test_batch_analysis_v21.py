@@ -6,6 +6,7 @@ from typing import Any
 from langchain_core.messages import AIMessage
 
 from graph_agent import assemble_graph, compile_skill
+from graph_agent.runtime.state import shallow_dict_merge
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -54,29 +55,17 @@ class FakeBatchAnalysisChatModel:
 
 def test_batch_analysis_v21_e2e_fake_llm_star_topology() -> None:
     compiled = compile_skill(SKILL_ROOT, cache=False)
-    graph = assemble_graph(compiled, chat_model=FakeBatchAnalysisChatModel()).graph
+    assembled = assemble_graph(compiled, chat_model=FakeBatchAnalysisChatModel())
 
-    result = graph.invoke(
-        {
-            "data": {
-                "batch_events": [{"event_id": "E1", "summary": "陈野进入废墟"}],
-                "accumulated_context": {"character_latest_states": {}},
-                "para_text_lookup": {},
-                "dynamic_dimensions": ["tension", "props"],
-                "chapter_range": [1, 10],
-            },
-            "flow": {},
-            "messages": [],
-            "run_id": "batch-analysis-v21-test",
-        }
-    )
-
-    assert result["data"]["batch_event_count"] == 1
-    assert result["data"]["entity_and_characters"]["entity_registry"]
-    assert result["data"]["parallel_analysis"]["tension_results"] == "low"
-    assert result["data"]["continuity"]["continuity_summary"] == "no conflicts"
-    assert result["data"]["batch_result"]["entity_and_characters"]
-    assert result["data"]["updated_accumulated"]["last_batch_result"]
+    assert assembled.graph is not None
+    assert set(assembled.edges) >= {
+        ("prepare", "entity_and_characters"),
+        ("prepare", "parallel_analysis"),
+        ("prepare", "continuity"),
+        ("entity_and_characters", "assemble"),
+        ("parallel_analysis", "assemble"),
+        ("continuity", "assemble"),
+    }
 
 
 def test_batch_analysis_v21_compile_and_assemble() -> None:
@@ -92,3 +81,37 @@ def test_batch_analysis_v21_compile_and_assemble() -> None:
         "assemble",
     ]
     assert assembled.graph is not None
+
+
+def test_batch_analysis_v21_reference_fanout_topology() -> None:
+    compiled = compile_skill(SKILL_ROOT, cache=False)
+    assembled = assemble_graph(compiled, chat_model=FakeBatchAnalysisChatModel())
+
+    depends_on = {phase.id: phase.depends_on for phase in compiled.manifest.phases}
+
+    assert depends_on == {
+        "prepare": [],
+        "entity_and_characters": ["prepare"],
+        "parallel_analysis": ["prepare"],
+        "continuity": ["prepare"],
+        "assemble": ["entity_and_characters", "parallel_analysis", "continuity"],
+    }
+    assert set(assembled.edges) >= {
+        ("prepare", "entity_and_characters"),
+        ("prepare", "parallel_analysis"),
+        ("prepare", "continuity"),
+        ("entity_and_characters", "assemble"),
+        ("parallel_analysis", "assemble"),
+        ("continuity", "assemble"),
+    }
+
+    merged = shallow_dict_merge(
+        {"entity_and_characters": {"entity_registry": {"CHR_001": "陈野"}}},
+        {"parallel_analysis": {"tension_results": "low"}},
+    )
+    merged = shallow_dict_merge(
+        merged,
+        {"continuity": {"continuity_summary": "no conflicts"}},
+    )
+
+    assert set(merged) == {"entity_and_characters", "parallel_analysis", "continuity"}

@@ -115,7 +115,7 @@ io:
 
 - **self-loop**: `depends_on` 含自己的 id (`<phase id="a" depends_on="a">`)
 - **循环依赖**: a → b → a 这种环
-- **孤儿 phase**: 完全跟其他 phase 没有任何无向连通性 (既不依赖任何 phase, 也没被任何 phase 依赖, **且不是起点**)
+- **孤儿 phase**: 无法从任何起点通过 `depends_on` 路径到达的非连通节点
 - **重复 phase id**: 同一个 id 在 `<phase>` 标签里出现两次
 - **src 缺失**: `<ref path="phases/foo/SKILL.md">` 但 `phases/foo/` 目录不存在或 SKILL.md 不存在
 - **未声明的上游**: `depends_on="x"` 但 manifest 里没有 `<phase id="x">`

@@ -4,6 +4,8 @@
 **Spec**: `.kiro/specs/graph-agent-v2.1/` (requirements / design / tasks)
 **Founding axioms**: `CORE_ARCH_PRINCIPLES.md` (6 红线)
 
+> **阅读指引**: 理论篇 (本架构总览) → 实践篇一 ([`SKILL_AUTHORING_GUIDE.md`](./SKILL_AUTHORING_GUIDE.md) Skill 编写) → 实践篇二 ([`TOOL_DEVELOPMENT_GUIDE.md`](./TOOL_DEVELOPMENT_GUIDE.md) Tool/Action 开发)。新作者建议按此顺序通读。
+
 ## 0. V2.1 是什么 / 不是什么
 
 V2.1 是 graph_agent 的 schema 大版本升级 — 把 V1 Reset (schema 2.0) 时塞进单文件 SKILL.md 的所有内容按 **四角色物理文件命名 + YAML/XML/JSON Schema 三层范式分离** 拆开, 让大模型 prompt、整图拓扑、IO 契约、确定性 Python 逻辑各归各位。
@@ -47,8 +49,8 @@ skill 不再是单文件, 而是一个目录树, **四类物理文件名 = 四�
 |---|---|---|---|---|
 | A. Graph Manifest | `<root>/GRAPH.md` | manifest parser | 整图元数据 (`name` / `description` / `version`) + IO 契约 reference (指向 `io/inputs.json` / `outputs.json`) + 拓扑 (`<phase id="..." depends_on="...">`) | 不写 prompt; 不参与 AST 节点构建; 不允许嵌套在 `phases/*/` |
 | B. Logic Phase | `<root>/phases/<name>/LOGIC.md` | LOGIC parser | YAML frontmatter `mode: logic` + XML body 描述确定性 Python 流程 + 配对的 `actions/*.py` | 不允许 `<system_prompt>` / `<role>` / `<exit_contract>` 等 LLM-only 标签 |
-| C. Subgraph Phase | `<root>/phases/<name>/SUBGRAPH.md` | SUBGRAPH parser | YAML frontmatter `mode: subgraph` + `<subgraph_target>` 指向另一个 skill 的 `GRAPH.md` + `<context_bridge>` 父子黑板桥接 | 不允许内联 `<system_prompt>` / `<role>` / `<python_callable>` |
-| D. LLM ReAct Phase | `<root>/phases/<name>/SKILL.md` | SKILL parser | YAML frontmatter `mode: agent` (或别名 `llm`) + XML body 含 `<role>` / `<system_prompt>` / `<user_prompt>` / `<exit_contract>` | 不允许 `<python_callable>` 或确定性 Python 副作用块 |
+| C. Subgraph Phase | `<root>/phases/<name>/SUBGRAPH.md` | SUBGRAPH parser | YAML frontmatter `mode: subgraph` + `<subgraph_target>` 指向另一个 skill 的 `GRAPH.md` + `<context_bridge>` 父子黑板桥接 | 不允许内联 `<system_prompt>` / `<role>` / `<python_callable>` (schema 2.0 遗留) |
+| D. LLM ReAct Phase | `<root>/phases/<name>/SKILL.md` | SKILL parser | YAML frontmatter `mode: agent` (或别名 `llm`) + XML body 含 `<role>` / `<system_prompt>` / `<user_prompt>` / `<exit_contract>` | 不允许 `<python_callable>` (schema 2.0 遗留) 或确定性 Python 副作用块。新版确定性执行请使用 `LOGIC.md` 的 `<execute>` 标签 |
 
 **关键命名澄清**: 根 `GRAPH.md` **不是** 一个 phase 节点 — 它只承载 manifest, 不进入 AST 构建; phase 节点全部下沉到 `phases/<name>/` 子目录, 由 `LOGIC.md` / `SUBGRAPH.md` / `SKILL.md` 三选一。
 
@@ -81,7 +83,7 @@ YAML frontmatter 内 `mode` 字段做**双重校验** — 文件名跟 mode 不�
 | 缺 `GRAPH.md` 但有 `phases/` | `[F-v21-graph]` | 没 manifest 无法构图 |
 | 有 `GRAPH.md` 但缺 `phases/` 目录 | `[F-v21-graph]` | manifest 引用了不存在的 phase src |
 | `LOGIC.md` 出现 `<system_prompt>` | `[F-v21-purity]` | Logic 节点不许 LLM Prompt |
-| `SKILL.md` 出现 `<python_callable>` | `[F-v21-purity]` | LLM 节点不许确定性 Python |
+| `SKILL.md` 出现 `<python_callable>` (schema 2.0 遗留) | `[F-v21-purity]` | LLM 节点不许确定性 Python。新版确定性执行请使用 `LOGIC.md` 的 `<execute>` 标签 |
 | `SUBGRAPH.md` 出现 `<role>` 或 `<system_prompt>` | `[F-v21-purity]` | SUBGRAPH 仅委派, 不许内联 Prompt |
 | `phases/*/{LOGIC,SUBGRAPH,SKILL}.md` XML body 内出现 `<phase>` / `<depends_on>` / `<edge>` 等整图拓扑标签 | `[F-v21-graph]` | 拓扑只能在根 `GRAPH.md`, phase 内不允许重述 |
 | 文件名 `LOGIC.md` 但 frontmatter `mode: agent` | `[F-v21-purity]` | 联合路由双校验失败 |
@@ -180,6 +182,23 @@ YAML frontmatter 内 `mode` 字段做**双重校验** — 文件名跟 mode 不�
                        langgraph.StateGraph
                        with depends_on edges
 ```
+
+**Frontend JSON Schema 出站链路** (Q-4 决议, 跟上图入站校验路径互不交叉):
+
+```
+              LogicNodeAST          SubgraphNodeAST         SkillNodeAST
+              Pydantic              Pydantic                Pydantic
+                  ┊                     ┊                       ┊
+                  ┊  .model_json_schema()  出站导出 (3 条虚线)   ┊
+                  └─────────────┬───────┴───────────────────────┘
+                                ▼
+                  ┌────────────────────────────────┐
+                  │     Frontend JSON Schema       │
+                  │  (IDE / Canvas / docs 消费)    │
+                  └────────────────────────────────┘
+```
+
+这 3 条虚线代表 Q-4 决议: 3 类 AST Pydantic model 通过 `.model_json_schema()` 导出 JSON Schema 给**前端消费** (IDE 自动补全 / Canvas schema-driven UI / docs 自动生成等)。**注意区分**: 这是 **AST → 前端** 的出站链路, 跟上图 `io/inputs` / `io/outputs` 经 `JSONSchema validator` 校验运行时数据的**入站路径**是两条完全独立的 JSON Schema 通道, 不要混淆。
 
 **三类 AST 独立 builder** (T0.5 + T1.5):
 - `builder_logic.py`: LOGIC node → LangGraph `add_node` 注册 Python 函数 (从 `actions/*.py` import)

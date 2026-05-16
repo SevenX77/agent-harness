@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
 
 from app.core.backends import get_auth_user_id, get_metadata, get_storage
 from app.core.exceptions import raise_not_implemented
@@ -25,11 +26,33 @@ from app.services.skills import (
     fork_skill,
     get_skill_detail,
     list_skill_summaries,
+    serialize_skill_graph_markdown,
     update_skill_files,
 )
 from app.services.validator import ValidationHttpError, validate_skill_input_file
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
+
+
+class SerializeGraphPhase(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    src: str
+    depends_on: list[str] = []
+    mode: str | None = None
+
+
+class SerializeGraphReq(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    phases: list[SerializeGraphPhase]
+
+
+class SerializeGraphRes(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    markdown_content: str
 
 
 @router.get("", response_model=list[SkillSummary])
@@ -60,6 +83,22 @@ async def get_skill(
 ) -> SkillDetail:
     """Return SkillDetail; invalid manifests are reported in manifest_errors."""
     return await get_skill_detail(user_id, skill_id, storage, metadata)
+
+
+@router.post("/{skill_id}/graph/serialize", response_model=SerializeGraphRes)
+async def serialize_skill_graph(
+    skill_id: str,
+    request: SerializeGraphReq,
+    user_id: str = Depends(get_auth_user_id),
+    storage: StorageBackend = Depends(get_storage),
+) -> SerializeGraphRes:
+    markdown = await serialize_skill_graph_markdown(
+        user_id,
+        skill_id,
+        [phase.model_dump() for phase in request.phases],
+        storage,
+    )
+    return SerializeGraphRes(markdown_content=markdown)
 
 
 @router.put("/{skill_id}", response_model=SkillDetail)

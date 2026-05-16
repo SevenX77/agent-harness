@@ -15,6 +15,7 @@ from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
 from graph_agent import CompiledSkill, compile_skill
 from graph_agent.core.exceptions import SkillCompilationError, SkillLoadError
+from graph_agent.core.graph_serializer import serialize_graph
 from graph_agent.core.loader import SkillLoader
 from graph_agent.core.manifest import (
     GraphManifest,
@@ -383,6 +384,32 @@ async def resolve_skill_dir_async(
     )
 
 
+async def serialize_skill_graph_markdown(
+    user_id: str,
+    skill_id: str,
+    phases: list[dict[str, Any]],
+    storage: StorageBackend,
+) -> str:
+    """Serialize a Canvas topology snapshot against the latest on-disk GRAPH.md."""
+    skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage)
+    graph_path = skill_dir / "GRAPH.md"
+    original_md = await storage.read_text(str(graph_path))
+    compiled = _load_compiled_for_graph_serializer(skill_dir)
+    manifest = compiled.manifest.model_copy(
+        update={
+            "phases": [
+                GraphPhaseRef(
+                    id=str(phase["id"]),
+                    src=str(phase["src"]),
+                    depends_on=list(phase.get("depends_on") or []),
+                )
+                for phase in phases
+            ]
+        }
+    )
+    return serialize_graph(GraphManifest.model_validate(manifest.model_dump()), original_md)
+
+
 async def latest_run_metadata_async(
     user_id: str,
     skill_id: str,
@@ -643,6 +670,20 @@ def _graph_content_hash(content: str) -> str:
 def _load_compiled(skill_path: Path) -> CompiledSkill:
     try:
         return SkillLoader().compile_skill(skill_path)
+    except Exception as exc:
+        response = error_response(
+            error_code="MANIFEST_VALIDATION_FAILED",
+            http_status=422,
+            message=str(exc),
+            details={"errors": []},
+            retry_strategy="not_retryable",
+        )
+        raise_error_response(response)
+
+
+def _load_compiled_for_graph_serializer(skill_path: Path) -> CompiledSkill:
+    try:
+        return SkillLoader(validate_context_writes=False).compile_skill(skill_path)
     except Exception as exc:
         response = error_response(
             error_code="MANIFEST_VALIDATION_FAILED",

@@ -54,16 +54,17 @@
   - `packages/graph-agent/src/graph_agent/core/actions.py`
   - `packages/graph-agent/src/graph_agent/core/loader.py`
 - **校验逻辑**:
-  - `loader.py` 在加载某个 Skill 时，提取 `outputs.schema.json` 中声明的 properties (即 Keys)。
-  - 在 `graph_assembler.py:79` (`_build_logic_node` 闭包) 包装 Action 的返回逻辑，加入运行时的返回 Key 验证（因为 Python 缺乏完美的静态字典返回推导）。
+  - **AST 静态扫描主路径**: `loader.py` 加载 SKILL 时，提取 `outputs.schema.json` 声明的 properties，利用 `ast.NodeVisitor` 扫描 Action 源码中所有 `ast.Return` 节点。提取字面值字典的 keys，与 schema properties 比对。未声明的 key 在加载期抛出 `[F-v21-actions-keys]` FATAL，包含 action file:line + key 名。
+  - **Runtime 兜底 (Fallback)**: 当 AST 无法推导动态 dict（如 `return {**other, "new": v}` 或 `result[k] = v; return result`）时，由 `_build_logic_node` 闭包在运行时兜底校验并抛出同样异常。
+  - Code Sketch (AST 扫描):
   ```python
-  # In graph_assembler.py _logic_node
-  result = action(ctx)
-  if isinstance(result, dict):
-      for key in result:
-          if key not in output_schema_keys:
-              raise GraphAgentFatalError(f"[F-v21-actions-keys] Action returned undeclared key {key!r}. Must be declared in outputs.schema.json.")
-      data.update(result)
+  class ReturnKeyVisitor(ast.NodeVisitor):
+      def visit_Return(self, node: ast.Return):
+          if isinstance(node.value, ast.Dict):
+              for key in node.value.keys:
+                  if isinstance(key, ast.Constant) and key.value not in schema_keys:
+                      raise GraphAgentFatalError(f"[F-v21-actions-keys] {path}:{node.lineno} undeclared key {key.value!r}")
+          self.generic_visit(node)
   ```
 
 ## 4. R1.3 `batch-analysis` GRAPH.md Diff

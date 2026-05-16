@@ -9,6 +9,6 @@ metadata:
 <output src="io/outputs.json" />
 <phase id="prepare" src="phases/prepare" depends_on="" />
 <phase id="entity_and_characters" src="phases/entity_and_characters" depends_on="prepare" />
-<phase id="parallel_analysis" src="phases/parallel_analysis" depends_on="entity_and_characters" />
-<phase id="continuity" src="phases/continuity" depends_on="parallel_analysis" />
-<phase id="assemble" src="phases/assemble" depends_on="continuity" />
+<phase id="parallel_analysis" src="phases/parallel_analysis" depends_on="prepare" />
+<phase id="continuity" src="phases/continuity" depends_on="prepare" />
+<phase id="assemble" src="phases/assemble" depends_on="entity_and_characters,parallel_analysis,continuity" />

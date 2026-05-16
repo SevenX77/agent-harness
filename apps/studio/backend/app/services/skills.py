@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn
+from uuid import uuid4
 
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
@@ -33,6 +36,27 @@ _ID_LINE_RE = re.compile(
 
 _ALLOWED_SKILL_FILE_SUFFIXES = {".md", ".json", ".py"}
 _PHASE_NODE_FILES = {"LOGIC.md", "SUBGRAPH.md", "SKILL.md"}
+_SCAFFOLD_FILES = {
+    "GRAPH.md": """---
+schema_version: "2.1"
+name: new-skill
+description: "New Studio skill"
+---
+<input src="io/inputs.json" />
+<output src="io/outputs.json" />
+<phase id="init" src="phases/init" depends_on="" />
+""",
+    "phases/init/LOGIC.md": """---
+mode: logic
+name: init
+---
+# init phase logic
+
+Describe what this phase does.
+""",
+    "io/inputs.json": "{}\n",
+    "io/outputs.json": "{}\n",
+}
 
 
 def validate_skill_file_path(rel_path: str) -> None:
@@ -67,6 +91,42 @@ def validate_skill_file_path(rel_path: str) -> None:
         return
 
     raise HTTPException(status_code=422, detail=invalid_message)
+
+
+def write_skill_files_atomic(skill_dir: Path, files: dict[str, str]) -> None:
+    """Replace a V2.1 skill directory using tmpdir-rename swap with rollback."""
+    for rel_path in files:
+        validate_skill_file_path(rel_path)
+
+    token = uuid4().hex
+    tmp_dir = skill_dir.parent / f".{skill_dir.name}.tmp-{token}"
+    backup_dir = skill_dir.parent / f".{skill_dir.name}.bak-{token}"
+
+    try:
+        tmp_dir.mkdir(parents=True, exist_ok=False)
+        for rel_path, content in files.items():
+            target = tmp_dir.joinpath(*PurePosixPath(rel_path).parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+
+        if skill_dir.exists():
+            os.rename(skill_dir, backup_dir)
+        os.rename(tmp_dir, skill_dir)
+    except Exception:
+        if not skill_dir.exists() and backup_dir.exists():
+            os.rename(backup_dir, skill_dir)
+        raise
+    finally:
+        if backup_dir.exists():
+            shutil.rmtree(backup_dir)
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir)
+
+
+def _scaffold_files_for(skill_id: str) -> dict[str, str]:
+    files = dict(_SCAFFOLD_FILES)
+    files["GRAPH.md"] = files["GRAPH.md"].replace("name: new-skill", f"name: {skill_id}")
+    return files
 
 
 def ensure_workspace_layout() -> None:
@@ -166,24 +226,40 @@ async def update_skill_content(
     _raise_v21_directory_authoring_required()
 
 
+async def update_skill_files(
+    user_id: str,
+    skill_id: str,
+    files: dict[str, str],
+    storage: StorageBackend,
+    metadata: MetadataStore,
+) -> SkillDetail:
+    """Persist a full V2.1 skill file map and return the compiled detail."""
+    skill_dir = await ensure_workspace_skill_dir_async(user_id, skill_id, storage)
+    write_skill_files_atomic(skill_dir, files)
+    lint = lint_skill_path(skill_dir)
+    if lint.status == "failed":
+        _raise_manifest_validation_failed(lint)
+    compiled = _load_compiled(skill_dir)
+    return await _detail_from_manifest_async(
+        user_id,
+        skill_id,
+        skill_dir,
+        compiled,
+        lint,
+        storage,
+        metadata,
+    )
+
+
 async def create_new_skill(
     user_id: str,
     skill_id: str,
-    content: str,
+    files: dict[str, str],
     storage: StorageBackend,
     metadata: MetadataStore,
-) -> NoReturn:
-    """Reject legacy single-file creation during the V2.1 backend cutover."""
-    if not content.strip():
-        response = error_response(
-            error_code="MANIFEST_VALIDATION_FAILED",
-            http_status=422,
-            message="Skill content must not be empty",
-            details={"errors": []},
-            retry_strategy="not_retryable",
-        )
-        raise_error_response(response)
-
+) -> SkillSummary:
+    """Create a new workspace skill from the built-in V2.1 starter scaffold."""
+    del files
     public_path = config.SKILLS_DIR / skill_id / "GRAPH.md"
     workspace_path = _workspace_skills_dir_for(user_id) / skill_id / "GRAPH.md"
     if await storage.exists(str(workspace_path)) or await storage.exists(str(public_path)):
@@ -193,8 +269,11 @@ async def create_new_skill(
             {"skill_id": skill_id},
         )
 
-    del metadata
-    _raise_v21_directory_authoring_required()
+    skill_dir = _workspace_skills_dir_for(user_id) / skill_id
+    write_skill_files_atomic(skill_dir, _scaffold_files_for(skill_id))
+    summary = await _summary_for_skill_dir_async(user_id, skill_dir, storage, metadata)
+    await metadata.save_skill_summary(user_id, summary)
+    return summary
 
 
 async def fork_skill(

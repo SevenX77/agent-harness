@@ -6,13 +6,15 @@ This example shows how to stitch four existing sub-skills
 glue code**.
 
 Compared to the legacy orchestrator under
-`skills/story-deconstruction/`, every phase in the SKILL.md here is
+`skills/story-deconstruction/`, every phase in this V2.1 example is
 purely declarative:
 
-* `subgraph:` points at a sibling skill's SKILL.md.
-* `context_bridge.inputs` maps the parent's context keys into the
+* `GRAPH.md` owns the four-phase topology.
+* Each `phases/*/SUBGRAPH.md` points at a sibling V2.1 skill root through
+  `<sub_skill_ref>`.
+* `context_bridge.inputs` documents how the parent's context keys map into the
   child skill's runtime inputs.
-* `context_bridge.outputs` maps the child's outputs back into the
+* `context_bridge.outputs` documents how the child's outputs map back into the
   parent's context keys so the next phase can pick them up.
 
 No `tools:` are declared on these phases — the framework rejects that
@@ -41,7 +43,7 @@ is:
 from graph_agent import run_skill
 
 result = run_skill(
-    "skills/examples/subgraph-sample/story-deconstruction/SKILL.md",
+    "skills/examples/subgraph-sample/story-deconstruction",
     chapters=[...],
     project_id="demo-project",
 )

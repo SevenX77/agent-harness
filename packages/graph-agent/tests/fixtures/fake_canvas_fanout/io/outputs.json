@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "a_out": {
+      "type": "integer"
+    },
+    "b_out": {
+      "type": "integer"
+    }
+  }
+}

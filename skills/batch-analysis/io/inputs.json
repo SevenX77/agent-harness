@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "accumulated_context": {
+      "type": "object",
+      "x-legacy-source": "runtime"
+    },
+    "batch_events": {
+      "type": "array",
+      "x-legacy-source": "runtime"
+    },
+    "chapter_range": {
+      "type": "array",
+      "x-legacy-source": "runtime"
+    },
+    "dynamic_dimensions": {
+      "type": "array",
+      "x-legacy-source": "runtime"
+    },
+    "para_text_lookup": {
+      "type": "object",
+      "x-legacy-source": "runtime"
+    }
+  },
+  "required": [
+    "batch_events",
+    "accumulated_context",
+    "para_text_lookup",
+    "dynamic_dimensions",
+    "chapter_range"
+  ],
+  "type": "object"
+}

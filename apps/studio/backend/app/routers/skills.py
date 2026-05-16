@@ -57,6 +57,7 @@ async def get_skill(
     storage: StorageBackend = Depends(get_storage),
     metadata: MetadataStore = Depends(get_metadata),
 ) -> SkillDetail:
+    """Return SkillDetail; invalid manifests are reported in manifest_errors."""
     return await get_skill_detail(user_id, skill_id, storage, metadata)
 
 

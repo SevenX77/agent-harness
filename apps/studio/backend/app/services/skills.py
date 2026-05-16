@@ -15,7 +15,7 @@ from fastapi.encoders import jsonable_encoder
 from graph_agent import CompiledSkill, compile_skill
 from graph_agent.core.exceptions import SkillCompilationError, SkillLoadError
 from graph_agent.core.loader import SkillLoader
-from graph_agent.core.manifest import GraphPhaseRef, LogicNodeAST, SkillNodeAST, SubgraphNodeAST
+from graph_agent.core.manifest import GraphManifest, GraphPhaseRef, LogicNodeAST, SkillNodeAST, SubgraphNodeAST
 
 from app.core import config
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
@@ -175,7 +175,14 @@ async def get_skill_detail(
     skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage)
     lint = lint_result or lint_skill_path(skill_dir)
     if lint.status == "failed":
-        _raise_manifest_validation_failed(lint)
+        return await _broken_detail_from_files_async(
+            user_id,
+            skill_id,
+            skill_dir,
+            lint,
+            storage,
+            metadata,
+        )
     compiled = _load_compiled(skill_dir)
     return await _detail_from_manifest_async(
         user_id,
@@ -516,6 +523,7 @@ def _detail_from_manifest(
         has_golden=_has_golden(skill_dir),
         latest_run_metadata=latest_run_metadata(skill_id),
         lint_result=lint_result,
+        manifest_errors=[],
     )
 
 
@@ -546,6 +554,42 @@ async def _detail_from_manifest_async(
         has_golden=await storage.exists(str(skill_dir / "golden")),
         latest_run_metadata=latest,
         lint_result=lint_result,
+        manifest_errors=[],
+    )
+
+
+async def _broken_detail_from_files_async(
+    user_id: str,
+    skill_id: str,
+    skill_dir: Path,
+    lint_result: LintResult,
+    storage: StorageBackend,
+    metadata: MetadataStore,
+) -> SkillDetail:
+    """Return raw files and manifest_errors for invalid manifests instead of 422."""
+    workspace_skill_dir = _workspace_skills_dir_for(user_id) / skill_id
+    latest = await latest_run_metadata_async(user_id, skill_id, metadata)
+    return SkillDetail(
+        manifest=GraphManifest(
+            name=skill_id,
+            description="(broken: manifest invalid)",
+            phases=[],
+        ),
+        graph_topology=[],
+        node_schema_v21=_node_schema_v21(),
+        io_schema={},
+        file_paths={
+            "skill_dir": str(skill_dir),
+            "graph_md": str(skill_dir / "GRAPH.md"),
+            "runs_dir": str(workspace_skill_dir / "runs"),
+            "test_inputs_dir": str(workspace_skill_dir / "test_inputs"),
+            "golden_dir": str(workspace_skill_dir / "golden"),
+        },
+        files=_read_skill_files(skill_dir),
+        has_golden=await storage.exists(str(skill_dir / "golden")),
+        latest_run_metadata=latest,
+        lint_result=lint_result,
+        manifest_errors=lint_result.errors,
     )
 
 
@@ -598,6 +642,7 @@ def _lint_error_from_exception(exc: Exception) -> LintError:
     match = _LOCATION_RE.search(message)
     line = int(match.group("line")) if match else None
     return LintError(
+        file=_file_from_error_message(message),
         line=line,
         column=None,
         error_code=_error_code_from_message(message),
@@ -605,6 +650,14 @@ def _lint_error_from_exception(exc: Exception) -> LintError:
         message=message,
         phase_name=_phase_from_location(match.group("loc") if match else None),
     )
+
+
+def _file_from_error_message(message: str) -> str | None:
+    for candidate in ("GRAPH.md", "io/inputs.json", "io/outputs.json"):
+        if candidate in message:
+            return candidate
+    phase_match = re.search(r"(phases/[A-Za-z0-9_-]+/(?:LOGIC|SUBGRAPH|SKILL)\.md)", message)
+    return phase_match.group(1) if phase_match else None
 
 
 def _phase_from_location(location: str | None) -> str | None:

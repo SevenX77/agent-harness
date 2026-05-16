@@ -8,7 +8,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from graph_agent.core.compiler import compile_skill
-from graph_agent.core.exceptions import SkillLoadError
+from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
 from graph_agent.core.graph_assembler import assemble_graph
 
 
@@ -65,6 +65,20 @@ mode: logic
         "def write_value(context):\n"
         "    context.set('foo', 42)\n",
     )
+
+
+def _logic_action(root: Path, phase: str, action: str, body: str) -> None:
+    _write(
+        root / "phases" / phase / "LOGIC.md",
+        f"""---
+mode: logic
+---
+<python_callable>
+{action}
+</python_callable>
+""",
+    )
+    _write(root / "phases" / phase / "actions" / f"{action}.py", body)
 
 
 def _skill(root: Path, phase: str = "skill", tools: list[str] | None = None) -> None:
@@ -144,6 +158,44 @@ def test_assemble_logic_skill_dependency(tmp_path: Path) -> None:
 
     assert result["data"]["foo"] == 42
     assert result["data"]["skill"] == {"summary": "used"}
+
+
+def test_assemble_fanout_disjoint_data_keys_merge(tmp_path: Path) -> None:
+    _base(
+        tmp_path,
+        '<phase id="prepare" src="phases/prepare" depends_on="" />\n'
+        '<phase id="branch_a" src="phases/branch_a" depends_on="prepare" />\n'
+        '<phase id="branch_b" src="phases/branch_b" depends_on="prepare" />\n'
+        '<phase id="assemble" src="phases/assemble" depends_on="branch_a branch_b" />\n',
+    )
+    _logic_action(tmp_path, "prepare", "prepare", "def prepare(context):\n    return None\n")
+    _logic_action(tmp_path, "branch_a", "write_a", "def write_a(context):\n    return {'a_out': 1}\n")
+    _logic_action(tmp_path, "branch_b", "write_b", "def write_b(context):\n    return {'b_out': 2}\n")
+    _logic_action(tmp_path, "assemble", "assemble", "def assemble(context):\n    return None\n")
+
+    result = assemble_graph(compile_skill(tmp_path, cache=False)).graph.invoke(
+        {"data": {}, "flow": {}, "messages": [], "run_id": "fanout-merge"}
+    )
+
+    assert result["data"] == {"a_out": 1, "b_out": 2}
+
+
+def test_assemble_fanout_same_data_key_conflict_fatal(tmp_path: Path) -> None:
+    _base(
+        tmp_path,
+        '<phase id="prepare" src="phases/prepare" depends_on="" />\n'
+        '<phase id="branch_a" src="phases/branch_a" depends_on="prepare" />\n'
+        '<phase id="branch_b" src="phases/branch_b" depends_on="prepare" />\n'
+        '<phase id="assemble" src="phases/assemble" depends_on="branch_a branch_b" />\n',
+    )
+    _logic_action(tmp_path, "prepare", "prepare", "def prepare(context):\n    return None\n")
+    _logic_action(tmp_path, "branch_a", "write_a", "def write_a(context):\n    return {'shared': 1}\n")
+    _logic_action(tmp_path, "branch_b", "write_b", "def write_b(context):\n    return {'shared': 2}\n")
+    _logic_action(tmp_path, "assemble", "assemble", "def assemble(context):\n    return None\n")
+
+    graph = assemble_graph(compile_skill(tmp_path, cache=False)).graph
+    with pytest.raises(GraphAgentFatalError, match=r"\[F-v21-state-conflict\].*key='shared'"):
+        graph.invoke({"data": {}, "flow": {}, "messages": [], "run_id": "fanout-conflict"})
 
 
 def test_assemble_subgraph_phase(tmp_path: Path) -> None:

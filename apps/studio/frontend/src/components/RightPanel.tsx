@@ -142,10 +142,12 @@ export function RightPanel({
         {activeTab === 'code' ? (
           <MonacoPanel
             isDarkMode={isDarkMode}
-            skillCode={skillCode}
+            activeFile="SKILL.md"
+            files={{ 'SKILL.md': skillCode }}
             lintErrors={lintErrors}
             onEditorMount={onEditorMount}
-            onDraftChange={onDraftChange}
+            // TODO T-C4 接 workspace store 后移除 SKILL.md stub。
+            onContentChange={(_path, content) => onDraftChange(content)}
             onJumpToLine={onJumpToLine}
             onCopyErrors={onCopyErrors}
           />

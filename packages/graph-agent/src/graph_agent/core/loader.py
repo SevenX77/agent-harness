@@ -70,6 +70,7 @@ class CompiledSkill:
     nodes: list[PhaseDocument] = field(default_factory=list)
     actions: ActionRegistry = field(default_factory=ActionRegistry.empty)
     tools: ToolRegistry = field(default_factory=ToolRegistry.empty)
+    phase_tokens: dict[str, "PhaseTokenInfo"] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -110,9 +111,6 @@ class PhaseTokenInfo:
     attr_spans: dict[str, PhaseAttributeSpan]
 
 
-_PHASE_TOKEN_INFO_BY_MANIFEST_ID: dict[int, dict[str, PhaseTokenInfo]] = {}
-
-
 class SkillLoader:
     """Thin V2.1 parser/route orchestrator."""
 
@@ -134,7 +132,7 @@ class SkillLoader:
         graph_frontmatter, graph_body, line_meta = parse_markdown_parts(graph_path)
         raw_attrs = _extract_phase_attrs(graph_body, line_meta["body_start"])
         manifest = _build_graph_manifest(graph_path, graph_frontmatter, graph_body, raw_attrs)
-        _register_phase_token_info(manifest, graph_text, graph_body, line_meta["body_start"])
+        phase_tokens = _extract_phase_token_info(graph_text, graph_body, line_meta["body_start"])
         _validate_graph_topology(graph_path, raw_attrs, root)
         io_inputs = _validate_io_schema(root, manifest.io_inputs_ref, "input")
         io_outputs = _validate_io_schema(root, manifest.io_outputs_ref, "output")
@@ -182,7 +180,12 @@ class SkillLoader:
         }
         logger.info("Compiled V2.1 graph skill root=%s phases=%d", root, len(phase_docs))
         return CompiledSkill(
-            raw=raw, manifest=manifest, nodes=phase_docs, actions=actions, tools=tools
+            raw=raw,
+            manifest=manifest,
+            nodes=phase_docs,
+            actions=actions,
+            tools=tools,
+            phase_tokens=phase_tokens,
         )
 
 
@@ -481,27 +484,15 @@ def _extract_phase_attrs(body: str, body_start_line: int) -> list[_RawPhaseAttrs
     return raw_attrs
 
 
-def _register_phase_token_info(
-    manifest: GraphManifest,
-    graph_text: str,
-    body: str,
-    body_start_line: int,
-) -> None:
-    _PHASE_TOKEN_INFO_BY_MANIFEST_ID[id(manifest)] = _extract_phase_token_info(
-        graph_text,
-        body,
-        body_start_line,
-    )
+def get_phase_token_info(compiled: CompiledSkill, phase_id: str) -> PhaseTokenInfo | None:
+    """Return source token metadata for a phase in a compiled skill.
 
-
-def get_phase_token_info(manifest: GraphManifest, phase_id: str) -> PhaseTokenInfo | None:
-    """Return source token metadata for a phase in a compiled manifest.
-
-    The metadata is intentionally stored out-of-band so ``GraphManifest`` and
-    ``GraphPhaseRef`` remain pure Pydantic business contracts.
+    The metadata lives on ``CompiledSkill`` so ``GraphManifest`` and
+    ``GraphPhaseRef`` remain pure Pydantic business contracts without a global
+    id-based registry.
     """
 
-    return _PHASE_TOKEN_INFO_BY_MANIFEST_ID.get(id(manifest), {}).get(phase_id)
+    return compiled.phase_tokens.get(phase_id)
 
 
 def _extract_phase_token_info(

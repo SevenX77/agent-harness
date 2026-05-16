@@ -13,7 +13,7 @@ def test_hello_world_phase_token_info_has_raw_line_and_line_numbers() -> None:
     skill_root = REPO_ROOT / "skills" / "hello-world"
     compiled = compile_skill(skill_root, cache=False)
 
-    info = get_phase_token_info(compiled.manifest, "greet")
+    info = get_phase_token_info(compiled, "greet")
 
     assert info is not None
     assert info.raw_text == '<phase id="greet" src="phases/greet" depends_on="" />'
@@ -27,7 +27,7 @@ def test_fake_canvas_fanout_phase_tokens_expose_attribute_offsets() -> None:
     compiled = compile_skill(skill_root, cache=False)
 
     for phase_id in ("prepare", "branch_a", "branch_b", "assemble"):
-        info = get_phase_token_info(compiled.manifest, phase_id)
+        info = get_phase_token_info(compiled, phase_id)
         assert info is not None
         assert graph_text[info.start_offset : info.end_offset] == info.raw_text
         assert info.attrs["id"] == phase_id
@@ -37,7 +37,7 @@ def test_fake_canvas_fanout_phase_tokens_expose_attribute_offsets() -> None:
             assert graph_text[span.value_start : span.value_end] == span.value
             assert graph_text[span.attr_start : span.attr_end].startswith(attr_name)
 
-    assemble = get_phase_token_info(compiled.manifest, "assemble")
+    assemble = get_phase_token_info(compiled, "assemble")
     assert assemble is not None
     assert assemble.attr_spans["depends_on"].value == "branch_a branch_b"
 
@@ -45,4 +45,4 @@ def test_fake_canvas_fanout_phase_tokens_expose_attribute_offsets() -> None:
 def test_missing_phase_token_info_returns_none() -> None:
     compiled = compile_skill(REPO_ROOT / "skills" / "hello-world", cache=False)
 
-    assert get_phase_token_info(compiled.manifest, "missing") is None
+    assert get_phase_token_info(compiled, "missing") is None

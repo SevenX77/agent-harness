@@ -5,7 +5,6 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict
 
 from app.core.backends import get_auth_user_id, get_metadata, get_storage
 from app.core.exceptions import raise_not_implemented
@@ -15,6 +14,8 @@ from app.models.errors import ErrorResponse
 from app.models.skills import (
     CreateSkillReq,
     ForkSkillReq,
+    SerializeGraphReq,
+    SerializeGraphRes,
     SkillDetail,
     SkillSummary,
     UpdateSkillReq,
@@ -32,27 +33,6 @@ from app.services.skills import (
 from app.services.validator import ValidationHttpError, validate_skill_input_file
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
-
-
-class SerializeGraphPhase(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    id: str
-    src: str
-    depends_on: list[str] = []
-    mode: str | None = None
-
-
-class SerializeGraphReq(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    phases: list[SerializeGraphPhase]
-
-
-class SerializeGraphRes(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    markdown_content: str
 
 
 @router.get("", response_model=list[SkillSummary])
@@ -92,13 +72,12 @@ async def serialize_skill_graph(
     user_id: str = Depends(get_auth_user_id),
     storage: StorageBackend = Depends(get_storage),
 ) -> SerializeGraphRes:
-    markdown = await serialize_skill_graph_markdown(
+    return await serialize_skill_graph_markdown(
         user_id,
         skill_id,
-        [phase.model_dump() for phase in request.phases],
+        request,
         storage,
     )
-    return SerializeGraphRes(markdown_content=markdown)
 
 
 @router.put("/{skill_id}", response_model=SkillDetail)

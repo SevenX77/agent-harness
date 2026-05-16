@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from graph_agent.core.manifest import SkillManifest
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models.errors import LintError
 from app.models.lint import LintResult
@@ -36,6 +37,41 @@ class SkillDetail(BaseModel):
     latest_run_metadata: RunMetadata | None = None
     lint_result: LintResult | None = None
     manifest_errors: list[LintError] | None = None
+
+
+class PhaseRef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(..., min_length=1)
+    src: str = Field(..., min_length=1)
+    depends_on: list[str] = Field(default_factory=list)
+    mode: Literal["logic", "subgraph", "skill"]
+
+
+class SerializeGraphReq(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    phases: list[PhaseRef]
+
+    @model_validator(mode="after")
+    def reject_duplicate_phase_ids(self) -> SerializeGraphReq:
+        seen: set[str] = set()
+        duplicates: set[str] = set()
+        for phase in self.phases:
+            if phase.id in seen:
+                duplicates.add(phase.id)
+            seen.add(phase.id)
+        if duplicates:
+            raise ValueError(f"duplicate phase id(s): {', '.join(sorted(duplicates))}")
+        return self
+
+
+class SerializeGraphRes(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    markdown_content: str
+    phase_count: int
+    elapsed_ms: float
 
 
 class CreateSkillReq(BaseModel):

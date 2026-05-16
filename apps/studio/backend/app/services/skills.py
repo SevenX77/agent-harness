@@ -6,6 +6,7 @@ import hashlib
 import os
 import re
 import shutil
+import time
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn
@@ -32,7 +33,7 @@ from app.core.ports.storage import StorageBackend
 from app.models.errors import LintError
 from app.models.lint import LintResult
 from app.models.runs import RunMetadata
-from app.models.skills import SkillDetail, SkillSummary
+from app.models.skills import SerializeGraphReq, SerializeGraphRes, SkillDetail, SkillSummary
 from app.services.canvas_errors import CanvasConflictError
 
 _LOCATION_RE = re.compile(r":(?P<line>\d+)(?::(?P<loc>.*))?")
@@ -387,10 +388,11 @@ async def resolve_skill_dir_async(
 async def serialize_skill_graph_markdown(
     user_id: str,
     skill_id: str,
-    phases: list[dict[str, Any]],
+    request: SerializeGraphReq,
     storage: StorageBackend,
-) -> str:
+) -> SerializeGraphRes:
     """Serialize a Canvas topology snapshot against the latest on-disk GRAPH.md."""
+    started = time.perf_counter()
     skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage)
     graph_path = skill_dir / "GRAPH.md"
     original_md = await storage.read_text(str(graph_path))
@@ -399,15 +401,20 @@ async def serialize_skill_graph_markdown(
         update={
             "phases": [
                 GraphPhaseRef(
-                    id=str(phase["id"]),
-                    src=str(phase["src"]),
-                    depends_on=list(phase.get("depends_on") or []),
+                    id=phase.id,
+                    src=phase.src,
+                    depends_on=list(phase.depends_on),
                 )
-                for phase in phases
+                for phase in request.phases
             ]
         }
     )
-    return serialize_graph(GraphManifest.model_validate(manifest.model_dump()), original_md)
+    markdown = serialize_graph(GraphManifest.model_validate(manifest.model_dump()), original_md)
+    return SerializeGraphRes(
+        markdown_content=markdown,
+        phase_count=len(request.phases),
+        elapsed_ms=(time.perf_counter() - started) * 1000,
+    )
 
 
 async def latest_run_metadata_async(

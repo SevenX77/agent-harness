@@ -48,7 +48,7 @@ export function SkillCreatorWizard({ open, onClose, onCreated, pushToast }: Skil
     try {
       const response = await api.post<SkillSummary>('/skills', {
         skill_id: state.data.skillId,
-        content: preview,
+        files: {},
       })
       pushToast(`Created skill: ${response.data.id}`, 'success')
       await onCreated(response.data.id)

@@ -4,6 +4,7 @@ import type { Connection } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { GraphCanvas } from './components/GraphCanvas'
 import { HeaderBar } from './components/HeaderBar'
+import { DirtyBar } from './components/DirtyBar'
 import { PromptInspector } from './components/PromptInspector'
 import { RightPanel } from './components/RightPanel'
 import { SkillSidebar } from './components/SkillSidebar'
@@ -18,7 +19,7 @@ import { SkillPalette } from './components/shortcuts/SkillPalette'
 import { ToastStack } from './components/ToastStack'
 import { WelcomeScreen } from './components/WelcomeScreen'
 import type { EditorOnMount, MonacoApi, MonacoEditor } from './components/MonacoPanel'
-import { api, saveSkillFiles, wsUrl } from './api/client'
+import { api, fetchSkillFiles, saveSkillFiles, wsUrl } from './api/client'
 import type {
   CallbackEvent,
   JsonObject,
@@ -153,7 +154,7 @@ export default function App() {
       loadedWorkspaceSkillIdRef.current = null
       return
     }
-    if (loadedWorkspaceSkillIdRef.current === selectedSkillId && useWorkspaceStore.getState().isDirty) {
+    if (loadedWorkspaceSkillIdRef.current === selectedSkillId) {
       return
     }
 
@@ -312,11 +313,22 @@ export default function App() {
     }, current))
   }, [setEdges])
 
-  const handleSelectSkill = useCallback((skillId: string) => {
+  const handleSelectSkill = useCallback(async (skillId: string) => {
     if (skillId === selectedSkillId) {
       return
     }
-    if (workspaceIsDirty && selectedSkillId && !window.confirm('You have unsaved changes. Switch skills anyway?')) {
+    if (workspaceIsDirty && selectedSkillId && !window.confirm('Unsaved changes in current skill, switch anyway?')) {
+      return
+    }
+    try {
+      const detail = await fetchSkillFiles(skillId)
+      const files = Object.keys(detail.files).length > 0
+        ? detail.files
+        : { 'SKILL.md': manifestToSkillMarkdown(detail.manifest) }
+      setWorkspaceFiles(files)
+      loadedWorkspaceSkillIdRef.current = skillId
+    } catch (error) {
+      pushToast(errorMessage(error), 'error')
       return
     }
     setActiveSkillId(skillId)
@@ -331,7 +343,7 @@ export default function App() {
     setSelectedPromptIndex(null)
     setActiveTab('code')
     rememberSkill(skillId)
-  }, [goldenDiff, rememberSkill, selectedSkillId, workspaceIsDirty])
+  }, [goldenDiff, pushToast, rememberSkill, selectedSkillId, setWorkspaceFiles, workspaceIsDirty])
 
   const handleLint = useCallback(async () => {
     if (!selectedSkillId) {
@@ -814,6 +826,7 @@ export default function App() {
               onOpenTerminal={() => void openTerminal()}
               onRun={() => void handleRun()}
             />
+            <DirtyBar onSave={() => void handleSave()} />
             <div className="flex flex-1 overflow-hidden">
               <GraphCanvas
                 currentSkillName={currentSkill?.name ?? 'Graph'}

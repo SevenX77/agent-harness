@@ -15,6 +15,11 @@ def _skill_graph(skill: str) -> tuple[GraphManifest, str]:
     return compile_skill(root, cache=False).manifest, (root / "GRAPH.md").read_text(encoding="utf-8")
 
 
+def _fixture_graph(name: str) -> tuple[GraphManifest, str]:
+    root = REPO_ROOT / "packages" / "graph-agent" / "tests" / "fixtures" / "canvas_serializer" / name
+    return compile_skill(root, cache=False).manifest, (root / "GRAPH.md").read_text(encoding="utf-8")
+
+
 def _line_diff_count(before: str, after: str) -> int:
     before_lines = before.splitlines()
     after_lines = after.splitlines()
@@ -93,6 +98,69 @@ def test_deleted_phase_removes_only_that_phase_line() -> None:
     assert '<phase id="branch_b" src="phases/branch_b" depends_on="prepare" />' not in serialized
     assert '<phase id="branch_a" src="phases/branch_a" depends_on="prepare" />' in serialized
     assert '<phase id="assemble" src="phases/assemble" depends_on="branch_a branch_b" />' in serialized
+
+
+def test_deleted_phase_removes_its_downward_attachment_only() -> None:
+    manifest, original = _fixture_graph("with_comments_v21")
+    mutated = manifest.model_copy(
+        update={"phases": [phase for phase in manifest.phases if phase.id != "branch"]}
+    )
+
+    serialized = serialize_graph(mutated, original)
+
+    assert "<!-- branch attachment -->" not in serialized
+    assert "Branch prose belongs to branch." not in serialized
+    assert "<!-- prepare attachment -->" in serialized
+    assert "Prepare prose belongs to prepare." in serialized
+    assert '<phase id="prepare" src="phases/prepare" depends_on="" />' in serialized
+    assert '<phase id="assemble" src="phases/assemble" depends_on="branch" />' in serialized
+
+
+def test_deleted_last_phase_preserves_footer() -> None:
+    manifest, original = _fixture_graph("with_comments_v21")
+    mutated = manifest.model_copy(
+        update={"phases": [phase for phase in manifest.phases if phase.id != "assemble"]}
+    )
+
+    serialized = serialize_graph(mutated, original)
+
+    assert "<!-- assemble attachment -->" not in serialized
+    assert "Assemble prose belongs to assemble." not in serialized
+    assert "<!-- global footer -->" in serialized
+    assert "Footer prose remains." in serialized
+
+
+def test_frontmatter_comments_are_not_phase_attachment() -> None:
+    manifest, original = _fixture_graph("with_comments_v21")
+    mutated = manifest.model_copy(
+        update={"phases": [phase for phase in manifest.phases if phase.id != "prepare"]}
+    )
+
+    serialized = serialize_graph(mutated, original)
+
+    assert "# frontmatter comment stays with YAML" in serialized
+    assert '<input src="io/inputs.json" />' in serialized
+    assert '<output src="io/outputs.json" />' in serialized
+    assert "<!-- prepare attachment -->" not in serialized
+    assert "Prepare prose belongs to prepare." not in serialized
+
+
+def test_between_phase_comment_attaches_downward_not_upward() -> None:
+    manifest, original = _fixture_graph("with_comments_v21")
+    without_prepare = manifest.model_copy(
+        update={"phases": [phase for phase in manifest.phases if phase.id != "prepare"]}
+    )
+    without_branch = manifest.model_copy(
+        update={"phases": [phase for phase in manifest.phases if phase.id != "branch"]}
+    )
+
+    prepare_deleted = serialize_graph(without_prepare, original)
+    branch_deleted = serialize_graph(without_branch, original)
+
+    assert "<!-- branch attachment -->" in prepare_deleted
+    assert "Branch prose belongs to branch." in prepare_deleted
+    assert "<!-- branch attachment -->" not in branch_deleted
+    assert "Branch prose belongs to branch." not in branch_deleted
 
 
 def test_fresh_render_without_original_markdown_uses_canonical_graph() -> None:

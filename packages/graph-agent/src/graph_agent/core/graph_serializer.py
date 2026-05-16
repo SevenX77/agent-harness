@@ -10,10 +10,11 @@ from graph_agent.core.loader import PhaseAttributeSpan, PhaseTokenInfo
 from graph_agent.core.manifest import GraphManifest, GraphPhaseRef
 
 
-TokenKind = Literal["frontmatter", "comment", "phase", "whitespace", "text"]
+TokenKind = Literal["frontmatter", "comment", "io", "phase", "whitespace", "text"]
 
 _PHASE_RE = re.compile(r"<phase\b([^>]*)/>", re.IGNORECASE | re.DOTALL)
 _COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+_IO_RE = re.compile(r"<(?:input|output)\b[^>]*/>", re.IGNORECASE | re.DOTALL)
 _ATTR_RE = re.compile(r"([A-Za-z_][\w:-]*)\s*=\s*(['\"])(.*?)\2", re.DOTALL)
 
 
@@ -44,31 +45,33 @@ def _serialize_with_original(manifest: GraphManifest, original_md: str) -> str:
     phase_by_id = {phase.id: phase for phase in manifest.phases}
     seen_phase_ids: set[str] = set()
     chunks: list[str] = []
+    attachment_buffer: list[GraphToken] = []
 
-    index = 0
-    while index < len(tokens):
-        token = tokens[index]
-        if token.kind != "phase" or token.phase_id is None or token.phase_info is None:
+    for token in tokens:
+        if token.kind in {"frontmatter", "io"}:
+            chunks.extend(buffered.text for buffered in attachment_buffer)
+            attachment_buffer = []
             chunks.append(token.text)
-            index += 1
             continue
+
+        if token.kind != "phase" or token.phase_id is None or token.phase_info is None:
+            attachment_buffer.append(token)
+            continue
+
         phase = phase_by_id.get(token.phase_id)
         if phase is None:
-            if index + 1 < len(tokens) and tokens[index + 1].kind == "whitespace":
-                next_text = tokens[index + 1].text
-                if next_text.startswith("\n"):
-                    chunks.append(next_text[1:])
-                    index += 2
-                    continue
-                if next_text.startswith("\r\n"):
-                    chunks.append(next_text[2:])
-                    index += 2
-                    continue
-            index += 1
+            separator = _attachment_separator(attachment_buffer)
+            if separator:
+                chunks.append(separator)
+            attachment_buffer = []
             continue
+
+        chunks.extend(buffered.text for buffered in attachment_buffer)
+        attachment_buffer = []
         seen_phase_ids.add(token.phase_id)
         chunks.append(_rewrite_phase_token(token, phase))
-        index += 1
+
+    chunks.extend(buffered.text for buffered in attachment_buffer)
 
     additions = [phase for phase in manifest.phases if phase.id not in seen_phase_ids]
     if additions:
@@ -102,6 +105,8 @@ def _tokenize_graph(text: str) -> list[GraphToken]:
         matches.append((frontmatter.start(), frontmatter.end(), "frontmatter", frontmatter))
     for match in _COMMENT_RE.finditer(text):
         matches.append((match.start(), match.end(), "comment", match))
+    for match in _IO_RE.finditer(text):
+        matches.append((match.start(), match.end(), "io", match))
     for match in _PHASE_RE.finditer(text):
         matches.append((match.start(), match.end(), "phase", match))
     matches.sort(key=lambda item: (item[0], item[1]))
@@ -138,6 +143,19 @@ def _text_or_whitespace_tokens(text: str, start: int, end: int) -> list[GraphTok
     token_text = text[start:end]
     kind: TokenKind = "whitespace" if token_text.strip() == "" else "text"
     return [GraphToken(kind=kind, start=start, end=end, text=token_text)]
+
+
+def _attachment_separator(tokens: list[GraphToken]) -> str:
+    if not tokens:
+        return ""
+    text = "".join(token.text for token in tokens)
+    if text.strip() == "":
+        return ""
+    if text.startswith("\r\n"):
+        return "\r\n"
+    if text.startswith("\n"):
+        return "\n"
+    return ""
 
 
 def _phase_token_info(text: str, match: re.Match[str]) -> PhaseTokenInfo:

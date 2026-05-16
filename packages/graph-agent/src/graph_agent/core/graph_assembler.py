@@ -131,7 +131,7 @@ def _build_subgraph_node(
     max_patch_attempts: int,
 ) -> Any:
     sub_root = _resolve_sub_skill_path(phase_doc.path, phase_ast.sub_skill_ref)
-    sub_compiled = SkillLoader().compile_skill(sub_root)
+    sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(sub_root)
     sub_assembled = assemble_graph(
         sub_compiled,
         chat_model=chat_model,

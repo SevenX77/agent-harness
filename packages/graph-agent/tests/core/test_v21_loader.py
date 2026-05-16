@@ -46,11 +46,33 @@ Call finish_task when done.
     )
 
 
+def _write_graph_with_io_refs(root: Path, input_ref: str, output_ref: str = "io/outputs.json") -> None:
+    _write(
+        root / "GRAPH.md",
+        f"""---
+schema_version: "2.1"
+name: hello-v21
+description: hello
+---
+<input src="{input_ref}" />
+<output src="{output_ref}" />
+<phase id="hello" src="phases/hello" />
+""",
+    )
+
+
 def _assert_fatal(exc: pytest.ExceptionInfo[SkillLoadError], path_fragment: str) -> None:
     message = str(exc.value)
     assert "[F-v21-route]" in message
     assert path_fragment in message
     assert ":1" in message or ":2" in message or ":5" in message
+
+
+def _assert_io_fatal(exc: pytest.ExceptionInfo[SkillLoadError], path_fragment: str) -> None:
+    message = str(exc.value)
+    assert "[F-v21-io]" in message
+    assert path_fragment in message
+    assert ":1" in message or ":2" in message
 
 
 def test_v21_happy_path_routes_graph_and_skill_raw_blocks(tmp_path: Path) -> None:
@@ -62,6 +84,8 @@ def test_v21_happy_path_routes_graph_and_skill_raw_blocks(tmp_path: Path) -> Non
     assert compiled.manifest.io_inputs_ref == "io/inputs.json"
     assert compiled.manifest.io_outputs_ref == "io/outputs.json"
     assert compiled.manifest.phases[0].id == "hello"
+    assert compiled.raw["io"]["inputs"] == {}
+    assert compiled.raw["io"]["outputs"] == {}
     assert len(compiled.nodes) == 1
     node = compiled.nodes[0]
     assert node.mode == "skill"
@@ -77,6 +101,97 @@ def test_extract_raw_blocks_keeps_inner_angle_brackets() -> None:
         ["system_prompt"],
     )
     assert blocks["system_prompt"] == "Use A < B and <div>x</div>."
+
+
+def test_io_schema_happy_path(tmp_path: Path) -> None:
+    _valid_skill(tmp_path)
+    _write(tmp_path / "io" / "inputs.json", '{"type": "object"}\n')
+    _write(tmp_path / "io" / "outputs.json", '{"type": "object"}\n')
+
+    compiled = SkillLoader().compile_skill(tmp_path)
+
+    assert compiled.manifest.io_inputs_ref == "io/inputs.json"
+    assert compiled.manifest.io_outputs_ref == "io/outputs.json"
+    assert compiled.raw["io"]["inputs"] == {"type": "object"}
+    assert compiled.raw["io"]["outputs"] == {"type": "object"}
+
+
+def test_io_inputs_missing(tmp_path: Path) -> None:
+    _valid_skill(tmp_path)
+    (tmp_path / "io" / "inputs.json").unlink()
+
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path)
+
+    _assert_io_fatal(exc, "io/inputs.json")
+    assert "missing IO schema referenced by GRAPH.md input" in str(exc.value)
+
+
+def test_io_outputs_missing(tmp_path: Path) -> None:
+    _valid_skill(tmp_path)
+    (tmp_path / "io" / "outputs.json").unlink()
+
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path)
+
+    _assert_io_fatal(exc, "io/outputs.json")
+    assert "missing IO schema referenced by GRAPH.md output" in str(exc.value)
+
+
+def test_io_inputs_invalid_json(tmp_path: Path) -> None:
+    _valid_skill(tmp_path)
+    _write(tmp_path / "io" / "inputs.json", "{bad\n")
+
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path)
+
+    _assert_io_fatal(exc, "io/inputs.json")
+    assert "invalid JSON:" in str(exc.value)
+
+
+def test_io_outputs_top_level_not_object(tmp_path: Path) -> None:
+    _valid_skill(tmp_path)
+    _write(tmp_path / "io" / "outputs.json", "[]\n")
+
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path)
+
+    _assert_io_fatal(exc, "io/outputs.json")
+    assert "JSON Schema document must be an object" in str(exc.value)
+
+
+def test_io_inputs_invalid_schema(tmp_path: Path) -> None:
+    _valid_skill(tmp_path)
+    _write(tmp_path / "io" / "inputs.json", '{"type": 123}\n')
+
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path)
+
+    _assert_io_fatal(exc, "io/inputs.json")
+    assert "invalid JSON Schema:" in str(exc.value)
+
+
+def test_io_ref_non_json_suffix(tmp_path: Path) -> None:
+    _valid_skill(tmp_path)
+    _write_graph_with_io_refs(tmp_path, "io/inputs.yaml")
+    _write(tmp_path / "io" / "inputs.yaml", "type: object\n")
+
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path)
+
+    _assert_io_fatal(exc, "io/inputs.yaml")
+    assert "IO schema refs must point to .json files" in str(exc.value)
+
+
+def test_io_ref_escape_root(tmp_path: Path) -> None:
+    _valid_skill(tmp_path)
+    _write_graph_with_io_refs(tmp_path, "../../etc/passwd")
+
+    with pytest.raises(SkillLoadError) as exc:
+        SkillLoader().compile_skill(tmp_path)
+
+    _assert_io_fatal(exc, "../../etc/passwd")
+    assert "IO schema ref must stay inside skill root" in str(exc.value)
 
 
 def test_root_skill_md_is_rejected(tmp_path: Path) -> None:

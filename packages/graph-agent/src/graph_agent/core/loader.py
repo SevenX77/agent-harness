@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import logging
+import json
 import re
 from dataclasses import dataclass, field
+from json import JSONDecodeError
 from pathlib import Path
 from typing import Any, Literal
 
+from jsonschema.exceptions import SchemaError
+from jsonschema.validators import Draft202012Validator
 from pydantic import ValidationError
 
 from graph_agent.core.exceptions import SkillLoadError
@@ -70,6 +74,8 @@ class SkillLoader:
         graph_path = root / "GRAPH.md"
         graph_frontmatter, graph_body, _ = parse_markdown_parts(graph_path)
         manifest = _parse_graph_manifest(graph_path, graph_frontmatter, graph_body)
+        io_inputs = _validate_io_schema(root, manifest.io_inputs_ref, "input")
+        io_outputs = _validate_io_schema(root, manifest.io_outputs_ref, "output")
 
         phase_docs: list[PhaseDocument] = []
         for phase_name, phase_file, mode in _discover_phase_files(root):
@@ -81,6 +87,7 @@ class SkillLoader:
 
         raw = {
             "graph": {"frontmatter": graph_frontmatter, "body": graph_body},
+            "io": {"inputs": io_inputs, "outputs": io_outputs},
             "phases": [
                 {
                     "phase_name": doc.phase_name,
@@ -120,6 +127,10 @@ def load_workflow_from_md(
 
 def _fatal(path: Path, line: int, message: str) -> None:
     raise SkillLoadError(f"[F-v21-route] {path}:{line} {message}")
+
+
+def _io_fatal(path: Path, line: int, message: str) -> None:
+    raise SkillLoadError(f"[F-v21-io] {path}:{line} {message}")
 
 
 def _guard_v21_root(skill_root: Path) -> None:
@@ -214,6 +225,48 @@ def _parse_graph_manifest(path: Path, frontmatter: dict[str, Any], body: str) ->
         _fatal(path, 1, f"GRAPH.md manifest validation failed: {exc}")
 
 
+def _resolve_io_ref(skill_root: Path, ref: str) -> Path:
+    display_path = skill_root / ref
+    if Path(ref).is_absolute():
+        _io_fatal(display_path, 1, "IO schema ref must stay inside skill root")
+    root_resolved = skill_root.resolve()
+    candidate = (skill_root / ref).resolve()
+    try:
+        candidate.relative_to(root_resolved)
+    except ValueError:
+        _io_fatal(display_path, 1, "IO schema ref must stay inside skill root")
+    return candidate
+
+
+def _validate_io_schema(
+    skill_root: Path,
+    ref: str,
+    kind: Literal["input", "output"],
+) -> dict[str, Any]:
+    path = _resolve_io_ref(skill_root, ref)
+    display_path = skill_root / ref
+    if path.suffix != ".json":
+        _io_fatal(display_path, 1, "IO schema refs must point to .json files")
+    if not path.is_file():
+        _io_fatal(display_path, 1, f"missing IO schema referenced by GRAPH.md {kind}")
+
+    try:
+        schema = json.loads(path.read_text(encoding="utf-8"))
+    except JSONDecodeError as exc:
+        _io_fatal(display_path, exc.lineno, f"invalid JSON: {exc.msg}")
+    except OSError as exc:
+        _io_fatal(display_path, 1, f"failed to read IO schema: {exc}")
+
+    if not isinstance(schema, dict):
+        _io_fatal(display_path, 1, "JSON Schema document must be an object")
+
+    try:
+        Draft202012Validator.check_schema(schema)
+    except SchemaError as exc:
+        _io_fatal(display_path, 1, f"invalid JSON Schema: {exc.message}")
+    return schema
+
+
 def _build_phase_document(
     phase_name: str,
     path: Path,
@@ -292,7 +345,9 @@ __all__ = [
     "SkillLoader",
     "_discover_phase_files",
     "_guard_v21_root",
+    "_resolve_io_ref",
     "_route_document",
+    "_validate_io_schema",
     "_validate_mode_matches_filename",
     "load_workflow_from_md",
 ]

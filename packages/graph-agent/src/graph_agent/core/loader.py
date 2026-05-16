@@ -83,8 +83,14 @@ class _RawPhaseAttrs:
 class SkillLoader:
     """Thin V2.1 parser/route orchestrator."""
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        validate_context_writes: bool = True,
+        **kwargs: Any,
+    ) -> None:
         del args, kwargs
+        self.validate_context_writes = validate_context_writes
 
     def compile_skill(self, skill_root: str | Path) -> CompiledSkill:
         root = Path(skill_root)
@@ -97,6 +103,7 @@ class SkillLoader:
         _validate_graph_topology(graph_path, raw_attrs, root)
         io_inputs = _validate_io_schema(root, manifest.io_inputs_ref, "input")
         io_outputs = _validate_io_schema(root, manifest.io_outputs_ref, "output")
+        input_schema_keys = _extract_output_schema_keys(io_inputs)
         output_schema_keys = _extract_output_schema_keys(io_outputs)
 
         discovered = _discover_phase_files(root)
@@ -108,7 +115,13 @@ class SkillLoader:
             scan_forbidden_topology_tags(phase_file, body)
             phase_docs.append(_build_phase_document(phase_name, phase_file, mode, frontmatter, body))
         actions, tools = _discover_actions_and_tools(root, discovered)
-        _validate_logic_action_return_keys(phase_docs, actions, output_schema_keys)
+        _validate_logic_action_return_keys(
+            phase_docs,
+            actions,
+            input_schema_keys,
+            output_schema_keys,
+            validate_context_writes=self.validate_context_writes,
+        )
 
         raw = {
             "graph": {"frontmatter": graph_frontmatter, "body": graph_body},
@@ -595,9 +608,15 @@ def _extract_output_schema_keys(schema: dict[str, Any]) -> set[str] | None:
 
 
 class _ActionReturnKeyVisitor(ast.NodeVisitor):
-    def __init__(self, path: Path, allowed_keys: set[str]) -> None:
+    def __init__(
+        self,
+        path: Path,
+        allowed_return_keys: set[str],
+        allowed_context_keys: set[str] | None,
+    ) -> None:
         self.path = path
-        self.allowed_keys = allowed_keys
+        self.allowed_return_keys = allowed_return_keys
+        self.allowed_context_keys = allowed_context_keys
 
     def visit_Return(self, node: ast.Return) -> None:  # noqa: N802
         value = node.value
@@ -605,7 +624,7 @@ class _ActionReturnKeyVisitor(ast.NodeVisitor):
             for key_node in value.keys:
                 if not isinstance(key_node, ast.Constant) or not isinstance(key_node.value, str):
                     continue
-                if key_node.value not in self.allowed_keys:
+                if key_node.value not in self.allowed_return_keys:
                     line = getattr(key_node, "lineno", node.lineno)
                     _actions_keys_fatal(
                         self.path,
@@ -614,31 +633,82 @@ class _ActionReturnKeyVisitor(ast.NodeVisitor):
                     )
         self.generic_visit(node)
 
+    def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+        if not _is_context_method_call(node, "update"):
+            self.generic_visit(node)
+            return
+        if self.allowed_context_keys is None:
+            self.generic_visit(node)
+            return
+        for keyword in node.keywords:
+            if keyword.arg is None:
+                continue
+            if keyword.arg not in self.allowed_context_keys:
+                _actions_keys_fatal(
+                    self.path,
+                    getattr(keyword, "lineno", node.lineno),
+                    f"action writes undeclared output key {keyword.arg!r}",
+                )
+        self.generic_visit(node)
+
+
+def _is_context_method_call(node: ast.Call, method: str) -> bool:
+    func = node.func
+    if not isinstance(func, ast.Attribute) or func.attr != method:
+        return False
+    return isinstance(func.value, ast.Name) and func.value.id in {"context", "ctx"}
+
 
 def _validate_logic_action_return_keys(
     phase_docs: list[PhaseDocument],
     actions: ActionRegistry,
+    input_schema_keys: set[str] | None,
     output_schema_keys: set[str] | None,
+    *,
+    validate_context_writes: bool,
 ) -> None:
     if output_schema_keys is None:
         return
+    context_keys = set(output_schema_keys)
+    if input_schema_keys is not None:
+        context_keys.update(input_schema_keys)
     for doc in phase_docs:
         if not isinstance(doc.ast, LogicNodeAST):
             continue
         action_def = actions.for_phase(doc.phase_name).get(doc.ast.python_callable)
         if action_def is None:
             continue
-        _validate_action_return_keys(action_def.path, output_schema_keys)
+        _validate_action_return_keys(
+            action_def.path,
+            output_schema_keys,
+            context_keys,
+            validate_context_writes=validate_context_writes and _should_validate_context_writes(phase_docs),
+        )
 
 
-def _validate_action_return_keys(path: Path, output_schema_keys: set[str]) -> None:
+def _should_validate_context_writes(phase_docs: list[PhaseDocument]) -> bool:
+    logic_count = sum(1 for doc in phase_docs if isinstance(doc.ast, LogicNodeAST))
+    return logic_count == 1
+
+
+def _validate_action_return_keys(
+    path: Path,
+    output_schema_keys: set[str],
+    context_schema_keys: set[str],
+    *,
+    validate_context_writes: bool,
+) -> None:
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     except SyntaxError as exc:
         _actions_keys_fatal(path, exc.lineno or 1, f"could not parse action source: {exc.msg}")
     except OSError as exc:
         _actions_keys_fatal(path, 1, f"could not read action source: {exc}")
-    _ActionReturnKeyVisitor(path, output_schema_keys).visit(tree)
+    _ActionReturnKeyVisitor(
+        path,
+        output_schema_keys,
+        context_schema_keys if validate_context_writes else None,
+    ).visit(tree)
 
 
 def _build_phase_document(

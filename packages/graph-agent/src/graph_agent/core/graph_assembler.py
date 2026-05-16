@@ -20,7 +20,7 @@ from graph_agent.cognitive.critic import (
 from graph_agent.cognitive.finish_task import build_finish_task_tool
 from graph_agent.cognitive.md2json import parse_finish_markdown
 from graph_agent.cognitive.md_patch import LLMMdPatchClient
-from graph_agent.core.exceptions import SkillLoadError
+from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
 from graph_agent.core.loader import CompiledSkill, PhaseDocument, SkillLoader
 from graph_agent.core.manifest import GraphManifest, LogicNodeAST, SkillNodeAST, SubgraphNodeAST
 from graph_agent.runtime.exit_contract import inject_exit_contract
@@ -105,6 +105,10 @@ def _build_logic_node(
     compiled: CompiledSkill,
 ) -> Any:
     action = compiled.actions.resolve(phase_id, phase_ast.python_callable)
+    action_def = compiled.actions.for_phase(phase_id).get(phase_ast.python_callable)
+    action_path = action_def.path if action_def is not None else Path("<unknown>")
+    action_line = getattr(getattr(action, "__code__", None), "co_firstlineno", 1)
+    output_schema_keys = _logic_output_schema_keys(compiled)
 
     def _logic_node(state: BlackboardState) -> dict[str, Any]:
         before = dict(state.get("data", {}))
@@ -113,6 +117,7 @@ def _build_logic_node(
         result = action(ctx)
         updates = _dict_delta(before, data)
         if isinstance(result, dict):
+            _validate_logic_update_keys(result, output_schema_keys, action_path, action_line)
             updates.update(result)
         return {"data": updates} if updates else {}
 
@@ -254,6 +259,31 @@ def _build_skill_node(
 
 def _dict_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in after.items() if key not in before or before[key] != value}
+
+
+def _logic_output_schema_keys(compiled: CompiledSkill) -> set[str] | None:
+    raw_keys = compiled.raw.get("io", {}).get("output_schema_keys")
+    if raw_keys is None:
+        return None
+    if not isinstance(raw_keys, list):
+        return set()
+    return {key for key in raw_keys if isinstance(key, str)}
+
+
+def _validate_logic_update_keys(
+    updates: dict[str, Any],
+    output_schema_keys: set[str] | None,
+    action_path: Path,
+    action_line: int,
+) -> None:
+    if output_schema_keys is None:
+        return
+    for key in updates:
+        if key not in output_schema_keys:
+            raise GraphAgentFatalError(
+                f"[F-v21-actions-keys] {action_path}:{action_line} "
+                f"action wrote undeclared output key {key!r}"
+            )
 
 
 def _resolve_sub_skill_path(phase_path: Path, sub_skill_ref: str) -> Path:

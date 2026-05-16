@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import logging
 import json
 import importlib.util
@@ -18,7 +19,7 @@ from jsonschema.exceptions import SchemaError
 from jsonschema.validators import Draft202012Validator
 from pydantic import ValidationError
 
-from graph_agent.core.exceptions import SkillLoadError
+from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
 from graph_agent.core.actions import ActionDef, ActionRegistry, ToolDef, ToolRegistry
 from graph_agent.core.manifest import (
     GraphManifest,
@@ -96,6 +97,7 @@ class SkillLoader:
         _validate_graph_topology(graph_path, raw_attrs, root)
         io_inputs = _validate_io_schema(root, manifest.io_inputs_ref, "input")
         io_outputs = _validate_io_schema(root, manifest.io_outputs_ref, "output")
+        output_schema_keys = _extract_output_schema_keys(io_outputs)
 
         discovered = _discover_phase_files(root)
         phase_docs: list[PhaseDocument] = []
@@ -106,10 +108,15 @@ class SkillLoader:
             scan_forbidden_topology_tags(phase_file, body)
             phase_docs.append(_build_phase_document(phase_name, phase_file, mode, frontmatter, body))
         actions, tools = _discover_actions_and_tools(root, discovered)
+        _validate_logic_action_return_keys(phase_docs, actions, output_schema_keys)
 
         raw = {
             "graph": {"frontmatter": graph_frontmatter, "body": graph_body},
-            "io": {"inputs": io_inputs, "outputs": io_outputs},
+            "io": {
+                "inputs": io_inputs,
+                "outputs": io_outputs,
+                "output_schema_keys": sorted(output_schema_keys) if output_schema_keys is not None else None,
+            },
             "phases": [
                 {
                     "phase_name": doc.phase_name,
@@ -160,6 +167,10 @@ def _graph_fatal(path: Path, line: int, message: str) -> None:
 
 def _actions_fatal(path: Path, line: int, message: str) -> None:
     raise SkillLoadError(f"[F-v21-actions] {path}:{line} {message}")
+
+
+def _actions_keys_fatal(path: Path, line: int, message: str) -> None:
+    raise GraphAgentFatalError(f"[F-v21-actions-keys] {path}:{line} {message}")
 
 
 def _purity_fatal(path: Path, line: int, message: str) -> None:
@@ -572,6 +583,62 @@ def _validate_io_schema(
     except SchemaError as exc:
         _io_fatal(display_path, 1, f"invalid JSON Schema: {exc.message}")
     return schema
+
+
+def _extract_output_schema_keys(schema: dict[str, Any]) -> set[str] | None:
+    properties = schema.get("properties")
+    if properties is None:
+        return None
+    if not isinstance(properties, dict):
+        return set()
+    return {key for key in properties if isinstance(key, str)}
+
+
+class _ActionReturnKeyVisitor(ast.NodeVisitor):
+    def __init__(self, path: Path, allowed_keys: set[str]) -> None:
+        self.path = path
+        self.allowed_keys = allowed_keys
+
+    def visit_Return(self, node: ast.Return) -> None:  # noqa: N802
+        value = node.value
+        if isinstance(value, ast.Dict):
+            for key_node in value.keys:
+                if not isinstance(key_node, ast.Constant) or not isinstance(key_node.value, str):
+                    continue
+                if key_node.value not in self.allowed_keys:
+                    line = getattr(key_node, "lineno", node.lineno)
+                    _actions_keys_fatal(
+                        self.path,
+                        line,
+                        f"action returns undeclared output key {key_node.value!r}",
+                    )
+        self.generic_visit(node)
+
+
+def _validate_logic_action_return_keys(
+    phase_docs: list[PhaseDocument],
+    actions: ActionRegistry,
+    output_schema_keys: set[str] | None,
+) -> None:
+    if output_schema_keys is None:
+        return
+    for doc in phase_docs:
+        if not isinstance(doc.ast, LogicNodeAST):
+            continue
+        action_def = actions.for_phase(doc.phase_name).get(doc.ast.python_callable)
+        if action_def is None:
+            continue
+        _validate_action_return_keys(action_def.path, output_schema_keys)
+
+
+def _validate_action_return_keys(path: Path, output_schema_keys: set[str]) -> None:
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except SyntaxError as exc:
+        _actions_keys_fatal(path, exc.lineno or 1, f"could not parse action source: {exc.msg}")
+    except OSError as exc:
+        _actions_keys_fatal(path, 1, f"could not read action source: {exc}")
+    _ActionReturnKeyVisitor(path, output_schema_keys).visit(tree)
 
 
 def _build_phase_document(

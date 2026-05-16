@@ -107,12 +107,14 @@ def _build_logic_node(
     action = compiled.actions.resolve(phase_id, phase_ast.python_callable)
 
     def _logic_node(state: BlackboardState) -> dict[str, Any]:
-        data = state.setdefault("data", {})
+        before = dict(state.get("data", {}))
+        data = dict(before)
         ctx = Context(data, phase_id=phase_id, run_id=state.get("run_id") or "default")
         result = action(ctx)
+        updates = _dict_delta(before, data)
         if isinstance(result, dict):
-            data.update(result)
-        return {"data": data}
+            updates.update(result)
+        return {"data": updates} if updates else {}
 
     return _logic_node
 
@@ -132,16 +134,19 @@ def _build_subgraph_node(
     )
 
     def _subgraph_node(state: BlackboardState) -> dict[str, Any]:
+        before_data = dict(state.get("data", {}))
         result = sub_assembled.graph.invoke(
             {
-                "data": state.setdefault("data", {}),
+                "data": before_data,
                 "flow": state.get("flow", {}),
                 "messages": [],
                 "run_id": state.get("run_id"),
             }
         )
+        result_data = result.get("data", before_data)
+        data_updates = _dict_delta(before_data, result_data) if isinstance(result_data, dict) else {}
         return {
-            "data": result.get("data", state.get("data", {})),
+            "data": data_updates,
             "flow": result.get("flow", state.get("flow", {})),
         }
 
@@ -196,8 +201,8 @@ def _build_skill_node(
         if chat_model is None:
             raise RuntimeError("[F-v21-graph] SKILL phase requires chat_model")
 
-        data = state.setdefault("data", {})
-        flow = state.setdefault("flow", {})
+        data_updates: dict[str, Any] = {}
+        flow = dict(state.get("flow", {}))
         messages = [SystemMessage(content=phase_ast.system_prompt), *state.get("messages", [])]
         model = chat_model.bind_tools(all_tools) if hasattr(chat_model, "bind_tools") else chat_model
 
@@ -224,7 +229,7 @@ def _build_skill_node(
                 if name == "finish_task":
                     flow["finish_task_result"] = result
                     if isinstance(result, dict) and result.get("ok"):
-                        data[phase_id] = result.get("data", {})
+                        data_updates[phase_id] = result.get("data", {})
                     flow.setdefault("critic_metrics", {}).update(
                         {
                             key: {
@@ -235,10 +240,20 @@ def _build_skill_node(
                             for key, value in critic_metrics.items()
                         }
                     )
-                    return {"data": data, "flow": flow, "messages": messages}
-        return {"data": data, "flow": flow, "messages": messages}
+                    response_state: dict[str, Any] = {"flow": flow, "messages": messages}
+                    if data_updates:
+                        response_state["data"] = data_updates
+                    return response_state
+        response_state = {"flow": flow, "messages": messages}
+        if data_updates:
+            response_state["data"] = data_updates
+        return response_state
 
     return _skill_node
+
+
+def _dict_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in after.items() if key not in before or before[key] != value}
 
 
 def _resolve_sub_skill_path(phase_path: Path, sub_skill_ref: str) -> Path:

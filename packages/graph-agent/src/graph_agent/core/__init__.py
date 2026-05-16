@@ -6,6 +6,7 @@ from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import (
     AllProvidersFailedError,
     GraphAgentError,
+    GraphAgentFatalError,
     MaxRetriesExceededError,
     SkillCompilationError,
     SkillLoadError,
@@ -24,6 +25,7 @@ __all__ = [
     "Phase",
     "WorkflowState",
     "GraphAgentError",
+    "GraphAgentFatalError",
     "SkillLoadError",
     "SkillCompilationError",
     "TemplateRenderError",

@@ -26,20 +26,23 @@
 | `graph-agent-state-mgmt-optimization` | ⚪ Backlog | R/D done, 实施 0 | 评估优先级 |
 | `studio-skill-git-system` | ⚪ Backlog (空 spec, 无 tasks) | — | 决定是否启动 |
 | `tauri-t3` | 🟢 Active (待起草 tasks) | 0/0 | a2 起草 tasks |
+| `studio-execution-loop` | 🟢 Drafting (R/D done) | 0/0 (tasks 未起草) | a1 起 backend tasks + apps master 起 frontend tasks |
 
 ---
 
 ## 当前活跃工作 (2026-05-17 晚)
 
-**主线**: baseline 重整阶段 (本次 user 要求, 见 [../STUDIO-BASELINE-2026-05-17.md](../STUDIO-BASELINE-2026-05-17.md))
+**主线**: baseline 重整 + 起新 spec 阶段
 
 **完成顺序**:
 1. ✅ 派 Gemini 设计科学文档索引 (taxonomy)
-2. ⏳ 应用索引重整文档 (本次, 进行中)
-3. ⏳ Playwright 实测 Studio 产出能力清单
-4. ⏳ 写 STUDIO-BASELINE-2026-05-17 完整版
-5. ⏳ Spec audit + archive 已 ship spec
-6. ⏳ 根据 baseline 规划下一个 spec (建议: Studio 执行态闭环)
+2. ✅ 应用索引重整文档 (commit a5d1c2f + 796ff74)
+3. ✅ Playwright 实测 Studio 产出能力清单 + 13 张截图归档 `docs/studio/screenshots-2026-05-17/`
+4. ✅ 写 STUDIO-BASELINE-2026-05-17 完整版 (§1.2 + §3.1 + §3.2 实测填完)
+5. ✅ 起 `studio-execution-loop` spec (research + requirements + design 三件, a2 主笔)
+6. ⏳ a1 起 backend tasks.md (P1.1-P1.3 + P3.1 backend 部分)
+7. ⏳ apps master 起 frontend tasks.md (P1.4 + P2.1-P2.2 + P3.1 frontend)
+8. ⏳ Spec audit + archive 已 ship spec (12 个待 archive)
 
 ---
 

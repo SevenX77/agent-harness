@@ -1,10 +1,11 @@
-import { Background, Controls, MiniMap, Panel, ReactFlow } from 'reactflow'
+import { Background, Controls, MarkerType, MiniMap, Panel, ReactFlow } from 'reactflow'
 import type { Connection, Edge, Node, NodeTypes, OnEdgesChange, OnNodesChange } from 'reactflow'
 import { useMemo } from 'react'
 import type { KeyboardEvent } from 'react'
 import { LayoutTemplate } from 'lucide-react'
 import { AgentNode, SubgraphNode } from '../CustomNodes'
 import type { StudioNodeData } from '../CustomNodes'
+import { getEdgeColor } from '../hooks/useEdgeColoring'
 import { errorMessage } from '../utils/errors'
 
 const nodeTypes = {
@@ -41,6 +42,17 @@ export function GraphCanvas({
   onPhaseSelect,
   onPhaseDoubleClick,
 }: GraphCanvasProps) {
+  const coloredEdges = useMemo(() => (
+    edges.map((edge) => {
+      const color = getEdgeColor(edge.source, isDarkMode)
+      return {
+        ...edge,
+        type: 'smoothstep',
+        style: { ...edge.style, stroke: color, strokeWidth: 2.5 },
+        markerEnd: { type: MarkerType.ArrowClosed, color },
+      }
+    })
+  ), [edges, isDarkMode])
   const visibleNodes = useMemo(() => (
     nodes.map((node) => ({
       ...node,
@@ -111,7 +123,7 @@ export function GraphCanvas({
       ) : (
         <ReactFlow
           nodes={visibleNodes}
-          edges={edges}
+          edges={coloredEdges}
           nodeTypes={nodeTypes}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}

@@ -19,6 +19,7 @@ from app.models.skills import (
     UpdateSkillReq,
 )
 from app.models.validation import ValidateInputReq, ValidateInputResponse
+from app.services.canvas_errors import CanvasConflictError
 from app.services.skills import (
     create_new_skill,
     fork_skill,
@@ -68,8 +69,25 @@ async def update_skill(
     user_id: str = Depends(get_auth_user_id),
     storage: StorageBackend = Depends(get_storage),
     metadata: MetadataStore = Depends(get_metadata),
-) -> SkillDetail:
-    return await update_skill_files(user_id, skill_id, request.files, storage, metadata)
+) -> SkillDetail | JSONResponse:
+    try:
+        return await update_skill_files(
+            user_id,
+            skill_id,
+            request.files,
+            storage,
+            metadata,
+            expected_hash=request.expected_hash,
+        )
+    except CanvasConflictError as exc:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "code": "snapshot_conflict",
+                "current_hash": exc.current_hash,
+                "current_markdown_content": exc.current_markdown_content,
+            },
+        )
 
 
 @router.post("/{skill_id}/fork", response_model=SkillSummary, status_code=201)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -25,6 +26,7 @@ from app.models.errors import LintError
 from app.models.lint import LintResult
 from app.models.runs import RunMetadata
 from app.models.skills import SkillDetail, SkillSummary
+from app.services.canvas_errors import CanvasConflictError
 
 _LOCATION_RE = re.compile(r":(?P<line>\d+)(?::(?P<loc>.*))?")
 _NAME_LINE_RE = re.compile(
@@ -239,8 +241,20 @@ async def update_skill_files(
     files: dict[str, str],
     storage: StorageBackend,
     metadata: MetadataStore,
+    *,
+    expected_hash: str | None = None,
 ) -> SkillDetail:
     """Persist a full V2.1 skill file map and return the compiled detail."""
+    if expected_hash is not None:
+        current_dir = await resolve_skill_dir_async(user_id, skill_id, storage)
+        current_markdown = _read_current_graph_markdown(current_dir)
+        current_hash = _graph_content_hash(current_markdown)
+        if current_hash != expected_hash:
+            raise CanvasConflictError(
+                current_hash=current_hash,
+                current_markdown_content=current_markdown,
+            )
+
     skill_dir = await ensure_workspace_skill_dir_async(user_id, skill_id, storage)
     write_skill_files_atomic(skill_dir, files)
     lint = lint_skill_path(skill_dir)
@@ -605,6 +619,17 @@ def _read_skill_files(skill_dir: Path) -> dict[str, str]:
             continue
         files[rel_path] = path.read_text(encoding="utf-8")
     return files
+
+
+def _read_current_graph_markdown(skill_dir: Path) -> str:
+    graph_path = skill_dir / "GRAPH.md"
+    if not graph_path.exists():
+        return ""
+    return graph_path.read_text(encoding="utf-8")
+
+
+def _graph_content_hash(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def _load_compiled(skill_path: Path) -> CompiledSkill:

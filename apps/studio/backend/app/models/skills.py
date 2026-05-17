@@ -55,3 +55,4 @@ class UpdateSkillReq(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     files: dict[str, str]
+    expected_hash: str | None = None

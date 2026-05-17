@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { toast } from "sonner"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { GraphCanvas, type SkillGraphNodeData } from "@/components/GraphCanvas"
 import { CopilotPanel } from "@/components/copilot/copilot-panel"
@@ -6,12 +7,23 @@ import { useCopilotContext } from "@/hooks/useCopilotContext"
 import { readLintStatus } from "@/hooks/useDebouncedLint"
 import { useSkills } from "@/hooks/useSkills"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
+import { getSkillDetail, wsUrl } from "@/api/client"
+import { sha256Hex } from "@/lib/hash"
 import { CenterActionBar, type SkillBuildStage } from "./center-action-bar"
+import { ConflictDialog } from "./ConflictDialog"
 import { Header } from "./Header"
-import { Panels, type FileMeta } from "./Panels"
+import { Panels } from "./Panels"
 import { SettingsPage } from "./SettingsPage"
 import { SplitEditor } from "./SplitEditor"
 import { Toolbar, type PanelKind } from "./Toolbar"
+import type { FileMeta } from "./file-types"
+import {
+  WorkspaceProvider,
+  type EditorSide,
+  type OpenFile,
+  type SaveConflict,
+  type WorkspaceContextValue,
+} from "./WorkspaceContext"
 
 interface WorkspaceProps {
   skillId: string | null
@@ -20,28 +32,34 @@ interface WorkspaceProps {
 }
 
 export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspaceProps) {
+  const [navStack, setNavStack] = useState<string[]>(() => (skillId ? [skillId] : []))
   const [activePanel, setActivePanel] = useState<PanelKind | null>(skillId ? "assets" : null)
   const [copilotOpen, setCopilotOpen] = useState(Boolean(skillId))
+  const currentSkillId = navStack.at(-1) ?? null
 
   useEffect(() => {
     if (skillId === null) {
+      setNavStack([])
       setActivePanel(null)
       setCopilotOpen(false)
     } else {
+      setNavStack([skillId])
       setActivePanel("assets")
       setCopilotOpen(true)
     }
   }, [skillId])
-  const [openFile, setOpenFile] = useState<FileMeta | null>(null)
+  const [activeFileDetails, setActiveFileDetails] = useState<Partial<Record<EditorSide, OpenFile>>>({})
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [fileDrafts, setFileDrafts] = useState<Record<string, string>>({})
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedNode, setSelectedNode] = useState<{ id: string; data: SkillGraphNodeData } | null>(null)
-  const { skillDetail, skillDetailError, mutateSkillDetail } = useSkills(skillId)
-  const isLoading = useMemo(() => Boolean(skillId && !skillDetail && !skillDetailError), [skillDetail, skillDetailError, skillId])
+  const [inFlight, setInFlight] = useState<Partial<Record<EditorSide, boolean>>>({})
+  const inFlightRef = useRef<Partial<Record<EditorSide, boolean>>>({})
+  const [conflict, setConflict] = useState<SaveConflict | null>(null)
+  const { skillDetail, skillDetailError, mutateSkillDetail } = useSkills(currentSkillId)
+  const isLoading = useMemo(() => Boolean(currentSkillId && !skillDetail && !skillDetailError), [skillDetail, skillDetailError, currentSkillId])
 
   useCopilotContext({
-    skillId,
+    skillId: currentSkillId,
     view: "Edit",
     context: {
       selected_node_id: selectedNodeId,
@@ -53,19 +71,205 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
             summary: typeof selectedNode.data.summary === "string" ? selectedNode.data.summary : null,
           }
         : null,
-      lint_status: skillId ? readLintStatus(skillId) : "idle",
+      lint_status: currentSkillId ? readLintStatus(currentSkillId) : "idle",
     },
   })
+
+  useEffect(() => {
+    inFlightRef.current = inFlight
+  }, [inFlight])
 
   const handleNodeSelect = (node: { id: string; data: SkillGraphNodeData }) => {
     setSelectedNodeId(node.id)
     setSelectedNode(node)
   }
 
-  const handleFileOpen = (file: FileMeta) => {
-    setOpenFile(file)
+  const toOpenFile = useCallback(async (fileOrPath: FileMeta | string): Promise<OpenFile | null> => {
+    if (!currentSkillId) return null
+    const currentFiles = skillDetail?.files ?? {}
+    const rawPath = typeof fileOrPath === "string" ? fileOrPath : fileOrPath.path
+    const prefix = `${currentSkillId}/`
+    const path = rawPath.startsWith(prefix) ? rawPath.slice(prefix.length) : rawPath
+    const content = typeof fileOrPath === "string" ? currentFiles[path] ?? "" : fileOrPath.content
+    const language = typeof fileOrPath === "string" ? languageForPath(path) : fileOrPath.language
+    return {
+      path,
+      language,
+      content,
+      hash: await sha256Hex(content),
+      skillId: currentSkillId,
+    }
+  }, [currentSkillId, skillDetail?.files])
+
+  const handleFileOpen = useCallback((fileOrPath: FileMeta | string, side?: EditorSide) => {
     setSettingsOpen(false)
-  }
+    void toOpenFile(fileOrPath).then((file) => {
+      if (!file) return
+      setActiveFileDetails((current) => {
+        const targetSide = side ?? (current.left ? "right" : "left")
+        return { ...current, [targetSide]: file }
+      })
+    })
+  }, [toOpenFile])
+
+  const closeFile = useCallback((side: EditorSide) => {
+    setActiveFileDetails((current) => ({ ...current, [side]: undefined }))
+    setInFlight((current) => ({ ...current, [side]: false }))
+  }, [])
+
+  const updateFileContent = useCallback((side: EditorSide, content: string) => {
+    setActiveFileDetails((current) => {
+      const file = current[side]
+      return file ? { ...current, [side]: { ...file, content } } : current
+    })
+  }, [])
+
+  const markFileSaved = useCallback((side: EditorSide, hash: string) => {
+    setActiveFileDetails((current) => {
+      const file = current[side]
+      return file ? { ...current, [side]: { ...file, hash } } : current
+    })
+    void mutateSkillDetail()
+  }, [mutateSkillDetail])
+
+  const setFileInFlight = useCallback((side: EditorSide, active: boolean) => {
+    setInFlight((current) => ({ ...current, [side]: active }))
+  }, [])
+
+  const reloadOpenFile = useCallback(async (side: EditorSide) => {
+    const file = activeFileDetails[side]
+    if (!file) return
+    const detail = await getSkillDetail(file.skillId)
+    const content = detail.files?.[file.path]
+    if (content === undefined) return
+    const hash = await sha256Hex(content)
+    setActiveFileDetails((current) => ({
+      ...current,
+      [side]: { ...file, content, hash, saveEnabled: true, title: undefined },
+    }))
+    void mutateSkillDetail(detail, { revalidate: false })
+  }, [activeFileDetails, mutateSkillDetail])
+
+  const handleUseRemote = useCallback(() => {
+    if (!conflict) return
+    setActiveFileDetails((current) => {
+      const currentFile = current[conflict.side]
+      if (!currentFile) return current
+      return {
+        ...current,
+        [conflict.side]: {
+          ...currentFile,
+          content: conflict.remoteContent,
+          hash: conflict.remoteHash,
+          saveEnabled: true,
+          title: undefined,
+        },
+      }
+    })
+    setConflict(null)
+  }, [conflict])
+
+  const handleViewDiff = useCallback(() => {
+    if (!conflict) return
+    setActiveFileDetails((current) => ({
+      ...current,
+      right: {
+        path: conflict.path,
+        title: `${conflict.path} remote`,
+        language: languageForPath(conflict.path),
+        content: conflict.remoteContent,
+        hash: conflict.remoteHash,
+        skillId: conflict.skillId,
+        saveEnabled: false,
+      },
+    }))
+    setConflict(null)
+  }, [conflict])
+
+  const pushNavSkill = useCallback((nextSkillId: string) => {
+    setNavStack((current) => [...current, nextSkillId])
+    setActiveFileDetails({})
+    setSelectedNode(null)
+    setSelectedNodeId(null)
+  }, [])
+
+  const popNavTo = useCallback((index: number) => {
+    setNavStack((current) => current.slice(0, index + 1))
+    setActiveFileDetails({})
+    setSelectedNode(null)
+    setSelectedNodeId(null)
+  }, [])
+
+  useEffect(() => {
+    if (!currentSkillId) return
+    const socket = new WebSocket(wsUrl("/ws/events"))
+    socket.onmessage = (message) => {
+      try {
+        const event = JSON.parse(String(message.data)) as { type?: string, skill_id?: string, path?: string }
+        if (event.type !== "skill_changed" || event.skill_id !== currentSkillId || !event.path) return
+        const entries = (["left", "right"] as const).filter((side) => activeFileDetails[side]?.path === event.path)
+        for (const side of entries) {
+          const file = activeFileDetails[side]
+          if (!file) continue
+          void getSkillDetail(currentSkillId).then(async (detail) => {
+            const remoteContent = detail.files?.[event.path ?? ""]
+            if (remoteContent === undefined) return
+            const remoteHash = await sha256Hex(remoteContent)
+            if (inFlightRef.current[side]) {
+              setConflict({
+                skillId: currentSkillId,
+                path: event.path ?? file.path,
+                side,
+                localContent: file.content,
+                remoteContent,
+                remoteHash,
+              })
+            } else {
+              setActiveFileDetails((current) => ({
+                ...current,
+                [side]: { ...file, content: remoteContent, hash: remoteHash },
+              }))
+              void mutateSkillDetail(detail, { revalidate: false })
+            }
+          })
+        }
+      } catch {
+        toast.error("Could not process file change event")
+      }
+    }
+    return () => socket.close()
+  }, [activeFileDetails, currentSkillId, mutateSkillDetail])
+
+  const contextValue = useMemo<WorkspaceContextValue>(() => ({
+    currentSkillId,
+    navStack,
+    activeFiles: {
+      left: activeFileDetails.left?.path,
+      right: activeFileDetails.right?.path,
+    },
+    activeFileDetails,
+    onFileOpen: handleFileOpen,
+    closeFile,
+    updateFileContent,
+    markFileSaved,
+    setFileInFlight,
+    onSaveConflict: setConflict,
+    reloadOpenFile,
+    pushNavSkill,
+    popNavTo,
+  }), [
+    activeFileDetails,
+    closeFile,
+    currentSkillId,
+    handleFileOpen,
+    markFileSaved,
+    navStack,
+    popNavTo,
+    pushNavSkill,
+    reloadOpenFile,
+    setFileInFlight,
+    updateFileContent,
+  ])
 
   const deriveBuildStage = (id: string): SkillBuildStage => {
     const lint = readLintStatus(id)
@@ -75,10 +279,15 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     return "idle"
   }
 
+  const hasOpenFile = Boolean(activeFileDetails.left || activeFileDetails.right)
+
   return (
+    <WorkspaceProvider value={contextValue}>
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
       <Header
-        skillId={skillId}
+        skillId={currentSkillId}
+        navStack={navStack}
+        onBreadcrumbClick={popNavTo}
         copilotOpen={copilotOpen}
         onCopilotToggle={() => setCopilotOpen((open) => !open)}
         onHome={onCloseSkill}
@@ -109,10 +318,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
               >
                 <Panels
                   activePanel={activePanel}
-                  skillId={skillId}
+                  skillId={currentSkillId}
                   skillDetail={skillDetail}
                   selectedNode={selectedNode}
-                  onFileOpen={handleFileOpen}
                 />
               </ResizablePanel>
               <ResizableHandle />
@@ -123,25 +331,21 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
             <div className="relative size-full">
               {settingsOpen ? (
                 <SettingsPage onClose={() => setSettingsOpen(false)} />
-              ) : skillId && openFile ? (
+              ) : currentSkillId && hasOpenFile ? (
                 <SplitEditor
-                  file={openFile}
-                  value={fileDrafts[openFile.path] ?? openFile.content}
-                  onChange={(value) => setFileDrafts((current) => ({ ...current, [openFile.path]: value }))}
-                  onCloseFile={() => setOpenFile(null)}
-                  skillId={skillId}
+                  skillId={currentSkillId}
                   skillDetail={skillDetail}
                   isLoading={isLoading}
                   error={skillDetailError}
                   selectedNodeId={selectedNodeId}
                   onNodeSelect={handleNodeSelect}
                 />
-              ) : skillId === null ? (
+              ) : currentSkillId === null ? (
                 <WelcomePage onSelectSkill={onSelectSkill} />
               ) : (
                 <>
                   <GraphCanvas
-                    skillId={skillId}
+                    skillId={currentSkillId}
                     skillDetail={skillDetail}
                     isLoading={isLoading}
                     error={skillDetailError}
@@ -149,7 +353,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                     onNodeSelect={handleNodeSelect}
                   />
                   <CenterActionBar
-                    stage={deriveBuildStage(skillId)}
+                    stage={deriveBuildStage(currentSkillId)}
                     onCompile={() => console.info("compile clicked")}
                     onPredict={() => console.info("predict clicked")}
                     onRun={() => console.info("run clicked")}
@@ -174,6 +378,19 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
           ) : null}
         </ResizablePanelGroup>
       </div>
+      <ConflictDialog
+        conflict={conflict}
+        onKeepLocal={() => setConflict(null)}
+        onUseRemote={handleUseRemote}
+        onViewDiff={handleViewDiff}
+      />
     </div>
+    </WorkspaceProvider>
   )
+}
+
+function languageForPath(path: string): string {
+  if (path.endsWith(".json")) return "json"
+  if (path.endsWith(".py")) return "python"
+  return "markdown"
 }

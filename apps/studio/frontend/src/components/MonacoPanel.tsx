@@ -19,6 +19,7 @@ interface MonacoPanelProps {
   lintErrors: LintError[]
   node_schema_v21?: Record<string, JsonObject>
   io_schema?: Record<string, JsonObject>
+  readOnly?: boolean
   onEditorMount?: EditorOnMount
   onContentChange: (path: string, content: string) => void
   onJumpToLine: (line: number | null, file?: string | null) => void
@@ -107,6 +108,7 @@ export function MonacoPanel({
   lintErrors,
   node_schema_v21,
   io_schema,
+  readOnly = false,
   onEditorMount,
   onContentChange,
   onJumpToLine,
@@ -129,8 +131,12 @@ export function MonacoPanel({
 
     const model = getOrCreateModel(monaco, activeFile, files[activeFile] ?? '')
     editor.setModel(model)
+    editor.updateOptions({ readOnly })
     monaco.editor.setModelMarkers(model, 'studio-lint', lintMarkersForPath(monaco, activeFile, lintErrors))
     changeSubscriptionRef.current = model.onDidChangeContent(() => {
+      if (readOnly) {
+        return
+      }
       onContentChange(activeFile, model.getValue())
     })
 
@@ -138,7 +144,7 @@ export function MonacoPanel({
       changeSubscriptionRef.current?.dispose()
       changeSubscriptionRef.current = null
     }
-  }, [activeFile, files, lintErrors, onContentChange])
+  }, [activeFile, files, lintErrors, onContentChange, readOnly])
 
   useEffect(() => {
     const monaco = monacoRef.current
@@ -206,6 +212,7 @@ export function MonacoPanel({
           options={{
             minimap: { enabled: false },
             fontSize: 13,
+            readOnly,
             wordWrap: 'on',
             scrollBeyondLastLine: false,
           }}

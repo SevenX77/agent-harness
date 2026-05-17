@@ -18,6 +18,16 @@ StudioEvent = dict[str, str]
 STUDIO_EVENTS_TOPIC = InMemoryEventBus.DEFAULT_TOPIC
 
 
+def _changed_file(path: Path, skill_id: str) -> str:
+    parts = path.parts
+    try:
+        index = parts.index(skill_id)
+    except ValueError:
+        return path.name
+    relative_parts = parts[index + 1 :]
+    return "/".join(relative_parts) if relative_parts else path.name
+
+
 class _SkillChangeHandler(FileSystemEventHandler):
     """watchdog handler that converts file changes into skill_changed events."""
 
@@ -42,7 +52,11 @@ class _SkillChangeHandler(FileSystemEventHandler):
         skill_id = skill_id_from_changed_path(path)
         if skill_id is None:
             return
-        self._bus.broadcast_from_thread({"type": "skill_changed", "skill_id": skill_id})
+        self._bus.broadcast_from_thread({
+            "type": "skill_changed",
+            "skill_id": skill_id,
+            "file": _changed_file(path, skill_id),
+        })
 
 
 class FileWatcherManager:
@@ -77,7 +91,11 @@ class FileWatcherManager:
     def notify_path_changed(self, path: Path) -> None:
         skill_id = skill_id_from_changed_path(path)
         if skill_id is not None:
-            self._bus.broadcast_from_thread({"type": "skill_changed", "skill_id": skill_id})
+            self._bus.broadcast_from_thread({
+                "type": "skill_changed",
+                "skill_id": skill_id,
+                "file": _changed_file(path, skill_id),
+            })
 
 
 event_bus = cast(InMemoryEventBus, get_eventbus())

@@ -13,6 +13,8 @@ interface HeaderBarProps {
   runStatus: RunStatus
   dirty: boolean
   saveDisabled?: boolean
+  saveDirty?: boolean
+  saveBusy?: boolean
   onToggleArtifactsMenu: () => void
   onLint: () => void
   onSave: () => void
@@ -30,6 +32,8 @@ export function HeaderBar({
   runStatus,
   dirty,
   saveDisabled = false,
+  saveDirty = false,
+  saveBusy = false,
   onToggleArtifactsMenu,
   onLint,
   onSave,
@@ -76,11 +80,15 @@ export function HeaderBar({
           type="button"
           aria-label="Save"
           onClick={onSave}
-          disabled={!selectedSkillId || lintStatus === 'checking' || saveDisabled}
-          className="flex items-center gap-2 rounded-md border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-1.5 font-medium text-gray-700 dark:text-gray-300 transition-colors hover:bg-gray-50 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={!selectedSkillId || lintStatus === 'checking' || saveDisabled || saveBusy}
+          className={`flex items-center gap-2 rounded-md px-4 py-1.5 font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+            saveDirty
+              ? 'border border-sky-600 bg-sky-600 text-white hover:bg-sky-700 dark:border-sky-500 dark:bg-sky-600 dark:hover:bg-sky-500'
+              : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-800 dark:text-gray-300 dark:hover:bg-slate-700'
+          }`}
         >
           <Save className="h-4 w-4" />
-          Save
+          {saveBusy ? 'Saving...' : 'Save'}
         </button>
 
         <button

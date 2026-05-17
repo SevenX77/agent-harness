@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { addEdge, MarkerType, useEdgesState, useNodesState } from 'reactflow'
-import type { Connection } from 'reactflow'
+import type { Connection, EdgeChange, NodeChange } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { GraphCanvas } from './components/GraphCanvas'
 import { HeaderBar } from './components/HeaderBar'
@@ -19,7 +19,7 @@ import { SkillPalette } from './components/shortcuts/SkillPalette'
 import { ToastStack } from './components/ToastStack'
 import { WelcomeScreen } from './components/WelcomeScreen'
 import type { EditorOnMount, MonacoApi, MonacoEditor } from './components/MonacoPanel'
-import { api, fetchSkillFiles, saveSkillFiles, wsUrl } from './api/client'
+import { api, fetchSkillFiles, serializeGraph, updateSkillFiles, wsUrl } from './api/client'
 import type {
   CallbackEvent,
   JsonObject,
@@ -30,6 +30,7 @@ import type {
   SkillDetail,
   SkillManifest,
   SkillSummary,
+  StudioGlobalEvent,
   TerminalSession,
 } from './api/types'
 import { useBatchRun } from './hooks/useBatchRun'
@@ -60,6 +61,8 @@ import type {
   VisualPhase,
 } from './types/studio'
 import { errorMessage, isRecord, lintErrorsFromError } from './utils/errors'
+import { saveCanvasGraph } from './utils/canvasSave'
+import { decideGraphReload } from './utils/canvasReload'
 import { buildGraph, graphSkill, subgraphSkillId } from './utils/graph'
 import { manifestToSkillMarkdown } from './utils/skillMarkdown'
 import { verifyTauriWindowIpc } from './utils/tauriIpc'
@@ -81,6 +84,21 @@ function phaseLineFor(source: string, phaseName: string): number | null {
 
 function isErrorTraceEvent(event: CallbackEvent): boolean {
   return event.event_type === 'internal_error' || event.event_type === 'validation_fail'
+}
+
+function isTopologyNodeChange(change: NodeChange): boolean {
+  return change.type !== 'position' && change.type !== 'dimensions' && change.type !== 'select'
+}
+
+function isTopologyEdgeChange(change: EdgeChange): boolean {
+  return change.type !== 'select'
+}
+
+function isConflictResponse(error: unknown): boolean {
+  if (!isRecord(error) || !isRecord(error.response)) {
+    return false
+  }
+  return error.response.status === 409
 }
 
 function findSubgraphTargetSkillId(detail: SkillDetail, phaseId: string): string | null {
@@ -114,6 +132,11 @@ export default function App() {
   const [activeSkillId, setActiveSkillId] = useState<string | null>(null)
   const navStack = useCanvasStore((state) => state.navStack)
   const setCanvasRoot = useCanvasStore((state) => state.setRoot)
+  const canvasDirty = useCanvasStore((state) => state.isDirty)
+  const canvasSaving = useCanvasStore((state) => state.isSaving)
+  const markCanvasDirty = useCanvasStore((state) => state.markDirty)
+  const markCanvasSaved = useCanvasStore((state) => state.markSaved)
+  const setCanvasSaving = useCanvasStore((state) => state.setSaving)
   const pushCanvas = useCanvasStore((state) => state.push)
   const popCanvas = useCanvasStore((state) => state.pop)
   const jumpCanvasTo = useCanvasStore((state) => state.jumpTo)
@@ -134,8 +157,8 @@ export default function App() {
     mutateSkillDetail,
   } = useSkills(selectedSkillId)
 
-  const [nodes, setNodes, onNodesChange] = useNodesState([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState([])
+  const [nodes, setNodes, applyNodesChange] = useNodesState([])
+  const [edges, setEdges, applyEdgesChange] = useEdgesState([])
   const [lintOverride, setLintOverride] = useState<LintOverride | null>(null)
   const [runStatus, setRunStatus] = useState<RunStatus>('idle')
   const [activeTab, setActiveTab] = useState<ActiveTab>('code')
@@ -156,11 +179,14 @@ export default function App() {
   const [skillPaletteOpen, setSkillPaletteOpen] = useState(false)
   const [cheatSheetOpen, setCheatSheetOpen] = useState(false)
   const [restorePromptSkillId, setRestorePromptSkillId] = useState<string | null>(null)
+  const [graphReloadPromptSkillId, setGraphReloadPromptSkillId] = useState<string | null>(null)
+  const [canvasConflictSkillId, setCanvasConflictSkillId] = useState<string | null>(null)
   const [dismissedDraftSkillId, setDismissedDraftSkillId] = useState<string | null>(null)
   const [pendingJumpLine, setPendingJumpLine] = useState<number | null>(null)
   const editorRef = useRef<MonacoEditor | null>(null)
   const monacoRef = useRef<MonacoApi | null>(null)
   const runWsRef = useRef<WebSocket | null>(null)
+  const ignoreOwnSaveEventsRef = useRef<{ skillId: string, until: number } | null>(null)
   const goldenDiff = useGoldenDiff(selectedSkillId, lastRunId)
   const batchRun = useBatchRun(selectedSkillId)
   const workspaceFiles = useWorkspaceStore((state) => state.files)
@@ -306,7 +332,7 @@ export default function App() {
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!workspaceIsDirty) {
+      if (!workspaceIsDirty && !canvasDirty) {
         return
       }
       event.preventDefault()
@@ -314,7 +340,20 @@ export default function App() {
     }
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [workspaceIsDirty])
+  }, [canvasDirty, workspaceIsDirty])
+
+  const reloadCurrentSkillDetail = useCallback(async (skillId: string) => {
+    const detail = await fetchSkillFiles(skillId)
+    await mutateSkillDetail(detail, { revalidate: false })
+    const files = Object.keys(detail.files).length > 0
+      ? detail.files
+      : { 'SKILL.md': manifestToSkillMarkdown(detail.manifest) }
+    setWorkspaceFiles(files)
+    loadedWorkspaceSkillIdRef.current = skillId
+    markCanvasSaved()
+    useWorkspaceStore.getState().markSaved()
+    return detail
+  }, [markCanvasSaved, mutateSkillDetail, setWorkspaceFiles])
 
   useEffect(() => {
     const socket = new WebSocket(wsUrl('/ws/events'))
@@ -323,19 +362,42 @@ export default function App() {
       if (!isRecord(parsed) || parsed.type !== 'skill_changed' || typeof parsed.skill_id !== 'string') {
         return
       }
-
-      pushToast(`Skill changed: ${parsed.skill_id}`, 'info')
-      if (parsed.skill_id === selectedSkillId) {
-        void mutateSkillDetail()
+      const event: StudioGlobalEvent = {
+        type: 'skill_changed',
+        skill_id: parsed.skill_id,
+        file: typeof parsed.file === 'string' ? parsed.file : null,
       }
+      const ignoredSaveEvent = ignoreOwnSaveEventsRef.current
+      if (
+        ignoredSaveEvent
+        && ignoredSaveEvent.skillId === event.skill_id
+        && Date.now() < ignoredSaveEvent.until
+      ) {
+        return
+      }
+
+      const decision = decideGraphReload(event, selectedSkillId, canvasDirty)
+      if (decision === 'prompt') {
+        setGraphReloadPromptSkillId(event.skill_id)
+        pushToast(`GRAPH.md changed externally: ${event.skill_id}`, 'info')
+        return
+      }
+      if (decision === 'reload') {
+        void reloadCurrentSkillDetail(event.skill_id)
+          .then(() => pushToast(`Reloaded GRAPH.md: ${event.skill_id}`, 'info'))
+          .catch((error: unknown) => pushToast(errorMessage(error), 'error'))
+        return
+      }
+      pushToast(`Skill changed: ${event.skill_id}`, 'info')
     }
     socket.onerror = () => pushToast('Studio event stream disconnected', 'error')
     return () => socket.close()
-  }, [mutateSkillDetail, pushToast, selectedSkillId])
+  }, [canvasDirty, pushToast, reloadCurrentSkillDetail, selectedSkillId])
 
   useEffect(() => () => runWsRef.current?.close(), [])
 
   const onConnect = useCallback((params: Connection) => {
+    markCanvasDirty()
     const nextEdges = addEdge({
       ...params,
       animated: true,
@@ -345,7 +407,21 @@ export default function App() {
     const layouted = getLayoutedElements(nodes, nextEdges)
     setNodes(layouted.nodes)
     setEdges(layouted.edges)
-  }, [edges, nodes, setEdges, setNodes])
+  }, [edges, markCanvasDirty, nodes, setEdges, setNodes])
+
+  const onNodesChange = useCallback((changes: NodeChange[]) => {
+    if (changes.some(isTopologyNodeChange)) {
+      markCanvasDirty()
+    }
+    applyNodesChange(changes)
+  }, [applyNodesChange, markCanvasDirty])
+
+  const onEdgesChange = useCallback((changes: EdgeChange[]) => {
+    if (changes.some(isTopologyEdgeChange)) {
+      markCanvasDirty()
+    }
+    applyEdgesChange(changes)
+  }, [applyEdgesChange, markCanvasDirty])
 
   const handleResetLayout = useCallback(() => {
     const layouted = getLayoutedElements(nodes, edges)
@@ -356,7 +432,8 @@ export default function App() {
   const resetCanvasTransientState = useCallback(() => {
     setExpandedSubgraphs(new Set())
     setNestedManifests({})
-    setLintOverride(null)
+      setLintOverride(null)
+      markCanvasSaved()
     setRunStatus('idle')
     setTraceLogs([])
     setLastRunId(null)
@@ -364,13 +441,13 @@ export default function App() {
     setPhaseDrawerPhaseId(null)
     setSelectedPromptIndex(null)
     setActiveTab('code')
-  }, [goldenDiff])
+  }, [goldenDiff, markCanvasSaved])
 
   const handleSelectSkill = useCallback(async (skillId: string) => {
     if (skillId === selectedSkillId) {
       return
     }
-    if (workspaceIsDirty && selectedSkillId && !window.confirm('Unsaved changes in current skill, switch anyway?')) {
+    if ((workspaceIsDirty || canvasDirty) && selectedSkillId && !window.confirm('Unsaved changes in current skill, switch anyway?')) {
       return
     }
     try {
@@ -396,6 +473,7 @@ export default function App() {
     setCanvasRoot,
     setWorkspaceFiles,
     workspaceIsDirty,
+    canvasDirty,
   ])
 
   const handleLint = useCallback(async () => {
@@ -415,29 +493,56 @@ export default function App() {
   }, [pushToast, selectedSkillId])
 
   const handleSave = useCallback(async () => {
-    if (!selectedSkillId || canvasReadOnly) {
+    if (!selectedSkillId || canvasReadOnly || canvasSaving) {
       return
     }
 
     setLintOverride({ skillId: selectedSkillId, status: 'checking', errors: [] })
+    setCanvasSaving(true)
     try {
       const { files } = useWorkspaceStore.getState()
-      const response = await saveSkillFiles(selectedSkillId, files)
-      await mutateSkillDetail(response, { revalidate: false })
+      const response = await saveCanvasGraph(
+        { serializeGraph, updateSkillFiles },
+        selectedSkillId,
+        nodes,
+        edges,
+        files,
+      )
+      await mutateSkillDetail(response.detail, { revalidate: false })
       useWorkspaceStore.getState().markSaved()
+      markCanvasSaved()
+      ignoreOwnSaveEventsRef.current = { skillId: selectedSkillId, until: Date.now() + 500 }
       setLintOverride({
         skillId: selectedSkillId,
-        status: response.lint_result?.status ?? 'passed',
-        errors: response.lint_result?.errors ?? [],
+        status: response.detail.lint_result?.status ?? 'passed',
+        errors: response.detail.lint_result?.errors ?? [],
       })
       clearDraft()
-      pushToast('Saved and linted successfully', 'success')
+      pushToast('Canvas saved successfully', 'success')
     } catch (error) {
+      if (isConflictResponse(error)) {
+        setCanvasConflictSkillId(selectedSkillId)
+        pushToast('其他人/终端修改了此文件，保存失败', 'error')
+        return
+      }
       const errors = lintErrorsFromError(error)
       setLintOverride({ skillId: selectedSkillId, status: 'failed', errors })
       pushToast(errorMessage(error), 'error')
+    } finally {
+      setCanvasSaving(false)
     }
-  }, [canvasReadOnly, clearDraft, mutateSkillDetail, pushToast, selectedSkillId])
+  }, [
+    canvasReadOnly,
+    canvasSaving,
+    clearDraft,
+    edges,
+    markCanvasSaved,
+    mutateSkillDetail,
+    nodes,
+    pushToast,
+    selectedSkillId,
+    setCanvasSaving,
+  ])
 
   const handleEditorMount: EditorOnMount = useCallback((editor, monaco) => {
     editorRef.current = editor
@@ -803,7 +908,7 @@ export default function App() {
       label: 'Save and lint',
       description: 'Persist SKILL.md and run backend lint validation.',
       hotkey: 'mod+s',
-      disabled: !selectedSkillId || canvasReadOnly,
+      disabled: !selectedSkillId || canvasReadOnly || canvasSaving,
       run: () => void handleSave(),
     },
     {
@@ -855,7 +960,7 @@ export default function App() {
       hotkey: '?',
       run: () => setCheatSheetOpen(true),
     },
-  ], [canRun, canvasReadOnly, handleRun, handleSave, openTerminal, runStatus, selectedSkillId, setIsDarkMode])
+  ], [canRun, canvasReadOnly, canvasSaving, handleRun, handleSave, openTerminal, runStatus, selectedSkillId, setIsDarkMode])
 
   const closeTopLayer = useCallback(() => {
     if (cheatSheetOpen) {
@@ -960,15 +1065,17 @@ export default function App() {
               isArtifactsMenuOpen={isArtifactsMenuOpen}
               lintStatus={lintStatus}
               runStatus={runStatus}
-              dirty={workspaceIsDirty && !canvasReadOnly}
+              dirty={(workspaceIsDirty || canvasDirty) && !canvasReadOnly}
               saveDisabled={canvasReadOnly}
+              saveDirty={(workspaceIsDirty || canvasDirty) && !canvasReadOnly}
+              saveBusy={canvasSaving}
               onToggleArtifactsMenu={() => setIsArtifactsMenuOpen((open) => !open)}
               onLint={() => void handleLint()}
               onSave={() => void handleSave()}
               onOpenTerminal={() => void openTerminal()}
               onRun={() => void handleRun()}
             />
-            {canvasReadOnly ? null : <DirtyBar onSave={() => void handleSave()} />}
+            {canvasReadOnly || (!workspaceIsDirty && !canvasDirty) ? null : <DirtyBar onSave={() => void handleSave()} />}
             <div className="flex flex-1 overflow-hidden">
               <GraphCanvas
                 currentSkillName={currentCanvasName}
@@ -1063,6 +1170,78 @@ export default function App() {
           setRestorePromptSkillId(null)
         }}
       />
+      {graphReloadPromptSkillId === selectedSkillId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-md border border-amber-200 bg-white p-5 shadow-xl dark:border-amber-800 dark:bg-slate-900">
+            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">GRAPH.md changed externally</h2>
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+              外部修改了文件，是否丢弃本地画布修改并加载最新版本？
+            </p>
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setGraphReloadPromptSkillId(null)}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-slate-700 dark:text-gray-200 dark:hover:bg-slate-800"
+              >
+                Keep Local
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!selectedSkillId) {
+                    return
+                  }
+                  void reloadCurrentSkillDetail(selectedSkillId)
+                    .then(() => {
+                      setGraphReloadPromptSkillId(null)
+                      pushToast('Reloaded latest GRAPH.md', 'success')
+                    })
+                    .catch((error: unknown) => pushToast(errorMessage(error), 'error'))
+                }}
+                className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-sky-700"
+              >
+                Reload
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {canvasConflictSkillId === selectedSkillId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-md border border-red-200 bg-white p-5 shadow-xl dark:border-red-800 dark:bg-slate-900">
+            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">Save conflict</h2>
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+              其他人/终端修改了此文件，保存失败。可以丢弃本地修改并重载最新版本，或保留本地修改手动解决。
+            </p>
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setCanvasConflictSkillId(null)}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-slate-700 dark:text-gray-200 dark:hover:bg-slate-800"
+              >
+                Merge
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!selectedSkillId) {
+                    return
+                  }
+                  void reloadCurrentSkillDetail(selectedSkillId)
+                    .then(() => {
+                      setCanvasConflictSkillId(null)
+                      pushToast('Reloaded latest GRAPH.md', 'success')
+                    })
+                    .catch((error: unknown) => pushToast(errorMessage(error), 'error'))
+                }}
+                className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-sky-700"
+              >
+                Reload
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <PhaseDrawer
         open={phaseDrawerPhaseId !== null && phaseForm.phase !== null}
         phaseId={phaseDrawerPhaseId}

@@ -11,6 +11,7 @@ import type {
   RunMetadata,
   SkillDetail,
   SyncSkillReq,
+  UpdateSkillFileRes,
 } from './types'
 
 export const API_BASE_URL = import.meta.env.VITE_STUDIO_API_BASE_URL ?? 'http://localhost:8787/api'
@@ -127,5 +128,24 @@ export async function getLocalHistory(skillId: string): Promise<GitHistoryItem[]
 
 export async function revertSkill(skillId: string, sha: string): Promise<SkillDetail> {
   const response = await api.post<SkillDetail>(`/skills/${skillId}/revert`, { sha })
+  return response.data
+}
+
+export async function getSkillDetail(skillId: string): Promise<SkillDetail> {
+  const response = await api.get<SkillDetail>(`/skills/${skillId}`)
+  return response.data
+}
+
+export async function writeSkillFile(
+  skillId: string,
+  path: string,
+  content: string,
+  expectedHash?: string | null,
+): Promise<UpdateSkillFileRes> {
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/')
+  const response = await api.post<UpdateSkillFileRes>(`/skills/${skillId}/files/${encodedPath}`, {
+    content,
+    expected_hash: expectedHash ?? null,
+  })
   return response.data
 }

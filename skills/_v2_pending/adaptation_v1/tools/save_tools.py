@@ -4,6 +4,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 def save_beats(ctx: dict, subagent_results: str) -> str:
     """
     将子代理返回的包含 beats 的 JSON 结果（或者 Markdown 文本）附加到 objective_scenes 并存盘。
@@ -16,5 +17,5 @@ def save_beats(ctx: dict, subagent_results: str) -> str:
         pass
     except Exception as e:
         return f"ERROR: {str(e)}"
-    
+
     return "已成功保存 Beats！"

@@ -36,6 +36,7 @@ def test_apply_patches_twice_raises(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_load_settings_round_trip_from_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     bootstrap = Bootstrap()
 

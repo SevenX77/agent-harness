@@ -373,9 +373,7 @@ class E2ETestRunner:
                 avg_chapter_time = sum(self.monitor.chapter_times.values()) / len(
                     self.monitor.chapter_times
                 )
-                print(
-                    f"  Avg chapter time: {avg_chapter_time:.2f}s"
-                )
+                print(f"  Avg chapter time: {avg_chapter_time:.2f}s")
 
         if self.results:
             print("\nResults summary:")

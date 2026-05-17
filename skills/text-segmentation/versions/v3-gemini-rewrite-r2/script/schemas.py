@@ -1,4 +1,5 @@
 """Pydantic schemas for text segmentation."""
+
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -6,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class Segment(BaseModel):
     """A single classified text segment."""
+
     model_config = ConfigDict(extra="forbid")
 
     index: int = Field(description="段落顺序编号，从 1 开始递增")
@@ -16,10 +18,12 @@ class Segment(BaseModel):
     confidence: float = Field(default=1.0, ge=0.0, le=1.0, description="类型判断置信度")
     notes: str | None = Field(default=None, description="修正说明或特殊边界记录 (Review 阶段专用)")
 
+
 class SegmentationResult(BaseModel):
     """Complete segmentation list output format."""
+
     model_config = ConfigDict(extra="forbid")
-    
+
     segments: list[Segment] = Field(
         min_length=1,
         description=(

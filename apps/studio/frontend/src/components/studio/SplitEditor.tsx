@@ -2,13 +2,9 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { GraphCanvas, type SkillGraphNodeData } from "@/components/GraphCanvas"
 import type { SkillDetail } from "@/api/types"
 import { LazyMonacoPanel } from "./LazyMonacoPanel"
-import type { FileMeta } from "./Panels"
+import { useWorkspaceContext, type EditorSide, type OpenFile } from "./WorkspaceContext"
 
 interface SplitEditorProps {
-  file: FileMeta
-  value: string
-  onChange: (value: string) => void
-  onCloseFile: () => void
   skillId: string
   skillDetail?: SkillDetail
   isLoading?: boolean
@@ -18,10 +14,6 @@ interface SplitEditorProps {
 }
 
 export function SplitEditor({
-  file,
-  value,
-  onChange,
-  onCloseFile,
   skillId,
   skillDetail,
   isLoading,
@@ -29,6 +21,41 @@ export function SplitEditor({
   selectedNodeId,
   onNodeSelect,
 }: SplitEditorProps) {
+  const {
+    activeFileDetails,
+    closeFile,
+    updateFileContent,
+    markFileSaved,
+    setFileInFlight,
+    onSaveConflict,
+  } = useWorkspaceContext()
+
+  const renderEditor = (side: EditorSide, file: OpenFile | undefined) => {
+    if (!file) {
+      return (
+        <div className="grid size-full place-items-center bg-card text-sm text-muted-foreground">
+          No file selected
+        </div>
+      )
+    }
+    return (
+      <LazyMonacoPanel
+        title={file.title ?? file.path}
+        skillId={file.skillId}
+        filePath={file.path}
+        initialHash={file.hash}
+        saveEnabled={file.saveEnabled ?? true}
+        language={file.language}
+        value={file.content}
+        onChange={(value) => updateFileContent(side, value)}
+        onSaved={(hash) => markFileSaved(side, hash)}
+        onInFlightChange={(inFlight) => setFileInFlight(side, inFlight)}
+        onConflict={(conflict) => onSaveConflict({ ...conflict, side })}
+        onClose={() => closeFile(side)}
+      />
+    )
+  }
+
   return (
     <ResizablePanelGroup
       id="studio-canvas-v"
@@ -36,13 +63,15 @@ export function SplitEditor({
       className="size-full"
     >
       <ResizablePanel id="top-editor" defaultSize="70%" minSize="30%">
-        <LazyMonacoPanel
-          title={file.path}
-          language={file.language}
-          value={value}
-          onChange={onChange}
-          onClose={onCloseFile}
-        />
+        <ResizablePanelGroup id="studio-split-editor-h" orientation="horizontal" className="size-full">
+          <ResizablePanel id="editor-left" defaultSize="50%" minSize="25%">
+            {renderEditor("left", activeFileDetails.left)}
+          </ResizablePanel>
+          <ResizableHandle />
+          <ResizablePanel id="editor-right" defaultSize="50%" minSize="25%">
+            {renderEditor("right", activeFileDetails.right)}
+          </ResizablePanel>
+        </ResizablePanelGroup>
       </ResizablePanel>
       <ResizableHandle />
       <ResizablePanel id="bottom-mini" defaultSize="30%" minSize="15%" maxSize="60%">

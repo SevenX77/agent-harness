@@ -18,7 +18,6 @@ from __future__ import annotations
 # adjacent ``middleware/test_chain_topology.py`` test file.
 from graph_agent.middleware import DEFAULT_MIDDLEWARE_ORDER  # noqa: F401
 
-
 # V1 cutover legacy test quarantine: these files import old class names removed
 # by the V2 refactor. Keep them as reference corpus pending a V1->V2 migration
 # spec deciding whether to delete, migrate, or rewrite them.

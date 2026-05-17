@@ -35,6 +35,7 @@ import type {
 import { useBatchRun } from './hooks/useBatchRun'
 import { useRecentSkills } from './hooks/useRecentSkills'
 import { useGoldenDiff } from './hooks/useGoldenDiff'
+import { getLayoutedElements } from './hooks/useDagreLayout'
 import { useDraftPersist } from './hooks/useDraftPersist'
 import { usePhaseForm } from './hooks/usePhaseForm'
 import { usePhaseSync } from './hooks/usePhaseSync'
@@ -230,8 +231,9 @@ export default function App() {
   ), [expandedSubgraphs, nestedManifests, skillDetail, toggleSubgraph, isDarkMode])
 
   useEffect(() => {
-    setNodes(graph.nodes)
-    setEdges(graph.edges)
+    const layouted = getLayoutedElements(graph.nodes, graph.edges)
+    setNodes(layouted.nodes)
+    setEdges(layouted.edges)
   }, [graph, setEdges, setNodes])
 
   useEffect(() => {
@@ -288,13 +290,22 @@ export default function App() {
   useEffect(() => () => runWsRef.current?.close(), [])
 
   const onConnect = useCallback((params: Connection) => {
-    setEdges((current) => addEdge({
+    const nextEdges = addEdge({
       ...params,
       animated: true,
       markerEnd: { type: MarkerType.ArrowClosed },
       style: { stroke: '#94a3b8', strokeWidth: 2 },
-    }, current))
-  }, [setEdges])
+    }, edges)
+    const layouted = getLayoutedElements(nodes, nextEdges)
+    setNodes(layouted.nodes)
+    setEdges(layouted.edges)
+  }, [edges, nodes, setEdges, setNodes])
+
+  const handleResetLayout = useCallback(() => {
+    const layouted = getLayoutedElements(nodes, edges)
+    setNodes(layouted.nodes)
+    setEdges(layouted.edges)
+  }, [edges, nodes, setEdges, setNodes])
 
   const handleSelectSkill = useCallback(async (skillId: string) => {
     if (skillId === selectedSkillId) {
@@ -827,6 +838,7 @@ export default function App() {
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
+                onResetLayout={handleResetLayout}
                 onPhaseSelect={handleGraphPhaseSelect}
                 onPhaseDoubleClick={handleOpenPhaseDrawer}
               />

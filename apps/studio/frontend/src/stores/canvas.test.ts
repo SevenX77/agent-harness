@@ -10,6 +10,7 @@ describe('useCanvasStore', () => {
     useCanvasStore.getState().setRoot({ skillId: 'root', skillName: 'Root' })
 
     expect(useCanvasStore.getState().navStack).toEqual([{ skillId: 'root', skillName: 'Root' }])
+    expect(useCanvasStore.getState().isDirty).toBe(false)
     expect(currentCanvasEntry(useCanvasStore.getState().navStack)?.skillId).toBe('root')
     expect(isCanvasReadOnly(useCanvasStore.getState().navStack)).toBe(false)
   })
@@ -47,5 +48,25 @@ describe('useCanvasStore', () => {
     expect(store.push({ skillId: 'three', skillName: 'Three' })).toEqual({ ok: true })
     expect(store.push({ skillId: 'four', skillName: 'Four' })).toEqual({ ok: true })
     expect(store.push({ skillId: 'five', skillName: 'Five' })).toEqual({ ok: false, reason: 'depth' })
+  })
+
+  it('tracks canvas dirty and saving state', () => {
+    const store = useCanvasStore.getState()
+    store.setRoot({ skillId: 'root', skillName: 'Root' })
+
+    store.markDirty()
+    expect(useCanvasStore.getState().isDirty).toBe(true)
+
+    store.setSaving(true)
+    expect(useCanvasStore.getState().isSaving).toBe(true)
+
+    store.markSaved()
+    expect(useCanvasStore.getState().isDirty).toBe(false)
+
+    store.setSaving(false)
+    store.markDirty()
+    store.discardLocalChanges()
+    expect(useCanvasStore.getState().isDirty).toBe(false)
+    expect(useCanvasStore.getState().isSaving).toBe(false)
   })
 })

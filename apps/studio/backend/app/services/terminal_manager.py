@@ -206,7 +206,7 @@ def _resolve_terminal_cwd(skill_id: str) -> Path:
             and not resolved.is_relative_to(config.SKILLS_DIR.resolve())
         ):
             continue
-        if (resolved / "SKILL.md").is_file():
+        if (resolved / "GRAPH.md").is_file():
             return resolved
 
     raise ValueError(f"SKILL_NOT_FOUND: Skill not found: {skill_id}")

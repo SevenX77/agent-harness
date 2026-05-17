@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 
 import pytest
 from app.core import config
 from app.services.skills import validate_skill_file_path
-from app.services.terminal_manager import TerminalManager, terminal_manager
+from app.services.terminal_manager import TerminalManager, TerminalRecord, terminal_manager
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -190,6 +191,43 @@ def test_terminal_background_reaper_task_can_start_and_shutdown() -> None:
         assert not manager._reaper_task.done()
         await manager.shutdown()
         assert manager._reaper_task is None
+
+    asyncio.run(scenario())
+
+
+def test_terminal_bridge_loops_swallow_normal_cancellation() -> None:
+    class SlowReadPty:
+        def read_nonblocking(self, size: int = 4096, timeout: float = 0.1) -> str | None:
+            del size, timeout
+            time.sleep(0.05)
+            return None
+
+        def write(self, data: object) -> None:
+            del data
+
+    class WaitingWebSocket:
+        async def receive(self) -> dict[str, object]:
+            await asyncio.sleep(10)
+            return {"type": "websocket.disconnect"}
+
+        async def send_text(self, data: str) -> None:
+            del data
+
+        async def send_bytes(self, data: bytes) -> None:
+            del data
+
+    async def scenario() -> None:
+        manager = TerminalManager()
+        record = TerminalRecord("term", SlowReadPty(), "/tmp", time.monotonic() + 10)
+        manager._sessions[record.term_id] = record
+        websocket = WaitingWebSocket()
+        reader = asyncio.create_task(manager._read_pty_loop(websocket, record))
+        writer = asyncio.create_task(manager._write_pty_loop(websocket, record))
+        await asyncio.sleep(0)
+        reader.cancel()
+        writer.cancel()
+        results = await asyncio.gather(reader, writer, return_exceptions=True)
+        assert results == [None, None]
 
     asyncio.run(scenario())
 

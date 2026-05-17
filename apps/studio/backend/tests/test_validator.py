@@ -152,7 +152,7 @@ def test_validate_input_compile_failure_returns_gate_error(
 ) -> None:
     skills_dir, workspaces_dir = studio_roots
     skill_dir = copy_skill(skills_dir, workspaces_dir, "text-segmentation")
-    skill_path = skill_dir / "SKILL.md"
+    skill_path = skill_dir / "phases" / "setup" / "LOGIC.md"
     skill_path.write_text(
         skill_path.read_text(encoding="utf-8").replace("mode: logic\n", "mode: bogus\n"),
         encoding="utf-8",

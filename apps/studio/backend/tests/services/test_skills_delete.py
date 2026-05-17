@@ -3,12 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
-
 from app.core.adapters.metadata_local import LocalJsonMetadataStore
 from app.core.adapters.storage_local import LocalFilesystemBackend
 from app.models.skills import SkillSummary
 from app.services.skills import delete_skill
+from fastapi import HTTPException
 
 
 @pytest.fixture
@@ -26,7 +25,7 @@ async def test_delete_skill_removes_workspace_skill(
     skill_id = "workspace-skill"
     skill_dir = workspaces_dir / user_id / "skills" / skill_id
     skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text("---\nname: workspace-skill\n---\n", encoding="utf-8")
+    (skill_dir / "GRAPH.md").write_text("---\nname: workspace-skill\n---\n", encoding="utf-8")
     (skill_dir / ".workspace" / "runs").mkdir(parents=True)
 
     metadata = LocalJsonMetadataStore(
@@ -76,5 +75,5 @@ async def test_delete_skill_rejects_builtin_public_skill(
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail["error_code"] == "SKILL_READ_ONLY"
-    assert (skill_dir / "SKILL.md").exists()
+    assert (skill_dir / "GRAPH.md").exists()
     assert skill_dir.exists()

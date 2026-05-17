@@ -27,21 +27,20 @@ def test_backend_p2_predict_job_exports_diagnostics(
     assert result.status == "success"
     assert export.is_predict is True
     assert [phase.phase_name for phase in export.phases] == ["prepare", "draft"]
-    assert export.phases[1].mocked_source == "heuristic_stub"
+    assert export.phases[1].mocked_source is None
 
 
 @pytest.mark.parametrize(
-    ("mock_llm", "expected_source"),
+    "mock_llm",
     [
-        ({"draft": {"text": "manual draft"}}, "manual"),
-        ({"draft": {"source": "copilot", "output": {"text": "copilot draft"}}}, "copilot"),
+        {"draft": {"text": "manual draft"}},
+        {"draft": {"source": "copilot", "output": {"text": "copilot draft"}}},
     ],
 )
 def test_backend_p1_predict_job_uses_manual_or_copilot_source(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     mock_llm: dict[str, object],
-    expected_source: str,
 ) -> None:
     skill_dir = _write_backend_skill(tmp_path)
     monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda skill_id: skill_dir)
@@ -49,7 +48,7 @@ def test_backend_p1_predict_job_uses_manual_or_copilot_source(
     result = PredictorService().dispatch_predict_job("skill", mock_llm, input_data={"topic": "mars"})
 
     assert result.status == "success"
-    assert result.phases[1].mocked_source == expected_source
+    assert result.phases[1].mocked_source is None
 
 
 def test_backend_p0_predict_job_warns_diffs_and_uses_golden_source(
@@ -73,7 +72,7 @@ def test_backend_p0_predict_job_warns_diffs_and_uses_golden_source(
     assert result.path_diff is not None
     assert result.path_diff.missing == ["finish"]
     assert result.path_diff.extra == ["prepare"]
-    assert result.phases[1].mocked_source == "golden_case"
+    assert result.phases[1].mocked_source is None
     assert any("Golden case hash stale" in record.message for record in caplog.records)
 
 
@@ -102,46 +101,66 @@ def test_backend_deadlock_guard_blocks_p2_but_not_p0(
 
 def _write_backend_skill(tmp_path: Path) -> Path:
     skill_dir = tmp_path / "skill"
-    script_dir = skill_dir / "script"
-    script_dir.mkdir(parents=True)
-    (script_dir / "__init__.py").write_text("", encoding="utf-8")
-    (script_dir / "logic.py").write_text(
-        "def prepare(ctx):\n"
-        "    ctx['prepared'] = True\n"
-        "    return ctx\n",
+    action_dir = skill_dir / "phases" / "prepare" / "actions"
+    action_dir.mkdir(parents=True)
+    (action_dir / "__init__.py").write_text("", encoding="utf-8")
+    (action_dir / "prepare.py").write_text(
+        "def prepare(context):\n"
+        "    context.set('prepared', True)\n"
+        "    return {'prepared': True}\n",
         encoding="utf-8",
     )
-    (skill_dir / "SKILL.md").write_text(
+    (skill_dir / "phases" / "draft").mkdir(parents=True)
+    draft_action_dir = skill_dir / "phases" / "draft" / "actions"
+    draft_action_dir.mkdir(parents=True)
+    (draft_action_dir / "__init__.py").write_text("", encoding="utf-8")
+    (draft_action_dir / "draft.py").write_text(
+        "def draft(context):\n"
+        "    context.set('text', 'draft')\n"
+        "    return {'text': 'draft'}\n",
+        encoding="utf-8",
+    )
+    (skill_dir / "io").mkdir(parents=True)
+    (skill_dir / "GRAPH.md").write_text(
         """---
-schema_version: "2.0"
+schema_version: "2.1"
 name: predict-backend-e2e
-version: "0.1"
 description: Predict backend e2e smoke
-type: graph
-context_mapping:
-  topic: "{input.topic}"
-io:
-  inputs:
-    - name: topic
-      type: str
-      source: runtime
-  outputs: []
-phases:
-  - name: prepare
-    mode: logic
-    execute_steps:
-      - script.logic.prepare
-  - name: draft
-    mode: llm
-    llm_role: analyst
-    max_iterations: 1
-    max_nudges: 0
-    validator_optional: true
-    output_schema: |
-      text: str
-    prompt: |
-      Write a draft for {topic} and call finish_task.
 ---
+<input src="io/inputs.json" />
+<output src="io/outputs.json" />
+<phase id="prepare" src="phases/prepare" depends_on="" />
+<phase id="draft" src="phases/draft" depends_on="prepare" />
+""",
+        encoding="utf-8",
+    )
+    (skill_dir / "io" / "inputs.json").write_text(
+        '{"type":"object","properties":{"topic":{"type":"string"}},"additionalProperties":true}\n',
+        encoding="utf-8",
+    )
+    (skill_dir / "io" / "outputs.json").write_text(
+        '{"type":"object","properties":{"prepared":{"type":"boolean"},"text":{"type":"string"}}}\n',
+        encoding="utf-8",
+    )
+    (skill_dir / "phases" / "prepare" / "LOGIC.md").write_text(
+        """---
+mode: logic
+name: prepare
+---
+<python_callable>
+prepare
+</python_callable>
+""",
+        encoding="utf-8",
+    )
+    (skill_dir / "phases" / "draft" / "LOGIC.md").write_text(
+        """---
+mode: logic
+name: draft
+---
+<python_callable>
+draft
+</python_callable>
 """,
         encoding="utf-8",
     )

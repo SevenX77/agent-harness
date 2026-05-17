@@ -10,11 +10,12 @@ import pytest
 
 os.environ.setdefault("STUDIO_API_TOKEN", "studio-test-token")
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-STUDIO_BACKEND = REPO_ROOT / "studio-backend"
+REPO_ROOT = Path(__file__).resolve().parents[4]
+STUDIO_BACKEND = REPO_ROOT / "apps" / "studio" / "backend"
 SRC_CORE = REPO_ROOT / "src" / "core"
+GRAPH_AGENT_SRC = REPO_ROOT / "packages" / "graph-agent" / "src"
 
-for path in (STUDIO_BACKEND, SRC_CORE):
+for path in (STUDIO_BACKEND, SRC_CORE, GRAPH_AGENT_SRC):
     path_str = str(path)
     if path_str not in sys.path:
         sys.path.insert(0, path_str)
@@ -79,38 +80,57 @@ def _with_ws_token(url: str) -> str:
 
 
 def _write_graph_skill(skill_dir: Path, name: str, description: str) -> None:
-    (skill_dir / "script").mkdir(parents=True)
-    (skill_dir / "script" / "__init__.py").write_text("", encoding="utf-8")
-    (skill_dir / "script" / "logic.py").write_text(
-        "def prepare(data):\n"
-        "    data['prepared'] = True\n"
-        "    return data\n",
+    (skill_dir / "phases" / "setup" / "actions").mkdir(parents=True)
+    (skill_dir / "phases" / "setup" / "actions" / "__init__.py").write_text("", encoding="utf-8")
+    (skill_dir / "phases" / "setup" / "actions" / "prepare.py").write_text(
+        "def prepare(context):\n"
+        "    context.set('prepared', True)\n"
+        "    return {'prepared': True}\n",
         encoding="utf-8",
     )
-    (skill_dir / "SKILL.md").write_text(
+    (skill_dir / "io").mkdir(parents=True)
+    (skill_dir / "GRAPH.md").write_text(
         f"""---
-schema_version: "2.0"
+schema_version: "2.1"
 name: {name}
 description: {description}
-type: graph
-context_mapping:
-  input_text: "{{input.input_text}}"
-  prepared: ""
-io:
-  inputs:
-    - name: input_text
-      type: str
-      source: runtime
-  outputs:
-    - name: prepared
-      type: dict
-      target: artifact
-phases:
-  - name: setup
-    mode: logic
-    execute_steps:
-      - script.logic.prepare
 ---
+<input src="io/inputs.json" />
+<output src="io/outputs.json" />
+<phase id="setup" src="phases/setup" depends_on="" />
+""",
+        encoding="utf-8",
+    )
+    (skill_dir / "io" / "inputs.json").write_text(
+        """{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {"input_text": {"type": "string"}},
+  "required": ["input_text"],
+  "additionalProperties": false
+}
+""",
+        encoding="utf-8",
+    )
+    (skill_dir / "io" / "outputs.json").write_text(
+        """{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {"prepared": {"type": "object"}},
+  "required": ["prepared"],
+  "additionalProperties": true
+}
+""",
+        encoding="utf-8",
+    )
+    (skill_dir / "phases" / "setup" / "LOGIC.md").write_text(
+        """---
+mode: logic
+name: setup
+---
+<python_callable>
+prepare
+</python_callable>
 """,
         encoding="utf-8",
     )

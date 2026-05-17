@@ -10,6 +10,7 @@ import argparse
 import json
 import re
 import shutil
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -101,6 +102,13 @@ def _to_builtin(value: Any) -> Any:
         return {str(k): _to_builtin(v) for k, v in value.items()}
     if isinstance(value, list):
         return [_to_builtin(v) for v in value]
+    if isinstance(value, AbstractSet):
+        items = sorted(str(item) for item in value)
+        if len(items) == 1:
+            return "{" + items[0] + "}"
+        return ["{" + item + "}" for item in items]
+    if isinstance(value, str):
+        return str(value)
     return value
 
 

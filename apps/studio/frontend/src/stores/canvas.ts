@@ -14,7 +14,13 @@ interface CanvasNavResult {
 
 interface CanvasState {
   navStack: CanvasNavEntry[]
+  isDirty: boolean
+  isSaving: boolean
   setRoot: (entry: CanvasNavEntry | null) => void
+  markDirty: () => void
+  markSaved: () => void
+  discardLocalChanges: () => void
+  setSaving: (saving: boolean) => void
   push: (entry: CanvasNavEntry) => CanvasNavResult
   pop: () => void
   jumpTo: (index: number) => void
@@ -31,8 +37,22 @@ export function currentCanvasEntry(navStack: CanvasNavEntry[]): CanvasNavEntry |
 
 export const useCanvasStore = create<CanvasState>((set, get) => ({
   navStack: [],
+  isDirty: false,
+  isSaving: false,
   setRoot: (entry) => {
-    set({ navStack: entry ? [entry] : [] })
+    set({ navStack: entry ? [entry] : [], isDirty: false, isSaving: false })
+  },
+  markDirty: () => {
+    set({ isDirty: true })
+  },
+  markSaved: () => {
+    set({ isDirty: false })
+  },
+  discardLocalChanges: () => {
+    set({ isDirty: false })
+  },
+  setSaving: (saving) => {
+    set({ isSaving: saving })
   },
   push: (entry) => {
     const navStack = get().navStack
@@ -59,6 +79,6 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     })
   },
   reset: () => {
-    set({ navStack: [] })
+    set({ navStack: [], isDirty: false, isSaving: false })
   },
 }))

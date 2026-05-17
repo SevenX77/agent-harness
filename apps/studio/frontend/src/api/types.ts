@@ -39,6 +39,26 @@ export interface SkillSummary {
 
 export interface MultifileSkillPayload {
   files: Record<string, string>
+  expected_hash?: string | null
+}
+
+export interface SerializeGraphPhase {
+  id: string
+  src: string
+  depends_on: string[]
+  mode: 'logic' | 'subgraph' | 'skill'
+}
+
+export interface SerializeGraphPayload {
+  phases: SerializeGraphPhase[]
+  expected_hash?: string | null
+}
+
+export interface SerializeGraphResult {
+  markdown_content: string
+  phase_count: number
+  elapsed_ms: number
+  current_hash: string
 }
 
 export interface SkillTemplate {
@@ -328,4 +348,5 @@ export type CallbackEvent = CallbackEventBase & Record<string, JsonValue | undef
 export interface StudioGlobalEvent {
   type: 'skill_changed'
   skill_id: string
+  file?: string | null
 }

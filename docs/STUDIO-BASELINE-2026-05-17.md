@@ -98,7 +98,8 @@ PM 期望路径上还**缺**:
 - V2.1 SDK 已 cutover (PR #45-#52), 9 skills 已迁
 - 公开 13 API exports 稳定
 - 已知技术债: V1 兼容 test fail; `graph-agent-engine` 空死 legacy package 待 archive
-- 多份 doc (`ARCHITECTURE.md` / `IMPLEMENTATION.md` 等) 标 ⚠️ Needs-Sync, 待 audit
+- 5 份 V1-era engine doc 已 archive 到 [`archive/v1-era/`](./archive/v1-era/) (IMPLEMENTATION / USER_GUIDE / INTEGRATION_GUIDE / COGNITIVE_LOOP_GUIDE / FRAMEWORK_UNDERSTANDING)
+- engine/ 剩 4 份 Living: COMPILER_RULES ✅ + ARCHITECTURE / TOOL_DEVELOPMENT_GUIDE / CONFIG_REFERENCE 等待 a2 audit 改写 + 补漏
 
 ---
 

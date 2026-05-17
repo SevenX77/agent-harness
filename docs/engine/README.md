@@ -12,17 +12,12 @@
 
 | 文档 | 描述 | Status |
 |---|---|---|
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | 引擎整体架构图 + Loader/Compiler/Executor 数据流 | ⚠️ 需 sync (V2.1 cutover 后未 verify) |
-| [IMPLEMENTATION.md](./IMPLEMENTATION.md) | 实现细节: phase node / state / callback / IO manager | ⚠️ 需 sync |
-| [USER_GUIDE.md](./USER_GUIDE.md) | 用户向: 如何调 `run_skill()` / 配 `Callback` / 读 `WorkflowResult` | ⚠️ 需 sync |
-| [INTEGRATION_GUIDE.md](./INTEGRATION_GUIDE.md) | Studio backend 等下游怎么集成 SDK | ⚠️ 需 sync |
-| [CONFIG_REFERENCE.md](./CONFIG_REFERENCE.md) | 配置项参考 (llm_roles.yaml + env var) | ⚠️ 需 sync |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | 引擎整体架构图 + Loader/Compiler/Executor 数据流 | 🔧 V2.1-STALE (待 a2 audit 改写) |
+| [CONFIG_REFERENCE.md](./CONFIG_REFERENCE.md) | 配置项参考 (llm_roles.yaml + env var) | 📝 GAP-CAPABILITY (待补漏字段) |
 | [COMPILER_RULES.md](./COMPILER_RULES.md) | strict compile rules v2 — 编译期校验规则 | ✅ Living |
-| [COGNITIVE_LOOP_GUIDE.md](./COGNITIVE_LOOP_GUIDE.md) | Cognitive loop (validate → retry → finish) 机制 | ⚠️ 需 sync |
-| [TOOL_DEVELOPMENT_GUIDE.md](./TOOL_DEVELOPMENT_GUIDE.md) | 写自定义 tool 的指南 | ⚠️ 需 sync |
-| [FRAMEWORK_UNDERSTANDING.md](./FRAMEWORK_UNDERSTANDING.md) | Framework 设计意图 (可能过时, 待 audit) | ⚠️ 需 sync |
+| [TOOL_DEVELOPMENT_GUIDE.md](./TOOL_DEVELOPMENT_GUIDE.md) | 写自定义 tool 的指南 | 🔧 V2.1-STALE (待 a2 audit 改写) |
 
-**多数文档标 ⚠️ Needs-Sync**: V2.1 cutover (PR #45-#52) 后还没逐一 verify。下一步 baseline 阶段会 audit, 该改改 / 该 archive archive。
+**已 archive 5 份 (V1 时代写的, V2.1 cutover 后核心概念 `GraphAgentHarness` / `script/validators.py` 单文件结构等已不存在)**: IMPLEMENTATION.md / USER_GUIDE.md / INTEGRATION_GUIDE.md / COGNITIVE_LOOP_GUIDE.md / FRAMEWORK_UNDERSTANDING.md → 已移到 [../archive/v1-era/](../archive/v1-era/) 历史保留。V2.1 替代版等 a2 audit 阶段产出后回填到 Living 表格。
 
 ---
 

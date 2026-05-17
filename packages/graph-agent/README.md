@@ -193,9 +193,11 @@ The package is verified clean under `mypy --strict` (143 source files, 0 errors 
 ## Extended Documentation
 
 - `docs/skills/SKILL_AUTHORING_GUIDE.md` — How to write SKILL.md
-- `docs/engine/INTEGRATION_GUIDE.md` — Integration into host projects
-- `docs/engine/COGNITIVE_LOOP_GUIDE.md` — Cognitive control architecture
+- `docs/engine/ARCHITECTURE.md` — Engine architecture overview (V2.1, audit in progress)
+- `docs/engine/COMPILER_RULES.md` — Strict compile rules v2 (Living)
+- `docs/engine/TOOL_DEVELOPMENT_GUIDE.md` — Writing custom tools (V2.1, audit in progress)
 - `docs/architecture/REPO_SPLIT_AND_SDK_PLAN.md` — V2 monorepo + SDK contract
+- `docs/archive/v1-era/` — V1-era engine docs kept for audit trail (no longer authoritative)
 
 ---
 

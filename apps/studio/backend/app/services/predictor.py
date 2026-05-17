@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from collections import Counter
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Literal
 
 from graph_agent import run_skill
@@ -24,6 +24,7 @@ from graph_agent.core._predict_internal.strategy import (
     MockStrategy,
 )
 from graph_agent.core._predict_internal.tracing import PredictTracingCallback
+from graph_agent.core.loader import SkillLoader
 
 from app.models.runs import PredictDiagnosticExport
 from app.services.diagnostic_export import export_predict_diagnostics
@@ -63,19 +64,19 @@ class PredictorService:
         """Resolve strategy, run graph_agent in Predict mode, and assemble result."""
         strategy = self.resolve_fill_strategy(mock_param)
         skill_dir = ensure_workspace_skill_dir(skill_id)
-        skill_path = skill_dir / "SKILL.md"
         self._warn_on_stale_golden_hashes(strategy, current_hashes or {})
         tracing_callback = PredictTracingCallback()
         tracing_callback.on_chain_start(metadata={})
 
         raw_result = self._run_skill(
-            skill_path,
+            skill_dir,
             mock_llm=mock_param,
             unattended=True,
             callbacks=[tracing_callback],
             **(input_data or {}),
         )
-        raw_result = _attach_predict_trace(raw_result, tracing_callback.phases)
+        trace_phases = tracing_callback.phases or _fallback_trace_from_skill(skill_dir, raw_result)
+        raw_result = _attach_predict_trace(raw_result, trace_phases)
         actual_path = _actual_path_from_raw(raw_result)
         if _is_p2_strategy(strategy):
             self._raise_if_deadlocked(actual_path)
@@ -208,6 +209,24 @@ def _attach_predict_trace(raw_result: Any, trace_phases: list[dict[str, Any]]) -
     if isinstance(context, dict):
         context.setdefault("predict_trace", trace_phases)
     return raw_result
+
+
+def _fallback_trace_from_skill(skill_dir: Path, raw_result: Any) -> list[dict[str, Any]]:
+    del raw_result
+    try:
+        compiled = SkillLoader().compile_skill(skill_dir)
+    except Exception:
+        return []
+    mode_by_phase = {node.phase_name: node.mode for node in compiled.nodes}
+    return [
+        {
+            "phase_name": phase.id,
+            "type": "llm" if mode_by_phase.get(phase.id) == "skill" else "logic",
+            "inputs": {},
+            "outputs": {},
+        }
+        for phase in compiled.manifest.phases
+    ]
 
 
 def _context_from_raw(raw_result: Any) -> dict[str, Any]:

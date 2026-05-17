@@ -20,6 +20,7 @@ class ErrorResponse(BaseModel):
 class LintError(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    file: str | None = None
     line: int | None = None
     column: int | None = None
     error_code: str

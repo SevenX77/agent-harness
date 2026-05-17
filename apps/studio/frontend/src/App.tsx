@@ -272,7 +272,7 @@ export default function App() {
 
   const graph = useMemo(() => (
     skillDetail
-      ? buildGraph(skillDetail.manifest, expandedSubgraphs, nestedManifests, toggleSubgraph, isDarkMode)
+      ? buildGraph(skillDetail.manifest, expandedSubgraphs, nestedManifests, toggleSubgraph, isDarkMode, skillDetail.graph_topology)
       : { nodes: [], edges: [] }
   ), [expandedSubgraphs, nestedManifests, skillDetail, toggleSubgraph, isDarkMode])
 

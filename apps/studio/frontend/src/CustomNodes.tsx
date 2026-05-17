@@ -6,6 +6,7 @@ import { ChevronDown, ChevronRight, Cpu, Layers } from 'lucide-react'
 export interface StudioNodeData {
   label: string
   mode?: string
+  src?: string | null
   role?: string | null
   subgraphPath?: string | null
   isExpanded?: boolean

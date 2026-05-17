@@ -7,6 +7,7 @@ import { AgentNode, SubgraphNode } from '../CustomNodes'
 import type { StudioNodeData } from '../CustomNodes'
 import { getEdgeColor } from '../hooks/useEdgeColoring'
 import type { CanvasNavEntry } from '../stores/canvas'
+import { dispatchOpenPhaseFileEvent, phaseFileForNode } from '../utils/canvasEvents'
 import { errorMessage } from '../utils/errors'
 
 const nodeTypes = {
@@ -65,6 +66,7 @@ export function GraphCanvas({
   const visibleBreadcrumbs = breadcrumbs.length > 0
     ? breadcrumbs
     : [{ skillId: currentSkillName, skillName: currentSkillName }]
+  const currentSkillId = visibleBreadcrumbs.at(-1)?.skillId ?? null
   const visibleNodes = useMemo(() => (
     nodes.map((node) => ({
       ...node,
@@ -86,6 +88,26 @@ export function GraphCanvas({
     onPhaseSelect?.(target.data.label)
   }
 
+  const handleNodeDoubleClick = (node: Node<StudioNodeData>) => {
+    if (node.type === 'subgraph' || node.data.mode === 'subgraph') {
+      onPhaseDoubleClick?.(node.data.label)
+      return
+    }
+    if (node.type !== 'agent' || !currentSkillId) {
+      return
+    }
+    const file = phaseFileForNode(node)
+    if (!file) {
+      return
+    }
+    dispatchOpenPhaseFileEvent({
+      skill_id: currentSkillId,
+      phase_id: node.id,
+      file,
+      readonly: isReadOnly,
+    })
+  }
+
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (isReadOnly && (event.key === 'Backspace' || event.key === 'Escape')) {
       event.preventDefault()
@@ -101,7 +123,7 @@ export function GraphCanvas({
     if (event.key === 'Enter' || event.key === ' ') {
       if (selectedNodeIndex >= 0) {
         event.preventDefault()
-        onPhaseDoubleClick?.(visibleNodes[selectedNodeIndex].data.label)
+        handleNodeDoubleClick(visibleNodes[selectedNodeIndex])
       }
       return
     }
@@ -172,7 +194,7 @@ export function GraphCanvas({
           onEdgesChange={isReadOnly ? undefined : onEdgesChange}
           onConnect={isReadOnly ? undefined : onConnect}
           onNodeClick={(_, node) => onPhaseSelect?.(node.data.label)}
-          onNodeDoubleClick={(_, node) => onPhaseDoubleClick?.(node.data.label)}
+          onNodeDoubleClick={(_, node) => handleNodeDoubleClick(node)}
           nodesConnectable={!isReadOnly}
           nodesDraggable={!isReadOnly}
           elementsSelectable={!isReadOnly}

@@ -1,7 +1,7 @@
 import { MarkerType } from 'reactflow'
 import type { Edge, Node } from 'reactflow'
 import type { StudioNodeData } from '../CustomNodes'
-import type { GraphSkillDef, SkillManifest } from '../api/types'
+import type { GraphSkillDef, JsonObject, SkillManifest } from '../api/types'
 import type { GraphBuildResult, VisualPhase } from '../types/studio'
 
 function normalizeDependency(value: string | string[] | undefined): string[] {
@@ -23,12 +23,18 @@ export function subgraphSkillId(path: string | null): string | null {
   return last.endsWith('.md') ? last.slice(0, -3) : last
 }
 
-function phasesFromManifest(manifest: SkillManifest): VisualPhase[] {
+function srcForPhase(graphTopology: JsonObject[], phaseName: string): string | null {
+  const topologyNode = graphTopology.find((node) => node.id === phaseName)
+  return typeof topologyNode?.src === 'string' ? topologyNode.src : null
+}
+
+function phasesFromManifest(manifest: SkillManifest, graphTopology: JsonObject[] = []): VisualPhase[] {
   if (manifest.type === 'graph') {
     return manifest.phases.map((phase) => ({
       id: phase.name,
       name: phase.name,
       mode: phase.mode,
+      src: srcForPhase(graphTopology, phase.name) ?? `phases/${phase.name}`,
       role: phase.mode === 'llm' ? phase.llm_role : null,
       dependsOn: normalizeDependency(phase.depends_on),
       subgraph: phase.subgraph ?? null,
@@ -40,6 +46,7 @@ function phasesFromManifest(manifest: SkillManifest): VisualPhase[] {
       id: manifest.name,
       name: manifest.name,
       mode: 'llm',
+      src: null,
       role: manifest.agent_profile.llm_role,
       dependsOn: [],
       subgraph: null,
@@ -50,6 +57,7 @@ function phasesFromManifest(manifest: SkillManifest): VisualPhase[] {
     id: manifest.name,
     name: manifest.name,
     mode: 'persona',
+    src: null,
     role: 'Persona',
     dependsOn: [],
     subgraph: null,
@@ -82,6 +90,7 @@ export function buildGraph(
   nestedManifests: Record<string, SkillManifest>,
   onToggleSubgraph: (phase: VisualPhase) => void,
   isDarkMode: boolean,
+  graphTopology: JsonObject[] = [],
 ): GraphBuildResult {
   const nodes: Node<StudioNodeData>[] = [{
     id: 'input',
@@ -100,7 +109,7 @@ export function buildGraph(
     },
   }]
   const edges: Edge[] = []
-  const phases = phasesFromManifest(manifest)
+  const phases = phasesFromManifest(manifest, graphTopology)
   const leafNodes = new Set<string>()
   let y = 150
 
@@ -113,6 +122,7 @@ export function buildGraph(
       data: {
         label: phase.name,
         mode: phase.mode,
+        src: phase.src,
         role: phase.role,
         subgraphPath: phase.subgraph,
         isExpanded,
@@ -156,6 +166,7 @@ export function buildGraph(
           data: {
             label: child.name,
             mode: child.mode,
+            src: child.src,
             role: child.role,
           },
           position: { x: 560, y: childY },

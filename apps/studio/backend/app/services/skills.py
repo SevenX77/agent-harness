@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from fastapi.encoders import jsonable_encoder
 from graph_agent import CompiledSkill, compile_skill
@@ -112,7 +112,7 @@ async def update_skill_content(
     content: str,
     storage: StorageBackend,
     metadata: MetadataStore,
-) -> SkillDetail:
+) -> NoReturn:
     """Reject legacy single-file edits during the V2.1 backend cutover."""
     if not content.strip():
         response = error_response(
@@ -134,7 +134,7 @@ async def create_new_skill(
     content: str,
     storage: StorageBackend,
     metadata: MetadataStore,
-) -> SkillSummary:
+) -> NoReturn:
     """Reject legacy single-file creation during the V2.1 backend cutover."""
     if not content.strip():
         response = error_response(
@@ -552,7 +552,7 @@ def _error_code_from_message(message: str) -> str:
     return match.group(1) if match else "F-v21-compile"
 
 
-def _raise_v21_directory_authoring_required() -> None:
+def _raise_v21_directory_authoring_required() -> NoReturn:
     response = error_response(
         error_code="MANIFEST_VALIDATION_FAILED",
         http_status=422,

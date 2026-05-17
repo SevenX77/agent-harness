@@ -103,7 +103,7 @@ def _rehydrate_compiled_skill(snapshot: dict[str, Any], root: Path) -> CompiledS
     from graph_agent.core.loader import _discover_actions_and_tools
 
     manifest = GraphManifest.model_validate(snapshot["manifest"])
-    adapter = TypeAdapter(PhaseAST)
+    adapter: TypeAdapter[PhaseAST] = TypeAdapter(PhaseAST)
     nodes = [
         PhaseDocument(
             phase_name=str(node["phase_name"]),

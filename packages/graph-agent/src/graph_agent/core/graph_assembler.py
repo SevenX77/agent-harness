@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from langchain_core.messages import SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
@@ -311,7 +311,7 @@ def _is_critic_tool_name(name: str) -> bool:
     return any(keyword in lower for keyword in ("critic", "reviewer", "auditor"))
 
 
-def _graph_fatal(message: str) -> None:
+def _graph_fatal(message: str) -> NoReturn:
     raise SkillLoadError(f"[F-v21-graph] {message}")
 
 

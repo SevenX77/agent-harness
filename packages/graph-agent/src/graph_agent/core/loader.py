@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from json import JSONDecodeError
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Literal
+from typing import Any, Literal, NoReturn, cast
 
 from jsonschema.exceptions import SchemaError
 from jsonschema.validators import Draft202012Validator
@@ -173,19 +173,19 @@ def load_workflow_from_md(
     return assemble_graph(compile_skill(root)).graph
 
 
-def _fatal(path: Path, line: int, message: str) -> None:
+def _fatal(path: Path, line: int, message: str) -> NoReturn:
     raise SkillLoadError(f"[F-v21-route] {path}:{line} {message}")
 
 
-def _io_fatal(path: Path, line: int, message: str) -> None:
+def _io_fatal(path: Path, line: int, message: str) -> NoReturn:
     raise SkillLoadError(f"[F-v21-io] {path}:{line} {message}")
 
 
-def _graph_fatal(path: Path, line: int, message: str) -> None:
+def _graph_fatal(path: Path, line: int, message: str) -> NoReturn:
     raise SkillLoadError(f"[F-v21-graph] {path}:{line} {message}")
 
 
-def _actions_fatal(path: Path, line: int, message: str) -> None:
+def _actions_fatal(path: Path, line: int, message: str) -> NoReturn:
     raise SkillLoadError(f"[F-v21-actions] {path}:{line} {message}")
 
 
@@ -617,7 +617,7 @@ def _validate_io_schema(
         Draft202012Validator.check_schema(schema)
     except SchemaError as exc:
         _io_fatal(display_path, 1, f"invalid JSON Schema: {exc.message}")
-    return schema
+    return cast(dict[str, Any], schema)
 
 
 def _extract_output_schema_keys(schema: dict[str, Any]) -> set[str] | None:

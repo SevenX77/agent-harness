@@ -52,7 +52,7 @@ from __future__ import annotations
 from io import StringIO
 from typing import TYPE_CHECKING, Any
 
-import yaml  # type: ignore[import-untyped]  # PyYAML runtime dependency has no local stubs.
+import yaml
 
 if TYPE_CHECKING:
     from graph_agent.core.manifest import SkillManifest

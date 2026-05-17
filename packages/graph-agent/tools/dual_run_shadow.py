@@ -101,7 +101,8 @@ def _run_v21(
     compiled = compile_skill(skill_root, cache=False)
     graph = assemble_graph(compiled, chat_model=_chat_model(chat_fixture)).graph
     result = graph.invoke({"data": dict(input_data), "flow": {}, "messages": [], "run_id": run_id})
-    return _normalize({"data": result.get("data", {}), "flow": result.get("flow", {})})
+    normalized = _normalize({"data": result.get("data", {}), "flow": result.get("flow", {})})
+    return normalized if isinstance(normalized, dict) else {}
 
 
 def _chat_model(chat_fixture: str) -> Any:

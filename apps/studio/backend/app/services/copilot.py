@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import inspect
 import json
+import os
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,9 +34,9 @@ from claude_agent_sdk.types import (
     ToolResultBlock,
     ToolUseBlock,
 )
+from graph_agent.config.llm_config import ProviderDef, ResolvedProvider, load_config
 
 from app.models.copilot import (
-    CopilotBackend,
     CopilotEvent,
     CopilotEventDone,
     CopilotEventError,
@@ -45,11 +46,10 @@ from app.models.copilot import (
     CopilotToolName,
 )
 
-SessionKey = tuple[str, CopilotBackend, str]
+SessionKey = tuple[str, str, str]
 
 MAX_REFERENCE_BYTES = 5 * 1024
 _BODY_REFERENCE_CHARS = 300
-_DEEPSEEK_ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
 _ALLOWED_TOOLS = ["Read", "Write", "Edit", "Bash"]
 _ALLOWED_TOOL_SET = set(_ALLOWED_TOOLS)
 _FILE_CONTENT_KEYS = {
@@ -81,33 +81,28 @@ _view_contexts: dict[str, ViewContext] = {}
 _view_context_lock = asyncio.Lock()
 
 
-def make_session_key(skill_id: str, backend: CopilotBackend, api_key: str) -> SessionKey:
+def make_session_key(
+    skill_id: str,
+    model_code: str,
+    provider_code: str,
+    api_key: str,
+) -> SessionKey:
     """Build a cache key that changes when credentials rotate."""
 
     api_key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16]
-    return (skill_id, backend, api_key_hash)
-
-
-def resolve_base_url(backend: CopilotBackend) -> str | None:
-    """Return the Anthropic-compatible base URL for a V1 backend."""
-
-    if backend == "claude":
-        return None
-    if backend == "deepseek":
-        return _DEEPSEEK_ANTHROPIC_BASE_URL
-    raise NotImplementedError(f"Backend '{backend}' is reserved for V1.5")
+    model_provider = f"{model_code}:{provider_code}"
+    return (skill_id, model_provider, api_key_hash)
 
 
 def build_options(
-    backend: CopilotBackend,
+    base_url: str | None,
     api_key: str,
     workspace_dir: str | Path,
 ) -> ClaudeAgentOptions:
     """Build per-session Claude Agent SDK options without mutating os.environ."""
 
     env = {"ANTHROPIC_API_KEY": api_key}
-    base_url = resolve_base_url(backend)
-    if base_url is not None:
+    if base_url:
         env["ANTHROPIC_BASE_URL"] = base_url
 
     return ClaudeAgentOptions(
@@ -187,24 +182,41 @@ def build_system_prompt(skill_id: str) -> str:
 
 async def stream_query(
     skill_id: str,
-    backend: CopilotBackend,
-    api_key: str | None,
     user_message: str,
+    model_override: str | None = None,
     workspace_dir: str | Path | None = None,
 ) -> AsyncIterator[CopilotEvent]:
-    """Stream one Copilot query as Studio CopilotEvent objects."""
+    """Stream one Copilot query using the copilot_chat role and optional model override."""
 
-    if not api_key:
-        yield CopilotEventError(message=f"未配置 {backend} backend 的 API key")
+    try:
+        primary = _resolve_copilot_provider(model_override)
+    except KeyError as exc:
+        yield CopilotEventError(message=f"未知模型: {exc}")
         return
+    except ValueError as exc:
+        yield CopilotEventError(message=str(exc))
+        return
+
+    api_key = _resolve_api_key(primary.provider_def)
+    if not api_key:
+        yield CopilotEventError(
+            message=(
+                f"Provider {primary.provider_code} 未配置 API key "
+                f"(env: {primary.provider_def.api_key_env})"
+            )
+        )
+        return
+
+    model_code = primary.model_def.code
+    provider_code = primary.provider_code
 
     tool_names: dict[str, str] = {}
     try:
-        if backend not in ("claude", "deepseek"):
-            raise NotImplementedError
         client = await get_or_create_session(
             skill_id=skill_id,
-            backend=backend,
+            model_code=model_code,
+            provider_code=provider_code,
+            base_url=primary.provider_def.base_url,
             api_key=api_key,
             workspace_dir=workspace_dir or Path.cwd(),
         )
@@ -220,35 +232,49 @@ async def stream_query(
         if not yielded_done:
             yield CopilotEventDone()
     except Exception as exc:  # noqa: BLE001
-        yield _error_event_for_exception(backend, exc)
+        yield _error_event_for_exception(exc)
 
 
 async def get_or_create_session(
     skill_id: str,
-    backend: CopilotBackend,
-    api_key: str,
-    workspace_dir: str | Path,
+    model_code: str,
+    provider_code: str | None = None,
+    base_url: str | Path | None = None,
+    api_key: str | None = None,
+    workspace_dir: str | Path | None = None,
 ) -> ClaudeSDKClient:
-    """Return a cached SDK client for the skill/backend/credential tuple."""
+    """Return a cached SDK client for the skill/model/provider/credential tuple."""
 
-    session_key = make_session_key(skill_id, backend, api_key)
+    if provider_code is None or api_key is None or workspace_dir is None:
+        raise TypeError("provider_code, api_key, and workspace_dir are required")
+
+    session_key = make_session_key(skill_id, model_code, provider_code, api_key)
     async with _session_lock:
         session = _sessions.get(session_key)
         if session is None:
-            session = _session_factory(build_options(backend, api_key, workspace_dir))
+            session = _session_factory(
+                build_options(cast(str | None, base_url), api_key, workspace_dir)
+            )
             _sessions[session_key] = session
         return session
 
 
-async def reset_session(skill_id: str | None, backend: CopilotBackend | None) -> int:
-    """Drop cached sessions matching skill and/or backend filters."""
+async def reset_session(
+    skill_id: str | None,
+    model_code: str | None = None,
+) -> int:
+    """Drop cached sessions matching skill and/or model filters."""
 
     async with _session_lock:
         matched_keys = [
             session_key
             for session_key in _sessions
             if (skill_id is None or session_key[0] == skill_id)
-            and (backend is None or session_key[1] == backend)
+            and (
+                model_code is None
+                or session_key[1] == model_code
+                or session_key[1].startswith(f"{model_code}:")
+            )
         ]
         sessions = [_sessions.pop(session_key) for session_key in matched_keys]
 
@@ -346,11 +372,28 @@ def _tool_result_summary(content: str | list[dict[str, Any]] | None) -> str:
     return json.dumps(content, ensure_ascii=False)
 
 
-def _error_event_for_exception(backend: CopilotBackend, exc: Exception) -> CopilotEventError:
+def _resolve_copilot_provider(model_override: str | None) -> ResolvedProvider:
+    config = load_config()
+    resolved = (
+        config.resolve_model(model_override)
+        if model_override
+        else config.resolve_role("copilot_chat")
+    )
+    if not resolved.call_chain:
+        raise ValueError("copilot_chat role 无可用 provider")
+    return resolved.call_chain[0]
+
+
+def _resolve_api_key(provider_def: ProviderDef) -> str:
+    key = os.environ.get(provider_def.api_key_env, "") if provider_def.api_key_env else ""
+    if not key and provider_def.api_key_env_fallback:
+        key = os.environ.get(provider_def.api_key_env_fallback, "")
+    return key
+
+
+def _error_event_for_exception(exc: Exception) -> CopilotEventError:
     if isinstance(exc, TimeoutError):
         return CopilotEventError(message="请求超时, 检查网络 / 代理")
-    if isinstance(exc, NotImplementedError):
-        return CopilotEventError(message=f"V1.5 backend ({backend}) 暂不可用")
     if isinstance(exc, (CLIConnectionError, ProcessError, ClaudeSDKError)):
         return CopilotEventError(
             message=f"后端连接失败 (DeepSeek 端点不可达 / 大陆需代理): {exc}"

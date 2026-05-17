@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from app.models.copilot import (
@@ -114,16 +115,24 @@ def test_tool_failure_translates_to_error_event() -> None:
     assert events == [CopilotEventError(message="工具 Bash 失败: permission denied")]
 
 
-def test_stream_query_errors_when_api_key_missing() -> None:
-    events = asyncio.run(_collect(copilot.stream_query("skill-a", "claude", None, "hi")))
+def test_stream_query_errors_when_api_key_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(copilot, "_resolve_copilot_provider", lambda _model_override: _resolved_provider())
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
-    assert events == [CopilotEventError(message="未配置 claude backend 的 API key")]
+    events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi")))
+
+    assert events == [CopilotEventError(message="Provider OC_CL_ANT 未配置 API key (env: ANTHROPIC_API_KEY)")]
 
 
-def test_stream_query_errors_when_backend_is_v1_5() -> None:
-    events = asyncio.run(_collect(copilot.stream_query("skill-a", "gemini", "key", "hi")))
+def test_stream_query_errors_when_model_override_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    def resolve_copilot_provider(_model_override: str | None) -> object:
+        raise KeyError("BAD_MODEL")
 
-    assert events == [CopilotEventError(message="V1.5 backend (gemini) 暂不可用")]
+    monkeypatch.setattr(copilot, "_resolve_copilot_provider", resolve_copilot_provider)
+
+    events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi", model_override="BAD_MODEL")))
+
+    assert events == [CopilotEventError(message="未知模型: 'BAD_MODEL'")]
 
 
 def test_stream_query_timeout_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -132,8 +141,10 @@ def test_stream_query_timeout_error(monkeypatch: pytest.MonkeyPatch, tmp_path: P
         "_session_factory",
         lambda _options: FakeClient(error=TimeoutError()),
     )
+    monkeypatch.setattr(copilot, "_resolve_copilot_provider", lambda _model_override: _resolved_provider())
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
 
-    events = asyncio.run(_collect(copilot.stream_query("skill-a", "claude", "key", "hi", tmp_path)))
+    events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi", workspace_dir=tmp_path)))
 
     assert events == [CopilotEventError(message="请求超时, 检查网络 / 代理")]
 
@@ -144,8 +155,10 @@ def test_stream_query_sdk_network_error(monkeypatch: pytest.MonkeyPatch, tmp_pat
         "_session_factory",
         lambda _options: FakeClient(error=CLIConnectionError("connection failed")),
     )
+    monkeypatch.setattr(copilot, "_resolve_copilot_provider", lambda _model_override: _resolved_provider())
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
 
-    events = asyncio.run(_collect(copilot.stream_query("skill-a", "deepseek", "key", "hi", tmp_path)))
+    events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi", workspace_dir=tmp_path)))
 
     assert events == [
         CopilotEventError(message="后端连接失败 (DeepSeek 端点不可达 / 大陆需代理): connection failed")
@@ -158,8 +171,10 @@ def test_stream_query_uses_system_prompt_and_yields_done(
 ) -> None:
     client = FakeClient(messages=[AssistantMessage(content=[TextBlock(text="hello")], model="claude")])
     monkeypatch.setattr(copilot, "_session_factory", lambda _options: client)
+    monkeypatch.setattr(copilot, "_resolve_copilot_provider", lambda _model_override: _resolved_provider())
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
 
-    events = asyncio.run(_collect(copilot.stream_query("skill-a", "claude", "key", "user text", tmp_path)))
+    events = asyncio.run(_collect(copilot.stream_query("skill-a", "user text", workspace_dir=tmp_path)))
 
     assert events == [CopilotEventText(content="hello"), CopilotEventDone()]
     assert client.connected is True
@@ -169,3 +184,17 @@ def test_stream_query_uses_system_prompt_and_yields_done(
 
 async def _collect(stream: AsyncIterator[object]) -> list[object]:
     return [event async for event in stream]
+
+
+def _resolved_provider() -> object:
+    provider_def = SimpleNamespace(
+        api_key_env="ANTHROPIC_API_KEY",
+        api_key_env_fallback=None,
+        base_url="https://provider.test",
+    )
+    model_def = SimpleNamespace(code="CL46T")
+    return SimpleNamespace(
+        provider_code="OC_CL_ANT",
+        provider_def=provider_def,
+        model_def=model_def,
+    )

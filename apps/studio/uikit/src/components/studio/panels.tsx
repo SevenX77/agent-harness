@@ -1,5 +1,5 @@
 
-import { ChevronRight, ChevronDown, FileText, Folder, X, Play, AlertCircle, CheckCircle2, Check, ChevronsUpDown } from "lucide-react"
+import { ChevronRight, ChevronDown, FileText, Folder, AlertCircle, CheckCircle2, Check, ChevronsUpDown } from "lucide-react"
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -12,10 +12,6 @@ import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { cn } from "@/lib/utils"
-
-interface PanelProps {
-  onClose: () => void
-}
 
 export type FileMeta = { path: string; content: string; language: string }
 
@@ -88,114 +84,184 @@ max_tokens: 2000
 system_prompt: "You are a helpful assistant."
 `,
   },
+  "artifacts/build.json": {
+    language: "json",
+    content: `{
+  "build_id": "build_2026_05_11_001",
+  "compiled_at": "2026-05-11T14:30:00Z",
+  "nodes": 4,
+  "edges": 4
+}
+`,
+  },
+  "artifacts/run_142_output.json": {
+    language: "json",
+    content: `{
+  "run_id": 142,
+  "status": "success",
+  "duration_ms": 2300,
+  "output": "Generated text response..."
+}
+`,
+  },
+  "input/sample_001.json": {
+    language: "json",
+    content: `{
+  "prompt": "Summarize the key points",
+  "system": "You are a helpful assistant.",
+  "max_tokens": 500
+}
+`,
+  },
+  "input/sample_002.json": {
+    language: "json",
+    content: `{
+  "prompt": "Translate to French",
+  "system": "You are a translator.",
+  "max_tokens": 200
+}
+`,
+  },
+  "input/schema.json": {
+    language: "json",
+    content: `{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["prompt"],
+  "properties": {
+    "prompt": { "type": "string" },
+    "system": { "type": "string" },
+    "max_tokens": { "type": "integer", "minimum": 1, "maximum": 4000 }
+  }
+}
+`,
+  },
 }
 
-interface AssetsPanelProps extends PanelProps {
+interface AssetsPanelProps {
   onFileOpen: (file: FileMeta) => void
 }
 
-// Panel Header Component
-function PanelHeader({ title, onClose, extra }: { title: string; onClose: () => void; extra?: React.ReactNode }) {
+interface InputPanelProps {
+  onFileOpen: (file: FileMeta) => void
+}
+
+function PanelHeader({ title, extra }: { title: string; extra?: React.ReactNode }) {
   return (
-    <div className="h-10 flex items-center justify-between px-3 shrink-0">
+    <div className="h-10 flex items-center px-3 shrink-0">
       <div className="flex items-center gap-2">
         <span className="text-xs font-medium text-foreground">{title}</span>
         {extra}
       </div>
-      <Button variant="ghost" size="icon-xs" onClick={onClose}>
-        <X className="size-2.5" strokeWidth={1.5} />
-      </Button>
+    </div>
+  )
+}
+
+function SectionHeading({ label }: { label: string }) {
+  return (
+    <div className="px-2 pt-1 pb-0.5 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+      {label}
+    </div>
+  )
+}
+
+function FileRow({
+  path,
+  icon: Icon,
+  onOpen,
+  indent = false,
+}: {
+  path: string
+  icon: typeof FileText
+  onOpen: (file: FileMeta) => void
+  indent?: boolean
+}) {
+  const meta = MOCK_FILES[path]
+  const filename = path.split("/").pop() ?? path
+
+  return (
+    <div
+      onClick={() => meta && onOpen({ path, ...meta })}
+      className={cn(
+        "flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors",
+        indent && "ml-4 border-l border-border pl-3"
+      )}
+    >
+      <Icon className="size-4" strokeWidth={1.5} />
+      <span>{filename}</span>
+    </div>
+  )
+}
+
+function FolderRow({
+  name,
+  children,
+  defaultExpanded = false,
+}: {
+  name: string
+  children: React.ReactNode
+  defaultExpanded?: boolean
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded)
+
+  return (
+    <div>
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors w-full text-left"
+      >
+        {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+        <Folder className="size-4" strokeWidth={1.5} />
+        <span>{name}</span>
+      </button>
+      {expanded && <div>{children}</div>}
     </div>
   )
 }
 
 // Assets Panel
-export function AssetsPanel({ onClose, onFileOpen }: AssetsPanelProps) {
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({
-    scripts: true,
-    data: false,
-  })
-
-  const toggleFolder = (folder: string) => {
-    setExpanded((prev) => ({ ...prev, [folder]: !prev[folder] }))
-  }
-
+export function AssetsPanel({ onFileOpen }: AssetsPanelProps) {
   return (
     <div className="h-full bg-background flex flex-col">
-      <PanelHeader title="Assets" onClose={onClose} />
+      <PanelHeader title="Assets" />
 
       <ScrollArea className="flex-1">
-        <div className="py-2 px-2 text-xs">
-          {/* SKILL.md */}
-          <div
-            className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
-            onClick={() => onFileOpen({ path: "SKILL.md", ...MOCK_FILES["SKILL.md"] })}
-          >
-            <FileText className="size-4 text-muted-foreground" strokeWidth={1.5} />
-            <span>SKILL.md</span>
-          </div>
+        <div className="py-2 px-2 text-xs space-y-3">
+          <SectionHeading label="Skill Files" />
+          <FileRow path="SKILL.md" icon={FileText} onOpen={onFileOpen} />
+          <FolderRow name="scripts" defaultExpanded>
+            <FileRow path="scripts/main.py" icon={FileText} onOpen={onFileOpen} indent />
+            <FileRow path="scripts/utils.py" icon={FileText} onOpen={onFileOpen} indent />
+          </FolderRow>
+          <FileRow path="config.yaml" icon={FileText} onOpen={onFileOpen} />
 
-          {/* Scripts folder */}
-          <div>
-            <button
-              onClick={() => toggleFolder("scripts")}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors w-full text-left"
-            >
-              {expanded.scripts ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-              <Folder className="size-4" strokeWidth={1.5} />
-              <span>scripts</span>
-            </button>
-            {expanded.scripts && (
-              <div className="ml-4 border-l border-border pl-3">
-                <div
-                  className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
-                  onClick={() => onFileOpen({ path: "scripts/main.py", ...MOCK_FILES["scripts/main.py"] })}
-                >
-                  <FileText className="size-4" strokeWidth={1.5} />
-                  <span>main.py</span>
-                </div>
-                <div
-                  className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
-                  onClick={() => onFileOpen({ path: "scripts/utils.py", ...MOCK_FILES["scripts/utils.py"] })}
-                >
-                  <FileText className="size-4" strokeWidth={1.5} />
-                  <span>utils.py</span>
-                </div>
-              </div>
-            )}
-          </div>
+          <SectionHeading label="Artifacts" />
+          <FolderRow name="artifacts" defaultExpanded>
+            <FileRow path="artifacts/build.json" icon={FileText} onOpen={onFileOpen} indent />
+            <FileRow path="artifacts/run_142_output.json" icon={FileText} onOpen={onFileOpen} indent />
+          </FolderRow>
+          <FolderRow name="data">
+            <FileRow path="data/golden_baseline.json" icon={FileText} onOpen={onFileOpen} indent />
+          </FolderRow>
+        </div>
+      </ScrollArea>
+    </div>
+  )
+}
 
-          {/* Data folder */}
-          <div>
-            <button
-              onClick={() => toggleFolder("data")}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors w-full text-left"
-            >
-              {expanded.data ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-              <Folder className="size-4" strokeWidth={1.5} />
-              <span>data</span>
-            </button>
-            {expanded.data && (
-              <div className="ml-4 border-l border-border pl-3">
-                <div
-                  className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
-                  onClick={() => onFileOpen({ path: "data/golden_baseline.json", ...MOCK_FILES["data/golden_baseline.json"] })}
-                >
-                  <FileText className="size-4" strokeWidth={1.5} />
-                  <span>golden_baseline.json</span>
-                </div>
-              </div>
-            )}
-          </div>
+export function InputPanel({ onFileOpen }: InputPanelProps) {
+  return (
+    <div className="h-full bg-background flex flex-col">
+      <PanelHeader title="Input" />
 
-          {/* Config */}
-          <div
-            className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
-            onClick={() => onFileOpen({ path: "config.yaml", ...MOCK_FILES["config.yaml"] })}
-          >
-            <FileText className="size-4" strokeWidth={1.5} />
-            <span>config.yaml</span>
-          </div>
+      <ScrollArea className="flex-1">
+        <div className="py-2 px-2 text-xs space-y-3">
+          <SectionHeading label="Input Files" />
+          <FileRow path="input/sample_001.json" icon={FileText} onOpen={onFileOpen} />
+          <FileRow path="input/sample_002.json" icon={FileText} onOpen={onFileOpen} />
+
+          <SectionHeading label="Schema" />
+          <FileRow path="input/schema.json" icon={FileText} onOpen={onFileOpen} />
         </div>
       </ScrollArea>
     </div>
@@ -203,7 +269,7 @@ export function AssetsPanel({ onClose, onFileOpen }: AssetsPanelProps) {
 }
 
 // Timeline Panel
-export function TimelinePanel({ onClose }: PanelProps) {
+export function TimelinePanel() {
   const traces = [
     { id: 1, name: "Run #142", status: "success", duration: "2.3s", time: "2m ago" },
     { id: 2, name: "Run #141", status: "error", duration: "0.8s", time: "5m ago" },
@@ -213,7 +279,7 @@ export function TimelinePanel({ onClose }: PanelProps) {
 
   return (
     <div className="h-full bg-background flex flex-col">
-      <PanelHeader title="Timeline" onClose={onClose} />
+      <PanelHeader title="Timeline" />
 
       <ScrollArea className="flex-1">
         <div className="py-2 px-2">
@@ -240,20 +306,12 @@ export function TimelinePanel({ onClose }: PanelProps) {
           ))}
         </div>
       </ScrollArea>
-
-      <Separator />
-      <div className="p-2">
-        <Button variant="secondary" className="w-full gap-2">
-          <Play className="size-3.5" />
-          New Run
-        </Button>
-      </div>
     </div>
   )
 }
 
 // Properties Panel
-export function PropertiesPanel({ onClose }: PanelProps) {
+export function PropertiesPanel() {
   const [temperature, setTemperature] = useState([0.7])
   const [modelOpen, setModelOpen] = useState(false)
   const [modelValue, setModelValue] = useState("gpt-4o-mini")
@@ -265,7 +323,7 @@ export function PropertiesPanel({ onClose }: PanelProps) {
 
   return (
     <div className="h-full bg-background flex flex-col">
-      <PanelHeader title="Properties" onClose={onClose} />
+      <PanelHeader title="Properties" />
 
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-5">
@@ -360,7 +418,7 @@ export function PropertiesPanel({ onClose }: PanelProps) {
 }
 
 // Editor Panel
-export function EditorPanel({ onClose }: PanelProps) {
+export function EditorPanel() {
   const codeLines = [
     { num: 1, content: "# main.py", type: "comment" },
     { num: 2, content: "import asyncio", type: "import" },
@@ -384,7 +442,6 @@ export function EditorPanel({ onClose }: PanelProps) {
     <div className="h-full bg-background flex flex-col">
       <PanelHeader
         title="Editor"
-        onClose={onClose}
         extra={<Badge variant="outline" className="text-xs">main.py</Badge>}
       />
 

@@ -2,10 +2,10 @@ import React, { useEffect, useState, type FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { ArrowUp, Bot, CircleAlert, Paperclip, Plus } from 'lucide-react'
 import { toast } from 'sonner'
-import { getCopilotCredentials, updateCopilotCredentials } from '../../api/copilot'
+import { getCredentials, getRole, type CredentialsState, type RoleEntry } from '../../api/llm'
 import { useCopilot } from '../../hooks/useCopilot'
 import { useTemplates } from '../../hooks/useTemplates'
-import type { CopilotBackend, CopilotCredentials, CopilotMessage } from '../../types/copilot'
+import type { CopilotMessage } from '../../types/copilot'
 import { DiffBubble } from './diff-bubble'
 import { ModelPicker } from './model-picker'
 import { ToolCallBubble } from './tool-call-bubble'
@@ -73,48 +73,43 @@ interface CopilotPanelProps {
 
 export function CopilotPanel({ skillId, view = 'edit' }: CopilotPanelProps) {
   const [draft, setDraft] = useState('')
-  const [credentials, setCredentials] = useState<CopilotCredentials | null>(null)
-  const [activeBackend, setActiveBackend] = useState<CopilotBackend>('claude')
+  const [roleData, setRoleData] = useState<RoleEntry | null>(null)
+  const [credentials, setCredentials] = useState<CredentialsState | null>(null)
+  const [selectedModel, setSelectedModel] = useState('')
   const { templates, templatesLoading } = useTemplates()
-  const copilot = useCopilot(skillId, activeBackend)
+  const copilot = useCopilot(skillId)
   const inEvalView = view === 'eval'
 
   useEffect(() => {
     let cancelled = false
-    getCopilotCredentials()
-      .then((next) => {
+    Promise.all([getRole('copilot_chat'), getCredentials()])
+      .then(([role, nextCredentials]) => {
         if (cancelled) {
           return
         }
-        setCredentials(next)
-        setActiveBackend(next.active_backend)
+        setRoleData(role)
+        setCredentials(nextCredentials)
+        setSelectedModel(role.active_model)
       })
       .catch(() => {
-        toast.error('Copilot credentials unavailable')
+        toast.error('Copilot model config unavailable')
       })
     return () => {
       cancelled = true
     }
   }, [])
 
-  async function selectBackend(backend: CopilotBackend) {
-    if (backend === activeBackend) {
+  function selectModel(modelCode: string) {
+    if (modelCode === selectedModel) {
       return
     }
-    try {
-      const next = await updateCopilotCredentials(backend, undefined, true)
-      setCredentials(next)
-      setActiveBackend(backend)
-      copilot.setBackend(backend)
-      toast.info('已切换模型, 聊天历史清空')
-    } catch {
-      toast.error('模型切换失败')
-    }
+    setSelectedModel(modelCode)
+    toast.info('已切换模型, 后续消息将使用该模型')
   }
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (copilot.sendMessage(draft)) {
+    if (copilot.sendMessage(draft, selectedModel || roleData?.active_model || null)) {
       setDraft('')
     }
   }
@@ -215,7 +210,12 @@ export function CopilotPanel({ skillId, view = 'edit' }: CopilotPanelProps) {
               >
                 <Plus className="size-3.5" />
               </button>
-              <ModelPicker credentials={credentials} activeBackend={activeBackend} onSelect={selectBackend} />
+              <ModelPicker
+                role={roleData}
+                credentials={credentials}
+                selectedModel={selectedModel || roleData?.active_model || ''}
+                onSelect={selectModel}
+              />
             </div>
             <button
               type="submit"

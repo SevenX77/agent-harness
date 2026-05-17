@@ -1,16 +1,14 @@
-import type { CopilotBackend, CopilotMessage } from '../types/copilot'
+import type { CopilotMessage } from '../types/copilot'
 
 type Listener = () => void
 
 interface CopilotState {
   skillId: string | null
-  backend: CopilotBackend
   messages: CopilotMessage[]
 }
 
 let state: CopilotState = {
   skillId: null,
-  backend: 'claude',
   messages: [],
 }
 
@@ -26,12 +24,8 @@ export const copilotStore = {
     listeners.add(listener)
     return () => listeners.delete(listener)
   },
-  reset(skillId: string | null, backend: CopilotBackend) {
-    state = { skillId, backend, messages: [] }
-    emit()
-  },
-  setBackend(backend: CopilotBackend) {
-    state = { ...state, backend, messages: [] }
+  reset(skillId: string | null) {
+    state = { skillId, messages: [] }
     emit()
   },
   appendMessage(message: CopilotMessage) {

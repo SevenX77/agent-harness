@@ -8,6 +8,7 @@ description: >
   shape rather than the orchestrator.py-style dispatcher pattern kept in
   `skills/story-deconstruction/` for host-project continuity.
 type: graph
+schema_version: "2.0"
 context_mapping:
   chapters: "{input.chapters}"
   project_id: "{input.project_id}"

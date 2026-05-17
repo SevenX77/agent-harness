@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import tempfile
 import threading
 from pathlib import Path
@@ -19,6 +20,12 @@ from app.models.settings import AppSettings
 from app.models.skills import SkillSummary
 
 logger = logging.getLogger(__name__)
+
+
+def _rmtree_if_exists(path: Path) -> None:
+    """Remove a directory tree if it exists; no-op when missing."""
+    if path.exists():
+        shutil.rmtree(path, ignore_errors=False)
 
 
 class LocalJsonMetadataStore:
@@ -119,6 +126,11 @@ class LocalJsonMetadataStore:
         await asyncio.to_thread(summary_path.parent.mkdir, parents=True, exist_ok=True)
         async with aiofiles.open(summary_path, "w", encoding="utf-8") as file:
             await file.write(summary.model_dump_json())
+
+    async def remove_skill_summary(self, user_id: str, skill_id: str) -> None:
+        """Remove one user's skill summary and any cached runs under it."""
+        skill_root = self._skills_root(user_id) / skill_id
+        await asyncio.to_thread(_rmtree_if_exists, skill_root)
 
     async def list_runs(self, user_id: str, skill_id: str) -> list[RunMetadata]:
         """Load run metadata files for one skill."""

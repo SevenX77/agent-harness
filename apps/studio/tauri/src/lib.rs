@@ -70,6 +70,35 @@ fn open_in_codex(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn reveal_in_file_manager(path: String) -> Result<(), String> {
+    if cfg!(target_os = "macos") {
+        return Command::new("open")
+            .args(["-R", &path])
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("failed to reveal in Finder: {error}"));
+    }
+
+    if cfg!(target_os = "linux") {
+        return Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("failed to open file manager: {error}"));
+    }
+
+    if cfg!(target_os = "windows") {
+        return Command::new("explorer")
+            .arg(format!("/select,{}", path))
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("failed to open Explorer: {error}"));
+    }
+
+    Err("revealing in file manager is not supported on this platform".to_string())
+}
+
+#[tauri::command]
 fn open_in_terminal(path: String) -> Result<(), String> {
     if cfg!(target_os = "macos") {
         return Command::new("open")
@@ -123,7 +152,8 @@ pub fn run() {
             get_sidecar_stderr,
             open_in_cursor,
             open_in_codex,
-            open_in_terminal
+            open_in_terminal,
+            reveal_in_file_manager
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

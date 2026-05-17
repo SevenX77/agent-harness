@@ -1,6 +1,5 @@
 import type { JsonObject, JsonValue } from '../api/types'
 
-export type CopilotBackend = 'claude' | 'deepseek' | 'gemini' | 'openai'
 export type CopilotToolName = 'Read' | 'Write' | 'Edit' | 'Bash'
 export type CopilotEventStatus = 'pending' | 'running' | 'success' | 'error'
 export type CopilotView = 'WelcomeScreen' | 'Edit' | 'Compile' | 'Validate' | 'Predict' | 'Run' | 'Publish'
@@ -59,17 +58,6 @@ export interface CopilotMessage {
   events: CopilotEvent[]
   status: CopilotEventStatus
   createdAt: number
-}
-
-export interface CopilotBackendStatus {
-  has_key: boolean
-  last4: string | null
-  base_url: string
-}
-
-export interface CopilotCredentials {
-  active_backend: CopilotBackend
-  backends: Record<CopilotBackend, CopilotBackendStatus>
 }
 
 export interface CopilotContextPayload {

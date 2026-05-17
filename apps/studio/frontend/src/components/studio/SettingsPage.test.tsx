@@ -17,7 +17,6 @@ import {
   visibleRoleNames,
   preserveTestStateOnInputChange,
   testRequestFor,
-  type CredentialDraft,
 } from './SettingsPage'
 import type { CredentialsState, RolesData } from '../../api/llm'
 

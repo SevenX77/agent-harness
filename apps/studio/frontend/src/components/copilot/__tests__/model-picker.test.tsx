@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server'
+import type { ReactElement } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { CredentialsState, RoleEntry } from '../../../api/llm'
 import {
@@ -25,6 +26,11 @@ const credentials: CredentialsState = {
     { provider_code: 'deepseek', has_key: false },
   ],
 }
+
+type MenuButtonElement = ReactElement<{
+  disabled?: boolean
+  onClick?: () => void
+}>
 
 function renderMenuHtml(selectedModel = 'CL46T', nextCredentials = credentials) {
   return renderToStaticMarkup(
@@ -74,10 +80,12 @@ describe('ModelPicker', () => {
     const onSelect = vi.fn()
     const options = getModelOptions(role, credentials)
     const element = ModelPickerMenu({ options, selectedModel: 'DS32R', onSelect })
-    const buttons = Array.isArray(element.props.children) ? element.props.children : [element.props.children]
+    const buttons: MenuButtonElement[] = Array.isArray(element.props.children)
+      ? element.props.children
+      : [element.props.children]
     const cl46t = buttons.find((button) => button.key === 'CL46T')
 
-    cl46t.props.onClick()
+    cl46t?.props.onClick?.()
 
     expect(onSelect).toHaveBeenCalledWith('CL46T')
   })
@@ -86,11 +94,13 @@ describe('ModelPicker', () => {
     const onSelect = vi.fn()
     const options = getModelOptions(role, credentials)
     const element = ModelPickerMenu({ options, selectedModel: 'CL46T', onSelect })
-    const buttons = Array.isArray(element.props.children) ? element.props.children : [element.props.children]
+    const buttons: MenuButtonElement[] = Array.isArray(element.props.children)
+      ? element.props.children
+      : [element.props.children]
     const ds32r = buttons.find((button) => button.key === 'DS32R')
 
-    expect(ds32r.props.disabled).toBe(true)
-    expect(ds32r.props.onClick).toBeUndefined()
+    expect(ds32r?.props.disabled).toBe(true)
+    expect(ds32r?.props.onClick).toBeUndefined()
     expect(onSelect).not.toHaveBeenCalled()
   })
 

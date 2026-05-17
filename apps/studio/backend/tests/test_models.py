@@ -3,7 +3,7 @@ from __future__ import annotations
 import app.models as models
 import pytest
 from app.models import ErrorResponse, RunRequest, SkillDetail
-from graph_agent.core.manifest import AgentProfile, AgentSkillDef
+from graph_agent.core.manifest import GraphManifest
 from pydantic import ValidationError
 
 
@@ -30,29 +30,37 @@ def test_model_exports_cover_phase0_contracts() -> None:
         "RunListResponse",
         "RunMetadata",
         "RunRequest",
+        "SerializeGraphReq",
+        "SerializeGraphRes",
         "SetGoldenReq",
         "SkillDetail",
         "SkillSummary",
         "TerminalSession",
         "TestInputMetadata",
         "TokensMetrics",
+        "UpdateSkillFileReq",
+        "UpdateSkillFileRes",
         "UpdateSkillReq",
     }
     assert set(models.__all__) == expected_exports
 
 
 def test_models_validate_fields_and_reuse_graph_agent_contracts() -> None:
-    manifest = AgentSkillDef(
-        type="agent",
+    manifest = GraphManifest(
+        schema_version="2.1",
         name="demo-skill",
         description="demo",
-        agent_profile=AgentProfile(role="role", goal="goal"),
+        phases=[],
     )
-    detail = SkillDetail(manifest=manifest, file_paths={"skill_md": "/tmp/SKILL.md"}, has_golden=False)
+    detail = SkillDetail(
+        manifest=manifest,
+        file_paths={"graph_md": "/tmp/GRAPH.md"},
+        has_golden=False,
+    )
 
-    assert detail.manifest.type == "agent"
+    assert detail.manifest.schema_version == "2.1"
     assert detail.manifest.name == "demo-skill"
-    assert detail.file_paths["skill_md"].endswith("SKILL.md")
+    assert detail.file_paths["graph_md"].endswith("GRAPH.md")
 
     with pytest.raises(ValidationError):
         ErrorResponse(

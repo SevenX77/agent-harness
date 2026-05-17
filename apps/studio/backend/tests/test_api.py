@@ -68,9 +68,10 @@ def test_skills_list_and_detail_use_real_skill_files(client: TestClient) -> None
     detail_response = client.get("/api/skills/text-segmentation")
     assert detail_response.status_code == 200
     body = detail_response.json()
-    assert body["manifest"]["type"] == "graph"
-    assert body["manifest"]["io"]["inputs"][0]["name"] == "input_text"
-    assert body["manifest"]["phases"][0]["name"] == "setup"
+    assert body["manifest"]["schema_version"] == "2.1"
+    assert body["io_schema"]["inputs"]["properties"]["input_text"]["type"] == "string"
+    assert body["manifest"]["phases"][0]["id"] == "setup"
+    assert "GRAPH.md" in body["files"]
     assert body["lint_result"]["status"] == "passed"
 
 
@@ -87,7 +88,7 @@ def test_lint_reports_failed_manifest_with_line_number(
 ) -> None:
     skills_dir, workspaces_dir = studio_roots
     skill_dir = copy_skill(skills_dir, workspaces_dir, "text-segmentation")
-    skill_path = skill_dir / "SKILL.md"
+    skill_path = skill_dir / "phases" / "setup" / "LOGIC.md"
     skill_path.write_text(
         skill_path.read_text(encoding="utf-8").replace("mode: logic\n", "mode: bogus\n"),
         encoding="utf-8",
@@ -109,23 +110,27 @@ def test_put_updates_indexed_skill_atomically_and_invalid_content_preserves_file
     _skills_dir, workspaces_dir = studio_roots
     create_response = client.post(
         "/api/skills",
-        json={"skill_id": "idea-generator", "content": _agent_skill_content("idea-generator")},
+        json={"skill_id": "idea-generator", "files": _agent_skill_files("idea-generator")},
     )
     assert create_response.status_code == 201
-    skill_path = config.DEFAULT_SKILLS_ROOT / "idea-generator" / "SKILL.md"
+    skill_path = config.DEFAULT_SKILLS_ROOT / "idea-generator" / "GRAPH.md"
     updated = skill_path.read_text(encoding="utf-8").replace(
         "description: Draft structured ideas",
         "description: Updated ideas",
     )
+    files = _agent_skill_files("idea-generator")
+    files["GRAPH.md"] = updated
 
-    ok_response = client.put("/api/skills/idea-generator", json={"content": updated})
+    ok_response = client.put("/api/skills/idea-generator", json={"files": files})
 
     assert ok_response.status_code == 200
     assert ok_response.json()["manifest"]["description"] == "Updated ideas"
     assert "Updated ideas" in skill_path.read_text(encoding="utf-8")
-    assert not (workspaces_dir / "default" / "skills" / "idea-generator" / "SKILL.md").exists()
+    assert not (workspaces_dir / "default" / "skills" / "idea-generator" / "GRAPH.md").exists()
 
-    bad_response = client.put("/api/skills/idea-generator", json={"content": "not yaml"})
+    bad_files = dict(files)
+    bad_files["GRAPH.md"] = "not yaml"
+    bad_response = client.put("/api/skills/idea-generator", json={"files": bad_files})
 
     assert bad_response.status_code == 422
     assert "Updated ideas" in skill_path.read_text(encoding="utf-8")
@@ -139,7 +144,7 @@ def test_create_skill(
 
     response = client.post(
         "/api/skills",
-        json={"skill_id": "idea-generator", "content": _agent_skill_content("idea-generator")},
+        json={"skill_id": "idea-generator", "files": _agent_skill_files("idea-generator")},
     )
 
     assert response.status_code == 201
@@ -151,7 +156,7 @@ def test_create_skill(
     skill_dir = config.DEFAULT_SKILLS_ROOT / "idea-generator"
     assert body["directory_path"] == str(skill_dir)
 
-    assert (skill_dir / "SKILL.md").exists()
+    assert (skill_dir / "GRAPH.md").exists()
     assert (skill_dir / ".workspace").is_dir()
     assert (skill_dir / ".git").is_dir()
     assert (skill_dir / ".gitignore").read_text(encoding="utf-8").splitlines() == [
@@ -160,7 +165,7 @@ def test_create_skill(
         "!/.workspace/predict/",
         "/.workspace/local_settings.json",
     ]
-    assert not (workspaces_dir / "default" / "skills" / "idea-generator" / "SKILL.md").exists()
+    assert not (workspaces_dir / "default" / "skills" / "idea-generator" / "GRAPH.md").exists()
     index = json.loads(config.SKILL_INDEX_PATH.read_text(encoding="utf-8"))
     assert index["idea-generator"]["absolute_path"] == str(skill_dir)
 
@@ -179,7 +184,7 @@ def test_create_skill_with_directory_path_writes_to_user_dir(
         "/api/skills",
         json={
             "skill_id": "idea-generator",
-            "content": _agent_skill_content("idea-generator"),
+            "files": _agent_skill_files("idea-generator"),
             "directory_path": str(skill_dir),
         },
     )
@@ -188,10 +193,10 @@ def test_create_skill_with_directory_path_writes_to_user_dir(
     body = response.json()
     assert body["id"] == "idea-generator"
     assert body["directory_path"] == str(skill_dir)
-    assert (skill_dir / "SKILL.md").exists()
+    assert (skill_dir / "GRAPH.md").exists()
     assert (skill_dir / ".workspace").is_dir()
     assert (skill_dir / ".git").is_dir()
-    assert not (workspaces_dir / "default" / "skills" / "idea-generator" / "SKILL.md").exists()
+    assert not (workspaces_dir / "default" / "skills" / "idea-generator" / "GRAPH.md").exists()
     index = json.loads(config.SKILL_INDEX_PATH.read_text(encoding="utf-8"))
     assert index["idea-generator"]["absolute_path"] == str(skill_dir)
     assert "idea-generator" in {
@@ -208,7 +213,7 @@ def test_create_skill_with_invalid_directory_path_returns_422(
             "/api/skills",
             json={
                 "skill_id": "relative-path",
-                "content": _agent_skill_content("relative-path"),
+                "files": _agent_skill_files("relative-path"),
                 "directory_path": "relative/path",
             },
         ),
@@ -216,7 +221,7 @@ def test_create_skill_with_invalid_directory_path_returns_422(
             "/api/skills",
             json={
                 "skill_id": "missing-parent",
-                "content": _agent_skill_content("missing-parent"),
+                "files": _agent_skill_files("missing-parent"),
                 "directory_path": str(tmp_path / "missing" / "missing-parent"),
             },
         ),
@@ -237,7 +242,7 @@ def test_create_skill_directory_path_conflict_returns_409(
         "/api/skills",
         json={
             "skill_id": "first-skill",
-            "content": _agent_skill_content("first-skill"),
+            "files": _agent_skill_files("first-skill"),
             "directory_path": str(skill_dir),
         },
     )
@@ -245,7 +250,7 @@ def test_create_skill_directory_path_conflict_returns_409(
         "/api/skills",
         json={
             "skill_id": "second-skill",
-            "content": _agent_skill_content("second-skill"),
+            "files": _agent_skill_files("second-skill"),
             "directory_path": str(skill_dir),
         },
     )
@@ -264,7 +269,7 @@ def test_resolve_skill_dir_uses_directory_path_when_set(
         "/api/skills",
         json={
             "skill_id": "external-skill",
-            "content": _agent_skill_content("external-skill"),
+            "files": _agent_skill_files("external-skill"),
             "directory_path": str(skill_dir),
         },
     )
@@ -275,7 +280,7 @@ def test_resolve_skill_dir_uses_directory_path_when_set(
     assert detail_response.status_code == 200
     file_paths = detail_response.json()["file_paths"]
     assert file_paths["skill_dir"] == str(skill_dir)
-    assert file_paths["skill_md"] == str(skill_dir / "SKILL.md")
+    assert file_paths["graph_md"] == str(skill_dir / "GRAPH.md")
     assert file_paths["runs_dir"] == str(skill_dir / ".workspace" / "runs")
     assert file_paths["golden_dir"] == str(skill_dir / ".workspace" / "golden")
     assert file_paths["predict_dir"] == str(skill_dir / ".workspace" / "predict")
@@ -285,7 +290,10 @@ def test_resolve_skill_dir_uses_directory_path_when_set(
 def test_create_skill_collision_returns_409(client: TestClient) -> None:
     response = client.post(
         "/api/skills",
-        json={"skill_id": "text-segmentation", "content": _agent_skill_content("text-segmentation")},
+        json={
+            "skill_id": "text-segmentation",
+            "files": _agent_skill_files("text-segmentation"),
+        },
     )
 
     assert response.status_code == 409
@@ -324,10 +332,10 @@ def test_fork_skill_copies_directory_and_rewrites_identity(
     assert body["name"] == "text-segmentation-copy"
 
     target_dir = workspaces_dir / "default" / "skills" / "text-segmentation-copy"
-    assert (target_dir / "SKILL.md").exists()
-    assert (target_dir / "script" / "logic.py").exists()
+    assert (target_dir / "GRAPH.md").exists()
+    assert (target_dir / "phases" / "setup" / "actions" / "prepare.py").exists()
     assert (target_dir / "golden" / "baseline.json").exists()
-    assert "name: text-segmentation-copy" in (target_dir / "SKILL.md").read_text(encoding="utf-8")
+    assert "name: text-segmentation-copy" in (target_dir / "GRAPH.md").read_text(encoding="utf-8")
 
 
 def test_request_validation_errors_use_error_response(client: TestClient) -> None:
@@ -396,7 +404,7 @@ def test_successful_run_triggers_auto_commit(
     commits: list[tuple[Path, str]] = []
     client.post(
         "/api/skills",
-        json={"skill_id": "commit-skill", "content": _agent_skill_content("commit-skill")},
+        json={"skill_id": "commit-skill", "files": _agent_skill_files("commit-skill")},
     )
     monkeypatch.setattr(run_manager, "process_factory", InlineProcess)
     monkeypatch.setattr(run_manager, "queue_factory", queue.Queue)
@@ -426,7 +434,10 @@ def test_failed_run_does_not_auto_commit(
     commits: list[tuple[Path, str]] = []
     client.post(
         "/api/skills",
-        json={"skill_id": "failed-commit-skill", "content": _agent_skill_content("failed-commit-skill")},
+        json={
+            "skill_id": "failed-commit-skill",
+            "files": _agent_skill_files("failed-commit-skill"),
+        },
     )
     monkeypatch.setattr(run_manager, "process_factory", InlineProcess)
     monkeypatch.setattr(run_manager, "queue_factory", queue.Queue)
@@ -779,6 +790,49 @@ class FakePtyFactory:
 
 
 def _agent_skill_content(skill_id: str) -> str:
+    return _agent_skill_files(skill_id)["GRAPH.md"]
+
+
+def _agent_skill_files(skill_id: str) -> dict[str, str]:
+    return {
+        "GRAPH.md": f"""---
+schema_version: "2.1"
+name: {skill_id}
+description: Draft structured ideas
+---
+<input src="io/inputs.json" />
+<output src="io/outputs.json" />
+<phase id="setup" src="phases/setup" depends_on="" />
+""",
+        "io/inputs.json": """{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {"topic": {"type": "string"}, "input_text": {"type": "string"}},
+  "additionalProperties": true
+}
+""",
+        "io/outputs.json": """{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true
+}
+""",
+        "phases/setup/LOGIC.md": """---
+mode: logic
+name: setup
+---
+<python_callable>
+prepare
+</python_callable>
+""",
+        "phases/setup/actions/prepare.py": """def prepare(context):
+    context.set("prepared", True)
+    return {"prepared": True}
+""",
+    }
+
+
+def _legacy_agent_skill_content(skill_id: str) -> str:
     return f"""---
 schema_version: "2.0"
 name: {skill_id}

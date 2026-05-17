@@ -13,7 +13,7 @@ from app.services.local_settings import read_local_settings, write_local_setting
 from app.services.run_manager import run_manager
 from fastapi.testclient import TestClient
 
-from tests.test_api import InlineProcess, _agent_skill_content, fake_run_worker
+from tests.test_api import InlineProcess, _agent_skill_files, fake_run_worker
 
 
 def test_p0_skill_git_directory_index_and_workspace_flow(
@@ -28,13 +28,13 @@ def test_p0_skill_git_directory_index_and_workspace_flow(
 
     create_response = client.post(
         "/api/skills",
-        json={"skill_id": "p0-skill", "content": _agent_skill_content("p0-skill")},
+        json={"skill_id": "p0-skill", "files": _agent_skill_files("p0-skill")},
     )
 
     assert create_response.status_code == 201
     skill_dir = config.DEFAULT_SKILLS_ROOT / "p0-skill"
     workspace_dir = skill_dir / ".workspace"
-    assert (skill_dir / "SKILL.md").exists()
+    assert (skill_dir / "GRAPH.md").exists()
     assert workspace_dir.is_dir()
     assert (skill_dir / ".git").is_dir()
     assert (skill_dir / ".gitignore").read_text(encoding="utf-8").splitlines() == [
@@ -51,7 +51,7 @@ def test_p0_skill_git_directory_index_and_workspace_flow(
         text=True,
     ).stdout.strip()
     assert git_user == "studio-user"
-    assert not (workspaces_dir / "default" / "skills" / "p0-skill" / "SKILL.md").exists()
+    assert not (workspaces_dir / "default" / "skills" / "p0-skill" / "GRAPH.md").exists()
 
     settings_path = write_local_settings(skill_dir, {"sidebar": "collapsed"})
     assert settings_path == workspace_dir / "local_settings.json"

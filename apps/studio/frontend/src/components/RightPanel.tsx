@@ -32,6 +32,7 @@ interface RightPanelProps {
   dirty: Record<string, boolean>
   node_schema_v21?: Record<string, JsonObject>
   io_schema?: Record<string, JsonObject>
+  readOnly?: boolean
   selectedSkillId: string | null
   lintErrors: LintError[]
   traceLogs: CallbackEvent[]
@@ -82,6 +83,7 @@ export function RightPanel({
   dirty,
   node_schema_v21,
   io_schema,
+  readOnly = false,
   selectedSkillId,
   lintErrors,
   traceLogs,
@@ -210,6 +212,7 @@ export function RightPanel({
                 lintErrors={lintErrors}
                 node_schema_v21={node_schema_v21}
                 io_schema={io_schema}
+                readOnly={readOnly}
                 onEditorMount={onEditorMount}
                 onContentChange={onFileChange}
                 onJumpToLine={onJumpToLine}

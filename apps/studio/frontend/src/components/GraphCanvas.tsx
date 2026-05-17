@@ -168,11 +168,14 @@ export function GraphCanvas({
           nodes={visibleNodes}
           edges={coloredEdges}
           nodeTypes={nodeTypes}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
+          onNodesChange={isReadOnly ? undefined : onNodesChange}
+          onEdgesChange={isReadOnly ? undefined : onEdgesChange}
+          onConnect={isReadOnly ? undefined : onConnect}
           onNodeClick={(_, node) => onPhaseSelect?.(node.data.label)}
           onNodeDoubleClick={(_, node) => onPhaseDoubleClick?.(node.data.label)}
+          nodesConnectable={!isReadOnly}
+          nodesDraggable={!isReadOnly}
+          elementsSelectable={!isReadOnly}
           fitView
           minZoom={0.4}
         >

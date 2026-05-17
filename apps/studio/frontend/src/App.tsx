@@ -415,7 +415,7 @@ export default function App() {
   }, [pushToast, selectedSkillId])
 
   const handleSave = useCallback(async () => {
-    if (!selectedSkillId) {
+    if (!selectedSkillId || canvasReadOnly) {
       return
     }
 
@@ -437,7 +437,7 @@ export default function App() {
       setLintOverride({ skillId: selectedSkillId, status: 'failed', errors })
       pushToast(errorMessage(error), 'error')
     }
-  }, [clearDraft, mutateSkillDetail, pushToast, selectedSkillId])
+  }, [canvasReadOnly, clearDraft, mutateSkillDetail, pushToast, selectedSkillId])
 
   const handleEditorMount: EditorOnMount = useCallback((editor, monaco) => {
     editorRef.current = editor
@@ -674,13 +674,17 @@ export default function App() {
       if (handled) {
         return
       }
+      if (canvasReadOnly) {
+        pushToast('Subgraph view is read-only.', 'info')
+        return
+      }
       setPhaseDrawerPhaseId(phaseId)
       if (traceSelection.linkEnabled) {
         traceSelection.selectPhase(phaseId)
       }
       setActiveTab('code')
     })
-  }, [handleSubgraphDrillDown, traceSelection])
+  }, [canvasReadOnly, handleSubgraphDrillDown, pushToast, traceSelection])
 
   const handleBreadcrumbClick = useCallback((index: number) => {
     const target = navStack[index]
@@ -799,7 +803,7 @@ export default function App() {
       label: 'Save and lint',
       description: 'Persist SKILL.md and run backend lint validation.',
       hotkey: 'mod+s',
-      disabled: !selectedSkillId,
+      disabled: !selectedSkillId || canvasReadOnly,
       run: () => void handleSave(),
     },
     {
@@ -851,7 +855,7 @@ export default function App() {
       hotkey: '?',
       run: () => setCheatSheetOpen(true),
     },
-  ], [canRun, handleRun, handleSave, openTerminal, runStatus, selectedSkillId, setIsDarkMode])
+  ], [canRun, canvasReadOnly, handleRun, handleSave, openTerminal, runStatus, selectedSkillId, setIsDarkMode])
 
   const closeTopLayer = useCallback(() => {
     if (cheatSheetOpen) {
@@ -956,14 +960,15 @@ export default function App() {
               isArtifactsMenuOpen={isArtifactsMenuOpen}
               lintStatus={lintStatus}
               runStatus={runStatus}
-              dirty={workspaceIsDirty}
+              dirty={workspaceIsDirty && !canvasReadOnly}
+              saveDisabled={canvasReadOnly}
               onToggleArtifactsMenu={() => setIsArtifactsMenuOpen((open) => !open)}
               onLint={() => void handleLint()}
               onSave={() => void handleSave()}
               onOpenTerminal={() => void openTerminal()}
               onRun={() => void handleRun()}
             />
-            <DirtyBar onSave={() => void handleSave()} />
+            {canvasReadOnly ? null : <DirtyBar onSave={() => void handleSave()} />}
             <div className="flex flex-1 overflow-hidden">
               <GraphCanvas
                 currentSkillName={currentCanvasName}
@@ -991,6 +996,7 @@ export default function App() {
                 dirty={workspaceDirty}
                 node_schema_v21={skillDetail?.node_schema_v21}
                 io_schema={skillDetail?.io_schema}
+                readOnly={canvasReadOnly}
                 selectedSkillId={selectedSkillId}
                 lintErrors={lintErrors}
                 traceLogs={traceLogs}

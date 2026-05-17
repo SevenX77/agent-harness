@@ -23,7 +23,9 @@ import { CycleDetectedError, getAutoLayoutedElements } from '../lib/layout'
 import { ContextEdge, type ContextEdgeData } from './edges/ContextEdge'
 import { GlobalInputNode, GlobalOutputNode } from './nodes/GlobalInputOutputNode'
 import { SubgraphInline } from './studio/SubgraphInline'
+import { useOptionalWorkspaceContext } from './studio/WorkspaceContext'
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
+import { subgraphSkillId } from '../utils/graph'
 
 export type SkillNodeStatus = 'idle' | 'running' | 'success' | 'error' | 'paused' | 'breakpoint'
 
@@ -187,6 +189,17 @@ function normalizeDependsOn(value: string | string[] | undefined): string[] {
 }
 
 function phasesFromManifest(manifest: SkillManifest | undefined, skillId: string): PhaseDef[] {
+  if (manifest?.schema_version === '2.1') {
+    return manifest.phases.map((phase) => ({
+      name: phase.id,
+      mode: 'logic',
+      model_override: null,
+      depends_on: phase.depends_on,
+      execute_steps: [],
+      validator: null,
+    }))
+  }
+
   if (manifest?.type === 'graph') {
     return manifest.phases
   }
@@ -261,7 +274,18 @@ function phasesFromManifest(manifest: SkillManifest | undefined, skillId: string
 }
 
 function ioFromManifest(manifest: SkillManifest | undefined): IoDeclaration {
+  if (manifest?.schema_version === '2.1') {
+    return EMPTY_IO
+  }
   return manifest?.type === 'graph' ? manifest.io : EMPTY_IO
+}
+
+function subgraphRefFromFile(content: string | undefined): string | null {
+  if (!content) return null
+  const block = content.match(/<sub_skill_ref>\s*([\s\S]*?)\s*<\/sub_skill_ref>/)
+  if (block?.[1]) return block[1].trim()
+  const yaml = content.match(/^sub_skill_ref:\s*['"]?([^'"\n]+)['"]?/m)
+  return yaml?.[1]?.trim() ?? null
 }
 
 function buildNodes(
@@ -273,19 +297,22 @@ function buildNodes(
 ): GraphCanvasNode[] {
   const phases = phasesFromManifest(detail?.manifest, skillId)
   const io = ioFromManifest(detail?.manifest)
+  const topologyById = new Map((detail?.graph_topology ?? []).map((phase) => [phase.id, phase]))
   const phaseNodes: SkillGraphNode[] = phases.map((phase, index) => ({
     id: phase.name,
     type: 'skill',
     position: { x: 160 + (index % 2) * 320, y: 80 + index * 150 },
     data: {
       label: phase.name,
-      mode: phase.mode,
+      mode: topologyById.get(phase.name)?.mode ?? phase.mode,
       role: phase.mode === 'llm' ? phase.llm_role : 'Logic',
       status: statusByNodeId[phase.name] ?? (index === 0 ? 'success' : 'idle'),
-      dependsOn: normalizeDependsOn(phase.depends_on),
-      subgraphPath: phase.subgraph ?? null,
+      dependsOn: topologyById.get(phase.name)?.depends_on ?? normalizeDependsOn(phase.depends_on),
+      subgraphPath: phase.subgraph ?? subgraphRefFromFile(detail?.files?.[`phases/${phase.name}/SUBGRAPH.md`]),
       isExpanded: expandedSubgraphs.has(phase.name),
-      onToggleSubgraph: phase.subgraph ? () => onToggleSubgraph(phase.name) : undefined,
+      onToggleSubgraph: (phase.subgraph ?? detail?.files?.[`phases/${phase.name}/SUBGRAPH.md`])
+        ? () => onToggleSubgraph(phase.name)
+        : undefined,
     },
   }))
   return [
@@ -350,6 +377,7 @@ export function buildEdges(phaseNodes: SkillGraphNode[]): Edge<ContextEdgeData>[
 }
 
 export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, selectedNodeId, onNodeSelect, statusByNodeId }: GraphCanvasProps) {
+  const workspace = useOptionalWorkspaceContext()
   const [expandedSubgraphs, setExpandedSubgraphs] = useState<Set<string>>(() => new Set())
   const fitViewRef = useRef<(() => void) | null>(null)
   const fitLayout = useCallback(() => {
@@ -466,6 +494,15 @@ export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, se
           if (node.type === 'skill') {
             onNodeSelect?.({ id: node.id, data: node.data })
           }
+        }}
+        onNodeDoubleClick={(_, node) => {
+          if (node.type !== 'skill') return
+          const targetSkillId = subgraphSkillId(node.data.subgraphPath ?? null)
+          if (targetSkillId) {
+            workspace?.pushNavSkill(targetSkillId)
+            return
+          }
+          workspace?.onFileOpen(`${skillId}/phases/${node.id}/SKILL.md`)
         }}
         onInit={(instance) => {
           fitViewRef.current = () => instance.fitView({ padding: 0.2 })

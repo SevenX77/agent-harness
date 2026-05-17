@@ -7,7 +7,6 @@ from pathlib import Path
 
 import httpx
 import pytest
-
 from app.models.settings import AppSettings
 from app.services.artifact_registry import (
     ArtifactRegistryApiError,
@@ -51,7 +50,9 @@ def test_upload_artifact_401_raises_api_error() -> None:
         host="https://registry.example.test",
         token="bad-token",
         http_client=httpx.Client(
-            transport=httpx.MockTransport(lambda _request: httpx.Response(401, text='{"error": "Unauthorized"}')),
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(401, text='{"error": "Unauthorized"}')
+            ),
         ),
     )
 

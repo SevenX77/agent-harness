@@ -80,7 +80,10 @@ def test_warning_when_urls_differ(tmp_path: Path) -> None:
     assert warning is not None
     assert warning.actual_remote_url == "https://gitea.example.test/bob/demo.git"
     assert warning.expected_remote_url == "https://gitea.example.test/alice/demo.git"
-    assert warning.recommendation == "建议以 .git/config 为基准 (per design.md 决策 22), 在 Settings 调整 User ID / Gitea Host"
+    assert (
+        warning.recommendation
+        == "建议以 .git/config 为基准 (per design.md 决策 22), 在 Settings 调整 User ID / Gitea Host"
+    )
 
 
 def _init_repo(tmp_path: Path) -> Path:

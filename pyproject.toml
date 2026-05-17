@@ -72,7 +72,40 @@ lint.select = ["E", "F", "B", "I", "UP"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
+explicit_package_bases = true
+mypy_path = [
+    "packages/graph-agent/src",
+    "apps/studio/backend",
+]
+exclude = [
+    "packages/graph-agent/tests",
+    "apps/studio/backend/tests",
+    "apps/studio/tests-e2e",
+    "skills",
+    "skills/story-deconstruction",
+    "scripts",
+]
 
 [[tool.mypy.overrides]]
 module = ["langgraph.checkpoint.postgres", "langgraph.checkpoint.postgres.*", "ptyprocess.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["jsonschema", "jsonschema.*", "yaml", "yaml.*"]
+ignore_missing_imports = true
+
+# V1 cutover legacy quarantine; pending deeper V1->V2 migration spec.
+[[tool.mypy.overrides]]
+module = [
+    "graph_agent.core.skill_builder",
+    "graph_agent.core.skill_validator",
+    "graph_agent.core.personas",
+    "graph_agent.core.validators.persona_resolution",
+    "graph_agent.core.validators.prompt_quality",
+    "graph_agent.core.validators.template_variables",
+    "graph_agent.core.validators.tool_paths",
+    "graph_agent.core.validators.validator_required",
+    "scripts.run_e2e_test",
+    "scripts.run_e2e_test_enhanced",
+]
+ignore_errors = true

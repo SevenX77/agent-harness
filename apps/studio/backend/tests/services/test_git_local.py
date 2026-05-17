@@ -6,11 +6,11 @@ from typing import Any
 
 import pytest
 from app.services.git_local import (
-    GitCommandError,
-    GitFileLockedError,
-    GitCommandTimeoutError,
-    GitLocalService,
     STUDIO_GITIGNORE,
+    GitCommandError,
+    GitCommandTimeoutError,
+    GitFileLockedError,
+    GitLocalService,
     run_git,
     write_studio_gitignore,
 )
@@ -75,7 +75,9 @@ def test_run_git_lock_error_retries_then_succeeds(
         del kwargs
         calls += 1
         if calls < 3:
-            return subprocess.CompletedProcess(command, 128, stdout="", stderr="Unable to create '.git/index.lock'")
+            return subprocess.CompletedProcess(
+                command, 128, stdout="", stderr="Unable to create '.git/index.lock'"
+            )
         return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -96,7 +98,9 @@ def test_run_git_lock_error_exhaustion_raises_file_locked(
         nonlocal calls
         del kwargs
         calls += 1
-        return subprocess.CompletedProcess(command, 128, stdout="", stderr="fatal: .git/index.lock exists")
+        return subprocess.CompletedProcess(
+            command, 128, stdout="", stderr="fatal: .git/index.lock exists"
+        )
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 

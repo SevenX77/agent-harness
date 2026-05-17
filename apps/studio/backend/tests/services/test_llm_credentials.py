@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from app.models.llm_config import LLMCredentialsFile, ProviderCredential
 from app.services import llm_env
 from app.services.llm_credentials import (
@@ -39,9 +38,7 @@ def test_save_credentials_chmods_file_0600(
     monkeypatch.setenv("HOME", str(tmp_path))
 
     save_credentials(
-        LLMCredentialsFile(
-            providers=[ProviderCredential(provider_code="OC_CL", api_key="secret")]
-        )
+        LLMCredentialsFile(providers=[ProviderCredential(provider_code="OC_CL", api_key="secret")])
     )
 
     assert os.stat(credentials_path()).st_mode & 0o777 == 0o600

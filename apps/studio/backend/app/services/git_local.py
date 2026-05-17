@@ -130,7 +130,9 @@ class GitLocalService:
             lock_retry_delays=self.lock_retry_delays,
         )
 
-    def commit(self, skill_dir: Path, message: str, *, allow_empty: bool = False) -> GitCommandResult:
+    def commit(
+        self, skill_dir: Path, message: str, *, allow_empty: bool = False
+    ) -> GitCommandResult:
         args = ["commit", "-m", message]
         if allow_empty:
             args.append("--allow-empty")
@@ -394,7 +396,8 @@ def _is_empty_or_damaged_history_error(stderr: str) -> bool:
         or "bad default revision" in lowered
         or "not a git repository" in lowered
         or "bad object head" in lowered
-        or "your current branch" in lowered and "does not have any commits" in lowered
+        or "your current branch" in lowered
+        and "does not have any commits" in lowered
     )
 
 

@@ -7,7 +7,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-
 GitHistoryKind = Literal["auto_run", "manual", "other"]
 
 

@@ -5,7 +5,6 @@ import stat
 from pathlib import Path
 
 import pytest
-
 from app.core.adapters.metadata_local import LocalJsonMetadataStore
 from app.models.settings import AppSettings
 

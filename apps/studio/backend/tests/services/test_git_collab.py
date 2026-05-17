@@ -4,8 +4,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-
-from app.services.git_collab import GiteaApiError, GiteaClient, GitCollaborateService
+from app.services.git_collab import GitCollaborateService, GiteaApiError, GiteaClient
 from app.services.git_local import GitCommandError, GitCommandResult, GitLocalService, run_git
 
 
@@ -316,7 +315,9 @@ class RecordingGit(GitLocalService):
         self.calls.append(("force_add_path", path))
         return _result(skill_dir, ("add", "-f", path))
 
-    def commit(self, skill_dir: Path, message: str, *, allow_empty: bool = False) -> GitCommandResult:
+    def commit(
+        self, skill_dir: Path, message: str, *, allow_empty: bool = False
+    ) -> GitCommandResult:
         self.calls.append(("commit", message, f"allow_empty={allow_empty}"))
         return _result(skill_dir, ("commit", "-m", message))
 

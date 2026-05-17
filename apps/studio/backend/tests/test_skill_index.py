@@ -72,7 +72,9 @@ async def test_save_skill_index_entry_overwrites_existing(
 
 
 @pytest.mark.anyio
-async def test_remove_skill_index_entry(metadata_store: LocalJsonMetadataStore, tmp_path: Path) -> None:
+async def test_remove_skill_index_entry(
+    metadata_store: LocalJsonMetadataStore, tmp_path: Path
+) -> None:
     await metadata_store.save_skill_index_entry(
         "idea-generator",
         {"absolute_path": str(tmp_path / "skill"), "l2_remote_url": ""},

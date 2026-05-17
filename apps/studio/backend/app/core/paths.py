@@ -6,7 +6,6 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
-
 APP_DIR_NAME = "AgentStudio"
 
 

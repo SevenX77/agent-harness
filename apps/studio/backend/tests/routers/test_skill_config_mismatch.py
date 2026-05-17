@@ -14,7 +14,9 @@ def test_list_skill_summaries_includes_config_mismatch_warning(
     skill_dir = skills_dir / "text-segmentation"
     local_git = GitLocalService()
     local_git.init(skill_dir)
-    local_git.remote_add(skill_dir, "origin", "https://gitea.example.test/bob/text-segmentation.git")
+    local_git.remote_add(
+        skill_dir, "origin", "https://gitea.example.test/bob/text-segmentation.git"
+    )
     settings_response = client.put(
         "/api/settings",
         json={"user_id": "alice", "gitea_host": "https://gitea.example.test"},

@@ -7,6 +7,7 @@ from datetime import datetime
 from graph_agent.core.manifest import SkillManifest
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.errors import LintError
 from app.models.lint import LintResult
 from app.models.runs import RunMetadata
 
@@ -30,16 +31,18 @@ class SkillDetail(BaseModel):
     node_schema_v21: dict[str, dict[str, object]]
     io_schema: dict[str, dict[str, object]]
     file_paths: dict[str, str]
+    files: dict[str, str]
     has_golden: bool
     latest_run_metadata: RunMetadata | None = None
     lint_result: LintResult | None = None
+    manifest_errors: list[LintError] | None = None
 
 
 class CreateSkillReq(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     skill_id: str = Field(..., pattern=r"^[a-z][a-z0-9-]+$")
-    content: str
+    files: dict[str, str]
 
 
 class ForkSkillReq(BaseModel):
@@ -51,4 +54,5 @@ class ForkSkillReq(BaseModel):
 class UpdateSkillReq(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    content: str
+    files: dict[str, str]
+    expected_hash: str | None = None

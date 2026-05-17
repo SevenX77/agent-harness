@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import app.models as models
 import pytest
-from app.models import ErrorResponse, RunRequest, SkillDetail
+from app.models import CreateSkillReq, ErrorResponse, RunRequest, SkillDetail, UpdateSkillReq
 from graph_agent.core.manifest import GraphManifest, GraphPhaseRef
 from pydantic import ValidationError
 
@@ -52,6 +52,7 @@ def test_models_validate_fields_and_reuse_graph_agent_contracts() -> None:
         node_schema_v21={"graph_phase_ref": {}, "logic": {}, "skill": {}, "subgraph": {}},
         io_schema={"inputs": {}, "outputs": {}},
         file_paths={"graph_md": "/tmp/GRAPH.md"},
+        files={"GRAPH.md": "# Demo"},
         has_golden=False,
     )
 
@@ -68,3 +69,22 @@ def test_models_validate_fields_and_reuse_graph_agent_contracts() -> None:
 
     with pytest.raises(ValidationError):
         RunRequest.model_validate({"unexpected": "field"})
+
+
+def test_skill_create_update_reject_content_payload() -> None:
+    create = CreateSkillReq.model_validate(
+        {
+            "skill_id": "demo-skill",
+            "files": {"GRAPH.md": "# Demo"},
+        }
+    )
+    update = UpdateSkillReq.model_validate({"files": {"GRAPH.md": "# Demo"}})
+
+    assert create.files == {"GRAPH.md": "# Demo"}
+    assert update.files == {"GRAPH.md": "# Demo"}
+
+    with pytest.raises(ValidationError):
+        CreateSkillReq.model_validate({"skill_id": "demo-skill", "content": "# Demo"})
+
+    with pytest.raises(ValidationError):
+        UpdateSkillReq.model_validate({"content": "# Demo"})

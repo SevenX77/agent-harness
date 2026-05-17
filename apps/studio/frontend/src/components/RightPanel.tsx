@@ -1,15 +1,19 @@
+import { useEffect, useMemo, useState } from 'react'
 import { FileText, GitCompareArrows, History, ListChecks, MessageSquare, Terminal as TerminalIcon } from 'lucide-react'
 import type {
   BatchRunStatus,
   CallbackEvent,
   CompareResult,
   GraphSkillDef,
+  JsonObject,
   LintError,
   RunDetail,
   TerminalSession,
   TestInputMetadata,
 } from '../api/types'
 import type { ActiveTab, ApiKeyName, ApiKeys, TerminalStatus, ToastKind } from '../types/studio'
+import { EditorTabs } from './EditorTabs'
+import { FileTree } from './FileTree'
 import { MonacoPanel } from './MonacoPanel'
 import type { EditorOnMount } from './MonacoPanel'
 import { SettingsPanel } from './SettingsPanel'
@@ -23,7 +27,11 @@ import { BatchRunner } from './playground/BatchRunner'
 interface RightPanelProps {
   activeTab: ActiveTab
   isDarkMode: boolean
-  skillCode: string
+  activeFile: string | null
+  files: Record<string, string>
+  dirty: Record<string, boolean>
+  node_schema_v21?: Record<string, JsonObject>
+  io_schema?: Record<string, JsonObject>
   selectedSkillId: string | null
   lintErrors: LintError[]
   traceLogs: CallbackEvent[]
@@ -43,8 +51,9 @@ interface RightPanelProps {
   apiKeys: ApiKeys
   onActiveTabChange: (tab: ActiveTab) => void
   onEditorMount: EditorOnMount
-  onDraftChange: (code: string) => void
-  onJumpToLine: (line: number | null) => void
+  onActiveFileChange: (path: string | null) => void
+  onFileChange: (path: string, content: string) => void
+  onJumpToLine: (line: number | null, file?: string | null) => void
   onCopyErrors: (message: string) => void
   onSelectPrompt: (index: number) => void
   onCompareToGolden: () => void
@@ -68,7 +77,11 @@ interface RightPanelProps {
 export function RightPanel({
   activeTab,
   isDarkMode,
-  skillCode,
+  activeFile,
+  files,
+  dirty,
+  node_schema_v21,
+  io_schema,
   selectedSkillId,
   lintErrors,
   traceLogs,
@@ -88,7 +101,8 @@ export function RightPanel({
   apiKeys,
   onActiveTabChange,
   onEditorMount,
-  onDraftChange,
+  onActiveFileChange,
+  onFileChange,
   onJumpToLine,
   onCopyErrors,
   onSelectPrompt,
@@ -109,11 +123,42 @@ export function RightPanel({
   onApiKeyChange,
   pushToast,
 }: RightPanelProps) {
+  const filePaths = useMemo(() => Object.keys(files).sort(), [files])
+  const [openTabs, setOpenTabs] = useState<string[]>([])
+  const errorFiles = useMemo(() => (
+    lintErrors.reduce<Record<string, boolean>>((current, error) => {
+      if (error.file) {
+        current[error.file] = true
+      }
+      return current
+    }, {})
+  ), [lintErrors])
+
+  useEffect(() => {
+    setOpenTabs((current) => {
+      const existing = current.filter((path) => Object.prototype.hasOwnProperty.call(files, path))
+      if (!activeFile || existing.includes(activeFile)) {
+        return existing
+      }
+      return [...existing, activeFile]
+    })
+  }, [activeFile, files])
+
+  const closeTab = (path: string) => {
+    setOpenTabs((current) => {
+      const next = current.filter((item) => item !== path)
+      if (path === activeFile) {
+        onActiveFileChange(next[0] ?? filePaths.find((item) => item !== path) ?? null)
+      }
+      return next
+    })
+  }
+
   return (
     <div className="z-10 flex w-[520px] flex-col bg-white dark:bg-slate-900">
       <div className="flex shrink-0 border-b border-gray-200 dark:border-slate-800">
         {([
-          ['code', FileText, 'SKILL.md'],
+          ['code', FileText, 'Files'],
           ['trace', MessageSquare, 'Trace'],
           ['diff', GitCompareArrows, 'Diff'],
           ['history', History, 'History'],
@@ -140,15 +185,38 @@ export function RightPanel({
         ) : null}
 
         {activeTab === 'code' ? (
-          <MonacoPanel
-            isDarkMode={isDarkMode}
-            skillCode={skillCode}
-            lintErrors={lintErrors}
-            onEditorMount={onEditorMount}
-            onDraftChange={onDraftChange}
-            onJumpToLine={onJumpToLine}
-            onCopyErrors={onCopyErrors}
-          />
+          <div className="flex h-full min-h-0">
+            <div className="w-44 shrink-0">
+              <FileTree
+                files={files}
+                activeFile={activeFile}
+                dirty={dirty}
+                errorFiles={errorFiles}
+                onSelect={onActiveFileChange}
+              />
+            </div>
+            <div className="flex min-w-0 flex-1 flex-col">
+              <EditorTabs
+                openTabs={openTabs}
+                activeFile={activeFile}
+                dirty={dirty}
+                onSwitch={onActiveFileChange}
+                onClose={closeTab}
+              />
+              <MonacoPanel
+                isDarkMode={isDarkMode}
+                activeFile={activeFile}
+                files={files}
+                lintErrors={lintErrors}
+                node_schema_v21={node_schema_v21}
+                io_schema={io_schema}
+                onEditorMount={onEditorMount}
+                onContentChange={onFileChange}
+                onJumpToLine={onJumpToLine}
+                onCopyErrors={onCopyErrors}
+              />
+            </div>
+          </div>
         ) : null}
 
         {activeTab === 'trace' ? (

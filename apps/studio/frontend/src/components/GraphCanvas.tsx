@@ -1,7 +1,8 @@
-import { Background, Controls, MiniMap, ReactFlow } from 'reactflow'
+import { Background, Controls, MiniMap, Panel, ReactFlow } from 'reactflow'
 import type { Connection, Edge, Node, NodeTypes, OnEdgesChange, OnNodesChange } from 'reactflow'
 import { useMemo } from 'react'
 import type { KeyboardEvent } from 'react'
+import { LayoutTemplate } from 'lucide-react'
 import { AgentNode, SubgraphNode } from '../CustomNodes'
 import type { StudioNodeData } from '../CustomNodes'
 import { errorMessage } from '../utils/errors'
@@ -21,6 +22,7 @@ interface GraphCanvasProps {
   onNodesChange: OnNodesChange
   onEdgesChange: OnEdgesChange
   onConnect: (connection: Connection) => void
+  onResetLayout: () => void
   onPhaseSelect?: (phaseId: string) => void
   onPhaseDoubleClick?: (phaseId: string) => void
 }
@@ -35,6 +37,7 @@ export function GraphCanvas({
   onNodesChange,
   onEdgesChange,
   onConnect,
+  onResetLayout,
   onPhaseSelect,
   onPhaseDoubleClick,
 }: GraphCanvasProps) {
@@ -118,6 +121,18 @@ export function GraphCanvas({
           fitView
           minZoom={0.4}
         >
+          <Panel position="top-right">
+            <button
+              type="button"
+              onClick={onResetLayout}
+              className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-sky-300 dark:border-slate-700 dark:bg-slate-900 dark:text-gray-200 dark:hover:bg-slate-800 dark:focus:ring-sky-800"
+              title="Reset layout"
+              aria-label="Reset layout"
+            >
+              <LayoutTemplate className="h-4 w-4" aria-hidden="true" />
+              Reset Layout
+            </button>
+          </Panel>
           <Controls />
           <MiniMap
             style={{ backgroundColor: isDarkMode ? '#0f172a' : '#fff' }}

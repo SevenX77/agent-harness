@@ -192,9 +192,9 @@ The package is verified clean under `mypy --strict` (143 source files, 0 errors 
 
 ## Extended Documentation
 
-- `docs/graph_agent_docs/SKILL_AUTHORING_GUIDE.md` — How to write SKILL.md
-- `docs/graph_agent_docs/INTEGRATION_GUIDE.md` — Integration into host projects
-- `docs/graph_agent_docs/COGNITIVE_LOOP_GUIDE.md` — Cognitive control architecture
+- `docs/skills/SKILL_AUTHORING_GUIDE.md` — How to write SKILL.md
+- `docs/engine/INTEGRATION_GUIDE.md` — Integration into host projects
+- `docs/engine/COGNITIVE_LOOP_GUIDE.md` — Cognitive control architecture
 - `docs/architecture/REPO_SPLIT_AND_SDK_PLAN.md` — V2 monorepo + SDK contract
 
 ---

@@ -16,7 +16,9 @@ def clear_context_cache() -> None:
     copilot_service._view_contexts.clear()
 
 
-def test_post_context_accepts_new_view_context(client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_post_context_accepts_new_view_context(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
 
     response = client.post(
@@ -62,7 +64,9 @@ def test_post_context_rejects_out_of_order_timestamp(
     assert cached.context == {"value": "new"}
 
 
-def test_post_context_rejects_equal_timestamp(client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_post_context_rejects_equal_timestamp(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     client.post(
         "/api/skills/text-segmentation/copilot/context",
@@ -79,7 +83,9 @@ def test_post_context_rejects_equal_timestamp(client: TestClient, tmp_path: Path
     assert response.json()["reason"] == "out_of_order"
 
 
-def test_post_context_requires_view_and_timestamp(client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_post_context_requires_view_and_timestamp(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
 
     missing_view = client.post(

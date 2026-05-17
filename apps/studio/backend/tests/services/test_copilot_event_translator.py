@@ -25,7 +25,9 @@ from claude_agent_sdk.types import (
 
 
 class FakeClient:
-    def __init__(self, messages: list[object] | None = None, error: Exception | None = None) -> None:
+    def __init__(
+        self, messages: list[object] | None = None, error: Exception | None = None
+    ) -> None:
         self.messages = messages or []
         self.error = error
         self.queries: list[str] = []
@@ -74,17 +76,23 @@ def test_translate_tool_use_start_event() -> None:
         tool_names,
     )
 
-    assert events == [CopilotEventToolUseStart(tool_name="Read", tool_input={"file_path": "SKILL.md"})]
+    assert events == [
+        CopilotEventToolUseStart(tool_name="Read", tool_input={"file_path": "SKILL.md"})
+    ]
     assert tool_names == {"tool-1": "Read"}
 
 
 def test_translate_tool_result_event() -> None:
     events = copilot._translate_sdk_message(
-        AssistantMessage(content=[ToolResultBlock(tool_use_id="tool-1", content="ok")], model="claude"),
+        AssistantMessage(
+            content=[ToolResultBlock(tool_use_id="tool-1", content="ok")], model="claude"
+        ),
         {"tool-1": "Read"},
     )
 
-    assert events == [CopilotEventToolUseResult(tool_name="Read", success=True, result_summary="ok")]
+    assert events == [
+        CopilotEventToolUseResult(tool_name="Read", success=True, result_summary="ok")
+    ]
 
 
 def test_translate_result_message_is_done() -> None:
@@ -106,7 +114,9 @@ def test_translate_result_message_is_done() -> None:
 def test_tool_failure_translates_to_error_event() -> None:
     events = copilot._translate_sdk_message(
         AssistantMessage(
-            content=[ToolResultBlock(tool_use_id="tool-1", content="permission denied", is_error=True)],
+            content=[
+                ToolResultBlock(tool_use_id="tool-1", content="permission denied", is_error=True)
+            ],
             model="claude",
         ),
         {"tool-1": "Bash"},
@@ -116,21 +126,29 @@ def test_tool_failure_translates_to_error_event() -> None:
 
 
 def test_stream_query_errors_when_api_key_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(copilot, "_resolve_copilot_provider", lambda _model_override: _resolved_provider())
+    monkeypatch.setattr(
+        copilot, "_resolve_copilot_provider", lambda _model_override: _resolved_provider()
+    )
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi")))
 
-    assert events == [CopilotEventError(message="Provider OC_CL_ANT 未配置 API key (env: ANTHROPIC_API_KEY)")]
+    assert events == [
+        CopilotEventError(message="Provider OC_CL_ANT 未配置 API key (env: ANTHROPIC_API_KEY)")
+    ]
 
 
-def test_stream_query_errors_when_model_override_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stream_query_errors_when_model_override_is_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     def resolve_copilot_provider(_model_override: str | None) -> object:
         raise KeyError("BAD_MODEL")
 
     monkeypatch.setattr(copilot, "_resolve_copilot_provider", resolve_copilot_provider)
 
-    events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi", model_override="BAD_MODEL")))
+    events = asyncio.run(
+        _collect(copilot.stream_query("skill-a", "hi", model_override="BAD_MODEL"))
+    )
 
     assert events == [CopilotEventError(message="未知模型: 'BAD_MODEL'")]
 
@@ -141,7 +159,9 @@ def test_stream_query_timeout_error(monkeypatch: pytest.MonkeyPatch, tmp_path: P
         "_session_factory",
         lambda _options: FakeClient(error=TimeoutError()),
     )
-    monkeypatch.setattr(copilot, "_resolve_copilot_provider", lambda _model_override: _resolved_provider())
+    monkeypatch.setattr(
+        copilot, "_resolve_copilot_provider", lambda _model_override: _resolved_provider()
+    )
     monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
 
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi", workspace_dir=tmp_path)))
@@ -155,13 +175,17 @@ def test_stream_query_sdk_network_error(monkeypatch: pytest.MonkeyPatch, tmp_pat
         "_session_factory",
         lambda _options: FakeClient(error=CLIConnectionError("connection failed")),
     )
-    monkeypatch.setattr(copilot, "_resolve_copilot_provider", lambda _model_override: _resolved_provider())
+    monkeypatch.setattr(
+        copilot, "_resolve_copilot_provider", lambda _model_override: _resolved_provider()
+    )
     monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
 
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi", workspace_dir=tmp_path)))
 
     assert events == [
-        CopilotEventError(message="后端连接失败 (DeepSeek 端点不可达 / 大陆需代理): connection failed")
+        CopilotEventError(
+            message="后端连接失败 (DeepSeek 端点不可达 / 大陆需代理): connection failed"
+        )
     ]
 
 
@@ -169,12 +193,18 @@ def test_stream_query_uses_system_prompt_and_yields_done(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    client = FakeClient(messages=[AssistantMessage(content=[TextBlock(text="hello")], model="claude")])
+    client = FakeClient(
+        messages=[AssistantMessage(content=[TextBlock(text="hello")], model="claude")]
+    )
     monkeypatch.setattr(copilot, "_session_factory", lambda _options: client)
-    monkeypatch.setattr(copilot, "_resolve_copilot_provider", lambda _model_override: _resolved_provider())
+    monkeypatch.setattr(
+        copilot, "_resolve_copilot_provider", lambda _model_override: _resolved_provider()
+    )
     monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
 
-    events = asyncio.run(_collect(copilot.stream_query("skill-a", "user text", workspace_dir=tmp_path)))
+    events = asyncio.run(
+        _collect(copilot.stream_query("skill-a", "user text", workspace_dir=tmp_path))
+    )
 
     assert events == [CopilotEventText(content="hello"), CopilotEventDone()]
     assert client.connected is True

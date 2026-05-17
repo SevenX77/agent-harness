@@ -13,4 +13,3 @@ router = APIRouter(prefix="/api/templates", tags=["templates"])
 @router.get("", response_model=list[SkillTemplate])
 async def get_templates() -> list[SkillTemplate]:
     return list_templates()
-

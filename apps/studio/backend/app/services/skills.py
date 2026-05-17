@@ -135,6 +135,8 @@ def _scaffold_files_for(skill_id: str) -> dict[str, str]:
     files = dict(_SCAFFOLD_FILES)
     files["GRAPH.md"] = files["GRAPH.md"].replace("name: new-skill", f"name: {skill_id}")
     return files
+
+
 _ID_LINE_RE = re.compile(
     r"(?m)^(?P<prefix>id:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\n]+)(?P=quote)\s*$"
 )
@@ -295,6 +297,7 @@ async def update_skill_content(
 
     del user_id, skill_id, storage, metadata
     _raise_v21_directory_authoring_required()
+
 
 async def update_skill_files(
     user_id: str,

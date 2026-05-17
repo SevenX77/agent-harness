@@ -19,8 +19,7 @@ class ConfigMismatchWarning(BaseModel):
     actual_remote_url: str
     expected_remote_url: str
     recommendation: str = (
-        "建议以 .git/config 为基准 (per design.md 决策 22), "
-        "在 Settings 调整 User ID / Gitea Host"
+        "建议以 .git/config 为基准 (per design.md 决策 22), 在 Settings 调整 User ID / Gitea Host"
     )
 
 

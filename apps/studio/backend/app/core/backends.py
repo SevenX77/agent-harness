@@ -19,7 +19,7 @@ from app.core.ports.eventbus import EventBus
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
 from app.services.artifact_registry import ArtifactRegistryClient
-from app.services.git_collab import GiteaClient, GitCollaborateService
+from app.services.git_collab import GitCollaborateService, GiteaClient
 from app.services.git_local import GitLocalService
 
 

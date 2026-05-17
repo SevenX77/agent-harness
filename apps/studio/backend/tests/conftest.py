@@ -83,9 +83,7 @@ def _write_graph_skill(skill_dir: Path, name: str, description: str) -> None:
     (skill_dir / "phases" / "setup" / "actions").mkdir(parents=True)
     (skill_dir / "phases" / "setup" / "actions" / "__init__.py").write_text("", encoding="utf-8")
     (skill_dir / "phases" / "setup" / "actions" / "prepare.py").write_text(
-        "def prepare(context):\n"
-        "    context.set('prepared', True)\n"
-        "    return {'prepared': True}\n",
+        "def prepare(context):\n    context.set('prepared', True)\n    return {'prepared': True}\n",
         encoding="utf-8",
     )
     (skill_dir / "io").mkdir(parents=True)

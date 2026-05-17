@@ -408,7 +408,10 @@ class RunManager:
     def get_run_detail(self, skill_id: str, run_id: str) -> RunDetail:
         metadata = self._metadata_for(skill_id, run_id)
         run_dir = run_dir_for(skill_id, run_id)
-        if metadata.status == "success" and not (run_dir.parent / "latest" / "run_metadata.json").exists():
+        if (
+            metadata.status == "success"
+            and not (run_dir.parent / "latest" / "run_metadata.json").exists()
+        ):
             _sync_latest_run(run_dir)
         return RunDetail(
             metadata=metadata,

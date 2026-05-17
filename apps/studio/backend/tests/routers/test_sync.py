@@ -166,7 +166,9 @@ class FakeGitCollaborate:
         branch: str = "main",
     ) -> CollaborateResult:
         del skill_dir
-        self.calls.append({"method": "save_to_team", "owner": owner, "repo": repo, "branch": branch})
+        self.calls.append(
+            {"method": "save_to_team", "owner": owner, "repo": repo, "branch": branch}
+        )
         return self.save_result
 
     def sync_from_team(
@@ -178,7 +180,9 @@ class FakeGitCollaborate:
         branch: str = "main",
     ) -> CollaborateResult:
         del skill_dir
-        self.calls.append({"method": "sync_from_team", "owner": owner, "repo": repo, "branch": branch})
+        self.calls.append(
+            {"method": "sync_from_team", "owner": owner, "repo": repo, "branch": branch}
+        )
         return CollaborateResult(status="ok", message="synced")
 
     def submit_for_review(

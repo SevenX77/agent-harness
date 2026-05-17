@@ -74,6 +74,7 @@ class ViewContext:
     context: dict[str, Any]
     timestamp_ms: int
 
+
 _sessions: dict[SessionKey, ClaudeSDKClient] = {}
 _session_lock = asyncio.Lock()
 _session_factory: Callable[[ClaudeAgentOptions], ClaudeSDKClient] = ClaudeSDKClient
@@ -175,8 +176,7 @@ def build_system_prompt(skill_id: str) -> str:
         sort_keys=True,
     )
     return (
-        f"{BASE_SYSTEM_PROMPT_TEMPLATE}\n\n"
-        f"## 当前 View: {view_context.view}\n{formatted_context}"
+        f"{BASE_SYSTEM_PROMPT_TEMPLATE}\n\n## 当前 View: {view_context.view}\n{formatted_context}"
     )
 
 
@@ -395,18 +395,13 @@ def _error_event_for_exception(exc: Exception) -> CopilotEventError:
     if isinstance(exc, TimeoutError):
         return CopilotEventError(message="请求超时, 检查网络 / 代理")
     if isinstance(exc, (CLIConnectionError, ProcessError, ClaudeSDKError)):
-        return CopilotEventError(
-            message=f"后端连接失败 (DeepSeek 端点不可达 / 大陆需代理): {exc}"
-        )
+        return CopilotEventError(message=f"后端连接失败 (DeepSeek 端点不可达 / 大陆需代理): {exc}")
     return CopilotEventError(message=f"Copilot 请求失败: {exc}")
 
 
 def _context_for_prompt(context: dict[str, Any]) -> dict[str, Any]:
     file_path = _file_path_from_context(context)
-    return {
-        key: _context_value_for_prompt(key, value, file_path)
-        for key, value in context.items()
-    }
+    return {key: _context_value_for_prompt(key, value, file_path) for key, value in context.items()}
 
 
 def _context_value_for_prompt(key: str, value: Any, file_path: str | None) -> Any:

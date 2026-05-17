@@ -15,14 +15,17 @@ from pydantic import TypeAdapter, ValidationError
 
 def test_copilot_event_subclasses_construct() -> None:
     assert CopilotEventText(content="hello").type == "text_delta"
-    assert CopilotEventToolUseStart(tool_name="Read", tool_input={"file_path": "SKILL.md"}).type == (
-        "tool_use_start"
+    assert CopilotEventToolUseStart(
+        tool_name="Read", tool_input={"file_path": "SKILL.md"}
+    ).type == ("tool_use_start")
+    assert (
+        CopilotEventToolUseResult(
+            tool_name="Edit",
+            success=True,
+            result_summary="Edited SKILL.md: +1 -0",
+        ).type
+        == "tool_use_result"
     )
-    assert CopilotEventToolUseResult(
-        tool_name="Edit",
-        success=True,
-        result_summary="Edited SKILL.md: +1 -0",
-    ).type == "tool_use_result"
     assert CopilotEventDone().type == "done"
     assert CopilotEventError(message="failed").type == "error"
 

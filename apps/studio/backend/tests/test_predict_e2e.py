@@ -45,7 +45,9 @@ def test_backend_p1_predict_job_uses_manual_or_copilot_source(
     skill_dir = _write_backend_skill(tmp_path)
     monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda skill_id: skill_dir)
 
-    result = PredictorService().dispatch_predict_job("skill", mock_llm, input_data={"topic": "mars"})
+    result = PredictorService().dispatch_predict_job(
+        "skill", mock_llm, input_data={"topic": "mars"}
+    )
 
     assert result.status == "success"
     assert result.phases[1].mocked_source is None
@@ -105,9 +107,7 @@ def _write_backend_skill(tmp_path: Path) -> Path:
     action_dir.mkdir(parents=True)
     (action_dir / "__init__.py").write_text("", encoding="utf-8")
     (action_dir / "prepare.py").write_text(
-        "def prepare(context):\n"
-        "    context.set('prepared', True)\n"
-        "    return {'prepared': True}\n",
+        "def prepare(context):\n    context.set('prepared', True)\n    return {'prepared': True}\n",
         encoding="utf-8",
     )
     (skill_dir / "phases" / "draft").mkdir(parents=True)
@@ -115,9 +115,7 @@ def _write_backend_skill(tmp_path: Path) -> Path:
     draft_action_dir.mkdir(parents=True)
     (draft_action_dir / "__init__.py").write_text("", encoding="utf-8")
     (draft_action_dir / "draft.py").write_text(
-        "def draft(context):\n"
-        "    context.set('text', 'draft')\n"
-        "    return {'text': 'draft'}\n",
+        "def draft(context):\n    context.set('text', 'draft')\n    return {'text': 'draft'}\n",
         encoding="utf-8",
     )
     (skill_dir / "io").mkdir(parents=True)

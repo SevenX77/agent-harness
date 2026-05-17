@@ -22,5 +22,7 @@ def write_local_settings(skill_dir: Path, settings: dict[str, Any]) -> Path:
     """Persist local UI settings inside .workspace."""
     workspace_dir_for(skill_dir).mkdir(parents=True, exist_ok=True)
     settings_path = local_settings_path_for(skill_dir)
-    settings_path.write_text(json.dumps(settings, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    settings_path.write_text(
+        json.dumps(settings, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     return settings_path

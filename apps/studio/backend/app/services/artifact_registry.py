@@ -6,7 +6,7 @@ import io
 import json
 import logging
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -82,7 +82,9 @@ class ArtifactRegistryClient:
         if not isinstance(payload, dict):
             raise ArtifactRegistryApiError(status_code=response.status_code, body=response.text)
 
-        logger.info("artifact registry upload ok skill=%s status=%d", skill_id, response.status_code)
+        logger.info(
+            "artifact registry upload ok skill=%s status=%d", skill_id, response.status_code
+        )
         return payload
 
 
@@ -104,7 +106,9 @@ def build_publish_package(skill_dir: Path) -> bytes:
 
             if path.is_symlink():
                 target = path.readlink()
-                logger.warning("symlink skipped in publish package path=%s target=%s", rel_path, target)
+                logger.warning(
+                    "symlink skipped in publish package path=%s target=%s", rel_path, target
+                )
                 continue
             if not path.is_file():
                 continue
@@ -117,7 +121,9 @@ def build_publish_package(skill_dir: Path) -> bytes:
                 raise
 
     result = buffer.getvalue()
-    logger.info("publish package built skill_dir=%s files=%d bytes=%d", skill_dir, file_count, len(result))
+    logger.info(
+        "publish package built skill_dir=%s files=%d bytes=%d", skill_dir, file_count, len(result)
+    )
     return result
 
 
@@ -135,7 +141,7 @@ def build_publish_metadata(
     return {
         "skill_id": skill_id,
         "author": author,
-        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+        "created_at": datetime.now(tz=UTC).isoformat(),
         "version": version,
     }
 

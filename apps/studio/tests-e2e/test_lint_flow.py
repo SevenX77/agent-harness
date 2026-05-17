@@ -68,11 +68,7 @@ def test_save_passes_then_failed_lint_renders_canvas(
     logger.info("selected text-segmentation; ready to edit Monaco buffer")
 
     workspace_skill = (
-        studio_workspace["workspaces_dir"]
-        / "default"
-        / "skills"
-        / "text-segmentation"
-        / "SKILL.md"
+        studio_workspace["workspaces_dir"] / "default" / "skills" / "text-segmentation" / "SKILL.md"
     )
     public_skill = studio_workspace["skills_dir"] / "text-segmentation" / "SKILL.md"
     initial_text = public_skill.read_text(encoding="utf-8")

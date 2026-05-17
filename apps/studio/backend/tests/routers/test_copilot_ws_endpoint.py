@@ -153,7 +153,9 @@ def test_stream_query_uses_copilot_chat_active_model_when_no_override(
     client = FakeClient([AssistantMessage(content=[TextBlock(text="hello")], model="claude")])
     monkeypatch.setattr(copilot_service, "load_config", lambda: fake_config)
     monkeypatch.setenv("PRIMARY_KEY", "primary-secret")
-    monkeypatch.setattr(copilot_service, "_session_factory", lambda options: client.capture(options))
+    monkeypatch.setattr(
+        copilot_service, "_session_factory", lambda options: client.capture(options)
+    )
 
     events = asyncio.run(
         _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
@@ -175,7 +177,9 @@ def test_stream_query_uses_model_override_when_provided(
     client = FakeClient([AssistantMessage(content=[TextBlock(text="hello")], model="claude")])
     monkeypatch.setattr(copilot_service, "load_config", lambda: fake_config)
     monkeypatch.setenv("PRIMARY_KEY", "primary-secret")
-    monkeypatch.setattr(copilot_service, "_session_factory", lambda options: client.capture(options))
+    monkeypatch.setattr(
+        copilot_service, "_session_factory", lambda options: client.capture(options)
+    )
 
     events = asyncio.run(
         _collect(

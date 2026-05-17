@@ -159,7 +159,9 @@ class GitCollaborateService:
             self.local_git.pull(skill_dir, "origin", branch)
         except GitCommandError as exc:
             if _is_conflict(exc):
-                return CollaborateResult(status="conflict", message="Pull requires conflict resolution")
+                return CollaborateResult(
+                    status="conflict", message="Pull requires conflict resolution"
+                )
             raise
         latest_restored = self._latest_snapshot_present(skill_dir)
         logger.debug("latest run snapshot restored after pull: %s", latest_restored)
@@ -283,7 +285,9 @@ def _is_permission_denied(exc: GitCommandError) -> bool:
 
 def _is_conflict(exc: GitCommandError) -> bool:
     text = f"{exc.result.stdout}\n{exc.result.stderr}".lower()
-    return "conflict" in text or "non-fast-forward" in text or "not possible to fast-forward" in text
+    return (
+        "conflict" in text or "non-fast-forward" in text or "not possible to fast-forward" in text
+    )
 
 
 def _is_empty_commit(exc: GitCommandError) -> bool:

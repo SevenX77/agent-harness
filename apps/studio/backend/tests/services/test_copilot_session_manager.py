@@ -43,7 +43,9 @@ def clean_sessions() -> Iterator[None]:
     asyncio.run(copilot.cleanup_all_sessions())
 
 
-def test_get_or_create_session_reuses_same_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_or_create_session_reuses_same_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     created: list[FakeClient] = []
 
     def factory(options: ClaudeAgentOptions) -> FakeClient:
@@ -63,7 +65,9 @@ def test_get_or_create_session_reuses_same_key(tmp_path: Path, monkeypatch: pyte
     assert len(created) == 1
 
 
-def test_reset_session_can_delete_skill_backend_pairs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reset_session_can_delete_skill_backend_pairs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     created: list[FakeClient] = []
 
     def factory(options: ClaudeAgentOptions) -> FakeClient:
@@ -87,7 +91,9 @@ def test_reset_session_can_delete_skill_backend_pairs(tmp_path: Path, monkeypatc
     asyncio.run(scenario())
 
 
-def test_reset_session_can_delete_all_backend_sessions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reset_session_can_delete_all_backend_sessions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(copilot, "_session_factory", FakeClient)
 
     async def scenario() -> None:
@@ -102,7 +108,9 @@ def test_reset_session_can_delete_all_backend_sessions(tmp_path: Path, monkeypat
     asyncio.run(scenario())
 
 
-def test_reset_session_can_delete_all_skill_sessions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reset_session_can_delete_all_skill_sessions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(copilot, "_session_factory", FakeClient)
 
     async def scenario() -> None:

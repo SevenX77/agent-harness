@@ -16,7 +16,13 @@ from fastapi.encoders import jsonable_encoder
 from graph_agent import CompiledSkill, compile_skill
 from graph_agent.core.exceptions import SkillCompilationError, SkillLoadError
 from graph_agent.core.loader import SkillLoader
-from graph_agent.core.manifest import GraphManifest, GraphPhaseRef, LogicNodeAST, SkillNodeAST, SubgraphNodeAST
+from graph_agent.core.manifest import (
+    GraphManifest,
+    GraphPhaseRef,
+    LogicNodeAST,
+    SkillNodeAST,
+    SubgraphNodeAST,
+)
 
 from app.core import config
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
@@ -209,7 +215,9 @@ def lint_skill_path(skill_path: Path) -> LintResult:
     except (SkillLoadError, SkillCompilationError) as exc:
         return LintResult(status="failed", errors=[_lint_error_from_exception(exc)])
     return LintResult(
-        status="passed", errors=[], phases_summary=_phase_summary_from_compiled(compiled)
+        status="passed",
+        errors=[],
+        phases_summary=_phase_summary_from_compiled(compiled),
     )
 
 

@@ -12,7 +12,7 @@ _GRAPH_AGENT_SRC = _REPO_ROOT / "packages" / "graph-agent" / "src"
 if _GRAPH_AGENT_SRC.is_dir():
     sys.path.insert(0, str(_GRAPH_AGENT_SRC))
 
-from graph_agent.core.purity import scan_python_purity
+from graph_agent.core.purity import scan_python_purity  # noqa: E402
 
 
 def _iter_python_files(root: Path) -> list[Path]:
@@ -38,8 +38,7 @@ def main(argv: list[str] | None = None) -> int:
 
     for violation in violations:
         print(
-            f"{violation.path}:{violation.line} [F-v21-purity] "
-            f"{violation.api} {violation.reason}"
+            f"{violation.path}:{violation.line} [F-v21-purity] {violation.api} {violation.reason}"
         )
     return 1 if violations else 0
 

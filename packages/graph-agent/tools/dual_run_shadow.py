@@ -29,7 +29,7 @@ class FakeHelloWorldChatModel:
     def __init__(self) -> None:
         self.react_turns = 0
 
-    def bind_tools(self, tools: list[Any]) -> "FakeHelloWorldChatModel":
+    def bind_tools(self, tools: list[Any]) -> FakeHelloWorldChatModel:
         del tools
         return self
 
@@ -65,8 +65,12 @@ def compare_idempotency(
     *,
     chat_fixture: str = "none",
 ) -> dict[str, Any]:
-    output_a = _run_v21(skill_root, input_data, run_id="dual-run-shadow-a", chat_fixture=chat_fixture)
-    output_b = _run_v21(skill_root, input_data, run_id="dual-run-shadow-b", chat_fixture=chat_fixture)
+    output_a = _run_v21(
+        skill_root, input_data, run_id="dual-run-shadow-a", chat_fixture=chat_fixture
+    )
+    output_b = _run_v21(
+        skill_root, input_data, run_id="dual-run-shadow-b", chat_fixture=chat_fixture
+    )
     diff = diff_json(output_a, output_b)
     return {
         "mode": "idempotency",
@@ -97,7 +101,8 @@ def _run_v21(
     compiled = compile_skill(skill_root, cache=False)
     graph = assemble_graph(compiled, chat_model=_chat_model(chat_fixture)).graph
     result = graph.invoke({"data": dict(input_data), "flow": {}, "messages": [], "run_id": run_id})
-    return _normalize({"data": result.get("data", {}), "flow": result.get("flow", {})})
+    normalized = _normalize({"data": result.get("data", {}), "flow": result.get("flow", {})})
+    return normalized if isinstance(normalized, dict) else {}
 
 
 def _chat_model(chat_fixture: str) -> Any:

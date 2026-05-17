@@ -1,30 +1,27 @@
-"""End-to-end: compile_skill on an agent with a missing tool ref surfaces F-tool-path-not-found."""
+"""V2.1 compile facade rejects legacy agent tool-path SKILL.md files."""
+
 from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from graph_agent.core.compiler import compile_skill
+from graph_agent.core.exceptions import SkillLoadError
 
 
-def test_compile_skill_propagates_tool_path_not_found(tmp_path: Path) -> None:
-    agent_path = tmp_path / "my_agent.md"
-    agent_path.write_text(
-        "---\n"
-        'schema_version: "2.0"\n'
-        "type: agent\n"
-        "name: my_agent\n"
-        "description: agent for tool_paths integration\n"
-        "agent_profile:\n"
-        "  role: tester\n"
-        "  goal: be tested\n"
-        "agent_tools:\n"
-        "  - missing_module.fn\n"
-        "---\n",
+def test_compile_skill_rejects_legacy_agent_tool_path_file(tmp_path: Path) -> None:
+    skill_file = tmp_path / "my_agent.md"
+    skill_file.write_text(
+        """---
+schema_version: "2.0"
+type: agent
+name: my_agent
+agent_tools:
+  - missing_module.fn
+---
+""",
         encoding="utf-8",
     )
 
-    result = compile_skill(agent_path)
-
-    rule_ids = sorted(i.rule_id for i in result.fatals)
-    assert "F-tool-path-not-found" in rule_ids
-    assert result.passed is False
+    with pytest.raises(SkillLoadError, match="expects a skill root directory"):
+        compile_skill(skill_file, cache=False)

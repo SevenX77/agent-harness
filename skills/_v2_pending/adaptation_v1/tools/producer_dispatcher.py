@@ -1,10 +1,14 @@
+# ruff: noqa: E501
 from __future__ import annotations
+
 import json
 import logging
 from pathlib import Path
+
 from story_forge.core.llm_client_manager import call_llm_with_fallback
 
 logger = logging.getLogger(__name__)
+
 
 def dispatch_producer_strategy(ctx: dict) -> str:
     """
@@ -19,27 +23,49 @@ def dispatch_producer_strategy(ctx: dict) -> str:
     # Load context assets
     base_dir = Path(__file__).resolve().parent.parent.parent
     fixtures_dir = base_dir / "fixtures"
-    
-    synopsis = (fixtures_dir / "synopsis.txt").read_text(encoding='utf-8') if (fixtures_dir / "synopsis.txt").exists() else "无"
-    framework = (fixtures_dir / "framework.md").read_text(encoding='utf-8') if (fixtures_dir / "framework.md").exists() else "无"
-    
+
+    synopsis = (
+        (fixtures_dir / "synopsis.txt").read_text(encoding="utf-8")
+        if (fixtures_dir / "synopsis.txt").exists()
+        else "无"
+    )
+    framework = (
+        (fixtures_dir / "framework.md").read_text(encoding="utf-8")
+        if (fixtures_dir / "framework.md").exists()
+        else "无"
+    )
+
     drama_dna = "无"
     if (fixtures_dir / "drama_dna.json").exists():
         try:
-            dna_data = json.loads((fixtures_dir / "drama_dna.json").read_text(encoding='utf-8'))
+            dna_data = json.loads((fixtures_dir / "drama_dna.json").read_text(encoding="utf-8"))
             drama_dna = json.dumps(dna_data.get("core_dna", {}), ensure_ascii=False, indent=2)
-        except: pass
+        except Exception:
+            pass
 
     # Build full scene context
     global_overview = []
     for sc in scenes:
-        beats_text = "\n".join([f"  - [{b['beat_id']}] {b['content']} (情绪: {b['emotion']})" for b in sc.get("beats", [])])
-        global_overview.append(f"【Scene: {sc['scene_id']} | Location: {sc['meta']['location']}】\nBeats:\n{beats_text}")
+        beats_text = "\n".join(
+            [
+                f"  - [{b['beat_id']}] {b['content']} (情绪: {b['emotion']})"
+                for b in sc.get("beats", [])
+            ]
+        )
+        global_overview.append(
+            f"【Scene: {sc['scene_id']} | Location: {sc['meta']['location']}】\nBeats:\n{beats_text}"
+        )
     overview_text = "\n\n".join(global_overview)
 
     # Load Voice & Rhythm Rules
-    rules_dir = Path(__file__).resolve().parent.parent / "subskills" / "producer_strategy" / "references"
-    voice_rhythm_rules = (rules_dir / "voice_and_rhythm_rules.md").read_text(encoding='utf-8') if (rules_dir / "voice_and_rhythm_rules.md").exists() else ""
+    rules_dir = (
+        Path(__file__).resolve().parent.parent / "subskills" / "producer_strategy" / "references"
+    )
+    voice_rhythm_rules = (
+        (rules_dir / "voice_and_rhythm_rules.md").read_text(encoding="utf-8")
+        if (rules_dir / "voice_and_rhythm_rules.md").exists()
+        else ""
+    )
 
     sys_prompt = f"""你是一个爆款 AI 短剧制片人。
 短剧的底层逻辑是：**解说推动（Narration-Driven）**。
@@ -81,22 +107,28 @@ def dispatch_producer_strategy(ctx: dict) -> str:
     logger.info("开始请求全局 Producer 策略...")
     try:
         output_dict = call_llm_with_fallback(
-            task_id="producer_plan_global", 
-            messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_prompt}],
+            task_id="producer_plan_global",
+            messages=[
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
             llm_role="screenwriter",
-            temperature=0.7
+            temperature=0.7,
         )
         output_text = output_dict.get("content", "").strip()
-        
-        if output_text.startswith("```json"): output_text = output_text[7:]
-        elif output_text.startswith("```"): output_text = output_text[3:]
-        if output_text.endswith("```"): output_text = output_text[:-3]
+
+        if output_text.startswith("```json"):
+            output_text = output_text[7:]
+        elif output_text.startswith("```"):
+            output_text = output_text[3:]
+        if output_text.endswith("```"):
+            output_text = output_text[:-3]
         output_text = output_text.strip()
 
         strategy_json = json.loads(output_text)
-        
+
         ctx["producer_global_analysis"] = strategy_json.get("audience_psychology_analysis", "")
-        
+
         try:
             strategy_map = {s["scene_id"]: s for s in strategy_json.get("scene_strategies", [])}
         except Exception:
@@ -107,5 +139,7 @@ def dispatch_producer_strategy(ctx: dict) -> str:
         ctx["objective_scenes"] = scenes
         return "全局制片人策略批注完成。"
     except Exception as e:
-        logger.error(f"全局 Producer 执行失败: {e}\nRaw Output: {{output_text if 'output_text' in locals() else 'None'}}")
+        logger.error(
+            f"全局 Producer 执行失败: {e}\nRaw Output: {{output_text if 'output_text' in locals() else 'None'}}"
+        )
         return f"ERROR: {e}"

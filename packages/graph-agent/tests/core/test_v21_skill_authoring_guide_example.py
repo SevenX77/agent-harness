@@ -4,7 +4,6 @@ from pathlib import Path
 
 from graph_agent import compile_skill
 
-
 REPO_ROOT = Path(__file__).resolve().parents[4]
 GUIDE = REPO_ROOT / "docs" / "graph_agent_docs" / "SKILL_AUTHORING_GUIDE.md"
 HELLO_WORLD = REPO_ROOT / "skills" / "hello-world"

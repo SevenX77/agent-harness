@@ -3,11 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import AIMessage
-
 from graph_agent import assemble_graph, compile_skill
 from graph_agent.runtime.state import shallow_dict_merge
-
+from langchain_core.messages import AIMessage
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SKILL_ROOT = REPO_ROOT / "skills" / "batch-analysis"
@@ -18,7 +16,7 @@ class FakeBatchAnalysisChatModel:
         self.bound_tool_names: list[str] = []
         self.messages_seen: list[list[Any]] = []
 
-    def bind_tools(self, tools: list[Any]) -> "FakeBatchAnalysisChatModel":
+    def bind_tools(self, tools: list[Any]) -> FakeBatchAnalysisChatModel:
         self.bound_tool_names = [tool.name for tool in tools]
         return self
 

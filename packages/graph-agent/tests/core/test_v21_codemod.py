@@ -4,14 +4,12 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
-from pydantic import TypeAdapter
-
 from graph_agent.codemod.v21_migrator import migrate_skill_md
 from graph_agent.core.loader import SkillLoader
 from graph_agent.core.manifest import PhaseAST, SkillNodeAST
+from pydantic import TypeAdapter
 
 _TESTS_DIR = Path(__file__).parents[1]
 _PACKAGE_ROOT = Path(__file__).parents[2]

@@ -2,6 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
+    "formatted_paragraphs": {"type": "string"},
+    "events_raw": {"type": "string"},
+    "parsed_events": {"type": "array"},
     "event_timeline": {
       "type": "object",
       "properties": {

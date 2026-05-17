@@ -1,6 +1,8 @@
 """Pydantic schemas for text segmentation."""
-from pydantic import BaseModel, Field, ConfigDict
 from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
 
 class Segment(BaseModel):
     """A single classified text segment."""

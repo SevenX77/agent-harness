@@ -10,6 +10,7 @@ import argparse
 import json
 import re
 import shutil
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -101,6 +102,13 @@ def _to_builtin(value: Any) -> Any:
         return {str(k): _to_builtin(v) for k, v in value.items()}
     if isinstance(value, list):
         return [_to_builtin(v) for v in value]
+    if isinstance(value, AbstractSet):
+        items = sorted(str(item) for item in value)
+        if len(items) == 1:
+            return "{" + items[0] + "}"
+        return ["{" + item + "}" for item in items]
+    if isinstance(value, str):
+        return str(value)
     return value
 
 
@@ -110,7 +118,9 @@ def _write_io_schemas(io_def: dict[str, Any], out_dir: Path, report: CodemodRepo
     for key, filename in (("inputs", "inputs.json"), ("outputs", "outputs.json")):
         schema, review_reasons = _json_schema_for_io_items(io_def.get(key) or [], key)
         path = io_dir / filename
-        _write_text(path, json.dumps(schema, ensure_ascii=False, indent=2, sort_keys=True) + "\n", report)
+        _write_text(
+            path, json.dumps(schema, ensure_ascii=False, indent=2, sort_keys=True) + "\n", report
+        )
         for reason in review_reasons:
             report.add_review(path, reason)
     report.mapping_decisions.append("io.inputs/io.outputs -> io/inputs.json + io/outputs.json")
@@ -175,7 +185,9 @@ def _migrate_simple_skill(
     out_dir: Path,
     report: CodemodReport,
 ) -> None:
-    blocks = extract_raw_blocks(body, ["phase_config", "system_prompt", "user_prompt", "exit_contract"])
+    blocks = extract_raw_blocks(
+        body, ["phase_config", "system_prompt", "user_prompt", "exit_contract"]
+    )
     phase_name = _phase_name_from_config(blocks.get("phase_config", "")) or "main"
     slug = _unique_slug(phase_name, set())
     phase: dict[str, Any] = {
@@ -240,7 +252,9 @@ def _write_logic_phase(
     report: CodemodReport,
 ) -> None:
     steps = phase.get("execute_steps") or []
-    callable_name = steps[0] if isinstance(steps, list) and steps else "TODO.codemod.missing_callable"
+    callable_name = (
+        steps[0] if isinstance(steps, list) and steps else "TODO.codemod.missing_callable"
+    )
     if not steps:
         reasons.append("logic phase missing execute_steps")
     frontmatter = {
@@ -378,8 +392,12 @@ def _unique_slug(name: str, used: set[str]) -> str:
     return candidate
 
 
-def _write_markdown(path: Path, frontmatter: dict[str, Any], body: str, report: CodemodReport) -> None:
-    text = "---\n" + yaml.safe_dump(frontmatter, allow_unicode=True, sort_keys=False) + "---\n" + body
+def _write_markdown(
+    path: Path, frontmatter: dict[str, Any], body: str, report: CodemodReport
+) -> None:
+    text = (
+        "---\n" + yaml.safe_dump(frontmatter, allow_unicode=True, sort_keys=False) + "---\n" + body
+    )
     _write_text(path, text, report)
 
 
@@ -417,7 +435,9 @@ def _dedupe(items: list[str]) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Dry-run migrate schema 2.0 SKILL.md to V2.1 candidates.")
+    parser = argparse.ArgumentParser(
+        description="Dry-run migrate schema 2.0 SKILL.md to V2.1 candidates."
+    )
     parser.add_argument("source", type=Path)
     parser.add_argument("--out-dir", type=Path)
     parser.add_argument("--force", action="store_true")

@@ -14,6 +14,7 @@ from langchain_core.callbacks.manager import (
 )
 from langchain_core.language_models.base import LanguageModelInput
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
+from langchain_core.messages.ai import UsageMetadata
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_core.runnables import Runnable
 
@@ -213,7 +214,7 @@ def _token_usage() -> dict[str, int]:
     return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
 
-def _message_usage_metadata() -> dict[str, int]:
+def _message_usage_metadata() -> UsageMetadata:
     return {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
 
 

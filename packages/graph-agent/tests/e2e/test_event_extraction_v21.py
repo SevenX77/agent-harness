@@ -5,12 +5,11 @@ from pathlib import Path
 from typing import Any
 
 from graph_agent import assemble_graph, compile_skill
+from graph_agent.cognitive.finish_task import build_finish_task_tool
 from graph_agent.cognitive.md2json import parse_finish_markdown
 from graph_agent.cognitive.md_patch import FakeMdPatchClient
 from graph_agent.core.graph_assembler import _is_terminal_phase
-from graph_agent.cognitive.finish_task import build_finish_task_tool
 from langchain_core.messages import AIMessage
-
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SKILL_ROOT = REPO_ROOT / "skills" / "event-extraction"
@@ -20,7 +19,7 @@ class FakeEventExtractionChatModel:
     def __init__(self) -> None:
         self.messages_seen: list[list[Any]] = []
 
-    def bind_tools(self, tools: list[Any]) -> "FakeEventExtractionChatModel":
+    def bind_tools(self, tools: list[Any]) -> FakeEventExtractionChatModel:
         return self
 
     def invoke(self, messages: list[Any]) -> AIMessage:

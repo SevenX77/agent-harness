@@ -13,6 +13,7 @@ export interface ErrorResponse {
 }
 
 export interface LintError {
+  file?: string | null
   line: number | null
   column: number | null
   error_code: string
@@ -250,6 +251,22 @@ export interface IoDeclaration {
   outputs: IoOutput[]
 }
 
+export interface GraphPhaseRef {
+  id: string
+  src: string
+  depends_on: string[]
+}
+
+export interface GraphManifestV21 {
+  schema_version: '2.1'
+  name: string
+  description: string
+  io_inputs_ref?: string
+  io_outputs_ref?: string
+  phases: GraphPhaseRef[]
+  metadata?: JsonObject
+}
+
 export interface BaseSkillManifest {
   schema_version: '2.0'
   name: string
@@ -338,14 +355,31 @@ export interface PersonaSkillDef extends BaseSkillManifest {
   few_shot_examples: string[]
 }
 
-export type SkillManifest = AgentSkillDef | GraphSkillDef | PersonaSkillDef
+export type SkillManifest = AgentSkillDef | GraphSkillDef | PersonaSkillDef | GraphManifestV21
+
+export interface GraphTopologyItem {
+  id: string
+  src: string
+  depends_on: string[]
+  mode: 'logic' | 'subgraph' | 'skill' | string
+}
 
 export interface SkillDetail {
   manifest: SkillManifest
+  graph_topology?: GraphTopologyItem[]
+  node_schema_v21?: Record<string, JsonObject>
+  io_schema?: Record<string, JsonObject>
   file_paths: Record<string, string>
+  files?: Record<string, string>
+  manifest_errors?: LintError[] | null
   has_golden: boolean
   latest_run_metadata: RunMetadata | null
   lint_result: LintResult | null
+}
+
+export interface UpdateSkillFileRes {
+  path: string
+  hash: string
 }
 
 export interface CallbackEventBase {

@@ -1,4 +1,5 @@
 """Tests for to_jsonable_dict (T-A3)."""
+
 from __future__ import annotations
 
 import json

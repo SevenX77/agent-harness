@@ -1,4 +1,5 @@
 """Tests for read_file builtin tool."""
+
 from __future__ import annotations
 
 from pathlib import Path

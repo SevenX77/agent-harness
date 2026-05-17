@@ -37,17 +37,13 @@ variable ``save_compaction_sidecar(...)`` (Name call) sourced from
 ``self.container.save_compaction_sidecar``. The matcher now accepts
 both patterns so the L1295 NameError guard survives the rename.
 """
+
 from __future__ import annotations
 
 import ast
 from pathlib import Path
 
-_CORE_DIR = (
-    Path(__file__).resolve().parents[2]
-    / "src"
-    / "graph_agent"
-    / "core"
-)
+_CORE_DIR = Path(__file__).resolve().parents[2] / "src" / "graph_agent" / "core"
 _SCAN_PATHS = [
     _CORE_DIR / "harness.py",
     _CORE_DIR / "phase_executor.py",
@@ -79,9 +75,7 @@ def _find_save_compaction_sidecar_calls() -> list[tuple[Path, ast.Call]]:
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
-            if (
-                isinstance(func, ast.Attribute) and func.attr in accepted_attr_names
-            ) or (
+            if (isinstance(func, ast.Attribute) and func.attr in accepted_attr_names) or (
                 isinstance(func, ast.Name) and func.id in accepted_local_names
             ):
                 calls.append((path, node))

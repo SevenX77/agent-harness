@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "segmentation_result": {
+      "type": "object",
+      "x-legacy-path": "output/text-segmentation/chapter_{context.chapter_number}_segments.json",
+      "x-legacy-target": "file"
+    }
+  },
+  "required": [
+    "segmentation_result"
+  ],
+  "type": "object"
+}

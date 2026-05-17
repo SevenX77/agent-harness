@@ -51,6 +51,8 @@ from typing import Any
 import pytest
 from dotenv import load_dotenv
 from graph_agent.config.llm_config import load_config
+from graph_agent.core.compiler import compile_skill
+from graph_agent.core.graph_assembler import assemble_graph
 from graph_agent.core.harness import GraphAgentHarness
 from graph_agent.core.loader import load_workflow_from_md
 from graph_agent.core.state import (
@@ -64,7 +66,7 @@ from langchain_core.messages import HumanMessage
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 LLM_ROLES_PATH = REPO_ROOT / "config" / "llm_roles.yaml"
-V3_SKILL_PATH = REPO_ROOT / "skills/text-segmentation/SKILL.md"
+V3_SKILL_PATH = REPO_ROOT / "skills/text-segmentation"
 REAL_LLM_SMOKE_ROLE_ENV = "GRAPH_AGENT_REAL_LLM_SMOKE_ROLE"
 DEFAULT_REAL_LLM_SMOKE_ROLE = "test_opus47_ws"
 E2E_TRACE_RUN_ENV = "GRAPH_AGENT_E2E_TRACE_RUN"
@@ -324,36 +326,18 @@ class TestCompileLayer:
 
     def test_v3_skill_compiles_to_graph_agent_harness(self) -> None:
         path = Path(V3_SKILL_PATH)
-        assert path.exists(), (
-            f"v3 SKILL missing at {V3_SKILL_PATH}; the spec brief's "
-            "skills/text-segmentation/v3/SKILL.md path is stale, "
-            "actual is under versions/v3-gemini-rewrite-r2/."
-        )
-        harness = load_workflow_from_md(path)
+        assert (path / "GRAPH.md").exists()
+        compiled = compile_skill(path, cache=False)
+        assembled = assemble_graph(compiled)
 
-        try:
-            assert isinstance(harness, GraphAgentHarness)
-            phase_names = [p.name for p in harness.phases]
-            assert phase_names == ["setup", "segment", "review"], (
-                f"v3 SKILL expected phases [setup, segment, review]; "
-                f"compiler produced {phase_names!r}."
-            )
-        finally:
-            harness.close()
+        assert assembled.graph is not None
+        assert [phase.id for phase in compiled.manifest.phases] == ["setup", "segment", "review"]
 
     def test_v3_skill_io_outputs_declared(self) -> None:
-        harness = load_workflow_from_md(Path(V3_SKILL_PATH))
-        try:
-            io_config = harness._io_config
-            assert io_config is not None and io_config.get("outputs"), (
-                "text-segmentation SKILL declares at least one output "
-                "(name varies by SKILL revision); harness should surface "
-                "it via _io_config['outputs']."
-            )
-            output_names = [o.get("name") for o in io_config["outputs"]]
-            assert len(output_names) >= 1, f"Expected ≥ 1 declared output, got {output_names!r}."
-        finally:
-            harness.close()
+        compiled = compile_skill(Path(V3_SKILL_PATH), cache=False)
+
+        assert compiled.raw["io"]["outputs"]["required"] == ["segmentation_result"]
+        assert "segmentation_result" in compiled.raw["io"]["output_schema_keys"]
 
 
 class TestStateInvariants:

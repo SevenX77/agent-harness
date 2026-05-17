@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "chapter_number": {
+      "type": "integer",
+      "x-legacy-source": "runtime"
+    },
+    "prev_chapter_last_event": {
+      "type": "object",
+      "x-legacy-source": "runtime"
+    },
+    "segmentation_result": {
+      "type": "object",
+      "x-legacy-source": "runtime"
+    }
+  },
+  "required": [
+    "segmentation_result",
+    "chapter_number",
+    "prev_chapter_last_event"
+  ],
+  "type": "object"
+}

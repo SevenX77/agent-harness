@@ -1,4 +1,5 @@
 """Unit tests for the CallbackEvent Pydantic union (Task 3.4)."""
+
 import sys
 from pathlib import Path
 
@@ -190,12 +191,14 @@ class TestUnionDiscriminator:
 
     def test_unknown_event_type_rejected(self) -> None:
         with pytest.raises(ValidationError):
-            self._ADAPTER.validate_python({
-                "event_type": "not_a_real_type",
-                "phase_name": "p",
-                "schema_version": "1.0",
-                "timestamp": "2026-04-23T00:00:00+00:00",
-            })
+            self._ADAPTER.validate_python(
+                {
+                    "event_type": "not_a_real_type",
+                    "phase_name": "p",
+                    "schema_version": "1.0",
+                    "timestamp": "2026-04-23T00:00:00+00:00",
+                }
+            )
 
 
 class TestParallelMapGrouping:

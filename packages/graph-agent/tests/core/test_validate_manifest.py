@@ -51,10 +51,7 @@ class RecordingSchemaEngine(SchemaEngine):
 def test_validate_manifest_calls_schema_engine_spec_validator() -> None:
     raw = parse_skill_md(
         _graph_skill_yaml(
-            "  - name: draft\n"
-            "    mode: llm\n"
-            "    output_schema: |\n"
-            "      title: str\n"
+            "  - name: draft\n    mode: llm\n    output_schema: |\n      title: str\n"
         )
     )
     engine = RecordingSchemaEngine()
@@ -68,10 +65,7 @@ def test_validate_manifest_calls_schema_engine_spec_validator() -> None:
 def test_validate_manifest_rejects_schema_engine_spec_errors() -> None:
     raw = parse_skill_md(
         _graph_skill_yaml(
-            "  - name: draft\n"
-            "    mode: llm\n"
-            "    output_schema: |\n"
-            "      title: str\n"
+            "  - name: draft\n    mode: llm\n    output_schema: |\n      title: str\n"
         )
     )
     engine = RecordingSchemaEngine(
@@ -134,9 +128,7 @@ def test_validate_manifest_compiles_output_example_md_to_schema_object() -> None
 def test_validate_manifest_leaves_dotted_output_schema_for_build_phase() -> None:
     raw = parse_skill_md(
         _graph_skill_yaml(
-            "  - name: draft\n"
-            "    mode: llm\n"
-            "    output_schema: script.models.Result\n"
+            "  - name: draft\n    mode: llm\n    output_schema: script.models.Result\n"
         )
     )
     engine = RecordingSchemaEngine()
@@ -149,11 +141,7 @@ def test_validate_manifest_leaves_dotted_output_schema_for_build_phase() -> None
 
 def test_validate_manifest_rejects_io_manager_errors() -> None:
     raw = parse_skill_md(
-        _graph_skill_yaml(
-            "  - name: draft\n"
-            "    mode: llm\n"
-            "    hoist_to: _private\n"
-        )
+        _graph_skill_yaml("  - name: draft\n    mode: llm\n    hoist_to: _private\n")
     )
     engine = RecordingSchemaEngine()
 
@@ -168,9 +156,7 @@ def test_validate_manifest_rejects_validator_without_output_schema() -> None:
     """
     raw = parse_skill_md(
         _graph_skill_yaml(
-            "  - name: draft\n"
-            "    mode: llm\n"
-            "    validator: script.validators.check_business\n"
+            "  - name: draft\n    mode: llm\n    validator: script.validators.check_business\n"
         )
     )
     engine = RecordingSchemaEngine()

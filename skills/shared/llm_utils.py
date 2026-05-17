@@ -9,23 +9,23 @@ logger = logging.getLogger(__name__)
 
 def safe_parse_json_list(raw: str, label: str) -> list:
     """Extract JSON list from LLM output.
-    
+
     Supports markdown code block extraction and handles truncation.
     """
     if not raw:
         logger.warning(f"{label}: Empty raw output")
         return []
-    
+
     # Extract from markdown code block if present
     pattern = r"```(?:json)?\s*([\s\S]*?)```"
     match = re.search(pattern, raw)
     if match:
         raw = match.group(1).strip()
-    
+
     # Detect truncation
     if _is_truncated_json(raw):
         logger.warning(f"{label}: JSON appears truncated")
-    
+
     try:
         data = json.loads(raw)
         if isinstance(data, list):
@@ -44,20 +44,20 @@ def _is_truncated_json(raw: str) -> bool:
     raw = raw.strip()
     if not raw:
         return False
-    
+
     # Check for unbalanced brackets
     open_braces = raw.count("{")
     close_braces = raw.count("}")
     open_brackets = raw.count("[")
     close_brackets = raw.count("]")
-    
+
     if open_braces != close_braces or open_brackets != close_brackets:
         return True
-    
+
     # Check for trailing comma or incomplete string
     if raw.rstrip().endswith(",") or raw.rstrip().endswith('"'):
         return True
-    
+
     return False
 
 

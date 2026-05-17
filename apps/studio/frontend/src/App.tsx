@@ -830,15 +830,19 @@ export default function App() {
             <div className="flex flex-1 overflow-hidden">
               <GraphCanvas
                 currentSkillName={currentSkill?.name ?? 'Graph'}
+                breadcrumbs={[{ skillId: selectedSkillId, skillName: currentSkill?.name ?? 'Graph' }]}
                 skillDetailError={skillDetailError}
                 nodes={nodes}
                 edges={edges}
                 isDarkMode={isDarkMode}
+                isReadOnly={false}
                 selectedPhaseId={traceSelection.linkEnabled ? traceSelection.selectedPhaseId : null}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
                 onResetLayout={handleResetLayout}
+                onBreadcrumbClick={() => undefined}
+                onBackToParent={() => undefined}
                 onPhaseSelect={handleGraphPhaseSelect}
                 onPhaseDoubleClick={handleOpenPhaseDrawer}
               />

@@ -70,7 +70,7 @@ class CompiledSkill:
     nodes: list[PhaseDocument] = field(default_factory=list)
     actions: ActionRegistry = field(default_factory=ActionRegistry.empty)
     tools: ToolRegistry = field(default_factory=ToolRegistry.empty)
-    phase_tokens: dict[str, "PhaseTokenInfo"] = field(default_factory=dict)
+    phase_tokens: dict[str, PhaseTokenInfo] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

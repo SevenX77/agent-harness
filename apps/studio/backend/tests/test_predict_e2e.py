@@ -16,7 +16,9 @@ def test_backend_p2_predict_job_exports_diagnostics(
 ) -> None:
     skill_dir = _write_backend_skill(tmp_path)
     monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda skill_id: skill_dir)
-    service = PredictorService(run_skill_fn=_fake_predict_run_skill(["prepare", "draft"], "heuristic_stub"))
+    service = PredictorService(
+        run_skill_fn=_fake_predict_run_skill(["prepare", "draft"], "heuristic_stub")
+    )
 
     result = service.dispatch_predict_job(
         "skill",
@@ -46,7 +48,9 @@ def test_backend_p1_predict_job_uses_manual_or_copilot_source(
 ) -> None:
     skill_dir = _write_backend_skill(tmp_path)
     monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda skill_id: skill_dir)
-    service = PredictorService(run_skill_fn=_fake_predict_run_skill(["prepare", "draft"], expected_source))
+    service = PredictorService(
+        run_skill_fn=_fake_predict_run_skill(["prepare", "draft"], expected_source)
+    )
 
     result = service.dispatch_predict_job("skill", mock_llm, input_data={"topic": "mars"})
 
@@ -62,7 +66,9 @@ def test_backend_p0_predict_job_warns_diffs_and_uses_golden_source(
     skill_dir = _write_backend_skill(tmp_path)
     golden_path = _write_golden_case(tmp_path, expected_path=["draft", "finish"])
     monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda skill_id: skill_dir)
-    service = PredictorService(run_skill_fn=_fake_predict_run_skill(["prepare", "draft"], "golden_case"))
+    service = PredictorService(
+        run_skill_fn=_fake_predict_run_skill(["prepare", "draft"], "golden_case")
+    )
 
     with caplog.at_level(logging.WARNING):
         result = service.dispatch_predict_job(
@@ -130,9 +136,7 @@ def _write_backend_skill(tmp_path: Path) -> Path:
     script_dir.mkdir(parents=True)
     (script_dir / "__init__.py").write_text("", encoding="utf-8")
     (script_dir / "logic.py").write_text(
-        "def prepare(ctx):\n"
-        "    ctx['prepared'] = True\n"
-        "    return ctx\n",
+        "def prepare(ctx):\n    ctx['prepared'] = True\n    return ctx\n",
         encoding="utf-8",
     )
     (skill_dir / "SKILL.md").write_text(

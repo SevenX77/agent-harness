@@ -9,7 +9,6 @@ from typing import Literal
 from graph_agent.core.loader import PhaseAttributeSpan, PhaseTokenInfo
 from graph_agent.core.manifest import GraphManifest, GraphPhaseRef
 
-
 TokenKind = Literal["frontmatter", "comment", "io", "phase", "whitespace", "text"]
 
 _PHASE_RE = re.compile(r"<phase\b([^>]*)/>", re.IGNORECASE | re.DOTALL)
@@ -113,14 +112,14 @@ def _tokenize_graph(text: str) -> list[GraphToken]:
 
     tokens: list[GraphToken] = []
     cursor = 0
-    for start, end, kind, match in matches:
+    for start, end, kind, token_match in matches:
         if start < cursor:
             continue
         if cursor < start:
             tokens.extend(_text_or_whitespace_tokens(text, cursor, start))
         token_text = text[start:end]
-        if kind == "phase" and match is not None:
-            info = _phase_token_info(text, match)
+        if kind == "phase" and token_match is not None:
+            info = _phase_token_info(text, token_match)
             tokens.append(
                 GraphToken(
                     kind="phase",
@@ -233,10 +232,7 @@ def _append_phase_lines(chunks: list[str], phases: list[GraphPhaseRef]) -> list[
 
 
 def _phase_line(phase: GraphPhaseRef) -> str:
-    return (
-        f'<phase id="{phase.id}" src="{phase.src}" '
-        f'depends_on="{_depends_on_text(phase)}" />'
-    )
+    return f'<phase id="{phase.id}" src="{phase.src}" depends_on="{_depends_on_text(phase)}" />'
 
 
 def _depends_on_text(phase: GraphPhaseRef) -> str:

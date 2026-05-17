@@ -29,7 +29,8 @@ class FakeMdPatchClient(MdPatchClient):
 
     def __init__(
         self,
-        patches: Sequence[str] | Callable[[str, dict[str, Any] | None, list[dict[str, Any]], int], str],
+        patches: Sequence[str]
+        | Callable[[str, dict[str, Any] | None, list[dict[str, Any]], int], str],
     ) -> None:
         self._patches = patches
         self.calls: list[dict[str, Any]] = []

@@ -50,7 +50,11 @@ def test_p0_strategy_loads_golden_case_source(tmp_path: Path) -> None:
 
 def test_backtest_strategy_merges_golden_cases() -> None:
     cases = [
-        GoldenCase(inputs={}, metadata={"expected_path": ["draft"]}, expected_traces={"draft": {"text": "a"}}),
+        GoldenCase(
+            inputs={},
+            metadata={"expected_path": ["draft"]},
+            expected_traces={"draft": {"text": "a"}},
+        ),
         GoldenCase(inputs={}, metadata={}, expected_traces={"review": {"ok": True}}),
     ]
 

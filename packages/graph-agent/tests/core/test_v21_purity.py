@@ -46,19 +46,27 @@ def test_purity_open_read_ok(tmp_path: Path) -> None:
 
 
 def test_purity_path_write_text_fatal(tmp_path: Path) -> None:
-    assert "write_text" in _apis(_write(tmp_path / "x.py", "from pathlib import Path\nPath('x').write_text('x')\n"))
+    assert "write_text" in _apis(
+        _write(tmp_path / "x.py", "from pathlib import Path\nPath('x').write_text('x')\n")
+    )
 
 
 def test_purity_path_write_bytes_fatal(tmp_path: Path) -> None:
-    assert "write_bytes" in _apis(_write(tmp_path / "x.py", "from pathlib import Path\nPath('x').write_bytes(b'x')\n"))
+    assert "write_bytes" in _apis(
+        _write(tmp_path / "x.py", "from pathlib import Path\nPath('x').write_bytes(b'x')\n")
+    )
 
 
 def test_purity_path_touch_fatal(tmp_path: Path) -> None:
-    assert "touch" in _apis(_write(tmp_path / "x.py", "from pathlib import Path\nPath('x').touch()\n"))
+    assert "touch" in _apis(
+        _write(tmp_path / "x.py", "from pathlib import Path\nPath('x').touch()\n")
+    )
 
 
 def test_purity_path_mkdir_fatal(tmp_path: Path) -> None:
-    assert "mkdir" in _apis(_write(tmp_path / "x.py", "from pathlib import Path\nPath('x').mkdir()\n"))
+    assert "mkdir" in _apis(
+        _write(tmp_path / "x.py", "from pathlib import Path\nPath('x').mkdir()\n")
+    )
 
 
 def test_purity_os_makedirs_fatal(tmp_path: Path) -> None:
@@ -66,11 +74,15 @@ def test_purity_os_makedirs_fatal(tmp_path: Path) -> None:
 
 
 def test_purity_shutil_copy_fatal(tmp_path: Path) -> None:
-    assert "shutil.copy" in _apis(_write(tmp_path / "x.py", "import shutil\nshutil.copy('a', 'b')\n"))
+    assert "shutil.copy" in _apis(
+        _write(tmp_path / "x.py", "import shutil\nshutil.copy('a', 'b')\n")
+    )
 
 
 def test_purity_shutil_rmtree_fatal(tmp_path: Path) -> None:
-    assert "shutil.rmtree" in _apis(_write(tmp_path / "x.py", "import shutil\nshutil.rmtree('a')\n"))
+    assert "shutil.rmtree" in _apis(
+        _write(tmp_path / "x.py", "import shutil\nshutil.rmtree('a')\n")
+    )
 
 
 def test_purity_tempfile_named_fatal(tmp_path: Path) -> None:
@@ -80,7 +92,9 @@ def test_purity_tempfile_named_fatal(tmp_path: Path) -> None:
 
 
 def test_purity_tempfile_mkdtemp_fatal(tmp_path: Path) -> None:
-    assert "tempfile.mkdtemp" in _apis(_write(tmp_path / "x.py", "import tempfile\ntempfile.mkdtemp()\n"))
+    assert "tempfile.mkdtemp" in _apis(
+        _write(tmp_path / "x.py", "import tempfile\ntempfile.mkdtemp()\n")
+    )
 
 
 def test_purity_temporary_directory_fatal(tmp_path: Path) -> None:
@@ -90,7 +104,12 @@ def test_purity_temporary_directory_fatal(tmp_path: Path) -> None:
 
 
 def test_purity_path_read_text_ok(tmp_path: Path) -> None:
-    assert scan_python_purity(_write(tmp_path / "x.py", "from pathlib import Path\nPath('x').read_text()\n")) == []
+    assert (
+        scan_python_purity(
+            _write(tmp_path / "x.py", "from pathlib import Path\nPath('x').read_text()\n")
+        )
+        == []
+    )
 
 
 def test_scan_blocks_import_full_path(tmp_path: Path) -> None:
@@ -118,9 +137,13 @@ def test_scan_blocks_from_cognitive_import_facade(tmp_path: Path) -> None:
 
 
 def test_purity_cli_clean_exit_0(tmp_path: Path) -> None:
-    _write(tmp_path / "phases" / "p" / "actions" / "clean.py", "def clean(context):\n    return None\n")
+    _write(
+        tmp_path / "phases" / "p" / "actions" / "clean.py", "def clean(context):\n    return None\n"
+    )
 
-    result = subprocess.run([sys.executable, str(_SCANNER), str(tmp_path)], text=True, capture_output=True)
+    result = subprocess.run(
+        [sys.executable, str(_SCANNER), str(tmp_path)], text=True, capture_output=True
+    )
 
     assert result.returncode == 0
     assert result.stdout == ""
@@ -129,7 +152,9 @@ def test_purity_cli_clean_exit_0(tmp_path: Path) -> None:
 def test_purity_cli_dirty_exit_1(tmp_path: Path) -> None:
     _write(tmp_path / "phases" / "p" / "actions" / "dirty.py", "open('x', 'w')\n")
 
-    result = subprocess.run([sys.executable, str(_SCANNER), str(tmp_path)], text=True, capture_output=True)
+    result = subprocess.run(
+        [sys.executable, str(_SCANNER), str(tmp_path)], text=True, capture_output=True
+    )
 
     assert result.returncode == 1
     assert "[F-v21-purity]" in result.stdout
@@ -138,7 +163,9 @@ def test_purity_cli_dirty_exit_1(tmp_path: Path) -> None:
 def test_purity_cli_ignores_v2_pending(tmp_path: Path) -> None:
     _write(tmp_path / "_v2_pending" / "x" / "tools" / "dirty.py", "open('x', 'w')\n")
 
-    result = subprocess.run([sys.executable, str(_SCANNER), str(tmp_path)], text=True, capture_output=True)
+    result = subprocess.run(
+        [sys.executable, str(_SCANNER), str(tmp_path)], text=True, capture_output=True
+    )
 
     assert result.returncode == 0
     assert result.stdout == ""

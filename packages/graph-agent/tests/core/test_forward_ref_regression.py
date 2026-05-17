@@ -24,9 +24,7 @@ def test_module_sandbox_rebuilds_forward_ref_schema(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    schema_cls = ModuleSandbox(search_paths=[tmp_path]).import_class(
-        "schemas.ForwardRefResult"
-    )
+    schema_cls = ModuleSandbox(search_paths=[tmp_path]).import_class("schemas.ForwardRefResult")
     instance = schema_cls.model_validate({"kind": "A", "title": "ok"})
 
     assert instance.model_dump() == {"kind": "A", "title": "ok"}

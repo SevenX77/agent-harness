@@ -10,6 +10,7 @@ The sidecar helper is a thin wrapper around ``StorageManager.save_artifact``
 * A raising ``storage_manager`` is swallowed and returns None (the
   harness must never crash the run because a debug sidecar failed).
 """
+
 from __future__ import annotations
 
 import json

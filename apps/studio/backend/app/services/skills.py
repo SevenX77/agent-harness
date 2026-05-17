@@ -829,7 +829,7 @@ def _serializer_fatal_from_engine_error(exc: Exception, elapsed_ms: float) -> Ca
 def _line_diff_count(before: str, after: str) -> int:
     before_lines = before.splitlines()
     after_lines = after.splitlines()
-    return sum(1 for old, new in zip(before_lines, after_lines) if old != new) + abs(
+    return sum(1 for old, new in zip(before_lines, after_lines, strict=False) if old != new) + abs(
         len(after_lines) - len(before_lines)
     )
 

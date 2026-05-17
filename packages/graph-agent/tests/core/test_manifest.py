@@ -260,56 +260,71 @@ class TestLLMPhaseUserPromptTemplate:
     """``user_prompt_template`` is per-turn template — separate from ``prompt``."""
 
     def test_llm_phase_user_prompt_template_accepted(self):
-        m = _SKILL_ADAPTER.validate_python({
-            **_base_graph_dict(),
-            "phases": [{
-                "mode": "llm",
-                "name": "segment",
-                "prompt": "You are a segmenter.",
-                "user_prompt_template": "Segment: {chapter_content}",
-            }],
-        })
+        m = _SKILL_ADAPTER.validate_python(
+            {
+                **_base_graph_dict(),
+                "phases": [
+                    {
+                        "mode": "llm",
+                        "name": "segment",
+                        "prompt": "You are a segmenter.",
+                        "user_prompt_template": "Segment: {chapter_content}",
+                    }
+                ],
+            }
+        )
         assert m.phases[0].user_prompt_template == "Segment: {chapter_content}"
 
     def test_logic_phase_cannot_have_user_prompt_template(self):
         data = _base_graph_dict()
-        data["phases"] = [{
-            "mode": "logic",
-            "name": "bad",
-            "execute_steps": ["x.y"],
-            "user_prompt_template": "Nope: {x}",
-        }]
+        data["phases"] = [
+            {
+                "mode": "logic",
+                "name": "bad",
+                "execute_steps": ["x.y"],
+                "user_prompt_template": "Nope: {x}",
+            }
+        ]
         with pytest.raises(ValidationError) as exc:
             _SKILL_ADAPTER.validate_python(data)
         assert "user_prompt_template" in str(exc.value)
+
 
 class TestPhaseModeDiscriminator:
     """Each ``mode:`` value picks exactly one phase class."""
 
     def test_llm_mode_yields_llm_phase(self):
-        m = _SKILL_ADAPTER.validate_python({
-            **_base_graph_dict(),
-            "phases": [{
-                "mode": "llm",
-                "name": "plan",
-                "prompt": "You are a planner.",
-                "agent_tools": ["read_file", "write_file"],
-                "max_iterations": 5,
-            }],
-        })
+        m = _SKILL_ADAPTER.validate_python(
+            {
+                **_base_graph_dict(),
+                "phases": [
+                    {
+                        "mode": "llm",
+                        "name": "plan",
+                        "prompt": "You are a planner.",
+                        "agent_tools": ["read_file", "write_file"],
+                        "max_iterations": 5,
+                    }
+                ],
+            }
+        )
         phase = m.phases[0]
         assert isinstance(phase, LLMPhase)
         assert phase.max_iterations == 5
 
     def test_logic_mode_yields_logic_phase(self):
-        m = _SKILL_ADAPTER.validate_python({
-            **_base_graph_dict(),
-            "phases": [{
-                "mode": "logic",
-                "name": "setup",
-                "execute_steps": ["script.segmenter.prepare_chapter"],
-            }],
-        })
+        m = _SKILL_ADAPTER.validate_python(
+            {
+                **_base_graph_dict(),
+                "phases": [
+                    {
+                        "mode": "logic",
+                        "name": "setup",
+                        "execute_steps": ["script.segmenter.prepare_chapter"],
+                    }
+                ],
+            }
+        )
         phase = m.phases[0]
         assert isinstance(phase, LogicPhase)
         assert phase.execute_steps == ["script.segmenter.prepare_chapter"]
@@ -339,24 +354,28 @@ class TestPhaseEngineExclusivity:
 
     def test_logic_phase_cannot_have_prompt(self):
         data = _base_graph_dict()
-        data["phases"] = [{
-            "mode": "logic",
-            "name": "bad",
-            "execute_steps": ["x.y.z"],
-            "prompt": "You are...",
-        }]
+        data["phases"] = [
+            {
+                "mode": "logic",
+                "name": "bad",
+                "execute_steps": ["x.y.z"],
+                "prompt": "You are...",
+            }
+        ]
         with pytest.raises(ValidationError) as exc:
             _SKILL_ADAPTER.validate_python(data)
         assert "prompt" in str(exc.value)
 
     def test_logic_phase_agent_tools_replaces_removed_sub_skills_contract(self):
         data = _base_graph_dict()
-        data["phases"] = [{
-            "mode": "logic",
-            "name": "bad",
-            "execute_steps": ["x.y.z"],
-            "agent_tools": ["t1"],
-        }]
+        data["phases"] = [
+            {
+                "mode": "logic",
+                "name": "bad",
+                "execute_steps": ["x.y.z"],
+                "agent_tools": ["t1"],
+            }
+        ]
         with pytest.raises(ValidationError) as exc:
             _SKILL_ADAPTER.validate_python(data)
         assert "agent_tools" in str(exc.value)
@@ -367,12 +386,14 @@ class TestPhaseEngineExclusivity:
         wired it. The logic-phase determinism guarantee is now
         demonstrated via ``agent_tools`` (also forbidden on logic)."""
         data = _base_graph_dict()
-        data["phases"] = [{
-            "mode": "logic",
-            "name": "bad",
-            "execute_steps": ["x.y.z"],
-            "agent_tools": ["pkg.f"],
-        }]
+        data["phases"] = [
+            {
+                "mode": "logic",
+                "name": "bad",
+                "execute_steps": ["x.y.z"],
+                "agent_tools": ["pkg.f"],
+            }
+        ]
         with pytest.raises(ValidationError) as exc:
             _SKILL_ADAPTER.validate_python(data)
         assert "agent_tools" in str(exc.value)
@@ -386,12 +407,14 @@ class TestPhaseEngineExclusivity:
 
     def test_llm_phase_cannot_have_execute_steps(self):
         data = _base_graph_dict()
-        data["phases"] = [{
-            "mode": "llm",
-            "name": "bad",
-            "prompt": "p",
-            "execute_steps": ["x.y"],
-        }]
+        data["phases"] = [
+            {
+                "mode": "llm",
+                "name": "bad",
+                "prompt": "p",
+                "execute_steps": ["x.y"],
+            }
+        ]
         with pytest.raises(ValidationError) as exc:
             _SKILL_ADAPTER.validate_python(data)
         assert "execute_steps" in str(exc.value)
@@ -400,12 +423,14 @@ class TestPhaseEngineExclusivity:
         """Regression guard: 1.x ``subgraph:`` field must not slip back in
         on LLMPhase via ``extra='forbid'``."""
         data = _base_graph_dict()
-        data["phases"] = [{
-            "mode": "llm",
-            "name": "bad",
-            "prompt": "p",
-            "subgraph": "./x",
-        }]
+        data["phases"] = [
+            {
+                "mode": "llm",
+                "name": "bad",
+                "prompt": "p",
+                "subgraph": "./x",
+            }
+        ]
         with pytest.raises(ValidationError) as exc:
             _SKILL_ADAPTER.validate_python(data)
         assert "subgraph" in str(exc.value)
@@ -429,38 +454,50 @@ class TestDelegationMechanisms:
         injection into Phase.tools), the schema rejects the field
         outright so authors can't write code that silently no-ops."""
         with pytest.raises(ValidationError) as exc:
-            _SKILL_ADAPTER.validate_python({
-                **_base_graph_dict(),
-                "phases": [{
-                    "mode": "llm",
-                    "name": "dispatcher",
-                    "prompt": "Route to the right tool.",
-                    "sub_skills": ["producer"],
-                }],
-            })
+            _SKILL_ADAPTER.validate_python(
+                {
+                    **_base_graph_dict(),
+                    "phases": [
+                        {
+                            "mode": "llm",
+                            "name": "dispatcher",
+                            "prompt": "Route to the right tool.",
+                            "sub_skills": ["producer"],
+                        }
+                    ],
+                }
+            )
         assert "sub_skills" in str(exc.value)
 
     def test_removed_subagent_enabled_rejected(self):
-        m = _SKILL_ADAPTER.validate_python({
-            **_base_graph_dict(),
-            "phases": [{
-                "mode": "llm",
-                "name": "x",
-                "prompt": "p",
-            }],
-        })
+        m = _SKILL_ADAPTER.validate_python(
+            {
+                **_base_graph_dict(),
+                "phases": [
+                    {
+                        "mode": "llm",
+                        "name": "x",
+                        "prompt": "p",
+                    }
+                ],
+            }
+        )
         assert not hasattr(m.phases[0], "subagent_enabled")
 
         with pytest.raises(ValidationError) as exc:
-            _SKILL_ADAPTER.validate_python({
-                **_base_graph_dict(),
-                "phases": [{
-                    "mode": "llm",
-                    "name": "x",
-                    "prompt": "p",
-                    "subagent_enabled": True,
-                }],
-            })
+            _SKILL_ADAPTER.validate_python(
+                {
+                    **_base_graph_dict(),
+                    "phases": [
+                        {
+                            "mode": "llm",
+                            "name": "x",
+                            "prompt": "p",
+                            "subagent_enabled": True,
+                        }
+                    ],
+                }
+            )
         assert "subagent_enabled" in str(exc.value)
 
 
@@ -473,27 +510,35 @@ class TestAdoptedPersonaInjection:
     """LLM phases and agent skills can inject a persona."""
 
     def test_llm_phase_adopted_persona(self):
-        m = _SKILL_ADAPTER.validate_python({
-            **_base_graph_dict(),
-            "phases": [{
-                "mode": "llm",
-                "name": "review",
-                "prompt": "Review this plan.",
-                "adopted_persona": "producer",
-            }],
-        })
+        m = _SKILL_ADAPTER.validate_python(
+            {
+                **_base_graph_dict(),
+                "phases": [
+                    {
+                        "mode": "llm",
+                        "name": "review",
+                        "prompt": "Review this plan.",
+                        "adopted_persona": "producer",
+                    }
+                ],
+            }
+        )
         assert m.phases[0].adopted_persona == "producer"
 
     def test_llm_phase_adopted_persona_relative_path(self):
-        m = _SKILL_ADAPTER.validate_python({
-            **_base_graph_dict(),
-            "phases": [{
-                "mode": "llm",
-                "name": "review",
-                "prompt": "Review this plan.",
-                "adopted_persona": "./subskills/villain_designer",
-            }],
-        })
+        m = _SKILL_ADAPTER.validate_python(
+            {
+                **_base_graph_dict(),
+                "phases": [
+                    {
+                        "mode": "llm",
+                        "name": "review",
+                        "prompt": "Review this plan.",
+                        "adopted_persona": "./subskills/villain_designer",
+                    }
+                ],
+            }
+        )
         assert m.phases[0].adopted_persona == "./subskills/villain_designer"
 
     def test_agent_skill_adopted_persona(self):
@@ -505,15 +550,18 @@ class TestAdoptedPersonaInjection:
 
     def test_logic_phase_cannot_have_adopted_persona(self):
         data = _base_graph_dict()
-        data["phases"] = [{
-            "mode": "logic",
-            "name": "bad",
-            "execute_steps": ["x.y"],
-            "adopted_persona": "producer",
-        }]
+        data["phases"] = [
+            {
+                "mode": "logic",
+                "name": "bad",
+                "execute_steps": ["x.y"],
+                "adopted_persona": "producer",
+            }
+        ]
         with pytest.raises(ValidationError) as exc:
             _SKILL_ADAPTER.validate_python(data)
         assert "adopted_persona" in str(exc.value)
+
 
 # =============================================================================
 # extra='forbid' at every level
@@ -622,8 +670,7 @@ class TestContextBridgeSchemaEngineIntegration:
         """
         declared = set(ContextBridge.model_fields.keys())
         assert declared == {"inputs", "outputs"}, (
-            f"ContextBridge surface drifted; expected {{inputs, outputs}}, "
-            f"got {declared!r}."
+            f"ContextBridge surface drifted; expected {{inputs, outputs}}, got {declared!r}."
         )
 
     def test_to_business_data_schema_rejects_underscore_input_keys(self):
@@ -649,12 +696,14 @@ class TestContextBridgeSchemaEngineIntegration:
     def test_typo_in_phase_field_name(self):
         """``max_iteration`` without trailing ``s`` used to silently drop."""
         data = _base_graph_dict()
-        data["phases"] = [{
-            "mode": "llm",
-            "name": "p",
-            "prompt": "p",
-            "max_iteration": 3,  # missing "s"
-        }]
+        data["phases"] = [
+            {
+                "mode": "llm",
+                "name": "p",
+                "prompt": "p",
+                "max_iteration": 3,  # missing "s"
+            }
+        ]
         with pytest.raises(ValidationError) as exc:
             _SKILL_ADAPTER.validate_python(data)
         assert "max_iteration" in str(exc.value)
@@ -667,23 +716,27 @@ class TestContextBridgeSchemaEngineIntegration:
 
 class TestIoFieldValidation:
     def test_target_artifact_accepted(self):
-        m = _SKILL_ADAPTER.validate_python({
-            **_base_graph_dict(),
-            "io": {
-                "inputs": [{"name": "x", "source": "runtime"}],
-                "outputs": [{"name": "y", "target": "artifact"}],
-            },
-        })
+        m = _SKILL_ADAPTER.validate_python(
+            {
+                **_base_graph_dict(),
+                "io": {
+                    "inputs": [{"name": "x", "source": "runtime"}],
+                    "outputs": [{"name": "y", "target": "artifact"}],
+                },
+            }
+        )
         assert m.io.outputs[0].target == "artifact"
 
     def test_target_file_accepted(self):
-        m = _SKILL_ADAPTER.validate_python({
-            **_base_graph_dict(),
-            "io": {
-                "inputs": [{"name": "x", "source": "runtime"}],
-                "outputs": [{"name": "y", "target": "file", "path": "out.md"}],
-            },
-        })
+        m = _SKILL_ADAPTER.validate_python(
+            {
+                **_base_graph_dict(),
+                "io": {
+                    "inputs": [{"name": "x", "source": "runtime"}],
+                    "outputs": [{"name": "y", "target": "file", "path": "out.md"}],
+                },
+            }
+        )
         assert m.io.outputs[0].target == "file"
 
     def test_target_unknown_rejected(self):
@@ -701,15 +754,19 @@ class TestIoFieldValidation:
 class TestLLMPhaseSteps:
     def test_llm_phase_accepts_steps_as_str_list(self):
         """LLMPhase.steps accepts list[str], aligned with AgentProfile.steps."""
-        manifest = _SKILL_ADAPTER.validate_python({
-            **_base_graph_dict(),
-            "phases": [{
-                "mode": "llm",
-                "name": "planning_phase",
-                "prompt": "p",
-                "steps": ["read context", "call tools", "return answer"],
-            }],
-        })
+        manifest = _SKILL_ADAPTER.validate_python(
+            {
+                **_base_graph_dict(),
+                "phases": [
+                    {
+                        "mode": "llm",
+                        "name": "planning_phase",
+                        "prompt": "p",
+                        "steps": ["read context", "call tools", "return answer"],
+                    }
+                ],
+            }
+        )
 
         phase = manifest.phases[0]
         assert isinstance(phase, LLMPhase)
@@ -717,26 +774,32 @@ class TestLLMPhaseSteps:
 
     def test_llm_phase_steps_default_empty_list(self):
         """Omitting steps defaults to [], preserving existing manifests."""
-        phase = LLMPhase.model_validate({
-            "mode": "llm",
-            "name": "p",
-            "prompt": "p",
-        })
+        phase = LLMPhase.model_validate(
+            {
+                "mode": "llm",
+                "name": "p",
+                "prompt": "p",
+            }
+        )
 
         assert phase.steps == []
 
     def test_llm_phase_steps_rejects_dict_object(self):
         """Old Step-object shaped entries are rejected; schema is list[str]."""
         with pytest.raises(ValidationError) as exc:
-            _SKILL_ADAPTER.validate_python({
-                **_base_graph_dict(),
-                "phases": [{
-                    "mode": "llm",
-                    "name": "planning_phase",
-                    "prompt": "p",
-                    "steps": [{"name": "maybe_run", "tools": ["t1"]}],
-                }],
-            })
+            _SKILL_ADAPTER.validate_python(
+                {
+                    **_base_graph_dict(),
+                    "phases": [
+                        {
+                            "mode": "llm",
+                            "name": "planning_phase",
+                            "prompt": "p",
+                            "steps": [{"name": "maybe_run", "tools": ["t1"]}],
+                        }
+                    ],
+                }
+            )
 
         assert "steps" in str(exc.value)
 
@@ -764,26 +827,32 @@ class TestLLMPhaseExtendedFields:
         assert phase.context_access == []
 
     def test_context_access_only_accepts_literal_values(self):
-        phase = LLMPhase.model_validate({
-            "mode": "llm",
-            "name": "p",
-            "context_access": ["artifact", "working_memory"],
-        })
+        phase = LLMPhase.model_validate(
+            {
+                "mode": "llm",
+                "name": "p",
+                "context_access": ["artifact", "working_memory"],
+            }
+        )
         assert phase.context_access == ["artifact", "working_memory"]
 
         with pytest.raises(ValidationError):
-            LLMPhase.model_validate({
-                "mode": "llm",
-                "name": "p",
-                "context_access": ["database"],
-            })
+            LLMPhase.model_validate(
+                {
+                    "mode": "llm",
+                    "name": "p",
+                    "context_access": ["database"],
+                }
+            )
 
     def test_llm_role_optional_string(self):
-        phase = LLMPhase.model_validate({
-            "mode": "llm",
-            "name": "p",
-            "llm_role": "architect",
-        })
+        phase = LLMPhase.model_validate(
+            {
+                "mode": "llm",
+                "name": "p",
+                "llm_role": "architect",
+            }
+        )
         assert phase.llm_role == "architect"
 
 
@@ -805,19 +874,23 @@ class TestAgentProfileExtendedFields:
         assert profile.context_access == []
 
     def test_context_access_only_accepts_literal_values(self):
-        profile = AgentProfile.model_validate({
-            "role": "r",
-            "goal": "g",
-            "context_access": ["artifact", "working_memory"],
-        })
+        profile = AgentProfile.model_validate(
+            {
+                "role": "r",
+                "goal": "g",
+                "context_access": ["artifact", "working_memory"],
+            }
+        )
         assert profile.context_access == ["artifact", "working_memory"]
 
         with pytest.raises(ValidationError):
-            AgentProfile.model_validate({
-                "role": "r",
-                "goal": "g",
-                "context_access": ["database"],
-            })
+            AgentProfile.model_validate(
+                {
+                    "role": "r",
+                    "goal": "g",
+                    "context_access": ["database"],
+                }
+            )
 
     def test_llm_role_optional_string(self):
         profile = AgentProfile(role="r", goal="g", llm_role="architect")
@@ -835,11 +908,13 @@ class TestTierRemoval:
             )
 
     def test_llm_role_alone_works_normally(self):
-        phase = LLMPhase.model_validate({
-            "mode": "llm",
-            "name": "p",
-            "llm_role": "architect",
-        })
+        phase = LLMPhase.model_validate(
+            {
+                "mode": "llm",
+                "name": "p",
+                "llm_role": "architect",
+            }
+        )
         assert phase.llm_role == "architect"
 
     def test_logic_phase_rejects_tier_field(self):
@@ -930,8 +1005,7 @@ class TestRetryTargetReferenceValidation:
             _SKILL_ADAPTER.validate_python(data)
         msg = str(exc.value)
         assert "retry_target" in msg, (
-            "retry_target validator must mention the field by name; got "
-            f"{msg!r}"
+            f"retry_target validator must mention the field by name; got {msg!r}"
         )
         assert "nonexistent_phase" in msg, (
             "Error message must include the offending value so the author "
@@ -1023,9 +1097,7 @@ class TestCountFieldsLowerBound:
     def test_zero_max_retries_accepted(self):
         """``max_retries=0`` is meaningful: the phase runs exactly once
         with no retries. Distinct from None (which means default)."""
-        phase = LLMPhase.model_validate(
-            {"mode": "llm", "name": "p", "max_retries": 0}
-        )
+        phase = LLMPhase.model_validate({"mode": "llm", "name": "p", "max_retries": 0})
         assert phase.max_retries == 0
 
     def test_negative_max_nudges_rejected(self):

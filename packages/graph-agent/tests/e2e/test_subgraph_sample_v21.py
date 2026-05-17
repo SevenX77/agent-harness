@@ -48,7 +48,7 @@ class FakeStoryDeconstructionChatModel:
             call_id = "event-settings-finish"
         elif "entity_registry" in text:
             markdown = (
-                "## entity_registry\n\n{\"CHR_001\": \"陈野\"}\n\n"
+                '## entity_registry\n\n{"CHR_001": "陈野"}\n\n'
                 "## character_changes\n\n陈野: enters batch"
             )
             call_id = "batch-entity-finish"
@@ -76,7 +76,9 @@ class FakeStoryDeconstructionChatModel:
             markdown = (
                 "## retroactive_corrections\n\n[]\n\n"
                 "## corrected_event_stream\n\n"
-                + json.dumps([{"event_id": "EVT-001", "summary": "陈野进入废墟"}], ensure_ascii=False)
+                + json.dumps(
+                    [{"event_id": "EVT-001", "summary": "陈野进入废墟"}], ensure_ascii=False
+                )
             )
             call_id = "global-retroactive-finish"
         else:

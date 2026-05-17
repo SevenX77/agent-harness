@@ -49,7 +49,9 @@ def test_load_workflow_from_md_v21_root_ok(tmp_path: Path) -> None:
 
 
 def test_load_workflow_from_md_legacy_schema_2_skill_md_crash(tmp_path: Path) -> None:
-    (tmp_path / "SKILL.md").write_text('---\nschema_version: "2.0"\nname: old\n---\n', encoding="utf-8")
+    (tmp_path / "SKILL.md").write_text(
+        '---\nschema_version: "2.0"\nname: old\n---\n', encoding="utf-8"
+    )
 
     with pytest.raises(SkillLoadError, match=r"root SKILL.md is not supported"):
         load_workflow_from_md(tmp_path)

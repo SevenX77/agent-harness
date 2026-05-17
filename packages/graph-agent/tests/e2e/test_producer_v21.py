@@ -62,12 +62,16 @@ class FakeProducerChatModel:
                 "critic_metadata": {"critic_invocations": self.critic_invocations},
             }
         }
-        markdown = "## producer_review\n\n```json\n" + json.dumps(
-            review["producer_review"], ensure_ascii=False
-        ) + "\n```"
+        markdown = (
+            "## producer_review\n\n```json\n"
+            + json.dumps(review["producer_review"], ensure_ascii=False)
+            + "\n```"
+        )
         return AIMessage(
             content="",
-            tool_calls=[{"name": "finish_task", "args": {"markdown": markdown}, "id": "producer-finish"}],
+            tool_calls=[
+                {"name": "finish_task", "args": {"markdown": markdown}, "id": "producer-finish"}
+            ],
         )
 
 

@@ -133,7 +133,9 @@ def test_generate_success_first_provider_returns_chat_result() -> None:
 
     with (
         patch.object(LLMClientManager, "_probe_provider", return_value=True) as probe,
-        patch.object(LLMClientManager, "_dispatch_provider_call", return_value=_response("hello")) as dispatch,
+        patch.object(
+            LLMClientManager, "_dispatch_provider_call", return_value=_response("hello")
+        ) as dispatch,
     ):
         result = model._generate([HumanMessage(content="hi")])
 
@@ -155,7 +157,9 @@ def test_generate_skip_marked_down_provider_uses_next_candidate() -> None:
 
     with (
         patch.object(LLMClientManager, "_probe_provider", return_value=True) as probe,
-        patch.object(LLMClientManager, "_dispatch_provider_call", return_value=_response("second")) as dispatch,
+        patch.object(
+            LLMClientManager, "_dispatch_provider_call", return_value=_response("second")
+        ) as dispatch,
     ):
         result = model._generate([HumanMessage(content="hi")])
 
@@ -257,7 +261,9 @@ def test_generate_non_failover_exception_propagates_without_mark_down() -> None:
 
     with (
         patch.object(LLMClientManager, "_probe_provider", return_value=True),
-        patch.object(LLMClientManager, "_dispatch_provider_call", side_effect=ValueError("bad test")),
+        patch.object(
+            LLMClientManager, "_dispatch_provider_call", side_effect=ValueError("bad test")
+        ),
         pytest.raises(ValueError, match="bad test"),
     ):
         model._generate([HumanMessage(content="hi")])
@@ -303,7 +309,9 @@ def test_generate_passes_runtime_kwargs_and_reasoning_flag() -> None:
 
     with (
         patch.object(LLMClientManager, "_probe_provider", return_value=True),
-        patch.object(LLMClientManager, "_dispatch_provider_call", return_value=_response("ok")) as dispatch,
+        patch.object(
+            LLMClientManager, "_dispatch_provider_call", return_value=_response("ok")
+        ) as dispatch,
     ):
         model._generate(
             [HumanMessage(content="hi")],
@@ -325,7 +333,9 @@ def test_generate_invalid_runtime_kwargs_fall_back_to_defaults() -> None:
 
     with (
         patch.object(LLMClientManager, "_probe_provider", return_value=True),
-        patch.object(LLMClientManager, "_dispatch_provider_call", return_value=_response("ok")) as dispatch,
+        patch.object(
+            LLMClientManager, "_dispatch_provider_call", return_value=_response("ok")
+        ) as dispatch,
     ):
         model._generate(
             [HumanMessage(content="hi")],
@@ -345,7 +355,9 @@ def test_generate_numeric_temperature_kwarg_is_forwarded() -> None:
 
     with (
         patch.object(LLMClientManager, "_probe_provider", return_value=True),
-        patch.object(LLMClientManager, "_dispatch_provider_call", return_value=_response("ok")) as dispatch,
+        patch.object(
+            LLMClientManager, "_dispatch_provider_call", return_value=_response("ok")
+        ) as dispatch,
     ):
         model._generate([HumanMessage(content="hi")], temperature=1)
 
@@ -485,7 +497,9 @@ def test_bind_tools_invoke_with_tool_calls() -> None:
         patch.object(
             LLMClientManager,
             "_dispatch_provider_call",
-            return_value=_response("", finish_reason="tool_calls", extra={"tool_calls": tool_calls}),
+            return_value=_response(
+                "", finish_reason="tool_calls", extra={"tool_calls": tool_calls}
+            ),
         ),
     ):
         message = model.bind_tools([{"name": "finish_task"}]).invoke("finish")
@@ -501,7 +515,9 @@ def test_bind_tools_forwards_tool_payload_to_dispatch() -> None:
 
     with (
         patch.object(LLMClientManager, "_probe_provider", return_value=True),
-        patch.object(LLMClientManager, "_dispatch_provider_call", return_value=_response("ok")) as dispatch,
+        patch.object(
+            LLMClientManager, "_dispatch_provider_call", return_value=_response("ok")
+        ) as dispatch,
     ):
         model.bind_tools([{"name": "finish_task"}], tool_choice="finish_task").invoke("finish")
 
@@ -567,7 +583,9 @@ def test_generate_converts_messages_before_dispatch() -> None:
 
     with (
         patch.object(LLMClientManager, "_probe_provider", return_value=True),
-        patch.object(LLMClientManager, "_dispatch_provider_call", return_value=_response("ok")) as dispatch,
+        patch.object(
+            LLMClientManager, "_dispatch_provider_call", return_value=_response("ok")
+        ) as dispatch,
     ):
         model._generate([SystemMessage(content="rules"), HumanMessage(content=["hello"])])
 

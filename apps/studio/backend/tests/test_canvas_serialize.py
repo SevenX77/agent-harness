@@ -4,10 +4,9 @@ import difflib
 import hashlib
 import statistics
 import time
-from typing import Any
 from pathlib import Path
+from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 
 
@@ -94,7 +93,9 @@ def test_canvas_graph_serialize_returns_markdown_and_stays_fast(
     response = None
     for _ in range(5):
         started = time.perf_counter()
-        response = client.post("/api/skills/text-segmentation/graph/serialize", json=_phase_payload())
+        response = client.post(
+            "/api/skills/text-segmentation/graph/serialize", json=_phase_payload()
+        )
         elapsed_ms.append((time.perf_counter() - started) * 1000)
 
     assert response is not None
@@ -202,9 +203,10 @@ def test_canvas_graph_serialize_accepts_fan_in_depends_on(
     assert response.status_code == 200
     body = response.json()
     assert body["phase_count"] == 4
-    assert '<phase id="final" src="phases/final" depends_on="setup,branch-a,branch-b" />' in body[
-        "markdown_content"
-    ]
+    assert (
+        '<phase id="final" src="phases/final" depends_on="setup,branch-a,branch-b" />'
+        in body["markdown_content"]
+    )
 
 
 def test_canvas_graph_serialize_openapi_schema_is_generated(client: TestClient) -> None:
@@ -360,15 +362,11 @@ def test_canvas_graph_serialize_helper_does_not_write_graph_md(
     assert graph_path.read_text(encoding="utf-8") == original
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="T-apps-1 multi-file PUT is not present on this branch; Canvas must use it once merged.",
-)
 def test_canvas_save_flow_uses_t_apps_multi_file_put_contract(
     client: TestClient,
     studio_roots: tuple[Path, Path],
 ) -> None:
-    skills_dir, _workspaces_dir = studio_roots
+    skills_dir, workspaces_dir = studio_roots
     skill_dir = skills_dir / "text-segmentation"
     _add_branch_and_final_phase(skill_dir)
 
@@ -387,14 +385,22 @@ def test_canvas_save_flow_uses_t_apps_multi_file_put_contract(
             ]
         },
     )
-    markdown = serialize_response.json()["markdown_content"]
+    serialized = serialize_response.json()
+    markdown = serialized["markdown_content"]
+    detail_before = client.get("/api/skills/text-segmentation").json()
+    files = detail_before["files"]
+    files["GRAPH.md"] = markdown
 
     put_response = client.put(
-        "/api/skills/text-segmentation/files",
-        json={"files": {"GRAPH.md": markdown}},
+        "/api/skills/text-segmentation",
+        json={
+            "files": files,
+            "expected_hash": serialized["current_hash"],
+        },
     )
 
     assert put_response.status_code == 200
-    assert (skill_dir / "GRAPH.md").read_text(encoding="utf-8") == markdown
+    workspace_graph = workspaces_dir / "default" / "skills" / "text-segmentation" / "GRAPH.md"
+    assert workspace_graph.read_text(encoding="utf-8") == markdown
     detail = client.get("/api/skills/text-segmentation").json()
     assert detail["graph_topology"][-1]["depends_on"] == ["setup", "branch"]

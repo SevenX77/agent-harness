@@ -5,18 +5,18 @@ import shutil
 from pathlib import Path
 
 import pytest
-
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.graph_serializer import serialize_graph
 from graph_agent.core.loader import SkillLoader
 from graph_agent.core.manifest import GraphManifest, GraphPhaseRef
 
-
 REPO_ROOT = Path(__file__).resolve().parents[4]
 CANVAS_SERIALIZER_FIXTURES = (
     REPO_ROOT / "packages" / "graph-agent" / "tests" / "fixtures" / "canvas_serializer"
 )
-FAKE_CANVAS_FANOUT_ROOT = REPO_ROOT / "packages" / "graph-agent" / "tests" / "fixtures" / "fake_canvas_fanout"
+FAKE_CANVAS_FANOUT_ROOT = (
+    REPO_ROOT / "packages" / "graph-agent" / "tests" / "fixtures" / "fake_canvas_fanout"
+)
 REAL_V21_SKILL_ROOTS = tuple(
     path.parent
     for path in sorted((REPO_ROOT / "skills").glob("*/GRAPH.md"))
@@ -30,12 +30,16 @@ CANVAS_DOD_MATRIX_ROOTS = (
 
 def _skill_graph(skill: str) -> tuple[GraphManifest, str]:
     root = REPO_ROOT / "skills" / skill
-    return compile_skill(root, cache=False).manifest, (root / "GRAPH.md").read_text(encoding="utf-8")
+    return compile_skill(root, cache=False).manifest, (root / "GRAPH.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def _fixture_graph(name: str) -> tuple[GraphManifest, str]:
     root = CANVAS_SERIALIZER_FIXTURES / name
-    return compile_skill(root, cache=False).manifest, (root / "GRAPH.md").read_text(encoding="utf-8")
+    return compile_skill(root, cache=False).manifest, (root / "GRAPH.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def _copy_skill_with_graph(root: Path, graph_text: str, tmp_path: Path) -> Path:
@@ -52,7 +56,7 @@ def _compile_graph_for_serializer(root: Path) -> GraphManifest:
 def _line_diff_count(before: str, after: str) -> int:
     before_lines = before.splitlines()
     after_lines = after.splitlines()
-    return sum(1 for old, new in zip(before_lines, after_lines) if old != new) + abs(
+    return sum(1 for old, new in zip(before_lines, after_lines, strict=False) if old != new) + abs(
         len(after_lines) - len(before_lines)
     )
 
@@ -88,7 +92,9 @@ def _build_manifest_with_phases(phases: list[tuple[str, list[str]]]) -> GraphMan
 @pytest.mark.parametrize(
     "root",
     CANVAS_DOD_MATRIX_ROOTS,
-    ids=lambda root: "skill:" + root.name if root.parent.name == "skills" else "fixture:" + root.name,
+    ids=lambda root: (
+        "skill:" + root.name if root.parent.name == "skills" else "fixture:" + root.name
+    ),
 )
 class TestCanvasV2SerializerDoDMatrix:
     def test_parse_serialize_parse_equivalence(self, root: Path, tmp_path: Path) -> None:
@@ -148,7 +154,9 @@ def test_depends_on_change_only_rewrites_target_phase_line() -> None:
 
     assert _line_diff_count(original, serialized) == 1
     assert _diff_changed_lines(original, serialized) == (1, 1)
-    assert '<phase id="branch_b" src="phases/branch_b" depends_on="prepare,branch_a" />' in serialized
+    assert (
+        '<phase id="branch_b" src="phases/branch_b" depends_on="prepare,branch_a" />' in serialized
+    )
     assert 'schema_version: "2.1"' in serialized
     assert '<input src="io/inputs.json" />' in serialized
     assert '<output src="io/outputs.json" />' in serialized
@@ -231,7 +239,9 @@ def test_deleted_phase_removes_only_that_phase_line() -> None:
     assert serialized.count("\n") == original.count("\n") - 1
     assert '<phase id="branch_b" src="phases/branch_b" depends_on="prepare" />' not in serialized
     assert '<phase id="branch_a" src="phases/branch_a" depends_on="prepare" />' in serialized
-    assert '<phase id="assemble" src="phases/assemble" depends_on="branch_a branch_b" />' in serialized
+    assert (
+        '<phase id="assemble" src="phases/assemble" depends_on="branch_a branch_b" />' in serialized
+    )
 
 
 def test_fanout_deleted_phase_removes_inserted_downward_attachment() -> None:
@@ -252,7 +262,9 @@ def test_fanout_deleted_phase_removes_inserted_downward_attachment() -> None:
     assert "<!-- branch_a canvas note -->" not in serialized
     assert "Branch A operator note." not in serialized
     assert '<phase id="branch_b" src="phases/branch_b" depends_on="prepare" />' in serialized
-    assert '<phase id="assemble" src="phases/assemble" depends_on="branch_a branch_b" />' in serialized
+    assert (
+        '<phase id="assemble" src="phases/assemble" depends_on="branch_a branch_b" />' in serialized
+    )
 
 
 def test_deleted_phase_removes_its_downward_attachment_only() -> None:

@@ -60,7 +60,12 @@ def test_skills_list_and_detail_use_real_skill_files(client: TestClient) -> None
     skills_response = client.get("/api/skills")
     assert skills_response.status_code == 200
     skill_ids = {item["id"] for item in skills_response.json()}
-    assert {"text-segmentation", "event-extraction", "batch-analysis", "global-synthesis"} <= skill_ids
+    assert {
+        "text-segmentation",
+        "event-extraction",
+        "batch-analysis",
+        "global-synthesis",
+    } <= skill_ids
 
     detail_response = client.get("/api/skills/text-segmentation")
     assert detail_response.status_code == 200
@@ -133,7 +138,13 @@ def test_update_skill_accepts_files_payload(
     body = response.json()
     assert body["files"]["phases/setup/LOGIC.md"] == files["phases/setup/LOGIC.md"]
     assert "updated setup" in (
-        workspaces_dir / "default" / "skills" / "text-segmentation" / "phases" / "setup" / "LOGIC.md"
+        workspaces_dir
+        / "default"
+        / "skills"
+        / "text-segmentation"
+        / "phases"
+        / "setup"
+        / "LOGIC.md"
     ).read_text(encoding="utf-8")
 
 

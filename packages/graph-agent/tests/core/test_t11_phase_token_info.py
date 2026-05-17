@@ -5,7 +5,6 @@ from pathlib import Path
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.loader import get_phase_token_info
 
-
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
@@ -22,7 +21,9 @@ def test_hello_world_phase_token_info_has_raw_line_and_line_numbers() -> None:
 
 
 def test_fake_canvas_fanout_phase_tokens_expose_attribute_offsets() -> None:
-    skill_root = REPO_ROOT / "packages" / "graph-agent" / "tests" / "fixtures" / "fake_canvas_fanout"
+    skill_root = (
+        REPO_ROOT / "packages" / "graph-agent" / "tests" / "fixtures" / "fake_canvas_fanout"
+    )
     graph_text = (skill_root / "GRAPH.md").read_text(encoding="utf-8")
     compiled = compile_skill(skill_root, cache=False)
 

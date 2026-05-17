@@ -30,9 +30,7 @@ class MemoryMockStrategy(BaseMockStrategy):
 
     def has_phase(self, phase_name: str) -> bool:
         return (
-            phase_name in self.golden
-            or phase_name in self.overrides
-            or phase_name in self.schemas
+            phase_name in self.golden or phase_name in self.overrides or phase_name in self.schemas
         )
 
     def has_golden_case(self, phase_name: str) -> bool:

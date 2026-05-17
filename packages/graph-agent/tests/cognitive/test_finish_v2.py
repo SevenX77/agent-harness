@@ -225,11 +225,7 @@ class TestFinishTaskWiringMVP2T5:
         """Happy path: real schema + valid markdown → schema_validation == 'passed'."""
         engine, schema = self._build_item_schema()
 
-        business_md = (
-            "## item-1\n"
-            "- title: First post\n"
-            "- count: 7\n"
-        )
+        business_md = "## item-1\n- title: First post\n- count: 7\n"
 
         ctx: dict[str, object] = {}
         result = finish_task(
@@ -254,10 +250,7 @@ class TestFinishTaskWiringMVP2T5:
         engine, schema = self._build_item_schema()
 
         # ``count`` is required but missing.
-        business_md = (
-            "## item-1\n"
-            "- title: First post\n"
-        )
+        business_md = "## item-1\n- title: First post\n"
 
         ctx: dict[str, object] = {}
         result = finish_task(
@@ -273,19 +266,14 @@ class TestFinishTaskWiringMVP2T5:
         # The error must reference the offending field by name —
         # otherwise downstream LLM retry feedback can't fix it.
         assert any("count" in err for err in errors), (
-            f"Expected an error mentioning the missing 'count' field; "
-            f"got {errors!r}."
+            f"Expected an error mentioning the missing 'count' field; got {errors!r}."
         )
 
     def test_real_schema_catches_type_mismatch(self) -> None:
         """Negative path: schema requires int, markdown supplies non-int → 'failed'."""
         engine, schema = self._build_item_schema()
 
-        business_md = (
-            "## item-1\n"
-            "- title: First post\n"
-            "- count: not-a-number\n"
-        )
+        business_md = "## item-1\n- title: First post\n- count: not-a-number\n"
 
         ctx: dict[str, object] = {}
         result = finish_task(
@@ -310,12 +298,7 @@ class TestFinishTaskWiringMVP2T5:
         engine, schema = self._build_item_schema()
 
         business_md = (
-            "## item-1\n"
-            "- title: alpha\n"
-            "- count: 1\n"
-            "## item-2\n"
-            "- title: beta\n"
-            "- count: 2\n"
+            "## item-1\n- title: alpha\n- count: 1\n## item-2\n- title: beta\n- count: 2\n"
         )
 
         ctx: dict[str, object] = {}

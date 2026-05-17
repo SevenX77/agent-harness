@@ -27,25 +27,19 @@ import { inferJsonSchemaFromText } from "@/lib/schema-infer"
 import { cn } from "@/lib/utils"
 import type { SkillGraphNodeData } from "@/components/GraphCanvas"
 import type { PanelKind } from "./Toolbar"
-
-export interface FileMeta {
-  path: string
-  language: string
-  content: string
-}
+import { useWorkspaceContext } from "./WorkspaceContext"
+import type { FileMeta } from "./file-types"
 
 interface PanelsProps {
   activePanel: PanelKind
   skillId: string | null
   skillDetail?: SkillDetail
   selectedNode: { id: string; data: SkillGraphNodeData } | null
-  onFileOpen: (file: FileMeta) => void
 }
 
 interface AssetsPanelProps {
   skillDetail?: SkillDetail
   selectedNode: { id: string; data: SkillGraphNodeData } | null
-  onFileOpen: (file: FileMeta) => void
 }
 
 interface InputPanelProps {
@@ -127,14 +121,47 @@ function FolderRow({
   )
 }
 
+function languageForPath(path: string): string {
+  if (path.endsWith(".json")) return "json"
+  if (path.endsWith(".py")) return "python"
+  return "markdown"
+}
+
+function fileFromDetail(skillDetail: SkillDetail | undefined, path: string): FileMeta {
+  return {
+    path,
+    language: languageForPath(path),
+    content: skillDetail?.files?.[path] ?? "",
+  }
+}
+
+function phaseIds(skillDetail?: SkillDetail): string[] {
+  const fromTopology = skillDetail?.graph_topology?.map((phase) => phase.id) ?? []
+  if (fromTopology.length > 0) return fromTopology
+  const phases = skillDetail?.manifest.schema_version === "2.1" ? skillDetail.manifest.phases : []
+  return phases.map((phase) => phase.id)
+}
+
+function actionFiles(skillDetail: SkillDetail | undefined, phaseId: string): FileMeta[] {
+  return Object.keys(skillDetail?.files ?? {})
+    .filter((path) => path.startsWith(`phases/${phaseId}/actions/`) && path.endsWith(".py"))
+    .sort()
+    .map((path) => fileFromDetail(skillDetail, path))
+}
+
 function manifestFiles(skillDetail?: SkillDetail, selectedNode?: { id: string; data: SkillGraphNodeData } | null): FileMeta[] {
   const manifest = skillDetail?.manifest
+  if (skillDetail?.files) {
+    return Object.keys(skillDetail.files)
+      .sort()
+      .map((path) => fileFromDetail(skillDetail, path))
+  }
   const files: FileMeta[] = [
     {
       path: "SKILL.md",
       language: "markdown",
       content: manifest
-        ? `# ${manifest.name}\n\n${manifest.description ?? "No description."}\n\nType: ${manifest.type}\n`
+        ? `# ${manifest.name}\n\n${manifest.description ?? "No description."}\n`
         : "# Skill\n\nLoading skill metadata...\n",
     },
     {
@@ -157,7 +184,13 @@ function manifestFiles(skillDetail?: SkillDetail, selectedNode?: { id: string; d
 
 function inputFiles(skillDetail?: SkillDetail): FileMeta[] {
   const manifest = skillDetail?.manifest
-  const io = manifest?.type === "graph" ? manifest.io : null
+  const io = manifest?.schema_version === "2.0" && manifest.type === "graph" ? manifest.io : null
+  if (skillDetail?.files) {
+    return [
+      fileFromDetail(skillDetail, "io/inputs.json"),
+      fileFromDetail(skillDetail, "io/outputs.json"),
+    ]
+  }
 
   return [
     {
@@ -173,8 +206,12 @@ function inputFiles(skillDetail?: SkillDetail): FileMeta[] {
   ]
 }
 
-export function AssetsPanel({ skillDetail, selectedNode, onFileOpen }: AssetsPanelProps) {
+export function AssetsPanel({ skillDetail, selectedNode }: AssetsPanelProps) {
+  const { onFileOpen } = useWorkspaceContext()
   const files = manifestFiles(skillDetail, selectedNode)
+  const phases = phaseIds(skillDetail)
+  const filesByPath = new Map(files.map((file) => [file.path, file]))
+  const openFile = (file: FileMeta) => onFileOpen(file)
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -183,11 +220,34 @@ export function AssetsPanel({ skillDetail, selectedNode, onFileOpen }: AssetsPan
       <ScrollArea className="flex-1">
         <div className="space-y-3 px-2 py-2 text-xs">
           <SectionHeading label="Skill Files" />
-          <FileRow file={files[0]} onOpen={onFileOpen} />
-          <FileRow file={files[1]} onOpen={onFileOpen} />
-          {files[2] ? (
+          <FileRow file={filesByPath.get("GRAPH.md") ?? fileFromDetail(skillDetail, "GRAPH.md")} onOpen={openFile} />
+          <FolderRow name="phases" defaultExpanded>
+            {phases.map((phaseId) => (
+              <FolderRow key={phaseId} name={phaseId} defaultExpanded>
+                {(["SKILL.md", "LOGIC.md", "SUBGRAPH.md"] as const).map((filename) => {
+                  const path = `phases/${phaseId}/${filename}`
+                  const file = filesByPath.get(path)
+                  return file ? <FileRow key={path} file={file} onOpen={openFile} indent /> : null
+                })}
+                {actionFiles(skillDetail, phaseId).length > 0 ? (
+                  <FolderRow name="actions" defaultExpanded>
+                    {actionFiles(skillDetail, phaseId).map((file) => (
+                      <FileRow key={file.path} file={file} onOpen={openFile} indent />
+                    ))}
+                  </FolderRow>
+                ) : null}
+              </FolderRow>
+            ))}
+          </FolderRow>
+          <FolderRow name="io" defaultExpanded>
+            {(["io/inputs.json", "io/outputs.json"] as const).map((path) => {
+              const file = filesByPath.get(path)
+              return file ? <FileRow key={path} file={file} onOpen={openFile} indent /> : null
+            })}
+          </FolderRow>
+          {filesByPath.size === 0 && files[2] ? (
             <FolderRow name="nodes" defaultExpanded>
-              <FileRow file={files[2]} onOpen={onFileOpen} indent />
+              <FileRow file={files[2]} onOpen={openFile} indent />
             </FolderRow>
           ) : null}
         </div>
@@ -313,7 +373,7 @@ export function TimelinePanel() {
 
 export function PropertiesPanel({ skillDetail, selectedNode }: Pick<PanelsProps, "skillDetail" | "selectedNode">) {
   const manifest = skillDetail?.manifest
-  const selectedType = selectedNode?.data.mode ?? manifest?.type ?? "Skill"
+  const selectedType = selectedNode?.data.mode ?? (manifest?.schema_version === "2.1" ? "graph" : manifest?.type) ?? "Skill"
   const [temperature, setTemperature] = useState([0.7])
   const [modelOpen, setModelOpen] = useState(false)
   const [modelValue, setModelValue] = useState(selectedNode?.data.role ?? "default")
@@ -420,7 +480,8 @@ export function PropertiesPanel({ skillDetail, selectedNode }: Pick<PanelsProps,
   )
 }
 
-export function Panels({ activePanel, skillId, skillDetail, selectedNode, onFileOpen }: PanelsProps) {
+export function Panels({ activePanel, skillId, skillDetail, selectedNode }: PanelsProps) {
+  const { onFileOpen } = useWorkspaceContext()
   if (!skillId) {
     return (
       <div className="flex h-full w-full flex-col bg-sidebar">
@@ -431,7 +492,7 @@ export function Panels({ activePanel, skillId, skillDetail, selectedNode, onFile
   }
 
   if (activePanel === "assets") {
-    return <AssetsPanel skillDetail={skillDetail} selectedNode={selectedNode} onFileOpen={onFileOpen} />
+    return <AssetsPanel skillDetail={skillDetail} selectedNode={selectedNode} />
   }
   if (activePanel === "input") {
     return <InputPanel skillDetail={skillDetail} onFileOpen={onFileOpen} />

@@ -71,11 +71,11 @@ def _serialize_with_original(manifest: GraphManifest, original_md: str) -> str:
         seen_phase_ids.add(token.phase_id)
         chunks.append(_rewrite_phase_token(token, phase))
 
-    chunks.extend(buffered.text for buffered in attachment_buffer)
-
     additions = [phase for phase in manifest.phases if phase.id not in seen_phase_ids]
     if additions:
         chunks = _append_phase_lines(chunks, additions)
+    if not additions or "".join(buffered.text for buffered in attachment_buffer).strip():
+        chunks.extend(buffered.text for buffered in attachment_buffer)
     return "".join(chunks)
 
 

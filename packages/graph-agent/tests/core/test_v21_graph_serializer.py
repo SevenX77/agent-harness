@@ -75,6 +75,16 @@ def _diff_changed_lines(before: str, after: str) -> tuple[int, int]:
     return removed, added
 
 
+def _build_manifest_with_phases(phases: list[tuple[str, list[str]]]) -> GraphManifest:
+    return GraphManifest(
+        name="footer-ordering",
+        phases=[
+            GraphPhaseRef(id=phase_id, src=f"phases/{phase_id}", depends_on=depends_on)
+            for phase_id, depends_on in phases
+        ],
+    )
+
+
 @pytest.mark.parametrize(
     "root",
     CANVAS_DOD_MATRIX_ROOTS,
@@ -155,6 +165,57 @@ def test_new_phase_appends_one_phase_line() -> None:
     assert serialized.count("\n") == original.count("\n") + 1
     assert _diff_changed_lines(original, serialized) == (0, 1)
     assert serialized.endswith('<phase id="review" src="phases/review" depends_on="greet" />\n')
+
+
+def test_serialize_new_phase_inserts_before_footer_comment() -> None:
+    original = """---
+schema_version: "2.1"
+---
+<input src="io/inputs.py:Req" />
+<output src="io/outputs.py:Res" />
+<phase id="setup" src="phases/setup" depends_on="" mode="logic" />
+
+<!-- footer: maintained by Canvas -->
+"""
+    manifest = _build_manifest_with_phases([("setup", []), ("new_phase", ["setup"])])
+
+    result = serialize_graph(manifest, original)
+
+    assert result.index('id="new_phase"') < result.index("<!-- footer")
+
+
+def test_serialize_new_phase_no_footer_appends_at_end() -> None:
+    original = """---
+schema_version: "2.1"
+---
+<input src="io/inputs.py:Req" />
+<output src="io/outputs.py:Res" />
+<phase id="setup" src="phases/setup" depends_on="" mode="logic" />
+"""
+    manifest = _build_manifest_with_phases([("setup", []), ("new_phase", ["setup"])])
+
+    result = serialize_graph(manifest, original)
+
+    assert 'id="new_phase"' in result
+    assert result.endswith('<phase id="new_phase" src="phases/new_phase" depends_on="setup" />\n')
+
+
+def test_serialize_no_additions_preserves_footer() -> None:
+    original = """---
+schema_version: "2.1"
+---
+<input src="io/inputs.py:Req" />
+<output src="io/outputs.py:Res" />
+<phase id="setup" src="phases/setup" depends_on="" mode="logic" />
+
+<!-- footer comment -->
+"""
+    manifest = _build_manifest_with_phases([("setup", [])])
+
+    result = serialize_graph(manifest, original)
+
+    assert result == original
+    assert "<!-- footer comment -->" in result
 
 
 def test_deleted_phase_removes_only_that_phase_line() -> None:

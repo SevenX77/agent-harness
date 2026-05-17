@@ -54,13 +54,7 @@ def test_run_emits_trace_events_and_writes_artifacts(
     _fill_playground_inputs(page, {"payload": "hello"})
     logger.info("filled playground input")
 
-    runs_root = (
-        studio_workspace["workspaces_dir"]
-        / "default"
-        / "skills"
-        / "e2e-fast"
-        / "runs"
-    )
+    runs_root = studio_workspace["workspaces_dir"] / "default" / "skills" / "e2e-fast" / "runs"
     pre_existing = set(runs_root.glob("*")) if runs_root.exists() else set()
 
     page.get_by_test_id("input-playground-run").click()
@@ -100,7 +94,9 @@ def test_run_emits_trace_events_and_writes_artifacts(
         f"e2e-fast run did not finish successfully; metrics={metrics_payload}"
     )
 
-    tracing_lines = [line for line in tracing_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    tracing_lines = [
+        line for line in tracing_path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
     assert len(tracing_lines) >= 5, (
         f"expected >= 5 CallbackEvents on disk, saw {len(tracing_lines)}: {tracing_lines}"
     )

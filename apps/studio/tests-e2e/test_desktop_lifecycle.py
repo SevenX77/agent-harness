@@ -28,7 +28,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 STUDIO_BACKEND = REPO_ROOT / "apps" / "studio" / "backend"
 TAURI_DIR = REPO_ROOT / "apps" / "studio" / "tauri"
 GRAPH_AGENT_SRC = REPO_ROOT / "packages" / "graph-agent" / "src"
-PYTHON = REPO_ROOT / ".venv" / ("Scripts/python.exe" if platform.system() == "Windows" else "bin/python")
+PYTHON = (
+    REPO_ROOT / ".venv" / ("Scripts/python.exe" if platform.system() == "Windows" else "bin/python")
+)
 
 SIDECAR_NEEDLES = ("uvicorn", "app.main:app")
 
@@ -91,9 +93,7 @@ def assert_no_new_sidecar_processes(baseline_pids: set[int]) -> None:
     leaked: list[ProcessInfo] = []
     while time.time() < deadline:
         leaked = [
-            process
-            for process in find_sidecar_processes()
-            if process.pid not in baseline_pids
+            process for process in find_sidecar_processes() if process.pid not in baseline_pids
         ]
         if not leaked:
             return

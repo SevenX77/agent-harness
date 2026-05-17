@@ -88,9 +88,7 @@ def _write_minimal_text_segmentation(skill_dir: Path) -> None:
     (skill_dir / "script").mkdir(parents=True)
     (skill_dir / "script" / "__init__.py").write_text("", encoding="utf-8")
     (skill_dir / "script" / "logic.py").write_text(
-        "def prepare(context):\n"
-        "    context['prepared'] = True\n"
-        "    return 'ok'\n",
+        "def prepare(context):\n    context['prepared'] = True\n    return 'ok'\n",
         encoding="utf-8",
     )
     (skill_dir / "SKILL.md").write_text(
@@ -237,7 +235,11 @@ def studio_servers(studio_workspace: dict[str, Path]) -> Iterator[dict[str, str]
         _wait_for_url(f"{BACKEND_URL}/docs", timeout=20.0, label="studio-backend")
     except Exception:
         backend_proc.terminate()
-        log_text = backend_log.read_text(encoding="utf-8", errors="replace") if backend_log.exists() else "<missing>"
+        log_text = (
+            backend_log.read_text(encoding="utf-8", errors="replace")
+            if backend_log.exists()
+            else "<missing>"
+        )
         raise RuntimeError(f"backend startup failed; log:\n{log_text}") from None
 
     frontend_env = {
@@ -249,7 +251,17 @@ def studio_servers(studio_workspace: dict[str, Path]) -> Iterator[dict[str, str]
     logger.info("spawning frontend port=%s log=%s", FRONTEND_PORT, frontend_log)
     with frontend_log.open("w", encoding="utf-8") as frontend_out:
         frontend_proc = subprocess.Popen(  # noqa: S603,S607
-            ["npm", "run", "dev", "--", "--port", str(FRONTEND_PORT), "--strictPort", "--host", "127.0.0.1"],
+            [
+                "npm",
+                "run",
+                "dev",
+                "--",
+                "--port",
+                str(FRONTEND_PORT),
+                "--strictPort",
+                "--host",
+                "127.0.0.1",
+            ],
             cwd=STUDIO_FRONTEND,
             env=frontend_env,
             stdout=frontend_out,
@@ -262,7 +274,11 @@ def studio_servers(studio_workspace: dict[str, Path]) -> Iterator[dict[str, str]
     except Exception:
         frontend_proc.terminate()
         backend_proc.terminate()
-        log_text = frontend_log.read_text(encoding="utf-8", errors="replace") if frontend_log.exists() else "<missing>"
+        log_text = (
+            frontend_log.read_text(encoding="utf-8", errors="replace")
+            if frontend_log.exists()
+            else "<missing>"
+        )
         raise RuntimeError(f"frontend startup failed; log:\n{log_text}") from None
 
     try:

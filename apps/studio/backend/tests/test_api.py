@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import queue
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -270,7 +271,11 @@ def test_run_endpoint_spawns_worker_and_ws_streams_events(
         "run_ended",
     ]
 
+    deadline = time.monotonic() + 0.25
     detail = client.get(f"/api/skills/text-segmentation/runs/{run_id}").json()
+    while "metadata" not in detail and time.monotonic() < deadline:
+        time.sleep(0.005)
+        detail = client.get(f"/api/skills/text-segmentation/runs/{run_id}").json()
     assert detail["metadata"]["status"] == "success"
     run_dir = workspaces_dir / "default" / "skills" / "text-segmentation" / "runs" / run_id
     assert (run_dir / "final_state.json").exists()

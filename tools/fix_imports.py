@@ -7,6 +7,7 @@ Run from repo root. Scans packages/graph-agent/src/**/*.py and converts
 all `from .x import y` and `from ..y import z` to absolute paths
 rooted at `graph_agent`.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

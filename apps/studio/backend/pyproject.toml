@@ -12,6 +12,7 @@ dependencies = [
     "aiofiles>=23.0.0",
     "sqlalchemy>=2.0.0",
     "watchdog>=4.0.0",
+    "watchfiles>=1.1.1",
     "ptyprocess>=0.7.0",
     "python-multipart>=0.0.5",
     "starlette>=0.37.2",

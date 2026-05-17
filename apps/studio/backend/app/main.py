@@ -37,7 +37,7 @@ from app.routers import (
     websockets,
 )
 from app.services.copilot import cleanup_all_sessions
-from app.services.event_bus import file_watcher
+from app.services.file_watcher import file_watcher
 from app.services.run_manager import run_manager
 from app.services.skills import ensure_workspace_layout
 from app.services.terminal_manager import terminal_manager

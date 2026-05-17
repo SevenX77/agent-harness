@@ -44,6 +44,11 @@ import { useTheme } from './hooks/useTheme'
 import { useToasts } from './hooks/useToasts'
 import { useTraceSelection } from './hooks/useTraceSelection'
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts'
+import {
+  currentCanvasEntry as getCurrentCanvasEntry,
+  isCanvasReadOnly as getCanvasReadOnly,
+  useCanvasStore,
+} from './stores/canvas'
 import { useWorkspaceStore } from './stores/workspace'
 import type {
   ActiveTab,
@@ -78,9 +83,43 @@ function isErrorTraceEvent(event: CallbackEvent): boolean {
   return event.event_type === 'internal_error' || event.event_type === 'validation_fail'
 }
 
+function findSubgraphTargetSkillId(detail: SkillDetail, phaseId: string): string | null {
+  if (detail.manifest.type !== 'graph') {
+    return null
+  }
+
+  const topologyNode = detail.graph_topology.find((node) => node.id === phaseId)
+  const src = typeof topologyNode?.src === 'string' ? topologyNode.src : null
+  const phase = detail.manifest.phases.find((item) => item.name === phaseId)
+  const candidates = [src, phase?.subgraph ?? null]
+    .filter((value): value is string => Boolean(value))
+    .flatMap((value) => (value.endsWith('.md') ? [value] : [`${value}/SUBGRAPH.md`, value]))
+
+  for (const path of candidates) {
+    const content = detail.files[path]
+    if (!content) {
+      continue
+    }
+    const match = /<sub_skill_ref>\s*([\s\S]*?)\s*<\/sub_skill_ref>/i.exec(content)
+    const skillId = match ? subgraphSkillId(match[1].trim()) : null
+    if (skillId) {
+      return skillId
+    }
+  }
+
+  return null
+}
+
 export default function App() {
   const [activeSkillId, setActiveSkillId] = useState<string | null>(null)
-  const selectedSkillId = activeSkillId
+  const navStack = useCanvasStore((state) => state.navStack)
+  const setCanvasRoot = useCanvasStore((state) => state.setRoot)
+  const pushCanvas = useCanvasStore((state) => state.push)
+  const popCanvas = useCanvasStore((state) => state.pop)
+  const jumpCanvasTo = useCanvasStore((state) => state.jumpTo)
+  const currentCanvas = getCurrentCanvasEntry(navStack)
+  const selectedSkillId = currentCanvas?.skillId ?? activeSkillId
+  const canvasReadOnly = getCanvasReadOnly(navStack)
   const { isDarkMode, setIsDarkMode } = useTheme()
   const { toasts, pushToast } = useToasts()
   const { register } = useGlobalShortcuts()
@@ -165,6 +204,13 @@ export default function App() {
     setWorkspaceFiles(files)
     loadedWorkspaceSkillIdRef.current = selectedSkillId
   }, [selectedSkillId, setWorkspaceFiles, skillDetail])
+
+  useEffect(() => {
+    if (!activeSkillId || !skillDetail || navStack.length > 0) {
+      return
+    }
+    setCanvasRoot({ skillId: activeSkillId, skillName: skillDetail.manifest.name || activeSkillId })
+  }, [activeSkillId, navStack.length, setCanvasRoot, skillDetail])
 
   const canonicalSkillMarkdown = skillDetail ? manifestToSkillMarkdown(skillDetail.manifest) : ''
   const skillMarkdown = workspaceFiles['SKILL.md'] ?? canonicalSkillMarkdown
@@ -307,6 +353,19 @@ export default function App() {
     setEdges(layouted.edges)
   }, [edges, nodes, setEdges, setNodes])
 
+  const resetCanvasTransientState = useCallback(() => {
+    setExpandedSubgraphs(new Set())
+    setNestedManifests({})
+    setLintOverride(null)
+    setRunStatus('idle')
+    setTraceLogs([])
+    setLastRunId(null)
+    goldenDiff.clear()
+    setPhaseDrawerPhaseId(null)
+    setSelectedPromptIndex(null)
+    setActiveTab('code')
+  }, [goldenDiff])
+
   const handleSelectSkill = useCallback(async (skillId: string) => {
     if (skillId === selectedSkillId) {
       return
@@ -321,23 +380,23 @@ export default function App() {
         : { 'SKILL.md': manifestToSkillMarkdown(detail.manifest) }
       setWorkspaceFiles(files)
       loadedWorkspaceSkillIdRef.current = skillId
+      setCanvasRoot({ skillId, skillName: detail.manifest.name || skillId })
     } catch (error) {
       pushToast(errorMessage(error), 'error')
       return
     }
     setActiveSkillId(skillId)
-    setExpandedSubgraphs(new Set())
-    setNestedManifests({})
-    setLintOverride(null)
-    setRunStatus('idle')
-    setTraceLogs([])
-    setLastRunId(null)
-    goldenDiff.clear()
-    setPhaseDrawerPhaseId(null)
-    setSelectedPromptIndex(null)
-    setActiveTab('code')
+    resetCanvasTransientState()
     rememberSkill(skillId)
-  }, [goldenDiff, pushToast, rememberSkill, selectedSkillId, setWorkspaceFiles, workspaceIsDirty])
+  }, [
+    pushToast,
+    rememberSkill,
+    resetCanvasTransientState,
+    selectedSkillId,
+    setCanvasRoot,
+    setWorkspaceFiles,
+    workspaceIsDirty,
+  ])
 
   const handleLint = useCallback(async () => {
     if (!selectedSkillId) {
@@ -356,7 +415,7 @@ export default function App() {
   }, [pushToast, selectedSkillId])
 
   const handleSave = useCallback(async () => {
-    if (!selectedSkillId) {
+    if (!selectedSkillId || canvasReadOnly) {
       return
     }
 
@@ -378,7 +437,7 @@ export default function App() {
       setLintOverride({ skillId: selectedSkillId, status: 'failed', errors })
       pushToast(errorMessage(error), 'error')
     }
-  }, [clearDraft, mutateSkillDetail, pushToast, selectedSkillId])
+  }, [canvasReadOnly, clearDraft, mutateSkillDetail, pushToast, selectedSkillId])
 
   const handleEditorMount: EditorOnMount = useCallback((editor, monaco) => {
     editorRef.current = editor
@@ -558,13 +617,94 @@ export default function App() {
     setActiveTab('trace')
   }, [traceSelection])
 
-  const handleOpenPhaseDrawer = useCallback((phaseId: string) => {
-    setPhaseDrawerPhaseId(phaseId)
-    if (traceSelection.linkEnabled) {
-      traceSelection.selectPhase(phaseId)
+  const handleSubgraphDrillDown = useCallback(async (phaseId: string): Promise<boolean> => {
+    if (!skillDetail) {
+      return false
     }
-    setActiveTab('code')
-  }, [traceSelection])
+    const targetSkillId = findSubgraphTargetSkillId(skillDetail, phaseId)
+    if (!targetSkillId) {
+      return false
+    }
+    if (navStack.some((entry) => entry.skillId === targetSkillId)) {
+      pushToast(`Subgraph cycle rejected: ${targetSkillId}`, 'error')
+      return true
+    }
+    if (navStack.length >= 5) {
+      pushToast('Subgraph depth limit reached (5).', 'info')
+      return true
+    }
+
+    try {
+      const detail = await fetchSkillFiles(targetSkillId)
+      const result = pushCanvas({ skillId: targetSkillId, skillName: detail.manifest.name || targetSkillId })
+      if (!result.ok) {
+        pushToast(
+          result.reason === 'cycle'
+            ? `Subgraph cycle rejected: ${targetSkillId}`
+            : 'Subgraph depth limit reached (5).',
+          result.reason === 'cycle' ? 'error' : 'info',
+        )
+        return true
+      }
+      setActiveSkillId(targetSkillId)
+      const files = Object.keys(detail.files).length > 0
+        ? detail.files
+        : { 'SKILL.md': manifestToSkillMarkdown(detail.manifest) }
+      setWorkspaceFiles(files)
+      loadedWorkspaceSkillIdRef.current = targetSkillId
+      resetCanvasTransientState()
+      rememberSkill(targetSkillId)
+      return true
+    } catch (error) {
+      pushToast(`Failed to load subgraph ${targetSkillId}: ${errorMessage(error)}`, 'error')
+      return true
+    }
+  }, [
+    navStack,
+    pushCanvas,
+    pushToast,
+    rememberSkill,
+    resetCanvasTransientState,
+    setWorkspaceFiles,
+    skillDetail,
+  ])
+
+  const handleOpenPhaseDrawer = useCallback((phaseId: string) => {
+    void handleSubgraphDrillDown(phaseId).then((handled) => {
+      if (handled) {
+        return
+      }
+      if (canvasReadOnly) {
+        pushToast('Subgraph view is read-only.', 'info')
+        return
+      }
+      setPhaseDrawerPhaseId(phaseId)
+      if (traceSelection.linkEnabled) {
+        traceSelection.selectPhase(phaseId)
+      }
+      setActiveTab('code')
+    })
+  }, [canvasReadOnly, handleSubgraphDrillDown, pushToast, traceSelection])
+
+  const handleBreadcrumbClick = useCallback((index: number) => {
+    const target = navStack[index]
+    if (!target) {
+      return
+    }
+    jumpCanvasTo(index)
+    setActiveSkillId(target.skillId)
+    resetCanvasTransientState()
+  }, [jumpCanvasTo, navStack, resetCanvasTransientState])
+
+  const handleBackToParent = useCallback(() => {
+    if (navStack.length <= 1) {
+      return
+    }
+    const parent = navStack[navStack.length - 2]
+    popCanvas()
+    setActiveSkillId(parent.skillId)
+    resetCanvasTransientState()
+  }, [navStack, popCanvas, resetCanvasTransientState])
 
   const handleTraceEventSelect = useCallback((index: number, event: CallbackEvent) => {
     traceSelection.selectEvent(event, index)
@@ -663,7 +803,7 @@ export default function App() {
       label: 'Save and lint',
       description: 'Persist SKILL.md and run backend lint validation.',
       hotkey: 'mod+s',
-      disabled: !selectedSkillId,
+      disabled: !selectedSkillId || canvasReadOnly,
       run: () => void handleSave(),
     },
     {
@@ -715,7 +855,7 @@ export default function App() {
       hotkey: '?',
       run: () => setCheatSheetOpen(true),
     },
-  ], [canRun, handleRun, handleSave, openTerminal, runStatus, selectedSkillId, setIsDarkMode])
+  ], [canRun, canvasReadOnly, handleRun, handleSave, openTerminal, runStatus, selectedSkillId, setIsDarkMode])
 
   const closeTopLayer = useCallback(() => {
     if (cheatSheetOpen) {
@@ -770,6 +910,7 @@ export default function App() {
   const promptEvent = selectedPromptIndex === null ? null : findPromptEvent(traceLogs, selectedPromptIndex)
   const currentGraphSkill = currentManifest ? graphSkill(currentManifest) : null
   const currentSkill = skills.find((skill) => skill.id === selectedSkillId)
+  const currentCanvasName = currentCanvas?.skillName ?? currentSkill?.name ?? 'Graph'
   const inputSummary = currentManifest
     ? manifestInputs.length > 0 ? `${manifestInputs.length} fields` : 'raw JSON'
     : 'loading'
@@ -819,26 +960,31 @@ export default function App() {
               isArtifactsMenuOpen={isArtifactsMenuOpen}
               lintStatus={lintStatus}
               runStatus={runStatus}
-              dirty={workspaceIsDirty}
+              dirty={workspaceIsDirty && !canvasReadOnly}
+              saveDisabled={canvasReadOnly}
               onToggleArtifactsMenu={() => setIsArtifactsMenuOpen((open) => !open)}
               onLint={() => void handleLint()}
               onSave={() => void handleSave()}
               onOpenTerminal={() => void openTerminal()}
               onRun={() => void handleRun()}
             />
-            <DirtyBar onSave={() => void handleSave()} />
+            {canvasReadOnly ? null : <DirtyBar onSave={() => void handleSave()} />}
             <div className="flex flex-1 overflow-hidden">
               <GraphCanvas
-                currentSkillName={currentSkill?.name ?? 'Graph'}
+                currentSkillName={currentCanvasName}
+                breadcrumbs={navStack}
                 skillDetailError={skillDetailError}
                 nodes={nodes}
                 edges={edges}
                 isDarkMode={isDarkMode}
+                isReadOnly={canvasReadOnly}
                 selectedPhaseId={traceSelection.linkEnabled ? traceSelection.selectedPhaseId : null}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
                 onResetLayout={handleResetLayout}
+                onBreadcrumbClick={handleBreadcrumbClick}
+                onBackToParent={handleBackToParent}
                 onPhaseSelect={handleGraphPhaseSelect}
                 onPhaseDoubleClick={handleOpenPhaseDrawer}
               />
@@ -850,6 +996,7 @@ export default function App() {
                 dirty={workspaceDirty}
                 node_schema_v21={skillDetail?.node_schema_v21}
                 io_schema={skillDetail?.io_schema}
+                readOnly={canvasReadOnly}
                 selectedSkillId={selectedSkillId}
                 lintErrors={lintErrors}
                 traceLogs={traceLogs}

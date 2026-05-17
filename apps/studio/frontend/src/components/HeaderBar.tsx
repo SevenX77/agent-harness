@@ -12,6 +12,7 @@ interface HeaderBarProps {
   lintStatus: LintStatus
   runStatus: RunStatus
   dirty: boolean
+  saveDisabled?: boolean
   onToggleArtifactsMenu: () => void
   onLint: () => void
   onSave: () => void
@@ -28,6 +29,7 @@ export function HeaderBar({
   lintStatus,
   runStatus,
   dirty,
+  saveDisabled = false,
   onToggleArtifactsMenu,
   onLint,
   onSave,
@@ -74,7 +76,7 @@ export function HeaderBar({
           type="button"
           aria-label="Save"
           onClick={onSave}
-          disabled={!selectedSkillId || lintStatus === 'checking'}
+          disabled={!selectedSkillId || lintStatus === 'checking' || saveDisabled}
           className="flex items-center gap-2 rounded-md border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-1.5 font-medium text-gray-700 dark:text-gray-300 transition-colors hover:bg-gray-50 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <Save className="h-4 w-4" />

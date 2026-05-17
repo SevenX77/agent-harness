@@ -1,4 +1,5 @@
 """Tests for reasoning_content LangChain monkey patches."""
+
 from __future__ import annotations
 
 import langchain_openai.chat_models.base as lc_openai_base

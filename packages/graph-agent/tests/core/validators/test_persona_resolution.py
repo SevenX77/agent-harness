@@ -1,4 +1,5 @@
 """Unit tests for the persona_resolution validator."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -35,12 +36,12 @@ def _write_persona_skill(parent_dir: Path, *, name: str) -> Path:
 
 
 def _write_agent_skill(
-    parent_dir: Path, *, name: str, adopted_persona: str | None = None,
+    parent_dir: Path,
+    *,
+    name: str,
+    adopted_persona: str | None = None,
 ) -> Path:
-    persona_line = (
-        f"adopted_persona: {adopted_persona}\n"
-        if adopted_persona is not None else ""
-    )
+    persona_line = f"adopted_persona: {adopted_persona}\n" if adopted_persona is not None else ""
     body = (
         "---\n"
         'schema_version: "2.0"\n'
@@ -94,8 +95,7 @@ def _write_graph_with_llm_phase(
     adopted_persona: str | None = None,
 ) -> Path:
     persona_line = (
-        f"    adopted_persona: {adopted_persona}\n"
-        if adopted_persona is not None else ""
+        f"    adopted_persona: {adopted_persona}\n" if adopted_persona is not None else ""
     )
     body = (
         "---\n"
@@ -119,7 +119,9 @@ def _write_graph_with_llm_phase(
 def test_returns_empty_when_agent_persona_resolves(tmp_path: Path) -> None:
     _write_persona_skill(tmp_path, name="reviewer")
     agent_path = _write_agent_skill(
-        tmp_path, name="my_agent", adopted_persona="reviewer",
+        tmp_path,
+        name="my_agent",
+        adopted_persona="reviewer",
     )
 
     manifest = _load(agent_path)
@@ -130,7 +132,9 @@ def test_returns_empty_when_agent_persona_resolves(tmp_path: Path) -> None:
 
 def test_fatal_when_agent_persona_not_found(tmp_path: Path) -> None:
     agent_path = _write_agent_skill(
-        tmp_path, name="my_agent", adopted_persona="missing",
+        tmp_path,
+        name="my_agent",
+        adopted_persona="missing",
     )
 
     manifest = _load(agent_path)
@@ -147,7 +151,9 @@ def test_fatal_when_agent_persona_not_found(tmp_path: Path) -> None:
 def test_fatal_when_agent_persona_resolves_to_wrong_type(tmp_path: Path) -> None:
     _write_graph_subskill(tmp_path, name="not_a_persona")
     agent_path = _write_agent_skill(
-        tmp_path, name="my_agent", adopted_persona="not_a_persona",
+        tmp_path,
+        name="my_agent",
+        adopted_persona="not_a_persona",
     )
 
     manifest = _load(agent_path)
@@ -162,7 +168,9 @@ def test_fatal_when_agent_persona_resolves_to_wrong_type(tmp_path: Path) -> None
 def test_returns_empty_when_llm_phase_persona_resolves(tmp_path: Path) -> None:
     _write_persona_skill(tmp_path, name="reviewer")
     parent_path = _write_graph_with_llm_phase(
-        tmp_path, name="parent", phase_name="review_step",
+        tmp_path,
+        name="parent",
+        phase_name="review_step",
         adopted_persona="reviewer",
     )
 
@@ -174,7 +182,9 @@ def test_returns_empty_when_llm_phase_persona_resolves(tmp_path: Path) -> None:
 
 def test_fatal_when_llm_phase_persona_not_found(tmp_path: Path) -> None:
     parent_path = _write_graph_with_llm_phase(
-        tmp_path, name="parent", phase_name="review_step",
+        tmp_path,
+        name="parent",
+        phase_name="review_step",
         adopted_persona="missing_persona",
     )
 
@@ -199,7 +209,10 @@ def test_returns_empty_when_agent_has_no_persona(tmp_path: Path) -> None:
 
 def test_returns_empty_when_graph_has_no_llm_persona(tmp_path: Path) -> None:
     parent_path = _write_graph_with_llm_phase(
-        tmp_path, name="parent", phase_name="step", adopted_persona=None,
+        tmp_path,
+        name="parent",
+        phase_name="step",
+        adopted_persona=None,
     )
 
     manifest = _load(parent_path)
@@ -209,7 +222,8 @@ def test_returns_empty_when_graph_has_no_llm_persona(tmp_path: Path) -> None:
 
 
 def test_validator_resolves_via_env_var_registry(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """Validator must use the same default search paths as the loader."""
     base_dir = tmp_path / "skill_root"
@@ -231,7 +245,9 @@ def test_validator_resolves_via_env_var_registry(
     monkeypatch.setenv(PERSONA_PATH_ENV_VAR, str(registry))
 
     agent_path = _write_agent_skill(
-        base_dir, name="my_agent", adopted_persona="external_reviewer",
+        base_dir,
+        name="my_agent",
+        adopted_persona="external_reviewer",
     )
     raw = parse_skill_file(agent_path)["frontmatter"]
     manifest = TypeAdapter(SkillManifest).validate_python(raw)

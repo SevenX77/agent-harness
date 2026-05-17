@@ -1,4 +1,5 @@
 """Unit tests for the tool_paths validator."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -88,7 +89,9 @@ def test_returns_empty_when_local_and_builtin_tools_resolve(tmp_path: Path) -> N
 
 def test_fatal_when_ref_lacks_dot(tmp_path: Path) -> None:
     agent_path = _write_agent_with_tools(
-        tmp_path, name="my_agent", tools=["nodot"],
+        tmp_path,
+        name="my_agent",
+        tools=["nodot"],
     )
 
     manifest = _load(agent_path)
@@ -102,7 +105,9 @@ def test_fatal_when_ref_lacks_dot(tmp_path: Path) -> None:
 
 def test_fatal_when_local_module_missing(tmp_path: Path) -> None:
     agent_path = _write_agent_with_tools(
-        tmp_path, name="my_agent", tools=["missing.fn"],
+        tmp_path,
+        name="my_agent",
+        tools=["missing.fn"],
     )
 
     manifest = _load(agent_path)
@@ -156,10 +161,7 @@ def test_fatal_when_llm_phase_validator_missing(tmp_path: Path) -> None:
         tmp_path,
         name="parent",
         phases_yaml=(
-            "  - name: think\n"
-            "    mode: llm\n"
-            "    prompt: do it\n"
-            "    validator: missing.validate\n"
+            "  - name: think\n    mode: llm\n    prompt: do it\n    validator: missing.validate\n"
         ),
     )
 
@@ -182,12 +184,7 @@ def test_fatal_when_logic_phase_execute_steps_missing(tmp_path: Path) -> None:
     parent_path = _write_graph_with_phases(
         tmp_path,
         name="parent",
-        phases_yaml=(
-            "  - name: render\n"
-            "    mode: logic\n"
-            "    execute_steps:\n"
-            "      - missing.fn\n"
-        ),
+        phases_yaml=("  - name: render\n    mode: logic\n    execute_steps:\n      - missing.fn\n"),
     )
 
     manifest = _load(parent_path)
@@ -231,10 +228,7 @@ def test_fatal_when_logic_step_imports_run_skill(tmp_path: Path) -> None:
         tmp_path,
         name="parent",
         phases_yaml=(
-            "  - name: render\n"
-            "    mode: logic\n"
-            "    execute_steps:\n"
-            "      - script.runner.prepare\n"
+            "  - name: render\n    mode: logic\n    execute_steps:\n      - script.runner.prepare\n"
         ),
     )
 
@@ -251,18 +245,14 @@ def test_fatal_when_logic_step_imports_run_skill(tmp_path: Path) -> None:
 def test_no_issue_when_logic_step_does_not_import_run_skill(tmp_path: Path) -> None:
     py_file = _stage_local_tool(tmp_path, dotted="script.runner")
     py_file.write_text(
-        "def prepare(ctx):\n"
-        "    ctx['prepared'] = True\n",
+        "def prepare(ctx):\n    ctx['prepared'] = True\n",
         encoding="utf-8",
     )
     parent_path = _write_graph_with_phases(
         tmp_path,
         name="parent",
         phases_yaml=(
-            "  - name: render\n"
-            "    mode: logic\n"
-            "    execute_steps:\n"
-            "      - script.runner.prepare\n"
+            "  - name: render\n    mode: logic\n    execute_steps:\n      - script.runner.prepare\n"
         ),
     )
 
@@ -277,19 +267,14 @@ def test_no_issue_for_runner_module_import_without_run_skill(
 ) -> None:
     py_file = _stage_local_tool(tmp_path, dotted="script.runner")
     py_file.write_text(
-        "import graph_agent.core.runner\n\n"
-        "def prepare(ctx):\n"
-        "    ctx['prepared'] = True\n",
+        "import graph_agent.core.runner\n\ndef prepare(ctx):\n    ctx['prepared'] = True\n",
         encoding="utf-8",
     )
     parent_path = _write_graph_with_phases(
         tmp_path,
         name="parent",
         phases_yaml=(
-            "  - name: render\n"
-            "    mode: logic\n"
-            "    execute_steps:\n"
-            "      - script.runner.prepare\n"
+            "  - name: render\n    mode: logic\n    execute_steps:\n      - script.runner.prepare\n"
         ),
     )
 

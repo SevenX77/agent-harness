@@ -36,6 +36,7 @@ EXPECTED_TOP_LEVEL_EXPORTS = [
     "SkillCompilationError",
 ]
 
+
 class DummyMockStrategy(BaseMockStrategy):
     def has_phase(self, phase_name: str) -> bool:
         return phase_name == "phaseA"

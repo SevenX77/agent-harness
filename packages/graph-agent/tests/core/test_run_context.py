@@ -1,4 +1,5 @@
 """Tests for RunContext dataclass."""
+
 from __future__ import annotations
 
 import types
@@ -91,6 +92,7 @@ class TestRunContext:
 
     def test_custom_values(self):
         """Test that custom values are properly assigned."""
+
         def dummy_saver():
             pass
 

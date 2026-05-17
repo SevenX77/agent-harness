@@ -11,6 +11,7 @@ contract level:
   populates ``current_phase`` / ``elapsed_seconds``.
 * A raising callback does not take down the pulser (swallow + continue).
 """
+
 from __future__ import annotations
 
 import sys

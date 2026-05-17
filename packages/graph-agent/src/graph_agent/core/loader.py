@@ -70,6 +70,7 @@ class CompiledSkill:
     nodes: list[PhaseDocument] = field(default_factory=list)
     actions: ActionRegistry = field(default_factory=ActionRegistry.empty)
     tools: ToolRegistry = field(default_factory=ToolRegistry.empty)
+    phase_tokens: dict[str, PhaseTokenInfo] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,35 @@ class _RawPhaseAttrs:
     depends_on_raw: str | None
     depends_on: list[str]
     line: int
+
+
+@dataclass(frozen=True)
+class PhaseAttributeSpan:
+    """Source span for one attribute inside a root GRAPH.md phase tag."""
+
+    name: str
+    value: str
+    quote: str
+    attr_start: int
+    attr_end: int
+    value_start: int
+    value_end: int
+    line_start: int
+    line_end: int
+
+
+@dataclass(frozen=True)
+class PhaseTokenInfo:
+    """Internal source token metadata for serializer round-trip work."""
+
+    phase_id: str
+    raw_text: str
+    start_offset: int
+    end_offset: int
+    line_start: int
+    line_end: int
+    attrs: dict[str, str]
+    attr_spans: dict[str, PhaseAttributeSpan]
 
 
 class SkillLoader:
@@ -98,9 +128,11 @@ class SkillLoader:
         _guard_v21_root(root)
 
         graph_path = root / "GRAPH.md"
+        graph_text = graph_path.read_text(encoding="utf-8")
         graph_frontmatter, graph_body, line_meta = parse_markdown_parts(graph_path)
         raw_attrs = _extract_phase_attrs(graph_body, line_meta["body_start"])
         manifest = _build_graph_manifest(graph_path, graph_frontmatter, graph_body, raw_attrs)
+        phase_tokens = _extract_phase_token_info(graph_text, graph_body, line_meta["body_start"])
         _validate_graph_topology(graph_path, raw_attrs, root)
         io_inputs = _validate_io_schema(root, manifest.io_inputs_ref, "input")
         io_outputs = _validate_io_schema(root, manifest.io_outputs_ref, "output")
@@ -148,7 +180,12 @@ class SkillLoader:
         }
         logger.info("Compiled V2.1 graph skill root=%s phases=%d", root, len(phase_docs))
         return CompiledSkill(
-            raw=raw, manifest=manifest, nodes=phase_docs, actions=actions, tools=tools
+            raw=raw,
+            manifest=manifest,
+            nodes=phase_docs,
+            actions=actions,
+            tools=tools,
+            phase_tokens=phase_tokens,
         )
 
 
@@ -445,6 +482,78 @@ def _extract_phase_attrs(body: str, body_start_line: int) -> list[_RawPhaseAttrs
             )
         )
     return raw_attrs
+
+
+def get_phase_token_info(compiled: CompiledSkill, phase_id: str) -> PhaseTokenInfo | None:
+    """Return source token metadata for a phase in a compiled skill.
+
+    The metadata lives on ``CompiledSkill`` so ``GraphManifest`` and
+    ``GraphPhaseRef`` remain pure Pydantic business contracts without a global
+    id-based registry.
+    """
+
+    return compiled.phase_tokens.get(phase_id)
+
+
+def _extract_phase_token_info(
+    graph_text: str,
+    body: str,
+    body_start_line: int,
+) -> dict[str, PhaseTokenInfo]:
+    body_start_offset = len(graph_text) - len(body)
+    tokens: dict[str, PhaseTokenInfo] = {}
+    pattern = re.compile(r"<phase\b([^>]*)/>", re.IGNORECASE | re.DOTALL)
+    for match in pattern.finditer(body):
+        raw_text = match.group(0)
+        attrs_raw = match.group(1)
+        attrs = _parse_attrs(attrs_raw)
+        phase_id = attrs.get("id")
+        if phase_id is None:
+            continue
+        token_start = body_start_offset + match.start()
+        token_end = body_start_offset + match.end()
+        line_start = body_start_line + body[: match.start()].count("\n")
+        line_end = line_start + raw_text.count("\n")
+        attr_raw_start = body_start_offset + match.start(1)
+        attr_spans = _phase_attr_spans(attrs_raw, attr_raw_start, graph_text)
+        tokens[phase_id] = PhaseTokenInfo(
+            phase_id=phase_id,
+            raw_text=raw_text,
+            start_offset=token_start,
+            end_offset=token_end,
+            line_start=line_start,
+            line_end=line_end,
+            attrs=attrs,
+            attr_spans=attr_spans,
+        )
+    return tokens
+
+
+def _phase_attr_spans(
+    attrs_raw: str,
+    attr_raw_start: int,
+    graph_text: str,
+) -> dict[str, PhaseAttributeSpan]:
+    spans: dict[str, PhaseAttributeSpan] = {}
+    for match in _ATTR_RE.finditer(attrs_raw):
+        name = match.group(1)
+        value = match.group(3)
+        attr_start = attr_raw_start + match.start()
+        attr_end = attr_raw_start + match.end()
+        value_start = attr_raw_start + match.start(3)
+        value_end = attr_raw_start + match.end(3)
+        spans[name] = PhaseAttributeSpan(
+            name=name,
+            value=value,
+            quote=match.group(2),
+            attr_start=attr_start,
+            attr_end=attr_end,
+            value_start=value_start,
+            value_end=value_end,
+            line_start=graph_text[:attr_start].count("\n") + 1,
+            line_end=graph_text[:attr_end].count("\n") + 1,
+        )
+    return spans
 
 
 def _validate_graph_topology(
@@ -808,11 +917,14 @@ def _frontmatter_key_line(path: Path, key: str) -> int:
 
 __all__ = [
     "CompiledSkill",
+    "PhaseAttributeSpan",
     "PhaseDocument",
+    "PhaseTokenInfo",
     "SkillLoader",
     "_discover_phase_files",
     "_extract_phase_attrs",
     "_guard_v21_root",
+    "get_phase_token_info",
     "_resolve_io_ref",
     "_route_document",
     "_validate_graph_topology",

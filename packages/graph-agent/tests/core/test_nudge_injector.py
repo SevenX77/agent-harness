@@ -58,10 +58,12 @@ class TestHasStructuredSelfcheck:
 
     def test_business_data_passed_skips_nudge(self):
         injector = NudgeInjector(_make_phase(), [])
-        outcome = injector.try_selfcheck({
-            "business_data_md": "## item\n- title: done",
-            "schema_validation": "passed",
-        })
+        outcome = injector.try_selfcheck(
+            {
+                "business_data_md": "## item\n- title: done",
+                "schema_validation": "passed",
+            }
+        )
         assert outcome.message is None
         assert outcome.budget_exhausted is False
 
@@ -96,10 +98,12 @@ class TestTrySelfcheck:
 
     def test_schema_failed_takes_priority(self):
         injector = NudgeInjector(_make_phase(max_nudges=0), [])
-        outcome = injector.try_selfcheck({
-            "schema_validation": "failed",
-            "validation_error_text": "test error",
-        })
+        outcome = injector.try_selfcheck(
+            {
+                "schema_validation": "failed",
+                "validation_error_text": "test error",
+            }
+        )
 
         assert isinstance(outcome.message, HumanMessage)
         assert "test error" in str(outcome.message.content)

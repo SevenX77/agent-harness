@@ -38,9 +38,7 @@ description: hello
 
 def test_parse_markdown_parts_accepts_crlf(tmp_path: Path) -> None:
     path = tmp_path / "GRAPH.md"
-    path.write_bytes(
-        b'---\r\nschema_version: "2.1"\r\nname: crlf\r\n---\r\n<body />\r\n'
-    )
+    path.write_bytes(b'---\r\nschema_version: "2.1"\r\nname: crlf\r\n---\r\n<body />\r\n')
 
     frontmatter, body, _ = parse_markdown_parts(path)
 

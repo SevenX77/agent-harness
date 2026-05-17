@@ -46,7 +46,9 @@ Call finish_task when done.
     )
 
 
-def _write_graph_with_io_refs(root: Path, input_ref: str, output_ref: str = "io/outputs.json") -> None:
+def _write_graph_with_io_refs(
+    root: Path, input_ref: str, output_ref: str = "io/outputs.json"
+) -> None:
     _write(
         root / "GRAPH.md",
         f"""---
@@ -348,7 +350,9 @@ def test_topology_dep_unknown_phase(tmp_path: Path) -> None:
 
 def test_topology_self_loop(tmp_path: Path) -> None:
     _base_v21_root(tmp_path)
-    _write_graph_with_phase_lines(tmp_path, ['<phase id="loop" src="phases/loop" depends_on="loop" />'])
+    _write_graph_with_phase_lines(
+        tmp_path, ['<phase id="loop" src="phases/loop" depends_on="loop" />']
+    )
     _write_skill_phase(tmp_path, "phases/loop")
 
     with pytest.raises(SkillLoadError) as exc:
@@ -412,7 +416,9 @@ def test_topology_src_escape_root(tmp_path: Path) -> None:
 
 def test_topology_src_directory_missing(tmp_path: Path) -> None:
     _base_v21_root(tmp_path)
-    _write_graph_with_phase_lines(tmp_path, ['<phase id="bad" src="phases/missing" depends_on="" />'])
+    _write_graph_with_phase_lines(
+        tmp_path, ['<phase id="bad" src="phases/missing" depends_on="" />']
+    )
     (tmp_path / "phases" / "dummy").mkdir(parents=True)
 
     with pytest.raises(SkillLoadError) as exc:

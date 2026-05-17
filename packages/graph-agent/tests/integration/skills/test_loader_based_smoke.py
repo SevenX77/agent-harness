@@ -14,7 +14,9 @@ REPO_ROOT = Path(__file__).resolve().parents[5]
 @pytest.fixture(scope="module")
 def compiled_skills() -> dict[str, CompiledSkill]:
     return {
-        skill_id: SkillLoader(validate_context_writes=False).compile_skill(REPO_ROOT / "skills" / skill_id)
+        skill_id: SkillLoader(validate_context_writes=False).compile_skill(
+            REPO_ROOT / "skills" / skill_id
+        )
         for skill_id in (
             "event-extraction",
             "batch-analysis",
@@ -37,14 +39,20 @@ def test_all_live_skills_compile_from_v21_roots(
         assert compiled.manifest.schema_version == "2.1"
         assert compiled.manifest.name
         assert compiled.nodes, skill_id
-        assert all(not node.path.name == "SKILL.md" or "phases" in node.path.parts for node in compiled.nodes)
+        assert all(
+            not node.path.name == "SKILL.md" or "phases" in node.path.parts
+            for node in compiled.nodes
+        )
 
 
 @pytest.mark.parametrize(
     ("skill_id", "phase_ids"),
     [
         ("event-extraction", ["setup", "aggregate", "review", "settings"]),
-        ("batch-analysis", ["prepare", "entity_and_characters", "parallel_analysis", "continuity", "assemble"]),
+        (
+            "batch-analysis",
+            ["prepare", "entity_and_characters", "parallel_analysis", "continuity", "assemble"],
+        ),
         ("global-synthesis", ["global_analysis", "scene_assembly", "retroactive", "export"]),
         ("text-segmentation", ["setup", "segment", "review"]),
     ],
@@ -70,7 +78,12 @@ def test_live_skill_topology_matches_graph_md(
             "phases/setup/actions/format_segments_for_prompt.py",
         ),
         ("batch-analysis", "prepare", "prepare_batch", "phases/prepare/actions/prepare_batch.py"),
-        ("batch-analysis", "assemble", "assemble_batch", "phases/assemble/actions/assemble_batch.py"),
+        (
+            "batch-analysis",
+            "assemble",
+            "assemble_batch",
+            "phases/assemble/actions/assemble_batch.py",
+        ),
         (
             "global-synthesis",
             "scene_assembly",
@@ -83,7 +96,12 @@ def test_live_skill_topology_matches_graph_md(
             "export_story_framework",
             "phases/export/actions/export_story_framework.py",
         ),
-        ("text-segmentation", "setup", "prepare_chapter", "phases/setup/actions/prepare_chapter.py"),
+        (
+            "text-segmentation",
+            "setup",
+            "prepare_chapter",
+            "phases/setup/actions/prepare_chapter.py",
+        ),
     ],
 )
 def test_logic_actions_are_discovered_from_v21_phase_dirs(

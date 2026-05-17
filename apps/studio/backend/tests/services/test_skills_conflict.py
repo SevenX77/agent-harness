@@ -36,7 +36,13 @@ def test_update_skill_expected_hash_match_writes_files(
 
     assert response.status_code == 200
     assert "hash matched setup" in (
-        workspaces_dir / "default" / "skills" / "text-segmentation" / "phases" / "setup" / "LOGIC.md"
+        workspaces_dir
+        / "default"
+        / "skills"
+        / "text-segmentation"
+        / "phases"
+        / "setup"
+        / "LOGIC.md"
     ).read_text(encoding="utf-8")
 
 
@@ -81,7 +87,13 @@ def test_update_skill_without_expected_hash_remains_backward_compatible(
 
     assert response.status_code == 200
     assert "legacy client setup" in (
-        workspaces_dir / "default" / "skills" / "text-segmentation" / "phases" / "setup" / "LOGIC.md"
+        workspaces_dir
+        / "default"
+        / "skills"
+        / "text-segmentation"
+        / "phases"
+        / "setup"
+        / "LOGIC.md"
     ).read_text(encoding="utf-8")
 
 
@@ -93,7 +105,9 @@ def test_update_skill_retry_with_returned_current_hash_succeeds(
     skill_dir = skills_dir / "text-segmentation"
     files = _files_from_skill_dir(skill_dir)
     graph_path = skill_dir / "GRAPH.md"
-    graph_path.write_text(graph_path.read_text(encoding="utf-8") + "\n<!-- reload me -->\n", encoding="utf-8")
+    graph_path.write_text(
+        graph_path.read_text(encoding="utf-8") + "\n<!-- reload me -->\n", encoding="utf-8"
+    )
     files["phases/setup/LOGIC.md"] = files["phases/setup/LOGIC.md"].replace(
         "name: setup",
         "name: retried setup",
@@ -111,5 +125,11 @@ def test_update_skill_retry_with_returned_current_hash_succeeds(
     assert conflict.status_code == 409
     assert retry.status_code == 200
     assert "retried setup" in (
-        workspaces_dir / "default" / "skills" / "text-segmentation" / "phases" / "setup" / "LOGIC.md"
+        workspaces_dir
+        / "default"
+        / "skills"
+        / "text-segmentation"
+        / "phases"
+        / "setup"
+        / "LOGIC.md"
     ).read_text(encoding="utf-8")

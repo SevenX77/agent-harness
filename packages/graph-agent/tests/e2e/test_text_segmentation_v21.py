@@ -20,8 +20,7 @@ class FakeTextSegmentationChatModel:
                 "name": "finish_task",
                 "args": {
                     "markdown": (
-                        "## raw_segmentation\n\n"
-                        "- **段落1（B类-事件）**：主角进入废墟 行号：1-2"
+                        "## raw_segmentation\n\n- **段落1（B类-事件）**：主角进入废墟 行号：1-2"
                     )
                 },
                 "id": "segment-finish",
@@ -88,7 +87,9 @@ def test_text_segmentation_v21_e2e_fake_llm() -> None:
     assert segmentation["chapter_number"] == 1
     assert segmentation["paragraphs"][0]["type"] == "B"
     assert result["flow"]["finish_task_result"]["ok"] is True
-    assert any("finish_task" in message.content for turn in chat_model.messages_seen for message in turn)
+    assert any(
+        "finish_task" in message.content for turn in chat_model.messages_seen for message in turn
+    )
 
 
 def test_text_segmentation_v21_compile_and_assemble() -> None:

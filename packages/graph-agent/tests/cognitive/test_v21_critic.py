@@ -24,9 +24,7 @@ def test_critic_pass_verdict() -> None:
 
 
 def test_critic_reject_verdict() -> None:
-    client = FakeCriticClient(
-        CriticVerdict(passed=False, reasons=["bad"], suggestions=["fix X"])
-    )
+    client = FakeCriticClient(CriticVerdict(passed=False, reasons=["bad"], suggestions=["fix X"]))
     tool, metrics = build_critic_tool("auditor", "Audit for defects", client)
 
     result = tool.invoke({"target_text": "draft", "criteria": "correctness"})

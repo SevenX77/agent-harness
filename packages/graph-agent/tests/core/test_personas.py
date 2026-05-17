@@ -1,4 +1,5 @@
 """Unit tests for the persona registry."""
+
 from __future__ import annotations
 
 import os
@@ -69,9 +70,7 @@ def test_resolve_persona_finds_skill_local(tmp_path: Path) -> None:
     assert persona.name == "reviewer"
 
 
-def test_resolve_persona_finds_via_env_var(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_resolve_persona_finds_via_env_var(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     base_dir = tmp_path / "skill_a"
     base_dir.mkdir()
     registry = tmp_path / "global_personas"
@@ -166,11 +165,15 @@ def test_resolve_persona_explicit_search_paths_override_env(
     # Explicit empty search_paths disables the env var entirely
     with pytest.raises(SkillLoadError):
         resolve_persona(
-            "reviewer", base_dir=base_dir, search_paths=[explicit_registry / "wrong"],
+            "reviewer",
+            base_dir=base_dir,
+            search_paths=[explicit_registry / "wrong"],
         )
 
     # Explicit registry resolves even when env var points elsewhere
     persona = resolve_persona(
-        "reviewer", base_dir=base_dir, search_paths=[explicit_registry],
+        "reviewer",
+        base_dir=base_dir,
+        search_paths=[explicit_registry],
     )
     assert persona.name == "reviewer"

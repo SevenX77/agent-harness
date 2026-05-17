@@ -26,9 +26,9 @@ def _relative_files(root: Path) -> list[str]:
 def _assert_tree_matches(actual: Path, expected: Path) -> None:
     assert _relative_files(actual) == _relative_files(expected)
     for rel_path in _relative_files(expected):
-        assert (actual / rel_path).read_text(encoding="utf-8") == (
-            expected / rel_path
-        ).read_text(encoding="utf-8")
+        assert (actual / rel_path).read_text(encoding="utf-8") == (expected / rel_path).read_text(
+            encoding="utf-8"
+        )
 
 
 @pytest.mark.parametrize("case", ["simple", "complex", "multi_phase"])

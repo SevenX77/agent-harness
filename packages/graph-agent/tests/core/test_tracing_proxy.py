@@ -1,4 +1,5 @@
 """TracingClientProxy behavior tests for loop_index counter semantics."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -72,14 +73,10 @@ class TestTracingClientProxyLoopIndex:
         proxy_a.invoke("a3")
 
         events_a = [
-            e
-            for e in cb.events
-            if isinstance(e, PromptCapturedEvent) and e.phase_name == "phase_a"
+            e for e in cb.events if isinstance(e, PromptCapturedEvent) and e.phase_name == "phase_a"
         ]
         events_b = [
-            e
-            for e in cb.events
-            if isinstance(e, PromptCapturedEvent) and e.phase_name == "phase_b"
+            e for e in cb.events if isinstance(e, PromptCapturedEvent) and e.phase_name == "phase_b"
         ]
 
         assert [e.loop_index for e in events_a] == [1, 2, 3]

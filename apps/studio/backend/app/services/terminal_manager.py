@@ -201,10 +201,9 @@ def _resolve_terminal_cwd(skill_id: str) -> Path:
         resolved = candidate.resolve()
         if not resolved.is_relative_to(root):
             continue
-        if (
-            not resolved.is_relative_to(config.WORKSPACES_DIR.resolve())
-            and not resolved.is_relative_to(config.SKILLS_DIR.resolve())
-        ):
+        if not resolved.is_relative_to(
+            config.WORKSPACES_DIR.resolve()
+        ) and not resolved.is_relative_to(config.SKILLS_DIR.resolve()):
             continue
         if (resolved / "GRAPH.md").is_file():
             return resolved

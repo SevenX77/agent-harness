@@ -49,9 +49,8 @@ def _request_server_exit(request: Request) -> None:
     server = getattr(app.state, "uvicorn_server", None)
     if server is not None:
         server.should_exit = True
-    elif (
-        os.environ.get("STUDIO_DISABLE_PROCESS_SHUTDOWN") == "1"
-        or (request.client and request.client.host == "testclient")
+    elif os.environ.get("STUDIO_DISABLE_PROCESS_SHUTDOWN") == "1" or (
+        request.client and request.client.host == "testclient"
     ):
         app.state.shutdown_requested = True
     else:

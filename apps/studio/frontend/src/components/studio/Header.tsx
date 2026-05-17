@@ -9,13 +9,23 @@ import type { CollaborateResult } from "@/api/types"
 
 interface HeaderProps {
   skillId: string | null
+  navStack?: string[]
   copilotOpen: boolean
   onCopilotToggle: () => void
   onHome: () => void
+  onBreadcrumbClick?: (index: number) => void
   onSyncSuccess?: (result: CollaborateResult) => void
 }
 
-export function Header({ skillId, copilotOpen, onCopilotToggle, onHome, onSyncSuccess }: HeaderProps) {
+export function Header({
+  skillId,
+  navStack = skillId ? [skillId] : [],
+  copilotOpen,
+  onCopilotToggle,
+  onHome,
+  onBreadcrumbClick,
+  onSyncSuccess,
+}: HeaderProps) {
   const skillSync = useSkillSync(skillId, { onSyncSuccess })
   const publish = usePublishSkill(skillId)
   const isSaving = skillSync.status === "saving"
@@ -64,9 +74,24 @@ export function Header({ skillId, copilotOpen, onCopilotToggle, onHome, onSyncSu
       </div>
 
       <div className="flex min-w-0 items-center justify-center gap-2">
-        <span className="truncate text-sm font-medium text-foreground">
-          {skillId ? `Skill ${skillId}` : "Studio Workspace"}
-        </span>
+        {navStack.length > 0 ? (
+          <nav className="flex min-w-0 items-center gap-1 text-sm font-medium text-foreground">
+            {navStack.map((item, index) => (
+              <span key={`${item}-${index}`} className="flex min-w-0 items-center gap-1">
+                {index > 0 ? <span className="text-muted-foreground">/</span> : null}
+                <button
+                  type="button"
+                  onClick={() => onBreadcrumbClick?.(index)}
+                  className="truncate rounded-sm px-1 hover:bg-accent"
+                >
+                  {item}
+                </button>
+              </span>
+            ))}
+          </nav>
+        ) : (
+          <span className="truncate text-sm font-medium text-foreground">Studio Workspace</span>
+        )}
         <Badge variant="outline" className="uppercase">
           Draft
         </Badge>

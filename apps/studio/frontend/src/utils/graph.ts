@@ -24,6 +24,17 @@ export function subgraphSkillId(path: string | null): string | null {
 }
 
 function phasesFromManifest(manifest: SkillManifest): VisualPhase[] {
+  if (manifest.schema_version === '2.1') {
+    return manifest.phases.map((phase) => ({
+      id: phase.id,
+      name: phase.id,
+      mode: 'logic',
+      role: null,
+      dependsOn: normalizeDependency(phase.depends_on),
+      subgraph: null,
+    }))
+  }
+
   if (manifest.type === 'graph') {
     return manifest.phases.map((phase) => ({
       id: phase.name,
@@ -57,6 +68,9 @@ function phasesFromManifest(manifest: SkillManifest): VisualPhase[] {
 }
 
 function inputLabel(manifest: SkillManifest): string {
+  if (manifest.schema_version === '2.1') {
+    return 'Input: schema'
+  }
   if (manifest.type !== 'graph') {
     return 'Input: runtime'
   }
@@ -65,6 +79,9 @@ function inputLabel(manifest: SkillManifest): string {
 }
 
 function outputLabel(manifest: SkillManifest): string {
+  if (manifest.schema_version === '2.1') {
+    return 'Output: schema'
+  }
   if (manifest.type !== 'graph') {
     return 'Output: result'
   }
@@ -73,7 +90,7 @@ function outputLabel(manifest: SkillManifest): string {
 }
 
 export function graphSkill(manifest: SkillManifest): GraphSkillDef | null {
-  return manifest.type === 'graph' ? manifest : null
+  return manifest.schema_version === '2.0' && manifest.type === 'graph' ? manifest : null
 }
 
 export function buildGraph(

@@ -45,7 +45,7 @@ export default defineConfig({
     },
   },
   server: {
-    host: '127.0.0.1',
+    host: '0.0.0.0',
     port: 5173,
     strictPort: true,
     warmup: {
@@ -64,7 +64,7 @@ export default defineConfig({
         changeOrigin: false,
       },
     },
-    allowedHosts: ['.trycloudflare.com', 'localhost', '127.0.0.1'],
+    allowedHosts: ['.trycloudflare.com', 'localhost', '127.0.0.1', '144.202.108.83'],
   },
   test: {
     exclude: [...configDefaults.exclude, 'tests/e2e/**'],

@@ -2,10 +2,13 @@ import { useState } from "react"
 import { Header } from "./header"
 import { Toolbar } from "./toolbar"
 import { Canvas } from "./canvas"
-import { SplitEditor, type ViewMode } from "./split-editor"
-import { Copilot, CopilotButton } from "./copilot"
+import { SplitEditor } from "./split-editor"
+import { Copilot } from "./copilot"
+import { CenterActionBar } from "./center-action-bar"
+import { SettingsPage } from "./settings-page"
 import {
   AssetsPanel,
+  InputPanel,
   TimelinePanel,
   PropertiesPanel,
   type FileMeta,
@@ -20,21 +23,24 @@ export function Workspace() {
   const [activePanel, setActivePanel] = useState<string | null>("assets")
   const [copilotOpen, setCopilotOpen] = useState(true)
   const [openFile, setOpenFile] = useState<FileMeta | null>(null)
-  const [viewMode, setViewMode] = useState<ViewMode>("split")
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const handleFileOpen = (file: FileMeta) => {
     setOpenFile(file)
-    setViewMode("split")
+    setSettingsOpen(false)
   }
+  const handleCloseFile = () => setOpenFile(null)
 
   const renderPanel = () => {
     switch (activePanel) {
       case "assets":
-        return <AssetsPanel onClose={() => setActivePanel(null)} onFileOpen={handleFileOpen} />
+        return <AssetsPanel onFileOpen={handleFileOpen} />
+      case "input":
+        return <InputPanel onFileOpen={handleFileOpen} />
       case "timeline":
-        return <TimelinePanel onClose={() => setActivePanel(null)} />
+        return <TimelinePanel />
       case "properties":
-        return <PropertiesPanel onClose={() => setActivePanel(null)} />
+        return <PropertiesPanel />
       default:
         return null
     }
@@ -49,8 +55,12 @@ export function Workspace() {
         onCopilotToggle={() => setCopilotOpen((v) => !v)}
       />
 
-      <div className="flex-1 flex min-h-0">
-        <Toolbar activePanel={activePanel} onPanelChange={setActivePanel} />
+      <div className="flex-1 flex min-h-0 relative">
+        <Toolbar
+          activePanel={activePanel}
+          onPanelChange={setActivePanel}
+          onSettingsOpen={() => setSettingsOpen(true)}
+        />
 
         <ResizablePanelGroup
           id="studio-workspace-h"
@@ -72,15 +82,20 @@ export function Workspace() {
           )}
 
           <ResizablePanel id="canvas" defaultSize="60%" minSize="30%">
-            {openFile ? (
-              <SplitEditor
-                file={openFile}
-                viewMode={viewMode}
-                onViewModeChange={setViewMode}
-              />
-            ) : (
-              <Canvas />
-            )}
+            <div className="relative size-full">
+              {settingsOpen ? (
+                <SettingsPage onClose={() => setSettingsOpen(false)} />
+              ) : (
+                <>
+                  {openFile ? (
+                    <SplitEditor file={openFile} onCloseFile={handleCloseFile} />
+                  ) : (
+                    <Canvas />
+                  )}
+                  <CenterActionBar />
+                </>
+              )}
+            </div>
           </ResizablePanel>
 
           {copilotOpen && (
@@ -92,16 +107,13 @@ export function Workspace() {
                 minSize="18%"
                 maxSize="35%"
               >
-                <Copilot onClose={() => setCopilotOpen(false)} />
+                <Copilot />
               </ResizablePanel>
             </>
           )}
         </ResizablePanelGroup>
-      </div>
 
-      {!copilotOpen && (
-        <CopilotButton onClick={() => setCopilotOpen(true)} />
-      )}
+      </div>
     </div>
   )
 }

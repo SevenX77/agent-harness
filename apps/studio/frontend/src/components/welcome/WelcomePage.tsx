@@ -1,12 +1,55 @@
-import { AlertCircle, AlertTriangle, Clock3, FolderOpen, Layers, Layers3, Plus, Sparkles } from 'lucide-react'
+import { AlertCircle, AlertTriangle, Clock3, FolderOpen, Layers, Layers3, MoreVertical, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { toast } from 'sonner'
 import { api } from '../../api/client'
 import type { SkillSummary } from '../../api/types'
 import { useRecentSkills } from '../../hooks/useRecentSkills'
 import { useSkills } from '../../hooks/useSkills'
-import { selectSkillDirectory } from '../../lib/tauri'
+import { revealInFileManager, selectSkillDirectory } from '../../lib/tauri'
 import { generateSkillMd } from '../../templates/skillMdGenerator'
 import { errorMessage } from '../../utils/errors'
+import { Badge } from '../ui/badge'
+import { Button } from '../ui/button'
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '../ui/card'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '../ui/context-menu'
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu'
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '../ui/empty'
+import { Input } from '../ui/input'
+import { Label } from '../ui/label'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 
 interface WelcomePageProps {
@@ -64,6 +107,9 @@ function shortPath(path: string | null) {
 export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   const [importing, setImporting] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [newSkillOpen, setNewSkillOpen] = useState(false)
+  const [newSkillName, setNewSkillName] = useState('new-skill')
+  const [newSkillError, setNewSkillError] = useState<string | null>(null)
   const { skills, skillListError, mutateSkills } = useSkills(null)
   const skillIds = useMemo(() => skills.map((skill) => skill.id), [skills])
   const { recentSkills, rememberSkill } = useRecentSkills(skillIds)
@@ -74,13 +120,39 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
     onSelectSkill(skillId)
   }
 
-  const createSkill = async () => {
-    const name = window.prompt('Skill name', 'new-skill')
-    if (!name) {
+  const openNewSkillDialog = () => {
+    setNewSkillName('new-skill')
+    setNewSkillError(null)
+    setNewSkillOpen(true)
+  }
+
+  const handleReveal = (skill: SkillSummary) => {
+    void revealInFileManager(skill.directory_path ?? '')
+  }
+
+  const handleDelete = async (skill: SkillSummary) => {
+    if (!window.confirm(`Delete skill "${skill.name}"? This cannot be undone.`)) {
       return
     }
-    const skillId = normalizeSkillId(name)
+    try {
+      await api.delete(`/skills/${skill.id}`)
+      toast.success(`Deleted ${skill.name}`)
+      await mutateSkills()
+    } catch (error) {
+      toast.error('Could not delete skill', { description: errorMessage(error) })
+    }
+  }
+
+  const submitNewSkill = async (event?: React.FormEvent) => {
+    event?.preventDefault()
+    const trimmed = newSkillName.trim()
+    if (!trimmed) {
+      setNewSkillError('Name is required')
+      return
+    }
+    const skillId = normalizeSkillId(trimmed)
     setCreating(true)
+    setNewSkillError(null)
     try {
       const response = await api.post<SkillSummary>('/skills', {
         skill_id: skillId,
@@ -99,9 +171,10 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
         }),
       })
       await mutateSkills()
+      setNewSkillOpen(false)
       openSkill(response.data.id)
     } catch (error) {
-      window.alert(errorMessage(error))
+      setNewSkillError(errorMessage(error))
     } finally {
       setCreating(false)
     }
@@ -142,8 +215,8 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   }
 
   return (
-    <div className="flex size-full items-center justify-center bg-background p-6">
-      <section className="w-full max-w-3xl">
+    <div className="flex size-full items-start justify-center overflow-y-auto bg-background">
+      <section className="w-full max-w-3xl px-6 pb-16 pt-6">
         <div className="mb-8 flex items-center gap-3">
           <div className="flex size-10 items-center justify-center rounded-lg bg-foreground">
             <Layers className="size-6 text-background" strokeWidth={2} />
@@ -156,27 +229,29 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
 
         <div className="mb-6 grid gap-3 sm:grid-cols-2">
           <div>
-            <button
-              type="button"
+            <Button
+              variant="outline"
+              size="lg"
               disabled={creating}
-              onClick={() => void createSkill()}
-              className="flex h-11 w-full items-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={openNewSkillDialog}
+              className="w-full justify-start"
             >
-              <Plus className="size-4" />
+              <Plus />
               {creating ? 'Creating' : 'New skill'}
-            </button>
+            </Button>
             <p className="mt-1 truncate text-xs text-muted-foreground">Default: AgentStudio/Skills</p>
           </div>
           <div>
-            <button
-              type="button"
+            <Button
+              variant="outline"
+              size="lg"
               disabled={importing}
               onClick={() => void importSkillDirectory()}
-              className="flex h-11 w-full items-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+              className="w-full justify-start"
             >
-              <FolderOpen className="size-4" />
+              <FolderOpen />
               {importing ? 'Importing' : 'Import skill'}
-            </button>
+            </Button>
             <p className="mt-1 truncate text-xs text-muted-foreground">Choose any local folder</p>
           </div>
         </div>
@@ -198,82 +273,177 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
           </div>
         ) : null}
 
-        <div className="grid max-h-[50vh] gap-3 overflow-y-auto pr-1 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2">
           {visibleSkills.map((skill) => (
-            <button
-              key={skill.id}
-              type="button"
-              onClick={() => openSkill(skill.id)}
-              className="group flex min-h-32 flex-col justify-between rounded-md border border-border bg-card p-4 text-left shadow-sm transition-colors hover:border-primary/45 hover:bg-accent/50"
-            >
-              <div>
-                <div className="mb-3 flex items-start justify-between gap-3">
-                  <div className="flex size-8 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
-                    <Layers3 className="size-4" />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {skill.has_golden ? (
-                      <span className="rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">Golden</span>
-                    ) : null}
-                    {skill.config_mismatch ? (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span
-                            role="img"
-                            aria-label="Repo URL mismatch"
+            <ContextMenu key={skill.id}>
+              <ContextMenuTrigger asChild>
+                <Card
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openSkill(skill.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      openSkill(skill.id)
+                    }
+                  }}
+                  className="group cursor-pointer transition-colors hover:ring-primary/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                >
+                  <CardHeader>
+                    <div className="flex size-8 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
+                      <Layers3 className="size-4" />
+                    </div>
+                    <CardAction>
+                      <div className="flex items-center gap-2">
+                        {skill.has_golden ? <Badge>Golden</Badge> : null}
+                        {skill.config_mismatch ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Badge
+                                variant="outline"
+                                aria-label="Repo URL mismatch"
+                                onClick={(event) => event.stopPropagation()}
+                                className="border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                              >
+                                <AlertTriangle />
+                                Config drift
+                              </Badge>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-xs text-xs">
+                              <div className="space-y-1.5">
+                                <div>
+                                  <span className="font-medium">Actual:</span>{' '}
+                                  <span className="break-all font-mono">{skill.config_mismatch.actual_remote_url}</span>
+                                </div>
+                                <div>
+                                  <span className="font-medium">Expected:</span>{' '}
+                                  <span className="break-all font-mono">{skill.config_mismatch.expected_remote_url}</span>
+                                </div>
+                                <div className="pt-1 text-muted-foreground">{skill.config_mismatch.recommendation}</div>
+                              </div>
+                            </TooltipContent>
+                          </Tooltip>
+                        ) : null}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              aria-label={`More actions for ${skill.name}`}
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              <MoreVertical />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            align="end"
                             onClick={(event) => event.stopPropagation()}
-                            className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-600 dark:text-amber-400"
                           >
-                            <AlertTriangle className="size-3.5" />
-                            Config drift
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent className="max-w-xs text-xs">
-                          <div className="space-y-1.5">
-                            <div>
-                              <span className="font-medium">Actual:</span>{' '}
-                              <span className="break-all font-mono">{skill.config_mismatch.actual_remote_url}</span>
-                            </div>
-                            <div>
-                              <span className="font-medium">Expected:</span>{' '}
-                              <span className="break-all font-mono">{skill.config_mismatch.expected_remote_url}</span>
-                            </div>
-                            <div className="pt-1 text-muted-foreground">{skill.config_mismatch.recommendation}</div>
-                          </div>
-                        </TooltipContent>
-                      </Tooltip>
-                    ) : null}
-                  </div>
-                </div>
-                <h3 className="line-clamp-2 text-sm font-semibold text-foreground group-hover:text-primary">
-                  {skill.name}
-                </h3>
-                <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">{skill.description}</p>
-                <p className="mt-2 truncate font-mono text-[11px] text-muted-foreground">
-                  {shortPath(skill.directory_path)}
-                </p>
-              </div>
-              <div className="mt-4 flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                <span>{skill.phase_count} phases</span>
-                <span className="inline-flex items-center gap-1">
-                  <Clock3 className="size-3.5" />
-                  {formatLastRun(skill.last_run_at)}
-                </span>
-              </div>
-            </button>
+                            <DropdownMenuItem onSelect={() => handleReveal(skill)}>
+                              <FolderOpen />
+                              Reveal in file manager
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onSelect={() => void handleDelete(skill)}
+                            >
+                              <Trash2 />
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </CardAction>
+                  </CardHeader>
+                  <CardContent>
+                    <CardTitle className="line-clamp-2 text-sm">{skill.name}</CardTitle>
+                    <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">{skill.description}</p>
+                    <p className="mt-2 truncate font-mono text-[11px] text-muted-foreground">
+                      {shortPath(skill.directory_path)}
+                    </p>
+                  </CardContent>
+                  <CardFooter className="justify-between gap-3 text-xs text-muted-foreground">
+                    <span>{skill.phase_count} phases</span>
+                    <span className="inline-flex items-center gap-1">
+                      <Clock3 className="size-3.5" />
+                      {formatLastRun(skill.last_run_at)}
+                    </span>
+                  </CardFooter>
+                </Card>
+              </ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuItem onSelect={() => handleReveal(skill)}>
+                  <FolderOpen />
+                  Reveal in file manager
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  variant="destructive"
+                  onSelect={() => void handleDelete(skill)}
+                >
+                  <Trash2 />
+                  Delete
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
           ))}
         </div>
 
         {!skillListError && visibleSkills.length === 0 ? (
-          <div className="grid min-h-40 place-items-center rounded-md border border-dashed border-border bg-card p-6 text-center">
-            <div>
-              <FolderOpen className="mx-auto mb-3 size-8 text-muted-foreground" />
-              <h3 className="text-sm font-semibold text-foreground">No skills found</h3>
-              <p className="mt-1 max-w-sm text-sm text-muted-foreground">Create or import a skill to populate this workspace.</p>
-            </div>
-          </div>
+          <Empty className="min-h-40 border border-dashed border-border">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <FolderOpen />
+              </EmptyMedia>
+              <EmptyTitle>No skills found</EmptyTitle>
+              <EmptyDescription>Create or import a skill to populate this workspace.</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : null}
       </section>
+
+      <Dialog open={newSkillOpen} onOpenChange={setNewSkillOpen}>
+        <DialogContent>
+          <form onSubmit={(event) => void submitNewSkill(event)}>
+            <DialogHeader>
+              <DialogTitle>New skill</DialogTitle>
+              <DialogDescription>
+                A folder will be created under AgentStudio/Skills with a starter SKILL.md.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="my-4 space-y-2">
+              <Label htmlFor="new-skill-name">Skill name</Label>
+              <Input
+                id="new-skill-name"
+                autoFocus
+                value={newSkillName}
+                onChange={(event) => setNewSkillName(event.target.value)}
+                placeholder="my-new-skill"
+                aria-invalid={Boolean(newSkillError)}
+                disabled={creating}
+              />
+              {newSkillError ? (
+                <p className="text-xs text-destructive">{newSkillError}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Will be normalized to <span className="font-mono">{normalizeSkillId(newSkillName || 'new-skill')}</span>
+                </p>
+              )}
+            </div>
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button type="button" variant="outline" disabled={creating}>
+                  Cancel
+                </Button>
+              </DialogClose>
+              <Button type="submit" disabled={creating || !newSkillName.trim()}>
+                {creating ? 'Creating' : 'Create'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

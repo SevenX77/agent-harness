@@ -1,7 +1,7 @@
 import { toast } from 'sonner'
 import { isTauriRuntime } from '../config/runtime'
 
-type TauriCommand = 'open_in_cursor' | 'open_in_terminal' | 'open_in_codex'
+type TauriCommand = 'open_in_cursor' | 'open_in_terminal' | 'open_in_codex' | 'reveal_in_file_manager'
 
 async function invokeShell(command: TauriCommand, path: string) {
   const targetPath = path.trim()
@@ -33,6 +33,32 @@ export function openInTerminal(path: string) {
 
 export function openInCodex(path: string) {
   return invokeShell('open_in_codex', path)
+}
+
+export async function revealInFileManager(path: string) {
+  const targetPath = path.trim()
+  if (!targetPath) {
+    toast.error('No skill path available')
+    return
+  }
+
+  if (isTauriRuntime()) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('reveal_in_file_manager', { path: targetPath })
+      return
+    } catch {
+      toast.error('Failed to reveal in file manager')
+      return
+    }
+  }
+
+  try {
+    await navigator.clipboard.writeText(targetPath)
+    toast.success('Path copied to clipboard', { description: targetPath })
+  } catch {
+    toast.info('Desktop-only feature', { description: targetPath })
+  }
 }
 
 export async function selectSkillDirectory(): Promise<string | null> {

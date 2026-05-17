@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from typing import Literal, TypeAlias
 
 import httpx
 
-from app.models.copilot import CopilotBackend
+CopilotProvider: TypeAlias = Literal["claude", "deepseek", "gemini", "openai"]
 
-DEFAULT_BASE_URLS: dict[CopilotBackend, str] = {
+DEFAULT_BASE_URLS: dict[CopilotProvider, str] = {
     "claude": "https://api.anthropic.com",
     "openai": "https://api.openai.com",
     "deepseek": "https://api.deepseek.com",
@@ -40,7 +41,7 @@ class _NetworkError(Exception):
 
 
 async def _ping_provider(
-    backend: CopilotBackend,
+    backend: CopilotProvider,
     api_key: str,
     base_url: str,
 ) -> PingResult:
@@ -61,7 +62,7 @@ async def _ping_provider(
 
 async def _request_models(
     client: httpx.AsyncClient,
-    backend: CopilotBackend,
+    backend: CopilotProvider,
     api_key: str,
     base_url: str,
 ) -> httpx.Response:

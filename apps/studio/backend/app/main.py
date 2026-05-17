@@ -25,6 +25,7 @@ from app.routers import (
     copilot,
     debug,
     golden,
+    llm,
     lint,
     runs,
     settings,
@@ -131,6 +132,7 @@ def create_app() -> FastAPI:
     studio_app.include_router(golden.router)
     studio_app.include_router(compare.router)
     studio_app.include_router(copilot.router)
+    studio_app.include_router(llm.router)
     studio_app.include_router(audit.router)
     studio_app.include_router(debug.router)
     studio_app.include_router(websockets.router)

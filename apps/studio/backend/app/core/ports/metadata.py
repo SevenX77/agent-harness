@@ -53,6 +53,10 @@ class MetadataStore(Protocol):
         """Persist one skill summary for one user."""
         ...
 
+    async def remove_skill_summary(self, user_id: str, skill_id: str) -> None:
+        """Remove one skill summary if present."""
+        ...
+
     async def list_runs(self, user_id: str, skill_id: str) -> list[RunMetadata]:
         """Return saved run metadata for one skill."""
         ...

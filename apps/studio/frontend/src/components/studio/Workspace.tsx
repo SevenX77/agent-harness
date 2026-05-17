@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { GraphCanvas, type SkillGraphNodeData } from "@/components/GraphCanvas"
 import { CopilotPanel } from "@/components/copilot/copilot-panel"
@@ -19,9 +19,19 @@ interface WorkspaceProps {
   onCloseSkill: () => void
 }
 
-export function Workspace({ skillId, onSelectSkill }: WorkspaceProps) {
-  const [activePanel, setActivePanel] = useState<PanelKind | null>("assets")
-  const [copilotOpen, setCopilotOpen] = useState(true)
+export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspaceProps) {
+  const [activePanel, setActivePanel] = useState<PanelKind | null>(skillId ? "assets" : null)
+  const [copilotOpen, setCopilotOpen] = useState(Boolean(skillId))
+
+  useEffect(() => {
+    if (skillId === null) {
+      setActivePanel(null)
+      setCopilotOpen(false)
+    } else {
+      setActivePanel("assets")
+      setCopilotOpen(true)
+    }
+  }, [skillId])
   const [openFile, setOpenFile] = useState<FileMeta | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [fileDrafts, setFileDrafts] = useState<Record<string, string>>({})
@@ -71,6 +81,7 @@ export function Workspace({ skillId, onSelectSkill }: WorkspaceProps) {
         skillId={skillId}
         copilotOpen={copilotOpen}
         onCopilotToggle={() => setCopilotOpen((open) => !open)}
+        onHome={onCloseSkill}
         onSyncSuccess={() => {
           void mutateSkillDetail()
         }}

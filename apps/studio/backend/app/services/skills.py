@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import re
+import shutil
 import uuid
 from collections.abc import Iterable
 from pathlib import Path
@@ -198,6 +200,31 @@ async def update_skill_content(
         await storage.delete(str(candidate_path))
 
     return await get_skill_detail(user_id, skill_id, storage, metadata, lint_result=lint)
+
+
+async def delete_skill(
+    user_id: str,
+    skill_id: str,
+    storage: StorageBackend,
+    metadata: MetadataStore,
+) -> None:
+    """Delete a skill directory and clear all metadata for it."""
+    skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
+    resolved_skill_dir = skill_dir.resolve()
+    builtin_root = config.SKILLS_DIR.resolve()
+    if resolved_skill_dir == builtin_root or resolved_skill_dir.is_relative_to(builtin_root):
+        response = error_response(
+            error_code="SKILL_READ_ONLY",
+            http_status=403,
+            message=f"Skill is read-only: {skill_id}",
+            details={"skill_id": skill_id},
+            retry_strategy="not_retryable",
+        )
+        raise_error_response(response)
+
+    await asyncio.to_thread(shutil.rmtree, resolved_skill_dir, ignore_errors=False)
+    await metadata.remove_skill_index_entry(skill_id)
+    await metadata.remove_skill_summary(user_id, skill_id)
 
 
 async def create_new_skill(

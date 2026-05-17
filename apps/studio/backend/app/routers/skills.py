@@ -6,15 +6,14 @@ import asyncio
 from typing import NoReturn
 
 import httpx
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 from app.core.backends import get_auth_user_id, get_git_collab, get_metadata, get_registry_client, get_storage
-from app.core.exceptions import error_response, raise_error_response, raise_not_implemented
+from app.core.exceptions import error_response, raise_error_response
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
-from app.models.errors import ErrorResponse
 from app.models.git_collab import SyncSkillReq
 from app.models.git_history import GitHistoryItem, RevertSkillReq
 from app.models.publish import PublishResult, PublishSkillReq
@@ -41,6 +40,7 @@ from app.services.git_local import (
 from app.services.git_collab import CollaborateResult, GiteaApiError, GitCollaborateService
 from app.services.skills import (
     create_new_skill,
+    delete_skill,
     fork_skill,
     get_skill_detail,
     list_skill_summaries,
@@ -355,13 +355,15 @@ async def validate_input(
     return ValidateInputResponse(validated_data=validated_data)
 
 
-@router.delete(
-    "/{skill_id}",
-    response_model=ErrorResponse,
-    responses={501: {"model": ErrorResponse}},
-)
-async def delete_skill(skill_id: str) -> ErrorResponse:
-    raise_not_implemented(f"delete skill {skill_id}")
+@router.delete("/{skill_id}", status_code=204)
+async def delete_skill_endpoint(
+    skill_id: str,
+    user_id: str = Depends(get_auth_user_id),
+    storage: StorageBackend = Depends(get_storage),
+    metadata: MetadataStore = Depends(get_metadata),
+) -> Response:
+    await delete_skill(user_id, skill_id, storage, metadata)
+    return Response(status_code=204)
 
 
 def _raise_missing_required_field(field: str) -> NoReturn:

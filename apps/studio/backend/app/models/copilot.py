@@ -1,4 +1,4 @@
-"""Studio Copilot V1 API models."""
+"""Studio Copilot API models."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ from typing import Annotated, Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
 
-CopilotBackend: TypeAlias = Literal["claude", "deepseek", "gemini", "openai"]
 CopilotToolName: TypeAlias = Literal["Read", "Write", "Edit", "Bash"]
 CopilotView: TypeAlias = Literal[
     "WelcomeScreen",
@@ -19,62 +18,13 @@ CopilotView: TypeAlias = Literal[
 ]
 
 
-class BackendStatus(BaseModel):
-    """Sanitized credential state for a backend."""
+class CopilotWsRequestPayload(BaseModel):
+    """Incoming Copilot WebSocket request payload."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
-    has_key: bool
-    last4: str | None = None
-    base_url: str = ""
-
-
-class CredentialsReadResponse(BaseModel):
-    """Sanitized credential response."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    backends: dict[CopilotBackend, BackendStatus]
-    active_backend: CopilotBackend
-
-
-class CredentialsWriteRequest(BaseModel):
-    """Credential write or active backend switch request."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    backend: CopilotBackend
-    api_key: str | None
-    base_url: str | None = None
-    set_active: bool = False
-
-
-class TestCredentialsRequest(BaseModel):
-    """Candidate Copilot backend credentials for connectivity testing."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    backend: CopilotBackend
-    api_key: str
-    base_url: str = ""
-
-
-class TestCredentialsResponse(BaseModel):
-    """Connectivity test result for candidate Copilot credentials."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    status: Literal[
-        "ok",
-        "invalid_key",
-        "rate_limited",
-        "quota_exceeded",
-        "network_error",
-        "timeout",
-    ]
-    latency_ms: int | None = None
-    model_seen: str | None = None
-    message: str | None = None
+    user_message: str
+    model_override: str | None = None
 
 
 class CopilotEventBase(BaseModel):

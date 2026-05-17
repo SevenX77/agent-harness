@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -12,22 +13,21 @@ from app.models.copilot import (
     CopilotEventToolUseStart,
 )
 from app.routers import copilot as copilot_router
-from app.services.copilot_credentials import BackendCredentials, CredentialsData
+from app.services import copilot as copilot_service
+from claude_agent_sdk import ClaudeAgentOptions
+from claude_agent_sdk.types import AssistantMessage, TextBlock
 from fastapi.testclient import TestClient
-from starlette.websockets import WebSocketDisconnect
+from graph_agent.config.llm_config import ModelDef, ProviderDef, ResolvedProvider, ResolvedRole
 
 
 def test_copilot_ws_streams_normal_query(
     client: TestClient,
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(copilot_router, "read_credentials", lambda: _credentials("claude", "key"))
     monkeypatch.setattr(
         copilot_router,
         "stream_query",
-        lambda *_args: _events(CopilotEventText(content="hello"), CopilotEventDone()),
+        lambda **_kwargs: _events(CopilotEventText(content="hello"), CopilotEventDone()),
     )
 
     with client.websocket_connect("/api/skills/text-segmentation/copilot/ws") as websocket:
@@ -37,80 +37,65 @@ def test_copilot_ws_streams_normal_query(
         assert websocket.receive_json()["type"] == "done"
 
 
-def test_copilot_ws_supports_multi_turn_queries(
+def test_copilot_ws_forwards_model_override(
     client: TestClient,
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[str] = []
+    calls: list[dict[str, object]] = []
 
-    def stream_query(_skill_id: str, _backend: str, _api_key: str, user_message: str) -> AsyncIterator[object]:
-        calls.append(user_message)
-        return _events(CopilotEventText(content=f"echo:{user_message}"), CopilotEventDone())
+    def stream_query(**kwargs: object) -> AsyncIterator[object]:
+        calls.append(kwargs)
+        return _events(CopilotEventDone())
 
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(copilot_router, "read_credentials", lambda: _credentials("claude", "key"))
     monkeypatch.setattr(copilot_router, "stream_query", stream_query)
 
     with client.websocket_connect("/api/skills/text-segmentation/copilot/ws") as websocket:
+        websocket.send_json({"user_message": "hi", "model_override": "CL46T"})
+        assert websocket.receive_json()["type"] == "done"
+
+    assert calls == [
+        {
+            "skill_id": "text-segmentation",
+            "user_message": "hi",
+            "model_override": "CL46T",
+        }
+    ]
+
+
+def test_copilot_ws_does_not_read_legacy_copilot_json(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    legacy_path = tmp_path / ".studio"
+    legacy_path.mkdir()
+    (legacy_path / "copilot.json").write_text(
+        '{"active_backend":"gemini","backends":{"gemini":{"api_key":"legacy"}}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(
+        copilot_router,
+        "stream_query",
+        lambda **_kwargs: _events(CopilotEventDone()),
+    )
+    assert not hasattr(copilot_router, "read_credentials")
+
+    with client.websocket_connect("/api/skills/text-segmentation/copilot/ws") as websocket:
         websocket.send_json({"user_message": "hi"})
-        assert websocket.receive_json()["content"] == "echo:hi"
         assert websocket.receive_json()["type"] == "done"
 
-        websocket.send_json({"user_message": "next"})
-        assert websocket.receive_json()["content"] == "echo:next"
-        assert websocket.receive_json()["type"] == "done"
 
-    assert calls == ["hi", "next"]
-
-
-def test_copilot_ws_without_active_backend_key_sends_error_and_closes(
+def test_copilot_ws_disconnect_resets_skill_sessions(
     client: TestClient,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(copilot_router, "read_credentials", lambda: _credentials("claude", ""))
-
-    with client.websocket_connect("/api/skills/text-segmentation/copilot/ws") as websocket:
-        assert websocket.receive_json() == {
-            "type": "error",
-            "message": "未配置 claude 的 API key",
-        }
-        with pytest.raises(WebSocketDisconnect):
-            websocket.receive_json()
-
-
-def test_copilot_ws_v1_5_backend_sends_error_and_closes(
-    client: TestClient,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(copilot_router, "read_credentials", lambda: _credentials("gemini", "key"))
-
-    with client.websocket_connect("/api/skills/text-segmentation/copilot/ws") as websocket:
-        assert websocket.receive_json() == {
-            "type": "error",
-            "message": "V1.5 backend (gemini) 暂不可用",
-        }
-        with pytest.raises(WebSocketDisconnect):
-            websocket.receive_json()
-
-
-def test_copilot_ws_disconnect_resets_session(
-    client: TestClient,
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     reset_session = AsyncMock(return_value=1)
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(copilot_router, "read_credentials", lambda: _credentials("claude", "key"))
     monkeypatch.setattr(copilot_router, "reset_session", reset_session)
     monkeypatch.setattr(
         copilot_router,
         "stream_query",
-        lambda *_args: _events(CopilotEventText(content="hello"), CopilotEventDone()),
+        lambda **_kwargs: _events(CopilotEventText(content="hello"), CopilotEventDone()),
     )
 
     with client.websocket_connect("/api/skills/text-segmentation/copilot/ws") as websocket:
@@ -118,20 +103,17 @@ def test_copilot_ws_disconnect_resets_session(
         assert websocket.receive_json()["type"] == "text_delta"
         assert websocket.receive_json()["type"] == "done"
 
-    reset_session.assert_awaited_once_with(skill_id="text-segmentation", backend="claude")
+    reset_session.assert_awaited_once_with(skill_id="text-segmentation", model_code=None)
 
 
 def test_copilot_ws_forwards_stream_query_error(
     client: TestClient,
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(copilot_router, "read_credentials", lambda: _credentials("claude", "key"))
     monkeypatch.setattr(
         copilot_router,
         "stream_query",
-        lambda *_args: _events(CopilotEventError(message="boom")),
+        lambda **_kwargs: _events(CopilotEventError(message="boom")),
     )
 
     with client.websocket_connect("/api/skills/text-segmentation/copilot/ws") as websocket:
@@ -142,15 +124,12 @@ def test_copilot_ws_forwards_stream_query_error(
 
 def test_copilot_ws_serializes_copilot_event_discriminator(
     client: TestClient,
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(copilot_router, "read_credentials", lambda: _credentials("claude", "key"))
     monkeypatch.setattr(
         copilot_router,
         "stream_query",
-        lambda *_args: _events(
+        lambda **_kwargs: _events(
             CopilotEventToolUseStart(tool_name="Read", tool_input={"file_path": "SKILL.md"}),
             CopilotEventDone(),
         ),
@@ -166,18 +145,143 @@ def test_copilot_ws_serializes_copilot_event_discriminator(
         }
 
 
+def test_stream_query_uses_copilot_chat_active_model_when_no_override(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_config = FakeConfig()
+    client = FakeClient([AssistantMessage(content=[TextBlock(text="hello")], model="claude")])
+    monkeypatch.setattr(copilot_service, "load_config", lambda: fake_config)
+    monkeypatch.setenv("PRIMARY_KEY", "primary-secret")
+    monkeypatch.setattr(copilot_service, "_session_factory", lambda options: client.capture(options))
+
+    events = asyncio.run(
+        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+    )
+
+    assert fake_config.role_calls == ["copilot_chat"]
+    assert fake_config.model_calls == []
+    assert client.options is not None
+    assert client.options.env["ANTHROPIC_API_KEY"] == "primary-secret"
+    assert client.options.env["ANTHROPIC_BASE_URL"] == "https://provider.test"
+    assert events == [CopilotEventText(content="hello"), CopilotEventDone()]
+
+
+def test_stream_query_uses_model_override_when_provided(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_config = FakeConfig()
+    client = FakeClient([AssistantMessage(content=[TextBlock(text="hello")], model="claude")])
+    monkeypatch.setattr(copilot_service, "load_config", lambda: fake_config)
+    monkeypatch.setenv("PRIMARY_KEY", "primary-secret")
+    monkeypatch.setattr(copilot_service, "_session_factory", lambda options: client.capture(options))
+
+    events = asyncio.run(
+        _collect(
+            copilot_service.stream_query(
+                "skill-a",
+                "hi",
+                model_override="CL46T",
+                workspace_dir=tmp_path,
+            )
+        )
+    )
+
+    assert fake_config.role_calls == []
+    assert fake_config.model_calls == ["CL46T"]
+    assert events[-1] == CopilotEventDone()
+
+
+def test_stream_query_yields_error_when_no_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("PRIMARY_KEY", raising=False)
+    monkeypatch.delenv("FALLBACK_KEY", raising=False)
+    monkeypatch.setattr(copilot_service, "load_config", lambda: FakeConfig())
+
+    events = asyncio.run(
+        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+    )
+
+    assert events == [
+        CopilotEventError(message="Provider TEST_PROVIDER 未配置 API key (env: PRIMARY_KEY)")
+    ]
+
+
 async def _events(*items: object) -> AsyncIterator[object]:
     for item in items:
         yield item
 
 
-def _credentials(active_backend: str, active_key: str) -> CredentialsData:
-    return CredentialsData(
-        active_backend=active_backend,
-        backends={
-            "claude": BackendCredentials(api_key=active_key if active_backend == "claude" else "claude-key"),
-            "deepseek": BackendCredentials(api_key=active_key if active_backend == "deepseek" else "deepseek-key"),
-            "gemini": BackendCredentials(api_key=active_key if active_backend == "gemini" else ""),
-            "openai": BackendCredentials(api_key=active_key if active_backend == "openai" else ""),
-        },
+async def _collect(stream: AsyncIterator[object]) -> list[object]:
+    return [event async for event in stream]
+
+
+class FakeConfig:
+    def __init__(self) -> None:
+        self.role_calls: list[str] = []
+        self.model_calls: list[str] = []
+
+    def resolve_role(self, role_name: str) -> ResolvedRole:
+        self.role_calls.append(role_name)
+        return _resolved_role("copilot_chat", "CL46T")
+
+    def resolve_model(self, model_code: str) -> ResolvedRole:
+        self.model_calls.append(model_code)
+        return _resolved_role("_model_override::CL46T", model_code)
+
+
+class FakeClient:
+    def __init__(self, messages: list[object]) -> None:
+        self.messages = messages
+        self.connected = False
+        self.queries: list[str] = []
+        self.options: ClaudeAgentOptions | None = None
+
+    def capture(self, options: ClaudeAgentOptions) -> FakeClient:
+        self.options = options
+        return self
+
+    async def connect(self) -> None:
+        self.connected = True
+
+    async def query(self, prompt: str, session_id: str = "default") -> None:
+        del session_id
+        self.queries.append(prompt)
+
+    async def receive_response(self) -> AsyncIterator[object]:
+        for message in self.messages:
+            yield message
+
+
+def _resolved_role(role_name: str, active_model_code: str) -> ResolvedRole:
+    model = ModelDef(
+        code=active_model_code,
+        name="Claude Test",
+        providers={"TEST_PROVIDER": "claude-test"},
+    )
+    provider = ProviderDef(
+        code="TEST_PROVIDER",
+        name="Test Provider",
+        type="anthropic_compatible",
+        api_key_env="PRIMARY_KEY",
+        api_key_env_fallback="FALLBACK_KEY",
+        base_url="https://provider.test",
+    )
+    return ResolvedRole(
+        role_name=role_name,
+        temperature=0.7,
+        system_prompt_prefix="",
+        active_model_code=active_model_code,
+        model_fallback=False,
+        call_chain=[
+            ResolvedProvider(
+                provider_code="TEST_PROVIDER",
+                provider_def=provider,
+                model_name="claude-test",
+                model_def=model,
+            )
+        ],
     )

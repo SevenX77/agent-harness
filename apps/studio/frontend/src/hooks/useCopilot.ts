@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { wsUrl } from '../api/client'
 import { nextBackoffMs } from '../lib/websocket'
 import { copilotStore } from '../store/copilotStore'
-import type { CopilotBackend, CopilotEvent, CopilotMessage } from '../types/copilot'
+import type { CopilotEvent, CopilotMessage } from '../types/copilot'
 import { normalizeCopilotEvent } from '../types/copilot'
 
 type ConnectionStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'reconnecting' | 'error'
@@ -22,7 +22,7 @@ function createMessage(role: CopilotMessage['role'], content: string, status: Co
   }
 }
 
-export function useCopilot(skillId: string | null, backend: CopilotBackend = 'claude') {
+export function useCopilot(skillId: string | null) {
   const snapshot = useSyncExternalStore(copilotStore.subscribe, copilotStore.getSnapshot)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('idle')
   const [reconnectInMs, setReconnectInMs] = useState<number | null>(null)
@@ -32,10 +32,10 @@ export function useCopilot(skillId: string | null, backend: CopilotBackend = 'cl
   const textQueueRef = useRef<Array<{ messageId: string, content: string, event: CopilotEvent }>>([])
 
   useEffect(() => {
-    if (snapshot.skillId !== skillId || snapshot.backend !== backend) {
-      copilotStore.reset(skillId, backend)
+    if (snapshot.skillId !== skillId) {
+      copilotStore.reset(skillId)
     }
-  }, [backend, skillId, snapshot.backend, snapshot.skillId])
+  }, [skillId, snapshot.skillId])
 
   useEffect(() => {
     if (!skillId) {
@@ -140,7 +140,7 @@ export function useCopilot(skillId: string | null, backend: CopilotBackend = 'cl
     }
   }, [])
 
-  const sendMessage = useCallback((content: string) => {
+  const sendMessage = useCallback((content: string, modelOverride?: string | null) => {
     const trimmed = content.trim()
     if (!trimmed || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
       return false
@@ -148,18 +148,20 @@ export function useCopilot(skillId: string | null, backend: CopilotBackend = 'cl
 
     assistantMessageIdRef.current = null
     copilotStore.appendMessage(createMessage('user', trimmed, 'success'))
-    socketRef.current.send(JSON.stringify({ user_message: trimmed }))
+    const payload: { user_message: string, model_override?: string } = { user_message: trimmed }
+    if (modelOverride) {
+      payload.model_override = modelOverride
+    }
+    socketRef.current.send(JSON.stringify(payload))
     return true
   }, [])
 
   return {
-    backend: snapshot.backend,
     messages: snapshot.messages,
     connectionStatus,
     reconnectInMs,
     lastError,
     sendMessage,
     clearMessages: copilotStore.clearMessages,
-    setBackend: copilotStore.setBackend,
   }
 }

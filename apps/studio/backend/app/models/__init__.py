@@ -5,13 +5,8 @@ from __future__ import annotations
 from app.models.audit import AuditResult
 from app.models.compare import CompareResult
 from app.models.copilot import (
-    BackendStatus,
     ContextUpdateRequest,
     ContextUpdateResponse,
-    CredentialsReadResponse,
-    CredentialsWriteRequest,
-    TestCredentialsRequest,
-    TestCredentialsResponse,
 )
 from app.models.errors import ErrorResponse, LintError
 from app.models.git_history import GitHistoryItem, RevertSkillReq
@@ -42,11 +37,8 @@ __all__ = [
     "BatchRunResponse",
     "BatchRunStatus",
     "CompareResult",
-    "BackendStatus",
     "ContextUpdateRequest",
     "ContextUpdateResponse",
-    "CredentialsReadResponse",
-    "CredentialsWriteRequest",
     "CreateSkillReq",
     "ErrorResponse",
     "GoldenBaseline",
@@ -63,8 +55,6 @@ __all__ = [
     "SkillDetail",
     "SkillSummary",
     "TerminalSession",
-    "TestCredentialsRequest",
-    "TestCredentialsResponse",
     "TestInputMetadata",
     "TokensMetrics",
     "UpdateSkillReq",

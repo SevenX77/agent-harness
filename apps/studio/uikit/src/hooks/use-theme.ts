@@ -1,47 +1,64 @@
-import { useEffect, useState } from "react"
+import { useSyncExternalStore } from "react"
 
 type Theme = "light" | "dark"
 
-function systemPrefersDark(): boolean {
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false
+const listeners = new Set<() => void>()
+
+function getInitialTheme(): Theme {
+  if (typeof window === "undefined") return "dark"
+  const stored = localStorage.getItem("theme")
+  if (stored === "light" || stored === "dark") return stored
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light"
 }
 
-function applyTheme(next: Theme) {
+function applyTheme(t: Theme) {
+  if (typeof document === "undefined") return
   document.documentElement.classList.remove("light", "dark")
-  document.documentElement.classList.add(next)
+  document.documentElement.classList.add(t)
+}
+
+let currentTheme: Theme = getInitialTheme()
+applyTheme(currentTheme)
+
+function subscribe(listener: () => void) {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+function getSnapshot(): Theme {
+  return currentTheme
+}
+
+function getServerSnapshot(): Theme {
+  return "dark"
+}
+
+export function setTheme(next: Theme) {
+  if (currentTheme === next) return
+  currentTheme = next
+  if (typeof window !== "undefined") {
+    localStorage.setItem("theme", next)
+  }
+  applyTheme(next)
+  listeners.forEach((l) => l())
+}
+
+if (typeof window !== "undefined") {
+  const mq = window.matchMedia("(prefers-color-scheme: dark)")
+  mq.addEventListener("change", (e) => {
+    const stored = localStorage.getItem("theme")
+    if (stored === "light" || stored === "dark") return
+    setTheme(e.matches ? "dark" : "light")
+  })
 }
 
 export function useTheme() {
-  const [theme, setThemeState] = useState<Theme>(() => {
-    if (typeof window === "undefined") return "dark"
-    const stored = localStorage.getItem("theme") as Theme | null
-    if (stored === "light" || stored === "dark") return stored
-    return systemPrefersDark() ? "dark" : "light"
-  })
-
-  useEffect(() => {
-    applyTheme(theme)
-  }, [theme])
-
-  useEffect(() => {
-    const stored = localStorage.getItem("theme")
-    if (stored === "light" || stored === "dark") return
-    const mq = window.matchMedia("(prefers-color-scheme: dark)")
-    const handler = (e: MediaQueryListEvent) => {
-      setThemeState(e.matches ? "dark" : "light")
-    }
-    mq.addEventListener("change", handler)
-    return () => mq.removeEventListener("change", handler)
-  }, [])
-
-  const setTheme = (next: Theme) => {
-    localStorage.setItem("theme", next)
-    setThemeState(next)
+  const theme = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
+  return {
+    theme,
+    setTheme,
+    toggleTheme: () => setTheme(theme === "dark" ? "light" : "dark"),
   }
-
-  const toggleTheme = () => {
-    setTheme(theme === "dark" ? "light" : "dark")
-  }
-
-  return { theme, setTheme, toggleTheme }
 }

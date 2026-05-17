@@ -1,13 +1,8 @@
-
 import { useState } from "react"
-import { X, Sparkles, ChevronRight, Plus, Paperclip, ArrowUp } from "lucide-react"
+import { ArrowUp, Paperclip, Plus, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
-
-interface CopilotProps {
-  onClose: () => void
-}
 
 const suggestions = [
   "Add error handling",
@@ -16,31 +11,13 @@ const suggestions = [
   "Generate tests",
 ]
 
-export function Copilot({ onClose }: CopilotProps) {
+export function Copilot() {
   const [message, setMessage] = useState("")
 
   return (
-    <div className="h-full w-full bg-sidebar border-l border-sidebar-border flex flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 h-11 border-b border-sidebar-border shrink-0">
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs font-medium text-foreground">New Chat</span>
-          <ChevronRight className="size-3 text-muted-foreground" />
-        </div>
-        <div className="flex items-center gap-0.5">
-          <Button variant="ghost" size="icon-xs">
-            <Plus />
-          </Button>
-          <Button variant="ghost" size="icon-xs" onClick={onClose}>
-            <X />
-          </Button>
-        </div>
-      </div>
-
-      {/* Content */}
+    <div className="h-full w-full bg-sidebar flex flex-col">
       <ScrollArea className="flex-1">
-        <div className="p-4">
-          {/* Welcome */}
+        <div className="p-4 pt-6">
           <div className="mb-6">
             <h2 className="text-sm font-medium text-foreground mb-1">
               Good afternoon.
@@ -50,11 +27,10 @@ export function Copilot({ onClose }: CopilotProps) {
             </p>
           </div>
 
-          {/* Suggestions */}
           <div className="space-y-1">
-            {suggestions.map((suggestion, i) => (
+            {suggestions.map((suggestion) => (
               <button
-                key={i}
+                key={suggestion}
                 className="w-full flex items-center gap-2.5 px-2.5 py-2 text-left text-xs text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded-sm transition-colors group"
               >
                 <Sparkles className="size-3.5 text-muted-foreground group-hover:text-foreground transition-colors" strokeWidth={1.5} />
@@ -65,9 +41,8 @@ export function Copilot({ onClose }: CopilotProps) {
         </div>
       </ScrollArea>
 
-      {/* Input */}
-      <div className="p-3 border-t border-sidebar-border shrink-0">
-        <div className="flex flex-col gap-2 bg-secondary border border-border rounded-md px-2.5 py-2 focus-within:ring-1 focus-within:ring-ring transition-colors">
+      <div className="p-3 shrink-0">
+        <div className="flex flex-col gap-2 bg-sidebar-accent/60 border border-transparent rounded-md px-2.5 py-2 focus-within:border-border transition-colors">
           <textarea
             value={message}
             onChange={(e) => setMessage(e.target.value)}
@@ -97,14 +72,6 @@ export function Copilot({ onClose }: CopilotProps) {
   )
 }
 
-export function CopilotButton({ onClick }: { onClick: () => void }) {
-  return (
-    <Button
-      onClick={onClick}
-      size="icon"
-      className="fixed right-5 bottom-5 size-10 rounded-full shadow-lg z-40"
-    >
-      <Sparkles strokeWidth={1.5} />
-    </Button>
-  )
+export function CopilotButton() {
+  return null
 }

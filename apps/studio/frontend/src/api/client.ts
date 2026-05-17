@@ -1,5 +1,5 @@
 import axios, { AxiosHeaders } from 'axios'
-import type { MultifileSkillPayload, SkillDetail } from './types'
+import type { MultifileSkillPayload, SerializeGraphPayload, SerializeGraphResult, SkillDetail } from './types'
 
 export const API_BASE_URL = import.meta.env.VITE_STUDIO_API_BASE_URL ?? 'http://localhost:8787/api'
 
@@ -38,10 +38,27 @@ export async function fetchSkillFiles(skillId: string): Promise<SkillDetail> {
 export async function saveSkillFiles(
   skillId: string,
   files: Record<string, string>,
+  expectedHash?: string | null,
 ): Promise<SkillDetail> {
-  const payload: MultifileSkillPayload = { files }
+  const payload: MultifileSkillPayload = { files, expected_hash: expectedHash }
   const response = await api.put<SkillDetail>(`/skills/${skillId}`, payload)
   return response.data
+}
+
+export async function serializeGraph(
+  skillId: string,
+  payload: SerializeGraphPayload,
+): Promise<SerializeGraphResult> {
+  const response = await api.post<SerializeGraphResult>(`/skills/${skillId}/graph/serialize`, payload)
+  return response.data
+}
+
+export async function updateSkillFiles(
+  skillId: string,
+  files: Record<string, string>,
+  expectedHash?: string | null,
+): Promise<SkillDetail> {
+  return saveSkillFiles(skillId, files, expectedHash)
 }
 
 export function wsUrl(path: string): string {

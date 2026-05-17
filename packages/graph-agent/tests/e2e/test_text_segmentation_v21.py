@@ -4,10 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import AIMessage
-
 from graph_agent import assemble_graph, compile_skill
-
+from langchain_core.messages import AIMessage
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SKILL_ROOT = REPO_ROOT / "skills" / "text-segmentation"
@@ -59,7 +57,7 @@ class FakeTextSegmentationChatModel:
             },
         ]
 
-    def bind_tools(self, tools: list[Any]) -> "FakeTextSegmentationChatModel":
+    def bind_tools(self, tools: list[Any]) -> FakeTextSegmentationChatModel:
         self.bound_tools = tools
         return self
 

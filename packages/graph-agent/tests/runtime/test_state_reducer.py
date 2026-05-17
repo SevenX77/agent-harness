@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from graph_agent.core.exceptions import GraphAgentFatalError
 from graph_agent.runtime.state import shallow_dict_merge
 

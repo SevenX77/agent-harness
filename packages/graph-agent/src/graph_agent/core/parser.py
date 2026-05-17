@@ -29,16 +29,19 @@ import io
 import re
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 try:  # pragma: no cover - exercised indirectly depending on env deps
-    from ruamel.yaml import YAML
-    from ruamel.yaml.error import YAMLError
+    from ruamel.yaml import YAML as _RuamelYAML
+    from ruamel.yaml.error import YAMLError as _RuamelYAMLError
+
+    RuamelYAML: Any = _RuamelYAML
+    YAMLError: Any = _RuamelYAMLError
 except ModuleNotFoundError:  # pragma: no cover
     import yaml
 
-    YAML = None  # type: ignore[assignment]
-    YAMLError = yaml.YAMLError  # type: ignore[assignment]
+    RuamelYAML = None
+    YAMLError = yaml.YAMLError
 
 from graph_agent.core.exceptions import SkillLoadError
 
@@ -49,16 +52,16 @@ from graph_agent.core.exceptions import SkillLoadError
 _FRONTMATTER_LINE_OFFSET = 2
 
 
-def _make_yaml() -> YAML:
+def _make_yaml() -> Any:
     """Build a configured ruamel YAML loader.
 
     Round-trip mode (``typ='rt'``) preserves per-key line/column
     metadata on the returned ``CommentedMap`` / ``CommentedSeq`` —
     that is what ``locate_line_for_pydantic_loc`` walks.
     """
-    if YAML is None:
+    if RuamelYAML is None:
         raise SkillLoadError("ruamel.yaml is not available")
-    yaml = YAML(typ="rt")
+    yaml = RuamelYAML(typ="rt")
     yaml.preserve_quotes = True
     return yaml
 
@@ -83,7 +86,7 @@ def _parse_frontmatter(content: str) -> dict[str, Any]:
 
     yaml_body = match.group(1)
     try:
-        if YAML is None:
+        if RuamelYAML is None:
             import yaml as pyyaml
 
             data = pyyaml.safe_load(io.StringIO(yaml_body))
@@ -167,7 +170,7 @@ def locate_line_for_pydantic_loc(root: Any, loc: Sequence[Any]) -> int | None:
     return max(1, last_line + 1)  # 0-indexed → 1-indexed
 
 
-def _fatal(path: Path, line: int, message: str) -> None:
+def _fatal(path: Path, line: int, message: str) -> NoReturn:
     raise SkillLoadError(f"[F-v21-route] {path}:{line} {message}")
 
 

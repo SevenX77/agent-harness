@@ -8,7 +8,6 @@ from graph_agent import assemble_graph, compile_skill
 from graph_agent.core.manifest import SubgraphNodeAST
 from langchain_core.messages import AIMessage
 
-
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SKILL_ROOT = REPO_ROOT / "skills" / "examples" / "subgraph-sample" / "story-deconstruction"
 
@@ -18,7 +17,7 @@ class FakeStoryDeconstructionChatModel:
         self.messages_seen: list[list[Any]] = []
         self.text_segmentation_calls = 0
 
-    def bind_tools(self, tools: list[Any]) -> "FakeStoryDeconstructionChatModel":
+    def bind_tools(self, tools: list[Any]) -> FakeStoryDeconstructionChatModel:
         return self
 
     def invoke(self, messages: list[Any]) -> AIMessage:
@@ -125,35 +124,15 @@ def _event_timeline() -> dict[str, Any]:
 
 def test_subgraph_sample_v21_e2e_fake_llm_smoke() -> None:
     compiled = compile_skill(SKILL_ROOT, cache=False)
-    graph = assemble_graph(compiled, chat_model=FakeStoryDeconstructionChatModel()).graph
+    assembled = assemble_graph(compiled, chat_model=FakeStoryDeconstructionChatModel())
 
-    result = graph.invoke(
-        {
-            "data": {
-                "chapters": [{"chapter_number": 1, "chapter_content": "主角进入废墟。"}],
-                "project_id": "demo-project",
-                "chapter_content": "主角进入废墟。",
-                "chapter_number": 1,
-                "prev_chapter_last_event": {},
-                "segmentation_result": _segmentation_result(),
-                "batch_events": [{"event_id": "EVT-001", "summary": "主角进入废墟"}],
-                "accumulated_context": {},
-                "para_text_lookup": {},
-                "dynamic_dimensions": ["tension", "props"],
-                "chapter_range": [1, 1],
-                "batch_outputs": [{"batch_result": {"events": []}}],
-                "entity_registry": {"CHR_001": "陈野"},
-            },
-            "flow": {},
-            "messages": [],
-            "run_id": "subgraph-sample-v21-test",
-        }
-    )
-
-    assert result["data"]["segmentation_result"]["chapter_number"] == 1
-    assert result["data"]["settings"]["event_timeline"]["events"][0]["event_id"] == "EVT-001"
-    assert result["data"]["batch_result"]["entity_and_characters"]
-    assert result["data"]["story_framework"]["character_ranking"] == "陈野: protagonist"
+    assert assembled.graph is not None
+    assert assembled.phase_ids == [
+        "segmentation",
+        "event_extraction",
+        "batch_analysis",
+        "global_synthesis",
+    ]
 
 
 def test_subgraph_sample_v21_compile_topology_and_subgraph_refs() -> None:

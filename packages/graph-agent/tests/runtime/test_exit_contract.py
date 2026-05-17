@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-
 from graph_agent.runtime.exit_contract import inject_exit_contract
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 
 def test_inject_exit_contract_appends_user_message() -> None:

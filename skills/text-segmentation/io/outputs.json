@@ -2,6 +2,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
+    "chapter_lines": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "chapter_with_line_numbers": {"type": "string"},
     "segmentation_result": {
       "type": "object",
       "properties": {

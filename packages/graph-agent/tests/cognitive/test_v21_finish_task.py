@@ -3,11 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
 from graph_agent.cognitive.finish_task import build_finish_task_tool
 from graph_agent.cognitive.md2json import parse_finish_markdown
 from graph_agent.cognitive.md_patch import FakeMdPatchClient, LLMMdPatchClient
-
 
 TITLE_SCHEMA: dict[str, Any] = {
     "type": "object",

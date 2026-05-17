@@ -6,7 +6,6 @@ from typing import Any
 from graph_agent import assemble_graph, compile_skill
 from langchain_core.messages import AIMessage
 
-
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SKILL_ROOT = REPO_ROOT / "skills" / "product-manual"
 
@@ -15,7 +14,7 @@ class FakeProductManualChatModel:
     def __init__(self) -> None:
         self.messages_seen: list[list[Any]] = []
 
-    def bind_tools(self, tools: list[Any]) -> "FakeProductManualChatModel":
+    def bind_tools(self, tools: list[Any]) -> FakeProductManualChatModel:
         return self
 
     def invoke(self, messages: list[Any]) -> AIMessage:

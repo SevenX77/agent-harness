@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-import json
 from typing import Any
 
 from langchain_core.messages import HumanMessage
+
 
 class MdPatchClient(ABC):
     """Internal patcher protocol; not exposed as a phase ReAct tool."""

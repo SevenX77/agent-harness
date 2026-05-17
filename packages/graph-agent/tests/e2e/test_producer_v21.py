@@ -7,7 +7,6 @@ from typing import Any
 from graph_agent import assemble_graph, compile_skill
 from langchain_core.messages import AIMessage
 
-
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SKILL_ROOT = REPO_ROOT / "skills" / "producer"
 
@@ -18,7 +17,7 @@ class FakeProducerChatModel:
         self.critic_invocations = 0
         self.react_turns = 0
 
-    def bind_tools(self, tools: list[Any]) -> "FakeProducerChatModel":
+    def bind_tools(self, tools: list[Any]) -> FakeProducerChatModel:
         self.bound_tools = tools
         return self
 

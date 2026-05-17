@@ -48,6 +48,7 @@ Compare a new run against the baseline::
 No assumption is made about how the tracing.jsonl itself is produced;
 the script consumes existing JSONL files.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -56,7 +57,6 @@ import re
 import sys
 from pathlib import Path
 from typing import Any
-
 
 _UUID_RE = re.compile(
     # Canonical 8-4-4-4-12 plus the common 12-char hex used by parallel_map
@@ -70,14 +70,16 @@ _UUID_RE = re.compile(
 # Fields whose values are ID-like regardless of format. `_UUID_RE` catches
 # most values, but some IDs (e.g. the run-prefixed ``<group>-0001``
 # sub_run_id format that parallel_map emits) need a by-name override.
-_ID_FIELD_NAMES = frozenset({
-    "run_id",
-    "thread_id",
-    "sub_run_id",
-    "group_key",
-    "tool_call_id",
-    "child_thread_id",
-})
+_ID_FIELD_NAMES = frozenset(
+    {
+        "run_id",
+        "thread_id",
+        "sub_run_id",
+        "group_key",
+        "tool_call_id",
+        "child_thread_id",
+    }
+)
 
 
 def _looks_like_id(value: str) -> bool:
@@ -108,9 +110,7 @@ def _normalise(obj: Any, uuid_map: dict[str, str], *, in_id_field: bool = False)
             if key == "timestamp":
                 # Rule 1 — drop timestamp.
                 continue
-            out[key] = _normalise(
-                value, uuid_map, in_id_field=(key in _ID_FIELD_NAMES)
-            )
+            out[key] = _normalise(value, uuid_map, in_id_field=(key in _ID_FIELD_NAMES))
         return out
 
     if isinstance(obj, list):
@@ -127,7 +127,7 @@ def _load_events(path: Path) -> list[dict[str, Any]]:
         try:
             events.append(json.loads(line))
         except json.JSONDecodeError as exc:
-            raise SystemExit(f"{path}:{idx}: invalid JSON — {exc}")
+            raise SystemExit(f"{path}:{idx}: invalid JSON — {exc}") from exc
     return events
 
 
@@ -164,8 +164,7 @@ def _diff(run_path: Path, baseline_path: Path) -> int:
 
     if baseline_events == run_events:
         print(
-            f"[snapshot_diff] OK — {len(run_events)} events match baseline "
-            f"({baseline_path.name})"
+            f"[snapshot_diff] OK — {len(run_events)} events match baseline ({baseline_path.name})"
         )
         return 0
 
@@ -204,9 +203,7 @@ def main(argv: list[str] | None = None) -> int:
 
     diff = sub.add_parser("diff", help="Diff a tracing.jsonl against a saved baseline.")
     diff.add_argument("--run", required=True, type=Path, help="Path to tracing.jsonl")
-    diff.add_argument(
-        "--baseline", required=True, type=Path, help="Path to baseline JSON"
-    )
+    diff.add_argument("--baseline", required=True, type=Path, help="Path to baseline JSON")
 
     args = parser.parse_args(argv)
     if args.mode == "record":

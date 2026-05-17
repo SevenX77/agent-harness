@@ -3,24 +3,26 @@
 from __future__ import annotations
 
 import ast
-import logging
-import json
 import importlib.util
 import inspect
+import json
+import logging
 import re
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from json import JSONDecodeError
-from types import ModuleType
 from pathlib import Path
-from typing import Any, Callable, Literal
+from types import ModuleType
+from typing import Any, Literal, NoReturn, cast
 
 from jsonschema.exceptions import SchemaError
 from jsonschema.validators import Draft202012Validator
 from pydantic import ValidationError
 
-from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
+from graph_agent.cognitive.context_facade import Context
 from graph_agent.core.actions import ActionDef, ActionRegistry, ToolDef, ToolRegistry
+from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
 from graph_agent.core.manifest import (
     GraphManifest,
     GraphPhaseRef,
@@ -34,7 +36,6 @@ from graph_agent.core.parser import (
     scan_forbidden_topology_tags,
 )
 from graph_agent.core.purity import scan_python_purity, scan_tool_imports_context
-from graph_agent.cognitive.context_facade import Context
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,9 @@ class SkillLoader:
             yaml_mode = str(frontmatter.get("mode") or "").strip()
             _validate_mode_matches_filename(phase_file, yaml_mode)
             scan_forbidden_topology_tags(phase_file, body)
-            phase_docs.append(_build_phase_document(phase_name, phase_file, mode, frontmatter, body))
+            phase_docs.append(
+                _build_phase_document(phase_name, phase_file, mode, frontmatter, body)
+            )
         actions, tools = _discover_actions_and_tools(root, discovered)
         _validate_logic_action_return_keys(
             phase_docs,
@@ -128,7 +131,9 @@ class SkillLoader:
             "io": {
                 "inputs": io_inputs,
                 "outputs": io_outputs,
-                "output_schema_keys": sorted(output_schema_keys) if output_schema_keys is not None else None,
+                "output_schema_keys": sorted(output_schema_keys)
+                if output_schema_keys is not None
+                else None,
             },
             "phases": [
                 {
@@ -142,7 +147,9 @@ class SkillLoader:
             ],
         }
         logger.info("Compiled V2.1 graph skill root=%s phases=%d", root, len(phase_docs))
-        return CompiledSkill(raw=raw, manifest=manifest, nodes=phase_docs, actions=actions, tools=tools)
+        return CompiledSkill(
+            raw=raw, manifest=manifest, nodes=phase_docs, actions=actions, tools=tools
+        )
 
 
 def load_workflow_from_md(
@@ -166,19 +173,19 @@ def load_workflow_from_md(
     return assemble_graph(compile_skill(root)).graph
 
 
-def _fatal(path: Path, line: int, message: str) -> None:
+def _fatal(path: Path, line: int, message: str) -> NoReturn:
     raise SkillLoadError(f"[F-v21-route] {path}:{line} {message}")
 
 
-def _io_fatal(path: Path, line: int, message: str) -> None:
+def _io_fatal(path: Path, line: int, message: str) -> NoReturn:
     raise SkillLoadError(f"[F-v21-io] {path}:{line} {message}")
 
 
-def _graph_fatal(path: Path, line: int, message: str) -> None:
+def _graph_fatal(path: Path, line: int, message: str) -> NoReturn:
     raise SkillLoadError(f"[F-v21-graph] {path}:{line} {message}")
 
 
-def _actions_fatal(path: Path, line: int, message: str) -> None:
+def _actions_fatal(path: Path, line: int, message: str) -> NoReturn:
     raise SkillLoadError(f"[F-v21-actions] {path}:{line} {message}")
 
 
@@ -219,7 +226,9 @@ def _discover_phase_files(skill_root: Path) -> list[tuple[str, Path, str]]:
         if nested_graph.exists():
             _fatal(nested_graph, 1, "GRAPH.md is only allowed at skill root")
 
-        phase_files = [phase_dir / name for name in _PHASE_FILE_TO_MODE if (phase_dir / name).exists()]
+        phase_files = [
+            phase_dir / name for name in _PHASE_FILE_TO_MODE if (phase_dir / name).exists()
+        ]
         if len(phase_files) > 1:
             names = ", ".join(path.name for path in phase_files)
             _fatal(phase_files[1], 1, f"phase directory contains multiple node files: {names}")
@@ -240,7 +249,11 @@ def _discover_actions_and_tools(
 ) -> tuple[ActionRegistry, ToolRegistry]:
     actions_by_phase: dict[str, dict[str, ActionDef]] = {}
     tools_by_phase: dict[str, list[ToolDef]] = {}
-    root_tools = _load_tool_dir(skill_root / "tools", phase_id=None) if (skill_root / "tools").exists() else []
+    root_tools = (
+        _load_tool_dir(skill_root / "tools", phase_id=None)
+        if (skill_root / "tools").exists()
+        else []
+    )
 
     for phase_id, phase_file, mode in discovered:
         phase_dir = phase_file.parent
@@ -263,7 +276,9 @@ def _discover_actions_and_tools(
             if tools_dir.exists():
                 _actions_fatal(tools_dir, 1, "tools/ is not allowed for SUBGRAPH phases")
 
-    return ActionRegistry(actions_by_phase), ToolRegistry(root_tools=root_tools, by_phase=tools_by_phase)
+    return ActionRegistry(actions_by_phase), ToolRegistry(
+        root_tools=root_tools, by_phase=tools_by_phase
+    )
 
 
 def _load_action_dir(actions_dir: Path, phase_id: str) -> dict[str, ActionDef]:
@@ -331,13 +346,18 @@ def _validate_action_signature(path: Path, func: Callable[..., object]) -> None:
     signature = inspect.signature(func)
     params = list(signature.parameters.values())
     if not params or params[0].name not in {"context", "ctx"}:
-        _actions_fatal(path, 1, f"action {func.__name__!r} must accept context/ctx as first parameter")
+        _actions_fatal(
+            path, 1, f"action {func.__name__!r} must accept context/ctx as first parameter"
+        )
     annotation = params[0].annotation
     if annotation is inspect.Parameter.empty:
         return
     if annotation is Context:
         return
-    if isinstance(annotation, str) and annotation in {"Context", "graph_agent.cognitive.context_facade.Context"}:
+    if isinstance(annotation, str) and annotation in {
+        "Context",
+        "graph_agent.cognitive.context_facade.Context",
+    }:
         return
     _actions_fatal(path, 1, f"action {func.__name__!r} first parameter must be Context-compatible")
 
@@ -439,7 +459,7 @@ def _validate_graph_topology(
             _graph_fatal(graph_path, attrs.line, f"phase {attrs.id!r} missing required src")
 
     phase_by_id: dict[str, _RawPhaseAttrs] = {}
-    for index, attrs in enumerate(raw_attrs):
+    for _index, attrs in enumerate(raw_attrs):
         assert attrs.id is not None
         if attrs.id in phase_by_id:
             _graph_fatal(graph_path, attrs.line, f"duplicate phase id {attrs.id!r}")
@@ -548,7 +568,9 @@ def _validate_phase_src(graph_path: Path, attrs: _RawPhaseAttrs, skill_root: Pat
     except ValueError:
         _graph_fatal(graph_path, attrs.line, f"phase {attrs.id!r} src must stay inside skill root")
 
-    if not candidate.is_dir() or not any((candidate / name).is_file() for name in _PHASE_FILE_TO_MODE):
+    if not candidate.is_dir() or not any(
+        (candidate / name).is_file() for name in _PHASE_FILE_TO_MODE
+    ):
         _graph_fatal(
             graph_path,
             attrs.line,
@@ -595,7 +617,7 @@ def _validate_io_schema(
         Draft202012Validator.check_schema(schema)
     except SchemaError as exc:
         _io_fatal(display_path, 1, f"invalid JSON Schema: {exc.message}")
-    return schema
+    return cast(dict[str, Any], schema)
 
 
 def _extract_output_schema_keys(schema: dict[str, Any]) -> set[str] | None:
@@ -682,7 +704,8 @@ def _validate_logic_action_return_keys(
             action_def.path,
             output_schema_keys,
             context_keys,
-            validate_context_writes=validate_context_writes and _should_validate_context_writes(phase_docs),
+            validate_context_writes=validate_context_writes
+            and _should_validate_context_writes(phase_docs),
         )
 
 

@@ -3,11 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from langchain_core.tools import StructuredTool
-
 from graph_agent.cognitive.context_facade import Context
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.loader import SkillLoader
+from langchain_core.tools import StructuredTool
 
 
 def _write(path: Path, text: str) -> None:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from graph_agent.cognitive.critic import (
     CriticMetrics,
     CriticVerdict,

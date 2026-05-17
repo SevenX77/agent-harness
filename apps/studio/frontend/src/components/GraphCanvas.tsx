@@ -44,7 +44,7 @@ export function GraphCanvas({
 }: GraphCanvasProps) {
   const coloredEdges = useMemo(() => (
     edges.map((edge) => {
-      const color = getEdgeColor(edge.source)
+      const color = getEdgeColor(edge.source, isDarkMode)
       return {
         ...edge,
         type: 'smoothstep',
@@ -52,7 +52,7 @@ export function GraphCanvas({
         markerEnd: { type: MarkerType.ArrowClosed, color },
       }
     })
-  ), [edges])
+  ), [edges, isDarkMode])
   const visibleNodes = useMemo(() => (
     nodes.map((node) => ({
       ...node,

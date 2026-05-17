@@ -30,6 +30,7 @@ import type {
   SkillDetail,
   SkillManifest,
   SkillSummary,
+  StudioGlobalEvent,
   TerminalSession,
 } from './api/types'
 import { useBatchRun } from './hooks/useBatchRun'
@@ -61,6 +62,7 @@ import type {
 } from './types/studio'
 import { errorMessage, isRecord, lintErrorsFromError } from './utils/errors'
 import { saveCanvasGraph } from './utils/canvasSave'
+import { decideGraphReload } from './utils/canvasReload'
 import { buildGraph, graphSkill, subgraphSkillId } from './utils/graph'
 import { manifestToSkillMarkdown } from './utils/skillMarkdown'
 import { verifyTauriWindowIpc } from './utils/tauriIpc'
@@ -170,6 +172,7 @@ export default function App() {
   const [skillPaletteOpen, setSkillPaletteOpen] = useState(false)
   const [cheatSheetOpen, setCheatSheetOpen] = useState(false)
   const [restorePromptSkillId, setRestorePromptSkillId] = useState<string | null>(null)
+  const [graphReloadPromptSkillId, setGraphReloadPromptSkillId] = useState<string | null>(null)
   const [dismissedDraftSkillId, setDismissedDraftSkillId] = useState<string | null>(null)
   const [pendingJumpLine, setPendingJumpLine] = useState<number | null>(null)
   const editorRef = useRef<MonacoEditor | null>(null)
@@ -330,6 +333,19 @@ export default function App() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [canvasDirty, workspaceIsDirty])
 
+  const reloadCurrentSkillDetail = useCallback(async (skillId: string) => {
+    const detail = await fetchSkillFiles(skillId)
+    await mutateSkillDetail(detail, { revalidate: false })
+    const files = Object.keys(detail.files).length > 0
+      ? detail.files
+      : { 'SKILL.md': manifestToSkillMarkdown(detail.manifest) }
+    setWorkspaceFiles(files)
+    loadedWorkspaceSkillIdRef.current = skillId
+    markCanvasSaved()
+    useWorkspaceStore.getState().markSaved()
+    return detail
+  }, [markCanvasSaved, mutateSkillDetail, setWorkspaceFiles])
+
   useEffect(() => {
     const socket = new WebSocket(wsUrl('/ws/events'))
     socket.onmessage = (message) => {
@@ -337,15 +353,29 @@ export default function App() {
       if (!isRecord(parsed) || parsed.type !== 'skill_changed' || typeof parsed.skill_id !== 'string') {
         return
       }
-
-      pushToast(`Skill changed: ${parsed.skill_id}`, 'info')
-      if (parsed.skill_id === selectedSkillId) {
-        void mutateSkillDetail()
+      const event: StudioGlobalEvent = {
+        type: 'skill_changed',
+        skill_id: parsed.skill_id,
+        file: typeof parsed.file === 'string' ? parsed.file : null,
       }
+
+      const decision = decideGraphReload(event, selectedSkillId, canvasDirty)
+      if (decision === 'prompt') {
+        setGraphReloadPromptSkillId(event.skill_id)
+        pushToast(`GRAPH.md changed externally: ${event.skill_id}`, 'info')
+        return
+      }
+      if (decision === 'reload') {
+        void reloadCurrentSkillDetail(event.skill_id)
+          .then(() => pushToast(`Reloaded GRAPH.md: ${event.skill_id}`, 'info'))
+          .catch((error: unknown) => pushToast(errorMessage(error), 'error'))
+        return
+      }
+      pushToast(`Skill changed: ${event.skill_id}`, 'info')
     }
     socket.onerror = () => pushToast('Studio event stream disconnected', 'error')
     return () => socket.close()
-  }, [mutateSkillDetail, pushToast, selectedSkillId])
+  }, [canvasDirty, pushToast, reloadCurrentSkillDetail, selectedSkillId])
 
   useEffect(() => () => runWsRef.current?.close(), [])
 
@@ -1117,6 +1147,42 @@ export default function App() {
           setRestorePromptSkillId(null)
         }}
       />
+      {graphReloadPromptSkillId === selectedSkillId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-md border border-amber-200 bg-white p-5 shadow-xl dark:border-amber-800 dark:bg-slate-900">
+            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">GRAPH.md changed externally</h2>
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+              外部修改了文件，是否丢弃本地画布修改并加载最新版本？
+            </p>
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setGraphReloadPromptSkillId(null)}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-slate-700 dark:text-gray-200 dark:hover:bg-slate-800"
+              >
+                Keep Local
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!selectedSkillId) {
+                    return
+                  }
+                  void reloadCurrentSkillDetail(selectedSkillId)
+                    .then(() => {
+                      setGraphReloadPromptSkillId(null)
+                      pushToast('Reloaded latest GRAPH.md', 'success')
+                    })
+                    .catch((error: unknown) => pushToast(errorMessage(error), 'error'))
+                }}
+                className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-sky-700"
+              >
+                Reload
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <PhaseDrawer
         open={phaseDrawerPhaseId !== null && phaseForm.phase !== null}
         phaseId={phaseDrawerPhaseId}

@@ -348,4 +348,5 @@ export type CallbackEvent = CallbackEventBase & Record<string, JsonValue | undef
 export interface StudioGlobalEvent {
   type: 'skill_changed'
   skill_id: string
+  file?: string | null
 }

@@ -12,7 +12,7 @@ import pytest
 from app.core.adapters.metadata_local import LocalJsonMetadataStore
 from app.core.adapters.storage_local import LocalFilesystemBackend
 from app.models.runs import RunMetadata
-from app.services.event_bus import event_bus
+from app.services.event_bus import event_bus, file_watcher
 from app.services.run_manager import run_manager
 from app.services.skills import create_new_skill
 from app.services.terminal_manager import terminal_manager
@@ -461,9 +461,24 @@ def test_events_ws_broadcasts_to_multiple_clients(client: TestClient) -> None:
         client.websocket_connect("/ws/events") as first,
         client.websocket_connect("/ws/events") as second,
     ):
-        event_bus.broadcast_from_thread({"type": "skill_changed", "skill_id": "text-segmentation"})
-        assert first.receive_json() == {"type": "skill_changed", "skill_id": "text-segmentation"}
-        assert second.receive_json() == {"type": "skill_changed", "skill_id": "text-segmentation"}
+        event_bus.broadcast_from_thread({"type": "skill_changed", "skill_id": "text-segmentation", "file": "GRAPH.md"})
+        assert first.receive_json() == {"type": "skill_changed", "skill_id": "text-segmentation", "file": "GRAPH.md"}
+        assert second.receive_json() == {"type": "skill_changed", "skill_id": "text-segmentation", "file": "GRAPH.md"}
+
+
+def test_file_watcher_skill_changed_includes_relative_file(
+    studio_roots: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _skills_dir, workspaces_dir = studio_roots
+    events: list[dict[str, str]] = []
+    monkeypatch.setattr(event_bus, "broadcast_from_thread", events.append)
+
+    file_watcher.notify_path_changed(
+        workspaces_dir / "default" / "skills" / "text-segmentation" / "GRAPH.md",
+    )
+
+    assert events == [{"type": "skill_changed", "skill_id": "text-segmentation", "file": "GRAPH.md"}]
 
 
 def test_deferred_endpoints_return_structured_501(client: TestClient) -> None:

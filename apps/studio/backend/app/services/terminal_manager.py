@@ -138,27 +138,33 @@ class TerminalManager:
             await asyncio.sleep(config.TERMINAL_REAPER_INTERVAL_SECONDS)
 
     async def _read_pty_loop(self, websocket: WebSocket, record: TerminalRecord) -> None:
-        while record.term_id in self._sessions:
-            data = await asyncio.to_thread(_read_nonblocking, record.process)
-            if not data:
-                await asyncio.sleep(0.05)
-                continue
-            if isinstance(data, str):
-                await websocket.send_text(data)
-            else:
-                await websocket.send_bytes(data)
+        try:
+            while record.term_id in self._sessions:
+                data = await asyncio.to_thread(_read_nonblocking, record.process)
+                if not data:
+                    await asyncio.sleep(0.05)
+                    continue
+                if isinstance(data, str):
+                    await websocket.send_text(data)
+                else:
+                    await websocket.send_bytes(data)
+        except asyncio.CancelledError:
+            return
 
     async def _write_pty_loop(self, websocket: WebSocket, record: TerminalRecord) -> None:
-        while record.term_id in self._sessions:
-            message = await websocket.receive()
-            if message.get("type") == "websocket.disconnect":
-                return
-            data = message.get("bytes")
-            if data is None:
-                text = message.get("text")
-                data = text if isinstance(text, str) else ""
-            if data:
-                await asyncio.to_thread(record.process.write, data)
+        try:
+            while record.term_id in self._sessions:
+                message = await websocket.receive()
+                if message.get("type") == "websocket.disconnect":
+                    return
+                data = message.get("bytes")
+                if data is None:
+                    text = message.get("text")
+                    data = text if isinstance(text, str) else ""
+                if data:
+                    await asyncio.to_thread(record.process.write, data)
+        except asyncio.CancelledError:
+            return
 
 
 def _read_nonblocking(process: Any) -> bytes | str | None:

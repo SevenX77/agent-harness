@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildEdges, GraphCanvas, SkillNode, type SkillGraphNode } from './GraphCanvas'
 import { CycleDetectedError, getAutoLayoutedElements } from '../lib/layout'
+import type { Edge, Node } from '@xyflow/react'
 
 vi.mock('@xyflow/react', () => ({
   Background: () => <div data-testid="background" />,
@@ -113,7 +114,7 @@ function expectContextEdges(nodes: SkillGraphNode[]) {
 describe('GraphCanvas', () => {
   beforeEach(() => {
     layoutMock.mockReset()
-    layoutMock.mockImplementation((nodes, edges) => ({ nodes, edges }))
+    layoutMock.mockImplementation((nodes: Node[], edges: Edge[]) => ({ nodes, edges }))
   })
 
   it('does not render the redundant edit graph title block', () => {

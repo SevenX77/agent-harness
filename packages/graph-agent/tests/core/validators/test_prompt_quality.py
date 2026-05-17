@@ -1,4 +1,5 @@
 """Tests for prompt_quality validator."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -50,8 +51,7 @@ def test_prompt_duplication_skips_v2_style_reference_only_prompt() -> None:
 
 def test_prompt_duplication_emits_for_repeated_rule_blocks() -> None:
     sys_prompt = (
-        "你是分段专家。A类、B类、C类必须按设定和事件区分。"
-        "同一时空连续动作合并，并输出分段列表。"
+        "你是分段专家。A类、B类、C类必须按设定和事件区分。同一时空连续动作合并，并输出分段列表。"
     )
     user_prompt = (
         "请检查章节。\n"
@@ -60,8 +60,7 @@ def test_prompt_duplication_emits_for_repeated_rule_blocks() -> None:
         "- B类：描述事件。\n"
         "- C类：系统空间。\n"
         "- 同一时空连续动作合并。\n"
-        "- 最终输出完整分段列表。\n"
-        + "补充说明。" * 90
+        "- 最终输出完整分段列表。\n" + "补充说明。" * 90
     )
 
     issues = _check_prompt_duplication(sys_prompt, user_prompt, _phase("segment"), 0)
@@ -71,15 +70,17 @@ def test_prompt_duplication_emits_for_repeated_rule_blocks() -> None:
 
 
 def test_finish_task_visibility_emits_when_buried_at_step_six() -> None:
-    prompt = "\n".join([
-        "你是复核节点。请先完成全部质量检查。" + "背景要求。" * 40,
-        "1. 通读原章节。",
-        "2. 对照 Pass 1 分段。",
-        "3. 检查 C 类边界。",
-        "4. 检查 A/B 类混合。",
-        "5. 修正所有关键错误。",
-        "6. 调用 finish_task 提交最终结果。",
-    ])
+    prompt = "\n".join(
+        [
+            "你是复核节点。请先完成全部质量检查。" + "背景要求。" * 40,
+            "1. 通读原章节。",
+            "2. 对照 Pass 1 分段。",
+            "3. 检查 C 类边界。",
+            "4. 检查 A/B 类混合。",
+            "5. 修正所有关键错误。",
+            "6. 调用 finish_task 提交最终结果。",
+        ]
+    )
 
     issues = _check_finish_task_visibility(prompt, _phase("review"), 0)
 
@@ -90,12 +91,14 @@ def test_finish_task_visibility_emits_when_buried_at_step_six() -> None:
 
 
 def test_finish_task_visibility_skips_short_step_list() -> None:
-    prompt = "\n".join([
-        "你是复核节点。" + "背景要求。" * 40,
-        "1. 通读输入。",
-        "2. 检查关键边界。",
-        "3. 调用 finish_task 提交最终结果。",
-    ])
+    prompt = "\n".join(
+        [
+            "你是复核节点。" + "背景要求。" * 40,
+            "1. 通读输入。",
+            "2. 检查关键边界。",
+            "3. 调用 finish_task 提交最终结果。",
+        ]
+    )
 
     issues = _check_finish_task_visibility(prompt, _phase("review"), 0)
 
@@ -103,10 +106,12 @@ def test_finish_task_visibility_skips_short_step_list() -> None:
 
 
 def test_setup_anti_pattern_emits_for_first_logic_setup_phase() -> None:
-    manifest = SimpleNamespace(phases=[
-        SimpleNamespace(name="setup", mode="logic"),
-        SimpleNamespace(name="segment", mode="llm"),
-    ])
+    manifest = SimpleNamespace(
+        phases=[
+            SimpleNamespace(name="setup", mode="logic"),
+            SimpleNamespace(name="segment", mode="llm"),
+        ]
+    )
 
     issues = _check_setup_anti_pattern(manifest)
 

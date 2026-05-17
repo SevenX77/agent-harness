@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "user_name": {
+      "type": "string",
+      "x-legacy-source": "runtime"
+    }
+  },
+  "required": [
+    "user_name"
+  ],
+  "type": "object"
+}

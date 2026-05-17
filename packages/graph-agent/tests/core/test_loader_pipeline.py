@@ -42,13 +42,7 @@ def test_parse_skill_md_is_schema_engine_free(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr("graph_agent.core.loader._SCHEMA_ENGINE", _ExplodingEngine())
 
     raw = parse_skill_md(
-        "---\n"
-        "schema_version: 2.0\n"
-        "name: x\n"
-        "description: d\n"
-        "type: persona\n"
-        "role_profile: r\n"
-        "---\n"
+        "---\nschema_version: 2.0\nname: x\ndescription: d\ntype: persona\nrole_profile: r\n---\n"
     )
 
     assert raw["schema_version"] == "2.0"
@@ -56,10 +50,7 @@ def test_parse_skill_md_is_schema_engine_free(monkeypatch: pytest.MonkeyPatch) -
 
 def test_parse_skill_md_mirrors_output_example_to_raw_md_field() -> None:
     example = (
-        '<output_example name="Item">\n'
-        "## items\n"
-        "- title (str, required): title\n"
-        "</output_example>"
+        '<output_example name="Item">\n## items\n- title (str, required): title\n</output_example>'
     )
 
     raw = parse_skill_md(

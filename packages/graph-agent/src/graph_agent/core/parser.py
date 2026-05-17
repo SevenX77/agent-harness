@@ -1,4 +1,4 @@
-"""Pure parsing utilities for schema-2.0 SKILL.md files.
+"""Pure parsing utilities for V2.1 Markdown/YAML documents.
 
 Two functions matter to callers:
 
@@ -29,10 +29,19 @@ import io
 import re
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
-from ruamel.yaml import YAML
-from ruamel.yaml.error import YAMLError
+try:  # pragma: no cover - exercised indirectly depending on env deps
+    from ruamel.yaml import YAML as _RuamelYAML
+    from ruamel.yaml.error import YAMLError as _RuamelYAMLError
+
+    RuamelYAML: Any = _RuamelYAML
+    YAMLError: Any = _RuamelYAMLError
+except ModuleNotFoundError:  # pragma: no cover
+    import yaml
+
+    RuamelYAML = None
+    YAMLError = yaml.YAMLError
 
 from graph_agent.core.exceptions import SkillLoadError
 
@@ -43,14 +52,16 @@ from graph_agent.core.exceptions import SkillLoadError
 _FRONTMATTER_LINE_OFFSET = 2
 
 
-def _make_yaml() -> YAML:
+def _make_yaml() -> Any:
     """Build a configured ruamel YAML loader.
 
     Round-trip mode (``typ='rt'``) preserves per-key line/column
     metadata on the returned ``CommentedMap`` / ``CommentedSeq`` —
     that is what ``locate_line_for_pydantic_loc`` walks.
     """
-    yaml = YAML(typ="rt")
+    if RuamelYAML is None:
+        raise SkillLoadError("ruamel.yaml is not available")
+    yaml = RuamelYAML(typ="rt")
     yaml.preserve_quotes = True
     return yaml
 
@@ -74,9 +85,14 @@ def _parse_frontmatter(content: str) -> dict[str, Any]:
         raise SkillLoadError("Invalid frontmatter format")
 
     yaml_body = match.group(1)
-    yaml = _make_yaml()
     try:
-        data = yaml.load(io.StringIO(yaml_body))
+        if RuamelYAML is None:
+            import yaml as pyyaml
+
+            data = pyyaml.safe_load(io.StringIO(yaml_body))
+        else:
+            yaml = _make_yaml()
+            data = yaml.load(io.StringIO(yaml_body))
     except YAMLError as exc:
         raise SkillLoadError(f"Invalid YAML in frontmatter: {exc}") from exc
 
@@ -154,38 +170,79 @@ def locate_line_for_pydantic_loc(root: Any, loc: Sequence[Any]) -> int | None:
     return max(1, last_line + 1)  # 0-indexed → 1-indexed
 
 
-def parse_skill_file(path: Path | str) -> dict[str, Any]:
-    """Read and decode a schema-2.0 SKILL.md file into its raw parts.
+def _fatal(path: Path, line: int, message: str) -> NoReturn:
+    raise SkillLoadError(f"[F-v21-route] {path}:{line} {message}")
 
-    Does *only* file I/O + YAML decoding. No semantic validation, no
-    XML extraction, no ``<ref>`` resolution. Those concerns belong to
-    ``SkillManifest.model_validate()`` and the compiler's rule pass.
 
-    Args:
-        path: Absolute or project-relative path to a ``SKILL.md``.
-
-    Returns:
-        ``{"frontmatter": CommentedMap, "human_body": str}``. The
-        ``frontmatter`` value is a ruamel ``CommentedMap`` (dict
-        subclass) carrying per-key ``.lc`` line metadata, ready to feed
-        to ``SkillManifest.model_validate`` *and* to
-        ``locate_line_for_pydantic_loc`` for line-resolved error
-        reporting.
-
-    Raises:
-        SkillLoadError: Missing/malformed frontmatter or unreadable file.
-    """
+def parse_markdown_parts(path: Path | str) -> tuple[dict[str, Any], str, dict[str, int]]:
+    """Read a V2.1 markdown document into YAML frontmatter and raw body."""
     p = Path(path)
     content = p.read_text(encoding="utf-8")
 
     frontmatter = _parse_frontmatter(content)
-    # Cohesion plan 方针 3.3 (2026-04-26): YAML parses unquoted ``2.0``
-    # as a Python float. Normalise to the canonical string so the
-    # downstream Pydantic ``Literal["2.0"]`` discriminator sees the
-    # right type and authors don't have to remember to quote the
-    # version literal.
     if "schema_version" in frontmatter:
         frontmatter["schema_version"] = str(frontmatter["schema_version"]).strip()
     body = _strip_frontmatter(content)
+    frontmatter_end_line = 1
+    match = re.match(r"^---\r?\n.*?\r?\n---", content, re.DOTALL)
+    if match:
+        frontmatter_end_line = content[: match.end()].count("\n") + 1
 
-    return {"frontmatter": frontmatter, "human_body": body}
+    return frontmatter, body, {"body_start": frontmatter_end_line + 1}
+
+
+def extract_raw_blocks(body: str, allowed_tags: list[str]) -> dict[str, str]:
+    """Extract top-level ``<tag>...</tag>`` blocks as raw strings.
+
+    The inside of each block is intentionally not parsed as XML.  Natural
+    language angle brackets, HTML snippets, and malformed inner markup remain
+    untouched.
+    """
+    blocks: dict[str, str] = {}
+    for tag in allowed_tags:
+        pattern = re.compile(
+            rf"<{re.escape(tag)}(?:\s[^>]*)?>(.*?)</{re.escape(tag)}>",
+            re.DOTALL | re.IGNORECASE,
+        )
+        match = pattern.search(body)
+        if match:
+            blocks[tag] = match.group(1).strip()
+    return blocks
+
+
+_FORBIDDEN_TOPOLOGY_TAG_RE = re.compile(
+    r"</?\s*(phase|depends_on|edge)\b",
+    re.IGNORECASE,
+)
+
+
+def scan_forbidden_topology_tags(path: Path, body: str) -> None:
+    """Reject graph-topology tags inside phase XML bodies."""
+    match = _FORBIDDEN_TOPOLOGY_TAG_RE.search(body)
+    if match is None:
+        return
+    line = body[: match.start()].count("\n") + 1
+    tag = match.group(0).replace(" ", "")
+    if not tag.endswith(">"):
+        tag += ">"
+    _fatal(
+        path,
+        line,
+        f"topology tag '{tag}' is forbidden in phase body (整图拓扑只能在 GRAPH.md)",
+    )
+
+
+def parse_skill_file(path: Path | str) -> dict[str, Any]:
+    """Deprecated schema-2.0 API removed by the V2.1 hard cut."""
+    _fatal(Path(path), 1, "schema 2.0 parse_skill_file is not supported; use GRAPH.md")
+
+
+__all__ = [
+    "_parse_frontmatter",
+    "_strip_frontmatter",
+    "extract_raw_blocks",
+    "locate_line_for_pydantic_loc",
+    "parse_markdown_parts",
+    "parse_skill_file",
+    "scan_forbidden_topology_tags",
+]

@@ -14,6 +14,7 @@ from langchain_core.runnables import RunnableConfig
 def _noop_node(phase: Phase) -> Callable[..., WorkflowState]:
     def _inner(state: WorkflowState, config: RunnableConfig) -> WorkflowState:
         return state
+
     return _inner
 
 
@@ -96,6 +97,7 @@ class TestBuild:
         nodes = graph.get_graph().nodes
         assert {"prep_execute", "analyse_execute", "analyse_validate"}.issubset(nodes)
 
+
 class TestExecutorFromConfig:
     """The `_executor_from_config` helper is the load-bearing link in Phase B:
     every LangGraph node extracts the per-run PhaseExecutor from
@@ -104,7 +106,9 @@ class TestExecutorFromConfig:
     These tests pin the contract end-to-end — missing config, empty config,
     nested configurable, and happy path."""
 
-    def _make_llm_node_with_executor_assert(self, phase: Phase, marker: list[str]) -> Callable[..., WorkflowState]:
+    def _make_llm_node_with_executor_assert(
+        self, phase: Phase, marker: list[str]
+    ) -> Callable[..., WorkflowState]:
         """Reach into GraphBuilder's private _make_llm_node to run the real
         unwrap path. We verify the call reaches the executor passed via
         config (not any ambient instance state)."""
@@ -146,9 +150,7 @@ class TestExecutorFromConfig:
 
         sentinel = PhaseExecutor([])
         got = _executor_from_config({"configurable": {"_phase_executor": sentinel}})
-        assert got is sentinel, (
-            "unwrap must return the exact object injected, not a copy or None"
-        )
+        assert got is sentinel, "unwrap must return the exact object injected, not a copy or None"
 
     def test_llm_node_dispatches_to_injected_executor(self):
         """End-to-end through `_make_llm_node`: the closure must call the

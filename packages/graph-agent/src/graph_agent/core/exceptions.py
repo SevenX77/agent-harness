@@ -24,6 +24,10 @@ class GraphAgentError(Exception):
         self.context = context or {}
 
 
+class GraphAgentFatalError(GraphAgentError):
+    """Fail-fast graph_agent error for violated hard invariants."""
+
+
 # === Loader-time errors (SKILL load / parse / module / phase build) ===
 
 

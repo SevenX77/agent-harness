@@ -37,15 +37,17 @@ class TestComposeAgentSystemPrompt:
     """Agent skill System Prompt composition from AgentProfile."""
 
     def test_basic_role_and_goal(self):
-        manifest = _SKILL_ADAPTER.validate_python({
-            "name": "beat-extractor",
-            "description": "Extract beats from a chapter.",
-            "type": "agent",
-            "agent_profile": {
-                "role": "专业的影视剧本拆解员",
-                "goal": "客观地将小说原著切分为动作节拍。",
-            },
-        })
+        manifest = _SKILL_ADAPTER.validate_python(
+            {
+                "name": "beat-extractor",
+                "description": "Extract beats from a chapter.",
+                "type": "agent",
+                "agent_profile": {
+                    "role": "专业的影视剧本拆解员",
+                    "goal": "客观地将小说原著切分为动作节拍。",
+                },
+            }
+        )
         assert isinstance(manifest, AgentSkillDef)
 
         prompt = _compose_agent_system_prompt(manifest)
@@ -57,20 +59,22 @@ class TestComposeAgentSystemPrompt:
         assert "</task_objective>" in prompt
 
     def test_steps_render_as_numbered_workflow(self):
-        manifest = _SKILL_ADAPTER.validate_python({
-            "name": "plan-scenes",
-            "description": "统筹制片大管家。",
-            "type": "agent",
-            "agent_profile": {
-                "role": "统筹制片大管家",
-                "goal": "从物理场拆解到编剧分镜。",
-                "steps": [
-                    "调用 build_objective_scenes",
-                    "调用 extract_beats_concurrently",
-                    "调用 dispatch_producer_strategy",
-                ],
-            },
-        })
+        manifest = _SKILL_ADAPTER.validate_python(
+            {
+                "name": "plan-scenes",
+                "description": "统筹制片大管家。",
+                "type": "agent",
+                "agent_profile": {
+                    "role": "统筹制片大管家",
+                    "goal": "从物理场拆解到编剧分镜。",
+                    "steps": [
+                        "调用 build_objective_scenes",
+                        "调用 extract_beats_concurrently",
+                        "调用 dispatch_producer_strategy",
+                    ],
+                },
+            }
+        )
         assert isinstance(manifest, AgentSkillDef)
 
         prompt = _compose_agent_system_prompt(manifest)
@@ -81,16 +85,18 @@ class TestComposeAgentSystemPrompt:
         assert "</steps>" in prompt
 
     def test_constraints_render_as_bullet_list(self):
-        manifest = _SKILL_ADAPTER.validate_python({
-            "name": "x",
-            "description": "x",
-            "type": "agent",
-            "agent_profile": {
-                "role": "r",
-                "goal": "g",
-                "constraints": ["不加入改编创意", "严禁寒暄"],
-            },
-        })
+        manifest = _SKILL_ADAPTER.validate_python(
+            {
+                "name": "x",
+                "description": "x",
+                "type": "agent",
+                "agent_profile": {
+                    "role": "r",
+                    "goal": "g",
+                    "constraints": ["不加入改编创意", "严禁寒暄"],
+                },
+            }
+        )
         assert isinstance(manifest, AgentSkillDef)
 
         prompt = _compose_agent_system_prompt(manifest)
@@ -104,15 +110,17 @@ class TestPhaseFromAgentSkill:
     """Agent skill → runtime Phase."""
 
     def test_phase_fields_propagated(self, tmp_path: Path):
-        manifest = _SKILL_ADAPTER.validate_python({
-            "name": "sample-agent",
-            "description": "d",
-            "type": "agent",
-            "model_override": "CL47T",
-            "agent_profile": {"role": "r", "goal": "g", "llm_role": "premium"},
-            "agent_tools": [],
-            "user_prompt_template": "Process: {input}",
-        })
+        manifest = _SKILL_ADAPTER.validate_python(
+            {
+                "name": "sample-agent",
+                "description": "d",
+                "type": "agent",
+                "model_override": "CL47T",
+                "agent_profile": {"role": "r", "goal": "g", "llm_role": "premium"},
+                "agent_tools": [],
+                "user_prompt_template": "Process: {input}",
+            }
+        )
         assert isinstance(manifest, AgentSkillDef)
 
         phase = _phase_from_agent_skill(manifest, tmp_path, callbacks=None, loading_stack=set())
@@ -124,12 +132,14 @@ class TestPhaseFromAgentSkill:
         assert phase.requires_llm is True
 
     def test_default_tier_when_unset(self, tmp_path: Path):
-        manifest = _SKILL_ADAPTER.validate_python({
-            "name": "x",
-            "description": "d",
-            "type": "agent",
-            "agent_profile": {"role": "r", "goal": "g"},
-        })
+        manifest = _SKILL_ADAPTER.validate_python(
+            {
+                "name": "x",
+                "description": "d",
+                "type": "agent",
+                "agent_profile": {"role": "r", "goal": "g"},
+            }
+        )
         assert isinstance(manifest, AgentSkillDef)
 
         phase = _phase_from_agent_skill(manifest, tmp_path, callbacks=None, loading_stack=set())
@@ -144,23 +154,25 @@ class TestPhaseFromGraphPhase:
         ``LLMPhase.output_schema: str`` and the runtime PhaseExecutor
         reads ``Phase.output_schema_path`` — but the loader was missing
         the wire between them, so the field had no observable effect."""
-        manifest = _SKILL_ADAPTER.validate_python({
-            "name": "g",
-            "description": "d",
-            "type": "graph",
-            "io": {"inputs": [], "outputs": []},
-            "phases": [{
-                "mode": "llm",
-                "name": "extract",
-                "llm_role": "balanced",
-                "prompt": "extract",
-                "output_schema": "pkg.module.MyResult",
-            }],
-        })
-        phase_def = manifest.phases[0]
-        phase = _phase_from_graph_phase(
-            phase_def, tmp_path, callbacks=None, loading_stack=set()
+        manifest = _SKILL_ADAPTER.validate_python(
+            {
+                "name": "g",
+                "description": "d",
+                "type": "graph",
+                "io": {"inputs": [], "outputs": []},
+                "phases": [
+                    {
+                        "mode": "llm",
+                        "name": "extract",
+                        "llm_role": "balanced",
+                        "prompt": "extract",
+                        "output_schema": "pkg.module.MyResult",
+                    }
+                ],
+            }
         )
+        phase_def = manifest.phases[0]
+        phase = _phase_from_graph_phase(phase_def, tmp_path, callbacks=None, loading_stack=set())
         assert phase.output_schema_path == "pkg.module.MyResult", (
             "Loader must pass LLMPhase.output_schema through to "
             "Phase.output_schema_path so PhaseExecutor can hand the "
@@ -169,23 +181,27 @@ class TestPhaseFromGraphPhase:
         )
 
     def test_llm_phase_builds_reactive_phase(self, tmp_path: Path):
-        manifest = _SKILL_ADAPTER.validate_python({
-            "name": "g",
-            "description": "d",
-            "type": "graph",
-            "io": {"inputs": [], "outputs": []},
-            "phases": [{
-                "mode": "llm",
-                "name": "segment",
-                "llm_role": "balanced",
-                "prompt": "You are a segmenter.",
-                "user_prompt_template": "Segment: {text}",
-                "max_iterations": 12,
-                "max_nudges": 3,
-                "max_retries": 2,
-                "retry_target": "segment",
-            }],
-        })
+        manifest = _SKILL_ADAPTER.validate_python(
+            {
+                "name": "g",
+                "description": "d",
+                "type": "graph",
+                "io": {"inputs": [], "outputs": []},
+                "phases": [
+                    {
+                        "mode": "llm",
+                        "name": "segment",
+                        "llm_role": "balanced",
+                        "prompt": "You are a segmenter.",
+                        "user_prompt_template": "Segment: {text}",
+                        "max_iterations": 12,
+                        "max_nudges": 3,
+                        "max_retries": 2,
+                        "retry_target": "segment",
+                    }
+                ],
+            }
+        )
 
         phase_def = manifest.phases[0]
         assert isinstance(phase_def, LLMPhase)
@@ -202,18 +218,22 @@ class TestPhaseFromGraphPhase:
         assert phase.requires_llm is True
 
     def test_llm_phase_with_steps_renders_into_system_prompt(self, tmp_path: Path):
-        manifest = _SKILL_ADAPTER.validate_python({
-            "name": "g",
-            "description": "d",
-            "type": "graph",
-            "io": {"inputs": [], "outputs": []},
-            "phases": [{
-                "mode": "llm",
-                "name": "plan",
-                "prompt": "Plan carefully.",
-                "steps": ["调用 X 工具", "验证 Y", "返回结果"],
-            }],
-        })
+        manifest = _SKILL_ADAPTER.validate_python(
+            {
+                "name": "g",
+                "description": "d",
+                "type": "graph",
+                "io": {"inputs": [], "outputs": []},
+                "phases": [
+                    {
+                        "mode": "llm",
+                        "name": "plan",
+                        "prompt": "Plan carefully.",
+                        "steps": ["调用 X 工具", "验证 Y", "返回结果"],
+                    }
+                ],
+            }
+        )
 
         phase = _phase_from_graph_phase(
             manifest.phases[0], tmp_path, callbacks=None, loading_stack=set()
@@ -228,17 +248,21 @@ class TestPhaseFromGraphPhase:
         assert "2. 验证 Y" in phase.system_prompt
 
     def test_llm_phase_without_steps_prompt_unchanged(self, tmp_path: Path):
-        manifest = _SKILL_ADAPTER.validate_python({
-            "name": "g",
-            "description": "d",
-            "type": "graph",
-            "io": {"inputs": [], "outputs": []},
-            "phases": [{
-                "mode": "llm",
-                "name": "plan",
-                "prompt": "Plan carefully.",
-            }],
-        })
+        manifest = _SKILL_ADAPTER.validate_python(
+            {
+                "name": "g",
+                "description": "d",
+                "type": "graph",
+                "io": {"inputs": [], "outputs": []},
+                "phases": [
+                    {
+                        "mode": "llm",
+                        "name": "plan",
+                        "prompt": "Plan carefully.",
+                    }
+                ],
+            }
+        )
 
         phase = _phase_from_graph_phase(
             manifest.phases[0], tmp_path, callbacks=None, loading_stack=set()
@@ -248,17 +272,21 @@ class TestPhaseFromGraphPhase:
         assert "<steps>" not in phase.system_prompt
 
     def test_llm_phase_dead_end_threshold_default_and_override(self, tmp_path: Path):
-        default_manifest = _SKILL_ADAPTER.validate_python({
-            "name": "g",
-            "description": "d",
-            "type": "graph",
-            "io": {"inputs": [], "outputs": []},
-            "phases": [{
-                "mode": "llm",
-                "name": "segment",
-                "prompt": "p",
-            }],
-        })
+        default_manifest = _SKILL_ADAPTER.validate_python(
+            {
+                "name": "g",
+                "description": "d",
+                "type": "graph",
+                "io": {"inputs": [], "outputs": []},
+                "phases": [
+                    {
+                        "mode": "llm",
+                        "name": "segment",
+                        "prompt": "p",
+                    }
+                ],
+            }
+        )
         default_phase = _phase_from_graph_phase(
             default_manifest.phases[0], tmp_path, callbacks=None, loading_stack=set()
         )
@@ -268,18 +296,22 @@ class TestPhaseFromGraphPhase:
             "documented runtime default."
         )
 
-        overridden_manifest = _SKILL_ADAPTER.validate_python({
-            "name": "g",
-            "description": "d",
-            "type": "graph",
-            "io": {"inputs": [], "outputs": []},
-            "phases": [{
-                "mode": "llm",
-                "name": "segment",
-                "prompt": "p",
-                "dead_end_threshold": 7,
-            }],
-        })
+        overridden_manifest = _SKILL_ADAPTER.validate_python(
+            {
+                "name": "g",
+                "description": "d",
+                "type": "graph",
+                "io": {"inputs": [], "outputs": []},
+                "phases": [
+                    {
+                        "mode": "llm",
+                        "name": "segment",
+                        "prompt": "p",
+                        "dead_end_threshold": 7,
+                    }
+                ],
+            }
+        )
         overridden_phase = _phase_from_graph_phase(
             overridden_manifest.phases[0], tmp_path, callbacks=None, loading_stack=set()
         )
@@ -290,18 +322,22 @@ class TestPhaseFromGraphPhase:
 
     def test_llm_phase_dead_end_threshold_rejects_zero(self):
         with pytest.raises(ValidationError):
-            _SKILL_ADAPTER.validate_python({
-                "name": "g",
-                "description": "d",
-                "type": "graph",
-                "io": {"inputs": [], "outputs": []},
-                "phases": [{
-                    "mode": "llm",
-                    "name": "segment",
-                    "prompt": "p",
-                    "dead_end_threshold": 0,
-                }],
-            })
+            _SKILL_ADAPTER.validate_python(
+                {
+                    "name": "g",
+                    "description": "d",
+                    "type": "graph",
+                    "io": {"inputs": [], "outputs": []},
+                    "phases": [
+                        {
+                            "mode": "llm",
+                            "name": "segment",
+                            "prompt": "p",
+                            "dead_end_threshold": 0,
+                        }
+                    ],
+                }
+            )
 
     def test_logic_phase_builds_nonllm_phase(self, tmp_path: Path):
         # A real test of execute_steps resolution would require a module
@@ -309,23 +345,29 @@ class TestPhaseFromGraphPhase:
         # expect a resolver failure — confirming the builder attempts
         # resolution. When PR #6 Commit 2 wires this in, the production
         # skills' execute_steps will point to real modules.
-        manifest = _SKILL_ADAPTER.validate_python({
-            "name": "g",
-            "description": "d",
-            "type": "graph",
-            "io": {"inputs": [], "outputs": []},
-            "phases": [{
-                "mode": "logic",
-                "name": "prep",
-                "execute_steps": ["nonexistent.stub.module.func"],
-            }],
-        })
+        manifest = _SKILL_ADAPTER.validate_python(
+            {
+                "name": "g",
+                "description": "d",
+                "type": "graph",
+                "io": {"inputs": [], "outputs": []},
+                "phases": [
+                    {
+                        "mode": "logic",
+                        "name": "prep",
+                        "execute_steps": ["nonexistent.stub.module.func"],
+                    }
+                ],
+            }
+        )
         phase_def = manifest.phases[0]
         assert isinstance(phase_def, LogicPhase)
 
         from graph_agent.core.exceptions import SkillLoadError
+
         with pytest.raises(SkillLoadError):
             _phase_from_graph_phase(phase_def, tmp_path, callbacks=None, loading_stack=set())
+
 
 # DelegatePhase coverage removed in MVP-0 B1 (2026-04-28).
 
@@ -333,6 +375,7 @@ class TestPhaseFromGraphPhase:
 # =============================================================================
 # Persona injection tests (PR #6 Commit 4)
 # =============================================================================
+
 
 def test_phase_from_agent_skill_injects_persona(tmp_path: Path) -> None:
     """Persona role_profile must be prepended to the composed system_prompt when an agent skill declares ``adopted_persona``."""
@@ -353,17 +396,19 @@ def test_phase_from_agent_skill_injects_persona(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    manifest = TypeAdapter(SkillManifest).validate_python({
-        "schema_version": "2.0",
-        "name": "host-agent",
-        "description": "host",
-        "type": "agent",
-        "agent_profile": {
-            "role": "测试角色",
-            "goal": "测试目标",
-        },
-        "adopted_persona": "p1",
-    })
+    manifest = TypeAdapter(SkillManifest).validate_python(
+        {
+            "schema_version": "2.0",
+            "name": "host-agent",
+            "description": "host",
+            "type": "agent",
+            "agent_profile": {
+                "role": "测试角色",
+                "goal": "测试目标",
+            },
+            "adopted_persona": "p1",
+        }
+    )
     assert isinstance(manifest, AgentSkillDef)
     phase = _phase_from_agent_skill(manifest, base_dir, callbacks=None, loading_stack=set())
     assert "PERSONA-ROLE-MARKER" in (phase.system_prompt or "")
@@ -389,16 +434,20 @@ def test_phase_from_graph_phase_injects_persona(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    phase_def = TypeAdapter(PhaseDef).validate_python({
-        "name": "p",
-        "mode": "llm",
-        "prompt": "ORIGINAL-PROMPT-BODY",
-        "adopted_persona": "p2",
-    })
+    phase_def = TypeAdapter(PhaseDef).validate_python(
+        {
+            "name": "p",
+            "mode": "llm",
+            "prompt": "ORIGINAL-PROMPT-BODY",
+            "adopted_persona": "p2",
+        }
+    )
     assert isinstance(phase_def, LLMPhase)
     phase = _phase_from_graph_phase(phase_def, base_dir, callbacks=None, loading_stack=set())
     assert "GRAPH-PERSONA-MARKER" in (phase.system_prompt or "")
-    assert phase.system_prompt.index("GRAPH-PERSONA-MARKER") < phase.system_prompt.index("ORIGINAL-PROMPT-BODY")
+    assert phase.system_prompt.index("GRAPH-PERSONA-MARKER") < phase.system_prompt.index(
+        "ORIGINAL-PROMPT-BODY"
+    )
 
 
 def test_phase_from_agent_skill_injects_evaluation_rubrics(tmp_path: Path) -> None:
@@ -421,14 +470,16 @@ def test_phase_from_agent_skill_injects_evaluation_rubrics(tmp_path: Path) -> No
         encoding="utf-8",
     )
 
-    manifest = TypeAdapter(SkillManifest).validate_python({
-        "schema_version": "2.0",
-        "name": "host-agent",
-        "description": "host",
-        "type": "agent",
-        "agent_profile": {"role": "host-role", "goal": "host-goal"},
-        "adopted_persona": "rubric_persona",
-    })
+    manifest = TypeAdapter(SkillManifest).validate_python(
+        {
+            "schema_version": "2.0",
+            "name": "host-agent",
+            "description": "host",
+            "type": "agent",
+            "agent_profile": {"role": "host-role", "goal": "host-goal"},
+            "adopted_persona": "rubric_persona",
+        }
+    )
     assert isinstance(manifest, AgentSkillDef)
     phase = _phase_from_agent_skill(manifest, base_dir, callbacks=None, loading_stack=set())
     sp = phase.system_prompt or ""
@@ -459,14 +510,16 @@ def test_persona_few_shot_examples_render_as_examples_tag(tmp_path: Path) -> Non
         encoding="utf-8",
     )
 
-    manifest = TypeAdapter(SkillManifest).validate_python({
-        "schema_version": "2.0",
-        "name": "host-agent",
-        "description": "host",
-        "type": "agent",
-        "agent_profile": {"role": "r", "goal": "g"},
-        "adopted_persona": "shotty",
-    })
+    manifest = TypeAdapter(SkillManifest).validate_python(
+        {
+            "schema_version": "2.0",
+            "name": "host-agent",
+            "description": "host",
+            "type": "agent",
+            "agent_profile": {"role": "r", "goal": "g"},
+            "adopted_persona": "shotty",
+        }
+    )
     assert isinstance(manifest, AgentSkillDef)
     phase = _phase_from_agent_skill(manifest, base_dir, callbacks=None, loading_stack=set())
     sp = phase.system_prompt or ""

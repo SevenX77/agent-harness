@@ -14,6 +14,7 @@ Fixed contract: any non-``"2.0"`` ``schema_version`` raises
 ``F-schema-version`` wording the compiler already produces, so callers
 get a single clear failure mode.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -27,12 +28,12 @@ def _write_skill(path: Path, schema_version_literal: str) -> None:
     path.write_text(
         f"---\n"
         f"schema_version: {schema_version_literal}\n"
-        'name: x\n'
-        'description: x\n'
-        'type: agent\n'
-        'agent_profile:\n'
-        '  role: r\n'
-        '  goal: g\n'
+        "name: x\n"
+        "description: x\n"
+        "type: agent\n"
+        "agent_profile:\n"
+        "  role: r\n"
+        "  goal: g\n"
         "---\n",
         encoding="utf-8",
     )

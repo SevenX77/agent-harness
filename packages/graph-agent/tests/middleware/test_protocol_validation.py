@@ -39,9 +39,7 @@ class TestInit:
         engine = SchemaEngine()
         schema = SchemaObject(fields=(), required_fields=frozenset())
 
-        mw = ProtocolValidationMiddleware(
-            engine, schema, phase_name="segment"
-        )
+        mw = ProtocolValidationMiddleware(engine, schema, phase_name="segment")
 
         assert mw._schema_engine is engine
         assert mw._current_phase_schema is schema

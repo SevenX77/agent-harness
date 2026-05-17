@@ -21,6 +21,10 @@ EXPECTED_TOP_LEVEL_EXPORTS = [
     "WorkflowResult",
     "compile_skill",
     "CompileResult",
+    "assemble_graph",
+    "CompiledSkill",
+    "CompiledStateGraph",
+    "BlackboardState",
     "SkillManifest",
     "serialize_skill",
     "Callback",
@@ -31,6 +35,7 @@ EXPECTED_TOP_LEVEL_EXPORTS = [
     "SkillLoadError",
     "SkillCompilationError",
 ]
+
 
 class DummyMockStrategy(BaseMockStrategy):
     def has_phase(self, phase_name: str) -> bool:

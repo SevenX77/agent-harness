@@ -1,0 +1,46 @@
+{
+  "additionalProperties": false,
+  "description": "Subgraph delegation phase node parsed from ``SUBGRAPH.md``.",
+  "properties": {
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    },
+    "mode": {
+      "const": "subgraph",
+      "title": "Mode",
+      "type": "string"
+    },
+    "name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Name"
+    },
+    "raw_blocks": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Raw Blocks",
+      "type": "object"
+    },
+    "sub_skill_ref": {
+      "minLength": 1,
+      "title": "Sub Skill Ref",
+      "type": "string"
+    }
+  },
+  "required": [
+    "mode",
+    "sub_skill_ref"
+  ],
+  "title": "SubgraphNodeAST",
+  "type": "object"
+}

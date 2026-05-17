@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "content": {
+      "type": "string",
+      "description": "Producer-facing artifact text or serialized JSON to review."
+    },
+    "contexts": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Review domains such as character, visual, adaptation, or pacing."
+    },
+    "criteria": {
+      "type": "string",
+      "description": "Additional runtime review criteria."
+    },
+    "artifact_type": {
+      "type": "string",
+      "description": "Type of artifact under review."
+    }
+  },
+  "required": ["content"],
+  "additionalProperties": true
+}

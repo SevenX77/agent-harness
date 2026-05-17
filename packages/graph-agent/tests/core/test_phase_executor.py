@@ -97,9 +97,7 @@ def _capture_execute_llm_phase(
         "create_custom_middlewares",
         fake_create_custom_middlewares,
     )
-    monkeypatch.setattr(
-        llm_phase_node_module, "create_agent", fake_create_agent
-    )
+    monkeypatch.setattr(llm_phase_node_module, "create_agent", fake_create_agent)
 
     resolver = _Resolver()
     executor = PhaseExecutor(
@@ -329,7 +327,11 @@ class TestExecuteCodeOnlyPhaseDictMergePhase2A3:
         # ``code_only_dict_validate`` event — i.e. validate never ran.
         decisions = [rec.message for rec in caplog.records]
         reject_idx = next(
-            (i for i, m in enumerate(decisions) if "code_only_dict_merge" in m and "decision=reject" in m),
+            (
+                i
+                for i, m in enumerate(decisions)
+                if "code_only_dict_merge" in m and "decision=reject" in m
+            ),
             None,
         )
         validate_idx = next(
@@ -374,9 +376,7 @@ class TestExecuteCodeOnlyPhaseDictMergePhase2A3:
         phase = Phase(name="prep", requires_llm=False, tools=[tool_dict])  # type: ignore[list-item]
         executor = PhaseExecutor([])
 
-        with caplog.at_level(
-            logging.INFO, logger="graph_agent.core.phase_nodes.code_phase_node"
-        ):
+        with caplog.at_level(logging.INFO, logger="graph_agent.core.phase_nodes.code_phase_node"):
             executor.execute_code_only_phase(phase, _make_state())
 
         merge_log = next(
@@ -467,8 +467,7 @@ class TestPhaseExecutorIoHoistT7Bis:
 
         # Missing required source field surfaces as an io_error in flow.
         assert any(
-            "absent" in err and "missing" in err.lower()
-            for err in state_out["flow"].io_errors
+            "absent" in err and "missing" in err.lower() for err in state_out["flow"].io_errors
         )
 
     def test_code_only_phase_hoist_appends_to_existing_io_errors(self):
@@ -485,9 +484,7 @@ class TestPhaseExecutorIoHoistT7Bis:
 
         # ``StateManager.update_framework`` appends, doesn't replace.
         assert state_out["flow"].io_errors[0] == "pre-existing"
-        assert any(
-            "absent" in err for err in state_out["flow"].io_errors[1:]
-        )
+        assert any("absent" in err for err in state_out["flow"].io_errors[1:])
 
 
 class TestExecuteLLMPhaseMiddlewareIntegration:
@@ -518,14 +515,9 @@ class TestExecuteLLMPhaseSchemaRoutingPhase3M7:
     """
 
     def _middleware_class_names(self, captured: dict[str, Any]) -> list[str]:
-        return [
-            type(mw).__name__
-            for mw in captured["create_agent_kwargs"]["middleware"]
-        ]
+        return [type(mw).__name__ for mw in captured["create_agent_kwargs"]["middleware"]]
 
-    def test_static_pydantic_schema_routes_to_new_pipeline(
-        self, monkeypatch, caplog
-    ):
+    def test_static_pydantic_schema_routes_to_new_pipeline(self, monkeypatch, caplog):
         class _LiveSchema(BaseModel):
             title: str
             score: int
@@ -537,9 +529,7 @@ class TestExecuteLLMPhaseSchemaRoutingPhase3M7:
             output_schema=_LiveSchema,
         )
 
-        with caplog.at_level(
-            logging.INFO, logger="graph_agent.core.phase_nodes.llm_phase_node"
-        ):
+        with caplog.at_level(logging.INFO, logger="graph_agent.core.phase_nodes.llm_phase_node"):
             captured = _capture_execute_llm_phase(monkeypatch, phase)
 
         names = self._middleware_class_names(captured)
@@ -550,8 +540,7 @@ class TestExecuteLLMPhaseSchemaRoutingPhase3M7:
             (
                 rec.message
                 for rec in caplog.records
-                if "middleware_pipeline" in rec.message
-                and "phase=segment" in rec.message
+                if "middleware_pipeline" in rec.message and "phase=segment" in rec.message
             ),
             None,
         )
@@ -578,9 +567,7 @@ class TestExecuteLLMPhaseSchemaRoutingPhase3M7:
         assert "ProtocolValidationMiddleware" in names
         assert "CognitiveFlowMiddleware" in names
 
-    def test_no_legacy_validation_middleware_anywhere_in_pipeline(
-        self, monkeypatch
-    ):
+    def test_no_legacy_validation_middleware_anywhere_in_pipeline(self, monkeypatch):
         """PHASE3_DESIGN.md §3.6 ship-standard: the legacy parallel
         pipeline must be physically gone. Even when assembling the
         middleware list against an arbitrary phase shape, no class

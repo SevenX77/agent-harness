@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import queue
 from datetime import UTC, datetime, timedelta
@@ -7,9 +8,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from app.core.adapters.metadata_local import LocalJsonMetadataStore
+from app.core.adapters.storage_local import LocalFilesystemBackend
 from app.models.runs import RunMetadata
 from app.services.event_bus import event_bus
 from app.services.run_manager import run_manager
+from app.services.skills import create_new_skill
 from app.services.terminal_manager import terminal_manager
 from fastapi.testclient import TestClient
 from graph_agent.callbacks.events import (
@@ -101,14 +105,36 @@ def test_lint_reports_failed_manifest_with_line_number(
     assert body["errors"][0]["error_code"]
 
 
-def test_put_single_file_edit_returns_v21_cutover_error(
+def test_update_skill_rejects_legacy_content_payload(
     client: TestClient,
 ) -> None:
     response = client.put("/api/skills/text-segmentation", json={"content": "name: updated"})
 
     assert response.status_code == 422
     assert response.json()["error_code"] == "MANIFEST_VALIDATION_FAILED"
-    assert response.json()["details"] == {"required_entry": "GRAPH.md"}
+    error_types = {error["type"] for error in response.json()["details"]["errors"]}
+    assert {"missing", "extra_forbidden"} <= error_types
+
+
+def test_update_skill_accepts_files_payload(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    skills_dir, workspaces_dir = studio_roots
+    files = _files_from_skill_dir(skills_dir / "text-segmentation")
+    files["phases/setup/LOGIC.md"] = files["phases/setup/LOGIC.md"].replace(
+        "name: setup",
+        "name: updated setup",
+    )
+
+    response = client.put("/api/skills/text-segmentation", json={"files": files})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["files"]["phases/setup/LOGIC.md"] == files["phases/setup/LOGIC.md"]
+    assert "updated setup" in (
+        workspaces_dir / "default" / "skills" / "text-segmentation" / "phases" / "setup" / "LOGIC.md"
+    ).read_text(encoding="utf-8")
 
 
 def test_create_skill_single_file_returns_v21_cutover_error(
@@ -120,13 +146,32 @@ def test_create_skill_single_file_returns_v21_cutover_error(
     )
 
     assert response.status_code == 422
-    assert response.json()["details"] == {"required_entry": "GRAPH.md"}
+    error_types = {error["type"] for error in response.json()["details"]["errors"]}
+    assert {"missing", "extra_forbidden"} <= error_types
+
+
+def test_create_skill_uses_inline_v21_scaffold(
+    studio_roots: tuple[Path, Path],
+) -> None:
+    _skills_dir, workspaces_dir = studio_roots
+    storage = LocalFilesystemBackend(workspaces_dir)
+    metadata = LocalJsonMetadataStore(workspaces_dir)
+
+    summary = asyncio.run(create_new_skill("default", "idea-generator", {}, storage, metadata))
+
+    skill_dir = workspaces_dir / "default" / "skills" / "idea-generator"
+    assert summary.id == "idea-generator"
+    assert (skill_dir / "GRAPH.md").exists()
+    assert (skill_dir / "phases" / "init" / "LOGIC.md").exists()
+    assert (skill_dir / "io" / "inputs.json").read_text(encoding="utf-8") == "{}\n"
+    assert (skill_dir / "io" / "outputs.json").read_text(encoding="utf-8") == "{}\n"
+    assert "name: idea-generator" in (skill_dir / "GRAPH.md").read_text(encoding="utf-8")
 
 
 def test_create_skill_collision_returns_409(client: TestClient) -> None:
     response = client.post(
         "/api/skills",
-        json={"skill_id": "text-segmentation", "content": _agent_skill_content("text-segmentation")},
+        json={"skill_id": "text-segmentation", "files": {}},
     )
 
     assert response.status_code == 409
@@ -552,6 +597,14 @@ user_prompt_template: |
 
 # {skill_id}
 """
+
+
+def _files_from_skill_dir(skill_dir: Path) -> dict[str, str]:
+    files: dict[str, str] = {}
+    for path in sorted(skill_dir.rglob("*")):
+        if path.is_file():
+            files[path.relative_to(skill_dir).as_posix()] = path.read_text(encoding="utf-8")
+    return files
 
 
 def _write_final_state(

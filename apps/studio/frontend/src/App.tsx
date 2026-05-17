@@ -4,6 +4,7 @@ import type { Connection } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { GraphCanvas } from './components/GraphCanvas'
 import { HeaderBar } from './components/HeaderBar'
+import { DirtyBar } from './components/DirtyBar'
 import { PromptInspector } from './components/PromptInspector'
 import { RightPanel } from './components/RightPanel'
 import { SkillSidebar } from './components/SkillSidebar'
@@ -18,7 +19,7 @@ import { SkillPalette } from './components/shortcuts/SkillPalette'
 import { ToastStack } from './components/ToastStack'
 import { WelcomeScreen } from './components/WelcomeScreen'
 import type { EditorOnMount, MonacoApi, MonacoEditor } from './components/MonacoPanel'
-import { api, wsUrl } from './api/client'
+import { api, fetchSkillFiles, saveSkillFiles, wsUrl } from './api/client'
 import type {
   CallbackEvent,
   JsonObject,
@@ -42,11 +43,11 @@ import { useTheme } from './hooks/useTheme'
 import { useToasts } from './hooks/useToasts'
 import { useTraceSelection } from './hooks/useTraceSelection'
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts'
+import { useWorkspaceStore } from './stores/workspace'
 import type {
   ActiveTab,
   ApiKeyName,
   ApiKeys,
-  EditorDraft,
   LintOverride,
   RunStatus,
   TerminalStatus,
@@ -95,7 +96,6 @@ export default function App() {
 
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
-  const [editorDraft, setEditorDraft] = useState<EditorDraft>({ skillId: null, code: '', dirty: false })
   const [lintOverride, setLintOverride] = useState<LintOverride | null>(null)
   const [runStatus, setRunStatus] = useState<RunStatus>('idle')
   const [activeTab, setActiveTab] = useState<ActiveTab>('code')
@@ -123,6 +123,14 @@ export default function App() {
   const runWsRef = useRef<WebSocket | null>(null)
   const goldenDiff = useGoldenDiff(selectedSkillId, lastRunId)
   const batchRun = useBatchRun(selectedSkillId)
+  const workspaceFiles = useWorkspaceStore((state) => state.files)
+  const workspaceActiveFile = useWorkspaceStore((state) => state.activeFile)
+  const workspaceDirty = useWorkspaceStore((state) => state.dirty)
+  const workspaceIsDirty = useWorkspaceStore((state) => state.isDirty)
+  const setWorkspaceFiles = useWorkspaceStore((state) => state.setFiles)
+  const setWorkspaceActiveFile = useWorkspaceStore((state) => state.setActive)
+  const updateWorkspaceFile = useWorkspaceStore((state) => state.updateFile)
+  const loadedWorkspaceSkillIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -140,20 +148,35 @@ export default function App() {
     }
   }, [])
 
-  const canonicalSkillCode = skillDetail ? manifestToSkillMarkdown(skillDetail.manifest) : ''
-  const editorOwnsSelectedSkill = editorDraft.skillId === selectedSkillId
-  const skillCode = editorOwnsSelectedSkill ? editorDraft.code : canonicalSkillCode
+  useEffect(() => {
+    if (!selectedSkillId || !skillDetail) {
+      setWorkspaceFiles({})
+      loadedWorkspaceSkillIdRef.current = null
+      return
+    }
+    if (loadedWorkspaceSkillIdRef.current === selectedSkillId) {
+      return
+    }
+
+    const files = Object.keys(skillDetail.files).length > 0
+      ? skillDetail.files
+      : { 'SKILL.md': manifestToSkillMarkdown(skillDetail.manifest) }
+    setWorkspaceFiles(files)
+    loadedWorkspaceSkillIdRef.current = selectedSkillId
+  }, [selectedSkillId, setWorkspaceFiles, skillDetail])
+
+  const canonicalSkillMarkdown = skillDetail ? manifestToSkillMarkdown(skillDetail.manifest) : ''
+  const skillMarkdown = workspaceFiles['SKILL.md'] ?? canonicalSkillMarkdown
   const {
-    isDirty: isDraftDirty,
     draft: storedDraft,
     baseHash: draftBaseHash,
     restoreDraft,
     clearDraft,
   } = useDraftPersist({
     skillId: selectedSkillId,
-    content: skillCode,
-    baseContent: canonicalSkillCode,
-    dirty: editorOwnsSelectedSkill && editorDraft.dirty,
+    content: skillMarkdown,
+    baseContent: canonicalSkillMarkdown,
+    dirty: workspaceDirty['SKILL.md'] === true,
   })
   const activeLintOverride = lintOverride?.skillId === selectedSkillId ? lintOverride : null
   const lintStatus = activeLintOverride?.status ?? skillDetail?.lint_result?.status ?? 'idle'
@@ -171,11 +194,11 @@ export default function App() {
     if (!selectedSkillId) {
       return
     }
-    setEditorDraft({ skillId: selectedSkillId, code, dirty: true })
-  }, [selectedSkillId])
-  const phaseForm = usePhaseForm(skillCode, phaseDrawerPhaseId)
+    updateWorkspaceFile('SKILL.md', code)
+  }, [selectedSkillId, updateWorkspaceFile])
+  const phaseForm = usePhaseForm(skillMarkdown, phaseDrawerPhaseId)
   const phaseSync = usePhaseSync({
-    markdown: skillCode,
+    markdown: skillMarkdown,
     phaseId: phaseDrawerPhaseId,
     editor: editorRef.current,
     monaco: monacoRef.current,
@@ -212,47 +235,30 @@ export default function App() {
   }, [graph, setEdges, setNodes])
 
   useEffect(() => {
-    const model = editorRef.current?.getModel()
-    const monaco = monacoRef.current
-    if (!model || !monaco) {
-      return
-    }
-
-    monaco.editor.setModelMarkers(model, 'studio-lint', lintErrors.map((error) => ({
-      startLineNumber: error.line ?? 1,
-      startColumn: error.column ?? 1,
-      endLineNumber: error.line ?? 1,
-      endColumn: 120,
-      message: error.message,
-      severity: error.severity === 'warning' ? monaco.MarkerSeverity.Warning : monaco.MarkerSeverity.Error,
-    })))
-  }, [lintErrors])
-
-  useEffect(() => {
-    if (!selectedSkillId || !skillDetail || !storedDraft || editorDraft.dirty) {
+    if (!selectedSkillId || !skillDetail || !storedDraft || workspaceIsDirty) {
       return
     }
     if (dismissedDraftSkillId === selectedSkillId) {
       return
     }
-    if (storedDraft.content === canonicalSkillCode) {
+    if (storedDraft.content === canonicalSkillMarkdown) {
       clearDraft()
       return
     }
     setRestorePromptSkillId(selectedSkillId)
   }, [
-    canonicalSkillCode,
+    canonicalSkillMarkdown,
     clearDraft,
     dismissedDraftSkillId,
-    editorDraft.dirty,
     selectedSkillId,
     skillDetail,
     storedDraft,
+    workspaceIsDirty,
   ])
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!isDraftDirty) {
+      if (!workspaceIsDirty) {
         return
       }
       event.preventDefault()
@@ -260,7 +266,7 @@ export default function App() {
     }
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [isDraftDirty])
+  }, [workspaceIsDirty])
 
   useEffect(() => {
     const socket = new WebSocket(wsUrl('/ws/events'))
@@ -290,11 +296,22 @@ export default function App() {
     }, current))
   }, [setEdges])
 
-  const handleSelectSkill = useCallback((skillId: string) => {
+  const handleSelectSkill = useCallback(async (skillId: string) => {
     if (skillId === selectedSkillId) {
       return
     }
-    if (isDraftDirty && selectedSkillId && !window.confirm('You have an unsaved local draft. Switch skills anyway?')) {
+    if (workspaceIsDirty && selectedSkillId && !window.confirm('Unsaved changes in current skill, switch anyway?')) {
+      return
+    }
+    try {
+      const detail = await fetchSkillFiles(skillId)
+      const files = Object.keys(detail.files).length > 0
+        ? detail.files
+        : { 'SKILL.md': manifestToSkillMarkdown(detail.manifest) }
+      setWorkspaceFiles(files)
+      loadedWorkspaceSkillIdRef.current = skillId
+    } catch (error) {
+      pushToast(errorMessage(error), 'error')
       return
     }
     setActiveSkillId(skillId)
@@ -309,7 +326,7 @@ export default function App() {
     setSelectedPromptIndex(null)
     setActiveTab('code')
     rememberSkill(skillId)
-  }, [goldenDiff, isDraftDirty, rememberSkill, selectedSkillId])
+  }, [goldenDiff, pushToast, rememberSkill, selectedSkillId, setWorkspaceFiles, workspaceIsDirty])
 
   const handleLint = useCallback(async () => {
     if (!selectedSkillId) {
@@ -334,14 +351,15 @@ export default function App() {
 
     setLintOverride({ skillId: selectedSkillId, status: 'checking', errors: [] })
     try {
-      const response = await api.put<SkillDetail>(`/skills/${selectedSkillId}`, { content: skillCode })
-      await mutateSkillDetail(response.data, { revalidate: false })
+      const { files } = useWorkspaceStore.getState()
+      const response = await saveSkillFiles(selectedSkillId, files)
+      await mutateSkillDetail(response, { revalidate: false })
+      useWorkspaceStore.getState().markSaved()
       setLintOverride({
         skillId: selectedSkillId,
-        status: response.data.lint_result?.status ?? 'passed',
-        errors: response.data.lint_result?.errors ?? [],
+        status: response.lint_result?.status ?? 'passed',
+        errors: response.lint_result?.errors ?? [],
       })
-      setEditorDraft({ skillId: selectedSkillId, code: manifestToSkillMarkdown(response.data.manifest), dirty: false })
       clearDraft()
       pushToast('Saved and linted successfully', 'success')
     } catch (error) {
@@ -349,7 +367,7 @@ export default function App() {
       setLintOverride({ skillId: selectedSkillId, status: 'failed', errors })
       pushToast(errorMessage(error), 'error')
     }
-  }, [clearDraft, mutateSkillDetail, pushToast, selectedSkillId, skillCode])
+  }, [clearDraft, mutateSkillDetail, pushToast, selectedSkillId])
 
   const handleEditorMount: EditorOnMount = useCallback((editor, monaco) => {
     editorRef.current = editor
@@ -359,14 +377,20 @@ export default function App() {
     })
   }, [handleSave])
 
-  const jumpToLine = useCallback((line: number | null) => {
+  const jumpToLine = useCallback((line: number | null, file?: string | null) => {
+    if (file && file !== useWorkspaceStore.getState().activeFile) {
+      setWorkspaceActiveFile(file)
+      setPendingJumpLine(line)
+      setActiveTab('code')
+      return
+    }
     if (!line || !editorRef.current) {
       return
     }
     editorRef.current.revealLineInCenter(line)
     editorRef.current.setPosition({ lineNumber: line, column: 1 })
     editorRef.current.focus()
-  }, [])
+  }, [setWorkspaceActiveFile])
 
   useEffect(() => {
     if (activeTab !== 'code' || pendingJumpLine === null) {
@@ -490,12 +514,12 @@ export default function App() {
       setRestorePromptSkillId(null)
       return
     }
-    setEditorDraft({ skillId: selectedSkillId, code: draft.content, dirty: true })
+    updateWorkspaceFile('SKILL.md', draft.content)
     setDismissedDraftSkillId(selectedSkillId)
     setRestorePromptSkillId(null)
     setActiveTab('code')
     pushToast('Restored local draft', 'success')
-  }, [pushToast, restoreDraft, selectedSkillId])
+  }, [pushToast, restoreDraft, selectedSkillId, updateWorkspaceFile])
 
   const handleDiscardDraft = useCallback(() => {
     if (selectedSkillId) {
@@ -536,12 +560,12 @@ export default function App() {
     if (!traceSelection.linkEnabled || !isErrorTraceEvent(event)) {
       return
     }
-    const line = phaseLineFor(skillCode, eventPhase(event))
+    const line = phaseLineFor(skillMarkdown, eventPhase(event))
     if (line !== null) {
       setPendingJumpLine(line)
       setActiveTab('code')
     }
-  }, [skillCode, traceSelection])
+  }, [skillMarkdown, traceSelection])
 
   const handleCompareToGolden = useCallback(async () => {
     if (!selectedSkillId || !lastRunId) {
@@ -784,13 +808,14 @@ export default function App() {
               isArtifactsMenuOpen={isArtifactsMenuOpen}
               lintStatus={lintStatus}
               runStatus={runStatus}
-              dirty={isDraftDirty}
+              dirty={workspaceIsDirty}
               onToggleArtifactsMenu={() => setIsArtifactsMenuOpen((open) => !open)}
               onLint={() => void handleLint()}
               onSave={() => void handleSave()}
               onOpenTerminal={() => void openTerminal()}
               onRun={() => void handleRun()}
             />
+            <DirtyBar onSave={() => void handleSave()} />
             <div className="flex flex-1 overflow-hidden">
               <GraphCanvas
                 currentSkillName={currentSkill?.name ?? 'Graph'}
@@ -808,7 +833,11 @@ export default function App() {
               <RightPanel
                 activeTab={activeTab}
                 isDarkMode={isDarkMode}
-                skillCode={skillCode}
+                activeFile={workspaceActiveFile}
+                files={workspaceFiles}
+                dirty={workspaceDirty}
+                node_schema_v21={skillDetail?.node_schema_v21}
+                io_schema={skillDetail?.io_schema}
                 selectedSkillId={selectedSkillId}
                 lintErrors={lintErrors}
                 traceLogs={traceLogs}
@@ -828,7 +857,8 @@ export default function App() {
                 apiKeys={apiKeys}
                 onActiveTabChange={setActiveTab}
                 onEditorMount={handleEditorMount}
-                onDraftChange={handlePhaseMarkdownChange}
+                onActiveFileChange={setWorkspaceActiveFile}
+                onFileChange={updateWorkspaceFile}
                 onJumpToLine={jumpToLine}
                 onCopyErrors={copyErrorToClipboard}
                 onSelectPrompt={setSelectedPromptIndex}

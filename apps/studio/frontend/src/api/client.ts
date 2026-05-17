@@ -1,4 +1,5 @@
 import axios, { AxiosHeaders } from 'axios'
+import type { MultifileSkillPayload, SkillDetail } from './types'
 
 export const API_BASE_URL = import.meta.env.VITE_STUDIO_API_BASE_URL ?? 'http://localhost:8787/api'
 
@@ -26,6 +27,20 @@ api.interceptors.request.use((config) => {
 
 export async function fetcher<T>(url: string): Promise<T> {
   const response = await api.get<T>(url)
+  return response.data
+}
+
+export async function fetchSkillFiles(skillId: string): Promise<SkillDetail> {
+  const response = await api.get<SkillDetail>(`/skills/${skillId}`)
+  return response.data
+}
+
+export async function saveSkillFiles(
+  skillId: string,
+  files: Record<string, string>,
+): Promise<SkillDetail> {
+  const payload: MultifileSkillPayload = { files }
+  const response = await api.put<SkillDetail>(`/skills/${skillId}`, payload)
   return response.data
 }
 

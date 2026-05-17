@@ -13,6 +13,7 @@ export interface ErrorResponse {
 }
 
 export interface LintError {
+  file?: string | null
   line: number | null
   column: number | null
   error_code: string
@@ -34,6 +35,10 @@ export interface SkillSummary {
   phase_count: number
   has_golden: boolean
   last_run_at: string | null
+}
+
+export interface MultifileSkillPayload {
+  files: Record<string, string>
 }
 
 export interface SkillTemplate {
@@ -288,7 +293,11 @@ export type SkillManifest = AgentSkillDef | GraphSkillDef | PersonaSkillDef
 
 export interface SkillDetail {
   manifest: SkillManifest
+  graph_topology: JsonObject[]
+  node_schema_v21: Record<string, JsonObject>
+  io_schema: Record<string, JsonObject>
   file_paths: Record<string, string>
+  files: Record<string, string>
   has_golden: boolean
   latest_run_metadata: RunMetadata | null
   lint_result: LintResult | null

@@ -2,16 +2,27 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
 import re
+import shutil
 from collections.abc import Iterable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn
+from uuid import uuid4
 
+from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
 from graph_agent import CompiledSkill, compile_skill
 from graph_agent.core.exceptions import SkillCompilationError, SkillLoadError
 from graph_agent.core.loader import SkillLoader
-from graph_agent.core.manifest import GraphPhaseRef, LogicNodeAST, SkillNodeAST, SubgraphNodeAST
+from graph_agent.core.manifest import (
+    GraphManifest,
+    GraphPhaseRef,
+    LogicNodeAST,
+    SkillNodeAST,
+    SubgraphNodeAST,
+)
 
 from app.core import config
 from app.core.exceptions import error_response, raise_error_response, standard_http_exception
@@ -21,6 +32,7 @@ from app.models.errors import LintError
 from app.models.lint import LintResult
 from app.models.runs import RunMetadata
 from app.models.skills import SkillDetail, SkillSummary
+from app.services.canvas_errors import CanvasConflictError
 
 _LOCATION_RE = re.compile(r":(?P<line>\d+)(?::(?P<loc>.*))?")
 _NAME_LINE_RE = re.compile(
@@ -29,6 +41,100 @@ _NAME_LINE_RE = re.compile(
 _ID_LINE_RE = re.compile(
     r"(?m)^(?P<prefix>id:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\n]+)(?P=quote)\s*$"
 )
+
+_ALLOWED_SKILL_FILE_SUFFIXES = {".md", ".json", ".py"}
+_PHASE_NODE_FILES = {"LOGIC.md", "SUBGRAPH.md", "SKILL.md"}
+_SCAFFOLD_FILES = {
+    "GRAPH.md": """---
+schema_version: "2.1"
+name: new-skill
+description: "New Studio skill"
+---
+<input src="io/inputs.json" />
+<output src="io/outputs.json" />
+<phase id="init" src="phases/init" depends_on="" />
+""",
+    "phases/init/LOGIC.md": """---
+mode: logic
+name: init
+---
+# init phase logic
+
+Describe what this phase does.
+""",
+    "io/inputs.json": "{}\n",
+    "io/outputs.json": "{}\n",
+}
+
+
+def validate_skill_file_path(rel_path: str) -> None:
+    """Validate V2.1 authoring file paths before reading or writing skill files."""
+    invalid_message = f"invalid_skill_file_path: {rel_path}"
+    path = PurePosixPath(rel_path)
+    parts = path.parts
+
+    if (
+        not rel_path
+        or rel_path.startswith("/")
+        or "\\" in rel_path
+        or path.suffix not in _ALLOWED_SKILL_FILE_SUFFIXES
+        or any(part in {"", ".", ".."} for part in parts)
+    ):
+        raise HTTPException(status_code=422, detail=invalid_message)
+
+    if parts == ("GRAPH.md",):
+        return
+    if parts in {("io", "inputs.json"), ("io", "outputs.json")}:
+        return
+    if len(parts) == 2 and parts[0] == "tools" and parts[1].endswith(".py"):
+        return
+    if len(parts) == 3 and parts[0] == "phases" and parts[2] in _PHASE_NODE_FILES:
+        return
+    if (
+        len(parts) == 4
+        and parts[0] == "phases"
+        and parts[2] in {"actions", "tools"}
+        and parts[3].endswith(".py")
+    ):
+        return
+
+    raise HTTPException(status_code=422, detail=invalid_message)
+
+
+def write_skill_files_atomic(skill_dir: Path, files: dict[str, str]) -> None:
+    """Replace a V2.1 skill directory using tmpdir-rename swap with rollback."""
+    for rel_path in files:
+        validate_skill_file_path(rel_path)
+
+    token = uuid4().hex
+    tmp_dir = skill_dir.parent / f".{skill_dir.name}.tmp-{token}"
+    backup_dir = skill_dir.parent / f".{skill_dir.name}.bak-{token}"
+
+    try:
+        tmp_dir.mkdir(parents=True, exist_ok=False)
+        for rel_path, content in files.items():
+            target = tmp_dir.joinpath(*PurePosixPath(rel_path).parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+
+        if skill_dir.exists():
+            os.rename(skill_dir, backup_dir)
+        os.rename(tmp_dir, skill_dir)
+    except Exception:
+        if not skill_dir.exists() and backup_dir.exists():
+            os.rename(backup_dir, skill_dir)
+        raise
+    finally:
+        if backup_dir.exists():
+            shutil.rmtree(backup_dir)
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir)
+
+
+def _scaffold_files_for(skill_id: str) -> dict[str, str]:
+    files = dict(_SCAFFOLD_FILES)
+    files["GRAPH.md"] = files["GRAPH.md"].replace("name: new-skill", f"name: {skill_id}")
+    return files
 
 
 def ensure_workspace_layout() -> None:
@@ -77,7 +183,14 @@ async def get_skill_detail(
     skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage)
     lint = lint_result or lint_skill_path(skill_dir)
     if lint.status == "failed":
-        _raise_manifest_validation_failed(lint)
+        return await _broken_detail_from_files_async(
+            user_id,
+            skill_id,
+            skill_dir,
+            lint,
+            storage,
+            metadata,
+        )
     compiled = _load_compiled(skill_dir)
     return await _detail_from_manifest_async(
         user_id,
@@ -102,7 +215,9 @@ def lint_skill_path(skill_path: Path) -> LintResult:
     except (SkillLoadError, SkillCompilationError) as exc:
         return LintResult(status="failed", errors=[_lint_error_from_exception(exc)])
     return LintResult(
-        status="passed", errors=[], phases_summary=_phase_summary_from_compiled(compiled)
+        status="passed",
+        errors=[],
+        phases_summary=_phase_summary_from_compiled(compiled),
     )
 
 
@@ -128,24 +243,52 @@ async def update_skill_content(
     _raise_v21_directory_authoring_required()
 
 
+async def update_skill_files(
+    user_id: str,
+    skill_id: str,
+    files: dict[str, str],
+    storage: StorageBackend,
+    metadata: MetadataStore,
+    *,
+    expected_hash: str | None = None,
+) -> SkillDetail:
+    """Persist a full V2.1 skill file map and return the compiled detail."""
+    if expected_hash is not None:
+        current_dir = await resolve_skill_dir_async(user_id, skill_id, storage)
+        current_markdown = _read_current_graph_markdown(current_dir)
+        current_hash = _graph_content_hash(current_markdown)
+        if current_hash != expected_hash:
+            raise CanvasConflictError(
+                current_hash=current_hash,
+                current_markdown_content=current_markdown,
+            )
+
+    skill_dir = await ensure_workspace_skill_dir_async(user_id, skill_id, storage)
+    write_skill_files_atomic(skill_dir, files)
+    lint = lint_skill_path(skill_dir)
+    if lint.status == "failed":
+        _raise_manifest_validation_failed(lint)
+    compiled = _load_compiled(skill_dir)
+    return await _detail_from_manifest_async(
+        user_id,
+        skill_id,
+        skill_dir,
+        compiled,
+        lint,
+        storage,
+        metadata,
+    )
+
+
 async def create_new_skill(
     user_id: str,
     skill_id: str,
-    content: str,
+    files: dict[str, str],
     storage: StorageBackend,
     metadata: MetadataStore,
-) -> NoReturn:
-    """Reject legacy single-file creation during the V2.1 backend cutover."""
-    if not content.strip():
-        response = error_response(
-            error_code="MANIFEST_VALIDATION_FAILED",
-            http_status=422,
-            message="Skill content must not be empty",
-            details={"errors": []},
-            retry_strategy="not_retryable",
-        )
-        raise_error_response(response)
-
+) -> SkillSummary:
+    """Create a new workspace skill from the built-in V2.1 starter scaffold."""
+    del files
     public_path = config.SKILLS_DIR / skill_id / "GRAPH.md"
     workspace_path = _workspace_skills_dir_for(user_id) / skill_id / "GRAPH.md"
     if await storage.exists(str(workspace_path)) or await storage.exists(str(public_path)):
@@ -155,8 +298,11 @@ async def create_new_skill(
             {"skill_id": skill_id},
         )
 
-    del metadata
-    _raise_v21_directory_authoring_required()
+    skill_dir = _workspace_skills_dir_for(user_id) / skill_id
+    write_skill_files_atomic(skill_dir, _scaffold_files_for(skill_id))
+    summary = await _summary_for_skill_dir_async(user_id, skill_dir, storage, metadata)
+    await metadata.save_skill_summary(user_id, summary)
+    return summary
 
 
 async def fork_skill(
@@ -395,9 +541,11 @@ def _detail_from_manifest(
             "test_inputs_dir": str(workspace_skill_dir / "test_inputs"),
             "golden_dir": str(workspace_skill_dir / "golden"),
         },
+        files=_read_skill_files(skill_dir),
         has_golden=_has_golden(skill_dir),
         latest_run_metadata=latest_run_metadata(skill_id),
         lint_result=lint_result,
+        manifest_errors=[],
     )
 
 
@@ -424,10 +572,72 @@ async def _detail_from_manifest_async(
             "test_inputs_dir": str(workspace_skill_dir / "test_inputs"),
             "golden_dir": str(workspace_skill_dir / "golden"),
         },
+        files=_read_skill_files(skill_dir),
         has_golden=await storage.exists(str(skill_dir / "golden")),
         latest_run_metadata=latest,
         lint_result=lint_result,
+        manifest_errors=[],
     )
+
+
+async def _broken_detail_from_files_async(
+    user_id: str,
+    skill_id: str,
+    skill_dir: Path,
+    lint_result: LintResult,
+    storage: StorageBackend,
+    metadata: MetadataStore,
+) -> SkillDetail:
+    """Return raw files and manifest_errors for invalid manifests instead of 422."""
+    workspace_skill_dir = _workspace_skills_dir_for(user_id) / skill_id
+    latest = await latest_run_metadata_async(user_id, skill_id, metadata)
+    return SkillDetail(
+        manifest=GraphManifest(
+            name=skill_id,
+            description="(broken: manifest invalid)",
+            phases=[],
+        ),
+        graph_topology=[],
+        node_schema_v21=_node_schema_v21(),
+        io_schema={},
+        file_paths={
+            "skill_dir": str(skill_dir),
+            "graph_md": str(skill_dir / "GRAPH.md"),
+            "runs_dir": str(workspace_skill_dir / "runs"),
+            "test_inputs_dir": str(workspace_skill_dir / "test_inputs"),
+            "golden_dir": str(workspace_skill_dir / "golden"),
+        },
+        files=_read_skill_files(skill_dir),
+        has_golden=await storage.exists(str(skill_dir / "golden")),
+        latest_run_metadata=latest,
+        lint_result=lint_result,
+        manifest_errors=lint_result.errors,
+    )
+
+
+def _read_skill_files(skill_dir: Path) -> dict[str, str]:
+    files: dict[str, str] = {}
+    for path in sorted(skill_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        rel_path = path.relative_to(skill_dir).as_posix()
+        try:
+            validate_skill_file_path(rel_path)
+        except HTTPException:
+            continue
+        files[rel_path] = path.read_text(encoding="utf-8")
+    return files
+
+
+def _read_current_graph_markdown(skill_dir: Path) -> str:
+    graph_path = skill_dir / "GRAPH.md"
+    if not graph_path.exists():
+        return ""
+    return graph_path.read_text(encoding="utf-8")
+
+
+def _graph_content_hash(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def _load_compiled(skill_path: Path) -> CompiledSkill:
@@ -465,6 +675,7 @@ def _lint_error_from_exception(exc: Exception) -> LintError:
     match = _LOCATION_RE.search(message)
     line = int(match.group("line")) if match else None
     return LintError(
+        file=_file_from_error_message(message),
         line=line,
         column=None,
         error_code=_error_code_from_message(message),
@@ -472,6 +683,14 @@ def _lint_error_from_exception(exc: Exception) -> LintError:
         message=message,
         phase_name=_phase_from_location(match.group("loc") if match else None),
     )
+
+
+def _file_from_error_message(message: str) -> str | None:
+    for candidate in ("GRAPH.md", "io/inputs.json", "io/outputs.json"):
+        if candidate in message:
+            return candidate
+    phase_match = re.search(r"(phases/[A-Za-z0-9_-]+/(?:LOGIC|SUBGRAPH|SKILL)\.md)", message)
+    return phase_match.group(1) if phase_match else None
 
 
 def _phase_from_location(location: str | None) -> str | None:

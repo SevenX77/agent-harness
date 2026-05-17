@@ -10,6 +10,7 @@ The middleware's contract:
 * A raising callback must not block other callbacks or the hook
   pass-through (middleware never mutates state, always returns None).
 """
+
 from __future__ import annotations
 
 import sys

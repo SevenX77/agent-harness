@@ -74,7 +74,7 @@ tools:
     )
     _write(
         root / "phases" / "greet" / "tools" / "generate_greeting.py",
-        'def generate_greeting(user_name: str) -> str:\n'
+        "def generate_greeting(user_name: str) -> str:\n"
         '    """Generate a deterministic greeting."""\n'
         '    return f"Hello, {user_name}!"\n',
     )
@@ -90,16 +90,24 @@ def test_skill_authoring_guide_minimal_example_matches_hello_world(tmp_path: Pat
     live_compiled = compile_skill(HELLO_WORLD, cache=False)
 
     assert guide_compiled.manifest.name == live_compiled.manifest.name == "hello-world"
-    assert [phase.id for phase in guide_compiled.manifest.phases] == [
-        phase.id for phase in live_compiled.manifest.phases
-    ] == ["greet"]
-    assert [phase.src for phase in guide_compiled.manifest.phases] == [
-        phase.src for phase in live_compiled.manifest.phases
-    ] == ["phases/greet"]
+    assert (
+        [phase.id for phase in guide_compiled.manifest.phases]
+        == [phase.id for phase in live_compiled.manifest.phases]
+        == ["greet"]
+    )
+    assert (
+        [phase.src for phase in guide_compiled.manifest.phases]
+        == [phase.src for phase in live_compiled.manifest.phases]
+        == ["phases/greet"]
+    )
     assert guide_compiled.nodes[0].mode == live_compiled.nodes[0].mode == "skill"
-    assert set(guide_compiled.raw["io"]["inputs"]["properties"]) == set(
-        live_compiled.raw["io"]["inputs"]["properties"]
-    ) == {"user_name"}
-    assert set(guide_compiled.raw["io"]["outputs"]["properties"]) == set(
-        live_compiled.raw["io"]["outputs"]["properties"]
-    ) == {"greeting"}
+    assert (
+        set(guide_compiled.raw["io"]["inputs"]["properties"])
+        == set(live_compiled.raw["io"]["inputs"]["properties"])
+        == {"user_name"}
+    )
+    assert (
+        set(guide_compiled.raw["io"]["outputs"]["properties"])
+        == set(live_compiled.raw["io"]["outputs"]["properties"])
+        == {"greeting"}
+    )

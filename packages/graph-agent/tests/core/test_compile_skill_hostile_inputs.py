@@ -14,6 +14,7 @@ bypass that contract:
 The 1.x ``validators.context_bridge`` coverage was removed in MVP-0 B1
 (2026-04-28) along with the DelegatePhase mode it validated.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -38,10 +39,7 @@ def test_compile_skill_with_invalid_utf8_returns_fatal_not_raise(
     assert not result.passed
     fatals = result.fatals
     assert len(fatals) >= 1
-    assert any(
-        f.rule_id == "INTERNAL" and "Failed to read SKILL.md" in f.message
-        for f in fatals
-    )
+    assert any(f.rule_id == "INTERNAL" and "Failed to read SKILL.md" in f.message for f in fatals)
 
 
 def test_compile_skill_with_symlink_loop_returns_fatal_not_raise(
@@ -97,7 +95,8 @@ adopted_persona: ./persona_loop
 
 
 def test_persona_resolution_with_oserror_returns_fatal_not_raise(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """OSError from resolve_persona must be aggregated, not propagated."""
     from graph_agent.core.validators import persona_resolution as pr_module
@@ -120,14 +119,14 @@ def test_persona_resolution_with_oserror_returns_fatal_not_raise(
     issues = check_persona_resolution(agent, base_dir=tmp_path)
 
     assert any(
-        i.rule_id == "F-persona-not-resolved"
-        and "simulated unreadable persona file" in i.message
+        i.rule_id == "F-persona-not-resolved" and "simulated unreadable persona file" in i.message
         for i in issues
     ), [(i.rule_id, i.message) for i in issues]
 
 
 def test_tool_paths_builtin_oserror_returns_fatal_not_raise(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """OSError from importlib.util.find_spec must surface as F-tool-path-not-found."""
     from graph_agent.core.validators import tool_paths as tp_module

@@ -117,7 +117,11 @@ class TestFinishTask:
         state = _state()
         request = _request(
             name="finish_task",
-            args={"reasoning": "done", "diagnostics_md": "ok", "business_data_md": VALID_BUSINESS_MD},
+            args={
+                "reasoning": "done",
+                "diagnostics_md": "ok",
+                "business_data_md": VALID_BUSINESS_MD,
+            },
             state=state,
         )
 
@@ -319,9 +323,7 @@ class TestPhase2A2v3PydanticSchemaDispatch:
             score: int = Field(ge=0, le=10)
 
         middleware = CognitiveFlowMiddleware(
-            IOManager(
-                [IODef(source_field="business_data_parsed", target_field="items")]
-            ),
+            IOManager([IODef(source_field="business_data_parsed", target_field="items")]),
             current_phase_schema=_LiveSchema,
             phase_name="segment",
         )
@@ -393,9 +395,7 @@ class TestPhase2A2v3BusinessValidatorDispatch:
             return True, []
 
         middleware = CognitiveFlowMiddleware(
-            IOManager(
-                [IODef(source_field="business_data_parsed", target_field="items")]
-            ),
+            IOManager([IODef(source_field="business_data_parsed", target_field="items")]),
             current_phase_schema=_schema(),
             business_validator=validator,
             phase_name="segment",

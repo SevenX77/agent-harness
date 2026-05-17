@@ -25,7 +25,7 @@ class FakeBatchAnalysisChatModel:
         text = str(getattr(messages[-1], "content", "")) if messages else ""
         if "entity_registry" in text:
             markdown = (
-                "## entity_registry\n\n{\"CHR_001\": \"陈野\"}\n\n"
+                '## entity_registry\n\n{"CHR_001": "陈野"}\n\n'
                 "## character_changes\n\n陈野: enters batch"
             )
             call_id = "entity-finish"

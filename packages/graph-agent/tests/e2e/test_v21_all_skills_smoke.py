@@ -44,7 +44,9 @@ def test_v21_all_skills_compile_assemble_and_cache_hit(
 
     assert assembled.graph is not None
     assert second.manifest.name == first.manifest.name
-    assert [phase.id for phase in second.manifest.phases] == [phase.id for phase in first.manifest.phases]
+    assert [phase.id for phase in second.manifest.phases] == [
+        phase.id for phase in first.manifest.phases
+    ]
     assert cache_hit_ms <= 200
 
 

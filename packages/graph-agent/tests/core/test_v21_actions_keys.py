@@ -74,9 +74,7 @@ def test_runtime_action_dynamic_return_key_must_be_declared(tmp_path: Path) -> N
     _base(tmp_path, _outputs("foo"))
     _action(
         tmp_path,
-        "def write_value(context):\n"
-        "    key = 'missing'\n"
-        "    return {key: 1}\n",
+        "def write_value(context):\n    key = 'missing'\n    return {key: 1}\n",
     )
     graph = assemble_graph(compile_skill(tmp_path, cache=False)).graph
 

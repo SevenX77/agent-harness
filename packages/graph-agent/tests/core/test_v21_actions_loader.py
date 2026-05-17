@@ -107,8 +107,7 @@ def test_tools_loader_happy_path(tmp_path: Path) -> None:
     _single_skill(tmp_path)
     _write(
         tmp_path / "phases" / "skill_phase" / "tools" / "bar.py",
-        "def bar(x: int) -> str:\n"
-        "    return str(x + 1)\n",
+        "def bar(x: int) -> str:\n    return str(x + 1)\n",
     )
 
     compiled = SkillLoader().compile_skill(tmp_path)
@@ -142,8 +141,7 @@ def test_action_registry_missing_keys_raise_keyerror(tmp_path: Path) -> None:
     _single_logic(tmp_path)
     _write(
         tmp_path / "phases" / "logic_phase" / "actions" / "foo.py",
-        "def foo(context) -> None:\n"
-        "    pass\n",
+        "def foo(context) -> None:\n    pass\n",
     )
     registry = SkillLoader().compile_skill(tmp_path).actions
 
@@ -163,7 +161,9 @@ def test_tool_registry_empty_phase_returns_empty_list(tmp_path: Path) -> None:
 
 def test_action_missing_ctx_param_fatal(tmp_path: Path) -> None:
     _single_logic(tmp_path)
-    _write(tmp_path / "phases" / "logic_phase" / "actions" / "foo.py", "def foo(x: int):\n    pass\n")
+    _write(
+        tmp_path / "phases" / "logic_phase" / "actions" / "foo.py", "def foo(x: int):\n    pass\n"
+    )
 
     with pytest.raises(SkillLoadError, match=r"\[F-v21-actions\].*context/ctx"):
         SkillLoader().compile_skill(tmp_path)
@@ -173,8 +173,7 @@ def test_tool_with_ctx_param_fatal(tmp_path: Path) -> None:
     _single_skill(tmp_path)
     _write(
         tmp_path / "phases" / "skill_phase" / "tools" / "bar.py",
-        "def bar(ctx, x: int) -> str:\n"
-        "    return 'x'\n",
+        "def bar(ctx, x: int) -> str:\n    return 'x'\n",
     )
 
     with pytest.raises(SkillLoadError, match=r"\[F-v21-actions\].*blackboard"):
@@ -196,7 +195,9 @@ def test_tool_imports_context_fatal(tmp_path: Path) -> None:
 
 def test_action_in_skill_phase_fatal(tmp_path: Path) -> None:
     _single_skill(tmp_path)
-    _write(tmp_path / "phases" / "skill_phase" / "actions" / "foo.py", "def foo(context):\n    pass\n")
+    _write(
+        tmp_path / "phases" / "skill_phase" / "actions" / "foo.py", "def foo(context):\n    pass\n"
+    )
 
     with pytest.raises(SkillLoadError, match=r"\[F-v21-actions\].*actions/ is only allowed"):
         SkillLoader().compile_skill(tmp_path)
@@ -204,7 +205,10 @@ def test_action_in_skill_phase_fatal(tmp_path: Path) -> None:
 
 def test_tool_in_logic_phase_fatal(tmp_path: Path) -> None:
     _single_logic(tmp_path)
-    _write(tmp_path / "phases" / "logic_phase" / "tools" / "bar.py", "def bar() -> str:\n    return 'x'\n")
+    _write(
+        tmp_path / "phases" / "logic_phase" / "tools" / "bar.py",
+        "def bar() -> str:\n    return 'x'\n",
+    )
 
     with pytest.raises(SkillLoadError, match=r"\[F-v21-actions\].*tools/ is only allowed"):
         SkillLoader().compile_skill(tmp_path)
@@ -225,7 +229,9 @@ def test_action_in_subgraph_phase_fatal(tmp_path: Path) -> None:
 def test_tool_in_subgraph_phase_fatal(tmp_path: Path) -> None:
     _base(tmp_path, ['<phase id="subgraph_phase" src="phases/subgraph_phase" depends_on="" />'])
     _subgraph(tmp_path)
-    _write(tmp_path / "phases" / "subgraph_phase" / "tools" / "bar.py", "def bar():\n    return 'x'\n")
+    _write(
+        tmp_path / "phases" / "subgraph_phase" / "tools" / "bar.py", "def bar():\n    return 'x'\n"
+    )
 
     with pytest.raises(SkillLoadError, match=r"\[F-v21-actions\].*SUBGRAPH"):
         SkillLoader().compile_skill(tmp_path)
@@ -251,8 +257,14 @@ def test_root_level_tools_allowed(tmp_path: Path) -> None:
 
 def test_duplicate_action_id_fatal(tmp_path: Path) -> None:
     _single_logic(tmp_path)
-    _write(tmp_path / "phases" / "logic_phase" / "actions" / "one.py", "def my_action(context):\n    pass\n")
-    _write(tmp_path / "phases" / "logic_phase" / "actions" / "two.py", "def my_action(context):\n    pass\n")
+    _write(
+        tmp_path / "phases" / "logic_phase" / "actions" / "one.py",
+        "def my_action(context):\n    pass\n",
+    )
+    _write(
+        tmp_path / "phases" / "logic_phase" / "actions" / "two.py",
+        "def my_action(context):\n    pass\n",
+    )
 
     with pytest.raises(SkillLoadError, match=r"\[F-v21-actions\].*duplicate action"):
         SkillLoader().compile_skill(tmp_path)

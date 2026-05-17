@@ -32,7 +32,9 @@ class FakeGlobalSynthesisChatModel:
             markdown = (
                 "## retroactive_corrections\n\n[]\n\n"
                 "## corrected_event_stream\n\n"
-                + json.dumps([{"event_id": "EVT-001", "summary": "陈野进入废墟"}], ensure_ascii=False)
+                + json.dumps(
+                    [{"event_id": "EVT-001", "summary": "陈野进入废墟"}], ensure_ascii=False
+                )
             )
             call_id = "retroactive-finish"
         else:

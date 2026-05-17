@@ -30,7 +30,9 @@ def test_compute_diff_reports_extra_phase() -> None:
 
 
 def test_compute_diff_reports_order_mismatch() -> None:
-    diff = compute_diff(["start", "draft", "review", "finish"], ["start", "review", "draft", "finish"])
+    diff = compute_diff(
+        ["start", "draft", "review", "finish"], ["start", "review", "draft", "finish"]
+    )
 
     assert diff.missing == []
     assert diff.extra == []

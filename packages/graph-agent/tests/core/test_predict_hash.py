@@ -12,9 +12,7 @@ def test_prompt_hash_normalizes_spaces_tabs_and_newlines() -> None:
 
 
 def test_prompt_hash_changes_when_text_changes_after_normalization() -> None:
-    assert prompt_hash("Generate JSON with title.") != prompt_hash(
-        "Generate JSON with summary."
-    )
+    assert prompt_hash("Generate JSON with title.") != prompt_hash("Generate JSON with summary.")
 
 
 def test_prompt_hash_rejects_non_string_input() -> None:

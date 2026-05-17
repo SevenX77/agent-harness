@@ -14,17 +14,20 @@ from app.models.errors import ErrorResponse
 from app.models.skills import (
     CreateSkillReq,
     ForkSkillReq,
+    SerializeGraphReq,
+    SerializeGraphRes,
     SkillDetail,
     SkillSummary,
     UpdateSkillReq,
 )
 from app.models.validation import ValidateInputReq, ValidateInputResponse
-from app.services.canvas_errors import CanvasConflictError
+from app.services.canvas_errors import CanvasConflictError, CanvasSerializerFatal
 from app.services.skills import (
     create_new_skill,
     fork_skill,
     get_skill_detail,
     list_skill_summaries,
+    serialize_skill_graph_markdown,
     update_skill_files,
 )
 from app.services.validator import ValidationHttpError, validate_skill_input_file
@@ -60,6 +63,45 @@ async def get_skill(
 ) -> SkillDetail:
     """Return SkillDetail; invalid manifests are reported in manifest_errors."""
     return await get_skill_detail(user_id, skill_id, storage, metadata)
+
+
+@router.post("/{skill_id}/graph/serialize", response_model=SerializeGraphRes)
+async def serialize_skill_graph(
+    skill_id: str,
+    request: SerializeGraphReq,
+    user_id: str = Depends(get_auth_user_id),
+    storage: StorageBackend = Depends(get_storage),
+) -> SerializeGraphRes | JSONResponse:
+    # Canvas save flow: POST here for markdown only, then persist GRAPH.md via
+    # the T-apps-1 multi-file PUT endpoint. This helper must not write files.
+    try:
+        return await serialize_skill_graph_markdown(
+            user_id,
+            skill_id,
+            request,
+            storage,
+        )
+    except CanvasConflictError as exc:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "code": "snapshot_conflict",
+                "current_hash": exc.current_hash,
+                "current_markdown_content": exc.current_markdown_content,
+                "current_phase_count": exc.current_phase_count,
+            },
+        )
+    except CanvasSerializerFatal as exc:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "code": exc.code,
+                "message": exc.message,
+                "detail": exc.detail,
+                "skill_id": skill_id,
+                "elapsed_ms": exc.elapsed_ms,
+            },
+        )
 
 
 @router.put("/{skill_id}", response_model=SkillDetail)

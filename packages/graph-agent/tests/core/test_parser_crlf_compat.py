@@ -5,9 +5,7 @@ from graph_agent.core.parser import parse_markdown_parts
 
 def test_parse_markdown_parts_accepts_crlf_on_disk(tmp_path):
     path = tmp_path / "GRAPH.md"
-    path.write_bytes(
-        b'---\r\nschema_version: "2.1"\r\nname: crlf-skill\r\n---\r\n<body />\r\n'
-    )
+    path.write_bytes(b'---\r\nschema_version: "2.1"\r\nname: crlf-skill\r\n---\r\n<body />\r\n')
 
     frontmatter, body, meta = parse_markdown_parts(path)
 

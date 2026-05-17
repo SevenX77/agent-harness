@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 import shutil
+import time
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn
@@ -14,7 +16,8 @@ from uuid import uuid4
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
 from graph_agent import CompiledSkill, compile_skill
-from graph_agent.core.exceptions import SkillCompilationError, SkillLoadError
+from graph_agent.core.exceptions import GraphAgentFatalError, SkillCompilationError, SkillLoadError
+from graph_agent.core.graph_serializer import serialize_graph
 from graph_agent.core.loader import SkillLoader
 from graph_agent.core.manifest import (
     GraphManifest,
@@ -31,8 +34,8 @@ from app.core.ports.storage import StorageBackend
 from app.models.errors import LintError
 from app.models.lint import LintResult
 from app.models.runs import RunMetadata
-from app.models.skills import SkillDetail, SkillSummary
-from app.services.canvas_errors import CanvasConflictError
+from app.models.skills import SerializeGraphReq, SerializeGraphRes, SkillDetail, SkillSummary
+from app.services.canvas_errors import CanvasConflictError, CanvasSerializerFatal
 
 _LOCATION_RE = re.compile(r":(?P<line>\d+)(?::(?P<loc>.*))?")
 _NAME_LINE_RE = re.compile(
@@ -41,6 +44,7 @@ _NAME_LINE_RE = re.compile(
 _ID_LINE_RE = re.compile(
     r"(?m)^(?P<prefix>id:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\n]+)(?P=quote)\s*$"
 )
+logger = logging.getLogger(__name__)
 
 _ALLOWED_SKILL_FILE_SUFFIXES = {".md", ".json", ".py"}
 _PHASE_NODE_FILES = {"LOGIC.md", "SUBGRAPH.md", "SKILL.md"}
@@ -383,6 +387,65 @@ async def resolve_skill_dir_async(
     )
 
 
+async def serialize_skill_graph_markdown(
+    user_id: str,
+    skill_id: str,
+    request: SerializeGraphReq,
+    storage: StorageBackend,
+) -> SerializeGraphRes:
+    """Serialize a Canvas topology snapshot against the latest on-disk GRAPH.md."""
+    started = time.perf_counter()
+    logger.info("canvas serialize start skill=%s phase_count=%d", skill_id, len(request.phases))
+    skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage)
+    graph_path = skill_dir / "GRAPH.md"
+    original_md = await storage.read_text(str(graph_path))
+    current_hash = _graph_content_hash(original_md)
+    try:
+        compiled = _load_compiled_for_graph_serializer(skill_dir)
+        if request.expected_hash is not None and request.expected_hash != current_hash:
+            raise CanvasConflictError(
+                current_hash=current_hash,
+                current_markdown_content=original_md,
+                current_phase_count=len(compiled.manifest.phases),
+            )
+        _validate_canvas_topology(request)
+        manifest = compiled.manifest.model_copy(
+            update={
+                "phases": [
+                    GraphPhaseRef(
+                        id=phase.id,
+                        src=phase.src,
+                        depends_on=list(phase.depends_on),
+                    )
+                    for phase in request.phases
+                ]
+            }
+        )
+        markdown = serialize_graph(GraphManifest.model_validate(manifest.model_dump()), original_md)
+    except CanvasConflictError:
+        raise
+    except CanvasSerializerFatal as exc:
+        exc.elapsed_ms = (time.perf_counter() - started) * 1000
+        logger.warning("canvas serialize fatal code=%s skill=%s", exc.code, skill_id)
+        raise
+    except (GraphAgentFatalError, SkillLoadError, SkillCompilationError) as exc:
+        fatal = _serializer_fatal_from_engine_error(exc, (time.perf_counter() - started) * 1000)
+        logger.warning("canvas serialize fatal code=%s skill=%s", fatal.code, skill_id)
+        raise fatal from exc
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    logger.info(
+        "canvas serialize done elapsed_ms=%d affected_lines=%d",
+        int(elapsed_ms),
+        _line_diff_count(original_md, markdown),
+    )
+    return SerializeGraphRes(
+        markdown_content=markdown,
+        phase_count=len(request.phases),
+        elapsed_ms=elapsed_ms,
+        current_hash=current_hash,
+    )
+
+
 async def latest_run_metadata_async(
     user_id: str,
     skill_id: str,
@@ -652,6 +715,123 @@ def _load_compiled(skill_path: Path) -> CompiledSkill:
             retry_strategy="not_retryable",
         )
         raise_error_response(response)
+
+
+def _load_compiled_for_graph_serializer(skill_path: Path) -> CompiledSkill:
+    try:
+        return SkillLoader(validate_context_writes=False).compile_skill(skill_path)
+    except Exception as exc:
+        response = error_response(
+            error_code="MANIFEST_VALIDATION_FAILED",
+            http_status=422,
+            message=str(exc),
+            details={"errors": []},
+            retry_strategy="not_retryable",
+        )
+        raise_error_response(response)
+
+
+def _graph_content_hash(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _validate_canvas_topology(request: SerializeGraphReq) -> None:
+    phase_ids = {phase.id for phase in request.phases}
+    for phase in request.phases:
+        for dep in phase.depends_on:
+            if dep not in phase_ids:
+                raise CanvasSerializerFatal(
+                    code="serializer_orphan",
+                    message=f"phase {phase.id!r} depends_on unknown phase {dep!r}",
+                    detail={"phase_id": phase.id, "dependency": dep},
+                )
+            if dep == phase.id:
+                raise CanvasSerializerFatal(
+                    code="serializer_cycle",
+                    message=f"phase {phase.id!r} cannot depend on itself",
+                    detail={"phase_id": phase.id},
+                )
+    _validate_canvas_acyclic(request)
+    _validate_canvas_connected(request)
+
+
+def _validate_canvas_acyclic(request: SerializeGraphReq) -> None:
+    adjacency: dict[str, list[str]] = {phase.id: [] for phase in request.phases}
+    for phase in request.phases:
+        for dep in phase.depends_on:
+            adjacency[dep].append(phase.id)
+    state: dict[str, str] = {}
+    stack: list[str] = []
+
+    def visit(node: str) -> None:
+        state[node] = "gray"
+        stack.append(node)
+        for nxt in adjacency[node]:
+            if state.get(nxt) == "gray":
+                start = stack.index(nxt)
+                cycle = stack[start:] + [nxt]
+                raise CanvasSerializerFatal(
+                    code="serializer_cycle",
+                    message="cycle detected: " + " -> ".join(cycle),
+                    detail={"cycle": cycle},
+                )
+            if state.get(nxt) is None:
+                visit(nxt)
+        stack.pop()
+        state[node] = "black"
+
+    for node in adjacency:
+        if state.get(node) is None:
+            visit(node)
+
+
+def _validate_canvas_connected(request: SerializeGraphReq) -> None:
+    if len(request.phases) <= 1:
+        return
+    adjacency: dict[str, set[str]] = {phase.id: set() for phase in request.phases}
+    for phase in request.phases:
+        for dep in phase.depends_on:
+            adjacency[phase.id].add(dep)
+            adjacency[dep].add(phase.id)
+    start = request.phases[0].id
+    visited: set[str] = set()
+    stack = [start]
+    while stack:
+        node = stack.pop()
+        if node in visited:
+            continue
+        visited.add(node)
+        stack.extend(sorted(adjacency[node] - visited))
+    for phase in request.phases:
+        if phase.id not in visited:
+            raise CanvasSerializerFatal(
+                code="serializer_orphan",
+                message=f"orphan phase {phase.id!r} is disconnected from the main graph",
+                detail={"phase_id": phase.id},
+            )
+
+
+def _serializer_fatal_from_engine_error(exc: Exception, elapsed_ms: float) -> CanvasSerializerFatal:
+    message = str(exc)
+    code = "serializer_invalid_topology"
+    if "cycle detected" in message or "cannot depend on itself" in message:
+        code = "serializer_cycle"
+    elif "unknown phase" in message or "orphan phase" in message:
+        code = "serializer_orphan"
+    return CanvasSerializerFatal(
+        code=code,
+        message=message,
+        detail={"engine_error": exc.__class__.__name__},
+        elapsed_ms=elapsed_ms,
+    )
+
+
+def _line_diff_count(before: str, after: str) -> int:
+    before_lines = before.splitlines()
+    after_lines = after.splitlines()
+    return sum(1 for old, new in zip(before_lines, after_lines, strict=False) if old != new) + abs(
+        len(after_lines) - len(before_lines)
+    )
 
 
 def _phase_summary_from_compiled(compiled: CompiledSkill) -> list[dict[str, Any]]:

@@ -53,9 +53,7 @@ def test_in_tree_action_reference_still_loads(tmp_path: Path) -> None:
 def test_action_local_write_fatals_as_purity_violation(tmp_path: Path) -> None:
     _write_minimal_graph(
         tmp_path,
-        "def prepare(context):\n"
-        "    open('out.txt', 'w').write('bad')\n"
-        "    return {}\n",
+        "def prepare(context):\n    open('out.txt', 'w').write('bad')\n    return {}\n",
     )
 
     with pytest.raises(SkillLoadError, match="F-v21-purity"):

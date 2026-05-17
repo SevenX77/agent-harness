@@ -68,8 +68,7 @@ def test_import_class_caches_result(tmp_path: Path) -> None:
 def test_import_callable_from_search_path(tmp_path: Path) -> None:
     module_file = tmp_path / "tools.py"
     module_file.write_text(
-        "def normalize(value):\n"
-        "    return value.strip().lower()\n",
+        "def normalize(value):\n    return value.strip().lower()\n",
         encoding="utf-8",
     )
 

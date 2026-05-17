@@ -22,9 +22,9 @@ def test_canvas_fanout_fixture_merges_disjoint_outputs() -> None:
 def test_canvas_fanout_fixture_conflicting_key_is_fatal(tmp_path: Path) -> None:
     root = tmp_path / "fake_canvas_fanout"
     copytree(FIXTURE, root)
-    (
-        root / "phases" / "branch_b" / "actions" / "write_b.py"
-    ).write_text("def write_b(context):\n    return {'a_out': 2}\n", encoding="utf-8")
+    (root / "phases" / "branch_b" / "actions" / "write_b.py").write_text(
+        "def write_b(context):\n    return {'a_out': 2}\n", encoding="utf-8"
+    )
     graph = assemble_graph(compile_skill(root, cache=False)).graph
 
     with pytest.raises(GraphAgentFatalError, match=r"\[F-v21-state-conflict\].*key='a_out'"):

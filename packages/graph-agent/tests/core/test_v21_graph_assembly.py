@@ -61,8 +61,7 @@ mode: logic
     )
     _write(
         root / "phases" / phase / "actions" / f"{action}.py",
-        "def write_value(context):\n"
-        "    context.set('foo', 42)\n",
+        "def write_value(context):\n    context.set('foo', 42)\n",
     )
 
 
@@ -81,7 +80,9 @@ mode: logic
 
 
 def _skill(root: Path, phase: str = "skill", tools: list[str] | None = None) -> None:
-    tools_yaml = "" if tools is None else "tools:\n" + "\n".join(f"  - {tool}" for tool in tools) + "\n"
+    tools_yaml = (
+        "" if tools is None else "tools:\n" + "\n".join(f"  - {tool}" for tool in tools) + "\n"
+    )
     _write(
         root / "phases" / phase / "SKILL.md",
         f"""---
@@ -168,8 +169,12 @@ def test_assemble_fanout_disjoint_data_keys_merge(tmp_path: Path) -> None:
         '<phase id="assemble" src="phases/assemble" depends_on="branch_a branch_b" />\n',
     )
     _logic_action(tmp_path, "prepare", "prepare", "def prepare(context):\n    return None\n")
-    _logic_action(tmp_path, "branch_a", "write_a", "def write_a(context):\n    return {'a_out': 1}\n")
-    _logic_action(tmp_path, "branch_b", "write_b", "def write_b(context):\n    return {'b_out': 2}\n")
+    _logic_action(
+        tmp_path, "branch_a", "write_a", "def write_a(context):\n    return {'a_out': 1}\n"
+    )
+    _logic_action(
+        tmp_path, "branch_b", "write_b", "def write_b(context):\n    return {'b_out': 2}\n"
+    )
     _logic_action(tmp_path, "assemble", "assemble", "def assemble(context):\n    return None\n")
 
     result = assemble_graph(compile_skill(tmp_path, cache=False)).graph.invoke(
@@ -188,8 +193,12 @@ def test_assemble_fanout_same_data_key_conflict_fatal(tmp_path: Path) -> None:
         '<phase id="assemble" src="phases/assemble" depends_on="branch_a branch_b" />\n',
     )
     _logic_action(tmp_path, "prepare", "prepare", "def prepare(context):\n    return None\n")
-    _logic_action(tmp_path, "branch_a", "write_a", "def write_a(context):\n    return {'shared': 1}\n")
-    _logic_action(tmp_path, "branch_b", "write_b", "def write_b(context):\n    return {'shared': 2}\n")
+    _logic_action(
+        tmp_path, "branch_a", "write_a", "def write_a(context):\n    return {'shared': 1}\n"
+    )
+    _logic_action(
+        tmp_path, "branch_b", "write_b", "def write_b(context):\n    return {'shared': 2}\n"
+    )
     _logic_action(tmp_path, "assemble", "assemble", "def assemble(context):\n    return None\n")
 
     graph = assemble_graph(compile_skill(tmp_path, cache=False)).graph
@@ -216,7 +225,13 @@ def test_critic_tool_wired_to_skill(tmp_path: Path) -> None:
     _skill(tmp_path, tools=["reviewer"])
     chat = FakeToolChatModel(
         [
-            [{"name": "reviewer", "args": {"target_text": "draft", "criteria": "quality"}, "id": "c1"}],
+            [
+                {
+                    "name": "reviewer",
+                    "args": {"target_text": "draft", "criteria": "quality"},
+                    "id": "c1",
+                }
+            ],
             [],
             [{"name": "finish_task", "args": {"markdown": "## result\n\nok"}, "id": "f1"}],
         ]
@@ -261,7 +276,11 @@ def test_non_terminal_phase_finish_task_no_validate(tmp_path: Path) -> None:
         tmp_path,
         '<phase id="skill" src="phases/skill" depends_on="" />\n'
         '<phase id="logic" src="phases/logic" depends_on="skill" />\n',
-        {"type": "object", "properties": {"required_later": {"type": "string"}}, "required": ["required_later"]},
+        {
+            "type": "object",
+            "properties": {"required_later": {"type": "string"}},
+            "required": ["required_later"],
+        },
     )
     _skill(tmp_path)
     _logic(tmp_path)

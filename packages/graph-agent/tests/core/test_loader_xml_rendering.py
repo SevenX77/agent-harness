@@ -33,35 +33,41 @@ def _output_schema_path(schema_cls: type[object]) -> str:
 
 
 def _agent_prompt(**profile_fields: object) -> str:
-    manifest = _SKILL_ADAPTER.validate_python({
-        "schema_version": "2.0",
-        "name": "agent",
-        "description": "agent",
-        "type": "agent",
-        "agent_profile": {
-            "role": "Role",
-            "goal": "Goal",
-            **profile_fields,
-        },
-    })
+    manifest = _SKILL_ADAPTER.validate_python(
+        {
+            "schema_version": "2.0",
+            "name": "agent",
+            "description": "agent",
+            "type": "agent",
+            "agent_profile": {
+                "role": "Role",
+                "goal": "Goal",
+                **profile_fields,
+            },
+        }
+    )
     assert isinstance(manifest, AgentSkillDef)
     return _compose_agent_system_prompt(manifest)
 
 
 def _phase_prompt(tmp_path: Path, **phase_fields: object) -> str:
-    manifest = _SKILL_ADAPTER.validate_python({
-        "schema_version": "2.0",
-        "name": "graph",
-        "description": "graph",
-        "type": "graph",
-        "io": {"inputs": [], "outputs": []},
-        "phases": [{
-            "mode": "llm",
-            "name": "phase",
-            "prompt": "Base prompt.",
-            **phase_fields,
-        }],
-    })
+    manifest = _SKILL_ADAPTER.validate_python(
+        {
+            "schema_version": "2.0",
+            "name": "graph",
+            "description": "graph",
+            "type": "graph",
+            "io": {"inputs": [], "outputs": []},
+            "phases": [
+                {
+                    "mode": "llm",
+                    "name": "phase",
+                    "prompt": "Base prompt.",
+                    **phase_fields,
+                }
+            ],
+        }
+    )
     phase = _phase_from_graph_phase(
         manifest.phases[0],
         tmp_path,
@@ -100,18 +106,22 @@ def test_references_renders_to_knowledge_base_tag(tmp_path: Path) -> None:
 
 
 def test_graph_phase_references_thread_to_runtime_phase(tmp_path: Path) -> None:
-    manifest = _SKILL_ADAPTER.validate_python({
-        "schema_version": "2.0",
-        "name": "graph",
-        "description": "graph",
-        "type": "graph",
-        "io": {"inputs": [], "outputs": []},
-        "phases": [{
-            "mode": "llm",
-            "name": "phase",
-            "references": ["references/guide.md"],
-        }],
-    })
+    manifest = _SKILL_ADAPTER.validate_python(
+        {
+            "schema_version": "2.0",
+            "name": "graph",
+            "description": "graph",
+            "type": "graph",
+            "io": {"inputs": [], "outputs": []},
+            "phases": [
+                {
+                    "mode": "llm",
+                    "name": "phase",
+                    "references": ["references/guide.md"],
+                }
+            ],
+        }
+    )
 
     phase = _phase_from_graph_phase(
         manifest.phases[0],
@@ -125,17 +135,19 @@ def test_graph_phase_references_thread_to_runtime_phase(tmp_path: Path) -> None:
 
 
 def test_agent_profile_references_thread_to_runtime_phase(tmp_path: Path) -> None:
-    manifest = _SKILL_ADAPTER.validate_python({
-        "schema_version": "2.0",
-        "name": "agent",
-        "description": "agent",
-        "type": "agent",
-        "agent_profile": {
-            "role": "Role",
-            "goal": "Goal",
-            "references": ["references/agent.md"],
-        },
-    })
+    manifest = _SKILL_ADAPTER.validate_python(
+        {
+            "schema_version": "2.0",
+            "name": "agent",
+            "description": "agent",
+            "type": "agent",
+            "agent_profile": {
+                "role": "Role",
+                "goal": "Goal",
+                "references": ["references/agent.md"],
+            },
+        }
+    )
     assert isinstance(manifest, AgentSkillDef)
 
     phase = _phase_from_agent_skill(
@@ -150,18 +162,22 @@ def test_agent_profile_references_thread_to_runtime_phase(tmp_path: Path) -> Non
 
 
 def test_graph_phase_context_access_threads_to_runtime_phase(tmp_path: Path) -> None:
-    manifest = _SKILL_ADAPTER.validate_python({
-        "schema_version": "2.0",
-        "name": "graph",
-        "description": "graph",
-        "type": "graph",
-        "io": {"inputs": [], "outputs": []},
-        "phases": [{
-            "mode": "llm",
-            "name": "phase",
-            "context_access": ["artifact", "working_memory"],
-        }],
-    })
+    manifest = _SKILL_ADAPTER.validate_python(
+        {
+            "schema_version": "2.0",
+            "name": "graph",
+            "description": "graph",
+            "type": "graph",
+            "io": {"inputs": [], "outputs": []},
+            "phases": [
+                {
+                    "mode": "llm",
+                    "name": "phase",
+                    "context_access": ["artifact", "working_memory"],
+                }
+            ],
+        }
+    )
 
     phase = _phase_from_graph_phase(
         manifest.phases[0],
@@ -174,17 +190,19 @@ def test_graph_phase_context_access_threads_to_runtime_phase(tmp_path: Path) -> 
 
 
 def test_agent_profile_context_access_threads_to_runtime_phase(tmp_path: Path) -> None:
-    manifest = _SKILL_ADAPTER.validate_python({
-        "schema_version": "2.0",
-        "name": "agent",
-        "description": "agent",
-        "type": "agent",
-        "agent_profile": {
-            "role": "Role",
-            "goal": "Goal",
-            "context_access": ["artifact"],
-        },
-    })
+    manifest = _SKILL_ADAPTER.validate_python(
+        {
+            "schema_version": "2.0",
+            "name": "agent",
+            "description": "agent",
+            "type": "agent",
+            "agent_profile": {
+                "role": "Role",
+                "goal": "Goal",
+                "context_access": ["artifact"],
+            },
+        }
+    )
     assert isinstance(manifest, AgentSkillDef)
 
     phase = _phase_from_agent_skill(
@@ -245,31 +263,37 @@ def test_output_format_resolves_skill_local_schema_from_file(tmp_path: Path) -> 
     schema_dir = tmp_path / "script"
     schema_dir.mkdir()
     (schema_dir / "schemas.py").write_text(
-        "\n".join([
-            "from pydantic import BaseModel, Field",
-            "",
-            "class SegmentationResult(BaseModel):",
-            "    chapter_title: str = Field(description='章节标题')",
-            "    segment_count: int = Field(description='分段数量')",
-            "",
-        ]),
+        "\n".join(
+            [
+                "from pydantic import BaseModel, Field",
+                "",
+                "class SegmentationResult(BaseModel):",
+                "    chapter_title: str = Field(description='章节标题')",
+                "    segment_count: int = Field(description='分段数量')",
+                "",
+            ]
+        ),
         encoding="utf-8",
     )
 
     sys.modules.pop("script.schemas", None)
-    manifest = _SKILL_ADAPTER.validate_python({
-        "schema_version": "2.0",
-        "name": "graph",
-        "description": "graph",
-        "type": "graph",
-        "io": {"inputs": [], "outputs": []},
-        "phases": [{
-            "mode": "llm",
-            "name": "phase",
-            "prompt": "Base prompt.",
-            "output_schema": "script.schemas.SegmentationResult",
-        }],
-    })
+    manifest = _SKILL_ADAPTER.validate_python(
+        {
+            "schema_version": "2.0",
+            "name": "graph",
+            "description": "graph",
+            "type": "graph",
+            "io": {"inputs": [], "outputs": []},
+            "phases": [
+                {
+                    "mode": "llm",
+                    "name": "phase",
+                    "prompt": "Base prompt.",
+                    "output_schema": "script.schemas.SegmentationResult",
+                }
+            ],
+        }
+    )
     assert isinstance(manifest, GraphSkillDef)
     phase = _phase_from_graph_phase(
         manifest.phases[0],

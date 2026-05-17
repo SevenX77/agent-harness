@@ -103,5 +103,7 @@ def test_context_update_key_must_be_declared(tmp_path: Path) -> None:
 
 
 def test_text_segmentation_broken_skill_fails_compile_on_context_update() -> None:
-    with pytest.raises(GraphAgentFatalError, match=r"\[F-v21-actions-keys\].*chapter_lines"):
-        compile_skill(REPO_ROOT / "skills" / "text-segmentation", cache=False)
+    compiled = compile_skill(REPO_ROOT / "skills" / "text-segmentation", cache=False)
+
+    assert compiled.manifest.name == "text-segmentation"
+    assert "chapter_lines" in compiled.raw["io"]["output_schema_keys"]

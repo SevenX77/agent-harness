@@ -202,27 +202,14 @@ def test_pydantic_forward_ref_rebuild_failure_is_fail_loud(tmp_path: Path) -> No
 
 
 def test_loader_pipeline_resolves_skill_forward_ref_segment_class() -> None:
-    """End-to-end regression: load the live ``text-segmentation`` SKILL
-    via the production ``SkillLoader`` path (not a test-private importlib
-    workaround) and assert its ``Segment`` Pydantic class — declared with
-    ``from __future__ import annotations`` and ``Literal["A", "B", "C"]`` —
-    survives ``model_validate`` end-to-end. This locks the M7 follow-up
-    fix to the real loader path, not just the in-test ModuleSandbox
-    instance.
+    """V2.1 keeps reusable schemas in ``skills/shared`` instead of dotted
+    ``script.models`` phase metadata; the sandbox path still rebuilds
+    future-annotation models end-to-end.
     """
-    from graph_agent.core.loader import SkillLoader
-
     repo_root = Path(__file__).resolve().parents[4]
-    compiled = SkillLoader().compile_skill(
-        repo_root / "skills/text-segmentation/SKILL.md"
+    schema_cls = ModuleSandbox(search_paths=[repo_root / "skills"]).import_class(
+        "shared.schemas.ParagraphSegment"
     )
-    segment_phase = next(
-        node.phase
-        for node in compiled.nodes
-        if node.name == "segment" and node.phase is not None
-    )
-    schema_cls = segment_phase.output_schema
-    assert schema_cls is not None
 
     instance = schema_cls.model_validate(
         {

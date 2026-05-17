@@ -94,6 +94,13 @@ function isTopologyEdgeChange(change: EdgeChange): boolean {
   return change.type !== 'select'
 }
 
+function isConflictResponse(error: unknown): boolean {
+  if (!isRecord(error) || !isRecord(error.response)) {
+    return false
+  }
+  return error.response.status === 409
+}
+
 function findSubgraphTargetSkillId(detail: SkillDetail, phaseId: string): string | null {
   if (detail.manifest.type !== 'graph') {
     return null
@@ -173,11 +180,13 @@ export default function App() {
   const [cheatSheetOpen, setCheatSheetOpen] = useState(false)
   const [restorePromptSkillId, setRestorePromptSkillId] = useState<string | null>(null)
   const [graphReloadPromptSkillId, setGraphReloadPromptSkillId] = useState<string | null>(null)
+  const [canvasConflictSkillId, setCanvasConflictSkillId] = useState<string | null>(null)
   const [dismissedDraftSkillId, setDismissedDraftSkillId] = useState<string | null>(null)
   const [pendingJumpLine, setPendingJumpLine] = useState<number | null>(null)
   const editorRef = useRef<MonacoEditor | null>(null)
   const monacoRef = useRef<MonacoApi | null>(null)
   const runWsRef = useRef<WebSocket | null>(null)
+  const ignoreOwnSaveEventsRef = useRef<{ skillId: string, until: number } | null>(null)
   const goldenDiff = useGoldenDiff(selectedSkillId, lastRunId)
   const batchRun = useBatchRun(selectedSkillId)
   const workspaceFiles = useWorkspaceStore((state) => state.files)
@@ -358,6 +367,14 @@ export default function App() {
         skill_id: parsed.skill_id,
         file: typeof parsed.file === 'string' ? parsed.file : null,
       }
+      const ignoredSaveEvent = ignoreOwnSaveEventsRef.current
+      if (
+        ignoredSaveEvent
+        && ignoredSaveEvent.skillId === event.skill_id
+        && Date.now() < ignoredSaveEvent.until
+      ) {
+        return
+      }
 
       const decision = decideGraphReload(event, selectedSkillId, canvasDirty)
       if (decision === 'prompt') {
@@ -494,6 +511,7 @@ export default function App() {
       await mutateSkillDetail(response.detail, { revalidate: false })
       useWorkspaceStore.getState().markSaved()
       markCanvasSaved()
+      ignoreOwnSaveEventsRef.current = { skillId: selectedSkillId, until: Date.now() + 500 }
       setLintOverride({
         skillId: selectedSkillId,
         status: response.detail.lint_result?.status ?? 'passed',
@@ -502,6 +520,11 @@ export default function App() {
       clearDraft()
       pushToast('Canvas saved successfully', 'success')
     } catch (error) {
+      if (isConflictResponse(error)) {
+        setCanvasConflictSkillId(selectedSkillId)
+        pushToast('其他人/终端修改了此文件，保存失败', 'error')
+        return
+      }
       const errors = lintErrorsFromError(error)
       setLintOverride({ skillId: selectedSkillId, status: 'failed', errors })
       pushToast(errorMessage(error), 'error')
@@ -1171,6 +1194,42 @@ export default function App() {
                   void reloadCurrentSkillDetail(selectedSkillId)
                     .then(() => {
                       setGraphReloadPromptSkillId(null)
+                      pushToast('Reloaded latest GRAPH.md', 'success')
+                    })
+                    .catch((error: unknown) => pushToast(errorMessage(error), 'error'))
+                }}
+                className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-sky-700"
+              >
+                Reload
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {canvasConflictSkillId === selectedSkillId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-md border border-red-200 bg-white p-5 shadow-xl dark:border-red-800 dark:bg-slate-900">
+            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">Save conflict</h2>
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+              其他人/终端修改了此文件，保存失败。可以丢弃本地修改并重载最新版本，或保留本地修改手动解决。
+            </p>
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setCanvasConflictSkillId(null)}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-slate-700 dark:text-gray-200 dark:hover:bg-slate-800"
+              >
+                Merge
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!selectedSkillId) {
+                    return
+                  }
+                  void reloadCurrentSkillDetail(selectedSkillId)
+                    .then(() => {
+                      setCanvasConflictSkillId(null)
                       pushToast('Reloaded latest GRAPH.md', 'success')
                     })
                     .catch((error: unknown) => pushToast(errorMessage(error), 'error'))

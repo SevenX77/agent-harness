@@ -8,7 +8,6 @@ from graph_agent import assemble_graph, compile_skill
 from graph_agent.core.manifest import SubgraphNodeAST
 from langchain_core.messages import AIMessage
 
-
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SKILL_ROOT = REPO_ROOT / "skills" / "examples" / "subgraph-sample" / "story-deconstruction"
 
@@ -18,7 +17,7 @@ class FakeStoryDeconstructionChatModel:
         self.messages_seen: list[list[Any]] = []
         self.text_segmentation_calls = 0
 
-    def bind_tools(self, tools: list[Any]) -> "FakeStoryDeconstructionChatModel":
+    def bind_tools(self, tools: list[Any]) -> FakeStoryDeconstructionChatModel:
         return self
 
     def invoke(self, messages: list[Any]) -> AIMessage:

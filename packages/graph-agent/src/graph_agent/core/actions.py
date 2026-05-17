@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
 
 from langchain_core.tools import StructuredTool
 
@@ -23,7 +23,7 @@ class ActionRegistry:
         self._by_phase = by_phase or {}
 
     @classmethod
-    def empty(cls) -> "ActionRegistry":
+    def empty(cls) -> ActionRegistry:
         return cls({})
 
     def resolve(self, phase_id: str, name: str) -> Callable[..., object]:
@@ -54,7 +54,7 @@ class ToolRegistry:
     by_phase: dict[str, list[ToolDef]] = field(default_factory=dict)
 
     @classmethod
-    def empty(cls) -> "ToolRegistry":
+    def empty(cls) -> ToolRegistry:
         return cls()
 
     def for_root(self) -> list[StructuredTool]:

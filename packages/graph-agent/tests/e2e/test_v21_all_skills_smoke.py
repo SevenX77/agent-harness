@@ -4,7 +4,6 @@ import time
 from pathlib import Path
 
 import pytest
-
 from graph_agent import assemble_graph, compile_skill
 
 REPO_ROOT = Path(__file__).resolve().parents[4]

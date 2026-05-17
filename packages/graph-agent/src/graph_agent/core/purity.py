@@ -30,7 +30,13 @@ _PATH_METHODS = {
 }
 _OS_METHODS = {"remove", "rename", "replace", "makedirs", "mkdir", "rmdir", "unlink", "chmod"}
 _SHUTIL_METHODS = {"copy", "copy2", "copyfile", "copytree", "move", "rmtree"}
-_TEMPFILE_METHODS = {"NamedTemporaryFile", "TemporaryFile", "mkstemp", "mkdtemp", "TemporaryDirectory"}
+_TEMPFILE_METHODS = {
+    "NamedTemporaryFile",
+    "TemporaryFile",
+    "mkstemp",
+    "mkdtemp",
+    "TemporaryDirectory",
+}
 _WRITE_MODE_CHARS = set("wax+")
 _READ_MODES = {"r", "rb", "rt"}
 
@@ -82,7 +88,10 @@ def scan_tool_imports_context(path: Path) -> list[PurityViolation]:
                             reason=f"Tools must not import the Action Context facade ({form})",
                         )
                     )
-        elif isinstance(node, ast.ImportFrom) and node.module == "graph_agent.cognitive.context_facade":
+        elif (
+            isinstance(node, ast.ImportFrom)
+            and node.module == "graph_agent.cognitive.context_facade"
+        ):
             violations.append(
                 PurityViolation(
                     path=path,
@@ -144,7 +153,9 @@ def _violation_for_call(
         if attr in _PATH_METHODS:
             return PurityViolation(path, node.lineno, attr, "path mutation APIs are forbidden")
         if qualified_base == "os" and attr in _OS_METHODS:
-            return PurityViolation(path, node.lineno, f"os.{attr}", "os filesystem mutation is forbidden")
+            return PurityViolation(
+                path, node.lineno, f"os.{attr}", "os filesystem mutation is forbidden"
+            )
         if qualified_base == "shutil" and attr in _SHUTIL_METHODS:
             return PurityViolation(
                 path, node.lineno, f"shutil.{attr}", "shutil filesystem mutation is forbidden"

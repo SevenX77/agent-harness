@@ -18,7 +18,9 @@ def build_scene_stream(context: Context) -> None:
     scenes = [
         {
             "scene_id": f"SCN-{index:03d}",
-            "event_id": event.get("event_id", str(index)) if isinstance(event, dict) else str(index),
+            "event_id": event.get("event_id", str(index))
+            if isinstance(event, dict)
+            else str(index),
             "summary": event.get("summary", str(event)) if isinstance(event, dict) else str(event),
         }
         for index, event in enumerate(events, start=1)

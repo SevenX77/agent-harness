@@ -29,7 +29,7 @@ class FakeHelloWorldChatModel:
     def __init__(self) -> None:
         self.react_turns = 0
 
-    def bind_tools(self, tools: list[Any]) -> "FakeHelloWorldChatModel":
+    def bind_tools(self, tools: list[Any]) -> FakeHelloWorldChatModel:
         del tools
         return self
 
@@ -65,8 +65,12 @@ def compare_idempotency(
     *,
     chat_fixture: str = "none",
 ) -> dict[str, Any]:
-    output_a = _run_v21(skill_root, input_data, run_id="dual-run-shadow-a", chat_fixture=chat_fixture)
-    output_b = _run_v21(skill_root, input_data, run_id="dual-run-shadow-b", chat_fixture=chat_fixture)
+    output_a = _run_v21(
+        skill_root, input_data, run_id="dual-run-shadow-a", chat_fixture=chat_fixture
+    )
+    output_b = _run_v21(
+        skill_root, input_data, run_id="dual-run-shadow-b", chat_fixture=chat_fixture
+    )
     diff = diff_json(output_a, output_b)
     return {
         "mode": "idempotency",

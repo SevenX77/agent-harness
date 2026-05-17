@@ -3,12 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
-
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.loader import SkillLoader, load_workflow_from_md
 from graph_agent.core.manifest import GraphPhaseRef, SkillNodeAST
 from graph_agent.core.parser import extract_raw_blocks
+from pydantic import ValidationError
 
 
 def _write(path: Path, text: str) -> None:

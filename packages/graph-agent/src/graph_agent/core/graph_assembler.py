@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 
 from graph_agent.cognitive.context_facade import Context
@@ -25,7 +25,6 @@ from graph_agent.core.loader import CompiledSkill, PhaseDocument, SkillLoader
 from graph_agent.core.manifest import GraphManifest, LogicNodeAST, SkillNodeAST, SubgraphNodeAST
 from graph_agent.runtime.exit_contract import inject_exit_contract
 from graph_agent.runtime.state import BlackboardState
-
 
 MAX_REACT_TURNS = 8
 
@@ -149,7 +148,9 @@ def _build_subgraph_node(
             }
         )
         result_data = result.get("data", before_data)
-        data_updates = _dict_delta(before_data, result_data) if isinstance(result_data, dict) else {}
+        data_updates = (
+            _dict_delta(before_data, result_data) if isinstance(result_data, dict) else {}
+        )
         return {
             "data": data_updates,
             "flow": result.get("flow", state.get("flow", {})),
@@ -190,9 +191,11 @@ def _build_skill_node(
                 "and not a critic naming pattern"
             )
 
-    output_schema = compiled.raw.get("io", {}).get("outputs") if _is_terminal_phase(
-        phase_id, compiled.manifest
-    ) else None
+    output_schema = (
+        compiled.raw.get("io", {}).get("outputs")
+        if _is_terminal_phase(phase_id, compiled.manifest)
+        else None
+    )
     finish_task = build_finish_task_tool(
         output_schema if isinstance(output_schema, dict) else None,
         parse_finish_markdown,
@@ -209,7 +212,9 @@ def _build_skill_node(
         data_updates: dict[str, Any] = {}
         flow = dict(state.get("flow", {}))
         messages = [SystemMessage(content=phase_ast.system_prompt), *state.get("messages", [])]
-        model = chat_model.bind_tools(all_tools) if hasattr(chat_model, "bind_tools") else chat_model
+        model = (
+            chat_model.bind_tools(all_tools) if hasattr(chat_model, "bind_tools") else chat_model
+        )
 
         for _ in range(MAX_REACT_TURNS):
             prompt_messages = inject_exit_contract(messages, phase_ast.exit_contract)

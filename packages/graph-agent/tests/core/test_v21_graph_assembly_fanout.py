@@ -4,11 +4,9 @@ from pathlib import Path
 from shutil import copytree
 
 import pytest
-
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import GraphAgentFatalError
 from graph_agent.core.graph_assembler import assemble_graph
-
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "fake_canvas_fanout"
 

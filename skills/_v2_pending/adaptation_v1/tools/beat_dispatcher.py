@@ -1,20 +1,21 @@
 from __future__ import annotations
 
-import json
 import logging
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pydantic import BaseModel
+from pathlib import Path
 
-from story_forge.core.md_parser import md_to_json
+from pydantic import BaseModel
 from story_forge.core.llm_client_manager import call_llm_with_fallback
+from story_forge.core.md_parser import md_to_json
 
 logger = logging.getLogger(__name__)
+
 
 class BeatSchema(BaseModel):
     beat_id: str
     content: str
     emotion: str
+
 
 def extract_beats_concurrently(ctx: dict) -> str:
     """
@@ -27,12 +28,14 @@ def extract_beats_concurrently(ctx: dict) -> str:
     if not scenes:
         return "ERROR: objective_scenes 为空，请先调用 build_objective_scenes。"
 
-    subskill_path = Path(__file__).resolve().parent.parent / "subskills" / "beat_extractor" / "SKILL.md"
-    
+    subskill_path = (
+        Path(__file__).resolve().parent.parent / "subskills" / "beat_extractor" / "SKILL.md"
+    )
+
     # 临时从 SKILL.md 解析 system prompt
-    with open(subskill_path, 'r', encoding='utf-8') as f:
+    with open(subskill_path, encoding="utf-8") as f:
         content = f.read()
-        
+
     sys_prompt = content.split("<system_prompt>")[1].split("</system_prompt>")[0].strip()
 
     results = []
@@ -46,10 +49,13 @@ def extract_beats_concurrently(ctx: dict) -> str:
         try:
             # 临时绕过 graph agent 框架，直接调大模型吐 Markdown
             output_dict = call_llm_with_fallback(
-                task_id=scene["scene_id"], 
-                messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_prompt}],
+                task_id=scene["scene_id"],
+                messages=[
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
                 llm_role="writer",
-                temperature=0.3
+                temperature=0.3,
             )
             output_text = output_dict.get("content", "")
             return {"scene_id": scene["scene_id"], "output": output_text}
@@ -63,7 +69,7 @@ def extract_beats_concurrently(ctx: dict) -> str:
         for future in as_completed(futures):
             res = future.result()
             results.append(res)
-            
+
     # 把结果合并回 scenes，使用 md_to_json 强转为 JSON 对象
     res_map = {r["scene_id"]: r["output"] for r in results}
     for sc in scenes:
@@ -75,10 +81,12 @@ def extract_beats_concurrently(ctx: dict) -> str:
                 sc["beats"] = [beat.model_dump() for beat in beats_json]
             except Exception as e:
                 logger.error(f"md_to_json 解析 {sc['scene_id']} 失败: {e}\nText:\n{out_str}")
-                sc["beats"] = [] # 降级保留为空
+                sc["beats"] = []  # 降级保留为空
         else:
             sc["beats"] = []
 
     ctx["objective_scenes"] = scenes
-    
-    return "子代理并发提取完毕。所有 beats 已存入 objective_scenes。你可以开始进行制片人汇总策略了。"
+
+    return (
+        "子代理并发提取完毕。所有 beats 已存入 objective_scenes。你可以开始进行制片人汇总策略了。"
+    )

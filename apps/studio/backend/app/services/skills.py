@@ -101,7 +101,9 @@ def lint_skill_path(skill_path: Path) -> LintResult:
         compiled = compile_skill(skill_path)
     except (SkillLoadError, SkillCompilationError) as exc:
         return LintResult(status="failed", errors=[_lint_error_from_exception(exc)])
-    return LintResult(status="passed", errors=[], phases_summary=_phase_summary_from_compiled(compiled))
+    return LintResult(
+        status="passed", errors=[], phases_summary=_phase_summary_from_compiled(compiled)
+    )
 
 
 async def update_skill_content(
@@ -554,7 +556,10 @@ def _raise_v21_directory_authoring_required() -> None:
     response = error_response(
         error_code="MANIFEST_VALIDATION_FAILED",
         http_status=422,
-        message="V2.1 skills are directory-based; single-file SKILL.md authoring is not supported by this endpoint",
+        message=(
+            "V2.1 skills are directory-based; single-file SKILL.md authoring "
+            "is not supported by this endpoint"
+        ),
         details={"required_entry": "GRAPH.md"},
         retry_strategy="not_retryable",
     )

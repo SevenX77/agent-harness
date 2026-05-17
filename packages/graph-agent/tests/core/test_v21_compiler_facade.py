@@ -3,11 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
-from graph_agent import BlackboardState, CompiledSkill, CompiledStateGraph, assemble_graph, compile_skill
+from graph_agent import (
+    BlackboardState,
+    CompiledSkill,
+    CompiledStateGraph,
+    assemble_graph,
+    compile_skill,
+)
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.loader import load_workflow_from_md
-
 from tests.core.test_v21_graph_assembly import _base, _logic
 
 

@@ -25,7 +25,9 @@ def scan_roots(roots: list[Path]) -> list[tuple[Path, int]]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Scan V2.1 phase markdown for CODEMOD_REVIEW markers.")
+    parser = argparse.ArgumentParser(
+        description="Scan V2.1 phase markdown for CODEMOD_REVIEW markers."
+    )
     parser.add_argument("roots", nargs="+", type=Path)
     args = parser.parse_args(argv)
 

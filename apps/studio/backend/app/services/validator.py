@@ -11,8 +11,8 @@ from typing import Any, cast
 
 from fastapi.encoders import jsonable_encoder
 from graph_agent import compile_skill
-from graph_agent.core.loader import SkillLoader
 from graph_agent.core.exceptions import SkillCompilationError, SkillLoadError
+from graph_agent.core.loader import SkillLoader
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -84,11 +84,11 @@ def _compile_input_schema_or_raise(skill_path: Path) -> dict[str, Any]:
     try:
         compile_skill(skill_path)
         compiled = SkillLoader().compile_skill(skill_path)
-    except (SkillLoadError, SkillCompilationError):
+    except (SkillLoadError, SkillCompilationError) as exc:
         raise ValidationHttpError(
             status_code=422,
             body={"detail": "skill itself failed to compile, fix it first"},
-        )
+        ) from exc
     input_schema = compiled.raw.get("io", {}).get("inputs")
     if not isinstance(input_schema, dict):
         raise ValidationHttpError(

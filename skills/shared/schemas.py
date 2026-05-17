@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 class ParagraphSegment(BaseModel):
     """单个 ABC 分段段落."""
+
     index: int = Field(..., description="段落编号（1-based）")
     type: str = Field(..., description="段落类型（A/B/C）")
     content: str = Field(..., description="段落内容（完整）")
@@ -29,6 +30,7 @@ class ParagraphSegment(BaseModel):
 
 class SegmentationResult(BaseModel):
     """章节分段输出."""
+
     chapter_number: int = Field(..., description="章节号")
     total_paragraphs: int = Field(..., description="总段落数")
     paragraphs: list[ParagraphSegment] = Field(..., description="段落列表")
@@ -37,6 +39,7 @@ class SegmentationResult(BaseModel):
 
 class EventEntry(BaseModel):
     """事件条目."""
+
     # Core fields
     event_id: str = Field(..., description="事件ID")
     event_summary: str = Field(..., description="事件摘要")
@@ -77,6 +80,7 @@ class EventEntry(BaseModel):
 
 class EventTimeline(BaseModel):
     """章节事件时间线."""
+
     chapter_number: int = Field(..., description="章节号")
     total_events: int = Field(..., description="总事件数")
     events: list[EventEntry] = Field(..., description="事件列表")
@@ -86,6 +90,7 @@ class EventTimeline(BaseModel):
 @dataclass
 class BatchAccumulator:
     """跨批次状态累加器."""
+
     # Accumulated lists (all changed to list[dict])
     character_changes: list[dict] = field(default_factory=list)
     prop_changes: list[dict] = field(default_factory=list)
@@ -101,11 +106,9 @@ class BatchAccumulator:
     active_arcs: list[str] = field(default_factory=list)
 
     # Spacetime state
-    time_tracker: dict[str, object] = field(default_factory=lambda: {
-        'current_day': 1,
-        'current_period': 'day',
-        'last_time_desc': ''
-    })
+    time_tracker: dict[str, object] = field(
+        default_factory=lambda: {"current_day": 1, "current_period": "day", "last_time_desc": ""}
+    )
     location_registry: list[dict] = field(default_factory=list)
     current_lighting_vibe: str = field(default="")
 
@@ -151,7 +154,9 @@ class BatchAccumulator:
             known_props=d.get("known_props", []),
             open_foreshadowing=d.get("open_foreshadowing", []),
             active_arcs=d.get("active_arcs", []),
-            time_tracker=d.get("time_tracker", {'current_day': 1, 'current_period': 'day', 'last_time_desc': ''}),
+            time_tracker=d.get(
+                "time_tracker", {"current_day": 1, "current_period": "day", "last_time_desc": ""}
+            ),
             location_registry=d.get("location_registry", []),
             current_lighting_vibe=d.get("current_lighting_vibe", ""),
             system_parameters=d.get("system_parameters", {}),
@@ -173,12 +178,16 @@ class BatchAccumulator:
         if self.time_tracker:
             tt = self.time_tracker
             time_str = f"第{tt.get('current_day', 1)}天 {tt.get('current_period', 'day')}"
-            if tt.get('last_time_desc'):
+            if tt.get("last_time_desc"):
                 time_str += f" ({tt['last_time_desc']})"
             lines.append(f"**时间状态**: {time_str}")
 
         if self.location_registry:
-            loc_names = [loc.get('name', str(i)) for i, loc in enumerate(self.location_registry) if isinstance(loc, dict)]
+            loc_names = [
+                loc.get("name", str(i))
+                for i, loc in enumerate(self.location_registry)
+                if isinstance(loc, dict)
+            ]
             if loc_names:
                 lines.append(f"**地点登记**: {', '.join(loc_names)}")
 

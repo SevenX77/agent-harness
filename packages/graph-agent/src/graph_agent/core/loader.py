@@ -18,7 +18,7 @@ from typing import Any, Literal, NoReturn, cast
 
 from jsonschema.exceptions import SchemaError
 from jsonschema.validators import Draft202012Validator
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from graph_agent.cognitive.context_facade import Context
 from graph_agent.core.actions import ActionDef, ActionRegistry, ToolDef, ToolRegistry
@@ -36,6 +36,7 @@ from graph_agent.core.parser import (
     scan_forbidden_topology_tags,
 )
 from graph_agent.core.purity import scan_python_purity, scan_tool_imports_context
+from graph_agent.core.subagents import build_subagent_input_model
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,8 @@ class CompiledSubagent:
     description: str
     root: Path
     input_schema: dict[str, Any]
+    input_model: type[BaseModel]
+    expected_schema: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -353,6 +356,17 @@ def _compile_subagent_metadata(
                     "subagent "
                     f"{spec.name!r} at {spec.path!r} must declare a non-empty io.inputs schema",
                 )
+            try:
+                input_model = build_subagent_input_model(
+                    _subagent_input_model_name(doc.phase_name, spec.name),
+                    input_schema,
+                )
+            except ValueError as exc:
+                _fatal(
+                    doc.path,
+                    _frontmatter_key_line(doc.path, "phase_config"),
+                    f"subagent {spec.name!r} io.inputs schema is unsupported: {exc}",
+                )
             phase_subagents.append(
                 CompiledSubagent(
                     parent_phase_id=doc.phase_name,
@@ -361,6 +375,8 @@ def _compile_subagent_metadata(
                     description=spec.description,
                     root=sub_root,
                     input_schema=input_schema,
+                    input_model=input_model,
+                    expected_schema=input_model.model_json_schema(),
                 )
             )
         subagents_by_phase[doc.phase_name] = phase_subagents
@@ -404,6 +420,12 @@ def _resolve_subagent_root(
             f"subagent {subagent_name!r} path {subagent_path!r} has no GRAPH.md",
         )
     return candidate
+
+
+def _subagent_input_model_name(phase_id: str, subagent_name: str) -> str:
+    safe_phase = "".join(part.title() for part in re.split(r"[^A-Za-z0-9]+", phase_id) if part)
+    safe_name = "".join(part.title() for part in subagent_name.split("_") if part)
+    return f"{safe_phase or 'Phase'}{safe_name or 'Subagent'}Input"
 
 
 def _load_action_dir(actions_dir: Path, phase_id: str) -> dict[str, ActionDef]:

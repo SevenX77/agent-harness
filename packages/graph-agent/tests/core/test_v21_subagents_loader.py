@@ -199,6 +199,67 @@ def test_subagent_metadata_resolves_target_and_input_schema(tmp_path: Path) -> N
     assert subagents[0].name == "beat_extractor"
     assert subagents[0].root == tmp_path / "phases" / "main" / "subskills" / "beat_extractor"
     assert subagents[0].input_schema["properties"]["scene_text"]["type"] == "string"
+    assert subagents[0].input_model.__name__ == "MainBeatExtractorInput"
+    assert subagents[0].expected_schema["properties"]["scene_text"]["type"] == "string"
+
+
+def test_subagent_input_model_validates_basic_json_schema_types(tmp_path: Path) -> None:
+    _base(tmp_path)
+    _sub_skill(
+        tmp_path / "phases" / "main",
+        "subskills/typed_expert",
+        inputs="""{
+  "type": "object",
+  "properties": {
+    "title": {"type": "string", "description": "Title"},
+    "count": {"type": "integer"},
+    "score": {"type": "number"},
+    "published": {"type": "boolean"},
+    "tags": {"type": "array"},
+    "metadata": {"type": "object"}
+  },
+  "required": ["title", "count", "score", "published", "tags", "metadata"]
+}
+""",
+    )
+    _skill(
+        tmp_path,
+        _skill_text(
+            phase_config="""  subagents:
+    - name: typed_expert
+      path: subskills/typed_expert
+      description: Validate typed input.
+"""
+        ),
+    )
+
+    input_model = SkillLoader().compile_skill(tmp_path).subagents_by_phase["main"][0].input_model
+    valid = input_model.model_validate(
+        {
+            "title": "A",
+            "count": 2,
+            "score": 0.5,
+            "published": True,
+            "tags": ["x"],
+            "metadata": {"k": "v"},
+        }
+    )
+
+    assert valid.model_dump()["title"] == "A"
+    with pytest.raises(ValueError, match="Field required"):
+        input_model.model_validate({"title": "A"})
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        input_model.model_validate(
+            {
+                "title": "A",
+                "count": 2,
+                "score": 0.5,
+                "published": True,
+                "tags": [],
+                "metadata": {},
+                "unknown": True,
+            }
+        )
 
 
 @pytest.mark.parametrize(

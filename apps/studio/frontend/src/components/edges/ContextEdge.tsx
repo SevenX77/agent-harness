@@ -52,7 +52,7 @@ export function ContextEdge({
                   'block size-3 rounded-full border bg-transparent transition-colors',
                   hasTraceData
                     ? 'border-primary bg-primary'
-                    : 'border-muted-foreground/70 hover:border-muted-foreground',
+                    : 'border-primary/70 hover:border-primary',
                 ].join(' ')}
                 onClick={(event) => {
                   event.stopPropagation()

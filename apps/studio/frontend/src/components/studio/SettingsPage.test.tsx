@@ -15,35 +15,34 @@ import type { CredentialsState, RolesData } from '../../api/llm'
 const credentials: CredentialsState = {
   providers: [
     {
-      provider_code: 'DS',
+      id: 'DS',
+      name: 'DeepSeek Official',
       has_key: true,
       base_url: 'https://api.deepseek.com',
-      name: 'DeepSeek Official',
       provider_type: 'openai_compatible',
       last_test_status: 'ok',
       last_test_at: '2026-05-18T01:23:45Z',
     },
     {
-      provider_code: 'OC_DS',
+      id: 'OC_DS',
+      name: 'OneChats DeepSeek',
       has_key: false,
       base_url: 'https://chatapi.onechats.ai/v1',
-      name: 'OneChats DeepSeek',
       provider_type: 'openai_compatible',
     },
     {
-      provider_code: 'WS_LLM',
+      id: 'WS_LLM',
+      name: 'WaveSpeed Any-LLM',
       has_key: false,
       base_url: 'https://llm.wavespeed.ai/v1',
-      name: 'WaveSpeed Any-LLM',
       provider_type: 'wavespeed_any_llm',
     },
     {
-      provider_code: 'CUSTOM_AB12CD34',
+      id: 'CUSTOM_AB12CD34',
+      name: 'My Custom OpenAI',
       has_key: true,
       base_url: 'https://api.example.com/v1',
-      title: 'My Custom OpenAI',
       provider_type: 'openai_compatible',
-      vendor_hint: 'openai',
     },
   ],
 }
@@ -129,51 +128,47 @@ describe('draftsFromCredentials', () => {
   it('produces one draft per provider with the persisted has_key flag', () => {
     const drafts = draftsFromCredentials(credentials)
     expect(drafts).toHaveLength(4)
-    expect(drafts.map((draft) => draft.provider_code)).toEqual(['DS', 'OC_DS', 'WS_LLM', 'CUSTOM_AB12CD34'])
+    expect(drafts.map((draft) => draft.id)).toEqual(['DS', 'OC_DS', 'WS_LLM', 'CUSTOM_AB12CD34'])
 
-    const ds = drafts.find((draft) => draft.provider_code === 'DS')!
+    const ds = drafts.find((draft) => draft.id === 'DS')!
     expect(ds.hasSavedKey).toBe(true)
     expect(ds.api_key).toBe('')
     expect(ds.provider_type).toBe('openai_compatible')
 
-    const custom = drafts.find((draft) => draft.provider_code === 'CUSTOM_AB12CD34')!
-    expect(custom.title).toBe('My Custom OpenAI')
-    expect(custom.vendor_hint).toBe('openai')
+    const custom = drafts.find((draft) => draft.id === 'CUSTOM_AB12CD34')!
+    expect(custom.name).toBe('My Custom OpenAI')
   })
 
   it('defaults provider_type to openai_compatible when missing', () => {
     const drafts = draftsFromCredentials({
-      providers: [{ provider_code: 'TEST', has_key: false }],
+      providers: [{ id: 'TEST', name: 'Test', has_key: false }],
     })
     expect(drafts[0].provider_type).toBe('openai_compatible')
   })
 })
 
 describe('SettingsPageContent (api_keys)', () => {
-  it('renders the flat provider list with title + provider_code', () => {
+  it('renders the provider cards with name inputs and primary test actions', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
     expect(html).toContain('API Keys')
     expect(html).toContain('DS')
     expect(html).toContain('OC_DS')
     expect(html).toContain('WS_LLM')
     expect(html).toContain('My Custom OpenAI')
-    expect(html).toContain('新增 Provider')
+    expect(html).toContain('Add Provider')
+    expect(html).toContain('Test Connection')
   })
 
   it('renders persistent Test outcome badge from credentials', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
     // DS has last_test_status='ok' set above.
-    expect(html).toContain('连接正常')
+    expect(html).toContain('Connected')
   })
 
-  it('omits the Delete button for YAML-owned providers but renders it for custom ones', () => {
+  it('renders a Delete button for each user-owned provider', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
-    // The aria-label "Delete provider" only appears on Trash buttons rendered
-    // when identityEditable is true (i.e., not a YAML-owned provider). With
-    // 3 YAML-owned providers + 1 custom in our fixture, exactly one Delete
-    // button should be in the markup.
     const matches = html.match(/aria-label="Delete provider"/g) ?? []
-    expect(matches).toHaveLength(1)
+    expect(matches).toHaveLength(4)
   })
 })
 

@@ -12,14 +12,14 @@ import { buildPutPayload } from "./useDebouncedCredentialsSave"
  * which is not currently a project dependency.
  */
 describe("buildPutPayload", () => {
-  it("emits the six editable fields with empty-string defaults for unset ones", () => {
+  it("emits editable fields with empty-string defaults for unset ones", () => {
     const result = buildPutPayload([
-      { provider_code: "AAA", api_key: "sk-xxx" },
-      { provider_code: "BBB", api_key: "", title: "Title", provider_type: "openai_compatible" },
+      { id: "AAA", name: "Alpha", api_key: "sk-xxx" },
+      { id: "BBB", name: "Beta", api_key: "", provider_type: "openai_compatible" },
     ])
     expect(result).toEqual([
-      { provider_code: "AAA", api_key: "sk-xxx", base_url: "", title: "", provider_type: null, vendor_hint: "" },
-      { provider_code: "BBB", api_key: "", base_url: "", title: "Title", provider_type: "openai_compatible", vendor_hint: "" },
+      { id: "AAA", name: "Alpha", api_key: "sk-xxx", base_url: "", provider_type: null },
+      { id: "BBB", name: "Beta", api_key: "", base_url: "", provider_type: "openai_compatible" },
     ])
   })
 
@@ -28,22 +28,21 @@ describe("buildPutPayload", () => {
       // @ts-expect-error — has_key is intentionally not in the input type
       // but may leak in via spread; confirm it gets stripped so the PUT
       // doesn't trip backend's extra="forbid".
-      { provider_code: "AAA", api_key: "sk", has_key: true },
+      { id: "AAA", name: "Alpha", api_key: "sk", has_key: true },
     ])
     expect(result[0]).not.toHaveProperty("has_key")
     expect(Object.keys(result[0]).sort()).toEqual([
       "api_key",
       "base_url",
-      "provider_code",
+      "id",
+      "name",
       "provider_type",
-      "title",
-      "vendor_hint",
     ])
   })
 
   it("preserves an explicit null provider_type (used to clear the field server-side)", () => {
     const result = buildPutPayload([
-      { provider_code: "AAA", api_key: "sk", provider_type: null },
+      { id: "AAA", name: "Alpha", api_key: "sk", provider_type: null },
     ])
     expect(result[0].provider_type).toBeNull()
   })

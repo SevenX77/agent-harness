@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { ArrowDown, ArrowUp, Check, KeyRound, Loader2, Plug, Plus, Settings, TriangleAlert, X } from "lucide-react"
+import { ArrowDown, ArrowUp, Check, Eye, EyeOff, KeyRound, Loader2, Plug, Plus, Settings, Trash2, TriangleAlert, X } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useAppSettings } from "@/hooks/useAppSettings"
@@ -24,22 +26,20 @@ import {
   type ProviderType,
   type RolesData,
 } from "../../api/llm"
-import { ProviderRow, type ProviderRowDraft } from "./ProviderRow"
 
 type SettingsTab = "general" | "api_keys" | "llm_roles"
 
 const emptyCredentials: CredentialsState = { providers: [] }
 const DISABLED_ROLE_EDITING = "Adding new model/provider coming in v2.5"
 
-/**
- * A provider is "YAML-owned" iff the backend supplied a `name` for it. Backend
- * fills `name` only when the provider exists in `llm_roles.yaml` (the path
- * `include_metadata=true` hits in `_credential_metadata_view`). YAML-owned
- * providers can edit api_key + base_url but not title / provider_type /
- * vendor_hint, and the row hides its Delete button.
- */
-export function isYamlOwned(persisted: { name?: string } | null | undefined): boolean {
-  return Boolean(persisted?.name)
+export interface ProviderDraft {
+  id: string
+  name: string
+  provider_type: ProviderType
+  base_url: string
+  api_key: string
+  hasSavedKey: boolean
+  isTesting: boolean
 }
 
 /** What the LLM Roles tab knows about a single provider. */
@@ -84,7 +84,7 @@ interface SettingsPageContentProps {
   activeTab: SettingsTab
   /** Server-persisted credentials snapshot — feeds both the ApiKeys flat list and the LLM Roles availability filter. */
   credentials: CredentialsState
-  drafts: ProviderRowDraft[]
+  drafts: ProviderDraft[]
   saveStatus: SaveStatus
   rolesData: RolesData | null
   selectedRole: string
@@ -100,9 +100,9 @@ interface SettingsPageContentProps {
   }
   onClose: () => void
   onTabChange: (tab: SettingsTab) => void
-  onProviderFieldChange: (providerCode: string, patch: Partial<ProviderRowDraft>) => void
-  onTestProvider: (providerCode: string) => void
-  onDeleteProvider: (providerCode: string) => void
+  onProviderFieldChange: (providerId: string, patch: Partial<ProviderDraft>) => void
+  onTestProvider: (providerId: string) => void
+  onDeleteProvider: (providerId: string) => void
   onAddProvider: () => void
   onSelectedRoleChange: (roleName: string) => void
   onRolesDataChange: (next: RolesData) => void
@@ -110,13 +110,12 @@ interface SettingsPageContentProps {
 }
 
 /** Build a draft list from the server `CredentialsState` snapshot. */
-export function draftsFromCredentials(credentials: CredentialsState): ProviderRowDraft[] {
+export function draftsFromCredentials(credentials: CredentialsState): ProviderDraft[] {
   return credentials.providers.map((provider) => ({
-    provider_code: provider.provider_code,
-    title: provider.title ?? "",
+    id: provider.id,
+    name: provider.name,
     provider_type: (provider.provider_type ?? "openai_compatible") as ProviderType,
     base_url: provider.base_url ?? "",
-    vendor_hint: provider.vendor_hint ?? "",
     api_key: "",
     hasSavedKey: provider.has_key,
     isTesting: false,
@@ -208,17 +207,15 @@ function cloneRolesData(data: RolesData): RolesData {
   return structuredClone(data) as RolesData
 }
 
-function newProviderCode(): string {
-  // crypto.randomUUID short-form: first segment + last segment → stable in JSDOM.
-  const uuid = (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`).toString()
-  return `CUSTOM_${uuid.replace(/-/g, "").slice(0, 8).toUpperCase()}`
+function newProviderId(): string {
+  return (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`).toString()
 }
 
 export function SettingsPage({ onClose }: SettingsPageProps) {
   const appSettings = useAppSettings()
   const [activeTab, setActiveTab] = useState<SettingsTab>("general")
   const [credentials, setCredentials] = useState<CredentialsState>(emptyCredentials)
-  const [drafts, setDrafts] = useState<ProviderRowDraft[]>([])
+  const [drafts, setDrafts] = useState<ProviderDraft[]>([])
   const [rolesData, setRolesData] = useState<RolesData | null>(null)
   const [selectedRole, setSelectedRole] = useState("copilot_chat")
   const [rolesDirty, setRolesDirty] = useState(false)
@@ -226,7 +223,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
 
   // Keep a ref of the most recent draft list so the debounced save can read it
   // at fire time (avoids re-binding the timer on every keystroke).
-  const draftsRef = useRef<ProviderRowDraft[]>(drafts)
+  const draftsRef = useRef<ProviderDraft[]>(drafts)
   draftsRef.current = drafts
 
   const handleSaved = useCallback((next: CredentialsState) => {
@@ -234,7 +231,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     // Re-sync `hasSavedKey` per provider, but preserve any unsent typed key
     // (user might still be editing while a previous batch flushed).
     setDrafts((current) => current.map((draft) => {
-      const persisted = next.providers.find((provider) => provider.provider_code === draft.provider_code)
+      const persisted = next.providers.find((provider) => provider.id === draft.id)
       if (!persisted) return draft
       return {
         ...draft,
@@ -260,8 +257,8 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       })
       .catch((error) => {
         if (cancelled) return
-        const message = error instanceof Error ? error.message : "凭据加载失败"
-        toast.error(`API Keys 加载失败：${message}`)
+        const message = error instanceof Error ? error.message : "Load failed"
+        toast.error(`API Keys load failed: ${message}`)
       })
     return () => {
       cancelled = true
@@ -289,27 +286,25 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     queueSave(() => buildPutPayload(draftsRef.current))
   }
 
-  function updateProviderField(providerCode: string, patch: Partial<ProviderRowDraft>) {
+  function updateProviderField(providerId: string, patch: Partial<ProviderDraft>) {
     setDrafts((current) => current.map((draft) => (
-      draft.provider_code === providerCode ? { ...draft, ...patch } : draft
+      draft.id === providerId ? { ...draft, ...patch } : draft
     )))
     scheduleSave()
   }
 
-  function setProviderTesting(providerCode: string, isTesting: boolean) {
+  function setProviderTesting(providerId: string, isTesting: boolean) {
     setDrafts((current) => current.map((draft) => (
-      draft.provider_code === providerCode ? { ...draft, isTesting } : draft
+      draft.id === providerId ? { ...draft, isTesting } : draft
     )))
   }
 
   function addProvider() {
-    const provider_code = newProviderCode()
-    const draft: ProviderRowDraft = {
-      provider_code,
-      title: "",
+    const draft: ProviderDraft = {
+      id: newProviderId(),
+      name: "",
       provider_type: "openai_compatible",
       base_url: "",
-      vendor_hint: "",
       api_key: "",
       hasSavedKey: false,
       isTesting: false,
@@ -318,36 +313,31 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     scheduleSave()
   }
 
-  function deleteProvider(providerCode: string) {
-    // YAML-owned providers cannot be deleted from the UI; their identity is
-    // pinned by llm_roles.yaml.
-    const persisted = credentials.providers.find((p) => p.provider_code === providerCode)
-    if (isYamlOwned(persisted)) return
-    setDrafts((current) => current.filter((draft) => draft.provider_code !== providerCode))
+  function deleteProvider(providerId: string) {
+    setDrafts((current) => current.filter((draft) => draft.id !== providerId))
     scheduleSave()
   }
 
-  async function runProviderTest(providerCode: string) {
-    const draft = draftsRef.current.find((d) => d.provider_code === providerCode)
+  async function runProviderTest(providerId: string) {
+    const draft = draftsRef.current.find((d) => d.id === providerId)
     if (!draft) return
 
-    setProviderTesting(providerCode, true)
-    const toastId = `test-${providerCode}`
-    toast.loading(`正在测试 ${draft.title || providerCode}…`, { id: toastId })
+    setProviderTesting(providerId, true)
+    const toastId = `test-${providerId}`
+    toast.loading(`Testing ${draft.name || "provider"}...`, { id: toastId })
 
     try {
       const response = await testProvider({
-        provider_code: draft.provider_code,
+        id: draft.id,
         provider_type: draft.provider_type,
         api_key: draft.api_key.trim(),
         base_url: draft.base_url || undefined,
       })
 
-      // F5: splice the persisted Test outcome into local credentials so the
-      // ProviderRow's `persisted` prop reflects it without a GET round-trip.
+      // F5: splice the persisted Test outcome into local credentials without a GET round-trip.
       setCredentials((current) => ({
         providers: current.providers.map((provider) => {
-          if (provider.provider_code !== providerCode) return provider
+          if (provider.id !== providerId) return provider
           return {
             ...provider,
             last_test_status: response.status === "missing_api_key" ? "untested" : response.status,
@@ -362,16 +352,16 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       if (response.status === "ok") {
         const latency = response.latency_ms ? `${response.latency_ms}ms` : ""
         const modelCount = response.available_models?.length ?? 0
-        const detail = [latency, modelCount > 0 ? `${modelCount} 个模型` : ""].filter(Boolean).join(" · ")
-        toast.success(detail ? `连接正常（${detail}）` : "连接正常", { id: toastId })
+        const detail = [latency, modelCount > 0 ? `${modelCount} models` : ""].filter(Boolean).join(" · ")
+        toast.success(detail ? `Connected (${detail})` : "Connected", { id: toastId })
       } else {
         toast.error(composeTestErrorMessage(response.status, response.error_code, response.message), { id: toastId })
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "未知错误"
-      toast.error(`测试调用失败：${message}`, { id: toastId })
+      const message = error instanceof Error ? error.message : "Unknown error"
+      toast.error(`Test failed: ${message}`, { id: toastId })
     } finally {
-      setProviderTesting(providerCode, false)
+      setProviderTesting(providerId, false)
     }
   }
 
@@ -616,7 +606,7 @@ function SaveStatusBadge({ status }: { status: SaveStatus }) {
     return (
       <Badge variant="outline" className="gap-1 text-[10px] font-normal text-muted-foreground">
         <Loader2 className="size-3 animate-spin" />
-        准备保存…
+        Pending
       </Badge>
     )
   }
@@ -624,23 +614,23 @@ function SaveStatusBadge({ status }: { status: SaveStatus }) {
     return (
       <Badge variant="outline" className="gap-1 text-[10px] font-normal text-muted-foreground">
         <Loader2 className="size-3 animate-spin" />
-        保存中
+        Saving
       </Badge>
     )
   }
   if (status === "saved") {
     return (
-      <Badge variant="outline" className="gap-1 text-[10px] font-normal text-emerald-300">
+      <Badge variant="outline" className="gap-1 text-[10px] font-normal">
         <Check className="size-3" />
-        已保存
+        Saved
       </Badge>
     )
   }
   // error
   return (
-    <Badge variant="outline" className="gap-1 text-[10px] font-normal text-red-300">
+    <Badge variant="outline" className="gap-1 text-[10px] font-normal">
       <TriangleAlert className="size-3" />
-      保存失败
+      Save failed
     </Badge>
   )
 }
@@ -657,39 +647,40 @@ function ApiKeysTab({
   SettingsPageContentProps,
   "credentials" | "drafts" | "saveStatus" | "onProviderFieldChange" | "onTestProvider" | "onDeleteProvider" | "onAddProvider"
 >) {
-  const persistedByCode = useMemo(
-    () => Object.fromEntries(credentials.providers.map((provider) => [provider.provider_code, provider])),
+  const persistedById = useMemo(
+    () => Object.fromEntries(credentials.providers.map((provider) => [provider.id, provider])),
     [credentials.providers],
   )
+  const [showKey, setShowKey] = useState<Record<string, boolean>>({})
 
   return (
     <div>
       <SectionTitle
-        title="API Keys（本地）"
-        description="Studio runtime 使用的 LLM 服务商凭据。改动会在 300ms 内自动保存。"
+        title="API Keys"
+        description="Local LLM provider credentials used by Studio runtime. Changes auto-save."
         trailing={<SaveStatusBadge status={saveStatus} />}
       />
-      <div className="space-y-3" data-testid="api-keys-list">
+      <div className="space-y-4" data-testid="api-keys-list">
         {drafts.map((draft) => {
-          const persisted = persistedByCode[draft.provider_code] ?? null
+          const persisted = persistedById[draft.id] ?? null
           return (
-            <ProviderRow
-              key={draft.provider_code}
+            <ProviderCard
+              key={draft.id}
               draft={draft}
               persisted={persisted}
-              identityEditable={!isYamlOwned(persisted)}
-              onFieldChange={(patch) => onProviderFieldChange(draft.provider_code, patch)}
-              onTest={() => onTestProvider(draft.provider_code)}
-              onDelete={() => onDeleteProvider(draft.provider_code)}
+              showKey={Boolean(showKey[draft.id])}
+              onToggleShowKey={() => setShowKey((current) => ({ ...current, [draft.id]: !current[draft.id] }))}
+              onFieldChange={(patch) => onProviderFieldChange(draft.id, patch)}
+              onTest={() => onTestProvider(draft.id)}
+              onDelete={() => onDeleteProvider(draft.id)}
             />
           )
         })}
         {drafts.length === 0 ? (
           <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border/60 bg-muted/10 px-4 py-10 text-center">
-            <div className="text-xs text-muted-foreground">尚未添加任何 Provider</div>
             <Button type="button" variant="default" onClick={onAddProvider} className="gap-1">
               <Plus className="size-3.5" />
-              新增第一个 Provider
+              Add Provider
             </Button>
           </div>
         ) : null}
@@ -698,11 +689,113 @@ function ApiKeysTab({
         <div className="mt-4 flex justify-start">
           <Button type="button" variant="outline" onClick={onAddProvider} className="gap-1">
             <Plus className="size-3.5" />
-            新增 Provider
+            Add Provider
           </Button>
         </div>
       )}
     </div>
+  )
+}
+
+function ProviderCard({
+  draft,
+  persisted,
+  showKey,
+  onToggleShowKey,
+  onFieldChange,
+  onTest,
+  onDelete,
+}: {
+  draft: ProviderDraft
+  persisted: CredentialsState["providers"][number] | null
+  showKey: boolean
+  onToggleShowKey: () => void
+  onFieldChange: (patch: Partial<ProviderDraft>) => void
+  onTest: () => void
+  onDelete: () => void
+}) {
+  const status = persisted?.last_test_status ?? "untested"
+  const displayStatus = status === "ok" ? "Connected" : status === "untested" ? "Untested" : "Failed"
+  const statusVariant = status === "ok" ? "secondary" : status === "untested" ? "outline" : "destructive"
+  return (
+    <Card data-provider-id={draft.id}>
+      <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+        <Input
+          value={draft.name}
+          onChange={(event) => onFieldChange({ name: event.target.value })}
+          placeholder="Provider Name"
+          className="flex-1 font-semibold"
+          aria-label="Provider Name"
+        />
+        <Button type="button" variant="ghost" size="icon" onClick={onDelete} aria-label="Delete provider">
+          <Trash2 className="size-4" />
+        </Button>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label>SDK Protocol</Label>
+          <RadioGroup
+            value={draft.provider_type}
+            onValueChange={(next) => onFieldChange({ provider_type: next as ProviderType })}
+            className="flex flex-row gap-4"
+          >
+            <div className="flex items-center gap-2">
+              <RadioGroupItem value="openai_compatible" id={`protocol-openai-${draft.id}`} />
+              <Label htmlFor={`protocol-openai-${draft.id}`}>OpenAI Compatible</Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <RadioGroupItem value="anthropic_compatible" id={`protocol-anthropic-${draft.id}`} />
+              <Label htmlFor={`protocol-anthropic-${draft.id}`}>Anthropic</Label>
+            </div>
+          </RadioGroup>
+        </div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor={`api-key-${draft.id}`}>API Key</Label>
+            <div className="relative">
+              <Input
+                id={`api-key-${draft.id}`}
+                type={showKey ? "text" : "password"}
+                value={draft.api_key}
+                onChange={(event) => onFieldChange({ api_key: event.target.value })}
+                placeholder={draft.hasSavedKey && !draft.api_key ? "Saved key retained" : "sk-..."}
+                className="pr-9"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute right-1 top-1/2 size-7 -translate-y-1/2"
+                onClick={onToggleShowKey}
+                aria-label={showKey ? "Hide API key" : "Show API key"}
+              >
+                {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </Button>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor={`base-url-${draft.id}`}>Base URL</Label>
+            <Input
+              id={`base-url-${draft.id}`}
+              value={draft.base_url}
+              onChange={(event) => onFieldChange({ base_url: event.target.value })}
+              placeholder="https://api.openai.com/v1"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
+        </div>
+      </CardContent>
+      <CardFooter className="flex justify-between border-t bg-muted/50 px-6 py-3">
+        <Badge variant={statusVariant}>{displayStatus}</Badge>
+        <Button type="button" variant="default" onClick={onTest} disabled={draft.isTesting}>
+          {draft.isTesting ? <Loader2 className="size-3.5 animate-spin" /> : null}
+          Test Connection
+        </Button>
+      </CardFooter>
+    </Card>
   )
 }
 
@@ -726,7 +819,7 @@ export function LlmRolesTab({
   onSave: () => void
 }) {
   const credentialsByCode = useMemo(
-    () => Object.fromEntries(credentials.providers.map((provider) => [provider.provider_code, provider])),
+    () => Object.fromEntries(credentials.providers.map((provider) => [provider.id, provider])),
     [credentials.providers],
   )
 
@@ -752,8 +845,8 @@ export function LlmRolesTab({
   }
 
   function availabilityPrefix(availability: ModelAvailability): string {
-    if (availability === "unavailable") return "⚠️ 不可用 · "
-    if (availability === "key_only") return "● 未测试 · "
+    if (availability === "unavailable") return "Unavailable · "
+    if (availability === "key_only") return "Untested · "
     return ""
   }
 
@@ -883,12 +976,12 @@ function RoleModelCard({
             {availability === "unavailable" ? (
               <Badge variant="outline" className="border-red-800/40 bg-red-950/40 text-red-300">
                 <TriangleAlert className="size-3" />
-                不可用
+                Unavailable
               </Badge>
             ) : null}
             {availability === "key_only" ? (
               <Badge variant="outline" className="text-muted-foreground">
-                未测试
+                Untested
               </Badge>
             ) : null}
           </div>

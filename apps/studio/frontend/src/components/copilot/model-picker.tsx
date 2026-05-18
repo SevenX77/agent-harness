@@ -25,7 +25,7 @@ export function getModelOptions(role: RoleEntry | null, credentials: Credentials
   }
 
   const credentialsByProvider = new Map(
-    (credentials?.providers ?? []).map((provider) => [provider.provider_code, provider]),
+    (credentials?.providers ?? []).map((provider) => [provider.id, provider]),
   )
 
   return Object.entries(role.models).map(([modelCode, model]) => {

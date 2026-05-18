@@ -72,8 +72,8 @@ export function useDebouncedCredentialsSave(
       } catch (error) {
         setStatus("error")
         setLastError(error)
-        const message = error instanceof Error ? error.message : "保存失败"
-        toast.error(`API Keys 保存失败：${message}`)
+        const message = error instanceof Error ? error.message : "Save failed"
+        toast.error(`API Keys save failed: ${message}`)
         onError?.(error)
         return null
       } finally {
@@ -145,27 +145,25 @@ export function useDebouncedCredentialsSave(
 /**
  * Build a PUT request body from the current draft state.
  *
- * Critical: only the 6 fields accepted by `ProviderCredentialWrite` on the
+ * Critical: only the fields accepted by `ProviderCredentialWrite` on the
  * backend are forwarded. The 5 Test outcome fields (last_test_status,
  * last_test_at, last_test_message, last_error_code, available_models) are
  * *single-writer* — the backend rejects them in PUT bodies with 422.
  */
 export function buildPutPayload(
   providers: ReadonlyArray<{
-    provider_code: string
+    id: string
+    name: string
     api_key?: string
     base_url?: string
-    title?: string
     provider_type?: ProviderCredentialUpdate["provider_type"]
-    vendor_hint?: string
   }>,
 ): ProviderCredentialUpdate[] {
   return providers.map((provider) => ({
-    provider_code: provider.provider_code,
+    id: provider.id,
+    name: provider.name,
     api_key: provider.api_key ?? "",
     base_url: provider.base_url ?? "",
-    title: provider.title ?? "",
     provider_type: provider.provider_type ?? null,
-    vendor_hint: provider.vendor_hint ?? "",
   }))
 }

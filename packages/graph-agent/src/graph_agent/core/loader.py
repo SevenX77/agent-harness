@@ -70,7 +70,20 @@ class CompiledSkill:
     nodes: list[PhaseDocument] = field(default_factory=list)
     actions: ActionRegistry = field(default_factory=ActionRegistry.empty)
     tools: ToolRegistry = field(default_factory=ToolRegistry.empty)
+    subagents_by_phase: dict[str, list[CompiledSubagent]] = field(default_factory=dict)
     phase_tokens: dict[str, PhaseTokenInfo] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class CompiledSubagent:
+    """Resolved sub-skill metadata declared on a parent SKILL phase."""
+
+    parent_phase_id: str
+    name: str
+    path: str
+    description: str
+    root: Path
+    input_schema: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -178,6 +191,7 @@ class SkillLoader:
                 for doc in phase_docs
             ],
         }
+        subagents_by_phase = _compile_subagent_metadata(root, phase_docs)
         logger.info("Compiled V2.1 graph skill root=%s phases=%d", root, len(phase_docs))
         return CompiledSkill(
             raw=raw,
@@ -185,6 +199,7 @@ class SkillLoader:
             nodes=phase_docs,
             actions=actions,
             tools=tools,
+            subagents_by_phase=subagents_by_phase,
             phase_tokens=phase_tokens,
         )
 
@@ -316,6 +331,79 @@ def _discover_actions_and_tools(
     return ActionRegistry(actions_by_phase), ToolRegistry(
         root_tools=root_tools, by_phase=tools_by_phase
     )
+
+
+def _compile_subagent_metadata(
+    skill_root: Path,
+    phase_docs: list[PhaseDocument],
+) -> dict[str, list[CompiledSubagent]]:
+    subagents_by_phase: dict[str, list[CompiledSubagent]] = {}
+    for doc in phase_docs:
+        if not isinstance(doc.ast, SkillNodeAST) or not doc.ast.subagents:
+            continue
+        phase_subagents: list[CompiledSubagent] = []
+        for spec in doc.ast.subagents:
+            sub_root = _resolve_subagent_root(skill_root, doc.path, spec.path, spec.name)
+            sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(sub_root)
+            input_schema = sub_compiled.raw.get("io", {}).get("inputs")
+            if not isinstance(input_schema, dict) or not input_schema:
+                _fatal(
+                    doc.path,
+                    _frontmatter_key_line(doc.path, "phase_config"),
+                    "subagent "
+                    f"{spec.name!r} at {spec.path!r} must declare a non-empty io.inputs schema",
+                )
+            phase_subagents.append(
+                CompiledSubagent(
+                    parent_phase_id=doc.phase_name,
+                    name=spec.name,
+                    path=spec.path,
+                    description=spec.description,
+                    root=sub_root,
+                    input_schema=input_schema,
+                )
+            )
+        subagents_by_phase[doc.phase_name] = phase_subagents
+    return subagents_by_phase
+
+
+def _resolve_subagent_root(
+    skill_root: Path,
+    phase_path: Path,
+    subagent_path: str,
+    subagent_name: str,
+) -> Path:
+    display_path = phase_path.parent / subagent_path
+    path = Path(subagent_path)
+    if path.is_absolute():
+        _fatal(
+            phase_path,
+            _frontmatter_key_line(phase_path, "phase_config"),
+            f"subagent {subagent_name!r} path must be relative to phase root",
+        )
+    skill_root_resolved = skill_root.resolve()
+    candidate = display_path.resolve()
+    try:
+        candidate.relative_to(skill_root_resolved)
+    except ValueError:
+        _fatal(
+            phase_path,
+            _frontmatter_key_line(phase_path, "phase_config"),
+            f"subagent {subagent_name!r} path must stay inside skill root",
+        )
+    if not candidate.is_dir():
+        _fatal(
+            phase_path,
+            _frontmatter_key_line(phase_path, "phase_config"),
+            f"subagent {subagent_name!r} path {subagent_path!r} does not exist",
+        )
+    if not (candidate / "GRAPH.md").is_file():
+        _fatal(
+            phase_path,
+            _frontmatter_key_line(phase_path, "phase_config"),
+            f"subagent {subagent_name!r} path {subagent_path!r} has no GRAPH.md",
+        )
+    return candidate
 
 
 def _load_action_dir(actions_dir: Path, phase_id: str) -> dict[str, ActionDef]:

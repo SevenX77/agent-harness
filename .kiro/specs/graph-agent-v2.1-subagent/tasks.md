@@ -114,6 +114,7 @@
   - 调用 sub-skill graph 时传入 parent `data`/`flow`/`run_id`, 并保持 `messages: []`。
   - 子技能只返回自身 data delta, 不污染 parent agent messages。
   - trace id/run id 从 parent 透明传入 subgraph 执行。
+  - 性能 hint: `sub_assembled.graph` 在 tool 初始化闭包时一次性 `compile_skill` + `assemble_graph`, runtime `call_subagent` 直接 invoke 已持有实例, 避免 fan-out 重复编译同一 sub-skill 浪费 I/O。
   - 避免复制 DeerFlow ThreadPool executor。
 - 测试:
   - Unit: subagent invoke 时传入 `messages: []`。
@@ -139,6 +140,7 @@
 - 依赖: T2.3
 - 验收:
   - FR-3 与 NFR-1 覆盖。
+  - DoD: 显式构造并传递带有 parent run_id 的 `RunnableConfig` (含 tags + run_id + callbacks 继承), 确保 LangGraph 原生 Tracing 链路不断层; 子 skill invoke 必须接 `RunnableConfig` 而非纯 state dict 字符串。
 
 ### T2.5 — Subagent result aggregator 与 traceable failure logging (~4h)
 - Owner: a1
@@ -198,9 +200,10 @@
 - Owner: apps master
 - Location: `apps/studio/frontend/src/` sidebar/properties tab/routing 相关文件
 - 工作:
-  - 选中带 subagents 的 phase 节点时, 在 Properties 的 Tools 列表下方显示 `Subagents` 栏。
+  - sidebar Properties Tab (`apps/studio/frontend/src/components/studio/Panels.tsx` 已有 properties case, R3 commit `9e907a4`) 加 `Subagents` section, 渲染当前 `selectedNode.data.subagents` 列表。
   - 每项显示 `name | description`。
-  - 点击条目触发现有 `canvas:open-phase-file` 或等价 R3 sidebar tab routing, 打开子 skill 的 `SKILL.md`。
+  - 每条 click -> 调用 `WorkspaceContext.onFileOpen(${skillId}/${subagent.path}/SKILL.md)` 跳到 sub-skill 的 `SKILL.md`, 跟 R3 双击 phase node 走同一 lift-state nav path。
+  - 严禁恢复废弃的 `canvas:open-phase-file` CustomEvent 管线; Wave 4 已删除, 多源导航会冲突。
   - 列表只读, 不在 UI 中编辑 subagents。
 - 测试:
   - Frontend unit/component: Subagents 列表按 metadata 渲染。
@@ -209,6 +212,7 @@
 - 依赖: T3.1 可并行; 需要 phase metadata 中包含 resolved subagent path
 - 验收:
   - FR-6 Properties Tab 覆盖。
+  - 不留任何 `document.dispatchEvent` / `addEventListener('canvas:*')` 残留。
   - Studio 视觉化只表达关系, 不承担 dispatcher 配置逻辑。
 
 ## Phase 4: Validation (user, TBD, after Phase 1-3)

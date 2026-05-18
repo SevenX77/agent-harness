@@ -8,6 +8,8 @@ from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.loader import SkillLoader
 from graph_agent.core.manifest import SkillNodeAST
 
+_FIXTURES = Path(__file__).parents[1] / "fixtures"
+
 
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -260,6 +262,71 @@ def test_subagent_input_model_validates_basic_json_schema_types(tmp_path: Path) 
                 "unknown": True,
             }
         )
+
+
+def test_subagent_tools_are_injected_into_phase_tool_registry(tmp_path: Path) -> None:
+    _base(tmp_path)
+    _sub_skill(tmp_path / "phases" / "main", "subskills/beat_extractor")
+    _sub_skill(tmp_path / "phases" / "main", "subskills/producer_strategy")
+    _skill(
+        tmp_path,
+        _skill_text(
+            phase_config="""  subagents:
+    - name: beat_extractor
+      path: subskills/beat_extractor
+      description: Extract narrative beats.
+    - name: producer_strategy
+      path: subskills/producer_strategy
+      description: Score audience pull.
+"""
+        ),
+    )
+
+    tools = {tool.name: tool for tool in SkillLoader().compile_skill(tmp_path).tools.for_phase("main")}
+
+    assert sorted(tools) == ["call_subagent_beat_extractor", "call_subagent_producer_strategy"]
+    beat_tool = tools["call_subagent_beat_extractor"]
+    assert "Extract narrative beats." in beat_tool.description
+    assert "no more than 3 inputs" in beat_tool.description
+    assert beat_tool.metadata is not None
+    assert beat_tool.metadata["subagent_path"] == "subskills/beat_extractor"
+    assert beat_tool.args_schema is not None
+    schema = beat_tool.args_schema.model_json_schema()
+    assert "inputs" in schema["properties"]
+    assert "MainBeatExtractorInput" in schema["$defs"]
+
+
+def test_subagent_dynamic_tool_name_conflict_fails_compile(tmp_path: Path) -> None:
+    _base(tmp_path)
+    _sub_skill(tmp_path / "phases" / "main", "subskills/beat_extractor")
+    _skill(
+        tmp_path,
+        _skill_text(
+            phase_config="""  subagents:
+    - name: beat_extractor
+      path: subskills/beat_extractor
+      description: Extract narrative beats.
+"""
+        ),
+    )
+    _write(
+        tmp_path / "phases" / "main" / "tools" / "conflict.py",
+        "def call_subagent_beat_extractor(x: str) -> str:\n    return x\n",
+    )
+
+    with pytest.raises(SkillLoadError, match="conflicts with an existing tool"):
+        SkillLoader().compile_skill(tmp_path)
+
+
+def test_static_subagent_minimal_fixture_compiles() -> None:
+    compiled = SkillLoader().compile_skill(_FIXTURES / "subagent_minimal")
+
+    subagents = compiled.subagents_by_phase["main"]
+    tools = {tool.name: tool for tool in compiled.tools.for_phase("main")}
+
+    assert subagents[0].name == "echo_expert"
+    assert subagents[0].input_model.model_validate({"text": "hello"}).text == "hello"
+    assert "call_subagent_echo_expert" in tools
 
 
 @pytest.mark.parametrize(

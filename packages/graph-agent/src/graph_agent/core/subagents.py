@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from types import GenericAlias
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
@@ -34,10 +35,31 @@ def build_subagent_input_model(model_name: str, schema: dict[str, Any]) -> type[
             Field(default, description=description if isinstance(description, str) else None),
         )
 
-    return create_model(  # type: ignore[call-overload]
+    field_definitions = cast(dict[str, Any], fields)
+    return create_model(
         model_name,
         __config__=ConfigDict(extra="forbid"),
-        **fields,
+        **field_definitions,
+    )
+
+
+def build_subagent_tool_args_model(
+    model_name: str,
+    input_model: type[BaseModel],
+) -> type[BaseModel]:
+    """Build the public `call_subagent_<name>` tool args model."""
+
+    input_list_type: Any = GenericAlias(list, (input_model,))
+    return create_model(
+        model_name,
+        __config__=ConfigDict(extra="forbid"),
+        inputs=(
+            input_list_type,
+            Field(
+                ...,
+                description="Batch of subagent inputs. Best practice: pass no more than 3.",
+            ),
+        ),
     )
 
 
@@ -58,4 +80,4 @@ def _annotation_for_json_schema(field_schema: dict[str, Any]) -> Any:
     return Any
 
 
-__all__ = ["build_subagent_input_model"]
+__all__ = ["build_subagent_input_model", "build_subagent_tool_args_model"]

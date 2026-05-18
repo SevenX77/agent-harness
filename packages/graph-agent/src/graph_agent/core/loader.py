@@ -36,7 +36,7 @@ from graph_agent.core.parser import (
     scan_forbidden_topology_tags,
 )
 from graph_agent.core.purity import scan_python_purity, scan_tool_imports_context
-from graph_agent.core.subagents import build_subagent_input_model
+from graph_agent.core.subagents import build_subagent_input_model, build_subagent_tool_args_model
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +173,8 @@ class SkillLoader:
             output_schema_keys,
             validate_context_writes=self.validate_context_writes,
         )
+        subagents_by_phase = _compile_subagent_metadata(root, phase_docs)
+        tools = _inject_subagent_tools(tools, subagents_by_phase)
 
         raw = {
             "graph": {"frontmatter": graph_frontmatter, "body": graph_body},
@@ -194,7 +196,6 @@ class SkillLoader:
                 for doc in phase_docs
             ],
         }
-        subagents_by_phase = _compile_subagent_metadata(root, phase_docs)
         logger.info("Compiled V2.1 graph skill root=%s phases=%d", root, len(phase_docs))
         return CompiledSkill(
             raw=raw,
@@ -381,6 +382,66 @@ def _compile_subagent_metadata(
             )
         subagents_by_phase[doc.phase_name] = phase_subagents
     return subagents_by_phase
+
+
+def _inject_subagent_tools(
+    registry: ToolRegistry,
+    subagents_by_phase: dict[str, list[CompiledSubagent]],
+) -> ToolRegistry:
+    by_phase = {phase_id: list(tools) for phase_id, tools in registry.by_phase.items()}
+    root_tool_names = {tool.id for tool in registry.root_tools}
+    for phase_id, subagents in subagents_by_phase.items():
+        phase_tools = by_phase.setdefault(phase_id, [])
+        existing_names = root_tool_names | {tool.id for tool in phase_tools}
+        for subagent in subagents:
+            tool_name = f"call_subagent_{subagent.name}"
+            if tool_name in existing_names:
+                _actions_fatal(
+                    subagent.root,
+                    1,
+                    f"subagent {subagent.name!r} dynamic tool {tool_name!r} "
+                    "conflicts with an existing tool",
+                )
+            existing_names.add(tool_name)
+            phase_tools.append(_subagent_tool_def(phase_id, subagent, tool_name))
+    return ToolRegistry(root_tools=registry.root_tools, by_phase=by_phase)
+
+
+def _subagent_tool_def(
+    phase_id: str,
+    subagent: CompiledSubagent,
+    tool_name: str,
+) -> ToolDef:
+    args_model = build_subagent_tool_args_model(
+        f"{subagent.input_model.__name__}ToolArgs",
+        subagent.input_model,
+    )
+    return ToolDef(
+        id=tool_name,
+        phase_id=phase_id,
+        path=subagent.root / "GRAPH.md",
+        func=_pending_call_subagent_tool,
+        description=(
+            f"{subagent.description}\n\n"
+            f"Call subagent {subagent.name!r}. Pass inputs as an array; best practice: "
+            "no more than 3 inputs per call."
+        ),
+        args_schema=args_model,
+        metadata={
+            "kind": "subagent",
+            "subagent_name": subagent.name,
+            "subagent_path": subagent.path,
+            "subagent_root": str(subagent.root),
+            "expected_schema": subagent.expected_schema,
+        },
+    )
+
+
+def _pending_call_subagent_tool(inputs: list[Any]) -> list[dict[str, Any]]:
+    """Placeholder for Phase 2 executor-owned subagent dispatch."""
+
+    del inputs
+    raise NotImplementedError("call_subagent runtime is implemented in Phase 2 Executor")
 
 
 def _resolve_subagent_root(

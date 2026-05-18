@@ -13,7 +13,9 @@ from app.models.copilot import (
     CopilotEventToolUseResult,
     CopilotEventToolUseStart,
 )
+from app.models.llm_config import LLMCredentialsFile, ProviderCredential
 from app.services import copilot
+from app.services.llm_credentials import save_credentials
 from claude_agent_sdk import CLIConnectionError
 from claude_agent_sdk.types import (
     AssistantMessage,
@@ -158,7 +160,7 @@ def test_stream_query_timeout_error(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     monkeypatch.setattr(
         copilot, "_resolve_copilot_provider", lambda _model_override: _resolved_provider()
     )
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
+    _seed_credentials(monkeypatch, tmp_path)
 
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi", workspace_dir=tmp_path)))
 
@@ -174,7 +176,7 @@ def test_stream_query_sdk_network_error(monkeypatch: pytest.MonkeyPatch, tmp_pat
     monkeypatch.setattr(
         copilot, "_resolve_copilot_provider", lambda _model_override: _resolved_provider()
     )
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
+    _seed_credentials(monkeypatch, tmp_path)
 
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi", workspace_dir=tmp_path)))
 
@@ -196,7 +198,7 @@ def test_stream_query_uses_system_prompt_and_yields_done(
     monkeypatch.setattr(
         copilot, "_resolve_copilot_provider", lambda _model_override: _resolved_provider()
     )
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
+    _seed_credentials(monkeypatch, tmp_path)
 
     events = asyncio.run(
         _collect(copilot.stream_query("skill-a", "user text", workspace_dir=tmp_path))
@@ -214,6 +216,7 @@ async def _collect(stream: AsyncIterator[object]) -> list[object]:
 
 def _resolved_provider() -> object:
     provider_def = SimpleNamespace(
+        name="OneChats Claude Anthropic",
         api_key_env="ANTHROPIC_API_KEY",
         api_key_env_fallback=None,
         base_url="https://provider.test",
@@ -223,4 +226,20 @@ def _resolved_provider() -> object:
         provider_code="OC_CL_ANT",
         provider_def=provider_def,
         model_def=model_def,
+    )
+
+
+def _seed_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    save_credentials(
+        LLMCredentialsFile(
+            providers=[
+                ProviderCredential(
+                    id="OC_CL_ANT",
+                    name="OneChats Claude Anthropic",
+                    api_key="key",
+                    provider_type="anthropic_compatible",
+                )
+            ]
+        )
     )

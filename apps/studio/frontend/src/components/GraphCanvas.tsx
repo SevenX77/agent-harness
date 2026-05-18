@@ -16,7 +16,7 @@ import {
   type NodeProps,
 } from '@xyflow/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Bot, CheckCircle2, Circle, Minus, Pause, Plus, Radio, Workflow } from 'lucide-react'
+import { AlertTriangle, Bot, CheckCircle2, Circle, Code, Minus, Network, Pause, Plus, Radio, Workflow } from 'lucide-react'
 import { toast } from 'sonner'
 import type { IoDeclaration, PhaseDef, SkillDetail, SkillManifest } from '../api/types'
 import { CycleDetectedError, getAutoLayoutedElements } from '../lib/layout'
@@ -32,7 +32,6 @@ export type SkillNodeStatus = 'idle' | 'running' | 'success' | 'error' | 'paused
 export interface SkillGraphNodeData extends Record<string, unknown> {
   label: string
   mode: string
-  role?: string | null
   status: SkillNodeStatus
   dependsOn: string[]
   subgraphPath?: string | null
@@ -41,6 +40,8 @@ export interface SkillGraphNodeData extends Record<string, unknown> {
 }
 
 export type SkillGraphNode = Node<SkillGraphNodeData, 'skill'>
+
+type PhaseKind = 'LOGIC' | 'AGENT' | 'SUBGRAPH'
 
 export interface GlobalNodeData extends Record<string, unknown> {
   type: 'global-input' | 'global-output'
@@ -101,9 +102,30 @@ const STATUS_STYLE: Record<SkillNodeStatus, { label: string, className: string, 
   },
 }
 
+function phaseKindLabel(data: Pick<SkillGraphNodeData, 'mode' | 'subgraphPath'>): PhaseKind {
+  if (data.subgraphPath || data.mode === 'subgraph') return 'SUBGRAPH'
+  if (data.mode === 'skill' || data.mode === 'llm') return 'AGENT'
+  return 'LOGIC'
+}
+
+function phaseKindFile(data: Pick<SkillGraphNodeData, 'mode' | 'subgraphPath'>): 'LOGIC.md' | 'SKILL.md' | 'SUBGRAPH.md' {
+  const kind = phaseKindLabel(data)
+  if (kind === 'SUBGRAPH') return 'SUBGRAPH.md'
+  if (kind === 'AGENT') return 'SKILL.md'
+  return 'LOGIC.md'
+}
+
+function phaseKindIcon(kind: PhaseKind): typeof Bot {
+  if (kind === 'LOGIC') return Code
+  if (kind === 'SUBGRAPH') return Network
+  return Bot
+}
+
 export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
   const style = STATUS_STYLE[data.status]
   const StatusIcon = style.icon
+  const kind = phaseKindLabel(data)
+  const KindIcon = phaseKindIcon(kind)
 
   return (
     <div
@@ -121,37 +143,24 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
       <Handle type="target" position={Position.Left} className="!size-2.5 !border-background !bg-primary" />
       <div className="flex items-start gap-3">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
-          <Bot className="size-4" />
+          <KindIcon className="size-4" />
         </div>
         <div className="min-w-0 flex-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className="truncate text-sm font-semibold text-foreground">{data.label}</div>
-            </TooltipTrigger>
-            <TooltipContent side="top" align="start">{data.label}</TooltipContent>
-          </Tooltip>
+          <div className="truncate text-sm font-semibold text-foreground">{data.label}</div>
           <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="uppercase">{data.mode}</span>
-            {data.role ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="truncate">{data.role}</span>
-                </TooltipTrigger>
-                <TooltipContent side="top">{data.role}</TooltipContent>
-              </Tooltip>
-            ) : null}
+            <span>{kind}</span>
           </div>
         </div>
-        <span className={['inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium', style.className].join(' ')}>
-          <StatusIcon className="size-3" />
-          {style.label}
-        </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className={['inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium', style.className].join(' ')}>
+              <StatusIcon className="size-3" />
+              {style.label}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top">{style.label}</TooltipContent>
+        </Tooltip>
       </div>
-      {data.dependsOn.length > 0 ? (
-        <div className="mt-3 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
-          depends_on: {data.dependsOn.join(', ')}
-        </div>
-      ) : null}
       {data.subgraphPath ? (
         <button
           type="button"
@@ -304,11 +313,10 @@ function buildNodes(
     id: phase.name,
     type: 'skill',
     position: { x: 160 + (index % 2) * 320, y: 80 + index * 150 },
-    data: {
-      label: phase.name,
-      mode: topologyById.get(phase.name)?.mode ?? phase.mode,
-      role: phase.mode === 'llm' ? phase.llm_role : 'Logic',
-      status: statusByNodeId[phase.name] ?? (index === 0 ? 'success' : 'idle'),
+      data: {
+        label: phase.name,
+        mode: topologyById.get(phase.name)?.mode ?? phase.mode,
+        status: statusByNodeId[phase.name] ?? (index === 0 ? 'success' : 'idle'),
       dependsOn: topologyById.get(phase.name)?.depends_on ?? normalizeDependsOn(phase.depends_on),
       subgraphPath: phase.subgraph ?? subgraphRefFromFile(detail?.files?.[`phases/${phase.name}/SUBGRAPH.md`]),
       isExpanded: expandedSubgraphs.has(phase.name),
@@ -520,7 +528,7 @@ export function GraphCanvas({
             workspace?.pushNavSkill(targetSkillId)
             return
           }
-          workspace?.onFileOpen(`${skillId}/phases/${node.id}/SKILL.md`)
+          workspace?.onFileOpen(`${skillId}/phases/${node.id}/${phaseKindFile(node.data)}`)
         }}
         onInit={(instance) => {
           fitViewRef.current = () => instance.fitView({ padding: 0.2 })

@@ -88,6 +88,33 @@ class SerializeGraphRes(BaseModel):
     current_hash: str
 
 
+class CompileError(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    file: str | None = None
+    line: int | None = None
+    field: str | None = None
+    severity: Literal["fatal", "warning"] = "fatal"
+    message: str
+
+
+class CompileSuccess(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    skill_id: str
+    status: Literal["ok"]
+    phase_count: int
+    manifest_name: str
+
+
+class CompileFailure(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: Literal["compile_failed"] = "compile_failed"
+    detail: str
+    errors: list[CompileError]
+
+
 class CreateSkillReq(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

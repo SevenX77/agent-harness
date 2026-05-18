@@ -28,6 +28,29 @@ export interface LintResult {
   phases_summary: JsonObject[] | null
 }
 
+export interface CompileError {
+  file: string | null
+  line: number | null
+  field: string | null
+  severity: 'fatal' | 'warning'
+  message: string
+}
+
+export interface CompileSuccess {
+  skill_id: string
+  status: 'ok'
+  phase_count: number
+  manifest_name: string
+}
+
+export interface CompileFailure {
+  code: 'compile_failed'
+  detail: string
+  errors: CompileError[]
+}
+
+export type CompileResult = CompileSuccess | CompileFailure
+
 export interface ConfigMismatchWarning {
   actual_remote_url: string
   expected_remote_url: string

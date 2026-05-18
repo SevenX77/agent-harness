@@ -36,7 +36,15 @@ from app.models.errors import LintError
 from app.models.lint import LintResult
 from app.models.runs import RunMetadata
 from app.models.settings import AppSettings
-from app.models.skills import SerializeGraphReq, SerializeGraphRes, SkillDetail, SkillSummary
+from app.models.skills import (
+    CompileError,
+    CompileFailure,
+    CompileSuccess,
+    SerializeGraphReq,
+    SerializeGraphRes,
+    SkillDetail,
+    SkillSummary,
+)
 from app.services.canvas_errors import CanvasConflictError, CanvasSerializerFatal
 from app.services.config_arbitration import detect_config_mismatch
 from app.services.file_watcher import record_api_write
@@ -70,6 +78,14 @@ Describe what this phase does.
     "io/inputs.json": "{}\n",
     "io/outputs.json": "{}\n",
 }
+
+
+class CompileFailedError(Exception):
+    """Raised when graph_agent compilation returns structured diagnostics."""
+
+    def __init__(self, failure: CompileFailure) -> None:
+        self.failure = failure
+        super().__init__(failure.detail)
 
 
 def validate_skill_file_path(rel_path: str) -> None:
@@ -272,6 +288,26 @@ def lint_skill_path(skill_path: Path) -> LintResult:
         status="passed",
         errors=[],
         phases_summary=_phase_summary_from_compiled(compiled),
+    )
+
+
+async def compile_skill_for_studio(
+    user_id: str,
+    skill_id: str,
+    storage: StorageBackend,
+    metadata: MetadataStore,
+) -> CompileSuccess:
+    """Compile a resolved skill and return the Studio compile contract."""
+    skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
+    try:
+        compiled = compile_skill(skill_dir, cache=False)
+    except (SkillLoadError, SkillCompilationError) as exc:
+        raise CompileFailedError(_compile_failure_from_exception(exc, skill_dir)) from exc
+    return CompileSuccess(
+        skill_id=skill_id,
+        status="ok",
+        phase_count=len(compiled.manifest.phases),
+        manifest_name=compiled.manifest.name,
     )
 
 
@@ -1210,6 +1246,88 @@ def _file_from_error_message(message: str) -> str | None:
             return candidate
     phase_match = re.search(r"(phases/[A-Za-z0-9_-]+/(?:LOGIC|SUBGRAPH|SKILL)\.md)", message)
     return phase_match.group(1) if phase_match else None
+
+
+def _compile_failure_from_exception(exc: Exception, skill_dir: Path) -> CompileFailure:
+    errors = _compile_errors_from_exception(exc, skill_dir)
+    count = len(errors)
+    noun = "error" if count == 1 else "errors"
+    return CompileFailure(
+        detail=f"Skill compilation failed with {count} {noun}",
+        errors=errors,
+    )
+
+
+def _compile_errors_from_exception(exc: Exception, skill_dir: Path) -> list[CompileError]:
+    compile_result = getattr(exc, "compile_result", None)
+    issues = getattr(compile_result, "issues", None)
+    if isinstance(issues, list) and issues:
+        return [_compile_error_from_issue(issue, skill_dir) for issue in issues]
+    return [_compile_error_from_exception(exc, skill_dir)]
+
+
+def _compile_error_from_issue(issue: object, skill_dir: Path) -> CompileError:
+    location = getattr(issue, "location", None)
+    line = None
+    file_path = None
+    field = None
+    if isinstance(location, str):
+        file_path, line, field = _parse_compile_location(location, skill_dir)
+    severity = str(getattr(issue, "severity", "fatal")).lower()
+    return CompileError(
+        file=file_path,
+        line=line,
+        field=field,
+        severity="warning" if severity == "warning" else "fatal",
+        message=str(getattr(issue, "message", "Skill compilation failed")),
+    )
+
+
+def _compile_error_from_exception(exc: Exception, skill_dir: Path) -> CompileError:
+    message = str(exc)
+    match = _LOCATION_RE.search(message)
+    line = getattr(exc, "line", None)
+    if line is None and match:
+        line = int(match.group("line"))
+    file_path = _relative_compile_path(getattr(exc, "skill_path", None), skill_dir)
+    if file_path is None:
+        file_path = _file_from_error_message(message)
+    return CompileError(
+        file=file_path,
+        line=line,
+        field=getattr(exc, "field_path", None),
+        severity="fatal",
+        message=message,
+    )
+
+
+def _parse_compile_location(
+    location: str,
+    skill_dir: Path,
+) -> tuple[str | None, int | None, str | None]:
+    file_part = location
+    field = None
+    if ":" in location:
+        file_part, rest = location.split(":", 1)
+        line_match = re.match(r"(?P<line>\d+)(?::(?P<field>.*))?", rest)
+        if line_match:
+            return (
+                _relative_compile_path(Path(file_part), skill_dir) or file_part or None,
+                int(line_match.group("line")),
+                line_match.group("field") or None,
+            )
+        field = rest or None
+    return _relative_compile_path(Path(file_part), skill_dir) or file_part or None, None, field
+
+
+def _relative_compile_path(path: str | os.PathLike[str] | None, skill_dir: Path) -> str | None:
+    if path is None:
+        return None
+    candidate = Path(path)
+    try:
+        return candidate.relative_to(skill_dir).as_posix()
+    except ValueError:
+        return candidate.as_posix() if not candidate.is_absolute() else candidate.name
 
 
 def _phase_from_location(location: str | None) -> str | None:

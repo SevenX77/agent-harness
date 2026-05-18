@@ -67,6 +67,17 @@ export function LazyMonacoPanel({
   const inFlightRef = useRef(false)
   const failedToastRef = useRef<string | number | null>(null)
   const flushRef = useRef<() => void>(() => undefined)
+  const onChangeRef = useRef(onChange)
+  const onSavedRef = useRef(onSaved)
+  const onInFlightChangeRef = useRef(onInFlightChange)
+  const onConflictRef = useRef(onConflict)
+
+  useEffect(() => {
+    onChangeRef.current = onChange
+    onSavedRef.current = onSaved
+    onInFlightChangeRef.current = onInFlightChange
+    onConflictRef.current = onConflict
+  })
 
   useEffect(() => {
     setDraft(value)
@@ -77,22 +88,22 @@ export function LazyMonacoPanel({
       window.clearTimeout(timerRef.current)
       timerRef.current = null
     }
-    onInFlightChange(false)
-  }, [filePath, initialHash, onInFlightChange, value])
+    onInFlightChangeRef.current(false)
+  }, [filePath, initialHash, value])
 
   const saveNow = useCallback(async (content: string) => {
     if (!saveEnabled || content === savedRef.current) {
       return
     }
     inFlightRef.current = true
-    onInFlightChange(true)
+    onInFlightChangeRef.current(true)
     let attempts = 0
     while (attempts < 4) {
       try {
         const result = await writeSkillFile(skillId, filePath, content, hashRef.current)
         hashRef.current = result.hash
         savedRef.current = content
-        onSaved(result.hash)
+        onSavedRef.current(result.hash)
         if (failedToastRef.current !== null) {
           toast.dismiss(failedToastRef.current)
           failedToastRef.current = null
@@ -105,7 +116,7 @@ export function LazyMonacoPanel({
             current_hash?: string
             current_markdown_content?: string
           }
-          onConflict({
+          onConflictRef.current({
             skillId,
             path: filePath,
             localContent: content,
@@ -127,7 +138,7 @@ export function LazyMonacoPanel({
         attempts += 1
       }
     }
-  }, [filePath, onConflict, onInFlightChange, onSaved, saveEnabled, skillId])
+  }, [filePath, saveEnabled, skillId])
 
   const flush = useCallback(() => {
     if (timerRef.current !== null) {
@@ -136,9 +147,9 @@ export function LazyMonacoPanel({
     }
     void saveNow(draftRef.current).finally(() => {
       inFlightRef.current = false
-      onInFlightChange(false)
+      onInFlightChangeRef.current(false)
     })
-  }, [onInFlightChange, saveNow])
+  }, [saveNow])
 
   useEffect(() => {
     flushRef.current = flush
@@ -149,17 +160,17 @@ export function LazyMonacoPanel({
   const handleChange = (nextValue: string) => {
     setDraft(nextValue)
     draftRef.current = nextValue
-    onChange(nextValue)
+    onChangeRef.current(nextValue)
     if (!saveEnabled) return
     if (timerRef.current !== null) {
       window.clearTimeout(timerRef.current)
     }
-    onInFlightChange(true)
+    onInFlightChangeRef.current(true)
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null
       void saveNow(draftRef.current).finally(() => {
         inFlightRef.current = false
-        onInFlightChange(false)
+        onInFlightChangeRef.current(false)
       })
     }, 1500)
   }

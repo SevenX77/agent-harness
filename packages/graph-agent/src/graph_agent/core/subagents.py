@@ -2,10 +2,35 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from types import GenericAlias
 from typing import Any, cast
 
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
+
+MAX_SUBAGENT_SCHEMA_RETRIES = 10
+
+
+@dataclass(frozen=True)
+class SubagentValidationFailure:
+    tool_name: str
+    subagent_name: str
+    retry_count: int
+    message: str
+    expected_schema: dict[str, Any]
+    errors: list[dict[str, Any]]
+
+    def to_tool_result(self) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "error_type": "validation",
+            "tool_name": self.tool_name,
+            "subagent_name": self.subagent_name,
+            "retry_count": self.retry_count,
+            "message": self.message,
+            "expected_schema": self.expected_schema,
+            "errors": self.errors,
+        }
 
 
 def build_subagent_input_model(model_name: str, schema: dict[str, Any]) -> type[BaseModel]:
@@ -63,6 +88,64 @@ def build_subagent_tool_args_model(
     )
 
 
+def validate_subagent_tool_args(
+    *,
+    tool_name: str,
+    subagent_name: str,
+    input_model: type[BaseModel],
+    expected_schema: dict[str, Any],
+    args: dict[str, Any],
+    retry_count: int,
+) -> list[BaseModel] | SubagentValidationFailure:
+    if retry_count > MAX_SUBAGENT_SCHEMA_RETRIES:
+        raise RuntimeError(
+            f"call_subagent validation exceeded max retries: tool={tool_name} "
+            f"retry_count={retry_count}"
+        )
+    inputs = args.get("inputs")
+    if not isinstance(inputs, list):
+        return SubagentValidationFailure(
+            tool_name=tool_name,
+            subagent_name=subagent_name,
+            retry_count=retry_count,
+            message=(
+                "Validation Error: Expected {'inputs': list[object]} where each item matches "
+                f"subagent {subagent_name!r} input schema. Please retry with correct schema."
+            ),
+            expected_schema=expected_schema,
+            errors=[
+                {
+                    "loc": ["inputs"],
+                    "msg": "Input should be a valid list",
+                    "type": "list_type",
+                }
+            ],
+        )
+    validated: list[BaseModel] = []
+    errors: list[dict[str, Any]] = []
+    for index, item in enumerate(inputs):
+        try:
+            validated.append(input_model.model_validate(item))
+        except ValidationError as exc:
+            for error in exc.errors():
+                error_copy = dict(error)
+                error_copy["loc"] = ["inputs", index, *list(error.get("loc", ()))]
+                errors.append(error_copy)
+    if errors:
+        return SubagentValidationFailure(
+            tool_name=tool_name,
+            subagent_name=subagent_name,
+            retry_count=retry_count,
+            message=(
+                "Validation Error: subagent inputs did not match expected schema. "
+                "Please retry with correct schema."
+            ),
+            expected_schema=expected_schema,
+            errors=errors,
+        )
+    return validated
+
+
 def _annotation_for_json_schema(field_schema: dict[str, Any]) -> Any:
     schema_type = field_schema.get("type")
     if schema_type == "string":
@@ -80,4 +163,10 @@ def _annotation_for_json_schema(field_schema: dict[str, Any]) -> Any:
     return Any
 
 
-__all__ = ["build_subagent_input_model", "build_subagent_tool_args_model"]
+__all__ = [
+    "MAX_SUBAGENT_SCHEMA_RETRIES",
+    "SubagentValidationFailure",
+    "build_subagent_input_model",
+    "build_subagent_tool_args_model",
+    "validate_subagent_tool_args",
+]

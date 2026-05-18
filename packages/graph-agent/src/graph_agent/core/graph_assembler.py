@@ -21,8 +21,9 @@ from graph_agent.cognitive.finish_task import build_finish_task_tool
 from graph_agent.cognitive.md2json import parse_finish_markdown
 from graph_agent.cognitive.md_patch import LLMMdPatchClient
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
-from graph_agent.core.loader import CompiledSkill, PhaseDocument, SkillLoader
+from graph_agent.core.loader import CompiledSkill, CompiledSubagent, PhaseDocument, SkillLoader
 from graph_agent.core.manifest import GraphManifest, LogicNodeAST, SkillNodeAST, SubgraphNodeAST
+from graph_agent.core.subagents import SubagentValidationFailure, validate_subagent_tool_args
 from graph_agent.runtime.exit_contract import inject_exit_contract
 from graph_agent.runtime.state import BlackboardState
 
@@ -168,6 +169,7 @@ def _build_skill_node(
 ) -> Any:
     business_tools = compiled.tools.for_phase(phase_id)
     tool_by_name = {tool.name: tool for tool in business_tools}
+    subagent_by_tool_name = _subagent_tool_map(phase_id, compiled)
     framework_tools = []
     critic_metrics: dict[str, Any] = {}
 
@@ -228,7 +230,16 @@ def _build_skill_node(
                 tool = all_tools_by_name.get(name)
                 if tool is None:
                     _graph_fatal(f"LLM called unknown tool {name!r} in phase {phase_id!r}")
-                result = tool.invoke(call.get("args", {}))
+                call_args = call.get("args", {})
+                if name in subagent_by_tool_name:
+                    result = _invoke_subagent_tool_t21(
+                        tool_name=name,
+                        subagent=subagent_by_tool_name[name],
+                        args=call_args if isinstance(call_args, dict) else {},
+                        flow=flow,
+                    )
+                else:
+                    result = tool.invoke(call_args)
                 messages.append(
                     ToolMessage(
                         content=json.dumps(result, ensure_ascii=False),
@@ -260,6 +271,47 @@ def _build_skill_node(
         return response_state
 
     return _skill_node
+
+
+def _subagent_tool_map(
+    phase_id: str,
+    compiled: CompiledSkill,
+) -> dict[str, CompiledSubagent]:
+    return {
+        f"call_subagent_{subagent.name}": subagent
+        for subagent in compiled.subagents_by_phase.get(phase_id, [])
+    }
+
+
+def _invoke_subagent_tool_t21(
+    *,
+    tool_name: str,
+    subagent: CompiledSubagent,
+    args: dict[str, Any],
+    flow: dict[str, Any],
+) -> dict[str, Any]:
+    retry_counts = flow.setdefault("subagent_validation_retries", {})
+    if not isinstance(retry_counts, dict):
+        retry_counts = {}
+        flow["subagent_validation_retries"] = retry_counts
+    retry_count = int(retry_counts.get(tool_name, 0)) + 1
+    retry_counts[tool_name] = retry_count
+    validation = validate_subagent_tool_args(
+        tool_name=tool_name,
+        subagent_name=subagent.name,
+        input_model=subagent.input_model,
+        expected_schema=subagent.expected_schema,
+        args=args,
+        retry_count=retry_count,
+    )
+    if isinstance(validation, SubagentValidationFailure):
+        return validation.to_tool_result()
+    return {
+        "ok": True,
+        "tool_name": tool_name,
+        "subagent_name": subagent.name,
+        "inputs": [item.model_dump() for item in validation],
+    }
 
 
 def _dict_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:

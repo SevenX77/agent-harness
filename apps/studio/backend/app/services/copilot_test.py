@@ -24,19 +24,27 @@ class PingResult:
     model_seen: str | None = None
 
 
-class _Unauthorized(Exception):
+class _ProviderTestError(Exception):
+    """Base class for provider Test errors carrying a vendor-specific code."""
+
+    def __init__(self, message: str = "", *, error_code: str | None = None) -> None:
+        super().__init__(message)
+        self.error_code = error_code or ""
+
+
+class _Unauthorized(_ProviderTestError):
     pass
 
 
-class _RateLimited(Exception):
+class _RateLimited(_ProviderTestError):
     pass
 
 
-class _QuotaExceeded(Exception):
+class _QuotaExceeded(_ProviderTestError):
     pass
 
 
-class _NetworkError(Exception):
+class _NetworkError(_ProviderTestError):
     pass
 
 
@@ -83,16 +91,58 @@ async def _request_models(
 
 
 def _raise_for_status(response: httpx.Response) -> None:
-    if response.status_code == 401:
-        raise _Unauthorized
-    if response.status_code == 429:
-        raise _RateLimited
-    if response.status_code in (402, 403):
-        raise _QuotaExceeded
+    code = response.status_code
+    if code == 401:
+        raise _Unauthorized(
+            f"HTTP 401 from provider",
+            error_code=_extract_vendor_error_code(response, default="unauthorized"),
+        )
+    if code == 429:
+        raise _RateLimited(
+            f"HTTP 429 from provider",
+            error_code=_extract_vendor_error_code(response, default="rate_limited"),
+        )
+    if code in (402, 403):
+        raise _QuotaExceeded(
+            f"HTTP {code} from provider",
+            error_code=_extract_vendor_error_code(response, default="quota_exceeded"),
+        )
     try:
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
-        raise _NetworkError(f"Provider returned HTTP {response.status_code}") from exc
+        raise _NetworkError(
+            f"Provider returned HTTP {code}",
+            error_code=_extract_vendor_error_code(response, default="http_error"),
+        ) from exc
+
+
+def _extract_vendor_error_code(response: httpx.Response, *, default: str) -> str:
+    """Extract a vendor-specific error code from a failed /models response body.
+
+    Vendors disagree on the shape:
+
+    * Anthropic / OpenAI: ``{"error": {"type": "invalid_api_key", ...}}``
+      (OpenAI also exposes ``code``).
+    * Gemini: ``{"error": {"status": "PERMISSION_DENIED", ...}}``.
+
+    Falls back to ``default`` when no recognized code is present (e.g. when
+    the body is plain text or the field is missing).
+    """
+
+    try:
+        payload = response.json()
+    except ValueError:
+        return default
+    if not isinstance(payload, dict):
+        return default
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return default
+    for key in ("type", "code", "status"):
+        candidate = error.get(key)
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    return default
 
 
 def _first_model_id(response: httpx.Response) -> str | None:

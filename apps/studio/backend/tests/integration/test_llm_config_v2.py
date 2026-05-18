@@ -8,7 +8,7 @@ import pytest
 from app.models.copilot import CopilotEventDone
 from app.routers import copilot as copilot_router
 from app.routers import llm as llm_router
-from app.services.copilot_test import PingResult
+from app.services.llm_provider_test import PingResultExtended
 from fastapi.testclient import TestClient
 
 
@@ -96,10 +96,15 @@ def test_provider_test_endpoint_mocked(
         _provider_type: str,
         _api_key: str,
         _base_url: str | None,
-    ) -> PingResult:
-        return PingResult(latency_ms=150, model_seen="claude-sonnet-4-6")
+    ) -> PingResultExtended:
+        return PingResultExtended(
+            latency_ms=150,
+            model_seen="claude-sonnet-4-6",
+            model_ids=["claude-sonnet-4-6"],
+            raw_payload={"data": [{"id": "claude-sonnet-4-6"}]},
+        )
 
-    monkeypatch.setattr(llm_router, "ping_provider", fake_ping)
+    monkeypatch.setattr(llm_router, "ping_provider_extended", fake_ping)
 
     response = client.post(
         "/api/llm/providers/test",
@@ -113,12 +118,13 @@ def test_provider_test_endpoint_mocked(
     )
 
     assert response.status_code == 200
-    assert response.json() == {
-        "status": "ok",
-        "latency_ms": 150,
-        "model_seen": "claude-sonnet-4-6",
-        "message": None,
-    }
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["latency_ms"] == 150
+    assert body["model_seen"] == "claude-sonnet-4-6"
+    assert body["message"] is None
+    assert body["error_code"] is None
+    assert [m["id"] for m in body["available_models"]] == ["claude-sonnet-4-6"]
 
 
 def test_websocket_forwards_model_override(

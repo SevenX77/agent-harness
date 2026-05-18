@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
 
 from graph_agent.core.exceptions import GraphAgentFatalError
 from graph_agent.core.graph_assembler import (
     _SubagentRuntime,
+    _invoke_subagent_many_t24,
     _invoke_subagent_once_t23,
     _invoke_subagent_tool_t21,
+    _subagent_runnable_config,
 )
 from graph_agent.core.subagents import build_subagent_input_model, validate_subagent_tool_args
 
@@ -123,9 +128,11 @@ def test_subagent_depth_one_blocks_nested_call() -> None:
 class _RecordingGraph:
     def __init__(self) -> None:
         self.states: list[dict] = []
+        self.configs: list[dict] = []
 
-    def invoke(self, state: dict) -> dict:
+    def invoke(self, state: dict, config: dict | None = None) -> dict:
         self.states.append(state)
+        self.configs.append(config or {})
         data = dict(state["data"])
         data["child_result"] = data["scene_text"].upper()
         return {"data": data, "flow": {"child": True}}
@@ -163,3 +170,60 @@ def test_subagent_valid_runtime_call_invokes_cached_graph() -> None:
     assert result["ok"] is True
     assert [item["data"]["child_result"] for item in result["results"]] == ["A", "B"]
     assert len(graph.states) == 2
+
+
+class _ConcurrentGraph(_RecordingGraph):
+    def __init__(self) -> None:
+        super().__init__()
+        self.active = 0
+        self.max_active = 0
+        self.lock = threading.Lock()
+
+    def invoke(self, state: dict, config: dict | None = None) -> dict:
+        with self.lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+        try:
+            time.sleep(0.01)
+            return super().invoke(state, config=config)
+        finally:
+            with self.lock:
+                self.active -= 1
+
+
+def test_subagent_fanout_preserves_order_and_limits_concurrency() -> None:
+    graph = _ConcurrentGraph()
+    runtime = _SubagentRuntime(subagent=_Subagent(), graph=graph)
+
+    results = _invoke_subagent_many_t24(
+        runtime,
+        {"data": {}, "flow": {}, "messages": [], "run_id": "parent-run"},
+        [{"scene_text": str(index)} for index in range(5)],
+        parent_config={"tags": ["parent"], "callbacks": ["cb"]},
+        depth=0,
+    )
+
+    assert [item["data"]["child_result"] for item in results] == ["0", "1", "2", "3", "4"]
+    assert graph.max_active <= 3
+    assert all(config["tags"] == ["parent", "subagent", "beat"] for config in graph.configs)
+    assert all(config["metadata"]["parent_run_id"] == "parent-run" for config in graph.configs)
+    assert all(config["metadata"]["subagent_depth"] == 1 for config in graph.configs)
+    assert all(config["callbacks"] == ["cb"] for config in graph.configs)
+
+
+def test_subagent_runnable_config_contains_tracing_metadata() -> None:
+    config = _subagent_runnable_config(
+        parent_state={"run_id": "parent-run"},
+        parent_config={"tags": ["root"], "metadata": {"trace": "t"}, "callbacks": ["cb"]},
+        subagent_name="beat",
+        depth=0,
+    )
+
+    assert config["tags"] == ["root", "subagent", "beat"]
+    assert config["metadata"] == {
+        "trace": "t",
+        "parent_run_id": "parent-run",
+        "subagent_depth": 1,
+    }
+    assert config["callbacks"] == ["cb"]
+    assert config["run_id"]

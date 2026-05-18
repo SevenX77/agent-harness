@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -37,7 +37,6 @@ from app.services.llm_credentials import (
     load_credentials,
     redacted_for_response,
 )
-from app.services.llm_env import patch_environment_from_credentials
 from app.services.llm_provider_test import (
     DEFAULT_BASE_URLS,
     PingResultExtended,
@@ -59,7 +58,7 @@ ROLES_PATH = config.REPO_ROOT / "config" / "llm_roles.yaml"
 class ProviderCredentialWrite(BaseModel):
     """Editable subset of ``ProviderCredential`` accepted via PUT.
 
-    Only the six fields below can be written by the client. The five Test
+    Only user-owned provider fields below can be written by the client. The five Test
     outcome fields (``last_test_status``/``last_test_at``/``last_test_message``/
     ``last_error_code``/``available_models``) are *single-writer* — they are
     written exclusively by the POST ``/providers/test`` flow via
@@ -69,12 +68,11 @@ class ProviderCredentialWrite(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    provider_code: str
+    id: str
+    name: str
     api_key: str = ""
     base_url: str = ""
-    title: str = ""
     provider_type: ProviderType | None = None
-    vendor_hint: str = ""
 
 
 class CredentialsWriteRequest(BaseModel):
@@ -90,7 +88,7 @@ class ProviderTestRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    provider_code: str
+    id: str
     provider_type: ProviderType
     api_key: str
     base_url: str | None = None
@@ -112,10 +110,8 @@ class ProviderTestResponse(BaseModel):
 async def get_llm_credentials(include_metadata: bool = False) -> dict[str, Any]:
     """Return sanitized LLM credential state."""
 
-    return redacted_for_response(
-        load_credentials(),
-        _provider_metadata() if include_metadata else None,
-    )
+    del include_metadata
+    return redacted_for_response(load_credentials())
 
 
 @router.put("/credentials")
@@ -127,23 +123,24 @@ async def put_llm_credentials(
 
     Semantics (departing from the prior incremental upsert):
 
-    * The provider list is replaced wholesale by the request — any
-      provider whose ``provider_code`` is absent from the body is **deleted**.
-    * Existing Test outcome fields are preserved per provider_code (single-write
+    * The provider list is replaced wholesale by the request — any provider
+      whose ``id`` is absent from the body is **deleted**.
+    * Existing Test outcome fields are preserved per id (single-write
       rule). The 6 editable fields come from the request body.
     * If ``api_key`` in the body is an empty string, the previously saved key
-      for that ``provider_code`` is preserved (so the UI can omit the value
+      for that ``id`` is preserved (so the UI can omit the value
       when the user is only editing other fields).
     """
 
+    del include_metadata
     path = credentials_path()
     with _credentials_lock:
         existing_by_code = {
-            provider.provider_code: provider for provider in load_credentials(path).providers
+            provider.id: provider for provider in load_credentials(path).providers
         }
         next_providers: list[ProviderCredential] = []
         for incoming in request.providers:
-            current = existing_by_code.get(incoming.provider_code)
+            current = existing_by_code.get(incoming.id)
             api_key = incoming.api_key
             if api_key == "" and current is not None and current.api_key:
                 api_key = current.api_key
@@ -154,27 +151,24 @@ async def put_llm_credentials(
                         update={
                             "api_key": api_key,
                             "base_url": base_url,
-                            "title": incoming.title,
+                            "name": incoming.name,
                             "provider_type": incoming.provider_type,
-                            "vendor_hint": incoming.vendor_hint,
                         }
                     )
                 )
             else:
                 next_providers.append(
                     ProviderCredential(
-                        provider_code=incoming.provider_code,
+                        id=incoming.id,
+                        name=incoming.name,
                         api_key=api_key,
                         base_url=base_url,
-                        title=incoming.title,
                         provider_type=incoming.provider_type,
-                        vendor_hint=incoming.vendor_hint,
                     )
                 )
         data = LLMCredentialsFile(providers=next_providers)
         _save_credentials_unlocked(data, path)
-    patch_environment_from_credentials(data)
-    return redacted_for_response(data, _provider_metadata() if include_metadata else None)
+    return redacted_for_response(data)
 
 
 @router.post("/providers/test", response_model=ProviderTestResponse)
@@ -204,16 +198,16 @@ async def test_llm_provider(request: ProviderTestRequest) -> ProviderTestRespons
     try:
         async with asyncio.timeout(8):
             result = await ping_provider_extended(
-                request.provider_code,
+                request.id,
                 request.provider_type,
                 request.api_key,
                 base_url,
             )
     except TimeoutError:
         latency_ms = _elapsed_ms(started)
-        _log_test_provider(request.provider_code, request.api_key, "timeout", latency_ms)
+        _log_test_provider(request.id, request.api_key, "timeout", latency_ms)
         return _record_and_return(
-            request.provider_code,
+            request.id,
             ProviderTestResponse(
                 status="timeout",
                 latency_ms=latency_ms,
@@ -224,9 +218,9 @@ async def test_llm_provider(request: ProviderTestRequest) -> ProviderTestRespons
         )
     except _Unauthorized as exc:
         latency_ms = _elapsed_ms(started)
-        _log_test_provider(request.provider_code, request.api_key, "invalid_key", latency_ms)
+        _log_test_provider(request.id, request.api_key, "invalid_key", latency_ms)
         return _record_and_return(
-            request.provider_code,
+            request.id,
             ProviderTestResponse(
                 status="invalid_key",
                 latency_ms=latency_ms,
@@ -237,9 +231,9 @@ async def test_llm_provider(request: ProviderTestRequest) -> ProviderTestRespons
         )
     except _RateLimited as exc:
         latency_ms = _elapsed_ms(started)
-        _log_test_provider(request.provider_code, request.api_key, "rate_limited", latency_ms)
+        _log_test_provider(request.id, request.api_key, "rate_limited", latency_ms)
         return _record_and_return(
-            request.provider_code,
+            request.id,
             ProviderTestResponse(
                 status="rate_limited",
                 latency_ms=latency_ms,
@@ -250,9 +244,9 @@ async def test_llm_provider(request: ProviderTestRequest) -> ProviderTestRespons
         )
     except _QuotaExceeded as exc:
         latency_ms = _elapsed_ms(started)
-        _log_test_provider(request.provider_code, request.api_key, "quota_exceeded", latency_ms)
+        _log_test_provider(request.id, request.api_key, "quota_exceeded", latency_ms)
         return _record_and_return(
-            request.provider_code,
+            request.id,
             ProviderTestResponse(
                 status="quota_exceeded",
                 latency_ms=latency_ms,
@@ -263,9 +257,9 @@ async def test_llm_provider(request: ProviderTestRequest) -> ProviderTestRespons
         )
     except _NetworkError as exc:
         latency_ms = _elapsed_ms(started)
-        _log_test_provider(request.provider_code, request.api_key, "network_error", latency_ms)
+        _log_test_provider(request.id, request.api_key, "network_error", latency_ms)
         return _record_and_return(
-            request.provider_code,
+            request.id,
             ProviderTestResponse(
                 status="network_error",
                 latency_ms=latency_ms,
@@ -275,10 +269,10 @@ async def test_llm_provider(request: ProviderTestRequest) -> ProviderTestRespons
             _now_iso(),
         )
 
-    _log_test_provider(request.provider_code, request.api_key, "ok", result.latency_ms)
+    _log_test_provider(request.id, request.api_key, "ok", result.latency_ms)
     available_models = _models_from_ping(result, request.provider_type)
     return _record_and_return(
-        request.provider_code,
+        request.id,
         ProviderTestResponse(
             status="ok",
             latency_ms=result.latency_ms,
@@ -337,7 +331,7 @@ def _models_from_ping(
 
 
 def _record_and_return(
-    provider_code: str,
+    provider_id: str,
     response: ProviderTestResponse,
     outcome_at: str,
 ) -> ProviderTestResponse:
@@ -345,7 +339,7 @@ def _record_and_return(
 
     try:
         _persist_test_outcome(
-            provider_code,
+            provider_id,
             last_test_status=response.status,  # type: ignore[arg-type]
             last_test_at=outcome_at,
             last_test_message=response.message or "",
@@ -354,15 +348,15 @@ def _record_and_return(
         )
     except Exception as exc:  # noqa: BLE001 — Test writeback failure must not break the API response.
         logger.warning(
-            "test_llm_provider writeback failed provider_code=%s error=%s",
-            provider_code,
+            "test_llm_provider writeback failed provider_id=%s error=%s",
+            provider_id,
             exc,
         )
     return response
 
 
 def _now_iso() -> str:
-    return datetime.now(tz=timezone.utc).isoformat()
+    return datetime.now(tz=UTC).isoformat()
 
 
 def _elapsed_ms(started: float) -> int:
@@ -370,31 +364,19 @@ def _elapsed_ms(started: float) -> int:
 
 
 def _log_test_provider(
-    provider_code: str,
+    provider_id: str,
     api_key: str,
     status: str,
     latency_ms: int,
 ) -> None:
     last4 = api_key[-4:] if api_key else ""
     logger.info(
-        "test_llm_provider provider_code=%s last4=%s status=%s latency_ms=%d",
-        provider_code,
+        "test_llm_provider provider_id=%s last4=%s status=%s latency_ms=%d",
+        provider_id,
         last4,
         status,
         latency_ms,
     )
-
-
-def _provider_metadata() -> dict[str, dict[str, Any]]:
-    data = load_roles_file(ROLES_PATH)
-    return {
-        provider_code: {
-            "name": provider.name,
-            "provider_type": provider.type,
-            "base_url": provider.llm_base_url or provider.base_url or "",
-        }
-        for provider_code, provider in data.providers.items()
-    }
 
 
 __all__ = ["router"]

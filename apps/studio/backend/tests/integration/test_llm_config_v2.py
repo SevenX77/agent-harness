@@ -40,7 +40,9 @@ def test_credentials_save_and_read_round_trip(
         json={
             "providers": [
                 {
-                    "provider_code": "DS",
+                    "id": "provider-ds",
+                    "name": "DeepSeek",
+                    "provider_type": "openai_compatible",
                     "api_key": "sk-test-123",
                     "base_url": "https://api.deepseek.com/v1",
                 }
@@ -52,10 +54,10 @@ def test_credentials_save_and_read_round_trip(
     get_response = client.get("/api/llm/credentials?include_metadata=true")
     assert get_response.status_code == 200
     data = get_response.json()
-    ds = next(provider for provider in data["providers"] if provider["provider_code"] == "DS")
+    ds = next(provider for provider in data["providers"] if provider["id"] == "provider-ds")
     assert ds["has_key"] is True
     assert ds["base_url"] == "https://api.deepseek.com/v1"
-    assert ds["name"]
+    assert ds["name"] == "DeepSeek"
     assert ds["provider_type"] == "openai_compatible"
     assert "sk-test-123" not in get_response.text
 
@@ -109,7 +111,7 @@ def test_provider_test_endpoint_mocked(
     response = client.post(
         "/api/llm/providers/test",
         json={
-            "provider_code": "DS",
+            "id": "provider-ds",
             "provider_type": "openai_compatible",
             "api_key": "sk-test",
             "base_url": "https://api.deepseek.com/v1",

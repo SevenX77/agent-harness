@@ -108,7 +108,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
   return (
     <div
       className={[
-        'relative min-w-[240px] rounded-md border bg-card p-3 text-card-foreground shadow-sm transition-colors',
+        'relative min-w-[240px] cursor-pointer rounded-md border bg-card p-3 text-card-foreground shadow-sm transition-colors',
         data.subgraphPath ? 'pb-5' : '',
         selected ? 'border-primary ring-2 ring-primary/30' : 'border-border',
       ].join(' ')}
@@ -507,6 +507,12 @@ export function GraphCanvas({
             onNodeSelect?.({ id: node.id, data: node.data })
           }
         }}
+        onNodeDragStart={(_, node) => {
+          if (node.type === 'skill') {
+            onNodeSelect?.({ id: node.id, data: node.data })
+          }
+        }}
+        selectNodesOnDrag
         onNodeDoubleClick={(_, node) => {
           if (node.type !== 'skill') return
           const targetSkillId = subgraphSkillId(node.data.subgraphPath ?? null)

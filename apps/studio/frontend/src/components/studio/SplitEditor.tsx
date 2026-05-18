@@ -11,6 +11,7 @@ interface SplitEditorProps {
   error?: unknown
   selectedNodeId?: string | null
   onNodeSelect?: (node: { id: string; data: SkillGraphNodeData }) => void
+  onPanelChange?: (panel: "assets" | "input" | "timeline" | "properties" | "local-history" | null) => void
 }
 
 export function SplitEditor({
@@ -20,6 +21,7 @@ export function SplitEditor({
   error,
   selectedNodeId,
   onNodeSelect,
+  onPanelChange,
 }: SplitEditorProps) {
   const {
     activeFileDetails,
@@ -94,6 +96,7 @@ export function SplitEditor({
             error={error}
             selectedNodeId={selectedNodeId}
             onNodeSelect={onNodeSelect}
+            onPanelChange={onPanelChange}
             compact
           />
         </div>

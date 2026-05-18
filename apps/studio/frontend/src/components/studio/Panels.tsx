@@ -1,10 +1,8 @@
 import {
   AlertCircle,
-  Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  ChevronsUpDown,
   FileText,
   Folder,
   Upload,
@@ -12,19 +10,11 @@ import {
 } from "lucide-react"
 import { useMemo, useState, type DragEvent, type ReactNode } from "react"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Separator } from "@/components/ui/separator"
-import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
 import type { SkillDetail } from "@/api/types"
 import { HistoryPanel } from "@/components/history/HistoryPanel"
 import { inferJsonSchemaFromText } from "@/lib/schema-infer"
-import { cn } from "@/lib/utils"
 import type { SkillGraphNodeData } from "@/components/GraphCanvas"
 import type { PanelKind } from "./Toolbar"
 import { useWorkspaceContext } from "./WorkspaceContext"
@@ -366,110 +356,56 @@ export function TimelinePanel() {
   )
 }
 
-export function PropertiesPanel({ skillDetail, selectedNode }: Pick<PanelsProps, "skillDetail" | "selectedNode">) {
-  const manifest = skillDetail?.manifest
-  const selectedType = selectedNode?.data.mode ?? (manifest?.schema_version === "2.1" ? "graph" : manifest?.type) ?? "Skill"
-  const [temperature, setTemperature] = useState([0.7])
-  const [modelOpen, setModelOpen] = useState(false)
-  const [modelValue, setModelValue] = useState(selectedNode?.data.role ?? "default")
-  const models = [
-    { value: "default", label: "Default model" },
-    { value: "gpt-4o-mini", label: "GPT-4o Mini" },
-    { value: "gpt-4o", label: "GPT-4o" },
-    { value: "claude-3.5", label: "Claude 3.5 Sonnet" },
-  ]
+function phaseKindLabel(data: Pick<SkillGraphNodeData, "mode" | "subgraphPath">): "LOGIC" | "AGENT" | "SUBGRAPH" {
+  if (data.subgraphPath || data.mode === "subgraph") return "SUBGRAPH"
+  if (data.mode === "skill" || data.mode === "llm") return "AGENT"
+  return "LOGIC"
+}
+
+function phaseKindFile(data: Pick<SkillGraphNodeData, "mode" | "subgraphPath">): "LOGIC.md" | "SKILL.md" | "SUBGRAPH.md" {
+  const kind = phaseKindLabel(data)
+  if (kind === "SUBGRAPH") return "SUBGRAPH.md"
+  if (kind === "AGENT") return "SKILL.md"
+  return "LOGIC.md"
+}
+
+function DetailRow({ label, value }: { label: string; value?: string | string[] | null }) {
+  const values = Array.isArray(value) ? value : value ? [value] : []
+  return (
+    <div className="rounded-md border border-border bg-card px-3 py-2">
+      <dt className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{label}</dt>
+      <dd className="mt-1 text-xs text-foreground">
+        {values.length > 0 ? values.join(", ") : <span className="text-muted-foreground">None</span>}
+      </dd>
+    </div>
+  )
+}
+
+export function PropertiesPanel({ selectedNode }: Pick<PanelsProps, "skillDetail" | "selectedNode">) {
+  const modeLabel = selectedNode ? phaseKindLabel(selectedNode.data) : null
+  const filePath = selectedNode?.data.filePath ?? (selectedNode ? `phases/${selectedNode.id}/${phaseKindFile(selectedNode.data)}` : null)
 
   return (
     <div className="flex h-full flex-col bg-background">
       <PanelHeader title="Properties" />
 
       <ScrollArea className="flex-1">
-        <div className="space-y-5 p-4">
-          <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground">Node ID</Label>
-            <Input
-              readOnly
-              value={selectedNode?.id ?? manifest?.name ?? "No node selected"}
-              className="h-7 bg-muted text-xs"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground">Type</Label>
-            <div className="flex items-center gap-2">
-              <Badge variant="secondary">{selectedType}</Badge>
+        {selectedNode ? (
+          <dl className="space-y-3 px-2 py-2">
+            <div className="flex items-center justify-between px-1">
+              <span className="truncate text-xs font-medium text-foreground">{selectedNode.data.label}</span>
+              {modeLabel ? <Badge variant="secondary">{modeLabel}</Badge> : null}
             </div>
-          </div>
-
-          <Separator />
-
-          <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground">Model</Label>
-            <Popover open={modelOpen} onOpenChange={setModelOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  role="combobox"
-                  aria-expanded={modelOpen}
-                  className="h-7 w-full justify-between text-xs font-normal"
-                >
-                  {models.find((model) => model.value === modelValue)?.label ?? "Select model..."}
-                  <ChevronsUpDown className="ml-2 size-3.5 shrink-0 opacity-50" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-                <Command>
-                  <CommandInput placeholder="Search model..." className="h-8 text-xs" />
-                  <CommandList>
-                    <CommandEmpty>No model found.</CommandEmpty>
-                    <CommandGroup>
-                      {models.map((model) => (
-                        <CommandItem
-                          key={model.value}
-                          value={model.value}
-                          onSelect={(currentValue) => {
-                            setModelValue(currentValue === modelValue ? "" : currentValue)
-                            setModelOpen(false)
-                          }}
-                          className="text-xs"
-                        >
-                          <Check className={cn("mr-2 size-3.5", modelValue === model.value ? "opacity-100" : "opacity-0")} />
-                          {model.label}
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-          </div>
-
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs text-muted-foreground">Temperature</Label>
-              <span className="text-xs text-foreground">{temperature[0]}</span>
-            </div>
-            <Slider
-              value={temperature}
-              onValueChange={setTemperature}
-              min={0}
-              max={1}
-              step={0.1}
-              className="w-full"
-            />
-          </div>
-
-          <Separator />
-
-          <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground">System Prompt</Label>
-            <Textarea
-              readOnly
-              value={selectedNode ? `${selectedNode.data.label}\n\nDepends on: ${selectedNode.data.dependsOn.join(", ") || "None"}` : "Select a node on the canvas."}
-              className="min-h-[100px] resize-none text-xs"
-            />
-          </div>
-        </div>
+            <DetailRow label="Phase ID" value={selectedNode.id} />
+            <DetailRow label="Mode" value={modeLabel} />
+            <DetailRow label="Depends On" value={selectedNode.data.dependsOn} />
+            <DetailRow label="Role" value={selectedNode.data.role} />
+            <DetailRow label="Tools" value={selectedNode.data.tools} />
+            <DetailRow label="File" value={filePath} />
+          </dl>
+        ) : (
+          <div className="p-4 text-xs text-muted-foreground">Select a node to inspect</div>
+        )}
       </ScrollArea>
     </div>
   )
@@ -498,5 +434,8 @@ export function Panels({ activePanel, skillId, skillDetail, selectedNode }: Pane
   if (activePanel === "local-history") {
     return <HistoryPanel skillId={skillId} />
   }
-  return <PropertiesPanel skillDetail={skillDetail} selectedNode={selectedNode} />
+  if (activePanel === "properties") {
+    return <PropertiesPanel skillDetail={skillDetail} selectedNode={selectedNode} />
+  }
+  return <AssetsPanel skillDetail={skillDetail} selectedNode={selectedNode} />
 }

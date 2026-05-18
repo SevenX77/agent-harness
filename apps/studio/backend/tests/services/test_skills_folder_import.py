@@ -4,12 +4,11 @@ import json
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.core import config
 from app.core.adapters.metadata_local import LocalJsonMetadataStore
 from app.core.adapters.storage_local import LocalFilesystemBackend
 from app.services import skills as skill_service
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture

@@ -23,7 +23,7 @@ function nodeSize(node: Node): { width: number; height: number } {
 export function getAutoLayoutedElements<TNode extends Node, TEdge extends Edge>(
   nodes: TNode[],
   edges: TEdge[],
-  options: { bottomReservedHeight?: number } = {},
+  options: { canvasHeight?: number; compactRatio?: number } = {},
 ): { nodes: TNode[]; edges: TEdge[] } {
   const graph = new graphlib.Graph()
   graph.setDefaultEdgeLabel(() => ({}))
@@ -47,6 +47,7 @@ export function getAutoLayoutedElements<TNode extends Node, TEdge extends Edge>(
   }
 
   dagreLayout(graph)
+  const compactOffset = (options.canvasHeight ?? 0) * (options.compactRatio ?? 0)
 
   return {
     nodes: nodes.map((node) => {
@@ -56,7 +57,7 @@ export function getAutoLayoutedElements<TNode extends Node, TEdge extends Edge>(
         ...node,
         position: {
           x: position.x - size.width / 2,
-          y: position.y - size.height / 2 - (options.bottomReservedHeight ?? 0),
+          y: position.y - size.height / 2 - compactOffset,
         },
       }
     }),

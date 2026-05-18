@@ -65,7 +65,6 @@ interface GraphCanvasProps {
   onNodeSelect?: (node: { id: string, data: SkillGraphNodeData }) => void
   statusByNodeId?: Record<string, SkillNodeStatus>
   compact?: boolean
-  bottomReservedHeight?: number
 }
 
 const INPUT_ID = '__global_input__'
@@ -438,11 +437,12 @@ export function GraphCanvas({
   onNodeSelect,
   statusByNodeId,
   compact = false,
-  bottomReservedHeight = 0,
 }: GraphCanvasProps) {
   const workspace = useOptionalWorkspaceContext()
   const [expandedSubgraphs, setExpandedSubgraphs] = useState<Set<string>>(() => new Set())
   const [selectedCanvasNodeId, setSelectedCanvasNodeId] = useState<string | null>(null)
+  const [canvasHeight, setCanvasHeight] = useState(0)
+  const canvasRef = useRef<HTMLElement | null>(null)
   const fitViewRef = useRef<(() => void) | null>(null)
   const fitLayout = useCallback(() => {
     window.requestAnimationFrame(() => {
@@ -461,6 +461,17 @@ export function GraphCanvas({
     })
   }, [])
   const safeStatusByNodeId = useMemo(() => statusByNodeId ?? {}, [statusByNodeId])
+  const compactRatio = compact && canvasHeight > 0 && canvasHeight < 500 ? 0.2 : 0
+
+  useEffect(() => {
+    const element = canvasRef.current
+    if (!element) return
+    const updateHeight = () => setCanvasHeight(element.getBoundingClientRect().height)
+    updateHeight()
+    const observer = new ResizeObserver(updateHeight)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
 
   const rawNodes = useMemo(
     () => buildNodes(skillId, skillDetail, expandedSubgraphs, toggleSubgraph, safeStatusByNodeId),
@@ -473,14 +484,14 @@ export function GraphCanvas({
   const rawEdges = useMemo(() => buildEdges(phaseNodes), [phaseNodes])
   const layoutResult = useMemo((): { nodes: GraphCanvasNode[]; edges: Edge<ContextEdgeData>[]; error: CycleDetectedError | null } => {
     try {
-      return { ...getAutoLayoutedElements(rawNodes, rawEdges, { bottomReservedHeight }), error: null }
+      return { ...getAutoLayoutedElements(rawNodes, rawEdges, { canvasHeight, compactRatio }), error: null }
     } catch (layoutError) {
       if (layoutError instanceof CycleDetectedError) {
         return { nodes: [], edges: [], error: layoutError }
       }
       throw layoutError
     }
-  }, [bottomReservedHeight, rawEdges, rawNodes])
+  }, [canvasHeight, compactRatio, rawEdges, rawNodes])
   const [nodes, setNodes, onNodesChange] = useNodesState<GraphCanvasNode>(layoutResult.nodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutResult.edges)
 
@@ -523,7 +534,7 @@ export function GraphCanvas({
   }, [setEdges, setNodes])
 
   return (
-    <section className="relative h-full min-h-0 bg-background">
+    <section ref={canvasRef} className="relative h-full min-h-0 bg-background">
       {error ? (
         <div className="absolute inset-0 z-10 grid place-items-center bg-background/80 p-8">
           <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">

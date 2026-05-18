@@ -95,7 +95,6 @@ export function SplitEditor({
             selectedNodeId={selectedNodeId}
             onNodeSelect={onNodeSelect}
             compact
-            bottomReservedHeight={72}
           />
         </div>
       </ResizablePanel>

@@ -40,17 +40,11 @@ export interface ModelInfo {
  * and arrive via GET. Sending them in PUT triggers a 422.
  */
 export interface CredentialProviderState {
-  provider_code: string
+  id: string
+  name: string
   has_key: boolean
   base_url?: string
-
-  // From llm_roles.yaml metadata (only when include_metadata=true).
-  name?: string
-
-  // From the credential record itself.
-  title?: string
   provider_type?: ProviderType | null
-  vendor_hint?: string
 
   last_test_status?: TestStatus
   last_test_at?: string
@@ -69,16 +63,15 @@ export interface CredentialsState {
  * persisted only via POST /providers/test.
  */
 export interface ProviderCredentialUpdate {
-  provider_code: string
+  id: string
+  name: string
   api_key: string
   base_url?: string
-  title?: string
   provider_type?: ProviderType | null
-  vendor_hint?: string
 }
 
 export interface ProviderTestRequest {
-  provider_code: string
+  id: string
   provider_type: ProviderType
   api_key: string
   base_url?: string
@@ -150,9 +143,7 @@ export interface RolesData {
 }
 
 export async function getCredentials(): Promise<CredentialsState> {
-  const response = await api.get<CredentialsState>('/llm/credentials', {
-    params: { include_metadata: true },
-  })
+  const response = await api.get<CredentialsState>('/llm/credentials')
   return response.data
 }
 
@@ -162,7 +153,6 @@ export async function putCredentials(
   const response = await api.put<CredentialsState>(
     '/llm/credentials',
     { providers: updates },
-    { params: { include_metadata: true } },
   )
   return response.data
 }

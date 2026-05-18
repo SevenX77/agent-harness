@@ -15,7 +15,7 @@ import { Textarea } from "@/components/ui/textarea"
 import type { SkillDetail } from "@/api/types"
 import { HistoryPanel } from "@/components/history/HistoryPanel"
 import { inferJsonSchemaFromText } from "@/lib/schema-infer"
-import type { SkillGraphNodeData } from "@/components/GraphCanvas"
+import type { SkillGraphNodeData, SubagentRef } from "@/components/GraphCanvas"
 import type { PanelKind } from "./Toolbar"
 import { useWorkspaceContext } from "./WorkspaceContext"
 import type { FileMeta } from "./file-types"
@@ -381,9 +381,64 @@ function DetailRow({ label, value }: { label: string; value?: string | string[] 
   )
 }
 
-export function PropertiesPanel({ selectedNode }: Pick<PanelsProps, "skillDetail" | "selectedNode">) {
+export function subagentSkillFilePath(skillId: string, subagent: SubagentRef): string {
+  return `${skillId}/${subagent.path}/SKILL.md`
+}
+
+function SubagentsSection({
+  skillId,
+  subagents,
+  onFileOpen,
+}: {
+  skillId: string | null
+  subagents: SubagentRef[]
+  onFileOpen?: (fileOrPath: FileMeta | string) => void
+}) {
+  if (subagents.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="rounded-md border border-border bg-card px-3 py-2">
+      <dt className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Subagents</dt>
+      <dd className="mt-2 space-y-1">
+        {subagents.map((subagent) => (
+          <button
+            key={`${subagent.name}:${subagent.path}`}
+            type="button"
+            onClick={() => {
+              if (skillId) {
+                onFileOpen?.(subagentSkillFilePath(skillId, subagent))
+              }
+            }}
+            className="flex w-full items-start gap-2 rounded-md border-0 px-2 py-1.5 text-left text-xs text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-medium text-foreground">{subagent.name}</span>
+              <span className="block truncate">{subagent.description}</span>
+            </span>
+          </button>
+        ))}
+      </dd>
+    </div>
+  )
+}
+
+interface PropertiesPanelProps {
+  skillId?: string | null
+  skillDetail?: SkillDetail
+  selectedNode: { id: string; data: SkillGraphNodeData } | null
+  onFileOpen?: (fileOrPath: FileMeta | string) => void
+}
+
+export function PropertiesPanel({
+  skillId = null,
+  selectedNode,
+  onFileOpen,
+}: PropertiesPanelProps) {
   const modeLabel = selectedNode ? phaseKindLabel(selectedNode.data) : null
   const filePath = selectedNode?.data.filePath ?? (selectedNode ? `phases/${selectedNode.id}/${phaseKindFile(selectedNode.data)}` : null)
+  const subagents = selectedNode?.data.subagents ?? []
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -401,6 +456,7 @@ export function PropertiesPanel({ selectedNode }: Pick<PanelsProps, "skillDetail
             <DetailRow label="Depends On" value={selectedNode.data.dependsOn} />
             <DetailRow label="Role" value={selectedNode.data.role} />
             <DetailRow label="Tools" value={selectedNode.data.tools} />
+            <SubagentsSection skillId={skillId} subagents={subagents} onFileOpen={onFileOpen} />
             <DetailRow label="File" value={filePath} />
           </dl>
         ) : (
@@ -435,7 +491,7 @@ export function Panels({ activePanel, skillId, skillDetail, selectedNode }: Pane
     return <HistoryPanel skillId={skillId} />
   }
   if (activePanel === "properties") {
-    return <PropertiesPanel skillDetail={skillDetail} selectedNode={selectedNode} />
+    return <PropertiesPanel skillId={skillId} skillDetail={skillDetail} selectedNode={selectedNode} onFileOpen={onFileOpen} />
   }
   return <AssetsPanel skillDetail={skillDetail} selectedNode={selectedNode} />
 }

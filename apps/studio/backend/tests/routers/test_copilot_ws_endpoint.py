@@ -12,8 +12,10 @@ from app.models.copilot import (
     CopilotEventText,
     CopilotEventToolUseStart,
 )
+from app.models.llm_config import LLMCredentialsFile, ProviderCredential
 from app.routers import copilot as copilot_router
 from app.services import copilot as copilot_service
+from app.services.llm_credentials import save_credentials
 from claude_agent_sdk import ClaudeAgentOptions
 from claude_agent_sdk.types import AssistantMessage, TextBlock
 from fastapi.testclient import TestClient
@@ -152,7 +154,20 @@ def test_stream_query_uses_copilot_chat_active_model_when_no_override(
     fake_config = FakeConfig()
     client = FakeClient([AssistantMessage(content=[TextBlock(text="hello")], model="claude")])
     monkeypatch.setattr(copilot_service, "load_config", lambda: fake_config)
-    monkeypatch.setenv("PRIMARY_KEY", "primary-secret")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    save_credentials(
+        LLMCredentialsFile(
+            providers=[
+                ProviderCredential(
+                    id="TEST_PROVIDER",
+                    name="Test Provider",
+                    api_key="primary-secret",
+                    base_url="https://credential.test",
+                    provider_type="anthropic_compatible",
+                )
+            ]
+        )
+    )
     monkeypatch.setattr(
         copilot_service, "_session_factory", lambda options: client.capture(options)
     )
@@ -165,7 +180,7 @@ def test_stream_query_uses_copilot_chat_active_model_when_no_override(
     assert fake_config.model_calls == []
     assert client.options is not None
     assert client.options.env["ANTHROPIC_API_KEY"] == "primary-secret"
-    assert client.options.env["ANTHROPIC_BASE_URL"] == "https://provider.test"
+    assert client.options.env["ANTHROPIC_BASE_URL"] == "https://credential.test"
     assert events == [CopilotEventText(content="hello"), CopilotEventDone()]
 
 
@@ -176,7 +191,19 @@ def test_stream_query_uses_model_override_when_provided(
     fake_config = FakeConfig()
     client = FakeClient([AssistantMessage(content=[TextBlock(text="hello")], model="claude")])
     monkeypatch.setattr(copilot_service, "load_config", lambda: fake_config)
-    monkeypatch.setenv("PRIMARY_KEY", "primary-secret")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    save_credentials(
+        LLMCredentialsFile(
+            providers=[
+                ProviderCredential(
+                    id="TEST_PROVIDER",
+                    name="Test Provider",
+                    api_key="primary-secret",
+                    provider_type="anthropic_compatible",
+                )
+            ]
+        )
+    )
     monkeypatch.setattr(
         copilot_service, "_session_factory", lambda options: client.capture(options)
     )
@@ -201,17 +228,14 @@ def test_stream_query_yields_error_when_no_api_key(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.delenv("PRIMARY_KEY", raising=False)
-    monkeypatch.delenv("FALLBACK_KEY", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(copilot_service, "load_config", lambda: FakeConfig())
 
     events = asyncio.run(
         _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
     )
 
-    assert events == [
-        CopilotEventError(message="Provider TEST_PROVIDER 未配置 API key (env: PRIMARY_KEY)")
-    ]
+    assert events == [CopilotEventError(message="Provider TEST_PROVIDER 未配置 API key")]
 
 
 async def _events(*items: object) -> AsyncIterator[object]:

@@ -43,6 +43,7 @@ class RunContext:
     artifact_saver: Callable[..., Any] | None = None
     callbacks: tuple[Callback, ...] = field(default_factory=tuple)
     unattended: bool = False
+    subagent_depth: int = 0
 
     def __post_init__(self) -> None:
         # ``frozen=True`` blocks attribute *reassignment* but not container

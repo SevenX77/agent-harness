@@ -23,7 +23,12 @@ from graph_agent.cognitive.md_patch import LLMMdPatchClient
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
 from graph_agent.core.loader import CompiledSkill, CompiledSubagent, PhaseDocument, SkillLoader
 from graph_agent.core.manifest import GraphManifest, LogicNodeAST, SkillNodeAST, SubgraphNodeAST
-from graph_agent.core.subagents import SubagentValidationFailure, validate_subagent_tool_args
+from graph_agent.core.subagents import (
+    SubagentValidationFailure,
+    assert_subagent_depth_allowed,
+    current_subagent_depth,
+    validate_subagent_tool_args,
+)
 from graph_agent.runtime.exit_contract import inject_exit_contract
 from graph_agent.runtime.state import BlackboardState
 
@@ -290,6 +295,10 @@ def _invoke_subagent_tool_t21(
     args: dict[str, Any],
     flow: dict[str, Any],
 ) -> dict[str, Any]:
+    try:
+        assert_subagent_depth_allowed(current_subagent_depth(flow))
+    except RuntimeError as exc:
+        raise GraphAgentFatalError(str(exc)) from exc
     retry_counts = flow.setdefault("subagent_validation_retries", {})
     if not isinstance(retry_counts, dict):
         retry_counts = {}

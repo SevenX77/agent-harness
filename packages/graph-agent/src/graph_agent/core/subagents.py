@@ -9,6 +9,7 @@ from typing import Any, cast
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
 MAX_SUBAGENT_SCHEMA_RETRIES = 10
+MAX_SUBAGENT_DEPTH = 1
 
 
 @dataclass(frozen=True)
@@ -146,6 +147,16 @@ def validate_subagent_tool_args(
     return validated
 
 
+def current_subagent_depth(flow: dict[str, Any]) -> int:
+    value = flow.get("subagent_depth", 0)
+    return value if isinstance(value, int) else 0
+
+
+def assert_subagent_depth_allowed(depth: int) -> None:
+    if depth >= MAX_SUBAGENT_DEPTH:
+        raise RuntimeError("Max Depth 1 exceeded: subagent cannot call another subagent")
+
+
 def _annotation_for_json_schema(field_schema: dict[str, Any]) -> Any:
     schema_type = field_schema.get("type")
     if schema_type == "string":
@@ -165,8 +176,11 @@ def _annotation_for_json_schema(field_schema: dict[str, Any]) -> Any:
 
 __all__ = [
     "MAX_SUBAGENT_SCHEMA_RETRIES",
+    "MAX_SUBAGENT_DEPTH",
     "SubagentValidationFailure",
+    "assert_subagent_depth_allowed",
     "build_subagent_input_model",
     "build_subagent_tool_args_model",
+    "current_subagent_depth",
     "validate_subagent_tool_args",
 ]

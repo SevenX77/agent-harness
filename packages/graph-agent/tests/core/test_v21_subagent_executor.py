@@ -1,18 +1,17 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
-import logging
 
 import pytest
-
 from graph_agent.core.exceptions import GraphAgentFatalError
 from graph_agent.core.graph_assembler import (
-    _SubagentRuntime,
     _invoke_subagent_many_t24,
     _invoke_subagent_once_t23,
     _invoke_subagent_tool_t21,
     _subagent_runnable_config,
+    _SubagentRuntime,
 )
 from graph_agent.core.subagents import build_subagent_input_model, validate_subagent_tool_args
 

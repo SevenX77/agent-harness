@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.loader import SkillLoader
 from graph_agent.core.manifest import SkillNodeAST

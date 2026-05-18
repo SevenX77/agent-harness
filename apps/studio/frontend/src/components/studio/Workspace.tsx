@@ -12,6 +12,7 @@ import { sha256Hex } from "@/lib/hash"
 import { CenterActionBar, type SkillBuildStage } from "./center-action-bar"
 import { ConflictDialog } from "./ConflictDialog"
 import { Header } from "./Header"
+import { NodePropertiesPanel } from "./NodePropertiesPanel"
 import { Panels } from "./Panels"
 import { SettingsPage } from "./SettingsPage"
 import { SplitEditor } from "./SplitEditor"
@@ -22,6 +23,7 @@ import {
   type EditorSide,
   type OpenFile,
   type SaveConflict,
+  type SelectedNodeForProperties,
   type WorkspaceContextValue,
 } from "./WorkspaceContext"
 
@@ -53,6 +55,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedNode, setSelectedNode] = useState<{ id: string; data: SkillGraphNodeData } | null>(null)
+  const [propertiesPanelOpen, setPropertiesPanelOpen] = useState(false)
+  const [selectedNodeForProperties, setSelectedNodeForProperties] = useState<SelectedNodeForProperties | null>(null)
   const [inFlight, setInFlight] = useState<Partial<Record<EditorSide, boolean>>>({})
   const inFlightRef = useRef<Partial<Record<EditorSide, boolean>>>({})
   const [conflict, setConflict] = useState<SaveConflict | null>(null)
@@ -124,6 +128,15 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       const remainingSide: EditorSide = side === "left" ? "right" : "left"
       return current[remainingSide] ? { left: current[remainingSide] } : {}
     })
+  }, [])
+
+  const openProperties = useCallback((node: SelectedNodeForProperties) => {
+    setSelectedNodeForProperties(node)
+    setPropertiesPanelOpen(true)
+  }, [])
+
+  const closeProperties = useCallback(() => {
+    setPropertiesPanelOpen(false)
   }, [])
 
   const updateFileContent = useCallback((side: EditorSide, content: string) => {
@@ -200,6 +213,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     setNavStack((current) => [...current, nextSkillId])
     setActiveFileDetails({})
     setSplitMode(false)
+    setPropertiesPanelOpen(false)
+    setSelectedNodeForProperties(null)
     setSelectedNode(null)
     setSelectedNodeId(null)
   }, [])
@@ -208,6 +223,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     setNavStack((current) => current.slice(0, index + 1))
     setActiveFileDetails({})
     setSplitMode(false)
+    setPropertiesPanelOpen(false)
+    setSelectedNodeForProperties(null)
     setSelectedNode(null)
     setSelectedNodeId(null)
   }, [])
@@ -261,8 +278,12 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     },
     activeFileDetails,
     splitMode,
+    propertiesPanelOpen,
+    selectedNodeForProperties,
     onFileOpen: handleFileOpen,
     openSplitEditor: () => setSplitMode(true),
+    openProperties,
+    closeProperties,
     closeFile,
     updateFileContent,
     markFileSaved,
@@ -278,11 +299,15 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     handleFileOpen,
     markFileSaved,
     navStack,
+    closeProperties,
+    openProperties,
     popNavTo,
     pushNavSkill,
     reloadOpenFile,
     setFileInFlight,
     splitMode,
+    propertiesPanelOpen,
+    selectedNodeForProperties,
     updateFileContent,
   ])
 
@@ -373,6 +398,12 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   onCompile={() => console.info("compile clicked")}
                   onPredict={() => console.info("predict clicked")}
                   onRun={() => console.info("run clicked")}
+                />
+              ) : null}
+              {propertiesPanelOpen ? (
+                <NodePropertiesPanel
+                  node={selectedNodeForProperties}
+                  onClose={closeProperties}
                 />
               ) : null}
             </div>

@@ -24,14 +24,17 @@ import { ContextEdge, type ContextEdgeData } from './edges/ContextEdge'
 import { GlobalInputNode, GlobalOutputNode } from './nodes/GlobalInputOutputNode'
 import { SubgraphInline } from './studio/SubgraphInline'
 import { useOptionalWorkspaceContext } from './studio/WorkspaceContext'
+import type { SelectedNodeForProperties } from './studio/WorkspaceContext'
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
-import { subgraphSkillId } from '../utils/graph'
 
 export type SkillNodeStatus = 'idle' | 'running' | 'success' | 'error' | 'paused' | 'breakpoint'
 
 export interface SkillGraphNodeData extends Record<string, unknown> {
   label: string
   mode: string
+  role?: string | null
+  tools?: string[]
+  filePath?: string
   status: SkillNodeStatus
   dependsOn: string[]
   subgraphPath?: string | null
@@ -113,6 +116,40 @@ function phaseKindFile(data: Pick<SkillGraphNodeData, 'mode' | 'subgraphPath'>):
   if (kind === 'SUBGRAPH') return 'SUBGRAPH.md'
   if (kind === 'AGENT') return 'SKILL.md'
   return 'LOGIC.md'
+}
+
+function schemaFields(schema: IoDeclaration, kind: 'input' | 'output'): SelectedNodeForProperties['fields'] {
+  const fields = kind === 'input' ? schema.inputs : schema.outputs
+  return fields.map((field) => ({
+    name: field.name,
+    type: field.type,
+  }))
+}
+
+function phaseProperties(node: SkillGraphNode, skillId: string): SelectedNodeForProperties {
+  const filePath = node.data.filePath ?? `phases/${node.id}/${phaseKindFile(node.data)}`
+  return {
+    id: node.id,
+    label: node.data.label,
+    kind: 'phase',
+    modeLabel: phaseKindLabel(node.data),
+    dependsOn: node.data.dependsOn,
+    role: node.data.role,
+    tools: node.data.tools,
+    filePath: `${skillId}/${filePath}`,
+  }
+}
+
+function globalProperties(node: Node<GlobalNodeData, 'globalInput' | 'globalOutput'>, skillId: string): SelectedNodeForProperties {
+  const kind = node.data.type === 'global-input' ? 'input' : 'output'
+  const filePath = kind === 'input' ? 'io/inputs.json' : 'io/outputs.json'
+  return {
+    id: node.id,
+    label: kind === 'input' ? 'Input' : 'Output',
+    kind,
+    filePath: `${skillId}/${filePath}`,
+    fields: schemaFields(node.data.schema, kind),
+  }
 }
 
 function phaseKindIcon(kind: PhaseKind): typeof Bot {
@@ -316,6 +353,12 @@ function buildNodes(
       data: {
         label: phase.name,
         mode: topologyById.get(phase.name)?.mode ?? phase.mode,
+        role: phase.mode === 'llm' ? phase.llm_role : null,
+        tools: phase.mode === 'llm' ? phase.agent_tools : [],
+        filePath: `phases/${phase.name}/${phaseKindFile({
+          mode: topologyById.get(phase.name)?.mode ?? phase.mode,
+          subgraphPath: phase.subgraph ?? subgraphRefFromFile(detail?.files?.[`phases/${phase.name}/SUBGRAPH.md`]),
+        })}`,
         status: statusByNodeId[phase.name] ?? (index === 0 ? 'success' : 'idle'),
       dependsOn: topologyById.get(phase.name)?.depends_on ?? normalizeDependsOn(phase.depends_on),
       subgraphPath: phase.subgraph ?? subgraphRefFromFile(detail?.files?.[`phases/${phase.name}/SUBGRAPH.md`]),
@@ -525,13 +568,18 @@ export function GraphCanvas({
         }}
         selectNodesOnDrag
         onNodeDoubleClick={(_, node) => {
-          if (node.type !== 'skill') return
-          const targetSkillId = subgraphSkillId(node.data.subgraphPath ?? null)
-          if (targetSkillId) {
-            workspace?.pushNavSkill(targetSkillId)
+          setSelectedCanvasNodeId(node.id)
+          if (node.type === 'globalInput' || node.type === 'globalOutput') {
+            const properties = globalProperties(node, skillId)
+            workspace?.onFileOpen(properties.filePath ?? '')
+            workspace?.openProperties(properties)
             return
           }
-          workspace?.onFileOpen(`${skillId}/phases/${node.id}/${phaseKindFile(node.data)}`)
+          if (node.type === 'skill') {
+            const properties = phaseProperties(node, skillId)
+            workspace?.onFileOpen(properties.filePath ?? '')
+            workspace?.openProperties(properties)
+          }
         }}
         onInit={(instance) => {
           fitViewRef.current = () => instance.fitView({ padding: 0.2 })

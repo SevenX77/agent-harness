@@ -71,6 +71,10 @@ const roleData = {
   circuit_breaker: null,
 }
 
+/**
+ * Build the v2.1 ProviderCredentialRead shape. `name` is only populated for
+ * YAML-owned providers — `isYamlOwned()` keys off it to lock identity edits.
+ */
 function credentials(ocClAntHasKey: boolean) {
   return {
     providers: [
@@ -78,29 +82,57 @@ function credentials(ocClAntHasKey: boolean) {
         provider_code: 'OC_CL_ANT',
         has_key: ocClAntHasKey,
         name: 'OpenCode Anthropic',
+        title: '',
         base_url: 'https://anthropic.example',
         provider_type: 'anthropic_compatible',
+        vendor_hint: '',
+        last_test_status: 'untested',
+        last_test_at: '',
+        last_test_message: '',
+        last_error_code: '',
+        available_models: [],
       },
       {
         provider_code: 'OC_CL',
         has_key: false,
         name: 'OpenCode Claude',
+        title: '',
         base_url: 'https://claude.example',
         provider_type: 'anthropic_compatible',
+        vendor_hint: '',
+        last_test_status: 'untested',
+        last_test_at: '',
+        last_test_message: '',
+        last_error_code: '',
+        available_models: [],
       },
       {
         provider_code: 'WS_LLM',
         has_key: false,
         name: 'WaveSpeed LLM',
+        title: '',
         base_url: 'https://wavespeed.example',
         provider_type: 'wavespeed_any_llm',
+        vendor_hint: '',
+        last_test_status: 'untested',
+        last_test_at: '',
+        last_test_message: '',
+        last_error_code: '',
+        available_models: [],
       },
       {
         provider_code: 'DS',
         has_key: false,
         name: 'DeepSeek Official',
+        title: '',
         base_url: 'https://deepseek.example',
         provider_type: 'openai_compatible',
+        vendor_hint: '',
+        last_test_status: 'untested',
+        last_test_at: '',
+        last_test_message: '',
+        last_error_code: '',
+        available_models: [],
       },
     ],
   }
@@ -135,8 +167,9 @@ async function mockBackend(page: Page) {
   })
   await page.route('**/api/llm/credentials**', async (route) => {
     if (route.request().method() === 'PUT') {
-      const body = JSON.parse(route.request().postData() ?? '{}') as { providers?: Array<{ provider_code: string }> }
-      hasOcClAntKey = Boolean(body.providers?.some((provider) => provider.provider_code === 'OC_CL_ANT'))
+      const body = JSON.parse(route.request().postData() ?? '{}') as { providers?: Array<{ provider_code: string; api_key?: string }> }
+      const ocCl = body.providers?.find((provider) => provider.provider_code === 'OC_CL_ANT')
+      if (ocCl && ocCl.api_key) hasOcClAntKey = true
       await fulfillJson(route, credentials(hasOcClAntKey))
       return
     }
@@ -148,6 +181,8 @@ async function mockBackend(page: Page) {
       latency_ms: 150,
       model_seen: 'claude-sonnet-4-6',
       message: null,
+      error_code: null,
+      available_models: ['claude-sonnet-4-6'],
     })
   })
   await page.route('**/api/llm/roles**', async (route) => {
@@ -209,7 +244,7 @@ async function mockWebSocket(page: Page) {
   })
 }
 
-test.describe('LLM config v2 e2e', () => {
+test.describe('LLM config v2.1 e2e', () => {
   test('saves provider key, tests provider, edits copilot_chat, and sends model_override', async ({ page }) => {
     await mockBackend(page)
     await mockWebSocket(page)
@@ -218,15 +253,25 @@ test.describe('LLM config v2 e2e', () => {
     await page.getByRole('button', { name: 'Settings' }).click()
     await page.getByRole('button', { name: 'API Keys' }).click()
 
-    const credentialsRequest = page.waitForRequest((request) =>
+    // Scope key/test/badge queries to the OC_CL_ANT row via data-provider-code.
+    const ocClAntRow = page.locator('[data-provider-code="OC_CL_ANT"]')
+    await expect(ocClAntRow).toBeVisible()
+
+    const credentialsPut = page.waitForRequest((request) =>
       request.url().includes('/api/llm/credentials') && request.method() === 'PUT',
     )
-    await page.getByRole('textbox', { name: 'OC_CL_ANT API key' }).fill('sk-test-anthropic-123')
-    await credentialsRequest
-    await expect(page.getByText('API key configured').first()).toBeVisible()
+    await ocClAntRow.locator('#api-key-OC_CL_ANT').fill('sk-test-anthropic-123')
+    await credentialsPut
 
-    await page.getByRole('button', { name: 'Test OC_CL_ANT' }).click()
-    await expect(page.getByText('Connected (150ms)')).toBeVisible({ timeout: 3000 })
+    // SaveStatusBadge transitions to "已保存" once the debounced PUT resolves.
+    await expect(page.getByText('已保存', { exact: true }).first()).toBeVisible({ timeout: 3000 })
+
+    // Run Test — sonner emits success toast "连接正常（150ms · 1 个模型）".
+    await ocClAntRow.getByRole('button', { name: /^Test$|^测试中$/ }).click()
+    await expect(page.getByText(/连接正常/)).toBeVisible({ timeout: 3000 })
+
+    // Persistent TestOutcomeBadge updates to "连接正常" with timestamp · MM-DD HH:mm.
+    await expect(ocClAntRow.getByText(/连接正常/)).toBeVisible()
 
     await page.getByRole('button', { name: 'LLM Roles' }).click()
     await page.locator('select[aria-label="Role"]').selectOption('copilot_chat')
@@ -255,5 +300,30 @@ test.describe('LLM config v2 e2e', () => {
       user_message: 'hello copilot',
       model_override: 'CL46T',
     })
+  })
+
+  test('Add Provider creates a new custom row with deletable identity', async ({ page }) => {
+    await mockBackend(page)
+    await mockWebSocket(page)
+
+    await page.goto(`${baseURL}/#/skill/${SKILL_ID}/edit`)
+    await page.getByRole('button', { name: 'Settings' }).click()
+    await page.getByRole('button', { name: 'API Keys' }).click()
+
+    const list = page.getByTestId('api-keys-list')
+    const initialCount = await list.locator('[data-provider-code]').count()
+
+    await page.getByRole('button', { name: /新增 Provider/ }).click()
+
+    await expect(list.locator('[data-provider-code]')).toHaveCount(initialCount + 1)
+    const newRow = list.locator('[data-provider-code^="CUSTOM_"]').first()
+    await expect(newRow).toBeVisible()
+
+    // YAML-owned rows hide the Delete button; the custom row must surface it.
+    await expect(newRow.getByRole('button', { name: 'Delete provider' })).toBeVisible()
+    // Whereas OC_CL_ANT (YAML-owned) must not.
+    await expect(
+      page.locator('[data-provider-code="OC_CL_ANT"]').getByRole('button', { name: 'Delete provider' }),
+    ).toHaveCount(0)
   })
 })

@@ -70,12 +70,10 @@ function FileRow({
   file,
   icon: Icon = FileText,
   onOpen,
-  indent = false,
 }: {
   file: FileMeta
   icon?: LucideIcon
   onOpen: (file: FileMeta) => void
-  indent?: boolean
 }) {
   const filename = file.path.split("/").pop() ?? file.path
 
@@ -83,10 +81,7 @@ function FileRow({
     <button
       type="button"
       onClick={() => onOpen(file)}
-      className={cn(
-        "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-        indent && "ml-4 border-l border-border pl-3",
-      )}
+      className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
     >
       <Icon className="size-4" strokeWidth={1.5} />
       <span className="truncate">{filename}</span>
@@ -116,7 +111,7 @@ function FolderRow({
         <Folder className="size-4" strokeWidth={1.5} />
         <span>{name}</span>
       </button>
-      {expanded ? <div>{children}</div> : null}
+      {expanded ? <div className="pl-4">{children}</div> : null}
     </div>
   )
 }
@@ -227,12 +222,12 @@ export function AssetsPanel({ skillDetail, selectedNode }: AssetsPanelProps) {
                 {(["SKILL.md", "LOGIC.md", "SUBGRAPH.md"] as const).map((filename) => {
                   const path = `phases/${phaseId}/${filename}`
                   const file = filesByPath.get(path)
-                  return file ? <FileRow key={path} file={file} onOpen={openFile} indent /> : null
+                  return file ? <FileRow key={path} file={file} onOpen={openFile} /> : null
                 })}
                 {actionFiles(skillDetail, phaseId).length > 0 ? (
                   <FolderRow name="actions" defaultExpanded>
                     {actionFiles(skillDetail, phaseId).map((file) => (
-                      <FileRow key={file.path} file={file} onOpen={openFile} indent />
+                      <FileRow key={file.path} file={file} onOpen={openFile} />
                     ))}
                   </FolderRow>
                 ) : null}
@@ -242,12 +237,12 @@ export function AssetsPanel({ skillDetail, selectedNode }: AssetsPanelProps) {
           <FolderRow name="io" defaultExpanded>
             {(["io/inputs.json", "io/outputs.json"] as const).map((path) => {
               const file = filesByPath.get(path)
-              return file ? <FileRow key={path} file={file} onOpen={openFile} indent /> : null
+              return file ? <FileRow key={path} file={file} onOpen={openFile} /> : null
             })}
           </FolderRow>
           {filesByPath.size === 0 && files[2] ? (
             <FolderRow name="nodes" defaultExpanded>
-              <FileRow file={files[2]} onOpen={openFile} indent />
+              <FileRow file={files[2]} onOpen={openFile} />
             </FolderRow>
           ) : null}
         </div>

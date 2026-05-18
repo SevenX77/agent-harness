@@ -685,17 +685,23 @@ function ApiKeysTab({
           )
         })}
         {drafts.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border/60 bg-muted/10 px-4 py-8 text-center text-xs text-muted-foreground">
-            尚未添加任何 Provider。点击下方按钮新增。
+          <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border/60 bg-muted/10 px-4 py-10 text-center">
+            <div className="text-xs text-muted-foreground">尚未添加任何 Provider</div>
+            <Button type="button" variant="default" onClick={onAddProvider} className="gap-1">
+              <Plus className="size-3.5" />
+              新增第一个 Provider
+            </Button>
           </div>
         ) : null}
       </div>
-      <div className="mt-4 flex justify-start">
-        <Button type="button" variant="outline" size="sm" onClick={onAddProvider} className="gap-1">
-          <Plus className="size-3.5" />
-          新增 Provider
-        </Button>
-      </div>
+      {drafts.length === 0 ? null : (
+        <div className="mt-4 flex justify-start">
+          <Button type="button" variant="outline" onClick={onAddProvider} className="gap-1">
+            <Plus className="size-3.5" />
+            新增 Provider
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

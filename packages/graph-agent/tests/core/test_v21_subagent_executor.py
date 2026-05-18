@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+import logging
 
 import pytest
 
@@ -203,7 +204,9 @@ def test_subagent_fanout_preserves_order_and_limits_concurrency() -> None:
         depth=0,
     )
 
+    assert [item["index"] for item in results] == [0, 1, 2, 3, 4]
     assert [item["data"]["child_result"] for item in results] == ["0", "1", "2", "3", "4"]
+    assert all(item["status"] == "ok" for item in results)
     assert graph.max_active <= 3
     assert all(config["tags"] == ["parent", "subagent", "beat"] for config in graph.configs)
     assert all(config["metadata"]["parent_run_id"] == "parent-run" for config in graph.configs)
@@ -227,3 +230,47 @@ def test_subagent_runnable_config_contains_tracing_metadata() -> None:
     }
     assert config["callbacks"] == ["cb"]
     assert config["run_id"]
+
+
+class _FailingGraph(_RecordingGraph):
+    def invoke(self, state: dict, config: dict | None = None) -> dict:
+        self.states.append(state)
+        self.configs.append(config or {})
+        if state["data"]["scene_text"] == "bad":
+            raise RuntimeError("child boom")
+        return super().invoke(state, config=config)
+
+
+def test_subagent_aggregator_preserves_item_failure_and_trace(caplog: pytest.LogCaptureFixture) -> None:
+    graph = _FailingGraph()
+    runtime = _SubagentRuntime(subagent=_Subagent(), graph=graph)
+
+    with caplog.at_level(logging.ERROR):
+        results = _invoke_subagent_many_t24(
+            runtime,
+            {"data": {}, "flow": {}, "messages": [], "run_id": "parent-run"},
+            [{"scene_text": "ok"}, {"scene_text": "bad"}],
+            parent_config={"tags": ["parent"]},
+            depth=0,
+        )
+
+    assert results[0]["status"] == "ok"
+    assert results[1]["index"] == 1
+    assert results[1]["status"] == "error"
+    assert results[1]["error"] == "child boom"
+    assert results[1]["parent_run_id"] == "parent-run"
+    assert results[1]["child_run_id"]
+    assert "subagent item failed" in caplog.text
+
+
+def test_subagent_retry_limit_logs_and_fails(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.ERROR), pytest.raises(GraphAgentFatalError, match="retry_count=11"):
+        _invoke_subagent_tool_t21(
+            tool_name="call_subagent_beat",
+            subagent=_Subagent(),
+            args={"inputs": []},
+            state={"data": {}, "flow": {}, "messages": [], "run_id": "parent-run"},
+            flow={"subagent_validation_retries": {"call_subagent_beat": 10}},
+        )
+
+    assert "subagent validation retry limit exceeded" in caplog.text

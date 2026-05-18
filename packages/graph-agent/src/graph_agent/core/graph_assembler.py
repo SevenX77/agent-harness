@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,6 +35,7 @@ from graph_agent.runtime.exit_contract import inject_exit_contract
 from graph_agent.runtime.state import BlackboardState
 
 MAX_REACT_TURNS = 8
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -326,14 +328,26 @@ def _invoke_subagent_tool_t21(
         flow["subagent_validation_retries"] = retry_counts
     retry_count = int(retry_counts.get(tool_name, 0)) + 1
     retry_counts[tool_name] = retry_count
-    validation = validate_subagent_tool_args(
-        tool_name=tool_name,
-        subagent_name=subagent.name,
-        input_model=subagent.input_model,
-        expected_schema=subagent.expected_schema,
-        args=args,
-        retry_count=retry_count,
-    )
+    try:
+        validation = validate_subagent_tool_args(
+            tool_name=tool_name,
+            subagent_name=subagent.name,
+            input_model=subagent.input_model,
+            expected_schema=subagent.expected_schema,
+            args=args,
+            retry_count=retry_count,
+        )
+    except RuntimeError as exc:
+        logger.error(
+            "subagent validation retry limit exceeded",
+            extra={
+                "tool_name": tool_name,
+                "parent_run_id": state.get("run_id") if state is not None else None,
+                "retry_count": retry_count,
+                "expected_schema": subagent.expected_schema,
+            },
+        )
+        raise GraphAgentFatalError(str(exc)) from exc
     if isinstance(validation, SubagentValidationFailure):
         return validation.to_tool_result()
     if runtime is not None and state is not None:
@@ -413,7 +427,7 @@ def _invoke_subagent_many_t24(
     async def _run_all() -> list[dict[str, Any]]:
         semaphore = asyncio.Semaphore(concurrency)
 
-        async def _run_one(input_data: dict[str, Any]) -> dict[str, Any]:
+        async def _run_one(index: int, input_data: dict[str, Any]) -> dict[str, Any]:
             async with semaphore:
                 child_config = _subagent_runnable_config(
                     parent_state=parent_state,
@@ -421,15 +435,46 @@ def _invoke_subagent_many_t24(
                     subagent_name=runtime.subagent.name,
                     depth=depth,
                 )
-                return await asyncio.to_thread(
-                    _invoke_subagent_once_t23,
-                    runtime,
-                    parent_state,
-                    input_data,
-                    child_config,
-                )
+                child_run_id = str(child_config.get("run_id", ""))
+                try:
+                    result = await asyncio.to_thread(
+                        _invoke_subagent_once_t23,
+                        runtime,
+                        parent_state,
+                        input_data,
+                        child_config,
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "subagent item failed",
+                        extra={
+                            "subagent_name": runtime.subagent.name,
+                            "input_index": index,
+                            "parent_run_id": parent_state.get("run_id"),
+                            "child_run_id": child_run_id,
+                        },
+                    )
+                    return {
+                        "index": index,
+                        "status": "error",
+                        "subagent_name": runtime.subagent.name,
+                        "error": str(exc),
+                        "parent_run_id": parent_state.get("run_id"),
+                        "child_run_id": child_run_id,
+                    }
+                return {
+                    "index": index,
+                    "status": "ok",
+                    "subagent_name": runtime.subagent.name,
+                    "data": result.get("data", {}),
+                    "flow": result.get("flow", {}),
+                    "parent_run_id": parent_state.get("run_id"),
+                    "child_run_id": child_run_id,
+                }
 
-        return await asyncio.gather(*[_run_one(item) for item in inputs])
+        return await asyncio.gather(
+            *[_run_one(index, item) for index, item in enumerate(inputs)]
+        )
 
     return asyncio.run(_run_all())
 

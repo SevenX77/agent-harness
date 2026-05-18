@@ -212,6 +212,26 @@ describe('GraphCanvas', () => {
     expect(html).not.toContain('aria-label="收起子图"')
   })
 
+  it('renders a compact Toolbox badge when a phase has subagents', () => {
+    const html = skillNodeHtml({
+      subagents: [
+        { name: 'echo_expert', path: 'subskills/echo_expert', description: 'Echo text.' },
+        { name: 'score_expert', path: 'subskills/score_expert', description: 'Score text.' },
+      ],
+    })
+
+    expect(html).toContain('aria-label="2 subagents available"')
+    expect(html).toContain('lucide-briefcase')
+    expect(html).toContain('2 subagents available')
+  })
+
+  it('does not render a Toolbox badge when a phase has no subagents', () => {
+    const html = skillNodeHtml({ subagents: [] })
+
+    expect(html).not.toContain('subagents available')
+    expect(html).not.toContain('lucide-briefcase')
+  })
+
   it('does not propagate double-click on subgraph nodes', () => {
     const stopPropagation = vi.fn()
     const onToggleSubgraph = vi.fn()

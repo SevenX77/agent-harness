@@ -16,7 +16,8 @@ import {
   type NodeProps,
 } from '@xyflow/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Bot, CheckCircle2, Circle, Code, Minus, Network, Pause, Plus, Radio, Workflow } from 'lucide-react'
+import { AlertTriangle, Bot, Briefcase, CheckCircle2, Circle, Code, Minus, Network, Pause, Plus, Radio, Workflow } from 'lucide-react'
+import yaml from 'js-yaml'
 import { toast } from 'sonner'
 import type { IoDeclaration, PhaseDef, SkillDetail, SkillManifest } from '../api/types'
 import { CycleDetectedError, getAutoLayoutedElements } from '../lib/layout'
@@ -38,11 +39,18 @@ export interface SkillGraphNodeData extends Record<string, unknown> {
   status: SkillNodeStatus
   dependsOn: string[]
   subgraphPath?: string | null
+  subagents?: SubagentRef[]
   isExpanded?: boolean
   onToggleSubgraph?: () => void
 }
 
 export type SkillGraphNode = Node<SkillGraphNodeData, 'skill'>
+
+export interface SubagentRef {
+  name: string
+  path: string
+  description: string
+}
 
 type PhaseKind = 'LOGIC' | 'AGENT' | 'SUBGRAPH'
 
@@ -129,6 +137,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
   const StatusIcon = style.icon
   const kind = phaseKindLabel(data)
   const KindIcon = phaseKindIcon(kind)
+  const subagentCount = data.subagents?.length ?? 0
 
   return (
     <div
@@ -152,6 +161,19 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
           <div className="truncate text-sm font-semibold text-foreground">{data.label}</div>
           <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
             <span>{kind}</span>
+            {subagentCount > 0 ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    aria-label={`${subagentCount} subagents available`}
+                    className="inline-flex size-5 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground"
+                  >
+                    <Briefcase className="size-3" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top">{subagentCount} subagents available</TooltipContent>
+              </Tooltip>
+            ) : null}
           </div>
         </div>
         <Tooltip>
@@ -302,6 +324,38 @@ function subgraphRefFromFile(content: string | undefined): string | null {
   return yaml?.[1]?.trim() ?? null
 }
 
+function subagentsFromUnknown(value: unknown): SubagentRef[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return []
+    const record = item as Record<string, unknown>
+    if (typeof record.name !== 'string' || typeof record.path !== 'string' || typeof record.description !== 'string') {
+      return []
+    }
+    return [{ name: record.name, path: record.path, description: record.description }]
+  })
+}
+
+function phaseFrontmatter(content: string | undefined): Record<string, unknown> | null {
+  if (!content) return null
+  const match = /^---\n([\s\S]*?)\n---/m.exec(content)
+  if (!match) return null
+  const parsed = yaml.load(match[1])
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  return parsed as Record<string, unknown>
+}
+
+function subagentsForPhase(detail: SkillDetail | undefined, phaseId: string): SubagentRef[] {
+  const topologyItem = detail?.graph_topology?.find((phase) => phase.id === phaseId) as ({ subagents?: unknown } | undefined)
+  const topologySubagents = subagentsFromUnknown(topologyItem?.subagents)
+  if (topologySubagents.length > 0) return topologySubagents
+
+  const frontmatter = phaseFrontmatter(detail?.files?.[`phases/${phaseId}/SKILL.md`])
+  const phaseConfig = frontmatter?.phase_config
+  if (!phaseConfig || typeof phaseConfig !== 'object' || Array.isArray(phaseConfig)) return []
+  return subagentsFromUnknown((phaseConfig as Record<string, unknown>).subagents)
+}
+
 function buildNodes(
   skillId: string,
   detail: SkillDetail | undefined,
@@ -321,6 +375,7 @@ function buildNodes(
         mode: topologyById.get(phase.name)?.mode ?? phase.mode,
         role: phase.mode === 'llm' ? phase.llm_role : null,
         tools: phase.mode === 'llm' ? phase.agent_tools : [],
+        subagents: subagentsForPhase(detail, phase.name),
         filePath: `phases/${phase.name}/${phaseKindFile({
           mode: topologyById.get(phase.name)?.mode ?? phase.mode,
           subgraphPath: phase.subgraph ?? subgraphRefFromFile(detail?.files?.[`phases/${phase.name}/SUBGRAPH.md`]),

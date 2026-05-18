@@ -440,6 +440,42 @@ def test_provider_test_returns_missing_api_key_without_call(
     assert called == [], "ping_provider_extended must not be called when api_key is blank"
 
 
+def test_provider_test_missing_api_key_does_not_dirty_last_test_status(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: `missing_api_key` is a synthetic short-circuit code, not a
+    TestStatus literal. Persisting it as `last_test_status` makes every later
+    GET /api/llm/credentials fail with 422 (Literal validation) — frontend
+    can't load the list at all. The empty-key path must keep
+    `last_test_status="untested"` and stash the synthetic code in
+    `last_error_code` only."""
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    # Seed a provider that has been used before so writeback has a target.
+    client.put(
+        "/api/llm/credentials",
+        json={"providers": [{"provider_code": "OC_CL", "api_key": "sk-once", "base_url": ""}]},
+    )
+
+    # Empty-key Test (sonner toast still shows missing_api_key).
+    response = client.post(
+        "/api/llm/providers/test",
+        json={"provider_code": "OC_CL", "provider_type": "openai_compatible", "api_key": ""},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "missing_api_key"
+
+    # GET must NOT 422 — `last_test_status` must remain a valid TestStatus.
+    get_response = client.get("/api/llm/credentials")
+    assert get_response.status_code == 200, get_response.text
+    providers = {p["provider_code"]: p for p in get_response.json()["providers"]}
+    oc_cl = providers["OC_CL"]
+    assert oc_cl["last_test_status"] == "untested"
+
+
 def test_provider_test_persists_outcome_to_credentials(
     client: TestClient,
     tmp_path: Path,

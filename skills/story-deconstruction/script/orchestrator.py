@@ -11,7 +11,7 @@ SKILLS_BASE_PATH = ROOT_PATH / "skills"
 
 def segment_all_chapters(context: dict) -> str:
     """遍历所有章节，调用 text-segmentation skill 进行分段。"""
-    from graph_agent.core.runner import run_skill
+    from story_forge.core.graph_agent import run_skill
 
     chapters = context.get("chapters", [])
     all_segmentations = []
@@ -31,12 +31,10 @@ def segment_all_chapters(context: dict) -> str:
         segmentation_ctx = result.get("context", {})
         segmentation_result = segmentation_ctx.get("segmentation_result", {})
 
-        all_segmentations.append(
-            {
-                "chapter_number": chapter_number,
-                "segmentation": segmentation_result,
-            }
-        )
+        all_segmentations.append({
+            "chapter_number": chapter_number,
+            "segmentation": segmentation_result,
+        })
 
     context["all_segmentations"] = all_segmentations
 
@@ -45,7 +43,7 @@ def segment_all_chapters(context: dict) -> str:
 
 def extract_all_events(context: dict) -> str:
     """遍历所有分段结果，调用 event-extraction skill 提取事件。"""
-    from graph_agent.core.runner import run_skill
+    from story_forge.core.graph_agent import run_skill
 
     all_segmentations = context.get("all_segmentations", [])
     all_events = []
@@ -63,6 +61,7 @@ def extract_all_events(context: dict) -> str:
             chapter_number=chapter_number,
             segmentation_result=segmentation,
             prev_chapter_last_event=prev_chapter_last_event,
+            output_dir=context.get("output_dir", ""),
         )
 
         event_ctx = result.get("context", {})
@@ -70,12 +69,10 @@ def extract_all_events(context: dict) -> str:
         chapter_events = event_timeline.get("events", [])
         para_lookup = event_ctx.get("para_text_lookup", {})
 
-        all_events.append(
-            {
-                "chapter_number": chapter_number,
-                "events": chapter_events,
-            }
-        )
+        all_events.append({
+            "chapter_number": chapter_number,
+            "events": chapter_events,
+        })
 
         para_text_lookup.update(para_lookup)
 
@@ -87,7 +84,10 @@ def extract_all_events(context: dict) -> str:
     context["total_events"] = sum(len(ch.get("events", [])) for ch in all_events)
     context["total_chapters"] = len(all_events)
 
-    return f"Extracted {context['total_events']} events from {context['total_chapters']} chapters"
+    return (
+        f"Extracted {context['total_events']} events "
+        f"from {context['total_chapters']} chapters"
+    )
 
 
 def discover_tracking_dimensions(context: dict) -> str:
@@ -112,9 +112,9 @@ def discover_tracking_dimensions(context: dict) -> str:
         prompt = (
             "Based on the following event summaries from a story, "
             "identify key dynamic dimensions that should be tracked "
-            "across the narrative:\n\n"
-            + "\n".join(f"- {s}" for s in event_summaries)
-            + "\n\nReturn a list of dimension names (e.g., 'plot_progression', "
+            "across the narrative:\n\n" +
+            "\n".join(f"- {s}" for s in event_summaries) +
+            "\n\nReturn a list of dimension names (e.g., 'plot_progression', "
             "'character_development', 'tension_level')."
         )
         response = llm_call(prompt)
@@ -137,12 +137,10 @@ def prepare_next_batch(context: dict) -> str:
     for ch in all_events:
         ch_num = ch.get("chapter_number")
         for event in ch.get("events", []):
-            flat_events.append(
-                {
-                    **event,
-                    "chapter_number": ch_num,
-                }
-            )
+            flat_events.append({
+                **event,
+                "chapter_number": ch_num,
+            })
 
     start_idx = batch_index * batch_size
     end_idx = start_idx + batch_size
@@ -167,7 +165,7 @@ def prepare_next_batch(context: dict) -> str:
 
 def run_batch_analysis(context: dict) -> str:
     """调用 batch-analysis skill 分析当前批次事件。"""
-    from graph_agent.core.runner import run_skill
+    from story_forge.core.graph_agent import run_skill
 
     batch_events = context.get("current_batch_events", [])
 
@@ -187,17 +185,57 @@ def run_batch_analysis(context: dict) -> str:
     updated_accumulated = batch_ctx.get("updated_accumulated", {})
 
     all_batch_results = context.get("all_batch_results", [])
-    all_batch_results.append(
-        {
-            "batch_index": context.get("current_batch_index", 1),
-            "chapter_range": context.get("current_chapter_range", ""),
-            "result": batch_result,
-        }
-    )
+    all_batch_results.append({
+        "batch_index": context.get("current_batch_index", 1),
+        "chapter_range": context.get("current_chapter_range", ""),
+        "result": batch_result,
+    })
     context["all_batch_results"] = all_batch_results
     context["accumulated_context"] = updated_accumulated
 
     return f"Batch analysis complete. Total batches: {len(all_batch_results)}"
+
+
+def run_global_synthesis(context: dict) -> str:
+    """调用 global-synthesis skill 进行全局综合分析。"""
+    from story_forge.core.graph_agent import run_skill
+
+    all_batch_results = context.get("all_batch_results", [])
+    accumulated_context = context.get("accumulated_context", {})
+    entity_registry = context.get("entity_registry", {})
+
+    logger.info(
+        "Running global synthesis: %d batches, entity_registry keys=%d",
+        len(all_batch_results),
+        len(entity_registry),
+    )
+
+    result = run_skill(
+        SKILLS_BASE_PATH / "global-synthesis" / "SKILL.md",
+        batch_outputs=all_batch_results,
+        accumulated_context=accumulated_context,
+        entity_registry=entity_registry,
+    )
+
+    synthesis_ctx = result.get("context", {})
+    story_framework = synthesis_ctx.get("story_framework", {})
+
+    context["story_framework"] = story_framework
+
+    climax_count = len(story_framework.get("climax_ranking", []))
+    character_count = len(story_framework.get("character_ranking", []))
+    scenes_count = len(story_framework.get("scenes", []))
+
+    logger.info(
+        "Global synthesis complete: climaxes=%d characters=%d scenes=%d",
+        climax_count,
+        character_count,
+        scenes_count,
+    )
+    return (
+        f"Global synthesis complete: {climax_count} climaxes, "
+        f"{character_count} characters, {scenes_count} scenes"
+    )
 
 
 def check_all_batches_done(context: dict) -> str:

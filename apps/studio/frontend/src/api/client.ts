@@ -1,7 +1,10 @@
-import axios, { AxiosHeaders } from 'axios'
+import axios, { AxiosError, AxiosHeaders } from 'axios'
 import type {
   AppSettings,
   CollaborateResult,
+  CompileFailure,
+  CompileResult,
+  CompileSuccess,
   GitHistoryItem,
   GoldenBaseline,
   JsonObject,
@@ -73,6 +76,26 @@ export async function syncSkill(skillId: string, request: SyncSkillReq): Promise
 export async function publishSkill(skillId: string, request: PublishSkillReq = {}): Promise<PublishResult> {
   const response = await api.post<PublishResult>(`/skills/${skillId}/publish`, request)
   return response.data
+}
+
+export async function compileSkill(skillId: string): Promise<CompileResult> {
+  try {
+    const response = await api.post<CompileSuccess>(`/skills/${skillId}/compile`)
+    return response.data
+  } catch (error) {
+    if (error instanceof AxiosError && isCompileFailure(error.response?.data)) {
+      return error.response.data
+    }
+    throw error
+  }
+}
+
+function isCompileFailure(value: unknown): value is CompileFailure {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false
+  }
+  const candidate = value as Partial<CompileFailure>
+  return candidate.code === 'compile_failed' && Array.isArray(candidate.errors)
 }
 
 export function wsUrl(path: string): string {

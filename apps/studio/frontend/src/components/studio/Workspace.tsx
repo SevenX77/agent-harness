@@ -7,7 +7,8 @@ import { useCopilotContext } from "@/hooks/useCopilotContext"
 import { readLintStatus } from "@/hooks/useDebouncedLint"
 import { useSkills } from "@/hooks/useSkills"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
-import { getSkillDetail, wsUrl } from "@/api/client"
+import { compileSkill, getSkillDetail, wsUrl } from "@/api/client"
+import type { CompileError } from "@/api/types"
 import { sha256Hex } from "@/lib/hash"
 import { CenterActionBar, type SkillBuildStage } from "./center-action-bar"
 import { ConflictDialog } from "./ConflictDialog"
@@ -58,6 +59,8 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const [conflict, setConflict] = useState<SaveConflict | null>(null)
   const { skillDetail, skillDetailError, mutateSkillDetail } = useSkills(currentSkillId)
   const isLoading = useMemo(() => Boolean(currentSkillId && !skillDetail && !skillDetailError), [skillDetail, skillDetailError, currentSkillId])
+  const [compileStages, setCompileStages] = useState<Record<string, SkillBuildStage>>({})
+  const [compileErrors, setCompileErrors] = useState<Record<string, CompileError[]>>({})
 
   useCopilotContext({
     skillId: currentSkillId,
@@ -286,7 +289,41 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     updateFileContent,
   ])
 
+  const handleCompile = useCallback(() => {
+    if (!currentSkillId) return
+    const targetSkillId = currentSkillId
+    setCompileStages((current) => ({ ...current, [targetSkillId]: "compiling" }))
+    setCompileErrors((current) => ({ ...current, [targetSkillId]: [] }))
+    void compileSkill(targetSkillId)
+      .then((result) => {
+        if ("code" in result) {
+          setCompileStages((current) => ({ ...current, [targetSkillId]: "compile-fail" }))
+          setCompileErrors((current) => ({ ...current, [targetSkillId]: result.errors }))
+          const firstMessage = result.errors[0]?.message ?? result.detail
+          toast.error(`${result.errors.length} compile error${result.errors.length === 1 ? "" : "s"}: ${firstMessage}`)
+          return
+        }
+        if (result.status === "ok") {
+          setCompileStages((current) => ({ ...current, [targetSkillId]: "compile-pass" }))
+          setCompileErrors((current) => ({ ...current, [targetSkillId]: [] }))
+          toast.success(`Compiled ${result.manifest_name}`)
+          void mutateSkillDetail()
+        }
+      })
+      .catch((error: unknown) => {
+        setCompileStages((current) => ({ ...current, [targetSkillId]: "compile-fail" }))
+        const message = error instanceof Error ? error.message : "Compile request failed"
+        setCompileErrors((current) => ({
+          ...current,
+          [targetSkillId]: [{ file: null, line: null, field: null, severity: "fatal", message }],
+        }))
+        toast.error(message)
+      })
+  }, [currentSkillId, mutateSkillDetail])
+
   const deriveBuildStage = (id: string): SkillBuildStage => {
+    const compileStage = compileStages[id]
+    if (compileStage) return compileStage
     const lint = readLintStatus(id)
     if (lint === "checking") return "compiling"
     if (lint === "failed") return "compile-fail"
@@ -295,6 +332,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   }
 
   const hasOpenFile = Boolean(activeFileDetails.left || activeFileDetails.right)
+  const currentCompileErrors = currentSkillId ? compileErrors[currentSkillId] ?? [] : []
 
   return (
     <WorkspaceProvider value={contextValue}>
@@ -370,12 +408,17 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                 />
               )}
               {currentSkillId && !settingsOpen ? (
-                <CenterActionBar
-                  stage={deriveBuildStage(currentSkillId)}
-                  onCompile={() => console.info("compile clicked")}
-                  onPredict={() => console.info("predict clicked")}
-                  onRun={() => console.info("run clicked")}
-                />
+                <>
+                  {currentCompileErrors.length > 0 ? (
+                    <CompileErrorPanel errors={currentCompileErrors} />
+                  ) : null}
+                  <CenterActionBar
+                    stage={deriveBuildStage(currentSkillId)}
+                    onCompile={handleCompile}
+                    onPredict={() => console.info("predict clicked")}
+                    onRun={() => console.info("run clicked")}
+                  />
+                </>
               ) : null}
             </div>
           </ResizablePanel>
@@ -403,6 +446,29 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       />
     </div>
     </WorkspaceProvider>
+  )
+}
+
+function CompileErrorPanel({ errors }: { errors: CompileError[] }) {
+  const first = errors[0]
+  return (
+    <div className="absolute bottom-20 left-1/2 z-30 w-[min(560px,calc(100%-2rem))] -translate-x-1/2 rounded-md border border-destructive/40 bg-background/95 p-3 text-sm shadow-lg backdrop-blur">
+      <div className="font-medium text-destructive">
+        {errors.length} compile error{errors.length === 1 ? "" : "s"}: {first?.message ?? "Compilation failed"}
+      </div>
+      <div className="mt-2 max-h-36 space-y-2 overflow-auto">
+        {errors.map((error, index) => (
+          <div key={`${error.file ?? "compile"}-${error.line ?? "x"}-${index}`} className="text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">
+              {error.file ?? "unknown file"}
+              {error.line ? `:${error.line}` : ""}
+            </span>
+            {error.field ? <span> - {error.field}</span> : null}
+            <span> - {error.message}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
 

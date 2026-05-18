@@ -24,6 +24,7 @@ from app.models.git_collab import SyncSkillReq
 from app.models.git_history import GitHistoryItem, RevertSkillReq
 from app.models.publish import PublishResult, PublishSkillReq
 from app.models.skills import (
+    CompileSuccess,
     CreateSkillReq,
     ForkSkillReq,
     SerializeGraphReq,
@@ -50,6 +51,8 @@ from app.services.git_local import (
     GitRevertConflictError,
 )
 from app.services.skills import (
+    CompileFailedError,
+    compile_skill_for_studio,
     create_new_skill,
     delete_skill,
     fork_skill,
@@ -100,6 +103,19 @@ async def get_skill(
     metadata: MetadataStore = Depends(get_metadata),
 ) -> SkillDetail:
     return await get_skill_detail(user_id, skill_id, storage, metadata)
+
+
+@router.post("/{skill_id}/compile", response_model=CompileSuccess)
+async def compile_skill_endpoint(
+    skill_id: str,
+    user_id: str = Depends(get_auth_user_id),
+    storage: StorageBackend = Depends(get_storage),
+    metadata: MetadataStore = Depends(get_metadata),
+) -> CompileSuccess | JSONResponse:
+    try:
+        return await compile_skill_for_studio(user_id, skill_id, storage, metadata)
+    except CompileFailedError as exc:
+        return JSONResponse(status_code=422, content=jsonable_encoder(exc.failure.model_dump()))
 
 
 @router.post("/{skill_id}/graph/serialize", response_model=SerializeGraphRes)

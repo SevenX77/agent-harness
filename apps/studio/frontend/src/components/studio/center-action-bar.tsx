@@ -32,7 +32,7 @@ function deriveButtons(stage: SkillBuildStage): ButtonDerivation {
   if (stage === "idle" || stage === "compiling" || stage === "compile-fail") {
     return {
       compileHighlight: true,
-      compileDisabled: false,
+      compileDisabled: stage === "compiling",
       predictHighlight: false,
       predictDisabled: true,
       runHighlight: false,

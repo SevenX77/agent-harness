@@ -19,35 +19,14 @@ export interface SaveConflict {
   remoteHash: string | null
 }
 
-export interface NodePropertyField {
-  name: string
-  type?: string | null
-}
-
-export interface SelectedNodeForProperties {
-  id: string
-  label: string
-  kind: 'phase' | 'input' | 'output'
-  modeLabel?: string
-  dependsOn?: string[]
-  role?: string | null
-  tools?: string[]
-  filePath?: string
-  fields?: NodePropertyField[]
-}
-
 export interface WorkspaceContextValue {
   currentSkillId: string | null
   navStack: string[]
   activeFiles: { left?: string, right?: string }
   activeFileDetails: Partial<Record<EditorSide, OpenFile>>
   splitMode: boolean
-  propertiesPanelOpen: boolean
-  selectedNodeForProperties: SelectedNodeForProperties | null
   onFileOpen: (fileOrPath: FileMeta | string, side?: EditorSide) => void
   openSplitEditor: () => void
-  openProperties: (node: SelectedNodeForProperties) => void
-  closeProperties: () => void
   closeFile: (side: EditorSide) => void
   updateFileContent: (side: EditorSide, content: string) => void
   markFileSaved: (side: EditorSide, hash: string) => void

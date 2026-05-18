@@ -855,6 +855,8 @@ def _build_phase_document(
     data = dict(frontmatter)
     data["raw_blocks"] = blocks
     data.setdefault("name", phase_name)
+    if mode == "skill":
+        data = _normalize_skill_node_frontmatter(path, data)
 
     try:
         if mode == "logic":
@@ -878,6 +880,27 @@ def _build_phase_document(
         raw_blocks=blocks,
         ast=ast,
     )
+
+
+def _normalize_skill_node_frontmatter(path: Path, data: dict[str, Any]) -> dict[str, Any]:
+    phase_config = data.pop("phase_config", None)
+    if phase_config is None:
+        return data
+    if not isinstance(phase_config, dict):
+        _fatal(path, _frontmatter_key_line(path, "phase_config"), "phase_config must be an object")
+    merged = dict(data)
+    if "tools" in phase_config:
+        merged.setdefault("tools", phase_config["tools"])
+    if "subagents" in phase_config:
+        merged["subagents"] = phase_config["subagents"]
+    extra_keys = sorted(set(phase_config) - {"tools", "subagents"})
+    if extra_keys:
+        _fatal(
+            path,
+            _frontmatter_key_line(path, "phase_config"),
+            "unsupported phase_config keys: " + ", ".join(extra_keys),
+        )
+    return merged
 
 
 _ATTR_RE = re.compile(r"([A-Za-z_][\w:-]*)\s*=\s*(['\"])(.*?)\2", re.DOTALL)

@@ -4,16 +4,6 @@
       "additionalProperties": false,
       "description": "Deterministic Python phase node parsed from ``LOGIC.md``.",
       "properties": {
-        "metadata": {
-          "additionalProperties": true,
-          "title": "Metadata",
-          "type": "object"
-        },
-        "mode": {
-          "const": "logic",
-          "title": "Mode",
-          "type": "string"
-        },
         "name": {
           "anyOf": [
             {
@@ -26,17 +16,27 @@
           "default": null,
           "title": "Name"
         },
-        "python_callable": {
-          "minLength": 1,
-          "title": "Python Callable",
-          "type": "string"
-        },
         "raw_blocks": {
           "additionalProperties": {
             "type": "string"
           },
           "title": "Raw Blocks",
           "type": "object"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "mode": {
+          "const": "logic",
+          "title": "Mode",
+          "type": "string"
+        },
+        "python_callable": {
+          "minLength": 1,
+          "title": "Python Callable",
+          "type": "string"
         }
       },
       "required": [
@@ -50,10 +50,24 @@
       "additionalProperties": false,
       "description": "LLM ReAct phase node parsed from ``SKILL.md``.",
       "properties": {
-        "exit_contract": {
-          "minLength": 1,
-          "title": "Exit Contract",
-          "type": "string"
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "raw_blocks": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Raw Blocks",
+          "type": "object"
         },
         "metadata": {
           "additionalProperties": true,
@@ -65,28 +79,14 @@
           "title": "Mode",
           "type": "string"
         },
-        "name": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Name"
-        },
-        "raw_blocks": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "Raw Blocks",
-          "type": "object"
-        },
         "system_prompt": {
           "minLength": 1,
           "title": "System Prompt",
+          "type": "string"
+        },
+        "exit_contract": {
+          "minLength": 1,
+          "title": "Exit Contract",
           "type": "string"
         },
         "tools": {
@@ -94,6 +94,13 @@
             "type": "string"
           },
           "title": "Tools",
+          "type": "array"
+        },
+        "subagents": {
+          "items": {
+            "$ref": "#/$defs/SubagentSpec"
+          },
+          "title": "Subagents",
           "type": "array"
         }
       },
@@ -105,20 +112,38 @@
       "title": "SkillNodeAST",
       "type": "object"
     },
+    "SubagentSpec": {
+      "additionalProperties": false,
+      "description": "Sub-skill declared as a callable tool on a SKILL phase.",
+      "properties": {
+        "name": {
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "description"
+      ],
+      "title": "SubagentSpec",
+      "type": "object"
+    },
     "SubgraphNodeAST": {
       "additionalProperties": false,
       "description": "Subgraph delegation phase node parsed from ``SUBGRAPH.md``.",
       "properties": {
-        "metadata": {
-          "additionalProperties": true,
-          "title": "Metadata",
-          "type": "object"
-        },
-        "mode": {
-          "const": "subgraph",
-          "title": "Mode",
-          "type": "string"
-        },
         "name": {
           "anyOf": [
             {
@@ -137,6 +162,16 @@
           },
           "title": "Raw Blocks",
           "type": "object"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "mode": {
+          "const": "subgraph",
+          "title": "Mode",
+          "type": "string"
         },
         "sub_skill_ref": {
           "minLength": 1,

@@ -3,7 +3,7 @@ import { ArrowDown, ArrowUp, Check, Eye, EyeOff, KeyRound, Loader2, Plug, Plus, 
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card"
+import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -719,14 +719,16 @@ function ProviderCard({
   const statusVariant = status === "ok" ? "secondary" : status === "untested" ? "outline" : "destructive"
   return (
     <Card data-provider-id={draft.id}>
-      <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+      <CardHeader className="flex flex-row items-center gap-3 pb-2">
         <Input
           value={draft.name}
           onChange={(event) => onFieldChange({ name: event.target.value })}
           placeholder="Provider Name"
-          className="flex-1 font-semibold"
+          className="w-full max-w-xs font-semibold"
           aria-label="Provider Name"
         />
+        <Badge variant={statusVariant}>{displayStatus}</Badge>
+        <div className="flex-1" />
         <Button type="button" variant="ghost" size="icon" onClick={onDelete} aria-label="Delete provider">
           <Trash2 className="size-4" />
         </Button>
@@ -749,9 +751,9 @@ function ProviderCard({
             </div>
           </RadioGroup>
         </div>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor={`api-key-${draft.id}`}>API Key</Label>
+        <div className="space-y-2">
+          <Label htmlFor={`api-key-${draft.id}`}>API Key</Label>
+          <div className="flex items-center gap-2">
             <div className="relative">
               <Input
                 id={`api-key-${draft.id}`}
@@ -774,27 +776,24 @@ function ProviderCard({
                 {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
               </Button>
             </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor={`base-url-${draft.id}`}>Base URL</Label>
-            <Input
-              id={`base-url-${draft.id}`}
-              value={draft.base_url}
-              onChange={(event) => onFieldChange({ base_url: event.target.value })}
-              placeholder="https://api.openai.com/v1"
-              autoComplete="off"
-              spellCheck={false}
-            />
+            <Button type="button" variant="default" onClick={onTest} disabled={draft.isTesting}>
+              {draft.isTesting ? <Loader2 className="size-3.5 animate-spin" /> : null}
+              Test Connection
+            </Button>
           </div>
         </div>
+        <div className="space-y-2">
+          <Label htmlFor={`base-url-${draft.id}`}>Base URL</Label>
+          <Input
+            id={`base-url-${draft.id}`}
+            value={draft.base_url}
+            onChange={(event) => onFieldChange({ base_url: event.target.value })}
+            placeholder="https://api.openai.com/v1"
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </div>
       </CardContent>
-      <CardFooter className="flex justify-between border-t bg-muted/50 px-6 py-3">
-        <Badge variant={statusVariant}>{displayStatus}</Badge>
-        <Button type="button" variant="default" onClick={onTest} disabled={draft.isTesting}>
-          {draft.isTesting ? <Loader2 className="size-3.5 animate-spin" /> : null}
-          Test Connection
-        </Button>
-      </CardFooter>
     </Card>
   )
 }

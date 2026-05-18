@@ -59,7 +59,9 @@ describe('ContextEdge', () => {
     const html = renderToStaticMarkup(<ContextEdge {...baseProps} />)
 
     expect(html).toContain('aria-label="查看连线传递数据"')
-    expect(html).toContain('border-primary/70')
+    expect(html).toContain('size-4')
+    expect(html).toContain('bg-primary')
+    expect(html).toContain('border-primary')
   })
 
   it('renders the design-time tooltip copy', () => {

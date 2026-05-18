@@ -49,10 +49,10 @@ export function ContextEdge({
                 type="button"
                 aria-label="查看连线传递数据"
                 className={[
-                  'block size-3 rounded-full border bg-transparent transition-colors',
+                  'block size-4 rounded-full border bg-primary transition-colors',
                   hasTraceData
-                    ? 'border-primary bg-primary'
-                    : 'border-primary/70 hover:border-primary',
+                    ? 'border-primary ring-2 ring-primary/40'
+                    : 'border-primary hover:ring-2 hover:ring-primary/30',
                 ].join(' ')}
                 onClick={(event) => {
                   event.stopPropagation()

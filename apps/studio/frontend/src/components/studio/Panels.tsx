@@ -413,7 +413,7 @@ export function PropertiesPanel({ skillDetail, selectedNode }: Pick<PanelsProps,
                   aria-expanded={modelOpen}
                   className="h-7 w-full justify-between text-xs font-normal"
                 >
-                  {models.find((model) => model.value === modelValue)?.label ?? selectedNode?.data.role ?? "Select model..."}
+                  {models.find((model) => model.value === modelValue)?.label ?? "Select model..."}
                   <ChevronsUpDown className="ml-2 size-3.5 shrink-0 opacity-50" />
                 </Button>
               </PopoverTrigger>

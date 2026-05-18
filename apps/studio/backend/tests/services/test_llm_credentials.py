@@ -51,15 +51,14 @@ def test_redacted_for_response_never_returns_api_key() -> None:
         ]
     )
 
-    assert redacted_for_response(data) == {
-        "providers": [
-            {
-                "provider_code": "OC_CL",
-                "has_key": True,
-                "base_url": "https://base",
-            }
-        ]
-    }
+    body = redacted_for_response(data)
+    assert body["providers"][0]["provider_code"] == "OC_CL"
+    assert body["providers"][0]["has_key"] is True
+    assert body["providers"][0]["base_url"] == "https://base"
+    assert body["providers"][0]["last_test_status"] == "untested"
+    assert body["providers"][0]["available_models"] == []
+    assert "api_key" not in body["providers"][0]
+    assert "secret" not in str(body)
 
 
 def test_patch_environment_uses_fallback_when_primary_env_missing(

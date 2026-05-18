@@ -6,6 +6,43 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
+ProviderType = Literal[
+    "anthropic_compatible",
+    "openai_compatible",
+    "gemini_official",
+    "wavespeed_any_llm",
+]
+
+TestStatus = Literal[
+    "untested",
+    "ok",
+    "invalid_key",
+    "rate_limited",
+    "quota_exceeded",
+    "network_error",
+    "timeout",
+]
+
+
+class ModelCapabilities(BaseModel):
+    """Per-model capability flags (lightweight, vendor-neutral)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: bool = True
+    function_calling: bool = False
+    vision: bool = False
+    reasoning: bool = False
+
+
+class ModelInfo(BaseModel):
+    """One model advertised by a provider."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
+
 
 class ProviderCredential(BaseModel):
     """Local credential entry for one configured LLM provider."""
@@ -16,6 +53,25 @@ class ProviderCredential(BaseModel):
     api_key: str = ""
     base_url: str = ""
 
+    title: str = ""
+    provider_type: ProviderType | None = None
+    vendor_hint: str = ""
+
+    last_test_status: TestStatus = "untested"
+    last_test_at: str = ""
+    last_test_message: str = ""
+    last_error_code: str = ""
+    available_models: list[ModelInfo] = Field(default_factory=list)
+
+
+TEST_OUTCOME_FIELDS: tuple[str, ...] = (
+    "last_test_status",
+    "last_test_at",
+    "last_test_message",
+    "last_error_code",
+    "available_models",
+)
+
 
 class LLMCredentialsFile(BaseModel):
     """Schema stored at ``~/.studio/llm_credentials.json``."""
@@ -23,14 +79,6 @@ class LLMCredentialsFile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     providers: list[ProviderCredential] = Field(default_factory=list)
-
-
-ProviderType = Literal[
-    "anthropic_compatible",
-    "openai_compatible",
-    "gemini_official",
-    "wavespeed_any_llm",
-]
 
 
 class ModelEntry(BaseModel):
@@ -103,11 +151,15 @@ class RolesData(BaseModel):
 
 __all__ = [
     "LLMCredentialsFile",
+    "ModelCapabilities",
     "ModelEntry",
+    "ModelInfo",
     "ProviderEntry",
     "ProviderCredential",
     "ProviderType",
     "RoleEntry",
     "RoleModelEntry",
     "RolesData",
+    "TEST_OUTCOME_FIELDS",
+    "TestStatus",
 ]

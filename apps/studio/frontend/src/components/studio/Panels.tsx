@@ -81,7 +81,7 @@ function FileRow({
     <button
       type="button"
       onClick={() => onOpen(file)}
-      className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      className="flex w-full cursor-pointer items-center gap-2 rounded-md border-0 px-2 py-1.5 text-left text-xs text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
     >
       <Icon className="size-4" strokeWidth={1.5} />
       <span className="truncate">{filename}</span>
@@ -105,7 +105,7 @@ function FolderRow({
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
-        className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        className="flex w-full cursor-pointer items-center gap-2 rounded-md border-0 px-2 py-1.5 text-left text-xs text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
       >
         {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
         <Folder className="size-4" strokeWidth={1.5} />

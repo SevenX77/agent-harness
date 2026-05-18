@@ -190,8 +190,6 @@ async def list_skill_summaries(
         if not saved_summary.directory_path:
             continue
         skill_dir = Path(saved_summary.directory_path)
-        if not await storage.exists(str(skill_dir / "GRAPH.md")):
-            continue
         summaries[saved_summary.id] = _attach_config_mismatch(
             (
                 await _summary_for_skill_dir_async(
@@ -411,8 +409,27 @@ async def create_new_skill(
         if directory_path
         else config.DEFAULT_SKILLS_ROOT / skill_id
     )
-    public_path = config.SKILLS_DIR / skill_id / "GRAPH.md"
+    if directory_path and await _directory_is_nonempty(skill_dir):
+        summary = (
+            await _summary_for_skill_dir_async(
+                user_id,
+                skill_dir,
+                storage,
+                metadata,
+                skill_id=skill_id,
+            )
+        ).model_copy(
+            update={"directory_path": str(skill_dir)},
+        )
+        await metadata.save_skill_index_entry(
+            skill_id,
+            {"absolute_path": str(skill_dir), "l2_remote_url": ""},
+        )
+        await metadata.save_skill_summary(user_id, summary)
+        return summary
+
     skill_path = skill_dir / "GRAPH.md"
+    public_path = config.SKILLS_DIR / skill_id / "GRAPH.md"
     if await storage.exists(str(skill_path)) or await storage.exists(str(public_path)):
         raise standard_http_exception(
             "SKILL_ALREADY_EXISTS",
@@ -527,18 +544,20 @@ async def resolve_skill_dir_async(
     indexed = await metadata.get_skill_index_entry(skill_id)
     if indexed:
         skill_dir = Path(indexed["absolute_path"])
-        if await storage.exists(str(skill_dir / "GRAPH.md")):
+        if await storage.exists(str(skill_dir)):
             return skill_dir
 
     saved_summary = await metadata.get_skill_summary(user_id, skill_id)
     if saved_summary and saved_summary.directory_path:
-        return Path(saved_summary.directory_path)
+        skill_dir = Path(saved_summary.directory_path)
+        if await storage.exists(str(skill_dir)):
+            return skill_dir
 
     workspace_dir = _workspace_skills_dir_for(user_id) / skill_id
-    if await storage.exists(str(workspace_dir / "GRAPH.md")):
+    if await _workspace_skill_body_exists(workspace_dir, storage):
         return workspace_dir
     public_dir = config.SKILLS_DIR / skill_id
-    if await storage.exists(str(public_dir / "GRAPH.md")):
+    if await storage.exists(str(public_dir)):
         return public_dir
     raise standard_http_exception(
         "SKILL_NOT_FOUND",
@@ -568,7 +587,7 @@ def ensure_workspace_skill_dir(skill_id: str) -> Path:
             return skill_dir
 
     workspace_dir = config.default_workspace_skills_dir() / skill_id
-    if workspace_dir.exists():
+    if _workspace_skill_body_exists_sync(workspace_dir):
         return workspace_dir
 
     public_dir = config.SKILLS_DIR / skill_id
@@ -593,14 +612,14 @@ def resolve_skill_dir(skill_id: str) -> Path:
     indexed = _sync_skill_index_entry(skill_id)
     if indexed:
         skill_dir = Path(indexed["absolute_path"])
-        if (skill_dir / "GRAPH.md").exists():
+        if skill_dir.exists():
             return skill_dir
 
     workspace_dir = config.default_workspace_skills_dir() / skill_id
-    if (workspace_dir / "GRAPH.md").exists():
+    if _workspace_skill_body_exists_sync(workspace_dir):
         return workspace_dir
     public_dir = config.SKILLS_DIR / skill_id
-    if (public_dir / "GRAPH.md").exists():
+    if public_dir.exists():
         return public_dir
     raise standard_http_exception(
         "SKILL_NOT_FOUND",
@@ -710,8 +729,11 @@ async def _summary_for_skill_dir_async(
     skill_id: str | None = None,
 ) -> SkillSummary:
     resolved_skill_id = skill_id or skill_dir.name
-    lint = lint_skill_path(skill_dir)
-    if lint.status == "passed":
+    if not await storage.exists(str(skill_dir / "GRAPH.md")):
+        name = resolved_skill_id
+        description = ""
+        phase_count = 0
+    elif (lint := lint_skill_path(skill_dir)).status == "passed":
         compiled = _load_compiled(skill_dir)
         name = compiled.manifest.name
         description = str(compiled.manifest.description or "")
@@ -729,6 +751,30 @@ async def _summary_for_skill_dir_async(
         has_golden=await storage.exists(str(golden_dir_for(skill_dir))),
         last_run_at=latest.started_at if latest else None,
     )
+
+
+async def _directory_is_nonempty(path: Path) -> bool:
+    if not path.exists() or not path.is_dir():
+        return False
+    return await asyncio.to_thread(lambda: any(path.iterdir()))
+
+
+async def _workspace_skill_body_exists(path: Path, storage: StorageBackend) -> bool:
+    if not await storage.exists(str(path)):
+        return False
+    child_names = await storage.list_dirs(str(path))
+    files = await asyncio.to_thread(
+        lambda: [child.name for child in path.iterdir() if child.is_file()] if path.exists() else [],
+    )
+    entries = set(child_names) | set(files)
+    return not entries or bool(entries - {"runs", "skill_summary.json"})
+
+
+def _workspace_skill_body_exists_sync(path: Path) -> bool:
+    if not path.exists():
+        return False
+    entries = {child.name for child in path.iterdir()}
+    return not entries or bool(entries - {"runs", "skill_summary.json"})
 
 
 async def _validated_directory_path(
@@ -867,6 +913,7 @@ async def _broken_detail_from_files_async(
             "predict_dir": str(predict_dir_for(skill_dir)),
             "local_settings": str(local_settings_path_for(skill_dir)),
         },
+        # Broken/V1 details still expose the real asset tree for the Explorer panel.
         files=_read_skill_files(skill_dir),
         has_golden=await storage.exists(str(golden_dir_for(skill_dir))),
         latest_run_metadata=latest,
@@ -881,11 +928,16 @@ def _read_skill_files(skill_dir: Path) -> dict[str, str]:
         if not path.is_file():
             continue
         rel_path = path.relative_to(skill_dir).as_posix()
-        try:
-            validate_skill_file_path(rel_path)
-        except HTTPException:
+        parts = path.relative_to(skill_dir).parts
+        if any(part.startswith(".") or part in {"__pycache__", "node_modules"} for part in parts):
             continue
-        files[rel_path] = path.read_text(encoding="utf-8")
+        if path.stat().st_size > 1024 * 1024:
+            files[rel_path] = "(binary or too large)"
+            continue
+        try:
+            files[rel_path] = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
     return files
 
 
@@ -1200,8 +1252,9 @@ def _raise_manifest_validation_failed(lint: LintResult) -> None:
 async def _list_skill_ids(root: Path, storage: StorageBackend) -> list[str]:
     skill_ids: list[str] = []
     for child_name in await storage.list_dirs(str(root)):
-        if await storage.exists(str(root / child_name / "GRAPH.md")):
-            skill_ids.append(child_name)
+        if child_name.startswith(".") or child_name == "__pycache__":
+            continue
+        skill_ids.append(child_name)
     return sorted(skill_ids)
 
 

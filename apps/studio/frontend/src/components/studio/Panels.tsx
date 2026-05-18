@@ -37,6 +37,13 @@ interface InputPanelProps {
   onFileOpen: (file: FileMeta) => void
 }
 
+interface AssetTreeNode {
+  name: string
+  path: string
+  file?: FileMeta
+  children: Map<string, AssetTreeNode>
+}
+
 function PanelHeader({ title, extra }: { title: string; extra?: ReactNode }) {
   return (
     <div className="flex h-10 shrink-0 items-center px-3">
@@ -120,21 +127,21 @@ function fileFromDetail(skillDetail: SkillDetail | undefined, path: string): Fil
   }
 }
 
-function phaseIds(skillDetail?: SkillDetail): string[] {
+export function phaseIds(skillDetail?: SkillDetail): string[] {
   const fromTopology = skillDetail?.graph_topology?.map((phase) => phase.id) ?? []
   if (fromTopology.length > 0) return fromTopology
   const phases = skillDetail?.manifest.schema_version === "2.1" ? skillDetail.manifest.phases : []
   return phases.map((phase) => phase.id)
 }
 
-function actionFiles(skillDetail: SkillDetail | undefined, phaseId: string): FileMeta[] {
+export function actionFiles(skillDetail: SkillDetail | undefined, phaseId: string): FileMeta[] {
   return Object.keys(skillDetail?.files ?? {})
     .filter((path) => path.startsWith(`phases/${phaseId}/actions/`) && path.endsWith(".py"))
     .sort()
     .map((path) => fileFromDetail(skillDetail, path))
 }
 
-function manifestFiles(skillDetail?: SkillDetail, selectedNode?: { id: string; data: SkillGraphNodeData } | null): FileMeta[] {
+export function manifestFiles(skillDetail?: SkillDetail, selectedNode?: { id: string; data: SkillGraphNodeData } | null): FileMeta[] {
   const manifest = skillDetail?.manifest
   if (skillDetail?.files) {
     return Object.keys(skillDetail.files)
@@ -191,11 +198,66 @@ function inputFiles(skillDetail?: SkillDetail): FileMeta[] {
   ]
 }
 
-export function AssetsPanel({ skillDetail, selectedNode }: AssetsPanelProps) {
+function createAssetTreeNode(name: string, path: string): AssetTreeNode {
+  return {
+    name,
+    path,
+    children: new Map(),
+  }
+}
+
+function buildAssetTree(skillDetail?: SkillDetail): AssetTreeNode {
+  const root = createAssetTreeNode("", "")
+  for (const path of Object.keys(skillDetail?.files ?? {}).sort()) {
+    const parts = path.split("/").filter(Boolean)
+    if (parts.length === 0) continue
+
+    let current = root
+    parts.forEach((part, index) => {
+      const nodePath = parts.slice(0, index + 1).join("/")
+      let node = current.children.get(part)
+      if (!node) {
+        node = createAssetTreeNode(part, nodePath)
+        current.children.set(part, node)
+      }
+      if (index === parts.length - 1) {
+        node.file = fileFromDetail(skillDetail, path)
+      }
+      current = node
+    })
+  }
+  return root
+}
+
+function sortedAssetChildren(node: AssetTreeNode): AssetTreeNode[] {
+  return [...node.children.values()].sort((left, right) => {
+    const leftIsFolder = left.children.size > 0
+    const rightIsFolder = right.children.size > 0
+    if (leftIsFolder !== rightIsFolder) return leftIsFolder ? -1 : 1
+    return left.name.localeCompare(right.name)
+  })
+}
+
+function AssetTreeRows({ node, onOpen }: { node: AssetTreeNode; onOpen: (file: FileMeta) => void }) {
+  return (
+    <>
+      {sortedAssetChildren(node).map((child) => {
+        if (child.children.size > 0) {
+          return (
+            <FolderRow key={child.path} name={child.name}>
+              <AssetTreeRows node={child} onOpen={onOpen} />
+            </FolderRow>
+          )
+        }
+        return child.file ? <FileRow key={child.path} file={child.file} onOpen={onOpen} /> : null
+      })}
+    </>
+  )
+}
+
+export function AssetsPanel({ skillDetail }: AssetsPanelProps) {
   const { onFileOpen } = useWorkspaceContext()
-  const files = manifestFiles(skillDetail, selectedNode)
-  const phases = phaseIds(skillDetail)
-  const filesByPath = new Map(files.map((file) => [file.path, file]))
+  const fileTree = useMemo(() => buildAssetTree(skillDetail), [skillDetail])
   const openFile = (file: FileMeta) => onFileOpen(file)
 
   return (
@@ -203,38 +265,9 @@ export function AssetsPanel({ skillDetail, selectedNode }: AssetsPanelProps) {
       <PanelHeader title="Assets" />
 
       <ScrollArea className="flex-1">
-        <div className="space-y-3 px-2 py-2 text-xs">
+        <div className="space-y-1 px-1.5 py-1 text-xs">
           <SectionHeading label="Skill Files" />
-          <FileRow file={filesByPath.get("GRAPH.md") ?? fileFromDetail(skillDetail, "GRAPH.md")} onOpen={openFile} />
-          <FolderRow name="phases" defaultExpanded>
-            {phases.map((phaseId) => (
-              <FolderRow key={phaseId} name={phaseId} defaultExpanded>
-                {(["SKILL.md", "LOGIC.md", "SUBGRAPH.md"] as const).map((filename) => {
-                  const path = `phases/${phaseId}/${filename}`
-                  const file = filesByPath.get(path)
-                  return file ? <FileRow key={path} file={file} onOpen={openFile} /> : null
-                })}
-                {actionFiles(skillDetail, phaseId).length > 0 ? (
-                  <FolderRow name="actions" defaultExpanded>
-                    {actionFiles(skillDetail, phaseId).map((file) => (
-                      <FileRow key={file.path} file={file} onOpen={openFile} />
-                    ))}
-                  </FolderRow>
-                ) : null}
-              </FolderRow>
-            ))}
-          </FolderRow>
-          <FolderRow name="io" defaultExpanded>
-            {(["io/inputs.json", "io/outputs.json"] as const).map((path) => {
-              const file = filesByPath.get(path)
-              return file ? <FileRow key={path} file={file} onOpen={openFile} /> : null
-            })}
-          </FolderRow>
-          {filesByPath.size === 0 && files[2] ? (
-            <FolderRow name="nodes" defaultExpanded>
-              <FileRow file={files[2]} onOpen={openFile} />
-            </FolderRow>
-          ) : null}
+          <AssetTreeRows node={fileTree} onOpen={openFile} />
         </div>
       </ScrollArea>
     </div>

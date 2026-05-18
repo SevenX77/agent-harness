@@ -129,13 +129,9 @@ def test_stream_query_errors_when_api_key_missing(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(
         copilot, "_resolve_copilot_provider", lambda _model_override: _resolved_provider()
     )
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi")))
 
-    assert events == [
-        CopilotEventError(message="Provider OC_CL_ANT 未配置 API key (env: ANTHROPIC_API_KEY)")
-    ]
+    assert events == [CopilotEventError(message="Provider OC_CL_ANT 未配置 API key")]
 
 
 def test_stream_query_errors_when_model_override_is_unknown(

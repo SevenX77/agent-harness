@@ -94,12 +94,12 @@ def _raise_for_status(response: httpx.Response) -> None:
     code = response.status_code
     if code == 401:
         raise _Unauthorized(
-            f"HTTP 401 from provider",
+            "HTTP 401 from provider",
             error_code=_extract_vendor_error_code(response, default="unauthorized"),
         )
     if code == 429:
         raise _RateLimited(
-            f"HTTP 429 from provider",
+            "HTTP 429 from provider",
             error_code=_extract_vendor_error_code(response, default="rate_limited"),
         )
     if code in (402, 403):

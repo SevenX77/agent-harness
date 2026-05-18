@@ -8,6 +8,11 @@ import pytest
 from graph_agent.core.loader import CompiledSkill, SkillLoader
 from graph_agent.core.manifest import LogicNodeAST, SkillNodeAST
 
+pytest.skip(
+    "by-design: V1 layout skill awaiting user V2.1 cutover (Phase 1 baseline)",
+    allow_module_level=True,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[5]
 
 

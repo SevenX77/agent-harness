@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 from app.core import config
 from app.models.llm_config import LLMCredentialsFile, ProviderCredential

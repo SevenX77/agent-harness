@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import pytest
+
+from graph_agent.core.exceptions import GraphAgentFatalError
+from graph_agent.core.graph_assembler import _invoke_subagent_tool_t21
 from graph_agent.core.subagents import build_subagent_input_model, validate_subagent_tool_args
 
 
@@ -13,6 +16,12 @@ def _input_model() -> type:
             "required": ["scene_text"],
         },
     )
+
+
+class _Subagent:
+    name = "beat"
+    input_model = _input_model()
+    expected_schema = input_model.model_json_schema()
 
 
 def test_subagent_runtime_rejects_non_array_inputs() -> None:
@@ -80,4 +89,28 @@ def test_subagent_runtime_fails_after_ten_schema_retries() -> None:
             expected_schema=model.model_json_schema(),
             args={"inputs": []},
             retry_count=11,
+        )
+
+
+def test_subagent_depth_zero_allows_call() -> None:
+    result = _invoke_subagent_tool_t21(
+        tool_name="call_subagent_beat",
+        subagent=_Subagent(),
+        args={"inputs": [{"scene_text": "x"}]},
+        flow={"subagent_depth": 0},
+    )
+
+    assert result["ok"] is True
+
+
+def test_subagent_depth_one_blocks_nested_call() -> None:
+    with pytest.raises(
+        GraphAgentFatalError,
+        match="Max Depth 1 exceeded: subagent cannot call another subagent",
+    ):
+        _invoke_subagent_tool_t21(
+            tool_name="call_subagent_beat",
+            subagent=_Subagent(),
+            args={"inputs": [{"scene_text": "x"}]},
+            flow={"subagent_depth": 1},
         )

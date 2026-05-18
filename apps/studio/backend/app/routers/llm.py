@@ -188,15 +188,15 @@ async def test_llm_provider(request: ProviderTestRequest) -> ProviderTestRespons
     """
 
     if not request.api_key:
-        outcome_at = _now_iso()
-        return _record_and_return(
-            request.provider_code,
-            ProviderTestResponse(
-                status="missing_api_key",
-                message="API key is empty.",
-                error_code="missing_api_key",
-            ),
-            outcome_at,
+        # `missing_api_key` is a synthetic short-circuit code — it's never an
+        # actual test outcome, so don't persist it as `last_test_status` (which
+        # is constrained to TestStatus literals and would 422 on next GET).
+        # The response still surfaces it for the toast; storage keeps
+        # last_test_status="untested" and only records the synthetic error_code.
+        return ProviderTestResponse(
+            status="missing_api_key",
+            message="API key is empty.",
+            error_code="missing_api_key",
         )
 
     started = asyncio.get_running_loop().time()

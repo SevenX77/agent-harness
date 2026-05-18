@@ -43,6 +43,12 @@ class CompiledStateGraph:
     edges: list[tuple[str, str]] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class _SubagentRuntime:
+    subagent: CompiledSubagent
+    graph: Any
+
+
 def assemble_graph(
     compiled: CompiledSkill,
     *,
@@ -175,6 +181,11 @@ def _build_skill_node(
     business_tools = compiled.tools.for_phase(phase_id)
     tool_by_name = {tool.name: tool for tool in business_tools}
     subagent_by_tool_name = _subagent_tool_map(phase_id, compiled)
+    subagent_runtime_by_tool_name = _subagent_runtime_map(
+        subagent_by_tool_name,
+        chat_model=chat_model,
+        max_patch_attempts=max_patch_attempts,
+    )
     framework_tools = []
     critic_metrics: dict[str, Any] = {}
 
@@ -241,7 +252,9 @@ def _build_skill_node(
                         tool_name=name,
                         subagent=subagent_by_tool_name[name],
                         args=call_args if isinstance(call_args, dict) else {},
+                        state=state,
                         flow=flow,
+                        runtime=subagent_runtime_by_tool_name[name],
                     )
                 else:
                     result = tool.invoke(call_args)
@@ -293,7 +306,9 @@ def _invoke_subagent_tool_t21(
     tool_name: str,
     subagent: CompiledSubagent,
     args: dict[str, Any],
+    state: BlackboardState | None = None,
     flow: dict[str, Any],
+    runtime: _SubagentRuntime | None = None,
 ) -> dict[str, Any]:
     try:
         assert_subagent_depth_allowed(current_subagent_depth(flow))
@@ -315,11 +330,63 @@ def _invoke_subagent_tool_t21(
     )
     if isinstance(validation, SubagentValidationFailure):
         return validation.to_tool_result()
+    if runtime is not None and state is not None:
+        return {
+            "ok": True,
+            "tool_name": tool_name,
+            "subagent_name": subagent.name,
+            "results": [
+                _invoke_subagent_once_t23(runtime, state, item.model_dump())
+                for item in validation
+            ],
+        }
     return {
         "ok": True,
         "tool_name": tool_name,
         "subagent_name": subagent.name,
         "inputs": [item.model_dump() for item in validation],
+    }
+
+
+def _subagent_runtime_map(
+    subagent_by_tool_name: dict[str, CompiledSubagent],
+    *,
+    chat_model: Any,
+    max_patch_attempts: int,
+) -> dict[str, _SubagentRuntime]:
+    runtimes: dict[str, _SubagentRuntime] = {}
+    for tool_name, subagent in subagent_by_tool_name.items():
+        sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(subagent.root)
+        sub_assembled = assemble_graph(
+            sub_compiled,
+            chat_model=chat_model,
+            max_patch_attempts=max_patch_attempts,
+        )
+        runtimes[tool_name] = _SubagentRuntime(subagent=subagent, graph=sub_assembled.graph)
+    return runtimes
+
+
+def _invoke_subagent_once_t23(
+    runtime: _SubagentRuntime,
+    parent_state: BlackboardState,
+    input_data: dict[str, Any],
+) -> dict[str, Any]:
+    before_data = dict(parent_state.get("data", {}))
+    child_data = {**before_data, **input_data}
+    result = runtime.graph.invoke(
+        {
+            "data": child_data,
+            "flow": parent_state.get("flow", {}),
+            "messages": [],
+            "run_id": parent_state.get("run_id"),
+        }
+    )
+    result_data = result.get("data", child_data)
+    data_delta = _dict_delta(before_data, result_data) if isinstance(result_data, dict) else {}
+    return {
+        "status": "ok",
+        "data": data_delta,
+        "flow": result.get("flow", parent_state.get("flow", {})),
     }
 
 

@@ -24,7 +24,9 @@ export interface WorkspaceContextValue {
   navStack: string[]
   activeFiles: { left?: string, right?: string }
   activeFileDetails: Partial<Record<EditorSide, OpenFile>>
+  splitMode: boolean
   onFileOpen: (fileOrPath: FileMeta | string, side?: EditorSide) => void
+  openSplitEditor: () => void
   closeFile: (side: EditorSide) => void
   updateFileContent: (side: EditorSide, content: string) => void
   markFileSaved: (side: EditorSide, hash: string) => void

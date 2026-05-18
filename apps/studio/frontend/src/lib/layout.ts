@@ -23,6 +23,7 @@ function nodeSize(node: Node): { width: number; height: number } {
 export function getAutoLayoutedElements<TNode extends Node, TEdge extends Edge>(
   nodes: TNode[],
   edges: TEdge[],
+  options: { bottomReservedHeight?: number } = {},
 ): { nodes: TNode[]; edges: TEdge[] } {
   const graph = new graphlib.Graph()
   graph.setDefaultEdgeLabel(() => ({}))
@@ -55,7 +56,7 @@ export function getAutoLayoutedElements<TNode extends Node, TEdge extends Edge>(
         ...node,
         position: {
           x: position.x - size.width / 2,
-          y: position.y - size.height / 2,
+          y: position.y - size.height / 2 - (options.bottomReservedHeight ?? 0),
         },
       }
     }),

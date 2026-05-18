@@ -1,6 +1,12 @@
-import { Layers, Loader2, Sparkles } from "lucide-react"
+import { ChevronDown, Layers, Loader2, Sparkles } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { isTauriRuntime } from "@/config/runtime"
 import { usePublishSkill } from "@/hooks/usePublishSkill"
@@ -99,52 +105,33 @@ export function Header({
 
       <div className="flex items-center justify-end gap-1.5">
         {skillId ? (
-          <>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={() => void skillSync.save()}
-              disabled={isBusy}
-              aria-label="Save to Team"
-            >
-              {isSaving ? <Loader2 className="mr-1 size-3 animate-spin" /> : null}
-              {isSaving ? "Saving" : "Save to Team"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={() => void skillSync.sync()}
-              disabled={isBusy}
-              aria-label="Sync from Team"
-            >
-              {isSyncing ? <Loader2 className="mr-1 size-3 animate-spin" /> : null}
-              {isSyncing ? "Syncing" : "Sync from Team"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={handleSubmitForReview}
-              disabled={isBusy}
-              aria-label="Submit for Review"
-            >
-              {isSubmitting ? <Loader2 className="mr-1 size-3 animate-spin" /> : null}
-              {isSubmitting ? "Submitting" : "Submit for Review"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={() => void publish.publish()}
-              disabled={isPublishing}
-              aria-label="Release to Production"
-            >
-              {isPublishing ? <Loader2 className="mr-1 size-3 animate-spin" /> : null}
-              {isPublishing ? "Releasing" : "Release"}
-            </Button>
-          </>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-7 gap-1 text-xs" disabled={isBusy || isPublishing}>
+                {(isBusy || isPublishing) ? <Loader2 className="size-3 animate-spin" /> : null}
+                Team
+                <ChevronDown className="size-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-44">
+              <DropdownMenuItem disabled={isBusy} onClick={() => void skillSync.save()}>
+                {isSaving ? <Loader2 className="size-3 animate-spin" /> : null}
+                Save to Team
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={isBusy} onClick={() => void skillSync.sync()}>
+                {isSyncing ? <Loader2 className="size-3 animate-spin" /> : null}
+                Sync from Team
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={isBusy} onClick={handleSubmitForReview}>
+                {isSubmitting ? <Loader2 className="size-3 animate-spin" /> : null}
+                Submit for Review
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={isPublishing} onClick={() => void publish.publish()}>
+                {isPublishing ? <Loader2 className="size-3 animate-spin" /> : null}
+                Release
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         ) : null}
         <Tooltip>
           <TooltipTrigger asChild>

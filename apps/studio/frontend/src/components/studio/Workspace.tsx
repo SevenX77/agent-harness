@@ -49,6 +49,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     }
   }, [skillId])
   const [activeFileDetails, setActiveFileDetails] = useState<Partial<Record<EditorSide, OpenFile>>>({})
+  const [splitMode, setSplitMode] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedNode, setSelectedNode] = useState<{ id: string; data: SkillGraphNodeData } | null>(null)
@@ -106,15 +107,23 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     void toOpenFile(fileOrPath).then((file) => {
       if (!file) return
       setActiveFileDetails((current) => {
-        const targetSide = side ?? (current.left ? "right" : "left")
+        const targetSide = side ?? (splitMode && current.left ? "right" : "left")
         return { ...current, [targetSide]: file }
       })
     })
-  }, [toOpenFile])
+  }, [splitMode, toOpenFile])
 
   const closeFile = useCallback((side: EditorSide) => {
-    setActiveFileDetails((current) => ({ ...current, [side]: undefined }))
-    setInFlight((current) => ({ ...current, [side]: false }))
+    setActiveFileDetails((current) => {
+      const remainingSide: EditorSide = side === "left" ? "right" : "left"
+      const remaining = current[remainingSide]
+      setSplitMode(false)
+      return remaining ? { left: remaining } : {}
+    })
+    setInFlight((current) => {
+      const remainingSide: EditorSide = side === "left" ? "right" : "left"
+      return current[remainingSide] ? { left: current[remainingSide] } : {}
+    })
   }, [])
 
   const updateFileContent = useCallback((side: EditorSide, content: string) => {
@@ -171,6 +180,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
 
   const handleViewDiff = useCallback(() => {
     if (!conflict) return
+    setSplitMode(true)
     setActiveFileDetails((current) => ({
       ...current,
       right: {
@@ -189,6 +199,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const pushNavSkill = useCallback((nextSkillId: string) => {
     setNavStack((current) => [...current, nextSkillId])
     setActiveFileDetails({})
+    setSplitMode(false)
     setSelectedNode(null)
     setSelectedNodeId(null)
   }, [])
@@ -196,6 +207,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const popNavTo = useCallback((index: number) => {
     setNavStack((current) => current.slice(0, index + 1))
     setActiveFileDetails({})
+    setSplitMode(false)
     setSelectedNode(null)
     setSelectedNodeId(null)
   }, [])
@@ -248,7 +260,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
       right: activeFileDetails.right?.path,
     },
     activeFileDetails,
+    splitMode,
     onFileOpen: handleFileOpen,
+    openSplitEditor: () => setSplitMode(true),
     closeFile,
     updateFileContent,
     markFileSaved,
@@ -268,6 +282,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     pushNavSkill,
     reloadOpenFile,
     setFileInFlight,
+    splitMode,
     updateFileContent,
   ])
 
@@ -343,23 +358,23 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
               ) : currentSkillId === null ? (
                 <WelcomePage onSelectSkill={onSelectSkill} />
               ) : (
-                <>
-                  <GraphCanvas
-                    skillId={currentSkillId}
-                    skillDetail={skillDetail}
-                    isLoading={isLoading}
-                    error={skillDetailError}
-                    selectedNodeId={selectedNodeId}
-                    onNodeSelect={handleNodeSelect}
-                  />
-                  <CenterActionBar
-                    stage={deriveBuildStage(currentSkillId)}
-                    onCompile={() => console.info("compile clicked")}
-                    onPredict={() => console.info("predict clicked")}
-                    onRun={() => console.info("run clicked")}
-                  />
-                </>
+                <GraphCanvas
+                  skillId={currentSkillId}
+                  skillDetail={skillDetail}
+                  isLoading={isLoading}
+                  error={skillDetailError}
+                  selectedNodeId={selectedNodeId}
+                  onNodeSelect={handleNodeSelect}
+                />
               )}
+              {currentSkillId && !settingsOpen ? (
+                <CenterActionBar
+                  stage={deriveBuildStage(currentSkillId)}
+                  onCompile={() => console.info("compile clicked")}
+                  onPredict={() => console.info("predict clicked")}
+                  onRun={() => console.info("run clicked")}
+                />
+              ) : null}
             </div>
           </ResizablePanel>
 

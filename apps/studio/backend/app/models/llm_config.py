@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
@@ -49,13 +50,11 @@ class ProviderCredential(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    provider_code: str
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    name: str
     api_key: str = ""
     base_url: str = ""
-
-    title: str = ""
     provider_type: ProviderType | None = None
-    vendor_hint: str = ""
 
     last_test_status: TestStatus = "untested"
     last_test_at: str = ""
@@ -78,6 +77,7 @@ class LLMCredentialsFile(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    schema_version: Literal[3] = 3
     providers: list[ProviderCredential] = Field(default_factory=list)
 
 

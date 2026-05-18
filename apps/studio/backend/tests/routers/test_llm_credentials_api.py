@@ -9,7 +9,6 @@ import pytest
 from app.main import create_app
 from app.routers import llm as llm_router
 from app.services.copilot_test import (
-    PingResult,
     _NetworkError,
     _QuotaExceeded,
     _RateLimited,
@@ -34,7 +33,8 @@ def test_get_credentials_returns_has_key_without_api_key(
         json={
             "providers": [
                 {
-                    "provider_code": "OC_CL",
+                    "id": "OC_CL",
+                    "name": "Claude",
                     "api_key": "sk-secret",
                     "base_url": "https://base.test",
                 }
@@ -48,7 +48,7 @@ def test_get_credentials_returns_has_key_without_api_key(
     body = response.json()
     assert len(body["providers"]) == 1
     provider = body["providers"][0]
-    assert provider["provider_code"] == "OC_CL"
+    assert provider["id"] == "OC_CL"
     assert provider["has_key"] is True
     assert provider["base_url"] == "https://base.test"
     assert provider["last_test_status"] == "untested"
@@ -65,7 +65,7 @@ def test_put_credentials_requires_bearer_token(
     with TestClient(create_app()) as unauthenticated:
         response = unauthenticated.put(
             "/api/llm/credentials",
-            json={"providers": [{"provider_code": "OC_CL", "api_key": "secret"}]},
+            json={"providers": [{"id": "OC_CL", "name": "Claude", "api_key": "secret"}]},
         )
 
     assert response.status_code == 401
@@ -80,7 +80,7 @@ def test_put_credentials_writes_and_get_reads_sanitized(
 
     response = client.put(
         "/api/llm/credentials",
-        json={"providers": [{"provider_code": "OC_CL", "api_key": "secret"}]},
+        json={"providers": [{"id": "OC_CL", "name": "Claude", "api_key": "secret"}]},
     )
 
     assert response.status_code == 200
@@ -178,7 +178,7 @@ def test_provider_test_maps_errors(
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     async def fake_ping(
-        _provider_code: str,
+        _id: str,
         _provider_type: ProviderType,
         _api_key: str,
         _base_url: str | None,
@@ -190,7 +190,7 @@ def test_provider_test_maps_errors(
     response = client.post(
         "/api/llm/providers/test",
         json={
-            "provider_code": "OC_CL",
+            "id": "OC_CL",
             "provider_type": "anthropic_compatible",
             "api_key": "secret",
         },
@@ -205,7 +205,7 @@ def test_provider_test_requires_token() -> None:
         response = unauthenticated.post(
             "/api/llm/providers/test",
             json={
-                "provider_code": "OC_CL",
+                "id": "OC_CL",
                 "provider_type": "anthropic_compatible",
                 "api_key": "secret",
             },
@@ -222,7 +222,7 @@ def test_provider_test_masks_key_in_response_and_logs(
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     async def fake_ping(
-        _provider_code: str,
+        _id: str,
         _provider_type: ProviderType,
         _api_key: str,
         _base_url: str | None,
@@ -240,7 +240,7 @@ def test_provider_test_masks_key_in_response_and_logs(
     response = client.post(
         "/api/llm/providers/test",
         json={
-            "provider_code": "OC_CL",
+            "id": "OC_CL",
             "provider_type": "anthropic_compatible",
             "api_key": "sk-secret-1234",
         },
@@ -274,19 +274,19 @@ def test_put_credentials_full_replace_deletes_omitted_providers(
         "/api/llm/credentials",
         json={
             "providers": [
-                {"provider_code": "OC_CL", "api_key": "k1", "base_url": "https://a"},
-                {"provider_code": "OC_OAI", "api_key": "k2", "base_url": "https://b"},
+                {"id": "OC_CL", "name": "Claude", "api_key": "k1", "base_url": "https://a"},
+                {"id": "OC_OAI", "name": "OpenAI", "api_key": "k2", "base_url": "https://b"},
             ]
         },
     )
     # Second PUT omits OC_OAI → must delete it (full-replace semantics).
     response = client.put(
         "/api/llm/credentials",
-        json={"providers": [{"provider_code": "OC_CL", "api_key": "k1", "base_url": "https://a"}]},
+        json={"providers": [{"id": "OC_CL", "name": "Claude", "api_key": "k1", "base_url": "https://a"}]},
     )
 
     assert response.status_code == 200
-    codes = sorted(p["provider_code"] for p in response.json()["providers"])
+    codes = sorted(p["id"] for p in response.json()["providers"])
     assert codes == ["OC_CL"]
 
 
@@ -301,7 +301,7 @@ def test_put_credentials_preserves_existing_api_key_when_body_blank(
         "/api/llm/credentials",
         json={
             "providers": [
-                {"provider_code": "OC_CL", "api_key": "sk-original", "base_url": "https://a"}
+                {"id": "OC_CL", "name": "Claude", "api_key": "sk-original", "base_url": "https://a"}
             ]
         },
     )
@@ -310,7 +310,7 @@ def test_put_credentials_preserves_existing_api_key_when_body_blank(
         "/api/llm/credentials",
         json={
             "providers": [
-                {"provider_code": "OC_CL", "api_key": "", "base_url": "https://updated"}
+                {"id": "OC_CL", "name": "Claude", "api_key": "", "base_url": "https://updated"}
             ]
         },
     )
@@ -339,7 +339,8 @@ def test_put_credentials_rejects_test_outcome_fields_in_body(
         json={
             "providers": [
                 {
-                    "provider_code": "OC_CL",
+                    "id": "OC_CL",
+                    "name": "Claude",
                     "api_key": "k",
                     "last_test_status": "ok",  # forbidden — Test fields are single-write
                 }
@@ -361,7 +362,7 @@ def test_put_credentials_preserves_test_outcome_fields(
 
     client.put(
         "/api/llm/credentials",
-        json={"providers": [{"provider_code": "OC_CL", "api_key": "k", "base_url": ""}]},
+        json={"providers": [{"id": "OC_CL", "name": "Claude", "api_key": "k", "base_url": ""}]},
     )
 
     # Simulate a POST test writeback by directly invoking _persist_test_outcome.
@@ -382,7 +383,7 @@ def test_put_credentials_preserves_test_outcome_fields(
         "/api/llm/credentials",
         json={
             "providers": [
-                {"provider_code": "OC_CL", "api_key": "k", "base_url": "https://updated"}
+                {"id": "OC_CL", "name": "Claude", "api_key": "k", "base_url": "https://updated"}
             ]
         },
     )
@@ -427,7 +428,7 @@ def test_provider_test_returns_missing_api_key_without_call(
     response = client.post(
         "/api/llm/providers/test",
         json={
-            "provider_code": "OC_CL",
+            "id": "OC_CL",
             "provider_type": "anthropic_compatible",
             "api_key": "",
         },
@@ -457,13 +458,13 @@ def test_provider_test_missing_api_key_does_not_dirty_last_test_status(
     # Seed a provider that has been used before so writeback has a target.
     client.put(
         "/api/llm/credentials",
-        json={"providers": [{"provider_code": "OC_CL", "api_key": "sk-once", "base_url": ""}]},
+        json={"providers": [{"id": "OC_CL", "name": "Claude", "api_key": "sk-once", "base_url": ""}]},
     )
 
     # Empty-key Test (sonner toast still shows missing_api_key).
     response = client.post(
         "/api/llm/providers/test",
-        json={"provider_code": "OC_CL", "provider_type": "openai_compatible", "api_key": ""},
+        json={"id": "OC_CL", "provider_type": "openai_compatible", "api_key": ""},
     )
     assert response.status_code == 200
     assert response.json()["status"] == "missing_api_key"
@@ -471,7 +472,7 @@ def test_provider_test_missing_api_key_does_not_dirty_last_test_status(
     # GET must NOT 422 — `last_test_status` must remain a valid TestStatus.
     get_response = client.get("/api/llm/credentials")
     assert get_response.status_code == 200, get_response.text
-    providers = {p["provider_code"]: p for p in get_response.json()["providers"]}
+    providers = {p["id"]: p for p in get_response.json()["providers"]}
     oc_cl = providers["OC_CL"]
     assert oc_cl["last_test_status"] == "untested"
 
@@ -486,7 +487,7 @@ def test_provider_test_persists_outcome_to_credentials(
     # Seed an existing provider so writeback has a target.
     client.put(
         "/api/llm/credentials",
-        json={"providers": [{"provider_code": "OC_CL", "api_key": "sk", "base_url": ""}]},
+        json={"providers": [{"id": "OC_CL", "name": "Claude", "api_key": "sk", "base_url": ""}]},
     )
 
     async def fake_ping(*_args: object, **_kwargs: object) -> PingResultExtended:
@@ -502,7 +503,7 @@ def test_provider_test_persists_outcome_to_credentials(
     response = client.post(
         "/api/llm/providers/test",
         json={
-            "provider_code": "OC_CL",
+            "id": "OC_CL",
             "provider_type": "anthropic_compatible",
             "api_key": "sk",
         },
@@ -543,7 +544,7 @@ def test_provider_test_no_provider_silent_noop(
     response = client.post(
         "/api/llm/providers/test",
         json={
-            "provider_code": "NEW_CODE",
+            "id": "NEW_CODE",
             "provider_type": "anthropic_compatible",
             "api_key": "sk",
         },

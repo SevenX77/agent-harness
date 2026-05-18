@@ -14,7 +14,6 @@ import asyncio
 import hashlib
 import inspect
 import json
-import os
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,6 +44,7 @@ from app.models.copilot import (
     CopilotEventToolUseStart,
     CopilotToolName,
 )
+from app.services.llm_credentials import load_credentials
 
 SessionKey = tuple[str, str, str]
 
@@ -197,13 +197,10 @@ async def stream_query(
         yield CopilotEventError(message=str(exc))
         return
 
-    api_key = _resolve_api_key(primary.provider_def)
+    api_key, base_url = _resolve_provider_runtime(primary.provider_code, primary.provider_def)
     if not api_key:
         yield CopilotEventError(
-            message=(
-                f"Provider {primary.provider_code} 未配置 API key "
-                f"(env: {primary.provider_def.api_key_env})"
-            )
+            message=f"Provider {primary.provider_code} 未配置 API key"
         )
         return
 
@@ -216,7 +213,7 @@ async def stream_query(
             skill_id=skill_id,
             model_code=model_code,
             provider_code=provider_code,
-            base_url=primary.provider_def.base_url,
+            base_url=base_url,
             api_key=api_key,
             workspace_dir=workspace_dir or Path.cwd(),
         )
@@ -384,11 +381,24 @@ def _resolve_copilot_provider(model_override: str | None) -> ResolvedProvider:
     return resolved.call_chain[0]
 
 
-def _resolve_api_key(provider_def: ProviderDef) -> str:
-    key = os.environ.get(provider_def.api_key_env, "") if provider_def.api_key_env else ""
-    if not key and provider_def.api_key_env_fallback:
-        key = os.environ.get(provider_def.api_key_env_fallback, "")
-    return key
+def _resolve_provider_runtime(
+    provider_code: str,
+    provider_def: ProviderDef,
+) -> tuple[str, str | None]:
+    credentials = load_credentials()
+    provider = next(
+        (
+            credential
+            for credential in credentials.providers
+            if credential.id == provider_code
+            or credential.name == provider_def.name
+            or credential.name == provider_code
+        ),
+        None,
+    )
+    if provider is None:
+        return "", provider_def.base_url
+    return provider.api_key.strip(), provider.base_url.strip() or provider_def.base_url
 
 
 def _error_event_for_exception(exc: Exception) -> CopilotEventError:

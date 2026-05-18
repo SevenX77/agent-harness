@@ -399,6 +399,7 @@ export function GraphCanvas({
 }: GraphCanvasProps) {
   const workspace = useOptionalWorkspaceContext()
   const [expandedSubgraphs, setExpandedSubgraphs] = useState<Set<string>>(() => new Set())
+  const [selectedCanvasNodeId, setSelectedCanvasNodeId] = useState<string | null>(null)
   const fitViewRef = useRef<(() => void) | null>(null)
   const fitLayout = useCallback(() => {
     window.requestAnimationFrame(() => {
@@ -456,8 +457,8 @@ export function GraphCanvas({
   }, [layoutResult.error])
 
   const selectedNodes = useMemo(
-    () => nodes.map((node) => ({ ...node, selected: node.id === selectedNodeId })),
-    [nodes, selectedNodeId],
+    () => nodes.map((node) => ({ ...node, selected: node.id === (selectedCanvasNodeId ?? selectedNodeId) })),
+    [nodes, selectedCanvasNodeId, selectedNodeId],
   )
 
   const onConnect = useCallback((connection: Connection) => {
@@ -511,11 +512,13 @@ export function GraphCanvas({
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onNodeClick={(_, node) => {
+          setSelectedCanvasNodeId(node.id)
           if (node.type === 'skill') {
             onNodeSelect?.({ id: node.id, data: node.data })
           }
         }}
         onNodeDragStart={(_, node) => {
+          setSelectedCanvasNodeId(node.id)
           if (node.type === 'skill') {
             onNodeSelect?.({ id: node.id, data: node.data })
           }

@@ -28,6 +28,27 @@ function renderNode(data: GlobalNodeData): string {
   )
 }
 
+function renderSelectedNode(data: GlobalNodeData): string {
+  const nodeType = data.type === 'global-input' ? 'globalInput' : 'globalOutput'
+
+  return renderToStaticMarkup(
+    <GlobalInputOutputNode
+      id="global"
+      type={nodeType}
+      data={data}
+      selected
+      isConnectable
+      draggable={false}
+      selectable
+      deletable={false}
+      dragging={false}
+      zIndex={0}
+      positionAbsoluteX={0}
+      positionAbsoluteY={0}
+    />,
+  )
+}
+
 describe('GlobalInputOutputNode', () => {
   it('renders input fields with type badges', () => {
     const html = renderNode({
@@ -39,9 +60,10 @@ describe('GlobalInputOutputNode', () => {
     })
 
     expect(html).toContain('Input')
+    expect(html).toContain('INPUT')
     expect(html).toContain('topic')
     expect(html).toContain('string')
-    expect(html).toContain('border-t-primary')
+    expect(html).toContain('cursor-pointer')
   })
 
   it('renders output fields with type badges', () => {
@@ -54,12 +76,13 @@ describe('GlobalInputOutputNode', () => {
     })
 
     expect(html).toContain('Output')
+    expect(html).toContain('OUTPUT')
     expect(html).toContain('report')
     expect(html).toContain('object')
-    expect(html).toContain('border-t-muted-foreground')
+    expect(html).toContain('cursor-pointer')
   })
 
-  it('renders an empty state when schema has no fields', () => {
+  it('omits empty state copy and schema eye button when schema has no fields', () => {
     const html = renderNode({
       type: 'global-input',
       schema: {
@@ -68,7 +91,20 @@ describe('GlobalInputOutputNode', () => {
       },
     })
 
-    expect(html).toContain('(no fields)')
-    expect(html).toContain('aria-label="查看完整 schema"')
+    expect(html).not.toContain('(no fields)')
+    expect(html).not.toContain('aria-label="查看完整 schema"')
+  })
+
+  it('uses the same selected ring treatment as graph nodes', () => {
+    const html = renderSelectedNode({
+      type: 'global-output',
+      schema: {
+        inputs: [],
+        outputs: [],
+      },
+    })
+
+    expect(html).toContain('border-primary')
+    expect(html).toContain('ring-primary/30')
   })
 })

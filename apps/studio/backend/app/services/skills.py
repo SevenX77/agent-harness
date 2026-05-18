@@ -800,7 +800,9 @@ async def _workspace_skill_body_exists(path: Path, storage: StorageBackend) -> b
         return False
     child_names = await storage.list_dirs(str(path))
     files = await asyncio.to_thread(
-        lambda: [child.name for child in path.iterdir() if child.is_file()] if path.exists() else [],
+        lambda: (
+            [child.name for child in path.iterdir() if child.is_file()] if path.exists() else []
+        ),
     )
     entries = set(child_names) | set(files)
     return not entries or bool(entries - {"runs", "skill_summary.json"})

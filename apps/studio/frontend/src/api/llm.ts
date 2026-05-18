@@ -6,22 +6,75 @@ export type ProviderType =
   | 'gemini_official'
   | 'wavespeed_any_llm'
 
+/**
+ * Test outcome status persisted on the credential record. Mirrors backend
+ * `app.models.llm_config.TestStatus`. Does NOT include `testing` — that is a
+ * transient UI flag, not a persisted state.
+ */
+export type TestStatus =
+  | 'untested'
+  | 'ok'
+  | 'invalid_key'
+  | 'rate_limited'
+  | 'quota_exceeded'
+  | 'network_error'
+  | 'timeout'
+
+export interface ModelCapabilities {
+  text: boolean
+  function_calling: boolean
+  vision: boolean
+  reasoning: boolean
+}
+
+export interface ModelInfo {
+  id: string
+  capabilities: ModelCapabilities
+}
+
+/**
+ * Server-side credential entry as returned by GET /api/llm/credentials.
+ *
+ * The 5 Test outcome fields (`last_test_*` + `available_models`) are
+ * *single-writer* — they're populated by POST /providers/test on the backend
+ * and arrive via GET. Sending them in PUT triggers a 422.
+ */
 export interface CredentialProviderState {
   provider_code: string
   has_key: boolean
   base_url?: string
+
+  // From llm_roles.yaml metadata (only when include_metadata=true).
   name?: string
-  provider_type?: ProviderType
+
+  // From the credential record itself.
+  title?: string
+  provider_type?: ProviderType | null
+  vendor_hint?: string
+
+  last_test_status?: TestStatus
+  last_test_at?: string
+  last_test_message?: string
+  last_error_code?: string
+  available_models?: ModelInfo[]
 }
 
 export interface CredentialsState {
   providers: CredentialProviderState[]
 }
 
+/**
+ * The 6 editable fields accepted by PUT /api/llm/credentials.
+ * Backend rejects unknown fields including any `last_test_*` — those are
+ * persisted only via POST /providers/test.
+ */
 export interface ProviderCredentialUpdate {
   provider_code: string
   api_key: string
   base_url?: string
+  title?: string
+  provider_type?: ProviderType | null
+  vendor_hint?: string
 }
 
 export interface ProviderTestRequest {
@@ -32,6 +85,7 @@ export interface ProviderTestRequest {
   model_id?: string
 }
 
+/** Includes the transient `missing_api_key` short-circuit (api_key empty). */
 export type ProviderTestStatus =
   | 'ok'
   | 'invalid_key'
@@ -39,12 +93,15 @@ export type ProviderTestStatus =
   | 'quota_exceeded'
   | 'network_error'
   | 'timeout'
+  | 'missing_api_key'
 
 export interface ProviderTestResponse {
   status: ProviderTestStatus
   latency_ms?: number | null
   model_seen?: string | null
   message?: string | null
+  error_code?: string | null
+  available_models?: ModelInfo[]
 }
 
 export interface RoleModelEntry {

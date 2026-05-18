@@ -23,6 +23,8 @@ export function SplitEditor({
 }: SplitEditorProps) {
   const {
     activeFileDetails,
+    splitMode,
+    openSplitEditor,
     closeFile,
     updateFileContent,
     markFileSaved,
@@ -30,7 +32,7 @@ export function SplitEditor({
     onSaveConflict,
   } = useWorkspaceContext()
 
-  const renderEditor = (side: EditorSide, file: OpenFile | undefined) => {
+  const renderEditor = (side: EditorSide, file: OpenFile | undefined, allowSplit: boolean) => {
     if (!file) {
       return (
         <div className="grid size-full place-items-center bg-card text-sm text-muted-foreground">
@@ -52,9 +54,13 @@ export function SplitEditor({
         onInFlightChange={(inFlight) => setFileInFlight(side, inFlight)}
         onConflict={(conflict) => onSaveConflict({ ...conflict, side })}
         onClose={() => closeFile(side)}
+        onSplit={allowSplit ? openSplitEditor : undefined}
       />
     )
   }
+
+  const primarySide: EditorSide = activeFileDetails.left ? "left" : "right"
+  const primaryFile = activeFileDetails[primarySide]
 
   return (
     <ResizablePanelGroup
@@ -63,15 +69,19 @@ export function SplitEditor({
       className="size-full"
     >
       <ResizablePanel id="top-editor" defaultSize="70%" minSize="30%">
-        <ResizablePanelGroup id="studio-split-editor-h" orientation="horizontal" className="size-full">
-          <ResizablePanel id="editor-left" defaultSize="50%" minSize="25%">
-            {renderEditor("left", activeFileDetails.left)}
-          </ResizablePanel>
-          <ResizableHandle />
-          <ResizablePanel id="editor-right" defaultSize="50%" minSize="25%">
-            {renderEditor("right", activeFileDetails.right)}
-          </ResizablePanel>
-        </ResizablePanelGroup>
+        {splitMode ? (
+          <ResizablePanelGroup id="studio-split-editor-h" orientation="horizontal" className="size-full">
+            <ResizablePanel id="editor-left" defaultSize="50%" minSize="25%">
+              {renderEditor("left", activeFileDetails.left, false)}
+            </ResizablePanel>
+            <ResizableHandle />
+            <ResizablePanel id="editor-right" defaultSize="50%" minSize="25%">
+              {renderEditor("right", activeFileDetails.right, false)}
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        ) : (
+          renderEditor(primarySide, primaryFile, true)
+        )}
       </ResizablePanel>
       <ResizableHandle />
       <ResizablePanel id="bottom-mini" defaultSize="30%" minSize="15%" maxSize="60%">
@@ -84,6 +94,8 @@ export function SplitEditor({
             error={error}
             selectedNodeId={selectedNodeId}
             onNodeSelect={onNodeSelect}
+            compact
+            bottomReservedHeight={72}
           />
         </div>
       </ResizablePanel>

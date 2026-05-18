@@ -60,6 +60,8 @@ interface GraphCanvasProps {
   selectedNodeId?: string | null
   onNodeSelect?: (node: { id: string, data: SkillGraphNodeData }) => void
   statusByNodeId?: Record<string, SkillNodeStatus>
+  compact?: boolean
+  bottomReservedHeight?: number
 }
 
 const INPUT_ID = '__global_input__'
@@ -376,7 +378,17 @@ export function buildEdges(phaseNodes: SkillGraphNode[]): Edge<ContextEdgeData>[
   return edges
 }
 
-export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, selectedNodeId, onNodeSelect, statusByNodeId }: GraphCanvasProps) {
+export function GraphCanvas({
+  skillId,
+  skillDetail,
+  isLoading = false,
+  error,
+  selectedNodeId,
+  onNodeSelect,
+  statusByNodeId,
+  compact = false,
+  bottomReservedHeight = 0,
+}: GraphCanvasProps) {
   const workspace = useOptionalWorkspaceContext()
   const [expandedSubgraphs, setExpandedSubgraphs] = useState<Set<string>>(() => new Set())
   const fitViewRef = useRef<(() => void) | null>(null)
@@ -409,14 +421,14 @@ export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, se
   const rawEdges = useMemo(() => buildEdges(phaseNodes), [phaseNodes])
   const layoutResult = useMemo((): { nodes: GraphCanvasNode[]; edges: Edge<ContextEdgeData>[]; error: CycleDetectedError | null } => {
     try {
-      return { ...getAutoLayoutedElements(rawNodes, rawEdges), error: null }
+      return { ...getAutoLayoutedElements(rawNodes, rawEdges, { bottomReservedHeight }), error: null }
     } catch (layoutError) {
       if (layoutError instanceof CycleDetectedError) {
         return { nodes: [], edges: [], error: layoutError }
       }
       throw layoutError
     }
-  }, [rawEdges, rawNodes])
+  }, [bottomReservedHeight, rawEdges, rawNodes])
   const [nodes, setNodes, onNodesChange] = useNodesState<GraphCanvasNode>(layoutResult.nodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutResult.edges)
 
@@ -514,7 +526,7 @@ export function GraphCanvas({ skillId, skillDetail, isLoading = false, error, se
       >
         <Background gap={18} size={1} />
         <Controls position="bottom-left" />
-        <MiniMap pannable zoomable />
+        {!compact ? <MiniMap pannable zoomable position="bottom-right" style={{ height: 120, width: 200 }} /> : null}
       </ReactFlow>
     </section>
   )

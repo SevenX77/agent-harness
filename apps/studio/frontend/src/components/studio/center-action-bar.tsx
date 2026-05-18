@@ -1,6 +1,5 @@
 import { Hammer, Play, Zap } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
 
 export type SkillBuildStage =
   | "idle"
@@ -63,34 +62,33 @@ function deriveButtons(stage: SkillBuildStage): ButtonDerivation {
 export function CenterActionBar({ stage, onCompile, onPredict, onRun }: CenterActionBarProps) {
   const d = deriveButtons(stage)
   return (
-    <div className="absolute bottom-6 left-1/2 z-30 inline-flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-card px-1.5 py-1 shadow-lg">
+    <div className="absolute bottom-3 left-1/2 z-30 inline-flex -translate-x-1/2 items-center gap-0.5 rounded-full border border-border bg-card px-1 py-0.5 shadow-lg">
       <Button
         variant={d.compileHighlight ? "default" : "ghost"}
-        size="default"
+        size="sm"
         disabled={d.compileDisabled}
         onClick={onCompile}
-        className="h-9 gap-1.5 rounded-full px-3.5 text-xs"
+        className="h-7 gap-1 rounded-full px-2.5 text-xs"
       >
         <Hammer className="size-3.5" />
         Compile
       </Button>
-      <Separator orientation="vertical" className="mx-0.5 h-4" />
       <Button
         variant={d.predictHighlight ? "default" : "ghost"}
-        size="default"
+        size="sm"
         disabled={d.predictDisabled}
         onClick={onPredict}
-        className="h-9 gap-1.5 rounded-full px-3.5 text-xs"
+        className="h-7 gap-1 rounded-full px-2.5 text-xs"
       >
         <Zap className="size-3.5" />
         Predict
       </Button>
       <Button
         variant={d.runHighlight ? "default" : "ghost"}
-        size="default"
+        size="sm"
         disabled={d.runDisabled}
         onClick={onRun}
-        className="h-9 gap-1.5 rounded-full px-3.5 text-xs"
+        className="h-7 gap-1 rounded-full px-2.5 text-xs"
       >
         <Play fill="currentColor" className="size-3.5" />
         Run

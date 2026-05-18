@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { Columns2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { writeSkillFile } from '@/api/client'
 
@@ -29,6 +30,7 @@ interface LazyMonacoPanelProps {
   initialHash?: string | null
   saveEnabled?: boolean
   onClose?: () => void
+  onSplit?: () => void
 }
 
 function MonacoSkeleton() {
@@ -58,6 +60,7 @@ export function LazyMonacoPanel({
   initialHash = null,
   saveEnabled = true,
   onClose,
+  onSplit,
 }: LazyMonacoPanelProps) {
   const [draft, setDraft] = useState(value)
   const draftRef = useRef(value)
@@ -181,6 +184,16 @@ export function LazyMonacoPanel({
         <h2 className="text-sm font-semibold text-foreground">{title}</h2>
         <div className="flex items-center gap-2">
           <span className="rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">{language}</span>
+          {onSplit ? (
+            <button
+              type="button"
+              onClick={onSplit}
+              aria-label="Split editor"
+              className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <Columns2 className="size-3.5" />
+            </button>
+          ) : null}
           {onClose ? (
             <button
               type="button"

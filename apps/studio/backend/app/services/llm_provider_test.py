@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from services.llm_provider_meta import load_provider_meta
+from services.llm_provider_meta import DOCS_DIR, load_provider_meta
 
 from app.models.llm_config import ProviderType
 from app.services.copilot_test import (
@@ -238,6 +239,80 @@ async def _probe_wavespeed_1token(base_url: str, headers: dict[str, str]) -> int
     return await _probe_openai_1token(base_url, headers)
 
 
+async def probe_available_models(vendor: str, api_key: str, base_url: str) -> list[str]:
+    """Load model ids via the provider /models endpoint or provider docs fallback."""
+
+    meta = load_provider_meta(vendor)
+    if meta.models_endpoint_path is None:
+        return _load_fallback_models_from_doc(vendor)
+
+    headers = _render_auth_headers(meta.auth_header_format, api_key)
+    url = f"{base_url.rstrip('/')}{meta.models_endpoint_path}"
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, headers=headers, timeout=15.0)
+    response.raise_for_status()
+    return _parse_models_response(response.json(), vendor)
+
+
+def _load_fallback_models_from_doc(vendor: str) -> list[str]:
+    """Load backtick-wrapped model ids from docs/llm-providers/<vendor>.md §4."""
+
+    doc_path = DOCS_DIR / f"{vendor}.md"
+    if not doc_path.exists():
+        return []
+    content = doc_path.read_text(encoding="utf-8")
+    return _extract_model_ids_from_section(_extract_section_4(content))
+
+
+def _extract_section_4(md_content: str) -> str:
+    """Extract the §4 markdown section body."""
+
+    pattern = re.compile(
+        r"^##\s+§4[^\n]*\n(.*?)(?=^##\s+§|\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    match = pattern.search(md_content)
+    return match.group(1) if match else ""
+
+
+def _extract_model_ids_from_section(section: str) -> list[str]:
+    """Extract unique backtick-wrapped model ids from a markdown section."""
+
+    matches = re.findall(r"`([a-zA-Z0-9][a-zA-Z0-9._/-]*)`", section)
+    seen: set[str] = set()
+    result: list[str] = []
+    for model_id in matches:
+        if model_id in seen:
+            continue
+        seen.add(model_id)
+        result.append(model_id)
+    return result
+
+
+def _parse_models_response(json_resp: Any, vendor: str) -> list[str]:
+    """Normalize supported provider /models payload shapes to model id strings."""
+
+    del vendor
+
+    if not isinstance(json_resp, dict):
+        return []
+    data = json_resp.get("data")
+    if isinstance(data, list):
+        return [
+            item["id"]
+            for item in data
+            if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"]
+        ]
+    models = json_resp.get("models")
+    if isinstance(models, list):
+        return [
+            item["name"].removeprefix("models/")
+            for item in models
+            if isinstance(item, dict) and isinstance(item.get("name"), str) and item["name"]
+        ]
+    return []
+
+
 async def _request_provider_models(
     client: httpx.AsyncClient,
     provider_type: ProviderType,
@@ -265,9 +340,14 @@ __all__ = [
     "PingResultExtended",
     "ProviderType",
     "_extract_model_ids",
+    "_extract_model_ids_from_section",
+    "_extract_section_4",
+    "_load_fallback_models_from_doc",
+    "_parse_models_response",
     "_render_auth_headers",
     "_send_1_token_request",
     "ping_provider",
     "ping_provider_extended",
+    "probe_available_models",
     "probe_compatible_sdks",
 ]

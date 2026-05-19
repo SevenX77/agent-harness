@@ -1,5 +1,16 @@
 import { useState } from "react"
 import { Eye, EyeOff, Loader2, Trash2 } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
@@ -12,6 +23,34 @@ import type { ProviderDraft } from "../SettingsPage"
 
 export function apiKeyInputClassName(visible: boolean): string {
   return cn("flex-1", !visible && "mask-input")
+}
+
+export function ProviderDeleteConfirmation({
+  draftName,
+  onDelete,
+}: {
+  draftName: string
+  onDelete: () => void
+}) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button type="button" variant="ghost" size="icon" aria-label="Delete provider">
+          <Trash2 className="size-4" />
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>确认删除 {draftName || "this provider"}?</AlertDialogTitle>
+          <AlertDialogDescription>此操作不可恢复, 该 provider 配置将永久删除。</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>取消</AlertDialogCancel>
+          <AlertDialogAction onClick={onDelete}>删除</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
 }
 
 export function ProviderCard({
@@ -43,9 +82,7 @@ export function ProviderCard({
         />
         <Badge variant={statusVariant}>{displayStatus}</Badge>
         <div className="flex-1" />
-        <Button type="button" variant="ghost" size="icon" onClick={onDelete} aria-label="Delete provider">
-          <Trash2 className="size-4" />
-        </Button>
+        <ProviderDeleteConfirmation draftName={draft.name} onDelete={onDelete} />
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">

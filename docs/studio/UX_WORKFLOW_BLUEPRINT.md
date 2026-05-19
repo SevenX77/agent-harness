@@ -31,23 +31,65 @@ last_updated: 2026-05-19
 ### 2.1 画布优先的分屏体验
 进入 Workspace 后，主要界面区域采用左右（或上下）的响应式分屏系统：
 - **核心画板 (React Flow Canvas)**: PM 可以在画布上直观地进行节点的拖拽、连线、和布局排列，配置输入与输出。
-- **代码映射区 (SplitEditor/Monaco)**: 右侧的 Monaco 编辑器自动跟随高亮当前选中节点相关的 Markdown (`SKILL.md`) 代码。或者用户在 Monaco 中修改代码，画布会实时重绘。
+- **代码映射区 (SplitEditor/Monaco)**: 中间主工作区的 SplitEditor / Monaco 编辑器自动跟随高亮当前选中节点相关的 Markdown (`SKILL.md`) 代码。或者用户在 Monaco 中修改代码，画布会实时重绘。 <!-- LAYOUT-VERIFIED 2026-05-19 vs STUDIO_LAYOUT_SPEC §2.4 -->
 
 ### 2.2 宏观层：契约与 I/O 黑板
 - **全局 Input/Output 节点**: 画布的最左侧和最右侧固定为系统级的 Input 和 Output 节点。
-- PM 点击 Input 节点，可以在右侧属性栏或代码区中声明该技能运行所需的初始数据。
+- PM 点击 Input 节点，可以在左侧属性栏 (Properties Panel) 或主工作区的代码区中声明该技能运行所需的初始数据。 <!-- LAYOUT-VERIFIED 2026-05-19 vs STUDIO_LAYOUT_SPEC §2.3 -->
 - 点击连线可定义“Context 数据桥接”的流向和映射关系。
 
 ### 2.3 微观拓扑展开 (Micro-Topology Unboxing)
-为了彻底**消除业务黑盒**，复杂的 Agent 节点内部的运作被设计为可逐级下钻的结构。
-- **交互动作**: 画布中的复杂节点（如包含多次 Tool 调用和思考的 Agent-Loop 节点，或者嵌套 Subgraph 节点）下方提供了一个明显的 `[ + ]` 展开按钮。
-- **UI 状态机切换**:
-  - 点击 `[ + ]`，该节点在画布中原地膨胀，展开为一个“内嵌的微型画布”或者“详细步骤时间轴”。
-  - **微观 JSON 渲染**: 展开后的内部结构会展示每一次子调用的详细 Request/Response，采用纯净的 JSON Viewer 进行渲染，提供格式化和折叠功能。
-  - **逻辑节点下钻**: 对于纯粹执行 Python 函数的 Code-only (Logic) 节点，双击节点直接在右侧唤起 Monaco 编辑器，定位并打开对应的 `.py` 源文件。
-  - **Nudge 计数标示**: 在微观展开中，如果发生了 Validator 失败导致的纠偏 (Nudge)，会在步骤旁边用显眼的红/黄警示色圆点显示**重试计数**（例如：`Nudge: 2/3`），清晰标明大模型纠错的激烈程度。
 
-### 2.4 背景 Compile (编译检查)
+为了彻底**消除业务黑盒**，节点的内部运作被设计为可逐级下钻或内联展开的结构。
+
+#### 2.3.1 节点类型与展开行为清单
+
+| 节点类型 | 微观展开支持 | 展开后视觉 | 触发交互 |
+|---|---|---|---|
+| **Agent** (LLM + Tool loop) | ✅ 支持 | 节点原地膨胀，内部呈现竖向的时间轴列表，展示 Plan, Tool Call, Prompt 等微观执行序列。 | 点击节点下方 `[ + ]` 按钮 |
+| **Subgraph** (嵌套技能) | ✅ 支持 | 当前主画布下钻切换为被嵌子技能的完整拓扑图，顶部出现面包屑导航。 | 双击节点 或 点击 `[ + ]` |
+| **Logic** (纯 Python 函数) | ❌ 不支持内联 | 不在画布上视觉膨胀。直接在中间主工作区的 Monaco 编辑器中打开对应的 `.py` 源文件。 <!-- LAYOUT-VERIFIED 2026-05-19 vs STUDIO_LAYOUT_SPEC §2.4 --> | 双击节点 |
+| **Input / Output** (系统) | ❌ 不支持 | 无变化。属性参数展示在左侧 Properties Panel 中。 | 点击选中节点 |
+| **Validator** (校验节点) | ✅ 支持 | 作为 Agent 的附属子节点展开，展示校验规则、报错信息及 Nudge 重试进度。 | 随 Agent 节点一并展开 |
+
+#### 2.3.2 微观 JSON 渲染与视觉 Mockup
+
+当点击 `[ + ]` 展开 Agent-Loop 节点时，节点会在 Canvas 画布中原地膨胀，展示微观执行细节和 JSON 渲染：
+
+```text
+┌─ Agent-Loop 节点 [ ContentSummarizer ] ──────────────────────────────────────────────┐
+│                                                                                    │
+│  ▼ Step 1 (LLM Reasoning) — 2.3s, 1.2k tokens                          [ ✓ pass ]  │
+│    {                                                                               │
+│      "input": { "raw_article": "React Flow is a library..." },                     │
+│      "output": { "intent": "extract_keywords", "next_tool": "web_search" }         │
+│    }                                                                               │
+│                                                                                    │
+│  ▼ Step 2 (Tool: web_search) — 1.1s                                    [ ✓ pass ]  │
+│    { "query": "React Flow custom nodes" }                                          │
+│    ↳ [ Result: 200 OK (2 KB) ]                                                     │
+│                                                                                    │
+│  ▼ Step 3 (Validator: Output Schema Check) — Nudge 2/3                 [ 🟡 retry ]│
+│    ❌ Error: missing required field 'summary_result'                                │
+│    {                                                                               │
+│       "message": "Validation failed, initiating nudge...",                         │
+│       "retries_left": 1                                                            │
+│    }                                                                               │
+│                                                                                    │
+│  └ [ ▶ Play from here ] [ ⇕ Collapse All ] [ ⎘ Copy JSON ] [ ↗ Open in Monaco ]    │
+└────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**视觉与交互规约**:
+- **区域**: 在 React Flow Canvas 画布中原地膨胀（Width 从标准的 ~200px 撑开至 ~600px），周围的节点利用 D3/Dagre 布局算法自动推开避让。
+- **JSON Viewer 控制**: 
+  - 支持层级折叠 (`▼` / `▶`)。
+  - 底部动作栏提供全选复制 (`Copy JSON`)、全部收起 (`Collapse All`)。
+  - 对于过长（> 1000 lines）的 JSON，自动裁剪，并提供 `Open in Monaco` 按钮在中间主编辑器深度查看。
+- **Nudge 计数与报错**: Validator 失败时右侧状态打上醒目的黄底徽章 `🟡 retry` 及重试次数。详细报错红字显示。
+- **关闭机制**: 再次点击节点外部的 `[ - ]` 收起按钮，或者按下 `Esc`，节点恢复初始态。展开状态在本地 React Context 保持。
+
+## 2.4 背景 Compile (编译检查)
 - “交通警察”机制：PM 的任何按键输入或连线修改，都会触发后台的静默 Compile。
 - 当且仅当右下角状态指示灯全绿（无语法错误、无 I/O 断流）时，底部的 `[ Predict ]` 与 `[ Run ]` 按钮才会解锁。
 
@@ -68,12 +110,12 @@ last_updated: 2026-05-19
 
 ### 4.1 Trace 瀑布流交互
 - PM 确信图逻辑没问题后，点击底部的 `[ Run ]` 开始真实调用大模型。
-- **瀑布流展示**: 界面上方（或右侧切 Tab）展开为极其详尽的**竖式 Trace 时间轴**。
+- **瀑布流展示**: 左侧面板切换至 Timeline 面板展开为极其详尽的**竖式 Trace 时间轴**。 <!-- LAYOUT-VERIFIED 2026-05-19 vs STUDIO_LAYOUT_SPEC §2.3 -->
 - 详细呈现每阶段 LLM 的 System Prompt (经过注入后的完全体)、User 提问、它选择了调用什么工具、传入了什么参数，以及工具返回的原始响应。
 
 ### 4.2 连线数据包点击 (Edge Inspection)
 - 在 React Flow 画布中，表示 Context 数据流转的连线（Edges）上，会有流动的小圆点或包裹图标。
-- **触发抽屉 UI**: 在运行时或暂停状态下，PM 点击连线上的数据包图标，界面右侧或底部会滑出一个纯净的 **Context Inspector 抽屉**。
+- **触发视图 UI**: 在运行时或暂停状态下，PM 点击连线上的数据包图标，界面左侧的属性面板 (Properties) 会切换显示为纯净的 **Context Inspector** 视图。 <!-- LAYOUT-VERIFIED 2026-05-19 vs STUDIO_LAYOUT_SPEC §2.3 -->
 - 抽屉内以高亮 JSON 形式展示上一轮执行完毕时，通过该连线从上游传递往下游的完整 Context Dictionary 数据。这能立刻帮助排查“是不是上一步少吐了一个关键字段”。
 
 ## 5. 断点干预与重试 (Debug, HitL & Resume)
@@ -84,7 +126,7 @@ last_updated: 2026-05-19
 
 ### 5.2 状态修改与就地 Resume
 - **修改 Context**: PM 打开错误处（比如上一条连线）的 Context 抽屉，直接手动修改有瑕疵的输出 JSON。
-- **修改逻辑**: 或者，PM 打开右侧 Monaco 修改 Prompt，或是修改了报错的 `.py` 代码。
+- **修改逻辑**: 或者，PM 在中间主工作区打开 Monaco 修改 Prompt，或是修改了报错的 `.py` 代码。 <!-- LAYOUT-VERIFIED 2026-05-19 vs STUDIO_LAYOUT_SPEC §2.4 -->
 - **断点续跑**: 修改完成后，PM 在画布上的报错节点旁直接点击专属的 `[ Resume ]` 按钮。
 - **底层支持**: 引擎利用 Checkpoint 恢复机制，携带刚刚 PM 修改过的合法数据“原地复活”，继续执行下游节点逻辑。这极大节省了重新运行全量图的 Token 消耗和时间成本。
 

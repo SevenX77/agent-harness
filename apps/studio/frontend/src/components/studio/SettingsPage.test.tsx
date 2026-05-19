@@ -2,7 +2,10 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import {
   SettingsPageContent,
+  draftFromAddProviderSubmission,
   draftsFromCredentials,
+  inferProviderKind,
+  inferProviderType,
   moveProviderInRole,
   removeProviderFromRole,
   toggleModelFallback,
@@ -144,6 +147,60 @@ describe('draftsFromCredentials', () => {
       providers: [{ id: 'TEST', name: 'Test', api_key: '' }],
     })
     expect(drafts[0].provider_type).toBe('openai_compatible')
+  })
+})
+
+describe('Add Provider flow helpers', () => {
+  it('maps official provider codes to provider_type', () => {
+    expect(inferProviderType('anthropic')).toBe('anthropic_compatible')
+    expect(inferProviderType('gemini')).toBe('gemini_official')
+    expect(inferProviderType('deepseek')).toBe('openai_compatible')
+  })
+
+  it('creates a populated draft from AddProviderForm submission', () => {
+    const draft = draftFromAddProviderSubmission({
+      providerCode: 'anthropic',
+      name: 'Anthropic-Official',
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'sk-anthropic',
+      type: 'official',
+    }, 'anthropic-test')
+
+    expect(draft).toEqual({
+      id: 'anthropic-test',
+      name: 'Anthropic-Official',
+      provider_type: 'anthropic_compatible',
+      base_url: 'https://api.anthropic.com',
+      api_key: 'sk-anthropic',
+      isTesting: false,
+    })
+  })
+
+  it('infers provider kind from official name or official id prefix', () => {
+    expect(inferProviderKind({
+      id: 'custom-1',
+      name: 'Anthropic-Official',
+      provider_type: 'anthropic_compatible',
+      base_url: 'https://api.anthropic.com',
+      api_key: 'sk',
+      isTesting: false,
+    })).toBe('official')
+    expect(inferProviderKind({
+      id: 'ark-123',
+      name: 'Ark',
+      provider_type: 'openai_compatible',
+      base_url: 'https://ark.cn-beijing.volces.com/api/v3',
+      api_key: 'sk',
+      isTesting: false,
+    })).toBe('official')
+    expect(inferProviderKind({
+      id: 'custom-1',
+      name: 'OpenRouter',
+      provider_type: 'openai_compatible',
+      base_url: 'https://openrouter.ai/api/v1',
+      api_key: 'sk',
+      isTesting: false,
+    })).toBe('third-party')
   })
 })
 

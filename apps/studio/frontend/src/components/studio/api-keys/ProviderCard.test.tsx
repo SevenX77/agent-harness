@@ -150,6 +150,38 @@ describe("ProviderCard test status badge", () => {
   })
 })
 
+describe("ProviderCard provider kind badge", () => {
+  it("renders Official badge when providerKind is official", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={draft}
+        persisted={null}
+        onFieldChange={vi.fn()}
+        onTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="official"
+      />,
+    )
+
+    expect(html).toContain("Official")
+  })
+
+  it("renders Third-party badge when providerKind is third-party", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={draft}
+        persisted={null}
+        onFieldChange={vi.fn()}
+        onTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="third-party"
+      />,
+    )
+
+    expect(html).toContain("Third-party")
+  })
+})
+
 describe("ProviderCard delete confirmation", () => {
   it("delete trigger opens confirmation without calling onDelete directly", () => {
     const onDelete = vi.fn()

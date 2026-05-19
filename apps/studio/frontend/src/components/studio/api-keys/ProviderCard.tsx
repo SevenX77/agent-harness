@@ -100,12 +100,14 @@ export function ProviderCard({
   onFieldChange,
   onTest,
   onDelete,
+  providerKind,
 }: {
   draft: ProviderDraft
   persisted: CredentialsState["providers"][number] | null
   onFieldChange: (patch: Partial<ProviderDraft>) => void
   onTest: () => void
   onDelete: () => void
+  providerKind?: "official" | "third-party"
 }) {
   const [visible, setVisible] = useState(false)
   const testStatus: TestMessageStatus = draft.isTesting
@@ -125,6 +127,11 @@ export function ProviderCard({
           className="w-full max-w-xs font-semibold"
           aria-label="Provider Name"
         />
+        {providerKind ? (
+          <Badge variant="outline" className="text-[10px]">
+            {providerKind === "official" ? "Official" : "Third-party"}
+          </Badge>
+        ) : null}
         <TestMessage status={testStatus} latencyMs={null} errorCode={persisted?.last_error_code ?? null} />
         <div className="flex-1" />
         <ProviderDeleteConfirmation draftName={draft.name} onDelete={onDelete} />

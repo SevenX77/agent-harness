@@ -24,7 +24,7 @@ import {
   type ProviderType,
   type RolesData,
 } from "../../api/llm"
-import { ProviderCard, ProviderListSkeleton } from "./api-keys"
+import { AddProviderForm, ProviderCard, ProviderListSkeleton, type AddProviderFormSubmission } from "./api-keys"
 
 type SettingsTab = "general" | "api_keys" | "llm_roles"
 
@@ -102,7 +102,7 @@ interface SettingsPageContentProps {
   onProviderFieldChange: (providerId: string, patch: Partial<ProviderDraft>) => void
   onTestProvider: (providerId: string) => void
   onDeleteProvider: (providerId: string) => void
-  onAddProvider: () => void
+  onAddProvider: (data: AddProviderFormSubmission) => Promise<void> | void
   onSelectedRoleChange: (roleName: string) => void
   onRolesDataChange: (next: RolesData) => void
   onSaveRoles: () => void
@@ -209,6 +209,34 @@ function newProviderId(): string {
   return (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`).toString()
 }
 
+const officialProviderCodes = ["anthropic", "openai", "gemini", "deepseek", "ark"]
+
+export function inferProviderType(providerCode: string): ProviderType {
+  if (providerCode === "anthropic") return "anthropic_compatible"
+  if (providerCode === "gemini") return "gemini_official"
+  return "openai_compatible"
+}
+
+export function inferProviderKind(draft: ProviderDraft): "official" | "third-party" {
+  if (draft.name.toLowerCase().includes("-official")) return "official"
+  if (officialProviderCodes.some((code) => draft.id.toLowerCase().startsWith(code))) return "official"
+  return "third-party"
+}
+
+export function draftFromAddProviderSubmission(
+  data: AddProviderFormSubmission,
+  id: string = newProviderId(),
+): ProviderDraft {
+  return {
+    id,
+    name: data.name,
+    provider_type: data.type === "official" ? inferProviderType(data.providerCode) : "openai_compatible",
+    base_url: data.baseUrl,
+    api_key: data.apiKey,
+    isTesting: false,
+  }
+}
+
 export function SettingsPage({ onClose }: SettingsPageProps) {
   const appSettings = useAppSettings()
   const [activeTab, setActiveTab] = useState<SettingsTab>("general")
@@ -296,17 +324,13 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     )))
   }
 
-  function addProvider() {
-    const draft: ProviderDraft = {
-      id: newProviderId(),
-      name: "",
-      provider_type: "openai_compatible",
-      base_url: "",
-      api_key: "",
-      isTesting: false,
-    }
-    setDrafts((current) => [...current, draft])
-    scheduleSave()
+  function addProviderWithData(data: AddProviderFormSubmission) {
+    const draft = draftFromAddProviderSubmission(data)
+    setDrafts((current) => {
+      const next = [...current, draft]
+      queueSave(() => buildPutPayload(next))
+      return next
+    })
   }
 
   function deleteProvider(providerId: string) {
@@ -413,7 +437,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       onProviderFieldChange={updateProviderField}
       onTestProvider={(providerCode) => void runProviderTest(providerCode)}
       onDeleteProvider={deleteProvider}
-      onAddProvider={addProvider}
+      onAddProvider={addProviderWithData}
       onSelectedRoleChange={setSelectedRole}
       onRolesDataChange={updateRolesData}
       onSaveRoles={() => void saveRoles()}
@@ -655,6 +679,7 @@ function ApiKeysTab({
   | "onDeleteProvider"
   | "onAddProvider"
 >) {
+  const [showAddForm, setShowAddForm] = useState(false)
   const persistedById = useMemo(
     () => Object.fromEntries(credentials.providers.map((provider) => [provider.id, provider])),
     [credentials.providers],
@@ -682,28 +707,38 @@ function ApiKeysTab({
                   onFieldChange={(patch) => onProviderFieldChange(draft.id, patch)}
                   onTest={() => onTestProvider(draft.id)}
                   onDelete={() => onDeleteProvider(draft.id)}
+                  providerKind={inferProviderKind(draft)}
                 />
               )
             })}
-            {drafts.length === 0 ? (
+            {!showAddForm && drafts.length === 0 ? (
               <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border/60 bg-muted/10 px-4 py-10 text-center">
-                <Button type="button" variant="default" onClick={onAddProvider} className="gap-1">
+                <Button type="button" variant="default" onClick={() => setShowAddForm(true)} className="gap-1">
                   <Plus className="size-3.5" />
                   Add Provider
                 </Button>
               </div>
             ) : null}
+            {showAddForm ? (
+              <AddProviderForm
+                onSubmit={async (data) => {
+                  await onAddProvider(data)
+                  setShowAddForm(false)
+                }}
+                onCancel={() => setShowAddForm(false)}
+              />
+            ) : null}
           </>
         )}
       </div>
-      {credentialsLoading || drafts.length === 0 ? null : (
+      {!credentialsLoading && drafts.length > 0 && !showAddForm ? (
         <div className="mt-4 flex justify-start">
-          <Button type="button" variant="outline" onClick={onAddProvider} className="gap-1">
+          <Button type="button" variant="outline" onClick={() => setShowAddForm(true)} className="gap-1">
             <Plus className="size-3.5" />
             Add Provider
           </Button>
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

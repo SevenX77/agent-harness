@@ -174,10 +174,9 @@ providers:
 
   WS_LLM:
     name: "WaveSpeed Any-LLM"
-    type: wavespeed_any_llm
+    type: openai_compatible
     api_key_env: WAVESPEED_API_KEY
-    base_url: "https://api.wavespeed.ai/api/v3"
-    llm_base_url: "https://llm.wavespeed.ai/v1"
+    base_url: "https://llm.wavespeed.ai/v1"
     timeout: 300
     trust_env: false
 
@@ -200,7 +199,7 @@ providers:
 
   GM_OFF:
     name: "Gemini Official"
-    type: gemini_official
+    type: google_genai
     api_key_env: GEMINI_API_KEY
     proxy_env: GEMINI_PROXY
     timeout: 120

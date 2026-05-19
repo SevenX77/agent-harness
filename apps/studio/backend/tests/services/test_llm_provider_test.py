@@ -119,8 +119,7 @@ async def test_probe_compatible_sdks_send_exception_is_handled(
     [
         ("openai_compatible", "_probe_openai_1token"),
         ("anthropic_compatible", "_probe_anthropic_1token"),
-        ("gemini_official", "_probe_gemini_1token"),
-        ("wavespeed_any_llm", "_probe_wavespeed_1token"),
+        ("google_genai", "_probe_google_genai_1token"),
     ],
 )
 async def test_send_1_token_request_dispatches_to_sdk_probe(
@@ -188,7 +187,7 @@ async def test_probe_available_models_gemini_format_strips_prefix(
 
     fake_meta = ProviderMeta(
         vendor="gemini",
-        compatible_sdks=["gemini_official"],
+        compatible_sdks=["google_genai"],
         models_endpoint_path="/v1beta/models",
         auth_header_format="x-goog-api-key: ${key}",
     )

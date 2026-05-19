@@ -12,7 +12,6 @@ import httpx
 from services.llm_provider_meta import DOCS_DIR, load_provider_meta
 
 from app.models.llm_config import ModelInfo, ProviderType
-from app.services.llm_capability_table import lookup_capabilities
 from app.services.copilot_test import (
     PingResult,
     _first_model_id,
@@ -25,8 +24,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_BASE_URLS: dict[ProviderType, str] = {
     "anthropic_compatible": "https://api.anthropic.com/v1",
     "openai_compatible": "https://api.openai.com/v1",
-    "gemini_official": "https://generativelanguage.googleapis.com/v1beta",
-    "wavespeed_any_llm": "https://llm.wavespeed.ai/v1",
+    "google_genai": "https://generativelanguage.googleapis.com/v1beta",
 }
 
 
@@ -173,10 +171,8 @@ async def _send_1_token_request(
         return await _probe_openai_1token(base_url, headers)
     if sdk == "anthropic_compatible":
         return await _probe_anthropic_1token(base_url, headers)
-    if sdk == "gemini_official":
-        return await _probe_gemini_1token(base_url, headers)
-    if sdk == "wavespeed_any_llm":
-        return await _probe_wavespeed_1token(base_url, headers)
+    if sdk == "google_genai":
+        return await _probe_google_genai_1token(base_url, headers)
     raise ValueError(f"Unknown SDK enum: {sdk}")
 
 
@@ -221,8 +217,8 @@ async def _probe_anthropic_1token(base_url: str, headers: dict[str, str]) -> int
     return response.status_code
 
 
-async def _probe_gemini_1token(base_url: str, headers: dict[str, str]) -> int:
-    """Gemini official generateContent probe."""
+async def _probe_google_genai_1token(base_url: str, headers: dict[str, str]) -> int:
+    """Google GenAI generateContent probe."""
 
     url = f"{base_url.rstrip('/')}/v1beta/models/gemini-2.0-flash:generateContent"
     payload = {
@@ -232,12 +228,6 @@ async def _probe_gemini_1token(base_url: str, headers: dict[str, str]) -> int:
     async with httpx.AsyncClient() as client:
         response = await client.post(url, json=payload, headers=headers, timeout=15.0)
     return response.status_code
-
-
-async def _probe_wavespeed_1token(base_url: str, headers: dict[str, str]) -> int:
-    """WaveSpeed any-LLM gateway uses the OpenAI-compatible request shape."""
-
-    return await _probe_openai_1token(base_url, headers)
 
 
 async def probe_available_models(vendor: str, api_key: str, base_url: str) -> list[ModelInfo]:
@@ -256,31 +246,19 @@ async def probe_available_models(vendor: str, api_key: str, base_url: str) -> li
 
 
 def _load_fallback_models_from_doc(vendor: str) -> list[ModelInfo]:
-    """Load backtick-wrapped model ids from docs/llm-providers/<vendor>.md §4."""
+    """Load backtick-wrapped model ids from app/data/llm_providers/<vendor>.md §4."""
 
     doc_path = DOCS_DIR / f"{vendor}.md"
     if not doc_path.exists():
         return []
     content = doc_path.read_text(encoding="utf-8")
-    return _model_infos_from_ids(_extract_model_ids_from_section(_extract_section_4(content)), vendor)
-
-
-def _provider_type_for_vendor(vendor: str) -> ProviderType:
-    if vendor == "anthropic":
-        return "anthropic_compatible"
-    if vendor == "gemini":
-        return "gemini_official"
-    if vendor == "wavespeed":
-        return "wavespeed_any_llm"
-    return "openai_compatible"
+    model_ids = _extract_model_ids_from_section(_extract_section_4(content))
+    return _model_infos_from_ids(model_ids, vendor)
 
 
 def _model_infos_from_ids(model_ids: list[str], vendor: str) -> list[ModelInfo]:
-    provider_type = _provider_type_for_vendor(vendor)
-    return [
-        ModelInfo(id=model_id, capabilities=lookup_capabilities(provider_type, model_id))
-        for model_id in model_ids
-    ]
+    del vendor
+    return [ModelInfo(id=model_id) for model_id in model_ids]
 
 
 def _extract_section_4(md_content: str) -> str:
@@ -346,7 +324,7 @@ async def _request_provider_models(
                 "anthropic-version": "2023-06-01",
             },
         )
-    if provider_type in ("openai_compatible", "wavespeed_any_llm"):
+    if provider_type == "openai_compatible":
         return await client.get(
             f"{base_url}/models",
             headers={"Authorization": f"Bearer {api_key}"},

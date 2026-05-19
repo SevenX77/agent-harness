@@ -38,7 +38,7 @@ const credentials: CredentialsState = {
       name: 'WaveSpeed Any-LLM',
       api_key: '',
       base_url: 'https://llm.wavespeed.ai/v1',
-      provider_type: 'wavespeed_any_llm',
+      provider_type: 'openai_compatible',
     },
     {
       id: 'CUSTOM_AB12CD34',
@@ -69,7 +69,7 @@ const rolesData: RolesData = {
   },
   providers: {
     OC_CL_ANT: { name: 'OneChats Claude Anthropic', type: 'anthropic_compatible' },
-    WS_LLM: { name: 'WaveSpeed Any-LLM', type: 'wavespeed_any_llm' },
+    WS_LLM: { name: 'WaveSpeed Any-LLM', type: 'openai_compatible' },
     DS: { name: 'DeepSeek Official', type: 'openai_compatible' },
     OC_DS: { name: 'OneChats DeepSeek', type: 'openai_compatible' },
   },
@@ -153,7 +153,7 @@ describe('draftsFromCredentials', () => {
 describe('Add Provider flow helpers', () => {
   it('maps official provider codes to provider_type', () => {
     expect(inferProviderType('anthropic')).toBe('anthropic_compatible')
-    expect(inferProviderType('gemini')).toBe('gemini_official')
+    expect(inferProviderType('gemini')).toBe('google_genai')
     expect(inferProviderType('deepseek')).toBe('openai_compatible')
   })
 

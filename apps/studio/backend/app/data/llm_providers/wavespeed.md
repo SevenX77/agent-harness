@@ -7,14 +7,14 @@ target_goal: "Studio MVP — 让 PM 可用"
 
 ## 1. Supported SDKs & Protocols
 
-- **Primary Protocol Enum**: `wavespeed_any_llm`
-- **Native SDK**: WaveSpeed SDK
+- **Primary Protocol Enum**: `openai_compatible`
+- **Native SDK**: 无; LLM 网关使用 OpenAI-compatible 协议
 
 ## §1.5 探测元数据 (round 3 新增, 用于 Studio 自动 Test 探测)
 
 ```yaml
 compatible_sdks:
-  - wavespeed_any_llm
+  - openai_compatible
 
 models_endpoint_path: "/models"
 

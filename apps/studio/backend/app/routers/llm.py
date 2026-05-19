@@ -291,8 +291,7 @@ def _infer_vendor(request: ProviderTestRequest) -> str:
     mapping = {
         "anthropic_compatible": "anthropic",
         "openai_compatible": "openai",
-        "gemini_official": "gemini",
-        "wavespeed_any_llm": "wavespeed",
+        "google_genai": "gemini",
     }
     return mapping.get(request.provider_type, "openai")
 

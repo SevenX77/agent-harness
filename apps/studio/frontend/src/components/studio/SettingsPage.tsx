@@ -213,7 +213,7 @@ const officialProviderCodes = ["anthropic", "openai", "gemini", "deepseek", "ark
 
 export function inferProviderType(providerCode: string): ProviderType {
   if (providerCode === "anthropic") return "anthropic_compatible"
-  if (providerCode === "gemini") return "gemini_official"
+  if (providerCode === "gemini") return "google_genai"
   return "openai_compatible"
 }
 

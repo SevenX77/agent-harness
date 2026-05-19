@@ -17,6 +17,7 @@ from app.models.llm_config import (
     ProviderCredential,
     TestStatus,
 )
+from app.services.migrations import migrate_credentials_payload
 
 _WRITE_LOCK = threading.Lock()
 _credentials_lock = _WRITE_LOCK
@@ -35,8 +36,11 @@ def load_credentials(path: Path | None = None) -> LLMCredentialsFile:
     if not credential_path.exists():
         return LLMCredentialsFile()
     try:
-        return LLMCredentialsFile.model_validate_json(credential_path.read_text(encoding="utf-8"))
+        payload = json.loads(credential_path.read_text(encoding="utf-8"))
+        return LLMCredentialsFile.model_validate(migrate_credentials_payload(payload))
     except ValidationError:
+        return LLMCredentialsFile()
+    except json.JSONDecodeError:
         return LLMCredentialsFile()
 
 

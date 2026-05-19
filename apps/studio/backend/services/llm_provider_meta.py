@@ -1,10 +1,10 @@
-"""Load LLM provider runtime metadata from provider docs."""
+"""Load LLM provider runtime metadata from app data files."""
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
-import re
 from typing import Any
 
 import yaml
@@ -18,11 +18,11 @@ class ProviderMeta:
     auth_header_format: str
 
 
-DOCS_DIR = Path(__file__).parent.parent.parent.parent / "docs" / "llm-providers"
+DOCS_DIR = Path(__file__).resolve().parents[1] / "app" / "data" / "llm_providers"
 
 
 def load_provider_meta(vendor: str) -> ProviderMeta:
-    """Parse the §1.5 YAML metadata block from docs/llm-providers/<vendor>.md."""
+    """Parse the §1.5 YAML metadata block from app/data/llm_providers/<vendor>.md."""
     doc_path = DOCS_DIR / f"{vendor}.md"
     if not doc_path.exists():
         raise FileNotFoundError(f"Provider doc not found: {doc_path}")

@@ -44,7 +44,7 @@ const roleData = {
   providers: {
     OC_CL_ANT: { name: 'OpenCode Anthropic', type: 'anthropic_compatible', base_url: 'https://anthropic.example' },
     OC_CL: { name: 'OpenCode Claude', type: 'anthropic_compatible', base_url: 'https://claude.example' },
-    WS_LLM: { name: 'WaveSpeed LLM', type: 'wavespeed_any_llm', base_url: 'https://wavespeed.example' },
+    WS_LLM: { name: 'WaveSpeed LLM', type: 'openai_compatible', base_url: 'https://wavespeed.example' },
     DS: { name: 'DeepSeek Official', type: 'openai_compatible', base_url: 'https://deepseek.example' },
   },
   roles: {
@@ -112,7 +112,7 @@ function credentials(ocClAntHasKey: boolean) {
         name: 'WaveSpeed LLM',
         title: '',
         base_url: 'https://wavespeed.example',
-        provider_type: 'wavespeed_any_llm',
+        provider_type: 'openai_compatible',
         vendor_hint: '',
         last_test_status: 'untested',
         last_test_at: '',

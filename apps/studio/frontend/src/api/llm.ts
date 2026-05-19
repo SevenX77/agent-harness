@@ -3,8 +3,7 @@ import { api } from './client'
 export type ProviderType =
   | 'anthropic_compatible'
   | 'openai_compatible'
-  | 'gemini_official'
-  | 'wavespeed_any_llm'
+  | 'google_genai'
 
 /**
  * Test outcome status persisted on the credential record. Mirrors backend

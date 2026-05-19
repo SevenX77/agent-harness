@@ -12,6 +12,7 @@ from typing import Any
 from ruamel.yaml import YAML
 
 from app.models.llm_config import RoleEntry, RolesData
+from app.services.migrations import migrate_roles_payload
 
 _WRITE_LOCK = threading.Lock()
 
@@ -26,7 +27,8 @@ def load_roles_file(path: Path) -> RolesData:
     text = path.read_text(encoding="utf-8")
     yaml = _yaml()
     raw = yaml.load(text)
-    data = RolesData.model_validate(_plain(raw))
+    plain = migrate_roles_payload(_plain(raw))
+    data = RolesData.model_validate(plain)
     data._raw = raw
     data._original_text = text
     data._original_snapshot = data.model_dump(mode="json")

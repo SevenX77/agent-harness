@@ -1,18 +1,17 @@
-"""Tests for provider metadata loaded from docs/llm-providers."""
+"""Tests for provider metadata loaded from app/data/llm_providers."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
-
 from services import llm_provider_meta
 from services.llm_provider_meta import ProviderMeta, load_provider_meta
 
 
 @pytest.fixture
 def provider_docs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    docs_dir = tmp_path / "llm-providers"
+    docs_dir = tmp_path / "llm_providers"
     docs_dir.mkdir()
     monkeypatch.setattr(llm_provider_meta, "DOCS_DIR", docs_dir)
 
@@ -23,7 +22,7 @@ def provider_docs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             "x-api-key: ${key}\nanthropic-version: 2023-06-01\n",
         ),
         "openai": (["openai_compatible"], "/v1/models", "Authorization: Bearer ${key}\n"),
-        "gemini": (["gemini_official"], "/v1beta/models", "x-goog-api-key: ${key}\n"),
+        "gemini": (["google_genai"], "/v1beta/models", "x-goog-api-key: ${key}\n"),
         "deepseek": (["openai_compatible"], "/v1/models", "Authorization: Bearer ${key}\n"),
         "ark": (["openai_compatible"], "/api/v3/models", "Authorization: Bearer ${key}\n"),
         "openrouter": (["openai_compatible"], "/api/v1/models", "Authorization: Bearer ${key}\n"),
@@ -62,7 +61,7 @@ auth_header_format: |
     [
         ("anthropic", ["anthropic_compatible"], None, "x-api-key"),
         ("openai", ["openai_compatible"], "/v1/models", "Bearer"),
-        ("gemini", ["gemini_official"], "/v1beta/models", "x-goog-api-key"),
+        ("gemini", ["google_genai"], "/v1beta/models", "x-goog-api-key"),
         ("deepseek", ["openai_compatible"], "/v1/models", "Bearer"),
         ("ark", ["openai_compatible"], "/api/v3/models", "Bearer"),
         ("openrouter", ["openai_compatible"], "/api/v1/models", "Bearer"),
@@ -86,10 +85,10 @@ def test_load_provider_meta_from_section_15_yaml(
     assert auth_fragment in meta.auth_header_format
 
 
-def test_gemini_is_strictly_gemini_official(provider_docs: Path) -> None:
+def test_gemini_is_strictly_google_genai(provider_docs: Path) -> None:
     meta = load_provider_meta("gemini")
 
-    assert meta.compatible_sdks == ["gemini_official"]
+    assert meta.compatible_sdks == ["google_genai"]
     assert "openai_compatible" not in meta.compatible_sdks
 
 
@@ -101,7 +100,7 @@ def test_missing_vendor_doc_raises_file_not_found(provider_docs: Path) -> None:
 def test_missing_section_15_raises_value_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    docs_dir = tmp_path / "llm-providers"
+    docs_dir = tmp_path / "llm_providers"
     docs_dir.mkdir()
     (docs_dir / "fake.md").write_text("# Just a heading, no metadata\n", encoding="utf-8")
     monkeypatch.setattr(llm_provider_meta, "DOCS_DIR", docs_dir)

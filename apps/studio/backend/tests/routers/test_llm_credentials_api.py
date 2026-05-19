@@ -94,8 +94,7 @@ def test_put_credentials_writes_and_get_reads_plaintext(
     [
         ("anthropic_compatible", "anthropic"),
         ("openai_compatible", "openai"),
-        ("wavespeed_any_llm", "openai"),
-        ("gemini_official", "gemini"),
+        ("google_genai", "gemini"),
     ],
 )
 def test_provider_test_uses_provider_type_to_select_client(

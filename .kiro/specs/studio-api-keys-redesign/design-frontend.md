@@ -62,7 +62,7 @@ ApiKeysTab
 interface ProviderEntry {
   provider_code: string             // UUID v4 (新 add) 或 legacy hardcoded. immutable from UI.
   title: string                     // 用户自定义 human-readable label, 默认 "Untitled Provider"
-  provider_type: ProviderType       // dropdown: anthropic_compatible | openai_compatible | gemini_official
+  provider_type: ProviderType       // dropdown: anthropic_compatible | openai_compatible | google_genai
   vendor_hint?: string              // 可选, 仅 UI 用 (e.g., "Anthropic" / "DeepSeek" / "OpenRouter")
   base_url: string                  // 跟 provider_type 关联默认值, 用户可改
   api_key: string                   // 后端返明文 (round 2 反转)
@@ -75,7 +75,7 @@ interface ProviderEntry {
   available_models?: ModelInfo[]    // Test 成功后填
 }
 
-type ProviderType = 'anthropic_compatible' | 'openai_compatible' | 'gemini_official'
+type ProviderType = 'anthropic_compatible' | 'openai_compatible' | 'google_genai'
 
 // 持久化状态 (跟 backend Literal 严格一致, 7 个值, **不含 testing**)
 type TestStatus = 'untested' | 'ok' | 'invalid_key' | 'rate_limited'
@@ -106,7 +106,7 @@ interface ProviderDraft extends ProviderEntry {
 const DEFAULTS_BY_TYPE: Record<ProviderType, { base_url: string; vendor_hint: string }> = {
   openai_compatible: { base_url: 'https://api.openai.com/v1', vendor_hint: 'OpenAI' },
   anthropic_compatible: { base_url: 'https://api.anthropic.com', vendor_hint: 'Anthropic' },
-  gemini_official: { base_url: 'https://generativelanguage.googleapis.com/v1beta', vendor_hint: 'Google Gemini' },
+  google_genai: { base_url: 'https://generativelanguage.googleapis.com/v1beta', vendor_hint: 'Google Gemini' },
 }
 ```
 
@@ -408,7 +408,7 @@ export function translateErrorCode(
 
 Step 1 + Step 2 + Step 4 三件. Step 4 即使 backend `ProviderTestResponse` 不扩, baseline 现有字段 (status / latency_ms / model_seen / message) 也够前端切换到 toast + isTesting badge UI; backend ship 后 Step 5 把扩展字段 (available_models / error_code) 接通.
 
-**重要 (B3 cutover 协调)**: Step 1 + 2 + 4 落实施时**保留 4-enum `ProviderType`** (wavespeed_any_llm 不砍), 因为 backend B1 跟 frontend F1 并行起 PR. 等 backend B1+B2+B3 ship 后, frontend F3 联调 PR 同步把 4-enum 砍到 3-enum, 并把 LlmRoles 引用 wavespeed_any_llm 的 model 自动 migrate 显示提示.
+**重要 (B3 cutover 协调)**: Step 1 + 2 + 4 落实施时**保留 4-enum `ProviderType`** (openai_compatible 不砍), 因为 backend B1 跟 frontend F1 并行起 PR. 等 backend B1+B2+B3 ship 后, frontend F3 联调 PR 同步把 4-enum 砍到 3-enum, 并把 LlmRoles 引用 openai_compatible 的 model 自动 migrate 显示提示.
 
 ### 5.2 卡 backend 的事
 

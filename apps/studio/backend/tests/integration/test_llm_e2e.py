@@ -36,10 +36,10 @@ VENDOR_TO_PROVIDER_TYPE = {
     "openai": "openai_compatible",
     "anthropic": "anthropic_compatible",
     "deepseek": "openai_compatible",
-    "gemini": "gemini_official",
+    "gemini": "google_genai",
     "ark": "openai_compatible",
     "openrouter": "openai_compatible",
-    "wavespeed": "wavespeed_any_llm",
+    "wavespeed": "openai_compatible",
     "qiniu": "openai_compatible",
 }
 

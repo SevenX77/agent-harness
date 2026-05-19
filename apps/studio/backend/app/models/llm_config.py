@@ -10,8 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 ProviderType = Literal[
     "anthropic_compatible",
     "openai_compatible",
-    "gemini_official",
-    "wavespeed_any_llm",
+    "google_genai",
 ]
 
 TestStatus = Literal[

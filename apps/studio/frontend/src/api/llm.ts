@@ -42,7 +42,7 @@ export interface ModelInfo {
 export interface CredentialProviderState {
   id: string
   name: string
-  has_key: boolean
+  api_key: string
   base_url?: string
   provider_type?: ProviderType | null
 

@@ -22,11 +22,17 @@ export function SettingsPanel({ apiKeys, onApiKeyChange }: SettingsPanelProps) {
             <label key={key} className="block">
               <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{label}</span>
               <input
-                type="password"
+                type="text"
                 value={apiKeys[key]}
                 onChange={(event) => onApiKeyChange(key, event.target.value)}
                 className="w-full rounded-md border border-gray-300 dark:border-slate-700 dark:bg-slate-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-500"
                 placeholder={placeholder}
+                name={`provider-secret-${key}`}
+                autoComplete="off"
+                data-1p-ignore=""
+                data-lpignore="true"
+                data-form-type="other"
+                spellCheck={false}
               />
             </label>
           ))}

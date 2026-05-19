@@ -55,11 +55,10 @@ def test_credentials_save_and_read_round_trip(
     assert get_response.status_code == 200
     data = get_response.json()
     ds = next(provider for provider in data["providers"] if provider["id"] == "provider-ds")
-    assert ds["has_key"] is True
+    assert ds["api_key"] == "sk-test-123"
     assert ds["base_url"] == "https://api.deepseek.com/v1"
     assert ds["name"] == "DeepSeek"
     assert ds["provider_type"] == "openai_compatible"
-    assert "sk-test-123" not in get_response.text
 
 
 def test_roles_edit_copilot_chat_fallback(

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
+from services.llm_provider_meta import load_provider_meta
 
 from app.models.llm_config import ProviderType
 from app.services.copilot_test import (
@@ -15,6 +17,8 @@ from app.services.copilot_test import (
     _NetworkError,
     _raise_for_status,
 )
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URLS: dict[ProviderType, str] = {
     "anthropic_compatible": "https://api.anthropic.com/v1",
@@ -124,6 +128,116 @@ def _extract_model_ids(payload: Any) -> list[str]:
     return ids
 
 
+async def probe_compatible_sdks(vendor: str, api_key: str, base_url: str) -> list[str]:
+    """Probe vendor metadata SDKs and return the SDKs that pass auth."""
+
+    meta = load_provider_meta(vendor)
+    available: list[str] = []
+    for sdk in meta.compatible_sdks:
+        try:
+            status = await _send_1_token_request(
+                sdk,
+                api_key,
+                base_url,
+                meta.auth_header_format,
+            )
+        except Exception as exc:
+            logger.warning("SDK probe vendor=%s sdk=%s failed: %s", vendor, sdk, exc)
+            continue
+        if status in (200, 400, 422):
+            available.append(sdk)
+        elif status in (401, 403):
+            continue
+        else:
+            logger.warning(
+                "SDK probe vendor=%s sdk=%s unexpected status=%s",
+                vendor,
+                sdk,
+                status,
+            )
+    return available
+
+
+async def _send_1_token_request(
+    sdk: str,
+    api_key: str,
+    base_url: str,
+    auth_header_template: str,
+) -> int:
+    """Dispatch one minimal request through the implementation for ``sdk``."""
+
+    headers = _render_auth_headers(auth_header_template, api_key)
+    if sdk == "openai_compatible":
+        return await _probe_openai_1token(base_url, headers)
+    if sdk == "anthropic_compatible":
+        return await _probe_anthropic_1token(base_url, headers)
+    if sdk == "gemini_official":
+        return await _probe_gemini_1token(base_url, headers)
+    if sdk == "wavespeed_any_llm":
+        return await _probe_wavespeed_1token(base_url, headers)
+    raise ValueError(f"Unknown SDK enum: {sdk}")
+
+
+def _render_auth_headers(template: str, api_key: str) -> dict[str, str]:
+    """Render a docs §1.5 auth header template into an HTTP header dict."""
+
+    rendered = template.replace("${key}", api_key)
+    headers: dict[str, str] = {}
+    for line in rendered.strip().splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        headers[key.strip()] = value.strip()
+    return headers
+
+
+async def _probe_openai_1token(base_url: str, headers: dict[str, str]) -> int:
+    """OpenAI-compatible chat completions probe."""
+
+    url = f"{base_url.rstrip('/')}/chat/completions"
+    payload = {
+        "model": "gpt-3.5-turbo",
+        "messages": [{"role": "user", "content": "."}],
+        "max_tokens": 1,
+    }
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, json=payload, headers=headers, timeout=15.0)
+    return response.status_code
+
+
+async def _probe_anthropic_1token(base_url: str, headers: dict[str, str]) -> int:
+    """Anthropic-compatible messages probe."""
+
+    url = f"{base_url.rstrip('/')}/v1/messages"
+    payload = {
+        "model": "claude-haiku-4-5-20251001",
+        "messages": [{"role": "user", "content": "."}],
+        "max_tokens": 1,
+    }
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, json=payload, headers=headers, timeout=15.0)
+    return response.status_code
+
+
+async def _probe_gemini_1token(base_url: str, headers: dict[str, str]) -> int:
+    """Gemini official generateContent probe."""
+
+    url = f"{base_url.rstrip('/')}/v1beta/models/gemini-2.0-flash:generateContent"
+    payload = {
+        "contents": [{"parts": [{"text": "."}]}],
+        "generationConfig": {"maxOutputTokens": 1},
+    }
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, json=payload, headers=headers, timeout=15.0)
+    return response.status_code
+
+
+async def _probe_wavespeed_1token(base_url: str, headers: dict[str, str]) -> int:
+    """WaveSpeed any-LLM gateway uses the OpenAI-compatible request shape."""
+
+    return await _probe_openai_1token(base_url, headers)
+
+
 async def _request_provider_models(
     client: httpx.AsyncClient,
     provider_type: ProviderType,
@@ -151,6 +265,9 @@ __all__ = [
     "PingResultExtended",
     "ProviderType",
     "_extract_model_ids",
+    "_render_auth_headers",
+    "_send_1_token_request",
     "ping_provider",
     "ping_provider_extended",
+    "probe_compatible_sdks",
 ]

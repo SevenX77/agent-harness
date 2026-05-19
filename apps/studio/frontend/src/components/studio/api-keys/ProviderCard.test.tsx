@@ -34,9 +34,11 @@ function makePersisted(
 function renderCardHtml({
   nextDraft = draft,
   persisted = null,
+  showManualModelPanel = false,
 }: {
   nextDraft?: ProviderDraft
   persisted?: CredentialsState["providers"][number] | null
+  showManualModelPanel?: boolean
 } = {}): string {
   return renderToStaticMarkup(
     <ProviderCard
@@ -45,6 +47,7 @@ function renderCardHtml({
       onFieldChange={vi.fn()}
       onTest={vi.fn()}
       onDelete={vi.fn()}
+      showManualModelPanel={showManualModelPanel}
     />,
   )
 }
@@ -253,6 +256,32 @@ describe("ProviderCard protocol controls", () => {
 
     expect(html).not.toContain(protocolLabel)
     expect(html).not.toContain(openAiLabel)
+  })
+})
+
+describe("ProviderCard manual model panel", () => {
+  it("renders fallback panel when requested", () => {
+    const html = renderCardHtml({ showManualModelPanel: true })
+
+    expect(html).toContain('data-testid="manual-model-test-panel"')
+    expect(html).toContain("Manual model probing")
+  })
+
+  it("hides fallback panel by default", () => {
+    const html = renderCardHtml()
+
+    expect(html).not.toContain('data-testid="manual-model-test-panel"')
+  })
+
+  it("keeps fallback panel visible after available model chips render", () => {
+    const html = renderCardHtml({
+      showManualModelPanel: true,
+      persisted: makePersisted({ available_models: [{ id: "gpt-5" }] }),
+    })
+
+    expect(html).toContain("Available Models:")
+    expect(html).toContain("gpt-5")
+    expect(html).toContain('data-testid="manual-model-test-panel"')
   })
 })
 

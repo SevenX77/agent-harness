@@ -93,6 +93,27 @@ export interface ProviderTestResponse {
   available_sdks?: string[]
 }
 
+export interface NotableModelsResponse {
+  notable_models: string[]
+}
+
+export interface ProviderModelTestRequest {
+  provider_key: string
+  model_ids: string[]
+}
+
+export interface ProviderModelTestResult {
+  model_id: string
+  status: 'ok' | 'invalid_model' | 'invalid_key' | 'rate_limited' | 'network_error' | 'timeout' | 'error'
+  latency_ms?: number | null
+  message?: string | null
+}
+
+export interface ProviderModelTestResponse {
+  results: ProviderModelTestResult[]
+  available_models: ModelInfo[]
+}
+
 export interface RoleModelEntry {
   providers: string[]
 }
@@ -157,6 +178,20 @@ export async function testProvider(
   request: ProviderTestRequest,
 ): Promise<ProviderTestResponse> {
   const response = await api.post<ProviderTestResponse>('/llm/providers/test', request)
+  return response.data
+}
+
+export async function getNotableModels(providerKey: string): Promise<NotableModelsResponse> {
+  const response = await api.get<NotableModelsResponse>('/llm/providers/notable-models', {
+    params: { provider_key: providerKey },
+  })
+  return response.data
+}
+
+export async function testProviderModels(
+  request: ProviderModelTestRequest,
+): Promise<ProviderModelTestResponse> {
+  const response = await api.post<ProviderModelTestResponse>('/llm/providers/test-models', request)
   return response.data
 }
 

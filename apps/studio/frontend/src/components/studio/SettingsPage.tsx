@@ -21,6 +21,7 @@ import {
   putRoles,
   testProvider,
   type CredentialsState,
+  type ModelInfo,
   type ProviderType,
   type RolesData,
 } from "../../api/llm"
@@ -103,6 +104,7 @@ interface SettingsPageContentProps {
   onTestProvider: (providerId: string) => void
   onDeleteProvider: (providerId: string) => void
   onAddProvider: (data: AddProviderFormSubmission) => Promise<void> | void
+  onProviderModelsUpdated: (providerId: string, models: ModelInfo[]) => void
   onSelectedRoleChange: (roleName: string) => void
   onRolesDataChange: (next: RolesData) => void
   onSaveRoles: () => void
@@ -262,6 +264,23 @@ export function thirdPartyProviderDrafts(drafts: ProviderDraft[]): ProviderDraft
   return drafts.filter((draft) => inferProviderKind(draft) === "third-party")
 }
 
+export function notableProviderKeyForDraft(draft: ProviderDraft): string {
+  const officialCode = officialProviderCodes.find((code) => isOfficialProviderDraft(draft, code))
+  if (officialCode) return officialCode
+  return draft.id.split(/[-_]/, 1)[0].toLowerCase()
+}
+
+export function shouldShowManualModelPanel(
+  draft: ProviderDraft,
+  persisted: CredentialsState["providers"][number] | null,
+): boolean {
+  return (
+    inferProviderKind(draft) === "official" ||
+    persisted?.last_test_status === "ok" ||
+    (persisted?.available_models?.length ?? 0) > 0
+  )
+}
+
 function isOfficialProviderDraft(draft: ProviderDraft, providerCode: string): boolean {
   const normalizedId = draft.id.toLowerCase()
   const normalizedName = draft.name.toLowerCase()
@@ -396,6 +415,14 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     scheduleSave()
   }
 
+  function updateProviderModels(providerId: string, models: ModelInfo[]) {
+    setCredentials((current) => ({
+      providers: current.providers.map((provider) => (
+        provider.id === providerId ? { ...provider, available_models: models } : provider
+      )),
+    }))
+  }
+
   async function runProviderTest(providerId: string) {
     const draft = draftsRef.current.find((d) => d.id === providerId)
     if (!draft) return
@@ -496,6 +523,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       onTestProvider={(providerCode) => void runProviderTest(providerCode)}
       onDeleteProvider={deleteProvider}
       onAddProvider={addProviderWithData}
+      onProviderModelsUpdated={updateProviderModels}
       onSelectedRoleChange={setSelectedRole}
       onRolesDataChange={updateRolesData}
       onSaveRoles={() => void saveRoles()}
@@ -520,6 +548,7 @@ export function SettingsPageContent({
   onTestProvider,
   onDeleteProvider,
   onAddProvider,
+  onProviderModelsUpdated,
   onSelectedRoleChange,
   onRolesDataChange,
   onSaveRoles,
@@ -559,6 +588,7 @@ export function SettingsPageContent({
                 onTestProvider={onTestProvider}
                 onDeleteProvider={onDeleteProvider}
                 onAddProvider={onAddProvider}
+                onProviderModelsUpdated={onProviderModelsUpdated}
               />
             ) : null}
             {activeTab === "llm_roles" ? (
@@ -726,6 +756,7 @@ function ApiKeysTab({
   onTestProvider,
   onDeleteProvider,
   onAddProvider,
+  onProviderModelsUpdated,
 }: Pick<
   SettingsPageContentProps,
   | "credentials"
@@ -736,6 +767,7 @@ function ApiKeysTab({
   | "onTestProvider"
   | "onDeleteProvider"
   | "onAddProvider"
+  | "onProviderModelsUpdated"
 >) {
   const [showAddForm, setShowAddForm] = useState(false)
   const persistedById = useMemo(
@@ -770,6 +802,9 @@ function ApiKeysTab({
                     onTest={() => onTestProvider(draft.id)}
                     onDelete={() => onDeleteProvider(draft.id)}
                     providerKind="official"
+                    showManualModelPanel={shouldShowManualModelPanel(draft, persisted)}
+                    notableProviderKey={notableProviderKeyForDraft(draft)}
+                    onModelsUpdated={(models) => onProviderModelsUpdated(draft.id, models)}
                   />
                 )
               })}
@@ -797,6 +832,9 @@ function ApiKeysTab({
                       onTest={() => onTestProvider(draft.id)}
                       onDelete={() => onDeleteProvider(draft.id)}
                       providerKind="third-party"
+                      showManualModelPanel={shouldShowManualModelPanel(draft, persisted)}
+                      notableProviderKey={notableProviderKeyForDraft(draft)}
+                      onModelsUpdated={(models) => onProviderModelsUpdated(draft.id, models)}
                     />
                   )
                 })

@@ -7,8 +7,10 @@ import {
   inferProviderKind,
   inferProviderType,
   moveProviderInRole,
+  notableProviderKeyForDraft,
   officialProviderDrafts,
   removeProviderFromRole,
+  shouldShowManualModelPanel,
   thirdPartyProviderDrafts,
   toggleModelFallback,
   updateActiveModel,
@@ -123,6 +125,7 @@ function baseViewProps(
     onTestProvider: vi.fn(),
     onDeleteProvider: vi.fn(),
     onAddProvider: vi.fn(),
+    onProviderModelsUpdated: vi.fn(),
     onSelectedRoleChange: vi.fn(),
     onRolesDataChange: vi.fn(),
     onSaveRoles: vi.fn(),
@@ -228,6 +231,17 @@ describe('Add Provider flow helpers', () => {
       'WS_LLM',
       'CUSTOM_AB12CD34',
     ])
+  })
+
+  it('derives notable provider key and manual panel visibility', () => {
+    const official = officialProviderDrafts(draftsFromCredentials(credentials))[0]
+    const custom = thirdPartyProviderDrafts(draftsFromCredentials(credentials))[2]
+
+    expect(notableProviderKeyForDraft(official)).toBe('anthropic')
+    expect(notableProviderKeyForDraft(custom)).toBe('custom')
+    expect(shouldShowManualModelPanel(official, null)).toBe(true)
+    expect(shouldShowManualModelPanel(custom, null)).toBe(false)
+    expect(shouldShowManualModelPanel(custom, { ...credentials.providers[3], last_test_status: 'ok' })).toBe(true)
   })
 })
 

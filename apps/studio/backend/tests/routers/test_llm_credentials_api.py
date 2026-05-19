@@ -773,3 +773,159 @@ def test_get_provider_notable_models_unknown_provider_returns_404(
     response = client.get("/api/llm/providers/notable-models?provider_key=missing")
 
     assert response.status_code == 404
+
+
+def test_provider_test_models_appends_ok_models_and_dedupes(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    client.put(
+        "/api/llm/credentials",
+        json={
+            "providers": [
+                {
+                    "id": "openai-default",
+                    "name": "OpenAI",
+                    "api_key": "sk",
+                    "base_url": "https://api.openai.com/v1",
+                    "provider_type": "openai_compatible",
+                }
+            ]
+        },
+    )
+
+    async def fake_probe(
+        provider_type: str,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+        auth_header_template: str | None = None,
+    ) -> Any:
+        del auth_header_template
+        assert provider_type == "openai_compatible"
+        assert api_key == "sk"
+        assert base_url == "https://api.openai.com/v1"
+        from app.services.llm_provider_test import ModelProbeResult
+
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=3)
+
+    monkeypatch.setattr(llm_router, "probe_model_id", fake_probe)
+
+    response = client.post(
+        "/api/llm/providers/test-models",
+        json={"provider_key": "openai-default", "model_ids": ["gpt-5", "gpt-5", "gpt-4o"]},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [result["model_id"] for result in body["results"]] == ["gpt-5", "gpt-4o"]
+    assert [model["id"] for model in body["available_models"]] == ["gpt-5", "gpt-4o"]
+    provider = client.get("/api/llm/credentials").json()["providers"][0]
+    assert [model["id"] for model in provider["available_models"]] == ["gpt-5", "gpt-4o"]
+
+
+def test_provider_test_models_partial_failures_append_only_ok(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    client.put(
+        "/api/llm/credentials",
+        json={
+            "providers": [
+                {
+                    "id": "openai-default",
+                    "name": "OpenAI",
+                    "api_key": "sk",
+                    "provider_type": "openai_compatible",
+                }
+            ]
+        },
+    )
+
+    async def fake_probe(*_args: object, **_kwargs: object) -> Any:
+        from app.services.llm_provider_test import ModelProbeResult
+
+        model_id = str(_args[3])
+        if model_id == "bad-model":
+            return ModelProbeResult(model_id=model_id, status="invalid_model", message="not found")
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=5)
+
+    monkeypatch.setattr(llm_router, "probe_model_id", fake_probe)
+
+    response = client.post(
+        "/api/llm/providers/test-models",
+        json={"provider_key": "openai-default", "model_ids": ["gpt-5", "bad-model"]},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [result["status"] for result in body["results"]] == ["ok", "invalid_model"]
+    assert [model["id"] for model in body["available_models"]] == ["gpt-5"]
+    provider = client.get("/api/llm/credentials").json()["providers"][0]
+    assert [model["id"] for model in provider["available_models"]] == ["gpt-5"]
+
+
+def test_provider_test_models_unknown_provider_returns_404(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    response = client.post(
+        "/api/llm/providers/test-models",
+        json={"provider_key": "missing", "model_ids": ["gpt-5"]},
+    )
+
+    assert response.status_code == 404
+
+
+def test_provider_test_models_preserves_existing_models(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    client.put(
+        "/api/llm/credentials",
+        json={
+            "providers": [
+                {
+                    "id": "openai-default",
+                    "name": "OpenAI",
+                    "api_key": "sk",
+                    "provider_type": "openai_compatible",
+                }
+            ]
+        },
+    )
+    from app.services.llm_credentials import _persist_test_outcome
+
+    _persist_test_outcome(
+        "openai-default",
+        last_test_status="ok",
+        last_test_at="2026-05-19T00:00:00+00:00",
+        available_models=[ModelInfo(id="gpt-5")],
+    )
+
+    async def fake_probe(*_args: object, **_kwargs: object) -> Any:
+        from app.services.llm_provider_test import ModelProbeResult
+
+        return ModelProbeResult(model_id=str(_args[3]), status="ok", latency_ms=5)
+
+    monkeypatch.setattr(llm_router, "probe_model_id", fake_probe)
+
+    response = client.post(
+        "/api/llm/providers/test-models",
+        json={"provider_key": "openai-default", "model_ids": ["gpt-5", "claude-opus-4-7"]},
+    )
+
+    assert response.status_code == 200
+    assert [model["id"] for model in response.json()["available_models"]] == [
+        "gpt-5",
+        "claude-opus-4-7",
+    ]

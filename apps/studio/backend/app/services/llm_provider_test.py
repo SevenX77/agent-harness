@@ -38,6 +38,16 @@ class PingResultExtended:
     raw_payload: Any
 
 
+@dataclass(frozen=True)
+class ModelProbeResult:
+    """One manual model probe result."""
+
+    model_id: str
+    status: str
+    latency_ms: int | None = None
+    message: str | None = None
+
+
 async def ping_provider(
     provider_code: str,
     provider_type: ProviderType,
@@ -176,6 +186,71 @@ async def _send_1_token_request(
     raise ValueError(f"Unknown SDK enum: {sdk}")
 
 
+async def probe_model_id(
+    provider_type: ProviderType,
+    api_key: str,
+    base_url: str,
+    model_id: str,
+    auth_header_template: str | None = None,
+) -> ModelProbeResult:
+    """Probe one concrete model id with a minimal generation request."""
+
+    headers = _render_auth_headers(
+        auth_header_template or _default_auth_header_template(provider_type),
+        api_key,
+    )
+    started = time.perf_counter()
+    try:
+        status_code = await _send_model_1_token_request(provider_type, model_id, base_url, headers)
+    except httpx.TimeoutException:
+        return ModelProbeResult(model_id=model_id, status="timeout")
+    except httpx.HTTPError as exc:
+        return ModelProbeResult(model_id=model_id, status="network_error", message=str(exc))
+    latency_ms = max(0, round((time.perf_counter() - started) * 1000))
+    return ModelProbeResult(
+        model_id=model_id,
+        status=_status_from_model_probe(status_code),
+        latency_ms=latency_ms,
+    )
+
+
+async def _send_model_1_token_request(
+    provider_type: ProviderType,
+    model_id: str,
+    base_url: str,
+    headers: dict[str, str],
+) -> int:
+    if provider_type == "openai_compatible":
+        return await _probe_openai_model_1token(base_url, headers, model_id)
+    if provider_type == "anthropic_compatible":
+        return await _probe_anthropic_model_1token(base_url, headers, model_id)
+    if provider_type == "google_genai":
+        return await _probe_google_genai_model_1token(base_url, headers, model_id)
+    raise ValueError(f"Unknown provider type: {provider_type}")
+
+
+def _default_auth_header_template(provider_type: ProviderType) -> str:
+    if provider_type == "anthropic_compatible":
+        return "x-api-key: ${key}\nanthropic-version: 2023-06-01"
+    if provider_type == "google_genai":
+        return "x-goog-api-key: ${key}"
+    return "Authorization: Bearer ${key}"
+
+
+def _status_from_model_probe(status_code: int) -> str:
+    if status_code in (200, 400, 422):
+        return "ok"
+    if status_code in (401, 403):
+        return "invalid_key"
+    if status_code == 404:
+        return "invalid_model"
+    if status_code == 429:
+        return "rate_limited"
+    if status_code >= 500:
+        return "error"
+    return "invalid_model"
+
+
 def _render_auth_headers(template: str, api_key: str) -> dict[str, str]:
     """Render a docs §1.5 auth header template into an HTTP header dict."""
 
@@ -192,9 +267,21 @@ def _render_auth_headers(template: str, api_key: str) -> dict[str, str]:
 async def _probe_openai_1token(base_url: str, headers: dict[str, str]) -> int:
     """OpenAI-compatible chat completions probe."""
 
-    url = f"{base_url.rstrip('/')}/chat/completions"
+    url = _join_base_url_and_endpoint(base_url, "/v1/chat/completions")
     payload = {
         "model": "gpt-3.5-turbo",
+        "messages": [{"role": "user", "content": "."}],
+        "max_tokens": 1,
+    }
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, json=payload, headers=headers, timeout=15.0)
+    return response.status_code
+
+
+async def _probe_openai_model_1token(base_url: str, headers: dict[str, str], model_id: str) -> int:
+    url = _join_base_url_and_endpoint(base_url, "/v1/chat/completions")
+    payload = {
+        "model": model_id,
         "messages": [{"role": "user", "content": "."}],
         "max_tokens": 1,
     }
@@ -206,9 +293,21 @@ async def _probe_openai_1token(base_url: str, headers: dict[str, str]) -> int:
 async def _probe_anthropic_1token(base_url: str, headers: dict[str, str]) -> int:
     """Anthropic-compatible messages probe."""
 
-    url = f"{base_url.rstrip('/')}/v1/messages"
+    url = _join_base_url_and_endpoint(base_url, "/v1/messages")
     payload = {
         "model": "claude-haiku-4-5-20251001",
+        "messages": [{"role": "user", "content": "."}],
+        "max_tokens": 1,
+    }
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, json=payload, headers=headers, timeout=15.0)
+    return response.status_code
+
+
+async def _probe_anthropic_model_1token(base_url: str, headers: dict[str, str], model_id: str) -> int:
+    url = _join_base_url_and_endpoint(base_url, "/v1/messages")
+    payload = {
+        "model": model_id,
         "messages": [{"role": "user", "content": "."}],
         "max_tokens": 1,
     }
@@ -220,7 +319,18 @@ async def _probe_anthropic_1token(base_url: str, headers: dict[str, str]) -> int
 async def _probe_google_genai_1token(base_url: str, headers: dict[str, str]) -> int:
     """Google GenAI generateContent probe."""
 
-    url = f"{base_url.rstrip('/')}/v1beta/models/gemini-2.0-flash:generateContent"
+    url = _join_base_url_and_endpoint(base_url, "/v1beta/models/gemini-2.0-flash:generateContent")
+    payload = {
+        "contents": [{"parts": [{"text": "."}]}],
+        "generationConfig": {"maxOutputTokens": 1},
+    }
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, json=payload, headers=headers, timeout=15.0)
+    return response.status_code
+
+
+async def _probe_google_genai_model_1token(base_url: str, headers: dict[str, str], model_id: str) -> int:
+    url = _join_base_url_and_endpoint(base_url, f"/v1beta/models/{model_id}:generateContent")
     payload = {
         "contents": [{"parts": [{"text": "."}]}],
         "generationConfig": {"maxOutputTokens": 1},
@@ -391,6 +501,7 @@ __all__ = [
     "DEFAULT_BASE_URLS",
     "PingResultExtended",
     "ProviderType",
+    "ModelProbeResult",
     "_extract_model_ids",
     "_extract_model_ids_from_section",
     "_extract_section_4",
@@ -399,6 +510,7 @@ __all__ = [
     "_parse_models_response",
     "_render_auth_headers",
     "_send_1_token_request",
+    "probe_model_id",
     "ping_provider",
     "ping_provider_extended",
     "probe_available_models",

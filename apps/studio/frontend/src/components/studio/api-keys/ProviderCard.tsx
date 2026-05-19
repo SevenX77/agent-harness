@@ -17,8 +17,9 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
-import type { CredentialsState } from "../../../api/llm"
+import type { CredentialsState, ModelInfo } from "../../../api/llm"
 import type { ProviderDraft } from "../SettingsPage"
+import { ManualModelTestPanel } from "./ManualModelTestPanel"
 
 type TestMessageStatus = "not_configured" | "untested" | "testing" | "ok" | "error"
 
@@ -104,6 +105,9 @@ export function ProviderCard({
   onTest,
   onDelete,
   providerKind,
+  showManualModelPanel = false,
+  notableProviderKey,
+  onModelsUpdated,
 }: {
   draft: ProviderDraft
   persisted: CredentialsState["providers"][number] | null
@@ -111,6 +115,9 @@ export function ProviderCard({
   onTest: () => void
   onDelete: () => void
   providerKind?: "official" | "third-party"
+  showManualModelPanel?: boolean
+  notableProviderKey?: string
+  onModelsUpdated?: (models: ModelInfo[]) => void
 }) {
   const [visible, setVisible] = useState(false)
   const isOfficial = providerKind === "official"
@@ -221,6 +228,13 @@ export function ProviderCard({
               </div>
             ) : null}
           </div>
+        ) : null}
+        {showManualModelPanel ? (
+          <ManualModelTestPanel
+            providerKey={draft.id}
+            notableProviderKey={notableProviderKey ?? draft.id.split(/[-_]/, 1)[0].toLowerCase()}
+            onModelsUpdated={(models) => onModelsUpdated?.(models)}
+          />
         ) : null}
       </CardContent>
     </Card>

@@ -31,6 +31,7 @@ from app.services.llm_provider_test import (
     DEFAULT_BASE_URLS,
     _extract_model_ids_from_section,
     _extract_section_4,
+    probe_model_id,
     probe_available_models,
     probe_compatible_sdks,
 )
@@ -103,6 +104,31 @@ class NotableModelsResponse(BaseModel):
     """Notable model ids parsed from provider metadata docs."""
 
     notable_models: list[str] = Field(default_factory=list)
+
+
+class ProviderModelTestRequest(BaseModel):
+    """Request body for manual model probing."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider_key: str
+    model_ids: list[str] = Field(default_factory=list)
+
+
+class ProviderModelTestResult(BaseModel):
+    """One manual model probe result."""
+
+    model_id: str
+    status: str
+    latency_ms: int | None = None
+    message: str | None = None
+
+
+class ProviderModelTestResponse(BaseModel):
+    """Manual model probing response."""
+
+    results: list[ProviderModelTestResult] = Field(default_factory=list)
+    available_models: list[ModelInfo] = Field(default_factory=list)
 
 
 @router.get("/credentials")
@@ -240,6 +266,58 @@ async def get_provider_notable_models(provider_key: str) -> NotableModelsRespons
     )
 
 
+@router.post("/providers/test-models", response_model=ProviderModelTestResponse)
+async def test_provider_models(request: ProviderModelTestRequest) -> ProviderModelTestResponse:
+    """Probe user-supplied model ids and append passing models to credentials."""
+
+    data = load_credentials()
+    provider = next((item for item in data.providers if item.id == request.provider_key), None)
+    if provider is None:
+        raise HTTPException(status_code=404, detail=f"Unknown provider: {request.provider_key}")
+    if not provider.api_key:
+        raise HTTPException(status_code=400, detail="Provider API key is empty")
+    provider_type = provider.provider_type or "openai_compatible"
+    base_url = provider.base_url or _default_base_url(provider_type)
+    model_ids = _dedupe_model_ids(request.model_ids)
+    if not model_ids:
+        return ProviderModelTestResponse(results=[], available_models=list(provider.available_models))
+
+    vendor = _infer_vendor_from_provider(provider)
+    auth_header_template = None
+    try:
+        from services.llm_provider_meta import load_provider_meta
+
+        auth_header_template = load_provider_meta(vendor).auth_header_format
+    except Exception:  # noqa: BLE001 - third-party providers may not have metadata docs.
+        auth_header_template = None
+
+    results: list[ProviderModelTestResult] = []
+    for model_id in model_ids:
+        result = await probe_model_id(
+            provider_type,
+            provider.api_key,
+            base_url,
+            model_id,
+            auth_header_template,
+        )
+        results.append(ProviderModelTestResult(**result.__dict__))
+
+    merged_models = _merge_available_models(
+        list(provider.available_models),
+        [result.model_id for result in results if result.status == "ok"],
+    )
+    _persist_test_outcome(
+        provider.id,
+        last_test_status=provider.last_test_status,
+        last_test_at=provider.last_test_at,
+        last_test_message=provider.last_test_message,
+        last_error_code=provider.last_error_code,
+        available_sdks=list(provider.available_sdks),
+        available_models=merged_models,
+    )
+    return ProviderModelTestResponse(results=results, available_models=merged_models)
+
+
 @router.get("/roles", response_model=RolesData)
 async def get_llm_roles() -> RolesData:
     """Return the full LLM roles configuration."""
@@ -317,6 +395,43 @@ def _infer_vendor(request: ProviderTestRequest) -> str:
         "google_genai": "gemini",
     }
     return mapping.get(request.provider_type, "openai")
+
+
+def _infer_vendor_from_provider(provider: ProviderCredential) -> str:
+    if provider.id and "-" in provider.id:
+        candidate = provider.id.split("-", 1)[0].lower()
+        if (DOCS_DIR / f"{candidate}.md").exists():
+            return candidate
+    if provider.id and "_" in provider.id:
+        candidate = provider.id.split("_", 1)[0].lower()
+        if (DOCS_DIR / f"{candidate}.md").exists():
+            return candidate
+    mapping = {
+        "anthropic_compatible": "anthropic",
+        "openai_compatible": "openai",
+        "google_genai": "gemini",
+    }
+    return mapping.get(provider.provider_type or "openai_compatible", "openai")
+
+
+def _dedupe_model_ids(model_ids: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for model_id in model_ids:
+        normalized = model_id.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
+
+
+def _merge_available_models(existing: list[ModelInfo], passed_model_ids: list[str]) -> list[ModelInfo]:
+    by_id = {model.id: model for model in existing}
+    for model_id in passed_model_ids:
+        if model_id not in by_id:
+            by_id[model_id] = ModelInfo(id=model_id)
+    return list(by_id.values())
 
 
 def _default_base_url(provider_type: ProviderType) -> str:

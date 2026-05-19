@@ -70,6 +70,7 @@ def _persist_test_outcome(
     last_test_at: str,
     last_test_message: str = "",
     last_error_code: str = "",
+    available_sdks: list[str] | None = None,
     available_models: list[str] | None = None,
     path: Path | None = None,
 ) -> ProviderCredential | None:
@@ -84,6 +85,7 @@ def _persist_test_outcome(
     """
 
     credential_path = path or credentials_path()
+    sdks = list(available_sdks or [])
     models = list(available_models or [])
 
     with _credentials_lock:
@@ -99,6 +101,7 @@ def _persist_test_outcome(
             "last_test_at": last_test_at,
             "last_test_message": last_test_message,
             "last_error_code": last_error_code,
+            "available_sdks": sdks,
             "available_models": models,
         }
         updated = existing.model_copy(update=updated_fields)

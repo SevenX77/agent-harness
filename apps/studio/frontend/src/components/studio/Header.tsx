@@ -8,7 +8,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { isTauriRuntime } from "@/config/runtime"
 import { usePublishSkill } from "@/hooks/usePublishSkill"
 import { useSkillSync } from "@/hooks/useSkillSync"
 import type { CollaborateResult } from "@/api/types"
@@ -50,30 +49,21 @@ export function Header({
   }
 
   return (
-    <header
-      data-tauri-drag-region
-      className="grid h-11 shrink-0 grid-cols-3 items-center border-b border-border bg-background px-3"
-    >
+    <header className="grid h-11 shrink-0 grid-cols-3 items-center border-b border-border bg-background px-3">
       <div className="flex items-center gap-2">
-        {isTauriRuntime() ? (
-          <div className="flex size-6 items-center justify-center rounded-md bg-foreground">
-            <Layers className="size-3.5 text-background" strokeWidth={2} />
-          </div>
-        ) : (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={onHome}
-                aria-label="Back to Home"
-                className="flex size-6 items-center justify-center rounded-md bg-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-              >
-                <Layers className="size-3.5 text-background" strokeWidth={2} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Back to Home</TooltipContent>
-          </Tooltip>
-        )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onHome}
+              aria-label="Back to Home"
+              className="flex size-6 items-center justify-center rounded-md bg-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            >
+              <Layers className="size-3.5 text-background" strokeWidth={2} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>Back to Home</TooltipContent>
+        </Tooltip>
         <span className="text-sm font-semibold tracking-tight text-foreground">
           GSkill Studio
         </span>

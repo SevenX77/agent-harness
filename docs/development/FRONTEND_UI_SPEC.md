@@ -11,29 +11,34 @@ last_updated: 2026-05-19
 
 # 前端与 UI 规范 (Frontend UI Spec)
 
-## 1. Tailwind 设计令牌与暗色模式适配
-- **基础库**: 全局放弃早期手写的杂乱 CSS，统一由 `TailwindCSS` 与 `shadcn/ui` 托管。
-- **暗黑沉浸**: Studio 定位为极客生产力工具，采用纯正的 Dark 模式。背景色使用 `bg-background` (`zinc-950` 级别)，面板边框使用 `border-border` (`zinc-800` 级别)。
-- **一致性控制**: 无论是在 React Flow 节点还是右侧的 Copilot 侧边栏，边框圆角统一为 `rounded-md` (0.375rem)，杜绝圆滑边框与极客风格产生割裂。
+## 1. Tailwind 设计令牌与暗色模式
+在构建桌面级复杂工具时，统一的设计系统是效率的保障。
+- **基础库选型**: 抛弃内联 CSS 和手写类名，全面基于 `TailwindCSS v4` 配合无头组件库 `shadcn/ui`。
+- **暗黑极客主题**: 默认只支持暗色模式（Dark Theme），营造专业生产力环境。
+  - 背景底色: `bg-background` 使用 `zinc-950`，制造沉浸深度感。
+  - 边框与分割线: `border-border` 使用 `zinc-800`。
+- **视觉一致性约束**: 全局组件（包括浮动弹窗和侧边栏）圆角上限设定为 `rounded-md` (0.375rem)。严禁引入过度活泼的大圆角元素。
 
-## 2. React Flow 画布基础样式重写
-`@xyflow/react` 默认的主题在我们的深色模式下过于突兀。
-必须在 `index.css` 的 `@layer components` 中覆写：
-- `react-flow__node`: 消除默认白底，应用我们的背景和阴影类。
-- `react-flow__handle`: 连线的接驳点需调小并匹配我们的主色调。
-- 画布底纹 (Background) 必须设置为极其暗淡的 `Dots`，以减少视觉噪音。
+## 2. ReactFlow 画布样式覆写
+原生的 `@xyflow/react` 深色主题仍带有较重的网页感，需在全局 `index.css` (通过 `@layer components`) 中彻底覆写：
+- **节点主体**: 去除硬高亮，应用统一的背景令牌，增添轻微半透明磨砂效果（backdrop-blur）。
+- **连接线 (Edges)**: 常态显示为浅灰色（如 `zinc-500`），在动画状态下（模拟数据流）渲染动态渐变色。
+- **连接点 (Handles)**: 调小尺寸并使其处于隐藏半透状态，只有节点被 Hover 时激活显示，降低整体画布的视觉噪音。
 
-## 3. 面板拖拽系统
-整个屏幕必须是响应式的分栏系统（基于 `react-resizable-panels`）。
-- **左侧**: 极窄的工具条 (Toolbar) + 可收起的资源树 (AssetsPanel)。
-- **中侧**: 分割区 (SplitEditor)，通常是上方画布，下方代码，两者可通过中部的 Handle 自由拉伸。
-- **右侧**: 默认隐藏，当触发 Copilot 或打磨 Golden 时滑出。
-确保拖动顺滑，不破坏 Monaco 编辑器和 React Flow 画布的自适应宽高度计算。
+## 3. 面板拖拽系统与自适应重绘
+Studio 必须表现得像一个原生桌面应用，核心支撑是灵活的分屏拖拽框架。
+- **基建组件**: 采用 `react-resizable-panels`。
+- **区域分割**:
+  - `Sidebar (AssetsPanel)` 宽 15%-25%。
+  - `Main Workspace (SplitEditor)` 包含上下或左右分割的 Canvas 画布和 Monaco 代码编辑器。
+  - `Right Drawer (Copilot / Golden)` 按需滑出。
+- **重要 caveat**: 拖拽调节窗体大小时，必须确保 `ReactFlow` 和 `Monaco Editor` 及时监听 Resize Observer，触发自我边界更新 (`fit-to-screen` 和 `layout()`)，否则可能产生渲染撕裂。
 
 ## 4. Tauri Native API 桥接层最佳实践
-前端代码中绝不允许出现零散的 `window.__TAURI__` 调用。
-一切系统级操作必须经过 `apps/studio/frontend/src/lib/tauri.ts` 封装的契约方法。
-当应用在纯 Web 模式下开发时 (如 `npm run dev`)，桥接层自动 Mock 返回假数据以保证 UI 不崩溃。
+将网页代码安全接入 Tauri 本地能力的护城河机制：
+- 严禁业务组件中直接解构 `window.__TAURI__` 对象。
+- 所有本地 I/O 和 Shell 调用，必须收敛并封装在统一的文件下：`apps/studio/frontend/src/lib/tauri.ts`。
+- **兼容策略**: 为了便于直接使用 Vite `npm run dev` 在浏览器中纯粹调试 UI，桥接层必须提供运行时检测：如果不在 Tauri 沙盒中，所有针对本地文件读写的接口必须返回模拟成功数据（Mock fallback），而不是直接引发白屏崩溃。
 
 ## 相关 Spec
 - [studio-uikit-redesign](../../.kiro/specs/studio-uikit-redesign/design.md)

@@ -48,40 +48,19 @@ def save_credentials(data: LLMCredentialsFile, path: Path | None = None) -> None
         _save_credentials_unlocked(data, credential_path)
 
 
-def redacted_for_response(
+def serialize_for_response(
     data: LLMCredentialsFile,
     provider_metadata: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Return credentials metadata suitable for API responses."""
+    """Return credentials suitable for API responses."""
 
     del provider_metadata
 
     return {
         "providers": [
-            {
-                "id": provider.id,
-                "name": provider.name,
-                "has_key": bool(provider.api_key.strip()),
-                "base_url": provider.base_url,
-                "provider_type": provider.provider_type,
-                **_credential_metadata_view(provider),
-            }
+            provider.model_dump(mode="json")
             for provider in data.providers
         ]
-    }
-
-
-def _credential_metadata_view(credential: ProviderCredential) -> dict[str, Any]:
-    """Return the user-visible metadata view (no secrets) for one provider."""
-
-    return {
-        "last_test_status": credential.last_test_status,
-        "last_test_at": credential.last_test_at,
-        "last_test_message": credential.last_test_message,
-        "last_error_code": credential.last_error_code,
-        "available_models": [
-            model.model_dump(mode="json") for model in credential.available_models
-        ],
     }
 
 
@@ -165,6 +144,6 @@ __all__ = [
     "_persist_test_outcome",
     "credentials_path",
     "load_credentials",
-    "redacted_for_response",
     "save_credentials",
+    "serialize_for_response",
 ]

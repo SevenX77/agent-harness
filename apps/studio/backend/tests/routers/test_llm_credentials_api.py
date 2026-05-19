@@ -22,7 +22,7 @@ from app.services.llm_provider_test import (
 from fastapi.testclient import TestClient
 
 
-def test_get_credentials_returns_has_key_without_api_key(
+def test_get_credentials_returns_api_key_plaintext(
     client: TestClient,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -35,7 +35,7 @@ def test_get_credentials_returns_has_key_without_api_key(
                 {
                     "id": "OC_CL",
                     "name": "Claude",
-                    "api_key": "sk-secret",
+                    "api_key": "sk-test-fake-key",
                     "base_url": "https://base.test",
                 }
             ]
@@ -49,12 +49,11 @@ def test_get_credentials_returns_has_key_without_api_key(
     assert len(body["providers"]) == 1
     provider = body["providers"][0]
     assert provider["id"] == "OC_CL"
-    assert provider["has_key"] is True
+    assert provider["api_key"] == "sk-test-fake-key"
     assert provider["base_url"] == "https://base.test"
     assert provider["last_test_status"] == "untested"
     assert provider["available_models"] == []
-    assert "sk-secret" not in response.text
-    assert "api_key" not in response.text
+    assert "has_key" not in provider
 
 
 def test_put_credentials_requires_bearer_token(
@@ -71,7 +70,7 @@ def test_put_credentials_requires_bearer_token(
     assert response.status_code == 401
 
 
-def test_put_credentials_writes_and_get_reads_sanitized(
+def test_put_credentials_writes_and_get_reads_plaintext(
     client: TestClient,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -80,13 +79,12 @@ def test_put_credentials_writes_and_get_reads_sanitized(
 
     response = client.put(
         "/api/llm/credentials",
-        json={"providers": [{"id": "OC_CL", "name": "Claude", "api_key": "secret"}]},
+        json={"providers": [{"id": "OC_CL", "name": "Claude", "api_key": "sk-test-fake-key"}]},
     )
 
     assert response.status_code == 200
-    assert response.json()["providers"][0]["has_key"] is True
-    assert client.get("/api/llm/credentials").json()["providers"][0]["has_key"] is True
-    assert "secret" not in response.text
+    assert response.json()["providers"][0]["api_key"] == "sk-test-fake-key"
+    assert client.get("/api/llm/credentials").json()["providers"][0]["api_key"] == "sk-test-fake-key"
 
 
 @pytest.mark.parametrize(
@@ -317,7 +315,7 @@ def test_put_credentials_preserves_existing_api_key_when_body_blank(
 
     assert response.status_code == 200
     provider = response.json()["providers"][0]
-    assert provider["has_key"] is True
+    assert provider["api_key"] == "sk-original"
     assert provider["base_url"] == "https://updated"
 
     # Verify on disk via load_credentials (round-trip)

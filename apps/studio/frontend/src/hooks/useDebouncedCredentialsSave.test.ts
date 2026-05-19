@@ -25,12 +25,12 @@ describe("buildPutPayload", () => {
 
   it("ignores fields not part of ProviderCredentialUpdate", () => {
     const result = buildPutPayload([
-      // @ts-expect-error — has_key is intentionally not in the input type
+      // @ts-expect-error — last_test_status is intentionally not in the input type
       // but may leak in via spread; confirm it gets stripped so the PUT
       // doesn't trip backend's extra="forbid".
-      { id: "AAA", name: "Alpha", api_key: "sk", has_key: true },
+      { id: "AAA", name: "Alpha", api_key: "sk", last_test_status: "ok" },
     ])
-    expect(result[0]).not.toHaveProperty("has_key")
+    expect(result[0]).not.toHaveProperty("last_test_status")
     expect(Object.keys(result[0]).sort()).toEqual([
       "api_key",
       "base_url",

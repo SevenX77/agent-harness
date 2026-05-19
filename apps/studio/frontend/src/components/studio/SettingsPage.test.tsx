@@ -97,6 +97,7 @@ function baseViewProps(
   return {
     activeTab: 'api_keys',
     credentials,
+    credentialsLoading: false,
     drafts: draftsFromCredentials(credentials),
     saveStatus: 'idle',
     rolesData,
@@ -147,6 +148,29 @@ describe('draftsFromCredentials', () => {
 })
 
 describe('SettingsPageContent (api_keys)', () => {
+  it('renders provider skeletons while credentials are loading', () => {
+    const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ credentialsLoading: true })} />)
+    const skeletons = html.match(/data-slot="skeleton"/g) ?? []
+    expect(skeletons).toHaveLength(9)
+    expect(html).not.toContain('Add Provider')
+    expect(html).not.toContain('Provider Name')
+  })
+
+  it('renders the empty provider state after credentials finish loading', () => {
+    const html = renderToStaticMarkup(
+      <SettingsPageContent
+        {...baseViewProps({
+          credentials: { providers: [] },
+          credentialsLoading: false,
+          drafts: [],
+        })}
+      />,
+    )
+    expect(html).toContain('Add Provider')
+    expect(html).toContain('border-dashed')
+    expect(html).not.toContain('data-slot="skeleton"')
+  })
+
   it('renders the provider cards with name inputs and primary test actions', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
     expect(html).toContain('API Keys')

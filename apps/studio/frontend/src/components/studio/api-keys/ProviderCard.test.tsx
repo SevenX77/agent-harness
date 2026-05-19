@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import { isValidElement, type ReactElement, type ReactNode } from "react"
 import { ProviderCard, ProviderDeleteConfirmation, apiKeyInputClassName } from "./ProviderCard"
+import type { CredentialsState } from "../../../api/llm"
 import type { ProviderDraft } from "../SettingsPage"
 
 const draft: ProviderDraft = {
@@ -11,6 +12,41 @@ const draft: ProviderDraft = {
   base_url: "",
   provider_type: "openai_compatible",
   isTesting: false,
+}
+
+function makeDraft(overrides: Partial<ProviderDraft> = {}): ProviderDraft {
+  return { ...draft, ...overrides }
+}
+
+function makePersisted(
+  overrides: Partial<CredentialsState["providers"][number]> = {},
+): CredentialsState["providers"][number] {
+  return {
+    id: "p1",
+    name: "OpenAI",
+    api_key: "sk-secret-123",
+    base_url: "",
+    provider_type: "openai_compatible",
+    ...overrides,
+  }
+}
+
+function renderCardHtml({
+  nextDraft = draft,
+  persisted = null,
+}: {
+  nextDraft?: ProviderDraft
+  persisted?: CredentialsState["providers"][number] | null
+} = {}): string {
+  return renderToStaticMarkup(
+    <ProviderCard
+      draft={nextDraft}
+      persisted={persisted}
+      onFieldChange={vi.fn()}
+      onTest={vi.fn()}
+      onDelete={vi.fn()}
+    />,
+  )
 }
 
 function textOf(node: ReactNode): string {
@@ -55,15 +91,7 @@ function findElement(
 
 describe("ProviderCard API key masking", () => {
   it("renders API key as masked text input by default", () => {
-    const html = renderToStaticMarkup(
-      <ProviderCard
-        draft={draft}
-        persisted={null}
-        onFieldChange={vi.fn()}
-        onTest={vi.fn()}
-        onDelete={vi.fn()}
-      />,
-    )
+    const html = renderCardHtml()
 
     expect(html).toContain('type="text"')
     expect(html).toContain('value="sk-secret-123"')
@@ -86,6 +114,39 @@ describe("ProviderCard API key masking", () => {
     expect(visibleClassName).not.toContain("mask-input")
     expect(onFieldChange).not.toHaveBeenCalled()
     expect(draft.api_key).toBe("sk-secret-123")
+  })
+})
+
+describe("ProviderCard test status badge", () => {
+  it("renders Untested as secondary badge", () => {
+    const html = renderCardHtml()
+
+    expect(html).toContain('data-variant="secondary"')
+    expect(html).toContain("Untested")
+  })
+
+  it("renders Testing badge with spinner", () => {
+    const html = renderCardHtml({ nextDraft: makeDraft({ isTesting: true }) })
+
+    expect(html).toContain("Testing...")
+    expect(html).toContain("animate-spin")
+  })
+
+  it("renders Connected badge with emerald utility color", () => {
+    const html = renderCardHtml({ persisted: makePersisted({ last_test_status: "ok" }) })
+
+    expect(html).toContain("Connected")
+    expect(html).toContain("text-emerald-500")
+    expect(html).toContain("border-emerald-500/50")
+  })
+
+  it("renders Error badge as destructive with error code", () => {
+    const html = renderCardHtml({
+      persisted: makePersisted({ last_test_status: "error", last_error_code: "auth_failed" }),
+    })
+
+    expect(html).toContain('data-variant="destructive"')
+    expect(html).toContain("auth_failed")
   })
 })
 

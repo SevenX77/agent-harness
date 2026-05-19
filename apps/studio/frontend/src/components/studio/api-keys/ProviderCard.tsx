@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Eye, EyeOff, Loader2, Trash2 } from "lucide-react"
+import { CheckCircle2, Eye, EyeOff, Loader2, Trash2, XCircle } from "lucide-react"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,8 +21,49 @@ import { cn } from "@/lib/utils"
 import type { ProviderType, CredentialsState } from "../../../api/llm"
 import type { ProviderDraft } from "../SettingsPage"
 
+type TestMessageStatus = "untested" | "testing" | "ok" | "error"
+
 export function apiKeyInputClassName(visible: boolean): string {
   return cn("flex-1", !visible && "mask-input")
+}
+
+export function TestMessage({
+  status,
+  latencyMs,
+  errorCode,
+}: {
+  status: TestMessageStatus
+  latencyMs?: number | null
+  errorCode?: string | null
+}) {
+  if (status === "testing") {
+    return (
+      <Badge variant="outline" className="gap-1">
+        <Loader2 className="size-3 animate-spin" />
+        Testing...
+      </Badge>
+    )
+  }
+
+  if (status === "ok") {
+    return (
+      <Badge variant="outline" className="gap-1 text-emerald-500 border-emerald-500/50">
+        <CheckCircle2 className="size-3" />
+        {latencyMs != null ? `Connected (${latencyMs}ms)` : "Connected"}
+      </Badge>
+    )
+  }
+
+  if (status === "error") {
+    return (
+      <Badge variant="destructive" className="gap-1">
+        <XCircle className="size-3" />
+        {errorCode ?? "Error"}
+      </Badge>
+    )
+  }
+
+  return <Badge variant="secondary">Untested</Badge>
 }
 
 export function ProviderDeleteConfirmation({
@@ -67,9 +108,13 @@ export function ProviderCard({
   onDelete: () => void
 }) {
   const [visible, setVisible] = useState(false)
-  const status = persisted?.last_test_status ?? "untested"
-  const displayStatus = status === "ok" ? "Connected" : status === "untested" ? "Untested" : "Failed"
-  const statusVariant = status === "ok" ? "secondary" : status === "untested" ? "outline" : "destructive"
+  const testStatus: TestMessageStatus = draft.isTesting
+    ? "testing"
+    : persisted?.last_test_status === "ok"
+      ? "ok"
+      : persisted?.last_test_status && persisted.last_test_status !== "untested"
+        ? "error"
+        : "untested"
   return (
     <Card data-provider-id={draft.id}>
       <CardHeader className="flex flex-row items-center gap-3 pb-2">
@@ -80,7 +125,7 @@ export function ProviderCard({
           className="w-full max-w-xs font-semibold"
           aria-label="Provider Name"
         />
-        <Badge variant={statusVariant}>{displayStatus}</Badge>
+        <TestMessage status={testStatus} latencyMs={null} errorCode={persisted?.last_error_code ?? null} />
         <div className="flex-1" />
         <ProviderDeleteConfirmation draftName={draft.name} onDelete={onDelete} />
       </CardHeader>

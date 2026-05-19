@@ -29,6 +29,11 @@ Studio 是 Tauri 桌面单机应用。**本地磁盘文件是唯一真相, Studi
 - **不存在 conflict 概念**。文件被改了就是被改了, 没有 "我正在编辑没保存 vs 外部改了" 的 race condition 需要解决。
 - **WebSocket `skill_changed` 事件应直接驱动 UI hot reload**, 绝不弹 ConflictDialog 阻断 用户 (当前代码中的 ConflictDialog 是错误的产品假设, 应砍除, 见 §5)。
 
+### 0.2 OS Title Bar 跨平台策略 (MVP0)
+Studio 桌面端 (Tauri) 保留 OS 标准窗口装饰 (`decorations: true` 默认): macOS 左上角红绿灯 (close/minimize/maximize), Windows 右上角三键 (`—` / `□` / `×`)。Header (44px) 位于 OS 标题栏之 下, 跨平台 (macOS / Windows / Linux / Browser) 布局一致, 不做平台分支。
+
+**MVP0 设计取舍**: 不学 VS Code 将 Header 合并进 OS Title Bar (Windows title bar 上承载系统 menu bar, 合并需复杂跨平台适配). MVP1+ 评估是否做合并 (见 [Task #31](../../) 设计参考)。
+
 ## 1. 整体布局总览
 
 整个 Studio 采用现代 IDE 经典的“顶部导航 + 极窄左侧边栏 + 可伸缩主分屏”布局架构。底层依赖 `react-resizable-panels`。
@@ -57,13 +62,15 @@ Studio 是 Tauri 桌面单机应用。**本地磁盘文件是唯一真相, Studi
 
 ### 2.1 顶部顶栏 (Header)
 - **对应组件**: `Header` (`apps/studio/frontend/src/components/studio/Header.tsx:32`)
-- **尺寸**: 固定高度 44px (`h-11`)。
+- **尺寸**: 固定高度 44px (`h-11`)。位于 OS 标题栏 (含红绿灯 / Windows 三键, Tauri 默认 `decorations: true`) 之下, 跨平台保持统一 (MVP0 不做 OS Title Bar 合并, 见 §0.2)。
 - **显示条件**: Always visible。
 - **包含功能**:
-  - 左侧：Home 按钮 / Tauri 窗口拖拽区 / Logo。
-  - 中部：当前顶层 Workspace (Skill) 名称，状态徽章 (Draft)。*(注意：全局面包屑已移至 Canvas, 见 §2.4)*
-  - 右侧：Git/Team 同步按钮组 (Save/Sync/Review/Release)，以及触发 Copilot 的 Toggle 按钮。
-- **交互互动**: 点击右侧的 Sparkles 图标，可触发 `copilotOpen` 状态，挤压中侧主面板以显示出最右侧的 Copilot 面板。
+  - 左侧：Logo (点击返回 welcome page, Tauri 与 Browser 模式行为统一) + "GSkill Studio" 文字 。
+  - 中部：当前顶层 Workspace (Skill) 名称, 状态徽章 (Draft)。*(注意：全局面包屑已移至 Canvas, 见 §2.4)*
+  - 右侧：Git/Team 同步按钮组 (Save / Sync / Review / Release), 以及触发 Copilot 的 Toggle 按钮 (Sparkles 图标)。
+- **交互互动**: 
+  - 点击 Logo: 返回 welcome page (`onHome` 回调)
+  - 点击右侧 Sparkles 图标: 触发 `copilotOpen` 状态, 挤压中侧主面板以显示出最右侧的 Copilot  面板
 
 ### 2.2 左侧工具条 (Toolbar)
 - **对应组件**: `Toolbar` (`apps/studio/frontend/src/components/studio/Toolbar.tsx:21`)

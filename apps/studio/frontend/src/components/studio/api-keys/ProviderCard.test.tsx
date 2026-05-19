@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
-import { ProviderCard, apiKeyInputClassName } from "./ProviderCard"
+import { isValidElement, type ReactElement, type ReactNode } from "react"
+import { ProviderCard, ProviderDeleteConfirmation, apiKeyInputClassName } from "./ProviderCard"
 import type { ProviderDraft } from "../SettingsPage"
 
 const draft: ProviderDraft = {
@@ -10,6 +11,46 @@ const draft: ProviderDraft = {
   base_url: "",
   provider_type: "openai_compatible",
   isTesting: false,
+}
+
+function textOf(node: ReactNode): string {
+  if (node === null || node === undefined || typeof node === "boolean") {
+    return ""
+  }
+  if (typeof node === "string" || typeof node === "number") {
+    return String(node)
+  }
+  if (Array.isArray(node)) {
+    return node.map(textOf).join("")
+  }
+  if (isValidElement(node)) {
+    return textOf((node as ReactElement<{ children?: ReactNode }>).props.children)
+  }
+  return ""
+}
+
+function findElement(
+  node: ReactNode,
+  predicate: (element: ReactElement<Record<string, unknown>>) => boolean,
+): ReactElement<Record<string, unknown>> | null {
+  if (!isValidElement(node)) {
+    return null
+  }
+
+  const element = node as ReactElement<Record<string, unknown>>
+  if (predicate(element)) {
+    return element
+  }
+
+  const children = element.props.children as ReactNode
+  if (Array.isArray(children)) {
+    for (const child of children) {
+      const match = findElement(child, predicate)
+      if (match) return match
+    }
+    return null
+  }
+  return findElement(children, predicate)
 }
 
 describe("ProviderCard API key masking", () => {
@@ -45,5 +86,32 @@ describe("ProviderCard API key masking", () => {
     expect(visibleClassName).not.toContain("mask-input")
     expect(onFieldChange).not.toHaveBeenCalled()
     expect(draft.api_key).toBe("sk-secret-123")
+  })
+})
+
+describe("ProviderCard delete confirmation", () => {
+  it("delete trigger opens confirmation without calling onDelete directly", () => {
+    const onDelete = vi.fn()
+    const element = ProviderDeleteConfirmation({ draftName: "OpenAI", onDelete })
+    const trigger = findElement(element, (candidate) => candidate.props["aria-label"] === "Delete provider")
+
+    expect(textOf(element)).toContain("确认删除 OpenAI?")
+    expect(textOf(element)).toContain("此操作不可恢复, 该 provider 配置将永久删除。")
+    expect(textOf(element)).toContain("取消")
+    expect(trigger?.props.onClick).toBeUndefined()
+    expect(onDelete).not.toHaveBeenCalled()
+  })
+
+  it("confirm action is wired to call onDelete", () => {
+    const onDelete = vi.fn()
+    const element = ProviderDeleteConfirmation({ draftName: "OpenAI", onDelete })
+    const confirm = findElement(
+      element,
+      (candidate) => textOf(candidate).trim() === "删除" && candidate.props.onClick === onDelete,
+    )
+
+    expect(confirm).not.toBeNull()
+    ;(confirm!.props.onClick as () => void)()
+    expect(onDelete).toHaveBeenCalledTimes(1)
   })
 })

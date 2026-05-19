@@ -1,39 +1,34 @@
 # Changelog
 
-## Unreleased
+All notable changes to this project will be documented in this file.
 
-### Breaking Changes
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-- Moved the SDK from `src/core/graph_agent` to
-  `packages/graph-agent/src/graph_agent`.
-- Converted the repository to a uv workspace with SDK and Studio packages.
-- Collapsed the top-level `graph_agent` public exports to the SDK contract.
-- Split tests by ownership under `packages/graph-agent/tests`,
-  `apps/studio/backend/tests`, and `apps/studio/tests-e2e`.
-- Removed legacy broken `data_manager.py` and `artifact_manager.py`.
-
-### Added
-
-- `WorkflowResult` and `WorkflowMetrics` typed SDK result models.
-- Detailed `SkillCompilationError` context fields for skill path, line,
-  field path, and suggestions.
-- Studio backend Ports and Local Adapters for Storage, Metadata, EventBus, and
-  Auth.
-- import-linter contracts for SDK and Studio boundary enforcement.
-- Restored Studio frontend dark mode UI.
+## [Unreleased]
 
 ### Changed
+- **Baseline cleanup (2026-05-19)**: 200 份历史文档收敛到 5 支柱 (~30 份精华 doc)
+  - 物理归档 160+ 份到 `docs/archive/*` + `.kiro/specs/_archive/`
+  - 新建 11 份逻辑融合 doc (`PROD_DEV_SEPARATION.md`, `AGENT_COGNITIVE_ARCHITECTURE.md`, 等)
+  - README 彻底重写，定调为大而全（自包含，不杂糅命令行碎碎念）
+  - 明确生产端/研发端架构分离的法典文档，引入 Level 3 与 Level 4 规范的双向链接标准
 
-- Studio backend skill routes now use async Storage and Metadata ports.
-- Studio event WebSocket now subscribes through the EventBus port.
-- Studio run manager main process now persists run metadata and final state
-  through backend ports.
-- README now documents the monorepo layout and uv-based workflows.
+### Added
+- feat(studio): API key plaintext display + design round 2 reversal (#74)
+- feat(studio-frontend): API Key row full-width + shorten Test button label (#73)
+- docs(llm-providers): add provider reference docs (Anthropic / Gemini / OpenAI)
+- docs(.kiro): add studio-frontend v2.1 multifile editor spec
 
-### Verification
+### Fixed
+- fix(studio-backend): keep last_test_status='untested' on missing API key
+- fix(studio-backend): satisfy ruff in skills service
 
-- `packages/graph-agent`: 1018 passed, 1 skipped.
-- `apps/studio/backend`: 28 passed.
-- `lint-imports`: 2 contracts kept, 0 broken.
-- `mypy --strict packages/graph-agent/src apps/studio/backend/app`: 5 known errors
-  remain deferred.
+## [v0.2.0] - 2026-05-18
+
+### Changed
+- feat(studio): 任意文件夹 = skill + VS Code 风格 Asset 文件树
+- refactor(studio-backend): API Keys schema v3 with UUID id and user-owned name
+- feat(studio-frontend): API Keys shadcn redesign with provider cards
+- feat(studio-backend): apply ruff import order
+- feat(studio): wire Compile button end-to-end

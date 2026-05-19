@@ -2,32 +2,21 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
+from services.llm_provider_meta import DOCS_DIR
 
 from app.core import config
 from app.models.llm_config import (
     LLMCredentialsFile,
-    ModelInfo,
     ProviderCredential,
     ProviderType,
     RoleEntry,
     RolesData,
-)
-from app.services.copilot_test import (
-    _NetworkError,
-    _QuotaExceeded,
-    _RateLimited,
-    _Unauthorized,
-)
-from app.services.llm_capability_table import (
-    STATIC_FALLBACK_MODELS,
-    lookup_capabilities,
 )
 from app.services.llm_credentials import (
     _credentials_lock,
@@ -39,8 +28,8 @@ from app.services.llm_credentials import (
 )
 from app.services.llm_provider_test import (
     DEFAULT_BASE_URLS,
-    PingResultExtended,
-    ping_provider_extended,
+    probe_available_models,
+    probe_compatible_sdks,
 )
 from app.services.llm_roles import (
     InvalidRoleReference,
@@ -103,7 +92,8 @@ class ProviderTestResponse(BaseModel):
     model_seen: str | None = None
     message: str | None = None
     error_code: str | None = None
-    available_models: list[ModelInfo] = Field(default_factory=list)
+    available_models: list[str] = Field(default_factory=list)
+    available_sdks: list[str] = Field(default_factory=list)
 
 
 @router.get("/credentials")
@@ -193,90 +183,33 @@ async def test_llm_provider(request: ProviderTestRequest) -> ProviderTestRespons
             error_code="missing_api_key",
         )
 
-    started = asyncio.get_running_loop().time()
-    base_url = request.base_url or DEFAULT_BASE_URLS[request.provider_type]
+    vendor = _infer_vendor(request)
+    base_url = request.base_url or _default_base_url(request.provider_type)
+    started = datetime.now(tz=UTC)
     try:
-        async with asyncio.timeout(8):
-            result = await ping_provider_extended(
-                request.id,
-                request.provider_type,
-                request.api_key,
-                base_url,
-            )
-    except TimeoutError:
-        latency_ms = _elapsed_ms(started)
-        _log_test_provider(request.id, request.api_key, "timeout", latency_ms)
-        return _record_and_return(
-            request.id,
-            ProviderTestResponse(
-                status="timeout",
-                latency_ms=latency_ms,
-                message="Request exceeded 8s",
-                error_code="timeout",
-            ),
-            _now_iso(),
-        )
-    except _Unauthorized as exc:
-        latency_ms = _elapsed_ms(started)
-        _log_test_provider(request.id, request.api_key, "invalid_key", latency_ms)
-        return _record_and_return(
-            request.id,
-            ProviderTestResponse(
-                status="invalid_key",
-                latency_ms=latency_ms,
-                message="Provider rejected key (401)",
-                error_code=getattr(exc, "error_code", "unauthorized") or "unauthorized",
-            ),
-            _now_iso(),
-        )
-    except _RateLimited as exc:
-        latency_ms = _elapsed_ms(started)
-        _log_test_provider(request.id, request.api_key, "rate_limited", latency_ms)
-        return _record_and_return(
-            request.id,
-            ProviderTestResponse(
-                status="rate_limited",
-                latency_ms=latency_ms,
-                message="Rate limit (429)",
-                error_code=getattr(exc, "error_code", "rate_limited") or "rate_limited",
-            ),
-            _now_iso(),
-        )
-    except _QuotaExceeded as exc:
-        latency_ms = _elapsed_ms(started)
-        _log_test_provider(request.id, request.api_key, "quota_exceeded", latency_ms)
-        return _record_and_return(
-            request.id,
-            ProviderTestResponse(
-                status="quota_exceeded",
-                latency_ms=latency_ms,
-                message="Quota exceeded",
-                error_code=getattr(exc, "error_code", "quota_exceeded") or "quota_exceeded",
-            ),
-            _now_iso(),
-        )
-    except _NetworkError as exc:
-        latency_ms = _elapsed_ms(started)
-        _log_test_provider(request.id, request.api_key, "network_error", latency_ms)
-        return _record_and_return(
-            request.id,
-            ProviderTestResponse(
-                status="network_error",
-                latency_ms=latency_ms,
-                message=str(exc)[:200],
-                error_code=getattr(exc, "error_code", "network_error") or "network_error",
-            ),
-            _now_iso(),
-        )
+        available_sdks = await probe_compatible_sdks(vendor, request.api_key, base_url)
+    except Exception as exc:  # noqa: BLE001 - probe failures should return a clean API result.
+        logger.warning("SDK probe failed for vendor=%s: %s", vendor, exc)
+        available_sdks = []
 
-    _log_test_provider(request.id, request.api_key, "ok", result.latency_ms)
-    available_models = _models_from_ping(result, request.provider_type)
+    available_models: list[str] = []
+    if available_sdks:
+        try:
+            available_models = await probe_available_models(vendor, request.api_key, base_url)
+        except Exception as exc:  # noqa: BLE001 - model probing is best-effort after SDK auth.
+            logger.warning("Model probe failed for vendor=%s: %s", vendor, exc)
+
+    latency_ms = _elapsed_ms(started)
+    status = "ok" if available_sdks else "error"
+    error_code = None if available_sdks else "no_available_sdk"
+    _log_test_provider(request.id, request.api_key, status, latency_ms)
     return _record_and_return(
         request.id,
         ProviderTestResponse(
-            status="ok",
-            latency_ms=result.latency_ms,
-            model_seen=result.model_seen,
+            status=status,
+            latency_ms=latency_ms,
+            error_code=error_code,
+            available_sdks=available_sdks,
             available_models=available_models,
         ),
         _now_iso(),
@@ -315,21 +248,6 @@ async def put_llm_roles(request: RolesData) -> RolesData:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-def _models_from_ping(
-    result: PingResultExtended,
-    provider_type: ProviderType,
-) -> list[ModelInfo]:
-    if result.model_ids:
-        return [
-            ModelInfo(id=model_id, capabilities=lookup_capabilities(provider_type, model_id))
-            for model_id in result.model_ids
-        ]
-    return [
-        ModelInfo(id=model_id, capabilities=lookup_capabilities(provider_type, model_id))
-        for model_id in STATIC_FALLBACK_MODELS.get(provider_type, ())
-    ]
-
-
 def _record_and_return(
     provider_id: str,
     response: ProviderTestResponse,
@@ -344,6 +262,7 @@ def _record_and_return(
             last_test_at=outcome_at,
             last_test_message=response.message or "",
             last_error_code=response.error_code or "",
+            available_sdks=list(response.available_sdks),
             available_models=list(response.available_models),
         )
     except Exception as exc:  # noqa: BLE001 — Test writeback failure must not break the API response.
@@ -359,8 +278,26 @@ def _now_iso() -> str:
     return datetime.now(tz=UTC).isoformat()
 
 
-def _elapsed_ms(started: float) -> int:
-    return max(0, round((asyncio.get_running_loop().time() - started) * 1000))
+def _elapsed_ms(started: datetime) -> int:
+    return max(0, round((datetime.now(tz=UTC) - started).total_seconds() * 1000))
+
+
+def _infer_vendor(request: ProviderTestRequest) -> str:
+    if request.id and "-" in request.id:
+        candidate = request.id.split("-", 1)[0].lower()
+        if (DOCS_DIR / f"{candidate}.md").exists():
+            return candidate
+    mapping = {
+        "anthropic_compatible": "anthropic",
+        "openai_compatible": "openai",
+        "gemini_official": "gemini",
+        "wavespeed_any_llm": "wavespeed",
+    }
+    return mapping.get(request.provider_type, "openai")
+
+
+def _default_base_url(provider_type: ProviderType) -> str:
+    return DEFAULT_BASE_URLS[provider_type]
 
 
 def _log_test_provider(

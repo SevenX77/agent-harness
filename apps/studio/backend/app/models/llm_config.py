@@ -22,6 +22,7 @@ TestStatus = Literal[
     "quota_exceeded",
     "network_error",
     "timeout",
+    "error",
 ]
 
 

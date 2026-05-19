@@ -58,6 +58,7 @@ class RunMetadata(BaseModel):
     started_at: datetime
     metrics: TokensMetrics | None = None
     input_summary: str | None = None
+    git_status: Literal["committed", "locked", "failed"] | None = None
 
 
 class RunListResponse(BaseModel):

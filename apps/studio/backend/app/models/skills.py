@@ -13,6 +13,16 @@ from app.models.lint import LintResult
 from app.models.runs import RunMetadata
 
 
+class ConfigMismatchWarning(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    actual_remote_url: str
+    expected_remote_url: str
+    recommendation: str = (
+        "建议以 .git/config 为基准 (per design.md 决策 22), 在 Settings 调整 User ID / Gitea Host"
+    )
+
+
 class SkillSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -22,17 +32,19 @@ class SkillSummary(BaseModel):
     phase_count: int
     has_golden: bool
     last_run_at: datetime | None = None
+    directory_path: str | None = None
+    config_mismatch: ConfigMismatchWarning | None = None
 
 
 class SkillDetail(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     manifest: SkillManifest
-    graph_topology: list[dict[str, object]]
-    node_schema_v21: dict[str, dict[str, object]]
-    io_schema: dict[str, dict[str, object]]
+    graph_topology: list[dict[str, object]] = Field(default_factory=list)
+    node_schema_v21: dict[str, dict[str, object]] = Field(default_factory=dict)
+    io_schema: dict[str, dict[str, object]] = Field(default_factory=dict)
     file_paths: dict[str, str]
-    files: dict[str, str]
+    files: dict[str, str] = Field(default_factory=dict)
     has_golden: bool
     latest_run_metadata: RunMetadata | None = None
     lint_result: LintResult | None = None
@@ -76,11 +88,39 @@ class SerializeGraphRes(BaseModel):
     current_hash: str
 
 
+class CompileError(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    file: str | None = None
+    line: int | None = None
+    field: str | None = None
+    severity: Literal["fatal", "warning"] = "fatal"
+    message: str
+
+
+class CompileSuccess(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    skill_id: str
+    status: Literal["ok"]
+    phase_count: int
+    manifest_name: str
+
+
+class CompileFailure(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: Literal["compile_failed"] = "compile_failed"
+    detail: str
+    errors: list[CompileError]
+
+
 class CreateSkillReq(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     skill_id: str = Field(..., pattern=r"^[a-z][a-z0-9-]+$")
-    files: dict[str, str]
+    files: dict[str, str] = Field(default_factory=dict)
+    directory_path: str | None = None
 
 
 class ForkSkillReq(BaseModel):
@@ -94,3 +134,17 @@ class UpdateSkillReq(BaseModel):
 
     files: dict[str, str]
     expected_hash: str | None = None
+
+
+class UpdateSkillFileReq(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content: str
+    expected_hash: str | None = None
+
+
+class UpdateSkillFileRes(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    hash: str

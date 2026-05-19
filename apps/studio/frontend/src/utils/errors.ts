@@ -35,7 +35,6 @@ export function asLintErrors(value: unknown): LintError[] {
       return []
     }
     return [{
-      file: typeof item.file === 'string' ? item.file : null,
       line: typeof item.line === 'number' ? item.line : null,
       column: typeof item.column === 'number' ? item.column : null,
       error_code: item.error_code,

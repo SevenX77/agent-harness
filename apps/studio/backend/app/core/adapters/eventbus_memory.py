@@ -60,6 +60,8 @@ class InMemoryEventBus:
         """Publish one default-topic event from a watchdog thread."""
         if self._loop is None:
             return
+        if self._loop.is_closed():
+            return
         future = asyncio.run_coroutine_threadsafe(self.broadcast(event), self._loop)
         try:
             future.result(timeout=1)

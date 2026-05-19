@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hmac
+import logging
 import os
 import threading
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
 
 from app.core.backends import clear_backend_caches
 from app.core.config import DEFAULT_STUDIO_PORT
@@ -23,7 +26,9 @@ from app.routers import (
     debug,
     golden,
     lint,
+    llm,
     runs,
+    settings,
     skills,
     system,
     templates,
@@ -31,10 +36,14 @@ from app.routers import (
     test_inputs,
     websockets,
 )
-from app.services.event_bus import file_watcher
+from app.services.copilot import cleanup_all_sessions
+from app.services.file_watcher import file_watcher
 from app.services.run_manager import run_manager
 from app.services.skills import ensure_workspace_layout
 from app.services.terminal_manager import terminal_manager
+
+logger = logging.getLogger(__name__)
+_VALID_TOKENS: list[str] = []
 
 
 @asynccontextmanager
@@ -49,8 +58,55 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         file_watcher.stop()
+        await cleanup_all_sessions()
         await terminal_manager.shutdown()
         await run_manager.shutdown()
+
+
+def configure_api_auth(studio_app: FastAPI) -> None:
+    api_token = os.environ.get("STUDIO_API_TOKEN", "").strip() or None
+    dev_tunnel_token = os.environ.get("STUDIO_DEV_TUNNEL_TOKEN", "").strip() or None
+    valid_tokens = [token for token in (api_token, dev_tunnel_token) if token]
+    if not valid_tokens:
+        raise RuntimeError(
+            "Refusing to start: STUDIO_API_TOKEN or STUDIO_DEV_TUNNEL_TOKEN must be set"
+        )
+
+    # Production Tauri uses STUDIO_API_TOKEN. Dev tunnel uses STUDIO_DEV_TUNNEL_TOKEN.
+    # There is no dev bypass mode.
+    global _VALID_TOKENS
+    _VALID_TOKENS = valid_tokens
+
+    @studio_app.middleware("http")
+    async def auth_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
+        if request.url.path in ("/health", "/api/health"):
+            return await call_next(request)
+
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return JSONResponse(
+                {"error_code": "UNAUTHORIZED", "message": "Missing Bearer token"},
+                status_code=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        token = auth_header[7:]
+        if not _is_valid_token(token):
+            return JSONResponse(
+                {"error_code": "INVALID_TOKEN", "message": "Invalid Bearer token"},
+                status_code=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        return await call_next(request)
+
+
+def _constant_time_compare(a: str, b: str) -> bool:
+    return hmac.compare_digest(a.encode(), b.encode())
+
+
+def _is_valid_token(token: str | None) -> bool:
+    if not token:
+        return False
+    return any(_constant_time_compare(token, valid_token) for valid_token in _VALID_TOKENS)
 
 
 def create_app() -> FastAPI:
@@ -61,6 +117,7 @@ def create_app() -> FastAPI:
         description="FastAPI backend for graph-agent-harness Skill Studio.",
         lifespan=lifespan,
     )
+    configure_api_auth(studio_app)
     configure_cors(studio_app)
     register_exception_handlers(studio_app)
 
@@ -69,11 +126,13 @@ def create_app() -> FastAPI:
     studio_app.include_router(lint.router)
     studio_app.include_router(runs.router)
     studio_app.include_router(runs.batch_router)
+    studio_app.include_router(settings.router)
     studio_app.include_router(terminal.router)
     studio_app.include_router(test_inputs.router)
     studio_app.include_router(golden.router)
     studio_app.include_router(compare.router)
     studio_app.include_router(copilot.router)
+    studio_app.include_router(llm.router)
     studio_app.include_router(audit.router)
     studio_app.include_router(debug.router)
     studio_app.include_router(websockets.router)

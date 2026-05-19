@@ -1,9 +1,26 @@
-import axios, { AxiosHeaders } from 'axios'
-import type { MultifileSkillPayload, SerializeGraphPayload, SerializeGraphResult, SkillDetail } from './types'
+import axios, { AxiosError, AxiosHeaders } from 'axios'
+import type {
+  AppSettings,
+  CollaborateResult,
+  CompileFailure,
+  CompileResult,
+  CompileSuccess,
+  GitHistoryItem,
+  GoldenBaseline,
+  JsonObject,
+  PublishResult,
+  PublishSkillReq,
+  RunDetail,
+  RunMetadata,
+  SkillDetail,
+  SyncSkillReq,
+  UpdateSkillFileRes,
+} from './types'
 
 export const API_BASE_URL = import.meta.env.VITE_STUDIO_API_BASE_URL ?? 'http://localhost:8787/api'
 
 let currentApiBaseURL = API_BASE_URL
+let currentApiToken: string | null = null
 
 export const api = axios.create({
   baseURL: currentApiBaseURL,
@@ -18,9 +35,20 @@ export function getApiBaseURL(): string {
   return currentApiBaseURL
 }
 
+export function configureApiToken(token: string | null): void {
+  currentApiToken = token
+}
+
+export function currentApiTokenIsSet(): boolean {
+  return Boolean(currentApiToken)
+}
+
 api.interceptors.request.use((config) => {
   const headers = AxiosHeaders.from(config.headers)
   headers.set('X-Studio-User-ID', 'default')
+  if (currentApiToken) {
+    headers.set('Authorization', `Bearer ${currentApiToken}`)
+  }
   config.headers = headers
   return config
 })
@@ -30,40 +58,117 @@ export async function fetcher<T>(url: string): Promise<T> {
   return response.data
 }
 
-export async function fetchSkillFiles(skillId: string): Promise<SkillDetail> {
-  const response = await api.get<SkillDetail>(`/skills/${skillId}`)
+export async function getAppSettings(): Promise<AppSettings> {
+  const response = await api.get<AppSettings>('/settings')
   return response.data
 }
 
-export async function saveSkillFiles(
-  skillId: string,
-  files: Record<string, string>,
-  expectedHash?: string | null,
-): Promise<SkillDetail> {
-  const payload: MultifileSkillPayload = { files, expected_hash: expectedHash }
-  const response = await api.put<SkillDetail>(`/skills/${skillId}`, payload)
+export async function updateAppSettings(settings: AppSettings): Promise<AppSettings> {
+  const response = await api.put<AppSettings>('/settings', settings)
   return response.data
 }
 
-export async function serializeGraph(
-  skillId: string,
-  payload: SerializeGraphPayload,
-): Promise<SerializeGraphResult> {
-  const response = await api.post<SerializeGraphResult>(`/skills/${skillId}/graph/serialize`, payload)
+export async function syncSkill(skillId: string, request: SyncSkillReq): Promise<CollaborateResult> {
+  const response = await api.post<CollaborateResult>(`/skills/${skillId}/sync`, request)
   return response.data
 }
 
-export async function updateSkillFiles(
-  skillId: string,
-  files: Record<string, string>,
-  expectedHash?: string | null,
-): Promise<SkillDetail> {
-  return saveSkillFiles(skillId, files, expectedHash)
+export async function publishSkill(skillId: string, request: PublishSkillReq = {}): Promise<PublishResult> {
+  const response = await api.post<PublishResult>(`/skills/${skillId}/publish`, request)
+  return response.data
+}
+
+export async function compileSkill(skillId: string): Promise<CompileResult> {
+  try {
+    const response = await api.post<CompileSuccess>(`/skills/${skillId}/compile`)
+    return response.data
+  } catch (error) {
+    if (error instanceof AxiosError && isCompileFailure(error.response?.data)) {
+      return error.response.data
+    }
+    throw error
+  }
+}
+
+function isCompileFailure(value: unknown): value is CompileFailure {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false
+  }
+  const candidate = value as Partial<CompileFailure>
+  return candidate.code === 'compile_failed' && Array.isArray(candidate.errors)
 }
 
 export function wsUrl(path: string): string {
   const base = new URL(currentApiBaseURL, window.location.origin)
   const protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
   const normalizedPath = path.startsWith('/') ? path : `/${path}`
-  return `${protocol}//${base.host}${normalizedPath}`
+  const separator = normalizedPath.includes('?') ? '&' : '?'
+  const tokenQuery = currentApiToken ? `${separator}token=${encodeURIComponent(currentApiToken)}` : ''
+  return `${protocol}//${base.host}${normalizedPath}${tokenQuery}`
+}
+
+export interface PredictRunResponse {
+  run_id?: string
+  status?: RunMetadata['status']
+  metadata?: RunMetadata
+  input_data?: JsonObject | null
+  final_context?: JsonObject | null
+  output?: JsonObject | null
+  artifacts?: string[] | null
+}
+
+export async function postPredictRun(skillId: string, inputData: JsonObject): Promise<PredictRunResponse | RunDetail> {
+  const response = await api.post<PredictRunResponse | RunDetail>(`/skills/${skillId}/runs/predict`, {
+    input_data: inputData,
+  })
+  return response.data
+}
+
+export async function saveGoldenBaseline(skillId: string, runId: string, lock = false): Promise<GoldenBaseline> {
+  const response = await api.post<GoldenBaseline>(`/skills/${skillId}/golden`, {
+    run_id: runId,
+    lock,
+  })
+  return response.data
+}
+
+export async function listGoldenBaselines(skillId: string): Promise<GoldenBaseline[]> {
+  const response = await api.get<GoldenBaseline[]>(`/skills/${skillId}/golden`)
+  return response.data
+}
+
+export async function startRun(skillId: string, inputData: JsonObject): Promise<RunMetadata> {
+  const response = await api.post<RunMetadata>(`/skills/${skillId}/runs`, {
+    input_data: inputData,
+  })
+  return response.data
+}
+
+export async function getLocalHistory(skillId: string): Promise<GitHistoryItem[]> {
+  const response = await api.get<GitHistoryItem[]>(`/skills/${skillId}/history`)
+  return response.data
+}
+
+export async function revertSkill(skillId: string, sha: string): Promise<SkillDetail> {
+  const response = await api.post<SkillDetail>(`/skills/${skillId}/revert`, { sha })
+  return response.data
+}
+
+export async function getSkillDetail(skillId: string): Promise<SkillDetail> {
+  const response = await api.get<SkillDetail>(`/skills/${skillId}`)
+  return response.data
+}
+
+export async function writeSkillFile(
+  skillId: string,
+  path: string,
+  content: string,
+  expectedHash?: string | null,
+): Promise<UpdateSkillFileRes> {
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/')
+  const response = await api.post<UpdateSkillFileRes>(`/skills/${skillId}/files/${encodedPath}`, {
+    content,
+    expected_hash: expectedHash ?? null,
+  })
+  return response.data
 }

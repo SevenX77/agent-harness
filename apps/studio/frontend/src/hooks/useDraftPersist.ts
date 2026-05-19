@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 const DRAFT_PREFIX = 'studio:draft:'
+const EDGE_DRAFT_PREFIX = 'studio:edge-draft:'
 const DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 export interface StoredDraft {
@@ -19,6 +20,34 @@ interface UseDraftPersistConfig {
 
 export function draftStorageKey(skillId: string): string {
   return `${DRAFT_PREFIX}${skillId}`
+}
+
+export function edgeDraftStorageKey(skillId: string, edgeId: string): string {
+  return `${EDGE_DRAFT_PREFIX}${skillId}:${edgeId}`
+}
+
+export function readEdgeDraft(skillId: string, edgeId: string): string | null {
+  try {
+    return window.localStorage.getItem(edgeDraftStorageKey(skillId, edgeId))
+  } catch {
+    return null
+  }
+}
+
+export function writeEdgeDraft(skillId: string, edgeId: string, content: string): void {
+  try {
+    window.localStorage.setItem(edgeDraftStorageKey(skillId, edgeId), content)
+  } catch {
+    // Local draft persistence is best-effort.
+  }
+}
+
+export function clearEdgeDraft(skillId: string, edgeId: string): void {
+  try {
+    window.localStorage.removeItem(edgeDraftStorageKey(skillId, edgeId))
+  } catch {
+    // Local draft persistence is best-effort.
+  }
 }
 
 export function hashDraftBase(content: string): string {
@@ -144,4 +173,3 @@ export function useDraftPersist({
     refreshDraft,
   }
 }
-

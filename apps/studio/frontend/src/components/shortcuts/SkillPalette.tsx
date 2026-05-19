@@ -105,7 +105,7 @@ export function SkillPalette({
                 onSelect(skill.id)
                 onClose()
               }}
-              className={`block w-full rounded-md px-3 py-2 text-left ${
+              className={`block w-full rounded-md px-3 py-2 text-start ${
                 index === activeIndex
                   ? 'bg-sky-50 dark:bg-sky-950/40'
                   : 'hover:bg-slate-50 dark:hover:bg-slate-900'

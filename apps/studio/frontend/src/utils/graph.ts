@@ -1,7 +1,7 @@
 import { MarkerType } from 'reactflow'
 import type { Edge, Node } from 'reactflow'
 import type { StudioNodeData } from '../CustomNodes'
-import type { GraphSkillDef, JsonObject, SkillManifest } from '../api/types'
+import type { GraphSkillDef, SkillManifest } from '../api/types'
 import type { GraphBuildResult, VisualPhase } from '../types/studio'
 
 function normalizeDependency(value: string | string[] | undefined): string[] {
@@ -23,18 +23,23 @@ export function subgraphSkillId(path: string | null): string | null {
   return last.endsWith('.md') ? last.slice(0, -3) : last
 }
 
-function srcForPhase(graphTopology: JsonObject[], phaseName: string): string | null {
-  const topologyNode = graphTopology.find((node) => node.id === phaseName)
-  return typeof topologyNode?.src === 'string' ? topologyNode.src : null
-}
+function phasesFromManifest(manifest: SkillManifest): VisualPhase[] {
+  if (manifest.schema_version === '2.1') {
+    return manifest.phases.map((phase) => ({
+      id: phase.id,
+      name: phase.id,
+      mode: 'logic',
+      role: null,
+      dependsOn: normalizeDependency(phase.depends_on),
+      subgraph: null,
+    }))
+  }
 
-function phasesFromManifest(manifest: SkillManifest, graphTopology: JsonObject[] = []): VisualPhase[] {
   if (manifest.type === 'graph') {
     return manifest.phases.map((phase) => ({
       id: phase.name,
       name: phase.name,
       mode: phase.mode,
-      src: srcForPhase(graphTopology, phase.name) ?? `phases/${phase.name}`,
       role: phase.mode === 'llm' ? phase.llm_role : null,
       dependsOn: normalizeDependency(phase.depends_on),
       subgraph: phase.subgraph ?? null,
@@ -46,7 +51,6 @@ function phasesFromManifest(manifest: SkillManifest, graphTopology: JsonObject[]
       id: manifest.name,
       name: manifest.name,
       mode: 'llm',
-      src: null,
       role: manifest.agent_profile.llm_role,
       dependsOn: [],
       subgraph: null,
@@ -57,7 +61,6 @@ function phasesFromManifest(manifest: SkillManifest, graphTopology: JsonObject[]
     id: manifest.name,
     name: manifest.name,
     mode: 'persona',
-    src: null,
     role: 'Persona',
     dependsOn: [],
     subgraph: null,
@@ -65,6 +68,9 @@ function phasesFromManifest(manifest: SkillManifest, graphTopology: JsonObject[]
 }
 
 function inputLabel(manifest: SkillManifest): string {
+  if (manifest.schema_version === '2.1') {
+    return 'Input: schema'
+  }
   if (manifest.type !== 'graph') {
     return 'Input: runtime'
   }
@@ -73,6 +79,9 @@ function inputLabel(manifest: SkillManifest): string {
 }
 
 function outputLabel(manifest: SkillManifest): string {
+  if (manifest.schema_version === '2.1') {
+    return 'Output: schema'
+  }
   if (manifest.type !== 'graph') {
     return 'Output: result'
   }
@@ -81,7 +90,7 @@ function outputLabel(manifest: SkillManifest): string {
 }
 
 export function graphSkill(manifest: SkillManifest): GraphSkillDef | null {
-  return manifest.type === 'graph' ? manifest : null
+  return manifest.schema_version === '2.0' && manifest.type === 'graph' ? manifest : null
 }
 
 export function buildGraph(
@@ -90,7 +99,6 @@ export function buildGraph(
   nestedManifests: Record<string, SkillManifest>,
   onToggleSubgraph: (phase: VisualPhase) => void,
   isDarkMode: boolean,
-  graphTopology: JsonObject[] = [],
 ): GraphBuildResult {
   const nodes: Node<StudioNodeData>[] = [{
     id: 'input',
@@ -109,7 +117,7 @@ export function buildGraph(
     },
   }]
   const edges: Edge[] = []
-  const phases = phasesFromManifest(manifest, graphTopology)
+  const phases = phasesFromManifest(manifest)
   const leafNodes = new Set<string>()
   let y = 150
 
@@ -122,7 +130,6 @@ export function buildGraph(
       data: {
         label: phase.name,
         mode: phase.mode,
-        src: phase.src,
         role: phase.role,
         subgraphPath: phase.subgraph,
         isExpanded,
@@ -166,7 +173,6 @@ export function buildGraph(
           data: {
             label: child.name,
             mode: child.mode,
-            src: child.src,
             role: child.role,
           },
           position: { x: 560, y: childY },

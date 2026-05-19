@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from graph_agent.core.parser import parse_skill_file
+import yaml
 
 from app.models.templates import SkillTemplate
 
@@ -31,4 +31,12 @@ def list_templates() -> list[SkillTemplate]:
 
 
 def _frontmatter(path: Path) -> dict[str, Any]:
-    return dict(parse_skill_file(path)["frontmatter"])
+    content = path.read_text(encoding="utf-8")
+    if not content.startswith("---"):
+        return {}
+    try:
+        _, raw_frontmatter, _ = content.split("---", 2)
+    except ValueError:
+        return {}
+    parsed = yaml.safe_load(raw_frontmatter) or {}
+    return dict(parsed) if isinstance(parsed, dict) else {}

@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Any, cast
 
 from fastapi.encoders import jsonable_encoder
-from graph_agent import compile_skill
-from graph_agent.core.exceptions import SkillCompilationError, SkillLoadError
+from graph_agent.core.exceptions import GraphAgentError
 from graph_agent.core.loader import SkillLoader
+from graph_agent.core.manifest import GraphManifest
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -25,6 +25,7 @@ from pydantic import (
     create_model,
 )
 
+from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
 from app.services.skills import resolve_skill_dir_async
 
@@ -41,14 +42,6 @@ _TYPE_MAP: dict[str, Any] = {
     "list": list[Any],
     "array": list[Any],
 }
-_JSON_TYPE_MAP: dict[str, Any] = {
-    "string": StrictStr,
-    "integer": StrictInt,
-    "number": StrictFloat,
-    "boolean": StrictBool,
-    "object": dict[str, Any],
-    "array": list[Any],
-}
 _YAML: Any = import_module("yaml")
 
 
@@ -63,12 +56,13 @@ async def validate_skill_input_file(
     skill_id: str,
     input_file_path: str,
     storage: StorageBackend,
+    metadata: MetadataStore,
 ) -> dict[str, Any]:
     """Validate a JSON/YAML file against a skill's declared runtime inputs."""
-    skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage)
-    input_schema = _compile_input_schema_or_raise(skill_dir)
+    skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
+    manifest, raw_io = _compile_manifest_or_raise(skill_dir)
     parsed_data = _parse_input_file(Path(input_file_path))
-    input_model = _input_model_for_schema(input_schema)
+    input_model = _input_model_for_manifest(manifest, raw_io)
 
     try:
         validated = input_model.model_validate(parsed_data)
@@ -80,22 +74,16 @@ async def validate_skill_input_file(
     return validated.model_dump()
 
 
-def _compile_input_schema_or_raise(skill_path: Path) -> dict[str, Any]:
+def _compile_manifest_or_raise(skill_path: Path) -> tuple[GraphManifest, dict[str, Any]]:
     try:
-        compile_skill(skill_path)
         compiled = SkillLoader().compile_skill(skill_path)
-    except (SkillLoadError, SkillCompilationError) as exc:
+    except GraphAgentError as exc:
+        del exc
         raise ValidationHttpError(
             status_code=422,
             body={"detail": "skill itself failed to compile, fix it first"},
-        ) from exc
-    input_schema = compiled.raw.get("io", {}).get("inputs")
-    if not isinstance(input_schema, dict):
-        raise ValidationHttpError(
-            status_code=422,
-            body={"detail": "skill does not declare graph runtime inputs"},
-        )
-    return input_schema
+        ) from None
+    return compiled.manifest, dict(compiled.raw["io"]["inputs"])
 
 
 def _parse_input_file(path: Path) -> Any:
@@ -130,17 +118,22 @@ def _parse_error(exc: Exception) -> ValidationHttpError:
     )
 
 
-def _input_model_for_schema(input_schema: dict[str, Any]) -> type[BaseModel]:
+def _input_model_for_manifest(
+    manifest: GraphManifest,
+    raw_inputs: dict[str, Any],
+) -> type[BaseModel]:
+    del manifest
     fields: dict[str, tuple[Any, Any]] = {}
-    properties = input_schema.get("properties", {})
-    required = set(input_schema.get("required", []))
+    properties = raw_inputs.get("properties", {})
+    required = set(raw_inputs.get("required", []))
     if not isinstance(properties, dict):
         properties = {}
-    for name, schema in properties.items():
-        if not isinstance(schema, dict):
-            schema = {}
-        default = Field(...) if name in required else schema.get("default", None)
-        fields[str(name)] = (_python_type_from_schema(schema), default)
+    for name, input_decl in properties.items():
+        if isinstance(input_decl, dict):
+            default = input_decl.get("default", Field(... if name in required else None))
+            fields[name] = (_python_type_from_input(input_decl), default)
+        else:
+            fields[name] = (Any, Field(...))
     field_definitions = cast(Mapping[str, Any], fields)
     return cast(
         type[BaseModel],
@@ -152,10 +145,8 @@ def _input_model_for_schema(input_schema: dict[str, Any]) -> type[BaseModel]:
     )
 
 
-def _python_type_from_schema(schema: dict[str, Any]) -> Any:
-    schema_type = schema.get("type")
-    if isinstance(schema_type, list):
-        schema_type = next((item for item in schema_type if item != "null"), None)
-    if schema_type is None:
+def _python_type_from_input(input_decl: dict[str, Any]) -> Any:
+    input_type = input_decl.get("type")
+    if not isinstance(input_type, str):
         return Any
-    return _JSON_TYPE_MAP.get(str(schema_type).strip().lower(), Any)
+    return _TYPE_MAP.get(input_type.strip().lower(), Any)

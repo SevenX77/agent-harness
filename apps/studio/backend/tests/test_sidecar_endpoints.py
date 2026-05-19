@@ -16,39 +16,30 @@ def test_health_endpoint_returns_ok(client: TestClient) -> None:
     assert response.json() == {"status": "ok"}
 
 
-def test_shutdown_requires_token(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("STUDIO_SHUTDOWN_TOKEN", "secret")
-
-    response = client.post("/shutdown")
-
-    assert response.status_code == 403
-    assert response.json()["error_code"] == "SHUTDOWN_FORBIDDEN"
-
-
-def test_shutdown_rejects_non_loopback_client(
+def test_shutdown_requires_bearer_token(
     monkeypatch: pytest.MonkeyPatch,
     studio_roots: tuple[Path, Path],
 ) -> None:
     del studio_roots
-    monkeypatch.setenv("STUDIO_SHUTDOWN_TOKEN", "secret")
+    monkeypatch.setenv("STUDIO_API_TOKEN", "secret")
 
-    with TestClient(create_app(), client=("10.0.0.5", 50000)) as client:
-        response = client.post("/shutdown", headers={"x-studio-shutdown-token": "secret"})
+    with TestClient(create_app()) as client:
+        response = client.post("/shutdown")
 
-    assert response.status_code == 403
-    assert response.json()["error_code"] == "SHUTDOWN_FORBIDDEN"
+    assert response.status_code == 401
+    assert response.json()["error_code"] == "UNAUTHORIZED"
 
 
-def test_shutdown_accepts_loopback_and_token(
+def test_shutdown_accepts_global_bearer_token(
     monkeypatch: pytest.MonkeyPatch,
     studio_roots: tuple[Path, Path],
 ) -> None:
     del studio_roots
-    monkeypatch.setenv("STUDIO_SHUTDOWN_TOKEN", "secret")
+    monkeypatch.setenv("STUDIO_API_TOKEN", "secret")
     monkeypatch.setenv("STUDIO_DISABLE_PROCESS_SHUTDOWN", "1")
 
-    with TestClient(create_app(), client=("127.0.0.1", 50000)) as client:
-        response = client.post("/shutdown", headers={"x-studio-shutdown-token": "secret"})
+    with TestClient(create_app()) as client:
+        response = client.post("/shutdown", headers={"Authorization": "Bearer secret"})
 
     assert response.status_code == 200
     assert response.json() == {"status": "shutting_down"}

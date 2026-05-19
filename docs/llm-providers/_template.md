@@ -13,6 +13,26 @@ target_goal: "Studio MVP — 让 PM 可用"
 - **Native SDK** (如有): 包名 + 链接
 - **Alternative Endpoints**: e.g., Azure / Vertex AI / Bedrock 部署变体
 
+## §1.5 探测元数据 (round 3 新增, 用于 Studio 自动 Test 探测)
+
+```yaml
+compatible_sdks:
+  # 该 vendor 的 API 兼容哪些 SDK enum
+  # 已有 enum: anthropic_compatible / openai_compatible / gemini_official / wavespeed_any_llm
+  - <sdk_enum>
+
+models_endpoint_path: "<path>" | null
+  # GET <base_url><path> 返回 models 列表 (e.g., OpenAI: "/v1/models")
+  # null = 该 vendor 没有 models endpoint, Studio 走 §4 Notable Model IDs fallback (e.g., Anthropic)
+
+auth_header_format: |
+  Header1: <template>
+  Header2: <template>
+  # 含 ${key} 占位符, Studio Test handler 用 user 填的 key 填入
+  # 例: OpenAI "Authorization: Bearer ${key}"
+  # 例: Anthropic "x-api-key: ${key}\nanthropic-version: 2023-06-01"
+```
+
 ## 2. Authentication
 
 - **Method**: Bearer Token / `x-api-key` header / Query param

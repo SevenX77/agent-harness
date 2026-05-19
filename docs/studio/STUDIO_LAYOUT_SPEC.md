@@ -117,6 +117,7 @@ Studio 的布局受一系列核心状态控制，构成以下布局矩阵：
 4. **Settings View (全局设置态)**
    - **触发条件**: 点击 Toolbar 底部的齿轮。
    - **Main Panel**: 完全被 `SettingsPage` 覆盖，屏蔽掉后方的 Canvas 或 Editor。
+   - **包含组件**: 内部使用 Tab 切换 (General / API Keys / LLM Roles)。在 API Keys 下，由 ProviderCard 列表与 AddProviderForm 组件负责交互。
 
 ## 4. View 模式切换
 目前前端代码仅实现了一套大一统的 **Edit View (编辑态)**，在此态下通过 Toolbar 切换看属性或资产。

@@ -7,6 +7,8 @@ linked_code_paths:
 linked_specs:
   - .kiro/specs/studio-api-keys-redesign/
 last_updated: 2026-05-19
+  - apps/studio/backend/services/llm_provider_meta.py
+  - apps/studio/backend/app/services/llm_provider_test.py
 ---
 
 # LLM 路由与降级配置 (LLM Routing & Fallback)
@@ -38,3 +40,18 @@ roles:
 
 ## 相关 Spec
 - [studio-api-keys-redesign](../../.kiro/specs/studio-api-keys-redesign/design-backend.md)
+
+## 5. 多 SDK 探测与 Provider Matrix (Round 3)
+
+在 Studio 界面中，当用户输入 API Key 进行测试时，引擎执行一套多 SDK 探测机制：
+
+### 5.1 元数据加载 (`llm_provider_meta.py`)
+系统不再硬编码 Provider 能力，而是直接解析 `docs/llm-providers/*.md` 中声明的 `§1.5` YAML metadata block。例如 Anthropic 的配置可能声明其兼容 `anthropic` 和 `openai` 两套 SDK，以及特定的 auth header 格式。
+
+### 5.2 兼容性嗅探 (`probe_compatible_sdks`)
+当接收到 API Key 后，系统会使用预设的 Base URL 探测 `GET /v1/models` (或其他定义好的 `models_endpoint_path`)。根据响应特征及 HTTP 状态码，系统决定哪套 `ProviderType` 适配器（目前收敛为 4 个 Enum：`anthropic_compatible`, `openai_compatible`, `gemini_official`, `wavespeed_any_llm`）能够成功跑通，并将这些存入用户的 Credentials Schema (`llm_credentials.json`)。
+
+### 5.3 当前生态版图
+截止 Baseline 2.1 (Round 3)，Studio 原生支持多达 8 家 Provider：
+- **官方源 (3个)**: Anthropic, OpenAI, Gemini
+- **第三方及中转 (5个)**: Ark, DeepSeek, OpenRouter, Qiniu, WaveSpeed

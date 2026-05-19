@@ -24,7 +24,7 @@ import {
   type ProviderType,
   type RolesData,
 } from "../../api/llm"
-import { ProviderCard } from "./api-keys"
+import { ProviderCard, ProviderListSkeleton } from "./api-keys"
 
 type SettingsTab = "general" | "api_keys" | "llm_roles"
 
@@ -82,6 +82,7 @@ interface SettingsPageContentProps {
   activeTab: SettingsTab
   /** Server-persisted credentials snapshot — feeds both the ApiKeys flat list and the LLM Roles availability filter. */
   credentials: CredentialsState
+  credentialsLoading: boolean
   drafts: ProviderDraft[]
   saveStatus: SaveStatus
   rolesData: RolesData | null
@@ -212,6 +213,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const appSettings = useAppSettings()
   const [activeTab, setActiveTab] = useState<SettingsTab>("general")
   const [credentials, setCredentials] = useState<CredentialsState>(emptyCredentials)
+  const [credentialsLoading, setCredentialsLoading] = useState(true)
   const [drafts, setDrafts] = useState<ProviderDraft[]>([])
   const [rolesData, setRolesData] = useState<RolesData | null>(null)
   const [selectedRole, setSelectedRole] = useState("copilot_chat")
@@ -247,11 +249,13 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         if (cancelled) return
         setCredentials(next)
         setDrafts(draftsFromCredentials(next))
+        setCredentialsLoading(false)
       })
       .catch((error) => {
         if (cancelled) return
         const message = error instanceof Error ? error.message : "Load failed"
         toast.error(`API Keys load failed: ${message}`)
+        setCredentialsLoading(false)
       })
     return () => {
       cancelled = true
@@ -389,6 +393,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     <SettingsPageContent
       activeTab={activeTab}
       credentials={credentials}
+      credentialsLoading={credentialsLoading}
       drafts={drafts}
       saveStatus={saveStatus}
       rolesData={rolesData}
@@ -419,6 +424,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
 export function SettingsPageContent({
   activeTab,
   credentials,
+  credentialsLoading,
   drafts,
   saveStatus,
   rolesData,
@@ -464,6 +470,7 @@ export function SettingsPageContent({
             {activeTab === "api_keys" ? (
               <ApiKeysTab
                 credentials={credentials}
+                credentialsLoading={credentialsLoading}
                 drafts={drafts}
                 saveStatus={saveStatus}
                 onProviderFieldChange={onProviderFieldChange}
@@ -630,6 +637,7 @@ function SaveStatusBadge({ status }: { status: SaveStatus }) {
 
 function ApiKeysTab({
   credentials,
+  credentialsLoading,
   drafts,
   saveStatus,
   onProviderFieldChange,
@@ -638,7 +646,14 @@ function ApiKeysTab({
   onAddProvider,
 }: Pick<
   SettingsPageContentProps,
-  "credentials" | "drafts" | "saveStatus" | "onProviderFieldChange" | "onTestProvider" | "onDeleteProvider" | "onAddProvider"
+  | "credentials"
+  | "credentialsLoading"
+  | "drafts"
+  | "saveStatus"
+  | "onProviderFieldChange"
+  | "onTestProvider"
+  | "onDeleteProvider"
+  | "onAddProvider"
 >) {
   const persistedById = useMemo(
     () => Object.fromEntries(credentials.providers.map((provider) => [provider.id, provider])),
@@ -653,29 +668,35 @@ function ApiKeysTab({
         trailing={<SaveStatusBadge status={saveStatus} />}
       />
       <div className="space-y-4" data-testid="api-keys-list">
-        {drafts.map((draft) => {
-          const persisted = persistedById[draft.id] ?? null
-          return (
-            <ProviderCard
-              key={draft.id}
-              draft={draft}
-              persisted={persisted}
-              onFieldChange={(patch) => onProviderFieldChange(draft.id, patch)}
-              onTest={() => onTestProvider(draft.id)}
-              onDelete={() => onDeleteProvider(draft.id)}
-            />
-          )
-        })}
-        {drafts.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border/60 bg-muted/10 px-4 py-10 text-center">
-            <Button type="button" variant="default" onClick={onAddProvider} className="gap-1">
-              <Plus className="size-3.5" />
-              Add Provider
-            </Button>
-          </div>
-        ) : null}
+        {credentialsLoading ? (
+          <ProviderListSkeleton count={3} />
+        ) : (
+          <>
+            {drafts.map((draft) => {
+              const persisted = persistedById[draft.id] ?? null
+              return (
+                <ProviderCard
+                  key={draft.id}
+                  draft={draft}
+                  persisted={persisted}
+                  onFieldChange={(patch) => onProviderFieldChange(draft.id, patch)}
+                  onTest={() => onTestProvider(draft.id)}
+                  onDelete={() => onDeleteProvider(draft.id)}
+                />
+              )
+            })}
+            {drafts.length === 0 ? (
+              <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border/60 bg-muted/10 px-4 py-10 text-center">
+                <Button type="button" variant="default" onClick={onAddProvider} className="gap-1">
+                  <Plus className="size-3.5" />
+                  Add Provider
+                </Button>
+              </div>
+            ) : null}
+          </>
+        )}
       </div>
-      {drafts.length === 0 ? null : (
+      {credentialsLoading || drafts.length === 0 ? null : (
         <div className="mt-4 flex justify-start">
           <Button type="button" variant="outline" onClick={onAddProvider} className="gap-1">
             <Plus className="size-3.5" />

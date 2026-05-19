@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from app.models.llm_config import LLMCredentialsFile, ProviderCredential
+from app.routers.llm import CredentialsWriteRequest, ProviderCredentialWrite, put_llm_credentials
 from app.services import llm_env
 from app.services.llm_credentials import (
     credentials_path,
@@ -58,8 +59,77 @@ def test_serialize_for_response_returns_api_key_plaintext() -> None:
     assert body["providers"][0]["api_key"] == "secret"
     assert body["providers"][0]["base_url"] == "https://base"
     assert body["providers"][0]["last_test_status"] == "untested"
+    assert body["providers"][0]["available_sdks"] == []
     assert body["providers"][0]["available_models"] == []
     assert "has_key" not in body["providers"][0]
+
+
+def test_credential_state_has_available_sdks_and_models() -> None:
+    state = ProviderCredential(id="provider-1", name="OpenAI", api_key="sk-secret")
+
+    assert state.available_sdks == []
+    assert state.available_models == []
+
+
+def test_serialize_for_response_includes_new_fields() -> None:
+    data = LLMCredentialsFile(
+        providers=[
+            ProviderCredential(
+                id="provider-1",
+                name="OpenAI",
+                api_key="sk-secret",
+                available_sdks=["openai_compatible"],
+                available_models=["gpt-5"],
+            )
+        ]
+    )
+
+    body = serialize_for_response(data)
+
+    assert body["providers"][0]["available_sdks"] == ["openai_compatible"]
+    assert body["providers"][0]["available_models"] == ["gpt-5"]
+
+
+@pytest.mark.anyio
+async def test_put_empty_api_key_preserves_available_sdks_and_models(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    save_credentials(
+        LLMCredentialsFile(
+            providers=[
+                ProviderCredential(
+                    id="provider-1",
+                    name="OpenAI",
+                    api_key="sk-secret",
+                    base_url="https://api.openai.com",
+                    provider_type="openai_compatible",
+                    available_sdks=["openai_compatible"],
+                    available_models=["gpt-5"],
+                )
+            ]
+        )
+    )
+
+    body = await put_llm_credentials(
+        CredentialsWriteRequest(
+            providers=[
+                ProviderCredentialWrite(
+                    id="provider-1",
+                    name="OpenAI renamed",
+                    api_key="",
+                    base_url="https://api.openai.test",
+                    provider_type="openai_compatible",
+                )
+            ]
+        )
+    )
+
+    provider = body["providers"][0]
+    assert provider["api_key"] == "sk-secret"
+    assert provider["available_sdks"] == ["openai_compatible"]
+    assert provider["available_models"] == ["gpt-5"]
 
 
 def test_patch_environment_is_noop(

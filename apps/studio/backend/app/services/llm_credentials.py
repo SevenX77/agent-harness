@@ -13,7 +13,6 @@ from pydantic import ValidationError
 
 from app.models.llm_config import (
     LLMCredentialsFile,
-    ModelInfo,
     ProviderCredential,
     TestStatus,
 )
@@ -71,7 +70,7 @@ def _persist_test_outcome(
     last_test_at: str,
     last_test_message: str = "",
     last_error_code: str = "",
-    available_models: list[ModelInfo] | None = None,
+    available_models: list[str] | None = None,
     path: Path | None = None,
 ) -> ProviderCredential | None:
     """Atomically patch only the 5 Test outcome fields on one provider.

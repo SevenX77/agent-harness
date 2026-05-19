@@ -182,6 +182,40 @@ describe("ProviderCard provider kind badge", () => {
   })
 })
 
+describe("ProviderCard provider capabilities", () => {
+  it("renders available_sdks chips when persisted has data", () => {
+    const html = renderCardHtml({
+      persisted: makePersisted({ available_sdks: ["openai_compatible", "anthropic_compatible"] }),
+    })
+
+    expect(html).toContain('data-testid="provider-capabilities"')
+    expect(html).toContain("Available SDKs:")
+    expect(html).toContain("openai_compatible")
+    expect(html).toContain("anthropic_compatible")
+  })
+
+  it("renders available_models chips when persisted has data", () => {
+    const html = renderCardHtml({
+      persisted: makePersisted({ available_models: ["gpt-5", "gpt-4o", "claude-opus-4"] }),
+    })
+
+    expect(html).toContain('data-testid="provider-capabilities"')
+    expect(html).toContain("Available Models:")
+    expect(html).toContain("gpt-5")
+    expect(html).toContain("claude-opus-4")
+  })
+
+  it("does not render chip area when persisted has no sdks/models", () => {
+    const html = renderCardHtml({
+      persisted: makePersisted({ available_sdks: [], available_models: [] }),
+    })
+
+    expect(html).not.toContain('data-testid="provider-capabilities"')
+    expect(html).not.toContain("Available SDKs:")
+    expect(html).not.toContain("Available Models:")
+  })
+})
+
 describe("ProviderCard delete confirmation", () => {
   it("delete trigger opens confirmation without calling onDelete directly", () => {
     const onDelete = vi.fn()

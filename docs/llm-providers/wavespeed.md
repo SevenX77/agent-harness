@@ -37,9 +37,12 @@ auth_header_format: |
 
 ## 4. Notable Model IDs
 
-- `openai/gpt-4o`
-- `anthropic/claude-3-opus`
-- `meta-llama/llama-3-70b`
+- `openai/gpt-5`
+- `anthropic/claude-opus-4`
+- `anthropic/claude-sonnet-4`
+- `google/gemini-3.1-pro`
+- `deepseek/deepseek-v4`
+- `meta-llama/llama-4`
 
 ## 5. 能力维度 (Test 成功后后端应当返回)
 
@@ -60,7 +63,7 @@ curl https://llm.wavespeed.ai/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <YOUR_KEY>" \
   -d '{
-    "model": "openai/gpt-4o",
+    "model": "openai/gpt-5",
     "messages": [
       {"role": "user", "content": "ping"}
     ],

@@ -222,3 +222,15 @@
 .react-flow .react-flow__attribution a:hover {
   color: var(--color-foreground) !important;
 }
+
+@font-face {
+  font-family: 'text-security-disc';
+  src: url('/fonts/text-security-disc.woff2') format('woff2');
+  font-display: block;
+}
+
+.mask-input {
+  -webkit-text-security: disc;
+  /* Firefox fallback (-webkit-text-security is unsupported). */
+  font-family: 'text-security-disc', -apple-system, sans-serif;
+}

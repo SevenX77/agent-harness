@@ -1,12 +1,18 @@
-import { Loader2, Trash2 } from "lucide-react"
+import { useState } from "react"
+import { Eye, EyeOff, Loader2, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { cn } from "@/lib/utils"
 import type { ProviderType, CredentialsState } from "../../../api/llm"
 import type { ProviderDraft } from "../SettingsPage"
+
+export function apiKeyInputClassName(visible: boolean): string {
+  return cn("flex-1", !visible && "mask-input")
+}
 
 export function ProviderCard({
   draft,
@@ -21,6 +27,7 @@ export function ProviderCard({
   onTest: () => void
   onDelete: () => void
 }) {
+  const [visible, setVisible] = useState(false)
   const status = persisted?.last_test_status ?? "untested"
   const displayStatus = status === "ok" ? "Connected" : status === "untested" ? "Untested" : "Failed"
   const statusVariant = status === "ok" ? "secondary" : status === "untested" ? "outline" : "destructive"
@@ -61,22 +68,31 @@ export function ProviderCard({
         <div className="space-y-2">
           <Label htmlFor={`api-key-${draft.id}`}>API Key</Label>
           <div className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <Input
-                id={`api-key-${draft.id}`}
-                type="text"
-                value={draft.api_key}
-                onChange={(event) => onFieldChange({ api_key: event.target.value })}
-                placeholder="sk-..."
-                name={`provider-secret-${draft.id}`}
-                autoComplete="off"
-                data-1p-ignore=""
-                data-lpignore="true"
-                data-form-type="other"
-                spellCheck={false}
-              />
-            </div>
-            <Button type="button" variant="default" onClick={onTest} disabled={draft.isTesting}>
+            <Input
+              id={`api-key-${draft.id}`}
+              type="text"
+              value={draft.api_key}
+              onChange={(event) => onFieldChange({ api_key: event.target.value })}
+              placeholder="sk-..."
+              name={`provider-secret-${draft.id}`}
+              autoComplete="off"
+              data-1p-ignore=""
+              data-lpignore="true"
+              data-form-type="other"
+              spellCheck={false}
+              className={apiKeyInputClassName(visible)}
+            />
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="transition-none"
+              onClick={() => setVisible((value) => !value)}
+              aria-label={visible ? "Hide API key" : "Show API key"}
+            >
+              {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </Button>
+            <Button type="button" variant="default" onClick={onTest} disabled={draft.isTesting} className="px-6">
               {draft.isTesting ? <Loader2 className="size-3.5 animate-spin" /> : null}
               Test
             </Button>

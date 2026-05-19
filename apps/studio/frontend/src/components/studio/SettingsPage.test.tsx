@@ -193,7 +193,7 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).toContain('data-lpignore="true"')
     expect(html).toContain('data-form-type="other"')
     expect(html).not.toContain('Saved key retained')
-    expect(html).not.toContain('Show API key')
+    expect(html).toContain('Show API key')
   })
 
   it('renders persistent Test outcome badge from credentials', () => {

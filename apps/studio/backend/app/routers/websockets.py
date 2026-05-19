@@ -14,8 +14,21 @@ from app.services.terminal_manager import terminal_manager
 router = APIRouter(tags=["websockets"])
 
 
+def _websocket_token_is_valid(websocket: WebSocket) -> bool:
+    from app.main import _is_valid_token
+
+    return _is_valid_token(websocket.query_params.get("token"))
+
+
+async def _close_unauthorized(websocket: WebSocket) -> None:
+    await websocket.close(code=4401, reason="Unauthorized")
+
+
 @router.websocket("/ws/runs/{run_id}")
 async def run_events(websocket: WebSocket, run_id: str) -> None:
+    if not _websocket_token_is_valid(websocket):
+        await _close_unauthorized(websocket)
+        return
     await websocket.accept()
     queue = await run_manager.stream_run(run_id)
     while True:
@@ -28,6 +41,9 @@ async def run_events(websocket: WebSocket, run_id: str) -> None:
 
 @router.websocket("/ws/terminal/{term_id}")
 async def terminal_stream(websocket: WebSocket, term_id: str) -> None:
+    if not _websocket_token_is_valid(websocket):
+        await _close_unauthorized(websocket)
+        return
     await terminal_manager.bridge(websocket, term_id)
 
 
@@ -36,6 +52,9 @@ async def studio_events(
     websocket: WebSocket,
     eventbus: EventBus = Depends(get_eventbus),
 ) -> None:
+    if not _websocket_token_is_valid(websocket):
+        await _close_unauthorized(websocket)
+        return
     await websocket.accept()
     try:
         async for event in eventbus.subscribe(STUDIO_EVENTS_TOPIC):

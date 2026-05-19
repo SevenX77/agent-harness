@@ -1,13 +1,15 @@
 """V2.1 CompiledSkill to LangGraph assembly."""
 
-from __future__ import annotations
-
+import asyncio
 import json
+import logging
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NoReturn
 
 from langchain_core.messages import SystemMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
 from graph_agent.cognitive.context_facade import Context
@@ -21,12 +23,19 @@ from graph_agent.cognitive.finish_task import build_finish_task_tool
 from graph_agent.cognitive.md2json import parse_finish_markdown
 from graph_agent.cognitive.md_patch import LLMMdPatchClient
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
-from graph_agent.core.loader import CompiledSkill, PhaseDocument, SkillLoader
+from graph_agent.core.loader import CompiledSkill, CompiledSubagent, PhaseDocument, SkillLoader
 from graph_agent.core.manifest import GraphManifest, LogicNodeAST, SkillNodeAST, SubgraphNodeAST
+from graph_agent.core.subagents import (
+    SubagentValidationFailure,
+    assert_subagent_depth_allowed,
+    current_subagent_depth,
+    validate_subagent_tool_args,
+)
 from graph_agent.runtime.exit_contract import inject_exit_contract
 from graph_agent.runtime.state import BlackboardState
 
 MAX_REACT_TURNS = 8
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -35,6 +44,12 @@ class CompiledStateGraph:
     compiled_skill: CompiledSkill
     phase_ids: list[str] = field(default_factory=list)
     edges: list[tuple[str, str]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _SubagentRuntime:
+    subagent: CompiledSubagent
+    graph: Any
 
 
 def assemble_graph(
@@ -168,6 +183,12 @@ def _build_skill_node(
 ) -> Any:
     business_tools = compiled.tools.for_phase(phase_id)
     tool_by_name = {tool.name: tool for tool in business_tools}
+    subagent_by_tool_name = _subagent_tool_map(phase_id, compiled)
+    subagent_runtime_by_tool_name = _subagent_runtime_map(
+        subagent_by_tool_name,
+        chat_model=chat_model,
+        max_patch_attempts=max_patch_attempts,
+    )
     framework_tools = []
     critic_metrics: dict[str, Any] = {}
 
@@ -205,7 +226,10 @@ def _build_skill_node(
     all_tools = [*business_tools, *framework_tools, finish_task]
     all_tools_by_name = {tool.name: tool for tool in all_tools}
 
-    def _skill_node(state: BlackboardState) -> dict[str, Any]:
+    def _skill_node(
+        state: BlackboardState,
+        config: RunnableConfig | None = None,
+    ) -> dict[str, Any]:
         if chat_model is None:
             raise RuntimeError("[F-v21-graph] SKILL phase requires chat_model")
 
@@ -228,7 +252,19 @@ def _build_skill_node(
                 tool = all_tools_by_name.get(name)
                 if tool is None:
                     _graph_fatal(f"LLM called unknown tool {name!r} in phase {phase_id!r}")
-                result = tool.invoke(call.get("args", {}))
+                call_args = call.get("args", {})
+                if name in subagent_by_tool_name:
+                    result = _invoke_subagent_tool_t21(
+                        tool_name=name,
+                        subagent=subagent_by_tool_name[name],
+                        args=call_args if isinstance(call_args, dict) else {},
+                        state=state,
+                        flow=flow,
+                        runtime=subagent_runtime_by_tool_name[name],
+                        parent_config=config,
+                    )
+                else:
+                    result = tool.invoke(call_args)
                 messages.append(
                     ToolMessage(
                         content=json.dumps(result, ensure_ascii=False),
@@ -260,6 +296,213 @@ def _build_skill_node(
         return response_state
 
     return _skill_node
+
+
+def _subagent_tool_map(
+    phase_id: str,
+    compiled: CompiledSkill,
+) -> dict[str, CompiledSubagent]:
+    return {
+        f"call_subagent_{subagent.name}": subagent
+        for subagent in compiled.subagents_by_phase.get(phase_id, [])
+    }
+
+
+def _invoke_subagent_tool_t21(
+    *,
+    tool_name: str,
+    subagent: CompiledSubagent,
+    args: dict[str, Any],
+    state: BlackboardState | None = None,
+    flow: dict[str, Any],
+    runtime: _SubagentRuntime | None = None,
+    parent_config: RunnableConfig | None = None,
+) -> dict[str, Any]:
+    try:
+        assert_subagent_depth_allowed(current_subagent_depth(flow))
+    except RuntimeError as exc:
+        raise GraphAgentFatalError(str(exc)) from exc
+    retry_counts = flow.setdefault("subagent_validation_retries", {})
+    if not isinstance(retry_counts, dict):
+        retry_counts = {}
+        flow["subagent_validation_retries"] = retry_counts
+    retry_count = int(retry_counts.get(tool_name, 0)) + 1
+    retry_counts[tool_name] = retry_count
+    try:
+        validation = validate_subagent_tool_args(
+            tool_name=tool_name,
+            subagent_name=subagent.name,
+            input_model=subagent.input_model,
+            expected_schema=subagent.expected_schema,
+            args=args,
+            retry_count=retry_count,
+        )
+    except RuntimeError as exc:
+        logger.error(
+            "subagent validation retry limit exceeded",
+            extra={
+                "tool_name": tool_name,
+                "parent_run_id": state.get("run_id") if state is not None else None,
+                "retry_count": retry_count,
+                "expected_schema": subagent.expected_schema,
+            },
+        )
+        raise GraphAgentFatalError(str(exc)) from exc
+    if isinstance(validation, SubagentValidationFailure):
+        return validation.to_tool_result()
+    if runtime is not None and state is not None:
+        return {
+            "ok": True,
+            "tool_name": tool_name,
+            "subagent_name": subagent.name,
+            "results": _invoke_subagent_many_t24(
+                runtime,
+                state,
+                [item.model_dump() for item in validation],
+                parent_config=parent_config,
+                depth=current_subagent_depth(flow),
+            ),
+        }
+    return {
+        "ok": True,
+        "tool_name": tool_name,
+        "subagent_name": subagent.name,
+        "inputs": [item.model_dump() for item in validation],
+    }
+
+
+def _subagent_runtime_map(
+    subagent_by_tool_name: dict[str, CompiledSubagent],
+    *,
+    chat_model: Any,
+    max_patch_attempts: int,
+) -> dict[str, _SubagentRuntime]:
+    runtimes: dict[str, _SubagentRuntime] = {}
+    for tool_name, subagent in subagent_by_tool_name.items():
+        sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(subagent.root)
+        sub_assembled = assemble_graph(
+            sub_compiled,
+            chat_model=chat_model,
+            max_patch_attempts=max_patch_attempts,
+        )
+        runtimes[tool_name] = _SubagentRuntime(subagent=subagent, graph=sub_assembled.graph)
+    return runtimes
+
+
+def _invoke_subagent_once_t23(
+    runtime: _SubagentRuntime,
+    parent_state: BlackboardState,
+    input_data: dict[str, Any],
+    config: RunnableConfig | None = None,
+) -> dict[str, Any]:
+    before_data = dict(parent_state.get("data", {}))
+    child_data = {**before_data, **input_data}
+    result = runtime.graph.invoke(
+        {
+            "data": child_data,
+            "flow": parent_state.get("flow", {}),
+            "messages": [],
+            "run_id": parent_state.get("run_id"),
+        },
+        config=config,
+    )
+    result_data = result.get("data", child_data)
+    data_delta = _dict_delta(before_data, result_data) if isinstance(result_data, dict) else {}
+    return {
+        "status": "ok",
+        "data": data_delta,
+        "flow": result.get("flow", parent_state.get("flow", {})),
+    }
+
+
+def _invoke_subagent_many_t24(
+    runtime: _SubagentRuntime,
+    parent_state: BlackboardState,
+    inputs: list[dict[str, Any]],
+    *,
+    parent_config: RunnableConfig | None,
+    depth: int,
+    concurrency: int = 3,
+) -> list[dict[str, Any]]:
+    async def _run_all() -> list[dict[str, Any]]:
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def _run_one(index: int, input_data: dict[str, Any]) -> dict[str, Any]:
+            async with semaphore:
+                child_config = _subagent_runnable_config(
+                    parent_state=parent_state,
+                    parent_config=parent_config,
+                    subagent_name=runtime.subagent.name,
+                    depth=depth,
+                )
+                child_run_id = str(child_config.get("run_id", ""))
+                try:
+                    result = await asyncio.to_thread(
+                        _invoke_subagent_once_t23,
+                        runtime,
+                        parent_state,
+                        input_data,
+                        child_config,
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "subagent item failed",
+                        extra={
+                            "subagent_name": runtime.subagent.name,
+                            "input_index": index,
+                            "parent_run_id": parent_state.get("run_id"),
+                            "child_run_id": child_run_id,
+                        },
+                    )
+                    return {
+                        "index": index,
+                        "status": "error",
+                        "subagent_name": runtime.subagent.name,
+                        "error": str(exc),
+                        "parent_run_id": parent_state.get("run_id"),
+                        "child_run_id": child_run_id,
+                    }
+                return {
+                    "index": index,
+                    "status": "ok",
+                    "subagent_name": runtime.subagent.name,
+                    "data": result.get("data", {}),
+                    "flow": result.get("flow", {}),
+                    "parent_run_id": parent_state.get("run_id"),
+                    "child_run_id": child_run_id,
+                }
+
+        return await asyncio.gather(
+            *[_run_one(index, item) for index, item in enumerate(inputs)]
+        )
+
+    return asyncio.run(_run_all())
+
+
+def _subagent_runnable_config(
+    *,
+    parent_state: BlackboardState,
+    parent_config: RunnableConfig | None,
+    subagent_name: str,
+    depth: int,
+) -> RunnableConfig:
+    parent_tags = list((parent_config or {}).get("tags") or [])
+    parent_metadata = dict((parent_config or {}).get("metadata") or {})
+    parent_run_id = str(parent_state.get("run_id") or parent_metadata.get("run_id") or "")
+    metadata = {
+        **parent_metadata,
+        "parent_run_id": parent_run_id,
+        "subagent_depth": depth + 1,
+    }
+    callbacks = (parent_config or {}).get("callbacks")
+    config: RunnableConfig = {
+        "tags": [*parent_tags, "subagent", subagent_name],
+        "run_id": uuid.uuid4(),
+        "metadata": metadata,
+    }
+    if callbacks is not None:
+        config["callbacks"] = callbacks
+    return config
 
 
 def _dict_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:

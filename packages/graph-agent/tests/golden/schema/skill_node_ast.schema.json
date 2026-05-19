@@ -1,22 +1,37 @@
 {
+  "$defs": {
+    "SubagentSpec": {
+      "additionalProperties": false,
+      "description": "Sub-skill declared as a callable tool on a SKILL phase.",
+      "properties": {
+        "name": {
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "description"
+      ],
+      "title": "SubagentSpec",
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
   "description": "LLM ReAct phase node parsed from ``SKILL.md``.",
   "properties": {
-    "exit_contract": {
-      "minLength": 1,
-      "title": "Exit Contract",
-      "type": "string"
-    },
-    "metadata": {
-      "additionalProperties": true,
-      "title": "Metadata",
-      "type": "object"
-    },
-    "mode": {
-      "const": "skill",
-      "title": "Mode",
-      "type": "string"
-    },
     "name": {
       "anyOf": [
         {
@@ -36,9 +51,24 @@
       "title": "Raw Blocks",
       "type": "object"
     },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    },
+    "mode": {
+      "const": "skill",
+      "title": "Mode",
+      "type": "string"
+    },
     "system_prompt": {
       "minLength": 1,
       "title": "System Prompt",
+      "type": "string"
+    },
+    "exit_contract": {
+      "minLength": 1,
+      "title": "Exit Contract",
       "type": "string"
     },
     "tools": {
@@ -46,6 +76,13 @@
         "type": "string"
       },
       "title": "Tools",
+      "type": "array"
+    },
+    "subagents": {
+      "items": {
+        "$ref": "#/$defs/SubagentSpec"
+      },
+      "title": "Subagents",
       "type": "array"
     }
   },

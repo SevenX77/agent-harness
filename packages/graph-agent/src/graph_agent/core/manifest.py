@@ -32,6 +32,16 @@ class ContextBridge(BaseModel):
     outputs: dict[str, str] = Field(default_factory=dict)
 
 
+class SubagentSpec(BaseModel):
+    """Sub-skill declared as a callable tool on a SKILL phase."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    path: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+
+
 class GraphManifest(BaseModel):
     """Root V2.1 graph manifest parsed from ``GRAPH.md``."""
 
@@ -77,6 +87,7 @@ class SkillNodeAST(_BaseNodeAST):
     system_prompt: str = Field(min_length=1)
     exit_contract: str = Field(min_length=1)
     tools: list[str] = Field(default_factory=list)
+    subagents: list[SubagentSpec] = Field(default_factory=list)
 
 
 PhaseAST = Annotated[
@@ -98,5 +109,6 @@ __all__ = [
     "PhaseAST",
     "SkillManifest",
     "SkillNodeAST",
+    "SubagentSpec",
     "SubgraphNodeAST",
 ]

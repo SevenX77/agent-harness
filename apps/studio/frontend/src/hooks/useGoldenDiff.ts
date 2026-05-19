@@ -24,7 +24,7 @@ export function useGoldenDiff(skillId: string | null, runId: string | null) {
 
     setState((current) => ({ ...current, loading: true, error: null }))
     try {
-      const response = await api.get<CompareResult>(`/skills/${skillId}/runs/${targetRunId}/diff`, {
+      const response = await api.get<CompareResult>(`/skills/${skillId}/runs/${targetRunId}/compare`, {
         params: against ? { against } : undefined,
       })
       setState({ result: response.data, loading: false, error: null })

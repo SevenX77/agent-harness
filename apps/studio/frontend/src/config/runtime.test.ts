@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { fallbackSidecarConfig, isTauriRuntime, resolveRuntimeConfig } from './runtime'
+import { configureApiToken, currentApiTokenIsSet } from '../api/client'
+import { fallbackSidecarConfig, initializeRuntimeConfig, isTauriRuntime, resolveRuntimeConfig } from './runtime'
 
 describe('runtime config', () => {
   it('detects the Tauri runtime marker', () => {
@@ -18,6 +19,7 @@ describe('runtime config', () => {
       baseURL: 'http://localhost:8787/api',
       wsURL: 'ws://localhost:8787/ws',
       resourceDir: '',
+      api_token: null,
     })
   })
 
@@ -31,6 +33,7 @@ describe('runtime config', () => {
           baseURL: 'http://127.0.0.1:49152/api/',
           wsURL: 'ws://127.0.0.1:49152/ws/',
           resourceDir: '/tmp/studio',
+          api_token: 'secret-token',
         } as T
       },
     })
@@ -40,10 +43,23 @@ describe('runtime config', () => {
       baseURL: 'http://127.0.0.1:49152/api',
       wsURL: 'ws://127.0.0.1:49152/ws',
       resourceDir: '/tmp/studio',
+      api_token: 'secret-token',
     })
   })
 
   it('derives websocket origin from fallback base URL', () => {
     expect(fallbackSidecarConfig('https://studio.local/api').wsURL).toBe('wss://studio.local/ws')
+  })
+
+  it('does not clear a token configured before runtime initialization', async () => {
+    configureApiToken('dev-tunnel-token')
+
+    await initializeRuntimeConfig({
+      windowRef: {},
+      fallbackBaseURL: '/api',
+    })
+
+    expect(currentApiTokenIsSet()).toBe(true)
+    configureApiToken(null)
   })
 })

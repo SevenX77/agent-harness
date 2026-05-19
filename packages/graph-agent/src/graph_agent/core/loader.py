@@ -18,7 +18,7 @@ from typing import Any, Literal, NoReturn, cast
 
 from jsonschema.exceptions import SchemaError
 from jsonschema.validators import Draft202012Validator
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from graph_agent.cognitive.context_facade import Context
 from graph_agent.core.actions import ActionDef, ActionRegistry, ToolDef, ToolRegistry
@@ -36,6 +36,7 @@ from graph_agent.core.parser import (
     scan_forbidden_topology_tags,
 )
 from graph_agent.core.purity import scan_python_purity, scan_tool_imports_context
+from graph_agent.core.subagents import build_subagent_input_model, build_subagent_tool_args_model
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,22 @@ class CompiledSkill:
     nodes: list[PhaseDocument] = field(default_factory=list)
     actions: ActionRegistry = field(default_factory=ActionRegistry.empty)
     tools: ToolRegistry = field(default_factory=ToolRegistry.empty)
+    subagents_by_phase: dict[str, list[CompiledSubagent]] = field(default_factory=dict)
     phase_tokens: dict[str, PhaseTokenInfo] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class CompiledSubagent:
+    """Resolved sub-skill metadata declared on a parent SKILL phase."""
+
+    parent_phase_id: str
+    name: str
+    path: str
+    description: str
+    root: Path
+    input_schema: dict[str, Any]
+    input_model: type[BaseModel]
+    expected_schema: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -157,6 +173,8 @@ class SkillLoader:
             output_schema_keys,
             validate_context_writes=self.validate_context_writes,
         )
+        subagents_by_phase = _compile_subagent_metadata(root, phase_docs)
+        tools = _inject_subagent_tools(tools, subagents_by_phase)
 
         raw = {
             "graph": {"frontmatter": graph_frontmatter, "body": graph_body},
@@ -185,6 +203,7 @@ class SkillLoader:
             nodes=phase_docs,
             actions=actions,
             tools=tools,
+            subagents_by_phase=subagents_by_phase,
             phase_tokens=phase_tokens,
         )
 
@@ -316,6 +335,158 @@ def _discover_actions_and_tools(
     return ActionRegistry(actions_by_phase), ToolRegistry(
         root_tools=root_tools, by_phase=tools_by_phase
     )
+
+
+def _compile_subagent_metadata(
+    skill_root: Path,
+    phase_docs: list[PhaseDocument],
+) -> dict[str, list[CompiledSubagent]]:
+    subagents_by_phase: dict[str, list[CompiledSubagent]] = {}
+    for doc in phase_docs:
+        if not isinstance(doc.ast, SkillNodeAST) or not doc.ast.subagents:
+            continue
+        phase_subagents: list[CompiledSubagent] = []
+        for spec in doc.ast.subagents:
+            sub_root = _resolve_subagent_root(skill_root, doc.path, spec.path, spec.name)
+            sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(sub_root)
+            input_schema = sub_compiled.raw.get("io", {}).get("inputs")
+            if not isinstance(input_schema, dict) or not input_schema:
+                _fatal(
+                    doc.path,
+                    _frontmatter_key_line(doc.path, "phase_config"),
+                    "subagent "
+                    f"{spec.name!r} at {spec.path!r} must declare a non-empty io.inputs schema",
+                )
+            try:
+                input_model = build_subagent_input_model(
+                    _subagent_input_model_name(doc.phase_name, spec.name),
+                    input_schema,
+                )
+            except ValueError as exc:
+                _fatal(
+                    doc.path,
+                    _frontmatter_key_line(doc.path, "phase_config"),
+                    f"subagent {spec.name!r} io.inputs schema is unsupported: {exc}",
+                )
+            phase_subagents.append(
+                CompiledSubagent(
+                    parent_phase_id=doc.phase_name,
+                    name=spec.name,
+                    path=spec.path,
+                    description=spec.description,
+                    root=sub_root,
+                    input_schema=input_schema,
+                    input_model=input_model,
+                    expected_schema=input_model.model_json_schema(),
+                )
+            )
+        subagents_by_phase[doc.phase_name] = phase_subagents
+    return subagents_by_phase
+
+
+def _inject_subagent_tools(
+    registry: ToolRegistry,
+    subagents_by_phase: dict[str, list[CompiledSubagent]],
+) -> ToolRegistry:
+    by_phase = {phase_id: list(tools) for phase_id, tools in registry.by_phase.items()}
+    root_tool_names = {tool.id for tool in registry.root_tools}
+    for phase_id, subagents in subagents_by_phase.items():
+        phase_tools = by_phase.setdefault(phase_id, [])
+        existing_names = root_tool_names | {tool.id for tool in phase_tools}
+        for subagent in subagents:
+            tool_name = f"call_subagent_{subagent.name}"
+            if tool_name in existing_names:
+                _actions_fatal(
+                    subagent.root,
+                    1,
+                    f"subagent {subagent.name!r} dynamic tool {tool_name!r} "
+                    "conflicts with an existing tool",
+                )
+            existing_names.add(tool_name)
+            phase_tools.append(_subagent_tool_def(phase_id, subagent, tool_name))
+    return ToolRegistry(root_tools=registry.root_tools, by_phase=by_phase)
+
+
+def _subagent_tool_def(
+    phase_id: str,
+    subagent: CompiledSubagent,
+    tool_name: str,
+) -> ToolDef:
+    args_model = build_subagent_tool_args_model(
+        f"{subagent.input_model.__name__}ToolArgs",
+        subagent.input_model,
+    )
+    return ToolDef(
+        id=tool_name,
+        phase_id=phase_id,
+        path=subagent.root / "GRAPH.md",
+        func=_pending_call_subagent_tool,
+        description=(
+            f"{subagent.description}\n\n"
+            f"Call subagent {subagent.name!r}. Pass inputs as an array; best practice: "
+            "no more than 3 inputs per call."
+        ),
+        args_schema=args_model,
+        metadata={
+            "kind": "subagent",
+            "subagent_name": subagent.name,
+            "subagent_path": subagent.path,
+            "subagent_root": str(subagent.root),
+            "expected_schema": subagent.expected_schema,
+        },
+    )
+
+
+def _pending_call_subagent_tool(inputs: list[Any]) -> list[dict[str, Any]]:
+    """Placeholder for Phase 2 executor-owned subagent dispatch."""
+
+    del inputs
+    raise NotImplementedError("call_subagent runtime is implemented in Phase 2 Executor")
+
+
+def _resolve_subagent_root(
+    skill_root: Path,
+    phase_path: Path,
+    subagent_path: str,
+    subagent_name: str,
+) -> Path:
+    display_path = phase_path.parent / subagent_path
+    path = Path(subagent_path)
+    if path.is_absolute():
+        _fatal(
+            phase_path,
+            _frontmatter_key_line(phase_path, "phase_config"),
+            f"subagent {subagent_name!r} path must be relative to phase root",
+        )
+    skill_root_resolved = skill_root.resolve()
+    candidate = display_path.resolve()
+    try:
+        candidate.relative_to(skill_root_resolved)
+    except ValueError:
+        _fatal(
+            phase_path,
+            _frontmatter_key_line(phase_path, "phase_config"),
+            f"subagent {subagent_name!r} path must stay inside skill root",
+        )
+    if not candidate.is_dir():
+        _fatal(
+            phase_path,
+            _frontmatter_key_line(phase_path, "phase_config"),
+            f"subagent {subagent_name!r} path {subagent_path!r} does not exist",
+        )
+    if not (candidate / "GRAPH.md").is_file():
+        _fatal(
+            phase_path,
+            _frontmatter_key_line(phase_path, "phase_config"),
+            f"subagent {subagent_name!r} path {subagent_path!r} has no GRAPH.md",
+        )
+    return candidate
+
+
+def _subagent_input_model_name(phase_id: str, subagent_name: str) -> str:
+    safe_phase = "".join(part.title() for part in re.split(r"[^A-Za-z0-9]+", phase_id) if part)
+    safe_name = "".join(part.title() for part in subagent_name.split("_") if part)
+    return f"{safe_phase or 'Phase'}{safe_name or 'Subagent'}Input"
 
 
 def _load_action_dir(actions_dir: Path, phase_id: str) -> dict[str, ActionDef]:
@@ -855,6 +1026,8 @@ def _build_phase_document(
     data = dict(frontmatter)
     data["raw_blocks"] = blocks
     data.setdefault("name", phase_name)
+    if mode == "skill":
+        data = _normalize_skill_node_frontmatter(path, data)
 
     try:
         if mode == "logic":
@@ -878,6 +1051,27 @@ def _build_phase_document(
         raw_blocks=blocks,
         ast=ast,
     )
+
+
+def _normalize_skill_node_frontmatter(path: Path, data: dict[str, Any]) -> dict[str, Any]:
+    phase_config = data.pop("phase_config", None)
+    if phase_config is None:
+        return data
+    if not isinstance(phase_config, dict):
+        _fatal(path, _frontmatter_key_line(path, "phase_config"), "phase_config must be an object")
+    merged = dict(data)
+    if "tools" in phase_config:
+        merged.setdefault("tools", phase_config["tools"])
+    if "subagents" in phase_config:
+        merged["subagents"] = phase_config["subagents"]
+    extra_keys = sorted(set(phase_config) - {"tools", "subagents"})
+    if extra_keys:
+        _fatal(
+            path,
+            _frontmatter_key_line(path, "phase_config"),
+            "unsupported phase_config keys: " + ", ".join(extra_keys),
+        )
+    return merged
 
 
 _ATTR_RE = re.compile(r"([A-Za-z_][\w:-]*)\s*=\s*(['\"])(.*?)\2", re.DOTALL)

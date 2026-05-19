@@ -303,6 +303,15 @@ roles:
     models:
       CLCH46: { providers: [OC_CL_ANT, OC_CL] }
 
+  # ── Studio Copilot 角色 ──
+  copilot_chat:
+    temperature: 0.7
+    model_fallback: true
+    active_model: CL46T
+    models:
+      CL46T: { providers: [OC_CL_ANT, OC_CL, WS_LLM] }
+      DS32R: { providers: [DS, OC_DS] }
+
   # ── 功能角色 ──
   analyst:
     temperature: 0.2

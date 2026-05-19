@@ -1,9 +1,8 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import type { CallbackEvent } from '../../api/types'
 import type { IndexedTraceEvent } from '../../hooks/useTraceFilter'
 import { traceEventId } from '../../hooks/useTraceSelection'
-import { useVirtualScroll } from '../../hooks/useVirtualScroll'
 import { eventPhase, isPredictTrace } from '../../utils/trace'
 import { TRACE_EVENT_ROW_HEIGHT, TraceEventRow } from './TraceEventRow'
 
@@ -26,11 +25,37 @@ export function VirtualTraceList({
 }: VirtualTraceListProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
-  const virtual = useVirtualScroll(viewportRef, {
-    itemCount: events.length,
-    itemHeight: TRACE_EVENT_ROW_HEIGHT,
-    overscan: 8,
-  })
+  const [viewportHeight, setViewportHeight] = useState(0)
+  const [scrollTop, setScrollTop] = useState(0)
+  useEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport) {
+      return undefined
+    }
+    const updateViewport = () => {
+      setViewportHeight(viewport.clientHeight)
+      setScrollTop(viewport.scrollTop)
+    }
+    updateViewport()
+    viewport.addEventListener('scroll', updateViewport, { passive: true })
+    window.addEventListener('resize', updateViewport)
+    return () => {
+      viewport.removeEventListener('scroll', updateViewport)
+      window.removeEventListener('resize', updateViewport)
+    }
+  }, [])
+  const virtual = useMemo(() => {
+    const visibleCount = Math.ceil(viewportHeight / TRACE_EVENT_ROW_HEIGHT)
+    const firstVisible = Math.floor(scrollTop / TRACE_EVENT_ROW_HEIGHT)
+    const startIdx = Math.max(0, firstVisible - 8)
+    const endIdx = Math.min(events.length, firstVisible + visibleCount + 9)
+    return {
+      startIdx,
+      endIdx,
+      totalHeight: events.length * TRACE_EVENT_ROW_HEIGHT,
+      offsetTop: startIdx * TRACE_EVENT_ROW_HEIGHT,
+    }
+  }, [events.length, scrollTop, viewportHeight])
   const visibleEvents = events.slice(virtual.startIdx, virtual.endIdx)
   const predictTrace = useMemo(
     () => isPredictTrace(events.map(({ event }) => event)),
@@ -40,6 +65,22 @@ export function VirtualTraceList({
     () => selectedEventId ? events.findIndex(({ event, index }) => traceEventId(event, index) === selectedEventId) : -1,
     [events, selectedEventId],
   )
+
+  useEffect(() => {
+    if (selectedPosition < 0) {
+      return
+    }
+    const viewport = viewportRef.current
+    if (!viewport) {
+      return
+    }
+
+    const top = selectedPosition * TRACE_EVENT_ROW_HEIGHT
+    const bottom = top + TRACE_EVENT_ROW_HEIGHT
+    if (top < viewport.scrollTop || bottom > viewport.scrollTop + viewport.clientHeight) {
+      viewport.scrollTo({ top: Math.max(0, top - TRACE_EVENT_ROW_HEIGHT), behavior: 'smooth' })
+    }
+  }, [selectedPosition])
 
   const focusEventAt = (position: number) => {
     const target = events[position]
@@ -99,6 +140,7 @@ export function VirtualTraceList({
       tabIndex={0}
       onKeyDown={handleKeyDown}
       data-predict-trace={predictTrace ? 'true' : undefined}
+      data-virtualized-count={events.length}
       className={`min-h-0 flex-1 overflow-y-auto pr-1 outline-none focus:ring-2 focus:ring-sky-300 dark:focus:ring-sky-800 ${
         predictTrace ? 'border-l border-amber-200 pl-2 dark:border-amber-900/50' : ''
       }`}
@@ -110,12 +152,14 @@ export function VirtualTraceList({
         >
           {visibleEvents.map(({ event, index }) => {
             const eventId = traceEventId(event, index)
+            const absolutePosition = events.findIndex((item) => item.index === index)
             return (
             <div
               key={`${event.timestamp}-${index}`}
               id={`trace-event-${eventId}`}
               role="option"
               aria-selected={selectedEventId === eventId}
+              data-virtual-index={absolutePosition}
               style={{ minHeight: TRACE_EVENT_ROW_HEIGHT }}
             >
               <TraceEventRow

@@ -1,0 +1,110 @@
+<phase_config>
+name: aggregate
+tier: balanced
+tools:
+  - script.extractor.add_event
+  - script.extractor.store_events
+  - script.extractor.backup_event_timeline
+max_iterations: 20
+max_nudges: 2
+</phase_config>
+
+<system_prompt>
+你是专业的小说编辑和叙事分析师。你的任务是分析已分段的小说章节，完成两个任务：
+
+## 任务1：时间线重排
+
+**核心原则**：小说的**段落顺序** ≠ **故事时间线顺序**
+
+**常见情况**：
+1. **细节展开**：后面的段落可能是前面事件的细节补充
+2. **回忆插叙**：某段落是对更早时间的回顾
+3. **平行叙事**：多个角色/地点的事件交替叙述
+
+**时间线判断依据**：
+- 明确时间标记（"几个月前"、"夜晚"、"第二天"）
+- 因果关系（A事件导致B事件）
+- 空间位置（从江城出发 → 路上 → 露营地）
+- 叙事逻辑（情节的自然发展顺序）
+
+---
+
+## 任务2：事件聚合
+
+**核心原则**：多个连续段落可能是同一个**事件**
+
+**聚合规则**：
+1. **语义连贯**：描述同一件事的不同方面
+2. **时空一致**：同一时间、同一地点的连续行为
+3. **细节展开**：一个段落是另一个段落的细节补充
+4. **描述性段落**：没有主体动作的描述段落应合并到相邻事件
+
+**重要**：
+- **C类段落必须独立成事件，严禁与B类段落混入同一个事件**
+- **M类段落（回忆/闪回/梦境）必须独立成事件，严禁与B类混合**
+- C类事件的 type 填 "C"，回忆/闪回事件填 "M"，其他现实事件填 "B"
+- 事件必须按**时间线顺序**排列，不是段落顺序
+- **M类事件不参与时间线排序**——按其在段落中出现的位置编号即可，不强制插入前世/过去时间点
+- **每个段落只能归属一个事件，不允许共享**（严格 N:1）
+
+### M类事件（回忆/闪回）识别规则
+
+**判断标准**：以下任意一条成立即为 M 类：
+1. 时间标记明确指向过去或另一条时间线（"前世"、"X年前"、"她记得那时"、"梦中"）
+2. 叙事视角切换为回忆视角（"她回忆起"、"记忆中"、"脑海中浮现"）
+3. 事件主体不在当前时间线物理空间中（梦境、幻想、前世记忆）
+
+**M类的重要性**：
+- M类事件中出现的人物**必须被正确注册为实体**（即使只在回忆中出场）
+- M类事件承载仇恨债、情感动机等关键叙事信息，不得丢弃
+- M类事件的 location/time 填回忆中的地点/时间，并在 time 字段注明"（回忆）"
+
+## 执行步骤
+
+1. 仔细阅读 {formatted_paragraphs} 中的章节分段
+2. 在脑中完成时间线重排和事件聚合
+3. 逐事件调用 add_event 工具——**每个事件一次调用**，只传标量参数
+4. 全部事件提交后，调用 store_events 保存结果
+5. 调用 backup_event_timeline 备份（供 review 阶段使用）
+6. 调用 finish_task 报告完成
+</system_prompt>
+
+<user_prompt>
+请分析以下已分段的章节，完成时间线重排和事件聚合：
+
+## 章节分段结果（段落按原文顺序）
+
+{formatted_paragraphs}
+
+---
+
+**分析完成后，逐事件调用 add_event 工具**：
+- `index`: 事件编号（按时间线顺序，从1开始）
+- `summary`: 事件概括（20-30字）
+- `type`: "B"（现实时间线事件）、"C"（系统/次元空间）或 "M"（回忆/闪回/梦境，不在当前时间线）
+- `paragraphs_str`: 包含的段落索引，字符串格式，如 "1, 2, 3" 或 "4-6"
+- `location`: 地点（原文原词），无明确地点填 "位置未明确"
+- `location_change`: 相对上一事件的地点变化，无变化填 ""
+- `time`: 时间（原文时间原词），无明确时间填 "时间未明确"
+- `time_change`: 与上一事件的时间关系，无明确标记时写推断理由，无变化填 ""
+- `present_characters`: 在场角色，逗号分隔，如 "姜宁, 张超"。无明确在场角色填 ""
+
+**关键要求**：
+1. 事件按**故事时间线顺序**排列
+2. 所有段落都必须归入某个事件，不遗漏
+3. C类段落必须独立为一个事件（type="C"）
+4. 每个段落只能归入一个事件
+5. present_characters 只列当前事件中明确出场/行动的角色，不含仅被提及的角色
+6. 回忆/闪回段落必须独立为 M 类事件（type="M"），不得强行归入现实时间线事件
+</user_prompt>
+
+<data_architecture>
+## Input
+- `formatted_paragraphs`: str — Markdown-formatted ABC segments
+- `chapter_number`: int
+- `prev_chapter_last_event`: dict | None — Previous chapter's last event for cross-chapter context
+
+## Output (stored in context)
+- `parsed_events`: list[dict] — Accumulated by add_event calls
+- `event_timeline`: dict — Built by store_events
+</data_architecture>

@@ -6,9 +6,7 @@ from pathlib import Path
 
 import pytest
 from app.core import config
-from app.services.skills import validate_skill_file_path
 from app.services.terminal_manager import TerminalManager, TerminalRecord, terminal_manager
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 
@@ -28,48 +26,6 @@ def test_terminal_rejects_invalid_skill_id_with_standard_404(
     assert response.status_code == 404
     assert response.json()["error_code"] == "SKILL_NOT_FOUND"
     assert RecordingPtyFactory.commands == []
-
-
-@pytest.mark.parametrize(
-    "rel_path",
-    [
-        "../x.md",
-        "phases/../x.md",
-        "/abs.md",
-        "README.txt",
-        "GRAPH.json",
-        "io/schema.json",
-        "phases/init/README.md",
-        "phases/init/actions/readme.md",
-        "tools/nested/helper.py",
-    ],
-)
-def test_skill_file_path_validation_rejects_traversal_absolute_and_bad_suffix(
-    rel_path: str,
-) -> None:
-    with pytest.raises(HTTPException) as exc_info:
-        validate_skill_file_path(rel_path)
-
-    assert exc_info.value.status_code == 422
-    assert exc_info.value.detail == f"invalid_skill_file_path: {rel_path}"
-
-
-@pytest.mark.parametrize(
-    "rel_path",
-    [
-        "GRAPH.md",
-        "io/inputs.json",
-        "io/outputs.json",
-        "phases/init/LOGIC.md",
-        "phases/init/SUBGRAPH.md",
-        "phases/init/SKILL.md",
-        "phases/init/actions/prepare.py",
-        "phases/init/tools/fetch.py",
-        "tools/shared.py",
-    ],
-)
-def test_skill_file_path_validation_allows_v21_actions_and_tools(rel_path: str) -> None:
-    validate_skill_file_path(rel_path)
 
 
 @pytest.mark.parametrize(

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer } from 'react'
+import { api } from '../api/client'
 import type { IoInput, JsonObject, JsonValue } from '../api/types'
 import { isJsonObject } from '../utils/errors'
 
@@ -175,6 +176,10 @@ export function useInputPlayground(inputs: PlaygroundInputSpec[]) {
     return Object.keys(currentErrors).length === 0 ? state.values : null
   }, [inputs, state.values])
 
+  const validateRemote = useCallback(async (skillId: string, values: JsonObject) => {
+    await api.post(`/skills/${skillId}/validate_input`, values)
+  }, [])
+
   return {
     values: state.values,
     errors,
@@ -183,6 +188,7 @@ export function useInputPlayground(inputs: PlaygroundInputSpec[]) {
     setValue,
     setValues,
     reset,
+    validateRemote,
     submitInputs,
   }
 }

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections import Counter
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Literal
 
 from graph_agent import run_skill
@@ -23,10 +24,11 @@ from graph_agent.core._predict_internal.strategy import (
     MockStrategy,
 )
 from graph_agent.core._predict_internal.tracing import PredictTracingCallback
+from graph_agent.core.loader import SkillLoader
 
 from app.models.runs import PredictDiagnosticExport
 from app.services.diagnostic_export import export_predict_diagnostics
-from app.services.skills import ensure_workspace_skill_dir
+from app.services.skills import ensure_workspace_skill_dir, predict_dir_for
 
 logger = logging.getLogger(__name__)
 
@@ -73,13 +75,16 @@ class PredictorService:
             callbacks=[tracing_callback],
             **(input_data or {}),
         )
-        raw_result = _attach_predict_trace(raw_result, tracing_callback.phases)
+        trace_phases = tracing_callback.phases or _fallback_trace_from_skill(skill_dir, raw_result)
+        raw_result = _attach_predict_trace(raw_result, trace_phases)
         actual_path = _actual_path_from_raw(raw_result)
         if _is_p2_strategy(strategy):
             self._raise_if_deadlocked(actual_path)
 
         path_diff = self._path_diff_for_strategy(strategy, actual_path)
-        return self.assemble_trace(raw_result, path_diff)
+        result = self.assemble_trace(raw_result, path_diff)
+        self._persist_predict_result(skill_dir, result)
+        return result
 
     def resolve_fill_strategy(self, mock_param: Any) -> BaseMockStrategy:
         """Convert polymorphic mock input into an internal strategy object."""
@@ -101,6 +106,14 @@ class PredictorService:
         """Expose PredictResult through the Studio in-process diagnostic contract."""
 
         return export_predict_diagnostics(result)
+
+    def _persist_predict_result(self, skill_dir: Path, result: PredictResult) -> None:
+        predict_root = predict_dir_for(skill_dir)
+        predict_root.mkdir(parents=True, exist_ok=True)
+        (predict_root / "latest_predict.json").write_text(
+            result.model_dump_json(),
+            encoding="utf-8",
+        )
 
     def _path_diff_for_strategy(
         self,
@@ -196,6 +209,24 @@ def _attach_predict_trace(raw_result: Any, trace_phases: list[dict[str, Any]]) -
     if isinstance(context, dict):
         context.setdefault("predict_trace", trace_phases)
     return raw_result
+
+
+def _fallback_trace_from_skill(skill_dir: Path, raw_result: Any) -> list[dict[str, Any]]:
+    del raw_result
+    try:
+        compiled = SkillLoader().compile_skill(skill_dir)
+    except Exception:
+        return []
+    mode_by_phase = {node.phase_name: node.mode for node in compiled.nodes}
+    return [
+        {
+            "phase_name": phase.id,
+            "type": "llm" if mode_by_phase.get(phase.id) == "skill" else "logic",
+            "inputs": {},
+            "outputs": {},
+        }
+        for phase in compiled.manifest.phases
+    ]
 
 
 def _context_from_raw(raw_result: Any) -> dict[str, Any]:

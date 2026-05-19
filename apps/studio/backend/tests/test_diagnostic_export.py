@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from app.core import config
 from app.services.diagnostic_export import (
     assert_trace_can_be_promoted_to_golden,
     export_predict_diagnostics,
@@ -98,8 +99,8 @@ def test_non_predict_trace_can_be_promoted_to_golden() -> None:
 def test_set_golden_baseline_rejects_predict_final_state(
     studio_roots: tuple[Path, Path],
 ) -> None:
-    _skills_dir, workspaces_dir = studio_roots
-    run_dir = workspaces_dir / "default" / "skills" / "text-segmentation" / "runs" / "predict-run"
+    _skills_dir, _workspaces_dir = studio_roots
+    run_dir = config.SKILLS_DIR / "text-segmentation" / ".workspace" / "runs" / "predict-run"
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "final_state.json").write_text(
         json.dumps({"metadata": {"is_predict": True}, "phases": []}),

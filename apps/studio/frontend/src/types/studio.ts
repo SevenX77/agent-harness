@@ -35,7 +35,6 @@ export interface VisualPhase {
   id: string
   name: string
   mode: string
-  src: string | null
   role: string | null
   dependsOn: string[]
   subgraph: string | null

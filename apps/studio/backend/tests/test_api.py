@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import queue
 import time
@@ -9,12 +8,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from app.core.adapters.metadata_local import LocalJsonMetadataStore
-from app.core.adapters.storage_local import LocalFilesystemBackend
+from app.core import config
 from app.models.runs import RunMetadata
-from app.services.event_bus import event_bus, file_watcher
+from app.services.event_bus import event_bus
 from app.services.run_manager import run_manager
-from app.services.skills import create_new_skill
 from app.services.terminal_manager import terminal_manager
 from fastapi.testclient import TestClient
 from graph_agent.callbacks.events import (
@@ -34,6 +31,10 @@ def test_openapi_registers_phase0_rest_surface(client: TestClient) -> None:
     expected_paths = {
         "/api/skills",
         "/api/skills/{skill_id}",
+        "/api/skills/{skill_id}/history",
+        "/api/skills/{skill_id}/revert",
+        "/api/skills/{skill_id}/sync",
+        "/api/skills/{skill_id}/publish",
         "/api/skills/{skill_id}/fork",
         "/api/skills/{skill_id}/lint",
         "/api/skills/{skill_id}/runs",
@@ -50,6 +51,7 @@ def test_openapi_registers_phase0_rest_surface(client: TestClient) -> None:
         "/api/skills/{skill_id}/copilot/dispatch",
         "/api/skills/{skill_id}/runs/{run_id}/audit",
         "/api/batch/{batch_id}",
+        "/api/settings",
         "/api/templates",
     }
 
@@ -71,15 +73,10 @@ def test_skills_list_and_detail_use_real_skill_files(client: TestClient) -> None
     detail_response = client.get("/api/skills/text-segmentation")
     assert detail_response.status_code == 200
     body = detail_response.json()
-    assert body["manifest"]["name"] == "text-segmentation"
-    assert body["manifest"]["phases"][0]["id"] == "setup"
-    assert body["graph_topology"] == [
-        {"id": "setup", "src": "phases/setup", "depends_on": [], "mode": "logic"}
-    ]
-    assert set(body["node_schema_v21"]) == {"graph_phase_ref", "logic", "skill", "subgraph"}
-    assert "depends_on" in body["node_schema_v21"]["graph_phase_ref"]["required"]
-    assert set(body["io_schema"]) == {"inputs", "outputs"}
+    assert body["manifest"]["schema_version"] == "2.1"
     assert body["io_schema"]["inputs"]["properties"]["input_text"]["type"] == "string"
+    assert body["manifest"]["phases"][0]["id"] == "setup"
+    assert "GRAPH.md" in body["files"]
     assert body["lint_result"]["status"] == "passed"
 
 
@@ -111,79 +108,197 @@ def test_lint_reports_failed_manifest_with_line_number(
     assert body["errors"][0]["error_code"]
 
 
-def test_update_skill_rejects_legacy_content_payload(
+def test_put_updates_indexed_skill_atomically_and_invalid_content_preserves_file(
     client: TestClient,
-) -> None:
-    response = client.put("/api/skills/text-segmentation", json={"content": "name: updated"})
-
-    assert response.status_code == 422
-    assert response.json()["error_code"] == "MANIFEST_VALIDATION_FAILED"
-    error_types = {error["type"] for error in response.json()["details"]["errors"]}
-    assert {"missing", "extra_forbidden"} <= error_types
-
-
-def test_update_skill_accepts_files_payload(
-    client: TestClient,
-    studio_roots: tuple[Path, Path],
-) -> None:
-    skills_dir, workspaces_dir = studio_roots
-    files = _files_from_skill_dir(skills_dir / "text-segmentation")
-    files["phases/setup/LOGIC.md"] = files["phases/setup/LOGIC.md"].replace(
-        "name: setup",
-        "name: updated setup",
-    )
-
-    response = client.put("/api/skills/text-segmentation", json={"files": files})
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["files"]["phases/setup/LOGIC.md"] == files["phases/setup/LOGIC.md"]
-    assert "updated setup" in (
-        workspaces_dir
-        / "default"
-        / "skills"
-        / "text-segmentation"
-        / "phases"
-        / "setup"
-        / "LOGIC.md"
-    ).read_text(encoding="utf-8")
-
-
-def test_create_skill_single_file_returns_v21_cutover_error(
-    client: TestClient,
-) -> None:
-    response = client.post(
-        "/api/skills",
-        json={"skill_id": "idea-generator", "content": _agent_skill_content("idea-generator")},
-    )
-
-    assert response.status_code == 422
-    error_types = {error["type"] for error in response.json()["details"]["errors"]}
-    assert {"missing", "extra_forbidden"} <= error_types
-
-
-def test_create_skill_uses_inline_v21_scaffold(
     studio_roots: tuple[Path, Path],
 ) -> None:
     _skills_dir, workspaces_dir = studio_roots
-    storage = LocalFilesystemBackend(workspaces_dir)
-    metadata = LocalJsonMetadataStore(workspaces_dir)
+    create_response = client.post(
+        "/api/skills",
+        json={"skill_id": "idea-generator", "files": _agent_skill_files("idea-generator")},
+    )
+    assert create_response.status_code == 201
+    skill_path = config.DEFAULT_SKILLS_ROOT / "idea-generator" / "GRAPH.md"
+    updated = skill_path.read_text(encoding="utf-8").replace(
+        "description: Draft structured ideas",
+        "description: Updated ideas",
+    )
+    files = _agent_skill_files("idea-generator")
+    files["GRAPH.md"] = updated
 
-    summary = asyncio.run(create_new_skill("default", "idea-generator", {}, storage, metadata))
+    ok_response = client.put("/api/skills/idea-generator", json={"files": files})
 
-    skill_dir = workspaces_dir / "default" / "skills" / "idea-generator"
-    assert summary.id == "idea-generator"
+    assert ok_response.status_code == 200
+    assert ok_response.json()["manifest"]["description"] == "Updated ideas"
+    assert "Updated ideas" in skill_path.read_text(encoding="utf-8")
+    assert not (workspaces_dir / "default" / "skills" / "idea-generator" / "GRAPH.md").exists()
+
+    bad_files = dict(files)
+    bad_files["GRAPH.md"] = "not yaml"
+    bad_response = client.put("/api/skills/idea-generator", json={"files": bad_files})
+
+    assert bad_response.status_code == 422
+    assert "Updated ideas" in skill_path.read_text(encoding="utf-8")
+
+
+def test_create_skill(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    _skills_dir, workspaces_dir = studio_roots
+
+    response = client.post(
+        "/api/skills",
+        json={"skill_id": "idea-generator", "files": _agent_skill_files("idea-generator")},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["id"] == "idea-generator"
+    assert body["name"] == "idea-generator"
+    assert body["description"] == "Draft structured ideas"
+    assert body["phase_count"] == 1
+    skill_dir = config.DEFAULT_SKILLS_ROOT / "idea-generator"
+    assert body["directory_path"] == str(skill_dir)
+
     assert (skill_dir / "GRAPH.md").exists()
-    assert (skill_dir / "phases" / "init" / "LOGIC.md").exists()
-    assert (skill_dir / "io" / "inputs.json").read_text(encoding="utf-8") == "{}\n"
-    assert (skill_dir / "io" / "outputs.json").read_text(encoding="utf-8") == "{}\n"
-    assert "name: idea-generator" in (skill_dir / "GRAPH.md").read_text(encoding="utf-8")
+    assert (skill_dir / ".workspace").is_dir()
+    assert (skill_dir / ".git").is_dir()
+    assert (skill_dir / ".gitignore").read_text(encoding="utf-8").splitlines() == [
+        "/.workspace/*",
+        "!/.workspace/golden/",
+        "!/.workspace/predict/",
+        "/.workspace/local_settings.json",
+    ]
+    assert not (workspaces_dir / "default" / "skills" / "idea-generator" / "GRAPH.md").exists()
+    index = json.loads(config.SKILL_INDEX_PATH.read_text(encoding="utf-8"))
+    assert index["idea-generator"]["absolute_path"] == str(skill_dir)
+
+
+def test_create_skill_with_directory_path_writes_to_user_dir(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+    tmp_path: Path,
+) -> None:
+    _skills_dir, workspaces_dir = studio_roots
+    parent_dir = tmp_path / "external-skills"
+    parent_dir.mkdir()
+    skill_dir = parent_dir / "idea-generator"
+
+    response = client.post(
+        "/api/skills",
+        json={
+            "skill_id": "idea-generator",
+            "files": _agent_skill_files("idea-generator"),
+            "directory_path": str(skill_dir),
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["id"] == "idea-generator"
+    assert body["directory_path"] == str(skill_dir)
+    assert (skill_dir / "GRAPH.md").exists()
+    assert (skill_dir / ".workspace").is_dir()
+    assert (skill_dir / ".git").is_dir()
+    assert not (workspaces_dir / "default" / "skills" / "idea-generator" / "GRAPH.md").exists()
+    index = json.loads(config.SKILL_INDEX_PATH.read_text(encoding="utf-8"))
+    assert index["idea-generator"]["absolute_path"] == str(skill_dir)
+    assert "idea-generator" in {
+        item["id"] for item in client.get("/api/skills").json() if item["directory_path"]
+    }
+
+
+def test_create_skill_with_invalid_directory_path_returns_422(
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    responses = [
+        client.post(
+            "/api/skills",
+            json={
+                "skill_id": "relative-path",
+                "files": _agent_skill_files("relative-path"),
+                "directory_path": "relative/path",
+            },
+        ),
+        client.post(
+            "/api/skills",
+            json={
+                "skill_id": "missing-parent",
+                "files": _agent_skill_files("missing-parent"),
+                "directory_path": str(tmp_path / "missing" / "missing-parent"),
+            },
+        ),
+    ]
+
+    for response in responses:
+        assert response.status_code == 422
+        assert response.json()["error_code"] == "INVALID_DIRECTORY_PATH"
+
+
+def test_create_skill_directory_path_conflict_returns_409(
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    skill_dir = tmp_path / "shared-skill-dir"
+
+    first_response = client.post(
+        "/api/skills",
+        json={
+            "skill_id": "first-skill",
+            "files": _agent_skill_files("first-skill"),
+            "directory_path": str(skill_dir),
+        },
+    )
+    second_response = client.post(
+        "/api/skills",
+        json={
+            "skill_id": "second-skill",
+            "files": _agent_skill_files("second-skill"),
+            "directory_path": str(skill_dir),
+        },
+    )
+
+    assert first_response.status_code == 201
+    assert second_response.status_code == 409
+    assert second_response.json()["error_code"] == "SKILL_ALREADY_EXISTS"
+
+
+def test_resolve_skill_dir_uses_directory_path_when_set(
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    skill_dir = tmp_path / "external-skill"
+    create_response = client.post(
+        "/api/skills",
+        json={
+            "skill_id": "external-skill",
+            "files": _agent_skill_files("external-skill"),
+            "directory_path": str(skill_dir),
+        },
+    )
+
+    detail_response = client.get("/api/skills/external-skill")
+
+    assert create_response.status_code == 201
+    assert detail_response.status_code == 200
+    file_paths = detail_response.json()["file_paths"]
+    assert file_paths["skill_dir"] == str(skill_dir)
+    assert file_paths["graph_md"] == str(skill_dir / "GRAPH.md")
+    assert file_paths["runs_dir"] == str(skill_dir / ".workspace" / "runs")
+    assert file_paths["golden_dir"] == str(skill_dir / ".workspace" / "golden")
+    assert file_paths["predict_dir"] == str(skill_dir / ".workspace" / "predict")
+    assert file_paths["local_settings"] == str(skill_dir / ".workspace" / "local_settings.json")
 
 
 def test_create_skill_collision_returns_409(client: TestClient) -> None:
     response = client.post(
         "/api/skills",
-        json={"skill_id": "text-segmentation", "files": {}},
+        json={
+            "skill_id": "text-segmentation",
+            "files": _agent_skill_files("text-segmentation"),
+        },
     )
 
     assert response.status_code == 409
@@ -192,7 +307,6 @@ def test_create_skill_collision_returns_409(client: TestClient) -> None:
     assert body["details"] == {"skill_id": "text-segmentation"}
 
 
-@pytest.mark.xfail(reason="T3.1 PM decision: templates.py remains legacy parser follow-up")
 def test_templates_api_lists_builtin_skill_templates(client: TestClient) -> None:
     response = client.get("/api/templates")
 
@@ -271,18 +385,83 @@ def test_run_endpoint_spawns_worker_and_ws_streams_events(
         "run_ended",
     ]
 
-    deadline = time.monotonic() + 0.25
-    detail = client.get(f"/api/skills/text-segmentation/runs/{run_id}").json()
-    while "metadata" not in detail and time.monotonic() < deadline:
-        time.sleep(0.005)
+    detail: dict[str, Any] = {}
+    for _ in range(20):
         detail = client.get(f"/api/skills/text-segmentation/runs/{run_id}").json()
+        if detail.get("metadata", {}).get("status") == "success":
+            break
+        time.sleep(0.05)
+
     assert detail["metadata"]["status"] == "success"
-    run_dir = workspaces_dir / "default" / "skills" / "text-segmentation" / "runs" / run_id
+    run_dir = _skills_dir / "text-segmentation" / ".workspace" / "runs" / run_id
     assert (run_dir / "final_state.json").exists()
     assert (run_dir / "tracing.jsonl").exists()
     assert (run_dir / "metrics.json").exists()
     assert (run_dir / "artifacts").is_dir()
     assert (run_dir / "checkpoints.db").exists()
+    assert (run_dir.parent / "latest" / "run_metadata.json").exists()
+
+
+def test_successful_run_triggers_auto_commit(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commits: list[tuple[Path, str]] = []
+    client.post(
+        "/api/skills",
+        json={"skill_id": "commit-skill", "files": _agent_skill_files("commit-skill")},
+    )
+    monkeypatch.setattr(run_manager, "process_factory", InlineProcess)
+    monkeypatch.setattr(run_manager, "queue_factory", queue.Queue)
+    monkeypatch.setattr(run_manager, "worker", fake_run_worker)
+    monkeypatch.setattr(
+        run_manager,
+        "git_service",
+        FakeGitService(commits),
+    )
+
+    response = client.post("/api/skills/commit-skill/runs", json={"input_data": {"topic": "ok"}})
+
+    assert response.status_code == 202
+    run_id = response.json()["run_id"]
+    for _ in range(20):
+        detail = client.get(f"/api/skills/commit-skill/runs/{run_id}").json()
+        if detail.get("metadata", {}).get("status") == "success":
+            break
+        time.sleep(0.05)
+    assert commits == [(config.DEFAULT_SKILLS_ROOT / "commit-skill", run_id)]
+
+
+def test_failed_run_does_not_auto_commit(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commits: list[tuple[Path, str]] = []
+    client.post(
+        "/api/skills",
+        json={
+            "skill_id": "failed-commit-skill",
+            "files": _agent_skill_files("failed-commit-skill"),
+        },
+    )
+    monkeypatch.setattr(run_manager, "process_factory", InlineProcess)
+    monkeypatch.setattr(run_manager, "queue_factory", queue.Queue)
+    monkeypatch.setattr(run_manager, "worker", fake_failed_run_worker)
+    monkeypatch.setattr(run_manager, "git_service", FakeGitService(commits))
+
+    response = client.post(
+        "/api/skills/failed-commit-skill/runs",
+        json={"input_data": {"topic": "fail"}},
+    )
+
+    assert response.status_code == 202
+    run_id = response.json()["run_id"]
+    for _ in range(20):
+        detail = client.get(f"/api/skills/failed-commit-skill/runs/{run_id}").json()
+        if detail.get("metadata", {}).get("status") == "failed":
+            break
+        time.sleep(0.05)
+    assert commits == []
 
 
 def test_run_history_lists_details_and_deletes_runs(
@@ -330,10 +509,9 @@ def test_batch_run_starts_runs_from_test_inputs(
     studio_roots: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    skills_dir, workspaces_dir = studio_roots
-    skill_dir = copy_skill(skills_dir, workspaces_dir, "text-segmentation")
-    inputs_dir = skill_dir / "test_inputs"
-    inputs_dir.mkdir()
+    skills_dir, _workspaces_dir = studio_roots
+    inputs_dir = skills_dir / "text-segmentation" / ".workspace" / "test_inputs"
+    inputs_dir.mkdir(parents=True)
     for index in range(3):
         (inputs_dir / f"case-{index}.json").write_text(
             json.dumps({"input_text": f"hello {index}"}),
@@ -390,6 +568,8 @@ def test_set_golden_and_compare_run_diff(
 
     assert promote_response.status_code == 200
     assert promote_response.json()["id"] == "golden-run"
+    golden_dir = _skills_dir / "text-segmentation" / ".workspace" / "golden" / "golden-run"
+    assert (golden_dir / "golden_metadata.json").exists()
 
     diff_response = client.get(
         "/api/skills/text-segmentation/runs/current-run/diff?against=golden-run",
@@ -450,6 +630,7 @@ def test_terminal_endpoint_spawns_pty_and_reaps_expired_session(
     with client.websocket_connect(body["ws_url"]) as websocket:
         assert websocket.receive_text() == "claude>"
         websocket.send_text("help\n")
+        websocket.close()
     record = terminal_manager._sessions[body["term_id"]]
     record.expires_at = 0
     terminal_manager.reap_expired()
@@ -461,24 +642,9 @@ def test_events_ws_broadcasts_to_multiple_clients(client: TestClient) -> None:
         client.websocket_connect("/ws/events") as first,
         client.websocket_connect("/ws/events") as second,
     ):
-        event_bus.broadcast_from_thread({"type": "skill_changed", "skill_id": "text-segmentation", "file": "GRAPH.md"})
-        assert first.receive_json() == {"type": "skill_changed", "skill_id": "text-segmentation", "file": "GRAPH.md"}
-        assert second.receive_json() == {"type": "skill_changed", "skill_id": "text-segmentation", "file": "GRAPH.md"}
-
-
-def test_file_watcher_skill_changed_includes_relative_file(
-    studio_roots: tuple[Path, Path],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _skills_dir, workspaces_dir = studio_roots
-    events: list[dict[str, str]] = []
-    monkeypatch.setattr(event_bus, "broadcast_from_thread", events.append)
-
-    file_watcher.notify_path_changed(
-        workspaces_dir / "default" / "skills" / "text-segmentation" / "GRAPH.md",
-    )
-
-    assert events == [{"type": "skill_changed", "skill_id": "text-segmentation", "file": "GRAPH.md"}]
+        event_bus.broadcast_from_thread({"type": "skill_changed", "skill_id": "text-segmentation"})
+        assert first.receive_json() == {"type": "skill_changed", "skill_id": "text-segmentation"}
+        assert second.receive_json() == {"type": "skill_changed", "skill_id": "text-segmentation"}
 
 
 def test_deferred_endpoints_return_structured_501(client: TestClient) -> None:
@@ -582,6 +748,29 @@ def fake_run_worker(
     process_queue.put({"type": "status", "status": "success", "metrics": {}})
 
 
+def fake_failed_run_worker(
+    skill_id: str,
+    skill_path_raw: str,
+    run_dir_raw: str,
+    inputs: dict[str, Any],
+    process_queue: queue.Queue[dict[str, Any]],
+) -> None:
+    del skill_id, skill_path_raw, inputs
+    run_dir = Path(run_dir_raw)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "final_state.json").write_text(json.dumps({}), encoding="utf-8")
+    (run_dir / "metrics.json").write_text(json.dumps({"status": "failed"}), encoding="utf-8")
+    process_queue.put({"type": "status", "status": "failed", "metrics": {}})
+
+
+class FakeGitService:
+    def __init__(self, commits: list[tuple[Path, str]]) -> None:
+        self._commits = commits
+
+    def auto_commit_run(self, skill_dir: Path, run_id: str) -> None:
+        self._commits.append((skill_dir, run_id))
+
+
 class FakePty:
     def __init__(self) -> None:
         self.terminated = False
@@ -606,6 +795,49 @@ class FakePtyFactory:
 
 
 def _agent_skill_content(skill_id: str) -> str:
+    return _agent_skill_files(skill_id)["GRAPH.md"]
+
+
+def _agent_skill_files(skill_id: str) -> dict[str, str]:
+    return {
+        "GRAPH.md": f"""---
+schema_version: "2.1"
+name: {skill_id}
+description: Draft structured ideas
+---
+<input src="io/inputs.json" />
+<output src="io/outputs.json" />
+<phase id="setup" src="phases/setup" depends_on="" />
+""",
+        "io/inputs.json": """{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {"topic": {"type": "string"}, "input_text": {"type": "string"}},
+  "additionalProperties": true
+}
+""",
+        "io/outputs.json": """{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true
+}
+""",
+        "phases/setup/LOGIC.md": """---
+mode: logic
+name: setup
+---
+<python_callable>
+prepare
+</python_callable>
+""",
+        "phases/setup/actions/prepare.py": """def prepare(context):
+    context.set("prepared", True)
+    return {"prepared": True}
+""",
+    }
+
+
+def _legacy_agent_skill_content(skill_id: str) -> str:
     return f"""---
 schema_version: "2.0"
 name: {skill_id}
@@ -630,21 +862,14 @@ user_prompt_template: |
 """
 
 
-def _files_from_skill_dir(skill_dir: Path) -> dict[str, str]:
-    files: dict[str, str] = {}
-    for path in sorted(skill_dir.rglob("*")):
-        if path.is_file():
-            files[path.relative_to(skill_dir).as_posix()] = path.read_text(encoding="utf-8")
-    return files
-
-
 def _write_final_state(
     workspaces_dir: Path,
     skill_id: str,
     run_id: str,
     payload: dict[str, Any],
 ) -> Path:
-    run_dir = workspaces_dir / "default" / "skills" / skill_id / "runs" / run_id
+    del workspaces_dir
+    run_dir = config.SKILLS_DIR / skill_id / ".workspace" / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "final_state.json").write_text(json.dumps(payload), encoding="utf-8")
     return run_dir

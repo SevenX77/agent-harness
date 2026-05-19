@@ -6,8 +6,10 @@ import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from langchain_core.tools import StructuredTool
+from pydantic import BaseModel
 
 
 @dataclass(frozen=True)
@@ -46,6 +48,9 @@ class ToolDef:
     phase_id: str | None
     path: Path
     func: Callable[..., object]
+    description: str | None = None
+    args_schema: type[BaseModel] | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -66,8 +71,14 @@ class ToolRegistry:
 
 
 def _structured_tool(tool: ToolDef) -> StructuredTool:
-    description = inspect.getdoc(tool.func) or f"Tool: {tool.id}"
-    return StructuredTool.from_function(func=tool.func, name=tool.id, description=description)
+    description = tool.description or inspect.getdoc(tool.func) or f"Tool: {tool.id}"
+    return StructuredTool.from_function(
+        func=tool.func,
+        name=tool.id,
+        description=description,
+        args_schema=tool.args_schema,
+        metadata=tool.metadata or None,
+    )
 
 
 __all__ = ["ActionDef", "ActionRegistry", "ToolDef", "ToolRegistry"]

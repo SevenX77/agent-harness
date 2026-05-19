@@ -1,174 +1,185 @@
-import { RefreshCw } from 'lucide-react'
+import { AlertCircle, GitCommit, RefreshCw, RotateCcw } from 'lucide-react'
 import { useState } from 'react'
-import type { RunDetail } from '../../api/types'
-import { useRunHistory } from '../../hooks/useRunHistory'
+import { toast } from 'sonner'
+import type { GitHistoryItem } from '../../api/types'
+import { useLocalHistory } from '../../hooks/useRunHistory'
 import { errorMessage } from '../../utils/errors'
-import type { ExportFormat } from '../../utils/reportTemplates'
-import { renderRunReport, reportFileBase } from '../../utils/reportTemplates'
-import { RunDetailDrawer } from './RunDetailDrawer'
-import { RunHistoryRow } from './RunHistoryRow'
-
-const PAGE_SIZE = 12
 
 interface HistoryPanelProps {
   skillId: string | null
-  onReplay: (detail: RunDetail) => void
-  onCompare: (runId: string) => void
-  pushToast: (message: string, kind?: 'info' | 'success' | 'error') => void
 }
 
-export function HistoryPanel({ skillId, onReplay, onCompare, pushToast }: HistoryPanelProps) {
-  const history = useRunHistory(skillId)
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
-  const [detail, setDetail] = useState<RunDetail | null>(null)
-  const [page, setPage] = useState(0)
+export interface LocalHistoryPanelViewProps {
+  history: GitHistoryItem[]
+  isLoading: boolean
+  error: unknown
+  selectedSha: string | null
+  revertingSha: string | null
+  onSelect: (sha: string) => void
+  onRefresh: () => void
+  onRevert: (sha: string) => void
+}
 
-  const pageCount = Math.max(1, Math.ceil(history.runs.length / PAGE_SIZE))
-  const visibleRuns = history.runs.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+function shortSha(sha: string): string {
+  return sha.slice(0, 7)
+}
 
-  const selectRun = async (runId: string) => {
-    setSelectedRunId(runId)
-    try {
-      const nextDetail = await history.fetchRunDetail(runId)
-      setDetail(nextDetail)
-    } catch (error) {
-      pushToast(errorMessage(error), 'error')
-    }
+function formatTimestamp(timestamp: string): string {
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) {
+    return timestamp
   }
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+}
 
-  const deleteRun = async (runId: string) => {
-    try {
-      await history.deleteRun(runId)
-      if (selectedRunId === runId) {
-        setSelectedRunId(null)
-        setDetail(null)
-      }
-      pushToast('Run deleted', 'success')
-    } catch (error) {
-      pushToast(errorMessage(error), 'error')
-    }
+function kindLabel(kind: GitHistoryItem['kind']): string {
+  if (kind === 'auto_run') {
+    return 'Auto run'
   }
+  if (kind === 'manual') {
+    return 'Manual'
+  }
+  return 'Other'
+}
 
-  const replayRun = async (runId: string) => {
-    try {
-      const nextDetail = detail?.metadata.run_id === runId ? detail : await history.fetchRunDetail(runId)
-      if (nextDetail) {
-        onReplay(nextDetail)
-      }
-    } catch (error) {
-      pushToast(errorMessage(error), 'error')
-    }
-  }
-
-  const exportRun = async (runId: string, format: ExportFormat): Promise<string> => {
-    if (!skillId) {
-      throw new Error('Select a skill before exporting.')
-    }
-    const nextDetail = detail?.metadata.run_id === runId ? detail : await history.fetchRunDetail(runId)
-    if (!nextDetail) {
-      throw new Error(`Run not found: ${runId}`)
-    }
-    return renderRunReport({ skillId, run: nextDetail }, format)
-  }
+export function LocalHistoryPanelView({
+  history,
+  isLoading,
+  error,
+  selectedSha,
+  revertingSha,
+  onSelect,
+  onRefresh,
+  onRevert,
+}: LocalHistoryPanelViewProps) {
+  const selectedItem = history.find((item) => item.sha === selectedSha) ?? null
 
   return (
-    <div className="relative flex h-full flex-col bg-slate-50 dark:bg-slate-950">
-      <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+    <div className="flex h-full flex-col bg-background">
+      <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-3">
         <div>
-          <h3 className="font-bold text-slate-800 dark:text-slate-100">Run History</h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            {history.total} runs tracked for this skill
-          </p>
+          <h3 className="text-xs font-medium text-foreground">Local History</h3>
+          <p className="text-[11px] text-muted-foreground">{history.length} snapshots</p>
         </div>
         <button
           type="button"
-          onClick={() => void history.refresh()}
-          className="rounded-md p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-          title="Refresh history"
+          onClick={onRefresh}
+          className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          aria-label="Refresh local history"
+          title="Refresh local history"
         >
-          <RefreshCw className="h-4 w-4" />
+          <RefreshCw className="size-4" />
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {history.error ? (
-          <div className="m-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
-            {errorMessage(history.error)}
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+        {error ? (
+          <div className="flex gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <AlertCircle className="mt-0.5 size-4 shrink-0" />
+            <span>{errorMessage(error)}</span>
           </div>
         ) : null}
-        {history.isLoading ? (
-          <div className="p-4 text-sm text-slate-500 dark:text-slate-400">Loading runs...</div>
+
+        {isLoading ? (
+          <div className="px-2 py-4 text-xs text-muted-foreground">Loading local history...</div>
         ) : null}
-        {!history.isLoading && history.runs.length === 0 ? (
-          <div className="flex h-full items-center justify-center p-8 text-center text-sm text-slate-500 dark:text-slate-400">
-            No run history yet.
+
+        {!isLoading && !error && history.length === 0 ? (
+          <div className="flex h-full items-center justify-center px-6 text-center text-xs text-muted-foreground">
+            No local history snapshots yet.
           </div>
         ) : null}
-        {visibleRuns.length > 0 ? (
-          <table className="w-full table-fixed">
-            <thead className="sticky top-0 bg-slate-100 text-left text-xs uppercase text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-              <tr>
-                <th className="w-24 px-3 py-2">Status</th>
-                <th className="w-36 px-3 py-2">Run</th>
-                <th className="px-3 py-2">Input</th>
-                <th className="w-20 px-3 py-2">Tokens</th>
-                <th className="w-36 px-3 py-2 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleRuns.map((run) => (
-                <RunHistoryRow
-                  key={run.run_id}
-                  run={run}
-                  selected={selectedRunId === run.run_id}
-                  filenameBase={reportFileBase(skillId, run.run_id)}
-                  onSelect={(runId) => void selectRun(runId)}
-                  onReplay={(runId) => void replayRun(runId)}
-                  onCompare={onCompare}
-                  onExport={(runId, format) => exportRun(runId, format)}
-                  onDelete={(runId) => void deleteRun(runId)}
-                />
-              ))}
-            </tbody>
-          </table>
+
+        {!isLoading && !error && history.length > 0 ? (
+          <div className="space-y-1">
+            {history.map((item) => {
+              const selected = item.sha === selectedSha
+              return (
+                <button
+                  key={item.sha}
+                  type="button"
+                  onClick={() => onSelect(item.sha)}
+                  className={[
+                    'flex w-full gap-2 rounded-md px-2 py-2 text-left text-xs transition-colors',
+                    selected ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                  ].join(' ')}
+                  aria-pressed={selected}
+                >
+                  <GitCommit className="mt-0.5 size-4 shrink-0" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium text-foreground">{item.message || shortSha(item.sha)}</span>
+                    <span className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                      <span>{shortSha(item.sha)}</span>
+                      <span>{kindLabel(item.kind)}</span>
+                      <span>{item.author}</span>
+                      <span>{formatTimestamp(item.timestamp)}</span>
+                    </span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
         ) : null}
       </div>
 
-      <div className="flex shrink-0 items-center justify-between border-t border-slate-200 px-4 py-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
-        <span>Page {page + 1} of {pageCount}</span>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            disabled={page === 0}
-            onClick={() => setPage((current) => Math.max(0, current - 1))}
-            className="rounded border border-slate-300 px-2 py-1 disabled:opacity-50 dark:border-slate-700"
-          >
-            Prev
-          </button>
-          <button
-            type="button"
-            disabled={page >= pageCount - 1}
-            onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}
-            className="rounded border border-slate-300 px-2 py-1 disabled:opacity-50 dark:border-slate-700"
-          >
-            Next
-          </button>
+      <div className="sticky bottom-0 flex shrink-0 items-center justify-between gap-2 border-t border-border bg-background px-3 py-2">
+        <div className="min-w-0 text-xs text-muted-foreground">
+          {selectedItem ? (
+            <span className="truncate">Selected {shortSha(selectedItem.sha)}</span>
+          ) : (
+            <span>Select a snapshot to revert.</span>
+          )}
         </div>
+        <button
+          type="button"
+          disabled={!selectedItem || revertingSha !== null}
+          onClick={() => {
+            if (selectedItem) {
+              onRevert(selectedItem.sha)
+            }
+          }}
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+        >
+          <RotateCcw className="size-3.5" />
+          {revertingSha ? 'Reverting...' : 'Revert'}
+        </button>
       </div>
-
-      <RunDetailDrawer
-        detail={detail}
-        open={detail !== null}
-        onClose={() => setDetail(null)}
-        onReplay={async (runId) => {
-          const nextDetail = detail?.metadata.run_id === runId ? detail : await history.fetchRunDetail(runId)
-          if (nextDetail) {
-            onReplay(nextDetail)
-          }
-        }}
-        onCompare={onCompare}
-        skillId={skillId}
-      />
     </div>
+  )
+}
+
+export function HistoryPanel({ skillId }: HistoryPanelProps) {
+  const localHistory = useLocalHistory(skillId)
+  const [selectedSha, setSelectedSha] = useState<string | null>(null)
+  const [revertingSha, setRevertingSha] = useState<string | null>(null)
+
+  const handleRevert = async (sha: string) => {
+    setRevertingSha(sha)
+    try {
+      await localHistory.revert(sha)
+      toast.success('Reverted to local history snapshot')
+    } catch (error) {
+      toast.error(errorMessage(error))
+    } finally {
+      setRevertingSha(null)
+    }
+  }
+
+  return (
+    <LocalHistoryPanelView
+      history={localHistory.history}
+      isLoading={localHistory.isLoading}
+      error={localHistory.error}
+      selectedSha={selectedSha}
+      revertingSha={revertingSha}
+      onSelect={setSelectedSha}
+      onRefresh={() => void localHistory.refresh()}
+      onRevert={(sha) => void handleRevert(sha)}
+    />
   )
 }

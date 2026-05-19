@@ -1,8 +1,11 @@
-import { useEffect, useState } from 'react'
-import App from '../App'
+import { useEffect, useState, type ReactNode } from 'react'
 import { initializeRuntimeConfig } from '../config/runtime'
 
-export function RuntimeGate() {
+interface RuntimeGateProps {
+  children: ReactNode
+}
+
+export function RuntimeGate({ children }: RuntimeGateProps) {
   const [runtimeState, setRuntimeState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('')
 
@@ -38,5 +41,5 @@ export function RuntimeGate() {
     )
   }
 
-  return <App />
+  return children
 }

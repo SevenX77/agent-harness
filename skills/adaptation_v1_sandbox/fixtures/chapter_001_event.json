@@ -1,0 +1,127 @@
+{
+  "chapter_number": 1,
+  "event_timeline": {
+    "chapter_number": 1,
+    "total_events": 4,
+    "events": [
+      {
+        "event_id": "000100001B",
+        "event_summary": "姜宁重生于末世前公寓，用血激活玉石吊坠",
+        "event_type": "B",
+        "paragraph_indices": [
+          1
+        ],
+        "location": "公寓（末世前住的公寓）",
+        "location_change": "本章首个事件，无上一事件参照",
+        "time": "上午（2029年9月14日9点32分）",
+        "time_change": "本章首个事件，无上一事件参照",
+        "setting": [
+          {
+            "setting_id": "S001001",
+            "setting_title": "末世起点与重生时间节点",
+            "setting_summary": "末世由超强台风\"菜刀\"揭开序幕，预计于2029年9月17日凌晨登陆沿海，风力16-19级，将持续数日大暴雨。姜宁重生于末世爆发前约两天半，即2029年9月14日上午9时许。台风是末世的起始事件，读者据此理解后续备灾行为的时间压迫感。",
+            "paragraph_indices": [
+              1
+            ]
+          },
+          {
+            "setting_id": "S001002",
+            "setting_title": "末世灾难序列与持续时长",
+            "setting_summary": "末世灾难并非单一事件，而是连续叠加：超强台风持续约半个月→连续三个月特大暴雨→城市大面积洪涝，此后还有极寒极热、地震等多种天灾层出不穷。姜宁前世仅存活三年，灾难形态多样且持续，药品清单长达三大页，普通药店无法满足需求。",
+            "paragraph_indices": [
+              1
+            ]
+          },
+          {
+            "setting_id": "S001003",
+            "setting_title": "吊坠空间的激活方式",
+            "setting_summary": "玉石吊坠为特殊储物空间道具，激活条件为持有者以鲜血（划破手指将血珠）滴落其上。吊坠原本属于姜宁，后被杨伟聪以不明方式骗走转赠苏梦瑶，苏梦瑶在末世中凭此空间维持精致生活，说明空间功能与持有者绑定。",
+            "paragraph_indices": [
+              1
+            ]
+          }
+        ],
+        "is_inferred": []
+      },
+      {
+        "event_id": "000100002C",
+        "event_summary": "吊坠光芒大作，姜宁进入空间探索其基本构造",
+        "event_type": "C",
+        "paragraph_indices": [
+          2
+        ],
+        "location": "空间（一套没有大门的公寓）",
+        "location_change": "从现实公寓进入吊坠内部空间，场景跳转",
+        "time": "上午",
+        "time_change": "无明确时间标记；段落2首句\"吊坠发出强烈光芒，再睁眼已身处……\"直接承接段落1末尾\"将血珠滴落在吊坠\"，因果链条连续，判断为同日上午紧接事件1",
+        "setting": [
+          {
+            "setting_id": "S001004",
+            "setting_title": "吊坠空间的基本物理构造",
+            "setting_summary": "吊坠内部空间形态为一套两房一厅公寓，套内约80平方米，楼高约3米，阳台旁附设10平方米黑土花园，已通水电但初始无任何家具，且无大门。客厅中悬浮有光影材质的倒计时器，激活时显示剩余可用时长（初始约1小时56分）。",
+            "paragraph_indices": [
+              2
+            ]
+          },
+          {
+            "setting_id": "S001005",
+            "setting_title": "吊坠空间的功能规则",
+            "setting_summary": "空间具备以下规则：①持有者离开后仍可在脑海中感知空间内部状态；②除阳台与花园区域外，室内所有区域具有保鲜功能（可长期存储食物等物资）；③可通过意识直接存入或取出物品；④计时器在无人进入时停止计时，人一进入则自动开始倒计时减少。",
+            "paragraph_indices": [
+              2
+            ]
+          }
+        ],
+        "is_inferred": []
+      },
+      {
+        "event_id": "000100003B",
+        "event_summary": "姜宁离开空间测试功能，制定物资清单并联络各方备货",
+        "event_type": "B",
+        "paragraph_indices": [
+          3,
+          4
+        ],
+        "location": "公寓",
+        "location_change": "从空间返回现实公寓，场景复归",
+        "time": "上午（下午学校有专业课，彼时尚未到下午）",
+        "time_change": "段落3首句\"离开空间\"直接衔接段落2，返回现实公寓，判断为同日上午连续发生；段落4中\"下午学校有专业课\"印证此时仍为上午",
+        "setting": [],
+        "is_inferred": []
+      },
+      {
+        "event_id": "000100004B",
+        "event_summary": "姜宁外出退鞋、租车、订铁门与防爆玻璃",
+        "event_type": "B",
+        "paragraph_indices": [
+          5
+        ],
+        "location": "早餐店、AJ专卖店、门窗一条街（门窗一条街）",
+        "location_change": "从公寓出发，转移至小区外多处商业街道",
+        "time": "上午（在街边的早餐店吃饱）",
+        "time_change": "段落4末尾\"拿起钥匙往外走\"与段落5首句\"出了小区\"直接衔接，早餐店就餐符合上午时段，门窗店家承诺\"后天\"安装亦与台风前两天半的紧迫时间框架自洽，判断为同日上午紧接事件3",
+        "setting": [],
+        "is_inferred": []
+      }
+    ],
+    "metadata": {
+      "type_distribution": {
+        "B": 3,
+        "C": 1
+      },
+      "processing_time": 55.15,
+      "tier": "premium"
+    }
+  },
+  "metadata": {
+    "total_processing_time": 259.17,
+    "pass1_processing_time": 55.15,
+    "pass1r_processing_time": 86.08,
+    "pass2_processing_time": 117.94,
+    "merged_settings_count": 5,
+    "tier": "premium",
+    "llm_model": "claude-sonnet-4-6-thinking (thinking)",
+    "llm_provider": "OC_CL",
+    "llm_candidate": "analyst_oc_cl_cl46t"
+  }
+}

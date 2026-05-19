@@ -28,6 +28,35 @@ export interface LintResult {
   phases_summary: JsonObject[] | null
 }
 
+export interface CompileError {
+  file: string | null
+  line: number | null
+  field: string | null
+  severity: 'fatal' | 'warning'
+  message: string
+}
+
+export interface CompileSuccess {
+  skill_id: string
+  status: 'ok'
+  phase_count: number
+  manifest_name: string
+}
+
+export interface CompileFailure {
+  code: 'compile_failed'
+  detail: string
+  errors: CompileError[]
+}
+
+export type CompileResult = CompileSuccess | CompileFailure
+
+export interface ConfigMismatchWarning {
+  actual_remote_url: string
+  expected_remote_url: string
+  recommendation: string
+}
+
 export interface SkillSummary {
   id: string
   name: string
@@ -35,30 +64,8 @@ export interface SkillSummary {
   phase_count: number
   has_golden: boolean
   last_run_at: string | null
-}
-
-export interface MultifileSkillPayload {
-  files: Record<string, string>
-  expected_hash?: string | null
-}
-
-export interface SerializeGraphPhase {
-  id: string
-  src: string
-  depends_on: string[]
-  mode: 'logic' | 'subgraph' | 'skill'
-}
-
-export interface SerializeGraphPayload {
-  phases: SerializeGraphPhase[]
-  expected_hash?: string | null
-}
-
-export interface SerializeGraphResult {
-  markdown_content: string
-  phase_count: number
-  elapsed_ms: number
-  current_hash: string
+  directory_path: string | null
+  config_mismatch?: ConfigMismatchWarning | null
 }
 
 export interface SkillTemplate {
@@ -67,6 +74,38 @@ export interface SkillTemplate {
   description: string
   type: string
   content: string
+}
+
+export interface AppSettings {
+  user_id: string
+  gitea_host: string
+}
+
+export interface CollaborateResult {
+  status: 'ok' | 'requires_review' | 'conflict' | 'error'
+  message: string
+  pr_url?: string | null
+  extra?: Record<string, unknown>
+}
+
+export type SyncAction = 'save_to_team' | 'sync_from_team' | 'submit_for_review'
+
+export interface SyncSkillReq {
+  action: SyncAction
+  branch?: string
+  dev_branch?: string
+  pr_title?: string
+}
+
+export interface PublishSkillReq {
+  version?: string
+}
+
+export interface PublishResult {
+  status: 'ok' | 'error'
+  message: string
+  artifact_id?: string | null
+  extra?: Record<string, unknown>
 }
 
 export interface TokensMetrics {
@@ -127,6 +166,20 @@ export interface RunMetadata {
 export interface RunListResponse {
   runs: RunMetadata[]
   total: number
+}
+
+export type GitHistoryKind = 'auto_run' | 'manual' | 'other'
+
+export interface GitHistoryItem {
+  sha: string
+  message: string
+  author: string
+  timestamp: string
+  kind: GitHistoryKind
+}
+
+export interface RevertSkillReq {
+  sha: string
 }
 
 export interface RunDetail {
@@ -221,6 +274,22 @@ export interface IoDeclaration {
   outputs: IoOutput[]
 }
 
+export interface GraphPhaseRef {
+  id: string
+  src: string
+  depends_on: string[]
+}
+
+export interface GraphManifestV21 {
+  schema_version: '2.1'
+  name: string
+  description: string
+  io_inputs_ref?: string
+  io_outputs_ref?: string
+  phases: GraphPhaseRef[]
+  metadata?: JsonObject
+}
+
 export interface BaseSkillManifest {
   schema_version: '2.0'
   name: string
@@ -309,18 +378,31 @@ export interface PersonaSkillDef extends BaseSkillManifest {
   few_shot_examples: string[]
 }
 
-export type SkillManifest = AgentSkillDef | GraphSkillDef | PersonaSkillDef
+export type SkillManifest = AgentSkillDef | GraphSkillDef | PersonaSkillDef | GraphManifestV21
+
+export interface GraphTopologyItem {
+  id: string
+  src: string
+  depends_on: string[]
+  mode: 'logic' | 'subgraph' | 'skill' | string
+}
 
 export interface SkillDetail {
   manifest: SkillManifest
-  graph_topology: JsonObject[]
-  node_schema_v21: Record<string, JsonObject>
-  io_schema: Record<string, JsonObject>
+  graph_topology?: GraphTopologyItem[]
+  node_schema_v21?: Record<string, JsonObject>
+  io_schema?: Record<string, JsonObject>
   file_paths: Record<string, string>
-  files: Record<string, string>
+  files?: Record<string, string>
+  manifest_errors?: LintError[] | null
   has_golden: boolean
   latest_run_metadata: RunMetadata | null
   lint_result: LintResult | null
+}
+
+export interface UpdateSkillFileRes {
+  path: string
+  hash: string
 }
 
 export interface CallbackEventBase {
@@ -348,5 +430,4 @@ export type CallbackEvent = CallbackEventBase & Record<string, JsonValue | undef
 export interface StudioGlobalEvent {
   type: 'skill_changed'
   skill_id: string
-  file?: string | null
 }

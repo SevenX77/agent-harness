@@ -364,7 +364,6 @@ def test_put_credentials_preserves_test_outcome_fields(
     )
 
     # Simulate a POST test writeback by directly invoking _persist_test_outcome.
-    from app.models.llm_config import ModelCapabilities, ModelInfo
     from app.services.llm_credentials import _persist_test_outcome
 
     _persist_test_outcome(
@@ -373,7 +372,7 @@ def test_put_credentials_preserves_test_outcome_fields(
         last_test_at="2026-05-18T12:00:00+00:00",
         last_test_message="",
         last_error_code="",
-        available_models=[ModelInfo(id="claude-opus-4-1", capabilities=ModelCapabilities())],
+        available_models=["claude-opus-4-1"],
     )
 
     # PUT only sends the 6 editable fields — Test fields must survive.
@@ -390,17 +389,7 @@ def test_put_credentials_preserves_test_outcome_fields(
     provider = response.json()["providers"][0]
     assert provider["last_test_status"] == "ok"
     assert provider["last_test_at"] == "2026-05-18T12:00:00+00:00"
-    assert provider["available_models"] == [
-        {
-            "id": "claude-opus-4-1",
-            "capabilities": {
-                "text": True,
-                "function_calling": False,
-                "vision": False,
-                "reasoning": False,
-            },
-        }
-    ]
+    assert provider["available_models"] == ["claude-opus-4-1"]
 
 
 # ---------------------------------------------------------------------------
@@ -520,7 +509,7 @@ def test_provider_test_persists_outcome_to_credentials(
     get_response = client.get("/api/llm/credentials")
     provider = get_response.json()["providers"][0]
     assert provider["last_test_status"] == "ok"
-    assert [m["id"] for m in provider["available_models"]] == [
+    assert provider["available_models"] == [
         "claude-opus-4-1",
         "claude-haiku-4-5",
     ]

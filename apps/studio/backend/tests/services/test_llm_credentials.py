@@ -9,8 +9,8 @@ from app.services import llm_env
 from app.services.llm_credentials import (
     credentials_path,
     load_credentials,
-    redacted_for_response,
     save_credentials,
+    serialize_for_response,
 )
 
 
@@ -45,22 +45,21 @@ def test_save_credentials_chmods_file_0600(
     assert os.stat(credentials_path()).st_mode & 0o777 == 0o600
 
 
-def test_redacted_for_response_never_returns_api_key() -> None:
+def test_serialize_for_response_returns_api_key_plaintext() -> None:
     data = LLMCredentialsFile(
         providers=[
             ProviderCredential(id="provider-1", name="Claude", api_key="secret", base_url="https://base")
         ]
     )
 
-    body = redacted_for_response(data)
+    body = serialize_for_response(data)
     assert body["providers"][0]["id"] == "provider-1"
     assert body["providers"][0]["name"] == "Claude"
-    assert body["providers"][0]["has_key"] is True
+    assert body["providers"][0]["api_key"] == "secret"
     assert body["providers"][0]["base_url"] == "https://base"
     assert body["providers"][0]["last_test_status"] == "untested"
     assert body["providers"][0]["available_models"] == []
-    assert "api_key" not in body["providers"][0]
-    assert "secret" not in str(body)
+    assert "has_key" not in body["providers"][0]
 
 
 def test_patch_environment_is_noop(

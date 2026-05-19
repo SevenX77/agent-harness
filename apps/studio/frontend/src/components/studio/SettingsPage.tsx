@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { ArrowDown, ArrowUp, Check, Eye, EyeOff, KeyRound, Loader2, Plug, Plus, Settings, Trash2, TriangleAlert, X } from "lucide-react"
+import { ArrowDown, ArrowUp, Check, KeyRound, Loader2, Plug, Plus, Settings, Trash2, TriangleAlert, X } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -38,13 +38,12 @@ export interface ProviderDraft {
   provider_type: ProviderType
   base_url: string
   api_key: string
-  hasSavedKey: boolean
   isTesting: boolean
 }
 
 /** What the LLM Roles tab knows about a single provider. */
 interface ProviderAvailabilityInput {
-  has_key: boolean
+  api_key: string
   last_test_status?: string
 }
 
@@ -69,7 +68,7 @@ export function getModelAvailability(
   let sawKey = false
   for (const code of providers) {
     const credential = credentialsByCode[code]
-    if (!credential?.has_key) continue
+    if (!credential?.api_key.trim()) continue
     sawKey = true
     if (credential.last_test_status === "ok") return "ok"
   }
@@ -116,8 +115,7 @@ export function draftsFromCredentials(credentials: CredentialsState): ProviderDr
     name: provider.name,
     provider_type: (provider.provider_type ?? "openai_compatible") as ProviderType,
     base_url: provider.base_url ?? "",
-    api_key: "",
-    hasSavedKey: provider.has_key,
+    api_key: provider.api_key,
     isTesting: false,
   }))
 }
@@ -228,17 +226,13 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
 
   const handleSaved = useCallback((next: CredentialsState) => {
     setCredentials(next)
-    // Re-sync `hasSavedKey` per provider, but preserve any unsent typed key
-    // (user might still be editing while a previous batch flushed).
+    // Re-sync plaintext api_key per provider from the persisted response.
     setDrafts((current) => current.map((draft) => {
       const persisted = next.providers.find((provider) => provider.id === draft.id)
       if (!persisted) return draft
       return {
         ...draft,
-        hasSavedKey: persisted.has_key,
-        // After a successful save the typed key is now on the server — clear
-        // it locally so the placeholder shows "saved" again.
-        api_key: "",
+        api_key: persisted.api_key,
       }
     }))
   }, [])
@@ -306,7 +300,6 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       provider_type: "openai_compatible",
       base_url: "",
       api_key: "",
-      hasSavedKey: false,
       isTesting: false,
     }
     setDrafts((current) => [...current, draft])
@@ -651,7 +644,6 @@ function ApiKeysTab({
     () => Object.fromEntries(credentials.providers.map((provider) => [provider.id, provider])),
     [credentials.providers],
   )
-  const [showKey, setShowKey] = useState<Record<string, boolean>>({})
 
   return (
     <div>
@@ -668,8 +660,6 @@ function ApiKeysTab({
               key={draft.id}
               draft={draft}
               persisted={persisted}
-              showKey={Boolean(showKey[draft.id])}
-              onToggleShowKey={() => setShowKey((current) => ({ ...current, [draft.id]: !current[draft.id] }))}
               onFieldChange={(patch) => onProviderFieldChange(draft.id, patch)}
               onTest={() => onTestProvider(draft.id)}
               onDelete={() => onDeleteProvider(draft.id)}
@@ -700,16 +690,12 @@ function ApiKeysTab({
 function ProviderCard({
   draft,
   persisted,
-  showKey,
-  onToggleShowKey,
   onFieldChange,
   onTest,
   onDelete,
 }: {
   draft: ProviderDraft
   persisted: CredentialsState["providers"][number] | null
-  showKey: boolean
-  onToggleShowKey: () => void
   onFieldChange: (patch: Partial<ProviderDraft>) => void
   onTest: () => void
   onDelete: () => void
@@ -757,24 +743,17 @@ function ProviderCard({
             <div className="relative flex-1">
               <Input
                 id={`api-key-${draft.id}`}
-                type={showKey ? "text" : "password"}
+                type="text"
                 value={draft.api_key}
                 onChange={(event) => onFieldChange({ api_key: event.target.value })}
-                placeholder={draft.hasSavedKey && !draft.api_key ? "Saved key retained" : "sk-..."}
-                className="pr-9"
+                placeholder="sk-..."
+                name={`provider-secret-${draft.id}`}
                 autoComplete="off"
+                data-1p-ignore=""
+                data-lpignore="true"
+                data-form-type="other"
                 spellCheck={false}
               />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="absolute right-1 top-1/2 size-7 -translate-y-1/2"
-                onClick={onToggleShowKey}
-                aria-label={showKey ? "Hide API key" : "Show API key"}
-              >
-                {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-              </Button>
             </div>
             <Button type="button" variant="default" onClick={onTest} disabled={draft.isTesting}>
               {draft.isTesting ? <Loader2 className="size-3.5 animate-spin" /> : null}

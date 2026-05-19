@@ -17,7 +17,7 @@ const credentials: CredentialsState = {
     {
       id: 'DS',
       name: 'DeepSeek Official',
-      has_key: true,
+      api_key: 'sk-deepseek',
       base_url: 'https://api.deepseek.com',
       provider_type: 'openai_compatible',
       last_test_status: 'ok',
@@ -26,21 +26,21 @@ const credentials: CredentialsState = {
     {
       id: 'OC_DS',
       name: 'OneChats DeepSeek',
-      has_key: false,
+      api_key: '',
       base_url: 'https://chatapi.onechats.ai/v1',
       provider_type: 'openai_compatible',
     },
     {
       id: 'WS_LLM',
       name: 'WaveSpeed Any-LLM',
-      has_key: false,
+      api_key: '',
       base_url: 'https://llm.wavespeed.ai/v1',
       provider_type: 'wavespeed_any_llm',
     },
     {
       id: 'CUSTOM_AB12CD34',
       name: 'My Custom OpenAI',
-      has_key: true,
+      api_key: 'sk-custom',
       base_url: 'https://api.example.com/v1',
       provider_type: 'openai_compatible',
     },
@@ -125,14 +125,13 @@ function baseViewProps(
 }
 
 describe('draftsFromCredentials', () => {
-  it('produces one draft per provider with the persisted has_key flag', () => {
+  it('produces one draft per provider with the persisted plaintext api_key', () => {
     const drafts = draftsFromCredentials(credentials)
     expect(drafts).toHaveLength(4)
     expect(drafts.map((draft) => draft.id)).toEqual(['DS', 'OC_DS', 'WS_LLM', 'CUSTOM_AB12CD34'])
 
     const ds = drafts.find((draft) => draft.id === 'DS')!
-    expect(ds.hasSavedKey).toBe(true)
-    expect(ds.api_key).toBe('')
+    expect(ds.api_key).toBe('sk-deepseek')
     expect(ds.provider_type).toBe('openai_compatible')
 
     const custom = drafts.find((draft) => draft.id === 'CUSTOM_AB12CD34')!
@@ -141,7 +140,7 @@ describe('draftsFromCredentials', () => {
 
   it('defaults provider_type to openai_compatible when missing', () => {
     const drafts = draftsFromCredentials({
-      providers: [{ id: 'TEST', name: 'Test', has_key: false }],
+      providers: [{ id: 'TEST', name: 'Test', api_key: '' }],
     })
     expect(drafts[0].provider_type).toBe('openai_compatible')
   })
@@ -157,6 +156,20 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).toContain('My Custom OpenAI')
     expect(html).toContain('Add Provider')
     expect(html).toContain('Test')
+  })
+
+  it('renders API key inputs as plaintext values with password-manager ignore attributes', () => {
+    const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
+
+    expect(html).toContain('type="text"')
+    expect(html).toContain('value="sk-deepseek"')
+    expect(html).toContain('name="provider-secret-DS"')
+    expect(html).toContain('autoComplete="off"')
+    expect(html).toContain('data-1p-ignore=""')
+    expect(html).toContain('data-lpignore="true"')
+    expect(html).toContain('data-form-type="other"')
+    expect(html).not.toContain('Saved key retained')
+    expect(html).not.toContain('Show API key')
   })
 
   it('renders persistent Test outcome badge from credentials', () => {

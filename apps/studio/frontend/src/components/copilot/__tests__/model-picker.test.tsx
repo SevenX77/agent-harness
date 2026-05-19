@@ -21,9 +21,9 @@ const role: RoleEntry = {
 
 const credentials: CredentialsState = {
   providers: [
-    { id: 'anthropic', name: 'Anthropic', has_key: true },
-    { id: 'openai_proxy', name: 'OpenAI Proxy', has_key: false },
-    { id: 'deepseek', name: 'DeepSeek', has_key: false },
+    { id: 'anthropic', name: 'Anthropic', api_key: 'sk-anthropic' },
+    { id: 'openai_proxy', name: 'OpenAI Proxy', api_key: '' },
+    { id: 'deepseek', name: 'DeepSeek', api_key: '' },
   ],
 }
 
@@ -62,8 +62,8 @@ describe('ModelPicker', () => {
   it('disables a model when no provider has a key', () => {
     const options = getModelOptions(role, {
       providers: [
-        { id: 'anthropic', name: 'Anthropic', has_key: false },
-        { id: 'openai_proxy', name: 'OpenAI Proxy', has_key: false },
+        { id: 'anthropic', name: 'Anthropic', api_key: '' },
+        { id: 'openai_proxy', name: 'OpenAI Proxy', api_key: '' },
       ],
     })
 

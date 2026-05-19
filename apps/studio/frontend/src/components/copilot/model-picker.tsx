@@ -30,7 +30,7 @@ export function getModelOptions(role: RoleEntry | null, credentials: Credentials
 
   return Object.entries(role.models).map(([modelCode, model]) => {
     const providers = model.providers ?? []
-    const available = providers.some((providerCode) => credentialsByProvider.get(providerCode)?.has_key === true)
+    const available = providers.some((providerCode) => Boolean(credentialsByProvider.get(providerCode)?.api_key.trim()))
     return {
       modelCode,
       providers,

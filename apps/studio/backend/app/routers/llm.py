@@ -35,7 +35,7 @@ from app.services.llm_credentials import (
     _save_credentials_unlocked,
     credentials_path,
     load_credentials,
-    redacted_for_response,
+    serialize_for_response,
 )
 from app.services.llm_provider_test import (
     DEFAULT_BASE_URLS,
@@ -111,7 +111,7 @@ async def get_llm_credentials(include_metadata: bool = False) -> dict[str, Any]:
     """Return sanitized LLM credential state."""
 
     del include_metadata
-    return redacted_for_response(load_credentials())
+    return serialize_for_response(load_credentials())
 
 
 @router.put("/credentials")
@@ -168,7 +168,7 @@ async def put_llm_credentials(
                 )
         data = LLMCredentialsFile(providers=next_providers)
         _save_credentials_unlocked(data, path)
-    return redacted_for_response(data)
+    return serialize_for_response(data)
 
 
 @router.post("/providers/test", response_model=ProviderTestResponse)

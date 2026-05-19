@@ -59,6 +59,7 @@ logs/
 # Output
 output/
 temp/
+tmp/
 
 # OS
 .DS_Store

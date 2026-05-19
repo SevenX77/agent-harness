@@ -7,7 +7,9 @@ import {
   inferProviderKind,
   inferProviderType,
   moveProviderInRole,
+  officialProviderDrafts,
   removeProviderFromRole,
+  thirdPartyProviderDrafts,
   toggleModelFallback,
   updateActiveModel,
   validateRoleDraft,
@@ -159,19 +161,19 @@ describe('Add Provider flow helpers', () => {
 
   it('creates a populated draft from AddProviderForm submission', () => {
     const draft = draftFromAddProviderSubmission({
-      providerCode: 'anthropic',
-      name: 'Anthropic-Official',
-      baseUrl: 'https://api.anthropic.com',
-      apiKey: 'sk-anthropic',
-      type: 'official',
-    }, 'anthropic-test')
+      providerCode: 'my-openrouter',
+      name: 'My OpenRouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      apiKey: 'sk-openrouter',
+      type: 'third-party',
+    }, 'custom-test')
 
     expect(draft).toEqual({
-      id: 'anthropic-test',
-      name: 'Anthropic-Official',
-      provider_type: 'anthropic_compatible',
-      base_url: 'https://api.anthropic.com',
-      api_key: 'sk-anthropic',
+      id: 'custom-test',
+      name: 'My OpenRouter',
+      provider_type: 'openai_compatible',
+      base_url: 'https://openrouter.ai/api/v1',
+      api_key: 'sk-openrouter',
       isTesting: false,
     })
   })
@@ -180,6 +182,14 @@ describe('Add Provider flow helpers', () => {
     expect(inferProviderKind({
       id: 'custom-1',
       name: 'Anthropic-Official',
+      provider_type: 'anthropic_compatible',
+      base_url: 'https://api.anthropic.com',
+      api_key: 'sk',
+      isTesting: false,
+    })).toBe('official')
+    expect(inferProviderKind({
+      id: 'custom-1',
+      name: 'Anthropic Official',
       provider_type: 'anthropic_compatible',
       base_url: 'https://api.anthropic.com',
       api_key: 'sk',
@@ -202,18 +212,35 @@ describe('Add Provider flow helpers', () => {
       isTesting: false,
     })).toBe('third-party')
   })
+
+  it('builds five official drafts and separates third-party drafts', () => {
+    const drafts = draftsFromCredentials(credentials)
+
+    expect(officialProviderDrafts(drafts).map((draft) => draft.name)).toEqual([
+      'Anthropic Official',
+      'OpenAI Official',
+      'Gemini Official',
+      'DeepSeek Official',
+      'Ark Official',
+    ])
+    expect(thirdPartyProviderDrafts(drafts).map((draft) => draft.id)).toEqual([
+      'OC_DS',
+      'WS_LLM',
+      'CUSTOM_AB12CD34',
+    ])
+  })
 })
 
 describe('SettingsPageContent (api_keys)', () => {
   it('renders provider skeletons while credentials are loading', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ credentialsLoading: true })} />)
     const skeletons = html.match(/data-slot="skeleton"/g) ?? []
-    expect(skeletons).toHaveLength(9)
+    expect(skeletons).toHaveLength(15)
     expect(html).not.toContain('Add Provider')
     expect(html).not.toContain('Provider Name')
   })
 
-  it('renders the empty provider state after credentials finish loading', () => {
+  it('renders official providers and empty third-party state after credentials finish loading', () => {
     const html = renderToStaticMarkup(
       <SettingsPageContent
         {...baseViewProps({
@@ -223,15 +250,29 @@ describe('SettingsPageContent (api_keys)', () => {
         })}
       />,
     )
+    expect(html).toContain('Official Providers')
+    expect(html).toContain('Anthropic Official')
+    expect(html).toContain('OpenAI Official')
+    expect(html).toContain('Gemini Official')
+    expect(html).toContain('DeepSeek Official')
+    expect(html).toContain('Ark Official')
+    expect(html).toContain('Not configured')
+    expect(html).toContain('Third-party Providers')
+    expect(html).toContain('No third-party providers configured.')
     expect(html).toContain('Add Provider')
     expect(html).toContain('border-dashed')
     expect(html).not.toContain('data-slot="skeleton"')
   })
 
-  it('renders the provider cards with name inputs and primary test actions', () => {
+  it('renders official and third-party provider cards with primary test actions', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
     expect(html).toContain('API Keys')
+    expect(html).toContain('Official Providers')
+    expect(html).toContain('Anthropic Official')
+    expect(html).toContain('OpenAI Official')
+    expect(html).toContain('Gemini Official')
     expect(html).toContain('DS')
+    expect(html).toContain('Third-party Providers')
     expect(html).toContain('OC_DS')
     expect(html).toContain('WS_LLM')
     expect(html).toContain('My Custom OpenAI')
@@ -262,7 +303,7 @@ describe('SettingsPageContent (api_keys)', () => {
   it('renders a Delete button for each user-owned provider', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
     const matches = html.match(/aria-label="Delete provider"/g) ?? []
-    expect(matches).toHaveLength(4)
+    expect(matches).toHaveLength(3)
   })
 })
 

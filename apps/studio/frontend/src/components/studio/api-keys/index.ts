@@ -4,5 +4,4 @@ export { OfficialVendorSelect, OFFICIAL_VENDORS, type OfficialVendor } from "./O
 export {
   AddProviderForm,
   type AddProviderFormSubmission,
-  type AddProviderType,
 } from "./AddProviderForm"

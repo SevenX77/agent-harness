@@ -209,7 +209,14 @@ function newProviderId(): string {
   return (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`).toString()
 }
 
-const officialProviderCodes = ["anthropic", "openai", "gemini", "deepseek", "ark"]
+const officialProviders = [
+  { code: "anthropic", label: "Anthropic", baseUrl: "https://api.anthropic.com" },
+  { code: "openai", label: "OpenAI", baseUrl: "https://api.openai.com" },
+  { code: "gemini", label: "Gemini", baseUrl: "https://generativelanguage.googleapis.com" },
+  { code: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com" },
+  { code: "ark", label: "Ark", baseUrl: "https://ark.cn-beijing.volces.com/api/v3" },
+]
+const officialProviderCodes = officialProviders.map((vendor) => vendor.code)
 
 export function inferProviderType(providerCode: string): ProviderType {
   if (providerCode === "anthropic") return "anthropic_compatible"
@@ -218,8 +225,7 @@ export function inferProviderType(providerCode: string): ProviderType {
 }
 
 export function inferProviderKind(draft: ProviderDraft): "official" | "third-party" {
-  if (draft.name.toLowerCase().includes("-official")) return "official"
-  if (officialProviderCodes.some((code) => draft.id.toLowerCase().startsWith(code))) return "official"
+  if (officialProviderCodes.some((code) => isOfficialProviderDraft(draft, code))) return "official"
   return "third-party"
 }
 
@@ -230,11 +236,47 @@ export function draftFromAddProviderSubmission(
   return {
     id,
     name: data.name,
-    provider_type: data.type === "official" ? inferProviderType(data.providerCode) : "openai_compatible",
+    provider_type: "openai_compatible",
     base_url: data.baseUrl,
     api_key: data.apiKey,
     isTesting: false,
   }
+}
+
+export function officialProviderDrafts(drafts: ProviderDraft[]): ProviderDraft[] {
+  return officialProviders.map((vendor) => {
+    const existing = drafts.find((draft) => isOfficialProviderDraft(draft, vendor.code))
+    if (existing) return existing
+    return {
+      id: `${vendor.code}-official`,
+      name: `${officialProviderDisplayName(vendor.label)} Official`,
+      provider_type: inferProviderType(vendor.code),
+      base_url: vendor.baseUrl,
+      api_key: "",
+      isTesting: false,
+    }
+  })
+}
+
+export function thirdPartyProviderDrafts(drafts: ProviderDraft[]): ProviderDraft[] {
+  return drafts.filter((draft) => inferProviderKind(draft) === "third-party")
+}
+
+function isOfficialProviderDraft(draft: ProviderDraft, providerCode: string): boolean {
+  const normalizedId = draft.id.toLowerCase()
+  const normalizedName = draft.name.toLowerCase()
+  const vendor = officialProviders.find((item) => item.code === providerCode)
+  const label = vendor ? officialProviderDisplayName(vendor.label).toLowerCase() : providerCode
+  return (
+    normalizedId === providerCode ||
+    normalizedId.startsWith(`${providerCode}-`) ||
+    normalizedId.startsWith(`${providerCode}_`) ||
+    (normalizedName.includes(label) && normalizedName.includes("official"))
+  )
+}
+
+function officialProviderDisplayName(label: string): string {
+  return label.replace(/\s*\(.+\)\s*$/, "")
 }
 
 export function SettingsPage({ onClose }: SettingsPageProps) {
@@ -312,9 +354,25 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   }
 
   function updateProviderField(providerId: string, patch: Partial<ProviderDraft>) {
-    setDrafts((current) => current.map((draft) => (
-      draft.id === providerId ? { ...draft, ...patch } : draft
-    )))
+    setDrafts((current) => {
+      const found = current.some((draft) => draft.id === providerId)
+      if (found) {
+        return current.map((draft) => (
+          draft.id === providerId ? { ...draft, ...patch } : draft
+        ))
+      }
+      return [
+        ...current,
+        {
+          id: providerId,
+          name: patch.name ?? providerId,
+          provider_type: patch.provider_type ?? "openai_compatible",
+          base_url: patch.base_url ?? "",
+          api_key: patch.api_key ?? "",
+          isTesting: patch.isTesting ?? false,
+        },
+      ]
+    })
     scheduleSave()
   }
 
@@ -684,6 +742,8 @@ function ApiKeysTab({
     () => Object.fromEntries(credentials.providers.map((provider) => [provider.id, provider])),
     [credentials.providers],
   )
+  const officialDrafts = useMemo(() => officialProviderDrafts(drafts), [drafts])
+  const thirdPartyDrafts = useMemo(() => thirdPartyProviderDrafts(drafts), [drafts])
 
   return (
     <div>
@@ -694,51 +754,70 @@ function ApiKeysTab({
       />
       <div className="space-y-4" data-testid="api-keys-list">
         {credentialsLoading ? (
-          <ProviderListSkeleton count={3} />
+          <ProviderListSkeleton count={5} />
         ) : (
           <>
-            {drafts.map((draft) => {
-              const persisted = persistedById[draft.id] ?? null
-              return (
-                <ProviderCard
-                  key={draft.id}
-                  draft={draft}
-                  persisted={persisted}
-                  onFieldChange={(patch) => onProviderFieldChange(draft.id, patch)}
-                  onTest={() => onTestProvider(draft.id)}
-                  onDelete={() => onDeleteProvider(draft.id)}
-                  providerKind={inferProviderKind(draft)}
-                />
-              )
-            })}
-            {!showAddForm && drafts.length === 0 ? (
-              <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border/60 bg-muted/10 px-4 py-10 text-center">
-                <Button type="button" variant="default" onClick={() => setShowAddForm(true)} className="gap-1">
-                  <Plus className="size-3.5" />
-                  Add Provider
-                </Button>
+            <section className="space-y-3" aria-label="Official Providers">
+              <h3 className="text-sm font-medium text-foreground">Official Providers</h3>
+              {officialDrafts.map((draft) => {
+                const persisted = persistedById[draft.id] ?? null
+                return (
+                  <ProviderCard
+                    key={draft.id}
+                    draft={draft}
+                    persisted={persisted}
+                    onFieldChange={(patch) => onProviderFieldChange(draft.id, { ...draft, ...patch })}
+                    onTest={() => onTestProvider(draft.id)}
+                    onDelete={() => onDeleteProvider(draft.id)}
+                    providerKind="official"
+                  />
+                )
+              })}
+            </section>
+
+            <section className="space-y-3 pt-4" aria-label="Third-party Providers">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-medium text-foreground">Third-party Providers</h3>
+                {!showAddForm ? (
+                  <Button type="button" variant="outline" onClick={() => setShowAddForm(true)} className="gap-1">
+                    <Plus className="size-3.5" />
+                    Add Provider
+                  </Button>
+                ) : null}
               </div>
-            ) : null}
-            {showAddForm ? (
-              <AddProviderForm
-                onSubmit={async (data) => {
-                  await onAddProvider(data)
-                  setShowAddForm(false)
-                }}
-                onCancel={() => setShowAddForm(false)}
-              />
-            ) : null}
+              {thirdPartyDrafts.length > 0 ? (
+                thirdPartyDrafts.map((draft) => {
+                  const persisted = persistedById[draft.id] ?? null
+                  return (
+                    <ProviderCard
+                      key={draft.id}
+                      draft={draft}
+                      persisted={persisted}
+                      onFieldChange={(patch) => onProviderFieldChange(draft.id, patch)}
+                      onTest={() => onTestProvider(draft.id)}
+                      onDelete={() => onDeleteProvider(draft.id)}
+                      providerKind="third-party"
+                    />
+                  )
+                })
+              ) : !showAddForm ? (
+                <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border/60 bg-muted/10 px-4 py-8 text-center">
+                  <p className="text-xs text-muted-foreground">No third-party providers configured.</p>
+                </div>
+              ) : null}
+              {showAddForm ? (
+                <AddProviderForm
+                  onSubmit={async (data) => {
+                    await onAddProvider(data)
+                    setShowAddForm(false)
+                  }}
+                  onCancel={() => setShowAddForm(false)}
+                />
+              ) : null}
+            </section>
           </>
         )}
       </div>
-      {!credentialsLoading && drafts.length > 0 && !showAddForm ? (
-        <div className="mt-4 flex justify-start">
-          <Button type="button" variant="outline" onClick={() => setShowAddForm(true)} className="gap-1">
-            <Plus className="size-3.5" />
-            Add Provider
-          </Button>
-        </div>
-      ) : null}
     </div>
   )
 }

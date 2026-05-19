@@ -154,7 +154,7 @@ describe("ProviderCard provider kind badge", () => {
   it("renders Official badge when providerKind is official", () => {
     const html = renderToStaticMarkup(
       <ProviderCard
-        draft={draft}
+        draft={makeDraft({ api_key: "" })}
         persisted={null}
         onFieldChange={vi.fn()}
         onTest={vi.fn()}
@@ -164,6 +164,10 @@ describe("ProviderCard provider kind badge", () => {
     )
 
     expect(html).toContain("Official")
+    expect(html).toContain("Not configured")
+    expect(html).not.toContain('aria-label="Provider Name"')
+    expect(html).not.toContain('aria-label="Delete provider"')
+    expect(html).not.toContain("Base URL")
   })
 
   it("renders Third-party badge when providerKind is third-party", () => {
@@ -179,6 +183,25 @@ describe("ProviderCard provider kind badge", () => {
     )
 
     expect(html).toContain("Third-party")
+    expect(html).toContain('aria-label="Provider Name"')
+    expect(html).toContain('aria-label="Delete provider"')
+    expect(html).toContain("Base URL")
+  })
+
+  it("renders an enabled official test action after API key is configured", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({ api_key: "sk-official" })}
+        persisted={makePersisted({ last_test_status: "untested" })}
+        onFieldChange={vi.fn()}
+        onTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="official"
+      />,
+    )
+
+    expect(html).toContain("Untested")
+    expect(html).not.toContain("Not configured")
   })
 })
 
@@ -198,9 +221,9 @@ describe("ProviderCard provider capabilities", () => {
     const html = renderCardHtml({
       persisted: makePersisted({
         available_models: [
-          { id: "gpt-5", capabilities: { text: true, function_calling: false, vision: false, reasoning: false } },
-          { id: "gpt-4o", capabilities: { text: true, function_calling: true, vision: true, reasoning: false } },
-          { id: "claude-opus-4", capabilities: { text: true, function_calling: true, vision: true, reasoning: true } },
+          { id: "gpt-5", capabilities: { max_context_tokens: 128000 } },
+          { id: "gpt-4o", capabilities: { modalities: ["text", "image"] } },
+          { id: "claude-opus-4", capabilities: { vendor: "anthropic" } },
         ],
       }),
     })
@@ -219,6 +242,17 @@ describe("ProviderCard provider capabilities", () => {
     expect(html).not.toContain('data-testid="provider-capabilities"')
     expect(html).not.toContain("Available SDKs:")
     expect(html).not.toContain("Available Models:")
+  })
+})
+
+describe("ProviderCard protocol controls", () => {
+  it("does not render SDK protocol selection UI", () => {
+    const html = renderCardHtml()
+    const protocolLabel = ["SDK", " Protocol"].join("")
+    const openAiLabel = ["OpenAI", " Compatible"].join("")
+
+    expect(html).not.toContain(protocolLabel)
+    expect(html).not.toContain(openAiLabel)
   })
 })
 

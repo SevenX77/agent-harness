@@ -16,12 +16,11 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { cn } from "@/lib/utils"
-import type { ProviderType, CredentialsState } from "../../../api/llm"
+import type { CredentialsState } from "../../../api/llm"
 import type { ProviderDraft } from "../SettingsPage"
 
-type TestMessageStatus = "untested" | "testing" | "ok" | "error"
+type TestMessageStatus = "not_configured" | "untested" | "testing" | "ok" | "error"
 
 export function apiKeyInputClassName(visible: boolean): string {
   return cn("flex-1", !visible && "mask-input")
@@ -52,6 +51,10 @@ export function TestMessage({
         {latencyMs != null ? `Connected (${latencyMs}ms)` : "Connected"}
       </Badge>
     )
+  }
+
+  if (status === "not_configured") {
+    return <Badge variant="secondary">Not configured</Badge>
   }
 
   if (status === "error") {
@@ -110,7 +113,11 @@ export function ProviderCard({
   providerKind?: "official" | "third-party"
 }) {
   const [visible, setVisible] = useState(false)
-  const testStatus: TestMessageStatus = draft.isTesting
+  const isOfficial = providerKind === "official"
+  const hasApiKey = draft.api_key.trim().length > 0
+  const testStatus: TestMessageStatus = isOfficial && !hasApiKey
+    ? "not_configured"
+    : draft.isTesting
     ? "testing"
     : persisted?.last_test_status === "ok"
       ? "ok"
@@ -120,13 +127,19 @@ export function ProviderCard({
   return (
     <Card data-provider-id={draft.id}>
       <CardHeader className="flex flex-row items-center gap-3 pb-2">
-        <Input
-          value={draft.name}
-          onChange={(event) => onFieldChange({ name: event.target.value })}
-          placeholder="Provider Name"
-          className="w-full max-w-xs font-semibold"
-          aria-label="Provider Name"
-        />
+        {isOfficial ? (
+          <div className="min-w-0 max-w-xs truncate text-sm font-semibold text-foreground">
+            {draft.name}
+          </div>
+        ) : (
+          <Input
+            value={draft.name}
+            onChange={(event) => onFieldChange({ name: event.target.value })}
+            placeholder="Provider Name"
+            className="w-full max-w-xs font-semibold"
+            aria-label="Provider Name"
+          />
+        )}
         {providerKind ? (
           <Badge variant="outline" className="text-[10px]">
             {providerKind === "official" ? "Official" : "Third-party"}
@@ -134,26 +147,9 @@ export function ProviderCard({
         ) : null}
         <TestMessage status={testStatus} latencyMs={null} errorCode={persisted?.last_error_code ?? null} />
         <div className="flex-1" />
-        <ProviderDeleteConfirmation draftName={draft.name} onDelete={onDelete} />
+        {!isOfficial ? <ProviderDeleteConfirmation draftName={draft.name} onDelete={onDelete} /> : null}
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <Label>SDK Protocol</Label>
-          <RadioGroup
-            value={draft.provider_type}
-            onValueChange={(next: string) => onFieldChange({ provider_type: next as ProviderType })}
-            className="flex flex-row gap-4"
-          >
-            <div className="flex items-center gap-2">
-              <RadioGroupItem value="openai_compatible" id={`protocol-openai-${draft.id}`} />
-              <Label htmlFor={`protocol-openai-${draft.id}`}>OpenAI Compatible</Label>
-            </div>
-            <div className="flex items-center gap-2">
-              <RadioGroupItem value="anthropic_compatible" id={`protocol-anthropic-${draft.id}`} />
-              <Label htmlFor={`protocol-anthropic-${draft.id}`}>Anthropic</Label>
-            </div>
-          </RadioGroup>
-        </div>
         <div className="space-y-2">
           <Label htmlFor={`api-key-${draft.id}`}>API Key</Label>
           <div className="flex items-center gap-2">
@@ -181,23 +177,25 @@ export function ProviderCard({
             >
               {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
             </Button>
-            <Button type="button" variant="default" onClick={onTest} disabled={draft.isTesting} className="px-6">
+            <Button type="button" variant="default" onClick={onTest} disabled={draft.isTesting || (isOfficial && !hasApiKey)} className="px-6">
               {draft.isTesting ? <Loader2 className="size-3.5 animate-spin" /> : null}
               Test
             </Button>
           </div>
         </div>
-        <div className="space-y-2">
-          <Label htmlFor={`base-url-${draft.id}`}>Base URL</Label>
-          <Input
-            id={`base-url-${draft.id}`}
-            value={draft.base_url}
-            onChange={(event) => onFieldChange({ base_url: event.target.value })}
-            placeholder="https://api.openai.com/v1"
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </div>
+        {!isOfficial ? (
+          <div className="space-y-2">
+            <Label htmlFor={`base-url-${draft.id}`}>Base URL</Label>
+            <Input
+              id={`base-url-${draft.id}`}
+              value={draft.base_url}
+              onChange={(event) => onFieldChange({ base_url: event.target.value })}
+              placeholder="https://api.openai.com/v1"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
+        ) : null}
         {persisted?.available_sdks?.length || persisted?.available_models?.length ? (
           <div className="border-t pt-3 space-y-2 text-xs" data-testid="provider-capabilities">
             {persisted.available_sdks && persisted.available_sdks.length > 0 ? (

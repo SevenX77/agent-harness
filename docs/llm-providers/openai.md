@@ -11,6 +11,18 @@ target_goal: "Studio MVP — 让 PM 可用"
 - **Native SDK**: `openai` Python / TypeScript ([docs](https://platform.openai.com/docs/))
 - 这是业界 defacto standard, 大部分中转 API / OSS vLLM 部署 / DeepSeek / WaveSpeed / Mistral / xAI Grok / Cohere Compatibility 都走这套协议. 后端只要支持这个 enum, 就能覆盖 90% 文本 LLM.
 
+## §1.5 探测元数据 (round 3 新增, 用于 Studio 自动 Test 探测)
+
+```yaml
+compatible_sdks:
+  - openai_compatible
+
+models_endpoint_path: "/v1/models"
+
+auth_header_format: |
+  Authorization: Bearer ${key}
+```
+
 ## 2. Authentication
 
 - **Method**: Bearer Token

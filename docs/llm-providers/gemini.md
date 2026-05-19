@@ -14,6 +14,18 @@ target_goal: "Studio MVP — 让 PM 可用"
 - **Alternative Endpoints**:
   - **Vertex AI**: GCP 部署, 走 `https://{region}-aiplatform.googleapis.com/...` + IAM/service account 鉴权 (v2.1 不支持)
 
+## §1.5 探测元数据 (round 3 新增, 用于 Studio 自动 Test 探测)
+
+```yaml
+compatible_sdks:
+  - gemini_official
+
+models_endpoint_path: "/v1beta/models"
+
+auth_header_format: |
+  x-goog-api-key: ${key}
+```
+
 ## 2. Authentication
 
 ### Native (gemini_official)

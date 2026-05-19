@@ -198,6 +198,32 @@ export function ProviderCard({
             spellCheck={false}
           />
         </div>
+        {persisted?.available_sdks?.length || persisted?.available_models?.length ? (
+          <div className="border-t pt-3 space-y-2 text-xs" data-testid="provider-capabilities">
+            {persisted.available_sdks && persisted.available_sdks.length > 0 ? (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-muted-foreground">Available SDKs:</span>
+                {persisted.available_sdks.map((sdk) => (
+                  <Badge key={sdk} variant="secondary" className="font-mono">
+                    {sdk}
+                  </Badge>
+                ))}
+              </div>
+            ) : null}
+            {persisted.available_models && persisted.available_models.length > 0 ? (
+              <div className="flex items-start gap-2 flex-wrap">
+                <span className="text-muted-foreground shrink-0">Available Models:</span>
+                <div className="flex gap-1 flex-wrap">
+                  {persisted.available_models.map((model) => (
+                    <Badge key={model} variant="outline" className="font-mono">
+                      {model}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   )

@@ -754,7 +754,7 @@ function ProviderCard({
         <div className="space-y-2">
           <Label htmlFor={`api-key-${draft.id}`}>API Key</Label>
           <div className="flex items-center gap-2">
-            <div className="relative">
+            <div className="relative flex-1">
               <Input
                 id={`api-key-${draft.id}`}
                 type={showKey ? "text" : "password"}
@@ -778,7 +778,7 @@ function ProviderCard({
             </div>
             <Button type="button" variant="default" onClick={onTest} disabled={draft.isTesting}>
               {draft.isTesting ? <Loader2 className="size-3.5 animate-spin" /> : null}
-              Test Connection
+              Test
             </Button>
           </div>
         </div>

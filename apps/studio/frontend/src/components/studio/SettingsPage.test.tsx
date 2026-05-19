@@ -156,7 +156,7 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).toContain('WS_LLM')
     expect(html).toContain('My Custom OpenAI')
     expect(html).toContain('Add Provider')
-    expect(html).toContain('Test Connection')
+    expect(html).toContain('Test')
   })
 
   it('renders persistent Test outcome badge from credentials', () => {

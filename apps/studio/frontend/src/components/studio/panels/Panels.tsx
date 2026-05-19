@@ -1,0 +1,46 @@
+import type { SkillDetail } from "@/api/types"
+import type { SkillGraphNodeData } from "@/components/GraphCanvas"
+import type { PanelKind } from "../Toolbar"
+import { useWorkspaceContext } from "../WorkspaceContext"
+import { AssetsPanel } from "./AssetsPanel"
+import { HistoryPanel } from "./HistoryPanel"
+import { InputPanel } from "./InputPanel"
+import { PanelHeader } from "./_shared/PanelHeader"
+import { PropertiesPanel } from "./PropertiesPanel"
+import { TimelinePanel } from "./TimelinePanel"
+
+interface PanelsProps {
+  activePanel: PanelKind
+  skillId: string | null
+  skillDetail?: SkillDetail
+  selectedNode: { id: string; data: SkillGraphNodeData } | null
+}
+
+export function Panels({ activePanel, skillId, skillDetail, selectedNode }: PanelsProps) {
+  const { onFileOpen } = useWorkspaceContext()
+  if (!skillId) {
+    return (
+      <div className="flex h-full w-full flex-col bg-sidebar">
+        <PanelHeader title="Workspace" />
+        <div className="p-4 text-xs text-muted-foreground">Open a skill to populate this panel.</div>
+      </div>
+    )
+  }
+
+  if (activePanel === "assets") {
+    return <AssetsPanel skillDetail={skillDetail} selectedNode={selectedNode} />
+  }
+  if (activePanel === "input") {
+    return <InputPanel skillDetail={skillDetail} onFileOpen={onFileOpen} />
+  }
+  if (activePanel === "timeline") {
+    return <TimelinePanel />
+  }
+  if (activePanel === "local-history") {
+    return <HistoryPanel skillId={skillId} />
+  }
+  if (activePanel === "properties") {
+    return <PropertiesPanel skillId={skillId} skillDetail={skillDetail} selectedNode={selectedNode} onFileOpen={onFileOpen} />
+  }
+  return <AssetsPanel skillDetail={skillDetail} selectedNode={selectedNode} />
+}

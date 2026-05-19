@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { SkillDetail } from '@/api/types'
 import { WorkspaceProvider, type WorkspaceContextValue } from './WorkspaceContext'
-import { AssetsPanel, PropertiesPanel, subagentSkillFilePath } from './Panels'
+import { AssetsPanel, PropertiesPanel, subagentSkillFilePath } from './panels'
 
 describe('PropertiesPanel', () => {
   it('renders an empty state without a selected node', () => {

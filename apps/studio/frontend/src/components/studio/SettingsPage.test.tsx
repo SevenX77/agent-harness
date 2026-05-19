@@ -9,7 +9,7 @@ import {
   updateActiveModel,
   validateRoleDraft,
   visibleRoleNames,
-} from './SettingsPage'
+} from './settings'
 import type { CredentialsState, RolesData } from '../../api/llm'
 
 const credentials: CredentialsState = {

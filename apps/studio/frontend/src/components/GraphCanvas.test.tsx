@@ -2,7 +2,7 @@ import { isValidElement, type ReactElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildEdges, GraphCanvas, SkillNode, type SkillGraphNode } from './GraphCanvas'
-import { CycleDetectedError, getAutoLayoutedElements } from '../lib/layout'
+import { CycleDetectedError, getAutoLayoutedElements } from '@/lib/layout'
 import type { Edge, Node } from '@xyflow/react'
 
 vi.mock('@xyflow/react', () => ({
@@ -18,7 +18,7 @@ vi.mock('@xyflow/react', () => ({
   useNodesState: vi.fn((initialNodes) => [initialNodes, vi.fn(), vi.fn()]),
 }))
 
-vi.mock('../lib/layout', () => {
+vi.mock('@/lib/layout', () => {
   class CycleDetectedError extends Error {
     constructor() {
       super('SKILL contains a cyclic dependency - cannot auto-layout')
@@ -32,7 +32,7 @@ vi.mock('../lib/layout', () => {
   }
 })
 
-vi.mock('./ui/tooltip', () => ({
+vi.mock('@/components/ui/tooltip', () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
   TooltipContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   TooltipTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,

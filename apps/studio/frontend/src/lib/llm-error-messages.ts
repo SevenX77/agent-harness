@@ -58,6 +58,7 @@ const ERROR_CODE_TRANSLATIONS: Record<string, string> = {
 const STATUS_TRANSLATIONS: Record<TestStatus | ProviderTestStatus, string> = {
   untested: "尚未测试",
   ok: "连接正常",
+  error: "测试失败",
   invalid_key: "Key 无效",
   rate_limited: "触发频率限制",
   quota_exceeded: "额度已用完",

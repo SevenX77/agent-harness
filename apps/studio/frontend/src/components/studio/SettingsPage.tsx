@@ -337,6 +337,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
             last_test_message: response.message ?? "",
             last_error_code: response.error_code ?? "",
             available_models: response.available_models ?? provider.available_models ?? [],
+            available_sdks: response.available_sdks ?? provider.available_sdks ?? [],
           }
         }),
       }))

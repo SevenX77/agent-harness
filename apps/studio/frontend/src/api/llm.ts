@@ -19,6 +19,7 @@ export type TestStatus =
   | 'quota_exceeded'
   | 'network_error'
   | 'timeout'
+  | 'error'
 
 export interface ModelCapabilities {
   text: boolean
@@ -35,7 +36,7 @@ export interface ModelInfo {
 /**
  * Server-side credential entry as returned by GET /api/llm/credentials.
  *
- * The 5 Test outcome fields (`last_test_*` + `available_models`) are
+ * The Test outcome fields (`last_test_*` + `available_sdks` / `available_models`) are
  * *single-writer* — they're populated by POST /providers/test on the backend
  * and arrive via GET. Sending them in PUT triggers a 422.
  */
@@ -50,7 +51,8 @@ export interface CredentialProviderState {
   last_test_at?: string
   last_test_message?: string
   last_error_code?: string
-  available_models?: ModelInfo[]
+  available_models?: string[]
+  available_sdks?: string[]
 }
 
 export interface CredentialsState {
@@ -81,6 +83,7 @@ export interface ProviderTestRequest {
 /** Includes the transient `missing_api_key` short-circuit (api_key empty). */
 export type ProviderTestStatus =
   | 'ok'
+  | 'error'
   | 'invalid_key'
   | 'rate_limited'
   | 'quota_exceeded'
@@ -94,7 +97,8 @@ export interface ProviderTestResponse {
   model_seen?: string | null
   message?: string | null
   error_code?: string | null
-  available_models?: ModelInfo[]
+  available_models?: string[]
+  available_sdks?: string[]
 }
 
 export interface RoleModelEntry {

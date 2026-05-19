@@ -130,5 +130,17 @@ last_updated: 2026-05-19
 - **断点续跑**: 修改完成后，PM 在画布上的报错节点旁直接点击专属的 `[ Resume ]` 按钮。
 - **底层支持**: 引擎利用 Checkpoint 恢复机制，携带刚刚 PM 修改过的合法数据“原地复活”，继续执行下游节点逻辑。这极大节省了重新运行全量图的 Token 消耗和时间成本。
 
+
+## 6. 全局设置与模型接入 (Settings & API Keys)
+
+### 6.1 Settings Page 布局叠加
+当 PM 在 Toolbar 点击齿轮图标进入 Settings 时，整个主工作区 (`Main Panel`) 将被全屏 Overlay 覆盖。
+其中最核心的面板为 **API Keys 管理页**。
+
+### 6.2 Provider 接入与管理
+- **卡片式总览**: 界面展示一组 ProviderCards (包含 3 个 Official Vendors 与多个第三方接入商)。
+- **添加流程**: PM 点击未配置的卡片，弹出 `AddProviderForm` 侧拉/弹窗界面。
+- **探测与测试**: PM 填入 API Key 及可选的自定义 Base URL 后，系统执行 `probe_compatible_sdks` 和模型列表探测，实时通过徽章反馈连通性（成功显示绿灯，并回显获取到的第一个模型名称或可用 SDK 列表）。
+
 ## 相关 Spec
 - [studio-frontend-v21-multifile-editor](../../.kiro/specs/studio-frontend-v21-multifile-editor/design.md)

@@ -15,6 +15,21 @@ target_goal: "Studio MVP — 让 PM 可用"
   - **Google Vertex AI**: `anthropic[vertex]` SDK, endpoint 走 GCP region (`us-east5-aiplatform.googleapis.com` etc.)
   - **AWS Bedrock**: `anthropic[bedrock]` SDK, IAM 鉴权
 
+## §1.5 探测元数据 (round 3 新增, 用于 Studio 自动 Test 探测)
+
+```yaml
+compatible_sdks:
+  - anthropic_compatible
+
+models_endpoint_path: null
+  # Anthropic 官方 API 没有 GET /models endpoint
+  # Studio 走 §4 Notable Model IDs fallback
+
+auth_header_format: |
+  x-api-key: ${key}
+  anthropic-version: 2023-06-01
+```
+
 ## 2. Authentication
 
 - **Method**: Custom headers (native)

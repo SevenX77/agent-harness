@@ -167,7 +167,16 @@ async def test_probe_available_models_openai_format(
         expected_headers={"Authorization": "Bearer sk-test"},
         response=httpx.Response(
             200,
-            json={"data": [{"id": "gpt-4"}, {"id": "gpt-5"}]},
+            json={
+                "data": [
+                    {
+                        "id": "gpt-4",
+                        "max_context_tokens": 8192,
+                        "capabilities": {"function_calling": True},
+                    },
+                    {"id": "gpt-5", "context_length": 128000},
+                ]
+            },
             request=httpx.Request("GET", "https://api.openai.com/v1/models"),
         ),
     )
@@ -177,6 +186,40 @@ async def test_probe_available_models_openai_format(
     )
 
     assert [model.id for model in result] == ["gpt-4", "gpt-5"]
+    assert result[0].capabilities["max_context_tokens"] == 8192
+    assert result[0].capabilities["function_calling"] is True
+    assert result[1].capabilities["max_context_tokens"] == 128000
+
+
+@pytest.mark.anyio
+async def test_probe_available_models_does_not_duplicate_endpoint_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import llm_provider_test
+
+    fake_meta = ProviderMeta(
+        vendor="openai",
+        compatible_sdks=["openai_compatible"],
+        models_endpoint_path="/v1/models",
+        auth_header_format="Authorization: Bearer ${key}",
+    )
+    monkeypatch.setattr(llm_provider_test, "load_provider_meta", lambda _vendor: fake_meta)
+    _patch_async_client_get(
+        monkeypatch,
+        expected_url="https://api.openai.com/v1/models",
+        expected_headers={"Authorization": "Bearer sk-test"},
+        response=httpx.Response(
+            200,
+            json={"data": [{"id": "gpt-4"}]},
+            request=httpx.Request("GET", "https://api.openai.com/v1/models"),
+        ),
+    )
+
+    result = await llm_provider_test.probe_available_models(
+        "openai", "sk-test", "https://api.openai.com/v1"
+    )
+
+    assert [model.id for model in result] == ["gpt-4"]
 
 
 @pytest.mark.anyio
@@ -200,7 +243,11 @@ async def test_probe_available_models_gemini_format_strips_prefix(
             200,
             json={
                 "models": [
-                    {"name": "models/gemini-2.0-flash"},
+                    {
+                        "name": "models/gemini-2.0-flash",
+                        "inputTokenLimit": 1048576,
+                        "outputTokenLimit": 8192,
+                    },
                     {"name": "models/gemini-2.5-pro"},
                 ]
             },
@@ -215,6 +262,96 @@ async def test_probe_available_models_gemini_format_strips_prefix(
     )
 
     assert [model.id for model in result] == ["gemini-2.0-flash", "gemini-2.5-pro"]
+    assert result[0].capabilities["max_context_tokens"] == 1048576
+    assert result[0].capabilities["max_output_tokens"] == 8192
+    assert result[0].capabilities["inputTokenLimit"] == 1048576
+
+
+@pytest.mark.anyio
+async def test_probe_available_models_anthropic_collects_token_limits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import llm_provider_test
+
+    fake_meta = ProviderMeta(
+        vendor="anthropic",
+        compatible_sdks=["anthropic_compatible"],
+        models_endpoint_path="/v1/models",
+        auth_header_format="x-api-key: ${key}\nanthropic-version: 2023-06-01",
+    )
+    monkeypatch.setattr(llm_provider_test, "load_provider_meta", lambda _vendor: fake_meta)
+    _patch_async_client_get(
+        monkeypatch,
+        expected_url="https://api.anthropic.com/v1/models",
+        expected_headers={
+            "x-api-key": "sk-ant",
+            "anthropic-version": "2023-06-01",
+        },
+        response=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "claude-sonnet-4-7",
+                        "display_name": "Claude Sonnet 4.7",
+                        "max_input_tokens": 200000,
+                        "max_tokens": 64000,
+                    }
+                ]
+            },
+            request=httpx.Request("GET", "https://api.anthropic.com/v1/models"),
+        ),
+    )
+
+    result = await llm_provider_test.probe_available_models(
+        "anthropic", "sk-ant", "https://api.anthropic.com"
+    )
+
+    assert [model.id for model in result] == ["claude-sonnet-4-7"]
+    assert result[0].capabilities["display_name"] == "Claude Sonnet 4.7"
+    assert result[0].capabilities["max_context_tokens"] == 200000
+    assert result[0].capabilities["max_output_tokens"] == 64000
+
+
+@pytest.mark.anyio
+async def test_probe_available_models_openrouter_context_length(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import llm_provider_test
+
+    fake_meta = ProviderMeta(
+        vendor="openrouter",
+        compatible_sdks=["openai_compatible"],
+        models_endpoint_path="/api/v1/models",
+        auth_header_format="Authorization: Bearer ${key}",
+    )
+    monkeypatch.setattr(llm_provider_test, "load_provider_meta", lambda _vendor: fake_meta)
+    _patch_async_client_get(
+        monkeypatch,
+        expected_url="https://openrouter.ai/api/v1/models",
+        expected_headers={"Authorization": "Bearer or-key"},
+        response=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "openai/gpt-4o",
+                        "context_length": 128000,
+                        "architecture": {"modality": "text+image->text"},
+                    }
+                ]
+            },
+            request=httpx.Request("GET", "https://openrouter.ai/api/v1/models"),
+        ),
+    )
+
+    result = await llm_provider_test.probe_available_models(
+        "openrouter", "or-key", "https://openrouter.ai"
+    )
+
+    assert [model.id for model in result] == ["openai/gpt-4o"]
+    assert result[0].capabilities["max_context_tokens"] == 128000
+    assert result[0].capabilities["architecture"] == {"modality": "text+image->text"}
 
 
 @pytest.mark.anyio

@@ -25,24 +25,13 @@ TestStatus = Literal[
 ]
 
 
-class ModelCapabilities(BaseModel):
-    """Per-model capability flags (lightweight, vendor-neutral)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    text: bool = True
-    function_calling: bool = False
-    vision: bool = False
-    reasoning: bool = False
-
-
 class ModelInfo(BaseModel):
     """One model advertised by a provider."""
 
     model_config = ConfigDict(extra="forbid")
 
     id: str
-    capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
+    capabilities: dict[str, Any] = Field(default_factory=dict)
 
 
 class ProviderCredential(BaseModel):
@@ -153,7 +142,6 @@ class RolesData(BaseModel):
 
 __all__ = [
     "LLMCredentialsFile",
-    "ModelCapabilities",
     "ModelEntry",
     "ModelInfo",
     "ProviderEntry",

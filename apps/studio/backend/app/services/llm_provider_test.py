@@ -99,7 +99,7 @@ async def ping_provider_extended(
     except ValueError:
         payload = None
 
-    model_ids = _extract_model_ids(payload)
+    model_ids = [model.id for model in _parse_models_response(payload, provider_code)]
     return PingResultExtended(
         latency_ms=latency_ms,
         model_seen=model_ids[0] if model_ids else None,
@@ -238,11 +238,11 @@ async def probe_available_models(vendor: str, api_key: str, base_url: str) -> li
         return _load_fallback_models_from_doc(vendor)
 
     headers = _render_auth_headers(meta.auth_header_format, api_key)
-    url = f"{base_url.rstrip('/')}{meta.models_endpoint_path}"
+    url = _join_base_url_and_endpoint(base_url, meta.models_endpoint_path)
     async with httpx.AsyncClient() as client:
         response = await client.get(url, headers=headers, timeout=15.0)
     response.raise_for_status()
-    return _model_infos_from_ids(_parse_models_response(response.json(), vendor), vendor)
+    return _parse_models_response(response.json(), vendor)
 
 
 def _load_fallback_models_from_doc(vendor: str) -> list[ModelInfo]:
@@ -286,8 +286,8 @@ def _extract_model_ids_from_section(section: str) -> list[str]:
     return result
 
 
-def _parse_models_response(json_resp: Any, vendor: str) -> list[str]:
-    """Normalize supported provider /models payload shapes to model id strings."""
+def _parse_models_response(json_resp: Any, vendor: str) -> list[ModelInfo]:
+    """Normalize supported provider /models payload shapes to ``ModelInfo`` records."""
 
     del vendor
 
@@ -296,18 +296,73 @@ def _parse_models_response(json_resp: Any, vendor: str) -> list[str]:
     data = json_resp.get("data")
     if isinstance(data, list):
         return [
-            item["id"]
+            ModelInfo(id=item["id"], capabilities=_extract_capabilities(item, id_keys={"id"}))
             for item in data
             if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"]
         ]
     models = json_resp.get("models")
     if isinstance(models, list):
         return [
-            item["name"].removeprefix("models/")
+            ModelInfo(
+                id=item["name"].removeprefix("models/"),
+                capabilities=_extract_capabilities(item, id_keys={"name"}),
+            )
             for item in models
             if isinstance(item, dict) and isinstance(item.get("name"), str) and item["name"]
         ]
     return []
+
+
+def _extract_capabilities(item: dict[str, Any], *, id_keys: set[str]) -> dict[str, Any]:
+    """Collect provider model metadata into a vendor-neutral capability dict."""
+
+    capabilities: dict[str, Any] = {}
+    nested = item.get("capabilities")
+    for key, value in item.items():
+        if key in id_keys or key == "capabilities":
+            continue
+        capabilities[key] = value
+    if isinstance(nested, dict):
+        capabilities.update(nested)
+
+    context_value = _first_present(
+        item,
+        "max_context_tokens",
+        "max_input_tokens",
+        "inputTokenLimit",
+        "context_length",
+    )
+    if context_value is not None:
+        capabilities["max_context_tokens"] = context_value
+
+    output_value = _first_present(
+        item,
+        "max_output_tokens",
+        "outputTokenLimit",
+        "max_tokens",
+    )
+    if output_value is not None:
+        capabilities["max_output_tokens"] = output_value
+
+    return capabilities
+
+
+def _first_present(item: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in item and item[key] is not None:
+            return item[key]
+    return None
+
+
+def _join_base_url_and_endpoint(base_url: str, endpoint_path: str) -> str:
+    """Join a user base URL and metadata endpoint without duplicating path prefixes."""
+
+    normalized_base = base_url.rstrip("/")
+    normalized_endpoint = "/" + endpoint_path.lstrip("/")
+    parent, _, leaf = normalized_endpoint.rpartition("/")
+    if parent and normalized_base.endswith(parent):
+        return f"{normalized_base}/{leaf}"
+    return f"{normalized_base}{normalized_endpoint}"
 
 
 async def _request_provider_models(
@@ -340,6 +395,7 @@ __all__ = [
     "_extract_model_ids_from_section",
     "_extract_section_4",
     "_load_fallback_models_from_doc",
+    "_join_base_url_and_endpoint",
     "_parse_models_response",
     "_render_auth_headers",
     "_send_1_token_request",

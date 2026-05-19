@@ -20,6 +20,10 @@ def _model(model_id: str) -> ModelInfo:
     return ModelInfo(id=model_id)
 
 
+def _model_with_capabilities(model_id: str, capabilities: dict[str, Any]) -> ModelInfo:
+    return ModelInfo(id=model_id, capabilities=capabilities)
+
+
 def _model_ids(models: list[dict[str, Any]]) -> list[str]:
     return [model["id"] for model in models]
 
@@ -550,6 +554,62 @@ def test_provider_test_persists_string_probe_results_to_credentials(
     assert _model_ids(provider["available_models"]) == ["gpt-5", "gpt-4o"]
 
 
+def test_provider_test_persists_model_capabilities_to_credentials(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    client.put(
+        "/api/llm/credentials",
+        json={
+            "providers": [
+                {
+                    "id": "openai-default",
+                    "name": "OpenAI",
+                    "api_key": "sk",
+                    "provider_type": "openai_compatible",
+                }
+            ]
+        },
+    )
+
+    async def fake_sdks(*_args: object, **_kwargs: object) -> list[str]:
+        return ["openai_compatible"]
+
+    async def fake_models(*_args: object, **_kwargs: object) -> list[ModelInfo]:
+        return [
+            _model_with_capabilities(
+                "gpt-5",
+                {"max_context_tokens": 128000, "custom_vendor_flag": True},
+            )
+        ]
+
+    monkeypatch.setattr(llm_router, "probe_compatible_sdks", fake_sdks)
+    monkeypatch.setattr(llm_router, "probe_available_models", fake_models)
+
+    response = client.post(
+        "/api/llm/providers/test",
+        json={
+            "id": "openai-default",
+            "provider_type": "openai_compatible",
+            "api_key": "sk",
+            "base_url": "https://api.openai.com",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["available_models"][0]["capabilities"] == {
+        "max_context_tokens": 128000,
+        "custom_vendor_flag": True,
+    }
+
+    provider = client.get("/api/llm/credentials").json()["providers"][0]
+    assert provider["available_models"][0]["capabilities"] == {
+        "max_context_tokens": 128000,
+        "custom_vendor_flag": True,
+    }
+
+
 def test_provider_test_empty_sdks_returns_error_without_model_probe(
     client: TestClient,
     tmp_path: Path,
@@ -667,3 +727,49 @@ def test_provider_test_no_provider_silent_noop(
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
     # No credentials file is created when there's nothing to update.
+
+
+def test_get_provider_notable_models_reads_section_4(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    docs_dir = tmp_path / "llm_providers"
+    docs_dir.mkdir()
+    (docs_dir / "anthropic.md").write_text(
+        """# Anthropic
+
+## §3 Endpoint
+
+Ignored.
+
+## §4. Notable Model IDs
+
+- `claude-opus-4-1`
+- `claude-sonnet-4-7`
+- `claude-opus-4-1`
+
+## §5 Capabilities
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(llm_router, "DOCS_DIR", docs_dir)
+
+    response = client.get("/api/llm/providers/notable-models?provider_key=anthropic")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "notable_models": ["claude-opus-4-1", "claude-sonnet-4-7"]
+    }
+
+
+def test_get_provider_notable_models_unknown_provider_returns_404(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(llm_router, "DOCS_DIR", tmp_path)
+
+    response = client.get("/api/llm/providers/notable-models?provider_key=missing")
+
+    assert response.status_code == 404

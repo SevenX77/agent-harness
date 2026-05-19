@@ -29,6 +29,8 @@ from app.services.llm_credentials import (
 )
 from app.services.llm_provider_test import (
     DEFAULT_BASE_URLS,
+    _extract_model_ids_from_section,
+    _extract_section_4,
     probe_available_models,
     probe_compatible_sdks,
 )
@@ -95,6 +97,12 @@ class ProviderTestResponse(BaseModel):
     error_code: str | None = None
     available_models: list[ModelInfo] = Field(default_factory=list)
     available_sdks: list[str] = Field(default_factory=list)
+
+
+class NotableModelsResponse(BaseModel):
+    """Notable model ids parsed from provider metadata docs."""
+
+    notable_models: list[str] = Field(default_factory=list)
 
 
 @router.get("/credentials")
@@ -214,6 +222,21 @@ async def test_llm_provider(request: ProviderTestRequest) -> ProviderTestRespons
             available_models=available_models,
         ),
         _now_iso(),
+    )
+
+
+@router.get("/providers/notable-models", response_model=NotableModelsResponse)
+async def get_provider_notable_models(provider_key: str) -> NotableModelsResponse:
+    """Return notable model ids from provider metadata §4."""
+
+    if not provider_key or not provider_key.replace("-", "").replace("_", "").isalnum():
+        raise HTTPException(status_code=400, detail="Invalid provider_key")
+    doc_path = DOCS_DIR / f"{provider_key}.md"
+    if not doc_path.exists():
+        raise HTTPException(status_code=404, detail=f"Unknown provider: {provider_key}")
+    content = doc_path.read_text(encoding="utf-8")
+    return NotableModelsResponse(
+        notable_models=_extract_model_ids_from_section(_extract_section_4(content))
     )
 
 

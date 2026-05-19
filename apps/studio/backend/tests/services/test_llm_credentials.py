@@ -90,6 +90,35 @@ def test_serialize_for_response_includes_new_fields() -> None:
     assert [model["id"] for model in body["providers"][0]["available_models"]] == ["gpt-5"]
 
 
+def test_model_info_capabilities_accepts_legacy_and_arbitrary_dicts() -> None:
+    legacy = ModelInfo.model_validate(
+        {
+            "id": "gpt-4o",
+            "capabilities": {
+                "text": True,
+                "function_calling": True,
+                "vision": True,
+                "reasoning": False,
+            },
+        }
+    )
+    expanded = ModelInfo.model_validate(
+        {
+            "id": "openrouter/auto",
+            "capabilities": {
+                "max_context_tokens": 131072,
+                "max_output_tokens": 8192,
+                "modalities": ["text", "image"],
+                "pricing": {"prompt": "0.1"},
+            },
+        }
+    )
+
+    assert legacy.capabilities["function_calling"] is True
+    assert expanded.capabilities["max_context_tokens"] == 131072
+    assert expanded.capabilities["pricing"] == {"prompt": "0.1"}
+
+
 @pytest.mark.anyio
 async def test_put_empty_api_key_preserves_available_sdks_and_models(
     tmp_path: Path,

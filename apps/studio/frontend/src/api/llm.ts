@@ -20,16 +20,9 @@ export type TestStatus =
   | 'timeout'
   | 'error'
 
-export interface ModelCapabilities {
-  text: boolean
-  function_calling: boolean
-  vision: boolean
-  reasoning: boolean
-}
-
 export interface ModelInfo {
   id: string
-  capabilities: ModelCapabilities
+  capabilities?: Record<string, any>
 }
 
 /**

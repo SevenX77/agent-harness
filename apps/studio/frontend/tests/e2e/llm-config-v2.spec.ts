@@ -2,7 +2,6 @@ import { expect, test } from '@playwright/test'
 import type { Page, Route } from '@playwright/test'
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:5173'
-
 const SKILL_ID = 'smoke'
 
 const skillDetail = {
@@ -10,7 +9,7 @@ const skillDetail = {
     schema_version: '2.0',
     type: 'graph',
     name: 'Smoke Skill',
-    description: 'LLM config v2 smoke skill',
+    description: 'Round 3 API Keys smoke skill',
     license: null,
     version: null,
     author: null,
@@ -28,7 +27,7 @@ const skillDetail = {
 const skillSummary = {
   id: SKILL_ID,
   name: 'Smoke Skill',
-  description: 'LLM config v2 smoke skill',
+  description: 'Round 3 API Keys smoke skill',
   phase_count: 0,
   has_golden: false,
   last_run_at: null,
@@ -36,107 +35,48 @@ const skillSummary = {
   config_mismatch: null,
 }
 
-const roleData = {
-  models: {
-    CL46T: { name: 'Claude Sonnet 4.6 Thinking', providers: { OC_CL_ANT: 'claude-sonnet-test' } },
-    DS32R: { name: 'DeepSeek R1', providers: { DS: 'deepseek-reasoner' } },
-  },
-  providers: {
-    OC_CL_ANT: { name: 'OpenCode Anthropic', type: 'anthropic_compatible', base_url: 'https://anthropic.example' },
-    OC_CL: { name: 'OpenCode Claude', type: 'anthropic_compatible', base_url: 'https://claude.example' },
-    WS_LLM: { name: 'WaveSpeed LLM', type: 'openai_compatible', base_url: 'https://wavespeed.example' },
-    DS: { name: 'DeepSeek Official', type: 'openai_compatible', base_url: 'https://deepseek.example' },
-  },
-  roles: {
-    copilot_chat: {
-      temperature: 0.2,
-      model_fallback: true,
-      active_model: 'CL46T',
-      models: {
-        CL46T: { providers: ['OC_CL_ANT', 'OC_CL', 'WS_LLM'] },
-        DS32R: { providers: ['DS'] },
-      },
-      system_prompt_prefix: null,
-    },
-    balanced: {
-      temperature: 0.3,
-      model_fallback: true,
-      active_model: 'CL46T',
-      models: { CL46T: { providers: ['OC_CL_ANT'] } },
-      system_prompt_prefix: null,
-    },
-  },
-  single_model_roles: [],
-  peer_model_groups: {},
-  circuit_breaker: null,
+type CredentialProvider = {
+  id: string
+  name: string
+  api_key: string
+  base_url: string
+  provider_type: 'anthropic_compatible' | 'openai_compatible' | 'google_genai'
+  last_test_status?: string
+  last_test_at?: string
+  last_test_message?: string
+  last_error_code?: string
+  available_models?: Array<{ id: string; capabilities?: Record<string, unknown> }>
+  available_sdks?: string[]
 }
 
-/**
- * Build the v2.1 ProviderCredentialRead shape. `name` is only populated for
- * YAML-owned providers — `isYamlOwned()` keys off it to lock identity edits.
- */
-function credentials(ocClAntHasKey: boolean) {
-  return {
-    providers: [
-      {
-        provider_code: 'OC_CL_ANT',
-        has_key: ocClAntHasKey,
-        name: 'OpenCode Anthropic',
-        title: '',
-        base_url: 'https://anthropic.example',
-        provider_type: 'anthropic_compatible',
-        vendor_hint: '',
-        last_test_status: 'untested',
-        last_test_at: '',
-        last_test_message: '',
-        last_error_code: '',
-        available_models: [],
-      },
-      {
-        provider_code: 'OC_CL',
-        has_key: false,
-        name: 'OpenCode Claude',
-        title: '',
-        base_url: 'https://claude.example',
-        provider_type: 'anthropic_compatible',
-        vendor_hint: '',
-        last_test_status: 'untested',
-        last_test_at: '',
-        last_test_message: '',
-        last_error_code: '',
-        available_models: [],
-      },
-      {
-        provider_code: 'WS_LLM',
-        has_key: false,
-        name: 'WaveSpeed LLM',
-        title: '',
-        base_url: 'https://wavespeed.example',
-        provider_type: 'openai_compatible',
-        vendor_hint: '',
-        last_test_status: 'untested',
-        last_test_at: '',
-        last_test_message: '',
-        last_error_code: '',
-        available_models: [],
-      },
-      {
-        provider_code: 'DS',
-        has_key: false,
-        name: 'DeepSeek Official',
-        title: '',
-        base_url: 'https://deepseek.example',
-        provider_type: 'openai_compatible',
-        vendor_hint: '',
-        last_test_status: 'untested',
-        last_test_at: '',
-        last_test_message: '',
-        last_error_code: '',
-        available_models: [],
-      },
-    ],
-  }
-}
+const initialProviders: CredentialProvider[] = [
+  {
+    id: 'deepseek-official',
+    name: 'DeepSeek Official',
+    api_key: 'sk-deepseek',
+    base_url: 'https://api.deepseek.com',
+    provider_type: 'openai_compatible',
+    last_test_status: 'ok',
+    last_test_at: '2026-05-19T00:00:00Z',
+    last_test_message: '',
+    last_error_code: '',
+    available_sdks: ['openai_compatible'],
+    available_models: [{ id: 'deepseek-chat', capabilities: { max_context_tokens: 64000 } }],
+  },
+  {
+    id: 'openrouter-custom',
+    name: 'OpenRouter Custom',
+    api_key: 'sk-openrouter',
+    base_url: 'https://openrouter.ai/api/v1',
+    provider_type: 'openai_compatible',
+    last_test_status: 'ok',
+    last_test_at: '2026-05-19T00:00:00Z',
+    last_test_message: '',
+    last_error_code: '',
+    available_sdks: ['openai_compatible'],
+    available_models: [{ id: 'gpt-5', capabilities: { max_context_tokens: 128000 } }],
+  },
+]
 
 async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({
@@ -147,7 +87,7 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
 }
 
 async function mockBackend(page: Page) {
-  let hasOcClAntKey = false
+  let providers = structuredClone(initialProviders) as CredentialProvider[]
 
   await page.route('**/api/settings', async (route) => {
     await fulfillJson(route, { user_id: 'e2e-user', gitea_host: 'https://gitea.example' })
@@ -167,56 +107,83 @@ async function mockBackend(page: Page) {
   })
   await page.route('**/api/llm/credentials**', async (route) => {
     if (route.request().method() === 'PUT') {
-      const body = JSON.parse(route.request().postData() ?? '{}') as { providers?: Array<{ provider_code: string; api_key?: string }> }
-      const ocCl = body.providers?.find((provider) => provider.provider_code === 'OC_CL_ANT')
-      if (ocCl && ocCl.api_key) hasOcClAntKey = true
-      await fulfillJson(route, credentials(hasOcClAntKey))
-      return
+      const body = JSON.parse(route.request().postData() ?? '{}') as { providers?: CredentialProvider[] }
+      providers = (body.providers ?? []).map((provider) => {
+        const existing = providers.find((item) => item.id === provider.id)
+        return {
+          ...existing,
+          ...provider,
+          api_key: provider.api_key || existing?.api_key || '',
+          last_test_status: existing?.last_test_status ?? 'untested',
+          last_test_at: existing?.last_test_at ?? '',
+          last_test_message: existing?.last_test_message ?? '',
+          last_error_code: existing?.last_error_code ?? '',
+          available_models: existing?.available_models ?? [],
+          available_sdks: existing?.available_sdks ?? [],
+        }
+      })
     }
-    await fulfillJson(route, credentials(hasOcClAntKey))
+    await fulfillJson(route, { providers })
+  })
+  await page.route('**/api/llm/providers/notable-models**', async (route) => {
+    const url = new URL(route.request().url())
+    const providerKey = url.searchParams.get('provider_key') ?? ''
+    const notable: Record<string, string[]> = {
+      anthropic: ['claude-opus-4-7', 'claude-sonnet-4-7'],
+      openai: ['gpt-5', 'gpt-4o'],
+      gemini: ['gemini-2.5-pro', 'gemini-2.0-flash'],
+      deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+      ark: ['doubao-seed-1-6'],
+      openrouter: ['anthropic/claude-opus-4-7'],
+    }
+    await fulfillJson(route, { notable_models: notable[providerKey] ?? ['manual/model'] })
+  })
+  await page.route('**/api/llm/providers/test-models', async (route) => {
+    const body = JSON.parse(route.request().postData() ?? '{}') as { provider_key: string; model_ids: string[] }
+    const provider = providers.find((item) => item.id === body.provider_key)
+    const unique = Array.from(new Set(body.model_ids.filter(Boolean)))
+    const results = unique.map((modelId) => ({ model_id: modelId, status: 'ok', latency_ms: 12, message: null }))
+    const existingModels = provider?.available_models ?? []
+    const byId = new Map(existingModels.map((model) => [model.id, model]))
+    for (const modelId of unique) {
+      if (!byId.has(modelId)) byId.set(modelId, { id: modelId, capabilities: { max_context_tokens: 200000 } })
+    }
+    const available_models = [...byId.values()]
+    providers = providers.map((item) => item.id === body.provider_key ? { ...item, available_models } : item)
+    await fulfillJson(route, { results, available_models })
   })
   await page.route('**/api/llm/providers/test', async (route) => {
+    const body = JSON.parse(route.request().postData() ?? '{}') as { id: string }
+    const provider = providers.find((item) => item.id === body.id)
+    const available_models = provider?.available_models ?? []
     await fulfillJson(route, {
       status: 'ok',
       latency_ms: 150,
-      model_seen: 'claude-sonnet-4-6',
+      model_seen: available_models[0]?.id ?? null,
       message: null,
       error_code: null,
-      available_models: ['claude-sonnet-4-6'],
+      available_sdks: ['openai_compatible'],
+      available_models,
     })
   })
   await page.route('**/api/llm/roles**', async (route) => {
-    if (route.request().url().includes('/api/llm/roles/copilot_chat')) {
-      await fulfillJson(route, roleData.roles.copilot_chat)
-      return
-    }
-    if (route.request().method() === 'PUT') {
-      const next = JSON.parse(route.request().postData() ?? '{}')
-      Object.assign(roleData, next)
-      await fulfillJson(route, roleData)
-      return
-    }
-    await fulfillJson(route, roleData)
+    await fulfillJson(route, { models: {}, providers: {}, roles: {}, single_model_roles: [], peer_model_groups: {}, circuit_breaker: null })
   })
 }
 
 async function mockWebSocket(page: Page) {
   await page.addInitScript(() => {
-    Object.assign(window, { __llmConfigV2WsMessages: [] })
-
     class MockWebSocket extends EventTarget {
       static readonly CONNECTING = 0
       static readonly OPEN = 1
       static readonly CLOSING = 2
       static readonly CLOSED = 3
-
       readonly url: string
       readyState = MockWebSocket.CONNECTING
       onopen: ((event: Event) => void) | null = null
       onclose: ((event: CloseEvent) => void) | null = null
       onerror: ((event: Event) => void) | null = null
       onmessage: ((event: MessageEvent) => void) | null = null
-
       constructor(url: string) {
         super()
         this.url = url
@@ -225,105 +192,91 @@ async function mockWebSocket(page: Page) {
           this.onopen?.(new Event('open'))
         }, 0)
       }
-
-      send(data: string) {
-        ;(window as unknown as { __llmConfigV2WsMessages: string[] }).__llmConfigV2WsMessages.push(data)
+      send() {
         window.setTimeout(() => {
           this.onmessage?.(new MessageEvent('message', { data: JSON.stringify({ type: 'done' }) }))
         }, 0)
       }
-
       close() {
         this.readyState = MockWebSocket.CLOSED
         this.onclose?.(new CloseEvent('close'))
       }
     }
-
     Object.defineProperty(MockWebSocket, 'OPEN', { value: 1 })
     window.WebSocket = MockWebSocket as unknown as typeof WebSocket
   })
 }
 
-test.describe('LLM config v2.1 e2e', () => {
-  test('saves provider key, tests provider, edits copilot_chat, and sends model_override', async ({ page }) => {
-    await mockBackend(page)
-    await mockWebSocket(page)
+async function openApiKeys(page: Page) {
+  await mockBackend(page)
+  await mockWebSocket(page)
+  await page.goto(`${baseURL}/#/skill/${SKILL_ID}/edit`)
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('button', { name: 'API Keys' }).click()
+}
 
-    await page.goto(`${baseURL}/#/skill/${SKILL_ID}/edit`)
-    await page.getByRole('button', { name: 'Settings' }).click()
-    await page.getByRole('button', { name: 'API Keys' }).click()
+test.describe('Round 3 API Keys e2e', () => {
+  test('renders Official and Third-party sections with round 3 provider cards', async ({ page }) => {
+    await openApiKeys(page)
 
-    // Scope key/test/badge queries to the OC_CL_ANT row via data-provider-code.
-    const ocClAntRow = page.locator('[data-provider-code="OC_CL_ANT"]')
-    await expect(ocClAntRow).toBeVisible()
-
-    const credentialsPut = page.waitForRequest((request) =>
-      request.url().includes('/api/llm/credentials') && request.method() === 'PUT',
-    )
-    await ocClAntRow.locator('#api-key-OC_CL_ANT').fill('sk-test-anthropic-123')
-    await credentialsPut
-
-    // SaveStatusBadge transitions to "已保存" once the debounced PUT resolves.
-    await expect(page.getByText('已保存', { exact: true }).first()).toBeVisible({ timeout: 3000 })
-
-    // Run Test — sonner emits success toast "连接正常（150ms · 1 个模型）".
-    await ocClAntRow.getByRole('button', { name: /^Test$|^测试中$/ }).click()
-    await expect(page.getByText(/连接正常/)).toBeVisible({ timeout: 3000 })
-
-    // Persistent TestOutcomeBadge updates to "连接正常" with timestamp · MM-DD HH:mm.
-    await expect(ocClAntRow.getByText(/连接正常/)).toBeVisible()
-
-    await page.getByRole('button', { name: 'LLM Roles' }).click()
-    await page.locator('select[aria-label="Role"]').selectOption('copilot_chat')
-    await page.getByRole('button', { name: 'Move OC_CL_ANT down' }).click()
-    const saveRequest = page.waitForRequest((request) =>
-      request.url().includes('/api/llm/roles') && request.method() === 'PUT',
-    )
-    await page.getByRole('button', { name: 'Save' }).click()
-    await saveRequest
-    await expect(page.getByText('Roles saved')).toBeVisible({ timeout: 3000 })
-
-    await page.getByRole('button', { name: 'Close settings' }).click()
-    await page.getByRole('button', { name: /Smoke Skill/ }).first().click()
-    await expect(page.getByRole('heading', { name: 'Copilot' })).toBeVisible()
-    await page.getByRole('button', { name: 'Select Copilot model' }).click()
-    await expect(page.getByRole('button', { name: 'Select model CL46T' })).toBeEnabled()
-
-    await page.getByPlaceholder("Use '@' to mention nodes...").fill('hello copilot')
-    await page.getByRole('button', { name: 'Send message' }).click()
-
-    await expect
-      .poll(async () => page.evaluate(() => (window as unknown as { __llmConfigV2WsMessages: string[] }).__llmConfigV2WsMessages.length))
-      .toBe(1)
-    const messages = await page.evaluate(() => (window as unknown as { __llmConfigV2WsMessages: string[] }).__llmConfigV2WsMessages)
-    expect(JSON.parse(messages[0])).toMatchObject({
-      user_message: 'hello copilot',
-      model_override: 'CL46T',
-    })
+    const apiKeys = page.getByTestId('api-keys-list')
+    await expect(apiKeys.getByRole('heading', { name: 'Official Providers' })).toBeVisible()
+    await expect(apiKeys.getByText('Anthropic Official')).toBeVisible()
+    await expect(apiKeys.getByText('OpenAI Official')).toBeVisible()
+    await expect(apiKeys.getByText('Gemini Official')).toBeVisible()
+    await expect(apiKeys.getByText('DeepSeek Official')).toBeVisible()
+    await expect(apiKeys.getByText('Ark Official')).toBeVisible()
+    await expect(apiKeys.getByRole('heading', { name: 'Third-party Providers' })).toBeVisible()
+    await expect(apiKeys.locator('input[aria-label="Provider Name"][value="OpenRouter Custom"]')).toBeVisible()
+    await expect(apiKeys.getByText('Not configured').first()).toBeVisible()
+    await expect(apiKeys.getByText('deepseek-chat')).toBeVisible()
+    await expect(apiKeys.getByText('gpt-5')).toBeVisible()
+    await expect(apiKeys.getByText('SDK Protocol')).toHaveCount(0)
+    await expect(apiKeys.getByText('OpenAI Compatible')).toHaveCount(0)
   })
 
-  test('Add Provider creates a new custom row with deletable identity', async ({ page }) => {
-    await mockBackend(page)
-    await mockWebSocket(page)
+  test('uses simplified Add Provider form with cancel and submit collapse', async ({ page }) => {
+    await openApiKeys(page)
 
-    await page.goto(`${baseURL}/#/skill/${SKILL_ID}/edit`)
-    await page.getByRole('button', { name: 'Settings' }).click()
-    await page.getByRole('button', { name: 'API Keys' }).click()
+    await page.getByRole('button', { name: 'Add Provider' }).click()
+    const form = page.getByTestId('add-provider-form')
+    await expect(form).toBeVisible()
+    await expect(form.getByLabel('Provider Name')).toBeVisible()
+    await expect(form.getByLabel('Base URL')).toBeVisible()
+    await expect(form.locator('input[aria-label="API Key"]')).toBeVisible()
+    await expect(form.getByText('Official Provider')).toHaveCount(0)
 
-    const list = page.getByTestId('api-keys-list')
-    const initialCount = await list.locator('[data-provider-code]').count()
+    await form.getByRole('button', { name: 'Cancel' }).click()
+    await expect(form).toHaveCount(0)
 
-    await page.getByRole('button', { name: /新增 Provider/ }).click()
+    await page.getByRole('button', { name: 'Add Provider' }).click()
+    const reopened = page.getByTestId('add-provider-form')
+    await reopened.getByLabel('Provider Name').fill('Together Custom')
+    await reopened.getByLabel('Base URL').fill('https://api.together.xyz/v1')
+    await reopened.locator('input[aria-label="API Key"]').fill('sk-together')
+    const saveRequest = page.waitForRequest((request) => request.url().includes('/api/llm/credentials') && request.method() === 'PUT')
+    await reopened.getByRole('button', { name: 'Add' }).click()
+    await saveRequest
+    await expect(page.getByTestId('add-provider-form')).toHaveCount(0)
+    await expect(page.locator('input[aria-label="Provider Name"][value="Together Custom"]')).toBeVisible()
+  })
 
-    await expect(list.locator('[data-provider-code]')).toHaveCount(initialCount + 1)
-    const newRow = list.locator('[data-provider-code^="CUSTOM_"]').first()
-    await expect(newRow).toBeVisible()
+  test('manual model probing appends deduped chips using mocked backend', async ({ page }) => {
+    await openApiKeys(page)
 
-    // YAML-owned rows hide the Delete button; the custom row must surface it.
-    await expect(newRow.getByRole('button', { name: 'Delete provider' })).toBeVisible()
-    // Whereas OC_CL_ANT (YAML-owned) must not.
-    await expect(
-      page.locator('[data-provider-code="OC_CL_ANT"]').getByRole('button', { name: 'Delete provider' }),
-    ).toHaveCount(0)
+    const openRouterCard = page.locator('[data-provider-id="openrouter-custom"]')
+    await expect(openRouterCard.getByText('Manual model probing')).toBeVisible()
+    await expect(openRouterCard.getByText('gpt-5')).toBeVisible()
+
+    await openRouterCard.getByLabel('Manual model 1').fill('claude-opus-4-7')
+    await openRouterCard.getByRole('button', { name: 'Add Model' }).click()
+    await openRouterCard.getByLabel('Manual model 2').fill('gpt-5')
+    const modelRequest = page.waitForRequest((request) => request.url().includes('/api/llm/providers/test-models') && request.method() === 'POST')
+    await openRouterCard.getByRole('button', { name: 'Test Models' }).click()
+    await modelRequest
+
+    await expect(openRouterCard.getByText('claude-opus-4-7').first()).toBeVisible()
+    await expect(openRouterCard.getByText('claude-opus-4-7: ok')).toBeVisible()
+    await expect(openRouterCard.getByText('gpt-5')).toHaveCount(2)
   })
 })

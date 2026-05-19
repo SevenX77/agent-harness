@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 import pytest
-from app.models.llm_config import LLMCredentialsFile, ProviderCredential
+from app.models.llm_config import LLMCredentialsFile, ModelInfo, ProviderCredential
 from app.routers.llm import CredentialsWriteRequest, ProviderCredentialWrite, put_llm_credentials
 from app.services import llm_env
 from app.services.llm_credentials import (
@@ -79,7 +79,7 @@ def test_serialize_for_response_includes_new_fields() -> None:
                 name="OpenAI",
                 api_key="sk-secret",
                 available_sdks=["openai_compatible"],
-                available_models=["gpt-5"],
+                available_models=[ModelInfo(id="gpt-5")],
             )
         ]
     )
@@ -87,7 +87,7 @@ def test_serialize_for_response_includes_new_fields() -> None:
     body = serialize_for_response(data)
 
     assert body["providers"][0]["available_sdks"] == ["openai_compatible"]
-    assert body["providers"][0]["available_models"] == ["gpt-5"]
+    assert [model["id"] for model in body["providers"][0]["available_models"]] == ["gpt-5"]
 
 
 @pytest.mark.anyio
@@ -106,7 +106,7 @@ async def test_put_empty_api_key_preserves_available_sdks_and_models(
                     base_url="https://api.openai.com",
                     provider_type="openai_compatible",
                     available_sdks=["openai_compatible"],
-                    available_models=["gpt-5"],
+                    available_models=[ModelInfo(id="gpt-5")],
                 )
             ]
         )
@@ -129,7 +129,7 @@ async def test_put_empty_api_key_preserves_available_sdks_and_models(
     provider = body["providers"][0]
     assert provider["api_key"] == "sk-secret"
     assert provider["available_sdks"] == ["openai_compatible"]
-    assert provider["available_models"] == ["gpt-5"]
+    assert [model["id"] for model in provider["available_models"]] == ["gpt-5"]
 
 
 def test_patch_environment_is_noop(

@@ -196,7 +196,13 @@ describe("ProviderCard provider capabilities", () => {
 
   it("renders available_models chips when persisted has data", () => {
     const html = renderCardHtml({
-      persisted: makePersisted({ available_models: ["gpt-5", "gpt-4o", "claude-opus-4"] }),
+      persisted: makePersisted({
+        available_models: [
+          { id: "gpt-5", capabilities: { text: true, function_calling: false, vision: false, reasoning: false } },
+          { id: "gpt-4o", capabilities: { text: true, function_calling: true, vision: true, reasoning: false } },
+          { id: "claude-opus-4", capabilities: { text: true, function_calling: true, vision: true, reasoning: true } },
+        ],
+      }),
     })
 
     expect(html).toContain('data-testid="provider-capabilities"')

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 ProviderType = Literal[
     "anthropic_compatible",
@@ -62,21 +62,7 @@ class ProviderCredential(BaseModel):
     last_test_message: str = ""
     last_error_code: str = ""
     available_sdks: list[str] = Field(default_factory=list)
-    available_models: list[str] = Field(default_factory=list)
-
-    @field_validator("available_models", mode="before")
-    @classmethod
-    def _coerce_available_models(cls, value: Any) -> Any:
-        if isinstance(value, list):
-            return [
-                item.id
-                if isinstance(item, ModelInfo)
-                else item.get("id")
-                if isinstance(item, dict) and isinstance(item.get("id"), str)
-                else item
-                for item in value
-            ]
-        return value
+    available_models: list[ModelInfo] = Field(default_factory=list)
 
 
 TEST_OUTCOME_FIELDS: tuple[str, ...] = (

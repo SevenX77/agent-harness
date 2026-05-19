@@ -51,7 +51,7 @@ export interface CredentialProviderState {
   last_test_at?: string
   last_test_message?: string
   last_error_code?: string
-  available_models?: string[]
+  available_models?: ModelInfo[]
   available_sdks?: string[]
 }
 
@@ -97,7 +97,7 @@ export interface ProviderTestResponse {
   model_seen?: string | null
   message?: string | null
   error_code?: string | null
-  available_models?: string[]
+  available_models?: ModelInfo[]
   available_sdks?: string[]
 }
 

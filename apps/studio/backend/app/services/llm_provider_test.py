@@ -11,7 +11,8 @@ from typing import Any
 import httpx
 from services.llm_provider_meta import DOCS_DIR, load_provider_meta
 
-from app.models.llm_config import ProviderType
+from app.models.llm_config import ModelInfo, ProviderType
+from app.services.llm_capability_table import lookup_capabilities
 from app.services.copilot_test import (
     PingResult,
     _first_model_id,
@@ -239,7 +240,7 @@ async def _probe_wavespeed_1token(base_url: str, headers: dict[str, str]) -> int
     return await _probe_openai_1token(base_url, headers)
 
 
-async def probe_available_models(vendor: str, api_key: str, base_url: str) -> list[str]:
+async def probe_available_models(vendor: str, api_key: str, base_url: str) -> list[ModelInfo]:
     """Load model ids via the provider /models endpoint or provider docs fallback."""
 
     meta = load_provider_meta(vendor)
@@ -251,17 +252,35 @@ async def probe_available_models(vendor: str, api_key: str, base_url: str) -> li
     async with httpx.AsyncClient() as client:
         response = await client.get(url, headers=headers, timeout=15.0)
     response.raise_for_status()
-    return _parse_models_response(response.json(), vendor)
+    return _model_infos_from_ids(_parse_models_response(response.json(), vendor), vendor)
 
 
-def _load_fallback_models_from_doc(vendor: str) -> list[str]:
+def _load_fallback_models_from_doc(vendor: str) -> list[ModelInfo]:
     """Load backtick-wrapped model ids from docs/llm-providers/<vendor>.md §4."""
 
     doc_path = DOCS_DIR / f"{vendor}.md"
     if not doc_path.exists():
         return []
     content = doc_path.read_text(encoding="utf-8")
-    return _extract_model_ids_from_section(_extract_section_4(content))
+    return _model_infos_from_ids(_extract_model_ids_from_section(_extract_section_4(content)), vendor)
+
+
+def _provider_type_for_vendor(vendor: str) -> ProviderType:
+    if vendor == "anthropic":
+        return "anthropic_compatible"
+    if vendor == "gemini":
+        return "gemini_official"
+    if vendor == "wavespeed":
+        return "wavespeed_any_llm"
+    return "openai_compatible"
+
+
+def _model_infos_from_ids(model_ids: list[str], vendor: str) -> list[ModelInfo]:
+    provider_type = _provider_type_for_vendor(vendor)
+    return [
+        ModelInfo(id=model_id, capabilities=lookup_capabilities(provider_type, model_id))
+        for model_id in model_ids
+    ]
 
 
 def _extract_section_4(md_content: str) -> str:

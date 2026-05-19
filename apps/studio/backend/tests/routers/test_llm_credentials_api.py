@@ -7,12 +7,21 @@ from typing import Any
 
 import pytest
 from app.main import create_app
+from app.models.llm_config import ModelInfo
 from app.routers import llm as llm_router
 from app.services.llm_provider_test import (
     ProviderType,
     ping_provider,
 )
 from fastapi.testclient import TestClient
+
+
+def _model(model_id: str) -> ModelInfo:
+    return ModelInfo(id=model_id)
+
+
+def _model_ids(models: list[dict[str, Any]]) -> list[str]:
+    return [model["id"] for model in models]
 
 
 def test_get_credentials_returns_api_key_plaintext(
@@ -214,8 +223,8 @@ def test_provider_test_masks_key_in_response_and_logs(
     async def fake_sdks(*_args: object, **_kwargs: object) -> list[str]:
         return ["anthropic_compatible"]
 
-    async def fake_models(*_args: object, **_kwargs: object) -> list[str]:
-        return ["seen-model"]
+    async def fake_models(*_args: object, **_kwargs: object) -> list[ModelInfo]:
+        return [_model("seen-model")]
 
     monkeypatch.setattr(llm_router, "probe_compatible_sdks", fake_sdks)
     monkeypatch.setattr(llm_router, "probe_available_models", fake_models)
@@ -238,7 +247,7 @@ def test_provider_test_masks_key_in_response_and_logs(
     assert body["message"] is None
     assert body["error_code"] is None
     assert body["available_sdks"] == ["anthropic_compatible"]
-    assert body["available_models"] == ["seen-model"]
+    assert _model_ids(body["available_models"]) == ["seen-model"]
     assert "sk-secret-1234" not in response.text
     assert "sk-secret-1234" not in caplog.text
     assert "last4=1234" in caplog.text
@@ -360,7 +369,7 @@ def test_put_credentials_preserves_test_outcome_fields(
         last_test_at="2026-05-18T12:00:00+00:00",
         last_test_message="",
         last_error_code="",
-        available_models=["claude-opus-4-1"],
+        available_models=[_model("claude-opus-4-1")],
     )
 
     # PUT only sends the 6 editable fields — Test fields must survive.
@@ -377,7 +386,7 @@ def test_put_credentials_preserves_test_outcome_fields(
     provider = response.json()["providers"][0]
     assert provider["last_test_status"] == "ok"
     assert provider["last_test_at"] == "2026-05-18T12:00:00+00:00"
-    assert provider["available_models"] == ["claude-opus-4-1"]
+    assert _model_ids(provider["available_models"]) == ["claude-opus-4-1"]
 
 
 # ---------------------------------------------------------------------------
@@ -465,10 +474,10 @@ def test_provider_test_calls_probes_and_returns_string_lists(
         assert api_key == "sk-test"
         return ["openai_compatible"]
 
-    async def fake_models(vendor: str, api_key: str, base_url: str) -> list[str]:
+    async def fake_models(vendor: str, api_key: str, base_url: str) -> list[ModelInfo]:
         calls.append(("models", vendor, base_url))
         assert api_key == "sk-test"
-        return ["gpt-5", "gpt-4o"]
+        return [_model("gpt-5"), _model("gpt-4o")]
 
     monkeypatch.setattr(llm_router, "probe_compatible_sdks", fake_sdks)
     monkeypatch.setattr(llm_router, "probe_available_models", fake_models)
@@ -488,7 +497,7 @@ def test_provider_test_calls_probes_and_returns_string_lists(
     assert body["status"] == "ok"
     assert body["error_code"] is None
     assert body["available_sdks"] == ["openai_compatible"]
-    assert body["available_models"] == ["gpt-5", "gpt-4o"]
+    assert _model_ids(body["available_models"]) == ["gpt-5", "gpt-4o"]
     assert calls == [
         ("sdks", "openai", "https://api.openai.com"),
         ("models", "openai", "https://api.openai.com"),
@@ -518,8 +527,8 @@ def test_provider_test_persists_string_probe_results_to_credentials(
     async def fake_sdks(*_args: object, **_kwargs: object) -> list[str]:
         return ["openai_compatible"]
 
-    async def fake_models(*_args: object, **_kwargs: object) -> list[str]:
-        return ["gpt-5", "gpt-4o"]
+    async def fake_models(*_args: object, **_kwargs: object) -> list[ModelInfo]:
+        return [_model("gpt-5"), _model("gpt-4o")]
 
     monkeypatch.setattr(llm_router, "probe_compatible_sdks", fake_sdks)
     monkeypatch.setattr(llm_router, "probe_available_models", fake_models)
@@ -539,7 +548,7 @@ def test_provider_test_persists_string_probe_results_to_credentials(
     provider = get_response.json()["providers"][0]
     assert provider["last_test_status"] == "ok"
     assert provider["available_sdks"] == ["openai_compatible"]
-    assert provider["available_models"] == ["gpt-5", "gpt-4o"]
+    assert _model_ids(provider["available_models"]) == ["gpt-5", "gpt-4o"]
 
 
 def test_provider_test_empty_sdks_returns_error_without_model_probe(
@@ -553,9 +562,9 @@ def test_provider_test_empty_sdks_returns_error_without_model_probe(
     async def empty_sdks(*_args: object, **_kwargs: object) -> list[str]:
         return []
 
-    async def fake_models(*_args: object, **_kwargs: object) -> list[str]:
+    async def fake_models(*_args: object, **_kwargs: object) -> list[ModelInfo]:
         model_calls.append(True)
-        return ["should-not-run"]
+        return [_model("should-not-run")]
 
     monkeypatch.setattr(llm_router, "probe_compatible_sdks", empty_sdks)
     monkeypatch.setattr(llm_router, "probe_available_models", fake_models)
@@ -595,8 +604,8 @@ def test_provider_test_persists_outcome_to_credentials(
     async def fake_sdks(*_args: object, **_kwargs: object) -> list[str]:
         return ["anthropic_compatible"]
 
-    async def fake_models(*_args: object, **_kwargs: object) -> list[str]:
-        return ["claude-opus-4-1", "claude-haiku-4-5"]
+    async def fake_models(*_args: object, **_kwargs: object) -> list[ModelInfo]:
+        return [_model("claude-opus-4-1"), _model("claude-haiku-4-5")]
 
     monkeypatch.setattr(llm_router, "probe_compatible_sdks", fake_sdks)
     monkeypatch.setattr(llm_router, "probe_available_models", fake_models)
@@ -614,7 +623,7 @@ def test_provider_test_persists_outcome_to_credentials(
     body = response.json()
     assert body["status"] == "ok"
     assert body["available_sdks"] == ["anthropic_compatible"]
-    assert body["available_models"] == [
+    assert _model_ids(body["available_models"]) == [
         "claude-opus-4-1",
         "claude-haiku-4-5",
     ]
@@ -624,7 +633,7 @@ def test_provider_test_persists_outcome_to_credentials(
     provider = get_response.json()["providers"][0]
     assert provider["last_test_status"] == "ok"
     assert provider["available_sdks"] == ["anthropic_compatible"]
-    assert provider["available_models"] == [
+    assert _model_ids(provider["available_models"]) == [
         "claude-opus-4-1",
         "claude-haiku-4-5",
     ]
@@ -641,7 +650,7 @@ def test_provider_test_no_provider_silent_noop(
     async def fake_sdks(*_args: object, **_kwargs: object) -> list[str]:
         return ["anthropic_compatible"]
 
-    async def fake_models(*_args: object, **_kwargs: object) -> list[str]:
+    async def fake_models(*_args: object, **_kwargs: object) -> list[ModelInfo]:
         return []
 
     monkeypatch.setattr(llm_router, "probe_compatible_sdks", fake_sdks)

@@ -13,6 +13,7 @@ from services.llm_provider_meta import DOCS_DIR
 from app.core import config
 from app.models.llm_config import (
     LLMCredentialsFile,
+    ModelInfo,
     ProviderCredential,
     ProviderType,
     RoleEntry,
@@ -92,7 +93,7 @@ class ProviderTestResponse(BaseModel):
     model_seen: str | None = None
     message: str | None = None
     error_code: str | None = None
-    available_models: list[str] = Field(default_factory=list)
+    available_models: list[ModelInfo] = Field(default_factory=list)
     available_sdks: list[str] = Field(default_factory=list)
 
 
@@ -192,7 +193,7 @@ async def test_llm_provider(request: ProviderTestRequest) -> ProviderTestRespons
         logger.warning("SDK probe failed for vendor=%s: %s", vendor, exc)
         available_sdks = []
 
-    available_models: list[str] = []
+    available_models: list[ModelInfo] = []
     if available_sdks:
         try:
             available_models = await probe_available_models(vendor, request.api_key, base_url)

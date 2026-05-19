@@ -177,7 +177,7 @@ async def test_probe_available_models_openai_format(
         "openai", "sk-test", "https://api.openai.com"
     )
 
-    assert result == ["gpt-4", "gpt-5"]
+    assert [model.id for model in result] == ["gpt-4", "gpt-5"]
 
 
 @pytest.mark.anyio
@@ -215,7 +215,7 @@ async def test_probe_available_models_gemini_format_strips_prefix(
         "gemini", "gemini-key", "https://generativelanguage.googleapis.com"
     )
 
-    assert result == ["gemini-2.0-flash", "gemini-2.5-pro"]
+    assert [model.id for model in result] == ["gemini-2.0-flash", "gemini-2.5-pro"]
 
 
 @pytest.mark.anyio
@@ -253,7 +253,7 @@ Ignored.
         "anthropic", "sk-ant-test", "https://api.anthropic.com"
     )
 
-    assert result == ["claude-opus-4-5-20251101", "claude-haiku-4-5-20251001"]
+    assert [model.id for model in result] == ["claude-opus-4-5-20251101", "claude-haiku-4-5-20251001"]
 
 
 @pytest.mark.anyio

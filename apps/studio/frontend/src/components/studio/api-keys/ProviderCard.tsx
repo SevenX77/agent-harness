@@ -215,8 +215,8 @@ export function ProviderCard({
                 <span className="text-muted-foreground shrink-0">Available Models:</span>
                 <div className="flex gap-1 flex-wrap">
                   {persisted.available_models.map((model) => (
-                    <Badge key={model} variant="outline" className="font-mono">
-                      {model}
+                    <Badge key={model.id} variant="outline" className="font-mono">
+                      {model.id}
                     </Badge>
                   ))}
                 </div>

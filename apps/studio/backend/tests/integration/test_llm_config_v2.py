@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from app.models.copilot import CopilotEventDone
+from app.models.llm_config import ModelInfo
 from app.routers import copilot as copilot_router
 from app.routers import llm as llm_router
 from fastapi.testclient import TestClient
@@ -102,8 +103,8 @@ def test_provider_test_endpoint_mocked(
         _vendor: str,
         _api_key: str,
         _base_url: str,
-    ) -> list[str]:
-        return ["claude-sonnet-4-6"]
+    ) -> list[ModelInfo]:
+        return [ModelInfo(id="claude-sonnet-4-6")]
 
     monkeypatch.setattr(llm_router, "probe_compatible_sdks", fake_sdks)
     monkeypatch.setattr(llm_router, "probe_available_models", fake_models)
@@ -127,7 +128,7 @@ def test_provider_test_endpoint_mocked(
     assert body["message"] is None
     assert body["error_code"] is None
     assert body["available_sdks"] == ["openai_compatible"]
-    assert body["available_models"] == ["claude-sonnet-4-6"]
+    assert [model["id"] for model in body["available_models"]] == ["claude-sonnet-4-6"]
 
 
 def test_websocket_forwards_model_override(

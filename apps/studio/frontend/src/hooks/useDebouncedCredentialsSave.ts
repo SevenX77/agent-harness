@@ -59,8 +59,8 @@ export function useDebouncedCredentialsSave(
   const inflightRef = useRef<Promise<CredentialsState | null> | null>(null)
   const pendingSnapshotRef = useRef<(() => ProviderCredentialUpdate[]) | null>(null)
 
-  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const performSave = useCallback(
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization
     async (getSnapshot: () => ProviderCredentialUpdate[]): Promise<CredentialsState | null> => {
       setStatus("saving")
       const payload = getSnapshot()

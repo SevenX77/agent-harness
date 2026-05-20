@@ -1,6 +1,6 @@
 # skill-compilation (engine) — MVP0 Alignment (下一步对齐逻辑)
 
-> **Status**: Filled by a2 (Gemini), 2026-05-20
+> **Status**: Filled by a1 (Codex) based on a2 framework, 2026-05-20
 > **Scope**: V2.1 技能目录解析、AST 构建、图拓扑校验、静态 IO 数据流校验 (audit A7/A8)、编译缓存策略
 > **配套**: 见 [INDEX.md](../../INDEX.md) 5 维模板 + cross-link 规则 + writing conventions。
 
@@ -8,31 +8,29 @@
 
 N/A — 此模块为纯 backend Python library, 无 UI / 无前端调用面。
 
-这里的 "backend Python library" 指 `packages/graph-agent` 里的 Python 引擎代码，并不是指代 Studio 的 FastAPI 后端服务，也不是 React 前端应用。用户永远不会直接在操作界面上看到 "compile" 这一生命周期模块的状态流转。它只通过调用方拿到的异常（例如拓扑环报错）、返回的静态对象结构或后续 runtime 行为体现结果。
+这里的 backend Python library 指 `packages/graph-agent` 里的引擎编译层，不是 Studio FastAPI，也不是 React。PM 可以把它理解成“把一个 skill 目录读成可执行说明书”的环节：它不画按钮、不打开面板，但它决定 Studio 之后能不能准确告诉用户“哪条边错了、哪个 phase 缺输入、哪个 schema 不合法”。
 
-然而，编译器的校验结果是整个系统最前端的安全屏障，它负责为前端界面提供最核心的、结构化的校验错误信息。例如，当 PM 在画布（Canvas）界面连错了节点的数据依赖，这里发出的 `[F-v21-io-conflict]` 异常将被 Studio 后端捕捉，最后呈现在画布边缘的红色警告框中。如果没有这层完善的 backend 支持，前端将无法定位和标红具体的错误连线。因此，UI 界面的健壮性极度依赖此后端的严谨输出。如果编译过程只产生字符串报错，前端界面就无法做到精确的连线高亮，可视化编辑的 MVP0 目标便无从谈起。
+当前编译入口是 `compile_skill()`，代码在 `packages/graph-agent/src/graph_agent/core/compiler.py:40`。它最终交出 `CompiledSkill`，字段定义在 `packages/graph-agent/src/graph_agent/core/loader.py:65` 到 `packages/graph-agent/src/graph_agent/core/loader.py:75`。MVP0 对齐后的 UI 价值不是新增一个界面，而是让后续 Studio Canvas、Trace 和 CompileErrorPanel 可以消费结构化错误，而不是只能展示一段不可定位的 Python 异常。
 
 ## 前端逻辑
 
 N/A — 此模块为纯 backend Python library, 无 UI / 无前端调用面。
 
-React 前端（如多文件编辑器 `SplitEditor` 或 `GraphCanvas` 拓扑图）并不直接参与 `GRAPH.md`、`io/*.json` 或各个 Phase Markdown 文件的字符串解析与内存 AST 构建。前端只负责维护内存结构，并通过 Tauri IPC 或者 WebSocket 获取后端的解析结果。前端逻辑虽然需要深度消费后端的 `CompileResult` 实体，或者是针对 `GraphAgentError` 异常进行 UI 状态更新，但是它对这些数据的生产过程完全透明。因此，本编译模块内部没有任何涉及到 React component 的逻辑变迁。所有的工作均在 Python 的抽象语法树和校验器中完成。
+React 不会解析 `GRAPH.md`、`LOGIC.md`、`SUBGRAPH.md` 或 `SKILL.md`。这些文件的发现与 AST 构建都发生在 `SkillLoader.compile_skill()`，主流程在 `packages/graph-agent/src/graph_agent/core/loader.py:142` 到 `packages/graph-agent/src/graph_agent/core/loader.py:177`。因此，本文件的“下一步对齐”只规定 Python compiler 将来应该产出什么，不规定 Studio 怎么渲染它。
+
+前端会间接受益。比如 GraphCanvas 双击 phase 后打开文件，用户修完后点 compile；后端如果能返回“phase `summarize` 需要字段 `clean_text`，但上游没有产出”，前端就能标红对应节点或边。这个跨 feature 消费关系放在 [Cross-feature interaction](#cross-feature-interaction) 里说明。
 
 ## 后端功能
 
 ### 1. 缓存元数据补全与深层对象重建 (P1-1 修复)
 
-当前 cache rehydrate 在恢复快照时丢失了至关重要的动态配置结构 `subagents_by_phase` 和 `phase_tokens`，详见 [baseline.md#后端功能](./baseline.md#后端功能)。这会导致缓存命中时，引擎丢掉了原本解析出的 Subagent 信息，产生致命的不一致行为。这是由于之前的序列化逻辑没有完全展开 Pydantic 的复杂类型，导致还原时只留下了壳子。
+MVP0 SHOULD 把编译缓存从“只保存骨架”升级为“命中缓存后与冷编译等价”。当前 `_dehydrate_compiled_skill()` 只保存 `raw`、`manifest` 和 `nodes`，见 `packages/graph-agent/src/graph_agent/core/cache.py:84` 到 `packages/graph-agent/src/graph_agent/core/cache.py:99`；`_rehydrate_compiled_skill()` 恢复时只重建 `actions`、`tools` 并构造 `CompiledSkill(raw, manifest, nodes, actions, tools)`，见 `packages/graph-agent/src/graph_agent/core/cache.py:102` 到 `packages/graph-agent/src/graph_agent/core/cache.py:126`。这会让 dataclass 默认值接管 `subagents_by_phase` 和 `phase_tokens`，而这两个字段本来定义在 `packages/graph-agent/src/graph_agent/core/loader.py:74` 到 `packages/graph-agent/src/graph_agent/core/loader.py:75`。
 
-实测发生路径在 `packages/graph-agent/src/graph_agent/core/cache.py:84` 的 `_dehydrate_compiled_skill` 以及 `packages/graph-agent/src/graph_agent/core/cache.py:102` 的 `_rehydrate_compiled_skill`。
+这里的 dehydrate / rehydrate 可以理解成“存盘压缩”和“从盘上还原”。问题是 subagent 不是一个普通字符串：`CompiledSubagent` 保存了子 skill root、input schema、动态生成的 Pydantic input model 和 expected schema，字段在 `packages/graph-agent/src/graph_agent/core/loader.py:78` 到 `packages/graph-agent/src/graph_agent/core/loader.py:89`。如果缓存只存 nodes，不存 subagent 元数据，冷编译时可用的 `call_subagent_<name>` 动态工具在 cache hit 时就会消失。
 
-MVP0 改造必须确保 `cache_key` 的回放过程 100% 还原内存结构。
-在序列化（dehydrate）侧，我们需要在返回的 JSON dict 中额外挂载提取自 `CompiledSkill` 实例的字典树。这里的复杂之处在于 `CompiledSubagent` 并不是一个普通的 Pydantic Model，它包含了动态构建的 `input_model` 类定义。因此我们需要提取元信息以备后续重建：
+MVP0 WILL 在 snapshot 里保存两类额外数据。第一类是 `subagents_by_phase`：每个父 phase 下每个 subagent 的 `parent_phase_id`、`name`、`path`、`description`、`root`、`input_schema` 和 `expected_schema` 都要进入 JSON。第二类是 `phase_tokens`：`GRAPH.md` 中 `<phase />` 标签的位置信息来自 `packages/graph-agent/src/graph_agent/core/loader.py:151`，后续结构化错误要用它定位行号。
 
-- 提取 `compiled.subagents_by_phase`，将其包含的 `root` 路径、`expected_schema` 结构化并存入 `snapshot["subagents_by_phase"]`。
-- 提取 `compiled.phase_tokens` 放入 `snapshot["phase_tokens"]` 以保留所有的成本消耗标识。
-
-在反序列化（rehydrate）侧，也就是 `packages/graph-agent/src/graph_agent/core/cache.py:102` 的恢复逻辑中，我们需要把 JSON 再次转化为 `CompiledSubagent` 实例。这不仅仅是单纯的字典赋值，更要借助动态类生成重新构造出 `input_model` (Pydantic 类)：
+恢复时不能把 `input_model` 当 JSON 保存，因为它是动态 Python 类。正确方向是保存 `expected_schema` 或 `input_schema`，再调用现有 `build_subagent_input_model()` 重新生成类型；冷编译路径已经在 `packages/graph-agent/src/graph_agent/core/loader.py:360` 到 `packages/graph-agent/src/graph_agent/core/loader.py:364` 使用这个 helper。换句话说，缓存恢复要复用真实编译路径的建模规则，而不是发明另一套简化对象。
 
 ```python
 # 拟定的重建逻辑示例，该部分将被插入 _rehydrate_compiled_skill 函数内
@@ -57,40 +55,38 @@ for phase, subs in snapshot.get("subagents_by_phase", {}).items():
         )
     subagents_by_phase[phase] = restored_subs
 ```
-最后把这些组装回 `CompiledSkill` 对象，确保无论是否命中 Cache，产生的运行时环境以及可注入的 Tool 集合完全一致。
 
 ### 2. 缓存写失败平滑降级机制 (P2-2 修复)
 
-目前，当编译器尝试在如 Docker 容器、无写入权限的只读沙箱等苛刻环境中写出编译快照时，它会因为遇到权限问题而抛出致命的 `OSError` 或 `PermissionError`。代码位于 `packages/graph-agent/src/graph_agent/core/cache.py:45` 的 `save_to_cache` 函数。这直接中断了用户的编译链路，甚至导致 Studio 侧看到未处理的 HTTP 500 错误，是典型的过激保护行为。这种因为缓存盘不可用而导致应用无法运行的情况是极不合理的。
+MVP0 SHOULD 把 cache 写入从“编译必要条件”改成“性能优化”。当前 `get_cache_dir()` 固定写 `~/.cache/graph-agent-v21`，见 `packages/graph-agent/src/graph_agent/core/cache.py:18` 到 `packages/graph-agent/src/graph_agent/core/cache.py:19`；`save_to_cache()` 直接 `mkdir` 和 `write_text`，见 `packages/graph-agent/src/graph_agent/core/cache.py:45` 到 `packages/graph-agent/src/graph_agent/core/cache.py:52`。如果 HOME 不可写、容器只读、CI 临时目录权限异常，编译本体明明成功，也会因为保存快照失败而整体失败。
 
-MVP0 改造计划将这部分 IO 操作变为非阻塞性警告，引入平滑的降级（Graceful Degradation）机制：
-- 我们将在 `cache_dir.mkdir(parents=True, exist_ok=True)` 以及接下来的 `cache_file.write_text(...)` 代码外部包裹一个细粒度的 `try ... except (OSError, IOError, PermissionError) as e` 异常捕获块。
-- 一旦捕获到写入问题，将通过 Python 原生的 `logging` 设施进行输出，提示用户当前的系统状态：
-  `logger.warning("Failed to write compile cache to %s: %s. Falling back to No-Cache in-memory compilation.", cache_dir, e)`
-- 异常捕获后，函数直接 `return None` 进行退出。如此，只要内存编译环节本身成功，运行时就能拿到合法的 `CompiledSkill` 顺利向下推演，而绝对不会因为辅助性能提升的缓存模块的原因而罢工。
+降级机制的产品语义很简单：cache 是加速器，不是发动机。`compile_skill(cache=True)` SHOULD 在写 cache 失败时记录 warning，然后返回内存中的 `CompiledSkill`。读取 cache 已经有容错：`load_from_cache()` 捕获 `OSError`、JSON 错误和类型错误后返回 None，见 `packages/graph-agent/src/graph_agent/core/cache.py:34` 到 `packages/graph-agent/src/graph_agent/core/cache.py:42`。写入侧也应保持同样心智模型。
+
+MVP0 WILL 在 `cache_dir.mkdir()` 和 `cache_file.write_text()` 周围捕获 `OSError | IOError | PermissionError`，记录 cache path 和异常文本。它不应该吞掉编译器本身的错误；只吞“保存缓存失败”这一类辅助 I/O 错误。这样 Studio 或 CLI 仍能运行，只是下次不会命中缓存。
 
 ### 3. 编译期 Schema 解析强制增强 (A7 补全)
 
-V2.1 引擎目前对 Node 内部自己的状态规约过于宽松。目前 `SkillNodeAST` 仅验证 `system_prompt` 和 `exit_contract` 等内容，见 `packages/graph-agent/src/graph_agent/core/manifest.py:83-90`。如果 Phase 不声明它的边界，后续的数据传递将如一盘散沙，导致运行时异常频发。这就好比在一台复杂的机器中各个零件互相传递着没有说明书的包裹。
+MVP0 SHOULD 引入 phase-level IO schema。当前根图只有 `GraphManifest.io_inputs_ref` 和 `io_outputs_ref`，默认值在 `packages/graph-agent/src/graph_agent/core/manifest.py:53` 到 `packages/graph-agent/src/graph_agent/core/manifest.py:54`；compiler 会校验这两个 JSON Schema 文件本身，调用点在 `packages/graph-agent/src/graph_agent/core/loader.py:153` 到 `packages/graph-agent/src/graph_agent/core/loader.py:154`，实现见 `packages/graph-agent/src/graph_agent/core/loader.py:874` 到 `packages/graph-agent/src/graph_agent/core/loader.py:900`。
 
-MVP0 要求每个逻辑节点或模型节点，必须为系统提供其消费与产出的 JSONSchema 契约。这是 PM 看清楚每一步 “输入是什么、输出是什么” 的基石，更是可视化编排的生命线：
-- 在 Markdown 解析组装阶段，也就是 `packages/graph-agent/src/graph_agent/core/loader.py:66` 附近的解析流水线中，遇到 `mode: skill` 和 `mode: logic` 时，我们将强制检查其 YAML Frontmatter 是否拥有合法的 `io` key。
-- 如果引擎发现缺失，它将绝不放行。而是收集为一条编译期结构化错误并终止装配流程：
-  `CompileIssue(severity="ERROR", code="F-v21-io-missing", message="Phase node 'analyze' is missing 'io' dict in its frontmatter.")`
-- 如果存在，将其按照 Schema 规范进行装载，灌入新增的 `io` 字段内部（详见 Data Model 部分的扩展），供后续的静态数据流校验模块深度查询。这个要求将强制开发者在编写阶段明确声明所需的输入和将要输出的数据，从根本上提升了模块的可靠性和可测性。
+但根级 schema 只说明整张图的入口和出口，不说明每个 phase 消费什么、产出什么。当前 `SkillNodeAST` 只有 `system_prompt`、`exit_contract`、`tools`、`subagents`，见 `packages/graph-agent/src/graph_agent/core/manifest.py:83` 到 `packages/graph-agent/src/graph_agent/core/manifest.py:90`；`LogicNodeAST` 也只有 `python_callable`，见 `packages/graph-agent/src/graph_agent/core/manifest.py:69` 到 `packages/graph-agent/src/graph_agent/core/manifest.py:73`。A7 的目标是让每个节点都在 frontmatter 里声明自己的 `io` dict。
+
+第一次出现的术语：phase-level IO schema，就是“单个节点自己的输入输出契约”。例子：`extract` 输出 `{clean_text: string}`，`summarize` 输入要求 `{clean_text: string}`。没有这个契约，compiler 只能知道节点顺序，不能知道数据是否接得上。
+
+MVP0 WILL 在 `_build_phase_document()` 解析 phase frontmatter 时要求 `mode: skill` 与 `mode: logic` 都携带合法 `io`。缺失时 SHOULD 产生结构化 compile issue，例如 `F-v21-io-missing`，并带上 phase 文件路径和 frontmatter 行号。文件解析主循环目前在 `packages/graph-agent/src/graph_agent/core/loader.py:158` 到 `packages/graph-agent/src/graph_agent/core/loader.py:167`，这里是最自然的接入点。
 
 ### 4. 静态数据流拓扑连通性校验 (A8 补全)
 
-除了现有的图循环检测（位于 `packages/graph-agent/src/graph_agent/core/compiler.py:40` 附近），我们需要一种强大的静态分析机制，能在图真正执行前（甚至都没发给 LangGraph 进行装配），就提前发现前后环节数据口径不匹配的问题。这能极大缩短调试周期，是“把事情做对”理念的直接体现。
+MVP0 SHOULD 在执行前证明“每个 required input 都有来源”。当前 `_validate_graph_topology()` 已经能检查 phase id/src、重复 id、unknown dependency、自环、环和孤岛，代码在 `packages/graph-agent/src/graph_agent/core/loader.py:730` 到 `packages/graph-agent/src/graph_agent/core/loader.py:771`；环检测在 `packages/graph-agent/src/graph_agent/core/loader.py:774` 到 `packages/graph-agent/src/graph_agent/core/loader.py:805`；孤岛检测在 `packages/graph-agent/src/graph_agent/core/loader.py:807` 到 `packages/graph-agent/src/graph_agent/core/loader.py:837`。这些是“拓扑结构正确”，不是“数据流正确”。
 
-MVP0 改造：
-我们将实现图级数据流的连续性校验（Dataflow Continuity Validation）。这个新增验证将对 `GRAPH.md` 定义的图结构进行拓扑排序遍历。针对每一个 `PhaseAST` 节点在其 `io.inputs` 中声明的 `required` 属性：
-- 它必须存在于全图启动的全局根节点 Schema (`io/inputs.json`) 的 properties 中。
-- 或者，它必须被该节点的上游 `depends_on` 阶段声明的 `io.outputs` 覆盖输出。
-如果找不到任何声明源，编译器将抛出带有精确路径和阶段名的 `[F-v21-io-conflict]` 错误。例如：“节点 `summarize` 需要 `clean_text`，但其上游依赖 `extract` 和全局输入中均未提供该字段。”通过静态分析将此类错误阻断在运行之前，极大地提高了整个系统流转的信心。
+数据流校验的 PM 版解释：如果 `summarize` 声明必须读 `clean_text`，编译器要在运行前确认 `clean_text` 来自全局输入，或者来自它依赖的上游 phase 输出。否则用户不应该等到 LLM 或 Python action 运行时才看到 KeyError。
+
+MVP0 WILL 在 graph manifest 和 phase AST 都构建完之后调用 `_validate_phase_io_dataflow()`。它会按 `depends_on` 做拓扑遍历，维护“当前节点可见字段集合”。入口字段来自 `io/inputs.json` 的 `properties`，当前 helper `_extract_output_schema_keys()` 已能从 schema 顶层 `properties` 提 key，见 `packages/graph-agent/src/graph_agent/core/loader.py:903` 到 `packages/graph-agent/src/graph_agent/core/loader.py:909`。上游字段来自每个上游 phase 的 `io.outputs`。
 
 ### 5. 编译期错误信息的规范化结构
-在产生任何上述异常（A7 的解析错误，A8 的拓扑连续性错误）时，系统不能再单纯抛出普通的字符串 `ValueError`。它必须发出带有极其精确语义位点的异常实例，例如包含了 `line` 或 `phase_id`。这样不仅是供终端输出，更核心是为了跨端通信。
+
+MVP0 SHOULD 让 A7/A8 的错误既能给人读，也能给 UI 定位。当前 loader 多数错误通过 `_fatal()`、`_graph_fatal()`、`_io_fatal()` 抛出带 `[F-v21-*]` 前缀的异常，helper 集中在 `packages/graph-agent/src/graph_agent/core/loader.py:232` 到 `packages/graph-agent/src/graph_agent/core/loader.py:253`。这对终端用户有用，但对 Canvas 标红还不够，因为前端需要字段名、phase id、source phase、line 等机器字段。
+
+MVP0 WILL 保留人类可读 message，同时把 compile issue 结构化。一个 A8 缺字段错误 SHOULD 至少包含：`code`、`severity`、`phase_id`、`field_name`、`source_phase_candidates`、`path`、`line`。这让 Studio 后端可以把 `F-v21-io-conflict` 转成 HTTP 422，再让 Canvas 精确定位缺口。
 
 ## API
 
@@ -131,15 +127,17 @@ def _validate_phase_io_dataflow(
     return issues
 ```
 
+MVP0 SHOULD 把这个函数放在 loader/compiler 内部 API 层，而不是 Studio 层。原因是数据流校验依赖 `GraphManifest`、`PhaseAST` 和 schema 文件，这些对象都已经在 `SkillLoader.compile_skill()` 里可用，见 `packages/graph-agent/src/graph_agent/core/loader.py:150` 到 `packages/graph-agent/src/graph_agent/core/loader.py:176`。
+
 ### 2. 扩充的 CompileResult 返回值契约
 
-虽然 `CompileResult` 定义位于 `packages/graph-agent/src/graph_agent/core/compiler.py:22`，但它需要在返回集合中附加上述分析产生的 IO 层级问题。我们不需要改变其基础签名，但必须丰富其内含的 `issues` 列表承载的错误维度，确保抛给 Studio 对接时包含具体的定位锚点（比如引发冲突的字段名 `field_name` 和阶段源 `source_phase`）。这将协助前端实现更细腻的反馈。
+虽然 `compile_skill()` 当前直接返回 `CompiledSkill`，签名在 `packages/graph-agent/src/graph_agent/core/compiler.py:40` 到 `packages/graph-agent/src/graph_agent/core/compiler.py:45`，MVP0 SHOULD 明确一种可被 Studio 捕捉的结构化 issue 契约。短期可以通过异常携带 `issues`；长期可以让 compile result 明确包含 issue list。关键不是类名，而是信息不能只停留在字符串。
 
 ## Data Model / State
 
 ### 1. CompiledSkill 缓存序列化 Schema 的深层升级
 
-`packages/graph-agent/src/graph_agent/core/loader.py:66` 处的 `CompiledSkill` 及其附属组件需要配合 P1-1 进行 dehydrate 侧的字典结构变更，以确保反序列化的绝对无损。它的快照表示模型进化如下：
+`CompiledSkill` 当前字段已经包含 MVP0 需要保存的状态，见 `packages/graph-agent/src/graph_agent/core/loader.py:65` 到 `packages/graph-agent/src/graph_agent/core/loader.py:75`；cache snapshot 只是没有完整写出它们。MVP0 的 `DehydratedCompiledSkill` SHOULD 成为“可 JSON 化的 CompiledSkill 子集”，而不是另一个业务模型。
 
 ```python
 from dataclasses import dataclass
@@ -164,9 +162,11 @@ class DehydratedCompiledSkill:
     phase_tokens: dict[str, dict[str, Any]]             
 ```
 
+这里的 `raw` 仍要保留 root graph/io/phases 信息，因为 runtime 和 Studio 可能需要原始 schema；`manifest` 继续走 Pydantic `model_dump(mode="json")`，当前实现已在 `packages/graph-agent/src/graph_agent/core/cache.py:85` 到 `packages/graph-agent/src/graph_agent/core/cache.py:98` 做到这部分。新增字段只补齐 P1-1，不改变冷编译产物的语义。
+
 ### 2. Node AST 数据结构边界扩展
 
-在 `packages/graph-agent/src/graph_agent/core/manifest.py:83` 中，必须为 `SkillNodeAST` 和 `LogicNodeAST` 引入 `io` 字段。这是所有动态 Schema 解析的基石结构定义，采用了强类型的 Pydantic 模型：
+MVP0 SHOULD 在 AST 层表达 phase-level IO。当前 `_BaseNodeAST` 有 `name`、`raw_blocks`、`metadata`，见 `packages/graph-agent/src/graph_agent/core/manifest.py:59` 到 `packages/graph-agent/src/graph_agent/core/manifest.py:67`。`LogicNodeAST`、`SubgraphNodeAST`、`SkillNodeAST` 都继承它，但没有统一 IO 字段。新增 `PhaseIOSchema` 后，compiler 才能在 A7/A8 中以强类型方式读取输入输出。
 
 ```python
 from pydantic import BaseModel, Field
@@ -194,14 +194,20 @@ class SkillNodeAST(_BaseNodeAST):
     io: PhaseIOSchema = Field(...) 
 ```
 
-## Cross-feature Interaction
+MVP0 SHOULD 决定 `SUBGRAPH` 是否强制声明 `io`。如果 SUBGRAPH 继续代表固定子流程，它至少需要声明映射边界，否则 state-and-io-contract 无法完成 A6 子图隔离。这个问题与 [state-and-io-contract 的黑板隔离](../state-and-io-contract/mvp0-alignment.md#cross-state-blackboard-isolation) 直接相关。
 
-本特性的执行作为上游防线，直接影响下游的运行时和前端可视化的体验，属于跨模块的强关联枢纽：
+## Cross-feature interaction
+
+本特性的执行作为上游防线，直接影响下游的运行时和前端可视化的体验，属于跨模块的强关联枢纽。
 
 ### 1. 与 Studio trace-visualization 及 Canvas 的协同
-当编译期在 `_validate_phase_io_dataflow` 检查发生失败并抛出结构化的 `CompileIssue` 列表时，Studio 后端会将这批包含着精确错误点位（如哪个 Phase，缺少哪个 Input key）的信息转化为 HTTP 响应发回前端。
-前端画布将据此进行预判标红（即在运行期之前就可以在 Canvas 连线上打叉反馈节点结构连线断裂的提示）。具体反馈数据结构和链路的双向引用可见 [tracing-and-observability 后端功能](../tracing-and-observability/mvp0-alignment.md#后端功能)。这正是打通 PM 期待的 "可视化看到错误" 功能的最核心源头。
+
+MVP0 编译错误 SHOULD 成为 Studio Canvas 的静态反馈源。Canvas 不应该等到 `run_skill()` 运行后才知道某条边没有产出字段；A8 的 `_validate_phase_io_dataflow()` 应在 compile 阶段发现它。当前 Canvas/Trace feature 需要展示 phase 与 edge 的可观测状态，具体消费侧见 [Studio trace-visualization mvp0 alignment](../../studio/feature-folders/trace-visualization/mvp0-alignment.md)。
+
+双向关系是：compiler 提供 `phase_id`、`field_name`、`line`；tracing/runtime 后续提供实际运行的 node_start/node_end。前者回答“图还没跑就知道结构错在哪里”，后者回答“图跑起来后每一步实际用了什么”。这两类数据不应该混在同一个错误字符串里。
 
 ### 2. 对 State Contract 阶段过滤漏斗的直接支撑
-此处静态发现并绑定的 `io` schema 将不会只是一个仅用于校验的占位符。在运行期（Execution-Runtime）中，这些被 AST 带过去的 `PhaseIOSchema` 对象将直接输送给各个阶段的 Phase Node Wrapper。
-引擎将在那里将其作为 `phase_input` 的严格装载漏斗依据，详见 [state-and-io-contract 核心防覆盖机制](../state-and-io-contract/mvp0-alignment.md#后端功能)。通过这个深度的互操作，引擎完美闭环了从静态规约设定到动态执行期阻断的完整生命周期。由于它的把关，运行时的逻辑层变得异常纯粹。
+
+state-and-io-contract 的 Runtime Input Funnel 和 phase-level sandbox 都依赖本文件新增的 `io` schema。编译阶段负责把 frontmatter 和 JSON Schema 变成可查的 AST；运行阶段负责按这些规则过滤输入、构造 `phase_input`、封装 `phase_outputs`。运行侧规划见 [state-and-io-contract mvp0 alignment](../state-and-io-contract/mvp0-alignment.md#后端功能)。
+
+举例：compiler 确认 `summarize.io.inputs.required = ["clean_text"]` 且 `extract.io.outputs.properties.clean_text` 存在；runtime 才能在 `summarize` 执行前只把 `clean_text` 交给它，而不是把整个 `state.data` 全量塞进去。

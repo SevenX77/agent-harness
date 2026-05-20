@@ -1,6 +1,6 @@
 # execution-runtime (engine) — MVP0 Alignment (下一步对齐逻辑)
 
-> **Status**: Filled by a2 (Gemini), 2026-05-20
+> **Status**: Filled by a1 (Codex) based on a2 framework, 2026-05-20
 > **Scope**: Graph 执行装配调度、主入口生命周期 run_skill、节点重试、subagent / call_subgraph 动态工具注入 (audit A4/A5)
 > **配套**: 见 [INDEX.md](../../INDEX.md) 5 维模板 + cross-link 规则 + writing conventions。
 
@@ -8,30 +8,31 @@
 
 N/A — 此模块为纯 backend Python library, 无 UI / 无前端调用面。
 
-这里的 "backend Python library" 指 `packages/graph-agent` 里的 Python 引擎代码。尽管 Studio 画布的右侧有一个 "Playground" 测试面板或者 History 的 Run 面板用于触发和展示这段 graph 跑的结果，但引擎的这套运行时逻辑是不包含任何 React 前端组件或是 API HTTP Server 代码的。所有用户看到的界面元素，都是外部包装层（比如 FastAPI WebSocket 流）通过捕获此执行态数据并自行渲染绘制的。这层机制就像发动机，决定了能否发动，但不负责仪表盘的展现。在 MVP0 阶段，它的目标就是稳健地将推演逻辑跑通，不抛出内部底层错误，所有的提示都应当被妥善包装为前端可展示的结构。
+Execution runtime 是“真正把编译好的 skill 跑起来”的引擎层。PM 在 Studio 里看到的 Run 按钮、Trace 流和 History 结果，都不是这里直接渲染的 UI；它们只是消费 runtime 产生的结果、错误和事件。当前 V2.1 主线在 `_run_v21_skill_dict()` 里执行 `compile_skill -> assemble_graph -> graph.invoke`，见 `packages/graph-agent/src/graph_agent/core/runner.py:451` 到 `packages/graph-agent/src/graph_agent/core/runner.py:486`。
+
+MVP0 runtime 的用户价值是：点击运行后，真实 LLM 能被自动解析并注入，子图不会偷读父图黑板，ReAct 消息不会无限堆积，错误能以可展示的 code 返回，而不是裸 Python RuntimeError。
 
 ## 前端逻辑
 
 N/A — 此模块为纯 backend Python library, 无 UI / 无前端调用面。
 
-前端逻辑仅仅是通过网络接口获得一个 `run_id` 然后通过 WebSocket 或者长轮询来订阅这里的执行状态变迁而已。本库只负责接收核心装配后的参数，把它们丢入 LangGraph 并使用真实的 AI 模型推演到最终退出或报错，前端不对如何发往 LLM、如何清理消息栈等核心行为进行介入。前端对 `ModelResolver` 或 `ExitContractRegistry` 没有任何感知，这些黑盒逻辑全部封装在引擎后端内。因此，这里没有任何前端架构的改动。所有的业务模型全部被收拢在了后端的 Python 实现里。
+React 不调用 `assemble_graph()`，也不理解 LangGraph reducer。前端最多通过 Studio 后端启动 run，再订阅事件。Runtime 与前端的边界应该是结构化结果和 trace event，而不是共享内部 Python state。V2.1 当前还会丢弃 callbacks，代码在 `packages/graph-agent/src/graph_agent/core/runner.py:462`，所以 MVP0 需要把 observability 接线放回 runtime，但不是让前端介入执行。
 
 ## 后端功能
 
 ### 1. V2.1 真实 LLM 路径模型装载接通 (P0-1 修复)
 
-当前 `run_skill` 在无 mock 模型时会抛出臭名昭著的错误：`[F-v21-graph] SKILL phase requires chat_model`。这是由于引擎缺乏主动寻找并注入模型的机制。实测位置在 `packages/graph-agent/src/graph_agent/core/runner.py:467` 附近的 `chat_model` 装载判定，详见 [baseline.md#后端功能](./baseline.md#后端功能)。这种缺失使得公用的核心入口彻底失效。
+MVP0 SHOULD 让 `run_skill()` 在没有 mock 的情况下也能跑真实 SKILL phase。当前 `_run_v21_skill_dict()` 只在传入 `mock_llm` 时给 `chat_model` 赋值，否则就是 None，见 `packages/graph-agent/src/graph_agent/core/runner.py:467` 到 `packages/graph-agent/src/graph_agent/core/runner.py:469`。SKILL node 一旦发现 `chat_model is None`，直接抛 `RuntimeError("[F-v21-graph] SKILL phase requires chat_model")`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:229` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:234`。
 
-MVP0 改造必须建立模型自发现闭环：
-我们需要提供完整的 `ModelResolver` 以完成从 `llm-provider-config`（负责具体的 provider API key 存放以及多角色调度设定）到底层真实可推理 LangChain `BaseChatModel` 的无缝切换。这意味着 `run_skill` 在启动期间将借助该 Resolver 自动拿到当前所选的 LLM（区分 `default` 和 `critic` 等不同角色），再把其送入 `assemble_graph` 构造出的图中，确保 `SKILL` node 具备实际对外发起大模型调用的核心推演能力。
-这种组装将在每一次图启动时动态进行，以适应随时被改变的用户配置。
+这里的 ModelResolver 是“把角色名解析成真实 LangChain 模型”的工厂。例子：phase frontmatter 写 `llm_role: analyst`，resolver 查 Studio 的 roles/provider 配置，得到 Anthropic/OpenAI/Gemini 等具体模型实例，然后交给 `assemble_graph()`。当前 `assemble_graph(compiled, chat_model=...)` 已经有注入参数，签名在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:55` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:60`，MVP0 不需要改 LangGraph 装配入口，只需要在 runner 主线补上解析路径。
+
+MVP0 WILL 把“缺模型”从裸 RuntimeError 升级成结构化错误，例如 `F-v21-model-not-found`。这样 Studio 可以告诉用户“没有配置 copilot/default 模型”而不是“SKILL phase requires chat_model”。
 
 ### 2. Child flow subagent_depth 状态透传与下发 (P1-2 修复)
 
-目前嵌套层级的探测在实际子图中名存实亡。在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:482` 附近，`_subagent_runnable_config` 仅仅是把 `subagent_depth: depth + 1` 敷衍地写进了 LangGraph 自身控制体系的 `RunnableConfig.metadata`。但真正的运行节点逻辑使用 `parent_state.get("flow", {})` 直接拿到了未增加层级的原始 flow 字典，这就是失效并导致死循环风险激增的根因。由于没有传到底层运行栈，深层网络就会无限制蔓延。
+MVP0 SHOULD 把 subagent depth 写入 child state 的 `flow`，而不是只写进 RunnableConfig metadata。当前 `_subagent_runnable_config()` 把 `"subagent_depth": depth + 1` 放在 metadata，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:482` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:505`；但 `_invoke_subagent_once_t23()` 启动子图时，`"flow"` 仍然是 `parent_state.get("flow", {})`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:400` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:405`。
 
-MVP0 的下传透传机制改造：
-在执行阶段切入子运行的 `_invoke_subagent_once_t23()` 方法内（大约 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:400` 处），我们必须对 `flow` 进行显式的深拷贝复制并覆写层级属性，接着送入隔离的黑板。只有这样做才能保证父图和子图之间深度状态的安全。
+这会让深度限制变成“看起来写了，子图实际没读到”。MVP0 WILL 在进入 child graph 前深拷贝 parent flow，显式写入 `subagent_depth = current_depth + 1`，再传给子图。深拷贝很重要，因为 flow 是 dict；如果直接复用父对象，子图修改 `flow["subagent_validation_retries"]` 这类控制字段时会污染父图。
 
 ```python
 import copy
@@ -51,31 +52,33 @@ child_state = {
 }
 ```
 
+这段伪代码同时服务 A6：child data 不应该是 `{**before_data, **input_data}`。当前正是这样合并父图全量 data 与显式输入，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:398` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:403`。
+
 ### 3. Exit_contract 历史堆积净化去重 (P1-3 修复)
 
-在循环多次的 LLM 对话中，每次注入引导后如果不做清理，它将导致提示消息无底洞般膨胀。在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:244` 处，`inject_exit_contract(messages, phase_ast.exit_contract)` 产生的带有契约提示的消息数组被整体保存入了长期流。ReAct 转的圈数越多，`messages` 中的系统契约指令越多，不仅耗费巨量 Token 甚至会带偏模型注意力，从而引发退化。
+MVP0 SHOULD 让 exit contract 只在发给模型时临时出现，不进入长期 `messages` 历史。当前每轮 ReAct 都先 `inject_exit_contract(messages, phase_ast.exit_contract)`，再把 `prompt_messages` 和模型 response 一起保存为下一轮 messages，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:243` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:247`。如果模型跑多轮，exit contract 会重复堆积。
 
-MVP0 净化逻辑：
-为了根治这一缺陷，我们将设计一层透明拦截净化。引入 `ExitContractRegistry` 数据结构。它能在发往 `model.invoke()` 之前，动态拼接入包含 exit contract 的特殊 `SystemMessage` 结构并记录其内存 ID；但是在接收模型答复之后，更新到 `BlackboardState` 准备回传时，执行净化操作，筛除掉标记有 exit contract 特征的元素。保证依靠 LangGraph 的 `add_messages` 默认行为只会追加纯粹的推断交互历史，保证对话上下文绝不污染。通过这种去重机制，模型的记忆流永远保持精简。
+PM 版例子：exit contract 是“回答必须调用 finish_task 并输出 JSON”的规则。它应该像临时贴纸一样贴在本次请求上，而不是每轮都复印一份塞进聊天历史。MVP0 WILL 用 `ExitContractRegistry` 标记临时消息，并在写回 `BlackboardState.messages` 前 strip 掉。`messages` 当前使用 LangGraph `add_messages` reducer，定义在 `packages/graph-agent/src/graph_agent/runtime/state.py:40`；这意味着只要污染进入 state，后续就会一直追加扩散。
 
 ### 4. Subagent 抽象层级轻量单节点化 (A4 改造)
 
-当前的 subagent 机制极其厚重，竟然要求子代理具备完整的 `GRAPH.md`、`io/*.json` 以及复杂的 `phases/` 目录结构。这对于仅仅想跑一个代理完成微型分析任务的场景来讲，带来了巨大阻力。这部分痛点导致复杂的装载代码大量散落在 loader 的拼接处理中，这也被 baseline.md 多次提及。当前逻辑集中在 `packages/graph-agent/src/graph_agent/core/subagents.py`。
+MVP0 SHOULD 允许轻量 subagent，不再强制每个 subagent 都是完整 V2.1 graph root。当前编译期 `_resolve_subagent_root()` 要求 subagent path 是目录且有 `GRAPH.md`，见 `packages/graph-agent/src/graph_agent/core/loader.py:447` 到 `packages/graph-agent/src/graph_agent/core/loader.py:483`。runtime 又会对每个 subagent 再 `compile_skill()` 和 `assemble_graph()`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:374` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:389`。
 
-MVP0 改造：
-我们将支持定义一种纯粹的**轻量单节点**作为 subagent。即它的目录下就只包含一个 Markdown（甚至可能只需要提供 Prompt）和一个工具目录。在引擎遇到这类特殊轻量子图，进入装载时，引擎将为其动态包裹一层虚构的 Graph 执行外壳，或者干脆退化为一个原生的 LangChain 工具节点。这就彻底摆脱了多文件编排的桎梏，实现了随处可调用的灵活性。这也是让 PM 不写复杂 YAML 而完成微操的核心改进。
+轻量单节点 subagent 的目标是：业务作者只写一个 prompt 或一个 `SKILL.md` 类文档，也能被父 SKILL phase 当工具调用。MVP0 WILL 在 compiler 侧识别轻量子代理，并在 runtime 侧包装成一个简单工具节点或虚拟单节点 graph。这样 A4 不会破坏现有完整 graph subagent，同时给“小任务委派”更低门槛。
 
 ### 5. Call_subgraph 大流程动态工具暴露 (A5 改造)
 
-LLM 目前只能用上述被拍平的微型 `subagent` 去执行单步闭环任务。对于需要委派一整套带有明确拓扑 `GRAPH.md` 和多节点串联子流程的情况，我们目前没有任何有效入口。这是极其受限的，它阻止了嵌套业务的开发。
+MVP0 SHOULD 新增 `call_subgraph` 工具，让 LLM 在 SKILL phase 中主动调用一个完整 graph skill。它和当前 `SUBGRAPH` phase 不同：`SUBGRAPH` 是固定拓扑节点，执行到那里自动跑；`call_subgraph` 是 LLM 决策时的工具调用，模型可以按任务需要选择是否调用。
 
-MVP0 改造：
-我们将向大模型开放名为 `call_subgraph` 的注册工具。它是专门用于让模型基于意图去拉起另外一个独立的复杂 V2.1 skill 流的桥梁封装。模型能够通过传递结构化的参数集来触发一条包含研究、总结、审计等多步骤连环的复杂编排，而对父节点自身依然只是一次 Tool Call 的等待。它在功能上极大地扩充了引擎作为底座的想象空间，也是未来编排庞大系统架构的关键能力。
+当前 `_build_skill_node()` 收集业务 tools、subagent tools、framework tools 和 `finish_task`，代码在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:184` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:227`。subagent tool map 只来自 `compiled.subagents_by_phase`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:301` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:308`。没有 subgraph registry，也没有 `call_subgraph` 工具族。
+
+MVP0 WILL 把 call_subgraph 设计成显式输入沙盒：LLM 必须传 `child_graph_path` 和 `explicit_inputs`，父图 `data` 不会隐式继承。这个约束与 [state-and-io-contract 的 A6 黑板隔离](../state-and-io-contract/mvp0-alignment.md#cross-state-blackboard-isolation) 是同一个安全边界。
 
 ### 6. 执行器的异常捕获与容错包裹
 
-在运行中，LangGraph 节点由于其不确定性，抛出的各种异常常常使得调用者一头雾水。为此我们将在 `packages/graph-agent/src/graph_agent/core/runner.py:460` 主体注入强大的重试与保护：
-任何异常如果不是由我们定义的控制流异常（如隔离违规抛错），都应当被统一降级为 `GraphAgentFatalError`，并附带着精确的错误栈抛给 Studio，使得容错机制标准化。这种包裹层将让那些未被处理的 KeyError 或者 IndexError 变成可被监控和捕捉的形式。
+MVP0 SHOULD 把运行期异常归一化。当前 `run_skill()` 成功时会包装 `WorkflowResult`，异常分支只捕获 `GraphAgentError`，见 `packages/graph-agent/src/graph_agent/core/runner.py:195` 到 `packages/graph-agent/src/graph_agent/core/runner.py:224`。但 P0-1 的无模型错误是裸 `RuntimeError`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:233` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:234`。
+
+MVP0 WILL 让 runtime node 抛出的可预期错误使用统一 code，例如 `MODEL_NOT_FOUND`、`DEPTH_LIMIT_REACHED`、`INVALID_TOOL_ARGS`。未知异常也应被包进 `GraphAgentFatalError`，并交给 tracing 发出 `EXCEPTION` 事件。这样 Studio 不需要按 Python 异常类猜测用户提示。
 
 ## API
 
@@ -125,6 +128,8 @@ class ModelResolver:
         """Return list of models available in the configured routing."""
         pass
 ```
+
+MVP0 SHOULD 在 `_run_v21_skill_dict()` 中使用 resolver，而不是要求调用方手动传 `mock_llm`。`mock_llm` 仍可保留为测试覆盖入口。
 
 ### 2. call_subgraph 工具封装完整签名
 对应 A5 阶段中 LLM 对外界发起复杂编排的请求入口。它的 Python 端调用承载将是这个函数：
@@ -192,30 +197,25 @@ class ExitContractRegistry:
 
 ## Data Model / State
 
-本运行时不直接持有持久化的外围 Schema，其关注的 Data Model 主要围绕传递流中对象的控制：
+Runtime state 仍以 `BlackboardState` 为主，当前字段是 `data`、`flow`、`messages`、`run_id`，定义在 `packages/graph-agent/src/graph_agent/runtime/state.py:35` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:41`。MVP0 不应把所有控制信息都塞进 RunnableConfig metadata；真正影响执行逻辑的内容必须进入 state，特别是 `subagent_depth`。
 
-- **子节点上下文控制块**: `child_flow` 字典将作为隔离状态的一部分，在深拷贝后独立发展其 `subagent_depth`、`subagent_validation_retries`，保证内部的递归错误不会影响上游流状态的完整性。这也是为什么 P1-2 必须通过状态下放实现，而不是继续依赖外挂的 metadata，这种分而治之的结构使得整个架构免受内部错误波及。同时，这种传递方式也使得状态的回溯与 debug 成为可能。
+子图调用的 state WILL 变成隔离对象：`data` 只来自 explicit inputs，`flow` 是父 flow 的深拷贝加深度字段，`messages` 从空列表开始。当前 SUBGRAPH 固定节点也仍然用父图全量 data 启动子图，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:155` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:164`；MVP0 SHOULD 与 state-and-io-contract 一起收敛这个行为。
 
 ## Cross-feature Interaction
 
 本特性的运行阶段极大地牵涉着上下游状态的传递以及前端表现。如果引擎运行时罢工，其它模块全部停摆。
 
 ### 1. State 黑板数据的严格沙盒隔离
-在执行子图时（无论是通过底层的 `_invoke_subagent_once_t23()` 还是暴露的 `call_subgraph` 大招），最核心的要求是断绝隐式变量继承的灾难。此过程强依赖状态与合约中的全新沙盒规范，黑板必须经历一次彻底的划分阻断。其双向协作及内存分配策略的细节详见：[state-and-io-contract 层的黑板彻底隔离设计](../state-and-io-contract/mvp0-alignment.md#cross-state-blackboard-isolation)。这是保证引擎健壮不崩溃的核心防线。它也从根本上确保了子任务的边界清晰。
+在执行子图时（无论是通过底层的 `_invoke_subagent_once_t23()` 还是暴露的 `call_subgraph` 大招），最核心的要求是断绝隐式变量继承的灾难。此过程强依赖状态与合约中的全新沙盒规范，黑板必须经历一次彻底的划分阻断。其双向协作及内存分配策略的细节详见：[state-and-io-contract 层的黑板彻底隔离设计](../state-and-io-contract/mvp0-alignment.md#cross-state-blackboard-isolation)。
 
 ### 2. 运行时全维度事件发射
-当引擎处于上述调度流中，包括发起单节点的 Tool Call 或是进出复杂的 Subgraph，它都必须在关键切面主动激活 [tracing-and-observability 的 callback event bus](../tracing-and-observability/mvp0-alignment.md#后端功能) 的相关记录。这实现了 PM 最重要的 “看到运行过程输入输出” 的愿景，也是把抽象的 Python 执行轨迹变成 Studio 界面中人类可阅读日志流的唯一核心路径。正是这层打通，才让死板的代码运行具备了可视化的生命力。通过对状态流转的精确控制与事件的分发，这两大模块完成了闭环。
+Runtime WILL 在 phase start/end、LLM call、tool call、subagent enter/exit 和 exception 位置调用 tracing callback。当前 V2.1 runner 删除 callbacks，见 `packages/graph-agent/src/graph_agent/core/runner.py:462`；MVP0 需要与 [tracing-and-observability 的 callback event bus](../tracing-and-observability/mvp0-alignment.md#后端功能) 对齐。
 
 ### 7. 详细的状态下发测试策略
-为了保证上述的 `subagent_depth` 和 `BlackboardState` 的完全隔离能够在长期的迭代中不被破坏，我们必须在 `packages/graph-agent/tests/core/` 下引入深度的集成测试：
-- **测试用例 1: Depth 穿透拦截**。使用 pytest 构建一个具备 `subgraph` 调用的 skill，在其子图中继续进行 `subagent` 调用。我们断言执行流能在第三层准确抛出 `GraphAgentFatalError`，并且错误栈能精准指出触发超限的阶段名。实测发生路径在 `packages/graph-agent/tests/core/test_v21_subagent_executor.py:124`。
-- **测试用例 2: 独立流隔离**。我们将在父图的 `flow` 注入特殊的 `test_marker=1`。断言当进入 `_invoke_subagent_once_t23()` 后，子图如果在其 `LOGIC` 阶段修改了 `flow["test_marker"] = 2`，在退出子图后，父图的 `flow["test_marker"]` 必须依旧等于 `1`。这种完全隔离是 A6 设计成功的基础。
+为了保证上述的 `subagent_depth` 和 `BlackboardState` 的完全隔离能够在长期的迭代中不被破坏，我们必须在 `packages/graph-agent/tests/core/` 下引入深度的集成测试。重点断言包括：子图看到的 `flow["subagent_depth"]` 已递增；子图修改 `flow` 不会污染父图；child data 不含父图未显式传入的 key。当前问题触发点在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:398` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:405`。
 
 ### 8. LangChain RunnableConfig 的彻底改造
-在 LangGraph 中，除了 State 之外，`RunnableConfig` 的 `metadata` 和 `callbacks` 也是信息传递的重要途径。
-MVP0 将重新梳理这一块的装载。目前在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:482` 中的 `_subagent_runnable_config`：
-- 我们不仅要传递 `thread_id`，还需要将 `run_id` 与当前的 `phase_id` 拼装成 `parent_id`。
-- 将清理不必要的自定义 metadata，统一将其归还给 `flow` 控制，让 config 只负责最原生的并发控制与异步调度，保证职责单一。
+MVP0 SHOULD 让 `RunnableConfig` 只承载 tags、callbacks、run id 等调度/观测信息，而不是作为业务控制状态来源。当前 `_subagent_runnable_config()` 同时写 tags、run_id、metadata 和 callbacks，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:482` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:505`。深度、重试次数和隔离边界应该回到 `flow` 或显式 child state。
 
 ### 9. 异常分发与状态码体系
 为了配合前端界面的多状态展示，我们在抛出异常时需要完善内部的 Error Code 体系：
@@ -225,4 +225,4 @@ class ErrorCode:
     DEPTH_LIMIT_REACHED = "F-v21-depth-limit"
     INVALID_TOOL_ARGS = "F-v21-tool-args-invalid"
 ```
-这将在 `packages/graph-agent/src/graph_agent/core/runner.py:460` 附近被强绑定，最终交付给 Tracer。
+这些 code SHOULD 被 tracing 的 `EXCEPTION` 事件携带，并最终交给 Studio 展示。

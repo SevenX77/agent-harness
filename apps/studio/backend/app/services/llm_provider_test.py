@@ -85,7 +85,6 @@ async def ping_provider_extended(
 ) -> PingResultExtended:
     """Ping provider and return full model list (vendor-shape aware)."""
 
-    del provider_code
     normalized_base_url = (base_url or DEFAULT_BASE_URLS[provider_type]).rstrip("/")
     started = time.perf_counter()
     try:
@@ -304,7 +303,11 @@ async def _probe_anthropic_1token(base_url: str, headers: dict[str, str]) -> int
     return response.status_code
 
 
-async def _probe_anthropic_model_1token(base_url: str, headers: dict[str, str], model_id: str) -> int:
+async def _probe_anthropic_model_1token(
+    base_url: str,
+    headers: dict[str, str],
+    model_id: str,
+) -> int:
     url = _join_base_url_and_endpoint(base_url, "/v1/messages")
     payload = {
         "model": model_id,
@@ -329,7 +332,11 @@ async def _probe_google_genai_1token(base_url: str, headers: dict[str, str]) -> 
     return response.status_code
 
 
-async def _probe_google_genai_model_1token(base_url: str, headers: dict[str, str], model_id: str) -> int:
+async def _probe_google_genai_model_1token(
+    base_url: str,
+    headers: dict[str, str],
+    model_id: str,
+) -> int:
     url = _join_base_url_and_endpoint(base_url, f"/v1beta/models/{model_id}:generateContent")
     payload = {
         "contents": [{"parts": [{"text": "."}]}],

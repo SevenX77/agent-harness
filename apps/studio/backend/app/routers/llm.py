@@ -31,9 +31,9 @@ from app.services.llm_provider_test import (
     DEFAULT_BASE_URLS,
     _extract_model_ids_from_section,
     _extract_section_4,
-    probe_model_id,
     probe_available_models,
     probe_compatible_sdks,
+    probe_model_id,
 )
 from app.services.llm_roles import (
     InvalidRoleReference,
@@ -294,7 +294,10 @@ async def test_provider_models(request: ProviderModelTestRequest) -> ProviderMod
     base_url = provider.base_url or _default_base_url(provider_type)
     model_ids = _dedupe_model_ids(request.model_ids)
     if not model_ids:
-        return ProviderModelTestResponse(results=[], available_models=list(provider.available_models))
+        return ProviderModelTestResponse(
+            results=[],
+            available_models=list(provider.available_models),
+        )
 
     vendor = _infer_vendor_from_provider(provider)
     auth_header_template = None
@@ -440,7 +443,10 @@ def _dedupe_model_ids(model_ids: list[str]) -> list[str]:
     return result
 
 
-def _merge_available_models(existing: list[ModelInfo], passed_model_ids: list[str]) -> list[ModelInfo]:
+def _merge_available_models(
+    existing: list[ModelInfo],
+    passed_model_ids: list[str],
+) -> list[ModelInfo]:
     by_id = {model.id: model for model in existing}
     for model_id in passed_model_ids:
         if model_id not in by_id:

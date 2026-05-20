@@ -82,16 +82,28 @@ class ProviderCredential(BaseModel):
     )
     provider_type: ProviderType | None = Field(
         default=None,
-        description="SDK protocol used to call this credential: anthropic_compatible, openai_compatible, or google_genai.",
+        description=(
+            "SDK protocol used to call this credential: anthropic_compatible, "
+            "openai_compatible, or google_genai."
+        ),
     )
 
     last_test_status: TestStatus = Field(
         default="untested",
         description="Last persisted provider probe status for this credential.",
     )
-    last_test_at: str = Field(default="", description="ISO timestamp of the last provider probe, empty when untested.")
-    last_test_message: str = Field(default="", description="Human-readable message from the last provider probe.")
-    last_error_code: str = Field(default="", description="Machine-readable error code from the last provider probe.")
+    last_test_at: str = Field(
+        default="",
+        description="ISO timestamp of the last provider probe, empty when untested.",
+    )
+    last_test_message: str = Field(
+        default="",
+        description="Human-readable message from the last provider probe.",
+    )
+    last_error_code: str = Field(
+        default="",
+        description="Machine-readable error code from the last provider probe.",
+    )
     available_sdks: list[str] = Field(
         default_factory=list,
         description="SDK protocols confirmed by provider probing for this credential.",
@@ -159,7 +171,10 @@ class RoleModelEntry(BaseModel):
 
     providers: list[str] = Field(
         default_factory=list,
-        description="Ordered provider identifiers used as the fallback chain for this model in a role.",
+        description=(
+            "Ordered provider identifiers used as the fallback chain for this model "
+            "in a role."
+        ),
     )
 
 
@@ -168,13 +183,27 @@ class RoleEntry(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    temperature: float = Field(default=0.7, description="Sampling temperature used when this role invokes a model.")
-    model_fallback: bool = Field(default=False, description="Whether this role may fall back across configured models/providers.")
-    active_model: str = Field(description="Model code currently selected as the first-choice model for this role.")
-    system_prompt_prefix: str | None = Field(default=None, description="Optional role-specific prompt prefix prepended at runtime.")
+    temperature: float = Field(
+        default=0.7,
+        description="Sampling temperature used when this role invokes a model.",
+    )
+    model_fallback: bool = Field(
+        default=False,
+        description="Whether this role may fall back across configured models/providers.",
+    )
+    active_model: str = Field(
+        description="Model code currently selected as the first-choice model for this role.",
+    )
+    system_prompt_prefix: str | None = Field(
+        default=None,
+        description="Optional role-specific prompt prefix prepended at runtime.",
+    )
     models: dict[str, RoleModelEntry] = Field(
         default_factory=dict,
-        description="Role model map keyed by model code, each value carrying that model's provider fallback chain.",
+        description=(
+            "Role model map keyed by model code, each value carrying that model's "
+            "provider fallback chain."
+        ),
     )
 
 

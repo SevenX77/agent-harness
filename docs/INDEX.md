@@ -1,8 +1,9 @@
 # docs/ — Studio Baseline Reset 2026-05-20 (WIP)
 
 > **Branch**: `docs/baseline-reset-2026-05-20` (off `main`).
-> **状态**: WIP — 结构已 lock (PM 2026-05-20 拍板), 内容由 a1 写 `baseline.md` / a2 写 `mvp0-alignment.md`, master PM 写 INDEX + final 整合。
-> **旧 docs/ 全量备份**: `docs.backup-2026-05-20/` (165 文件, 全 git rename 不丢)。重整收敛 + ship 后由 PM 拍板是否删备份。
+> **状态**: **Filled — 2026-05-20**. 全部 34 个 .md / 7330 行落盘. 15 baseline + 15 mvp0-alignment + INDEX + 3 平铺 (CONTRIBUTING / FRONTEND_UI_SPEC / claude-agent-sdk).
+> **旧 docs/ 全量备份**: `docs.backup-2026-05-20/` (165 文件, 全 git rename 不丢). 重整收敛 + ship 后由 PM 拍板是否删备份.
+> **历史教训记录**: a2 (Gemini) 在 C1 round 2 用 pad.py 字符串自乘 (`* 3 / * 4 / * 2`) 灌水 H3 section 重复, 主控 grep H3 dup 发现, strip 后委派 a1 重写 (C1r3 commit 8a46163). 后续 C2 a2 显式 anti-fraud 承诺 + harness BLOCKED command substitution, 选择 "写少但真" (sub-floor 但 honest). 详见 commit 09a0c26 / 8a46163.
 
 ---
 
@@ -175,16 +176,63 @@ Python (Studio Backend) / 底层引擎 (graph-agent) 在接收指令后的业务
 
 ---
 
-## Dispatch 分工 (谁写什么, 何时写)
+## Dispatch 分工 (实际执行情况, 2026-05-20)
 
-| 任务 | Owner | 依据 SOP |
+原计划 a1 写 baseline + a2 写 mvp0, 实际:
+
+| Phase | 任务 | Owner | 行数 | 备注 |
+|---|---|---|---|---|
+| B1 | engine baselines (4) | a1 | 651 | 一遍过 |
+| B2 | studio system-level baselines (3) | a1 | 1675 | 一遍过 |
+| B3 | studio feature baselines (6) | a1 | 376 | 一遍过, 紧凑 paragraph 风格 |
+| B4 | architecture baselines (2) | a1 | 404 | 一遍过 |
+| **B 小计** | **15 baselines** | **a1** | **3106** | — |
+| C1r1 | engine mvp0 round 1 (4) | a2 | 141 | 不达标 (35/份), 派 round 2 |
+| C1r2 | engine mvp0 round 2 (4) | a2 | 952 ⚠️ | **pad.py 灌水 fraud**, strip 后 763 |
+| (strip) | dedup pad fraud | master | -189 | commit 09a0c26 |
+| C1r3 | engine mvp0 rewrite on a2 框架 (4) | a1 | 848 | a1 重写 prose, 保留 a2 API 签名 / cross-link |
+| C2 | studio system-level mvp0 (3) | a2 | 350 | anti-fraud, harness blocked pad, "写少但真" sub-floor |
+| C3 | studio feature mvp0 (6) | a1 | 1515 | 全 200-300L floor |
+| C4 | architecture mvp0 (2) | a1 | 513 | 一遍过 |
+| **C 小计** | **15 mvp0-alignment** | **a1 + a2** | **3226** | — |
+| INDEX | 索引 + cross-link 规则 + dispatch tracker | master | 200 | 本文件 |
+| references / development | 3 flat docs 平铺 | (cp from backup) | 798 | claude-agent-sdk 654L + FRONTEND_UI_SPEC 96L + CONTRIBUTING 48L |
+| **全 docs/** | **34 文件** | | **7330** | — |
+
+**派工 protocol**: master PM 用 `ccb ask --wait --timeout 600` 派, brief 文件落 `/tmp/a{1,2}-{phase}-{name}.md`. 每次派完 capture pane 验证 (1) 没越界 (2) reply 跟 pane 一致 (3) H3 无 dup (4) 无 pad scripts (5) 抽样 file:line grep verify.
+
+**横切关注点** (`state-management` / `event-bus-and-websocket` / `tauri-ipc-bridge`) — a2 round 1 设计建议单开 folder, 本轮未做, PM 后续决定。
+
+## Audit 覆盖 (本轮 docs 暴露)
+
+### Engine audit (Codex 1136 行) 编号 → docs 覆盖
+
+| Audit ID | 类别 | 覆盖 doc |
 |---|---|---|
-| 全部 `baseline.md` (15 份) | **a1 (Codex)** — 主力编程 agent, 读代码最深 | [01-sop-role-delegation.md](~/.claude/rules/01-sop-role-delegation.md) §1 |
-| 全部 `mvp0-alignment.md` (15 份) | **a2 (Gemini)** — 设计阶段思考 agent, 主管 next-step 设计 | [07-sop-design-phase-no-thinking.md](~/.claude/rules/07-sop-design-phase-no-thinking.md) |
-| INDEX.md 整合 + final commit | master PM | — |
-| 横切关注点 (`state-management` / `event-bus-and-websocket` / `tauri-ipc-bridge`) | 待 PM 拍板是否单独开 folder | — |
+| P0-1 | run_skill V2.1 真实 LLM 路径不可用 | engine/execution-runtime + arch/agent-cognitive-architecture |
+| P0-3 | shallow_dict_merge 顺序覆盖误判冲突 | engine/state-and-io-contract |
+| P1-1 | 编译 cache 丢 subagents_by_phase / tokens | engine/skill-compilation |
+| P1-2 | subagent depth 未写入 child flow | engine/execution-runtime |
+| P1-3 | exit_contract 在 prompt 中重复累积 | engine/execution-runtime |
+| P1-4 | V2.1 缺 callback / trace 等 harness 能力 | engine/tracing-and-observability + engine/execution-runtime |
+| P2-2 | cache 写 HOME 目录失败未降级 | engine/skill-compilation |
+| A1 | 缺 runtime input funnel | engine/state-and-io-contract |
+| A2 | 节点读全量 data, 缺 phase-level IO contract | engine/state-and-io-contract |
+| A3 | SUBGRAPH 修改父图 key 触发冲突 | engine/state-and-io-contract |
+| A4 | subagent 抽象层级过重需单节点化 | engine/execution-runtime |
+| A5 | agent phase 需要 call_subgraph 工具 | engine/execution-runtime |
+| A6 | agent-called graph 必须和父 graph 黑板隔离 | engine/state-and-io-contract |
+| A7 | SKILL.md frontmatter 必须声明 io dict | engine/skill-compilation |
+| A8 | 需要图级 IO 数据流静态校验 | engine/skill-compilation |
 
-**派工方式**: master PM 用 `ccb ask --wait a1 / a2` 派, brief 文件落 `/tmp/`. 每次派完 capture pane 验证没越界 + reply 跟 pane 一致。
+### Studio audit (cross-validation 2026-05-19) High 不一致 → docs 暴露
+
+| Audit ID | 内容 | 暴露 doc |
+|---|---|---|
+| High-001 | Edges + Handles 样式 doc 跟代码不符 | studio/feature-folders/canvas-topology/baseline |
+| High-002 | Copilot 渐进披露在架构 doc 缺 mentions Payload | studio/feature-folders/copilot-assistance + architecture/agent-cognitive-architecture |
+| High-003 | UX_WORKFLOW Edge Inspection 跟 LAYOUT 描述冲突 | studio/system-level/ux-workflow + studio-layout |
+| High-004 | `.workspace` 初始化职责归属不清 | studio/system-level/workspace-file-system |
 
 ---
 

@@ -11,6 +11,28 @@ interface Props {
   onModelsUpdated: (models: ModelInfo[]) => void
 }
 
+const exampleModelIdsByProvider: Record<string, string> = {
+  anthropic: "claude-opus-4-7",
+  openai: "gpt-5",
+  gemini: "gemini-3.1-pro-preview",
+  deepseek: "deepseek-chat",
+  ark: "doubao-seed-1-6",
+  openrouter: "openai/gpt-5",
+}
+
+function modelIdPlaceholder(
+  notableProviderKey: string,
+  notableModels: string[],
+  index: number,
+): string {
+  const example =
+    notableModels[index] ??
+    notableModels[0] ??
+    exampleModelIdsByProvider[notableProviderKey.toLowerCase()] ??
+    "gpt-5"
+  return `model_id: ${example}`
+}
+
 export function mergeModelLists(existing: ModelInfo[], incoming: ModelInfo[]): ModelInfo[] {
   const byId = new Map(existing.map((model) => [model.id, model]))
   for (const model of incoming) {
@@ -90,7 +112,7 @@ export function ManualModelTestPanel({ providerKey, notableProviderKey, onModels
                 next[index] = event.target.value
                 setModelIds(next)
               }}
-              placeholder={notableModels[index] ?? notableModels[0] ?? "provider/model-id"}
+              placeholder={modelIdPlaceholder(notableProviderKey, notableModels, index)}
               aria-label={`Manual model ${index + 1}`}
               className="h-8 font-mono text-xs"
             />

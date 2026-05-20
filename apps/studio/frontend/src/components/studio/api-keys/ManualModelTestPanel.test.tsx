@@ -16,6 +16,8 @@ describe("ManualModelTestPanel", () => {
     expect(html).toContain("Manual model probing")
     expect(html).toContain("Add Model")
     expect(html).toContain("Test Models")
+    expect(html).toContain('placeholder="model_id: claude-opus-4-7"')
+    expect(html).not.toContain("provider/model-id")
     expect(html).toContain("disabled")
   })
 

@@ -72,13 +72,16 @@ docs/
 | [state-and-io-contract](./engine/state-and-io-contract/) | `BlackboardState` 规约 (data/flow/messages)、Reducer 并发冲突控制、阶段级 IO 隔离、Runtime Input 漏斗 (audit A1/A2/A3/A6) |
 | [tracing-and-observability](./engine/tracing-and-observability/) | Predict 内部与 LangGraph 节点拦截、生命周期事件发出、结构化 Trace 日志 (audit P1-4) |
 
-### Studio system-level (3 份系统级, 横切多 feature, 全走双时态)
+### Studio system-level (6 份系统级, 横切多 feature, 全走双时态)
 
 | Feature | Scope |
 |---|---|
 | [ux-workflow](./studio/system-level/ux-workflow/) | 贯穿多个 feature (canvas → editor → trace) 的用户核心操作流蓝图 |
 | [studio-layout](./studio/system-level/studio-layout/) | 全局 React Shell 区域切割、Resizable 面板通信、Context 派发 |
 | [workspace-file-system](./studio/system-level/workspace-file-system/) | Tauri/Rust IPC 桥接真实文件系统 (Watcher + Dir R/W) + 前端内存 Draft Persist |
+| [state-management](./studio/system-level/state-management/) | Studio frontend 跨 feature 共享 client state (Workspace/Context Provider / copilotStore / 局部 useReducer / 持久化 localStorage / sessionStorage / Tauri fs) |
+| [event-bus-and-websocket](./studio/system-level/event-bus-and-websocket/) | Studio backend ↔ frontend 实时通信 (WebSocket / SSE / 内部 event bus)、Run streaming、Copilot streaming、心跳 / 重连 / backpressure |
+| [tauri-ipc-bridge](./studio/system-level/tauri-ipc-bridge/) | Tauri shell ↔ webview 的 IPC contract (`#[tauri::command]` Rust ↔ frontend `invoke()`)、sidecar 健康、Keychain (mvp0)、dev vs prod 桥差别 |
 
 ### Studio feature folders (6 个 feature, 全走双时态)
 
@@ -195,13 +198,14 @@ Python (Studio Backend) / 底层引擎 (graph-agent) 在接收指令后的业务
 | C3 | studio feature mvp0 (6) | a1 | 1515 | 全 200-300L floor |
 | C4 | architecture mvp0 (2) | a1 | 513 | 一遍过 |
 | **C 小计** | **15 mvp0-alignment** | **a1 + a2** | **3226** | — |
-| INDEX | 索引 + cross-link 规则 + dispatch tracker | master | 200 | 本文件 |
+| E | studio cross-cutting folders (3 × 2 = 6) | a1 | 1320 | state-management 448L / event-bus-and-websocket 434L / tauri-ipc-bridge 438L; 287 refs / 53 APIs / 56 cross-links |
+| INDEX | 索引 + cross-link 规则 + dispatch tracker | master | 230 | 本文件 |
 | references / development | 3 flat docs 平铺 | (cp from backup) | 798 | claude-agent-sdk 654L + FRONTEND_UI_SPEC 96L + CONTRIBUTING 48L |
-| **全 docs/** | **34 文件** | | **7330** | — |
+| **全 docs/** | **40 文件** | | **8680** | — |
 
 **派工 protocol**: master PM 用 `ccb ask --wait --timeout 600` 派, brief 文件落 `/tmp/a{1,2}-{phase}-{name}.md`. 每次派完 capture pane 验证 (1) 没越界 (2) reply 跟 pane 一致 (3) H3 无 dup (4) 无 pad scripts (5) 抽样 file:line grep verify.
 
-**横切关注点** (`state-management` / `event-bus-and-websocket` / `tauri-ipc-bridge`) — a2 round 1 设计建议单开 folder, 本轮未做, PM 后续决定。
+**横切关注点 Phase E** — PM 2026-05-20 拍板开 folder, a1 一遍过写 6 份 (1320 行 / 287 file:line refs / 53 proposed API / 56 cross-links). 入 `studio/system-level/{state-management, event-bus-and-websocket, tauri-ipc-bridge}/`, 见上表第 4-6 行.
 
 ## Audit 覆盖 (本轮 docs 暴露)
 

@@ -17,6 +17,7 @@ from app.models.llm_config import (
     ProviderCredential,
     TestStatus,
 )
+from app.services.migrations import migrate_credentials_payload
 
 _WRITE_LOCK = threading.Lock()
 _credentials_lock = _WRITE_LOCK
@@ -35,8 +36,11 @@ def load_credentials(path: Path | None = None) -> LLMCredentialsFile:
     if not credential_path.exists():
         return LLMCredentialsFile()
     try:
-        return LLMCredentialsFile.model_validate_json(credential_path.read_text(encoding="utf-8"))
+        payload = json.loads(credential_path.read_text(encoding="utf-8"))
+        return LLMCredentialsFile.model_validate(migrate_credentials_payload(payload))
     except ValidationError:
+        return LLMCredentialsFile()
+    except json.JSONDecodeError:
         return LLMCredentialsFile()
 
 
@@ -71,6 +75,7 @@ def _persist_test_outcome(
     last_test_at: str,
     last_test_message: str = "",
     last_error_code: str = "",
+    available_sdks: list[str] | None = None,
     available_models: list[ModelInfo] | None = None,
     path: Path | None = None,
 ) -> ProviderCredential | None:
@@ -85,6 +90,7 @@ def _persist_test_outcome(
     """
 
     credential_path = path or credentials_path()
+    sdks = list(available_sdks or [])
     models = list(available_models or [])
 
     with _credentials_lock:
@@ -100,6 +106,7 @@ def _persist_test_outcome(
             "last_test_at": last_test_at,
             "last_test_message": last_test_message,
             "last_error_code": last_error_code,
+            "available_sdks": sdks,
             "available_models": models,
         }
         updated = existing.model_copy(update=updated_fields)

@@ -18,7 +18,7 @@ target_goal: "Studio MVP — 让 PM 可用"
 ```yaml
 compatible_sdks:
   # 该 vendor 的 API 兼容哪些 SDK enum
-  # 已有 enum: anthropic_compatible / openai_compatible / gemini_official / wavespeed_any_llm
+  # 已有 enum: anthropic_compatible / openai_compatible / google_genai
   - <sdk_enum>
 
 models_endpoint_path: "<path>" | null

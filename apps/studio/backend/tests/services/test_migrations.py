@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
-from app.services.migrations import migrate_provider_type_value, migrate_roles_payload
+from app.services.migrations import (
+    migrate_credentials_payload,
+    migrate_provider_type_value,
+    migrate_roles_payload,
+)
 
 
 def test_migrate_wavespeed_any_llm_to_openai_compatible() -> None:
     assert migrate_provider_type_value("wavespeed_any_llm") == "openai_compatible"
 
 
+def test_migrate_gemini_official_to_google_genai() -> None:
+    assert migrate_provider_type_value("gemini_official") == "google_genai"
+
+
 def test_migrate_passes_through_known_canonical_values() -> None:
-    for value in ("anthropic_compatible", "openai_compatible", "gemini_official"):
+    for value in ("anthropic_compatible", "openai_compatible", "google_genai"):
         assert migrate_provider_type_value(value) == value
 
 
@@ -24,6 +32,7 @@ def test_migrate_roles_payload_rewrites_provider_type_in_place() -> None:
     payload = {
         "providers": {
             "WS_LLM": {"type": "wavespeed_any_llm", "base_url": "https://x"},
+            "GM": {"type": "gemini_official"},
             "OC_CL": {"type": "anthropic_compatible"},
         },
     }
@@ -31,6 +40,7 @@ def test_migrate_roles_payload_rewrites_provider_type_in_place() -> None:
 
     assert migrated["providers"]["WS_LLM"]["type"] == "openai_compatible"
     assert migrated["providers"]["WS_LLM"]["base_url"] == "https://x"
+    assert migrated["providers"]["GM"]["type"] == "google_genai"
     assert migrated["providers"]["OC_CL"]["type"] == "anthropic_compatible"
 
 
@@ -43,3 +53,18 @@ def test_migrate_roles_payload_handles_missing_or_malformed_keys() -> None:
     assert migrate_roles_payload({"providers": {"X": "scalar"}}) == {"providers": {"X": "scalar"}}
     # Non-dict top-level payload.
     assert migrate_roles_payload(None) is None
+
+
+def test_migrate_credentials_payload_rewrites_provider_type_in_place() -> None:
+    payload = {
+        "providers": [
+            {"id": "old-gemini", "provider_type": "gemini_official"},
+            {"id": "old-ws", "provider_type": "wavespeed_any_llm"},
+            {"id": "current", "provider_type": "openai_compatible"},
+        ],
+    }
+    migrated = migrate_credentials_payload(payload)
+
+    assert migrated["providers"][0]["provider_type"] == "google_genai"
+    assert migrated["providers"][1]["provider_type"] == "openai_compatible"
+    assert migrated["providers"][2]["provider_type"] == "openai_compatible"

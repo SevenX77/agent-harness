@@ -7,19 +7,25 @@ from typing import Any
 
 import pytest
 from app.main import create_app
+from app.models.llm_config import ModelInfo
 from app.routers import llm as llm_router
-from app.services.copilot_test import (
-    _NetworkError,
-    _QuotaExceeded,
-    _RateLimited,
-    _Unauthorized,
-)
 from app.services.llm_provider_test import (
-    PingResultExtended,
     ProviderType,
     ping_provider,
 )
 from fastapi.testclient import TestClient
+
+
+def _model(model_id: str) -> ModelInfo:
+    return ModelInfo(id=model_id)
+
+
+def _model_with_capabilities(model_id: str, capabilities: dict[str, Any]) -> ModelInfo:
+    return ModelInfo(id=model_id, capabilities=capabilities)
+
+
+def _model_ids(models: list[dict[str, Any]]) -> list[str]:
+    return [model["id"] for model in models]
 
 
 def test_get_credentials_returns_api_key_plaintext(
@@ -92,8 +98,7 @@ def test_put_credentials_writes_and_get_reads_plaintext(
     [
         ("anthropic_compatible", "anthropic"),
         ("openai_compatible", "openai"),
-        ("wavespeed_any_llm", "openai"),
-        ("gemini_official", "gemini"),
+        ("google_genai", "gemini"),
     ],
 )
 def test_provider_test_uses_provider_type_to_select_client(
@@ -158,32 +163,27 @@ def test_provider_test_uses_provider_type_to_select_client(
 
 
 @pytest.mark.parametrize(
-    ("exc", "status"),
+    "exc",
     [
-        (_Unauthorized(), "invalid_key"),
-        (_RateLimited(), "rate_limited"),
-        (_QuotaExceeded(), "quota_exceeded"),
-        (_NetworkError("dns failure"), "network_error"),
-        (TimeoutError(), "timeout"),
+        RuntimeError("invalid key"),
+        RuntimeError("rate limited"),
+        RuntimeError("quota exceeded"),
+        RuntimeError("dns failure"),
+        TimeoutError(),
     ],
 )
-def test_provider_test_maps_errors(
+def test_provider_test_probe_errors_return_no_available_sdk(
     client: TestClient,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     exc: Exception,
-    status: str,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    async def fake_ping(
-        _id: str,
-        _provider_type: ProviderType,
-        _api_key: str,
-        _base_url: str | None,
-    ) -> PingResultExtended:
+
+    async def fake_sdks(*_args: object, **_kwargs: object) -> list[str]:
         raise exc
 
-    monkeypatch.setattr(llm_router, "ping_provider_extended", fake_ping)
+    monkeypatch.setattr(llm_router, "probe_compatible_sdks", fake_sdks)
 
     response = client.post(
         "/api/llm/providers/test",
@@ -195,7 +195,10 @@ def test_provider_test_maps_errors(
     )
 
     assert response.status_code == 200
-    assert response.json()["status"] == status
+    body = response.json()
+    assert body["status"] == "error"
+    assert body["error_code"] == "no_available_sdk"
+    assert body["available_sdks"] == []
 
 
 def test_provider_test_requires_token() -> None:
@@ -219,20 +222,15 @@ def test_provider_test_masks_key_in_response_and_logs(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    async def fake_ping(
-        _id: str,
-        _provider_type: ProviderType,
-        _api_key: str,
-        _base_url: str | None,
-    ) -> PingResultExtended:
-        return PingResultExtended(
-            latency_ms=12,
-            model_seen="seen-model",
-            model_ids=["seen-model"],
-            raw_payload={"data": [{"id": "seen-model"}]},
-        )
 
-    monkeypatch.setattr(llm_router, "ping_provider_extended", fake_ping)
+    async def fake_sdks(*_args: object, **_kwargs: object) -> list[str]:
+        return ["anthropic_compatible"]
+
+    async def fake_models(*_args: object, **_kwargs: object) -> list[ModelInfo]:
+        return [_model("seen-model")]
+
+    monkeypatch.setattr(llm_router, "probe_compatible_sdks", fake_sdks)
+    monkeypatch.setattr(llm_router, "probe_available_models", fake_models)
     caplog.set_level(logging.INFO, logger="app.routers.llm")
 
     response = client.post(
@@ -247,10 +245,12 @@ def test_provider_test_masks_key_in_response_and_logs(
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert body["latency_ms"] == 12
-    assert body["model_seen"] == "seen-model"
+    assert isinstance(body["latency_ms"], int)
+    assert body["model_seen"] is None
     assert body["message"] is None
     assert body["error_code"] is None
+    assert body["available_sdks"] == ["anthropic_compatible"]
+    assert _model_ids(body["available_models"]) == ["seen-model"]
     assert "sk-secret-1234" not in response.text
     assert "sk-secret-1234" not in caplog.text
     assert "last4=1234" in caplog.text
@@ -364,7 +364,6 @@ def test_put_credentials_preserves_test_outcome_fields(
     )
 
     # Simulate a POST test writeback by directly invoking _persist_test_outcome.
-    from app.models.llm_config import ModelCapabilities, ModelInfo
     from app.services.llm_credentials import _persist_test_outcome
 
     _persist_test_outcome(
@@ -373,7 +372,7 @@ def test_put_credentials_preserves_test_outcome_fields(
         last_test_at="2026-05-18T12:00:00+00:00",
         last_test_message="",
         last_error_code="",
-        available_models=[ModelInfo(id="claude-opus-4-1", capabilities=ModelCapabilities())],
+        available_models=[_model("claude-opus-4-1")],
     )
 
     # PUT only sends the 6 editable fields — Test fields must survive.
@@ -390,17 +389,7 @@ def test_put_credentials_preserves_test_outcome_fields(
     provider = response.json()["providers"][0]
     assert provider["last_test_status"] == "ok"
     assert provider["last_test_at"] == "2026-05-18T12:00:00+00:00"
-    assert provider["available_models"] == [
-        {
-            "id": "claude-opus-4-1",
-            "capabilities": {
-                "text": True,
-                "function_calling": False,
-                "vision": False,
-                "reasoning": False,
-            },
-        }
-    ]
+    assert _model_ids(provider["available_models"]) == ["claude-opus-4-1"]
 
 
 # ---------------------------------------------------------------------------
@@ -417,11 +406,11 @@ def test_provider_test_returns_missing_api_key_without_call(
 
     called: list[bool] = []
 
-    async def fake_ping(*_args: object, **_kwargs: object) -> PingResultExtended:
+    async def fake_sdks(*_args: object, **_kwargs: object) -> list[str]:
         called.append(True)
-        return PingResultExtended(latency_ms=0, model_seen=None, model_ids=[], raw_payload=None)
+        return ["should-not-run"]
 
-    monkeypatch.setattr(llm_router, "ping_provider_extended", fake_ping)
+    monkeypatch.setattr(llm_router, "probe_compatible_sdks", fake_sdks)
 
     response = client.post(
         "/api/llm/providers/test",
@@ -436,7 +425,7 @@ def test_provider_test_returns_missing_api_key_without_call(
     body = response.json()
     assert body["status"] == "missing_api_key"
     assert body["error_code"] == "missing_api_key"
-    assert called == [], "ping_provider_extended must not be called when api_key is blank"
+    assert called == [], "probe_compatible_sdks must not be called when api_key is blank"
 
 
 def test_provider_test_missing_api_key_does_not_dirty_last_test_status(
@@ -475,6 +464,189 @@ def test_provider_test_missing_api_key_does_not_dirty_last_test_status(
     assert oc_cl["last_test_status"] == "untested"
 
 
+def test_provider_test_calls_probes_and_returns_string_lists(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    calls: list[tuple[str, str, str]] = []
+
+    async def fake_sdks(vendor: str, api_key: str, base_url: str) -> list[str]:
+        calls.append(("sdks", vendor, base_url))
+        assert api_key == "sk-test"
+        return ["openai_compatible"]
+
+    async def fake_models(vendor: str, api_key: str, base_url: str) -> list[ModelInfo]:
+        calls.append(("models", vendor, base_url))
+        assert api_key == "sk-test"
+        return [_model("gpt-5"), _model("gpt-4o")]
+
+    monkeypatch.setattr(llm_router, "probe_compatible_sdks", fake_sdks)
+    monkeypatch.setattr(llm_router, "probe_available_models", fake_models)
+
+    response = client.post(
+        "/api/llm/providers/test",
+        json={
+            "id": "openai-default",
+            "provider_type": "openai_compatible",
+            "api_key": "sk-test",
+            "base_url": "https://api.openai.com",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["error_code"] is None
+    assert body["available_sdks"] == ["openai_compatible"]
+    assert _model_ids(body["available_models"]) == ["gpt-5", "gpt-4o"]
+    assert calls == [
+        ("sdks", "openai", "https://api.openai.com"),
+        ("models", "openai", "https://api.openai.com"),
+    ]
+
+
+def test_provider_test_persists_string_probe_results_to_credentials(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    client.put(
+        "/api/llm/credentials",
+        json={
+            "providers": [
+                {
+                    "id": "openai-default",
+                    "name": "OpenAI",
+                    "api_key": "sk",
+                    "provider_type": "openai_compatible",
+                }
+            ]
+        },
+    )
+
+    async def fake_sdks(*_args: object, **_kwargs: object) -> list[str]:
+        return ["openai_compatible"]
+
+    async def fake_models(*_args: object, **_kwargs: object) -> list[ModelInfo]:
+        return [_model("gpt-5"), _model("gpt-4o")]
+
+    monkeypatch.setattr(llm_router, "probe_compatible_sdks", fake_sdks)
+    monkeypatch.setattr(llm_router, "probe_available_models", fake_models)
+
+    response = client.post(
+        "/api/llm/providers/test",
+        json={
+            "id": "openai-default",
+            "provider_type": "openai_compatible",
+            "api_key": "sk",
+            "base_url": "https://api.openai.com",
+        },
+    )
+    assert response.status_code == 200
+
+    get_response = client.get("/api/llm/credentials")
+    provider = get_response.json()["providers"][0]
+    assert provider["last_test_status"] == "ok"
+    assert provider["available_sdks"] == ["openai_compatible"]
+    assert _model_ids(provider["available_models"]) == ["gpt-5", "gpt-4o"]
+
+
+def test_provider_test_persists_model_capabilities_to_credentials(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    client.put(
+        "/api/llm/credentials",
+        json={
+            "providers": [
+                {
+                    "id": "openai-default",
+                    "name": "OpenAI",
+                    "api_key": "sk",
+                    "provider_type": "openai_compatible",
+                }
+            ]
+        },
+    )
+
+    async def fake_sdks(*_args: object, **_kwargs: object) -> list[str]:
+        return ["openai_compatible"]
+
+    async def fake_models(*_args: object, **_kwargs: object) -> list[ModelInfo]:
+        return [
+            _model_with_capabilities(
+                "gpt-5",
+                {"max_context_tokens": 128000, "custom_vendor_flag": True},
+            )
+        ]
+
+    monkeypatch.setattr(llm_router, "probe_compatible_sdks", fake_sdks)
+    monkeypatch.setattr(llm_router, "probe_available_models", fake_models)
+
+    response = client.post(
+        "/api/llm/providers/test",
+        json={
+            "id": "openai-default",
+            "provider_type": "openai_compatible",
+            "api_key": "sk",
+            "base_url": "https://api.openai.com",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["available_models"][0]["capabilities"] == {
+        "max_context_tokens": 128000,
+        "custom_vendor_flag": True,
+    }
+
+    provider = client.get("/api/llm/credentials").json()["providers"][0]
+    assert provider["available_models"][0]["capabilities"] == {
+        "max_context_tokens": 128000,
+        "custom_vendor_flag": True,
+    }
+
+
+def test_provider_test_empty_sdks_returns_error_without_model_probe(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    model_calls: list[bool] = []
+
+    async def empty_sdks(*_args: object, **_kwargs: object) -> list[str]:
+        return []
+
+    async def fake_models(*_args: object, **_kwargs: object) -> list[ModelInfo]:
+        model_calls.append(True)
+        return [_model("should-not-run")]
+
+    monkeypatch.setattr(llm_router, "probe_compatible_sdks", empty_sdks)
+    monkeypatch.setattr(llm_router, "probe_available_models", fake_models)
+
+    response = client.post(
+        "/api/llm/providers/test",
+        json={
+            "id": "openai-default",
+            "provider_type": "openai_compatible",
+            "api_key": "sk",
+            "base_url": "https://api.openai.com",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "error"
+    assert body["error_code"] == "no_available_sdk"
+    assert body["available_sdks"] == []
+    assert body["available_models"] == []
+    assert model_calls == []
+
+
 def test_provider_test_persists_outcome_to_credentials(
     client: TestClient,
     tmp_path: Path,
@@ -488,15 +660,14 @@ def test_provider_test_persists_outcome_to_credentials(
         json={"providers": [{"id": "OC_CL", "name": "Claude", "api_key": "sk", "base_url": ""}]},
     )
 
-    async def fake_ping(*_args: object, **_kwargs: object) -> PingResultExtended:
-        return PingResultExtended(
-            latency_ms=42,
-            model_seen="claude-opus-4-1",
-            model_ids=["claude-opus-4-1", "claude-haiku-4-5"],
-            raw_payload=None,
-        )
+    async def fake_sdks(*_args: object, **_kwargs: object) -> list[str]:
+        return ["anthropic_compatible"]
 
-    monkeypatch.setattr(llm_router, "ping_provider_extended", fake_ping)
+    async def fake_models(*_args: object, **_kwargs: object) -> list[ModelInfo]:
+        return [_model("claude-opus-4-1"), _model("claude-haiku-4-5")]
+
+    monkeypatch.setattr(llm_router, "probe_compatible_sdks", fake_sdks)
+    monkeypatch.setattr(llm_router, "probe_available_models", fake_models)
 
     response = client.post(
         "/api/llm/providers/test",
@@ -510,8 +681,8 @@ def test_provider_test_persists_outcome_to_credentials(
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert body["latency_ms"] == 42
-    assert [m["id"] for m in body["available_models"]] == [
+    assert body["available_sdks"] == ["anthropic_compatible"]
+    assert _model_ids(body["available_models"]) == [
         "claude-opus-4-1",
         "claude-haiku-4-5",
     ]
@@ -520,7 +691,8 @@ def test_provider_test_persists_outcome_to_credentials(
     get_response = client.get("/api/llm/credentials")
     provider = get_response.json()["providers"][0]
     assert provider["last_test_status"] == "ok"
-    assert [m["id"] for m in provider["available_models"]] == [
+    assert provider["available_sdks"] == ["anthropic_compatible"]
+    assert _model_ids(provider["available_models"]) == [
         "claude-opus-4-1",
         "claude-haiku-4-5",
     ]
@@ -534,10 +706,14 @@ def test_provider_test_no_provider_silent_noop(
     """Test writeback when the provider is not in credentials must not error."""
     monkeypatch.setenv("HOME", str(tmp_path))
 
-    async def fake_ping(*_args: object, **_kwargs: object) -> PingResultExtended:
-        return PingResultExtended(latency_ms=5, model_seen=None, model_ids=[], raw_payload=None)
+    async def fake_sdks(*_args: object, **_kwargs: object) -> list[str]:
+        return ["anthropic_compatible"]
 
-    monkeypatch.setattr(llm_router, "ping_provider_extended", fake_ping)
+    async def fake_models(*_args: object, **_kwargs: object) -> list[ModelInfo]:
+        return []
+
+    monkeypatch.setattr(llm_router, "probe_compatible_sdks", fake_sdks)
+    monkeypatch.setattr(llm_router, "probe_available_models", fake_models)
 
     response = client.post(
         "/api/llm/providers/test",
@@ -551,3 +727,205 @@ def test_provider_test_no_provider_silent_noop(
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
     # No credentials file is created when there's nothing to update.
+
+
+def test_get_provider_notable_models_reads_section_4(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    docs_dir = tmp_path / "llm_providers"
+    docs_dir.mkdir()
+    (docs_dir / "anthropic.md").write_text(
+        """# Anthropic
+
+## §3 Endpoint
+
+Ignored.
+
+## §4. Notable Model IDs
+
+- `claude-opus-4-1`
+- `claude-sonnet-4-7`
+- `claude-opus-4-1`
+
+## §5 Capabilities
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(llm_router, "DOCS_DIR", docs_dir)
+
+    response = client.get("/api/llm/providers/notable-models?provider_key=anthropic")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "notable_models": ["claude-opus-4-1", "claude-sonnet-4-7"]
+    }
+
+
+def test_get_provider_notable_models_unknown_provider_returns_404(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(llm_router, "DOCS_DIR", tmp_path)
+
+    response = client.get("/api/llm/providers/notable-models?provider_key=missing")
+
+    assert response.status_code == 404
+
+
+def test_provider_test_models_appends_ok_models_and_dedupes(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    client.put(
+        "/api/llm/credentials",
+        json={
+            "providers": [
+                {
+                    "id": "openai-default",
+                    "name": "OpenAI",
+                    "api_key": "sk",
+                    "base_url": "https://api.openai.com/v1",
+                    "provider_type": "openai_compatible",
+                }
+            ]
+        },
+    )
+
+    async def fake_probe(
+        provider_type: str,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+        auth_header_template: str | None = None,
+    ) -> Any:
+        del auth_header_template
+        assert provider_type == "openai_compatible"
+        assert api_key == "sk"
+        assert base_url == "https://api.openai.com/v1"
+        from app.services.llm_provider_test import ModelProbeResult
+
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=3)
+
+    monkeypatch.setattr(llm_router, "probe_model_id", fake_probe)
+
+    response = client.post(
+        "/api/llm/providers/test-models",
+        json={"provider_id": "openai-default", "model_ids": ["gpt-5", "gpt-5", "gpt-4o"]},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [result["model_id"] for result in body["results"]] == ["gpt-5", "gpt-4o"]
+    assert [model["id"] for model in body["available_models"]] == ["gpt-5", "gpt-4o"]
+    provider = client.get("/api/llm/credentials").json()["providers"][0]
+    assert [model["id"] for model in provider["available_models"]] == ["gpt-5", "gpt-4o"]
+
+
+def test_provider_test_models_partial_failures_append_only_ok(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    client.put(
+        "/api/llm/credentials",
+        json={
+            "providers": [
+                {
+                    "id": "openai-default",
+                    "name": "OpenAI",
+                    "api_key": "sk",
+                    "provider_type": "openai_compatible",
+                }
+            ]
+        },
+    )
+
+    async def fake_probe(*_args: object, **_kwargs: object) -> Any:
+        from app.services.llm_provider_test import ModelProbeResult
+
+        model_id = str(_args[3])
+        if model_id == "bad-model":
+            return ModelProbeResult(model_id=model_id, status="invalid_model", message="not found")
+        return ModelProbeResult(model_id=model_id, status="ok", latency_ms=5)
+
+    monkeypatch.setattr(llm_router, "probe_model_id", fake_probe)
+
+    response = client.post(
+        "/api/llm/providers/test-models",
+        json={"provider_id": "openai-default", "model_ids": ["gpt-5", "bad-model"]},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [result["status"] for result in body["results"]] == ["ok", "invalid_model"]
+    assert [model["id"] for model in body["available_models"]] == ["gpt-5"]
+    provider = client.get("/api/llm/credentials").json()["providers"][0]
+    assert [model["id"] for model in provider["available_models"]] == ["gpt-5"]
+
+
+def test_provider_test_models_unknown_provider_returns_404(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    response = client.post(
+        "/api/llm/providers/test-models",
+        json={"provider_id": "missing", "model_ids": ["gpt-5"]},
+    )
+
+    assert response.status_code == 404
+
+
+def test_provider_test_models_preserves_existing_models(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    client.put(
+        "/api/llm/credentials",
+        json={
+            "providers": [
+                {
+                    "id": "openai-default",
+                    "name": "OpenAI",
+                    "api_key": "sk",
+                    "provider_type": "openai_compatible",
+                }
+            ]
+        },
+    )
+    from app.services.llm_credentials import _persist_test_outcome
+
+    _persist_test_outcome(
+        "openai-default",
+        last_test_status="ok",
+        last_test_at="2026-05-19T00:00:00+00:00",
+        available_models=[ModelInfo(id="gpt-5")],
+    )
+
+    async def fake_probe(*_args: object, **_kwargs: object) -> Any:
+        from app.services.llm_provider_test import ModelProbeResult
+
+        return ModelProbeResult(model_id=str(_args[3]), status="ok", latency_ms=5)
+
+    monkeypatch.setattr(llm_router, "probe_model_id", fake_probe)
+
+    response = client.post(
+        "/api/llm/providers/test-models",
+        json={"provider_id": "openai-default", "model_ids": ["gpt-5", "claude-opus-4-7"]},
+    )
+
+    assert response.status_code == 200
+    assert [model["id"] for model in response.json()["available_models"]] == [
+        "gpt-5",
+        "claude-opus-4-7",
+    ]

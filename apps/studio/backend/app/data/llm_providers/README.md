@@ -27,9 +27,9 @@ linked_specs:
 |---|---|---|---|
 | `anthropic_compatible` | Anthropic native protocol | `x-api-key` + `anthropic-version` header | `GET /v1/models` (Anthropic 2024 加的) 或仅做 base URL 探活 |
 | `openai_compatible` | OpenAI 标准 (最广支持) | `Authorization: Bearer <key>` | `GET /v1/models` |
-| `gemini_official` | Google Gemini native (可选保留, native SDK 有 grounding 等特性) | API key query param 或 Bearer (兼容 endpoint) | `GET /v1/models` |
+| `google_genai` | Google Gemini native (可选保留, native SDK 有 grounding 等特性) | API key query param 或 Bearer (兼容 endpoint) | `GET /v1/models` |
 
-**之前的 `wavespeed_any_llm` 已干掉** — WaveSpeed 实测就是 `openai_compatible`, base URL 换成 `https://llm.wavespeed.ai/v1` 即可.
+**旧 WaveSpeed 专用 enum 已干掉** — WaveSpeed 实测就是 `openai_compatible`, base URL 换成 `https://llm.wavespeed.ai/v1` 即可.
 
 ## Text / Chat Completion Providers 速查表
 
@@ -37,7 +37,7 @@ linked_specs:
 |---|---|---|---|---|
 | **OpenAI** | `openai_compatible` | `https://api.openai.com/v1` | Bearer | defacto standard |
 | **Anthropic** | `anthropic_compatible` | `https://api.anthropic.com` | `x-api-key` + `anthropic-version` | OpenAI 兼容层走 `/v1/messages`, 但 native SDK 有 Prompt Caching 等特性 |
-| **Google Gemini** | `gemini_official` 或 `openai_compatible` | native: `https://generativelanguage.googleapis.com/v1beta` ; OpenAI 兼容: `https://generativelanguage.googleapis.com/v1beta/openai/` | API key (native) / Bearer (兼容) | 2024-11 起官方加了 OpenAI 兼容 endpoint |
+| **Google Gemini** | `google_genai` 或 `openai_compatible` | native: `https://generativelanguage.googleapis.com/v1beta` ; OpenAI 兼容: `https://generativelanguage.googleapis.com/v1beta/openai/` | API key (native) / Bearer (兼容) | 2024-11 起官方加了 OpenAI 兼容 endpoint |
 | **DeepSeek** | `openai_compatible` | `https://api.deepseek.com/v1` | Bearer | 完全 OpenAI 协议 (历史无独立 SDK) |
 | **Mistral** | `openai_compatible` | `https://api.mistral.ai/v1` | Bearer | `mistralai` SDK 底层也是 OpenAI 协议 |
 | **xAI Grok** | `openai_compatible` | `https://api.x.ai/v1` | Bearer | 直接用 openai SDK 改 base_url |

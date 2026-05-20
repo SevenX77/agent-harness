@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { ArrowDown, ArrowUp, Check, KeyRound, Loader2, Plug, Plus, Settings, Trash2, TriangleAlert, X } from "lucide-react"
+import { ArrowDown, ArrowUp, Check, KeyRound, Loader2, Plug, Plus, Settings, TriangleAlert, X } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useAppSettings } from "@/hooks/useAppSettings"
@@ -23,9 +21,11 @@ import {
   putRoles,
   testProvider,
   type CredentialsState,
+  type ModelInfo,
   type ProviderType,
   type RolesData,
 } from "../../api/llm"
+import { AddProviderForm, ProviderCard, ProviderListSkeleton, type AddProviderFormSubmission } from "./api-keys"
 
 type SettingsTab = "general" | "api_keys" | "llm_roles"
 
@@ -83,6 +83,7 @@ interface SettingsPageContentProps {
   activeTab: SettingsTab
   /** Server-persisted credentials snapshot — feeds both the ApiKeys flat list and the LLM Roles availability filter. */
   credentials: CredentialsState
+  credentialsLoading: boolean
   drafts: ProviderDraft[]
   saveStatus: SaveStatus
   rolesData: RolesData | null
@@ -102,7 +103,8 @@ interface SettingsPageContentProps {
   onProviderFieldChange: (providerId: string, patch: Partial<ProviderDraft>) => void
   onTestProvider: (providerId: string) => void
   onDeleteProvider: (providerId: string) => void
-  onAddProvider: () => void
+  onAddProvider: (data: AddProviderFormSubmission) => Promise<void> | void
+  onProviderModelsUpdated: (providerId: string, models: ModelInfo[]) => void
   onSelectedRoleChange: (roleName: string) => void
   onRolesDataChange: (next: RolesData) => void
   onSaveRoles: () => void
@@ -209,10 +211,98 @@ function newProviderId(): string {
   return (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`).toString()
 }
 
+const officialProviders = [
+  { code: "anthropic", label: "Anthropic", baseUrl: "https://api.anthropic.com" },
+  { code: "openai", label: "OpenAI", baseUrl: "https://api.openai.com" },
+  { code: "gemini", label: "Gemini", baseUrl: "https://generativelanguage.googleapis.com" },
+  { code: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com" },
+  { code: "ark", label: "Ark", baseUrl: "https://ark.cn-beijing.volces.com/api/v3" },
+]
+const officialProviderCodes = officialProviders.map((vendor) => vendor.code)
+
+export function inferProviderType(providerCode: string): ProviderType {
+  if (providerCode === "anthropic") return "anthropic_compatible"
+  if (providerCode === "gemini") return "google_genai"
+  return "openai_compatible"
+}
+
+export function inferProviderKind(draft: ProviderDraft): "official" | "third-party" {
+  if (officialProviderCodes.some((code) => isOfficialProviderDraft(draft, code))) return "official"
+  return "third-party"
+}
+
+export function draftFromAddProviderSubmission(
+  data: AddProviderFormSubmission,
+  id: string = newProviderId(),
+): ProviderDraft {
+  return {
+    id,
+    name: data.name,
+    provider_type: "openai_compatible",
+    base_url: data.baseUrl,
+    api_key: data.apiKey,
+    isTesting: false,
+  }
+}
+
+export function officialProviderDrafts(drafts: ProviderDraft[]): ProviderDraft[] {
+  return officialProviders.map((vendor) => {
+    const existing = drafts.find((draft) => isOfficialProviderDraft(draft, vendor.code))
+    if (existing) return existing
+    return {
+      id: `${vendor.code}-official`,
+      name: `${officialProviderDisplayName(vendor.label)} Official`,
+      provider_type: inferProviderType(vendor.code),
+      base_url: vendor.baseUrl,
+      api_key: "",
+      isTesting: false,
+    }
+  })
+}
+
+export function thirdPartyProviderDrafts(drafts: ProviderDraft[]): ProviderDraft[] {
+  return drafts.filter((draft) => inferProviderKind(draft) === "third-party")
+}
+
+export function notableProviderKeyForDraft(draft: ProviderDraft): string {
+  const officialCode = officialProviderCodes.find((code) => isOfficialProviderDraft(draft, code))
+  if (officialCode) return officialCode
+  return draft.id.split(/[-_]/, 1)[0].toLowerCase()
+}
+
+export function shouldShowManualModelPanel(
+  draft: ProviderDraft,
+  persisted: CredentialsState["providers"][number] | null,
+): boolean {
+  return (
+    inferProviderKind(draft) === "official" ||
+    persisted?.last_test_status === "ok" ||
+    (persisted?.available_models?.length ?? 0) > 0
+  )
+}
+
+function isOfficialProviderDraft(draft: ProviderDraft, providerCode: string): boolean {
+  const normalizedId = draft.id.toLowerCase()
+  const normalizedName = draft.name.toLowerCase()
+  const vendor = officialProviders.find((item) => item.code === providerCode)
+  const label = vendor ? officialProviderDisplayName(vendor.label).toLowerCase() : providerCode
+  return (
+    normalizedId === providerCode ||
+    normalizedId.startsWith(`${providerCode}-`) ||
+    normalizedId.startsWith(`${providerCode}_`) ||
+    (normalizedName.includes(label) && normalizedName.includes("official"))
+  )
+}
+
+function officialProviderDisplayName(label: string): string {
+  return label.replace(/\s*\(.+\)\s*$/, "")
+}
+
 export function SettingsPage({ onClose }: SettingsPageProps) {
   const appSettings = useAppSettings()
   const [activeTab, setActiveTab] = useState<SettingsTab>("general")
   const [credentials, setCredentials] = useState<CredentialsState>(emptyCredentials)
+  const [credentialsLoading, setCredentialsLoading] = useState(true)
   const [drafts, setDrafts] = useState<ProviderDraft[]>([])
   const [rolesData, setRolesData] = useState<RolesData | null>(null)
   const [selectedRole, setSelectedRole] = useState("copilot_chat")
@@ -248,11 +338,13 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         if (cancelled) return
         setCredentials(next)
         setDrafts(draftsFromCredentials(next))
+        setCredentialsLoading(false)
       })
       .catch((error) => {
         if (cancelled) return
         const message = error instanceof Error ? error.message : "Load failed"
         toast.error(`API Keys load failed: ${message}`)
+        setCredentialsLoading(false)
       })
     return () => {
       cancelled = true
@@ -281,9 +373,25 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   }
 
   function updateProviderField(providerId: string, patch: Partial<ProviderDraft>) {
-    setDrafts((current) => current.map((draft) => (
-      draft.id === providerId ? { ...draft, ...patch } : draft
-    )))
+    setDrafts((current) => {
+      const found = current.some((draft) => draft.id === providerId)
+      if (found) {
+        return current.map((draft) => (
+          draft.id === providerId ? { ...draft, ...patch } : draft
+        ))
+      }
+      return [
+        ...current,
+        {
+          id: providerId,
+          name: patch.name ?? providerId,
+          provider_type: patch.provider_type ?? "openai_compatible",
+          base_url: patch.base_url ?? "",
+          api_key: patch.api_key ?? "",
+          isTesting: patch.isTesting ?? false,
+        },
+      ]
+    })
     scheduleSave()
   }
 
@@ -293,22 +401,26 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     )))
   }
 
-  function addProvider() {
-    const draft: ProviderDraft = {
-      id: newProviderId(),
-      name: "",
-      provider_type: "openai_compatible",
-      base_url: "",
-      api_key: "",
-      isTesting: false,
-    }
-    setDrafts((current) => [...current, draft])
-    scheduleSave()
+  function addProviderWithData(data: AddProviderFormSubmission) {
+    const draft = draftFromAddProviderSubmission(data)
+    setDrafts((current) => {
+      const next = [...current, draft]
+      queueSave(() => buildPutPayload(next))
+      return next
+    })
   }
 
   function deleteProvider(providerId: string) {
     setDrafts((current) => current.filter((draft) => draft.id !== providerId))
     scheduleSave()
+  }
+
+  function updateProviderModels(providerId: string, models: ModelInfo[]) {
+    setCredentials((current) => ({
+      providers: current.providers.map((provider) => (
+        provider.id === providerId ? { ...provider, available_models: models } : provider
+      )),
+    }))
   }
 
   async function runProviderTest(providerId: string) {
@@ -338,6 +450,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
             last_test_message: response.message ?? "",
             last_error_code: response.error_code ?? "",
             available_models: response.available_models ?? provider.available_models ?? [],
+            available_sdks: response.available_sdks ?? provider.available_sdks ?? [],
           }
         }),
       }))
@@ -389,6 +502,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     <SettingsPageContent
       activeTab={activeTab}
       credentials={credentials}
+      credentialsLoading={credentialsLoading}
       drafts={drafts}
       saveStatus={saveStatus}
       rolesData={rolesData}
@@ -408,7 +522,8 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       onProviderFieldChange={updateProviderField}
       onTestProvider={(providerCode) => void runProviderTest(providerCode)}
       onDeleteProvider={deleteProvider}
-      onAddProvider={addProvider}
+      onAddProvider={addProviderWithData}
+      onProviderModelsUpdated={updateProviderModels}
       onSelectedRoleChange={setSelectedRole}
       onRolesDataChange={updateRolesData}
       onSaveRoles={() => void saveRoles()}
@@ -419,6 +534,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
 export function SettingsPageContent({
   activeTab,
   credentials,
+  credentialsLoading,
   drafts,
   saveStatus,
   rolesData,
@@ -432,6 +548,7 @@ export function SettingsPageContent({
   onTestProvider,
   onDeleteProvider,
   onAddProvider,
+  onProviderModelsUpdated,
   onSelectedRoleChange,
   onRolesDataChange,
   onSaveRoles,
@@ -464,12 +581,14 @@ export function SettingsPageContent({
             {activeTab === "api_keys" ? (
               <ApiKeysTab
                 credentials={credentials}
+                credentialsLoading={credentialsLoading}
                 drafts={drafts}
                 saveStatus={saveStatus}
                 onProviderFieldChange={onProviderFieldChange}
                 onTestProvider={onTestProvider}
                 onDeleteProvider={onDeleteProvider}
                 onAddProvider={onAddProvider}
+                onProviderModelsUpdated={onProviderModelsUpdated}
               />
             ) : null}
             {activeTab === "llm_roles" ? (
@@ -630,20 +749,33 @@ function SaveStatusBadge({ status }: { status: SaveStatus }) {
 
 function ApiKeysTab({
   credentials,
+  credentialsLoading,
   drafts,
   saveStatus,
   onProviderFieldChange,
   onTestProvider,
   onDeleteProvider,
   onAddProvider,
+  onProviderModelsUpdated,
 }: Pick<
   SettingsPageContentProps,
-  "credentials" | "drafts" | "saveStatus" | "onProviderFieldChange" | "onTestProvider" | "onDeleteProvider" | "onAddProvider"
+  | "credentials"
+  | "credentialsLoading"
+  | "drafts"
+  | "saveStatus"
+  | "onProviderFieldChange"
+  | "onTestProvider"
+  | "onDeleteProvider"
+  | "onAddProvider"
+  | "onProviderModelsUpdated"
 >) {
+  const [showAddForm, setShowAddForm] = useState(false)
   const persistedById = useMemo(
     () => Object.fromEntries(credentials.providers.map((provider) => [provider.id, provider])),
     [credentials.providers],
   )
+  const officialDrafts = useMemo(() => officialProviderDrafts(drafts), [drafts])
+  const thirdPartyDrafts = useMemo(() => thirdPartyProviderDrafts(drafts), [drafts])
 
   return (
     <div>
@@ -653,127 +785,78 @@ function ApiKeysTab({
         trailing={<SaveStatusBadge status={saveStatus} />}
       />
       <div className="space-y-4" data-testid="api-keys-list">
-        {drafts.map((draft) => {
-          const persisted = persistedById[draft.id] ?? null
-          return (
-            <ProviderCard
-              key={draft.id}
-              draft={draft}
-              persisted={persisted}
-              onFieldChange={(patch) => onProviderFieldChange(draft.id, patch)}
-              onTest={() => onTestProvider(draft.id)}
-              onDelete={() => onDeleteProvider(draft.id)}
-            />
-          )
-        })}
-        {drafts.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border/60 bg-muted/10 px-4 py-10 text-center">
-            <Button type="button" variant="default" onClick={onAddProvider} className="gap-1">
-              <Plus className="size-3.5" />
-              Add Provider
-            </Button>
-          </div>
-        ) : null}
-      </div>
-      {drafts.length === 0 ? null : (
-        <div className="mt-4 flex justify-start">
-          <Button type="button" variant="outline" onClick={onAddProvider} className="gap-1">
-            <Plus className="size-3.5" />
-            Add Provider
-          </Button>
-        </div>
-      )}
-    </div>
-  )
-}
+        {credentialsLoading ? (
+          <ProviderListSkeleton count={5} />
+        ) : (
+          <>
+            <section className="space-y-3" aria-label="Official Providers">
+              <h3 className="text-sm font-medium text-foreground">Official Providers</h3>
+              {officialDrafts.map((draft) => {
+                const persisted = persistedById[draft.id] ?? null
+                return (
+                  <ProviderCard
+                    key={draft.id}
+                    draft={draft}
+                    persisted={persisted}
+                    onFieldChange={(patch) => onProviderFieldChange(draft.id, { ...draft, ...patch })}
+                    onTest={() => onTestProvider(draft.id)}
+                    onDelete={() => onDeleteProvider(draft.id)}
+                    providerKind="official"
+                    showManualModelPanel={shouldShowManualModelPanel(draft, persisted)}
+                    notableProviderKey={notableProviderKeyForDraft(draft)}
+                    onModelsUpdated={(models) => onProviderModelsUpdated(draft.id, models)}
+                  />
+                )
+              })}
+            </section>
 
-function ProviderCard({
-  draft,
-  persisted,
-  onFieldChange,
-  onTest,
-  onDelete,
-}: {
-  draft: ProviderDraft
-  persisted: CredentialsState["providers"][number] | null
-  onFieldChange: (patch: Partial<ProviderDraft>) => void
-  onTest: () => void
-  onDelete: () => void
-}) {
-  const status = persisted?.last_test_status ?? "untested"
-  const displayStatus = status === "ok" ? "Connected" : status === "untested" ? "Untested" : "Failed"
-  const statusVariant = status === "ok" ? "secondary" : status === "untested" ? "outline" : "destructive"
-  return (
-    <Card data-provider-id={draft.id}>
-      <CardHeader className="flex flex-row items-center gap-3 pb-2">
-        <Input
-          value={draft.name}
-          onChange={(event) => onFieldChange({ name: event.target.value })}
-          placeholder="Provider Name"
-          className="w-full max-w-xs font-semibold"
-          aria-label="Provider Name"
-        />
-        <Badge variant={statusVariant}>{displayStatus}</Badge>
-        <div className="flex-1" />
-        <Button type="button" variant="ghost" size="icon" onClick={onDelete} aria-label="Delete provider">
-          <Trash2 className="size-4" />
-        </Button>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <Label>SDK Protocol</Label>
-          <RadioGroup
-            value={draft.provider_type}
-            onValueChange={(next) => onFieldChange({ provider_type: next as ProviderType })}
-            className="flex flex-row gap-4"
-          >
-            <div className="flex items-center gap-2">
-              <RadioGroupItem value="openai_compatible" id={`protocol-openai-${draft.id}`} />
-              <Label htmlFor={`protocol-openai-${draft.id}`}>OpenAI Compatible</Label>
-            </div>
-            <div className="flex items-center gap-2">
-              <RadioGroupItem value="anthropic_compatible" id={`protocol-anthropic-${draft.id}`} />
-              <Label htmlFor={`protocol-anthropic-${draft.id}`}>Anthropic</Label>
-            </div>
-          </RadioGroup>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor={`api-key-${draft.id}`}>API Key</Label>
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <Input
-                id={`api-key-${draft.id}`}
-                type="text"
-                value={draft.api_key}
-                onChange={(event) => onFieldChange({ api_key: event.target.value })}
-                placeholder="sk-..."
-                name={`provider-secret-${draft.id}`}
-                autoComplete="off"
-                data-1p-ignore=""
-                data-lpignore="true"
-                data-form-type="other"
-                spellCheck={false}
-              />
-            </div>
-            <Button type="button" variant="default" onClick={onTest} disabled={draft.isTesting}>
-              {draft.isTesting ? <Loader2 className="size-3.5 animate-spin" /> : null}
-              Test
-            </Button>
-          </div>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor={`base-url-${draft.id}`}>Base URL</Label>
-          <Input
-            id={`base-url-${draft.id}`}
-            value={draft.base_url}
-            onChange={(event) => onFieldChange({ base_url: event.target.value })}
-            placeholder="https://api.openai.com/v1"
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </div>
-      </CardContent>
-    </Card>
+            <section className="space-y-3 pt-4" aria-label="Third-party Providers">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-medium text-foreground">Third-party Providers</h3>
+                {!showAddForm ? (
+                  <Button type="button" variant="outline" onClick={() => setShowAddForm(true)} className="gap-1">
+                    <Plus className="size-3.5" />
+                    Add Provider
+                  </Button>
+                ) : null}
+              </div>
+              {thirdPartyDrafts.length > 0 ? (
+                thirdPartyDrafts.map((draft) => {
+                  const persisted = persistedById[draft.id] ?? null
+                  return (
+                    <ProviderCard
+                      key={draft.id}
+                      draft={draft}
+                      persisted={persisted}
+                      onFieldChange={(patch) => onProviderFieldChange(draft.id, patch)}
+                      onTest={() => onTestProvider(draft.id)}
+                      onDelete={() => onDeleteProvider(draft.id)}
+                      providerKind="third-party"
+                      showManualModelPanel={shouldShowManualModelPanel(draft, persisted)}
+                      notableProviderKey={notableProviderKeyForDraft(draft)}
+                      onModelsUpdated={(models) => onProviderModelsUpdated(draft.id, models)}
+                    />
+                  )
+                })
+              ) : !showAddForm ? (
+                <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border/60 bg-muted/10 px-4 py-8 text-center">
+                  <p className="text-xs text-muted-foreground">No third-party providers configured.</p>
+                </div>
+              ) : null}
+              {showAddForm ? (
+                <AddProviderForm
+                  onSubmit={async (data) => {
+                    await onAddProvider(data)
+                    setShowAddForm(false)
+                  }}
+                  onCancel={() => setShowAddForm(false)}
+                />
+              ) : null}
+            </section>
+          </>
+        )}
+      </div>
+    </div>
   )
 }
 

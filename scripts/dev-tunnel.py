@@ -90,7 +90,12 @@ def process_specs(token: str) -> list[tuple[str, list[str], Path, dict[str, str]
             BACKEND_DIR,
             backend_env,
         ),
-        ("vite", ["corepack", "pnpm", "dev"], FRONTEND_DIR, None),
+        (
+            "vite",
+            ["corepack", "pnpm", "dev"],
+            FRONTEND_DIR,
+            {**os.environ, "VITE_STUDIO_API_BASE_URL": "/api"},
+        ),
         (
             "cloudflared",
             [

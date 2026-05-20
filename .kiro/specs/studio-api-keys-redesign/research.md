@@ -20,7 +20,7 @@ a2 (Gemini) 2026-05-18 通过 `web_search` 拉取各 vendor 官方 / GitHub / �
 | **Anthropic** | 官方 `anthropic` Python/TS SDK; Vertex AI 部署 (`anthropic[vertex]`); AWS Bedrock 部署 (`anthropic[bedrock]`); **近年正式支持 OpenAI compatible 协议** (通过 `/v1/messages` 兼容层, 但 native SDK 更推荐 — 因为支持 Prompt Caching / Extended Thinking / Computer Use 等) | `anthropic_compatible` (native) / `openai_compatible` (兼容层) | https://docs.anthropic.com/ |
 | **OpenAI** | 官方 SDK, Azure OpenAI (api-key header 而不是 Bearer, 需后端 adapter), OpenAI compatible 协议是业界 defacto standard | `openai_compatible` | https://platform.openai.com/docs/ |
 | **DeepSeek** | **完全 OpenAI compatible**, 官方虽有轻量 SDK 但底层就是改了 base_url 的 openai 客户端. 还提供了一个 Anthropic 兼容端点用于平替 Claude | `openai_compatible` | https://platform.deepseek.com/api-docs |
-| **Google Gemini** | 官方 `google-generativeai` SDK; Vertex AI; **2024-11 起加了 OpenAI compatible endpoint** (`https://generativelanguage.googleapis.com/v1beta/openai/`), 允许直接用 openai SDK 调 gemini-1.5/2.0/3.x 系列 | `gemini_official` (native, 有 grounding 等高级特性) / `openai_compatible` (兼容 endpoint) | https://ai.google.dev/gemini-api/docs/openai |
+| **Google Gemini** | 官方 `google-generativeai` SDK; Vertex AI; **2024-11 起加了 OpenAI compatible endpoint** (`https://generativelanguage.googleapis.com/v1beta/openai/`), 允许直接用 openai SDK 调 gemini-1.5/2.0/3.x 系列 | `google_genai` (native, 有 grounding 等高级特性) / `openai_compatible` (兼容 endpoint) | https://ai.google.dev/gemini-api/docs/openai |
 | **Mistral** | 官方 SDK (`mistralai`), 同时**完全兼容 OpenAI 协议**. Azure 上作为 MaaS 运行同样兼容 | `openai_compatible` | https://docs.mistral.ai/ |
 | **xAI Grok** | API **完全兼容 OpenAI 规范**, 推荐直接用 openai 库换 `base_url="https://api.x.ai/v1"` | `openai_compatible` | https://docs.x.ai/ |
 | **Cohere** | 提供专门的 **Compatibility API** (`https://api.cohere.ai/compatibility/v1`) 完美对接 OpenAI SDK | `openai_compatible` | https://docs.cohere.com/docs/compatibility-api |
@@ -54,13 +54,13 @@ a2 (Gemini) 2026-05-18 通过 `web_search` 拉取各 vendor 官方 / GitHub / �
 class ProviderType(str, Enum):
     anthropic_compatible = "anthropic_compatible"
     openai_compatible = "openai_compatible"
-    gemini_official = "gemini_official"
-    wavespeed_any_llm = "wavespeed_any_llm"
+    google_genai = "google_genai"
+    openai_compatible = "openai_compatible"
 ```
 
 ### Web research 揭示的问题
 
-`apps/studio/backend/app/services/llm_provider_test.py:75-79` 实证: `wavespeed_any_llm` 跟 `openai_compatible` test 路径**完全一样** (都是 `GET /v1/models` + `Authorization: Bearer`). 这暗示 4-enum 区分**只是 base URL 不同**, 没有协议层差异.
+`apps/studio/backend/app/services/llm_provider_test.py:75-79` 实证: `openai_compatible` 跟 `openai_compatible` test 路径**完全一样** (都是 `GET /v1/models` + `Authorization: Bearer`). 这暗示 4-enum 区分**只是 base URL 不同**, 没有协议层差异.
 
 ### v2.1 收敛后 (3 enum)
 
@@ -68,13 +68,13 @@ class ProviderType(str, Enum):
 class ProviderType(str, Enum):
     anthropic_compatible = "anthropic_compatible"   # native SDK, x-api-key + anthropic-version header
     openai_compatible = "openai_compatible"         # OpenAI 标准, 覆盖 90%+ 文本 LLM
-    gemini_official = "gemini_official"             # 可选保留, native SDK 有 grounding 等特性
+    google_genai = "google_genai"             # 可选保留, native SDK 有 grounding 等特性
 ```
 
 理由:
-- `wavespeed_any_llm` 干掉 — 它就是 `openai_compatible` 套了不同 base URL
+- `openai_compatible` 干掉 — 它就是 `openai_compatible` 套了不同 base URL
 - DeepSeek / Mistral / Grok / Cohere / WaveSpeed / 各中转商 全部统一到 `openai_compatible`, 用户改 base URL 就能切换
-- `gemini_official` 保留是因为 native protocol (`:generateContent`) 跟 OpenAI 协议 message format 不同 (`contents` 而非 `messages`, role 用 `model` 而非 `assistant`), 而 Google 的 OpenAI 兼容 endpoint 又不支持所有特性
+- `google_genai` 保留是因为 native protocol (`:generateContent`) 跟 OpenAI 协议 message format 不同 (`contents` 而非 `messages`, role 用 `model` 而非 `assistant`), 而 Google 的 OpenAI 兼容 endpoint 又不支持所有特性
 
 ### v2.2+ 加多模态时
 
@@ -129,7 +129,7 @@ Studio v2.1 paradigm = **Continue.dev + OpenWebUI 风格** (provider 顶层 + �
 
 a2 Gemini round 2 (web research 后) 主动推送的设计 risk:
 
-1. **`wavespeed_any_llm` Enum 的荒谬性** — Web research 实证 WaveSpeed 就是 `openai_compatible`. 后端只需要统一成 2-3 enum (anthropic / openai / gemini_official), 靠用户配置 Base URL 去分发. **user 2026-05-18 已采纳, 收敛到 3 enum**.
+1. **`openai_compatible` Enum 的荒谬性** — Web research 实证 WaveSpeed 就是 `openai_compatible`. 后端只需要统一成 2-3 enum (anthropic / openai / google_genai), 靠用户配置 Base URL 去分发. **user 2026-05-18 已采纳, 收敛到 3 enum**.
 
 2. **多模态测试 (Test) 按钮怎么做?** Fal / Replicate 没 `/v1/models`, 需要不同 Ping 策略. **user 2026-05-18 已拍: 多模态 v2.1 不做, 延到 v2.2+**.
 

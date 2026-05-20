@@ -22,7 +22,7 @@ export type TestStatus =
 
 export interface ModelInfo {
   id: string
-  capabilities?: Record<string, any>
+  capabilities?: Record<string, unknown>
 }
 
 /**

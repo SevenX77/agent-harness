@@ -1,5 +1,5 @@
 import { AlertCircle, AlertTriangle, Clock3, FolderOpen, Layers, Layers3, MoreVertical, Plus, Sparkles, Trash2 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
 import type { SkillSummary } from '../../api/types'
@@ -26,15 +26,6 @@ import {
   ContextMenuTrigger,
 } from '../ui/context-menu'
 import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '../ui/dialog'
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -48,61 +39,14 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '../ui/empty'
-import { Input } from '../ui/input'
-import { Label } from '../ui/label'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
+import { NewSkillDialog } from './NewSkillDialog'
+import { formatLastRun, normalizeSkillId, shortPath, skillIdFromPath, sortRecent } from './utils'
 
 interface WelcomePageProps {
   onSelectSkill: (skillId: string) => void
 }
 
-function formatLastRun(value: string | null) {
-  if (!value) {
-    return 'No runs yet'
-  }
-
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(new Date(value))
-  } catch {
-    return value
-  }
-}
-
-function sortRecent(skills: SkillSummary[], recentSkillIds: string[]) {
-  const byId = new Map(skills.map((skill) => [skill.id, skill]))
-  const recent = recentSkillIds.map((id) => byId.get(id)).filter((skill): skill is SkillSummary => Boolean(skill))
-  const remaining = skills
-    .filter((skill) => !recentSkillIds.includes(skill.id))
-    .sort((a, b) => (b.last_run_at ?? '').localeCompare(a.last_run_at ?? ''))
-
-  return [...recent, ...remaining]
-}
-
-function skillIdFromPath(path: string) {
-  const name = path.split(/[\\/]/).filter(Boolean).pop() ?? 'imported-skill'
-  const normalized = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-  const withLetter = /^[a-z]/.test(normalized) ? normalized : `skill-${normalized}`
-  return withLetter || 'imported-skill'
-}
-
-function normalizeSkillId(value: string) {
-  const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-  const withLetter = /^[a-z]/.test(normalized) ? normalized : `skill-${normalized}`
-  return withLetter || 'new-skill'
-}
-
-function shortPath(path: string | null) {
-  if (!path) {
-    return 'AgentStudio/Skills'
-  }
-  const parts = path.split(/[\\/]/).filter(Boolean)
-  return parts.length > 3 ? `.../${parts.slice(-3).join('/')}` : path
-}
 
 export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   const [importing, setImporting] = useState(false)
@@ -143,7 +87,7 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
     }
   }
 
-  const submitNewSkill = async (event?: React.FormEvent) => {
+  const submitNewSkill = async (event?: FormEvent) => {
     event?.preventDefault()
     const trimmed = newSkillName.trim()
     if (!trimmed) {
@@ -403,47 +347,15 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
         ) : null}
       </section>
 
-      <Dialog open={newSkillOpen} onOpenChange={setNewSkillOpen}>
-        <DialogContent>
-          <form onSubmit={(event) => void submitNewSkill(event)}>
-            <DialogHeader>
-              <DialogTitle>New skill</DialogTitle>
-              <DialogDescription>
-                A folder will be created under AgentStudio/Skills with a starter SKILL.md.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="my-4 space-y-2">
-              <Label htmlFor="new-skill-name">Skill name</Label>
-              <Input
-                id="new-skill-name"
-                autoFocus
-                value={newSkillName}
-                onChange={(event) => setNewSkillName(event.target.value)}
-                placeholder="my-new-skill"
-                aria-invalid={Boolean(newSkillError)}
-                disabled={creating}
-              />
-              {newSkillError ? (
-                <p className="text-xs text-destructive">{newSkillError}</p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  Will be normalized to <span className="font-mono">{normalizeSkillId(newSkillName || 'new-skill')}</span>
-                </p>
-              )}
-            </div>
-            <DialogFooter>
-              <DialogClose asChild>
-                <Button type="button" variant="outline" disabled={creating}>
-                  Cancel
-                </Button>
-              </DialogClose>
-              <Button type="submit" disabled={creating || !newSkillName.trim()}>
-                {creating ? 'Creating' : 'Create'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <NewSkillDialog
+        open={newSkillOpen}
+        onOpenChange={setNewSkillOpen}
+        newSkillName={newSkillName}
+        onNewSkillNameChange={setNewSkillName}
+        newSkillError={newSkillError}
+        creating={creating}
+        onSubmit={submitNewSkill}
+      />
     </div>
   )
 }

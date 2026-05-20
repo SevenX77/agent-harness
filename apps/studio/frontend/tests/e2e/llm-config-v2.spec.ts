@@ -139,8 +139,8 @@ async function mockBackend(page: Page) {
     await fulfillJson(route, { notable_models: notable[providerKey] ?? ['manual/model'] })
   })
   await page.route('**/api/llm/providers/test-models', async (route) => {
-    const body = JSON.parse(route.request().postData() ?? '{}') as { provider_key: string; model_ids: string[] }
-    const provider = providers.find((item) => item.id === body.provider_key)
+    const body = JSON.parse(route.request().postData() ?? '{}') as { provider_id: string; model_ids: string[] }
+    const provider = providers.find((item) => item.id === body.provider_id)
     const unique = Array.from(new Set(body.model_ids.filter(Boolean)))
     const results = unique.map((modelId) => ({ model_id: modelId, status: 'ok', latency_ms: 12, message: null }))
     const existingModels = provider?.available_models ?? []
@@ -149,7 +149,7 @@ async function mockBackend(page: Page) {
       if (!byId.has(modelId)) byId.set(modelId, { id: modelId, capabilities: { max_context_tokens: 200000 } })
     }
     const available_models = [...byId.values()]
-    providers = providers.map((item) => item.id === body.provider_key ? { ...item, available_models } : item)
+    providers = providers.map((item) => item.id === body.provider_id ? { ...item, available_models } : item)
     await fulfillJson(route, { results, available_models })
   })
   await page.route('**/api/llm/providers/test', async (route) => {

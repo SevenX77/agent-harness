@@ -98,7 +98,8 @@ export interface NotableModelsResponse {
 }
 
 export interface ProviderModelTestRequest {
-  provider_key: string
+  /** Credential UUID (`ProviderCredential.id`), not the provider_key metadata file key. */
+  provider_id: string
   model_ids: string[]
 }
 

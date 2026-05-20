@@ -56,6 +56,57 @@ provider.id (UUID) 区分多张 credential record:
 
 ---
 
+## §概念定义.2 ProviderCredential Schema 字段表
+
+`ProviderCredential` 是 `~/.studio/llm_credentials.json` 持久化的核心 record. 每条记录代表 user 配置的一张 API key + 元数据. 字段定义如下:
+
+| 字段 | 类型 | 写入主体 | 含义 + 功能 |
+|---|---|---|---|
+| `id` | `str` (UUID) | frontend AddProviderForm | credential record 唯一标识, 区分同 provider_key 下多张 record (e.g., 一个 user 申请 2 个 OpenRouter key 各给 Gemini / Claude). **lookup credential 永远用 id 匹配, 不用 provider_key.** |
+| `name` | `str` | frontend AddProviderForm | user 输入的人话标识 (e.g., "OpenRouter (Gemini 用)"), 仅 UI 显示用 |
+| `provider_key` | `str` | frontend AddProviderForm (Official 5 vendor 自动注入 / Third-party user 输入) | 元数据文件名, 对应 `apps/studio/backend/app/data/llm_providers/<provider_key>.md`. 多个 credential 可共享同一 provider_key (e.g., 2 张 OpenRouter record 都用 provider_key="openrouter"). 仅用于 backend 加载 vendor 元数据 (docs, models_endpoint_path, auth_header_format). |
+| `api_key` | `str` | frontend AddProviderForm + ProviderCard mask UI | API 鉴权密钥真值. PUT /credentials 时空串语义 "保留旧值不变". |
+| `base_url` | `str` (Optional) | frontend AddProviderForm | API endpoint base URL. 空时 backend fallback 到 provider_key 元数据里的默认 base_url. |
+| `provider_type` | `str` | frontend AddProviderForm Radio | SDK 协议: `anthropic_compatible` / `openai_compatible` / `google_genai` |
+| `available_models` | `list[ModelInfo]` | backend `_persist_test_outcome` (Test outcome single-writer) | 探测过的 model 列表 + 每个 model 的 capabilities dict (`max_context_tokens` / `thinking` 等). user 不直接编辑, 通过 Test button / ManualModelTestPanel 累加 |
+| `available_sdks` | `list[str]` | backend `_persist_test_outcome` | 探测过的兼容 SDK 列表 (`openai_compatible` 等) |
+| `last_test_status` | `TestStatus` enum | backend `_persist_test_outcome` | 探测状态: `ok` / `invalid_key` / `timeout` / `untested` |
+| `last_test_at` | `datetime` (Optional) | backend `_persist_test_outcome` | 探测时间戳 |
+| `last_test_message` | `str` (Optional) | backend `_persist_test_outcome` | 探测失败 message |
+| `last_error_code` | `str` (Optional) | backend `_persist_test_outcome` | 探测错误 enum code |
+
+**single-writer 边界 (`ProviderCredentialWrite` 强制隔离)**:
+- 6 个 user-editable 字段: `id`, `name`, `provider_key`, `api_key`, `base_url`, `provider_type` (PUT /credentials 写)
+- 6 个 Test-outcome 字段: `available_models`, `available_sdks`, `last_test_status`, `last_test_at`, `last_test_message`, `last_error_code` (POST /providers/test + POST /providers/test-models 写)
+- backend `ProviderCredentialWrite` Schema 用 `ConfigDict(extra="forbid")` 防御前端意外写入 Test outcome 字段 (PR-D2 实施时落地)
+
+**ProviderModelTestRequest 字段** (POST /providers/test-models body):
+- `provider_id: str` — credential UUID (= `ProviderCredential.id`), **不是** provider_key 元数据文件名. 用于 lookup 具体 credential record.
+- `model_ids: list[str]` — 用户要探测的 model id 列表
+
+### lookup 维度区分 (重要 — 避免后续读代码的人混淆)
+
+`provider_key` 跟 `provider.id` 是**两个不同 lookup 维度**, 各有自己的用途, **都保留不二选一**:
+
+| Lookup 目的 | 用什么字段 | 例子 |
+|---|---|---|
+| 取 credential 实例 (api_key / base_url / Test outcome) | `provider.id` (UUID) | 后端 `POST /providers/test-models` 内 `next(p for p in data.providers if p.id == request.provider_id)` |
+| 取 vendor / model **静态属性** (SDK 协议 / 默认 base_url / model 输入输出参数 / 默认 capabilities) | `(provider_key, model_name)` 联合 | 后端读 `<provider_key>.md` 获取 model 默认 max_tokens / `vendor` lookup `_infer_vendor_from_provider` 等 |
+
+**user 拍板原话** (2026-05-20):
+> "我要查看一个模型的 sdk、输入输出参数时, 我用的字段肯定是 `provider_key + model name`, 同一家 provider 的同一个模型参数是一样的"
+
+含义:
+- 同一家 provider (e.g., OpenRouter) 申请 2 张 key (id 不同, **provider_key 共享 = "openrouter"**), 这两张 credential 看同一个 model (e.g., `claude-opus-4-7`) 时, SDK / 输入输出参数 / 默认 capabilities **完全一致** (来自 vendor 的 model 设计, 不因 credential 不同而变)
+- 所以查静态参数用 `(provider_key, model_name)` 联合是正确的; 用 `(provider.id, model_name)` 会冗余 (id 是 credential 维度, 跟 model 静态属性无关)
+- 查 credential 实例 (具体哪张 key / Test outcome / 上次探测时间) 才用 `provider.id`
+
+**Pydantic 实现建议**:
+- `ProviderCredential.provider_key` 字段 docstring 明确: "Use this with model_name for lookup of vendor static properties (SDK, default params, capabilities)."
+- `ProviderCredential.id` 字段 docstring 明确: "Use this for credential instance lookup (api_key, base_url, Test outcome). Multiple credentials may share the same provider_key but have distinct id."
+
+---
+
 ## §1 9 项 user feedback 总览 + cover 段映射
 
 | # | User 原话 (节选) | Cover 段 |

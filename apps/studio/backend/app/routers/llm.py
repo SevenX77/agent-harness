@@ -107,12 +107,26 @@ class NotableModelsResponse(BaseModel):
 
 
 class ProviderModelTestRequest(BaseModel):
-    """Request body for manual model probing."""
+    """Manual model probing request body.
+
+    ``provider_id`` is the UUID of the credential record (``provider.id``),
+    NOT the metadata file key (``provider_key`` like ``openrouter``). See
+    ``.kiro/specs/studio-api-keys-redesign/round3-design.md`` §概念定义
+    for the distinction.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    provider_key: str
-    model_ids: list[str] = Field(default_factory=list)
+    provider_id: str = Field(
+        description=(
+            "Credential record UUID (provider.id), distinguishes multiple "
+            "credentials sharing the same provider_key."
+        )
+    )
+    model_ids: list[str] = Field(
+        default_factory=list,
+        description="List of model ids to probe against the provider's API.",
+    )
 
 
 class ProviderModelTestResult(BaseModel):
@@ -271,9 +285,9 @@ async def test_provider_models(request: ProviderModelTestRequest) -> ProviderMod
     """Probe user-supplied model ids and append passing models to credentials."""
 
     data = load_credentials()
-    provider = next((item for item in data.providers if item.id == request.provider_key), None)
+    provider = next((item for item in data.providers if item.id == request.provider_id), None)
     if provider is None:
-        raise HTTPException(status_code=404, detail=f"Unknown provider: {request.provider_key}")
+        raise HTTPException(status_code=404, detail=f"Unknown provider: {request.provider_id}")
     if not provider.api_key:
         raise HTTPException(status_code=400, detail="Provider API key is empty")
     provider_type = provider.provider_type or "openai_compatible"

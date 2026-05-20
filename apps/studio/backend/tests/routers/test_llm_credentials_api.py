@@ -815,7 +815,7 @@ def test_provider_test_models_appends_ok_models_and_dedupes(
 
     response = client.post(
         "/api/llm/providers/test-models",
-        json={"provider_key": "openai-default", "model_ids": ["gpt-5", "gpt-5", "gpt-4o"]},
+        json={"provider_id": "openai-default", "model_ids": ["gpt-5", "gpt-5", "gpt-4o"]},
     )
 
     assert response.status_code == 200
@@ -858,7 +858,7 @@ def test_provider_test_models_partial_failures_append_only_ok(
 
     response = client.post(
         "/api/llm/providers/test-models",
-        json={"provider_key": "openai-default", "model_ids": ["gpt-5", "bad-model"]},
+        json={"provider_id": "openai-default", "model_ids": ["gpt-5", "bad-model"]},
     )
 
     assert response.status_code == 200
@@ -878,7 +878,7 @@ def test_provider_test_models_unknown_provider_returns_404(
 
     response = client.post(
         "/api/llm/providers/test-models",
-        json={"provider_key": "missing", "model_ids": ["gpt-5"]},
+        json={"provider_id": "missing", "model_ids": ["gpt-5"]},
     )
 
     assert response.status_code == 404
@@ -921,7 +921,7 @@ def test_provider_test_models_preserves_existing_models(
 
     response = client.post(
         "/api/llm/providers/test-models",
-        json={"provider_key": "openai-default", "model_ids": ["gpt-5", "claude-opus-4-7"]},
+        json={"provider_id": "openai-default", "model_ids": ["gpt-5", "claude-opus-4-7"]},
     )
 
     assert response.status_code == 200

@@ -58,7 +58,7 @@ export function ManualModelTestPanel({ providerKey, notableProviderKey, onModels
     setError(null)
     try {
       const response = await testProviderModels({
-        provider_key: providerKey,
+        provider_id: providerKey,
         model_ids: trimmedModelIds,
       })
       setResults(response.results)

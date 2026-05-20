@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Skill Studio - UI Mockup</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', '-apple-system', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+          },
+          colors: {
+            zinc: {
+              850: '#1f1f22',
+              900: '#18181b',
+              950: '#09090b',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+    
+    body {
+      font-family: 'Inter', sans-serif;
+      /* Prevent scrolling on the body */
+      overflow: hidden; 
+    }
+    
+    /* Vercel/Linear style minimal scrollbars */
+    ::-webkit-scrollbar {
+      width: 4px;
+      height: 4px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #3f3f46;
+      border-radius: 2px;
+    }
+
+    /* The signature tech dot-grid background */
+    .bg-dot-grid {
+      background-image: radial-gradient(circle, #27272a 1px, transparent 1px);
+      background-size: 14px 14px;
+    }
+
+    /* Minimalist glowing active state */
+    .glow-active {
+      box-shadow: 0 0 12px 0 rgba(99, 102, 241, 0.15);
+    }
+  </style>
+</head>
+<body class="bg-zinc-950 text-zinc-300 h-screen flex flex-col selection:bg-indigo-500/30">
+
+  <!-- ==================== HEADER ==================== -->
+  <header class="h-9 min-h-[36px] border-b border-zinc-800/80 flex items-center justify-between px-3 bg-zinc-950/80 backdrop-blur-sm z-10 relative">
+    
+    <!-- Left: Breadcrumbs -->
+    <div class="flex items-center gap-2 text-[11px] font-medium text-zinc-500">
+      <svg class="w-3.5 h-3.5 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
+      <span class="hover:text-zinc-300 cursor-pointer transition-colors">Workspace</span>
+      <span class="text-zinc-700">/</span>
+      <span class="hover:text-zinc-300 cursor-pointer transition-colors">story-deconstruction</span>
+      <span class="text-zinc-700">/</span>
+      <span class="text-zinc-100 font-mono text-[10px]">SKILL.md</span>
+    </div>
+
+    <!-- Right: Status & Actions -->
+    <div class="flex items-center gap-2.5">
+      <!-- Status Badge -->
+      <div class="flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-zinc-800 bg-zinc-900/50">
+        <div class="w-1.5 h-1.5 rounded-full bg-emerald-500/80"></div>
+        <span class="text-[10px] font-mono text-zinc-400">Compiled</span>
+      </div>
+      
+      <!-- Buttons -->
+      <button class="px-2.5 py-1 text-[11px] font-medium text-zinc-300 border border-zinc-700 rounded hover:bg-zinc-800 transition-colors h-6 flex items-center">
+        Predict
+      </button>
+      <button class="px-2.5 py-1 text-[11px] font-medium text-white bg-indigo-600 rounded hover:bg-indigo-500 transition-colors h-6 flex items-center gap-1.5 border border-indigo-500/50">
+        <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M4 4l12 6-12 6V4z"></path></svg>
+        Run
+      </button>
+    </div>
+  </header>
+
+  <!-- ==================== MAIN WORKSPACE ==================== -->
+  <div class="flex flex-1 h-[calc(100vh-36px)]">
+    
+    <!-- LEFT: Asset Tree (Ultra Dense) -->
+    <aside class="w-48 border-r border-zinc-800/80 bg-zinc-950 flex flex-col">
+      <div class="px-3 py-2 border-b border-zinc-800/80 text-[10px] font-mono text-zinc-500 tracking-wider">ASSETS</div>
+      
+      <!-- File Tree List -->
+      <div class="flex flex-col py-1 text-[11.5px]">
+        <!-- Folder -->
+        <div class="flex items-center gap-1.5 px-3 py-1 hover:bg-zinc-900 cursor-pointer text-zinc-400 group">
+          <svg class="w-3 h-3 text-zinc-500 group-hover:text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+          scripts/
+        </div>
+        <!-- Active File -->
+        <div class="flex items-center gap-1.5 px-3 py-1 bg-indigo-500/10 text-indigo-300 cursor-pointer border-l-2 border-indigo-500 font-mono text-[11px]">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+          SKILL.md
+        </div>
+        <!-- Inactive File -->
+        <div class="flex items-center gap-1.5 px-3 py-1 hover:bg-zinc-900 cursor-pointer text-zinc-400 pl-4">
+          <svg class="w-3 h-3 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+          rules_v2.md
+        </div>
+        <div class="flex items-center gap-1.5 px-3 py-1 hover:bg-zinc-900 cursor-pointer text-zinc-500 pl-4 font-mono text-[10px]">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
+          baseline.json
+        </div>
+      </div>
+    </aside>
+
+    <!-- CENTER: Canvas Stage (The Graph) -->
+    <main class="flex-1 relative bg-zinc-950 bg-dot-grid overflow-hidden">
+      
+      <!-- Top Left Control -->
+      <div class="absolute top-3 left-3 flex gap-1 bg-zinc-900/80 border border-zinc-800 rounded p-1 backdrop-blur-md">
+        <button class="w-6 h-6 flex items-center justify-center rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg></button>
+        <button class="w-6 h-6 flex items-center justify-center rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path></svg></button>
+      </div>
+
+      <!-- ================= CANVAS NODES ================= -->
+
+      <!-- SVG Lines for connection -->
+      <svg class="absolute inset-0 w-full h-full pointer-events-none z-0">
+        <path d="M 280 180 C 340 180, 360 180, 420 180" fill="none" stroke="#3f3f46" stroke-width="1.5"></path>
+        <path d="M 680 180 C 740 180, 760 180, 820 180" fill="none" stroke="#3f3f46" stroke-width="1.5" stroke-dasharray="4 4"></path>
+      </svg>
+
+      <!-- The Edge Dot (Context Inspector Trigger) -->
+      <div class="absolute w-4 h-4 bg-zinc-900 border border-zinc-600 rounded-full flex items-center justify-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-900/30 z-10 transition-colors" style="left: 342px; top: 172px;">
+        <div class="w-1.5 h-1.5 bg-zinc-500 rounded-full"></div>
+      </div>
+
+      <!-- Node 1: Input (Muted/Grey) -->
+      <div class="absolute w-56 bg-zinc-900/80 border border-zinc-800/80 rounded-md shadow-sm backdrop-blur-md overflow-hidden z-10" style="left: 60px; top: 140px;">
+        <div class="px-2.5 py-1.5 bg-zinc-800/30 border-b border-zinc-800/80 flex items-center justify-between">
+          <div class="flex items-center gap-1.5">
+            <svg class="w-3 h-3 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M4 12a8 8 0 1116 0 8 8 0 01-16 0z"></path></svg>
+            <span class="text-[11px] font-medium text-zinc-400">io.inputs</span>
+          </div>
+        </div>
+        <div class="p-2.5 flex flex-col gap-1.5">
+          <div class="flex justify-between items-center">
+            <span class="text-[10px] text-zinc-500 font-mono">scene_id</span>
+            <span class="text-[10px] text-indigo-400/70 font-mono">str</span>
+          </div>
+          <div class="flex justify-between items-center">
+            <span class="text-[10px] text-zinc-500 font-mono">raw_text</span>
+            <span class="text-[10px] text-indigo-400/70 font-mono">str</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Node 2: Active Phase (Glowing Indigo) -->
+      <div class="absolute w-64 bg-zinc-900 border border-indigo-500 glow-active rounded-md shadow-lg overflow-hidden z-20" style="left: 420px; top: 120px;">
+        <div class="px-2.5 py-1.5 bg-indigo-500/10 border-b border-indigo-500/30 flex items-center justify-between">
+          <div class="flex items-center gap-1.5">
+            <div class="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-pulse"></div>
+            <span class="text-[12px] font-semibold text-indigo-100">extract_events</span>
+          </div>
+          <span class="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">Phase</span>
+        </div>
+        
+        <!-- Dense Config Pills -->
+        <div class="p-2 border-b border-zinc-800/80 bg-zinc-950/50 flex gap-1.5 flex-wrap">
+          <span class="px-1.5 py-0.5 text-[9px] font-mono bg-zinc-800 border border-zinc-700 text-zinc-300 rounded">type: Agent-Loop</span>
+          <span class="px-1.5 py-0.5 text-[9px] font-mono bg-zinc-800 border border-zinc-700 text-zinc-300 rounded">tier: balanced</span>
+        </div>
+
+        <div class="p-2.5 text-[11px] text-zinc-400 leading-snug">
+          <div class="mb-1 text-zinc-500 text-[10px] uppercase tracking-wider font-mono">system_prompt</div>
+          <div class="font-mono text-zinc-300 truncate opacity-80">You are an expert story analyst...</div>
+        </div>
+        
+        <!-- Action Row -->
+        <div class="px-2 py-1.5 bg-zinc-900 border-t border-zinc-800 flex justify-between items-center">
+          <span class="text-[10px] text-zinc-500">2 Tools attached</span>
+          <button class="text-[10px] font-medium text-indigo-400 hover:text-indigo-300">Edit Prompt ↗</button>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- RIGHT: Copilot Panel (Ultra-dense Inline Style) -->
+    <aside class="w-[280px] border-l border-zinc-800/80 bg-zinc-900 flex flex-col relative z-20 shadow-[-4px_0_15px_rgba(0,0,0,0.2)]">
+      <!-- Panel Header -->
+      <div class="px-3 py-2 border-b border-zinc-800/80 text-[10px] font-mono text-zinc-500 tracking-wider flex justify-between items-center">
+        COPILOT
+        <div class="flex gap-1.5">
+          <svg class="w-3.5 h-3.5 hover:text-zinc-300 cursor-pointer" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path></svg>
+        </div>
+      </div>
+
+      <!-- Chat History (No bubbles, inline Slack/Terminal style) -->
+      <div class="flex-1 overflow-y-auto p-3 flex flex-col gap-4 text-[12px] leading-snug">
+        
+        <!-- A message block -->
+        <div class="flex flex-col gap-1">
+          <div class="flex items-center gap-1.5 text-zinc-500">
+            <span class="font-semibold text-zinc-300">You</span>
+            <span class="text-[9px] font-mono">10:42 AM</span>
+          </div>
+          <div class="text-zinc-300">I need to add a validator to the extract_events phase. It should check if the JSON array has at least 3 items.</div>
+        </div>
+
+        <!-- AI response block -->
+        <div class="flex flex-col gap-1">
+          <div class="flex items-center gap-1.5 text-indigo-400">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            <span class="font-semibold">Studio AI</span>
+            <span class="text-[9px] text-zinc-600 font-mono">10:42 AM</span>
+          </div>
+          <div class="text-zinc-300">I've generated a <code class="text-[11px] bg-zinc-800 text-zinc-200 px-1 py-0.5 rounded border border-zinc-700">length_validator</code> function in your scripts folder and updated the phase config.</div>
+          
+          <!-- Code snippet inline -->
+          <div class="mt-1.5 bg-zinc-950 border border-zinc-800 rounded p-2 overflow-x-auto">
+<pre class="text-[10px] font-mono text-zinc-400"><span class="text-indigo-400">def</span> <span class="text-blue-300">validate_events</span>(ctx):
+  events = ctx.get(<span class="text-green-400">'events'</span>, [])
+  <span class="text-indigo-400">if</span> len(events) < <span class="text-orange-300">3</span>:
+    <span class="text-indigo-400">return</span> <span class="text-orange-300">False</span>, [<span class="text-green-400">"Too few events"</span>]
+  <span class="text-indigo-400">return</span> <span class="text-orange-300">True</span>, []</pre>
+          </div>
+          
+          <!-- Action buttons inline in chat -->
+          <div class="flex gap-2 mt-1">
+            <button class="text-[10px] border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-2 py-1 rounded transition-colors">Apply to SKILL.md</button>
+            <button class="text-[10px] text-zinc-500 hover:text-zinc-300 px-2 py-1">Reject</button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Input Area -->
+      <div class="p-2 border-t border-zinc-800/80 bg-zinc-950">
+        <div class="relative flex items-center bg-zinc-900 border border-zinc-700 focus-within:border-indigo-500 rounded px-2 py-1.5 transition-colors shadow-inner">
+          <input type="text" placeholder="Ask Copilot or use /commands..." class="w-full bg-transparent text-[11px] text-zinc-200 placeholder-zinc-600 focus:outline-none ml-1">
+          <button class="w-5 h-5 flex items-center justify-center text-zinc-500 hover:text-indigo-400 rounded">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+          </button>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+</body>
+</html>

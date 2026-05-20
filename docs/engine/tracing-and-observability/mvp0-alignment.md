@@ -141,38 +141,6 @@ class AgentTraceEvent(TypedDict):
 ### 5. 面向 Studio 的数据反补
 正是通过这些结构化的吐出，我们才能支撑前端完成对大图每一个节点的健康度评估。由于前端画布是强依赖阶段名（`phase_id`）做定位的，我们在 `AgentTraceEvent` 中强制绑定的 `phase_id` 就是它们之间的唯一身份令牌。这就使得我们在后续不需要做任何复杂的图匹配算法，也能让 UI 高效运转。
 
-### 3. `TraceEventKind` 与可观测性生命周期的完整映射
-在上述提到的事件分类中，每一次从 `packages/graph-agent/src/graph_agent/core/_predict_internal/tracing.py:76` 到 `packages/graph-agent/src/graph_agent/core/_predict_internal/exporter.py:22` 的投递，都对应着图流转的一个真实物理阶段。
-- `NODE_START`：发生在 LangGraph 调用节点包装器的第一行代码。此时标志着这个 `Phase` 开始消耗时间。
-- `NODE_END`：无论是通过 `return` 还是内部抛出了异常被截获降级，只要它结束了对当前线程的占用，此事件就必须发出。
-- `LLM_CALL_START`：它紧贴着 `chat_model.invoke()` 的前一行。此时组装完成的 Prompt 将展现出大模型最终所能看到的全貌，是 debug 幻觉问题的黄金证据。
-- `EXCEPTION`：一旦发生不可挽回的崩溃（比如 A8 遗漏的非法 IO 越界写入），除了抛给主循环，也必须单独打包发出给日志流，以保证日志文件自我完备，而无需额外查阅 stderr。这通常绑定在 `packages/graph-agent/src/graph_agent/core/runner.py` 的顶层截获逻辑处。
-
-### 4. 高效日志文件的轮转与清理
-虽然引擎不应过多干预外部日志系统的管理，但对于输出到默认目录 `trace.jsonl` 的行为，为了防止无休止的文件膨胀导致磁盘耗尽：
-- 我们将在每次 `run_skill` 触发新流时，检查目标日志文件的大小。
-- 若超过预设阈值（例如 50MB），自动执行文件的 rotate 行为（加上时间戳后缀），保障最新的追踪数据总是落在最易访问的文件头部。
-
-### 5. 面向 Studio 的数据反补
-正是通过这些结构化的吐出，我们才能支撑前端完成对大图每一个节点的健康度评估。由于前端画布是强依赖阶段名（`phase_id`）做定位的，我们在 `AgentTraceEvent` 中强制绑定的 `phase_id` 就是它们之间的唯一身份令牌。这就使得我们在后续不需要做任何复杂的图匹配算法，也能让 UI 高效运转。
-
-### 3. `TraceEventKind` 与可观测性生命周期的完整映射
-在上述提到的事件分类中，每一次从 `packages/graph-agent/src/graph_agent/core/_predict_internal/tracing.py:76` 到 `packages/graph-agent/src/graph_agent/core/_predict_internal/exporter.py:22` 的投递，都对应着图流转的一个真实物理阶段。
-- `NODE_START`：发生在 LangGraph 调用节点包装器的第一行代码。此时标志着这个 `Phase` 开始消耗时间。
-- `NODE_END`：无论是通过 `return` 还是内部抛出了异常被截获降级，只要它结束了对当前线程的占用，此事件就必须发出。
-- `LLM_CALL_START`：它紧贴着 `chat_model.invoke()` 的前一行。此时组装完成的 Prompt 将展现出大模型最终所能看到的全貌，是 debug 幻觉问题的黄金证据。
-- `EXCEPTION`：一旦发生不可挽回的崩溃（比如 A8 遗漏的非法 IO 越界写入），除了抛给主循环，也必须单独打包发出给日志流，以保证日志文件自我完备，而无需额外查阅 stderr。这通常绑定在 `packages/graph-agent/src/graph_agent/core/runner.py` 的顶层截获逻辑处。
-
-### 4. 高效日志文件的轮转与清理
-虽然引擎不应过多干预外部日志系统的管理，但对于输出到默认目录 `trace.jsonl` 的行为，为了防止无休止的文件膨胀导致磁盘耗尽：
-- 我们将在每次 `run_skill` 触发新流时，检查目标日志文件的大小。
-- 若超过预设阈值（例如 50MB），自动执行文件的 rotate 行为（加上时间戳后缀），保障最新的追踪数据总是落在最易访问的文件头部。
-
-### 5. 面向 Studio 的数据反补
-正是通过这些结构化的吐出，我们才能支撑前端完成对大图每一个节点的健康度评估。由于前端画布是强依赖阶段名（`phase_id`）做定位的，我们在 `AgentTraceEvent` 中强制绑定的 `phase_id` 就是它们之间的唯一身份令牌。这就使得我们在后续不需要做任何复杂的图匹配算法，也能让 UI 高效运转。
-
-
-
 ### 6. 模型流式响应的集成展望
 目前的 `LLM_CALL_END` 主要是为了捕获同步请求（Sync Call）或非流式的完整回应。但是在前端界面，PM 和开发者往往希望能看到逐字输出（Streaming）的效果。
 MVP0 观测体系的预留：
@@ -184,40 +152,3 @@ MVP0 观测体系的预留：
 针对 Tool 执行期间抛出的状态：
 - 我们可以将 `TraceEventKind` 进行扩容，加入 `TOOL_CALL_START` 和 `TOOL_CALL_END`。
 - 在 `payload` 中，精确带上 `tool_name` 以及经过验证的 `tool_args`。这对于调试基于 ReAct 模式的 LLM Agent 是不可或缺的基石信息。
-
-### 6. 模型流式响应的集成展望
-目前的 `LLM_CALL_END` 主要是为了捕获同步请求（Sync Call）或非流式的完整回应。但是在前端界面，PM 和开发者往往希望能看到逐字输出（Streaming）的效果。
-MVP0 观测体系的预留：
-- `V2TracingCallback` 将引入一对新的辅助方法：`on_llm_new_token(token: str)`。
-- 这要求在底层使用 `chat_model.stream()` 的情况也能被完整覆盖。虽然最终组装好的响应会通过 `LLM_CALL_END` 统一发射，但中间过程的 Token 也能利用这个观测窗口喂给 Web Socket，这使得 UX 体验的上限被极大拔高。
-
-### 7. 对外部网络及工具的专项抓取
-图中的节点不仅仅是调用模型，它们还会频繁使用我们绑定的 `Tools`。
-针对 Tool 执行期间抛出的状态：
-- 我们可以将 `TraceEventKind` 进行扩容，加入 `TOOL_CALL_START` 和 `TOOL_CALL_END`。
-- 在 `payload` 中，精确带上 `tool_name` 以及经过验证的 `tool_args`。这对于调试基于 ReAct 模式的 LLM Agent 是不可或缺的基石信息。
-
-### 6. 模型流式响应的集成展望
-目前的 `LLM_CALL_END` 主要是为了捕获同步请求（Sync Call）或非流式的完整回应。但是在前端界面，PM 和开发者往往希望能看到逐字输出（Streaming）的效果。
-MVP0 观测体系的预留：
-- `V2TracingCallback` 将引入一对新的辅助方法：`on_llm_new_token(token: str)`。
-- 这要求在底层使用 `chat_model.stream()` 的情况也能被完整覆盖。虽然最终组装好的响应会通过 `LLM_CALL_END` 统一发射，但中间过程的 Token 也能利用这个观测窗口喂给 Web Socket，这使得 UX 体验的上限被极大拔高。
-
-### 7. 对外部网络及工具的专项抓取
-图中的节点不仅仅是调用模型，它们还会频繁使用我们绑定的 `Tools`。
-针对 Tool 执行期间抛出的状态：
-- 我们可以将 `TraceEventKind` 进行扩容，加入 `TOOL_CALL_START` 和 `TOOL_CALL_END`。
-- 在 `payload` 中，精确带上 `tool_name` 以及经过验证的 `tool_args`。这对于调试基于 ReAct 模式的 LLM Agent 是不可或缺的基石信息。
-
-### 6. 模型流式响应的集成展望
-目前的 `LLM_CALL_END` 主要是为了捕获同步请求（Sync Call）或非流式的完整回应。但是在前端界面，PM 和开发者往往希望能看到逐字输出（Streaming）的效果。
-MVP0 观测体系的预留：
-- `V2TracingCallback` 将引入一对新的辅助方法：`on_llm_new_token(token: str)`。
-- 这要求在底层使用 `chat_model.stream()` 的情况也能被完整覆盖。虽然最终组装好的响应会通过 `LLM_CALL_END` 统一发射，但中间过程的 Token 也能利用这个观测窗口喂给 Web Socket，这使得 UX 体验的上限被极大拔高。
-
-### 7. 对外部网络及工具的专项抓取
-图中的节点不仅仅是调用模型，它们还会频繁使用我们绑定的 `Tools`。
-针对 Tool 执行期间抛出的状态：
-- 我们可以将 `TraceEventKind` 进行扩容，加入 `TOOL_CALL_START` 和 `TOOL_CALL_END`。
-- 在 `payload` 中，精确带上 `tool_name` 以及经过验证的 `tool_args`。这对于调试基于 ReAct 模式的 LLM Agent 是不可或缺的基石信息。
-

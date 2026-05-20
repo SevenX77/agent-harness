@@ -157,42 +157,6 @@ class StateMapper:
 - **强制转换**: 对于 Pydantic 支持的安全类型转换（例如 `str` 转 `bool`），引擎会做最佳努力处理，使得 CLI 命令行或者外部 HTTP 触发时，容错率得到提升。
 这种鲁棒性的提升，是使得整个执行体系摆脱脆弱标签的关键，这也是我们在 `packages/graph-agent/src/graph_agent/core/runner.py` 主线逻辑中需要着重把控的防御屏障。
 
-### 6. Phase Wrapper 的上下文准备过程
-在落实 A2 时，我们在 `packages/graph-agent/src/graph_agent/core/phase_node.py` 中引入了 `phase_input` 的装载机制。它的执行细则如下：
-1. **阶段提取**: 从 `BlackboardState.inputs` 中提取当前节点在 `io.inputs` 中声明关联的全局字段。
-2. **前置合并**: 从 `BlackboardState.phase_outputs` 遍历当前节点的 `depends_on` 列表，将合法的输出组装进来。如果出现命名冲突（比如上游的两个节点都输出了 `text` 且当前节点需要 `text`），触发 `[F-v21-io-conflict]` 阻断。
-3. **严格过滤**: 确保任何未声明在这个阶段的输入列表里的属性，都绝对不会被传入给大模型。这种控制大幅度降低了大模型在收到过多信息时产生幻觉（Hallucination）的几率。
-
-### 7. 对遗留字典 `shallow_dict_merge` 的退役计划
-由于 P0-3 所指出的 `packages/graph-agent/src/graph_agent/runtime/state.py:13` 中的函数严重阻碍了单线状态推进，在替换为 `SmartReducer` 之后，我们需要全量清理旧有函数的引用。
-- 在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py` 里面的 `Annotated[dict, shallow_dict_merge]` 会被完全替换为 `Annotated[dict, smart_dict_reducer]`。
-- 为了兼顾可能依赖旧版行为的少部分 V2.0 遗留测例，我们在一段时间内可能保留原函数名但挂上 `@deprecated` 标志。
-
-### 8. 输入过滤机制的数据纠错与补全 (Coercion)
-关于 A1 中描述的 `Input Funnel`，它不仅承担丢弃无效数据的责任，更在某些安全范围内负责补全：
-- **默认值**: 如果 `io/inputs.json` 中某属性标明了 `default` 且外部未传，Funnel 会补上它。
-- **强制转换**: 对于 Pydantic 支持的安全类型转换（例如 `str` 转 `bool`），引擎会做最佳努力处理，使得 CLI 命令行或者外部 HTTP 触发时，容错率得到提升。
-这种鲁棒性的提升，是使得整个执行体系摆脱脆弱标签的关键，这也是我们在 `packages/graph-agent/src/graph_agent/core/runner.py` 主线逻辑中需要着重把控的防御屏障。
-
-### 6. Phase Wrapper 的上下文准备过程
-在落实 A2 时，我们在 `packages/graph-agent/src/graph_agent/core/phase_node.py` 中引入了 `phase_input` 的装载机制。它的执行细则如下：
-1. **阶段提取**: 从 `BlackboardState.inputs` 中提取当前节点在 `io.inputs` 中声明关联的全局字段。
-2. **前置合并**: 从 `BlackboardState.phase_outputs` 遍历当前节点的 `depends_on` 列表，将合法的输出组装进来。如果出现命名冲突（比如上游的两个节点都输出了 `text` 且当前节点需要 `text`），触发 `[F-v21-io-conflict]` 阻断。
-3. **严格过滤**: 确保任何未声明在这个阶段的输入列表里的属性，都绝对不会被传入给大模型。这种控制大幅度降低了大模型在收到过多信息时产生幻觉（Hallucination）的几率。
-
-### 7. 对遗留字典 `shallow_dict_merge` 的退役计划
-由于 P0-3 所指出的 `packages/graph-agent/src/graph_agent/runtime/state.py:13` 中的函数严重阻碍了单线状态推进，在替换为 `SmartReducer` 之后，我们需要全量清理旧有函数的引用。
-- 在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py` 里面的 `Annotated[dict, shallow_dict_merge]` 会被完全替换为 `Annotated[dict, smart_dict_reducer]`。
-- 为了兼顾可能依赖旧版行为的少部分 V2.0 遗留测例，我们在一段时间内可能保留原函数名但挂上 `@deprecated` 标志。
-
-### 8. 输入过滤机制的数据纠错与补全 (Coercion)
-关于 A1 中描述的 `Input Funnel`，它不仅承担丢弃无效数据的责任，更在某些安全范围内负责补全：
-- **默认值**: 如果 `io/inputs.json` 中某属性标明了 `default` 且外部未传，Funnel 会补上它。
-- **强制转换**: 对于 Pydantic 支持的安全类型转换（例如 `str` 转 `bool`），引擎会做最佳努力处理，使得 CLI 命令行或者外部 HTTP 触发时，容错率得到提升。
-这种鲁棒性的提升，是使得整个执行体系摆脱脆弱标签的关键，这也是我们在 `packages/graph-agent/src/graph_agent/core/runner.py` 主线逻辑中需要着重把控的防御屏障。
-
-
-
 ### 9. 状态重置与清理策略
 在很多情况下，`run_skill` 可能需要被反复触发（比如在 Playground 里的批量测试）。如果核心 `data` 没有被完全重置，很容易出现数据串联导致的脏读脏写。
 在 MVP0 中：
@@ -203,49 +167,8 @@ class StateMapper:
 尽管目前的重点是把流程隔离并推断跑通，但是考虑到后续的扩展，这套 Reducer 和黑板机制不能对外部是绝对封闭的：
 - 在 `packages/graph-agent/src/graph_agent/core/checkpointer.py` (如果存在) 或 LangGraph 原生的 Checkpointer 的协作下，我们隔离好的 `phase_outputs` 及其字典树，能完美适配 JSON 的序列化。
 - 这意味着我们以后在实现断点续传（Pause and Resume）时，由于状态完全按 Phase 隔离，我们可以精准地知道哪些步骤不需要重跑。
-
-### 9. 状态重置与清理策略
-在很多情况下，`run_skill` 可能需要被反复触发（比如在 Playground 里的批量测试）。如果核心 `data` 没有被完全重置，很容易出现数据串联导致的脏读脏写。
-在 MVP0 中：
-- 我们规定每次启动时，不仅仅是清空 `BlackboardState`，更是要在内部主动调用垃圾回收机制（Garbage Collection），释放掉所有大体积的对象引用（例如上一次运行加载的巨型 DataFrame 或是图像 Buffer）。
-- 在 `packages/graph-agent/src/graph_agent/runtime/state.py` 内部会增加 `clear_state()` 的支持。
-
-### 10. 长时运行图的状态保存机制 (Checkpointing)
-尽管目前的重点是把流程隔离并推断跑通，但是考虑到后续的扩展，这套 Reducer 和黑板机制不能对外部是绝对封闭的：
-- 在 `packages/graph-agent/src/graph_agent/core/checkpointer.py` (如果存在) 或 LangGraph 原生的 Checkpointer 的协作下，我们隔离好的 `phase_outputs` 及其字典树，能完美适配 JSON 的序列化。
-- 这意味着我们以后在实现断点续传（Pause and Resume）时，由于状态完全按 Phase 隔离，我们可以精准地知道哪些步骤不需要重跑。
-
-### 9. 状态重置与清理策略
-在很多情况下，`run_skill` 可能需要被反复触发（比如在 Playground 里的批量测试）。如果核心 `data` 没有被完全重置，很容易出现数据串联导致的脏读脏写。
-在 MVP0 中：
-- 我们规定每次启动时，不仅仅是清空 `BlackboardState`，更是要在内部主动调用垃圾回收机制（Garbage Collection），释放掉所有大体积的对象引用（例如上一次运行加载的巨型 DataFrame 或是图像 Buffer）。
-- 在 `packages/graph-agent/src/graph_agent/runtime/state.py` 内部会增加 `clear_state()` 的支持。
-
-### 10. 长时运行图的状态保存机制 (Checkpointing)
-尽管目前的重点是把流程隔离并推断跑通，但是考虑到后续的扩展，这套 Reducer 和黑板机制不能对外部是绝对封闭的：
-- 在 `packages/graph-agent/src/graph_agent/core/checkpointer.py` (如果存在) 或 LangGraph 原生的 Checkpointer 的协作下，我们隔离好的 `phase_outputs` 及其字典树，能完美适配 JSON 的序列化。
-- 这意味着我们以后在实现断点续传（Pause and Resume）时，由于状态完全按 Phase 隔离，我们可以精准地知道哪些步骤不需要重跑。
-
-### 9. 状态重置与清理策略
-在很多情况下，`run_skill` 可能需要被反复触发（比如在 Playground 里的批量测试）。如果核心 `data` 没有被完全重置，很容易出现数据串联导致的脏读脏写。
-在 MVP0 中：
-- 我们规定每次启动时，不仅仅是清空 `BlackboardState`，更是要在内部主动调用垃圾回收机制（Garbage Collection），释放掉所有大体积的对象引用（例如上一次运行加载的巨型 DataFrame 或是图像 Buffer）。
-- 在 `packages/graph-agent/src/graph_agent/runtime/state.py` 内部会增加 `clear_state()` 的支持。
-
-### 10. 长时运行图的状态保存机制 (Checkpointing)
-尽管目前的重点是把流程隔离并推断跑通，但是考虑到后续的扩展，这套 Reducer 和黑板机制不能对外部是绝对封闭的：
-- 在 `packages/graph-agent/src/graph_agent/core/checkpointer.py` (如果存在) 或 LangGraph 原生的 Checkpointer 的协作下，我们隔离好的 `phase_outputs` 及其字典树，能完美适配 JSON 的序列化。
-- 这意味着我们以后在实现断点续传（Pause and Resume）时，由于状态完全按 Phase 隔离，我们可以精准地知道哪些步骤不需要重跑。
-
-
 
 ### 11. 与日志及 Trace 观测体系的数据同步
 这里的数据沙箱隔离机制并非仅仅服务于业务的健康运转。在 `tracing-and-observability` 特性的实现中，我们需要向 Studio 返回阶段级别的完整输入输出镜像。
 - 这些日志所依赖的核心数据抓取点，就是建立在经过 `Input Funnel` 过滤以及 `Phase Wrapper` 切分的纯粹结构体之上的。
 - 如果没有这一套无冗余的数据合约作保障，Trace 记录中会充斥着全集数据，造成网络和存储的双重灾难。
-
-### 11. 与日志及 Trace 观测体系的数据同步
-这里的数据沙箱隔离机制并非仅仅服务于业务的健康运转。在 `tracing-and-observability` 特性的实现中，我们需要向 Studio 返回阶段级别的完整输入输出镜像。
-- 这些日志所依赖的核心数据抓取点，就是建立在经过 `Input Funnel` 过滤以及 `Phase Wrapper` 切分的纯粹结构体之上的。
-- 如果没有这一套无冗余的数据合约作保障，Trace 记录中会充斥着全集数据，造成网络和存储的双重灾难。
-

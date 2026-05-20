@@ -2,9 +2,16 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import {
   SettingsPageContent,
+  draftFromAddProviderSubmission,
   draftsFromCredentials,
+  inferProviderKind,
+  inferProviderType,
   moveProviderInRole,
+  notableProviderKeyForDraft,
+  officialProviderDrafts,
   removeProviderFromRole,
+  shouldShowManualModelPanel,
+  thirdPartyProviderDrafts,
   toggleModelFallback,
   updateActiveModel,
   validateRoleDraft,
@@ -35,7 +42,7 @@ const credentials: CredentialsState = {
       name: 'WaveSpeed Any-LLM',
       api_key: '',
       base_url: 'https://llm.wavespeed.ai/v1',
-      provider_type: 'wavespeed_any_llm',
+      provider_type: 'openai_compatible',
     },
     {
       id: 'CUSTOM_AB12CD34',
@@ -66,7 +73,7 @@ const rolesData: RolesData = {
   },
   providers: {
     OC_CL_ANT: { name: 'OneChats Claude Anthropic', type: 'anthropic_compatible' },
-    WS_LLM: { name: 'WaveSpeed Any-LLM', type: 'wavespeed_any_llm' },
+    WS_LLM: { name: 'WaveSpeed Any-LLM', type: 'openai_compatible' },
     DS: { name: 'DeepSeek Official', type: 'openai_compatible' },
     OC_DS: { name: 'OneChats DeepSeek', type: 'openai_compatible' },
   },
@@ -97,6 +104,7 @@ function baseViewProps(
   return {
     activeTab: 'api_keys',
     credentials,
+    credentialsLoading: false,
     drafts: draftsFromCredentials(credentials),
     saveStatus: 'idle',
     rolesData,
@@ -117,6 +125,7 @@ function baseViewProps(
     onTestProvider: vi.fn(),
     onDeleteProvider: vi.fn(),
     onAddProvider: vi.fn(),
+    onProviderModelsUpdated: vi.fn(),
     onSelectedRoleChange: vi.fn(),
     onRolesDataChange: vi.fn(),
     onSaveRoles: vi.fn(),
@@ -146,11 +155,138 @@ describe('draftsFromCredentials', () => {
   })
 })
 
+describe('Add Provider flow helpers', () => {
+  it('maps official provider codes to provider_type', () => {
+    expect(inferProviderType('anthropic')).toBe('anthropic_compatible')
+    expect(inferProviderType('gemini')).toBe('google_genai')
+    expect(inferProviderType('deepseek')).toBe('openai_compatible')
+  })
+
+  it('creates a populated draft from AddProviderForm submission', () => {
+    const draft = draftFromAddProviderSubmission({
+      providerCode: 'my-openrouter',
+      name: 'My OpenRouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      apiKey: 'sk-openrouter',
+      type: 'third-party',
+    }, 'custom-test')
+
+    expect(draft).toEqual({
+      id: 'custom-test',
+      name: 'My OpenRouter',
+      provider_type: 'openai_compatible',
+      base_url: 'https://openrouter.ai/api/v1',
+      api_key: 'sk-openrouter',
+      isTesting: false,
+    })
+  })
+
+  it('infers provider kind from official name or official id prefix', () => {
+    expect(inferProviderKind({
+      id: 'custom-1',
+      name: 'Anthropic-Official',
+      provider_type: 'anthropic_compatible',
+      base_url: 'https://api.anthropic.com',
+      api_key: 'sk',
+      isTesting: false,
+    })).toBe('official')
+    expect(inferProviderKind({
+      id: 'custom-1',
+      name: 'Anthropic Official',
+      provider_type: 'anthropic_compatible',
+      base_url: 'https://api.anthropic.com',
+      api_key: 'sk',
+      isTesting: false,
+    })).toBe('official')
+    expect(inferProviderKind({
+      id: 'ark-123',
+      name: 'Ark',
+      provider_type: 'openai_compatible',
+      base_url: 'https://ark.cn-beijing.volces.com/api/v3',
+      api_key: 'sk',
+      isTesting: false,
+    })).toBe('official')
+    expect(inferProviderKind({
+      id: 'custom-1',
+      name: 'OpenRouter',
+      provider_type: 'openai_compatible',
+      base_url: 'https://openrouter.ai/api/v1',
+      api_key: 'sk',
+      isTesting: false,
+    })).toBe('third-party')
+  })
+
+  it('builds five official drafts and separates third-party drafts', () => {
+    const drafts = draftsFromCredentials(credentials)
+
+    expect(officialProviderDrafts(drafts).map((draft) => draft.name)).toEqual([
+      'Anthropic Official',
+      'OpenAI Official',
+      'Gemini Official',
+      'DeepSeek Official',
+      'Ark Official',
+    ])
+    expect(thirdPartyProviderDrafts(drafts).map((draft) => draft.id)).toEqual([
+      'OC_DS',
+      'WS_LLM',
+      'CUSTOM_AB12CD34',
+    ])
+  })
+
+  it('derives notable provider key and manual panel visibility', () => {
+    const official = officialProviderDrafts(draftsFromCredentials(credentials))[0]
+    const custom = thirdPartyProviderDrafts(draftsFromCredentials(credentials))[2]
+
+    expect(notableProviderKeyForDraft(official)).toBe('anthropic')
+    expect(notableProviderKeyForDraft(custom)).toBe('custom')
+    expect(shouldShowManualModelPanel(official, null)).toBe(true)
+    expect(shouldShowManualModelPanel(custom, null)).toBe(false)
+    expect(shouldShowManualModelPanel(custom, { ...credentials.providers[3], last_test_status: 'ok' })).toBe(true)
+  })
+})
+
 describe('SettingsPageContent (api_keys)', () => {
-  it('renders the provider cards with name inputs and primary test actions', () => {
+  it('renders provider skeletons while credentials are loading', () => {
+    const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ credentialsLoading: true })} />)
+    const skeletons = html.match(/data-slot="skeleton"/g) ?? []
+    expect(skeletons).toHaveLength(15)
+    expect(html).not.toContain('Add Provider')
+    expect(html).not.toContain('Provider Name')
+  })
+
+  it('renders official providers and empty third-party state after credentials finish loading', () => {
+    const html = renderToStaticMarkup(
+      <SettingsPageContent
+        {...baseViewProps({
+          credentials: { providers: [] },
+          credentialsLoading: false,
+          drafts: [],
+        })}
+      />,
+    )
+    expect(html).toContain('Official Providers')
+    expect(html).toContain('Anthropic Official')
+    expect(html).toContain('OpenAI Official')
+    expect(html).toContain('Gemini Official')
+    expect(html).toContain('DeepSeek Official')
+    expect(html).toContain('Ark Official')
+    expect(html).toContain('Not configured')
+    expect(html).toContain('Third-party Providers')
+    expect(html).toContain('No third-party providers configured.')
+    expect(html).toContain('Add Provider')
+    expect(html).toContain('border-dashed')
+    expect(html).not.toContain('data-slot="skeleton"')
+  })
+
+  it('renders official and third-party provider cards with primary test actions', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
     expect(html).toContain('API Keys')
+    expect(html).toContain('Official Providers')
+    expect(html).toContain('Anthropic Official')
+    expect(html).toContain('OpenAI Official')
+    expect(html).toContain('Gemini Official')
     expect(html).toContain('DS')
+    expect(html).toContain('Third-party Providers')
     expect(html).toContain('OC_DS')
     expect(html).toContain('WS_LLM')
     expect(html).toContain('My Custom OpenAI')
@@ -169,7 +305,7 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).toContain('data-lpignore="true"')
     expect(html).toContain('data-form-type="other"')
     expect(html).not.toContain('Saved key retained')
-    expect(html).not.toContain('Show API key')
+    expect(html).toContain('Show API key')
   })
 
   it('renders persistent Test outcome badge from credentials', () => {
@@ -181,7 +317,7 @@ describe('SettingsPageContent (api_keys)', () => {
   it('renders a Delete button for each user-owned provider', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
     const matches = html.match(/aria-label="Delete provider"/g) ?? []
-    expect(matches).toHaveLength(4)
+    expect(matches).toHaveLength(3)
   })
 })
 

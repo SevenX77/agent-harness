@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 from app.models.copilot import CopilotEventDone
+from app.models.llm_config import ModelInfo
 from app.routers import copilot as copilot_router
 from app.routers import llm as llm_router
-from app.services.llm_provider_test import PingResultExtended
 from fastapi.testclient import TestClient
 
 
@@ -92,20 +92,22 @@ def test_provider_test_endpoint_mocked(
 ) -> None:
     del isolated_llm_config
 
-    async def fake_ping(
-        _provider_code: str,
-        _provider_type: str,
+    async def fake_sdks(
+        _vendor: str,
         _api_key: str,
-        _base_url: str | None,
-    ) -> PingResultExtended:
-        return PingResultExtended(
-            latency_ms=150,
-            model_seen="claude-sonnet-4-6",
-            model_ids=["claude-sonnet-4-6"],
-            raw_payload={"data": [{"id": "claude-sonnet-4-6"}]},
-        )
+        _base_url: str,
+    ) -> list[str]:
+        return ["openai_compatible"]
 
-    monkeypatch.setattr(llm_router, "ping_provider_extended", fake_ping)
+    async def fake_models(
+        _vendor: str,
+        _api_key: str,
+        _base_url: str,
+    ) -> list[ModelInfo]:
+        return [ModelInfo(id="claude-sonnet-4-6")]
+
+    monkeypatch.setattr(llm_router, "probe_compatible_sdks", fake_sdks)
+    monkeypatch.setattr(llm_router, "probe_available_models", fake_models)
 
     response = client.post(
         "/api/llm/providers/test",
@@ -121,11 +123,12 @@ def test_provider_test_endpoint_mocked(
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert body["latency_ms"] == 150
-    assert body["model_seen"] == "claude-sonnet-4-6"
+    assert isinstance(body["latency_ms"], int)
+    assert body["model_seen"] is None
     assert body["message"] is None
     assert body["error_code"] is None
-    assert [m["id"] for m in body["available_models"]] == ["claude-sonnet-4-6"]
+    assert body["available_sdks"] == ["openai_compatible"]
+    assert [model["id"] for model in body["available_models"]] == ["claude-sonnet-4-6"]
 
 
 def test_websocket_forwards_model_override(

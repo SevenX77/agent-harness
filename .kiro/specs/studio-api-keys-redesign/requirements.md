@@ -73,7 +73,7 @@ linked_docs:
 
 ### Round 2 后 user 4 条最终拍板 (2026-05-18)
 
-1. **Backend `ProviderType` enum 收敛** — 从 4 砍到 3 (干掉 `wavespeed_any_llm`, 因为 WaveSpeed 实测就是 `openai_compatible`)
+1. **Backend `ProviderType` enum 收敛** — 从 4 砍到 3 (干掉 `openai_compatible`, 因为 WaveSpeed 实测就是 `openai_compatible`)
 2. **多模态 (Replicate / Fal / Stability AI / BFL Flux / Midjourney / Runway) 在 v2.1 不做** — async polling 协议跟当前 text-stream test path 不兼容, 延到 v2.2+
 3. **Round 2 反转 Mask** — 不再做 focus-aware mask / Eye toggle; input 值始终等于 server 返回并持久化的 `api_key` 真值
 4. **`docs/llm-providers/` 已落盘 5 个 md** (README / _template / anthropic / openai / gemini); v2.1 不覆盖多模态
@@ -82,7 +82,7 @@ linked_docs:
 
 ### In v2.1
 - Text-only LLM provider: Anthropic / OpenAI / Gemini / DeepSeek / Mistral / xAI Grok / Cohere / WaveSpeed / OpenRouter / Together AI / OneChats / Jiekou 等
-- 3 个 protocol enum (anthropic_compatible / openai_compatible / gemini_official)
+- 3 个 protocol enum (anthropic_compatible / openai_compatible / google_genai)
 - Flat provider list + Add / Edit / Test / Delete CRUD
 - 明文 `api_key` input + 密码管理器隔离
 - Auto-debounce save (300ms)

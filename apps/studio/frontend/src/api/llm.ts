@@ -3,8 +3,7 @@ import { api } from './client'
 export type ProviderType =
   | 'anthropic_compatible'
   | 'openai_compatible'
-  | 'gemini_official'
-  | 'wavespeed_any_llm'
+  | 'google_genai'
 
 /**
  * Test outcome status persisted on the credential record. Mirrors backend
@@ -19,23 +18,17 @@ export type TestStatus =
   | 'quota_exceeded'
   | 'network_error'
   | 'timeout'
-
-export interface ModelCapabilities {
-  text: boolean
-  function_calling: boolean
-  vision: boolean
-  reasoning: boolean
-}
+  | 'error'
 
 export interface ModelInfo {
   id: string
-  capabilities: ModelCapabilities
+  capabilities?: Record<string, any>
 }
 
 /**
  * Server-side credential entry as returned by GET /api/llm/credentials.
  *
- * The 5 Test outcome fields (`last_test_*` + `available_models`) are
+ * The Test outcome fields (`last_test_*` + `available_sdks` / `available_models`) are
  * *single-writer* — they're populated by POST /providers/test on the backend
  * and arrive via GET. Sending them in PUT triggers a 422.
  */
@@ -51,6 +44,7 @@ export interface CredentialProviderState {
   last_test_message?: string
   last_error_code?: string
   available_models?: ModelInfo[]
+  available_sdks?: string[]
 }
 
 export interface CredentialsState {
@@ -81,6 +75,7 @@ export interface ProviderTestRequest {
 /** Includes the transient `missing_api_key` short-circuit (api_key empty). */
 export type ProviderTestStatus =
   | 'ok'
+  | 'error'
   | 'invalid_key'
   | 'rate_limited'
   | 'quota_exceeded'
@@ -95,6 +90,29 @@ export interface ProviderTestResponse {
   message?: string | null
   error_code?: string | null
   available_models?: ModelInfo[]
+  available_sdks?: string[]
+}
+
+export interface NotableModelsResponse {
+  notable_models: string[]
+}
+
+export interface ProviderModelTestRequest {
+  /** Credential UUID (`ProviderCredential.id`), not the provider_key metadata file key. */
+  provider_id: string
+  model_ids: string[]
+}
+
+export interface ProviderModelTestResult {
+  model_id: string
+  status: 'ok' | 'invalid_model' | 'invalid_key' | 'rate_limited' | 'network_error' | 'timeout' | 'error'
+  latency_ms?: number | null
+  message?: string | null
+}
+
+export interface ProviderModelTestResponse {
+  results: ProviderModelTestResult[]
+  available_models: ModelInfo[]
 }
 
 export interface RoleModelEntry {
@@ -161,6 +179,20 @@ export async function testProvider(
   request: ProviderTestRequest,
 ): Promise<ProviderTestResponse> {
   const response = await api.post<ProviderTestResponse>('/llm/providers/test', request)
+  return response.data
+}
+
+export async function getNotableModels(providerKey: string): Promise<NotableModelsResponse> {
+  const response = await api.get<NotableModelsResponse>('/llm/providers/notable-models', {
+    params: { provider_key: providerKey },
+  })
+  return response.data
+}
+
+export async function testProviderModels(
+  request: ProviderModelTestRequest,
+): Promise<ProviderModelTestResponse> {
+  const response = await api.post<ProviderModelTestResponse>('/llm/providers/test-models', request)
   return response.data
 }
 

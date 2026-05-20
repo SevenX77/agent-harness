@@ -8,7 +8,7 @@ target_goal: "Studio MVP — 让 PM 可用"
 ## 1. Supported SDKs & Protocols
 
 - **Primary Protocol Enum**:
-  - `gemini_official` — native API, 走 `:generateContent` / `:streamGenerateContent`, 支持 grounding / Code Execution / Search 等 google-only 特性
+  - `google_genai` — native API, 走 `:generateContent` / `:streamGenerateContent`, 支持 grounding / Code Execution / Search 等 google-only 特性
   - 或 `openai_compatible` — **2024-11 起** Google 加了 OpenAI 协议兼容 endpoint, 直接用 `openai` SDK 改 base_url 即可调 Gemini
 - **Native SDK**: `google-generativeai` Python ([docs](https://ai.google.dev/gemini-api/docs))
 - **Alternative Endpoints**:
@@ -18,7 +18,7 @@ target_goal: "Studio MVP — 让 PM 可用"
 
 ```yaml
 compatible_sdks:
-  - gemini_official
+  - google_genai
 
 models_endpoint_path: "/v1beta/models"
 
@@ -28,7 +28,7 @@ auth_header_format: |
 
 ## 2. Authentication
 
-### Native (gemini_official)
+### Native (google_genai)
 
 - **Method**: API key 作为 query param, **或** Bearer header
 - **Query param sample**:

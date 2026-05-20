@@ -30,7 +30,7 @@ baseline_worktree: /home/sevenx/coding/baseline-v21/
 - 新 `ApiKeyInput` 组件: focus-aware mask, onChange 拦截方案 (C2 fix, 见 design-frontend §4.2)
 - ProviderRow 拆到独立文件
 - 视觉按 `.kiro/specs/studio-uikit-redesign/tokens.md` semantic token
-- `ProviderType` Literal **保留 4-enum (含 `wavespeed_any_llm`)**, 砍 enum 留到 F3 联调 (跟 backend B1 同步)
+- `ProviderType` Literal **保留 4-enum (含 `openai_compatible`)**, 砍 enum 留到 F3 联调 (跟 backend B1 同步)
 
 **依赖**: 无 (frontend-can-do-now)
 
@@ -71,7 +71,7 @@ baseline_worktree: /home/sevenx/coding/baseline-v21/
 - 验证 PUT 接受任意 UUID provider_code (新 add)
 - 验证 api_key 空字符串保留旧值 (改 title 不清 key)
 - 验证 vendor_hint / title 字段往返一致
-- **ProviderType Literal 收敛 4→3** (砍 `wavespeed_any_llm`): 跟 backend B1 同步 ship, LlmRoles 引用 wavespeed 的 model 自动 migrate 显示 vendor_hint = "OpenAI compatible"
+- **ProviderType Literal 收敛 4→3** (砍 `openai_compatible`): 跟 backend B1 同步 ship, LlmRoles 引用 wavespeed 的 model 自动 migrate 显示 vendor_hint = "OpenAI compatible"
 - 删除 F1 临时保留的 4-enum 兼容代码
 
 **依赖**: backend B1 + B2 + B3 ship
@@ -82,7 +82,7 @@ baseline_worktree: /home/sevenx/coding/baseline-v21/
 - e2e: Add → 改字段 → refresh → 字段持久化
 - e2e: Delete provider → refresh → 真消失
 - e2e: 改 title 中 → PUT 时 server 端 api_key 不清
-- e2e: PUT body 含 wavespeed_any_llm → 后端拒收 (422)
+- e2e: PUT body 含 openai_compatible → 后端拒收 (422)
 
 ---
 
@@ -149,7 +149,7 @@ baseline_worktree: /home/sevenx/coding/baseline-v21/
 
 **Scope**: `apps/studio/backend/app/models/llm_config.py:31-36` + `app/services/llm_provider_test.py:11-30`, 新增 `app/services/migrations.py`
 
-- 两处 `ProviderType = Literal[...]` 同步砍 `wavespeed_any_llm` (4 → 3)
+- 两处 `ProviderType = Literal[...]` 同步砍 `openai_compatible` (4 → 3)
 - `DEFAULT_BASE_URLS` 改成含 `/v1` 后缀的版本 (跟 frontend 推荐值对齐)
 - `_request_provider_models` 拼接逻辑改 `f"{base_url.rstrip('/')}/models"`, 不重复加 `/v1`
 - 新增 `migrate_provider_type_value` 给 yaml load 时迁移
@@ -157,8 +157,8 @@ baseline_worktree: /home/sevenx/coding/baseline-v21/
 **Owner**: parent master 派 a1 主实施, a2 audit + a3 review
 
 **测试**:
-- Unit: `ProviderType` 解析 3 个合法 / wavespeed_any_llm 报 ValidationError
-- Unit: `migrate_provider_type_value("wavespeed_any_llm") == "openai_compatible"`
+- Unit: `ProviderType` 解析 3 个合法 / openai_compatible 报 ValidationError
+- Unit: `migrate_provider_type_value("openai_compatible") == "openai_compatible"`
 - Unit: 两处 Literal 值完全一致 (assert 一致性 test 避免漂移)
 
 ---
@@ -237,7 +237,7 @@ baseline_worktree: /home/sevenx/coding/baseline-v21/
 
 **Scope**: `apps/studio/backend/tests/services/` + `apps/studio/backend/tests/routers/`
 
-- 删除测旧 `wavespeed_any_llm` 的 test (如有)
+- 删除测旧 `openai_compatible` 的 test (如有)
 - 加 migrations / capability_table / provider_test / llm router 新 test 覆盖
 
 **依赖**: B1-B4

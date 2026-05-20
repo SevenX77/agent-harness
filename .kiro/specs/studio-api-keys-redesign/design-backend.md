@@ -56,8 +56,8 @@ linked_docs:
 ProviderType = Literal[
     "anthropic_compatible",
     "openai_compatible",
-    "gemini_official",
-    "wavespeed_any_llm",  # ← 砍掉
+    "google_genai",
+    "openai_compatible",  # ← 砍掉
 ]
 ```
 
@@ -67,22 +67,22 @@ ProviderType = Literal[
 ProviderType = Literal[
     "anthropic_compatible",
     "openai_compatible",
-    "gemini_official",
-    "wavespeed_any_llm",  # ← 砍掉
+    "google_genai",
+    "openai_compatible",  # ← 砍掉
 ]
 ```
 
-`apps/studio/backend/app/services/llm_provider_test.py:71-77` `_request_provider_models` 实证: `wavespeed_any_llm` 跟 `openai_compatible` test 路径**完全一样** (`GET <base>/v1/models` + `Authorization: Bearer`), 仅 `DEFAULT_BASE_URLS` 默认值不同. Web research (`research.md §1.1`) 进一步确认 WaveSpeed 就是 OpenAI 协议中转.
+`apps/studio/backend/app/services/llm_provider_test.py:71-77` `_request_provider_models` 实证: `openai_compatible` 跟 `openai_compatible` test 路径**完全一样** (`GET <base>/v1/models` + `Authorization: Bearer`), 仅 `DEFAULT_BASE_URLS` 默认值不同. Web research (`research.md §1.1`) 进一步确认 WaveSpeed 就是 OpenAI 协议中转.
 
 ### 1.2 改动
 
-两份 `Literal` 同步砍掉 `wavespeed_any_llm`:
+两份 `Literal` 同步砍掉 `openai_compatible`:
 
 ```python
 ProviderType = Literal[
     "anthropic_compatible",   # native, x-api-key + anthropic-version
     "openai_compatible",      # OpenAI 标准, 覆盖 90% 文本 LLM
-    "gemini_official",        # native, /v1beta/models + ?key=
+    "google_genai",        # native, /v1beta/models + ?key=
 ]
 ```
 
@@ -90,14 +90,14 @@ ProviderType = Literal[
 
 ### 1.3 数据迁移
 
-baseline 凭据存储 `~/.studio/llm_credentials.json` 当前**不存** `provider_type` 字段 (ProviderCredential 只有 `provider_code` / `api_key` / `base_url`), 所以**凭据存储层不用 migration**. 但 `config/llm_roles.yaml` 里的 `providers.<name>.type` 字段可能含 `wavespeed_any_llm` — 这份 migration 由 user 手动改 yaml, 不在本 spec 实施范围 (yaml 不在凭据存储层, 由用户编辑).
+baseline 凭据存储 `~/.studio/llm_credentials.json` 当前**不存** `provider_type` 字段 (ProviderCredential 只有 `provider_code` / `api_key` / `base_url`), 所以**凭据存储层不用 migration**. 但 `config/llm_roles.yaml` 里的 `providers.<name>.type` 字段可能含 `openai_compatible` — 这份 migration 由 user 手动改 yaml, 不在本 spec 实施范围 (yaml 不在凭据存储层, 由用户编辑).
 
 加 service-layer guard (Pydantic 解析 yaml 时拒收 wavespeed → 显式报错):
 
 ```python
 # apps/studio/backend/app/services/migrations.py (新增文件)
 LEGACY_PROVIDER_TYPE_MIGRATION = {
-    "wavespeed_any_llm": "openai_compatible",
+    "openai_compatible": "openai_compatible",
 }
 
 
@@ -106,7 +106,7 @@ def migrate_provider_type_value(raw_type: str) -> str:
     return LEGACY_PROVIDER_TYPE_MIGRATION.get(raw_type, raw_type)
 ```
 
-`load_roles_file` 解析 yaml 前先跑一遍 migrate (key path: `providers.*.type`), 让旧 yaml 不破; 同时记一行 `logger.warning("migrated legacy provider_type=wavespeed_any_llm → openai_compatible")` 让 user 知道发生过迁移.
+`load_roles_file` 解析 yaml 前先跑一遍 migrate (key path: `providers.*.type`), 让旧 yaml 不破; 同时记一行 `logger.warning("migrated legacy provider_type=openai_compatible → openai_compatible")` 让 user 知道发生过迁移.
 
 ### 1.4 DEFAULT_BASE_URLS 同步
 
@@ -116,7 +116,7 @@ def migrate_provider_type_value(raw_type: str) -> str:
 DEFAULT_BASE_URLS: dict[ProviderType, str] = {
     "anthropic_compatible": "https://api.anthropic.com",
     "openai_compatible": "https://api.openai.com",
-    "gemini_official": "https://generativelanguage.googleapis.com",
+    "google_genai": "https://generativelanguage.googleapis.com",
 }
 ```
 
@@ -128,7 +128,7 @@ DEFAULT_BASE_URLS: dict[ProviderType, str] = {
 DEFAULT_BASE_URLS: dict[ProviderType, str] = {
     "anthropic_compatible": "https://api.anthropic.com/v1",          # 含 /v1
     "openai_compatible": "https://api.openai.com/v1",                  # 含 /v1
-    "gemini_official": "https://generativelanguage.googleapis.com/v1beta",  # 含 /v1beta
+    "google_genai": "https://generativelanguage.googleapis.com/v1beta",  # 含 /v1beta
 }
 
 
@@ -244,7 +244,7 @@ def load_credentials() -> LLMCredentialsFile:
 
 ### 2.4 跟 ProviderEntry.type 字段重名解决
 
-`models/llm_config.py:38-52` 已有 `ProviderEntry`, 字段 `type: ProviderType` (llm_roles.yaml 的注册表项). `ProviderCredential.provider_type` 跟 `ProviderEntry.type` **共用同一个** `ProviderType = Literal[...]` 别名 — 这是好事, 单一 source-of-truth. 但要确认 B1 把 `ProviderType` 收敛到 3 enum 后, `ProviderEntry.type` 也跟着改 (`config/llm_roles.yaml` 不要再写 `type: wavespeed_any_llm`, B1 的 yaml migration 会自动转).
+`models/llm_config.py:38-52` 已有 `ProviderEntry`, 字段 `type: ProviderType` (llm_roles.yaml 的注册表项). `ProviderCredential.provider_type` 跟 `ProviderEntry.type` **共用同一个** `ProviderType = Literal[...]` 别名 — 这是好事, 单一 source-of-truth. 但要确认 B1 把 `ProviderType` 收敛到 3 enum 后, `ProviderEntry.type` 也跟着改 (`config/llm_roles.yaml` 不要再写 `type: openai_compatible`, B1 的 yaml migration 会自动转).
 
 ---
 
@@ -625,7 +625,7 @@ STATIC_FALLBACK_MODELS: dict[str, list[str]] = {
     "openai_compatible": [
         # 不强 union, OpenAI 自己 /v1/models 列表完整
     ],
-    "gemini_official": [
+    "google_genai": [
         "gemini-3.1-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash",
     ],
 }
@@ -728,7 +728,7 @@ baseline 已在 `services/llm_provider_test.py:62-82` `_request_provider_models`
   - 429 其他 → `_RateLimited(error_code=body.error.code)` → `rate_limited`
   - 5xx → `_NetworkError` → `network_error`
 
-### 5.3 Gemini (`gemini_official`)
+### 5.3 Gemini (`google_genai`)
 
 - 请求: `GET <base>/models` + query `?key=<api_key>` (base 已含 `/v1beta`)
 - 成功响应 body shape: `{"models": [{"name": "models/gemini-...", "displayName": ..., "supportedGenerationMethods": [...]}]}`
@@ -745,7 +745,7 @@ baseline 已在 `services/llm_provider_test.py:62-82` `_request_provider_models`
 ```python
 def _extract_model_ids(response: httpx.Response, provider_type: ProviderType) -> list[str]:
     body = response.json()
-    if provider_type == "gemini_official":
+    if provider_type == "google_genai":
         # Gemini: {"models": [{"name": "models/gemini-..."}]}, 剥前缀 "models/"
         return [m["name"].removeprefix("models/") for m in body.get("models", [])]
     # Anthropic + OpenAI: {"data": [{"id": "..."}]}
@@ -765,7 +765,7 @@ def _extract_model_ids(response: httpx.Response, provider_type: ProviderType) ->
   - 扩 `ProviderTestRequest` schema (§4.2 — 加 vendor_hint)
   - 改 `ProviderTestResponse` schema (§4.2 — 加 available_models / error_code, 保留 model_seen 向后兼容)
 - `apps/studio/backend/app/services/llm_provider_test.py`
-  - 收敛 `ProviderType` Literal 砍 wavespeed_any_llm (§1.2)
+  - 收敛 `ProviderType` Literal 砍 openai_compatible (§1.2)
   - 改 `DEFAULT_BASE_URLS` 含 `/v1` 后缀 (§1.4) + `_request_provider_models` 拼接逻辑跟着改
   - 新增 `ping_provider_extended` 返完整 model 列表 + capability lookup (§4.3 + §4.4)
   - 新增 `_extract_model_ids` (§5.4)
@@ -773,7 +773,7 @@ def _extract_model_ids(response: httpx.Response, provider_type: ProviderType) ->
   - 扩 `_Unauthorized` / `_RateLimited` / `_QuotaExceeded` / `_NetworkError` 异常加 `error_code` 属性 (§4.3)
   - 增强 `_raise_for_status` 解析 vendor body 提取 error_code (§4.3)
 - `apps/studio/backend/app/models/llm_config.py`
-  - 收敛 `ProviderType` Literal 砍 wavespeed_any_llm (§1.2 — **跟 services 同步改**)
+  - 收敛 `ProviderType` Literal 砍 openai_compatible (§1.2 — **跟 services 同步改**)
   - 扩 `ProviderCredential` 加 8 字段 (§2.2 — title / provider_type / vendor_hint + 5 Test 字段)
   - 新增 `ModelInfo` / `ModelCapabilities` / `TestStatus` 类型
 - `apps/studio/backend/app/services/llm_credentials.py`
@@ -801,7 +801,7 @@ def _extract_model_ids(response: httpx.Response, provider_type: ProviderType) ->
   - POST Test 成功后 GET credentials 看到回写的 last_test_* + available_models (B4 atomic write)
   - POST Test 期间并发 PUT (race scenario): 两个写不互相覆盖 (B4)
 - `apps/studio/backend/tests/services/test_migrations.py` 单元
-  - `migrate_provider_type_value("wavespeed_any_llm")` 返 `"openai_compatible"`
+  - `migrate_provider_type_value("openai_compatible")` 返 `"openai_compatible"`
   - 旧 llm_credentials.json (只 3 字段) 通过 ProviderCredential.model_validate 解析时, 新 8 字段填默认值
 - `apps/studio/backend/tests/services/test_llm_capability_table.py` 单元
   - `lookup_capabilities("claude-opus-4-7")` 返预期 capabilities
@@ -823,8 +823,8 @@ def _extract_model_ids(response: httpx.Response, provider_type: ProviderType) ->
 
 ```python
 def test_legacy_wavespeed_yaml_type_migrates_to_openai():
-    """yaml 加载层 migration: `providers.<name>.type` 字段砍 wavespeed_any_llm."""
-    assert migrate_provider_type_value("wavespeed_any_llm") == "openai_compatible"
+    """yaml 加载层 migration: `providers.<name>.type` 字段砍 openai_compatible."""
+    assert migrate_provider_type_value("openai_compatible") == "openai_compatible"
     assert migrate_provider_type_value("openai_compatible") == "openai_compatible"  # 已合法不变
     assert migrate_provider_type_value("anthropic_compatible") == "anthropic_compatible"
 
@@ -848,7 +848,7 @@ def test_baseline_credentials_json_loads_with_defaults():
 
 | Task | 工作 | 依赖 |
 |---|---|---|
-| **B1** | `ProviderType` Literal 砍 wavespeed_any_llm (两处同步: models/llm_config.py + services/llm_provider_test.py) + `DEFAULT_BASE_URLS` 改成含 `/v1` 后缀 + `_request_provider_models` 拼接逻辑改 + `migrate_provider_type_value` yaml 加载迁移 | 无 |
+| **B1** | `ProviderType` Literal 砍 openai_compatible (两处同步: models/llm_config.py + services/llm_provider_test.py) + `DEFAULT_BASE_URLS` 改成含 `/v1` 后缀 + `_request_provider_models` 拼接逻辑改 + `migrate_provider_type_value` yaml 加载迁移 | 无 |
 | **B2** | `ProviderCredential` 扩 8 字段 (title / provider_type / vendor_hint + 5 Test 字段) + 新增 `ModelInfo` / `ModelCapabilities` / `TestStatus` 类型 | B1 |
 | **B3** | PUT `/api/llm/credentials` 改全量替换语义 + provider_code 不可变 + api_key 空保留 + Test 字段单向写 (拒收 client) | B1, B2 |
 | **B4** | POST `/api/llm/providers/test` 加 missing_api_key 前置校验 + `ping_provider_extended` 返完整 model 列表 + capability lookup + static fallback union + 原子回写 5 Test 字段 (`_persist_test_outcome` + `_credentials_lock`) | B1, B2 |
@@ -856,7 +856,7 @@ def test_baseline_credentials_json_loads_with_defaults():
 
 **B1-B5 同一 PR ship** (按 cutover discipline 铁律, schema 改 + test 同步不可分拆).
 
-**跟 frontend cutover 协同 (B3 race 解决)**: frontend F1 第一次 PR 完成时 **不动 `ProviderType` 收敛 (保留 4-enum 兼容)**, 因为 backend B1 跟 frontend F1 并行起 PR — F1 落地时 backend 还没砍 wavespeed_any_llm. **`ProviderType` 收敛归到 frontend 第二个 PR (F3 联调)**, 那时 backend 已 ship. 详见 [`tasks.md §实施顺序`](./tasks.md#实施顺序--协同).
+**跟 frontend cutover 协同 (B3 race 解决)**: frontend F1 第一次 PR 完成时 **不动 `ProviderType` 收敛 (保留 4-enum 兼容)**, 因为 backend B1 跟 frontend F1 并行起 PR — F1 落地时 backend 还没砍 openai_compatible. **`ProviderType` 收敛归到 frontend 第二个 PR (F3 联调)**, 那时 backend 已 ship. 详见 [`tasks.md §实施顺序`](./tasks.md#实施顺序--协同).
 
 ---
 
@@ -872,7 +872,7 @@ def test_baseline_credentials_json_loads_with_defaults():
 
 5. **error_code 翻译职责划分**: backend 返 vendor 原始 error_code (英文), frontend 用 `lib/llm-error-messages.ts` 翻译人话 (v2.1 中文; i18n 延到后续版本, 见 `design-frontend.md §4.3` C3 备注). 后端**不**做中文翻译 (避免锁死语言).
 
-6. **`ProviderType` 双定义 (B1 风险)**: `models/llm_config.py` 跟 `services/llm_provider_test.py` 重复定义同名 Literal. B1 同步砍 wavespeed_any_llm 时**两处必须一起改**, 漏一处会 (a) mypy 不挂但 enum 校验路径不一致 (b) yaml load 跟 ProviderEntry / ProviderCredential 解析行为漂移. **缓解**: B5 加 assert test 验证两处 Literal 值完全一致.
+6. **`ProviderType` 双定义 (B1 风险)**: `models/llm_config.py` 跟 `services/llm_provider_test.py` 重复定义同名 Literal. B1 同步砍 openai_compatible 时**两处必须一起改**, 漏一处会 (a) mypy 不挂但 enum 校验路径不一致 (b) yaml load 跟 ProviderEntry / ProviderCredential 解析行为漂移. **缓解**: B5 加 assert test 验证两处 Literal 值完全一致.
 
 7. **PUT 改全量替换的 client 兼容性**: baseline 旧 client (现 frontend 在没改之前) 发的 PUT body 不含 `title` / `provider_type` / `vendor_hint` Optional 字段 — `ProviderCredentialWrite` 加 `model_config = ConfigDict(extra="forbid")` 时**旧 client 仍能跑** (这些是 Optional 字段, 旧 body 不发不报错). 但**反向**: 旧 client PUT 不发某个 provider, B3 全量替换语义会**真的删掉** server 端那个 provider — frontend F1 → F3 中间状态如果旧 client 跑可能误删. **缓解**: F3 联调 PR 同步上 frontend Send 完整列表的逻辑, 不允许旧 client + 新 backend 长期共存.
 

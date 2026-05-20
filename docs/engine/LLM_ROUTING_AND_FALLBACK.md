@@ -4,11 +4,13 @@ target_goal: "规范大模型提供商的统一接入方式、Role 定义机制�
 linked_code_paths:
   - apps/studio/backend/app/services/llm_roles.py
   - apps/studio/backend/app/routers/llm.py
-linked_specs:
-  - .kiro/specs/studio-api-keys-redesign/
-last_updated: 2026-05-19
   - apps/studio/backend/services/llm_provider_meta.py
   - apps/studio/backend/app/services/llm_provider_test.py
+  - packages/graph-agent/src/graph_agent/models/llm_client_manager.py
+  - packages/graph-agent/src/graph_agent/config/llm_config.py
+linked_specs:
+  - .kiro/specs/studio-api-keys-redesign/
+last_updated: 2026-05-20
 ---
 
 # LLM 路由与降级配置 (LLM Routing & Fallback)
@@ -55,3 +57,11 @@ roles:
 截止 Baseline 2.1 (Round 3)，Studio 原生支持多达 8 家 Provider：
 - **官方源 (3个)**: Anthropic, OpenAI, Gemini
 - **第三方及中转 (5个)**: Ark, DeepSeek, OpenRouter, Qiniu, WaveSpeed
+
+## 6. API Key 在运行时的取值来源
+
+Engine (graph-agent) 在跑 skill 时, 通过 `ProviderDef.api_key_env` 字段从 `os.environ` 取 key (`packages/graph-agent/src/graph_agent/models/llm_client_manager.py:_resolve_api_key`)。这是 engine 唯一的 key 输入契约 — engine 不读 `~/.studio/llm_credentials.json`, 也不感知 Studio UI 输入。
+
+Studio 侧的 credentials 持久化、Copilot 的 SDK 注入方式, 以及 "Studio UI 输入的 key 不会进入 graph-agent run 子进程" 这一 Studio↔Engine 边界 gap, 详见:
+
+- [`docs/studio/API_KEY_STORAGE_AND_RUNTIME.md`](../studio/API_KEY_STORAGE_AND_RUNTIME.md)

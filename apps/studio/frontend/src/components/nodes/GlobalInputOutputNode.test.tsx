@@ -92,7 +92,7 @@ describe('GlobalInputOutputNode', () => {
     })
 
     expect(html).not.toContain('(no fields)')
-    expect(html).not.toContain('aria-label="查看完整 schema"')
+    expect(html).not.toContain('aria-label="View full schema"')
   })
 
   it('uses the same selected ring treatment as graph nodes', () => {

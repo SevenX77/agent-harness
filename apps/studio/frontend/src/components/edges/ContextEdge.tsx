@@ -47,7 +47,7 @@ export function ContextEdge({
             <TooltipTrigger asChild>
               <button
                 type="button"
-                aria-label="查看连线传递数据"
+                aria-label="View edge trace data"
                 className={[
                   'block size-4 rounded-full border bg-primary transition-colors',
                   hasTraceData
@@ -59,7 +59,7 @@ export function ContextEdge({
                 }}
               />
             </TooltipTrigger>
-            <TooltipContent side="top">运行后可查看传递数据</TooltipContent>
+            <TooltipContent side="top">Run the skill to inspect transferred data</TooltipContent>
           </Tooltip>
         </div>
       </ReactFlow.EdgeLabelRenderer>

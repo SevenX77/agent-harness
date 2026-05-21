@@ -27,7 +27,53 @@ apps/studio/tauri/
   二进制在 `~/.npm-global/bin/tauri`
 * 系统库: `webkit2gtk-4.1`, `libgtk-3-dev`, `libssl-dev` (Linux dev)
 
-## 开发流程 (Linux 本地有 X server / Wayland 时)
+## 开发流程
+
+### 标准启动方式
+
+只启动一个 Tauri dev 会话，让 Tauri 自己通过 `beforeDevCommand` 拉起 Vite，
+同时让 Tauri sidecar 拉起动态端口的 FastAPI 后端。
+
+```bash
+cd apps/studio/tauri
+cargo tauri dev
+```
+
+默认配置来自 `apps/studio/tauri/tauri.conf.json`:
+
+- frontend dev URL: `http://127.0.0.1:5173`
+- frontend API base in Tauri runtime: 由 `get_sidecar_config` 改写为 `http://127.0.0.1:<dynamic>/api`
+- backend sidecar port: Rust 主进程动态分配, 不固定为 `8787`
+- backend auth: Rust 生成 `STUDIO_API_TOKEN`, frontend 通过 runtime config 带 `Authorization: Bearer <token>`
+- backend code in dev: debug build 优先运行工作区源码 `apps/studio/backend`; 打包/找不到源码时才运行 `apps/studio/tauri/vendor/backend`
+
+### 端口 5173 被占用时
+
+优先停止旧的 Vite/Tauri 进程, 再用标准启动方式。不要长期手写临时端口命令。
+
+```bash
+lsof -nP -iTCP:5173 -sTCP:LISTEN
+lsof -nP -iTCP:5174 -sTCP:LISTEN
+```
+
+如果确实需要临时使用 5174, 后端 CORS 也必须允许同一个 origin。当前后端默认已允许
+`http://127.0.0.1:5174` 和 `http://localhost:5174`。其他临时端口必须显式传入:
+
+```bash
+cd apps/studio/tauri
+STUDIO_CORS_EXTRA_ORIGINS=http://127.0.0.1:5175 \
+cargo tauri dev --config '{"build":{"devUrl":"http://127.0.0.1:5175","beforeDevCommand":"cd /Users/sevenx/Documents/coding/agent-harness/apps/studio/frontend && env VITE_STUDIO_API_BASE_URL=/api npm run dev -- --host 127.0.0.1 --port 5175 --strictPort"}}'
+```
+
+### 启动后检查
+
+1. DevTools Console 不应出现 `Preflight response is not successful` 或 `Missing Bearer token`。
+2. Recent skills 不应显示 `Could not load skills`。
+3. Tauri pane 日志应显示 `/health` 200, `/api/skills` 的 OPTIONS/GET 不应是 400。
+4. `lsof -nP -iTCP -sTCP:LISTEN | rg "(5173|5174|uvicorn|python3)"` 只应看到当前需要的一组 Vite + sidecar。
+5. 如果改过 backend, 不需要手动同步 `vendor/backend` 才能在 dev shell 生效；release 资源同步仍由 build pipeline 调 `node scripts/sync_resources.js` 完成。
+
+## 旧式手动流程 (仅用于纯浏览器调试)
 
 ```bash
 # Terminal 1: 起 Vite

@@ -130,13 +130,13 @@ test.describe('Canvas v1 design-time visual', () => {
     await expect(page.getByText('summary', { exact: true })).toBeVisible()
 
     await expect(page.locator('.react-flow__edge-path[marker-end]')).toHaveCount(0)
-    await expect(page.getByRole('button', { name: '查看连线传递数据' }).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: 'View edge trace data' }).first()).toBeVisible()
 
     await page.screenshot({ path: 'test-results/canvas-v1-desktop-initial.png', fullPage: false })
 
-    await expect(page.getByRole('button', { name: '展开子图' })).toBeVisible()
-    await page.getByRole('button', { name: '展开子图' }).click()
-    await expect(page.getByRole('button', { name: '收起子图' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Expand subgraph' })).toBeVisible()
+    await page.getByRole('button', { name: 'Expand subgraph' }).click()
+    await expect(page.getByRole('button', { name: 'Collapse subgraph' })).toBeVisible()
     await expect(page.getByText('./review.md')).toBeVisible()
 
     await page.screenshot({ path: 'test-results/canvas-v1-desktop-expanded.png', fullPage: false })

@@ -83,6 +83,6 @@ test.describe('Tauri desktop integration smoke', () => {
     await expect(page.getByRole('button', { name: 'Open in Codex' })).toBeVisible()
 
     await page.getByRole('button', { name: 'Open in Cursor' }).click()
-    await expect(page.getByText('桌面端 only')).toBeVisible()
+    await expect(page.getByText('Desktop only')).toBeVisible()
   })
 })

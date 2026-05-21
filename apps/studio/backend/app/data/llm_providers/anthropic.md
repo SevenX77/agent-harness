@@ -21,9 +21,8 @@ target_goal: "Studio MVP — 让 PM 可用"
 compatible_sdks:
   - anthropic_compatible
 
-models_endpoint_path: null
-  # Anthropic 官方 API 没有 GET /models endpoint
-  # Studio 走 §4 Notable Model IDs fallback
+models_endpoint_path: "/v1/models"
+  # Studio Test validates API key / Base URL against the model-list endpoint first.
 
 auth_header_format: |
   x-api-key: ${key}

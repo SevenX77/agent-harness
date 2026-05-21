@@ -6,6 +6,7 @@ use std::sync::{
     Arc, Mutex,
 };
 use tauri::Manager;
+use tauri_plugin_dialog::DialogExt;
 
 struct SidecarAppState {
     manager: Mutex<Option<sidecar::SidecarManager>>,
@@ -67,6 +68,15 @@ fn open_in_cursor(path: String) -> Result<(), String> {
 #[tauri::command]
 fn open_in_codex(path: String) -> Result<(), String> {
     spawn_tool("codex", &path)
+}
+
+#[tauri::command]
+async fn select_directory(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    Ok(app
+        .dialog()
+        .file()
+        .blocking_pick_folder()
+        .map(|path| path.to_string()))
 }
 
 #[tauri::command]
@@ -147,11 +157,13 @@ fn open_in_terminal(path: String) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             get_sidecar_config,
             get_sidecar_stderr,
             open_in_cursor,
             open_in_codex,
+            select_directory,
             open_in_terminal,
             reveal_in_file_manager
         ])

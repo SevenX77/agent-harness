@@ -212,7 +212,8 @@ async function openApiKeys(page: Page) {
   await mockWebSocket(page)
   await page.goto(`${baseURL}/#/skill/${SKILL_ID}/edit`)
   await page.getByRole('button', { name: 'Settings' }).click()
-  await page.getByRole('button', { name: 'API Keys' }).click()
+  await page.getByRole('button', { name: 'API Keys', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'API Keys' })).toBeVisible()
 }
 
 test.describe('Round 3 API Keys e2e', () => {
@@ -235,29 +236,25 @@ test.describe('Round 3 API Keys e2e', () => {
     await expect(apiKeys.getByText('OpenAI Compatible')).toHaveCount(0)
   })
 
-  test('uses simplified Add Provider form with cancel and submit collapse', async ({ page }) => {
+  test('adds a third-party provider as a normal auto-saved card', async ({ page }) => {
     await openApiKeys(page)
 
-    await page.getByRole('button', { name: 'Add Provider' }).click()
-    const form = page.getByTestId('add-provider-form')
-    await expect(form).toBeVisible()
-    await expect(form.getByLabel('Provider Name')).toBeVisible()
-    await expect(form.getByLabel('Base URL')).toBeVisible()
-    await expect(form.locator('input[aria-label="API Key"]')).toBeVisible()
-    await expect(form.getByText('Official Provider')).toHaveCount(0)
-
-    await form.getByRole('button', { name: 'Cancel' }).click()
-    await expect(form).toHaveCount(0)
-
-    await page.getByRole('button', { name: 'Add Provider' }).click()
-    const reopened = page.getByTestId('add-provider-form')
-    await reopened.getByLabel('Provider Name').fill('Together Custom')
-    await reopened.getByLabel('Base URL').fill('https://api.together.xyz/v1')
-    await reopened.locator('input[aria-label="API Key"]').fill('sk-together')
     const saveRequest = page.waitForRequest((request) => request.url().includes('/api/llm/credentials') && request.method() === 'PUT')
-    await reopened.getByRole('button', { name: 'Add' }).click()
+    await page.getByRole('button', { name: 'Add Provider' }).click()
     await saveRequest
+
     await expect(page.getByTestId('add-provider-form')).toHaveCount(0)
+    const newCard = page.locator('[data-provider-id^="custom-"]').last()
+    await expect(newCard).toBeVisible()
+    await expect(newCard.locator('input[aria-label="Provider Name"][value="New Provider"]')).toBeVisible()
+
+    await newCard.getByLabel('Provider Name').fill('Together Custom')
+    await newCard.getByLabel('Base URL').fill('https://api.together.xyz/v1')
+    await newCard.locator('input[name^="provider-secret-"]').fill('sk-together')
+    const testRequest = page.waitForRequest((request) => request.url().includes('/api/llm/providers/test') && request.method() === 'POST')
+    await newCard.getByRole('button', { name: 'Test' }).click()
+    await testRequest
+    await expect(newCard.getByText('Connected')).toBeVisible()
     await expect(page.locator('input[aria-label="Provider Name"][value="Together Custom"]')).toBeVisible()
   })
 
@@ -267,9 +264,14 @@ test.describe('Round 3 API Keys e2e', () => {
     const openRouterCard = page.locator('[data-provider-id="openrouter-custom"]')
     await expect(openRouterCard.getByText('Manual model probing')).toBeVisible()
     await expect(openRouterCard.getByText('gpt-5')).toBeVisible()
+    await openRouterCard.getByRole('button', { name: /Manual model probing/i }).click()
+    await expect(openRouterCard.getByLabel('Manual model 1')).toBeVisible()
+    await openRouterCard.getByRole('button', { name: /Manual model probing/i }).click()
+    await expect(openRouterCard.getByLabel('Manual model 1')).toBeHidden()
+    await openRouterCard.getByRole('button', { name: /Manual model probing/i }).click()
 
     await openRouterCard.getByLabel('Manual model 1').fill('claude-opus-4-7')
-    await openRouterCard.getByRole('button', { name: 'Add Model' }).click()
+    await openRouterCard.getByRole('button', { name: 'Add Model', exact: true }).click()
     await openRouterCard.getByLabel('Manual model 2').fill('gpt-5')
     const modelRequest = page.waitForRequest((request) => request.url().includes('/api/llm/providers/test-models') && request.method() === 'POST')
     await openRouterCard.getByRole('button', { name: 'Test Models' }).click()

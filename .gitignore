@@ -20,6 +20,7 @@ apps/studio/frontend/src/lib/*
 !apps/studio/frontend/src/lib/utils.ts
 !apps/studio/frontend/src/lib/llm-error-messages.ts
 !apps/studio/frontend/src/lib/llm-error-messages.test.ts
+!apps/studio/frontend/src/lib/tauri.test.ts
 lib64/
 parts/
 sdist/

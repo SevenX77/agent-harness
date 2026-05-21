@@ -10,6 +10,14 @@ const officialProviders = [
   { code: "ark", label: "Ark", baseUrl: "https://ark.cn-beijing.volces.com/api/v3" },
 ]
 const officialProviderCodes = officialProviders.map((vendor) => vendor.code)
+const notableProviderKeys = [
+  ...officialProviderCodes,
+  "openrouter",
+  "wavespeed",
+  "qiniu",
+  "onechats",
+  "jiekou",
+]
 
 /** Build a draft list from the server `CredentialsState` snapshot. */
 export function draftsFromCredentials(credentials: CredentialsState): ProviderDraft[] {
@@ -40,7 +48,7 @@ export function inferProviderKind(draft: ProviderDraft): "official" | "third-par
 
 export function draftFromAddProviderSubmission(
   data: AddProviderFormSubmission,
-  id: string = newProviderId(),
+  id: string = data.providerCode || newProviderId(),
 ): ProviderDraft {
   return {
     id,
@@ -72,9 +80,12 @@ export function thirdPartyProviderDrafts(drafts: ProviderDraft[]): ProviderDraft
 }
 
 export function notableProviderKeyForDraft(draft: ProviderDraft): string {
-  const officialCode = officialProviderCodes.find((code) => isOfficialProviderDraft(draft, code))
-  if (officialCode) return officialCode
-  return draft.id.split(/[-_]/, 1)[0].toLowerCase()
+  const haystack = `${draft.id} ${draft.name} ${draft.base_url}`.toLowerCase()
+  const matched = notableProviderKeys.find((code) => haystack.includes(code))
+  if (matched) return matched
+  if (draft.provider_type === "anthropic_compatible") return "anthropic"
+  if (draft.provider_type === "google_genai") return "gemini"
+  return "openai"
 }
 
 export function shouldShowManualModelPanel(

@@ -105,6 +105,7 @@ function baseViewProps(
     activeTab: 'api_keys',
     credentials,
     credentialsLoading: false,
+    credentialsError: null,
     drafts: draftsFromCredentials(credentials),
     saveStatus: 'idle',
     rolesData,
@@ -162,7 +163,7 @@ describe('Add Provider flow helpers', () => {
     expect(inferProviderType('deepseek')).toBe('openai_compatible')
   })
 
-  it('creates a populated draft from AddProviderForm submission', () => {
+  it('creates a populated draft from an Add Provider submission', () => {
     const draft = draftFromAddProviderSubmission({
       providerCode: 'my-openrouter',
       name: 'My OpenRouter',
@@ -238,7 +239,7 @@ describe('Add Provider flow helpers', () => {
     const custom = thirdPartyProviderDrafts(draftsFromCredentials(credentials))[2]
 
     expect(notableProviderKeyForDraft(official)).toBe('anthropic')
-    expect(notableProviderKeyForDraft(custom)).toBe('custom')
+    expect(notableProviderKeyForDraft(custom)).toBe('openai')
     expect(shouldShowManualModelPanel(official, null)).toBe(true)
     expect(shouldShowManualModelPanel(custom, null)).toBe(false)
     expect(shouldShowManualModelPanel(custom, { ...credentials.providers[3], last_test_status: 'ok' })).toBe(true)
@@ -252,6 +253,25 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(skeletons).toHaveLength(15)
     expect(html).not.toContain('Add Provider')
     expect(html).not.toContain('Provider Name')
+  })
+
+  it('renders a load failure instead of synthetic empty providers when credentials cannot load', () => {
+    const html = renderToStaticMarkup(
+      <SettingsPageContent
+        {...baseViewProps({
+          credentials: { providers: [] },
+          credentialsLoading: false,
+          credentialsError: 'Bad Gateway',
+          drafts: [],
+        })}
+      />,
+    )
+
+    expect(html).toContain('API Keys load failed')
+    expect(html).toContain('Bad Gateway')
+    expect(html).toContain('Stored provider values are not shown')
+    expect(html).not.toContain('Anthropic Official')
+    expect(html).not.toContain('Add Provider')
   })
 
   it('renders official providers and empty third-party state after credentials finish loading', () => {
@@ -274,7 +294,10 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).toContain('Third-party Providers')
     expect(html).toContain('No third-party providers configured.')
     expect(html).toContain('Add Provider')
+    expect(html).toContain('data-variant="default"')
     expect(html).toContain('border-dashed')
+    expect(html).not.toContain('Cancel')
+    expect(html).not.toContain('data-testid="add-provider-form"')
     expect(html).not.toContain('data-slot="skeleton"')
   })
 
@@ -294,10 +317,10 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).toContain('Test')
   })
 
-  it('renders API key inputs as plaintext values with password-manager ignore attributes', () => {
+  it('renders API key inputs as native password values with password-manager ignore attributes', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
 
-    expect(html).toContain('type="text"')
+    expect(html).toContain('type="password"')
     expect(html).toContain('value="sk-deepseek"')
     expect(html).toContain('name="provider-secret-DS"')
     expect(html).toContain('autoComplete="off"')

@@ -121,6 +121,7 @@ class CreateSkillReq(BaseModel):
     skill_id: str = Field(..., pattern=r"^[a-z][a-z0-9-]+$")
     files: dict[str, str] = Field(default_factory=dict)
     directory_path: str | None = None
+    import_existing: bool = False
 
 
 class ForkSkillReq(BaseModel):

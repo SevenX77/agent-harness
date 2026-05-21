@@ -106,7 +106,7 @@ test.describe('Edit workflow smoke', () => {
     await expect(page.locator('.react-flow__edge')).toHaveCount(3)
 
     await page.getByTestId('rf__node-review').getByText('review', { exact: true }).click()
-    await page.getByRole('button', { name: '展开子图' }).click()
+    await page.getByRole('button', { name: 'Expand subgraph' }).click()
     await expect(page.getByText('./review.md')).toBeVisible()
 
     await page.getByLabel('JSON input for schema inference').fill('{"topic":"demo","count":2,"ok":true}')

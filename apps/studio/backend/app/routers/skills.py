@@ -92,6 +92,7 @@ async def create_skill(
         storage,
         metadata,
         directory_path=request.directory_path,
+        import_existing=request.import_existing,
     )
 
 

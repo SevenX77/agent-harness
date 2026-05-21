@@ -22,7 +22,7 @@ interface ExecutePublishSkillOptions {
 }
 
 const DEFAULT_RESET_DELAY_MS = 200
-export const ERROR_TOAST_MESSAGE = '发版校验失败或网络异常, 当前版本仍留存在草稿区'
+export const ERROR_TOAST_MESSAGE = 'Release validation failed or the network is unavailable. The draft version is unchanged.'
 
 function messageFromError(error: unknown): string {
   return error instanceof Error ? error.message : 'Publish failed'

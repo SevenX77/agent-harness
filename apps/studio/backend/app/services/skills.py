@@ -71,9 +71,17 @@ description: "New Studio skill"
 mode: logic
 name: init
 ---
+<python_callable>
+initialize
+</python_callable>
+
 # init phase logic
 
 Describe what this phase does.
+""",
+    "phases/init/actions/initialize.py": """def initialize(context):
+    \"\"\"Starter logic action for a new Studio skill.\"\"\"
+    return None
 """,
     "io/inputs.json": "{}\n",
     "io/outputs.json": "{}\n",
@@ -178,26 +186,28 @@ async def list_skill_summaries(
     metadata_summaries = await metadata.list_skills(user_id)
     for skill_id in public_ids:
         skill_dir = config.SKILLS_DIR / skill_id
+        summary = await _summary_for_skill_dir_async(
+            user_id,
+            skill_dir,
+            storage,
+            metadata,
+        )
         summaries[skill_id] = _attach_config_mismatch(
-            await _summary_for_skill_dir_async(
-                user_id,
-                skill_dir,
-                storage,
-                metadata,
-            ),
+            summary.model_copy(update={"directory_path": str(skill_dir)}),
             skill_dir,
             app_settings,
             local_git,
         )
     for skill_id in workspace_ids:
         skill_dir = workspace_root / skill_id
+        summary = await _summary_for_skill_dir_async(
+            user_id,
+            skill_dir,
+            storage,
+            metadata,
+        )
         summaries[skill_id] = _attach_config_mismatch(
-            await _summary_for_skill_dir_async(
-                user_id,
-                skill_dir,
-                storage,
-                metadata,
-            ),
+            summary.model_copy(update={"directory_path": str(skill_dir)}),
             skill_dir,
             app_settings,
             local_git,
@@ -429,6 +439,7 @@ async def create_new_skill(
     storage: StorageBackend,
     metadata: MetadataStore,
     directory_path: str | None = None,
+    import_existing: bool = False,
 ) -> SkillSummary:
     """Create a new directory-based V2.1 skill."""
     saved_summary = await metadata.get_skill_summary(user_id, skill_id)
@@ -445,7 +456,33 @@ async def create_new_skill(
         if directory_path
         else config.DEFAULT_SKILLS_ROOT / skill_id
     )
-    if directory_path and await _directory_is_nonempty(skill_dir):
+    public_skill_dir = config.SKILLS_DIR / skill_id
+    workspace_skill_dir = _workspace_skills_dir_for(user_id) / skill_id
+    if await _is_importable_skill_directory(
+        public_skill_dir,
+        storage,
+    ) or await _is_importable_skill_directory(workspace_skill_dir, storage):
+        raise standard_http_exception(
+            "SKILL_ALREADY_EXISTS",
+            f"Skill already exists: {skill_id}",
+            {"skill_id": skill_id},
+        )
+
+    if import_existing:
+        if not directory_path:
+            _raise_invalid_directory_path("", "directory_path is required for import")
+        if not skill_dir.exists() or not skill_dir.is_dir():
+            _raise_invalid_directory_path(str(skill_dir), "selected folder does not exist")
+        if not await _is_importable_skill_directory(skill_dir, storage):
+            _raise_invalid_directory_path(
+                str(skill_dir),
+                "Selected folder is not a Studio skill directory: missing GRAPH.md or SKILL.md.",
+                required_entry="GRAPH.md or SKILL.md",
+            )
+        if await storage.exists(str(skill_dir / "GRAPH.md")):
+            lint = lint_skill_path(skill_dir)
+            if lint.status == "failed":
+                _raise_manifest_validation_failed(lint)
         summary = (
             await _summary_for_skill_dir_async(
                 user_id,
@@ -464,9 +501,13 @@ async def create_new_skill(
         await metadata.save_skill_summary(user_id, summary)
         return summary
 
-    skill_path = skill_dir / "GRAPH.md"
-    public_path = config.SKILLS_DIR / skill_id / "GRAPH.md"
-    if await storage.exists(str(skill_path)) or await storage.exists(str(public_path)):
+    if directory_path and await _directory_is_nonempty(skill_dir):
+        _raise_invalid_directory_path(
+            str(skill_dir),
+            "Cannot create a new skill in a non-empty folder. Choose an empty folder or use Import skill.",
+        )
+
+    if await _is_importable_skill_directory(skill_dir, storage):
         raise standard_http_exception(
             "SKILL_ALREADY_EXISTS",
             f"Skill already exists: {skill_id}",
@@ -795,6 +836,10 @@ async def _directory_is_nonempty(path: Path) -> bool:
     return await asyncio.to_thread(lambda: any(path.iterdir()))
 
 
+async def _is_importable_skill_directory(path: Path, storage: StorageBackend) -> bool:
+    return await storage.exists(str(path / "GRAPH.md")) or await storage.exists(str(path / "SKILL.md"))
+
+
 async def _workspace_skill_body_exists(path: Path, storage: StorageBackend) -> bool:
     if not await storage.exists(str(path)):
         return False
@@ -857,12 +902,20 @@ async def _validated_directory_path(
     return resolved_skill_dir
 
 
-def _raise_invalid_directory_path(directory_path: str, message: str) -> None:
+def _raise_invalid_directory_path(
+    directory_path: str,
+    message: str,
+    *,
+    required_entry: str | None = None,
+) -> None:
+    details = {"directory_path": directory_path}
+    if required_entry:
+        details["required_entry"] = required_entry
     response = error_response(
         error_code="INVALID_DIRECTORY_PATH",
         http_status=422,
         message=message,
-        details={"directory_path": directory_path},
+        details=details,
         retry_strategy="not_retryable",
     )
     raise_error_response(response)

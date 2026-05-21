@@ -11,6 +11,7 @@ export function SettingsPageContent({
   activeTab,
   credentials,
   credentialsLoading,
+  credentialsError,
   drafts,
   saveStatus,
   rolesData,
@@ -58,6 +59,7 @@ export function SettingsPageContent({
               <ApiKeysTab
                 credentials={credentials}
                 credentialsLoading={credentialsLoading}
+                credentialsError={credentialsError}
                 drafts={drafts}
                 saveStatus={saveStatus}
                 onProviderFieldChange={onProviderFieldChange}

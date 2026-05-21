@@ -6,14 +6,11 @@ import type { SkillSummary } from '../../api/types'
 import { useRecentSkills } from '../../hooks/useRecentSkills'
 import { useSkills } from '../../hooks/useSkills'
 import { revealInFileManager, selectSkillDirectory } from '../../lib/tauri'
-import { generateSkillMd } from '../../templates/skillMdGenerator'
-import { errorMessage } from '../../utils/errors'
+import { errorMessage, isRecord } from '../../utils/errors'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import {
   Card,
-  CardAction,
-  CardContent,
   CardFooter,
   CardHeader,
   CardTitle,
@@ -43,8 +40,102 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { NewSkillDialog } from './NewSkillDialog'
 import { formatLastRun, normalizeSkillId, shortPath, skillIdFromPath, sortRecent } from './utils'
 
+export const REVEAL_ACTION_LABEL = 'Show in folder'
+export const ACTION_MENU_CLASSNAME = 'w-48'
+
 interface WelcomePageProps {
   onSelectSkill: (skillId: string) => void
+}
+
+interface CreateSkillPayload {
+  skill_id: string
+  directory_path?: string
+  import_existing?: boolean
+}
+
+function joinDirectoryPath(parentDirectory: string, folderName: string) {
+  const separator = parentDirectory.includes('\\') && !parentDirectory.includes('/') ? '\\' : '/'
+  return `${parentDirectory.replace(/[\\/]+$/, '')}${separator}${folderName}`
+}
+
+export function buildSkillCreatePayload(name: string, parentDirectory?: string | null): CreateSkillPayload {
+  const skillId = normalizeSkillId(name)
+  return {
+    skill_id: skillId,
+    ...(parentDirectory ? { directory_path: joinDirectoryPath(parentDirectory, skillId) } : {}),
+  }
+}
+
+export function buildSkillImportPayload(directoryPath: string): CreateSkillPayload {
+  return {
+    skill_id: skillIdFromPath(directoryPath),
+    directory_path: directoryPath,
+    import_existing: true,
+  }
+}
+
+interface StudioErrorPayload {
+  error_code?: string
+  message?: string
+  details?: Record<string, unknown>
+}
+
+function studioErrorPayload(error: unknown): StudioErrorPayload | null {
+  if (!isRecord(error) || !isRecord(error.response) || !isRecord(error.response.data)) {
+    return null
+  }
+  return error.response.data as StudioErrorPayload
+}
+
+function sentenceFragment(message: string) {
+  return message ? `${message[0].toLowerCase()}${message.slice(1)}` : message
+}
+
+function firstLintErrorMessage(payload: StudioErrorPayload): string | null {
+  const errors = payload.details?.errors
+  if (!Array.isArray(errors) || errors.length === 0) {
+    return null
+  }
+  const first = errors[0]
+  if (!isRecord(first) || typeof first.message !== 'string') {
+    return null
+  }
+  const location = [
+    typeof first.file === 'string' ? first.file : null,
+    typeof first.line === 'number' ? String(first.line) : null,
+  ].filter(Boolean).join(':')
+  return location ? `${location} ${first.message}` : first.message
+}
+
+export function formatCreateSkillError(error: unknown, skillId: string): string {
+  const payload = studioErrorPayload(error)
+  if (payload?.error_code === 'SKILL_ALREADY_EXISTS') {
+    return `Cannot create "${skillId}": a skill with this name already exists. Choose a different name.`
+  }
+  if (payload?.error_code === 'INVALID_DIRECTORY_PATH' && payload.message) {
+    return `Cannot create "${skillId}": ${sentenceFragment(payload.message)}`
+  }
+  if (payload?.error_code === 'MANIFEST_VALIDATION_FAILED') {
+    return `Cannot create "${skillId}": ${firstLintErrorMessage(payload) ?? sentenceFragment(payload.message ?? 'manifest validation failed')}`
+  }
+  return errorMessage(error)
+}
+
+export function formatImportSkillError(error: unknown): string {
+  const payload = studioErrorPayload(error)
+  if (payload?.error_code === 'INVALID_DIRECTORY_PATH' && payload.message) {
+    return `Cannot import this folder: ${sentenceFragment(payload.message)}`
+  }
+  if (payload?.error_code === 'SKILL_ALREADY_EXISTS') {
+    const existingSkillId = payload.details?.skill_id
+    return typeof existingSkillId === 'string'
+      ? `Cannot import this folder: it is already registered as "${existingSkillId}".`
+      : 'Cannot import this folder: it is already registered.'
+  }
+  if (payload?.error_code === 'MANIFEST_VALIDATION_FAILED') {
+    return `Cannot import this folder: ${firstLintErrorMessage(payload) ?? sentenceFragment(payload.message ?? 'manifest validation failed')}`
+  }
+  return errorMessage(error)
 }
 
 
@@ -53,6 +144,8 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   const [creating, setCreating] = useState(false)
   const [newSkillOpen, setNewSkillOpen] = useState(false)
   const [newSkillName, setNewSkillName] = useState('new-skill')
+  const [newSkillParentDirectory, setNewSkillParentDirectory] = useState<string | null>(null)
+  const [selectingNewSkillParent, setSelectingNewSkillParent] = useState(false)
   const [newSkillError, setNewSkillError] = useState<string | null>(null)
   const { skills, skillListError, mutateSkills } = useSkills(null)
   const skillIds = useMemo(() => skills.map((skill) => skill.id), [skills])
@@ -66,8 +159,21 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
 
   const openNewSkillDialog = () => {
     setNewSkillName('new-skill')
+    setNewSkillParentDirectory(null)
     setNewSkillError(null)
     setNewSkillOpen(true)
+  }
+
+  const chooseNewSkillParentDirectory = async () => {
+    setSelectingNewSkillParent(true)
+    try {
+      const directory = await selectSkillDirectory()
+      if (directory) {
+        setNewSkillParentDirectory(directory)
+      }
+    } finally {
+      setSelectingNewSkillParent(false)
+    }
   }
 
   const handleReveal = (skill: SkillSummary) => {
@@ -98,27 +204,12 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
     setCreating(true)
     setNewSkillError(null)
     try {
-      const response = await api.post<SkillSummary>('/skills', {
-        skill_id: skillId,
-        content: generateSkillMd({
-          templateId: 'empty-agent',
-          templateContent: null,
-          type: 'agent',
-          skillId,
-          name: skillId,
-          description: `Created in Studio`,
-          tags: '',
-          inputs: [{ id: 'input', name: 'input_text', type: 'str', defaultValue: '' }],
-          phaseId: 'draft',
-          llmRole: 'analyst',
-          prompt: 'Use {input_text} to complete the task.',
-        }),
-      })
+      const response = await api.post<SkillSummary>('/skills', buildSkillCreatePayload(skillId, newSkillParentDirectory))
       await mutateSkills()
       setNewSkillOpen(false)
       openSkill(response.data.id)
     } catch (error) {
-      setNewSkillError(errorMessage(error))
+      setNewSkillError(formatCreateSkillError(error, skillId))
     } finally {
       setCreating(false)
     }
@@ -131,28 +222,11 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
       if (!directory) {
         return
       }
-      const skillId = skillIdFromPath(directory)
-      const response = await api.post<SkillSummary>('/skills', {
-        skill_id: skillId,
-        directory_path: directory,
-        content: generateSkillMd({
-          templateId: 'empty-agent',
-          templateContent: null,
-          type: 'agent',
-          skillId,
-          name: skillId,
-          description: `Imported from ${directory}`,
-          tags: '',
-          inputs: [{ id: 'input', name: 'input_text', type: 'str', defaultValue: '' }],
-          phaseId: 'draft',
-          llmRole: 'analyst',
-          prompt: 'Use {input_text} to complete the task.',
-        }),
-      })
+      const response = await api.post<SkillSummary>('/skills', buildSkillImportPayload(directory))
       await mutateSkills()
       openSkill(response.data.id)
     } catch (error) {
-      window.alert(errorMessage(error))
+      toast.error('Import failed', { description: formatImportSkillError(error) })
     } finally {
       setImporting(false)
     }
@@ -222,6 +296,7 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
             <ContextMenu key={skill.id}>
               <ContextMenuTrigger asChild>
                 <Card
+                  size="sm"
                   role="button"
                   tabIndex={0}
                   onClick={() => openSkill(skill.id)}
@@ -231,14 +306,20 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
                       openSkill(skill.id)
                     }
                   }}
-                  className="group cursor-pointer transition-colors hover:ring-primary/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  className="group min-h-24 cursor-pointer gap-2 rounded-md border border-border py-2.5 ring-1 ring-border/70 transition-colors hover:border-primary/50 hover:bg-accent/30 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
-                  <CardHeader>
-                    <div className="flex size-8 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
-                      <Layers3 className="size-4" />
-                    </div>
-                    <CardAction>
-                      <div className="flex items-center gap-2">
+                  <CardHeader className="px-3 pb-0">
+                    <div className="flex items-start gap-3">
+                      <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
+                        <Layers3 className="size-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <CardTitle className="truncate text-sm">{skill.name}</CardTitle>
+                        <p className="mt-1 truncate font-mono text-[11px] leading-5 text-muted-foreground">
+                          {shortPath(skill.directory_path)}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
                         {skill.has_golden ? <Badge>Golden</Badge> : null}
                         {skill.config_mismatch ? (
                           <Tooltip>
@@ -247,7 +328,7 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
                                 variant="outline"
                                 aria-label="Repo URL mismatch"
                                 onClick={(event) => event.stopPropagation()}
-                                className="border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                className="border-destructive/40 bg-destructive/10 text-destructive"
                               >
                                 <AlertTriangle />
                                 Config drift
@@ -281,11 +362,12 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent
                             align="end"
+                            className={ACTION_MENU_CLASSNAME}
                             onClick={(event) => event.stopPropagation()}
                           >
                             <DropdownMenuItem onSelect={() => handleReveal(skill)}>
                               <FolderOpen />
-                              Reveal in file manager
+                              {REVEAL_ACTION_LABEL}
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
@@ -298,16 +380,9 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
-                    </CardAction>
+                    </div>
                   </CardHeader>
-                  <CardContent>
-                    <CardTitle className="line-clamp-2 text-sm">{skill.name}</CardTitle>
-                    <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">{skill.description}</p>
-                    <p className="mt-2 truncate font-mono text-[11px] text-muted-foreground">
-                      {shortPath(skill.directory_path)}
-                    </p>
-                  </CardContent>
-                  <CardFooter className="justify-between gap-3 text-xs text-muted-foreground">
+                  <CardFooter className="justify-between gap-3 px-3 pt-0 text-xs text-muted-foreground">
                     <span>{skill.phase_count} phases</span>
                     <span className="inline-flex items-center gap-1">
                       <Clock3 className="size-3.5" />
@@ -316,10 +391,10 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
                   </CardFooter>
                 </Card>
               </ContextMenuTrigger>
-              <ContextMenuContent>
+              <ContextMenuContent className={ACTION_MENU_CLASSNAME}>
                 <ContextMenuItem onSelect={() => handleReveal(skill)}>
                   <FolderOpen />
-                  Reveal in file manager
+                  {REVEAL_ACTION_LABEL}
                 </ContextMenuItem>
                 <ContextMenuSeparator />
                 <ContextMenuItem
@@ -352,6 +427,9 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
         onOpenChange={setNewSkillOpen}
         newSkillName={newSkillName}
         onNewSkillNameChange={setNewSkillName}
+        parentDirectory={newSkillParentDirectory}
+        selectingParentDirectory={selectingNewSkillParent}
+        onChooseParentDirectory={() => void chooseNewSkillParentDirectory()}
         newSkillError={newSkillError}
         creating={creating}
         onSubmit={submitNewSkill}

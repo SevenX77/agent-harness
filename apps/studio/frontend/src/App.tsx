@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { Toaster } from 'sonner'
 import { RuntimeGate } from './components/RuntimeGate'
 import { Workspace } from './components/studio/Workspace'
+import { Toaster } from './components/ui/sonner'
 import { TooltipProvider } from './components/ui/tooltip'
 
 export function App() {
@@ -15,7 +15,7 @@ export function App() {
           onSelectSkill={setCurrentSkillId}
           onCloseSkill={() => setCurrentSkillId(null)}
         />
-        <Toaster position="bottom-right" richColors closeButton />
+        <Toaster position="bottom-right" />
       </RuntimeGate>
     </TooltipProvider>
   )

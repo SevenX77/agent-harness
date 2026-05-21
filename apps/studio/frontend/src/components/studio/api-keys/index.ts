@@ -3,6 +3,8 @@ export { ProviderListSkeleton } from "./ProviderListSkeleton"
 export { ManualModelTestPanel } from "./ManualModelTestPanel"
 export { OfficialVendorSelect, OFFICIAL_VENDORS, type OfficialVendor } from "./OfficialVendorSelect"
 export {
-  AddProviderForm,
+  createBlankAddProviderSubmission,
+  deriveAddProviderFormSubmission,
+  providerCodeFromCustomName,
   type AddProviderFormSubmission,
 } from "./AddProviderForm"

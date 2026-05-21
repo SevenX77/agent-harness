@@ -64,7 +64,7 @@ impl SidecarLaunchConfig {
         let resource_root = resource_root.as_ref();
         Self {
             python: python_executable_path(resource_root),
-            backend_dir: resource_root.join("vendor").join("backend"),
+            backend_dir: backend_dir_for_resource_root(resource_root),
             site_packages: resource_root.join("vendor").join("site-packages"),
             resource_dir: resource_root.join("vendor").join("resources"),
             startup_attempts: MAX_STARTUP_ATTEMPTS,
@@ -72,6 +72,20 @@ impl SidecarLaunchConfig {
             shutdown_timeout: Duration::from_secs(2),
         }
     }
+}
+
+fn backend_dir_for_resource_root(resource_root: &Path) -> PathBuf {
+    if cfg!(debug_assertions) {
+        let live_backend = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .map(|studio_dir| studio_dir.join("backend"));
+        if let Some(live_backend) = live_backend {
+            if live_backend.join("app").join("main.py").exists() {
+                return live_backend;
+            }
+        }
+    }
+    resource_root.join("vendor").join("backend")
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -254,6 +268,7 @@ fn spawn_sidecar_process(
         )
         .env("STUDIO_RESOURCE_DIR", &config.resource_dir)
         .env("STUDIO_API_TOKEN", api_token)
+        .env("STUDIO_CORS_EXTRA_ORIGINS", sidecar_cors_extra_origins())
         .env("STUDIO_EXIT_ON_ORPHAN", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -279,6 +294,25 @@ fn python_path_env(site_packages: &Path, backend_dir: &Path) -> OsString {
         entries.extend(std::env::split_paths(&existing));
     }
     std::env::join_paths(entries).expect("PYTHONPATH entries must be valid")
+}
+
+fn sidecar_cors_extra_origins() -> String {
+    let mut origins = vec![
+        "http://localhost:5174".to_string(),
+        "http://127.0.0.1:5174".to_string(),
+    ];
+    if let Ok(existing) = std::env::var("STUDIO_CORS_EXTRA_ORIGINS") {
+        origins.extend(
+            existing
+                .split(',')
+                .map(str::trim)
+                .filter(|origin| !origin.is_empty())
+                .map(str::to_string),
+        );
+    }
+    origins.sort();
+    origins.dedup();
+    origins.join(",")
 }
 
 fn capture_lines(stream: impl std::io::Read + Send + 'static, sink: Arc<Mutex<VecDeque<String>>>) {
@@ -416,10 +450,14 @@ mod tests {
     #[test]
     fn launch_config_uses_resource_root_layout() {
         let config = SidecarLaunchConfig::from_resource_root(Path::new("/app/resources"));
-        assert_eq!(
-            config.backend_dir,
-            Path::new("/app/resources/vendor/backend")
-        );
+        if cfg!(debug_assertions) {
+            assert!(config.backend_dir.ends_with("apps/studio/backend"));
+        } else {
+            assert_eq!(
+                config.backend_dir,
+                Path::new("/app/resources/vendor/backend")
+            );
+        }
         assert_eq!(
             config.site_packages,
             Path::new("/app/resources/vendor/site-packages")
@@ -428,6 +466,13 @@ mod tests {
             config.resource_dir,
             Path::new("/app/resources/vendor/resources")
         );
+    }
+
+    #[test]
+    fn sidecar_cors_extra_origins_includes_default_backup_dev_port() {
+        let origins = sidecar_cors_extra_origins();
+        assert!(origins.contains("http://127.0.0.1:5174"));
+        assert!(origins.contains("http://localhost:5174"));
     }
 
     #[test]

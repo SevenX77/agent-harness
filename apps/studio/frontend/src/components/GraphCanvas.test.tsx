@@ -194,22 +194,22 @@ describe('GraphCanvas', () => {
   it('renders subgraph expand icon button when collapsed', () => {
     const html = skillNodeHtml({ subgraphPath: 'subgraph.SKILL.md', isExpanded: false })
 
-    expect(html).toContain('aria-label="展开子图"')
+    expect(html).toContain('aria-label="Expand subgraph"')
     expect(html).toContain('lucide-plus')
   })
 
   it('renders subgraph collapse icon button when expanded', () => {
     const html = skillNodeHtml({ subgraphPath: 'subgraph.SKILL.md', isExpanded: true })
 
-    expect(html).toContain('aria-label="收起子图"')
+    expect(html).toContain('aria-label="Collapse subgraph"')
     expect(html).toContain('lucide-minus')
   })
 
   it('does not render a subgraph icon button for regular nodes', () => {
     const html = skillNodeHtml()
 
-    expect(html).not.toContain('aria-label="展开子图"')
-    expect(html).not.toContain('aria-label="收起子图"')
+    expect(html).not.toContain('aria-label="Expand subgraph"')
+    expect(html).not.toContain('aria-label="Collapse subgraph"')
   })
 
   it('renders a compact Toolbox badge when a phase has subagents', () => {

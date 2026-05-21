@@ -104,7 +104,7 @@ export function CopilotPanel({ skillId, view = 'edit' }: CopilotPanelProps) {
       return
     }
     setSelectedModel(modelCode)
-    toast.info('已切换模型, 后续消息将使用该模型')
+    toast.info('Model switched. Future messages will use it.')
   }
 
   const submit = (event: FormEvent<HTMLFormElement>) => {

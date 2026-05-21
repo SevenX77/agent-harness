@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { useAppSettings } from "@/hooks/useAppSettings"
 import { buildPutPayload, useDebouncedCredentialsSave } from "@/hooks/useDebouncedCredentialsSave"
-import { composeTestErrorMessage } from "@/lib/llm-error-messages"
+import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
 import { getCredentials, getRoles, putRoles, testProvider, type CredentialsState, type ModelInfo, type RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
@@ -17,6 +17,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>("general")
   const [credentials, setCredentials] = useState<CredentialsState>(emptyCredentials)
   const [credentialsLoading, setCredentialsLoading] = useState(true)
+  const [credentialsError, setCredentialsError] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<ProviderDraft[]>([])
   const [rolesData, setRolesData] = useState<RolesData | null>(null)
   const [selectedRole, setSelectedRole] = useState("copilot_chat")
@@ -30,15 +31,6 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
 
   const handleSaved = useCallback((next: CredentialsState) => {
     setCredentials(next)
-    // Re-sync plaintext api_key per provider from the persisted response.
-    setDrafts((current) => current.map((draft) => {
-      const persisted = next.providers.find((provider) => provider.id === draft.id)
-      if (!persisted) return draft
-      return {
-        ...draft,
-        api_key: persisted.api_key,
-      }
-    }))
   }, [])
 
   const { queue: queueSave, status: saveStatus } = useDebouncedCredentialsSave({
@@ -50,6 +42,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     getCredentials()
       .then((next) => {
         if (cancelled) return
+        setCredentialsError(null)
         setCredentials(next)
         setDrafts(draftsFromCredentials(next))
         setCredentialsLoading(false)
@@ -57,6 +50,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       .catch((error) => {
         if (cancelled) return
         const message = error instanceof Error ? error.message : "Load failed"
+        setCredentialsError(message)
         toast.error(`API Keys load failed: ${message}`)
         setCredentialsLoading(false)
       })
@@ -178,8 +172,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         toast.error(composeTestErrorMessage(response.status, response.error_code, response.message), { id: toastId })
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error"
-      toast.error(`Test failed: ${message}`, { id: toastId })
+      toast.error(composeRequestErrorMessage(error, "Test failed"), { id: toastId })
     } finally {
       setProviderTesting(providerId, false)
     }
@@ -217,6 +210,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       activeTab={activeTab}
       credentials={credentials}
       credentialsLoading={credentialsLoading}
+      credentialsError={credentialsError}
       drafts={drafts}
       saveStatus={saveStatus}
       rolesData={rolesData}

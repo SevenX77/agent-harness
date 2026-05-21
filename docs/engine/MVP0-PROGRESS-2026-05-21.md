@@ -7,7 +7,7 @@
 
 ## 一句话总结
 
-我从你睡前到现在 **派了 15 个真实工作 job 给 ccb agents** (a1 Codex 6 个 / a2 Gemini 9 个), 实际**ship 了 2 个 PR** (#87 cache 修复 + #88 spec 文档), 把 engine MVP0 改造的 4 个模块完整的 kiro spec **全套 12 份文档写好** (research / design / tasks 共 2057 行). 工程实施现在卡在 **14 个 [BREAKING] 设计决策需要你拍板**, 拍完我能立刻让 a1 接着写代码.
+我从你睡前到现在 **派了 15 个真实工作 job 给 ccb agents** (a1 Codex 6 个 / a2 Gemini 9 个), 实际**ship 了 2 个 PR** (#87 cache 修复 + #88 spec 文档), 把 engine MVP0 改造的 4 个模块完整的 kiro spec **全套 12 份文档写好** (research / design / tasks 共 2057 行). 工程实施现在卡在 **18 个 [BREAKING] 设计决策需要你拍板** (复检后比初版多 4 个: Q-R-ERROR / Q-T-P1-4 / Q-T-STREAM / Q-T-PAYLOAD), 拍完我能立刻让 a1 接着写代码.
 
 ---
 
@@ -71,9 +71,11 @@
 
 ---
 
-## 等你拍板的 14 个决策 (按重要度排序)
+## 等你拍板的 18 个决策 (按重要度排序)
 
-醒来跟我说"全按 a2 推荐" 我立刻照办, 或者你逐条改. **每条 1-2 句够了**, 我不需要长解释:
+醒来跟我说"全按 a2 推荐" 我立刻照办, 或者你逐条改. **每条 1-2 句够了**, 我不需要长解释。
+
+> **更正**: 初版报告写 14 个, 我夜里数漏了。复检 4 块 tasks.md 全文后, 真实数 = **18 个**。多出的 4 个: Q-R-ERROR (Block 3), Q-T-P1-4 + Q-T-STREAM + Q-T-PAYLOAD (Block 4)。
 
 ### Block 1 (skill-compilation) — 3 个
 
@@ -93,21 +95,25 @@
 | **Q-S-A3-A6** | 子图 (subagent + SUBGRAPH) 切断隐式继承, 仅接 explicit input ? | 是 (彻底隔离) |
 | **Q-S-StateMapper** | 独立 `StateMapper` 类 / 直接在 wrapper 函数内联 ? | 独立类 (高内聚易测试) |
 
-### Block 3 (execution-runtime) — 5 个
+### Block 3 (execution-runtime) — 6 个
 
 | Q 编号 | 问什么 | a2 推荐 |
 |---|---|---|
-| **Q-R-P0-1** | ModelResolver 写在 Studio Backend 由 DI 传入 / 下沉到 graph-agent 自带 ? | 你定 (跟 apps/studio 的 LLM routing 设计强耦合) |
+| **Q-R-P0-1** | ModelResolver 写在 Studio Backend 由 DI 传入 / 下沉到 graph-agent 自带 ? | DI 注入, engine 保持轻量 (跟 apps/studio 的 LLM routing 强耦合, 你 verify) |
 | **Q-R-P1-2** | child flow 用 `copy.deepcopy(parent_flow)` + 写 depth ? | 是 |
 | **Q-R-P1-3** | exit_contract 临时 SystemMessage marker strip / 每轮单独构 prompt 不入 messages ? | 后者 (彻底不污染历史) |
 | **Q-R-A4** | 轻量 subagent 基于单文件识别 + 虚拟图包装 / 新引入 SubagentSpec.lightweight 字段 ? | 单文件识别 (兼容现有 SubagentSpec) |
 | **Q-R-A5** | `call_subgraph_<name>` 静态注入族 / 通用 `call_subgraph(path, inputs)` 工具 ? | 静态注入 (跟 call_subagent 一致, 强 schema) |
+| **Q-R-ERROR** | error 用扩展 `GraphAgentError` 加 `code`/`metadata` / 全面改 `WorkflowResult(error_code=...)` ? | 异常基类扩展 (不改公开执行结果模型) |
 
-### Block 4 (tracing-and-observability) — 1 个
+### Block 4 (tracing-and-observability) — 4 个
 
 | Q 编号 | 问什么 | a2 推荐 |
 |---|---|---|
-| **Q-T-1** | V2TracingCallback 纯手工独立 / 继承 LangChain BaseCallbackHandler / 抽抽象基类 ? | 抽抽象基类 (整合现有 PredictTracingCallback) |
+| **Q-T-1** | V2TracingCallback 纯手工独立 / 继承 LangChain BaseCallbackHandler / 抽抽象基类 ? | 抽 `BaseV2Callback` 抽象基类 (跟现有 PredictTracingCallback 共享) |
+| **Q-T-P1-4** | V2.1 callback 接回入口 改 `graph_assembler.py` wrapper / 走 LangGraph Runnable callback tree ? | wrapper 显式投递 (等 Block 2 StateMapper 给 phase input/output) |
+| **Q-T-STREAM** | 流式 token 在线推送 + trace.jsonl 落盘 / 仅在线不落盘 ? | token 在线但默认不落, tool call 必落 |
+| **Q-T-PAYLOAD** | payload 截断防爆 复用/迁移 Predict `_sanitize_mapping` / 走 blob sidecar 长报文 ? | 复用 `_sanitize_mapping` (MVP0 不做 sidecar) |
 
 ---
 
@@ -123,9 +129,22 @@
 ## 没做的事 (诚实交代)
 
 1. **没替你拍 [BREAKING]** — 按 SOP-06 / 宪法 7 规则, 设计阶段我不思考, 你跟 Gemini 直接对话. 你睡了我替不了你. 这是规矩.
-2. **没做 P0-1 真实 LLM e2e** — 你没授权我用你的 API key, 我不能动 keychain.
+2. **没做真实 LLM e2e** — 你后续补的 ".env 里 api key 可以用" 解了 key 依赖, 但 P0-1 还卡 Q-R-P0-1 design 拍板. 按你指示**最后一次性跑全部 e2e** (避免多次单跑烧 budget).
 3. **没修 pre-existing `test_compiler_line_locations`** — 改 parser 风险大, 留你 triage.
 4. **a3 (Claude provider) 全程无效** — Async Guardrail hook 钳死 a3 (收到 `[CCB_ASYNC_SUBMITTED]` 就强制 1 行 reply 然后 end turn). 我把所有任务改派 a1 (Codex 不受 hook 干扰). 后续 e2e 任务我会让 a3 用 sync `--wait` 模式, 或者你授权我改 hook 配置.
+
+### .env API key 覆盖现状 (后续 e2e 用)
+
+| Provider 代号 | 期望 env | .env 是否有 |
+|---|---|---|
+| `WS_LLM` (WaveSpeed) | `WAVESPEED_API_KEY` | ✅ |
+| `DS` (DeepSeek 官方) | `DEEPSEEK_API_KEY` | ✅ |
+| `GM_OFF` (Gemini 官方) | `GEMINI_API_KEY` | ✅ |
+| `ARK` (火山引擎) | `ARK_API_KEY` | ✅ |
+| `JK_CL_ANT` (Jiekou Claude) | `JIEKOU_API_KEY` | ✅ |
+| `OC_*` (OneChats 系列) | `ONE_CHATS_*_API_KEY` | ❌ (没配, 但 `model_fallback: true` 会切到 WS_LLM 兜底) |
+
+`conftest.py:_load_dotenv_for_smoke()` 自动加载 .env, 不需要手 export. `premium`/`balanced`/`analyst` 角色首选 OneChats 不可用, fallback 到 WS_LLM 等; `fast`/`drafter` 角色首选 DS/ARK 直接命中.
 
 ---
 
@@ -133,9 +152,9 @@
 
 1. **5 分钟**: review + squash merge PR #87 (cache fix, 已 CI 绿)
 2. **5 分钟**: 跟我说 "Block 1 全按 a2 推荐" (Q-A7=C 中间路径 + Q-A8=A 轻量 + Q-ISSUE=B 异常 attribute)
-3. **10 分钟**: 看 PR #88 各 design.md 拍 Block 2/3/4 共 11 个 Q (跟我对话定)
-4. **5 分钟**: 提供 LLM API key 给 a3 e2e 跑 (P0-1 验证)
-5. 我夜里继续, 一块一块按 tasks.md 推, 醒来你 review 实施 PR
+3. **15 分钟**: 看 PR #88 各 design.md 拍 Block 2/3/4 共 **15 个** Q (跟我对话定)
+4. 我推全实施 (Block 1→4 顺序), 完成后**一次性跑全部真实 LLM e2e** (.env key 已可用, 你指示"最后一次性跑")
+5. 醒来你 review 各实施 PR
 
 ---
 
@@ -148,7 +167,7 @@
 | Spec docs 总行 | **2057** (4 块 × research/design/tasks) |
 | 代码改动行 | **+202 / -8** (cache.py 137 / test_v21_cache.py 65 + spy 11) |
 | 新测试 | **5** (4 cache 主测 + 1 fallback spy) |
-| PM 拍板 Q | **14** (跨 4 块) |
+| PM 拍板 Q | **18** (跨 4 块; 初版报 14 漏 4, 已更正) |
 | 主控自己改了代码? | **没有** (主控 PM 不写代码铁律守住) |
 | 卡死处理 | 1 次 (a1 cache fix job ccbd completion-detection lag, cancel + 重排 queue, 1 分钟自愈) |
 | Async Guardrail 钳死 | 1 次 (a3 被钳, 改派 a1 接) |
@@ -164,12 +183,12 @@
 | PR #87 详情 | https://github.com/SevenX77/agent-harness/pull/87 |
 | PR #88 详情 | https://github.com/SevenX77/agent-harness/pull/88 |
 | 本报告 | `docs/engine/MVP0-PROGRESS-2026-05-21.md` |
-| 拍板 Q 编号汇总 | 见上面 "等你拍板的 14 个决策" 表 |
+| 拍板 Q 编号汇总 | 见上面 "等你拍板的 18 个决策" 表 |
 
 ---
 
 ## 总结 (1 句)
 
-工程实施基本卡在你拍板 14 个 Q 这一步, 醒来 30 分钟内拍完 → 我可以一夜推完 Block 1-4 全实施 + 测试 + PR (除了 P0-1 真实 LLM e2e 等你 key).
+工程实施基本卡在你拍板 18 个 Q 这一步, 醒来 30 分钟内拍完 → 我可以一夜推完 Block 1-4 全实施 + 单元/集成测试 + PR, 最后一次性跑全部真实 LLM e2e (.env key 已可用).
 
 你睡个好觉. ✋

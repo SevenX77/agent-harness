@@ -248,7 +248,7 @@ test.describe('Team collaboration buttons', () => {
     await page.getByRole('button', { name: 'Release to Production' }).click()
 
     await expect(
-      page.getByText('发版校验失败或网络异常, 当前版本仍留存在草稿区'),
+      page.getByText('Release validation failed or the network is unavailable. The draft version is unchanged.'),
     ).toBeVisible({ timeout: 5000 })
   })
 })

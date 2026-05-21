@@ -6,9 +6,10 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-from services.llm_provider_meta import DOCS_DIR
+from services.llm_provider_meta import DOCS_DIR, load_provider_meta
 
 from app.core import config
 from app.models.llm_config import (
@@ -235,28 +236,48 @@ async def test_llm_provider(request: ProviderTestRequest) -> ProviderTestRespons
     vendor = _infer_vendor(request)
     base_url = request.base_url or _default_base_url(request.provider_type)
     started = datetime.now(tz=UTC)
-    try:
-        available_sdks = await probe_compatible_sdks(vendor, request.api_key, base_url)
-    except Exception as exc:  # noqa: BLE001 - probe failures should return a clean API result.
-        logger.warning("SDK probe failed for vendor=%s: %s", vendor, exc)
-        available_sdks = []
 
     available_models: list[ModelInfo] = []
-    if available_sdks:
+    available_sdks: list[str] = []
+    model_list_ok = False
+    model_error_status = "error"
+    model_error_code = "model_list_unavailable"
+    model_error_message = "Model listing failed."
+    if _provider_has_models_endpoint(vendor):
         try:
             available_models = await probe_available_models(vendor, request.api_key, base_url)
-        except Exception as exc:  # noqa: BLE001 - model probing is best-effort after SDK auth.
-            logger.warning("Model probe failed for vendor=%s: %s", vendor, exc)
+            model_list_ok = True
+        except Exception as exc:  # noqa: BLE001 - convert vendor failures to clean API results.
+            logger.warning("Model list probe failed for vendor=%s: %s", vendor, exc)
+            model_error_status, model_error_code, model_error_message = _provider_test_error_from_exception(exc)
+    else:
+        model_error_message = "Provider metadata does not define a model-list endpoint."
+
+    if model_list_ok:
+        available_sdks = [request.provider_type]
+    else:
+        try:
+            available_sdks = await probe_compatible_sdks(vendor, request.api_key, base_url)
+        except Exception as exc:  # noqa: BLE001 - SDK probing is non-blocking diagnostics.
+            logger.warning("SDK probe failed for vendor=%s: %s", vendor, exc)
+            available_sdks = []
+        if available_sdks:
+            try:
+                available_models = await probe_available_models(vendor, request.api_key, base_url)
+            except Exception as exc:  # noqa: BLE001 - auth passed; model listing remains optional.
+                logger.warning("Model list fallback failed for vendor=%s: %s", vendor, exc)
 
     latency_ms = _elapsed_ms(started)
-    status = "ok" if available_sdks else "error"
-    error_code = None if available_sdks else "no_available_sdk"
+    status = "ok" if (model_list_ok or available_sdks) else model_error_status
+    error_code = None if status == "ok" else model_error_code
+    message = None if status == "ok" else model_error_message
     _log_test_provider(request.id, request.api_key, status, latency_ms)
     return _record_and_return(
         request.id,
         ProviderTestResponse(
             status=status,
             latency_ms=latency_ms,
+            message=message,
             error_code=error_code,
             available_sdks=available_sdks,
             available_models=available_models,
@@ -429,6 +450,35 @@ def _infer_vendor_from_provider(provider: ProviderCredential) -> str:
         "google_genai": "gemini",
     }
     return mapping.get(provider.provider_type or "openai_compatible", "openai")
+
+
+def _provider_has_models_endpoint(vendor: str) -> bool:
+    try:
+        return load_provider_meta(vendor).models_endpoint_path is not None
+    except Exception as exc:  # noqa: BLE001 - unknown metadata falls back to SDK probing.
+        logger.warning("Provider metadata unavailable vendor=%s error=%s", vendor, exc)
+        return False
+
+
+def _provider_test_error_from_exception(exc: Exception) -> tuple[str, str, str]:
+    if isinstance(exc, TimeoutError | httpx.TimeoutException):
+        return "timeout", "timeout", "Provider request timed out."
+    if isinstance(exc, httpx.HTTPStatusError):
+        status_code = exc.response.status_code
+        if status_code in (401, 403):
+            return "invalid_key", "invalid_api_key", "Provider rejected the API key."
+        if status_code == 402:
+            return "quota_exceeded", "quota_exceeded", "Provider quota is exhausted."
+        if status_code == 429:
+            return "rate_limited", "rate_limited", "Provider rate limit was reached."
+        if status_code == 404:
+            return "error", "model_list_unavailable", "Provider model-list endpoint was not found."
+        if status_code >= 500:
+            return "error", "http_error", "Provider or upstream service failed."
+        return "error", "http_error", f"Provider returned HTTP {status_code}."
+    if isinstance(exc, httpx.HTTPError):
+        return "network_error", "network_error", "Provider could not be reached."
+    return "error", "model_list_unavailable", "Provider model list could not be loaded."
 
 
 def _dedupe_model_ids(model_ids: list[str]) -> list[str]:

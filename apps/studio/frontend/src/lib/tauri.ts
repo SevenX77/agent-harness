@@ -11,7 +11,7 @@ async function invokeShell(command: TauriCommand, path: string) {
   }
 
   if (!isTauriRuntime()) {
-    toast.info('桌面端 only')
+    toast.info('Desktop only')
     return
   }
 
@@ -63,17 +63,17 @@ export async function revealInFileManager(path: string) {
 
 export async function selectSkillDirectory(): Promise<string | null> {
   if (!isTauriRuntime()) {
-    toast.info('桌面端 only')
+    toast.info('Desktop only')
     return null
   }
 
   try {
-    const moduleName = '@tauri-apps/plugin-dialog'
-    const dialog = await import(/* @vite-ignore */ moduleName) as { open?: (options: { directory: boolean, multiple: boolean }) => Promise<string | string[] | null> }
-    const selected = await dialog.open?.({ directory: true, multiple: false })
+    const { invoke } = await import('@tauri-apps/api/core')
+    const selected = await invoke<string | null>('select_directory')
     return typeof selected === 'string' ? selected : null
-  } catch {
-    toast.error('Failed to open directory picker')
+  } catch (error) {
+    const description = error instanceof Error ? error.message : String(error)
+    toast.error('Failed to open directory picker', { description })
     return null
   }
 }

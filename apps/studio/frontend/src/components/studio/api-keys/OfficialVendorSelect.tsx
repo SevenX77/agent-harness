@@ -17,7 +17,7 @@ export const OFFICIAL_VENDORS: OfficialVendor[] = [
   { code: "openai", label: "OpenAI", baseUrl: "https://api.openai.com" },
   { code: "gemini", label: "Gemini", baseUrl: "https://generativelanguage.googleapis.com" },
   { code: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com" },
-  { code: "ark", label: "Ark (火山方舟)", baseUrl: "https://ark.cn-beijing.volces.com/api/v3" },
+  { code: "ark", label: "Ark", baseUrl: "https://ark.cn-beijing.volces.com/api/v3" },
 ]
 
 interface Props {
@@ -35,7 +35,7 @@ export function OfficialVendorSelect({ value, onChange }: Props) {
       }}
     >
       <SelectTrigger>
-        <SelectValue placeholder="选择官方厂商..." />
+        <SelectValue placeholder="Select official provider..." />
       </SelectTrigger>
       <SelectContent>
         {OFFICIAL_VENDORS.map((vendor) => (

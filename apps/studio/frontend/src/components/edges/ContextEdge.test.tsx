@@ -58,7 +58,7 @@ describe('ContextEdge', () => {
   it('renders a design-time edge dot button when hasTraceData is false', () => {
     const html = renderToStaticMarkup(<ContextEdge {...baseProps} />)
 
-    expect(html).toContain('aria-label="查看连线传递数据"')
+    expect(html).toContain('aria-label="View edge trace data"')
     expect(html).toContain('size-4')
     expect(html).toContain('bg-primary')
     expect(html).toContain('border-primary')
@@ -67,7 +67,7 @@ describe('ContextEdge', () => {
   it('renders the design-time tooltip copy', () => {
     const html = renderToStaticMarkup(<ContextEdge {...baseProps} />)
 
-    expect(html).toContain('运行后可查看传递数据')
+    expect(html).toContain('Run the skill to inspect transferred data')
   })
 
   it('clicking the design-time dot is a no-op beyond stopping propagation', () => {

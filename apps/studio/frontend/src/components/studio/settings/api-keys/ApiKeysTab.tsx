@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import { Check, Loader2, Plus, TriangleAlert } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
-import { AddProviderForm, ProviderCard, ProviderListSkeleton } from "../../api-keys"
+import { createBlankAddProviderSubmission, ProviderCard, ProviderListSkeleton } from "../../api-keys"
 import { officialProviderDrafts, thirdPartyProviderDrafts, notableProviderKeyForDraft, shouldShowManualModelPanel } from "../provider-utils"
 import { SectionTitle } from "../shared"
 import type { SettingsPageContentProps } from "../types"
@@ -46,6 +47,7 @@ function SaveStatusBadge({ status }: { status: SaveStatus }) {
 export function ApiKeysTab({
   credentials,
   credentialsLoading,
+  credentialsError,
   drafts,
   saveStatus,
   onProviderFieldChange,
@@ -57,6 +59,7 @@ export function ApiKeysTab({
   SettingsPageContentProps,
   | "credentials"
   | "credentialsLoading"
+  | "credentialsError"
   | "drafts"
   | "saveStatus"
   | "onProviderFieldChange"
@@ -65,7 +68,6 @@ export function ApiKeysTab({
   | "onAddProvider"
   | "onProviderModelsUpdated"
 >) {
-  const [showAddForm, setShowAddForm] = useState(false)
   const persistedById = useMemo(
     () => Object.fromEntries(credentials.providers.map((provider) => [provider.id, provider])),
     [credentials.providers],
@@ -83,6 +85,14 @@ export function ApiKeysTab({
       <div className="space-y-4" data-testid="api-keys-list">
         {credentialsLoading ? (
           <ProviderListSkeleton count={5} />
+        ) : credentialsError ? (
+          <Alert variant="destructive">
+            <TriangleAlert className="size-3.5" />
+            <AlertTitle>API Keys load failed</AlertTitle>
+            <AlertDescription>
+              {credentialsError}. Stored provider values are not shown until the credentials document loads.
+            </AlertDescription>
+          </Alert>
         ) : (
           <>
             <section className="space-y-3" aria-label="Official Providers">
@@ -107,47 +117,33 @@ export function ApiKeysTab({
             </section>
 
             <section className="space-y-3 pt-4" aria-label="Third-party Providers">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-sm font-medium text-foreground">Third-party Providers</h3>
-                {!showAddForm ? (
-                  <Button type="button" variant="outline" onClick={() => setShowAddForm(true)} className="gap-1">
-                    <Plus className="size-3.5" />
-                    Add Provider
-                  </Button>
-                ) : null}
-              </div>
-              {thirdPartyDrafts.length > 0 ? (
-                thirdPartyDrafts.map((draft) => {
-                  const persisted = persistedById[draft.id] ?? null
-                  return (
-                    <ProviderCard
-                      key={draft.id}
-                      draft={draft}
-                      persisted={persisted}
-                      onFieldChange={(patch) => onProviderFieldChange(draft.id, patch)}
-                      onTest={() => onTestProvider(draft.id)}
-                      onDelete={() => onDeleteProvider(draft.id)}
-                      providerKind="third-party"
-                      showManualModelPanel={shouldShowManualModelPanel(draft, persisted)}
-                      notableProviderKey={notableProviderKeyForDraft(draft)}
-                      onModelsUpdated={(models) => onProviderModelsUpdated(draft.id, models)}
-                    />
-                  )
-                })
-              ) : !showAddForm ? (
+              <h3 className="text-sm font-medium text-foreground">Third-party Providers</h3>
+              {thirdPartyDrafts.map((draft) => {
+                const persisted = persistedById[draft.id] ?? null
+                return (
+                  <ProviderCard
+                    key={draft.id}
+                    draft={draft}
+                    persisted={persisted}
+                    onFieldChange={(patch) => onProviderFieldChange(draft.id, patch)}
+                    onTest={() => onTestProvider(draft.id)}
+                    onDelete={() => onDeleteProvider(draft.id)}
+                    providerKind="third-party"
+                    showManualModelPanel={shouldShowManualModelPanel(draft, persisted)}
+                    notableProviderKey={notableProviderKeyForDraft(draft)}
+                    onModelsUpdated={(models) => onProviderModelsUpdated(draft.id, models)}
+                  />
+                )
+              })}
+              {thirdPartyDrafts.length === 0 ? (
                 <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border/60 bg-muted/10 px-4 py-8 text-center">
                   <p className="text-xs text-muted-foreground">No third-party providers configured.</p>
                 </div>
               ) : null}
-              {showAddForm ? (
-                <AddProviderForm
-                  onSubmit={async (data) => {
-                    await onAddProvider(data)
-                    setShowAddForm(false)
-                  }}
-                  onCancel={() => setShowAddForm(false)}
-                />
-              ) : null}
+              <Button type="button" variant="default" onClick={() => void onAddProvider(createBlankAddProviderSubmission())} className="gap-1">
+                <Plus className="size-3.5" />
+                Add Provider
+              </Button>
             </section>
           </>
         )}

@@ -9,16 +9,16 @@ interface ToolCallBubbleProps {
 }
 
 const toolLabels: Record<string, string> = {
-  Read: '正在 Read',
-  Write: '正在 Write',
-  Edit: '正在 Edit',
-  Bash: '正在 Bash',
+  Read: 'Running Read',
+  Write: 'Running Write',
+  Edit: 'Running Edit',
+  Bash: 'Running Bash',
 }
 
 function ToolCallBubbleBase({ event }: ToolCallBubbleProps) {
   const isResult = event.type === 'tool_use_result'
   const failed = isResult && !event.success
-  const label = isResult ? `${event.tool_name} ${event.success ? '完成' : '失败'}` : (toolLabels[event.tool_name] ?? `正在 ${event.tool_name}`)
+  const label = isResult ? `${event.tool_name} ${event.success ? 'completed' : 'failed'}` : (toolLabels[event.tool_name] ?? `Running ${event.tool_name}`)
 
   return (
     <div

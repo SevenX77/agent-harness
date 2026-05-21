@@ -157,6 +157,8 @@ async def probe_compatible_sdks(vendor: str, api_key: str, base_url: str) -> lis
             available.append(sdk)
         elif status in (401, 403):
             continue
+        elif status == 404 and await _models_endpoint_auth_passes(meta, api_key, base_url):
+            available.append(sdk)
         else:
             logger.warning(
                 "SDK probe vendor=%s sdk=%s unexpected status=%s",
@@ -165,6 +167,27 @@ async def probe_compatible_sdks(vendor: str, api_key: str, base_url: str) -> lis
                 status,
             )
     return available
+
+
+async def _models_endpoint_auth_passes(meta: Any, api_key: str, base_url: str) -> bool:
+    """Use the provider model-list endpoint as a fallback auth probe.
+
+    Some official providers remove or restrict a hardcoded generation probe
+    model before they remove the SDK or `/models` endpoint. A 200 from the
+    model-list endpoint means the key/base URL/auth header are valid enough to
+    trust the SDK family, even if the one-token model probe returned 404.
+    """
+
+    if meta.models_endpoint_path is None:
+        return False
+    headers = _render_auth_headers(meta.auth_header_format, api_key)
+    url = _join_base_url_and_endpoint(base_url, meta.models_endpoint_path)
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, timeout=15.0)
+    except httpx.HTTPError:
+        return False
+    return response.status_code == 200
 
 
 async def _send_1_token_request(

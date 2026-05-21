@@ -163,26 +163,29 @@ def test_provider_test_uses_provider_type_to_select_client(
 
 
 @pytest.mark.parametrize(
-    "exc",
+    ("exc", "expected_status", "expected_error_code"),
     [
-        RuntimeError("invalid key"),
-        RuntimeError("rate limited"),
-        RuntimeError("quota exceeded"),
-        RuntimeError("dns failure"),
-        TimeoutError(),
+        (RuntimeError("provider rejected the request"), "error", "model_list_unavailable"),
+        (TimeoutError(), "timeout", "timeout"),
     ],
 )
-def test_provider_test_probe_errors_return_no_available_sdk(
+def test_provider_test_model_list_errors_return_human_test_status(
     client: TestClient,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     exc: Exception,
+    expected_status: str,
+    expected_error_code: str,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
 
-    async def fake_sdks(*_args: object, **_kwargs: object) -> list[str]:
+    async def fake_models(*_args: object, **_kwargs: object) -> list[ModelInfo]:
         raise exc
 
+    async def fake_sdks(*_args: object, **_kwargs: object) -> list[str]:
+        return []
+
+    monkeypatch.setattr(llm_router, "probe_available_models", fake_models)
     monkeypatch.setattr(llm_router, "probe_compatible_sdks", fake_sdks)
 
     response = client.post(
@@ -196,8 +199,8 @@ def test_provider_test_probe_errors_return_no_available_sdk(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "error"
-    assert body["error_code"] == "no_available_sdk"
+    assert body["status"] == expected_status
+    assert body["error_code"] == expected_error_code
     assert body["available_sdks"] == []
 
 
@@ -502,7 +505,6 @@ def test_provider_test_calls_probes_and_returns_string_lists(
     assert body["available_sdks"] == ["openai_compatible"]
     assert _model_ids(body["available_models"]) == ["gpt-5", "gpt-4o"]
     assert calls == [
-        ("sdks", "openai", "https://api.openai.com"),
         ("models", "openai", "https://api.openai.com"),
     ]
 
@@ -610,20 +612,20 @@ def test_provider_test_persists_model_capabilities_to_credentials(
     }
 
 
-def test_provider_test_empty_sdks_returns_error_without_model_probe(
+def test_provider_test_model_list_success_does_not_require_sdk_probe(
     client: TestClient,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    model_calls: list[bool] = []
+    sdk_calls: list[bool] = []
 
     async def empty_sdks(*_args: object, **_kwargs: object) -> list[str]:
+        sdk_calls.append(True)
         return []
 
     async def fake_models(*_args: object, **_kwargs: object) -> list[ModelInfo]:
-        model_calls.append(True)
-        return [_model("should-not-run")]
+        return [_model("gpt-5")]
 
     monkeypatch.setattr(llm_router, "probe_compatible_sdks", empty_sdks)
     monkeypatch.setattr(llm_router, "probe_available_models", fake_models)
@@ -640,11 +642,11 @@ def test_provider_test_empty_sdks_returns_error_without_model_probe(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "error"
-    assert body["error_code"] == "no_available_sdk"
-    assert body["available_sdks"] == []
-    assert body["available_models"] == []
-    assert model_calls == []
+    assert body["status"] == "ok"
+    assert body["error_code"] is None
+    assert body["available_sdks"] == ["openai_compatible"]
+    assert _model_ids(body["available_models"]) == ["gpt-5"]
+    assert sdk_calls == []
 
 
 def test_provider_test_persists_outcome_to_credentials(

@@ -9,4 +9,4 @@ export {
   PropertiesPanel,
   subagentSkillFilePath,
   TimelinePanel,
-} from "./panels"
+} from "./panels/index"

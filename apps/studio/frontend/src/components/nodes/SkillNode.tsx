@@ -108,7 +108,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
       {data.subgraphPath ? (
         <button
           type="button"
-          aria-label={data.isExpanded ? '收起子图' : '展开子图'}
+          aria-label={data.isExpanded ? 'Collapse subgraph' : 'Expand subgraph'}
           onClick={(event) => {
             event.stopPropagation()
             data.onToggleSubgraph?.()

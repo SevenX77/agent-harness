@@ -22,6 +22,7 @@ export interface SettingsPageContentProps {
   activeTab: SettingsTab
   credentials: CredentialsState
   credentialsLoading: boolean
+  credentialsError: string | null
   drafts: ProviderDraft[]
   saveStatus: SaveStatus
   rolesData: RolesData | null

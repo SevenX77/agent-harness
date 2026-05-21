@@ -1,30 +1,35 @@
 import { useState } from "react"
+import { toast } from "sonner"
 import { CheckCircle2, Eye, EyeOff, Loader2, Trash2, XCircle } from "lucide-react"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { translateErrorCode, translateTestStatus } from "@/lib/llm-error-messages"
 import { cn } from "@/lib/utils"
 import type { CredentialsState, ModelInfo } from "../../../api/llm"
 import type { ProviderDraft } from "../SettingsPage"
 import { ManualModelTestPanel } from "./ManualModelTestPanel"
 
-type TestMessageStatus = "not_configured" | "untested" | "testing" | "ok" | "error"
+type TestMessageStatus = "not_configured" | "testing" | NonNullable<CredentialsState["providers"][number]["last_test_status"]>
+const availableModelsPreviewLimit = 12
 
-export function apiKeyInputClassName(visible: boolean): string {
-  return cn("flex-1", !visible && "mask-input")
+export function apiKeyInputType(visible: boolean): "text" | "password" {
+  return visible ? "text" : "password"
+}
+
+export function sortModelInfos(models: ModelInfo[]): ModelInfo[] {
+  return [...models].sort((left, right) => {
+    const leftKey = modelSortKey(left.id)
+    const rightKey = modelSortKey(right.id)
+    const primary = leftKey.localeCompare(rightKey, undefined, { numeric: true, sensitivity: "base" })
+    return primary !== 0 ? primary : left.id.localeCompare(right.id)
+  })
+}
+
+function modelSortKey(modelId: string): string {
+  return modelId.replace(/^~+/, "").toLowerCase()
 }
 
 export function TestMessage({
@@ -59,10 +64,21 @@ export function TestMessage({
   }
 
   if (status === "error") {
+    const detail = translateErrorCode(errorCode)
     return (
-      <Badge variant="destructive" className="gap-1">
+      <Badge variant="destructive" className="gap-1" title={detail || undefined}>
         <XCircle className="size-3" />
-        {errorCode ?? "Error"}
+        {translateTestStatus(status)}
+      </Badge>
+    )
+  }
+
+  if (["invalid_key", "rate_limited", "quota_exceeded", "network_error", "timeout"].includes(status)) {
+    const detail = translateErrorCode(errorCode)
+    return (
+      <Badge variant="destructive" className="gap-1" title={detail || undefined}>
+        <XCircle className="size-3" />
+        {translateTestStatus(status)}
       </Badge>
     )
   }
@@ -70,31 +86,36 @@ export function TestMessage({
   return <Badge variant="secondary">Untested</Badge>
 }
 
-export function ProviderDeleteConfirmation({
+export function ProviderDeleteButton({
   draftName,
   onDelete,
 }: {
   draftName: string
   onDelete: () => void
 }) {
+  const displayName = draftName.trim() || "this provider"
+  function requestDelete() {
+    toast(`Delete ${displayName}?`, {
+      description: "This provider configuration will be removed from the credentials document.",
+      action: {
+        label: "Delete",
+        onClick: () => onDelete(),
+      },
+      cancel: {
+        label: "Cancel",
+        onClick: () => undefined,
+      },
+      classNames: {
+        actionButton: "!bg-destructive !text-destructive-foreground hover:!bg-destructive/90",
+      },
+      duration: 10000,
+    })
+  }
+
   return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>
-        <Button type="button" variant="ghost" size="icon" aria-label="Delete provider">
-          <Trash2 className="size-4" />
-        </Button>
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>确认删除 {draftName || "this provider"}?</AlertDialogTitle>
-          <AlertDialogDescription>此操作不可恢复, 该 provider 配置将永久删除。</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>取消</AlertDialogCancel>
-          <AlertDialogAction onClick={onDelete}>删除</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <Button type="button" variant="ghost" size="icon" aria-label="Delete provider" onClick={requestDelete}>
+      <Trash2 className="size-4" />
+    </Button>
   )
 }
 
@@ -120,59 +141,74 @@ export function ProviderCard({
   onModelsUpdated?: (models: ModelInfo[]) => void
 }) {
   const [visible, setVisible] = useState(false)
+  const [showAllModels, setShowAllModels] = useState(false)
   const isOfficial = providerKind === "official"
   const hasApiKey = draft.api_key.trim().length > 0
-  const testStatus: TestMessageStatus = isOfficial && !hasApiKey
+  const hasRequiredConfig = hasApiKey && (providerKind !== "third-party" || draft.base_url.trim().length > 0)
+  const displayName = draft.name.trim() || "Unnamed Provider"
+  const apiKeyProviderName = displayName.replace(/ Official$/, "")
+  const availableModels = sortModelInfos(persisted?.available_models ?? [])
+  const hasAvailableModels = availableModels.length > 0
+  const visibleModels = showAllModels ? availableModels : availableModels.slice(0, availableModelsPreviewLimit)
+  const hiddenModelCount = Math.max(0, availableModels.length - visibleModels.length)
+  const persistedStatus = persisted?.last_test_status
+  const testStatus: TestMessageStatus = !hasRequiredConfig
     ? "not_configured"
     : draft.isTesting
     ? "testing"
-    : persisted?.last_test_status === "ok"
+    : persistedStatus === "ok"
       ? "ok"
-      : persisted?.last_test_status && persisted.last_test_status !== "untested"
-        ? "error"
+      : persistedStatus && persistedStatus !== "untested"
+        ? persistedStatus
         : "untested"
   return (
     <Card data-provider-id={draft.id}>
       <CardHeader className="flex flex-row items-center gap-3 pb-2">
-        {isOfficial ? (
-          <div className="min-w-0 max-w-xs truncate text-sm font-semibold text-foreground">
-            {draft.name}
-          </div>
-        ) : (
-          <Input
-            value={draft.name}
-            onChange={(event) => onFieldChange({ name: event.target.value })}
-            placeholder="Provider Name"
-            className="w-full max-w-xs font-semibold"
-            aria-label="Provider Name"
-          />
-        )}
-        {providerKind ? (
+        <div className="min-w-0 max-w-xs truncate text-sm font-semibold text-foreground">{displayName}</div>
+        {providerKind && !isOfficial ? (
           <Badge variant="outline" className="text-[10px]">
-            {providerKind === "official" ? "Official" : "Third-party"}
+            Third-party
           </Badge>
         ) : null}
         <TestMessage status={testStatus} latencyMs={null} errorCode={persisted?.last_error_code ?? null} />
         <div className="flex-1" />
-        {!isOfficial ? <ProviderDeleteConfirmation draftName={draft.name} onDelete={onDelete} /> : null}
+        {!isOfficial ? <ProviderDeleteButton draftName={draft.name} onDelete={onDelete} /> : null}
       </CardHeader>
       <CardContent className="space-y-4">
+        {!isOfficial ? (
+          <div className="space-y-2">
+            <Label htmlFor={`provider-name-${draft.id}`}>Provider Name</Label>
+            <Input
+              id={`provider-name-${draft.id}`}
+              value={draft.name}
+              onChange={(event) => onFieldChange({ name: event.target.value })}
+              placeholder="Provider Name"
+              aria-label="Provider Name"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
+            />
+          </div>
+        ) : null}
         <div className="space-y-2">
           <Label htmlFor={`api-key-${draft.id}`}>API Key</Label>
           <div className="flex items-center gap-2">
             <Input
               id={`api-key-${draft.id}`}
-              type="text"
+              type={apiKeyInputType(visible)}
               value={draft.api_key}
               onChange={(event) => onFieldChange({ api_key: event.target.value })}
-              placeholder="sk-..."
+              placeholder={`Enter your ${apiKeyProviderName} API Key`}
               name={`provider-secret-${draft.id}`}
               autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
               data-1p-ignore=""
               data-lpignore="true"
               data-form-type="other"
               spellCheck={false}
-              className={apiKeyInputClassName(visible)}
+              className="flex-1"
             />
             <Button
               type="button"
@@ -184,7 +220,7 @@ export function ProviderCard({
             >
               {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
             </Button>
-            <Button type="button" variant="default" onClick={onTest} disabled={draft.isTesting || (isOfficial && !hasApiKey)} className="px-6">
+            <Button type="button" variant="default" onClick={onTest} disabled={draft.isTesting || !hasRequiredConfig} className="px-6">
               {draft.isTesting ? <Loader2 className="size-3.5 animate-spin" /> : null}
               Test
             </Button>
@@ -199,6 +235,8 @@ export function ProviderCard({
               onChange={(event) => onFieldChange({ base_url: event.target.value })}
               placeholder="https://api.openai.com/v1"
               autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
               spellCheck={false}
             />
           </div>
@@ -215,16 +253,30 @@ export function ProviderCard({
                 ))}
               </div>
             ) : null}
-            {persisted.available_models && persisted.available_models.length > 0 ? (
-              <div className="flex items-start gap-2 flex-wrap">
-                <span className="text-muted-foreground shrink-0">Available Models:</span>
-                <div className="flex gap-1 flex-wrap">
-                  {persisted.available_models.map((model) => (
+            {hasAvailableModels ? (
+              <div className="space-y-2 pb-1">
+                <div className="text-muted-foreground">Available Models:</div>
+                <div
+                  data-testid="available-models-list"
+                  className={cn("flex gap-1 flex-wrap", !showAllModels && "max-h-[2.75rem] overflow-hidden")}
+                >
+                  {visibleModels.map((model) => (
                     <Badge key={model.id} variant="outline" className="font-mono">
                       {model.id}
                     </Badge>
                   ))}
                 </div>
+                {availableModels.length > availableModelsPreviewLimit ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    className="h-5 px-1 text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => setShowAllModels((value) => !value)}
+                  >
+                    {showAllModels ? "Show fewer" : `Show ${hiddenModelCount} more`}
+                  </Button>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -234,6 +286,7 @@ export function ProviderCard({
             providerKey={draft.id}
             notableProviderKey={notableProviderKey ?? draft.id.split(/[-_]/, 1)[0].toLowerCase()}
             onModelsUpdated={(models) => onModelsUpdated?.(models)}
+            defaultExpanded={false}
           />
         ) : null}
       </CardContent>

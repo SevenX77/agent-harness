@@ -44,7 +44,7 @@ async def test_create_new_skill_imports_existing_nonempty_directory_without_writ
     metadata_store: LocalJsonMetadataStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    skill_dir = tmp_path / "external" / "story-deconstruction"
+    skill_dir = tmp_path / "external" / "story-deconstruction-imported"
     skill_dir.mkdir(parents=True)
     skill_path = skill_dir / "SKILL.md"
     original_content = "# Story Deconstruction\n"
@@ -58,25 +58,121 @@ async def test_create_new_skill_imports_existing_nonempty_directory_without_writ
 
     summary = await skill_service.create_new_skill(
         "default",
-        "story-deconstruction",
+        "story-deconstruction-imported",
         {},
         storage,
         metadata_store,
         directory_path=str(skill_dir),
+        import_existing=True,
     )
 
-    assert summary.id == "story-deconstruction"
+    assert summary.id == "story-deconstruction-imported"
     assert summary.directory_path == str(skill_dir)
     assert summary.description == ""
     assert summary.phase_count == 0
     assert skill_path.read_text(encoding="utf-8") == original_content
     assert not (skill_dir / "GRAPH.md").exists()
     assert not (skill_dir / ".git").exists()
-    assert await metadata_store.get_skill_index_entry("story-deconstruction") == {
+    assert await metadata_store.get_skill_index_entry("story-deconstruction-imported") == {
         "absolute_path": str(skill_dir),
         "l2_remote_url": "",
     }
-    assert await metadata_store.get_skill_summary("default", "story-deconstruction") == summary
+    assert await metadata_store.get_skill_summary("default", "story-deconstruction-imported") == summary
+
+
+def test_create_skill_import_rejects_non_skill_directory(
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    skill_dir = tmp_path / "external" / "not-a-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "notes.txt").write_text("plain folder\n", encoding="utf-8")
+
+    response = client.post(
+        "/api/skills",
+        json={
+            "skill_id": "not-a-skill",
+            "directory_path": str(skill_dir),
+            "import_existing": True,
+        },
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error_code"] == "INVALID_DIRECTORY_PATH"
+    assert "GRAPH.md or SKILL.md" in body["message"]
+    assert body["details"] == {
+        "directory_path": str(skill_dir),
+        "required_entry": "GRAPH.md or SKILL.md",
+    }
+
+
+def test_import_skill_rejects_empty_directory_without_scaffolding(
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    skill_dir = tmp_path / "external" / "empty-folder"
+    skill_dir.mkdir(parents=True)
+
+    response = client.post(
+        "/api/skills",
+        json={
+            "skill_id": "empty-folder",
+            "directory_path": str(skill_dir),
+            "import_existing": True,
+        },
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error_code"] == "INVALID_DIRECTORY_PATH"
+    assert "GRAPH.md or SKILL.md" in body["message"]
+    assert not (skill_dir / "GRAPH.md").exists()
+
+
+def test_import_skill_rejects_invalid_graph_with_lint_details(
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    skill_dir = tmp_path / "external" / "bad-graph"
+    (skill_dir / "phases" / "init").mkdir(parents=True)
+    (skill_dir / "io").mkdir()
+    (skill_dir / "GRAPH.md").write_text(
+        """---
+schema_version: "2.1"
+name: bad-graph
+---
+<input src="io/inputs.json" />
+<output src="io/outputs.json" />
+<phase id="init" src="phases/init" depends_on="" />
+""",
+        encoding="utf-8",
+    )
+    (skill_dir / "io" / "inputs.json").write_text("{}\n", encoding="utf-8")
+    (skill_dir / "io" / "outputs.json").write_text("{}\n", encoding="utf-8")
+    (skill_dir / "phases" / "init" / "LOGIC.md").write_text(
+        """---
+mode: logic
+name: init
+---
+""",
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        "/api/skills",
+        json={
+            "skill_id": "bad-graph",
+            "directory_path": str(skill_dir),
+            "import_existing": True,
+        },
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error_code"] == "MANIFEST_VALIDATION_FAILED"
+    assert body["details"]["errors"][0]["file"] == "phases/init/LOGIC.md"
+    assert "python_callable" in body["details"]["errors"][0]["message"]
 
 
 def test_create_skill_with_empty_directory_path_scaffolds(
@@ -100,6 +196,54 @@ def test_create_skill_with_empty_directory_path_scaffolds(
     assert (skill_dir / "GRAPH.md").exists()
     assert (skill_dir / ".workspace").is_dir()
     assert (skill_dir / ".git").is_dir()
+
+
+def test_create_skill_without_files_uses_valid_default_scaffold(
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    skill_dir = tmp_path / "external" / "fresh-skill"
+    skill_dir.parent.mkdir()
+
+    response = client.post(
+        "/api/skills",
+        json={
+            "skill_id": "fresh-skill",
+            "directory_path": str(skill_dir),
+        },
+    )
+
+    assert response.status_code == 201, response.json()
+    assert response.json()["directory_path"] == str(skill_dir)
+    assert (skill_dir / "GRAPH.md").exists()
+    assert (skill_dir / "phases" / "init" / "LOGIC.md").exists()
+    assert (skill_dir / "phases" / "init" / "actions" / "initialize.py").exists()
+    assert (skill_dir / ".workspace").is_dir()
+    assert (skill_dir / ".git").is_dir()
+
+
+def test_create_skill_rejects_existing_public_v1_skill_id(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    public_skill_dir = tmp_path / "public-skills" / "text-segmentation"
+    public_skill_dir.mkdir(parents=True)
+    (public_skill_dir / "SKILL.md").write_text("# Text segmentation\n", encoding="utf-8")
+    monkeypatch.setattr(config, "SKILLS_DIR", tmp_path / "public-skills")
+
+    parent_dir = tmp_path / "external"
+    parent_dir.mkdir()
+    response = client.post(
+        "/api/skills",
+        json={
+            "skill_id": "text-segmentation",
+            "directory_path": str(parent_dir / "text-segmentation"),
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "SKILL_ALREADY_EXISTS"
 
 
 def test_create_skill_with_missing_directory_path_scaffolds(
@@ -149,6 +293,7 @@ async def test_list_skill_summaries_returns_minimal_summary_for_v1_skill(
     assert summaries[0].name == "story-deconstruction"
     assert summaries[0].description == ""
     assert summaries[0].phase_count == 0
+    assert summaries[0].directory_path == str(skill_dir)
 
 
 @pytest.mark.anyio

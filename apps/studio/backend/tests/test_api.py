@@ -672,7 +672,11 @@ def test_value_error_handler_returns_studio_error_response(client: TestClient) -
 
 
 def test_cors_allows_vite_and_backup_dev_origins(client: TestClient) -> None:
-    for origin in ("http://localhost:5173", "http://localhost:3000"):
+    for origin in (
+        "http://localhost:5173",
+        "http://127.0.0.1:5174",
+        "http://localhost:3000",
+    ):
         response = client.options(
             "/api/skills",
             headers={

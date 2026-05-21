@@ -55,6 +55,42 @@ async def test_probe_compatible_sdks_status_code_to_inclusion(
     assert ("openai_compatible" in result) is expected_in
 
 
+@pytest.mark.anyio
+async def test_probe_compatible_sdks_uses_models_endpoint_when_probe_model_is_404(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import llm_provider_test
+
+    fake_meta = ProviderMeta(
+        vendor="openai",
+        compatible_sdks=["openai_compatible"],
+        models_endpoint_path="/v1/models",
+        auth_header_format="Authorization: Bearer ${key}",
+    )
+    monkeypatch.setattr(llm_provider_test, "load_provider_meta", lambda _vendor: fake_meta)
+
+    async def fake_send(*_args: object, **_kwargs: object) -> int:
+        return 404
+
+    monkeypatch.setattr(llm_provider_test, "_send_1_token_request", fake_send)
+    _patch_async_client_get(
+        monkeypatch,
+        expected_url="https://api.openai.com/v1/models",
+        expected_headers={"Authorization": "Bearer sk-test"},
+        response=httpx.Response(
+            200,
+            json={"data": [{"id": "gpt-5"}]},
+            request=httpx.Request("GET", "https://api.openai.com/v1/models"),
+        ),
+    )
+
+    result = await llm_provider_test.probe_compatible_sdks(
+        "openai", "sk-test", "https://api.openai.com"
+    )
+
+    assert result == ["openai_compatible"]
+
+
 def test_render_auth_headers_anthropic_multiline() -> None:
     from app.services.llm_provider_test import _render_auth_headers
 

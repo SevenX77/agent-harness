@@ -136,14 +136,14 @@ test.describe('Copilot V1 integration smoke', () => {
     await page.getByRole('button', { name: /send/i }).click()
 
     await expect(page.getByText('hello from copilot')).toBeVisible()
-    await expect(page.getByText('正在 Bash')).toBeVisible()
-    await expect(page.getByText('Bash 完成')).toBeVisible()
+    await expect(page.getByText('Running Bash')).toBeVisible()
+    await expect(page.getByText('Bash completed')).toBeVisible()
     await expect(page.getByText('diff --git a/demo.txt b/demo.txt')).toBeVisible()
     await expect(page.getByText('Unknown Copilot event')).toBeVisible()
     await expect(page.getByText('Injected error for smoke')).toBeVisible()
 
     await page.getByRole('button', { name: 'DeepSeek' }).click()
-    await expect(page.getByText('已切换模型, 聊天历史清空')).toBeVisible()
+    await expect(page.getByText('Model switched. Future messages will use it.')).toBeVisible()
     await expect(page.getByText('hello from copilot')).toHaveCount(0)
   })
 })

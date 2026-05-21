@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from graph_agent.core.cache import compute_cache_key
 from graph_agent.core.compiler import compile_skill
+from graph_agent.core.loader import SkillLoader
 from tests.core.test_v21_graph_assembly import _base, _logic
 
 _FIXTURES = Path(__file__).parents[1] / "fixtures"
@@ -147,6 +149,14 @@ def test_cache_read_failure_falls_back_to_compile(tmp_path: Path, monkeypatch) -
     cache_dir.mkdir(parents=True)
     (cache_dir / f"{key}.json").write_text("{not json", encoding="utf-8")
 
-    compiled = compile_skill(skill, cache=True)
+    with patch.object(
+        SkillLoader,
+        "compile_skill",
+        autospec=True,
+        wraps=SkillLoader.compile_skill,
+    ) as spy:
+        compiled = compile_skill(skill, cache=True)
 
     assert compiled.manifest.name == "assembly-test"
+    assert spy.call_count == 1
+    assert spy.call_args.args[1] == skill

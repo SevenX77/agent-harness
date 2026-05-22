@@ -1,8 +1,9 @@
-# state-and-io-contract (engine) — MVP0 Alignment (下一步对齐逻辑)
+# state-and-io-contract (engine) — MVP0 Alignment (V0.3.0 目标对齐逻辑)
 
-> **Status**: Filled by a1 (Codex) based on a2 framework, 2026-05-20
+> **Status**: Filled by a1 (Codex) based on a2 framework, 2026-05-20; Q9/Q13 + 死代码清退 + V0.3.0 版本号 升级 2026-05-21
 > **Scope**: BlackboardState 规约 (data/flow/messages)、Reducer 并发冲突控制、阶段级 IO 隔离、Runtime Input 漏斗 (audit A1/A2/A3/A6)
-> **配套**: 见 [INDEX.md](../../INDEX.md) 5 维模板 + cross-link 规则 + writing conventions。
+> **改造目标 engine 版本**: V0.3.0 (MVP0 落地后, 详见 [INDEX.md#engine-版本号约定-2026-05-21-pm-拍定](../../INDEX.md#engine-版本号约定-2026-05-21-pm-拍定))
+> **配套**: 见 [INDEX.md](../../INDEX.md) 三时态模板 + cross-link 规则 + writing conventions。
 
 ## UI/UX
 
@@ -54,7 +55,9 @@ MVP0 MUST 保证 agent-called graph 和父 graph 黑板隔离。当前 subagent 
 
 隔离规则应该更严格：child graph 的初始 `data` **只等于** explicit tool input 经过 schema funnel 后的结果；父图 data 不隐式继承。child `flow` 可以继承必要控制字段，但必须 deep copy，并写入新的 `subagent_depth`。当前 child flow 直接用 `parent_state.get("flow", {})`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:400` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:405`，MVP0 WILL 修掉这类引用共享。
 
-返回路径也要保持隔离。subagent 作为 tool 调用时，子图结果 SHOULD 作为 tool result 回到父 LLM，而不是自动合并进父 `data`。当前 `_invoke_subagent_once_t23()` 返回 `{"status": "ok", "data": data_delta, "flow": ...}`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:411` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:415`。MVP0 SHOULD 明确这个 `data` 是“给父 LLM 阅读的工具结果”，不是父图黑板 patch。
+返回路径也要保持隔离。subagent 作为 tool 调用时，子图结果 SHOULD 作为 tool result 回到父 LLM，而不是自动合并进父 `data`。当前 `_invoke_subagent_once_t23()` 返回 `{“status”: “ok”, “data”: data_delta, “flow”: ...}`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:411` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:415`。MVP0 SHOULD 明确这个 `data` 是”给父 LLM 阅读的工具结果”，不是父图黑板 patch。
+
+**Q13 决策协同**: A6 黑板隔离规则跟 Q13 per-tool 编译 (详见 [execution-runtime/mvp0-alignment.md#3-call_subgraph_name-per-tool-编译路径-q13-决策](../execution-runtime/mvp0-alignment.md#3-call_subgraph_name-per-tool-编译路径-q13-决策)) 是同一条决策的两面 — Q13 在编译期把 `call_<subagent/subgraph>` tool 的 `arguments` 严格按 JSON Schema 校验; A6 在 runtime 把这些 validated kwargs 作为 child `BlackboardState.data` 的**唯一**来源, 父图 `before_data` 不并入。两者合在一起, child graph 看到的就是 LLM 主动决策传入的字段, 不是父图业务黑板的隐式快照。
 
 ### 5. 防污染的垃圾回收策略
 
@@ -204,4 +207,54 @@ Mapper 还 SHOULD 负责冲突解释。比如两个上游都产出 `text`，而�
 - 这些日志所依赖的核心数据抓取点，就是建立在经过 `Input Funnel` 过滤以及 `Phase Wrapper` 切分的纯粹结构体之上的。
 - 如果没有这一套无冗余的数据合约作保障，Trace 记录中会充斥着全集数据。观测侧规划见 [tracing-and-observability mvp0 alignment](../tracing-and-observability/mvp0-alignment.md#后端功能)。
 
-这个双向关系也会影响 Studio 的 Edge Inspection。Edge 面板需要展示“上游 phase 实际传给下游 phase 的字段”，而不是整张黑板。只有 StateMapper 能稳定产出 phase-to-phase slice，Trace 才能把它记录下来，Studio 才能在边上展示精确上下文。
+这个双向关系也会影响 Studio 的 Edge Inspection。Edge 面板需要展示”上游 phase 实际传给下游 phase 的字段”，而不是整张黑板。只有 StateMapper 能稳定产出 phase-to-phase slice，Trace 才能把它记录下来，Studio 才能在边上展示精确上下文。
+
+## MVP0 死代码清退 {#mvp0-死代码清退}
+
+按 a1 (Codex) 2026-05-21 死代码调查 (详见 [baseline.md#legacy--死代码残留清单-a1-调查-2026-05-21](./baseline.md#legacy--死代码残留清单-a1-调查-2026-05-21)) 跟 PM 拍定原则 “把事情做对, 不向后兼容”, MVP0 cutover **同 PR** 一并清退以下 state-and-io-contract 域内的 legacy / 死代码:
+
+### Legacy IO 子系统整体退役
+
+V2.1 主线不用这些 legacy IO 类, MVP0 引入 Runtime Input Funnel (A1) 时一并清退:
+
+- `packages/graph-agent/src/graph_agent/io/manager.py` — `IOManager` 完整删除。`load_inputs()` (`:65-106`) 跟 `save_outputs()` (`:108`) 在 V2.1 主线 `_run_v21_skill_dict` (`runner.py:471`) 完全 bypass。其功能定位 (runtime/file 混合源 declarative IO) 被新的 `filter_runtime_inputs(raw_kwargs, schema)` (A1 funnel, 详见本文件后端功能 §2) 严格替代。
+- `packages/graph-agent/src/graph_agent/io/context_resolver.py` — `ContextResolver` (`:22-59`) `{input.scene.scene_id}` 类表达式引擎, V2.1 主线不用作 per-phase input mapping。MVP0 用 `StateMapper.build_phase_input(data, required_schema)` (本文件 Data Model §2) 替代, 不需要 string 表达式 DSL。
+- `packages/graph-agent/src/graph_agent/io/` 整目录可以在 cutover 后删 (确认无其他模块引用)。
+
+### `shallow_dict_merge` 退役 (P0-3 cutover)
+
+按本文件 Cross-feature §7 退役计划:
+
+- `packages/graph-agent/src/graph_agent/runtime/state.py:13-32` `shallow_dict_merge` 函数整删
+- `packages/graph-agent/src/graph_agent/runtime/state.py:44` `__all__` 导出去掉 `shallow_dict_merge`
+- 所有 `Annotated[dict[str, Any], shallow_dict_merge]` 替换为 `Annotated[dict[str, Any], smart_dict_reducer]`
+- **不留** `@deprecated` alias (按 “不向后兼容” 原则)
+
+### 测试残留同 PR 处理
+
+`packages/graph-agent/tests/` 下任何引用 `IOManager` / `ContextResolver` / `shallow_dict_merge` 的 test 同 PR 改测新 funnel / smart reducer, 或直接删 (dead test 不保护 V2.1 regression)。
+
+### Cutover discipline (按 SOP-05)
+
+state-and-io-contract 的 P0-3 reducer 替换 + A1 funnel 引入 + IO legacy 清退 **必须同 PR 落地**, 不允许分拆。改 reducer 的 BREAKING 必带 [BREAKING] 标 + 完整迁移路径 (按 SOP-06 spec 默认保守)。
+
+### V0.3.0 版本号 cutover (PM 2026-05-21)
+
+MVP0 落地 = engine 版本号从 V2.1 升 V0.3.0 (详见 [INDEX.md#engine-版本号约定-2026-05-21-pm-拍定](../../INDEX.md#engine-版本号约定-2026-05-21-pm-拍定))。同 cutover PR 处理 state-and-io-contract 域内的版本号 step:
+
+- **错误码前缀** `[F-v21-state-conflict]` (`packages/graph-agent/src/graph_agent/runtime/state.py:24-30`) → `[F-v3-state-conflict]`; 新引入的 funnel 错误用 `F-v3-input-missing` / `F-v3-input-invalid` / `F-v3-input-unknown` / `F-v3-io-conflict` 直接走 V0.3.0 命名。
+- **`BlackboardState`** TypedDict (`packages/graph-agent/src/graph_agent/runtime/state.py:35-41`) 字段名保持稳定 (`data` / `flow` / `messages` / `run_id`), 不带版本后缀。reducer 改名 `shallow_dict_merge` → `smart_dict_reducer` (跟 P0-3 cutover 同步)。
+
+### MVP0 test 全清重写 (PM 2026-05-21)
+
+PM 原则 (2026-05-21): **不只是 V1/V2.0 dead test, V2.1 现有 test 也全部清掉, MVP0 重新写 test 套**。
+
+- **现状 V2.1 test**: `packages/graph-agent/tests/runtime/test_state*.py` / `test_blackboard*.py` / `test_shallow_dict_merge*.py` 等 V2.1 state 相关 test 全部清退。
+- **MVP0 重写覆盖** (state-and-io-contract 域):
+  - P0-3: `smart_dict_reducer` 顺序覆盖通过 vs 并行 fan-in 冲突阻断
+  - A1: `filter_runtime_inputs` 按 schema 过滤未知字段 / reject 缺 required / coerce 安全类型
+  - A2/A3: phase wrapper 只看见声明字段 / 写键限制在自己 namespace
+  - A6: subagent child data **不**继承父图 data (Q13 决策协同) + child flow 深拷贝
+  - StateMapper: `build_phase_input` / `wrap_phase_output` 端到端
+- **重写策略**: 同 P0-3 cutover PR (按 SOP-05)。**禁止** "测试随后补"。
+- **覆盖率**: unit (reducer / funnel / mapper 单函数) + integration (端到端 phase 序列, 包含并行 fan-in 场景) + e2e (实际 skill 跑, 真实 LLM, 验证 contextual 隔离)。

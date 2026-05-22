@@ -1,8 +1,9 @@
-# skill-compilation (engine) — MVP0 Alignment (下一步对齐逻辑)
+# skill-compilation (engine) — MVP0 Alignment (V0.3.0 目标对齐逻辑)
 
-> **Status**: Filled by a1 (Codex) based on a2 framework, 2026-05-20
-> **Scope**: V2.1 技能目录解析、AST 构建、图拓扑校验、静态 IO 数据流校验 (audit A7/A8)、编译缓存策略
-> **配套**: 见 [INDEX.md](../../INDEX.md) 5 维模板 + cross-link 规则 + writing conventions。
+> **Status**: Filled by a1 (Codex) based on a2 framework, 2026-05-20; Q9/Q13 + 死代码清退 + V0.3.0 版本号 升级 2026-05-21
+> **Scope**: V0.3.0 技能目录解析、AST 构建、图拓扑校验、静态 IO 数据流校验 (audit A7/A8)、编译缓存策略
+> **改造目标 engine 版本**: V0.3.0 (MVP0 落地后, 详见 [INDEX.md#engine-版本号约定-2026-05-21-pm-拍定](../../INDEX.md#engine-版本号约定-2026-05-21-pm-拍定))
+> **配套**: 见 [INDEX.md](../../INDEX.md) 三时态模板 + cross-link 规则 + writing conventions。
 
 ## UI/UX
 
@@ -87,6 +88,23 @@ MVP0 WILL 在 graph manifest 和 phase AST 都构建完之后调用 `_validate_p
 MVP0 SHOULD 让 A7/A8 的错误既能给人读，也能给 UI 定位。当前 loader 多数错误通过 `_fatal()`、`_graph_fatal()`、`_io_fatal()` 抛出带 `[F-v21-*]` 前缀的异常，helper 集中在 `packages/graph-agent/src/graph_agent/core/loader.py:232` 到 `packages/graph-agent/src/graph_agent/core/loader.py:253`。这对终端用户有用，但对 Canvas 标红还不够，因为前端需要字段名、phase id、source phase、line 等机器字段。
 
 MVP0 WILL 保留人类可读 message，同时把 compile issue 结构化。一个 A8 缺字段错误 SHOULD 至少包含：`code`、`severity`、`phase_id`、`field_name`、`source_phase_candidates`、`path`、`line`。这让 Studio 后端可以把 `F-v21-io-conflict` 转成 HTTP 422，再让 Canvas 精确定位缺口。
+
+### 6. Subagent / Subgraph 工具的 per-tool 编译 (Q13 决策落地)
+
+**Q13 PM 拍定方案** (2026-05-21, a2 round 5 reply): subagent 跟未来新加的 subgraph 都走 **per-tool 编译路径** — 每个登记的子图在 graph 装配期编译为独立原生 LangChain tool `call_<name>`, schema 从子图 `io.inputs` JSON Schema 直接转, 挂到 `bind_tools`, **完全不占用 system prompt**。
+
+**现状 = 跟决策一致, 文档化即可**:
+
+`_inject_subagent_tools()` (`packages/graph-agent/src/graph_agent/core/loader.py:387-407`) 已经是 per-tool 编译: `tool_name = f"call_subagent_{subagent.name}"` (`:396`); `_subagent_tool_def()` (`:410-437`) 用 `build_subagent_tool_args_model(subagent.input_model.__name__, subagent.input_model)` (`:419-422`) 从 subagent 编译期生成的 Pydantic input model 转成 LangChain Tool args schema。
+
+这条路径已经满足 Q13 决策, MVP0 **不**改 subagent tool 编译入口, 只做 2 件事:
+
+1. **文档化现状**: design.md 明写 "subagent → `call_subagent_<name>` per-tool 是 spec, 不是 implementation detail", 防止后续工程师再次提出"统一入口"方案。
+2. **扩展到 subgraph**: 新增 `_inject_subgraph_tools()` 跟 `_compile_subgraph_metadata()`, 跟 subagent 现状完全同构。具体编译路径详见 [execution-runtime/mvp0-alignment.md#3-call_subgraph_name-per-tool-编译路径-q13-决策](../execution-runtime/mvp0-alignment.md#3-call_subgraph_name-per-tool-编译路径-q13-决策)。
+
+**A7 phase-level IO 跟 Q13 的关联**: A7 引入 `PhaseIOSchema` (本文件 Data Model §2) 后, 每个 phase 的 `io.inputs` 都可以直接当 JSON Schema 用; subagent / subgraph 的 root `io/inputs.json` 也是同一种 JSON Schema 格式。编译期统一从 phase 的 `io.inputs` 生成 LangChain Tool args schema, 不需要二次发明 schema DSL。这是 Q13 跟 A7 的协同点 — A7 把 IO 契约带到每个 phase, Q13 把 phase IO 契约编译进 Tool API。
+
+**Token 影响 (a2 round 4 事实 3 估算)**: 5 个 subagent / subgraph schema 序列化后约 500-1250 tokens (假设每个 3-5 个属性), 相对一个完善 SKILL.md system prompt 1000-3000 tokens 而言, 是非常轻量级开销, 完全不影响 prompt cache。
 
 ## API
 
@@ -211,3 +229,50 @@ MVP0 编译错误 SHOULD 成为 Studio Canvas 的静态反馈源。Canvas 不应
 state-and-io-contract 的 Runtime Input Funnel 和 phase-level sandbox 都依赖本文件新增的 `io` schema。编译阶段负责把 frontmatter 和 JSON Schema 变成可查的 AST；运行阶段负责按这些规则过滤输入、构造 `phase_input`、封装 `phase_outputs`。运行侧规划见 [state-and-io-contract mvp0 alignment](../state-and-io-contract/mvp0-alignment.md#后端功能)。
 
 举例：compiler 确认 `summarize.io.inputs.required = ["clean_text"]` 且 `extract.io.outputs.properties.clean_text` 存在；runtime 才能在 `summarize` 执行前只把 `clean_text` 交给它，而不是把整个 `state.data` 全量塞进去。
+
+## MVP0 死代码清退 {#mvp0-死代码清退}
+
+按 a1 (Codex) 2026-05-21 死代码调查 (详见 [baseline.md#legacy--死代码残留清单-a1-调查-2026-05-21](./baseline.md#legacy--死代码残留清单-a1-调查-2026-05-21)) 跟 PM 拍定原则 "把事情做对, 不向后兼容", MVP0 cutover **同 PR** 一并清退以下 skill-compilation 域内的 legacy / 死代码, 不留 deprecated alias:
+
+### 高置信度死 — 直接 `git rm`
+
+- `packages/graph-agent/src/graph_agent/core/skill_builder.py` (991 行) — 旧 schema-2.0 PhaseNode builder, 0 caller。
+- `packages/graph-agent/src/graph_agent/core/skill_parser.py` (312 行) — 旧 `parse_skill_md`, 0 caller。
+- `packages/graph-agent/src/graph_agent/core/skill_validator.py` (185 行) — 旧 `validate_manifest`, 0 caller。
+
+### 中置信度死 — 删文件 + 同 PR 删测试 (不改测 V2.1)
+
+V2.1 compile 主流程不调用这些 validator, 测试是 dead test 不是 regression 保险:
+
+- `packages/graph-agent/src/graph_agent/core/validators/persona_resolution.py` (84) / `prompt_quality.py` (192) / `template_variables.py` (56) / `tool_paths.py` (269) / `validator_required.py` (83) — 合计 684 行 + 对应 `packages/graph-agent/tests/core/validators/*` 测试目录整删。
+- `packages/graph-agent/src/graph_agent/core/skill_tool_factory.py` (127) + `packages/graph-agent/tests/core/test_skill_tool_factory.py`
+- `packages/graph-agent/src/graph_agent/core/phase_node.py` (34) + `packages/graph-agent/tests/core/test_phase_node.py` / `test_build_graph_nodes.py`
+- `packages/graph-agent/src/graph_agent/codemod/v21_migrator.py` (454) + `packages/graph-agent/tests/core/test_v21_codemod.py` — V2.0 → V2.1 一次性迁移工具, 迁移已完成, 不再需要。
+
+### Legacy 入口直接删
+
+- `load_workflow_from_md()` at `packages/graph-agent/src/graph_agent/core/loader.py:211` 到 `:229` — V2.1 主线 `_run_v21_skill_dict` 不调用。canonical compile API 已是 `compile_skill()` (`compiler.py:40`), 删 `load_workflow_from_md` 同时清掉对它的所有 import (按 SOP-05 cutover discipline 同 PR 改 test)。
+
+### Cutover discipline (按 SOP-05)
+
+清退 PR 必须同 PR 改/删 integration test + e2e test + unit test。**禁止** "skill-compilation 域 1 PR + 测试清退留下一 PR" 这种分拆。
+
+合计本 PR 清退 `~ 2179 行` (高置信度死 1488 + 中置信度死 ~ 1322, validators 测试目录另算), engine 仓库瘦身明显。
+
+### V0.3.0 版本号 cutover (PM 2026-05-21)
+
+MVP0 落地 = engine 版本号从 V2.1 升 V0.3.0 (详见 [INDEX.md#engine-版本号约定-2026-05-21-pm-拍定](../../INDEX.md#engine-版本号约定-2026-05-21-pm-拍定))。同 cutover PR 处理 skill-compilation 域内的版本号 step:
+
+- **错误码前缀** `[F-v21-*]` → `[F-v3-*]`: 现 loader.py / cache.py / actions.py 等 `_fatal()` / `_graph_fatal()` / `_io_fatal()` helper (`packages/graph-agent/src/graph_agent/core/loader.py:232-253`) 抛出的所有 `[F-v21-route]` / `[F-v21-graph]` / `[F-v21-io]` / `[F-v21-actions]` / `[F-v21-actions-keys]` / `[F-v21-purity]` 全部改 `[F-v3-*]`。**不留 alias** (按 "不向后兼容")。
+- **cache dir** `~/.cache/graph-agent-v21` → `~/.cache/graph-agent-v3`: `packages/graph-agent/src/graph_agent/core/cache.py:18-19` `get_cache_dir()` 默认路径升级。旧 v21 缓存目录不读取 (V0.3.0 cache 跟 V2.1 cache schema 不兼容, 强制 cache miss 重新编译)。
+- **`_guard_v21_root` rename**: `packages/graph-agent/src/graph_agent/core/loader.py:256-272` `_guard_v21_root` 改名 `_guard_v3_root`。`load_workflow_from_md` (`:211-229`) 已经在死代码清退里删, 不再需要。
+- **fixture / test 路径**: `packages/graph-agent/tests/core/test_v21_codemod.py` 已经在中置信度死代码清退里删 (跟 codemod/ 一起)。
+
+### MVP0 test 全清重写 (PM 2026-05-21)
+
+PM 原则 (2026-05-21): **不只是 V1/V2.0 dead test, V2.1 现有 test 也全部清掉, MVP0 重新写 test 套**。
+
+- **现状 V2.1 test**: `packages/graph-agent/tests/core/test_compiler*.py` / `test_loader*.py` / `test_cache*.py` / `test_compile_skill_*.py` 等 V2.1 compile 相关 test 全部清退。
+- **MVP0 重写覆盖**: 新 test 必须覆盖 V0.3.0 新增能力 — A7 (`PhaseIOSchema` frontmatter 强制) + A8 (静态数据流校验 `_validate_phase_io_dataflow`) + P1-1 (`CompiledSubagent` cache rehydrate) + P2-2 (cache 写失败降级) + Q13 (`_inject_subgraph_tools` per-tool 编译) + V0.3.0 错误码前缀 + 新 cache dir。
+- **重写策略**: a1 实施 PR 内, 跟 src 改造同 PR 写新 test (按 SOP-05 cutover discipline 不分拆)。**禁止** "测试随后补" — 测试是 V0.3.0 实施的一部分, 不是 followup。
+- **覆盖率**: 测试套必须包括 unit (Pydantic schema / single helper function) + integration (compile_skill 端到端) + e2e (compile + assemble + invoke, 真实 LLM 跑 1 个 reference skill, 用 .env API key)。具体 fixture 设计由 a1 在实施 task spec 阶段写。

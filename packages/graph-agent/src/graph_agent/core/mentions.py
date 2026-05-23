@@ -9,6 +9,10 @@ MENTION_RE = re.compile(
     r"@(subagent|tool|subgraph|protocol|step|reference|example):([A-Za-z0-9_-]+)"
 )
 BROKEN_MENTION_RE = re.compile(r"@(subagent|tool|subgraph|protocol|step|reference|example)(?!:)")
+UNKNOWN_MENTION_RE = re.compile(r"@([A-Za-z][A-Za-z0-9_-]*):")
+MENTION_KINDS = frozenset(
+    {"subagent", "tool", "subgraph", "protocol", "step", "reference", "example"}
+)
 
 
 @dataclass(frozen=True)
@@ -26,7 +30,13 @@ def scan_mentions(text: str) -> list[Mention]:
 
 
 def first_broken_mention(text: str) -> re.Match[str] | None:
-    return BROKEN_MENTION_RE.search(text)
+    broken = BROKEN_MENTION_RE.search(text)
+    if broken is not None:
+        return broken
+    for match in UNKNOWN_MENTION_RE.finditer(text):
+        if match.group(1) not in MENTION_KINDS:
+            return match
+    return None
 
 
 __all__ = ["Mention", "first_broken_mention", "scan_mentions"]

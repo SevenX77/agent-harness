@@ -12,9 +12,16 @@ from graph_agent.callbacks.events import (
 )
 from graph_agent.callbacks.tracing import TracingCallback
 from graph_agent.cognitive.ambiguity import log_ambiguity
-from graph_agent.core.graph_assembler import _reference_reader_markdown
+from graph_agent.core.graph_assembler import _reference_reader_markdown, assemble_graph
 from graph_agent.core.loader import CompiledSkill, PhaseDocument
-from graph_agent.core.manifest import AgentNodeAST, GraphManifest, PhaseIOSchema, ReferenceSpec
+from graph_agent.core.manifest import (
+    AgentNodeAST,
+    GraphManifest,
+    GraphPhaseRef,
+    PhaseIOSchema,
+    ReferenceSpec,
+)
+from langchain_core.messages import AIMessage
 from pydantic import TypeAdapter
 
 
@@ -133,6 +140,48 @@ def test_reference_reader_emits_fallback_event(
     assert fallback.payload.warning_message is not None
 
 
+def test_v030_graph_runtime_emits_tool_call_before_ambiguity_logged() -> None:
+    collector = Collector()
+    io = PhaseIOSchema(inputs={"topic": {"type": "string"}}, outputs={"answer": {"type": "string"}})
+    phase_ast = AgentNodeAST(
+        mode="agent",
+        role="analyst",
+        goal="resolve ambiguity",
+        exit_contract="return answer",
+        io=io,
+        max_iterations=1,
+    )
+    phase_doc = PhaseDocument(
+        phase_name="main",
+        path=Path("/tmp/skill/phases/main/SKILL.md"),
+        mode="agent",
+        frontmatter={},
+        raw_blocks={},
+        ast=phase_ast,
+    )
+    compiled = CompiledSkill(
+        raw={"io": {"outputs": {"type": "object"}}},
+        manifest=GraphManifest(
+            name="test-skill",
+            io=io,
+            phases=[GraphPhaseRef(id="main", src="phases/main/SKILL.md", depends_on=[])],
+        ),
+        nodes=[phase_doc],
+    )
+    graph = assemble_graph(
+        compiled,
+        chat_model=_AmbiguityModel(),
+        callbacks=[collector],
+    ).graph
+
+    graph.invoke({"data": {"topic": "x"}, "flow": {}, "messages": [], "run_id": "run-1"})
+
+    event_types = [event.event_type for event in collector.events]
+    assert event_types[:2] == ["tool_call", "ambiguity_logged"]
+    assert collector.events[0].tool_name == "log_ambiguity"
+    assert collector.events[1].related_reference_ids == ["R1"]
+
+
 def _reference_reader_fixture(
     tmp_path: Path,
 ) -> tuple[PhaseDocument, AgentNodeAST, CompiledSkill]:
@@ -161,3 +210,25 @@ def _reference_reader_fixture(
     )
     manifest = GraphManifest(name="test-skill", io=io, phases=[])
     return phase_doc, phase_ast, CompiledSkill(raw={"io": {}}, manifest=manifest, nodes=[phase_doc])
+
+
+class _AmbiguityModel:
+    def bind_tools(self, _tools):
+        return self
+
+    def invoke(self, _messages):
+        return AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "id": "call-1",
+                    "name": "log_ambiguity",
+                    "args": {
+                        "question": "How should @reference:R1 be handled?",
+                        "ambiguity_type": "ambiguous_requirement",
+                        "decision": "Use conservative reading.",
+                        "reason": "No explicit protocol matched.",
+                    },
+                }
+            ],
+        )

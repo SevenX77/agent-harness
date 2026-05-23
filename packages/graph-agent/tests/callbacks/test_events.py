@@ -11,8 +11,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from graph_agent.callbacks.events import (  # noqa: E402
     SCHEMA_VERSION,
     AgentLoopIterationEvent,
+    AmbiguityLoggedEvent,
     AmbiguityReportEvent,
     ArtifactSavedEvent,
+    BuiltinSubagentEnterEvent,
+    BuiltinSubagentExitEvent,
+    BuiltinSubagentFallbackEvent,
     CallbackEvent,
     CompactionEvent,
     DeadEndPrunedEvent,
@@ -54,6 +58,10 @@ _ALL_EVENT_CLASSES = [
     DeadEndPrunedEvent,
     CompactionEvent,
     AmbiguityReportEvent,
+    AmbiguityLoggedEvent,
+    BuiltinSubagentEnterEvent,
+    BuiltinSubagentExitEvent,
+    BuiltinSubagentFallbackEvent,
     PromptCapturedEvent,
     LLMFallbackEvent,
     # Tier 1 Commit A — core lifecycle
@@ -97,6 +105,26 @@ _MIN_CTOR: dict[type, dict] = {
         "ambiguity_type": "a",
         "question": "q",
         "decision": "d",
+    },
+    AmbiguityLoggedEvent: {
+        "phase_name": "p",
+        "ambiguity_type": "a",
+        "question": "q",
+        "decision": "d",
+    },
+    BuiltinSubagentEnterEvent: {
+        "phase_name": "p",
+        "builtin_name": "reference_reader",
+    },
+    BuiltinSubagentExitEvent: {
+        "phase_name": "p",
+        "builtin_name": "reference_reader",
+    },
+    BuiltinSubagentFallbackEvent: {
+        "phase_name": "p",
+        "builtin_name": "reference_reader",
+        "fallback_reason": "config_missing",
+        "fallback_strategy": "raw_excerpt",
     },
     PromptCapturedEvent: {"phase_name": "p"},
     LLMFallbackEvent: {
@@ -199,6 +227,10 @@ class TestUnionDiscriminator:
                     "timestamp": "2026-04-23T00:00:00+00:00",
                 }
             )
+
+    def test_tool_call_requires_tool_name(self) -> None:
+        with pytest.raises(ValidationError):
+            ToolCallEvent(phase_name="p", result="r")
 
 
 class TestParallelMapGrouping:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Literal
@@ -81,19 +82,26 @@ def _serialize_with_original(manifest: GraphManifest, original_md: str) -> str:
 def _render_fresh_graph(manifest: GraphManifest) -> str:
     lines = [
         "---",
-        'schema_version: "2.1"',
+        'schema_version: "0.3.0"',
         f"name: {manifest.name}",
     ]
     if manifest.description:
         lines.append(f"description: {manifest.description}")
+    lines.append("io:")
+    lines.append(f"  inputs: {json.dumps(manifest.io.inputs, ensure_ascii=False)}")
+    lines.append(f"  outputs: {json.dumps(manifest.io.outputs, ensure_ascii=False)}")
+    lines.append("phases:")
+    for phase in manifest.phases:
+        lines.append(f"  - id: {phase.id}")
+        lines.append(f"    src: {phase.src}")
+        lines.append(
+            f"    depends_on: {json.dumps(phase.depends_on, ensure_ascii=False)}"
+        )
     lines.extend(
         [
             "---",
-            f'<input src="{manifest.io_inputs_ref}" />',
-            f'<output src="{manifest.io_outputs_ref}" />',
         ]
     )
-    lines.extend(_phase_line(phase) for phase in manifest.phases)
     return "\n".join(lines) + "\n"
 
 

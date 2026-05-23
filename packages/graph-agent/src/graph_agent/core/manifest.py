@@ -109,12 +109,10 @@ class GraphManifest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["0.3.0", "2.1"] = "2.1"
+    schema_version: Literal["0.3.0"] = "0.3.0"
     name: str = Field(min_length=1, max_length=128)
     description: str = ""
-    io_inputs_ref: str = "io/inputs.json"
-    io_outputs_ref: str = "io/outputs.json"
-    io: PhaseIOSchema | None = None
+    io: PhaseIOSchema
     phases: list[GraphPhaseRef] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 

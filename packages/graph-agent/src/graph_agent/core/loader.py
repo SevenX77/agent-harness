@@ -158,12 +158,8 @@ class SkillLoader:
         raw_attrs = _phase_refs_to_raw_attrs(manifest.phases, graph_frontmatter)
         phase_tokens: dict[str, PhaseTokenInfo] = {}
         _validate_graph_topology(graph_path, raw_attrs, root)
-        if manifest.io is not None:
-            io_inputs = _validate_inline_io_schema(graph_path, manifest.io.inputs, "input")
-            io_outputs = _validate_inline_io_schema(graph_path, manifest.io.outputs, "output")
-        else:
-            io_inputs = _validate_io_schema(root, manifest.io_inputs_ref, "input")
-            io_outputs = _validate_io_schema(root, manifest.io_outputs_ref, "output")
+        io_inputs = _validate_inline_io_schema(graph_path, manifest.io.inputs, "input")
+        io_outputs = _validate_inline_io_schema(graph_path, manifest.io.outputs, "output")
         input_schema_keys = _extract_output_schema_keys(io_inputs)
         output_schema_keys = _extract_output_schema_keys(io_outputs)
 
@@ -252,6 +248,13 @@ def _io_fatal(path: Path, line: int, message: str) -> NoReturn:
     raise SkillLoadError(f"[F-v3-io] {path}:{line} {message}")
 
 
+def _io_physical_fatal(path: Path, line: int) -> NoReturn:
+    raise SkillLoadError(
+        f"[F-v3-graph-io-physical-file-deprecated] {path}:{line} "
+        "root IO must be declared inline as GRAPH.md io.inputs/io.outputs"
+    )
+
+
 def _graph_fatal(path: Path, line: int, message: str) -> NoReturn:
     raise SkillLoadError(f"[F-v3-graph] {path}:{line} {message}")
 
@@ -287,6 +290,10 @@ def _guard_v21_root(skill_root: Path) -> None:
         _fatal(phases, 1, "missing phases directory or phase entries")
     if (skill_root / "actions").exists():
         _actions_fatal(skill_root / "actions", 1, "root-level actions/ is not allowed")
+    if (skill_root / "io" / "inputs.json").exists():
+        _io_physical_fatal(skill_root / "io" / "inputs.json", 1)
+    if (skill_root / "io" / "outputs.json").exists():
+        _io_physical_fatal(skill_root / "io" / "outputs.json", 1)
 
 
 def _discover_phase_files(skill_root: Path) -> list[tuple[str, Path, str]]:
@@ -594,7 +601,10 @@ def _build_graph_manifest(
     frontmatter: dict[str, Any],
 ) -> GraphManifest:
     data = dict(frontmatter)
-    data.setdefault("schema_version", "2.1")
+    data.setdefault("schema_version", "0.3.0")
+    for deprecated_key in ("io_inputs_ref", "io_outputs_ref"):
+        if deprecated_key in data:
+            _io_physical_fatal(path, _frontmatter_key_line(path, deprecated_key))
 
     try:
         return GraphManifest.model_validate(data)

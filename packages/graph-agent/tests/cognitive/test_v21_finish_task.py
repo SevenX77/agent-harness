@@ -114,7 +114,7 @@ def test_finish_task_3_retries_then_structured_error() -> None:
     result = tool.invoke({"markdown": "## title\n\nbody"})
 
     assert result["ok"] is False
-    assert result["error"]["code"] == "F-v21-md2json"
+    assert result["error"]["code"] == "F-v3-md2json"
     assert result["error"]["attempts"] == 3
     assert len(patcher.calls) == 3
 
@@ -125,13 +125,13 @@ def test_finish_task_patcher_unavailable_structured_error() -> None:
     result = tool.invoke({"markdown": "## title\n\nbody"})
 
     assert result["ok"] is False
-    assert result["error"]["code"] == "F-v21-md2json"
+    assert result["error"]["code"] == "F-v3-md2json"
     assert result["error"]["attempts"] == 0
     assert result["error"]["validation_errors"][0]["validator"] == "required"
 
 
 def test_finish_task_invalid_output_schema_fatal() -> None:
-    with pytest.raises(RuntimeError, match=r"\[F-v21-md2json\].*output_schema invalid"):
+    with pytest.raises(RuntimeError, match=r"\[F-v3-md2json\].*output_schema invalid"):
         build_finish_task_tool({"invalid": "schema"}, parse_finish_markdown)
 
 
@@ -149,7 +149,7 @@ def test_finish_task_empty_input_structured_error() -> None:
     result = tool.invoke({"markdown": ""})
 
     assert result["ok"] is False
-    assert result["error"]["code"] == "F-v21-md2json"
+    assert result["error"]["code"] == "F-v3-md2json"
     assert result["error"]["kind"] == "invalid_markdown"
 
 

@@ -103,21 +103,21 @@ def _base_v21_root(root: Path) -> None:
 
 def _assert_fatal(exc: pytest.ExceptionInfo[SkillLoadError], path_fragment: str) -> None:
     message = str(exc.value)
-    assert "[F-v21-route]" in message
+    assert "[F-v3-route]" in message
     assert path_fragment in message
     assert ":1" in message or ":2" in message or ":5" in message
 
 
 def _assert_io_fatal(exc: pytest.ExceptionInfo[SkillLoadError], path_fragment: str) -> None:
     message = str(exc.value)
-    assert "[F-v21-io]" in message
+    assert "[F-v3-io]" in message
     assert path_fragment in message
     assert ":1" in message or ":2" in message
 
 
 def _assert_graph_fatal(exc: pytest.ExceptionInfo[SkillLoadError]) -> None:
     message = str(exc.value)
-    assert "[F-v21-graph]" in message
+    assert "[F-v3-graph]" in message
     assert "GRAPH.md:" in message
 
 
@@ -566,7 +566,7 @@ bad
     with pytest.raises(SkillLoadError) as exc:
         SkillLoader().compile_skill(tmp_path)
 
-    assert "[F-v21-route]" in str(exc.value)
+    assert "[F-v3-route]" in str(exc.value)
     assert "phases/hello/SKILL.md:" in str(exc.value)
     assert f"topology tag '<{tag}>' is forbidden" in str(exc.value)
 

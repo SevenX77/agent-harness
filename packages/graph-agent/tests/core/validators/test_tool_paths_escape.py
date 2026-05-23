@@ -56,7 +56,7 @@ def test_action_local_write_fatals_as_purity_violation(tmp_path: Path) -> None:
         "def prepare(context):\n    open('out.txt', 'w').write('bad')\n    return {}\n",
     )
 
-    with pytest.raises(SkillLoadError, match="F-v21-purity"):
+    with pytest.raises(SkillLoadError, match="F-v3-purity"):
         SkillLoader().compile_skill(tmp_path)
 
 

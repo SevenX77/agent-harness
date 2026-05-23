@@ -1,9 +1,9 @@
-# state-and-io-contract 运行逻辑人话版
+# state-and-io-contract 运行逻辑解释
 
 署名：Codex
 日期：2026-05-23
 范围：`/home/sevenx/coding/agent-harness/packages/graph-agent`
-定位：解释当前 V0.3.0 state / IO 边界真实怎么跑，以及 MVP0 目标语义要收敛到哪里
+定位：解释当前 V0.3.0 state / IO 边界真实怎么跑
 
 ## 0. 阅读路径
 
@@ -13,7 +13,7 @@
 - 想知道 state 里有什么：读“2. 术语先讲清楚”和“3. BlackboardState 是什么”。
 - 想知道输入输出怎么被拦：读“5. StateMapper 做了什么”和“6. PhaseWrapper 在哪里生效”。
 - 想知道 LOGIC / Agent / SUBGRAPH / subagent 的差别：读“7. 四类运行边界怎么走”。
-- 想知道 V0.3.0 为什么要改：读“10. MVP0 要收敛的 4 件事”。
+- 想知道错误边界：读“9. 错误应该停在哪里”。
 
 ## 1. 先给结论
 
@@ -40,9 +40,9 @@ phase 跑完后
 
 一句话：
 
-> `BlackboardState` 是全图共享黑板，`StateMapper` 是每个 phase 门口的检查员：进去前只发它声明能看的字段，出来后只收它声明能写的字段。
+> `BlackboardState` 是全图共享黑板，`StateMapper` 是每个 phase 的边界状态隔离器：进入 phase 前只提供它声明能看的字段，phase 返回后只接收它声明能写的字段。
 
-当前源码已经有这个门口检查员，但还不是最终形态。它现在主要按 JSON Schema 的 `properties` 做字段名过滤和输出 key 检查，还没有完整做 required / type / default / coercion 级别的 JSON Schema runtime validation。代码位置是 `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:15` 到 `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:66`。
+`StateMapper` 按 JSON Schema 的 `properties` 做字段名过滤和输出 key 检查。代码位置是 `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:15` 到 `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:66`。
 
 ## 2. 术语先讲清楚
 
@@ -52,7 +52,7 @@ LangGraph 运行时的主 state。
 
 它定义在 `packages/graph-agent/src/graph_agent/runtime/state.py:35` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:41`，字段是 `data`、`flow`、`messages`、`run_id`。
 
-它是 `TypedDict(total=False)`。人话就是：运行时仍然是普通 dict，但类型说明告诉代码读者和类型检查器，这个 dict 主要应该长什么样。
+它是 `TypedDict(total=False)`。在运行时它仍然是普通 dict，类型说明主要对静态类型检查器和代码读者生效。
 
 ### data
 
@@ -150,7 +150,7 @@ data_updates[phase_id] = result.get("data", {})
 
 位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:346` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:362`。
 
-人话：
+**要点**：
 
 > LOGIC 通常写顶层 delta；SUBGRAPH 写子图相对父图的 delta；Agent 把 `finish_task` 结果放进 `data[phase_id]`。
 
@@ -197,13 +197,11 @@ SUBGRAPH 和 subagent child graph 都从空 messages 开始，位置分别是 `p
 
 位置是 `packages/graph-agent/src/graph_agent/runtime/state.py:26` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:30`。
 
-人话：
+**要点**：
 
 > 当前 reducer 只允许新增顶层 key，不允许写已有顶层 key。
 
-这个设计本来是为了挡并行分支同时写同一个字段。问题是它现在看不到 LangGraph super-step，也不知道这次写入是并行 fan-in 还是顺序 phase 更新。所以只要 delta 写了已有 key，它都会失败。
-
-这就是 MVP0 里 P0-3 要收敛的地方：未来应该区分“同一 super-step 并发冲突”和“前后 step 的合法覆盖”。但在当前源码里，真实行为仍是顶层同名 key 直接 `[F-v3-state-conflict]`。
+这个设计用于阻断并行分支同时写同一个字段。它不区分这次写入是并行 fan-in 还是顺序 phase 更新；只要 delta 写了已有顶层 key，真实行为就是直接 `[F-v3-state-conflict]`。
 
 ## 5. StateMapper 做了什么
 
@@ -230,7 +228,7 @@ output_schema: dict[str, Any] | None = None
 
 注意：
 
-当前这里不是完整 JSON Schema validator。它不检查 required，不检查 type，不填 default，也不做 coercion。它只是拿字段名集合。
+这里的职责是提取字段名集合，不承担 required、type、default 或 coercion 处理。
 
 ### 第二步：运行前切输入
 
@@ -253,7 +251,7 @@ phase_state = {
 
 位置是 `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:40` 到 `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:47`。
 
-人话：
+**要点**：
 
 > phase 进去前，不应该默认拿到整张黑板。它声明能看哪些字段，StateMapper 就从 `data` 里切哪些字段给它。
 
@@ -351,7 +349,7 @@ PhaseWrapper 先按 io.inputs 切 state.data
 
 LOGIC 还有一层老的输出 key 检查：如果 action 直接 `return dict`，会调用 `_validate_logic_update_keys()`，位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:182` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:184`。未声明 key 会报 `[F-v3-actions-keys]`，位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:713` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:718`。
 
-人话：
+**要点**：
 
 > LOGIC 是确定性 Python 节点。它可以用 Context 读写局部 data，但最终写回全局前仍要过 output schema。
 
@@ -399,7 +397,7 @@ PhaseWrapper 先按 io.inputs 切父 phase state
 
 当前 SUBGRAPH child data 仍来自当前 phase-local `state.data`。如果外层 phase 已经被 StateMapper 切过，它拿到的是切片后的 data；但 child skill 自己的 root `io.inputs` 漏斗还不是这里的明确入口。
 
-MVP0 要收敛的是：SUBGRAPH child 初始 data 应该先由父 phase 显式 input 得到，再按 child skill 的 `GRAPH.md io.inputs` 做漏斗，不应该靠父图全量黑板穿透。
+SUBGRAPH child 初始 data 的契约是从父 phase 显式 input 得到，再按 child skill 的 `GRAPH.md io.inputs` 做漏斗，避免父图全量黑板穿透。
 
 ### subagent tool
 
@@ -436,7 +434,7 @@ child_data = {**before_data, **input_data}
 
 位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:582` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:584`。
 
-这说明当前 subagent child graph 会看到父 graph 的业务 data，再叠加工具显式 input。MVP0 的 NEW-2 要改的就是这里：child graph 应该只拿显式 input，再按 target skill 的 root input schema 过滤和校验，不应该默认继承父黑板。
+这说明当前 subagent child graph 会看到父 graph 的业务 data，再叠加工具显式 input。V0.3.0 的 child graph 契约要求只拿显式 input，再按 target skill 的 root input schema 过滤和校验，不默认继承父黑板。
 
 subagent 的结果不会直接 patch 父图 `data`。它作为 tool result 返回给父 LLM，位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:595` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:599`。父 LLM 后续是否把它写进父 phase 的 `finish_task`，是父 Agent 的决策。
 
@@ -468,108 +466,13 @@ reference reader 不是普通 runtime phase。
 
 位置是 `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:99` 到 `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:105`。
 
-人话：
+**要点**：
 
 > reference reader 有自己的临时小黑板。它只知道当前 skill / phase 和超时时间，不知道父图业务上下文。
 
-MVP0 的 NEW-1 要补齐的是：reader 的业务输入还应该包含当前 Agent phase 的 reference registry，reader 失败时应该 WARN fallback，错误码收敛到 `[F-v3-reference-reader-failed]` 这一类边界，而不是污染 runtime graph state。
+Reader 的业务输入包含当前 Agent phase 的 reference registry。reader 失败时应停在 `[F-v3-reference-reader-failed]` 这一类边界，而不是污染 runtime graph state。
 
-## 9. 现在代码和目标语义的差距
-
-当前源码已经有 V0.3.0 state/io 的骨架：
-
-- `BlackboardState` 已经把 `data`、`flow`、`messages`、`run_id` 分开。
-- `data` 已经有 fail-fast reducer。
-- `StateMapper` 已经能按 `io.inputs` properties 切 phase input。
-- `StateMapper` 已经能按 `io.outputs` properties 拦未声明 output key。
-- `PhaseWrapper` 已经能覆盖带 `io` 的 LOGIC、SUBGRAPH、Agent / SKILL phase。
-- `ReaderSandboxState` 已经给 reference reader 准备了独立 blackboard envelope。
-
-但它还不是完整目标态：
-
-1. 输入漏斗目前主要是 properties 级过滤，不是完整 JSON Schema runtime validation。
-2. `data` reducer 还不能区分并行冲突和顺序覆盖。
-3. SUBGRAPH child input 还没有明确先过 child root `GRAPH.md io.inputs`。
-4. subagent child graph 当前还会继承父图业务 data。
-5. reference reader sandbox 还只是 envelope，reference registry / WARN fallback 语义需要继续接到装配链路。
-
-## 10. MVP0 要收敛的 4 件事
-
-### C7：Runtime Input Funnel 改到 inline root IO
-
-V0.3.0 不应该再把 `io/inputs.json` 当作 runtime input funnel 的来源。
-
-根输入 schema 应该来自 `GRAPH.md` frontmatter inline `io.inputs`。编译期负责确认它是合法 object schema；runtime 入口只消费编译产物，不重新猜 schema。
-
-目标流程：
-
-```text
-run_skill(inputs)
-  -> 读取编译产物里的 root io.inputs
-  -> 过滤 unknown fields
-  -> 校验 required / type
-  -> 形成 canonical inputs
-  -> 写入初始 BlackboardState.data
-```
-
-当前代码里的 `filter_runtime_inputs()` 是这个方向的最小基础，位置是 `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:24` 到 `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:30`。
-
-### C8：Phase Wrapper 覆盖四类边界
-
-当前 `_wrap_phase_runtime_node()` 已经把带 `io` 的 phase 包进 `PhaseWrapper(StateMapper(...))`，位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:158` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:162`。
-
-MVP0 要求这个思路覆盖四类边界：
-
-- Agent / SKILL phase。
-- LOGIC phase。
-- SUBGRAPH phase。
-- builtin reference reader subagent。
-
-前三类来自 graph runtime phase。reference reader 不在 `phases/` 目录里，但它同样需要临时 blackboard、输入输出合约和失败边界。
-
-### NEW-1：Builtin reference reader 独立沙盒
-
-reference reader 应该是装配期沙盒，不是父 Agent 的隐式子对话。
-
-当前 `ReaderSandboxState.to_blackboard()` 已经做到不继承父 data、不继承父 messages，位置是 `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:99` 到 `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:105`。
-
-目标语义还要继续补齐：
-
-```text
-Agent references registry
-  -> reader sandbox data
-  -> reader 产出可注入 cognitive template 的摘要
-  -> reader 失败时 WARN
-  -> fallback 截取 reference 原文
-```
-
-这个流程的失败不应该把父 graph runtime state 搞脏。
-
-### NEW-2：child graph 黑板隔离
-
-当前 subagent child graph 的 `child_data` 是父图 data 加显式 input：
-
-```python
-child_data = {**before_data, **input_data}
-```
-
-位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:582` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:584`。
-
-目标语义应该改成：
-
-```text
-resolve target skill
-  -> 读取 target GRAPH.md io.inputs
-  -> 只用 explicit input 过 child input funnel
-  -> child graph 从 canonical child input 启动
-  -> child result 作为 tool result 或 SUBGRAPH phase output 回来
-```
-
-人话：
-
-> 子图可以被调用，但不能默认看见父图整块业务黑板。
-
-## 11. 错误应该停在哪里
+## 9. 错误应该停在哪里
 
 state/io 的错误边界应该尽量靠近原因。
 
@@ -586,7 +489,7 @@ reference reader 失败，应该停在装配期 reader fallback，而不是污�
 - LOGIC action 返回未声明 key：`[F-v3-actions-keys]`，位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:713` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:718`。
 - SKILL phase 没有 chat model：`[F-v3-graph] SKILL phase requires chat_model`，位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:294` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:295`。
 
-## 12. 用一条完整链路串起来
+## 10. 用一条完整链路串起来
 
 假设有一张图：
 
@@ -609,7 +512,7 @@ prepare(LOGIC)
 
 最终 `run_skill()` 看到的是合并后的 `state.data`。
 
-## 13. 当前最容易误解的 6 件事
+## 11. 当前最容易误解的 6 件事
 
 ### 1. `io.inputs` 不是旧版 context_mapping
 
@@ -627,15 +530,15 @@ Agent `finish_task` 成功后写 `data_updates[phase_id]`，不是把所有结�
 
 SUBGRAPH 是 graph 拓扑里的 phase。subagent 是 Agent phase 里的工具调用。SUBGRAPH 的结果直接作为 phase 输出回 graph；subagent 的结果先作为 tool result 回父 LLM。
 
-### 5. 当前 child graph 读隔离还没完全完成
+### 5. child graph 读隔离由显式输入边界决定
 
-SUBGRAPH 至少会受到父 phase `io.inputs` 切片影响；subagent 当前仍会把父图 data 合进 child data。NEW-2 就是为了解这个问题。
+SUBGRAPH 至少会受到父 phase `io.inputs` 切片影响；subagent child graph 的输入边界由工具显式 input 和 target skill root input schema 决定。
 
 ### 6. 当前 reducer 很保守
 
 它不是 deep merge，也不是 last-write-wins。顶层同名 key 直接报 `[F-v3-state-conflict]`。
 
-## 14. 最后的总图
+## 12. 最后的总图
 
 ```text
 run_skill(inputs)
@@ -669,6 +572,6 @@ LangGraph reducer
 最终 state.data
 ```
 
-## 15. 一句话收尾
+## 13. 一句话收尾
 
-`state-and-io-contract` 的核心工作，是把“所有节点共享一块业务黑板”的自由模型，收敛成“每个 phase 只读声明输入、只写声明输出、child graph 不偷看父黑板、reference reader 有独立沙盒”的可审计模型。当前源码已经有 `BlackboardState`、`StateMapper`、`PhaseWrapper` 和 `ReaderSandboxState` 这些骨架；MVP0 要继续补齐的是完整 input funnel、smart reducer、child graph 隔离和 reference reader fallback。
+`state-and-io-contract` 的核心工作，是把“所有节点共享一块业务黑板”的自由模型，表达为“每个 phase 只读声明输入、只写声明输出、child graph 按显式输入边界运行、reference reader 有独立沙盒”的可审计模型。`BlackboardState`、`StateMapper`、`PhaseWrapper` 和 `ReaderSandboxState` 共同构成这套运行时边界。

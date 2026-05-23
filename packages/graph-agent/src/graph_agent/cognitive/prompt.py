@@ -10,6 +10,7 @@ by a phase agent. It merges:
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -143,30 +144,27 @@ def apply_v030_cognitive_template(
         if role_prefix and role_prefix.strip()
         else ""
     )
-    steps_md = (
-        "\n".join(
-            f"- [{item.get('id', '')}] {item.get('name', '')}: {item.get('content', '')}".strip()
-            for item in steps
-        )
-        or "无显式步骤"
-    )
-    protocols_md = (
-        "\n".join(
-            f"- [protocol:{item.get('id', '')}] {item.get('content', '')}".strip()
-            for item in protocols
-        )
-        or "无显式协议"
-    )
-    examples_md = "\n\n".join(inline_examples or []) or "无内联示例"
+    steps_md = _render_steps(steps)
+    protocols_md = _render_protocols(protocols)
+    examples_md = _render_inline_examples(inline_examples or [])
     document_examples_md = (
         "\n".join(
             f"- {item.get('id')}: {item.get('summary', '')}" for item in document_examples or []
         )
         or "无扩展案例"
     )
-    schema_md = ""
+    exit_contract_inline = exit_contract
     if output_schema is not None:
-        schema_md = "\n\n<output_schema>\n" + str(output_schema) + "\n</output_schema>"
+        try:
+            schema_md = json.dumps(output_schema, ensure_ascii=False, indent=2, sort_keys=True)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("[F-v3-cognitive-output-schema-render-failed]") from exc
+        exit_contract_inline = (
+            exit_contract.rstrip()
+            + "\n\noutput_schema:\n```json\n"
+            + schema_md
+            + "\n```"
+        )
 
     return f"""
 <role>
@@ -180,43 +178,78 @@ def apply_v030_cognitive_template(
 </goal>
 
 <thinking_style>
-- 先确认目标、输入、输出契约，再行动
-- 区分事实、推断和待验证假设
-- 每次调用工具前说明目的，调用后检查结果是否满足下一步需要
+- 行动前先做简短策略思考: 目标是什么, 输入是否充分, 输出标准是什么
+- 区分"事实"与"推断", 不要把推断当作事实写入结果
+- 对关键判断给出依据, 不要无依据臆测
+- 先规划后执行: 明确步骤, 再调用工具
+- 思考用于规划; 对外输出必须给出可执行结果, 而不是只描述计划
+- 建议步骤:
+{steps_md}
 </thinking_style>
 
 <knowledge_base>
-{knowledge_base or "无预读取参考资料"}
+【垂直领域知识修正报告】(系统已提前查阅相关资料并提取核心差异):
+{knowledge_base or "无注册 Reference"}
 </knowledge_base>
 
-<steps>
-{steps_md}
-</steps>
-
 <examples>
+以下是供你理解业务思路和处理风格的参考案例. 请注意: 这些案例仅用于辅助理解业务逻辑,
+你的最终输出格式必须严格遵守 <exit_contract> 中的 Schema, 不要照搬案例的结构.
+
+【内联示范】:
 {examples_md}
 
-<document_examples>
+【扩展案例库】:
+系统还注册了以下更多复杂案例. 遇到棘手边界问题时, 你可以调用 `read_example` subagent 工具, 传入对应的 E-id 查阅:
 {document_examples_md}
-</document_examples>
 </examples>
 
 <ambiguity_feedback>
-输入不足、规则冲突或存在多种合理解释时，调用 log_ambiguity 记录决策和原因，然后继续执行。
+当你发现规则不清晰, 输入不足或存在多种合理解释时, 不要静默跳过:
+1. 优先调用 log_ambiguity 记录问题, 类型, 你的决策和理由
+2. 然后继续按"最保守且可解释"的方案执行
 </ambiguity_feedback>
 
 <protocol_citation>
-判断必须引用协议 id；没有对应协议时明确写出“未找到明确协议条款”。
+做判断时必须标注协议依据, 例如: [protocol:P1]. 若无明确协议, 需在自检说明中写明并调用 log_ambiguity.
+
+必须遵守的协议:
 {protocols_md}
 </protocol_citation>
 
 <critical_reminders>
-- finish_task 前必须检查输出是否满足 output_schema
-- 工具结果与预期不一致时，先修正再 finish
-- 最终 business_data_md 必须能转换为声明的结构化输出
+- 调用 finish_task 前, 先检查关键工具返回值是否与预期一致
+- 对每个关键结论都给出规则依据或数据依据
+- 当你不确定规则边界时, 先 log_ambiguity, 再继续执行
+- finish_task 必须提供 diagnostics_md (自检诊断 Markdown) + business_data_md (业务输出 Markdown)
+- business_data_md 会经系统强校验. 如果校验失败, 你会收到错误反馈消息; 按反馈修正后重新调用 finish_task
 </critical_reminders>
 
 <exit_contract>
-{exit_contract}{schema_md}
+{exit_contract_inline}
 </exit_contract>
 """.strip()
+
+
+def _render_steps(steps: list[dict[str, str]]) -> str:
+    if not steps:
+        return ""
+    return "\n".join(
+        f"    - [{item.get('id', '')}] {item.get('name', '')}: {item.get('content', '')}".rstrip()
+        for item in steps
+    )
+
+
+def _render_protocols(protocols: list[dict[str, str]]) -> str:
+    if not protocols:
+        return "无显式协议"
+    return "\n".join(
+        f"[protocol:{item.get('id', '')}]\n{item.get('content', '')}".rstrip()
+        for item in protocols
+    )
+
+
+def _render_inline_examples(inline_examples: list[str]) -> str:
+    if not inline_examples:
+        return "无内联示例"
+    return "\n\n".join(inline_examples)

@@ -325,7 +325,8 @@ def test_v030_agent_runtime_uses_cognitive_template_and_resource_tools(tmp_path:
 
     system_prompt = chat.messages_seen[0][0].content
     assert "<knowledge_base>" in system_prompt
-    assert "<output_schema>" in system_prompt
+    assert "output_schema:" in system_prompt
+    assert system_prompt.rfind("output_schema:") > system_prompt.rfind("<critical_reminders>")
     assert "read_reference" in chat.bound_tool_names
     assert "read_example" in chat.bound_tool_names
     assert result["data"]["main"] == {"answer": "ok"}

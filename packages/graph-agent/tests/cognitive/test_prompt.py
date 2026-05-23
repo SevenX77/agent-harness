@@ -74,10 +74,13 @@ def test_v030_cognitive_template_places_exit_contract_with_output_schema() -> No
     )
 
     assert "<knowledge_base>" in prompt
+    assert "<thinking_style>" in prompt
+    assert "建议步骤" in prompt
     assert "<ambiguity_feedback>" in prompt
     assert "<protocol_citation>" in prompt
     assert "[protocol:P1]" in prompt
     assert "Example A" in prompt
     assert "E2: Long example" in prompt
-    assert "<output_schema>" in prompt
-    assert prompt.rfind("<output_schema>") > prompt.rfind("Return JSON-compatible business data.")
+    assert "output_schema:" in prompt
+    assert prompt.rfind("output_schema:") > prompt.rfind("Return JSON-compatible business data.")
+    assert prompt.rfind("<exit_contract>") > prompt.rfind("<critical_reminders>")

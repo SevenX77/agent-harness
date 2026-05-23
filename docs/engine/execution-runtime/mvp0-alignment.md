@@ -1,228 +1,318 @@
-# execution-runtime (engine) — MVP0 Alignment (下一步对齐逻辑)
+# execution-runtime (engine) — MVP0 Alignment (V0.3.0 graph_skill)
 
-> **Status**: Filled by a1 (Codex) based on a2 framework, 2026-05-20
-> **Scope**: Graph 执行装配调度、主入口生命周期 run_skill、节点重试、subagent / call_subgraph 动态工具注入 (audit A4/A5)
-> **配套**: 见 [INDEX.md](../../INDEX.md) 5 维模板 + cross-link 规则 + writing conventions。
+> **Status**: Rewritten by a1 (Codex) for V0.3.0 graph_skill, 2026-05-23
+> **Scope**: Graph runtime 装配、ModelResolver / SkillResolver DI、Agent cognitive template 渲染、builtin reference reader / tools、LOGIC ActionRegistry、SUBGRAPH / subagent 隔离调用、运行期错误归一化。
+> **配套**: 见 [skill-spec README](../skill-spec/README.md), [skill-compilation alignment](../skill-compilation/mvp0-alignment.md), [state-and-io-contract alignment](../state-and-io-contract/mvp0-alignment.md)。
+
+## V0.3.0 改造摘要
+
+本文件从 V2.1 runtime 对齐计划改写为 V0.3.0 graph_skill runtime / assembly 计划。以下旧段落被推翻:
+
+| 旧语义 | V0.3.0 新语义 | 决议来源 |
+|---|---|---|
+| `ExitContractRegistry` 每轮 inject / strip | `exit_contract` 在 cognitive template 末尾 inline, 内嵌 `output_schema` | [Cognitive Template](../skill-spec/06-cognitive-template-spec.md#7-大插槽布局拓扑) |
+| 轻量单节点 subagent | subagent / subgraph 统一通过 `SkillResolverProtocol.resolve_skill()` 寻址完整 graph skill | [Skill Resolver DI](../skill-spec/10-skill-resolver-protocol-spec.md#依赖注入-di-边界) |
+| `call_subgraph(child_graph_path)` | `target_skill` registry id + resolver DI + IO 1:1 校验 | [SUBGRAPH target_skill](../skill-spec/04-subgraph-md-spec.md#target_skill-寻址规则) |
+| document example / reference 混入普通 prompt 文本 | reference reader 装配期预读, examples inline/document 双模式 | [Resource Mechanisms](../skill-spec/08-resource-mechanisms-spec.md#reference-三机制生命周期) |
+| LOGIC action 多路径加载 | Skill Global `<skill_root>/actions/<name>.py` 一级寻址 | [LOGIC Actions](../skill-spec/03-logic-md-spec.md#actions-1-级寻址与执行契约) |
+| `[F-v21-*]` runtime 错误 | `[F-v3-*]` 错误码 + trace payload | [Error Code Spec](../skill-spec/11-error-code-spec.md#错误码速查全表) |
+
+Runtime 不重新解析 Markdown 字段。Markdown / YAML / XML 的强校验属于 skill-compilation; execution-runtime 消费已编译的 AST、resolver、tool registry 和 cognitive prompt 装配结果。
 
 ## UI/UX
 
 N/A — 此模块为纯 backend Python library, 无 UI / 无前端调用面。
 
-Execution runtime 是“真正把编译好的 skill 跑起来”的引擎层。PM 在 Studio 里看到的 Run 按钮、Trace 流和 History 结果，都不是这里直接渲染的 UI；它们只是消费 runtime 产生的结果、错误和事件。当前 V2.1 主线在 `_run_v21_skill_dict()` 里执行 `compile_skill -> assemble_graph -> graph.invoke`，见 `packages/graph-agent/src/graph_agent/core/runner.py:451` 到 `packages/graph-agent/src/graph_agent/core/runner.py:486`。
-
-MVP0 runtime 的用户价值是：点击运行后，真实 LLM 能被自动解析并注入，子图不会偷读父图黑板，ReAct 消息不会无限堆积，错误能以可展示的 code 返回，而不是裸 Python RuntimeError。
+Studio Run 按钮、Trace 面板和 History 只消费 runtime 返回值与 trace event。Runtime 的职责是执行已编译 graph, 在可预期失败时返回结构化 `[F-v3-*]` 错误, 并保证子图 / 子 Agent / tool 调用不越过状态隔离边界。
 
 ## 前端逻辑
 
-N/A — 此模块为纯 backend Python library, 无 UI / 无前端调用面。
+N/A — 此模块为纯 backend Python library, 无 React 逻辑。
 
-React 不调用 `assemble_graph()`，也不理解 LangGraph reducer。前端最多通过 Studio 后端启动 run，再订阅事件。Runtime 与前端的边界应该是结构化结果和 trace event，而不是共享内部 Python state。V2.1 当前还会丢弃 callbacks，代码在 `packages/graph-agent/src/graph_agent/core/runner.py:462`，所以 MVP0 需要把 observability 接线放回 runtime，但不是让前端介入执行。
+前端相关要求通过结构化事件体现: subgraph 未注册对应 `[F-v3-skill-not-registered]`, reference reader 降级对应 WARN trace, ambiguity feedback 通过 `log_ambiguity` 事件进入 TracePanel。前端如何渲染不在本文件范围。
 
 ## 后端功能
 
-### 1. V2.1 真实 LLM 路径模型装载接通 (P0-1 修复)
+### 1. ModelResolverProtocol 真实 LLM 注入 (P0-1 保留)
 
-MVP0 SHOULD 让 `run_skill()` 在没有 mock 的情况下也能跑真实 SKILL phase。当前 `_run_v21_skill_dict()` 只在传入 `mock_llm` 时给 `chat_model` 赋值，否则就是 None，见 `packages/graph-agent/src/graph_agent/core/runner.py:467` 到 `packages/graph-agent/src/graph_agent/core/runner.py:469`。SKILL node 一旦发现 `chat_model is None`，直接抛 `RuntimeError("[F-v21-graph] SKILL phase requires chat_model")`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:229` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:234`。
+MVP0 MUST 继续补齐真实 LLM 注入路径。Agent phase 的 `llm_role` 由编译期校验存在, runtime 负责把 role 解析成 LangChain `BaseChatModel`。
 
-这里的 ModelResolver 是“把角色名解析成真实 LangChain 模型”的工厂。例子：phase frontmatter 写 `llm_role: analyst`，resolver 查 Studio 的 roles/provider 配置，得到 Anthropic/OpenAI/Gemini 等具体模型实例，然后交给 `assemble_graph()`。当前 `assemble_graph(compiled, chat_model=...)` 已经有注入参数，签名在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:55` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:60`，MVP0 不需要改 LangGraph 装配入口，只需要在 runner 主线补上解析路径。
+| 字段 / 参数 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `llm_role` | string | Agent phase 必填或继承 graph | graph `llm_role`, 再无为 `analyst` | 必须存在于 roles registry | `[F-v3-agent-llm-role-unknown]` | 选择模型路由 |
+| `model_resolver` | ModelResolverProtocol | 运行 Agent 时必填 | 无 | 必须实现 `resolve_model(role) -> BaseChatModel` | `[F-v3-runtime-phase-failed]` | 从配置生成真实模型 |
+| `mock_llm` | BaseChatModel | 否 | `None` | 仅测试入口; 优先级高于 resolver | — | 单测 / sandbox 注入 |
+| resolved model | BaseChatModel | 是 | 无 | 必须可被 LangGraph / LangChain 调用 | `[F-v3-runtime-phase-failed]` | Agent ReAct 执行 |
 
-MVP0 WILL 把“缺模型”从裸 RuntimeError 升级成结构化错误，例如 `F-v21-model-not-found`。这样 Studio 可以告诉用户“没有配置 copilot/default 模型”而不是“SKILL phase requires chat_model”。
+ModelResolver 与 SkillResolver 都是 DI 边界: Engine 定义协议, Studio / CLI / 测试环境提供实现。模型解析失败不应再抛裸 `RuntimeError`, 应包装为 GraphAgent runtime error 并写入 trace。
 
-### 2. Child flow subagent_depth 状态透传与下发 (P1-2 修复)
+### 1.5 SkillResolverProtocol DI 注入边界 (C10, NEW-D)
 
-MVP0 SHOULD 把 subagent depth 写入 child state 的 `flow`，而不是只写进 RunnableConfig metadata。当前 `_subagent_runnable_config()` 把 `"subagent_depth": depth + 1` 放在 metadata，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:482` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:505`；但 `_invoke_subagent_once_t23()` 启动子图时，`"flow"` 仍然是 `parent_state.get("flow", {})`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:400` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:405`。
-
-这会让深度限制变成“看起来写了，子图实际没读到”。MVP0 WILL 在进入 child graph 前深拷贝 parent flow，显式写入 `subagent_depth = current_depth + 1`，再传给子图。深拷贝很重要，因为 flow 是 dict；如果直接复用父对象，子图修改 `flow["subagent_validation_retries"]` 这类控制字段时会污染父图。
+MVP0 MUST 在 runtime / assembly 主入口注入 `SkillResolverProtocol`, 与 Q9 ModelResolverProtocol 同款单方法 DI。它只允许:
 
 ```python
-import copy
-from graph_agent.core.subagents import current_subagent_depth
-
-# 深拷贝父级 flow 防止双向污染，确保完全隔离
-child_flow = copy.deepcopy(parent_state.get("flow", {}))
-# 读取旧深度并累加计算当前新层次
-current_depth = current_subagent_depth(parent_state.get("flow", {}))
-child_flow["subagent_depth"] = current_depth + 1
-
-# 后续把带有正确累加层级的 child_flow 构建成初始态送入隔离的子图调用中
-child_state = {
-    "data": explicit_inputs,
-    "flow": child_flow, 
-    "messages": []
-}
+def resolve_skill(skill_id: str) -> Path: ...
 ```
 
-这段伪代码同时服务 A6：child data 不应该是 `{**before_data, **input_data}`。当前正是这样合并父图全量 data 与显式输入，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:398` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:403`。
+| 参数 / 返回 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `skill_resolver` | SkillResolverProtocol | 含 SUBGRAPH / subagent / Agent `subgraphs` 时必填 | 无 | 必须只有 `resolve_skill(skill_id) -> Path` 语义 | `[F-v3-resolver-missing]` / `[F-v3-resolver-interface-invalid]` | 子 skill registry 寻址 |
+| `skill_id` | string | 是 | 无 | `^[a-z][a-z0-9_-]*$` | `[F-v3-resolver-skill-id-invalid]` | registry key |
+| return `Path` | Path | 是 | 无 | 路径存在、是目录、含 `GRAPH.md` | `[F-v3-skill-not-registered]` / `[F-v3-resolver-path-invalid]` | 子 graph skill root |
 
-### 3. Exit_contract 历史堆积净化去重 (P1-3 修复)
+实现差异:
 
-MVP0 SHOULD 让 exit contract 只在发给模型时临时出现，不进入长期 `messages` 历史。当前每轮 ReAct 都先 `inject_exit_contract(messages, phase_ast.exit_contract)`，再把 `prompt_messages` 和模型 response 一起保存为下一轮 messages，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:243` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:247`。如果模型跑多轮，exit contract 会重复堆积。
+| 环境 | Resolver 实现 | 行为 |
+|---|---|---|
+| Studio sandbox | `StudioSkillResolver` 查本地 skill registry; 未注册时把 `[F-v3-skill-not-registered]` 传给前端 | Assets Panel 标红并触发导入 |
+| 生产 Registry 模式 | 后端服务或部署配置查只读 registry | 未注册直接 FATAL, 不弹本地文件选择 |
+| 单测 | InMemorySkillResolver / fixture resolver | 用临时目录映射 skill id |
 
-PM 版例子：exit contract 是“回答必须调用 finish_task 并输出 JSON”的规则。它应该像临时贴纸一样贴在本次请求上，而不是每轮都复印一份塞进聊天历史。MVP0 WILL 用 `ExitContractRegistry` 标记临时消息，并在写回 `BlackboardState.messages` 前 strip 掉。`messages` 当前使用 LangGraph `add_messages` reducer，定义在 `packages/graph-agent/src/graph_agent/runtime/state.py:40`；这意味着只要污染进入 state，后续就会一直追加扩散。
+Runtime 不允许回退到 `_resolve_subagent_root` 或相对路径扫描。规范终点见 [SkillResolverProtocol DI 边界](../skill-spec/10-skill-resolver-protocol-spec.md#依赖注入-di-边界)。
 
-### 4. Subagent 抽象层级轻量单节点化 (A4 改造)
+### 2. Child flow subagent_depth 状态透传与下发
 
-MVP0 SHOULD 允许轻量 subagent，不再强制每个 subagent 都是完整 V2.1 graph root。当前编译期 `_resolve_subagent_root()` 要求 subagent path 是目录且有 `GRAPH.md`，见 `packages/graph-agent/src/graph_agent/core/loader.py:447` 到 `packages/graph-agent/src/graph_agent/core/loader.py:483`。runtime 又会对每个 subagent 再 `compile_skill()` 和 `assemble_graph()`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:374` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:389`。
+MVP0 MUST 把影响执行逻辑的深度状态写入 child `BlackboardState.flow`, 不只放在 `RunnableConfig.metadata`。
 
-轻量单节点 subagent 的目标是：业务作者只写一个 prompt 或一个 `SKILL.md` 类文档，也能被父 SKILL phase 当工具调用。MVP0 WILL 在 compiler 侧识别轻量子代理，并在 runtime 侧包装成一个简单工具节点或虚拟单节点 graph。这样 A4 不会破坏现有完整 graph subagent，同时给“小任务委派”更低门槛。
+| 字段 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `flow.subagent_depth` | integer | 子调用时必填 | parent depth + 1 | `>= 0`; 超限制时中断 | `[F-v3-runtime-phase-failed]` | 防止无限递归 |
+| `child.flow` | dict | 是 | `{}` | 必须 deep copy parent flow 后写入 depth | `[F-v3-runtime-state-mapping-failed]` | 避免父子 flow 双向污染 |
+| `child.data` | dict | 是 | 无 | 只来自显式 `io.inputs` 映射, 不继承父图全量 data | `[F-v3-runtime-state-mapping-failed]` | 黑板隔离 |
+| `child.messages` | list | 是 | `[]` | 子图 / 子 Agent 从空消息历史开始 | — | 防止跨 Agent prompt 污染 |
 
-### 5. Call_subgraph 大流程动态工具暴露 (A5 改造)
+这条规则同时约束 subagent、SUBGRAPH phase 和 Agent runtime 主动调用的 subgraph-like 能力。状态隔离细节与 [state-and-io-contract](../state-and-io-contract/mvp0-alignment.md#后端功能) 对齐。
 
-MVP0 SHOULD 新增 `call_subgraph` 工具，让 LLM 在 SKILL phase 中主动调用一个完整 graph skill。它和当前 `SUBGRAPH` phase 不同：`SUBGRAPH` 是固定拓扑节点，执行到那里自动跑；`call_subgraph` 是 LLM 决策时的工具调用，模型可以按任务需要选择是否调用。
+### 3. ExitContractRegistry 退役与 exit_contract inline (C9)
 
-当前 `_build_skill_node()` 收集业务 tools、subagent tools、framework tools 和 `finish_task`，代码在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:184` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:227`。subagent tool map 只来自 `compiled.subagents_by_phase`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:301` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:308`。没有 subgraph registry，也没有 `call_subgraph` 工具族。
+MVP0 MUST 删除 `ExitContractRegistry` 的 per-turn inject / strip 设计。`exit_contract` 不再作为临时消息反复塞进 ReAct 历史, 而是在 Agent system prompt 装配时 inline 到 cognitive template 末尾, 并内嵌 `io.outputs` schema。
 
-MVP0 WILL 把 call_subgraph 设计成显式输入沙盒：LLM 必须传 `child_graph_path` 和 `explicit_inputs`，父图 `data` 不会隐式继承。这个约束与 [state-and-io-contract 的 A6 黑板隔离](../state-and-io-contract/mvp0-alignment.md#cross-state-blackboard-isolation) 是同一个安全边界。
+| 旧组件 / 字段 | V0.3.0 状态 | 替代物 | 校验规则 | 错误码 | 业务作用 |
+|---|---|---|---|---|---|
+| `ExitContractRegistry` | 退役 | `{skill_exit_contract_inline}` | runtime 不再 inject/strip messages | — | 避免历史堆积 |
+| `phase_ast.exit_contract` | 保留为 Agent AST 字段 | template 末尾完整 block | 必须来自 `<exit_contract>` 且非空 | `[F-v3-agent-exit-contract-missing]` | 最终输出规则 |
+| `output_schema` 独立插槽 | 退役 | 追加到 exit_contract 末尾 | 序列化失败 FATAL | `[F-v3-cognitive-output-schema-render-failed]` | recency bias |
+| ReAct `messages` | 不存 exit contract 临时副本 | 只保存真实对话 / tool 消息 | 不允许重复注入 contract | `[F-v3-runtime-phase-failed]` | 控制上下文体积 |
 
-### 6. 执行器的异常捕获与容错包裹
+这样做的原因是输出契约属于 Agent prompt 的固定系统约束, 不是每轮 runtime 临时补丁。规范终点见 [Cognitive Template 7 大插槽](../skill-spec/06-cognitive-template-spec.md#7-大插槽布局拓扑) 与 [Agent Body XML](../skill-spec/05-agent-md-spec.md#body-xml-扁平化容器)。
 
-MVP0 SHOULD 把运行期异常归一化。当前 `run_skill()` 成功时会包装 `WorkflowResult`，异常分支只捕获 `GraphAgentError`，见 `packages/graph-agent/src/graph_agent/core/runner.py:195` 到 `packages/graph-agent/src/graph_agent/core/runner.py:224`。但 P0-1 的无模型错误是裸 `RuntimeError`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:233` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:234`。
+### 4. Subagent 全局寻址与轻量单节点抽象退役 (C11)
 
-MVP0 WILL 让 runtime node 抛出的可预期错误使用统一 code，例如 `MODEL_NOT_FOUND`、`DEPTH_LIMIT_REACHED`、`INVALID_TOOL_ARGS`。未知异常也应被包进 `GraphAgentFatalError`，并交给 tracing 发出 `EXCEPTION` 事件。这样 Studio 不需要按 Python 异常类猜测用户提示。
+MVP0 MUST 取消“轻量单节点 subagent”分支。Agent `subagents:` registry 中的每个 `target_skill` 都表示一个完整 graph skill, 由 `SkillResolverProtocol` 解析。
+
+| 字段 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `subagents[].name` | string | 是 | 无 | Agent frontmatter 内唯一 | `[F-v3-agent-subagent-invalid]` | `@subagent:NAME` 和动态 tool 名 |
+| `subagents[].target_skill` | string | 是 | 无 | resolver 可解析 | `[F-v3-skill-not-registered]` | 子 Agent graph skill |
+| `subagents[].description` | string | 是 | 无 | 非空 | `[F-v3-agent-subagent-invalid]` | LLM tool 描述 |
+| child input schema | JSON Schema object | 是 | 无 | 来自 child `GRAPH.md io.inputs` | `[F-v3-graph-io-schema-invalid]` | 动态 tool 参数 schema |
+
+Runtime 注入的 subagent tool 名可以继续是 `call_subagent_<name>`, 但 tool 内部只能按 `target_skill` 调 resolver, 编译子 skill, 再用显式输入启动隔离 child graph。
+
+### 5. SUBGRAPH target_skill 运行期调用与 IO 强映射 (C12)
+
+V0.3.0 的 SUBGRAPH 是物理 phase 节点: `phases/<id>/SUBGRAPH.md`, frontmatter 声明 `target_skill` 和 `io`。Runtime 不接收 `child_graph_path` 参数, 只消费编译期已 resolve / 已校验的 target metadata。
+
+| 字段 / 输入 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `target_skill` | string | 是 | 无 | 编译 / 装配期已通过 resolver | `[F-v3-skill-not-registered]` | 目标子图 |
+| parent `io.inputs` | JSON Schema object | 是 | 无 | 与 child root `io.inputs` 字段 1:1 | `[F-v3-subgraph-io-mismatch]` | 子图入参映射 |
+| parent `io.outputs` | JSON Schema object | 是 | 无 | 与 child root `io.outputs` 字段 1:1 | `[F-v3-subgraph-io-mismatch]` | 子图返回映射 |
+| `phase_input` | dict | 是 | 无 | 只含 parent `io.inputs` 字段 | `[F-v3-runtime-state-mapping-failed]` | 运行期隔离输入 |
+| `child_output` | dict | 是 | 无 | 必须满足 parent `io.outputs` | `[F-v3-runtime-state-mapping-failed]` | 回写父图黑板 |
+
+SUBGRAPH 节点像函数调用: 父图按声明传参, 子图按根 IO 接收, 返回值再按父 phase outputs 回写。规范终点见 [SUBGRAPH target_skill 寻址](../skill-spec/04-subgraph-md-spec.md#target_skill-寻址规则) 与 [IO 严格映射](../skill-spec/04-subgraph-md-spec.md#io-严格-11-映射校验-strict-mapping)。
+
+### 6. 执行器异常捕获与 V0.3.0 错误码归一 (C13)
+
+MVP0 MUST 把运行期可预期失败归一到 `[F-v3-*]`。本文件新增关注以下 runtime / assembly 错误:
+
+| 错误码 | 阶段 | 触发条件 | 处理 | Spec |
+|---|---|---|---|---|
+| `[F-v3-skill-not-registered]` | 装配期 / 运行期 | resolver 查不到 `target_skill` | FATAL; Studio 可标红导入 | [Error Code Spec](../skill-spec/11-error-code-spec.md#错误码速查全表) |
+| `[F-v3-reference-reader-failed]` | 装配期 | builtin reference reader 超时、异常或输出非法 | WARN; fallback 原文摘录继续装配 | [Error Code Spec](../skill-spec/11-error-code-spec.md#错误码速查全表) |
+| `[F-v3-cognitive-output-schema-render-failed]` | 装配期 | `io.outputs` 无法 inline 到 exit_contract | FATAL | [Error Code Spec](../skill-spec/11-error-code-spec.md#错误码速查全表) |
+| `[F-v3-runtime-state-mapping-failed]` | 运行期 | StateMapper 切片 / 回写失败 | FATAL; 不回写脏数据 | [Error Code Spec](../skill-spec/11-error-code-spec.md#错误码速查全表) |
+| `[F-v3-runtime-phase-failed]` | 运行期 | phase 执行异常且无法归入更细错误 | FATAL; trace 原始异常 | [Error Code Spec](../skill-spec/11-error-code-spec.md#错误码速查全表) |
+| `[F-v3-tool-argument-invalid]` | 运行期 | builtin tool 参数非法 | tool error message 返回 Agent 或 FATAL | [Error Code Spec](../skill-spec/11-error-code-spec.md#错误码速查全表) |
+
+未知 Python 异常仍可保留原始 traceback 到 trace debug payload, 但对外 code 必须是 `[F-v3-runtime-phase-failed]`。
+
+### 7. Builtin Reference Reader Subagent 装配期调用 (NEW-A)
+
+MVP0 MUST 在 Agent cognitive template 渲染前主动调用 builtin reference reader subagent。它读取 Agent frontmatter `references` 注册表, 输出 Markdown 注入 `{reference_reader_subagent_output_markdown}`。
+
+| 输入 / 输出 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `skill_id` | string | 是 | 无 | 当前 graph skill id | `[F-v3-reference-reader-input-invalid]` | trace 定位 |
+| `phase_id` | string | 是 | 无 | 当前 Agent phase id | `[F-v3-reference-reader-input-invalid]` | trace 定位 |
+| `references` | list[ReferenceSpec] | 是 | `[]` | 每项 id/path/summary 已编译期校验 | `[F-v3-resource-reference-invalid]` | reader 输入资料 |
+| `markdown` | string | 是 | fallback markdown | reader 输出非空 | `[F-v3-reference-reader-output-invalid]` / `[F-v3-reference-reader-failed]` | knowledge_base 内容 |
+| `warnings` | list[string] | 否 | `[]` | WARN trace | `[F-v3-reference-reader-failed]` | 降级说明 |
+
+失败策略:
+
+1. reader 超时 / 抛异常 / 输出非法: 发 WARN `[F-v3-reference-reader-failed]`。
+2. Runtime 截取每份 reference 原文前 3000 token, 生成 fallback markdown。
+3. fallback 填入 `<knowledge_base>` 插槽, Agent run 不阻塞。
+
+规范终点见 [Builtin Reference Reader Subagent 签名](../skill-spec/09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名) 与 [Reference 三机制生命周期](../skill-spec/08-resource-mechanisms-spec.md#reference-三机制生命周期)。
+
+### 8. Builtin Tools 运行期注入 (NEW-B)
+
+MVP0 MUST 给每个 Agent runtime 注入 `read_reference` 与 `read_example` builtin tools。即使 frontmatter `tools:` 未列这两个名字, Agent 也可以按 cognitive template 提示主动调用。
+
+| Tool | 参数 | 类型 | 必填 | 默认值 | 校验失败错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `read_reference` | `reference_id` | string | 是 | 无 | `[F-v3-resource-reference-not-found]` | 读取注册 reference |
+| `read_reference` | `query` | string | 否 | `""` | — | 指定查阅问题 |
+| `read_reference` | `mode` | enum | 否 | `excerpt` | `[F-v3-tool-argument-invalid]` | 控制 excerpt / full |
+| `read_example` | `example_id` | string | 是 | 无 | `[F-v3-resource-example-not-found]` | 读取 inline 或 document example |
+| `read_example` | `query` | string | 否 | `""` | — | 指定对照问题 |
+
+Builtin tools 的权限域只能看到当前 Agent phase 注册的 `references` / `examples`, 不能跨 phase 或跨 skill 读取未注册资源。实现位置与签名见 [按需调取 Tools](../skill-spec/09-builtin-modules-spec.md#按需调取-tools-read_reference--read_example)。
+
+### 9. Cognitive Template 7 插槽装配 (NEW-C)
+
+Execution-runtime 的装配层 MUST 消费 `AgentNodeAST` 和资源预处理结果, 渲染最终 Agent system prompt。插槽如下:
+
+| 插槽 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `{skill_role}` | string | 是 | 无 | 来自 Agent AST role | `[F-v3-agent-role-missing]` | 身份 |
+| `{skill_goal}` | string | 是 | 无 | 来自 Agent AST goal | `[F-v3-agent-goal-missing]` | 目标 |
+| `{skill_steps_splat}` | markdown | 否 | `""` | 来自 steps AST | `[F-v3-agent-step-invalid]` | 行动步骤 |
+| `{skill_protocols_splat}` | markdown | 否 | `"无显式协议"` | 来自 protocols AST | `[F-v3-agent-protocol-invalid]` | 协议依据 |
+| `{reference_reader_subagent_output_markdown}` | markdown | 否 | fallback markdown | NEW-A 输出 | `[F-v3-reference-reader-failed]` WARN | 领域知识 |
+| `{inline_examples_splat}` | markdown | 否 | `"无内联示例"` | inline examples content | `[F-v3-resource-example-invalid]` | 短案例 |
+| `{document_examples_registry}` | markdown list | 否 | `"无扩展案例"` | document examples id + summary | `[F-v3-resource-example-invalid]` | 长案例目录 |
+| `{skill_exit_contract_inline}` | XML + schema | 是 | 无 | `<exit_contract>` + `io.outputs` schema | `[F-v3-cognitive-output-schema-render-failed]` | 输出契约末尾 recency bias |
+
+渲染完成后, Agent ReAct 循环只接收一个稳定 system prompt, 不再在每轮 message history 动态注入 exit contract。规范终点见 [Cognitive Template 7 大插槽](../skill-spec/06-cognitive-template-spec.md#7-大插槽布局拓扑)。
+
+### 10. LOGIC Actions 运行时一级寻址 ActionRegistry (C14)
+
+MVP0 MUST 在运行期继续执行编译期已校验的一级 action 寻址, 并通过 ActionRegistry 固定作用域。
+
+| 字段 / 对象 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `ActionRegistry.skill_root` | Path | 是 | 无 | 当前 graph skill root | `[F-v3-logic-action-dir-missing]` | action 寻址根 |
+| `actions_dir` | Path | actions 非空时必填 | `<skill_root>/actions` | 不允许跨 skill | `[F-v3-logic-action-dir-missing]` | skill-global action 目录 |
+| `action_name` | string | 是 | 无 | `^[a-z][a-z0-9_]*$` | `[F-v3-logic-action-name-invalid]` | action key |
+| `action_path` | Path | 是 | 无 | 必须等于 `<skill_root>/actions/<name>.py` | `[F-v3-logic-action-not-found]` | action 文件 |
+| `run` | callable | 是 | 无 | 返回 dict | `[F-v3-logic-action-entrypoint-missing]` / `[F-v3-logic-action-return-invalid]` | runtime 执行入口 |
+
+Sandbox 模式必须禁止跨 skill action 引用: action 名不能包含 `/`, `.`, `..`, Python module path 或绝对路径。规范终点见 [LOGIC Actions 1 级寻址](../skill-spec/03-logic-md-spec.md#actions-1-级寻址与执行契约)。
 
 ## API
 
-以下是配合上述 MVP0 功能变更需要全新定义或者调整的重要接口签名与结构体。它们是联结不同层次能力的骨干，不仅是供内部调用，也是未来接入 CLI 等外界形态的保障。
-
-### 1. ModelResolver 接口声明
-用于接管 `run_skill` 中空缺的大模型注入能力（解决 P0-1），它在 `packages/graph-agent/src/graph_agent/core/models.py` 的预计详细形态如下：
+### 1. ModelResolverProtocol 接口声明
 
 ```python
-from typing import Any
-from pydantic import BaseModel
-from langchain_core.language_models.chat_models import BaseChatModel
-
-class ModelInfo(BaseModel):
-    provider: str
-    model_name: str
-    roles: list[str]
-
-class ModelResolver:
-    def __init__(self, llm_routing: dict[str, Any]) -> None:
-        """Initialize resolver with Studio's LLM roles configuration.
-        
-        Args:
-            llm_routing: System-level configuration binding roles to models,
-                         typically sourced from `llm_roles.yaml` configuration.
-        """
-        self.routing = llm_routing
-
-    def resolve(self, role_or_provider: str) -> BaseChatModel:
-        """Resolve a specific role (e.g. 'default', 'critic') to a LangChain model.
-        
-        This factory instantiates the precise vendor implementation (OpenAI, 
-        Anthropic, Gemini, etc.) based on the mapped configuration.
-        
-        Args:
-            role_or_provider: String identifier usually from node frontmatter.
-            
-        Returns:
-            A bound BaseChatModel ready to be injected into SKILL nodes.
-            
-        Raises:
-            ModelResolutionError: If the specified role is unmapped.
-        """
-        pass
-        
-    def list_available(self) -> list[ModelInfo]:
-        """Return list of models available in the configured routing."""
-        pass
+class ModelResolverProtocol(Protocol):
+    def resolve_model(self, llm_role: str) -> BaseChatModel:
+        ...
 ```
 
-MVP0 SHOULD 在 `_run_v21_skill_dict()` 中使用 resolver，而不是要求调用方手动传 `mock_llm`。`mock_llm` 仍可保留为测试覆盖入口。
+| 参数 / 返回 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `llm_role` | string | 是 | 无 | 必须是编译期已通过的 role | `[F-v3-agent-llm-role-unknown]` | 模型路由 key |
+| return | BaseChatModel | 是 | 无 | 可被 LangChain 调用 | `[F-v3-runtime-phase-failed]` | Agent LLM |
 
-### 2. call_subgraph 工具封装完整签名
-对应 A5 阶段中 LLM 对外界发起复杂编排的请求入口。它的 Python 端调用承载将是这个函数：
+### 1.5 SkillResolverProtocol DI 注入边界
 
 ```python
-from pathlib import Path
-from typing import Any
-from langchain_core.language_models.chat_models import BaseChatModel
-
-def call_subgraph(
-    child_graph_path: Path,
-    explicit_inputs: dict[str, Any],
-    chat_model: BaseChatModel | None = None,
-) -> dict[str, Any]:
-    """Execute child graph in a strictly isolated blackboard sandbox.
-
-    This executor bridges the gap between an LLM's tool call desire and
-    the complex multi-step execution engine. It compiles and invokes the
-    target graph dynamically without leaking state.
-
-    Args:
-        child_graph_path: Absolute V2.1 skill root directory of child graph.
-        explicit_inputs: The exact dictionary mapping to `io/inputs.json`.
-            Parent blackboard is NOT implicitly inherited under any condition.
-        chat_model: Optional override for child's LLM routing. Defaults to 
-            inheriting the parent's default model resolver setup.
-
-    Returns:
-        Final child blackboard ``data`` dict, namespaced by phase outputs,
-        ready to be digested back as a tool execution result.
-
-    Raises:
-        SubgraphIsolationError: If child tries to read parent-only keys or write out of bounds.
-        CompileIssue: If the requested child graph is structurally invalid.
-    """
-    pass
+class SkillResolverProtocol(Protocol):
+    def resolve_skill(self, skill_id: str) -> Path:
+        ...
 ```
 
-### 3. ExitContractRegistry 去重服务
-用于解决 P1-3 的临时存储机制封装，用于拦截并剥离临时状态的公共注册机：
+该接口由 Engine 定义, Studio / production registry / tests 注入实现。字段表见 [后端功能 §1.5](#15-skillresolverprotocol-di-注入边界-c10-new-d), 规范终点见 [SkillResolverProtocol Interface](../skill-spec/10-skill-resolver-protocol-spec.md#protocol-interface-定义)。
+
+### 2. run_skill V0.3.0 入口参数
 
 ```python
-from typing import Any
-
-class ExitContractRegistry:
-    """Manages injection and stripping of temporary system messages."""
-    
-    def inject(self, messages: list[Any], contract: str) -> list[Any]:
-        """Inject the exit contract as a temporary message into the flow.
-        
-        Returns a new message list containing the temporary contract, ready
-        to be sent to the LLM. The original list is unmodified.
-        """
-        pass
-        
-    def strip(self, messages: list[Any]) -> list[Any]:
-        """Strip marked temporary messages from the history payload.
-        
-        Iterates over the current stack and removes any element identified
-        as a volatile exit contract marker, preserving context size.
-        This must be called before state is written back to the LangGraph reducer.
-        """
-        pass
+def run_skill(
+    root: Path,
+    inputs: dict[str, Any],
+    *,
+    model_resolver: ModelResolverProtocol,
+    skill_resolver: SkillResolverProtocol,
+    callbacks: list[Any] | None = None,
+    mock_llm: BaseChatModel | None = None,
+    cache: bool = True,
+) -> WorkflowResult:
+    ...
 ```
+
+| 参数 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `root` | Path | 是 | 无 | graph skill root | `[F-v3-graph-root-missing]` | 主图入口 |
+| `inputs` | dict | 是 | 无 | 满足 `GRAPH.md io.inputs` | `[F-v3-runtime-state-mapping-failed]` | 初始黑板 |
+| `model_resolver` | Protocol | Agent 图必填 | 无 | 实现 `resolve_model` | `[F-v3-runtime-phase-failed]` | LLM 注入 |
+| `skill_resolver` | Protocol | 是 | 无 | 实现 `resolve_skill` | `[F-v3-resolver-missing]` | 子 skill 寻址 |
+| `callbacks` | list | 否 | `[]` | trace callback | — | observability |
+| `mock_llm` | BaseChatModel | 否 | `None` | test only | — | 测试覆盖 |
+| `cache` | bool | 否 | `True` | 编译缓存开关 | — | 性能优化 |
+
+### 3. ExitContractRegistry 删除说明
+
+不再提供 `ExitContractRegistry.inject()` / `strip()` API。runtime 若仍需要兼容旧调用, 应在 V0.3.0 cutover 中直接删除旧路径或让旧 API 抛清晰迁移错误, 不能继续写入 message history。
+
+### 4. Builtin tool 注册 API
+
+```python
+def build_builtin_runtime_tools(agent_ast: AgentNodeAST) -> list[BaseTool]:
+    """Return read_reference/read_example plus framework tools for one Agent phase."""
+```
+
+| 输入 / 输出 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `agent_ast.references` | list[ReferenceSpec] | 否 | `[]` | 编译期已校验 | `[F-v3-resource-reference-invalid]` | `read_reference` 闭包 registry |
+| `agent_ast.examples` | list[ExampleSpec] | 否 | `[]` | 编译期已校验 | `[F-v3-resource-example-invalid]` | `read_example` 闭包 registry |
+| return | list[BaseTool] | 是 | 无 | 包含 builtin tools | `[F-v3-tool-argument-invalid]` | Agent tool 域 |
 
 ## Data Model / State
 
-Runtime state 仍以 `BlackboardState` 为主，当前字段是 `data`、`flow`、`messages`、`run_id`，定义在 `packages/graph-agent/src/graph_agent/runtime/state.py:35` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:41`。MVP0 不应把所有控制信息都塞进 RunnableConfig metadata；真正影响执行逻辑的内容必须进入 state，特别是 `subagent_depth`。
+### 1. BlackboardState 隔离模型
 
-子图调用的 state WILL 变成隔离对象：`data` 只来自 explicit inputs，`flow` 是父 flow 的深拷贝加深度字段，`messages` 从空列表开始。当前 SUBGRAPH 固定节点也仍然用父图全量 data 启动子图，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:155` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:164`；MVP0 SHOULD 与 state-and-io-contract 一起收敛这个行为。
+| 字段 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `data` | dict | 是 | `{}` | phase 只能看到 StateMapper 切片 | `[F-v3-runtime-state-mapping-failed]` | 业务数据黑板 |
+| `flow` | dict | 是 | `{}` | 控制字段 deep copy 下发 | `[F-v3-runtime-state-mapping-failed]` | 深度 / retry / run 控制 |
+| `messages` | list | Agent phase 必填 | `[]` | 不保存 exit_contract 临时副本 | `[F-v3-runtime-phase-failed]` | ReAct 历史 |
+| `run_id` | string | 是 | generated | trace 全局唯一 | — | observability |
+
+### 2. AST 与 Cognitive Slot 映射联调模型 (NEW-E)
+
+Runtime / assembly 消费编译期产出的 `AgentNodeAST`, 不直接解析 SKILL.md 文本。
+
+| AgentNodeAST 字段 | 来源 | 目标插槽 / 组件 | 必填 | 错误码 | 业务作用 |
+|---|---|---|---|---|---|
+| `role` | body `<role>` | `{skill_role}` | 是 | `[F-v3-agent-role-missing]` | 身份 |
+| `goal` | body `<goal>` | `{skill_goal}` | 是 | `[F-v3-agent-goal-missing]` | 目标 |
+| `steps` | body `<step>` AST | `{skill_steps_splat}` | 否 | `[F-v3-agent-step-invalid]` | workflow 指引 |
+| `protocols` | body `<protocol>` AST | `{skill_protocols_splat}` | 否 | `[F-v3-agent-protocol-invalid]` | 协议引用 |
+| `references` | frontmatter | reference reader + `read_reference` | 否 | `[F-v3-resource-reference-invalid]` | 知识资料 |
+| `examples` | frontmatter | examples slots + `read_example` | 否 | `[F-v3-resource-example-invalid]` | 案例 |
+| `exit_contract` | body `<exit_contract>` | `{skill_exit_contract_inline}` | 是 | `[F-v3-agent-exit-contract-missing]` | 输出规则 |
+| `io.outputs` | frontmatter | inline output_schema | 是 | `[F-v3-cognitive-output-schema-render-failed]` | 输出结构 |
+
+Body XML 的顶层业务标签与解析规则见 [Agent Body XML 扁平化容器](../skill-spec/05-agent-md-spec.md#body-xml-扁平化容器)。`knowledge_base` 和 `examples` 是 cognitive template 容器, 不是 Agent body 自定义标签。
 
 ## Cross-feature Interaction
 
-本特性的运行阶段极大地牵涉着上下游状态的传递以及前端表现。如果引擎运行时罢工，其它模块全部停摆。
-
 ### 1. State 黑板数据的严格沙盒隔离
-在执行子图时（无论是通过底层的 `_invoke_subagent_once_t23()` 还是暴露的 `call_subgraph` 大招），最核心的要求是断绝隐式变量继承的灾难。此过程强依赖状态与合约中的全新沙盒规范，黑板必须经历一次彻底的划分阻断。其双向协作及内存分配策略的细节详见：[state-and-io-contract 层的黑板彻底隔离设计](../state-and-io-contract/mvp0-alignment.md#cross-state-blackboard-isolation)。
+
+SUBGRAPH、subagent tool 和未来 subgraph-like builtin tool 都必须只传显式 inputs, 不继承父图全量 data。编译期已证明 IO 对齐, runtime 负责按 schema 切片和回写。细节见 [state-and-io-contract](../state-and-io-contract/mvp0-alignment.md#后端功能)。
 
 ### 2. 运行时全维度事件发射
-Runtime WILL 在 phase start/end、LLM call、tool call、subagent enter/exit 和 exception 位置调用 tracing callback。当前 V2.1 runner 删除 callbacks，见 `packages/graph-agent/src/graph_agent/core/runner.py:462`；MVP0 需要与 [tracing-and-observability 的 callback event bus](../tracing-and-observability/mvp0-alignment.md#后端功能) 对齐。
 
-### 7. 详细的状态下发测试策略
-为了保证上述的 `subagent_depth` 和 `BlackboardState` 的完全隔离能够在长期的迭代中不被破坏，我们必须在 `packages/graph-agent/tests/core/` 下引入深度的集成测试。重点断言包括：子图看到的 `flow["subagent_depth"]` 已递增；子图修改 `flow` 不会污染父图；child data 不含父图未显式传入的 key。当前问题触发点在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:398` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:405`。
+Runtime SHOULD 在 phase start/end、LLM call、tool call、reference reader fallback、subagent enter/exit、SUBGRAPH enter/exit、exception 位置调用 tracing callback。事件 payload 必须带 `tool_name` / `phase_id` / `error_code` 等字段, 与 Q13 trace 决议对齐。
 
-### 8. LangChain RunnableConfig 的彻底改造
-MVP0 SHOULD 让 `RunnableConfig` 只承载 tags、callbacks、run id 等调度/观测信息，而不是作为业务控制状态来源。当前 `_subagent_runnable_config()` 同时写 tags、run_id、metadata 和 callbacks，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:482` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:505`。深度、重试次数和隔离边界应该回到 `flow` 或显式 child state。
+### 3. Ambiguity feedback 链路
 
-### 9. 异常分发与状态码体系
-为了配合前端界面的多状态展示，我们在抛出异常时需要完善内部的 Error Code 体系：
-```python
-class ErrorCode:
-    MODEL_NOT_FOUND = "F-v21-model-not-found"
-    DEPTH_LIMIT_REACHED = "F-v21-depth-limit"
-    INVALID_TOOL_ARGS = "F-v21-tool-args-invalid"
-```
-这些 code SHOULD 被 tracing 的 `EXCEPTION` 事件携带，并最终交给 Studio 展示。
+Cognitive template 固定包含 ambiguity feedback 提示。Runtime 必须提供或透传 `log_ambiguity` 能力, 让 Agent 在规则不清晰时记录问题、决策和理由。Studio TracePanel 的展示需求来自 [V0.3.0 New Requirements](../../studio/V0.3.0-NEW-REQUIREMENTS--DO-NOT-DELETE-DURING-CLEANUP.md)。
+
+### 4. RunnableConfig 边界
+
+`RunnableConfig` 只承载 tags、callbacks、run id 等调度 / 观测信息。深度、重试次数、隔离输入输出不应依赖 RunnableConfig metadata, 必须进入 `BlackboardState.flow` 或显式 child state。

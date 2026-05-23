@@ -1,17 +1,33 @@
 {
+  "$defs": {
+    "PhaseIOSchema": {
+      "additionalProperties": false,
+      "description": "Inline JSON Schema contract for a graph or phase boundary.",
+      "properties": {
+        "inputs": {
+          "additionalProperties": true,
+          "minProperties": 1,
+          "title": "Inputs",
+          "type": "object"
+        },
+        "outputs": {
+          "additionalProperties": true,
+          "minProperties": 1,
+          "title": "Outputs",
+          "type": "object"
+        }
+      },
+      "required": [
+        "inputs",
+        "outputs"
+      ],
+      "title": "PhaseIOSchema",
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
   "description": "Subgraph delegation phase node parsed from ``SUBGRAPH.md``.",
   "properties": {
-    "metadata": {
-      "additionalProperties": true,
-      "title": "Metadata",
-      "type": "object"
-    },
-    "mode": {
-      "const": "subgraph",
-      "title": "Mode",
-      "type": "string"
-    },
     "name": {
       "anyOf": [
         {
@@ -31,10 +47,44 @@
       "title": "Raw Blocks",
       "type": "object"
     },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    },
+    "mode": {
+      "const": "subgraph",
+      "title": "Mode",
+      "type": "string"
+    },
     "sub_skill_ref": {
       "minLength": 1,
       "title": "Sub Skill Ref",
       "type": "string"
+    },
+    "target_skill": {
+      "anyOf": [
+        {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Target Skill"
+    },
+    "io": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PhaseIOSchema"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

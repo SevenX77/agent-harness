@@ -24,7 +24,13 @@ from graph_agent.cognitive.md2json import parse_finish_markdown
 from graph_agent.cognitive.md_patch import LLMMdPatchClient
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
 from graph_agent.core.loader import CompiledSkill, CompiledSubagent, PhaseDocument, SkillLoader
-from graph_agent.core.manifest import GraphManifest, LogicNodeAST, SkillNodeAST, SubgraphNodeAST
+from graph_agent.core.manifest import (
+    AgentNodeAST,
+    GraphManifest,
+    LogicNodeAST,
+    SkillNodeAST,
+    SubgraphNodeAST,
+)
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
 from graph_agent.core.subagents import (
     SubagentValidationFailure,
@@ -124,7 +130,7 @@ def _build_phase_node(
             max_patch_attempts,
             skill_resolver,
         )
-    if isinstance(ast, SkillNodeAST):
+    if isinstance(ast, (AgentNodeAST, SkillNodeAST)):
         return _build_skill_node(
             phase_id,
             ast,
@@ -204,7 +210,7 @@ def _build_subgraph_node(
 
 def _build_skill_node(
     phase_id: str,
-    phase_ast: SkillNodeAST,
+    phase_ast: AgentNodeAST | SkillNodeAST,
     compiled: CompiledSkill,
     chat_model: Any,
     max_patch_attempts: int,

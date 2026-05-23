@@ -1,5 +1,286 @@
 {
   "$defs": {
+    "AgentNodeAST": {
+      "additionalProperties": false,
+      "description": "V0.3.0 Agent phase node parsed from ``SKILL.md``.",
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "raw_blocks": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Raw Blocks",
+          "type": "object"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "mode": {
+          "const": "agent",
+          "title": "Mode",
+          "type": "string"
+        },
+        "role": {
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "goal": {
+          "minLength": 1,
+          "title": "Goal",
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/AgentStep"
+          },
+          "title": "Steps",
+          "type": "array"
+        },
+        "protocols": {
+          "items": {
+            "$ref": "#/$defs/AgentProtocol"
+          },
+          "title": "Protocols",
+          "type": "array"
+        },
+        "exit_contract": {
+          "minLength": 1,
+          "title": "Exit Contract",
+          "type": "string"
+        },
+        "io": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PhaseIOSchema"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tools": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tools",
+          "type": "array"
+        },
+        "subagents": {
+          "items": {
+            "$ref": "#/$defs/SubagentSpec"
+          },
+          "title": "Subagents",
+          "type": "array"
+        },
+        "subgraphs": {
+          "items": {
+            "$ref": "#/$defs/AgentRegistryItem"
+          },
+          "title": "Subgraphs",
+          "type": "array"
+        },
+        "references": {
+          "items": {
+            "$ref": "#/$defs/ReferenceSpec"
+          },
+          "title": "References",
+          "type": "array"
+        },
+        "examples": {
+          "items": {
+            "$ref": "#/$defs/ExampleSpec"
+          },
+          "title": "Examples",
+          "type": "array"
+        },
+        "max_iterations": {
+          "default": 10,
+          "maximum": 50,
+          "minimum": 1,
+          "title": "Max Iterations",
+          "type": "integer"
+        },
+        "llm_role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Llm Role"
+        },
+        "system_prompt": {
+          "default": "",
+          "title": "System Prompt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode",
+        "role",
+        "goal",
+        "exit_contract"
+      ],
+      "title": "AgentNodeAST",
+      "type": "object"
+    },
+    "AgentProtocol": {
+      "additionalProperties": false,
+      "description": "One Agent protocol parsed from body XML.",
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "content": {
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "content"
+      ],
+      "title": "AgentProtocol",
+      "type": "object"
+    },
+    "AgentRegistryItem": {
+      "additionalProperties": false,
+      "description": "Named registry binding available to an Agent body.",
+      "properties": {
+        "name": {
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "target_skill": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+          "title": "Target Skill",
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "target_skill",
+        "description"
+      ],
+      "title": "AgentRegistryItem",
+      "type": "object"
+    },
+    "AgentStep": {
+      "additionalProperties": false,
+      "description": "One ordered Agent step parsed from body XML.",
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "content": {
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "content"
+      ],
+      "title": "AgentStep",
+      "type": "object"
+    },
+    "ExampleSpec": {
+      "additionalProperties": false,
+      "description": "Inline or document example declared on an Agent.",
+      "properties": {
+        "id": {
+          "pattern": "^[A-Z][A-Za-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "inline",
+            "document"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Summary"
+        }
+      },
+      "required": [
+        "id",
+        "type"
+      ],
+      "title": "ExampleSpec",
+      "type": "object"
+    },
     "LogicNodeAST": {
       "additionalProperties": false,
       "description": "Deterministic Python phase node parsed from ``LOGIC.md``.",
@@ -44,6 +325,58 @@
         "python_callable"
       ],
       "title": "LogicNodeAST",
+      "type": "object"
+    },
+    "PhaseIOSchema": {
+      "additionalProperties": false,
+      "description": "Inline JSON Schema contract for a graph or phase boundary.",
+      "properties": {
+        "inputs": {
+          "additionalProperties": true,
+          "minProperties": 1,
+          "title": "Inputs",
+          "type": "object"
+        },
+        "outputs": {
+          "additionalProperties": true,
+          "minProperties": 1,
+          "title": "Outputs",
+          "type": "object"
+        }
+      },
+      "required": [
+        "inputs",
+        "outputs"
+      ],
+      "title": "PhaseIOSchema",
+      "type": "object"
+    },
+    "ReferenceSpec": {
+      "additionalProperties": false,
+      "description": "Reference resource declared on an Agent.",
+      "properties": {
+        "id": {
+          "pattern": "^[A-Z][A-Za-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "summary": {
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "path",
+        "summary"
+      ],
+      "title": "ReferenceSpec",
       "type": "object"
     },
     "SkillNodeAST": {
@@ -197,6 +530,30 @@
           "minLength": 1,
           "title": "Sub Skill Ref",
           "type": "string"
+        },
+        "target_skill": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Skill"
+        },
+        "io": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PhaseIOSchema"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -209,6 +566,7 @@
   },
   "discriminator": {
     "mapping": {
+      "agent": "#/$defs/AgentNodeAST",
       "logic": "#/$defs/LogicNodeAST",
       "skill": "#/$defs/SkillNodeAST",
       "subgraph": "#/$defs/SubgraphNodeAST"
@@ -221,6 +579,9 @@
     },
     {
       "$ref": "#/$defs/SubgraphNodeAST"
+    },
+    {
+      "$ref": "#/$defs/AgentNodeAST"
     },
     {
       "$ref": "#/$defs/SkillNodeAST"

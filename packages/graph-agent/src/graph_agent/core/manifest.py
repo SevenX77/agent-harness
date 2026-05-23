@@ -34,6 +34,66 @@ class ContextBridge(BaseModel):
     outputs: dict[str, str] = Field(default_factory=dict)
 
 
+class PhaseIOSchema(BaseModel):
+    """Inline JSON Schema contract for a graph or phase boundary."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    inputs: dict[str, Any] = Field(..., min_length=1)
+    outputs: dict[str, Any] = Field(..., min_length=1)
+
+
+class AgentRegistryItem(BaseModel):
+    """Named registry binding available to an Agent body."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    target_skill: str = Field(pattern=SKILL_ID_PATTERN)
+    description: str = Field(min_length=1)
+
+
+class ReferenceSpec(BaseModel):
+    """Reference resource declared on an Agent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=r"^[A-Z][A-Za-z0-9_-]*$")
+    path: str = Field(min_length=1)
+    summary: str = Field(min_length=1)
+
+
+class ExampleSpec(BaseModel):
+    """Inline or document example declared on an Agent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=r"^[A-Z][A-Za-z0-9_-]*$")
+    type: Literal["inline", "document"]
+    content: str | None = None
+    path: str | None = None
+    summary: str | None = None
+
+
+class AgentStep(BaseModel):
+    """One ordered Agent step parsed from body XML."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]*$")
+    name: str = Field(min_length=1)
+    content: str = Field(min_length=1)
+
+
+class AgentProtocol(BaseModel):
+    """One Agent protocol parsed from body XML."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]*$")
+    content: str = Field(min_length=1)
+
+
 class SubagentSpec(BaseModel):
     """Sub-skill declared as a callable tool on a SKILL phase."""
 
@@ -56,11 +116,12 @@ class GraphManifest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["2.1"] = "2.1"
+    schema_version: Literal["0.3.0", "2.1"] = "2.1"
     name: str = Field(min_length=1, max_length=128)
     description: str = ""
     io_inputs_ref: str = "io/inputs.json"
     io_outputs_ref: str = "io/outputs.json"
+    io: PhaseIOSchema | None = None
     phases: list[GraphPhaseRef] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -87,6 +148,43 @@ class SubgraphNodeAST(_BaseNodeAST):
 
     mode: Literal["subgraph"]
     sub_skill_ref: str = Field(min_length=1)
+    target_skill: str | None = Field(default=None, pattern=SKILL_ID_PATTERN)
+    io: PhaseIOSchema | None = None
+
+
+class AgentNodeAST(_BaseNodeAST):
+    """V0.3.0 Agent phase node parsed from ``SKILL.md``."""
+
+    mode: Literal["agent"]
+    role: str = Field(min_length=1)
+    goal: str = Field(min_length=1)
+    steps: list[AgentStep] = Field(default_factory=list)
+    protocols: list[AgentProtocol] = Field(default_factory=list)
+    exit_contract: str = Field(min_length=1)
+    io: PhaseIOSchema | None = None
+    tools: list[str] = Field(default_factory=list)
+    subagents: list[SubagentSpec] = Field(default_factory=list)
+    subgraphs: list[AgentRegistryItem] = Field(default_factory=list)
+    references: list[ReferenceSpec] = Field(default_factory=list)
+    examples: list[ExampleSpec] = Field(default_factory=list)
+    max_iterations: int = Field(default=10, ge=1, le=50)
+    llm_role: str | None = None
+    system_prompt: str = ""
+
+    @model_validator(mode="after")
+    def _render_legacy_system_prompt(self) -> "AgentNodeAST":
+        if not self.system_prompt:
+            step_lines = "\n".join(f"- {step.name}: {step.content}" for step in self.steps)
+            protocol_lines = "\n".join(
+                f"- {protocol.id}: {protocol.content}" for protocol in self.protocols
+            )
+            parts = [f"Role: {self.role}", f"Goal: {self.goal}"]
+            if step_lines:
+                parts.append("Steps:\n" + step_lines)
+            if protocol_lines:
+                parts.append("Protocols:\n" + protocol_lines)
+            self.system_prompt = "\n\n".join(parts)
+        return self
 
 
 class SkillNodeAST(_BaseNodeAST):
@@ -100,7 +198,7 @@ class SkillNodeAST(_BaseNodeAST):
 
 
 PhaseAST = Annotated[
-    LogicNodeAST | SubgraphNodeAST | SkillNodeAST,
+    LogicNodeAST | SubgraphNodeAST | AgentNodeAST | SkillNodeAST,
     Field(discriminator="mode"),
 ]
 
@@ -112,10 +210,17 @@ SkillManifest = GraphManifest
 
 __all__ = [
     "ContextBridge",
+    "AgentNodeAST",
+    "AgentProtocol",
+    "AgentRegistryItem",
+    "AgentStep",
+    "ExampleSpec",
     "GraphManifest",
     "GraphPhaseRef",
     "LogicNodeAST",
     "PhaseAST",
+    "PhaseIOSchema",
+    "ReferenceSpec",
     "SkillManifest",
     "SkillNodeAST",
     "SubagentSpec",

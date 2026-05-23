@@ -3,16 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from graph_agent.core.compiler import compile_skill
-from graph_agent.core.exceptions import SkillLoadError
-from graph_agent.core.loader import SkillLoader
-from graph_agent.core.skill_resolver_protocol import (
+from graph_agent.core import (
     SkillResolutionError,
+    SkillResolverProtocol,
+    resolve_skill_root,
     validate_skill_id,
 )
 
 
-class DictSkillResolver:
+class InMemorySkillResolver:
     def __init__(self, roots: dict[str, Path]) -> None:
         self.roots = roots
 
@@ -23,127 +22,58 @@ class DictSkillResolver:
             raise SkillResolutionError(skill_id, "not registered") from exc
 
 
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _base(root: Path, *, name: str = "resolver-test", phase: str = "main") -> None:
-    _write(
-        root / "GRAPH.md",
-        f"""---
-schema_version: "2.1"
-name: {name}
----
-<input src="io/inputs.json" />
-<output src="io/outputs.json" />
-<phase id="{phase}" src="phases/{phase}" depends_on="" />
-""",
-    )
-    _write(root / "io" / "inputs.json", "{}\n")
-    _write(root / "io" / "outputs.json", "{}\n")
-
-
-def _child_skill(root: Path) -> None:
-    _base(root, name="child", phase="child")
-    _write(
-        root / "io" / "inputs.json",
-        """{
-  "type": "object",
-  "properties": {
-    "text": {"type": "string"}
-  },
-  "required": ["text"]
-}
-""",
-    )
-    _write(
-        root / "phases" / "child" / "SKILL.md",
-        """---
-mode: skill
-name: child
----
-<system_prompt>
-Child work.
-</system_prompt>
-<exit_contract>
-Call finish_task.
-</exit_contract>
-""",
+def _write_graph_root(root: Path) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "GRAPH.md").write_text(
+        '---\nschema_version: "0.3.0"\nname: child_skill\nphases: []\n---\n',
+        encoding="utf-8",
     )
 
 
-def _parent_skill(root: Path, target_skill: str) -> None:
-    _base(root)
-    _write(
-        root / "phases" / "main" / "SKILL.md",
-        f"""---
-mode: skill
-name: main
-phase_config:
-  subagents:
-    - name: child_expert
-      target_skill: {target_skill}
-      description: Resolve child by skill id.
----
-<system_prompt>
-Parent work.
-</system_prompt>
-<exit_contract>
-Call finish_task.
-</exit_contract>
-""",
-    )
+def test_skill_resolver_protocol_imports() -> None:
+    resolver: SkillResolverProtocol = InMemorySkillResolver({})
+
+    assert isinstance(resolver, InMemorySkillResolver)
 
 
-def test_target_skill_subagent_resolves_through_protocol(tmp_path: Path) -> None:
-    parent = tmp_path / "parent"
-    child = tmp_path / "registered-child"
-    _parent_skill(parent, "demo.child")
-    _child_skill(child)
-    resolver = DictSkillResolver({"demo.child": child})
-
-    compiled = SkillLoader().compile_skill(parent, skill_resolver=resolver)
-    subagent = compiled.subagents_by_phase["main"][0]
-    tools = {tool.name: tool for tool in compiled.tools.for_phase("main")}
-
-    assert subagent.target_skill == "demo.child"
-    assert subagent.root == child
-    assert subagent.input_model.model_validate({"text": "hello"}).text == "hello"
-    assert tools["call_subagent_child_expert"].metadata["target_skill"] == "demo.child"
+def test_validate_skill_id_accepts_v030_ids() -> None:
+    validate_skill_id("child_skill")
+    validate_skill_id("child-skill")
+    validate_skill_id("child1")
 
 
-def test_compile_skill_facade_passes_skill_resolver(tmp_path: Path) -> None:
-    parent = tmp_path / "parent"
-    child = tmp_path / "registered-child"
-    _parent_skill(parent, "demo.child")
-    _child_skill(child)
+@pytest.mark.parametrize("skill_id", ["Child", "child.skill", "../child", "_child", "1child", ""])
+def test_validate_skill_id_rejects_invalid_ids(skill_id: str) -> None:
+    with pytest.raises(SkillResolutionError) as exc_info:
+        validate_skill_id(skill_id)
 
-    compiled = compile_skill(
-        parent,
-        cache=False,
-        skill_resolver=DictSkillResolver({"demo.child": child}),
-    )
-
-    assert compiled.subagents_by_phase["main"][0].target_skill == "demo.child"
+    assert exc_info.value.code == "[F-v3-resolver-skill-id-invalid]"
+    assert exc_info.value.skill_id == skill_id
 
 
-def test_target_skill_requires_resolver(tmp_path: Path) -> None:
-    parent = tmp_path / "parent"
-    _parent_skill(parent, "demo.child")
+def test_resolve_skill_root_validates_registered_path(tmp_path: Path) -> None:
+    child = tmp_path / "child"
+    _write_graph_root(child)
 
-    with pytest.raises(SkillLoadError, match="no skill_resolver was provided"):
-        SkillLoader().compile_skill(parent)
+    resolved = resolve_skill_root(InMemorySkillResolver({"child": child}), "child")
 
-
-def test_invalid_skill_id_raises_v3_code() -> None:
-    with pytest.raises(SkillResolutionError, match=r"\[F-v3-invalid-skill-id\]"):
-        validate_skill_id("../escape")
+    assert resolved == child
 
 
-def test_unregistered_skill_id_raises_v3_code(tmp_path: Path) -> None:
-    parent = tmp_path / "parent"
-    _parent_skill(parent, "demo.missing")
+def test_resolve_skill_root_invalid_path_has_v3_code(tmp_path: Path) -> None:
+    missing_graph = tmp_path / "missing_graph"
+    missing_graph.mkdir()
 
-    with pytest.raises(SkillResolutionError, match=r"\[F-v3-skill-not-registered\]"):
-        SkillLoader().compile_skill(parent, skill_resolver=DictSkillResolver({}))
+    with pytest.raises(SkillResolutionError) as exc_info:
+        resolve_skill_root(InMemorySkillResolver({"child": missing_graph}), "child")
+
+    assert exc_info.value.code == "[F-v3-resolver-path-invalid]"
+    assert exc_info.value.skill_id == "child"
+
+
+def test_resolve_skill_root_unregistered_has_v3_code() -> None:
+    with pytest.raises(SkillResolutionError) as exc_info:
+        resolve_skill_root(InMemorySkillResolver({}), "missing_child")
+
+    assert exc_info.value.code == "[F-v3-skill-not-registered]"
+    assert exc_info.value.skill_id == "missing_child"

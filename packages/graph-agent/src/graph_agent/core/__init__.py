@@ -17,6 +17,14 @@ from graph_agent.core.loader import load_workflow_from_md
 from graph_agent.core.manifest import ContextBridge
 from graph_agent.core.run_context import RunContext
 from graph_agent.core.runner import run_skill
+from graph_agent.core.skill_resolver_protocol import (
+    SKILL_ID_PATTERN,
+    SKILL_ID_RE,
+    SkillResolutionError,
+    SkillResolverProtocol,
+    resolve_skill_root,
+    validate_skill_id,
+)
 from graph_agent.core.state import WorkflowState
 from graph_agent.core.types import Phase
 
@@ -36,4 +44,10 @@ __all__ = [
     "compile_skill",
     "run_skill",
     "RunContext",
+    "SKILL_ID_PATTERN",
+    "SKILL_ID_RE",
+    "SkillResolutionError",
+    "SkillResolverProtocol",
+    "resolve_skill_root",
+    "validate_skill_id",
 ]

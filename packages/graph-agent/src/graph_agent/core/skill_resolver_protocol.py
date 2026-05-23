@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Protocol
 
 from graph_agent.core.exceptions import SkillLoadError
 
-SKILL_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+SKILL_ID_PATTERN = r"^[a-z][a-z0-9_-]*$"
 SKILL_ID_RE = re.compile(SKILL_ID_PATTERN)
 
 
@@ -28,12 +28,11 @@ class SkillResolutionError(SkillLoadError):
         super().__init__(f"{code} skill {skill_id!r}: {reason}")
 
 
-@runtime_checkable
 class SkillResolverProtocol(Protocol):
-    """Resolve a stable skill id to a local V2.1 skill root directory."""
+    """Resolve a stable V0.3.0 skill id to a graph skill root directory."""
 
-    def resolve_skill(self, skill_id: str) -> str | Path:
-        """Return the local skill root for ``skill_id``."""
+    def resolve_skill(self, skill_id: str) -> Path:
+        """Return graph skill root path or raise SkillResolutionError."""
 
 
 def validate_skill_id(skill_id: str) -> None:
@@ -43,7 +42,7 @@ def validate_skill_id(skill_id: str) -> None:
         raise SkillResolutionError(
             str(skill_id),
             "skill id must match " + SKILL_ID_PATTERN,
-            code="[F-v3-invalid-skill-id]",
+            code="[F-v3-resolver-skill-id-invalid]",
         )
 
 
@@ -51,7 +50,7 @@ def resolve_skill_root(
     resolver: SkillResolverProtocol,
     skill_id: str,
 ) -> Path:
-    """Resolve and validate that a skill id points at a V2.1 skill root."""
+    """Resolve and validate that a skill id points at a V0.3.0 skill root."""
 
     validate_skill_id(skill_id)
     try:
@@ -62,9 +61,17 @@ def resolve_skill_root(
         raise SkillResolutionError(skill_id, str(exc)) from exc
 
     if not root.is_dir():
-        raise SkillResolutionError(skill_id, f"resolved path is not a directory: {root}")
+        raise SkillResolutionError(
+            skill_id,
+            f"resolved path is not a directory: {root}",
+            code="[F-v3-resolver-path-invalid]",
+        )
     if not (root / "GRAPH.md").is_file():
-        raise SkillResolutionError(skill_id, f"resolved path has no GRAPH.md: {root}")
+        raise SkillResolutionError(
+            skill_id,
+            f"resolved path has no GRAPH.md: {root}",
+            code="[F-v3-resolver-path-invalid]",
+        )
     return root
 
 

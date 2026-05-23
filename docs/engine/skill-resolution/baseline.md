@@ -48,7 +48,7 @@ V0.3.0 的 resolver 域只处理 graph skill root 寻址。输入是逻辑 id, �
 |---|---|
 | `references[].path` / `examples[].path` | 当前 skill root 内资源校验, 见 resource mechanisms |
 | `actions/<name>.py` | LOGIC action 一级寻址, 见 [LOGIC Actions](../skill-spec/03-logic-md-spec.md#actions-1-级寻址与执行契约) |
-| LLM role 到模型实例 | llm-routing / ModelResolverProtocol |
+| LLM role 到模型实例 | graph-agent-gateway / ModelResolverProtocol |
 | Studio 文件选择器导入 | Studio backend / frontend |
 
 ## 跟其他 engine 子模块的关系

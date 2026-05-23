@@ -37,7 +37,7 @@
 
 字段级决议以各 spec doc 头部、[11 错误码](./11-error-code-spec.md) 和 [12 flow doc](./12-compile-runtime-flow-spec.md) 为落地入口。Phase A 只固定文件边界和 H2 骨架, Phase B 再补字段级内容。
 
-模块级决议见 [Skill Compilation MVP0 Alignment](../skill-compilation/mvp0-alignment.md), [State and IO Contract MVP0 Alignment](../state-and-io-contract/mvp0-alignment.md), [Execution Runtime MVP0 Alignment](../execution-runtime/mvp0-alignment.md), [Tracing and Observability MVP0 Alignment](../tracing-and-observability/mvp0-alignment.md), [LLM Routing MVP0 Alignment](../llm-routing/mvp0-alignment.md) 末尾的 "MVP0 死代码清退" 与 "V0.3.0 版本号 cutover" 段。
+模块级决议见 [Skill Compilation MVP0 Alignment](../skill-compilation/mvp0-alignment.md), [State and IO Contract MVP0 Alignment](../state-and-io-contract/mvp0-alignment.md), [Execution Runtime MVP0 Alignment](../execution-runtime/mvp0-alignment.md), [Tracing and Observability MVP0 Alignment](../tracing-and-observability/mvp0-alignment.md), [Graph Agent Gateway MVP0 Alignment](../graph-agent-gateway/mvp0-alignment.md) 末尾的 "MVP0 死代码清退" 与 "V0.3.0 版本号 cutover" 段。
 
 跨模块宏观决议见 [MVP0 Decisions Explained](../MVP0-DECISIONS-EXPLAINED-2026-05-21.md) 18 Q 全集。该文档解释为什么 V0.3.0 要收敛到当前 graph_skill 契约、状态隔离、运行时和路由边界。
 

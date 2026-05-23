@@ -105,7 +105,7 @@ class SubagentSpec(BaseModel):
     description: str = Field(min_length=1)
 
     @model_validator(mode="after")
-    def _requires_target_skill_or_legacy_path(self) -> "SubagentSpec":
+    def _requires_target_skill_or_legacy_path(self) -> SubagentSpec:
         if self.target_skill is None and self.path is None:
             raise ValueError("subagent requires target_skill")
         return self
@@ -172,7 +172,7 @@ class AgentNodeAST(_BaseNodeAST):
     system_prompt: str = ""
 
     @model_validator(mode="after")
-    def _render_legacy_system_prompt(self) -> "AgentNodeAST":
+    def _render_legacy_system_prompt(self) -> AgentNodeAST:
         if not self.system_prompt:
             step_lines = "\n".join(f"- {step.name}: {step.content}" for step in self.steps)
             protocol_lines = "\n".join(

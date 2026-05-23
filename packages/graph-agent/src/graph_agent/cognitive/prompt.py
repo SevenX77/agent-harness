@@ -143,18 +143,27 @@ def apply_v030_cognitive_template(
         if role_prefix and role_prefix.strip()
         else ""
     )
-    steps_md = "\n".join(
-        f"- [{item.get('id', '')}] {item.get('name', '')}: {item.get('content', '')}".strip()
-        for item in steps
-    ) or "无显式步骤"
-    protocols_md = "\n".join(
-        f"- [protocol:{item.get('id', '')}] {item.get('content', '')}".strip()
-        for item in protocols
-    ) or "无显式协议"
+    steps_md = (
+        "\n".join(
+            f"- [{item.get('id', '')}] {item.get('name', '')}: {item.get('content', '')}".strip()
+            for item in steps
+        )
+        or "无显式步骤"
+    )
+    protocols_md = (
+        "\n".join(
+            f"- [protocol:{item.get('id', '')}] {item.get('content', '')}".strip()
+            for item in protocols
+        )
+        or "无显式协议"
+    )
     examples_md = "\n\n".join(inline_examples or []) or "无内联示例"
-    document_examples_md = "\n".join(
-        f"- {item.get('id')}: {item.get('summary', '')}" for item in document_examples or []
-    ) or "无扩展案例"
+    document_examples_md = (
+        "\n".join(
+            f"- {item.get('id')}: {item.get('summary', '')}" for item in document_examples or []
+        )
+        or "无扩展案例"
+    )
     schema_md = ""
     if output_schema is not None:
         schema_md = "\n\n<output_schema>\n" + str(output_schema) + "\n</output_schema>"

@@ -132,24 +132,24 @@ def _build_phase_node(
         return _wrap_phase_runtime_node(
             ast,
             _build_subgraph_node(
-            phase_doc,
-            ast,
-            chat_model,
-            max_patch_attempts,
-            skill_resolver,
+                phase_doc,
+                ast,
+                chat_model,
+                max_patch_attempts,
+                skill_resolver,
             ),
         )
     if isinstance(ast, (AgentNodeAST, SkillNodeAST)):
         return _wrap_phase_runtime_node(
             ast,
             _build_skill_node(
-            phase_id,
-            phase_doc,
-            ast,
-            compiled,
-            chat_model,
-            max_patch_attempts,
-            skill_resolver,
+                phase_id,
+                phase_doc,
+                ast,
+                compiled,
+                chat_model,
+                max_patch_attempts,
+                skill_resolver,
             ),
         )
     _graph_fatal(f"unknown phase mode for {phase_id!r}")
@@ -656,9 +656,7 @@ def _invoke_subagent_many_t24(
                     "child_run_id": child_run_id,
                 }
 
-        return await asyncio.gather(
-            *[_run_one(index, item) for index, item in enumerate(inputs)]
-        )
+        return await asyncio.gather(*[_run_one(index, item) for index, item in enumerate(inputs)])
 
     return asyncio.run(_run_all())
 

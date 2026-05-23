@@ -378,3 +378,18 @@ state-and-io-contract 的 Runtime Input Funnel 和 phase-level sandbox 依赖本
 ### 3. 对 execution-runtime 装配层的输入
 
 execution-runtime 不再自行解释 `SKILL.md` body。它接收已经解析好的 `AgentNodeAST`, 以及装配期生成的 cognitive template prompt、tool registry、subagent/subgraph resolved metadata。这样 runtime 只负责执行, 不重新做编译期 schema / mention / IO 判断。
+
+## 与当前源码的差异
+
+本文件描述的是目标收敛方向；当前编译器还保留一些兼容行为：
+
+| 本文件目标态 | 当前源码事实 |
+|---|---|
+| `GRAPH.md` phase DAG 只来自 frontmatter `phases:` | 当前仍兼容 body 里的 `<phase .../>`，没有 frontmatter `phases:` 时会从 body 提取。 |
+| 物理 `io/inputs.json` / `io/outputs.json` 退役 | 当前没有 inline `io` 时仍会读取 `io_inputs_ref` / `io_outputs_ref` 指向的 JSON 文件。 |
+| `SKILL.md` 必须是 `mode: agent`，`SkillNodeAST` 退役 | 当前 `SKILL.md` 仍兼容 `mode: skill`，并保留 `SkillNodeAST`。 |
+| LOGIC / SUBGRAPH / Agent 都必须持有 `io` | 当前只有 Agent 和 SUBGRAPH AST 有 `io` 字段；LOGIC AST 没有 phase-level `io`。 |
+| subagent 只允许 `target_skill` + resolver | 当前 `SubagentSpec` 仍允许 legacy `path`，并会走相对路径解析。 |
+| LOGIC actions 使用 skill root 下全局 actions 一级寻址 | 当前仍按 phase 目录下的 `actions/` 发现 action。 |
+| SUBGRAPH `target_skill` 是主要寻址规则 | 当前 SUBGRAPH runtime 仍主要使用 `sub_skill_ref` 路径。 |
+| 编译错误全部归一到 spec 表里的 `[F-v3-*]` 细粒度错误码 | 当前很多编译错误仍由 helper 前缀或 Pydantic ValidationError 包装生成，粒度与 spec 不完全一致。 |

@@ -230,3 +230,17 @@ Tracing 不模拟运行过程。它由 [execution-runtime](../execution-runtime/
 ### 4. 安全与截断
 
 Trace payload 不保存 provider API key、HTTP headers、完整大文档或未截断 prompt。长字符串、reference 原文、tool result 必须截断并标记 `truncated=true`。Debug 全量输出只能通过显式本地调试开关打开。
+
+## 与当前源码的差异
+
+本文件描述的是目标收敛方向；当前 trace / callback 体系还没有完全接入 graph skill 主线：
+
+| 本文件目标态 | 当前源码事实 |
+|---|---|
+| runtime 在 phase start/end、LLM、tool、subagent 等真实调用点发事件 | 当前 graph skill dict runner 丢弃 `callbacks`，主线不会自动发这些事件。 |
+| 统一 `AgentTraceEvent` / `TraceEventKind` schema | 当前主要是 Pydantic `CallbackEvent` union，事件名是小写字符串。 |
+| `NODE_START` / `NODE_END` payload 来自 StateMapper 沙盒输入输出 | 当前事件协议有 `phase_start` / `phase_end`，但 graph skill path 没有在 PhaseWrapper 中发这些事件。 |
+| TOOL_CALL start/end 分离并带 `tool_call_id` | 当前 legacy `ToolCallEvent` 是单个 `tool_call` 事件，字段较简单。 |
+| builtin reference reader enter/exit/fallback 在装配期真实发出 | 当前事件模型已定义 builtin subagent 事件，但完整 reference reader 调用点未在 graph skill 主线落地。 |
+| fallback 事件通过统一 tracing 底座发出 | 当前 gateway fallback 直接遍历 callbacks 调 `on_event`。 |
+| prompt、reference、tool result 按统一策略截断 | 当前部分 proxy / tracing 能做轻量序列化，但没有全局统一截断策略覆盖所有 graph skill 事件。 |

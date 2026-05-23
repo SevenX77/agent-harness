@@ -87,7 +87,7 @@ V0.3.0 Agent prompt 装配后的最终 XML 模板如下。`role` / `goal` 来自
 
 这里叫“7 大插槽”是指 7 个固定容器: `role`, `goal`, `thinking_style`, `knowledge_base`, `examples`, `ambiguity_feedback`, `protocol_citation`, `critical_reminders` 中 `role/goal` 是业务直填, 后 6 个是框架容器; `exit_contract` 不再作为独立中部插槽, 而是完整 inline 到末尾。
 
-[Cognitive Template 内部插槽布局](./06-cognitive-template-spec.md#7-大插槽布局拓扑) 是所有 Agent prompt 装配的最终结构入口。
+[Cognitive Template 内部插槽布局](./06-cognitive-template-spec.md#8-大插槽布局拓扑) 是所有 Agent prompt 装配的最终结构入口。
 
 ## 静态组装插槽解析
 
@@ -125,3 +125,4 @@ V0.3.0 Agent prompt 装配后的最终 XML 模板如下。`role` / `goal` 来自
 - 所有 slot render 都必须在 trace 中记录输入来源, 便于 Debug prompt 差异。
 
 动态输入依赖 [Builtin Reference Reader Subagent 签名](./09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名) 与 [Template 装配流](./12-compile-runtime-flow-spec.md#template-装配流-assembly-time-workflow)。
+assembly-time-workflow)。

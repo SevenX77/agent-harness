@@ -82,7 +82,7 @@ Compiled GraphSkillAST
 3. `read_reference` / `read_example` tools 在 prompt 完成前绑定, 因为模板正文会提到这些工具。
 4. `exit_contract` 带 output_schema 放在最终 prompt 末尾。
 
-本流程引用 [Cognitive Template 内部插槽布局](./06-cognitive-template-spec.md#7-大插槽布局拓扑) 与 [Builtin Reference Reader Subagent 签名](./09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名)。
+本流程引用 [Cognitive Template 内部插槽布局](./06-cognitive-template-spec.md#8-大插槽布局拓扑) 与 [Builtin Reference Reader Subagent 签名](./09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名)。
 
 ## 运行时引擎流 (Run-time Workflow)
 

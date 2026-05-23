@@ -25,7 +25,7 @@
 - [03-logic-md-spec.md](./03-logic-md-spec.md#frontmatter-字段解析表-schema--validation): 定义 `LOGIC.md` Frontmatter、Action 一级寻址和 validator 生命周期。
 - [04-subgraph-md-spec.md](./04-subgraph-md-spec.md#mode-声明与类型断言): 定义 `SUBGRAPH.md` 类型断言、SkillResolverProtocol 寻址和父子图 IO 强校验。
 - [05-agent-md-spec.md](./05-agent-md-spec.md#frontmatter-字段解析表): 定义 Agent `SKILL.md` Frontmatter、Body XML 扁平化和引用注入校验。
-- [06-cognitive-template-spec.md](./06-cognitive-template-spec.md#7-大插槽布局拓扑): 定义 Cognitive Template 7 大插槽的数据来源与装配顺序。
+- [06-cognitive-template-spec.md](./06-cognitive-template-spec.md#8-大插槽布局拓扑): 定义 Cognitive Template 8 大插槽的数据来源与装配顺序。
 - [07-mention-syntax-spec.md](./07-mention-syntax-spec.md#--mention-语法规范): 定义 `@type:NAME` 7 类引用语法和静态依赖校验。
 - [08-resource-mechanisms-spec.md](./08-resource-mechanisms-spec.md#reference-三机制生命周期): 定义 Reference 三机制、Example 双模式和 Frontmatter 挂载格式。
 - [09-builtin-modules-spec.md](./09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名): 定义 builtin reference reader subagent 与按需读取 tools 的 I/O 签名。

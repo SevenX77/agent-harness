@@ -26,7 +26,6 @@ from graph_agent.cognitive.prompt import (
     apply_v030_cognitive_template,
     resolve_role_prefix_from_llm_role,
 )
-from graph_agent.core.actions import ToolDef, _structured_tool
 from graph_agent.core.builtin_subagents.reference_reader import (
     ReferenceReaderInput,
     fallback_reference_markdown,
@@ -50,6 +49,8 @@ from graph_agent.core.subagents import (
 )
 from graph_agent.runtime.state import BlackboardState
 from graph_agent.runtime.state_mapper import PhaseWrapper, StateMapper
+from graph_agent.tools.builtin.read_example import build_read_example_tool
+from graph_agent.tools.builtin.read_reference import build_read_reference_tool
 
 logger = logging.getLogger(__name__)
 
@@ -244,8 +245,7 @@ def _build_skill_node(
     skill_resolver: SkillResolverProtocol | None,
 ) -> Any:
     business_tools = compiled.tools.for_phase(phase_id)
-    if isinstance(phase_ast, AgentNodeAST):
-        business_tools = [*business_tools, *_agent_resource_tools(phase_doc, phase_ast)]
+    business_tools = [*business_tools, *_agent_resource_tools(phase_doc, phase_ast)]
     tool_by_name = {tool.name: tool for tool in business_tools}
     subagent_by_tool_name = _subagent_tool_map(phase_id, compiled)
     subagent_runtime_by_tool_name = _subagent_runtime_map(
@@ -452,47 +452,10 @@ def _agent_resource_tools(
     phase_ast: AgentNodeAST,
 ) -> list[Any]:
     root = _skill_root_for_phase_path(phase_doc.path)
-    references = {item.id: item for item in phase_ast.references}
-    examples = {item.id: item for item in phase_ast.examples}
-
-    def read_reference(reference_id: str) -> str:
-        spec = references.get(reference_id)
-        if spec is None:
-            raise GraphAgentFatalError(f"[F-v3-resource-reference-id-invalid] {reference_id!r}")
-        return _read_skill_root_file(root, spec.path)
-
-    def read_example(example_id: str) -> str:
-        spec = examples.get(example_id)
-        if spec is None:
-            raise GraphAgentFatalError(f"[F-v3-resource-example-invalid] {example_id!r}")
-        if spec.type == "inline":
-            return spec.content or ""
-        if spec.path is None:
-            raise GraphAgentFatalError(f"[F-v3-resource-example-path-invalid] {example_id!r}")
-        return _read_skill_root_file(root, spec.path)
-
-    tools: list[Any] = []
-    if references:
-        tools.append(
-            ToolDef(
-                id="read_reference",
-                phase_id=phase_doc.phase_name,
-                path=phase_doc.path,
-                func=read_reference,
-                description="Read one declared reference by id.",
-            )
-        )
-    if examples:
-        tools.append(
-            ToolDef(
-                id="read_example",
-                phase_id=phase_doc.phase_name,
-                path=phase_doc.path,
-                func=read_example,
-                description="Read one declared example by id.",
-            )
-        )
-    return [_structured_tool(tool) for tool in tools]
+    return [
+        build_read_reference_tool(skill_root=root, references=phase_ast.references),
+        build_read_example_tool(skill_root=root, examples=phase_ast.examples),
+    ]
 
 
 def _skill_root_for_phase_path(path: Path) -> Path:

@@ -1,207 +1,232 @@
-# state-and-io-contract (engine) — MVP0 Alignment (下一步对齐逻辑)
+# state-and-io-contract (engine) — MVP0 Alignment (V0.3.0 graph_skill)
 
-> **Status**: Filled by a1 (Codex) based on a2 framework, 2026-05-20
-> **Scope**: BlackboardState 规约 (data/flow/messages)、Reducer 并发冲突控制、阶段级 IO 隔离、Runtime Input 漏斗 (audit A1/A2/A3/A6)
-> **配套**: 见 [INDEX.md](../../INDEX.md) 5 维模板 + cross-link 规则 + writing conventions。
+> **Status**: Rewritten by a1 (Codex) for V0.3.0 graph_skill, 2026-05-23
+> **Scope**: BlackboardState 规约、Runtime Input Funnel、Phase-Level IO、StateMapper、child graph 黑板隔离、builtin reference reader 装配期沙盒。
+> **配套**: 见 [skill-spec README](../skill-spec/README.md), [skill-compilation alignment](../skill-compilation/mvp0-alignment.md), [execution-runtime alignment](../execution-runtime/mvp0-alignment.md)。
+
+## V0.3.0 改造摘要
+
+本文件保留 A1 Input Funnel、A2/A3 phase-level IO、A6 child 黑板隔离、P0-3 smart reducer、StateMapper 的主方向, 只做 V0.3.0 graph_skill 对齐微调:
+
+| 旧语义 | V0.3.0 新语义 | 决议来源 |
+|---|---|---|
+| Runtime Input Funnel 读取 `io/inputs.json` | 读取 `GRAPH.md` frontmatter inline `io.inputs` | [Root IO Schema](../skill-spec/02-graph-md-spec.md#根-io-契约-root-io-schema) |
+| `io_inputs_ref` / `io_outputs_ref` 可作为 schema 来源 | 编译期 FATAL `[F-v3-graph-io-physical-file-deprecated]` | [Root IO Schema](../skill-spec/02-graph-md-spec.md#根-io-契约-root-io-schema) |
+| Phase Wrapper 覆盖 skill / logic / subgraph 三类 | 覆盖 agent / logic / subgraph / builtin reference reader subagent 四类调用边界 | [Physical Layout](../skill-spec/01-physical-layout.md#物理结构拓扑-directory-tree), [Builtin Modules](../skill-spec/09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名) |
+| child graph 只做内存层隔离 | 通过 SkillResolverProtocol 解析 target skill 后, 再按目标 `GRAPH.md io.inputs` 做合约漏斗 | [SkillResolverProtocol](../skill-spec/10-skill-resolver-protocol-spec.md#protocol-interface-定义) |
+| reference reader 未定义黑板归属 | 装配期临时 child blackboard, 独立沙盒, 失败 WARN fallback | [Reference 三机制](../skill-spec/08-resource-mechanisms-spec.md#reference-三机制生命周期) |
 
 ## UI/UX
 
 N/A — 此模块为纯 backend Python library, 无 UI / 无前端调用面。
 
-本模块定义的是 engine 内存里的“黑板”和 IO 边界。黑板可以理解成每次运行时各节点共享的一张工作表：`data` 放业务数据，`flow` 放控制状态，`messages` 放 LLM 对话。当前 `BlackboardState` 定义在 `packages/graph-agent/src/graph_agent/runtime/state.py:35` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:41`。它不会直接渲染 UI，但它决定 Studio 最终看到的输入输出、trace 和错误是否干净。
+本模块定义 engine 内存里的黑板和 IO 边界。Studio 最终看到的输入输出、Trace 和错误是否干净, 取决于这里的漏斗、切片和沙盒是否稳定。
 
 ## 前端逻辑
 
-N/A — 此模块为纯 backend Python library, 无 UI / 无前端调用面。
+N/A — 此模块为纯 backend Python library, 无 React 逻辑。
 
-前端不执行 reducer，也不持有 `BlackboardState`。Studio 只会看到 runtime 最终返回的 context，当前 V2.1 runner 用 `dict(result.get("data", {}))` 构造 context，见 `packages/graph-agent/src/graph_agent/core/runner.py:480` 到 `packages/graph-agent/src/graph_agent/core/runner.py:486`。MVP0 的目标是让这份 context 来自严格漏斗和 phase 输出，而不是来自一块所有节点都能读写的全局 dict。
+前端只消费运行结果和 trace event。StateMapper 需要产出足够精确的 `phase_input` / `phase_output` 镜像, 让 Studio Edge Inspection 展示“这条边实际传了哪些字段”, 而不是整张黑板。
 
 ## 后端功能
 
-### 1. 升级 Reducer 智能合并语义 (P0-3 修复)
+### 1. 升级 Reducer 智能合并语义 (P0-3)
 
-MVP0 SHOULD 替换当前过度保守的 `shallow_dict_merge`。Reducer 是 LangGraph 合并节点返回 state delta 的函数；当前 `data` 字段使用 `Annotated[dict[str, Any], shallow_dict_merge]`，见 `packages/graph-agent/src/graph_agent/runtime/state.py:38`。`shallow_dict_merge()` 定义在 `packages/graph-agent/src/graph_agent/runtime/state.py:13` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:32`。
+MVP0 SHOULD 用 `smart_dict_reducer` 替换过度保守的 `shallow_dict_merge`。同一 super-step 内并行写同一 key 仍然 FATAL; 跨 step 顺序覆盖允许采用 `dict.update` 语义。
 
-当前行为是：如果 `left` 已经有某个 key，而 `right` 也写同一个 key，就抛 `[F-v21-state-conflict]`，见 `packages/graph-agent/src/graph_agent/runtime/state.py:24` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:30`。这能拦住并行 fan-in 分支同时写 `foo` 的危险场景，但也误伤顺序覆盖。例子：`{a: 1}` 后面一个 phase 合法地产出 `{a: 2}`，当前 reducer 也会抛错，而 PM 直觉上会认为“后一步更新前一步结果”是合理行为。
+| 字段 / 输入 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `left` | dict | 否 | `{}` | 当前 blackboard data | `[F-v3-runtime-state-mapping-failed]` | reducer 旧状态 |
+| `right` | dict | 否 | `{}` | phase 返回 state delta | `[F-v3-runtime-state-mapping-failed]` | reducer 新写入 |
+| `super_step_id` | string/int | 并行冲突判断时必填 | runtime context | 同一 super-step 同 key 写入为冲突 | `[F-v3-runtime-state-mapping-failed]` | 区分并发冲突与顺序覆盖 |
+| `source_phase_id` | string | 建议 | 无 | trace payload 中必须可定位 | `[F-v3-runtime-state-mapping-failed]` | Studio 标红来源节点 |
 
-MVP0 WILL 引入 `smart_dict_reducer`：同一 super-step 内的并行冲突继续拦截；跨 step 的顺序覆盖允许采用 `dict.update` 语义，即 `{a:1} ∪ {a:2} -> {a:2}`。如果 LangGraph 不能直接给 reducer 足够上下文，MVP0 SHOULD 通过状态结构调整避免顶层同名写入，例如把 phase 输出放入 `phase_outputs[phase_id]`，减少 reducer 对并发来源的猜测。
+Reducer 只是最后一道防线。正常情况下, 编译期 A8 数据流校验和运行期 StateMapper 已经避免不明确的写入来源。
 
-落地时还要保留一类强阻断：两个并行分支同时写同一个 phase output slot，仍然是编排错误。MVP0 SHOULD 在错误里带上 key、左值来源、右值来源和 super-step 信息。现在的错误 message 只写 `key`、left、right，见 `packages/graph-agent/src/graph_agent/runtime/state.py:27` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:30`，足够给开发者看，但不足以让 Studio 把错误定位回两条 fan-in 边。
+### 2. Runtime Input Funnel 迁移到 inline 根 IO (A1, C7)
 
-### 2. 引入 Runtime Input Funnel (A1 补全)
+MVP0 MUST 在 `run_skill(inputs)` 入口先按 `GRAPH.md` inline `io.inputs` 过滤和校验输入。V0.3.0 不再读取 `io/inputs.json`。
 
-MVP0 SHOULD 在 `run_skill(**inputs)` 入口先过滤和校验输入。当前 `_run_v21_skill_dict()` 直接把外部 kwargs 做成 `dict(inputs)` 放入 `data`，见 `packages/graph-agent/src/graph_agent/core/runner.py:471` 到 `packages/graph-agent/src/graph_agent/core/runner.py:477`。这意味着未知字段、类型错误字段、缺失 required 字段都可能进入整张图。
+| 字段 / 来源 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `GRAPH.md io.inputs` | JSON Schema object | 是 | 无 | 顶层 `type: object`; Draft 2020-12 合法 | `[F-v3-graph-io-not-object]` / `[F-v3-graph-io-schema-invalid]` | Runtime Input Funnel 唯一 schema 来源 |
+| raw runtime inputs | dict | 是 | 无 | 必须满足 `io.inputs.required` 与 properties 类型 | `[F-v3-runtime-state-mapping-failed]` | 外部输入原始值 |
+| canonical inputs | dict | 是 | 无 | 只保留 schema 声明字段; 安全默认值 / coercion 可在白名单内执行 | `[F-v3-runtime-state-mapping-failed]` | 写入 blackboard inputs 专区 |
+| `io_inputs_ref` / `io_outputs_ref` | deprecated field | 禁止 | — | 编译期发现即 FATAL | `[F-v3-graph-io-physical-file-deprecated]` | 防止旧物理 IO 引用继续影响运行 |
+| `<root>/io/inputs.json` / `outputs.json` | deprecated file | 禁止 | — | 编译期发现即 FATAL | `[F-v3-graph-io-physical-file-deprecated]` | 防止 schema 漂移 |
 
-Input Funnel 是“运行入口漏斗”：它根据 `io/inputs.json` 只放行声明过的字段。比如 schema 只允许 `scene_id` 和 `text`，调用方传了 `debug_token`，漏斗应该丢弃或拒绝它；如果 schema 要求 `count` 是 integer，而 CLI 传入 `"3"`，漏斗可以在安全范围内转成 `3`。旧 `IOManager.load_inputs()` 已经有 runtime/file 输入概念，见 `packages/graph-agent/src/graph_agent/io/manager.py:65` 到 `packages/graph-agent/src/graph_agent/io/manager.py:106`，但 V2.1 主线没有调用它。
+Input Funnel 的依赖源从物理 JSON 文件迁移到编译产物中的 inline schema。Runtime 不重新猜 schema, 只消费 compilation 已校验过的 `GRAPH.md io.inputs`。规范终点见 [Root IO Schema](../skill-spec/02-graph-md-spec.md#根-io-契约-root-io-schema)。
 
-MVP0 WILL 复用编译期验证过的根级 schema。`GraphManifest` 默认 input ref 是 `io/inputs.json`，见 `packages/graph-agent/src/graph_agent/core/manifest.py:53`；compiler 会在 `packages/graph-agent/src/graph_agent/core/loader.py:153` 和 `packages/graph-agent/src/graph_agent/core/loader.py:874` 到 `packages/graph-agent/src/graph_agent/core/loader.py:900` 校验 schema 文件合法。runtime 不应重新猜 schema，而应消费编译产物里的规范化 schema。
+### 3. 细粒度 Phase-Level IO 契约与防覆盖机制 (A2/A3)
 
-Funnel 的结果 SHOULD 成为只读 initial inputs。也就是说，后续 LOGIC 或 SKILL 如果想产生新字段，应写入自己的 phase output，而不是改写原始 input。这样批量测试和重跑才可解释：同一个 canonical input 进入图，无论跑多少次，输入区都不会被业务 action 意外修改。
+MVP0 SHOULD 让每个 phase 只看到自己声明的输入, 只能写入自己声明的输出。`io.inputs` 是读取授权, `io.outputs` 是写入授权。
 
-### 3. 细粒度 Phase-Level IO 契约与防覆盖机制 (A2/A3 补全)
+| 字段 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `phase.io.inputs` | JSON Schema object | 是 | 无 | 顶层 object; required 只能引用 properties | `[F-v3-runtime-state-mapping-failed]` | 构造 `phase_input` |
+| `phase.io.outputs` | JSON Schema object | 是 | 无 | 顶层 object; 返回字段必须是 properties 子集 | `[F-v3-runtime-state-mapping-failed]` | 包装 `phase_output` |
+| `phase_input` | dict | 是 | 无 | 从 root inputs + 上游 phase outputs 切片, deep copy | `[F-v3-runtime-state-mapping-failed]` | 节点局部工作区 |
+| `phase_output` | dict | 是 | 无 | 满足 `phase.io.outputs`; 不得含未声明 key | `[F-v3-runtime-state-mapping-failed]` | 节点回写边界 |
+| `phase_outputs[phase_id]` | dict | 是 | `{}` | 按 phase_id 命名空间存储 | `[F-v3-runtime-state-mapping-failed]` | 防止顶层覆盖污染 |
 
-MVP0 SHOULD 让每个 phase 只看到自己声明需要的输入，只能写入自己的输出区域。当前 LOGIC node 复制全量 `state.data` 给 `Context`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:127` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:136`。SUBGRAPH node 也把父图全量 data 传入子图，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:155` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:164`。这就是 A2/A3 的核心问题。
+LOGIC action、Agent finish_task、SUBGRAPH child output 都必须经 StateMapper 包装, 不能直接 diff 全局 `data` 后合并。
 
-Phase-Level IO Contract 是“每个节点自己的读写授权清单”。例子：`summarize` 只声明读取 `clean_text`，那它不应该能看到用户上传的全部原始 payload；它输出的 `summary` 应放进 `phase_outputs["summarize"]["summary"]`，而不是直接覆盖顶层 `data["summary"]` 或父图已有 key。
+### 4. 彻底隔离 Child Graph 黑板状态 (A6, NEW-2) {#cross-state-blackboard-isolation}
 
-MVP0 WILL 在 phase wrapper 执行前构建 `phase_input`，执行后把结果封装到 phase 命名空间。对于 SUBGRAPH，子图返回值也不能直接 diff 父图全量 data 后合回顶层。当前 `_dict_delta(before_data, result_data)` 取子图变化，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:165` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:172`；MVP0 SHOULD 改成显式 output mapping。
+MVP0 MUST 对 subagent / SUBGRAPH / future call_subgraph 做双向隔离: 内存层切断 + 合约层防穿透。
 
-这会改变 LOGIC action 作者的心智模型。当前 action 可以通过 `Context(data, ...)` 看到全局黑板，构造位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:130`；MVP0 SHOULD 让 Context 包装的是 `phase_input` 加受控 writer，而不是全量 `state.data`。如果 action 需要某字段，必须在 phase `io.inputs` 声明；如果没有声明却读取，应该得到清晰的 contract error。
+| 字段 / 步骤 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `target_skill` | string | 是 | 无 | 通过 `SkillResolverProtocol.resolve_skill(skill_id) -> Path` 解析 | `[F-v3-skill-not-registered]` | 找到目标 graph skill |
+| child root `io.inputs` | JSON Schema object | 是 | 无 | 来自解析所得 target skill `GRAPH.md` | `[F-v3-graph-io-schema-invalid]` | child input funnel schema |
+| explicit tool / phase input | dict | 是 | 无 | 必须先经 child root `io.inputs` 漏斗过滤 | `[F-v3-runtime-state-mapping-failed]` | 子图初始 data |
+| `child.data` | dict | 是 | 无 | 只等于 canonical explicit input; 不继承 parent data | `[F-v3-runtime-state-mapping-failed]` | 黑板读隔离 |
+| `child.flow` | dict | 是 | `{}` | deep copy parent flow, 写入 `subagent_depth + 1` | `[F-v3-runtime-state-mapping-failed]` | 控制态隔离 |
+| child result | dict/tool result | 是 | 无 | 作为 tool result 或 SUBGRAPH phase output 返回, 不自动 patch 父 data | `[F-v3-runtime-state-mapping-failed]` | 黑板写隔离 |
 
-### 4. 彻底隔离 Child Graph 黑板状态 (A6 补全) {#cross-state-blackboard-isolation}
-
-MVP0 MUST 保证 agent-called graph 和父 graph 黑板隔离。当前 subagent child data 是 `{**before_data, **input_data}`，也就是父图全量 data 加上 LLM 显式传入的参数，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:392` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:410`。这会让子任务看到不该看到的父图字段。
-
-隔离规则应该更严格：child graph 的初始 `data` **只等于** explicit tool input 经过 schema funnel 后的结果；父图 data 不隐式继承。child `flow` 可以继承必要控制字段，但必须 deep copy，并写入新的 `subagent_depth`。当前 child flow 直接用 `parent_state.get("flow", {})`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:400` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:405`，MVP0 WILL 修掉这类引用共享。
-
-返回路径也要保持隔离。subagent 作为 tool 调用时，子图结果 SHOULD 作为 tool result 回到父 LLM，而不是自动合并进父 `data`。当前 `_invoke_subagent_once_t23()` 返回 `{"status": "ok", "data": data_delta, "flow": ...}`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:411` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:415`。MVP0 SHOULD 明确这个 `data` 是“给父 LLM 阅读的工具结果”，不是父图黑板 patch。
+这里的关键是“先 resolve, 再 funnel”。只有 SkillResolverProtocol 解析到目标 skill root 后, runtime 才知道 child `GRAPH.md io.inputs` 的真实 schema。规范终点见 [SkillResolverProtocol Interface](../skill-spec/10-skill-resolver-protocol-spec.md#protocol-interface-定义)。
 
 ### 5. 防污染的垃圾回收策略
 
-MVP0 SHOULD 防止可变对象引用从临时 phase input 泄漏回父 state。Python 的 dict/list 是引用类型；如果 phase_input 中包含嵌套 list，子图或 action 修改它，父图可能观察到副作用。MVP0 在构造 `phase_input`、child `data`、child `flow` 时 SHOULD 使用 `copy.deepcopy` 或等价结构化复制。
+MVP0 SHOULD 防止可变对象引用从临时 phase input 泄漏回父 state。构造 `phase_input`、`child.data`、`child.flow`、reference reader 临时 blackboard 时, 都应 deep copy JSON-like 对象。
 
-这不是性能洁癖，而是安全边界。当前 LOGIC node 会复制顶层 dict：`before = dict(state.get("data", {}))` 和 `data = dict(before)`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:127` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:130`；这只是浅拷贝，不能阻止嵌套对象污染。
+| 对象 | 复制策略 | 非 JSON-like 对象处理 | 业务作用 |
+|---|---|---|---|
+| `phase_input` | deep copy | 拒绝或转引用句柄 | 防止 action 修改嵌套对象污染父 state |
+| `phase_output` | schema validation 后 copy | 拒绝不可序列化对象 | 保证 trace / checkpoint 可 JSON 化 |
+| `child.data` | funnel 后 deep copy | 拒绝隐式父对象引用 | 子图读隔离 |
+| `child.flow` | deep copy | 只允许控制字段 | 子图控制态隔离 |
+| reference reader blackboard | fresh object | 不继承父 graph data | 装配期沙盒 |
 
-MVP0 SHOULD 为大对象复制设置边界。对于普通 JSON-like dict/list，深拷贝可接受；对于文件句柄、模型客户端、DataFrame 这类非 JSON 对象，Input Funnel 和 Phase Wrapper 应直接拒绝或转成引用句柄。否则 Checkpointing 和 Trace JSON 化都会失控。
+### 6. Phase Wrapper 四类调用拦截入口 (C8)
+
+MVP0 SHOULD 抽出统一 Phase Wrapper, 覆盖 V0.3.0 四类调用边界: Agent、LOGIC、SUBGRAPH、builtin reference reader subagent。
+
+| Wrapper 类型 | 输入来源 | 输出去向 | 必填 schema | 校验失败错误码 | 业务作用 |
+|---|---|---|---|---|---|
+| Agent phase wrapper | `phase.io.inputs` 切片 | finish_task output -> `phase_outputs[phase_id]` | Agent `io.inputs` / `io.outputs` | `[F-v3-runtime-state-mapping-failed]` | LLM 节点沙盒 |
+| LOGIC phase wrapper | `phase.io.inputs` 切片 | action dict -> `phase_outputs[phase_id]` | LOGIC `io.inputs` / `io.outputs` | `[F-v3-runtime-state-mapping-failed]` / `[F-v3-logic-output-field-undeclared]` | 确定性 action 沙盒 |
+| SUBGRAPH phase wrapper | parent phase input -> child graph input funnel | child graph output -> parent phase output | SUBGRAPH IO + child GRAPH IO | `[F-v3-subgraph-io-mismatch]` / `[F-v3-runtime-state-mapping-failed]` | 子图调用沙盒 |
+| Builtin reference reader wrapper | `references[]` registry | markdown report -> cognitive slot | reader input/output JSON contract | `[F-v3-reference-reader-failed]` WARN | 装配期资料预读沙盒 |
+
+前三类来自 graph physical phases; reference reader 是装配期 builtin subagent, 不在 `phases/` 目录中, 但同样必须经过 wrapper 建立临时 blackboard 和错误归一。物理节点标准见 [Physical Layout](../skill-spec/01-physical-layout.md#物理结构拓扑-directory-tree), builtin 签名见 [Builtin Modules](../skill-spec/09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名)。
+
+### 7. Builtin Reference Reader Subagent 黑板隔离 (NEW-1)
+
+MVP0 MUST 让 builtin reference reader subagent 运行在装配期独立沙盒中。它不读取父 graph runtime blackboard, 只接收 Agent phase 的 `references` registry 和必要 trace metadata。
+
+| 字段 / 对象 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `reader.data.references` | list[ReferenceSpec] | 是 | `[]` | 每项 id/path/summary 已编译期校验 | `[F-v3-resource-reference-invalid]` | reader 唯一业务输入 |
+| `reader.data.skill_id` | string | 是 | 无 | 当前 skill id | `[F-v3-reference-reader-input-invalid]` | trace 定位 |
+| `reader.data.phase_id` | string | 是 | 无 | 当前 Agent phase id | `[F-v3-reference-reader-input-invalid]` | trace 定位 |
+| `reader.flow` | dict | 否 | `{timeout_s: 60}` | 不继承父 runtime flow | `[F-v3-reference-reader-failed]` WARN | 装配期控制 |
+| `reader.messages` | list | 是 | `[]` | 从空消息开始 | — | 防止 prompt history 污染 |
+| reader output | markdown JSON payload | 是 | fallback excerpt | 输出非法则 WARN fallback | `[F-v3-reference-reader-failed]` | 注入 knowledge_base |
+
+失败边界:
+
+1. reference path 不合法是编译期 FATAL, 不进入 reader。
+2. reader 远端调用失败、超时、输出非法是装配期 WARN `[F-v3-reference-reader-failed]`。
+3. WARN 后 runtime 截取 reference 原文前 3000 token 作为 fallback, 填入 cognitive template。
+
+Reference 三机制见 [Resource Mechanisms](../skill-spec/08-resource-mechanisms-spec.md#reference-三机制生命周期), reader 签名见 [Builtin Modules](../skill-spec/09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名)。
 
 ## API
 
-以下为这些重要修改需要引入引擎侧的 API 签名展示，展示了更健壮的新设计。所有的实现都需要严防黑板溢出和不符合预期的参数传递。
-
-### 1. SmartReducer 接口实现定义
-对应 P0-3 缺陷的彻底解决：
+### 1. SmartReducer 接口
 
 ```python
-from typing import Any
-
 def smart_dict_reducer(
     left: dict[str, Any] | None,
     right: dict[str, Any] | None,
+    *,
+    merge_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Merge data with intelligent conflict detection for graph paths.
-    
-    This replaces the overly aggressive `shallow_dict_merge`. It evaluates
-    the metadata context (e.g., from LangGraph's super-step or active 
-    channel context injection) to allow sequential overrides 
-    while strictly blocking concurrent writes to the exact same key 
-    during parallel fan-in branches.
-
-    Args:
-        left: The existing blackboard dictionary state.
-        right: The new dictionary update arriving from a phase node exit.
-
-    Returns:
-        The smartly merged blackboard data, preferring `right` where legal.
-
-    Raises:
-        GraphAgentFatalError: If an undeniable concurrent collision is detected.
-    """
-    pass
+    ...
 ```
 
-MVP0 SHOULD 在 `BlackboardState.data` 的 Annotated reducer 中替换旧函数。现有导出 `__all__ = ["BlackboardState", "shallow_dict_merge"]` 在 `packages/graph-agent/src/graph_agent/runtime/state.py:44`，迁移时可以短期保留旧名但标记 deprecated。
+| 参数 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `left` | dict | 否 | `{}` | 当前 state | `[F-v3-runtime-state-mapping-failed]` | 旧值 |
+| `right` | dict | 否 | `{}` | phase delta | `[F-v3-runtime-state-mapping-failed]` | 新值 |
+| `merge_context` | dict | 否 | `{}` | 建议含 super_step/source_phase | `[F-v3-runtime-state-mapping-failed]` | 冲突定位 |
 
-### 2. Input Funnel 过滤签名定义
-对应 A1 的强依赖启动拦截函数，通过 jsonschema 进行防御：
+### 2. Input Funnel 过滤签名
 
 ```python
-from typing import Any
-
 def filter_runtime_inputs(
-    raw_kwargs: dict[str, Any], 
-    schema: dict[str, Any]
+    raw_inputs: dict[str, Any],
+    schema: dict[str, Any],
+    *,
+    strict_unknown: bool = True,
 ) -> dict[str, Any]:
-    """Validate and funnel incoming start state data strictly against schema.
-    
-    This function utilizes `jsonschema` strict validation to enforce
-    properties. Unmapped or undeclared fields in `raw_kwargs` are explicitly
-    dropped to ensure absolute purity before placement into the global state.
-
-    Args:
-        raw_kwargs: The incoming raw data dict from `run_skill(**inputs)`.
-        schema: Evaluated draft JSONSchema definition from `io/inputs.json`.
-        
-    Returns:
-        Canonical initial data matching schema properties safely.
-        
-    Raises:
-        InputFunnelValidationError: Structured error if types mismatch or 
-            required inputs are fundamentally omitted.
-    """
-    pass
+    ...
 ```
 
-MVP0 SHOULD 在 `_run_v21_skill_dict()` 调用 `graph.invoke()` 前使用该函数，替换当前的 `"data": dict(inputs)`。接入点就是 `packages/graph-agent/src/graph_agent/core/runner.py:471` 到 `packages/graph-agent/src/graph_agent/core/runner.py:477`。
+| 参数 / 返回 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `raw_inputs` | dict | 是 | 无 | 外部 run inputs | `[F-v3-runtime-state-mapping-failed]` | 原始输入 |
+| `schema` | JSON Schema object | 是 | 无 | 来自 `GRAPH.md io.inputs` | `[F-v3-graph-io-schema-invalid]` | 漏斗规则 |
+| `strict_unknown` | boolean | 否 | `True` | unknown field FATAL 或 WARN drop | `[F-v3-runtime-state-mapping-failed]` | 严格模式 |
+| return | dict | 是 | 无 | 满足 schema 的 canonical inputs | `[F-v3-runtime-state-mapping-failed]` | 初始 blackboard inputs |
 
-错误模型 SHOULD 与 compiler 的结构化 issue 对齐。缺少 required input 是用户输入错误，应该给 `F-v21-input-missing`；类型不可转换是输入格式错误，应该给 `F-v21-input-invalid`；未知字段如果被配置为 strict，则给 `F-v21-input-unknown`，如果配置为 permissive，则记录 warning 并丢弃。
+### 3. StateMapper 模型
+
+```python
+class StateMapper:
+    def build_phase_input(self, state: BlackboardState, phase_io: PhaseIOSchema) -> dict[str, Any]: ...
+    def wrap_phase_output(self, phase_id: str, output: dict[str, Any], phase_io: PhaseIOSchema) -> dict[str, Any]: ...
+    def build_child_input(self, target_skill_root: Path, explicit_input: dict[str, Any]) -> dict[str, Any]: ...
+```
+
+| 方法 | 输入 | 输出 | 校验失败错误码 | 业务作用 |
+|---|---|---|---|---|
+| `build_phase_input` | state + phase `io.inputs` | local dict | `[F-v3-runtime-state-mapping-failed]` | phase 读切片 |
+| `wrap_phase_output` | phase_id + output + `io.outputs` | namespaced output | `[F-v3-runtime-state-mapping-failed]` | phase 写回 |
+| `build_child_input` | resolved target skill root + explicit input | child canonical input | `[F-v3-runtime-state-mapping-failed]` / `[F-v3-skill-not-registered]` | 子图合约漏斗 |
 
 ## Data Model / State
 
-### 1. BlackBoard 状态结构的隔离深化
-随着黑板完全向 A2 描述的那样进行分阶段治理，原有的单一 `data` 聚合形式在设计思维中演变为多个分段概念区。尽管出于对旧模块兼容性考量我们依然把它们承载在原 `BlackboardState` 之中（代码位于 `packages/graph-agent/src/graph_agent/runtime/state.py:35` 附近）：
+### 1. BlackboardState 规范化区域
 
-- **`inputs` 专有区**：容纳从 `Input Funnel` 处理后形成的数据集，它被设定为全生命周期只读，作为大局依赖源，绝对禁止任何修改。
-- **`phase_outputs` 字典树**：形如 `phase_outputs = {"analyze": {...}, "search": {...}}`，成为节点专属的、被隔离保护的存储地带。
-- 只有通过专门包装的节点装载器函数，它们才会被按需挑选组合，形成一个局部的、轻量的 `phase_input` 发送至目标工作空间，并在完工后反向提取写回树中。这就完成了从逻辑到物理层面的彻底切割。
+| 区域 | 类型 | 必填 | 默认值 | 校验规则 | 业务作用 |
+|---|---|---|---|---|---|
+| `data.inputs` | dict | 是 | `{}` | 只由 Runtime Input Funnel 写入; 全生命周期只读 | 根输入专区 |
+| `data.phase_outputs` | dict[str, dict] | 是 | `{}` | 只由 StateMapper 写入 | phase 输出命名空间 |
+| `data.scratch` | dict | 否 | `{}` | 单 phase 临时数据, 不进入最终 context | 临时计算 |
+| `flow` | dict | 是 | `{}` | 控制字段; child 调用 deep copy | 深度 / retry / run 控制 |
+| `messages` | list | Agent runtime 使用 | `[]` | 不跨 child graph 共享 | LLM 对话历史 |
 
-MVP0 可以选择在内部继续把这些挂在 `data` 下，也可以扩展 `BlackboardState` 字段；关键是语义必须固定。当前 `data` 是一整块共享 dict，见 `packages/graph-agent/src/graph_agent/runtime/state.py:38`，这不是最终契约。
+MVP0 可以内部继续兼容旧扁平 `data`, 但语义上必须收敛到 inputs / phase_outputs / scratch 三个区域。
 
-推荐的迁移路线是先兼容旧 `data`，同时新增规范化子结构：`data["inputs"]`、`data["phase_outputs"]` 和 `data["scratch"]`。其中 `scratch` 只能服务单个 phase 临时计算，不进入最终 context。等下游代码都切到 mapper，再考虑把它们提升为 `BlackboardState` 的顶层字段。
+### 2. ReaderSandboxState
 
-### 2. 状态映射器模型 (StateMapper)
-由于状态不再是扁平的铺开，可能需要一个新的 `StateMapper` 工具类协助负责。它依据静态期间生成的 `io.inputs` 要求，从 `inputs` 或 `phase_outputs` 的分段中提取需要的数据：
 ```python
-class StateMapper:
-    def build_phase_input(self, data: dict, required_schema: dict) -> dict: ...
-    def wrap_phase_output(self, phase_id: str, output: dict) -> dict: ...
+class ReaderSandboxState(TypedDict):
+    data: dict[str, Any]
+    flow: dict[str, Any]
+    messages: list[Any]
 ```
 
-`StateMapper` SHOULD 消费 skill-compilation 产出的 phase-level IO schema。编译侧将新增 `PhaseIOSchema`，见 [skill-compilation 的 Node AST 数据结构边界扩展](../skill-compilation/mvp0-alignment.md#2-node-ast-数据结构边界扩展)。
-
-Mapper 还 SHOULD 负责冲突解释。比如两个上游都产出 `text`，而当前 phase 只声明输入 `text`，它应该提示用户在 `io.inputs` 里指定来源，或在上游输出改名。这个错误属于数据流 contract，不应该等 reducer 在运行时用 `[F-v21-state-conflict]` 才发现。
+| 字段 | 类型 | 必填 | 默认值 | 校验规则 | 业务作用 |
+|---|---|---|---|---|---|
+| `data.references` | list | 是 | `[]` | 只含当前 Agent phase references | reader 业务输入 |
+| `data.skill_id` | string | 是 | 无 | trace id | 定位 |
+| `data.phase_id` | string | 是 | 无 | trace id | 定位 |
+| `flow.timeout_s` | integer | 否 | `60` | 超时触发 WARN fallback | 控制 reader |
+| `messages` | list | 是 | `[]` | 不继承父 Agent messages | 消息隔离 |
 
 ## Cross-feature Interaction
 
-本机制的完善是跨越整个生命周期的枢纽，涉及多个其他模块的密切配合：
+### 1. 与 skill-compilation 的耦合
 
-- **与 Compilation 特性的深度耦合**:
-  不论是 `Input Funnel` 还是 `Phase-Level IO` 拦截，这里用于驱动过滤和裁切漏斗逻辑的所有 JSONSchema 数据来源依据，全部是 [skill-compilation AST 解析时注入并在图检验中查阅完毕的 io_schema 产物](../skill-compilation/mvp0-alignment.md#后端功能)。静态编译阶段提供法则，此模块提供基于法则的动态执法。
-  
-- **向 Execution-Runtime 执行装载提供支撑**:
-  子图与子代理的启动，必然将遭受这层 A6 级黑板屏蔽切断继承的洗礼。这在 [execution-runtime 的运行分发与隔离调用机制](../execution-runtime/mvp0-alignment.md#cross-feature-interaction) 中会直接体现。
+本模块不解析 Markdown。`GRAPH.md io.inputs`、phase `io.inputs` / `io.outputs`、SUBGRAPH target skill 和 reference registry 都来自 [skill-compilation](../skill-compilation/mvp0-alignment.md#后端功能) 的编译产物。
 
-### 6. Phase Wrapper 的上下文准备过程
-在落实 A2 时，我们在 `packages/graph-agent/src/graph_agent/core/phase_node.py` 中引入了 `phase_input` 的装载机制。它的执行细则如下：
-1. **阶段提取**: 从 `BlackboardState.inputs` 中提取当前节点在 `io.inputs` 中声明关联的全局字段。
-2. **前置合并**: 从 `BlackboardState.phase_outputs` 遍历当前节点的 `depends_on` 列表，将合法的输出组装进来。如果出现命名冲突（比如上游的两个节点都输出了 `text` 且当前节点需要 `text`），触发 `[F-v21-io-conflict]` 阻断。
-3. **严格过滤**: 确保任何未声明在这个阶段的输入列表里的属性，都绝对不会被传入给大模型。
+### 2. 与 execution-runtime 的耦合
 
-当前还没有 `phase_node.py` 这个 wrapper；现有逻辑分散在 `graph_assembler.py` 的 LOGIC/SUBGRAPH/SKILL builder，入口分别在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:116`、`packages/graph-agent/src/graph_agent/core/graph_assembler.py:141`、`packages/graph-agent/src/graph_agent/core/graph_assembler.py:177`。MVP0 SHOULD 抽出统一 wrapper，减少三类节点各自绕过 sandbox 的风险。
+execution-runtime 调用 Agent、LOGIC、SUBGRAPH、reference reader 时必须经过本文件定义的 wrapper / StateMapper。runtime 负责执行, state-and-io-contract 负责运行前切片、运行后封装和 child graph 隔离。
 
-### 7. 对遗留字典 `shallow_dict_merge` 的退役计划
-由于 P0-3 所指出的 `packages/graph-agent/src/graph_agent/runtime/state.py:13` 中的函数严重阻碍了单线状态推进，在替换为 `SmartReducer` 之后，我们需要全量清理旧有函数的引用。
-- 在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py` 里面的 `Annotated[dict, shallow_dict_merge]` 会被完全替换为 `Annotated[dict, smart_dict_reducer]`。
-- 为了兼顾可能依赖旧版行为的少部分 V2.0 遗留测例，我们在一段时间内可能保留原函数名但挂上 `@deprecated` 标志。
+### 3. 与 tracing-and-observability 的耦合
 
-### 8. 输入过滤机制的数据纠错与补全 (Coercion)
-关于 A1 中描述的 `Input Funnel`，它不仅承担丢弃无效数据的责任，更在某些安全范围内负责补全：
-- **默认值**: 如果 `io/inputs.json` 中某属性标明了 `default` 且外部未传，Funnel 会补上它。
-- **强制转换**: 对于 Pydantic 支持的安全类型转换（例如 `str` 转 `bool`），引擎会做最佳努力处理，使得 CLI 命令行或者外部 HTTP 触发时，容错率得到提升。
-
-### 9. 状态重置与清理策略
-在很多情况下，`run_skill` 可能需要被反复触发（比如在 Playground 里的批量测试）。如果核心 `data` 没有被完全重置，很容易出现数据串联导致的脏读脏写。
-在 MVP0 中：
-- 我们规定每次启动时，不仅仅是清空 `BlackboardState`，更是要在内部主动释放大体积对象引用。
-- 在 `packages/graph-agent/src/graph_agent/runtime/state.py` 内部会增加 `clear_state()` 的支持。
-
-### 10. 长时运行图的状态保存机制 (Checkpointing)
-尽管目前的重点是把流程隔离并推断跑通，但是考虑到后续的扩展，这套 Reducer 和黑板机制不能对外部是绝对封闭的：
-- 在 `packages/graph-agent/src/graph_agent/core/checkpointer.py` (如果存在) 或 LangGraph 原生的 Checkpointer 的协作下，我们隔离好的 `phase_outputs` 及其字典树，能完美适配 JSON 的序列化。
-- 这意味着以后实现断点续传时，可以精准知道哪些 phase outputs 已存在，哪些需要重跑。
-
-### 11. 与日志及 Trace 观测体系的数据同步
-这里的数据沙箱隔离机制并非仅仅服务于业务的健康运转。在 `tracing-and-observability` 特性的实现中，我们需要向 Studio 返回阶段级别的完整输入输出镜像。
-- 这些日志所依赖的核心数据抓取点，就是建立在经过 `Input Funnel` 过滤以及 `Phase Wrapper` 切分的纯粹结构体之上的。
-- 如果没有这一套无冗余的数据合约作保障，Trace 记录中会充斥着全集数据。观测侧规划见 [tracing-and-observability mvp0 alignment](../tracing-and-observability/mvp0-alignment.md#后端功能)。
-
-这个双向关系也会影响 Studio 的 Edge Inspection。Edge 面板需要展示“上游 phase 实际传给下游 phase 的字段”，而不是整张黑板。只有 StateMapper 能稳定产出 phase-to-phase slice，Trace 才能把它记录下来，Studio 才能在边上展示精确上下文。
+Trace 应记录 canonical root inputs、每个 phase_input、phase_output、child graph canonical input、reference reader fallback。记录的是沙盒后的结构, 不是全量父黑板。观测侧规划见 [tracing-and-observability mvp0 alignment](../tracing-and-observability/mvp0-alignment.md#后端功能)。

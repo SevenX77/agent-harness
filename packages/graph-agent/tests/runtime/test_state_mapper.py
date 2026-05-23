@@ -7,6 +7,7 @@ from graph_agent.core.exceptions import GraphAgentFatalError
 from graph_agent.runtime.state_mapper import (
     PhaseWrapper,
     ReaderSandboxState,
+    ReferenceReaderWrapper,
     StateMapper,
     filter_runtime_inputs,
 )
@@ -79,3 +80,21 @@ def test_reader_sandbox_state_does_not_inherit_parent_blackboard(tmp_path: Path)
     assert state["messages"] == []
     assert state["flow"]["timeout_s"] == 60
     assert state["run_id"] is None
+
+
+def test_reference_reader_wrapper_uses_fresh_messages_and_copied_flow() -> None:
+    seen: dict[str, object] = {}
+
+    def reader(state):
+        seen["messages"] = state["messages"]
+        state["flow"]["timeout_s"] = 1
+        return {"markdown": "ok", "used_reference_ids": []}
+
+    wrapped = ReferenceReaderWrapper().wrap(reader)
+    parent_flow = {"timeout_s": 60}
+
+    result = wrapped({"data": {"skill_id": "demo"}, "flow": parent_flow, "messages": ["old"]})
+
+    assert result["markdown"] == "ok"
+    assert seen["messages"] == []
+    assert parent_flow == {"timeout_s": 60}

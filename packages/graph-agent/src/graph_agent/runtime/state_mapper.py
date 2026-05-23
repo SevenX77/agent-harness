@@ -116,6 +116,32 @@ class PhaseWrapper:
 
 
 @dataclass(frozen=True)
+class ReferenceReaderWrapper:
+    """Assembly-time wrapper for the builtin reference reader subagent."""
+
+    def wrap(
+        self,
+        reader: Callable[[BlackboardState], dict[str, Any]],
+    ) -> Callable[[BlackboardState], dict[str, Any]]:
+        def _wrapped(state: BlackboardState) -> dict[str, Any]:
+            try:
+                return reader(
+                    {
+                        "data": deepcopy(state.get("data", {})),
+                        "flow": deepcopy(state.get("flow", {})),
+                        "messages": [],
+                        "run_id": None,
+                    }
+                )
+            except GraphAgentFatalError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                raise GraphAgentFatalError(f"[F-v3-reference-reader-failed] {exc}") from exc
+
+        return _wrapped
+
+
+@dataclass(frozen=True)
 class ReaderSandboxState:
     """Isolated state envelope for builtin reference reader execution."""
 
@@ -136,6 +162,7 @@ class ReaderSandboxState:
 __all__ = [
     "PhaseWrapper",
     "ReaderSandboxState",
+    "ReferenceReaderWrapper",
     "StateMapper",
     "filter_runtime_inputs",
     "schema_properties",

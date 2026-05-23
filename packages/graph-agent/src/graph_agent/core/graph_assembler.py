@@ -47,7 +47,7 @@ from graph_agent.core.subagents import (
     validate_subagent_tool_args,
 )
 from graph_agent.runtime.state import BlackboardState
-from graph_agent.runtime.state_mapper import PhaseWrapper, StateMapper
+from graph_agent.runtime.state_mapper import PhaseWrapper, ReferenceReaderWrapper, StateMapper
 from graph_agent.tools.builtin.read_example import build_read_example_tool
 from graph_agent.tools.builtin.read_reference import build_read_reference_tool
 
@@ -447,11 +447,28 @@ def _reference_reader_markdown(
         references=reference_items,
     )
     try:
-        output = output_from_any(read_references_for_prompt(payload))
+        output = output_from_any(_run_reference_reader_wrapped(payload))
         return output.markdown
     except Exception as exc:  # noqa: BLE001
         logger.warning("[F-v3-reference-reader-failed] %s", exc)
         return fallback_reference_markdown(reference_items)
+
+
+def _run_reference_reader_wrapped(payload: ReferenceReaderInput) -> dict[str, Any]:
+    def _reader(_state: BlackboardState) -> dict[str, Any]:
+        return read_references_for_prompt(payload).__dict__
+
+    state: BlackboardState = {
+        "data": {
+            "skill_id": payload.skill_id,
+            "phase_id": payload.phase_id,
+            "references": payload.references,
+        },
+        "flow": {"timeout_s": 60},
+        "messages": [],
+        "run_id": None,
+    }
+    return ReferenceReaderWrapper().wrap(_reader)(state)
 
 
 def _agent_resource_tools(

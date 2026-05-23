@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from graph_agent import (
@@ -12,6 +13,7 @@ from graph_agent import (
 )
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.loader import load_workflow_from_md
+from tests.conftest import InMemorySkillResolver
 from tests.core.test_v21_graph_assembly import _base, _logic
 
 
@@ -22,6 +24,19 @@ def test_compile_skill_facade_returns_compiled(tmp_path: Path) -> None:
     compiled = compile_skill(tmp_path, cache=False)
 
     assert isinstance(compiled, CompiledSkill)
+
+
+def test_compile_skill_facade_passes_skill_resolver(tmp_path: Path) -> None:
+    resolver = InMemorySkillResolver({})
+
+    with patch("graph_agent.core.compiler.SkillLoader") as loader_cls:
+        loader = loader_cls.return_value
+        loader.compile_skill.return_value = "compiled"
+
+        result = compile_skill(tmp_path, cache=False, skill_resolver=resolver)
+
+    assert result == "compiled"
+    loader.compile_skill.assert_called_once_with(tmp_path, skill_resolver=resolver)
 
 
 def test_assemble_graph_facade_returns_compiled_state_graph(tmp_path: Path) -> None:

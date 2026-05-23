@@ -13,7 +13,11 @@ runtime failure deep in a single test case.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from pathlib import Path
+
 import pytest
+from graph_agent.core import SkillResolutionError
 
 # Import-time sanity: ensure the MVP-3 middleware package is importable
 # before any test runs. The actual ordering assertions live in the
@@ -39,6 +43,22 @@ collect_ignore_glob = [
     "core/validators/test_tool_paths.py",
     "integration/test_mvp2_schema_io.py",
 ]
+
+
+class InMemorySkillResolver:
+    def __init__(self, roots: dict[str, Path]) -> None:
+        self.roots = roots
+
+    def resolve_skill(self, skill_id: str) -> Path:
+        try:
+            return self.roots[skill_id]
+        except KeyError as exc:
+            raise SkillResolutionError(skill_id, "not registered") from exc
+
+
+@pytest.fixture
+def in_memory_skill_resolver_factory() -> Callable[[dict[str, Path]], InMemorySkillResolver]:
+    return InMemorySkillResolver
 
 # Test paths that depend on the live repo skills using the V2.1 layout
 # (GRAPH.md / phases/). Phase 1 baseline intentionally imported V1 layout

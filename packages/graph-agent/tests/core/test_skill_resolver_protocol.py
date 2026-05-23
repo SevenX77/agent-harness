@@ -9,17 +9,7 @@ from graph_agent.core import (
     resolve_skill_root,
     validate_skill_id,
 )
-
-
-class InMemorySkillResolver:
-    def __init__(self, roots: dict[str, Path]) -> None:
-        self.roots = roots
-
-    def resolve_skill(self, skill_id: str) -> Path:
-        try:
-            return self.roots[skill_id]
-        except KeyError as exc:
-            raise SkillResolutionError(skill_id, "not registered") from exc
+from tests.conftest import InMemorySkillResolver
 
 
 def _write_graph_root(root: Path) -> None:

@@ -45,10 +45,11 @@ def compile_skill(
     cache: bool = True,
     skill_resolver: SkillResolverProtocol | None = None,
 ) -> CompiledSkill:
-    """Compile a V2.1 skill root into a CompiledSkill.
+    """Compile a graph skill root into a CompiledSkill.
 
     ``chat_model`` is accepted for the stable T1.5 public signature; compilation itself
     is model-free. LangGraph assembly receives the model separately.
+    ``skill_resolver`` is passed through to the loader for child-skill resolution.
     """
 
     del chat_model

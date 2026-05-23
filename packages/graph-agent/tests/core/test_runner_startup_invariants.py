@@ -22,6 +22,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from graph_agent.bootstrap import Bootstrap
 from graph_agent.core import runner as runner_module
+from graph_agent.core.result import WorkflowResult
+from tests.conftest import InMemorySkillResolver
 
 SRC_RUNNER = Path(runner_module.__file__)
 SRC_CORE_INIT = SRC_RUNNER.parent / "__init__.py"
@@ -149,3 +151,26 @@ class TestRunnerMainBootstrapWiring:
         # Required ordering: apply_patches → load_dotenv → load_settings.
         assert call_order.index("apply_patches") < call_order.index("load_dotenv")
         assert call_order.index("load_dotenv") < call_order.index("load_settings")
+
+
+class TestRunSkillResolverWiring:
+    def test_run_skill_passes_skill_resolver_to_dict_runner(self, tmp_path: Path) -> None:
+        skill = tmp_path / "GRAPH.md"
+        skill.write_text("---\nname: parent\n---\n", encoding="utf-8")
+        resolver = InMemorySkillResolver({})
+
+        def _fake_run_skill_dict(*_args: object, **kwargs: object) -> dict[str, object]:
+            assert kwargs["skill_resolver"] is resolver
+            return {
+                "run_id": "r1",
+                "context": {},
+                "metrics": {},
+                "trace_path": None,
+                "wall_time_sec": 0.0,
+            }
+
+        with patch("graph_agent.core.runner._run_skill_dict", _fake_run_skill_dict):
+            result = runner_module.run_skill(tmp_path, skill_resolver=resolver)
+
+        assert isinstance(result, WorkflowResult)
+        assert result.success is True

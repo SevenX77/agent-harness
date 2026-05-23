@@ -257,6 +257,8 @@ def _run_skill_dict(
             checkpoint after the pipeline has technically finished
             (e.g. human review loops, golden regression data gathering).
             Task 2.8 (simplified) — see deferred-items.md D-2.8.
+        skill_resolver: Resolver injected into graph skill compile/runtime for
+            target_skill based child graph lookup.
         **inputs: Runtime inputs matching SKILL.md io.inputs declarations.
             Each kwarg name must match an input's ``name`` field.
 

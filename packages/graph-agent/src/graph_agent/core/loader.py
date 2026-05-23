@@ -33,6 +33,7 @@ from graph_agent.core.manifest import (
 from graph_agent.core.mentions import first_broken_mention, scan_mentions
 from graph_agent.core.parser import (
     extract_raw_blocks,
+    locate_line_for_pydantic_loc,
     parse_markdown_parts,
     scan_forbidden_topology_tags,
 )
@@ -151,13 +152,11 @@ class SkillLoader:
         _guard_v21_root(root)
 
         graph_path = root / "GRAPH.md"
-        graph_text = graph_path.read_text(encoding="utf-8")
         graph_frontmatter, graph_body, line_meta = parse_markdown_parts(graph_path)
-        raw_attrs = _extract_phase_attrs(graph_body, line_meta["body_start"])
-        manifest = _build_graph_manifest(graph_path, graph_frontmatter, graph_body, raw_attrs)
-        phase_tokens = _extract_phase_token_info(graph_text, graph_body, line_meta["body_start"])
-        if manifest.phases and "phases" in graph_frontmatter:
-            raw_attrs = _phase_refs_to_raw_attrs(manifest.phases)
+        _reject_graph_body_phase_xml(graph_path, graph_body, line_meta["body_start"])
+        manifest = _build_graph_manifest(graph_path, graph_frontmatter)
+        raw_attrs = _phase_refs_to_raw_attrs(manifest.phases, graph_frontmatter)
+        phase_tokens: dict[str, PhaseTokenInfo] = {}
         _validate_graph_topology(graph_path, raw_attrs, root)
         if manifest.io is not None:
             io_inputs = _validate_inline_io_schema(graph_path, manifest.io.inputs, "input")
@@ -593,32 +592,9 @@ def _validate_mode_matches_filename(path: Path, yaml_mode: str) -> None:
 def _build_graph_manifest(
     path: Path,
     frontmatter: dict[str, Any],
-    body: str,
-    raw_attrs: list[_RawPhaseAttrs],
 ) -> GraphManifest:
     data = dict(frontmatter)
     data.setdefault("schema_version", "2.1")
-
-    input_ref = _first_src(body, "input")
-    output_ref = _first_src(body, "output")
-    if input_ref:
-        data["io_inputs_ref"] = input_ref
-    if output_ref:
-        data["io_outputs_ref"] = output_ref
-
-    if "phases" not in data:
-        phases: list[GraphPhaseRef] = []
-        for attrs in raw_attrs:
-            if attrs.id is None or attrs.src is None:
-                continue
-            phases.append(
-                GraphPhaseRef(
-                    id=attrs.id,
-                    src=attrs.src,
-                    depends_on=attrs.depends_on,
-                )
-            )
-        data["phases"] = phases
 
     try:
         return GraphManifest.model_validate(data)
@@ -626,16 +602,27 @@ def _build_graph_manifest(
         _fatal(path, 1, f"GRAPH.md manifest validation failed: {exc}")
 
 
-def _phase_refs_to_raw_attrs(phases: list[GraphPhaseRef]) -> list[_RawPhaseAttrs]:
+def _reject_graph_body_phase_xml(path: Path, body: str, body_start_line: int) -> None:
+    match = re.search(r"<phase\b", body, re.IGNORECASE)
+    if match is None:
+        return
+    line = body_start_line + body[: match.start()].count("\n")
+    _graph_fatal(path, line, "GRAPH.md phases must be declared in frontmatter phases YAML list")
+
+
+def _phase_refs_to_raw_attrs(
+    phases: list[GraphPhaseRef],
+    frontmatter: dict[str, Any],
+) -> list[_RawPhaseAttrs]:
     return [
         _RawPhaseAttrs(
             id=phase.id,
             src=phase.src,
             depends_on_raw=",".join(phase.depends_on),
             depends_on=phase.depends_on,
-            line=1,
+            line=locate_line_for_pydantic_loc(frontmatter, ("phases", index)) or 1,
         )
-        for phase in phases
+        for index, phase in enumerate(phases)
     ]
 
 

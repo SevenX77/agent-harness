@@ -25,6 +25,7 @@ from graph_agent.cognitive.md_patch import LLMMdPatchClient
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
 from graph_agent.core.loader import CompiledSkill, CompiledSubagent, PhaseDocument, SkillLoader
 from graph_agent.core.manifest import GraphManifest, LogicNodeAST, SkillNodeAST, SubgraphNodeAST
+from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
 from graph_agent.core.subagents import (
     SubagentValidationFailure,
     assert_subagent_depth_allowed,
@@ -57,6 +58,7 @@ def assemble_graph(
     *,
     chat_model: Any = None,
     max_patch_attempts: int = 3,
+    skill_resolver: SkillResolverProtocol | None = None,
 ) -> CompiledStateGraph:
     """Assemble a V2.1 CompiledSkill into a compiled LangGraph."""
 
@@ -71,7 +73,14 @@ def assemble_graph(
             _graph_fatal(f"phase {phase_ref.id!r} has no parsed node")
         builder.add_node(
             phase_ref.id,
-            _build_phase_node(phase_ref.id, phase_doc, compiled, chat_model, max_patch_attempts),
+            _build_phase_node(
+                phase_ref.id,
+                phase_doc,
+                compiled,
+                chat_model,
+                max_patch_attempts,
+                skill_resolver,
+            ),
         )
         phase_ids.append(phase_ref.id)
 
@@ -102,14 +111,28 @@ def _build_phase_node(
     compiled: CompiledSkill,
     chat_model: Any,
     max_patch_attempts: int,
+    skill_resolver: SkillResolverProtocol | None,
 ) -> Any:
     ast = phase_doc.ast
     if isinstance(ast, LogicNodeAST):
         return _build_logic_node(phase_id, ast, compiled)
     if isinstance(ast, SubgraphNodeAST):
-        return _build_subgraph_node(phase_doc, ast, chat_model, max_patch_attempts)
+        return _build_subgraph_node(
+            phase_doc,
+            ast,
+            chat_model,
+            max_patch_attempts,
+            skill_resolver,
+        )
     if isinstance(ast, SkillNodeAST):
-        return _build_skill_node(phase_id, ast, compiled, chat_model, max_patch_attempts)
+        return _build_skill_node(
+            phase_id,
+            ast,
+            compiled,
+            chat_model,
+            max_patch_attempts,
+            skill_resolver,
+        )
     _graph_fatal(f"unknown phase mode for {phase_id!r}")
 
 
@@ -143,13 +166,18 @@ def _build_subgraph_node(
     phase_ast: SubgraphNodeAST,
     chat_model: Any,
     max_patch_attempts: int,
+    skill_resolver: SkillResolverProtocol | None,
 ) -> Any:
     sub_root = _resolve_sub_skill_path(phase_doc.path, phase_ast.sub_skill_ref)
-    sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(sub_root)
+    sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(
+        sub_root,
+        skill_resolver=skill_resolver,
+    )
     sub_assembled = assemble_graph(
         sub_compiled,
         chat_model=chat_model,
         max_patch_attempts=max_patch_attempts,
+        skill_resolver=skill_resolver,
     )
 
     def _subgraph_node(state: BlackboardState) -> dict[str, Any]:
@@ -180,6 +208,7 @@ def _build_skill_node(
     compiled: CompiledSkill,
     chat_model: Any,
     max_patch_attempts: int,
+    skill_resolver: SkillResolverProtocol | None,
 ) -> Any:
     business_tools = compiled.tools.for_phase(phase_id)
     tool_by_name = {tool.name: tool for tool in business_tools}
@@ -188,6 +217,7 @@ def _build_skill_node(
         subagent_by_tool_name,
         chat_model=chat_model,
         max_patch_attempts=max_patch_attempts,
+        skill_resolver=skill_resolver,
     )
     framework_tools = []
     critic_metrics: dict[str, Any] = {}
@@ -376,14 +406,19 @@ def _subagent_runtime_map(
     *,
     chat_model: Any,
     max_patch_attempts: int,
+    skill_resolver: SkillResolverProtocol | None,
 ) -> dict[str, _SubagentRuntime]:
     runtimes: dict[str, _SubagentRuntime] = {}
     for tool_name, subagent in subagent_by_tool_name.items():
-        sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(subagent.root)
+        sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(
+            subagent.root,
+            skill_resolver=skill_resolver,
+        )
         sub_assembled = assemble_graph(
             sub_compiled,
             chat_model=chat_model,
             max_patch_attempts=max_patch_attempts,
+            skill_resolver=skill_resolver,
         )
         runtimes[tool_name] = _SubagentRuntime(subagent=subagent, graph=sub_assembled.graph)
     return runtimes

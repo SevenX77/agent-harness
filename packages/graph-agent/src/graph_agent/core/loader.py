@@ -36,6 +36,7 @@ from graph_agent.core.parser import (
     scan_forbidden_topology_tags,
 )
 from graph_agent.core.purity import scan_python_purity, scan_tool_imports_context
+from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol, resolve_skill_root
 from graph_agent.core.subagents import build_subagent_input_model, build_subagent_tool_args_model
 
 logger = logging.getLogger(__name__)
@@ -81,7 +82,7 @@ class CompiledSubagent:
 
     parent_phase_id: str
     name: str
-    path: str
+    target_skill: str
     description: str
     root: Path
     input_schema: dict[str, Any]
@@ -139,7 +140,12 @@ class SkillLoader:
         del args, kwargs
         self.validate_context_writes = validate_context_writes
 
-    def compile_skill(self, skill_root: str | Path) -> CompiledSkill:
+    def compile_skill(
+        self,
+        skill_root: str | Path,
+        *,
+        skill_resolver: SkillResolverProtocol | None = None,
+    ) -> CompiledSkill:
         root = Path(skill_root)
         _guard_v21_root(root)
 
@@ -173,7 +179,11 @@ class SkillLoader:
             output_schema_keys,
             validate_context_writes=self.validate_context_writes,
         )
-        subagents_by_phase = _compile_subagent_metadata(root, phase_docs)
+        subagents_by_phase = _compile_subagent_metadata(
+            root,
+            phase_docs,
+            skill_resolver=skill_resolver,
+        )
         tools = _inject_subagent_tools(tools, subagents_by_phase)
 
         raw = {
@@ -340,6 +350,8 @@ def _discover_actions_and_tools(
 def _compile_subagent_metadata(
     skill_root: Path,
     phase_docs: list[PhaseDocument],
+    *,
+    skill_resolver: SkillResolverProtocol | None = None,
 ) -> dict[str, list[CompiledSubagent]]:
     subagents_by_phase: dict[str, list[CompiledSubagent]] = {}
     for doc in phase_docs:
@@ -347,8 +359,24 @@ def _compile_subagent_metadata(
             continue
         phase_subagents: list[CompiledSubagent] = []
         for spec in doc.ast.subagents:
-            sub_root = _resolve_subagent_root(skill_root, doc.path, spec.path, spec.name)
-            sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(sub_root)
+            if spec.target_skill is not None:
+                if skill_resolver is None:
+                    _fatal(
+                        doc.path,
+                        _frontmatter_key_line(doc.path, "phase_config"),
+                        f"subagent {spec.name!r} declares target_skill "
+                        f"{spec.target_skill!r} but no skill_resolver was provided",
+                    )
+                sub_root = resolve_skill_root(skill_resolver, spec.target_skill)
+                target_skill = spec.target_skill
+            else:
+                legacy_path = cast(str, spec.path)
+                sub_root = _resolve_subagent_root(skill_root, doc.path, legacy_path, spec.name)
+                target_skill = legacy_path
+            sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(
+                sub_root,
+                skill_resolver=skill_resolver,
+            )
             input_schema = sub_compiled.raw.get("io", {}).get("inputs")
             if not isinstance(input_schema, dict) or not input_schema:
                 _fatal(
@@ -372,7 +400,7 @@ def _compile_subagent_metadata(
                 CompiledSubagent(
                     parent_phase_id=doc.phase_name,
                     name=spec.name,
-                    path=spec.path,
+                    target_skill=target_skill,
                     description=spec.description,
                     root=sub_root,
                     input_schema=input_schema,
@@ -430,7 +458,8 @@ def _subagent_tool_def(
         metadata={
             "kind": "subagent",
             "subagent_name": subagent.name,
-            "subagent_path": subagent.path,
+            "target_skill": subagent.target_skill,
+            "subagent_path": subagent.target_skill,
             "subagent_root": str(subagent.root),
             "expected_schema": subagent.expected_schema,
         },

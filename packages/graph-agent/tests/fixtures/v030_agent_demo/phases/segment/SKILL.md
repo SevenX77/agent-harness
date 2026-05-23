@@ -48,19 +48,17 @@ You are a narrative segmentation editor.
 Segment chapter_content using @reference:R1 and compare tricky cases with @example:E2.
 </goal>
 
-<workflow>
-  <step id="S1" name="read_reference">
-  Read the segmentation criteria from @reference:R1 and follow @protocol:P1.
-  </step>
+<step id="S1" name="read_reference">
+Read the segmentation criteria from @reference:R1 and follow @protocol:P1.
+</step>
 
-  <step id="S2" name="review_with_subagent">
-  Ask @subagent:echo_expert for a concise review note when the boundary is ambiguous.
-  </step>
+<step id="S2" name="review_with_subagent">
+Ask @subagent:echo_expert for a concise review note when the boundary is ambiguous.
+</step>
 
-  <step id="S3" name="finish">
-  Call @tool:finish_task with structured segment data.
-  </step>
-</workflow>
+<step id="S3" name="finish">
+Call @tool:finish_task with structured segment data.
+</step>
 
 <protocol id="P1">
 A setting explanation is separate from a physical event unless both sentences are inseparable.

@@ -1036,7 +1036,6 @@ def _build_phase_document(
         "goal",
         "step",
         "protocol",
-        "system_prompt",
         "exit_contract",
         "python_callable",
         "sub_skill_ref",
@@ -1113,8 +1112,11 @@ def _parse_agent_body(
     body: str,
     blocks: dict[str, str],
 ) -> dict[str, Any]:
-    if "<steps" in body.lower() or "</steps" in body.lower():
-        _fatal(path, _xml_line(body, body.lower().find("<steps")), "unknown top-level tag steps")
+    _validate_agent_body_tags(path, body)
+    for tag in ("role", "goal", "exit_contract"):
+        count = _count_xml_blocks(body, tag)
+        if count > 1:
+            _fatal(path, 1, f"[F-v3-agent-{tag.replace('_', '-')}-duplicate] duplicate <{tag}>")
     role = blocks.get("role")
     goal = blocks.get("goal")
     exit_contract = blocks.get("exit_contract")
@@ -1131,6 +1133,28 @@ def _parse_agent_body(
         "protocols": _extract_agent_protocols(path, body),
         "exit_contract": exit_contract,
     }
+
+
+def _validate_agent_body_tags(path: Path, body: str) -> None:
+    allowed = {"role", "goal", "step", "protocol", "exit_contract"}
+    forbidden_shells = {"workflow", "steps", "protocols"}
+    tag_re = re.compile(r"<\s*/?\s*([A-Za-z_][\w:-]*)\b", re.IGNORECASE)
+    for match in tag_re.finditer(body):
+        tag = match.group(1).lower()
+        if tag in forbidden_shells or tag not in allowed:
+            _fatal(
+                path,
+                _xml_line(body, match.start()),
+                f"[F-v3-agent-body-tag-invalid] unknown top-level tag {tag}",
+            )
+
+
+def _count_xml_blocks(body: str, tag: str) -> int:
+    pattern = re.compile(
+        rf"<{re.escape(tag)}(?:\s[^>]*)?>.*?</{re.escape(tag)}>",
+        re.DOTALL | re.IGNORECASE,
+    )
+    return len(pattern.findall(body))
 
 
 def _extract_agent_steps(path: Path, body: str) -> list[dict[str, str]]:

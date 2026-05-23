@@ -29,11 +29,9 @@ You echo review notes.
 Return a short echoed note.
 </goal>
 
-<workflow>
-  <step id="S1" name="echo">
-  Echo the note.
-  </step>
-</workflow>
+<step id="S1" name="echo">
+Echo the note.
+</step>
 
 <protocol id="P1">
 Keep the response brief.

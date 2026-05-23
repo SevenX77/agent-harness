@@ -29,11 +29,9 @@ You echo review notes for the parent Agent.
 Return a concise review note.
 </goal>
 
-<workflow>
-  <step id="S1" name="echo">
-  Echo the provided note.
-  </step>
-</workflow>
+<step id="S1" name="echo">
+Echo the provided note.
+</step>
 
 <protocol id="P1">
 Keep the response brief.

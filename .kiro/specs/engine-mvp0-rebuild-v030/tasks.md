@@ -1,6 +1,6 @@
 # Tasks: Engine MVP0 Rebuild V0.3.0 Cutover
 
-本文档只规划 `packages/graph-agent/src/` 与 `packages/graph-agent/tests/` 的 V0.3.0 graph_skill cutover 实施任务, 不包含 Studio backend / Studio frontend 实施。所有实现必须对齐 `docs/engine/skill-spec/` 字段级规范和 5 个 engine 子模块 MVP0 alignment 文档。
+本文档规划 V0.3.0 graph_skill cutover 的原子实施任务: `packages/graph-agent/src/`、`packages/graph-agent/tests/`、以及为 `SkillResolverProtocol` hard cutover 必需的 Studio backend / frontend / Tauri 配套改动。所有实现必须对齐 `docs/engine/skill-spec/` 字段级规范和 engine 子模块 MVP0 alignment 文档, 不做任何向后兼容。
 
 ## 整体框架
 
@@ -17,9 +17,9 @@
 
 预计净改动: src 约 25-32 文件, +3800 / -1650 行; tests 约 35-50 文件, +2500 / -1200 行。
 
-### 拆 PR 策略
+### 单 PR 原子切换策略
 
-PM 已拍板按层切 3 PR: engine src / Studio backend / Studio frontend。本 cutover 只做 engine src, 一个 PR 入 main。PR 内可拆 8-12 个小 commit:
+按 PM 2026-05-23 原则和 a1+a2 cross-verify 收敛结论, 本 cutover 采用**单 PR 原子切换**: engine src + graph-agent tests + Studio backend (`StudioSkillResolver` + import endpoint) + Studio frontend (Assets Panel SUBGRAPH 类目) + Studio Tauri (`pick_folder` command) 放进同一 cutover PR。PR 内拆 8-12 个小 commit 分层 review; main 只接受原子切换后的完整状态。依据: `docs/engine/skill-spec/10-skill-resolver-protocol-spec.md:63-75` 要求含 child graph 的入口强注入 resolver, 缺 resolver FATAL, 拆 PR 会产生兼容 fallback 或 broken main。
 
 1. skill-resolution Protocol 独立 commit。
 2. AST / manifest / loader schema commit。
@@ -82,7 +82,7 @@ Merge 前必须满足:
   - 更新 `packages/graph-agent/tests/core/test_runner_startup_invariants.py`
   - 新增 fixture `InMemorySkillResolver`
 - 风险点:
-  - 大量旧测试直接调用 `compile_skill(root)`; 需要对不含 child skill 的图允许 None, 或在 tests 中统一注入 no-op resolver。
+  - 大量旧测试直接调用 `compile_skill(root)`; 含 child skill 的测试必须统一注入 resolver fixture, 不允许靠 fallback / mock resolver 掩盖 missing resolver。
   - CLI / `__main__` 调用可能仍缺 resolver, 需显式处理。
 
 #### A3. 退役旧 subagent 物理路径扫描
@@ -540,58 +540,138 @@ Merge 前必须满足:
 - 风险点:
   - Avoid breaking public exception str too hard; keep human-readable message.
 
-### G. Schema Cleanup (finalized decisions)
+### G. Schema Cleanup (按 PM 2026-05-23 原则: 对齐 docs mvp0, 不做任何向后兼容)
 
-本节承接 2026-05-23 已 finalized 的 cleanup 决策。它只定义 V0.3.0 cutover 后应清理的 legacy/schema 2.0 残留和 pre-existing test 处理方式, 不删除 V2.1/V0.3.0 主路径。`_run_v21_skill_dict`, `compile_skill`, `assemble_graph`, `BlackboardState` 等当前 graph skill 主线不是 T11 cleanup 对象。
+本节实施 PM 2026-05-23 拍板 hard cutover: V2.1 主路径 + codemod + schema 2.0 stub + V2.1 fixture + 旧 test + context_mapping 全链路 + python_callable + 伪需求 docs-frontmatter-schema 全清, 不留向后兼容代码 / fallback / mock.
 
-#### G1. T11.1 清 legacy schema 2.0 残留
+#### G1. V2.1 main path 全删
+- 改 files:
+  - `packages/graph-agent/src/graph_agent/core/runner.py`
+  - `packages/graph-agent/src/graph_agent/core/compiler.py`
+  - `packages/graph-agent/src/graph_agent/core/graph_assembler.py`
+  - `packages/graph-agent/src/graph_agent/runtime/state.py`
+- 改 lines / 函数 / 类:
+  - 删除 `runner.py:456-525` `_run_v21_skill_dict()`。
+  - 删除 `runner.py:274` 调用 `_run_v21_skill_dict` 的 dispatch 分支。
+  - 删除 `compiler.py` 中 V2.1 兼容代码; 实施时 grep `_run_v21|v21_` 确认范围。
+  - 删除 `graph_assembler.py` 中 V2.1 兼容; SUBGRAPH / subagent 只走 `target_skill` + `SkillResolverProtocol`。
+  - 删除 `runtime/state.py` 中 V2.1 `BlackboardState` path; V0.3.0 state shape 以 `data.inputs` / `data.phase_outputs` / `data.scratch` 为准。
+- 依赖 tasks: A-F V0.3.0 replacements complete.
+- 测试影响:
+  - 删除 / 重写仍断言 V2.1 runner/compiler/assembler/state 的 tests。
+  - 增加 grep guard: `rg "_run_v21_skill_dict|v21_|sub_skill_ref|BlackboardState" packages/graph-agent/src packages/graph-agent/tests` 无 active V2.1 main-path 残留。
+- 风险点:
+  - 不允许把旧路径改名成 V0.3.0 facade; 语义必须来自 `docs/engine/skill-spec/`.
+
+#### G2. codemod 全删
+- 改 files:
+  - 删除 `packages/graph-agent/src/graph_agent/codemod/v21_migrator.py`
+  - 删除 `packages/graph-agent/src/graph_agent/codemod/` 目录, 如清空
+- 改 lines / 函数 / 类:
+  - 删除整个 schema 2.0 -> V2.1 migration helper; 该文件约 454 行, V0.3.0 不需要。
+  - 删除所有 imports / CLI references / tests that mention `v21_migrator`.
+- 依赖 tasks: G1, B8 fixture migration.
+- 测试影响:
+  - 删除 codemod unit / golden fixtures。
+  - grep guard: `rg "v21_migrator|codemod_v20" packages/graph-agent/src packages/graph-agent/tests` 无 active match.
+- 风险点:
+  - 不保留 dry-run helper; 保留会暗示 schema 2.0 / V2.1 迁移仍是 supported path.
+
+#### G3. schema 2.0 parser stub 全删
 - 改 files:
   - `packages/graph-agent/src/graph_agent/core/parser.py`
-  - `packages/graph-agent/src/graph_agent/core/harness.py`
-  - `packages/graph-agent/src/graph_agent/core/state.py`
-  - 保留 `packages/graph-agent/src/graph_agent/codemod/v21_migrator.py`
 - 改 lines / 函数 / 类:
-  - 检查并删除 `parse_skill_file()` deprecated schema 2.0 stub 的死依赖; 当前 stub 在 `parser.py:235-237` 已 hard-cut 抛错, 只允许保留必要 import compatibility。
-  - 删除 legacy harness 路径中 `GraphAgentHarness` 对 schema 2.0 workflow 的入口; 当前 `GraphAgentHarness.__init__` 仍接 `context_mapping`, 见 `harness.py:356-362`。
-  - 删除 legacy callbacks 字段和相关调用; 当前 `self.callbacks = callbacks or []` 在 `harness.py:369`。
-  - 删除 legacy `BusinessData` / `WorkflowState` 运行路径; 当前 harness run 仍构造 `WorkflowState(data=BusinessData.model_validate(...))`, 见 `harness.py:506-508`。
-  - 保留 `codemod/v21_migrator.py`; 它是 schema 2.0 -> V2.1 一次性 dry-run 迁移辅助, 文件说明在 `codemod/v21_migrator.py:1-4`, 主入口在 `codemod/v21_migrator.py:61-62`。
-- 依赖 tasks: A-F core implementations merged; V0.3.0 graph skill 主路径已稳定。
+  - 删除 `parser.py:230-245` `parse_skill_file` stub。
+  - 删除 `locate_line_for_pydantic_loc` 旧 AST line 定位器和死依赖。
+  - 检查 parser.py 是否还有 V2.1 / schema 2.0 残留: `rg "schema_version|parse_skill_file|<phase\\b" packages/graph-agent/src/graph_agent/core/parser.py`.
+- 依赖 tasks: B3/B4 V0.3.0 YAML/frontmatter parser complete.
 - 测试影响:
-  - 删除或迁移仍调用 legacy harness / `parse_skill_file()` 的 tests。
-  - 增加 grep guard: production entry 不再引用 schema 2.0 parser / legacy harness。
+  - 删除仍 import `parse_skill_file` 或 `locate_line_for_pydantic_loc` 的 tests。
+  - V0.3.0 source-span tests 后续由 parser implementation 新增, 不保留旧 test skip。
 - 风险点:
-  - 不要把 V2.1 graph skill 主路径当 legacy 删除。`_run_v21_skill_dict`, `compile_skill`, `assemble_graph` 是当前主线, T11 不碰。
+  - 删除 stub 后 public import 可能断; 这是 hard cutover, 不补 compatibility shim.
 
-#### G2. T11.2 删 ContextResolver 死代码
+#### G4. V2.1 fixture 全清
+- 改 files:
+  - 删除 `packages/graph-agent/tests/fixtures/canvas_serializer/with_comments_v21/`
+  - 删除 `packages/graph-agent/tests/fixtures/codemod_v20/{multi_phase,complex}/SKILL.md`
+  - 删除 `packages/graph-agent/tests/fixtures/subagent_minimal/GRAPH.md` 和 `phases/main/subskills/echo_expert/GRAPH.md`
+  - 删除 `packages/graph-agent/tests/fixtures/fake_canvas_fanout/`
+  - 新建 V0.3.0 minimal fixtures covering `GRAPH.md`, `SKILL.md`, `LOGIC.md`, and `SUBGRAPH.md`
+- 改 lines / 函数 / 类:
+  - 实施时 grep `schema_version.*"2\\.[01]"|<python_callable>` 确认完整清单。
+  - 旧 `mode: skill`, `<phase />`, physical `io/*.json`, relative subskill paths, and `<python_callable>` fixtures must not remain in active tests.
+- 依赖 tasks: B1-B8 parser and schema tasks.
+- 测试影响:
+  - Update integration/e2e fixtures to `schema_version: "0.3.0"`.
+  - Add target_skill registry fixture and resolver fixture for child graph coverage.
+- 风险点:
+  - Fixture deletion must be paired with test deletion/rewrite so CI does not silently point at missing paths.
+
+#### G5. #14 test_compiler_line_locations 直接删
+- 改 files:
+  - 删除 `packages/graph-agent/tests/core/test_compiler_line_locations.py`
+  - `packages/graph-agent/src/graph_agent/core/parser.py`
+- 改 lines / 函数 / 类:
+  - 删除 `parser.py:230-245` `locate_line_for_pydantic_loc` / old AST line-location helper.
+  - 不加 `@pytest.mark.skip`; 不保留 deferred V2.1 test.
+- 依赖 tasks: G3.
+- 测试影响:
+  - CI 不再包含 V2.1 line-location test。
+  - V0.3.0 YAML/frontmatter source-span test 在 parser cutover implementation 中重新添加。
+- 风险点:
+  - 新测试必须围绕 V0.3.0 AST and source spans, not V2.1 Pydantic loc behavior.
+
+#### G6. context_mapping 全链路清
 - 改 files:
   - 删除 `packages/graph-agent/src/graph_agent/io/context_resolver.py`
-  - 更新 / 删除 `packages/graph-agent/src/graph_agent/core/harness.py` 中 `context_mapping` 调用
-  - 更新 / 删除 `packages/graph-agent/src/graph_agent/core/validators/` 中 context_mapping 相关 validator
-  - 更新 docs 中 `context_mapping` 的旧语义描述
+  - 更新 / 删除 `packages/graph-agent/src/graph_agent/core/harness.py`
+  - 更新 / 删除 `packages/graph-agent/src/graph_agent/core/validators/prompt_quality.py`
+  - 更新 / 删除 `packages/graph-agent/src/graph_agent/core/validators/template_variables.py`
+  - 删除 `packages/graph-agent/src/graph_agent/skills/builtin/md-patch/`
+  - 删除 `packages/graph-agent/src/graph_agent/tools/md_to_json.py`
+  - 删除含 `context_mapping` 的 fixtures, especially `tests/fixtures/codemod_v20/**/SKILL.md`
 - 改 lines / 函数 / 类:
-  - `GraphAgentHarness.__init__(..., context_mapping: dict[str, str] | None = None, ...)` 是 legacy 入口, 见 `harness.py:356-362`; V0.3.0 主线 `assemble_graph` + `_run_v21_skill_dict` 不走该入口。
-  - 删除 `ContextResolver` 双模推断, 不再维护 `context_mapping` 与 `io.inputs` / `io.outputs` 并存语义。
-  - docs 改为只描述 JSON Schema 白名单切片: root `io.inputs` -> canonical inputs, phase `io.inputs` -> phase input, phase `io.outputs` -> phase output。
-- 依赖 tasks: D1-D5 StateMapper / Phase Wrapper 完成; B4 root inline IO 完成。
+  - 删除 `harness.py:356-362, 371, 847, 851` context_mapping entry/internal refs; 如果 legacy harness 只服务旧 schema, 可整体删除。
+  - 删除 `prompt_quality.py:186` implicit context_mapping validation。
+  - 删除 `template_variables.py:27, 44` placeholder validation tied to context_mapping。
+  - 删除 builtin md-patch and `md_to_json.py`; V0.3.0 docs have zero hits for this builtin path.
+- 依赖 tasks: D1-D5 StateMapper / Phase Wrapper complete; G2/G4 codemod fixtures removed.
 - 测试影响:
-  - 删除 context_mapping resolver unit tests。
-  - 更新 validator tests, 让数据流校验只按 schema properties / required 字段判断。
+  - Delete context resolver unit tests and old validator tests.
+  - Update tests to assert schema properties / required fields, not context_mapping aliases.
 - 风险点:
-  - Studio / docs 如仍展示 context_mapping, 必须同步删除或标记 deprecated, 否则会误导用户写无入口配置。
+  - Do not mark context_mapping as deprecated in active user docs; remove it to avoid teaching a dead entry point.
 
-#### G3. T11.3 defer pre-existing compiler line-location test
+#### G7. python_callable 全清
 - 改 files:
-  - `packages/graph-agent/tests/core/test_compiler_line_locations.py`
+  - `packages/graph-agent/src/graph_agent/core/manifest.py`
+  - `packages/graph-agent/src/graph_agent/core/graph_assembler.py`
+  - `packages/graph-agent/src/graph_agent/core/loader.py`
+  - V2.1 LOGIC fixtures
 - 改 lines / 函数 / 类:
-  - 给该 test 加 `@pytest.mark.skip(reason="defer: rewrite with V0.3.0 IO parser cutover, see .kiro/specs/engine-mvp0-rebuild-v030/tasks.md")`。
-  - 记录失败现象: `locate_line_for_pydantic_loc` 返回 `None`, 断言期望 line 3。
-- 依赖 tasks: B3 GRAPH.md phases YAML parser + B4 inline IO parser + B8 fixture migration。
+  - `manifest.py:143` 删除 `python_callable: str`, 改为 `actions: list[str]` per `docs/engine/skill-spec/03-logic-md-spec.md:24`.
+  - `graph_assembler.py:170-171` 改为迭代 `actions`.
+  - `loader.py:1043, 1094, 1108` 改 `actions:` 解析。
+  - `<python_callable>` fixtures 在 G4 一并清。
+- 依赖 tasks: B5 LOGIC actions parser, C2 action runtime.
 - 测试影响:
-  - CI 不再被旧 AST 行号提取测试阻塞。
-  - V0.3.0 parser cutover 完成后必须新增 YAML AST line/span 定位测试替代该 skip。
+  - Add tests for action list parsing, missing action file, invalid action name, and undeclared output.
+  - grep guard: `rg "python_callable|<python_callable>" packages/graph-agent/src packages/graph-agent/tests` no active matches.
 - 风险点:
-  - 这是 defer, 不是永久豁免。skip reason 必须指向本 cutover tasks, 并在 B3/B4 实施时回收。
+  - Do not rename `python_callable`; remove it. MVP0 LOGIC only uses `actions:`.
+
+#### G8. docs-frontmatter-schema 砍
+- 改 files:
+  - 删除 `.kiro/specs/docs-frontmatter-schema/`
+- 改 lines / 函数 / 类:
+  - Remove `design.md` and `tasks.md` from that directory.
+  - Ensure engine cutover docs no longer list docs frontmatter schema as finalized implementation scope.
+- 依赖 tasks: none.
+- 测试影响:
+  - Docs-only cleanup; no src/test change.
+- 风险点:
+  - Do not replace it with another engine blocker. Docs metadata can be reopened as a separate docs hygiene task later.
 
 ## CI Gate Checklist
 

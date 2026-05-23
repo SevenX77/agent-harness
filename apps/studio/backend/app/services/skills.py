@@ -504,7 +504,8 @@ async def create_new_skill(
     if directory_path and await _directory_is_nonempty(skill_dir):
         _raise_invalid_directory_path(
             str(skill_dir),
-            "Cannot create a new skill in a non-empty folder. Choose an empty folder or use Import skill.",
+            "Cannot create a new skill in a non-empty folder. "
+            "Choose an empty folder or use Import skill.",
         )
 
     if await _is_importable_skill_directory(skill_dir, storage):
@@ -844,7 +845,9 @@ async def _directory_is_nonempty(path: Path) -> bool:
 
 
 async def _is_importable_skill_directory(path: Path, storage: StorageBackend) -> bool:
-    return await storage.exists(str(path / "GRAPH.md")) or await storage.exists(str(path / "SKILL.md"))
+    return await storage.exists(str(path / "GRAPH.md")) or await storage.exists(
+        str(path / "SKILL.md")
+    )
 
 
 async def _workspace_skill_body_exists(path: Path, storage: StorageBackend) -> bool:

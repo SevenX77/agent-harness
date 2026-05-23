@@ -24,12 +24,15 @@ from graph_agent.cognitive.context_facade import Context
 from graph_agent.core.actions import ActionDef, ActionRegistry, ToolDef, ToolRegistry
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
 from graph_agent.core.manifest import (
+    AgentNodeAST,
     GraphManifest,
     GraphPhaseRef,
     LogicNodeAST,
+    PhaseIOSchema,
     SkillNodeAST,
     SubgraphNodeAST,
 )
+from graph_agent.core.mentions import first_broken_mention, scan_mentions
 from graph_agent.core.parser import (
     extract_raw_blocks,
     parse_markdown_parts,
@@ -42,7 +45,7 @@ from graph_agent.core.subagents import build_subagent_input_model, build_subagen
 logger = logging.getLogger(__name__)
 
 RouteKind = Literal["graph", "logic", "subgraph", "skill"]
-PhaseAST = LogicNodeAST | SubgraphNodeAST | SkillNodeAST
+PhaseAST = LogicNodeAST | SubgraphNodeAST | AgentNodeAST | SkillNodeAST
 
 _PHASE_FILE_TO_MODE: dict[str, str] = {
     "LOGIC.md": "logic",
@@ -155,9 +158,15 @@ class SkillLoader:
         raw_attrs = _extract_phase_attrs(graph_body, line_meta["body_start"])
         manifest = _build_graph_manifest(graph_path, graph_frontmatter, graph_body, raw_attrs)
         phase_tokens = _extract_phase_token_info(graph_text, graph_body, line_meta["body_start"])
+        if manifest.phases and "phases" in graph_frontmatter:
+            raw_attrs = _phase_refs_to_raw_attrs(manifest.phases)
         _validate_graph_topology(graph_path, raw_attrs, root)
-        io_inputs = _validate_io_schema(root, manifest.io_inputs_ref, "input")
-        io_outputs = _validate_io_schema(root, manifest.io_outputs_ref, "output")
+        if manifest.io is not None:
+            io_inputs = _validate_inline_io_schema(graph_path, manifest.io.inputs, "input")
+            io_outputs = _validate_inline_io_schema(graph_path, manifest.io.outputs, "output")
+        else:
+            io_inputs = _validate_io_schema(root, manifest.io_inputs_ref, "input")
+            io_outputs = _validate_io_schema(root, manifest.io_outputs_ref, "output")
         input_schema_keys = _extract_output_schema_keys(io_inputs)
         output_schema_keys = _extract_output_schema_keys(io_outputs)
 
@@ -355,7 +364,7 @@ def _compile_subagent_metadata(
 ) -> dict[str, list[CompiledSubagent]]:
     subagents_by_phase: dict[str, list[CompiledSubagent]] = {}
     for doc in phase_docs:
-        if not isinstance(doc.ast, SkillNodeAST) or not doc.ast.subagents:
+        if not isinstance(doc.ast, (AgentNodeAST, SkillNodeAST)) or not doc.ast.subagents:
             continue
         phase_subagents: list[CompiledSubagent] = []
         for spec in doc.ast.subagents:
@@ -625,6 +634,8 @@ def _validate_mode_matches_filename(path: Path, yaml_mode: str) -> None:
     if expected is None:
         _route_document(path)
         return
+    if path.name == "SKILL.md" and yaml_mode in {"agent", "skill"}:
+        return
     if yaml_mode != expected:
         line = _frontmatter_key_line(path, "mode")
         _fatal(path, line, f"mode {yaml_mode!r} does not match {path.name} filename")
@@ -646,23 +657,37 @@ def _build_graph_manifest(
     if output_ref:
         data["io_outputs_ref"] = output_ref
 
-    phases: list[GraphPhaseRef] = []
-    for attrs in raw_attrs:
-        if attrs.id is None or attrs.src is None:
-            continue
-        phases.append(
-            GraphPhaseRef(
-                id=attrs.id,
-                src=attrs.src,
-                depends_on=attrs.depends_on,
+    if "phases" not in data:
+        phases: list[GraphPhaseRef] = []
+        for attrs in raw_attrs:
+            if attrs.id is None or attrs.src is None:
+                continue
+            phases.append(
+                GraphPhaseRef(
+                    id=attrs.id,
+                    src=attrs.src,
+                    depends_on=attrs.depends_on,
+                )
             )
-        )
-    data["phases"] = phases
+        data["phases"] = phases
 
     try:
         return GraphManifest.model_validate(data)
     except ValidationError as exc:
         _fatal(path, 1, f"GRAPH.md manifest validation failed: {exc}")
+
+
+def _phase_refs_to_raw_attrs(phases: list[GraphPhaseRef]) -> list[_RawPhaseAttrs]:
+    return [
+        _RawPhaseAttrs(
+            id=phase.id,
+            src=phase.src,
+            depends_on_raw=",".join(phase.depends_on),
+            depends_on=phase.depends_on,
+            line=1,
+        )
+        for phase in phases
+    ]
 
 
 def _extract_phase_attrs(body: str, body_start_line: int) -> list[_RawPhaseAttrs]:
@@ -929,6 +954,16 @@ def _validate_io_schema(
     return cast(dict[str, Any], schema)
 
 
+def _validate_inline_io_schema(path: Path, schema: dict[str, Any], kind: str) -> dict[str, Any]:
+    if not isinstance(schema, dict):
+        _io_fatal(path, 1, f"inline {kind} schema must be an object")
+    try:
+        Draft202012Validator.check_schema(schema)
+    except SchemaError as exc:
+        _io_fatal(path, 1, f"invalid inline {kind} JSON Schema: {exc.message}")
+    return cast(dict[str, Any], schema)
+
+
 def _extract_output_schema_keys(schema: dict[str, Any]) -> set[str] | None:
     properties = schema.get("properties")
     if properties is None:
@@ -1050,12 +1085,23 @@ def _build_phase_document(
     frontmatter: dict[str, Any],
     body: str,
 ) -> PhaseDocument:
-    allowed = ["role", "system_prompt", "exit_contract", "python_callable", "sub_skill_ref"]
+    allowed = [
+        "role",
+        "goal",
+        "step",
+        "protocol",
+        "system_prompt",
+        "exit_contract",
+        "python_callable",
+        "sub_skill_ref",
+    ]
     blocks = extract_raw_blocks(body, allowed)
     data = dict(frontmatter)
     data["raw_blocks"] = blocks
     data.setdefault("name", phase_name)
-    if mode == "skill":
+    yaml_mode = str(frontmatter.get("mode") or "").strip()
+    is_agent = path.name == "SKILL.md" and yaml_mode == "agent"
+    if mode == "skill" or is_agent:
         data = _normalize_skill_node_frontmatter(path, data)
 
     try:
@@ -1065,6 +1111,10 @@ def _build_phase_document(
         elif mode == "subgraph":
             data.setdefault("sub_skill_ref", blocks.get("sub_skill_ref"))
             ast = SubgraphNodeAST.model_validate(data)
+        elif is_agent:
+            data.update(_parse_agent_body(path, body, blocks))
+            ast = AgentNodeAST.model_validate(data)
+            _validate_agent_mentions(path, ast, body)
         else:
             data.setdefault("system_prompt", blocks.get("system_prompt"))
             data.setdefault("exit_contract", blocks.get("exit_contract"))
@@ -1091,9 +1141,13 @@ def _normalize_skill_node_frontmatter(path: Path, data: dict[str, Any]) -> dict[
     merged = dict(data)
     if "tools" in phase_config:
         merged.setdefault("tools", phase_config["tools"])
-    if "subagents" in phase_config:
-        merged["subagents"] = phase_config["subagents"]
-    extra_keys = sorted(set(phase_config) - {"tools", "subagents"})
+    for key in ("subagents", "subgraphs", "references", "examples", "io", "max_iterations", "llm_role"):
+        if key in phase_config:
+            merged[key] = phase_config[key]
+    extra_keys = sorted(
+        set(phase_config)
+        - {"tools", "subagents", "subgraphs", "references", "examples", "io", "max_iterations", "llm_role"}
+    )
     if extra_keys:
         _fatal(
             path,
@@ -1101,6 +1155,82 @@ def _normalize_skill_node_frontmatter(path: Path, data: dict[str, Any]) -> dict[
             "unsupported phase_config keys: " + ", ".join(extra_keys),
         )
     return merged
+
+
+def _parse_agent_body(
+    path: Path,
+    body: str,
+    blocks: dict[str, str],
+) -> dict[str, Any]:
+    if "<steps" in body.lower() or "</steps" in body.lower():
+        _fatal(path, _xml_line(body, body.lower().find("<steps")), "unknown top-level tag steps")
+    role = blocks.get("role")
+    goal = blocks.get("goal")
+    exit_contract = blocks.get("exit_contract")
+    if not role:
+        _fatal(path, 1, "[F-v3-agent-role-missing] Agent body requires <role>")
+    if not goal:
+        _fatal(path, 1, "[F-v3-agent-goal-missing] Agent body requires <goal>")
+    if not exit_contract:
+        _fatal(path, 1, "[F-v3-agent-exit-contract-missing] Agent body requires <exit_contract>")
+    return {
+        "role": role,
+        "goal": goal,
+        "steps": _extract_agent_steps(path, body),
+        "protocols": _extract_agent_protocols(path, body),
+        "exit_contract": exit_contract,
+    }
+
+
+def _extract_agent_steps(path: Path, body: str) -> list[dict[str, str]]:
+    steps: list[dict[str, str]] = []
+    pattern = re.compile(r"<step\b([^>]*)>(.*?)</step>", re.IGNORECASE | re.DOTALL)
+    for match in pattern.finditer(body):
+        attrs = _parse_attrs(match.group(1))
+        step_id = attrs.get("id")
+        name = attrs.get("name")
+        if not step_id or not name:
+            _fatal(path, _xml_line(body, match.start()), "[F-v3-agent-step-invalid] step requires id and name")
+        steps.append({"id": step_id, "name": name, "content": match.group(2).strip()})
+    return steps
+
+
+def _extract_agent_protocols(path: Path, body: str) -> list[dict[str, str]]:
+    protocols: list[dict[str, str]] = []
+    pattern = re.compile(r"<protocol\b([^>]*)>(.*?)</protocol>", re.IGNORECASE | re.DOTALL)
+    for match in pattern.finditer(body):
+        attrs = _parse_attrs(match.group(1))
+        protocol_id = attrs.get("id")
+        if not protocol_id:
+            _fatal(path, _xml_line(body, match.start()), "[F-v3-agent-protocol-invalid] protocol requires id")
+        protocols.append({"id": protocol_id, "content": match.group(2).strip()})
+    return protocols
+
+
+def _validate_agent_mentions(path: Path, ast: AgentNodeAST, body: str) -> None:
+    broken = first_broken_mention(body)
+    if broken is not None:
+        _fatal(path, _xml_line(body, broken.start()), "[F-v3-mention-syntax-invalid] malformed @-mention")
+    domains = {
+        "subagent": {item.name for item in ast.subagents},
+        "subgraph": {item.name for item in ast.subgraphs},
+        "reference": {item.id for item in ast.references},
+        "example": {item.id for item in ast.examples},
+        "step": {item.id for item in ast.steps},
+        "protocol": {item.id for item in ast.protocols},
+        "tool": set(ast.tools) | {"finish_task"},
+    }
+    for mention in scan_mentions(body):
+        if mention.name not in domains.get(mention.kind, set()):
+            _fatal(
+                path,
+                _xml_line(body, mention.start),
+                f"[F-v3-mention-target-not-found] @{mention.kind}:{mention.name}",
+            )
+
+
+def _xml_line(body: str, offset: int) -> int:
+    return body[: max(0, offset)].count("\n") + 1
 
 
 _ATTR_RE = re.compile(r"([A-Za-z_][\w:-]*)\s*=\s*(['\"])(.*?)\2", re.DOTALL)

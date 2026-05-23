@@ -45,6 +45,7 @@ from graph_agent.core.subagents import (
 )
 from graph_agent.runtime.exit_contract import inject_exit_contract
 from graph_agent.runtime.state import BlackboardState
+from graph_agent.runtime.state_mapper import PhaseWrapper, StateMapper
 
 MAX_REACT_TURNS = 8
 logger = logging.getLogger(__name__)
@@ -126,17 +127,22 @@ def _build_phase_node(
 ) -> Any:
     ast = phase_doc.ast
     if isinstance(ast, LogicNodeAST):
-        return _build_logic_node(phase_id, ast, compiled)
+        return _wrap_phase_runtime_node(ast, _build_logic_node(phase_id, ast, compiled))
     if isinstance(ast, SubgraphNodeAST):
-        return _build_subgraph_node(
+        return _wrap_phase_runtime_node(
+            ast,
+            _build_subgraph_node(
             phase_doc,
             ast,
             chat_model,
             max_patch_attempts,
             skill_resolver,
+            ),
         )
     if isinstance(ast, (AgentNodeAST, SkillNodeAST)):
-        return _build_skill_node(
+        return _wrap_phase_runtime_node(
+            ast,
+            _build_skill_node(
             phase_id,
             phase_doc,
             ast,
@@ -144,8 +150,16 @@ def _build_phase_node(
             chat_model,
             max_patch_attempts,
             skill_resolver,
+            ),
         )
     _graph_fatal(f"unknown phase mode for {phase_id!r}")
+
+
+def _wrap_phase_runtime_node(phase_ast: Any, node: Any) -> Any:
+    io = getattr(phase_ast, "io", None)
+    if io is None:
+        return node
+    return PhaseWrapper(StateMapper(io.inputs, io.outputs)).wrap(node)
 
 
 def _build_logic_node(
@@ -413,7 +427,7 @@ def _agent_resource_tools(
         spec = references.get(reference_id)
         if spec is None:
             raise GraphAgentFatalError(f"[F-v3-resource-reference-id-invalid] {reference_id!r}")
-        return (root / spec.path).read_text(encoding="utf-8")
+        return _read_skill_root_file(root, spec.path)
 
     def read_example(example_id: str) -> str:
         spec = examples.get(example_id)
@@ -423,7 +437,7 @@ def _agent_resource_tools(
             return spec.content or ""
         if spec.path is None:
             raise GraphAgentFatalError(f"[F-v3-resource-example-path-invalid] {example_id!r}")
-        return (root / spec.path).read_text(encoding="utf-8")
+        return _read_skill_root_file(root, spec.path)
 
     tools: list[Any] = []
     if references:
@@ -455,6 +469,22 @@ def _skill_root_for_phase_path(path: Path) -> Path:
     except ValueError:
         return path.parent
     return Path(*path.parts[:phase_index])
+
+
+def _read_skill_root_file(root: Path, relative_path: str) -> str:
+    candidate = (root / relative_path).resolve()
+    root_resolved = root.resolve()
+    try:
+        candidate.relative_to(root_resolved)
+    except ValueError as exc:
+        raise GraphAgentFatalError(
+            f"[F-v3-resource-reference-path-invalid] {relative_path!r} escapes skill root"
+        ) from exc
+    if not candidate.is_file():
+        raise GraphAgentFatalError(
+            f"[F-v3-resource-reference-path-invalid] {relative_path!r} is not readable"
+        )
+    return candidate.read_text(encoding="utf-8")
 
 
 def _invoke_subagent_tool_t21(

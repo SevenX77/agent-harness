@@ -40,7 +40,7 @@ from graph_agent.core.manifest import (
     LogicNodeAST,
     SubgraphNodeAST,
 )
-from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
+from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol, resolve_skill_root
 from graph_agent.core.subagents import (
     SubagentValidationFailure,
     assert_subagent_depth_allowed,
@@ -201,7 +201,7 @@ def _build_subgraph_node(
     del phase_doc
     if skill_resolver is None:
         _graph_fatal(f"SUBGRAPH target_skill {phase_ast.target_skill!r} requires skill_resolver")
-    sub_root = skill_resolver.resolve_skill(phase_ast.target_skill)
+    sub_root = resolve_skill_root(skill_resolver, phase_ast.target_skill)
     sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(
         sub_root,
         skill_resolver=skill_resolver,
@@ -215,21 +215,25 @@ def _build_subgraph_node(
 
     def _subgraph_node(state: BlackboardState) -> dict[str, Any]:
         before_data = dict(state.get("data", {}))
+        child_data = _phase_input_data(before_data, phase_ast.io.inputs if phase_ast.io else None)
+        child_flow = dict(state.get("flow", {}))
         result = sub_assembled.graph.invoke(
             {
-                "data": before_data,
-                "flow": state.get("flow", {}),
+                "data": child_data,
+                "flow": child_flow,
                 "messages": [],
                 "run_id": state.get("run_id"),
             }
         )
-        result_data = result.get("data", before_data)
+        result_data = result.get("data", child_data)
         data_updates = (
-            _dict_delta(before_data, result_data) if isinstance(result_data, dict) else {}
+            _phase_output_data(result_data, phase_ast.io.outputs if phase_ast.io else None)
+            if isinstance(result_data, dict)
+            else {}
         )
         return {
             "data": data_updates,
-            "flow": result.get("flow", state.get("flow", {})),
+            "flow": result.get("flow", child_flow),
         }
 
     return _subgraph_node
@@ -554,8 +558,14 @@ def _subagent_runtime_map(
 ) -> dict[str, _SubagentRuntime]:
     runtimes: dict[str, _SubagentRuntime] = {}
     for tool_name, subagent in subagent_by_tool_name.items():
+        if skill_resolver is None:
+            _graph_fatal(
+                f"subagent {subagent.name!r} target_skill "
+                f"{subagent.target_skill!r} requires skill_resolver"
+            )
+        sub_root = resolve_skill_root(skill_resolver, subagent.target_skill)
         sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(
-            subagent.root,
+            sub_root,
             skill_resolver=skill_resolver,
         )
         sub_assembled = assemble_graph(
@@ -574,23 +584,23 @@ def _invoke_subagent_once_t23(
     input_data: dict[str, Any],
     config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
-    before_data = dict(parent_state.get("data", {}))
-    child_data = {**before_data, **input_data}
+    child_data = dict(input_data)
+    parent_flow = dict(parent_state.get("flow", {}))
     result = runtime.graph.invoke(
         {
             "data": child_data,
-            "flow": parent_state.get("flow", {}),
+            "flow": parent_flow,
             "messages": [],
             "run_id": parent_state.get("run_id"),
         },
         config=config,
     )
     result_data = result.get("data", child_data)
-    data_delta = _dict_delta(before_data, result_data) if isinstance(result_data, dict) else {}
+    data_delta = dict(result_data) if isinstance(result_data, dict) else {}
     return {
         "status": "ok",
         "data": data_delta,
-        "flow": result.get("flow", parent_state.get("flow", {})),
+        "flow": result.get("flow", parent_flow),
     }
 
 
@@ -684,6 +694,24 @@ def _subagent_runnable_config(
 
 def _dict_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in after.items() if key not in before or before[key] != value}
+
+
+def _phase_input_data(data: dict[str, Any], schema: dict[str, Any] | None) -> dict[str, Any]:
+    if schema is None:
+        return dict(data)
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return dict(data)
+    return {key: data[key] for key in properties if isinstance(key, str) and key in data}
+
+
+def _phase_output_data(data: dict[str, Any], schema: dict[str, Any] | None) -> dict[str, Any]:
+    if schema is None:
+        return dict(data)
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return dict(data)
+    return {key: data[key] for key in properties if isinstance(key, str) and key in data}
 
 
 def _logic_output_schema_keys(compiled: CompiledSkill) -> set[str] | None:

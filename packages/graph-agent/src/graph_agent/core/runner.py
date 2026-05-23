@@ -273,6 +273,10 @@ def _run_skill_dict(
     if not skill_path.exists():
         raise SkillLoadError(f"SKILL.md not found: {skill_path}")
     if skill_path.is_dir() and (skill_path / "GRAPH.md").is_file():
+        if skill_resolver is None:
+            raise SkillLoadError(
+                "[F-v3-resolver-missing] graph skill runtime requires skill_resolver"
+            )
         return _run_v21_skill_dict(
             skill_path,
             trace_dir=trace_dir,

@@ -22,6 +22,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from graph_agent.bootstrap import Bootstrap
 from graph_agent.core import runner as runner_module
+from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.result import WorkflowResult
 from tests.conftest import InMemorySkillResolver
 
@@ -154,6 +155,13 @@ class TestRunnerMainBootstrapWiring:
 
 
 class TestRunSkillResolverWiring:
+    def test_graph_skill_runtime_requires_skill_resolver(self, tmp_path: Path) -> None:
+        skill = tmp_path / "GRAPH.md"
+        skill.write_text("---\nschema_version: \"0.3.0\"\nname: parent\n---\n", encoding="utf-8")
+
+        with pytest.raises(SkillLoadError, match=r"\[F-v3-resolver-missing\]"):
+            runner_module._run_skill_dict(tmp_path)
+
     def test_run_skill_passes_skill_resolver_to_dict_runner(self, tmp_path: Path) -> None:
         skill = tmp_path / "GRAPH.md"
         skill.write_text("---\nname: parent\n---\n", encoding="utf-8")

@@ -7,13 +7,18 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, Literal, NoReturn
 
 from langchain_core.messages import SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
-from graph_agent.callbacks.events import ToolCallEvent
+from graph_agent.callbacks.events import (
+    BuiltinSubagentEnterEvent,
+    BuiltinSubagentExitEvent,
+    BuiltinSubagentFallbackEvent,
+    ToolCallEvent,
+)
 from graph_agent.cognitive.ambiguity import ambiguity_logged_event_from_record, log_ambiguity
 from graph_agent.cognitive.critic import (
     CriticVerdict,
@@ -61,6 +66,14 @@ from graph_agent.tools.builtin.read_example import build_read_example_tool
 from graph_agent.tools.builtin.read_reference import build_read_reference_tool
 
 logger = logging.getLogger(__name__)
+
+ReferenceReaderFallbackReason = Literal[
+    "remote_timeout",
+    "remote_error",
+    "config_missing",
+    "invalid_output",
+    "local_io_error",
+]
 
 
 @dataclass(frozen=True)
@@ -327,7 +340,7 @@ def _build_skill_node(
     ambiguity_tool = _wrap_tool_for_langchain(log_ambiguity, tool_state)
     all_tools = [*business_tools, *framework_tools, ambiguity_tool, finish_task]
     all_tools_by_name = {tool.name: tool for tool in all_tools}
-    system_prompt = _agent_system_prompt(phase_id, phase_doc, phase_ast, compiled)
+    system_prompt = _agent_system_prompt(phase_id, phase_doc, phase_ast, compiled, callbacks)
 
     def _skill_node(
         state: BlackboardState,
@@ -463,6 +476,7 @@ def _agent_system_prompt(
     phase_doc: PhaseDocument,
     phase_ast: AgentNodeAST,
     compiled: CompiledSkill,
+    callbacks: list[Any] | None,
 ) -> str:
     output_schema = (
         phase_ast.io.outputs
@@ -479,7 +493,7 @@ def _agent_system_prompt(
         protocols=[protocol.model_dump() for protocol in phase_ast.protocols],
         exit_contract=phase_ast.exit_contract,
         output_schema=output_schema if isinstance(output_schema, dict) else None,
-        knowledge_base=_reference_reader_markdown(phase_doc, phase_ast, compiled),
+        knowledge_base=_reference_reader_markdown(phase_doc, phase_ast, compiled, callbacks),
         inline_examples=[
             example.content
             for example in phase_ast.examples
@@ -498,6 +512,7 @@ def _reference_reader_markdown(
     phase_doc: PhaseDocument,
     phase_ast: AgentNodeAST,
     compiled: CompiledSkill,
+    callbacks: list[Any] | None,
 ) -> str:
     root = _skill_root_for_phase_path(phase_doc.path)
     reference_items: list[dict[str, str]] = []
@@ -512,17 +527,70 @@ def _reference_reader_markdown(
         )
     if not reference_items:
         return "无注册 Reference"
+    reference_ids = [item["id"] for item in reference_items]
     payload = ReferenceReaderInput(
         skill_id=compiled.manifest.name,
         phase_id=phase_doc.phase_name,
         references=reference_items,
     )
+    trace_payload: dict[str, Any] = {
+        "trigger_stage": "assembly",
+        "reference_ids": reference_ids,
+    }
+    _emit_callback_event(
+        callbacks,
+        BuiltinSubagentEnterEvent(
+            phase_name=phase_doc.phase_name,
+            builtin_name="reference_reader",
+            payload=trace_payload,
+        ),
+    )
+    started_at = time.monotonic()
     try:
         output = output_from_any(_run_reference_reader_wrapped(payload))
+        _emit_callback_event(
+            callbacks,
+            BuiltinSubagentExitEvent(
+                phase_name=phase_doc.phase_name,
+                builtin_name="reference_reader",
+                payload={
+                    **trace_payload,
+                    "used_reference_ids": output.used_reference_ids,
+                    "warnings": output.warnings,
+                    "duration_ms": round((time.monotonic() - started_at) * 1000, 2),
+                },
+            ),
+        )
         return output.markdown
     except Exception as exc:  # noqa: BLE001
         logger.warning("[F-v3-reference-reader-failed] %s", exc)
+        _emit_callback_event(
+            callbacks,
+            BuiltinSubagentFallbackEvent(
+                phase_name=phase_doc.phase_name,
+                builtin_name="reference_reader",
+                fallback_reason=_reference_reader_fallback_reason(exc),
+                fallback_strategy="raw_excerpt",
+                excerpt_token_limit=3000,
+                warning=f"[F-v3-reference-reader-failed] {exc}",
+            ),
+        )
         return fallback_reference_markdown(reference_items)
+
+
+def _reference_reader_fallback_reason(
+    exc: Exception,
+) -> ReferenceReaderFallbackReason:
+    message = str(exc).lower()
+    if "timeout" in message:
+        return "remote_timeout"
+    if "config" in message or "missing" in message:
+        return "config_missing"
+    if "output-invalid" in message or "invalid output" in message:
+        return "invalid_output"
+    if "remote" in message:
+        return "remote_error"
+    return "local_io_error"
 
 
 def _run_reference_reader_wrapped(payload: ReferenceReaderInput) -> dict[str, Any]:

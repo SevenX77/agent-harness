@@ -27,6 +27,12 @@ from graph_agent.cognitive.prompt import (
     resolve_role_prefix_from_llm_role,
 )
 from graph_agent.core.actions import ToolDef, _structured_tool
+from graph_agent.core.builtin_subagents.reference_reader import (
+    ReferenceReaderInput,
+    fallback_reference_markdown,
+    output_from_any,
+    read_references_for_prompt,
+)
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
 from graph_agent.core.loader import CompiledSkill, CompiledSubagent, PhaseDocument, SkillLoader
 from graph_agent.core.manifest import (
@@ -286,6 +292,7 @@ def _build_skill_node(
     )
     all_tools = [*business_tools, *framework_tools, finish_task]
     all_tools_by_name = {tool.name: tool for tool in all_tools}
+    system_prompt = _agent_system_prompt(phase_id, phase_doc, phase_ast, compiled)
 
     def _skill_node(
         state: BlackboardState,
@@ -297,7 +304,7 @@ def _build_skill_node(
         data_updates: dict[str, Any] = {}
         flow = dict(state.get("flow", {}))
         messages = [
-            SystemMessage(content=_agent_system_prompt(phase_id, phase_ast, compiled)),
+            SystemMessage(content=system_prompt),
             *state.get("messages", []),
         ]
         model = (
@@ -375,6 +382,7 @@ def _subagent_tool_map(
 
 def _agent_system_prompt(
     phase_id: str,
+    phase_doc: PhaseDocument,
     phase_ast: AgentNodeAST,
     compiled: CompiledSkill,
 ) -> str:
@@ -393,6 +401,7 @@ def _agent_system_prompt(
         protocols=[protocol.model_dump() for protocol in phase_ast.protocols],
         exit_contract=phase_ast.exit_contract,
         output_schema=output_schema if isinstance(output_schema, dict) else None,
+        knowledge_base=_reference_reader_markdown(phase_doc, phase_ast, compiled),
         inline_examples=[
             example.content
             for example in phase_ast.examples
@@ -405,6 +414,37 @@ def _agent_system_prompt(
         ],
         role_prefix=resolve_role_prefix_from_llm_role(phase_ast.llm_role),
     )
+
+
+def _reference_reader_markdown(
+    phase_doc: PhaseDocument,
+    phase_ast: AgentNodeAST,
+    compiled: CompiledSkill,
+) -> str:
+    root = _skill_root_for_phase_path(phase_doc.path)
+    reference_items: list[dict[str, str]] = []
+    for spec in phase_ast.references:
+        reference_items.append(
+            {
+                "id": spec.id,
+                "path": spec.path,
+                "summary": spec.summary,
+                "content": _read_skill_root_file(root, spec.path),
+            }
+        )
+    if not reference_items:
+        return "无注册 Reference"
+    payload = ReferenceReaderInput(
+        skill_id=compiled.manifest.name,
+        phase_id=phase_doc.phase_name,
+        references=reference_items,
+    )
+    try:
+        output = output_from_any(read_references_for_prompt(payload))
+        return output.markdown
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[F-v3-reference-reader-failed] %s", exc)
+        return fallback_reference_markdown(reference_items)
 
 
 def _agent_resource_tools(

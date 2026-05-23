@@ -144,7 +144,7 @@ MVP0 MUST 在编译后的装配阶段把 Agent AST 渲染成 V0.3.0 cognitive te
 | `{skill_goal}` | string | 是 | 无 | 来自 `<goal>`; 非空 | `[F-v3-agent-goal-missing]` | Agent 目标 |
 | `{skill_steps_splat}` | string | 否 | `""` | 所有 `<step id name>` 按 body 顺序展开 | `[F-v3-agent-step-invalid]` | 行动步骤 |
 | `{skill_protocols_splat}` | string | 否 | `"无显式协议"` | 所有 `<protocol id>` 展开 | `[F-v3-agent-protocol-invalid]` | 判断依据 |
-| `{reference_reader_subagent_output_markdown}` | markdown | 否 | 降级 warning + 原文摘录 | 来自 builtin reference reader | `[F-v3-reference-reader-failed]` (WARN) | 领域知识修正 |
+| `{reference_reader_subagent_output_markdown}` | markdown | 否 | 降级 warning + 原文摘录 | 来自 [Builtin Reference Reader Subagent](../skill-spec/09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名) | `[F-v3-reference-reader-failed]` (WARN) | 领域知识修正 |
 | `{inline_examples_splat}` | markdown | 否 | `"无内联示例"` | examples `type:inline` content | `[F-v3-resource-example-invalid]` | 短示例直接注入 |
 | `{document_examples_registry}` | markdown list | 否 | `"无扩展案例"` | examples `type:document` id + summary | `[F-v3-resource-example-invalid]` | 长案例按需读取目录 |
 | `{skill_exit_contract_inline}` | XML block | 是 | 无 | `<exit_contract>` 末尾追加 `io.outputs` schema | `[F-v3-agent-exit-contract-missing]` / `[F-v3-cognitive-output-schema-render-failed]` | 输出契约 recency bias |
@@ -211,7 +211,7 @@ MVP0 MUST 在 Agent 装配阶段主动触发 builtin reference reader subagent, 
 | document example `path` | string | `type:document` 必填 | 无 | 可读; 不预读 | `[F-v3-resource-example-path-invalid]` | runtime `read_example` |
 | document example `summary` | string | `type:document` 必填 | 无 | 非空 | `[F-v3-resource-example-summary-missing]` | 扩展案例目录 |
 
-Reference 三机制必须并存: 装配期预读、runtime `read_reference`、body `@reference:R1`。Example 只做 inline 直接注入 + document 按需读取, document example 不预读。规范终点见 [Reference 三机制生命周期](../skill-spec/08-resource-mechanisms-spec.md#reference-三机制生命周期)。
+Reference 三机制必须并存: 装配期预读、runtime `read_reference`、body `@reference:R1`。Example 只做 inline 直接注入 + document 按需读取, document example 不预读。规范终点见 [Reference 三机制生命周期](../skill-spec/08-resource-mechanisms-spec.md#reference-三机制生命周期) 与 [Builtin Reference Reader Subagent 签名](../skill-spec/09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名)。
 
 ### 12. 编译期错误信息的规范化结构
 

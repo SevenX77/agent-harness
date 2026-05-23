@@ -107,3 +107,16 @@ def test_reference_reader_wrapper_uses_fresh_messages_and_copied_flow() -> None:
     assert result["markdown"] == "ok"
     assert seen["messages"] == []
     assert parent_flow == {"timeout_s": 60}
+
+
+def test_state_mapper_build_child_input_and_flow_are_isolated() -> None:
+    mapper = StateMapper(input_schema={"type": "object", "properties": {"topic": {}}})
+    parent_flow = {"subagent_depth": 2, "nested": {"keep": True}}
+
+    child_data = mapper.build_child_input({"topic": "A"})
+    child_flow = mapper.build_child_flow(parent_flow)
+    child_flow["nested"]["keep"] = False
+
+    assert child_data == {"topic": "A"}
+    assert child_flow["subagent_depth"] == 3
+    assert parent_flow == {"subagent_depth": 2, "nested": {"keep": True}}

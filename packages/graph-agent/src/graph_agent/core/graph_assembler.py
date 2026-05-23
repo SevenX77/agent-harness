@@ -223,8 +223,12 @@ def _build_subgraph_node(
 
     def _subgraph_node(state: BlackboardState) -> dict[str, Any]:
         before_data = dict(state.get("data", {}))
-        child_data = _phase_input_data(before_data, phase_ast.io.inputs if phase_ast.io else None)
-        child_flow = dict(state.get("flow", {}))
+        mapper = StateMapper(
+            phase_ast.io.inputs if phase_ast.io else None,
+            phase_ast.io.outputs if phase_ast.io else None,
+        )
+        child_data = mapper.build_child_input(before_data)
+        child_flow = mapper.build_child_flow(dict(state.get("flow", {})))
         result = sub_assembled.graph.invoke(
             {
                 "data": child_data,
@@ -604,12 +608,14 @@ def _invoke_subagent_once_t23(
     input_data: dict[str, Any],
     config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
-    child_data = dict(input_data)
+    mapper = StateMapper(runtime.subagent.input_schema, runtime.subagent.input_schema)
+    child_data = mapper.build_child_input(dict(input_data))
     parent_flow = dict(parent_state.get("flow", {}))
+    child_flow = mapper.build_child_flow(parent_flow)
     result = runtime.graph.invoke(
         {
             "data": child_data,
-            "flow": parent_flow,
+            "flow": child_flow,
             "messages": [],
             "run_id": parent_state.get("run_id"),
         },
@@ -620,7 +626,7 @@ def _invoke_subagent_once_t23(
     return {
         "status": "ok",
         "data": data_delta,
-        "flow": result.get("flow", parent_flow),
+        "flow": result.get("flow", child_flow),
     }
 
 

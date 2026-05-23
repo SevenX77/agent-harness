@@ -92,6 +92,14 @@ class StateMapper:
             )
         return output
 
+    def build_child_input(self, explicit_input: dict[str, Any]) -> dict[str, Any]:
+        return filter_runtime_inputs(explicit_input, self.input_schema, strict_unknown=True)
+
+    def build_child_flow(self, parent_flow: dict[str, Any]) -> dict[str, Any]:
+        child_flow = deepcopy(parent_flow)
+        child_flow["subagent_depth"] = int(parent_flow.get("subagent_depth", 0)) + 1
+        return child_flow
+
 
 @dataclass(frozen=True)
 class PhaseWrapper:

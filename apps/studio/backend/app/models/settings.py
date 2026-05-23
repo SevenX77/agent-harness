@@ -18,8 +18,12 @@ class AppSettings(BaseModel):
         default="",
         description="Base URL for the user's self-hosted Gitea instance.",
     )
+    default_skills_directory: str = Field(
+        default="",
+        description="Absolute directory where Studio creates new skills by default.",
+    )
 
-    @field_validator("user_id", "gitea_host")
+    @field_validator("user_id", "gitea_host", "default_skills_directory")
     @classmethod
     def strip_string_fields(cls, value: str) -> str:
         """Store surrounding whitespace-free settings values."""

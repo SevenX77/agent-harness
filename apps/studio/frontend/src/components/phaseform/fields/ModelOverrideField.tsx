@@ -1,3 +1,6 @@
+import { Input } from '../../ui/input'
+import { Label } from '../../ui/label'
+
 interface ModelOverrideFieldProps {
   value: string
   onChange: (value: string) => void
@@ -5,16 +8,19 @@ interface ModelOverrideFieldProps {
 
 export function ModelOverrideField({ value, onChange }: ModelOverrideFieldProps) {
   return (
-    <label className="block">
-      <span className="mb-1 block text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+    <Label className="block space-y-1">
+      <span className="block text-xs font-semibold uppercase text-muted-foreground">
         Model override
       </span>
-      <input
+      <Input
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder="Use role default"
-        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+        spellCheck={false}
+        autoCorrect="off"
+        autoCapitalize="none"
+        className="font-mono"
       />
-    </label>
+    </Label>
   )
 }

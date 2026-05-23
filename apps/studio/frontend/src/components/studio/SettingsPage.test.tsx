@@ -9,7 +9,10 @@ import {
   moveProviderInRole,
   notableProviderKeyForDraft,
   officialProviderDrafts,
+  providerTestParamsMatch,
   removeProviderFromRole,
+  reorderModelInRole,
+  reorderProviderInRole,
   shouldShowManualModelPanel,
   thirdPartyProviderDrafts,
   toggleModelFallback,
@@ -79,20 +82,18 @@ const rolesData: RolesData = {
   },
   roles: {
     copilot_chat: {
-      temperature: 0.7,
       model_fallback: true,
       active_model: 'CL46T',
       models: {
-        CL46T: { providers: ['OC_CL_ANT', 'WS_LLM'] },
-        DS32R: { providers: ['DS', 'OC_DS'] },
+        CL46T: { providers: ['OC_CL_ANT', 'WS_LLM'], temperature: 0.7 },
+        DS32R: { providers: ['DS', 'OC_DS'], temperature: 0.7 },
       },
     },
     deerflow_default: {
-      temperature: 0.7,
       model_fallback: true,
       active_model: 'CL46T',
       models: {
-        CL46T: { providers: ['OC_CL_ANT'] },
+        CL46T: { providers: ['OC_CL_ANT'], temperature: 0.7 },
       },
     },
   },
@@ -109,16 +110,17 @@ function baseViewProps(
     drafts: draftsFromCredentials(credentials),
     saveStatus: 'idle',
     rolesData,
-    selectedRole: 'copilot_chat',
-    rolesDirty: false,
+    rolesSaveStatus: 'idle',
     rolesError: null,
     appSettings: {
       userId: 'alice',
       giteaHost: 'https://gitea.example.com',
+      defaultSkillsDirectory: '/Users/alice/Skills',
       isLoading: false,
+      saveStatus: 'idle',
       setUserId: vi.fn(),
       setGiteaHost: vi.fn(),
-      save: vi.fn(),
+      setDefaultSkillsDirectory: vi.fn(),
     },
     onClose: vi.fn(),
     onTabChange: vi.fn(),
@@ -127,9 +129,7 @@ function baseViewProps(
     onDeleteProvider: vi.fn(),
     onAddProvider: vi.fn(),
     onProviderModelsUpdated: vi.fn(),
-    onSelectedRoleChange: vi.fn(),
     onRolesDataChange: vi.fn(),
-    onSaveRoles: vi.fn(),
     ...overrides,
   }
 }
@@ -180,6 +180,24 @@ describe('Add Provider flow helpers', () => {
       api_key: 'sk-openrouter',
       isTesting: false,
     })
+  })
+
+  it('infers anthropic-compatible protocol from third-party name or base URL', () => {
+    expect(draftFromAddProviderSubmission({
+      providerCode: 'qiniu-anthropic',
+      name: 'QiNiu Anthropic',
+      baseUrl: 'https://anthropic.qnaigc.com',
+      apiKey: 'sk-qiniu',
+      type: 'third-party',
+    }, 'custom-qiniu-anthropic').provider_type).toBe('anthropic_compatible')
+
+    expect(draftFromAddProviderSubmission({
+      providerCode: 'custom-google',
+      name: 'Gemini Proxy',
+      baseUrl: 'https://example.test',
+      apiKey: 'sk-google',
+      type: 'third-party',
+    }, 'custom-google').provider_type).toBe('google_genai')
   })
 
   it('infers provider kind from official name or official id prefix', () => {
@@ -244,9 +262,56 @@ describe('Add Provider flow helpers', () => {
     expect(shouldShowManualModelPanel(custom, null)).toBe(false)
     expect(shouldShowManualModelPanel(custom, { ...credentials.providers[3], last_test_status: 'ok' })).toBe(true)
   })
+
+  it('matches test outcome identity by API key, base URL, and provider type only', () => {
+    expect(providerTestParamsMatch(
+      { api_key: 'sk', base_url: 'https://base.test', provider_type: 'openai_compatible' },
+      { api_key: 'sk', base_url: 'https://base.test', provider_type: 'openai_compatible' },
+    )).toBe(true)
+    expect(providerTestParamsMatch(
+      { api_key: 'sk', base_url: 'https://base.test', provider_type: 'openai_compatible' },
+      { api_key: 'sk', base_url: 'https://changed.test', provider_type: 'openai_compatible' },
+    )).toBe(false)
+    expect(providerTestParamsMatch(
+      { api_key: 'sk', base_url: 'https://base.test', provider_type: 'openai_compatible' },
+      { api_key: 'sk', base_url: 'https://base.test', provider_type: 'anthropic_compatible' },
+    )).toBe(false)
+  })
 })
 
 describe('SettingsPageContent (api_keys)', () => {
+  it('renders General settings as auto-saved shadcn fields without manual save buttons', () => {
+    const html = renderToStaticMarkup(
+      <SettingsPageContent
+        {...baseViewProps({
+          activeTab: 'general',
+          appSettings: {
+            ...baseViewProps().appSettings,
+            saveStatus: 'saving',
+          },
+        })}
+      />,
+    )
+
+    expect(html).toContain('Changes auto-save')
+    expect(html).toContain('Saving')
+    expect(html).toContain('data-slot="field"')
+    expect(html).toContain('value="/Users/alice/Skills"')
+    expect(html).toContain('max-w-5xl')
+    expect(html).not.toContain('>Save</button>')
+    expect(html).not.toContain('Using /Users/alice/Skills')
+  })
+
+  it('keeps every Settings tab content constrained within the Settings surface', () => {
+    for (const activeTab of ['general', 'api_keys'] as const) {
+      const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ activeTab })} />)
+
+      expect(html).toContain('max-w-3xl')
+    }
+    const rolesHtml = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ activeTab: 'llm_roles' })} />)
+    expect(rolesHtml).toContain('max-w-6xl')
+  })
+
   it('renders provider skeletons while credentials are loading', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ credentialsLoading: true })} />)
     const skeletons = html.match(/data-slot="skeleton"/g) ?? []
@@ -359,6 +424,17 @@ describe('LLM Roles helpers', () => {
   it('moveProviderInRole shifts a provider up the chain', () => {
     const next = moveProviderInRole(rolesData, 'copilot_chat', 'CL46T', 1, -1)
     expect(next.roles.copilot_chat.models.CL46T.providers).toEqual(['WS_LLM', 'OC_CL_ANT'])
+  })
+
+  it('reorderProviderInRole moves a provider to a target index while preserving settings', () => {
+    const next = reorderProviderInRole(rolesData, 'copilot_chat', 'CL46T', 0, 1)
+    expect(next.roles.copilot_chat.models.CL46T.providers).toEqual(['WS_LLM', 'OC_CL_ANT'])
+    expect(next.roles.copilot_chat.models.CL46T.temperature).toBe(0.7)
+  })
+
+  it('reorderModelInRole moves a model to a target position', () => {
+    const next = reorderModelInRole(rolesData, 'copilot_chat', 'DS32R', 'CL46T')
+    expect(Object.keys(next.roles.copilot_chat.models)).toEqual(['DS32R', 'CL46T'])
   })
 
   it('removeProviderFromRole drops the provider at index', () => {

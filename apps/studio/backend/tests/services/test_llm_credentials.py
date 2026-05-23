@@ -8,6 +8,7 @@ from app.models.llm_config import LLMCredentialsFile, ModelInfo, ProviderCredent
 from app.routers.llm import CredentialsWriteRequest, ProviderCredentialWrite, put_llm_credentials
 from app.services import llm_env
 from app.services.llm_credentials import (
+    _persist_test_outcome,
     credentials_path,
     load_credentials,
     save_credentials,
@@ -134,6 +135,10 @@ async def test_put_empty_api_key_preserves_available_sdks_and_models(
                     api_key="sk-secret",
                     base_url="https://api.openai.com",
                     provider_type="openai_compatible",
+                    last_test_status="ok",
+                    last_test_at="2026-05-18T12:00:00+00:00",
+                    last_test_message="",
+                    last_error_code="",
                     available_sdks=["openai_compatible"],
                     available_models=[ModelInfo(id="gpt-5")],
                 )
@@ -148,6 +153,55 @@ async def test_put_empty_api_key_preserves_available_sdks_and_models(
                     id="provider-1",
                     name="OpenAI renamed",
                     api_key="",
+                    base_url="https://api.openai.com",
+                    provider_type="openai_compatible",
+                )
+            ]
+        )
+    )
+
+    provider = body["providers"][0]
+    assert provider["api_key"] == "sk-secret"
+    assert provider["name"] == "OpenAI renamed"
+    assert provider["last_test_status"] == "ok"
+    assert provider["last_test_at"] == "2026-05-18T12:00:00+00:00"
+    assert provider["available_sdks"] == ["openai_compatible"]
+    assert [model["id"] for model in provider["available_models"]] == ["gpt-5"]
+
+
+@pytest.mark.anyio
+async def test_put_changed_test_parameters_resets_test_outcome(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    save_credentials(
+        LLMCredentialsFile(
+            providers=[
+                ProviderCredential(
+                    id="provider-1",
+                    name="OpenAI",
+                    api_key="sk-secret",
+                    base_url="https://api.openai.com",
+                    provider_type="openai_compatible",
+                    last_test_status="ok",
+                    last_test_at="2026-05-18T12:00:00+00:00",
+                    last_test_message="Connected.",
+                    last_error_code="",
+                    available_sdks=["openai_compatible"],
+                    available_models=[ModelInfo(id="gpt-5")],
+                )
+            ]
+        )
+    )
+
+    body = await put_llm_credentials(
+        CredentialsWriteRequest(
+            providers=[
+                ProviderCredentialWrite(
+                    id="provider-1",
+                    name="OpenAI",
+                    api_key="",
                     base_url="https://api.openai.test",
                     provider_type="openai_compatible",
                 )
@@ -157,8 +211,74 @@ async def test_put_empty_api_key_preserves_available_sdks_and_models(
 
     provider = body["providers"][0]
     assert provider["api_key"] == "sk-secret"
-    assert provider["available_sdks"] == ["openai_compatible"]
-    assert [model["id"] for model in provider["available_models"]] == ["gpt-5"]
+    assert provider["base_url"] == "https://api.openai.test"
+    assert provider["last_test_status"] == "untested"
+    assert provider["last_test_at"] == ""
+    assert provider["last_test_message"] == ""
+    assert provider["last_error_code"] == ""
+    assert provider["available_sdks"] == []
+    assert provider["available_models"] == []
+
+    restored = await put_llm_credentials(
+        CredentialsWriteRequest(
+            providers=[
+                ProviderCredentialWrite(
+                    id="provider-1",
+                    name="OpenAI",
+                    api_key="",
+                    base_url="https://api.openai.com",
+                    provider_type="openai_compatible",
+                )
+            ]
+        )
+    )
+
+    restored_provider = restored["providers"][0]
+    assert restored_provider["api_key"] == "sk-secret"
+    assert restored_provider["base_url"] == "https://api.openai.com"
+    assert restored_provider["last_test_status"] == "ok"
+    assert restored_provider["last_test_at"] == "2026-05-18T12:00:00+00:00"
+    assert restored_provider["available_sdks"] == ["openai_compatible"]
+    assert [model["id"] for model in restored_provider["available_models"]] == ["gpt-5"]
+
+
+def test_persist_test_outcome_rejects_stale_test_parameters(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    save_credentials(
+        LLMCredentialsFile(
+            providers=[
+                ProviderCredential(
+                    id="provider-1",
+                    name="OpenAI",
+                    api_key="sk-new",
+                    base_url="https://api.new.test",
+                    provider_type="openai_compatible",
+                )
+            ]
+        )
+    )
+
+    result = _persist_test_outcome(
+        "provider-1",
+        last_test_status="ok",
+        last_test_at="2026-05-18T12:00:00+00:00",
+        available_sdks=["openai_compatible"],
+        available_models=[ModelInfo(id="gpt-5")],
+        expected_api_key="sk-old",
+        expected_base_url="https://api.old.test",
+        expected_provider_type="openai_compatible",
+    )
+
+    saved = load_credentials()
+    assert result is not None
+    assert saved.providers[0].last_test_status == "untested"
+    assert saved.providers[0].available_sdks == []
+    assert saved.providers[0].available_models == []
+    assert saved.providers[0].test_results[0].last_test_status == "ok"
+    assert [model.id for model in saved.providers[0].test_results[0].available_models] == ["gpt-5"]
 
 
 def test_patch_environment_is_noop(

@@ -5,8 +5,10 @@ import {
   ACTION_MENU_CLASSNAME,
   buildSkillCreatePayload,
   buildSkillImportPayload,
+  defaultSkillsDirectory,
   formatCreateSkillError,
   formatImportSkillError,
+  registeredSkillIdForImport,
   REVEAL_ACTION_LABEL,
   WelcomePage,
 } from './WelcomePage'
@@ -48,6 +50,13 @@ vi.mock('../../api/client', () => ({
   },
 }))
 
+vi.mock('../../config/runtime', () => ({
+  getRuntimeConfig: vi.fn(() => ({
+    resourceDir: '/studio/resources',
+    configDir: '/studio/config',
+  })),
+}))
+
 vi.mock('../../lib/tauri', () => ({
   selectSkillDirectory: vi.fn(),
 }))
@@ -74,6 +83,26 @@ describe('WelcomePage', () => {
     expect(html).toContain('/tmp/demo-skill')
   })
 
+  it('keeps selectable skill cards on the local shadcn Card default surface', () => {
+    const html = renderToStaticMarkup(<WelcomePage onSelectSkill={vi.fn()} />)
+
+    expect(html).toContain('ring-1 ring-foreground/10')
+    expect(html).toContain('data-size="sm"')
+    expect(html).not.toContain('border-2')
+    expect(html).not.toContain('ring-border/80')
+    expect(html).not.toContain('[box-shadow:none]')
+  })
+
+  it('fixes skill card actions while allowing two lines for the folder path', () => {
+    const html = renderToStaticMarkup(<WelcomePage onSelectSkill={vi.fn()} />)
+
+    expect(html).toContain('absolute right-2 top-2 z-10')
+    expect(html).toContain('min-w-0 flex-1 pr-12')
+    expect(html).toContain('line-clamp-2 min-h-10 break-all')
+    expect(html).toContain('hover:ring-2')
+    expect(html).toContain('hover:ring-primary/70')
+  })
+
   it('uses a short reveal action label in wider action menus', () => {
     expect(REVEAL_ACTION_LABEL).toBe('Show in folder')
     expect(ACTION_MENU_CLASSNAME).toBe('w-48')
@@ -98,6 +127,28 @@ describe('WelcomePage', () => {
       directory_path: '/Users/sevenx/AgentStudio/Skills/My Skill',
       import_existing: true,
     })
+  })
+
+  it('derives the default skill parent from the Tauri resource dir', () => {
+    expect(defaultSkillsDirectory()).toBe('/studio/config/Skills')
+  })
+
+  it('uses the configured default skill parent when app settings provide one', () => {
+    expect(defaultSkillsDirectory('/Users/sevenx/graph_skills')).toBe('/Users/sevenx/graph_skills')
+  })
+
+  it('renders the concrete default skill parent path', () => {
+    const html = renderToStaticMarkup(<WelcomePage onSelectSkill={vi.fn()} />)
+
+    expect(html).toContain('Default: /studio/config/Skills')
+  })
+
+  it('finds an already registered skill by selected import directory path', () => {
+    expect(registeredSkillIdForImport('/tmp/demo-skill/', [mismatchSkill])).toBe('demo-skill')
+  })
+
+  it('falls back to matching an already registered skill by normalized selected folder name', () => {
+    expect(registeredSkillIdForImport('/other/place/Demo Skill', [mismatchSkill])).toBe('demo-skill')
   })
 
   it('explains duplicate skill create failures', () => {
@@ -138,10 +189,46 @@ describe('WelcomePage', () => {
     })
 
     expect(formatImportSkillError(error)).toBe(
-      'Cannot import this folder: phases/init/LOGIC.md:1 LOGIC.md AST validation failed: python_callable is required',
+      'Cannot import this folder: phases/init/LOGIC.md:1 LOGIC.md is missing <python_callable>. Add a <python_callable> block that names a Python function in phases/<phase>/actions/.',
     )
     expect(formatCreateSkillError(error, 'new-skill')).toBe(
-      'Cannot create "new-skill": phases/init/LOGIC.md:1 LOGIC.md AST validation failed: python_callable is required',
+      'Cannot create "new-skill": phases/init/LOGIC.md:1 LOGIC.md is missing <python_callable>. Add a <python_callable> block that names a Python function in phases/<phase>/actions/.',
+    )
+  })
+
+  it('turns old scaffold python_callable validation into actionable copy', () => {
+    const error = studioApiError({
+      error_code: 'MANIFEST_VALIDATION_FAILED',
+      message: 'Manifest validation failed',
+      details: {
+        errors: [{
+          file: 'phases/init/LOGIC.md',
+          line: 1,
+          message: '[F-v21-route] /tmp/.new-skill.tmp/phases/init/LOGIC.md:1 LOGIC.md AST validation failed: 1 validation error for LogicNodeAST\npython_callable\n  Input should be a valid string [type=string_type, input_value=None, input_type=None]\n    For further information visit https://errors.pydantic.dev/2.13/v/string_type',
+        }],
+      },
+    })
+
+    expect(formatCreateSkillError(error, 'new-skill')).toBe(
+      'Cannot create "new-skill": phases/init/LOGIC.md:1 LOGIC.md is missing <python_callable>. Add a <python_callable> block that names a Python function in phases/<phase>/actions/.',
+    )
+  })
+
+  it('explains stale sidecar request validation on import', () => {
+    const error = studioApiError({
+      error_code: 'MANIFEST_VALIDATION_FAILED',
+      message: 'Request validation failed',
+      details: {
+        errors: [{
+          type: 'extra_forbidden',
+          loc: ['body', 'import_existing'],
+          msg: 'Extra inputs are not permitted',
+        }],
+      },
+    })
+
+    expect(formatImportSkillError(error)).toBe(
+      'Cannot import this folder: the running backend does not support folder import yet. Quit and restart Studio so the updated sidecar is loaded.',
     )
   })
 })

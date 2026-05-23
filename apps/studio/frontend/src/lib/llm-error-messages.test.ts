@@ -64,13 +64,13 @@ describe("composeRequestErrorMessage", () => {
 describe("translateTestStatus", () => {
   it("returns the English label for each TestStatus variant", () => {
     expect(translateTestStatus("ok")).toBe("Connected")
-    expect(translateTestStatus("untested")).toBe("Untested")
+    expect(translateTestStatus("untested")).toBe("Not configured")
     expect(translateTestStatus("invalid_key")).toBe("Invalid API key")
     expect(translateTestStatus("missing_api_key")).toContain("API key is empty")
   })
 
-  it("defaults to Untested when undefined", () => {
-    expect(translateTestStatus(undefined)).toBe("Untested")
+  it("defaults to Not configured when undefined", () => {
+    expect(translateTestStatus(undefined)).toBe("Not configured")
   })
 })
 

@@ -7,12 +7,16 @@ target_goal: "Studio MVP — 让 PM 可用"
 
 ## 1. Supported SDKs & Protocols
 
-- **Primary Protocol Enum**: `openai_compatible`
+- **Endpoint profile (OpenAI)**: `openai_compatible` at `https://api.qnaigc.com/v1`
+- **Endpoint profile (Anthropic)**: `anthropic_compatible` at `https://anthropic.qnaigc.com`
 - **Native SDK**: 七牛云 SDK (Token Plan)
+- **Studio rule**: one API Keys provider card represents one endpoint profile. If the same Qiniu key has both OpenAI and Anthropic URLs, create two provider cards with the same key, different Base URLs, and different Protocol values.
 
 ## §1.5 探测元数据 (round 3 新增, 用于 Studio 自动 Test 探测)
 
 ```yaml
+# Default metadata profile. Endpoint-specific profiles are represented in
+# Studio credentials by the provider_type + base_url pair.
 compatible_sdks:
   - openai_compatible
 
@@ -33,14 +37,17 @@ auth_header_format: |
 
 ## 3. Base URL
 
-- **Official Endpoint**: `https://api.qiniu.com/v1`
+- **OpenAI Base URL**: `https://api.qnaigc.com/v1`
+- **Anthropic Base URL**: `https://anthropic.qnaigc.com`
 
 ## 4. Notable Model IDs
 
-- `deepseek-v4`
-- `doubao-pro`
-- `qwen-max`
-- `kimi-latest`
+- `deepseek-r1`
+- `deepseek-v3`
+- `deepseek/deepseek-v3.1-terminus`
+- `qwen/qwen3.7-max`
+- `moonshotai/kimi-k2.6`
+- `anthropic/claude-opus-4.7`
 
 ## 5. 能力维度 (Test 成功后后端应当返回)
 
@@ -57,11 +64,25 @@ auth_header_format: |
 ## 7. Testing (cURL)
 
 ```bash
-curl https://api.qiniu.com/v1/chat/completions \
+curl https://api.qnaigc.com/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <YOUR_KEY>" \
   -d '{
     "model": "deepseek-v4",
+    "messages": [
+      {"role": "user", "content": "ping"}
+    ],
+    "max_tokens": 1
+  }'
+```
+
+```bash
+curl https://anthropic.qnaigc.com/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: <YOUR_KEY>" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "anthropic/claude-opus-4.7",
     "messages": [
       {"role": "user", "content": "ping"}
     ],

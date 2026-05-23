@@ -2,6 +2,11 @@ import { Download } from 'lucide-react'
 import { useState } from 'react'
 import type { ExportFormat } from '../../utils/reportTemplates'
 import { reportTimestamp } from '../../utils/reportTemplates'
+import { Button } from '../ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu'
 import { ExportFormatPicker } from './ExportFormatPicker'
 
 interface ExportButtonProps {
@@ -60,29 +65,26 @@ export function ExportButton({
   }
 
   return (
-    <div className="relative inline-flex">
-      <button
-        type="button"
-        disabled={disabled || exporting}
-        onClick={(event) => {
-          event.stopPropagation()
-          setOpen((current) => !current)
-        }}
-        className={`inline-flex items-center gap-1.5 rounded-md border border-slate-300 font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 ${
-          compact ? 'p-1.5 text-xs' : 'px-3 py-1.5 text-xs'
-        }`}
-        title={title}
-      >
-        <Download className="h-3.5 w-3.5" />
-        {compact ? null : exporting ? 'Exporting...' : label}
-      </button>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size={compact ? 'icon-sm' : 'sm'}
+          disabled={disabled || exporting}
+          onClick={(event) => event.stopPropagation()}
+          title={title}
+        >
+          <Download />
+          {compact ? null : exporting ? 'Exporting...' : label}
+        </Button>
+      </DropdownMenuTrigger>
       {open ? (
         <ExportFormatPicker
           disabled={disabled || exporting}
           onSelect={(format) => void handleSelect(format)}
         />
       ) : null}
-    </div>
+    </DropdownMenu>
   )
 }
-

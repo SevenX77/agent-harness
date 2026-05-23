@@ -76,7 +76,7 @@ export function ApiKeysTab({
   const thirdPartyDrafts = useMemo(() => thirdPartyProviderDrafts(drafts), [drafts])
 
   return (
-    <div>
+    <div className="max-w-3xl">
       <SectionTitle
         title="API Keys"
         description="Local LLM provider credentials used by Studio runtime. Changes auto-save."

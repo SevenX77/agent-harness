@@ -13,6 +13,7 @@ from services.llm_provider_meta import DOCS_DIR, load_provider_meta
 
 from app.core import config
 from app.models.llm_config import (
+    TEST_OUTCOME_FIELDS,
     LLMCredentialsFile,
     ModelInfo,
     ProviderCredential,
@@ -25,13 +26,19 @@ from app.services.llm_credentials import (
     _persist_test_outcome,
     _save_credentials_unlocked,
     credentials_path,
+    find_provider_test_result,
     load_credentials,
+    provider_current_test_result,
     serialize_for_response,
+    test_outcome_values_from_result,
+    upsert_provider_test_result,
 )
 from app.services.llm_provider_test import (
     DEFAULT_BASE_URLS,
     _extract_model_ids_from_section,
     _extract_section_4,
+    canonical_model_id_for_vendor,
+    normalize_model_info_for_vendor,
     probe_available_models,
     probe_compatible_sdks,
     probe_model_id,
@@ -52,10 +59,10 @@ ROLES_PATH = config.REPO_ROOT / "config" / "llm_roles.yaml"
 class ProviderCredentialWrite(BaseModel):
     """Editable subset of ``ProviderCredential`` accepted via PUT.
 
-    Only user-owned provider fields below can be written by the client. The five Test
+    Only user-owned provider fields below can be written by the client. The Test
     outcome fields (``last_test_status``/``last_test_at``/``last_test_message``/
-    ``last_error_code``/``available_models``) are *single-writer* — they are
-    written exclusively by the POST ``/providers/test`` flow via
+    ``last_error_code``/``available_sdks``/``available_models``) are
+    *single-writer* — they are written exclusively by the POST ``/providers/test`` flow via
     ``_persist_test_outcome``. Including any of them in PUT is rejected by
     ``extra="forbid"``.
     """
@@ -75,6 +82,42 @@ class CredentialsWriteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     providers: list[ProviderCredentialWrite] = Field(default_factory=list)
+
+
+TEST_OUTCOME_RESET_FIELD_NAMES = {
+    "last_test_status",
+    "last_test_at",
+    "last_test_message",
+    "last_error_code",
+    "available_sdks",
+    "available_models",
+}
+assert TEST_OUTCOME_RESET_FIELD_NAMES == set(TEST_OUTCOME_FIELDS)
+
+
+def _provider_test_params_changed(
+    current: ProviderCredential,
+    incoming: ProviderCredentialWrite,
+    resolved_api_key: str,
+) -> bool:
+    """Return true when saved Test results no longer describe incoming params."""
+
+    return (
+        current.api_key != resolved_api_key
+        or current.base_url != incoming.base_url
+        or (current.provider_type or None) != (incoming.provider_type or None)
+    )
+
+
+def _test_outcome_reset_values() -> dict[str, Any]:
+    return {
+        "last_test_status": "untested",
+        "last_test_at": "",
+        "last_test_message": "",
+        "last_error_code": "",
+        "available_sdks": [],
+        "available_models": [],
+    }
 
 
 class ProviderTestRequest(BaseModel):
@@ -165,8 +208,8 @@ async def put_llm_credentials(
 
     * The provider list is replaced wholesale by the request — any provider
       whose ``id`` is absent from the body is **deleted**.
-    * Existing Test outcome fields are preserved per id (single-write
-      rule). The 6 editable fields come from the request body.
+    * Existing Test outcome fields are preserved per id only while test
+      parameters still match. Editable fields come from the request body.
     * If ``api_key`` in the body is an empty string, the previously saved key
       for that ``id`` is preserved (so the UI can omit the value
       when the user is only editing other fields).
@@ -186,16 +229,30 @@ async def put_llm_credentials(
                 api_key = current.api_key
             base_url = incoming.base_url
             if current is not None:
-                next_providers.append(
-                    current.model_copy(
-                        update={
-                            "api_key": api_key,
-                            "base_url": base_url,
-                            "name": incoming.name,
-                            "provider_type": incoming.provider_type,
-                        }
-                    )
+                test_results = upsert_provider_test_result(
+                    list(current.test_results),
+                    provider_current_test_result(current),
                 )
+                update: dict[str, Any] = {
+                    "api_key": api_key,
+                    "base_url": base_url,
+                    "name": incoming.name,
+                    "provider_type": incoming.provider_type,
+                    "test_results": test_results,
+                }
+                if _provider_test_params_changed(current, incoming, api_key):
+                    cached = find_provider_test_result(
+                        test_results,
+                        api_key=api_key,
+                        base_url=base_url,
+                        provider_type=incoming.provider_type,
+                    )
+                    update.update(
+                        test_outcome_values_from_result(cached)
+                        if cached is not None
+                        else _test_outcome_reset_values()
+                    )
+                next_providers.append(current.model_copy(update=update))
             else:
                 next_providers.append(
                     ProviderCredential(
@@ -215,7 +272,7 @@ async def put_llm_credentials(
 async def test_llm_provider(request: ProviderTestRequest) -> ProviderTestResponse:
     """Use candidate credentials to test provider connectivity.
 
-    The 5 Test outcome fields on the matching ``ProviderCredential`` are
+    The Test outcome fields on the matching ``ProviderCredential`` are
     atomically patched via ``_persist_test_outcome`` (which shares the
     credentials lock with the PUT path, so concurrent edits do not lose
     Test writeback). Other fields are untouched.
@@ -249,7 +306,9 @@ async def test_llm_provider(request: ProviderTestRequest) -> ProviderTestRespons
             model_list_ok = True
         except Exception as exc:  # noqa: BLE001 - convert vendor failures to clean API results.
             logger.warning("Model list probe failed for vendor=%s: %s", vendor, exc)
-            model_error_status, model_error_code, model_error_message = _provider_test_error_from_exception(exc)
+            model_error_status, model_error_code, model_error_message = (
+                _provider_test_error_from_exception(exc)
+            )
     else:
         model_error_message = "Provider metadata does not define a model-list endpoint."
 
@@ -283,6 +342,9 @@ async def test_llm_provider(request: ProviderTestRequest) -> ProviderTestRespons
             available_models=available_models,
         ),
         _now_iso(),
+        expected_api_key=request.api_key,
+        expected_base_url=request.base_url or "",
+        expected_provider_type=request.provider_type,
     )
 
 
@@ -343,6 +405,7 @@ async def test_provider_models(request: ProviderModelTestRequest) -> ProviderMod
     merged_models = _merge_available_models(
         list(provider.available_models),
         [result.model_id for result in results if result.status == "ok"],
+        vendor=vendor,
     )
     _persist_test_outcome(
         provider.id,
@@ -352,6 +415,9 @@ async def test_provider_models(request: ProviderModelTestRequest) -> ProviderMod
         last_error_code=provider.last_error_code,
         available_sdks=list(provider.available_sdks),
         available_models=merged_models,
+        expected_api_key=provider.api_key,
+        expected_base_url=provider.base_url or "",
+        expected_provider_type=provider.provider_type,
     )
     return ProviderModelTestResponse(results=results, available_models=merged_models)
 
@@ -392,6 +458,10 @@ def _record_and_return(
     provider_id: str,
     response: ProviderTestResponse,
     outcome_at: str,
+    *,
+    expected_api_key: str,
+    expected_base_url: str,
+    expected_provider_type: ProviderType,
 ) -> ProviderTestResponse:
     """Write the Test outcome back to credentials (best-effort) and return the response."""
 
@@ -404,6 +474,9 @@ def _record_and_return(
             last_error_code=response.error_code or "",
             available_sdks=list(response.available_sdks),
             available_models=list(response.available_models),
+            expected_api_key=expected_api_key,
+            expected_base_url=expected_base_url,
+            expected_provider_type=expected_provider_type,
         )
     except Exception as exc:  # noqa: BLE001 — Test writeback failure must not break the API response.
         logger.warning(
@@ -496,11 +569,23 @@ def _dedupe_model_ids(model_ids: list[str]) -> list[str]:
 def _merge_available_models(
     existing: list[ModelInfo],
     passed_model_ids: list[str],
+    *,
+    vendor: str = "",
 ) -> list[ModelInfo]:
-    by_id = {model.id: model for model in existing}
+    by_id = {
+        normalized.id: normalized
+        for normalized in (
+            normalize_model_info_for_vendor(model, vendor)
+            for model in existing
+        )
+    }
     for model_id in passed_model_ids:
-        if model_id not in by_id:
-            by_id[model_id] = ModelInfo(id=model_id)
+        canonical_model_id = canonical_model_id_for_vendor(model_id, vendor)
+        if canonical_model_id not in by_id:
+            by_id[canonical_model_id] = normalize_model_info_for_vendor(
+                ModelInfo(id=model_id),
+                vendor,
+            )
     return list(by_id.values())
 
 

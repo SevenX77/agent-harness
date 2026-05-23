@@ -1,7 +1,15 @@
-import { RotateCcw, Save, X } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { RotateCcw, Save } from 'lucide-react'
 import type { PhaseFormData } from '../../hooks/usePhaseForm'
 import { phaseFormErrors } from '../../hooks/usePhaseForm'
+import { Button } from '../ui/button'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from '../ui/sheet'
 import { PhaseFormBody } from './PhaseFormBody'
 
 interface PhaseDrawerProps {
@@ -29,92 +37,57 @@ export function PhaseDrawer({
 }: PhaseDrawerProps) {
   const errors = phaseFormErrors(data)
   const canApply = Object.keys(errors).length === 0
-  const trapRef = useRef<HTMLElement | null>(null)
-
-  useEffect(() => {
-    if (!open) {
-      return undefined
-    }
-    const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose()
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    const focusTimer = window.setTimeout(() => trapRef.current?.querySelector<HTMLElement>('button, textarea, input, select, a[href]')?.focus(), 0)
-    return () => {
-      window.clearTimeout(focusTimer)
-      document.removeEventListener('keydown', handleKeyDown)
-      returnFocus?.focus()
-    }
-  }, [onClose, open])
 
   if (!open) {
     return null
   }
 
   return (
-    <div className="pointer-events-none fixed inset-0 z-40">
-      <aside
-        ref={trapRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="phase-drawer-title"
-        className="pointer-events-auto absolute end-0 top-0 flex h-full w-[min(42rem,44vw)] min-w-[32rem] flex-col border-s border-slate-200 bg-slate-50 shadow-2xl dark:border-slate-800 dark:bg-slate-950"
+    <Sheet open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
+      <SheetContent
+        className="w-[min(92vw,42rem)] max-w-none p-0 sm:max-w-none md:min-w-[32rem]"
+        side="right"
       >
-        <div className="flex shrink-0 items-start justify-between border-b border-slate-200 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-900">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-400">
-              Phase form
-            </p>
-            <h2 id="phase-drawer-title" className="mt-1 text-lg font-bold text-slate-900 dark:text-slate-50">
-              {phaseId ?? 'Unknown phase'}
-            </h2>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              Changes apply only after pressing Apply.
-            </p>
-          </div>
-          <button
-            type="button"
-            aria-label="Close phase form"
-            onClick={onClose}
-            className="min-h-8 min-w-8 rounded-md p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-            title="Close phase form"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
+        <SheetHeader className="border-b border-border bg-background px-5 py-4">
+          <SheetDescription className="font-semibold uppercase tracking-wide text-primary">
+            Phase form
+          </SheetDescription>
+          <SheetTitle className="text-lg font-bold">
+            {phaseId ?? 'Unknown phase'}
+          </SheetTitle>
+          <SheetDescription>
+            Changes apply only after pressing Apply.
+          </SheetDescription>
+        </SheetHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-5">
           <PhaseFormBody data={data} availableTools={availableTools} onChange={onChange} />
         </div>
 
-        <div className="flex shrink-0 items-center justify-between border-t border-slate-200 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-900">
-          <span className={`text-xs font-medium ${dirty ? 'text-amber-600 dark:text-amber-300' : 'text-slate-500 dark:text-slate-400'}`}>
+        <SheetFooter className="flex-row items-center justify-between border-t border-border bg-background px-5 py-4">
+          <span className={`text-xs font-medium ${dirty ? 'text-primary' : 'text-muted-foreground'}`}>
             {dirty ? 'Unsaved form edits' : 'Synced with SKILL.md'}
           </span>
           <div className="flex items-center gap-2">
-            <button
+            <Button
               type="button"
               onClick={onReset}
-              className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+              variant="outline"
             >
               <RotateCcw className="h-4 w-4" />
               Reset
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               disabled={!canApply}
               onClick={onApply}
-              className="inline-flex items-center gap-2 rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-sky-300 dark:disabled:bg-sky-900"
             >
               <Save className="h-4 w-4" />
               Apply
-            </button>
+            </Button>
           </div>
-        </div>
-      </aside>
-    </div>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   )
 }

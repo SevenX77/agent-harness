@@ -1,22 +1,53 @@
 import { useState } from "react"
 import { toast } from "sonner"
-import { CheckCircle2, Eye, EyeOff, Loader2, Trash2, XCircle } from "lucide-react"
+import { CheckCircle2, Copy, Eye, EyeOff, Loader2, Trash2, XCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { translateErrorCode, translateTestStatus } from "@/lib/llm-error-messages"
 import { cn } from "@/lib/utils"
-import type { CredentialsState, ModelInfo } from "../../../api/llm"
-import type { ProviderDraft } from "../SettingsPage"
+import type { CredentialsState, ModelInfo, ProviderType } from "../../../api/llm"
+import { providerCachedTestResult, providerTestParamsMatch } from "../settings/provider-utils"
+import type { ProviderDraft } from "../settings/types"
 import { ManualModelTestPanel } from "./ManualModelTestPanel"
 
 type TestMessageStatus = "not_configured" | "testing" | NonNullable<CredentialsState["providers"][number]["last_test_status"]>
 const availableModelsPreviewLimit = 12
+const providerProtocolOptions: Array<{ value: ProviderType; label: string }> = [
+  { value: "openai_compatible", label: "OpenAI compatible" },
+  { value: "anthropic_compatible", label: "Anthropic compatible" },
+  { value: "google_genai", label: "Google GenAI" },
+]
 
 export function apiKeyInputType(visible: boolean): "text" | "password" {
   return visible ? "text" : "password"
+}
+
+export function apiKeyInputClassName(visible: boolean): string {
+  return cn("flex-1", visible ? "text-foreground" : "text-muted-foreground")
+}
+
+export function providerProtocolLabel(value: ProviderType): string {
+  return providerProtocolOptions.find((option) => option.value === value)?.label ?? "OpenAI compatible"
+}
+
+export async function copyCredentialValue(value: string, label: string): Promise<void> {
+  if (!value) return
+  try {
+    await navigator.clipboard.writeText(value)
+    toast.success(`${label} copied`)
+  } catch {
+    toast.error(`Failed to copy ${label.toLowerCase()}`)
+  }
 }
 
 export function sortModelInfos(models: ModelInfo[]): ModelInfo[] {
@@ -52,7 +83,7 @@ export function TestMessage({
 
   if (status === "ok") {
     return (
-      <Badge variant="outline" className="gap-1 text-emerald-500 border-emerald-500/50">
+      <Badge variant="success">
         <CheckCircle2 className="size-3" />
         {latencyMs != null ? `Connected (${latencyMs}ms)` : "Connected"}
       </Badge>
@@ -83,7 +114,7 @@ export function TestMessage({
     )
   }
 
-  return <Badge variant="secondary">Untested</Badge>
+  return <Badge variant="secondary">Not configured</Badge>
 }
 
 export function ProviderDeleteButton({
@@ -113,8 +144,31 @@ export function ProviderDeleteButton({
   }
 
   return (
-    <Button type="button" variant="ghost" size="icon" aria-label="Delete provider" onClick={requestDelete}>
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      aria-label="Delete provider"
+      className="text-muted-foreground/70 hover:text-muted-foreground"
+      onClick={requestDelete}
+    >
       <Trash2 className="size-4" />
+    </Button>
+  )
+}
+
+function FieldCopyButton({ value, label }: { value: string; label: string }) {
+  return (
+    <Button
+      type="button"
+      size="icon"
+      variant="ghost"
+      className="text-muted-foreground/70 transition-none hover:text-muted-foreground"
+      onClick={() => void copyCredentialValue(value, label)}
+      disabled={!value}
+      aria-label={`Copy ${label}`}
+    >
+      <Copy className="size-4" />
     </Button>
   )
 }
@@ -145,32 +199,49 @@ export function ProviderCard({
   const isOfficial = providerKind === "official"
   const hasApiKey = draft.api_key.trim().length > 0
   const hasRequiredConfig = hasApiKey && (providerKind !== "third-party" || draft.base_url.trim().length > 0)
+  const draftMatchesPersisted = Boolean(persisted) && providerTestParamsMatch(draft, persisted ?? {})
+  const cachedResult = draftMatchesPersisted ? null : providerCachedTestResult(persisted, draft)
+  const hasMatchedTestResult = draftMatchesPersisted || cachedResult !== null
   const displayName = draft.name.trim() || "Unnamed Provider"
   const apiKeyProviderName = displayName.replace(/ Official$/, "")
-  const availableModels = sortModelInfos(persisted?.available_models ?? [])
+  const availableSdks = draftMatchesPersisted
+    ? persisted?.available_sdks ?? []
+    : cachedResult?.available_sdks ?? []
+  const availableModels = sortModelInfos(
+    draftMatchesPersisted
+      ? persisted?.available_models ?? []
+      : cachedResult?.available_models ?? [],
+  )
   const hasAvailableModels = availableModels.length > 0
   const visibleModels = showAllModels ? availableModels : availableModels.slice(0, availableModelsPreviewLimit)
   const hiddenModelCount = Math.max(0, availableModels.length - visibleModels.length)
-  const persistedStatus = persisted?.last_test_status
+  const matchedStatus = draftMatchesPersisted
+    ? persisted?.last_test_status
+    : cachedResult?.last_test_status
+  const matchedErrorCode = draftMatchesPersisted
+    ? persisted?.last_error_code
+    : cachedResult?.last_error_code
   const testStatus: TestMessageStatus = !hasRequiredConfig
     ? "not_configured"
     : draft.isTesting
     ? "testing"
-    : persistedStatus === "ok"
+    : !hasMatchedTestResult
+      ? "not_configured"
+    : matchedStatus === "ok"
       ? "ok"
-      : persistedStatus && persistedStatus !== "untested"
-        ? persistedStatus
-        : "untested"
+    : matchedStatus && matchedStatus !== "untested"
+      ? matchedStatus
+      : "not_configured"
   return (
     <Card data-provider-id={draft.id}>
       <CardHeader className="flex flex-row items-center gap-3 pb-2">
         <div className="min-w-0 max-w-xs truncate text-sm font-semibold text-foreground">{displayName}</div>
         {providerKind && !isOfficial ? (
-          <Badge variant="outline" className="text-[10px]">
+          <Badge variant="outline" className="text-[10px] text-muted-foreground">
             Third-party
           </Badge>
         ) : null}
-        <TestMessage status={testStatus} latencyMs={null} errorCode={persisted?.last_error_code ?? null} />
+        <TestMessage status={testStatus} latencyMs={null} errorCode={matchedErrorCode ?? null} />
         <div className="flex-1" />
         {!isOfficial ? <ProviderDeleteButton draftName={draft.name} onDelete={onDelete} /> : null}
       </CardHeader>
@@ -191,6 +262,26 @@ export function ProviderCard({
             />
           </div>
         ) : null}
+        {!isOfficial ? (
+          <div className="space-y-2">
+            <Label htmlFor={`provider-protocol-${draft.id}`}>Protocol</Label>
+            <Select
+              value={draft.provider_type}
+              onValueChange={(value) => onFieldChange({ provider_type: value as ProviderType })}
+            >
+              <SelectTrigger id={`provider-protocol-${draft.id}`} className="w-full justify-between">
+                <SelectValue>{providerProtocolLabel(draft.provider_type)}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {providerProtocolOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
         <div className="space-y-2">
           <Label htmlFor={`api-key-${draft.id}`}>API Key</Label>
           <div className="flex items-center gap-2">
@@ -208,18 +299,19 @@ export function ProviderCard({
               data-lpignore="true"
               data-form-type="other"
               spellCheck={false}
-              className="flex-1"
+              className={apiKeyInputClassName(visible)}
             />
             <Button
               type="button"
               size="icon"
               variant="ghost"
-              className="transition-none"
+              className="text-muted-foreground/70 transition-none hover:text-muted-foreground"
               onClick={() => setVisible((value) => !value)}
               aria-label={visible ? "Hide API key" : "Show API key"}
             >
               {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
             </Button>
+            <FieldCopyButton value={draft.api_key} label="API key" />
             <Button type="button" variant="default" onClick={onTest} disabled={draft.isTesting || !hasRequiredConfig} className="px-6">
               {draft.isTesting ? <Loader2 className="size-3.5 animate-spin" /> : null}
               Test
@@ -229,25 +321,29 @@ export function ProviderCard({
         {!isOfficial ? (
           <div className="space-y-2">
             <Label htmlFor={`base-url-${draft.id}`}>Base URL</Label>
-            <Input
-              id={`base-url-${draft.id}`}
-              value={draft.base_url}
-              onChange={(event) => onFieldChange({ base_url: event.target.value })}
-              placeholder="https://api.openai.com/v1"
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="none"
-              spellCheck={false}
-            />
+            <div className="flex items-center gap-2">
+              <Input
+                id={`base-url-${draft.id}`}
+                value={draft.base_url}
+                onChange={(event) => onFieldChange({ base_url: event.target.value })}
+                placeholder="https://api.openai.com/v1"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                className="flex-1"
+              />
+              <FieldCopyButton value={draft.base_url} label="Base URL" />
+            </div>
           </div>
         ) : null}
-        {persisted?.available_sdks?.length || persisted?.available_models?.length ? (
+        {availableSdks.length || availableModels.length ? (
           <div className="border-t pt-3 space-y-2 text-xs" data-testid="provider-capabilities">
-            {persisted.available_sdks && persisted.available_sdks.length > 0 ? (
+            {availableSdks.length > 0 ? (
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-muted-foreground">Available SDKs:</span>
-                {persisted.available_sdks.map((sdk) => (
-                  <Badge key={sdk} variant="secondary" className="font-mono">
+                {availableSdks.map((sdk) => (
+                  <Badge key={sdk} variant="outline" className="border-border/70 bg-muted/20 font-mono text-muted-foreground">
                     {sdk}
                   </Badge>
                 ))}
@@ -261,7 +357,7 @@ export function ProviderCard({
                   className={cn("flex gap-1 flex-wrap", !showAllModels && "max-h-[2.75rem] overflow-hidden")}
                 >
                   {visibleModels.map((model) => (
-                    <Badge key={model.id} variant="outline" className="font-mono">
+                    <Badge key={model.id} variant="outline" className="border-border/70 bg-muted/20 font-mono text-muted-foreground">
                       {model.id}
                     </Badge>
                   ))}

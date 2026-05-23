@@ -147,9 +147,9 @@ export function useDebouncedCredentialsSave(
  * Build a PUT request body from the current draft state.
  *
  * Critical: only the fields accepted by `ProviderCredentialWrite` on the
- * backend are forwarded. The 5 Test outcome fields (last_test_status,
- * last_test_at, last_test_message, last_error_code, available_models) are
- * *single-writer* — the backend rejects them in PUT bodies with 422.
+ * backend are forwarded. Test outcome fields (`last_test_*`,
+ * `available_sdks`, `available_models`) are *single-writer* — the backend
+ * rejects them in PUT bodies with 422.
  */
 export function buildPutPayload(
   providers: ReadonlyArray<{

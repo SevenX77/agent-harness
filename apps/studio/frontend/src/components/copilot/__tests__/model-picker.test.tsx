@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server'
-import type { ReactElement } from 'react'
+import type { ComponentProps, ReactElement, ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { CredentialsState, RoleEntry } from '../../../api/llm'
 import {
@@ -9,13 +9,52 @@ import {
   ModelPickerMenu,
 } from '../model-picker'
 
+vi.mock('../../ui/button', () => ({
+  Button: ({
+    children,
+    ...props
+  }: ComponentProps<'button'> & { children: ReactNode }) => (
+    <button data-slot="button" {...props}>
+      {children}
+    </button>
+  ),
+}))
+
+vi.mock('../../ui/dropdown-menu', () => ({
+  DropdownMenu: ({ children }: { children: ReactNode }) => <div data-slot="dropdown-menu">{children}</div>,
+  DropdownMenuContent: ({ children, className }: { children: ReactNode; className?: string }) => (
+    <div className={className} data-slot="dropdown-menu-content">
+      {children}
+    </div>
+  ),
+  DropdownMenuItem: ({
+    children,
+    disabled,
+    onSelect,
+    ...props
+  }: {
+    children: ReactNode
+    disabled?: boolean
+    onSelect?: () => void
+  } & ComponentProps<'div'>) => (
+    <div data-disabled={disabled} data-slot="dropdown-menu-item" onClick={onSelect} {...props}>
+      {children}
+    </div>
+  ),
+  DropdownMenuLabel: ({ children }: { children: ReactNode }) => (
+    <div data-slot="dropdown-menu-label">{children}</div>
+  ),
+  DropdownMenuTrigger: ({ children }: { children: ReactNode }) => (
+    <div data-slot="dropdown-menu-trigger">{children}</div>
+  ),
+}))
+
 const role: RoleEntry = {
-  temperature: 0.2,
   model_fallback: true,
   active_model: 'CL46T',
   models: {
-    CL46T: { providers: ['anthropic', 'openai_proxy'] },
-    DS32R: { providers: ['deepseek'] },
+    CL46T: { providers: ['anthropic', 'openai_proxy'], temperature: 0.2 },
+    DS32R: { providers: ['deepseek'], temperature: 0.2 },
   },
 }
 
@@ -115,7 +154,10 @@ describe('ModelPicker', () => {
     )
 
     expect(html).toContain('Select Copilot model')
-    expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain('data-slot="dropdown-menu"')
+    expect(html).toContain('data-slot="dropdown-menu-trigger"')
+    expect(html).toContain('data-slot="button"')
+    expect(html).not.toContain('absolute bottom-8')
   })
 
   it('renders the full variant as a button group', () => {

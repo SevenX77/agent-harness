@@ -454,7 +454,7 @@ async def create_new_skill(
     skill_dir = (
         await _validated_directory_path(user_id, skill_id, directory_path, metadata)
         if directory_path
-        else config.DEFAULT_SKILLS_ROOT / skill_id
+        else await _default_skills_root(metadata) / skill_id
     )
     public_skill_dir = config.SKILLS_DIR / skill_id
     workspace_skill_dir = _workspace_skills_dir_for(user_id) / skill_id
@@ -531,6 +531,13 @@ async def create_new_skill(
     )
     await metadata.save_skill_summary(user_id, summary)
     return summary
+
+
+async def _default_skills_root(metadata: MetadataStore) -> Path:
+    settings = await metadata.read_app_settings()
+    if settings.default_skills_directory:
+        return Path(settings.default_skills_directory).expanduser().resolve()
+    return config.DEFAULT_SKILLS_ROOT
 
 
 async def fork_skill(

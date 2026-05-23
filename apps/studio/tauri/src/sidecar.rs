@@ -54,6 +54,7 @@ pub struct SidecarLaunchConfig {
     pub backend_dir: PathBuf,
     pub site_packages: PathBuf,
     pub resource_dir: PathBuf,
+    pub config_dir: PathBuf,
     pub startup_attempts: usize,
     pub health_timeout: Duration,
     pub shutdown_timeout: Duration,
@@ -67,10 +68,16 @@ impl SidecarLaunchConfig {
             backend_dir: backend_dir_for_resource_root(resource_root),
             site_packages: resource_root.join("vendor").join("site-packages"),
             resource_dir: resource_root.join("vendor").join("resources"),
+            config_dir: resource_root.join("vendor").join("resources").join("config"),
             startup_attempts: MAX_STARTUP_ATTEMPTS,
             health_timeout: Duration::from_secs(5),
             shutdown_timeout: Duration::from_secs(2),
         }
+    }
+
+    pub fn with_config_dir(mut self, config_dir: PathBuf) -> Self {
+        self.config_dir = config_dir;
+        self
     }
 }
 
@@ -97,16 +104,19 @@ pub struct SidecarRuntimeConfig {
     pub ws_url: String,
     #[serde(rename = "resourceDir")]
     pub resource_dir: String,
+    #[serde(rename = "configDir")]
+    pub config_dir: String,
     pub api_token: String,
 }
 
 impl SidecarRuntimeConfig {
-    fn new(port: u16, resource_dir: &Path, api_token: &str) -> Self {
+    fn new(port: u16, resource_dir: &Path, config_dir: &Path, api_token: &str) -> Self {
         Self {
             port,
             base_url: format!("http://127.0.0.1:{port}/api"),
             ws_url: format!("ws://127.0.0.1:{port}/ws"),
             resource_dir: resource_dir.display().to_string(),
+            config_dir: config_dir.display().to_string(),
             api_token: api_token.to_string(),
         }
     }
@@ -141,7 +151,12 @@ impl SidecarManager {
                     state: Mutex::new(SidecarState {
                         child: Some(child),
                         token: api_token.clone(),
-                        runtime_config: SidecarRuntimeConfig::new(port, &config.resource_dir, &api_token),
+                        runtime_config: SidecarRuntimeConfig::new(
+                            port,
+                            &config.resource_dir,
+                            &config.config_dir,
+                            &api_token,
+                        ),
                         stderr_lines,
                         shutdown_timeout: config.shutdown_timeout,
                     }),
@@ -188,6 +203,50 @@ impl SidecarManager {
 
 pub fn default_tauri_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+pub fn default_user_config_dir() -> PathBuf {
+    if cfg!(target_os = "macos") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join("AgentStudio");
+        }
+    }
+    if cfg!(target_os = "windows") {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            return PathBuf::from(appdata).join("AgentStudio");
+        }
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("AgentStudio");
+    }
+    default_tauri_dir()
+        .join("vendor")
+        .join("resources")
+        .join("config")
+}
+
+pub fn resource_root_for_runtime(resolved_resource_root: PathBuf) -> PathBuf {
+    resource_root_for_runtime_mode(resolved_resource_root, cfg!(debug_assertions))
+}
+
+fn resource_root_for_runtime_mode(
+    resolved_resource_root: PathBuf,
+    debug_assertions: bool,
+) -> PathBuf {
+    if debug_assertions {
+        return default_tauri_dir();
+    }
+    if resolved_resource_root.join("vendor").exists() {
+        resolved_resource_root
+    } else {
+        default_tauri_dir()
+    }
 }
 
 pub fn allocate_loopback_port() -> std::io::Result<u16> {
@@ -267,6 +326,7 @@ fn spawn_sidecar_process(
             python_path_env(&config.site_packages, &config.backend_dir),
         )
         .env("STUDIO_RESOURCE_DIR", &config.resource_dir)
+        .env("STUDIO_CONFIG_DIR", &config.config_dir)
         .env("STUDIO_API_TOKEN", api_token)
         .env("STUDIO_CORS_EXTRA_ORIGINS", sidecar_cors_extra_origins())
         .env("STUDIO_EXIT_ON_ORPHAN", "1")
@@ -440,10 +500,16 @@ mod tests {
 
     #[test]
     fn runtime_config_uses_dynamic_http_and_ws_urls() {
-        let config = SidecarRuntimeConfig::new(45678, Path::new("/tmp/studio-resource"), "token");
+        let config = SidecarRuntimeConfig::new(
+            45678,
+            Path::new("/tmp/studio-resource"),
+            Path::new("/tmp/studio-config"),
+            "token",
+        );
         assert_eq!(config.base_url, "http://127.0.0.1:45678/api");
         assert_eq!(config.ws_url, "ws://127.0.0.1:45678/ws");
         assert_eq!(config.resource_dir, "/tmp/studio-resource");
+        assert_eq!(config.config_dir, "/tmp/studio-config");
         assert_eq!(config.api_token, "token");
     }
 
@@ -466,6 +532,37 @@ mod tests {
             config.resource_dir,
             Path::new("/app/resources/vendor/resources")
         );
+        assert_eq!(
+            config.config_dir,
+            Path::new("/app/resources/vendor/resources/config")
+        );
+        assert_eq!(
+            config
+                .clone()
+                .with_config_dir(PathBuf::from("/tmp/studio-config"))
+                .config_dir,
+            Path::new("/tmp/studio-config")
+        );
+    }
+
+    #[test]
+    fn debug_runtime_resource_root_uses_source_tauri_dir() {
+        let resolved = PathBuf::from("/app/target/debug");
+        let root = resource_root_for_runtime_mode(resolved, true);
+        assert_eq!(root, default_tauri_dir());
+    }
+
+    #[test]
+    fn release_runtime_resource_root_prefers_resolved_vendor_root() {
+        let resolved = default_tauri_dir();
+        let root = resource_root_for_runtime_mode(resolved.clone(), false);
+        assert_eq!(root, resolved);
+    }
+
+    #[test]
+    fn release_runtime_resource_root_falls_back_without_vendor() {
+        let root = resource_root_for_runtime_mode(PathBuf::from("/app/no-vendor"), false);
+        assert_eq!(root, default_tauri_dir());
     }
 
     #[test]
@@ -477,11 +574,17 @@ mod tests {
 
     #[test]
     fn runtime_config_serializes_frontend_contract_field_names() {
-        let config = SidecarRuntimeConfig::new(45678, Path::new("/tmp/studio-resource"), "token");
+        let config = SidecarRuntimeConfig::new(
+            45678,
+            Path::new("/tmp/studio-resource"),
+            Path::new("/tmp/studio-config"),
+            "token",
+        );
         let json = serde_json::to_value(config).expect("serialize config");
         assert_eq!(json["baseURL"], "http://127.0.0.1:45678/api");
         assert_eq!(json["wsURL"], "ws://127.0.0.1:45678/ws");
         assert_eq!(json["resourceDir"], "/tmp/studio-resource");
+        assert_eq!(json["configDir"], "/tmp/studio-config");
         assert_eq!(json["api_token"], "token");
     }
 

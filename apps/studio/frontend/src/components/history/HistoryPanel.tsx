@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import type { GitHistoryItem } from '../../api/types'
 import { useLocalHistory } from '../../hooks/useRunHistory'
 import { errorMessage } from '../../utils/errors'
+import { Button } from '../ui/button'
 
 interface HistoryPanelProps {
   skillId: string | null
@@ -66,15 +67,16 @@ export function LocalHistoryPanelView({
           <h3 className="text-xs font-medium text-foreground">Local History</h3>
           <p className="text-[11px] text-muted-foreground">{history.length} snapshots</p>
         </div>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-lg"
           onClick={onRefresh}
-          className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
           aria-label="Refresh local history"
           title="Refresh local history"
         >
           <RefreshCw className="size-4" />
-        </button>
+        </Button>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
@@ -100,14 +102,12 @@ export function LocalHistoryPanelView({
             {history.map((item) => {
               const selected = item.sha === selectedSha
               return (
-                <button
+                <Button
                   key={item.sha}
                   type="button"
+                  variant={selected ? 'secondary' : 'ghost'}
                   onClick={() => onSelect(item.sha)}
-                  className={[
-                    'flex w-full gap-2 rounded-md px-2 py-2 text-left text-xs transition-colors',
-                    selected ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
-                  ].join(' ')}
+                  className="h-auto w-full justify-start gap-2 px-2 py-2 text-left text-xs"
                   aria-pressed={selected}
                 >
                   <GitCommit className="mt-0.5 size-4 shrink-0" />
@@ -120,7 +120,7 @@ export function LocalHistoryPanelView({
                       <span>{formatTimestamp(item.timestamp)}</span>
                     </span>
                   </span>
-                </button>
+                </Button>
               )
             })}
           </div>
@@ -135,19 +135,19 @@ export function LocalHistoryPanelView({
             <span>Select a snapshot to revert.</span>
           )}
         </div>
-        <button
+        <Button
           type="button"
+          variant="outline"
           disabled={!selectedItem || revertingSha !== null}
           onClick={() => {
             if (selectedItem) {
               onRevert(selectedItem.sha)
             }
           }}
-          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2 text-xs text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
         >
           <RotateCcw className="size-3.5" />
           {revertingSha ? 'Reverting...' : 'Revert'}
-        </button>
+        </Button>
       </div>
     </div>
   )

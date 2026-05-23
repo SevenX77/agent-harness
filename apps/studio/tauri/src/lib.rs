@@ -1,8 +1,10 @@
 mod sidecar;
 
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
+    mpsc,
     Arc, Mutex,
 };
 use tauri::Manager;
@@ -52,9 +54,22 @@ fn get_sidecar_stderr(state: tauri::State<'_, SidecarAppState>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn existing_path(path: &str) -> Result<PathBuf, String> {
+    let target = path.trim();
+    if target.is_empty() {
+        return Err("path is required".to_string());
+    }
+    let target = PathBuf::from(target);
+    if !target.exists() {
+        return Err(format!("path does not exist: {}", target.display()));
+    }
+    Ok(target)
+}
+
 fn spawn_tool(bin: &str, path: &str) -> Result<(), String> {
+    let target = existing_path(path)?;
     Command::new(bin)
-        .arg(path)
+        .arg(target)
         .spawn()
         .map(|_| ())
         .map_err(|error| format!("failed to spawn {bin}: {error}"))
@@ -71,19 +86,52 @@ fn open_in_codex(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn select_directory(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    Ok(app
-        .dialog()
-        .file()
-        .blocking_pick_folder()
-        .map(|path| path.to_string()))
+async fn select_directory(
+    app: tauri::AppHandle,
+    default_path: Option<String>,
+) -> Result<Option<String>, String> {
+    let mut dialog = app.dialog().file();
+    if let Some(default_path) = picker_starting_directory(default_path) {
+        dialog = dialog.set_directory(default_path);
+    }
+    let (sender, receiver) = mpsc::channel();
+    dialog.pick_folder(move |path| {
+        let _ = sender.send(path.map(|path| path.to_string()));
+    });
+
+    tauri::async_runtime::spawn_blocking(move || {
+        receiver
+            .recv()
+            .map_err(|error| format!("directory picker failed: {error}"))
+    })
+    .await
+    .map_err(|error| format!("directory picker task failed: {error}"))?
+}
+
+fn picker_starting_directory(default_path: Option<String>) -> Option<PathBuf> {
+    let candidate = PathBuf::from(default_path?.trim());
+    if candidate.as_os_str().is_empty() {
+        return None;
+    }
+    if candidate.is_dir() {
+        return Some(candidate);
+    }
+    if std::fs::create_dir_all(&candidate).is_ok() && candidate.is_dir() {
+        return Some(candidate);
+    }
+    candidate
+        .parent()
+        .filter(|parent| parent.is_dir())
+        .map(PathBuf::from)
 }
 
 #[tauri::command]
 fn reveal_in_file_manager(path: String) -> Result<(), String> {
+    let target = existing_path(&path)?;
     if cfg!(target_os = "macos") {
         return Command::new("open")
-            .args(["-R", &path])
+            .arg("-R")
+            .arg(target)
             .spawn()
             .map(|_| ())
             .map_err(|error| format!("failed to reveal in Finder: {error}"));
@@ -91,7 +139,7 @@ fn reveal_in_file_manager(path: String) -> Result<(), String> {
 
     if cfg!(target_os = "linux") {
         return Command::new("xdg-open")
-            .arg(&path)
+            .arg(target)
             .spawn()
             .map(|_| ())
             .map_err(|error| format!("failed to open file manager: {error}"));
@@ -99,7 +147,7 @@ fn reveal_in_file_manager(path: String) -> Result<(), String> {
 
     if cfg!(target_os = "windows") {
         return Command::new("explorer")
-            .arg(format!("/select,{}", path))
+            .arg(format!("/select,{}", target.display()))
             .spawn()
             .map(|_| ())
             .map_err(|error| format!("failed to open Explorer: {error}"));
@@ -110,9 +158,12 @@ fn reveal_in_file_manager(path: String) -> Result<(), String> {
 
 #[tauri::command]
 fn open_in_terminal(path: String) -> Result<(), String> {
+    let target = existing_path(&path)?;
     if cfg!(target_os = "macos") {
         return Command::new("open")
-            .args(["-a", "Terminal", &path])
+            .arg("-a")
+            .arg("Terminal")
+            .arg(target)
             .spawn()
             .map(|_| ())
             .map_err(|error| format!("failed to open Terminal: {error}"));
@@ -120,7 +171,8 @@ fn open_in_terminal(path: String) -> Result<(), String> {
 
     if cfg!(target_os = "linux") {
         return Command::new("gnome-terminal")
-            .args(["--working-directory", &path])
+            .arg("--working-directory")
+            .arg(&target)
             .spawn()
             .or_else(|_| {
                 Command::new("xterm")
@@ -130,8 +182,8 @@ fn open_in_terminal(path: String) -> Result<(), String> {
                         "-lc",
                         "cd \"$1\" && exec \"${SHELL:-sh}\"",
                         "sh",
-                        &path,
                     ])
+                    .arg(&target)
                     .spawn()
             })
             .map(|_| ())
@@ -140,11 +192,13 @@ fn open_in_terminal(path: String) -> Result<(), String> {
 
     if cfg!(target_os = "windows") {
         return Command::new("wt.exe")
-            .args(["-d", &path])
+            .arg("-d")
+            .arg(&target)
             .spawn()
             .or_else(|_| {
                 Command::new("cmd")
-                    .args(["/c", "start", "cmd", "/k", "cd", "/d", &path])
+                    .args(["/c", "start", "cmd", "/k", "cd", "/d"])
+                    .arg(&target)
                     .spawn()
             })
             .map(|_| ())
@@ -180,12 +234,9 @@ pub fn run() {
                     .path()
                     .resource_dir()
                     .unwrap_or_else(|_| sidecar::default_tauri_dir());
-                let resource_root = if resolved_resource_root.join("vendor").exists() {
-                    resolved_resource_root
-                } else {
-                    sidecar::default_tauri_dir()
-                };
-                let config = sidecar::SidecarLaunchConfig::from_resource_root(resource_root);
+                let resource_root = sidecar::resource_root_for_runtime(resolved_resource_root);
+                let config = sidecar::SidecarLaunchConfig::from_resource_root(resource_root)
+                    .with_config_dir(sidecar::default_user_config_dir());
                 match sidecar::SidecarManager::start(config) {
                     Ok(manager) => app.manage(SidecarAppState {
                         manager: Mutex::new(Some(manager)),
@@ -229,4 +280,44 @@ pub fn run() {
             });
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "skill-studio-tauri-{name}-{}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn picker_starting_directory_creates_missing_default_directory() {
+        let target = temp_path("picker-default");
+        let _ = std::fs::remove_dir_all(&target);
+
+        let selected = picker_starting_directory(Some(target.display().to_string()));
+
+        assert_eq!(selected.as_deref(), Some(target.as_path()));
+        assert!(target.is_dir());
+        let _ = std::fs::remove_dir_all(&target);
+    }
+
+    #[test]
+    fn picker_starting_directory_ignores_empty_default() {
+        assert!(picker_starting_directory(Some("  ".to_string())).is_none());
+        assert!(picker_starting_directory(None).is_none());
+    }
+
+    #[test]
+    fn existing_path_rejects_missing_paths() {
+        let missing = temp_path("missing-path");
+        let _ = std::fs::remove_dir_all(&missing);
+
+        let error = existing_path(&missing.display().to_string()).expect_err("missing path");
+
+        assert!(error.contains("path does not exist"));
+    }
 }

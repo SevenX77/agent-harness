@@ -47,6 +47,19 @@ type CredentialProvider = {
   last_error_code?: string
   available_models?: Array<{ id: string; capabilities?: Record<string, unknown> }>
   available_sdks?: string[]
+  test_results?: CredentialTestResult[]
+}
+
+type CredentialTestResult = {
+  params_fingerprint: string
+  base_url: string
+  provider_type: CredentialProvider['provider_type']
+  last_test_status: string
+  last_test_at?: string
+  last_test_message?: string
+  last_error_code?: string
+  available_models?: CredentialProvider['available_models']
+  available_sdks?: string[]
 }
 
 const initialProviders: CredentialProvider[] = [
@@ -77,6 +90,78 @@ const initialProviders: CredentialProvider[] = [
     available_models: [{ id: 'gpt-5', capabilities: { max_context_tokens: 128000 } }],
   },
 ]
+
+function paramsFingerprint(provider: Pick<CredentialProvider, 'api_key' | 'base_url' | 'provider_type'>): string {
+  return fnv1a32(JSON.stringify({
+    api_key: provider.api_key || '',
+    base_url: provider.base_url || '',
+    provider_type: provider.provider_type ?? null,
+  }))
+}
+
+function fnv1a32(value: string): string {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash.toString(16).padStart(8, '0')
+}
+
+function hasTestOutcome(provider: CredentialProvider): boolean {
+  return Boolean(
+    provider.last_test_status && provider.last_test_status !== 'untested' ||
+    provider.last_test_at ||
+    provider.last_test_message ||
+    provider.last_error_code ||
+    provider.available_models?.length ||
+    provider.available_sdks?.length,
+  )
+}
+
+function topLevelResult(provider: CredentialProvider): CredentialTestResult | null {
+  if (!hasTestOutcome(provider)) return null
+  return {
+    params_fingerprint: paramsFingerprint(provider),
+    base_url: provider.base_url || '',
+    provider_type: provider.provider_type,
+    last_test_status: provider.last_test_status ?? 'untested',
+    last_test_at: provider.last_test_at ?? '',
+    last_test_message: provider.last_test_message ?? '',
+    last_error_code: provider.last_error_code ?? '',
+    available_models: provider.available_models ?? [],
+    available_sdks: provider.available_sdks ?? [],
+  }
+}
+
+function upsertResult(results: CredentialTestResult[], result: CredentialTestResult | null): CredentialTestResult[] {
+  if (!result) return results
+  return [...results.filter((item) => item.params_fingerprint !== result.params_fingerprint), result]
+}
+
+function applyResult(provider: CredentialProvider, result: CredentialTestResult): CredentialProvider {
+  return {
+    ...provider,
+    last_test_status: result.last_test_status,
+    last_test_at: result.last_test_at ?? '',
+    last_test_message: result.last_test_message ?? '',
+    last_error_code: result.last_error_code ?? '',
+    available_models: result.available_models ?? [],
+    available_sdks: result.available_sdks ?? [],
+  }
+}
+
+function resetResult(provider: CredentialProvider): CredentialProvider {
+  return {
+    ...provider,
+    last_test_status: 'untested',
+    last_test_at: '',
+    last_test_message: '',
+    last_error_code: '',
+    available_models: [],
+    available_sdks: [],
+  }
+}
 
 async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({
@@ -110,17 +195,21 @@ async function mockBackend(page: Page) {
       const body = JSON.parse(route.request().postData() ?? '{}') as { providers?: CredentialProvider[] }
       providers = (body.providers ?? []).map((provider) => {
         const existing = providers.find((item) => item.id === provider.id)
-        return {
+        const test_results = upsertResult(existing?.test_results ?? [], existing ? topLevelResult(existing) : null)
+        const next = {
           ...existing,
           ...provider,
           api_key: provider.api_key || existing?.api_key || '',
-          last_test_status: existing?.last_test_status ?? 'untested',
-          last_test_at: existing?.last_test_at ?? '',
-          last_test_message: existing?.last_test_message ?? '',
-          last_error_code: existing?.last_error_code ?? '',
-          available_models: existing?.available_models ?? [],
-          available_sdks: existing?.available_sdks ?? [],
+          last_test_status: 'untested',
+          last_test_at: '',
+          last_test_message: '',
+          last_error_code: '',
+          available_models: [],
+          available_sdks: [],
+          test_results,
         }
+        const cached = test_results.find((result) => result.params_fingerprint === paramsFingerprint(next))
+        return cached ? applyResult(next, cached) : resetResult(next)
       })
     }
     await fulfillJson(route, { providers })
@@ -153,7 +242,7 @@ async function mockBackend(page: Page) {
     await fulfillJson(route, { results, available_models })
   })
   await page.route('**/api/llm/providers/test', async (route) => {
-    const body = JSON.parse(route.request().postData() ?? '{}') as { id: string }
+    const body = JSON.parse(route.request().postData() ?? '{}') as { id: string; provider_type?: CredentialProvider['provider_type'] }
     const provider = providers.find((item) => item.id === body.id)
     const available_models = provider?.available_models ?? []
     await fulfillJson(route, {
@@ -162,7 +251,7 @@ async function mockBackend(page: Page) {
       model_seen: available_models[0]?.id ?? null,
       message: null,
       error_code: null,
-      available_sdks: ['openai_compatible'],
+      available_sdks: [body.provider_type ?? provider?.provider_type ?? 'openai_compatible'],
       available_models,
     })
   })
@@ -232,8 +321,8 @@ test.describe('Round 3 API Keys e2e', () => {
     await expect(apiKeys.getByText('Not configured').first()).toBeVisible()
     await expect(apiKeys.getByText('deepseek-chat')).toBeVisible()
     await expect(apiKeys.getByText('gpt-5')).toBeVisible()
-    await expect(apiKeys.getByText('SDK Protocol')).toHaveCount(0)
-    await expect(apiKeys.getByText('OpenAI Compatible')).toHaveCount(0)
+    await expect(apiKeys.getByText('Protocol')).toBeVisible()
+    await expect(apiKeys.getByText('OpenAI compatible')).toBeVisible()
   })
 
   test('adds a third-party provider as a normal auto-saved card', async ({ page }) => {
@@ -247,15 +336,44 @@ test.describe('Round 3 API Keys e2e', () => {
     const newCard = page.locator('[data-provider-id^="custom-"]').last()
     await expect(newCard).toBeVisible()
     await expect(newCard.locator('input[aria-label="Provider Name"][value="New Provider"]')).toBeVisible()
+    await expect(newCard.getByLabel('Protocol')).toHaveText('OpenAI compatible')
 
     await newCard.getByLabel('Provider Name').fill('Together Custom')
-    await newCard.getByLabel('Base URL').fill('https://api.together.xyz/v1')
+    await newCard.getByLabel('Protocol').click()
+    await page.getByRole('option', { name: 'Anthropic compatible' }).click()
+    await newCard.getByRole('textbox', { name: 'Base URL' }).fill('https://api.together.xyz/v1')
     await newCard.locator('input[name^="provider-secret-"]').fill('sk-together')
     const testRequest = page.waitForRequest((request) => request.url().includes('/api/llm/providers/test') && request.method() === 'POST')
     await newCard.getByRole('button', { name: 'Test' }).click()
-    await testRequest
+    const request = await testRequest
+    expect(JSON.parse(request.postData() ?? '{}').provider_type).toBe('anthropic_compatible')
     await expect(newCard.getByText('Connected')).toBeVisible()
+    await expect(newCard.getByText('anthropic_compatible')).toBeVisible()
     await expect(page.locator('input[aria-label="Provider Name"][value="Together Custom"]')).toBeVisible()
+  })
+
+  test('clears stale test outcome when provider test parameters change', async ({ page }) => {
+    await openApiKeys(page)
+
+    const providerCard = page.locator('[data-provider-id="openrouter-custom"]')
+    await expect(providerCard.getByText('Connected')).toBeVisible()
+    await expect(providerCard.getByText('Available SDKs:')).toBeVisible()
+
+    const saveRequest = page.waitForRequest((request) => request.url().includes('/api/llm/credentials') && request.method() === 'PUT')
+    await providerCard.getByRole('textbox', { name: 'Base URL' }).fill('https://openrouter.ai/api/v2')
+    await expect(providerCard.getByText('Connected')).toHaveCount(0)
+    await expect(providerCard.getByText('Available SDKs:')).toHaveCount(0)
+    await saveRequest
+
+    await expect(providerCard.getByText('Connected')).toHaveCount(0)
+    await expect(providerCard.getByText('Available SDKs:')).toHaveCount(0)
+
+    const restoreRequest = page.waitForRequest((request) => request.url().includes('/api/llm/credentials') && request.method() === 'PUT')
+    await providerCard.getByRole('textbox', { name: 'Base URL' }).fill('https://openrouter.ai/api/v1')
+    await restoreRequest
+
+    await expect(providerCard.getByText('Connected')).toBeVisible()
+    await expect(providerCard.getByText('Available SDKs:')).toBeVisible()
   })
 
   test('manual model probing appends deduped chips using mocked backend', async ({ page }) => {
@@ -278,7 +396,7 @@ test.describe('Round 3 API Keys e2e', () => {
     await modelRequest
 
     await expect(openRouterCard.getByText('claude-opus-4-7').first()).toBeVisible()
-    await expect(openRouterCard.getByText('claude-opus-4-7: ok')).toBeVisible()
+    await expect(openRouterCard.getByText('claude-opus-4-7: Available')).toBeVisible()
     await expect(openRouterCard.getByText('gpt-5')).toHaveCount(2)
   })
 })

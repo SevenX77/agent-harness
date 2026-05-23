@@ -25,7 +25,7 @@ def migrate_provider_type_value(value: Any) -> Any:
 
 
 def migrate_roles_payload(payload: Any) -> Any:
-    """Walk a llm_roles.yaml payload and rewrite legacy provider ``type`` values."""
+    """Walk a llm_roles.yaml payload and rewrite legacy values in place."""
 
     if not isinstance(payload, dict):
         return payload
@@ -38,6 +38,19 @@ def migrate_roles_payload(payload: Any) -> Any:
             migrated = migrate_provider_type_value(current)
             if migrated != current:
                 provider["type"] = migrated
+    roles = payload.get("roles")
+    if isinstance(roles, dict):
+        for role in roles.values():
+            if not isinstance(role, dict):
+                continue
+            role_temperature = role.pop("temperature", None)
+            models = role.get("models")
+            if role_temperature is None or not isinstance(models, dict):
+                continue
+            for role_model in models.values():
+                if not isinstance(role_model, dict):
+                    continue
+                role_model.setdefault("temperature", role_temperature)
     return payload
 
 

@@ -104,6 +104,25 @@ def test_render_auth_headers_anthropic_multiline() -> None:
     }
 
 
+def test_join_base_url_and_endpoint_deduplicates_version_prefix() -> None:
+    from app.services.llm_provider_test import _join_base_url_and_endpoint
+
+    assert (
+        _join_base_url_and_endpoint(
+            "https://llm.wavespeed.ai/v1",
+            "/v1/chat/completions",
+        )
+        == "https://llm.wavespeed.ai/v1/chat/completions"
+    )
+    assert (
+        _join_base_url_and_endpoint(
+            "https://openrouter.ai/api/v1",
+            "/v1/chat/completions",
+        )
+        == "https://openrouter.ai/api/v1/chat/completions"
+    )
+
+
 @pytest.mark.anyio
 async def test_probe_compatible_sdks_unknown_sdk_is_handled(
     monkeypatch: pytest.MonkeyPatch,
@@ -374,7 +393,15 @@ async def test_probe_available_models_openrouter_context_length(
                         "id": "openai/gpt-4o",
                         "context_length": 128000,
                         "architecture": {"modality": "text+image->text"},
-                    }
+                    },
+                    {
+                        "id": "~openai/gpt-4o",
+                        "context_length": 128000,
+                    },
+                    {
+                        "id": "~anthropic/claude-sonnet-latest",
+                        "context_length": 200000,
+                    },
                 ]
             },
             request=httpx.Request("GET", "https://openrouter.ai/api/v1/models"),
@@ -385,7 +412,8 @@ async def test_probe_available_models_openrouter_context_length(
         "openrouter", "or-key", "https://openrouter.ai"
     )
 
-    assert [model.id for model in result] == ["openai/gpt-4o"]
+    assert [model.id for model in result] == ["gpt-4o", "claude-sonnet-latest"]
+    assert result[0].capabilities["provider_model_id"] == "openai/gpt-4o"
     assert result[0].capabilities["max_context_tokens"] == 128000
     assert result[0].capabilities["architecture"] == {"modality": "text+image->text"}
 

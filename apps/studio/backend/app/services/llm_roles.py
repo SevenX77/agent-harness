@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 import threading
+from copy import deepcopy
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -27,11 +28,13 @@ def load_roles_file(path: Path) -> RolesData:
     text = path.read_text(encoding="utf-8")
     yaml = _yaml()
     raw = yaml.load(text)
-    plain = migrate_roles_payload(_plain(raw))
+    plain_before_migration = _plain(raw)
+    plain = migrate_roles_payload(deepcopy(plain_before_migration))
+    migrated = plain != plain_before_migration
     data = RolesData.model_validate(plain)
     data._raw = raw
-    data._original_text = text
-    data._original_snapshot = data.model_dump(mode="json")
+    data._original_text = None if migrated else text
+    data._original_snapshot = None if migrated else data.model_dump(mode="json")
     return data
 
 

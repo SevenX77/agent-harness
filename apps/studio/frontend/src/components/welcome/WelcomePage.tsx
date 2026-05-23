@@ -3,10 +3,12 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
 import type { SkillSummary } from '../../api/types'
+import { useAppSettings } from '../../hooks/useAppSettings'
 import { useRecentSkills } from '../../hooks/useRecentSkills'
 import { useSkills } from '../../hooks/useSkills'
 import { revealInFileManager, selectSkillDirectory } from '../../lib/tauri'
 import { errorMessage, isRecord } from '../../utils/errors'
+import { effectiveDefaultSkillsDirectory, joinDirectoryPath } from '../../utils/skill-paths'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import {
@@ -53,9 +55,8 @@ interface CreateSkillPayload {
   import_existing?: boolean
 }
 
-function joinDirectoryPath(parentDirectory: string, folderName: string) {
-  const separator = parentDirectory.includes('\\') && !parentDirectory.includes('/') ? '\\' : '/'
-  return `${parentDirectory.replace(/[\\/]+$/, '')}${separator}${folderName}`
+export function defaultSkillsDirectory(customDirectory?: string | null): string | null {
+  return effectiveDefaultSkillsDirectory(customDirectory)
 }
 
 export function buildSkillCreatePayload(name: string, parentDirectory?: string | null): CreateSkillPayload {
@@ -72,6 +73,23 @@ export function buildSkillImportPayload(directoryPath: string): CreateSkillPaylo
     directory_path: directoryPath,
     import_existing: true,
   }
+}
+
+function comparableDirectoryPath(path: string) {
+  return path.trim().replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
+export function registeredSkillIdForImport(directoryPath: string, skills: SkillSummary[]): string | null {
+  const selectedPath = comparableDirectoryPath(directoryPath)
+  const pathMatch = skills.find((skill) => (
+    skill.directory_path ? comparableDirectoryPath(skill.directory_path) === selectedPath : false
+  ))
+  if (pathMatch) {
+    return pathMatch.id
+  }
+
+  const selectedSkillId = skillIdFromPath(directoryPath)
+  return skills.find((skill) => skill.id === selectedSkillId)?.id ?? null
 }
 
 interface StudioErrorPayload {
@@ -91,6 +109,31 @@ function sentenceFragment(message: string) {
   return message ? `${message[0].toLowerCase()}${message.slice(1)}` : message
 }
 
+function relativeLintFile(value: string): string | null {
+  const match = value.match(/(?:^|[\\/])?((?:phases[\\/][A-Za-z0-9_-]+[\\/](?:LOGIC|SUBGRAPH|SKILL)\.md)|GRAPH\.md|io[\\/]inputs\.json|io[\\/]outputs\.json)/)
+  return match ? match[1].replace(/\\/g, '/') : null
+}
+
+function lineFromLintMessage(value: string): string | null {
+  const match = value.match(/(?:GRAPH\.md|io[\\/](?:inputs|outputs)\.json|phases[\\/][A-Za-z0-9_-]+[\\/](?:LOGIC|SUBGRAPH|SKILL)\.md):(?<line>\d+)/)
+  return match?.groups?.line ?? null
+}
+
+function isMissingPythonCallable(message: string) {
+  return /python_callable/.test(message) && /(Input should be a valid string|required)/.test(message)
+}
+
+function cleanLintMessage(message: string): string {
+  if (isMissingPythonCallable(message)) {
+    return 'LOGIC.md is missing <python_callable>. Add a <python_callable> block that names a Python function in phases/<phase>/actions/.'
+  }
+  return message
+    .replace(/\s*For further information visit https:\/\/errors\.pydantic\.dev\/\S+/g, '')
+    .replace(/\[F-[^\]]+\]\s*/g, '')
+    .replace(/^.*(?:GRAPH\.md|io[\\/](?:inputs|outputs)\.json|phases[\\/][A-Za-z0-9_-]+[\\/](?:LOGIC|SUBGRAPH|SKILL)\.md):\d+\s*/s, '')
+    .trim()
+}
+
 function firstLintErrorMessage(payload: StudioErrorPayload): string | null {
   const errors = payload.details?.errors
   if (!Array.isArray(errors) || errors.length === 0) {
@@ -100,11 +143,37 @@ function firstLintErrorMessage(payload: StudioErrorPayload): string | null {
   if (!isRecord(first) || typeof first.message !== 'string') {
     return null
   }
+  const file = typeof first.file === 'string'
+    ? relativeLintFile(first.file)
+    : relativeLintFile(first.message)
+  const line = typeof first.line === 'number'
+    ? String(first.line)
+    : lineFromLintMessage(first.message)
   const location = [
-    typeof first.file === 'string' ? first.file : null,
-    typeof first.line === 'number' ? String(first.line) : null,
+    file,
+    line,
   ].filter(Boolean).join(':')
-  return location ? `${location} ${first.message}` : first.message
+  const message = cleanLintMessage(first.message)
+  return location ? `${location} ${message}` : message
+}
+
+function requestValidationMessage(payload: StudioErrorPayload): string {
+  const errors = payload.details?.errors
+  const first = Array.isArray(errors) && isRecord(errors[0]) ? errors[0] : null
+  const location = first && Array.isArray(first.loc) ? first.loc.join('.') : ''
+  if (location.includes('import_existing')) {
+    return 'the running backend does not support folder import yet. Quit and restart Studio so the updated sidecar is loaded.'
+  }
+  return 'the request did not match the /skills API contract.'
+}
+
+function existingSkillIdFromError(error: unknown): string | null {
+  const payload = studioErrorPayload(error)
+  if (payload?.error_code !== 'SKILL_ALREADY_EXISTS') {
+    return null
+  }
+  const existingSkillId = payload.details?.skill_id
+  return typeof existingSkillId === 'string' ? existingSkillId : null
 }
 
 export function formatCreateSkillError(error: unknown, skillId: string): string {
@@ -116,6 +185,9 @@ export function formatCreateSkillError(error: unknown, skillId: string): string 
     return `Cannot create "${skillId}": ${sentenceFragment(payload.message)}`
   }
   if (payload?.error_code === 'MANIFEST_VALIDATION_FAILED') {
+    if (payload.message?.toLowerCase() === 'request validation failed') {
+      return `Cannot create "${skillId}": ${requestValidationMessage(payload)}`
+    }
     return `Cannot create "${skillId}": ${firstLintErrorMessage(payload) ?? sentenceFragment(payload.message ?? 'manifest validation failed')}`
   }
   return errorMessage(error)
@@ -133,6 +205,9 @@ export function formatImportSkillError(error: unknown): string {
       : 'Cannot import this folder: it is already registered.'
   }
   if (payload?.error_code === 'MANIFEST_VALIDATION_FAILED') {
+    if (payload.message?.toLowerCase() === 'request validation failed') {
+      return `Cannot import this folder: ${requestValidationMessage(payload)}`
+    }
     return `Cannot import this folder: ${firstLintErrorMessage(payload) ?? sentenceFragment(payload.message ?? 'manifest validation failed')}`
   }
   return errorMessage(error)
@@ -147,6 +222,8 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   const [newSkillParentDirectory, setNewSkillParentDirectory] = useState<string | null>(null)
   const [selectingNewSkillParent, setSelectingNewSkillParent] = useState(false)
   const [newSkillError, setNewSkillError] = useState<string | null>(null)
+  const appSettings = useAppSettings()
+  const defaultSkillParentDirectory = defaultSkillsDirectory(appSettings.settings.default_skills_directory)
   const { skills, skillListError, mutateSkills } = useSkills(null)
   const skillIds = useMemo(() => skills.map((skill) => skill.id), [skills])
   const { recentSkills, rememberSkill } = useRecentSkills(skillIds)
@@ -167,7 +244,7 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   const chooseNewSkillParentDirectory = async () => {
     setSelectingNewSkillParent(true)
     try {
-      const directory = await selectSkillDirectory()
+      const directory = await selectSkillDirectory(defaultSkillParentDirectory)
       if (directory) {
         setNewSkillParentDirectory(directory)
       }
@@ -218,14 +295,24 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
   const importSkillDirectory = async () => {
     setImporting(true)
     try {
-      const directory = await selectSkillDirectory()
+      const directory = await selectSkillDirectory(defaultSkillParentDirectory)
       if (!directory) {
+        return
+      }
+      const registeredSkillId = registeredSkillIdForImport(directory, skills)
+      if (registeredSkillId) {
+        openSkill(registeredSkillId)
         return
       }
       const response = await api.post<SkillSummary>('/skills', buildSkillImportPayload(directory))
       await mutateSkills()
       openSkill(response.data.id)
     } catch (error) {
+      const existingSkillId = existingSkillIdFromError(error)
+      if (existingSkillId) {
+        openSkill(existingSkillId)
+        return
+      }
       toast.error('Import failed', { description: formatImportSkillError(error) })
     } finally {
       setImporting(false)
@@ -257,7 +344,12 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
               <Plus />
               {creating ? 'Creating' : 'New skill'}
             </Button>
-            <p className="mt-1 truncate text-xs text-muted-foreground">Default: AgentStudio/Skills</p>
+            <p
+              title={defaultSkillParentDirectory ?? undefined}
+              className="mt-1 truncate text-xs text-muted-foreground"
+            >
+              {defaultSkillParentDirectory ? `Default: ${defaultSkillParentDirectory}` : 'Default: AgentStudio/Skills'}
+            </p>
           </div>
           <div>
             <Button
@@ -306,80 +398,85 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
                       openSkill(skill.id)
                     }
                   }}
-                  className="group min-h-24 cursor-pointer gap-2 rounded-md border border-border py-2.5 ring-1 ring-border/70 transition-colors hover:border-primary/50 hover:bg-accent/30 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  className="relative cursor-pointer select-none transition-colors hover:ring-2 hover:ring-primary/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
                   <CardHeader className="px-3 pb-0">
                     <div className="flex items-start gap-3">
                       <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
                         <Layers3 className="size-4" />
                       </div>
-                      <div className="min-w-0 flex-1">
+                      <div className="min-w-0 flex-1 pr-12">
                         <CardTitle className="truncate text-sm">{skill.name}</CardTitle>
-                        <p className="mt-1 truncate font-mono text-[11px] leading-5 text-muted-foreground">
+                        <p className="mt-1 line-clamp-2 min-h-10 break-all font-mono text-[11px] leading-5 text-muted-foreground">
                           {shortPath(skill.directory_path)}
                         </p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1">
-                        {skill.has_golden ? <Badge>Golden</Badge> : null}
-                        {skill.config_mismatch ? (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Badge
-                                variant="outline"
-                                aria-label="Repo URL mismatch"
-                                onClick={(event) => event.stopPropagation()}
-                                className="border-destructive/40 bg-destructive/10 text-destructive"
-                              >
-                                <AlertTriangle />
-                                Config drift
-                              </Badge>
-                            </TooltipTrigger>
-                            <TooltipContent className="max-w-xs text-xs">
-                              <div className="space-y-1.5">
-                                <div>
-                                  <span className="font-medium">Actual:</span>{' '}
-                                  <span className="break-all font-mono">{skill.config_mismatch.actual_remote_url}</span>
-                                </div>
-                                <div>
-                                  <span className="font-medium">Expected:</span>{' '}
-                                  <span className="break-all font-mono">{skill.config_mismatch.expected_remote_url}</span>
-                                </div>
-                                <div className="pt-1 text-muted-foreground">{skill.config_mismatch.recommendation}</div>
-                              </div>
-                            </TooltipContent>
-                          </Tooltip>
+                        {skill.has_golden || skill.config_mismatch ? (
+                          <div className="mt-2 flex flex-wrap items-center gap-1">
+                            {skill.has_golden ? <Badge>Golden</Badge> : null}
+                            {skill.config_mismatch ? (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Badge
+                                    variant="outline"
+                                    aria-label="Repo URL mismatch"
+                                    onClick={(event) => event.stopPropagation()}
+                                    className="border-destructive/40 bg-destructive/10 text-destructive"
+                                  >
+                                    <AlertTriangle />
+                                    Config drift
+                                  </Badge>
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-xs text-xs">
+                                  <div className="space-y-1.5">
+                                    <div>
+                                      <span className="font-medium">Actual:</span>{' '}
+                                      <span className="break-all font-mono">{skill.config_mismatch.actual_remote_url}</span>
+                                    </div>
+                                    <div>
+                                      <span className="font-medium">Expected:</span>{' '}
+                                      <span className="break-all font-mono">{skill.config_mismatch.expected_remote_url}</span>
+                                    </div>
+                                    <div className="pt-1 text-muted-foreground">{skill.config_mismatch.recommendation}</div>
+                                  </div>
+                                </TooltipContent>
+                              </Tooltip>
+                            ) : null}
+                          </div>
                         ) : null}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              aria-label={`More actions for ${skill.name}`}
-                              onClick={(event) => event.stopPropagation()}
-                            >
-                              <MoreVertical />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent
-                            align="end"
-                            className={ACTION_MENU_CLASSNAME}
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            <DropdownMenuItem onSelect={() => handleReveal(skill)}>
-                              <FolderOpen />
-                              {REVEAL_ACTION_LABEL}
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              variant="destructive"
-                              onSelect={() => void handleDelete(skill)}
-                            >
-                              <Trash2 />
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
                       </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`More actions for ${skill.name}`}
+                            className="absolute right-2 top-2 z-10"
+                            onClick={(event) => event.stopPropagation()}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onKeyDown={(event) => event.stopPropagation()}
+                          >
+                            <MoreVertical />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          align="end"
+                          className={ACTION_MENU_CLASSNAME}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <DropdownMenuItem onSelect={() => handleReveal(skill)}>
+                            <FolderOpen />
+                            {REVEAL_ACTION_LABEL}
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onSelect={() => void handleDelete(skill)}
+                          >
+                            <Trash2 />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </CardHeader>
                   <CardFooter className="justify-between gap-3 px-3 pt-0 text-xs text-muted-foreground">
@@ -428,6 +525,7 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
         newSkillName={newSkillName}
         onNewSkillNameChange={setNewSkillName}
         parentDirectory={newSkillParentDirectory}
+        defaultParentDirectory={defaultSkillParentDirectory}
         selectingParentDirectory={selectingNewSkillParent}
         onChooseParentDirectory={() => void chooseNewSkillParentDirectory()}
         newSkillError={newSkillError}

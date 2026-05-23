@@ -16,20 +16,36 @@ from app.services.llm_roles import (
 from fastapi.testclient import TestClient
 
 
-def test_load_roles_yaml_roundtrip_preserves_comments(tmp_path: Path) -> None:
+def test_load_roles_yaml_save_migrates_once_then_stays_stable(tmp_path: Path) -> None:
     path = _copy_roles_yaml(tmp_path)
     before = path.read_text(encoding="utf-8")
 
     data = load_roles_file(path)
     save_roles_file(path, data)
+    migrated = path.read_text(encoding="utf-8")
 
-    assert path.read_text(encoding="utf-8") == before
+    assert migrated != before
+    assert "temperature" not in load_roles_file(path).roles["balanced"].model_fields_set
+
+    data = load_roles_file(path)
+    save_roles_file(path, data)
+
+    assert path.read_text(encoding="utf-8") == migrated
 
 
 def test_load_get_role_returns_active_model(tmp_path: Path) -> None:
     data = load_roles_file(_copy_roles_yaml(tmp_path))
 
     assert get_role(data, "balanced").active_model == "CL46T"
+
+
+def test_load_roles_yaml_migrates_role_temperature_to_model_entries(tmp_path: Path) -> None:
+    data = load_roles_file(_copy_roles_yaml(tmp_path))
+    role = get_role(data, "balanced")
+
+    assert not hasattr(role, "temperature")
+    assert role.models["CL46T"].temperature == 0.7
+    assert role.models["DS32R"].temperature == 0.7
 
 
 def test_load_get_role_fallback_order(tmp_path: Path) -> None:

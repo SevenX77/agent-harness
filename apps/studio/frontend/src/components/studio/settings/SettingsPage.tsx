@@ -2,15 +2,30 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { useAppSettings } from "@/hooks/useAppSettings"
 import { buildPutPayload, useDebouncedCredentialsSave } from "@/hooks/useDebouncedCredentialsSave"
+import { useDebouncedRolesSave } from "@/hooks/useDebouncedRolesSave"
 import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
-import { getCredentials, getRoles, putRoles, testProvider, type CredentialsState, type ModelInfo, type RolesData } from "../../../api/llm"
+import { getCredentials, getRoles, testProvider, type CredentialsState, type ModelInfo, type RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
-import { draftsFromCredentials, draftFromAddProviderSubmission } from "./provider-utils"
-import { validateRoleDraft, visibleRoleNames } from "./role-utils"
+import { draftsFromCredentials, draftFromAddProviderSubmission, providerCachedTestResult, providerTestParamsMatch } from "./provider-utils"
+import { validateRolesDraft } from "./role-utils"
 import type { ProviderDraft, SettingsPageProps, SettingsTab } from "./types"
 
 const emptyCredentials: CredentialsState = { providers: [] }
+
+function resetProviderTestOutcome(
+  provider: CredentialsState["providers"][number],
+): CredentialsState["providers"][number] {
+  return {
+    ...provider,
+    last_test_status: "untested",
+    last_test_at: "",
+    last_test_message: "",
+    last_error_code: "",
+    available_models: [],
+    available_sdks: [],
+  }
+}
 
 export function SettingsPage({ onClose }: SettingsPageProps) {
   const appSettings = useAppSettings()
@@ -20,21 +35,53 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const [credentialsError, setCredentialsError] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<ProviderDraft[]>([])
   const [rolesData, setRolesData] = useState<RolesData | null>(null)
-  const [selectedRole, setSelectedRole] = useState("copilot_chat")
-  const [rolesDirty, setRolesDirty] = useState(false)
   const [rolesError, setRolesError] = useState<string | null>(null)
 
   // Keep a ref of the most recent draft list so the debounced save can read it
   // at fire time (avoids re-binding the timer on every keystroke).
   const draftsRef = useRef<ProviderDraft[]>(drafts)
   draftsRef.current = drafts
+  const credentialsRef = useRef<CredentialsState>(credentials)
+  credentialsRef.current = credentials
+  const rolesDataRef = useRef<RolesData | null>(rolesData)
+  rolesDataRef.current = rolesData
+  const invalidatedTestOutcomeIdsRef = useRef<Set<string>>(new Set())
 
   const handleSaved = useCallback((next: CredentialsState) => {
-    setCredentials(next)
+    setCredentials({
+      providers: next.providers.map((provider) => {
+        if (!invalidatedTestOutcomeIdsRef.current.has(provider.id)) return provider
+        const draft = draftsRef.current.find((item) => item.id === provider.id)
+        const cached = draft ? providerCachedTestResult(provider, draft) : null
+        if (cached) {
+          invalidatedTestOutcomeIdsRef.current.delete(provider.id)
+          return {
+            ...provider,
+            last_test_status: cached.last_test_status,
+            last_test_at: cached.last_test_at ?? "",
+            last_test_message: cached.last_test_message ?? "",
+            last_error_code: cached.last_error_code ?? "",
+            available_models: cached.available_models ?? [],
+            available_sdks: cached.available_sdks ?? [],
+          }
+        }
+        return resetProviderTestOutcome(provider)
+      }),
+    })
   }, [])
 
   const { queue: queueSave, status: saveStatus } = useDebouncedCredentialsSave({
     onSaved: handleSaved,
+  })
+  const { queue: queueRolesSave, status: rolesSaveStatus } = useDebouncedRolesSave({
+    onSaved: (next) => {
+      setRolesData(next)
+      setRolesError(null)
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : "Save failed"
+      setRolesError(message)
+    },
   })
 
   useEffect(() => {
@@ -42,6 +89,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     getCredentials()
       .then((next) => {
         if (cancelled) return
+        invalidatedTestOutcomeIdsRef.current.clear()
         setCredentialsError(null)
         setCredentials(next)
         setDrafts(draftsFromCredentials(next))
@@ -66,7 +114,6 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       .then((next) => {
         if (cancelled) return
         setRolesData(next)
-        if (!next.roles[selectedRole]) setSelectedRole(visibleRoleNames(next)[0] ?? "")
       })
       .catch(() => {
         if (!cancelled) setRolesError("Roles unavailable")
@@ -74,13 +121,23 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     return () => {
       cancelled = true
     }
-  }, [activeTab, rolesData, selectedRole])
+  }, [activeTab, rolesData])
 
   function scheduleSave() {
     queueSave(() => buildPutPayload(draftsRef.current))
   }
 
   function updateProviderField(providerId: string, patch: Partial<ProviderDraft>) {
+    const currentDraft = draftsRef.current.find((draft) => draft.id === providerId)
+    const nextDraft = currentDraft ? { ...currentDraft, ...patch } : null
+    if (currentDraft && nextDraft && !providerTestParamsMatch(currentDraft, nextDraft)) {
+      const persisted = credentialsRef.current.providers.find((provider) => provider.id === providerId)
+      if (persisted && providerTestParamsMatch(nextDraft, persisted)) {
+        invalidatedTestOutcomeIdsRef.current.delete(providerId)
+      } else {
+        invalidatedTestOutcomeIdsRef.current.add(providerId)
+      }
+    }
     setDrafts((current) => {
       const found = current.some((draft) => draft.id === providerId)
       if (found) {
@@ -134,6 +191,11 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   async function runProviderTest(providerId: string) {
     const draft = draftsRef.current.find((d) => d.id === providerId)
     if (!draft) return
+    const testedParams = {
+      api_key: draft.api_key,
+      base_url: draft.base_url,
+      provider_type: draft.provider_type,
+    }
 
     setProviderTesting(providerId, true)
     const toastId = `test-${providerId}`
@@ -147,12 +209,23 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         base_url: draft.base_url || undefined,
       })
 
+      const latestDraft = draftsRef.current.find((item) => item.id === providerId)
+      if (!latestDraft || !providerTestParamsMatch(latestDraft, testedParams)) {
+        toast.info("Test result ignored because provider configuration changed.", { id: toastId })
+        return
+      }
+      invalidatedTestOutcomeIdsRef.current.delete(providerId)
+
       // F5: splice the persisted Test outcome into local credentials without a GET round-trip.
       setCredentials((current) => ({
         providers: current.providers.map((provider) => {
           if (provider.id !== providerId) return provider
           return {
             ...provider,
+            name: latestDraft.name,
+            api_key: latestDraft.api_key,
+            base_url: latestDraft.base_url,
+            provider_type: latestDraft.provider_type,
             last_test_status: response.status === "missing_api_key" ? "untested" : response.status,
             last_test_at: new Date().toISOString(),
             last_test_message: response.message ?? "",
@@ -179,30 +252,15 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   }
 
   function updateRolesData(next: RolesData) {
+    rolesDataRef.current = next
     setRolesData(next)
-    setRolesDirty(true)
-    setRolesError(null)
-  }
-
-  async function saveRoles() {
-    if (!rolesData) return
-    const validationError = validateRoleDraft(rolesData, selectedRole)
+    const validationError = validateRolesDraft(next)
     if (validationError) {
       setRolesError(validationError)
-      toast.error(`Validation failed: ${validationError}`)
       return
     }
-    try {
-      const saved = await putRoles(rolesData)
-      setRolesData(saved)
-      setRolesDirty(false)
-      setRolesError(null)
-      toast.success("Roles saved")
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Save failed"
-      setRolesError(message)
-      toast.error(`Validation failed: ${message}`)
-    }
+    setRolesError(null)
+    queueRolesSave(() => rolesDataRef.current)
   }
 
   return (
@@ -214,16 +272,17 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       drafts={drafts}
       saveStatus={saveStatus}
       rolesData={rolesData}
-      selectedRole={selectedRole}
-      rolesDirty={rolesDirty}
+      rolesSaveStatus={rolesSaveStatus}
       rolesError={rolesError}
       appSettings={{
         userId: appSettings.settings.user_id,
         giteaHost: appSettings.settings.gitea_host,
+        defaultSkillsDirectory: appSettings.settings.default_skills_directory,
         isLoading: appSettings.isLoading,
+        saveStatus: appSettings.saveStatus,
         setUserId: appSettings.setUserId,
         setGiteaHost: appSettings.setGiteaHost,
-        save: appSettings.save,
+        setDefaultSkillsDirectory: appSettings.setDefaultSkillsDirectory,
       }}
       onClose={onClose}
       onTabChange={setActiveTab}
@@ -232,9 +291,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       onDeleteProvider={deleteProvider}
       onAddProvider={addProviderWithData}
       onProviderModelsUpdated={updateProviderModels}
-      onSelectedRoleChange={setSelectedRole}
       onRolesDataChange={updateRolesData}
-      onSaveRoles={() => void saveRoles()}
     />
   )
 }

@@ -5,6 +5,7 @@ export interface SidecarConfig {
   baseURL: string
   wsURL: string
   resourceDir: string
+  configDir?: string | null
   api_token?: string | null
 }
 
@@ -36,6 +37,7 @@ export function fallbackSidecarConfig(
     baseURL: parsed.toString().replace(/\/$/, ''),
     wsURL: `${wsProtocol}//${parsed.host}/ws`,
     resourceDir: '',
+    configDir: '',
     api_token: null,
   }
 }
@@ -73,6 +75,7 @@ function normalizeSidecarConfig(config: SidecarConfig): SidecarConfig {
     baseURL: config.baseURL.replace(/\/$/, ''),
     wsURL: config.wsURL.replace(/\/$/, ''),
     resourceDir: config.resourceDir,
+    configDir: config.configDir ?? '',
     api_token: config.api_token ?? null,
   }
 }

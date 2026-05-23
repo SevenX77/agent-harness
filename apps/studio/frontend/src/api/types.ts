@@ -79,6 +79,7 @@ export interface SkillTemplate {
 export interface AppSettings {
   user_id: string
   gitea_host: string
+  default_skills_directory: string
 }
 
 export interface CollaborateResult {

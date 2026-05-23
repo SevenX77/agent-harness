@@ -34,6 +34,7 @@ function copyBackend() {
 
 function copyRuntimeResources() {
   const resourcesTarget = path.join(VENDOR_DIR, 'resources')
+  fs.rmSync(resourcesTarget, { recursive: true, force: true })
   fs.mkdirSync(resourcesTarget, { recursive: true })
   copyDir(path.join(REPO_ROOT, 'skills'), path.join(resourcesTarget, 'skills'))
   copyDir(path.join(REPO_ROOT, 'config'), path.join(resourcesTarget, 'config'))

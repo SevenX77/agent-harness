@@ -1,5 +1,7 @@
 import type { PhaseFormData } from '../../hooks/usePhaseForm'
 import { phaseFormErrors } from '../../hooks/usePhaseForm'
+import { Label } from '../ui/label'
+import { Textarea } from '../ui/textarea'
 import { ConditionalField } from './fields/ConditionalField'
 import { LlmRoleField } from './fields/LlmRoleField'
 import { ModelOverrideField } from './fields/ModelOverrideField'
@@ -53,23 +55,26 @@ export function PhaseFormBody({ data, availableTools, onChange }: PhaseFormBodyP
           />
         </>
       ) : (
-        <label className="block">
-          <span className="mb-1 block text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+        <Label className="block space-y-1">
+          <span className="block text-xs font-semibold uppercase text-muted-foreground">
             Execute steps
           </span>
-          <textarea
+          <Textarea
             value={data.executeSteps.join('\n')}
             onChange={(event) => onChange(
               'executeSteps',
               event.target.value.split('\n').map((line) => line.trim()).filter(Boolean),
             )}
             rows={Math.max(4, data.executeSteps.length + 1)}
-            className="w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-xs leading-5 text-slate-800 outline-none focus:ring-2 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="none"
+            className="resize-y font-mono text-xs leading-5"
           />
           {errors.executeSteps ? (
-            <span className="mt-1 block text-xs text-red-600 dark:text-red-400">{errors.executeSteps}</span>
+            <span className="block text-xs text-destructive">{errors.executeSteps}</span>
           ) : null}
-        </label>
+        </Label>
       )}
 
       <ConditionalField

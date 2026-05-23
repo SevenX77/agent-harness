@@ -2,9 +2,10 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import { isValidElement, type ReactElement, type ReactNode } from "react"
 import { toast } from "sonner"
-import { ProviderCard, ProviderDeleteButton, apiKeyInputType, sortModelInfos } from "./ProviderCard"
-import type { CredentialsState } from "../../../api/llm"
-import type { ProviderDraft } from "../SettingsPage"
+import { ProviderCard, ProviderDeleteButton, apiKeyInputClassName, apiKeyInputType, sortModelInfos } from "./ProviderCard"
+import type { CredentialsState, TestStatus } from "../../../api/llm"
+import { providerTestParamsFingerprint } from "../settings/provider-utils"
+import type { ProviderDraft } from "../settings/types"
 
 const toastMock = vi.hoisted(() => vi.fn())
 
@@ -113,7 +114,9 @@ describe("ProviderCard API key masking", () => {
     expect(html).toContain('autoCorrect="off"')
     expect(html).toContain('autoCapitalize="none"')
     expect(html).toContain('aria-label="Show API key"')
+    expect(html).toContain('aria-label="Copy API key"')
     expect(html).toContain("transition-none")
+    expect(html).toContain("text-muted-foreground")
     expect(html).toContain("px-6")
   })
 
@@ -127,14 +130,22 @@ describe("ProviderCard API key masking", () => {
     expect(onFieldChange).not.toHaveBeenCalled()
     expect(draft.api_key).toBe("sk-secret-123")
   })
+
+  it("uses muted text only while the API key is hidden", () => {
+    expect(apiKeyInputClassName(false)).toContain("text-muted-foreground")
+    expect(apiKeyInputClassName(false)).not.toContain("text-foreground")
+    expect(apiKeyInputClassName(true)).toContain("text-foreground")
+    expect(apiKeyInputClassName(true)).not.toContain("text-muted-foreground")
+  })
 })
 
 describe("ProviderCard test status badge", () => {
-  it("renders Untested as secondary badge", () => {
+  it("renders Not configured for untested provider state", () => {
     const html = renderCardHtml()
 
     expect(html).toContain('data-variant="secondary"')
-    expect(html).toContain("Untested")
+    expect(html).toContain("Not configured")
+    expect(html).not.toContain("Untested")
   })
 
   it("renders Testing badge with spinner", () => {
@@ -144,12 +155,104 @@ describe("ProviderCard test status badge", () => {
     expect(html).toContain("animate-spin")
   })
 
-  it("renders Connected badge with emerald utility color", () => {
+  it("renders Connected badge through semantic success tokens", () => {
     const html = renderCardHtml({ persisted: makePersisted({ last_test_status: "ok" }) })
+    const connectedIndex = html.indexOf("Connected")
+    const badgeStart = html.lastIndexOf("<span", connectedIndex)
+    const badgeEnd = html.indexOf("</span>", connectedIndex)
+    const badgeHtml = html.slice(badgeStart, badgeEnd)
 
     expect(html).toContain("Connected")
-    expect(html).toContain("text-emerald-500")
-    expect(html).toContain("border-emerald-500/50")
+    expect(badgeHtml).toContain('data-variant="success"')
+    expect(badgeHtml).toContain("bg-success-background")
+    expect(badgeHtml).toContain("text-success-foreground")
+    expect(badgeHtml).toContain("border-success-border")
+    expect(badgeHtml).not.toContain("text-primary")
+    expect(badgeHtml).not.toContain("border-primary")
+  })
+
+  it.each([
+    ["untested", "Not configured"],
+    ["ok", "Connected"],
+    ["invalid_key", "Invalid API key"],
+    ["rate_limited", "Rate limited"],
+    ["quota_exceeded", "Quota exhausted"],
+    ["network_error", "Network error"],
+    ["timeout", "Request timed out"],
+    ["error", "Test failed"],
+  ] satisfies Array<[TestStatus, string]>)(
+    "maps backend TestStatus %s to %s",
+    (status, label) => {
+      const html = renderCardHtml({
+        persisted: makePersisted({ last_test_status: status }),
+      })
+
+      expect(html).toContain(label)
+    },
+  )
+
+  it("resets persisted test state when editable provider fields diverge from stored values", () => {
+    const html = renderCardHtml({
+      nextDraft: makeDraft({ api_key: "sk-edited" }),
+      persisted: makePersisted({
+        last_test_status: "network_error",
+        available_sdks: ["openai_compatible"],
+        available_models: [{ id: "openai/gpt-5" }],
+      }),
+    })
+
+    expect(html).toContain("Not configured")
+    expect(html).not.toContain("Network error")
+    expect(html).not.toContain("Available SDKs:")
+    expect(html).not.toContain("Available Models:")
+  })
+
+  it("keeps persisted test state when only the provider display name changes", () => {
+    const html = renderCardHtml({
+      nextDraft: makeDraft({ name: "OpenAI renamed" }),
+      persisted: makePersisted({
+        last_test_status: "ok",
+        available_sdks: ["openai_compatible"],
+        available_models: [{ id: "openai/gpt-5" }],
+      }),
+    })
+
+    expect(html).toContain("Connected")
+    expect(html).toContain("Available SDKs:")
+    expect(html).toContain("openai_compatible")
+    expect(html).toContain("Available Models:")
+    expect(html).toContain("openai/gpt-5")
+  })
+
+  it("restores cached test state when draft parameters match a previous result", () => {
+    const cachedParams = makeDraft({ base_url: "https://api.original.test" })
+    const html = renderCardHtml({
+      nextDraft: cachedParams,
+      persisted: makePersisted({
+        base_url: "https://api.changed.test",
+        last_test_status: "untested",
+        available_sdks: [],
+        available_models: [],
+        test_results: [
+          {
+            params_fingerprint: providerTestParamsFingerprint(cachedParams),
+            base_url: "https://api.original.test",
+            provider_type: "openai_compatible",
+            last_test_status: "ok",
+            last_test_at: "2026-05-18T12:00:00+00:00",
+            last_test_message: "",
+            last_error_code: "",
+            available_sdks: ["openai_compatible"],
+            available_models: [{ id: "openai/gpt-5" }],
+          },
+        ],
+      }),
+    })
+
+    expect(html).toContain("Connected")
+    expect(html).toContain("Available SDKs:")
+    expect(html).toContain("openai_compatible")
+    expect(html).toContain("openai/gpt-5")
   })
 
   it("renders Error badge as destructive with error code", () => {
@@ -211,6 +314,7 @@ describe("ProviderCard provider kind badge", () => {
     expect(html).toContain(">Provider Name</label>")
     expect(html).toContain('aria-label="Delete provider"')
     expect(html).toContain("Base URL")
+    expect(html).toContain('aria-label="Copy Base URL"')
   })
 
   it("uses the same not-configured test state for third-party providers without an API key", () => {
@@ -233,7 +337,7 @@ describe("ProviderCard provider kind badge", () => {
     const html = renderToStaticMarkup(
       <ProviderCard
         draft={makeDraft({ api_key: "sk-official" })}
-        persisted={makePersisted({ last_test_status: "untested" })}
+        persisted={makePersisted({ api_key: "sk-official", last_test_status: "untested" })}
         onFieldChange={vi.fn()}
         onTest={vi.fn()}
         onDelete={vi.fn()}
@@ -241,8 +345,8 @@ describe("ProviderCard provider kind badge", () => {
       />,
     )
 
-    expect(html).toContain("Untested")
-    expect(html).not.toContain("Not configured")
+    expect(html).toContain("Not configured")
+    expect(html).not.toContain("Untested")
   })
 })
 
@@ -256,6 +360,9 @@ describe("ProviderCard provider capabilities", () => {
     expect(html).toContain("Available SDKs:")
     expect(html).toContain("openai_compatible")
     expect(html).toContain("anthropic_compatible")
+    expect(html).toContain("text-muted-foreground")
+    expect(html).toContain('data-variant="outline"')
+    expect(html).not.toContain('data-variant="secondary">openai_compatible')
   })
 
   it("renders available_models chips when persisted has data", () => {
@@ -273,6 +380,7 @@ describe("ProviderCard provider capabilities", () => {
     expect(html).toContain("Available Models:")
     expect(html).toContain("gpt-5")
     expect(html).toContain("claude-opus-4")
+    expect(html).toContain("text-muted-foreground")
   })
 
   it("collapses long available model lists behind a show-all action", () => {
@@ -325,13 +433,37 @@ describe("ProviderCard provider capabilities", () => {
 })
 
 describe("ProviderCard protocol controls", () => {
-  it("does not render SDK protocol selection UI", () => {
-    const html = renderCardHtml()
-    const protocolLabel = ["SDK", " Protocol"].join("")
-    const openAiLabel = ["OpenAI", " Compatible"].join("")
+  it("renders protocol selection for third-party providers", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({ provider_type: "anthropic_compatible" })}
+        persisted={null}
+        onFieldChange={vi.fn()}
+        onTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="third-party"
+      />,
+    )
 
-    expect(html).not.toContain(protocolLabel)
-    expect(html).not.toContain(openAiLabel)
+    expect(html).toContain("Protocol")
+    expect(html).toContain("Anthropic compatible")
+    expect(html).toContain('data-slot="select-trigger"')
+  })
+
+  it("does not render protocol selection for official providers", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({ provider_type: "anthropic_compatible" })}
+        persisted={null}
+        onFieldChange={vi.fn()}
+        onTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="official"
+      />,
+    )
+
+    expect(html).not.toContain("Protocol")
+    expect(html).not.toContain("Anthropic compatible")
   })
 })
 

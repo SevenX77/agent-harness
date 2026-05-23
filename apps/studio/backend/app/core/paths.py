@@ -20,6 +20,10 @@ def app_settings_dir(
     platform: str | None = None,
     home: Path | None = None,
 ) -> Path:
+    config_dir = environ.get("STUDIO_CONFIG_DIR")
+    if config_dir:
+        return Path(config_dir).resolve()
+
     raw = environ.get("STUDIO_RESOURCE_DIR")
     if raw:
         return default_config_dir(Path(raw).resolve())

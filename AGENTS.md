@@ -2,7 +2,8 @@
 
 ## Studio Frontend UI
 
-- Before changing `apps/studio/frontend` UI, read `docs/development/FRONTEND_UI_SPEC.md`, especially section 2.
+- Before planning, reviewing, or changing `apps/studio/frontend` UI, read `docs/development/FRONTEND_UI_SPEC.md`, especially section 2. Treat it as the source of truth for Studio frontend layout, interaction, and verification rules.
+- When a UI iteration reveals a reusable frontend rule, update `docs/development/FRONTEND_UI_SPEC.md` in the same change instead of leaving the lesson only in chat.
 - First search `apps/studio/frontend/src/components/ui/` for an existing shadcn/ui or Radix wrapper. Prefer those components over custom interaction code.
 - If a needed primitive is missing, add the shadcn/ui-style wrapper under `src/components/ui/` before using it in business components.
 - Use semantic design tokens and existing component variants. Do not hardcode hex colors or one-off Tailwind palette colors.

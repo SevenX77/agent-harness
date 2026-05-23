@@ -169,29 +169,6 @@ audit A8 说需要图级 IO 数据流校验，位置是 `docs.backup-2026-05-20/
 
 第四，编译阶段不建立 per-phase input/output mapping。`GraphPhaseRef` 只有 `id`、`src`、`depends_on`，见 `packages/graph-agent/src/graph_agent/core/manifest.py:16` 到 `packages/graph-agent/src/graph_agent/core/manifest.py:23`。它没有 "input from phase X output Y" 的字段。
 
-### Legacy / 死代码残留清单 (a1 调查 2026-05-21)
-
-这一节由 a1 (Codex) 在 2026-05-21 通过反向遍历 V2.1 主线 (`_run_v21_skill_dict -> compile_skill -> assemble_graph`) 闭包后产出, 按 "置信度死/活" 分级。skill-compilation 域内的 legacy:
-
-**高置信度死 (生产 0 引用 + test 0 引用)**:
-
-- `packages/graph-agent/src/graph_agent/core/skill_builder.py` — 991 行。旧 schema-2.0 / Phase 3 manifest 到 `PhaseNode` builder, 文件头自标 "Phase 3 SKILL manifest to PhaseNode builder" 在 `packages/graph-agent/src/graph_agent/core/skill_builder.py:1`; `build_graph_nodes` 在 `:37`, `get_schema_engine` 在 `:42`, 只在本文件定义, 无外部 caller。
-- `packages/graph-agent/src/graph_agent/core/skill_parser.py` — 312 行。旧 `parse_skill_md`, 定义在 `packages/graph-agent/src/graph_agent/core/skill_parser.py:35`, 0 引用。
-- `packages/graph-agent/src/graph_agent/core/skill_validator.py` — 185 行。旧 `validate_manifest`, 定义在 `packages/graph-agent/src/graph_agent/core/skill_validator.py:20`, 0 引用。
-
-**中置信度死 (仅 test / dev 引用, 无生产主路径)**:
-
-- `packages/graph-agent/src/graph_agent/codemod/v21_migrator.py` — 454 行。V2.0 → V2.1 迁移 CLI 工具, guard 在 `packages/graph-agent/src/graph_agent/codemod/v21_migrator.py:453`, 测试引用 `packages/graph-agent/tests/core/test_v21_codemod.py:9`。
-- `packages/graph-agent/src/graph_agent/core/validators/persona_resolution.py` (84 行) / `prompt_quality.py` (192 行) / `template_variables.py` (56 行) / `tool_paths.py` (269 行) / `validator_required.py` (83 行) — 5 个文件合计 684 行。compile-era validator, **`SkillLoader.compile_skill` 主流程未调用**, 只有测试在 `packages/graph-agent/tests/core/validators/*` 和 `test_compile_skill_hostile_inputs.py` 引用。compile 主线实际调用的校验是 `_validate_graph_topology` (loader.py:152) / `_validate_logic_action_return_keys` (loader.py:168) / `_compile_subagent_metadata` (loader.py:176)。
-- `packages/graph-agent/src/graph_agent/core/skill_tool_factory.py` — 127 行。定义在 `:8`, 旧 manifest 注释提及, 测试 `packages/graph-agent/tests/core/test_skill_tool_factory.py:8` 引用, V2.1 主线不引用。
-- `packages/graph-agent/src/graph_agent/core/phase_node.py` — 34 行。旧 `PhaseNode` wrapper, 只被高置信度死的 `skill_builder.py:29` 引用 + test。
-
-**低置信度疑似死 (legacy 入口, 不在 V2.1 主线)**:
-
-- `load_workflow_from_md()` at `packages/graph-agent/src/graph_agent/core/loader.py:211` — V2.1 主线 `_run_v21_skill_dict` (`runner.py:451`) 不调用这个旧入口, 直接 `compile_skill + assemble_graph`。它现在的实现仍可工作, 但文档化的 canonical compile API 已经是 `compile_skill`, 不是 `load_workflow_from_md`。
-
-MVP0 cutover 时的清退方案见 [skill-compilation/mvp0-alignment.md#mvp0-死代码清退](./mvp0-alignment.md#mvp0-死代码清退)。
-
 ### 读代码时的主路径提示
 
 如果读者想从代码理解编译，推荐按这个顺序跳：

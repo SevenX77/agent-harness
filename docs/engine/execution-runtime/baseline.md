@@ -170,38 +170,6 @@ runtime 也不是 phase-level IO mapper。LOGIC、SUBGRAPH、subagent 都围绕�
 
 `WorkflowResult` 包装发生在 `run_skill()` 成功分支，见 `packages/graph-agent/src/graph_agent/core/runner.py:211` 到 `packages/graph-agent/src/graph_agent/core/runner.py:224`。失败包装只捕获 `GraphAgentError`，见 `packages/graph-agent/src/graph_agent/core/runner.py:195` 到 `packages/graph-agent/src/graph_agent/core/runner.py:209`；而 P0-1 的 SKILL phase 无模型错误当前是裸 `RuntimeError`，抛出位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:233` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:234`。
 
-### Legacy / 死代码残留清单 (a1 调查 2026-05-21)
-
-这一节由 a1 (Codex) 在 2026-05-21 通过反向遍历 V2.1 主线 (`_run_v21_skill_dict -> compile_skill -> assemble_graph`) 闭包后产出。**execution-runtime 是死代码最集中的域** — 旧 V1/V2.0 `GraphAgentHarness` 编排器栈 (合计 1553 行) 仍在仓库里, 不被 `_run_v21_skill_dict` 主线调用, 但被 `packages/graph-agent/src/graph_agent/core/__init__.py:15` export 保活, 也被旧 `phase_nodes/*.py` lazy import 保活。
-
-**低置信度疑似死 (V1/V2.0 GraphAgentHarness 栈, 不在 V2.1 主线)**:
-
-- `packages/graph-agent/src/graph_agent/core/harness.py` — 1150 行。`GraphAgentHarness` 主体。**保活原因**: `core/__init__.py:15` 仍 export; 旧 phase node lazy import (`packages/graph-agent/src/graph_agent/core/phase_nodes/llm_phase_node.py:86` / `code_phase_node.py:35` / `validation_phase_node.py:44`)。V2.1 主线 (`_run_v21_skill_dict` at `runner.py:451`) **不**调用 harness。
-- `packages/graph-agent/src/graph_agent/core/graph_builder.py` — 130 行。`GraphBuilder`, 只被 `harness.py:36` 引用 + test。
-- `packages/graph-agent/src/graph_agent/core/phase_executor.py` — 154 行。`PhaseExecutor`, 只被 harness / graph_builder / phase_nodes / test 引用。
-- `packages/graph-agent/src/graph_agent/core/retry_router.py` — 56 行。`RetryRouter`, 只被 harness / graph_builder / test 引用。
-- `packages/graph-agent/src/graph_agent/core/run_context.py` — 63 行。`RunContext`, 只被 harness / phase_executor / phase_nodes 引用 + `core/__init__.py:18` export。
-- `packages/graph-agent/src/graph_agent/core/phase_nodes/*` — 旧 `LLMPhaseNode` / `CodePhaseNode` / `ValidationPhaseNode`, 只被 `phase_executor` 调用, 不在 V2.1 assembler 主线。
-- `packages/graph-agent/src/graph_agent/core/nudge_injector.py` — 旧 nudge 注入器, 引用 `cognitive/finish.py` 跟 `cognitive/memory.py`, 不在 V2.1 主线。
-
-合计旧 harness 栈 ~ 1553 行 (`harness.py + graph_builder.py + phase_executor.py + retry_router.py + run_context.py`), 加上 `phase_nodes/*` 跟 `nudge_injector.py` 总量更大。
-
-**V2.1 主线 "活" 文件清单 (a1 反向闭包结果, 严格核心 ~ 17 个)**:
-
-- `packages/graph-agent/src/graph_agent/core/runner.py` (入口 `:451`) / `compiler.py` / `cache.py` / `loader.py` / `graph_assembler.py` / `actions.py` / `exceptions.py` / `manifest.py` / `parser.py` / `purity.py` / `subagents.py`
-- `packages/graph-agent/src/graph_agent/cognitive/{context_facade,critic,finish_task,md2json,md_patch}.py`
-- `packages/graph-agent/src/graph_agent/runtime/{exit_contract,state}.py`
-
-**易混淆点**: V2.1 主线用的 `cognitive/finish_task.py` 跟旧栈用的 `cognitive/finish.py` (257 行) 是**两个不同文件**。V2.1 `graph_assembler.py:22` import `finish_task.py`; `finish.py` 旧版只被 `harness.py:28` / `phase_nodes/llm_phase_node.py:32` / `nudge_injector.py:40` 引用, 不在 V2.1 主线。`cognitive/memory.py` (`update_working_memory`, 19 行) 同理只在旧栈。
-
-**关键确认 (非死代码, 跟 Q9 决策协同)**:
-
-- `packages/graph-agent/src/graph_agent/models/gateway_chat_model.py` 不是死代码。`ModelResolver` 用它 (`packages/graph-agent/src/graph_agent/models/resolver.py:27,117`); Predict 也继承它 (`packages/graph-agent/src/graph_agent/core/_predict_internal/interception.py:26`)。
-- `packages/graph-agent/src/graph_agent/models/llm_client_manager.py` 不是死代码。`GatewayChatModel` 调用它 (`gateway_chat_model.py:32,151`)。
-- 未发现真实 `LLMGateway` / `ToolExecutor` 类实现; 只在 `harness.py:11` docstring 里出现旧名。
-
-MVP0 cutover 时的清退方案见 [execution-runtime/mvp0-alignment.md#mvp0-死代码清退](./mvp0-alignment.md#mvp0-死代码清退)。
-
 ### 读代码时的主路径提示
 
 读 runtime 建议先看 `run_skill()`，位置是 `packages/graph-agent/src/graph_agent/core/runner.py:161`。然后跳到 `_run_v21_skill_dict()`，位置是 `packages/graph-agent/src/graph_agent/core/runner.py:451`。再跳到 `assemble_graph()`，位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:55`。

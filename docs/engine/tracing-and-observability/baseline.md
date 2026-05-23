@@ -134,21 +134,6 @@ trace 里要表达的 `inputs` 和 `outputs` 不是凭空来的，它们必须�
 
 这也解释了为什么 P1-4 不只是 "少一个 callback 类"。callback 类存在，Predict exporter 也存在；缺口在于 V2.1 graph runtime 没有把 phase lifecycle 和 state slice 统一投递出去。
 
-### Legacy / 死代码残留清单 (a1 调查 2026-05-21)
-
-这一节由 a1 (Codex) 在 2026-05-21 通过反向遍历 V2.1 主线 (`_run_v21_skill_dict -> compile_skill -> assemble_graph`) 闭包后产出。tracing-and-observability 域涉及的 legacy:
-
-**低置信度疑似死 (V2.1 主线不用的 observability legacy)**:
-
-- 旧 harness 路径默认创建的 `LoggingCallback()` 跟 `TracingCallback(trace_dir=...)` 调用点在 `packages/graph-agent/src/graph_agent/core/runner.py:284` 到 `:286` — 这是 legacy `_run_skill_dict()` 旧路径, 不是 V2.1 `_run_v21_skill_dict()` 主线 (V2.1 主线 `runner.py:462` `del callbacks`)。
-- `packages/graph-agent/src/graph_agent/callbacks/base.py:9` / `events.py:10` / `tracing.py:88` — legacy dict/event 兼容代码, 仍存在但 V2.1 callback 设计 (按 [mvp0-alignment.md#1-v21-runtime-callback-与-trace-事件分发体系恢复-p1-4-修复](./mvp0-alignment.md#1-v21-runtime-callback-与-trace-事件分发体系恢复-p1-4-修复)) 要做新 V2TracingCallback 替代它们。
-
-**关键确认 (非死代码)**:
-
-- `packages/graph-agent/src/graph_agent/core/_predict_internal/tracing.py` `PredictTracingCallback` — **不是死代码**, Predict 路径 (interception.py + tracing.py + exporter.py) 仍是活的 V2.1 旁路。但文件头 `:1-6` 明示 "not public SDK surface", 是 private internal 模块。MVP0 设计的 V2TracingCallback 不能直接把这个 private API 升级成 public, 需要做新的 public API surface。
-
-MVP0 cutover 时的清退方案见 [tracing-and-observability/mvp0-alignment.md#mvp0-死代码清退](./mvp0-alignment.md#mvp0-死代码清退)。
-
 ### 读代码时的主路径提示
 
 读 observability 建议先看 `_run_v21_skill_dict()`，位置是 `packages/graph-agent/src/graph_agent/core/runner.py:451`，确认 V2.1 主线没有接 callbacks。然后看旧路径 callbacks 默认创建，位置是 `packages/graph-agent/src/graph_agent/core/runner.py:284`，理解 legacy 能力来自哪里。

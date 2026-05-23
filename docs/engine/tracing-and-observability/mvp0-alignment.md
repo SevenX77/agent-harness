@@ -1,200 +1,232 @@
-# tracing-and-observability (engine) — MVP0 Alignment (下一步对齐逻辑)
+# tracing-and-observability (engine) — MVP0 Alignment (V0.3.0 graph_skill)
 
-> **Status**: Filled by a1 (Codex) based on a2 framework, 2026-05-20
-> **Scope**: Predict 内部与 LangGraph 节点拦截、生命周期事件发出、结构化 Trace 日志 (audit P1-4)
-> **配套**: 见 [INDEX.md](../../INDEX.md) 5 维模板 + cross-link 规则 + writing conventions。
+> **Status**: Rewritten by a1 (Codex) for V0.3.0 graph_skill, 2026-05-23
+> **Scope**: Runtime / assembly trace event protocol, Agent tool trace, builtin reference reader subagent trace, ambiguity feedback event, async logger, Studio trace payload。
+> **配套**: 见 [skill-spec README](../skill-spec/README.md), [execution-runtime alignment](../execution-runtime/mvp0-alignment.md), [state-and-io-contract alignment](../state-and-io-contract/mvp0-alignment.md)。
+
+## V0.3.0 改造摘要
+
+本文件保留 V2.1 MVP0 的方向: 运行主线恢复 callbacks, 统一 TraceEventKind, TOOL_CALL 事件带 `tool_name`, EXCEPTION 保留结构化错误。V0.3.0 只补 3 类事件协议:
+
+| 改造点 | 新语义 | 决议来源 |
+|---|---|---|
+| C14 | 新增 `AMBIGUITY_LOGGED`, `log_ambiguity` 不只是一条普通 tool end, 还要投递业务反馈事件 | [Studio V0.3.0 新需求 #3](../../studio/V0.3.0-NEW-REQUIREMENTS--DO-NOT-DELETE-DURING-CLEANUP.md) |
+| C15 | builtin reference reader subagent 使用 `BUILTIN_SUBAGENT_ENTER` / `BUILTIN_SUBAGENT_EXIT`, 与用户 subagent 区分 | [Builtin Modules](../skill-spec/09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名) |
+| 改造点 3 | 装配期 reader 失败发 `BUILTIN_SUBAGENT_FALLBACK` WARN, 携带 timeout/error/config missing 原因 | [Reference 三机制](../skill-spec/08-resource-mechanisms-spec.md#reference-三机制生命周期) |
+
+Tracing 不决定业务执行, 只记录真实 runtime / assembly 调用点。任何 trace payload 都必须来自 StateMapper / runtime 已校验数据, 不记录未授权全局黑板。
 
 ## UI/UX
 
 N/A — 此模块为纯 backend Python library, 无 UI / 无前端调用面。
 
-Tracing 是“把运行过程拍成可回放记录”的 engine 能力。它不画瀑布流、不画 Edge Inspection，但它必须提供 Studio 能消费的数据。当前 V2.1 runner 返回一个 `trace_path` 字符串，见 `packages/graph-agent/src/graph_agent/core/runner.py:480` 到 `packages/graph-agent/src/graph_agent/core/runner.py:485`，但这条主线没有真正写出 phase 级 trace。
-
-MVP0 的 UI 价值是让前端可以回答三个问题：哪个 phase 开始了、它看到了哪些输入、它输出了什么或在哪里失败。没有这些事件，Studio 只能展示最终结果，不能展示过程。
-
-PM 可以把本模块理解为“黑盒飞行记录仪”。它不会决定飞机怎么飞，那是 execution-runtime 的职责；它只保证每个关键动作都留下时间、身份、输入、输出和错误。当前 Predict 路径已经能保存一部分业务切片，但 V2.1 主执行路径仍缺统一事件。
+Studio TracePanel、Ambiguity Feedback 面板、Canvas 节点状态和 Edge Inspection 都消费本模块输出的结构化事件。Engine 只负责事件协议和投递, 不负责 React 展示。
 
 ## 前端逻辑
 
-N/A — 此模块为纯 backend Python library, 无 UI / 无前端调用面。
+N/A — 此模块为纯 backend Python library, 无 React 逻辑。
 
-前端将来只订阅事件流或读取 trace 文件。它不应该知道 `GraphAssembler` 怎么调用 `model.invoke()`，也不应该直接调用 `PredictTracingCallback`。当前 Predict 内部已有 callback/exporter，但 V2.1 graph runtime 的 LOGIC/SUBGRAPH/SKILL node 没有统一发事件：LOGIC 主体在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:127` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:136`，SUBGRAPH 主体在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:155` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:172`，SKILL 主体在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:229` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:296`。
-
-这也意味着前端的 TracePanel 不应该自己推断 phase 生命周期。它应该消费 engine 事件：`NODE_START` 出现就新增一行，`LLM_CALL_END` 出现就补 prompt/response，`EXCEPTION` 出现就把当前 phase 标红。事件协议稳定后，Studio 的 WebSocket 和本地 trace 文件可以复用同一种 payload。
+前端不应推断 phase 生命周期或 reader fallback。它只订阅事件流: `NODE_START` 新增节点运行行, `TOOL_CALL_END` 补工具结果, `AMBIGUITY_LOGGED` 进入 ambiguity 面板, `BUILTIN_SUBAGENT_FALLBACK` 标记 reference reader 降级。
 
 ## 后端功能
 
-### 1. V2.1 Runtime Callback 与 Trace 事件分发体系恢复 (P1-4 修复)
+### 1. Runtime Callback 与 Trace 事件分发体系恢复 (P1-4)
 
-MVP0 SHOULD 把 callbacks/trace 接回 V2.1 主线。当前 `_run_v21_skill_dict()` 直接 `del callbacks`，见 `packages/graph-agent/src/graph_agent/core/runner.py:451` 到 `packages/graph-agent/src/graph_agent/core/runner.py:462`，随后只执行 `compile_skill -> assemble_graph -> graph.invoke`，见 `packages/graph-agent/src/graph_agent/core/runner.py:463` 到 `packages/graph-agent/src/graph_agent/core/runner.py:471`。这就是 P1-4：旧 harness 的 callbacks / trace / heartbeat 等能力没有进入 V2.1 graph runtime。
+MVP0 SHOULD 把 callbacks / trace 接回 graph runtime 主线。事件应由真实执行点发出, 不是由顶层 `graph.invoke()` 外围猜测。
 
-现有可复用基础是 Predict tracing。`PredictTracingCallback` 定义在 `packages/graph-agent/src/graph_agent/core/_predict_internal/tracing.py:76`，支持 chain start、phase start/end、LLM call 和 save；phase start 保存 inputs，见 `packages/graph-agent/src/graph_agent/core/_predict_internal/tracing.py:111` 到 `packages/graph-agent/src/graph_agent/core/_predict_internal/tracing.py:116`；phase end 保存 outputs、metrics 和 mocked source，见 `packages/graph-agent/src/graph_agent/core/_predict_internal/tracing.py:118` 到 `packages/graph-agent/src/graph_agent/core/_predict_internal/tracing.py:137`；LLM call 清零 usage 后写入，见 `packages/graph-agent/src/graph_agent/core/_predict_internal/tracing.py:139` 到 `packages/graph-agent/src/graph_agent/core/_predict_internal/tracing.py:157`。
+| 事件 | 触发点 | 必填 payload | 校验规则 | 错误码 | 业务作用 |
+|---|---|---|---|---|---|
+| `NODE_START` | Phase Wrapper 调用节点前 | `phase_id`, `phase_input` | input 必须是 StateMapper 切片 | — | 展示节点开始与输入 |
+| `NODE_END` | 节点返回 phase output 后 | `phase_id`, `phase_output`, `duration_ms` | output 已满足 phase `io.outputs` | — | 展示节点结果 |
+| `LLM_CALL_START` | Agent model invoke 前 | `phase_id`, `messages_summary` | prompt 可截断, 不泄漏 secrets | — | 展示模型调用开始 |
+| `LLM_CALL_END` | Agent model invoke 后 | `phase_id`, `response_summary`, `usage` | response 可截断 | — | 展示模型响应 |
+| `TOOL_CALL_START` | Tool invoke 前 | `phase_id`, `tool_name`, `tool_call_id`, `validated_args` | args 必须是校验后结构 | — | 展示工具调用请求 |
+| `TOOL_CALL_END` | Tool invoke 后 | `phase_id`, `tool_name`, `tool_call_id`, `success`, `result_summary` | result 必须可 JSON 化 / 可截断 | `[F-v3-tool-argument-invalid]` | 展示工具调用结果 |
+| `SUBAGENT_ENTER` / `SUBAGENT_EXIT` | 用户 subagent graph 进入 / 退出 | `subagent_name`, `target_skill`, `depth` | 只用于用户注册 subagent | `[F-v3-skill-not-registered]` | 展示用户委派边界 |
+| `EXCEPTION` | runtime 捕获异常 | `error_code`, `message`, `phase_id` | code 必须是 `[F-v3-*]` | domain-specific | 标红失败 |
 
-MVP0 WILL 设计 V2TracingCallback，不直接把 `_predict_internal` 私有模块变成 public API。文件头已经说明 Predict tracing 是 private internal，见 `packages/graph-agent/src/graph_agent/core/_predict_internal/tracing.py:1` 到 `packages/graph-agent/src/graph_agent/core/_predict_internal/tracing.py:6`。V2TracingCallback 应接入 LangGraph node lifecycle：NODE_START 记录 phase_input，NODE_END 记录 phase output，LLM_CALL_START/END 记录 prompt 与 response，SUBAGENT_ENTER/EXIT 记录嵌套边界，EXCEPTION 记录错误。
+事件投递点 SHOULD 靠近 phase wrapper、tool wrapper、model invocation wrapper、subagent wrapper。只包顶层 run 无法满足 Studio Debug。
 
-接入点 SHOULD 尽量靠近节点 wrapper，而不是只包住 `graph.invoke()`。只包顶层只能知道“图开始/结束”，不知道哪个 phase 出错。LOGIC 的 action 调用点在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:131`，SUBGRAPH 的 child graph invoke 在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:157` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:164`，SKILL 的模型调用点在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:245`。这些位置都应发细粒度事件。
+### 2. AMBIGUITY_LOGGED trace event (C14)
 
-P1-4 还要求恢复旧 harness 的“运行健康”语义。旧路径会创建 `LoggingCallback()` 和 `TracingCallback(trace_dir=...)`，见 `packages/graph-agent/src/graph_agent/core/runner.py:284` 到 `packages/graph-agent/src/graph_agent/core/runner.py:286`。MVP0 不必照搬旧 harness，但必须让 V2.1 主线具备等价的 phase trace、错误 trace 和可持续事件输出。
+Agent cognitive template 要求规则不清晰时调用 `log_ambiguity`。Runtime MUST 在 `log_ambiguity` tool 成功后追加投递 `AMBIGUITY_LOGGED`, 不能只发普通 `TOOL_CALL_END`。
 
-### 2. 异步日志记录器构建
+| 字段 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `run_id` | string | 是 | 无 | 当前 run id | — | trace 归属 |
+| `phase_id` | string | 是 | 无 | 当前 Agent phase | — | Canvas / TracePanel 定位 |
+| `event_type` | enum | 是 | `AMBIGUITY_LOGGED` | 固定值 | — | 前端路由到 ambiguity 面板 |
+| `ambiguity_type` | string | 是 | 无 | 非空; 建议枚举 `rule_gap` / `input_missing` / `conflict` / `other` | `[F-v3-tool-argument-invalid]` | 问题分类 |
+| `decision` | string | 是 | 无 | Agent 采取的保守决策 | `[F-v3-tool-argument-invalid]` | 反馈闭环核心 |
+| `reason` | string | 是 | 无 | 非空; 可截断 | `[F-v3-tool-argument-invalid]` | 决策理由 |
+| `related_reference_ids` | list[string] | 否 | `[]` | 必须是当前 Agent references id 子集 | `[F-v3-resource-reference-not-found]` | 关联资料 |
+| `related_protocol_ids` | list[string] | 否 | `[]` | 必须是当前 Agent protocols id 子集 | `[F-v3-mention-target-not-found]` | 关联规则 |
+| `tool_call_id` | string | 是 | 无 | 与 `log_ambiguity` TOOL_CALL 共享 correlation id | — | 串联 tool 与业务事件 |
 
-MVP0 SHOULD 避免 trace 写盘阻塞模型推理。LLM 调用和工具调用可能产生大量事件，如果每个事件都同步写 `trace.jsonl`，运行性能会被 I/O 拖慢。异步记录器可以理解成“一个后台队列”：runtime 只把结构化事件丢进队列，后台线程或 async task 批量写盘。
+投递顺序:
 
-现有 Predict exporter 已经有清洗字段的经验。`assemble_phase_record()` 会把 raw phase 转成 `PhaseRecord`，见 `packages/graph-agent/src/graph_agent/core/_predict_internal/exporter.py:24` 到 `packages/graph-agent/src/graph_agent/core/_predict_internal/exporter.py:38`；`_sanitize_mapping()` 会过滤 usage/cost 并截断长字段，见 `packages/graph-agent/src/graph_agent/core/_predict_internal/exporter.py:74` 到 `packages/graph-agent/src/graph_agent/core/_predict_internal/exporter.py:108`。MVP0 的异步 logger SHOULD 复用这些“不要无限写大 payload”的原则。
+1. `TOOL_CALL_START` with `tool_name="log_ambiguity"`。
+2. `TOOL_CALL_END` with `success=true`。
+3. `AMBIGUITY_LOGGED` with normalized ambiguity payload。
 
-异步 logger 还 SHOULD 支持 backpressure。比如后台队列超过阈值时，低价值 token 事件可以合并，高价值 EXCEPTION/NODE_END 事件不能丢。这样即使模型流式输出很快，也不会因为 trace 太慢把整个 run 卡住。
+Studio 需求来源见 [V0.3.0 New Requirements](../../studio/V0.3.0-NEW-REQUIREMENTS--DO-NOT-DELETE-DURING-CLEANUP.md), builtin tools 背景见 [Builtin Modules](../skill-spec/09-builtin-modules-spec.md#按需调取-tools-read_reference--read_example)。
+
+### 3. Builtin Subagent 与 Reference Tools 的 trace 归属 (C15)
+
+Builtin reference reader subagent 与用户 subagent 语义不同。MVP0 MUST 新增 builtin 专属事件, 避免 Studio 把装配期系统预读误认为用户 Agent 委派。
+
+| 事件 | 触发点 | 必填 payload | 校验规则 | 错误码 | 业务作用 |
+|---|---|---|---|---|---|
+| `BUILTIN_SUBAGENT_ENTER` | builtin reader 调用前 | `builtin_name`, `phase_id`, `trigger_stage`, `reference_ids` | `builtin_name="reference_reader"` | — | 标记系统预读开始 |
+| `BUILTIN_SUBAGENT_EXIT` | builtin reader 成功返回 | `builtin_name`, `phase_id`, `duration_ms`, `used_reference_ids`, `warnings` | 输出 markdown 已生成 | — | 标记系统预读成功 |
+| `BUILTIN_SUBAGENT_FALLBACK` | builtin reader 降级 | `builtin_name`, `phase_id`, `fallback_reason`, `fallback_strategy` | WARN event | `[F-v3-reference-reader-failed]` | 标记系统预读降级 |
+| `TOOL_CALL_START` | `read_reference` / `read_example` 调用前 | `tool_name`, `tool_call_id`, `validated_args` | `tool_name` 必须是真实 builtin 名 | — | 运行期资料读取请求 |
+| `TOOL_CALL_END` | `read_reference` / `read_example` 返回后 | `tool_name`, `tool_call_id`, `success`, `result_summary` | Q13 per-tool `tool_name` 必填 | `[F-v3-resource-reference-not-found]` / `[F-v3-resource-example-not-found]` | 运行期资料读取结果 |
+
+`read_reference` 和 `read_example` 不需要专属 event kind; 它们走通用 `TOOL_CALL_*`, 但 payload 中 `tool_name` 必须分别是 `read_reference` / `read_example`。这与 Q13 per-tool `tool_name` 决议一致。
+
+规范终点: [Builtin Modules](../skill-spec/09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名), [read_reference / read_example tools](../skill-spec/09-builtin-modules-spec.md#按需调取-tools-read_reference--read_example), [MVP0 Q13](../MVP0-DECISIONS-EXPLAINED-2026-05-21.md#q13)。
+
+### 4. 装配期 Reader Fallback Trace 链路 (改造点 3)
+
+Builtin reference reader 发生在 Agent prompt 装配期, 可能调用本地或远端模型 / 服务。MVP0 MUST 让这段“静默期”进入 trace。
+
+```text
+BUILTIN_SUBAGENT_ENTER
+  -> local/remote reference reader call
+  -> BUILTIN_SUBAGENT_EXIT
+
+or
+
+BUILTIN_SUBAGENT_ENTER
+  -> timeout/error/config missing
+  -> BUILTIN_SUBAGENT_FALLBACK (WARN)
+  -> fallback raw excerpt injected into knowledge_base
+```
+
+| 字段 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `trigger_stage` | enum | 是 | `assembly` | 只允许 `assembly` / `runtime_tool` | — | 区分装配期与运行期 |
+| `fallback_reason` | enum | fallback 时必填 | 无 | `remote_timeout` / `remote_error` / `local_error` / `config_missing` / `invalid_output` | `[F-v3-reference-reader-failed]` | 告诉 Studio 降级原因 |
+| `fallback_strategy` | string | fallback 时必填 | `raw_excerpt_3000_tokens` | 非空 | `[F-v3-reference-reader-failed]` | 告诉用户如何继续 |
+| `reference_ids` | list[string] | 是 | `[]` | 当前 Agent references id | — | 资料范围 |
+| `excerpt_token_limit` | integer | fallback 时必填 | `3000` | `> 0` | — | fallback 体积边界 |
+| `warning_message` | string | fallback 时必填 | 无 | 可读, 可截断 | `[F-v3-reference-reader-failed]` | TracePanel 展示 |
+
+Fallback 是 WARN, 不阻断 Agent run。Reference 机制见 [Reference 三机制生命周期](../skill-spec/08-resource-mechanisms-spec.md#reference-三机制生命周期)。
+
+### 5. 异步日志记录器构建
+
+MVP0 SHOULD 避免 trace 写盘阻塞模型推理。Runtime 只把结构化事件放入队列, 后台 writer 批量写 `trace.jsonl` 或推送 event bus。
+
+| 字段 / 设置 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `queue_max_size` | integer | 否 | `10000` | `> 0` | — | backpressure |
+| `drop_policy` | enum | 否 | `drop_low_value` | 不得丢 `EXCEPTION`, `NODE_END`, fallback events | — | 防止日志拖垮业务 |
+| `payload_max_bytes` | integer | 否 | `65536` | 超限截断并标记 | — | 防止单事件过大 |
+| `file_rotate_mb` | integer | 否 | `50` | `> 0` | — | 控制磁盘体积 |
+| `write_failure` | WARN | 否 | continue | 写盘失败不阻断 run | `[F-v3-runtime-phase-failed]` 仅用于业务异常, 不用于普通写盘 WARN | 保持 runtime 可用 |
+
+高价值事件不能丢: `EXCEPTION`, `BUILTIN_SUBAGENT_FALLBACK`, `AMBIGUITY_LOGGED`, `NODE_END`。
 
 ## API
 
-以下为事件类型及回调处理入口的全新 Python 接口契约提议，它们属于 `graph_agent` 的核心观测模块，是对外吐出数据的唯一标准：
-
-### 1. Trace Event 类别枚举规范
-为了彻底梳理和统一发送向 Studio 总线或磁盘日志的种类，我们必须锁定并强约束有限种类的事件枚举。不能再让开发者随意派发乱七八糟的纯字符串事件。
+### 1. TraceEventKind 枚举规范
 
 ```python
-from enum import StrEnum
-
 class TraceEventKind(StrEnum):
-    """Enumeration of all system-emitted trace events.
-    
-    This strict enumeration ensures that both backend dispatchers
-    and frontend consumers follow the exact same event taxonomy
-    to avoid parsing failures down the line.
-    """
     NODE_START = "node_start"
     NODE_END = "node_end"
     LLM_CALL_START = "llm_call_start"
     LLM_CALL_END = "llm_call_end"
+    TOOL_CALL_START = "tool_call_start"
+    TOOL_CALL_END = "tool_call_end"
     SUBAGENT_ENTER = "subagent_enter"
     SUBAGENT_EXIT = "subagent_exit"
+    BUILTIN_SUBAGENT_ENTER = "builtin_subagent_enter"
+    BUILTIN_SUBAGENT_EXIT = "builtin_subagent_exit"
+    BUILTIN_SUBAGENT_FALLBACK = "builtin_subagent_fallback"
+    AMBIGUITY_LOGGED = "ambiguity_logged"
     EXCEPTION = "exception"
 ```
 
-MVP0 SHOULD 保持枚举小而稳定。Predict 侧目前把 mocked source 限定为 `"golden_case" | "copilot" | "heuristic_stub" | "manual"`，类型在 `packages/graph-agent/src/graph_agent/core/_predict_internal/tracing.py:18`，exporter 同样有集合约束，见 `packages/graph-agent/src/graph_agent/core/_predict_internal/exporter.py:21`。Trace event kind 也应采用这种有限集合。
+| 枚举 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `TOOL_CALL_*` | event kind | 是 | 无 | payload 必含 `tool_name` | `[F-v3-tool-argument-invalid]` | Q13 工具级追踪 |
+| `BUILTIN_SUBAGENT_*` | event kind | 是 | 无 | 只用于 engine builtin subagent | `[F-v3-reference-reader-failed]` for fallback | 区分系统预读 |
+| `AMBIGUITY_LOGGED` | event kind | 是 | 无 | 只由 `log_ambiguity` 成功调用触发 | `[F-v3-tool-argument-invalid]` | Studio ambiguity 面板 |
+| `EXCEPTION` | event kind | 是 | 无 | payload 必含 `[F-v3-*]` code | domain-specific | 失败定位 |
 
-如果未来要支持更多事件，SHOULD 用 additive 扩展，不重命名已发布枚举。Studio 和 CLI 都会按字符串解析事件类型，一旦重命名，历史 trace 文件就会失效。
+枚举只做 additive 扩展, 不重命名已发布值。
 
 ### 2. TracingCallback V2 接口定义
-接棒老版本的失效回调体系，全新的 Callback Interface 应当契合当前对 LangGraph 环境下的拦截参数提取要求。具体代码可能落定于重构的 `runner.py` 装载点附近，或通过事件调度器注入。
 
 ```python
-from typing import Any
-
 class V2TracingCallback:
-    """Core interface for observing V2.1 skill execution lifecycle.
-    
-    Plugs into LangGraph dispatch mechanisms to surface granular
-    events out of the execution black box and feed them to the Event Bus.
-    """
-    
-    def on_node_start(self, run_id: str, phase_id: str, inputs: dict[str, Any]) -> None:
-        """Emitted when a phase graph node evaluation kicks off.
-        
-        Args:
-            run_id: Global tracking identifier for the skill execution.
-            phase_id: Target phase identifier.
-            inputs: Sandboxed `phase_input` presented to this specific node.
-        """
-        pass
-        
-    def on_llm_call(self, run_id: str, phase_id: str, prompt: list[Any], response: Any) -> None:
-        """Emitted covering the complete roundtrip of a model invoke.
-        
-        This will wrap the serialized array of LangChain messages alongside
-        whatever JSON response was successfully decoded back from the vendor.
-        """
-        pass
-        
-    def on_node_end(self, run_id: str, phase_id: str, result: dict[str, Any]) -> None:
-        """Emitted when node successfully or erroneously exits execution.
-        
-        Provides the output state difference generated by this exact stage.
-        """
-        pass
+    def on_event(self, event: AgentTraceEvent) -> None: ...
 ```
 
-MVP0 SHOULD 把这个 callback 放到 runtime 可传入的 config 中。当前 subagent config 已经能透传 callbacks，如果 parent config 里有 callbacks，它会写进 child config，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:497` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:505`。问题是 public V2.1 runner 顶层没有传入 callbacks。
+推荐 facade:
 
-`on_llm_call` 的签名目前把 prompt 和 response 放在同一个方法里，适合非流式调用。MVP0 实现时可以内部拆成 start/end 两个事件，但保持此 high-level method 作为兼容 facade。这样调用者可以简单接一个 callback，同时事件总线仍能输出 `LLM_CALL_START` 和 `LLM_CALL_END`。
+```python
+def on_tool_call_start(run_id: str, phase_id: str, tool_name: str, tool_call_id: str, args: dict) -> None: ...
+def on_tool_call_end(run_id: str, phase_id: str, tool_name: str, tool_call_id: str, result: dict) -> None: ...
+def on_builtin_subagent_fallback(run_id: str, phase_id: str, payload: dict) -> None: ...
+def on_ambiguity_logged(run_id: str, phase_id: str, payload: dict) -> None: ...
+```
+
+Callback 实现可写文件、推 event bus 或转 WebSocket, 但必须接收同一个 `AgentTraceEvent` schema。
 
 ## Data Model / State
 
-### 1. AgentTraceEvent JSON Schema 对接标准契约
-不管是吐向磁盘存储日志文件，还是走内存 Event Bus 交给后端外壳，承载以上 Event 的根本外壳包体必须具有固定的 `TypedDict` 模型。这份 `AgentTraceEvent` 的严格 Schema 最终将交付给前端用于实现结构的序列化渲染解析：
+### 1. AgentTraceEvent JSON Schema
 
-```python
-from typing import Any, TypedDict
-from .events import TraceEventKind
+| 字段 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `run_id` | string | 是 | 无 | 同一次 run 内稳定 | — | 全局归属 |
+| `phase_id` | string | 是 | 无 | phase 相关事件必须提供; assembly 可用目标 Agent phase | — | Canvas 定位 |
+| `event_type` | TraceEventKind | 是 | 无 | 必须是枚举值 | — | 前端路由 |
+| `timestamp_ms` | integer | 是 | 无 | 单调递增用于排序 | — | 时间线 |
+| `iso_time` | string | 否 | 无 | UTC ISO 8601 | — | 审计 |
+| `severity` | enum | 否 | `INFO` | `INFO` / `WARN` / `ERROR` | — | UI 样式 |
+| `payload` | dict | 是 | `{}` | 按 event type schema; 超限截断 | event-specific | 事件正文 |
 
-class AgentTraceEvent(TypedDict):
-    """The canonical shape of an emitted trace log."""
-    run_id: str
-    phase_id: str
-    event_type: TraceEventKind
-    timestamp_ms: int
-    payload: dict[str, Any]
-```
+### 2. ToolTracePayload
 
-`payload` SHOULD 随 event type 保持可预测结构。`NODE_START` 放 `phase_input`，`NODE_END` 放 phase output delta，`LLM_CALL_START` 放 prompt messages，`LLM_CALL_END` 放 response 和 tool calls，`EXCEPTION` 放 error code、message、stack。Predict exporter 目前只输出 phase_name/type/inputs/outputs/mocked_source，见 `packages/graph-agent/src/graph_agent/core/_predict_internal/exporter.py:31` 到 `packages/graph-agent/src/graph_agent/core/_predict_internal/exporter.py:38`；MVP0 的 AgentTraceEvent 会比 Predict business slice 更底层、更完整。
+| 字段 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `tool_name` | string | 是 | 无 | 真实 tool 名, 如 `read_reference` | — | Q13 per-tool 定位 |
+| `tool_call_id` | string | 是 | 无 | 同一请求/响应共享 | — | correlation id |
+| `validated_args` | dict | start 必填 | `{}` | 已通过 tool schema 校验 | `[F-v3-tool-argument-invalid]` | 展示实际执行参数 |
+| `success` | boolean | end 必填 | 无 | true/false | — | UI 状态 |
+| `result_summary` | dict/string | end 必填 | 无 | 可截断; 不泄漏 secrets | — | 展示结果 |
+| `error_code` | string | 失败时必填 | 无 | `[F-v3-*]` | domain-specific | 失败定位 |
 
-`timestamp_ms` SHOULD 使用单调时间或统一 UTC wall time 的明确策略。面向 UI 排序时，单调时间更稳；面向日志审计时，UTC 时间更直观。MVP0 可以同时保存 `timestamp_ms` 和 `iso_time`，但必须指定哪个字段用于排序。
+### 3. BuiltinSubagentTracePayload
 
-payload 还需要 size guard。Predict exporter 当前会截断长字符串并写 `truncated` 标记，见 `packages/graph-agent/src/graph_agent/core/_predict_internal/exporter.py:92` 到 `packages/graph-agent/src/graph_agent/core/_predict_internal/exporter.py:108`。V2 event payload SHOULD 采用同样策略，避免 prompt 或工具结果把单条事件撑到数 MB。
+| 字段 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `builtin_name` | string | 是 | `reference_reader` | 当前只允许 `reference_reader` | — | 系统组件名 |
+| `trigger_stage` | enum | 是 | `assembly` | `assembly` / `runtime_tool` | — | 调用阶段 |
+| `reference_ids` | list[string] | 是 | `[]` | 当前 Agent references id | — | 资料范围 |
+| `used_reference_ids` | list[string] | exit 时必填 | `[]` | 输入 id 子集 | — | 实际读取范围 |
+| `fallback_reason` | enum | fallback 时必填 | 无 | 固定枚举 | `[F-v3-reference-reader-failed]` | 降级原因 |
+| `fallback_strategy` | string | fallback 时必填 | 无 | 非空 | `[F-v3-reference-reader-failed]` | 降级方式 |
 
 ## Cross-feature Interaction
 
-本观测特性的平稳运行，重度依赖于大量其他引擎底层特征的动作捕捉与配合支持：
+### 1. Studio Trace 与 Ambiguity Feedback
 
-- **提供源头用于 Studio Trace-Visualization 体系**:
-  上述 `AgentTraceEvent` 及 `TraceEventKind` 是和 Studio 前端直接达成的 JSON 数据协议对接契约。这批发送往事件流通道的序列构成了完全透明可靠的日志数据本源。前端对 Trace 瀑布流的呈现，甚至连线之间的 Edge 节点探视面板所依托的数据，均需完全依赖本文件提出的格式源泉。其双向关联细节详见 [Studio trace-visualization 的接收渲染规划](../../studio/feature-folders/trace-visualization/mvp0-alignment.md)。
-  
-- **与 BlackBoardState 的状态切片提取联动**:
-  在每次 `NODE_START` 等关键生命周期事件触发时，提取出并发放的 `inputs` / `outputs` 数据片段，正是基于在执行前被严格拦截并拆散的黑板数据——即基于 [state-and-io-contract 模块彻底沙盒隔离划分下的纯净状态](../state-and-io-contract/mvp0-alignment.md#Data-Model-/-State)。
+`AMBIGUITY_LOGGED` 是 Studio ambiguity feedback 面板的数据源。TracePanel 可以仍显示 `log_ambiguity` tool call, 但产品侧的“待反馈问题列表”应消费专属事件, 避免从普通 tool result 中解析业务语义。
 
-- **与 execution-runtime 的调用点绑定**:
-  Tracing 不应独立模拟运行过程。它必须由 runtime 在真实执行点发出事件。P0-1 的 ModelResolver、P1-3 的 ExitContractRegistry、A5 的 call_subgraph 都会新增关键调用点，观测模块需要为这些调用点提供统一事件命名。
+### 2. StateMapper 与 Edge Inspection
 
-### 3. `TraceEventKind` 与可观测性生命周期的完整映射
-在上述提到的事件分类中，每一次投递都对应图流转的一个真实物理阶段。
-- `NODE_START`：发生在 LangGraph 调用节点包装器前。MVP0 应在此记录 phase_input。
-- `NODE_END`：发生在节点返回 state delta 后。LOGIC 当前返回 `{"data": updates}`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:132` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:136`。
-- `LLM_CALL_START`：紧贴 `model.invoke(prompt_messages)` 前，当前调用点在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:243` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:245`。
-- `EXCEPTION`：发生在 runtime 捕获错误时，应绑定 [execution-runtime 的异常分发与状态码体系](../execution-runtime/mvp0-alignment.md#9-异常分发与状态码体系)。
+`NODE_START.phase_input` 和 `NODE_END.phase_output` 必须来自 [state-and-io-contract](../state-and-io-contract/mvp0-alignment.md#后端功能) 的 StateMapper 沙盒结果, 不得记录全局父黑板。Edge Inspection 可以用上游 output 和下游 input 推导边上传递字段。
 
-这张映射表也是测试清单。每个事件类型都应该有至少一个 fixture 证明它会在正确位置发出，并且 payload 不包含未授权的全局黑板字段。
+### 3. Execution Runtime 调用点绑定
 
-### 4. 高效日志文件的轮转与清理
-虽然引擎不应过多干预外部日志系统的管理，但对于输出到默认目录 `trace.jsonl` 的行为，为了防止无休止的文件膨胀导致磁盘耗尽：
-- 我们将在每次 `run_skill` 触发新流时，检查目标日志文件的大小。
-- 若超过预设阈值（例如 50MB），自动执行文件的 rotate 行为（加上时间戳后缀），保障最新的追踪数据总是落在最易访问的文件头部。
+Tracing 不模拟运行过程。它由 [execution-runtime](../execution-runtime/mvp0-alignment.md#后端功能) 在真实 model/tool/subagent/SUBGRAPH/reference-reader 调用点发出事件。`read_reference` / `read_example` 运行期事件走 TOOL_CALL, 装配期 reference reader 走 BUILTIN_SUBAGENT。
 
-轮转策略 SHOULD 不影响实时事件总线。写文件失败时，runtime 可以继续向 callbacks/WebSocket 发事件，并记录 logger warning；它不应该因为 trace 文件不可写而中断业务执行。这与 compilation cache 的 P2-2 降级原则一致。
+### 4. 安全与截断
 
-### 5. 面向 Studio 的数据反补
-Studio 需要按 `phase_id` 把 trace event 贴回 Canvas 节点和 Trace 列表。`AgentTraceEvent.phase_id` 因此是必须字段，不是可选装饰。当前 `CompiledStateGraph` 已经保存 `phase_ids` 和 edges，构造见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:91` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:96`，MVP0 trace 应沿用这些 phase id。
-
-Edge Inspection 还需要 edge 级数据。MVP0 可以先从 NODE_END 的 output 和下游 NODE_START 的 input 推导“这条边传了哪些字段”；长期则可在 StateMapper 里直接发出 edge transfer event。这个设计依赖 [state-and-io-contract 的 Phase Wrapper](../state-and-io-contract/mvp0-alignment.md#6-phase-wrapper-的上下文准备过程)。
-
-### 6. 模型流式响应的集成展望
-目前的 `LLM_CALL_END` 主要是为了捕获同步请求（Sync Call）或非流式的完整回应。但是在前端界面，PM 和开发者往往希望能看到逐字输出（Streaming）的效果。
-MVP0 观测体系的预留：
-- `V2TracingCallback` 将引入一对新的辅助方法：`on_llm_new_token(token: str)`。
-- 这要求在底层使用 `chat_model.stream()` 的情况也能被完整覆盖。虽然最终组装好的响应会通过 `LLM_CALL_END` 统一发射，但中间过程的 Token 也能利用这个观测窗口喂给 Web Socket。
-
-流式 token 事件应该被视作高频低价值事件。MVP0 SHOULD 允许关闭 token 级 trace，只保留最终聚合文本，以便批量测试和 CI 不产生海量日志。
-
-### 7. 对外部网络及工具的专项抓取
-图中的节点不仅仅是调用模型，它们还会频繁使用 Tools。当前 SKILL node 对普通工具直接 `tool.invoke(call_args)`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:266` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:267`；subagent tool 则走 `_invoke_subagent_tool_t21()`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:256` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:265`。
-
-MVP0 SHOULD 扩容 `TraceEventKind`，加入 `TOOL_CALL_START` 和 `TOOL_CALL_END`，payload 带 `tool_name`、validated args、result summary 和 error。这样 ReAct 调试不只看到“模型说了什么”，也能看到“工具实际做了什么”。
-
-工具事件还要和安全过滤联动。工具参数应该记录“校验后的 args”，不要记录 LLM 原始未校验文本；如果校验失败，事件应标记 `success=false` 并带 `error_code=F-v21-tool-args-invalid`。这样 Studio 展示的不是一团模型幻觉文本，而是 runtime 真正尝试执行的结构化调用。
-
-对外部网络工具，payload SHOULD 避免保存敏感 header、API key 或完整响应体。MVP0 可以保存 URL host、status code、耗时、截断后的 body 摘要；完整数据如果需要调试，应通过显式 debug 开关控制。这个规则与 LLM provider credential 隔离一致，避免 trace 文件变成秘密泄漏面。
-
-最后，所有 tool call event 都应该带 `phase_id` 和可选 `tool_call_id`。SKILL node 当前从模型 tool call 中读取 `call.get("id", f"{name}-call")` 构造 ToolMessage，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:268` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:273`；MVP0 trace SHOULD 复用同一个 id，让 prompt、tool request、tool result 可以在 UI 中串起来。
-
-这也为回放提供稳定锚点。一次 ReAct turn 里可能有多个 tool call；没有 `tool_call_id`，前端只能按时间猜测响应属于哪个请求。MVP0 SHOULD 把 `tool_call_id` 作为同一轮工具事件的 correlation id，并在异步 logger 中保持事件顺序。
-
-回放器还应允许按 `run_id`、`phase_id`、`event_type` 做过滤。这样同一份 trace 既能服务完整时间线，也能服务单个节点的局部调试。
-过滤结果必须保持原始时间顺序，避免调试时误判事件因果。
+Trace payload 不保存 provider API key、HTTP headers、完整大文档或未截断 prompt。长字符串、reference 原文、tool result 必须截断并标记 `truncated=true`。Debug 全量输出只能通过显式本地调试开关打开。

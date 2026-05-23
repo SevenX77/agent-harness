@@ -540,6 +540,59 @@ Merge 前必须满足:
 - 风险点:
   - Avoid breaking public exception str too hard; keep human-readable message.
 
+### G. Schema Cleanup (finalized decisions)
+
+本节承接 2026-05-23 已 finalized 的 cleanup 决策。它只定义 V0.3.0 cutover 后应清理的 legacy/schema 2.0 残留和 pre-existing test 处理方式, 不删除 V2.1/V0.3.0 主路径。`_run_v21_skill_dict`, `compile_skill`, `assemble_graph`, `BlackboardState` 等当前 graph skill 主线不是 T11 cleanup 对象。
+
+#### G1. T11.1 清 legacy schema 2.0 残留
+- 改 files:
+  - `packages/graph-agent/src/graph_agent/core/parser.py`
+  - `packages/graph-agent/src/graph_agent/core/harness.py`
+  - `packages/graph-agent/src/graph_agent/core/state.py`
+  - 保留 `packages/graph-agent/src/graph_agent/codemod/v21_migrator.py`
+- 改 lines / 函数 / 类:
+  - 检查并删除 `parse_skill_file()` deprecated schema 2.0 stub 的死依赖; 当前 stub 在 `parser.py:235-237` 已 hard-cut 抛错, 只允许保留必要 import compatibility。
+  - 删除 legacy harness 路径中 `GraphAgentHarness` 对 schema 2.0 workflow 的入口; 当前 `GraphAgentHarness.__init__` 仍接 `context_mapping`, 见 `harness.py:356-362`。
+  - 删除 legacy callbacks 字段和相关调用; 当前 `self.callbacks = callbacks or []` 在 `harness.py:369`。
+  - 删除 legacy `BusinessData` / `WorkflowState` 运行路径; 当前 harness run 仍构造 `WorkflowState(data=BusinessData.model_validate(...))`, 见 `harness.py:506-508`。
+  - 保留 `codemod/v21_migrator.py`; 它是 schema 2.0 -> V2.1 一次性 dry-run 迁移辅助, 文件说明在 `codemod/v21_migrator.py:1-4`, 主入口在 `codemod/v21_migrator.py:61-62`。
+- 依赖 tasks: A-F core implementations merged; V0.3.0 graph skill 主路径已稳定。
+- 测试影响:
+  - 删除或迁移仍调用 legacy harness / `parse_skill_file()` 的 tests。
+  - 增加 grep guard: production entry 不再引用 schema 2.0 parser / legacy harness。
+- 风险点:
+  - 不要把 V2.1 graph skill 主路径当 legacy 删除。`_run_v21_skill_dict`, `compile_skill`, `assemble_graph` 是当前主线, T11 不碰。
+
+#### G2. T11.2 删 ContextResolver 死代码
+- 改 files:
+  - 删除 `packages/graph-agent/src/graph_agent/io/context_resolver.py`
+  - 更新 / 删除 `packages/graph-agent/src/graph_agent/core/harness.py` 中 `context_mapping` 调用
+  - 更新 / 删除 `packages/graph-agent/src/graph_agent/core/validators/` 中 context_mapping 相关 validator
+  - 更新 docs 中 `context_mapping` 的旧语义描述
+- 改 lines / 函数 / 类:
+  - `GraphAgentHarness.__init__(..., context_mapping: dict[str, str] | None = None, ...)` 是 legacy 入口, 见 `harness.py:356-362`; V0.3.0 主线 `assemble_graph` + `_run_v21_skill_dict` 不走该入口。
+  - 删除 `ContextResolver` 双模推断, 不再维护 `context_mapping` 与 `io.inputs` / `io.outputs` 并存语义。
+  - docs 改为只描述 JSON Schema 白名单切片: root `io.inputs` -> canonical inputs, phase `io.inputs` -> phase input, phase `io.outputs` -> phase output。
+- 依赖 tasks: D1-D5 StateMapper / Phase Wrapper 完成; B4 root inline IO 完成。
+- 测试影响:
+  - 删除 context_mapping resolver unit tests。
+  - 更新 validator tests, 让数据流校验只按 schema properties / required 字段判断。
+- 风险点:
+  - Studio / docs 如仍展示 context_mapping, 必须同步删除或标记 deprecated, 否则会误导用户写无入口配置。
+
+#### G3. T11.3 defer pre-existing compiler line-location test
+- 改 files:
+  - `packages/graph-agent/tests/core/test_compiler_line_locations.py`
+- 改 lines / 函数 / 类:
+  - 给该 test 加 `@pytest.mark.skip(reason="defer: rewrite with V0.3.0 IO parser cutover, see .kiro/specs/engine-mvp0-rebuild-v030/tasks.md")`。
+  - 记录失败现象: `locate_line_for_pydantic_loc` 返回 `None`, 断言期望 line 3。
+- 依赖 tasks: B3 GRAPH.md phases YAML parser + B4 inline IO parser + B8 fixture migration。
+- 测试影响:
+  - CI 不再被旧 AST 行号提取测试阻塞。
+  - V0.3.0 parser cutover 完成后必须新增 YAML AST line/span 定位测试替代该 skip。
+- 风险点:
+  - 这是 defer, 不是永久豁免。skip reason 必须指向本 cutover tasks, 并在 B3/B4 实施时回收。
+
 ## CI Gate Checklist
 
 Before PR merge:

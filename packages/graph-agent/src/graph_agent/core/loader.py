@@ -185,6 +185,7 @@ class SkillLoader:
             phase_docs,
             skill_resolver=skill_resolver,
         )
+        _validate_subgraph_targets(phase_docs, skill_resolver=skill_resolver)
         tools = _inject_subagent_tools(tools, subagents_by_phase)
 
         raw = {
@@ -416,6 +417,42 @@ def _compile_subagent_metadata(
             )
         subagents_by_phase[doc.phase_name] = phase_subagents
     return subagents_by_phase
+
+
+def _validate_subgraph_targets(
+    phase_docs: list[PhaseDocument],
+    *,
+    skill_resolver: SkillResolverProtocol | None,
+) -> None:
+    for doc in phase_docs:
+        if not isinstance(doc.ast, SubgraphNodeAST):
+            continue
+        if skill_resolver is None:
+            _fatal(
+                doc.path,
+                _frontmatter_key_line(doc.path, "target_skill"),
+                f"SUBGRAPH target_skill {doc.ast.target_skill!r} requires skill_resolver",
+            )
+        sub_root = resolve_skill_root(skill_resolver, doc.ast.target_skill)
+        sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(
+            sub_root,
+            skill_resolver=skill_resolver,
+        )
+        if doc.ast.io is None:
+            _fatal(
+                doc.path,
+                _frontmatter_key_line(doc.path, "io"),
+                "SUBGRAPH must declare io matching target_skill GRAPH.md io",
+            )
+        expected_inputs = sub_compiled.manifest.io.inputs
+        expected_outputs = sub_compiled.manifest.io.outputs
+        if doc.ast.io.inputs != expected_inputs or doc.ast.io.outputs != expected_outputs:
+            _fatal(
+                doc.path,
+                _frontmatter_key_line(doc.path, "io"),
+                "[F-v3-subgraph-io-mismatch] SUBGRAPH io must match target_skill "
+                "GRAPH.md io exactly",
+            )
 
 
 def _inject_subagent_tools(
@@ -1038,7 +1075,6 @@ def _build_phase_document(
         "protocol",
         "exit_contract",
         "python_callable",
-        "sub_skill_ref",
     ]
     blocks = extract_raw_blocks(body, allowed)
     data = dict(frontmatter)
@@ -1054,7 +1090,6 @@ def _build_phase_document(
             data.setdefault("python_callable", blocks.get("python_callable"))
             ast: PhaseAST = LogicNodeAST.model_validate(data)
         elif mode == "subgraph":
-            data.setdefault("sub_skill_ref", blocks.get("sub_skill_ref"))
             ast = SubgraphNodeAST.model_validate(data)
         elif is_agent:
             data.update(_parse_agent_body(path, body, blocks))

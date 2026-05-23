@@ -138,8 +138,7 @@ class SubgraphNodeAST(_BaseNodeAST):
     """Subgraph delegation phase node parsed from ``SUBGRAPH.md``."""
 
     mode: Literal["subgraph"]
-    sub_skill_ref: str = Field(min_length=1)
-    target_skill: str | None = Field(default=None, pattern=SKILL_ID_PATTERN)
+    target_skill: str = Field(pattern=SKILL_ID_PATTERN)
     io: PhaseIOSchema | None = None
 
 

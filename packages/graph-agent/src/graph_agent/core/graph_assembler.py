@@ -191,7 +191,10 @@ def _build_subgraph_node(
     max_patch_attempts: int,
     skill_resolver: SkillResolverProtocol | None,
 ) -> Any:
-    sub_root = _resolve_sub_skill_path(phase_doc.path, phase_ast.sub_skill_ref)
+    del phase_doc
+    if skill_resolver is None:
+        _graph_fatal(f"SUBGRAPH target_skill {phase_ast.target_skill!r} requires skill_resolver")
+    sub_root = skill_resolver.resolve_skill(phase_ast.target_skill)
     sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(
         sub_root,
         skill_resolver=skill_resolver,
@@ -703,13 +706,6 @@ def _validate_logic_update_keys(
                 f"[F-v3-actions-keys] {action_path}:{action_line} "
                 f"action wrote undeclared output key {key!r}"
             )
-
-
-def _resolve_sub_skill_path(phase_path: Path, sub_skill_ref: str) -> Path:
-    candidate = Path(sub_skill_ref)
-    if candidate.is_absolute():
-        return candidate
-    return (phase_path.parent / candidate).resolve()
 
 
 def _is_terminal_phase(phase_id: str, manifest: GraphManifest) -> bool:

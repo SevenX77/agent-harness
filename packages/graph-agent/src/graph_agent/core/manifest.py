@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from graph_agent.core.skill_resolver_protocol import SKILL_ID_PATTERN
 
 
 class GraphPhaseRef(BaseModel):
@@ -38,8 +40,15 @@ class SubagentSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
-    path: str = Field(min_length=1)
+    target_skill: str | None = Field(default=None, pattern=SKILL_ID_PATTERN)
+    path: str | None = Field(default=None, min_length=1)
     description: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _requires_target_skill_or_legacy_path(self) -> "SubagentSpec":
+        if self.target_skill is None and self.path is None:
+            raise ValueError("subagent requires target_skill")
+        return self
 
 
 class GraphManifest(BaseModel):

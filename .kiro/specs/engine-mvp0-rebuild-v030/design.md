@@ -12,81 +12,30 @@ V0.3.0 engine is organized around five contracts:
 
 ## 2. Core data models
 
-### `PhaseIOSchema`
+### Field model source of truth
 
-```python
-class PhaseIOSchema(BaseModel):
-    inputs: dict[str, Any]
-    outputs: dict[str, Any]
-```
+This design does not invent a parallel schema. Field-level contracts come from `docs/engine/skill-spec/`:
 
-Field requirements:
+- Physical layout and mode/path lock: `docs/engine/skill-spec/01-physical-layout.md:32-36`, `:71-84`.
+- GRAPH root fields and root IO: `docs/engine/skill-spec/02-graph-md-spec.md:7-12`, `:51-78`.
+- LOGIC node fields and `actions:`: `docs/engine/skill-spec/03-logic-md-spec.md:7-12`, `:24`, `:33-40`, `:58-67`.
+- SUBGRAPH node fields and `target_skill`: `docs/engine/skill-spec/04-subgraph-md-spec.md`.
+- Agent node fields and body XML tags: `docs/engine/skill-spec/05-agent-md-spec.md:7-18`, `:41-52`.
+- SkillResolver DI: `docs/engine/skill-spec/10-skill-resolver-protocol-spec.md:24-35`, `:47-75`.
 
-- `inputs`
-  - JSON Schema object
-  - required for every phase
-  - must have `type: object`
-  - `required` entries must be keys in `properties`
-- `outputs`
-  - JSON Schema object
-  - required for every phase
-  - must have `type: object`
-  - properties define allowed phase output fields
-
-### `GraphRootIOSchema`
-
-```python
-class GraphRootIOSchema(BaseModel):
-    inputs: dict[str, Any]
-    outputs: dict[str, Any]
-```
-
-Root IO is stored inline in `GRAPH.md` frontmatter. Physical `io/inputs.json` and `io/outputs.json` are deprecated and must fail compile.
+Root IO is stored inline in `GRAPH.md` frontmatter. Physical `io/inputs.json`, `io/outputs.json`, `io_inputs_ref`, and `io_outputs_ref` are hard failures, per `docs/engine/skill-spec/01-physical-layout.md:94-102`.
 
 ### `AgentNodeAST`
 
-Required fields:
-
-- `id: str`
-- `mode: Literal["agent"]`
-- `role: str`
-- `goal: str`
-- `steps: list[AgentStep]`
-- `protocols: list[AgentProtocol]`
-- `exit_contract: str`
-- `io: PhaseIOSchema`
-
-Optional fields:
-
-- `tools: list[str]`
-- `subagents: list[AgentRegistryItem]`
-- `subgraphs: list[AgentRegistryItem]`
-- `references: list[ReferenceSpec]`
-- `examples: list[ExampleSpec]`
-- `max_iterations: int`
-- `llm_role: str`
+Required and optional fields are not redefined here; use `docs/engine/skill-spec/05-agent-md-spec.md:11-18`. The body parser only accepts the flat XML tags listed in `docs/engine/skill-spec/05-agent-md-spec.md:41-52`; no `<steps>` / `<protocols>` shell is allowed.
 
 ### `LogicNodeAST`
 
-Required fields:
-
-- `id: str`
-- `mode: Literal["logic"]`
-- `actions: list[str]`
-- `io: PhaseIOSchema`
-
-Action names are one-level names resolved under `<skill_root>/actions/<name>.py`.
+Required fields are `name`, `mode: logic`, `actions`, and `io`, per `docs/engine/skill-spec/03-logic-md-spec.md:33-40`. Action names are one-level names resolved under `<skill_root>/actions/<name>.py`, per `docs/engine/skill-spec/03-logic-md-spec.md:58`. `python_callable` is not part of V0.3.0.
 
 ### `SubgraphNodeAST`
 
-Required fields:
-
-- `id: str`
-- `mode: Literal["subgraph"]`
-- `target_skill: str`
-- `io: PhaseIOSchema`
-
-Compiler resolves `target_skill`, compiles child root, and checks parent phase IO against child root IO.
+Required fields come from `docs/engine/skill-spec/04-subgraph-md-spec.md`: `mode: subgraph`, `target_skill`, and `io`. Compiler resolves `target_skill` through `SkillResolverProtocol`, compiles the child root, and checks parent phase IO against child root IO.
 
 ## 3. Normalized state shape
 
@@ -140,7 +89,7 @@ This is the T3 + T5 settlement: T5 defines `data.inputs` / `data.phase_outputs` 
 class StateMapper:
     def build_phase_input(
         self,
-        state: BlackboardState,
+        state: V030RuntimeState,
         phase_id: str,
         phase_io: PhaseIOSchema,
     ) -> PhaseInput: ...
@@ -270,15 +219,20 @@ Trace events carry only sanitized data:
 - reference reader fallback metadata
 - tool args after validation
 
-Trace must not dump full parent `BlackboardState`.
+Trace must not dump full parent runtime state. It emits StateMapper-filtered inputs/outputs and structured metadata, matching `docs/engine/tracing-and-observability/mvp0-alignment.md` and `docs/engine/skill-spec/12-compile-runtime-flow-spec.md:119-121`.
 
 ## 11. Cleanup design
 
-T11 cleanup removes dead legacy/schema 2.0 surfaces after cutover:
+T11 cleanup is a hard V0.3.0 cutover. It removes V2.1 main path and schema 2.0 surfaces after the V0.3.0 replacements are in place:
 
+- `_run_v21_skill_dict` and V2.1 dispatch references
+- V2.1 compatibility code in compiler / graph assembler / runtime state
+- `codemod/v21_migrator.py`
 - `ContextResolver`
 - context_mapping docs
 - legacy harness entry points
 - schema 2.0 parser dependencies
+- V2.1 fixtures and old line-location tests
+- `python_callable` surfaces
 
-It does not remove graph skill main path or codemod migration helpers.
+No fallback, mock resolver, migration helper, or backward-compatible V2.1 path remains in active src/tests.

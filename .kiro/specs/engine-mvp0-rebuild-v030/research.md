@@ -75,11 +75,11 @@ Research conclusion: tracing payload should be emitted at wrapper/tool/model bou
 
 ### T11 scope
 
-Cross-verification concluded that “V2.1 compatibility code” is ambiguous. Current graph skill main path is not cleanup target. Cleanup target is legacy schema 2.0 residue: old parser stubs, legacy harness state, context_mapping, and docs that advertise dead paths.
+Cross-verification concluded that PM's 2026-05-23 principle removes the ambiguity: V2.1 main path (`_run_v21_skill_dict` and related compiler / graph assembler / runtime compatibility) is part of the V0.3.0 hard-cut cleanup scope. Cleanup also covers schema 2.0 residue, old parser stubs, legacy harness state, context_mapping, fixtures, and docs that advertise dead paths.
 
 ### Compiler line-location test
 
-`test_compiler_line_locations.py` failure is tied to old AST location extraction. It should be skipped until V0.3.0 parser cutover rewrites YAML/frontmatter source spans.
+`test_compiler_line_locations.py` is tied to old V2.1 AST location extraction. It must be deleted during cutover, not skipped. V0.3.0 YAML/frontmatter source-span tests should be added with the V0.3.0 parser implementation.
 
 ### ContextResolver
 
@@ -87,13 +87,18 @@ Cross-verification concluded that “V2.1 compatibility code” is ambiguous. Cu
 
 ### Docs frontmatter
 
-Docs metadata is a separate Kiro spec. It applies to docs prose, not graph skill markdown.
+Docs metadata is not part of the engine V0.3.0 cutover. The separate `.kiro/specs/docs-frontmatter-schema/` pseudo-spec is removed from this workstream.
 
 ## 4. Open items
 
-The following were intentionally not settled here:
+Open Items: none. All audit items were finalized on 2026-05-23.
 
-- PR strategy conflict involving Studio #50 and engine cutover.
-- Q2.1 rename scope E all-change decision.
+## 5. Finalized 2026-05-23
 
-They require PM direction before task updates.
+- T11 scope: hard cut V2.1 main path, codemod, schema 2.0 parser stub, V2.1 fixtures, context_mapping, and `python_callable`; no backward compatibility.
+- #14 line-location test: delete `packages/graph-agent/tests/core/test_compiler_line_locations.py`; no `@pytest.mark.skip` defer.
+- #28 context_mapping: delete full chain, including `ContextResolver`, harness entry points, validators, builtin md-patch / md_to_json dependency path, fixtures, and docs references.
+- #29 docs frontmatter: remove `.kiro/specs/docs-frontmatter-schema/`; it is not an engine MVP0 blocker.
+- #2 PR strategy: choose single atomic PR for engine src/tests plus Studio backend resolver/import, Studio frontend Assets Panel SUBGRAPH category, and Tauri folder picker. Splitting would require fallback or produce broken main, both against PM principle.
+- Q2.1: do not expand body tags and do not rename `python_callable`; remove `python_callable` and use LOGIC `actions:` from `docs/engine/skill-spec/03-logic-md-spec.md`.
+- 4580dde cleanup docs: rewrite stale “protect V2.1 main path”, “keep codemod”, “defer line-location”, “split PR”, and “docs-frontmatter-schema” conclusions.

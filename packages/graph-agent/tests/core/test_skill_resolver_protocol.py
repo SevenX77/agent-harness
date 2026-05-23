@@ -9,7 +9,11 @@ from graph_agent.core import (
     resolve_skill_root,
     validate_skill_id,
 )
+from graph_agent.core.loader import SkillLoader
 from tests.conftest import InMemorySkillResolver
+
+_FIXTURES = Path(__file__).parents[1] / "fixtures"
+_REGISTRY_FIXTURE = _FIXTURES / "v030_skill_registry"
 
 
 def _write_graph_root(root: Path) -> None:
@@ -67,3 +71,45 @@ def test_resolve_skill_root_unregistered_has_v3_code() -> None:
 
     assert exc_info.value.code == "[F-v3-skill-not-registered]"
     assert exc_info.value.skill_id == "missing_child"
+
+
+def test_v030_parent_agent_subagent_target_skill_compiles() -> None:
+    compiled = SkillLoader().compile_skill(
+        _REGISTRY_FIXTURE / "parent",
+        skill_resolver=InMemorySkillResolver(
+            {"echo_agent": _REGISTRY_FIXTURE / "registry" / "echo_agent"}
+        ),
+    )
+
+    subagent = compiled.subagents_by_phase["main"][0]
+    tools = {tool.name: tool for tool in compiled.tools.for_phase("main")}
+
+    assert subagent.name == "echo_expert"
+    assert subagent.target_skill == "echo_agent"
+    assert subagent.root == _REGISTRY_FIXTURE / "registry" / "echo_agent"
+    assert "call_subagent_echo_expert" in tools
+
+
+def test_v030_parent_agent_registry_miss_fails() -> None:
+    with pytest.raises(SkillResolutionError) as exc_info:
+        SkillLoader().compile_skill(
+            _REGISTRY_FIXTURE / "parent",
+            skill_resolver=InMemorySkillResolver({}),
+        )
+
+    assert exc_info.value.code == "[F-v3-skill-not-registered]"
+    assert exc_info.value.skill_id == "echo_agent"
+
+
+def test_v030_parent_agent_invalid_registry_path_fails(tmp_path: Path) -> None:
+    not_a_skill = tmp_path / "not_a_skill"
+    not_a_skill.mkdir()
+
+    with pytest.raises(SkillResolutionError) as exc_info:
+        SkillLoader().compile_skill(
+            _REGISTRY_FIXTURE / "parent",
+            skill_resolver=InMemorySkillResolver({"echo_agent": not_a_skill}),
+        )
+
+    assert exc_info.value.code == "[F-v3-resolver-path-invalid]"
+    assert exc_info.value.skill_id == "echo_agent"

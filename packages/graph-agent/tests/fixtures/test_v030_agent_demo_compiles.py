@@ -18,7 +18,7 @@ class InMemorySkillResolver:
 
 
 def test_v030_agent_demo_fixture_compiles_and_renders_template() -> None:
-    resolver = InMemorySkillResolver({"demo.echo_agent": FIXTURE / "registry" / "echo_agent"})
+    resolver = InMemorySkillResolver({"echo_agent": FIXTURE / "registry" / "echo_agent"})
 
     compiled = SkillLoader().compile_skill(FIXTURE, skill_resolver=resolver)
     ast = compiled.nodes[0].ast
@@ -31,7 +31,7 @@ def test_v030_agent_demo_fixture_compiles_and_renders_template() -> None:
     assert ast.protocols[0].id == "P1"
     assert ast.references[0].id == "R1"
     assert {example.id for example in ast.examples} == {"E1", "E2"}
-    assert compiled.subagents_by_phase["segment"][0].target_skill == "demo.echo_agent"
+    assert compiled.subagents_by_phase["segment"][0].target_skill == "echo_agent"
 
     prompt = apply_v030_cognitive_template(
         phase_name="segment",

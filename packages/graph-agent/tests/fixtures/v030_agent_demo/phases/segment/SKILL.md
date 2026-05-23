@@ -22,7 +22,7 @@ phase_config:
     - finish_task
   subagents:
     - name: echo_expert
-      target_skill: demo.echo_agent
+      target_skill: echo_agent
       description: Echoes a short review note for smoke coverage.
   subgraphs: []
   references:

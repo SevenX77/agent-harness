@@ -215,3 +215,16 @@ class ResolvedSkill:
 | tracing-and-observability | [Execution Runtime 调用点绑定](../tracing-and-observability/mvp0-alignment.md#3-execution-runtime-调用点绑定) | resolver error codes / target ids | EXCEPTION event payload |
 | Studio backend | import / registry service | Protocol implementation | settings registry, folder validation |
 | skill-spec/10 | [Protocol Interface](../skill-spec/10-skill-resolver-protocol-spec.md#protocol-interface-定义) | implementation plan | contract truth source |
+
+## 与当前源码的差异
+
+本文件描述的是目标收敛方向；当前源码还保留了一些兼容路径和错误码差异：
+
+| 本文件目标态 | 当前源码事实 |
+|---|---|
+| 所有跨 skill 寻址都通过 `target_skill` 和 resolver | 当前 subagent 仍兼容 legacy `path` 相对路径。 |
+| 无 resolver 时含 child skill 的图统一报 resolver missing | 当前只有声明了 `target_skill` 才必须传 resolver；legacy `path` 不需要 resolver。 |
+| `resolve_skill()` 目标签名是返回 `Path` | 当前协议允许返回 `str | Path`，helper 再规整成 Path。 |
+| skill id 非法错误码归一为 resolver skill id invalid | 当前非法 id 使用 `[F-v3-invalid-skill-id]`。 |
+| `_resolve_subagent_root` 相对路径扫描退役 | 当前源码仍保留并用于 legacy `path`。 |
+| SUBGRAPH 全部通过 `target_skill` 解析 | 当前 SUBGRAPH runtime 仍主要使用 `sub_skill_ref` 路径解析。 |

@@ -64,13 +64,12 @@ def test_create_openai_model_uses_environment_defaults(monkeypatch: pytest.Monke
     monkeypatch.setenv("GRAPH_AGENT_MODEL", "env-model")
     monkeypatch.setenv("GRAPH_AGENT_API_KEY", "env-key")
     monkeypatch.setenv("GRAPH_AGENT_BASE_URL", "https://env.example/v1")
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     model = factory.create_chat_model()
 
     assert isinstance(model, _FakeChatModel)
     assert model.kwargs["model"] == "env-model"
-    assert model.kwargs["api_key"].get_secret_value() == "env-key" if hasattr(model.kwargs["api_key"], "get_secret_value") else model.kwargs["api_key"] == "env-key"
+    assert model.kwargs["api_key"] == "env-key"
     assert model.kwargs["base_url"] == "https://env.example/v1"
 
 

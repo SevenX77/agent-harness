@@ -21,7 +21,10 @@ def schema_properties(schema: dict[str, Any] | None) -> set[str]:
     return {key for key in properties if isinstance(key, str)}
 
 
-def filter_runtime_inputs(raw_inputs: dict[str, Any], schema: dict[str, Any] | None) -> dict[str, Any]:
+def filter_runtime_inputs(
+    raw_inputs: dict[str, Any],
+    schema: dict[str, Any] | None,
+) -> dict[str, Any]:
     """Filter raw graph inputs to the declared inline input schema keys."""
 
     keys = schema_properties(schema)
@@ -72,7 +75,10 @@ class PhaseWrapper:
 
     mapper: StateMapper
 
-    def wrap(self, node: Callable[[BlackboardState], dict[str, Any]]) -> Callable[[BlackboardState], dict[str, Any]]:
+    def wrap(
+        self,
+        node: Callable[[BlackboardState], dict[str, Any]],
+    ) -> Callable[[BlackboardState], dict[str, Any]]:
         def _wrapped(state: BlackboardState) -> dict[str, Any]:
             try:
                 result = node(self.mapper.build_phase_input(state))
@@ -80,9 +86,7 @@ class PhaseWrapper:
             except GraphAgentFatalError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                raise GraphAgentFatalError(
-                    f"[F-v3-runtime-state-mapping-failed] {exc}"
-                ) from exc
+                raise GraphAgentFatalError(f"[F-v3-runtime-state-mapping-failed] {exc}") from exc
 
         return _wrapped
 

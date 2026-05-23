@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.graph_assembler import assemble_graph
 from graph_agent.core.loader import SkillLoader
@@ -98,7 +97,7 @@ class FakeAgentChatModel:
         self.messages_seen: list[list[object]] = []
         self.bound_tool_names: list[str] = []
 
-    def bind_tools(self, tools: list[object]) -> "FakeAgentChatModel":
+    def bind_tools(self, tools: list[object]) -> FakeAgentChatModel:
         self.bound_tool_names = [getattr(tool, "name", "") for tool in tools]
         return self
 

@@ -281,7 +281,9 @@ def test_subagent_tools_are_injected_into_phase_tool_registry(tmp_path: Path) ->
         ),
     )
 
-    tools = {tool.name: tool for tool in SkillLoader().compile_skill(tmp_path).tools.for_phase("main")}
+    tools = {
+        tool.name: tool for tool in SkillLoader().compile_skill(tmp_path).tools.for_phase("main")
+    }
 
     assert sorted(tools) == ["call_subagent_beat_extractor", "call_subagent_producer_strategy"]
     beat_tool = tools["call_subagent_beat_extractor"]

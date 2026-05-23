@@ -28,7 +28,6 @@ from graph_agent.core.manifest import (
     GraphManifest,
     GraphPhaseRef,
     LogicNodeAST,
-    PhaseIOSchema,
     SkillNodeAST,
     SubgraphNodeAST,
 )
@@ -1141,13 +1140,20 @@ def _normalize_skill_node_frontmatter(path: Path, data: dict[str, Any]) -> dict[
     merged = dict(data)
     if "tools" in phase_config:
         merged.setdefault("tools", phase_config["tools"])
-    for key in ("subagents", "subgraphs", "references", "examples", "io", "max_iterations", "llm_role"):
+    phase_config_keys = (
+        "tools",
+        "subagents",
+        "subgraphs",
+        "references",
+        "examples",
+        "io",
+        "max_iterations",
+        "llm_role",
+    )
+    for key in phase_config_keys[1:]:
         if key in phase_config:
             merged[key] = phase_config[key]
-    extra_keys = sorted(
-        set(phase_config)
-        - {"tools", "subagents", "subgraphs", "references", "examples", "io", "max_iterations", "llm_role"}
-    )
+    extra_keys = sorted(set(phase_config) - set(phase_config_keys))
     if extra_keys:
         _fatal(
             path,
@@ -1190,7 +1196,11 @@ def _extract_agent_steps(path: Path, body: str) -> list[dict[str, str]]:
         step_id = attrs.get("id")
         name = attrs.get("name")
         if not step_id or not name:
-            _fatal(path, _xml_line(body, match.start()), "[F-v3-agent-step-invalid] step requires id and name")
+            _fatal(
+                path,
+                _xml_line(body, match.start()),
+                "[F-v3-agent-step-invalid] step requires id and name",
+            )
         steps.append({"id": step_id, "name": name, "content": match.group(2).strip()})
     return steps
 
@@ -1202,7 +1212,11 @@ def _extract_agent_protocols(path: Path, body: str) -> list[dict[str, str]]:
         attrs = _parse_attrs(match.group(1))
         protocol_id = attrs.get("id")
         if not protocol_id:
-            _fatal(path, _xml_line(body, match.start()), "[F-v3-agent-protocol-invalid] protocol requires id")
+            _fatal(
+                path,
+                _xml_line(body, match.start()),
+                "[F-v3-agent-protocol-invalid] protocol requires id",
+            )
         protocols.append({"id": protocol_id, "content": match.group(2).strip()})
     return protocols
 
@@ -1210,7 +1224,11 @@ def _extract_agent_protocols(path: Path, body: str) -> list[dict[str, str]]:
 def _validate_agent_mentions(path: Path, ast: AgentNodeAST, body: str) -> None:
     broken = first_broken_mention(body)
     if broken is not None:
-        _fatal(path, _xml_line(body, broken.start()), "[F-v3-mention-syntax-invalid] malformed @-mention")
+        _fatal(
+            path,
+            _xml_line(body, broken.start()),
+            "[F-v3-mention-syntax-invalid] malformed @-mention",
+        )
     domains = {
         "subagent": {item.name for item in ast.subagents},
         "subgraph": {item.name for item in ast.subgraphs},

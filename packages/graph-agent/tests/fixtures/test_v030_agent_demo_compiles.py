@@ -42,7 +42,9 @@ def test_v030_agent_demo_fixture_compiles_and_renders_template() -> None:
         exit_contract=ast.exit_contract,
         output_schema=ast.io.outputs if ast.io is not None else None,
         inline_examples=[
-            example.content for example in ast.examples if example.type == "inline" and example.content
+            example.content
+            for example in ast.examples
+            if example.type == "inline" and example.content
         ],
         document_examples=[
             {"id": example.id, "summary": example.summary or ""}

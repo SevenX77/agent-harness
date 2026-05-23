@@ -144,7 +144,12 @@ def test_subagent_invoke_uses_isolated_messages_and_parent_run_id() -> None:
 
     result = _invoke_subagent_once_t23(
         runtime,
-        {"data": {"parent": "kept"}, "flow": {"parent_flow": True}, "messages": ["dirty"], "run_id": "run-1"},
+        {
+            "data": {"parent": "kept"},
+            "flow": {"parent_flow": True},
+            "messages": ["dirty"],
+            "run_id": "run-1",
+        },
         {"scene_text": "hello"},
     )
 
@@ -240,7 +245,9 @@ class _FailingGraph(_RecordingGraph):
         return super().invoke(state, config=config)
 
 
-def test_subagent_aggregator_preserves_item_failure_and_trace(caplog: pytest.LogCaptureFixture) -> None:
+def test_subagent_aggregator_preserves_item_failure_and_trace(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     graph = _FailingGraph()
     runtime = _SubagentRuntime(subagent=_Subagent(), graph=graph)
 
@@ -263,7 +270,10 @@ def test_subagent_aggregator_preserves_item_failure_and_trace(caplog: pytest.Log
 
 
 def test_subagent_retry_limit_logs_and_fails(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.ERROR), pytest.raises(GraphAgentFatalError, match="retry_count=11"):
+    with (
+        caplog.at_level(logging.ERROR),
+        pytest.raises(GraphAgentFatalError, match="retry_count=11"),
+    ):
         _invoke_subagent_tool_t21(
             tool_name="call_subagent_beat",
             subagent=_Subagent(),

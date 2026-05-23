@@ -147,12 +147,17 @@ class ReaderSandboxState:
 
     skill_id: str
     phase_id: str
-    root: Path
+    references: list[dict[str, str]]
+    root: Path | None = None
     timeout_s: int = 60
 
     def to_blackboard(self) -> BlackboardState:
         return {
-            "data": {"skill_id": self.skill_id, "phase_id": self.phase_id},
+            "data": {
+                "skill_id": self.skill_id,
+                "phase_id": self.phase_id,
+                "references": deepcopy(self.references),
+            },
             "flow": {"timeout_s": self.timeout_s},
             "messages": [],
             "run_id": None,

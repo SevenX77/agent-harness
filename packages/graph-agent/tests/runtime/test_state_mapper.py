@@ -72,11 +72,20 @@ def test_phase_wrapper_maps_input_and_output() -> None:
 
 
 def test_reader_sandbox_state_does_not_inherit_parent_blackboard(tmp_path: Path) -> None:
-    sandbox = ReaderSandboxState(skill_id="demo.skill", phase_id="main", root=tmp_path)
+    sandbox = ReaderSandboxState(
+        skill_id="demo.skill",
+        phase_id="main",
+        root=tmp_path,
+        references=[{"id": "R1", "path": "refs/r1.md", "summary": "Rules"}],
+    )
 
     state = sandbox.to_blackboard()
 
-    assert state["data"] == {"skill_id": "demo.skill", "phase_id": "main"}
+    assert state["data"] == {
+        "skill_id": "demo.skill",
+        "phase_id": "main",
+        "references": [{"id": "R1", "path": "refs/r1.md", "summary": "Rules"}],
+    }
     assert state["messages"] == []
     assert state["flow"]["timeout_s"] == 60
     assert state["run_id"] is None

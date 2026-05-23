@@ -38,7 +38,8 @@ docs/
 │   ├── skill-resolution/{baseline,mvp0-alignment}.md
 │   ├── execution-runtime/{baseline,mvp0-alignment}.md
 │   ├── state-and-io-contract/{baseline,mvp0-alignment}.md
-│   └── tracing-and-observability/{baseline,mvp0-alignment}.md
+│   ├── tracing-and-observability/{baseline,mvp0-alignment}.md
+│   └── graph-agent-gateway/{baseline,mvp0-alignment,INDEX}.md
 ├── studio/
 │   ├── system-level/
 │   │   ├── ux-workflow/{baseline,mvp0-alignment}.md
@@ -73,6 +74,7 @@ docs/
 | [execution-runtime](./engine/execution-runtime/) | Graph 执行装配调度、主入口生命周期 `run_skill`、节点重试、subagent / `call_subgraph` 动态工具注入 (audit A4/A5) |
 | [state-and-io-contract](./engine/state-and-io-contract/) | `BlackboardState` 规约 (data/flow/messages)、Reducer 并发冲突控制、阶段级 IO 隔离、Runtime Input 漏斗 (audit A1/A2/A3/A6) |
 | [tracing-and-observability](./engine/tracing-and-observability/) | Predict 内部与 LangGraph 节点拦截、生命周期事件发出、结构化 Trace 日志 (audit P1-4) |
+| [graph-agent-gateway](./engine/graph-agent-gateway/) | V0.3.0 新增, 替代旧 llm-routing 命名. `llm_role -> BaseChatModel` 解析、跨 provider fallback chain 调度、bind_tools 适配、LLMFallbackEvent emit. ModelResolverProtocol DI (跟 SkillResolverProtocol 风格对齐, V0.3.0 改造 GW-1) |
 
 ### Studio system-level (6 份系统级, 横切多 feature, 全走双时态)
 

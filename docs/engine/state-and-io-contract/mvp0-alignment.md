@@ -230,3 +230,18 @@ execution-runtime 调用 Agent、LOGIC、SUBGRAPH、reference reader 时必须�
 ### 3. 与 tracing-and-observability 的耦合
 
 Trace 应记录 canonical root inputs、每个 phase_input、phase_output、child graph canonical input、reference reader fallback。记录的是沙盒后的结构, 不是全量父黑板。观测侧规划见 [tracing-and-observability mvp0 alignment](../tracing-and-observability/mvp0-alignment.md#后端功能)。
+
+## 与当前源码的差异
+
+本文件描述的是目标收敛方向；当前源码还没有完全达到这些语义。按当前实现核对，主要差异如下：
+
+| 本文件目标态 | 当前源码事实 |
+|---|---|
+| 入口应按根级 `io.inputs` 做输入漏斗 | 当前入口把用户输入直接放进 `data`。 |
+| 使用 smart reducer，顺序覆盖允许、并行同 key 冲突 | 当前仍是浅层合并，任何已有顶层 key 都冲突。 |
+| `io_inputs_ref` / `io_outputs_ref` 和物理 IO 文件应废弃 | 当前仍支持通过这些 ref 读取物理 JSON schema；inline `io` 存在时才优先用 inline schema。 |
+| `data.inputs`、`data.phase_outputs`、`data.scratch` 是规范化区域 | 当前 `data` 仍是扁平业务 dict，没有固定分成这三个专区。 |
+| phase output 统一写入 `phase_outputs[phase_id]` | 当前 Agent 写 `data[phase_id]`，LOGIC 和 SUBGRAPH 通常写顶层 delta。 |
+| child graph 的 `data` 只来自显式输入 | 当前 subagent child graph 会拿父 phase-local data，再叠加显式输入；SUBGRAPH 也用当前 phase-local data 启动。 |
+| LOGIC phase wrapper 也按 phase-level IO 切片 | 当前 LOGIC AST 没有 phase-level `io` 字段，通常不会进入 `StateMapper`。 |
+| reference reader 有完整 reader input/output、WARN fallback 语义 | 当前 state 模块里能看到的是隔离状态对象；完整 fallback 流程不能按本模块理解成已经全部落地。 |

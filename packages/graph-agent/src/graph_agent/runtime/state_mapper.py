@@ -8,6 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
+from jsonschema.validators import Draft202012Validator
+
 from graph_agent.core.exceptions import GraphAgentFatalError
 from graph_agent.runtime.state import BlackboardState
 
@@ -24,13 +27,30 @@ def schema_properties(schema: dict[str, Any] | None) -> set[str]:
 def filter_runtime_inputs(
     raw_inputs: dict[str, Any],
     schema: dict[str, Any] | None,
+    *,
+    strict_unknown: bool = True,
 ) -> dict[str, Any]:
     """Filter raw graph inputs to the declared inline input schema keys."""
 
     keys = schema_properties(schema)
+    if strict_unknown and keys:
+        unknown = sorted(key for key in raw_inputs if key not in keys)
+        if unknown:
+            raise GraphAgentFatalError(
+                "[F-v3-runtime-state-mapping-failed] undeclared runtime inputs: "
+                + ", ".join(unknown)
+            )
+    canonical = {key: deepcopy(raw_inputs[key]) for key in keys if key in raw_inputs}
     if not keys:
-        return dict(raw_inputs)
-    return {key: raw_inputs[key] for key in keys if key in raw_inputs}
+        canonical = deepcopy(raw_inputs)
+    if schema is not None:
+        try:
+            Draft202012Validator(schema).validate(canonical)
+        except JsonSchemaValidationError as exc:
+            raise GraphAgentFatalError(
+                f"[F-v3-runtime-state-mapping-failed] runtime inputs invalid: {exc.message}"
+            ) from exc
+    return canonical
 
 
 @dataclass(frozen=True)
@@ -42,7 +62,11 @@ class StateMapper:
 
     def build_phase_input(self, state: BlackboardState) -> BlackboardState:
         phase_state: BlackboardState = {
-            "data": filter_runtime_inputs(dict(state.get("data", {})), self.input_schema),
+            "data": filter_runtime_inputs(
+                dict(state.get("data", {})),
+                self.input_schema,
+                strict_unknown=False,
+            ),
             "flow": deepcopy(state.get("flow", {})),
             "messages": list(state.get("messages", [])),
             "run_id": state.get("run_id"),

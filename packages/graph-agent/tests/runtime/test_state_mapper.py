@@ -12,14 +12,36 @@ from graph_agent.runtime.state_mapper import (
 )
 
 
-def test_filter_runtime_inputs_uses_declared_schema_properties() -> None:
+def test_filter_runtime_inputs_uses_declared_schema_properties_in_lenient_mode() -> None:
     schema = {
         "type": "object",
         "properties": {"topic": {"type": "string"}},
         "required": ["topic"],
     }
 
-    assert filter_runtime_inputs({"topic": "A", "extra": True}, schema) == {"topic": "A"}
+    assert filter_runtime_inputs(
+        {"topic": "A", "extra": True},
+        schema,
+        strict_unknown=False,
+    ) == {"topic": "A"}
+
+
+def test_filter_runtime_inputs_rejects_unknown_inputs_by_default() -> None:
+    schema = {"type": "object", "properties": {"topic": {"type": "string"}}}
+
+    with pytest.raises(GraphAgentFatalError, match="undeclared runtime inputs"):
+        filter_runtime_inputs({"topic": "A", "extra": True}, schema)
+
+
+def test_filter_runtime_inputs_validates_required_schema() -> None:
+    schema = {
+        "type": "object",
+        "properties": {"topic": {"type": "string"}},
+        "required": ["topic"],
+    }
+
+    with pytest.raises(GraphAgentFatalError, match="runtime inputs invalid"):
+        filter_runtime_inputs({}, schema)
 
 
 def test_state_mapper_rejects_undeclared_output_keys() -> None:

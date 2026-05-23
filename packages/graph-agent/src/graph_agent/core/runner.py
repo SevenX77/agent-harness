@@ -474,15 +474,17 @@ def _run_v21_skill_dict(
     del callbacks
     from graph_agent.core.compiler import compile_skill
     from graph_agent.core.graph_assembler import assemble_graph
+    from graph_agent.runtime.state_mapper import filter_runtime_inputs
 
     t0 = time.time()
     chat_model = None if mock_llm is _NO_MOCK_LLM else mock_llm
     compiled = compile_skill(skill_root, skill_resolver=skill_resolver)
     graph = assemble_graph(compiled, chat_model=chat_model, skill_resolver=skill_resolver).graph
     run_id = thread_id or str(uuid.uuid4())
+    canonical_inputs = filter_runtime_inputs(dict(inputs), compiled.manifest.io.inputs)
     result = graph.invoke(
         {
-            "data": dict(inputs),
+            "data": canonical_inputs,
             "flow": {},
             "messages": [],
             "run_id": run_id,

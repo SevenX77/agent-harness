@@ -175,6 +175,30 @@ class AmbiguityLoggedEvent(_EventBase):
     related_protocol_ids: list[str] = Field(default_factory=list)
 
 
+BuiltinFallbackReason = Literal[
+    "remote_timeout",
+    "remote_error",
+    "local_error",
+    "config_missing",
+    "invalid_output",
+]
+
+
+class BuiltinSubagentTracePayload(BaseModel):
+    """Structured V0.3.0 payload shared by builtin subagent trace events."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    trigger_stage: Literal["assembly"] = "assembly"
+    reference_ids: list[str] = Field(default_factory=list)
+    used_reference_ids: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    fallback_reason: BuiltinFallbackReason | None = None
+    fallback_strategy: str | None = None
+    excerpt_token_limit: int | None = None
+    warning_message: str | None = None
+
+
 class BuiltinSubagentEnterEvent(_EventBase):
     """V0.3.0 builtin subagent invocation start."""
 
@@ -182,7 +206,7 @@ class BuiltinSubagentEnterEvent(_EventBase):
     run_id: str | None = None
     phase_name: str
     builtin_name: str
-    payload: dict[str, Any] = Field(default_factory=dict)
+    payload: BuiltinSubagentTracePayload = Field(default_factory=BuiltinSubagentTracePayload)
 
 
 class BuiltinSubagentExitEvent(_EventBase):
@@ -192,7 +216,7 @@ class BuiltinSubagentExitEvent(_EventBase):
     run_id: str | None = None
     phase_name: str
     builtin_name: str
-    payload: dict[str, Any] = Field(default_factory=dict)
+    payload: BuiltinSubagentTracePayload = Field(default_factory=BuiltinSubagentTracePayload)
 
 
 class BuiltinSubagentFallbackEvent(_EventBase):
@@ -202,16 +226,11 @@ class BuiltinSubagentFallbackEvent(_EventBase):
     run_id: str | None = None
     phase_name: str
     builtin_name: str
-    fallback_reason: Literal[
-        "remote_timeout",
-        "remote_error",
-        "config_missing",
-        "invalid_output",
-        "local_io_error",
-    ]
+    fallback_reason: BuiltinFallbackReason
     fallback_strategy: str
     excerpt_token_limit: int | None = None
-    warning: str = ""
+    warning_message: str = ""
+    payload: BuiltinSubagentTracePayload = Field(default_factory=BuiltinSubagentTracePayload)
 
 
 class PromptCapturedEvent(_EventBase):
@@ -500,6 +519,8 @@ __all__ = [
     "CompactionEvent",
     "AmbiguityReportEvent",
     "AmbiguityLoggedEvent",
+    "BuiltinFallbackReason",
+    "BuiltinSubagentTracePayload",
     "BuiltinSubagentEnterEvent",
     "BuiltinSubagentExitEvent",
     "BuiltinSubagentFallbackEvent",

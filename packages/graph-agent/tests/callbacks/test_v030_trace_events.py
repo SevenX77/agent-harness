@@ -60,7 +60,7 @@ def test_builtin_subagent_trace_events_round_trip_through_callback_union() -> No
             fallback_reason="config_missing",
             fallback_strategy="raw_excerpt",
             excerpt_token_limit=3000,
-            warning="[F-v3-reference-reader-failed] missing config",
+            warning_message="[F-v3-reference-reader-failed] missing config",
         ),
     ]:
         parsed = adapter.validate_python(event.model_dump())
@@ -75,6 +75,7 @@ def test_tracing_callback_writes_v030_typed_events(tmp_path: Path) -> None:
             builtin_name="reference_reader",
             fallback_reason="remote_timeout",
             fallback_strategy="raw_excerpt",
+            excerpt_token_limit=3000,
         )
     )
 
@@ -82,6 +83,7 @@ def test_tracing_callback_writes_v030_typed_events(tmp_path: Path) -> None:
     payload = json.loads(lines[0])
     assert payload["event_type"] == "builtin_subagent_fallback"
     assert payload["fallback_reason"] == "remote_timeout"
+    assert payload["payload"]["fallback_reason"] is None
 
 
 def test_reference_reader_emits_enter_and_exit_events(tmp_path: Path) -> None:
@@ -97,10 +99,10 @@ def test_reference_reader_emits_enter_and_exit_events(tmp_path: Path) -> None:
     ]
     enter, exit_event = collector.events
     assert isinstance(enter, BuiltinSubagentEnterEvent)
-    assert enter.payload["trigger_stage"] == "assembly"
-    assert enter.payload["reference_ids"] == ["R1"]
+    assert enter.payload.trigger_stage == "assembly"
+    assert enter.payload.reference_ids == ["R1"]
     assert isinstance(exit_event, BuiltinSubagentExitEvent)
-    assert exit_event.payload["used_reference_ids"] == ["R1"]
+    assert exit_event.payload.used_reference_ids == ["R1"]
 
 
 def test_reference_reader_emits_fallback_event(
@@ -126,6 +128,9 @@ def test_reference_reader_emits_fallback_event(
     assert isinstance(fallback, BuiltinSubagentFallbackEvent)
     assert fallback.fallback_reason == "invalid_output"
     assert fallback.excerpt_token_limit == 3000
+    assert fallback.payload.fallback_reason == "invalid_output"
+    assert fallback.payload.fallback_strategy == "raw_excerpt"
+    assert fallback.payload.warning_message is not None
 
 
 def _reference_reader_fixture(

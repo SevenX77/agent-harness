@@ -17,6 +17,7 @@ from graph_agent.callbacks.events import (
     BuiltinSubagentEnterEvent,
     BuiltinSubagentExitEvent,
     BuiltinSubagentFallbackEvent,
+    BuiltinSubagentTracePayload,
     ToolCallEvent,
 )
 from graph_agent.cognitive.ambiguity import ambiguity_logged_event_from_record, log_ambiguity
@@ -70,9 +71,9 @@ logger = logging.getLogger(__name__)
 ReferenceReaderFallbackReason = Literal[
     "remote_timeout",
     "remote_error",
+    "local_error",
     "config_missing",
     "invalid_output",
-    "local_io_error",
 ]
 
 
@@ -533,10 +534,7 @@ def _reference_reader_markdown(
         phase_id=phase_doc.phase_name,
         references=reference_items,
     )
-    trace_payload: dict[str, Any] = {
-        "trigger_stage": "assembly",
-        "reference_ids": reference_ids,
-    }
+    trace_payload = BuiltinSubagentTracePayload(reference_ids=reference_ids)
     _emit_callback_event(
         callbacks,
         BuiltinSubagentEnterEvent(
@@ -545,7 +543,6 @@ def _reference_reader_markdown(
             payload=trace_payload,
         ),
     )
-    started_at = time.monotonic()
     try:
         output = output_from_any(_run_reference_reader_wrapped(payload))
         _emit_callback_event(
@@ -553,26 +550,35 @@ def _reference_reader_markdown(
             BuiltinSubagentExitEvent(
                 phase_name=phase_doc.phase_name,
                 builtin_name="reference_reader",
-                payload={
-                    **trace_payload,
-                    "used_reference_ids": output.used_reference_ids,
-                    "warnings": output.warnings,
-                    "duration_ms": round((time.monotonic() - started_at) * 1000, 2),
-                },
+                payload=BuiltinSubagentTracePayload(
+                    reference_ids=reference_ids,
+                    used_reference_ids=output.used_reference_ids,
+                    warnings=output.warnings,
+                ),
             ),
         )
         return output.markdown
     except Exception as exc:  # noqa: BLE001
         logger.warning("[F-v3-reference-reader-failed] %s", exc)
+        fallback_reason = _reference_reader_fallback_reason(exc)
+        fallback_strategy = "raw_excerpt"
+        warning_message = f"[F-v3-reference-reader-failed] {exc}"
         _emit_callback_event(
             callbacks,
             BuiltinSubagentFallbackEvent(
                 phase_name=phase_doc.phase_name,
                 builtin_name="reference_reader",
-                fallback_reason=_reference_reader_fallback_reason(exc),
-                fallback_strategy="raw_excerpt",
+                fallback_reason=fallback_reason,
+                fallback_strategy=fallback_strategy,
                 excerpt_token_limit=3000,
-                warning=f"[F-v3-reference-reader-failed] {exc}",
+                warning_message=warning_message,
+                payload=BuiltinSubagentTracePayload(
+                    reference_ids=reference_ids,
+                    fallback_reason=fallback_reason,
+                    fallback_strategy=fallback_strategy,
+                    excerpt_token_limit=3000,
+                    warning_message=warning_message,
+                ),
             ),
         )
         return fallback_reference_markdown(reference_items)
@@ -590,7 +596,7 @@ def _reference_reader_fallback_reason(
         return "invalid_output"
     if "remote" in message:
         return "remote_error"
-    return "local_io_error"
+    return "local_error"
 
 
 def _run_reference_reader_wrapped(payload: ReferenceReaderInput) -> dict[str, Any]:

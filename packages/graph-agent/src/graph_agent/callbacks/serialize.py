@@ -9,7 +9,7 @@ to have stuffed into the context.
 Type-dispatch table comes from Gemini's Q4 review:
 
     BaseMessage      →  {"_type": "BaseMessage", "role": ..., "content": ...}
-    BaseModel        →  obj.model_dump()
+    BaseModel        →  obj.model_dump(mode="json")
     Path             →  str(path)
     datetime         →  obj.isoformat()
     UUID             →  str(uuid)

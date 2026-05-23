@@ -51,6 +51,7 @@ from graph_agent.callbacks.events import (
     ValidationFailEvent,
     WorkingMemoryUpdateEvent,
 )
+from graph_agent.callbacks.serialize import to_jsonable_dict
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +109,7 @@ class TracingCallback(Callback):
         if self._typed_jsonl_path is None:
             return
         with self._typed_jsonl_path.open("a", encoding="utf-8") as f:
-            f.write(event.model_dump_json() + "\n")
+            f.write(json.dumps(to_jsonable_dict(event), ensure_ascii=False) + "\n")
 
     def on_event(self, event: CallbackEvent) -> None:
         """New-style sink: log the typed event to tracing.jsonl.

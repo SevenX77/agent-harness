@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from graph_agent.cognitive.md2json import Md2JsonResult
 from graph_agent.cognitive.md_patch import MdPatchClient
 
-FATAL_CODE = "F-v21-md2json"
+FATAL_CODE = "F-v3-md2json"
 
 
 class FinishTaskInput(BaseModel):

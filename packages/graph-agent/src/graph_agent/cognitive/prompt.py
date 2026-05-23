@@ -120,3 +120,94 @@ def apply_cognitive_template(
 - business_data_md 会经 md_to_json 校验。如果校验失败，你会收到错误反馈消息——按反馈修正后重新调用 finish_task
 </critical_reminders>
 """.strip()
+
+
+def apply_v030_cognitive_template(
+    *,
+    phase_name: str,
+    role: str,
+    goal: str,
+    steps: list[dict[str, str]],
+    protocols: list[dict[str, str]],
+    exit_contract: str,
+    output_schema: dict[str, Any] | None = None,
+    knowledge_base: str = "",
+    inline_examples: list[str] | None = None,
+    document_examples: list[dict[str, str]] | None = None,
+    role_prefix: str = "",
+) -> str:
+    """Compose the V0.3.0 seven-slot cognitive template for Agent phases."""
+
+    role_prefix_section = (
+        f"<llm_role_prefix>\n{role_prefix.strip()}\n</llm_role_prefix>\n"
+        if role_prefix and role_prefix.strip()
+        else ""
+    )
+    steps_md = "\n".join(
+        f"- [{item.get('id', '')}] {item.get('name', '')}: {item.get('content', '')}".strip()
+        for item in steps
+    ) or "无显式步骤"
+    protocols_md = "\n".join(
+        f"- [protocol:{item.get('id', '')}] {item.get('content', '')}".strip()
+        for item in protocols
+    ) or "无显式协议"
+    examples_md = "\n\n".join(inline_examples or []) or "无内联示例"
+    document_examples_md = "\n".join(
+        f"- {item.get('id')}: {item.get('summary', '')}" for item in document_examples or []
+    ) or "无扩展案例"
+    schema_md = ""
+    if output_schema is not None:
+        schema_md = "\n\n<output_schema>\n" + str(output_schema) + "\n</output_schema>"
+
+    return f"""
+<role>
+{role}
+</role>
+
+{role_prefix_section}
+
+<goal>
+{goal}
+</goal>
+
+<thinking_style>
+- 先确认目标、输入、输出契约，再行动
+- 区分事实、推断和待验证假设
+- 每次调用工具前说明目的，调用后检查结果是否满足下一步需要
+</thinking_style>
+
+<knowledge_base>
+{knowledge_base or "无预读取参考资料"}
+</knowledge_base>
+
+<steps>
+{steps_md}
+</steps>
+
+<examples>
+{examples_md}
+
+<document_examples>
+{document_examples_md}
+</document_examples>
+</examples>
+
+<ambiguity_feedback>
+输入不足、规则冲突或存在多种合理解释时，调用 log_ambiguity 记录决策和原因，然后继续执行。
+</ambiguity_feedback>
+
+<protocol_citation>
+判断必须引用协议 id；没有对应协议时明确写出“未找到明确协议条款”。
+{protocols_md}
+</protocol_citation>
+
+<critical_reminders>
+- finish_task 前必须检查输出是否满足 output_schema
+- 工具结果与预期不一致时，先修正再 finish
+- 最终 business_data_md 必须能转换为声明的结构化输出
+</critical_reminders>
+
+<exit_contract>
+{exit_contract}{schema_md}
+</exit_contract>
+""".strip()

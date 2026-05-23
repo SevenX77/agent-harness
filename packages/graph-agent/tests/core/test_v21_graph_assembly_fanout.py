@@ -27,5 +27,5 @@ def test_canvas_fanout_fixture_conflicting_key_is_fatal(tmp_path: Path) -> None:
     )
     graph = assemble_graph(compile_skill(root, cache=False)).graph
 
-    with pytest.raises(GraphAgentFatalError, match=r"\[F-v21-state-conflict\].*key='a_out'"):
+    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-state-conflict\].*key='a_out'"):
         graph.invoke({"data": {}, "flow": {}, "messages": [], "run_id": "fanout-conflict"})

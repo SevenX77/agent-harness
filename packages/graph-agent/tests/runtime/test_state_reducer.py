@@ -22,5 +22,5 @@ def test_shallow_merge_both_none() -> None:
 
 
 def test_shallow_merge_conflict_raises_fatal() -> None:
-    with pytest.raises(GraphAgentFatalError, match=r"\[F-v21-state-conflict\].*key='a'"):
+    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-state-conflict\].*key='a'"):
         shallow_dict_merge({"a": 1}, {"a": 2})

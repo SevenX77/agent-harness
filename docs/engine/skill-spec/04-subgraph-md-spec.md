@@ -1,0 +1,99 @@
+# SUBGRAPH.md Spec
+
+本文定义 `SUBGRAPH.md` 的 mode 类型断言、`target_skill` 寻址与父子图 IO 强校验。它连接 [SkillResolverProtocol](./10-skill-resolver-protocol-spec.md#protocol-interface-定义)、[Root IO Schema](./02-graph-md-spec.md#根-io-契约-root-io-schema) 和运行期 subgraph 调度。
+
+## Mode 声明与类型断言
+
+`SUBGRAPH.md` 表示当前 phase 委托另一个 graph skill 执行。它不是内联复制子图, 也不是相对路径 include; V0.3.0 的跨 skill 寻址统一走 registry + DI。
+
+```yaml
+---
+name: producer_review
+mode: subgraph
+target_skill: producer_reviewer
+io:
+  inputs:
+    type: object
+    required: [segments]
+    properties:
+      segments: {type: array, items: {type: object}}
+  outputs:
+    type: object
+    required: [review_score]
+    properties:
+      review_score: {type: number}
+---
+```
+
+| 字段 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `name` | string | 是 | 无 | 正则 `^[a-z][a-z0-9_-]*$` | `[F-v3-subgraph-name-invalid]` | Trace 与 Studio 展示名 |
+| `mode` | string literal | 是 | 无 | 必须精确为 `"subgraph"`; 文件名必须是 `SUBGRAPH.md` | `[F-v3-subgraph-mode-invalid]` / `[F-v3-graph-mode-path-mismatch]` | Loader 类型断言, 防止错装为 Agent/Logic |
+| `target_skill` | string | 是 | 无 | 正则 `^[a-z][a-z0-9_-]*$`; 必须可被 SkillResolverProtocol 解析 | `[F-v3-subgraph-target-skill-invalid]` / `[F-v3-skill-not-registered]` | 指向被调用的 graph skill |
+| `io.inputs` | JSON Schema object | 是 | 无 | 顶层 `type: object`; 字段名必须与子图 `GRAPH.md io.inputs.properties` 1:1 相等 | `[F-v3-subgraph-io-schema-invalid]` / `[F-v3-subgraph-io-mismatch]` | 声明父图传给子图入口的字段 |
+| `io.outputs` | JSON Schema object | 是 | 无 | 顶层 `type: object`; 字段名必须与子图 `GRAPH.md io.outputs.properties` 1:1 相等 | `[F-v3-subgraph-io-schema-invalid]` / `[F-v3-subgraph-io-mismatch]` | 声明子图返回父图黑板的字段 |
+
+Loader 拦截规则:
+
+1. 扫描 `phases/<id>/` 时发现 `SUBGRAPH.md`, 节点类型锁定为 `subgraph`。
+2. 解析 frontmatter 后检查 `mode === "subgraph"`。
+3. 若同目录还存在 `LOGIC.md` 或 `SKILL.md`, 先由物理布局报 `[F-v3-graph-phase-mode-ambiguous]`。
+4. 若文件名与 mode 不一致, 报 `[F-v3-graph-mode-path-mismatch]`。
+
+[物理布局校验](./01-physical-layout.md#mode路径双向校验-mode-path-cross-validation) 与 [错误码速查表](./11-error-code-spec.md#subgraph-domain) 覆盖 loader 拦截规则。
+
+## target_skill 寻址规则
+
+`target_skill` 只描述逻辑 skill id, 不描述磁盘路径。Engine 编译或装配子图时必须调用 DI 注入的单方法接口:
+
+```python
+resolved_root: Path = skill_resolver.resolve_skill(target_skill)
+```
+
+寻址流程:
+
+1. Loader 读到 `target_skill: producer_reviewer`。
+2. Engine 调 `SkillResolverProtocol.resolve_skill("producer_reviewer")`。
+3. resolver 返回子 skill 根目录 Path。
+4. Engine 在该目录读取 `GRAPH.md`, 并按完整 graph_skill 编译流程递归编译。
+5. resolver 抛 `SkillResolutionError` 或返回不存在路径时, 归一为 `[F-v3-skill-not-registered]`。
+
+禁止行为:
+
+| 禁止写法 | 原因 | 错误码 |
+|---|---|---|
+| `target_skill: ./subskills/foo` | 绕过 Studio registry, 破坏跨 skill 导入流程 | `[F-v3-subgraph-target-skill-invalid]` |
+| `target_skill_path` | V0.3.0 不暴露路径字段 | `[F-v3-subgraph-schema-unknown-field]` |
+| `resolve_resource()` | round 2 已决议 SkillResolverProtocol 只有 `resolve_skill()` | `[F-v3-resolver-interface-invalid]` |
+
+`target_skill` 必须通过 [SkillResolverProtocol Interface](./10-skill-resolver-protocol-spec.md#protocol-interface-定义) 寻址。Studio 的 subgraph asset panel 可以在同一失败码上渲染红色未注册入口并触发导入流程。
+
+## IO 严格 1:1 映射校验 (Strict Mapping)
+
+父图 `SUBGRAPH.md io` 与子图 `GRAPH.md io` 必须做字段名 1:1 相等校验。这里的“相等”指 properties key set 完全一致, 不只是 required 字段覆盖。
+
+```text
+parent phase SUBGRAPH.md io.inputs.properties == child GRAPH.md io.inputs.properties
+parent phase SUBGRAPH.md io.outputs.properties == child GRAPH.md io.outputs.properties
+```
+
+| 校验项 | 规则 | 失败错误码 |
+|---|---|---|
+| 输入字段集合 | 父 `io.inputs.properties.keys()` 与子 `GRAPH.md io.inputs.properties.keys()` 完全相等 | `[F-v3-subgraph-io-mismatch]` |
+| 输出字段集合 | 父 `io.outputs.properties.keys()` 与子 `GRAPH.md io.outputs.properties.keys()` 完全相等 | `[F-v3-subgraph-io-mismatch]` |
+| required 集合 | 父子同名 schema 的 `required` 集合必须相等 | `[F-v3-subgraph-io-mismatch]` |
+| 字段 schema | 同名字段 schema 必须结构等价; description 差异不影响运行但 WARN | `[F-v3-subgraph-io-schema-incompatible]` |
+
+为什么是严格 1:1: subgraph 调用像函数调用。父图 phase 的 `io.inputs` 是实参形状, 子图根 `io.inputs` 是形参形状; 如果允许自动改名或部分映射, 错误会延迟到运行期黑板缺字段, Debug 成本高。V0.3.0 先用强约束换可定位性。
+
+失败报告必须包含:
+
+- `parent_phase_id`
+- `target_skill`
+- `direction`: `inputs` 或 `outputs`
+- `parent_fields`
+- `child_fields`
+- `missing_in_parent`
+- `missing_in_child`
+
+本节与 [State and IO Contract MVP0 Alignment](../state-and-io-contract/mvp0-alignment.md) 和 [编译期校验流](./12-compile-runtime-flow-spec.md#编译期校验流-compile-time-workflow) 对齐。

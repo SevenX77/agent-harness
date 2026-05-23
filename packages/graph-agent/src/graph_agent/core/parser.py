@@ -171,7 +171,7 @@ def locate_line_for_pydantic_loc(root: Any, loc: Sequence[Any]) -> int | None:
 
 
 def _fatal(path: Path, line: int, message: str) -> NoReturn:
-    raise SkillLoadError(f"[F-v21-route] {path}:{line} {message}")
+    raise SkillLoadError(f"[F-v3-route] {path}:{line} {message}")
 
 
 def parse_markdown_parts(path: Path | str) -> tuple[dict[str, Any], str, dict[str, int]]:

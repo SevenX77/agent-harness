@@ -9,7 +9,7 @@ linked_code_paths:
   - apps/studio/frontend/src/lib/tauri.ts
 linked_specs:
   - .kiro/specs/_archive/studio-uikit-redesign/
-last_updated: 2026-05-22
+last_updated: 2026-05-19
 ---
 
 # 前端模块化与 UI 规范 (Frontend Modularity & UI Spec)
@@ -70,46 +70,6 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 
 ### 2.4 圆角原则
 为保持极客硬朗感，应用圆角不得超过 `rounded-md` (0.375rem)，杜绝大圆角的“消费端”圆滑感。视觉一致性约束包含全局组件（包括浮动弹窗和侧边栏），严禁引入过度活泼的大圆角元素。
-
-### 2.5 表单与页面宽度
-- Settings 类表单必须优先使用本地 shadcn `Field` 组件组织字段（`FieldSet` / `FieldGroup` / `Field` / `FieldLabel` / `FieldDescription`），不要在业务组件里手写 label-description-control 三段式布局。
-- Settings 表单默认遵循 API Keys 页的交互：字段变更实时保存并显示保存状态；除非是明确的事务型提交，不要放独立 `Save` 按钮。
-- 输入框的 `value` 必须同步当前实际值；placeholder 只做空状态提示，不能承载当前路径、密钥、配置值等真实数据。不要在输入框下方重复显示同一个字段值。
-- 页面内容区需要设置响应式最大宽度，避免表单、文本和卡片在超宽窗口里被横向拉得过长；数据密集型列表可按具体信息密度单独放宽。
-
-### 2.6 桌面工具布局与滚动区域
-- Settings 内部的标题、说明和主要内容必须作为一个整体进入对应内容区；不要把 header 和 main 做成割裂的同级结构，导致标题不随内容滚动或视觉归属不清。
-- 主内容和侧栏内容应明确分工：主区域可以独立滚动，侧栏可以 sticky/fixed 并在自身内部滚动。不要让页面级滚动、主区滚动和侧栏滚动互相抢空间。
-- 数据密集型侧栏（例如模型库、资源列表、引用列表）应避免外层再套装饰性 Card；侧栏本身是布局区域，只有单个 repeated item、弹窗或真正独立的工具面板才使用 Card。
-- `ScrollArea` 不应让 scrollbar 占用内容宽度；需要隐藏 scrollbar 时使用本地 `ScrollArea` wrapper 的 slot selector，且必须验证内容宽度没有被挤压。
-- 任何固定宽度或最小宽度都必须有响应式约束。窄面板下卡片、ring、badge、按钮和长文本不能横向溢出，也不能被父级裁掉关键反馈。
-
-### 2.7 卡片、选中态与即时反馈
-- 交互卡片统一使用语义 surface：`bg-card`、`rounded-md`、`ring-inset`、`ring-1 ring-foreground/10` 等既有 token/variant。不要为单个页面创造另一套 card 外观。
-- Hover 反馈优先使用背景色变化（如 `hover:bg-muted/...`），不要用 hover 边框高亮制造跳动或与选中态冲突。
-- 选中态必须保留明确高亮（例如 `data-[selected=true]` + selected ring/background），且反馈要在 pointer down/click 后即时发生。长列表中如果 React state 更新造成体感延迟，应采用局部 ref/DOM attribute 或等价轻量方案，但不能牺牲可访问状态。
-- 选中后只展开用户需要的信息；不要在卡片里加入额外复杂详情区，除非产品需求明确要求。
-- 图标、按钮和徽章要使用 lucide + 本地 `Button`/`Badge` wrapper；文本型按钮只用于清晰命令，不用于图标已有行业惯例的动作。
-
-### 2.8 输入框、搜索与行内动作
-- 带图标、清空、复制、显示/隐藏等行内动作的输入框，优先使用本地 `InputGroup` / `InputGroupButton` / `InputGroupAddon`。不要用绝对定位按钮硬盖在 `Input` 上；这种做法容易被 input 拦截点击，也更难保证窄宽度布局。
-- 搜索框应支持清空操作：有 query 时显示清空按钮，清空后恢复列表并把焦点放回搜索输入框。
-- 搜索结果数量应在标题附近展示，让用户知道当前 filter 后剩余多少项。
-- 搜索匹配在数据密集列表中应尽量宽容：支持名称、分组、provider/vendor 等关键字段，并避免 `-`、`.`、空格等符号成为强制精确匹配门槛。
-
-### 2.9 数据密集列表与 Badge Overflow
-- 数据密集列表中的标签必须尽量可读。不要把每个 Badge 单独截成 `Ope...` 这类不可识别文本。
-- 多标签行的通用模式是：展示能稳定放下的完整标签，末尾用 `+N` overflow badge 表示剩余项；选中或展开后再展示完整标签集合。
-- Badge 文本使用真实 label，不使用临时缩写。模型、provider、vendor 等实体名必须展示准确名称。
-- 长模型名、路径和 id 使用 `overflow-wrap:anywhere` / `break-words` 等方式在卡片内换行；不要让文本把卡片撑破。
-- 如果列表来自外部探测或后端缓存，UI 不应写死样例数据。模型库类 UI 应展示已测试并持久化的数据源，按 vendor/provider 等真实字段归类。
-- 多 provider 对同一模型命名不一致时，前端只能做明确可解释的 canonicalization（例如移除 OpenRouter 的 `vendor/model` 展示前缀）；模糊合并规则必须保守，避免误把不同模型合并。
-
-### 2.10 前端验证要求
-- 修改 `apps/studio/frontend` 的用户可见 UI 后，完成前必须亲自启动或连接本地页面，实际打开、点击、输入相关流程，并检查桌面/窄面板等关键宽度下是否穿模、截断或布局错位。单测和 typecheck 不能替代这一步。
-- 必须覆盖被改动的主成功路径和明显的取消/清空/错误/空状态。对于搜索、选择、复制、显示/隐藏、展开/折叠等交互，要逐一点击验证。
-- 手动验证应包含窄宽度视口。至少检查页面级、侧栏级、卡片级没有横向溢出；选中 ring、hover/active、badge overflow 和按钮点击目标不能被裁剪或被其它元素拦截。
-- 如果变更涉及 Tauri 文件系统能力（目录选择、Reveal、终端、外部编辑器等），必须在 Tauri 环境或等价的 Tauri bridge 路径下验证，不能只用普通浏览器 fallback 得出结论。
 
 ## 3. GraphCanvas 画布样式覆写
 原生的 `@xyflow/react` 深色主题仍带有较重的网页感，在 `GraphCanvas` 组件和全局 `index.css` 中进行了覆写：

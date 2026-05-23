@@ -1,6 +1,6 @@
-"""Pydantic v2.1 manifest and phase-node AST contracts.
+"""Pydantic V0.3.0 manifest and phase-node AST contracts.
 
-V2.1 is a hard cut from schema 2.0.  The root ``GRAPH.md`` is the graph
+V0.3.0 is a hard cut from schema 2.1.  The root ``GRAPH.md`` is the graph
 manifest and never becomes a runtime node.  Phase nodes live under
 ``phases/*/{LOGIC,SUBGRAPH,SKILL}.md`` and are routed by physical file
 name plus the YAML ``mode`` discriminator.
@@ -105,7 +105,7 @@ class SubagentSpec(BaseModel):
 
 
 class GraphManifest(BaseModel):
-    """Root V2.1 graph manifest parsed from ``GRAPH.md``."""
+    """Root V0.3.0 graph manifest parsed from ``GRAPH.md``."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -120,7 +120,7 @@ class GraphManifest(BaseModel):
 
 
 class _BaseNodeAST(BaseModel):
-    """Fields shared by all V2.1 phase node AST variants."""
+    """Fields shared by all V0.3.0 phase node AST variants."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -180,24 +180,14 @@ class AgentNodeAST(_BaseNodeAST):
         return self
 
 
-class SkillNodeAST(_BaseNodeAST):
-    """LLM ReAct phase node parsed from ``SKILL.md``."""
-
-    mode: Literal["skill"]
-    system_prompt: str = Field(min_length=1)
-    exit_contract: str = Field(min_length=1)
-    tools: list[str] = Field(default_factory=list)
-    subagents: list[SubagentSpec] = Field(default_factory=list)
-
-
 PhaseAST = Annotated[
-    LogicNodeAST | SubgraphNodeAST | AgentNodeAST | SkillNodeAST,
+    LogicNodeAST | SubgraphNodeAST | AgentNodeAST,
     Field(discriminator="mode"),
 ]
 
 
-# Transitional public name for package imports.  This is not the old
-# schema-2.0 discriminated union; it aliases the V2.1 root manifest only.
+# Transitional public name for package imports.  This aliases the V0.3.0 root
+# manifest only.
 SkillManifest = GraphManifest
 
 
@@ -215,7 +205,6 @@ __all__ = [
     "PhaseIOSchema",
     "ReferenceSpec",
     "SkillManifest",
-    "SkillNodeAST",
     "SubagentSpec",
     "SubgraphNodeAST",
 ]

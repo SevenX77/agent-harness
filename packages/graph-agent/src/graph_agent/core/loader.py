@@ -28,7 +28,6 @@ from graph_agent.core.manifest import (
     GraphManifest,
     GraphPhaseRef,
     LogicNodeAST,
-    SkillNodeAST,
     SubgraphNodeAST,
 )
 from graph_agent.core.mentions import first_broken_mention, scan_mentions
@@ -43,13 +42,13 @@ from graph_agent.core.subagents import build_subagent_input_model, build_subagen
 
 logger = logging.getLogger(__name__)
 
-RouteKind = Literal["graph", "logic", "subgraph", "skill"]
-PhaseAST = LogicNodeAST | SubgraphNodeAST | AgentNodeAST | SkillNodeAST
+RouteKind = Literal["graph", "logic", "subgraph", "agent"]
+PhaseAST = LogicNodeAST | SubgraphNodeAST | AgentNodeAST
 
 _PHASE_FILE_TO_MODE: dict[str, str] = {
     "LOGIC.md": "logic",
     "SUBGRAPH.md": "subgraph",
-    "SKILL.md": "skill",
+    "SKILL.md": "agent",
 }
 
 
@@ -338,7 +337,7 @@ def _discover_actions_and_tools(
                 _actions_fatal(tools_dir, 1, "tools/ is only allowed for SKILL phases")
             if actions_dir.exists():
                 actions_by_phase[phase_id] = _load_action_dir(actions_dir, phase_id)
-        elif mode == "skill":
+        elif mode == "agent":
             if actions_dir.exists():
                 _actions_fatal(actions_dir, 1, "actions/ is only allowed for LOGIC phases")
             if tools_dir.exists():
@@ -361,7 +360,7 @@ def _compile_subagent_metadata(
 ) -> dict[str, list[CompiledSubagent]]:
     subagents_by_phase: dict[str, list[CompiledSubagent]] = {}
     for doc in phase_docs:
-        if not isinstance(doc.ast, (AgentNodeAST, SkillNodeAST)) or not doc.ast.subagents:
+        if not isinstance(doc.ast, AgentNodeAST) or not doc.ast.subagents:
             continue
         phase_subagents: list[CompiledSubagent] = []
         for spec in doc.ast.subagents:
@@ -1053,7 +1052,7 @@ def _build_phase_document(
     data.setdefault("name", phase_name)
     yaml_mode = str(frontmatter.get("mode") or "").strip()
     is_agent = path.name == "SKILL.md" and yaml_mode == "agent"
-    if mode == "skill" or is_agent:
+    if is_agent:
         data = _normalize_skill_node_frontmatter(path, data)
 
     try:
@@ -1068,9 +1067,7 @@ def _build_phase_document(
             ast = AgentNodeAST.model_validate(data)
             _validate_agent_mentions(path, ast, body)
         else:
-            data.setdefault("system_prompt", blocks.get("system_prompt"))
-            data.setdefault("exit_contract", blocks.get("exit_contract"))
-            ast = SkillNodeAST.model_validate(data)
+            _fatal(path, 1, f"unsupported phase mode {mode!r}")
     except ValidationError as exc:
         _fatal(path, 1, f"{path.name} AST validation failed: {exc}")
 

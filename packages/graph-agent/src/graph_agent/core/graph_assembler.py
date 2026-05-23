@@ -33,7 +33,6 @@ from graph_agent.core.manifest import (
     AgentNodeAST,
     GraphManifest,
     LogicNodeAST,
-    SkillNodeAST,
     SubgraphNodeAST,
 )
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
@@ -43,11 +42,9 @@ from graph_agent.core.subagents import (
     current_subagent_depth,
     validate_subagent_tool_args,
 )
-from graph_agent.runtime.exit_contract import inject_exit_contract
 from graph_agent.runtime.state import BlackboardState
 from graph_agent.runtime.state_mapper import PhaseWrapper, StateMapper
 
-MAX_REACT_TURNS = 8
 logger = logging.getLogger(__name__)
 
 
@@ -139,7 +136,7 @@ def _build_phase_node(
                 skill_resolver,
             ),
         )
-    if isinstance(ast, (AgentNodeAST, SkillNodeAST)):
+    if isinstance(ast, AgentNodeAST):
         return _wrap_phase_runtime_node(
             ast,
             _build_skill_node(
@@ -231,7 +228,7 @@ def _build_subgraph_node(
 def _build_skill_node(
     phase_id: str,
     phase_doc: PhaseDocument,
-    phase_ast: AgentNodeAST | SkillNodeAST,
+    phase_ast: AgentNodeAST,
     compiled: CompiledSkill,
     chat_model: Any,
     max_patch_attempts: int,
@@ -304,15 +301,9 @@ def _build_skill_node(
             chat_model.bind_tools(all_tools) if hasattr(chat_model, "bind_tools") else chat_model
         )
 
-        max_turns = (
-            phase_ast.max_iterations if isinstance(phase_ast, AgentNodeAST) else MAX_REACT_TURNS
-        )
+        max_turns = phase_ast.max_iterations
         for _ in range(max_turns):
-            prompt_messages = (
-                messages
-                if isinstance(phase_ast, AgentNodeAST)
-                else inject_exit_contract(messages, phase_ast.exit_contract)
-            )
+            prompt_messages = messages
             response = model.invoke(prompt_messages)
             messages = [*prompt_messages, response]
             tool_calls = list(getattr(response, "tool_calls", []) or [])
@@ -381,11 +372,9 @@ def _subagent_tool_map(
 
 def _agent_system_prompt(
     phase_id: str,
-    phase_ast: AgentNodeAST | SkillNodeAST,
+    phase_ast: AgentNodeAST,
     compiled: CompiledSkill,
 ) -> str:
-    if not isinstance(phase_ast, AgentNodeAST):
-        return phase_ast.system_prompt
     output_schema = (
         phase_ast.io.outputs
         if phase_ast.io is not None

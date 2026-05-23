@@ -50,7 +50,7 @@ Q-R-P0-1 选择“外层 Studio 注入”。决策文档说明 Studio 后端负�
 
 ### Why
 
-MVP0 决策 Q-R-ERROR 要求运行时错误带 code / metadata, 便于 Studio 解析, 见 `docs/engine/MVP0-DECISIONS-EXPLAINED-2026-05-21.md:93`. 当前 `_generate()` 在所有 provider 都失败后拼接字符串并抛 `RuntimeError`, 位置是 `packages/graph-agent/src/graph_agent/models/gateway_chat_model.py:189`. 兼容异常 `AllProvidersFailedError` 只有 `tier` 和 `errors`, 位置是 `packages/graph-agent/src/graph_agent/core/exceptions.py:256`.
+MVP0 决策 Q-R-ERROR 要求运行时错误带 code / metadata, 便于 Studio 解析, 见 `docs/engine/MVP0-DECISIONS-EXPLAINED-2026-05-21.md:93`. 当前 `_generate()` 在所有 provider 都失败后拼接字符串并抛 `RuntimeError`, 位置是 `packages/graph-agent/src/graph_agent/models/gateway_chat_model.py:190`. 兼容异常 `AllProvidersFailedError` 接收 `tier`, `errors` 以及可选 `context` (kwarg), 位置是 `packages/graph-agent/src/graph_agent/core/exceptions.py:256`.
 
 ### 范围
 
@@ -64,7 +64,7 @@ MVP0 决策 Q-R-ERROR 要求运行时错误带 code / metadata, 便于 Studio �
 | 字段 | src 依据 | 干什么 | 为何校验 | 目标判定逻辑 | 错误码 |
 |---|---|---|---|---|---|
 | `code` | error spec payload 规则 `skill-spec/11-error-code-spec.md:29` | 机器可读错误码 | UI 不应截字符串识别模型用尽 | 固定 `[F-v3-gateway-all-providers-failed]` | `[F-v3-gateway-all-providers-failed]` |
-| `role_name` / `tier` | `gateway_chat_model.py:190`, `exceptions.py:261` | 说明哪个角色耗尽候选 | Studio 需要定位配置项 | 来自 `GatewayChatModel.role_name` 或 resolver effective role | `[F-v3-gateway-all-providers-failed]` |
+| `role_name` / `tier` | `gateway_chat_model.py:191`, `exceptions.py:261` | 说明哪个角色耗尽候选 | Studio 需要定位配置项 | 来自 `GatewayChatModel.role_name` 或 resolver effective role | `[F-v3-gateway-all-providers-failed]` |
 | `phase_name` | `gateway_chat_model.py:63`, `:274` | 说明哪个 phase 调用失败 | Canvas / trace 需要标红 phase | 来自 model `phase_name`; 无则 `<gateway>` | `[F-v3-gateway-all-providers-failed]` |
 | `failed_provider_codes` | `gateway_chat_model.py:127` | 失败候选 provider/model 列表 | UI 需要展示 fallback 链和全部失败原因 | 从 `resolved_role.call_chain` 与捕获失败构造, 格式建议 `provider/model` | `[F-v3-gateway-all-providers-failed]` |
 | `last_error_chain` | `gateway_chat_model.py:175` | 每个候选的异常类型和消息 | 诊断需要保留 root cause | 捕获 `_RUNTIME_FAILOVER_EXCEPTIONS` 时追加结构化 item | `[F-v3-gateway-all-providers-failed]` |
@@ -121,3 +121,17 @@ Q-T-1 选择抽公共 tracing 底座, 主线和 Predict 共享, 见 `docs/engine
 4. fallback 事件通过统一 tracing callback 底座产生, Predict mock 与真实 provider fallback 在 trace 中可区分。
 
 cutover 后, baseline 中描述的 singleton 和纯文本失败只作为 V2.1 历史现状保留, 不再是 Engine 运行路径。
+
+## 与当前源码的差异
+
+本文件描述的是目标收敛方向；当前 gateway 仍有这些未对齐点：
+
+| 本文件目标态 | 当前源码事实 |
+|---|---|
+| 生产路径通过外部 `ModelResolverProtocol` 强 DI 注入 | 当前仍存在 `get_model_resolver()` singleton，graph skill runtime 也没有生产级 `model_resolver` 参数。 |
+| role 未配置时结构化报 `[F-v3-gateway-role-not-configured]` | 当前 role 未命中会退到 minimal factory。 |
+| `model_override` 未命中时结构化失败 | 当前会 warning 后回退到 role-based resolution。 |
+| 全 provider 失败抛结构化 gateway exception | 当前 `GatewayChatModel` 最终抛普通 `RuntimeError` 文本。 |
+| fallback 事件统一走 tracing 底座 | 当前 gateway 直接遍历 callbacks 调 `on_event(LLMFallbackEvent)`。 |
+| Predict mock 与真实 provider fallback 在统一 trace 中严格区分 | 当前 Predict gateway 复用 gateway surface，但 graph skill dict runner 还没有把 callbacks 接入主线。 |
+| baseline/singleton 只保留历史说明，不再是运行路径 | 当前 singleton 仍是可用代码路径。 |

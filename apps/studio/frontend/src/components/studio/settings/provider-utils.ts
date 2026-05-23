@@ -1,4 +1,4 @@
-import type { CredentialsState, ProviderType } from "../../../api/llm"
+import type { CredentialProviderState, CredentialsState, ProviderTestResult, ProviderType } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
 import type { ProviderDraft } from "./types"
 
@@ -19,6 +19,12 @@ const notableProviderKeys = [
   "jiekou",
 ]
 
+type ProviderTestParams = {
+  api_key?: string | null
+  base_url?: string | null
+  provider_type?: ProviderType | null
+}
+
 /** Build a draft list from the server `CredentialsState` snapshot. */
 export function draftsFromCredentials(credentials: CredentialsState): ProviderDraft[] {
   return credentials.providers.map((provider) => ({
@@ -35,9 +41,10 @@ function newProviderId(): string {
   return (globalThis.crypto?.randomUUID?.() ?? Date.now() + "-" + Math.random().toString(36).slice(2)).toString()
 }
 
-export function inferProviderType(providerCode: string): ProviderType {
-  if (providerCode === "anthropic") return "anthropic_compatible"
-  if (providerCode === "gemini") return "google_genai"
+export function inferProviderType(providerCode: string, baseUrl = "", name = ""): ProviderType {
+  const haystack = `${providerCode} ${name} ${baseUrl}`.toLowerCase()
+  if (haystack.includes("anthropic") || haystack.includes("claude")) return "anthropic_compatible"
+  if (haystack.includes("gemini") || haystack.includes("google")) return "google_genai"
   return "openai_compatible"
 }
 
@@ -53,7 +60,7 @@ export function draftFromAddProviderSubmission(
   return {
     id,
     name: data.name,
-    provider_type: "openai_compatible",
+    provider_type: inferProviderType(data.providerCode, data.baseUrl, data.name),
     base_url: data.baseUrl,
     api_key: data.apiKey,
     isTesting: false,
@@ -97,6 +104,47 @@ export function shouldShowManualModelPanel(
     persisted?.last_test_status === "ok" ||
     (persisted?.available_models?.length ?? 0) > 0
   )
+}
+
+export function providerTestParamsMatch(
+  left: ProviderTestParams,
+  right: ProviderTestParams,
+): boolean {
+  return (
+    (left.api_key ?? "") === (right.api_key ?? "") &&
+    (left.base_url ?? "") === (right.base_url ?? "") &&
+    (left.provider_type ?? null) === (right.provider_type ?? null)
+  )
+}
+
+export function providerTestParamsFingerprint(params: ProviderTestParams): string {
+  return fnv1a32(JSON.stringify({
+    api_key: params.api_key ?? "",
+    base_url: params.base_url ?? "",
+    provider_type: params.provider_type ?? null,
+  }))
+}
+
+export function providerCachedTestResult(
+  persisted: CredentialProviderState | null,
+  params: ProviderTestParams,
+): ProviderTestResult | null {
+  if (!persisted) return null
+  const fingerprint = providerTestParamsFingerprint(params)
+  const results = persisted.test_results ?? []
+  for (let index = results.length - 1; index >= 0; index -= 1) {
+    if (results[index].params_fingerprint === fingerprint) return results[index]
+  }
+  return null
+}
+
+function fnv1a32(value: string): string {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash.toString(16).padStart(8, "0")
 }
 
 function isOfficialProviderDraft(draft: ProviderDraft, providerCode: string): boolean {

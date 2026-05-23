@@ -44,6 +44,29 @@ def test_migrate_roles_payload_rewrites_provider_type_in_place() -> None:
     assert migrated["providers"]["OC_CL"]["type"] == "anthropic_compatible"
 
 
+def test_migrate_roles_payload_moves_role_temperature_to_each_model() -> None:
+    payload = {
+        "roles": {
+            "balanced": {
+                "temperature": 0.4,
+                "model_fallback": True,
+                "active_model": "CL46T",
+                "models": {
+                    "CL46T": {"providers": ["anthropic"]},
+                    "DS32R": {"providers": ["deepseek"], "temperature": 0.2},
+                },
+            },
+        },
+    }
+
+    migrated = migrate_roles_payload(payload)
+
+    role = migrated["roles"]["balanced"]
+    assert "temperature" not in role
+    assert role["models"]["CL46T"]["temperature"] == 0.4
+    assert role["models"]["DS32R"]["temperature"] == 0.2
+
+
 def test_migrate_roles_payload_handles_missing_or_malformed_keys() -> None:
     # No providers key at all.
     assert migrate_roles_payload({}) == {}

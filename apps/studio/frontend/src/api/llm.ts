@@ -25,6 +25,18 @@ export interface ModelInfo {
   capabilities?: Record<string, unknown>
 }
 
+export interface ProviderTestResult {
+  params_fingerprint: string
+  base_url: string
+  provider_type?: ProviderType | null
+  last_test_status: TestStatus
+  last_test_at?: string
+  last_test_message?: string
+  last_error_code?: string
+  available_models?: ModelInfo[]
+  available_sdks?: string[]
+}
+
 /**
  * Server-side credential entry as returned by GET /api/llm/credentials.
  *
@@ -45,6 +57,7 @@ export interface CredentialProviderState {
   last_error_code?: string
   available_models?: ModelInfo[]
   available_sdks?: string[]
+  test_results?: ProviderTestResult[]
 }
 
 export interface CredentialsState {
@@ -117,10 +130,11 @@ export interface ProviderModelTestResponse {
 
 export interface RoleModelEntry {
   providers: string[]
+  temperature?: number | null
+  max_tokens?: number | null
 }
 
 export interface RoleEntry {
-  temperature: number | null
   model_fallback: boolean
   active_model: string
   models: Record<string, RoleModelEntry>

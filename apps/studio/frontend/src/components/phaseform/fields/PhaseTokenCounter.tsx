@@ -8,7 +8,7 @@ export function estimatedTokens(text: string): number {
 
 export function PhaseTokenCounter({ text }: PhaseTokenCounterProps) {
   return (
-    <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
+    <div className="text-xs font-medium text-muted-foreground">
       Characters: {text.length.toLocaleString()} / ~{estimatedTokens(text).toLocaleString()} tokens
     </div>
   )

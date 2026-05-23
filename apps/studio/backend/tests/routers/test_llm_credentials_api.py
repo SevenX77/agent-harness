@@ -358,7 +358,7 @@ def test_put_credentials_preserves_test_outcome_fields(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Test outcome fields written by POST must survive a subsequent PUT."""
+    """Test outcome fields written by POST survive PUT when test params match."""
     monkeypatch.setenv("HOME", str(tmp_path))
 
     client.put(
@@ -383,16 +383,79 @@ def test_put_credentials_preserves_test_outcome_fields(
         "/api/llm/credentials",
         json={
             "providers": [
-                {"id": "OC_CL", "name": "Claude", "api_key": "k", "base_url": "https://updated"}
+                {"id": "OC_CL", "name": "Claude renamed", "api_key": "", "base_url": ""}
             ]
         },
     )
 
     assert response.status_code == 200
     provider = response.json()["providers"][0]
+    assert provider["name"] == "Claude renamed"
+    assert provider["api_key"] == "k"
     assert provider["last_test_status"] == "ok"
     assert provider["last_test_at"] == "2026-05-18T12:00:00+00:00"
     assert _model_ids(provider["available_models"]) == ["claude-opus-4-1"]
+
+
+def test_put_credentials_resets_test_outcome_when_test_params_change(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    client.put(
+        "/api/llm/credentials",
+        json={
+            "providers": [
+                {
+                    "id": "OC_CL",
+                    "name": "Claude",
+                    "api_key": "k",
+                    "base_url": "",
+                    "provider_type": "anthropic_compatible",
+                }
+            ]
+        },
+    )
+
+    from app.services.llm_credentials import _persist_test_outcome
+
+    _persist_test_outcome(
+        "OC_CL",
+        last_test_status="ok",
+        last_test_at="2026-05-18T12:00:00+00:00",
+        last_test_message="Connected.",
+        last_error_code="",
+        available_sdks=["anthropic_compatible"],
+        available_models=[_model("claude-opus-4-1")],
+    )
+
+    response = client.put(
+        "/api/llm/credentials",
+        json={
+            "providers": [
+                {
+                    "id": "OC_CL",
+                    "name": "Claude",
+                    "api_key": "",
+                    "base_url": "https://api.anthropic.test",
+                    "provider_type": "anthropic_compatible",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    provider = response.json()["providers"][0]
+    assert provider["api_key"] == "k"
+    assert provider["base_url"] == "https://api.anthropic.test"
+    assert provider["last_test_status"] == "untested"
+    assert provider["last_test_at"] == ""
+    assert provider["last_test_message"] == ""
+    assert provider["last_error_code"] == ""
+    assert provider["available_sdks"] == []
+    assert provider["available_models"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -523,6 +586,7 @@ def test_provider_test_persists_string_probe_results_to_credentials(
                     "id": "openai-default",
                     "name": "OpenAI",
                     "api_key": "sk",
+                    "base_url": "https://api.openai.com",
                     "provider_type": "openai_compatible",
                 }
             ]
@@ -556,6 +620,85 @@ def test_provider_test_persists_string_probe_results_to_credentials(
     assert _model_ids(provider["available_models"]) == ["gpt-5", "gpt-4o"]
 
 
+def test_provider_test_does_not_write_back_after_parameters_change(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    client.put(
+        "/api/llm/credentials",
+        json={
+            "providers": [
+                {
+                    "id": "openai-default",
+                    "name": "OpenAI",
+                    "api_key": "sk-old",
+                    "base_url": "https://api.old.test",
+                    "provider_type": "openai_compatible",
+                }
+            ]
+        },
+    )
+
+    async def fake_models(*_args: object, **_kwargs: object) -> list[ModelInfo]:
+        from app.models.llm_config import LLMCredentialsFile, ProviderCredential
+        from app.services.llm_credentials import save_credentials
+
+        save_credentials(
+            LLMCredentialsFile(
+                providers=[
+                    ProviderCredential(
+                        id="openai-default",
+                        name="OpenAI",
+                        api_key="sk-new",
+                        base_url="https://api.new.test",
+                        provider_type="openai_compatible",
+                    )
+                ]
+            )
+        )
+        return [_model("gpt-5")]
+
+    monkeypatch.setattr(llm_router, "probe_available_models", fake_models)
+
+    response = client.post(
+        "/api/llm/providers/test",
+        json={
+            "id": "openai-default",
+            "provider_type": "openai_compatible",
+            "api_key": "sk-old",
+            "base_url": "https://api.old.test",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    provider = client.get("/api/llm/credentials").json()["providers"][0]
+    assert provider["api_key"] == "sk-new"
+    assert provider["base_url"] == "https://api.new.test"
+    assert provider["last_test_status"] == "untested"
+    assert provider["available_models"] == []
+
+    restored = client.put(
+        "/api/llm/credentials",
+        json={
+            "providers": [
+                {
+                    "id": "openai-default",
+                    "name": "OpenAI",
+                    "api_key": "sk-old",
+                    "base_url": "https://api.old.test",
+                    "provider_type": "openai_compatible",
+                }
+            ]
+        },
+    )
+    restored_provider = restored.json()["providers"][0]
+    assert restored_provider["last_test_status"] == "ok"
+    assert _model_ids(restored_provider["available_models"]) == ["gpt-5"]
+
+
 def test_provider_test_persists_model_capabilities_to_credentials(
     client: TestClient,
     tmp_path: Path,
@@ -570,6 +713,7 @@ def test_provider_test_persists_model_capabilities_to_credentials(
                     "id": "openai-default",
                     "name": "OpenAI",
                     "api_key": "sk",
+                    "base_url": "https://api.openai.com",
                     "provider_type": "openai_compatible",
                 }
             ]
@@ -659,7 +803,17 @@ def test_provider_test_persists_outcome_to_credentials(
     # Seed an existing provider so writeback has a target.
     client.put(
         "/api/llm/credentials",
-        json={"providers": [{"id": "OC_CL", "name": "Claude", "api_key": "sk", "base_url": ""}]},
+        json={
+            "providers": [
+                {
+                    "id": "OC_CL",
+                    "name": "Claude",
+                    "api_key": "sk",
+                    "base_url": "",
+                    "provider_type": "anthropic_compatible",
+                }
+            ]
+        },
     )
 
     async def fake_sdks(*_args: object, **_kwargs: object) -> list[str]:
@@ -930,4 +1084,50 @@ def test_provider_test_models_preserves_existing_models(
     assert [model["id"] for model in response.json()["available_models"]] == [
         "gpt-5",
         "claude-opus-4-7",
+    ]
+
+
+def test_provider_test_models_normalizes_openrouter_model_prefixes(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    client.put(
+        "/api/llm/credentials",
+        json={
+            "providers": [
+                {
+                    "id": "openrouter-default",
+                    "name": "OpenRouter",
+                    "api_key": "sk",
+                    "base_url": "https://openrouter.ai/api/v1",
+                    "provider_type": "openai_compatible",
+                }
+            ]
+        },
+    )
+
+    async def fake_probe(*_args: object, **_kwargs: object) -> Any:
+        from app.services.llm_provider_test import ModelProbeResult
+
+        return ModelProbeResult(model_id=str(_args[3]), status="ok", latency_ms=5)
+
+    monkeypatch.setattr(llm_router, "probe_model_id", fake_probe)
+
+    response = client.post(
+        "/api/llm/providers/test-models",
+        json={
+            "provider_id": "openrouter-default",
+            "model_ids": ["~anthropic/claude-sonnet-latest", "anthropic/claude-sonnet-latest"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert [model["id"] for model in response.json()["available_models"]] == [
+        "claude-sonnet-latest",
+    ]
+    provider = client.get("/api/llm/credentials").json()["providers"][0]
+    assert [model["id"] for model in provider["available_models"]] == [
+        "claude-sonnet-latest",
     ]

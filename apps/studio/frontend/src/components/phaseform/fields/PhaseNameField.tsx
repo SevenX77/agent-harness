@@ -1,4 +1,13 @@
 import type { PhaseMode } from '../../../hooks/usePhaseForm'
+import { Input } from '../../ui/input'
+import { Label } from '../../ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../ui/select'
 
 interface PhaseNameFieldProps {
   name: string
@@ -17,30 +26,37 @@ export function PhaseNameField({
 }: PhaseNameFieldProps) {
   return (
     <div className="grid grid-cols-[1fr_8rem] gap-3">
-      <label className="block">
-        <span className="mb-1 block text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+      <Label className="block space-y-1">
+        <span className="block text-xs font-semibold uppercase text-muted-foreground">
           Phase name
         </span>
-        <input
+        <Input
           value={name}
           onChange={(event) => onNameChange(event.target.value)}
-          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 outline-none focus:ring-2 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="none"
+          className="font-medium"
         />
-        {error ? <span className="mt-1 block text-xs text-red-600 dark:text-red-400">{error}</span> : null}
-      </label>
-      <label className="block">
-        <span className="mb-1 block text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+        {error ? <span className="block text-xs text-destructive">{error}</span> : null}
+      </Label>
+      <Label className="block space-y-1">
+        <span className="block text-xs font-semibold uppercase text-muted-foreground">
           Mode
         </span>
-        <select
+        <Select
           value={mode}
-          onChange={(event) => onModeChange(event.target.value as PhaseMode)}
-          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 outline-none focus:ring-2 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+          onValueChange={(value) => onModeChange(value as PhaseMode)}
         >
-          <option value="llm">llm</option>
-          <option value="logic">logic</option>
-        </select>
-      </label>
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="llm">llm</SelectItem>
+            <SelectItem value="logic">logic</SelectItem>
+          </SelectContent>
+        </Select>
+      </Label>
     </div>
   )
 }

@@ -1,8 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import {
+  ManualModelResultList,
   manualModelAccordionValue,
   manualModelCandidateErrorMessage,
+  manualModelStatusLabel,
+  manualModelToastSummary,
   ManualModelTestPanel,
   mergeModelLists,
   modelIdPlaceholder,
@@ -97,5 +100,57 @@ describe("ManualModelTestPanel", () => {
         response: { status: 404, data: { detail: "Unknown provider: custom" } },
       }),
     ).toContain("resource or endpoint could not be found")
+  })
+
+  it("translates manual model test statuses into user-facing labels", () => {
+    expect(manualModelStatusLabel("ok")).toBe("Available")
+    expect(manualModelStatusLabel("invalid_model")).toBe("Model not found")
+    expect(manualModelStatusLabel("invalid_key")).toBe("Invalid API key")
+    expect(manualModelStatusLabel("rate_limited")).toBe("Rate limited")
+    expect(manualModelStatusLabel("network_error")).toBe("Network error")
+    expect(manualModelStatusLabel("timeout")).toBe("Request timed out")
+    expect(manualModelStatusLabel("error")).toBe("Test failed")
+  })
+
+  it("renders failed manual model test results instead of going quiet", () => {
+    const html = renderToStaticMarkup(
+      <ManualModelResultList
+        results={[
+          {
+            model_id: "claude-opus-4.7",
+            status: "invalid_model",
+            latency_ms: 354,
+          },
+        ]}
+      />,
+    )
+
+    expect(html).toContain("claude-opus-4.7")
+    expect(html).toContain("Model not found")
+    expect(html).not.toContain("invalid_model")
+  })
+
+  it("renders an empty manual model test response as visible feedback", () => {
+    const html = renderToStaticMarkup(<ManualModelResultList results={[]} />)
+
+    expect(html).toContain("No model results were returned.")
+  })
+
+  it("summarizes manual model results for sonner toast feedback", () => {
+    expect(manualModelToastSummary([])).toEqual({
+      kind: "info",
+      title: "No model results were returned.",
+      description: undefined,
+    })
+    expect(
+      manualModelToastSummary([
+        { model_id: "gpt-5", status: "ok", latency_ms: 12 },
+        { model_id: "missing-model", status: "invalid_model", latency_ms: 14 },
+      ]),
+    ).toEqual({
+      kind: "error",
+      title: "1 of 2 model tests failed.",
+      description: "missing-model: Model not found",
+    })
   })
 })

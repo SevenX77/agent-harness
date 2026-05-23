@@ -31,7 +31,11 @@ async def test_app_settings_returns_defaults_when_file_missing(
 
 @pytest.mark.anyio
 async def test_app_settings_roundtrip(metadata_store: LocalJsonMetadataStore) -> None:
-    settings = AppSettings(user_id="studio-user", gitea_host="https://gitea.example.test")
+    settings = AppSettings(
+        user_id="studio-user",
+        gitea_host="https://gitea.example.test",
+        default_skills_directory="/Users/studio/Skills",
+    )
 
     await metadata_store.write_app_settings(settings)
 

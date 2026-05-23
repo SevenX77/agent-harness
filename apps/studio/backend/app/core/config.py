@@ -57,7 +57,7 @@ SKILL_INDEX_PATH = paths.skill_index_path(APP_SETTINGS_DIR)
 APP_SETTINGS_PATH = paths.app_settings_path(APP_SETTINGS_DIR)
 SKILLS_DIR = default_skills_dir(RESOURCE_DIR)
 DEFAULT_SKILLS_ROOT = default_skills_root(APP_SETTINGS_DIR)
-WORKSPACES_DIR = default_workspaces_dir(RESOURCE_DIR)
+WORKSPACES_DIR = default_workspaces_dir(APP_SETTINGS_DIR)
 
 
 def default_workspace_skills_dir() -> Path:

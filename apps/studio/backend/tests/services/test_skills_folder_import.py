@@ -222,6 +222,37 @@ def test_create_skill_without_files_uses_valid_default_scaffold(
     assert (skill_dir / ".git").is_dir()
 
 
+def test_create_skill_without_directory_uses_settings_default_folder(
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    parent_dir = tmp_path / "custom-skills"
+    settings_response = client.put(
+        "/api/settings",
+        json={
+            "user_id": "",
+            "gitea_host": "",
+            "default_skills_directory": str(parent_dir),
+        },
+    )
+    assert settings_response.status_code == 200
+
+    response = client.post(
+        "/api/skills",
+        json={
+            "skill_id": "custom-default",
+            "files": _valid_skill_files("custom-default"),
+        },
+    )
+
+    skill_dir = parent_dir / "custom-default"
+    assert response.status_code == 201, response.json()
+    assert response.json()["directory_path"] == str(skill_dir)
+    assert (skill_dir / "GRAPH.md").exists()
+    assert (skill_dir / ".workspace").is_dir()
+    assert (skill_dir / ".git").is_dir()
+
+
 def test_create_skill_rejects_existing_public_v1_skill_id(
     client: TestClient,
     tmp_path: Path,

@@ -7,6 +7,7 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from services.llm_provider_meta import DOCS_DIR, load_provider_meta
@@ -397,8 +398,10 @@ def _load_fallback_models_from_doc(vendor: str) -> list[ModelInfo]:
 
 
 def _model_infos_from_ids(model_ids: list[str], vendor: str) -> list[ModelInfo]:
-    del vendor
-    return [ModelInfo(id=model_id) for model_id in model_ids]
+    return _dedupe_model_infos([
+        normalize_model_info_for_vendor(ModelInfo(id=model_id), vendor)
+        for model_id in model_ids
+    ])
 
 
 def _extract_section_4(md_content: str) -> str:
@@ -429,28 +432,66 @@ def _extract_model_ids_from_section(section: str) -> list[str]:
 def _parse_models_response(json_resp: Any, vendor: str) -> list[ModelInfo]:
     """Normalize supported provider /models payload shapes to ``ModelInfo`` records."""
 
-    del vendor
-
     if not isinstance(json_resp, dict):
         return []
     data = json_resp.get("data")
     if isinstance(data, list):
-        return [
-            ModelInfo(id=item["id"], capabilities=_extract_capabilities(item, id_keys={"id"}))
+        return _dedupe_model_infos([
+            normalize_model_info_for_vendor(
+                ModelInfo(id=item["id"], capabilities=_extract_capabilities(item, id_keys={"id"})),
+                vendor,
+            )
             for item in data
             if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"]
-        ]
+        ])
     models = json_resp.get("models")
     if isinstance(models, list):
-        return [
-            ModelInfo(
-                id=item["name"].removeprefix("models/"),
-                capabilities=_extract_capabilities(item, id_keys={"name"}),
+        return _dedupe_model_infos([
+            normalize_model_info_for_vendor(
+                ModelInfo(
+                    id=item["name"].removeprefix("models/"),
+                    capabilities=_extract_capabilities(item, id_keys={"name"}),
+                ),
+                vendor,
             )
             for item in models
             if isinstance(item, dict) and isinstance(item.get("name"), str) and item["name"]
-        ]
+        ])
     return []
+
+
+def normalize_model_info_for_vendor(model: ModelInfo, vendor: str) -> ModelInfo:
+    """Return a storage/display-safe model id for provider model-list results."""
+
+    canonical_id = canonical_model_id_for_vendor(model.id, vendor)
+    if canonical_id == model.id:
+        return model
+    capabilities = dict(model.capabilities)
+    capabilities.setdefault("provider_model_id", model.id)
+    return model.model_copy(update={"id": canonical_id, "capabilities": capabilities})
+
+
+def canonical_model_id_for_vendor(model_id: str, vendor: str) -> str:
+    """Strip OpenRouter routing prefixes so equivalent models merge in UI storage."""
+
+    normalized = model_id.strip()
+    if vendor != "openrouter":
+        return normalized
+
+    without_alias_prefix = normalized.lstrip("~")
+    provider_prefix, separator, canonical_id = without_alias_prefix.partition("/")
+    if separator and provider_prefix and canonical_id:
+        return canonical_id
+    return without_alias_prefix
+
+
+def _dedupe_model_infos(models: list[ModelInfo]) -> list[ModelInfo]:
+    by_id: dict[str, ModelInfo] = {}
+    for model in models:
+        if not model.id or model.id in by_id:
+            continue
+        by_id[model.id] = model
+    return list(by_id.values())
 
 
 def _extract_capabilities(item: dict[str, Any], *, id_keys: set[str]) -> dict[str, Any]:
@@ -498,11 +539,20 @@ def _join_base_url_and_endpoint(base_url: str, endpoint_path: str) -> str:
     """Join a user base URL and metadata endpoint without duplicating path prefixes."""
 
     normalized_base = base_url.rstrip("/")
-    normalized_endpoint = "/" + endpoint_path.lstrip("/")
-    parent, _, leaf = normalized_endpoint.rpartition("/")
-    if parent and normalized_base.endswith(parent):
-        return f"{normalized_base}/{leaf}"
-    return f"{normalized_base}{normalized_endpoint}"
+    split = urlsplit(normalized_base)
+    base_segments = [segment for segment in split.path.split("/") if segment]
+    endpoint_segments = [segment for segment in endpoint_path.split("/") if segment]
+
+    overlap = 0
+    max_overlap = min(len(base_segments), len(endpoint_segments))
+    for count in range(max_overlap, 0, -1):
+        if base_segments[-count:] == endpoint_segments[:count]:
+            overlap = count
+            break
+
+    joined_segments = base_segments + endpoint_segments[overlap:]
+    path = "/" + "/".join(joined_segments) if joined_segments else ""
+    return urlunsplit((split.scheme, split.netloc, path, split.query, split.fragment))
 
 
 async def _request_provider_models(
@@ -540,6 +590,8 @@ __all__ = [
     "_parse_models_response",
     "_render_auth_headers",
     "_send_1_token_request",
+    "canonical_model_id_for_vendor",
+    "normalize_model_info_for_vendor",
     "probe_model_id",
     "ping_provider",
     "ping_provider_extended",

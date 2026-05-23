@@ -1,5 +1,17 @@
-import { AlertTriangle, X } from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
 import type { StoredDraft } from '../../hooks/useDraftPersist'
+import { Alert, AlertDescription } from '../ui/alert'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from '../ui/alert-dialog'
 
 interface DraftRestoreModalProps {
   open: boolean
@@ -38,69 +50,69 @@ export function DraftRestoreModal({
   const baseChanged = draft.baseHash !== baseHash
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6 dark:bg-black/80">
-      <div className="w-full max-w-lg rounded-md border border-gray-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4 dark:border-slate-800">
-          <div className="flex items-start gap-3">
-            <span className="mt-0.5 rounded bg-amber-100 p-2 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
-              <AlertTriangle className="h-5 w-5" />
-            </span>
-            <div>
-              <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Unsaved draft found</h2>
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                Restore the local draft for {skillId}, or discard it and keep the saved file.
-              </p>
-            </div>
-          </div>
-          <button type="button" onClick={onCancel} className="rounded p-1 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-slate-800">
-            <X className="h-4 w-4" />
-          </button>
+    <AlertDialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          onCancel()
+        }
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogMedia>
+            <AlertTriangle />
+          </AlertDialogMedia>
+          <AlertDialogTitle>Unsaved draft found</AlertDialogTitle>
+          <AlertDialogDescription>
+            Restore the local draft for {skillId}, or discard it and keep the saved file.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+
+        <div className="grid gap-3 text-sm md:grid-cols-2">
+          <DraftStat label="Saved" value={formatTime(draft.timestamp)} />
+          <DraftStat label="Draft Size" value={`${lineCount(draft.content)} lines`} />
         </div>
 
-        <div className="space-y-4 p-5">
-          <div className="grid gap-3 text-sm md:grid-cols-2">
-            <div className="rounded-md border border-gray-200 bg-gray-50 p-3 dark:border-slate-800 dark:bg-slate-950">
-              <div className="text-xs font-semibold uppercase text-gray-400 dark:text-gray-500">Saved</div>
-              <div className="mt-1 text-gray-700 dark:text-gray-300">{formatTime(draft.timestamp)}</div>
-            </div>
-            <div className="rounded-md border border-gray-200 bg-gray-50 p-3 dark:border-slate-800 dark:bg-slate-950">
-              <div className="text-xs font-semibold uppercase text-gray-400 dark:text-gray-500">Draft Size</div>
-              <div className="mt-1 text-gray-700 dark:text-gray-300">{lineCount(draft.content)} lines</div>
-            </div>
-          </div>
-
-          {baseChanged ? (
-            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
+        {baseChanged ? (
+          <Alert>
+            <AlertTriangle />
+            <AlertDescription>
               The saved SKILL.md has changed since this draft was recorded. Review carefully after restoring.
-            </div>
-          ) : null}
-        </div>
+            </AlertDescription>
+          </Alert>
+        ) : null}
 
-        <div className="flex items-center justify-end gap-2 border-t border-gray-200 px-5 py-4 dark:border-slate-800">
-          <button
-            type="button"
-            onClick={onDiscard}
-            className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-slate-700 dark:text-gray-300 dark:hover:bg-slate-800"
+        <AlertDialogFooter>
+          <AlertDialogAction
+            variant="destructive"
+            onClick={(event) => {
+              event.preventDefault()
+              onDiscard()
+            }}
           >
             Discard
-          </button>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-slate-700 dark:text-gray-300 dark:hover:bg-slate-800"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={onRestore}
-            className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700"
+          </AlertDialogAction>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={(event) => {
+              event.preventDefault()
+              onRestore()
+            }}
           >
             Restore
-          </button>
-        </div>
-      </div>
-    </div>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
 
+function DraftStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-border bg-muted/40 p-3">
+      <div className="text-xs font-medium uppercase text-muted-foreground">{label}</div>
+      <div className="mt-1 text-foreground">{value}</div>
+    </div>
+  )
+}

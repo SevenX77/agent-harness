@@ -75,7 +75,7 @@ const HTTP_STATUS_TRANSLATIONS: Record<number, string> = {
  * blank.
  */
 const STATUS_TRANSLATIONS: Record<TestStatus | ProviderTestStatus, string> = {
-  untested: "Untested",
+  untested: "Not configured",
   ok: "Connected",
   error: "Test failed",
   invalid_key: "Invalid API key",
@@ -106,7 +106,7 @@ export function translateHttpStatus(status: number | null | undefined): string {
  * badge). Falls back to the raw status string if unrecognized.
  */
 export function translateTestStatus(status: TestStatus | ProviderTestStatus | undefined): string {
-  if (!status) return "Untested"
+  if (!status) return "Not configured"
   return STATUS_TRANSLATIONS[status] ?? status
 }
 

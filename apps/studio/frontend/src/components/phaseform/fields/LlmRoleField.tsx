@@ -1,3 +1,12 @@
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../ui/select'
+import { Label } from '../../ui/label'
+
 const LLM_ROLES = [
   'analyst',
   'planner',
@@ -7,6 +16,7 @@ const LLM_ROLES = [
   'researcher',
   'coder',
 ]
+const DEFAULT_ROLE_VALUE = '__default__'
 
 interface LlmRoleFieldProps {
   value: string
@@ -15,21 +25,25 @@ interface LlmRoleFieldProps {
 
 export function LlmRoleField({ value, onChange }: LlmRoleFieldProps) {
   return (
-    <label className="block">
-      <span className="mb-1 block text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+    <Label className="block space-y-1">
+      <span className="block text-xs font-semibold uppercase text-muted-foreground">
         LLM role
       </span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+      <Select
+        value={value || DEFAULT_ROLE_VALUE}
+        onValueChange={(nextValue) => onChange(nextValue === DEFAULT_ROLE_VALUE ? '' : nextValue)}
       >
-        <option value="">Default</option>
-        {LLM_ROLES.map((role) => (
-          <option key={role} value={role}>{role}</option>
-        ))}
-        {value && !LLM_ROLES.includes(value) ? <option value={value}>{value}</option> : null}
-      </select>
-    </label>
+        <SelectTrigger className="w-full">
+          <SelectValue placeholder="Default" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={DEFAULT_ROLE_VALUE}>Default</SelectItem>
+          {LLM_ROLES.map((role) => (
+            <SelectItem key={role} value={role}>{role}</SelectItem>
+          ))}
+          {value && !LLM_ROLES.includes(value) ? <SelectItem value={value}>{value}</SelectItem> : null}
+        </SelectContent>
+      </Select>
+    </Label>
   )
 }

@@ -52,6 +52,7 @@ linked_specs:
 | **Together AI** | `openai_compatible` | `https://api.together.xyz/v1` | OSS model hosting |
 | **OneChats** | `openai_compatible` | `https://chatapi.onechats.ai/v1` | 国内中转 |
 | **Jiekou** | `openai_compatible` 或 `anthropic_compatible` | `https://api.jiekou.ai/openai/v1` 或 `https://api.jiekou.ai/anthropic` | 双协议入口, URL 区分 |
+| **Qiniu** | `openai_compatible` 或 `anthropic_compatible` | `https://api.qnaigc.com/v1` 或 `https://anthropic.qnaigc.com` | 双协议入口, URL 区分; Studio 中建两张 provider card |
 
 ## 文件清单
 

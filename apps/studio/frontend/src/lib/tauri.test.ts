@@ -28,8 +28,19 @@ describe('selectSkillDirectory', () => {
 
     await expect(selectSkillDirectory()).resolves.toBe('/tmp/imported-skill')
 
-    expect(mockInvoke).toHaveBeenCalledWith('select_directory')
+    expect(mockInvoke).toHaveBeenCalledWith('select_directory', { defaultPath: null })
     expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('passes the default folder to the native picker', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    mockInvoke.mockResolvedValue('/tmp/imported-skill')
+
+    await expect(selectSkillDirectory('/tmp/default-skills')).resolves.toBe('/tmp/imported-skill')
+
+    expect(mockInvoke).toHaveBeenCalledWith('select_directory', {
+      defaultPath: '/tmp/default-skills',
+    })
   })
 
   it('shows the picker failure reason', async () => {

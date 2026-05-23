@@ -50,12 +50,12 @@ export function SettingRow({
   control: ReactNode
 }) {
   return (
-    <div className="flex items-start justify-between gap-6 py-3">
-      <div className="min-w-0 flex-1">
+    <div className="grid grid-cols-[minmax(13rem,18rem)_minmax(0,1fr)] items-start gap-6 py-3 max-lg:grid-cols-1 max-lg:gap-2">
+      <div className="min-w-0">
         <Label className="text-xs font-medium text-foreground">{label}</Label>
         {description ? <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{description}</p> : null}
       </div>
-      <div className="shrink-0">{control}</div>
+      <div className="min-w-0">{control}</div>
     </div>
   )
 }

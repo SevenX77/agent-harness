@@ -19,6 +19,7 @@ vi.mock('sonner', () => ({
 const serverSettings: AppSettings = {
   user_id: 'alice',
   gitea_host: 'https://gitea.example.com',
+  default_skills_directory: '/Users/alice/AgentStudio/Skills',
 }
 
 describe('useAppSettings helpers', () => {
@@ -41,6 +42,7 @@ describe('useAppSettings helpers', () => {
     const draft: AppSettings = {
       user_id: 'bob',
       gitea_host: 'https://git.internal.example',
+      default_skills_directory: '/Users/bob/Skills',
     }
     vi.mocked(updateAppSettings).mockResolvedValue(draft)
 
@@ -54,6 +56,7 @@ describe('useAppSettings helpers', () => {
     const draft: AppSettings = {
       user_id: 'bob',
       gitea_host: 'https://git.internal.example',
+      default_skills_directory: '/Users/bob/Skills',
     }
     vi.mocked(updateAppSettings).mockRejectedValue(new Error('write failed'))
 

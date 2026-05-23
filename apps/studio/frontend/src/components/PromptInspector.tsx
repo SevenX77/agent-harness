@@ -1,71 +1,83 @@
-import { CheckCircle, MessageSquare, X } from 'lucide-react'
+import { CheckCircle, MessageSquare } from 'lucide-react'
 import { useState } from 'react'
 import type { CallbackEvent } from '../api/types'
 import { eventPhase, jsonText } from '../utils/trace'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from './ui/dialog'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 
 interface PromptInspectorProps {
   promptEvent: CallbackEvent | null
   onClose: () => void
 }
 
+type InspectorTab = 'template' | 'variables' | 'rendered'
+
 export function PromptInspector({ promptEvent, onClose }: PromptInspectorProps) {
-  const [tab, setTab] = useState<'template' | 'variables' | 'rendered'>('template')
+  const [tab, setTab] = useState<InspectorTab>('template')
 
   if (!promptEvent) {
     return null
   }
 
-  const tabs = [
-    ['template', 'Template'],
-    ['variables', 'Variables'],
-    ['rendered', 'Rendered'],
-  ] as const
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 dark:bg-black/80 p-8">
-      <div className="flex h-[80vh] w-full max-w-5xl flex-col overflow-hidden rounded-md bg-white dark:bg-slate-900 shadow-2xl border dark:border-slate-800">
-        <div className="flex items-center justify-between border-b border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-950 px-6 py-4">
-          <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800 dark:text-gray-100">
-            <MessageSquare className="h-5 w-5 text-violet-600 dark:text-violet-400" />
+    <Dialog
+      open={Boolean(promptEvent)}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          onClose()
+        }
+      }}
+    >
+      <DialogContent className="flex h-[80vh] max-w-5xl flex-col overflow-hidden p-0 sm:max-w-5xl">
+        <DialogHeader className="border-b border-border bg-muted/30 px-6 py-4">
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <MessageSquare className="size-5 text-primary" />
             Prompt Inspector: {eventPhase(promptEvent)}
-          </h3>
-          <button type="button" onClick={onClose} className="rounded p-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-slate-800 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-100">
-            <X className="h-5 w-5" />
-          </button>
-        </div>
+          </DialogTitle>
+        </DialogHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-6">
-          <div className="mb-4 flex gap-2">
-            {tabs.map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setTab(id)}
-                className={`h-9 rounded-md border px-3 text-sm font-medium ${
-                  tab === id
-                    ? 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-900/30 dark:text-violet-300'
-                    : 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-slate-800 dark:text-gray-300 dark:hover:bg-slate-800'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <pre className="min-h-0 flex-1 overflow-auto rounded-md border border-gray-200 bg-gray-50 p-4 text-sm whitespace-pre-wrap text-gray-800 dark:border-slate-800 dark:bg-slate-950 dark:text-gray-300">
-            {tab === 'template' ? (promptEvent.template_source ?? 'inline') : null}
-            {tab === 'variables' ? jsonText(promptEvent.variables) : null}
-            {tab === 'rendered' ? (
-              promptEvent.event_type === 'prompt_captured' ? jsonText(promptEvent.resolved_prompt) : jsonText(promptEvent.messages ?? undefined)
-            ) : null}
-          </pre>
-          {tab === 'rendered' ? (
-            <div className="mt-3 flex items-center gap-1 text-xs font-bold text-violet-700 dark:text-violet-400">
-              <CheckCircle className="h-3 w-3" />
+        <Tabs
+          value={tab}
+          onValueChange={(value) => setTab(value as InspectorTab)}
+          className="min-h-0 flex-1 px-6 pb-6"
+        >
+          <TabsList variant="line" className="mb-4">
+            <TabsTrigger value="template">Template</TabsTrigger>
+            <TabsTrigger value="variables">Variables</TabsTrigger>
+            <TabsTrigger value="rendered">Rendered</TabsTrigger>
+          </TabsList>
+          <TabsContent value="template" className="min-h-0">
+            <PromptPayload>{promptEvent.template_source ?? 'inline'}</PromptPayload>
+          </TabsContent>
+          <TabsContent value="variables" className="min-h-0">
+            <PromptPayload>{jsonText(promptEvent.variables)}</PromptPayload>
+          </TabsContent>
+          <TabsContent value="rendered" className="min-h-0">
+            <PromptPayload>
+              {promptEvent.event_type === 'prompt_captured'
+                ? jsonText(promptEvent.resolved_prompt)
+                : jsonText(promptEvent.messages ?? undefined)}
+            </PromptPayload>
+            <div className="mt-3 flex items-center gap-1 text-xs font-medium text-primary">
+              <CheckCircle className="size-3" />
               Rendered prompt payload
             </div>
-          ) : null}
-        </div>
-      </div>
-    </div>
+          </TabsContent>
+        </Tabs>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function PromptPayload({ children }: { children: string }) {
+  return (
+    <pre className="h-full min-h-[24rem] overflow-auto rounded-md border border-border bg-muted/40 p-4 text-sm whitespace-pre-wrap text-foreground">
+      {children}
+    </pre>
   )
 }

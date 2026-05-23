@@ -331,6 +331,11 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     return "idle"
   }
 
+  const handleHome = useCallback(() => {
+    setSettingsOpen(false)
+    onCloseSkill()
+  }, [onCloseSkill])
+
   const hasOpenFile = Boolean(activeFileDetails.left || activeFileDetails.right)
   const currentCompileErrors = currentSkillId ? compileErrors[currentSkillId] ?? [] : []
 
@@ -343,7 +348,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         onBreadcrumbClick={popNavTo}
         copilotOpen={copilotOpen}
         onCopilotToggle={() => setCopilotOpen((open) => !open)}
-        onHome={onCloseSkill}
+        onHome={handleHome}
         onSyncSuccess={() => {
           void mutateSkillDetail()
         }}

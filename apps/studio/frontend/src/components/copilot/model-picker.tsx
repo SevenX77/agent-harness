@@ -1,6 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import { Cpu } from 'lucide-react'
 import type { CredentialsState, RoleEntry } from '../../api/llm'
+import { Button } from '../ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu'
 
 interface ModelPickerProps {
   role: RoleEntry | null
@@ -55,17 +63,19 @@ export function ModelPickerMenu({ options, selectedModel, onSelect, onClose }: M
   return (
     <>
       {options.map((option) => (
-        <button
+        <Button
           key={option.modelCode}
           type="button"
           disabled={!option.available}
+          variant={selectedModel === option.modelCode ? 'default' : 'ghost'}
+          size="sm"
           title={option.available ? `Use ${option.modelCode}` : option.unavailableReason}
           aria-label={`Select model ${option.modelCode}`}
           onClick={option.available ? () => {
             onSelect(option.modelCode)
             onClose?.()
           } : undefined}
-          className={`flex h-7 items-center justify-between rounded-sm px-2 text-left text-xs font-medium ${
+          className={`h-7 w-full justify-between px-2 text-left ${
             selectedModel === option.modelCode
               ? 'bg-primary text-primary-foreground'
               : 'text-foreground hover:bg-accent'
@@ -75,14 +85,37 @@ export function ModelPickerMenu({ options, selectedModel, onSelect, onClose }: M
           {!option.available ? (
             <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">No key</span>
           ) : null}
-        </button>
+        </Button>
+      ))}
+    </>
+  )
+}
+
+function ModelPickerDropdownItems({ options, selectedModel, onSelect }: ModelPickerMenuProps) {
+  return (
+    <>
+      {options.map((option) => (
+        <DropdownMenuItem
+          key={option.modelCode}
+          disabled={!option.available}
+          title={option.available ? `Use ${option.modelCode}` : option.unavailableReason}
+          aria-label={`Select model ${option.modelCode}`}
+          onSelect={() => onSelect(option.modelCode)}
+          className={`justify-between ${
+            selectedModel === option.modelCode ? 'bg-accent text-accent-foreground' : ''
+          }`}
+        >
+          <span>{option.modelCode}</span>
+          {!option.available ? (
+            <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">No key</span>
+          ) : null}
+        </DropdownMenuItem>
       ))}
     </>
   )
 }
 
 export function ModelPicker({ role, credentials, selectedModel, onSelect, variant = 'icon' }: ModelPickerProps) {
-  const [open, setOpen] = useState(false)
   const options = useMemo(() => getModelOptions(role, credentials), [credentials, role])
   const fallbackModel = firstAvailableModel(options)
   const effectiveModel = selectedModel || role?.active_model || ''
@@ -99,15 +132,17 @@ export function ModelPicker({ role, credentials, selectedModel, onSelect, varian
 
   if (!role) {
     return (
-      <button
+      <Button
         type="button"
         disabled
+        variant="ghost"
+        size="icon"
         title="Copilot model config unavailable"
         aria-label="Select Copilot model"
-        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground opacity-45"
+        className="opacity-45"
       >
         <Cpu className="size-3.5" />
-      </button>
+      </Button>
     )
   }
 
@@ -124,28 +159,26 @@ export function ModelPicker({ role, credentials, selectedModel, onSelect, varian
   }
 
   return (
-    <div className="relative" aria-label="Copilot model picker">
-      <button
-        type="button"
-        title={effectiveModel ? `Model: ${effectiveModel}` : 'Select model'}
-        aria-label="Select Copilot model"
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-      >
-        <Cpu className="size-3.5" />
-      </button>
-      {open ? (
-        <div className="absolute bottom-8 left-0 z-50 flex w-48 flex-col gap-1 rounded-md bg-popover p-1.5 text-popover-foreground shadow-md ring-1 ring-foreground/10">
-          <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground">Model</div>
-          <ModelPickerMenu
-            options={options}
-            selectedModel={effectiveModel}
-            onSelect={onSelect}
-            onClose={() => setOpen(false)}
-          />
-        </div>
-      ) : null}
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          title={effectiveModel ? `Model: ${effectiveModel}` : 'Select model'}
+          aria-label="Select Copilot model"
+        >
+          <Cpu className="size-3.5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" side="top" className="w-48">
+        <DropdownMenuLabel>Model</DropdownMenuLabel>
+        <ModelPickerDropdownItems
+          options={options}
+          selectedModel={effectiveModel}
+          onSelect={onSelect}
+        />
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

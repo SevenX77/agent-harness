@@ -1,8 +1,10 @@
 import axios from 'axios'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
-import { Columns2 } from 'lucide-react'
+import { Columns2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { writeSkillFile } from '@/api/client'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 
 const MonacoEditor = lazy(async () => {
   const module = await import('@monaco-editor/react')
@@ -183,26 +185,30 @@ export function LazyMonacoPanel({
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-3">
         <h2 className="text-sm font-semibold text-foreground">{title}</h2>
         <div className="flex items-center gap-2">
-          <span className="rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">{language}</span>
+          <Badge variant="secondary" className="font-mono text-muted-foreground">{language}</Badge>
           {onSplit ? (
-            <button
+            <Button
               type="button"
               onClick={onSplit}
               aria-label="Split editor"
-              className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground/70 hover:text-muted-foreground"
             >
               <Columns2 className="size-3.5" />
-            </button>
+            </Button>
           ) : null}
           {onClose ? (
-            <button
+            <Button
               type="button"
               onClick={onClose}
               aria-label="Close editor"
-              className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground/70 hover:text-muted-foreground"
             >
-              x
-            </button>
+              <X className="size-3.5" />
+            </Button>
           ) : null}
         </div>
       </div>

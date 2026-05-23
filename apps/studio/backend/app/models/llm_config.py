@@ -48,6 +48,30 @@ class ModelInfo(BaseModel):
     )
 
 
+class ProviderTestResult(BaseModel):
+    """One cached Test outcome for one provider parameter set."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    params_fingerprint: str = Field(
+        description="Stable fingerprint of api_key, base_url, and provider_type for lookup.",
+    )
+    base_url: str = Field(default="", description="Base URL used by this cached result.")
+    provider_type: ProviderType | None = Field(
+        default=None,
+        description="Provider protocol used by this cached result.",
+    )
+    last_test_status: TestStatus = Field(
+        default="untested",
+        description="Cached provider probe status for this parameter set.",
+    )
+    last_test_at: str = Field(default="", description="ISO timestamp of this probe.")
+    last_test_message: str = Field(default="", description="Human-readable probe message.")
+    last_error_code: str = Field(default="", description="Machine-readable probe error code.")
+    available_sdks: list[str] = Field(default_factory=list, description="Confirmed SDK protocols.")
+    available_models: list[ModelInfo] = Field(default_factory=list, description="Confirmed models.")
+
+
 class ProviderCredential(BaseModel):
     """User-configured API credential record persisted in ~/.studio/llm_credentials.json.
 
@@ -111,6 +135,13 @@ class ProviderCredential(BaseModel):
     available_models: list[ModelInfo] = Field(
         default_factory=list,
         description="Models confirmed by automatic or manual probing for this credential.",
+    )
+    test_results: list[ProviderTestResult] = Field(
+        default_factory=list,
+        description=(
+            "Cached Test outcomes keyed by api_key/base_url/provider_type fingerprint. "
+            "The top-level Test fields mirror the entry matching the current editable fields."
+        ),
     )
 
 
@@ -176,6 +207,14 @@ class RoleModelEntry(BaseModel):
             "in a role."
         ),
     )
+    temperature: float | None = Field(
+        default=None,
+        description="Optional sampling temperature override for this model within the role.",
+    )
+    max_tokens: int | None = Field(
+        default=None,
+        description="Optional maximum output token override for this model within the role.",
+    )
 
 
 class RoleEntry(BaseModel):
@@ -183,10 +222,6 @@ class RoleEntry(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    temperature: float = Field(
-        default=0.7,
-        description="Sampling temperature used when this role invokes a model.",
-    )
     model_fallback: bool = Field(
         default=False,
         description="Whether this role may fall back across configured models/providers.",
@@ -230,6 +265,7 @@ __all__ = [
     "ModelInfo",
     "ProviderEntry",
     "ProviderCredential",
+    "ProviderTestResult",
     "ProviderType",
     "RoleEntry",
     "RoleModelEntry",

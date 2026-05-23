@@ -12,6 +12,7 @@ interface NewSkillDialogProps {
   newSkillName: string
   onNewSkillNameChange: (value: string) => void
   parentDirectory: string | null
+  defaultParentDirectory: string | null
   selectingParentDirectory: boolean
   onChooseParentDirectory: () => void
   newSkillError: string | null
@@ -25,15 +26,18 @@ export function NewSkillDialog({
   newSkillName,
   onNewSkillNameChange,
   parentDirectory,
+  defaultParentDirectory,
   selectingParentDirectory,
   onChooseParentDirectory,
   newSkillError,
   creating,
   onSubmit,
 }: NewSkillDialogProps) {
+  const currentParentDirectory = parentDirectory ?? defaultParentDirectory ?? ''
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[min(calc(100vw-2rem),28rem)] rounded-md border border-border bg-popover p-4 shadow-xl ring-0 sm:max-w-md">
+      <DialogContent className="w-[min(calc(100vw-2rem),52rem)] rounded-md border border-border bg-popover p-4 shadow-xl ring-0 sm:max-w-3xl">
         <form onSubmit={(event) => void onSubmit(event)}>
           <DialogHeader>
             <DialogTitle>New skill</DialogTitle>
@@ -54,7 +58,7 @@ export function NewSkillDialog({
                 disabled={creating}
               />
               {newSkillError ? (
-                <p className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
+                <p className="max-h-28 overflow-y-auto break-words rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
                   {newSkillError}
                 </p>
               ) : (
@@ -65,7 +69,15 @@ export function NewSkillDialog({
             </div>
             <div className="space-y-2">
               <Label>Parent folder</Label>
-              <div className="grid gap-2 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center">
+              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                <Input
+                  readOnly
+                  value={currentParentDirectory}
+                  placeholder="Select a parent folder"
+                  title={currentParentDirectory || undefined}
+                  className="min-w-0 font-mono text-xs"
+                  aria-label="Parent folder"
+                />
                 <Button
                   type="button"
                   variant="outline"
@@ -75,12 +87,6 @@ export function NewSkillDialog({
                   <FolderOpen />
                   {selectingParentDirectory ? 'Choosing' : 'Choose folder'}
                 </Button>
-                <p
-                  title={parentDirectory ?? undefined}
-                  className="min-w-0 truncate rounded-md border border-border bg-muted/30 px-2 py-1.5 text-xs text-muted-foreground"
-                >
-                  {parentDirectory ?? 'Default: AgentStudio/Skills'}
-                </p>
               </div>
             </div>
           </div>

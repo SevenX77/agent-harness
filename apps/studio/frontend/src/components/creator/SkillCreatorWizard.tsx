@@ -1,6 +1,6 @@
 import { AxiosError } from 'axios'
-import { FolderOpen, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { FolderOpen } from 'lucide-react'
+import { useState } from 'react'
 import { api } from '../../api/client'
 import type { SkillSummary } from '../../api/types'
 import { useSkillCreator, validateStep } from '../../hooks/useSkillCreator'
@@ -8,6 +8,15 @@ import { selectSkillDirectory } from '../../lib/tauri'
 import type { ToastKind } from '../../types/studio'
 import { errorMessage } from '../../utils/errors'
 import type { WizardData, WizardInput } from '../../templates/skillMdGenerator'
+import { Button } from '../ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../ui/dialog'
 import { TemplatePicker } from '../templates/TemplatePicker'
 import { StepIndicator } from './StepIndicator'
 import { StepBasics } from './steps/StepBasics'
@@ -25,26 +34,6 @@ interface SkillCreatorWizardProps {
 export function SkillCreatorWizard({ open, onClose, onCreated, pushToast }: SkillCreatorWizardProps) {
   const { state, dispatch, preview, canNext, isLastStep, stepCount, currentErrors } = useSkillCreator()
   const [directoryPath, setDirectoryPath] = useState<string | null>(null)
-  const trapRef = useRef<HTMLDivElement | null>(null)
-
-  useEffect(() => {
-    if (!open) {
-      return undefined
-    }
-    const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose()
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    const focusTimer = window.setTimeout(() => trapRef.current?.querySelector<HTMLElement>('button, textarea, input, select, a[href]')?.focus(), 0)
-    return () => {
-      window.clearTimeout(focusTimer)
-      document.removeEventListener('keydown', handleKeyDown)
-      returnFocus?.focus()
-    }
-  }, [onClose, open])
 
   if (!open) {
     return null
@@ -96,38 +85,34 @@ export function SkillCreatorWizard({ open, onClose, onCreated, pushToast }: Skil
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6 dark:bg-black/80">
-      <div
-        ref={trapRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="skill-creator-title"
-        className="flex h-[82vh] w-full max-w-4xl flex-col overflow-hidden rounded-md border border-gray-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900"
-      >
-        <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 dark:border-slate-800">
-          <div>
-            <h1 id="skill-creator-title" className="text-xl font-bold text-gray-900 dark:text-gray-100">New Skill</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Generate a valid SKILL.md from guided inputs.
-            </p>
-          </div>
-          <button type="button" aria-label="Close skill creator" onClick={onClose} className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-slate-800 dark:hover:text-gray-100">
-            <X className="h-5 w-5" />
-          </button>
-        </div>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          onClose()
+        }
+      }}
+    >
+      <DialogContent className="flex h-[82vh] max-w-4xl flex-col overflow-hidden p-0 sm:max-w-4xl">
+        <DialogHeader className="border-b border-border px-6 py-4">
+          <DialogTitle>New Skill</DialogTitle>
+          <DialogDescription>
+            Generate a valid SKILL.md from guided inputs.
+          </DialogDescription>
+        </DialogHeader>
 
         <StepIndicator stepIndex={state.stepIndex} stepCount={stepCount} />
 
-        <div className="border-b border-gray-200 px-6 py-3 dark:border-slate-800">
-          <button
+        <div className="border-b border-border px-6 py-3">
+          <Button
             type="button"
+            variant="outline"
             onClick={() => void chooseDirectory()}
-            className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-slate-700 dark:text-gray-300 dark:hover:bg-slate-800"
           >
-            <FolderOpen className="h-4 w-4" />
+            <FolderOpen />
             Choose folder
-          </button>
-          <span className="ml-3 align-middle text-xs text-gray-500 dark:text-gray-400">
+          </Button>
+          <span className="ms-3 align-middle text-xs text-muted-foreground">
             {directoryPath ?? 'Default: AgentStudio/Skills'}
           </span>
         </div>
@@ -159,36 +144,34 @@ export function SkillCreatorWizard({ open, onClose, onCreated, pushToast }: Skil
           ) : null}
         </div>
 
-        <div className="flex items-center justify-between border-t border-gray-200 px-6 py-4 dark:border-slate-800">
-          <button
+        <DialogFooter className="border-t border-border px-6 py-4 sm:justify-between">
+          <Button
             type="button"
+            variant="outline"
             onClick={() => dispatch({ type: 'PREV' })}
             disabled={state.stepIndex === 0 || state.submitting}
-            className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-gray-300 dark:hover:bg-slate-800"
           >
             Prev
-          </button>
+          </Button>
           {isLastStep ? (
-            <button
+            <Button
               type="button"
               onClick={() => void submit()}
               disabled={!canNext || state.submitting}
-              className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-sky-300 dark:disabled:bg-sky-900"
             >
               {state.submitting ? 'Creating...' : 'Create Skill'}
-            </button>
+            </Button>
           ) : (
-            <button
+            <Button
               type="button"
               onClick={next}
               disabled={!canNext || state.submitting}
-              className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-sky-300 dark:disabled:bg-sky-900"
             >
               Next
-            </button>
+            </Button>
           )}
-        </div>
-      </div>
-    </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

@@ -1,8 +1,19 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import { isValidElement, type ReactElement, type ReactNode } from 'react'
+import { isValidElement, type ComponentProps, type ReactElement, type ReactNode } from 'react'
 import type { GitHistoryItem } from '../../api/types'
 import { LocalHistoryPanelView, type LocalHistoryPanelViewProps } from './HistoryPanel'
+
+vi.mock('../ui/button', () => ({
+  Button: ({
+    children,
+    ...props
+  }: ComponentProps<'button'> & { children: ReactNode }) => (
+    <button data-slot="button" {...props}>
+      {children}
+    </button>
+  ),
+}))
 
 const snapshots: GitHistoryItem[] = [
   {
@@ -50,7 +61,7 @@ function findButtonByText(node: ReactNode, label: string): ReactElement<{ childr
   }
 
   const element = node as ReactElement<{ children?: ReactNode; onClick?: () => void }>
-  if (element.type === 'button' && textOf(element.props.children).includes(label)) {
+  if (element.props.onClick && textOf(element.props.children).includes(label)) {
     return element
   }
 
@@ -71,6 +82,7 @@ describe('LocalHistoryPanelView', () => {
     const html = renderToStaticMarkup(<LocalHistoryPanelView {...baseProps()} />)
 
     expect(html).toContain('No local history snapshots yet.')
+    expect(html).toContain('data-slot="button"')
   })
 
   it('renders loading state', () => {

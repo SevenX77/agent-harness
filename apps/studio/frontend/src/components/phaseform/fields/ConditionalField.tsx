@@ -1,3 +1,6 @@
+import { Input } from '../../ui/input'
+import { Label } from '../../ui/label'
+
 interface ConditionalFieldProps {
   when: string
   skipIf: string
@@ -17,36 +20,45 @@ export function ConditionalField({
 }: ConditionalFieldProps) {
   return (
     <section className="space-y-3">
-      <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+      <div className="text-xs font-semibold uppercase text-muted-foreground">
         Conditions and validation
       </div>
-      <label className="block">
-        <span className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">when</span>
-        <input
+      <Label className="block space-y-1">
+        <span className="block text-xs font-medium text-muted-foreground">when</span>
+        <Input
           value={when}
           onChange={(event) => onWhenChange(event.target.value)}
           placeholder="context.ready == true"
-          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-800 outline-none focus:ring-2 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="none"
+          className="font-mono"
         />
-      </label>
-      <label className="block">
-        <span className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">skip_if</span>
-        <input
+      </Label>
+      <Label className="block space-y-1">
+        <span className="block text-xs font-medium text-muted-foreground">skip_if</span>
+        <Input
           value={skipIf}
           onChange={(event) => onSkipIfChange(event.target.value)}
           placeholder="context.skip_review"
-          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-800 outline-none focus:ring-2 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="none"
+          className="font-mono"
         />
-      </label>
-      <label className="block">
-        <span className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">validator</span>
-        <input
+      </Label>
+      <Label className="block space-y-1">
+        <span className="block text-xs font-medium text-muted-foreground">validator</span>
+        <Input
           value={validator}
           onChange={(event) => onValidatorChange(event.target.value)}
           placeholder="script.validators.validate_output"
-          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-800 outline-none focus:ring-2 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="none"
+          className="font-mono"
         />
-      </label>
+      </Label>
     </section>
   )
 }

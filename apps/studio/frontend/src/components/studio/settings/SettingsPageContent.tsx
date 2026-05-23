@@ -4,6 +4,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { ApiKeysTab } from "./api-keys/ApiKeysTab"
 import { GeneralTab } from "./GeneralTab"
 import { LlmRolesTab } from "./LlmRolesTab"
+import { SettingsErrorBoundary } from "./SettingsErrorBoundary"
 import { NavButton } from "./shared"
 import type { SettingsPageContentProps } from "./types"
 
@@ -15,8 +16,7 @@ export function SettingsPageContent({
   drafts,
   saveStatus,
   rolesData,
-  selectedRole,
-  rolesDirty,
+  rolesSaveStatus,
   rolesError,
   appSettings,
   onClose,
@@ -26,9 +26,7 @@ export function SettingsPageContent({
   onDeleteProvider,
   onAddProvider,
   onProviderModelsUpdated,
-  onSelectedRoleChange,
   onRolesDataChange,
-  onSaveRoles,
 }: SettingsPageContentProps) {
   return (
     <div className="flex size-full flex-col bg-background">
@@ -39,8 +37,8 @@ export function SettingsPageContent({
         </Button>
       </div>
 
-      <div className="flex min-h-0 flex-1">
-        <nav className="w-56 shrink-0 border-r border-border bg-sidebar/40 px-2 py-4">
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        <nav className="flex w-full shrink-0 gap-1 overflow-x-auto border-b border-border bg-sidebar/40 px-2 py-2 md:w-56 md:flex-col md:border-b-0 md:border-r md:py-4">
           <NavButton active={activeTab === "general"} icon={<Settings />} onClick={() => onTabChange("general")}>
             General
           </NavButton>
@@ -52,8 +50,23 @@ export function SettingsPageContent({
           </NavButton>
         </nav>
 
-        <ScrollArea className="flex-1">
-          <div className="max-w-3xl px-10 py-8">
+        {activeTab === "llm_roles" ? (
+          <div className="min-w-0 flex-1 overflow-y-auto lg:overflow-hidden">
+            <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col px-4 py-6 sm:px-6 md:px-8 md:py-8 lg:h-full lg:min-h-0">
+              <SettingsErrorBoundary label="LLM Roles">
+                <LlmRolesTab
+                  data={rolesData}
+                  credentials={credentials}
+                  saveStatus={rolesSaveStatus}
+                  error={rolesError}
+                  onChange={onRolesDataChange}
+                />
+              </SettingsErrorBoundary>
+            </div>
+          </div>
+        ) : (
+          <ScrollArea className="flex-1">
+            <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 md:px-8 md:py-8">
             {activeTab === "general" ? <GeneralTab appSettings={appSettings} /> : null}
             {activeTab === "api_keys" ? (
               <ApiKeysTab
@@ -69,20 +82,9 @@ export function SettingsPageContent({
                 onProviderModelsUpdated={onProviderModelsUpdated}
               />
             ) : null}
-            {activeTab === "llm_roles" ? (
-              <LlmRolesTab
-                data={rolesData}
-                credentials={credentials}
-                selectedRole={selectedRole}
-                dirty={rolesDirty}
-                error={rolesError}
-                onSelectedRoleChange={onSelectedRoleChange}
-                onChange={onRolesDataChange}
-                onSave={onSaveRoles}
-              />
-            ) : null}
-          </div>
-        </ScrollArea>
+            </div>
+          </ScrollArea>
+        )}
       </div>
     </div>
   )

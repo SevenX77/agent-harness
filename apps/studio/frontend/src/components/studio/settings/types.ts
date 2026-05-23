@@ -26,16 +26,17 @@ export interface SettingsPageContentProps {
   drafts: ProviderDraft[]
   saveStatus: SaveStatus
   rolesData: RolesData | null
-  selectedRole: string
-  rolesDirty: boolean
+  rolesSaveStatus: SaveStatus
   rolesError: string | null
   appSettings: {
     userId: string
     giteaHost: string
+    defaultSkillsDirectory: string
     isLoading: boolean
+    saveStatus: SaveStatus
     setUserId: (value: string) => void
     setGiteaHost: (value: string) => void
-    save: () => void | Promise<unknown>
+    setDefaultSkillsDirectory: (value: string) => void
   }
   onClose: () => void
   onTabChange: (tab: SettingsTab) => void
@@ -44,9 +45,7 @@ export interface SettingsPageContentProps {
   onDeleteProvider: (providerId: string) => void
   onAddProvider: (data: AddProviderFormSubmission) => Promise<void> | void
   onProviderModelsUpdated: (providerId: string, models: ModelInfo[]) => void
-  onSelectedRoleChange: (roleName: string) => void
   onRolesDataChange: (next: RolesData) => void
-  onSaveRoles: () => void
 }
 
 export type { ReactNode }

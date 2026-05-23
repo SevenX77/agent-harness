@@ -30,6 +30,8 @@
 
 各字段 spec 的 FATAL / WARN 判断最终收敛到本节命名规则。
 
+TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是错误码, 不进入本速查表; 事件协议由 tracing-and-observability 文档维护。
+
 ## 错误码速查全表
 
 ### graph domain

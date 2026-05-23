@@ -6,6 +6,7 @@ import logging
 
 from graph_agent.cognitive.prompt import (
     apply_cognitive_template,
+    apply_v030_cognitive_template,
     resolve_role_prefix_from_llm_role,
 )
 
@@ -57,3 +58,26 @@ def test_critical_reminders_use_finish_task_v2_contract() -> None:
     assert "execution_summary" not in prompt
     assert "plan_checklist" not in prompt
     assert "unresolved_issues" not in prompt
+
+
+def test_v030_cognitive_template_places_exit_contract_with_output_schema() -> None:
+    prompt = apply_v030_cognitive_template(
+        phase_name="main",
+        role="Researcher",
+        goal="Answer the question.",
+        steps=[{"id": "S1", "name": "Read", "content": "Read references."}],
+        protocols=[{"id": "P1", "content": "Cite evidence."}],
+        exit_contract="Return JSON-compatible business data.",
+        output_schema={"type": "object", "properties": {"answer": {"type": "string"}}},
+        inline_examples=["Example A"],
+        document_examples=[{"id": "E2", "summary": "Long example"}],
+    )
+
+    assert "<knowledge_base>" in prompt
+    assert "<ambiguity_feedback>" in prompt
+    assert "<protocol_citation>" in prompt
+    assert "[protocol:P1]" in prompt
+    assert "Example A" in prompt
+    assert "E2: Long example" in prompt
+    assert "<output_schema>" in prompt
+    assert prompt.rfind("<output_schema>") > prompt.rfind("Return JSON-compatible business data.")

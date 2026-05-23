@@ -188,7 +188,6 @@ class SkillLoader:
             validate_context_writes=self.validate_context_writes,
         )
         subagents_by_phase = _compile_subagent_metadata(
-            root,
             phase_docs,
             skill_resolver=skill_resolver,
         )
@@ -356,7 +355,6 @@ def _discover_actions_and_tools(
 
 
 def _compile_subagent_metadata(
-    skill_root: Path,
     phase_docs: list[PhaseDocument],
     *,
     skill_resolver: SkillResolverProtocol | None = None,
@@ -367,20 +365,14 @@ def _compile_subagent_metadata(
             continue
         phase_subagents: list[CompiledSubagent] = []
         for spec in doc.ast.subagents:
-            if spec.target_skill is not None:
-                if skill_resolver is None:
-                    _fatal(
-                        doc.path,
-                        _frontmatter_key_line(doc.path, "phase_config"),
-                        f"subagent {spec.name!r} declares target_skill "
-                        f"{spec.target_skill!r} but no skill_resolver was provided",
-                    )
-                sub_root = resolve_skill_root(skill_resolver, spec.target_skill)
-                target_skill = spec.target_skill
-            else:
-                legacy_path = cast(str, spec.path)
-                sub_root = _resolve_subagent_root(skill_root, doc.path, legacy_path, spec.name)
-                target_skill = legacy_path
+            if skill_resolver is None:
+                _fatal(
+                    doc.path,
+                    _frontmatter_key_line(doc.path, "phase_config"),
+                    f"subagent {spec.name!r} declares target_skill "
+                    f"{spec.target_skill!r} but no skill_resolver was provided",
+                )
+            sub_root = resolve_skill_root(skill_resolver, spec.target_skill)
             sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(
                 sub_root,
                 skill_resolver=skill_resolver,
@@ -391,7 +383,8 @@ def _compile_subagent_metadata(
                     doc.path,
                     _frontmatter_key_line(doc.path, "phase_config"),
                     "subagent "
-                    f"{spec.name!r} at {spec.path!r} must declare a non-empty io.inputs schema",
+                    f"{spec.name!r} at {spec.target_skill!r} must declare "
+                    "a non-empty io.inputs schema",
                 )
             try:
                 input_model = build_subagent_input_model(
@@ -408,7 +401,7 @@ def _compile_subagent_metadata(
                 CompiledSubagent(
                     parent_phase_id=doc.phase_name,
                     name=spec.name,
-                    target_skill=target_skill,
+                    target_skill=spec.target_skill,
                     description=spec.description,
                     root=sub_root,
                     input_schema=input_schema,
@@ -467,7 +460,6 @@ def _subagent_tool_def(
             "kind": "subagent",
             "subagent_name": subagent.name,
             "target_skill": subagent.target_skill,
-            "subagent_path": subagent.target_skill,
             "subagent_root": str(subagent.root),
             "expected_schema": subagent.expected_schema,
         },
@@ -479,45 +471,6 @@ def _pending_call_subagent_tool(inputs: list[Any]) -> list[dict[str, Any]]:
 
     del inputs
     raise NotImplementedError("call_subagent runtime is implemented in Phase 2 Executor")
-
-
-def _resolve_subagent_root(
-    skill_root: Path,
-    phase_path: Path,
-    subagent_path: str,
-    subagent_name: str,
-) -> Path:
-    display_path = phase_path.parent / subagent_path
-    path = Path(subagent_path)
-    if path.is_absolute():
-        _fatal(
-            phase_path,
-            _frontmatter_key_line(phase_path, "phase_config"),
-            f"subagent {subagent_name!r} path must be relative to phase root",
-        )
-    skill_root_resolved = skill_root.resolve()
-    candidate = display_path.resolve()
-    try:
-        candidate.relative_to(skill_root_resolved)
-    except ValueError:
-        _fatal(
-            phase_path,
-            _frontmatter_key_line(phase_path, "phase_config"),
-            f"subagent {subagent_name!r} path must stay inside skill root",
-        )
-    if not candidate.is_dir():
-        _fatal(
-            phase_path,
-            _frontmatter_key_line(phase_path, "phase_config"),
-            f"subagent {subagent_name!r} path {subagent_path!r} does not exist",
-        )
-    if not (candidate / "GRAPH.md").is_file():
-        _fatal(
-            phase_path,
-            _frontmatter_key_line(phase_path, "phase_config"),
-            f"subagent {subagent_name!r} path {subagent_path!r} has no GRAPH.md",
-        )
-    return candidate
 
 
 def _subagent_input_model_name(phase_id: str, subagent_name: str) -> str:

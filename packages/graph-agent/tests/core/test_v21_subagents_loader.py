@@ -6,6 +6,7 @@ import pytest
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.loader import SkillLoader
 from graph_agent.core.manifest import SkillNodeAST
+from tests.conftest import InMemorySkillResolver
 
 _FIXTURES = Path(__file__).parents[1] / "fixtures"
 
@@ -37,7 +38,7 @@ def _skill(root: Path, body: str, phase: str = "main") -> None:
 
 def _sub_skill(
     parent_phase_root: Path,
-    relative: str,
+    name: str,
     *,
     inputs: str = """{
   "type": "object",
@@ -50,13 +51,13 @@ def _sub_skill(
   "required": ["scene_text"]
 }
 """,
-) -> None:
-    root = parent_phase_root / relative
+) -> Path:
+    root = parent_phase_root / "subskills" / name
     _write(
         root / "GRAPH.md",
-        """---
+        f"""---
 schema_version: "2.1"
-name: child
+name: {name}
 ---
 <input src="io/inputs.json" />
 <output src="io/outputs.json" />
@@ -79,6 +80,13 @@ Call finish_task.
 </exit_contract>
 """,
     )
+    return root
+
+
+def _subskill_resolver(tmp_path: Path, *names: str) -> InMemorySkillResolver:
+    return InMemorySkillResolver(
+        {name: tmp_path / "phases" / "main" / "subskills" / name for name in names}
+    )
 
 
 def _skill_text(*, phase_config: str = "") -> str:
@@ -99,8 +107,8 @@ Call finish_task.
 
 def test_skill_phase_config_subagents_parse_into_ast(tmp_path: Path) -> None:
     _base(tmp_path)
-    _sub_skill(tmp_path / "phases" / "main", "subskills/beat_extractor")
-    _sub_skill(tmp_path / "phases" / "main", "subskills/producer_strategy")
+    _sub_skill(tmp_path / "phases" / "main", "beat_extractor")
+    _sub_skill(tmp_path / "phases" / "main", "producer_strategy")
     _skill(
         tmp_path,
         _skill_text(
@@ -108,16 +116,19 @@ def test_skill_phase_config_subagents_parse_into_ast(tmp_path: Path) -> None:
     - read_file
   subagents:
     - name: beat_extractor
-      path: subskills/beat_extractor
+      target_skill: beat_extractor
       description: Extract narrative beats.
     - name: producer_strategy
-      path: subskills/producer_strategy
+      target_skill: producer_strategy
       description: Score audience pull.
 """
         ),
     )
 
-    compiled = SkillLoader().compile_skill(tmp_path)
+    compiled = SkillLoader().compile_skill(
+        tmp_path,
+        skill_resolver=_subskill_resolver(tmp_path, "beat_extractor", "producer_strategy"),
+    )
     ast = compiled.nodes[0].ast
 
     assert isinstance(ast, SkillNodeAST)
@@ -126,7 +137,7 @@ def test_skill_phase_config_subagents_parse_into_ast(tmp_path: Path) -> None:
         "beat_extractor",
         "producer_strategy",
     ]
-    assert ast.subagents[0].path == "subskills/beat_extractor"
+    assert ast.subagents[0].target_skill == "beat_extractor"
     assert ast.subagents[0].description == "Extract narrative beats."
 
 
@@ -145,7 +156,7 @@ def test_skill_without_subagents_keeps_empty_default(tmp_path: Path) -> None:
     [
         (
             """  subagents:
-    - path: subskills/missing_name
+    - target_skill: missing_name
       description: Missing name.
 """,
             "name",
@@ -153,7 +164,7 @@ def test_skill_without_subagents_keeps_empty_default(tmp_path: Path) -> None:
         (
             """  subagents:
     - name: bad-name
-      path: subskills/bad
+      target_skill: bad
       description: Invalid name.
 """,
             "bad-name",
@@ -161,9 +172,24 @@ def test_skill_without_subagents_keeps_empty_default(tmp_path: Path) -> None:
         (
             """  subagents:
     - name: missing_description
-      path: subskills/missing_description
+      target_skill: missing_description
 """,
             "description",
+        ),
+        (
+            """  subagents:
+    - name: missing_target
+      description: Missing target.
+""",
+            "target_skill",
+        ),
+        (
+            """  subagents:
+    - name: legacy_path
+      path: subskills/legacy
+      description: Legacy path is forbidden.
+""",
+            "Extra inputs are not permitted",
         ),
     ],
 )
@@ -181,23 +207,27 @@ def test_invalid_subagent_declaration_fails_compile(
 
 def test_subagent_metadata_resolves_target_and_input_schema(tmp_path: Path) -> None:
     _base(tmp_path)
-    _sub_skill(tmp_path / "phases" / "main", "subskills/beat_extractor")
+    _sub_skill(tmp_path / "phases" / "main", "beat_extractor")
     _skill(
         tmp_path,
         _skill_text(
             phase_config="""  subagents:
     - name: beat_extractor
-      path: subskills/beat_extractor
+      target_skill: beat_extractor
       description: Extract narrative beats.
 """
         ),
     )
 
-    compiled = SkillLoader().compile_skill(tmp_path)
+    compiled = SkillLoader().compile_skill(
+        tmp_path,
+        skill_resolver=_subskill_resolver(tmp_path, "beat_extractor"),
+    )
     subagents = compiled.subagents_by_phase["main"]
 
     assert len(subagents) == 1
     assert subagents[0].name == "beat_extractor"
+    assert subagents[0].target_skill == "beat_extractor"
     assert subagents[0].root == tmp_path / "phases" / "main" / "subskills" / "beat_extractor"
     assert subagents[0].input_schema["properties"]["scene_text"]["type"] == "string"
     assert subagents[0].input_model.__name__ == "MainBeatExtractorInput"
@@ -208,7 +238,7 @@ def test_subagent_input_model_validates_basic_json_schema_types(tmp_path: Path) 
     _base(tmp_path)
     _sub_skill(
         tmp_path / "phases" / "main",
-        "subskills/typed_expert",
+        "typed_expert",
         inputs="""{
   "type": "object",
   "properties": {
@@ -228,13 +258,16 @@ def test_subagent_input_model_validates_basic_json_schema_types(tmp_path: Path) 
         _skill_text(
             phase_config="""  subagents:
     - name: typed_expert
-      path: subskills/typed_expert
+      target_skill: typed_expert
       description: Validate typed input.
 """
         ),
     )
 
-    input_model = SkillLoader().compile_skill(tmp_path).subagents_by_phase["main"][0].input_model
+    input_model = SkillLoader().compile_skill(
+        tmp_path,
+        skill_resolver=_subskill_resolver(tmp_path, "typed_expert"),
+    ).subagents_by_phase["main"][0].input_model
     valid = input_model.model_validate(
         {
             "title": "A",
@@ -265,32 +298,35 @@ def test_subagent_input_model_validates_basic_json_schema_types(tmp_path: Path) 
 
 def test_subagent_tools_are_injected_into_phase_tool_registry(tmp_path: Path) -> None:
     _base(tmp_path)
-    _sub_skill(tmp_path / "phases" / "main", "subskills/beat_extractor")
-    _sub_skill(tmp_path / "phases" / "main", "subskills/producer_strategy")
+    _sub_skill(tmp_path / "phases" / "main", "beat_extractor")
+    _sub_skill(tmp_path / "phases" / "main", "producer_strategy")
     _skill(
         tmp_path,
         _skill_text(
             phase_config="""  subagents:
     - name: beat_extractor
-      path: subskills/beat_extractor
+      target_skill: beat_extractor
       description: Extract narrative beats.
     - name: producer_strategy
-      path: subskills/producer_strategy
+      target_skill: producer_strategy
       description: Score audience pull.
 """
         ),
     )
 
-    tools = {
-        tool.name: tool for tool in SkillLoader().compile_skill(tmp_path).tools.for_phase("main")
-    }
+    compiled = SkillLoader().compile_skill(
+        tmp_path,
+        skill_resolver=_subskill_resolver(tmp_path, "beat_extractor", "producer_strategy"),
+    )
+    tools = {tool.name: tool for tool in compiled.tools.for_phase("main")}
 
     assert sorted(tools) == ["call_subagent_beat_extractor", "call_subagent_producer_strategy"]
     beat_tool = tools["call_subagent_beat_extractor"]
     assert "Extract narrative beats." in beat_tool.description
     assert "no more than 3 inputs" in beat_tool.description
     assert beat_tool.metadata is not None
-    assert beat_tool.metadata["subagent_path"] == "subskills/beat_extractor"
+    assert beat_tool.metadata["target_skill"] == "beat_extractor"
+    assert "subagent_path" not in beat_tool.metadata
     assert beat_tool.args_schema is not None
     schema = beat_tool.args_schema.model_json_schema()
     assert "inputs" in schema["properties"]
@@ -299,13 +335,13 @@ def test_subagent_tools_are_injected_into_phase_tool_registry(tmp_path: Path) ->
 
 def test_subagent_dynamic_tool_name_conflict_fails_compile(tmp_path: Path) -> None:
     _base(tmp_path)
-    _sub_skill(tmp_path / "phases" / "main", "subskills/beat_extractor")
+    _sub_skill(tmp_path / "phases" / "main", "beat_extractor")
     _skill(
         tmp_path,
         _skill_text(
             phase_config="""  subagents:
     - name: beat_extractor
-      path: subskills/beat_extractor
+      target_skill: beat_extractor
       description: Extract narrative beats.
 """
         ),
@@ -316,63 +352,99 @@ def test_subagent_dynamic_tool_name_conflict_fails_compile(tmp_path: Path) -> No
     )
 
     with pytest.raises(SkillLoadError, match="conflicts with an existing tool"):
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(
+            tmp_path,
+            skill_resolver=_subskill_resolver(tmp_path, "beat_extractor"),
+        )
 
 
 def test_static_subagent_minimal_fixture_compiles() -> None:
-    compiled = SkillLoader().compile_skill(_FIXTURES / "subagent_minimal")
+    root = _FIXTURES / "subagent_minimal"
+    compiled = SkillLoader().compile_skill(
+        root,
+        skill_resolver=InMemorySkillResolver(
+            {"echo_expert": root / "phases" / "main" / "subskills" / "echo_expert"}
+        ),
+    )
 
     subagents = compiled.subagents_by_phase["main"]
     tools = {tool.name: tool for tool in compiled.tools.for_phase("main")}
 
     assert subagents[0].name == "echo_expert"
+    assert subagents[0].target_skill == "echo_expert"
     assert subagents[0].input_model.model_validate({"text": "hello"}).text == "hello"
     assert "call_subagent_echo_expert" in tools
 
 
-@pytest.mark.parametrize(
-    ("relative", "message"),
-    [
-        ("subskills/missing", "does not exist"),
-        ("subskills/not_a_skill", "has no GRAPH.md"),
-    ],
-)
-def test_subagent_target_must_exist_and_be_v21_skill_root(
-    tmp_path: Path,
-    relative: str,
-    message: str,
-) -> None:
+def test_subagent_target_requires_resolver(tmp_path: Path) -> None:
     _base(tmp_path)
-    if relative.endswith("not_a_skill"):
-        (tmp_path / "phases" / "main" / relative).mkdir(parents=True)
-    _skill(
-        tmp_path,
-        _skill_text(
-            phase_config=f"""  subagents:
-    - name: beat_extractor
-      path: {relative}
-      description: Extract narrative beats.
-"""
-        ),
-    )
-
-    with pytest.raises(SkillLoadError, match=message):
-        SkillLoader().compile_skill(tmp_path)
-
-
-def test_subagent_target_must_declare_io_inputs(tmp_path: Path) -> None:
-    _base(tmp_path)
-    _sub_skill(tmp_path / "phases" / "main", "subskills/beat_extractor", inputs="{}\n")
     _skill(
         tmp_path,
         _skill_text(
             phase_config="""  subagents:
     - name: beat_extractor
-      path: subskills/beat_extractor
+      target_skill: beat_extractor
+      description: Extract narrative beats.
+"""
+        ),
+    )
+
+    with pytest.raises(SkillLoadError, match="no skill_resolver was provided"):
+        SkillLoader().compile_skill(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("roots", "message"),
+    [
+        ({}, r"\[F-v3-skill-not-registered\]"),
+        ({"beat_extractor": "not_a_skill"}, r"\[F-v3-resolver-path-invalid\]"),
+    ],
+)
+def test_subagent_target_must_resolve_to_skill_root(
+    tmp_path: Path,
+    roots: dict[str, str],
+    message: str,
+) -> None:
+    _base(tmp_path)
+    if roots:
+        (tmp_path / "phases" / "main" / "subskills" / "not_a_skill").mkdir(parents=True)
+    _skill(
+        tmp_path,
+        _skill_text(
+            phase_config="""  subagents:
+    - name: beat_extractor
+      target_skill: beat_extractor
+      description: Extract narrative beats.
+"""
+        ),
+    )
+    resolver = InMemorySkillResolver(
+        {
+            skill_id: tmp_path / "phases" / "main" / "subskills" / relative
+            for skill_id, relative in roots.items()
+        }
+    )
+
+    with pytest.raises(SkillLoadError, match=message):
+        SkillLoader().compile_skill(tmp_path, skill_resolver=resolver)
+
+
+def test_subagent_target_must_declare_io_inputs(tmp_path: Path) -> None:
+    _base(tmp_path)
+    _sub_skill(tmp_path / "phases" / "main", "beat_extractor", inputs="{}\n")
+    _skill(
+        tmp_path,
+        _skill_text(
+            phase_config="""  subagents:
+    - name: beat_extractor
+      target_skill: beat_extractor
       description: Extract narrative beats.
 """
         ),
     )
 
     with pytest.raises(SkillLoadError, match="io.inputs"):
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(
+            tmp_path,
+            skill_resolver=_subskill_resolver(tmp_path, "beat_extractor"),
+        )

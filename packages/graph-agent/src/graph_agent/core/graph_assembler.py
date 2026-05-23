@@ -22,6 +22,11 @@ from graph_agent.cognitive.critic import (
 from graph_agent.cognitive.finish_task import build_finish_task_tool
 from graph_agent.cognitive.md2json import parse_finish_markdown
 from graph_agent.cognitive.md_patch import LLMMdPatchClient
+from graph_agent.cognitive.prompt import (
+    apply_v030_cognitive_template,
+    resolve_role_prefix_from_llm_role,
+)
+from graph_agent.core.actions import ToolDef, _structured_tool
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
 from graph_agent.core.loader import CompiledSkill, CompiledSubagent, PhaseDocument, SkillLoader
 from graph_agent.core.manifest import (
@@ -133,6 +138,7 @@ def _build_phase_node(
     if isinstance(ast, (AgentNodeAST, SkillNodeAST)):
         return _build_skill_node(
             phase_id,
+            phase_doc,
             ast,
             compiled,
             chat_model,
@@ -210,6 +216,7 @@ def _build_subgraph_node(
 
 def _build_skill_node(
     phase_id: str,
+    phase_doc: PhaseDocument,
     phase_ast: AgentNodeAST | SkillNodeAST,
     compiled: CompiledSkill,
     chat_model: Any,
@@ -217,6 +224,8 @@ def _build_skill_node(
     skill_resolver: SkillResolverProtocol | None,
 ) -> Any:
     business_tools = compiled.tools.for_phase(phase_id)
+    if isinstance(phase_ast, AgentNodeAST):
+        business_tools = [*business_tools, *_agent_resource_tools(phase_doc, phase_ast)]
     tool_by_name = {tool.name: tool for tool in business_tools}
     subagent_by_tool_name = _subagent_tool_map(phase_id, compiled)
     subagent_runtime_by_tool_name = _subagent_runtime_map(
@@ -242,6 +251,8 @@ def _build_skill_node(
             )
             framework_tools.append(critic_tool)
             critic_metrics[tool_name] = metrics
+        elif tool_name == "finish_task":
+            continue
         elif tool_name not in tool_by_name:
             _graph_fatal(
                 f"tool {tool_name!r} in SKILL phase {phase_id!r} not found in ToolRegistry "
@@ -271,13 +282,23 @@ def _build_skill_node(
 
         data_updates: dict[str, Any] = {}
         flow = dict(state.get("flow", {}))
-        messages = [SystemMessage(content=phase_ast.system_prompt), *state.get("messages", [])]
+        messages = [
+            SystemMessage(content=_agent_system_prompt(phase_id, phase_ast, compiled)),
+            *state.get("messages", []),
+        ]
         model = (
             chat_model.bind_tools(all_tools) if hasattr(chat_model, "bind_tools") else chat_model
         )
 
-        for _ in range(MAX_REACT_TURNS):
-            prompt_messages = inject_exit_contract(messages, phase_ast.exit_contract)
+        max_turns = (
+            phase_ast.max_iterations if isinstance(phase_ast, AgentNodeAST) else MAX_REACT_TURNS
+        )
+        for _ in range(max_turns):
+            prompt_messages = (
+                messages
+                if isinstance(phase_ast, AgentNodeAST)
+                else inject_exit_contract(messages, phase_ast.exit_contract)
+            )
             response = model.invoke(prompt_messages)
             messages = [*prompt_messages, response]
             tool_calls = list(getattr(response, "tool_calls", []) or [])
@@ -342,6 +363,98 @@ def _subagent_tool_map(
         f"call_subagent_{subagent.name}": subagent
         for subagent in compiled.subagents_by_phase.get(phase_id, [])
     }
+
+
+def _agent_system_prompt(
+    phase_id: str,
+    phase_ast: AgentNodeAST | SkillNodeAST,
+    compiled: CompiledSkill,
+) -> str:
+    if not isinstance(phase_ast, AgentNodeAST):
+        return phase_ast.system_prompt
+    output_schema = (
+        phase_ast.io.outputs
+        if phase_ast.io is not None
+        else compiled.raw.get("io", {}).get("outputs")
+        if _is_terminal_phase(phase_id, compiled.manifest)
+        else None
+    )
+    return apply_v030_cognitive_template(
+        phase_name=phase_id,
+        role=phase_ast.role,
+        goal=phase_ast.goal,
+        steps=[step.model_dump() for step in phase_ast.steps],
+        protocols=[protocol.model_dump() for protocol in phase_ast.protocols],
+        exit_contract=phase_ast.exit_contract,
+        output_schema=output_schema if isinstance(output_schema, dict) else None,
+        inline_examples=[
+            example.content
+            for example in phase_ast.examples
+            if example.type == "inline" and example.content
+        ],
+        document_examples=[
+            {"id": example.id, "summary": example.summary or ""}
+            for example in phase_ast.examples
+            if example.type == "document"
+        ],
+        role_prefix=resolve_role_prefix_from_llm_role(phase_ast.llm_role),
+    )
+
+
+def _agent_resource_tools(
+    phase_doc: PhaseDocument,
+    phase_ast: AgentNodeAST,
+) -> list[Any]:
+    root = _skill_root_for_phase_path(phase_doc.path)
+    references = {item.id: item for item in phase_ast.references}
+    examples = {item.id: item for item in phase_ast.examples}
+
+    def read_reference(reference_id: str) -> str:
+        spec = references.get(reference_id)
+        if spec is None:
+            raise GraphAgentFatalError(f"[F-v3-resource-reference-id-invalid] {reference_id!r}")
+        return (root / spec.path).read_text(encoding="utf-8")
+
+    def read_example(example_id: str) -> str:
+        spec = examples.get(example_id)
+        if spec is None:
+            raise GraphAgentFatalError(f"[F-v3-resource-example-invalid] {example_id!r}")
+        if spec.type == "inline":
+            return spec.content or ""
+        if spec.path is None:
+            raise GraphAgentFatalError(f"[F-v3-resource-example-path-invalid] {example_id!r}")
+        return (root / spec.path).read_text(encoding="utf-8")
+
+    tools: list[Any] = []
+    if references:
+        tools.append(
+            ToolDef(
+                id="read_reference",
+                phase_id=phase_doc.phase_name,
+                path=phase_doc.path,
+                func=read_reference,
+                description="Read one declared reference by id.",
+            )
+        )
+    if examples:
+        tools.append(
+            ToolDef(
+                id="read_example",
+                phase_id=phase_doc.phase_name,
+                path=phase_doc.path,
+                func=read_example,
+                description="Read one declared example by id.",
+            )
+        )
+    return [_structured_tool(tool) for tool in tools]
+
+
+def _skill_root_for_phase_path(path: Path) -> Path:
+    try:
+        phase_index = path.parts.index("phases")
+    except ValueError:
+        return path.parent
+    return Path(*path.parts[:phase_index])
 
 
 def _invoke_subagent_tool_t21(

@@ -960,7 +960,7 @@ def _validate_inline_io_schema(path: Path, schema: dict[str, Any], kind: str) ->
         Draft202012Validator.check_schema(schema)
     except SchemaError as exc:
         _io_fatal(path, 1, f"invalid inline {kind} JSON Schema: {exc.message}")
-    return cast(dict[str, Any], schema)
+    return schema
 
 
 def _extract_output_schema_keys(schema: dict[str, Any]) -> set[str] | None:

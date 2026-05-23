@@ -94,7 +94,7 @@ MVP0 MUST 删除 `ExitContractRegistry` 的 per-turn inject / strip 设计。`ex
 | `output_schema` 独立插槽 | 退役 | 追加到 exit_contract 末尾 | 序列化失败 FATAL | `[F-v3-cognitive-output-schema-render-failed]` | recency bias |
 | ReAct `messages` | 不存 exit contract 临时副本 | 只保存真实对话 / tool 消息 | 不允许重复注入 contract | `[F-v3-runtime-phase-failed]` | 控制上下文体积 |
 
-这样做的原因是输出契约属于 Agent prompt 的固定系统约束, 不是每轮 runtime 临时补丁。规范终点见 [Cognitive Template 7 大插槽](../skill-spec/06-cognitive-template-spec.md#7-大插槽布局拓扑) 与 [Agent Body XML](../skill-spec/05-agent-md-spec.md#body-xml-扁平化容器)。
+这样做的原因是输出契约属于 Agent prompt 的固定系统约束, 不是每轮 runtime 临时补丁。规范终点见 [Cognitive Template 8 大插槽](../skill-spec/06-cognitive-template-spec.md#8-大插槽布局拓扑) 与 [Agent Body XML](../skill-spec/05-agent-md-spec.md#body-xml-扁平化容器)。
 
 ### 4. Subagent 全局寻址与轻量单节点抽象退役 (C11)
 

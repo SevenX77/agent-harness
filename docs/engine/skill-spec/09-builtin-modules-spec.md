@@ -70,7 +70,7 @@ Reference reader 是质量增强模块, 不是 Agent phase 的硬依赖。失败
 
 为什么不阻塞: reference reader 的价值是把资料变得更好读, 但 Agent 仍有 `read_reference` tool 可以按需读取原文。编译期只保证资料路径存在和 registry 正确; reader 推理失败不应让整个 graph 无法运行。
 
-降级后的 knowledge_base 填充位置见 [Cognitive Template 内部插槽布局](./06-cognitive-template-spec.md#7-大插槽布局拓扑)。
+降级后的 knowledge_base 填充位置见 [Cognitive Template 内部插槽布局](./06-cognitive-template-spec.md#8-大插槽布局拓扑)。
 
 ## 按需调取 Tools (read_reference / read_example)
 

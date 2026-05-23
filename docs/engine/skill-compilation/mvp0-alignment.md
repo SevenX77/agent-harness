@@ -149,7 +149,7 @@ MVP0 MUST 在编译后的装配阶段把 Agent AST 渲染成 V0.3.0 cognitive te
 | `{document_examples_registry}` | markdown list | 否 | `"无扩展案例"` | examples `type:document` id + summary | `[F-v3-resource-example-invalid]` | 长案例按需读取目录 |
 | `{skill_exit_contract_inline}` | XML block | 是 | 无 | `<exit_contract>` 末尾追加 `io.outputs` schema | `[F-v3-agent-exit-contract-missing]` / `[F-v3-cognitive-output-schema-render-failed]` | 输出契约 recency bias |
 
-说明: Agent body XML AST 与 cognitive template 容器分层处理。Loader 从 SKILL.md body 提取 5 类顶层业务标签, 装配器再填充到 cognitive template 的固定容器。编译器执行时以 [Agent Body XML 扁平化容器](../skill-spec/05-agent-md-spec.md#body-xml-扁平化容器) 和 [Cognitive Template 7 大插槽](../skill-spec/06-cognitive-template-spec.md#7-大插槽布局拓扑) 为准。
+说明: Agent body XML AST 与 cognitive template 容器分层处理。Loader 从 SKILL.md body 提取 5 类顶层业务标签, 装配器再填充到 cognitive template 的固定容器。编译器执行时以 [Agent Body XML 扁平化容器](../skill-spec/05-agent-md-spec.md#body-xml-扁平化容器) 和 [Cognitive Template 8 大插槽](../skill-spec/06-cognitive-template-spec.md#8-大插槽布局拓扑) 为准。
 
 ### 8. Mention 语法静态可达性校验 (NEW-4)
 

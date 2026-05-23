@@ -470,16 +470,22 @@ def _run_v21_skill_dict(
     **inputs: Any,
 ) -> dict[str, Any]:
     """Execute a V2.1 skill root through compile_skill + assemble_graph."""
-
-    del callbacks
     from graph_agent.core.compiler import compile_skill
     from graph_agent.core.graph_assembler import assemble_graph
     from graph_agent.runtime.state_mapper import filter_runtime_inputs
 
     t0 = time.time()
     chat_model = None if mock_llm is _NO_MOCK_LLM else mock_llm
+    effective_callbacks = callbacks
+    if effective_callbacks is None and trace_dir is not None:
+        effective_callbacks = [LoggingCallback(), TracingCallback(trace_dir=trace_dir)]
     compiled = compile_skill(skill_root, skill_resolver=skill_resolver)
-    graph = assemble_graph(compiled, chat_model=chat_model, skill_resolver=skill_resolver).graph
+    graph = assemble_graph(
+        compiled,
+        chat_model=chat_model,
+        skill_resolver=skill_resolver,
+        callbacks=effective_callbacks,
+    ).graph
     run_id = thread_id or str(uuid.uuid4())
     canonical_inputs = filter_runtime_inputs(dict(inputs), compiled.manifest.io.inputs)
     result = graph.invoke(

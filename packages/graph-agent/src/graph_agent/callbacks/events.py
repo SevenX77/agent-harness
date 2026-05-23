@@ -171,8 +171,8 @@ class AmbiguityLoggedEvent(_EventBase):
     question: str
     decision: str
     reason: str = ""
-    related_refs: list[str] = Field(default_factory=list)
-    related_protocols: list[str] = Field(default_factory=list)
+    related_reference_ids: list[str] = Field(default_factory=list)
+    related_protocol_ids: list[str] = Field(default_factory=list)
 
 
 class BuiltinSubagentEnterEvent(_EventBase):

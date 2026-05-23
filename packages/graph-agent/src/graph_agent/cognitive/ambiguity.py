@@ -60,7 +60,8 @@ def log_ambiguity(
         "reason": reason,
     }
     reports.append(record)
-    _emit_ambiguity_logged(ctx, record)
+    if not ctx.get("_defer_ambiguity_event"):
+        _emit_ambiguity_logged(ctx, record)
 
     return json.dumps(
         {
@@ -72,23 +73,27 @@ def log_ambiguity(
     )
 
 
-def _emit_ambiguity_logged(ctx: dict[str, Any], record: dict[str, Any]) -> None:
-    callbacks = ctx.get("_callbacks")
-    if not isinstance(callbacks, list):
-        return
+def ambiguity_logged_event_from_record(record: dict[str, Any]) -> Any:
     from graph_agent.callbacks.events import AmbiguityLoggedEvent
 
     question = str(record.get("question") or "")
     reason = str(record.get("reason") or "")
-    payload = AmbiguityLoggedEvent(
+    return AmbiguityLoggedEvent(
         phase_name=record.get("phase"),
         ambiguity_type=str(record.get("type") or ""),
         question=question,
         decision=str(record.get("decision") or ""),
         reason=reason,
-        related_refs=_REF_RE.findall(question + " " + reason),
-        related_protocols=_PROTOCOL_RE.findall(question + " " + reason),
+        related_reference_ids=_REF_RE.findall(question + " " + reason),
+        related_protocol_ids=_PROTOCOL_RE.findall(question + " " + reason),
     )
+
+
+def _emit_ambiguity_logged(ctx: dict[str, Any], record: dict[str, Any]) -> None:
+    callbacks = ctx.get("_callbacks")
+    if not isinstance(callbacks, list):
+        return
+    payload = ambiguity_logged_event_from_record(record)
     for callback in callbacks:
         on_event = getattr(callback, "on_event", None)
         if on_event is None:

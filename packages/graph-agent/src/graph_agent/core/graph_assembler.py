@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,6 +13,8 @@ from langchain_core.messages import SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
+from graph_agent.callbacks.events import ToolCallEvent
+from graph_agent.cognitive.ambiguity import ambiguity_logged_event_from_record, log_ambiguity
 from graph_agent.cognitive.critic import (
     CriticVerdict,
     FakeCriticClient,
@@ -46,6 +49,7 @@ from graph_agent.core.subagents import (
     current_subagent_depth,
     validate_subagent_tool_args,
 )
+from graph_agent.core.tool_wrapper import _wrap_tool_for_langchain
 from graph_agent.runtime.state import BlackboardState
 from graph_agent.runtime.state_mapper import (
     PhaseWrapper,
@@ -79,6 +83,7 @@ def assemble_graph(
     chat_model: Any = None,
     max_patch_attempts: int = 3,
     skill_resolver: SkillResolverProtocol | None = None,
+    callbacks: list[Any] | None = None,
 ) -> CompiledStateGraph:
     """Assemble a V2.1 CompiledSkill into a compiled LangGraph."""
 
@@ -100,6 +105,7 @@ def assemble_graph(
                 chat_model,
                 max_patch_attempts,
                 skill_resolver,
+                callbacks,
             ),
         )
         phase_ids.append(phase_ref.id)
@@ -132,6 +138,7 @@ def _build_phase_node(
     chat_model: Any,
     max_patch_attempts: int,
     skill_resolver: SkillResolverProtocol | None,
+    callbacks: list[Any] | None,
 ) -> Any:
     ast = phase_doc.ast
     if isinstance(ast, LogicNodeAST):
@@ -145,6 +152,7 @@ def _build_phase_node(
                 chat_model,
                 max_patch_attempts,
                 skill_resolver,
+                callbacks,
             ),
         )
     if isinstance(ast, AgentNodeAST):
@@ -158,6 +166,7 @@ def _build_phase_node(
                 chat_model,
                 max_patch_attempts,
                 skill_resolver,
+                callbacks,
             ),
         )
     _graph_fatal(f"unknown phase mode for {phase_id!r}")
@@ -205,6 +214,7 @@ def _build_subgraph_node(
     chat_model: Any,
     max_patch_attempts: int,
     skill_resolver: SkillResolverProtocol | None,
+    callbacks: list[Any] | None,
 ) -> Any:
     del phase_doc
     if skill_resolver is None:
@@ -219,6 +229,7 @@ def _build_subgraph_node(
         chat_model=chat_model,
         max_patch_attempts=max_patch_attempts,
         skill_resolver=skill_resolver,
+        callbacks=callbacks,
     )
 
     def _subgraph_node(state: BlackboardState) -> dict[str, Any]:
@@ -259,9 +270,15 @@ def _build_skill_node(
     chat_model: Any,
     max_patch_attempts: int,
     skill_resolver: SkillResolverProtocol | None,
+    callbacks: list[Any] | None,
 ) -> Any:
     business_tools = compiled.tools.for_phase(phase_id)
     business_tools = [*business_tools, *_agent_resource_tools(phase_doc, phase_ast)]
+    tool_state: dict[str, Any] = {
+        "_current_phase": phase_id,
+        "_callbacks": list(callbacks or []),
+        "_defer_ambiguity_event": True,
+    }
     tool_by_name = {tool.name: tool for tool in business_tools}
     subagent_by_tool_name = _subagent_tool_map(phase_id, compiled)
     subagent_runtime_by_tool_name = _subagent_runtime_map(
@@ -269,6 +286,7 @@ def _build_skill_node(
         chat_model=chat_model,
         max_patch_attempts=max_patch_attempts,
         skill_resolver=skill_resolver,
+        callbacks=callbacks,
     )
     framework_tools = []
     critic_metrics: dict[str, Any] = {}
@@ -306,7 +324,8 @@ def _build_skill_node(
         LLMMdPatchClient(chat_model) if chat_model is not None else None,
         max_patch_attempts=max_patch_attempts,
     )
-    all_tools = [*business_tools, *framework_tools, finish_task]
+    ambiguity_tool = _wrap_tool_for_langchain(log_ambiguity, tool_state)
+    all_tools = [*business_tools, *framework_tools, ambiguity_tool, finish_task]
     all_tools_by_name = {tool.name: tool for tool in all_tools}
     system_prompt = _agent_system_prompt(phase_id, phase_doc, phase_ast, compiled)
 
@@ -342,6 +361,7 @@ def _build_skill_node(
                     _graph_fatal(f"LLM called unknown tool {name!r} in phase {phase_id!r}")
                 call_args = call.get("args", {})
                 if name in subagent_by_tool_name:
+                    started_at = time.monotonic()
                     result = _invoke_subagent_tool_t21(
                         tool_name=name,
                         subagent=subagent_by_tool_name[name],
@@ -352,7 +372,25 @@ def _build_skill_node(
                         parent_config=config,
                     )
                 else:
+                    started_at = time.monotonic()
                     result = tool.invoke(call_args)
+                duration_ms = (time.monotonic() - started_at) * 1000
+                _emit_callback_event(
+                    callbacks,
+                    ToolCallEvent(
+                        phase_name=phase_id,
+                        tool_name=str(name),
+                        args=call_args if isinstance(call_args, dict) else {},
+                        result=(
+                            result
+                            if isinstance(result, str)
+                            else json.dumps(result, ensure_ascii=False)
+                        ),
+                        duration_ms=duration_ms,
+                    ),
+                )
+                if name == "log_ambiguity":
+                    _emit_latest_ambiguity_logged(callbacks, tool_state)
                 messages.append(
                     ToolMessage(
                         content=json.dumps(result, ensure_ascii=False),
@@ -384,6 +422,30 @@ def _build_skill_node(
         return response_state
 
     return _skill_node
+
+
+def _emit_callback_event(callbacks: list[Any] | None, event: Any) -> None:
+    for callback in callbacks or []:
+        on_event = getattr(callback, "on_event", None)
+        if on_event is None:
+            continue
+        try:
+            on_event(event)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("callback %s failed for %s: %s", callback, event, exc)
+
+
+def _emit_latest_ambiguity_logged(
+    callbacks: list[Any] | None,
+    tool_state: dict[str, Any],
+) -> None:
+    reports = tool_state.get("_ambiguity_reports")
+    if not isinstance(reports, list) or not reports:
+        return
+    latest = reports[-1]
+    if not isinstance(latest, dict):
+        return
+    _emit_callback_event(callbacks, ambiguity_logged_event_from_record(latest))
 
 
 def _subagent_tool_map(
@@ -579,6 +641,7 @@ def _subagent_runtime_map(
     chat_model: Any,
     max_patch_attempts: int,
     skill_resolver: SkillResolverProtocol | None,
+    callbacks: list[Any] | None,
 ) -> dict[str, _SubagentRuntime]:
     runtimes: dict[str, _SubagentRuntime] = {}
     for tool_name, subagent in subagent_by_tool_name.items():
@@ -597,6 +660,7 @@ def _subagent_runtime_map(
             chat_model=chat_model,
             max_patch_attempts=max_patch_attempts,
             skill_resolver=skill_resolver,
+            callbacks=callbacks,
         )
         runtimes[tool_name] = _SubagentRuntime(subagent=subagent, graph=sub_assembled.graph)
     return runtimes

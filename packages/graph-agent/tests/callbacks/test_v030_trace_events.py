@@ -41,8 +41,8 @@ def test_log_ambiguity_emits_v030_ambiguity_logged_event() -> None:
     event = collector.events[0]
     assert isinstance(event, AmbiguityLoggedEvent)
     assert event.phase_name == "main"
-    assert event.related_refs == ["R1"]
-    assert event.related_protocols == ["P1"]
+    assert event.related_reference_ids == ["R1"]
+    assert event.related_protocol_ids == ["P1"]
 
 
 def test_builtin_subagent_trace_events_round_trip_through_callback_union() -> None:

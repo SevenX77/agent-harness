@@ -51,6 +51,7 @@ from graph_agent.core.exceptions import (
 )
 from graph_agent.core.loader import load_workflow_from_md
 from graph_agent.core.result import WorkflowMetrics, WorkflowResult
+from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
 from graph_agent.core.state import WorkflowState
 
 logger = logging.getLogger(__name__)
@@ -169,6 +170,7 @@ def run_skill(
     artifact_saver: Any | None = None,
     initial_context: dict[str, Any] | None = None,
     cleanup_checkpoints_on_finish: bool = True,
+    skill_resolver: SkillResolverProtocol | None = None,
     **inputs: Any,
 ) -> WorkflowResult:
     """Execute a SKILL.md and return a typed workflow result."""
@@ -190,6 +192,7 @@ def run_skill(
             artifact_saver=artifact_saver,
             initial_context=initial_context,
             cleanup_checkpoints_on_finish=cleanup_checkpoints_on_finish,
+            skill_resolver=skill_resolver,
             **inputs,
         )
     except GraphAgentError as exc:
@@ -235,6 +238,7 @@ def _run_skill_dict(
     artifact_saver: Any | None = None,
     initial_context: dict[str, Any] | None = None,
     cleanup_checkpoints_on_finish: bool = True,
+    skill_resolver: SkillResolverProtocol | None = None,
     **inputs: Any,
 ) -> dict[str, Any]:
     """Execute a SKILL.md with the given inputs. Pure document-driven.
@@ -273,6 +277,7 @@ def _run_skill_dict(
             mock_llm=mock_llm,
             thread_id=thread_id,
             callbacks=callbacks,
+            skill_resolver=skill_resolver,
             **inputs,
         )
 
@@ -455,6 +460,7 @@ def _run_v21_skill_dict(
     trace_dir: str | Path | None = None,
     thread_id: str | None = None,
     callbacks: list[Any] | None = None,
+    skill_resolver: SkillResolverProtocol | None = None,
     **inputs: Any,
 ) -> dict[str, Any]:
     """Execute a V2.1 skill root through compile_skill + assemble_graph."""
@@ -465,8 +471,8 @@ def _run_v21_skill_dict(
 
     t0 = time.time()
     chat_model = None if mock_llm is _NO_MOCK_LLM else mock_llm
-    compiled = compile_skill(skill_root)
-    graph = assemble_graph(compiled, chat_model=chat_model).graph
+    compiled = compile_skill(skill_root, skill_resolver=skill_resolver)
+    graph = assemble_graph(compiled, chat_model=chat_model, skill_resolver=skill_resolver).graph
     run_id = thread_id or str(uuid.uuid4())
     result = graph.invoke(
         {

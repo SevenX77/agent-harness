@@ -9,10 +9,31 @@
           "title": "Name",
           "type": "string"
         },
+        "target_skill": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Skill"
+        },
         "path": {
-          "minLength": 1,
-          "title": "Path",
-          "type": "string"
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
         },
         "description": {
           "minLength": 1,
@@ -22,7 +43,6 @@
       },
       "required": [
         "name",
-        "path",
         "description"
       ],
       "title": "SubagentSpec",

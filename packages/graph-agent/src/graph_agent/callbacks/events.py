@@ -162,6 +162,58 @@ class AmbiguityReportEvent(_EventBase):
     decision: str
 
 
+class AmbiguityLoggedEvent(_EventBase):
+    """V0.3.0 event emitted after log_ambiguity records a decision."""
+
+    event_type: Literal["ambiguity_logged"] = "ambiguity_logged"
+    phase_name: str | None = None
+    ambiguity_type: str
+    question: str
+    decision: str
+    reason: str = ""
+    related_refs: list[str] = Field(default_factory=list)
+    related_protocols: list[str] = Field(default_factory=list)
+
+
+class BuiltinSubagentEnterEvent(_EventBase):
+    """V0.3.0 builtin subagent invocation start."""
+
+    event_type: Literal["builtin_subagent_enter"] = "builtin_subagent_enter"
+    run_id: str | None = None
+    phase_name: str
+    builtin_name: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class BuiltinSubagentExitEvent(_EventBase):
+    """V0.3.0 builtin subagent invocation success."""
+
+    event_type: Literal["builtin_subagent_exit"] = "builtin_subagent_exit"
+    run_id: str | None = None
+    phase_name: str
+    builtin_name: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class BuiltinSubagentFallbackEvent(_EventBase):
+    """V0.3.0 builtin subagent fallback path."""
+
+    event_type: Literal["builtin_subagent_fallback"] = "builtin_subagent_fallback"
+    run_id: str | None = None
+    phase_name: str
+    builtin_name: str
+    fallback_reason: Literal[
+        "remote_timeout",
+        "remote_error",
+        "config_missing",
+        "invalid_output",
+        "local_io_error",
+    ]
+    fallback_strategy: str
+    excerpt_token_limit: int | None = None
+    warning: str = ""
+
+
 class PromptCapturedEvent(_EventBase):
     """Fired by TracingClientProxy right before the LLM round-trip.
 
@@ -407,6 +459,10 @@ CallbackEvent = Annotated[
     | DeadEndPrunedEvent
     | CompactionEvent
     | AmbiguityReportEvent
+    | AmbiguityLoggedEvent
+    | BuiltinSubagentEnterEvent
+    | BuiltinSubagentExitEvent
+    | BuiltinSubagentFallbackEvent
     | PromptCapturedEvent
     | LLMFallbackEvent
     | RunStartedEvent
@@ -443,6 +499,10 @@ __all__ = [
     "DeadEndPrunedEvent",
     "CompactionEvent",
     "AmbiguityReportEvent",
+    "AmbiguityLoggedEvent",
+    "BuiltinSubagentEnterEvent",
+    "BuiltinSubagentExitEvent",
+    "BuiltinSubagentFallbackEvent",
     "PromptCapturedEvent",
     "LLMFallbackEvent",
     "RunStartedEvent",

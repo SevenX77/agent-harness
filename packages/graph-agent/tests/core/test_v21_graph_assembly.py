@@ -202,7 +202,7 @@ def test_assemble_fanout_same_data_key_conflict_fatal(tmp_path: Path) -> None:
     _logic_action(tmp_path, "assemble", "assemble", "def assemble(context):\n    return None\n")
 
     graph = assemble_graph(compile_skill(tmp_path, cache=False)).graph
-    with pytest.raises(GraphAgentFatalError, match=r"\[F-v21-state-conflict\].*key='shared'"):
+    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-state-conflict\].*key='shared'"):
         graph.invoke({"data": {}, "flow": {}, "messages": [], "run_id": "fanout-conflict"})
 
 
@@ -249,7 +249,7 @@ def test_unknown_tool_in_skill_phase_fatal(tmp_path: Path) -> None:
     _base(tmp_path, '<phase id="skill" src="phases/skill" depends_on="" />\n')
     _skill(tmp_path, tools=["unknown_xyz"])
 
-    with pytest.raises(SkillLoadError, match=r"\[F-v21-graph\].*unknown_xyz"):
+    with pytest.raises(SkillLoadError, match=r"\[F-v3-graph\].*unknown_xyz"):
         assemble_graph(compile_skill(tmp_path, cache=False))
 
 

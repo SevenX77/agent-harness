@@ -62,6 +62,7 @@ def test_create_openai_model_uses_environment_defaults(monkeypatch: pytest.Monke
     )
     monkeypatch.setenv("GRAPH_AGENT_MODEL_PROVIDER", "openai")
     monkeypatch.setenv("GRAPH_AGENT_MODEL", "env-model")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("GRAPH_AGENT_API_KEY", "env-key")
     monkeypatch.setenv("GRAPH_AGENT_BASE_URL", "https://env.example/v1")
 

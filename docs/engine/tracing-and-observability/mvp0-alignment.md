@@ -1,9 +1,8 @@
-# tracing-and-observability (engine) — MVP0 Alignment (V0.3.0 目标对齐逻辑)
+# tracing-and-observability (engine) — MVP0 Alignment (下一步对齐逻辑)
 
-> **Status**: Filled by a1 (Codex) based on a2 framework, 2026-05-20; Q9/Q13 + 死代码清退 + V0.3.0 版本号 升级 2026-05-21
+> **Status**: Filled by a1 (Codex) based on a2 framework, 2026-05-20
 > **Scope**: Predict 内部与 LangGraph 节点拦截、生命周期事件发出、结构化 Trace 日志 (audit P1-4)
-> **改造目标 engine 版本**: V0.3.0 (MVP0 落地后, 详见 [INDEX.md#engine-版本号约定-2026-05-21-pm-拍定](../../INDEX.md#engine-版本号约定-2026-05-21-pm-拍定))
-> **配套**: 见 [INDEX.md](../../INDEX.md) 三时态模板 + cross-link 规则 + writing conventions。
+> **配套**: 见 [INDEX.md](../../INDEX.md) 5 维模板 + cross-link 规则 + writing conventions。
 
 ## UI/UX
 
@@ -187,11 +186,7 @@ MVP0 观测体系的预留：
 ### 7. 对外部网络及工具的专项抓取
 图中的节点不仅仅是调用模型，它们还会频繁使用 Tools。当前 SKILL node 对普通工具直接 `tool.invoke(call_args)`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:266` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:267`；subagent tool 则走 `_invoke_subagent_tool_t21()`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:256` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:265`。
 
-MVP0 SHOULD 扩容 `TraceEventKind`，加入 `TOOL_CALL_START` 和 `TOOL_CALL_END`，payload 带 `tool_name`、validated args、result summary 和 error。这样 ReAct 调试不只看到”模型说了什么”，也能看到”工具实际做了什么”。
-
-**Q13 决策协同 — `tool_name` 是 per-subagent/subgraph**: 按 Q13 PM 拍定 (详见 [execution-runtime/mvp0-alignment.md#5-call_subgraph-大流程动态工具暴露-a5-改造-q13-决策落地](../execution-runtime/mvp0-alignment.md#5-call_subgraph-大流程动态工具暴露-a5-改造-q13-决策落地)), engine 不暴露统一 `call_subagent(name=..., args=...)` 入口, 而是每个登记的 subagent / subgraph 编译为独立原生 tool `call_subagent_<name>` / `call_subgraph_<name>`。所以 `TOOL_CALL_START.payload.tool_name` SHOULD 直接是这些具体 tool 名 (例: `”call_subagent_beat_extractor”`), Studio Trace 面板可以按 tool name 聚合调用统计, 不需要再额外解析 args 里的 `name=...` 字段。
-
-**Q9 决策协同 — `EXCEPTION` 事件的 fallback 语义**: 按 Q9 决策, LLM 调用失败时 fallback 责任完全在 `GatewayChatModel._generate` 内消化 (`packages/graph-agent/src/graph_agent/models/gateway_chat_model.py` 内部 with_fallbacks 思路)。engine 只看到一次 `chat_model.invoke()` 调用 — 要么成功 (即便底层换了 provider 也是透明的), 要么所有 provider 全 fail 抛出 `ModelResolutionError`。所以 `EXCEPTION` 事件**只在所有 fallback 都用尽之后**才发出, 单 provider fail 重试**不**触发 `EXCEPTION`。如果 Studio 后续要展示”哪个 provider 被试过 / 何时降级”, 那是 `GatewayChatModel` 内部 metric 暴露的事 (不在本 engine tracing spec scope 内)。
+MVP0 SHOULD 扩容 `TraceEventKind`，加入 `TOOL_CALL_START` 和 `TOOL_CALL_END`，payload 带 `tool_name`、validated args、result summary 和 error。这样 ReAct 调试不只看到“模型说了什么”，也能看到“工具实际做了什么”。
 
 工具事件还要和安全过滤联动。工具参数应该记录“校验后的 args”，不要记录 LLM 原始未校验文本；如果校验失败，事件应标记 `success=false` 并带 `error_code=F-v21-tool-args-invalid`。这样 Studio 展示的不是一团模型幻觉文本，而是 runtime 真正尝试执行的结构化调用。
 
@@ -203,59 +198,3 @@ MVP0 SHOULD 扩容 `TraceEventKind`，加入 `TOOL_CALL_START` 和 `TOOL_CALL_EN
 
 回放器还应允许按 `run_id`、`phase_id`、`event_type` 做过滤。这样同一份 trace 既能服务完整时间线，也能服务单个节点的局部调试。
 过滤结果必须保持原始时间顺序，避免调试时误判事件因果。
-
-## MVP0 死代码清退 {#mvp0-死代码清退}
-
-按 a1 (Codex) 2026-05-21 死代码调查 (详见 [baseline.md#legacy--死代码残留清单-a1-调查-2026-05-21](./baseline.md#legacy--死代码残留清单-a1-调查-2026-05-21)) 跟 PM 拍定原则 "把事情做对, 不向后兼容", MVP0 cutover **同 PR** 一并清退以下 tracing-and-observability 域内的 legacy / 死代码:
-
-### 旧 harness 路径 callbacks 整体退役
-
-跟 [execution-runtime/mvp0-alignment.md#MVP0-死代码清退](../execution-runtime/mvp0-alignment.md#mvp0-死代码清退) 协同, 旧 harness `_run_skill_dict` 路径 (`runner.py:284-286`) 默认创建的 `LoggingCallback()` 跟 `TracingCallback(trace_dir=...)` **跟 harness 栈一起退役**。V2.1 主线唯一 callback 接入点是新设计的 `V2TracingCallback` (本文件 API §2)。
-
-### Callback legacy dict/event 兼容退役
-
-以下 legacy dict/event 兼容代码 MVP0 同 PR 退役 (`V2TracingCallback` + 严格 `TraceEventKind` 枚举替代):
-
-- `packages/graph-agent/src/graph_agent/callbacks/base.py:9` — legacy dict 兼容代码
-- `packages/graph-agent/src/graph_agent/callbacks/events.py:10` — legacy event 兼容
-- `packages/graph-agent/src/graph_agent/callbacks/tracing.py:88` — legacy tracing callback 体
-
-清退方式: 跟 V2TracingCallback (新设计, 接 LangGraph node lifecycle) 同 PR 直接替换, 不留 alias。
-
-### 关键保留 — `_predict_internal/` 不退役
-
-a1 已确认 `packages/graph-agent/src/graph_agent/core/_predict_internal/tracing.py` (`PredictTracingCallback`) + `exporter.py` + `interception.py` **不是死代码**, 是 V2.1 Predict 旁路活路径。
-
-但 MVP0 设计的 `V2TracingCallback` 是 **public** API surface, 而 `_predict_internal/tracing.py:1-6` 文件头明示 "not public SDK surface"。两者关系需要在 design 阶段明确:
-
-- 选项 A: V2TracingCallback 作为新 public surface, `PredictTracingCallback` 保留为 private 子类继承 V2TracingCallback (额外加 Predict-specific source tagging)
-- 选项 B: 不复用 `_predict_internal` 类, 让 V2TracingCallback 跟 PredictTracingCallback 并存作为两个独立 callback (用户可以同时挂)
-
-**这个选择 PM 拍**。在 baseline + mvp0-alignment 不预设, 留给 a2 在 design 阶段提推荐 + PM 拍。
-
-### Cutover discipline (按 SOP-05)
-
-tracing-and-observability 的 P1-4 修复 + V2TracingCallback 引入 + legacy callbacks 清退 **必须同 PR**, 跟 execution-runtime harness 栈退役同 cutover。改 callback shape 是 [BREAKING] (按 SOP-06), 必带完整迁移路径。
-
-### V0.3.0 版本号 cutover (PM 2026-05-21)
-
-MVP0 落地 = engine 版本号从 V2.1 升 V0.3.0 (详见 [INDEX.md#engine-版本号约定-2026-05-21-pm-拍定](../../INDEX.md#engine-版本号约定-2026-05-21-pm-拍定))。同 cutover PR 处理 tracing-and-observability 域内的版本号 step:
-
-- **类名 `V2TracingCallback` → `V3TracingCallback`**: 上面 API §2 设计的新 public callback class 名字直接走 V0.3.0 命名 (PM 决策 "不向后兼容", V2.1 没真正接公开 callback, 不需要 V2 → V3 名字过渡)。文件命名 `tracing_v3.py` 或合并入新 `packages/graph-agent/src/graph_agent/callbacks/v3.py` (a2 design 阶段细化)。
-- **`TraceEventKind` enum** 不带版本号 (枚举值就是 `NODE_START` / `NODE_END` / 等), 但 trace 文件顶部 metadata SHOULD 写 `engine_version: 0.3.0` 让 Studio 知道 schema 版本。
-- **错误码前缀**: trace event payload `EXCEPTION.error_code` 跟 engine 错误码同步 (`F-v3-*`)。
-- **trace dir 默认名**: `_run_v21_skill_dict` 返回 `trace_path` (`packages/graph-agent/src/graph_agent/core/runner.py:484`) 现状只拼 `Path(trace_dir) / "trace.json"`, V0.3.0 加版本目录避免新旧混淆 (可选, a2 拍)。
-
-### MVP0 test 全清重写 (PM 2026-05-21)
-
-PM 原则 (2026-05-21): **不只是 V1/V2.0 dead test, V2.1 现有 test 也全部清掉, MVP0 重新写 test 套**。
-
-- **现状 V2.1 test**: `packages/graph-agent/tests/core/test_predict_*.py` / `test_tracing*.py` / `test_callbacks*.py` 等 tracing 相关 test 部分清退 (`_predict_internal/` 相关 test 保留 — Predict 不是死代码, 详见 baseline.md §Legacy 节)。
-- **MVP0 重写覆盖** (tracing-and-observability 域):
-  - P1-4: V3TracingCallback 在 LangGraph node lifecycle 发出 NODE_START/END / LLM_CALL_START/END / SUBAGENT_ENTER/EXIT / EXCEPTION 全 7 类事件 (覆盖每类至少一个 fixture)
-  - 异步 logger 行为 (backpressure / 不阻塞模型推理)
-  - TOOL_CALL_START/END 含 `tool_name = "call_subagent_<name>"` 跟 Q13 per-tool 命名一致
-  - EXCEPTION 在 Q9 fallback 用尽后才触发 (单 provider fail 不触发)
-  - trace file rotate (50MB 阈值) + size guard (payload 截断)
-- **重写策略**: 同 P1-4 cutover PR。**禁止** "测试随后补"。
-- **覆盖率**: unit (单 callback method) + integration (端到端 skill 跑, 抓 trace.jsonl 校验所有 event 都发) + e2e (Studio Trace 面板真消费 event, 不是 mock — 这部分跟 Studio 侧 spec 协同, 不在 engine 域 scope 内)。

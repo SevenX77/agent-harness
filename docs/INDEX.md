@@ -7,26 +7,17 @@
 
 ---
 
-## 重整目标 (PM 2026-05-20, 2026-05-21 升级)
+## 重整目标 (PM 2026-05-20)
 
 1. 原 13 份单 `.md` 升级成 **feature-per-folder** 结构
-2. **studio + engine 域**每个 feature folder 内含**三时态** 3 份: `baseline.md` (当下代码实现逻辑) + `mvp0-alignment.md` (下一步对齐 MVP0 的改造逻辑) + `logic-explained.md` (人话功能逻辑解释, 给 PM 看懂) **[2026-05-21 PM 新增]**
+2. **studio + engine 域**每个 feature folder 内含双时态 2 份: `baseline.md` (当下代码实现逻辑) + `mvp0-alignment.md` (下一步对齐 MVP0 的改造逻辑)
 3. **architecture 域** 2 份核心文档也走双时态 (V2.1 重大演进, baseline ↔ MVP0 心智模型差距明显)
-4. **development / references** 平铺单 `.md`, 不走三时态
-5. **新增 engine 对外文档** `docs/engine/public/` **[2026-05-21 PM 新增]** (业界标准结构, a2 设计中) — 引擎功能说明 / 术语标准 / compile 规则 / 标准 skill 格式 / 创建 graph_skill 指南 / 对外 Python API + Protocol reference 等
-6. **新增 LLM 路由模块** `docs/engine/llm-routing/` **[2026-05-21 PM 新增]** (跟 4 engine feature 平级三时态)
-7. 文档要**详细 + 用人话 + 术语必解释 + 不省字 + 引用代码用 `file:line`** (logic-explained.md 例外, 严禁 `file:line`, 是人话心智模型)
-
-## Engine 版本号约定 (2026-05-21 PM 拍定)
-
-- **V2.1** = MVP0 改造**前**的现状 (baseline.md 描述的就是 V2.1)
-- **V0.3.0** = MVP0 落地**后**的目标版本 (mvp0-alignment.md 描述的就是 V0.3.0)。**用 semver 主版本 0.x** (engine 从未对外发布, 主版本 0.x 表示 pre-1.0 / API 仍迭代中, 跟 LangChain 0.x / Pydantic v0 同思路, PM 2026-05-21 拍定)。
-- **cutover step** 包含: `__version__` / 错误码前缀 `[F-v21-*]` → `[F-v0_3-*]` / cache dir `~/.cache/graph-agent-v21` → `~/.cache/graph-agent-v0_3` / `test_v21_*` test 命名 / fixture 路径版本号等。具体在每个 `mvp0-alignment.md` 的 §MVP0 死代码清退 列出。
-- **Implementation name placeholder 约定**: 各 mvp0-alignment.md 里写到的 `v3` / `V3` 前缀 (`_run_v3_skill_dict` / `V3TracingCallback` / `tracing_v3.py` / `F-v3-*` 等) 是**早期 draft placeholder** — a2 在 design 阶段会细化最终命名 (可能改 `v0_3` 跟版本号一致, 也可能干脆**不带版本号** 因为 V0.x 没 backward compat 共存需求, 类似 LangChain 0.x 不在 class 名上带版本前缀)。不要把这些 placeholder 当成 cutover 必须保持的命名。
+4. **development / references** 平铺单 `.md`, 不走双时态
+5. 文档要**详细 + 用人话 + 术语必解释 + 不省字 + 引用代码用 `file:line`**
 
 ## MVP0 目标 (锁定, 出处见 docs.backup-2026-05-20/STUDIO-BASELINE-2026-05-17 + PM 2026-05-17 复述)
 
-PM 不开终端、不写 YAML, **可视化编辑 / 改 / 跑 V0.3.0 skill, 跑完看每 phase 输入输出**。
+PM 不开终端、不写 YAML, **可视化编辑 / 改 / 跑 V2.1 skill, 跑完看每 phase 输入输出**。
 
 ---
 
@@ -43,12 +34,10 @@ docs/
 │       ├── baseline.md
 │       └── mvp0-alignment.md
 ├── engine/
-│   ├── skill-compilation/{baseline,mvp0-alignment,logic-explained}.md
-│   ├── execution-runtime/{baseline,mvp0-alignment,logic-explained}.md
-│   ├── state-and-io-contract/{baseline,mvp0-alignment,logic-explained}.md
-│   ├── tracing-and-observability/{baseline,mvp0-alignment,logic-explained}.md
-│   ├── llm-routing/{baseline,mvp0-alignment,logic-explained}.md       ← [2026-05-21 新模块]
-│   └── public/                                                          ← [2026-05-21 对外文档, a2 设计中]
+│   ├── skill-compilation/{baseline,mvp0-alignment}.md
+│   ├── execution-runtime/{baseline,mvp0-alignment}.md
+│   ├── state-and-io-contract/{baseline,mvp0-alignment}.md
+│   └── tracing-and-observability/{baseline,mvp0-alignment}.md
 ├── studio/
 │   ├── system-level/
 │   │   ├── ux-workflow/{baseline,mvp0-alignment}.md
@@ -74,16 +63,14 @@ docs/
 
 ## Feature scope (一句话, 详见各 folder 内 baseline.md)
 
-### Engine (5 个内部 feature + public 对外文档, 全走三时态 baseline/mvp0/logic)
+### Engine (4 个 feature, 全走双时态)
 
 | Feature | Scope |
 |---|---|
-| [skill-compilation](./engine/skill-compilation/) | V0.3.0 技能目录解析、AST 构建、图拓扑校验、静态 IO 数据流校验 (audit A7/A8)、编译缓存策略 |
-| [execution-runtime](./engine/execution-runtime/) | Graph 执行装配调度、主入口生命周期 `run_skill`、节点重试、subagent / `call_<subgraph_name>` per-tool 动态工具注入 (audit A4/A5, Q13 决策) |
+| [skill-compilation](./engine/skill-compilation/) | V2.1 技能目录解析、AST 构建、图拓扑校验、静态 IO 数据流校验 (audit A7/A8)、编译缓存策略 |
+| [execution-runtime](./engine/execution-runtime/) | Graph 执行装配调度、主入口生命周期 `run_skill`、节点重试、subagent / `call_subgraph` 动态工具注入 (audit A4/A5) |
 | [state-and-io-contract](./engine/state-and-io-contract/) | `BlackboardState` 规约 (data/flow/messages)、Reducer 并发冲突控制、阶段级 IO 隔离、Runtime Input 漏斗 (audit A1/A2/A3/A6) |
 | [tracing-and-observability](./engine/tracing-and-observability/) | Predict 内部与 LangGraph 节点拦截、生命周期事件发出、结构化 Trace 日志 (audit P1-4) |
-| [llm-routing](./engine/llm-routing/) **[2026-05-21 新]** | `ModelResolverProtocol` 契约 + 具体 `ModelResolver` 切到 `apps/studio/backend/` + Fallback 收敛在 `GatewayChatModel._generate` (Q9 决策) |
-| [public](./engine/public/) **[2026-05-21 对外文档]** | 引擎功能说明 / 术语标准 / compile 规则 / 标准 skill 格式 / 创建 graph_skill 指南 / 对外 API + Protocol reference (业界标准结构, a2 设计中) |
 
 ### Studio system-level (6 份系统级, 横切多 feature, 全走双时态)
 

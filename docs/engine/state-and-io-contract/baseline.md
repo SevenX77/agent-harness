@@ -140,19 +140,6 @@ state-and-io-contract 依赖 skill-compilation 提供根级 IO schema 和 phase 
 
 反过来，编译阶段的写键检查无法独立保证 runtime state 安全，因为最终是否冲突由 `shallow_dict_merge` 决定，见 `packages/graph-agent/src/graph_agent/runtime/state.py:13` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:32`。这就是为什么本 feature 要单独记录 P0-3、A1、A2、A3、A6，而不是只放在 compiler 文档里。
 
-### Legacy / 死代码残留清单 (a1 调查 2026-05-21)
-
-这一节由 a1 (Codex) 在 2026-05-21 通过反向遍历 V2.1 主线 (`_run_v21_skill_dict -> compile_skill -> assemble_graph`) 闭包后产出。state-and-io-contract 域涉及的 legacy:
-
-**低置信度疑似死 (V2.1 主线不用的 IO/state legacy)**:
-
-- `packages/graph-agent/src/graph_agent/io/manager.py` `IOManager` — `IOManager.load_inputs()` (`packages/graph-agent/src/graph_agent/io/manager.py:65` 到 `:106`) 跟 `save_outputs()` (`:108`) 完整保留, 但 V2.1 主线 `_run_v21_skill_dict` 不调用它 — `packages/graph-agent/src/graph_agent/core/runner.py:471` 直接 `dict(inputs)` 放入 graph 初始 state, 跳过 IOManager。
-- `packages/graph-agent/src/graph_agent/io/context_resolver.py` `ContextResolver` — `{input.scene.scene_id}` 类表达式引擎 (核心方法在 `packages/graph-agent/src/graph_agent/io/context_resolver.py:41-59`), V2.1 主线不用作 per-phase input mapping。
-
-**MVP0 处理**: 这两个 legacy 文件在 MVP0 引入 Runtime Input Funnel (audit A1, 详见 [state-and-io-contract/mvp0-alignment.md#2-引入-runtime-input-funnel-a1-补全](./mvp0-alignment.md#2-引入-runtime-input-funnel-a1-补全)) 时一并清退。A1 funnel 的语义跟 `IOManager.load_inputs` 不完全等价 (funnel 严格按 `io/inputs.json` JSON Schema 过滤, IOManager 是 declarative runtime/file 混合源), 但功能定位有交集, cutover 同 PR 合并到新 Funnel。
-
-MVP0 cutover 时的清退方案见 [state-and-io-contract/mvp0-alignment.md#mvp0-死代码清退](./mvp0-alignment.md#mvp0-死代码清退)。
-
 ### 读代码时的主路径提示
 
 读 state contract 建议先看 `BlackboardState`，位置是 `packages/graph-agent/src/graph_agent/runtime/state.py:35`。再看 `shallow_dict_merge()`，位置是 `packages/graph-agent/src/graph_agent/runtime/state.py:13`。然后回到 `_run_v21_skill_dict()` 看初始 state，位置是 `packages/graph-agent/src/graph_agent/core/runner.py:451`。

@@ -1,207 +1,137 @@
 # state-and-io-contract V0.3.0 代码逻辑翻译
 
-本文解释 V0.3.0 完成态下 `state-and-io-contract` 的运行机制。这个模块的核心不是"有一个 state dict", 而是: 全图共享的 `BlackboardState` 如何被切成每个 phase 可见的 `phase_input`, phase 返回后如何按 `phase_output` 规则封口, child graph 和 builtin reference reader 如何避免继承父图黑板。本文按 v1 原则写: 字段级颗粒度, 每个关键字段都说明四件事: (a) 干什么用, (b) 为什么必须校验, (c) 判定逻辑, (d) 错误码。
+本文解释 V0.3.0 完成态下 `state-and-io-contract` 子模块具体在做什么: 它如何把整张图的运行状态收口到 `BlackboardState`, 如何让 `StateMapper` 按 phase 的 `io.inputs` 做数据切片, 如何在 phase 返回后按 `io.outputs` 封住写回边界, 以及为什么这些动作必须 Fail-fast。它不是 baseline 的现状复盘, 也不是 mvp0-alignment 的待办清单; 它是对当前源码中 state / mapper 机制的自然语言翻译, 并标明完成态语义应如何理解。
 
 核心源码锚点:
 
-- `BlackboardState` 与 `shallow_dict_merge()` 在 `packages/graph-agent/src/graph_agent/runtime/state.py:13`, `packages/graph-agent/src/graph_agent/runtime/state.py:35`。
-- `schema_properties()`, `filter_runtime_inputs()`, `StateMapper`, `PhaseWrapper`, `ReaderSandboxState` 在 `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:15`, `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:24`, `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:34`, `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:70`, `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:91`。
-- LangGraph 以 `StateGraph(BlackboardState)` 装配全图运行态: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:77`。
-- 有 `io` 的 phase 通过 `PhaseWrapper(StateMapper(io.inputs, io.outputs)).wrap(node)` 进入切片/封口路径: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:158`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:162`。
+- `BlackboardState` 和 `shallow_dict_merge()` 定义在 `packages/graph-agent/src/graph_agent/runtime/state.py:13` 与 `packages/graph-agent/src/graph_agent/runtime/state.py:35`。
+- `schema_properties()`, `filter_runtime_inputs()`, `StateMapper`, `PhaseWrapper`, `ReaderSandboxState` 定义在 `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:15`, `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:24`, `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:34`, `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:70`, `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:91`。
+- LangGraph 装配时用 `StateGraph(BlackboardState)` 作为全图状态类型: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:77`。
+- 每个带 `io` 的 phase 会被 `_wrap_phase_runtime_node()` 套上 `PhaseWrapper(StateMapper(io.inputs, io.outputs))`: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:158`。
+- LOGIC、SUBGRAPH、Agent/subagent 都在 `graph_assembler.py` 中读写这份 state, 关键位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:176`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:209`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:290`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:576`。
 
 ## 模块边界
 
-`state-and-io-contract` 负责运行时数据边界: 输入进来后放在哪里, phase 能看到哪一片 `data`, phase 能写回哪些 key, child graph 是否能继承父图状态, reader 是否能继承父 Agent 对话。它不解析 Markdown, 不选择模型, 不解析 `target_skill`, 不决定 DAG 顺序。
+`state-and-io-contract` 只管运行时数据能不能流动、能流到哪里、写回来之前要不要拦。它不解析 Markdown, 不判断 DAG 是否成环, 不选择模型, 不解析 `target_skill`, 也不执行业务 action。那些事情分别属于 skill-compilation、execution-runtime、graph-agent-gateway 和 skill-resolution。
 
-和其它模块的边界:
+它的核心对象只有几个:
 
-- skill-compilation 产生 `GRAPH.md io.inputs`、phase `io.inputs` / `io.outputs` 和 AST。
-- execution-runtime 调用 node 并把 node 包进 `PhaseWrapper`。
-- skill-resolution 解析 `target_skill -> skill root Path`; state/io 只消费解析后的 child IO 契约。
-- tracing-and-observability 记录已经切片后的 input/output, 不应该记录全量父黑板。
+- `BlackboardState`: 全图共享状态容器。
+- `shallow_dict_merge`: `data` 的 LangGraph reducer, 用来合并 node 返回的业务数据。
+- `StateMapper`: phase 执行前后的数据切片和输出封口机制。
+- `PhaseWrapper`: 把 `StateMapper` 套到 LOGIC / SUBGRAPH / Agent 节点外层。
+- `ReaderSandboxState`: builtin reference reader 的装配期隔离黑板。
 
-难点名词只用一个: **配料员**。`StateMapper` 像配料员: 不执行业务, 不决定 DAG, 只按 `io.inputs` 取料, 按 `io.outputs` 验收。
+这里唯一需要的形象名词是 **配料员**: `StateMapper` 不做菜, 也不决定菜谱; 它只按 phase 声明的 `io.inputs` 从全局黑板取料, 再按 `io.outputs` 检查成品能不能端回去。
 
-## BlackboardState 字段
+## BlackboardState 是全图黑板
 
-`BlackboardState` 是全图共享状态。它是 `TypedDict(total=False)`, 运行时仍是普通 dict, 但 LangGraph 和类型检查能看到四个固定 key: `data`, `flow`, `messages`, `run_id`: `packages/graph-agent/src/graph_agent/runtime/state.py:35`。
+`BlackboardState` 是 `TypedDict(total=False)`, 运行时仍是普通 dict, 但类型层面固定了四个 key: `data`, `flow`, `messages`, `run_id`: `packages/graph-agent/src/graph_agent/runtime/state.py:35`。LangGraph 在 `StateGraph(BlackboardState)` 中使用它, 所以每个 node 返回的 patch 最后都会落到这四个区域之一: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:77`。
 
-| 字段 | (a) 干什么用 | (b) 为什么校验 | (c) 判定逻辑 | (d) 错误码 | src |
-|---|---|---|---|---|---|
-| `data` | 承载业务数据: root inputs、LOGIC action 更新、SUBGRAPH delta、Agent `finish_task` 输出 | 不校验会让 phase 读写未声明业务字段, child graph 也可能污染父图 | 类型语义是 `dict[str, Any]`; LangGraph 合并时走 `shallow_dict_merge` reducer | 当前冲突为 `[F-v3-state-conflict]`; 切片/回写失败归 `[F-v3-runtime-state-mapping-failed]` | `runtime/state.py:38` |
-| `flow` | 承载控制态: retry、depth、`finish_task_result`、critic metrics | 业务数据混入 flow 会绕过 IO schema; 可变引用共享会污染父状态 | `dict[str, Any]`; `StateMapper.build_phase_input()` 对它 `deepcopy` | `[F-v3-runtime-state-mapping-failed]` | `runtime/state.py:39`, `runtime/state_mapper.py:43` |
-| `messages` | 承载 LLM 对话历史 | child graph 或 reader 继承父 Agent prompt history 会污染推理上下文 | `list[AnyMessage]`; LangGraph 用 `add_messages` reducer; StateMapper 只复制 list 容器 | `[F-v3-runtime-state-mapping-failed]` | `runtime/state.py:40`, `runtime/state_mapper.py:44` |
-| `run_id` | 标识本次 graph run, 供 trace 和 child metadata 关联 | 没有稳定 id, subagent child run 和父 run 难关联 | `str | None`; phase input 中原样复制 | `[F-v3-runtime-state-mapping-failed]` | `runtime/state.py:41`, `runtime/state_mapper.py:45` |
+`data` 是业务数据区。它保存外部输入、LOGIC action 的返回、SUBGRAPH child result 的 delta、Agent `finish_task` 产出的业务结果。源码把它声明为 `Annotated[dict[str, Any], shallow_dict_merge]`: `packages/graph-agent/src/graph_agent/runtime/state.py:38`。这意味着 `data` 不是普通覆盖, 而是由 `shallow_dict_merge()` 负责合并。完成态里, 业务语义应收敛为 root inputs 和 phase outputs 的可追踪集合; 当前源码仍是一个扁平 dict, 但 `StateMapper` 已经开始用 `io.inputs` / `io.outputs` 在 phase 边界切片和封口。
 
-V0.3.0 完成态中, `data` 的语义应进一步收敛为 `inputs`、`phase_outputs`、`scratch` 三类区域。当前源码仍是扁平 dict, 所以 `StateMapper` 的切片和输出封口是阻止全局变量化的关键边界。
+`flow` 是控制态, 定义在 `packages/graph-agent/src/graph_agent/runtime/state.py:39`。它不是业务输出, 适合放 `finish_task_result`, subagent retry count, critic metrics, subagent depth 之类的运行控制信息。`StateMapper.build_phase_input()` 会对它做 `deepcopy`: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:43`。这个 copy 很重要: phase 内部改控制态时, 不应该通过同一个 dict 引用悄悄污染父状态。
 
-## data reducer: shallow_dict_merge
+`messages` 是 LLM 对话历史, 使用 LangGraph 的 `add_messages` reducer: `packages/graph-agent/src/graph_agent/runtime/state.py:40`。Agent node 会把 system prompt 和已有 messages 组合成本轮对话入口: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:299`。SUBGRAPH 和 subagent child graph 则从空 messages 启动, 防止子图继承父 Agent 的 prompt history: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:215`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:588`。
 
-`shallow_dict_merge(left, right)` 是 `data` 的 reducer。它只合并顶层 key, 不做深层递归合并: `packages/graph-agent/src/graph_agent/runtime/state.py:13`。
+`run_id` 是运行标识, 定义在 `packages/graph-agent/src/graph_agent/runtime/state.py:41`。`StateMapper` 原样复制它: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:45`。subagent item 会额外得到新的 child `run_id`, 并在 metadata 中保留 `parent_run_id` 和 `subagent_depth`: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:676`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:682`。
 
-| 字段 / 步骤 | (a) 干什么用 | (b) 为什么校验 | (c) 判定逻辑 | (d) 错误码 | src |
-|---|---|---|---|---|---|
-| `left` | 当前已经合并出的 `data` 状态 | 不是 dict 或可变引用不清晰时, 后续冲突判断不可信 | `None` 或空值按 `{}` 处理; 非空时浅拷贝成 `merged` | `[F-v3-runtime-state-mapping-failed]` | `runtime/state.py:14`, `runtime/state.py:19` |
-| `right` | 当前 node 返回的 `data` delta | node 返回值是写回入口, 必须能被稳定合并 | `None` 或空值不改变 left; 非空时遍历 `right.items()` | `[F-v3-runtime-state-mapping-failed]` | `runtime/state.py:15`, `runtime/state.py:21` |
-| `key` | 顶层业务字段名 | 并行分支写同一个 key 时, runtime 不知道哪个值应该赢 | 如果 `key in merged`, 立即抛 `GraphAgentFatalError` | `[F-v3-state-conflict]` | `runtime/state.py:25`, `runtime/state.py:27` |
-| `value` | 新写入的字段值 | value 会进入后续 phase 和 trace, 不应是不可追踪的隐式对象 | 当前 reducer 不做 JSON validation; 完成态应由 StateMapper/schema 先封口 | `[F-v3-runtime-state-mapping-failed]` | `runtime/state.py:31` |
-| return `merged` | 给 LangGraph 下一步看到的新 `data` | 合并结果必须是新 dict, 避免原地改旧状态 | 无冲突后返回 `merged` | 无 | `runtime/state.py:32` |
+## data reducer 的 Fail-fast 语义
 
-这里的 Fail-fast 是有意的。它宁可在同 key 写入时失败, 也不静默覆盖。mvp0-alignment 中的 P0-3 要把这个 reducer 升级成能区分同一 super-step 并发冲突和顺序覆盖的 smart reducer; 在完成态文档里仍要保留"并发同 key 写入必须失败"这个业务意图。
+`shallow_dict_merge(left, right)` 是 `data` 的最后一道合并防线。它只看顶层 key, 不做递归深合并: `packages/graph-agent/src/graph_agent/runtime/state.py:13`。左侧为空时返回右侧浅拷贝, 右侧为空时返回左侧浅拷贝: `packages/graph-agent/src/graph_agent/runtime/state.py:19`, `packages/graph-agent/src/graph_agent/runtime/state.py:21`。
 
-## 输入漏斗: schema_properties 与 filter_runtime_inputs
+真正的关键在冲突分支: 遍历 `right.items()` 时, 只要 `key in merged`, 就抛 `GraphAgentFatalError("[F-v3-state-conflict] ...")`: `packages/graph-agent/src/graph_agent/runtime/state.py:24`, `packages/graph-agent/src/graph_agent/runtime/state.py:27`。这不是温和覆盖, 而是 Fail-fast。原因是 LangGraph fan-in 时如果两个分支都写同一个业务字段, runtime 无法知道哪个值应该赢。直接失败比静默覆盖安全。
 
-当前源码的输入漏斗是轻量实现: 只按 JSON Schema 的 `properties` key 做字段过滤, 不执行完整 Draft validation。
+完成态语义需要更精细地区分"并行分支冲突"和"拓扑顺序上的合法覆盖"。当前 reducer 还没有 super-step 上下文, 所以它看到同名 key 就失败。StateMapper 的职责就是尽量让每个 phase 写到明确的输出命名空间, 减少 reducer 在最后一步才发现冲突。
 
-| 字段 / 函数 | (a) 干什么用 | (b) 为什么校验 | (c) 判定逻辑 | (d) 错误码 | src |
-|---|---|---|---|---|---|
-| `schema` | 提供允许通过漏斗的字段声明 | runtime 不能从全量黑板猜 phase 要什么 | `schema_properties()` 只接受 `dict`; 非 dict 返回空集合 | 编译期 schema 错误归 `[F-v3-graph-io-schema-invalid]`; runtime 失败归 `[F-v3-runtime-state-mapping-failed]` | `runtime/state_mapper.py:15`, `runtime/state_mapper.py:16` |
-| `properties` | JSON Schema 中的字段集合 | 未声明字段如果进入 phase, 就绕过 IO contract | 必须是 dict; key 必须是字符串; 非 dict 返回空集合 | `[F-v3-runtime-state-mapping-failed]` | `runtime/state_mapper.py:18`, `runtime/state_mapper.py:21` |
-| `raw_inputs` | 外部输入或父 phase data | 原始 dict 可能带 typo、越权字段、未声明上下文 | `filter_runtime_inputs()` 先用 `dict(state.get("data", {}))` 或调用方 dict 规整 | `[F-v3-runtime-state-mapping-failed]` | `runtime/state_mapper.py:24`, `runtime/state_mapper.py:42` |
-| `keys` | schema properties 的 key 集合 | 决定哪些字段能进入 phase-local `data` | `keys` 为空时当前返回 raw copy; 非空时只保留交集 | 完成态 unknown/required/type 应归 `[F-v3-runtime-state-mapping-failed]` | `runtime/state_mapper.py:27`, `runtime/state_mapper.py:28` |
-| return dict | 生成 canonical phase input data | 后续 LOGIC/Agent/SUBGRAPH 只应看到这个切片 | `{key: raw_inputs[key] for key in keys if key in raw_inputs}` | `[F-v3-runtime-state-mapping-failed]` | `runtime/state_mapper.py:30` |
+## schema_properties 与输入漏斗
 
-C7 决策要求 Runtime Input Funnel 迁移到 `GRAPH.md` inline `io.inputs`, 不再读取旧物理 `io/inputs.json`。因此完成态中, root 输入和 phase 输入都应该从已编译的 inline schema 来, runtime 不再猜 schema 来源。
+`schema_properties(schema)` 是最小 schema 读取函数。它只认 JSON Schema 顶层 `properties` 下的字符串 key: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:15`。如果 `schema` 不是 dict, 或 `properties` 不是 dict, 它返回空集合: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:16`, `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:18`。这说明当前源码做的是字段名级别的过滤, 不是完整 JSON Schema validation。
 
-## StateMapper 字段与方法
+`filter_runtime_inputs(raw_inputs, schema)` 用这些 property keys 过滤输入: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:24`。如果 schema 没有可识别的 keys, 它返回 `dict(raw_inputs)`: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:27`。如果 keys 非空, 它只保留同时出现在 schema 和 raw inputs 里的字段: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:30`。
 
-`StateMapper` 是 phase 边界的核心类。它有两个配置字段, 两个行为方法: `input_schema`, `output_schema`, `build_phase_input()`, `wrap_phase_output()`: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:34`。
+这就是运行时输入漏斗的源码基础。完成态里, root `GRAPH.md io.inputs` 和 phase `io.inputs` 应该在编译期已经被验证成 object schema; runtime 再用这个 schema 过滤 unknown fields、检查 required 和类型。当前源码先实现了最关键的一步: phase 不再默认看到整张 `data`, 而是只拿 schema properties 中声明过的那部分。
 
-### StateMapper 配置字段
+如果没有这一步, 一个 LOGIC action 或 Agent prompt 可能隐式读取上游没有声明给它的字段。短期看这样很方便, 长期会让 graph 的数据流变成不可审计的全局变量访问。
 
-| 字段 | (a) 干什么用 | (b) 为什么校验 | (c) 判定逻辑 | (d) 错误码 | src |
-|---|---|---|---|---|---|
-| `input_schema` | 描述当前 phase 可读取的 `data` 字段 | 没有读边界, phase 会退化成全黑板读取 | `dict[str, Any] | None`; 传给 `filter_runtime_inputs()` | `[F-v3-runtime-state-mapping-failed]` | `runtime/state_mapper.py:37` |
-| `output_schema` | 描述当前 phase 可写回的 `data` 字段 | 没有写边界, action 或 Agent 可污染未声明字段 | `dict[str, Any] | None`; `wrap_phase_output()` 从中取 `properties` | `[F-v3-runtime-state-mapping-failed]` | `runtime/state_mapper.py:38` |
+## StateMapper: phase 前切片, phase 后封口
 
-### build_phase_input 输出字段
+`StateMapper` 是 `@dataclass(frozen=True)`, 只有两个配置字段: `input_schema` 和 `output_schema`: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:33`, `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:37`。它不执行业务逻辑, 只做 phase 边界上的 state 变换。
 
-| 字段 | (a) 干什么用 | (b) 为什么校验 | (c) 判定逻辑 | (d) 错误码 | src |
-|---|---|---|---|---|---|
-| phase-local `data` | 当前 phase 的业务输入切片 | 防止 phase 读取全局黑板或隐式依赖未声明上游字段 | 从全局 `state.data` 复制 dict, 再按 `input_schema.properties` 过滤 | `[F-v3-runtime-state-mapping-failed]` | `runtime/state_mapper.py:41`, `runtime/state_mapper.py:42` |
-| phase-local `flow` | 当前 phase 的控制态副本 | 防止 phase 内部修改 nested flow 对象污染父 graph | `deepcopy(state.get("flow", {}))` | `[F-v3-runtime-state-mapping-failed]` | `runtime/state_mapper.py:43` |
-| phase-local `messages` | 当前 phase 的消息列表快照 | 防止直接共享 list 对象造成 prompt history 串写 | `list(state.get("messages", []))` | `[F-v3-runtime-state-mapping-failed]` | `runtime/state_mapper.py:44` |
-| phase-local `run_id` | 当前 phase 的 run 标识 | trace 和错误定位要沿用父 run id | `state.get("run_id")` 原样复制 | `[F-v3-runtime-state-mapping-failed]` | `runtime/state_mapper.py:45` |
-| return `phase_state` | 交给原始 node 执行的局部 state | node 不应直接拿全局 state | 返回 `BlackboardState` 形状 dict | `[F-v3-runtime-state-mapping-failed]` | `runtime/state_mapper.py:47` |
+`input_schema` 决定 phase 能读什么。`build_phase_input(state)` 创建新的 phase-local `BlackboardState`: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:40`。其中 `data` 由 `filter_runtime_inputs(dict(state.get("data", {})), self.input_schema)` 生成: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:42`。这一步是读隔离: phase 拿到的是当前声明允许的业务字段切片, 不是父 graph 的整块数据。
 
-### wrap_phase_output 校验字段
+`flow` 在 phase-local state 中是 deep copy: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:43`。这里不能只做浅拷贝, 因为 flow 里面可能有 retry count 或 nested metrics。浅拷贝会让 phase 内部修改嵌套对象时回写到父状态, 破坏"先执行、再封口"的边界。
 
-| 字段 / 分支 | (a) 干什么用 | (b) 为什么校验 | (c) 判定逻辑 | (d) 错误码 | src |
-|---|---|---|---|---|---|
-| `output` | node 返回的 state patch | 这是写回全图前最后一个拦截点 | 必须是 dict-like; wrapper 调用该方法处理 | `[F-v3-runtime-state-mapping-failed]` | `runtime/state_mapper.py:49` |
-| `data` | node 试图写回的业务数据 | 业务数据写回必须受 `io.outputs` 控制 | `output.get("data")`; 非 dict 时当前直接放行 | 完成态应归 `[F-v3-runtime-state-mapping-failed]` | `runtime/state_mapper.py:50`, `runtime/state_mapper.py:51` |
-| `allowed` | output schema 允许的字段集合 | 没有 allowed 集合就无法判断越界写入 | `schema_properties(self.output_schema)`; 空集合时当前放行 | `[F-v3-runtime-state-mapping-failed]` | `runtime/state_mapper.py:53`, `runtime/state_mapper.py:54` |
-| nested output | 兼容 Agent `data_updates[phase_id]` 形状 | Agent 输出常挂在 phase id 下, 但内部业务字段仍需验证 | `len(data)==1` 且 nested dict keys 是 allowed 子集时放行 | `[F-v3-runtime-state-mapping-failed]` | `runtime/state_mapper.py:56`, `runtime/state_mapper.py:58` |
-| `invalid` | 未声明输出字段列表 | 需要给 Studio/trace 定位具体越界 key | `sorted(key for key in data if key not in allowed)` 非空即 fatal | `[F-v3-runtime-state-mapping-failed]` | `runtime/state_mapper.py:60`, `runtime/state_mapper.py:62` |
-| return `output` | 验证通过后的 state patch | 只有验证后的 patch 才能回到 LangGraph | 无 invalid 后原样返回 | 无 | `runtime/state_mapper.py:66` |
+`messages` 是 list copy: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:44`。这能避免直接共享列表对象, 但列表里的 message 对象本身并未深拷贝。当前源码重点是保护列表结构, 而不是重写 LangChain message 对象。
 
-## PhaseWrapper 字段与执行链路
+`run_id` 原样复制: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:45`。它是定位信息, 不是业务数据。
 
-`PhaseWrapper` 是把 `StateMapper` 接入 execution-runtime 的薄壳。它不理解业务, 只保证原始 node 执行前后都经过 mapper。
+`output_schema` 决定 phase 能写什么。`wrap_phase_output(output)` 先看 `output.get("data")`: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:49`。如果 `data` 不是 dict, 当前直接放行: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:51`。如果没有可识别的 output properties, 也直接放行: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:53`。这两个放行分支说明当前实现是渐进式封口, 依赖编译产物提供完整 `io.outputs`。
 
-| 字段 / 步骤 | (a) 干什么用 | (b) 为什么校验 | (c) 判定逻辑 | (d) 错误码 | src |
-|---|---|---|---|---|---|
-| `mapper` | 保存当前 phase 的 `StateMapper` | wrapper 不应该自己解析 schema, 避免两套规则 | dataclass 字段, 由 `_wrap_phase_runtime_node()` 传入 | `[F-v3-runtime-state-mapping-failed]` | `runtime/state_mapper.py:73` |
-| `node` | 原始 LangGraph node callable | wrapper 只负责边界, 业务执行仍属于 node | `wrap(node)` 接收 callable | `[F-v3-runtime-phase-failed]` / `[F-v3-runtime-state-mapping-failed]` | `runtime/state_mapper.py:75` |
-| `_wrapped(state)` | LangGraph 实际调用的包装函数 | 所有有 IO 的 phase 都要从这里进入 | 先 `build_phase_input()`, 再执行 node, 再 `wrap_phase_output()` | `[F-v3-runtime-state-mapping-failed]` | `runtime/state_mapper.py:76`, `runtime/state_mapper.py:78` |
-| `GraphAgentFatalError` passthrough | 保留更具体的错误码 | 不能把 `[F-v3-state-conflict]` 等细分错误都抹成泛化错误 | 捕获后直接 `raise` | 原错误码 | `runtime/state_mapper.py:80` |
-| generic exception wrapping | 把非契约异常变成 runtime state mapping failure | 普通 Python 异常不能带着脏 state 继续运行 | `except Exception as exc` 后包装为 `GraphAgentFatalError` | `[F-v3-runtime-state-mapping-failed]` | `runtime/state_mapper.py:82`, `runtime/state_mapper.py:83` |
+当 output properties 存在时, mapper 会检查 phase 写回的 `data` key 是否都在允许集合里: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:60`。发现未声明 key 时, 抛 `[F-v3-runtime-state-mapping-failed] phase wrote undeclared keys`: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:62`。这是写隔离的 Fail-fast 点。它把错误拦在 phase 返回边界, 而不是让污染字段进入后续节点。
 
-C8 决策要求 Phase Wrapper 覆盖 Agent、LOGIC、SUBGRAPH、builtin reference reader 四类调用边界。当前源码已通过 `_wrap_phase_runtime_node()` 覆盖有 `io` 的 LOGIC / SUBGRAPH / Agent runtime node: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:129`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:131`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:142`。
+还有一个当前源码里的兼容分支: 如果 `data` 只有一个 top-level key, 且这个 key 的 value 是 dict, 并且 nested dict 的 keys 都属于 allowed properties, mapper 会放行: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:56`。这是为了兼容 Agent `finish_task` 当前写 `data_updates[phase_id] = result.get("data", {})` 的形状: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:346`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:349`。换句话说, Agent 输出可以先挂在 phase_id 命名空间下, mapper 仍能验证里面的业务字段没有越界。
 
-## graph_assembler 中的真实读写字段
+## PhaseWrapper 把规则套到节点上
 
-StateMapper 的价值要放到真实 node 上看。下面列出 LOGIC、SUBGRAPH、Agent、subagent 当前怎样读写 state, 以及完成态为什么要继续收紧。
+`PhaseWrapper` 是非常薄的一层调用壳。它保存一个 `StateMapper`: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:70`。`wrap(node)` 返回 `_wrapped(state)`: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:75`。真正执行时只做三件事:
 
-### LOGIC phase
+1. 调 `self.mapper.build_phase_input(state)`, 给 node 一个局部 state: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:78`。
+2. 执行业务 node。
+3. 调 `self.mapper.wrap_phase_output(result)`, 在返回全局 graph 之前封口: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:79`。
 
-| 字段 / 步骤 | (a) 干什么用 | (b) 为什么校验 | (c) 判定逻辑 | (d) 错误码 | src |
-|---|---|---|---|---|---|
-| `before` | action 执行前的数据快照 | 没有快照就无法计算 action 改了什么 | `dict(state.get("data", {}))` | `[F-v3-runtime-state-mapping-failed]` | `graph_assembler.py:177` |
-| `data` | 给 `Context` 的可变工作副本 | action 需要局部可写对象, 但不能直接改全局 state | `dict(before)` | `[F-v3-runtime-state-mapping-failed]` | `graph_assembler.py:178` |
-| `Context` | LOGIC action 的读写 facade | action 需要 phase_id/run_id, 不能直接操作 LangGraph state | `Context(data, phase_id=phase_id, run_id=...)` | `[F-v3-runtime-state-mapping-failed]` | `graph_assembler.py:179` |
-| `result` | action 显式返回值 | 返回 dict 是写业务输出的一条路径 | `isinstance(result, dict)` 时校验 key 后合入 updates | `[F-v3-actions-keys]` / `[F-v3-runtime-state-mapping-failed]` | `graph_assembler.py:180`, `graph_assembler.py:182` |
-| `updates` | 最终写回的 data delta | 只应写 action 变更或声明返回字段 | `_dict_delta(before, data)`, 再 `updates.update(result)` | `[F-v3-runtime-state-mapping-failed]` | `graph_assembler.py:181`, `graph_assembler.py:184` |
+如果业务 node 已经抛 `GraphAgentFatalError`, wrapper 原样抛出: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:80`。这样更具体的错误码不会被抹掉。其它普通异常会被包装成 `[F-v3-runtime-state-mapping-failed]`: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:82`, `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:83`。这不是说所有业务异常本质都是 state mapping 错, 而是 phase 边界发生了无法安全转换的异常, runtime 需要用统一错误码阻断脏状态进入 graph。
 
-### SUBGRAPH phase
+装配点在 `_wrap_phase_runtime_node()`: 它先取 `phase_ast.io`: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:158`。没有 `io` 就返回原 node; 有 `io` 就返回 `PhaseWrapper(StateMapper(io.inputs, io.outputs)).wrap(node)`: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:159`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:162`。
 
-| 字段 / 步骤 | (a) 干什么用 | (b) 为什么校验 | (c) 判定逻辑 | (d) 错误码 | src |
-|---|---|---|---|---|---|
-| `before_data` | 子图执行前的父图数据快照 | child result 需要和父图执行前状态比较 | 当前 `dict(state.get("data", {}))` | `[F-v3-runtime-state-mapping-failed]` | `graph_assembler.py:210` |
-| child `data` | 子图初始业务黑板 | 完成态不能默认继承父图全量 data | 当前传 `before_data`; 完成态应传 explicit input funnel 结果 | `[F-v3-runtime-state-mapping-failed]` / `[F-v3-subgraph-io-mismatch]` | `graph_assembler.py:213` |
-| child `flow` | 子图控制态 | 子图不应原地污染父 flow | 当前传 `state.get("flow", {})`; 完成态应 deep copy | `[F-v3-runtime-state-mapping-failed]` | `graph_assembler.py:214` |
-| child `messages` | 子图 LLM 历史 | 子图不应继承父 Agent 对话 | 固定 `[]` | `[F-v3-runtime-state-mapping-failed]` | `graph_assembler.py:215` |
-| child `run_id` | 子图 run 标识 | trace 需要关联父图 run | 当前传 `state.get("run_id")` | `[F-v3-runtime-state-mapping-failed]` | `graph_assembler.py:216` |
-| `data_updates` | 子图返回父图的业务 delta | 父图只能接收声明输出, 不能让 child 临时字段泄漏 | 当前 `_dict_delta(before_data, result_data)`; 完成态应经 `io.outputs` 封口 | `[F-v3-runtime-state-mapping-failed]` | `graph_assembler.py:220`, `graph_assembler.py:223` |
+这意味着 IO contract 真正生效的前提是编译出的 AST 上有 `io`。如果某个 legacy node 没有 `io`, 当前 runtime 不会强行猜它的输入输出边界。
 
-### Agent phase
+## 三类 runtime phase 如何经过 StateMapper
 
-| 字段 / 步骤 | (a) 干什么用 | (b) 为什么校验 | (c) 判定逻辑 | (d) 错误码 | src |
-|---|---|---|---|---|---|
-| `flow` | 保存本 Agent 的控制态 | `finish_task_result` 和 critic metrics 不应写入业务 data | `dict(state.get("flow", {}))` | `[F-v3-runtime-state-mapping-failed]` | `graph_assembler.py:298` |
-| `messages` | 本轮 Agent 对话历史 | Prompt 输入影响模型行为, 必须可定位来源 | `SystemMessage(...) + state.get("messages", [])` | `[F-v3-runtime-state-mapping-failed]` | `graph_assembler.py:299` |
-| `finish_task_result` | 保存最终工具调用结果 | runtime 和 trace 需要知道 Agent 如何结束 | tool 名为 `finish_task` 时写入 flow | `[F-v3-runtime-state-mapping-failed]` | `graph_assembler.py:346`, `graph_assembler.py:347` |
-| `data_updates[phase_id]` | Agent 业务输出命名空间 | 防止 Agent 直接覆盖 root input 或其它 phase 输出 | `result` 是 dict 且 `ok` 为真时写入 | `[F-v3-runtime-state-mapping-failed]` | `graph_assembler.py:348`, `graph_assembler.py:349` |
-| `critic_metrics` | reviewer/critic 工具统计 | 这是控制指标, 不是业务输出 | 写入 `flow.setdefault("critic_metrics", {})` | `[F-v3-runtime-state-mapping-failed]` | `graph_assembler.py:350` |
+LOGIC phase 的 node 在 `_build_logic_node()` 中创建。它从 phase-local `state.data` 复制出 `before`, 再复制一份 `data` 给 `Context`: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:176`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:177`。action 可以通过 `Context` 修改这份局部 data, 也可以直接返回 dict。runtime 先用 `_dict_delta(before, data)` 找隐式修改, 再合并显式返回: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:181`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:182`。最后返回 `{"data": updates}`: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:185`。如果这份 updates 写了未声明字段, StateMapper 会在外层 wrapper 里拦住。
 
-### subagent child graph
+SUBGRAPH phase 当前仍把 `before_data = dict(state.get("data", {}))` 作为 child graph 的 data: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:209`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:213`。child messages 从空列表开始: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:215`。child 执行结束后, runtime 用 `_dict_delta(before_data, result_data)` 计算 data updates: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:219`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:220`。完成态应进一步收窄: child 初始 data 不应继承父 graph 全量 `data`, 而应只来自父 SUBGRAPH phase 的显式 input, 再通过 child root `GRAPH.md io.inputs` 漏斗。
 
-| 字段 / 步骤 | (a) 干什么用 | (b) 为什么校验 | (c) 判定逻辑 | (d) 错误码 | src |
-|---|---|---|---|---|---|
-| `input_data` | LLM 调 subagent tool 时显式传入的参数 | child graph 应以显式参数为输入来源 | 当前与 parent `before_data` 合并 | `[F-v3-runtime-state-mapping-failed]` | `graph_assembler.py:579`, `graph_assembler.py:583` |
-| `child_data` | subagent child graph 初始 data | 默认继承父图全量 data 会破坏读隔离 | 当前 `{**before_data, **input_data}`; NEW-2 完成态应只用 child input funnel 结果 | `[F-v3-runtime-state-mapping-failed]` | `graph_assembler.py:583`, `graph_assembler.py:586` |
-| child `messages` | child graph 的对话历史 | child 不应继承父 Agent prompt history | 当前固定 `[]` | `[F-v3-runtime-state-mapping-failed]` | `graph_assembler.py:588` |
-| `data_delta` | child 相对父图的结果差量 | tool result 需要可解释, 但不能自动污染父图 | 当前 `_dict_delta(before_data, result_data)` | `[F-v3-runtime-state-mapping-failed]` | `graph_assembler.py:593`, `graph_assembler.py:594` |
-| `parent_run_id` | child trace 关联父 run | 并行 child run 必须能回到父 run | 从 `parent_state` 或 metadata 取值 | `[F-v3-runtime-state-mapping-failed]` | `graph_assembler.py:675`, `graph_assembler.py:678` |
-| `subagent_depth` | child 调用深度 | 防止递归 subagent 失控 | metadata 写 `depth + 1` | `[F-v3-runtime-state-mapping-failed]` | `graph_assembler.py:679` |
-| child `run_id` | 每个 child item 的独立 run id | 并行 child 需要独立定位 | `uuid.uuid4()` | 无 | `graph_assembler.py:684` |
+Agent phase 的 node 在 `_build_skill_node()` 中创建。它先复制 `flow`, 组装 `messages`, 再进入 ReAct loop: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:297`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:299`。当 LLM 调 `finish_task` 且结果 `ok` 为真时, runtime 把业务结果放到 `data_updates[phase_id]`: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:346`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:349`。这就是为什么 `wrap_phase_output()` 需要识别单 key nested dict: Agent 输出常用 phase id 做命名空间, 内部字段才是 `io.outputs` 要验证的业务字段。
 
-NEW-2 的核心是"先 resolve, 再 funnel": 先通过 `SkillResolverProtocol` 找到 child skill root, 再读取 child `GRAPH.md io.inputs`, 最后把 explicit input 过滤成 child canonical input。StateMapper 不负责解析 `target_skill`, 但它负责 child input 进入执行前的隔离语义。
+这三类 phase 的共同点是: 业务 node 不直接决定自己能读全局多少数据、能写回哪些字段。只要 AST 有 `io`, 外层 `PhaseWrapper` 就先切片、后封口。
 
-## ReaderSandboxState 字段
+## subagent 与 child graph 的隔离
 
-`ReaderSandboxState` 是 builtin reference reader 的装配期沙盒。它不是 runtime phase, 但它遵守同样的黑板隔离思想: 不继承父 graph `data`, 不继承父 Agent messages。
+Agent 动态 subagent tool 走 `_invoke_subagent_once_t23()`。当前源码先取父 graph 的 `before_data`, 再构造 `child_data = {**before_data, **input_data}`: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:582`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:583`。child graph 运行时 messages 为空, run_id 继承 parent state 的 run_id: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:586`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:588`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:589`。
 
-| 字段 | (a) 干什么用 | (b) 为什么校验 | (c) 判定逻辑 | (d) 错误码 | src |
-|---|---|---|---|---|---|
-| `skill_id` | 标识当前 graph skill | reader 输出和 WARN 需要定位来源 skill | dataclass 必填 string; `to_blackboard()` 写入 `data.skill_id` | `[F-v3-reference-reader-input-invalid]` | `runtime/state_mapper.py:94`, `runtime/state_mapper.py:101` |
-| `phase_id` | 标识当前 Agent phase | 同一 skill 可能多个 Agent phase 使用 references | dataclass 必填 string; `to_blackboard()` 写入 `data.phase_id` | `[F-v3-reference-reader-input-invalid]` | `runtime/state_mapper.py:95`, `runtime/state_mapper.py:101` |
-| `root` | 当前 skill root | reader 读取 reference path 时必须以 skill root 为边界 | dataclass 必填 `Path`; 当前 `to_blackboard()` 不写入 data, 执行层应用它做 path 边界 | `[F-v3-resource-reference-path-invalid]` | `runtime/state_mapper.py:96` |
-| `timeout_s` | reader 最大执行时间 | 装配期增强不能无限阻塞主图 | 默认 `60`; `to_blackboard()` 写入 `flow.timeout_s` | `[F-v3-reference-reader-failed]` WARN | `runtime/state_mapper.py:97`, `runtime/state_mapper.py:102` |
-| sandbox `data` | reader 的业务定位输入 | reader 不应读取父 runtime data | 当前只含 `skill_id`, `phase_id`; 完成态还应加入 references registry | `[F-v3-reference-reader-input-invalid]` | `runtime/state_mapper.py:100`, `runtime/state_mapper.py:101` |
-| sandbox `flow` | reader 的控制态 | reader 超时/降级策略需要控制参数, 但不能继承父 flow | 当前只含 `timeout_s` | `[F-v3-reference-reader-failed]` WARN | `runtime/state_mapper.py:102` |
-| sandbox `messages` | reader 的 LLM 历史 | reader 不是父 Agent 的一轮对话 | 固定 `[]` | 无 | `runtime/state_mapper.py:103` |
-| sandbox `run_id` | reader 黑板 run 标识 | 装配期 reader 可单独 trace, 不复用 runtime run id | 当前 `None` | 无 | `runtime/state_mapper.py:104` |
+这段代码说明当前实现已经隔离了 messages, 但 data 仍然带着父图全量字段。完成态的 state/io 契约要更严格: child graph 的输入应来自 tool call 的 explicit input, 然后按 child skill root 的 `GRAPH.md io.inputs` 过滤和校验。父图 data 只能作为调用上下文被显式传入, 不能默认暴露。
 
-NEW-1 决策要求 builtin reference reader 使用独立黑板沙盒。reference path 不合法是编译期 FATAL; reader 超时、远端失败或输出非法是装配期 WARN `[F-v3-reference-reader-failed]`, 主图继续用 fallback excerpt。
+child 返回后, runtime 仍然通过 `_dict_delta(before_data, result_data)` 计算 child 相对父 data 的差量: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:593`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:594`。subagent tool 的最终返回是 `{"status": "ok", "data": data_delta, "flow": ...}`: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:595`。这代表 subagent 结果先作为 tool result 回到父 Agent, 不等于直接 patch 父 graph 黑板。
 
-## V0.3.0 四个改造点
+child run metadata 由 `_subagent_runnable_config()` 构造。它保留父 `tags` 和 metadata, 写入 `parent_run_id` 与 `subagent_depth + 1`, 并为 child 分配新的 `run_id`: `packages/graph-agent/src/graph_agent/core/graph_assembler.py:673`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:676`, `packages/graph-agent/src/graph_agent/core/graph_assembler.py:682`。这部分属于控制态隔离和 trace 定位, 不应混入业务 `data`。
 
-| 改造点 | 字段级落点 | 为什么这么改 | 错误码 |
-|---|---|---|---|
-| C7 Runtime Input Funnel 迁移到 inline 根 IO | `GRAPH.md io.inputs`, raw inputs, canonical inputs | 旧 `io/inputs.json` 会让 schema 漂移; 完成态只消费编译后的 inline IO | `[F-v3-graph-io-physical-file-deprecated]`, `[F-v3-runtime-state-mapping-failed]` |
-| C8 四类调用边界都经 wrapper/sandbox | Agent, LOGIC, SUBGRAPH, builtin reader | 统一读切片和写封口, 避免每类 node 自己发明 IO 行为 | `[F-v3-runtime-state-mapping-failed]`, reader WARN code |
-| NEW-1 builtin reference reader 黑板沙盒 | `ReaderSandboxState.skill_id/phase_id/root/timeout_s`, sandbox data/flow/messages | reader 是装配期辅助模块, 不能继承父 graph 黑板或 prompt history | `[F-v3-reference-reader-input-invalid]`, `[F-v3-reference-reader-failed]` |
-| NEW-2 child graph 先 resolve 再 funnel | `target_skill`, child root `io.inputs`, explicit input, child data | child schema 只有解析到目标 skill root 后才知道; 不能默认继承父 data | `[F-v3-skill-not-registered]`, `[F-v3-runtime-state-mapping-failed]`, `[F-v3-subgraph-io-mismatch]` |
+## ReaderSandboxState 是装配期沙盒
 
-## 错误码清单
+`ReaderSandboxState` 是给 builtin reference reader 准备的隔离 envelope: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:90`。字段有 `skill_id`, `phase_id`, `root`, `timeout_s`: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:94`, `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:95`, `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:96`, `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:97`。
 
-| 错误码 | 触发边界 | 字段/对象 | 修复方向 | 来源 |
-|---|---|---|---|---|
-| `[F-v3-state-conflict]` | reducer 合并 | `data` top-level key | 拆分输出命名空间, 或避免并行分支写同一 key | `runtime/state.py:27` |
-| `[F-v3-runtime-state-mapping-failed]` | 输入切片 / 输出封口 / wrapper 包装异常 | `input_schema`, `output_schema`, phase `data`, child `data` | 检查 phase IO、上游输出、node 返回结构 | `runtime/state_mapper.py:62`, `docs/engine/skill-spec/11-error-code-spec.md:159` |
-| `[F-v3-graph-io-physical-file-deprecated]` | 编译期 root IO | `io_inputs_ref`, `io_outputs_ref`, `io/*.json` | 改为 `GRAPH.md` inline IO | `mvp0-alignment.md` C7 |
-| `[F-v3-subgraph-io-mismatch]` | 父子图 IO 对齐 | SUBGRAPH input/output 与 child GRAPH IO | 对齐父 phase 和 child graph schema | `mvp0-alignment.md` NEW-2 |
-| `[F-v3-reference-reader-input-invalid]` | reader sandbox 输入 | `skill_id`, `phase_id`, references | 修 references registry 或 reader input | `docs/engine/skill-spec/11-error-code-spec.md:156` |
-| `[F-v3-reference-reader-output-invalid]` | reader 输出 | `markdown`, `used_reference_ids` | 修 builtin reader 输出结构 | `docs/engine/skill-spec/11-error-code-spec.md:157` |
-| `[F-v3-reference-reader-failed]` | reader WARN fallback | `timeout_s`, remote error, invalid output | 查看 trace; 主图使用 fallback 内容继续 | `docs/engine/skill-spec/11-error-code-spec.md:138` |
-| `[F-v3-resource-reference-path-invalid]` | reference path 边界 | `ReaderSandboxState.root`, reference path | 修正 path, 禁止越过 skill root | resource spec / runtime reader边界 |
-| `[F-v3-skill-not-registered]` | child skill 解析 | `target_skill` | 在 Studio registry 注册或导入 child skill | skill-resolution |
+`to_blackboard()` 生成一份新的 `BlackboardState`: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:99`。它的 `data` 只含 `skill_id` 和 `phase_id`: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:101`。它的 `flow` 只含 `timeout_s`: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:102`。`messages` 固定为空, `run_id` 为 `None`: `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:103`, `packages/graph-agent/src/graph_agent/runtime/state_mapper.py:104`。
 
-## 读代码顺序
+这个对象的业务含义是: reference reader 是装配期辅助模块, 不是父 Agent 的一轮对话, 也不是 runtime graph 的普通 phase。它不能继承父 graph 的 `data`, 不能继承父 Agent 的 messages。它只应该拿到当前 skill/phase 的 reference registry 和必要的定位信息。reader 超时、异常或输出非法时, 规范错误码是 `[F-v3-reference-reader-failed]`, 错误码表位于 `docs/engine/skill-spec/11-error-code-spec.md:138`。
 
-先看 `runtime/state.py`: `shallow_dict_merge()` 定义 data 合并失败规则, `BlackboardState` 定义全图状态四个区。
+## Fail-fast 的价值
 
-再看 `runtime/state_mapper.py`: `schema_properties()` 和 `filter_runtime_inputs()` 是输入漏斗, `StateMapper` 是切片/封口, `PhaseWrapper` 是接入点, `ReaderSandboxState` 是装配期沙盒。
+state/io 的 Fail-fast 不是为了让系统更容易报错, 而是为了让错误停在最靠近原因的位置。
 
-最后看 `core/graph_assembler.py`: `StateGraph(BlackboardState)` 是 graph 入口, `_wrap_phase_runtime_node()` 决定哪些 phase 经过 mapper, LOGIC/SUBGRAPH/Agent/subagent 节点展示真实 state 读写路径。
+未知输入字段如果不在入口漏斗被拦, 可能会被下游 LLM 当成合法上下文使用。未声明输出字段如果不在 `wrap_phase_output()` 被拦, 会进入全局 `data`, 之后任何 phase 都可能隐式依赖它。并行写冲突如果不在 reducer 被拦, 后续执行会基于不确定值继续运行。
+
+因此这三类错误都应该尽早失败:
+
+- 输入切片失败或输出封口失败, 使用 `[F-v3-runtime-state-mapping-failed]`: `docs/engine/skill-spec/11-error-code-spec.md:159`。
+- reducer 发现同 key 写入冲突, 当前源码使用 `[F-v3-state-conflict]`: `packages/graph-agent/src/graph_agent/runtime/state.py:28`。
+- reference reader 输入/输出非法或执行失败, 使用 `[F-v3-reference-reader-input-invalid]`, `[F-v3-reference-reader-output-invalid]`, `[F-v3-reference-reader-failed]`: `docs/engine/skill-spec/11-error-code-spec.md:156`, `docs/engine/skill-spec/11-error-code-spec.md:157`, `docs/engine/skill-spec/11-error-code-spec.md:138`。
+
+这些错误码的共同目标是让 Studio 和工程师定位到具体边界: 是入口输入不合法、phase 写越界、child graph 泄漏, 还是装配期 reader 降级。
+
+## 读代码的顺序
+
+先读 `runtime/state.py`: `shallow_dict_merge()` 解释了为什么 `data` 不能随便覆盖, `BlackboardState` 解释了全图共享状态有哪些区域。
+
+再读 `runtime/state_mapper.py`: `schema_properties()` 和 `filter_runtime_inputs()` 是输入漏斗的最小实现, `StateMapper` 是 phase-local 切片和输出封口, `PhaseWrapper` 是统一拦截壳, `ReaderSandboxState` 是装配期沙盒。
+
+最后读 `core/graph_assembler.py`: `assemble_graph()` 把状态类型交给 LangGraph, `_wrap_phase_runtime_node()` 决定哪些节点进入 StateMapper, LOGIC/SUBGRAPH/Agent/subagent 的 node 函数展示了 state 在真实执行中的读写形状。

@@ -316,3 +316,18 @@ Cognitive template 固定包含 ambiguity feedback 提示。Runtime 必须提供
 ### 4. RunnableConfig 边界
 
 `RunnableConfig` 只承载 tags、callbacks、run id 等调度 / 观测信息。深度、重试次数、隔离输入输出不应依赖 RunnableConfig metadata, 必须进入 `BlackboardState.flow` 或显式 child state。
+
+## 与当前源码的差异
+
+本文件描述的是目标收敛方向；当前 runtime 仍有这些未对齐点：
+
+| 本文件目标态 | 当前源码事实 |
+|---|---|
+| `run_skill` 显式接收 `inputs` dict、`model_resolver`、`skill_resolver` | 当前 `run_skill` 通过 `**inputs` 接收输入；有 `skill_resolver`，但没有生产级 `model_resolver` 参数。 |
+| Agent phase 通过 model resolver 解析真实模型 | 当前 graph skill path 主要通过 `mock_llm` 注入 chat model；缺模型时 Agent phase 会运行期失败。 |
+| callbacks / trace 接回 graph runtime 主线 | 当前 graph skill dict runner 接收 `callbacks` 后直接丢弃，不会自动发 phase/tool/LLM trace。 |
+| runtime 入口先按根级 `io.inputs` 校验输入 | 当前初始 state 直接使用 `dict(inputs)`。 |
+| child graph 只传显式输入，不继承父 data | 当前 SUBGRAPH 使用当前 phase-local data 启动；subagent child graph 使用父 phase-local data 加显式 input。 |
+| depth / retry 等控制态写入 child flow | 当前 subagent depth 主要写入 RunnableConfig metadata；flow 中用来判断的是父 flow 当前值。 |
+| `ExitContractRegistry` 路径删除，exit contract 只在 cognitive template inline | 当前 legacy `SKILL.md` 模式仍会在 Agent 循环里 inject exit contract message。 |
+| GraphAgentError 以外异常也结构化返回 | 当前 public runner 只捕获 GraphAgentError；普通 RuntimeError 等可能直接冒泡。 |

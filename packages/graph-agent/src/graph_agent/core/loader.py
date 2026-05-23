@@ -585,8 +585,6 @@ def _validate_mode_matches_filename(path: Path, yaml_mode: str) -> None:
     if expected is None:
         _route_document(path)
         return
-    if path.name == "SKILL.md" and yaml_mode in {"agent", "skill"}:
-        return
     if yaml_mode != expected:
         line = _frontmatter_key_line(path, "mode")
         _fatal(path, line, f"mode {yaml_mode!r} does not match {path.name} filename")

@@ -35,6 +35,7 @@ docs/
 │       └── mvp0-alignment.md
 ├── engine/
 │   ├── skill-compilation/{baseline,mvp0-alignment}.md
+│   ├── skill-resolution/{baseline,mvp0-alignment}.md
 │   ├── execution-runtime/{baseline,mvp0-alignment}.md
 │   ├── state-and-io-contract/{baseline,mvp0-alignment}.md
 │   └── tracing-and-observability/{baseline,mvp0-alignment}.md
@@ -63,11 +64,12 @@ docs/
 
 ## Feature scope (一句话, 详见各 folder 内 baseline.md)
 
-### Engine (4 个 feature, 全走双时态)
+### Engine (5 个 feature, 全走双时态)
 
 | Feature | Scope |
 |---|---|
 | [skill-compilation](./engine/skill-compilation/) | V2.1 技能目录解析、AST 构建、图拓扑校验、静态 IO 数据流校验 (audit A7/A8)、编译缓存策略 |
+| [skill-resolution](./engine/skill-resolution/) | V0.3.0 新增全局 Registry 寻址的 DI 接口。解耦了子图 (`SUBGRAPH.md`) 与子代理 (`subagents`) 的物理依赖扫描，制定了支持跨 Skill 导入及沙箱/生产双态隔离挂载的协议边界。 |
 | [execution-runtime](./engine/execution-runtime/) | Graph 执行装配调度、主入口生命周期 `run_skill`、节点重试、subagent / `call_subgraph` 动态工具注入 (audit A4/A5) |
 | [state-and-io-contract](./engine/state-and-io-contract/) | `BlackboardState` 规约 (data/flow/messages)、Reducer 并发冲突控制、阶段级 IO 隔离、Runtime Input 漏斗 (audit A1/A2/A3/A6) |
 | [tracing-and-observability](./engine/tracing-and-observability/) | Predict 内部与 LangGraph 节点拦截、生命周期事件发出、结构化 Trace 日志 (audit P1-4) |

@@ -20,7 +20,6 @@ from jsonschema.exceptions import SchemaError
 from jsonschema.validators import Draft202012Validator
 from pydantic import BaseModel, ValidationError
 
-from graph_agent.cognitive.context_facade import Context
 from graph_agent.core.actions import ActionDef, ActionRegistry, ToolDef, ToolRegistry
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
 from graph_agent.core.manifest import (
@@ -173,7 +172,7 @@ class SkillLoader:
             phase_docs.append(
                 _build_phase_document(phase_name, phase_file, mode, frontmatter, body)
             )
-        actions, tools = _discover_actions_and_tools(root, discovered)
+        actions, tools = _discover_actions_and_tools(root, discovered, phase_docs)
         _validate_logic_action_return_keys(
             phase_docs,
             actions,
@@ -289,8 +288,6 @@ def _guard_v21_root(skill_root: Path) -> None:
     phases = skill_root / "phases"
     if not phases.is_dir() or not any(p.is_dir() for p in phases.iterdir()):
         _fatal(phases, 1, "missing phases directory or phase entries")
-    if (skill_root / "actions").exists():
-        _actions_fatal(skill_root / "actions", 1, "root-level actions/ is not allowed")
     if (skill_root / "io" / "inputs.json").exists():
         _io_physical_fatal(skill_root / "io" / "inputs.json", 1)
     if (skill_root / "io" / "outputs.json").exists():
@@ -325,6 +322,7 @@ def _discover_phase_files(skill_root: Path) -> list[tuple[str, Path, str]]:
 def _discover_actions_and_tools(
     skill_root: Path,
     discovered: list[tuple[str, Path, str]],
+    phase_docs: list[PhaseDocument],
 ) -> tuple[ActionRegistry, ToolRegistry]:
     actions_by_phase: dict[str, dict[str, ActionDef]] = {}
     tools_by_phase: dict[str, list[ToolDef]] = {}
@@ -343,7 +341,7 @@ def _discover_actions_and_tools(
             if tools_dir.exists():
                 _actions_fatal(tools_dir, 1, "tools/ is only allowed for SKILL phases")
             if actions_dir.exists():
-                actions_by_phase[phase_id] = _load_action_dir(actions_dir, phase_id)
+                _actions_fatal(actions_dir, 1, "phase-local actions/ is not allowed")
         elif mode == "agent":
             if actions_dir.exists():
                 _actions_fatal(actions_dir, 1, "actions/ is only allowed for LOGIC phases")
@@ -355,9 +353,62 @@ def _discover_actions_and_tools(
             if tools_dir.exists():
                 _actions_fatal(tools_dir, 1, "tools/ is not allowed for SUBGRAPH phases")
 
+    root_actions_dir = skill_root / "actions"
+    for doc in phase_docs:
+        if isinstance(doc.ast, LogicNodeAST):
+            actions_by_phase[doc.phase_name] = _load_logic_actions(
+                root_actions_dir,
+                doc.phase_name,
+                doc.ast.actions,
+            )
+
     return ActionRegistry(actions_by_phase), ToolRegistry(
         root_tools=root_tools, by_phase=tools_by_phase
     )
+
+
+def _load_logic_actions(
+    actions_dir: Path,
+    phase_id: str,
+    action_names: list[str],
+) -> dict[str, ActionDef]:
+    by_id: dict[str, ActionDef] = {}
+    for action_name in action_names:
+        _validate_logic_action_name(actions_dir, action_name)
+        if not actions_dir.is_dir():
+            _actions_fatal(
+                actions_dir,
+                1,
+                "[F-v3-logic-action-dir-missing] actions/ is required",
+            )
+        path = actions_dir / f"{action_name}.py"
+        if not path.is_file():
+            _actions_fatal(
+                path,
+                1,
+                f"[F-v3-logic-action-not-found] action {action_name!r} not found",
+            )
+        _raise_on_purity_violations(path)
+        module = _load_python_module(path)
+        func = getattr(module, "run", None)
+        if not callable(func):
+            _actions_fatal(
+                path,
+                1,
+                f"[F-v3-logic-action-entrypoint-missing] {path.name} must export run()",
+            )
+        _validate_action_signature(path, func)
+        by_id[action_name] = ActionDef(id=action_name, phase_id=phase_id, path=path, func=func)
+    return by_id
+
+
+def _validate_logic_action_name(path: Path, action_name: str) -> None:
+    if not re.fullmatch(r"[a-z][a-z0-9_]*", action_name):
+        _actions_fatal(
+            path,
+            1,
+            f"[F-v3-logic-action-name-invalid] invalid action name {action_name!r}",
+        )
 
 
 def _compile_subagent_metadata(
@@ -585,21 +636,10 @@ def _module_functions(module: ModuleType) -> list[Callable[..., object]]:
 def _validate_action_signature(path: Path, func: Callable[..., object]) -> None:
     signature = inspect.signature(func)
     params = list(signature.parameters.values())
-    if not params or params[0].name not in {"context", "ctx"}:
+    if not params or params[0].name != "state_slice":
         _actions_fatal(
-            path, 1, f"action {func.__name__!r} must accept context/ctx as first parameter"
+            path, 1, f"action {func.__name__!r} must accept state_slice as first parameter"
         )
-    annotation = params[0].annotation
-    if annotation is inspect.Parameter.empty:
-        return
-    if annotation is Context:
-        return
-    if isinstance(annotation, str) and annotation in {
-        "Context",
-        "graph_agent.cognitive.context_facade.Context",
-    }:
-        return
-    _actions_fatal(path, 1, f"action {func.__name__!r} first parameter must be Context-compatible")
 
 
 def _validate_tool_signature(path: Path, func: Callable[..., object]) -> None:
@@ -1024,16 +1064,17 @@ def _validate_logic_action_return_keys(
     for doc in phase_docs:
         if not isinstance(doc.ast, LogicNodeAST):
             continue
-        action_def = actions.for_phase(doc.phase_name).get(doc.ast.python_callable)
-        if action_def is None:
-            continue
-        _validate_action_return_keys(
-            action_def.path,
-            output_schema_keys,
-            context_keys,
-            validate_context_writes=validate_context_writes
-            and _should_validate_context_writes(phase_docs),
-        )
+        for action_name in doc.ast.actions:
+            action_def = actions.for_phase(doc.phase_name).get(action_name)
+            if action_def is None:
+                continue
+            _validate_action_return_keys(
+                action_def.path,
+                output_schema_keys,
+                context_keys,
+                validate_context_writes=validate_context_writes
+                and _should_validate_context_writes(phase_docs),
+            )
 
 
 def _should_validate_context_writes(phase_docs: list[PhaseDocument]) -> bool:
@@ -1074,7 +1115,6 @@ def _build_phase_document(
         "step",
         "protocol",
         "exit_contract",
-        "python_callable",
     ]
     blocks = extract_raw_blocks(body, allowed)
     data = dict(frontmatter)
@@ -1087,7 +1127,6 @@ def _build_phase_document(
 
     try:
         if mode == "logic":
-            data.setdefault("python_callable", blocks.get("python_callable"))
             ast: PhaseAST = LogicNodeAST.model_validate(data)
         elif mode == "subgraph":
             ast = SubgraphNodeAST.model_validate(data)

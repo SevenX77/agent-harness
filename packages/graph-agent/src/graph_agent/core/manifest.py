@@ -131,7 +131,9 @@ class LogicNodeAST(_BaseNodeAST):
     """Deterministic Python phase node parsed from ``LOGIC.md``."""
 
     mode: Literal["logic"]
-    python_callable: str = Field(min_length=1)
+    io: PhaseIOSchema | None = None
+    actions: list[str] = Field(..., min_length=1)
+    validator: bool = False
 
 
 class SubgraphNodeAST(_BaseNodeAST):

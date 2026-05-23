@@ -12,7 +12,6 @@ from langchain_core.messages import SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
-from graph_agent.cognitive.context_facade import Context
 from graph_agent.cognitive.critic import (
     CriticVerdict,
     FakeCriticClient,
@@ -171,20 +170,24 @@ def _build_logic_node(
     phase_ast: LogicNodeAST,
     compiled: CompiledSkill,
 ) -> Any:
-    action = compiled.actions.resolve(phase_id, phase_ast.python_callable)
-    action_def = compiled.actions.for_phase(phase_id).get(phase_ast.python_callable)
-    action_path = action_def.path if action_def is not None else Path("<unknown>")
-    action_line = getattr(getattr(action, "__code__", None), "co_firstlineno", 1)
     output_schema_keys = _logic_output_schema_keys(compiled)
 
     def _logic_node(state: BlackboardState) -> dict[str, Any]:
-        before = dict(state.get("data", {}))
-        data = dict(before)
-        ctx = Context(data, phase_id=phase_id, run_id=state.get("run_id") or "default")
-        result = action(ctx)
-        updates = _dict_delta(before, data)
-        if isinstance(result, dict):
+        state_slice = dict(state.get("data", {}))
+        updates: dict[str, Any] = {}
+        for action_name in phase_ast.actions:
+            action = compiled.actions.resolve(phase_id, action_name)
+            action_def = compiled.actions.for_phase(phase_id).get(action_name)
+            action_path = action_def.path if action_def is not None else Path("<unknown>")
+            action_line = getattr(getattr(action, "__code__", None), "co_firstlineno", 1)
+            result = action(dict(state_slice), phase_id=phase_id, run_id=state.get("run_id"))
+            if not isinstance(result, dict):
+                raise GraphAgentFatalError(
+                    f"[F-v3-logic-action-return-invalid] {action_path}:{action_line} "
+                    f"action {action_name!r} must return dict"
+                )
             _validate_logic_update_keys(result, output_schema_keys, action_path, action_line)
+            state_slice.update(result)
             updates.update(result)
         return {"data": updates} if updates else {}
 

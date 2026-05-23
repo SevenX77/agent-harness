@@ -249,27 +249,27 @@ def load_workflow_from_md(
 
 
 def _fatal(path: Path, line: int, message: str) -> NoReturn:
-    raise SkillLoadError(f"[F-v21-route] {path}:{line} {message}")
+    raise SkillLoadError(f"[F-v3-route] {path}:{line} {message}")
 
 
 def _io_fatal(path: Path, line: int, message: str) -> NoReturn:
-    raise SkillLoadError(f"[F-v21-io] {path}:{line} {message}")
+    raise SkillLoadError(f"[F-v3-io] {path}:{line} {message}")
 
 
 def _graph_fatal(path: Path, line: int, message: str) -> NoReturn:
-    raise SkillLoadError(f"[F-v21-graph] {path}:{line} {message}")
+    raise SkillLoadError(f"[F-v3-graph] {path}:{line} {message}")
 
 
 def _actions_fatal(path: Path, line: int, message: str) -> NoReturn:
-    raise SkillLoadError(f"[F-v21-actions] {path}:{line} {message}")
+    raise SkillLoadError(f"[F-v3-actions] {path}:{line} {message}")
 
 
 def _actions_keys_fatal(path: Path, line: int, message: str) -> None:
-    raise GraphAgentFatalError(f"[F-v21-actions-keys] {path}:{line} {message}")
+    raise GraphAgentFatalError(f"[F-v3-actions-keys] {path}:{line} {message}")
 
 
 def _purity_fatal(path: Path, line: int, message: str) -> None:
-    raise SkillLoadError(f"[F-v21-purity] {path}:{line} {message}")
+    raise SkillLoadError(f"[F-v3-purity] {path}:{line} {message}")
 
 
 def _guard_v21_root(skill_root: Path) -> None:

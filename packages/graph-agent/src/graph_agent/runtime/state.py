@@ -25,7 +25,7 @@ def shallow_dict_merge(
     for key, value in right.items():
         if key in merged:
             raise GraphAgentFatalError(
-                f"[F-v21-state-conflict] key={key!r}: branches wrote same key "
+                f"[F-v3-state-conflict] key={key!r}: branches wrote same key "
                 f"(left={merged[key]!r}, right={value!r})"
             )
         merged[key] = value

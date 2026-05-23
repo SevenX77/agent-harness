@@ -292,7 +292,7 @@ def _build_skill_node(
         config: RunnableConfig | None = None,
     ) -> dict[str, Any]:
         if chat_model is None:
-            raise RuntimeError("[F-v21-graph] SKILL phase requires chat_model")
+            raise RuntimeError("[F-v3-graph] SKILL phase requires chat_model")
 
         data_updates: dict[str, Any] = {}
         flow = dict(state.get("flow", {}))
@@ -713,7 +713,7 @@ def _validate_logic_update_keys(
     for key in updates:
         if key not in output_schema_keys:
             raise GraphAgentFatalError(
-                f"[F-v21-actions-keys] {action_path}:{action_line} "
+                f"[F-v3-actions-keys] {action_path}:{action_line} "
                 f"action wrote undeclared output key {key!r}"
             )
 
@@ -739,7 +739,7 @@ def _is_critic_tool_name(name: str) -> bool:
 
 
 def _graph_fatal(message: str) -> NoReturn:
-    raise SkillLoadError(f"[F-v21-graph] {message}")
+    raise SkillLoadError(f"[F-v3-graph] {message}")
 
 
 __all__ = [

@@ -24,7 +24,7 @@ EXPECTED_TOP_LEVEL_EXPORTS = [
     "assemble_graph",
     "CompiledSkill",
     "CompiledStateGraph",
-    "BlackboardState",
+    "GraphRuntimeState",
     "SkillManifest",
     "serialize_skill",
     "Callback",

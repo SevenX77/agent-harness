@@ -14,15 +14,9 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
-VALID_BUSINESS_MD = """## item-1
-- title: Scene plan
-- score: 3
-"""
+VALID_BUSINESS_MD = """{"title": "Scene plan", "score": 3}"""
 
-INVALID_BUSINESS_MD = """## item-1
-- title: Scene plan
-- score: high
-"""
+INVALID_BUSINESS_MD = """{"title": "Scene plan", "score": "high"}"""
 
 
 class SpySchemaEngine(SchemaEngine):

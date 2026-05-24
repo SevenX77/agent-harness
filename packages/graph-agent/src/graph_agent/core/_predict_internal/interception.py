@@ -8,6 +8,8 @@ from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
 
+from graph_agent_gateway.gateway_chat_model import GatewayChatModel, ToolSpec, _normalise_tool
+from graph_agent_gateway.llm_config import ResolvedRole
 from langchain_core.callbacks.manager import (
     AsyncCallbackManagerForLLMRun,
     CallbackManagerForLLMRun,
@@ -19,11 +21,9 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from langchain_core.runnables import Runnable
 
 from graph_agent.callbacks.base import Callback
-from graph_agent.config.llm_config import ResolvedRole
 from graph_agent.core._predict_internal.strategy import BaseMockStrategy, MockedSource
 from graph_agent.core._predict_internal.stub import generate_heuristic_stub
 from graph_agent.core._predict_internal.tracing import record_mock_source
-from graph_agent.models.gateway_chat_model import GatewayChatModel, ToolSpec, _normalise_tool
 
 
 class PredictGatewayChatModel(GatewayChatModel):

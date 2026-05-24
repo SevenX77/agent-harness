@@ -89,7 +89,10 @@ class LLMPhaseNode(PhaseNode):
         )
 
         resolver = self.container.resolver
-        assert resolver is not None, "execute_llm_phase requires a resolver"
+        if resolver is None:
+            from graph_agent_gateway.exceptions import GatewayResolverMissingError
+
+            raise GatewayResolverMissingError(phase_name=phase.name)
         save_compaction_sidecar = self.container.save_compaction_sidecar
         assert save_compaction_sidecar is not None, (
             "execute_llm_phase requires a save_compaction_sidecar callable"

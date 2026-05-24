@@ -44,13 +44,17 @@ def migrate_roles_payload(payload: Any) -> Any:
             if not isinstance(role, dict):
                 continue
             role_temperature = role.pop("temperature", None)
+            role_max_tokens = role.pop("max_tokens", None)
             models = role.get("models")
-            if role_temperature is None or not isinstance(models, dict):
+            if not isinstance(models, dict):
                 continue
             for role_model in models.values():
                 if not isinstance(role_model, dict):
                     continue
-                role_model.setdefault("temperature", role_temperature)
+                if role_temperature is not None:
+                    role_model.setdefault("temperature", role_temperature)
+                if role_max_tokens is not None:
+                    role_model.setdefault("max_tokens", role_max_tokens)
     return payload
 
 

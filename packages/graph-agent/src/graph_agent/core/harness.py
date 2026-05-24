@@ -46,7 +46,6 @@ from graph_agent.core.state import (
     verify_state_invariants,
 )
 from graph_agent.core.types import Phase
-from graph_agent.models.resolver import get_model_resolver
 
 logger = logging.getLogger(__name__)
 
@@ -356,11 +355,13 @@ class GraphAgentHarness:
     def __init__(
         self,
         phases: list[Phase],
+        *,
         callbacks: list[Callback] | None = None,
         io_config: dict[str, Any] | None = None,
         context_mapping: dict[str, str] | None = None,
         skill_dir: Path | None = None,
         checkpointer: Any = "auto",
+        model_resolver: Any | None = None,
     ) -> None:
         """Initialize a harness with fixed phases and shared runtime services."""
         if not phases:
@@ -370,7 +371,11 @@ class GraphAgentHarness:
         self._io_config = io_config
         self._context_mapping = context_mapping
         self._skill_dir = skill_dir
-        self._resolver = get_model_resolver()
+        if model_resolver is None:
+            from graph_agent_gateway.exceptions import GatewayResolverMissingError
+
+            raise GatewayResolverMissingError(phase_name="<harness>")
+        self._resolver = model_resolver
         self._checkpointer_cms: list[Any] = []
         self._checkpointer = self._resolve_checkpointer(checkpointer)
         # D-7.3 — compile-time routing collaborator; reused across runs.

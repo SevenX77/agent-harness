@@ -53,6 +53,7 @@ from app.models.runs import (
     RunRequest,
     TokensMetrics,
 )
+from app.services.gateway_resolver import build_gateway_model_resolver
 from app.services.git_local import GitCommandError, GitFileLockedError, GitLocalService
 from app.services.skills import resolve_skill_dir, run_dir_for, test_inputs_dir_for_skill
 
@@ -231,6 +232,7 @@ def _run_worker_main(
             Path(skill_path_raw),
             trace_dir=run_dir,
             callbacks=callbacks,
+            model_resolver=build_gateway_model_resolver(),
             unattended=True,
             cleanup_checkpoints_on_finish=False,
             **inputs,

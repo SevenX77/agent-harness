@@ -3,18 +3,16 @@ from __future__ import annotations
 import inspect
 
 import graph_agent
-import pytest
-from graph_agent.config.llm_config import (
-    ModelDef,
-    ProviderDef,
-    RoleConfigData,
-    RoleDef,
-    RoleModelEntry,
-)
 from graph_agent.core._predict_internal.strategy import BaseMockStrategy
-from graph_agent.models import resolver as resolver_module
-from graph_agent.models.gateway_chat_model import GatewayChatModel
-from graph_agent.models.resolver import ModelResolver
+from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+from graph_agent_gateway.llm_config import (
+    ModelEntry,
+    ProviderEntry,
+    RoleEntry,
+    RoleModelEntry,
+    RolesData,
+)
+from graph_agent_gateway.resolver import ModelResolver
 
 EXPECTED_TOP_LEVEL_EXPORTS = [
     "run_skill",
@@ -42,10 +40,9 @@ class DummyMockStrategy(BaseMockStrategy):
         return phase_name == "phaseA"
 
 
-def _make_config() -> RoleConfigData:
+def _make_config() -> RolesData:
     models = {
-        "X": ModelDef(
-            code="X",
+        "X": ModelEntry(
             name="Primary",
             min_max_tokens=321,
             max_input_tokens=200000,
@@ -53,20 +50,19 @@ def _make_config() -> RoleConfigData:
         ),
     }
     providers = {
-        "PX": ProviderDef(code="PX", name="Provider X", type="openai_compatible"),
+        "PX": ProviderEntry(name="Provider X", type="openai_compatible"),
     }
     roles = {
-        "test_role": RoleDef(
-            name="test_role",
+        "test_role": RoleEntry(
             temperature=0.4,
             active_model="X",
             model_fallback=True,
             models={
-                "X": RoleModelEntry(model_code="X", provider_codes=["PX"]),
+                "X": RoleModelEntry(providers=["PX"]),
             },
         )
     }
-    return RoleConfigData(models=models, providers=providers, roles=roles)
+    return RolesData(models=models, providers=providers, roles=roles)
 
 
 def test_predict_internal_exports_bind_predictor_only() -> None:
@@ -91,12 +87,9 @@ def test_top_level_13_export_abi_has_no_predict_additions() -> None:
     assert "bind_predictor" not in graph_agent.__all__
 
 
-def test_model_resolver_non_predict_path_still_returns_gateway(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_model_resolver_non_predict_path_still_returns_gateway() -> None:
     cfg = _make_config()
-    resolver = ModelResolver()
-    monkeypatch.setattr(resolver_module, "get_role_config", lambda: cfg)
+    resolver = ModelResolver(roles_data=cfg)
 
     model = resolver.resolve("test_role", phase_name="phaseA")
 
@@ -104,16 +97,13 @@ def test_model_resolver_non_predict_path_still_returns_gateway(
     assert model.phase_name == "phaseA"
 
 
-def test_bind_predictor_switches_resolver_to_predict_gateway(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_bind_predictor_switches_resolver_to_predict_gateway() -> None:
     from graph_agent.core._predict_internal import bind_predictor
     from graph_agent.core._predict_internal.interception import PredictGatewayChatModel
 
     cfg = _make_config()
-    resolver = ModelResolver()
+    resolver = ModelResolver(roles_data=cfg)
     strategy = DummyMockStrategy()
-    monkeypatch.setattr(resolver_module, "get_role_config", lambda: cfg)
 
     bound = bind_predictor(resolver, strategy)
     model = resolver.resolve("test_role", phase_name="phaseA")

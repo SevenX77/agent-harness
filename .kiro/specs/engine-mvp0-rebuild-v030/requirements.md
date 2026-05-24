@@ -58,7 +58,8 @@ Agent phases MUST parse body XML into the exact top-level tag allowlist in `docs
 - `goal`
 - repeated `step`
 - repeated `protocol`
-- `exit_contract`
+
+*Note: Exit contract is NOT written in SKILL.md. It is hardcoded in the cognitive template and automatically injected from the phase `io.outputs` schema.*
 
 Runtime MUST render these fields into the V0.3.0 cognitive template and place `io.outputs` schema at the end of the exit contract.
 

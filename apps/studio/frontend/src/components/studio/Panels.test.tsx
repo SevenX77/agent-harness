@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { SkillDetail } from '@/api/types'
 import { WorkspaceProvider, type WorkspaceContextValue } from './WorkspaceContext'
 import { AssetsPanel, PropertiesPanel, subagentSkillFilePath } from './Panels'
+import { extractSubgraphReferences } from './panels/SubgraphCategory'
 
 describe('PropertiesPanel', () => {
   it('renders an empty state without a selected node', () => {
@@ -117,6 +118,39 @@ describe('AssetsPanel', () => {
     expect(html).not.toContain('GRAPH.md')
     expect(html).not.toContain('SKILL.md')
   })
+
+  it('extracts subgraph target skills from phase SUBGRAPH frontmatter', () => {
+    expect(extractSubgraphReferences({
+      'phases/child/SUBGRAPH.md': [
+        '---',
+        'target_skill: story-child',
+        'inputs: {}',
+        '---',
+        '',
+      ].join('\n'),
+      'phases/other/LOGIC.md': '# Logic',
+    })).toEqual([
+      {
+        targetSkill: 'story-child',
+        phaseIds: ['child'],
+        sourcePaths: ['phases/child/SUBGRAPH.md'],
+      },
+    ])
+  })
+
+  it('renders subgraph category for SUBGRAPH target skills', () => {
+    const html = renderAssetsPanel({
+      'phases/child/SUBGRAPH.md': [
+        '---',
+        'target_skill: story-child',
+        '---',
+        '',
+      ].join('\n'),
+    })
+
+    expect(html).toContain('Subgraphs')
+    expect(html).toContain('story-child')
+  })
 })
 
 function renderAssetsPanel(files: Record<string, string>): string {
@@ -161,6 +195,7 @@ const workspaceContextStub: WorkspaceContextValue = {
   setFileInFlight: () => undefined,
   onSaveConflict: () => undefined,
   reloadOpenFile: async () => undefined,
+  reloadSkillDetail: async () => undefined,
   pushNavSkill: () => undefined,
   popNavTo: () => undefined,
 }

@@ -9,6 +9,7 @@ import { FolderRow } from "./_shared/FolderRow"
 import { PanelHeader } from "./_shared/PanelHeader"
 import { SectionHeading } from "./_shared/SectionHeading"
 import { fileFromDetail } from "./panel-files"
+import { SubgraphCategory } from "./SubgraphCategory"
 
 interface AssetsPanelProps {
   skillDetail?: SkillDetail
@@ -90,6 +91,7 @@ export function AssetsPanel({ skillDetail }: AssetsPanelProps) {
 
       <ScrollArea className="flex-1">
         <div className="space-y-1 px-1.5 py-1 text-xs">
+          <SubgraphCategory skillDetail={skillDetail} />
           <SectionHeading label="Skill Files" />
           <AssetTreeRows node={fileTree} onOpen={openFile} />
         </div>

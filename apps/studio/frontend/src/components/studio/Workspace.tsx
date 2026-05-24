@@ -162,6 +162,10 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     void mutateSkillDetail(detail, { revalidate: false })
   }, [activeFileDetails, mutateSkillDetail])
 
+  const reloadSkillDetail = useCallback(async () => {
+    await mutateSkillDetail()
+  }, [mutateSkillDetail])
+
   const handleUseRemote = useCallback(() => {
     if (!conflict) return
     setActiveFileDetails((current) => {
@@ -272,6 +276,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     setFileInFlight,
     onSaveConflict: setConflict,
     reloadOpenFile,
+    reloadSkillDetail,
     pushNavSkill,
     popNavTo,
   }), [
@@ -283,6 +288,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     navStack,
     popNavTo,
     pushNavSkill,
+    reloadSkillDetail,
     reloadOpenFile,
     setFileInFlight,
     splitMode,

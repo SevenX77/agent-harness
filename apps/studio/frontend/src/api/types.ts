@@ -68,6 +68,16 @@ export interface SkillSummary {
   config_mismatch?: ConfigMismatchWarning | null
 }
 
+export interface StudioSkillImportReq {
+  directory_path: string
+  target_skill_id: string
+}
+
+export interface StudioSkillImportRes {
+  success: boolean
+  skill: SkillSummary
+}
+
 export interface SkillTemplate {
   id: string
   name: string

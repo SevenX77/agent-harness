@@ -33,6 +33,7 @@ export interface WorkspaceContextValue {
   setFileInFlight: (side: EditorSide, inFlight: boolean) => void
   onSaveConflict: (conflict: SaveConflict) => void
   reloadOpenFile: (side: EditorSide) => Promise<void>
+  reloadSkillDetail: () => Promise<void>
   pushNavSkill: (skillId: string) => void
   popNavTo: (index: number) => void
 }

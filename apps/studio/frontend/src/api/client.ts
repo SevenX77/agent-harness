@@ -13,6 +13,8 @@ import type {
   RunDetail,
   RunMetadata,
   SkillDetail,
+  StudioSkillImportReq,
+  StudioSkillImportRes,
   SyncSkillReq,
   UpdateSkillFileRes,
 } from './types'
@@ -156,6 +158,11 @@ export async function revertSkill(skillId: string, sha: string): Promise<SkillDe
 
 export async function getSkillDetail(skillId: string): Promise<SkillDetail> {
   const response = await api.get<SkillDetail>(`/skills/${skillId}`)
+  return response.data
+}
+
+export async function importStudioSkill(request: StudioSkillImportReq): Promise<StudioSkillImportRes> {
+  const response = await api.post<StudioSkillImportRes>('/studio/skills/import', request)
   return response.data
 }
 

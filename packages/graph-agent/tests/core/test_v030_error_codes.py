@@ -3,13 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def test_engine_src_no_longer_emits_v21_error_codes() -> None:
-    src_root = Path(__file__).parents[2] / "src" / "graph_agent"
-    legacy_prefix = "F-" + "v21-"
+def test_v21_error_codes_are_retired_from_src_and_tests() -> None:
+    root = Path(__file__).resolve().parents[2]
+    scanned_roots = [root / "src", root / "tests"]
+    retired_prefix = "F-" + "v21-"
     offenders: list[str] = []
-    for path in src_root.rglob("*.py"):
-        text = path.read_text(encoding="utf-8")
-        if f"[{legacy_prefix}" in text or legacy_prefix in text:
-            offenders.append(str(path.relative_to(src_root)))
+    for scanned_root in scanned_roots:
+        for path in scanned_root.rglob("*"):
+            if not path.is_file() or path.suffix not in {".py", ".md"}:
+                continue
+            text = path.read_text(encoding="utf-8")
+            if retired_prefix in text:
+                offenders.append(path.relative_to(root).as_posix())
 
     assert offenders == []

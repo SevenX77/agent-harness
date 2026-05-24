@@ -1404,7 +1404,7 @@ def _phase_from_location(location: str | None) -> str | None:
 
 def _error_code_from_message(message: str) -> str:
     match = re.search(r"\[(F-[^\]]+)\]", message)
-    return match.group(1) if match else "F-v21-compile"
+    return match.group(1) if match else "F-v3-runtime-phase-failed"
 
 
 def _raise_v21_directory_authoring_required() -> NoReturn:

@@ -62,6 +62,10 @@ export async function revealInFileManager(path: string) {
 }
 
 export async function selectSkillDirectory(defaultDirectory?: string | null): Promise<string | null> {
+  return pickFolder(defaultDirectory)
+}
+
+export async function pickFolder(defaultDirectory?: string | null): Promise<string | null> {
   if (!isTauriRuntime()) {
     toast.info('Desktop only')
     return null
@@ -69,7 +73,7 @@ export async function selectSkillDirectory(defaultDirectory?: string | null): Pr
 
   try {
     const { invoke } = await import('@tauri-apps/api/core')
-    const selected = await invoke<string | null>('select_directory', {
+    const selected = await invoke<string | null>('pick_folder', {
       defaultPath: defaultDirectory?.trim() || null,
     })
     return typeof selected === 'string' ? selected : null

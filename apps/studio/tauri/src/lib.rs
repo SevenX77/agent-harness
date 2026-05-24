@@ -90,6 +90,14 @@ async fn select_directory(
     app: tauri::AppHandle,
     default_path: Option<String>,
 ) -> Result<Option<String>, String> {
+    pick_folder(app, default_path).await
+}
+
+#[tauri::command]
+async fn pick_folder(
+    app: tauri::AppHandle,
+    default_path: Option<String>,
+) -> Result<Option<String>, String> {
     let mut dialog = app.dialog().file();
     if let Some(default_path) = picker_starting_directory(default_path) {
         dialog = dialog.set_directory(default_path);
@@ -217,6 +225,7 @@ pub fn run() {
             get_sidecar_stderr,
             open_in_cursor,
             open_in_codex,
+            pick_folder,
             select_directory,
             open_in_terminal,
             reveal_in_file_manager

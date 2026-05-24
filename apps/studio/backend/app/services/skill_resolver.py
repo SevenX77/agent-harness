@@ -10,7 +10,9 @@ from graph_agent.core.skill_resolver_protocol import (
     validate_skill_id,
 )
 
+from app.core import config
 from app.core.adapters.metadata_local import LocalJsonMetadataStore
+from app.core.ports.metadata import MetadataStore
 
 
 class StudioSkillResolver(SkillResolverProtocol):
@@ -38,4 +40,25 @@ class StudioSkillResolver(SkillResolverProtocol):
             ) from exc
 
 
-__all__ = ["StudioSkillResolver"]
+def studio_skill_resolver_from_metadata(metadata: MetadataStore) -> StudioSkillResolver:
+    """Build the Studio resolver from the configured local metadata store."""
+    if not isinstance(metadata, LocalJsonMetadataStore):
+        raise TypeError("StudioSkillResolver requires LocalJsonMetadataStore")
+    return StudioSkillResolver(metadata)
+
+
+def studio_skill_resolver_from_config() -> StudioSkillResolver:
+    """Build the Studio resolver inside sync/subprocess entrypoints."""
+    return StudioSkillResolver(
+        LocalJsonMetadataStore(
+            global_config_dir=config.APP_SETTINGS_DIR,
+            workspaces_root=config.WORKSPACES_DIR,
+        )
+    )
+
+
+__all__ = [
+    "StudioSkillResolver",
+    "studio_skill_resolver_from_config",
+    "studio_skill_resolver_from_metadata",
+]

@@ -49,6 +49,10 @@ from app.services.canvas_errors import CanvasConflictError, CanvasSerializerFata
 from app.services.config_arbitration import detect_config_mismatch
 from app.services.file_watcher import record_api_write
 from app.services.git_local import GitLocalService, initialize_skill_repository
+from app.services.skill_resolver import (
+    studio_skill_resolver_from_config,
+    studio_skill_resolver_from_metadata,
+)
 
 _LOCATION_RE = re.compile(r":(?P<line>\d+)(?::(?P<loc>.*))?")
 _NAME_LINE_RE = re.compile(
@@ -302,7 +306,10 @@ def lint_skill(skill_id: str) -> LintResult:
 def lint_skill_path(skill_path: Path) -> LintResult:
     """Compile a V2.1 skill root into Studio lint diagnostics."""
     try:
-        compiled = compile_skill(skill_path)
+        compiled = compile_skill(
+            skill_path,
+            skill_resolver=studio_skill_resolver_from_config(),
+        )
     except (SkillLoadError, SkillCompilationError) as exc:
         return LintResult(status="failed", errors=[_lint_error_from_exception(exc)])
     return LintResult(
@@ -321,7 +328,11 @@ async def compile_skill_for_studio(
     """Compile a resolved skill and return the Studio compile contract."""
     skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
     try:
-        compiled = compile_skill(skill_dir, cache=False)
+        compiled = compile_skill(
+            skill_dir,
+            cache=False,
+            skill_resolver=studio_skill_resolver_from_metadata(metadata),
+        )
     except (SkillLoadError, SkillCompilationError) as exc:
         raise CompileFailedError(_compile_failure_from_exception(exc, skill_dir)) from exc
     return CompileSuccess(
@@ -1071,7 +1082,10 @@ def _graph_content_hash(content: str) -> str:
 
 def _load_compiled(skill_path: Path) -> CompiledSkill:
     try:
-        return SkillLoader().compile_skill(skill_path)
+        return SkillLoader().compile_skill(
+            skill_path,
+            skill_resolver=studio_skill_resolver_from_config(),
+        )
     except Exception as exc:
         response = error_response(
             error_code="MANIFEST_VALIDATION_FAILED",
@@ -1085,7 +1099,10 @@ def _load_compiled(skill_path: Path) -> CompiledSkill:
 
 def _load_compiled_for_graph_serializer(skill_path: Path) -> CompiledSkill:
     try:
-        return SkillLoader(validate_context_writes=False).compile_skill(skill_path)
+        return SkillLoader(validate_context_writes=False).compile_skill(
+            skill_path,
+            skill_resolver=studio_skill_resolver_from_config(),
+        )
     except Exception as exc:
         response = error_response(
             error_code="MANIFEST_VALIDATION_FAILED",

@@ -54,6 +54,7 @@ from app.models.runs import (
     TokensMetrics,
 )
 from app.services.git_local import GitCommandError, GitFileLockedError, GitLocalService
+from app.services.skill_resolver import studio_skill_resolver_from_config
 from app.services.skills import resolve_skill_dir, run_dir_for, test_inputs_dir_for_skill
 
 _EVENT_ADAPTER: TypeAdapter[Any] = TypeAdapter(CallbackEvent)
@@ -233,6 +234,7 @@ def _run_worker_main(
             callbacks=callbacks,
             unattended=True,
             cleanup_checkpoints_on_finish=False,
+            skill_resolver=studio_skill_resolver_from_config(),
             **inputs,
         )
         metrics = dict(result.get("metrics", {}))

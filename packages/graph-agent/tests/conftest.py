@@ -60,26 +60,8 @@ class InMemorySkillResolver:
 def in_memory_skill_resolver_factory() -> Callable[[dict[str, Path]], InMemorySkillResolver]:
     return InMemorySkillResolver
 
-# Test paths that depend on the live repo skills using the V2.1 layout
-# (GRAPH.md / phases/). Phase 1 baseline intentionally imported V1 layout
-# skills, awaiting user-guided V2.1 cutover.
 _V1_SKILL_AWAITING_CUTOVER = [
     "tests/core/test_t11_phase_token_info.py",
-    "tests/core/test_v21_actions_keys.py",
-    "tests/core/test_v21_codemod.py",
-    "tests/core/test_v21_graph_serializer.py",
-    "tests/core/test_v21_purity.py",
-    "tests/core/test_v21_skill_authoring_guide_example.py",
-    "tests/e2e/test_batch_analysis_v21.py",
-    "tests/e2e/test_event_extraction_v21.py",
-    "tests/e2e/test_global_synthesis_v21.py",
-    "tests/e2e/test_hello_world_v21.py",
-    "tests/e2e/test_producer_v21.py",
-    "tests/e2e/test_text_segmentation_v21.py",
-    "tests/e2e/test_product_manual_v21.py",
-    "tests/e2e/test_subgraph_sample_v21.py",
-    "tests/e2e/test_v21_all_skills_smoke.py",
-    "tests/integration/skills/",
     "tests/integration/test_mvp1_smoke.py",
     "tests/tools/test_dual_run_shadow.py",
 ]

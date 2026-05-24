@@ -741,6 +741,8 @@ class GraphAgentHarness:
             return cast(WorkflowState, result)
         except Exception as exc:
             # Tier 1 Commit A — T-B14 InternalErrorEvent at harness.run entry
+            from graph_agent.core.exceptions import error_payload_from_exception
+
             _safe_emit_event(
                 active_callbacks,
                 InternalErrorEvent(
@@ -748,6 +750,9 @@ class GraphAgentHarness:
                     error_type=type(exc).__name__,
                     error_message=str(exc),
                     traceback=traceback.format_exc(),
+                    error_payload=error_payload_from_exception(
+                        exc, stage="runtime"
+                    ).model_dump(mode="json", exclude_none=True),
                 ),
             )
             _safe_emit_event(
@@ -1128,6 +1133,7 @@ class GraphAgentHarness:
         except Exception as exc:
             # Tier 1 Commit A — T-B14 InternalErrorEvent at harness.resume
             from graph_agent.callbacks.events import InternalErrorEvent
+            from graph_agent.core.exceptions import error_payload_from_exception
 
             _safe_emit_event(
                 self.callbacks,
@@ -1136,6 +1142,9 @@ class GraphAgentHarness:
                     error_type=type(exc).__name__,
                     error_message=str(exc),
                     traceback=traceback.format_exc(),
+                    error_payload=error_payload_from_exception(
+                        exc, stage="runtime"
+                    ).model_dump(mode="json", exclude_none=True),
                 ),
             )
             raise

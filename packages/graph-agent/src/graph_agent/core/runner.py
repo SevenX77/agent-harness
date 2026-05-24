@@ -206,6 +206,7 @@ def run_skill(
             metrics=WorkflowMetrics(wall_time_sec=wall_time),
             trace_path=None,
             error=str(exc),
+            error_payload=exc.to_error_payload_dict(),
             started_at=started_at,
             finished_at=finished_at,
             wall_time_sec=wall_time,

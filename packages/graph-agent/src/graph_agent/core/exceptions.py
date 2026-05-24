@@ -6,9 +6,80 @@ specific class possible at boundaries; let unexpected errors bubble.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field
+
+DEFAULT_ERROR_CODE = "[F-v3-runtime-phase-failed]"
+DEFAULT_DOC_LINK = "docs/engine/skill-spec/11-error-code-spec.md"
+_ERROR_CODE_RE = re.compile(r"\[(F-v3-[^\]]+)\]")
+
+
+class ErrorPayload(BaseModel):
+    """Standard V0.3.0 framework error payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(pattern=r"^\[F-v3-[^\]]+\]$")
+    level: str = "FATAL"
+    stage: str
+    message: str
+    doc_link: str
+    skill_id: str | None = None
+    phase_id: str | None = None
+    field_path: str | None = None
+    source_path: str | None = None
+
+
+def _code_from_message(message: str) -> str:
+    match = _ERROR_CODE_RE.search(message)
+    return f"[{match.group(1)}]" if match else DEFAULT_ERROR_CODE
+
+
+def _stage_from_code(code: str) -> str:
+    if code.startswith("[F-v3-graph-") or code.startswith("[F-v3-logic-"):
+        return "compile"
+    if (
+        code.startswith("[F-v3-subgraph-")
+        or code.startswith("[F-v3-agent-")
+        or code.startswith("[F-v3-mention-")
+        or code.startswith("[F-v3-resource-")
+        or code.startswith("[F-v3-resolver-")
+        or code == "[F-v3-skill-not-registered]"
+    ):
+        return "compile"
+    if code.startswith("[F-v3-reference-reader-") or code.startswith("[F-v3-cognitive-"):
+        return "assembly"
+    return "runtime"
+
+
+def _doc_link_from_code(code: str) -> str:
+    return f"{DEFAULT_DOC_LINK}#{code.strip('[]')}"
+
+
+def error_payload_from_exception(
+    exc: BaseException,
+    *,
+    stage: str | None = None,
+    level: str = "FATAL",
+) -> ErrorPayload:
+    """Return the standard V0.3.0 payload for any exception."""
+    if isinstance(exc, GraphAgentError):
+        payload = exc.error_payload
+        if stage is not None and payload.stage != stage:
+            return payload.model_copy(update={"stage": stage})
+        return payload
+    message = str(exc)
+    code = _code_from_message(message)
+    return ErrorPayload(
+        code=code,
+        level=level,
+        stage=stage or _stage_from_code(code),
+        message=message,
+        doc_link=_doc_link_from_code(code),
+    )
 
 class GraphAgentError(Exception):
     """Base for all graph_agent framework errors.
@@ -18,10 +89,42 @@ class GraphAgentError(Exception):
     native exceptions with ``raise ... from`` and include structured context.
     """
 
-    def __init__(self, message: str, *, context: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        context: dict[str, Any] | None = None,
+        code: str | None = None,
+        level: str = "FATAL",
+        stage: str | None = None,
+        doc_link: str | None = None,
+        skill_id: str | None = None,
+        phase_id: str | None = None,
+        field_path: str | None = None,
+        source_path: str | None = None,
+    ) -> None:
         """Store the surfaced error message and optional structured context."""
         super().__init__(message)
         self.context = context or {}
+        resolved_code = code or _code_from_message(message)
+        self.code = resolved_code
+        self.error_payload = ErrorPayload(
+            code=resolved_code,
+            level=level,
+            stage=stage or _stage_from_code(resolved_code),
+            message=message,
+            doc_link=doc_link or _doc_link_from_code(resolved_code),
+            skill_id=skill_id,
+            phase_id=phase_id,
+            field_path=field_path,
+            source_path=source_path,
+        )
+
+    def to_error_payload(self) -> ErrorPayload:
+        return self.error_payload
+
+    def to_error_payload_dict(self) -> dict[str, Any]:
+        return self.error_payload.model_dump(mode="json", exclude_none=True)
 
 
 class GraphAgentFatalError(GraphAgentError):

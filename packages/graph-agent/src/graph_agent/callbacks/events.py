@@ -462,6 +462,7 @@ class InternalErrorEvent(_EventBase):
     error_type: str  # exception class name (e.g. "RuntimeError")
     error_message: str  # str(exc)
     traceback: str  # traceback.format_exc()
+    error_payload: dict[str, Any]
 
 
 CallbackEvent = Annotated[

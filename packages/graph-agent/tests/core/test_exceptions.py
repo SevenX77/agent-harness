@@ -5,6 +5,7 @@ from graph_agent.core.exceptions import (
     ArtifactError,
     CheckpointError,
     ContractValidationError,
+    ErrorPayload,
     ExecutionError,
     GraphAgentError,
     LoaderError,
@@ -18,6 +19,7 @@ from graph_agent.core.exceptions import (
     ToolExecutionError,
     TraceWriteError,
     ValidationError,
+    error_payload_from_exception,
 )
 
 DESIGN_EXCEPTIONS = (
@@ -86,6 +88,41 @@ def test_context_dict_is_preserved() -> None:
     exc = PhaseExecutionError("phase failed", context=context)
 
     assert exc.context == context
+
+
+def test_standard_error_payload_is_attached_and_serializable() -> None:
+    exc = PhaseExecutionError(
+        "[F-v3-runtime-state-mapping-failed] phase write failed",
+        skill_id="demo",
+        phase_id="draft",
+        field_path="io.outputs.answer",
+        source_path="phases/draft/SKILL.md",
+    )
+
+    assert isinstance(exc.to_error_payload(), ErrorPayload)
+    assert exc.to_error_payload_dict() == {
+        "code": "[F-v3-runtime-state-mapping-failed]",
+        "level": "FATAL",
+        "stage": "runtime",
+        "message": "[F-v3-runtime-state-mapping-failed] phase write failed",
+        "doc_link": (
+            "docs/engine/skill-spec/11-error-code-spec.md"
+            "#F-v3-runtime-state-mapping-failed"
+        ),
+        "skill_id": "demo",
+        "phase_id": "draft",
+        "field_path": "io.outputs.answer",
+        "source_path": "phases/draft/SKILL.md",
+    }
+
+
+def test_error_payload_from_native_exception_uses_runtime_default() -> None:
+    payload = error_payload_from_exception(RuntimeError("boom"))
+
+    assert payload.code == "[F-v3-runtime-phase-failed]"
+    assert payload.level == "FATAL"
+    assert payload.stage == "runtime"
+    assert payload.message == "boom"
 
 
 def test_raise_from_preserves_cause() -> None:

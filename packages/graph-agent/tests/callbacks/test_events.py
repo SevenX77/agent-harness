@@ -150,6 +150,13 @@ _MIN_CTOR: dict[type, dict] = {
         "error_type": "RuntimeError",
         "error_message": "boom",
         "traceback": "Traceback: ...",
+        "error_payload": {
+            "code": "[F-v3-runtime-phase-failed]",
+            "level": "FATAL",
+            "stage": "runtime",
+            "message": "boom",
+            "doc_link": "docs/engine/skill-spec/11-error-code-spec.md#F-v3-runtime-phase-failed",
+        },
     },
     # Tier 1 Commit B — data + proxy enhancement
     ModelResolvedEvent: {
@@ -231,6 +238,13 @@ class TestUnionDiscriminator:
     def test_tool_call_requires_tool_name(self) -> None:
         with pytest.raises(ValidationError):
             ToolCallEvent(phase_name="p", result="r")
+
+    def test_internal_error_event_serializes_standard_payload(self) -> None:
+        event = InternalErrorEvent(**_MIN_CTOR[InternalErrorEvent])
+        payload = event.model_dump(mode="json")["error_payload"]
+
+        assert payload["code"] == "[F-v3-runtime-phase-failed]"
+        assert payload["stage"] == "runtime"
 
 
 class TestParallelMapGrouping:

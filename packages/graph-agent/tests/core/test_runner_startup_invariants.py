@@ -182,3 +182,15 @@ class TestRunSkillResolverWiring:
 
         assert isinstance(result, WorkflowResult)
         assert result.success is True
+
+    def test_run_skill_failure_returns_standard_error_payload(self, tmp_path: Path) -> None:
+        skill = tmp_path / "GRAPH.md"
+        skill.write_text("---\nname: parent\n---\n", encoding="utf-8")
+
+        result = runner_module.run_skill(tmp_path)
+
+        assert result.success is False
+        assert result.error_payload is not None
+        assert result.error_payload["code"] == "[F-v3-resolver-missing]"
+        assert result.error_payload["level"] == "FATAL"
+        assert result.error_payload["stage"] == "compile"

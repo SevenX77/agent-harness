@@ -55,6 +55,7 @@ class WorkflowResult(BaseModel):
     metrics: WorkflowMetrics = Field(default_factory=WorkflowMetrics)
     trace_path: Path | None = None
     error: str | None = None
+    error_payload: dict[str, Any] | None = None
     started_at: datetime
     finished_at: datetime
     wall_time_sec: float = 0.0

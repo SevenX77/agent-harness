@@ -32,7 +32,6 @@ from graph_agent.core.manifest import (
 from graph_agent.core.mentions import first_broken_mention, scan_mentions
 from graph_agent.core.parser import (
     extract_raw_blocks,
-    locate_line_for_pydantic_loc,
     parse_markdown_parts,
     scan_forbidden_topology_tags,
 )
@@ -707,7 +706,7 @@ def _phase_refs_to_raw_attrs(
             src=phase.src,
             depends_on_raw=",".join(phase.depends_on),
             depends_on=phase.depends_on,
-            line=locate_line_for_pydantic_loc(frontmatter, ("phases", index)) or 1,
+            line=_frontmatter_sequence_item_line(frontmatter, "phases", index),
         )
         for index, phase in enumerate(phases)
     ]
@@ -1327,6 +1326,20 @@ def _frontmatter_key_line(path: Path, key: str) -> int:
     except OSError:
         return 1
     return 1
+
+
+def _frontmatter_sequence_item_line(frontmatter: dict[str, Any], key: str, index: int) -> int:
+    sequence = frontmatter.get(key)
+    lc = getattr(sequence, "lc", None)
+    if lc is None or not hasattr(lc, "item"):
+        return 1
+    try:
+        item_lc = lc.item(index)
+    except (KeyError, IndexError):
+        return 1
+    if not item_lc:
+        return 1
+    return max(1, int(item_lc[0]) + 2)
 
 
 __all__ = [

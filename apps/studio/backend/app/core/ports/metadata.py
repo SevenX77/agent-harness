@@ -33,6 +33,15 @@ class MetadataStore(Protocol):
         """Remove one skill index entry if present."""
         ...
 
+    async def import_skill_directory(
+        self,
+        user_id: str,
+        target_skill_id: str,
+        directory_path: str,
+    ) -> SkillSummary:
+        """Validate and register an existing V0.3.0 graph skill directory."""
+        ...
+
     async def read_app_settings(self) -> AppSettings:
         """Return global Studio application settings."""
         ...

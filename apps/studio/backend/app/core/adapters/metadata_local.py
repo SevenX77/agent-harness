@@ -13,7 +13,11 @@ from pathlib import Path
 from typing import Any
 
 import aiofiles  # type: ignore[import-untyped]
+from graph_agent.core.manifest import GraphManifest
+from graph_agent.core.parser import parse_markdown_parts
+from graph_agent.core.skill_resolver_protocol import validate_skill_id
 
+from app.core.paths import default_skills_root
 from app.core.ports.metadata import SkillIndexEntry
 from app.models.runs import RunMetadata
 from app.models.settings import AppSettings
@@ -83,6 +87,56 @@ class LocalJsonMetadataStore:
             return
         del index[skill_id]
         await self._write_skill_index(index)
+
+    async def import_skill_directory(
+        self,
+        user_id: str,
+        target_skill_id: str,
+        directory_path: str,
+    ) -> SkillSummary:
+        """Validate and register an existing V0.3.0 graph skill directory."""
+        del user_id
+        summary = await asyncio.to_thread(
+            self._validate_import_skill_directory_sync,
+            target_skill_id,
+            directory_path,
+        )
+        registry_path = self._registry_summary_path(target_skill_id)
+        await asyncio.to_thread(registry_path.parent.mkdir, parents=True, exist_ok=True)
+        async with aiofiles.open(registry_path, "w", encoding="utf-8") as file:
+            await file.write(summary.model_dump_json())
+        await self.save_skill_index_entry(
+            target_skill_id,
+            {"absolute_path": summary.directory_path or "", "l2_remote_url": ""},
+        )
+        return summary
+
+    def resolve_registered_skill_path(self, skill_id: str) -> Path:
+        """Resolve a Studio registered skill id to its graph skill root."""
+        validate_skill_id(skill_id)
+        index_path = self._skill_index_path()
+        if index_path.exists():
+            try:
+                raw = json.loads(index_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                raw = {}
+            if isinstance(raw, dict):
+                entry = raw.get(skill_id)
+                if isinstance(entry, dict) and isinstance(entry.get("absolute_path"), str):
+                    path = Path(entry["absolute_path"]).resolve()
+                    if path.is_dir() and (path / "GRAPH.md").is_file():
+                        return path
+
+        registry_path = self._registry_summary_path(skill_id)
+        if registry_path.exists():
+            summary = SkillSummary.model_validate_json(
+                registry_path.read_text(encoding="utf-8")
+            )
+            if summary.directory_path:
+                path = Path(summary.directory_path).resolve()
+                if path.is_dir() and (path / "GRAPH.md").is_file():
+                    return path
+        raise FileNotFoundError(skill_id)
 
     async def read_app_settings(self) -> AppSettings:
         """Return global app settings, falling back to defaults for missing or bad files."""
@@ -169,6 +223,9 @@ class LocalJsonMetadataStore:
     def _skills_root(self, user_id: str) -> Path:
         return self._workspaces_root / user_id / "skills"
 
+    def _registry_summary_path(self, skill_id: str) -> Path:
+        return default_skills_root(self._global_config_dir) / skill_id / "skill_summary.json"
+
     async def _runs_root(self, user_id: str, skill_id: str) -> Path:
         entry = await self.get_skill_index_entry(skill_id)
         if entry:
@@ -177,6 +234,34 @@ class LocalJsonMetadataStore:
 
     def _skill_index_path(self) -> Path:
         return self._global_config_dir / "skill_index.json"
+
+    def _validate_import_skill_directory_sync(
+        self,
+        target_skill_id: str,
+        directory_path: str,
+    ) -> SkillSummary:
+        validate_skill_id(target_skill_id)
+        skill_dir = Path(directory_path).expanduser().resolve()
+        if not skill_dir.is_dir():
+            raise ValueError(f"directory_path is not a directory: {skill_dir}")
+        graph_path = skill_dir / "GRAPH.md"
+        if not graph_path.is_file():
+            raise ValueError(f"directory_path has no GRAPH.md: {skill_dir}")
+        frontmatter, _body, _line_meta = parse_markdown_parts(graph_path)
+        manifest = GraphManifest.model_validate(frontmatter)
+        if manifest.name != target_skill_id:
+            raise ValueError(
+                "GRAPH.md name must match target_skill_id: "
+                f"{manifest.name!r} != {target_skill_id!r}"
+            )
+        return SkillSummary(
+            id=target_skill_id,
+            name=manifest.name,
+            description=manifest.description,
+            phase_count=len(manifest.phases),
+            has_golden=(skill_dir / "golden").exists(),
+            directory_path=str(skill_dir),
+        )
 
     def _app_settings_path(self) -> Path:
         return self._global_config_dir / "app_settings.json"

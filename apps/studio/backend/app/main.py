@@ -122,6 +122,7 @@ def create_app() -> FastAPI:
     register_exception_handlers(studio_app)
 
     studio_app.include_router(skills.router)
+    studio_app.include_router(skills.studio_router)
     studio_app.include_router(templates.router)
     studio_app.include_router(lint.router)
     studio_app.include_router(runs.router)

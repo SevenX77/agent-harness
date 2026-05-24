@@ -31,6 +31,8 @@ from app.models.skills import (
     SerializeGraphRes,
     SkillDetail,
     SkillSummary,
+    StudioSkillImportReq,
+    StudioSkillImportRes,
     UpdateSkillFileReq,
     UpdateSkillFileRes,
     UpdateSkillReq,
@@ -66,7 +68,35 @@ from app.services.skills import (
 from app.services.validator import ValidationHttpError, validate_skill_input_file
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
+studio_router = APIRouter(prefix="/api/studio/skills", tags=["studio-skills"])
 git_service = GitLocalService()
+
+
+@studio_router.post("/import", response_model=StudioSkillImportRes)
+async def import_studio_skill(
+    request: StudioSkillImportReq,
+    user_id: str = Depends(get_auth_user_id),
+    metadata: MetadataStore = Depends(get_metadata),
+) -> StudioSkillImportRes:
+    try:
+        summary = await metadata.import_skill_directory(
+            user_id,
+            request.target_skill_id,
+            request.directory_path,
+        )
+    except ValueError as exc:
+        response = error_response(
+            error_code="INVALID_SKILL_IMPORT_PATH",
+            http_status=422,
+            message=str(exc),
+            details={
+                "directory_path": request.directory_path,
+                "target_skill_id": request.target_skill_id,
+            },
+            retry_strategy="not_retryable",
+        )
+        raise_error_response(response)
+    return StudioSkillImportRes(success=True, skill=summary)
 
 
 @router.get("", response_model=list[SkillSummary])

@@ -124,6 +124,20 @@ class CreateSkillReq(BaseModel):
     import_existing: bool = False
 
 
+class StudioSkillImportReq(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    directory_path: str = Field(..., min_length=1)
+    target_skill_id: str = Field(..., pattern=r"^[a-z][a-z0-9_-]*$")
+
+
+class StudioSkillImportRes(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    success: bool
+    skill: SkillSummary
+
+
 class ForkSkillReq(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

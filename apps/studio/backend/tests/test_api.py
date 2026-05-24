@@ -50,6 +50,7 @@ def test_openapi_registers_phase0_rest_surface(client: TestClient) -> None:
         "/api/skills/{skill_id}/runs/{run_id}/diff",
         "/api/skills/{skill_id}/copilot/dispatch",
         "/api/skills/{skill_id}/runs/{run_id}/audit",
+        "/api/studio/skills/import",
         "/api/batch/{batch_id}",
         "/api/settings",
         "/api/templates",
@@ -57,6 +58,59 @@ def test_openapi_registers_phase0_rest_surface(client: TestClient) -> None:
 
     assert expected_paths <= set(schema["paths"])
     assert "/api/_debug/value-error" not in schema["paths"]
+
+
+def test_import_studio_skill_registers_existing_graph_skill(
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    skill_dir = tmp_path / "external" / "child-skill"
+    files = _agent_skill_files("child-skill")
+    for rel_path, content in files.items():
+        path = skill_dir / rel_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    response = client.post(
+        "/api/studio/skills/import",
+        json={
+            "directory_path": str(skill_dir),
+            "target_skill_id": "child-skill",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["skill"]["id"] == "child-skill"
+    assert body["skill"]["directory_path"] == str(skill_dir)
+    assert (config.APP_SETTINGS_DIR / "Skills" / "child-skill" / "skill_summary.json").exists()
+    assert json.loads(config.SKILL_INDEX_PATH.read_text(encoding="utf-8"))["child-skill"][
+        "absolute_path"
+    ] == str(skill_dir)
+
+
+def test_import_studio_skill_rejects_name_mismatch(
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    skill_dir = tmp_path / "external" / "wrong-skill"
+    files = _agent_skill_files("actual-skill")
+    for rel_path, content in files.items():
+        path = skill_dir / rel_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    response = client.post(
+        "/api/studio/skills/import",
+        json={
+            "directory_path": str(skill_dir),
+            "target_skill_id": "expected-skill",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error_code"] == "INVALID_SKILL_IMPORT_PATH"
 
 
 def test_skills_list_and_detail_use_real_skill_files(client: TestClient) -> None:

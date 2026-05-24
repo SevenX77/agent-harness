@@ -73,7 +73,7 @@ def test_skills_list_and_detail_use_real_skill_files(client: TestClient) -> None
     detail_response = client.get("/api/skills/text-segmentation")
     assert detail_response.status_code == 200
     body = detail_response.json()
-    assert body["manifest"]["schema_version"] == "2.1"
+    assert body["manifest"]["schema_version"] == "0.3.0"
     assert body["io_schema"]["inputs"]["properties"]["input_text"]["type"] == "string"
     assert body["manifest"]["phases"][0]["id"] == "setup"
     assert "GRAPH.md" in body["files"]
@@ -338,7 +338,7 @@ def test_fork_skill_copies_directory_and_rewrites_identity(
 
     target_dir = workspaces_dir / "default" / "skills" / "text-segmentation-copy"
     assert (target_dir / "GRAPH.md").exists()
-    assert (target_dir / "phases" / "setup" / "actions" / "prepare.py").exists()
+    assert (target_dir / "actions" / "prepare.py").exists()
     assert (target_dir / "golden" / "baseline.json").exists()
     assert "name: text-segmentation-copy" in (target_dir / "GRAPH.md").read_text(encoding="utf-8")
 
@@ -805,63 +805,53 @@ def _agent_skill_content(skill_id: str) -> str:
 def _agent_skill_files(skill_id: str) -> dict[str, str]:
     return {
         "GRAPH.md": f"""---
-schema_version: "2.1"
+schema_version: "0.3.0"
 name: {skill_id}
 description: Draft structured ideas
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+      input_text:
+        type: string
+    additionalProperties: true
+  outputs:
+    type: object
+    additionalProperties: true
+phases:
+  - id: setup
+    src: phases/setup
+    depends_on: []
 ---
-<input src="io/inputs.json" />
-<output src="io/outputs.json" />
-<phase id="setup" src="phases/setup" depends_on="" />
-""",
-        "io/inputs.json": """{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "properties": {"topic": {"type": "string"}, "input_text": {"type": "string"}},
-  "additionalProperties": true
-}
-""",
-        "io/outputs.json": """{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "additionalProperties": true
-}
 """,
         "phases/setup/LOGIC.md": """---
 mode: logic
 name: setup
+actions: [prepare]
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+      input_text:
+        type: string
+    additionalProperties: true
+  outputs:
+    type: object
+    properties:
+      prepared:
+        type: boolean
+    additionalProperties: true
 ---
-<python_callable>
-prepare
-</python_callable>
 """,
-        "phases/setup/actions/prepare.py": """def prepare(context):
-    context.set("prepared", True)
+        "actions/prepare.py": """def run(state_slice):
+    del state_slice
     return {"prepared": True}
 """,
     }
-
-
-def _legacy_agent_skill_content(skill_id: str) -> str:
-    return f"""---
-schema_version: "2.0"
-name: {skill_id}
-description: Draft structured ideas
-type: agent
-agent_profile:
-  role: Creative assistant
-  goal: Generate concise planning ideas
-  steps:
-    - Read the requested topic
-    - Return a short list of ideas
-  constraints:
-    - Keep the answer concise
-  llm_role: analyst
-user_prompt_template: |
-  Generate ideas for {{topic}}.
----
-
-# {skill_id}
-"""
 
 
 def _write_final_state(

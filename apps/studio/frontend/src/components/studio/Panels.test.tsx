@@ -130,13 +130,13 @@ function renderAssetsPanel(files: Record<string, string>): string {
 function skillDetailWithFiles(files: Record<string, string>): SkillDetail {
   return {
     manifest: {
-      schema_version: '2.1',
+      schema_version: '0.3.0',
       name: 'story-deconstruction',
       description: '(broken: manifest invalid)',
       phases: [],
     },
     graph_topology: [],
-    node_schema_v21: {},
+    node_schema_v030: {},
     io_schema: {},
     file_paths: {},
     files,

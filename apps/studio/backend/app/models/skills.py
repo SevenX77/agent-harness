@@ -41,7 +41,7 @@ class SkillDetail(BaseModel):
 
     manifest: SkillManifest
     graph_topology: list[dict[str, object]] = Field(default_factory=list)
-    node_schema_v21: dict[str, dict[str, object]] = Field(default_factory=dict)
+    node_schema_v030: dict[str, dict[str, object]] = Field(default_factory=dict)
     io_schema: dict[str, dict[str, object]] = Field(default_factory=dict)
     file_paths: dict[str, str]
     files: dict[str, str] = Field(default_factory=dict)
@@ -57,7 +57,7 @@ class PhaseRef(BaseModel):
     id: str = Field(..., min_length=1)
     src: str = Field(..., min_length=1)
     depends_on: list[str] = Field(default_factory=list)
-    mode: Literal["logic", "subgraph", "skill"]
+    mode: Literal["logic", "subgraph", "agent"]
 
 
 class SerializeGraphReq(BaseModel):

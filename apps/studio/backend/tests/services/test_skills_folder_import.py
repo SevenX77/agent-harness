@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -136,20 +135,23 @@ def test_import_skill_rejects_invalid_graph_with_lint_details(
 ) -> None:
     skill_dir = tmp_path / "external" / "bad-graph"
     (skill_dir / "phases" / "init").mkdir(parents=True)
-    (skill_dir / "io").mkdir()
     (skill_dir / "GRAPH.md").write_text(
         """---
-schema_version: "2.1"
+schema_version: "0.3.0"
 name: bad-graph
+io:
+  inputs:
+    type: object
+  outputs:
+    type: object
+phases:
+  - id: init
+    src: phases/init
+    depends_on: []
 ---
-<input src="io/inputs.json" />
-<output src="io/outputs.json" />
-<phase id="init" src="phases/init" depends_on="" />
 """,
         encoding="utf-8",
     )
-    (skill_dir / "io" / "inputs.json").write_text("{}\n", encoding="utf-8")
-    (skill_dir / "io" / "outputs.json").write_text("{}\n", encoding="utf-8")
     (skill_dir / "phases" / "init" / "LOGIC.md").write_text(
         """---
 mode: logic
@@ -172,7 +174,7 @@ name: init
     body = response.json()
     assert body["error_code"] == "MANIFEST_VALIDATION_FAILED"
     assert body["details"]["errors"][0]["file"] == "phases/init/LOGIC.md"
-    assert "python_callable" in body["details"]["errors"][0]["message"]
+    assert "actions" in body["details"]["errors"][0]["message"]
 
 
 def test_create_skill_with_empty_directory_path_scaffolds(
@@ -217,7 +219,7 @@ def test_create_skill_without_files_uses_valid_default_scaffold(
     assert response.json()["directory_path"] == str(skill_dir)
     assert (skill_dir / "GRAPH.md").exists()
     assert (skill_dir / "phases" / "init" / "LOGIC.md").exists()
-    assert (skill_dir / "phases" / "init" / "actions" / "initialize.py").exists()
+    assert (skill_dir / "actions" / "initialize.py").exists()
     assert (skill_dir / ".workspace").is_dir()
     assert (skill_dir / ".git").is_dir()
 
@@ -412,27 +414,41 @@ async def test_get_skill_detail_returns_broken_detail_with_v1_files(
 
 def _write_graph_skill(skill_dir: Path, name: str) -> None:
     (skill_dir / "phases" / "setup").mkdir(parents=True)
-    (skill_dir / "io").mkdir()
+    (skill_dir / "actions").mkdir()
     (skill_dir / "GRAPH.md").write_text(
         f"""---
-schema_version: "2.1"
+schema_version: "0.3.0"
 name: {name}
 description: Test skill
+io:
+  inputs:
+    type: object
+  outputs:
+    type: object
+phases:
+  - id: setup
+    src: phases/setup
+    depends_on: []
 ---
-<input src="io/inputs.json" />
-<output src="io/outputs.json" />
-<phase id="setup" src="phases/setup" depends_on="" />
 """,
         encoding="utf-8",
     )
-    (skill_dir / "io" / "inputs.json").write_text(json.dumps({}), encoding="utf-8")
-    (skill_dir / "io" / "outputs.json").write_text(json.dumps({}), encoding="utf-8")
     (skill_dir / "phases" / "setup" / "LOGIC.md").write_text(
         """---
 mode: logic
 name: setup
+actions: [prepare]
+io:
+  inputs:
+    type: object
+  outputs:
+    type: object
 ---
 """,
+        encoding="utf-8",
+    )
+    (skill_dir / "actions" / "prepare.py").write_text(
+        "def run(state_slice):\n    del state_slice\n    return {}\n",
         encoding="utf-8",
     )
 
@@ -440,26 +456,33 @@ name: setup
 def _valid_skill_files(skill_id: str) -> dict[str, str]:
     return {
         "GRAPH.md": f"""---
-schema_version: "2.1"
+schema_version: "0.3.0"
 name: {skill_id}
 description: Test skill
+io:
+  inputs:
+    type: object
+  outputs:
+    type: object
+phases:
+  - id: setup
+    src: phases/setup
+    depends_on: []
 ---
-<input src="io/inputs.json" />
-<output src="io/outputs.json" />
-<phase id="setup" src="phases/setup" depends_on="" />
 """,
-        "io/inputs.json": json.dumps({}),
-        "io/outputs.json": json.dumps({}),
         "phases/setup/LOGIC.md": """---
 mode: logic
 name: setup
+actions: [prepare]
+io:
+  inputs:
+    type: object
+  outputs:
+    type: object
 ---
-<python_callable>
-prepare
-</python_callable>
 """,
-        "phases/setup/actions/prepare.py": """def prepare(context):
-    context.set("prepared", True)
+        "actions/prepare.py": """def run(state_slice):
+    del state_slice
     return {"prepared": True}
 """,
     }

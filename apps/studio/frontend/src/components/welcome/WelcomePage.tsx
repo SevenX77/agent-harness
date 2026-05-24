@@ -110,27 +110,27 @@ function sentenceFragment(message: string) {
 }
 
 function relativeLintFile(value: string): string | null {
-  const match = value.match(/(?:^|[\\/])?((?:phases[\\/][A-Za-z0-9_-]+[\\/](?:LOGIC|SUBGRAPH|SKILL)\.md)|GRAPH\.md|io[\\/]inputs\.json|io[\\/]outputs\.json)/)
+  const match = value.match(/(?:^|[\\/])?((?:phases[\\/][A-Za-z0-9_-]+[\\/](?:LOGIC|SUBGRAPH|SKILL)\.md)|GRAPH\.md|actions[\\/][A-Za-z0-9_-]+\.py)/)
   return match ? match[1].replace(/\\/g, '/') : null
 }
 
 function lineFromLintMessage(value: string): string | null {
-  const match = value.match(/(?:GRAPH\.md|io[\\/](?:inputs|outputs)\.json|phases[\\/][A-Za-z0-9_-]+[\\/](?:LOGIC|SUBGRAPH|SKILL)\.md):(?<line>\d+)/)
+  const match = value.match(/(?:GRAPH\.md|actions[\\/][A-Za-z0-9_-]+\.py|phases[\\/][A-Za-z0-9_-]+[\\/](?:LOGIC|SUBGRAPH|SKILL)\.md):(?<line>\d+)/)
   return match?.groups?.line ?? null
 }
 
-function isMissingPythonCallable(message: string) {
-  return /python_callable/.test(message) && /(Input should be a valid string|required)/.test(message)
+function isMissingLogicActions(message: string) {
+  return /actions/.test(message) && /(Field required|required|missing)/.test(message)
 }
 
 function cleanLintMessage(message: string): string {
-  if (isMissingPythonCallable(message)) {
-    return 'LOGIC.md is missing <python_callable>. Add a <python_callable> block that names a Python function in phases/<phase>/actions/.'
+  if (isMissingLogicActions(message)) {
+    return 'LOGIC.md is missing actions. Add actions: [name] and create actions/name.py at the skill root.'
   }
   return message
     .replace(/\s*For further information visit https:\/\/errors\.pydantic\.dev\/\S+/g, '')
     .replace(/\[F-[^\]]+\]\s*/g, '')
-    .replace(/^.*(?:GRAPH\.md|io[\\/](?:inputs|outputs)\.json|phases[\\/][A-Za-z0-9_-]+[\\/](?:LOGIC|SUBGRAPH|SKILL)\.md):\d+\s*/s, '')
+    .replace(/^.*(?:GRAPH\.md|actions[\\/][A-Za-z0-9_-]+\.py|phases[\\/][A-Za-z0-9_-]+[\\/](?:LOGIC|SUBGRAPH|SKILL)\.md):\d+\s*/s, '')
     .trim()
 }
 

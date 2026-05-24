@@ -1,32 +1,25 @@
 ---
-schema_version: "2.0"
+schema_version: "0.3.0"
 name: Blank Graph
-description: A minimal multi-phase graph template with runtime input and artifact output.
-type: graph
-metadata:
-  tags:
-    - template
-    - graphio:
+description: A minimal graph template with runtime input and artifact output.
+io:
   inputs:
-    - name: input_text
-      type: str
-      source: runtime
+    type: object
+    properties:
+      input_text:
+        type: string
+    required: [input_text]
+    additionalProperties: true
   outputs:
-    - name: result
-      type: dict
-      target: artifact
+    type: object
+    properties:
+      result:
+        type: object
+    additionalProperties: true
 phases:
-  - name: draft
-    mode: llm
-    llm_role: analyst
-    prompt: |
-      Analyze {input_text} and produce a structured draft result.
-  - name: review
-    mode: llm
-    llm_role: analyst
-    prompt: |
-      Review the draft result and call finish_task with the final response.
+  - id: draft
+    src: phases/draft
+    depends_on: []
 ---
 
 # Blank Graph
-

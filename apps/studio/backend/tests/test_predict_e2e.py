@@ -103,51 +103,65 @@ def test_backend_deadlock_guard_blocks_p2_but_not_p0(
 
 def _write_backend_skill(tmp_path: Path) -> Path:
     skill_dir = tmp_path / "skill"
-    action_dir = skill_dir / "phases" / "prepare" / "actions"
-    action_dir.mkdir(parents=True)
-    (action_dir / "__init__.py").write_text("", encoding="utf-8")
-    (action_dir / "prepare.py").write_text(
-        "def prepare(context):\n    context.set('prepared', True)\n    return {'prepared': True}\n",
+    (skill_dir / "phases" / "prepare").mkdir(parents=True)
+    (skill_dir / "actions").mkdir(parents=True)
+    (skill_dir / "actions" / "prepare.py").write_text(
+        "def run(state_slice):\n    del state_slice\n    return {'prepared': True}\n",
         encoding="utf-8",
     )
     (skill_dir / "phases" / "draft").mkdir(parents=True)
-    draft_action_dir = skill_dir / "phases" / "draft" / "actions"
-    draft_action_dir.mkdir(parents=True)
-    (draft_action_dir / "__init__.py").write_text("", encoding="utf-8")
-    (draft_action_dir / "draft.py").write_text(
-        "def draft(context):\n    context.set('text', 'draft')\n    return {'text': 'draft'}\n",
+    (skill_dir / "actions" / "draft.py").write_text(
+        "def run(state_slice):\n    del state_slice\n    return {'text': 'draft'}\n",
         encoding="utf-8",
     )
-    (skill_dir / "io").mkdir(parents=True)
     (skill_dir / "GRAPH.md").write_text(
         """---
-schema_version: "2.1"
+schema_version: "0.3.0"
 name: predict-backend-e2e
 description: Predict backend e2e smoke
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+    additionalProperties: true
+  outputs:
+    type: object
+    properties:
+      prepared:
+        type: boolean
+      text:
+        type: string
+phases:
+  - id: prepare
+    src: phases/prepare
+    depends_on: []
+  - id: draft
+    src: phases/draft
+    depends_on: [prepare]
 ---
-<input src="io/inputs.json" />
-<output src="io/outputs.json" />
-<phase id="prepare" src="phases/prepare" depends_on="" />
-<phase id="draft" src="phases/draft" depends_on="prepare" />
 """,
-        encoding="utf-8",
-    )
-    (skill_dir / "io" / "inputs.json").write_text(
-        '{"type":"object","properties":{"topic":{"type":"string"}},"additionalProperties":true}\n',
-        encoding="utf-8",
-    )
-    (skill_dir / "io" / "outputs.json").write_text(
-        '{"type":"object","properties":{"prepared":{"type":"boolean"},"text":{"type":"string"}}}\n',
         encoding="utf-8",
     )
     (skill_dir / "phases" / "prepare" / "LOGIC.md").write_text(
         """---
 mode: logic
 name: prepare
+actions: [prepare]
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+    additionalProperties: true
+  outputs:
+    type: object
+    properties:
+      prepared:
+        type: boolean
 ---
-<python_callable>
-prepare
-</python_callable>
 """,
         encoding="utf-8",
     )
@@ -155,10 +169,20 @@ prepare
         """---
 mode: logic
 name: draft
+actions: [draft]
+io:
+  inputs:
+    type: object
+    properties:
+      prepared:
+        type: boolean
+    additionalProperties: true
+  outputs:
+    type: object
+    properties:
+      text:
+        type: string
 ---
-<python_callable>
-draft
-</python_callable>
 """,
         encoding="utf-8",
     )

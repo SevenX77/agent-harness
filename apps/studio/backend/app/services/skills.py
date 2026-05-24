@@ -21,10 +21,10 @@ from graph_agent.core.exceptions import GraphAgentError, SkillCompilationError, 
 from graph_agent.core.graph_serializer import serialize_graph
 from graph_agent.core.loader import CompiledSkill, SkillLoader
 from graph_agent.core.manifest import (
+    AgentNodeAST,
     GraphManifest,
     GraphPhaseRef,
     LogicNodeAST,
-    SkillNodeAST,
     SubgraphNodeAST,
 )
 
@@ -59,32 +59,52 @@ _ALLOWED_SKILL_FILE_SUFFIXES = {".md", ".json", ".py"}
 _PHASE_NODE_FILES = {"LOGIC.md", "SUBGRAPH.md", "SKILL.md"}
 _SCAFFOLD_FILES = {
     "GRAPH.md": """---
-schema_version: "2.1"
+schema_version: "0.3.0"
 name: new-skill
 description: "New Studio skill"
+io:
+  inputs:
+    type: object
+    additionalProperties: true
+  outputs:
+    type: object
+    properties:
+      initialized:
+        type: boolean
+    required: [initialized]
+    additionalProperties: true
+phases:
+  - id: init
+    src: phases/init
+    depends_on: []
 ---
-<input src="io/inputs.json" />
-<output src="io/outputs.json" />
-<phase id="init" src="phases/init" depends_on="" />
 """,
     "phases/init/LOGIC.md": """---
 mode: logic
 name: init
+actions: [initialize]
+io:
+  inputs:
+    type: object
+    additionalProperties: true
+  outputs:
+    type: object
+    properties:
+      initialized:
+        type: boolean
+    required: [initialized]
+    additionalProperties: true
 ---
-<python_callable>
-initialize
-</python_callable>
 
 # init phase logic
 
 Describe what this phase does.
 """,
-    "phases/init/actions/initialize.py": """def initialize(context):
+    "actions/initialize.py": """def run(state_slice):
     \"\"\"Starter logic action for a new Studio skill.\"\"\"
-    return None
+    del state_slice
+    return {"initialized": True}
 """,
-    "io/inputs.json": "{}\n",
-    "io/outputs.json": "{}\n",
 }
 
 
@@ -110,18 +130,9 @@ def validate_skill_file_path(rel_path: str) -> None:
         raise HTTPException(status_code=422, detail=invalid_message)
     if parts == ("GRAPH.md",):
         return
-    if parts in {("io", "inputs.json"), ("io", "outputs.json")}:
-        return
-    if len(parts) == 2 and parts[0] == "tools" and parts[1].endswith(".py"):
+    if len(parts) == 2 and parts[0] in {"actions", "tools"} and parts[1].endswith(".py"):
         return
     if len(parts) == 3 and parts[0] == "phases" and parts[2] in _PHASE_NODE_FILES:
-        return
-    if (
-        len(parts) == 4
-        and parts[0] == "phases"
-        and parts[2] in {"actions", "tools"}
-        and parts[3].endswith(".py")
-    ):
         return
     raise HTTPException(status_code=422, detail=invalid_message)
 
@@ -940,7 +951,7 @@ def _detail_from_manifest(
     return SkillDetail(
         manifest=compiled.manifest,
         graph_topology=_graph_topology(compiled),
-        node_schema_v21=_node_schema_v21(),
+        node_schema_v030=_node_schema_v030(),
         io_schema=_io_schema(compiled),
         file_paths={
             "skill_dir": str(skill_dir),
@@ -972,7 +983,7 @@ async def _detail_from_manifest_async(
     return SkillDetail(
         manifest=compiled.manifest,
         graph_topology=_graph_topology(compiled),
-        node_schema_v21=_node_schema_v21(),
+        node_schema_v030=_node_schema_v030(),
         io_schema=_io_schema(compiled),
         file_paths={
             "skill_dir": str(skill_dir),
@@ -1001,9 +1012,14 @@ async def _broken_detail_from_files_async(
 ) -> SkillDetail:
     latest = await latest_run_metadata_async(user_id, skill_id, metadata)
     return SkillDetail(
-        manifest=GraphManifest(name=skill_id, description="(broken: manifest invalid)", phases=[]),
+        manifest=GraphManifest(
+            name=skill_id,
+            description="(broken: manifest invalid)",
+            io={"inputs": {"type": "object"}, "outputs": {"type": "object"}},
+            phases=[],
+        ),
         graph_topology=[],
-        node_schema_v21=_node_schema_v21(),
+        node_schema_v030=_node_schema_v030(),
         io_schema={},
         file_paths={
             "skill_dir": str(skill_dir),
@@ -1249,11 +1265,11 @@ def _graph_topology(compiled: CompiledSkill) -> list[dict[str, object]]:
     ]
 
 
-def _node_schema_v21() -> dict[str, dict[str, object]]:
+def _node_schema_v030() -> dict[str, dict[str, object]]:
     return {
         "graph_phase_ref": GraphPhaseRef.model_json_schema(),
         "logic": LogicNodeAST.model_json_schema(),
-        "skill": SkillNodeAST.model_json_schema(),
+        "agent": AgentNodeAST.model_json_schema(),
         "subgraph": SubgraphNodeAST.model_json_schema(),
     }
 

@@ -1,41 +1,28 @@
 ---
-schema_version: "2.0"
+schema_version: "0.3.0"
 name: Data Extractor
 description: Extract structured JSON fields from unstructured text.
-type: graph
-metadata:
-  tags:
-    - template
-    - extractionio:
+io:
   inputs:
-    - name: document_text
-      type: str
-      source: runtime
-    - name: extraction_goal
-      type: str
-      source: runtime
+    type: object
+    properties:
+      document_text:
+        type: string
+      extraction_goal:
+        type: string
+    required: [document_text, extraction_goal]
+    additionalProperties: true
   outputs:
-    - name: extracted_data
-      type: dict
-      target: file
-      path: "output/extracted_data.json"
+    type: object
+    properties:
+      extracted_data:
+        type: object
+    required: [extracted_data]
+    additionalProperties: true
 phases:
-  - name: extract
-    mode: llm
-    llm_role: analyst
-    output_schema_md: |
-      {
-        "fields": {
-          "summary": "string",
-          "entities": "array",
-          "confidence": "number"
-        }
-      }
-    prompt: |
-      Extract structured data from {document_text}.
-      Goal: {extraction_goal}
-      Return JSON with summary, entities, and confidence.
+  - id: extract
+    src: phases/extract
+    depends_on: []
 ---
 
 # Data Extractor
-

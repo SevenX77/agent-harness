@@ -1,4 +1,4 @@
-import type { SkillDetail } from "@/api/types"
+import type { IoInput, SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData } from "@/components/GraphCanvas"
 import type { FileMeta } from "../file-types"
 
@@ -19,13 +19,16 @@ export function fileFromDetail(skillDetail: SkillDetail | undefined, path: strin
 export function phaseIds(skillDetail?: SkillDetail): string[] {
   const fromTopology = skillDetail?.graph_topology?.map((phase) => phase.id) ?? []
   if (fromTopology.length > 0) return fromTopology
-  const phases = skillDetail?.manifest.schema_version === "2.1" ? skillDetail.manifest.phases : []
-  return phases.map((phase) => phase.id)
+  const phases = skillDetail?.manifest.schema_version === "0.3.0" ? (skillDetail.manifest.phases ?? []) : []
+  return phases.flatMap((phase) => {
+    const id = (phase as { id?: unknown }).id
+    return typeof id === "string" ? [id] : []
+  })
 }
 
 export function actionFiles(skillDetail: SkillDetail | undefined, phaseId: string): FileMeta[] {
   return Object.keys(skillDetail?.files ?? {})
-    .filter((path) => path.startsWith(`phases/${phaseId}/actions/`) && path.endsWith(".py"))
+    .filter((path) => path === `actions/${phaseId}.py`)
     .sort()
     .map((path) => fileFromDetail(skillDetail, path))
 }
@@ -65,7 +68,7 @@ export function manifestFiles(skillDetail?: SkillDetail, selectedNode?: { id: st
 
 export function inputFiles(skillDetail?: SkillDetail): FileMeta[] {
   const manifest = skillDetail?.manifest
-  const io = manifest?.schema_version === "2.0" && manifest.type === "graph" ? manifest.io : null
+  const io = manifest?.schema_version === "0.3.0" && manifest.type === "graph" ? manifest.io : null
   if (skillDetail?.files) {
     return [
       fileFromDetail(skillDetail, "io/inputs.json"),
@@ -82,7 +85,9 @@ export function inputFiles(skillDetail?: SkillDetail): FileMeta[] {
     {
       path: "input/sample.json",
       language: "json",
-      content: JSON.stringify(Object.fromEntries((io?.inputs ?? []).map((input) => [input.name, ""])), null, 2),
+      content: JSON.stringify(Object.fromEntries(
+        (Array.isArray(io?.inputs) ? io.inputs as IoInput[] : []).map((input) => [input.name, ""]),
+      ), null, 2),
     },
   ]
 }

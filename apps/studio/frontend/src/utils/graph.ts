@@ -1,7 +1,7 @@
 import { MarkerType } from 'reactflow'
 import type { Edge, Node } from 'reactflow'
 import type { StudioNodeData } from '../CustomNodes'
-import type { GraphSkillDef, SkillManifest } from '../api/types'
+import type { GraphPhaseRef, GraphSkillDef, IoInput, IoOutput, SkillManifest } from '../api/types'
 import type { GraphBuildResult, VisualPhase } from '../types/studio'
 
 function normalizeDependency(value: string | string[] | undefined): string[] {
@@ -9,6 +9,13 @@ function normalizeDependency(value: string | string[] | undefined): string[] {
     return value
   }
   return typeof value === 'string' && value.length > 0 ? [value] : []
+}
+
+function graphPhaseRefs(manifest: SkillManifest): GraphPhaseRef[] {
+  return (manifest.phases ?? []).filter((phase): phase is GraphPhaseRef => (
+    typeof (phase as { id?: unknown }).id === 'string'
+    && typeof (phase as { src?: unknown }).src === 'string'
+  ))
 }
 
 export function subgraphSkillId(path: string | null): string | null {
@@ -24,8 +31,9 @@ export function subgraphSkillId(path: string | null): string | null {
 }
 
 function phasesFromManifest(manifest: SkillManifest): VisualPhase[] {
-  if (manifest.schema_version === '2.1') {
-    return manifest.phases.map((phase) => ({
+  const refs = graphPhaseRefs(manifest)
+  if (manifest.schema_version === '0.3.0' && refs.length > 0) {
+    return refs.map((phase) => ({
       id: phase.id,
       name: phase.id,
       mode: 'logic',
@@ -36,7 +44,7 @@ function phasesFromManifest(manifest: SkillManifest): VisualPhase[] {
   }
 
   if (manifest.type === 'graph') {
-    return manifest.phases.map((phase) => ({
+    return ((manifest.phases ?? []) as GraphSkillDef['phases']).map((phase) => ({
       id: phase.name,
       name: phase.name,
       mode: phase.mode,
@@ -47,11 +55,12 @@ function phasesFromManifest(manifest: SkillManifest): VisualPhase[] {
   }
 
   if (manifest.type === 'agent') {
+    const profile = manifest.agent_profile ?? { llm_role: null }
     return [{
       id: manifest.name,
       name: manifest.name,
       mode: 'llm',
-      role: manifest.agent_profile.llm_role,
+      role: profile.llm_role,
       dependsOn: [],
       subgraph: null,
     }]
@@ -68,29 +77,33 @@ function phasesFromManifest(manifest: SkillManifest): VisualPhase[] {
 }
 
 function inputLabel(manifest: SkillManifest): string {
-  if (manifest.schema_version === '2.1') {
+  if (manifest.schema_version === '0.3.0') {
     return 'Input: schema'
   }
   if (manifest.type !== 'graph') {
     return 'Input: runtime'
   }
-  const names = manifest.io.inputs.map((input) => input.name)
+  const inputs = Array.isArray(manifest.io?.inputs) ? manifest.io.inputs as IoInput[] : []
+  const names = inputs.map((input) => input.name)
   return `Input: ${names.length > 0 ? names.join(', ') : 'None'}`
 }
 
 function outputLabel(manifest: SkillManifest): string {
-  if (manifest.schema_version === '2.1') {
+  if (manifest.schema_version === '0.3.0') {
     return 'Output: schema'
   }
   if (manifest.type !== 'graph') {
     return 'Output: result'
   }
-  const names = manifest.io.outputs.map((output) => output.name)
+  const outputs = Array.isArray(manifest.io?.outputs) ? manifest.io.outputs as IoOutput[] : []
+  const names = outputs.map((output) => output.name)
   return `Output: ${names.length > 0 ? names.join(', ') : 'None'}`
 }
 
 export function graphSkill(manifest: SkillManifest): GraphSkillDef | null {
-  return manifest.schema_version === '2.0' && manifest.type === 'graph' ? manifest : null
+  return manifest.schema_version === '0.3.0' && manifest.type === 'graph'
+    ? manifest as GraphSkillDef
+    : null
 }
 
 export function buildGraph(

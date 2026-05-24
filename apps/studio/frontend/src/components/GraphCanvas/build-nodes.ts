@@ -1,12 +1,12 @@
 import yaml from 'js-yaml'
-import type { IoDeclaration, PhaseDef, SkillDetail, SkillManifest } from '@/api/types'
+import type { GraphPhaseRef, IoDeclaration, PhaseDef, SkillDetail, SkillManifest } from '@/api/types'
 import { INPUT_ID, OUTPUT_ID, type GlobalNodeData, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus, type SubagentRef } from '@/components/nodes'
 
 const EMPTY_IO: IoDeclaration = { inputs: [], outputs: [] }
 
 export function phaseKindFile(data: Pick<SkillGraphNodeData, 'mode' | 'subgraphPath'>): 'LOGIC.md' | 'SKILL.md' | 'SUBGRAPH.md' {
   if (data.subgraphPath || data.mode === 'subgraph') return 'SUBGRAPH.md'
-  if (data.mode === 'skill' || data.mode === 'llm') return 'SKILL.md'
+  if (data.mode === 'agent' || data.mode === 'llm') return 'SKILL.md'
   return 'LOGIC.md'
 }
 
@@ -17,9 +17,17 @@ function normalizeDependsOn(value: string | string[] | undefined): string[] {
   return value ? [value] : []
 }
 
+function graphPhaseRefs(manifest: SkillManifest | undefined): GraphPhaseRef[] {
+  return (manifest?.phases ?? []).filter((phase): phase is GraphPhaseRef => (
+    typeof (phase as { id?: unknown }).id === 'string'
+    && typeof (phase as { src?: unknown }).src === 'string'
+  ))
+}
+
 function phasesFromManifest(manifest: SkillManifest | undefined, skillId: string): PhaseDef[] {
-  if (manifest?.schema_version === '2.1') {
-    return manifest.phases.map((phase) => ({
+  const graphRefs = graphPhaseRefs(manifest)
+  if (manifest?.schema_version === '0.3.0' && graphRefs.length > 0) {
+    return graphRefs.map((phase) => ({
       name: phase.id,
       mode: 'logic',
       model_override: null,
@@ -30,24 +38,32 @@ function phasesFromManifest(manifest: SkillManifest | undefined, skillId: string
   }
 
   if (manifest?.type === 'graph') {
-    return manifest.phases
+    return (manifest.phases ?? []) as PhaseDef[]
   }
 
   if (manifest?.type === 'agent') {
+    const profile = manifest.agent_profile ?? {
+      steps: [],
+      domain_protocols: [],
+      references: [],
+      few_shot_examples: [],
+      context_access: ['working_memory'] as const,
+      llm_role: null,
+    }
     return [{
       name: manifest.name,
       mode: 'llm',
-      model_override: manifest.model_override,
+      model_override: manifest.model_override ?? null,
       prompt: null,
-      user_prompt_template: manifest.user_prompt_template,
-      agent_tools: manifest.agent_tools,
-      steps: manifest.agent_profile.steps,
-      domain_protocols: manifest.agent_profile.domain_protocols,
-      references: manifest.agent_profile.references,
-      few_shot_examples: manifest.agent_profile.few_shot_examples,
-      context_access: manifest.agent_profile.context_access,
-      llm_role: manifest.agent_profile.llm_role,
-      adopted_persona: manifest.adopted_persona,
+      user_prompt_template: manifest.user_prompt_template ?? null,
+      agent_tools: manifest.agent_tools ?? [],
+      steps: profile.steps,
+      domain_protocols: profile.domain_protocols,
+      references: profile.references,
+      few_shot_examples: profile.few_shot_examples,
+      context_access: profile.context_access,
+      llm_role: profile.llm_role,
+      adopted_persona: manifest.adopted_persona ?? null,
       max_iterations: null,
       max_retries: null,
       max_nudges: null,
@@ -103,10 +119,12 @@ function phasesFromManifest(manifest: SkillManifest | undefined, skillId: string
 }
 
 function ioFromManifest(manifest: SkillManifest | undefined): IoDeclaration {
-  if (manifest?.schema_version === '2.1') {
+  if (manifest?.schema_version === '0.3.0') {
     return EMPTY_IO
   }
-  return manifest?.type === 'graph' ? manifest.io : EMPTY_IO
+  return manifest?.type === 'graph' && Array.isArray(manifest.io?.inputs)
+    ? manifest.io as IoDeclaration
+    : EMPTY_IO
 }
 
 function subgraphRefFromFile(content: string | undefined): string | null {

@@ -1,34 +1,28 @@
 ---
-schema_version: "2.0"
+schema_version: "0.3.0"
 name: Chained Reasoning
-description: Demonstrates a two-phase reasoning chain where phase B reviews phase A.
-type: graph
-metadata:
-  tags:
-    - template
-    - reasoningio:
+description: A two-phase reasoning chain where synthesis follows analysis.
+io:
   inputs:
-    - name: question
-      type: str
-      source: runtime
+    type: object
+    properties:
+      question:
+        type: string
+    required: [question]
+    additionalProperties: true
   outputs:
-    - name: final_answer
-      type: dict
-      target: artifact
+    type: object
+    properties:
+      final_answer:
+        type: object
+    additionalProperties: true
 phases:
-  - name: analyze
-    mode: llm
-    llm_role: analyst
-    prompt: |
-      Break down the question into assumptions, evidence, and candidate answers.
-      Question: {question}
-  - name: synthesize
-    mode: llm
-    llm_role: analyst
-    prompt: |
-      Use the analysis from the prior phase to produce a final answer.
-      Include risks and confidence.
+  - id: analyze
+    src: phases/analyze
+    depends_on: []
+  - id: synthesize
+    src: phases/synthesize
+    depends_on: [analyze]
 ---
 
 # Chained Reasoning
-

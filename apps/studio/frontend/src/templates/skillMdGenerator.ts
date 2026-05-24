@@ -36,8 +36,8 @@ function metadataTags(tags: string): string[] {
     .filter(Boolean)
 }
 
-function contextMapping(inputs: WizardInput[]): Record<string, string> {
-  return Object.fromEntries(inputs.map((input) => [input.name, `{input.${input.name}}`]))
+function jsonSchemaProperties(inputs: WizardInput[]): Record<string, Record<string, string>> {
+  return Object.fromEntries(inputs.map((input) => [input.name, { type: input.type }]))
 }
 
 function splitSkillMarkdown(content: string): SkillMarkdownParts | null {
@@ -67,62 +67,71 @@ function renderMarkdown(frontmatter: Record<string, unknown>, title: string, bod
 
 function graphFrontmatter(data: WizardData): Record<string, unknown> {
   return {
-    schema_version: '2.0',
+    schema_version: '0.3.0',
     name: data.name,
     description: data.description,
-    type: 'graph',
     metadata: { tags: metadataTags(data.tags) },
-    context_mapping: contextMapping(data.inputs),
     io: {
-      inputs: data.inputs.map((input) => ({
-        name: input.name,
-        type: input.type,
-        source: 'runtime',
-      })),
-      outputs: [{
-        name: 'result',
-        type: 'dict',
-        target: 'file',
-        path: 'output/result.json',
-      }],
+      inputs: {
+        type: 'object',
+        properties: jsonSchemaProperties(data.inputs),
+        additionalProperties: true,
+      },
+      outputs: {
+        type: 'object',
+        properties: {
+          result: { type: 'object' },
+        },
+        additionalProperties: true,
+      },
     },
     phases: [{
-      name: data.phaseId,
-      mode: 'llm',
-      llm_role: data.llmRole,
-      prompt: data.prompt,
+      id: data.phaseId,
+      src: `phases/${data.phaseId}/SKILL.md`,
+      depends_on: [],
     }],
   }
 }
 
 function agentFrontmatter(data: WizardData): Record<string, unknown> {
   return {
-    schema_version: '2.0',
+    mode: 'agent',
     name: data.name,
-    description: data.description,
-    type: 'agent',
-    metadata: { tags: metadataTags(data.tags) },
-    context_mapping: contextMapping(data.inputs),
-    agent_profile: {
-      role: data.llmRole,
-      goal: data.description,
-      steps: ['Read the provided input', 'Complete the requested task', 'Return the final result'],
-      constraints: ['Be concise and explicit'],
-      llm_role: data.llmRole,
+    role: data.llmRole,
+    goal: data.description,
+    exit_contract: 'Return the final result.',
+    io: {
+      inputs: {
+        type: 'object',
+        properties: jsonSchemaProperties(data.inputs),
+        additionalProperties: true,
+      },
+      outputs: {
+        type: 'object',
+        additionalProperties: true,
+      },
     },
-    user_prompt_template: data.prompt,
   }
 }
 
 function personaFrontmatter(data: WizardData): Record<string, unknown> {
   return {
-    schema_version: '2.0',
+    mode: 'agent',
     name: data.name,
-    description: data.description,
-    type: 'persona',
-    metadata: { tags: metadataTags(data.tags) },
-    role_profile: data.prompt || data.description,
-    evaluation_rubrics: `Use this persona when work requires ${data.description}.`,
+    role: data.llmRole,
+    goal: data.description,
+    exit_contract: `Use this persona when work requires ${data.description}.`,
+    io: {
+      inputs: {
+        type: 'object',
+        properties: jsonSchemaProperties(data.inputs),
+        additionalProperties: true,
+      },
+      outputs: {
+        type: 'object',
+        additionalProperties: true,
+      },
+    },
   }
 }
 
@@ -141,47 +150,24 @@ function templateMarkdown(data: WizardData): string | null {
   const frontmatter = { ...parsed.frontmatter }
   frontmatter.name = data.name
   frontmatter.description = data.description
-  frontmatter.type = data.type
   frontmatter.metadata = {
     ...objectValue(frontmatter.metadata),
     tags: metadataTags(data.tags),
   }
 
   if (data.type === 'graph') {
-    frontmatter.context_mapping = {
-      ...objectValue(frontmatter.context_mapping),
-      ...contextMapping(data.inputs),
-    }
     const io = { ...objectValue(frontmatter.io) }
-    io.inputs = data.inputs.map((input) => ({
-      name: input.name,
-      type: input.type,
-      source: 'runtime',
-    }))
-    if (!Array.isArray(io.outputs)) {
-      io.outputs = (graphFrontmatter(data).io as { outputs: unknown[] }).outputs
-    }
+    io.inputs = (graphFrontmatter(data).io as { inputs: unknown }).inputs
+    io.outputs = objectValue(io.outputs).type ? io.outputs : (graphFrontmatter(data).io as { outputs: unknown }).outputs
     frontmatter.io = io
-
-    const phases = Array.isArray(frontmatter.phases) ? [...frontmatter.phases] : []
-    const llmPhaseIndex = phases.findIndex((phase) => objectValue(phase).mode === 'llm')
-    const targetIndex = llmPhaseIndex >= 0 ? llmPhaseIndex : 0
-    const targetPhase: Record<string, unknown> = { ...objectValue(phases[targetIndex]), mode: 'llm' }
-    targetPhase.name = data.phaseId
-    targetPhase.llm_role = data.llmRole
-    targetPhase.prompt = data.prompt
-    phases[targetIndex] = targetPhase
-    frontmatter.phases = phases.length > 0 ? phases : graphFrontmatter(data).phases
   } else if (data.type === 'agent') {
-    const profile = { ...objectValue(frontmatter.agent_profile) }
-    profile.role = data.llmRole
-    profile.goal = data.description
-    profile.llm_role = data.llmRole
-    frontmatter.context_mapping = contextMapping(data.inputs)
-    frontmatter.agent_profile = profile
-    frontmatter.user_prompt_template = data.prompt
+    frontmatter.mode = 'agent'
+    frontmatter.role = data.llmRole
+    frontmatter.goal = data.description
   } else {
-    frontmatter.role_profile = data.prompt || data.description
+    frontmatter.mode = 'agent'
+    frontmatter.role = data.llmRole
+    frontmatter.goal = data.prompt || data.description
   }
 
   return renderMarkdown(frontmatter, data.name, `# ${data.name}\n`)
@@ -212,9 +198,8 @@ function safeInputType(value: unknown): SkillInputType {
     : 'str'
 }
 
-function inputFromContextMapping(mapping: unknown): WizardInput[] {
-  return Object.entries(objectValue(mapping))
-    .filter(([, value]) => typeof value === 'string' && value.startsWith('{input.'))
+function inputFromIoSchema(schema: unknown): WizardInput[] {
+  return Object.entries(objectValue(objectValue(schema).properties))
     .map(([name]) => ({
       id: crypto.randomUUID(),
       name,
@@ -230,7 +215,7 @@ export function wizardDataFromSkillMd(content: string, templateId: string | null
   const metadata = objectValue(frontmatter.metadata)
   const tags = Array.isArray(metadata.tags) ? metadata.tags.filter((tag): tag is string => typeof tag === 'string').join(', ') : ''
 
-  let inputs = inputFromContextMapping(frontmatter.context_mapping)
+  let inputs = inputFromIoSchema(objectValue(frontmatter.io).inputs)
   let phaseId = 'draft'
   let llmRole = 'analyst'
   let prompt = ''

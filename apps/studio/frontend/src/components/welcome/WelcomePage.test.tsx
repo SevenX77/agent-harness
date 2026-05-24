@@ -183,20 +183,20 @@ describe('WelcomePage', () => {
         errors: [{
           file: 'phases/init/LOGIC.md',
           line: 1,
-          message: 'LOGIC.md AST validation failed: python_callable is required',
+          message: 'LOGIC.md AST validation failed: actions field required',
         }],
       },
     })
 
     expect(formatImportSkillError(error)).toBe(
-      'Cannot import this folder: phases/init/LOGIC.md:1 LOGIC.md is missing <python_callable>. Add a <python_callable> block that names a Python function in phases/<phase>/actions/.',
+      'Cannot import this folder: phases/init/LOGIC.md:1 LOGIC.md is missing actions. Add actions: [name] and create actions/name.py at the skill root.',
     )
     expect(formatCreateSkillError(error, 'new-skill')).toBe(
-      'Cannot create "new-skill": phases/init/LOGIC.md:1 LOGIC.md is missing <python_callable>. Add a <python_callable> block that names a Python function in phases/<phase>/actions/.',
+      'Cannot create "new-skill": phases/init/LOGIC.md:1 LOGIC.md is missing actions. Add actions: [name] and create actions/name.py at the skill root.',
     )
   })
 
-  it('turns old scaffold python_callable validation into actionable copy', () => {
+  it('turns missing logic actions validation into actionable copy', () => {
     const error = studioApiError({
       error_code: 'MANIFEST_VALIDATION_FAILED',
       message: 'Manifest validation failed',
@@ -204,13 +204,13 @@ describe('WelcomePage', () => {
         errors: [{
           file: 'phases/init/LOGIC.md',
           line: 1,
-          message: '[F-v21-route] /tmp/.new-skill.tmp/phases/init/LOGIC.md:1 LOGIC.md AST validation failed: 1 validation error for LogicNodeAST\npython_callable\n  Input should be a valid string [type=string_type, input_value=None, input_type=None]\n    For further information visit https://errors.pydantic.dev/2.13/v/string_type',
+          message: '[F-v3-logic-actions-missing] /tmp/.new-skill.tmp/phases/init/LOGIC.md:1 LOGIC.md AST validation failed: actions Field required',
         }],
       },
     })
 
     expect(formatCreateSkillError(error, 'new-skill')).toBe(
-      'Cannot create "new-skill": phases/init/LOGIC.md:1 LOGIC.md is missing <python_callable>. Add a <python_callable> block that names a Python function in phases/<phase>/actions/.',
+      'Cannot create "new-skill": phases/init/LOGIC.md:1 LOGIC.md is missing actions. Add actions: [name] and create actions/name.py at the skill root.',
     )
   })
 

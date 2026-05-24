@@ -80,44 +80,37 @@ def _with_ws_token(url: str) -> str:
 
 
 def _write_graph_skill(skill_dir: Path, name: str, description: str) -> None:
-    (skill_dir / "phases" / "setup" / "actions").mkdir(parents=True)
-    (skill_dir / "phases" / "setup" / "actions" / "__init__.py").write_text("", encoding="utf-8")
-    (skill_dir / "phases" / "setup" / "actions" / "prepare.py").write_text(
-        "def prepare(context):\n    context.set('prepared', True)\n    return {'prepared': True}\n",
+    (skill_dir / "phases" / "setup").mkdir(parents=True)
+    (skill_dir / "actions").mkdir(parents=True)
+    (skill_dir / "actions" / "prepare.py").write_text(
+        "def run(state_slice):\n    del state_slice\n    return {'prepared': True}\n",
         encoding="utf-8",
     )
-    (skill_dir / "io").mkdir(parents=True)
     (skill_dir / "GRAPH.md").write_text(
         f"""---
-schema_version: "2.1"
+schema_version: "0.3.0"
 name: {name}
 description: {description}
+io:
+  inputs:
+    type: object
+    properties:
+      input_text:
+        type: string
+    required: [input_text]
+    additionalProperties: false
+  outputs:
+    type: object
+    properties:
+      prepared:
+        type: boolean
+    required: [prepared]
+    additionalProperties: true
+phases:
+  - id: setup
+    src: phases/setup
+    depends_on: []
 ---
-<input src="io/inputs.json" />
-<output src="io/outputs.json" />
-<phase id="setup" src="phases/setup" depends_on="" />
-""",
-        encoding="utf-8",
-    )
-    (skill_dir / "io" / "inputs.json").write_text(
-        """{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "properties": {"input_text": {"type": "string"}},
-  "required": ["input_text"],
-  "additionalProperties": false
-}
-""",
-        encoding="utf-8",
-    )
-    (skill_dir / "io" / "outputs.json").write_text(
-        """{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "properties": {"prepared": {"type": "object"}},
-  "required": ["prepared"],
-  "additionalProperties": true
-}
 """,
         encoding="utf-8",
     )
@@ -125,10 +118,23 @@ description: {description}
         """---
 mode: logic
 name: setup
+actions: [prepare]
+io:
+  inputs:
+    type: object
+    properties:
+      input_text:
+        type: string
+    required: [input_text]
+    additionalProperties: false
+  outputs:
+    type: object
+    properties:
+      prepared:
+        type: boolean
+    required: [prepared]
+    additionalProperties: true
 ---
-<python_callable>
-prepare
-</python_callable>
 """,
         encoding="utf-8",
     )

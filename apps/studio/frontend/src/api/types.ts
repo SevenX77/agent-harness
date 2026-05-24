@@ -281,24 +281,31 @@ export interface GraphPhaseRef {
   depends_on: string[]
 }
 
-export interface GraphManifestV21 {
-  schema_version: '2.1'
+export interface GraphManifestV030 {
+  schema_version: '0.3.0'
   name: string
   description: string
-  io_inputs_ref?: string
-  io_outputs_ref?: string
+  type?: 'graph' | 'agent' | 'persona'
+  io?: JsonObject | IoDeclaration
   phases: GraphPhaseRef[]
   metadata?: JsonObject
+  agent_profile?: AgentProfile
+  model_override?: string | null
+  agent_tools?: string[]
+  adopted_persona?: string | null
+  user_prompt_template?: string | null
 }
 
 export interface BaseSkillManifest {
-  schema_version: '2.0'
+  schema_version: '0.3.0'
   name: string
   description: string
   license: string | null
   version: string | null
   author: string | null
   metadata: JsonObject | null
+  phases?: GraphPhaseRef[] | PhaseDef[]
+  io?: JsonObject | IoDeclaration
 }
 
 export interface AgentProfile {
@@ -320,7 +327,6 @@ export interface AgentSkillDef extends BaseSkillManifest {
   agent_tools: string[]
   adopted_persona: string | null
   user_prompt_template: string | null
-  context_mapping: Record<string, string>
 }
 
 export interface BasePhase {
@@ -369,7 +375,6 @@ export interface GraphSkillDef extends BaseSkillManifest {
   type: 'graph'
   io: IoDeclaration
   phases: PhaseDef[]
-  context_mapping: Record<string, string>
 }
 
 export interface PersonaSkillDef extends BaseSkillManifest {
@@ -379,19 +384,19 @@ export interface PersonaSkillDef extends BaseSkillManifest {
   few_shot_examples: string[]
 }
 
-export type SkillManifest = AgentSkillDef | GraphSkillDef | PersonaSkillDef | GraphManifestV21
+export type SkillManifest = AgentSkillDef | GraphSkillDef | PersonaSkillDef | GraphManifestV030
 
 export interface GraphTopologyItem {
   id: string
   src: string
   depends_on: string[]
-  mode: 'logic' | 'subgraph' | 'skill' | string
+  mode: 'logic' | 'subgraph' | 'agent' | string
 }
 
 export interface SkillDetail {
   manifest: SkillManifest
   graph_topology?: GraphTopologyItem[]
-  node_schema_v21?: Record<string, JsonObject>
+  node_schema_v030?: Record<string, JsonObject>
   io_schema?: Record<string, JsonObject>
   file_paths: Record<string, string>
   files?: Record<string, string>

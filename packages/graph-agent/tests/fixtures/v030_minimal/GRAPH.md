@@ -17,13 +17,13 @@ io:
     required: [answer]
 phases:
   - id: prepare
-    src: phases/prepare/LOGIC.md
+    src: phases/prepare
     depends_on: []
   - id: write
-    src: phases/write/SKILL.md
+    src: phases/write
     depends_on: [prepare]
   - id: child
-    src: phases/child/SUBGRAPH.md
+    src: phases/child
     depends_on: [prepare]
 ---
 

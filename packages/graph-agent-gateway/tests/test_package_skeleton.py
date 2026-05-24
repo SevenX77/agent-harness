@@ -19,6 +19,7 @@ def test_gateway_package_layout_exists() -> None:
     assert (PACKAGE_ROOT / "src" / "graph_agent_gateway" / "resolver.py").is_file()
     assert (PACKAGE_ROOT / "src" / "graph_agent_gateway" / "gateway_chat_model.py").is_file()
     assert (PACKAGE_ROOT / "src" / "graph_agent_gateway" / "llm_config.py").is_file()
+    assert (PACKAGE_ROOT / "src" / "graph_agent_gateway" / "factory.py").is_file()
     assert (PACKAGE_ROOT / "src" / "graph_agent_gateway" / "predict_interception.py").is_file()
     assert (PACKAGE_ROOT / "src" / "graph_agent_gateway" / "exceptions.py").is_file()
 
@@ -28,6 +29,7 @@ def test_gateway_public_modules_are_importable_without_graph_agent_cycle() -> No
         "graph_agent_gateway",
         "graph_agent_gateway.protocol",
         "graph_agent_gateway.resolver",
+        "graph_agent_gateway.factory",
         "graph_agent_gateway.gateway_chat_model",
         "graph_agent_gateway.llm_config",
         "graph_agent_gateway.predict_interception",
@@ -39,6 +41,7 @@ def test_gateway_public_modules_are_importable_without_graph_agent_cycle() -> No
 
     assert imported["graph_agent_gateway.protocol"].ModelResolverProtocol is not None
     assert imported["graph_agent_gateway.resolver"].ModelResolver is not None
+    assert imported["graph_agent_gateway.factory"].create_chat_model is not None
     assert imported["graph_agent_gateway.gateway_chat_model"].GatewayChatModel is not None
     assert imported["graph_agent_gateway.exceptions"].AllProvidersFailedError is not None
 

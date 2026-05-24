@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from graph_agent_gateway import factory as factory
 from graph_agent_gateway.exceptions import (
     AllProvidersFailedError,
     GatewayResolverMissingError,
@@ -18,4 +19,5 @@ __all__ = [
     "GatewayRoleNotConfiguredError",
     "ModelResolver",
     "ModelResolverProtocol",
+    "factory",
 ]

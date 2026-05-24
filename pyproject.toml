@@ -94,7 +94,7 @@ module = ["langgraph.checkpoint.postgres", "langgraph.checkpoint.postgres.*", "p
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["jsonschema", "jsonschema.*", "yaml", "yaml.*"]
+module = ["jsonschema", "jsonschema.*", "langchain_anthropic", "yaml", "yaml.*"]
 ignore_missing_imports = true
 
 # V1 cutover legacy quarantine; pending deeper V1->V2 migration spec.

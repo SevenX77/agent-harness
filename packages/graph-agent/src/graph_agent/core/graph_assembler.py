@@ -29,7 +29,6 @@ from graph_agent.cognitive.critic import (
 )
 from graph_agent.cognitive.finish_task import build_finish_task_tool
 from graph_agent.cognitive.md2json import parse_finish_markdown
-from graph_agent.cognitive.md_patch import LLMMdPatchClient
 from graph_agent.cognitive.prompt import (
     apply_v030_cognitive_template,
     resolve_role_prefix_from_llm_role,
@@ -335,7 +334,7 @@ def _build_skill_node(
     finish_task = build_finish_task_tool(
         output_schema if isinstance(output_schema, dict) else None,
         parse_finish_markdown,
-        LLMMdPatchClient(chat_model) if chat_model is not None else None,
+        None,
         max_patch_attempts=max_patch_attempts,
     )
     ambiguity_tool = _wrap_tool_for_langchain(log_ambiguity, tool_state)

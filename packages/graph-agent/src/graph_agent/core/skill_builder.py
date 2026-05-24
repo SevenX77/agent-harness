@@ -712,9 +712,8 @@ def _render_output_format_markdown(
     """Render output schema as Markdown template + field reference.
 
     The template explicitly shows the ``##`` block + bullet structure
-    that md_to_json expects, so the LLM doesn't have to infer it from
-    field metadata alone. Falls back to empty string + log warning when
-    the schema can't be resolved (graceful degradation).
+    expected by the structured output contract. Falls back to empty string
+    + log warning when the schema can't be resolved.
 
     Args:
         output_schema_path: Dotted path to a Pydantic BaseModel class.

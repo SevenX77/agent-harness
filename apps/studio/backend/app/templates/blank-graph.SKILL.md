@@ -6,11 +6,7 @@ type: graph
 metadata:
   tags:
     - template
-    - graph
-context_mapping:
-  input_text: "{input.input_text}"
-  draft_result: ""
-io:
+    - graphio:
   inputs:
     - name: input_text
       type: str

@@ -11,7 +11,6 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from graph_agent.cognitive.md2json import Md2JsonResult
-from graph_agent.cognitive.md_patch import MdPatchClient
 
 FATAL_CODE = "F-v3-md2json"
 
@@ -23,6 +22,7 @@ class FinishTaskInput(BaseModel):
 
 
 Md2JsonConverter = Callable[[str, dict[str, Any] | None], Md2JsonResult]
+MdPatchClient = Any
 
 
 def build_finish_task_tool(
@@ -66,7 +66,7 @@ def build_finish_task_tool(
                         {
                             "path": [],
                             "schema_path": [],
-                            "message": "md-patch returned empty or non-string markdown",
+                            "message": "markdown repair returned empty or non-string markdown",
                             "validator": "md_patch",
                         }
                     ],

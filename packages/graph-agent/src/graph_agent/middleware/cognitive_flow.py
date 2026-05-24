@@ -37,7 +37,6 @@ from graph_agent.core.exceptions import GraphAgentError
 from graph_agent.core.io_manager import IOManager
 from graph_agent.core.schema_engine import SchemaEngine, SchemaObject
 from graph_agent.core.state import BusinessData, FrameworkState, StateManager, WorkflowState
-from graph_agent.tools.md_to_json import parse_md
 
 logger = logging.getLogger(__name__)
 
@@ -297,7 +296,11 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
                 model = self._schema_engine.get_pydantic_model(schema)
             else:
                 model = schema
-            blocks = parse_md(business_data_md, model)
+            data = json.loads(business_data_md)
+            if isinstance(data, list):
+                blocks = [model.model_validate(item) for item in data]
+            else:
+                blocks = [model.model_validate(data)]
         except Exception as exc:  # noqa: BLE001 - returned to LLM as retry feedback
             return _FinishValidation(
                 ok=False,
@@ -318,26 +321,26 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         parsed_items: list[dict[str, Any]] = []
         errors: list[str] = []
         for block in blocks:
-            item_id = block.meta.id or "unknown"
+            item_data = block.model_dump()
             if isinstance(schema, SchemaObject):
-                result = self._schema_engine.validate(block.data, schema)
+                result = self._schema_engine.validate(item_data, schema)
                 if result.ok:
-                    parsed_items.append(result.parsed or dict(block.data))
+                    parsed_items.append(result.parsed or item_data)
                 else:
-                    errors.extend(f"item {item_id}: {error}" for error in result.errors)
+                    errors.extend(f"item: {error}" for error in result.errors)
                 continue
             # Pydantic class path: validate the per-item dict directly
             # against the imported BaseModel and surface any
             # ValidationError as a per-item, per-field message so the LLM
             # can correct the markdown on retry.
             try:
-                instance = model.model_validate(block.data)
+                instance = model.model_validate(item_data)
             except PydanticValidationError as exc:
                 for detail in exc.errors():
                     loc_parts = detail.get("loc", ())
                     loc = ".".join(str(part) for part in loc_parts) or "__root__"
                     msg = str(detail.get("msg", "validation error"))
-                    errors.append(f"item {item_id}: {loc}: {msg}")
+                    errors.append(f"item: {loc}: {msg}")
                 continue
             parsed_items.append(instance.model_dump())
 

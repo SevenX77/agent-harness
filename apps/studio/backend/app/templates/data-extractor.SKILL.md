@@ -6,12 +6,7 @@ type: graph
 metadata:
   tags:
     - template
-    - extraction
-context_mapping:
-  document_text: "{input.document_text}"
-  extraction_goal: "{input.extraction_goal}"
-  extracted_data: ""
-io:
+    - extractionio:
   inputs:
     - name: document_text
       type: str

@@ -6,12 +6,7 @@ type: graph
 metadata:
   tags:
     - template
-    - reasoning
-context_mapping:
-  question: "{input.question}"
-  analysis: ""
-  final_answer: ""
-io:
+    - reasoningio:
   inputs:
     - name: question
       type: str

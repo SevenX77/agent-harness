@@ -847,8 +847,6 @@ schema_version: "2.0"
 name: {skill_id}
 description: Draft structured ideas
 type: agent
-context_mapping:
-  topic: "{{input.topic}}"
 agent_profile:
   role: Creative assistant
   goal: Generate concise planning ideas

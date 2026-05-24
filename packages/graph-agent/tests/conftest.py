@@ -24,23 +24,8 @@ from graph_agent.core import SkillResolutionError
 # adjacent ``middleware/test_chain_topology.py`` test file.
 from graph_agent.middleware import DEFAULT_MIDDLEWARE_ORDER  # noqa: F401
 
-# V1 cutover legacy test quarantine: these files import old class names removed
-# by the V2 refactor. Keep them as reference corpus pending a V1->V2 migration
-# spec deciding whether to delete, migrate, or rewrite them.
 collect_ignore_glob = [
-    "cognitive/test_finish_v2.py",
-    "core/test_build_graph_nodes.py",
-    "core/test_compile_skill_hostile_inputs.py",
-    "core/test_loader_pipeline.py",
-    "core/test_loader_xml_rendering.py",
-    "core/test_manifest_phase_builders.py",
     "core/test_manifest.py",
-    "core/test_parse_skill_md.py",
-    "core/test_personas.py",
-    "core/test_validate_manifest.py",
-    "core/validators/test_persona_resolution.py",
-    "core/validators/test_template_variables.py",
-    "core/validators/test_tool_paths.py",
     "integration/test_mvp2_schema_io.py",
 ]
 
@@ -73,7 +58,7 @@ _V1_SKILL_AWAITING_CUTOVER_TESTS = {
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     xfail_marker = pytest.mark.xfail(
-        reason="by-design: V1 layout skill awaiting user V2.1 cutover (Phase 1 baseline)",
+        reason="by-design: legacy repo skill awaiting V0.3.0 fixture migration",
         strict=False,
     )
     tests_root = config.rootpath

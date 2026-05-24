@@ -6,10 +6,7 @@ type: agent
 metadata:
   tags:
     - template
-    - agent
-context_mapping:
-  input_text: "{input.input_text}"
-agent_profile:
+    - agentagent_profile:
   role: analyst
   goal: Complete the requested task from the provided input.
   steps:

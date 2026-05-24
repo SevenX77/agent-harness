@@ -12,7 +12,7 @@ from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from jsonschema.validators import Draft202012Validator
 
 from graph_agent.core.exceptions import GraphAgentFatalError
-from graph_agent.runtime.state import BlackboardState
+from graph_agent.runtime.state import GraphRuntimeState
 
 
 def schema_properties(schema: dict[str, Any] | None) -> set[str]:
@@ -60,8 +60,8 @@ class StateMapper:
     input_schema: dict[str, Any] | None = None
     output_schema: dict[str, Any] | None = None
 
-    def build_phase_input(self, state: BlackboardState) -> BlackboardState:
-        phase_state: BlackboardState = {
+    def build_phase_input(self, state: GraphRuntimeState) -> GraphRuntimeState:
+        phase_state: GraphRuntimeState = {
             "data": filter_runtime_inputs(
                 dict(state.get("data", {})),
                 self.input_schema,
@@ -109,9 +109,9 @@ class PhaseWrapper:
 
     def wrap(
         self,
-        node: Callable[[BlackboardState], dict[str, Any]],
-    ) -> Callable[[BlackboardState], dict[str, Any]]:
-        def _wrapped(state: BlackboardState) -> dict[str, Any]:
+        node: Callable[[GraphRuntimeState], dict[str, Any]],
+    ) -> Callable[[GraphRuntimeState], dict[str, Any]]:
+        def _wrapped(state: GraphRuntimeState) -> dict[str, Any]:
             try:
                 result = node(self.mapper.build_phase_input(state))
                 return self.mapper.wrap_phase_output(result)
@@ -129,9 +129,9 @@ class ReferenceReaderWrapper:
 
     def wrap(
         self,
-        reader: Callable[[BlackboardState], dict[str, Any]],
-    ) -> Callable[[BlackboardState], dict[str, Any]]:
-        def _wrapped(state: BlackboardState) -> dict[str, Any]:
+        reader: Callable[[GraphRuntimeState], dict[str, Any]],
+    ) -> Callable[[GraphRuntimeState], dict[str, Any]]:
+        def _wrapped(state: GraphRuntimeState) -> dict[str, Any]:
             try:
                 return reader(
                     {
@@ -159,7 +159,7 @@ class ReaderSandboxState:
     root: Path | None = None
     timeout_s: int = 60
 
-    def to_blackboard(self) -> BlackboardState:
+    def to_blackboard(self) -> GraphRuntimeState:
         return {
             "data": {
                 "skill_id": self.skill_id,

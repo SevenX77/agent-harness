@@ -1,4 +1,4 @@
-"""V2.1 graph skill loader: route GRAPH.md + phase node documents."""
+"""V0.3.0 graph skill loader: route GRAPH.md + phase node documents."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ _PHASE_FILE_TO_MODE: dict[str, str] = {
 
 @dataclass(frozen=True)
 class PhaseDocument:
-    """One routed V2.1 phase document plus its typed AST."""
+    """One routed V0.3.0 phase document plus its typed AST."""
 
     phase_name: str
     path: Path
@@ -130,7 +130,7 @@ class PhaseTokenInfo:
 
 
 class SkillLoader:
-    """Thin V2.1 parser/route orchestrator."""
+    """Thin V0.3.0 parser/route orchestrator."""
 
     def __init__(
         self,
@@ -148,7 +148,7 @@ class SkillLoader:
         skill_resolver: SkillResolverProtocol | None = None,
     ) -> CompiledSkill:
         root = Path(skill_root)
-        _guard_v21_root(root)
+        _guard_graph_root(root)
 
         graph_path = root / "GRAPH.md"
         graph_frontmatter, graph_body, line_meta = parse_markdown_parts(graph_path)
@@ -207,7 +207,7 @@ class SkillLoader:
                 for doc in phase_docs
             ],
         }
-        logger.info("Compiled V2.1 graph skill root=%s phases=%d", root, len(phase_docs))
+        logger.info("Compiled V0.3.0 graph skill root=%s phases=%d", root, len(phase_docs))
         return CompiledSkill(
             raw=raw,
             manifest=manifest,
@@ -224,16 +224,16 @@ def load_workflow_from_md(
     callbacks: list[Any] | None = None,
     _loading_stack: set[str] | None = None,
 ) -> Any:
-    """V2.1 temporary runtime wrapper.
+    """V0.3.0 temporary runtime wrapper.
 
     T0.1 owns document routing only.  Runtime LangGraph assembly lands in
     T1.5, so this wrapper rejects file paths and then fails explicitly after
-    proving the V2.1 root can compile.
+    proving the V0.3.0 root can compile.
     """
     del callbacks, _loading_stack
     root = Path(md_path)
     if root.is_file():
-        _fatal(root, 1, "load_workflow_from_md now accepts a V2.1 skill root directory")
+        _fatal(root, 1, "load_workflow_from_md now accepts a V0.3.0 skill root directory")
     from graph_agent.core.compiler import compile_skill
     from graph_agent.core.graph_assembler import assemble_graph
 
@@ -271,11 +271,11 @@ def _purity_fatal(path: Path, line: int, message: str) -> None:
     raise SkillLoadError(f"[F-v3-purity] {path}:{line} {message}")
 
 
-def _guard_v21_root(skill_root: Path) -> None:
+def _guard_graph_root(skill_root: Path) -> None:
     if not skill_root.exists():
         _fatal(skill_root / "GRAPH.md", 1, "missing required GRAPH.md")
     if not skill_root.is_dir():
-        _fatal(skill_root, 1, "V2.1 compile_skill expects a skill root directory")
+        _fatal(skill_root, 1, "V0.3.0 compile_skill expects a skill root directory")
 
     root_skill = skill_root / "SKILL.md"
     if root_skill.exists():
@@ -611,7 +611,7 @@ def _raise_on_purity_violations(path: Path) -> None:
 
 
 def _load_python_module(path: Path) -> ModuleType:
-    module_name = f"_graph_agent_v21_{abs(hash(path.resolve()))}"
+    module_name = f"_graph_agent_v030_{abs(hash(path.resolve()))}"
     try:
         spec = importlib.util.spec_from_file_location(module_name, path)
         if spec is None or spec.loader is None:
@@ -660,7 +660,7 @@ def _route_document(file_path: Path) -> RouteKind:
         return "graph"
     if file_path.name in _PHASE_FILE_TO_MODE:
         return _PHASE_FILE_TO_MODE[file_path.name]  # type: ignore[return-value]
-    _fatal(file_path, 1, "unsupported V2.1 document filename")
+    _fatal(file_path, 1, "unsupported V0.3.0 document filename")
 
 
 def _validate_mode_matches_filename(path: Path, yaml_mode: str) -> None:
@@ -1337,7 +1337,7 @@ __all__ = [
     "SkillLoader",
     "_discover_phase_files",
     "_extract_phase_attrs",
-    "_guard_v21_root",
+    "_guard_graph_root",
     "get_phase_token_info",
     "_resolve_io_ref",
     "_route_document",

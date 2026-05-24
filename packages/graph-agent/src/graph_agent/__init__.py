@@ -43,7 +43,7 @@ from graph_agent.core.manifest import SkillManifest as SkillManifest
 from graph_agent.core.result import WorkflowResult as WorkflowResult
 from graph_agent.core.runner import run_skill as run_skill
 from graph_agent.core.serialize import serialize_skill as serialize_skill
-from graph_agent.runtime.state import BlackboardState as BlackboardState
+from graph_agent.runtime.state import GraphRuntimeState as GraphRuntimeState
 
 __all__ = [
     "run_skill",
@@ -53,7 +53,7 @@ __all__ = [
     "assemble_graph",
     "CompiledSkill",
     "CompiledStateGraph",
-    "BlackboardState",
+    "GraphRuntimeState",
     "SkillManifest",
     "serialize_skill",
     "Callback",

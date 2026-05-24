@@ -1,4 +1,4 @@
-"""V2.1 CompiledSkill to LangGraph assembly."""
+"""V0.3.0 CompiledSkill to LangGraph assembly."""
 
 import asyncio
 import json
@@ -56,7 +56,7 @@ from graph_agent.core.subagents import (
     validate_subagent_tool_args,
 )
 from graph_agent.core.tool_wrapper import _wrap_tool_for_langchain
-from graph_agent.runtime.state import BlackboardState
+from graph_agent.runtime.state import GraphRuntimeState
 from graph_agent.runtime.state_mapper import (
     PhaseWrapper,
     ReaderSandboxState,
@@ -99,9 +99,9 @@ def assemble_graph(
     skill_resolver: SkillResolverProtocol | None = None,
     callbacks: list[Any] | None = None,
 ) -> CompiledStateGraph:
-    """Assemble a V2.1 CompiledSkill into a compiled LangGraph."""
+    """Assemble a V0.3.0 CompiledSkill into a compiled LangGraph."""
 
-    builder = StateGraph(BlackboardState)
+    builder = StateGraph(GraphRuntimeState)
     node_by_phase = {node.phase_name: node for node in compiled.nodes}
     phase_ids: list[str] = []
     edges: list[tuple[str, str]] = []
@@ -200,7 +200,7 @@ def _build_logic_node(
 ) -> Any:
     output_schema_keys = _logic_output_schema_keys(compiled)
 
-    def _logic_node(state: BlackboardState) -> dict[str, Any]:
+    def _logic_node(state: GraphRuntimeState) -> dict[str, Any]:
         state_slice = dict(state.get("data", {}))
         updates: dict[str, Any] = {}
         for action_name in phase_ast.actions:
@@ -246,7 +246,7 @@ def _build_subgraph_node(
         callbacks=callbacks,
     )
 
-    def _subgraph_node(state: BlackboardState) -> dict[str, Any]:
+    def _subgraph_node(state: GraphRuntimeState) -> dict[str, Any]:
         before_data = dict(state.get("data", {}))
         mapper = StateMapper(
             phase_ast.io.inputs if phase_ast.io else None,
@@ -344,7 +344,7 @@ def _build_skill_node(
     system_prompt = _agent_system_prompt(phase_id, phase_doc, phase_ast, compiled, callbacks)
 
     def _skill_node(
-        state: BlackboardState,
+        state: GraphRuntimeState,
         config: RunnableConfig | None = None,
     ) -> dict[str, Any]:
         if chat_model is None:
@@ -600,7 +600,7 @@ def _reference_reader_fallback_reason(
 
 
 def _run_reference_reader_wrapped(payload: ReferenceReaderInput) -> dict[str, Any]:
-    def _reader(_state: BlackboardState) -> dict[str, Any]:
+    def _reader(_state: GraphRuntimeState) -> dict[str, Any]:
         return read_references_for_prompt(payload).__dict__
 
     state = ReaderSandboxState(
@@ -651,7 +651,7 @@ def _invoke_subagent_tool_t21(
     tool_name: str,
     subagent: CompiledSubagent,
     args: dict[str, Any],
-    state: BlackboardState | None = None,
+    state: GraphRuntimeState | None = None,
     flow: dict[str, Any],
     runtime: _SubagentRuntime | None = None,
     parent_config: RunnableConfig | None = None,
@@ -742,7 +742,7 @@ def _subagent_runtime_map(
 
 def _invoke_subagent_once_t23(
     runtime: _SubagentRuntime,
-    parent_state: BlackboardState,
+    parent_state: GraphRuntimeState,
     input_data: dict[str, Any],
     config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
@@ -770,7 +770,7 @@ def _invoke_subagent_once_t23(
 
 def _invoke_subagent_many_t24(
     runtime: _SubagentRuntime,
-    parent_state: BlackboardState,
+    parent_state: GraphRuntimeState,
     inputs: list[dict[str, Any]],
     *,
     parent_config: RunnableConfig | None,
@@ -832,7 +832,7 @@ def _invoke_subagent_many_t24(
 
 def _subagent_runnable_config(
     *,
-    parent_state: BlackboardState,
+    parent_state: GraphRuntimeState,
     parent_config: RunnableConfig | None,
     subagent_name: str,
     depth: int,

@@ -1,4 +1,4 @@
-"""V2.1 public compile facade."""
+"""V0.3.0 public compile facade."""
 
 from __future__ import annotations
 

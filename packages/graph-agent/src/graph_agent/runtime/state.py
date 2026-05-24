@@ -45,7 +45,7 @@ def shallow_dict_merge(
     return smart_dict_reducer(left, right)
 
 
-class BlackboardState(TypedDict, total=False):
+class GraphRuntimeState(TypedDict, total=False):
     """Shared LangGraph blackboard state for V0.3.0 skills."""
 
     data: Annotated[dict[str, Any], smart_dict_reducer]
@@ -54,4 +54,4 @@ class BlackboardState(TypedDict, total=False):
     run_id: str | None
 
 
-__all__ = ["BlackboardState", "shallow_dict_merge", "smart_dict_reducer"]
+__all__ = ["GraphRuntimeState", "shallow_dict_merge", "smart_dict_reducer"]

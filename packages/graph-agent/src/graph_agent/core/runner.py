@@ -1,7 +1,8 @@
-"""Generic Skill Runner — pure document-driven execution of SKILL.md.
+"""Generic Skill Runner — pure document-driven execution of graph skills.
 
-Reads SKILL.md's io + context_mapping declarations, loads inputs via IOManager,
-transforms via ContextResolver, executes via GraphAgentHarness, saves outputs.
+V0.3.0 graph skills execute from a skill root containing GRAPH.md. The older
+single-file SKILL.md harness path remains below only for non-graph workflows
+that have not moved into the V0.3.0 engine surface.
 
 No per-skill __init__.py needed. SKILL.md is the single source of truth.
 
@@ -278,7 +279,7 @@ def _run_skill_dict(
             raise SkillLoadError(
                 "[F-v3-resolver-missing] graph skill runtime requires skill_resolver"
             )
-        return _run_v21_skill_dict(
+        return _run_graph_skill_dict(
             skill_path,
             trace_dir=trace_dir,
             mock_llm=mock_llm,
@@ -344,7 +345,7 @@ def _run_skill_dict(
                 effective_thread_id = saved_tid
                 logger.info("[Runner] Resuming from checkpoint: thread_id=%s", saved_tid)
 
-    # Run — IOManager + ContextResolver handle input loading + context building
+    # Run — IOManager handles input loading before the legacy harness executes.
     t0 = time.time()
 
     # Write .run_id for potential resume
@@ -460,7 +461,7 @@ def _run_skill_dict(
     }
 
 
-def _run_v21_skill_dict(
+def _run_graph_skill_dict(
     skill_root: Path,
     *,
     mock_llm: Any = _NO_MOCK_LLM,
@@ -470,7 +471,7 @@ def _run_v21_skill_dict(
     skill_resolver: SkillResolverProtocol | None = None,
     **inputs: Any,
 ) -> dict[str, Any]:
-    """Execute a V2.1 skill root through compile_skill + assemble_graph."""
+    """Execute a V0.3.0 graph skill root through compile_skill + assemble_graph."""
     from graph_agent.core.compiler import compile_skill
     from graph_agent.core.graph_assembler import assemble_graph
     from graph_agent.runtime.state_mapper import filter_runtime_inputs

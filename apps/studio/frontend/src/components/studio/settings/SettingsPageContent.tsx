@@ -1,7 +1,7 @@
-import { KeyRound, Plug, Settings, X } from "lucide-react"
+import { Plug, Router, Settings, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { ApiKeysTab } from "./api-keys/ApiKeysTab"
+import { EndpointsTab } from "./endpoints/EndpointsTab"
 import { GeneralTab } from "./GeneralTab"
 import { LlmRolesTab } from "./LlmRolesTab"
 import { SettingsErrorBoundary } from "./SettingsErrorBoundary"
@@ -10,23 +10,26 @@ import type { SettingsPageContentProps } from "./types"
 
 export function SettingsPageContent({
   activeTab,
-  credentials,
-  credentialsLoading,
-  credentialsError,
-  drafts,
-  saveStatus,
+  registry,
+  registryLoading,
+  registryError,
+  endpointSaveStatus,
+  importDrafts,
   rolesData,
   rolesSaveStatus,
   rolesError,
   appSettings,
   onClose,
   onTabChange,
-  onProviderFieldChange,
-  onTestProvider,
-  onDeleteProvider,
-  onAddProvider,
-  onProviderModelsUpdated,
+  onAddEndpoint,
+  onEndpointChange,
+  onDeleteEndpoint,
+  onTestEndpoint,
+  onProbeRoute,
+  onApplyDraft,
   onRolesDataChange,
+  onProbeRole,
+  onApplyProfile,
 }: SettingsPageContentProps) {
   return (
     <div className="flex size-full flex-col bg-background">
@@ -42,8 +45,8 @@ export function SettingsPageContent({
           <NavButton active={activeTab === "general"} icon={<Settings />} onClick={() => onTabChange("general")}>
             General
           </NavButton>
-          <NavButton active={activeTab === "api_keys"} icon={<KeyRound />} onClick={() => onTabChange("api_keys")}>
-            API Keys
+          <NavButton active={activeTab === "endpoints"} icon={<Router />} onClick={() => onTabChange("endpoints")}>
+            Endpoints
           </NavButton>
           <NavButton active={activeTab === "llm_roles"} icon={<Plug />} onClick={() => onTabChange("llm_roles")}>
             LLM Roles
@@ -56,10 +59,12 @@ export function SettingsPageContent({
               <SettingsErrorBoundary label="LLM Roles">
                 <LlmRolesTab
                   data={rolesData}
-                  credentials={credentials}
+                  registry={registry}
                   saveStatus={rolesSaveStatus}
                   error={rolesError}
                   onChange={onRolesDataChange}
+                  onProbeRole={onProbeRole}
+                  onApplyProfile={onApplyProfile}
                 />
               </SettingsErrorBoundary>
             </div>
@@ -67,21 +72,22 @@ export function SettingsPageContent({
         ) : (
           <ScrollArea className="flex-1">
             <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 md:px-8 md:py-8">
-            {activeTab === "general" ? <GeneralTab appSettings={appSettings} /> : null}
-            {activeTab === "api_keys" ? (
-              <ApiKeysTab
-                credentials={credentials}
-                credentialsLoading={credentialsLoading}
-                credentialsError={credentialsError}
-                drafts={drafts}
-                saveStatus={saveStatus}
-                onProviderFieldChange={onProviderFieldChange}
-                onTestProvider={onTestProvider}
-                onDeleteProvider={onDeleteProvider}
-                onAddProvider={onAddProvider}
-                onProviderModelsUpdated={onProviderModelsUpdated}
-              />
-            ) : null}
+              {activeTab === "general" ? <GeneralTab appSettings={appSettings} /> : null}
+              {activeTab === "endpoints" ? (
+                <EndpointsTab
+                  registry={registry}
+                  loading={registryLoading}
+                  error={registryError}
+                  saveStatus={endpointSaveStatus}
+                  importDrafts={importDrafts}
+                  onAddEndpoint={onAddEndpoint}
+                  onEndpointChange={onEndpointChange}
+                  onDeleteEndpoint={onDeleteEndpoint}
+                  onTestEndpoint={onTestEndpoint}
+                  onProbeRoute={onProbeRoute}
+                  onApplyDraft={onApplyDraft}
+                />
+              ) : null}
             </div>
           </ScrollArea>
         )}

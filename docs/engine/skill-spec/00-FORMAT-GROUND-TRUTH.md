@@ -152,9 +152,8 @@ subgraphs:                                        # 子图委派注册（AgentRe
   - {name: sub_x, target_skill: some-skill, description: "..."}
 references:                                       # reference 资源注册（ReferenceSpec）
   - {id: R1, path: refs/domain.md, summary: "领域知识"}
-examples:                                         # example 注册（ExampleSpec）
-  - {id: E1, type: inline,   content: "...", summary: "..."}
-  - {id: E2, type: document, path: examples/e2.md, summary: "..."}
+examples:                                         # 只注册 document 扩展案例库（inline 案例写 body <example>，不在此注册）
+  - {id: E2, path: examples/e2.md, summary: "复杂边界案例"}
 ---
 
 <role>agent 角色描述</role>
@@ -164,6 +163,8 @@ examples:                                         # example 注册（ExampleSpec
 <step id="S2" name="producer_review">调用 @subagent:producer_reviewer 审核评分.</step>
 
 <protocol id="P1">A类-设定：解释世界规则；B类-事件：现实物理时间线；C类-次元：脱离物理世界</protocol>
+
+<example id="E1">边缘情节判定示范：人物做梦（物理时间流逝但场景虚幻）判 B 类，不是 C 类；只有完全切断物理时间的内心独白才是 C 类。</example>
 ```
 
 ### frontmatter 注册字段（manifest.py:152-156，曾全漏）
@@ -174,7 +175,7 @@ examples:                                         # example 注册（ExampleSpec
 | `subagents` | `[{name, target_skill, description}]` | 可调用子 skill（作为 tool） |
 | `subgraphs` | `[{name, target_skill, description}]` | 子图委派绑定 |
 | `references` | `[{id, path, summary}]` | reference 资源（id 须大写开头） |
-| `examples` | `[{id, type:inline/document, content?/path?, summary?}]` | 案例 |
+| `examples` | `[{id, path, summary}]`（**只注册 document 扩展案例库**；inline 案例写 body `<example>`，不在 frontmatter） | read_example 调用的扩展库 |
 | `llm_role` | `str?` | 选用 LLM 角色 |
 | `validator` | `bool` | 默认 false |
 | `max_iterations` | `int` 1~50 | 默认 10 |
@@ -187,6 +188,7 @@ examples:                                         # example 注册（ExampleSpec
 | `<goal>` | 1 | ✅ | agent 目标 |
 | `<step id name>` | 0..N | 选填 | **单数**，脱壳；canvas 按 step 顺序拓扑渲染 |
 | `<protocol id>` | 0..N | 选填 | **单数**，脱壳 |
+| `<example id>` | 0..N | 选填 | **inline 案例直接写 body**（不是 frontmatter 注册，那是反逻辑）；cognitive `{skill_examples_inline}` 引用其内容 |
 
 - **明令禁止**：复数壳 `<steps>`/`<protocols>`
 - **明令禁止**：`<exit_contract>` 写进 SKILL.md ——「exit_contract 不用在 skill.md 里面再写一遍」（只在 §5 cognitive template hardcode）
@@ -238,8 +240,8 @@ examples:                                         # example 注册（ExampleSpec
 
 <examples>
 以下案例仅用于辅助理解业务逻辑，你的最终输出格式必须严格遵守 <exit_contract> 的 Schema，不要照搬案例结构。
-【内联示范】：{skill_examples_inline}
-【扩展案例库】(遇棘手边界可调用 read_example subagent)：{example_registry_listing}
+【内联示范】：{skill_examples_inline}    ← 引用 SKILL.md body 的 <example> 标签内容（脱壳，像 steps），不是 frontmatter
+【扩展案例库】(遇棘手边界可调用 read_example subagent)：{example_registry_listing}   ← frontmatter 注册的 document 案例
 </examples>
 
 <ambiguity_feedback>
@@ -264,7 +266,10 @@ examples:                                         # example 注册（ExampleSpec
 </critical_reminders>
 
 <exit_contract>
-{skill_exit_contract_inline}   ← hardcode 写进模版，末尾引用 output_schema
+回答必须调用 finish_task，输出符合下方 Schema 的结构化结果。business_data_md 遵循 output_schema 列业务字段；diagnostics_md 写自检诊断。
+（↑ 固定 prompt 文本，hardcode 写死在 cognitive template，**不从 skill.md 引用**——skill.md 没有 exit_contract 可引用）
+强制输出 Schema：
+{output_schema}                ← 末尾拼接该 phase 的 io.outputs schema
 </exit_contract>
 ```
 
@@ -287,7 +292,9 @@ knowledge_base 装载 subagent 报错（token 超限/网络超时）→ 不阻�
 
 ### 代码实现偏差（待修）
 
-代码 `prompt.py apply_v030_cognitive_template` 偏离定稿：thinking_style 漏"建议步骤:{steps}"、knowledge_base 只简单插值漏完整文本、steps 被独立成 `<steps>` slot（定稿应放 thinking_style）、占位符没用 `{aligned_concepts...}`。须按本节修正。
+代码 `prompt.py apply_v030_cognitive_template` 偏离定稿：thinking_style 漏"建议步骤:{steps}"、knowledge_base 只简单插值漏完整文本、steps 被独立成 `<steps>` slot（定稿应放 thinking_style）、占位符没用 `{aligned_concepts...}`、`exit_contract` 占位符写 `{skill_exit_contract_inline}` 但应 hardcode 固定文本（skill.md 无可引用源）。须按本节修正。
+
+另：`manifest.py ExampleSpec` 把 inline 案例放 frontmatter `content` 字段 = 反逻辑（PM 2026-05-25）。inline 案例应在 SKILL.md body 用 `<example id>` 标签写（loader 像解析 `<step>` 一样解析 body `<example>`），frontmatter `examples` 只注册 document 扩展案例库（id/path/summary）。须修 manifest + loader。
 
 ---
 

@@ -141,3 +141,27 @@ PM 指示"让 agents 过一遍, 统一就执行"。三方独立评估 §7 顺序
 - a2 收敛理由 (PM 认可): round-14 = 编译器静态契约切换 (loader/AST/manifest/静态校验)。B5 body 5 标签解析出 AgentNodeAST 后, 编译期闭环, 可用**纯数据结构 Unit Test** 验证 (断言 AST 属性), **不需** cognitive template 渲染做 e2e。纳入 C2 会牵扯 read_reference/read_example runtime 绑定 + knowledge_base subagent 注入, 静态编译 PR 膨胀成 runtime PR。
 - a3 一致 (本来就倾向移出); a2 此理由反驳了 a1 之前"B5 需 template 消费验证"的纳入理由。三方收敛移出。
 - **round-14 范围 = Task B only** (B1-B8); C2/C4/C5 入后续 C 组 PR (task #18)。
+
+---
+
+## §9 round-14 重做进度 (2026-05-25 更新)
+
+### 已完成: spec 四件套重做 (SOP-08 step 1-3) — commit `93295b8`
+
+| 阶段 | 产出 | 主笔 | 审计 | 状态 |
+|---|---|---|---|---|
+| step 1 spec 四件套 | design/research/requirements (a2) + tasks (a1) | a2/a1 | a1↔a2 交叉 + a3 PM 替身 | ✅ commit `4a794e7` |
+| step 2 三审收敛修订 | design 8 点偏移修订 + tasks 对齐 + 11 補 name-mismatch | a2/a1 | 主控 grep verify 全属实 | ✅ commit `93295b8` |
+| step 3 文档链一致 | 11 错误码总册 6 个 graph 码齐全, id-invalid 收窄 | a1 | 主控 verify | ✅ |
+
+**三审 catch + 修订点 (全 grep verify 属实)**:
+- design: mode 字段非法报错 (非绕错) / 補 `[F-v3-graph-phase-name-mismatch]` / A8-A9 禁 phase metadata + Logic validator / DAG 4 码 (cycle/island/duplicate/output) / SUBGRAPH IO 双向 1:1 / B4 io.outputs 退役 / python_callable 措辞 / §4 错误码清单补全
+- tasks: 对齐修订后 design (tests-first red suite 在前, B1-B8 原子, 補 name-mismatch + 禁 metadata guard + Logic validator 测试)
+- 11: 補 name-mismatch 三者不一致 FATAL, id-invalid 收窄为纯命名非法
+
+### 下一步: step 4 a1 tests-first 重写 src + test
+
+- 先写红灯 failing tests (按 design 验收 + [F-v3-*] 码), 再实施转绿
+- 含 step 5 折叠点 (三方共识): schema_version+v / 删 mode 校验 / sweep 已 merge 污染 (`graph_serializer.py:34/41` / `loader.py:642/647` / pre-existing GRAPH.md fixture 纯 YAML / 十余处 merged test)
+- 当前 working tree 的 src/test WIP = 被打断前错误前提实施, step 4 brief 必让 a1 看清并按新 spec 推翻重写, 不在污染基础上改
+- B8 撤销 conftest blanket xfail (`:158/171`) + grep gate (merge 前)

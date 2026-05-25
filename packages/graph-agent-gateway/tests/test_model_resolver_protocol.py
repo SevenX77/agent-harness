@@ -22,6 +22,11 @@ from langchain_core.tools import BaseTool
 from pydantic import Field
 
 
+class EmptySkillResolver:
+    def resolve_skill(self, skill_id: str) -> Path:
+        raise AssertionError(f"unexpected skill resolution: {skill_id}")
+
+
 def test_model_resolver_protocol_signature_is_complete() -> None:
     from graph_agent_gateway.protocol import ModelResolverProtocol
 
@@ -229,15 +234,16 @@ Say done.
   <step id="S1" name="answer">Return done.</step>
 </workflow>
 
-<exit_contract>
-No structured output is required for this test.
-</exit_contract>
 """,
         encoding="utf-8",
     )
 
     resolver = MockResolver()
-    result = run_skill(skill_root, model_resolver=resolver)
+    result = run_skill(
+        skill_root,
+        skill_resolver=EmptySkillResolver(),
+        model_resolver=resolver,
+    )
 
     assert result.success is True
     assert resolver.calls

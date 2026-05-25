@@ -4,6 +4,7 @@ import { CheckCircle2, Copy, Eye, EyeOff, Loader2, Trash2, XCircle } from "lucid
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
+import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -125,35 +126,25 @@ export function ProviderDeleteButton({
   onDelete: () => void
 }) {
   const displayName = draftName.trim() || "this provider"
-  function requestDelete() {
-    toast(`Delete ${displayName}?`, {
-      description: "This provider configuration will be removed from the credentials document.",
-      action: {
-        label: "Delete",
-        onClick: () => onDelete(),
-      },
-      cancel: {
-        label: "Cancel",
-        onClick: () => undefined,
-      },
-      classNames: {
-        actionButton: "!bg-destructive !text-destructive-foreground hover:!bg-destructive/90",
-      },
-      duration: 10000,
-    })
-  }
 
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      aria-label="Delete provider"
-      className="text-muted-foreground/70 hover:text-muted-foreground"
-      onClick={requestDelete}
-    >
-      <Trash2 className="size-4" />
-    </Button>
+    <DeleteConfirmDialog
+      itemName={displayName}
+      description="This provider configuration will be removed from the credentials document."
+      onConfirm={onDelete}
+      trigger={(
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="Delete provider"
+          data-delete-confirm-trigger={true}
+          className="text-muted-foreground/70 hover:text-muted-foreground"
+        >
+          <Trash2 className="size-4" />
+        </Button>
+      )}
+    />
   )
 }
 

@@ -3,6 +3,12 @@ import { Check, Loader2, Plus, TriangleAlert } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import {
+  CatalogAccordion,
+  CatalogAccordionContent,
+  CatalogAccordionItem,
+  CatalogAccordionTrigger,
+} from "@/components/ui/catalog-accordion"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 import { createBlankAddProviderSubmission, ProviderCard, ProviderListSkeleton } from "../../api-keys"
 import { officialProviderDrafts, thirdPartyProviderDrafts, notableProviderKeyForDraft, shouldShowManualModelPanel } from "../provider-utils"
@@ -94,58 +100,69 @@ export function ApiKeysTab({
             </AlertDescription>
           </Alert>
         ) : (
-          <>
-            <section className="space-y-3" aria-label="Official Providers">
-              <h3 className="text-sm font-medium text-foreground">Official Providers</h3>
-              {officialDrafts.map((draft) => {
-                const persisted = persistedById[draft.id] ?? null
-                return (
-                  <ProviderCard
-                    key={draft.id}
-                    draft={draft}
-                    persisted={persisted}
-                    onFieldChange={(patch) => onProviderFieldChange(draft.id, { ...draft, ...patch })}
-                    onTest={() => onTestProvider(draft.id)}
-                    onDelete={() => onDeleteProvider(draft.id)}
-                    providerKind="official"
-                    showManualModelPanel={shouldShowManualModelPanel(draft, persisted)}
-                    notableProviderKey={notableProviderKeyForDraft(draft)}
-                    onModelsUpdated={(models) => onProviderModelsUpdated(draft.id, models)}
-                  />
-                )
-              })}
-            </section>
+          <CatalogAccordion
+            type="multiple"
+            defaultValue={["official", "third-party"]}
+          >
+            <CatalogAccordionItem value="official">
+              <CatalogAccordionTrigger>
+                Official Providers
+              </CatalogAccordionTrigger>
+              <CatalogAccordionContent className="-mx-2 space-y-3 pb-5">
+                {officialDrafts.map((draft) => {
+                  const persisted = persistedById[draft.id] ?? null
+                  return (
+                    <ProviderCard
+                      key={draft.id}
+                      draft={draft}
+                      persisted={persisted}
+                      onFieldChange={(patch) => onProviderFieldChange(draft.id, { ...draft, ...patch })}
+                      onTest={() => onTestProvider(draft.id)}
+                      onDelete={() => onDeleteProvider(draft.id)}
+                      providerKind="official"
+                      showManualModelPanel={shouldShowManualModelPanel(draft, persisted)}
+                      notableProviderKey={notableProviderKeyForDraft(draft)}
+                      onModelsUpdated={(models) => onProviderModelsUpdated(draft.id, models)}
+                    />
+                  )
+                })}
+              </CatalogAccordionContent>
+            </CatalogAccordionItem>
 
-            <section className="space-y-3 pt-4" aria-label="Third-party Providers">
-              <h3 className="text-sm font-medium text-foreground">Third-party Providers</h3>
-              {thirdPartyDrafts.map((draft) => {
-                const persisted = persistedById[draft.id] ?? null
-                return (
-                  <ProviderCard
-                    key={draft.id}
-                    draft={draft}
-                    persisted={persisted}
-                    onFieldChange={(patch) => onProviderFieldChange(draft.id, patch)}
-                    onTest={() => onTestProvider(draft.id)}
-                    onDelete={() => onDeleteProvider(draft.id)}
-                    providerKind="third-party"
-                    showManualModelPanel={shouldShowManualModelPanel(draft, persisted)}
-                    notableProviderKey={notableProviderKeyForDraft(draft)}
-                    onModelsUpdated={(models) => onProviderModelsUpdated(draft.id, models)}
-                  />
-                )
-              })}
-              {thirdPartyDrafts.length === 0 ? (
-                <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border/60 bg-muted/10 px-4 py-8 text-center">
-                  <p className="text-xs text-muted-foreground">No third-party providers configured.</p>
-                </div>
-              ) : null}
-              <Button type="button" variant="default" onClick={() => void onAddProvider(createBlankAddProviderSubmission())} className="gap-1">
-                <Plus className="size-3.5" />
-                Add Provider
-              </Button>
-            </section>
-          </>
+            <CatalogAccordionItem value="third-party">
+              <CatalogAccordionTrigger>
+                Third-party Providers
+              </CatalogAccordionTrigger>
+              <CatalogAccordionContent className="-mx-2 space-y-3 pb-5">
+                {thirdPartyDrafts.map((draft) => {
+                  const persisted = persistedById[draft.id] ?? null
+                  return (
+                    <ProviderCard
+                      key={draft.id}
+                      draft={draft}
+                      persisted={persisted}
+                      onFieldChange={(patch) => onProviderFieldChange(draft.id, patch)}
+                      onTest={() => onTestProvider(draft.id)}
+                      onDelete={() => onDeleteProvider(draft.id)}
+                      providerKind="third-party"
+                      showManualModelPanel={shouldShowManualModelPanel(draft, persisted)}
+                      notableProviderKey={notableProviderKeyForDraft(draft)}
+                      onModelsUpdated={(models) => onProviderModelsUpdated(draft.id, models)}
+                    />
+                  )
+                })}
+                {thirdPartyDrafts.length === 0 ? (
+                  <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border/60 bg-muted/10 px-4 py-8 text-center">
+                    <p className="text-xs text-muted-foreground">No third-party providers configured.</p>
+                  </div>
+                ) : null}
+                <Button type="button" variant="default" onClick={() => void onAddProvider(createBlankAddProviderSubmission())} className="gap-1">
+                  <Plus className="size-3.5" />
+                  Add Provider
+                </Button>
+              </CatalogAccordionContent>
+            </CatalogAccordionItem>
+          </CatalogAccordion>
         )}
       </div>
     </div>

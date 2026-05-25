@@ -10,6 +10,11 @@ from app.services.diagnostic_export import export_predict_diagnostics
 from app.services.predictor import MAX_PHASE_REVISITS, PredictDeadlockError, PredictorService
 
 
+@pytest.fixture(autouse=True)
+def _isolate_studio_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+
 def test_backend_p2_predict_job_exports_diagnostics(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

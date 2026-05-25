@@ -1,257 +1,191 @@
-models:
+schema_version: 2
+
+model_profiles:
   CL46T:
-    name: Claude Sonnet 4.6 Thinking
-    reasoning: true
-    min_max_tokens: 8192
-    max_input_tokens: 200000
-    fc_supported: true
-    providers:
-      OC_CL_ANT: claude-sonnet-4-6-thinking
-      OC_CL: claude-sonnet-4-6-thinking
-      WS_LLM: anthropic/claude-sonnet-4.6
-      JK_CL_ANT: claude-sonnet-4-6
-    provider_options:
-      OC_CL:
-        max_max_tokens: 8192
-  CLO46T:
-    name: Claude Opus 4.6 Thinking
-    reasoning: true
-    min_max_tokens: 8192
-    max_input_tokens: 200000
-    fc_supported: true
-    providers:
-      OC_CL_ANT: claude-opus-4-6-thinking
-      OC_CL: claude-opus-4-6-thinking
-      WS_LLM: anthropic/claude-opus-4.6
-    provider_options:
-      OC_CL:
-        max_max_tokens: 8192
+    model_profile_id: CL46T
+    display_name: Claude Sonnet 4.6 Thinking
+    canonical_id: claude-sonnet-4.6
+    tags:
+      - thinking
+      - premium
+    fallback_chain:
+      - route_id: anthropic-official:claude-sonnet-4.6
+        temperature: null
+        max_output_tokens: 8192
+      - route_id: openrouter-prod:anthropic.claude-sonnet-4.6
+        temperature: null
+        max_output_tokens: 8192
+    lint_requirements:
+      thinking: "error"
+      tool_calling: "warn"
+
   CLO47T:
-    name: anthropic/claude-opus-4.7
-    reasoning: true
-    min_max_tokens: 8192
-    max_input_tokens: 200000
-    fc_supported: true
-    providers:
-      custom-532dc361-de53-480e-864f-188d9271ef34: anthropic/claude-opus-4.7
-    provider_options:
-      OC_CL:
-        max_max_tokens: 8192
-  GM31P:
-    name: Gemini 3.1 Pro Preview
-    reasoning: false
-    min_max_tokens: 8192
-    max_input_tokens: 1000000
-    fc_supported: false
-    providers:
-      OC_GM: gemini-3.1-pro-preview
-      GM_OFF: gemini-3.1-pro-preview
-      WS_LLM: google/gemini-3.1-pro-preview
-  DS32C:
-    name: DeepSeek-V4 Flash
-    reasoning: false
-    min_max_tokens: 8192
-    max_input_tokens: 64000
-    fc_supported: true
-    providers:
-      OC_DS: deepseek-ai/DeepSeek-V3.2
-      DS: deepseek-v4-flash
+    model_profile_id: CLO47T
+    display_name: Claude Opus 4.7 Thinking
+    canonical_id: claude-opus-4.7
+    tags:
+      - thinking
+      - premium
+    fallback_chain:
+      - route_id: anthropic-official:claude-opus-4.7
+        temperature: null
+        max_output_tokens: 8192
+      - route_id: openrouter-prod:anthropic.claude-opus-4.7
+        temperature: null
+        max_output_tokens: 8192
+    lint_requirements:
+      thinking: "error"
+      tool_calling: "warn"
+
   DS32R:
-    name: DeepSeek-V4 Pro
-    reasoning: true
-    min_max_tokens: 24000
-    max_input_tokens: 64000
-    fc_supported: true
-    providers:
-      OC_DS: deepseek/deepseek-r1-0528
-      DS: deepseek-v4-pro
-  SD20P:
-    name: Seed 2.0 Pro
-    reasoning: true
-    min_max_tokens: 8192
-    fc_supported: false
-    providers:
-      OC_ARK: doubao-seed-2-0-pro-260215
-      ARK: doubao-seed-2-0-pro-260215
-  SD20L:
-    name: Seed 2.0 Lite
-    reasoning: false
-    min_max_tokens: 8192
-    fc_supported: false
-    providers:
-      OC_ARK: doubao-seed-2-0-lite-260215
-      ARK: doubao-seed-2-0-lite-260215
-  SD16:
-    name: Seed 1.6
-    reasoning: false
-    min_max_tokens: 8192
-    fc_supported: false
-    providers:
-      OC_ARK: doubao-seed-1-6-250615
-      ARK: doubao-seed-1-6-250615
-  CLCH46:
-    name: claude-haiku-4-5-20251001
-    reasoning: true
-    min_max_tokens: 8192
-    max_input_tokens: 200000
-    fc_supported: true
-    providers:
-      anthropic-official: claude-haiku-4-5-20251001
-  claude-opus-4-7:
-    name: claude-opus-4-7
-    reasoning: true
-    fc_supported: false
-    providers:
-      anthropic-official: claude-opus-4-7
-  claude-opus-4.7:
-    name: claude-opus-4.7
-    reasoning: false
-    fc_supported: false
-    providers:
-      98593eb6-764b-497e-808d-6610935f0e0a: anthropic/claude-opus-4.7
-  claude-opus-4.7-fast:
-    name: claude-opus-4.7-fast
-    reasoning: false
-    fc_supported: false
-    providers:
-      98593eb6-764b-497e-808d-6610935f0e0a: anthropic/claude-opus-4.7-fast
-  deepseek-r1:
-    name: deepseek-r1
-    reasoning: false
-    fc_supported: false
-    providers:
-      98593eb6-764b-497e-808d-6610935f0e0a: deepseek/deepseek-r1
-      custom-5c6bd417-5645-4e57-823a-5869e298e079: deepseek-r1
-      custom-463432aa-b790-4a6e-882c-d0aa506d2cd0: deepseek-r1
-  deepseek-chat-v3.1:
-    name: deepseek-chat-v3.1
-    reasoning: false
-    fc_supported: false
-    providers:
-      98593eb6-764b-497e-808d-6610935f0e0a: deepseek/deepseek-chat-v3.1
-  deepseek-chat-v3-0324:
-    name: deepseek-chat-v3-0324
-    reasoning: false
-    fc_supported: false
-    providers:
-      98593eb6-764b-497e-808d-6610935f0e0a: deepseek/deepseek-chat-v3-0324
-  claude-3-haiku:
-    name: claude-3-haiku
-    reasoning: false
-    fc_supported: false
-    providers:
-      98593eb6-764b-497e-808d-6610935f0e0a: anthropic/claude-3-haiku
-providers:
-  OC_CL:
-    name: OneChats Claude
-    type: openai_compatible
-    api_key_env: ONE_CHATS_CLAUDE_API_KEY
-    api_key_env_fallback: ONE_CHATS_API_KEY
-    base_url: https://chatapi.onechats.ai/v1
-    timeout: 300
-    trust_env: false
-    retry_strategy: timeout_escalation
-  OC_CL_ANT:
-    name: OneChats Claude (Anthropic Endpoint)
-    type: anthropic_compatible
-    api_key_env: ONE_CHATS_CLAUDE_API_KEY
-    api_key_env_fallback: ONE_CHATS_API_KEY
-    base_url: https://chatapi.onechats.ai
-    timeout: 300
-    trust_env: false
-  JK_CL_ANT:
-    name: Jiekou Claude (Anthropic Endpoint)
-    type: anthropic_compatible
-    api_key_env: JIEKOU_API_KEY
-    base_url: https://api.jiekou.ai/anthropic
-    timeout: 300
-    trust_env: false
-  OC_GM:
-    name: OneChats Gemini
-    type: openai_compatible
-    api_key_env: ONE_CHATS_GEMINI_API_KEY
-    base_url: https://chatapi.onechats.ai/v1
-    timeout: 300
-    trust_env: false
-  OC_ARK:
-    name: OneChats ARK
-    type: openai_compatible
-    api_key_env: ONE_CHATS_ARK_API_KEY
-    base_url: https://chatapi.onechats.ai/v1
-    timeout: 120
-    trust_env: false
-  WS_LLM:
-    name: WaveSpeed Any-LLM
-    type: openai_compatible
-    api_key_env: WAVESPEED_API_KEY
-    base_url: https://llm.wavespeed.ai/v1
-    timeout: 300
-    trust_env: false
-  OC_DS:
-    name: OneChats DeepSeek
-    type: openai_compatible
-    api_key_env: ONE_CHATS_DEEPSEEK_API_KEY
-    api_key_env_fallback: ONE_CHATS_API_KEY
-    base_url: https://chatapi.onechats.ai/v1
-    timeout: 120
-    trust_env: false
-  DS:
-    name: DeepSeek Official
-    type: openai_compatible
-    api_key_env: DEEPSEEK_API_KEY
-    base_url: https://api.deepseek.com
-    timeout: 120
-    trust_env: false
-  GM_OFF:
-    name: Gemini Official
-    type: google_genai
-    api_key_env: GEMINI_API_KEY
-    proxy_env: GEMINI_PROXY
-    timeout: 120
-    trust_env: false
-  ARK:
-    name: Volcengine ARK
-    type: openai_compatible
-    api_key_env: ARK_API_KEY
-    base_url: https://ark.cn-beijing.volces.com/api/v3
-    timeout: 120
-    trust_env: false
-  custom-532dc361-de53-480e-864f-188d9271ef34:
-    name: WaveSpeed
-    type: openai_compatible
-    base_url: https://llm.wavespeed.ai/v1
-  anthropic-official:
-    name: Anthropic Official
-    type: anthropic_compatible
-    base_url: https://api.anthropic.com
-  98593eb6-764b-497e-808d-6610935f0e0a:
-    name: OpenRouter
-    type: openai_compatible
-    base_url: https://openrouter.ai/api
-  custom-5c6bd417-5645-4e57-823a-5869e298e079:
-    name: QiNiu-OpenAI
-    type: openai_compatible
-    base_url: https://api.qnaigc.com/v1
-  custom-463432aa-b790-4a6e-882c-d0aa506d2cd0:
-    name: QiNiu-Anthropic
-    type: anthropic_compatible
-    base_url: https://anthropic.qnaigc.com
+    model_profile_id: DS32R
+    display_name: DeepSeek R1 Reasoner
+    canonical_id: deepseek-r1
+    tags:
+      - thinking
+      - cost-effective
+    fallback_chain:
+      - route_id: deepseek-official:deepseek-r1
+        temperature: 0.7
+        max_output_tokens: 8192
+      - route_id: openrouter-prod:deepseek.deepseek-r1
+        temperature: 0.7
+        max_output_tokens: 8192
+    lint_requirements:
+      thinking: "warn"
+      tool_calling: "warn"
+
 roles:
-  Premium:
-    model_fallback: true
-    active_model: deepseek-r1
-    models:
-      deepseek-r1:
-        providers:
-        - 98593eb6-764b-497e-808d-6610935f0e0a
-        - custom-463432aa-b790-4a6e-882c-d0aa506d2cd0
-        - custom-5c6bd417-5645-4e57-823a-5869e298e079
-  test:
-    model_fallback: true
-    active_model: CLO47T
-    models:
-      CLO47T:
-        providers:
-        - custom-532dc361-de53-480e-864f-188d9271ef34
-single_model_roles: []
-peer_model_groups: {}
+  balanced:
+    system_prompt_prefix: ""
+    source_profile_id: CL46T
+    source_profile_snapshot:
+      model_profile_id: CL46T
+      display_name: Claude Sonnet 4.6 Thinking
+      route_ids:
+        - anthropic-official:claude-sonnet-4.6
+        - openrouter-prod:anthropic.claude-sonnet-4.6
+      applied_at: "2026-05-24T00:00:00Z"
+      deleted_at: null
+      deleted_marker: false
+    fallback_chain:
+      - route_id: anthropic-official:claude-sonnet-4.6
+        temperature: null
+        max_output_tokens: 8192
+      - route_id: openrouter-prod:anthropic.claude-sonnet-4.6
+        temperature: null
+        max_output_tokens: 8192
+    lint_requirements:
+      thinking: "error"
+      tool_calling: "warn"
+
+  premium:
+    system_prompt_prefix: ""
+    source_profile_id: CLO47T
+    source_profile_snapshot:
+      model_profile_id: CLO47T
+      display_name: Claude Opus 4.7 Thinking
+      route_ids:
+        - anthropic-official:claude-opus-4.7
+        - openrouter-prod:anthropic.claude-opus-4.7
+      applied_at: "2026-05-24T00:00:00Z"
+      deleted_at: null
+      deleted_marker: false
+    fallback_chain:
+      - route_id: anthropic-official:claude-opus-4.7
+        temperature: null
+        max_output_tokens: 8192
+      - route_id: openrouter-prod:anthropic.claude-opus-4.7
+        temperature: null
+        max_output_tokens: 8192
+    lint_requirements:
+      thinking: "error"
+      tool_calling: "warn"
+
+  fast:
+    system_prompt_prefix: ""
+    source_profile_id: DS32R
+    source_profile_snapshot:
+      model_profile_id: DS32R
+      display_name: DeepSeek R1 Reasoner
+      route_ids:
+        - deepseek-official:deepseek-r1
+        - openrouter-prod:deepseek.deepseek-r1
+      applied_at: "2026-05-24T00:00:00Z"
+      deleted_at: null
+      deleted_marker: false
+    fallback_chain:
+      - route_id: deepseek-official:deepseek-r1
+        temperature: 0.7
+        max_output_tokens: 8192
+      - route_id: openrouter-prod:deepseek.deepseek-r1
+        temperature: 0.7
+        max_output_tokens: 8192
+    lint_requirements:
+      thinking: "warn"
+      tool_calling: "warn"
+
+  analyst:
+    system_prompt_prefix: ""
+    source_profile_id: CL46T
+    source_profile_snapshot:
+      model_profile_id: CL46T
+      display_name: Claude Sonnet 4.6 Thinking
+      route_ids:
+        - anthropic-official:claude-sonnet-4.6
+        - openrouter-prod:anthropic.claude-sonnet-4.6
+      applied_at: "2026-05-24T00:00:00Z"
+      deleted_at: null
+      deleted_marker: false
+    fallback_chain:
+      - route_id: anthropic-official:claude-sonnet-4.6
+        temperature: null
+        max_output_tokens: 8192
+      - route_id: openrouter-prod:anthropic.claude-sonnet-4.6
+        temperature: null
+        max_output_tokens: 8192
+    lint_requirements:
+      thinking: "error"
+      tool_calling: "warn"
+
+  graph_agent:
+    system_prompt_prefix: ""
+    source_profile_id: CL46T
+    source_profile_snapshot:
+      model_profile_id: CL46T
+      display_name: Claude Sonnet 4.6 Thinking
+      route_ids:
+        - anthropic-official:claude-sonnet-4.6
+        - openrouter-prod:anthropic.claude-sonnet-4.6
+      applied_at: "2026-05-24T00:00:00Z"
+      deleted_at: null
+      deleted_marker: false
+    fallback_chain:
+      - route_id: anthropic-official:claude-sonnet-4.6
+        temperature: null
+        max_output_tokens: 8192
+      - route_id: openrouter-prod:anthropic.claude-sonnet-4.6
+        temperature: null
+        max_output_tokens: 8192
+    lint_requirements:
+      thinking: "error"
+      tool_calling: "warn"
+
+  copilot_chat:
+    system_prompt_prefix: ""
+    source_profile_id: CL46T
+    source_profile_snapshot:
+      model_profile_id: CL46T
+      display_name: Claude Sonnet 4.6 Thinking
+      route_ids:
+        - openrouter-prod:anthropic.claude-sonnet-4.6
+      applied_at: "2026-05-24T00:00:00Z"
+      deleted_at: null
+      deleted_marker: false
+    fallback_chain:
+      - route_id: openrouter-prod:anthropic.claude-sonnet-4.6
+        temperature: 0.7
+        max_output_tokens: 4096
+    lint_requirements:
+      thinking: "warn"
+      tool_calling: "warn"

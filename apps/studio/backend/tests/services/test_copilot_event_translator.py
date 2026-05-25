@@ -13,9 +13,7 @@ from app.models.copilot import (
     CopilotEventToolUseResult,
     CopilotEventToolUseStart,
 )
-from app.models.llm_config import LLMCredentialsFile, ProviderCredential
 from app.services import copilot
-from app.services.llm_credentials import save_credentials
 from claude_agent_sdk import CLIConnectionError
 from claude_agent_sdk.types import (
     AssistantMessage,
@@ -129,20 +127,20 @@ def test_tool_failure_translates_to_error_event() -> None:
 
 def test_stream_query_errors_when_api_key_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        copilot, "_resolve_copilot_provider", lambda _model_override: _resolved_provider()
+        copilot, "_resolve_copilot_route", lambda _model_override: _resolved_route(api_key="")
     )
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi")))
 
-    assert events == [CopilotEventError(message="Provider OC_CL_ANT 未配置 API key")]
+    assert events == [CopilotEventError(message="Endpoint anthropic-official 未配置 API key")]
 
 
 def test_stream_query_errors_when_model_override_is_unknown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def resolve_copilot_provider(_model_override: str | None) -> object:
+    def resolve_copilot_route(_model_override: str | None) -> object:
         raise KeyError("BAD_MODEL")
 
-    monkeypatch.setattr(copilot, "_resolve_copilot_provider", resolve_copilot_provider)
+    monkeypatch.setattr(copilot, "_resolve_copilot_route", resolve_copilot_route)
 
     events = asyncio.run(
         _collect(copilot.stream_query("skill-a", "hi", model_override="BAD_MODEL"))
@@ -158,9 +156,8 @@ def test_stream_query_timeout_error(monkeypatch: pytest.MonkeyPatch, tmp_path: P
         lambda _options: FakeClient(error=TimeoutError()),
     )
     monkeypatch.setattr(
-        copilot, "_resolve_copilot_provider", lambda _model_override: _resolved_provider()
+        copilot, "_resolve_copilot_route", lambda _model_override: _resolved_route()
     )
-    _seed_credentials(monkeypatch, tmp_path)
 
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi", workspace_dir=tmp_path)))
 
@@ -174,9 +171,8 @@ def test_stream_query_sdk_network_error(monkeypatch: pytest.MonkeyPatch, tmp_pat
         lambda _options: FakeClient(error=CLIConnectionError("connection failed")),
     )
     monkeypatch.setattr(
-        copilot, "_resolve_copilot_provider", lambda _model_override: _resolved_provider()
+        copilot, "_resolve_copilot_route", lambda _model_override: _resolved_route()
     )
-    _seed_credentials(monkeypatch, tmp_path)
 
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi", workspace_dir=tmp_path)))
 
@@ -196,9 +192,8 @@ def test_stream_query_uses_system_prompt_and_yields_done(
     )
     monkeypatch.setattr(copilot, "_session_factory", lambda _options: client)
     monkeypatch.setattr(
-        copilot, "_resolve_copilot_provider", lambda _model_override: _resolved_provider()
+        copilot, "_resolve_copilot_route", lambda _model_override: _resolved_route()
     )
-    _seed_credentials(monkeypatch, tmp_path)
 
     events = asyncio.run(
         _collect(copilot.stream_query("skill-a", "user text", workspace_dir=tmp_path))
@@ -214,32 +209,10 @@ async def _collect(stream: AsyncIterator[object]) -> list[object]:
     return [event async for event in stream]
 
 
-def _resolved_provider() -> object:
-    provider_def = SimpleNamespace(
-        name="OneChats Claude Anthropic",
-        api_key_env="ANTHROPIC_API_KEY",
-        api_key_env_fallback=None,
-        base_url="https://provider.test",
-    )
-    model_def = SimpleNamespace(code="CL46T")
+def _resolved_route(api_key: str = "key") -> SimpleNamespace:
     return SimpleNamespace(
-        provider_code="OC_CL_ANT",
-        provider_def=provider_def,
-        model_def=model_def,
-    )
-
-
-def _seed_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-    save_credentials(
-        LLMCredentialsFile(
-            providers=[
-                ProviderCredential(
-                    id="OC_CL_ANT",
-                    name="OneChats Claude Anthropic",
-                    api_key="key",
-                    provider_type="anthropic_compatible",
-                )
-            ]
-        )
+        endpoint_id="anthropic-official",
+        provider_model_id="claude-sonnet",
+        base_url="https://provider.test",
+        api_key=SimpleNamespace(get_secret_value=lambda: api_key),
     )

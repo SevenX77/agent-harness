@@ -692,11 +692,72 @@ Returns a redacted snapshot:
 - Keeps the current secret when `api_key` is omitted.
 - Invalidates client fingerprint/version when secret, protocol, or base URL changes.
 
+Request:
+
+```json
+{
+  "provider_endpoints": {
+    "anthropic-official": {
+      "endpoint_id": "anthropic-official",
+      "display_name": "Anthropic Official",
+      "protocol": "anthropic_compatible",
+      "base_url": "https://api.anthropic.com",
+      "api_key": "",
+      "status": "unverified_manual",
+      "timeout_seconds": 120,
+      "trust_env": false
+    }
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "schema_version": 4,
+  "provider_endpoints": {
+    "anthropic-official": {
+      "endpoint_id": "anthropic-official",
+      "display_name": "Anthropic Official",
+      "protocol": "anthropic_compatible",
+      "base_url": "https://api.anthropic.com",
+      "api_key": "**********",
+      "status": "unverified_manual",
+      "timeout_seconds": 120,
+      "trust_env": false,
+      "proxy_env": null,
+      "metadata": {}
+    }
+  },
+  "provider_routes": {},
+  "runtime_policy": {
+    "provider_down_ttl_seconds": 60,
+    "probe_timeout_seconds": 5,
+    "token_escalation_rounds": 2
+  }
+}
+```
+
 `DELETE /api/llm/registry/endpoints/{endpoint_id}`
 
 - Deletes one endpoint only when no active route, role, or model profile still references it.
 - If referenced, returns `409 endpoint_in_use` with references grouped by `routes`, `roles`, and `model_profiles`.
 - Does not delete import drafts; drafts remain transient history until expiration or explicit draft cleanup.
+
+Conflict response:
+
+```json
+{
+  "detail": {
+    "code": "endpoint_in_use",
+    "endpoint_id": "anthropic-official",
+    "routes": ["anthropic-official:claude-sonnet-4.6"],
+    "roles": ["graph_agent.fallback_chain[0]"],
+    "model_profiles": ["CL46T.fallback_chain[0]"]
+  }
+}
+```
 
 `POST /api/llm/endpoints/{endpoint_id}/test`
 
@@ -709,6 +770,30 @@ Returns a redacted snapshot:
 - Request names desired capabilities.
 - Updates only that route's capability fields and status.
 
+Request:
+
+```json
+{
+  "capabilities": ["thinking", "tool_calling", "max_output_tokens"]
+}
+```
+
+Response:
+
+```json
+{
+  "route_id": "anthropic-official:claude-sonnet-4.6",
+  "status": "verified",
+  "capabilities": {
+    "tool_protocol": {
+      "value": "anthropic_tools",
+      "source": "probed_verified",
+      "observed_at": "2026-05-24T00:00:00Z"
+    }
+  }
+}
+```
+
 `PUT /api/llm/routes/{route_id}`
 
 - Replaces editable metadata for one route.
@@ -717,11 +802,61 @@ Returns a redacted snapshot:
 - Changing the route identity requires creating a new route and deleting the old route.
 - Backend validates that the route remains internally consistent and still references an existing endpoint.
 
+Request:
+
+```json
+{
+  "display_name": "Claude Sonnet 4.6",
+  "canonical_id": "claude-sonnet-4.6",
+  "status": "verified",
+  "capabilities": {
+    "thinking_protocol": {
+      "value": "anthropic_v1",
+      "source": "manual"
+    }
+  },
+  "metadata": {
+    "provider_brand": "anthropic"
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "route_id": "anthropic-official:claude-sonnet-4.6",
+  "endpoint_id": "anthropic-official",
+  "route_slug": "claude-sonnet-4.6",
+  "provider_model_id": "claude-sonnet-4-6",
+  "canonical_id": "claude-sonnet-4.6",
+  "display_name": "Claude Sonnet 4.6",
+  "status": "verified",
+  "capabilities": {},
+  "metadata": {
+    "provider_brand": "anthropic"
+  }
+}
+```
+
 `DELETE /api/llm/routes/{route_id}`
 
 - Deletes one route only when no role or model profile references it.
 - If referenced, returns `409 route_in_use` with role/profile reference paths.
 - Deleting a route never rewrites fallback chains implicitly.
+
+Conflict response:
+
+```json
+{
+  "detail": {
+    "code": "route_in_use",
+    "route_id": "anthropic-official:claude-sonnet-4.6",
+    "roles": ["graph_agent.fallback_chain[0]"],
+    "model_profiles": ["CL46T.fallback_chain[0]"]
+  }
+}
+```
 
 Router implementation must document request/response JSON examples for endpoint upsert, route update, route probe, delete conflicts, and profile-apply conflicts in this section before frontend integration.
 
@@ -801,6 +936,20 @@ Role read/write APIs use only the new route-chain schema. Reusing the current UR
 - Does not create a runtime dependency from the role back to the profile.
 - If the role has diverged from its stored `source_profile_snapshot`, backend returns `409 profile_apply_conflict` with a diff.
 - Conflict resolution is explicit: the caller may retry with `mode: "replace"` to replace the role fallback chain with the current profile, or cancel. No merge mode is provided in V2.
+
+Conflict response:
+
+```json
+{
+  "detail": {
+    "code": "profile_apply_conflict",
+    "role_name": "graph_agent",
+    "model_profile_id": "CL46T",
+    "current_route_ids": ["openrouter-prod:anthropic.claude-sonnet-4.6"],
+    "profile_route_ids": ["anthropic-official:claude-sonnet-4.6"]
+  }
+}
+```
 
 ### 8.6 Deprecated LLM API Paths
 

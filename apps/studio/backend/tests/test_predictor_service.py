@@ -15,6 +15,11 @@ from graph_agent.core._predict_internal.models import PathDiff
 from graph_agent.core._predict_internal.strategy import GoldenCaseStrategy, HeuristicStubStrategy
 
 
+@pytest.fixture(autouse=True)
+def _isolate_studio_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+
 def _raw_result(*, actual_path: list[str] | None = None) -> dict[str, object]:
     return {
         "context": {

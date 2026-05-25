@@ -5,10 +5,10 @@ import json
 from typing import Literal
 from unittest.mock import patch
 
-from graph_agent.config.llm_config import ModelDef, ProviderDef, ResolvedProvider, ResolvedRole
 from graph_agent.core._predict_internal.interception import PredictGatewayChatModel
 from graph_agent.core._predict_internal.strategy import BaseMockStrategy
 from graph_agent.models.llm_client_manager import LLMClientManager
+from graph_agent_gateway.llm_config import ModelDef, ProviderDef, ResolvedProvider, ResolvedRole
 from langchain_core.messages import HumanMessage
 
 MockedSource = Literal["golden_case", "copilot", "heuristic_stub", "manual"]

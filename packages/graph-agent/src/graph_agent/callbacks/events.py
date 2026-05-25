@@ -245,6 +245,8 @@ class LLMFallbackEvent(_EventBase):
     from_provider: str
     to_provider: str
     reason: str
+    code: str | None = None
+    context: dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

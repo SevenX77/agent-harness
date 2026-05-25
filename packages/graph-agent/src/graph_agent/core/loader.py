@@ -229,6 +229,7 @@ class SkillLoader:
 def load_workflow_from_md(
     md_path: str | Path,
     callbacks: list[Any] | None = None,
+    model_resolver: Any | None = None,
     _loading_stack: set[str] | None = None,
 ) -> Any:
     """V2.1 temporary runtime wrapper.
@@ -244,7 +245,10 @@ def load_workflow_from_md(
     from graph_agent.core.compiler import compile_skill
     from graph_agent.core.graph_assembler import assemble_graph
 
-    return assemble_graph(compile_skill(root)).graph
+    chat_model = None
+    if model_resolver is not None:
+        chat_model = model_resolver.resolve(phase_name="<workflow>")
+    return assemble_graph(compile_skill(root), chat_model=chat_model).graph
 
 
 def _fatal(path: Path, line: int, message: str) -> NoReturn:

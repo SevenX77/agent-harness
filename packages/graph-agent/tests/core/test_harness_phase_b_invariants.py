@@ -30,11 +30,23 @@ from graph_agent.core.phase_executor import PhaseExecutor
 from graph_agent.core.types import Phase
 
 
+class _FakeModelResolver:
+    def resolve(self, *args: object, **kwargs: object) -> object:
+        raise AssertionError("invariant tests must not resolve models")
+
+
+def _harness() -> GraphAgentHarness:
+    return GraphAgentHarness(
+        phases=[Phase(name="only", requires_llm=False)],
+        model_resolver=_FakeModelResolver(),
+    )
+
+
 class TestHarnessHasNoRunState:
     """GraphAgentHarness instances do not carry per-run mutable state."""
 
     def test_no_active_heartbeat_after_construction(self):
-        harness = GraphAgentHarness(phases=[Phase(name="only", requires_llm=False)])
+        harness = _harness()
         assert not hasattr(harness, "_active_heartbeat"), (
             "Phase B removed _active_heartbeat from GraphAgentHarness instance; "
             "it moved to a per-run local variable held by PhaseExecutor. "
@@ -43,7 +55,7 @@ class TestHarnessHasNoRunState:
         )
 
     def test_no_active_run_context_after_construction(self):
-        harness = GraphAgentHarness(phases=[Phase(name="only", requires_llm=False)])
+        harness = _harness()
         assert not hasattr(harness, "_active_run_context"), (
             "Phase B removed _active_run_context from GraphAgentHarness instance; "
             "RunContext now flows through LangGraph RunnableConfig. Re-introducing "
@@ -175,11 +187,9 @@ class TestResumeRuntimeInputsRestore:
         assert sig.parameters["runtime_inputs_map"].default is None
 
     def test_get_active_run_options_projects_runtime_inputs(self):
-        from graph_agent.core.harness import GraphAgentHarness
         from graph_agent.core.run_context import RunContext
-        from graph_agent.core.types import Phase
 
-        harness = GraphAgentHarness(phases=[Phase(name="only", requires_llm=False)])
+        harness = _harness()
         ctx = RunContext(thread_id="t", runtime_inputs={"pipeline": "p1", "batch": 3})
 
         options = harness._get_active_run_options(ctx)
@@ -190,10 +200,8 @@ class TestResumeRuntimeInputsRestore:
         assert "mutation" not in ctx.runtime_inputs
 
     def test_get_active_run_options_returns_empty_dict_when_no_run_context(self):
-        from graph_agent.core.harness import GraphAgentHarness
-        from graph_agent.core.types import Phase
 
-        harness = GraphAgentHarness(phases=[Phase(name="only", requires_llm=False)])
+        harness = _harness()
         assert harness._get_active_run_options(None) == {}
 
 
@@ -234,10 +242,8 @@ class TestPersistentRuntimeInputsOptIn:
         the graph is invoked.
         """
         import pytest
-        from graph_agent.core.harness import GraphAgentHarness
-        from graph_agent.core.types import Phase
 
-        harness = GraphAgentHarness(phases=[Phase(name="only", requires_llm=False)])
+        harness = _harness()
 
         with pytest.raises(ValueError, match="JSON-serialisable"):
             harness.run(
@@ -252,10 +258,8 @@ class TestPersistentRuntimeInputsOptIn:
         """
         from unittest.mock import patch
 
-        from graph_agent.core.harness import GraphAgentHarness
-        from graph_agent.core.types import Phase
 
-        harness = GraphAgentHarness(phases=[Phase(name="only", requires_llm=False)])
+        harness = _harness()
 
         captured: dict[str, object] = {}
 

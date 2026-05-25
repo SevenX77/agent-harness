@@ -22,6 +22,7 @@ This design does not invent a parallel schema. Field-level contracts come from `
 - SUBGRAPH node fields and `target_skill`: `docs/engine/skill-spec/04-subgraph-md-spec.md`.
 - Agent node fields and body XML tags: `docs/engine/skill-spec/05-agent-md-spec.md:7-18`, `:41-52`.
 - SkillResolver DI: `docs/engine/skill-spec/10-skill-resolver-protocol-spec.md:24-35`, `:47-75`.
+- **[Completed via PR α]** ModelResolver DI: Engine runtime decoupled from Gateway provider initialization through explicit `ModelResolverProtocol` dependency injection in `run_skill`.
 
 Root IO is stored inline in `GRAPH.md` frontmatter. Physical `io/inputs.json`, `io/outputs.json`, `io_inputs_ref`, and `io_outputs_ref` are hard failures, per `docs/engine/skill-spec/01-physical-layout.md:94-102`.
 

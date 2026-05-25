@@ -171,6 +171,7 @@ def run_skill(
     initial_context: dict[str, Any] | None = None,
     cleanup_checkpoints_on_finish: bool = True,
     skill_resolver: SkillResolverProtocol | None = None,
+    model_resolver: Any | None = None,
     **inputs: Any,
 ) -> WorkflowResult:
     """Execute a SKILL.md and return a typed workflow result."""
@@ -193,6 +194,7 @@ def run_skill(
             initial_context=initial_context,
             cleanup_checkpoints_on_finish=cleanup_checkpoints_on_finish,
             skill_resolver=skill_resolver,
+            model_resolver=model_resolver,
             **inputs,
         )
     except GraphAgentError as exc:
@@ -239,6 +241,7 @@ def _run_skill_dict(
     initial_context: dict[str, Any] | None = None,
     cleanup_checkpoints_on_finish: bool = True,
     skill_resolver: SkillResolverProtocol | None = None,
+    model_resolver: Any | None = None,
     **inputs: Any,
 ) -> dict[str, Any]:
     """Execute a SKILL.md with the given inputs. Pure document-driven.
@@ -278,6 +281,7 @@ def _run_skill_dict(
             thread_id=thread_id,
             callbacks=callbacks,
             skill_resolver=skill_resolver,
+            model_resolver=model_resolver,
             **inputs,
         )
 
@@ -299,7 +303,11 @@ def _run_skill_dict(
     with _cache_lock:
         cached = _harness_cache.get(cache_key)
         if cached is None or _collect_skill_dependency_snapshot(cached[0]) != cached[1]:
-            harness = load_workflow_from_md(str(skill_path), callbacks=callbacks)
+            harness = load_workflow_from_md(
+                str(skill_path),
+                callbacks=callbacks,
+                model_resolver=model_resolver,
+            )
             _harness_cache[cache_key] = (harness, _collect_skill_dependency_snapshot(harness))
             logger.info(
                 "[Runner] Loaded SKILL: %s (%d phases)", skill_path.name, len(harness.phases)
@@ -461,16 +469,24 @@ def _run_v21_skill_dict(
     thread_id: str | None = None,
     callbacks: list[Any] | None = None,
     skill_resolver: SkillResolverProtocol | None = None,
+    model_resolver: Any | None = None,
     **inputs: Any,
 ) -> dict[str, Any]:
     """Execute a V2.1 skill root through compile_skill + assemble_graph."""
 
-    del callbacks
     from graph_agent.core.compiler import compile_skill
     from graph_agent.core.graph_assembler import assemble_graph
 
     t0 = time.time()
-    chat_model = None if mock_llm is _NO_MOCK_LLM else mock_llm
+    if mock_llm is not _NO_MOCK_LLM:
+        chat_model = mock_llm
+    elif model_resolver is not None:
+        chat_model = model_resolver.resolve(
+            callbacks=tuple(callbacks or ()),
+            phase_name="<workflow>",
+        )
+    else:
+        chat_model = None
     compiled = compile_skill(skill_root, skill_resolver=skill_resolver)
     graph = assemble_graph(compiled, chat_model=chat_model, skill_resolver=skill_resolver).graph
     run_id = thread_id or str(uuid.uuid4())

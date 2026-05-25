@@ -65,12 +65,18 @@ class _CompletedFakeGraph:
         return SimpleNamespace(next=(), tasks=())
 
 
+class _FakeModelResolver:
+    def resolve(self, *args: Any, **kwargs: Any) -> object:
+        raise AssertionError("fake graph tests must not resolve models")
+
+
 def _build_harness_with_completed_graph(
     *, io_config: dict[str, Any] | None = None
 ) -> GraphAgentHarness:
     harness = GraphAgentHarness(
         phases=[Phase(name="phase_a", requires_llm=False)],
         io_config=io_config,
+        model_resolver=_FakeModelResolver(),
     )
     harness._graph = _CompletedFakeGraph()
     return harness

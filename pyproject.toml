@@ -10,6 +10,7 @@ workspace = { members = ["packages/*", "apps/studio/backend"] }
 
 [tool.uv.sources]
 graph-agent = { workspace = true }
+graph-agent-gateway = { workspace = true }
 studio-backend = { workspace = true }
 
 [dependency-groups]
@@ -40,6 +41,7 @@ testpaths = [
 ]
 pythonpath = [
     "packages/graph-agent/src",
+    "packages/graph-agent-gateway/src",
     "apps/studio/backend",
 ]
 addopts = ["--import-mode=importlib"]
@@ -75,6 +77,7 @@ strict = true
 explicit_package_bases = true
 mypy_path = [
     "packages/graph-agent/src",
+    "packages/graph-agent-gateway/src",
     "apps/studio/backend",
 ]
 exclude = [
@@ -91,7 +94,7 @@ module = ["langgraph.checkpoint.postgres", "langgraph.checkpoint.postgres.*", "p
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["jsonschema", "jsonschema.*", "yaml", "yaml.*"]
+module = ["jsonschema", "jsonschema.*", "langchain_anthropic", "yaml", "yaml.*"]
 ignore_missing_imports = true
 
 # V1 cutover legacy quarantine; pending deeper V1->V2 migration spec.

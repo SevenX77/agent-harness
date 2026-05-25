@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 import threading
@@ -16,6 +17,7 @@ from app.models.llm_config import RoleEntry, RolesData
 from app.services.migrations import migrate_roles_payload
 
 _WRITE_LOCK = threading.Lock()
+logger = logging.getLogger(__name__)
 
 
 class InvalidRoleReference(ValueError):
@@ -32,6 +34,11 @@ def load_roles_file(path: Path) -> RolesData:
     plain = migrate_roles_payload(deepcopy(plain_before_migration))
     migrated = plain != plain_before_migration
     data = RolesData.model_validate(plain)
+    data.migration_required = migrated
+    if migrated:
+        logger.warning(
+            "llm_roles.yaml legacy schema migrated in memory; save to persist new format"
+        )
     data._raw = raw
     data._original_text = None if migrated else text
     data._original_snapshot = None if migrated else data.model_dump(mode="json")
@@ -84,7 +91,11 @@ def validate_references(data: RolesData) -> None:
 
 
 def _dump_synced_raw(raw: Any, data: RolesData) -> str:
-    payload = data.model_dump(mode="json", exclude_none=True)
+    payload = data.model_dump(
+        mode="json",
+        exclude_none=True,
+        exclude={"migration_required"},
+    )
     if raw is None or not isinstance(raw, dict):
         raw = {}
     raw["models"] = payload["models"]

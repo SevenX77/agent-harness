@@ -253,26 +253,6 @@ class TemplateRenderError(ValidationError):
         )
 
 
-class AllProvidersFailedError(ExecutionError):
-    """Compatibility execution error for provider failover exhaustion."""
-
-    def __init__(
-        self,
-        tier: str,
-        errors: list[tuple[str, Exception]],
-        *,
-        context: dict[str, Any] | None = None,
-    ) -> None:
-        """Capture the failing tier and per-provider error list."""
-        self.tier = tier
-        self.errors = errors
-        details = "; ".join(f"{name}: {err}" for name, err in errors)
-        super().__init__(
-            f"All providers failed for tier '{tier}': {details}",
-            context=context,
-        )
-
-
 class MaxRetriesExceededError(ExecutionError):
     """Compatibility execution error for retry exhaustion notifications."""
 

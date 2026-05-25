@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from graph_agent.models.factory import create_chat_model
-from graph_agent.models.resolver import ModelResolver, get_model_resolver, reset_model_resolver
+from graph_agent_gateway import factory as factory
+from graph_agent_gateway.factory import create_chat_model
 
 __all__ = [
-    "ModelResolver",
     "create_chat_model",
-    "get_model_resolver",
-    "reset_model_resolver",
+    "factory",
 ]

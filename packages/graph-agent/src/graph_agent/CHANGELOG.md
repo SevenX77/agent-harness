@@ -4,7 +4,6 @@
 
 ### Fixed
 - **compiler.py**: P012 code-only phase validation was outside the per-node loop, only checking the last node
-- **resolver.py**: `AllProvidersFailedError` imported from non-existent `models/exceptions.py` — fixed to `core/exceptions.py`
 - **resolver.py**: `_fallback_to_deerflow_native` used unsafe global hook swap — replaced with thread-safe `_bypass_hook` parameter
 - **generate_image.py**: Added `openai_compatible_image` provider type handler (used by OC_GEMINI)
 - **harness.py**: `_clone_state` now uses `copy.deepcopy` for context to prevent cross-phase mutation

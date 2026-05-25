@@ -1,9 +1,9 @@
-"""Minimal LangChain chat model factory for GraphAgent."""
+"""Minimal LangChain chat model factory for GraphAgent Gateway."""
 
 from __future__ import annotations
 
 import os
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -79,6 +79,6 @@ def create_chat_model(
         }
         if anthropic_api_key is not None:
             anthropic_kwargs["api_key"] = anthropic_api_key
-        return ChatAnthropic(**anthropic_kwargs)
+        return cast(BaseChatModel, ChatAnthropic(**anthropic_kwargs))
 
     raise ValueError(f"Unsupported chat model provider: {resolved_provider!r}")

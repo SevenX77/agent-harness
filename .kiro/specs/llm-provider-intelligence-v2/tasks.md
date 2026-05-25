@@ -139,7 +139,7 @@
 
 **目标**: 建立 endpoint/route/profile/role/draft/lint 的纯数据层，不接入 SDK client。
 
-- [ ] 2.1 新建 registry package。
+- [x] 2.1 新建 registry package。
   - Create:
     - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/__init__.py`
     - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py`
@@ -150,7 +150,7 @@
     - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/error_classification.py`
     - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/probe_contracts.py`
   - Acceptance: `python -c "import graph_agent_gateway.registry"` succeeds.
-- [ ] 2.2 实现 schema models。
+- [x] 2.2 实现 schema models。
   - Define in `schema.py`: `ProviderEndpoint`, `ProviderRoute`, `CapabilityValue`, `RuntimePolicy`, `RoleRouteEntry`, `ModelProfile`, `RoleEntry`, `ProviderImportDraft`, `RegistrySnapshot`, `ResolvedRole`, `ResolvedRoute`, `LintRequirement`, `LintResult`.
   - Use `SecretStr` for runtime `ResolvedRoute.api_key`.
   - `ResolvedRole` carries `system_prompt_prefix: str`, `runtime_policy: RuntimePolicy`, route chain, lints, and optional profile trace metadata.
@@ -158,24 +158,24 @@
   - `ProviderImportDraft` includes status enum, `endpoint_candidates`, `route_candidates`, `probe_results`, and field-source records.
   - Validate `endpoint_id`, `route_slug`, `route_id`, `model_profile_id`.
   - Acceptance: new tests in `packages/graph-agent-gateway/tests/test_registry_schema.py` cover valid/invalid IDs, secret serialization, runtime policy defaults/ranges, draft enums, multi-endpoint drafts, and `system_prompt_prefix` null rejection.
-- [ ] 2.3 Implement canonical mapper.
+- [x] 2.3 Implement canonical mapper.
   - Define confidence classes: `transport_normalized`, `explicit_alias`, `orphan`.
   - Forbid fuzzy merges of `latest`, dated snapshots, `fast`, `thinking`, and provider variants unless explicit alias exists.
   - Acceptance: `pytest packages/graph-agent-gateway/tests/test_registry_canonical.py -q` covers positive and negative cases.
-- [ ] 2.4 Implement capability normalizer and linter.
+- [x] 2.4 Implement capability normalizer and linter.
   - Known keys: `max_input_tokens`, `max_output_tokens`, `thinking_protocol`, `tool_protocol`, `structured_output_protocol`, `vision`.
   - Implement explicit lint key mapping: `thinking` → `thinking_protocol`, `tool_calling` → `tool_protocol`, `structured_output` → `structured_output_protocol`, `vision` → `vision`, token keys to themselves.
   - `error + missing/unverified` returns blocking `requires_probe`.
   - `warn + missing` returns non-blocking warning.
   - Acceptance: `pytest packages/graph-agent-gateway/tests/test_registry_lint.py -q`.
-- [ ] 2.5 Implement registry resolver.
+- [x] 2.5 Implement registry resolver.
   - Input: `RegistrySnapshot`, role name or route override.
   - Output: `ResolvedRole` with role metadata, runtime policy, and ordered `ResolvedRoute` records.
   - Validate endpoint, route status, credential presence, lints.
   - Plumb `RegistrySnapshot.runtime_policy` into `ResolvedRole.runtime_policy`.
   - Never search by capability, availability, provider, price, or latency.
   - Acceptance: `pytest packages/graph-agent-gateway/tests/test_registry_resolver.py -q`.
-- [ ] 2.6 Implement error classifier.
+- [x] 2.6 Implement error classifier.
   - Map `httpx.ConnectError`, `httpx.TimeoutException`, retryable 5xx, rate limits, marked-down route to fallback.
   - Map missing credential, auth failure, bad request, unknown model, unsupported capability, schema/config error to fail-fast.
   - Acceptance: `pytest packages/graph-agent-gateway/tests/test_registry_error_classification.py -q`.

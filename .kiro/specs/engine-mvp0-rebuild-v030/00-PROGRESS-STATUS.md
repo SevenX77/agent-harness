@@ -171,8 +171,8 @@ PM 指示"让 agents 过一遍, 统一就执行"。三方独立评估 §7 顺序
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | step 4 阶段一 (r14.1) | a1 写红灯 suite `test_round14_skill_compilation_cutover.py` (27 test 函数: 双轨/schema_version v/禁 mode/禁 phase metadata/Logic validator/DAG 4 码/name-mismatch/IO deprecated/body 5 标签/mention/subgraph IO) | ✅ 主控实证 pytest 30 failed + 3 passed (3 pass = src 已满足契约: skill-mode pydantic 拒/physical-io deprecated, 非 false red) |
-| step 4 阶段一 audit | a2 audit 红灯 suite 覆盖度 + tests-first 纯度 (3 passed 合理性) | 🔄 进行中 (job_67efd9349954) |
-| step 4 阶段二 (r14.2-r14.9) | a1 实施转绿 (B1-B8, 含 sweep 已 merge 污染 graph_serializer:34/41 + loader:642/647 + pre-existing fixture + 十余 merged test, B8 撤 xfail) | ⏳ 待 a2 audit pass |
+| step 4 阶段一 audit | a2 audit: 红灯 suite **够格做验收基准** (无 must-fix); 3 发现主控复核: schema_version "2.1" 增量 (属实, 阶段二补) / masking 轻微 (physical_io parametrize 混场景) / B4 脏数据 (误判, test 已覆盖 `("","io/inputs.json")`) | ✅ |
+| step 4 阶段二 (r14.2-r14.9) | a1 实施转绿 (先补 schema_version "2.1" 红灯; B1-B8; sweep 已 merge 污染 graph_serializer:34/41 + loader:642/647 + pre-existing fixture + 18 个 modified test WIP 同步重写, B8 撤 xfail) | 🔄 进行中 (job_e6dfe239c001) |
 | step 4 阶段三 (r14.10) | grep gate + 全量 pytest 绿 | ⏳ |
 
 **注**: 其他 18 个 working tree modified test WIP = 被打断前错误前提实施, 在阶段二随 src sweep 同步重写, 不单独处理。

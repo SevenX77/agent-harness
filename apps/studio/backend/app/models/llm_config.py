@@ -250,6 +250,10 @@ class RolesData(BaseModel):
     models: dict[str, ModelEntry]
     providers: dict[str, ProviderEntry]
     roles: dict[str, RoleEntry]
+    migration_required: bool = Field(
+        default=False,
+        description="True when legacy roles YAML was migrated in memory and should be saved.",
+    )
     single_model_roles: list[str] = Field(default_factory=list)
     peer_model_groups: dict[str, list[str]] = Field(default_factory=dict)
     circuit_breaker: dict[str, Any] | None = None

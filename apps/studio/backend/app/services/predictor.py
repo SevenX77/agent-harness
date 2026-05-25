@@ -28,6 +28,7 @@ from graph_agent.core.loader import SkillLoader
 
 from app.models.runs import PredictDiagnosticExport
 from app.services.diagnostic_export import export_predict_diagnostics
+from app.services.gateway_resolver import build_gateway_model_resolver
 from app.services.skills import ensure_workspace_skill_dir, predict_dir_for
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,7 @@ class PredictorService:
         raw_result = self._run_skill(
             skill_dir,
             mock_llm=mock_param,
+            model_resolver=build_gateway_model_resolver(),
             unattended=True,
             callbacks=[tracing_callback],
             **(input_data or {}),

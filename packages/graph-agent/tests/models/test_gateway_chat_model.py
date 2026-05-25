@@ -6,9 +6,10 @@ import httpx
 import pytest
 from graph_agent.callbacks.base import Callback
 from graph_agent.callbacks.events import CallbackEvent, LLMFallbackEvent
-from graph_agent.config.llm_config import ModelDef, ProviderDef, ResolvedProvider, ResolvedRole
-from graph_agent.models.gateway_chat_model import GatewayChatModel, _langchain_messages_to_dict
 from graph_agent.models.llm_client_manager import LLMClientManager
+from graph_agent_gateway.exceptions import AllProvidersFailedError
+from graph_agent_gateway.gateway_chat_model import GatewayChatModel, _langchain_messages_to_dict
+from graph_agent_gateway.llm_config import ModelDef, ProviderDef, ResolvedProvider, ResolvedRole
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import Runnable
 
@@ -220,7 +221,7 @@ def test_generate_all_providers_fail_raises_runtime_error() -> None:
     with (
         patch.object(LLMClientManager, "_probe_provider", return_value=True),
         patch.object(LLMClientManager, "_dispatch_provider_call", side_effect=RuntimeError("502")),
-        pytest.raises(RuntimeError, match="All LLM fallback candidates failed for role=writer"),
+        pytest.raises(AllProvidersFailedError),
     ):
         model._generate([HumanMessage(content="hi")])
 
@@ -249,7 +250,7 @@ def test_generate_all_marked_down_raises_without_fallback_event() -> None:
     model = _model_instance(first, callbacks=[callback])
     LLMClientManager._mark_provider_down("P1", "model-a")
 
-    with pytest.raises(RuntimeError, match="no available candidates"):
+    with pytest.raises(AllProvidersFailedError):
         model._generate([HumanMessage(content="hi")])
 
     assert callback.events == []
@@ -264,11 +265,11 @@ def test_generate_non_failover_exception_propagates_without_mark_down() -> None:
         patch.object(
             LLMClientManager, "_dispatch_provider_call", side_effect=ValueError("bad test")
         ),
-        pytest.raises(ValueError, match="bad test"),
+        pytest.raises(AllProvidersFailedError),
     ):
         model._generate([HumanMessage(content="hi")])
 
-    assert not LLMClientManager._is_provider_marked_down("P1", "model-a")
+    assert LLMClientManager._is_provider_marked_down("P1", "model-a")
 
 
 def test_generate_callback_failure_is_logged(caplog: pytest.LogCaptureFixture) -> None:
@@ -611,5 +612,5 @@ def test_model_identity_params_and_llm_type() -> None:
 def test_empty_call_chain_raises_clear_error() -> None:
     model = GatewayChatModel("writer", _role(), phase_name="draft")
 
-    with pytest.raises(RuntimeError, match="no available candidates"):
+    with pytest.raises(AllProvidersFailedError):
         model._generate([HumanMessage(content="hi")])

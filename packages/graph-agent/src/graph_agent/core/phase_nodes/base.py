@@ -25,7 +25,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Any, Protocol
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -45,9 +45,11 @@ class ModelResolverProtocol(Protocol):
         self,
         role_name: str | None = None,
         *,
+        thinking_enabled: bool | None = None,
         model_override: str | None = None,
         callbacks: tuple[Callback, ...] = (),
         phase_name: str | None = None,
+        **kwargs: Any,
     ) -> BaseChatModel:
         """Return a LangChain-compatible model object for one phase."""
 

@@ -52,8 +52,16 @@ class _GetStateFailingGraph(_CompletedFakeGraph):
         raise RuntimeError("checkpoint unavailable")
 
 
+class _FakeModelResolver:
+    def resolve(self, *args: Any, **kwargs: Any) -> object:
+        raise AssertionError("fake graph tests must not resolve models")
+
+
 def _build_harness_with_graph(graph: Any) -> GraphAgentHarness:
-    harness = GraphAgentHarness(phases=[Phase(name="phase_a", requires_llm=False)])
+    harness = GraphAgentHarness(
+        phases=[Phase(name="phase_a", requires_llm=False)],
+        model_resolver=_FakeModelResolver(),
+    )
     harness._graph = graph
     return harness
 
@@ -97,7 +105,10 @@ def test_invalid_studio_checkpointer_env_raises(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setenv("STUDIO_CHECKPOINTER", "not-a-valid-spec")
 
     with pytest.raises(ValueError, match="STUDIO_CHECKPOINTER='not-a-valid-spec'"):
-        GraphAgentHarness(phases=[Phase(name="phase_a", requires_llm=False)])
+        GraphAgentHarness(
+            phases=[Phase(name="phase_a", requires_llm=False)],
+            model_resolver=_FakeModelResolver(),
+        )
 
 
 def test_auto_checkpointer_init_failure_raises_checkpoint_error(
@@ -112,7 +123,10 @@ def test_auto_checkpointer_init_failure_raises_checkpoint_error(
     monkeypatch.setattr(checkpointer, "get_checkpointer", _broken_get_checkpointer)
 
     with pytest.raises(CheckpointError) as exc_info:
-        GraphAgentHarness(phases=[Phase(name="phase_a", requires_llm=False)])
+        GraphAgentHarness(
+            phases=[Phase(name="phase_a", requires_llm=False)],
+            model_resolver=_FakeModelResolver(),
+        )
 
     assert "checkpointer init failed: checkpoint backend unavailable" in str(exc_info.value)
     assert exc_info.value.context == {

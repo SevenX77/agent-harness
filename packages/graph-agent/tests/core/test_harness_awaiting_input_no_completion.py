@@ -73,11 +73,17 @@ class _AwaitingInputFakeGraph:
         return self._snapshot
 
 
+class _FakeModelResolver:
+    def resolve(self, *args: Any, **kwargs: Any) -> object:
+        raise AssertionError("fake graph tests must not resolve models")
+
+
 def _build_harness_with_fake_graph(*, io_config: dict[str, Any] | None = None) -> GraphAgentHarness:
     """Build a real harness, then swap in a graph that simulates AWAITING_INPUT."""
     harness = GraphAgentHarness(
         phases=[Phase(name="phase_a", requires_llm=False)],
         io_config=io_config,
+        model_resolver=_FakeModelResolver(),
     )
     harness._graph = _AwaitingInputFakeGraph()
     return harness

@@ -60,7 +60,7 @@ Research conclusion: T3 reducer and T5 namespace shape must be implemented toget
 Current runtime path still has mixed concerns: prompt assembly, finish_task, child graph invocation, subagent tools, resolver behavior, and reference tooling. Alignment requires explicit DI boundaries:
 
 - `SkillResolverProtocol`
-- ModelResolver-like injection for LLM roles
+- **[Completed via PR α]** `ModelResolverProtocol` injection for LLM roles (Gateway independent package and explicit DI via `run_skill`).
 - StateMapper wrapper for all phase kinds
 
 Research conclusion: execution-runtime should consume compiled AST only; no runtime Markdown reparsing.

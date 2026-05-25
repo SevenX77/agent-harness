@@ -55,6 +55,7 @@ from app.models.runs import (
 )
 from app.services.gateway_resolver import build_gateway_model_resolver
 from app.services.git_local import GitCommandError, GitFileLockedError, GitLocalService
+from app.services.skill_resolver import build_studio_skill_resolver
 from app.services.skills import resolve_skill_dir, run_dir_for, test_inputs_dir_for_skill
 
 _EVENT_ADAPTER: TypeAdapter[Any] = TypeAdapter(CallbackEvent)
@@ -233,6 +234,7 @@ def _run_worker_main(
             trace_dir=run_dir,
             callbacks=callbacks,
             model_resolver=build_gateway_model_resolver(),
+            skill_resolver=build_studio_skill_resolver(),
             unattended=True,
             cleanup_checkpoints_on_finish=False,
             **inputs,

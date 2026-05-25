@@ -38,7 +38,11 @@ from graph_agent.core.parser import (
     scan_forbidden_topology_tags,
 )
 from graph_agent.core.purity import scan_python_purity, scan_tool_imports_context
-from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol, resolve_skill_root
+from graph_agent.core.skill_resolver_protocol import (
+    SkillResolverProtocol,
+    require_skill_resolver,
+    resolve_skill_root,
+)
 from graph_agent.core.subagents import build_subagent_input_model, build_subagent_tool_args_model
 
 logger = logging.getLogger(__name__)
@@ -146,8 +150,9 @@ class SkillLoader:
         self,
         skill_root: str | Path,
         *,
-        skill_resolver: SkillResolverProtocol | None = None,
+        skill_resolver: SkillResolverProtocol,
     ) -> CompiledSkill:
+        resolver = require_skill_resolver(skill_resolver, caller="SkillLoader.compile_skill")
         root = Path(skill_root)
         _guard_v21_root(root)
 
@@ -188,9 +193,8 @@ class SkillLoader:
             validate_context_writes=self.validate_context_writes,
         )
         subagents_by_phase = _compile_subagent_metadata(
-            root,
             phase_docs,
-            skill_resolver=skill_resolver,
+            skill_resolver=resolver,
         )
         tools = _inject_subagent_tools(tools, subagents_by_phase)
 
@@ -230,6 +234,8 @@ def load_workflow_from_md(
     md_path: str | Path,
     callbacks: list[Any] | None = None,
     model_resolver: Any | None = None,
+    *,
+    skill_resolver: SkillResolverProtocol,
     _loading_stack: set[str] | None = None,
 ) -> Any:
     """V2.1 temporary runtime wrapper.
@@ -248,7 +254,12 @@ def load_workflow_from_md(
     chat_model = None
     if model_resolver is not None:
         chat_model = model_resolver.resolve(phase_name="<workflow>")
-    return assemble_graph(compile_skill(root), chat_model=chat_model).graph
+    resolver = require_skill_resolver(skill_resolver, caller="load_workflow_from_md")
+    return assemble_graph(
+        compile_skill(root, skill_resolver=resolver),
+        chat_model=chat_model,
+        skill_resolver=resolver,
+    ).graph
 
 
 def _fatal(path: Path, line: int, message: str) -> NoReturn:
@@ -360,10 +371,9 @@ def _discover_actions_and_tools(
 
 
 def _compile_subagent_metadata(
-    skill_root: Path,
     phase_docs: list[PhaseDocument],
     *,
-    skill_resolver: SkillResolverProtocol | None = None,
+    skill_resolver: SkillResolverProtocol,
 ) -> dict[str, list[CompiledSubagent]]:
     subagents_by_phase: dict[str, list[CompiledSubagent]] = {}
     for doc in phase_docs:
@@ -371,20 +381,7 @@ def _compile_subagent_metadata(
             continue
         phase_subagents: list[CompiledSubagent] = []
         for spec in doc.ast.subagents:
-            if spec.target_skill is not None:
-                if skill_resolver is None:
-                    _fatal(
-                        doc.path,
-                        _frontmatter_key_line(doc.path, "phase_config"),
-                        f"subagent {spec.name!r} declares target_skill "
-                        f"{spec.target_skill!r} but no skill_resolver was provided",
-                    )
-                sub_root = resolve_skill_root(skill_resolver, spec.target_skill)
-                target_skill = spec.target_skill
-            else:
-                legacy_path = cast(str, spec.path)
-                sub_root = _resolve_subagent_root(skill_root, doc.path, legacy_path, spec.name)
-                target_skill = legacy_path
+            sub_root = resolve_skill_root(skill_resolver, spec.target_skill)
             sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(
                 sub_root,
                 skill_resolver=skill_resolver,
@@ -395,7 +392,8 @@ def _compile_subagent_metadata(
                     doc.path,
                     _frontmatter_key_line(doc.path, "phase_config"),
                     "subagent "
-                    f"{spec.name!r} at {spec.path!r} must declare a non-empty io.inputs schema",
+                    f"{spec.name!r} at {spec.target_skill!r} must declare "
+                    "a non-empty io.inputs schema",
                 )
             try:
                 input_model = build_subagent_input_model(
@@ -412,7 +410,7 @@ def _compile_subagent_metadata(
                 CompiledSubagent(
                     parent_phase_id=doc.phase_name,
                     name=spec.name,
-                    target_skill=target_skill,
+                    target_skill=spec.target_skill,
                     description=spec.description,
                     root=sub_root,
                     input_schema=input_schema,
@@ -483,45 +481,6 @@ def _pending_call_subagent_tool(inputs: list[Any]) -> list[dict[str, Any]]:
 
     del inputs
     raise NotImplementedError("call_subagent runtime is implemented in Phase 2 Executor")
-
-
-def _resolve_subagent_root(
-    skill_root: Path,
-    phase_path: Path,
-    subagent_path: str,
-    subagent_name: str,
-) -> Path:
-    display_path = phase_path.parent / subagent_path
-    path = Path(subagent_path)
-    if path.is_absolute():
-        _fatal(
-            phase_path,
-            _frontmatter_key_line(phase_path, "phase_config"),
-            f"subagent {subagent_name!r} path must be relative to phase root",
-        )
-    skill_root_resolved = skill_root.resolve()
-    candidate = display_path.resolve()
-    try:
-        candidate.relative_to(skill_root_resolved)
-    except ValueError:
-        _fatal(
-            phase_path,
-            _frontmatter_key_line(phase_path, "phase_config"),
-            f"subagent {subagent_name!r} path must stay inside skill root",
-        )
-    if not candidate.is_dir():
-        _fatal(
-            phase_path,
-            _frontmatter_key_line(phase_path, "phase_config"),
-            f"subagent {subagent_name!r} path {subagent_path!r} does not exist",
-        )
-    if not (candidate / "GRAPH.md").is_file():
-        _fatal(
-            phase_path,
-            _frontmatter_key_line(phase_path, "phase_config"),
-            f"subagent {subagent_name!r} path {subagent_path!r} has no GRAPH.md",
-        )
-    return candidate
 
 
 def _subagent_input_model_name(phase_id: str, subagent_name: str) -> str:
@@ -1096,7 +1055,6 @@ def _build_phase_document(
         "system_prompt",
         "exit_contract",
         "python_callable",
-        "sub_skill_ref",
     ]
     blocks = extract_raw_blocks(body, allowed)
     data = dict(frontmatter)
@@ -1112,7 +1070,6 @@ def _build_phase_document(
             data.setdefault("python_callable", blocks.get("python_callable"))
             ast: PhaseAST = LogicNodeAST.model_validate(data)
         elif mode == "subgraph":
-            data.setdefault("sub_skill_ref", blocks.get("sub_skill_ref"))
             ast = SubgraphNodeAST.model_validate(data)
         elif is_agent:
             data.update(_parse_agent_body(path, body, blocks))

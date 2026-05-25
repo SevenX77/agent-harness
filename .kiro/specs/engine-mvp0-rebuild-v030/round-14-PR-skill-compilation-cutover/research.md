@@ -3,20 +3,31 @@
 署名：a2
 日期：2026-05-25
 
-## 1. Loader 与 Manifest 的分支并存现状
-在当前的 `packages/graph-agent/src/graph_agent/core/loader.py` 和 `manifest.py` 实现中，存在着典型的“为了向后兼容而妥协”的双轨逻辑：
+## 污染溯源：为何出现错误前提的 spec
+在 2026-05-23 的 `e485261` commit 中，旧的 `02-graph-md-spec.md` 将 `GRAPH.md` 中 body XML 的 `<phase>` 标签定义为需要被剔除的遗产，取而代之的是纯 YAML 的 `phases: list[str]`。
+这就导致了上一版 round-14 spec 和 WIP 代码错误地将 `loader.py` 中的 `_extract_phase_attrs` (读取 body 的 DAG 连线) 给删掉了。
 
-- **XML + YAML 拓扑解析双轨**: `GRAPH.md` 的拓扑解析仍尝试从 markdown body 提取 `<phase />` 标签（见 `_extract_phase_attrs`）。即使在引入了 YAML 的 `phases:` 后，代码中还专门用了一个 `_phase_refs_to_raw_attrs` 方法（L166）把新的 YAML 格式“倒退”回旧的 XML-style raw 属性去进行旧版拓扑图检验。
-- **Physical + Inline IO 双轨**: 当前只要 YAML 里面没有显式的 `io.inputs`，系统依然会悄悄 fallback 去调用 `_validate_io_schema` 去读 `io_inputs_ref` 指向的磁盘 JSON 文件。
-- **SkillNodeAST 的残留**: 在 `manifest.py` 中，`SkillNodeAST` 依然与 `AgentNodeAST` 并列存在于 `PhaseAST` 联合类型中，导致后续所有的 schema visitor 都需要兼顾 `mode: skill` 和 `mode: agent`。
+而真实情况（PM 于 5-24 拍板的 `00-FORMAT-GROUND-TRUTH.md`）是双轨制：
+- frontmatter `phases` 只做注册（不含 depends_on 连线，因为 YAML 层级表示 DAG 不直观）。
+- body `<phase>` XML 做 DAG 拓扑连线。
 
-这种状态使得整个 Compiler 的维护成本极高，任何新的 IO 或者图连通性检查（如后续的 A7/A8 数据流校验）都需要同时照顾两条分支。
+因此，我们在 round-14 必须**重新恢复 XML 的提取正则**，但将其作为 DAG 连线的唯一事实来源，与 frontmatter registry 互相校验，而不是把它当作兼容 V2.1 的垃圾代码删掉。
 
-## 2. 已经 Ready 的基础设施
-- **B5/B6 已 Ship**: Agent body 的 5 类 XML 提取，以及 `@type` Mention 校验在前期任务中已经成功并入主干。这意味着 AST 构建的最底层 parser 是完备的。
-- **SkillResolverProtocol (PR δ)**: PR δ 已经将 `SkillResolverProtocol` DI 注入接口建设完毕（例如 `compile_skill` 签名已接纳 `skill_resolver` 参数）。这使得 B7 (子图目标解析) 可以直接消费该 Protocol 接口去递归调用，无需重新发明外部寻址逻辑。
-- **StateMapper (PR γ2)**: 刚落地不久的三区隔离和 StateMapper 同样强烈需求 Compiler 侧能提供统一、干净的 AST（比如强制统一的 inline IO schema），来生成 phase-local input 漏斗，B1-B4 的完成恰好能填补这一块编译期的空缺。
+## AST 内部状态与文件推导论证
+**核心问题**：为什么要求用户在 `LOGIC.md` 或 `SKILL.md` 的 frontmatter 里写 `mode: logic` 是错的？
+1. **冗余且易致分歧**：物理文件名（`LOGIC.md`）已经从结构上决定了其行为。要求作者再写一次 `mode` 违反了 DRY (Don't Repeat Yourself) 原则。
+2. **校验成本高**：上一版代码中 `loader.py:625` 的 `_validate_mode_matches_filename` 就暴露出这种冗余设计的代价——框架不仅要读 YAML，还要对比文件名是否合法，不一致时抛出的异常让用户很困惑。
+3. **架构解法**：Pydantic 的 `Field(discriminator="mode")` 确实非常适合用来做联合类型的多态反序列化。所以，我们的解法是在 AST (`manifest.py`) 中**保留 `mode` 字段**，但在 `loader.py` 读取时，**从文件名自动推导字符串并动态注入进解析前的字典中**。这样既让开发者免去手写之苦，又保持了 Python 代码类型推导的严谨性。
 
-## 3. Serializer 的隐性债务
-在检索漏读点时，我审查了 `packages/graph-agent/src/graph_agent/core/graph_serializer.py`，这部分原本没有在原始 brief 的雷达内。
-代码中的 `_render_fresh_graph` 函数直接硬编码了 `<input src="{manifest.io_inputs_ref}" />`。如果 B4 在 `manifest.py` 中直接砍掉 `io_inputs_ref`，这里必然引发 `AttributeError` 或阻断 Studio 的保存流程，这是一个必须在同一 PR 拔除的毒瘤。
+## Example 的双机制拆分溯源
+先前的版本把 inline 案例（直接注入 prompt）和 document 案例（按需读取的大文档）混在一个 YAML `content` 字段里，甚至允许 `content` 写多行字符串，这在长 prompt 下会破坏 YAML 的可读性。
+PM 决议：
+- 短 inline 案例：必须像 `<step>` 那样写在 body 的 `<example id="xx">` 标签内。
+- 长 document 案例：放在 frontmatter 的 `examples: [{id, path, summary}]` 中，不加载原文，只暴露给 `read_example` tool。
+因此在 AST `AgentNodeAST` 解析层面，我们需要单独新增一个 `<example>` XML 正则捕获流。
+
+## 为什么 Cognitive Template (C2) 移出 round-14
+认知模板的 8 插槽装配（`{skill_steps_splat}`, `{aligned_concepts_and_critical_corrections_markdown}` 等）不仅涉及字符串替换，还涉及：
+1. `knowledge_base` subagent 的 pre-run 装配逻辑。
+2. `<exit_contract>` 从 `SKILL.md` 中剥离并在装配层 Hardcode 追加 output_schema 的逻辑。
+将其塞入静态 AST 编译的 Task B 中，会使得原本只需要校验 Pydantic 解析结果的纯静态测试，演变为高度依赖 LLM chain 初始化、上下文注入和 string mock 的高成本 E2E 测试。将其隔离，是维护 PR 高内聚 (Cohesion) 的必要架构策略。

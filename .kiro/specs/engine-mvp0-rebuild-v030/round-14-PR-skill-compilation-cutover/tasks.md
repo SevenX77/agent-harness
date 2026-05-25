@@ -1,327 +1,378 @@
 ---
 spec: engine-mvp0-rebuild-v030/round-14-PR-skill-compilation-cutover
 phase: PR skill-compilation cutover tasks
-owner: a1 audit+tasks / a2 design+requirements+research / a3 final gate
-工程量: 48h = tests 6h + B1 7h + B2 5h + B3 7h + B4 7h + B7 8h + B8 6h + gate 2h
+owner: a1 tasks / a2 design+requirements+research / a3 gate
+scope: Task B only, tests-first, [BREAKING] SOP-05 cutover
 ---
 
 # PR round-14: Skill Compilation Cutover Tasks
 
-## §0 Scope 和继承边界
+## §0 Scope
 
-本 PR 只做 Task B skill-compilation hard cutover: B1-B4, B7, B8。不改 A 的 `SkillResolverProtocol` 语义, 不改 D 的三区 state / `PhaseWrapper` 语义, 不重开 B5/B6。
+本 PR 只做 Task B skill-compilation 静态编译契约硬切换: B1-B8。C2 Cognitive Template 8 插槽装配不在本轮, 只保证 Agent AST 能解析出 C2 后续需要的 role/goal/steps/protocols/examples/resources。
 
-继承事实:
+唯一格式权威: `docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md`。
 
-- `SkillResolverProtocol` 已存在, child skill 入口必须显式注入 resolver。
-- `AgentNodeAST` 已存在, 但 `SkillNodeAST` / `mode: skill` 仍是 active path。
-- `GraphManifest` 仍允许 `schema_version: "2.1"` 和 `"0.3.0"`。
-- `GRAPH.md` 仍存在 XML `<phase/>` 与 YAML `phases:` 双轨。
-- root IO 仍存在 physical `io/inputs.json` / `io/outputs.json` 与 inline `io` 双轨。
-- `SubgraphNodeAST.target_skill` 已必填, 但父子 IO 1:1 静态校验未完成。
+[BREAKING] cutover discipline:
 
-Hard cutover 点:
-
-- 不保留 V2.1 loader/cache/serializer fallback。
-- 不保留 `SkillNodeAST` / `mode: skill` active path。
-- 不保留 `GRAPH.md` body XML `<phase/>` 拓扑。
-- 不保留 physical root IO 文件或 `io_inputs_ref` / `io_outputs_ref` 引用。
-- 同 PR 同步 engine tests、fixtures、serializer/cache、Studio backend schema/template 受影响面。
+- src 改 + tests/fixtures 改必须同 PR 同步落地。
+- 第一批任务只写红灯测试, 不改 src。
+- 禁止用 `xfail` / blanket quarantine 掩盖本轮 V0.3 contract tests。
+- round-14 WIP 与已 merge 污染都要 sweep: `graph_serializer.py` schema/version/body phase、`loader.py` hardcoded `"0.3.0"`、pre-existing v030 fixtures 纯 YAML、tests 中 `"0.3.0"` 无 v。
+- `skills/` 下真实业务 skill corpus 本轮不迁移, 仅允许明确隔离在非 active compile/import path。
 
 ## §1 依赖图
 
 ```text
 r14.1 Tests-first red suite
-  ├─> r14.2 B1! AgentNodeAST-only AST
-  │     └─> r14.3 B2! mode 三值化 + phase file 3 选 1
-  │           └─> r14.4 B3! GRAPH.md YAML phases cutover
-  │                 └─> r14.5 B4! inline root IO cutover
-  │                       └─> r14.6 B7! SUBGRAPH IO 1:1 校验
-  └─> r14.7 B8! fixtures / serializer / cache / Studio sync
-        └─> r14.8 CI gate + grep guard
+  ├─> r14.2 B1 AgentNodeAST-only AST
+  │     └─> r14.3 B2 filename-derived phase type
+  │           └─> r14.4 B3 GRAPH.md dual-track topology
+  │                 └─> r14.5 B4 inline root IO
+  │                       └─> r14.6 B5 Agent body 5 tags
+  │                             └─> r14.7 B6 mention reachability
+  │                                   └─> r14.8 B7 SUBGRAPH target_skill + IO
+  └─> r14.9 B8 fixture/test/cache/serializer sweep
+        └─> r14.10 grep + CI gate
 ```
 
-必须串行:
+## §2 r14.1: Tests-first red suite
 
-- `r14.1` 必须先写红灯, 覆盖 old schema 仍被接受、XML/physical IO fallback、SUBGRAPH IO mismatch 未拦截。
-- `r14.2-r14.6` 按 AST -> phase discovery -> graph topology -> root IO -> child IO 顺序推进。
-- `r14.7` 必须跟随所有 schema cutover, 统一迁移 tests/fixtures/Studio 触点。
-
-可并行:
-
-- `r14.7` 中 fixture 迁移、serializer 测试迁移、Studio backend 测试迁移可在 B3/B4 接口稳定后并行。
-
-## §2 r14.1: Tests-first red suite (6h)
-
-**WHY**: 本 PR 是 breaking schema cutover。先写红灯证明旧分支仍 active, 避免实现只改模型不切断 loader/runtime 入口。
+**目标**: 先写失败测试锁定 design.md / requirements.md 的验收标准和错误码。此 task 只改 tests/fixtures, 不改 src。
 
 **Files**:
 
-- 新增 `packages/graph-agent/tests/core/test_round14_skill_compilation_cutover.py`
-- 修改 `packages/graph-agent/tests/core/test_v21_loader.py`
-- 修改 `packages/graph-agent/tests/core/test_v21_graph_serializer.py`
-- 修改 `packages/graph-agent/tests/core/test_compiler_schema_version_tolerance.py`
-- 修改 `apps/studio/backend/tests/test_models.py`
-- 修改 `apps/studio/backend/tests/services/test_skills_folder_import.py`
+- `packages/graph-agent/tests/core/test_round14_skill_compilation_cutover.py` 新增
+- `packages/graph-agent/tests/core/test_compiler_schema_version_tolerance.py`
+- `packages/graph-agent/tests/core/test_v21_loader.py` 或迁移为 `test_v030_loader.py`
+- `packages/graph-agent/tests/core/test_v21_graph_serializer.py` 或迁移为 `test_v030_graph_serializer.py`
+- `packages/graph-agent/tests/core/test_gamma0_contract_tdd.py`
+- `packages/graph-agent/tests/core/test_gamma2_child_graph_isolation.py`
+- `packages/graph-agent/tests/core/test_gamma2_phase_outputs_flow.py`
+- `packages/graph-agent/tests/core/test_gamma2_reference_reader_sandbox.py`
+- `packages/graph-agent/tests/core/test_delta_skill_resolution_red.py`
+- `packages/graph-agent/tests/core/test_skill_resolver_protocol.py`
+- `packages/graph-agent/tests/core/test_compiler_line_locations.py`
+- `packages/graph-agent/tests/core/validators/test_tool_paths_escape.py`
 
-**WHAT**:
+**Red tests**:
 
-- 红灯: `schema_version: "2.1"` compile fatal, 不再 coerce / tolerate。
-- 红灯: phase `SKILL.md mode: skill` fatal `[F-v3-agent-mode-invalid]`。
-- 红灯: Pydantic `TypeAdapter(PhaseAST)` / AST parser 直接反序列化 `{"mode": "skill", ...}` payload 时失败, 不只依赖 loader 逻辑校验。
-- 红灯: 同一 phase 目录同时存在 `SKILL.md` / `LOGIC.md` / `SUBGRAPH.md` 多个节点文件 fatal `[F-v3-graph-phase-mode-ambiguous]`。
-- 红灯: `GRAPH.md` body 中 `<phase/>` 不再作为 topology 来源; 缺 YAML `phases:` fatal `[F-v3-graph-phases-missing]`。
-- 红灯: `io/inputs.json`, `io/outputs.json`, `io_inputs_ref`, `io_outputs_ref` 任一存在 fatal `[F-v3-graph-io-physical-file-deprecated]`。
-- 红灯: SUBGRAPH 父 `io` 与 child root `GRAPH.md io` inputs/outputs properties 不一致 fatal `[F-v3-subgraph-io-mismatch]`。
-- 红灯: `serialize_graph()` fresh/original round-trip 产出 YAML `phases:` + inline `io`, 不再产出 XML IO/phase tag。
-
-**Cutover discipline**:
-
-- 本 task 只写/改 tests, 不改 src。
-- 不加 `xfail` / `skip`。
-
-**验收**:
-
-- 新测试在当前 main 下失败, 且失败点分别指向 legacy schema、XML、physical IO、SUBGRAPH IO mismatch。
+- `schema_version: "0.3.0"` fatal `[F-v3-graph-schema-version-mismatch]`; `"v0.3.0"` pass.
+- phase frontmatter 写任意 `mode:` fatal/validation fail; 不要求作者写 `mode`, loader 从 filename 注入内部 discriminator。
+- phase frontmatter 写 `schema_version` / `graph_skill_id` / `phase_id` fatal, 按对应 phase domain unknown-field 错误处理。
+- `LOGIC.md` / `SUBGRAPH.md` / `SKILL.md` 三类 phase 都能装载 `validator: boolean`, 缺省为 `false`; 非 boolean fatal 对应 domain validator/type 错误。
+- `SkillNodeAST` / `mode: skill` TypeAdapter path fail。
+- phase 目录多节点文件 fatal `[F-v3-graph-phase-mode-ambiguous]`。
+- phase 目录无节点文件 fatal `[F-v3-graph-phase-node-missing]`。
+- GRAPH.md 缺 frontmatter `phases: list[str]` fatal `[F-v3-graph-phases-missing]`。
+- GRAPH.md 缺 body `<phase>` 或 body/frontmatter 注册缺漏 fatal `[F-v3-graph-phase-id-invalid]`。
+- body/frontmatter phase name 与物理目录名不一致 fatal `[F-v3-graph-phase-name-mismatch]`。
+- body `<phase depends_on>` 引用未知 phase 或入口非 `input` fatal `[F-v3-graph-depends-unknown]`。
+- body `output` 标记非法 fatal `[F-v3-graph-output-phase-invalid]`。
+- 物理 `io/inputs.json` / `io/outputs.json` / `io_inputs_ref` / `io_outputs_ref` fatal `[F-v3-graph-io-physical-file-deprecated]`。
+- Agent body 只接受 `<role>`, `<goal>`, `<step>`, `<protocol>`, `<example>`; `<steps>` / `<protocols>` / `<exit_contract>` fatal `[F-v3-agent-body-tag-unknown]`。
+- `@example:E1` 同时覆盖 body `<example id="E1">` 和 frontmatter document example registry。
+- missing mention fatal `[F-v3-mention-target-not-found]`。
+- SUBGRAPH parent/child `io.inputs.properties` 或 `io.outputs.properties` 不一致 fatal `[F-v3-subgraph-io-mismatch]`。
+- `graph_serializer.serialize_graph()` fresh render 输出 `"v0.3.0"` + frontmatter phase names + body `<phase depends_on ...>name</phase>`, 不输出纯 YAML topology。
+- `tests/conftest.py` blanket xfail 去掉后, gamma0/gamma2/delta/skill_resolver/line_locations 文件保持 active red/green, 不 xfail 掩盖。
 
 **依赖**: none。
 
-## §3 r14.2: B1! AgentNodeAST-only AST (7h)
+**验收**: 新增/迁移测试在当前实现下红灯, 且红灯原因分别落到上述错误码或缺失行为。
 
-**WHY**: `SkillNodeAST` 是后续 legacy runtime/exit_contract/cache/schema 双轨的根。必须先收敛 PhaseAST discriminator。
+## §3 r14.2: B1 AgentNodeAST-only AST
 
-**Files**:
+**目标**: 退役 `SkillNodeAST`, 仅保留 Agent/Logic/Subgraph AST。
+
+**Files / functions**:
 
 - `packages/graph-agent/src/graph_agent/core/manifest.py`
+  - 删除 `SkillNodeAST`
+  - `PhaseAST = Annotated[LogicNodeAST | SubgraphNodeAST | AgentNodeAST, Field(discriminator="mode")]`
+  - `AgentNodeAST.mode = Literal["agent"]`
+  - `AgentNodeAST.examples` 拆为 body inline example AST + frontmatter document examples 所需结构
+  - 删除 `python_callable` 从 Agent/Skill path 残留
 - `packages/graph-agent/src/graph_agent/core/loader.py`
+  - 删除 `SkillNodeAST` import 和分支
+  - `_build_phase_document()` 只构建 `AgentNodeAST` for `SKILL.md`
 - `packages/graph-agent/src/graph_agent/core/graph_assembler.py`
+  - 删除 `SkillNodeAST` branch / `node_kind="skill"`
 - `packages/graph-agent/src/graph_agent/core/cache.py`
+  - cache hydrate/dump 不再引用 SkillNodeAST
 - `apps/studio/backend/app/services/skills.py`
-- `packages/graph-agent/tests/golden/schema/`
+  - schema registry 仅保留 `"agent": AgentNodeAST`
 
-**WHAT**:
+**Test sync**:
 
-- 删除 `SkillNodeAST` class 和 public export。
-- `PhaseAST = LogicNodeAST | SubgraphNodeAST | AgentNodeAST`。
-- `SKILL.md` 只允许 `mode: agent`; `mode: skill` 抛 `[F-v3-agent-mode-invalid]`。
-- 删除 graph assembler 中 `SkillNodeAST` 分支和 `node_kind="skill"`。
-- 更新 Studio backend schema registry, 不再导出 `"skill": SkillNodeAST.model_json_schema()`。
-- 更新 golden schema: 删除 `skill_node_ast.schema.json`, 更新 `phase_ast_union.schema.json`。
+- 更新 `test_v21_ast_schema.py`, `test_v21_codemod.py`, `test_v21_loader.py`, integration smoke 中旧 `SkillNodeAST` import。
 
-**迁移路径**:
-
-- 所有 active fixture `mode: skill` -> `mode: agent`。
-- 旧 `system_prompt` / `exit_contract` style phase fixture 改为 B5 已 ship 的 `<role>` / `<goal>` / `<step>` / `<protocol>` Agent body。
-- cache snapshot 不能 rehydrate old `SkillNodeAST`; namespace 在 B8 bump。
+**依赖**: r14.1。
 
 **验收**:
 
-- `rg -n "SkillNodeAST|mode: Literal\\[\\\"skill\\\"\\]|node_kind=\\\"skill\\\"" packages/graph-agent/src apps/studio/backend/app` 无 active 命中。
-- `pytest packages/graph-agent/tests/core/test_round14_skill_compilation_cutover.py -k agent_mode -v` 通过。
+- `rg -n "class SkillNodeAST|SkillNodeAST|mode: Literal\\[\\\"skill\\\"\\]|node_kind=\\\"skill\\\"" packages/graph-agent/src apps/studio/backend/app` 无 active 命中。
 
-**依赖**: `r14.1`。
+## §4 r14.3: B2 filename-derived phase type
 
-## §4 r14.3: B2! mode 三值化 + phase file 3 选 1 (5h)
+**目标**: 作者不写 `mode:`; phase 类型由 `SKILL.md` / `LOGIC.md` / `SUBGRAPH.md` 文件名推导, loader 注入内部 discriminator。
 
-**WHY**: v0.3 phase node kind 必须由物理文件和 frontmatter mode 双向绑定, 不能靠旧 loader 宽松推断。
-
-**Files**:
+**Files / functions**:
 
 - `packages/graph-agent/src/graph_agent/core/loader.py`
+  - `_PHASE_FILE_TO_MODE = {"SKILL.md": "agent", "LOGIC.md": "logic", "SUBGRAPH.md": "subgraph"}`
+  - 删除 `_validate_mode_matches_filename()`
+  - `_discover_phase_files()` 保证每个 `phases/<id>/` 恰好一个节点文件
+  - phase frontmatter 预校验禁止 `mode`, `schema_version`, `graph_skill_id`, `phase_id`; 命中后抛对应 `F-v3-*-unknown-field` fatal, 不进入 legacy mode 纠正分支
+  - `_build_phase_document()` 在 Pydantic validate 前 `data["mode"] = mode`
+  - 若 frontmatter 已含 `mode`, 按 unknown/forbidden field fatal, 不再做“纠正 mode”错误
 - `packages/graph-agent/src/graph_agent/core/manifest.py`
-- `packages/graph-agent/tests/core/test_v21_loader.py`
-- `packages/graph-agent/tests/core/test_loader_subgraph_is_file.py`
+  - phase AST 内部保留 `mode` discriminator, 但文档输入不要求该字段
+  - `LogicNodeAST.validator: bool = False`, `SubgraphNodeAST.validator: bool = False`, `AgentNodeAST.validator: bool = False`
 
-**WHAT**:
+**Test sync**:
 
-- mode enum 严格为 `agent` / `logic` / `subgraph`。
-- `SKILL.md -> mode: agent`, `LOGIC.md -> mode: logic`, `SUBGRAPH.md -> mode: subgraph`。
-- 重写 `_discover_phase_files`: 每个 `phases/<id>/` 恰好一个 node file。
-- 多个 node file fatal `[F-v3-graph-phase-mode-ambiguous]`。
-- 缺 node file fatal `[F-v3-graph-phase-node-missing]`。
+- 删除 active fixtures 的 `mode: agent` / `mode: logic` / `mode: subgraph` / `mode: skill`。
+- 删除 active fixtures 的 phase-level `schema_version` / `graph_skill_id` / `phase_id`。
+- 增加三类 phase `validator` 缺省 false、显式 true/false、非 boolean 失败测试, 覆盖 `LogicNodeAST`。
+- duplicate node file / missing node file tests 精确断言 `[F-v3-graph-phase-mode-ambiguous]` / `[F-v3-graph-phase-node-missing]`。
 
-**迁移路径**:
-
-- active tests 中所有 helper 改成生成唯一 node file。
-- 删除 `SKILL.md` 可接受 `mode: skill` 的分支。
+**依赖**: r14.2。
 
 **验收**:
 
-- `rg -n "yaml_mode in \\{\\\"agent\\\", \\\"skill\\\"\\}|elif mode == \\\"skill\\\"|mode == \\\"skill\\\"" packages/graph-agent/src/graph_agent/core/loader.py` 无 active 命中。
-- duplicate / missing node file tests 通过。
+- `rg -n "_validate_mode_matches_filename|frontmatter\\.get\\(\\\"mode\\\"\\)|yaml_mode|mode: skill|mode: agent|mode: logic|mode: subgraph|^schema_version:|^graph_skill_id:|^phase_id:" packages/graph-agent/src packages/graph-agent/tests` 无 active fixture/loader 依赖命中; 内部 AST `mode` 字段和 root `GRAPH.md schema_version` 除外。
 
-**依赖**: `r14.2`。
+## §5 r14.4: B3 GRAPH.md dual-track topology
 
-## §5 r14.4: B3! GRAPH.md YAML phases cutover (7h)
+**目标**: GRAPH.md 双轨制: frontmatter `phases: list[str]` 只注册名字; body `<phase depends_on output>name</phase>` 是 DAG 拓扑事实来源。
 
-**WHY**: XML `<phase/>` 与 YAML `phases:` 双轨让 topology、line span、serializer 全部维持旧语义。Topology truth source 必须只剩 frontmatter。
+**Files / functions**:
 
-**Files**:
-
-- `packages/graph-agent/src/graph_agent/core/loader.py`
 - `packages/graph-agent/src/graph_agent/core/manifest.py`
+  - `GraphManifest.schema_version = Literal["v0.3.0"]`
+  - `GraphManifest.phases: list[str]`
+  - 删除 `GraphPhaseRef.src/depends_on` 作为 frontmatter topology 结构; 若仍需 runtime topo, 使用 loader 解析出的内部 graph topology model
+- `packages/graph-agent/src/graph_agent/core/loader.py`
+  - `_build_graph_manifest()` 校验 `"v0.3.0"`、frontmatter `phases: list[str]`
+  - 恢复/重写 `_extract_phase_attrs()` 或等价函数, 解析 body `<phase depends_on="..." output>name</phase>`
+  - `_extract_phase_token_info()` 保留用于 body phase source spans, 但适配新 tag 形态
+  - `_validate_graph_topology(graph_path, manifest.phases, body_phase_refs, skill_root)` 校验:
+    - frontmatter names == body names == physical dirs
+    - body/frontmatter name 与 physical dir mismatch -> `[F-v3-graph-phase-name-mismatch]`
+    - duplicate name -> `[F-v3-graph-phase-id-duplicate]`
+    - unknown dependency / bad input dependency -> `[F-v3-graph-depends-unknown]`
+    - cycle -> `[F-v3-graph-phase-cycle]`
+    - island -> `[F-v3-graph-phase-island]`
+    - invalid/missing output mark -> `[F-v3-graph-output-phase-invalid]`
+    - missing body `<phase>` -> `[F-v3-graph-phase-id-invalid]`
 - `packages/graph-agent/src/graph_agent/core/graph_serializer.py`
+  - `_render_fresh_graph()` 输出 frontmatter phase names + body `<phase>` lines
+  - 修 `graph_serializer.py:34/41`: schema_version 加 `v`, body phase 序列化回双轨, 不产出纯 YAML topology
 - `packages/graph-agent/src/graph_agent/core/cache.py`
-- `packages/graph-agent/tests/core/test_t11_phase_token_info.py`
-- `packages/graph-agent/tests/core/test_v21_graph_serializer.py`
-- `packages/graph-agent/tests/core/test_v21_loader.py`
+  - cache graph metadata 使用双轨 topo digest
 
-**WHAT**:
+**Merged pollution sweep**:
 
-- 删除 `_extract_phase_attrs`, `_extract_phase_token_info`, `_phase_refs_to_raw_attrs` active path。
-- `GraphManifest.phases` 只来自 YAML frontmatter `phases:`。
-- 重构 `_validate_graph_topology`: 入参从 `list[_RawPhaseAttrs]` 改为消费 `manifest.phases` (`list[GraphPhaseRef]`), 不再依赖 XML raw attrs / line span carrier。
-- 缺 `phases:` fatal `[F-v3-graph-phases-missing]`。
-- `depends_on` 引用未知 phase id fatal `[F-v3-graph-phase-id-invalid]`。
-- 空 list / duplicate / cycle / missing src / invalid src 由 YAML phase refs 触发对应 graph-domain fatal。
-- `graph_serializer.py` 从 XML token rewrite 改为 YAML frontmatter rewrite / fresh render。
-- phase token line/span 测试改为 YAML key/value 定位或删除 XML token contract。
+- `loader.py:642/647` 附近 hardcoded `"0.3.0"` 改 `"v0.3.0"`。
+- `packages/graph-agent/tests/fixtures/v030_agent_demo/GRAPH.md`、`registry/echo_agent/GRAPH.md` 等纯 YAML fixture 加 body `<phase>`。
+- 十余处 tests helper 中 `schema_version: "0.3.0"` 改 `"v0.3.0"`。
 
-**迁移路径**:
-
-- 所有 `GRAPH.md` body `<phase ... />` 转为:
-  - `phases:`
-  - `- id: <id>`
-  - `src: phases/<id>`
-  - `depends_on: [...]`
-- serializer tests 统一断言 YAML, 不再断言 XML token preservation。
+**依赖**: r14.3。
 
 **验收**:
 
-- `rg -n "<phase\\b|_extract_phase_attrs|_phase_refs_to_raw_attrs|_PHASE_RE|_phase_line" packages/graph-agent/src/graph_agent/core packages/graph-agent/tests/core` 无 active legacy 命中。
-- YAML topology success / cycle / duplicate / island tests 通过。
+- `rg -n "schema_version: [\"']0\\.3\\.0[\"']|schema_version\\\": \\\"0\\.3\\.0\\\"|Literal\\[\\\"0\\.3\\.0\\\"\\]|must be exactly \\\"0\\.3\\.0\\\"" packages/graph-agent/src packages/graph-agent/tests apps/studio/backend` 无 active 命中。
+- `rg -n "depends_on:\\s*\\[|src:\\s*phases/" packages/graph-agent/tests packages/graph-agent/src` 无 active GRAPH topology fixture 命中。
 
-**依赖**: `r14.3`。
+## §6 r14.5: B4 inline root IO
 
-## §6 r14.5: B4! inline root IO cutover (7h)
+**目标**: root IO 只来自 GRAPH.md frontmatter `io.inputs` / `io.outputs`; 物理 IO 文件和 ref 字段 fatal。
 
-**WHY**: StateMapper 和 SUBGRAPH IO 校验依赖 root `GRAPH.md io` 是唯一 schema 来源。physical IO fallback 会绕过 v0.3 编译契约。
-
-**Files**:
+**Files / functions**:
 
 - `packages/graph-agent/src/graph_agent/core/manifest.py`
+  - 删除 `io_inputs_ref`, `io_outputs_ref`
+  - `GraphManifest.io: PhaseIOSchema` 必填
 - `packages/graph-agent/src/graph_agent/core/loader.py`
+  - `_reject_deprecated_physical_io(root)`
+  - `_build_graph_manifest()` 发现 `io_inputs_ref` / `io_outputs_ref` fatal
+  - 删除 `_resolve_io_ref()` / `_validate_io_schema()` active path
+  - `_validate_inline_io_schema()` 作为唯一 root IO validator
 - `packages/graph-agent/src/graph_agent/core/graph_serializer.py`
+  - 删除 `_IO_RE` / `<input src>` / `<output src>` rewrite
+  - fresh render inline `io`
 - `packages/graph-agent/src/graph_agent/core/cache.py`
-- `apps/studio/backend/app/services/skills.py`
-- `apps/studio/backend/app/services/validator.py`
-- `apps/studio/backend/tests/`
+  - 不扫描 `io/*.json`
 
-**WHAT**:
+**Test sync**:
 
-- 删除 `GraphManifest.io_inputs_ref` / `io_outputs_ref`。
-- `GraphManifest.io: PhaseIOSchema` 改为必填。
-- `loader.py` 发现 `io/inputs.json`, `io/outputs.json`, `io_inputs_ref`, `io_outputs_ref` 直接 fatal `[F-v3-graph-io-physical-file-deprecated]`。
-- 删除 `_validate_io_schema` active path, 只保留 inline schema validation。
-- `graph_serializer.py` 删除 `<input>/<output>` XML tokenizing 正则 `_IO_RE` 和 `"io"` token kind, fresh/original render inline `io` dict。
-- `cache.py` 不扫描 `io/*.json`; cache key 只依赖 `GRAPH.md` + phase node/action/tool files。
-- Studio backend blank graph/template/import/export 同步 inline `io`。
+- 删除 active fixtures 的 `io/inputs.json`, `io/outputs.json`。
+- helper 把 schema inline 到 GRAPH.md。
 
-**迁移路径**:
-
-- fixture `io/*.json` 内容合并到 `GRAPH.md frontmatter io.inputs/io.outputs`。
-- 删除 active fixture 的 `io/` 目录。
-- Studio tests 由 physical bundle 改为 inline `GRAPH.md` bundle。
+**依赖**: r14.4。
 
 **验收**:
 
-- `rg -n "io_inputs_ref|io_outputs_ref|io/inputs\\.json|io/outputs\\.json|_validate_io_schema" packages/graph-agent/src apps/studio/backend/app packages/graph-agent/tests apps/studio/backend/tests` 无 active legacy 命中。
-- deprecated physical IO fatal tests 通过。
+- `rg -n "io_inputs_ref|io_outputs_ref|io/inputs\\.json|io/outputs\\.json|_validate_io_schema|_resolve_io_ref" packages/graph-agent/src packages/graph-agent/tests apps/studio/backend` 无 active 命中。
 
-**依赖**: `r14.4`。
+## §7 r14.6: B5 Agent body 5 tags
 
-## §7 r14.6: B7! SUBGRAPH target_skill IO 1:1 校验 (8h)
+**目标**: Agent body AST 解析 5 类扁平标签: role/goal/step/protocol/example。禁止复数壳和 exit_contract。
 
-**WHY**: PR delta 只完成 resolver smoke。B7 要把 SUBGRAPH 当函数调用, 在编译/装配前确认父 phase IO 与 child root IO 完全一致。
-
-**Files**:
+**Files / functions**:
 
 - `packages/graph-agent/src/graph_agent/core/loader.py`
+  - `_parse_agent_body()`
+  - `_extract_agent_steps()`
+  - `_extract_agent_protocols()`
+  - 新增 `_extract_agent_examples()`
+  - `extract_raw_blocks()` allowed tags 增加 `example`, 删除 `exit_contract`
 - `packages/graph-agent/src/graph_agent/core/manifest.py`
+  - 新增 `AgentExample` 或等价 body inline example AST
+  - `AgentNodeAST.examples_inline` / `examples` 命名以 design 最终字段为准, 但 frontmatter `examples` 仅 document registry
+  - 删除 `ExampleSpec.type/content`
+
+**Test sync**:
+
+- `<exit_contract>` fatal `[F-v3-agent-body-tag-unknown]`。
+- `<example id>` parse success, duplicate/empty/invalid id fail。
+- frontmatter `examples` only `{id,path,summary}`。
+
+**依赖**: r14.5。
+
+**验收**:
+
+- `rg -n "exit_contract|ExampleSpec.*content|type: inline|inline_examples_splat|document_examples_registry|<steps>|<protocols>" packages/graph-agent/src packages/graph-agent/tests` 无 active polluted contract 命中; allowed docs/comments 必须说明非 active。
+
+## §8 r14.7: B6 mention reachability
+
+**目标**: Agent body `@type:NAME` 精确静态可达。
+
+**Files / functions**:
+
+- `packages/graph-agent/src/graph_agent/core/mentions.py`
+  - `MENTION_RE = r"@(subagent|tool|subgraph|protocol|step|reference|example):([a-zA-Z0-9_-]+)"`
+  - `scan_mentions()`
+  - `first_broken_mention()`
+- `packages/graph-agent/src/graph_agent/core/loader.py`
+  - `_validate_agent_mentions(path, ast, body)`
+  - domains:
+    - `subagent`: frontmatter `subagents[].name`
+    - `tool`: frontmatter `tools[]` + builtin `finish_task`, `read_reference`, `read_example`, `log_ambiguity`
+    - `subgraph`: frontmatter `subgraphs[].name`
+    - `protocol`: body `<protocol id>`
+    - `step`: body `<step id>`
+    - `reference`: frontmatter `references[].id`
+    - `example`: body `<example id>` + frontmatter document `examples[].id`
+
+**Test sync**:
+
+- success and target-missing for all 7 domains.
+- malformed mention fatal `[F-v3-mention-syntax-invalid]`.
+- target missing fatal `[F-v3-mention-target-not-found]`.
+
+**依赖**: r14.6。
+
+**验收**:
+
+- `pytest packages/graph-agent/tests/core/test_v030_mentions.py -v` 或等价 mention tests 通过。
+
+## §9 r14.8: B7 SUBGRAPH target_skill + IO 1:1
+
+**目标**: SUBGRAPH 编译期通过 resolver 找 child graph, 并校验 parent phase IO 与 child root IO 1:1。
+
+**Files / functions**:
+
+- `packages/graph-agent/src/graph_agent/core/manifest.py`
+  - `SubgraphNodeAST.io: PhaseIOSchema` 必填
+  - `target_skill` 保持必填
+- `packages/graph-agent/src/graph_agent/core/loader.py`
+  - `_validate_subgraph_io_contracts(phase_docs, skill_resolver=...)`
+  - compile child root via `resolve_skill_root()` / `SkillLoader(...).compile_skill(...)`
+  - missing resolver fatal `[F-v3-resolver-missing]`
+  - mismatch fatal `[F-v3-subgraph-io-mismatch]`
 - `packages/graph-agent/src/graph_agent/core/graph_assembler.py`
-- `packages/graph-agent/tests/core/test_v030_subgraph_target_skill.py`
+  - 使用 compiled metadata, 不做路径 fallback
 - `packages/graph-agent/tests/fixtures/v030_skill_registry/`
+  - child graph fixtures 用 `"v0.3.0"` + GRAPH dual-track + inline IO
 
-**WHAT**:
+**Test sync**:
 
-- `SubgraphNodeAST.io` 改为必填。
-- 编译/装配 SUBGRAPH 时通过 `resolve_skill_root(skill_resolver, target_skill)` 加载 child root。
-- 校验 parent SUBGRAPH `io.inputs` 与 child `GraphManifest.io.inputs` 1:1 等价。
-- 校验 parent SUBGRAPH `io.outputs` 与 child `GraphManifest.io.outputs` 1:1 等价。
-- mismatch fatal `[F-v3-subgraph-io-mismatch]`, payload 包含 parent phase id、target_skill、side(inputs/outputs)。
-- 防止递归 target_skill 循环导致无限 compile; 使用现有 cache/visited guard 或新增 compile stack guard。
+- target_skill unregistered / resolver invalid path / missing resolver / inputs mismatch / outputs mismatch / success。
 
-**迁移路径**:
-
-- 所有 SUBGRAPH fixture 必须声明 `io`。
-- child fixture root 必须是 v0.3 inline IO。
+**依赖**: r14.5; tests 可在 r14.1 先写红灯。
 
 **验收**:
 
-- unregistered / missing resolver / inputs mismatch / outputs mismatch / success tests 通过。
-- `pytest packages/graph-agent/tests/core/test_v030_subgraph_target_skill.py -v` 通过。
+- `pytest packages/graph-agent/tests/core/test_delta_skill_resolution_red.py packages/graph-agent/tests/core/test_skill_resolver_protocol.py -v` 通过。
 
-**依赖**: `r14.5`。
+## §10 r14.9: B8 fixtures, conftest, serializer, cache sweep
 
-## §8 r14.7: B8! fixtures / serializer / cache / Studio sync (6h)
+**目标**: 真迁移 tests/fixtures, 撤销 blanket xfail, 不重复上次 46 xpass 误隔离。
 
-**WHY**: Cutover PR 不能只改 src。所有 active unit/integration/e2e fixture 和 app-facing schema surface 必须同 PR 对齐。
+**Files / functions**:
 
-**Files**:
-
+- `packages/graph-agent/tests/conftest.py`
+  - 删除 round-14 blanket xfail 列表 / marker 注入
+  - 仅保留明确非本轮真实 skill corpus xfail, 且不能覆盖 gamma0/gamma2/delta/new v030 tests
 - `packages/graph-agent/tests/core/`
-- `packages/graph-agent/tests/integration/`
+  - gamma0/gamma2/delta/skill_resolver/line_locations helpers 全部改 `"v0.3.0"` + dual-track + inline IO + no mode
+  - v21-only tests 真删/真迁移, 不 blanket xfail
 - `packages/graph-agent/tests/fixtures/`
-- `packages/graph-agent/tests/golden/`
+  - `v030_agent_demo/GRAPH.md`, registry child graphs, fake canvas/core fixtures 全部 dual-track
 - `packages/graph-agent/src/graph_agent/core/cache.py`
-- `packages/graph-agent/src/graph_agent/codemod/v21_migrator.py`
-- `packages/graph-agent/src/graph_agent/skills/builtin/`
+  - namespace bump: no `graph-agent-v21`
+  - digest includes GRAPH.md body phase topology
+- `packages/graph-agent/src/graph_agent/core/graph_serializer.py`
+  - serializer tests cover `"v0.3.0"` and body `<phase>`
 - `apps/studio/backend/app/services/skills.py`
-- `apps/studio/backend/app/templates/`
-- `apps/studio/backend/tests/`
-- `apps/studio/frontend/tests/e2e/`
+  - blank/template/import examples if active graph import path uses this schema
 
-**WHAT**:
+**Merged pollution sweep**:
 
-- active graph-agent tests 全部迁移到 `schema_version: "0.3.0"`。
-- 旧 v21 parser/cache/serializer 测试改名为 v030 或删除过时断言。
-- codemod/golden 若保留为历史迁移测试, 必须隔离在非 active compile path; 若仍 active, 输出改 v0.3。
-- built-in/example skill 若仍被 tests/import endpoint 扫描, 迁移或隔离。
-- 顶层 `skills/` 真实 skill corpus 本轮不迁移; 必须从 round-14 active compile/import/test 路径隔离, 后续独立 task 处理, 不能作为隐式兼容 fallback 的理由。
-- Studio backend API/model/import tests 改为 v0.3 GraphManifest / inline IO / YAML phases。
-- Studio frontend e2e fixture 中 `schema_version: "2.0"` 仅允许非 graph skill legacy UI 测试; graph import/run fixture 必须 v0.3。
-- bump cache namespace from `graph-agent-v21` to `graph-agent-v030`.
+- `graph_serializer.py:34/41`: `"v0.3.0"` and body `<phase>` render.
+- `loader.py:642/647`: hardcoded `"0.3.0"` strings.
+- pre-existing `v030_agent_demo/GRAPH.md` and registry child graph pure YAML fixtures.
+- all active test helpers hardcoding `schema_version: "0.3.0"`.
+
+**依赖**: r14.2-r14.8.
 
 **验收**:
 
-- `rg -n "schema_version: [\"']2\\.[01][\"']|schema_version\\\": \\\"2\\.[01]\\\"|mode: skill|<phase\\b|<input src|<output src|SkillNodeAST|io_inputs_ref|io_outputs_ref" packages/graph-agent/src packages/graph-agent/tests apps/studio/backend/app apps/studio/backend/tests apps/studio/frontend/tests skills` 仅剩明确注释/历史 codemod golden/已隔离真实 skill corpus, 且不在 active compile/import path。
-- cache dir string 不再含 `graph-agent-v21`。
+- `pytest packages/graph-agent/tests/core/test_round14_skill_compilation_cutover.py -v`
+- `pytest packages/graph-agent/tests/core/test_gamma0_contract_tdd.py packages/graph-agent/tests/core/test_gamma2_child_graph_isolation.py packages/graph-agent/tests/core/test_gamma2_phase_outputs_flow.py packages/graph-agent/tests/core/test_gamma2_reference_reader_sandbox.py packages/graph-agent/tests/core/test_delta_skill_resolution_red.py packages/graph-agent/tests/core/test_skill_resolver_protocol.py packages/graph-agent/tests/core/test_compiler_line_locations.py -v`
+- full `pytest packages/graph-agent/tests/ -rX` shows `0 xpassed`.
 
-**依赖**: `r14.2-r14.6`。
+## §11 r14.10: grep guard + CI gate
 
-## §9 r14.8: CI gate + grep guard (2h)
+**目标**: merge 前防止旧 schema 或错误前提回流。
 
-**WHY**: 本 PR 清理范围大, merge 前必须用 grep guard 防止 legacy 分支回流。
+**Grep guard**:
 
-**Files**:
+- No schema without v:
+  - `rg -n 'schema_version:\\s*["'\\'']0\\.3\\.0["'\\'']|schema_version.*0\\.3\\.0|Literal\\["0\\.3\\.0"\\]|must be exactly "0\\.3\\.0"' packages/graph-agent/src packages/graph-agent/tests apps/studio/backend`
+- Every active GRAPH fixture has body phase:
+  - `rg -l 'schema_version:\\s*"v0\\.3\\.0"' packages/graph-agent/tests packages/graph-agent/src apps/studio/backend | xargs -r grep -L '<phase\\b'` must be empty or documented non-GRAPH false positives.
+- No author-written phase mode:
+  - `rg -n '^mode:\\s*(skill|agent|logic|subgraph)\\b' packages/graph-agent/tests packages/graph-agent/src apps/studio/backend skills`
+- No physical IO active path:
+  - `rg -n 'io_inputs_ref|io_outputs_ref|io/inputs\\.json|io/outputs\\.json|_validate_io_schema|_resolve_io_ref' packages/graph-agent/src packages/graph-agent/tests apps/studio/backend`
+- No deleted AST:
+  - `rg -n 'SkillNodeAST|mode: Literal\\["skill"\\]|node_kind="skill"|python_callable' packages/graph-agent/src packages/graph-agent/tests apps/studio/backend`
+- No pure-YAML topology implementation:
+  - `rg -n 'depends_on:\\s*\\[|src:\\s*phases/|_phase_refs_to_raw_attrs|_PHASE_RE|_phase_line' packages/graph-agent/src packages/graph-agent/tests apps/studio/backend`
 
-- 无业务文件; 可更新 CI 脚本/PR checklist 如仓库已有约定。
+**CI commands**:
 
-**WHAT / gate**:
-
-- `pytest packages/graph-agent/tests/ -v`
-- `pytest apps/studio/backend/tests/ -v`
-- `ruff check packages/graph-agent/src packages/graph-agent/tests apps/studio/backend/app apps/studio/backend/tests`
+- `pytest packages/graph-agent/tests/ -rX`
+- `ruff check packages/graph-agent/src packages/graph-agent/tests`
 - `mypy packages/graph-agent/src`
-- grep guard:
-  - `rg -n "SkillNodeAST|mode: Literal\\[\\\"skill\\\"\\]|mode: skill" packages/graph-agent/src packages/graph-agent/tests apps/studio/backend skills`
-  - `rg -n "<phase\\b|<input src|<output src|_extract_phase_attrs|_PHASE_RE|_IO_RE" packages/graph-agent/src packages/graph-agent/tests apps/studio/backend skills`
-  - `rg -n "io_inputs_ref|io_outputs_ref|io/inputs\\.json|io/outputs\\.json|_validate_io_schema" packages/graph-agent/src packages/graph-agent/tests apps/studio/backend skills`
-  - `rg -n "schema_version.*2\\.[01]|graph-agent-v21" packages/graph-agent/src packages/graph-agent/tests apps/studio/backend skills`
+
+**依赖**: r14.9。
 
 **验收**:
 
-- CI gate 全绿。
-- grep guard 无 active legacy 命中; 如保留历史 codemod golden, PR report 必须逐条说明为何不在 active compile/import path。
-
-**依赖**: `r14.7`。
+- CI green。
+- `0 xpassed`。
+- grep guard 无 active pollution; any historical/codemod exception must be listed in PR report with path and why not active.

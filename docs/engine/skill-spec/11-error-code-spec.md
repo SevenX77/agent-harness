@@ -44,7 +44,9 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | `[F-v3-graph-llm-role-unknown]` | 编译期 | `llm_role` 未注册 | 使用 `llm_roles.yaml` 中角色 | [GRAPH](./02-graph-md-spec.md#基础元数据字段-metadata) |
 | `[F-v3-graph-root-missing]` | 编译期 | `<skill_root>/GRAPH.md` 缺失或大小写不匹配 | 创建精确命名的 `GRAPH.md` | [Physical](./01-physical-layout.md#物理结构拓扑-directory-tree) |
 | `[F-v3-graph-phases-dir-missing]` | 编译期 | `<skill_root>/phases/` 缺失 | 创建 phases 目录 | [Physical](./01-physical-layout.md#物理结构拓扑-directory-tree) |
-| `[F-v3-graph-phase-id-invalid]` | 编译期 | phase name 命名非法或双轨 name 不一致 | 修正 frontmatter `phases`、body `<phase>` name 和目录名 | [GRAPH](./02-graph-md-spec.md#phases-注册与-body-拓扑校验-phase-registration--dag) |
+| `[F-v3-graph-phases-missing]` | 编译期 | `GRAPH.md` frontmatter 缺少 `phases` 列表 | 添加 `phases: [...]` 名字注册 | [GRAPH](./02-graph-md-spec.md#phases-注册与-body-拓扑校验-phase-registration--dag) |
+| `[F-v3-graph-phase-id-invalid]` | 编译期 | phase name 命名规则非法 | 修正 phase name 为合法标识 | [GRAPH](./02-graph-md-spec.md#phases-注册与-body-拓扑校验-phase-registration--dag) |
+| `[F-v3-graph-phase-name-mismatch]` | 编译期 | body `<phase>` name / frontmatter `phases` 注册名 / 物理目录名三者不一致 | 对齐 body、frontmatter 和目录名 | [GRAPH](./02-graph-md-spec.md#phases-注册与-body-拓扑校验-phase-registration--dag) |
 | `[F-v3-graph-phase-id-duplicate]` | 编译期 | phases 列表 id 重复 | 去重 | [GRAPH](./02-graph-md-spec.md#phases-注册与-body-拓扑校验-phase-registration--dag) |
 | `[F-v3-graph-depends-unknown]` | 编译期 | body `<phase depends_on>` 引用未声明 phase | 修正依赖名 | [GRAPH](./02-graph-md-spec.md#phases-注册与-body-拓扑校验-phase-registration--dag) |
 | `[F-v3-graph-output-phase-invalid]` | 编译期 | body `output` 标记无效或无法确定输出 phase | 修正 `<phase ... output>` 标记 | [GRAPH](./02-graph-md-spec.md#phases-注册与-body-拓扑校验-phase-registration--dag) |

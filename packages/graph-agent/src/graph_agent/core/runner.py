@@ -51,7 +51,7 @@ from graph_agent.core.exceptions import (
 )
 from graph_agent.core.loader import load_workflow_from_md
 from graph_agent.core.result import WorkflowMetrics, WorkflowResult
-from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
+from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol, require_skill_resolver
 from graph_agent.core.state import WorkflowState
 
 logger = logging.getLogger(__name__)
@@ -170,11 +170,12 @@ def run_skill(
     artifact_saver: Any | None = None,
     initial_context: dict[str, Any] | None = None,
     cleanup_checkpoints_on_finish: bool = True,
-    skill_resolver: SkillResolverProtocol | None = None,
+    skill_resolver: SkillResolverProtocol,
     model_resolver: Any | None = None,
     **inputs: Any,
 ) -> WorkflowResult:
     """Execute a SKILL.md and return a typed workflow result."""
+    resolver = require_skill_resolver(skill_resolver, caller="run_skill")
     started_at = datetime.now(UTC)
     started_monotonic = time.monotonic()
     skill_path_obj = Path(skill_path)
@@ -193,7 +194,7 @@ def run_skill(
             artifact_saver=artifact_saver,
             initial_context=initial_context,
             cleanup_checkpoints_on_finish=cleanup_checkpoints_on_finish,
-            skill_resolver=skill_resolver,
+            skill_resolver=resolver,
             model_resolver=model_resolver,
             **inputs,
         )
@@ -240,7 +241,7 @@ def _run_skill_dict(
     artifact_saver: Any | None = None,
     initial_context: dict[str, Any] | None = None,
     cleanup_checkpoints_on_finish: bool = True,
-    skill_resolver: SkillResolverProtocol | None = None,
+    skill_resolver: SkillResolverProtocol,
     model_resolver: Any | None = None,
     **inputs: Any,
 ) -> dict[str, Any]:
@@ -270,6 +271,7 @@ def _run_skill_dict(
         - ``trace_path``: Path to trace.json (if TracingCallback active)
         - ``wall_time_sec``: Total wall time
     """
+    resolver = require_skill_resolver(skill_resolver, caller="_run_skill_dict")
     skill_path = Path(skill_path)
     if not skill_path.exists():
         raise SkillLoadError(f"SKILL.md not found: {skill_path}")
@@ -280,7 +282,7 @@ def _run_skill_dict(
             mock_llm=mock_llm,
             thread_id=thread_id,
             callbacks=callbacks,
-            skill_resolver=skill_resolver,
+            skill_resolver=resolver,
             model_resolver=model_resolver,
             **inputs,
         )
@@ -307,6 +309,7 @@ def _run_skill_dict(
                 str(skill_path),
                 callbacks=callbacks,
                 model_resolver=model_resolver,
+                skill_resolver=resolver,
             )
             _harness_cache[cache_key] = (harness, _collect_skill_dependency_snapshot(harness))
             logger.info(
@@ -356,17 +359,17 @@ def _run_skill_dict(
         if effective_thread_id is None:
             effective_thread_id = actual_tid
 
-    resolver = getattr(harness, "_resolver", None)
+    model_predict_resolver = getattr(harness, "_resolver", None)
     had_previous_predict_binding = False
     previous_predict_strategy: Any = None
     predict_attr = "_graph_agent_predict_mock_strategy"
-    if mock_llm is not _NO_MOCK_LLM and resolver is not None:
+    if mock_llm is not _NO_MOCK_LLM and model_predict_resolver is not None:
         from graph_agent.core._predict_internal import bind_predictor
         from graph_agent.core._predict_internal.strategy import MockStrategy
 
-        had_previous_predict_binding = hasattr(resolver, predict_attr)
-        previous_predict_strategy = getattr(resolver, predict_attr, None)
-        bind_predictor(resolver, MockStrategy.from_param(mock_llm))
+        had_previous_predict_binding = hasattr(model_predict_resolver, predict_attr)
+        previous_predict_strategy = getattr(model_predict_resolver, predict_attr, None)
+        bind_predictor(model_predict_resolver, MockStrategy.from_param(mock_llm))
 
     try:
         try:
@@ -394,12 +397,12 @@ def _run_skill_dict(
                     ) from exc
             raise
     finally:
-        if mock_llm is not _NO_MOCK_LLM and resolver is not None:
+        if mock_llm is not _NO_MOCK_LLM and model_predict_resolver is not None:
             if had_previous_predict_binding:
-                setattr(resolver, predict_attr, previous_predict_strategy)
+                setattr(model_predict_resolver, predict_attr, previous_predict_strategy)
             else:
                 with contextlib.suppress(AttributeError):
-                    delattr(resolver, predict_attr)
+                    delattr(model_predict_resolver, predict_attr)
     wall_time = time.time() - t0
 
     # Success — remove .run_id
@@ -468,7 +471,7 @@ def _run_v21_skill_dict(
     trace_dir: str | Path | None = None,
     thread_id: str | None = None,
     callbacks: list[Any] | None = None,
-    skill_resolver: SkillResolverProtocol | None = None,
+    skill_resolver: SkillResolverProtocol,
     model_resolver: Any | None = None,
     **inputs: Any,
 ) -> dict[str, Any]:
@@ -477,6 +480,7 @@ def _run_v21_skill_dict(
     from graph_agent.core.compiler import compile_skill
     from graph_agent.core.graph_assembler import assemble_graph
 
+    resolver = require_skill_resolver(skill_resolver, caller="_run_v21_skill_dict")
     t0 = time.time()
     if mock_llm is not _NO_MOCK_LLM:
         chat_model = mock_llm
@@ -487,8 +491,8 @@ def _run_v21_skill_dict(
         )
     else:
         chat_model = None
-    compiled = compile_skill(skill_root, skill_resolver=skill_resolver)
-    graph = assemble_graph(compiled, chat_model=chat_model, skill_resolver=skill_resolver).graph
+    compiled = compile_skill(skill_root, skill_resolver=resolver)
+    graph = assemble_graph(compiled, chat_model=chat_model, skill_resolver=resolver).graph
     run_id = thread_id or str(uuid.uuid4())
     result = graph.invoke(
         {

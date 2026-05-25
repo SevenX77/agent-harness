@@ -36,7 +36,11 @@ from graph_agent.core.manifest import (
     SkillNodeAST,
     SubgraphNodeAST,
 )
-from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
+from graph_agent.core.skill_resolver_protocol import (
+    SkillResolverProtocol,
+    require_skill_resolver,
+    resolve_skill_root,
+)
 from graph_agent.core.subagents import (
     SubagentValidationFailure,
     assert_subagent_depth_allowed,
@@ -71,10 +75,11 @@ def assemble_graph(
     *,
     chat_model: Any = None,
     max_patch_attempts: int = 3,
-    skill_resolver: SkillResolverProtocol | None = None,
+    skill_resolver: SkillResolverProtocol,
 ) -> CompiledStateGraph:
     """Assemble a V2.1 CompiledSkill into a compiled LangGraph."""
 
+    resolver = require_skill_resolver(skill_resolver, caller="assemble_graph")
     builder = StateGraph(BlackboardState)
     node_by_phase = {node.phase_name: node for node in compiled.nodes}
     phase_ids: list[str] = []
@@ -92,7 +97,7 @@ def assemble_graph(
                 compiled,
                 chat_model,
                 max_patch_attempts,
-                skill_resolver,
+                resolver,
             ),
         )
         phase_ids.append(phase_ref.id)
@@ -124,7 +129,7 @@ def _build_phase_node(
     compiled: CompiledSkill,
     chat_model: Any,
     max_patch_attempts: int,
-    skill_resolver: SkillResolverProtocol | None,
+    skill_resolver: SkillResolverProtocol,
 ) -> Any:
     ast = phase_doc.ast
     if isinstance(ast, LogicNodeAST):
@@ -193,9 +198,9 @@ def _build_subgraph_node(
     phase_ast: SubgraphNodeAST,
     chat_model: Any,
     max_patch_attempts: int,
-    skill_resolver: SkillResolverProtocol | None,
+    skill_resolver: SkillResolverProtocol,
 ) -> Any:
-    sub_root = _resolve_sub_skill_path(phase_doc.path, phase_ast.sub_skill_ref)
+    sub_root = resolve_skill_root(skill_resolver, phase_ast.target_skill)
     sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(
         sub_root,
         skill_resolver=skill_resolver,
@@ -236,7 +241,7 @@ def _build_skill_node(
     compiled: CompiledSkill,
     chat_model: Any,
     max_patch_attempts: int,
-    skill_resolver: SkillResolverProtocol | None,
+    skill_resolver: SkillResolverProtocol,
 ) -> Any:
     business_tools = compiled.tools.for_phase(phase_id)
     if isinstance(phase_ast, AgentNodeAST):
@@ -547,7 +552,7 @@ def _subagent_runtime_map(
     *,
     chat_model: Any,
     max_patch_attempts: int,
-    skill_resolver: SkillResolverProtocol | None,
+    skill_resolver: SkillResolverProtocol,
 ) -> dict[str, _SubagentRuntime]:
     runtimes: dict[str, _SubagentRuntime] = {}
     for tool_name, subagent in subagent_by_tool_name.items():
@@ -706,13 +711,6 @@ def _validate_logic_update_keys(
                 f"[F-v3-actions-keys] {action_path}:{action_line} "
                 f"action wrote undeclared output key {key!r}"
             )
-
-
-def _resolve_sub_skill_path(phase_path: Path, sub_skill_ref: str) -> Path:
-    candidate = Path(sub_skill_ref)
-    if candidate.is_absolute():
-        return candidate
-    return (phase_path.parent / candidate).resolve()
 
 
 def _is_terminal_phase(phase_id: str, manifest: GraphManifest) -> bool:

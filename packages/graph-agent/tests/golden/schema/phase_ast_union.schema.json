@@ -4,58 +4,17 @@
       "additionalProperties": false,
       "description": "V0.3.0 Agent phase node parsed from ``SKILL.md``.",
       "properties": {
-        "name": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Name"
-        },
-        "raw_blocks": {
-          "additionalProperties": {
-            "type": "string"
+        "examples": {
+          "items": {
+            "$ref": "#/$defs/ExampleSpec"
           },
-          "title": "Raw Blocks",
-          "type": "object"
-        },
-        "metadata": {
-          "additionalProperties": true,
-          "title": "Metadata",
-          "type": "object"
-        },
-        "mode": {
-          "const": "agent",
-          "title": "Mode",
-          "type": "string"
-        },
-        "role": {
-          "minLength": 1,
-          "title": "Role",
-          "type": "string"
+          "title": "Examples",
+          "type": "array"
         },
         "goal": {
           "minLength": 1,
           "title": "Goal",
           "type": "string"
-        },
-        "steps": {
-          "items": {
-            "$ref": "#/$defs/AgentStep"
-          },
-          "title": "Steps",
-          "type": "array"
-        },
-        "protocols": {
-          "items": {
-            "$ref": "#/$defs/AgentProtocol"
-          },
-          "title": "Protocols",
-          "type": "array"
         },
         "io": {
           "anyOf": [
@@ -68,16 +27,78 @@
           ],
           "default": null
         },
-        "validator": {
-          "default": false,
-          "title": "Validator",
-          "type": "boolean"
+        "llm_role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Llm Role"
         },
-        "tools": {
+        "max_iterations": {
+          "default": 10,
+          "maximum": 50,
+          "minimum": 1,
+          "title": "Max Iterations",
+          "type": "integer"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "mode": {
+          "const": "agent",
+          "title": "Mode",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "protocols": {
           "items": {
+            "$ref": "#/$defs/AgentProtocol"
+          },
+          "title": "Protocols",
+          "type": "array"
+        },
+        "raw_blocks": {
+          "additionalProperties": {
             "type": "string"
           },
-          "title": "Tools",
+          "title": "Raw Blocks",
+          "type": "object"
+        },
+        "references": {
+          "items": {
+            "$ref": "#/$defs/ReferenceSpec"
+          },
+          "title": "References",
+          "type": "array"
+        },
+        "role": {
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/AgentStep"
+          },
+          "title": "Steps",
           "type": "array"
         },
         "subagents": {
@@ -94,43 +115,22 @@
           "title": "Subgraphs",
           "type": "array"
         },
-        "references": {
-          "items": {
-            "$ref": "#/$defs/ReferenceSpec"
-          },
-          "title": "References",
-          "type": "array"
-        },
-        "examples": {
-          "items": {
-            "$ref": "#/$defs/ExampleSpec"
-          },
-          "title": "Examples",
-          "type": "array"
-        },
-        "max_iterations": {
-          "default": 10,
-          "maximum": 50,
-          "minimum": 1,
-          "title": "Max Iterations",
-          "type": "integer"
-        },
-        "llm_role": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Llm Role"
-        },
         "system_prompt": {
           "default": "",
           "title": "System Prompt",
           "type": "string"
+        },
+        "tools": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tools",
+          "type": "array"
+        },
+        "validator": {
+          "default": false,
+          "title": "Validator",
+          "type": "boolean"
         }
       },
       "required": [
@@ -145,14 +145,14 @@
       "additionalProperties": false,
       "description": "One Agent protocol parsed from body XML.",
       "properties": {
-        "id": {
-          "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
-          "title": "Id",
-          "type": "string"
-        },
         "content": {
           "minLength": 1,
           "title": "Content",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+          "title": "Id",
           "type": "string"
         }
       },
@@ -167,6 +167,11 @@
       "additionalProperties": false,
       "description": "Named registry binding available to an Agent body.",
       "properties": {
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
         "name": {
           "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
           "title": "Name",
@@ -175,11 +180,6 @@
         "target_skill": {
           "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
           "title": "Target Skill",
-          "type": "string"
-        },
-        "description": {
-          "minLength": 1,
-          "title": "Description",
           "type": "string"
         }
       },
@@ -195,6 +195,11 @@
       "additionalProperties": false,
       "description": "One ordered Agent step parsed from body XML.",
       "properties": {
+        "content": {
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
         "id": {
           "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
           "title": "Id",
@@ -203,11 +208,6 @@
         "name": {
           "minLength": 1,
           "title": "Name",
-          "type": "string"
-        },
-        "content": {
-          "minLength": 1,
-          "title": "Content",
           "type": "string"
         }
       },
@@ -223,19 +223,6 @@
       "additionalProperties": false,
       "description": "Inline or document example declared on an Agent.",
       "properties": {
-        "id": {
-          "pattern": "^[A-Z][A-Za-z0-9_-]*$",
-          "title": "Id",
-          "type": "string"
-        },
-        "type": {
-          "enum": [
-            "inline",
-            "document"
-          ],
-          "title": "Type",
-          "type": "string"
-        },
         "content": {
           "anyOf": [
             {
@@ -247,6 +234,11 @@
           ],
           "default": null,
           "title": "Content"
+        },
+        "id": {
+          "pattern": "^[A-Z][A-Za-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
         },
         "path": {
           "anyOf": [
@@ -271,6 +263,14 @@
           ],
           "default": null,
           "title": "Summary"
+        },
+        "type": {
+          "enum": [
+            "inline",
+            "document"
+          ],
+          "title": "Type",
+          "type": "string"
         }
       },
       "required": [
@@ -284,6 +284,16 @@
       "additionalProperties": false,
       "description": "Deterministic Python phase node parsed from ``LOGIC.md``.",
       "properties": {
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "mode": {
+          "const": "logic",
+          "title": "Mode",
+          "type": "string"
+        },
         "name": {
           "anyOf": [
             {
@@ -296,27 +306,17 @@
           "default": null,
           "title": "Name"
         },
+        "python_callable": {
+          "minLength": 1,
+          "title": "Python Callable",
+          "type": "string"
+        },
         "raw_blocks": {
           "additionalProperties": {
             "type": "string"
           },
           "title": "Raw Blocks",
           "type": "object"
-        },
-        "metadata": {
-          "additionalProperties": true,
-          "title": "Metadata",
-          "type": "object"
-        },
-        "mode": {
-          "const": "logic",
-          "title": "Mode",
-          "type": "string"
-        },
-        "python_callable": {
-          "minLength": 1,
-          "title": "Python Callable",
-          "type": "string"
         }
       },
       "required": [
@@ -382,6 +382,21 @@
       "additionalProperties": false,
       "description": "LLM ReAct phase node parsed from ``SKILL.md``.",
       "properties": {
+        "exit_contract": {
+          "minLength": 1,
+          "title": "Exit Contract",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "mode": {
+          "const": "skill",
+          "title": "Mode",
+          "type": "string"
+        },
         "name": {
           "anyOf": [
             {
@@ -401,24 +416,16 @@
           "title": "Raw Blocks",
           "type": "object"
         },
-        "metadata": {
-          "additionalProperties": true,
-          "title": "Metadata",
-          "type": "object"
-        },
-        "mode": {
-          "const": "skill",
-          "title": "Mode",
-          "type": "string"
+        "subagents": {
+          "items": {
+            "$ref": "#/$defs/SubagentSpec"
+          },
+          "title": "Subagents",
+          "type": "array"
         },
         "system_prompt": {
           "minLength": 1,
           "title": "System Prompt",
-          "type": "string"
-        },
-        "exit_contract": {
-          "minLength": 1,
-          "title": "Exit Contract",
           "type": "string"
         },
         "tools": {
@@ -426,13 +433,6 @@
             "type": "string"
           },
           "title": "Tools",
-          "type": "array"
-        },
-        "subagents": {
-          "items": {
-            "$ref": "#/$defs/SubagentSpec"
-          },
-          "title": "Subagents",
           "type": "array"
         }
       },
@@ -448,45 +448,25 @@
       "additionalProperties": false,
       "description": "Sub-skill declared as a callable tool on a SKILL phase.",
       "properties": {
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
         "name": {
           "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
           "title": "Name",
           "type": "string"
         },
         "target_skill": {
-          "anyOf": [
-            {
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Target Skill"
-        },
-        "path": {
-          "anyOf": [
-            {
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Path"
-        },
-        "description": {
-          "minLength": 1,
-          "title": "Description",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+          "title": "Target Skill",
           "type": "string"
         }
       },
       "required": [
         "name",
+        "target_skill",
         "description"
       ],
       "title": "SubagentSpec",
@@ -496,6 +476,27 @@
       "additionalProperties": false,
       "description": "Subgraph delegation phase node parsed from ``SUBGRAPH.md``.",
       "properties": {
+        "io": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PhaseIOSchema"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "mode": {
+          "const": "subgraph",
+          "title": "Mode",
+          "type": "string"
+        },
         "name": {
           "anyOf": [
             {
@@ -515,44 +516,10 @@
           "title": "Raw Blocks",
           "type": "object"
         },
-        "metadata": {
-          "additionalProperties": true,
-          "title": "Metadata",
-          "type": "object"
-        },
-        "mode": {
-          "const": "subgraph",
-          "title": "Mode",
-          "type": "string"
-        },
-        "sub_skill_ref": {
-          "minLength": 1,
-          "title": "Sub Skill Ref",
-          "type": "string"
-        },
         "target_skill": {
-          "anyOf": [
-            {
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Target Skill"
-        },
-        "io": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/PhaseIOSchema"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+          "title": "Target Skill",
+          "type": "string"
         },
         "validator": {
           "default": false,
@@ -562,7 +529,7 @@
       },
       "required": [
         "mode",
-        "sub_skill_ref"
+        "target_skill"
       ],
       "title": "SubgraphNodeAST",
       "type": "object"

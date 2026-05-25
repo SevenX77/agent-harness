@@ -6,6 +6,7 @@ import pytest
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.loader import SkillLoader
+from graph_agent.core.runner import run_skill
 from graph_agent.core.skill_resolver_protocol import (
     SkillResolutionError,
     validate_skill_id,
@@ -132,13 +133,41 @@ def test_target_skill_requires_resolver(tmp_path: Path) -> None:
     parent = tmp_path / "parent"
     _parent_skill(parent, "demo.child")
 
-    with pytest.raises(SkillLoadError, match="no skill_resolver was provided"):
-        SkillLoader().compile_skill(parent)
+    with pytest.raises(SkillLoadError, match=r"\[F-v3-resolver-missing\]"):
+        SkillLoader().compile_skill(parent, skill_resolver=None)
+
+
+def test_compile_skill_facade_requires_resolver_v3_code(tmp_path: Path) -> None:
+    parent = tmp_path / "parent"
+    _parent_skill(parent, "demo.child")
+
+    with pytest.raises(SkillLoadError, match=r"\[F-v3-resolver-missing\]"):
+        compile_skill(parent, cache=False, skill_resolver=None)
+
+
+def test_run_skill_requires_resolver_v3_code(tmp_path: Path) -> None:
+    parent = tmp_path / "parent"
+    _parent_skill(parent, "demo.child")
+
+    with pytest.raises(SkillLoadError, match=r"\[F-v3-resolver-missing\]"):
+        run_skill(parent, skill_resolver=None)
 
 
 def test_invalid_skill_id_raises_v3_code() -> None:
-    with pytest.raises(SkillResolutionError, match=r"\[F-v3-invalid-skill-id\]"):
+    with pytest.raises(SkillResolutionError, match=r"\[F-v3-resolver-skill-id-invalid\]"):
         validate_skill_id("../escape")
+
+
+def test_resolver_returning_invalid_path_raises_v3_code(tmp_path: Path) -> None:
+    parent = tmp_path / "parent"
+    missing_root = tmp_path / "missing-child"
+    _parent_skill(parent, "demo.child")
+
+    with pytest.raises(SkillResolutionError, match=r"\[F-v3-resolver-path-invalid\]"):
+        SkillLoader().compile_skill(
+            parent,
+            skill_resolver=DictSkillResolver({"demo.child": missing_root}),
+        )
 
 
 def test_unregistered_skill_id_raises_v3_code(tmp_path: Path) -> None:
@@ -147,3 +176,7 @@ def test_unregistered_skill_id_raises_v3_code(tmp_path: Path) -> None:
 
     with pytest.raises(SkillResolutionError, match=r"\[F-v3-skill-not-registered\]"):
         SkillLoader().compile_skill(parent, skill_resolver=DictSkillResolver({}))
+
+
+# TODO: PR delta src impl: add an active test for
+# [F-v3-resolver-interface-invalid] when the runtime interface-validation trigger is defined.

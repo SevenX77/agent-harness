@@ -27,6 +27,7 @@ from pydantic import (
 
 from app.core.ports.metadata import MetadataStore
 from app.core.ports.storage import StorageBackend
+from app.services.skill_resolver import build_studio_skill_resolver
 from app.services.skills import resolve_skill_dir_async
 
 _TYPE_MAP: dict[str, Any] = {
@@ -76,7 +77,10 @@ async def validate_skill_input_file(
 
 def _compile_manifest_or_raise(skill_path: Path) -> tuple[GraphManifest, dict[str, Any]]:
     try:
-        compiled = SkillLoader().compile_skill(skill_path)
+        compiled = SkillLoader().compile_skill(
+            skill_path,
+            skill_resolver=build_studio_skill_resolver(),
+        )
     except GraphAgentError as exc:
         del exc
         raise ValidationHttpError(

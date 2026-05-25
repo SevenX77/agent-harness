@@ -67,6 +67,7 @@ def test_build_skill_tool_invokes_runner_and_returns_final_output(
         thread_id: str,
         trace_dir: Path | None,
         initial_context: dict[str, Any],
+        skill_resolver: object,
     ) -> dict[str, dict[str, str]]:
         calls.append(
             {
@@ -74,6 +75,7 @@ def test_build_skill_tool_invokes_runner_and_returns_final_output(
                 "thread_id": thread_id,
                 "trace_dir": trace_dir,
                 "initial_context": initial_context,
+                "skill_resolver": skill_resolver,
             }
         )
         return {"context": {"final_output": "done"}}
@@ -94,11 +96,12 @@ def test_build_skill_tool_invokes_runner_and_returns_final_output(
     assert calls == [
         {
             "path": skill_path,
-            "thread_id": calls[0]["thread_id"],
-            "trace_dir": tmp_path / "traces" / "sub_child_tool",
-            "initial_context": {"topic": "contracts"},
-        }
-    ]
+                "thread_id": calls[0]["thread_id"],
+                "trace_dir": tmp_path / "traces" / "sub_child_tool",
+                "initial_context": {"topic": "contracts"},
+                "skill_resolver": calls[0]["skill_resolver"],
+            }
+        ]
     assert str(calls[0]["thread_id"]).startswith("sub_parent_child_tool_")
 
 
@@ -116,6 +119,7 @@ def test_build_skill_tool_returns_error_when_final_output_missing(
         thread_id: str,
         trace_dir: Path | None,
         initial_context: dict[str, Any],
+        skill_resolver: object,
     ) -> dict[str, dict[str, str]]:
         return {"context": {}}
 

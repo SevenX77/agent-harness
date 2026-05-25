@@ -9,7 +9,7 @@ linked_code_paths:
   - apps/studio/frontend/src/lib/tauri.ts
 linked_specs:
   - .kiro/specs/_archive/studio-uikit-redesign/
-last_updated: 2026-05-23
+last_updated: 2026-05-24
 ---
 
 # 前端模块化与 UI 规范 (Frontend Modularity & UI Spec)
@@ -121,7 +121,7 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - 可拖拽的模型、provider 和模型库卡片必须使用 `select-none`，避免拖拽时选中文字；从 Available Models 添加模型时，drop handler 应覆盖整个 role card，Empty 只作为视觉 target，拖拽过程中 role header 的 Edit 等非 drop action 不应抢 hover/click。跨 role card 拖拽时必须用透明 drop shield 覆盖 header 操作，并在 pointerup 后吞掉该次合成 click，避免 Dialog trigger 在拖拽结束瞬间闪开。不要把跨区域添加依赖在 native HTML5 drag/drop 上；Tauri/WebKit 下 `dragstart`/`dataTransfer.types` 不稳定，应保留 pointer 坐标命中 drop zone 的 fallback，并同时渲染跟随指针的 drag preview，避免交互看起来像静态点击。
 - 长模型名、路径和 id 使用 `overflow-wrap:anywhere` / `break-words` 等方式在卡片内换行；不要让文本把卡片撑破。
 - 如果列表来自外部探测或后端缓存，UI 不应写死样例数据。模型库类 UI 应展示已测试并持久化的数据源，按 vendor/provider 等真实字段归类。
-- 多 provider 对同一模型命名不一致时，前端只能做明确可解释的 canonicalization（例如移除 OpenRouter 的 `vendor/model` 展示前缀）；模糊合并规则必须保守，避免误把不同模型合并。
+- LLM Provider Intelligence V2 之后，Available Routes 的 `canonical_id`、vendor/provider 分组、route availability 和 provider ownership 均来自后端 DTO；前端不再从 raw model string 做 canonicalization、provider ownership inference 或 stale provider pruning。
 
 ### 2.10 前端验证要求
 - 修改 `apps/studio/frontend` 的用户可见 UI 后，完成前必须亲自启动或连接本地页面，实际打开、点击、输入相关流程，并检查桌面/窄面板等关键宽度下是否穿模、截断或布局错位。单测和 typecheck 不能替代这一步。

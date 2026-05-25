@@ -35,7 +35,10 @@ from __future__ import annotations
 
 from graph_agent.middleware.cognitive_flow import CognitiveFlowMiddleware
 from graph_agent.middleware.execution_control import ExecutionControlMiddleware
+from graph_agent.middleware.loop_detection import LoopDetectionMiddleware
 from graph_agent.middleware.protocol_validation import ProtocolValidationMiddleware
+from graph_agent.middleware.tool_error import ToolErrorHandlingMiddleware
+from graph_agent.middleware.tracing import TracingMiddleware
 
 # Fixed topological order for the MVP-3 middleware chain.
 #
@@ -64,11 +67,23 @@ MVP0_MIDDLEWARE_ORDER_CONTRACT: tuple[str, ...] = (
 # Backward-compatible public name used by the γ0 TDD tests and future PR β.
 DEFAULT_MIDDLEWARE_ORDER_CONTRACT = MVP0_MIDDLEWARE_ORDER_CONTRACT
 
+from graph_agent.middleware.factory import (  # noqa: E402
+    MIDDLEWARE_ORDER_CONTRACT,
+    build_middleware_chain,
+    build_middleware_chain_cognitive_flow,
+)
+
 __all__ = [
     "DEFAULT_MIDDLEWARE_ORDER",
     "DEFAULT_MIDDLEWARE_ORDER_CONTRACT",
+    "MIDDLEWARE_ORDER_CONTRACT",
     "MVP0_MIDDLEWARE_ORDER_CONTRACT",
     "CognitiveFlowMiddleware",
     "ExecutionControlMiddleware",
+    "LoopDetectionMiddleware",
     "ProtocolValidationMiddleware",
+    "ToolErrorHandlingMiddleware",
+    "TracingMiddleware",
+    "build_middleware_chain",
+    "build_middleware_chain_cognitive_flow",
 ]

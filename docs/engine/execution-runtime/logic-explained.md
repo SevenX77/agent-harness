@@ -1,335 +1,87 @@
-# execution-runtime 运行逻辑人话版
+# execution-runtime 运行逻辑 (PR β 当前实现)
 
-署名：Codex  
-日期：2026-05-23  
-定位：只解释当前执行运行时真实怎么运行，不做源码导览，不讲实现写法。
+署名：Codex / a1
+日期：2026-05-25
+定位：把当前执行运行时代码翻译成自然语言。本文只描述当前 src 已经真实发生的行为，不提前描述后续目标态。
 
-## 1. 一句话结论
+## 1. 入口与当前 live middleware 装配
 
-`execution-runtime` 负责把已经编译好的 skill 真正跑起来。
+公开入口仍是 `run_skill()`。它负责驱动图运行，并把成功或已知 GraphAgent 错误包装成 `WorkflowResult`。
 
-它的主线是：
-
-```text
-run_skill()
-  -> 判断这是 graph skill 还是 legacy SKILL.md
-  -> graph skill 走 compile_skill()
-  -> assemble_graph()
-  -> graph.invoke(initial_state)
-  -> 返回 WorkflowResult
-```
-
-编译器负责把文件变成 `CompiledSkill`；runtime 负责把 `CompiledSkill` 装成 LangGraph，并执行每个 phase。
-
-## 2. 运行入口怎么分流
-
-公开入口是 `run_skill()`。它会把成功结果包装成 `WorkflowResult`，失败时如果是已知 GraphAgent 错误，也会包装成失败的 `WorkflowResult`。
-
-当前有两条运行路径：
-
-| 输入形状 | 当前走向 |
-|---|---|
-| 传入目录，目录里有 `GRAPH.md` | 走当前 graph skill 路径。 |
-| 传入 legacy `SKILL.md` 文件 | 走旧 harness 路径。 |
-
-本解释主要讲 graph skill 路径。
-
-例子：
+PR β 已新增 `build_middleware_chain`，按 `MVP0_MIDDLEWARE_ORDER_CONTRACT` 可实例化 6 层顺序：
 
 ```text
-run_skill("/skills/demo_graph", topic="solar")
-
-/skills/demo_graph/
-  GRAPH.md
-  phases/
-
-=> 走 graph skill 路径
+ProtocolValidation → CognitiveFlow → ExecutionControl → Tracing → ToolError → LoopDetection
 ```
 
-## 3. 初始 state 怎么创建
+但当前 live 路径还没有把这 6 层完整接进 `graph_assembler` 主循环。`graph_assembler` 现在只调用 `build_middleware_chain_cognitive_flow(phase_name=phase_id)`，也就是只装一层 `CognitiveFlowMiddleware` helper。其余 5 层在 factory 中已经能构造，其中 `Tracing`、`ToolError`、`LoopDetection` 目前是可实例化的 no-op skeleton；真正接入主循环留给后续 wire-in。
 
-graph skill 路径会先编译 skill，再装配 LangGraph，然后创建初始 state。
+## 2. finish_task 在 graph_assembler 中如何移交给 CognitiveFlow
 
-初始 state 大概是：
+Agent phase 仍是 LLM 工具循环。模型每轮输出 tool call 后，`graph_assembler` 先按 tool name 找到具体工具并调用。工具结果会先被追加成 `ToolMessage`，然后统一交给 `CognitiveFlowMiddleware.handle_finish_task_tool_result` 判断。
 
-```json
-{
-  "data": {
-    "topic": "solar"
-  },
-  "flow": {},
-  "messages": [],
-  "run_id": "本次运行 id"
-}
+`handle_finish_task_tool_result` 的输入字段含义如下：
+
+- `tool_name`：本次工具名。不是 `finish_task` 时直接返回 `None`，表示 CognitiveFlow 不处理。
+- `tool_result`：工具执行结果。若不是 dict，会按空 dict 处理。
+- `output_schema`：当前 phase 的输出 schema。当前只在 terminal phase 从 `io.outputs` 传入；非 terminal phase 传 `None`。
+- `flow`：当前执行流状态。方法会复制一份，避免原地修改调用者传入对象。
+- `messages`：当前消息列表。schema 或 validator reject 时，会向这里追加 LLM 可见的错误 `ToolMessage`。
+- `critic_metrics`：critic 统计。方法会把每个 metric 的 `invocations`、`passed`、`rejected` 写进 `flow["critic_metrics"]`。
+
+返回值有三类：
+
+- `None`：不是 `finish_task`，外层继续普通工具流程。
+- `{"flow": ..., "messages": ...}`：`finish_task` 没有成功，或 schema/validator reject，需要把错误反馈给模型继续修正。
+- `{"flow": ..., "messages": ..., "data": {phase_name: final_write}}`：`finish_task` 被接受，`data` 下只写当前 phase 名对应的最终业务输出。
+
+## 3. Schema gate 的当前真实规则
+
+`validate_finish_task_with_schema_gate` 是一个可单测的严格 schema gate。它接收 `business_data_md` 或已解析好的 `output`，再用 `output_schema` 走 `SchemaEngine.validate`。
+
+字段级返回值 `FinishTaskSchemaGateResult`：
+
+- `accepted`：布尔值。`True` 表示 schema 校验通过；`False` 表示需要驳回给模型。
+- `error_code`：失败时的错误码。当前使用 `[F-v3-agent-output-schema-missing]` 或 `[F-v3-agent-output-schema-invalid]`。
+- `tool_message`：失败时生成的 `ToolMessage(status="error")`，内容包含错误码、phase 和具体错误。
+- `final_write`：通过时准备用于写回 `data` 的 dict；失败时为 `None`。
+- `output`：通过时的解析后输出；失败时为 `None`。
+- `errors`：失败原因列表，例如 JSON 不是对象、schema 无法解析、字段类型不匹配。
+
+触发条件要区分“helper 直接调用”和“live graph_assembler 路径”：
+
+- 直接调用 `validate_finish_task_with_schema_gate(output_schema=None)` 时，会返回带 `[F-v3-agent-output-schema-missing]` 的 reject。
+- live `handle_finish_task_tool_result` 会先调用 `_has_strict_output_schema`。`output_schema is None`、`SchemaObject.fields` 为空、或 JSON schema 没有非空 `properties` 时，都视为非 strict schema，直接接受并写回。这是当前为 V2.1/非终结阶段保留的兼容放行。
+- 只有存在 strict output schema 时，live 路径才调用 schema gate。若 `validation.ok == False`，返回带 `[F-v3-agent-output-schema-invalid]` 的 reject；若 schema 解析或转换异常，也会被捕获并转成同一个错误码的 reject。这里不是向外抛异常，而是返回 LLM 可见的错误消息。
+
+## 4. Validator runtime 契约与当前接线状态
+
+`invoke_validator_with_contract` 已落地 validator runtime 的统一调用契约：
+
+```python
+def validate(output: dict, state_slice: dict, **kwargs) -> None | dict:
 ```
 
-这里要注意：用户输入会直接进入 `data`。当前不会先按根级 input schema 做运行入口过滤。
+字段级返回值 `ValidatorRuntimeResult`：
 
-如果调用方传了 `thread_id`，它会被当作 run id；否则运行时会生成一个新的 id。
+- `accepted`：布尔值。`True` 表示业务验证通过或没有 validator；`False` 表示需要把反馈交给模型重试。
+- `error_code`：失败时为 `[F-v3-agent-validator-failed]`；通过时为 `None`。
+- `feedback`：失败时的文本反馈。validator 返回 dict 时会被 JSON 序列化；validator 抛异常时会写入异常类型和消息。
+- `tool_message`：失败时生成的 `ToolMessage(status="error")`，内容包含错误码、phase 和反馈文本。
 
-## 4. graph 是怎么装起来的
+当前 live 路径尚未把 `AgentNodeAST.validator=True` 解析成具体 validator 实例。`handle_finish_task_tool_result` 内部调用 `invoke_validator_with_contract` 时传的是 `validator=None`。因此 PR β 当前完成的是“validator runtime 契约接口和失败反馈形态”，不是“AST bool 到业务 validator 实例的完整注入”。这部分留给后续 PR。
 
-`assemble_graph()` 会拿到 `CompiledSkill`，创建一张 LangGraph。
+## 5. ask_clarification 与普通工具透传
 
-它做三件事：
+`intercept_ask_clarification` 统一处理 attended 和 unattended 两条路径。
 
-1. 给每个 phase 加一个节点。
-2. 根据 `depends_on` 加边。
-3. 找到没有下游依赖的 terminal phase，连到 END。
+字段级返回值 `ClarificationResult`：
 
-例子：
+- `answer`：返回给模型的回答文本。
+- `source`：回答来源。当前可能是 `human_interrupt`、`unattended_auto_answer` 或 `needs_human_input`。
 
-```yaml
-phases:
-  - id: prepare
-    depends_on: []
-  - id: analyze
-    depends_on: [prepare]
-  - id: report
-    depends_on: [analyze]
-```
+attended 模式下，方法把 `question` 和 state 合成 payload，调用 `interrupt_fn(payload)`。如果在 LangGraph runnable context 内运行，返回值会作为人工回答，`source="human_interrupt"`。如果在 context 外调用并触发特定 RuntimeError，则降级为 `source="needs_human_input"`，answer 使用 state 中的 message 或原始 question。
 
-会变成：
+unattended 模式下，不允许人工介入。方法返回中文系统提示，要求模型基于现有上下文做最保守推测，并在最终 `diagnostics_md` 中记录想问的问题、推测和依据，`source="unattended_auto_answer"`。
 
-```text
-START -> prepare -> analyze -> report -> END
-```
-
-如果两个 phase 都不依赖任何 phase，它们都会从 START 出发，LangGraph 会把它们作为并行分支处理。
-
-## 5. phase 节点怎么选择执行器
-
-每个 phase 的 AST 类型决定运行方式：
-
-| phase 类型 | 当前运行方式 |
-|---|---|
-| LOGIC | 调 Python action，算出 `data` delta。 |
-| Agent / SKILL | 跑 LLM 工具循环，通常用 `finish_task` 结束。 |
-| SUBGRAPH | 编译并运行另一个 child graph，再把 child graph 的差异作为结果返回。 |
-
-如果 phase AST 上带 `io`，runtime 会先用 `PhaseWrapper` 套一层输入/输出边界。没有 `io` 的 phase 直接运行原始节点。
-
-## 6. LOGIC phase 怎么跑
-
-LOGIC phase 会把当前 `data` 复制一份，包成 `Context` 给 Python action。
-
-action 有两种写结果方式：
-
-1. 修改 Context 里的数据。
-2. 直接返回 dict。
-
-runtime 会把 action 前后的数据做对比，得到变化量。
-
-例子：
-
-```text
-运行前 data:
-  {"topic": " Solar "}
-
-action 写入:
-  clean_topic = "Solar"
-
-返回 delta:
-  {"data": {"clean_topic": "Solar"}}
-```
-
-如果 action 直接返回：
-
-```json
-{
-  "clean_topic": "Solar"
-}
-```
-
-也会被合进 delta。
-
-如果根级 output schema 声明了允许输出 key，LOGIC 返回 dict 的 key 还会被这层静态约束检查。
-
-## 7. Agent / SKILL phase 怎么跑
-
-Agent phase 是 LLM 工具循环。
-
-它会准备：
-
-- system prompt。
-- 当前 messages。
-- business tools。
-- critic/reviewer/auditor 这类 framework tools。
-- subagent tools。
-- `finish_task` 工具。
-
-然后进入循环：
-
-```text
-模型 invoke(messages)
-  -> 如果没有 tool call，循环结束
-  -> 如果有 tool call，逐个执行工具
-  -> 工具结果作为 ToolMessage 追加到 messages
-  -> 如果工具是 finish_task，就返回 phase 结果
-```
-
-例子：模型调用 `finish_task`，工具返回：
-
-```json
-{
-  "ok": true,
-  "data": {
-    "answer": "Solar is renewable."
-  }
-}
-```
-
-phase 名叫 `answer` 时，runtime 返回的业务 delta 是：
-
-```json
-{
-  "data": {
-    "answer": {
-      "answer": "Solar is renewable."
-    }
-  }
-}
-```
-
-同时，完整的 `finish_task` 结果会放进 `flow.finish_task_result`。
-
-如果 `finish_task` 返回 `ok: false`，runtime 不写业务 `data`，但工具结果仍会进入 messages 和 flow。
-
-## 8. finish_task 做什么
-
-`finish_task` 是 Agent 告诉 runtime“这个 phase 完成了”的工具。
-
-它接收 Markdown。runtime 会尝试把 Markdown 解析成 dict，再按输出 schema 校验。
-
-例子：
-
-```markdown
-## answer
-Solar is renewable.
-
-## confidence
-0.8
-```
-
-如果输出 schema 有 `answer` 和 `confidence`，解析后大致变成：
-
-```json
-{
-  "answer": "Solar is renewable.",
-  "confidence": 0.8
-}
-```
-
-解析或校验失败时，工具返回结构化错误；如果配置了 patcher，可能尝试让模型修补 Markdown。
-
-## 9. SUBGRAPH phase 怎么跑
-
-SUBGRAPH phase 会启动另一个完整 skill graph。
-
-流程是：
-
-```text
-拿当前 state.data 作为 before_data
-  -> 用 before_data 启动 child graph
-  -> child graph messages 从空开始
-  -> child graph 跑完
-  -> 对比 before_data 和 child result data
-  -> 把差异作为父 phase 的 data delta
-```
-
-例子：
-
-```text
-父 data:
-  {"chapter": "text"}
-
-child graph 最终 data:
-  {"chapter": "text", "events": ["A meets B"]}
-
-SUBGRAPH 返回:
-  {"data": {"events": ["A meets B"]}}
-```
-
-SUBGRAPH 的 `flow` 也会从 child result 带回父图。
-
-## 10. subagent tool 怎么跑
-
-subagent 是 Agent phase 里的工具，不是 graph 拓扑上的普通 phase。
-
-父 Agent 调用 subagent tool 时，参数必须是：
-
-```json
-{
-  "inputs": [
-    { "scene_text": "A enters." }
-  ]
-}
-```
-
-每个 input item 会触发一次 child graph run。当前 child graph 的初始 `data` 是：
-
-```text
-父 phase-local data + 这个 input item
-```
-
-child graph 从空 messages 开始，并带着父 run id 相关 metadata。多个 input item 会并发执行，但有并发上限。
-
-subagent 返回的是 tool result，不会直接 patch 父图 `data`。父 Agent 必须在后续 `finish_task` 里采用这些结果，它们才会进入父 phase 输出。
-
-## 11. callbacks 和 trace 当前在哪里断开
-
-当前 graph skill dict runner 接收 `callbacks` 参数，但会直接丢弃它。也就是说，这条新 graph path 目前不会像 legacy harness 那样自动把 phase start、tool call、LLM call 等事件写进 callback trace。
-
-但 subagent child graph 的 RunnableConfig 会保留 parent config 里的 callbacks。如果外层调用确实通过 LangGraph config 传了 callbacks，child run 可以继续带上这些 callback metadata。
-
-这和目标态“runtime 主线完整发 trace event”不同。
-
-## 12. 错误怎么返回
-
-公开 `run_skill()` 只捕获 GraphAgent 系列错误，并包装成 `WorkflowResult(success=False)`。
-
-普通 Python 异常不一定会被包装；它可能直接向上抛。
-
-例子：
-
-```text
-SkillLoadError
-  -> 返回 success=False 的 WorkflowResult
-
-RuntimeError
-  -> 可能直接冒泡
-```
-
-Agent phase 没有 chat model 时，当前会抛运行错误。因为 graph skill dict runner 只有在传了 `mock_llm` 时才把它作为 chat model；没有真实 model resolver 注入路径。
-
-## 13. 最容易误解的点
-
-### runtime 不重新解析 Markdown
-
-Markdown 已经在 compilation 阶段被解析成 AST。runtime 消费的是编译产物。
-
-### callbacks 参数当前没有接入 graph skill dict runner
-
-这条路径会 `del callbacks`。所以不要以为传了 `TracingCallback` 就一定会得到完整 graph skill trace。
-
-### Agent 不会自动看到 data 文本
-
-Agent state 里有 phase-local data，但模型能不能看到，要看 prompt 和工具是否暴露这些数据。
-
-### subagent 结果不会自动写父 data
-
-subagent 是工具调用。它的结果先回到父 LLM，不直接进入父图业务黑板。
-
-## 14. 总图
-
-```text
-run_skill()
-  -> _run_skill_dict()
-  -> graph skill path
-  -> compile_skill()
-  -> assemble_graph()
-  -> StateGraph(BlackboardState)
-  -> LOGIC / Agent / SUBGRAPH nodes
-  -> graph.invoke(initial_state)
-  -> result.data -> WorkflowResult.context
-```
+`dispatch_tool_call` 只负责普通工具透传。非 `finish_task` / `ask_clarification` 工具会直接调用传入的 `handler(tool_name, args)` 并返回 handler 结果。只有 `finish_task` 或 `ask_clarification` 这两个认知流工具会返回 `{"handled": False, "tool_name": ..., "args": ...}`，表示该 helper 不在这里处理它们。

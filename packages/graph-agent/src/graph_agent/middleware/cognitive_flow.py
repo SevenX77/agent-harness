@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
 
@@ -93,6 +94,227 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         self._phase_name = phase_name
         self._interrupt_fn = interrupt_fn or interrupt
 
+    @staticmethod
+    def validate_finish_task_with_schema_gate(
+        *,
+        business_data_md: str | None = None,
+        output: dict[str, Any] | None = None,
+        output_schema: dict[str, Any] | SchemaObject | None,
+        state: dict[str, Any] | None = None,
+        phase_name: str = "unknown",
+        business_validator: Callable[..., Any] | None = None,
+        schema_engine: SchemaEngine | None = None,
+    ) -> FinishTaskSchemaGateResult:
+        """Validate finish_task output against compiled ``io.outputs`` before any write.
+
+        PR β keeps this as a small schema gate: business validator wiring
+        is deliberately later, so this method only guarantees that schema
+        failures do not call ``business_validator`` and do not expose a
+        final write candidate.
+        """
+        del state, business_validator
+        engine = schema_engine or SchemaEngine()
+
+        if output_schema is None:
+            return _schema_gate_reject(
+                phase_name=phase_name,
+                error_code="[F-v3-agent-output-schema-missing]",
+                errors=("finish_task reached schema gate without compiled io.outputs.",),
+            )
+
+        if output is None:
+            parsed = _parse_finish_task_output_payload(business_data_md)
+            if not isinstance(parsed, dict):
+                return _schema_gate_reject(
+                    phase_name=phase_name,
+                    error_code="[F-v3-agent-output-schema-invalid]",
+                    errors=(
+                        "business_data_md must decode to a JSON object for schema validation.",
+                    ),
+                )
+            output = parsed
+
+        try:
+            schema = _coerce_output_schema(output_schema, engine)
+            validation = engine.validate(output, schema)
+        except Exception as exc:  # noqa: BLE001 - schema issues become tool feedback
+            logger.warning(
+                "schema gate failed before validation: phase=%s exc=%s",
+                phase_name,
+                exc,
+            )
+            return _schema_gate_reject(
+                phase_name=phase_name,
+                error_code="[F-v3-agent-output-schema-invalid]",
+                errors=(f"invalid compiled io.outputs schema: {exc}",),
+            )
+        if not validation.ok:
+            return _schema_gate_reject(
+                phase_name=phase_name,
+                error_code="[F-v3-agent-output-schema-invalid]",
+                errors=validation.errors,
+            )
+
+        parsed_output = validation.parsed or dict(output)
+        return FinishTaskSchemaGateResult(
+            accepted=True,
+            error_code=None,
+            tool_message=None,
+            final_write=parsed_output,
+            output=parsed_output,
+            errors=(),
+        )
+
+    @staticmethod
+    def invoke_validator_with_contract(
+        *,
+        validator: Callable[..., dict[str, Any] | None] | None,
+        output: dict[str, Any],
+        state_slice: dict[str, Any],
+        phase_name: str = "unknown",
+        **kwargs: Any,
+    ) -> ValidatorRuntimeResult:
+        """Run the PR β validator contract after schema validation passes."""
+        if validator is None:
+            return ValidatorRuntimeResult(accepted=True, error_code=None, feedback=None)
+
+        try:
+            result = validator(output, state_slice, phase_name=phase_name, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - converted to LLM-visible feedback
+            logger.warning("validator exception: phase=%s exc=%s", phase_name, exc)
+            return _validator_runtime_reject(
+                phase_name=phase_name,
+                feedback=f"{type(exc).__name__}: {exc}",
+            )
+
+        if result is None:
+            return ValidatorRuntimeResult(accepted=True, error_code=None, feedback=None)
+
+        feedback = json.dumps(result, ensure_ascii=False, sort_keys=True, default=str)
+        logger.warning("validator rejected: phase=%s feedback=%s", phase_name, feedback)
+        return _validator_runtime_reject(phase_name=phase_name, feedback=feedback)
+
+    def handle_finish_task_tool_result(
+        self,
+        *,
+        tool_name: str,
+        tool_result: Any,
+        output_schema: dict[str, Any] | SchemaObject | None,
+        flow: dict[str, Any],
+        messages: list[Any],
+        critic_metrics: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Handle a finish_task tool result for graph assembly callers."""
+        if tool_name != self._FINISH_TOOL:
+            return None
+
+        result_payload = tool_result if isinstance(tool_result, dict) else {}
+        next_flow = dict(flow)
+        next_flow["finish_task_result"] = result_payload
+        next_flow.setdefault("critic_metrics", {}).update(
+            {
+                key: {
+                    "invocations": value.invocations,
+                    "passed": value.passed,
+                    "rejected": value.rejected,
+                }
+                for key, value in critic_metrics.items()
+            }
+        )
+
+        if not result_payload.get("ok"):
+            return {"flow": next_flow, "messages": messages}
+
+        output = result_payload.get("data", {})
+        if not isinstance(output, dict):
+            output = {}
+
+        if not _has_strict_output_schema(output_schema):
+            return _finish_task_accept_response(
+                phase_name=self._phase_name,
+                flow=next_flow,
+                messages=messages,
+                final_write=output,
+            )
+
+        schema_gate = self.validate_finish_task_with_schema_gate(
+            output=output,
+            output_schema=output_schema,
+            state={"flow": next_flow},
+            phase_name=self._phase_name,
+            business_validator=None,
+        )
+        if not schema_gate.accepted:
+            if schema_gate.tool_message is not None:
+                messages.append(schema_gate.tool_message)
+            return {"flow": next_flow, "messages": messages}
+
+        validator_result = self.invoke_validator_with_contract(
+            validator=None,
+            output=schema_gate.output or output,
+            state_slice={"flow": next_flow},
+            phase_name=self._phase_name,
+        )
+        if not validator_result.accepted:
+            if validator_result.tool_message is not None:
+                messages.append(validator_result.tool_message)
+            return {"flow": next_flow, "messages": messages}
+
+        return _finish_task_accept_response(
+            phase_name=self._phase_name,
+            flow=next_flow,
+            messages=messages,
+            final_write=schema_gate.final_write or {},
+        )
+
+    @staticmethod
+    def intercept_ask_clarification(
+        *,
+        tool: Any,
+        args: dict[str, Any],
+        state: dict[str, Any],
+        unattended: bool,
+        interrupt_fn: Callable[[dict[str, Any]], str] | None,
+    ) -> ClarificationResult:
+        """Intercept ask_clarification for attended and unattended unit paths."""
+        del tool
+        question = str(args.get("question") or "").strip()
+        if unattended:
+            return ClarificationResult(
+                answer=_unattended_clarification_answer(question),
+                source="unattended_auto_answer",
+            )
+
+        payload: dict[str, Any] = {"question": question}
+        payload.update(state)
+        try:
+            answer = interrupt_fn(payload) if interrupt_fn is not None else ""
+        except RuntimeError as exc:
+            if "outside of a runnable context" not in str(exc):
+                raise
+            return ClarificationResult(
+                answer=str(state.get("message") or question),
+                source="needs_human_input",
+            )
+        return ClarificationResult(answer=str(answer), source="human_interrupt")
+
+    @staticmethod
+    def dispatch_tool_call(
+        *,
+        tool_name: str,
+        args: dict[str, Any],
+        state: dict[str, Any],
+        handler: Callable[[str, dict[str, Any]], Any],
+    ) -> Any:
+        """Pass non-cognitive tools through unchanged."""
+        del state
+        if tool_name in {
+            CognitiveFlowMiddleware._FINISH_TOOL,
+            CognitiveFlowMiddleware._CLARIFICATION_TOOL,
+        }:
+            return {"handled": False, "tool_name": tool_name, "args": args}
+        return handler(tool_name, args)
+
     def intercept_tool_call(
         self,
         tool_name: str,
@@ -108,8 +330,19 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         if tool_name == self._FINISH_TOOL:
             return True, self._handle_finish_task(args, state, tool_call_id="")
         if tool_name == self._CLARIFICATION_TOOL:
-            return True, self._handle_clarification(args, tool_call_id="")
-        return False, None
+            return True, self.intercept_ask_clarification(
+                tool=None,
+                args=args,
+                state={"phase_name": self._phase_name},
+                unattended=self._unattended,
+                interrupt_fn=self._interrupt_fn,
+            )
+        return False, self.dispatch_tool_call(
+            tool_name=tool_name,
+            args=args,
+            state={"phase_name": self._phase_name},
+            handler=lambda _tool_name, _args: None,
+        )
 
     def wrap_tool_call(
         self,
@@ -119,15 +352,29 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         """Intercept supported tool calls and pass all others through."""
         tool_name = str(request.tool_call.get("name") or "")
         if tool_name not in {self._FINISH_TOOL, self._CLARIFICATION_TOOL}:
-            return handler(request)
+            args = request.tool_call.get("args", {})
+            result: ToolCallResult = self.dispatch_tool_call(
+                tool_name=tool_name,
+                args=args if isinstance(args, dict) else {},
+                state={"phase_name": self._phase_name},
+                handler=lambda _tool_name, _args: handler(request),
+            )
+            return result
 
         parsed_args = self._args_dict(request)
         if isinstance(parsed_args, Command):
             return parsed_args
 
         if tool_name == self._CLARIFICATION_TOOL:
-            return self._handle_clarification(
-                parsed_args,
+            return self._clarification_command(
+                self.intercept_ask_clarification(
+                    tool=None,
+                    args=parsed_args,
+                    state=self._clarification_state(parsed_args),
+                    unattended=self._unattended,
+                    interrupt_fn=self._interrupt_fn,
+                ),
+                args=parsed_args,
                 tool_call_id=_tool_call_id(request),
             )
 
@@ -156,8 +403,15 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             return parsed_args
 
         if tool_name == self._CLARIFICATION_TOOL:
-            return self._handle_clarification(
-                parsed_args,
+            return self._clarification_command(
+                self.intercept_ask_clarification(
+                    tool=None,
+                    args=parsed_args,
+                    state=self._clarification_state(parsed_args),
+                    unattended=self._unattended,
+                    interrupt_fn=self._interrupt_fn,
+                ),
+                args=parsed_args,
                 tool_call_id=_tool_call_id(request),
             )
 
@@ -452,75 +706,30 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             )
         return next_state
 
-    def _handle_clarification(
-        self,
-        args: dict[str, Any],
-        *,
-        tool_call_id: str,
-    ) -> Command[Any]:
-        if self._unattended:
-            return self._auto_answer_clarification(args, tool_call_id=tool_call_id)
-        return self._interrupt_clarification(args, tool_call_id=tool_call_id)
-
-    def _auto_answer_clarification(
-        self,
-        args: dict[str, Any],
-        *,
-        tool_call_id: str,
-    ) -> Command[Any]:
-        question = str(args.get("question") or "").strip()
-        content = (
-            "[系统] 当前执行流为无人值守环境（unattended=True），不允许人类干预。"
-            "请基于当前已有上下文做出最保守、最合理的推测并继续执行任务。"
-            "务必在最终 finish_task 的 diagnostics_md 中明确记录：\n"
-            f"  - 你曾想问的问题：{question or '未提供'}\n"
-            "  - 你做出的推测：[你的推测]\n"
-            "  - 该推测的依据：[依据]\n"
-            "现在请继续执行后续步骤。"
-        )
-        logger.info("[CognitiveFlowMiddleware] auto-answered ask_clarification")
-        return Command(
-            update={
-                "messages": [
-                    ToolMessage(
-                        content=content,
-                        name=self._CLARIFICATION_TOOL,
-                        tool_call_id=tool_call_id,
-                    )
-                ]
-            },
-            goto="model",
-        )
-
-    def _interrupt_clarification(
-        self,
-        args: dict[str, Any],
-        *,
-        tool_call_id: str,
-    ) -> Command[Any]:
+    def _clarification_state(self, args: dict[str, Any]) -> dict[str, Any]:
         formatted = self._format_clarification_message(args)
-        payload = {
+        return {
             "tool": self._CLARIFICATION_TOOL,
             "phase_name": self._phase_name,
             "message": formatted,
             "args": args,
         }
-        try:
-            human_answer = self._interrupt_fn(payload)
-        except RuntimeError as exc:
-            # Unit tests and direct middleware calls run outside LangGraph's
-            # runnable context. In that case keep legacy behaviour: surface a
-            # tool message and end the graph turn for the host to handle.
-            if "outside of a runnable context" not in str(exc):
-                raise
-            human_answer = None
 
-        if human_answer is not None:
+    def _clarification_command(
+        self,
+        result: ClarificationResult,
+        *,
+        args: dict[str, Any],
+        tool_call_id: str,
+    ) -> Command[Any]:
+        if result.source in {"human_interrupt", "unattended_auto_answer"}:
+            if result.source == "unattended_auto_answer":
+                logger.info("[CognitiveFlowMiddleware] auto-answered ask_clarification")
             return Command(
                 update={
                     "messages": [
                         ToolMessage(
-                            content=str(human_answer),
+                            content=result.answer,
                             name=self._CLARIFICATION_TOOL,
                             tool_call_id=tool_call_id,
                         )
@@ -529,6 +738,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
                 goto="model",
             )
 
+        formatted = result.answer or self._format_clarification_message(args)
         return Command(
             update={
                 "messages": [
@@ -593,6 +803,131 @@ class _FinishValidation:
         self.schema_validation = schema_validation
         self.parsed_items = parsed_items
         self.errors = errors
+
+
+@dataclass(frozen=True)
+class FinishTaskSchemaGateResult:
+    """Result returned by the PR β strict io.outputs schema gate."""
+
+    accepted: bool
+    error_code: str | None
+    tool_message: ToolMessage | None
+    final_write: dict[str, Any] | None
+    output: dict[str, Any] | None = None
+    errors: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ValidatorRuntimeResult:
+    """Result returned by the PR β validator runtime adapter."""
+
+    accepted: bool
+    error_code: str | None
+    feedback: str | None
+    tool_message: ToolMessage | None = None
+
+
+@dataclass(frozen=True)
+class ClarificationResult:
+    """Small return value for PR β ask_clarification interception tests."""
+
+    answer: str
+    source: str
+
+
+def _parse_finish_task_output_payload(business_data_md: str | None) -> dict[str, Any] | None:
+    text = str(business_data_md or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _unattended_clarification_answer(question: str) -> str:
+    return (
+        "[系统] 当前执行流为无人值守环境（unattended=True），不允许人类干预。"
+        "请基于当前已有上下文做出最保守、最合理的推测并继续执行任务。"
+        "务必在最终 finish_task 的 diagnostics_md 中明确记录：\n"
+        f"  - 你曾想问的问题：{question or '未提供'}\n"
+        "  - 你做出的推测：[你的推测]\n"
+        "  - 该推测的依据：[依据]\n"
+        "现在请继续执行后续步骤。"
+    )
+
+
+def _has_strict_output_schema(output_schema: dict[str, Any] | SchemaObject | None) -> bool:
+    if output_schema is None:
+        return False
+    if isinstance(output_schema, SchemaObject):
+        return bool(output_schema.fields)
+    properties = output_schema.get("properties")
+    return isinstance(properties, dict) and bool(properties)
+
+
+def _finish_task_accept_response(
+    *,
+    phase_name: str,
+    flow: dict[str, Any],
+    messages: list[Any],
+    final_write: dict[str, Any],
+) -> dict[str, Any]:
+    response_state: dict[str, Any] = {"flow": flow, "messages": messages}
+    response_state["data"] = {phase_name: final_write}
+    return response_state
+
+
+def _coerce_output_schema(
+    output_schema: dict[str, Any] | SchemaObject,
+    schema_engine: SchemaEngine,
+) -> SchemaObject:
+    if isinstance(output_schema, SchemaObject):
+        return output_schema
+    return schema_engine.parse_from_md(json.dumps(output_schema, ensure_ascii=False))
+
+
+def _schema_gate_reject(
+    *,
+    phase_name: str,
+    error_code: str,
+    errors: tuple[str, ...],
+) -> FinishTaskSchemaGateResult:
+    content = "\n".join((error_code, f"phase={phase_name}", *errors))
+    return FinishTaskSchemaGateResult(
+        accepted=False,
+        error_code=error_code,
+        tool_message=ToolMessage(
+            content=content,
+            name=CognitiveFlowMiddleware._FINISH_TOOL,
+            tool_call_id="schema-gate",
+            status="error",
+        ),
+        final_write=None,
+        output=None,
+        errors=errors,
+    )
+
+
+def _validator_runtime_reject(
+    *,
+    phase_name: str,
+    feedback: str,
+) -> ValidatorRuntimeResult:
+    error_code = "[F-v3-agent-validator-failed]"
+    content = "\n".join((error_code, f"phase={phase_name}", feedback))
+    return ValidatorRuntimeResult(
+        accepted=False,
+        error_code=error_code,
+        feedback=content,
+        tool_message=ToolMessage(
+            content=content,
+            name=CognitiveFlowMiddleware._FINISH_TOOL,
+            tool_call_id="validator-runtime",
+            status="error",
+        ),
+    )
 
 
 def _workflow_state_or_none(value: object) -> WorkflowState | None:

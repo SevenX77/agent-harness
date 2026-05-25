@@ -34,8 +34,8 @@ def test_assemble_graph_facade_returns_compiled_state_graph(tmp_path: Path) -> N
 
 
 def test_blackboard_state_exported() -> None:
-    state: BlackboardState = {"data": {}}
-    assert state["data"] == {}
+    state: BlackboardState = {"data": {"inputs": {}, "phase_outputs": {}, "scratch": {}}}
+    assert state["data"] == {"inputs": {}, "phase_outputs": {}, "scratch": {}}
 
 
 def test_load_workflow_from_md_v21_root_ok(tmp_path: Path) -> None:
@@ -45,7 +45,7 @@ def test_load_workflow_from_md_v21_root_ok(tmp_path: Path) -> None:
     graph = load_workflow_from_md(tmp_path)
     result = graph.invoke({"data": {}, "flow": {}, "messages": [], "run_id": "r1"})
 
-    assert result["data"]["foo"] == 42
+    assert result["data"]["phase_outputs"]["logic"]["foo"] == 42
 
 
 def test_load_workflow_from_md_legacy_schema_2_skill_md_crash(tmp_path: Path) -> None:

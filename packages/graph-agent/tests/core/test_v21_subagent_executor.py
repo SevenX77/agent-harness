@@ -133,9 +133,12 @@ class _RecordingGraph:
     def invoke(self, state: dict, config: dict | None = None) -> dict:
         self.states.append(state)
         self.configs.append(config or {})
-        data = dict(state["data"])
+        data = dict(state["data"]["inputs"])
         data["child_result"] = data["scene_text"].upper()
-        return {"data": data, "flow": {"child": True}}
+        return {
+            "data": {"inputs": {}, "phase_outputs": {"beat": data}, "scratch": {}},
+            "flow": {"child": True},
+        }
 
 
 def test_subagent_invoke_uses_isolated_messages_and_parent_run_id() -> None:
@@ -155,7 +158,11 @@ def test_subagent_invoke_uses_isolated_messages_and_parent_run_id() -> None:
 
     assert graph.states[0]["messages"] == []
     assert graph.states[0]["run_id"] == "run-1"
-    assert graph.states[0]["data"] == {"parent": "kept", "scene_text": "hello"}
+    assert graph.states[0]["data"] == {
+        "inputs": {"scene_text": "hello"},
+        "phase_outputs": {},
+        "scratch": {},
+    }
     assert result["data"] == {"scene_text": "hello", "child_result": "HELLO"}
 
 
@@ -240,7 +247,7 @@ class _FailingGraph(_RecordingGraph):
     def invoke(self, state: dict, config: dict | None = None) -> dict:
         self.states.append(state)
         self.configs.append(config or {})
-        if state["data"]["scene_text"] == "bad":
+        if state["data"]["inputs"]["scene_text"] == "bad":
             raise RuntimeError("child boom")
         return super().invoke(state, config=config)
 

@@ -220,12 +220,12 @@
 
 **目标**: Studio Backend becomes the product orchestration layer over `graph_agent_gateway.registry`.
 
-- [ ] 4.1 Replace backend LLM models.
+- [x] 4.1 Replace backend LLM models.
   - Modify: `apps/studio/backend/app/models/llm_config.py`
   - Replace v3 `LLMCredentialsFile.providers` with v4 endpoint/route DTOs.
   - Add model profile, runtime policy, role route chain, lint result, import draft DTOs from gateway registry or thin API wrappers.
   - Acceptance: backend model tests cover secret redaction and schema-version fatal for old v3.
-- [ ] 4.2 Rewrite credential storage.
+- [x] 4.2 Rewrite credential storage.
   - Modify: `apps/studio/backend/app/services/llm_credentials.py`
   - Active credentials file contains endpoints/routes/runtime policy only.
   - Drafts are not stored in active credentials.
@@ -233,30 +233,30 @@
   - Replace `provider_test_params_fingerprint` with `graph_agent_gateway.registry.storage.compute_credential_fingerprint(endpoint, secret)`.
   - Acceptance: tests verify omit `api_key` keeps current secret and empty string does not replace secret.
   - Acceptance: backend provider-test result fingerprints match gateway runtime client fingerprints for the same endpoint/secret.
-- [ ] 4.3 Add import draft store.
+- [x] 4.3 Add import draft store.
   - Create: `apps/studio/backend/app/services/llm_import_drafts.py`
   - Store shape matches `ProviderImportDraft`.
   - Support create/read/probe/apply, status transitions, multiple endpoint candidates, route candidates keyed by route ID, probe result shape, expiration, conflict diff, concurrent write protection.
   - Drafts with an `endpoint_id` matching an active endpoint require explicit per-field merge, discard, or delete-active-first choice; no auto-promote.
   - Acceptance: tests cover draft enum validation, multi-endpoint draft, expired draft apply rejection, and concurrent apply conflict.
-- [ ] 4.4 Rewrite role storage.
+- [x] 4.4 Rewrite role storage.
   - Modify: `apps/studio/backend/app/services/llm_roles.py`
   - Schema v2 only: `model_profiles` and `roles[*].fallback_chain`.
   - `system_prompt_prefix` is a string defaulting to `""`; `null` is invalid.
   - Quote or serialize lint values as string enum values `"off"`, `"warn"`, `"error"`.
   - Old `models/providers/active_model/model_fallback/peer_model_groups/single_model_roles/circuit_breaker` fail validation.
   - Acceptance: tests prove old short-code YAML returns actionable schema error.
-- [ ] 4.5 Rewrite gateway resolver bridge.
+- [x] 4.5 Rewrite gateway resolver bridge.
   - Modify: `apps/studio/backend/app/services/gateway_resolver.py`
   - Build `RegistrySnapshot` from active credentials + roles.
   - Return `graph_agent_gateway.ModelResolver`.
   - Acceptance: `run_manager.py` uses this resolver without env patching.
-- [ ] 4.6 Delete old env patch and old migration runtime paths.
+- [x] 4.6 Delete old env patch and old migration runtime paths.
   - Modify/delete: `apps/studio/backend/app/services/llm_env.py`
   - Modify: `apps/studio/backend/app/services/migrations.py`
   - Runtime must not mutate `os.environ`.
   - Acceptance: `rg -n "patch_environment_from_credentials|os.environ\\[" apps/studio/backend/app/services packages/graph-agent-gateway/src` has no runtime env injection.
-- [ ] 4.7 Replace LLM router endpoints.
+- [x] 4.7 Replace LLM router endpoints.
   - Modify: `apps/studio/backend/app/routers/llm.py`
   - Add: `GET /api/llm/registry`
   - Add: `PUT /api/llm/registry/endpoints` as endpoint upsert; absent endpoint IDs are retained.
@@ -276,7 +276,7 @@
   - Before implementation, add request/response JSON examples to `design.md` §8.x for endpoint upsert, route update, route probe, delete conflicts, and profile-apply conflicts.
   - Remove production contract for `providers/test`, `providers/test-models`, `providers/notable-models`.
   - Acceptance: router tests cover new endpoints, documented request/response shapes, conflict payloads, and old endpoints hard-cutover behavior.
-- [ ] 4.8 Update Copilot provider resolution.
+- [x] 4.8 Update Copilot provider resolution.
   - Modify: `apps/studio/backend/app/services/copilot.py`
   - Resolve through route IDs and Gateway registry.
   - Remove imports from `graph_agent.config.llm_config`.

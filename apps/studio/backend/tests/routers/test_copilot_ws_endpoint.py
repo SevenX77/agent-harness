@@ -192,13 +192,13 @@ def test_stream_query_uses_model_override_when_provided(
             copilot_service.stream_query(
                 "skill-a",
                 "hi",
-                model_override="CL46T",
+                model_override="test-provider:claude-test",
                 workspace_dir=tmp_path,
             )
         )
     )
 
-    assert calls == ["CL46T"]
+    assert calls == ["test-provider:claude-test"]
     assert events[-1] == CopilotEventDone()
 
 

@@ -2,6 +2,7 @@ schema_version: 2
 
 model_profiles:
   CL46T:
+    model_profile_id: CL46T
     display_name: Claude Sonnet 4.6 Thinking
     canonical_id: claude-sonnet-4.6
     tags:
@@ -23,7 +24,11 @@ roles:
     system_prompt_prefix: ""
     source_profile_id: CL46T
     source_profile_snapshot:
+      model_profile_id: CL46T
       display_name: Claude Sonnet 4.6 Thinking
+      route_ids:
+        - anthropic-official:claude-sonnet-4.6
+        - openrouter-prod:anthropic.claude-sonnet-4.6
       applied_at: "2026-05-24T00:00:00Z"
       deleted_at: null
       deleted_marker: false

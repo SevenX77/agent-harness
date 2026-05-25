@@ -1,141 +1,120 @@
-"""Round-trip role configuration service for ``config/llm_roles.yaml``."""
+"""Round-trip storage for v2 route-chain ``llm_roles.yaml``."""
 
 from __future__ import annotations
 
-import logging
 import os
 import tempfile
 import threading
-from copy import deepcopy
-from io import StringIO
 from pathlib import Path
 from typing import Any
 
 from ruamel.yaml import YAML
+from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 
 from app.models.llm_config import RoleEntry, RolesData
-from app.services.migrations import migrate_roles_payload
 
 _WRITE_LOCK = threading.Lock()
-logger = logging.getLogger(__name__)
 
 
 class InvalidRoleReference(ValueError):
-    """Raised when a role/model/provider reference is invalid."""
+    """Raised when a role/profile references an unknown route."""
 
 
 def load_roles_file(path: Path) -> RolesData:
-    """Load an LLM roles YAML file with round-trip metadata attached."""
+    """Load a v2 roles YAML file; legacy short-code schemas are fatal."""
+    payload = _yaml().load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(payload, dict):
+        raise ValueError(f"llm_roles.yaml must contain a mapping: {path}")
+    _reject_legacy_roles(payload, path)
+    return RolesData.model_validate(_plain(payload))
 
-    text = path.read_text(encoding="utf-8")
+
+def save_roles_file(
+    path: Path,
+    data: RolesData,
+    *,
+    known_route_ids: set[str] | None = None,
+) -> None:
+    """Atomically save roles YAML after route reference validation."""
+    validate_references(data, known_route_ids=known_route_ids)
+    payload = _quote_lint_values(data.model_dump(mode="json"))
     yaml = _yaml()
-    raw = yaml.load(text)
-    plain_before_migration = _plain(raw)
-    plain = migrate_roles_payload(deepcopy(plain_before_migration))
-    migrated = plain != plain_before_migration
-    data = RolesData.model_validate(plain)
-    data.migration_required = migrated
-    if migrated:
-        logger.warning(
-            "llm_roles.yaml legacy schema migrated in memory; save to persist new format"
-        )
-    data._raw = raw
-    data._original_text = None if migrated else text
-    data._original_snapshot = None if migrated else data.model_dump(mode="json")
-    return data
+    from io import StringIO
 
-
-def save_roles_file(path: Path, data: RolesData) -> None:
-    """Atomically save roles YAML, preserving unchanged round-trip text."""
-
-    normalize_role_drafts(data)
-    validate_references(data)
-    if data._original_snapshot == data.model_dump(mode="json") and data._original_text is not None:
-        serialized = data._original_text
-    else:
-        raw = data._raw if data._raw is not None else {}
-        serialized = _dump_synced_raw(raw, data)
-    _atomic_write(path, serialized)
+    buffer = StringIO()
+    yaml.dump(payload, buffer)
+    _atomic_write(path, buffer.getvalue())
 
 
 def get_role(data: RolesData, role_name: str) -> RoleEntry:
-    """Return one role entry or raise ``KeyError``."""
-
+    """Return one role entry or raise KeyError."""
     return data.roles[role_name]
 
 
-def validate_references(data: RolesData) -> None:
-    """Validate role -> model -> provider references before writing."""
-
+def validate_references(
+    data: RolesData,
+    *,
+    known_route_ids: set[str] | None = None,
+) -> None:
+    """Validate all role/profile route references against known routes."""
+    if known_route_ids is None:
+        return
     for role_name, role in data.roles.items():
-        if not role.models:
-            if role.active_model:
+        for index, entry in enumerate(role.fallback_chain):
+            if entry.route_id not in known_route_ids:
                 raise InvalidRoleReference(
-                    f"role {role_name} has no models but active_model is set"
+                    f"role {role_name} fallback_chain[{index}] references unknown route "
+                    f"{entry.route_id}"
                 )
-            continue
-        if role.active_model not in data.models:
-            raise InvalidRoleReference(
-                f"role {role_name} active_model references unknown model {role.active_model}"
-            )
-        if role.active_model not in role.models:
-            raise InvalidRoleReference(
-                f"role {role_name} active_model is not configured in this role"
-            )
-        for model_code, role_model in role.models.items():
-            model = data.models.get(model_code)
-            if model is None:
+    for profile_id, profile in data.model_profiles.items():
+        for index, entry in enumerate(profile.fallback_chain):
+            if entry.route_id not in known_route_ids:
                 raise InvalidRoleReference(
-                    f"role {role_name} references unknown model {model_code}"
+                    f"profile {profile_id} fallback_chain[{index}] references unknown route "
+                    f"{entry.route_id}"
                 )
-            for provider_code in role_model.providers:
-                if provider_code not in data.providers:
-                    raise InvalidRoleReference(
-                        f"role {role_name} model {model_code} references unknown provider "
-                        f"{provider_code}"
-                    )
-                if provider_code not in model.providers:
-                    raise InvalidRoleReference(
-                        f"role {role_name} model {model_code} uses provider {provider_code}, "
-                        "but model has no provider mapping"
-                    )
 
 
 def normalize_role_drafts(data: RolesData) -> None:
-    """Clear stale active_model and orphan model values from draft roles."""
-
-    for role in data.roles.values():
-        for model_code in list(role.models.keys()):
-            if model_code not in data.models:
-                del role.models[model_code]
-        if not role.models:
-            role.active_model = ""
-        elif role.active_model not in role.models or role.active_model not in data.models:
-            role.active_model = next(iter(role.models))
+    """V2 roles need no draft normalization; kept as explicit no-op."""
+    del data
 
 
-def _dump_synced_raw(raw: Any, data: RolesData) -> str:
-    payload = data.model_dump(
-        mode="json",
-        exclude_none=True,
-        exclude={"migration_required"},
-    )
-    if raw is None or not isinstance(raw, dict):
-        raw = {}
-    raw["models"] = payload["models"]
-    raw["providers"] = payload["providers"]
-    raw["roles"] = payload["roles"]
-    if "single_model_roles" in payload:
-        raw["single_model_roles"] = payload["single_model_roles"]
-    if "peer_model_groups" in payload:
-        raw["peer_model_groups"] = payload["peer_model_groups"]
-    if payload.get("circuit_breaker") is not None:
-        raw["circuit_breaker"] = payload["circuit_breaker"]
+def _reject_legacy_roles(payload: dict[str, Any], path: Path) -> None:
+    if payload.get("schema_version") != 2:
+        raise ValueError(
+            f"llm_roles.yaml must use schema_version 2; legacy short-code schema "
+            f"is not runtime-compatible: {path}"
+        )
+    legacy = {
+        "models",
+        "providers",
+        "single_model_roles",
+        "peer_model_groups",
+        "circuit_breaker",
+    }.intersection(payload)
+    if legacy:
+        raise ValueError(f"legacy roles fields are not supported: {sorted(legacy)}")
+    for role_name, role in (payload.get("roles") or {}).items():
+        if isinstance(role, dict) and ("active_model" in role or "models" in role):
+            raise ValueError(f"legacy role schema is not supported for role: {role_name}")
 
-    yaml = _yaml()
-    buffer = StringIO()
-    yaml.dump(raw, buffer)
-    return buffer.getvalue()
+
+def _quote_lint_values(value: Any) -> Any:
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            if key == "lint_requirements" and isinstance(item, dict):
+                result[key] = {
+                    lint_key: DoubleQuotedScalarString(str(lint_value))
+                    for lint_key, lint_value in item.items()
+                }
+            else:
+                result[key] = _quote_lint_values(item)
+        return result
+    if isinstance(value, list):
+        return [_quote_lint_values(item) for item in value]
+    return value
 
 
 def _atomic_write(path: Path, text: str) -> None:

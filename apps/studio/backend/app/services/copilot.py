@@ -33,8 +33,8 @@ from claude_agent_sdk.types import (
     ToolResultBlock,
     ToolUseBlock,
 )
+from app.models.llm_config import RolesData
 from graph_agent_gateway.registry.schema import ResolvedRoute
-from graph_agent_gateway.resolver import load_registry_snapshot
 
 from app.models.copilot import (
     CopilotEvent,
@@ -46,7 +46,8 @@ from app.models.copilot import (
     CopilotToolName,
 )
 from app.core import config
-from app.services.llm_credentials import credentials_path
+from app.services.llm_credentials import load_credentials
+from app.services.llm_roles import load_roles_file
 
 SessionKey = tuple[str, str, str]
 
@@ -375,7 +376,9 @@ def _resolve_copilot_route(model_override: str | None) -> ResolvedRoute:
     from graph_agent_gateway.registry.resolver import resolve_role
 
     roles_path = config.REPO_ROOT / "config" / "llm_roles.yaml"
-    snapshot = load_registry_snapshot(credentials_path(), roles_path)
+    credentials = load_credentials()
+    roles = load_roles_file(roles_path) if roles_path.exists() else RolesData()
+    snapshot = roles.to_registry_snapshot(credentials)
     resolved = resolve_role(
         snapshot,
         "copilot_chat",

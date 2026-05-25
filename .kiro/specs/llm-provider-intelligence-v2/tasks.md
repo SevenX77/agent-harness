@@ -91,19 +91,19 @@
 
 **目标**: 在改代码前清楚锁定硬切边界，避免实现时走回兼容路线。
 
-- [ ] 0.1 确认当前分支没有未提交实现代码混入本 spec 变更。
+- [x] 0.1 确认当前分支没有未提交实现代码混入本 spec 变更。
   - Run: `git status --short`
   - Acceptance: 仅包含本 spec/docs 相关变更，或先分批 commit 文档。
-- [ ] 0.2 建立 cutover 失败策略。
+- [x] 0.2 建立 cutover 失败策略。
   - Modify: `.kiro/specs/llm-provider-intelligence-v2/design.md` 若后续发现新冲突，只能补硬切规则，不新增 runtime compatibility reader。
   - Acceptance: spec/docs may mention old paths only as removed/forbidden behavior; no runtime task may introduce old schema readers, compatibility DTOs, or compatibility wrappers.
-- [ ] 0.3 建立 commit 分层。
+- [x] 0.3 建立 commit 分层。
   - Commit 1: Gateway shared primitives and registry schema.
   - Commit 2: Gateway resolver/runtime/client manager hard cutover.
   - Commit 3: Studio backend storage/API hard cutover.
   - Commit 4: Studio frontend Endpoints/Routes/Profile UI cutover.
   - Commit 5: Verification/docs cleanup.
-- [ ] 0.4 准备 v4 bootstrap recovery docs。
+- [x] 0.4 准备 v4 bootstrap recovery docs。
   - Create: `docs/development/CREDENTIALS_V4_BOOTSTRAP.md`
   - Create: checked-in example credentials/roles files under an appropriate docs or config examples directory.
   - Define startup behavior: missing v4 credentials returns empty registry plus setup-required status; detected legacy v3 config fails with actionable schema error and doc link.

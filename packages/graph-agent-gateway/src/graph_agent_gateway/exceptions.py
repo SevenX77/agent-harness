@@ -80,7 +80,7 @@ class GatewayRoleNotConfiguredError(GatewayError):
             "model_override": model_override,
         }
         super().__init__(
-            "gateway role/model is not configured",
+            "gateway role/route is not configured",
             code="[F-v3-gateway-role-not-configured]",
             context=context,
         )

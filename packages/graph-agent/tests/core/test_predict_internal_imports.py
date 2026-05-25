@@ -5,12 +5,12 @@ import inspect
 import graph_agent
 from graph_agent.core._predict_internal.strategy import BaseMockStrategy
 from graph_agent_gateway.gateway_chat_model import GatewayChatModel
-from graph_agent_gateway.llm_config import (
-    ModelEntry,
-    ProviderEntry,
+from graph_agent_gateway.registry.schema import (
+    ProviderEndpoint,
+    ProviderRoute,
+    RegistrySnapshot,
     RoleEntry,
-    RoleModelEntry,
-    RolesData,
+    RoleRouteEntry,
 )
 from graph_agent_gateway.resolver import ModelResolver
 
@@ -40,29 +40,34 @@ class DummyMockStrategy(BaseMockStrategy):
         return phase_name == "phaseA"
 
 
-def _make_config() -> RolesData:
-    models = {
-        "X": ModelEntry(
-            name="Primary",
-            min_max_tokens=321,
-            max_input_tokens=200000,
-            providers={"PX": "x-model"},
-        ),
-    }
-    providers = {
-        "PX": ProviderEntry(name="Provider X", type="openai_compatible"),
-    }
-    roles = {
-        "test_role": RoleEntry(
-            temperature=0.4,
-            active_model="X",
-            model_fallback=True,
-            models={
-                "X": RoleModelEntry(providers=["PX"]),
-            },
-        )
-    }
-    return RolesData(models=models, providers=providers, roles=roles)
+def _make_snapshot() -> RegistrySnapshot:
+    return RegistrySnapshot(
+        provider_endpoints={
+            "px": ProviderEndpoint(
+                endpoint_id="px",
+                display_name="Provider X",
+                protocol="openai_compatible",
+                base_url="https://provider.example/v1",
+                api_key="secret",
+            ),
+        },
+        provider_routes={
+            "px:x-model": ProviderRoute(
+                route_id="px:x-model",
+                endpoint_id="px",
+                route_slug="x-model",
+                provider_model_id="x-model",
+                canonical_id="x-model",
+                display_name="Primary",
+                status="verified",
+            ),
+        },
+        roles={
+            "test_role": RoleEntry(
+                fallback_chain=[RoleRouteEntry(route_id="px:x-model", temperature=0.4)],
+            )
+        },
+    )
 
 
 def test_predict_internal_exports_bind_predictor_only() -> None:
@@ -88,8 +93,7 @@ def test_top_level_13_export_abi_has_no_predict_additions() -> None:
 
 
 def test_model_resolver_non_predict_path_still_returns_gateway() -> None:
-    cfg = _make_config()
-    resolver = ModelResolver(roles_data=cfg)
+    resolver = ModelResolver(registry_snapshot=_make_snapshot())
 
     model = resolver.resolve("test_role", phase_name="phaseA")
 
@@ -99,10 +103,9 @@ def test_model_resolver_non_predict_path_still_returns_gateway() -> None:
 
 def test_bind_predictor_switches_resolver_to_predict_gateway() -> None:
     from graph_agent.core._predict_internal import bind_predictor
-    from graph_agent.core._predict_internal.interception import PredictGatewayChatModel
+    from graph_agent_gateway.predict_interception import PredictGatewayChatModel
 
-    cfg = _make_config()
-    resolver = ModelResolver(roles_data=cfg)
+    resolver = ModelResolver(registry_snapshot=_make_snapshot())
     strategy = DummyMockStrategy()
 
     bound = bind_predictor(resolver, strategy)

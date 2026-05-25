@@ -4,7 +4,7 @@ This module turns framework-level methodology into the final system prompt seen
 by a phase agent. It merges:
 
 - the phase-local skill system prompt
-- optional role-level methodology prefixes from ``llm_roles.yaml``
+- optional role-level methodology prefixes supplied by the injected model resolver
 - optional ``data_architecture`` constraints
 """
 
@@ -12,8 +12,6 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-
-from graph_agent.config.llm_config import get_role_config
 
 logger = logging.getLogger(__name__)
 
@@ -24,18 +22,15 @@ V030_AGENT_EXIT_CONTRACT_TEXT = (
 
 
 def resolve_role_prefix_from_llm_role(llm_role: str | None) -> str:
-    """Resolve ``llm_roles.yaml`` system_prompt_prefix for an LLM role."""
-    if llm_role is None:
-        return ""
-    try:
-        return get_role_config().resolve_role(llm_role).system_prompt_prefix
-    except Exception as exc:
-        logger.warning(
-            "Failed to resolve llm_role=%s system_prompt_prefix: %s",
-            llm_role,
-            exc,
-        )
-        return ""
+    """Return no Engine-owned role prefix.
+
+    Provider Intelligence V2 moves role prefix application into
+    ``graph_agent_gateway.GatewayChatModel`` from the resolved registry role.
+    The Engine keeps this function as a prompt-composition seam, but it no
+    longer reads role files directly.
+    """
+    del llm_role
+    return ""
 
 
 def _build_data_architecture_section(data_architecture: str | None) -> str:
@@ -64,7 +59,7 @@ def apply_cognitive_template(
         context: Reserved extension point for future context-aware prompt
             branching. Currently accepted for compatibility and ignored.
         role_prefix: Optional methodology prefix resolved from
-            ``llm_roles.yaml.roles.<tier>.system_prompt_prefix``.
+            the injected gateway resolver.
 
     Returns:
         One merged system prompt string consumed by ``create_agent()``.

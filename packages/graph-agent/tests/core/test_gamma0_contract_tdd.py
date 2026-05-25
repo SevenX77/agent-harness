@@ -7,6 +7,7 @@ from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.loader import SkillLoader
 from graph_agent.core.manifest import AgentNodeAST, SubgraphNodeAST
 from graph_agent.core.validator_contract import VALIDATOR_ERROR_CODES, VALIDATOR_SIGNATURE
+from pydantic import ValidationError
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 GAMMA0_SPEC_DIR = (
@@ -142,6 +143,18 @@ def test_γ0_2_agent_loader_accepts_validator_true(tmp_path: Path) -> None:
     ast = compiled.nodes[0].ast
     assert isinstance(ast, AgentNodeAST)
     assert ast.validator is True
+
+
+def test_validator_non_bool_fatal() -> None:
+    with pytest.raises(ValidationError):
+        AgentNodeAST.model_validate(
+            {
+                "mode": "agent",
+                "role": "Research assistant.",
+                "goal": "Return a concise answer.",
+                "validator": "maybe",
+            }
+        )
 
 
 def test_γ0_2_subgraph_node_validator_defaults_false() -> None:

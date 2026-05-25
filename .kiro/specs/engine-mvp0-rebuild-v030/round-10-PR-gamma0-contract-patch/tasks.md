@@ -84,7 +84,8 @@ PM 最新真相来自 `/tmp/v030-cutover-correction-todo-2026-05-24.md` §12 和
   - 保留 `role`, `goal`, `steps`, `protocols`, `io`, `tools`, `subagents`, `subgraphs`, `references`, `examples`, `max_iterations`, `llm_role`, `system_prompt`。
   - `_render_legacy_system_prompt` 不再依赖 `exit_contract` 字段。
 - 修改 `packages/graph-agent/src/graph_agent/core/loader.py:1091-1100`:
-  - 从 Agent body allowed tags 移除 `exit_contract`。
+  - 保留 shared allowed tags 中的 `exit_contract` 供 legacy `SkillNodeAST` 共用路径解析。
+  - Agent branch 用 substring reject guard 显式拒绝 `<exit_contract>`。
   - 若 legacy `SkillNodeAST` path 仍需要旧 `<exit_contract>`，必须限定在非 `mode: agent` 旧 path，不能污染 V0.3 Agent。
 - 修改 `loader.py:1170-1192`:
   - `_parse_agent_body` 只强制 `<role>` 和 `<goal>`。
@@ -213,7 +214,7 @@ PM 最新真相来自 `/tmp/v030-cutover-correction-todo-2026-05-24.md` §12 和
 
 | Task | Unit tests | Integration tests | Ship checks |
 |---|---|---|---|
-| γ0_1 | `AgentNodeAST` 无 `exit_contract`; loader 缺 `<exit_contract>` 成功; legacy `<exit_contract>` tag rejected | minimal Agent `SKILL.md` parse/load succeeds | `rg -n "AgentNodeAST.*exit_contract|F-v3-agent-exit-contract-missing|blocks.get\\(\"exit_contract\"\\)" packages/graph-agent/src/graph_agent/core` 无 V0.3 Agent 命中 |
+| γ0_1 | `AgentNodeAST` 无 `exit_contract`; loader 缺 `<exit_contract>` 成功; legacy `<exit_contract>` tag rejected | minimal Agent `SKILL.md` parse/load succeeds | loader 仅命中 legacy `SkillNodeAST` 共用路径 + Agent substring reject guard; `AgentNodeAST` 不命中 |
 | γ0_2 | Agent/Subgraph `validator` default false / true parse / non-bool fatal | phase document parse 后 AST 字段稳定 | mypy 覆盖 manifest/loader |
 | γ0_3 | middleware order string constant 等于六项; class order 前三项一致 | PR beta factory 可直接消费 order contract | `rg -n "MVP0_MIDDLEWARE_ORDER_CONTRACT|DEFAULT_MIDDLEWARE_ORDER" packages/graph-agent/src/graph_agent/middleware` |
 | γ0_4 | validator signature docs/constant test; error code placeholder presence | 无 runtime hook integration | `rg -n "\\[F-v3-(agent|subgraph|logic)-validator-failed\\]"` 命中 spec/docs |

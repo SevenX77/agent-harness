@@ -36,7 +36,7 @@ owner: a1 主笔 tasks.md / a2 主笔 3 文档 / 主控复核
 - ruff check packages/graph-agent: clean
 - mypy packages/graph-agent: 0 errors
 - pytest packages/graph-agent/tests/{models,core,middleware}: 100% pass
-- grep -r exit_contract packages/graph-agent/src/: 仅命中 `SkillNodeAST` legacy path (不命中 AgentNodeAST / loader)
+- grep -r exit_contract packages/graph-agent/src/: loader 仅命中 legacy `SkillNodeAST` 共用路径 + Agent substring reject guard, 不命中 `AgentNodeAST`
 - grep -r DEFAULT_MIDDLEWARE_ORDER packages/graph-agent/src/middleware/: 命中新 6 string constant 定义
 
 ### 3.5 Out of Scope (γ0 不做, 留给后续 PR)

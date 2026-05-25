@@ -28,7 +28,7 @@ owner: a1 主笔 tasks.md / a2 主笔 3 文档 / 主控复核
 
 | Hook | 现状 file:line | round 10/γ0 状态 |
 |---|---|---|
-| `_parse_agent_body` allowed tags (1091-1098) | 包含 `exit_contract` | **[BREAKING] 移除 `exit_contract`** |
+| shared `extract_raw_blocks` allowed tags (1091-1098) | 包含 `exit_contract` | **保留给 legacy `SkillNodeAST` 共用解析; Agent path 另设 substring reject guard** |
 | `_parse_agent_body` required tag (1179-1185) | `exit_contract` fatal-required | **[BREAKING] 移除** |
 | `_parse_agent_body` return dict (1186-1192) | 写入 `exit_contract` | **[BREAKING] 移除该 key** |
 | legacy `SkillNodeAST` else path | — | **不改 (γ0 不动)** |
@@ -42,9 +42,9 @@ owner: a1 主笔 tasks.md / a2 主笔 3 文档 / 主控复核
 ## §1 R4 Agent AST/Loader `exit_contract` Removal
 - **AST 调整**: `packages/graph-agent/src/graph_agent/core/manifest.py` 中的 `AgentNodeAST` 的 `exit_contract: str = Field(min_length=1)` **[BREAKING]** 修改为彻底删除该字段。**γ0 不动 legacy `SkillNodeAST` path**: `manifest.py:190-195` 的 `SkillNodeAST.exit_contract` 留给 PR γ3 cleanup, 防止 scope creep。
 - **Loader 调整**: `packages/graph-agent/src/graph_agent/core/loader.py` 中：
-  - 移除对 `<exit_contract>` 的提取 (`blocks.get("exit_contract")`)。
+  - Agent path 不再消费 `<exit_contract>` 提取结果。
   - 移除 `if not exit_contract: _fatal(...)` 的强制阻断逻辑。
-  - 更新 Allowed / Required XML tags 列表，剔除对该 tag 的约束。
+  - 保留 legacy `SkillNodeAST` 共用 allowed 列表, 在 Agent 分支用 substring guard 显式拒绝 `<exit_contract>`。
 
 ## §2 AST `validator` 字段与统一签名
 - **AST 新增字段**: 在 `manifest.py` 的 `AgentNodeAST` 与 `SubgraphNodeAST` 模型中 **[NEW]** 增加 `validator: bool = False`。

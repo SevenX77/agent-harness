@@ -76,7 +76,9 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | `[F-v3-logic-validator-type-invalid]` | 编译期 | `validator` 不是 boolean | 改为 true/false | [LOGIC](./03-logic-md-spec.md#validator-生命周期-post-execution-hook) |
 | `[F-v3-logic-validator-missing]` | 编译期 | `validator: true` 但无文件 | 增加同级 `validator.py` | [LOGIC](./03-logic-md-spec.md#validator-生命周期-post-execution-hook) |
 | `[F-v3-logic-validator-entrypoint-missing]` | 编译期 | validator 无 `validate()` | 导出 `validate` | [LOGIC](./03-logic-md-spec.md#validator-生命周期-post-execution-hook) |
-| `[F-v3-logic-validator-failed]` | 运行期 | validator 抛异常 | 修正输出或校验规则 | [LOGIC](./03-logic-md-spec.md#validator-生命周期-post-execution-hook) |
+| `[F-v3-logic-validator-failed]` | 运行期 | logic validator 抛异常 | 修正输出或校验规则 | [LOGIC](./03-logic-md-spec.md#validator-生命周期-post-execution-hook) |
+| `[F-v3-agent-validator-failed]` | 运行期 | agent validator 抛异常 | 触发 LLM 重试反馈 | |
+| `[F-v3-subgraph-validator-failed]` | 运行期 | subgraph validator 抛异常 | 检查子图业务规则 | |
 
 ### subgraph domain
 
@@ -103,10 +105,9 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | `[F-v3-agent-subagent-invalid]` | 编译期 | subagents 项缺字段 | 补 name/target_skill/description | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
 | `[F-v3-agent-subgraph-invalid]` | 编译期 | subgraphs 项缺字段 | 补 name/target_skill/description | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
 | `[F-v3-agent-max-iterations-invalid]` | 编译期 | max_iterations 超范围 | 设为 1..50 | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
-| `[F-v3-agent-body-tag-unknown]` | 编译期 | body 顶层未知 XML 标签 | 使用允许标签 | [Agent](./05-agent-md-spec.md#body-xml-扁平化容器) |
+| `[F-v3-agent-body-tag-unknown]` | 编译期 | 使用了不允许的顶级标签 | 仅保留 4 类白名单标签 | [Agent](./05-agent-md-spec.md#body-xml-扁平化容器) |
 | `[F-v3-agent-role-missing]` | 编译期 | 缺 `<role>` | 添加 role | [Agent](./05-agent-md-spec.md#必须持有的业务核心标签) |
 | `[F-v3-agent-goal-missing]` | 编译期 | 缺 `<goal>` | 添加 goal | [Agent](./05-agent-md-spec.md#必须持有的业务核心标签) |
-| `[F-v3-agent-exit-contract-missing]` | 编译期 | 缺 `<exit_contract>` | 添加 exit contract | [Agent](./05-agent-md-spec.md#必须持有的业务核心标签) |
 | `[F-v3-agent-step-invalid]` | 编译期 | step id/name 非法或重复 | 修正 step | [Agent](./05-agent-md-spec.md#body-xml-扁平化容器) |
 | `[F-v3-agent-protocol-invalid]` | 编译期 | protocol id 非法或重复 | 修正 protocol | [Agent](./05-agent-md-spec.md#body-xml-扁平化容器) |
 

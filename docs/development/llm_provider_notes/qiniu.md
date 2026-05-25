@@ -10,7 +10,7 @@ target_goal: "Studio MVP — 让 PM 可用"
 - **Endpoint profile (OpenAI)**: `openai_compatible` at `https://api.qnaigc.com/v1`
 - **Endpoint profile (Anthropic)**: `anthropic_compatible` at `https://anthropic.qnaigc.com`
 - **Native SDK**: 七牛云 SDK (Token Plan)
-- **Studio rule**: one API Keys provider card represents one endpoint profile. If the same Qiniu key has both OpenAI and Anthropic URLs, create two provider cards with the same key, different Base URLs, and different Protocol values.
+- **Studio rule**: one Endpoint record represents one endpoint profile. If the same Qiniu key has both OpenAI and Anthropic URLs, create two endpoints with the same key, different Base URLs, and different Protocol values.
 
 ## §1.5 探测元数据 (round 3 新增, 用于 Studio 自动 Test 探测)
 

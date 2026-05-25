@@ -1,0 +1,13 @@
+# LLM Provider Intelligence V2 canonical grouping rules.
+#
+# This file is intentionally empty for the initial hard cutover. Runtime model
+# selection never uses canonical IDs; they are UI grouping keys only. Add aliases
+# here only when a provider-specific model ID is deliberately proven equivalent
+# to another stable model ID and covered by registry canonicalization tests.
+#
+# Moving aliases such as OpenRouter "~openai/gpt-latest" are intentionally not
+# listed because their target can change over time.
+
+version: 1
+strip_prefixes: []
+id_aliases: {}

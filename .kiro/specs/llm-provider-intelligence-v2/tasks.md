@@ -95,7 +95,7 @@
   - Run: `git status --short`
   - Acceptance: 仅包含本 spec/docs 相关变更，或先分批 commit 文档。
 - [x] 0.2 建立 cutover 失败策略。
-  - Modify: `.kiro/specs/llm-provider-intelligence-v2/design.md` 若后续发现新冲突，只能补硬切规则，不新增 runtime compatibility reader。
+  - Modify: `.kiro/specs/llm-provider-intelligence-v2/design.md` 若后续发现新冲突，只能补硬切规则，不新增 legacy schema reader。
   - Acceptance: spec/docs may mention old paths only as removed/forbidden behavior; no runtime task may introduce old schema readers, compatibility DTOs, or compatibility wrappers.
 - [x] 0.3 建立 commit 分层。
   - Commit 1: Gateway shared primitives and registry schema.
@@ -336,33 +336,33 @@
 
 **目标**: Merge 前证明 hard cutover 完整、无旧 runtime 路径、无前端本地 canonicalization。
 
-- [ ] 6.1 Run gateway tests.
+- [x] 6.1 Run gateway tests.
   - Run: `pytest packages/graph-agent-gateway/tests -q`
   - Expected: all pass.
-- [ ] 6.2 Run graph-agent tests affected by resolver protocol.
+- [x] 6.2 Run graph-agent tests affected by resolver protocol.
   - Run: `pytest packages/graph-agent/tests -q`
   - Expected: pytest exits 0. If any test still references the old short-code schema, update it to route IDs in the same PR; tests deleted because they covered removed behavior are listed in the PR description with rationale.
-- [ ] 6.3 Run backend tests.
+- [x] 6.3 Run backend tests.
   - Run: `cd apps/studio/backend && pytest`
   - Expected: all pass.
-- [ ] 6.4 Run frontend checks.
+- [x] 6.4 Run frontend checks.
   - Run:
     - `cd apps/studio/frontend && npm run typecheck`
     - `cd apps/studio/frontend && npm run lint`
     - `cd apps/studio/frontend && npm run test`
     - `cd apps/studio/frontend && npm run build`
   - Expected: all pass.
-- [ ] 6.5 Static hard-cutover scans.
+- [x] 6.5 Static hard-cutover scans.
   - Run: `rg -n --glob '!**/*test*' --glob '!**/*.bak' "graph_agent.config.llm_config|graph_agent.models.llm_client_manager|patch_environment_from_credentials|api_key_env|providers/test-models|providers/notable-models" packages/graph-agent*/src apps/studio/backend/app apps/studio/frontend/src config/llm_roles.yaml`
   - Expected: no production runtime references. Test names or archived docs are acceptable only when explicitly asserting deletion.
-- [ ] 6.6 No-env runtime smoke.
+- [x] 6.6 No-env runtime smoke.
   - Run a short Graph Agent flow with temp credentials/roles files and no `.env` provider keys.
   - Expected: resolver creates route-backed `GatewayChatModel`; fake client receives endpoint credential from `ResolvedRoute`.
-- [ ] 6.7 Documentation cleanup.
+- [x] 6.7 Documentation cleanup.
   - Update `docs/engine/graph-agent-gateway/mvp0-alignment.md` if implementation changes any package boundary.
   - Update `docs/development/FRONTEND_UI_SPEC.md` if UI verification reveals a reusable rule.
   - Archive or rewrite `docs/development/LLM_MODEL_CONFIGURATION_FLOW.md` to match the V2 endpoint/route registry flow.
-  - Decide fate of `apps/studio/backend/app/data/llm_providers/*.md`: archive under docs or move into `graph_agent_gateway/registry/seed/` as seed/import-draft fixtures.
-  - Create `config/llm_canonical_rules.yaml` with documented empty schema; populate it from `apps/studio/backend/app/data/llm_providers/*.md` if curated aliases exist.
+  - Decide fate of `apps/studio/backend/app/data/llm_providers/*.md`: archived under `docs/development/llm_provider_notes/` as import-draft reference material, not runtime source.
+  - Create `config/llm_canonical_rules.yaml` with documented empty schema; populate it from archived provider notes if curated aliases exist.
   - Add endpoint_id seed/cutover naming table to bootstrap docs.
-  - Acceptance: `git diff --check` passes and spec/docs do not mention runtime compatibility with old short-code schema.
+  - Acceptance: `git diff --check` passes and spec/docs do not claim runtime support for the old short-code schema.

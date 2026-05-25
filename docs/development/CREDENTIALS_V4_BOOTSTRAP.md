@@ -47,7 +47,7 @@ Engine execution cannot start a role until the registry has at least one route r
 
 ### Legacy V3 Or Short-Code Config Detected
 
-If the backend detects the old provider list or old `models/providers/roles` shape, it must fail with an actionable schema error. It must not load a compatibility reader.
+If the backend detects the old provider list or old `models/providers/roles` shape, it must fail with an actionable schema error. It must not load a legacy schema reader.
 
 Recommended error payload:
 
@@ -94,6 +94,21 @@ Examples:
 | Qiniu Anthropic-compatible endpoint | `qiniu-anthropic` |
 
 Old uppercase short codes such as `OC_CL`, `WS_LLM`, and `GM_OFF` are not runtime identifiers in V2.
+
+## Seed And Cutover Naming
+
+When converting seed examples, docs, or local prototype configs, treat old labels as input hints only. Write new runtime files with lowercase endpoint IDs and exact route IDs.
+
+| Old source label | V2 endpoint_id | Example route_id | Notes |
+|---|---|---|---|
+| `ANTHROPIC_OFFICIAL`, `ANTHROPIC`, `CLAUDE_*` | `anthropic-official` | `anthropic-official:claude-opus-4-7-thinking` | Official Anthropic protocol endpoint. |
+| `OPENAI_OFFICIAL`, `OPENAI`, `GPT_*` | `openai-official` | `openai-official:gpt-5` | Official OpenAI-compatible endpoint. |
+| `GM_OFF`, `GEMINI_*` | `gemini-official` | `gemini-official:gemini-3-1-pro` | Gemini native endpoint. |
+| `OC_CL`, OneChats Claude labels | `onechats-anthropic` | `onechats-anthropic:claude-sonnet-4-6` | OneChats Anthropic-compatible endpoint. |
+| `OC_OPENAI`, OneChats GPT labels | `onechats-openai` | `onechats-openai:gpt-5` | OneChats OpenAI-compatible endpoint. |
+| `WS_LLM`, WaveSpeed labels | `wavespeed-anyllm` | `wavespeed-anyllm:anthropic-claude-opus-4-7` | WaveSpeed aggregation endpoint. |
+| Qiniu OpenAI labels | `qiniu-openai` | `qiniu-openai:deepseek-r1` | Qiniu OpenAI-compatible endpoint. |
+| Qiniu Anthropic labels | `qiniu-anthropic` | `qiniu-anthropic:anthropic-claude-opus-4-7` | Qiniu Anthropic-compatible endpoint. |
 
 ## Hard-Cut Rules
 

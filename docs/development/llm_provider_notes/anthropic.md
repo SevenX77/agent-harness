@@ -48,7 +48,7 @@ auth_header_format: |
 
 ## 4. Notable Model IDs
 
-v2.1 默认列表 (后端 `available_models` 应包含):
+Reference route candidates:
 
 - `claude-opus-4-7` — flagship, 2026 旗舰 (高质量推理 / 长上下文)
 - `claude-sonnet-4-6` — 平衡型, 速度 + 成本
@@ -64,7 +64,7 @@ v2.1 默认列表 (后端 `available_models` 应包含):
 | `claude-sonnet-4-6` | ✓ | ✓ | ✓ | 200000 |
 | `claude-haiku-4-5` | ✓ | ✓ | ✓ | 200000 |
 
-(后端 `Test` 成功响应应当对每个 model 携带这些字段, 给 LlmRolesTab 用)
+(Import draft or route probe responses can use these fields as reference material. Runtime must rely on active V2 routes, not this note.)
 
 ## 6. Known Quirks / Pitfalls
 

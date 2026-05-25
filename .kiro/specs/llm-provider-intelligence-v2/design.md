@@ -1082,21 +1082,20 @@ Primary files affected:
 - `apps/studio/backend/app/models/llm_config.py`
 - `apps/studio/backend/app/services/llm_credentials.py`
 - `apps/studio/backend/app/services/llm_roles.py`
-- `apps/studio/backend/app/services/llm_provider_test.py`
 - `apps/studio/backend/app/services/llm_import_drafts.py`
 - `apps/studio/backend/app/services/gateway_resolver.py`
 - `apps/studio/backend/app/services/llm_env.py`
 - `apps/studio/backend/app/services/migrations.py`
 - `apps/studio/backend/app/routers/llm.py`
 - `apps/studio/backend/app/services/copilot.py`
-- `apps/studio/backend/app/data/llm_providers/*.md`
+- `docs/development/llm_provider_notes/*.md`
 
 Changes:
 
 - Replace `providers: list[ProviderCredential]` with endpoint/route maps and runtime policy in the active credentials file.
 - Store import drafts outside active credentials in `llm_import_drafts.json` or a backend job store.
 - Move canonical mapping to the shared registry module.
-- Make provider tests create/update endpoint and route records.
+- Replace provider-oriented tests with endpoint test and route probe APIs.
 - Add route-level probe endpoints.
 - Add import draft lifecycle endpoints.
 - Add model profile CRUD and profile-apply endpoints.
@@ -1104,7 +1103,8 @@ Changes:
 - Save roles as explicit route chains.
 - Replace backend provider-test fingerprint helper with gateway credential fingerprint helper.
 - Update Copilot provider resolution to use `route_id`.
-- Delete or rewrite old env-patching and old schema migration shims; runtime migration readers are not allowed.
+- Delete old provider-card probing helpers, env-patching, and old schema migration shims; runtime migration readers are not allowed.
+- Archive provider notes under docs only. Runtime code must not parse provider note markdown.
 
 ### 11.4 Studio Frontend
 

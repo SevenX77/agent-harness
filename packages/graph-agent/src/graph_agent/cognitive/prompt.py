@@ -17,6 +17,11 @@ from graph_agent.config.llm_config import get_role_config
 
 logger = logging.getLogger(__name__)
 
+V030_AGENT_EXIT_CONTRACT_TEXT = (
+    "Call finish_task only after the phase output satisfies the declared output_schema. "
+    "Provide diagnostics_md and business_data_md in the finish_task payload."
+)
+
 
 def resolve_role_prefix_from_llm_role(llm_role: str | None) -> str:
     """Resolve ``llm_roles.yaml`` system_prompt_prefix for an LLM role."""
@@ -129,7 +134,6 @@ def apply_v030_cognitive_template(
     goal: str,
     steps: list[dict[str, str]],
     protocols: list[dict[str, str]],
-    exit_contract: str,
     output_schema: dict[str, Any] | None = None,
     knowledge_base: str = "",
     inline_examples: list[str] | None = None,
@@ -217,6 +221,6 @@ def apply_v030_cognitive_template(
 </critical_reminders>
 
 <exit_contract>
-{exit_contract}{schema_md}
+{V030_AGENT_EXIT_CONTRACT_TEXT}{schema_md}
 </exit_contract>
 """.strip()

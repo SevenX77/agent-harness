@@ -39,7 +39,6 @@ def test_v030_agent_demo_fixture_compiles_and_renders_template() -> None:
         goal=ast.goal,
         steps=[step.model_dump() for step in ast.steps],
         protocols=[protocol.model_dump() for protocol in ast.protocols],
-        exit_contract="Call finish_task with output_schema-compatible business_data_md.",
         output_schema=ast.io.outputs if ast.io is not None else None,
         inline_examples=[
             example.content

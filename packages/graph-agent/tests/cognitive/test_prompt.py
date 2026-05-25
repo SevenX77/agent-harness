@@ -67,7 +67,6 @@ def test_v030_cognitive_template_places_exit_contract_with_output_schema() -> No
         goal="Answer the question.",
         steps=[{"id": "S1", "name": "Read", "content": "Read references."}],
         protocols=[{"id": "P1", "content": "Cite evidence."}],
-        exit_contract="Return JSON-compatible business data.",
         output_schema={"type": "object", "properties": {"answer": {"type": "string"}}},
         inline_examples=["Example A"],
         document_examples=[{"id": "E2", "summary": "Long example"}],
@@ -80,4 +79,4 @@ def test_v030_cognitive_template_places_exit_contract_with_output_schema() -> No
     assert "Example A" in prompt
     assert "E2: Long example" in prompt
     assert "<output_schema>" in prompt
-    assert prompt.rfind("<output_schema>") > prompt.rfind("Return JSON-compatible business data.")
+    assert prompt.rfind("<output_schema>") > prompt.rfind("Call finish_task")

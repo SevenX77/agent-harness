@@ -49,10 +49,6 @@ from graph_agent.runtime.state_mapper import PhaseWrapper, StateMapper
 
 MAX_REACT_TURNS = 8
 logger = logging.getLogger(__name__)
-_DEFAULT_AGENT_EXIT_CONTRACT = (
-    "Call finish_task only after the phase output satisfies the declared output_schema. "
-    "Provide diagnostics_md and business_data_md in the finish_task payload."
-)
 
 
 @dataclass(frozen=True)
@@ -403,7 +399,6 @@ def _agent_system_prompt(
         goal=phase_ast.goal,
         steps=[step.model_dump() for step in phase_ast.steps],
         protocols=[protocol.model_dump() for protocol in phase_ast.protocols],
-        exit_contract=_DEFAULT_AGENT_EXIT_CONTRACT,
         output_schema=output_schema if isinstance(output_schema, dict) else None,
         inline_examples=[
             example.content

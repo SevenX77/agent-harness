@@ -134,10 +134,10 @@ PM 指示"让 agents 过一遍, 统一就执行"。三方独立评估 §7 顺序
 3. **B3 防半恢复** (a3): `depends_on` 必须在 body `<phase depends_on=...>`, loader 从 body XML 读拓扑, 不是 frontmatter YAML (否则"恢复 `<phase>` 当显示却仍从 YAML 读 depends_on" = 半恢复, 违反 R1.1)。
 4. **B5 补全** (a1+a3): body 5 类 = role/goal/step/protocol/example (**不是 exit_contract**); 补 `manifest.ExampleSpec` body `<example>` 解析 (inline example 当前塞 frontmatter content 是反逻辑, 补全非推翻)。
 
-### 8.3 待收敛分歧 (step 4 时 a1+a3 round 2)
+### 8.3 范围决策 (已收敛, PM 2026-05-25 拍板)
 
-**`prompt.py` cognitive 8 插槽重写放哪?**
-- a1+a2: 放进 round-14 同 PR (单独 commit), 实施连续性 (B5 body 解析跟 template 消费耦合, 不一起做没法验证)
-- a3: 移出, 作 round-14 merge 后独立 Task-C round (prompt.py 属 Task C, STATUS §5 自列 C 组; 塞进来 round-14 横跨 B+C 违反 SOP-08 一 PR 一 cohesive 组)
+**cognitive template (C2) 移出 round-14, 留后续 Task C 组。**
 
-真张力 (cohesive vs 连续性), 非信息不对称。**到 step 4 (基于对的 spec 重写 src) 时派 a1+a3 round 2 辩论收敛 PR 边界**, 不现在拍。
+- a2 收敛理由 (PM 认可): round-14 = 编译器静态契约切换 (loader/AST/manifest/静态校验)。B5 body 5 标签解析出 AgentNodeAST 后, 编译期闭环, 可用**纯数据结构 Unit Test** 验证 (断言 AST 属性), **不需** cognitive template 渲染做 e2e。纳入 C2 会牵扯 read_reference/read_example runtime 绑定 + knowledge_base subagent 注入, 静态编译 PR 膨胀成 runtime PR。
+- a3 一致 (本来就倾向移出); a2 此理由反驳了 a1 之前"B5 需 template 消费验证"的纳入理由。三方收敛移出。
+- **round-14 范围 = Task B only** (B1-B8); C2/C4/C5 入后续 C 组 PR (task #18)。

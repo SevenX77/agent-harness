@@ -86,7 +86,7 @@ io:
 
 actions: [action1_name, action2_name]
 # ↑ frontmatter 注册 action 名字；两种来源：
-#   (1) 本 logic phase 路径下 action/ 文件夹的 action_name.py
+#   (1) 本 logic phase 路径下 actions/ 文件夹的 action_name.py
 #   (2) studio 或 engine 内注册的通用 action
 
 validator: true   # boolean；true → validator.py 放本 phase 目录下 phases/<phase_id>/validator.py
@@ -151,7 +151,7 @@ subagents:                                        # 可调用的子 skill（作�
 subgraphs:                                        # 子图委派注册（AgentRegistryItem）
   - {name: sub_x, target_skill: some-skill, description: "..."}
 references:                                       # reference 资源注册（ReferenceSpec）
-  - {id: R1, path: refs/domain.md, summary: "领域知识"}
+  - {id: R1, path: references/domain.md, summary: "领域知识"}
 examples:                                         # 只注册 document 扩展案例库（inline 案例写 body <example>，不在此注册）
   - {id: E2, path: examples/e2.md, summary: "复杂边界案例"}
 ---

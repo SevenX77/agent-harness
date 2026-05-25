@@ -73,10 +73,11 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 
 ### 2.5 表单与页面宽度
 - Settings 类表单必须优先使用本地 shadcn `Field` 组件组织字段（`FieldSet` / `FieldGroup` / `Field` / `FieldLabel` / `FieldDescription`），不要在业务组件里手写 label-description-control 三段式布局。
-- Settings 表单默认遵循 API Keys 页的交互：字段变更实时保存并显示保存状态；除非是明确的事务型提交，不要放独立 `Save` 按钮。
+- Settings 表单默认遵循 Endpoints 页的交互：字段变更实时保存并显示保存状态；除非是明确的事务型提交，不要放独立 `Save` 按钮。
+- 后端探测/测试响应只能合并后端拥有的诊断字段，例如 `status`、`last_test_at`、`last_test_message`、probe capability 结果；不能用较旧响应覆盖用户仍在编辑、尚未 autosave 完成的本地表单字段。
 - 输入框的 `value` 必须同步当前实际值；placeholder 只做空状态提示，不能承载当前路径、密钥、配置值等真实数据。不要在输入框下方重复显示同一个字段值。
 - 页面内容区需要设置响应式最大宽度，避免表单、文本和卡片在超宽窗口里被横向拉得过长；数据密集型列表可按具体信息密度单独放宽。
-- Settings 页面中用于归类列表的同级内容分区应统一使用本地 `CatalogAccordion`，例如 API Keys 的 `Official Providers` / `Third-party Providers` 和 LLM Roles 的 `Graph Agent Roles` / `Copilot Roles`；普通探测或表单内折叠（如 `Manual model probing`）继续使用基础 `Accordion`。空分区也要保留可见的 catalog header 和简短 empty state，避免用户误以为分类缺失。分区标题使用 Title Case，展开/收拢指示箭头放在标题前方，业务分类 icon 放在标题文本后方，并与首张内容卡保持清晰垂直间距。
+- Settings 页面中用于归类列表的同级内容分区应统一使用本地 `CatalogAccordion`，例如 Endpoints 的 endpoint groups 和 LLM Roles 的 `Graph Agent Roles` / `Copilot Roles`；普通探测或表单内折叠继续使用基础 `Accordion`。空分区也要保留可见的 catalog header 和简短 empty state，避免用户误以为分类缺失。分区标题使用 Title Case，展开/收拢指示箭头放在标题前方，业务分类 icon 放在标题文本后方，并与首张内容卡保持清晰垂直间距。
 - 删除确认必须复用本地 `DeleteConfirmDialog`，不要在各业务组件里分别使用 `window.confirm`、toast action 或手写 `AlertDialog` 文案；确认按钮统一使用 destructive variant。
 
 ### 2.6 桌面工具布局与滚动区域
@@ -104,21 +105,21 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - 多标签行的通用模式是：展示能稳定放下的完整标签，末尾用 `+N` overflow badge 表示剩余项；选中或展开后再展示完整标签集合。
 - Badge 文本使用真实 label，不使用临时缩写。模型、provider、vendor 等实体名必须展示准确名称。
 - Role / model / provider 这类层级编辑器不得把内部短码（如 `GM31P`、`CLO47T`）作为可见主标签；短码只用于持久化 key 或调试上下文。模型行展示模型真实名称，Provider 行只展示 provider 名称，不展示派生标题或 provider model id 副标题。
-- Role model 的 provider 列表必须以右侧 tested `available_models` 归属为准；如果 role/config 中混入了不拥有该 model 的 provider，UI 要过滤并触发归一化保存。
-- 从 Available Models 拖入 credential provider 时，前端必须同步补齐 roles payload 的 `providers` registry entry（至少 `name`、`type`，必要时带 `base_url`）；role model 不允许引用未注册 provider，否则后端会拒绝保存。
-- 添加 role model 使用右侧 Available Models 的拖拽源和本地 shadcn `Empty` drop target；不要再提供与可用模型库割裂的 Add model select。
+- Role fallback chain 只能保存后端返回的精确 `route_id`；UI 不得从 provider model id、display name 或 provider brand 推导执行目标。
+- 从 Available Routes 拖入 role 时，拖拽 payload 必须携带 exact `route_id`，并保持后端 DTO 中的 canonical/provider/status 字段只读展示；未知 route 由后端拒绝保存。
+- 添加 role route 使用右侧 Available Routes 的拖拽源和本地 shadcn `Empty` drop target；不要提供与 route registry 割裂的 Add model select。
 - 添加 Role 必须先通过本地 shadcn `Dialog` + `Field` 输入 role name，创建后的 role 是可保存的空草稿，不自动塞入默认 model/provider；保存前必须归一化掉空草稿或 orphan draft model 上的 stale `active_model`，并取消会读取 invalid ref 的既有 autosave；role name 必须可从 role 的三点 action menu 修改。
 - Provider 添加入口使用与 provider row 等宽等高的 ghost `DropdownMenu` trigger；没有可添加 provider 时不显示占位按钮。
-- Provider fallback row 数量超过一个时使用响应式横向 grid，添加 provider 的 ghost trigger 作为 grid 最后一项；provider card 必须同时设置最小列宽和最大列宽，少量 provider 不要横向撑满整行；不要回退到纵向堆叠或单独 select。
+- Route fallback row 数量超过一个时使用响应式横向 grid，添加 route 的 ghost trigger 作为 grid 最后一项；route card 必须同时设置最小列宽和最大列宽，少量 route 不要横向撑满整行；不要回退到纵向堆叠或单独 select。
 - Provider 名称在 row 内必须单行省略并配 Radix Tooltip 展示完整名称，避免窄卡片中把 provider label 拆成两行。
-- Role list 和 Available Models 这类可能很长的设置列表必须渐进渲染，保持搜索/计数完整，同时用 sentinel 自动加载后续批次。
+- Role list 和 Available Routes 这类可能很长的设置列表必须渐进渲染，保持搜索/计数完整，同时用 sentinel 自动加载后续批次。
 - Role list 必须按用途分区展示，当前分为 `Graph Agent Roles` 与 `Copilot Roles`；每个分区底部都要提供对应的 `Add Graph Agent Role` / `Add Copilot Role` 入口，并与下一段分区保持明确垂直间距。Graph Agent 分类与 role icon 使用 engine/cog 语义图标，role 标题行需要使用默认字体，整行 controls 必须垂直居中对齐；编辑和删除等 role 级动作统一收进标题右侧的三点 `DropdownMenu`，删除必须使用统一 `DeleteConfirmDialog` 二次确认。
 - Tauri/WebKit 下非编辑区双击可能触发原生文本选择命令，导致 macOS `Edit` 菜单闪烁或系统提示音；应用根部必须保留全局 double-click guard，在非输入、非 `contenteditable`、非 Monaco 区域阻止原生默认选择行为和 `selectstart`，并用 CSS 将普通 chrome 设为不可文本选择；但不能阻止事件冒泡，以免破坏业务组件自己的 `onDoubleClick`。确实需要保留原生双击选择的区域使用 `data-allow-native-double-click` 标记。Tauri macOS shell 不使用默认菜单，必须显式重建不包含 `Edit` submenu 的 app menu，避免 `copy:` / `selectAll:` 等预置 selector 在 WebKit selection 状态变化时抢占系统反馈。
 - Role 级三点菜单这类 hover-adjacent action 必须把鼠标双击视为 no-op，键盘打开菜单仍需保留。
 - LLM Roles autosave 必须串行化并忽略被更新快照 supersede 的旧请求结果；当用户创建空 role 或拖入模型后，旧的 400 不应覆盖新的 pending/saved 状态或弹出陈旧 toast。
 - 层级编辑器必须用不同 shadcn surface/variant 区分层级，例如外层 role 用 `Card`，可排序 model/provider 行用 `Item` 的不同 variant，并且只使用语义化 token。
 - 排序交互优先使用整行拖拽表面，不额外展示上下移动按钮或独立拖拽标签；设置、删除等行内动作必须阻止拖拽冒泡，保证点击目标可靠。
-- 可拖拽的模型、provider 和模型库卡片必须使用 `select-none`，避免拖拽时选中文字；从 Available Models 添加模型时，drop handler 应覆盖整个 role card，Empty 只作为视觉 target，拖拽过程中 role header 的 Edit 等非 drop action 不应抢 hover/click。跨 role card 拖拽时必须用透明 drop shield 覆盖 header 操作，并在 pointerup 后吞掉该次合成 click，避免 Dialog trigger 在拖拽结束瞬间闪开。不要把跨区域添加依赖在 native HTML5 drag/drop 上；Tauri/WebKit 下 `dragstart`/`dataTransfer.types` 不稳定，应保留 pointer 坐标命中 drop zone 的 fallback，并同时渲染跟随指针的 drag preview，避免交互看起来像静态点击。
+- 可拖拽的 route 和 route 库卡片必须使用 `select-none`，避免拖拽时选中文字；从 Available Routes 添加 route 时，drop handler 应覆盖整个 role card，Empty 只作为视觉 target，拖拽过程中 role header 的 Edit 等非 drop action 不应抢 hover/click。跨 role card 拖拽时必须用透明 drop shield 覆盖 header 操作，并在 pointerup 后吞掉该次合成 click，避免 Dialog trigger 在拖拽结束瞬间闪开。不要把跨区域添加依赖在 native HTML5 drag/drop 上；Tauri/WebKit 下 `dragstart`/`dataTransfer.types` 不稳定，应保留 pointer 坐标命中 drop zone 的 fallback，并同时渲染跟随指针的 drag preview，避免交互看起来像静态点击。
 - 长模型名、路径和 id 使用 `overflow-wrap:anywhere` / `break-words` 等方式在卡片内换行；不要让文本把卡片撑破。
 - 如果列表来自外部探测或后端缓存，UI 不应写死样例数据。模型库类 UI 应展示已测试并持久化的数据源，按 vendor/provider 等真实字段归类。
 - LLM Provider Intelligence V2 之后，Available Routes 的 `canonical_id`、vendor/provider 分组、route availability 和 provider ownership 均来自后端 DTO；前端不再从 raw model string 做 canonicalization、provider ownership inference 或 stale provider pruning。

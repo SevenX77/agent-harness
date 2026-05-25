@@ -188,6 +188,34 @@
     }
 }
 
+html[data-native-double-click-guard="true"] body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+html[data-native-double-click-guard="true"] input,
+html[data-native-double-click-guard="true"] textarea,
+html[data-native-double-click-guard="true"] select,
+html[data-native-double-click-guard="true"] [contenteditable=""],
+html[data-native-double-click-guard="true"] [contenteditable="true"],
+html[data-native-double-click-guard="true"] [role="textbox"],
+html[data-native-double-click-guard="true"] .monaco-editor,
+html[data-native-double-click-guard="true"] .monaco-editor *,
+html[data-native-double-click-guard="true"] [data-allow-native-double-click],
+html[data-native-double-click-guard="true"] [data-allow-native-double-click] * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+html[data-available-model-dragging="true"] [data-role-edit-trigger="true"] {
+  pointer-events: none;
+}
+
+html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
+  display: block;
+  pointer-events: auto;
+}
+
 @keyframes pulse-primary {
   0%, 100% {
     box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 35%, transparent);

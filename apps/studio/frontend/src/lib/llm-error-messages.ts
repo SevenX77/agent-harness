@@ -3,11 +3,21 @@
  * Future i18n should wrap this catalog rather than showing raw codes directly.
  */
 
-import type { ProviderTestStatus, TestStatus } from "@/api/llm"
+type TestStatus =
+  | "untested"
+  | "ok"
+  | "invalid_key"
+  | "rate_limited"
+  | "quota_exceeded"
+  | "network_error"
+  | "timeout"
+  | "error"
+
+type ProviderTestStatus = TestStatus | "missing_api_key"
 
 /**
- * Map of `error_code` strings returned by the backend POST /providers/test
- * response (vendor codes + the synthetic `missing_api_key` / `timeout`).
+ * Map of `error_code` strings returned by endpoint/route verification
+ * responses (vendor codes + synthetic `missing_api_key` / `timeout`).
  *
  * Anthropic error codes: `invalid_api_key`, `permission_error`,
  * `not_found_error`, `request_too_large`, `rate_limit_error`, `api_error`,

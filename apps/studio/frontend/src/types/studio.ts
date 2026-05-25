@@ -39,7 +39,3 @@ export interface VisualPhase {
   dependsOn: string[]
   subgraph: string | null
 }
-
-export type ApiKeyName = 'openai' | 'anthropic' | 'gemini'
-
-export type ApiKeys = Record<ApiKeyName, string>

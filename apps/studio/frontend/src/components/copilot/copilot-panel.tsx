@@ -2,7 +2,7 @@ import React, { useEffect, useState, type FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { ArrowUp, Bot, CircleAlert, Paperclip, Plus } from 'lucide-react'
 import { toast } from 'sonner'
-import { getCredentials, getRole, type CredentialsState, type RoleEntry } from '../../api/llm'
+import { getRegistry, type RegistryResponse, type RoleEntry } from '../../api/llm'
 import { useCopilot } from '../../hooks/useCopilot'
 import { useTemplates } from '../../hooks/useTemplates'
 import type { CopilotMessage } from '../../types/copilot'
@@ -74,42 +74,43 @@ interface CopilotPanelProps {
 export function CopilotPanel({ skillId, view = 'edit' }: CopilotPanelProps) {
   const [draft, setDraft] = useState('')
   const [roleData, setRoleData] = useState<RoleEntry | null>(null)
-  const [credentials, setCredentials] = useState<CredentialsState | null>(null)
-  const [selectedModel, setSelectedModel] = useState('')
+  const [registry, setRegistry] = useState<RegistryResponse | null>(null)
+  const [selectedRouteId, setSelectedRouteId] = useState('')
   const { templates, templatesLoading } = useTemplates()
   const copilot = useCopilot(skillId)
   const inEvalView = view === 'eval'
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([getRole('copilot_chat'), getCredentials()])
-      .then(([role, nextCredentials]) => {
+    getRegistry()
+      .then((nextRegistry) => {
         if (cancelled) {
           return
         }
+        const role = nextRegistry.roles.copilot_chat ?? null
         setRoleData(role)
-        setCredentials(nextCredentials)
-        setSelectedModel(role.active_model)
+        setRegistry(nextRegistry)
+        setSelectedRouteId(role?.fallback_chain[0]?.route_id ?? '')
       })
       .catch(() => {
-        toast.error('Copilot model config unavailable')
+        toast.error('Copilot route config unavailable')
       })
     return () => {
       cancelled = true
     }
   }, [])
 
-  function selectModel(modelCode: string) {
-    if (modelCode === selectedModel) {
+  function selectRoute(routeId: string) {
+    if (routeId === selectedRouteId) {
       return
     }
-    setSelectedModel(modelCode)
-    toast.info('Model switched. Future messages will use it.')
+    setSelectedRouteId(routeId)
+    toast.info('Route switched. Future messages will use it.')
   }
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (copilot.sendMessage(draft, selectedModel || roleData?.active_model || null)) {
+    if (copilot.sendMessage(draft, selectedRouteId || roleData?.fallback_chain[0]?.route_id || null)) {
       setDraft('')
     }
   }
@@ -212,9 +213,9 @@ export function CopilotPanel({ skillId, view = 'edit' }: CopilotPanelProps) {
               </button>
               <ModelPicker
                 role={roleData}
-                credentials={credentials}
-                selectedModel={selectedModel || roleData?.active_model || ''}
-                onSelect={selectModel}
+                registry={registry}
+                selectedRouteId={selectedRouteId || roleData?.fallback_chain[0]?.route_id || ''}
+                onSelect={selectRoute}
               />
             </div>
             <button

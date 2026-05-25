@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react'
-import { Cpu } from 'lucide-react'
-import type { CredentialsState, RoleEntry } from '../../api/llm'
+import { Route } from 'lucide-react'
+import type { RegistryResponse, RoleEntry } from '../../api/llm'
 import { Button } from '../ui/button'
 import {
   DropdownMenu,
@@ -12,78 +12,74 @@ import {
 
 interface ModelPickerProps {
   role: RoleEntry | null
-  credentials: CredentialsState | null
-  selectedModel: string
-  onSelect: (modelCode: string) => void
+  registry: RegistryResponse | null
+  selectedRouteId: string
+  onSelect: (routeId: string) => void
   variant?: 'icon' | 'full'
 }
 
-export interface ModelOption {
-  modelCode: string
-  providers: string[]
+export interface RouteOption {
+  routeId: string
+  label: string
   available: boolean
   unavailableReason: string
 }
 
-const unavailableReason = 'No API key configured for any provider in this model'
+const unavailableReason = 'Route is missing, disabled, or failed in the active registry'
 
-export function getModelOptions(role: RoleEntry | null, credentials: CredentialsState | null): ModelOption[] {
+export function getRouteOptions(role: RoleEntry | null, registry: RegistryResponse | null): RouteOption[] {
   if (!role) {
     return []
   }
 
-  const credentialsByProvider = new Map(
-    (credentials?.providers ?? []).map((provider) => [provider.id, provider]),
-  )
-
-  return Object.entries(role.models).map(([modelCode, model]) => {
-    const providers = model.providers ?? []
-    const available = providers.some((providerCode) => Boolean(credentialsByProvider.get(providerCode)?.api_key.trim()))
+  return role.fallback_chain.map((entry) => {
+    const route = registry?.provider_routes[entry.route_id] ?? null
+    const available = Boolean(route && route.status !== 'disabled' && route.status !== 'failed')
     return {
-      modelCode,
-      providers,
+      routeId: entry.route_id,
+      label: route?.display_name ?? entry.route_id,
       available,
       unavailableReason,
     }
   })
 }
 
-export function firstAvailableModel(options: ModelOption[]): string | null {
-  return options.find((option) => option.available)?.modelCode ?? null
+export function firstAvailableRoute(options: RouteOption[]): string | null {
+  return options.find((option) => option.available)?.routeId ?? null
 }
 
 interface ModelPickerMenuProps {
-  options: ModelOption[]
-  selectedModel: string
-  onSelect: (modelCode: string) => void
+  options: RouteOption[]
+  selectedRouteId: string
+  onSelect: (routeId: string) => void
   onClose?: () => void
 }
 
-export function ModelPickerMenu({ options, selectedModel, onSelect, onClose }: ModelPickerMenuProps) {
+export function ModelPickerMenu({ options, selectedRouteId, onSelect, onClose }: ModelPickerMenuProps) {
   return (
     <>
       {options.map((option) => (
         <Button
-          key={option.modelCode}
+          key={option.routeId}
           type="button"
           disabled={!option.available}
-          variant={selectedModel === option.modelCode ? 'default' : 'ghost'}
+          variant={selectedRouteId === option.routeId ? 'default' : 'ghost'}
           size="sm"
-          title={option.available ? `Use ${option.modelCode}` : option.unavailableReason}
-          aria-label={`Select model ${option.modelCode}`}
+          title={option.available ? `Use ${option.routeId}` : option.unavailableReason}
+          aria-label={`Select route ${option.routeId}`}
           onClick={option.available ? () => {
-            onSelect(option.modelCode)
+            onSelect(option.routeId)
             onClose?.()
           } : undefined}
           className={`h-7 w-full justify-between px-2 text-left ${
-            selectedModel === option.modelCode
+            selectedRouteId === option.routeId
               ? 'bg-primary text-primary-foreground'
               : 'text-foreground hover:bg-accent'
           } disabled:cursor-not-allowed disabled:opacity-45`}
         >
-          <span>{option.modelCode}</span>
+          <span className="min-w-0 truncate">{option.routeId}</span>
           {!option.available ? (
-            <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">No key</span>
+            <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">Off</span>
           ) : null}
         </Button>
       ))}
@@ -91,23 +87,23 @@ export function ModelPickerMenu({ options, selectedModel, onSelect, onClose }: M
   )
 }
 
-function ModelPickerDropdownItems({ options, selectedModel, onSelect }: ModelPickerMenuProps) {
+function ModelPickerDropdownItems({ options, selectedRouteId, onSelect }: ModelPickerMenuProps) {
   return (
     <>
       {options.map((option) => (
         <DropdownMenuItem
-          key={option.modelCode}
+          key={option.routeId}
           disabled={!option.available}
-          title={option.available ? `Use ${option.modelCode}` : option.unavailableReason}
-          aria-label={`Select model ${option.modelCode}`}
-          onSelect={() => onSelect(option.modelCode)}
+          title={option.available ? `Use ${option.routeId}` : option.unavailableReason}
+          aria-label={`Select route ${option.routeId}`}
+          onSelect={() => onSelect(option.routeId)}
           className={`justify-between ${
-            selectedModel === option.modelCode ? 'bg-accent text-accent-foreground' : ''
+            selectedRouteId === option.routeId ? 'bg-accent text-accent-foreground' : ''
           }`}
         >
-          <span>{option.modelCode}</span>
+          <span className="min-w-0 truncate">{option.routeId}</span>
           {!option.available ? (
-            <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">No key</span>
+            <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">Off</span>
           ) : null}
         </DropdownMenuItem>
       ))}
@@ -115,20 +111,20 @@ function ModelPickerDropdownItems({ options, selectedModel, onSelect }: ModelPic
   )
 }
 
-export function ModelPicker({ role, credentials, selectedModel, onSelect, variant = 'icon' }: ModelPickerProps) {
-  const options = useMemo(() => getModelOptions(role, credentials), [credentials, role])
-  const fallbackModel = firstAvailableModel(options)
-  const effectiveModel = selectedModel || role?.active_model || ''
+export function ModelPicker({ role, registry, selectedRouteId, onSelect, variant = 'icon' }: ModelPickerProps) {
+  const options = useMemo(() => getRouteOptions(role, registry), [registry, role])
+  const fallbackRoute = firstAvailableRoute(options)
+  const effectiveRouteId = selectedRouteId || role?.fallback_chain[0]?.route_id || ''
 
   useEffect(() => {
-    if (!role || !effectiveModel || !fallbackModel) {
+    if (!role || !effectiveRouteId || !fallbackRoute) {
       return
     }
-    const current = options.find((option) => option.modelCode === effectiveModel)
-    if ((!current || !current.available) && fallbackModel !== effectiveModel) {
-      onSelect(fallbackModel)
+    const current = options.find((option) => option.routeId === effectiveRouteId)
+    if ((!current || !current.available) && fallbackRoute !== effectiveRouteId) {
+      onSelect(fallbackRoute)
     }
-  }, [effectiveModel, fallbackModel, onSelect, options, role])
+  }, [effectiveRouteId, fallbackRoute, onSelect, options, role])
 
   if (!role) {
     return (
@@ -137,21 +133,21 @@ export function ModelPicker({ role, credentials, selectedModel, onSelect, varian
         disabled
         variant="ghost"
         size="icon"
-        title="Copilot model config unavailable"
-        aria-label="Select Copilot model"
+        title="Copilot route config unavailable"
+        aria-label="Select Copilot route"
         className="opacity-45"
       >
-        <Cpu className="size-3.5" />
+        <Route className="size-3.5" />
       </Button>
     )
   }
 
   if (variant === 'full') {
     return (
-      <div className="flex flex-wrap gap-1.5" aria-label="Copilot model picker">
+      <div className="flex flex-wrap gap-1.5" aria-label="Copilot route picker">
         <ModelPickerMenu
           options={options}
-          selectedModel={effectiveModel}
+          selectedRouteId={effectiveRouteId}
           onSelect={onSelect}
         />
       </div>
@@ -165,17 +161,17 @@ export function ModelPicker({ role, credentials, selectedModel, onSelect, varian
           type="button"
           variant="ghost"
           size="icon"
-          title={effectiveModel ? `Model: ${effectiveModel}` : 'Select model'}
-          aria-label="Select Copilot model"
+          title={effectiveRouteId ? `Route: ${effectiveRouteId}` : 'Select route'}
+          aria-label="Select Copilot route"
         >
-          <Cpu className="size-3.5" />
+          <Route className="size-3.5" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="top" className="w-48">
-        <DropdownMenuLabel>Model</DropdownMenuLabel>
+      <DropdownMenuContent align="start" side="top" className="w-64">
+        <DropdownMenuLabel>Route</DropdownMenuLabel>
         <ModelPickerDropdownItems
           options={options}
-          selectedModel={effectiveModel}
+          selectedRouteId={effectiveRouteId}
           onSelect={onSelect}
         />
       </DropdownMenuContent>

@@ -286,11 +286,11 @@
 
 **目标**: UI moves from API Keys / Available Models to Endpoints / Available Routes / Model Profiles.
 
-- [ ] 5.1 Update API types and clients.
+- [x] 5.1 Update API types and clients.
   - Modify: `apps/studio/frontend/src/api/llm.ts`
   - Replace credentials v3 / roles v3 DTOs with registry, endpoint, route, model profile, role chain, lint, draft DTOs.
   - Acceptance: `cd apps/studio/frontend && npm run typecheck` reaches only component errors before components are updated.
-- [ ] 5.2 Rewrite autosave hooks.
+- [x] 5.2 Rewrite autosave hooks.
   - Modify:
     - `apps/studio/frontend/src/hooks/useDebouncedCredentialsSave.ts`
     - `apps/studio/frontend/src/hooks/useDebouncedRolesSave.ts`
@@ -299,21 +299,21 @@
   - Roles save route-chain schema.
   - Route probe replaces old manual model test chain.
   - Acceptance: hook tests cover stale result suppression and serialized saves.
-- [ ] 5.3 Rename API Keys UX to Endpoints.
+- [x] 5.3 Rename API Keys UX to Endpoints.
   - Modify:
     - `apps/studio/frontend/src/components/studio/settings/api-keys/*`
     - `apps/studio/frontend/src/components/studio/api-keys/*`
     - `apps/studio/frontend/src/components/studio/settings/provider-utils.ts`
   - UI copy uses Endpoints for callable credential records; provider brand is metadata.
   - Acceptance: component tests assert "Endpoints" copy and no old provider-oriented payload.
-- [ ] 5.4 Rewrite LLM Roles data utilities.
+- [x] 5.4 Rewrite LLM Roles data utilities.
   - Modify: `apps/studio/frontend/src/components/studio/settings/role-utils.ts`
   - Remove frontend raw model canonicalization.
   - Remove provider ownership inference.
   - Remove stale provider pruning based on frontend model strings.
   - Keep only pure role-chain operations over backend-provided route/profile DTOs.
   - Acceptance: `role-utils` tests prove route IDs are preserved and no raw model IDs are converted.
-- [ ] 5.5 Update LLM Roles UI.
+- [x] 5.5 Update LLM Roles UI.
   - Modify:
     - `apps/studio/frontend/src/components/studio/settings/LlmRolesTab.tsx`
     - `apps/studio/frontend/src/components/studio/settings/llm-roles/*`
@@ -322,11 +322,11 @@
   - Drag/drop payload carries exact `route_id`.
   - Preserve pointer fallback, drag preview, drop shield, pointerup click suppression.
   - Acceptance: tests cover add route, reorder route, apply profile, apply conflict UI, lint badges.
-- [ ] 5.6 Add Import Draft UI.
+- [x] 5.6 Add Import Draft UI.
   - Modify or create components under renamed `apps/studio/frontend/src/components/studio/settings/endpoints/` feature directory.
   - Show draft diff, verified/unverified candidates, conflicts, apply confirmation.
   - Acceptance: tests cover draft diff rendering and apply disabled states.
-- [ ] 5.7 Manual frontend verification.
+- [x] 5.7 Manual frontend verification.
   - Run: `cd apps/studio/tauri && cargo tauri dev`
   - Verify Settings → Endpoints: create/edit endpoint, omit API key, endpoint test, route probe.
   - Verify Settings → LLM Roles: model profile card, apply profile, route drag/drop, lint warning/error, narrow width.

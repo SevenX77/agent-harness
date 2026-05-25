@@ -1,43 +1,49 @@
 import { useCallback, useState } from "react"
 import {
-  testProvider,
-  type CredentialsState,
-  type ProviderTestResponse,
-  type ProviderTestStatus,
+  probeRoute,
+  type ProviderRoute,
+  type RegistryResponse,
+  type RoleEntry,
   type RolesData,
+  type RouteProbeRequest,
+  type RouteStatus,
 } from "@/api/llm"
 
-export type RoleChainStatus = ProviderTestStatus | "testing" | "idle"
+export type RoleChainStatus = RouteStatus | "testing" | "idle" | "missing_route" | "probe_error"
 
-export interface RoleTestTarget {
-  modelCode: string
-  providerCode: string
-  modelId: string
-  credential: CredentialsState["providers"][number] | null
+export interface RoleProbeTarget {
+  roleName: string
+  routeId: string
+  route: ProviderRoute | null
+  capabilities: string[]
 }
 
 export type RoleChainStatusMap = Record<string, { status: RoleChainStatus; message?: string }>
 
-export function roleChainStatusKey(modelCode: string, providerCode: string): string {
-  return `${modelCode}:${providerCode}`
+export function roleChainStatusKey(roleName: string, routeId: string): string {
+  return `${roleName}:${routeId}`
 }
 
-export function buildRoleTestTargets(
+export function requiredProbeCapabilities(role: RoleEntry): string[] {
+  return Object.entries(role.lint_requirements)
+    .filter(([, severity]) => severity !== "off")
+    .map(([capability]) => capability)
+}
+
+export function buildRoleProbeTargets(
   data: RolesData,
   roleName: string,
-  credentials: CredentialsState,
-): RoleTestTarget[][] {
+  registry: RegistryResponse,
+): RoleProbeTarget[] {
   const role = data.roles[roleName]
   if (!role) return []
-  const credentialsByCode = Object.fromEntries(credentials.providers.map((provider) => [provider.id, provider]))
-  return Object.entries(role.models).map(([modelCode, roleModel]) => (
-    roleModel.providers.map((providerCode) => ({
-      modelCode,
-      providerCode,
-      modelId: data.models[modelCode]?.providers[providerCode] ?? modelCode,
-      credential: credentialsByCode[providerCode] ?? null,
-    }))
-  ))
+  const capabilities = requiredProbeCapabilities(role)
+  return role.fallback_chain.map((entry) => ({
+    roleName,
+    routeId: entry.route_id,
+    route: registry.provider_routes[entry.route_id] ?? null,
+    capabilities,
+  }))
 }
 
 export async function runWithConcurrency<T>(
@@ -58,17 +64,17 @@ export async function runWithConcurrency<T>(
 }
 
 export function useRoleTestChainRunner({
-  testFn = testProvider,
+  probeFn = probeRoute,
 }: {
-  testFn?: typeof testProvider
+  probeFn?: (routeId: string, request: RouteProbeRequest) => Promise<ProviderRoute>
 } = {}) {
   const [isRunning, setIsRunning] = useState(false)
   const [statuses, setStatuses] = useState<RoleChainStatusMap>({})
 
-  const setTargetStatus = useCallback((target: RoleTestTarget, status: RoleChainStatus, message?: string) => {
+  const setTargetStatus = useCallback((target: RoleProbeTarget, status: RoleChainStatus, message?: string) => {
     setStatuses((current) => ({
       ...current,
-      [roleChainStatusKey(target.modelCode, target.providerCode)]: { status, message },
+      [roleChainStatusKey(target.roleName, target.routeId)]: { status, message },
     }))
   }, [])
 
@@ -76,38 +82,34 @@ export function useRoleTestChainRunner({
     async ({
       data,
       roleName,
-      credentials,
+      registry,
     }: {
       data: RolesData
       roleName: string
-      credentials: CredentialsState
+      registry: RegistryResponse
     }) => {
-      const modelChains = buildRoleTestTargets(data, roleName, credentials)
+      const targets = buildRoleProbeTargets(data, roleName, registry)
       setIsRunning(true)
       try {
-        await runWithConcurrency(modelChains, 3, async (providerChain) => {
-          for (const target of providerChain) {
-            if (!target.credential?.api_key.trim() || !target.credential.provider_type) {
-              setTargetStatus(target, "missing_api_key", "Provider has no API key or protocol.")
-              continue
-            }
-            setTargetStatus(target, "testing")
-            const response: ProviderTestResponse = await testFn({
-              id: target.credential.id,
-              provider_type: target.credential.provider_type,
-              api_key: target.credential.api_key.trim(),
-              base_url: target.credential.base_url || undefined,
-              model_id: target.modelId,
-            })
-            setTargetStatus(target, response.status, response.message ?? undefined)
-            if (response.status === "ok") break
+        await runWithConcurrency(targets, 3, async (target) => {
+          if (!target.route) {
+            setTargetStatus(target, "missing_route", "Route is not present in the active registry.")
+            return
+          }
+          setTargetStatus(target, "testing")
+          try {
+            const response = await probeFn(target.routeId, { capabilities: target.capabilities })
+            setTargetStatus(target, response.status, response.display_name)
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Route probe failed."
+            setTargetStatus(target, "probe_error", message)
           }
         })
       } finally {
         setIsRunning(false)
       }
     },
-    [setTargetStatus, testFn],
+    [probeFn, setTargetStatus],
   )
 
   return { isRunning, run, statuses }

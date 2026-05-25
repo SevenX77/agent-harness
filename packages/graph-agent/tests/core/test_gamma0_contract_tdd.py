@@ -96,9 +96,6 @@ mode: subgraph
 name: main
 target_skill: child-skill
 {validator_line}---
-<sub_skill_ref>
-child-skill
-</sub_skill_ref>
 """,
     )
 
@@ -161,7 +158,7 @@ def test_γ0_2_subgraph_node_validator_defaults_false() -> None:
     ast = SubgraphNodeAST.model_validate(
         {
             "mode": "subgraph",
-            "sub_skill_ref": "child-skill",
+            "target_skill": "child-skill",
         }
     )
 

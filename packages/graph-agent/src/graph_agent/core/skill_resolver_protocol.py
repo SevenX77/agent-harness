@@ -43,7 +43,7 @@ def validate_skill_id(skill_id: str) -> None:
         raise SkillResolutionError(
             str(skill_id),
             "skill id must match " + SKILL_ID_PATTERN,
-            code="[F-v3-invalid-skill-id]",
+            code="[F-v3-resolver-skill-id-invalid]",
         )
 
 
@@ -62,10 +62,34 @@ def resolve_skill_root(
         raise SkillResolutionError(skill_id, str(exc)) from exc
 
     if not root.is_dir():
-        raise SkillResolutionError(skill_id, f"resolved path is not a directory: {root}")
+        raise SkillResolutionError(
+            skill_id,
+            f"resolved path is not a directory: {root}",
+            code="[F-v3-resolver-path-invalid]",
+        )
     if not (root / "GRAPH.md").is_file():
-        raise SkillResolutionError(skill_id, f"resolved path has no GRAPH.md: {root}")
+        raise SkillResolutionError(
+            skill_id,
+            f"resolved path has no GRAPH.md: {root}",
+            code="[F-v3-resolver-path-invalid]",
+        )
     return root
+
+
+def require_skill_resolver(
+    resolver: SkillResolverProtocol | None,
+    *,
+    caller: str,
+) -> SkillResolverProtocol:
+    """Return resolver or raise the V0.3 resolver-domain missing error."""
+
+    if resolver is None:
+        raise SkillResolutionError(
+            caller,
+            "skill_resolver is required",
+            code="[F-v3-resolver-missing]",
+        )
+    return resolver
 
 
 __all__ = [
@@ -73,6 +97,7 @@ __all__ = [
     "SKILL_ID_RE",
     "SkillResolutionError",
     "SkillResolverProtocol",
+    "require_skill_resolver",
     "resolve_skill_root",
     "validate_skill_id",
 ]

@@ -103,10 +103,8 @@ def _subgraph(root: Path, phase: str = "sub", ref: str = "child") -> None:
         root / "phases" / phase / "SUBGRAPH.md",
         f"""---
 mode: subgraph
+target_skill: {ref}
 ---
-<sub_skill_ref>
-{ref}
-</sub_skill_ref>
 """,
     )
 

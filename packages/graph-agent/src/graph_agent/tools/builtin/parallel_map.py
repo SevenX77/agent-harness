@@ -35,6 +35,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
+
 logger = logging.getLogger(__name__)
 
 
@@ -43,6 +45,7 @@ def parallel_map(
     item_list: list[Any],
     item_as: str,
     *,
+    skill_resolver: SkillResolverProtocol,
     max_concurrent: int = 3,
     base_runtime_inputs: dict[str, Any] | None = None,
     callbacks: list[Any] | None = None,
@@ -139,6 +142,7 @@ def parallel_map(
                 group_key=group_key,
                 callbacks=callbacks,
                 trace_dir=trace_dir,
+                skill_resolver=skill_resolver,
             )
             future_to_index[future] = idx
 
@@ -203,6 +207,7 @@ def _run_one_item(
     group_key: str,
     callbacks: list[Any] | None,
     trace_dir: str | Path | None,
+    skill_resolver: SkillResolverProtocol,
 ) -> dict[str, Any]:
     """Execute one child-skill run under the shared group_key."""
     # Lazy import keeps tools/builtin/__init__.py import-light for callers
@@ -226,6 +231,7 @@ def _run_one_item(
         skill_path,
         trace_dir=trace_dir,
         callbacks=callbacks,
+        skill_resolver=skill_resolver,
         **inputs,
     )
     logger.info(

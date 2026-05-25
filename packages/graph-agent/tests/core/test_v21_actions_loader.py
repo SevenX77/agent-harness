@@ -68,10 +68,8 @@ def _subgraph(root: Path, phase: str = "subgraph_phase") -> None:
         """---
 mode: subgraph
 name: sub
+target_skill: skills.child
 ---
-<sub_skill_ref>
-skills/child
-</sub_skill_ref>
 """,
     )
 

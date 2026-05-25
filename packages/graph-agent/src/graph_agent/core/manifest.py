@@ -100,15 +100,8 @@ class SubagentSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
-    target_skill: str | None = Field(default=None, pattern=SKILL_ID_PATTERN)
-    path: str | None = Field(default=None, min_length=1)
+    target_skill: str = Field(pattern=SKILL_ID_PATTERN)
     description: str = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def _requires_target_skill_or_legacy_path(self) -> SubagentSpec:
-        if self.target_skill is None and self.path is None:
-            raise ValueError("subagent requires target_skill")
-        return self
 
 
 class GraphManifest(BaseModel):
@@ -147,8 +140,7 @@ class SubgraphNodeAST(_BaseNodeAST):
     """Subgraph delegation phase node parsed from ``SUBGRAPH.md``."""
 
     mode: Literal["subgraph"]
-    sub_skill_ref: str = Field(min_length=1)
-    target_skill: str | None = Field(default=None, pattern=SKILL_ID_PATTERN)
+    target_skill: str = Field(pattern=SKILL_ID_PATTERN)
     io: PhaseIOSchema | None = None
     # V0.3 AST bool flag; not the legacy LLMPhase.validator module path.
     validator: bool = False

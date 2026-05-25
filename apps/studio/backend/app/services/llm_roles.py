@@ -48,6 +48,7 @@ def load_roles_file(path: Path) -> RolesData:
 def save_roles_file(path: Path, data: RolesData) -> None:
     """Atomically save roles YAML, preserving unchanged round-trip text."""
 
+    normalize_role_drafts(data)
     validate_references(data)
     if data._original_snapshot == data.model_dump(mode="json") and data._original_text is not None:
         serialized = data._original_text
@@ -67,9 +68,19 @@ def validate_references(data: RolesData) -> None:
     """Validate role -> model -> provider references before writing."""
 
     for role_name, role in data.roles.items():
+        if not role.models:
+            if role.active_model:
+                raise InvalidRoleReference(
+                    f"role {role_name} has no models but active_model is set"
+                )
+            continue
         if role.active_model not in data.models:
             raise InvalidRoleReference(
                 f"role {role_name} active_model references unknown model {role.active_model}"
+            )
+        if role.active_model not in role.models:
+            raise InvalidRoleReference(
+                f"role {role_name} active_model is not configured in this role"
             )
         for model_code, role_model in role.models.items():
             model = data.models.get(model_code)
@@ -88,6 +99,19 @@ def validate_references(data: RolesData) -> None:
                         f"role {role_name} model {model_code} uses provider {provider_code}, "
                         "but model has no provider mapping"
                     )
+
+
+def normalize_role_drafts(data: RolesData) -> None:
+    """Clear stale active_model and orphan model values from draft roles."""
+
+    for role in data.roles.values():
+        for model_code in list(role.models.keys()):
+            if model_code not in data.models:
+                del role.models[model_code]
+        if not role.models:
+            role.active_model = ""
+        elif role.active_model not in role.models or role.active_model not in data.models:
+            role.active_model = next(iter(role.models))
 
 
 def _dump_synced_raw(raw: Any, data: RolesData) -> str:
@@ -151,6 +175,7 @@ __all__ = [
     "InvalidRoleReference",
     "get_role",
     "load_roles_file",
+    "normalize_role_drafts",
     "save_roles_file",
     "validate_references",
 ]

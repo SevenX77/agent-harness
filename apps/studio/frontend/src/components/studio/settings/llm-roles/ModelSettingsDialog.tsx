@@ -46,8 +46,14 @@ export function ModelSettingsDialog({
         <Tooltip>
           <DialogTrigger asChild>
             <TooltipTrigger asChild>
-              <Button type="button" variant="ghost" size="icon-xs" aria-label={`Model settings for ${modelCode}`}>
-                <Settings className="size-3" />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={`Model settings for ${modelName}`}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <Settings data-role-icon="true" className="size-3 text-muted-foreground" />
               </Button>
             </TooltipTrigger>
           </DialogTrigger>
@@ -57,9 +63,7 @@ export function ModelSettingsDialog({
       <DialogContent forceMount className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Model settings</DialogTitle>
-          <DialogDescription>
-            {modelCode} · {modelName}
-          </DialogDescription>
+          <DialogDescription>{modelName}</DialogDescription>
         </DialogHeader>
         <ModelSettingsFields
           modelCode={modelCode}

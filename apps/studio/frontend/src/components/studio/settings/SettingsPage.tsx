@@ -8,7 +8,7 @@ import { getCredentials, getRoles, testProvider, type CredentialsState, type Mod
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
 import { draftsFromCredentials, draftFromAddProviderSubmission, providerCachedTestResult, providerTestParamsMatch } from "./provider-utils"
-import { validateRolesDraft } from "./role-utils"
+import { normalizeRolesDraft, validateRolesDraft } from "./role-utils"
 import type { ProviderDraft, SettingsPageProps, SettingsTab } from "./types"
 
 const emptyCredentials: CredentialsState = { providers: [] }
@@ -73,14 +73,13 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const { queue: queueSave, status: saveStatus } = useDebouncedCredentialsSave({
     onSaved: handleSaved,
   })
-  const { queue: queueRolesSave, status: rolesSaveStatus } = useDebouncedRolesSave({
+  const { cancel: cancelRolesSave, queue: queueRolesSave, status: rolesSaveStatus } = useDebouncedRolesSave({
     onSaved: (next) => {
       setRolesData(next)
       setRolesError(null)
     },
     onError: (error) => {
-      const message = error instanceof Error ? error.message : "Save failed"
-      setRolesError(message)
+      setRolesError(composeRequestErrorMessage(error, "Save failed"))
     },
   })
 
@@ -252,15 +251,17 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   }
 
   function updateRolesData(next: RolesData) {
-    rolesDataRef.current = next
-    setRolesData(next)
-    const validationError = validateRolesDraft(next)
+    const normalized = normalizeRolesDraft(next)
+    rolesDataRef.current = normalized
+    setRolesData(normalized)
+    const validationError = validateRolesDraft(normalized)
     if (validationError) {
       setRolesError(validationError)
+      cancelRolesSave()
       return
     }
     setRolesError(null)
-    queueRolesSave(() => rolesDataRef.current)
+    queueRolesSave(() => normalized)
   }
 
   return (

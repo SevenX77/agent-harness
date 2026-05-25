@@ -1,4 +1,4 @@
-import { BrainCircuit, Check, Loader2, TriangleAlert } from "lucide-react"
+import { Brain, Check, Loader2, TriangleAlert } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
@@ -80,19 +80,17 @@ export function ProviderTestStatusBadge({ status, message }: { status: RoleChain
   )
 }
 
-export function CapabilityBadge({ enabled }: { enabled: boolean }) {
+export function ThinkingBadge() {
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Badge variant={enabled ? "outline" : "secondary"} className="gap-1">
-            <BrainCircuit className="size-3" />
-            Thinking
-          </Badge>
-        </TooltipTrigger>
-        <TooltipContent>{enabled ? "Thinking capable model" : "Thinking not confirmed"}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Badge
+      variant="outline"
+      data-thinking-badge="true"
+      className="shrink-0 gap-1 px-1.5 text-[9px]"
+      aria-label="Thinking capable"
+    >
+      <Brain className="size-3" />
+      <span className="hidden xl:inline text-[9px] leading-none">Thinking</span>
+    </Badge>
   )
 }
 

@@ -43,6 +43,7 @@ from graph_agent.core.subagents import (
     current_subagent_depth,
     validate_subagent_tool_args,
 )
+from graph_agent.middleware.factory import build_middleware_chain_cognitive_flow
 from graph_agent.runtime.exit_contract import inject_exit_contract
 from graph_agent.runtime.state import BlackboardState
 from graph_agent.runtime.state_mapper import PhaseWrapper, StateMapper
@@ -286,6 +287,7 @@ def _build_skill_node(
     )
     all_tools = [*business_tools, *framework_tools, finish_task]
     all_tools_by_name = {tool.name: tool for tool in all_tools}
+    cognitive_flow = build_middleware_chain_cognitive_flow(phase_name=phase_id)
 
     def _skill_node(
         state: BlackboardState,
@@ -343,31 +345,22 @@ def _build_skill_node(
                         tool_call_id=call.get("id", f"{name}-call"),
                     )
                 )
-                if name == "finish_task":
-                    flow["finish_task_result"] = result
-                    if isinstance(result, dict) and result.get("ok"):
-                        data_updates[phase_id] = result.get("data", {})
-                    flow.setdefault("critic_metrics", {}).update(
-                        {
-                            key: {
-                                "invocations": value.invocations,
-                                "passed": value.passed,
-                                "rejected": value.rejected,
-                            }
-                            for key, value in critic_metrics.items()
-                        }
-                    )
-                    response_state: dict[str, Any] = {"flow": flow, "messages": messages}
-                    if data_updates:
-                        response_state["data"] = data_updates
-                    return response_state
+                finish_response = cognitive_flow.handle_finish_task_tool_result(
+                    tool_name=str(name or ""),
+                    tool_result=result,
+                    output_schema=output_schema if isinstance(output_schema, dict) else None,
+                    flow=flow,
+                    messages=messages,
+                    critic_metrics=critic_metrics,
+                )
+                if finish_response is not None:
+                    return finish_response
         response_state = {"flow": flow, "messages": messages}
         if data_updates:
             response_state["data"] = data_updates
         return response_state
 
     return _skill_node
-
 
 def _subagent_tool_map(
     phase_id: str,

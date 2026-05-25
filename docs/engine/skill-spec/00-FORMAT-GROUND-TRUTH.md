@@ -186,11 +186,11 @@ examples:                                         # 只注册 document 扩展案
 |---|---|---|---|
 | `<role>` | 1 | ✅ | agent 角色 |
 | `<goal>` | 1 | ✅ | agent 目标 |
-| `<step id name>` | 0..N | 选填 | **单数**，脱壳；canvas 按 step 顺序拓扑渲染 |
-| `<protocol id>` | 0..N | 选填 | **单数**，脱壳 |
+| `<step id name>` | 0..N | 选填 | **单数标签直接写**（无 `<steps>` 复数壳包裹，不需脱壳）；canvas 按 step 顺序拓扑渲染 |
+| `<protocol id>` | 0..N | 选填 | **单数标签直接写**（无 `<protocols>` 复数壳包裹） |
 | `<example id>` | 0..N | 选填 | **inline 案例直接写 body**（不是 frontmatter 注册，那是反逻辑）；cognitive `{skill_examples_inline}` 引用其内容 |
 
-- **明令禁止**：复数壳 `<steps>`/`<protocols>`
+- **明令禁止**：复数壳 `<steps>`/`<protocols>`（所以是单数标签直接写，装配时无"脱壳"动作，直接拼入 cognitive template）
 - **明令禁止**：`<exit_contract>` 写进 SKILL.md ——「exit_contract 不用在 skill.md 里面再写一遍」（只在 §5 cognitive template hardcode）
 
 ### PM 原话
@@ -224,7 +224,7 @@ examples:                                         # 只注册 document 扩展案
 - 思考用于规划；对外输出必须给出可执行结果，而不是只描述计划
 
 建议步骤：
-{skill_steps_splat}          ← 脱壳后的 <step> 标签序列
+{skill_steps_splat}          ← SKILL.md body 的 <step> 标签序列直接拼入（无脱壳）
 </thinking_style>
 
 <knowledge_base>
@@ -240,7 +240,7 @@ examples:                                         # 只注册 document 扩展案
 
 <examples>
 以下案例仅用于辅助理解业务逻辑，你的最终输出格式必须严格遵守 <exit_contract> 的 Schema，不要照搬案例结构。
-【内联示范】：{skill_examples_inline}    ← 引用 SKILL.md body 的 <example> 标签内容（脱壳，像 steps），不是 frontmatter
+【内联示范】：{skill_examples_inline}    ← 引用 SKILL.md body 的 <example> 标签内容（直接拼入，像 steps），不是 frontmatter
 【扩展案例库】(遇棘手边界可调用 read_example subagent)：{example_registry_listing}   ← frontmatter 注册的 document 案例
 </examples>
 
@@ -254,7 +254,7 @@ examples:                                         # 只注册 document 扩展案
 <protocol_citation>
 做判断时必须标注协议依据，例如 [protocol:P1]。若无明确协议，需在自检说明写明并调用 log_ambiguity。
 必须遵守的协议：
-{skill_protocols_splat}       ← 脱壳后的 <protocol> 标签序列
+{skill_protocols_splat}       ← SKILL.md body 的 <protocol> 标签序列直接拼入（无脱壳）
 </protocol_citation>
 
 <critical_reminders>
@@ -321,6 +321,7 @@ knowledge_base 装载 subagent 报错（token 超限/网络超时）→ 不阻�
 | `target_skill` key 名 | ⏳ 待你确认（SUBGRAPH/subagents/subgraphs 都用，PM 未明示这个 key 名是你拍还是 agent 起的） |
 | `@type:NAME` mention 语法 | ⏳ 待你确认（@protocol/@subagent/@reference 等；你 5-22T08:40 提过 7 类 subagents/tools/subgraph/protocol/steps/reference/example） |
 | 错误码 `[F-v3-*]` 字典 | ⏳ 待你确认（命名体系是 agent 设计，是否认可现有命名） |
+| exit_contract 缺 md 格式约定 | ⏳ **待补**（5-25 你提的验证点）。md2json (`md2json.py:22/61/88`) 只认 `## 字段名` 二级标题 + 值放标题下 + object 用 ` ```json fence` + 嵌套用 `- 子key: 值` bullet；现有 prompt 只说"遵循 output_schema"没教这套格式 → LLM 易吐纯 JSON → 切段失败 → 校验 fail → patcher 兜底。需把"md 字段→`## 标题`映射"写进 exit_contract 措辞（设计阶段你跟 a2 定文本） |
 
 ---
 

@@ -4,9 +4,10 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    mpsc,
-    Arc, Mutex,
+    mpsc, Arc, Mutex,
 };
+#[cfg(target_os = "macos")]
+use tauri::menu::{AboutMetadata, Menu, PredefinedMenuItem, Submenu};
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
@@ -208,9 +209,79 @@ fn open_in_terminal(path: String) -> Result<(), String> {
     Err("opening a terminal is not supported on this platform".to_string())
 }
 
+#[cfg(target_os = "macos")]
+fn macos_menu_without_edit<R: tauri::Runtime>(
+    app_handle: &tauri::AppHandle<R>,
+) -> tauri::Result<Menu<R>> {
+    let pkg_info = app_handle.package_info();
+    let config = app_handle.config();
+    let about_metadata = AboutMetadata {
+        name: Some(pkg_info.name.clone()),
+        version: Some(pkg_info.version.to_string()),
+        copyright: config.bundle.copyright.clone(),
+        authors: config
+            .bundle
+            .publisher
+            .clone()
+            .map(|publisher| vec![publisher]),
+        ..Default::default()
+    };
+
+    let app_menu = Submenu::with_items(
+        app_handle,
+        pkg_info.name.clone(),
+        true,
+        &[
+            &PredefinedMenuItem::about(app_handle, None, Some(about_metadata))?,
+            &PredefinedMenuItem::separator(app_handle)?,
+            &PredefinedMenuItem::services(app_handle, None)?,
+            &PredefinedMenuItem::separator(app_handle)?,
+            &PredefinedMenuItem::hide(app_handle, None)?,
+            &PredefinedMenuItem::hide_others(app_handle, None)?,
+            &PredefinedMenuItem::separator(app_handle)?,
+            &PredefinedMenuItem::quit(app_handle, None)?,
+        ],
+    )?;
+    let file_menu = Submenu::with_items(
+        app_handle,
+        "File",
+        true,
+        &[&PredefinedMenuItem::close_window(app_handle, None)?],
+    )?;
+    let view_menu = Submenu::with_items(
+        app_handle,
+        "View",
+        true,
+        &[&PredefinedMenuItem::fullscreen(app_handle, None)?],
+    )?;
+    let window_menu = Submenu::with_items(
+        app_handle,
+        "Window",
+        true,
+        &[
+            &PredefinedMenuItem::minimize(app_handle, None)?,
+            &PredefinedMenuItem::maximize(app_handle, None)?,
+            &PredefinedMenuItem::separator(app_handle)?,
+            &PredefinedMenuItem::close_window(app_handle, None)?,
+        ],
+    )?;
+    let help_menu = Submenu::with_items(app_handle, "Help", true, &[])?;
+
+    Menu::with_items(
+        app_handle,
+        &[&app_menu, &file_menu, &view_menu, &window_menu, &help_menu],
+    )
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .enable_macos_default_menu(false)
+        .menu(macos_menu_without_edit);
+
+    let app = builder
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             get_sidecar_config,
@@ -287,10 +358,7 @@ mod tests {
     use super::*;
 
     fn temp_path(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "skill-studio-tauri-{name}-{}",
-            std::process::id()
-        ))
+        std::env::temp_dir().join(format!("skill-studio-tauri-{name}-{}", std::process::id()))
     }
 
     #[test]

@@ -68,7 +68,10 @@ impl SidecarLaunchConfig {
             backend_dir: backend_dir_for_resource_root(resource_root),
             site_packages: resource_root.join("vendor").join("site-packages"),
             resource_dir: resource_root.join("vendor").join("resources"),
-            config_dir: resource_root.join("vendor").join("resources").join("config"),
+            config_dir: resource_root
+                .join("vendor")
+                .join("resources")
+                .join("config"),
             startup_attempts: MAX_STARTUP_ATTEMPTS,
             health_timeout: Duration::from_secs(5),
             shutdown_timeout: Duration::from_secs(2),

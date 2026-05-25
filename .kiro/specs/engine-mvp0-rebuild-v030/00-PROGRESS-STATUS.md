@@ -100,6 +100,37 @@ tasks.md 共 A-G 约 40 个原子任务。已知 round 9-13 覆盖了 A(skill-re
 
 ---
 
-## §7 下一步决策点 (插入分析见对话)
+## §7 下一步决策 (已定: 先修)
 
-ground truth 恢复 → 是先修污染源 + 重做 round-14, 还是先继续 round-14? 见 parent master 给 PM 的插入分析。
+ground truth 恢复 → **先修污染源 + 重做 round-14, 再继续 C/E/F/G**。理由见 §8。即时前置 gate = PM 确认 ground truth §0-§6。
+
+## §8 三方 cross-check 收敛 (2026-05-25, a1+a2+a3)
+
+PM 指示"让 agents 过一遍, 统一就执行"。三方独立评估 §7 顺序, **大方向认可** (step 1→4 排序无依赖倒置 / redo 范围 B1/B4/B5/B6/B7 方向对 + B2/B3/C2 判错准, 没把对的当错或反之)。catch 出以下修正 (主控已 grep verify 为真):
+
+### 8.1 污染范围比 §2 宽 — 已部分 ship 到 main (verify 真)
+
+| 文件 | 污染 | 状态 |
+|---|---|---|
+| `core/graph_serializer.py:34,41` | 序列化硬编码 `schema_version: "0.3.0"` 无 v + `phases:` 纯 YAML (无 body `<phase>`) | **已 merge 到 main** |
+| `core/loader.py:642,647` | 硬编码 `!= "0.3.0"` + 错误消息 `must be exactly "0.3.0"` | round-14 WIP, 只改 manifest 漏 loader → FATAL 拒正确 v0.3.0 |
+| `tests/fixtures/v030_agent_demo/GRAPH.md` 等 | pre-existing fixture 纯 YAML 无 `<phase>` (e485261 时代) | **已在 main**, 非 round-14 新建 |
+| 十余处已 merge test (`test_v030_agent_compilation` / `gamma0` / `gamma2_*` / `delta` / gateway `test_model_resolver_protocol`) | 硬编码 `schema_version: "0.3.0"` 无 v | **已在 main** |
+| docs `01-physical-layout`(mode↔路径校验) / `03,04,05`(frontmatter mode) / `05,08,09,11,12`(example type:inline/content) / `06`(7 插槽旧 placeholder) | a1 指出; a3 提醒别 blanket: `01` 可能仅目录命名没污染, `06` 需逐句校 | 修文档时 grep 精确, 逐份校 |
+
+**含义**: 修复范围 = round-14 重做 + **sweep 已 merge 的 graph_serializer + 全部 GRAPH.md fixture + 十余处 test**, 不只 round-14 modified。
+
+### 8.2 采纳的顺序修正
+
+1. **step 5 折叠进 step 4** (三方共识): schema_version+v / 删 mode 校验是 round-14 src (`loader`/`manifest`/`serializer`) 范围, 必须跟 src 重写同步, 割裂会导致 step4 写的 test 在 step5 崩。
+2. **加 grep gate** (a3, round-14 merge 前): 任何 `GRAPH.md` 缺 body `<phase>` = fail; 任何 `schema_version "0.3.0"` 无 v = fail。防漏扫旧 fixture。
+3. **B3 防半恢复** (a3): `depends_on` 必须在 body `<phase depends_on=...>`, loader 从 body XML 读拓扑, 不是 frontmatter YAML (否则"恢复 `<phase>` 当显示却仍从 YAML 读 depends_on" = 半恢复, 违反 R1.1)。
+4. **B5 补全** (a1+a3): body 5 类 = role/goal/step/protocol/example (**不是 exit_contract**); 补 `manifest.ExampleSpec` body `<example>` 解析 (inline example 当前塞 frontmatter content 是反逻辑, 补全非推翻)。
+
+### 8.3 待收敛分歧 (step 4 时 a1+a3 round 2)
+
+**`prompt.py` cognitive 8 插槽重写放哪?**
+- a1+a2: 放进 round-14 同 PR (单独 commit), 实施连续性 (B5 body 解析跟 template 消费耦合, 不一起做没法验证)
+- a3: 移出, 作 round-14 merge 后独立 Task-C round (prompt.py 属 Task C, STATUS §5 自列 C 组; 塞进来 round-14 横跨 B+C 违反 SOP-08 一 PR 一 cohesive 组)
+
+真张力 (cohesive vs 连续性), 非信息不对称。**到 step 4 (基于对的 spec 重写 src) 时派 a1+a3 round 2 辩论收敛 PR 边界**, 不现在拍。

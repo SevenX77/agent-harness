@@ -1,0 +1,105 @@
+# V0.3.0 Engine MVP0 Rebuild — 任务进度状态 (被打断快照)
+
+> **用途**: 2026-05-25 服务器崩溃 + GRAPH.md 格式 ground truth 恢复事件打断了 round-14 实施。本文件记录被打断时的完整任务状态, 防止再次丢失。
+> **唯一格式权威**: `docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md` (PM 拍板恢复的双轨制真相)。
+> **最后更新**: 2026-05-25 (parent master, 分支 `feat/round-14-skill-compilation-cutover`)
+
+---
+
+## §1 PR 序列状态 (round 9-14)
+
+| Round | PR | 范围 | 状态 | commit |
+|---|---|---|---|---|
+| round-9 | PR α | Gateway 抽独立 package + LLM Roles Phase 1 (data 层) | ✅ merged | 934709e 系列 |
+| round-10 | PR γ0 | Agent AST/loader exit_contract removal + validator + middleware order 契约补丁 | ✅ merged | #92 671f97a |
+| round-11 | PR β | Middleware refactor + CognitiveFlow 接管 finish_task/ask_clarification | ✅ merged | #93 cb060fe |
+| round-12 | PR δ | Skill Resolution hard cutover (engine + Studio + SUBGRAPH) | ✅ merged | #94 88c022c |
+| round-13 | PR γ2 | State/IO Isolation 三区 state breaking cutover | ✅ merged | #95 825860a |
+| **round-14** | **PR skill-compilation** | **Task B 组 skill-compilation cutover (loader + AST + GRAPH.md)** | **🔴 WIP 被打断, 错误前提** | 未 commit (一堆 modified + 1 untracked test) |
+
+**注**: round 9-13 代码全已进 main。round-14 是当前被打断的工作。
+
+---
+
+## §2 ⚠️ 核心事件: GRAPH.md 格式 ground truth 恢复 (round-14 错误前提)
+
+### 污染链 (PM 2026-05-25 揭示)
+
+1. **第一污染源**: commit `e485261` (5-23) 把 `docs/engine/skill-spec/02-graph-md-spec.md` 写成**纯 YAML phases**(删了 body `<phase>` XML), 违反 PM "phase 写 body XML" 拍板。
+2. 5-24 PM 重新拍板**双轨制定稿** + 打印 4 文件模版二次确认, 但**只存 `/tmp/`** → 服务器崩溃丢失。
+3. round-14 spec 四件套 (`4a794e7`) + 顶层 `tasks.md` **B3** 继承了"删 `<phase>`"的错误理解。
+4. a1 基于错误 spec 写了 round-14 src + test (当前 WIP modified files)。
+
+### 已恢复的真相 (写进 ground truth)
+
+GRAPH.md **双轨制 (DUAL-TRACK)**:
+- frontmatter `phases:` = phase 名字 list[str] (注册)
+- body `<phase depends_on="X" output>name</phase>` XML = DAG 拓扑
+- **两者都必须存在**, 不是二选一。
+
+### 受污染需修正的文件清单
+
+| 文件 | 污染内容 | 修正方向 |
+|---|---|---|
+| `docs/engine/skill-spec/02-graph-md-spec.md` | 纯 YAML phases (删 XML) | 回归双轨制 |
+| `docs/engine/skill-spec/01,03-12-*.md` | 可能受牵连 | 按 ground truth 逐份校 |
+| `.kiro/specs/.../tasks.md` B3 | "GRAPH.md `<phase/>` 改为 phases: YAML list" | 改回双轨 |
+| `.kiro/specs/.../tasks.md` B2 | mode 三值化 (要求作者写 mode) | ground truth 定 mode frontmatter **删除** (loader 从文件名注入) |
+| `.kiro/specs/.../tasks.md` C2 | "Cognitive Template 7 插槽" | ground truth §5 定 **8 插槽** |
+| round-14 spec 四件套 | 删 `<phase>` 前提 | 重做 |
+| round-14 src + test (WIP) | 实施了错误前提 | 重做 (非全推翻, 见 §4) |
+| `manifest.py:106` | `schema_version: Literal["0.3.0"]` 无 v | 改 `"v0.3.0"` |
+| `loader.py:625` | `_validate_mode_matches_filename` 要求作者写 mode | 删 (纯文件名推导) |
+| `cognitive/prompt.py` | cognitive template 自创 7 插槽 (commit 8d60106), 缺 knowledge_base 装载 subagent / read_reference / read_example | 按 ground truth §5 重写 8 插槽 |
+
+---
+
+## §3 ground truth 确认进度
+
+`docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md` (commit 684be1e→bfb8eff→790d780→77aad8d):
+
+- §0 全局规则 / §1 GRAPH.md 双轨 / §2 LOGIC.md / §3 SUBGRAPH.md / §4 SKILL.md / §5 Cognitive Template 8 插槽 / §6 跨文件规则 — **待 PM 逐节确认 (对/错/错在哪)**
+- §7 字段状态: schema_version ✅v0.3.0 / mode ✅删 / SkillResolverProtocol ✅认可 / target_skill key ✅PM 认可(功能正常即可) / @type ✅PM 无异议 / 错误码 ✅agents 设计功能正常即可 / **exit_contract 缺 md 格式约定 ⏳待补**(设计阶段补措辞, 非 PM 拍)
+
+---
+
+## §4 round-14 重做范围 (非全推翻)
+
+round-14 src 改动里**方向可能对**的 (待逐条 grep diff 精校):
+- B1 SkillNodeAST → AgentNodeAST ✅方向对
+- B4 根 IO 物理文件退役 → inline io ✅方向对
+- B5 Agent body XML 5 类标签 (禁 `<steps>` 壳) ✅方向对
+- B6 `@type:NAME` mention 校验 ✅方向对
+- B7 SUBGRAPH target_skill ✅方向对
+
+**确定错的** (需修正):
+- B3 GRAPH.md 删 `<phase>` XML → 必须回归双轨
+- B2 mode 三值化要求作者写 mode → 删 mode frontmatter
+- C2 cognitive 7 插槽 → 8 插槽
+
+**待精校**: 逐个 `git diff` round-14 modified src/test, 标出受 B3/B2 错误前提影响的具体行。
+
+---
+
+## §5 规划内剩余任务 (tasks.md A-G, 待 round 覆盖核对)
+
+tasks.md 共 A-G 约 40 个原子任务。已知 round 9-13 覆盖了 A(skill-resolution→δ) / C middleware 部分(β/γ0) / D(state-io→γ2) / gateway+llm_roles(α)。**精确映射待逐 round design 核对**。
+
+明确**尚未做**的大块:
+- **B 组 skill-compilation** (round-14, 重做)
+- **C 组剩余**: C2 cognitive template 8 插槽 / C4 reference reader 装配 / C5 read_reference+read_example tools / C7 ActionRegistry / C8 e2e
+- **E 组 tracing** (E1-E4)
+- **F 组 错误码** (F1-F2)
+- **G 组 schema cleanup** (G1-G8: V2.1 主路径/codemod/parser stub/fixture/context_mapping/python_callable 全清)
+
+---
+
+## §6 Loose Ends
+
+- round-13 PR γ2 spec 目录在当前 working tree 是 **untracked** (`?? round-13-PR-gamma2-state-io-isolation/`), 虽然代码已 merge (#95)。需确认是否补 commit spec 文档。
+
+---
+
+## §7 下一步决策点 (插入分析见对话)
+
+ground truth 恢复 → 是先修污染源 + 重做 round-14, 还是先继续 round-14? 见 parent master 给 PM 的插入分析。

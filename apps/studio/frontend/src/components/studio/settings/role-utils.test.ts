@@ -72,6 +72,7 @@ const registry: RegistryResponse = {
     },
   ],
   lint_results: [],
+  setup_required: false,
 }
 
 describe("role-utils route-chain helpers", () => {

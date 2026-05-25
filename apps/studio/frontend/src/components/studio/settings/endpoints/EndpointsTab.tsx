@@ -82,7 +82,9 @@ export function EndpointsTab({
       {!loading && endpoints.length === 0 ? (
         <Card size="sm" className="rounded-md">
           <CardContent className="py-5 text-xs text-muted-foreground">
-            No endpoints configured. Add one endpoint to start route discovery.
+            {registry?.setup_required
+              ? "Setup required. Add one endpoint to create the local V4 registry."
+              : "No endpoints configured. Add one endpoint to start route discovery."}
           </CardContent>
         </Card>
       ) : null}

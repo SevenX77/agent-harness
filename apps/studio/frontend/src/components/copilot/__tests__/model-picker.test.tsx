@@ -105,6 +105,7 @@ const registry: RegistryResponse = {
   roles: { copilot_chat: role },
   canonical_groups: [],
   lint_results: [],
+  setup_required: false,
 }
 
 type MenuButtonElement = ReactElement<{

@@ -84,7 +84,7 @@ def _reject_legacy_roles(payload: dict[str, Any], path: Path) -> None:
     if payload.get("schema_version") != 2:
         raise ValueError(
             f"llm_roles.yaml must use schema_version 2; legacy short-code schema "
-            f"is not runtime-compatible: {path}"
+            f"is rejected at the v2 cutover boundary: {path}"
         )
     legacy = {
         "models",

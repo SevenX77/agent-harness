@@ -84,9 +84,10 @@ class RoleApplyProfileRequest(BaseModel):
 @router.get("/registry", response_model=RegistryResponse)
 async def get_llm_registry() -> RegistryResponse:
     """Return the joined redacted endpoint/route/role registry."""
+    setup_required = not credentials_path().exists()
     credentials = load_credentials()
     roles = _load_roles_or_empty()
-    return _registry_response(credentials, roles)
+    return _registry_response(credentials, roles, setup_required=setup_required)
 
 
 @router.put("/registry/endpoints")
@@ -366,6 +367,8 @@ async def apply_model_profile(
 def _registry_response(
     credentials: LLMCredentialsFile,
     roles: RolesData,
+    *,
+    setup_required: bool = False,
 ) -> RegistryResponse:
     routes_by_canonical: dict[str, list[str]] = {}
     for route_id, route in credentials.provider_routes.items():
@@ -394,6 +397,7 @@ def _registry_response(
             for canonical_id, route_ids in sorted(routes_by_canonical.items())
         ],
         lint_results=lint_results,
+        setup_required=setup_required,
     )
 
 

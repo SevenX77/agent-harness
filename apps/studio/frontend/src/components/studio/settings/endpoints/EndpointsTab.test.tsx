@@ -43,6 +43,7 @@ const registry: RegistryResponse = {
   roles: {},
   canonical_groups: [],
   lint_results: [],
+  setup_required: false,
 }
 
 const draft: ProviderImportDraft = {
@@ -107,6 +108,32 @@ describe("EndpointsTab", () => {
     expect(html).toContain("Anthropic Official")
     expect(html).toContain("Claude Opus 4.7 Thinking")
     expect(html).toContain("Probe")
+  })
+
+  it("renders setup-required status for first-run empty registries", () => {
+    const html = renderToStaticMarkup(
+      <EndpointsTab
+        registry={{
+          ...registry,
+          provider_endpoints: {},
+          provider_routes: {},
+          setup_required: true,
+        }}
+        loading={false}
+        error={null}
+        saveStatus="idle"
+        importDrafts={[]}
+        onAddEndpoint={() => undefined}
+        onEndpointChange={() => undefined}
+        onDeleteEndpoint={() => undefined}
+        onTestEndpoint={() => undefined}
+        onProbeRoute={() => undefined}
+        onApplyDraft={() => undefined}
+      />,
+    )
+
+    expect(html).toContain("Setup required")
+    expect(html).toContain("Add one endpoint")
   })
 
   it("renders import draft diffs and disables apply until probed", () => {

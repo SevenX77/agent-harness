@@ -157,6 +157,7 @@ export interface RegistryResponse {
   roles: Record<string, RoleEntry>
   canonical_groups: CanonicalGroup[]
   lint_results: LintResult[]
+  setup_required: boolean
 }
 
 export interface CredentialRegistryResponse {

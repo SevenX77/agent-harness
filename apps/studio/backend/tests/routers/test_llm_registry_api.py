@@ -111,6 +111,47 @@ def test_registry_read_and_endpoint_upsert_redacts_secret(
     assert raw["provider_endpoints"]["anthropic-official"]["api_key"] == "anthropic-secret"
 
 
+def test_registry_missing_credentials_returns_setup_required_status(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    roles_path = tmp_path / "llm_roles.yaml"
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(llm_router, "ROLES_PATH", roles_path)
+
+    response = client.get("/api/llm/registry")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["setup_required"] is True
+    assert body["provider_endpoints"] == {}
+    assert body["provider_routes"] == {}
+
+
+def test_registry_legacy_credentials_returns_bootstrap_schema_error(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    credentials_path = tmp_path / ".studio" / "llm_credentials.json"
+    credentials_path.parent.mkdir(parents=True)
+    credentials_path.write_text(
+        json.dumps({"schema_version": 3, "providers": [{"id": "old"}]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(llm_router, "ROLES_PATH", tmp_path / "llm_roles.yaml")
+
+    response = client.get("/api/llm/registry")
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error_code"] == "LLM_CREDENTIALS_SCHEMA"
+    assert "schema_version 4" in body["message"]
+    assert body["details"]["docs_path"] == "docs/development/CREDENTIALS_V4_BOOTSTRAP.md"
+
+
 def test_route_and_endpoint_delete_conflicts(
     client: TestClient,
     tmp_path: Path,

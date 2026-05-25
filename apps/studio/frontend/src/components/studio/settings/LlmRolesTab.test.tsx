@@ -85,6 +85,7 @@ const registry: RegistryResponse = {
       code: "requires_probe",
     },
   ],
+  setup_required: false,
 }
 
 describe("LlmRolesTab", () => {

@@ -98,6 +98,7 @@ class RegistryResponse(RegistrySnapshot):
 
     canonical_groups: list[dict[str, object]] = Field(default_factory=list)
     lint_results: list[LintResult] = Field(default_factory=list)
+    setup_required: bool = False
 
 
 __all__ = [

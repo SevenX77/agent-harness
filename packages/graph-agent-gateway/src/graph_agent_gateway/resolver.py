@@ -195,7 +195,7 @@ def _assert_v4_credentials(payload: dict[str, Any], path: Path) -> None:
     if schema_version != 4:
         raise ValueError(
             f"credentials file must use schema_version 4: {path}; "
-            "legacy provider credentials are not runtime-compatible"
+            "legacy provider credentials are rejected at the v4 cutover boundary"
         )
     forbidden = {"providers", "provider_credentials"}
     present = sorted(forbidden.intersection(payload))
@@ -208,7 +208,7 @@ def _assert_v2_roles(payload: dict[str, Any], path: Path) -> None:
     if schema_version != 2:
         raise ValueError(
             f"roles file must use schema_version 2: {path}; "
-            "legacy models/providers/active_model schema is not runtime-compatible"
+            "legacy models/providers/active_model schema is rejected at the v2 cutover boundary"
         )
     forbidden = {"models", "providers", "single_model_roles", "peer_model_groups", "circuit_breaker"}
     present = sorted(forbidden.intersection(payload))

@@ -37,6 +37,7 @@ function mergeCredentials(registry: RegistryResponse | null, next: CredentialReg
     provider_endpoints: next.provider_endpoints,
     provider_routes: next.provider_routes,
     runtime_policy: next.runtime_policy,
+    setup_required: false,
   }
 }
 

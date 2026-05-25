@@ -36,18 +36,22 @@ def load_credentials(path: Path | None = None) -> LLMCredentialsFile:
     try:
         payload = json.loads(credential_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise ValueError(f"invalid llm_credentials.json: {credential_path}") from exc
+        raise ValueError(
+            f"LLM_CREDENTIALS_SCHEMA: invalid llm_credentials.json: {credential_path}"
+        ) from exc
     if isinstance(payload, dict) and (
         payload.get("schema_version") != 4 or "providers" in payload
     ):
         raise ValueError(
-            f"llm_credentials.json must use schema_version 4; legacy provider "
-            f"credentials are not runtime-compatible: {credential_path}"
+            f"LLM_CREDENTIALS_SCHEMA: llm_credentials.json must use schema_version 4; "
+            f"legacy provider credentials are rejected: {credential_path}"
         )
     try:
         return LLMCredentialsFile.model_validate(payload)
     except ValidationError as exc:
-        raise ValueError(f"invalid v4 llm credentials schema: {credential_path}") from exc
+        raise ValueError(
+            f"LLM_CREDENTIALS_SCHEMA: invalid v4 llm credentials schema: {credential_path}"
+        ) from exc
 
 
 def save_credentials(data: LLMCredentialsFile, path: Path | None = None) -> None:

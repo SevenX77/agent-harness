@@ -62,6 +62,7 @@ const registry: RegistryResponse = {
     },
   ],
   lint_results: [],
+  setup_required: false,
 }
 
 describe("useRoleTestChainRunner helpers", () => {

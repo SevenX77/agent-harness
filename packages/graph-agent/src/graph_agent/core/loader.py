@@ -1176,19 +1176,21 @@ def _parse_agent_body(
         _fatal(path, _xml_line(body, body.lower().find("<steps")), "unknown top-level tag steps")
     role = blocks.get("role")
     goal = blocks.get("goal")
-    exit_contract = blocks.get("exit_contract")
+    if "<exit_contract" in body.lower() or "</exit_contract" in body.lower():
+        _fatal(
+            path,
+            _xml_line(body, body.lower().find("<exit_contract")),
+            "unknown top-level tag exit_contract",
+        )
     if not role:
         _fatal(path, 1, "[F-v3-agent-role-missing] Agent body requires <role>")
     if not goal:
         _fatal(path, 1, "[F-v3-agent-goal-missing] Agent body requires <goal>")
-    if not exit_contract:
-        _fatal(path, 1, "[F-v3-agent-exit-contract-missing] Agent body requires <exit_contract>")
     return {
         "role": role,
         "goal": goal,
         "steps": _extract_agent_steps(path, body),
         "protocols": _extract_agent_protocols(path, body),
-        "exit_contract": exit_contract,
     }
 
 

@@ -65,7 +65,3 @@ Segment chapter_content using @reference:R1 and compare tricky cases with @examp
 <protocol id="P1">
 A setting explanation is separate from a physical event unless both sentences are inseparable.
 </protocol>
-
-<exit_contract>
-Call finish_task. business_data_md must include a segments array compatible with output_schema.
-</exit_contract>

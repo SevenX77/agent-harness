@@ -1,4 +1,4 @@
-"""MVP-3 middleware package: 4 core middleware (B3 simplification).
+"""MVP-3 middleware package: core middleware and MVP0 order contracts.
 
 The package replaces the legacy decorator-style middleware chain that
 used to live in ``cognitive/middlewares.py`` with four single-purpose
@@ -13,10 +13,8 @@ classes the framework wires in a fixed topological order:
 3. :class:`ExecutionControlMiddleware` (T9) — iteration counter,
    dead-end detection, lightweight loop detection, metrics
    aggregation.
-4. (TBD) Logging — emits the unified callback events; left for a
-   later commit since the existing ``LoggingCallback`` already
-   covers most of the surface and the middleware version requires
-   the MVP-4 phase_executor rewrite to fully take over.
+4. (TBD) Tracing / ToolError / LoopDetection — PR γ0 locks their
+   future order as string contracts; PR β wires the runtime classes.
 
 The fixed list :data:`DEFAULT_MIDDLEWARE_ORDER` exists so callers can
 construct the chain without re-deriving the order. A regression test
@@ -54,8 +52,22 @@ DEFAULT_MIDDLEWARE_ORDER: tuple[type, ...] = (
     ExecutionControlMiddleware,
 )
 
+MVP0_MIDDLEWARE_ORDER_CONTRACT: tuple[str, ...] = (
+    "ProtocolValidation",
+    "CognitiveFlow",
+    "ExecutionControl",
+    "Tracing",
+    "ToolError",
+    "LoopDetection",
+)
+
+# Backward-compatible public name used by the γ0 TDD tests and future PR β.
+DEFAULT_MIDDLEWARE_ORDER_CONTRACT = MVP0_MIDDLEWARE_ORDER_CONTRACT
+
 __all__ = [
     "DEFAULT_MIDDLEWARE_ORDER",
+    "DEFAULT_MIDDLEWARE_ORDER_CONTRACT",
+    "MVP0_MIDDLEWARE_ORDER_CONTRACT",
     "CognitiveFlowMiddleware",
     "ExecutionControlMiddleware",
     "ProtocolValidationMiddleware",

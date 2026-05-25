@@ -85,6 +85,11 @@
         }
       ],
       "default": null
+    },
+    "validator": {
+      "default": false,
+      "title": "Validator",
+      "type": "boolean"
     }
   },
   "required": [

@@ -6,6 +6,7 @@ import pytest
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.loader import SkillLoader
 from graph_agent.core.manifest import AgentNodeAST, SubgraphNodeAST
+from graph_agent.core.validator_contract import VALIDATOR_ERROR_CODES, VALIDATOR_SIGNATURE
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 GAMMA0_SPEC_DIR = (
@@ -134,7 +135,7 @@ def test_γ0_2_agent_node_validator_defaults_false() -> None:
 
 def test_γ0_2_agent_loader_accepts_validator_true(tmp_path: Path) -> None:
     _write_v030_graph(tmp_path)
-    _write_agent_phase(tmp_path, validator=True, include_exit_contract=True)
+    _write_agent_phase(tmp_path, validator=True, include_exit_contract=False)
 
     compiled = SkillLoader().compile_skill(tmp_path)
 
@@ -186,7 +187,6 @@ def test_γ0_3_current_middleware_class_order_matches_contract_prefix() -> None:
     assert implemented_prefix == middleware.MVP0_MIDDLEWARE_ORDER_CONTRACT[:3]
 
 
-@pytest.mark.skip(reason="γ0_4 docs placeholders are already locked; runtime source stays out of Step 3")
 def test_γ0_4_validator_signature_and_error_placeholders_are_documented() -> None:
     docs = "\n".join(path.read_text(encoding="utf-8") for path in GAMMA0_SPEC_DIR.glob("*.md"))
 
@@ -194,6 +194,12 @@ def test_γ0_4_validator_signature_and_error_placeholders_are_documented() -> No
     assert "[F-v3-agent-validator-failed]" in docs
     assert "[F-v3-subgraph-validator-failed]" in docs
     assert "[F-v3-logic-validator-failed]" in docs
+    assert VALIDATOR_SIGNATURE == "def validate(output: dict, state_slice: dict, **kwargs) -> None | dict"
+    assert VALIDATOR_ERROR_CODES == (
+        "[F-v3-agent-validator-failed]",
+        "[F-v3-subgraph-validator-failed]",
+        "[F-v3-logic-validator-failed]",
+    )
 
 
 def test_γ0_5_docs_ship_gates_match_source_contract() -> None:

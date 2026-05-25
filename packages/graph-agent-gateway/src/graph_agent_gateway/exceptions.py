@@ -4,13 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-try:
-    from graph_agent.core.exceptions import ExecutionError
-except Exception:  # pragma: no cover - fallback for standalone package import
-    ExecutionError = RuntimeError  # type: ignore[misc,assignment]
 
-
-class GatewayError(ExecutionError):
+class GatewayError(Exception):
     """Base class for gateway failures with a stable error code."""
 
     code: str
@@ -24,7 +19,7 @@ class GatewayError(ExecutionError):
     ) -> None:
         self.code = code
         self.context = dict(context or {})
-        super().__init__(f"{code} {message}", context=self.context)
+        super().__init__(f"{code} {message}")
 
 
 class AllProvidersFailedError(GatewayError):

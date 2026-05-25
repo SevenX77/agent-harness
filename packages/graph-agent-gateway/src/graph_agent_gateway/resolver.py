@@ -71,7 +71,7 @@ class ModelResolver:
             )
         mock_strategy = getattr(self, "_graph_agent_predict_mock_strategy", None)
         if mock_strategy is not None:
-            from graph_agent.core._predict_internal.interception import PredictGatewayChatModel
+            from graph_agent_gateway.predict_interception import PredictGatewayChatModel
 
             return PredictGatewayChatModel(
                 resolved.role_name,

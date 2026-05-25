@@ -113,27 +113,27 @@
 
 **目标**: 先让 `graph-agent-gateway` 不再依赖 `graph_agent` execution internals，为 registry/runtime 迁移提供干净边界。
 
-- [ ] 1.1 新增 Gateway-owned event DTO。
+- [x] 1.1 新增 Gateway-owned event DTO。
   - Create: `packages/graph-agent-gateway/src/graph_agent_gateway/events.py`
   - Modify: `packages/graph-agent-gateway/src/graph_agent_gateway/tracing.py`
   - Move/define: `LLMFallbackEvent` payload fields `phase_name`, `from_provider`, `to_provider`, `reason`, `code`, `context`.
   - Acceptance: `rg -n "from graph_agent.callbacks.events" packages/graph-agent-gateway/src` 无结果。
-- [ ] 1.2 让 Gateway exceptions 不继承 Engine `ExecutionError`。
+- [x] 1.2 让 Gateway exceptions 不继承 Engine `ExecutionError`。
   - Modify: `packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py`
   - Remove import: `graph_agent.core.exceptions`.
   - Keep fields: `code`, `context`, stable message string.
   - Acceptance: `pytest packages/graph-agent-gateway/tests/test_all_providers_failed_error.py packages/graph-agent-gateway/tests/test_gateway_integration.py -q` 通过.
   - Acceptance: `rg -n "def test_.*(exception|error|fallback)" packages/graph-agent/tests` 至少 1 条命中。
   - Acceptance: `pytest packages/graph-agent/tests -q -k "exception or error or fallback"` 通过。
-- [ ] 1.3 清理 Predict mock 反向 import。
+- [x] 1.3 清理 Predict mock 反向 import。
   - Modify: `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py`
   - Ensure Predict path uses `graph_agent_gateway.predict_interception.PredictGatewayChatModel` or injected strategy only.
   - Acceptance: `rg -n "graph_agent.core._predict_internal" packages/graph-agent-gateway/src` 无结果。
-- [ ] 1.4 处理 `factory.py` env fallback。
+- [x] 1.4 处理 `factory.py` env fallback。
   - Modify: `packages/graph-agent-gateway/src/graph_agent_gateway/__init__.py`
   - Delete or de-export: `graph_agent_gateway.factory`.
   - If kept for tests, keep it outside public runtime imports and document as test helper.
-  - Acceptance: `python -c "import graph_agent_gateway; print(hasattr(graph_agent_gateway, 'factory'))"` 输出 `False`。
+  - Acceptance: `uv run python -c "import graph_agent_gateway; print(hasattr(graph_agent_gateway, 'factory'))"` 输出 `False`。
 
 ## Phase 2: Gateway Registry Core
 

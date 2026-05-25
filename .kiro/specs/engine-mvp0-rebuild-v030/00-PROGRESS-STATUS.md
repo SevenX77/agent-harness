@@ -6,18 +6,25 @@
 
 ---
 
-## §1 PR 序列状态 (round 9-14)
+## §1 全程 PR 序列 todolist (V0.3.0 完整)
 
-| Round | PR | 范围 | 状态 | commit |
+> 显式 todolist 同步在 Task 工具 (TaskList 可查, task #12-#21)。
+> **🔴 PR 流程铁律 (PM 2026-05-25)**: 每个 PR 做完**必须清空 a1/a2/a3 的 context** (`ccb ask <agent> /clear` 或 tmux keystroke `/clear`) 再开下一个 PR, 否则 agents context 越堆越多、注意力失焦严重。下一 PR brief 必含"读 ground truth + tasks.md + 上一 PR report"重建 context。
+
+| # | Round/组 | PR | 范围 | 状态 |
 |---|---|---|---|---|
-| round-9 | PR α | Gateway 抽独立 package + LLM Roles Phase 1 (data 层) | ✅ merged | 934709e 系列 |
-| round-10 | PR γ0 | Agent AST/loader exit_contract removal + validator + middleware order 契约补丁 | ✅ merged | #92 671f97a |
-| round-11 | PR β | Middleware refactor + CognitiveFlow 接管 finish_task/ask_clarification | ✅ merged | #93 cb060fe |
-| round-12 | PR δ | Skill Resolution hard cutover (engine + Studio + SUBGRAPH) | ✅ merged | #94 88c022c |
-| round-13 | PR γ2 | State/IO Isolation 三区 state breaking cutover | ✅ merged | #95 825860a |
-| **round-14** | **PR skill-compilation** | **Task B 组 skill-compilation cutover (loader + AST + GRAPH.md)** | **🔴 WIP 被打断, 错误前提** | 未 commit (一堆 modified + 1 untracked test) |
+| 1 | round-9 | PR α | Gateway 抽独立 package + LLM Roles Phase 1 | ✅ merged (934709e) |
+| 2 | round-10 | PR γ0 | Agent AST/loader exit_contract removal + validator + middleware order 契约补丁 | ✅ merged (#92) |
+| 3 | round-11 | PR β | Middleware refactor + CognitiveFlow 接管 finish_task/ask_clarification | ✅ merged (#93) |
+| 4 | round-12 | PR δ | Skill Resolution hard cutover (engine + Studio + SUBGRAPH) | ✅ merged (#94) |
+| 5 | round-13 | PR γ2 | State/IO Isolation 三区 state breaking cutover | ✅ merged (#95) |
+| 6 | round-14 | PR skill-compilation | Task B (AgentNodeAST/loader/GRAPH双轨/body 5标签/mention/subgraph/inline io) — **含 ground truth 恢复后重做 (step 1-9 见 §7/§8)** | 🔄 进行中 (重做) |
+| 7 | 待定 round | PR C 组 | execution-runtime: cognitive 8插槽 / reference reader / read_reference+read_example tools / ActionRegistry / e2e | ⏳ pending (PR 拆分待规划) |
+| 8 | 待定 round | PR E 组 | tracing: AMBIGUITY_LOGGED / BUILTIN_SUBAGENT events / fallback payload | ⏳ pending |
+| 9 | 待定 round | PR F 组 | 错误码: 退役 [F-v21-*] / standard error payload | ⏳ pending |
+| 10 | 待定 round | PR G 组 | schema cleanup: V2.1主路径/codemod/parser stub/fixture/context_mapping/python_callable 全清 (cutover 收尾) | ⏳ pending |
 
-**注**: round 9-13 代码全已进 main。round-14 是当前被打断的工作。
+**注**: round 9-13 代码全已进 main。round-14 是当前工作 (ground truth 恢复后重做中)。后续 7-10 的 PR 边界 (拆几个 round) 待 round-14 完成后规划。
 
 ---
 

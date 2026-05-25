@@ -7,8 +7,8 @@ from unittest.mock import patch
 
 from graph_agent.core._predict_internal.interception import PredictGatewayChatModel
 from graph_agent.core._predict_internal.strategy import BaseMockStrategy
-from graph_agent.models.llm_client_manager import LLMClientManager
-from graph_agent_gateway.llm_config import ModelDef, ProviderDef, ResolvedProvider, ResolvedRole
+from graph_agent_gateway.client_manager import LLMClientManager
+from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute, RuntimePolicy
 from langchain_core.messages import HumanMessage
 
 MockedSource = Literal["golden_case", "copilot", "heuristic_stub", "manual"]
@@ -52,36 +52,27 @@ class MemoryMockStrategy(BaseMockStrategy):
         return self.schemas.get(phase_name)
 
 
-def _provider(provider_code: str, model_name: str) -> ResolvedProvider:
-    provider = ProviderDef(
-        code=provider_code,
-        name=f"Provider {provider_code}",
-        type="openai_compatible",
-        api_key_env="TEST_API_KEY",
+def _route(endpoint_id: str, model_name: str) -> ResolvedRoute:
+    return ResolvedRoute(
+        role_name="writer",
+        route_id=f"{endpoint_id}:{model_name}",
+        endpoint_id=endpoint_id,
+        protocol="openai_compatible",
         base_url="https://provider.example/v1",
-    )
-    model = ModelDef(
-        code=f"M_{provider_code}",
-        name=f"Model {provider_code}",
-        min_max_tokens=64,
-        providers={provider_code: model_name},
-    )
-    return ResolvedProvider(
-        provider_code=provider_code,
-        provider_def=provider,
-        model_name=model_name,
-        model_def=model,
+        api_key="test-secret",
+        credential_fingerprint=f"fp-{endpoint_id}",
+        provider_model_id=model_name,
+        canonical_id=model_name,
+        display_name=f"Model {endpoint_id}",
     )
 
 
 def _role() -> ResolvedRole:
     return ResolvedRole(
         role_name="writer",
-        temperature=0.3,
         system_prompt_prefix="",
-        active_model_code="M_P1",
-        model_fallback=True,
-        call_chain=[_provider("P1", "model-a")],
+        runtime_policy=RuntimePolicy(),
+        routes=[_route("p1", "model-a")],
     )
 
 

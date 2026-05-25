@@ -184,7 +184,7 @@
 
 **目标**: 让 runtime 通过 explicit registry snapshot 执行 route chain，不再依赖 `.env`、旧 roles schema、旧 Engine client manager。
 
-- [ ] 3.1 Move `LLMClientManager` into Gateway.
+- [x] 3.1 Move `LLMClientManager` into Gateway.
   - Move: `packages/graph-agent/src/graph_agent/models/llm_client_manager.py` → `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py`
   - Update imports to use gateway schema/runtime DTOs.
   - Replace old class constants for probe down TTL, probe timeout, and token escalation with `ResolvedRole.runtime_policy`.
@@ -192,25 +192,25 @@
   - Runtime policy changes invalidate runtime client cache but not credential-fingerprint provider-test cache.
   - Delete Engine production import path; do not leave compatibility wrapper.
   - Acceptance: `rg -n "graph_agent.models.llm_client_manager" packages apps config` only appears in deleted-code references or no results.
-- [ ] 3.2 Remove Engine LLM config loader from production imports.
+- [x] 3.2 Remove Engine LLM config loader from production imports.
   - Remove production usage of `packages/graph-agent/src/graph_agent/config/llm_config.py`.
   - Update `packages/graph-agent/src/graph_agent/cognitive/prompt.py` so it does not read role config directly.
   - Acceptance: `rg -n "graph_agent.config.llm_config" packages/graph-agent/src apps/studio/backend/app` no production results.
-- [ ] 3.3 Rewrite `graph_agent_gateway.resolver.ModelResolver`.
+- [x] 3.3 Rewrite `graph_agent_gateway.resolver.ModelResolver`.
   - Constructor accepts explicit `RegistrySnapshot` or explicit credentials/roles paths.
   - No `_load_default_roles_data`.
   - No built-in model defaults.
   - No env key fallback.
   - `model_override` means explicit `route_id`.
   - Acceptance: gateway resolver tests cover missing snapshot/path, old schema fatal, route override success/failure.
-- [ ] 3.4 Update `GatewayChatModel`.
+- [x] 3.4 Update `GatewayChatModel`.
   - Consume `ResolvedRole` with route-backed resolved candidates.
   - Apply role-specific `ResolvedRole.system_prompt_prefix` without Engine reading role files.
   - Emit diagnostics with `route_id`, `endpoint_id`, `provider_model_id`, `canonical_id`, protocol, fallback decision.
   - Use error classifier for fallback vs fail-fast.
   - Emit `unclassified_default: true` when the classifier uses the default fail-fast path.
   - Acceptance: `pytest packages/graph-agent-gateway/tests/test_llm_fallback_event.py packages/graph-agent-gateway/tests/test_gateway_integration.py -q`.
-- [ ] 3.5 Runtime no-env smoke.
+- [x] 3.5 Runtime no-env smoke.
   - Remove LLM API keys from test environment for smoke path using `monkeypatch.delenv(..., raising=False)` for every provider key the repo recognizes.
   - Build resolver from temp credentials/roles files with in-file secret.
   - Use fake client manager to avoid real provider call.

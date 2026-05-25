@@ -1,15 +1,9 @@
-"""Production-grade native SDK client manager for future LLM gateway routing.
-
-Phase 4 M1 introduces the low-level engine only.  The existing
-``ModelResolver`` and graph execution stack still own live traffic until
-M2/M3 wire a ``GatewayChatModel`` on top of this module.
-"""
+"""Native SDK client manager for route-backed gateway runtime."""
 
 from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import ClassVar, Literal, cast
@@ -20,7 +14,7 @@ from anthropic.types import MessageParam
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
-from graph_agent.config.llm_config import ProviderDef, ResolvedProvider
+from graph_agent_gateway.registry.schema import ResolvedRoute, RuntimePolicy
 
 logger = logging.getLogger(__name__)
 
@@ -51,36 +45,92 @@ class LLMClientManager:
     _clients: ClassVar[dict[str, OpenAI | Anthropic]] = {}
     _usage_stats: ClassVar[dict[str, UsageStats]] = {}
     _provider_down_cache: ClassVar[dict[str, float]] = {}
-    _PROBE_DOWN_TTL: ClassVar[float] = 60.0
-    _PROBE_TIMEOUT: ClassVar[float] = 5.0
-    _TOKEN_ESCALATION_ROUNDS: ClassVar[int] = 2
+
+    @classmethod
+    def is_provider_marked_down(
+        cls,
+        route: ResolvedRoute,
+        runtime_policy: RuntimePolicy,
+    ) -> bool:
+        """Return true when a route is still inside the configured down TTL."""
+        del runtime_policy
+        return cls._is_provider_marked_down(route)
+
+    @classmethod
+    def probe_provider(
+        cls,
+        route: ResolvedRoute,
+        runtime_policy: RuntimePolicy,
+    ) -> bool:
+        """Probe one route using runtime policy instead of class constants."""
+        return cls._probe_provider(route, runtime_policy)
+
+    @classmethod
+    def dispatch_provider_call(
+        cls,
+        route: ResolvedRoute,
+        messages: list[MessageDict],
+        *,
+        max_tokens: int,
+        temperature: float,
+        runtime_policy: RuntimePolicy,
+        reasoning: bool = False,
+        tools: list[ToolSchema] | None = None,
+        tool_choice: str | None = None,
+    ) -> CallResult:
+        """Call one route and return a normalized chat result."""
+        return cls._dispatch_provider_call(
+            route,
+            messages,
+            max_tokens,
+            temperature,
+            runtime_policy=runtime_policy,
+            reasoning=reasoning,
+            tools=tools,
+            tool_choice=tool_choice,
+        )
+
+    @classmethod
+    def mark_provider_down(
+        cls,
+        route: ResolvedRoute,
+        exc: BaseException,
+        runtime_policy: RuntimePolicy,
+    ) -> None:
+        """Mark one route down after a fallback-eligible failure."""
+        del exc
+        cls._mark_provider_down(route, runtime_policy)
+
+    @classmethod
+    def usage_total_calls(cls, route: ResolvedRoute) -> int:
+        """Return total call count for one endpoint/route stats bucket."""
+        stats = cls._usage_stats.get(route.endpoint_id)
+        if not isinstance(stats, Mapping):
+            return 0
+        value = stats.get("total_calls")
+        return value if isinstance(value, int) else 0
 
     @classmethod
     def _get_openai_client(
         cls,
-        provider_code: str,
-        provider_def: ProviderDef,
+        route: ResolvedRoute,
         *,
         timeout_override: float | None = None,
+        runtime_policy: RuntimePolicy | None = None,
     ) -> OpenAI:
-        """Return a cached OpenAI-compatible client for one provider."""
-        cache_key = f"openai:{provider_code}"
-        if timeout_override is not None:
-            cache_key = f"{cache_key}:timeout:{timeout_override:g}"
+        """Return a cached OpenAI-compatible client for one route endpoint."""
+        policy = runtime_policy or RuntimePolicy()
+        timeout_value = float(timeout_override or route.timeout_seconds)
+        cache_key = cls._client_cache_key("openai", route, timeout_value, policy)
 
         cached = cls._clients.get(cache_key)
         if cached is not None:
             return cast(OpenAI, cached)
 
-        api_key = cls._resolve_api_key(provider_def)
-        timeout_value = float(timeout_override or provider_def.timeout)
-        base_url = (
-            provider_def.llm_base_url
-            if provider_def.type == "wavespeed_any_llm" and provider_def.llm_base_url
-            else provider_def.base_url
-        )
+        api_key = cls._resolve_api_key(route)
+        base_url = route.base_url
         http_client = httpx.Client(
-            trust_env=provider_def.trust_env,
+            trust_env=route.trust_env,
             timeout=httpx.Timeout(timeout_value),
         )
         client = OpenAI(
@@ -92,10 +142,11 @@ class LLMClientManager:
         )
 
         cls._clients[cache_key] = client
-        cls._init_usage_stats(provider_code)
+        cls._init_usage_stats(route.endpoint_id)
         logger.info(
-            "phase=llm_client_manager action=create_client type=openai provider=%s base_url=%s",
-            provider_code,
+            "phase=llm_client_manager action=create_client type=openai endpoint=%s route=%s base_url=%s",
+            route.endpoint_id,
+            route.route_id,
             base_url or "<default>",
         )
         return client
@@ -103,27 +154,30 @@ class LLMClientManager:
     @classmethod
     def _get_anthropic_client(
         cls,
-        provider_code: str,
-        provider_def: ProviderDef,
+        route: ResolvedRoute,
+        *,
+        runtime_policy: RuntimePolicy | None = None,
     ) -> Anthropic:
-        """Return a cached Anthropic-compatible client for one provider."""
-        cache_key = f"anthropic:{provider_code}"
+        """Return a cached Anthropic-compatible client for one route endpoint."""
+        policy = runtime_policy or RuntimePolicy()
+        cache_key = cls._client_cache_key("anthropic", route, float(route.timeout_seconds), policy)
         cached = cls._clients.get(cache_key)
         if cached is not None:
             return cast(Anthropic, cached)
 
         client = Anthropic(
-            api_key=cls._resolve_api_key(provider_def),
-            base_url=provider_def.base_url or None,
-            timeout=float(provider_def.timeout),
+            api_key=cls._resolve_api_key(route),
+            base_url=route.base_url or None,
+            timeout=float(route.timeout_seconds),
             max_retries=0,
         )
         cls._clients[cache_key] = client
-        cls._init_usage_stats(provider_code)
+        cls._init_usage_stats(route.endpoint_id)
         logger.info(
-            "phase=llm_client_manager action=create_client type=anthropic provider=%s base_url=%s",
-            provider_code,
-            provider_def.base_url or "<default>",
+            "phase=llm_client_manager action=create_client type=anthropic endpoint=%s route=%s base_url=%s",
+            route.endpoint_id,
+            route.route_id,
+            route.base_url or "<default>",
         )
         return client
 
@@ -171,9 +225,9 @@ class LLMClientManager:
         return f"{provider_code}:{model_name}"
 
     @classmethod
-    def _is_provider_marked_down(cls, provider_code: str, model_name: str) -> bool:
-        """Return true when provider/model is still inside the down TTL."""
-        key = cls._make_down_key(provider_code, model_name)
+    def _is_provider_marked_down(cls, route: ResolvedRoute) -> bool:
+        """Return true when route is still inside the down TTL."""
+        key = cls._make_down_key(route.endpoint_id, route.provider_model_id)
         expires_at = cls._provider_down_cache.get(key)
         if expires_at is None:
             return False
@@ -183,30 +237,39 @@ class LLMClientManager:
         return True
 
     @classmethod
-    def _mark_provider_down(cls, provider_code: str, model_name: str) -> None:
-        """Mark provider/model down for the probe TTL window."""
-        key = cls._make_down_key(provider_code, model_name)
-        cls._provider_down_cache[key] = time.monotonic() + cls._PROBE_DOWN_TTL
+    def _mark_provider_down(
+        cls,
+        route: ResolvedRoute,
+        runtime_policy: RuntimePolicy,
+    ) -> None:
+        """Mark route down for the configured probe TTL window."""
+        key = cls._make_down_key(route.endpoint_id, route.provider_model_id)
+        ttl = runtime_policy.provider_down_ttl_seconds
+        cls._provider_down_cache[key] = time.monotonic() + ttl
         logger.warning(
-            "phase=llm_client_manager action=mark_down provider=%s model=%s ttl=%.0f",
-            provider_code,
-            model_name,
-            cls._PROBE_DOWN_TTL,
+            "phase=llm_client_manager action=mark_down endpoint=%s route=%s model=%s ttl=%d",
+            route.endpoint_id,
+            route.route_id,
+            route.provider_model_id,
+            ttl,
         )
 
     @classmethod
-    def _probe_provider(cls, rp: ResolvedProvider) -> bool:
+    def _probe_provider(
+        cls,
+        route: ResolvedRoute,
+        runtime_policy: RuntimePolicy,
+    ) -> bool:
         """Run a one-token active probe when the provider type supports it."""
-        pdef = rp.provider_def
-        if pdef.type == "openai_compatible":
+        if route.protocol == "openai_compatible":
             try:
                 openai_client = cls._get_openai_client(
-                    rp.provider_code,
-                    pdef,
-                    timeout_override=cls._PROBE_TIMEOUT,
+                    route,
+                    timeout_override=runtime_policy.probe_timeout_seconds,
+                    runtime_policy=runtime_policy,
                 )
                 openai_client.chat.completions.create(
-                    model=rp.model_name,
+                    model=route.provider_model_id,
                     messages=cast(
                         Iterable[ChatCompletionMessageParam],
                         [{"role": "user", "content": "."}],
@@ -217,35 +280,37 @@ class LLMClientManager:
                 return True
             except Exception as exc:
                 logger.warning(
-                    "phase=llm_client_manager action=probe_fail provider=%s model=%s error=%s",
-                    rp.provider_code,
-                    rp.model_name,
+                    "phase=llm_client_manager action=probe_fail endpoint=%s route=%s model=%s error=%s",
+                    route.endpoint_id,
+                    route.route_id,
+                    route.provider_model_id,
                     exc,
                 )
-                cls._mark_provider_down(rp.provider_code, rp.model_name)
+                cls._mark_provider_down(route, runtime_policy)
                 return False
 
-        if pdef.type == "anthropic_compatible":
+        if route.protocol == "anthropic_compatible":
             try:
-                anthropic_client = cls._get_anthropic_client(rp.provider_code, pdef)
+                anthropic_client = cls._get_anthropic_client(
+                    route,
+                    runtime_policy=runtime_policy,
+                )
                 anthropic_client.messages.create(
-                    model=rp.model_name,
+                    model=route.provider_model_id,
                     messages=[MessageParam(role="user", content=".")],
                     max_tokens=1,
                 )
                 return True
             except Exception as exc:
                 logger.warning(
-                    "phase=llm_client_manager action=probe_fail provider=%s model=%s error=%s",
-                    rp.provider_code,
-                    rp.model_name,
+                    "phase=llm_client_manager action=probe_fail endpoint=%s route=%s model=%s error=%s",
+                    route.endpoint_id,
+                    route.route_id,
+                    route.provider_model_id,
                     exc,
                 )
-                cls._mark_provider_down(rp.provider_code, rp.model_name)
+                cls._mark_provider_down(route, runtime_policy)
                 return False
-
-        if pdef.type == "wavespeed_any_llm":
-            return True
 
         return True
 
@@ -361,7 +426,7 @@ class LLMClientManager:
     @classmethod
     def _call_wavespeed_any_llm(
         cls,
-        provider_def: ProviderDef,
+        route: ResolvedRoute,
         messages: list[MessageDict],
         model: str,
         max_tokens: int,
@@ -372,7 +437,7 @@ class LLMClientManager:
         tool_choice: str | None = None,
     ) -> CallResult:
         """Call WaveSpeed's Any-LLM endpoint with 5xx backoff retries."""
-        api_key = cls._resolve_api_key(provider_def)
+        api_key = cls._resolve_api_key(route)
         prompt_parts: list[str] = []
         system_prompt = ""
         for msg in messages:
@@ -405,7 +470,7 @@ class LLMClientManager:
         response: httpx.Response | None = None
         for attempt in range(3):
             response = httpx.post(
-                f"{provider_def.base_url.rstrip('/')}/wavespeed-ai/any-llm",
+                f"{route.base_url.rstrip('/')}/wavespeed-ai/any-llm",
                 json=payload,
                 headers=headers,
                 timeout=300.0,
@@ -454,24 +519,24 @@ class LLMClientManager:
     @classmethod
     def _dispatch_provider_call(
         cls,
-        rp: ResolvedProvider,
+        route: ResolvedRoute,
         messages: list[MessageDict],
         max_tokens: int,
         temperature: float,
         *,
+        runtime_policy: RuntimePolicy,
         reasoning: bool = False,
         tools: list[ToolSchema] | None = None,
         tool_choice: str | None = None,
     ) -> CallResult:
-        """Route a provider call by configured provider type."""
-        pdef = rp.provider_def
+        """Route a provider call by configured endpoint protocol."""
 
         def invoke(token_budget: int) -> CallResult:
-            if pdef.type == "openai_compatible":
-                client = cls._get_openai_client(rp.provider_code, pdef)
+            if route.protocol == "openai_compatible":
+                client = cls._get_openai_client(route, runtime_policy=runtime_policy)
                 return cls._call_openai_compatible(
                     client,
-                    rp.model_name,
+                    route.provider_model_id,
                     messages,
                     token_budget,
                     temperature,
@@ -479,11 +544,14 @@ class LLMClientManager:
                     tool_choice=tool_choice,
                 )
 
-            if pdef.type == "anthropic_compatible":
-                anthropic_client = cls._get_anthropic_client(rp.provider_code, pdef)
+            if route.protocol == "anthropic_compatible":
+                anthropic_client = cls._get_anthropic_client(
+                    route,
+                    runtime_policy=runtime_policy,
+                )
                 return cls._call_anthropic_compatible(
                     anthropic_client,
-                    rp.model_name,
+                    route.provider_model_id,
                     messages,
                     token_budget,
                     temperature,
@@ -491,47 +559,34 @@ class LLMClientManager:
                     tools=tools,
                 )
 
-            if pdef.type == "wavespeed_any_llm":
-                if tools:
-                    client = cls._get_openai_client(rp.provider_code, pdef)
-                    return cls._call_openai_compatible(
-                        client,
-                        rp.model_name,
-                        messages,
-                        token_budget,
-                        temperature,
-                        tools=tools,
-                        tool_choice=tool_choice,
-                    )
-                return cls._call_wavespeed_any_llm(
-                    pdef,
-                    messages,
-                    rp.model_name,
-                    token_budget,
-                    temperature,
-                    reasoning=reasoning,
-                    tools=tools,
-                    tool_choice=tool_choice,
-                )
+            if route.protocol == "google_genai":
+                raise NotImplementedError("google_genai route execution is not implemented yet")
 
-            raise ValueError(f"Unknown provider type: {pdef.type}")
+            raise ValueError(f"Unknown endpoint protocol: {route.protocol}")
 
-        return cls._call_with_token_escalation(rp, max_tokens, invoke)
+        return cls._call_with_token_escalation(
+            route,
+            max_tokens,
+            invoke,
+            runtime_policy=runtime_policy,
+        )
 
     @classmethod
     def _call_with_token_escalation(
         cls,
-        rp: ResolvedProvider,
+        route: ResolvedRoute,
         max_tokens: int,
         invoke: Callable[[int], CallResult],
+        *,
+        runtime_policy: RuntimePolicy,
     ) -> CallResult:
         """Retry with a larger token budget when the provider truncates output."""
         current_tokens = max(1, int(max_tokens))
-        cap = cls._max_token_cap(rp, current_tokens)
+        cap = cls._max_token_cap(route, current_tokens)
         result: CallResult | None = None
-        for _ in range(cls._TOKEN_ESCALATION_ROUNDS + 1):
+        for _ in range(runtime_policy.token_escalation_rounds + 1):
             result = invoke(current_tokens)
-            cls._record_usage_from_result(rp.provider_code, result)
+            cls._record_usage_from_result(route.endpoint_id, result)
             if not _is_finish_reason_truncated(result.get("finish_reason")):
                 return result
             if current_tokens >= cap:
@@ -553,20 +608,36 @@ class LLMClientManager:
             cls.record_usage(provider_code, 0, 0)
 
     @classmethod
-    def _max_token_cap(cls, rp: ResolvedProvider, requested: int) -> int:
-        provider_cap = rp.provider_options.get("max_max_tokens")
-        if isinstance(provider_cap, int) and provider_cap > 0:
-            return max(requested, provider_cap)
-        return max(requested, rp.model_def.min_max_tokens)
+    def _max_token_cap(cls, route: ResolvedRoute, requested: int) -> int:
+        capability = route.capabilities.get("max_output_tokens")
+        value = capability.value if capability is not None else None
+        if isinstance(value, int) and value > 0:
+            return max(requested, value)
+        return requested
 
     @classmethod
-    def _resolve_api_key(cls, provider_def: ProviderDef) -> str:
-        api_key = os.environ.get(provider_def.api_key_env) if provider_def.api_key_env else None
-        if not api_key and provider_def.api_key_env_fallback:
-            api_key = os.environ.get(provider_def.api_key_env_fallback)
+    def _resolve_api_key(cls, route: ResolvedRoute) -> str:
+        api_key = route.api_key.get_secret_value()
         if not api_key:
-            raise ValueError(f"{provider_def.api_key_env} not configured, set it in .env")
+            raise ValueError(f"endpoint has no credential: {route.endpoint_id}")
         return api_key
+
+    @classmethod
+    def _client_cache_key(
+        cls,
+        client_type: str,
+        route: ResolvedRoute,
+        timeout_value: float,
+        runtime_policy: RuntimePolicy,
+    ) -> str:
+        return (
+            f"{client_type}:{route.endpoint_id}:{route.credential_fingerprint}:"
+            f"timeout:{timeout_value:g}:trust_env:{route.trust_env}:"
+            f"proxy:{route.proxy_env or ''}:"
+            f"down_ttl:{runtime_policy.provider_down_ttl_seconds}:"
+            f"probe_timeout:{runtime_policy.probe_timeout_seconds}:"
+            f"token_escalation:{runtime_policy.token_escalation_rounds}"
+        )
 
 
 def _normalise_message_role(role: object) -> Literal["user", "assistant"]:

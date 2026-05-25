@@ -10,19 +10,20 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from pydantic import SecretStr
 
 
 class AlwaysFailingClientManager:
-    def is_provider_marked_down(self, provider_code: str) -> bool:
+    def is_provider_marked_down(self, route: Any, runtime_policy: Any) -> bool:
         return False
 
-    def probe_provider(self, provider: Any) -> bool:
+    def probe_provider(self, route: Any, runtime_policy: Any) -> bool:
         return True
 
-    def dispatch_provider_call(self, provider: Any, messages: list[Any], **kwargs: Any) -> Any:
-        raise RuntimeError(f"{provider.provider_code} failed")
+    def dispatch_provider_call(self, route: Any, messages: list[Any], **kwargs: Any) -> Any:
+        raise RuntimeError(f"{route.route_id} failed")
 
-    def mark_provider_down(self, provider_code: str, exc: BaseException) -> None:
+    def mark_provider_down(self, route: Any, exc: BaseException, runtime_policy: Any) -> None:
         return None
 
 
@@ -36,45 +37,53 @@ class RecordingCallback:
 
 def test_resolver_applies_role_model_parameters_to_gateway_model() -> None:
     from graph_agent_gateway.gateway_chat_model import GatewayChatModel
-    from graph_agent_gateway.llm_config import (
-        ModelEntry,
-        ProviderEntry,
+    from graph_agent_gateway.registry.schema import (
+        ProviderEndpoint,
+        ProviderRoute,
+        RegistrySnapshot,
         RoleEntry,
-        RoleModelEntry,
-        RolesData,
+        RoleRouteEntry,
     )
     from graph_agent_gateway.resolver import ModelResolver
 
-    roles = RolesData(
-        models={
-            "GPT5": ModelEntry(
-                name="GPT-5",
-                reasoning=True,
-                providers={"openai": "gpt-5"},
+    snapshot = RegistrySnapshot(
+        provider_endpoints={
+            "openai": ProviderEndpoint(
+                endpoint_id="openai",
+                display_name="OpenAI",
+                protocol="openai_compatible",
+                base_url="https://api.openai.example/v1",
+                api_key=SecretStr("secret"),
             )
         },
-        providers={
-            "openai": ProviderEntry(
-                name="OpenAI",
-                type="openai_compatible",
+        provider_routes={
+            "openai:gpt-5": ProviderRoute(
+                route_id="openai:gpt-5",
+                endpoint_id="openai",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+                status="verified",
             )
         },
         roles={
             "balanced": RoleEntry(
-                model_fallback=False,
-                active_model="GPT5",
-                models={
-                    "GPT5": RoleModelEntry(
-                        providers=["openai"],
+                fallback_chain=[
+                    RoleRouteEntry(
+                        route_id="openai:gpt-5",
                         temperature=0.3,
-                        max_tokens=1234,
+                        max_output_tokens=1234,
                     )
-                },
+                ],
             )
         },
     )
 
-    resolver = ModelResolver(roles_data=roles, client_manager=AlwaysFailingClientManager())
+    resolver = ModelResolver(
+        registry_snapshot=snapshot,
+        client_manager=AlwaysFailingClientManager(),
+    )
     model = resolver.resolve("balanced", phase_name="draft")
 
     assert isinstance(model, GatewayChatModel)
@@ -82,36 +91,37 @@ def test_resolver_applies_role_model_parameters_to_gateway_model() -> None:
     assert model.phase_name == "draft"
     assert model.temperature == 0.3
     assert model.max_tokens == 1234
-    assert model.resolved_role.call_chain[0].provider_code == "openai"
-    assert model.resolved_role.call_chain[0].model_name == "gpt-5"
+    assert model.resolved_role.routes[0].endpoint_id == "openai"
+    assert model.resolved_role.routes[0].provider_model_id == "gpt-5"
 
 
 def test_gateway_failure_path_emits_event_and_structured_exception() -> None:
     from graph_agent_gateway.exceptions import AllProvidersFailedError
     from graph_agent_gateway.gateway_chat_model import GatewayChatModel
-    from graph_agent_gateway.llm_config import (
-        ModelDef,
-        ProviderDef,
-        ResolvedProvider,
+    from graph_agent_gateway.registry.schema import (
+        ResolvedRoute,
         ResolvedRole,
+        RuntimePolicy,
     )
     from langchain_core.messages import HumanMessage
 
     callback = RecordingCallback()
-    provider_def = ProviderDef(name="OpenAI", type="openai_compatible")
-    model_def = ModelDef(name="GPT-5", providers={"openai": "gpt-5"})
     resolved_role = ResolvedRole(
         role_name="balanced",
-        temperature=0.7,
         system_prompt_prefix="",
-        active_model_code="GPT5",
-        model_fallback=False,
-        call_chain=[
-            ResolvedProvider(
-                provider_code="openai",
-                provider_def=provider_def,
-                model_name="gpt-5",
-                model_def=model_def,
+        runtime_policy=RuntimePolicy(),
+        routes=[
+            ResolvedRoute(
+                role_name="balanced",
+                route_id="openai:gpt-5",
+                endpoint_id="openai",
+                protocol="openai_compatible",
+                base_url="https://api.openai.example/v1",
+                api_key=SecretStr("secret"),
+                credential_fingerprint="fp",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+                display_name="GPT-5",
             )
         ],
     )
@@ -130,36 +140,54 @@ def test_gateway_failure_path_emits_event_and_structured_exception() -> None:
     assert exc.code == "[F-v3-gateway-all-providers-failed]"
     assert exc.context["role_name"] == "balanced"
     assert exc.context["phase_name"] == "draft"
-    assert exc.context["failed_provider_codes"] == ["openai/gpt-5"]
-    assert exc.context["last_error_chain"][0]["provider"] == "openai/gpt-5"
-    assert len(callback.events) == 1
-    assert callback.events[0].from_provider == "openai/gpt-5"
-    assert callback.events[0].to_provider == "<none>"
+    assert exc.context["failed_provider_codes"] == ["openai:gpt-5"]
+    assert exc.context["last_error_chain"][0]["provider"] == "openai:gpt-5"
+    assert exc.context["last_error_chain"][0]["route_id"] == "openai:gpt-5"
+    assert len(callback.events) == 0
 
 
 def test_unknown_role_raises_gateway_role_not_configured_error() -> None:
     from graph_agent_gateway.exceptions import GatewayRoleNotConfiguredError
-    from graph_agent_gateway.llm_config import (
-        ModelEntry,
-        ProviderEntry,
+    from graph_agent_gateway.registry.schema import (
+        ProviderEndpoint,
+        ProviderRoute,
+        RegistrySnapshot,
         RoleEntry,
-        RoleModelEntry,
-        RolesData,
+        RoleRouteEntry,
     )
     from graph_agent_gateway.resolver import ModelResolver
 
-    roles = RolesData(
-        models={"GPT5": ModelEntry(name="GPT-5", providers={"openai": "gpt-5"})},
-        providers={"openai": ProviderEntry(name="OpenAI", type="openai_compatible")},
+    snapshot = RegistrySnapshot(
+        provider_endpoints={
+            "openai": ProviderEndpoint(
+                endpoint_id="openai",
+                display_name="OpenAI",
+                protocol="openai_compatible",
+                base_url="https://api.openai.example/v1",
+                api_key=SecretStr("secret"),
+            )
+        },
+        provider_routes={
+            "openai:gpt-5": ProviderRoute(
+                route_id="openai:gpt-5",
+                endpoint_id="openai",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+            )
+        },
         roles={
             "balanced": RoleEntry(
-                active_model="GPT5",
-                models={"GPT5": RoleModelEntry(providers=["openai"])},
+                fallback_chain=[RoleRouteEntry(route_id="openai:gpt-5")],
             )
         },
     )
 
-    resolver = ModelResolver(roles_data=roles, client_manager=AlwaysFailingClientManager())
+    resolver = ModelResolver(
+        registry_snapshot=snapshot,
+        client_manager=AlwaysFailingClientManager(),
+    )
 
     with pytest.raises(GatewayRoleNotConfiguredError) as exc_info:
         resolver.resolve("not_exist", phase_name="draft")

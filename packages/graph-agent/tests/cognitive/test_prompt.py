@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import logging
-from types import SimpleNamespace
 
-import graph_agent.cognitive.prompt as prompt_module
 import pytest
 from graph_agent.cognitive.prompt import (
     apply_cognitive_template,
@@ -23,25 +21,13 @@ def _compose_with_role_prefix(role_prefix: str) -> str:
     )
 
 
-def test_role_prefix_injected_when_llm_role_set(monkeypatch: pytest.MonkeyPatch) -> None:
-    expected_prefix = "Synthetic role prefix for isolated test role."
-    monkeypatch.setattr(
-        prompt_module,
-        "get_role_config",
-        lambda: SimpleNamespace(
-            resolve_role=lambda _role_name: SimpleNamespace(
-                system_prompt_prefix=expected_prefix
-            )
-        ),
-    )
-
-    prefix = resolve_role_prefix_from_llm_role("test_role")
+def test_engine_no_longer_reads_role_prefix_from_llm_role() -> None:
+    prefix = resolve_role_prefix_from_llm_role("architect")
 
     prompt = _compose_with_role_prefix(prefix)
 
-    assert prefix == expected_prefix
-    assert "<role_prefix>" in prompt
-    assert expected_prefix in prompt
+    assert prefix == ""
+    assert "<role_prefix>" not in prompt
 
 
 def test_role_prefix_empty_when_llm_role_none() -> None:
@@ -53,7 +39,9 @@ def test_role_prefix_empty_when_llm_role_none() -> None:
     assert "<role_prefix>" not in prompt
 
 
-def test_unknown_llm_role_fallback(caplog: pytest.LogCaptureFixture) -> None:
+def test_unknown_llm_role_does_not_read_role_config(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     caplog.set_level(logging.WARNING)
 
     prefix = resolve_role_prefix_from_llm_role("does_not_exist")
@@ -61,7 +49,7 @@ def test_unknown_llm_role_fallback(caplog: pytest.LogCaptureFixture) -> None:
 
     assert prefix == ""
     assert "<role_prefix>" not in prompt
-    assert "does_not_exist" in caplog.text
+    assert caplog.text == ""
 
 
 def test_critical_reminders_use_finish_task_v2_contract() -> None:

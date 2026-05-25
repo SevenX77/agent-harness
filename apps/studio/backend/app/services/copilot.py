@@ -33,7 +33,8 @@ from claude_agent_sdk.types import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from graph_agent.config.llm_config import ProviderDef, ResolvedProvider, load_config
+from graph_agent_gateway.registry.schema import ResolvedRoute
+from graph_agent_gateway.resolver import load_registry_snapshot
 
 from app.models.copilot import (
     CopilotEvent,
@@ -44,7 +45,8 @@ from app.models.copilot import (
     CopilotEventToolUseStart,
     CopilotToolName,
 )
-from app.services.llm_credentials import load_credentials
+from app.core import config
+from app.services.llm_credentials import credentials_path
 
 SessionKey = tuple[str, str, str]
 
@@ -189,7 +191,7 @@ async def stream_query(
     """Stream one Copilot query using the copilot_chat role and optional model override."""
 
     try:
-        primary = _resolve_copilot_provider(model_override)
+        primary = _resolve_copilot_route(model_override)
     except KeyError as exc:
         yield CopilotEventError(message=f"未知模型: {exc}")
         return
@@ -197,15 +199,15 @@ async def stream_query(
         yield CopilotEventError(message=str(exc))
         return
 
-    api_key, base_url = _resolve_provider_runtime(primary.provider_code, primary.provider_def)
+    api_key, base_url = _resolve_route_runtime(primary)
     if not api_key:
         yield CopilotEventError(
-            message=f"Provider {primary.provider_code} 未配置 API key"
+            message=f"Endpoint {primary.endpoint_id} 未配置 API key"
         )
         return
 
-    model_code = primary.model_def.code
-    provider_code = primary.provider_code
+    model_code = primary.provider_model_id
+    provider_code = primary.endpoint_id
 
     tool_names: dict[str, str] = {}
     try:
@@ -369,36 +371,23 @@ def _tool_result_summary(content: str | list[dict[str, Any]] | None) -> str:
     return json.dumps(content, ensure_ascii=False)
 
 
-def _resolve_copilot_provider(model_override: str | None) -> ResolvedProvider:
-    config = load_config()
-    resolved = (
-        config.resolve_model(model_override)
-        if model_override
-        else config.resolve_role("copilot_chat")
+def _resolve_copilot_route(model_override: str | None) -> ResolvedRoute:
+    from graph_agent_gateway.registry.resolver import resolve_role
+
+    roles_path = config.REPO_ROOT / "config" / "llm_roles.yaml"
+    snapshot = load_registry_snapshot(credentials_path(), roles_path)
+    resolved = resolve_role(
+        snapshot,
+        "copilot_chat",
+        route_override=model_override,
     )
-    if not resolved.call_chain:
-        raise ValueError("copilot_chat role 无可用 provider")
-    return resolved.call_chain[0]
+    if not resolved.routes:
+        raise ValueError("copilot_chat role 无可用 route")
+    return resolved.routes[0]
 
 
-def _resolve_provider_runtime(
-    provider_code: str,
-    provider_def: ProviderDef,
-) -> tuple[str, str | None]:
-    credentials = load_credentials()
-    provider = next(
-        (
-            credential
-            for credential in credentials.providers
-            if credential.id == provider_code
-            or credential.name == provider_def.name
-            or credential.name == provider_code
-        ),
-        None,
-    )
-    if provider is None:
-        return "", provider_def.base_url
-    return provider.api_key.strip(), provider.base_url.strip() or provider_def.base_url
+def _resolve_route_runtime(route: ResolvedRoute) -> tuple[str, str | None]:
+    return route.api_key.get_secret_value().strip(), route.base_url.strip() or None
 
 
 def _error_event_for_exception(exc: Exception) -> CopilotEventError:

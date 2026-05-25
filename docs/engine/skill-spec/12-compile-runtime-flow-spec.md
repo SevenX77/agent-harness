@@ -1,6 +1,6 @@
 # Compile Runtime Flow Spec
 
-本文定义 graph_skill 从 Loader 编译、Template 装配到运行时执行的生命周期。它串联 [物理布局](./01-physical-layout.md#物理结构拓扑-directory-tree)、[Cognitive Template](./06-cognitive-template-spec.md#7-大插槽布局拓扑)、[错误码字典](./11-error-code-spec.md#错误码速查全表) 和 5 个 Engine 子模块 alignment。
+本文定义 graph_skill 从 Loader 编译、Template 装配到运行时执行的生命周期。它串联 [物理布局](./01-physical-layout.md#物理结构拓扑-directory-tree)、[Cognitive Template](./06-cognitive-template-spec.md#8-大插槽布局拓扑)、[错误码字典](./11-error-code-spec.md#错误码速查全表) 和 5 个 Engine 子模块 alignment。
 
 ## 编译期校验流 (Compile-time Workflow)
 
@@ -14,11 +14,12 @@ sequenceDiagram
   participant AST
 
   Loader->>FS: read <root>/GRAPH.md
-  Loader->>Loader: parse frontmatter metadata + io + phases
+  Loader->>Loader: parse frontmatter metadata + io + phases registry
+  Loader->>Loader: parse GRAPH.md body <phase> DAG topology
   Loader->>FS: validate phases/<id>/ contains exactly one node file
   loop each phase
     Loader->>FS: read LOGIC.md / SUBGRAPH.md / SKILL.md
-    Loader->>Loader: mode-path cross validation
+    Loader->>Loader: derive node type from filename and inject internal mode
     Loader->>AST: build node AST
     alt SUBGRAPH or registered subgraph mention
       Loader->>Resolver: resolve_skill(target_skill)
@@ -36,10 +37,11 @@ sequenceDiagram
 | 步骤 | 输入 | 输出 | 主要校验 | 失败错误码 |
 |---|---|---|---|---|
 | 读取根 | `<root>/GRAPH.md` | raw markdown | 文件存在 | `[F-v3-graph-phase-dir-missing]` 等物理错误 |
-| 解析根 frontmatter | raw markdown | Graph metadata AST | name/version/phases/io | `[F-v3-graph-schema-version-mismatch]`, `[F-v3-graph-io-schema-invalid]` |
+| 解析根 frontmatter | raw markdown | Graph metadata AST | name/version/phases registry/io | `[F-v3-graph-schema-version-mismatch]`, `[F-v3-graph-io-schema-invalid]` |
+| 解析根 body 拓扑 | raw markdown body | DAG edges/output marks | `<phase depends_on>` 与 frontmatter phases/目录一致 | `[F-v3-graph-depends-unknown]`, `[F-v3-graph-phase-id-invalid]` |
 | 扫描 phase 目录 | `phases[]` | phase file map | 每个 phase 恰好一个节点文件 | `[F-v3-graph-phase-mode-ambiguous]` |
-| 解析 phase 节点 | node md | Logic/Subgraph/Agent AST | mode/path、字段表、body XML | domain-specific F-v3 |
-| DAG 校验 | phases + depends_on | topological order | 依赖存在、无环、无孤岛 | `[F-v3-graph-phase-cycle]`, `[F-v3-graph-phase-island]` |
+| 解析 phase 节点 | node md | Logic/Subgraph/Agent AST | 文件名类型推导、字段表、body XML | domain-specific F-v3 |
+| DAG 校验 | frontmatter phases + body depends_on | topological order | 依赖存在、无环、无孤岛 | `[F-v3-graph-phase-cycle]`, `[F-v3-graph-phase-island]` |
 | IO 数据流校验 | root IO + phase IO | dataflow map | 输入来源存在、输出字段合法 | `[F-v3-graph-dataflow-source-missing]` |
 | Mention 校验 | Agent AST | mention refs | 7 类静态可达 | `[F-v3-mention-target-not-found]` |
 | 错误聚合 | all checks | error report | 同阶段尽量聚合 | 各 domain code |
@@ -71,8 +73,9 @@ Compiled GraphSkillAST
 |---|---|---|---|---|---|
 | Agent AST | `SKILL.md` | 是 | 无 | `[F-v3-agent-*]` | prompt static slots |
 | references registry | frontmatter `references` | 否 | `[]` | `[F-v3-resource-reference-invalid]` | reader input + registry listing |
-| examples registry | frontmatter `examples` | 否 | `[]` | `[F-v3-resource-example-invalid]` | inline splat + document listing |
-| output schema | `io.outputs` | 是 | 无 | `[F-v3-cognitive-output-schema-render-failed]` | exit_contract inline schema |
+| inline examples | SKILL.md body `<example id>` | 否 | `[]` | `[F-v3-agent-example-invalid]` | `{skill_examples_inline}` |
+| examples registry | frontmatter document `examples` | 否 | `[]` | `[F-v3-resource-example-invalid]` | `{example_registry_listing}` |
+| output schema | `io.outputs` | 是 | 无 | `[F-v3-cognitive-output-schema-render-failed]` | `{output_schema}` in hardcoded exit_contract |
 | tools list | frontmatter `tools` + builtin | 否 | builtin minimum tools | `[F-v3-agent-tool-unknown]` | Agent tool bindings |
 
 装配顺序必须保证:

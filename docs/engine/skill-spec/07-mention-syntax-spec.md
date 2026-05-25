@@ -41,12 +41,12 @@ Loader 必须按 mention 类型查对应可达域:
 | `protocol` | body `<protocol id="...">` | 当前 SKILL.md body AST | id 唯一 | `[F-v3-mention-target-not-found]` |
 | `step` | body `<step id="...">` | 当前 SKILL.md body AST | id 唯一 | `[F-v3-mention-target-not-found]` |
 | `reference` | `frontmatter.references[].id` | Agent SKILL.md frontmatter | path 合法; summary 非空 | `[F-v3-mention-target-not-found]` / `[F-v3-resource-reference-invalid]` |
-| `example` | `frontmatter.examples[].id` | Agent SKILL.md frontmatter | inline/document 类型合法 | `[F-v3-mention-target-not-found]` / `[F-v3-resource-example-invalid]` |
+| `example` | body `<example id>` + frontmatter document `examples[].id` | Agent SKILL.md body + frontmatter | inline body example 或 document example 合法 | `[F-v3-mention-target-not-found]` / `[F-v3-resource-example-invalid]` |
 
 算法步骤:
 
-1. 构建本地 registry: `subagents`, `tools`, `subgraphs`, `references`, `examples`。
-2. 构建 body registry: `protocols`, `steps`。
+1. 构建本地 registry: `subagents`, `tools`, `subgraphs`, `references`, document `examples`。
+2. 构建 body registry: `protocols`, `steps`, inline `examples`。
 3. 扫描所有 body 文本节点, 得到 mention refs。
 4. 对每个 ref 按 type 查域; 不跨域 fallback。例如存在 tool `P1` 不能满足 `@protocol:P1`。
 5. 聚合全部不可达 ref, 一次性报 `[F-v3-mention-target-not-found]`, payload 带 `type`, `name`, `source_tag`, `source_id`。

@@ -37,13 +37,13 @@ def test_phase_wrapper_maps_input_and_output() -> None:
     seen: dict[str, object] = {}
 
     def node(state):
-        seen.update(state["data"])
-        return {"data": {"answer": state["data"]["topic"]}}
+        seen.update(state["data"]["inputs"])
+        return {"data": {"answer": state["data"]["inputs"]["topic"]}}
 
     wrapped = PhaseWrapper(mapper).wrap(node)
 
     assert wrapped({"data": {"topic": "A", "extra": True}, "flow": {}, "messages": []}) == {
-        "data": {"answer": "A"}
+        "data": {"inputs": {}, "phase_outputs": {"unknown": {"answer": "A"}}, "scratch": {}}
     }
     assert seen == {"topic": "A"}
 
@@ -53,7 +53,11 @@ def test_reader_sandbox_state_does_not_inherit_parent_blackboard(tmp_path: Path)
 
     state = sandbox.to_blackboard()
 
-    assert state["data"] == {"skill_id": "demo.skill", "phase_id": "main"}
+    assert state["data"] == {
+        "inputs": {"skill_id": "demo.skill", "phase_id": "main"},
+        "phase_outputs": {},
+        "scratch": {},
+    }
     assert state["messages"] == []
     assert state["flow"]["timeout_s"] == 60
     assert state["run_id"] is None

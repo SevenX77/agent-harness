@@ -110,32 +110,58 @@ collect_ignore_glob = [
     "integration/test_mvp2_schema_io.py",
 ]
 
-# Test paths that depend on the live repo skills using the V2.1 layout
-# (GRAPH.md / phases/). Phase 1 baseline intentionally imported V1 layout
-# skills, awaiting user-guided V2.1 cutover.
-_V1_SKILL_AWAITING_CUTOVER = [
-    "tests/core/test_t11_phase_token_info.py",
-    "tests/core/test_v21_actions_keys.py",
-    "tests/core/test_v21_codemod.py",
-    "tests/core/test_v21_graph_serializer.py",
-    "tests/core/test_v21_purity.py",
-    "tests/core/test_v21_skill_authoring_guide_example.py",
-    "tests/e2e/test_batch_analysis_v21.py",
-    "tests/e2e/test_event_extraction_v21.py",
-    "tests/e2e/test_global_synthesis_v21.py",
-    "tests/e2e/test_hello_world_v21.py",
-    "tests/e2e/test_producer_v21.py",
-    "tests/e2e/test_text_segmentation_v21.py",
-    "tests/e2e/test_product_manual_v21.py",
-    "tests/e2e/test_subgraph_sample_v21.py",
-    "tests/e2e/test_v21_all_skills_smoke.py",
-    "tests/integration/skills/",
-    "tests/integration/test_mvp1_smoke.py",
-    "tests/tools/test_dual_run_shadow.py",
-]
-
 _V1_SKILL_AWAITING_CUTOVER_TESTS = {
     "tests/core/test_module_sandbox.py::test_loader_pipeline_resolves_skill_forward_ref_segment_class",
+    "tests/core/test_t11_phase_token_info.py::test_hello_world_phase_token_info_has_raw_line_and_line_numbers",
+    "tests/core/test_t11_phase_token_info.py::test_missing_phase_token_info_returns_none",
+    "tests/core/test_v21_actions_keys.py::test_context_write_intermediate_state_is_not_output_key_checked",
+    "tests/core/test_v21_actions_keys.py::test_text_segmentation_broken_skill_fails_compile_on_context_update",
+    "tests/core/test_v21_codemod.py::test_ci_scan_codemod_review_exits_one_on_marker",
+    "tests/core/test_v21_codemod.py::test_ci_scan_codemod_review_exits_zero_without_marker",
+    "tests/core/test_v21_graph_serializer.py::test_new_phase_appends_one_phase_line",
+    "tests/core/test_v21_graph_serializer.py::test_serial_graph_round_trips_byte_exact",
+    "tests/core/test_v21_graph_serializer.py::test_single_phase_graph_round_trips_byte_exact",
+    "tests/core/test_v21_purity.py::test_purity_cli_clean_exit_0",
+    "tests/core/test_v21_purity.py::test_purity_cli_dirty_exit_1",
+    "tests/core/test_v21_purity.py::test_purity_cli_ignores_v2_pending",
+    "tests/core/test_v21_skill_authoring_guide_example.py::test_skill_authoring_guide_minimal_example_matches_hello_world",
+    "tests/e2e/test_batch_analysis_v21.py::test_batch_analysis_v21_compile_and_assemble",
+    "tests/e2e/test_batch_analysis_v21.py::test_batch_analysis_v21_e2e_fake_llm_star_topology",
+    "tests/e2e/test_batch_analysis_v21.py::test_batch_analysis_v21_reference_fanout_topology",
+    "tests/e2e/test_event_extraction_v21.py::test_event_extraction_v21_compile_and_assemble",
+    "tests/e2e/test_event_extraction_v21.py::test_event_extraction_v21_e2e_fake_llm",
+    "tests/e2e/test_global_synthesis_v21.py::test_global_synthesis_io_field_flow_consistency",
+    "tests/e2e/test_global_synthesis_v21.py::test_global_synthesis_v21_compile_and_assemble",
+    "tests/e2e/test_global_synthesis_v21.py::test_global_synthesis_v21_e2e_fake_llm",
+    "tests/e2e/test_hello_world_v21.py::test_hello_world_v21_compile_and_assemble",
+    "tests/e2e/test_hello_world_v21.py::test_hello_world_v21_e2e_tool_then_finish_task",
+    "tests/e2e/test_producer_v21.py::test_producer_v21_compile_and_assemble",
+    "tests/e2e/test_producer_v21.py::test_producer_v21_e2e_actor_critic_fake_llm",
+    "tests/e2e/test_product_manual_v21.py::test_product_manual_v21_compile_and_assemble",
+    "tests/e2e/test_product_manual_v21.py::test_product_manual_v21_e2e_fake_llm",
+    "tests/e2e/test_subgraph_sample_v21.py::test_subgraph_sample_v21_compile_topology_and_subgraph_refs",
+    "tests/e2e/test_subgraph_sample_v21.py::test_subgraph_sample_v21_e2e_fake_llm_smoke",
+    "tests/e2e/test_text_segmentation_v21.py::test_text_segmentation_v21_compile_and_assemble",
+    "tests/e2e/test_text_segmentation_v21.py::test_text_segmentation_v21_e2e_fake_llm",
+    "tests/e2e/test_v21_all_skills_smoke.py::test_v21_all_skills_smoke_discovers_current_sources",
+    "tests/integration/skills/event_extraction/test_cognitive_flow_smoke.py::test_event_extraction_compiles_from_v21_root",
+    "tests/integration/skills/event_extraction/test_cognitive_flow_smoke.py::test_event_extraction_final_phase_documents_json_output_contract",
+    "tests/integration/skills/event_extraction/test_cognitive_flow_smoke.py::test_event_extraction_setup_action_is_discovered",
+    "tests/integration/skills/event_extraction/test_validators_runtime.py::TestEventExtractionOutputSchema::test_accepts_well_formed_timeline",
+    "tests/integration/skills/event_extraction/test_validators_runtime.py::TestEventExtractionOutputSchema::test_rejects_missing_event_id",
+    "tests/integration/skills/event_extraction/test_validators_runtime.py::TestEventExtractionOutputSchema::test_rejects_missing_event_timeline",
+    "tests/integration/skills/event_extraction/test_validators_runtime.py::TestEventExtractionOutputSchema::test_rejects_non_integer_paragraph_index",
+    "tests/integration/skills/text_segmentation/test_cognitive_flow_smoke.py::test_text_segmentation_compiles_from_v21_root",
+    "tests/integration/skills/text_segmentation/test_cognitive_flow_smoke.py::test_text_segmentation_review_documents_json_output_contract",
+    "tests/integration/skills/text_segmentation/test_cognitive_flow_smoke.py::test_text_segmentation_setup_action_is_discovered",
+    "tests/integration/skills/text_segmentation/test_validators_runtime.py::TestTextSegmentationOutputSchema::test_accepts_well_formed_segmentation_result",
+    "tests/integration/skills/text_segmentation/test_validators_runtime.py::TestTextSegmentationOutputSchema::test_rejects_invalid_segment_type",
+    "tests/integration/skills/text_segmentation/test_validators_runtime.py::TestTextSegmentationOutputSchema::test_rejects_missing_line_field",
+    "tests/integration/skills/text_segmentation/test_validators_runtime.py::TestTextSegmentationOutputSchema::test_rejects_missing_required_root",
+    "tests/integration/test_mvp1_smoke.py::TestCompileLayer::test_v3_skill_compiles_to_graph_agent_harness",
+    "tests/integration/test_mvp1_smoke.py::TestCompileLayer::test_v3_skill_io_outputs_declared",
+    "tests/integration/test_mvp1_smoke.py::TestRealLLMSmoke::test_v3_run_one_chapter_honors_invariants",
+    "tests/tools/test_dual_run_shadow.py::test_dual_run_shadow_hello_world_idempotency",
 }
 
 
@@ -149,9 +175,8 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         tests_root = tests_root / "packages/graph-agent"
     for item in items:
         nodeid = str(item.path.relative_to(tests_root))
-        full_nodeid = f"{nodeid}::{item.name}"
-        if full_nodeid in _V1_SKILL_AWAITING_CUTOVER_TESTS:
-            item.add_marker(xfail_marker)
-            continue
-        if any(nodeid.startswith(pattern) for pattern in _V1_SKILL_AWAITING_CUTOVER):
+        candidate_nodeids = {item.nodeid, f"{nodeid}::{item.name}"}
+        if item.cls is not None:
+            candidate_nodeids.add(f"{nodeid}::{item.cls.__name__}::{item.name}")
+        if candidate_nodeids & _V1_SKILL_AWAITING_CUTOVER_TESTS:
             item.add_marker(xfail_marker)

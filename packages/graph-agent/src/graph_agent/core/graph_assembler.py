@@ -27,6 +27,7 @@ from graph_agent.cognitive.prompt import (
     resolve_role_prefix_from_llm_role,
 )
 from graph_agent.core.actions import ToolDef, _structured_tool
+from graph_agent.core.builtin_subagents import ReferenceReaderRuntime
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
 from graph_agent.core.loader import CompiledSkill, CompiledSubagent, PhaseDocument, SkillLoader
 from graph_agent.core.manifest import (
@@ -50,7 +51,12 @@ from graph_agent.core.subagents import (
 from graph_agent.middleware.factory import build_middleware_chain_cognitive_flow
 from graph_agent.runtime.exit_contract import inject_exit_contract
 from graph_agent.runtime.state import BlackboardState
-from graph_agent.runtime.state_mapper import PhaseWrapper, StateMapper
+from graph_agent.runtime.state_mapper import (
+    PhaseWrapper,
+    StateMapper,
+    phase_inputs_from_state,
+    phase_outputs_from_state,
+)
 
 MAX_REACT_TURNS = 8
 logger = logging.getLogger(__name__)
@@ -133,9 +139,15 @@ def _build_phase_node(
 ) -> Any:
     ast = phase_doc.ast
     if isinstance(ast, LogicNodeAST):
-        return _wrap_phase_runtime_node(ast, _build_logic_node(phase_id, ast, compiled))
+        return _wrap_phase_runtime_node(
+            phase_id,
+            ast,
+            _build_logic_node(phase_id, ast, compiled),
+            node_kind="logic",
+        )
     if isinstance(ast, SubgraphNodeAST):
         return _wrap_phase_runtime_node(
+            phase_id,
             ast,
             _build_subgraph_node(
                 phase_doc,
@@ -144,9 +156,11 @@ def _build_phase_node(
                 max_patch_attempts,
                 skill_resolver,
             ),
+            node_kind="subgraph",
         )
     if isinstance(ast, (AgentNodeAST, SkillNodeAST)):
         return _wrap_phase_runtime_node(
+            phase_id,
             ast,
             _build_skill_node(
                 phase_id,
@@ -157,15 +171,19 @@ def _build_phase_node(
                 max_patch_attempts,
                 skill_resolver,
             ),
+            node_kind="agent" if isinstance(ast, AgentNodeAST) else "skill",
         )
     _graph_fatal(f"unknown phase mode for {phase_id!r}")
 
 
-def _wrap_phase_runtime_node(phase_ast: Any, node: Any) -> Any:
+def _wrap_phase_runtime_node(phase_id: str, phase_ast: Any, node: Any, *, node_kind: str) -> Any:
     io = getattr(phase_ast, "io", None)
-    if io is None:
-        return node
-    return PhaseWrapper(StateMapper(io.inputs, io.outputs)).wrap(node)
+    input_schema = getattr(io, "inputs", None) if io is not None else None
+    output_schema = getattr(io, "outputs", None) if io is not None else None
+    return PhaseWrapper(
+        StateMapper(input_schema, output_schema, phase_id=phase_id),
+        node_kind=node_kind,
+    ).wrap(node)
 
 
 def _build_logic_node(
@@ -180,7 +198,7 @@ def _build_logic_node(
     output_schema_keys = _logic_output_schema_keys(compiled)
 
     def _logic_node(state: BlackboardState) -> dict[str, Any]:
-        before = dict(state.get("data", {}))
+        before = phase_inputs_from_state(state)
         data = dict(before)
         ctx = Context(data, phase_id=phase_id, run_id=state.get("run_id") or "default")
         result = action(ctx)
@@ -213,22 +231,22 @@ def _build_subgraph_node(
     )
 
     def _subgraph_node(state: BlackboardState) -> dict[str, Any]:
-        before_data = dict(state.get("data", {}))
+        child_input = phase_inputs_from_state(state)
+        child_flow = dict(state.get("flow", {}))
+        child_flow["subagent_depth"] = current_subagent_depth(child_flow) + 1
         result = sub_assembled.graph.invoke(
             {
-                "data": before_data,
-                "flow": state.get("flow", {}),
+                "data": {"inputs": child_input, "phase_outputs": {}, "scratch": {}},
+                "flow": child_flow,
                 "messages": [],
                 "run_id": state.get("run_id"),
             }
         )
-        result_data = result.get("data", before_data)
-        data_updates = (
-            _dict_delta(before_data, result_data) if isinstance(result_data, dict) else {}
-        )
+        outputs = phase_outputs_from_state(result)
+        data_updates = _deterministic_child_phase_outputs(outputs)
         return {
             "data": data_updates,
-            "flow": result.get("flow", state.get("flow", {})),
+            "flow": result.get("flow", child_flow),
         }
 
     return _subgraph_node
@@ -245,7 +263,7 @@ def _build_skill_node(
 ) -> Any:
     business_tools = compiled.tools.for_phase(phase_id)
     if isinstance(phase_ast, AgentNodeAST):
-        business_tools = [*business_tools, *_agent_resource_tools(phase_doc, phase_ast)]
+        business_tools = [*business_tools, *_agent_resource_tools(phase_doc, phase_ast, compiled)]
     tool_by_name = {tool.name: tool for tool in business_tools}
     subagent_by_tool_name = _subagent_tool_map(phase_id, compiled)
     subagent_runtime_by_tool_name = _subagent_runtime_map(
@@ -415,16 +433,35 @@ def _agent_system_prompt(
 def _agent_resource_tools(
     phase_doc: PhaseDocument,
     phase_ast: AgentNodeAST,
+    compiled: CompiledSkill,
 ) -> list[Any]:
     root = _skill_root_for_phase_path(phase_doc.path)
     references = {item.id: item for item in phase_ast.references}
     examples = {item.id: item for item in phase_ast.examples}
+    reference_reader = _build_reference_reader_node(root=root, phase_id=phase_doc.phase_name)
 
     def read_reference(reference_id: str) -> str:
         spec = references.get(reference_id)
         if spec is None:
             raise GraphAgentFatalError(f"[F-v3-resource-reference-id-invalid] {reference_id!r}")
-        return _read_skill_root_file(root, spec.path)
+        runtime = ReferenceReaderRuntime(
+            skill_id=compiled.manifest.name,
+            phase_id=phase_doc.phase_name,
+            root=root,
+            timeout_s=60,
+        )
+        sandbox_state = runtime.initial_state()
+        sandbox_inputs = dict(sandbox_state["data"]["inputs"])
+        sandbox_inputs["reference_id"] = reference_id
+        sandbox_inputs["path"] = spec.path
+        sandbox_state = {
+            **sandbox_state,
+            "data": {**sandbox_state["data"], "inputs": sandbox_inputs},
+        }
+        result = reference_reader(sandbox_state)
+        output = phase_outputs_from_state(result).get(phase_doc.phase_name, {})
+        content = output.get("content")
+        return content if isinstance(content, str) else ""
 
     def read_example(example_id: str) -> str:
         spec = examples.get(example_id)
@@ -458,6 +495,20 @@ def _agent_resource_tools(
             )
         )
     return [_structured_tool(tool) for tool in tools]
+
+
+def _build_reference_reader_node(*, root: Path, phase_id: str) -> Any:
+    def _reference_reader_node(state: BlackboardState) -> dict[str, Any]:
+        inputs = phase_inputs_from_state(state)
+        path = inputs.get("path")
+        if not isinstance(path, str):
+            raise GraphAgentFatalError("[F-v3-reference-reader-failed] missing reference path")
+        return {"data": {"content": _read_skill_root_file(root, path)}}
+
+    return PhaseWrapper(
+        StateMapper(phase_id=phase_id),
+        node_kind="reference_reader",
+    ).wrap(_reference_reader_node)
 
 
 def _skill_root_for_phase_path(path: Path) -> Path:
@@ -576,19 +627,17 @@ def _invoke_subagent_once_t23(
     input_data: dict[str, Any],
     config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
-    before_data = dict(parent_state.get("data", {}))
-    child_data = {**before_data, **input_data}
     result = runtime.graph.invoke(
         {
-            "data": child_data,
+            "data": {"inputs": dict(input_data), "phase_outputs": {}, "scratch": {}},
             "flow": parent_state.get("flow", {}),
             "messages": [],
             "run_id": parent_state.get("run_id"),
         },
         config=config,
     )
-    result_data = result.get("data", child_data)
-    data_delta = _dict_delta(before_data, result_data) if isinstance(result_data, dict) else {}
+    result_outputs = phase_outputs_from_state(result)
+    data_delta = _deterministic_child_phase_outputs(result_outputs)
     return {
         "status": "ok",
         "data": data_delta,
@@ -686,6 +735,21 @@ def _subagent_runnable_config(
 
 def _dict_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in after.items() if key not in before or before[key] != value}
+
+
+def _deterministic_child_phase_outputs(
+    phase_outputs: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    data_delta: dict[str, Any] = {}
+    for phase_id in sorted(phase_outputs):
+        for key, value in phase_outputs[phase_id].items():
+            if key in data_delta:
+                raise GraphAgentFatalError(
+                    "[F-v3-runtime-state-mapping-failed] duplicate child output key "
+                    f"{key!r} from phase {phase_id!r}"
+                )
+            data_delta[key] = value
+    return data_delta
 
 
 def _logic_output_schema_keys(compiled: CompiledSkill) -> set[str] | None:

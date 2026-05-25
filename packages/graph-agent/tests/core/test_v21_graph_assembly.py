@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 from graph_agent.core.compiler import compile_skill
-from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
+from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.graph_assembler import assemble_graph
 from langchain_core.messages import AIMessage
 
@@ -116,7 +116,7 @@ def test_assemble_single_logic_phase(tmp_path: Path) -> None:
     graph = assemble_graph(compile_skill(tmp_path, cache=False)).graph
     result = graph.invoke({"data": {}, "flow": {}, "messages": [], "run_id": "r1"})
 
-    assert result["data"]["foo"] == 42
+    assert result["data"]["phase_outputs"]["logic"]["foo"] == 42
 
 
 def test_assemble_single_skill_phase_with_fake_llm(tmp_path: Path) -> None:
@@ -134,7 +134,7 @@ def test_assemble_single_skill_phase_with_fake_llm(tmp_path: Path) -> None:
     result = graph.invoke({"data": {}, "flow": {}, "messages": [], "run_id": "r1"})
 
     assert result["flow"]["finish_task_result"]["ok"] is True
-    assert result["data"]["skill"] == {"result": "ok"}
+    assert result["data"]["phase_outputs"]["skill"] == {"result": "ok"}
     assert chat.messages_seen[0][-1].content == "Call finish_task."
 
 
@@ -154,8 +154,8 @@ def test_assemble_logic_skill_dependency(tmp_path: Path) -> None:
         {"data": {}, "flow": {}, "messages": [], "run_id": "r1"}
     )
 
-    assert result["data"]["foo"] == 42
-    assert result["data"]["skill"] == {"summary": "used"}
+    assert result["data"]["phase_outputs"]["logic"]["foo"] == 42
+    assert result["data"]["phase_outputs"]["skill"] == {"summary": "used"}
 
 
 def test_assemble_fanout_disjoint_data_keys_merge(tmp_path: Path) -> None:
@@ -179,7 +179,10 @@ def test_assemble_fanout_disjoint_data_keys_merge(tmp_path: Path) -> None:
         {"data": {}, "flow": {}, "messages": [], "run_id": "fanout-merge"}
     )
 
-    assert result["data"] == {"a_out": 1, "b_out": 2}
+    assert result["data"]["phase_outputs"] == {
+        "branch_a": {"a_out": 1},
+        "branch_b": {"b_out": 2},
+    }
 
 
 def test_assemble_fanout_same_data_key_conflict_fatal(tmp_path: Path) -> None:
@@ -200,8 +203,11 @@ def test_assemble_fanout_same_data_key_conflict_fatal(tmp_path: Path) -> None:
     _logic_action(tmp_path, "assemble", "assemble", "def assemble(context):\n    return None\n")
 
     graph = assemble_graph(compile_skill(tmp_path, cache=False)).graph
-    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-state-conflict\].*key='shared'"):
-        graph.invoke({"data": {}, "flow": {}, "messages": [], "run_id": "fanout-conflict"})
+    result = graph.invoke({"data": {}, "flow": {}, "messages": [], "run_id": "fanout-conflict"})
+    assert result["data"]["phase_outputs"] == {
+        "branch_a": {"shared": 1},
+        "branch_b": {"shared": 2},
+    }
 
 
 def test_assemble_subgraph_phase(tmp_path: Path) -> None:
@@ -215,7 +221,7 @@ def test_assemble_subgraph_phase(tmp_path: Path) -> None:
         {"data": {}, "flow": {}, "messages": [], "run_id": "r1"}
     )
 
-    assert result["data"]["foo"] == 42
+    assert result["data"]["phase_outputs"]["sub"]["foo"] == 42
 
 
 def test_critic_tool_wired_to_skill(tmp_path: Path) -> None:
@@ -266,7 +272,7 @@ def test_terminal_phase_finish_task_validates(tmp_path: Path) -> None:
         {"data": {}, "flow": {}, "messages": [], "run_id": "r1"}
     )
 
-    assert result["data"]["skill"] == {"count": 42}
+    assert result["data"]["phase_outputs"]["skill"] == {"count": 42}
 
 
 def test_non_terminal_phase_finish_task_no_validate(tmp_path: Path) -> None:
@@ -290,7 +296,7 @@ def test_non_terminal_phase_finish_task_no_validate(tmp_path: Path) -> None:
         {"data": {}, "flow": {}, "messages": [], "run_id": "r1"}
     )
 
-    assert result["data"]["skill"] == {"draft": "unchecked"}
+    assert result["data"]["phase_outputs"]["skill"] == {"draft": "unchecked"}
 
 
 def test_non_terminal_phase_finish_task_empty_data_still_writes_key_placeholder(
@@ -311,5 +317,5 @@ def test_non_terminal_phase_finish_task_empty_data_still_writes_key_placeholder(
         {"data": {}, "flow": {}, "messages": [], "run_id": "r1"}
     )
 
-    assert "skill" in result["data"]
-    assert result["data"]["skill"] == {}
+    assert "skill" in result["data"]["phase_outputs"]
+    assert result["data"]["phase_outputs"]["skill"] == {}

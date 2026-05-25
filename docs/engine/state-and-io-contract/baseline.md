@@ -1,149 +1,194 @@
-# state-and-io-contract (engine) — Baseline (当下代码实现逻辑)
+# state-and-io-contract (engine) — Baseline (PR γ2 当下代码实现逻辑)
 
-> **Status**: Filled by a1 (Codex), 2026-05-20
-> **Scope**: BlackboardState 规约 (data/flow/messages)、Reducer 并发冲突控制、阶段级 IO 隔离、Runtime Input 漏斗 (audit A1/A2/A3/A6)
-> **配套**: 见 [INDEX.md](../../INDEX.md) 5 维模板 + cross-link 规则 + writing conventions。
+> **Status**: Synced by a1 (Codex), 2026-05-25
+> **Scope**: 当前源码事实：BlackboardState 三区、StateMapper、PhaseWrapper、child graph 隔离、reference reader 沙盒、finish_task 写回。
+> **配套**: 字段级运行解释见 [logic-explained.md](./logic-explained.md)。
 
 ## UI/UX
 
 N/A — 此模块为纯 backend Python library, 无 UI / 无前端调用面。
 
-状态合并、IO schema、黑板隔离都发生在 Python engine 内存里，不直接渲染 UI。上层如果要展示 phase 输入输出，需要另行从运行结果或 trace 中读取。
+Studio 如果要展示 phase 输入输出，应读取 γ2 后的 `data.inputs`、`data.phase_outputs`、`data.scratch`，不能再按旧 flat `state["data"][key]` 解释。
 
 ## 前端逻辑
 
-N/A — 此模块为纯 backend Python library, 无 UI / 无前端调用面。
+N/A — 此模块为纯 backend Python library, 无 React 逻辑。
 
-React 不持有 `BlackboardState`，也不执行 reducer。Studio 的 state store 和这里的 engine state 是两套不同东西。
+React 不持有 `BlackboardState`，但 trace/结果面板需要知道：业务输出现在按 `phase_outputs[phase_id]` 归档。
 
 ## 后端功能
 
-### 当前状态模型总览 {#cross-state-blackboard-fields}
+### 当前状态模型总览
 
-`BlackboardState` 是 LangGraph 状态主 dict，定义在 `packages/graph-agent/src/graph_agent/runtime/state.py:35` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:41`。`TypedDict` 第一次出现时需要定义：它是 Python typing 里的 "带固定字段说明的 dict"，运行时仍然像普通 dict，但类型检查器知道有哪些 key。
+`BlackboardState` 定义在 `packages/graph-agent/src/graph_agent/runtime/state.py`。
 
-当前字段是：
+字段：
 
-- `data`: 业务数据黑板，带 `shallow_dict_merge` reducer，见 `packages/graph-agent/src/graph_agent/runtime/state.py:38`。
-- `flow`: 框架控制状态，普通 dict，见 `packages/graph-agent/src/graph_agent/runtime/state.py:39`。
-- `messages`: LLM 对话消息，带 LangGraph `add_messages` reducer，见 `packages/graph-agent/src/graph_agent/runtime/state.py:40`。
-- `run_id`: 本次运行 id，见 `packages/graph-agent/src/graph_agent/runtime/state.py:41`。
+- `data`: `BlackboardData`，带 `blackboard_data_merge` reducer。
+- `flow`: 控制状态 dict。
+- `messages`: LLM 对话消息，带 LangGraph `add_messages` reducer。
+- `run_id`: 本次运行 id。
 
-Reducer 第一次出现时需要定义：它是 LangGraph 合并 node 返回值的函数。例如两个节点都返回 `{"data": {...}}`，LangGraph 需要知道这些 dict 如何合并。当前 `data` 的 reducer 是 `shallow_dict_merge`，`messages` 的 reducer 是 `add_messages`。
+`BlackboardData` 是三区：
 
-这份 state 在 runtime 中如何被 LOGIC/SKILL/SUBGRAPH 节点读写，详见 [execution-runtime/baseline.md#后端功能](../execution-runtime/baseline.md#后端功能)。
+- `inputs`: canonical 初始入参，只读。
+- `phase_outputs`: `dict[str, dict]`，每个 phase 的输出 namespace。
+- `scratch`: 草稿区。
 
-### `shallow_dict_merge`
+`shallow_dict_merge` 当前只是 `blackboard_data_merge` 的兼容别名。
 
-`shallow_dict_merge(left, right)` 定义在 `packages/graph-agent/src/graph_agent/runtime/state.py:13` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:32`。它只合并顶层 key，不做深层递归合并。
+### blackboard_data_merge
 
-当前语义是：
+当前 `data` reducer 先调用 `normalize_blackboard_data()`。如果收到旧 flat dict，会把它规范化成 `{"inputs": raw, "phase_outputs": {}, "scratch": {}}`；如果已经包含 `inputs` / `phase_outputs` / `scratch`，则按三区 deep copy。
 
-1. `left` 为空就返回 `right` 的浅拷贝，见 `packages/graph-agent/src/graph_agent/runtime/state.py:19` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:20`。
-2. `right` 为空就返回 `left` 的浅拷贝，见 `packages/graph-agent/src/graph_agent/runtime/state.py:21` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:22`。
-3. 遍历 `right.items()`，如果 key 已经在 `left` 里，抛 `GraphAgentFatalError("[F-v21-state-conflict] ...")`，见 `packages/graph-agent/src/graph_agent/runtime/state.py:24` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:30`。
-4. 没冲突才写入 merged，见 `packages/graph-agent/src/graph_agent/runtime/state.py:31` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:32`。
+合并规则：
 
-这就是 audit P0-3 的根因：它想防并行分支写同一 key，但在顺序 phase 更新已有 key 时也会冲突。audit P0-3 位置是 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:177`。
+1. right 没有内容时返回 left 规范化结果。
+2. right 写 `inputs`，且 left 已有不同 inputs，抛 `[F-v3-runtime-state-mapping-failed] data.inputs is read-only after initialization`。
+3. right 写 `phase_outputs[phase_id]`，而 left 已有同 phase_id，抛 `[F-v3-state-conflict] phase_outputs[...] written more than once`。
+4. right 写 `scratch[key]`，而 left 已有同 key，抛 `[F-v3-state-conflict] scratch key=... written more than once`。
 
-### data 的当前读写面
+这替代了旧 baseline 里的 flat 顶层 key 冲突模型。
 
-当前 runtime input 直接进入 `data`。`_run_v21_skill_dict()` 把 `**inputs` 变成 `dict(inputs)`，作为 graph 初始 state 的 `data`，见 `packages/graph-agent/src/graph_agent/core/runner.py:471` 到 `packages/graph-agent/src/graph_agent/core/runner.py:477`。这里没有调用 `io/inputs.json` 做 runtime 校验、过滤、默认值填充或类型转换。
+### StateMapper 读写面
 
-LOGIC node 通过 `Context` 读写 `data`。它复制 `state.data`，执行 action 后用 `_dict_delta()` 计算变化，再返回 `{"data": updates}`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:127` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:136`。
+`StateMapper.build_phase_input()` 当前构造 phase-local state：
 
-SUBGRAPH node 把父图当前 `data` 直接传给子图，子图结束后再 diff 出 delta 合回父图，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:155` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:172`。
+- canonical inputs 与上游 `phase_outputs` 通过 `_phase_local_inputs` 合成局部 `inputs`。
+- raw inputs 优先：`setdefault` 不覆盖已有 input。
+- 上游同名输出按 `phase_outputs` 插入序先到先得。
+- 再用 `filter_runtime_inputs` 按 `input_schema.properties` 做 phase input funnel。
+- `phase_outputs` 嵌套区 deep copy 透传。
+- `scratch` 清空。
+- `messages` 清空。
+- `flow` deep copy。
 
-SKILL node 不直接拿一个 `Context`。它主要通过 prompt、tools、subagents 和 `finish_task` 工作。`finish_task` 成功后，runtime 写 `data_updates[phase_id] = result.get("data", {})`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:275` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:291`。
+注意：canonical `data.inputs` 和 phase-local `data.inputs` 不是同一个语义。前者是持久只读入口；后者是当前 phase 的一次性读取视图，可以含上游产出。
 
-### flow 的当前读写面
+`StateMapper.wrap_phase_output()` 当前写回：
 
-`flow` 是控制状态，不是业务输出。SKILL node 会复制 `state.flow`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:236` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:237`。`finish_task` 结果写进 `flow["finish_task_result"]`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:275` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:276`。
+- 普通业务 dict -> `data.phase_outputs[phase_id]`。
+- 返回三区结构但含 `inputs` -> `[F-v3-runtime-state-mapping-failed] data.inputs is read-only`。
+- 有 `output_schema.properties` 时，未声明输出 key -> `[F-v3-runtime-state-mapping-failed] phase wrote undeclared keys: ...`。
 
-subagent 参数校验次数写在 `flow["subagent_validation_retries"]`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:325` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:330`。critic 工具指标写在 `flow["critic_metrics"]`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:279` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:288`。
+### PhaseWrapper
 
-`flow` 没有显式 reducer。它在 `BlackboardState` 里只是 `dict[str, Any]`，见 `packages/graph-agent/src/graph_agent/runtime/state.py:39`。这意味着它不像 `data` 那样有自定义冲突检测，也不像 `messages` 那样有 `add_messages` 追加语义。
+`PhaseWrapper` 是所有 runtime node 的统一漏斗。当前覆盖：
 
-### messages 的当前读写面
+- LOGIC node。
+- Agent / Skill node。
+- SUBGRAPH node。
+- builtin reference reader node。
 
-`messages` 是 LLM 对话历史。它用 LangGraph `add_messages` reducer，见 `packages/graph-agent/src/graph_agent/runtime/state.py:7` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:8` 和 `packages/graph-agent/src/graph_agent/runtime/state.py:40`。
+wrapper 给返回函数写入 `__graph_agent_phase_wrapped__` 和 `__graph_agent_phase_node_kind__`。如果再次包装同一个函数，会抛 `[F-v3-runtime-state-mapping-failed] double-wrap rejected...`。
 
-SKILL node 初始 messages 是 `[SystemMessage(...), *state.get("messages", [])]`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:238`。每轮 ReAct 会把 response 和 tool messages 继续 append，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:243` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:274`。
+### LOGIC / Agent / SUBGRAPH 当前状态行为
 
-因为 `inject_exit_contract()` 产生的 `prompt_messages` 会被保存回 `messages`，`exit_contract` 当前也会进入长期历史，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:243` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:246`。
+LOGIC node：
 
-### IOManager 和 legacy context resolver
+- 从 `phase_inputs_from_state(state)` 取 phase-local inputs。
+- `Context` 在这个局部 dict 上读写。
+- action 写出的 delta 返回给 `wrap_phase_output`，最终落 `phase_outputs[phase_id]`。
 
-`IOManager` 是旧 SKILL.md 驱动 workflow 的声明式 IO helper，不是 V2.1 `run_skill(**inputs)` 的入口漏斗。它定义在 `packages/graph-agent/src/graph_agent/io/manager.py:27` 到 `packages/graph-agent/src/graph_agent/io/manager.py:43`，输入来源支持 runtime/file，输出目标支持 artifact_manager/file，说明写在 `packages/graph-agent/src/graph_agent/io/manager.py:1` 到 `packages/graph-agent/src/graph_agent/io/manager.py:13`。
+Agent / Skill node：
 
-`IOManager.load_inputs(**runtime_args)` 会按 `io_config["inputs"]` 逐项读取 runtime 或 file 输入，见 `packages/graph-agent/src/graph_agent/io/manager.py:65` 到 `packages/graph-agent/src/graph_agent/io/manager.py:106`。但 V2.1 `_run_v21_skill_dict()` 没有调用它；V2.1 入口直接 `dict(inputs)`，见 `packages/graph-agent/src/graph_agent/core/runner.py:473`。
+- ReAct messages 不继承上一 phase 的 messages，因为 wrapper 的 phase-local input 清空 messages。
+- finish_task 成功后由 `CognitiveFlowMiddleware` 写三区结构：`phase_outputs[phase_name] = final_write`。
 
-`ContextResolver` 是旧 `context_mapping` 表达式引擎，定义在 `packages/graph-agent/src/graph_agent/io/context_resolver.py:22` 到 `packages/graph-agent/src/graph_agent/io/context_resolver.py:40`。它把 `{input.scene.scene_id}` 这类表达式从 raw inputs 中解析出来，核心方法在 `packages/graph-agent/src/graph_agent/io/context_resolver.py:41` 到 `packages/graph-agent/src/graph_agent/io/context_resolver.py:59`。V2.1 主线没有把它作为 per-phase input mapping 使用。
+SUBGRAPH node：
+
+- child graph 初始 state 是 fresh blackboard：`inputs=child_input`、`phase_outputs={}`、`scratch={}`、`messages=[]`。
+- parent `phase_outputs`、`scratch`、`messages` 不进入 child。
+- child outputs 只从 child `phase_outputs` 聚合；重复业务 key fatal。
+- 聚合结果再由 parent phase wrapper 写入 `phase_outputs[parent_phase_id]`。
+
+### Subagent child 当前状态行为
+
+subagent child graph 初始 state：
+
+- `data.inputs = dict(input_data)`，只来自工具显式入参。
+- `data.phase_outputs = {}`。
+- `data.scratch = {}`。
+- `messages = []`。
+- `run_id` 透传 parent run_id。
+
+child result 只从 child `phase_outputs` 聚合。child 没有 phase_outputs 时返回空 data，不再用 `_dict_delta(input_data, result_data)` 兼容 flat 旧语义。
+
+### Builtin reference reader 当前状态行为
+
+`ReferenceReaderRuntime` 位于 `packages/graph-agent/src/graph_agent/core/builtin_subagents/reference_reader.py`。
+
+`initial_state()` 通过 `ReaderSandboxState` 返回：
+
+- `data.inputs.skill_id`
+- `data.inputs.phase_id`
+- `data.phase_outputs={}`
+- `data.scratch={}`
+- `flow.timeout_s=60`
+- `messages=[]`
+- `run_id=None`
+
+`graph_assembler` 中 `read_reference` 工具调用会创建该 runtime，并把 `reference_id` / `path` 加入 sandbox inputs，再交给 `node_kind="reference_reader"` 的 `PhaseWrapper`。路径非法或不可读抛 `[F-v3-resource-reference-path-invalid]`；reader path 缺失抛 `[F-v3-reference-reader-failed]`。
+
+### finish_task 当前写回
+
+`CognitiveFlowMiddleware.handle_finish_task_tool_result()` 成功时返回：
+
+```python
+{
+    "data": {
+        "inputs": {},
+        "phase_outputs": {phase_name: final_write},
+        "scratch": {},
+    },
+    "flow": ...,
+    "messages": ...,
+}
+```
+
+这替代旧文档里的 `data={phase_name: final_write}`。schema gate 失败时仍通过 `[F-v3-agent-output-schema-invalid]` / `[F-v3-agent-output-schema-missing]` 给 LLM 反馈，不写业务输出。
 
 ## API
 
-### State API
+当前直接 API：
 
-本模块的直接 API 是 `BlackboardState` 和 `shallow_dict_merge`，由 `packages/graph-agent/src/graph_agent/runtime/state.py:44` 暴露在 `__all__`。`BlackboardState` 给 `StateGraph(BlackboardState)` 使用，装配点在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:63`。
+- `BlackboardData`
+- `BlackboardState`
+- `blackboard_data_merge`
+- `normalize_blackboard_data`
+- `StateMapper`
+- `PhaseWrapper`
+- `ReaderSandboxState`
 
-`shallow_dict_merge` 不是给业务作者直接调用的常规 public API，但它是 state 合并契约的一部分。任何 node 返回 `{"data": ...}` 都会走这个 reducer，因此它的冲突语义会影响 LOGIC、SUBGRAPH、SKILL 三类节点。
-
-### IO API
-
-根级 V2.1 IO 文件由 compiler 校验，而不是 runtime API 校验。`GraphManifest` 默认 `io_inputs_ref` 和 `io_outputs_ref` 分别是 `io/inputs.json`、`io/outputs.json`，见 `packages/graph-agent/src/graph_agent/core/manifest.py:53` 到 `packages/graph-agent/src/graph_agent/core/manifest.py:54`。编译期 `_validate_io_schema()` 校验这些文件，见 `packages/graph-agent/src/graph_agent/core/loader.py:874` 到 `packages/graph-agent/src/graph_agent/core/loader.py:900`。
-
-legacy `IOManager` 的 API 是 `load_inputs()` 和 `save_outputs()`，分别在 `packages/graph-agent/src/graph_agent/io/manager.py:65` 和 `packages/graph-agent/src/graph_agent/io/manager.py:108`。它们说明旧 IO 系统仍在代码中，但不是当前 V2.1 graph runner 的实际 input funnel。
+`filter_runtime_inputs(raw_inputs, schema)` 只按 `schema.properties` 过滤字段；没有 properties 时复制输入。它不是完整 JSON Schema validator。
 
 ## Data Model / State
 
-### audit A1：缺 runtime input funnel
+当前最准确的心智模型：
 
-audit A1 位置是 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:507`。当前实现是 `run_skill(**inputs) -> data = dict(inputs)`，代码证据在 `packages/graph-agent/src/graph_agent/core/runner.py:471` 到 `packages/graph-agent/src/graph_agent/core/runner.py:477`。
+1. 持久黑板分三区。
+2. 同一 graph 内，下游 phase 通过 phase-local input view 读取上游 phase output。
+3. phase 写回必须归档到自己的 `phase_outputs[phase_id]`。
+4. child graph / subagent / reference reader 都从 fresh blackboard 开始，不继承 parent scratch/messages/phase_outputs。
 
-这意味着当下 runtime 不按 `io/inputs.json` 过滤未知字段、不校验类型、不填默认值，也不把输入分发到 phase-level input。`io/inputs.json` 的当下作用主要是编译期 schema 文件合法性、LOGIC context 写键允许集、subagent 工具入参模型来源，而不是 runtime 入口漏斗。
+## Cross-feature Interaction
 
-### audit A2：所有节点读全量 data，缺 phase-level IO contract
+### 与 skill-compilation 的关系
 
-audit A2 位置是 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:547`。当前 LOGIC 和 SUBGRAPH 都直接拿全量 `state.data`：LOGIC 在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:127` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:130`，SUBGRAPH 在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:155` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:160`。
+compilation 负责解析 phase AST、`io.inputs` / `io.outputs`、SUBGRAPH target skill、Agent references。state-and-io-contract 只消费这些编译结果做运行时切片和写回。
 
-当前 `SkillNodeAST` 也没有 phase-level `io` 字段，只有 prompt、exit_contract、tools、subagents，见 `packages/graph-agent/src/graph_agent/core/manifest.py:83` 到 `packages/graph-agent/src/graph_agent/core/manifest.py:90`。因此没有 "这个 phase 只能读哪些字段、只能写哪些字段" 的正式状态契约。
+### 与 execution-runtime 的关系
 
-### audit A3：SUBGRAPH 修改父图 key 的冲突场景
+execution-runtime 执行 node；StateMapper 和 PhaseWrapper 决定 node 能看到什么、能写回什么。runtime 不应绕过 wrapper 直接 patch flat `data`。
 
-audit A3 位置是 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:588`。当前 SUBGRAPH 用父图全量 data 启动子图，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:155` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:164`。子图完成后 `_dict_delta(before_data, result_data)` 取变化，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:165` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:168`。
+### 与 tracing-and-observability 的关系
 
-如果这个 delta 包含父图已经有的 key，`data` reducer 会按冲突处理，因为 `shallow_dict_merge` 在 key 已存在时抛错，见 `packages/graph-agent/src/graph_agent/runtime/state.py:24` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:30`。所以当下 SUBGRAPH 没有父子黑板边界。
+trace 应按三区记录：
 
-### audit A6：agent-called graph 黑板隔离缺失
+- canonical `inputs`
+- phase-local input view
+- `phase_outputs[phase_id]`
+- child canonical input
+- reference reader sandbox input
 
-audit A6 位置是 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:734`。当前 subagent tool 调用子图时，child data 是 `{**before_data, **input_data}`，代码在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:398` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:403`。
-
-这说明子 graph 默认可以看到父 graph 全量业务黑板，再叠加 LLM 显式传入的 input。结果不会自动合回父图 data，而是作为 tool result 回给父 LLM；但子图执行期间的读取边界仍然不是隔离的。这个现状也和 engine-flow 文档对 subagent 初始 data 的解释一致，见 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-engine-flow-explained__by-codex-2026-05-20.md:837`。
-
-### audit P0-3：顺序覆盖冲突
-
-P0-3 是 state 模块最直接的已验证 bug，位置是 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:177`。当前 `shallow_dict_merge({"foo": 1}, {"foo": 2})` 会抛 `[F-v21-state-conflict]`，因为实现不区分顺序更新和并行 fan-in 冲突，见 `packages/graph-agent/src/graph_agent/runtime/state.py:24` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:30`。
-
-这个问题被 LOGIC 和 SUBGRAPH 都触发：LOGIC 返回 `{"data": updates}`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:136`；SUBGRAPH 返回 `{"data": data_updates}`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:169` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:170`。只要 updates 里有已有 key，就会进入 reducer 冲突路径。
-
-### 当前数据契约的实际心智模型
-
-当下最准确的心智模型不是 "每个 phase 有自己的输入对象和输出对象"，而是 "整张图共享一块顶层业务黑板 `data`"。engine-flow 文档也这样总结，见 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-engine-flow-explained__by-codex-2026-05-20.md:1239`。
-
-这块黑板从 `_run_v21_skill_dict()` 的 `dict(inputs)` 开始，见 `packages/graph-agent/src/graph_agent/core/runner.py:473`。LOGIC 可以通过 `Context` 直接读写它，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:130` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:131`。SKILL 通过 `finish_task` 间接写 `data[phase_id]`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:275` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:291`。SUBGRAPH 通过子图 delta 改它，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:165` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:172`。
-
-因此，`io/inputs.json` 和 `io/outputs.json` 在当下不能理解成自动数据路由表。它们在编译期被 `_validate_io_schema()` 校验，见 `packages/graph-agent/src/graph_agent/core/loader.py:874` 到 `packages/graph-agent/src/graph_agent/core/loader.py:900`；output schema keys 会约束 LOGIC action 返回 key，见 `packages/graph-agent/src/graph_agent/core/loader.py:964` 到 `packages/graph-agent/src/graph_agent/core/loader.py:989`；终点 SKILL phase 的 `finish_task` 会使用 output schema，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:215` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:225`。
-
-### 与 skill-compilation 的双向关系
-
-state-and-io-contract 依赖 skill-compilation 提供根级 IO schema 和 phase AST。根级 `GraphManifest` 的默认 input/output refs 在 `packages/graph-agent/src/graph_agent/core/manifest.py:53` 到 `packages/graph-agent/src/graph_agent/core/manifest.py:54`，实际 schema 校验在 `packages/graph-agent/src/graph_agent/core/loader.py:874` 到 `packages/graph-agent/src/graph_agent/core/loader.py:900`。编译侧细节见 [skill-compilation/baseline.md#后端功能](../skill-compilation/baseline.md#后端功能)。
-
-反过来，编译阶段的写键检查无法独立保证 runtime state 安全，因为最终是否冲突由 `shallow_dict_merge` 决定，见 `packages/graph-agent/src/graph_agent/runtime/state.py:13` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:32`。这就是为什么本 feature 要单独记录 P0-3、A1、A2、A3、A6，而不是只放在 compiler 文档里。
-
-### 读代码时的主路径提示
-
-读 state contract 建议先看 `BlackboardState`，位置是 `packages/graph-agent/src/graph_agent/runtime/state.py:35`。再看 `shallow_dict_merge()`，位置是 `packages/graph-agent/src/graph_agent/runtime/state.py:13`。然后回到 `_run_v21_skill_dict()` 看初始 state，位置是 `packages/graph-agent/src/graph_agent/core/runner.py:451`。
-
-如果要理解每类 phase 对 state 的影响，看 LOGIC node 的 `Context` 包装，位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:127`；看 SUBGRAPH node 的 child state，位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:155`；看 SKILL node 的 `finish_task` 写入，位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:275`；看 subagent child data，位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:398`。
-
-如果要理解 legacy IO 和 V2.1 IO 的差别，看 `IOManager.load_inputs()`，位置是 `packages/graph-agent/src/graph_agent/io/manager.py:65`，再对比 V2.1 `dict(inputs)`，位置是 `packages/graph-agent/src/graph_agent/core/runner.py:473`。这两个路径现在不是同一套入口。
+旧 flat `data[key]` 视角已经不能准确解释 γ2 后的结果。

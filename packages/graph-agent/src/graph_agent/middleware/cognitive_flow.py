@@ -875,7 +875,11 @@ def _finish_task_accept_response(
     final_write: dict[str, Any],
 ) -> dict[str, Any]:
     response_state: dict[str, Any] = {"flow": flow, "messages": messages}
-    response_state["data"] = {phase_name: final_write}
+    response_state["data"] = {
+        "inputs": {},
+        "phase_outputs": {phase_name: final_write},
+        "scratch": {},
+    }
     return response_state
 
 

@@ -160,4 +160,4 @@ def test_v030_agent_runtime_uses_cognitive_template_and_resource_tools(tmp_path:
     assert "<output_schema>" in system_prompt
     assert "read_reference" in chat.bound_tool_names
     assert "read_example" in chat.bound_tool_names
-    assert result["data"]["main"] == {"answer": "ok"}
+    assert result["data"]["phase_outputs"]["main"] == {"answer": "ok"}

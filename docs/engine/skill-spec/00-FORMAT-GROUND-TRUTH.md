@@ -318,9 +318,9 @@ knowledge_base 装载 subagent 报错（token 超限/网络超时）→ 不阻�
 | `schema_version` | ✅ 已定 `"v0.3.0"`（带 v，PM 历史确认） |
 | `mode` frontmatter | ✅ 已定**删除**（a1+a2+a3 论证，PM 待最终拍） |
 | `SkillResolverProtocol` | ✅ PM 认可"功能正常即可" |
-| `target_skill` key 名 | ⏳ 待你确认（SUBGRAPH/subagents/subgraphs 都用，PM 未明示这个 key 名是你拍还是 agent 起的） |
-| `@type:NAME` mention 语法 | ⏳ 待你确认（@protocol/@subagent/@reference 等；你 5-22T08:40 提过 7 类 subagents/tools/subgraph/protocol/steps/reference/example） |
-| 错误码 `[F-v3-*]` 字典 | ⏳ 待你确认（命名体系是 agent 设计，是否认可现有命名） |
+| `target_skill` key 名 | ✅ PM 认可（agent 设计，功能正常即可） |
+| `@type:NAME` mention 语法 | ✅ PM 无异议（agent 设计，功能正常即可） |
+| 错误码 `[F-v3-*]` 字典 | ✅ PM 认可（agent 设计，功能正常即可） |
 | exit_contract 缺 md 格式约定 | ⏳ **待补**（5-25 你提的验证点）。md2json (`md2json.py:22/61/88`) 只认 `## 字段名` 二级标题 + 值放标题下 + object 用 ` ```json fence` + 嵌套用 `- 子key: 值` bullet；现有 prompt 只说"遵循 output_schema"没教这套格式 → LLM 易吐纯 JSON → 切段失败 → 校验 fail → patcher 兜底。需把"md 字段→`## 标题`映射"写进 exit_contract 措辞（设计阶段你跟 a2 定文本） |
 
 ---

@@ -1,37 +1,35 @@
-import { useState } from "react"
 import { useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { ArrowDown, ArrowUp, GripVertical, Plus, Trash2 } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item"
+import { cn } from "@/lib/utils"
 import type { RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
-import type { RolesData } from "@/api/llm"
+import type { CredentialsState, RolesData } from "@/api/llm"
 import type { ModelAvailability } from "../availability"
 import {
-  appendProviderToModel,
-  moveModelInRole,
+  ownedProviderCodesForModel,
   removeModelFromRole,
+  roleModelProviderCodes,
   updateRoleModelSettings,
 } from "../role-utils"
 import { IconTooltip } from "./IconTooltip"
 import { ModelSettingsDialog } from "./ModelSettingsDialog"
 import { ProviderChain } from "./ProviderChain"
-import { AvailabilityBadge, CapabilityBadge } from "./RoleBadges"
+import { AvailabilityBadge, ThinkingBadge } from "./RoleBadges"
 
 export function ModelItem({
   data,
   roleName,
   modelCode,
   modelIndex,
-  modelCount,
-  active,
+  credentialsByCode,
   availability,
   testStatuses,
   onChange,
@@ -40,17 +38,16 @@ export function ModelItem({
   roleName: string
   modelCode: string
   modelIndex: number
-  modelCount: number
-  active: boolean
+  credentialsByCode: Record<string, CredentialsState["providers"][number]>
   availability: ModelAvailability
   testStatuses: RoleChainStatusMap
   onChange: (next: RolesData) => void
 }) {
   const role = data.roles[roleName]
   const roleModel = role.models[modelCode]
-  const providers = roleModel.providers
+  const providers = roleModelProviderCodes(data, modelCode, roleModel.providers, credentialsByCode)
   const modelName = data.models[modelCode]?.name ?? modelCode
-  const appendableProviderCodes = Object.keys(data.models[modelCode]?.providers ?? {})
+  const appendableProviderCodes = ownedProviderCodesForModel(data, modelCode, credentialsByCode)
     .filter((providerCode) => !providers.includes(providerCode))
   const {
     attributes,
@@ -58,6 +55,7 @@ export function ModelItem({
     setNodeRef,
     transform,
     transition,
+    isDragging,
   } = useSortable({ id: modelCode })
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -68,32 +66,39 @@ export function ModelItem({
     <div
       ref={setNodeRef}
       style={style}
-      className="rounded-md border border-border bg-muted/15 p-3"
+      className={cn("rounded-md", isDragging && "opacity-70")}
       data-availability={availability}
     >
-      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-            <span className="font-mono">{modelCode}</span>
-            {active ? <Badge variant="outline">active</Badge> : null}
-            <AvailabilityBadge availability={availability} />
-            {data.models[modelCode]?.reasoning ? <CapabilityBadge enabled /> : null}
-          </div>
-          <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{modelName}</div>
-        </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
-          <IconTooltip label={`Drag ${modelCode}`}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              aria-label={`Drag ${modelCode}`}
-              {...attributes}
-              {...listeners}
-            >
-              <GripVertical className="size-3" />
-            </Button>
-          </IconTooltip>
+      <Item
+        variant="outline"
+        size="sm"
+        data-model-row="true"
+        data-dnd-drag-surface="model"
+        className="cursor-grab select-none items-center gap-3 bg-background/60 p-3 ring-inset ring-1 ring-foreground/10 active:cursor-grabbing"
+        {...attributes}
+        {...listeners}
+        role="listitem"
+        aria-label={`Reorder ${modelName}`}
+      >
+        <ItemMedia className="size-6 rounded-sm bg-muted text-[10px] font-mono text-muted-foreground ring-1 ring-foreground/10">
+          {modelIndex + 1}
+        </ItemMedia>
+        <ItemContent className="min-w-0 overflow-hidden gap-1">
+          <ItemTitle
+            data-model-title-row="true"
+            className="line-clamp-none !grid w-full min-w-0 grid-cols-[minmax(0,max-content)_auto] justify-start gap-x-4 overflow-hidden text-sm/relaxed text-card-foreground"
+          >
+            <span data-model-name="true" className="min-w-0 truncate whitespace-nowrap">{modelName}</span>
+            <span data-model-badge-group="true" className="flex shrink-0 items-center gap-2.5">
+              {data.models[modelCode]?.reasoning ? <ThinkingBadge /> : null}
+              <AvailabilityBadge availability={availability} />
+            </span>
+          </ItemTitle>
+        </ItemContent>
+        <ItemActions
+          className="ml-auto shrink-0 gap-1"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
           <ModelSettingsDialog
             modelCode={modelCode}
             modelName={modelName}
@@ -101,98 +106,31 @@ export function ModelItem({
             maxTokens={roleModel.max_tokens ?? null}
             onSubmit={(settings) => onChange(updateRoleModelSettings(data, roleName, modelCode, settings))}
           />
-          <IconTooltip label={`Move ${modelCode} up`}>
+          <IconTooltip label={`Remove ${modelName}`}>
             <Button
               type="button"
               variant="ghost"
               size="icon-xs"
-              aria-label={`Move ${modelCode} up`}
-              disabled={modelIndex === 0}
-              onClick={() => onChange(moveModelInRole(data, roleName, modelCode, -1))}
-            >
-              <ArrowUp className="size-3" />
-            </Button>
-          </IconTooltip>
-          <IconTooltip label={`Move ${modelCode} down`}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              aria-label={`Move ${modelCode} down`}
-              disabled={modelIndex === modelCount - 1}
-              onClick={() => onChange(moveModelInRole(data, roleName, modelCode, 1))}
-            >
-              <ArrowDown className="size-3" />
-            </Button>
-          </IconTooltip>
-          <IconTooltip label={`Remove ${modelCode}`}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              aria-label={`Remove ${modelCode}`}
+              aria-label={`Remove ${modelName}`}
+              className="text-muted-foreground hover:text-foreground"
               onClick={() => onChange(removeModelFromRole(data, roleName, modelCode))}
             >
-              <Trash2 className="size-3" />
+              <Trash2 data-role-icon="true" className="size-3 text-muted-foreground" />
             </Button>
           </IconTooltip>
+        </ItemActions>
+        <div className="basis-full pt-2" onPointerDown={(event) => event.stopPropagation()}>
+          <ProviderChain
+            data={data}
+            roleName={roleName}
+            modelCode={modelCode}
+            providers={providers}
+            appendableProviderCodes={appendableProviderCodes}
+            testStatuses={testStatuses}
+            onChange={onChange}
+          />
         </div>
-      </div>
-      <div className="mb-2 text-[11px] font-medium text-muted-foreground">Provider chain</div>
-      <ProviderChain
-        data={data}
-        roleName={roleName}
-        modelCode={modelCode}
-        providers={providers}
-        testStatuses={testStatuses}
-        onChange={onChange}
-      />
-      <div className="mt-2">
-        <AddProviderSelect
-          providerCodes={appendableProviderCodes}
-          onAppend={(providerCode) => onChange(appendProviderToModel(data, roleName, modelCode, providerCode))}
-        />
-      </div>
+      </Item>
     </div>
-  )
-}
-
-function AddProviderSelect({
-  providerCodes,
-  onAppend,
-}: {
-  providerCodes: string[]
-  onAppend: (providerCode: string) => void
-}) {
-  const [resetKey, setResetKey] = useState(0)
-
-  if (providerCodes.length === 0) {
-    return (
-      <Button type="button" variant="ghost" size="sm" disabled className="text-muted-foreground">
-        All providers added
-      </Button>
-    )
-  }
-
-  return (
-    <Select
-      key={resetKey}
-      onValueChange={(providerCode) => {
-        onAppend(providerCode)
-        setResetKey((value) => value + 1)
-      }}
-    >
-      <SelectTrigger className="w-full sm:w-56" aria-label={`Add provider to model`}>
-        <Plus className="size-3" />
-        <SelectValue placeholder="Add provider" />
-      </SelectTrigger>
-      <SelectContent>
-        {providerCodes.map((providerCode) => (
-          <SelectItem key={providerCode} value={providerCode}>
-            {providerCode}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
   )
 }

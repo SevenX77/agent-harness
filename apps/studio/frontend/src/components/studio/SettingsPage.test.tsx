@@ -349,6 +349,9 @@ describe('SettingsPageContent (api_keys)', () => {
         })}
       />,
     )
+    expect(html).toContain('data-slot="catalog-accordion"')
+    expect(html).toContain('data-slot="catalog-accordion-trigger"')
+    expect(html.indexOf("catalog-accordion-state-icon")).toBeLessThan(html.indexOf("Official Providers"))
     expect(html).toContain('Official Providers')
     expect(html).toContain('Anthropic Official')
     expect(html).toContain('OpenAI Official')
@@ -369,6 +372,8 @@ describe('SettingsPageContent (api_keys)', () => {
   it('renders official and third-party provider cards with primary test actions', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
     expect(html).toContain('API Keys')
+    expect(html).toContain('data-slot="catalog-accordion"')
+    expect(html).toContain('data-slot="catalog-accordion-content"')
     expect(html).toContain('Official Providers')
     expect(html).toContain('Anthropic Official')
     expect(html).toContain('OpenAI Official')
@@ -435,6 +440,7 @@ describe('LLM Roles helpers', () => {
   it('reorderModelInRole moves a model to a target position', () => {
     const next = reorderModelInRole(rolesData, 'copilot_chat', 'DS32R', 'CL46T')
     expect(Object.keys(next.roles.copilot_chat.models)).toEqual(['DS32R', 'CL46T'])
+    expect(next.roles.copilot_chat.active_model).toBe('DS32R')
   })
 
   it('removeProviderFromRole drops the provider at index', () => {

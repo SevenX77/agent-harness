@@ -47,6 +47,7 @@ from app.services.llm_roles import (
     InvalidRoleReference,
     get_role,
     load_roles_file,
+    normalize_role_drafts,
     save_roles_file,
     validate_references,
 )
@@ -445,6 +446,7 @@ async def put_llm_roles(request: RolesData) -> RolesData:
     """Replace the editable LLM roles tree after reference validation."""
 
     try:
+        normalize_role_drafts(request)
         validate_references(request)
         save_roles_file(ROLES_PATH, request)
         saved = load_roles_file(ROLES_PATH)

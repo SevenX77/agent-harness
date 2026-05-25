@@ -1,12 +1,14 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import type { CredentialsState, RolesData } from "../../../api/llm"
-import { LlmRolesTab, ModelSettingsDialog, ModelSettingsFields } from "./LlmRolesTab"
+import { AvailableModelDragPreview, LlmRolesTab, ModelSettingsDialog, ModelSettingsFields } from "./LlmRolesTab"
 import {
   AvailableModelsSidebar,
   buildAvailableModelGroups,
   filterAvailableModelGroups,
 } from "./llm-roles/AvailableModelsSidebar"
+import { roleNameDisplayError, RoleNameDialog, RoleNameFields } from "./llm-roles/RoleNameDialog"
+import { appendAvailableModelToRole, appendRole, normalizeRolesDraft, pruneInvalidRoleProviders, removeRole, renameRole, validateRolesDraft } from "./role-utils"
 
 const credentials: CredentialsState = {
   providers: [
@@ -116,10 +118,14 @@ describe("LlmRolesTab controls", () => {
     const html = renderRolesHtml()
 
     expect(html).toContain('data-slot="card"')
-    expect(html).toContain("Add Role")
-    expect(html).toContain("Add model")
+    expect(html).toContain("Add Graph Agent Role")
+    expect(html).toContain("Add Copilot Role")
+    expect(html).toContain('data-role-add-trigger="true"')
+    expect(html).toContain('data-slot="empty"')
+    expect(html).toContain("Drop model")
     expect(html).toContain("Add provider")
     expect(html).not.toContain('aria-label="LLM roles"')
+    expect(html).not.toContain('aria-label="Add model to role"')
   })
 
   it("renders the model library as an unframed searchable scroll area", () => {
@@ -167,6 +173,32 @@ describe("LlmRolesTab controls", () => {
     expect(html).toContain("text-[9px]")
     expect(html).toContain("hidden xl:inline")
     expect(html).not.toContain("BrainCircuit")
+  })
+
+  it("makes available model cards pointer-draggable for role drop targets", () => {
+    const html = renderToStaticMarkup(<AvailableModelsSidebar credentials={credentials} />)
+
+    expect(html).toContain('data-available-model-drag-source="true"')
+    expect(html).toContain('data-available-model-pointer-drag-source="true"')
+  })
+
+  it("renders a pointer drag preview for available model drops", () => {
+    const html = renderToStaticMarkup(
+      <AvailableModelDragPreview
+        drag={{
+          dragging: true,
+          modelId: "anthropic/claude-opus-4.7",
+          x: 120,
+          y: 240,
+        }}
+      />,
+    )
+
+    expect(html).toContain('data-available-model-drag-preview="true"')
+    expect(html).toContain("anthropic/claude-opus-4.7")
+    expect(html).toContain("translate3d(120px, 240px, 0)")
+    expect(html).toContain("pointer-events-none")
+    expect(html).toContain("ring-primary/40")
   })
 
   it("renders provider labels as badges without native model/provider title tooltips", () => {
@@ -246,16 +278,517 @@ describe("LlmRolesTab controls", () => {
     expect(rolesViewportHtml).toContain('data-role-name="copilot_chat"')
     expect(rolesViewportHtml).not.toContain("Available Models")
     expect(html.indexOf("Available Models")).toBeGreaterThan(modelsSidebarStart)
+    expect(html.slice(rolesScrollAreaStart, rolesViewportStart)).toContain("[&amp;_[data-slot=scroll-area-scrollbar]]:hidden")
     expect(html).toContain("lg:grid-cols-[minmax(0,1fr)_minmax(14rem,20vw)]")
     expect(html).toContain("2xl:grid-cols-[minmax(0,1fr)_minmax(14rem,18rem)]")
     expect(html).not.toContain("lg:grid-cols-[minmax(0,1fr)_18rem]")
   })
 
-  it("uses shadcn select primitives for role controls", () => {
+  it("uses shadcn dropdown primitives for provider add controls", () => {
     const html = renderRolesHtml()
 
-    expect(html).toContain('data-slot="select-trigger"')
+    expect(html).toContain('data-slot="dropdown-menu-trigger"')
+    expect(html).toContain('data-provider-add-trigger="true"')
+    expect(html).not.toContain('aria-label="Add provider to model"')
+    expect(html).not.toContain('data-slot="select-trigger"')
     expect(html).not.toContain('class="mt-1 h-8 rounded-md border border-input bg-background px-2 text-xs"')
+  })
+
+  it("keeps model row content centered with breathing room between title and badges", () => {
+    const html = renderRolesHtml()
+
+    expect(html).toContain('data-model-row="true"')
+    expect(html).toContain("items-center")
+    expect(html).toContain('data-model-title-row="true"')
+    expect(html).toContain('data-model-badge-group="true"')
+    expect(html).toContain("grid-cols-[minmax(0,max-content)_auto]")
+    expect(html).toContain("gap-x-4")
+    expect(html).toContain("gap-2.5")
+  })
+
+  it("keeps provider names single-line with a tooltip for overflow", () => {
+    const html = renderRolesHtml()
+
+    expect(html).toContain('data-provider-title-tooltip="true"')
+    expect(html).toContain("truncate")
+    expect(html).toContain("whitespace-nowrap")
+    expect(html).toContain("flex-nowrap")
+  })
+
+  it("prevents text selection on every draggable surface", () => {
+    const html = renderRolesHtml()
+    const availableModelsHtml = renderToStaticMarkup(<AvailableModelsSidebar credentials={credentials} />)
+
+    expect(html).toContain('data-dnd-drag-surface="model"')
+    expect(html).toContain('data-dnd-drag-surface="provider"')
+    expect(html).toContain("select-none")
+    expect(availableModelsHtml).toContain('data-available-model-drag-source="true"')
+    expect(availableModelsHtml).toContain("select-none")
+  })
+
+  it("accepts available model drops across the role card content area", () => {
+    const html = renderRolesHtml()
+
+    expect(html).toMatch(/data-slot="card"[^>]*data-role-name="copilot_chat"[^>]*data-model-drop-zone="true"/)
+    expect(html).toContain('data-model-drop-zone="true"')
+    expect(html).toContain('data-model-drop-target="true"')
+    expect(html).toContain('data-model-drop-fallback="active-drag-ref"')
+    expect(html).toContain('data-role-drop-shield="true"')
+  })
+
+  it("renders provider rows as capped-width grid tracks with a ghost dropdown button", () => {
+    const html = renderRolesHtml()
+
+    expect(html).toContain('data-provider-grid="true"')
+    expect(html).toContain("grid-cols-[repeat(auto-fill,minmax(min(100%,12rem),20rem))]")
+    expect(html).toContain("justify-start")
+    expect(html).not.toContain("grid-cols-[repeat(auto-fit,minmax(min(100%,max(12rem,calc((100%_-_0.75rem)/3))),1fr))]")
+    expect(html).not.toContain("grid-cols-[repeat(auto-fit,minmax(12rem,1fr))]")
+    expect(html).toContain('data-provider-add-trigger="true"')
+    expect(html).toContain('data-variant="ghost"')
+    expect(html).toContain("h-9 w-full")
+    expect(html).toContain("hover:bg-muted/35")
+    expect(html).toContain("Add provider")
+    expect(html).not.toContain("All providers added")
+
+    const allProvidersAddedData: RolesData = {
+      ...rolesData,
+      roles: {
+        copilot_chat: {
+          ...rolesData.roles.copilot_chat,
+          models: {
+            CL46T: {
+              ...rolesData.roles.copilot_chat.models.CL46T,
+              providers: ["anthropic", "openai_proxy"],
+            },
+          },
+        },
+      },
+    }
+    const filledHtml = renderRolesHtml({ data: allProvidersAddedData })
+
+    expect(filledHtml).not.toContain('data-provider-add-trigger="true"')
+  })
+
+  it("uses subdued provider card text and role editor icons", () => {
+    const html = renderRolesHtml()
+
+    expect(html).toContain('data-provider-title-tooltip="true"')
+    expect(html).toContain("text-muted-foreground")
+    expect(html).toContain('data-role-icon="true"')
+  })
+
+  it("adds named roles as empty drafts that can auto-save", () => {
+    const next = appendRole(rolesData, "planner_role")
+
+    expect(Object.keys(next.roles)).toEqual(["copilot_chat", "planner_role"])
+    expect(next.roles.planner_role).toEqual({
+      model_fallback: true,
+      active_model: "",
+      models: {},
+    })
+    expect(validateRolesDraft(next)).toBeNull()
+  })
+
+  it("normalizes stale active models before roles autosave", () => {
+    const next = normalizeRolesDraft({
+      ...rolesData,
+      roles: {
+        ...rolesData.roles,
+        test: {
+          model_fallback: true,
+          active_model: "unknown model",
+          models: {},
+        },
+        stale_model: {
+          model_fallback: true,
+          active_model: "unknown model",
+          models: {
+            "unknown model": { providers: [] },
+          },
+        },
+      },
+    })
+
+    expect(next.roles.test.active_model).toBe("")
+    expect(next.roles.stale_model.active_model).toBe("")
+    expect(next.roles.stale_model.models).toEqual({})
+    expect(validateRolesDraft(next)).toBeNull()
+  })
+
+  it("renames role keys without changing role configuration", () => {
+    const dataWithSingleModelRole: RolesData = {
+      ...rolesData,
+      single_model_roles: ["copilot_chat"],
+    }
+
+    const next = renameRole(dataWithSingleModelRole, "copilot_chat", "planner_role")
+
+    expect(Object.keys(next.roles)).toEqual(["planner_role"])
+    expect(next.roles.planner_role).toEqual(rolesData.roles.copilot_chat)
+    expect(next.roles.copilot_chat).toBeUndefined()
+    expect(next.single_model_roles).toEqual(["planner_role"])
+  })
+
+  it("uses a role name dialog for add and edit flows", () => {
+    const html = renderRolesHtml()
+    const dialogHtml = renderToStaticMarkup(
+      <RoleNameDialog
+        title="New role"
+        initialName=""
+        existingNames={Object.keys(rolesData.roles)}
+        open
+        trigger={<button type="button">Open</button>}
+        onSubmit={vi.fn()}
+      />,
+    )
+    const fieldsHtml = renderToStaticMarkup(
+      <RoleNameFields
+        inputId="role-name-test"
+        nameDraft="planner_role"
+        error={null}
+        onNameChange={vi.fn()}
+      />,
+    )
+
+    expect(html).toContain('data-role-actions-trigger="true"')
+    expect(html).not.toContain(">Edit</button>")
+    expect(dialogHtml).toContain('data-slot="dialog-trigger"')
+    expect(fieldsHtml).toContain('data-slot="field-set"')
+    expect(fieldsHtml).toContain("Role name")
+    expect(fieldsHtml).toContain('value="planner_role"')
+    expect(dialogHtml).not.toContain("disabled")
+  })
+
+  it("groups roles into graph agent and copilot accordion sections", () => {
+    const groupedData: RolesData = {
+      ...rolesData,
+      roles: {
+        planner: {
+          model_fallback: true,
+          active_model: "",
+          models: {},
+        },
+        copilot_chat: rolesData.roles.copilot_chat,
+      },
+    }
+    const html = renderRolesHtml({ data: groupedData })
+
+    expect(html).toContain('data-slot="catalog-accordion"')
+    expect(html).toContain('data-slot="catalog-accordion-trigger"')
+    expect(html).toContain('data-role-category="graph-agent"')
+    expect(html).toContain("Graph Agent Roles")
+    expect(html).toContain('data-role-category="copilot"')
+    expect(html).toContain("Copilot Roles")
+    expect(html.indexOf("Graph Agent Roles")).toBeLessThan(html.indexOf("Copilot Roles"))
+    expect(html.indexOf("catalog-accordion-state-icon")).toBeLessThan(html.indexOf("Graph Agent Roles"))
+    expect(html.indexOf("Graph Agent Roles")).toBeLessThan(html.indexOf("lucide-cog"))
+    expect(html).not.toContain("lucide-workflow")
+  })
+
+  it("keeps empty role categories visible and uses default title typography", () => {
+    const graphOnlyData: RolesData = {
+      ...rolesData,
+      roles: {
+        Premium: {
+          model_fallback: true,
+          active_model: "",
+          models: {},
+        },
+      },
+    }
+    const html = renderRolesHtml({ data: graphOnlyData })
+    const titleIndex = html.indexOf('data-slot="card-title"')
+    const titleEnd = html.indexOf("</div>", titleIndex)
+    const titleHtml = html.slice(titleIndex, titleEnd)
+
+    expect(html).toContain('data-role-category="graph-agent"')
+    expect(html).toContain('data-role-category="copilot"')
+    expect(html).toContain("No Copilot roles configured.")
+    expect(html).toContain("Add Graph Agent Role")
+    expect(html).toContain("Add Copilot Role")
+    expect(titleHtml).not.toContain("font-mono")
+  })
+
+  it("uses a role title icon and dropdown actions for edit and delete", () => {
+    const html = renderRolesHtml()
+
+    expect(html).toContain('data-role-title-icon="true"')
+    expect(html).toContain('data-role-actions-trigger="true"')
+    expect(html).toContain('aria-label="More actions for copilot_chat"')
+    expect(html).not.toContain('data-role-edit-trigger="true"')
+    expect(html).not.toContain(">Edit</button>")
+  })
+
+  it("removes role entries from role maps and grouping metadata", () => {
+    const dataWithMetadata: RolesData = {
+      ...rolesData,
+      single_model_roles: ["copilot_chat"],
+      peer_model_groups: {
+        default: ["copilot_chat", "planner"],
+      },
+      roles: {
+        ...rolesData.roles,
+        planner: {
+          model_fallback: true,
+          active_model: "",
+          models: {},
+        },
+      },
+    }
+
+    const next = removeRole(dataWithMetadata, "copilot_chat")
+
+    expect(next.roles.copilot_chat).toBeUndefined()
+    expect(next.roles.planner).toBeTruthy()
+    expect(next.single_model_roles).toEqual([])
+    expect(next.peer_model_groups).toEqual({ default: ["planner"] })
+  })
+
+  it("does not show role name errors until submit and checks duplicates case-insensitively", () => {
+    expect(roleNameDisplayError("", ["copilot_chat"], "", false)).toBeNull()
+    expect(roleNameDisplayError("copilot_chat", ["copilot_chat"], "", false)).toBeNull()
+    expect(roleNameDisplayError("", ["copilot_chat"], "", true)).toBe("Role name is required.")
+    expect(roleNameDisplayError("copilot_chat", ["copilot_chat"], "", true)).toBe("Role name already exists.")
+    expect(roleNameDisplayError("Copilot_Chat", ["copilot_chat"], "", true)).toBe("Role name already exists.")
+  })
+
+  it("keeps role fallback controls in the right header action group", () => {
+    const html = renderRolesHtml()
+
+    expect(html).toContain('data-role-card-title-row="true"')
+    expect(html).toContain('data-role-header-actions="true"')
+    expect(html).toContain("items-center")
+    expect(html).toContain("self-center")
+    expect(html).toContain("row-span-1")
+    expect(html).toContain("flex-nowrap")
+    expect(html).toContain("h-8")
+    expect(html).toContain("justify-self-end")
+    expect(html).toContain("model_fallback")
+    expect(html).toContain('data-role-test-trigger="true"')
+  })
+
+  it("lazy renders available model cards without changing the full result count", () => {
+    const manyModelsCredentials: CredentialsState = {
+      providers: [{
+        id: "bulk-provider",
+        name: "Bulk Provider",
+        api_key: "sk-bulk",
+        available_models: Array.from({ length: 50 }, (_, index) => ({ id: `bulk-model-${index}` })),
+      }],
+    }
+    const html = renderToStaticMarkup(<AvailableModelsSidebar credentials={manyModelsCredentials} />)
+    const renderedCards = html.match(/data-available-model-drag-source="true"/g) ?? []
+
+    expect(html).toContain('data-lazy-list="available-models"')
+    expect(html).toContain('data-lazy-sentinel="available-models"')
+    expect(html).toContain('aria-label="50 available models"')
+    expect(renderedCards.length).toBeGreaterThan(0)
+    expect(renderedCards.length).toBeLessThan(50)
+  })
+
+  it("lazy renders role cards before the add-role action", () => {
+    const manyRolesData: RolesData = {
+      ...rolesData,
+      roles: Object.fromEntries(
+        Array.from({ length: 12 }, (_, index) => [
+          `role_${index}`,
+          {
+            model_fallback: true,
+            active_model: "CL46T",
+            models: {
+              CL46T: { providers: ["anthropic"], temperature: null, max_tokens: null },
+            },
+          },
+        ]),
+      ),
+    }
+    const html = renderRolesHtml({ data: manyRolesData })
+    const renderedRoles = html.match(/data-role-name="/g) ?? []
+
+    expect(html).toContain('data-lazy-list="roles"')
+    expect(html).toContain('data-lazy-sentinel="roles"')
+    expect(renderedRoles.length).toBeGreaterThan(0)
+    expect(renderedRoles.length).toBeLessThan(12)
+    expect(html).toContain("Add Graph Agent Role")
+    expect(html).toContain("Add Copilot Role")
+  })
+
+  it("shows readable model names instead of active model controls or model abbreviations", () => {
+    const html = renderRolesHtml()
+
+    expect(html).toContain("Claude Sonnet 4.6 Thinking")
+    expect(html).toContain("DeepSeek V4 Pro")
+    expect(html).not.toContain("configured for this model")
+    expect(html).not.toContain("Provider chain")
+    expect(html).not.toContain("Active model")
+    expect(html).not.toContain("First model attempted before fallback.")
+    expect(html).not.toContain(">CL46T<")
+    expect(html).not.toContain(">DS32R<")
+    expect(html).not.toContain(">GPT5<")
+    expect(html).not.toContain(">active<")
+  })
+
+  it("filters role providers to the providers owned by that model", () => {
+    const dataWithMismatchedProvider: RolesData = {
+      ...rolesData,
+      providers: {
+        ...rolesData.providers,
+        gemini: { name: "Gemini Official", type: "google_genai" },
+      },
+      models: {
+        ...rolesData.models,
+        CL46T: {
+          ...rolesData.models.CL46T,
+          name: "claude-opus-4-1",
+          providers: {
+            anthropic: "claude-opus-4-1",
+            gemini: "gemini-3.1-pro-preview",
+          },
+        },
+      },
+      roles: {
+        copilot_chat: {
+          ...rolesData.roles.copilot_chat,
+          models: {
+            CL46T: { providers: ["anthropic", "gemini"], temperature: 0.2, max_tokens: 8192 },
+          },
+        },
+      },
+    }
+    const html = renderRolesHtml({ data: dataWithMismatchedProvider })
+    const roleCardStart = html.indexOf('data-role-name="copilot_chat"')
+    const sidebarStart = html.indexOf("<aside", roleCardStart)
+    const roleCardHtml = html.slice(roleCardStart, sidebarStart)
+
+    expect(roleCardHtml).toContain("Anthropic")
+    expect(roleCardHtml).not.toContain("Gemini Official")
+  })
+
+  it("materializes credential providers when adding available models to a role", () => {
+    const customCredentials: CredentialsState = {
+      providers: [{
+        id: "custom-532dc361-de53-480e-864f-188d9271ef34",
+        name: "Anthropic Custom",
+        api_key: "sk-custom",
+        base_url: "https://example.test/v1",
+        provider_type: "anthropic_compatible",
+        available_models: [
+          { id: "anthropic/claude-opus-4.7", capabilities: { thinking: true } },
+        ],
+      }],
+    }
+    const next = appendAvailableModelToRole(
+      rolesData,
+      "copilot_chat",
+      "anthropic/claude-opus-4.7",
+      Object.fromEntries(customCredentials.providers.map((provider) => [provider.id, provider])),
+    )
+    const modelCode = Object.keys(next.roles.copilot_chat.models)
+      .find((code) => next.models[code]?.name === "anthropic/claude-opus-4.7")
+
+    expect(modelCode).toBeTruthy()
+    expect(next.providers["custom-532dc361-de53-480e-864f-188d9271ef34"]).toEqual({
+      name: "Anthropic Custom",
+      type: "anthropic_compatible",
+      base_url: "https://example.test/v1",
+    })
+    expect(next.models[modelCode!].providers).toEqual({
+      "custom-532dc361-de53-480e-864f-188d9271ef34": "anthropic/claude-opus-4.7",
+    })
+    expect(next.roles.copilot_chat.models[modelCode!].providers).toEqual([
+      "custom-532dc361-de53-480e-864f-188d9271ef34",
+    ])
+    expect(validateRolesDraft(next)).toBeNull()
+  })
+
+  it("flags unknown role providers before the backend rejects the save", () => {
+    const invalidData: RolesData = {
+      ...rolesData,
+      roles: {
+        ...rolesData.roles,
+        copilot_chat: {
+          ...rolesData.roles.copilot_chat,
+          models: {
+            CL46T: { providers: ["missing-provider"], temperature: null, max_tokens: null },
+          },
+        },
+      },
+    }
+
+    expect(validateRolesDraft(invalidData)).toBe(
+      "copilot_chat: Model CL46T references unknown provider missing-provider",
+    )
+  })
+
+  it("repairs a failed custom-provider draft when credential metadata is available", () => {
+    const providerId = "custom-532dc361-de53-480e-864f-188d9271ef34"
+    const customCredentials: CredentialsState = {
+      providers: [{
+        id: providerId,
+        name: "Anthropic Custom",
+        api_key: "sk-custom",
+        base_url: "https://example.test/v1",
+        provider_type: "anthropic_compatible",
+        available_models: [{ id: "anthropic/claude-opus-4.7" }],
+      }],
+    }
+    const failedDraft: RolesData = {
+      ...rolesData,
+      models: {
+        ...rolesData.models,
+        "anthropic/claude-opus-4.7": {
+          name: "anthropic/claude-opus-4.7",
+          reasoning: true,
+          providers: { [providerId]: "anthropic/claude-opus-4.7" },
+        },
+      },
+      roles: {
+        copilot_chat: {
+          ...rolesData.roles.copilot_chat,
+          active_model: "anthropic/claude-opus-4.7",
+          models: {
+            "anthropic/claude-opus-4.7": { providers: [providerId], temperature: null, max_tokens: null },
+          },
+        },
+      },
+    }
+
+    const repaired = pruneInvalidRoleProviders(
+      failedDraft,
+      Object.fromEntries(customCredentials.providers.map((provider) => [provider.id, provider])),
+    )
+
+    expect(repaired.providers[providerId]).toEqual({
+      name: "Anthropic Custom",
+      type: "anthropic_compatible",
+      base_url: "https://example.test/v1",
+    })
+    expect(repaired.roles.copilot_chat.models["anthropic/claude-opus-4.7"].providers).toEqual([providerId])
+    expect(validateRolesDraft(repaired)).toBeNull()
+  })
+
+  it("uses whole-row drag surfaces without explicit drag or arrow controls", () => {
+    const html = renderRolesHtml()
+
+    expect(html).toContain('data-dnd-drag-surface="model"')
+    expect(html).toContain('data-dnd-drag-surface="provider"')
+    expect(html).toContain('data-slot="item"')
+    expect(html).toContain('data-variant="outline"')
+    expect(html).toContain('data-variant="muted"')
+    expect(html).not.toContain('aria-label="Drag')
+    expect(html).not.toContain('aria-label="Move')
+  })
+
+  it("uses a primary default-size test button on the role header", () => {
+    const html = renderRolesHtml()
+
+    expect(html).toContain('data-role-test-trigger="true"')
+    expect(html).toContain('data-variant="default"')
+    expect(html).toContain('data-size="default"')
+    expect(html).toContain("min-w-20")
+    expect(html).toContain(">Test</button>")
+    expect(html).not.toContain("Test Chain")
   })
 
   it("uses semantic destructive badges instead of hard-coded red utility colors", () => {
@@ -289,7 +822,7 @@ describe("LlmRolesTab controls", () => {
     )
 
     expect(triggerHtml).toContain('data-slot="dialog-trigger"')
-    expect(triggerHtml).toContain('aria-label="Model settings for CL46T"')
+    expect(triggerHtml).toContain('aria-label="Model settings for Claude Sonnet 4.6 Thinking"')
     expect(fieldsHtml).toContain('data-slot="field-set"')
     expect(fieldsHtml).toContain("Temperature")
     expect(fieldsHtml).toContain("Max Tokens")

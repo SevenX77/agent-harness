@@ -37,16 +37,22 @@ export function useDebouncedRolesSave(
       setStatus("saving")
       try {
         const next = await putFn(payload)
-        setStatus("saved")
-        setLastError(null)
-        onSaved?.(next)
+        const hasBufferedSave = Boolean(pendingSnapshotRef.current)
+        if (!hasBufferedSave) {
+          setStatus("saved")
+          setLastError(null)
+          onSaved?.(next)
+        }
         return next
       } catch (error) {
-        setStatus("error")
-        setLastError(error)
-        const message = error instanceof Error ? error.message : "Save failed"
-        toast.error(`LLM Roles save failed: ${message}`)
-        onError?.(error)
+        const hasBufferedSave = Boolean(pendingSnapshotRef.current)
+        if (!hasBufferedSave) {
+          setStatus("error")
+          setLastError(error)
+          const message = error instanceof Error ? error.message : "Save failed"
+          toast.error(`LLM Roles save failed: ${message}`)
+          onError?.(error)
+        }
         return null
       } finally {
         inflightRef.current = null
@@ -64,12 +70,12 @@ export function useDebouncedRolesSave(
     (getSnapshot: () => RolesData | null) => {
       if (timerRef.current) clearTimeout(timerRef.current)
       setStatus("pending")
+      if (inflightRef.current) {
+        pendingSnapshotRef.current = getSnapshot
+        return
+      }
       timerRef.current = setTimeout(() => {
         timerRef.current = null
-        if (inflightRef.current) {
-          pendingSnapshotRef.current = getSnapshot
-          return
-        }
         inflightRef.current = performSave(getSnapshot)
       }, delayMs)
     },

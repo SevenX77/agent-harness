@@ -390,7 +390,7 @@ class LLMClientManager:
             kwargs["temperature"] = 1.0
             kwargs["thinking"] = {
                 "type": "adaptive",
-                "budget_tokens": max(max_tokens, 4096),
+                "budget_tokens": _anthropic_thinking_budget(max_tokens),
             }
             try:
                 response = _anthropic_messages_create(client, kwargs)
@@ -399,7 +399,7 @@ class LLMClientManager:
                     raise
                 kwargs["thinking"] = {
                     "type": "enabled",
-                    "budget_tokens": max(max_tokens, 4096),
+                    "budget_tokens": _anthropic_thinking_budget(max_tokens),
                 }
                 response = _anthropic_messages_create(client, kwargs)
         else:
@@ -661,6 +661,10 @@ def _split_anthropic_messages(messages: Sequence[MessageDict]) -> tuple[str, lis
 def _is_anthropic_adaptive_rejection(exc: Exception) -> bool:
     text = str(exc).lower()
     return "adaptive" in text or "extra inputs" in text
+
+
+def _anthropic_thinking_budget(max_tokens: int) -> int:
+    return max(1, min(4096, max_tokens - 1))
 
 
 def _anthropic_messages_create(client: Anthropic, kwargs: Mapping[str, object]) -> object:

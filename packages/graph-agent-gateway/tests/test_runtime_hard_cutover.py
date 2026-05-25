@@ -224,6 +224,30 @@ def test_runtime_uses_route_secret_and_no_provider_env(
     assert dispatch["messages"][0] == {"role": "system", "content": "Always be exact."}
 
 
+def test_thinking_protocol_uses_capability_value_not_field_presence() -> None:
+    from graph_agent_gateway.registry.schema import CapabilityValue
+    from graph_agent_gateway.resolver import ModelResolver
+
+    snapshot = _snapshot()
+    route = snapshot.provider_routes["openai-direct:gpt-5"]
+    snapshot.provider_routes["openai-direct:gpt-5"] = route.model_copy(
+        update={
+            "capabilities": {
+                "thinking_protocol": CapabilityValue(value=False, source="manual"),
+            }
+        }
+    )
+    client_manager = RecordingClientManager()
+    model = ModelResolver(
+        registry_snapshot=snapshot,
+        client_manager=client_manager,
+    ).resolve("graph_agent")
+
+    model.invoke([HumanMessage(content="hello")])
+
+    assert client_manager.dispatches[0]["kwargs"]["reasoning"] is False
+
+
 def test_legacy_roles_schema_is_fatal(tmp_path: Path) -> None:
     from graph_agent_gateway.resolver import ModelResolver
 

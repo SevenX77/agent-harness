@@ -125,3 +125,34 @@ def test_token_escalation_rounds_come_from_runtime_policy() -> None:
 
     assert result["content"] == "partial"
     assert calls == [2]
+
+
+def test_anthropic_thinking_budget_stays_below_max_tokens(monkeypatch) -> None:
+    from graph_agent_gateway import client_manager
+    from graph_agent_gateway.client_manager import LLMClientManager
+
+    captured: list[dict[str, object]] = []
+
+    def fake_messages_create(_client: object, kwargs: dict[str, object]) -> dict[str, object]:
+        captured.append(dict(kwargs))
+        return {
+            "content": [{"type": "text", "text": "ok"}],
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+            "stop_reason": "end_turn",
+        }
+
+    monkeypatch.setattr(client_manager, "_anthropic_messages_create", fake_messages_create)
+
+    result = LLMClientManager._call_anthropic_compatible(
+        object(),  # type: ignore[arg-type]
+        "claude-sonnet-4-6",
+        [{"role": "user", "content": "hello"}],
+        512,
+        0,
+        reasoning=True,
+    )
+
+    assert result["content"] == "ok"
+    thinking = captured[0]["thinking"]
+    assert isinstance(thinking, dict)
+    assert thinking["budget_tokens"] < captured[0]["max_tokens"]

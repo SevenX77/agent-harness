@@ -1,17 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
-import { isValidElement, type ReactElement, type ReactNode } from "react"
-import { toast } from "sonner"
+import type { ReactElement } from "react"
 import { ProviderCard, ProviderDeleteButton, apiKeyInputClassName, apiKeyInputType, sortModelInfos } from "./ProviderCard"
+import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog"
 import type { CredentialsState, TestStatus } from "../../../api/llm"
 import { providerTestParamsFingerprint } from "../settings/provider-utils"
 import type { ProviderDraft } from "../settings/types"
-
-const toastMock = vi.hoisted(() => vi.fn())
-
-vi.mock("sonner", () => ({
-  toast: toastMock,
-}))
 
 const draft: ProviderDraft = {
   id: "p1",
@@ -58,46 +52,6 @@ function renderCardHtml({
       showManualModelPanel={showManualModelPanel}
     />,
   )
-}
-
-function textOf(node: ReactNode): string {
-  if (node === null || node === undefined || typeof node === "boolean") {
-    return ""
-  }
-  if (typeof node === "string" || typeof node === "number") {
-    return String(node)
-  }
-  if (Array.isArray(node)) {
-    return node.map(textOf).join("")
-  }
-  if (isValidElement(node)) {
-    return textOf((node as ReactElement<{ children?: ReactNode }>).props.children)
-  }
-  return ""
-}
-
-function findElement(
-  node: ReactNode,
-  predicate: (element: ReactElement<Record<string, unknown>>) => boolean,
-): ReactElement<Record<string, unknown>> | null {
-  if (!isValidElement(node)) {
-    return null
-  }
-
-  const element = node as ReactElement<Record<string, unknown>>
-  if (predicate(element)) {
-    return element
-  }
-
-  const children = element.props.children as ReactNode
-  if (Array.isArray(children)) {
-    for (const child of children) {
-      const match = findElement(child, predicate)
-      if (match) return match
-    }
-    return null
-  }
-  return findElement(children, predicate)
 }
 
 describe("ProviderCard API key masking", () => {
@@ -502,38 +456,24 @@ describe("ProviderCard manual model panel", () => {
 })
 
 describe("ProviderCard delete confirmation", () => {
-  it("delete trigger uses a sonner toast action instead of AlertDialog", () => {
+  it("delete trigger uses the shared confirmation dialog", () => {
     const onDelete = vi.fn()
     const element = ProviderDeleteButton({ draftName: "OpenAI", onDelete })
-    const trigger = findElement(element, (candidate) => candidate.props["aria-label"] === "Delete provider")
+    const html = renderToStaticMarkup(<ProviderDeleteButton draftName="OpenAI" onDelete={onDelete} />)
 
-    expect(textOf(element)).not.toContain("Confirm")
-    expect(textOf(element)).not.toContain("Delete OpenAI?")
-    expect(trigger?.props.onClick).toBeTypeOf("function")
-    ;(trigger!.props.onClick as () => void)()
-
-    expect(toast).toHaveBeenCalledWith(
-      "Delete OpenAI?",
-      expect.objectContaining({
-        description: "This provider configuration will be removed from the credentials document.",
-        action: expect.objectContaining({ label: "Delete" }),
-        cancel: expect.objectContaining({ label: "Cancel" }),
-        classNames: expect.objectContaining({
-          actionButton: "!bg-destructive !text-destructive-foreground hover:!bg-destructive/90",
-        }),
-      }),
-    )
-    expect(onDelete).not.toHaveBeenCalled()
+    expect(element.type).toBe(DeleteConfirmDialog)
+    expect(element.props.itemName).toBe("OpenAI")
+    expect(element.props.description).toBe("This provider configuration will be removed from the credentials document.")
+    expect(html).toContain('data-delete-confirm-trigger="true"')
   })
 
-  it("toast delete action is wired to call onDelete", () => {
+  it("delete trigger remains wired to the provider delete button", () => {
     const onDelete = vi.fn()
-    ProviderDeleteButton({ draftName: "OpenAI", onDelete }).props.onClick?.()
-    const options = vi.mocked(toast).mock.calls.at(-1)?.[1] as {
-      action?: { onClick?: () => void }
-    }
+    const element = ProviderDeleteButton({ draftName: "OpenAI", onDelete })
+    const trigger = element.props.trigger as ReactElement<Record<string, unknown>>
 
-    options.action?.onClick?.()
-    expect(onDelete).toHaveBeenCalledTimes(1)
+    expect(element.props.onConfirm).toBe(onDelete)
+    expect(trigger.props["aria-label"]).toBe("Delete provider")
+    expect(trigger.props["data-delete-confirm-trigger"]).toBe(true)
   })
 })

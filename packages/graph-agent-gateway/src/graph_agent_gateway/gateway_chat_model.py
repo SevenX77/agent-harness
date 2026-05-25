@@ -132,7 +132,7 @@ class GatewayChatModel(BaseChatModel):
                         kwargs.get("reasoning"),
                         self.thinking_enabled
                         if self.thinking_enabled is not None
-                        else bool(candidate.capabilities.get("thinking_protocol")),
+                        else _capability_enabled(candidate.capabilities.get("thinking_protocol")),
                     ),
                     tools=list(self.bound_tools) or None,
                     tool_choice=self.tool_choice,
@@ -277,6 +277,13 @@ class GatewayChatModel(BaseChatModel):
 
 def _candidate_id(candidate: ResolvedRoute) -> str:
     return candidate.route_id
+
+
+def _capability_enabled(capability: object | None) -> bool:
+    if capability is None:
+        return False
+    value = getattr(capability, "value", capability)
+    return bool(value)
 
 
 def _default_client_manager() -> Any:

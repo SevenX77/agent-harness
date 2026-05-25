@@ -150,6 +150,8 @@ class SubgraphNodeAST(_BaseNodeAST):
     sub_skill_ref: str = Field(min_length=1)
     target_skill: str | None = Field(default=None, pattern=SKILL_ID_PATTERN)
     io: PhaseIOSchema | None = None
+    # V0.3 AST bool flag; not the legacy LLMPhase.validator module path.
+    validator: bool = False
 
 
 class AgentNodeAST(_BaseNodeAST):
@@ -160,8 +162,9 @@ class AgentNodeAST(_BaseNodeAST):
     goal: str = Field(min_length=1)
     steps: list[AgentStep] = Field(default_factory=list)
     protocols: list[AgentProtocol] = Field(default_factory=list)
-    exit_contract: str = Field(min_length=1)
     io: PhaseIOSchema | None = None
+    # V0.3 AST bool flag; not the legacy LLMPhase.validator module path.
+    validator: bool = False
     tools: list[str] = Field(default_factory=list)
     subagents: list[SubagentSpec] = Field(default_factory=list)
     subgraphs: list[AgentRegistryItem] = Field(default_factory=list)

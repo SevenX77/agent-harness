@@ -57,11 +57,6 @@
           "title": "Protocols",
           "type": "array"
         },
-        "exit_contract": {
-          "minLength": 1,
-          "title": "Exit Contract",
-          "type": "string"
-        },
         "io": {
           "anyOf": [
             {
@@ -72,6 +67,11 @@
             }
           ],
           "default": null
+        },
+        "validator": {
+          "default": false,
+          "title": "Validator",
+          "type": "boolean"
         },
         "tools": {
           "items": {
@@ -136,8 +136,7 @@
       "required": [
         "mode",
         "role",
-        "goal",
-        "exit_contract"
+        "goal"
       ],
       "title": "AgentNodeAST",
       "type": "object"
@@ -554,6 +553,11 @@
             }
           ],
           "default": null
+        },
+        "validator": {
+          "default": false,
+          "title": "Validator",
+          "type": "boolean"
         }
       },
       "required": [

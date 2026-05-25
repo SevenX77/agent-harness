@@ -399,7 +399,6 @@ def _agent_system_prompt(
         goal=phase_ast.goal,
         steps=[step.model_dump() for step in phase_ast.steps],
         protocols=[protocol.model_dump() for protocol in phase_ast.protocols],
-        exit_contract=phase_ast.exit_contract,
         output_schema=output_schema if isinstance(output_schema, dict) else None,
         inline_examples=[
             example.content

@@ -83,7 +83,7 @@ V0.3.0 Agent prompt 装配后的最终 XML 模板如下。`role` / `goal` 来自
 | `{inline_examples_splat}` | string | 否 | `"无内联示例"` | examples `type:inline` | `[F-v3-resource-example-invalid]` | 直接给短案例, 不消耗 tool 调用 |
 | `{document_examples_registry}` | markdown list | 否 | `"无扩展案例"` | examples `type:document` | `[F-v3-resource-example-invalid]` | 只列 id/summary, 鼓励按需读取 |
 | `{skill_protocols_splat}` | string | 否 | `"无显式协议"` | 所有 `<protocol id>` AST | `[F-v3-cognitive-slot-render-failed]` | 给判断提供可引用规则 |
-| `{skill_exit_contract_inline}` | xml block | 是 | 无 | `<exit_contract>` + `io.outputs` schema | `[F-v3-agent-exit-contract-missing]` | 用 recency bias 把输出契约放在 prompt 末尾 |
+| `{skill_exit_contract_inline}` | 系统默认字符串 | 是 | 无 | 系统默认字符串 + `io.outputs` schema | `[F-v3-cognitive-output-schema-render-failed]` | 用 recency bias 把输出契约放在 prompt 末尾 |
 
 这里叫“7 大插槽”是指 7 个固定容器: `role`, `goal`, `thinking_style`, `knowledge_base`, `examples`, `ambiguity_feedback`, `protocol_citation`, `critical_reminders` 中 `role/goal` 是业务直填, 后 6 个是框架容器; `exit_contract` 不再作为独立中部插槽, 而是完整 inline 到末尾。
 
@@ -99,7 +99,7 @@ V0.3.0 Agent prompt 装配后的最终 XML 模板如下。`role` / `goal` 来自
 | `{skill_goal}` | `<goal>` text | 保留正文 Markdown, trim 外层空白 | 不允许为空 | `[F-v3-agent-goal-missing]` |
 | `{skill_steps_splat}` | `<step id name>` list | 按 body 顺序展开为 `- [S1] name: body`; 内容缩进 4 空格 | 允许为空字符串 | `[F-v3-agent-step-invalid]` |
 | `{skill_protocols_splat}` | `<protocol id>` list | 按 body 顺序展开为 `[protocol:P1]\n...` | 输出 `"无显式协议"` | `[F-v3-agent-protocol-invalid]` |
-| `{skill_exit_contract_inline}` | `<exit_contract>` | 原 block 末尾附加 `output_schema` fenced YAML/JSON | 不允许为空 | `[F-v3-agent-exit-contract-missing]` |
+| `{skill_exit_contract_inline}` | 系统默认字符串 | 原 block 末尾附加 `output_schema` fenced YAML/JSON | 不允许为空 | `[F-v3-cognitive-output-schema-render-failed]` |
 
 `{skill_exit_contract_inline}` 必须追加 `io.outputs` schema, 不能依赖单独 output_schema 插槽。这是 V0.3.0 对 V2.1 exit contract 方案的推翻: 输出契约越靠近 prompt 末尾, 模型越不容易在 finish_task 前忘记结构要求。
 

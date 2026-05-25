@@ -182,13 +182,18 @@ def test_mark_provider_down_delegates_to_gateway_cache() -> None:
     assert LLMClientManager._is_provider_marked_down("PX", "x-model")
 
 
-def test_peer_model_groups_parsed_from_yaml() -> None:
+def test_peer_model_groups_parsed_from_yaml(tmp_path: Path) -> None:
     import yaml
 
-    repo_root = Path(__file__).resolve().parents[4]
-    payload = yaml.safe_load((repo_root / "config" / "llm_roles.yaml").read_text(encoding="utf-8"))
+    fixture = tmp_path / "llm_roles.yaml"
+    fixture.write_text(
+        "peer_model_groups:\n"
+        "  test_tier: [MA, MB]\n",
+        encoding="utf-8",
+    )
+    payload = yaml.safe_load(fixture.read_text(encoding="utf-8"))
 
-    assert payload["peer_model_groups"]["claude_sonnet_tier"] == ["CL46T", "CLO46T"]
+    assert payload["peer_model_groups"]["test_tier"] == ["MA", "MB"]
 
 
 def _candidate_id(rp: ResolvedProvider) -> str:

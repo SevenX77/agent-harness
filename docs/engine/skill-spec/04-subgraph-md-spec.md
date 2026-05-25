@@ -29,6 +29,7 @@ io:
 |---|---|---|---|---|---|---|
 | `name` | string | 是 | 无 | 正则 `^[a-z][a-z0-9_-]*$` | `[F-v3-subgraph-name-invalid]` | Trace 与 Studio 展示名 |
 | `mode` | string literal | 是 | 无 | 必须精确为 `"subgraph"`; 文件名必须是 `SUBGRAPH.md` | `[F-v3-subgraph-mode-invalid]` / `[F-v3-graph-mode-path-mismatch]` | Loader 类型断言, 防止错装为 Agent/Logic |
+| `validator` | boolean | 否 | `False` | 必须是 YAML boolean, 不能用 `"true"` 字符串 | Pydantic validation fatal | 结合 validator.py 控制阻断 |
 | `target_skill` | string | 是 | 无 | 正则 `^[a-z][a-z0-9_-]*$`; 必须可被 SkillResolverProtocol 解析 | `[F-v3-subgraph-target-skill-invalid]` / `[F-v3-skill-not-registered]` | 指向被调用的 graph skill |
 | `io.inputs` | JSON Schema object | 是 | 无 | 顶层 `type: object`; 字段名必须与子图 `GRAPH.md io.inputs.properties` 1:1 相等 | `[F-v3-subgraph-io-schema-invalid]` / `[F-v3-subgraph-io-mismatch]` | 声明父图传给子图入口的字段 |
 | `io.outputs` | JSON Schema object | 是 | 无 | 顶层 `type: object`; 字段名必须与子图 `GRAPH.md io.outputs.properties` 1:1 相等 | `[F-v3-subgraph-io-schema-invalid]` / `[F-v3-subgraph-io-mismatch]` | 声明子图返回父图黑板的字段 |

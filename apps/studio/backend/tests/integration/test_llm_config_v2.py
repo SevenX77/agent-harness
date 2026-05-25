@@ -65,6 +65,42 @@ def test_roles_edit_copilot_chat_fallback(
     client: TestClient,
     isolated_llm_config: Path,
 ) -> None:
+    isolated_llm_config.write_text(
+        """
+models:
+  CL46T:
+    name: Claude 4.6 Thinking
+    providers:
+      WS_LLM: claude-4-thinking
+      OC_CL_ANT: claude-4-thinking
+      OC_CL: claude-4-thinking
+providers:
+  WS_LLM:
+    name: WaveSpeed LLM
+    type: openai_compatible
+    api_key_env: WS_API_KEY
+    base_url: https://api.example.com/v1
+  OC_CL_ANT:
+    name: OneChats Claude Anthropic
+    type: anthropic_compatible
+    api_key_env: OC_CL_ANT_API_KEY
+    base_url: https://api.example.com/v1
+  OC_CL:
+    name: OneChats Claude
+    type: openai_compatible
+    api_key_env: OC_CL_API_KEY
+    base_url: https://api.example.com/v1
+roles:
+  copilot_chat:
+    active_model: CL46T
+    models:
+      CL46T:
+        providers: [OC_CL]
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
     roles = client.get("/api/llm/roles").json()
     roles["roles"]["copilot_chat"]["models"]["CL46T"]["providers"] = [
         "WS_LLM",

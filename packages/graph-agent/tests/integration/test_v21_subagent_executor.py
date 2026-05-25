@@ -153,9 +153,17 @@ def test_subagent_max_depth_blocks_nested_dispatch() -> None:
 class _OneFailureGraph:
     def invoke(self, state: dict[str, Any], config: dict[str, Any] | None = None) -> dict[str, Any]:
         del config
-        if state["data"]["text"] == "bad":
+        text = state["data"]["inputs"]["text"]
+        if text == "bad":
             raise RuntimeError("planned child failure")
-        return {"data": {**state["data"], "echoed": state["data"]["text"]}, "flow": {}}
+        return {
+            "data": {
+                "inputs": {},
+                "phase_outputs": {"child": {"text": text, "echoed": text}},
+                "scratch": {},
+            },
+            "flow": {},
+        }
 
 
 def test_subagent_failure_aggregation_e2e(caplog: pytest.LogCaptureFixture) -> None:

@@ -29,6 +29,11 @@ def test_delta4_predictor_dispatch_passes_skill_resolver(
         return {"context": {"predict_trace": []}, "metrics": {}}
 
     monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda _: tmp_path)
+    monkeypatch.setattr(
+        predictor_module,
+        "build_gateway_model_resolver",
+        lambda: object(),
+    )
     service = PredictorService(run_skill_fn=fake_run_skill)
 
     service.dispatch_predict_job("demo.skill")
@@ -66,6 +71,11 @@ def test_delta4_run_worker_passes_skill_resolver(tmp_path: Path, monkeypatch: An
         return {"context": {}, "metrics": {}}
 
     monkeypatch.setattr(run_manager_module, "run_skill", fake_run_skill)
+    monkeypatch.setattr(
+        run_manager_module,
+        "build_gateway_model_resolver",
+        lambda: object(),
+    )
     queue = _Queue()
 
     run_manager_module._run_worker_main(

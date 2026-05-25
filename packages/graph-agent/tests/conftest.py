@@ -14,6 +14,7 @@ runtime failure deep in a single test case.
 from __future__ import annotations
 
 import inspect
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -40,10 +41,20 @@ class TestSkillResolver:
         if (dotted / "GRAPH.md").is_file():
             return dotted
         matches: list[Path] = []
-        for tmp_root in Path("/tmp").glob("pytest-of-*"):
-            for candidate in tmp_root.rglob(skill_id):
-                if candidate.is_dir():
-                    matches.append(candidate)
+        tmp_roots = [
+            Path(tempfile.gettempdir()).resolve(),
+            Path(tempfile.gettempdir()),
+            Path("/tmp"),
+        ]
+        seen_roots: set[Path] = set()
+        for root in tmp_roots:
+            if root in seen_roots or not root.exists():
+                continue
+            seen_roots.add(root)
+            for tmp_root in root.glob("pytest-of-*"):
+                for candidate in tmp_root.rglob(skill_id):
+                    if candidate.is_dir():
+                        matches.append(candidate.resolve())
         with_graph = [candidate for candidate in matches if (candidate / "GRAPH.md").is_file()]
         if with_graph:
             return max(with_graph, key=lambda path: path.stat().st_mtime_ns)

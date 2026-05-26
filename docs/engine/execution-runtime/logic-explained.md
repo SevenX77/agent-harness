@@ -8,6 +8,8 @@
 
 公开入口仍是 `run_skill()`。它负责驱动图运行，并把成功或已知 GraphAgent 错误包装成 `WorkflowResult`。
 
+目录型 V0.3.0 `GRAPH.md` root 会走 `_run_v030_skill_dict()`，不是旧 harness 缓存路径。这个分支现在会在 `graph.invoke()` 前准备 callbacks 和 trace 输出目录，再把 callbacks 传给 `assemble_graph()`，见 `packages/graph-agent/src/graph_agent/core/runner.py:488-526`。这点很重要：如果 `TracingCallback` 等到执行后才绑定目录，过程中产生的 typed events 就进不了 `tracing.jsonl`。
+
 PR β 已新增 `build_middleware_chain`，按 `MVP0_MIDDLEWARE_ORDER_CONTRACT` 可实例化 6 层顺序：
 
 ```text
@@ -34,6 +36,36 @@ Agent phase 仍是 LLM 工具循环。模型每轮输出 tool call 后，`graph_
 - `None`：不是 `finish_task`，外层继续普通工具流程。
 - `{"flow": ..., "messages": ...}`：`finish_task` 没有成功，或 schema/validator reject，需要把错误反馈给模型继续修正。
 - `{"flow": ..., "messages": ..., "data": {phase_name: final_write}}`：`finish_task` 被接受，`data` 下只写当前 phase 名对应的最终业务输出。
+
+## 2.1 V0.3.0 Agent phase 的观测事件
+
+当前 V0.3.0 Agent phase 的 live 执行体是 `graph_assembler._build_skill_node()` 内部的 `_skill_node`。它在同一个 ReAct 循环里执行模型、工具和 `finish_task`，并在这些边界发观测事件。
+
+字段级行为：
+
+- phase 进入时发 `PhaseStartEvent`。`context` 固定是完整 blackboard data：`{"inputs": ..., "phase_outputs": ..., "scratch": ...}`，由 `_observable_data_context()` 生成，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:381-384` 和 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:494-500`。这与旧 harness 的 `LLMPhaseNode` / `CodePhaseNode` 用 `state["data"].model_dump()` 发 start/end 的形态对齐，见 `packages/graph-agent/src/graph_agent/core/phase_nodes/llm_phase_node.py:129-130`、`packages/graph-agent/src/graph_agent/core/phase_nodes/code_phase_node.py:39`。
+- 每次 `model.invoke(...)` 返回后发 `LLMCallEvent`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:403-417`。token 统计由 `_extract_token_usage()` 读取并归一；缺失、布尔值、不可转整数时降级为 `0`，字段名兼容 `input_tokens/output_tokens`、`prompt_tokens/completion_tokens`、`total_input_tokens/total_output_tokens`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:525-548`。
+- 每个工具成功返回后发 `ToolCallEvent`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:422-447`。普通业务工具、critic/framework tool、subagent tool 和 `finish_task` 都走这条发射。`args` 只接受 dict；非 dict 时给空 dict。`result` 是字符串字段，dict/list 用 JSON 序列化，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:557-562`。
+- phase 退出时发 `PhaseEndEvent`，并且只发一次。`_emit_phase_end()` 用 `phase_end_emitted` 防重，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:366-379`。覆盖 `finish_task` 早返回、无 tool call / max turns 正常返回、以及异常路径；异常路径在 `finally` 发事件后仍继续抛异常，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:456-479`。
+
+`PhaseEndEvent.context` 也是完整 blackboard data。`finish_task` 成功时，response data 里的 `{phase_name: final_write}` 会被 `_phase_end_context()` 翻译成 `{"inputs": {}, "phase_outputs": {phase_name: final_write}, "scratch": {}}`；若 response data 已经是完整结构，则保留完整结构，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:503-522`。
+
+## 2.2 V0.3.0 trace 如何真实落盘
+
+`_run_v030_skill_dict()` 现在不再返回伪 `trace.json`。它的 trace 流程是：
+
+1. 先计算输出目录：显式 `trace_dir` 优先；没有时，如果 runtime inputs 有 `output_dir`，使用 `Path(output_dir) / "traces"`，见 `packages/graph-agent/src/graph_agent/core/runner.py:506-509`。
+2. 调 `_prepare_v030_callbacks(callbacks, trace_output)`。没有 callbacks 时创建 `LoggingCallback()`；有 trace 目录但没有 tracer 时追加 `TracingCallback(trace_dir=trace_output)`；已有 tracer 但未绑定 typed JSONL 路径时调用 `set_trace_dir(trace_output)`，见 `packages/graph-agent/src/graph_agent/core/runner.py:469-485`。
+3. 把 `active_callbacks` 传给 model resolver 和 `assemble_graph()`，所以装配期 builtin reader 事件和运行期 `_skill_node` 事件都能进入同一批 callbacks，见 `packages/graph-agent/src/graph_agent/core/runner.py:511-526`。
+4. `graph.invoke()` 完成后，遍历 `TracingCallback` 并调用 `.save(trace_output)`。返回的真实 summary JSON 路径写进 dict 的 `trace_path`，见 `packages/graph-agent/src/graph_agent/core/runner.py:537-552`。
+5. `.save()` 失败时抛 `TraceWriteError("trace save failed: ...")`，并带 `context={"trace_path": str(trace_output)}`，见 `packages/graph-agent/src/graph_agent/core/runner.py:541-547`。
+
+因此现在有两个文件概念：
+
+- `tracing.jsonl`：执行期间由 `TracingCallback.on_event()` 逐行追加 typed Pydantic event。
+- `{run_id}_summary.json`：执行结束后由 `TracingCallback.save()` 写出的 summary；`WorkflowResult.trace_path` 指向这个真实存在的 summary 文件。
+
+这和旧行为不同：旧 V0.3.0 分支只是拼出 `Path(trace_dir) / "trace.json"` 字符串，不能证明文件存在，也没有把执行期事件写进 typed stream。
 
 ## 3. Schema gate 的当前真实规则
 

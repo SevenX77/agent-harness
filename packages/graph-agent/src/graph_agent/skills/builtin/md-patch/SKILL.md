@@ -6,16 +6,6 @@ description: >
   and original MD excerpt, fixes only the flagged fields/items.
   Triggered by md_to_json() for the ~5-10% of items that fail Pydantic validation.
 type: agent
-context_mapping:
-  original_md_excerpt: "{input.original_md_excerpt}"
-  diagnostic_report: "{input.diagnostic_report}"
-  valid_results: "{input.valid_results}"
-  error_items: "{input.error_items}"
-  schema: "{input.schema}"
-  patches: "{{}}"
-  added_items: "[]"
-  final_results: "[]"
-  finalized: "false"
 io:
   inputs:
     - name: original_md_excerpt

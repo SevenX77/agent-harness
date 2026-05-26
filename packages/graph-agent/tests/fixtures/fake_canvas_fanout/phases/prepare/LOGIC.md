@@ -1,6 +1,5 @@
 ---
 mode: logic
+actions: [prepare]
 ---
-<python_callable>
 prepare
-</python_callable>

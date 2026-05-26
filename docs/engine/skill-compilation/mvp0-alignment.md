@@ -15,7 +15,7 @@
 | V2.1 `GRAPH.md` self-closing body `<phase id src depends_on />` | `GRAPH.md` 双轨: frontmatter `phases:` 注册 + body `<phase depends_on output>name</phase>` 拓扑 | 注册与 DAG 分离但必须三方一致, 见 [GRAPH Phase DAG](../skill-spec/02-graph-md-spec.md#phases-注册与-body-拓扑校验-phase-registration--dag) |
 | `io/inputs.json` / `io/outputs.json` | inline `io.inputs` / `io.outputs` dict | 物理 IO 文件退役, 见 [Root IO Schema](../skill-spec/02-graph-md-spec.md#根-io-契约-root-io-schema) |
 | `_resolve_subagent_root` 相对路径扫描 | `SkillResolverProtocol.resolve_skill(skill_id) -> Path` DI | 子图 / 子 Agent 全局 registry 寻址, 见 [Skill Resolver Protocol](../skill-spec/10-skill-resolver-protocol-spec.md#protocol-interface-定义) |
-| LOGIC `python_callable` | body `<action>` 顺序 + phase-local `actions/<name>.py` | round-14 实现移除 `<python_callable>`, 以 phase 内 action 链为准 |
+| LOGIC `python_callable` | body `<action>` 顺序 + phase-local `actions/<name>.py` | PR G / round-18 清掉残留 golden/fixture/tests; 当前以 phase 内 action 链为准 |
 | output_schema 独立插槽 | 系统内置 exit contract 末尾 inline output_schema | recency bias, 见 [Cognitive Template](../skill-spec/06-cognitive-template-spec.md#8-大插槽布局拓扑) |
 
 本文件只描述 skill-compilation 需要实现的编译 / 装配边界, 不改 runtime 执行策略本身。
@@ -235,7 +235,7 @@ MVP0 MUST 将编译错误归一到 `[F-v3-*]`, 并携带机器可读 payload。
 
 ### 13. 缓存元数据补全与写失败降级
 
-MVP0 SHOULD 保留 V2.1 audit 中对 cache 的两个修复方向, 但缓存内容要迁移到 V0.3.0 AST。
+MVP0 SHOULD 保留历史 V2.1 audit 中对 cache 的两个修复方向, 但缓存内容已经按 V0.3.0 AST 作为当前目标。PR G 后不再保留 V2.1 codemod / `python_callable` / `context_mapping` 迁移路径。
 
 | 字段 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
 |---|---|---|---|---|---|---|
@@ -386,7 +386,7 @@ execution-runtime 不再自行解释 `SKILL.md` body。它接收已经解析好�
 
 ## 与当前源码的对齐状态
 
-round-14 实施后，本文件描述的 skill-compilation 主契约已经作为当前源码事实落地：
+round-18 / PR G 后，本文件描述的 skill-compilation 主契约已经作为当前源码事实落地：
 
 | 契约点 | 当前状态 |
 |---|---|
@@ -400,3 +400,4 @@ round-14 实施后，本文件描述的 skill-compilation 主契约已经作为�
 | Mention | Agent body `@type:NAME` 编译期静态可达校验 |
 | SUBGRAPH | `target_skill` + resolver, 父子 IO properties 1:1 对齐 |
 | 禁 phase metadata | `schema_version` / `graph_skill_id` / `phase_id` / `mode` 在 phase frontmatter 中按 unknown field 失败 |
+| codemod / V2.1 validators | repo 内 codemod、`context_mapping`、5 个 dead validators 和隐藏死测试已由 PR G 删除 |

@@ -6,10 +6,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+import httpx
 from fastapi import APIRouter, HTTPException
+from graph_agent_gateway.registry.capabilities import (
+    build_runtime_setting_descriptors,
+    normalize_route_capabilities,
+)
+from graph_agent_gateway.registry.lint import lint_role_routes
+from graph_agent_gateway.registry.resolver import RegistryResolutionError, resolve_role
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.core import config
 from app.models.llm_config import (
     CapabilityValue,
     LLMCredentialsFile,
@@ -20,6 +26,15 @@ from app.models.llm_config import (
     RegistryResponse,
     RoleEntry,
     RolesData,
+)
+from app.services.copilot_test import (
+    CopilotProvider,
+    PingResult,
+    _NetworkError,
+    _ping_provider,
+    _QuotaExceeded,
+    _RateLimited,
+    _Unauthorized,
 )
 from app.services.llm_credentials import (
     credentials_path,
@@ -43,19 +58,25 @@ from app.services.llm_roles import (
     InvalidRoleReference,
     get_role,
     load_roles_file,
+    roles_path,
     save_roles_file,
     validate_references,
 )
-from graph_agent_gateway.registry.lint import lint_role_routes
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
-ROLES_PATH = config.REPO_ROOT / "config" / "llm_roles.yaml"
 
 
 class EndpointUpsertRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider_endpoints: dict[str, ProviderEndpoint] = Field(default_factory=dict)
+
+
+class EndpointSecretResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    endpoint_id: str
+    api_key: str
 
 
 class RouteEditableUpdate(BaseModel):
@@ -72,6 +93,7 @@ class RouteProbeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     capabilities: list[str] = Field(default_factory=list)
+    runtime_settings: dict[str, Any] = Field(default_factory=dict)
 
 
 class RoleApplyProfileRequest(BaseModel):
@@ -88,6 +110,19 @@ async def get_llm_registry() -> RegistryResponse:
     credentials = load_credentials()
     roles = _load_roles_or_empty()
     return _registry_response(credentials, roles, setup_required=setup_required)
+
+
+@router.get("/registry/endpoints/{endpoint_id}/secret", response_model=EndpointSecretResponse)
+async def get_registry_endpoint_secret(endpoint_id: str) -> EndpointSecretResponse:
+    """Return one endpoint secret for the local settings UI."""
+    credentials = load_credentials()
+    endpoint = credentials.provider_endpoints.get(endpoint_id)
+    if endpoint is None:
+        raise HTTPException(status_code=404, detail=f"Unknown endpoint: {endpoint_id}")
+    return EndpointSecretResponse(
+        endpoint_id=endpoint_id,
+        api_key=endpoint.api_key.get_secret_value() if endpoint.api_key else "",
+    )
 
 
 @router.put("/registry/endpoints")
@@ -120,17 +155,41 @@ async def delete_registry_endpoint(endpoint_id: str) -> dict[str, Any]:
 
 @router.post("/endpoints/{endpoint_id}/test")
 async def test_endpoint(endpoint_id: str) -> ProviderEndpoint:
-    """Mark an endpoint as tested without mutating environment variables."""
+    """Verify an endpoint by making the provider's minimal models-list call."""
     credentials = load_credentials()
     endpoint = credentials.provider_endpoints.get(endpoint_id)
     if endpoint is None:
         raise HTTPException(status_code=404, detail=f"Unknown endpoint: {endpoint_id}")
-    status = "verified" if endpoint.api_key and endpoint.api_key.get_secret_value() else "failed"
+    status: Literal["verified", "failed"] = "failed"
+    message = "API key is empty."
+    if endpoint.api_key and endpoint.api_key.get_secret_value():
+        try:
+            result = await _ping_provider(
+                _endpoint_probe_backend(endpoint),
+                endpoint.api_key.get_secret_value(),
+                _endpoint_probe_base_url(endpoint),
+            )
+        except _Unauthorized as exc:
+            message = _provider_error_message("Invalid API key", exc)
+        except _RateLimited as exc:
+            message = _provider_error_message("Provider rate limited the test request", exc)
+        except _QuotaExceeded as exc:
+            message = _provider_error_message(
+                "Provider rejected the key because quota or billing is unavailable",
+                exc,
+            )
+        except httpx.TimeoutException:
+            message = "Endpoint test timed out."
+        except _NetworkError as exc:
+            message = _provider_error_message("Network error while testing endpoint", exc)
+        else:
+            status = "verified"
+            message = _endpoint_success_message(result)
     updated = endpoint.model_copy(
         update={
             "status": status,
             "last_test_at": _now_iso(),
-            "last_test_message": "Credential present." if status == "verified" else "API key is empty.",
+            "last_test_message": message,
         }
     )
     credentials.provider_endpoints[endpoint_id] = updated
@@ -145,6 +204,9 @@ async def probe_route(route_id: str, request: RouteProbeRequest) -> ProviderRout
     route = credentials.provider_routes.get(route_id)
     if route is None:
         raise HTTPException(status_code=404, detail=f"Unknown route: {route_id}")
+    endpoint = credentials.provider_endpoints.get(route.endpoint_id)
+    if endpoint is None:
+        raise HTTPException(status_code=404, detail=f"Unknown endpoint: {route.endpoint_id}")
     capabilities = dict(route.capabilities)
     for capability in request.capabilities:
         key = _capability_key(capability)
@@ -152,6 +214,15 @@ async def probe_route(route_id: str, request: RouteProbeRequest) -> ProviderRout
             value=True,
             source="probed_verified",
             observed_at=_now_iso(),
+        )
+    if request.runtime_settings:
+        capabilities.update(
+            normalize_route_capabilities(
+                protocol=endpoint.protocol,
+                provider_model_id=route.provider_model_id,
+                raw_capabilities=request.runtime_settings,
+                source="probed_verified",
+            )
         )
     updated = route.model_copy(update={"status": "verified", "capabilities": capabilities})
     credentials.provider_routes[route_id] = updated
@@ -182,7 +253,6 @@ async def put_route_metadata(route_id: str, request: RouteEditableUpdate) -> Pro
 @router.delete("/routes/{route_id}")
 async def delete_registry_route(route_id: str) -> dict[str, Any]:
     """Delete a route unless roles/profiles still reference it."""
-    credentials = load_credentials()
     roles = _load_roles_or_empty()
     refs = _route_references(route_id, roles)
     if refs["roles"] or refs["model_profiles"]:
@@ -219,14 +289,21 @@ async def probe_import_draft(draft_id: str) -> ProviderImportDraft:
 
 
 @router.post("/import-drafts/{draft_id}/apply", response_model=ProviderImportDraft)
-async def apply_import_draft(draft_id: str, mode: Literal["merge"] | None = None) -> ProviderImportDraft:
+async def apply_import_draft(
+    draft_id: str,
+    mode: Literal["merge"] | None = None,
+) -> ProviderImportDraft:
     """Apply selected draft records into active credentials."""
     try:
         return apply_draft(draft_id, conflict_mode=mode)
     except DraftNotFound as exc:
         raise HTTPException(status_code=404, detail=f"Unknown draft: {draft_id}") from exc
-    except DraftExpired as exc:
-        _raise_conflict("draft_expired", f"Import draft has expired: {draft_id}", {"draft_id": draft_id})
+    except DraftExpired:
+        _raise_conflict(
+            "draft_expired",
+            f"Import draft has expired: {draft_id}",
+            {"draft_id": draft_id},
+        )
     except DraftApplyConflict as exc:
         _raise_conflict("draft_conflict", str(exc), {"draft_id": draft_id})
 
@@ -325,7 +402,10 @@ async def apply_model_profile(
     if role is None:
         raise HTTPException(status_code=404, detail=f"Unknown LLM role: {role_name}")
     if profile is None:
-        raise HTTPException(status_code=404, detail=f"Unknown model profile: {request.model_profile_id}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown model profile: {request.model_profile_id}",
+        )
     snapshot_route_ids = (role.source_profile_snapshot or {}).get("route_ids")
     if (
         request.mode != "replace"
@@ -355,7 +435,10 @@ async def apply_model_profile(
         update={
             "source_profile_id": request.model_profile_id,
             "source_profile_snapshot": snapshot,
-            "fallback_chain": list(profile.fallback_chain),
+            "fallback_chain": [
+                entry.model_copy(update={"runtime_settings_source": "profile_default"})
+                for entry in profile.fallback_chain
+            ],
             "lint_requirements": dict(profile.lint_requirements),
         }
     )
@@ -373,7 +456,6 @@ def _registry_response(
     routes_by_canonical: dict[str, list[str]] = {}
     for route_id, route in credentials.provider_routes.items():
         routes_by_canonical.setdefault(route.canonical_id, []).append(route_id)
-    provider_routes = list(credentials.provider_routes.values())
     lint_results = []
     for role_name, role in roles.roles.items():
         role_routes = [
@@ -397,22 +479,47 @@ def _registry_response(
             for canonical_id, route_ids in sorted(routes_by_canonical.items())
         ],
         lint_results=lint_results,
+        route_runtime_settings={
+            route_id: build_runtime_setting_descriptors(route)
+            for route_id, route in credentials.provider_routes.items()
+        },
+        role_effective_runtime_settings=_role_effective_runtime_settings(credentials, roles),
         setup_required=setup_required,
     )
 
 
+def _role_effective_runtime_settings(
+    credentials: LLMCredentialsFile,
+    roles: RolesData,
+) -> dict[str, dict[str, dict[str, Any]]]:
+    snapshot = roles.to_registry_snapshot(credentials)
+    result: dict[str, dict[str, dict[str, Any]]] = {}
+    for role_name in roles.roles:
+        try:
+            resolved = resolve_role(snapshot, role_name)
+        except RegistryResolutionError:
+            continue
+        result[role_name] = {
+            route.route_id: route.effective_runtime_settings
+            for route in resolved.routes
+        }
+    return result
+
+
 def _load_roles_or_empty(path: Path | None = None) -> RolesData:
-    path = path or ROLES_PATH
-    if not path.exists():
+    active_path = path or roles_path()
+    if not active_path.exists():
         return RolesData()
-    return load_roles_file(path)
+    return load_roles_file(active_path)
 
 
 def _save_roles_with_active_routes(data: RolesData) -> RolesData:
+    active_path = roles_path()
+    active_route_ids = set(load_credentials().provider_routes)
     try:
-        validate_references(data, known_route_ids=set(load_credentials().provider_routes))
-        save_roles_file(ROLES_PATH, data, known_route_ids=set(load_credentials().provider_routes))
-        return load_roles_file(ROLES_PATH)
+        validate_references(data, known_route_ids=active_route_ids)
+        save_roles_file(active_path, data, known_route_ids=active_route_ids)
+        return load_roles_file(active_path)
     except InvalidRoleReference as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -459,6 +566,42 @@ def _capability_key(value: str) -> str:
         "tool_calling": "tool_protocol",
         "structured_output": "structured_output_protocol",
     }.get(value, value)
+
+
+def _endpoint_probe_backend(endpoint: ProviderEndpoint) -> CopilotProvider:
+    if endpoint.protocol == "anthropic_compatible":
+        return "claude"
+    if endpoint.protocol == "google_genai":
+        return "gemini"
+    if "deepseek" in endpoint.base_url.lower() or "deepseek" in endpoint.endpoint_id.lower():
+        return "deepseek"
+    return "openai"
+
+
+def _endpoint_probe_base_url(endpoint: ProviderEndpoint) -> str:
+    base_url = endpoint.base_url.rstrip("/")
+    if (
+        endpoint.protocol in ("anthropic_compatible", "openai_compatible")
+        and base_url.endswith("/v1")
+    ):
+        return base_url[: -len("/v1")]
+    if endpoint.protocol == "google_genai" and base_url.endswith("/v1beta"):
+        return base_url[: -len("/v1beta")]
+    return base_url
+
+
+def _endpoint_success_message(result: PingResult) -> str:
+    message = f"Connected in {result.latency_ms}ms."
+    if result.model_seen:
+        message = f"{message} Model seen: {result.model_seen}."
+    return message
+
+
+def _provider_error_message(prefix: str, exc: BaseException) -> str:
+    error_code = getattr(exc, "error_code", "")
+    if error_code:
+        return f"{prefix} ({error_code})."
+    return f"{prefix}."
 
 
 def _raise_conflict(error_code: str, message: str, details: dict[str, Any]) -> None:

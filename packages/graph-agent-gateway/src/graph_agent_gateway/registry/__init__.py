@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from graph_agent_gateway.registry.schema import (
     CapabilityValue,
+    EffectiveRuntimeSetting,
     EndpointCandidate,
     FieldSource,
     LintResult,
@@ -15,14 +16,18 @@ from graph_agent_gateway.registry.schema import (
     RegistrySnapshot,
     ResolvedRole,
     ResolvedRoute,
+    RuntimeSettings,
+    ReasoningSettings,
     RoleEntry,
     RoleRouteEntry,
     RouteCandidate,
     RuntimePolicy,
+    StructuredOutputSettings,
 )
 
 __all__ = [
     "CapabilityValue",
+    "EffectiveRuntimeSetting",
     "EndpointCandidate",
     "FieldSource",
     "LintResult",
@@ -34,8 +39,11 @@ __all__ = [
     "RegistrySnapshot",
     "ResolvedRole",
     "ResolvedRoute",
+    "RuntimeSettings",
+    "ReasoningSettings",
     "RoleEntry",
     "RoleRouteEntry",
     "RouteCandidate",
     "RuntimePolicy",
+    "StructuredOutputSettings",
 ]

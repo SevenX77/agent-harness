@@ -10,11 +10,12 @@ model_profiles:
       - premium
     fallback_chain:
       - route_id: anthropic-official:claude-sonnet-4.6
-        temperature: null
-        max_output_tokens: 8192
-      - route_id: openrouter-prod:anthropic.claude-sonnet-4.6
-        temperature: null
-        max_output_tokens: 8192
+        runtime_settings:
+          temperature: null
+          max_output_tokens: 8192
+          reasoning:
+            enabled: true
+            budget_tokens: 4096
     lint_requirements:
       thinking: "error"
       tool_calling: "warn"
@@ -28,11 +29,11 @@ model_profiles:
       - premium
     fallback_chain:
       - route_id: anthropic-official:claude-opus-4.7
-        temperature: null
-        max_output_tokens: 8192
-      - route_id: openrouter-prod:anthropic.claude-opus-4.7
-        temperature: null
-        max_output_tokens: 8192
+        runtime_settings:
+          temperature: null
+          max_output_tokens: 8192
+          reasoning:
+            enabled: true
     lint_requirements:
       thinking: "error"
       tool_calling: "warn"
@@ -45,12 +46,10 @@ model_profiles:
       - thinking
       - cost-effective
     fallback_chain:
-      - route_id: deepseek-official:deepseek-r1
-        temperature: 0.7
-        max_output_tokens: 8192
       - route_id: openrouter-prod:deepseek.deepseek-r1
-        temperature: 0.7
-        max_output_tokens: 8192
+        runtime_settings:
+          temperature: 0.7
+          max_output_tokens: 8192
     lint_requirements:
       thinking: "warn"
       tool_calling: "warn"
@@ -64,17 +63,17 @@ roles:
       display_name: Claude Sonnet 4.6 Thinking
       route_ids:
         - anthropic-official:claude-sonnet-4.6
-        - openrouter-prod:anthropic.claude-sonnet-4.6
       applied_at: "2026-05-24T00:00:00Z"
       deleted_at: null
       deleted_marker: false
     fallback_chain:
       - route_id: anthropic-official:claude-sonnet-4.6
-        temperature: null
-        max_output_tokens: 8192
-      - route_id: openrouter-prod:anthropic.claude-sonnet-4.6
-        temperature: null
-        max_output_tokens: 8192
+        runtime_settings:
+          temperature: null
+          max_output_tokens: 8192
+          reasoning:
+            enabled: true
+            budget_tokens: 4096
     lint_requirements:
       thinking: "error"
       tool_calling: "warn"
@@ -87,17 +86,16 @@ roles:
       display_name: Claude Opus 4.7 Thinking
       route_ids:
         - anthropic-official:claude-opus-4.7
-        - openrouter-prod:anthropic.claude-opus-4.7
       applied_at: "2026-05-24T00:00:00Z"
       deleted_at: null
       deleted_marker: false
     fallback_chain:
       - route_id: anthropic-official:claude-opus-4.7
-        temperature: null
-        max_output_tokens: 8192
-      - route_id: openrouter-prod:anthropic.claude-opus-4.7
-        temperature: null
-        max_output_tokens: 8192
+        runtime_settings:
+          temperature: null
+          max_output_tokens: 8192
+          reasoning:
+            enabled: true
     lint_requirements:
       thinking: "error"
       tool_calling: "warn"
@@ -109,18 +107,15 @@ roles:
       model_profile_id: DS32R
       display_name: DeepSeek R1 Reasoner
       route_ids:
-        - deepseek-official:deepseek-r1
         - openrouter-prod:deepseek.deepseek-r1
       applied_at: "2026-05-24T00:00:00Z"
       deleted_at: null
       deleted_marker: false
     fallback_chain:
-      - route_id: deepseek-official:deepseek-r1
-        temperature: 0.7
-        max_output_tokens: 8192
       - route_id: openrouter-prod:deepseek.deepseek-r1
-        temperature: 0.7
-        max_output_tokens: 8192
+        runtime_settings:
+          temperature: 0.7
+          max_output_tokens: 8192
     lint_requirements:
       thinking: "warn"
       tool_calling: "warn"
@@ -133,17 +128,17 @@ roles:
       display_name: Claude Sonnet 4.6 Thinking
       route_ids:
         - anthropic-official:claude-sonnet-4.6
-        - openrouter-prod:anthropic.claude-sonnet-4.6
       applied_at: "2026-05-24T00:00:00Z"
       deleted_at: null
       deleted_marker: false
     fallback_chain:
       - route_id: anthropic-official:claude-sonnet-4.6
-        temperature: null
-        max_output_tokens: 8192
-      - route_id: openrouter-prod:anthropic.claude-sonnet-4.6
-        temperature: null
-        max_output_tokens: 8192
+        runtime_settings:
+          temperature: null
+          max_output_tokens: 8192
+          reasoning:
+            enabled: true
+            budget_tokens: 4096
     lint_requirements:
       thinking: "error"
       tool_calling: "warn"
@@ -156,17 +151,17 @@ roles:
       display_name: Claude Sonnet 4.6 Thinking
       route_ids:
         - anthropic-official:claude-sonnet-4.6
-        - openrouter-prod:anthropic.claude-sonnet-4.6
       applied_at: "2026-05-24T00:00:00Z"
       deleted_at: null
       deleted_marker: false
     fallback_chain:
       - route_id: anthropic-official:claude-sonnet-4.6
-        temperature: null
-        max_output_tokens: 8192
-      - route_id: openrouter-prod:anthropic.claude-sonnet-4.6
-        temperature: null
-        max_output_tokens: 8192
+        runtime_settings:
+          temperature: null
+          max_output_tokens: 8192
+          reasoning:
+            enabled: true
+            budget_tokens: 4096
     lint_requirements:
       thinking: "error"
       tool_calling: "warn"
@@ -184,8 +179,9 @@ roles:
       deleted_marker: false
     fallback_chain:
       - route_id: openrouter-prod:anthropic.claude-sonnet-4.6
-        temperature: 0.7
-        max_output_tokens: 4096
+        runtime_settings:
+          temperature: 0.7
+          max_output_tokens: 4096
     lint_requirements:
       thinking: "warn"
       tool_calling: "warn"

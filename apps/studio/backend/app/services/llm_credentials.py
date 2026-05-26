@@ -4,23 +4,27 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
 import tempfile
 import threading
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from graph_agent_gateway.registry.canonical import canonicalize_model
+from graph_agent_gateway.registry.capabilities import normalize_route_capabilities
+from graph_agent_gateway.registry.schema import ProviderRoute
 from pydantic import SecretStr, ValidationError
 
 from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint
+from app.services.llm_paths import credentials_path
 
 _WRITE_LOCK = threading.Lock()
 _credentials_lock = _WRITE_LOCK
 SECRET_REDACTION_PLACEHOLDER = "**********"
-
-
-def credentials_path() -> Path:
-    """Return the local Studio LLM credentials path."""
-    return Path.home() / ".studio" / "llm_credentials.json"
+LEGACY_FAKE_TEST_MESSAGE = "Credential present."
+LEGACY_FAKE_TEST_REPLACEMENT_MESSAGE = "Needs retest after v4 provider probe upgrade."
 
 
 def load_credentials(path: Path | None = None) -> LLMCredentialsFile:
@@ -47,7 +51,7 @@ def load_credentials(path: Path | None = None) -> LLMCredentialsFile:
             f"legacy provider credentials are rejected: {credential_path}"
         )
     try:
-        return LLMCredentialsFile.model_validate(payload)
+        return _invalidate_legacy_fake_test_statuses(LLMCredentialsFile.model_validate(payload))
     except ValidationError as exc:
         raise ValueError(
             f"LLM_CREDENTIALS_SCHEMA: invalid v4 llm credentials schema: {credential_path}"
@@ -59,6 +63,26 @@ def save_credentials(data: LLMCredentialsFile, path: Path | None = None) -> None
     credential_path = path or credentials_path()
     with _credentials_lock:
         _save_credentials_unlocked(data, credential_path)
+
+
+def migrate_v3_credentials_to_v4(path: Path | None = None) -> LLMCredentialsFile:
+    """Convert a legacy Studio v3 credentials file into the v4 route registry.
+
+    The migration is explicit, creates a sibling backup first, preserves
+    secrets, and writes the v4 file atomically through the normal storage path.
+    """
+    credential_path = path or credentials_path()
+    payload = json.loads(credential_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or payload.get("schema_version") != 3:
+        raise ValueError(f"expected schema_version 3 credentials: {credential_path}")
+
+    backup_path = _next_backup_path(credential_path)
+    shutil.copy2(credential_path, backup_path)
+    backup_path.chmod(0o600)
+
+    migrated = _v3_payload_to_v4(payload)
+    save_credentials(migrated, credential_path)
+    return migrated
 
 
 def serialize_for_response(data: LLMCredentialsFile, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
@@ -120,7 +144,10 @@ def upsert_routes(
         data = load_credentials(credential_path)
         routes = dict(data.provider_routes)
         for route_id, payload in route_payloads.items():
-            route = payload if isinstance(payload, ProviderRoute) else ProviderRoute.model_validate(payload)
+            if isinstance(payload, ProviderRoute):
+                route = payload
+            else:
+                route = ProviderRoute.model_validate(payload)
             if route.route_id != route_id:
                 raise ValueError(f"route payload key does not match route_id: {route_id}")
             if route.endpoint_id not in data.provider_endpoints:
@@ -150,6 +177,136 @@ def _endpoint_from_payload(payload: dict[str, Any] | ProviderEndpoint) -> Provid
     if normalized.get("api_key") == "":
         normalized["api_key"] = None
     return ProviderEndpoint.model_validate(normalized)
+
+
+def _invalidate_legacy_fake_test_statuses(data: LLMCredentialsFile) -> LLMCredentialsFile:
+    endpoints = {}
+    changed = False
+    for endpoint_id, endpoint in data.provider_endpoints.items():
+        if endpoint.status == "verified" and endpoint.last_test_message == LEGACY_FAKE_TEST_MESSAGE:
+            endpoints[endpoint_id] = endpoint.model_copy(
+                update={
+                    "status": "unverified_manual",
+                    "last_test_message": LEGACY_FAKE_TEST_REPLACEMENT_MESSAGE,
+                }
+            )
+            changed = True
+        else:
+            endpoints[endpoint_id] = endpoint
+    if not changed:
+        return data
+    return data.model_copy(update={"provider_endpoints": endpoints})
+
+
+def _v3_payload_to_v4(payload: dict[str, Any]) -> LLMCredentialsFile:
+    endpoints: dict[str, ProviderEndpoint] = {}
+    routes: dict[str, ProviderRoute] = {}
+    for provider in payload.get("providers") or []:
+        if not isinstance(provider, dict):
+            continue
+        endpoint_id = _stable_endpoint_id(provider)
+        protocol = provider.get("provider_type") or provider.get("type")
+        base_url = str(provider.get("base_url") or "").strip()
+        supported_protocols = {
+            "anthropic_compatible",
+            "openai_compatible",
+            "google_genai",
+            "ark_runtime",
+        }
+        if not endpoint_id or protocol not in supported_protocols:
+            continue
+        endpoint = ProviderEndpoint(
+            endpoint_id=endpoint_id,
+            display_name=str(provider.get("name") or endpoint_id),
+            protocol=protocol,
+            base_url=base_url,
+            api_key=provider.get("api_key") or None,
+            status="verified" if provider.get("last_test_status") == "ok" else "unverified_manual",
+            last_test_at=provider.get("last_test_at"),
+            last_test_message=provider.get("last_test_message") or None,
+        )
+        endpoints[endpoint_id] = endpoint
+        capability_source = (
+            "probed_verified" if provider.get("last_test_status") == "ok" else "api_list"
+        )
+        for model in _legacy_models(provider):
+            model_id = str(model.get("id") or "").strip()
+            if not model_id:
+                continue
+            raw_capabilities = model.get("capabilities")
+            if not isinstance(raw_capabilities, dict):
+                raw_capabilities = {}
+            route_slug = _route_slug(model_id)
+            canonical = canonicalize_model(endpoint_id=endpoint_id, provider_model_id=route_slug)
+            route_id = f"{endpoint_id}:{route_slug}"
+            routes[route_id] = ProviderRoute(
+                route_id=route_id,
+                endpoint_id=endpoint_id,
+                route_slug=route_slug,
+                provider_model_id=model_id,
+                canonical_id=canonical.canonical_id,
+                display_name=str(raw_capabilities.get("display_name") or canonical.display_name),
+                status=endpoint.status,
+                capabilities=normalize_route_capabilities(
+                    protocol=endpoint.protocol,
+                    provider_model_id=model_id,
+                    raw_capabilities=raw_capabilities,
+                    source=capability_source,
+                ),
+                metadata={"legacy_migrated_from": "schema_version_3"},
+            )
+    return LLMCredentialsFile(provider_endpoints=endpoints, provider_routes=routes)
+
+
+def _legacy_models(provider: dict[str, Any]) -> list[dict[str, Any]]:
+    models = provider.get("available_models")
+    if isinstance(models, list):
+        return [item for item in models if isinstance(item, dict)]
+    models = provider.get("models")
+    if isinstance(models, list):
+        return [item for item in models if isinstance(item, dict)]
+    return []
+
+
+def _stable_endpoint_id(provider: dict[str, Any]) -> str:
+    raw = str(provider.get("id") or provider.get("code") or "").strip()
+    name = str(provider.get("name") or "").lower()
+    base_url = str(provider.get("base_url") or "").lower().rstrip("/")
+    if "api.anthropic.com" in base_url:
+        return "anthropic-official"
+    if "api.openai.com" in base_url:
+        return "openai-official"
+    if "api.deepseek.com" in base_url:
+        return "deepseek-official"
+    if "generativelanguage.googleapis.com" in base_url:
+        return "gemini-official"
+    if "volces.com" in base_url:
+        return "ark-official"
+    if "openrouter.ai" in base_url or "openrouter" in name:
+        return "openrouter-prod"
+    if "wavespeed" in base_url or "wavespeed" in name:
+        return "wavespeed-prod"
+    if "qnaigc.com" in base_url and "anthropic" in base_url:
+        return "qiniu-anthropic"
+    if "qnaigc.com" in base_url:
+        return "qiniu-openai"
+    return raw
+
+
+def _route_slug(provider_model_id: str) -> str:
+    slug = provider_model_id.strip().lower().replace("/", ".").replace("_", "-")
+    slug = re.sub(r"[^a-z0-9._-]+", "-", slug)
+    slug = re.sub(r"-+", "-", slug).strip("-")
+    slug = re.sub(r"^(claude-(?:sonnet|opus|haiku)-\d+)-(\d+)$", r"\1.\2", slug)
+    return slug or "unknown"
+
+
+def _next_backup_path(path: Path) -> Path:
+    backup = path.with_name(f"{path.name}.v3.bak")
+    if not backup.exists():
+        return backup
+    stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+    return path.with_name(f"{path.name}.v3.{stamp}.bak")
 
 
 def _preserved_secret(
@@ -211,6 +368,7 @@ __all__ = [
     "delete_endpoint",
     "delete_route",
     "load_credentials",
+    "migrate_v3_credentials_to_v4",
     "save_credentials",
     "serialize_for_response",
     "upsert_endpoints",

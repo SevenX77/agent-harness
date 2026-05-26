@@ -1,13 +1,18 @@
 import type { ReactNode } from "react"
-import type {
-  ProviderEndpoint,
-  ProviderImportDraft,
-  RegistryResponse,
-  RolesData,
-} from "@/api/llm"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
+import type { CredentialsState, ModelInfo, ProviderType, RolesData } from "../../../api/llm"
+import type { AddProviderFormSubmission } from "../api-keys"
 
-export type SettingsTab = "general" | "endpoints" | "llm_roles"
+export type SettingsTab = "general" | "api_keys" | "llm_roles"
+
+export interface ProviderDraft {
+  id: string
+  name: string
+  provider_type: ProviderType
+  base_url: string
+  api_key: string
+  isTesting: boolean
+}
 
 export interface SettingsPageProps {
   onClose: () => void
@@ -15,11 +20,11 @@ export interface SettingsPageProps {
 
 export interface SettingsPageContentProps {
   activeTab: SettingsTab
-  registry: RegistryResponse | null
-  registryLoading: boolean
-  registryError: string | null
-  endpointSaveStatus: SaveStatus
-  importDrafts: ProviderImportDraft[]
+  credentials: CredentialsState
+  credentialsLoading: boolean
+  credentialsError: string | null
+  drafts: ProviderDraft[]
+  saveStatus: SaveStatus
   rolesData: RolesData | null
   rolesSaveStatus: SaveStatus
   rolesError: string | null
@@ -35,15 +40,12 @@ export interface SettingsPageContentProps {
   }
   onClose: () => void
   onTabChange: (tab: SettingsTab) => void
-  onAddEndpoint: () => void
-  onEndpointChange: (endpointId: string, patch: Partial<ProviderEndpoint>) => void
-  onDeleteEndpoint: (endpointId: string) => void
-  onTestEndpoint: (endpointId: string) => void
-  onProbeRoute: (routeId: string) => void
-  onApplyDraft: (draftId: string) => void
+  onProviderFieldChange: (providerId: string, patch: Partial<ProviderDraft>) => void
+  onTestProvider: (providerId: string) => void
+  onDeleteProvider: (providerId: string) => void
+  onAddProvider: (data: AddProviderFormSubmission) => Promise<void> | void
+  onProviderModelsUpdated: (providerId: string, models: ModelInfo[]) => void
   onRolesDataChange: (next: RolesData) => void
-  onProbeRole: (roleName: string) => void
-  onApplyProfile: (roleName: string, profileId: string) => void
 }
 
 export type { ReactNode }

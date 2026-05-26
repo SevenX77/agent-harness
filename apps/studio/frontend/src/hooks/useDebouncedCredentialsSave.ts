@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import {
-  putRegistryEndpoints,
-  type CredentialRegistryResponse,
-  type ProviderEndpoint,
+  putCredentials,
+  type CredentialsState,
+  type ProviderCredentialUpdate,
 } from "@/api/llm"
 
 /** Status of the most recent (or in-flight) auto-save call. */
@@ -13,30 +13,30 @@ export interface UseDebouncedCredentialsSaveOptions {
   /** Milliseconds to wait after the last `queue()` call. Default 300. */
   delayMs?: number
   /** Replace the API call (for unit tests). */
-  putFn?: (updates: Record<string, ProviderEndpoint>) => Promise<CredentialRegistryResponse>
-  /** Receive the server's registry response on success. */
-  onSaved?: (next: CredentialRegistryResponse) => void
+  putFn?: (updates: ProviderCredentialUpdate[]) => Promise<CredentialsState>
+  /** Receive the server's CredentialsState response on success. */
+  onSaved?: (next: CredentialsState) => void
   /** Receive the underlying error on failure. */
   onError?: (error: unknown) => void
 }
 
 export interface UseDebouncedCredentialsSaveResult {
   /**
-   * Schedule a save. Each call resets the debounce timer; the eventual endpoint
-   * upsert body is built from `buildEndpointUpsertPayload(getSnapshot())` so
-   * that intermediate keystrokes coalesce into one network request.
+   * Schedule a save. Each call resets the debounce timer; the eventual PUT
+   * body is built from `buildPutPayload(getProvidersSnapshot())` so that
+   * intermediate keystrokes coalesce into one network request.
    */
-  queue: (getEndpointsSnapshot: () => ProviderEndpoint[]) => void
+  queue: (getProvidersSnapshot: () => ProviderCredentialUpdate[]) => void
   /** Cancel any pending save (no network call). */
   cancel: () => void
   /** Force a save now (still serialized through the same flight). */
-  flush: () => Promise<CredentialRegistryResponse | null>
+  flush: () => Promise<CredentialsState | null>
   status: SaveStatus
   lastError: unknown
 }
 
 /**
- * Debounced auto-save for endpoint registry edits.
+ * Debounced auto-save for the API Keys page (spec F2).
  *
  * Coalescing rule: every call to `queue()` resets a 300ms timer. When the
  * timer fires, the latest `getProvidersSnapshot()` is consulted *at fire
@@ -51,19 +51,19 @@ export interface UseDebouncedCredentialsSaveResult {
 export function useDebouncedCredentialsSave(
   options: UseDebouncedCredentialsSaveOptions = {},
 ): UseDebouncedCredentialsSaveResult {
-  const { delayMs = 300, putFn = putRegistryEndpoints, onSaved, onError } = options
+  const { delayMs = 300, putFn = putCredentials, onSaved, onError } = options
   const [status, setStatus] = useState<SaveStatus>("idle")
   const [lastError, setLastError] = useState<unknown>(null)
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const inflightRef = useRef<Promise<CredentialRegistryResponse | null> | null>(null)
-  const pendingSnapshotRef = useRef<(() => ProviderEndpoint[]) | null>(null)
+  const inflightRef = useRef<Promise<CredentialsState | null> | null>(null)
+  const pendingSnapshotRef = useRef<(() => ProviderCredentialUpdate[]) | null>(null)
 
   const performSave = useCallback(
     // eslint-disable-next-line react-hooks/preserve-manual-memoization
-    async (getSnapshot: () => ProviderEndpoint[]): Promise<CredentialRegistryResponse | null> => {
+    async (getSnapshot: () => ProviderCredentialUpdate[]): Promise<CredentialsState | null> => {
       setStatus("saving")
-      const payload = buildEndpointUpsertPayload(getSnapshot())
+      const payload = getSnapshot()
       try {
         const next = await putFn(payload)
         setStatus("saved")
@@ -74,7 +74,7 @@ export function useDebouncedCredentialsSave(
         setStatus("error")
         setLastError(error)
         const message = error instanceof Error ? error.message : "Save failed"
-        toast.error(`Endpoints save failed: ${message}`)
+        toast.error(`API Keys save failed: ${message}`)
         onError?.(error)
         return null
       } finally {
@@ -91,7 +91,7 @@ export function useDebouncedCredentialsSave(
   )
 
   const queue = useCallback(
-    (getSnapshot: () => ProviderEndpoint[]) => {
+    (getSnapshot: () => ProviderCredentialUpdate[]) => {
       if (timerRef.current) clearTimeout(timerRef.current)
       setStatus("pending")
       timerRef.current = setTimeout(() => {
@@ -116,7 +116,7 @@ export function useDebouncedCredentialsSave(
     setStatus((prev) => (prev === "pending" ? "idle" : prev))
   }, [])
 
-  const flush = useCallback(async (): Promise<CredentialRegistryResponse | null> => {
+  const flush = useCallback(async (): Promise<CredentialsState | null> => {
     if (timerRef.current) {
       clearTimeout(timerRef.current)
       timerRef.current = null
@@ -144,40 +144,27 @@ export function useDebouncedCredentialsSave(
 }
 
 /**
- * Build an endpoint upsert request body from the current draft state.
+ * Build a PUT request body from the current draft state.
  *
- * Critical: only fields accepted by the backend endpoint upsert are forwarded.
- * Route/test outcome fields are backend-owned and rejected in PUT bodies.
+ * Critical: only the fields accepted by `ProviderCredentialWrite` on the
+ * backend are forwarded. Test outcome fields (`last_test_*`,
+ * `available_sdks`, `available_models`) are *single-writer* — the backend
+ * rejects them in PUT bodies with 422.
  */
-export function buildEndpointUpsertPayload(
+export function buildPutPayload(
   providers: ReadonlyArray<{
-    endpoint_id: string
-    display_name: string
-    protocol: ProviderEndpoint["protocol"]
+    id: string
+    name: string
+    api_key?: string
     base_url?: string
-    api_key?: string | null
-    status?: ProviderEndpoint["status"]
-    timeout_seconds?: number
-    trust_env?: boolean
-    proxy_env?: string | null
-    metadata?: Record<string, unknown>
+    provider_type?: ProviderCredentialUpdate["provider_type"]
   }>,
-): Record<string, ProviderEndpoint> {
-  return Object.fromEntries(
-    providers.map((provider) => [
-      provider.endpoint_id,
-      {
-        endpoint_id: provider.endpoint_id,
-        display_name: provider.display_name,
-        protocol: provider.protocol,
-        base_url: provider.base_url ?? "",
-        api_key: provider.api_key ?? null,
-        status: provider.status ?? "unverified_manual",
-        timeout_seconds: provider.timeout_seconds ?? 60,
-        trust_env: provider.trust_env ?? false,
-        proxy_env: provider.proxy_env ?? null,
-        metadata: provider.metadata ?? {},
-      },
-    ]),
-  )
+): ProviderCredentialUpdate[] {
+  return providers.map((provider) => ({
+    id: provider.id,
+    name: provider.name,
+    api_key: provider.api_key ?? "",
+    base_url: provider.base_url ?? "",
+    provider_type: provider.provider_type ?? null,
+  }))
 }

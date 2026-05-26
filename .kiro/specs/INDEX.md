@@ -8,7 +8,8 @@
 |---|---|---|---|
 | [`canvas-micro-topology-v1/`](./canvas-micro-topology-v1/) | Draft (P0) | React Flow 画布微观拓扑展开 + 前后端嵌套 Payload schema | [`docs/studio/UX_WORKFLOW_BLUEPRINT.md`](../../docs/studio/UX_WORKFLOW_BLUEPRINT.md) + [`docs/engine/GRAPH_EXECUTION_MODEL.md`](../../docs/engine/GRAPH_EXECUTION_MODEL.md) |
 | [`trace-and-predict-visibility/`](./trace-and-predict-visibility/) | Draft (P1) | Trace 瀑布流 + Prompt 透视仪 + Edge Inspection + Compile 结构化报错 | [`docs/studio/TRACE_AND_VISUALIZATION.md`](../../docs/studio/TRACE_AND_VISUALIZATION.md) |
-| [`studio-api-keys-redesign/`](./studio-api-keys-redesign/) | Implementing | API Keys 多 provider 配置 + 测试 + redesign Round 2/3 | [`docs/engine/LLM_ROUTING_AND_FALLBACK.md`](../../docs/engine/LLM_ROUTING_AND_FALLBACK.md) |
+| [`studio-api-keys-redesign/`](./studio-api-keys-redesign/) | Superseded (UX only) | API Keys Round 2/3 UX 参考；v4 生产契约见 `llm-provider-intelligence-v2` | [`docs/engine/LLM_ROUTING_AND_FALLBACK.md`](../../docs/engine/LLM_ROUTING_AND_FALLBACK.md) |
+| [`studio-api-keys-regression-hardening/`](./studio-api-keys-regression-hardening/) | Implementing | API Keys 回归收敛：先恢复删除前前端状态，再接 v4 API | [`docs/development/FRONTEND_UI_SPEC.md`](../../docs/development/FRONTEND_UI_SPEC.md) |
 | [`studio-frontend-v21-multifile-editor/`](./studio-frontend-v21-multifile-editor/) | Draft | V2.1 多文件 skill 编辑架构 (VS Code 风格) | [`docs/studio/WORKSPACE_FILE_MANAGEMENT.md`](../../docs/studio/WORKSPACE_FILE_MANAGEMENT.md) |
 
 ## Archive (历史归档区)

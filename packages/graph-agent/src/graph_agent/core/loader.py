@@ -436,8 +436,6 @@ def _validate_agent_reference_paths(skill_root: Path, phase_docs: list[PhaseDocu
             try:
                 candidate.relative_to(root_resolved)
             except ValueError as exc:
-                if candidate.is_file():
-                    continue
                 raise SkillLoadError(
                     f"[F-v3-resource-reference-path-invalid] {doc.path}:"
                     f"{_frontmatter_key_line(doc.path, 'phase_config')} "

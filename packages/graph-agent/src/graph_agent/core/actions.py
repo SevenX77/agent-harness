@@ -91,7 +91,6 @@ def _validate_action_name(name: str) -> None:
         or "/" in name
         or "\\" in name
         or "." in name
-        or name == ".."
         or Path(name).is_absolute()
     ):
         raise GraphAgentFatalError(f"[F-v3-logic-action-name-invalid] invalid action name {name!r}")

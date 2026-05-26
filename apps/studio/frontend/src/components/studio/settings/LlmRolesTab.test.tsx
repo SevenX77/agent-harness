@@ -486,6 +486,35 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain("lucide-workflow")
   })
 
+  it("uses role_kind instead of role name when grouping roles", () => {
+    const groupedData: RolesData = {
+      ...rolesData,
+      roles: {
+        assistant: {
+          role_kind: "copilot",
+          model_fallback: true,
+          active_model: "",
+          models: {},
+        },
+        copilot_planner: {
+          role_kind: "graph_agent",
+          model_fallback: true,
+          active_model: "",
+          models: {},
+        },
+      },
+    }
+    const html = renderRolesHtml({ data: groupedData })
+    const graphSectionStart = html.indexOf('data-role-category="graph-agent"')
+    const copilotSectionStart = html.indexOf('data-role-category="copilot"')
+    const graphSection = html.slice(graphSectionStart, copilotSectionStart)
+    const copilotSection = html.slice(copilotSectionStart)
+
+    expect(graphSection).toContain('data-role-name="copilot_planner"')
+    expect(graphSection).not.toContain('data-role-name="assistant"')
+    expect(copilotSection).toContain('data-role-name="assistant"')
+  })
+
   it("keeps empty role categories visible and uses default title typography", () => {
     const graphOnlyData: RolesData = {
       ...rolesData,

@@ -6,9 +6,16 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import graph_agent.core.graph_assembler as graph_assembler_module
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import GraphAgentFatalError
-from graph_agent.core.graph_assembler import _invoke_subagent_once_t23, assemble_graph
+from graph_agent.core.graph_assembler import (
+    _build_subgraph_node,
+    _invoke_subagent_once_t23,
+    assemble_graph,
+)
+from graph_agent.core.loader import PhaseDocument
+from graph_agent.core.manifest import PhaseIOSchema, SubgraphNodeAST
 from graph_agent.runtime.state_mapper import PhaseWrapper, StateMapper
 
 
@@ -198,6 +205,100 @@ def test_subagent_child_without_phase_outputs_does_not_flat_diff_parent_data() -
     )
 
     assert result["data"] == {}
+
+
+def test_subagent_child_flow_is_deep_copied_and_depth_increments() -> None:
+    captured_child_flow: dict[str, object] = {}
+
+    class MutatingChildGraph:
+        def invoke(self, state, config=None):
+            del config
+            captured_child_flow.update(state["flow"])
+            state["flow"]["nested"]["child_only"] = True
+            state["flow"]["subagent_depth"] = 2
+            return {
+                "data": {"inputs": {}, "phase_outputs": {}, "scratch": {}},
+                "flow": state["flow"],
+                "messages": [],
+            }
+
+    parent_flow = {"subagent_depth": 1, "nested": {"parent_only": True}}
+    result = _invoke_subagent_once_t23(
+        SimpleNamespace(graph=MutatingChildGraph()),
+        {"data": {"inputs": {"item": "a"}}, "flow": parent_flow, "messages": [], "run_id": "p"},
+        {"item": "a"},
+    )
+
+    assert captured_child_flow["subagent_depth"] == 2
+    assert parent_flow == {"subagent_depth": 1, "nested": {"parent_only": True}}
+    assert result["flow"]["nested"]["child_only"] is True
+
+
+def test_subgraph_child_flow_is_deep_copied_and_depth_increments(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class MutatingSubgraph:
+        def invoke(self, state):
+            assert state["flow"]["subagent_depth"] == 2
+            state["flow"]["nested"]["child_only"] = True
+            return {
+                "data": {"inputs": {}, "phase_outputs": {}, "scratch": {}},
+                "flow": state["flow"],
+                "messages": [],
+            }
+
+    class FakeSkillLoader:
+        def __init__(self, *args, **kwargs):
+            del args, kwargs
+
+        def compile_skill(self, *args, **kwargs):
+            del args, kwargs
+            return SimpleNamespace(manifest=SimpleNamespace(phases=[]))
+
+    monkeypatch.setattr(graph_assembler_module, "resolve_skill_root", lambda resolver, skill: tmp_path)
+    monkeypatch.setattr(graph_assembler_module, "SkillLoader", FakeSkillLoader)
+    monkeypatch.setattr(
+        graph_assembler_module,
+        "assemble_graph",
+        lambda *args, **kwargs: SimpleNamespace(graph=MutatingSubgraph()),
+    )
+    phase_ast = SubgraphNodeAST(
+        mode="subgraph",
+        target_skill="child",
+        io=PhaseIOSchema(
+            inputs={"type": "object", "properties": {"public": {"type": "string"}}},
+            outputs={"type": "object", "properties": {}},
+        ),
+    )
+    phase_doc = PhaseDocument(
+        phase_name="sub",
+        path=tmp_path / "phases" / "sub" / "SUBGRAPH.md",
+        mode="subgraph",
+        frontmatter={},
+        raw_blocks={},
+        ast=phase_ast,
+    )
+    parent_flow = {"subagent_depth": 1, "nested": {"parent_only": True}}
+
+    node = _build_subgraph_node(
+        phase_doc,
+        phase_ast,
+        chat_model=None,
+        max_patch_attempts=1,
+        skill_resolver=SimpleNamespace(resolve_skill=lambda skill_id: tmp_path),
+    )
+    result = node(
+        {
+            "data": {"inputs": {"public": "visible"}, "phase_outputs": {}, "scratch": {}},
+            "flow": parent_flow,
+            "messages": [],
+            "run_id": "r1",
+        }
+    )
+
+    assert parent_flow == {"subagent_depth": 1, "nested": {"parent_only": True}}
+    assert result["flow"]["nested"]["child_only"] is True
 
 
 def test_phase_wrapper_rejects_double_wrap() -> None:

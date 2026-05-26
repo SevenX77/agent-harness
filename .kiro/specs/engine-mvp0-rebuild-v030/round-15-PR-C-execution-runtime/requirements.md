@@ -33,8 +33,8 @@
 ## 4. C7：ActionRegistry 一级沙盒拦截与多余字段校验
 **验收条件**：
 - [ ] `ActionRegistry` 必须按编译期校验定性（name 在 LOGIC.md 编译期固定）。通过正则表达式主动拦截 `name` 中的 `/`, `.`, `..` 及绝对路径，拦截到非法字符直接抛出 FATAL `[F-v3-logic-action-name-invalid]`。
-- [ ] 运行时接收到 Action 执行的 Dict 结果后，引擎会针对 `LOGIC.md` `io.outputs` 字段进行比对。
-- [ ] 当发现未被声明的多余返回字段时，程序抛出 **FATAL** `[F-v3-logic-output-field-undeclared]`，**抛错不截断**，中断当前 phase 状态回写闭环。
+- [ ] 运行时接收到 Action 执行的 Dict 结果或对 ctx 的就地突变后，引擎会针对 `LOGIC.md` `io.outputs` 字段进行比对。
+- [ ] 当发现未被声明的多余返回字段时（无论来自字典返回还是 ctx.set 突变），程序统一抛出 **FATAL** `[F-v3-logic-output-field-undeclared]`，**抛错不截断**，中断当前 phase 状态回写闭环。
 - [ ] 覆盖测试：`tests/core/test_action_registry_v030.py`。
 
 ## 5. C6 / D4：Resolver 寻址与 Subagent 隔离泄漏

@@ -68,7 +68,7 @@
 ### C7 ActionRegistry 一级寻址校验
 - 正则拦截：按编译期校验定性（name 在 LOGIC.md 编译期固定，runtime resolve 理论不触发）。拦截所有带 `/`, `\`, `..`, `.`, 绝对路径和 module path 的 action name 请求，抛出 **FATAL `[F-v3-logic-action-name-invalid]`**。
 - 寻址范围：限定在 `phases/<phase_id>/actions/<name>.py` 或是全局 Common action registry 中。
-- **多余字段校验**：错误码重命名为 `[F-v3-logic-output-field-undeclared]` + 补 ctx 突变路径校验。当前 `result` 已有 Fatal 拦截，但 `ctx.data` 突变路径（如 `:210` 旁路）绕过了校验，需针对此缺口进行补漏，一旦发现未声明字段的就地修改，直接抛错终止。
+- **多余字段校验**：错误码重命名为 `[F-v3-logic-output-field-undeclared]` + 补 ctx 突变路径校验。当前 `result` 已有 Fatal 拦截，但 `ctx.data` 突变路径（如 `:210` 旁路）绕过了校验，需针对此缺口进行补漏。设计决策（G2）：一旦发现未声明字段的写入（不论是通过 action dict return 还是 ctx.set 就地突变），**统一抛出 FATAL `[F-v3-logic-output-field-undeclared]` 终止，不交给 StateMapper 拦截**。
 
 ### C6 + D4 subagent/SUBGRAPH resolver 与 深拷贝
 - **C6**: 全面走 `target_skill` resolver 加载。不提供 `child_graph_path` public tool 参数。

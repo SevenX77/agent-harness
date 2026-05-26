@@ -140,3 +140,66 @@ def test_builtin_tool_failure_asserts_payload_code(tmp_path: Path) -> None:
         read_declared_reference(root=tmp_path, references={}, reference_id="missing")
 
     assert exc_info.value.payload.code == "[F-v3-resource-reference-not-found]"
+
+
+def test_error_registry_entries_have_complete_nonempty_metadata() -> None:
+    registry = _error_registry()
+
+    assert len(registry) == 87
+    for code, metadata in registry.items():
+        assert metadata.code == code
+        assert metadata.code
+        assert metadata.level
+        assert metadata.stage
+        assert all(stage for stage in metadata.stage)
+        assert metadata.doc_link
+
+
+def test_error_registry_preserves_warn_level_for_reference_reader_fallback() -> None:
+    registry = _error_registry()
+
+    assert registry["[F-v3-reference-reader-failed]"].level == "WARN"
+
+
+def test_error_payload_requires_nonempty_message() -> None:
+    ErrorPayload = _error_payload_model()
+
+    with pytest.raises(ValueError):
+        ErrorPayload(code="[F-v3-graph-phase-cycle]")
+    with pytest.raises(ValueError):
+        ErrorPayload(code="[F-v3-graph-phase-cycle]", message="")
+
+
+def test_engine_source_has_no_coarse_error_code_literals() -> None:
+    coarse_codes = {
+        "[F-v3-route]",
+        "[F-v3-io]",
+        "[F-v3-graph]",
+        "[F-v3-actions]",
+        "[F-v3-purity]",
+    }
+    source_root = REPO_ROOT / "packages" / "graph-agent" / "src" / "graph_agent"
+    occurrences: list[str] = []
+    for path in source_root.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        for code in coarse_codes:
+            if code in text:
+                occurrences.append(f"{path.relative_to(REPO_ROOT)}:{code}")
+
+    assert occurrences == []
+
+
+def test_error_payload_json_boundary_shape_uses_required_keys_and_stage_array() -> None:
+    import json
+
+    ErrorPayload = _error_payload_model()
+    payload = ErrorPayload(code="[F-v3-graph-phase-cycle]", message="cycle")
+
+    data = json.loads(payload.model_dump_json())
+
+    assert {"code", "level", "stage", "message", "doc_link"} <= set(data)
+    assert data["code"] == "[F-v3-graph-phase-cycle]"
+    assert data["level"] == "FATAL"
+    assert data["stage"] == ["编译期"]
+    assert data["message"] == "cycle"
+    assert data["doc_link"]

@@ -45,9 +45,8 @@ from app.models.copilot import (
     CopilotEventToolUseStart,
     CopilotToolName,
 )
-from app.core import config
 from app.services.llm_credentials import load_credentials
-from app.services.llm_roles import load_roles_file
+from app.services.llm_roles import load_roles_file, roles_path as default_roles_path
 
 SessionKey = tuple[str, str, str]
 
@@ -375,9 +374,9 @@ def _tool_result_summary(content: str | list[dict[str, Any]] | None) -> str:
 def _resolve_copilot_route(model_override: str | None) -> ResolvedRoute:
     from graph_agent_gateway.registry.resolver import resolve_role
 
-    roles_path = config.REPO_ROOT / "config" / "llm_roles.yaml"
     credentials = load_credentials()
-    roles = load_roles_file(roles_path) if roles_path.exists() else RolesData()
+    active_roles_path = default_roles_path()
+    roles = load_roles_file(active_roles_path) if active_roles_path.exists() else RolesData()
     snapshot = roles.to_registry_snapshot(credentials)
     resolved = resolve_role(
         snapshot,

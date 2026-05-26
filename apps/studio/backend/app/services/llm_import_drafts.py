@@ -15,6 +15,7 @@ from app.services.llm_credentials import (
     load_credentials,
     save_credentials,
 )
+from app.services.llm_paths import import_drafts_path
 from graph_agent_gateway.registry.schema import ProviderImportDraft, ProviderRoute
 
 _WRITE_LOCK = threading.Lock()
@@ -36,7 +37,7 @@ class DraftApplyConflict(ValueError):
 
 def drafts_path() -> Path:
     """Return the transient import draft store path."""
-    return Path.home() / ".studio" / "import_drafts.json"
+    return import_drafts_path()
 
 
 def create_draft(

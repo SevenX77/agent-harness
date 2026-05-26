@@ -5,8 +5,6 @@ import os
 from pathlib import Path
 
 import pytest
-from pydantic import SecretStr, ValidationError
-
 from app.models.llm_config import (
     LLMCredentialsFile,
     RoleEntry,
@@ -14,6 +12,7 @@ from app.models.llm_config import (
 )
 from app.services.llm_credentials import (
     load_credentials,
+    migrate_v3_credentials_to_v4,
     save_credentials,
     serialize_for_response,
     upsert_endpoints,
@@ -26,6 +25,7 @@ from graph_agent_gateway.registry.schema import (
     RoleRouteEntry,
 )
 from graph_agent_gateway.registry.storage import compute_credential_fingerprint
+from pydantic import SecretStr, ValidationError
 
 
 def _endpoint(
@@ -88,6 +88,90 @@ def test_load_missing_credentials_returns_empty_v4_and_legacy_file_is_fatal(tmp_
 
     with pytest.raises(ValueError, match="schema_version 4|legacy"):
         load_credentials(path)
+
+
+def test_migrate_v3_credentials_to_v4_preserves_secret_and_models(tmp_path: Path) -> None:
+    path = tmp_path / "llm_credentials.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 3,
+                "providers": [
+                    {
+                        "id": "anthropic-official",
+                        "name": "Anthropic Official",
+                        "provider_type": "anthropic_compatible",
+                        "base_url": "https://api.anthropic.com",
+                        "api_key": "anthropic-secret",
+                        "last_test_status": "ok",
+                        "available_models": [
+                            {
+                                "id": "claude-sonnet-4-6",
+                                "capabilities": {
+                                    "display_name": "Claude Sonnet 4.6",
+                                    "max_input_tokens": 1_000_000,
+                                    "max_output_tokens": 128_000,
+                                    "thinking": {"supported": True},
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    migrated = migrate_v3_credentials_to_v4(path)
+
+    assert migrated.schema_version == 4
+    endpoint = migrated.provider_endpoints["anthropic-official"]
+    assert endpoint.api_key is not None
+    assert endpoint.api_key.get_secret_value() == "anthropic-secret"
+    assert "anthropic-official:claude-sonnet-4.6" in migrated.provider_routes
+    route = migrated.provider_routes["anthropic-official:claude-sonnet-4.6"]
+    assert route.display_name == "Claude Sonnet 4.6"
+    assert route.provider_model_id == "claude-sonnet-4-6"
+    assert route.canonical_id == "claude-sonnet-4.6"
+    assert route.capabilities["thinking_protocol"].value is True
+    assert route.capabilities["thinking_protocol"].source == "probed_verified"
+    assert route.capabilities["min_thinking_budget_tokens"].value == 1024
+    assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == 4
+    assert (tmp_path / "llm_credentials.json.v3.bak").exists()
+
+
+def test_migrate_v3_credentials_normalizes_known_endpoint_ids(tmp_path: Path) -> None:
+    path = tmp_path / "llm_credentials.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 3,
+                "providers": [
+                    {
+                        "id": "98593eb6-764b-497e-808d-6610935f0e0a",
+                        "name": "OpenRouter",
+                        "provider_type": "openai_compatible",
+                        "base_url": "https://openrouter.ai/api",
+                        "api_key": "openrouter-secret",
+                        "last_test_status": "ok",
+                        "available_models": [
+                            {
+                                "id": "anthropic/claude-sonnet-4-6",
+                                "capabilities": {"display_name": "Claude Sonnet 4.6"},
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    migrated = migrate_v3_credentials_to_v4(path)
+
+    assert "openrouter-prod" in migrated.provider_endpoints
+    assert "98593eb6-764b-497e-808d-6610935f0e0a" not in migrated.provider_endpoints
+    assert "openrouter-prod:anthropic.claude-sonnet-4-6" in migrated.provider_routes
 
 
 def test_upsert_endpoint_omitted_or_empty_api_key_preserves_secret(tmp_path: Path) -> None:
@@ -233,8 +317,9 @@ roles:
     system_prompt_prefix: ""
     fallback_chain:
       - route_id: openai-direct:gpt-5
-        temperature: 0.2
-        max_output_tokens: 1024
+        runtime_settings:
+          temperature: 0.2
+          max_output_tokens: 1024
     lint_requirements:
       thinking: "warn"
 """.lstrip(),
@@ -245,6 +330,7 @@ roles:
 
     assert data.schema_version == 2
     assert data.roles["graph_agent"].fallback_chain[0].route_id == "openai-direct:gpt-5"
+    assert data.roles["graph_agent"].fallback_chain[0].runtime_settings.temperature == 0.2
     save_roles_file(path, data, known_route_ids={"openai-direct:gpt-5"})
     assert 'thinking: "warn"' in path.read_text(encoding="utf-8")
 
@@ -263,3 +349,18 @@ def test_checked_in_roles_file_uses_v2_route_chain_schema() -> None:
     assert data.schema_version == 2
     assert "balanced" in data.roles
     assert data.roles["balanced"].fallback_chain[0].route_id
+    assert data.model_profiles["CL46T"].fallback_chain[0].runtime_settings.reasoning.enabled is True
+    assert (
+        data.model_profiles["CL46T"]
+        .fallback_chain[0]
+        .runtime_settings.reasoning.budget_tokens
+        == 4096
+    )
+    assert data.model_profiles["CLO47T"].fallback_chain[0].runtime_settings.reasoning.enabled is True
+    assert (
+        data.model_profiles["CLO47T"]
+        .fallback_chain[0]
+        .runtime_settings.reasoning.budget_tokens
+        is None
+    )
+    assert data.roles["balanced"].fallback_chain[0].runtime_settings.reasoning.enabled is True

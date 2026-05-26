@@ -31,7 +31,12 @@ from graph_agent.callbacks.events import (
     BuiltinSubagentEnterEvent,
     BuiltinSubagentExitEvent,
     BuiltinSubagentFallbackEvent,
+    LLMCallEvent,
+    PhaseEndEvent,
+    PhaseStartEvent,
+    ToolCallEvent,
 )
+from graph_agent.callbacks.emit import _safe_emit_event
 from graph_agent.core.actions import ToolDef, _structured_tool
 from graph_agent.core.builtin_subagents import ReferenceReaderRuntime
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError, make_error_payload
@@ -55,6 +60,7 @@ from graph_agent.core.subagents import (
 )
 from graph_agent.middleware.factory import build_middleware_chain_cognitive_flow
 from graph_agent.runtime.state import BlackboardState
+from graph_agent.runtime.state import normalize_blackboard_data
 from graph_agent.runtime.state_mapper import (
     PhaseWrapper,
     StateMapper,
@@ -357,68 +363,120 @@ def _build_skill_node(
 
         data_updates: dict[str, Any] = {}
         flow = dict(state.get("flow", {}))
-        messages = [
-            SystemMessage(
-                content=_agent_system_prompt(
-                    phase_id,
-                    phase_ast,
-                    compiled,
-                    knowledge_base_markdown=knowledge_base_markdown,
-                )
-            ),
-            *state.get("messages", []),
-        ]
-        model = (
-            chat_model.bind_tools(all_tools) if hasattr(chat_model, "bind_tools") else chat_model
-        )
+        phase_end_emitted = False
 
-        max_turns = phase_ast.max_iterations
-        for _ in range(max_turns):
-            prompt_messages = messages
-            response = model.invoke(prompt_messages)
-            messages = [*prompt_messages, response]
-            tool_calls = list(getattr(response, "tool_calls", []) or [])
-            if not tool_calls:
-                break
-            for call in tool_calls:
-                name = call.get("name")
-                tool = all_tools_by_name.get(name)
-                if tool is None:
-                    _graph_fatal(f"LLM called unknown tool {name!r} in phase {phase_id!r}")
-                call_args = call.get("args", {})
-                if name in subagent_by_tool_name:
-                    result = _invoke_subagent_tool_t21(
-                        tool_name=name,
-                        subagent=subagent_by_tool_name[name],
-                        args=call_args if isinstance(call_args, dict) else {},
-                        state=state,
+        def _emit_phase_end(response_state: dict[str, Any]) -> None:
+            nonlocal phase_end_emitted
+            if phase_end_emitted:
+                return
+            phase_end_emitted = True
+            _safe_emit_event(
+                callbacks,
+                PhaseEndEvent(
+                    phase_name=phase_id,
+                    context=_phase_end_context(phase_id, state, response_state),
+                ),
+            )
+
+        _safe_emit_event(
+            callbacks,
+            PhaseStartEvent(phase_name=phase_id, context=_observable_data_context(state)),
+        )
+        try:
+            messages = [
+                SystemMessage(
+                    content=_agent_system_prompt(
+                        phase_id,
+                        phase_ast,
+                        compiled,
+                        knowledge_base_markdown=knowledge_base_markdown,
+                    )
+                ),
+                *state.get("messages", []),
+            ]
+            model = (
+                chat_model.bind_tools(all_tools)
+                if hasattr(chat_model, "bind_tools")
+                else chat_model
+            )
+
+            max_turns = phase_ast.max_iterations
+            for _ in range(max_turns):
+                prompt_messages = messages
+                response = model.invoke(prompt_messages)
+                input_tokens, output_tokens = _extract_token_usage(response)
+                _safe_emit_event(
+                    callbacks,
+                    LLMCallEvent(
+                        phase_name=phase_id,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        messages=None,
+                        response_data=None,
+                    ),
+                )
+                messages = [*prompt_messages, response]
+                tool_calls = list(getattr(response, "tool_calls", []) or [])
+                if not tool_calls:
+                    break
+                for call in tool_calls:
+                    name = call.get("name")
+                    tool = all_tools_by_name.get(name)
+                    if tool is None:
+                        _graph_fatal(f"LLM called unknown tool {name!r} in phase {phase_id!r}")
+                    call_args = call.get("args", {})
+                    if name in subagent_by_tool_name:
+                        result = _invoke_subagent_tool_t21(
+                            tool_name=name,
+                            subagent=subagent_by_tool_name[name],
+                            args=call_args if isinstance(call_args, dict) else {},
+                            state=state,
+                            flow=flow,
+                            runtime=subagent_runtime_by_tool_name[name],
+                            parent_config=config,
+                        )
+                    else:
+                        result = tool.invoke(call_args)
+                    _safe_emit_event(
+                        callbacks,
+                        ToolCallEvent(
+                            phase_name=phase_id,
+                            tool_name=str(name or ""),
+                            args=call_args if isinstance(call_args, dict) else {},
+                            result=_stringify_tool_result(result),
+                        ),
+                    )
+                    messages.append(
+                        ToolMessage(
+                            content=json.dumps(result, ensure_ascii=False),
+                            name=name,
+                            tool_call_id=call.get("id", f"{name}-call"),
+                        )
+                    )
+                    finish_response = cognitive_flow.handle_finish_task_tool_result(
+                        tool_name=str(name or ""),
+                        tool_result=result,
+                        output_schema=output_schema if isinstance(output_schema, dict) else None,
                         flow=flow,
-                        runtime=subagent_runtime_by_tool_name[name],
-                        parent_config=config,
+                        messages=messages,
+                        critic_metrics=critic_metrics,
                     )
-                else:
-                    result = tool.invoke(call_args)
-                messages.append(
-                    ToolMessage(
-                        content=json.dumps(result, ensure_ascii=False),
-                        name=name,
-                        tool_call_id=call.get("id", f"{name}-call"),
-                    )
-                )
-                finish_response = cognitive_flow.handle_finish_task_tool_result(
-                    tool_name=str(name or ""),
-                    tool_result=result,
-                    output_schema=output_schema if isinstance(output_schema, dict) else None,
-                    flow=flow,
-                    messages=messages,
-                    critic_metrics=critic_metrics,
-                )
-                if finish_response is not None:
-                    return finish_response
-        response_state = {"flow": flow, "messages": messages}
-        if data_updates:
-            response_state["data"] = data_updates
-        return response_state
+                    if finish_response is not None:
+                        _emit_phase_end(finish_response)
+                        return finish_response
+            response_state = {"flow": flow, "messages": messages}
+            if data_updates:
+                response_state["data"] = data_updates
+            _emit_phase_end(response_state)
+            return response_state
+        finally:
+            _emit_phase_end(
+                {
+                    "flow": flow,
+                    "messages": state.get("messages", []),
+                    "data": normalize_blackboard_data(state.get("data")),
+                }
+            )
 
     return _skill_node
 
@@ -431,6 +489,77 @@ def _subagent_tool_map(
         f"call_subagent_{subagent.name}": subagent
         for subagent in compiled.subagents_by_phase.get(phase_id, [])
     }
+
+
+def _observable_data_context(state: BlackboardState) -> dict[str, Any]:
+    data = normalize_blackboard_data(state.get("data"))
+    return {
+        "inputs": dict(data["inputs"]),
+        "phase_outputs": deepcopy(data["phase_outputs"]),
+        "scratch": deepcopy(data["scratch"]),
+    }
+
+
+def _phase_end_context(
+    phase_id: str,
+    state: BlackboardState,
+    response_state: dict[str, Any],
+) -> dict[str, Any]:
+    response_data = response_state.get("data")
+    if isinstance(response_data, dict):
+        if any(key in response_data for key in ("inputs", "phase_outputs", "scratch")):
+            normalized = normalize_blackboard_data(response_data)
+            return {
+                "inputs": dict(normalized["inputs"]),
+                "phase_outputs": deepcopy(normalized["phase_outputs"]),
+                "scratch": deepcopy(normalized["scratch"]),
+            }
+        return {
+            "inputs": {},
+            "phase_outputs": {phase_id: dict(response_data)},
+            "scratch": {},
+        }
+    return _observable_data_context(state)
+
+
+def _extract_token_usage(response: Any) -> tuple[int, int]:
+    metadata = getattr(response, "response_metadata", None)
+    usage = metadata.get("token_usage") if isinstance(metadata, dict) else None
+    if not isinstance(usage, dict):
+        usage = metadata.get("usage") if isinstance(metadata, dict) else None
+    if not isinstance(usage, dict):
+        usage = getattr(response, "usage_metadata", None)
+    if not isinstance(usage, dict):
+        return 0, 0
+    input_tokens = _coerce_token_count(
+        usage.get("input_tokens", usage.get("prompt_tokens", usage.get("total_input_tokens")))
+    )
+    output_tokens = _coerce_token_count(
+        usage.get(
+            "output_tokens",
+            usage.get("completion_tokens", usage.get("total_output_tokens")),
+        )
+    )
+    return input_tokens, output_tokens
+
+
+def _coerce_token_count(value: Any) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return max(value, 0)
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _stringify_tool_result(result: Any) -> str:
+    if isinstance(result, str):
+        return result
+    if isinstance(result, (dict, list)):
+        return json.dumps(result, ensure_ascii=False, default=str)
+    return str(result)
 
 
 def _agent_system_prompt(

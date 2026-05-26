@@ -91,7 +91,7 @@ MVP0 MUST 删除 `ExitContractRegistry` 的 per-turn inject / strip 设计。`ex
 |---|---|---|---|---|---|
 | `ExitContractRegistry` | 退役 | `<exit_contract>` 尾置模板 | runtime 不再 inject/strip messages | — | 避免历史堆积 |
 | `AgentNodeAST.exit_contract` | 退役 | `V030_AGENT_EXIT_CONTRACT_TEXT` 系统默认字符串 | Agent body 不再提供 `<exit_contract>` | `[F-v3-cognitive-output-schema-render-failed]` | 最终输出规则 |
-| `<exit_contract>` body tag | 禁止 | codemod 一次性迁移工具仍可读写旧 tag | live loader 看到 Agent body 顶层 `<exit_contract>` 直接 FATAL | `[F-v3-agent-body-tag-unknown]` | 防止旧契约继续进入 runtime |
+| `<exit_contract>` body tag | 禁止 | PR G / round-18 已删除 repo 内 codemod; live loader 看到 Agent body 顶层 `<exit_contract>` 直接 FATAL | `[F-v3-agent-body-tag-unknown]` | 防止旧契约继续进入 runtime |
 | `output_schema` 独立插槽 | 退役 | 追加到 exit_contract 末尾 | 序列化失败 FATAL | `[F-v3-cognitive-output-schema-render-failed]` | recency bias |
 | ReAct `messages` | 不存 exit contract 临时副本 | 只保存真实对话 / tool 消息 | 不允许重复注入 contract | `[F-v3-runtime-phase-failed]` | 控制上下文体积 |
 
@@ -268,7 +268,7 @@ def run_skill(
 
 | 参数 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
 |---|---|---|---|---|---|---|
-| `skill_path` | str 或 Path | 是 | 无 | `SKILL.md` 或 V2.1 skill root | `[F-v3-graph-root-missing]` 等编译错误 | 主图入口 |
+| `skill_path` | str 或 Path | 是 | 无 | V0.3.0 skill root, 必须包含 `GRAPH.md`; legacy root `SKILL.md` corpus 属 §10 Deferred 迁移范围 | `[F-v3-graph-root-missing]` 等编译错误 | 主图入口 |
 | `**inputs` | Any kwargs | 否 | `{}` | 当前 graph_skill path 会写入初始 `data=dict(inputs)`；根级 strict input gate 仍是目标态 | `[F-v3-runtime-state-mapping-failed]` | 初始黑板 |
 | `model_resolver` | Any | 否 | `None` | graph_skill runner 有参；无 `mock_llm` 时调用 `model_resolver.resolve(callbacks=..., phase_name="<workflow>")` | `[F-v3-runtime-phase-failed]` | LLM 注入 |
 | `skill_resolver` | Protocol | 是 | 无 | 实现 `resolve_skill` | `[F-v3-resolver-missing]` | 子 skill 寻址 |
@@ -276,7 +276,7 @@ def run_skill(
 | `trace_dir` | str 或 Path | 否 | `None` | 无 | — | 默认 tracing 输出目录 |
 | `thread_id` | string | 否 | `None` | graph_skill path 无值时生成 UUID run id | — | run/thread 定位 |
 | `unattended` | bool | 否 | `False` | legacy/harness 路径消费 | — | 无人值守运行 |
-| `callbacks` | list[Any] | 否 | `None` | graph_skill path 会传给 resolver；V2 harness 路径会默认补 Logging/Tracing callbacks | — | observability |
+| `callbacks` | list[Any] | 否 | `None` | graph_skill path 会传给 resolver；legacy harness 路径会默认补 Logging/Tracing callbacks | — | observability |
 | `artifact_saver` | Any | 否 | `None` | legacy/harness 路径消费 | — | artifact 保存 |
 | `initial_context` | dict[str, Any] | 否 | `None` | legacy/harness 路径消费 | — | 初始上下文 |
 | `cleanup_checkpoints_on_finish` | bool | 否 | `True` | run 结束后清理线程 checkpoint | — | 存储清理 |

@@ -195,7 +195,6 @@ class TestHeartbeatPulser:
         harness.phases = [Phase(name="phase_a", requires_llm=False)]
         harness.callbacks = []
         harness._io_config = None
-        harness._context_mapping = None
         harness._skill_dir = None
         harness._resolver = None
         harness._checkpointer = None

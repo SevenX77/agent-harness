@@ -38,7 +38,7 @@ sequenceDiagram
 |---|---|---|---|---|
 | 读取根 | `<root>/GRAPH.md` | raw markdown | 文件存在 | `[F-v3-graph-phase-dir-missing]` 等物理错误 |
 | 解析根 frontmatter | raw markdown | Graph metadata AST | name/version/phases registry/io | `[F-v3-graph-schema-version-mismatch]`, `[F-v3-graph-io-schema-invalid]` |
-| 解析根 body 拓扑 | raw markdown body | DAG edges/output marks | `<phase depends_on>` 与 frontmatter phases/目录一致 | `[F-v3-graph-depends-unknown]`, `[F-v3-graph-phase-id-invalid]` |
+| 解析根 body 拓扑 | raw markdown body | DAG edges/output marks | `<phase depends_on>` 与 frontmatter phases/目录一致; name mismatch 与重复注册分码 | `[F-v3-graph-depends-unknown]`, `[F-v3-graph-phase-id-invalid]`, `[F-v3-graph-phase-name-mismatch]`, `[F-v3-graph-phase-id-duplicate]`, `[F-v3-graph-output-phase-invalid]` |
 | 扫描 phase 目录 | `phases[]` | phase file map | 每个 phase 恰好一个节点文件 | `[F-v3-graph-phase-mode-ambiguous]` |
 | 解析 phase 节点 | node md | Logic/Subgraph/Agent AST | 文件名类型推导、字段表、body XML | domain-specific F-v3 |
 | DAG 校验 | frontmatter phases + body depends_on | topological order | 依赖存在、无环、无孤岛 | `[F-v3-graph-phase-cycle]`, `[F-v3-graph-phase-island]` |
@@ -48,7 +48,7 @@ sequenceDiagram
 
 编译期不执行 action、不调用业务 Agent, 但可以调用 resolver 做 skill root 可达性检查。Reference reader 不在编译期跑, 它属于装配期。
 
-本流程引用 [Physical Layout](./01-physical-layout.md#物理结构拓扑-directory-tree)、[GRAPH Phase DAG](./02-graph-md-spec.md#phases-列表与拓扑校验-phase-dag) 和 [Mention Syntax](./07-mention-syntax-spec.md#7-大分类静态可达性算法)。
+本流程引用 [Physical Layout](./01-physical-layout.md#物理结构拓扑-directory-tree)、[GRAPH Phase DAG](./02-graph-md-spec.md#phases-注册与-body-拓扑校验-phase-registration--dag) 和 [Mention Syntax](./07-mention-syntax-spec.md#7-大分类静态可达性算法)。
 
 ## Template 装配流 (Assembly-time Workflow)
 

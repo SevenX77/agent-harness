@@ -34,8 +34,8 @@
 *   `[F-v3-graph-phase-node-missing]`: 当 phase 目录下没有任何有效的 LOGIC/SUBGRAPH/SKILL 文件时。
 *   `[F-v3-graph-phases-missing]`: 当 `GRAPH.md` 缺少 frontmatter `phases` 列表时。
 *   `[F-v3-graph-phase-name-mismatch]`: 当 body `<phase>` name 或 frontmatter registered name 与物理目录名不一致时。
-*   `[F-v3-graph-phase-id-invalid]`: 当 body `<phase>` 标签缺失，或拓扑解析失败的基础 ID 错误时。
-*   `[F-v3-graph-phase-id-duplicate]`: 当注册了重复的 phase name 时。
+*   `[F-v3-graph-phase-id-invalid]`: 当 body `<phase>` 标签缺失、phase name 为空/非法，或拓扑解析失败的基础 ID 错误时；不得用于 name 与物理目录不一致或 phases 列表重复。
+*   `[F-v3-graph-phase-id-duplicate]`: 当 frontmatter `phases` 注册了重复的 phase name 时；区别于 body/目录 name mismatch。
 *   `[F-v3-graph-depends-unknown]`: 当拓扑依赖 (`depends_on`) 引用了未注册的 phase name，或首节点未使用 `input` 时。
 *   `[F-v3-graph-phase-cycle]`: 当 DAG 中存在环时。
 *   `[F-v3-graph-phase-island]`: 当存在从 input 不可达的孤岛 phase 时。

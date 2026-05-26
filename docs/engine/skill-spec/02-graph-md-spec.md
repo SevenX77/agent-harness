@@ -34,15 +34,15 @@ phases: [extract_chapter, segment_text, producer_review]
 
 | 元素 | 类型 | 必填 | 校验规则 | 校验失败错误码 |
 |---|---|---|---|---|
-| frontmatter `phases` | list[string] | 是 | 每项正则 `^[a-z][a-z0-9_-]*$`; 必须有对应 `phases/<name>/` 物理目录 | `[F-v3-graph-phase-id-invalid]` / `[F-v3-graph-phase-dir-missing]` |
-| body `<phase>` 文本 | string | 是 | 必须等于 frontmatter 注册名与物理目录名 | `[F-v3-graph-phase-id-invalid]` |
+| frontmatter `phases` | list[string] | 是 | 每项正则 `^[a-z][a-z0-9_-]*$`; list 内不能重复; 必须有对应 `phases/<name>/` 物理目录 | `[F-v3-graph-phase-id-invalid]` / `[F-v3-graph-phase-id-duplicate]` / `[F-v3-graph-phase-dir-missing]` |
+| body `<phase>` 文本 | string | 是 | 必须等于 frontmatter 注册名与物理目录名; 与目录名不一致时按 name mismatch 处理 | `[F-v3-graph-phase-name-mismatch]` |
 | body `depends_on` | string | 是 | 第一个节点写 `input`; 其他节点引用已注册 phase; 多依赖用空格或逗号分隔 | `[F-v3-graph-depends-unknown]` |
 | body `output` 属性 | flag | 否 | 标记结束节点, 可多个; 未标记时以无下游节点推导输出候选 | `[F-v3-graph-output-phase-invalid]` |
 
 ### DAG 校验算法 (编译期 Loader 必跑)
 
 1. **唯一性**: frontmatter `phases` 列表内 name 不能重复 — 重复 → `[F-v3-graph-phase-id-duplicate]`
-2. **双轨一致**: body `<phase>` name 集合必须等于 frontmatter `phases` 集合, 并等于 `phases/<name>/` 目录集合。
+2. **双轨一致**: body `<phase>` name 集合必须等于 frontmatter `phases` 集合, 并等于 `phases/<name>/` 目录集合; 任一 body name 或注册名与物理目录不一致 → `[F-v3-graph-phase-name-mismatch]`
 3. **依赖可达**: 每个 body `depends_on` 引用的 phase id 必须在 frontmatter `phases` 列表内存在; 入口节点依赖写保留字 `input` → `[F-v3-graph-depends-unknown]`
 4. **无环**: DFS 拓扑排序, 检测到环 → `[F-v3-graph-phase-cycle]` (报具体环路径)
 5. **无孤岛**: 从 `depends_on="input"` 入口节点不可达的 phase = 孤岛 → `[F-v3-graph-phase-island]`

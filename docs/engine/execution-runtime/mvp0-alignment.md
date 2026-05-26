@@ -1,6 +1,6 @@
 # execution-runtime (engine) — MVP0 Alignment (V0.3.0 graph_skill)
 
-> **Status**: Rewritten by a1 (Codex) for V0.3.0 graph_skill, 2026-05-23
+> **Status**: Rewritten by a1 (Codex) for V0.3.0 graph_skill, synced with PR C live behavior 2026-05-26
 > **Scope**: Graph runtime 装配、ModelResolver / SkillResolver DI、Agent cognitive template 渲染、builtin reference reader / tools、LOGIC ActionRegistry、SUBGRAPH / subagent 隔离调用、运行期错误归一化。
 > **配套**: 见 [skill-spec README](../skill-spec/README.md), [skill-compilation alignment](../skill-compilation/mvp0-alignment.md), [state-and-io-contract alignment](../state-and-io-contract/mvp0-alignment.md)。
 
@@ -89,8 +89,8 @@ MVP0 MUST 删除 `ExitContractRegistry` 的 per-turn inject / strip 设计。`ex
 
 | 旧组件 / 字段 | V0.3.0 状态 | 替代物 | 校验规则 | 错误码 | 业务作用 |
 |---|---|---|---|---|---|
-| `ExitContractRegistry` | 退役 | `{skill_exit_contract_inline}` | runtime 不再 inject/strip messages | — | 避免历史堆积 |
-| `AgentNodeAST.exit_contract` | 退役 | `{skill_exit_contract_inline}` 系统默认字符串 | Agent body 不再提供 `<exit_contract>` | `[F-v3-cognitive-output-schema-render-failed]` | 最终输出规则 |
+| `ExitContractRegistry` | 退役 | `<exit_contract>` 尾置模板 | runtime 不再 inject/strip messages | — | 避免历史堆积 |
+| `AgentNodeAST.exit_contract` | 退役 | `V030_AGENT_EXIT_CONTRACT_TEXT` 系统默认字符串 | Agent body 不再提供 `<exit_contract>` | `[F-v3-cognitive-output-schema-render-failed]` | 最终输出规则 |
 | `SkillNodeAST.exit_contract` | legacy path 保留 | legacy runtime 注入路径 | 仅旧 `mode: skill` 路径消费 | — | PR γ3 cleanup 前兼容旧路径 |
 | `output_schema` 独立插槽 | 退役 | 追加到 exit_contract 末尾 | 序列化失败 FATAL | `[F-v3-cognitive-output-schema-render-failed]` | recency bias |
 | ReAct `messages` | 不存 exit contract 临时副本 | 只保存真实对话 / tool 消息 | 不允许重复注入 contract | `[F-v3-runtime-phase-failed]` | 控制上下文体积 |
@@ -131,7 +131,8 @@ MVP0 MUST 把运行期可预期失败归一到 `[F-v3-*]`。本文件新增关�
 | 错误码 | 阶段 | 触发条件 | 处理 | Spec |
 |---|---|---|---|---|
 | `[F-v3-skill-not-registered]` | 装配期 / 运行期 | resolver 查不到 `target_skill` | FATAL; Studio 可标红导入 | [Error Code Spec](../skill-spec/11-error-code-spec.md#错误码速查全表) |
-| `[F-v3-reference-reader-failed]` | 装配期 | builtin reference reader 超时、异常或输出非法 | WARN; fallback 原文摘录继续装配 | [Error Code Spec](../skill-spec/11-error-code-spec.md#错误码速查全表) |
+| `[F-v3-reference-reader-failed]` | 装配期 | builtin reference reader 超时、普通异常或输出非法 | WARN; fallback 原文摘录继续装配 | [Error Code Spec](../skill-spec/11-error-code-spec.md#错误码速查全表) |
+| `[F-v3-resource-reference-path-invalid]` | 编译期 / 装配期 / tool 运行期 | reference path 为空、绝对路径、逃逸 skill root、不可读，或 reader 遇到 path fatal | FATAL; 不允许 fallback 静默降级 | [Error Code Spec](../skill-spec/11-error-code-spec.md#错误码速查全表) |
 | `[F-v3-cognitive-output-schema-render-failed]` | 装配期 | `io.outputs` 无法 inline 到 exit_contract | FATAL | [Error Code Spec](../skill-spec/11-error-code-spec.md#错误码速查全表) |
 | `[F-v3-runtime-state-mapping-failed]` | 运行期 | StateMapper 切片 / 回写失败 | FATAL; 不回写脏数据 | [Error Code Spec](../skill-spec/11-error-code-spec.md#错误码速查全表) |
 | `[F-v3-runtime-phase-failed]` | 运行期 | phase 执行异常且无法归入更细错误 | FATAL; trace 原始异常 | [Error Code Spec](../skill-spec/11-error-code-spec.md#错误码速查全表) |
@@ -141,7 +142,7 @@ MVP0 MUST 把运行期可预期失败归一到 `[F-v3-*]`。本文件新增关�
 
 ### 7. Builtin Reference Reader Subagent 装配期调用 (NEW-A)
 
-MVP0 MUST 在 Agent cognitive template 渲染前主动调用 builtin reference reader subagent。它读取 Agent frontmatter `references` 注册表, 输出 Markdown 注入 `{reference_reader_subagent_output_markdown}`。
+MVP0 MUST 在 Agent cognitive template 渲染前主动调用 builtin reference reader subagent。它读取 Agent frontmatter `references` 注册表, 输出 Markdown 作为 `knowledge_base_markdown` 注入 `<knowledge_base>`。
 
 | 输入 / 输出 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
 |---|---|---|---|---|---|---|
@@ -156,39 +157,41 @@ MVP0 MUST 在 Agent cognitive template 渲染前主动调用 builtin reference r
 1. reader 超时 / 抛异常 / 输出非法: 发 WARN `[F-v3-reference-reader-failed]`。
 2. Runtime 截取每份 reference 原文前 3000 token, 生成 fallback markdown。
 3. fallback 填入 `<knowledge_base>` 插槽, Agent run 不阻塞。
+4. 若失败码是 `[F-v3-resource-reference-path-invalid]`, 必须 FATAL 透传, 不进入 fallback。
 
 规范终点见 [Builtin Reference Reader Subagent 签名](../skill-spec/09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名) 与 [Reference 三机制生命周期](../skill-spec/08-resource-mechanisms-spec.md#reference-三机制生命周期)。
 
 ### 8. Builtin Tools 运行期注入 (NEW-B)
 
-MVP0 MUST 给每个 Agent runtime 注入 `read_reference` 与 `read_example` builtin tools。即使 frontmatter `tools:` 未列这两个名字, Agent 也可以按 cognitive template 提示主动调用。
+MVP0 MUST 给每个 Agent runtime 注入 `read_reference` 与 `read_example` builtin tools。即使 frontmatter `tools:` 未列这两个名字, Agent 也可以按 cognitive template 提示主动调用。工具必须先查当前 phase registry, 未声明 id 要在文件 IO 前短路, 不能尝试访问同名外部文件。
 
 | Tool | 参数 | 类型 | 必填 | 默认值 | 校验失败错误码 | 业务作用 |
 |---|---|---|---|---|---|---|
 | `read_reference` | `reference_id` | string | 是 | 无 | `[F-v3-resource-reference-not-found]` | 读取注册 reference |
 | `read_reference` | `query` | string | 否 | `""` | — | 指定查阅问题 |
-| `read_reference` | `mode` | enum | 否 | `excerpt` | `[F-v3-tool-argument-invalid]` | 控制 excerpt / full |
+| `read_reference` | `mode` | string | 否 | `excerpt` | `[F-v3-tool-argument-invalid]` 仅用于 `reference_id` 类型错误；当前实现接收但忽略 `mode` | 预留读取模式 |
 | `read_example` | `example_id` | string | 是 | 无 | `[F-v3-resource-example-not-found]` | 读取 inline 或 document example |
 | `read_example` | `query` | string | 否 | `""` | — | 指定对照问题 |
 
-Builtin tools 的权限域只能看到当前 Agent phase 注册的 `references` / `examples`, 不能跨 phase 或跨 skill 读取未注册资源。实现位置与签名见 [按需调取 Tools](../skill-spec/09-builtin-modules-spec.md#按需调取-tools-read_reference--read_example)。
+Builtin tools 的权限域只能看到当前 Agent phase 注册的 `references` / `examples`, 不能跨 phase 或跨 skill 读取未注册资源。路径读取统一用 `relative_to(root_resolved)` 拦截逃逸；reference path 错误码是 `[F-v3-resource-reference-path-invalid]`, example path 错误码是 `[F-v3-resource-example-path-invalid]`。实现位置与签名见 [按需调取 Tools](../skill-spec/09-builtin-modules-spec.md#按需调取-tools-read_reference--read_example)。
 
-### 9. Cognitive Template 7 插槽装配 (NEW-C)
+### 9. Cognitive Template 8 容器装配 (NEW-C)
 
-Execution-runtime 的装配层 MUST 消费 `AgentNodeAST` 和资源预处理结果, 渲染最终 Agent system prompt。插槽如下:
+Execution-runtime 的装配层 MUST 消费 `AgentNodeAST` 和资源预处理结果, 渲染最终 Agent system prompt。当前 live 代码使用 8 个固定 XML 容器；`<exit_contract>` 固定尾置但不计入 8 个认知容器。
 
-| 插槽 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
+| 容器 / 字段 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
 |---|---|---|---|---|---|---|
-| `{skill_role}` | string | 是 | 无 | 来自 Agent AST role | `[F-v3-agent-role-missing]` | 身份 |
-| `{skill_goal}` | string | 是 | 无 | 来自 Agent AST goal | `[F-v3-agent-goal-missing]` | 目标 |
-| `{skill_steps_splat}` | markdown | 否 | `""` | 来自 steps AST | `[F-v3-agent-step-invalid]` | 行动步骤 |
-| `{skill_protocols_splat}` | markdown | 否 | `"无显式协议"` | 来自 protocols AST | `[F-v3-agent-protocol-invalid]` | 协议依据 |
-| `{reference_reader_subagent_output_markdown}` | markdown | 否 | fallback markdown | NEW-A 输出 | `[F-v3-reference-reader-failed]` WARN | 领域知识 |
-| `{inline_examples_splat}` | markdown | 否 | `"无内联示例"` | inline examples content | `[F-v3-resource-example-invalid]` | 短案例 |
-| `{document_examples_registry}` | markdown list | 否 | `"无扩展案例"` | document examples id + summary | `[F-v3-resource-example-invalid]` | 长案例目录 |
-| `{skill_exit_contract_inline}` | 系统默认字符串 + schema | 是 | 无 | 系统默认字符串 + `io.outputs` schema | `[F-v3-cognitive-output-schema-render-failed]` | 输出契约末尾 recency bias |
+| `<role>` / `role` | string | 是 | 无 | 来自 Agent AST role | `[F-v3-agent-role-missing]` | 身份 |
+| `<goal>` / `goal` | string | 是 | 无 | 来自 Agent AST goal | `[F-v3-agent-goal-missing]` | 目标 |
+| `<thinking_style>` / `steps_md` | markdown | 否 | `"无显式步骤"` | `steps` 平铺为 `- [id] name: content` | `[F-v3-agent-step-invalid]` | 思考规则 + 行动步骤 |
+| `<knowledge_base>` / `knowledge_base_markdown`, `reference_registry_listing` | markdown | 否 | `"无预读取参考资料"` / `"无注册 Reference"` | NEW-A 输出 + reference id/summary 清单 | `[F-v3-reference-reader-failed]` WARN / `[F-v3-resource-reference-path-invalid]` FATAL | 领域知识 |
+| `<examples>` / `inline_examples`, `example_registry_listing` | markdown | 否 | `"无内联示范"` / `"无扩展案例"` | inline 正文 + document example id/summary 清单 | `[F-v3-resource-example-invalid]` | 示例 |
+| `<ambiguity_feedback>` | 固定文本 | 是 | 固定存在 | 模板内置 | — | 不清晰时记录 ambiguity |
+| `<protocol_citation>` / `protocols_md` | markdown | 否 | `"无显式协议"` | protocols 平铺为 `- [protocol:id] content` | `[F-v3-agent-protocol-invalid]` | 协议依据 |
+| `<critical_reminders>` | 固定文本 | 是 | 固定存在 | 模板内置 | `[F-v3-agent-output-schema-invalid]` 等运行期反馈 | finish 前自检 |
+| `<exit_contract>` / `V030_AGENT_EXIT_CONTRACT_TEXT`, `schema_md` | 系统默认字符串 + schema | 是 | `schema_md="{}"` | 系统默认字符串 + `io.outputs` schema | `[F-v3-cognitive-output-schema-render-failed]` | 输出契约末尾 recency bias |
 
-渲染完成后, Agent ReAct 循环只接收一个稳定 system prompt, 不再在每轮 message history 动态注入 exit contract。规范终点见 [Cognitive Template 7 大插槽](../skill-spec/06-cognitive-template-spec.md#7-大插槽布局拓扑)。
+渲染完成后, Agent ReAct 循环只接收一个稳定 system prompt, 不再在每轮 message history 动态注入 exit contract。规范终点见 [Cognitive Template 8 大插槽](../skill-spec/06-cognitive-template-spec.md#8-大插槽布局拓扑)。
 
 ### 10. LOGIC Actions 运行时一级寻址 ActionRegistry (C14)
 
@@ -198,11 +201,11 @@ MVP0 MUST 在运行期继续执行编译期已校验的一级 action 寻址, 并
 |---|---|---|---|---|---|---|
 | `ActionRegistry.skill_root` | Path | 是 | 无 | 当前 graph skill root | `[F-v3-logic-action-dir-missing]` | action 寻址根 |
 | `actions_dir` | Path | actions 非空时必填 | `<skill_root>/actions` | 不允许跨 skill | `[F-v3-logic-action-dir-missing]` | skill-global action 目录 |
-| `action_name` | string | 是 | 无 | `^[a-z][a-z0-9_]*$` | `[F-v3-logic-action-name-invalid]` | action key |
+| `action_name` | string | 是 | 无 | 不得为空、不得包含 `/`、`\`、`.`、不得为绝对路径 | `[F-v3-logic-action-name-invalid]` | action key |
 | `action_path` | Path | 是 | 无 | 必须等于 `<skill_root>/actions/<name>.py` | `[F-v3-logic-action-not-found]` | action 文件 |
 | `run` | callable | 是 | 无 | 返回 dict | `[F-v3-logic-action-entrypoint-missing]` / `[F-v3-logic-action-return-invalid]` | runtime 执行入口 |
 
-Sandbox 模式必须禁止跨 skill action 引用: action 名不能包含 `/`, `.`, `..`, Python module path 或绝对路径。规范终点见 [LOGIC Actions 1 级寻址](../skill-spec/03-logic-md-spec.md#actions-1-级寻址与执行契约)。
+Sandbox 模式必须禁止跨 skill action 引用: action 名不能包含 `/`, `\`, `.`, Python module path 或绝对路径；`..` 已被“包含 `.`”覆盖。Action 返回非 dict 抛 `[F-v3-logic-action-return-invalid]`；返回 dict 或 `Context` 就地突变写入未声明字段都归一抛 `[F-v3-logic-output-field-undeclared]`。规范终点见 [LOGIC Actions 1 级寻址](../skill-spec/03-logic-md-spec.md#actions-1-级寻址与执行契约)。
 
 ## API
 
@@ -295,8 +298,8 @@ Runtime / assembly 消费编译期产出的 `AgentNodeAST`, 不直接解析 SKIL
 | `protocols` | body `<protocol>` AST | `{skill_protocols_splat}` | 否 | `[F-v3-agent-protocol-invalid]` | 协议引用 |
 | `references` | frontmatter | reference reader + `read_reference` | 否 | `[F-v3-resource-reference-invalid]` | 知识资料 |
 | `examples` | frontmatter | examples slots + `read_example` | 否 | `[F-v3-resource-example-invalid]` | 案例 |
-| `exit_contract` | 系统默认字符串 | `{skill_exit_contract_inline}` | 是 | `[F-v3-cognitive-output-schema-render-failed]` | 输出规则 |
-| `io.outputs` | frontmatter | inline output_schema | 是 | `[F-v3-cognitive-output-schema-render-failed]` | 输出结构 |
+| `exit_contract` | 系统默认字符串 | `<exit_contract>` 尾置模板 | 是 | `[F-v3-cognitive-output-schema-render-failed]` | 输出规则 |
+| `io.outputs` | frontmatter | `<output_schema>` 中的 `schema_md` | 是 | `[F-v3-cognitive-output-schema-render-failed]` | 输出结构 |
 
 Body XML 的顶层业务标签与解析规则见 [Agent Body XML 扁平化容器](../skill-spec/05-agent-md-spec.md#body-xml-扁平化容器)。`knowledge_base` 和 `examples` 是 cognitive template 容器, 不是 Agent body 自定义标签。
 
@@ -328,7 +331,4 @@ Cognitive template 固定包含 ambiguity feedback 提示。Runtime 必须提供
 | Agent phase 通过 model resolver 解析真实模型 | 当前 graph skill path 主要通过 `mock_llm` 注入 chat model；缺模型时 Agent phase 会运行期失败。 |
 | callbacks / trace 接回 graph runtime 主线 | 当前 graph skill dict runner 接收 `callbacks` 后直接丢弃，不会自动发 phase/tool/LLM trace。 |
 | runtime 入口先按根级 `io.inputs` 校验输入 | 当前初始 state 直接使用 `dict(inputs)`。 |
-| child graph 只传显式输入，不继承父 data | 当前 SUBGRAPH 使用当前 phase-local data 启动；subagent child graph 使用父 phase-local data 加显式 input。 |
-| depth / retry 等控制态写入 child flow | 当前 subagent depth 主要写入 RunnableConfig metadata；flow 中用来判断的是父 flow 当前值。 |
-| `ExitContractRegistry` 路径删除，exit contract 只在 cognitive template inline | 当前 legacy `SKILL.md` 模式仍会在 Agent 循环里 inject exit contract message。 |
 | GraphAgentError 以外异常也结构化返回 | 当前 public runner 只捕获 GraphAgentError；普通 RuntimeError 等可能直接冒泡。 |

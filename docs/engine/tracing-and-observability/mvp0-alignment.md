@@ -6,13 +6,13 @@
 
 ## V0.3.0 改造摘要
 
-本文件保留 V2.1 MVP0 的方向: 运行主线恢复 callbacks, 统一 TraceEventKind, TOOL_CALL 事件带 `tool_name`, EXCEPTION 保留结构化错误。V0.3.0 只补 3 类事件协议:
+本文件保留 V2.1 MVP0 的方向: 运行主线恢复 callbacks, TOOL_CALL 事件带 `tool_name`, EXCEPTION 保留结构化错误。当前源码事实是 Pydantic `CallbackEvent` union + 小写 `event_type` 字符串；`TraceEventKind` / `AgentTraceEvent` 仍是目标态描述，不是已落地 API。V0.3.0 只补 3 类事件协议:
 
 | 改造点 | 新语义 | 决议来源 |
 |---|---|---|
-| C14 | 新增 `AMBIGUITY_LOGGED`, `log_ambiguity` 不只是一条普通 tool end, 还要投递业务反馈事件 | [Studio V0.3.0 新需求 #3](../../studio/V0.3.0-NEW-REQUIREMENTS--DO-NOT-DELETE-DURING-CLEANUP.md) |
-| C15 | builtin reference reader subagent 使用 `BUILTIN_SUBAGENT_ENTER` / `BUILTIN_SUBAGENT_EXIT`, 与用户 subagent 区分 | [Builtin Modules](../skill-spec/09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名) |
-| 改造点 3 | 装配期 reader 失败发 `BUILTIN_SUBAGENT_FALLBACK` WARN, 携带 timeout/error/config missing 原因 | [Reference 三机制](../skill-spec/08-resource-mechanisms-spec.md#reference-三机制生命周期) |
+| C14 | 新增 `ambiguity_logged`, `log_ambiguity` 不只是一条普通 `tool_call`, 还要投递业务反馈事件 | [Studio V0.3.0 新需求 #3](../../studio/V0.3.0-NEW-REQUIREMENTS--DO-NOT-DELETE-DURING-CLEANUP.md) |
+| C15 | builtin reference reader subagent 使用 `builtin_subagent_enter` / `builtin_subagent_exit`, 与用户 subagent 区分 | [Builtin Modules](../skill-spec/09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名) |
+| 改造点 3 | 装配期 reader 失败发 `builtin_subagent_fallback` WARN, 携带 timeout/error/config missing/invalid/local IO 原因 | [Reference 三机制](../skill-spec/08-resource-mechanisms-spec.md#reference-三机制生命周期) |
 
 Tracing 不决定业务执行, 只记录真实 runtime / assembly 调用点。任何 trace payload 都必须来自 StateMapper / runtime 已校验数据, 不记录未授权全局黑板。
 
@@ -26,7 +26,7 @@ Studio TracePanel、Ambiguity Feedback 面板、Canvas 节点状态和 Edge Insp
 
 N/A — 此模块为纯 backend Python library, 无 React 逻辑。
 
-前端不应推断 phase 生命周期或 reader fallback。它只订阅事件流: `NODE_START` 新增节点运行行, `TOOL_CALL_END` 补工具结果, `AMBIGUITY_LOGGED` 进入 ambiguity 面板, `BUILTIN_SUBAGENT_FALLBACK` 标记 reference reader 降级。
+前端不应推断 phase 生命周期或 reader fallback。它只订阅事件流。当前已落地的 PR E 事件名是小写 typed event: `tool_call` 补工具结果, `ambiguity_logged` 进入 ambiguity 面板, `builtin_subagent_fallback` 标记 reference reader 降级。`NODE_START` / `NODE_END` 仍属于后续目标态。
 
 ## 后端功能
 
@@ -49,25 +49,27 @@ MVP0 SHOULD 把 callbacks / trace 接回 graph runtime 主线。事件应由真�
 
 ### 2. AMBIGUITY_LOGGED trace event (C14)
 
-Agent cognitive template 要求规则不清晰时调用 `log_ambiguity`。Runtime MUST 在 `log_ambiguity` tool 成功后追加投递 `AMBIGUITY_LOGGED`, 不能只发普通 `TOOL_CALL_END`。
+Agent cognitive template 要求规则不清晰时调用 `log_ambiguity`。Runtime MUST 在 `log_ambiguity` tool 成功后追加投递 `AmbiguityLoggedEvent(event_type="ambiguity_logged")`, 不能只发普通 `ToolCallEvent(event_type="tool_call")`。
 
 | 字段 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
 |---|---|---|---|---|---|---|
-| `run_id` | string | 是 | 无 | 当前 run id | — | trace 归属 |
-| `phase_id` | string | 是 | 无 | 当前 Agent phase | — | Canvas / TracePanel 定位 |
-| `event_type` | enum | 是 | `AMBIGUITY_LOGGED` | 固定值 | — | 前端路由到 ambiguity 面板 |
+| `phase_name` | string/null | 否 | `None` | 当前 Agent phase, 由 tool ctx 注入 | — | Canvas / TracePanel 定位 |
+| `event_type` | Literal | 是 | `ambiguity_logged` | 固定值 | — | 前端路由到 ambiguity 面板 |
 | `ambiguity_type` | string | 是 | 无 | 非空; 建议枚举 `rule_gap` / `input_missing` / `conflict` / `other` | `[F-v3-tool-argument-invalid]` | 问题分类 |
+| `question` | string | 是 | 无 | 原始模糊问题 | `[F-v3-tool-argument-invalid]` | 问题正文 |
 | `decision` | string | 是 | 无 | Agent 采取的保守决策 | `[F-v3-tool-argument-invalid]` | 反馈闭环核心 |
-| `reason` | string | 是 | 无 | 非空; 可截断 | `[F-v3-tool-argument-invalid]` | 决策理由 |
-| `related_reference_ids` | list[string] | 否 | `[]` | 必须是当前 Agent references id 子集 | `[F-v3-resource-reference-not-found]` | 关联资料 |
-| `related_protocol_ids` | list[string] | 否 | `[]` | 必须是当前 Agent protocols id 子集 | `[F-v3-mention-target-not-found]` | 关联规则 |
-| `tool_call_id` | string | 是 | 无 | 与 `log_ambiguity` TOOL_CALL 共享 correlation id | — | 串联 tool 与业务事件 |
+| `reason` | string | 否 | `""` | 可为空; 可截断 | `[F-v3-tool-argument-invalid]` | 决策理由 |
+| `related_refs` | list[string] | 否 | `[]` | 从 `@reference:<id>` 提取 | — | 关联资料 |
+| `related_protocols` | list[string] | 否 | `[]` | 从 `@protocol:<id>` 提取 | — | 关联规则 |
+
+> 注 (live 行为对齐): 上表 `[F-v3-tool-argument-invalid]` 是**目标态入参校验契约**。当前 live `log_ambiguity` (cognitive/ambiguity.py) 对这些字段以 `str(... or "")` **容错处理**, 不主动抛该码; 字段真正缺失时表现为 `AmbiguityLoggedEvent` 的 Pydantic ValidationError。严格入参校验属后续目标态。
 
 投递顺序:
 
-1. `TOOL_CALL_START` with `tool_name="log_ambiguity"`。
-2. `TOOL_CALL_END` with `success=true`。
-3. `AMBIGUITY_LOGGED` with normalized ambiguity payload。
+1. tool wrapper / callback bridge 记录普通 tool lifecycle。
+2. `log_ambiguity` 成功写业务记录。
+3. `_emit_ambiguity_logged` 经 `callback.on_event(...)` 并列投递 `ambiguity_logged`。
+4. `TracingCallback.on_tool_call()` 继续写 `tool_call`，不被业务事件替代。
 
 Studio 需求来源见 [V0.3.0 New Requirements](../../studio/V0.3.0-NEW-REQUIREMENTS--DO-NOT-DELETE-DURING-CLEANUP.md), builtin tools 背景见 [Builtin Modules](../skill-spec/09-builtin-modules-spec.md#按需调取-tools-read_reference--read_example)。
 
@@ -77,13 +79,12 @@ Builtin reference reader subagent 与用户 subagent 语义不同。MVP0 MUST �
 
 | 事件 | 触发点 | 必填 payload | 校验规则 | 错误码 | 业务作用 |
 |---|---|---|---|---|---|
-| `BUILTIN_SUBAGENT_ENTER` | builtin reader 调用前 | `builtin_name`, `phase_id`, `trigger_stage`, `reference_ids` | `builtin_name="reference_reader"` | — | 标记系统预读开始 |
-| `BUILTIN_SUBAGENT_EXIT` | builtin reader 成功返回 | `builtin_name`, `phase_id`, `duration_ms`, `used_reference_ids`, `warnings` | 输出 markdown 已生成 | — | 标记系统预读成功 |
-| `BUILTIN_SUBAGENT_FALLBACK` | builtin reader 降级 | `builtin_name`, `phase_id`, `fallback_reason`, `fallback_strategy` | WARN event | `[F-v3-reference-reader-failed]` | 标记系统预读降级 |
-| `TOOL_CALL_START` | `read_reference` / `read_example` 调用前 | `tool_name`, `tool_call_id`, `validated_args` | `tool_name` 必须是真实 builtin 名 | — | 运行期资料读取请求 |
-| `TOOL_CALL_END` | `read_reference` / `read_example` 返回后 | `tool_name`, `tool_call_id`, `success`, `result_summary` | Q13 per-tool `tool_name` 必填 | `[F-v3-resource-reference-not-found]` / `[F-v3-resource-example-not-found]` | 运行期资料读取结果 |
+| `builtin_subagent_enter` | builtin reader 调用前 | `run_id=None`, `phase_name`, `builtin_name`, `payload.reference_ids` | `builtin_name="reference_reader"` | — | 标记系统预读开始 |
+| `builtin_subagent_exit` | builtin reader 成功返回 | `run_id=None`, `phase_name`, `builtin_name`, `payload.reference_ids`, `payload.markdown_length` | 输出 markdown 已生成 | — | 标记系统预读成功 |
+| `builtin_subagent_fallback` | builtin reader 降级 | `run_id=None`, `phase_name`, `builtin_name`, `fallback_reason`, `fallback_strategy`, `excerpt_token_limit`, `warning` | WARN event | `[F-v3-reference-reader-failed]` | 标记系统预读降级 |
+| `tool_call` | `read_reference` / `read_example` 返回后 | `phase_name`, `tool_name`, `args`, `result`, `duration_ms` | Q13 per-tool `tool_name` 必填 | `[F-v3-resource-reference-not-found]` / `[F-v3-resource-example-not-found]` | 运行期资料读取结果 |
 
-`read_reference` 和 `read_example` 不需要专属 event kind; 它们走通用 `TOOL_CALL_*`, 但 payload 中 `tool_name` 必须分别是 `read_reference` / `read_example`。这与 Q13 per-tool `tool_name` 决议一致。
+`read_reference` 和 `read_example` 不需要专属 event kind; 它们走通用 `tool_call`, 但 payload 中 `tool_name` 必须分别是 `read_reference` / `read_example`。这与 Q13 per-tool `tool_name` 决议一致。
 
 规范终点: [Builtin Modules](../skill-spec/09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名), [read_reference / read_example tools](../skill-spec/09-builtin-modules-spec.md#按需调取-tools-read_reference--read_example), [MVP0 Q13](../MVP0-DECISIONS-EXPLAINED-2026-05-21.md#q13)。
 
@@ -92,28 +93,30 @@ Builtin reference reader subagent 与用户 subagent 语义不同。MVP0 MUST �
 Builtin reference reader 发生在 Agent prompt 装配期, 可能调用本地或远端模型 / 服务。MVP0 MUST 让这段“静默期”进入 trace。
 
 ```text
-BUILTIN_SUBAGENT_ENTER
+builtin_subagent_enter
   -> local/remote reference reader call
-  -> BUILTIN_SUBAGENT_EXIT
+  -> builtin_subagent_exit
 
 or
 
-BUILTIN_SUBAGENT_ENTER
+builtin_subagent_enter
   -> timeout/error/config missing
-  -> BUILTIN_SUBAGENT_FALLBACK (WARN)
+  -> builtin_subagent_fallback (WARN)
   -> fallback raw excerpt injected into knowledge_base
 ```
 
 | 字段 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
 |---|---|---|---|---|---|---|
-| `trigger_stage` | enum | 是 | `assembly` | 只允许 `assembly` / `runtime_tool` | — | 区分装配期与运行期 |
-| `fallback_reason` | enum | fallback 时必填 | 无 | `remote_timeout` / `remote_error` / `local_error` / `config_missing` / `invalid_output` | `[F-v3-reference-reader-failed]` | 告诉 Studio 降级原因 |
+| `run_id` | string/null | 是 | `None` | 装配期无 run id | — | 标明这是 graph.invoke 前事件 |
+| `phase_name` | string | 是 | 无 | 目标 Agent phase | — | Canvas 定位 |
+| `builtin_name` | string | 是 | `reference_reader` | 当前只允许 reference reader | — | 系统组件名 |
+| `fallback_reason` | enum | fallback 时必填 | 无 | `remote_timeout` / `remote_error` / `config_missing` / `invalid_output` / `local_io_error` | `[F-v3-reference-reader-failed]` | 告诉 Studio 降级原因 |
 | `fallback_strategy` | string | fallback 时必填 | `raw_excerpt_3000_tokens` | 非空 | `[F-v3-reference-reader-failed]` | 告诉用户如何继续 |
-| `reference_ids` | list[string] | 是 | `[]` | 当前 Agent references id | — | 资料范围 |
+| `payload.reference_ids` | list[string] | enter/exit 时提供 | `[]` | 当前 Agent references id | — | 资料范围 |
 | `excerpt_token_limit` | integer | fallback 时必填 | `3000` | `> 0` | — | fallback 体积边界 |
-| `warning_message` | string | fallback 时必填 | 无 | 可读, 可截断 | `[F-v3-reference-reader-failed]` | TracePanel 展示 |
+| `warning` | string | fallback 时必填 | 无 | 可读, `_short_warning()` 最多 500 字符 | `[F-v3-reference-reader-failed]` | TracePanel 展示 |
 
-Fallback 是 WARN, 不阻断 Agent run。Reference 机制见 [Reference 三机制生命周期](../skill-spec/08-resource-mechanisms-spec.md#reference-三机制生命周期)。
+Fallback 是 WARN, 不阻断 Agent run。`[F-v3-resource-reference-path-invalid]` 是 FATAL path 边界错误, 会 re-raise, 不发 fallback。Reference 机制见 [Reference 三机制生命周期](../skill-spec/08-resource-mechanisms-spec.md#reference-三机制生命周期)。
 
 ### 5. 异步日志记录器构建
 
@@ -131,7 +134,11 @@ MVP0 SHOULD 避免 trace 写盘阻塞模型推理。Runtime 只把结构化事�
 
 ## API
 
-### 1. TraceEventKind 枚举规范
+### 1. 当前 CallbackEvent union 与 TraceEventKind 目标态
+
+当前已实现 API 是 Pydantic `CallbackEvent` union, 事件类型通过各 model 的 `event_type: Literal[...]` 字段区分, 不存在已落地的 `TraceEventKind` enum。以下 enum 只作为后续统一 trace facade 的目标态, 不能按当前源码 API 调用。
+
+### 2. TraceEventKind 枚举规范 (目标态)
 
 ```python
 class TraceEventKind(StrEnum):
@@ -159,7 +166,7 @@ class TraceEventKind(StrEnum):
 
 枚举只做 additive 扩展, 不重命名已发布值。
 
-### 2. TracingCallback V2 接口定义
+### 3. TracingCallback V2 接口定义 (目标态)
 
 ```python
 class V2TracingCallback:
@@ -175,7 +182,7 @@ def on_builtin_subagent_fallback(run_id: str, phase_id: str, payload: dict) -> N
 def on_ambiguity_logged(run_id: str, phase_id: str, payload: dict) -> None: ...
 ```
 
-Callback 实现可写文件、推 event bus 或转 WebSocket, 但必须接收同一个 `AgentTraceEvent` schema。
+Callback 实现可写文件、推 event bus 或转 WebSocket。当前源码入口是 `Callback.on_event(event: CallbackEvent)` 和 legacy `on_*` hook, 不是 `AgentTraceEvent`。
 
 ## Data Model / State
 
@@ -183,9 +190,9 @@ Callback 实现可写文件、推 event bus 或转 WebSocket, 但必须接收同
 
 | 字段 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
 |---|---|---|---|---|---|---|
-| `run_id` | string | 是 | 无 | 同一次 run 内稳定 | — | 全局归属 |
-| `phase_id` | string | 是 | 无 | phase 相关事件必须提供; assembly 可用目标 Agent phase | — | Canvas 定位 |
-| `event_type` | TraceEventKind | 是 | 无 | 必须是枚举值 | — | 前端路由 |
+| `run_id` | string | 目标态字段 | 无 | 同一次 run 内稳定; 当前并非所有 CallbackEvent 都有该字段 | — | 全局归属 |
+| `phase_name` | string | phase 相关事件必填 | 无 | 当前源码字段名是 `phase_name` | — | Canvas 定位 |
+| `event_type` | Literal string | 是 | 无 | 当前为 Pydantic Literal, 不是已落地 enum | — | 前端路由 |
 | `timestamp_ms` | integer | 是 | 无 | 单调递增用于排序 | — | 时间线 |
 | `iso_time` | string | 否 | 无 | UTC ISO 8601 | — | 审计 |
 | `severity` | enum | 否 | `INFO` | `INFO` / `WARN` / `ERROR` | — | UI 样式 |
@@ -206,12 +213,15 @@ Callback 实现可写文件、推 event bus 或转 WebSocket, 但必须接收同
 
 | 字段 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
 |---|---|---|---|---|---|---|
+| `run_id` | string/null | 是 | `None` | 装配期 builtin reader 没有 invoke run id | — | 全局归属 |
+| `phase_name` | string | 是 | 无 | 目标 Agent phase | — | Canvas 定位 |
 | `builtin_name` | string | 是 | `reference_reader` | 当前只允许 `reference_reader` | — | 系统组件名 |
-| `trigger_stage` | enum | 是 | `assembly` | `assembly` / `runtime_tool` | — | 调用阶段 |
-| `reference_ids` | list[string] | 是 | `[]` | 当前 Agent references id | — | 资料范围 |
-| `used_reference_ids` | list[string] | exit 时必填 | `[]` | 输入 id 子集 | — | 实际读取范围 |
-| `fallback_reason` | enum | fallback 时必填 | 无 | 固定枚举 | `[F-v3-reference-reader-failed]` | 降级原因 |
+| `payload.reference_ids` | list[string] | enter/exit 时提供 | `[]` | 当前 Agent references id | — | 资料范围 |
+| `payload.markdown_length` | integer | exit 时提供 | 无 | reader 返回 markdown 字符长度 | — | 成功输出摘要 |
+| `fallback_reason` | enum | fallback 时必填 | 无 | `remote_timeout` / `remote_error` / `config_missing` / `invalid_output` / `local_io_error` | `[F-v3-reference-reader-failed]` | 降级原因 |
 | `fallback_strategy` | string | fallback 时必填 | 无 | 非空 | `[F-v3-reference-reader-failed]` | 降级方式 |
+| `excerpt_token_limit` | integer/null | fallback 时提供 | `3000` | fallback excerpt 上限 | — | 体积边界 |
+| `warning` | string | fallback 时提供 | `""` | 短文本; 当前最多 500 字符 | `[F-v3-reference-reader-failed]` | 展示警告 |
 
 ## Cross-feature Interaction
 
@@ -237,10 +247,11 @@ Trace payload 不保存 provider API key、HTTP headers、完整大文档或未�
 
 | 本文件目标态 | 当前源码事实 |
 |---|---|
-| runtime 在 phase start/end、LLM、tool、subagent 等真实调用点发事件 | 当前 graph skill dict runner 丢弃 `callbacks`，主线不会自动发这些事件。 |
-| 统一 `AgentTraceEvent` / `TraceEventKind` schema | 当前主要是 Pydantic `CallbackEvent` union，事件名是小写字符串。 |
+| runtime 在 phase start/end、LLM、tool、subagent 等真实调用点发事件 | 当前 PR E 已接 `log_ambiguity` + builtin reference reader 装配期事件; 完整 phase lifecycle 仍未全部接线。 |
+| 统一 `AgentTraceEvent` / `TraceEventKind` schema | 当前主要是 Pydantic `CallbackEvent` union，事件名是小写字符串；不要把目标 enum 当已实现 API。 |
 | `NODE_START` / `NODE_END` payload 来自 StateMapper 沙盒输入输出 | 当前事件协议有 `phase_start` / `phase_end`，但 graph skill path 没有在 PhaseWrapper 中发这些事件。 |
-| TOOL_CALL start/end 分离并带 `tool_call_id` | 当前 legacy `ToolCallEvent` 是单个 `tool_call` 事件，字段较简单。 |
-| builtin reference reader enter/exit/fallback 在装配期真实发出 | 当前事件模型已定义 builtin subagent 事件，但完整 reference reader 调用点未在 graph skill 主线落地。 |
+| TOOL_CALL start/end 分离并带 `tool_call_id` | 当前 `ToolCallEvent` 是单个 `tool_call` 事件，字段为 `phase_name/tool_name/args/result/duration_ms`。 |
+| builtin reference reader enter/exit/fallback 在装配期真实发出 | 当前已通过 `assemble_graph(..., callbacks=...)` 接线, loader/runner 入口透传 callbacks; 无 callbacks 时不发 trace。 |
 | fallback 事件通过统一 tracing 底座发出 | 当前 gateway fallback 直接遍历 callbacks 调 `on_event`。 |
 | prompt、reference、tool result 按统一策略截断 | 当前部分 proxy / tracing 能做轻量序列化，但没有全局统一截断策略覆盖所有 graph skill 事件。 |
+| 异步日志记录器 (queue / drop policy / payload 上限 / 文件轮转) | **目标态 (MVP0 SHOULD)，PR E 未实现**；当前 `TracingCallback` 同步写 JSONL，无异步队列 / 背压 / 轮转。 |

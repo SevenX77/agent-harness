@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.loader import SkillLoader
-from graph_agent.core.manifest import SkillNodeAST
+from graph_agent.core.manifest import AgentNodeAST
 
 _FIXTURES = Path(__file__).parents[1] / "fixtures"
 
@@ -120,7 +120,7 @@ def test_skill_phase_config_subagents_parse_into_ast(tmp_path: Path) -> None:
     compiled = SkillLoader().compile_skill(tmp_path)
     ast = compiled.nodes[0].ast
 
-    assert isinstance(ast, SkillNodeAST)
+    assert isinstance(ast, AgentNodeAST)
     assert ast.tools == ["read_file"]
     assert [subagent.name for subagent in ast.subagents] == [
         "beat_extractor",
@@ -136,7 +136,7 @@ def test_skill_without_subagents_keeps_empty_default(tmp_path: Path) -> None:
 
     ast = SkillLoader().compile_skill(tmp_path).nodes[0].ast
 
-    assert isinstance(ast, SkillNodeAST)
+    assert isinstance(ast, AgentNodeAST)
     assert ast.subagents == []
 
 

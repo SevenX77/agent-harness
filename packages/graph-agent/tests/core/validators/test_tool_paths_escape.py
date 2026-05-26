@@ -1,4 +1,4 @@
-"""V2.1 tool/action path containment tests."""
+"""V0.3 tool/action path containment tests."""
 
 from __future__ import annotations
 
@@ -10,29 +10,36 @@ from graph_agent.core.loader import SkillLoader
 
 
 def _write_minimal_graph(root: Path, action_body: str) -> None:
-    (root / "io").mkdir(parents=True)
     (root / "phases" / "prepare" / "actions").mkdir(parents=True)
-    (root / "io" / "inputs.json").write_text("{}\n", encoding="utf-8")
-    (root / "io" / "outputs.json").write_text("{}\n", encoding="utf-8")
     (root / "GRAPH.md").write_text(
         """---
-schema_version: "2.1"
+schema_version: "v0.3.0"
 name: action-path-test
+io:
+  inputs:
+    type: object
+    properties: {}
+  outputs:
+    type: object
+    properties: {}
+phases:
+  - prepare
 ---
-<input src="io/inputs.json" />
-<output src="io/outputs.json" />
-<phase id="prepare" src="phases/prepare" depends_on="" />
+<phase depends_on="input" output>prepare</phase>
 """,
         encoding="utf-8",
     )
     (root / "phases" / "prepare" / "LOGIC.md").write_text(
         """---
-mode: logic
-name: prepare
+io:
+  inputs:
+    type: object
+    properties: {}
+  outputs:
+    type: object
+    properties: {}
 ---
-<python_callable>
-prepare
-</python_callable>
+<action>prepare</action>
 """,
         encoding="utf-8",
     )

@@ -23,8 +23,8 @@ from graph_agent.core.loader import CompiledSkill, SkillLoader
 from graph_agent.core.manifest import (
     GraphManifest,
     GraphPhaseRef,
+    AgentNodeAST,
     LogicNodeAST,
-    SkillNodeAST,
     SubgraphNodeAST,
 )
 
@@ -1263,8 +1263,8 @@ def _graph_topology(compiled: CompiledSkill) -> list[dict[str, object]]:
 def _node_schema_v21() -> dict[str, dict[str, object]]:
     return {
         "graph_phase_ref": GraphPhaseRef.model_json_schema(),
+        "agent": AgentNodeAST.model_json_schema(),
         "logic": LogicNodeAST.model_json_schema(),
-        "skill": SkillNodeAST.model_json_schema(),
         "subgraph": SubgraphNodeAST.model_json_schema(),
     }
 

@@ -412,15 +412,10 @@ def _agent_system_prompt(
         steps=[step.model_dump() for step in phase_ast.steps],
         protocols=[protocol.model_dump() for protocol in phase_ast.protocols],
         output_schema=output_schema if isinstance(output_schema, dict) else None,
-        inline_examples=[
-            example.content
-            for example in phase_ast.examples
-            if example.type == "inline" and example.content
-        ],
+        inline_examples=[example.content for example in phase_ast.examples_inline],
         document_examples=[
-            {"id": example.id, "summary": example.summary or ""}
+            {"id": example.id, "summary": example.summary}
             for example in phase_ast.examples
-            if example.type == "document"
         ],
         role_prefix=resolve_role_prefix_from_llm_role(phase_ast.llm_role),
     )
@@ -463,10 +458,6 @@ def _agent_resource_tools(
         spec = examples.get(example_id)
         if spec is None:
             raise GraphAgentFatalError(f"[F-v3-resource-example-invalid] {example_id!r}")
-        if spec.type == "inline":
-            return spec.content or ""
-        if spec.path is None:
-            raise GraphAgentFatalError(f"[F-v3-resource-example-path-invalid] {example_id!r}")
         return _read_skill_root_file(root, spec.path)
 
     tools: list[Any] = []

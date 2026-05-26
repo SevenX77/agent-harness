@@ -227,12 +227,12 @@ def _fallback_trace_from_skill(skill_dir: Path, raw_result: Any) -> list[dict[st
     mode_by_phase = {node.phase_name: node.mode for node in compiled.nodes}
     return [
         {
-            "phase_name": phase.id,
-            "type": "llm" if mode_by_phase.get(phase.id) == "skill" else "logic",
+            "phase_name": phase_name,
+            "type": "llm" if mode_by_phase.get(phase_name) == "agent" else "logic",
             "inputs": {},
             "outputs": {},
         }
-        for phase in compiled.manifest.phases
+        for phase_name in compiled.manifest.phases
     ]
 
 

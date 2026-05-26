@@ -1123,8 +1123,9 @@ def _build_phase_document(
     try:
         if mode == "logic":
             data.setdefault("actions", _extract_logic_actions(path, body))
-            ast: PhaseAST = LogicNodeAST.model_validate(data)
-            _validate_logic_actions_declared(path, ast, body)
+            logic_ast = LogicNodeAST.model_validate(data)
+            _validate_logic_actions_declared(path, logic_ast, body)
+            ast: PhaseAST = logic_ast
         elif mode == "subgraph":
             ast = SubgraphNodeAST.model_validate(data)
         elif is_agent:

@@ -8,6 +8,7 @@ from pydantic import SecretStr
 
 def _snapshot():
     from graph_agent_gateway.registry.schema import (
+        CapabilityValue,
         ProviderEndpoint,
         ProviderRoute,
         RegistrySnapshot,
@@ -41,6 +42,9 @@ def _snapshot():
                 canonical_id="claude",
                 display_name="Claude",
                 status="verified",
+                capabilities={
+                    "thinking_protocol": CapabilityValue(value=True, source="manual"),
+                },
             ),
             "openrouter-prod:anthropic.claude": ProviderRoute(
                 route_id="openrouter-prod:anthropic.claude",
@@ -58,8 +62,11 @@ def _snapshot():
                 fallback_chain=[
                     RoleRouteEntry(
                         route_id="anthropic-official:claude",
-                        temperature=0.2,
-                        max_output_tokens=8192,
+                        runtime_settings={
+                            "temperature": 0.2,
+                            "max_output_tokens": 8192,
+                            "reasoning": {"enabled": True, "budget_tokens": 4096},
+                        },
                     ),
                     RoleRouteEntry(route_id="openrouter-prod:anthropic.claude"),
                 ],
@@ -80,8 +87,10 @@ def test_resolver_preserves_declared_route_order_and_role_metadata() -> None:
         "openrouter-prod:anthropic.claude",
     ]
     assert resolved.routes[0].provider_model_id == "claude"
-    assert resolved.routes[0].temperature == 0.2
-    assert resolved.routes[0].max_output_tokens == 8192
+    assert resolved.routes[0].runtime_settings.temperature == 0.2
+    assert resolved.routes[0].effective_runtime_settings["max_output_tokens"].value == 8192
+    assert resolved.routes[0].effective_runtime_settings["reasoning.enabled"].value is True
+    assert resolved.routes[0].effective_runtime_settings["reasoning.budget_tokens"].value == 4096
     assert resolved.runtime_policy.provider_down_ttl_seconds == 60
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from app.core import config
 from app.models.llm_config import LLMCredentialsFile, RolesData
 from app.services import copilot
 from app.services.llm_credentials import save_credentials
@@ -18,10 +19,9 @@ def test_copilot_route_resolution_uses_v4_registry_route_ids(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-    repo_root = tmp_path / "repo"
-    roles_path = repo_root / "config" / "llm_roles.yaml"
-    monkeypatch.setattr(copilot.config, "REPO_ROOT", repo_root)
+    settings_dir = tmp_path / "settings"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
     save_credentials(
         LLMCredentialsFile(
             provider_endpoints={

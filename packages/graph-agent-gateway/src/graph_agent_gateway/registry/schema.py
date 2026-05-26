@@ -10,10 +10,17 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, m
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 ROUTE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*$")
 
-Protocol = Literal["openai_compatible", "anthropic_compatible", "google_genai"]
+Protocol = Literal["openai_compatible", "anthropic_compatible", "google_genai", "ark_runtime"]
 RouteStatus = Literal["verified", "unverified_manual", "disabled", "failed"]
 CapabilitySource = Literal["api_list", "provider_doc", "agent_draft", "manual", "probed_verified"]
 LintSeverity = Literal["off", "warn", "error"]
+RuntimeSettingSource = Literal[
+    "route_setting",
+    "profile_default",
+    "route_capability_default",
+    "protocol_default",
+    "studio_default",
+]
 DraftStatus = Literal[
     "pending",
     "needs_probe",
@@ -62,6 +69,68 @@ class RuntimePolicy(BaseModel):
     provider_down_ttl_seconds: int = Field(default=60, ge=0, le=3600)
     probe_timeout_seconds: int = Field(default=5, ge=1, le=120)
     token_escalation_rounds: int = Field(default=2, ge=0, le=10)
+
+
+class ReasoningSettings(BaseModel):
+    """Provider-neutral reasoning/thinking request settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool | None = None
+    effort: str | None = None
+    budget_tokens: int | None = Field(default=None, ge=1)
+
+
+class StructuredOutputSettings(BaseModel):
+    """Provider-neutral structured output request settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["none", "json_object", "json_schema"] = "none"
+    json_schema: dict[str, Any] | None = None
+    strict: bool | None = None
+
+
+class RuntimeSettings(BaseModel):
+    """User-authored normalized runtime settings for one route entry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    temperature: float | None = None
+    top_p: float | None = None
+    max_output_tokens: int | None = Field(default=None, ge=1)
+    stop_sequences: list[str] | None = None
+    seed: int | None = None
+    tool_choice: str | dict[str, Any] | None = None
+    parallel_tool_calls: bool | None = None
+    structured_output: StructuredOutputSettings | None = None
+    reasoning: ReasoningSettings = Field(default_factory=ReasoningSettings)
+
+
+class EffectiveRuntimeSetting(BaseModel):
+    """One resolver-produced runtime setting value with provenance."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    value: Any
+    source: RuntimeSettingSource
+    message: str | None = None
+
+
+class RuntimeSettingDescriptor(BaseModel):
+    """Frontend-safe metadata for one normalized runtime setting control."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+    value_type: Literal["number", "integer", "boolean", "string", "string_list", "object"]
+    supported: bool | None = None
+    min: float | None = None
+    max: float | None = None
+    default: Any = None
+    allowed_values: list[str] = Field(default_factory=list)
+    source: CapabilitySource | Literal["unknown"] = "unknown"
+    message: str | None = None
 
 
 class ProviderEndpoint(BaseModel):
@@ -134,8 +203,8 @@ class RoleRouteEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     route_id: str
-    temperature: float | None = None
-    max_output_tokens: int | None = Field(default=None, ge=1)
+    runtime_settings_source: Literal["route_setting", "profile_default"] = "route_setting"
+    runtime_settings: RuntimeSettings = Field(default_factory=RuntimeSettings)
 
     @field_validator("route_id")
     @classmethod
@@ -277,8 +346,8 @@ class ResolvedRoute(BaseModel):
     canonical_id: str
     display_name: str
     capabilities: dict[str, CapabilityValue] = Field(default_factory=dict)
-    temperature: float | None = None
-    max_output_tokens: int | None = None
+    runtime_settings: RuntimeSettings = Field(default_factory=RuntimeSettings)
+    effective_runtime_settings: dict[str, EffectiveRuntimeSetting] = Field(default_factory=dict)
 
 
 class ResolvedRole(BaseModel):

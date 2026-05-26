@@ -64,11 +64,11 @@
 | R3 role PUT semantics | Design + Task | 明确 map upsert、single role full replace、frontend per-role serialized saves。 |
 | R4 runtime_policy scope | Design + Task | 明确只接管 TTL/timeout/retry-rounds；retry status/finish reasons 留 client manager/classifier 常量。 |
 | R5 deleted profile marker schema | Design + Task | 补 `deleted_at` / `deleted_marker`。 |
-| R6 runtime_policy file ownership wording | Design | 明确顶层 block 位于 `~/.studio/llm_credentials.json`，snapshot 只是内存镜像。 |
+| R6 runtime_policy file ownership wording | Design | 明确顶层 block 位于 `<studio_config_dir>/llm/llm_credentials.json`，snapshot 只是内存镜像。 |
 | R7 cache key vs fingerprint asymmetry | Design + Task | 明确 runtime_policy 影响 runtime cache，不影响 credential fingerprint/provider-test cache。 |
 | R8 mvp0 deleted-profile wording | Task | 同步 mvp0 alignment。 |
 | R9 import draft same endpoint update behavior | Design + Task | 同 endpoint draft 不 auto-promote，必须显式 diff/merge/delete-first。 |
-| R10 canonical rules seed file | Task | Phase 6.7 创建 `config/llm_canonical_rules.yaml` 空 schema 并从 provider md 提取 alias。 |
+| R10 canonical rules seed file | Task | Phase 6.7 创建 gateway package default rules；repo `config/llm_canonical_rules.yaml` 仅可作为 seed/example fixture，active override 放 `<studio_config_dir>/llm/` 或显式 env path。 |
 | R11 endpoint PUT semantics | Design + Task | 明确 endpoint PUT 是 upsert，删除只能走 DELETE。 |
 | R12 REQ-13 verification alignment | Requirements + Task | 补 delete conflict、RuntimePolicy、lint mapping 测试项。 |
 
@@ -79,6 +79,17 @@
 | S1 missing route metadata edit API | Design + Task | 补 `PUT /api/llm/routes/{route_id}`，只允许改 metadata/display/capability/status，route identity 不可变。 |
 | S2 request/response JSON examples | Task | Phase 4 router 实现前必须在 design §8.x 补 endpoint/route/delete/profile conflict examples，并用 router tests 固化。 |
 | S3 disposition/task double pointers | Task | 保持为文档维护提醒；后续改 spec 时同步 disposition 与具体 task。 |
+
+## Runtime Settings / Provider Matrix Disposition
+
+| Item | Classification | Decision |
+|---|---|---|
+| C1 repo-root `config/` as active runtime state | Design + Task | Active credentials/roles/canonical overrides move to `<studio_config_dir>/llm/*` or explicit env override. Repo `config/` may remain only as seed/example/package fixture, never hard-coded runtime state. |
+| C2 capability vs user runtime setting conflation | Design + Task | Add fixed normalized `RuntimeSettings` schema and resolver-produced `effective_runtime_settings`; capabilities gate display/validation/defaults but are not user settings. |
+| C3 missing runtime setting fallback defaults | Design + Task | Default chain is route entry → profile default → route capability default → protocol default → Studio safe default, with per-field source metadata in diagnostics/tracing. |
+| C4 dynamic vs fixed runtime setting UI/schema | Design + Task | Backend/gateway use fixed schema; frontend may dynamically show/disable controls from capabilities but cannot invent arbitrary runtime keys. |
+| C5 provider/model parameter pattern testing | Design + Task | Add protocol matrix tests covering same official family, same canonical model across providers, positive probes, negative boundary probes, and route-local capability storage. |
+| C6 Volcengine Ark official SDK | Design + Task | Add `ark_runtime` protocol adapter and live/local tests comparing official Ark SDK behavior with the existing Ark OpenAI-compatible path when credentials are present. |
 
 ## Frontend Guardrails
 
@@ -215,6 +226,12 @@
   - Build resolver from temp credentials/roles files with in-file secret.
   - Use fake client manager to avoid real provider call.
   - Acceptance: new integration test proves no `.env` lookup is required.
+- [x] 3.6 Resolve Engine chat models per phase role.
+  - Modify: `packages/graph-agent/src/graph_agent/core/runner.py`
+  - Modify: `packages/graph-agent/src/graph_agent/core/graph_assembler.py`
+  - V0.3/V2.1 graph assembly must pass each executable phase's `llm_role` to `ModelResolver.resolve`.
+  - It must not pre-resolve a workflow-level model with `role_name=None`.
+  - Acceptance: `test_agent_phase_react_loop_uses_injected_model_resolver` asserts resolver receives the phase `llm_role` and phase ID.
 
 ## Phase 4: Studio Backend Storage and API
 
@@ -353,7 +370,7 @@
     - `cd apps/studio/frontend && npm run build`
   - Expected: all pass.
 - [x] 6.5 Static hard-cutover scans.
-  - Run: `rg -n --glob '!**/*test*' --glob '!**/*.bak' "graph_agent.config.llm_config|graph_agent.models.llm_client_manager|patch_environment_from_credentials|api_key_env|providers/test-models|providers/notable-models" packages/graph-agent*/src apps/studio/backend/app apps/studio/frontend/src config/llm_roles.yaml`
+  - Run: `rg -n --glob '!**/*test*' --glob '!**/*.bak' "graph_agent.config.llm_config|graph_agent.models.llm_client_manager|patch_environment_from_credentials|api_key_env|providers/test-models|providers/notable-models" packages/graph-agent*/src apps/studio/backend/app apps/studio/frontend/src docs/development/examples/llm_roles.v2.example.yaml`
   - Expected: no production runtime references. Test names or archived docs are acceptable only when explicitly asserting deletion.
 - [x] 6.6 No-env runtime smoke.
   - Run a short Graph Agent flow with temp credentials/roles files and no `.env` provider keys.
@@ -363,6 +380,136 @@
   - Update `docs/development/FRONTEND_UI_SPEC.md` if UI verification reveals a reusable rule.
   - Archive or rewrite `docs/development/LLM_MODEL_CONFIGURATION_FLOW.md` to match the V2 endpoint/route registry flow.
   - Decide fate of `apps/studio/backend/app/data/llm_providers/*.md`: archived under `docs/development/llm_provider_notes/` as import-draft reference material, not runtime source.
-  - Create `config/llm_canonical_rules.yaml` with documented empty schema; populate it from archived provider notes if curated aliases exist.
+  - Create package-default canonical rules inside `graph_agent_gateway.registry` and keep any checked-in `config/llm_canonical_rules.yaml` as a seed/example fixture only; active overrides use `<studio_config_dir>/llm/llm_canonical_rules.yaml` or `STUDIO_LLM_CANONICAL_RULES_PATH`.
   - Add endpoint_id seed/cutover naming table to bootstrap docs.
   - Acceptance: `git diff --check` passes and spec/docs do not claim runtime support for the old short-code schema.
+
+## Phase 7: Config Location and Runtime Settings Backend
+
+**目标**: 先完成后端/网关的数据契约，不动前端视觉实现。Active LLM config 离开 repo-root `config/`，runtime settings 变成固定 normalized schema，并能解析默认值、校验能力、输出 tracing。
+
+- [x] 7.1 Move active LLM config path resolution into Studio config dir.
+  - Modify:
+    - `apps/studio/backend/app/services/llm_credentials.py`
+    - `apps/studio/backend/app/services/llm_import_drafts.py`
+    - `apps/studio/backend/app/services/llm_roles.py`
+    - `apps/studio/backend/app/services/gateway_resolver.py`
+    - `apps/studio/backend/app/services/copilot.py`
+    - `apps/studio/backend/app/routers/llm.py`
+    - `apps/studio/backend/app/models/llm_config.py`
+  - Add helpers that resolve:
+    - `STUDIO_LLM_CREDENTIALS_PATH` or `<config.APP_SETTINGS_DIR>/llm/llm_credentials.json`
+    - `STUDIO_LLM_ROLES_PATH` or `<config.APP_SETTINGS_DIR>/llm/llm_roles.yaml`
+    - `STUDIO_LLM_IMPORT_DRAFTS_PATH` or `<config.APP_SETTINGS_DIR>/llm/llm_import_drafts.json`
+    - `STUDIO_LLM_CANONICAL_RULES_PATH` or `<config.APP_SETTINGS_DIR>/llm/llm_canonical_rules.yaml`
+  - Remove hard-coded `config.REPO_ROOT / "config" / "llm_roles.yaml"` from production code.
+  - Acceptance: backend tests prove `STUDIO_CONFIG_DIR` redirects all default LLM files into a temp app settings dir, and explicit `STUDIO_LLM_*_PATH` overrides win.
+  - Acceptance: `rg -n "REPO_ROOT / \"config\" / \"llm_roles.yaml\"|Path.home\\(\\) / \"\\.studio\"" apps/studio/backend/app packages/graph-agent-gateway/src` has no production hits.
+
+- [x] 7.2 Introduce fixed `RuntimeSettings` and `EffectiveRuntimeSettings` schema.
+  - Modify: `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py`
+  - Replace route-entry scalar fields `temperature`, `max_output_tokens`, `thinking_enabled`, and `thinking_budget_tokens` with:
+    - `runtime_settings: RuntimeSettings = Field(default_factory=RuntimeSettings)`
+    - compatibility shims are not allowed in production parsing.
+  - Add typed submodels:
+    - `ReasoningSettings(enabled: bool | None, effort: str | None, budget_tokens: int | None)`
+    - `StructuredOutputSettings(mode: Literal["none", "json_object", "json_schema"], json_schema: dict[str, Any] | None, strict: bool | None)`
+    - `RuntimeSettings(temperature, top_p, max_output_tokens, stop_sequences, seed, tool_choice, parallel_tool_calls, structured_output, reasoning)`
+    - `EffectiveRuntimeSetting(value, source, message)`
+  - Acceptance: `pytest packages/graph-agent-gateway/tests/test_registry_schema.py packages/graph-agent-gateway/tests/test_registry_runtime_settings.py -q` covers default object creation, unknown key rejection, scalar legacy field rejection, and valid nested reasoning/structured output settings.
+
+- [x] 7.3 Resolve runtime setting defaults in the registry resolver.
+  - Modify:
+    - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/resolver.py`
+    - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/capabilities.py`
+  - Implement default order: route entry → copied profile default → route capability default → protocol default → Studio safe default.
+  - Store resolved values on `ResolvedRoute.effective_runtime_settings`.
+  - Preserve original user-authored settings on `ResolvedRoute.runtime_settings`.
+  - Acceptance: tests prove missing `max_output_tokens` and reasoning budget get deterministic defaults with source metadata, and profile-applied defaults do not create runtime dependency on the profile.
+
+- [x] 7.4 Validate runtime settings against normalized capabilities.
+  - Modify:
+    - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/lint.py`
+    - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/capabilities.py`
+    - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/error_classification.py`
+  - Add capability keys for `temperature`, `top_p`, `stop_sequences`, `seed`, `tool_choice`, `parallel_tool_calls`, `reasoning_budget_tokens`, and `reasoning_effort`.
+  - Out-of-range known values return blocking lint on save/probe and fail fast at runtime if they slip through.
+  - Acceptance: tests cover Anthropic-style `reasoning_budget_tokens.min`, unsupported `seed`, invalid `tool_choice`, and unknown runtime setting key failure.
+
+- [x] 7.5 Map effective runtime settings in provider adapters.
+  - Modify:
+    - `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py`
+    - `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py`
+  - OpenAI-compatible adapter maps normalized settings to OpenAI-shaped request args.
+  - Anthropic-compatible adapter maps `reasoning.enabled/budget_tokens` to Anthropic thinking args and validates max token interactions before request.
+  - Google GenAI adapter maps generation config fields without leaking Google-specific names into role YAML.
+  - Unsupported fields are omitted only after validation records why they are unsupported or defaulted.
+  - Acceptance: gateway tests use fake clients to assert request payloads for OpenAI-compatible, Anthropic-compatible, and Google GenAI protocols.
+
+- [x] 7.6 Add runtime settings diagnostics/tracing.
+  - Modify:
+    - `packages/graph-agent-gateway/src/graph_agent_gateway/events.py`
+    - `packages/graph-agent-gateway/src/graph_agent_gateway/tracing.py`
+    - `apps/studio/backend/app/services/run_manager.py`
+  - Include redacted `effective_runtime_settings` source metadata in LLM call diagnostics and fallback events.
+  - Do not log API keys, raw secrets, or full JSON schemas unless explicitly marked safe.
+  - Acceptance: tracing tests assert route ID, provider model ID, fallback decision, and effective runtime setting sources are present.
+
+- [x] 7.7 Update examples and bootstrap docs.
+  - Modify:
+    - `docs/development/examples/llm_roles.v2.example.yaml`
+    - `docs/development/CREDENTIALS_V4_BOOTSTRAP.md`
+    - `docs/engine/graph-agent-gateway/mvp0-alignment.md`
+  - Examples use `runtime_settings` nested objects, not legacy scalar route-entry params.
+  - Docs state repo `config/` files are seed/example only.
+  - Acceptance: docs grep has no claim that repo-root `config/llm_roles.yaml` is the active runtime file.
+
+## Phase 8: Provider Protocol Matrix and Ark SDK Verification
+
+**目标**: 证明 normalized capability/runtime setting schema 能覆盖真实 provider 差异，并把 Ark official SDK 作为一等协议路径测试。
+
+- [ ] 8.1 Add provider probe contracts for runtime settings.
+  - Modify:
+    - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/probe_contracts.py`
+    - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/capabilities.py`
+  - Probe request supports selected runtime settings and negative-boundary checks, including `max_output_tokens`, `reasoning_budget_tokens`, tools, and structured output.
+  - Probe result records normalized capabilities, raw diagnostic metadata, error class, observed request shape, and source URL/message when derived from docs.
+  - Acceptance: unit tests cover successful probe normalization and failed boundary probe preservation without deleting previous verified capability values.
+
+- [x] 8.2 Add `ark_runtime` protocol adapter.
+  - Modify:
+    - `packages/graph-agent-gateway/pyproject.toml`
+    - `packages/graph-agent-gateway/src/graph_agent_gateway/registry/schema.py`
+    - `packages/graph-agent-gateway/src/graph_agent_gateway/client_manager.py`
+  - Add optional dependency for Volcengine Ark runtime SDK, using official import path `volcenginesdkarkruntime`.
+  - `Protocol` includes `ark_runtime`.
+  - Adapter constructs the official Ark client from endpoint `api_key`, `base_url`, timeout, and proxy/trust settings when supported.
+  - Acceptance: tests skip cleanly when the optional SDK is not installed, and fake-client tests prove request construction does not use the OpenAI-compatible client path.
+
+- [ ] 8.3 Run live/local provider matrix smoke when credentials are available.
+  - Add tests under `packages/graph-agent-gateway/tests/live/` or guarded integration tests that run only with local credentials enabled.
+  - Required local checks:
+    - Anthropic official: valid thinking request and too-low thinking budget boundary.
+    - Ark OpenAI-compatible: minimal chat call through existing `openai_compatible` protocol.
+    - Ark official SDK: same model minimal chat call through `ark_runtime`.
+    - Same Ark model comparison: record capability deltas between `openai_compatible` and `ark_runtime`.
+  - Optional checks when credentials exist:
+    - OpenAI official reasoning/non-reasoning route.
+    - Gemini native thinking/generation config route.
+    - DeepSeek OpenAI-compatible reasoning route.
+  - Acceptance: live tests are opt-in, never required in normal CI, and produce a JSON observation artifact under `temp/` for review.
+
+- [x] 8.4 Record provider pattern defaults and lower bounds.
+  - Create: `docs/engine/graph-agent-gateway/provider-runtime-settings-matrix.md`
+  - Document observed/default patterns for Anthropic, OpenAI-compatible, Google GenAI, DeepSeek, and Ark SDK routes.
+  - Record at least one observed lower-bound or unsupported-setting result per tested provider family when safe.
+  - Distinguish `provider_doc`, `manual`, and `probed_verified` sources.
+  - Acceptance: docs link back to the official provider docs used for source claims and to the generated live observation artifact when available.
+
+- [x] 8.5 Add backend API surface for runtime settings metadata.
+  - Modify:
+    - `apps/studio/backend/app/routers/llm.py`
+    - `apps/studio/backend/app/models/llm_config.py`
+  - Registry read DTO includes route capabilities, supported runtime setting descriptors, and current effective defaults for selected route/profile context.
+  - Route probe API accepts runtime-setting probe requests and returns normalized capability/default/bounds updates.
+  - Acceptance: backend router tests prove UI can discover which controls should be shown/disabled without doing frontend-side provider inference.

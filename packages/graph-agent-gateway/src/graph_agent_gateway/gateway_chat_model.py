@@ -108,35 +108,113 @@ class GatewayChatModel(BaseChatModel):
             candidate_id = _candidate_id(candidate)
             if _is_marked_down(self.client_manager, candidate, runtime_policy):
                 continue
-            if self.probe_before_call and not _probe(
-                self.client_manager,
-                candidate,
-                runtime_policy,
-            ):
-                _mark_down(
-                    self.client_manager,
-                    candidate,
-                    RuntimeError("probe failed"),
-                    runtime_policy,
-                )
-                continue
+            if self.probe_before_call:
+                try:
+                    probe_ok = _probe(
+                        self.client_manager,
+                        candidate,
+                        runtime_policy,
+                    )
+                except Exception as exc:  # noqa: BLE001 - gateway fallback boundary
+                    classification = classify_exception(exc, route_id=candidate.route_id)
+                    failure = _failure_record(candidate, exc, classification.decision)
+                    failure["unclassified_default"] = classification.unclassified_default
+                    failure["provider_status_code"] = classification.provider_status_code
+                    failures.append(failure)
+                    if classification.decision != "fallback_allowed":
+                        raise AllProvidersFailedError(
+                            self.role_name,
+                            failures,
+                            phase_name=self.phase_name or "<gateway>",
+                        ) from exc
+                    _mark_down(self.client_manager, candidate, exc, runtime_policy)
+                    emit_llm_fallback_event(
+                        callbacks=self.event_callbacks,
+                        phase_name=self.phase_name or "<gateway>",
+                        from_provider=candidate_id,
+                        to_provider=self._next_candidate_id(index + 1),
+                        reason=f"{type(exc).__name__}: {exc}",
+                        code="[F-v3-gateway-all-providers-failed]",
+                        context=self._fallback_event_context(
+                            candidate,
+                            index + 1,
+                            fallback_decision=classification.decision,
+                            error_type=type(exc).__name__,
+                            provider_status_code=classification.provider_status_code,
+                            unclassified_default=classification.unclassified_default,
+                        ),
+                    )
+                    continue
+                if not probe_ok:
+                    failure = {
+                        "provider": candidate_id,
+                        "route_id": candidate.route_id,
+                        "endpoint_id": candidate.endpoint_id,
+                        "provider_model_id": candidate.provider_model_id,
+                        "canonical_id": candidate.canonical_id,
+                        "protocol": candidate.protocol,
+                        "error_type": "RuntimeError",
+                        "message": "probe failed",
+                        "fallback_decision": "fallback_allowed",
+                        "unclassified_default": False,
+                        "provider_status_code": None,
+                    }
+                    failures.append(failure)
+                    _mark_down(
+                        self.client_manager,
+                        candidate,
+                        RuntimeError("probe failed"),
+                        runtime_policy,
+                    )
+                    emit_llm_fallback_event(
+                        callbacks=self.event_callbacks,
+                        phase_name=self.phase_name or "<gateway>",
+                        from_provider=candidate_id,
+                        to_provider=self._next_candidate_id(index + 1),
+                        reason="RuntimeError: probe failed",
+                        code="[F-v3-gateway-all-providers-failed]",
+                        context=self._fallback_event_context(
+                            candidate,
+                            index + 1,
+                            fallback_decision="fallback_allowed",
+                            error_type="RuntimeError",
+                            provider_status_code=None,
+                        ),
+                    )
+                    continue
             try:
                 before_usage = _usage_total_calls(self.client_manager, candidate)
                 response = _dispatch(
                     self.client_manager,
                     candidate,
                     request_messages,
-                    max_tokens=_int_kwarg(kwargs.get("max_tokens"), self.max_tokens),
-                    temperature=_float_kwarg(kwargs.get("temperature"), self.temperature),
+                    max_tokens=_int_kwarg(
+                        kwargs.get("max_tokens"),
+                        _effective_int(candidate, "max_output_tokens", self.max_tokens),
+                    ),
+                    temperature=_float_kwarg(
+                        kwargs.get("temperature"),
+                        _effective_float(candidate, "temperature", self.temperature),
+                    ),
                     reasoning=_bool_kwarg(
                         kwargs.get("reasoning"),
                         self.thinking_enabled
                         if self.thinking_enabled is not None
-                        else _capability_enabled(candidate.capabilities.get("thinking_protocol")),
+                        else _effective_bool(candidate, "reasoning.enabled", False),
+                    ),
+                    thinking_budget_tokens=_optional_int_kwarg(
+                        kwargs.get("thinking_budget_tokens"),
+                        _effective_optional_int(candidate, "reasoning.budget_tokens"),
                     ),
                     tools=list(self.bound_tools) or None,
-                    tool_choice=self.tool_choice,
+                    tool_choice=self.tool_choice or _effective_text(candidate, "tool_choice"),
                     runtime_policy=runtime_policy,
+                    top_p=_effective_optional_float(candidate, "top_p"),
+                    stop_sequences=_effective_string_list(candidate, "stop_sequences"),
+                    seed=_effective_optional_int(candidate, "seed"),
+                    parallel_tool_calls=_effective_optional_bool(candidate, "parallel_tool_calls"),
+                    structured_output=_effective_structured_output(candidate),
+                    reasoning_effort=_effective_text(candidate, "reasoning.effort"),
                 )
                 after_usage = _usage_total_calls(self.client_manager, candidate)
                 if after_usage == before_usage:
@@ -150,19 +228,9 @@ class GatewayChatModel(BaseChatModel):
                 return self._build_chat_result(response, candidate)
             except Exception as exc:  # noqa: BLE001 - gateway fallback boundary
                 classification = classify_exception(exc, route_id=candidate.route_id)
-                failure = {
-                    "provider": candidate_id,
-                    "route_id": candidate.route_id,
-                    "endpoint_id": candidate.endpoint_id,
-                    "provider_model_id": candidate.provider_model_id,
-                    "canonical_id": candidate.canonical_id,
-                    "protocol": candidate.protocol,
-                    "error_type": type(exc).__name__,
-                    "message": str(exc),
-                    "fallback_decision": classification.decision,
-                    "unclassified_default": classification.unclassified_default,
-                    "provider_status_code": classification.provider_status_code,
-                }
+                failure = _failure_record(candidate, exc, classification.decision)
+                failure["unclassified_default"] = classification.unclassified_default
+                failure["provider_status_code"] = classification.provider_status_code
                 failures.append(failure)
                 if classification.decision != "fallback_allowed":
                     raise AllProvidersFailedError(
@@ -178,7 +246,14 @@ class GatewayChatModel(BaseChatModel):
                     to_provider=self._next_candidate_id(index + 1),
                     reason=f"{type(exc).__name__}: {exc}",
                     code="[F-v3-gateway-all-providers-failed]",
-                    context={"role_name": self.role_name},
+                    context=self._fallback_event_context(
+                        candidate,
+                        index + 1,
+                        fallback_decision=classification.decision,
+                        error_type=type(exc).__name__,
+                        provider_status_code=classification.provider_status_code,
+                        unclassified_default=classification.unclassified_default,
+                    ),
                 )
 
         raise AllProvidersFailedError(
@@ -238,6 +313,7 @@ class GatewayChatModel(BaseChatModel):
                 "protocol": candidate.protocol,
                 "finish_reason": finish_reason,
                 "usage": usage,
+                "effective_runtime_settings": _runtime_settings_metadata(candidate),
             },
         )
         return ChatResult(
@@ -261,29 +337,85 @@ class GatewayChatModel(BaseChatModel):
                 "endpoint_id": candidate.endpoint_id,
                 "canonical_id": candidate.canonical_id,
                 "protocol": candidate.protocol,
+                "effective_runtime_settings": _runtime_settings_metadata(candidate),
             },
         )
 
     def _next_candidate_id(self, start_index: int) -> str:
+        candidate = self._next_candidate(start_index)
+        return _candidate_id(candidate) if candidate is not None else "<none>"
+
+    def _next_candidate(self, start_index: int) -> ResolvedRoute | None:
         for candidate in self.resolved_role.routes[start_index:]:
             if not _is_marked_down(
                 self.client_manager,
                 candidate,
                 self.resolved_role.runtime_policy,
             ):
-                return _candidate_id(candidate)
-        return "<none>"
+                return candidate
+        return None
+
+    def _fallback_event_context(
+        self,
+        candidate: ResolvedRoute,
+        next_index: int,
+        *,
+        fallback_decision: str,
+        error_type: str,
+        provider_status_code: int | None,
+        unclassified_default: bool = False,
+    ) -> dict[str, object]:
+        return {
+            "role_name": self.role_name,
+            "fallback_decision": fallback_decision,
+            "error_type": error_type,
+            "provider_status_code": provider_status_code,
+            "unclassified_default": unclassified_default,
+            "from_route": _route_diagnostics(candidate),
+            "to_route": _route_diagnostics(self._next_candidate(next_index)),
+            "effective_runtime_settings": _runtime_settings_metadata(candidate),
+        }
 
 
 def _candidate_id(candidate: ResolvedRoute) -> str:
     return candidate.route_id
 
 
-def _capability_enabled(capability: object | None) -> bool:
-    if capability is None:
-        return False
-    value = getattr(capability, "value", capability)
-    return bool(value)
+def _route_diagnostics(candidate: ResolvedRoute | None) -> dict[str, object] | None:
+    if candidate is None:
+        return None
+    return {
+        "route_id": candidate.route_id,
+        "endpoint_id": candidate.endpoint_id,
+        "provider_model_id": candidate.provider_model_id,
+        "canonical_id": candidate.canonical_id,
+        "protocol": candidate.protocol,
+    }
+
+
+def _failure_record(
+    candidate: ResolvedRoute,
+    exc: BaseException,
+    fallback_decision: str,
+) -> dict[str, object]:
+    return {
+        "provider": _candidate_id(candidate),
+        "route_id": candidate.route_id,
+        "endpoint_id": candidate.endpoint_id,
+        "provider_model_id": candidate.provider_model_id,
+        "canonical_id": candidate.canonical_id,
+        "protocol": candidate.protocol,
+        "error_type": type(exc).__name__,
+        "message": str(exc),
+        "fallback_decision": fallback_decision,
+    }
+
+
+def _runtime_settings_metadata(candidate: ResolvedRoute) -> dict[str, dict[str, object]]:
+    return {
+        key: setting.model_dump(mode="json")
+        for key, setting in candidate.effective_runtime_settings.items()
+    }
 
 
 def _default_client_manager() -> Any:
@@ -365,6 +497,85 @@ def _int_kwarg(value: object, default: int) -> int:
     if isinstance(value, str) and value.isdigit() and int(value) > 0:
         return int(value)
     return default
+
+
+def _optional_int_kwarg(value: object, default: int | None) -> int | None:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int | float) and value > 0:
+        return int(value)
+    if isinstance(value, str) and value.isdigit() and int(value) > 0:
+        return int(value)
+    return default
+
+
+def _effective_bool(candidate: ResolvedRoute, key: str, default: bool) -> bool:
+    setting = candidate.effective_runtime_settings.get(key)
+    value = setting.value if setting is not None else None
+    return value if isinstance(value, bool) else default
+
+
+def _effective_int(candidate: ResolvedRoute, key: str, default: int) -> int:
+    setting = candidate.effective_runtime_settings.get(key)
+    value = setting.value if setting is not None else None
+    return int(value) if isinstance(value, int | float) and value > 0 else default
+
+
+def _effective_float(candidate: ResolvedRoute, key: str, default: float) -> float:
+    setting = candidate.effective_runtime_settings.get(key)
+    value = setting.value if setting is not None else None
+    return float(value) if isinstance(value, int | float) else default
+
+
+def _effective_optional_int(candidate: ResolvedRoute, key: str) -> int | None:
+    setting = candidate.effective_runtime_settings.get(key)
+    value = setting.value if setting is not None else None
+    return int(value) if isinstance(value, int | float) and value > 0 else None
+
+
+def _effective_optional_float(candidate: ResolvedRoute, key: str) -> float | None:
+    setting = candidate.effective_runtime_settings.get(key)
+    value = setting.value if setting is not None else None
+    if isinstance(value, bool):
+        return None
+    return float(value) if isinstance(value, int | float) else None
+
+
+def _effective_optional_bool(candidate: ResolvedRoute, key: str) -> bool | None:
+    setting = candidate.effective_runtime_settings.get(key)
+    value = setting.value if setting is not None else None
+    return value if isinstance(value, bool) else None
+
+
+def _effective_text(candidate: ResolvedRoute, key: str) -> str | None:
+    setting = candidate.effective_runtime_settings.get(key)
+    value = setting.value if setting is not None else None
+    return value if isinstance(value, str) and value else None
+
+
+def _effective_string_list(candidate: ResolvedRoute, key: str) -> list[str] | None:
+    setting = candidate.effective_runtime_settings.get(key)
+    value = setting.value if setting is not None else None
+    if not isinstance(value, list):
+        return None
+    result = [item for item in value if isinstance(item, str)]
+    return result or None
+
+
+def _effective_structured_output(candidate: ResolvedRoute) -> dict[str, object] | None:
+    mode = _effective_text(candidate, "structured_output.mode")
+    if mode is None or mode == "none":
+        return None
+    result: dict[str, object] = {"mode": mode}
+    schema_setting = candidate.effective_runtime_settings.get("structured_output.json_schema")
+    if schema_setting is not None and isinstance(schema_setting.value, dict):
+        result["json_schema"] = schema_setting.value
+    strict_setting = candidate.effective_runtime_settings.get("structured_output.strict")
+    if strict_setting is not None and isinstance(strict_setting.value, bool):
+        result["strict"] = strict_setting.value
+    return result
 
 
 def _float_kwarg(value: object, default: float) -> float:

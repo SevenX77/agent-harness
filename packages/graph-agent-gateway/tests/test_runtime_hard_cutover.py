@@ -72,8 +72,11 @@ def _snapshot():
                 fallback_chain=[
                     RoleRouteEntry(
                         route_id="openai-direct:gpt-5",
-                        temperature=0.25,
-                        max_output_tokens=2048,
+                        runtime_settings={
+                            "temperature": 0.25,
+                            "max_output_tokens": 2048,
+                            "reasoning": {"enabled": False},
+                        },
                     ),
                     RoleRouteEntry(route_id="openrouter-prod:openai.gpt-5"),
                 ],
@@ -171,6 +174,7 @@ def test_model_resolver_loads_explicit_v4_v2_files(tmp_path: Path) -> None:
     assert isinstance(model, GatewayChatModel)
     assert model.max_tokens == 2048
     assert model.temperature == 0.25
+    assert model.thinking_enabled is False
     assert model.resolved_role.system_prompt_prefix == "Always be exact."
     assert [route.route_id for route in model.resolved_role.routes] == [
         "openai-direct:gpt-5",
@@ -246,6 +250,40 @@ def test_thinking_protocol_uses_capability_value_not_field_presence() -> None:
     model.invoke([HumanMessage(content="hello")])
 
     assert client_manager.dispatches[0]["kwargs"]["reasoning"] is False
+
+
+def test_route_runtime_setting_not_capability_enables_thinking() -> None:
+    from graph_agent_gateway.registry.schema import CapabilityValue, RoleRouteEntry
+    from graph_agent_gateway.resolver import ModelResolver
+
+    snapshot = _snapshot()
+    route = snapshot.provider_routes["openai-direct:gpt-5"]
+    snapshot.provider_routes["openai-direct:gpt-5"] = route.model_copy(
+        update={
+            "capabilities": {
+                "thinking_protocol": CapabilityValue(value=True, source="manual"),
+            }
+        }
+    )
+    snapshot.roles["graph_agent"].fallback_chain = [
+        RoleRouteEntry(
+            route_id="openai-direct:gpt-5",
+            runtime_settings={
+                "max_output_tokens": 2048,
+                "reasoning": {"enabled": True},
+            },
+        )
+    ]
+    client_manager = RecordingClientManager()
+    model = ModelResolver(
+        registry_snapshot=snapshot,
+        client_manager=client_manager,
+    ).resolve("graph_agent")
+
+    model.invoke([HumanMessage(content="hello")])
+
+    assert model.thinking_enabled is True
+    assert client_manager.dispatches[0]["kwargs"]["reasoning"] is True
 
 
 def test_legacy_roles_schema_is_fatal(tmp_path: Path) -> None:

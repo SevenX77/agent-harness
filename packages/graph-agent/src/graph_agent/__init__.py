@@ -1,10 +1,11 @@
 """graph_agent - Document-driven LLM agent harness SDK.
 
-Public API (13 stable exports):
+Public API (18 stable exports):
 
 * Execution: ``run_skill``, ``WorkflowResult``
 * Static analysis: ``compile_skill``, ``CompileResult``, ``SkillManifest``,
   ``serialize_skill``
+* Skill resolution: ``LocalWorkspaceResolver``
 * Observability: ``Callback``, ``LoggingCallback``, ``MetricsCallback``,
   ``TracingCallback``
 * Exceptions: ``GraphAgentError``, ``SkillLoadError``, ``SkillCompilationError``
@@ -14,7 +15,7 @@ Internal helpers (``Phase``, ``WorkflowState``, ``IOManager``,
 ``load_workflow_from_md``, etc.) live under
 ``graph_agent.core.*`` / ``graph_agent.io.*`` / ``graph_agent.models.*``
 and are not part of the public ABI. Downstream code that depended on
-the previous lazy-deprecated re-exports must migrate to the 13-export
+the previous lazy-deprecated re-exports must migrate to the 18-export
 surface.
 
 Each ``from X import Y as Y`` re-export is intentional — the explicit
@@ -39,6 +40,9 @@ from graph_agent.core.exceptions import SkillLoadError as SkillLoadError
 from graph_agent.core.graph_assembler import CompiledStateGraph as CompiledStateGraph
 from graph_agent.core.graph_assembler import assemble_graph as assemble_graph
 from graph_agent.core.loader import CompiledSkill as CompiledSkill
+from graph_agent.core.local_workspace_resolver import (
+    LocalWorkspaceResolver as LocalWorkspaceResolver,
+)
 from graph_agent.core.manifest import SkillManifest as SkillManifest
 from graph_agent.core.result import WorkflowResult as WorkflowResult
 from graph_agent.core.runner import run_skill as run_skill
@@ -54,6 +58,7 @@ __all__ = [
     "CompiledSkill",
     "CompiledStateGraph",
     "BlackboardState",
+    "LocalWorkspaceResolver",
     "SkillManifest",
     "serialize_skill",
     "Callback",

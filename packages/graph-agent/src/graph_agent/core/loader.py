@@ -147,7 +147,7 @@ class SkillLoader:
         self,
         skill_root: str | Path,
         *,
-        skill_resolver: SkillResolverProtocol | None = None,
+        skill_resolver: SkillResolverProtocol,
     ) -> CompiledSkill:
         root = Path(skill_root)
         _guard_v030_root(root)

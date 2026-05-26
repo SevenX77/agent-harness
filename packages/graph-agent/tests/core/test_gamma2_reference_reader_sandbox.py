@@ -92,7 +92,9 @@ read reference
     _write(root / "references" / "guide.md", "sandboxed guide")
 
 
-def test_reference_reader_runtime_is_invoked_with_sandbox(monkeypatch, tmp_path: Path) -> None:
+def test_reference_reader_runtime_is_invoked_with_sandbox(
+    monkeypatch, tmp_path: Path, mock_skill_resolver: object
+) -> None:
     seen: list[BlackboardState] = []
 
     class SpyReferenceReaderRuntime:
@@ -153,7 +155,10 @@ def test_reference_reader_runtime_is_invoked_with_sandbox(monkeypatch, tmp_path:
         ]
     )
 
-    result = assemble_graph(compile_skill(tmp_path, cache=False), chat_model=chat).graph.invoke(
+    compiled = compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
+    result = assemble_graph(
+        compiled, chat_model=chat, skill_resolver=mock_skill_resolver
+    ).graph.invoke(
         {
             "data": {
                 "inputs": {"topic": "visible"},

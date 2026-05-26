@@ -84,6 +84,7 @@ Use @reference:Guide.
 def test_reader_failure_warns_and_fallback_markdown_enters_knowledge_base(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    mock_skill_resolver: object,
 ) -> None:
     class FailingReaderRuntime:
         def __init__(self, **kwargs: Any) -> None:
@@ -100,7 +101,10 @@ def test_reader_failure_warns_and_fallback_markdown_enters_knowledge_base(
     _write(tmp_path / "references" / "guide.md", "fallback source text " * 50)
     chat = CapturePromptChatModel()
 
-    graph = assemble_graph(compile_skill(tmp_path, cache=False), chat_model=chat).graph
+    compiled = compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
+    graph = assemble_graph(
+        compiled, chat_model=chat, skill_resolver=mock_skill_resolver
+    ).graph
     graph.invoke({"data": {"inputs": {"topic": "T"}}, "flow": {}, "messages": [], "run_id": "r1"})
 
     prompt = chat.system_prompts[0]
@@ -109,27 +113,32 @@ def test_reader_failure_warns_and_fallback_markdown_enters_knowledge_base(
     assert "fallback source text" in knowledge_base
 
 
-def test_invalid_reference_path_is_compile_fatal_not_reader_fallback(tmp_path: Path) -> None:
+def test_invalid_reference_path_is_compile_fatal_not_reader_fallback(
+    tmp_path: Path, mock_skill_resolver: object
+) -> None:
     _agent_skill(tmp_path, reference_path="../outside.md")
 
     with pytest.raises(SkillLoadError) as exc_info:
-        compile_skill(tmp_path, cache=False)
+        compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
     assert exc_info.value.payload.code == "[F-v3-resource-reference-path-invalid]"
 
 
-def test_reference_path_escape_to_existing_file_is_compile_fatal(tmp_path: Path) -> None:
+def test_reference_path_escape_to_existing_file_is_compile_fatal(
+    tmp_path: Path, mock_skill_resolver: object
+) -> None:
     outside = tmp_path.parent / f"{tmp_path.name}-outside.md"
     _write(outside, "external reference")
     _agent_skill(tmp_path, reference_path=f"../{outside.name}")
 
     with pytest.raises(SkillLoadError) as exc_info:
-        compile_skill(tmp_path, cache=False)
+        compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
     assert exc_info.value.payload.code == "[F-v3-resource-reference-path-invalid]"
 
 
 def test_reference_reader_path_invalid_fatal_propagates_from_assembly(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    mock_skill_resolver: object,
 ) -> None:
     class PathInvalidReaderRuntime:
         def __init__(self, **kwargs: Any) -> None:
@@ -149,13 +158,19 @@ def test_reference_reader_path_invalid_fatal_propagates_from_assembly(
     _write(tmp_path / "references" / "guide.md", "reference body")
 
     with pytest.raises(GraphAgentFatalError) as exc_info:
-        assemble_graph(compile_skill(tmp_path, cache=False), chat_model=CapturePromptChatModel())
+        compiled = compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
+        assemble_graph(
+            compiled,
+            chat_model=CapturePromptChatModel(),
+            skill_resolver=mock_skill_resolver,
+        )
     assert exc_info.value.payload.code == "[F-v3-resource-reference-path-invalid]"
 
 
 def test_reference_reader_runs_once_during_assembly_not_each_agent_turn(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    mock_skill_resolver: object,
 ) -> None:
     calls: list[str] = []
 
@@ -180,7 +195,8 @@ def test_reference_reader_runs_once_during_assembly_not_each_agent_turn(
     _write(tmp_path / "references" / "guide.md", "reference body")
     chat = CapturePromptChatModel()
 
-    assemble_graph(compile_skill(tmp_path, cache=False), chat_model=chat)
+    compiled = compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
+    assemble_graph(compiled, chat_model=chat, skill_resolver=mock_skill_resolver)
 
     assert calls == ["main"]
 
@@ -191,6 +207,7 @@ def test_reference_reader_runs_once_during_assembly_not_each_agent_turn(
 def test_reader_output_invalid_falls_back_without_blocking_agent(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    mock_skill_resolver: object,
 ) -> None:
     class InvalidReaderRuntime:
         def __init__(self, **kwargs: Any) -> None:
@@ -207,7 +224,10 @@ def test_reader_output_invalid_falls_back_without_blocking_agent(
     _write(tmp_path / "references" / "guide.md", "raw reference for fallback")
     chat = CapturePromptChatModel()
 
-    graph = assemble_graph(compile_skill(tmp_path, cache=False), chat_model=chat).graph
+    compiled = compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
+    graph = assemble_graph(
+        compiled, chat_model=chat, skill_resolver=mock_skill_resolver
+    ).graph
     result = graph.invoke(
         {"data": {"inputs": {"topic": "T"}}, "flow": {}, "messages": [], "run_id": "r1"}
     )

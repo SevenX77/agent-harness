@@ -149,8 +149,12 @@ class Callback:
         # Import here to avoid pulling Pydantic at module load for callbacks
         # that never process typed events.
         from graph_agent.callbacks.events import (
+            AmbiguityLoggedEvent,
             AmbiguityReportEvent,
             ArtifactSavedEvent,
+            BuiltinSubagentEnterEvent,
+            BuiltinSubagentExitEvent,
+            BuiltinSubagentFallbackEvent,
             CompactionEvent,
             DeadEndPrunedEvent,
             FinishTaskEvent,
@@ -219,6 +223,11 @@ class Callback:
                 # Existing typed-only events (Task 3.4)
                 PromptCapturedEvent,
                 LLMFallbackEvent,
+                # PR E — tracing-only business / assembly events
+                AmbiguityLoggedEvent,
+                BuiltinSubagentEnterEvent,
+                BuiltinSubagentExitEvent,
+                BuiltinSubagentFallbackEvent,
                 # Tier 1 Commit A — core lifecycle
                 RunStartedEvent,
                 RunEndedEvent,

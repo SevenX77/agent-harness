@@ -242,7 +242,7 @@ def load_workflow_from_md(
     T1.5, so this wrapper rejects file paths and then fails explicitly after
     proving the V2.1 root can compile.
     """
-    del callbacks, _loading_stack
+    del _loading_stack
     root = Path(md_path)
     if root.is_file():
         _fatal(root, 1, "load_workflow_from_md now accepts a V0.3.0 skill root directory")
@@ -256,6 +256,7 @@ def load_workflow_from_md(
     return assemble_graph(
         compile_skill(root, skill_resolver=resolver),
         chat_model=chat_model,
+        callbacks=callbacks,
         skill_resolver=resolver,
     ).graph
 

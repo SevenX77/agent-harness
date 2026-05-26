@@ -27,6 +27,11 @@ from graph_agent.cognitive.prompt import (
     apply_v030_cognitive_template,
     resolve_role_prefix_from_llm_role,
 )
+from graph_agent.callbacks.events import (
+    BuiltinSubagentEnterEvent,
+    BuiltinSubagentExitEvent,
+    BuiltinSubagentFallbackEvent,
+)
 from graph_agent.core.actions import ToolDef, _structured_tool
 from graph_agent.core.builtin_subagents import ReferenceReaderRuntime
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
@@ -82,6 +87,7 @@ def assemble_graph(
     *,
     chat_model: Any = None,
     max_patch_attempts: int = 3,
+    callbacks: list[Any] | None = None,
     skill_resolver: SkillResolverProtocol,
 ) -> CompiledStateGraph:
     """Assemble a V2.1 CompiledSkill into a compiled LangGraph."""
@@ -106,6 +112,7 @@ def assemble_graph(
                 compiled,
                 chat_model,
                 max_patch_attempts,
+                callbacks,
                 resolver,
             ),
         )
@@ -139,6 +146,7 @@ def _build_phase_node(
     compiled: CompiledSkill,
     chat_model: Any,
     max_patch_attempts: int,
+    callbacks: list[Any] | None,
     skill_resolver: SkillResolverProtocol,
 ) -> Any:
     ast = phase_doc.ast
@@ -173,6 +181,7 @@ def _build_phase_node(
                 compiled,
                 chat_model,
                 max_patch_attempts,
+                callbacks,
                 skill_resolver,
             ),
             node_kind="agent",
@@ -271,6 +280,7 @@ def _build_skill_node(
     compiled: CompiledSkill,
     chat_model: Any,
     max_patch_attempts: int,
+    callbacks: list[Any] | None,
     skill_resolver: SkillResolverProtocol,
 ) -> Any:
     knowledge_base_markdown = _build_reference_reader_markdown(
@@ -278,6 +288,7 @@ def _build_skill_node(
         phase_doc=phase_doc,
         phase_ast=phase_ast,
         compiled=compiled,
+        callbacks=callbacks,
     )
     business_tools = compiled.tools.for_phase(phase_id)
     business_tools = [*business_tools, *_agent_resource_tools(phase_doc, phase_ast, compiled)]
@@ -459,6 +470,7 @@ def _build_reference_reader_markdown(
     phase_doc: PhaseDocument,
     phase_ast: AgentNodeAST,
     compiled: CompiledSkill,
+    callbacks: list[Any] | None = None,
 ) -> str:
     if not phase_ast.references:
         return ""
@@ -473,20 +485,116 @@ def _build_reference_reader_markdown(
         language="zh",
         timeout_s=60,
     )
+    _emit_builtin_subagent_event(
+        callbacks,
+        BuiltinSubagentEnterEvent(
+            run_id=None,
+            phase_name=phase_id,
+            builtin_name="reference_reader",
+            payload={"reference_ids": _reference_ids(references)},
+        ),
+    )
     try:
         result = runtime.run() if hasattr(runtime, "run") else runtime.initial_state()
         markdown = result.get("markdown") if isinstance(result, dict) else None
         if isinstance(markdown, str) and markdown.strip():
+            _emit_builtin_subagent_event(
+                callbacks,
+                BuiltinSubagentExitEvent(
+                    run_id=None,
+                    phase_name=phase_id,
+                    builtin_name="reference_reader",
+                    payload={
+                        "reference_ids": _reference_ids(references),
+                        "markdown_length": len(markdown),
+                    },
+                ),
+            )
             return markdown
-        return _fallback_reference_reader_markdown(root, references, "empty reader output")
+        reason = "empty reader output"
+        _emit_reference_reader_fallback(
+            callbacks,
+            phase_id=phase_id,
+            reason="invalid_output",
+            warning=reason,
+        )
+        return _fallback_reference_reader_markdown(root, references, reason)
     except GraphAgentFatalError as exc:
         if "[F-v3-resource-reference-path-invalid]" in str(exc):
             raise
         logger.warning("[F-v3-reference-reader-failed] %s", exc)
+        _emit_reference_reader_fallback(
+            callbacks,
+            phase_id=phase_id,
+            reason=_fallback_reason_from_exception(exc),
+            warning=str(exc),
+        )
         return _fallback_reference_reader_markdown(root, references, str(exc))
     except Exception as exc:  # noqa: BLE001
         logger.warning("[F-v3-reference-reader-failed] %s", exc)
+        _emit_reference_reader_fallback(
+            callbacks,
+            phase_id=phase_id,
+            reason=_fallback_reason_from_exception(exc),
+            warning=str(exc),
+        )
         return _fallback_reference_reader_markdown(root, references, str(exc))
+
+
+def _emit_reference_reader_fallback(
+    callbacks: list[Any] | None,
+    *,
+    phase_id: str,
+    reason: str,
+    warning: str,
+) -> None:
+    _emit_builtin_subagent_event(
+        callbacks,
+        BuiltinSubagentFallbackEvent(
+            run_id=None,
+            phase_name=phase_id,
+            builtin_name="reference_reader",
+            fallback_reason=reason,  # type: ignore[arg-type]
+            fallback_strategy="raw_excerpt_3000_tokens",
+            excerpt_token_limit=3000,
+            warning=_short_warning(warning),
+        ),
+    )
+
+
+def _emit_builtin_subagent_event(callbacks: list[Any] | None, event: Any) -> None:
+    if not callbacks:
+        return
+    for callback in callbacks:
+        on_event = getattr(callback, "on_event", None)
+        if on_event is None:
+            continue
+        try:
+            on_event(event)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[F-v3-reference-reader-trace-failed] %s", exc)
+
+
+def _fallback_reason_from_exception(exc: BaseException) -> str:
+    text = str(exc).lower()
+    if isinstance(exc, TimeoutError) or "timeout" in text or "timed out" in text:
+        return "remote_timeout"
+    if isinstance(exc, OSError):
+        return "local_io_error"
+    if "missing config" in text or "config_missing" in text:
+        return "config_missing"
+    if "invalid" in text or "empty" in text or "missing markdown" in text:
+        return "invalid_output"
+    return "remote_error"
+
+
+def _short_warning(warning: str, limit: int = 500) -> str:
+    text = f"[F-v3-reference-reader-failed] {warning}"
+    return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
+def _reference_ids(references: list[dict[str, Any]]) -> list[str]:
+    return [str(spec.get("id")) for spec in references if spec.get("id") is not None]
 
 
 def _fallback_reference_reader_markdown(

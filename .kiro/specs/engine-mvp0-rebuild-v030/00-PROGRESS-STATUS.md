@@ -14,7 +14,8 @@
 - **✅ PR E 组 (tracing) 已完成** (round-16, SOP-08 9 步全走): E1 AMBIGUITY_LOGGED runtime emission / E2 builtin reference reader ENTER/EXIT/FALLBACK / E3 fallback payload 瘦身 / E4 base.py 注册 4 新事件。tests-first 8 红转绿; a2+a3 双审零 must-fix; docs 字段级同步 + a3 文档审计 2 诚实补强。merge-commit `d3610e8` 进 `stage/engine-v030`。主控亲跑 **989 passed, 3 skipped, 38 xfailed** 实证 (stage 分支 post-merge 也 989 绿)。report 已发 PM (`/tmp/pr-e-report.md`)。
 - **🔴 合并工作流变更 (PM 2026-05-26 拍板, 取代每 PR 直接 squash)**: 中间 PR 用 `git merge --no-ff` 进集成分支 `stage/engine-v030` (off main, 保留细粒度历史可 bisect); main 不动。整个 engine 阶段 PM **实测 golden** 后才**先打 tag 再 squash 进 main** 作 golden baseline。**铁律: squash 进 main 前必先打 tag**, 否则 granular 历史变游离对象被 git gc 清掉。详见 memory `[[staged-merge-workflow]]`。
 - **✅ PR F 组 (错误码) 已完成** (round-17, SOP-08 9 步全走): F1 退役 `[F-v21-*]` 已完成; F2 standard error payload — 新 ErrorPayload model + error_registry (89 码, 实施期补 2 缺口码 purity-violation + cognitive-output-schema-invalid) autofill level/stage/doc_link; 退役粗码 → 11-spec 细码; 测试断言 message-regex → payload.code (24 文件); must-fix 堵静默失败 None 后门 → fail loud。a2+a3 双审 (catch must-fix 已修); tests-first 15 红转绿; logic-explained 字段级。merge-commit `487f11f` 进 `stage/engine-v030`。主控亲跑 **1005 passed** 实证。report 已发 PM (`/tmp/pr-f-report.md`)。
-- **下一步 = PR G 组 (schema cleanup 收尾)**: V2.1主路径/codemod/parser stub/fixture/context_mapping/python_callable 全清 (cutover 收尾, 最后一个 PR)。
+- **✅ PR G 组 (schema cleanup 收尾) 已完成** (round-18, SOP-08 9 步全走, **最后一个引擎 PR**): 删 codemod/context_mapping 全链/python_callable/`<steps>`壳/5 dead validators/12 个 collect_ignore 隐藏死测试; cognitive 模块保活。dead-vs-live **三重审计** (a2 plan 重判 catch 2 致命误判 cognitive+context_mapping + a3 plan audit conftest/gate gap + a2 impl audit catch **假绿** collect_ignore 隐藏 broken tests + a3 impl audit gate 收窄合法性+覆盖无丢失) + **主控物理复验亲跑 pytest**。must-fix: collect_ignore_glob 清空 → **诚实全绿 981 passed 0 fail 0 error** (不再靠隐藏凑绿); round18 gate 加防回归断言。Studio + 根 skills/ corpus V0.3.0 迁移 = §10 Deferred (engine-only charter scope)。4 granular commits (spec `55a57a6` / tests-first `f03d9ca` / impl `9877bf1` / docs `7d8c6d3`), merge-commit `1a540ca` 进 `stage/engine-v030`。report 已发 PM (`/tmp/pr-g-report.md`)。
+- **🎉 engine 阶段 (C+E+F+G) 全部完成**: 4 个 PR 全在 `stage/engine-v030` 集成分支, **待 PM 实测 golden** 后才先打 tag 再 squash 进 main (§0 合并工作流铁律)。main 仍在 74950f4 (round-14)。
 - git 仓库已 gc 清理 (15000→0 游离对象, auto-gc 恢复)。
 
 ---
@@ -35,9 +36,9 @@
 | 7 | round-15 | PR C 组 | execution-runtime: cognitive 8插槽 / reference reader / read_reference+read_example tools / ActionRegistry / e2e | ✅ done (merge-commit `405e63d` on stage) |
 | 8 | round-16 | PR E 组 | tracing: AMBIGUITY_LOGGED / BUILTIN_SUBAGENT events / fallback payload | ✅ done (merge-commit `d3610e8` on stage) |
 | 9 | round-17 | PR F 组 | 错误码: 退役 [F-v21-*] + standard error payload (ErrorPayload + 89 码 registry) | ✅ done (merge-commit `487f11f` on stage) |
-| 10 | 待定 round | PR G 组 | schema cleanup: V2.1主路径/codemod/parser stub/fixture/context_mapping/python_callable 全清 (cutover 收尾) | ⏳ in_progress |
+| 10 | round-18 | PR G 组 | schema cleanup: V2.1主路径/codemod/parser stub/fixture/context_mapping/python_callable 全清 (cutover 收尾, **最后一个引擎 PR**) | ✅ done (merge-commit `1a540ca` on stage) |
 
-**注**: round 9-14 代码全已进 main (#92-#96); round-15 (PR C) + round-16 (PR E) + round-17 (PR F) 以 merge-commit 进 `stage/engine-v030` (未进 main, 等整阶段 golden 后 tag+squash)。下一步 = PR G 组 (schema cleanup 收尾, 最后一个 PR)。新 PR 走 §0 合并工作流 (merge-commit 进 `stage/engine-v030`, 不直接进 main)。
+**注**: round 9-14 代码全已进 main (#92-#96); round-15 (PR C) + round-16 (PR E) + round-17 (PR F) + round-18 (PR G) 以 merge-commit 进 `stage/engine-v030` (未进 main)。**engine 阶段 4 个 PR 全部完成**, 整阶段待 PM 实测 golden 后 tag+squash 进 main。新 PR 走 §0 合并工作流 (merge-commit 进 `stage/engine-v030`, 不直接进 main)。
 
 ---
 

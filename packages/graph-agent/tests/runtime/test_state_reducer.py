@@ -37,8 +37,10 @@ def test_blackboard_data_merge_both_none() -> None:
 
 
 def test_blackboard_data_merge_phase_output_conflict_raises_fatal() -> None:
-    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-state-conflict\].*phase_outputs"):
+    with pytest.raises(GraphAgentFatalError) as exc_info:
         blackboard_data_merge(
             {"inputs": {}, "phase_outputs": {"a": {"value": 1}}, "scratch": {}},
             {"inputs": {}, "phase_outputs": {"a": {"value": 2}}, "scratch": {}},
         )
+    assert exc_info.value.payload.code == "[F-v3-runtime-state-mapping-failed]"
+    assert "phase_outputs" in str(exc_info.value)

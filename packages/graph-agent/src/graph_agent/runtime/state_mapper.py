@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from graph_agent.core.exceptions import GraphAgentFatalError
+from graph_agent.core.exceptions import GraphAgentFatalError, make_error_payload
 from graph_agent.runtime.state import BlackboardData, BlackboardState, normalize_blackboard_data
 
 
@@ -66,17 +66,20 @@ class StateMapper:
         if any(key in data for key in ("inputs", "phase_outputs", "scratch")):
             normalized = normalize_blackboard_data(data)
             if normalized["inputs"]:
+                detail = "data.inputs is read-only"
                 raise GraphAgentFatalError(
-                    "[F-v3-runtime-state-mapping-failed] data.inputs is read-only"
+                    detail,
+                    payload=make_error_payload("[F-v3-runtime-state-mapping-failed]", detail),
                 )
             return {**output, "data": normalized}
         allowed = schema_properties(self.output_schema)
         if allowed:
             invalid = sorted(key for key in data if key not in allowed)
             if invalid:
+                detail = "phase wrote undeclared keys: " + ", ".join(invalid)
                 raise GraphAgentFatalError(
-                    "[F-v3-runtime-state-mapping-failed] phase wrote undeclared keys: "
-                    + ", ".join(invalid)
+                    detail,
+                    payload=make_error_payload("[F-v3-runtime-state-mapping-failed]", detail),
                 )
         return {
             **output,
@@ -101,7 +104,11 @@ def _phase_local_inputs(
 
 def phase_output(data: dict[str, Any], phase_id: str) -> BlackboardData:
     if "inputs" in data:
-        raise GraphAgentFatalError("[F-v3-runtime-state-mapping-failed] data.inputs is read-only")
+        detail = "data.inputs is read-only"
+        raise GraphAgentFatalError(
+            detail,
+            payload=make_error_payload("[F-v3-runtime-state-mapping-failed]", detail),
+        )
     return {"inputs": {}, "phase_outputs": {phase_id: dict(data)}, "scratch": {}}
 
 
@@ -119,7 +126,11 @@ def scratch_from_state(state: BlackboardState) -> dict[str, Any]:
 
 def ensure_no_input_write(data: dict[str, Any]) -> None:
     if "inputs" in data:
-        raise GraphAgentFatalError("[F-v3-runtime-state-mapping-failed] data.inputs is read-only")
+        detail = "data.inputs is read-only"
+        raise GraphAgentFatalError(
+            detail,
+            payload=make_error_payload("[F-v3-runtime-state-mapping-failed]", detail),
+        )
 
 
 @dataclass(frozen=True)
@@ -135,9 +146,10 @@ class PhaseWrapper:
     ) -> Callable[[BlackboardState], dict[str, Any]]:
         if getattr(node, "__graph_agent_phase_wrapped__", False):
             wrapped_kind = getattr(node, "__graph_agent_phase_node_kind__", "unknown")
+            detail = f"double-wrap rejected: {wrapped_kind} node is already wrapped"
             raise GraphAgentFatalError(
-                "[F-v3-runtime-state-mapping-failed] double-wrap rejected: "
-                f"{wrapped_kind} node is already wrapped"
+                detail,
+                payload=make_error_payload("[F-v3-runtime-state-mapping-failed]", detail),
             )
 
         def _wrapped(state: BlackboardState) -> dict[str, Any]:
@@ -147,7 +159,11 @@ class PhaseWrapper:
             except GraphAgentFatalError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                raise GraphAgentFatalError(f"[F-v3-runtime-state-mapping-failed] {exc}") from exc
+                detail = str(exc)
+                raise GraphAgentFatalError(
+                    detail,
+                    payload=make_error_payload("[F-v3-runtime-state-mapping-failed]", detail),
+                ) from exc
 
         wrapped_attrs = cast(Any, _wrapped)
         wrapped_attrs.__graph_agent_phase_wrapped__ = True

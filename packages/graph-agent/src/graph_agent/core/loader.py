@@ -20,7 +20,7 @@ from pydantic import BaseModel, ValidationError
 
 from graph_agent.cognitive.context_facade import Context
 from graph_agent.core.actions import ActionDef, ActionRegistry, ToolDef, ToolRegistry
-from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
+from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError, make_error_payload
 from graph_agent.core.manifest import (
     AgentNodeAST,
     GraphManifest,
@@ -245,7 +245,12 @@ def load_workflow_from_md(
     del _loading_stack
     root = Path(md_path)
     if root.is_file():
-        _fatal(root, 1, "load_workflow_from_md now accepts a V0.3.0 skill root directory")
+        _fatal(
+            root,
+            1,
+            "load_workflow_from_md now accepts a V0.3.0 skill root directory",
+            code="[F-v3-graph-root-missing]",
+        )
     from graph_agent.core.compiler import compile_skill
     from graph_agent.core.graph_assembler import assemble_graph
 
@@ -261,41 +266,89 @@ def load_workflow_from_md(
     ).graph
 
 
-def _fatal(path: Path, line: int, message: str) -> NoReturn:
-    raise SkillLoadError(f"[F-v3-route] {path}:{line} {message}")
+_CODE_PREFIX_RE = re.compile(r"^\[(F-v3-[a-z0-9-]+)\]\s*(.*)$", re.DOTALL)
+
+
+def _split_code_message(code: str, message: str) -> tuple[str, str]:
+    match = _CODE_PREFIX_RE.match(message)
+    if match is None:
+        return code, message
+    return f"[{match.group(1)}]", match.group(2)
+
+
+def _fatal(
+    path: Path,
+    line: int,
+    message: str,
+    *,
+    code: str = "[F-v3-graph-root-missing]",
+) -> NoReturn:
+    code, clean = _split_code_message(code, message)
+    detail = f"{path}:{line} {clean}"
+    raise SkillLoadError(detail, payload=make_error_payload(code, detail, source_path=path))
 
 
 def _io_fatal(path: Path, line: int, message: str) -> NoReturn:
-    raise SkillLoadError(f"[F-v3-io] {path}:{line} {message}")
+    code, clean = _split_code_message("[F-v3-graph-io-schema-invalid]", message)
+    detail = f"{path}:{line} {clean}"
+    raise SkillLoadError(detail, payload=make_error_payload(code, detail, source_path=path))
 
 
 def _graph_fatal(path: Path, line: int, message: str) -> NoReturn:
-    raise SkillLoadError(f"[F-v3-graph] {path}:{line} {message}")
+    code, clean = _split_code_message("[F-v3-graph-schema-unknown-field]", message)
+    detail = f"{path}:{line} {clean}"
+    raise SkillLoadError(detail, payload=make_error_payload(code, detail, source_path=path))
 
 
-def _actions_fatal(path: Path, line: int, message: str) -> NoReturn:
-    raise SkillLoadError(f"[F-v3-actions] {path}:{line} {message}")
+def _actions_fatal(
+    path: Path,
+    line: int,
+    message: str,
+    *,
+    code: str = "[F-v3-logic-action-not-found]",
+) -> NoReturn:
+    code, clean = _split_code_message(code, message)
+    detail = f"{path}:{line} {clean}"
+    raise SkillLoadError(detail, payload=make_error_payload(code, detail, source_path=path))
 
 
 def _actions_keys_fatal(path: Path, line: int, message: str) -> None:
+    detail = f"{path}:{line} {message}"
     raise GraphAgentFatalError(
-        f"[F-v3-logic-output-field-undeclared] {path}:{line} {message}"
+        detail,
+        payload=make_error_payload("[F-v3-logic-output-field-undeclared]", detail, source_path=path),
     )
 
 
 def _purity_fatal(path: Path, line: int, message: str) -> None:
-    raise SkillLoadError(f"[F-v3-purity] {path}:{line} {message}")
+    detail = f"{path}:{line} {message}"
+    raise SkillLoadError(
+        detail,
+        payload=make_error_payload(
+            "[F-v3-logic-action-purity-violation]", detail, source_path=path
+        ),
+    )
 
 
 def _guard_v030_root(skill_root: Path) -> None:
     if not skill_root.exists():
         _fatal(skill_root / "GRAPH.md", 1, "missing required GRAPH.md")
     if not skill_root.is_dir():
-        _fatal(skill_root, 1, "V0.3.0 compile_skill expects a skill root directory")
+        _fatal(
+            skill_root,
+            1,
+            "V0.3.0 compile_skill expects a skill root directory",
+            code="[F-v3-graph-root-missing]",
+        )
 
     root_skill = skill_root / "SKILL.md"
     if root_skill.exists():
-        _fatal(root_skill, 1, "schema 2.0 root SKILL.md is not supported; use GRAPH.md")
+        _fatal(
+            root_skill,
+            1,
+            "schema 2.0 root SKILL.md is not supported; use GRAPH.md",
+            code="[F-v3-graph-root-missing]",
+        )
 
     graph = skill_root / "GRAPH.md"
     if not graph.is_file():
@@ -303,9 +356,19 @@ def _guard_v030_root(skill_root: Path) -> None:
 
     phases = skill_root / "phases"
     if not phases.is_dir() or not any(p.is_dir() for p in phases.iterdir()):
-        _fatal(phases, 1, "missing phases directory or phase entries")
+        _fatal(
+            phases,
+            1,
+            "missing phases directory or phase entries",
+            code="[F-v3-graph-phases-dir-missing]",
+        )
     if (skill_root / "actions").exists():
-        _actions_fatal(skill_root / "actions", 1, "root-level actions/ is not allowed")
+        _actions_fatal(
+            skill_root / "actions",
+            1,
+            "root-level actions/ is not allowed",
+            code="[F-v3-logic-action-dir-missing]",
+        )
 
 
 def _discover_phase_files(skill_root: Path) -> list[tuple[str, Path, str]]:
@@ -314,7 +377,12 @@ def _discover_phase_files(skill_root: Path) -> list[tuple[str, Path, str]]:
     for phase_dir in sorted(p for p in phases_root.iterdir() if p.is_dir()):
         nested_graph = phase_dir / "GRAPH.md"
         if nested_graph.exists():
-            _fatal(nested_graph, 1, "GRAPH.md is only allowed at skill root")
+            _fatal(
+                nested_graph,
+                1,
+                "GRAPH.md is only allowed at skill root",
+                code="[F-v3-graph-root-missing]",
+            )
 
         phase_files = [
             phase_dir / name for name in _PHASE_FILE_TO_MODE if (phase_dir / name).exists()
@@ -339,7 +407,12 @@ def _discover_phase_files(skill_root: Path) -> list[tuple[str, Path, str]]:
         discovered.append((phase_dir.name, phase_file, _PHASE_FILE_TO_MODE[phase_file.name]))
 
     if not discovered:
-        _fatal(phases_root, 1, "missing phases directory or phase entries")
+        _fatal(
+            phases_root,
+            1,
+            "missing phases directory or phase entries",
+            code="[F-v3-graph-phases-dir-missing]",
+        )
     return discovered
 
 
@@ -362,19 +435,39 @@ def _discover_actions_and_tools(
 
         if mode == "logic":
             if tools_dir.exists():
-                _actions_fatal(tools_dir, 1, "tools/ is only allowed for SKILL phases")
+                _actions_fatal(
+                    tools_dir,
+                    1,
+                    "tools/ is only allowed for SKILL phases",
+                    code="[F-v3-agent-tool-unknown]",
+                )
             if actions_dir.exists():
                 actions_by_phase[phase_id] = _load_action_dir(actions_dir, phase_id)
         elif mode == "agent":
             if actions_dir.exists():
-                _actions_fatal(actions_dir, 1, "actions/ is only allowed for LOGIC phases")
+                _actions_fatal(
+                    actions_dir,
+                    1,
+                    "actions/ is only allowed for LOGIC phases",
+                    code="[F-v3-logic-action-dir-missing]",
+                )
             if tools_dir.exists():
                 tools_by_phase[phase_id] = _load_tool_dir(tools_dir, phase_id=phase_id)
         else:
             if actions_dir.exists():
-                _actions_fatal(actions_dir, 1, "actions/ is not allowed for SUBGRAPH phases")
+                _actions_fatal(
+                    actions_dir,
+                    1,
+                    "actions/ is not allowed for SUBGRAPH phases",
+                    code="[F-v3-logic-action-dir-missing]",
+                )
             if tools_dir.exists():
-                _actions_fatal(tools_dir, 1, "tools/ is not allowed for SUBGRAPH phases")
+                _actions_fatal(
+                    tools_dir,
+                    1,
+                    "tools/ is not allowed for SUBGRAPH phases",
+                    code="[F-v3-agent-tool-unknown]",
+                )
 
     return ActionRegistry(actions_by_phase), ToolRegistry(
         root_tools=root_tools, by_phase=tools_by_phase
@@ -428,19 +521,33 @@ def _validate_agent_reference_paths(skill_root: Path, phase_docs: list[PhaseDocu
         for reference in doc.ast.references:
             path = Path(reference.path)
             if path.is_absolute():
-                raise SkillLoadError(
-                    f"[F-v3-resource-reference-path-invalid] {doc.path}:"
-                    f"{_frontmatter_key_line(doc.path, 'phase_config')} "
+                detail = (
+                    f"{doc.path}:{_frontmatter_key_line(doc.path, 'phase_config')} "
                     f"reference {reference.id!r} path escapes skill root"
+                )
+                raise SkillLoadError(
+                    detail,
+                    payload=make_error_payload(
+                        "[F-v3-resource-reference-path-invalid]",
+                        detail,
+                        source_path=doc.path,
+                    ),
                 )
             candidate = (skill_root / path).resolve()
             try:
                 candidate.relative_to(root_resolved)
             except ValueError as exc:
-                raise SkillLoadError(
-                    f"[F-v3-resource-reference-path-invalid] {doc.path}:"
-                    f"{_frontmatter_key_line(doc.path, 'phase_config')} "
+                detail = (
+                    f"{doc.path}:{_frontmatter_key_line(doc.path, 'phase_config')} "
                     f"reference {reference.id!r} path escapes skill root"
+                )
+                raise SkillLoadError(
+                    detail,
+                    payload=make_error_payload(
+                        "[F-v3-resource-reference-path-invalid]",
+                        detail,
+                        source_path=doc.path,
+                    ),
                 ) from exc
 def _compile_subagent_metadata(
     phase_docs: list[PhaseDocument],
@@ -467,6 +574,7 @@ def _compile_subagent_metadata(
                     "subagent "
                     f"{spec.name!r} at {spec.target_skill!r} must declare "
                     "a non-empty io.inputs schema",
+                    code="[F-v3-agent-subagent-invalid]",
                 )
             try:
                 input_model = build_subagent_input_model(
@@ -478,6 +586,7 @@ def _compile_subagent_metadata(
                     doc.path,
                     _frontmatter_key_line(doc.path, "phase_config"),
                     f"subagent {spec.name!r} io.inputs schema is unsupported: {exc}",
+                    code="[F-v3-agent-subagent-invalid]",
                 )
             phase_subagents.append(
                 CompiledSubagent(
@@ -512,6 +621,7 @@ def _inject_subagent_tools(
                     1,
                     f"subagent {subagent.name!r} dynamic tool {tool_name!r} "
                     "conflicts with an existing tool",
+                    code="[F-v3-agent-tool-unknown]",
                 )
             existing_names.add(tool_name)
             phase_tools.append(_subagent_tool_def(phase_id, subagent, tool_name))
@@ -573,7 +683,12 @@ def _load_action_dir(actions_dir: Path, phase_id: str) -> dict[str, ActionDef]:
             _validate_action_signature(path, func)
             action_id = func.__name__
             if action_id in by_id:
-                _actions_fatal(path, 1, f"duplicate action id {action_id!r} in phase {phase_id!r}")
+                _actions_fatal(
+                    path,
+                    1,
+                    f"duplicate action id {action_id!r} in phase {phase_id!r}",
+                    code="[F-v3-logic-action-name-invalid]",
+                )
             by_id[action_id] = ActionDef(id=action_id, phase_id=phase_id, path=path, func=func)
     return by_id
 
@@ -585,7 +700,12 @@ def _load_tool_dir(tools_dir: Path, *, phase_id: str | None) -> list[ToolDef]:
             continue
         _raise_on_purity_violations(path)
         for violation in scan_tool_imports_context(path):
-            _actions_fatal(path, violation.line, violation.reason)
+            _actions_fatal(
+                path,
+                violation.line,
+                violation.reason,
+                code="[F-v3-agent-tool-unknown]",
+            )
         module = _load_python_module(path)
         for func in _module_functions(module):
             _validate_tool_signature(path, func)
@@ -596,7 +716,12 @@ def _load_tool_dir(tools_dir: Path, *, phase_id: str | None) -> list[ToolDef]:
 def _raise_on_purity_violations(path: Path) -> None:
     for violation in scan_python_purity(path):
         if violation.api == "python":
-            _actions_fatal(path, violation.line, f"module load failed: {violation.reason}")
+            _actions_fatal(
+                path,
+                violation.line,
+                f"module load failed: {violation.reason}",
+                code="[F-v3-logic-action-purity-violation]",
+            )
         _purity_fatal(path, violation.line, f"{violation.api} {violation.reason}")
 
 
@@ -605,13 +730,23 @@ def _load_python_module(path: Path) -> ModuleType:
     try:
         spec = importlib.util.spec_from_file_location(module_name, path)
         if spec is None or spec.loader is None:
-            _actions_fatal(path, 1, "could not create import spec")
+            _actions_fatal(
+                path,
+                1,
+                "could not create import spec",
+                code="[F-v3-logic-action-entrypoint-missing]",
+            )
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
     except Exception as exc:
         tb = traceback.format_exc()
         line = getattr(exc, "lineno", 1) or 1
-        _actions_fatal(path, line, f"module load failed: {exc}\n{tb}")
+        _actions_fatal(
+            path,
+            line,
+            f"module load failed: {exc}\n{tb}",
+            code="[F-v3-logic-action-entrypoint-missing]",
+        )
     return module
 
 
@@ -628,7 +763,10 @@ def _validate_action_signature(path: Path, func: Callable[..., object]) -> None:
     params = list(signature.parameters.values())
     if not params or params[0].name not in {"context", "ctx"}:
         _actions_fatal(
-            path, 1, f"action {func.__name__!r} must accept context/ctx as first parameter"
+            path,
+            1,
+            f"action {func.__name__!r} must accept context/ctx as first parameter",
+            code="[F-v3-logic-action-entrypoint-missing]",
         )
     annotation = params[0].annotation
     if annotation is inspect.Parameter.empty:
@@ -640,7 +778,12 @@ def _validate_action_signature(path: Path, func: Callable[..., object]) -> None:
         "graph_agent.cognitive.context_facade.Context",
     }:
         return
-    _actions_fatal(path, 1, f"action {func.__name__!r} first parameter must be Context-compatible")
+    _actions_fatal(
+        path,
+        1,
+        f"action {func.__name__!r} first parameter must be Context-compatible",
+        code="[F-v3-logic-action-entrypoint-missing]",
+    )
 
 
 def _validate_tool_signature(path: Path, func: Callable[..., object]) -> None:
@@ -651,17 +794,28 @@ def _validate_tool_signature(path: Path, func: Callable[..., object]) -> None:
                 path,
                 1,
                 f"tool {func.__name__!r} must not accept blackboard parameter {param.name!r}",
+                code="[F-v3-agent-tool-unknown]",
             )
 
 
 def _route_document(file_path: Path) -> RouteKind:
     if file_path.name == "GRAPH.md":
         if file_path.parent.name == "phases" or file_path.parent.parent.name == "phases":
-            _fatal(file_path, 1, "GRAPH.md is only allowed at skill root")
+            _fatal(
+                file_path,
+                1,
+                "GRAPH.md is only allowed at skill root",
+                code="[F-v3-graph-root-missing]",
+            )
         return "graph"
     if file_path.name in _PHASE_FILE_TO_MODE:
         return _PHASE_FILE_TO_MODE[file_path.name]  # type: ignore[return-value]
-    _fatal(file_path, 1, "unsupported V0.3.0 document filename")
+    _fatal(
+        file_path,
+        1,
+        "unsupported V0.3.0 document filename",
+        code="[F-v3-graph-root-missing]",
+    )
 
 
 def _reject_phase_forbidden_metadata(path: Path, frontmatter: dict[str, Any]) -> None:
@@ -711,7 +865,12 @@ def _build_graph_manifest(
     try:
         return GraphManifest.model_validate(data)
     except ValidationError as exc:
-        _fatal(path, 1, f"GRAPH.md manifest validation failed: {exc}")
+        _fatal(
+            path,
+            1,
+            f"GRAPH.md manifest validation failed: {exc}",
+            code="[F-v3-graph-schema-unknown-field]",
+        )
 
 
 def get_phase_token_info(compiled: CompiledSkill, phase_id: str) -> PhaseTokenInfo | None:
@@ -1164,6 +1323,7 @@ def _build_phase_document(
                 path,
                 1,
                 f"unsupported phase file {path.name}",
+                code="[F-v3-graph-phase-node-missing]",
             )
     except ValidationError as exc:
         _phase_validation_fatal(path, mode, exc)
@@ -1183,7 +1343,12 @@ def _normalize_skill_node_frontmatter(path: Path, data: dict[str, Any]) -> dict[
     if phase_config is None:
         return data
     if not isinstance(phase_config, dict):
-        _fatal(path, _frontmatter_key_line(path, "phase_config"), "phase_config must be an object")
+        _fatal(
+            path,
+            _frontmatter_key_line(path, "phase_config"),
+            "phase_config must be an object",
+            code="[F-v3-agent-schema-unknown-field]",
+        )
     merged = dict(data)
     if "tools" in phase_config:
         merged.setdefault("tools", phase_config["tools"])
@@ -1207,6 +1372,7 @@ def _normalize_skill_node_frontmatter(path: Path, data: dict[str, Any]) -> dict[
             path,
             _frontmatter_key_line(path, "phase_config"),
             "unsupported phase_config keys: " + ", ".join(extra_keys),
+            code="[F-v3-agent-schema-unknown-field]",
         )
     return merged
 

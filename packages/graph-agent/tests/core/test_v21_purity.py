@@ -157,7 +157,7 @@ def test_purity_cli_dirty_exit_1(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 1
-    assert "[F-v3-purity]" in result.stdout
+    assert "[F-v3-logic-action-purity-violation]" in result.stdout
 
 
 def test_purity_cli_ignores_v2_pending(tmp_path: Path) -> None:

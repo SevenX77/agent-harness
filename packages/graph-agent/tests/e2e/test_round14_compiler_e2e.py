@@ -364,25 +364,13 @@ _LOCATED_ERROR_CASES: list[tuple[str, Callable[[Path], None], str]] = [
 
 _SOURCE_FILE_MARKERS = ("GRAPH.md", "SKILL.md", "LOGIC.md", "SUBGRAPH.md", ".json")
 
-# Every ``[F-v3-*]`` token a SkillLoadError message can carry.  The "generic
-# wrappers" are routing prefixes that ``_fatal`` / ``_io_fatal`` / ``_graph_fatal``
-# emit *alongside* the dedicated defect code (e.g. ``[F-v3-route] <path> [F-v3-...]``);
-# they are not themselves defect codes, so they are excluded from the
-# "exactly one defect code" assertion below.
+# Every ``[F-v3-*]`` token a SkillLoadError message can carry.
 _CODE_RE = re.compile(r"\[F-v3-[a-z0-9-]+\]")
-_GENERIC_WRAPPER_CODES = frozenset(
-    {
-        "[F-v3-route]",
-        "[F-v3-graph]",
-        "[F-v3-io]",
-        "[F-v3-actions]",
-        "[F-v3-purity]",
-    }
-)
+_GENERIC_WRAPPER_CODES = frozenset()
 
 
-def _assert_unique_defect_code(message: str, expected: str) -> None:
-    """Assert ``message`` carries ``expected`` and no *other* defect code.
+def _assert_unique_defect_code(exc: BaseException, expected: str) -> None:
+    """Assert ``exc`` carries ``expected`` and no *other* defect code.
 
     This is the permanent form of the one-off discrimination check: the only
     dedicated ``[F-v3-*]`` code in the message (after stripping generic routing
@@ -390,6 +378,11 @@ def _assert_unique_defect_code(message: str, expected: str) -> None:
     masquerade behind a shared or leaked error code.
     """
 
+    payload = getattr(exc, "payload", None)
+    if payload is not None:
+        assert payload.code == expected
+        return
+    message = str(exc)
     found = set(_CODE_RE.findall(message))
     defect_codes = found - _GENERIC_WRAPPER_CODES
     assert expected in message, f"missing expected {expected} in: {message}"
@@ -416,7 +409,7 @@ def test_corrupted_skill_raises_dedicated_located_code(
         SkillLoader().compile_skill(corrupt_root, skill_resolver=_resolver_for(corrupt_root))
 
     message = str(exc.value)
-    _assert_unique_defect_code(message, code)
+    _assert_unique_defect_code(exc.value, code)
     assert any(marker in message for marker in _SOURCE_FILE_MARKERS), message
 
 
@@ -427,7 +420,7 @@ def test_unresolvable_subgraph_target_raises_skill_not_registered(corrupt_root: 
     with pytest.raises(SkillLoadError) as exc:
         SkillLoader().compile_skill(corrupt_root, skill_resolver=resolver)
 
-    _assert_unique_defect_code(str(exc.value), "[F-v3-skill-not-registered]")
+    _assert_unique_defect_code(exc.value, "[F-v3-skill-not-registered]")
 
 
 def test_missing_resolver_raises_resolver_missing(corrupt_root: Path) -> None:
@@ -435,4 +428,4 @@ def test_missing_resolver_raises_resolver_missing(corrupt_root: Path) -> None:
     with pytest.raises(SkillLoadError) as exc:
         SkillLoader().compile_skill(corrupt_root, skill_resolver=None)
 
-    _assert_unique_defect_code(str(exc.value), "[F-v3-resolver-missing]")
+    _assert_unique_defect_code(exc.value, "[F-v3-resolver-missing]")

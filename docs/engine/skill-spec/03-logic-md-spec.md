@@ -67,6 +67,7 @@ validator: true
 | 入参 | `state_slice` 是按 `io.inputs` 从 BlackboardState 切出的浅 dict; `kwargs` 预留 trace_id、phase_id 等系统参数 |
 | 返回值 | dict; key 必须是 `io.outputs.properties` 子集 |
 | 执行顺序 | 严格按 body `<action>` 标签从上到下串行执行; 上一个 action 的返回会合并进下一次 `state_slice` |
+| 纯净性约束 | 编译期执行 purity 扫描, 禁止 action 包含本地写 (`open(..., 'w')`) 等副作用 |
 
 Action 与 Tool 的边界必须固定:
 
@@ -83,6 +84,7 @@ Action 与 Tool 的边界必须固定:
 | action 文件不存在 | `[F-v3-logic-action-not-found]` | 编译期 | FATAL |
 | action 名含 `/`、`.` 或非法字符 | `[F-v3-logic-action-name-invalid]` | 编译期 | FATAL |
 | action 模块无 `run` | `[F-v3-logic-action-entrypoint-missing]` | 编译期 | FATAL |
+| action 代码存在本地写等副作用违例 | `[F-v3-logic-action-purity-violation]` | 编译期 | FATAL |
 | `run()` 返回非 dict | `[F-v3-logic-action-return-invalid]` | 运行期 | FATAL, 不回写 |
 | 返回字段超出 `io.outputs` | `[F-v3-logic-output-field-undeclared]` | 运行期 | FATAL, 不回写 |
 

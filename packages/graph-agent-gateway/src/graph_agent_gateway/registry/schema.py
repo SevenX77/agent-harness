@@ -11,6 +11,7 @@ SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 ROUTE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*$")
 
 Protocol = Literal["openai_compatible", "anthropic_compatible", "google_genai", "ark_runtime"]
+ProviderKind = Literal["official", "third_party", "custom"]
 RouteStatus = Literal["verified", "unverified_manual", "disabled", "failed"]
 CapabilitySource = Literal["api_list", "provider_doc", "agent_draft", "manual", "probed_verified"]
 LintSeverity = Literal["off", "warn", "error"]
@@ -146,6 +147,8 @@ class ProviderEndpoint(BaseModel):
     status: RouteStatus = "unverified_manual"
     last_test_at: str | None = None
     last_test_message: str | None = None
+    provider_kind: ProviderKind = "third_party"
+    rate_limit_bucket: str | None = None
     timeout_seconds: int = Field(default=120, ge=1)
     trust_env: bool = False
     proxy_env: str | None = None

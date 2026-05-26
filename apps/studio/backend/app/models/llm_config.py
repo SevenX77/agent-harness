@@ -8,7 +8,7 @@ and API-facing helper models.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from graph_agent_gateway.registry.schema import (
     CapabilityValue,
@@ -24,14 +24,16 @@ from graph_agent_gateway.registry.schema import (
     RegistrySnapshot,
     ResolvedRole,
     ResolvedRoute,
-    RoleEntry,
     RoleRouteEntry,
     RouteCandidate,
     RuntimePolicy,
     RuntimeSettingDescriptor,
 )
+from graph_agent_gateway.registry.schema import (
+    RoleEntry as GatewayRoleEntry,
+)
 from graph_agent_gateway.registry.storage import compute_credential_fingerprint
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 ProviderType = Literal["anthropic_compatible", "openai_compatible", "google_genai", "ark_runtime"]
 
@@ -74,14 +76,109 @@ class LLMCredentialsFile(BaseModel):
         return compute_credential_fingerprint(self.provider_endpoints[endpoint_id])
 
 
+class RoleTokenIntent(BaseModel):
+    """Role-level token intent. Role level cannot inherit from a parent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["default", "maximum_available", "target", "required_minimum"]
+    value: int | None = Field(default=None, ge=1)
+    downgrade: Literal["allow", "allow_with_warning", "block"] = "allow"
+
+
+class TokenIntent(BaseModel):
+    """Nested token intent. Model groups may inherit from the role."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["inherit", "default", "maximum_available", "target", "required_minimum"]
+    value: int | None = Field(default=None, ge=1)
+    downgrade: Literal["allow", "allow_with_warning", "block"] = "allow"
+
+
+class RoleIntent(BaseModel):
+    """User intent stored at the Role level."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider_preference: Literal["official_first", "ready_first", "manual_order"] = (
+        "official_first"
+    )
+    thinking: Literal["off", "preferred", "required"] = "off"
+    target_context_tokens: RoleTokenIntent | None = None
+    target_output_tokens: RoleTokenIntent | None = None
+    cost_priority: Literal["quality", "balanced", "low_cost"] | None = None
+
+
+class ModelGroupIntent(BaseModel):
+    """Optional Model Group override intent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider_preference: Literal["official_first", "ready_first", "manual_order"] | None = None
+    thinking: Literal["inherit", "off", "preferred", "required"] = "inherit"
+    target_context_tokens: TokenIntent | None = None
+    target_output_tokens: TokenIntent | None = None
+    cost_priority: Literal["quality", "balanced", "low_cost"] | None = None
+
+
+class RoleProviderModel(BaseModel):
+    """One selected provider model option inside a Model Group."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    route_id: str
+    intent: ModelGroupIntent | None = None
+
+
+class RoleModelGroup(BaseModel):
+    """One user-authored Model Group in a Role."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    canonical_id: str
+    display_name: str
+    intent: ModelGroupIntent = Field(default_factory=ModelGroupIntent)
+    provider_models: list[RoleProviderModel] = Field(default_factory=list)
+
+
+class RoleEntry(GatewayRoleEntry):
+    """Studio Role entry with authoring fields plus generated fallback chain."""
+
+    role_kind: Literal["graph_agent", "copilot"] = "graph_agent"
+    model_fallback_enabled: bool = True
+    intent: RoleIntent = Field(default_factory=RoleIntent)
+    model_groups: list[RoleModelGroup] = Field(default_factory=list)
+    materialization_report: dict[str, Any] = Field(
+        default_factory=lambda: {
+            "entries": [],
+            "warnings": [],
+            "skipped_provider_details": [],
+        }
+    )
+
+
 class RolesData(BaseModel):
     """Schema stored at the active Studio LLM roles path."""
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[2] = 2
+    schema_version: Literal[2, 3] = 2
     model_profiles: dict[str, ModelProfile] = Field(default_factory=dict)
+    model_bundles: dict[str, ModelProfile] = Field(default_factory=dict)
     roles: dict[str, RoleEntry] = Field(default_factory=dict)
+
+    @field_validator("roles", mode="before")
+    @classmethod
+    def _coerce_gateway_roles(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        return {
+            role_name: role.model_dump(mode="json")
+            if hasattr(role, "model_dump") and not isinstance(role, RoleEntry)
+            else role
+            for role_name, role in value.items()
+        }
 
     def to_registry_snapshot(self, credentials: LLMCredentialsFile) -> RegistrySnapshot:
         """Join credentials and roles into the gateway runtime snapshot."""
@@ -98,6 +195,7 @@ class RegistryResponse(RegistrySnapshot):
     """Redacted registry response plus grouped display metadata."""
 
     canonical_groups: list[dict[str, object]] = Field(default_factory=list)
+    model_groups: list[dict[str, object]] = Field(default_factory=list)
     lint_results: list[LintResult] = Field(default_factory=list)
     route_runtime_settings: dict[str, dict[str, RuntimeSettingDescriptor]] = Field(
         default_factory=dict

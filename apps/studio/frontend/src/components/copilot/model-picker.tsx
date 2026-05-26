@@ -32,7 +32,7 @@ export function getRouteOptions(role: RoleEntry | null, registry: RegistryRespon
     return []
   }
 
-  return role.fallback_chain.map((entry) => {
+  return (role.fallback_chain ?? []).map((entry) => {
     const route = registry?.provider_routes[entry.route_id] ?? null
     const available = Boolean(route && route.status !== 'disabled' && route.status !== 'failed')
     return {
@@ -114,7 +114,7 @@ function ModelPickerDropdownItems({ options, selectedRouteId, onSelect }: ModelP
 export function ModelPicker({ role, registry, selectedRouteId, onSelect, variant = 'icon' }: ModelPickerProps) {
   const options = useMemo(() => getRouteOptions(role, registry), [registry, role])
   const fallbackRoute = firstAvailableRoute(options)
-  const effectiveRouteId = selectedRouteId || role?.fallback_chain[0]?.route_id || ''
+  const effectiveRouteId = selectedRouteId || role?.fallback_chain?.[0]?.route_id || ''
 
   useEffect(() => {
     if (!role || !effectiveRouteId || !fallbackRoute) {

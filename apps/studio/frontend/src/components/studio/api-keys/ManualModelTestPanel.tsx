@@ -37,6 +37,8 @@ export function manualModelStatusLabel(status: ProviderModelTestResult["status"]
       return "Invalid API key"
     case "rate_limited":
       return "Rate limited"
+    case "quota_exceeded":
+      return "Quota exceeded"
     case "network_error":
       return "Network error"
     case "timeout":

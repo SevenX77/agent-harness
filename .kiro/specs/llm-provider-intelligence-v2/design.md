@@ -203,7 +203,8 @@ Secrets:
 
 - `api_key` is stored only in the local credentials file.
 - Registry read APIs must redact `api_key` unless an explicit internal-only runtime path needs the value.
-- Endpoint mutation APIs may omit `api_key` to keep the current secret. An empty string is not treated as a replacement secret.
+- Endpoint mutation APIs may omit `api_key` to keep the current secret.
+- Endpoint mutation APIs treat `api_key: ""` as an explicit clear only when the Settings UI is saving an intentionally empty API key value. Frontend must not send a redacted placeholder such as `"**********"` as a real secret.
 
 Runtime policy:
 
@@ -843,6 +844,7 @@ Returns a redacted snapshot:
 - Endpoints absent from the request body are retained.
 - Endpoint deletion must use `DELETE /api/llm/registry/endpoints/{endpoint_id}`.
 - Keeps the current secret when `api_key` is omitted.
+- Clears the current secret when `api_key` is explicitly set to an empty string.
 - Invalidates client fingerprint/version when secret, protocol, or base URL changes.
 
 Request:
@@ -1170,10 +1172,18 @@ Probe results are stored as normalized capabilities with `source: "probed_verifi
 
 The frontend follows `docs/development/FRONTEND_UI_SPEC.md` section 2.
 
+API Keys UX amendment, added after the API Keys regression review:
+
+- The v4 storage model uses `ProviderEndpoint` and `ProviderRoute`, but the Settings page must not change user-facing UX merely because storage changed.
+- The API Keys page remains an API Keys/provider configuration surface. User-visible copy such as "API Keys", "Official Providers", "Third-party Providers", "Provider Name", and "Available Models" is allowed and preferred for the restored page.
+- `endpoint` and `route` are internal registry concepts. Use them in DTOs, API paths, tests, and engineering docs; do not force them into user-facing labels unless the product explicitly decides to rename the page.
+- The frontend must treat the backend registry as the only persisted truth source. It may keep transient input drafts and loading state, but endpoint status and available models are always projected from the latest registry snapshot.
+- API Keys `Available Models` is a view of `provider_routes` filtered by `endpoint_id`; it is not a stored field on the endpoint.
+
 Required UI shape:
 
-- API Keys page evolves into endpoint management.
-- Settings navigation and page copy should use "Endpoints" for callable credential records. Provider brand remains metadata, not the primary page concept.
+- API Keys page manages endpoint-backed provider credentials without changing the restored API Keys/provider UX.
+- Provider brand and user-facing provider label are display metadata over endpoint records.
 - Roles settings include a Model Profiles area for reusable route bundles such as `CLO47T`.
 - Roles page uses an Available Routes sidebar grouped by `canonical_id`.
 - Applying a model profile to a role snapshots that profile into the role fallback chain.

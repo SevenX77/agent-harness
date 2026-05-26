@@ -57,7 +57,8 @@ export function ApiKeysTab({
   drafts,
   saveStatus,
   onProviderFieldChange,
-  onTestProvider,
+  onGetProviderModels,
+  onTestProviderEndpoint,
   onDeleteProvider,
   onAddProvider,
   onProviderModelsUpdated,
@@ -69,7 +70,8 @@ export function ApiKeysTab({
   | "drafts"
   | "saveStatus"
   | "onProviderFieldChange"
-  | "onTestProvider"
+  | "onGetProviderModels"
+  | "onTestProviderEndpoint"
   | "onDeleteProvider"
   | "onAddProvider"
   | "onProviderModelsUpdated"
@@ -117,7 +119,8 @@ export function ApiKeysTab({
                       draft={draft}
                       persisted={persisted}
                       onFieldChange={(patch) => onProviderFieldChange(draft.id, { ...draft, ...patch })}
-                      onTest={() => onTestProvider(draft.id)}
+                      onGetModels={() => onGetProviderModels(draft.id)}
+                      onEndpointTest={(modelId) => onTestProviderEndpoint(draft.id, modelId)}
                       onDelete={() => onDeleteProvider(draft.id)}
                       providerKind="official"
                       showManualModelPanel={shouldShowManualModelPanel(draft, persisted)}
@@ -142,7 +145,8 @@ export function ApiKeysTab({
                       draft={draft}
                       persisted={persisted}
                       onFieldChange={(patch) => onProviderFieldChange(draft.id, patch)}
-                      onTest={() => onTestProvider(draft.id)}
+                      onGetModels={() => onGetProviderModels(draft.id)}
+                      onEndpointTest={(modelId) => onTestProviderEndpoint(draft.id, modelId)}
                       onDelete={() => onDeleteProvider(draft.id)}
                       providerKind="third-party"
                       showManualModelPanel={shouldShowManualModelPanel(draft, persisted)}

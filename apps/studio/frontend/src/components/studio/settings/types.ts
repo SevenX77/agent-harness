@@ -41,7 +41,8 @@ export interface SettingsPageContentProps {
   onClose: () => void
   onTabChange: (tab: SettingsTab) => void
   onProviderFieldChange: (providerId: string, patch: Partial<ProviderDraft>) => void
-  onTestProvider: (providerId: string) => void
+  onGetProviderModels: (providerId: string) => void
+  onTestProviderEndpoint: (providerId: string, modelId: string) => void
   onDeleteProvider: (providerId: string) => void
   onAddProvider: (data: AddProviderFormSubmission) => Promise<void> | void
   onProviderModelsUpdated: (providerId: string, models: ModelInfo[]) => void

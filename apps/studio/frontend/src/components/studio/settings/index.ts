@@ -1,4 +1,4 @@
-export { SettingsPage } from "./SettingsPage"
+export { SettingsPage, upsertProviderModels, upsertProviderTestResponse } from "./SettingsPage"
 export { SettingsPageContent } from "./SettingsPageContent"
 export { LlmRolesTab } from "./LlmRolesTab"
 export { getModelAvailability, type ModelAvailability } from "./availability"

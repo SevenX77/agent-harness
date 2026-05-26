@@ -90,7 +90,7 @@ export function CopilotPanel({ skillId, view = 'edit' }: CopilotPanelProps) {
         const role = nextRegistry.roles.copilot_chat ?? null
         setRoleData(role)
         setRegistry(nextRegistry)
-        setSelectedRouteId(role?.fallback_chain[0]?.route_id ?? '')
+        setSelectedRouteId(role?.fallback_chain?.[0]?.route_id ?? '')
       })
       .catch(() => {
         toast.error('Copilot route config unavailable')
@@ -110,7 +110,7 @@ export function CopilotPanel({ skillId, view = 'edit' }: CopilotPanelProps) {
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (copilot.sendMessage(draft, selectedRouteId || roleData?.fallback_chain[0]?.route_id || null)) {
+    if (copilot.sendMessage(draft, selectedRouteId || roleData?.fallback_chain?.[0]?.route_id || null)) {
       setDraft('')
     }
   }
@@ -214,7 +214,7 @@ export function CopilotPanel({ skillId, view = 'edit' }: CopilotPanelProps) {
               <ModelPicker
                 role={roleData}
                 registry={registry}
-                selectedRouteId={selectedRouteId || roleData?.fallback_chain[0]?.route_id || ''}
+                selectedRouteId={selectedRouteId || roleData?.fallback_chain?.[0]?.route_id || ''}
                 onSelect={selectRoute}
               />
             </div>

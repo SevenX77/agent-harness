@@ -2,6 +2,7 @@ import { api } from './client'
 
 export type ProviderType =
   | 'anthropic_compatible'
+  | 'ark_runtime'
   | 'openai_compatible'
   | 'google_genai'
 
@@ -75,7 +76,7 @@ export interface LintResult {
 
 export interface RegistryResponse extends CredentialRegistryResponse {
   model_profiles: Record<string, unknown>
-  roles: Record<string, unknown>
+  roles: Record<string, RoleEntry>
   canonical_groups: CanonicalGroup[]
   lint_results: LintResult[]
   setup_required: boolean
@@ -188,14 +189,26 @@ export interface ProviderModelTestRequest {
 
 export interface ProviderModelTestResult {
   model_id: string
-  status: 'ok' | 'invalid_model' | 'invalid_key' | 'rate_limited' | 'network_error' | 'timeout' | 'error'
+  status: 'ok' | 'invalid_model' | 'invalid_key' | 'rate_limited' | 'quota_exceeded' | 'network_error' | 'timeout' | 'error'
   latency_ms?: number | null
   message?: string | null
+  route_id?: string | null
 }
 
 export interface ProviderModelTestResponse {
   results: ProviderModelTestResult[]
   available_models: ModelInfo[]
+}
+
+export interface EndpointTestResponse {
+  registry: RegistryResponse
+  tested_endpoint_id: string
+  discovered_model_count: number
+}
+
+export interface EndpointModelTestResponse {
+  registry: RegistryResponse
+  results: ProviderModelTestResult[]
 }
 
 export interface RoleModelEntry {
@@ -204,10 +217,20 @@ export interface RoleModelEntry {
   max_tokens?: number | null
 }
 
+export interface RoleRouteEntry {
+  route_id: string
+  runtime_settings?: Record<string, unknown>
+  runtime_settings_source?: string | null
+}
+
 export interface RoleEntry {
   model_fallback: boolean
   active_model: string
   models: Record<string, RoleModelEntry>
+  fallback_chain?: RoleRouteEntry[]
+  lint_requirements?: Record<string, LintSeverity>
+  source_profile_id?: string | null
+  source_profile_snapshot?: Record<string, unknown> | null
   system_prompt_prefix?: string | null
 }
 
@@ -255,7 +278,14 @@ const localNotableModels: Record<string, string[]> = {
 
 const redactedSecret = '**********'
 let cachedRegistry: RegistryResponse | null = null
+const knownEndpointSecrets: Record<string, string> = {}
 const testResultCacheByEndpoint: Record<string, ProviderTestResult[]> = {}
+
+export function resetLlmApiCachesForTests(): void {
+  cachedRegistry = null
+  for (const endpointId of Object.keys(knownEndpointSecrets)) delete knownEndpointSecrets[endpointId]
+  for (const endpointId of Object.keys(testResultCacheByEndpoint)) delete testResultCacheByEndpoint[endpointId]
+}
 
 function segment(value: string): string {
   return encodeURIComponent(value)
@@ -303,11 +333,36 @@ function upsertCachedResult(endpointId: string, result: ProviderTestResult | nul
   return next
 }
 
+function cachedResultForCredentialUpdate(update: ProviderCredentialUpdate): ProviderTestResult | null {
+  const fingerprint = paramsFingerprint({
+    api_key: update.api_key,
+    base_url: update.base_url ?? '',
+    provider_type: update.provider_type ?? null,
+  })
+  const results = testResultCacheByEndpoint[update.id] ?? []
+  for (let index = results.length - 1; index >= 0; index -= 1) {
+    if (results[index].params_fingerprint === fingerprint) return results[index]
+  }
+  return null
+}
+
+function routeStatusFromTestStatus(status: TestStatus): RouteStatus {
+  if (status === 'ok') return 'verified'
+  if (status === 'untested') return 'unverified_manual'
+  return 'failed'
+}
+
 function testResultFromEndpoint(
   endpoint: ProviderEndpoint,
   routes: ProviderRoute[],
 ): ProviderTestResult | null {
   const lastTestStatus = statusToTestStatus(endpoint.status)
+  const hasListedModels = (
+    lastTestStatus === 'untested' &&
+    Boolean(endpoint.last_test_at || endpoint.last_test_message) &&
+    routes.length > 0
+  )
+  const visibleRoutes = lastTestStatus === 'ok' || hasListedModels ? routes : []
   if (lastTestStatus === 'untested' && !endpoint.last_test_at && !endpoint.last_test_message && routes.length === 0) {
     return null
   }
@@ -323,11 +378,11 @@ function testResultFromEndpoint(
     last_test_at: endpoint.last_test_at ?? '',
     last_test_message: endpoint.last_test_message ?? '',
     last_error_code: endpoint.status === 'failed' ? 'endpoint_test_failed' : '',
-    available_models: routes.map((route) => ({
+    available_models: visibleRoutes.map((route) => ({
       id: route.provider_model_id,
       capabilities: route.capabilities,
     })),
-    available_sdks: [endpoint.protocol],
+    available_sdks: visibleRoutes.length > 0 ? [endpoint.protocol] : [],
   }
 }
 
@@ -336,7 +391,20 @@ function endpointToCredential(
   endpoint: ProviderEndpoint,
 ): CredentialProviderState {
   const routes = routesForEndpoint(registry, endpoint.endpoint_id)
-  const testResults = upsertCachedResult(endpoint.endpoint_id, testResultFromEndpoint(endpoint, routes))
+  const currentTestResult = testResultFromEndpoint(endpoint, routes)
+  const testResults = upsertCachedResult(endpoint.endpoint_id, currentTestResult)
+  const activeModels = currentTestResult && (
+    currentTestResult.last_test_status === 'ok' ||
+    currentTestResult.last_test_status === 'untested'
+  )
+    ? currentTestResult.available_models ?? []
+    : []
+  const activeSdks = currentTestResult && (
+    currentTestResult.last_test_status === 'ok' ||
+    currentTestResult.last_test_status === 'untested'
+  )
+    ? currentTestResult.available_sdks ?? []
+    : []
   return {
     id: endpoint.endpoint_id,
     name: endpoint.display_name,
@@ -347,11 +415,8 @@ function endpointToCredential(
     last_test_at: endpoint.last_test_at ?? '',
     last_test_message: endpoint.last_test_message ?? '',
     last_error_code: '',
-    available_models: routes.map((route) => ({
-      id: route.provider_model_id,
-      capabilities: route.capabilities,
-    })),
-    available_sdks: [endpoint.protocol],
+    available_models: activeModels,
+    available_sdks: activeSdks,
     test_results: testResults,
   }
 }
@@ -367,10 +432,13 @@ function registryToCredentials(registry: CredentialRegistryResponse): Credential
 function endpointFromCredentialUpdate(
   update: ProviderCredentialUpdate,
   existing?: ProviderEndpoint,
+  cachedResult?: ProviderTestResult | null,
 ): ProviderEndpoint {
   const nextProtocol = update.provider_type ?? existing?.protocol ?? 'openai_compatible'
   const nextBaseUrl = update.base_url ?? existing?.base_url ?? ''
-  const nextSecret = update.api_key === '' ? null : update.api_key ?? existing?.api_key ?? null
+  const nextSecret = update.api_key === redactedSecret
+    ? existing?.api_key === redactedSecret ? undefined : existing?.api_key
+    : update.api_key ?? existing?.api_key ?? null
   const secretChanged = Boolean(
     existing &&
     update.api_key &&
@@ -385,20 +453,63 @@ function endpointFromCredentialUpdate(
       secretChanged
     ),
   )
+  const restoredStatus = cachedResult ? routeStatusFromTestStatus(cachedResult.last_test_status) : null
   return {
     endpoint_id: update.id,
     display_name: update.name || existing?.display_name || update.id,
     protocol: nextProtocol,
     base_url: nextBaseUrl,
     api_key: nextSecret,
-    status: testParamsChanged ? 'unverified_manual' : existing?.status ?? 'unverified_manual',
-    last_test_at: testParamsChanged ? null : existing?.last_test_at ?? null,
-    last_test_message: testParamsChanged ? null : existing?.last_test_message ?? null,
+    status: testParamsChanged ? restoredStatus ?? 'unverified_manual' : existing?.status ?? 'unverified_manual',
+    last_test_at: testParamsChanged ? cachedResult?.last_test_at ?? null : existing?.last_test_at ?? null,
+    last_test_message: testParamsChanged ? cachedResult?.last_test_message ?? null : existing?.last_test_message ?? null,
     timeout_seconds: existing?.timeout_seconds ?? 120,
     trust_env: existing?.trust_env ?? false,
     proxy_env: existing?.proxy_env ?? null,
     metadata: existing?.metadata ?? {},
   }
+}
+
+function rememberEndpointSecret(endpointId: string, apiKey: string | null | undefined): void {
+  if (apiKey == null) return
+  if (apiKey === redactedSecret) return
+  knownEndpointSecrets[endpointId] = apiKey
+}
+
+function forgetEndpointSecret(endpointId: string): void {
+  delete knownEndpointSecrets[endpointId]
+}
+
+function hydrateRegistryWithKnownSecrets<T extends CredentialRegistryResponse>(registry: T): T {
+  const providerEndpoints = Object.fromEntries(
+    Object.entries(registry.provider_endpoints).map(([endpointId, endpoint]) => {
+      const knownSecret = knownEndpointSecrets[endpointId]
+      if (endpoint.api_key === redactedSecret && knownSecret !== undefined) {
+        return [endpointId, { ...endpoint, api_key: knownSecret }]
+      }
+      rememberEndpointSecret(endpointId, endpoint.api_key)
+      return [endpointId, endpoint]
+    }),
+  )
+  return {
+    ...registry,
+    provider_endpoints: providerEndpoints,
+  } as T
+}
+
+function cacheRegistry<T extends CredentialRegistryResponse>(registry: T): T {
+  const hydrated = hydrateRegistryWithKnownSecrets(registry)
+  cachedRegistry = {
+    ...(cachedRegistry ?? {
+      model_profiles: {},
+      roles: {},
+      canonical_groups: [],
+      lint_results: [],
+      setup_required: false,
+    }),
+    ...hydrated,
+  } as RegistryResponse
+  return hydrated
 }
 
 function endpointErrorCode(endpoint: ProviderEndpoint): string | undefined {
@@ -445,17 +556,18 @@ function providerTestResponseFromEndpoint(
   const routes = registry ? routesForEndpoint(registry, endpoint.endpoint_id) : []
   upsertCachedResult(endpoint.endpoint_id, testResultFromEndpoint(endpoint, routes))
   const status = endpointTestStatus(endpoint)
+  const successfulRoutes = status === 'ok' ? routes : []
   return {
     status,
     latency_ms: null,
-    model_seen: routes[0]?.provider_model_id ?? null,
+    model_seen: successfulRoutes[0]?.provider_model_id ?? null,
     message: endpoint.last_test_message ?? null,
     error_code: endpointErrorCode(endpoint),
-    available_models: routes.map((route) => ({
+    available_models: successfulRoutes.map((route) => ({
       id: route.provider_model_id,
       capabilities: route.capabilities,
     })),
-    available_sdks: [endpoint.protocol],
+    available_sdks: successfulRoutes.length > 0 ? [endpoint.protocol] : [],
   }
 }
 
@@ -465,12 +577,12 @@ export function apiKeysCredentialsFromRegistry(registry: CredentialRegistryRespo
 
 export async function getRegistry(): Promise<RegistryResponse> {
   const response = await api.get<RegistryResponse>('/llm/registry')
-  cachedRegistry = response.data
-  return response.data
+  return cacheRegistry(response.data)
 }
 
 export async function getEndpointSecret(endpointId: string): Promise<EndpointSecretResponse> {
   const response = await api.get<EndpointSecretResponse>(`/llm/registry/endpoints/${segment(endpointId)}/secret`)
+  rememberEndpointSecret(endpointId, response.data.api_key)
   return response.data
 }
 
@@ -482,6 +594,7 @@ async function hydrateEndpointSecrets<T extends CredentialRegistryResponse>(regi
       }
       try {
         const secret = await getEndpointSecret(endpointId)
+        rememberEndpointSecret(endpointId, secret.api_key)
         return [endpointId, { ...endpoint, api_key: secret.api_key }] as const
       } catch {
         return [endpointId, endpoint] as const
@@ -504,25 +617,19 @@ async function hydrateEndpointSecrets<T extends CredentialRegistryResponse>(regi
 export async function putRegistryEndpoints(
   providerEndpoints: Record<string, ProviderEndpoint>,
 ): Promise<CredentialRegistryResponse> {
+  for (const [endpointId, endpoint] of Object.entries(providerEndpoints)) {
+    rememberEndpointSecret(endpointId, endpoint.api_key)
+  }
   const response = await api.put<CredentialRegistryResponse>(
     '/llm/registry/endpoints',
     { provider_endpoints: providerEndpoints },
   )
-  cachedRegistry = {
-    ...(cachedRegistry ?? {
-      model_profiles: {},
-      roles: {},
-      canonical_groups: [],
-      lint_results: [],
-      setup_required: false,
-    }),
-    ...response.data,
-  }
-  return response.data
+  return cacheRegistry(response.data)
 }
 
 export async function deleteEndpoint(endpointId: string): Promise<CredentialRegistryResponse> {
   const response = await api.delete<CredentialRegistryResponse>(`/llm/registry/endpoints/${segment(endpointId)}`)
+  forgetEndpointSecret(endpointId)
   if (cachedRegistry) {
     const providerEndpoints = { ...cachedRegistry.provider_endpoints }
     delete providerEndpoints[endpointId]
@@ -540,7 +647,14 @@ export async function deleteEndpoint(endpointId: string): Promise<CredentialRegi
 }
 
 export async function testEndpoint(endpointId: string): Promise<ProviderEndpoint> {
-  const response = await api.post<ProviderEndpoint>(`/llm/endpoints/${segment(endpointId)}/test`)
+  const response = await api.post<ProviderEndpoint | EndpointTestResponse>(`/llm/endpoints/${segment(endpointId)}/test`)
+  if (isEndpointTestResponse(response.data)) {
+    const registry = cacheRegistry(response.data.registry)
+    const endpoint = registry.provider_endpoints[endpointId]
+    if (endpoint) return endpoint
+    throw new Error(`Endpoint test response omitted endpoint: ${endpointId}`)
+  }
+  rememberEndpointSecret(endpointId, response.data.api_key)
   if (cachedRegistry) {
     cachedRegistry = {
       ...cachedRegistry,
@@ -551,6 +665,24 @@ export async function testEndpoint(endpointId: string): Promise<ProviderEndpoint
     }
   }
   return response.data
+}
+
+function isEndpointTestResponse(value: ProviderEndpoint | EndpointTestResponse): value is EndpointTestResponse {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'registry' in value &&
+    typeof (value as EndpointTestResponse).registry === 'object'
+  )
+}
+
+function isEndpointModelTestResponse(value: unknown): value is EndpointModelTestResponse {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'registry' in value &&
+    Array.isArray((value as EndpointModelTestResponse).results)
+  )
 }
 
 export async function probeRoute(routeId: string, request: { capabilities: string[] }): Promise<ProviderRoute> {
@@ -584,7 +716,11 @@ export async function putCredentials(
   const providerEndpoints = Object.fromEntries(
     updates.map((update) => [
       update.id,
-      endpointFromCredentialUpdate(update, existingEndpoints[update.id]),
+      endpointFromCredentialUpdate(
+        update,
+        existingEndpoints[update.id],
+        cachedResultForCredentialUpdate(update),
+      ),
     ]),
   )
   if (Object.keys(providerEndpoints).length === 0) {
@@ -615,6 +751,7 @@ export async function testProvider(
       available_sdks: [request.provider_type],
     }
   }
+  rememberEndpointSecret(request.id, request.api_key)
   const existing = cachedRegistry?.provider_endpoints[request.id]
   await putRegistryEndpoints({
     [request.id]: endpointFromCredentialUpdate(
@@ -632,6 +769,108 @@ export async function testProvider(
   return providerTestResponseFromEndpoint(endpoint, cachedRegistry)
 }
 
+export async function getProviderModels(
+  request: ProviderTestRequest,
+): Promise<ProviderTestResponse> {
+  if (!request.api_key.trim()) {
+    return {
+      status: 'missing_api_key',
+      latency_ms: null,
+      model_seen: null,
+      message: 'API key is empty.',
+      available_models: [],
+      available_sdks: [request.provider_type],
+    }
+  }
+  rememberEndpointSecret(request.id, request.api_key)
+  const existing = cachedRegistry?.provider_endpoints[request.id]
+  await putRegistryEndpoints({
+    [request.id]: endpointFromCredentialUpdate(
+      {
+        id: request.id,
+        name: existing?.display_name ?? request.id,
+        api_key: request.api_key,
+        base_url: request.base_url ?? existing?.base_url ?? '',
+        provider_type: request.provider_type,
+      },
+      existing,
+    ),
+  })
+  const response = await api.post<EndpointTestResponse>(`/llm/endpoints/${segment(request.id)}/test`)
+  const registry = cacheRegistry(response.data.registry)
+  const endpoint = registry.provider_endpoints[request.id]
+  if (!endpoint) throw new Error(`Endpoint model list response omitted endpoint: ${request.id}`)
+  const routes = routesForEndpoint(registry, request.id)
+  const models = routes.map((route) => ({
+    id: route.provider_model_id,
+    capabilities: route.capabilities,
+  }))
+  upsertCachedResult(request.id, {
+    params_fingerprint: paramsFingerprint({
+      api_key: request.api_key,
+      base_url: request.base_url ?? '',
+      provider_type: request.provider_type,
+    }),
+    base_url: request.base_url ?? '',
+    provider_type: request.provider_type,
+    last_test_status: statusToTestStatus(endpoint.status),
+    last_test_at: endpoint.last_test_at ?? '',
+    last_test_message: endpoint.last_test_message ?? '',
+    last_error_code: endpointErrorCode(endpoint) ?? '',
+    available_models: models,
+    available_sdks: models.length > 0 ? [endpoint.protocol] : [],
+  })
+  return {
+    status: models.length > 0 ? 'ok' : endpointTestStatus(endpoint),
+    latency_ms: null,
+    model_seen: models[0]?.id ?? null,
+    message: endpoint.last_test_message ?? null,
+    error_code: endpointErrorCode(endpoint),
+    available_models: models,
+    available_sdks: models.length > 0 ? [endpoint.protocol] : [],
+  }
+}
+
+export async function testProviderEndpoint(
+  request: ProviderTestRequest & { model_id: string },
+): Promise<ProviderTestResponse> {
+  if (!request.api_key.trim()) {
+    return {
+      status: 'missing_api_key',
+      latency_ms: null,
+      model_seen: null,
+      message: 'API key is empty.',
+      available_models: [],
+      available_sdks: [request.provider_type],
+    }
+  }
+  rememberEndpointSecret(request.id, request.api_key)
+  const existing = cachedRegistry?.provider_endpoints[request.id]
+  await putRegistryEndpoints({
+    [request.id]: endpointFromCredentialUpdate(
+      {
+        id: request.id,
+        name: existing?.display_name ?? request.id,
+        api_key: request.api_key,
+        base_url: request.base_url ?? existing?.base_url ?? '',
+        provider_type: request.provider_type,
+      },
+      existing,
+    ),
+  })
+  const response = await api.post<EndpointModelTestResponse>(
+    `/llm/endpoints/${segment(request.id)}/models/test`,
+    { model_ids: [request.model_id] },
+  )
+  if (!isEndpointModelTestResponse(response.data)) {
+    throw new Error('Endpoint model test response omitted registry results.')
+  }
+  const registry = cacheRegistry(response.data.registry)
+  const endpoint = registry.provider_endpoints[request.id]
+  if (!endpoint) throw new Error(`Endpoint model test response omitted endpoint: ${request.id}`)
+  return providerTestResponseFromEndpoint(endpoint, registry)
+}
+
 export async function getNotableModels(providerKey: string): Promise<NotableModelsResponse> {
   return {
     notable_models: localNotableModels[providerKey.toLowerCase()] ?? ['gpt-5'],
@@ -641,24 +880,32 @@ export async function getNotableModels(providerKey: string): Promise<NotableMode
 export async function testProviderModels(
   request: ProviderModelTestRequest,
 ): Promise<ProviderModelTestResponse> {
-  const registry = cachedRegistry ?? await getRegistry()
-  const endpointRoutes = routesForEndpoint(registry, request.provider_id)
-  const availableModels = endpointRoutes.map((route) => ({
+  const response = await api.post<EndpointModelTestResponse>(
+    `/llm/endpoints/${segment(request.provider_id)}/models/test`,
+    { model_ids: request.model_ids },
+  )
+  if (!isEndpointModelTestResponse(response.data)) {
+    throw new Error('Endpoint model test response omitted registry results.')
+  }
+  cachedRegistry = response.data.registry
+  const endpointRoutes = routesForEndpoint(response.data.registry, request.provider_id)
+  return {
+    results: response.data.results,
+    available_models: endpointRoutes.map((route) => ({
+      id: route.provider_model_id,
+      capabilities: route.capabilities,
+    })),
+  }
+}
+
+export function providerModelsFromRegistry(
+  registry: CredentialRegistryResponse,
+  endpointId: string,
+): ModelInfo[] {
+  return routesForEndpoint(registry, endpointId).map((route) => ({
     id: route.provider_model_id,
     capabilities: route.capabilities,
   }))
-  return {
-    results: request.model_ids.map((modelId) => {
-      const route = endpointRoutes.find((candidate) => candidate.provider_model_id === modelId)
-      return {
-        model_id: modelId,
-        status: route ? 'ok' : 'invalid_model',
-        latency_ms: null,
-        message: route ? null : 'Model route is not registered in the v4 registry.',
-      }
-    }),
-    available_models: availableModels,
-  }
 }
 
 export async function getRoles(): Promise<RolesData> {

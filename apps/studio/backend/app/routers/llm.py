@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import hashlib
+import logging
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException
+from graph_agent_gateway.registry.canonical import canonicalize_model
 from graph_agent_gateway.registry.capabilities import (
     build_runtime_setting_descriptors,
     normalize_route_capabilities,
@@ -29,14 +32,17 @@ from app.models.llm_config import (
 )
 from app.services.copilot_test import (
     CopilotProvider,
+    ModelProbeResult,
     PingResult,
     _NetworkError,
     _ping_provider,
+    _probe_model,
     _QuotaExceeded,
     _RateLimited,
     _Unauthorized,
 )
 from app.services.llm_credentials import (
+    _route_slug,
     credentials_path,
     delete_endpoint,
     delete_route,
@@ -46,6 +52,7 @@ from app.services.llm_credentials import (
     upsert_endpoints,
     upsert_routes,
 )
+from app.services.llm_health_store import RuntimeCircuit, SqliteLlmHealthStore
 from app.services.llm_import_drafts import (
     DraftApplyConflict,
     DraftExpired,
@@ -54,6 +61,7 @@ from app.services.llm_import_drafts import (
     create_draft,
     load_draft,
 )
+from app.services.llm_role_materializer import materialize_role
 from app.services.llm_roles import (
     InvalidRoleReference,
     get_role,
@@ -62,8 +70,10 @@ from app.services.llm_roles import (
     save_roles_file,
     validate_references,
 )
+from app.services.llm_state_projection import project_provider_model_state
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
+logger = logging.getLogger(__name__)
 
 
 class EndpointUpsertRequest(BaseModel):
@@ -101,6 +111,45 @@ class RoleApplyProfileRequest(BaseModel):
 
     model_profile_id: str
     mode: Literal["replace"] | None = None
+
+
+class EndpointTestResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    registry: RegistryResponse
+    tested_endpoint_id: str
+    discovered_model_count: int
+
+
+class EndpointModelTestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model_ids: list[str] = Field(default_factory=list)
+
+
+class EndpointModelTestResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model_id: str
+    status: Literal[
+        "ok",
+        "invalid_model",
+        "invalid_key",
+        "rate_limited",
+        "quota_exceeded",
+        "network_error",
+        "timeout",
+        "error",
+    ]
+    route_id: str | None = None
+    message: str | None = None
+
+
+class EndpointModelTestResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    registry: RegistryResponse
+    results: list[EndpointModelTestResult]
 
 
 @router.get("/registry", response_model=RegistryResponse)
@@ -153,21 +202,32 @@ async def delete_registry_endpoint(endpoint_id: str) -> dict[str, Any]:
     return serialize_for_response(data)
 
 
-@router.post("/endpoints/{endpoint_id}/test")
-async def test_endpoint(endpoint_id: str) -> ProviderEndpoint:
+@router.post("/endpoints/{endpoint_id}/test", response_model=EndpointTestResponse)
+async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
     """Verify an endpoint by making the provider's minimal models-list call."""
     credentials = load_credentials()
     endpoint = credentials.provider_endpoints.get(endpoint_id)
     if endpoint is None:
         raise HTTPException(status_code=404, detail=f"Unknown endpoint: {endpoint_id}")
-    status: Literal["verified", "failed"] = "failed"
+    starting_fingerprint = credentials.endpoint_fingerprint(endpoint_id)
+    status: Literal["unverified_manual", "failed"] = "failed"
     message = "API key is empty."
+    discovered_model_ids: tuple[str, ...] = ()
     if endpoint.api_key and endpoint.api_key.get_secret_value():
+        probe_backend = _endpoint_probe_backend(endpoint)
+        probe_base_url = _endpoint_probe_base_url(endpoint)
+        logger.warning(
+            "testing LLM endpoint endpoint_id=%s protocol=%s backend=%s base_url=%s",
+            endpoint_id,
+            endpoint.protocol,
+            probe_backend,
+            probe_base_url,
+        )
         try:
             result = await _ping_provider(
-                _endpoint_probe_backend(endpoint),
+                probe_backend,
                 endpoint.api_key.get_secret_value(),
-                _endpoint_probe_base_url(endpoint),
+                probe_base_url,
             )
         except _Unauthorized as exc:
             message = _provider_error_message("Invalid API key", exc)
@@ -183,22 +243,178 @@ async def test_endpoint(endpoint_id: str) -> ProviderEndpoint:
         except _NetworkError as exc:
             message = _provider_error_message("Network error while testing endpoint", exc)
         else:
-            status = "verified"
-            message = _endpoint_success_message(result)
-    updated = endpoint.model_copy(
+            if not result.model_ids:
+                message = "Endpoint returned no models."
+            else:
+                status = "unverified_manual"
+                message = _endpoint_success_message(result)
+                discovered_model_ids = result.model_ids
+    latest_credentials = load_credentials()
+    latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
+    if latest_endpoint is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Endpoint changed while endpoint test was running: {endpoint_id}",
+        )
+    if latest_credentials.endpoint_fingerprint(endpoint_id) != starting_fingerprint:
+        updated = latest_endpoint.model_copy(
+            update={
+                "status": "unverified_manual",
+                "last_test_at": _now_iso(),
+                "last_test_message": (
+                    "Endpoint changed while endpoint test was running. Test result discarded."
+                ),
+            }
+        )
+        latest_credentials.provider_endpoints[endpoint_id] = updated
+        save_credentials(latest_credentials)
+        return EndpointTestResponse(
+            registry=_registry_response(latest_credentials, _load_roles_or_empty()),
+            tested_endpoint_id=endpoint_id,
+            discovered_model_count=0,
+        )
+    if discovered_model_ids:
+        latest_credentials, _ = _upsert_discovered_routes(
+            latest_credentials,
+            endpoint=latest_endpoint,
+            model_ids=discovered_model_ids,
+            verified=False,
+            replace_endpoint_routes=True,
+        )
+    updated = latest_endpoint.model_copy(
         update={
             "status": status,
             "last_test_at": _now_iso(),
             "last_test_message": message,
         }
     )
-    credentials.provider_endpoints[endpoint_id] = updated
-    save_credentials(credentials)
-    return updated
+    latest_credentials.provider_endpoints[endpoint_id] = updated
+    save_credentials(latest_credentials)
+    return EndpointTestResponse(
+        registry=_registry_response(latest_credentials, _load_roles_or_empty()),
+        tested_endpoint_id=endpoint_id,
+        discovered_model_count=len(discovered_model_ids),
+    )
+
+
+@router.post("/endpoints/{endpoint_id}/models/test", response_model=EndpointModelTestResponse)
+async def test_endpoint_models(
+    endpoint_id: str,
+    request: EndpointModelTestRequest,
+) -> EndpointModelTestResponse:
+    """Probe requested model IDs against one stored endpoint and upsert successful routes."""
+    credentials = load_credentials()
+    endpoint = credentials.provider_endpoints.get(endpoint_id)
+    if endpoint is None:
+        raise HTTPException(status_code=404, detail=f"Unknown endpoint: {endpoint_id}")
+    starting_fingerprint = credentials.endpoint_fingerprint(endpoint_id)
+
+    requested_model_ids = _requested_model_ids(request.model_ids)
+    results: list[EndpointModelTestResult] = []
+    if not endpoint.api_key or not endpoint.api_key.get_secret_value():
+        results = [
+            EndpointModelTestResult(
+                model_id=model_id,
+                status="invalid_key",
+                message="API key is empty.",
+            )
+            for model_id in requested_model_ids
+        ]
+        return EndpointModelTestResponse(
+            registry=_registry_response(credentials, _load_roles_or_empty()),
+            results=results,
+        )
+
+    probe_results: list[ModelProbeResult] = []
+    for model_id in requested_model_ids:
+        probe_results.append(
+            await _probe_model(
+                _endpoint_probe_backend(endpoint),
+                endpoint.api_key.get_secret_value(),
+                _endpoint_probe_base_url(endpoint),
+                model_id,
+            )
+        )
+    successful_model_ids = [
+        result.model_id for result in probe_results if result.status == "ok"
+    ]
+    if successful_model_ids:
+        latest_credentials = load_credentials()
+        latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
+        if latest_endpoint is None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Endpoint changed while model test was running: {endpoint_id}",
+            )
+        if latest_credentials.endpoint_fingerprint(endpoint_id) != starting_fingerprint:
+            results = [
+                EndpointModelTestResult(
+                    model_id=result.model_id,
+                    status="error",
+                    message="Endpoint changed while model test was running.",
+                )
+                for result in probe_results
+            ]
+            return EndpointModelTestResponse(
+                registry=_registry_response(latest_credentials, _load_roles_or_empty()),
+                results=results,
+            )
+        latest_credentials, route_ids_by_model = _upsert_discovered_routes(
+            latest_credentials,
+            endpoint=latest_endpoint,
+            model_ids=tuple(successful_model_ids),
+            verified=True,
+        )
+        latest_endpoint = latest_endpoint.model_copy(
+            update={
+                "status": "verified",
+                "last_test_at": _now_iso(),
+                "last_test_message": f"Connected. Model seen: {successful_model_ids[0]}.",
+            }
+        )
+        latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint
+        save_credentials(latest_credentials)
+    else:
+        latest_credentials = credentials
+        latest_endpoint = credentials.provider_endpoints.get(endpoint_id)
+        if latest_endpoint is not None and probe_results:
+            latest_credentials = latest_credentials.model_copy(
+                update={
+                    "provider_endpoints": {
+                        **latest_credentials.provider_endpoints,
+                        endpoint_id: latest_endpoint.model_copy(
+                            update={
+                                "status": "failed",
+                                "last_test_at": _now_iso(),
+                                "last_test_message": _model_probe_failure_message(probe_results[0]),
+                            }
+                        ),
+                    }
+                }
+            )
+            save_credentials(latest_credentials)
+        route_ids_by_model: dict[str, str] = {}
+    results = [
+        EndpointModelTestResult(
+            model_id=result.model_id,
+            status=result.status,
+            route_id=route_ids_by_model.get(result.model_id) if result.status == "ok" else None,
+            message=result.message,
+        )
+        for result in probe_results
+    ]
+    return EndpointModelTestResponse(
+        registry=_registry_response(latest_credentials, _load_roles_or_empty()),
+        results=results,
+    )
 
 
 @router.post("/routes/{route_id}/probe")
-async def probe_route(route_id: str, request: RouteProbeRequest) -> ProviderRoute:
+async def probe_route(
+    route_id: str,
+    request: RouteProbeRequest,
+    force: bool = False,
+) -> ProviderRoute:
     """Probe one route and update normalized capability metadata."""
     credentials = load_credentials()
     route = credentials.provider_routes.get(route_id)
@@ -207,6 +423,8 @@ async def probe_route(route_id: str, request: RouteProbeRequest) -> ProviderRout
     endpoint = credentials.provider_endpoints.get(route.endpoint_id)
     if endpoint is None:
         raise HTTPException(status_code=404, detail=f"Unknown endpoint: {route.endpoint_id}")
+    if force:
+        return await _force_probe_route(credentials, route, endpoint)
     capabilities = dict(route.capabilities)
     for capability in request.capabilities:
         key = _capability_key(capability)
@@ -341,10 +559,66 @@ async def get_llm_role(role_name: str) -> RoleEntry:
 async def put_llm_role(role_name: str, request: RoleEntry) -> RoleEntry:
     """Full replace one role."""
     data = _load_roles_or_empty()
+    credentials = load_credentials()
+    role = (
+        materialize_role(request, credentials, _health_store())
+        if request.model_groups
+        else request
+    )
     roles = dict(data.roles)
-    roles[role_name] = request
-    saved = _save_roles_with_active_routes(data.model_copy(update={"roles": roles}))
+    roles[role_name] = role
+    schema_version = 3 if role.model_groups else data.schema_version
+    saved = _save_roles_with_active_routes(
+        data.model_copy(update={"schema_version": schema_version, "roles": roles})
+    )
     return saved.roles[role_name]
+
+
+@router.post("/roles/{role_name}/test")
+async def test_llm_role(role_name: str, _payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Run a minimal persisted-role fallback test; request payload is ignored."""
+    del _payload
+    data = _load_roles_or_empty()
+    role = data.roles.get(role_name)
+    if role is None:
+        raise HTTPException(status_code=404, detail=f"Unknown LLM role: {role_name}")
+    credentials = load_credentials()
+    model_groups: dict[str, dict[str, Any]] = {}
+    warnings: list[dict[str, Any]] = []
+    aggregate_status = "ok"
+    for report_entry, fallback_entry in _role_test_entries(role):
+        route_id = report_entry["route_id"]
+        route = credentials.provider_routes.get(route_id)
+        if route is None:
+            continue
+        endpoint = credentials.provider_endpoints.get(route.endpoint_id)
+        if endpoint is None:
+            continue
+        provider_result = await _role_test_provider_result(
+            fallback_entry,
+            report_entry,
+            route,
+            endpoint,
+        )
+        if provider_result["warnings"]:
+            warnings.extend(provider_result["warnings"])
+        aggregate_status = _merge_role_test_status(aggregate_status, provider_result)
+        canonical_id = str(report_entry.get("canonical_id") or route.canonical_id)
+        group = model_groups.setdefault(
+            canonical_id,
+            {
+                "canonical_id": canonical_id,
+                "display_name": route.display_name,
+                "provider_results": [],
+            },
+        )
+        group["provider_results"].append(provider_result)
+    return {
+        "role_name": role_name,
+        "status": aggregate_status,
+        "warnings": warnings,
+        "model_groups": list(model_groups.values()),
+    }
 
 
 @router.get("/model-profiles")
@@ -478,6 +752,7 @@ def _registry_response(
             }
             for canonical_id, route_ids in sorted(routes_by_canonical.items())
         ],
+        model_groups=_model_groups_response(credentials),
         lint_results=lint_results,
         route_runtime_settings={
             route_id: build_runtime_setting_descriptors(route)
@@ -486,6 +761,381 @@ def _registry_response(
         role_effective_runtime_settings=_role_effective_runtime_settings(credentials, roles),
         setup_required=setup_required,
     )
+
+
+def _model_groups_response(credentials: LLMCredentialsFile) -> list[dict[str, Any]]:
+    routes_by_canonical: dict[str, list[ProviderRoute]] = {}
+    for route in credentials.provider_routes.values():
+        routes_by_canonical.setdefault(route.canonical_id or route.route_slug, []).append(route)
+    return [
+        _model_group_response(canonical_id, routes, credentials)
+        for canonical_id, routes in sorted(routes_by_canonical.items())
+    ]
+
+
+def _model_group_response(
+    canonical_id: str,
+    routes: list[ProviderRoute],
+    credentials: LLMCredentialsFile,
+) -> dict[str, Any]:
+    provider_models = [
+        option
+        for route in sorted(routes, key=lambda item: item.route_id)
+        if (option := _provider_model_option(route, credentials)) is not None
+    ]
+    status_summary = {
+        state: 0
+        for state in ["ready", "untested", "cooling_down", "needs_setup", "off"]
+    }
+    for option in provider_models:
+        status_summary[option["ui_state"]] += 1
+    return {
+        "canonical_id": canonical_id,
+        "display_name": routes[0].display_name if routes else canonical_id,
+        "provider_models": provider_models,
+        "status_summary": status_summary,
+        "capability_summary": _capability_summary(provider_models),
+    }
+
+
+def _provider_model_option(
+    route: ProviderRoute,
+    credentials: LLMCredentialsFile,
+) -> dict[str, Any] | None:
+    endpoint = credentials.provider_endpoints.get(route.endpoint_id)
+    if endpoint is None:
+        return None
+    circuits = _health_store().get_active_circuits(
+        route_id=route.route_id,
+        endpoint_id=endpoint.endpoint_id,
+        rate_limit_bucket=endpoint.rate_limit_bucket or endpoint.endpoint_id,
+        now=datetime.now(UTC),
+    )
+    projection = project_provider_model_state(
+        endpoint=endpoint,
+        route=route,
+        circuits=circuits,
+        now=datetime.now(UTC),
+    )
+    return {
+        "route_id": route.route_id,
+        "provider_label": endpoint.display_name,
+        "provider_kind": endpoint.provider_kind,
+        "provider_model_id": route.provider_model_id,
+        "ui_state": projection.ui_state,
+        "ui_detail": projection.ui_detail,
+        "retry_at": projection.retry_at,
+        "reason_code": projection.reason_code,
+        "capability_state": _capability_state(route),
+        "capabilities": route.capabilities,
+    }
+
+
+def _health_store() -> SqliteLlmHealthStore:
+    return SqliteLlmHealthStore(credentials_path().with_name("llm_health.sqlite"))
+
+
+def _capability_state(route: ProviderRoute) -> str:
+    if not route.capabilities:
+        return "unknown"
+    return "known"
+
+
+def _capability_summary(provider_models: list[dict[str, Any]]) -> dict[str, Any]:
+    known_count = sum(1 for option in provider_models if option["capability_state"] != "unknown")
+    return {
+        "capability_known_count": known_count,
+        "thinking": "unknown",
+        "tools": "unknown",
+        "structured_output": "unknown",
+        "max_context_tokens": None,
+        "max_output_tokens": None,
+    }
+
+
+async def _force_probe_route(
+    credentials: LLMCredentialsFile,
+    route: ProviderRoute,
+    endpoint: ProviderEndpoint,
+) -> ProviderRoute:
+    if not endpoint.api_key or not endpoint.api_key.get_secret_value():
+        updated = route.model_copy(
+            update={
+                "status": "failed",
+                "metadata": {
+                    **route.metadata,
+                    "reason_code": "missing_key",
+                    "last_probe_message": "API key is empty.",
+                },
+            }
+        )
+        credentials.provider_routes[route.route_id] = updated
+        save_credentials(credentials)
+        return updated
+    result = await _probe_model(
+        _endpoint_probe_backend(endpoint),
+        endpoint.api_key.get_secret_value(),
+        _endpoint_probe_base_url(endpoint),
+        route.provider_model_id,
+    )
+    if result.status == "ok":
+        updated = route.model_copy(
+            update={
+                "status": "verified",
+                "metadata": {
+                    key: value
+                    for key, value in route.metadata.items()
+                    if key not in {"reason_code", "last_probe_message"}
+                },
+            }
+        )
+        credentials.provider_routes[route.route_id] = updated
+        save_credentials(credentials)
+        _health_store().clear_circuit(scope="route", scope_id=route.route_id)
+        return updated
+    if result.status in {"timeout", "rate_limited", "quota_exceeded", "network_error"}:
+        ttl_seconds = credentials.runtime_policy.provider_down_ttl_seconds
+        now = datetime.now(UTC)
+        _health_store().open_circuit(
+            RuntimeCircuit(
+                scope="route",
+                scope_id=route.route_id,
+                opened_at=now,
+                retry_at=now + timedelta(seconds=ttl_seconds),
+                ttl_seconds=ttl_seconds,
+                reason_code=result.status,
+                failure_count=1,
+                message=result.message,
+            )
+        )
+        return route
+    updated = route.model_copy(
+        update={
+            "status": "failed",
+            "metadata": {
+                **route.metadata,
+                "reason_code": result.status,
+                "last_probe_message": result.message,
+            },
+        }
+    )
+    credentials.provider_routes[route.route_id] = updated
+    save_credentials(credentials)
+    return updated
+
+
+async def _role_test_provider_result(
+    entry,
+    report_entry: dict[str, Any],
+    route: ProviderRoute,
+    endpoint: ProviderEndpoint,
+) -> dict[str, Any]:
+    projection = _provider_model_projection(route, endpoint)
+    provider_ui_state = projection.ui_state
+    role_fit = str(report_entry.get("role_fit") or "using")
+    warnings = list(report_entry.get("warnings") or [])
+    admission_decision = _admission_decision(projection.ui_state)
+    status = "blocked" if admission_decision == "block" else "untested"
+    message = None
+    if role_fit in {"needs_test", "not_fit"}:
+        admission_decision = "block"
+        status = "blocked"
+    elif admission_decision == "admit" and endpoint.api_key is not None and entry is not None:
+        result = await _probe_model(
+            _endpoint_probe_backend(endpoint),
+            endpoint.api_key.get_secret_value(),
+            _endpoint_probe_base_url(endpoint),
+            route.provider_model_id,
+        )
+        status = "ok" if result.status == "ok" else "failed"
+        if status == "ok":
+            provider_ui_state = "ready"
+        message = result.message
+    resolved_settings = report_entry.get("resolved_settings")
+    if resolved_settings is None and entry is not None:
+        resolved_settings = entry.runtime_settings.model_dump(
+            mode="json",
+            exclude_none=True,
+        )
+    return {
+        "route_id": route.route_id,
+        "provider_label": endpoint.display_name,
+        "provider_ui_state": provider_ui_state,
+        "role_fit": role_fit,
+        "admission_decision": admission_decision,
+        "status": status,
+        "warnings": warnings,
+        "retry_at": projection.retry_at,
+        "message": message,
+        "resolved_settings": resolved_settings or {},
+    }
+
+
+def _role_test_entries(role: RoleEntry):
+    fallback_by_route = {entry.route_id: entry for entry in role.fallback_chain}
+    report = role.materialization_report if isinstance(role.materialization_report, dict) else {}
+    report_entries = [
+        entry
+        for entry in report.get("entries", [])
+        if isinstance(entry, dict) and isinstance(entry.get("route_id"), str)
+    ]
+    if report_entries:
+        return [
+            (entry, fallback_by_route.get(entry["route_id"]))
+            for entry in report_entries
+        ]
+    return [
+        (
+            {
+                "route_id": entry.route_id,
+                "role_fit": "using",
+                "warnings": [],
+                "resolved_settings": entry.runtime_settings.model_dump(
+                    mode="json",
+                    exclude_none=True,
+                ),
+            },
+            entry,
+        )
+        for entry in role.fallback_chain
+    ]
+
+
+def _merge_role_test_status(current: str, provider_result: dict[str, Any]) -> str:
+    if current == "blocked" or provider_result["status"] == "blocked":
+        return "blocked"
+    if current == "failed" or provider_result["status"] == "failed":
+        return "failed"
+    if current == "warning" or provider_result["warnings"]:
+        return "warning"
+    return current
+
+
+def _provider_model_projection(route: ProviderRoute, endpoint: ProviderEndpoint):
+    now = datetime.now(UTC)
+    return project_provider_model_state(
+        endpoint=endpoint,
+        route=route,
+        circuits=_health_store().get_active_circuits(
+            route_id=route.route_id,
+            endpoint_id=endpoint.endpoint_id,
+            rate_limit_bucket=endpoint.rate_limit_bucket or endpoint.endpoint_id,
+            now=now,
+        ),
+        now=now,
+    )
+
+
+def _admission_decision(ui_state: str) -> str:
+    if ui_state == "cooling_down":
+        return "temporary_skip"
+    if ui_state in {"needs_setup", "off"}:
+        return "block"
+    return "admit"
+
+
+def _upsert_discovered_routes(
+    credentials: LLMCredentialsFile,
+    *,
+    endpoint: ProviderEndpoint,
+    model_ids: tuple[str, ...],
+    verified: bool,
+    replace_endpoint_routes: bool = False,
+) -> tuple[LLMCredentialsFile, dict[str, str]]:
+    routes = dict(credentials.provider_routes)
+    route_ids_by_model: dict[str, str] = {}
+    for model_id in model_ids:
+        route_id = _route_id(endpoint.endpoint_id, model_id, routes)
+        route_ids_by_model[model_id] = route_id
+        existing = routes.get(route_id)
+        status: Literal["verified", "unverified_manual"] = (
+            "verified" if verified else "unverified_manual"
+        )
+        capability_source = "probed_verified" if verified else "api_list"
+        if existing is None:
+            routes[route_id] = _provider_route(
+                endpoint=endpoint,
+                model_id=model_id,
+                status=status,
+                capability_source=capability_source,
+            )
+            continue
+        updates: dict[str, Any] = {}
+        if verified:
+            updates["status"] = "verified"
+            updates["capabilities"] = {
+                **existing.capabilities,
+                **normalize_route_capabilities(
+                    protocol=endpoint.protocol,
+                    provider_model_id=model_id,
+                    raw_capabilities={},
+                    source=capability_source,
+                ),
+            }
+        routes[route_id] = existing.model_copy(update=updates) if updates else existing
+    if replace_endpoint_routes:
+        discovered_model_ids = set(model_ids)
+        routes = {
+            route_id: route
+            for route_id, route in routes.items()
+            if route.endpoint_id != endpoint.endpoint_id
+            or route.provider_model_id in discovered_model_ids
+        }
+    return credentials.model_copy(update={"provider_routes": routes}), route_ids_by_model
+
+
+def _provider_route(
+    *,
+    endpoint: ProviderEndpoint,
+    model_id: str,
+    status: Literal["verified", "unverified_manual"],
+    capability_source: Literal["api_list", "probed_verified"],
+) -> ProviderRoute:
+    route_slug = _route_slug(model_id)
+    canonical = canonicalize_model(endpoint_id=endpoint.endpoint_id, provider_model_id=route_slug)
+    return ProviderRoute(
+        route_id=f"{endpoint.endpoint_id}:{route_slug}",
+        endpoint_id=endpoint.endpoint_id,
+        route_slug=route_slug,
+        provider_model_id=model_id,
+        canonical_id=canonical.canonical_id,
+        display_name=canonical.display_name,
+        status=status,
+        capabilities=normalize_route_capabilities(
+            protocol=endpoint.protocol,
+            provider_model_id=model_id,
+            raw_capabilities={},
+            source=capability_source,
+        ),
+    )
+
+
+def _route_id(
+    endpoint_id: str,
+    model_id: str,
+    routes: dict[str, ProviderRoute] | None = None,
+) -> str:
+    base_slug = _route_slug(model_id)
+    route_id = f"{endpoint_id}:{base_slug}"
+    if not routes:
+        return route_id
+    existing = routes.get(route_id)
+    if existing is None or existing.provider_model_id == model_id:
+        return route_id
+    suffix = hashlib.sha256(f"{endpoint_id}:{model_id}".encode()).hexdigest()[:8]
+    return f"{endpoint_id}:{base_slug}-{suffix}"
+
+
+def _requested_model_ids(model_ids: list[str]) -> list[str]:
+    seen: set[str] = set()
+    requested: list[str] = []
+    for model_id in model_ids:
+        normalized = model_id.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        requested.append(normalized)
+    return requested
 
 
 def _role_effective_runtime_settings(
@@ -569,31 +1219,34 @@ def _capability_key(value: str) -> str:
 
 
 def _endpoint_probe_backend(endpoint: ProviderEndpoint) -> CopilotProvider:
+    base_url = endpoint.base_url.lower()
+    endpoint_id = endpoint.endpoint_id.lower()
+    if endpoint.protocol == "ark_runtime" or "volces.com" in base_url or "ark" in endpoint_id:
+        return "ark"
     if endpoint.protocol == "anthropic_compatible":
         return "claude"
     if endpoint.protocol == "google_genai":
         return "gemini"
-    if "deepseek" in endpoint.base_url.lower() or "deepseek" in endpoint.endpoint_id.lower():
+    if "deepseek" in base_url or "deepseek" in endpoint_id:
         return "deepseek"
     return "openai"
 
 
 def _endpoint_probe_base_url(endpoint: ProviderEndpoint) -> str:
-    base_url = endpoint.base_url.rstrip("/")
-    if (
-        endpoint.protocol in ("anthropic_compatible", "openai_compatible")
-        and base_url.endswith("/v1")
-    ):
-        return base_url[: -len("/v1")]
-    if endpoint.protocol == "google_genai" and base_url.endswith("/v1beta"):
-        return base_url[: -len("/v1beta")]
-    return base_url
+    return endpoint.base_url.rstrip("/")
 
 
 def _endpoint_success_message(result: PingResult) -> str:
     message = f"Connected in {result.latency_ms}ms."
     if result.model_seen:
         message = f"{message} Model seen: {result.model_seen}."
+    return message
+
+
+def _model_probe_failure_message(result: ModelProbeResult) -> str:
+    message = f"Endpoint model probe failed ({result.status})."
+    if result.message:
+        message = f"{message} {result.message}"
     return message
 
 

@@ -174,7 +174,9 @@ def test_migrate_v3_credentials_normalizes_known_endpoint_ids(tmp_path: Path) ->
     assert "openrouter-prod:anthropic.claude-sonnet-4-6" in migrated.provider_routes
 
 
-def test_upsert_endpoint_omitted_or_empty_api_key_preserves_secret(tmp_path: Path) -> None:
+def test_upsert_endpoint_omitted_api_key_preserves_secret_and_empty_clears_secret(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "llm_credentials.json"
     save_credentials(
         LLMCredentialsFile(provider_endpoints={"openai-direct": _endpoint()}),
@@ -214,7 +216,7 @@ def test_upsert_endpoint_omitted_or_empty_api_key_preserves_secret(tmp_path: Pat
 
     endpoint = load_credentials(path).provider_endpoints["openai-direct"]
     assert endpoint.display_name == "OpenAI Renamed Again"
-    assert endpoint.api_key.get_secret_value() == "secret"
+    assert endpoint.api_key is None
 
 
 def test_upsert_endpoint_redacted_api_key_placeholder_preserves_secret(tmp_path: Path) -> None:
@@ -284,6 +286,138 @@ def test_backend_fingerprint_matches_gateway_helper() -> None:
     assert data.endpoint_fingerprint("openai-direct") == compute_credential_fingerprint(endpoint)
 
 
+def test_provider_endpoint_persists_provider_kind_and_rate_limit_bucket() -> None:
+    default_endpoint = _endpoint()
+
+    assert default_endpoint.provider_kind == "third_party"
+    assert default_endpoint.rate_limit_bucket is None
+
+    custom_endpoint = ProviderEndpoint(
+        endpoint_id="onechats-proxy",
+        display_name="OneChats Proxy",
+        protocol="openai_compatible",
+        base_url="https://onechats.example/v1",
+        api_key=SecretStr("secret"),
+        provider_kind="custom",
+        rate_limit_bucket="onechats-shared-key",
+    )
+
+    dumped = custom_endpoint.model_dump(mode="json")
+
+    assert custom_endpoint.provider_kind == "custom"
+    assert custom_endpoint.rate_limit_bucket == "onechats-shared-key"
+    assert dumped["provider_kind"] == "custom"
+    assert dumped["rate_limit_bucket"] == "onechats-shared-key"
+
+
+def test_upsert_endpoint_preserves_user_provider_kind_and_rate_limit_bucket(tmp_path: Path) -> None:
+    path = tmp_path / "llm_credentials.json"
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "onechats-proxy": ProviderEndpoint(
+                    endpoint_id="onechats-proxy",
+                    display_name="OneChats Proxy",
+                    protocol="openai_compatible",
+                    base_url="https://onechats.example/v1",
+                    api_key=SecretStr("secret"),
+                    provider_kind="custom",
+                    rate_limit_bucket="onechats-shared-key",
+                )
+            }
+        ),
+        path,
+    )
+
+    upsert_endpoints(
+        {
+            "onechats-proxy": {
+                "endpoint_id": "onechats-proxy",
+                "display_name": "OneChats Proxy Renamed",
+                "protocol": "openai_compatible",
+                "base_url": "https://onechats.example/v1",
+                "provider_kind": "official",
+                "rate_limit_bucket": "onechats-official-mirror",
+            }
+        },
+        path=path,
+    )
+
+    endpoint = load_credentials(path).provider_endpoints["onechats-proxy"]
+    assert endpoint.display_name == "OneChats Proxy Renamed"
+    assert endpoint.provider_kind == "official"
+    assert endpoint.rate_limit_bucket == "onechats-official-mirror"
+    assert endpoint.api_key is not None
+    assert endpoint.api_key.get_secret_value() == "secret"
+
+
+def test_upsert_new_endpoint_seeds_curated_provider_kind(tmp_path: Path) -> None:
+    path = tmp_path / "llm_credentials.json"
+
+    upsert_endpoints(
+        {
+            "anthropic-official": {
+                "endpoint_id": "anthropic-official",
+                "display_name": "Anthropic",
+                "protocol": "anthropic_compatible",
+                "base_url": "https://api.anthropic.com",
+                "api_key": "anthropic-secret",
+            },
+            "my-custom-proxy": {
+                "endpoint_id": "my-custom-proxy",
+                "display_name": "My Custom Proxy",
+                "protocol": "openai_compatible",
+                "base_url": "https://proxy.example/v1",
+                "api_key": "proxy-secret",
+            },
+        },
+        path=path,
+    )
+
+    endpoints = load_credentials(path).provider_endpoints
+    assert endpoints["anthropic-official"].provider_kind == "official"
+    assert endpoints["my-custom-proxy"].provider_kind == "third_party"
+
+
+def test_upsert_endpoint_omitted_provider_kind_and_bucket_preserve_existing_values(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "llm_credentials.json"
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "onechats-proxy": ProviderEndpoint(
+                    endpoint_id="onechats-proxy",
+                    display_name="OneChats Proxy",
+                    protocol="openai_compatible",
+                    base_url="https://onechats.example/v1",
+                    api_key=SecretStr("secret"),
+                    provider_kind="custom",
+                    rate_limit_bucket="onechats-shared-key",
+                )
+            }
+        ),
+        path,
+    )
+
+    upsert_endpoints(
+        {
+            "onechats-proxy": {
+                "endpoint_id": "onechats-proxy",
+                "display_name": "OneChats Proxy Renamed",
+                "protocol": "openai_compatible",
+                "base_url": "https://onechats.example/v1",
+            }
+        },
+        path=path,
+    )
+
+    endpoint = load_credentials(path).provider_endpoints["onechats-proxy"]
+    assert endpoint.display_name == "OneChats Proxy Renamed"
+    assert endpoint.provider_kind == "custom"
+    assert endpoint.rate_limit_bucket == "onechats-shared-key"
+
+
 def test_serialize_for_response_does_not_leak_endpoint_secret() -> None:
     body = serialize_for_response(
         LLMCredentialsFile(provider_endpoints={"openai-direct": _endpoint()}),
@@ -304,6 +438,96 @@ def test_roles_v2_schema_rejects_legacy_short_code_shape() -> None:
 
     with pytest.raises(ValidationError):
         RoleEntry.model_validate({"system_prompt_prefix": None, "fallback_chain": []})
+
+
+def test_roles_v3_authoring_schema_preserves_role_kind_model_groups_and_intent() -> None:
+    data = RolesData.model_validate(
+        {
+            "schema_version": 3,
+            "model_bundles": {},
+            "roles": {
+                "analyst": {
+                    "role_kind": "graph_agent",
+                    "system_prompt_prefix": "",
+                    "model_fallback_enabled": True,
+                    "intent": {
+                        "provider_preference": "official_first",
+                        "thinking": "preferred",
+                        "target_output_tokens": {
+                            "mode": "target",
+                            "value": 128000,
+                            "downgrade": "allow_with_warning",
+                        },
+                    },
+                    "model_groups": [
+                        {
+                            "canonical_id": "claude-sonnet-4-7",
+                            "display_name": "Claude Sonnet 4.7",
+                            "intent": {
+                                "thinking": "inherit",
+                                "target_output_tokens": {"mode": "inherit"},
+                            },
+                            "provider_models": [
+                                {
+                                    "route_id": "anthropic-official:claude-sonnet-4-7",
+                                },
+                                {
+                                    "route_id": "openrouter-prod:anthropic.claude-sonnet-4-7",
+                                },
+                            ],
+                        }
+                    ],
+                },
+                "copilot_chat": {
+                    "role_kind": "copilot",
+                    "system_prompt_prefix": "",
+                    "model_fallback_enabled": True,
+                    "intent": {"provider_preference": "ready_first"},
+                    "model_groups": [],
+                },
+            },
+        }
+    )
+
+    assert data.schema_version == 3
+    assert data.roles["analyst"].role_kind == "graph_agent"
+    assert data.roles["analyst"].model_fallback_enabled is True
+    assert data.roles["analyst"].intent.provider_preference == "official_first"
+    assert data.roles["analyst"].model_groups[0].canonical_id == "claude-sonnet-4-7"
+    assert data.roles["analyst"].model_groups[0].provider_models[0].route_id == (
+        "anthropic-official:claude-sonnet-4-7"
+    )
+    assert data.roles["copilot_chat"].role_kind == "copilot"
+
+
+def test_role_level_intent_rejects_inherit_token_mode() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        RolesData.model_validate(
+            {
+                "schema_version": 3,
+                "model_bundles": {},
+                "roles": {
+                    "analyst": {
+                        "role_kind": "graph_agent",
+                        "system_prompt_prefix": "",
+                        "model_fallback_enabled": True,
+                        "intent": {
+                            "target_output_tokens": {"mode": "inherit"},
+                        },
+                        "model_groups": [],
+                    }
+                },
+            }
+        )
+
+    error_locations = {tuple(error["loc"]) for error in exc_info.value.errors()}
+    assert (
+        "roles",
+        "analyst",
+        "intent",
+        "target_output_tokens",
+        "mode",
+    ) in error_locations
 
 
 def test_roles_v2_round_trip_and_reference_validation(tmp_path: Path) -> None:

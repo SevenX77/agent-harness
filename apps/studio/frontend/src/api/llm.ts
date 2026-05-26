@@ -7,8 +7,14 @@ export type ProviderType =
   | 'google_genai'
 
 export type RouteStatus = 'verified' | 'unverified_manual' | 'disabled' | 'failed'
+export type ProviderKind = 'official' | 'third_party' | 'custom'
+export type ProviderUiState = 'ready' | 'untested' | 'cooling_down' | 'needs_setup' | 'off'
+export type RoleFitState = 'using' | 'downgraded' | 'needs_test' | 'not_fit'
+export type CapabilityState = 'unknown' | 'callable_only' | 'partial' | 'known'
+export type CapabilitySummaryState = 'supported' | 'unsupported' | 'mixed' | 'unknown'
 export type CapabilitySource = 'api_list' | 'provider_doc' | 'agent_draft' | 'manual' | 'probed_verified'
 export type LintSeverity = 'off' | 'warn' | 'error'
+export type RoleKind = 'graph_agent' | 'copilot'
 
 export interface CapabilityValue {
   value: unknown
@@ -32,6 +38,8 @@ export interface ProviderEndpoint {
   status: RouteStatus
   last_test_at?: string | null
   last_test_message?: string | null
+  provider_kind?: ProviderKind
+  rate_limit_bucket?: string | null
   timeout_seconds: number
   trust_env: boolean
   proxy_env?: string | null
@@ -63,6 +71,62 @@ export interface CanonicalGroup {
   routes: string[]
 }
 
+export interface ProviderModelOption {
+  route_id: string
+  provider_label: string
+  provider_kind: ProviderKind
+  provider_model_id: string
+  ui_state: ProviderUiState
+  ui_detail?: string | null
+  retry_at?: string | null
+  reason_code?: string | null
+  capability_state: CapabilityState
+  capabilities: Record<string, CapabilityValue>
+}
+
+export interface ModelGroupStatusSummary {
+  ready: number
+  untested: number
+  cooling_down: number
+  needs_setup: number
+  off: number
+}
+
+export interface ModelGroupCapabilitySummary {
+  capability_known_count: number
+  thinking: CapabilitySummaryState
+  tools: CapabilitySummaryState
+  structured_output: CapabilitySummaryState
+  max_context_tokens?: number | null
+  max_output_tokens?: number | null
+}
+
+export interface ModelGroup {
+  canonical_id: string
+  display_name: string
+  provider_models: ProviderModelOption[]
+  status_summary: ModelGroupStatusSummary
+  capability_summary: ModelGroupCapabilitySummary
+}
+
+export interface RuntimeSettingDescriptor {
+  key: string
+  value_type: 'number' | 'integer' | 'boolean' | 'string' | 'string_list' | 'object'
+  supported?: boolean | null
+  min?: number | null
+  max?: number | null
+  default?: unknown
+  allowed_values: string[]
+  source: CapabilitySource | 'unknown'
+  message?: string | null
+}
+
+export interface EffectiveRuntimeSetting {
+  value: unknown
+  source: 'route_setting' | 'profile_default' | 'route_capability_default' | 'protocol_default' | 'studio_default'
+  message?: string | null
+}
+
 export interface LintResult {
   role_name: string
   route_id: string
@@ -76,9 +140,12 @@ export interface LintResult {
 
 export interface RegistryResponse extends CredentialRegistryResponse {
   model_profiles: Record<string, unknown>
+  model_groups: ModelGroup[]
   roles: Record<string, RoleEntry>
   canonical_groups: CanonicalGroup[]
   lint_results: LintResult[]
+  route_runtime_settings?: Record<string, Record<string, RuntimeSettingDescriptor>>
+  role_effective_runtime_settings?: Record<string, Record<string, Record<string, EffectiveRuntimeSetting>>>
   setup_required: boolean
 }
 
@@ -224,14 +291,45 @@ export interface RoleRouteEntry {
 }
 
 export interface RoleEntry {
+  role_kind?: RoleKind
   model_fallback: boolean
+  model_fallback_enabled?: boolean
   active_model: string
   models: Record<string, RoleModelEntry>
+  model_groups?: RoleModelGroup[]
+  materialization_report?: MaterializationReport
   fallback_chain?: RoleRouteEntry[]
   lint_requirements?: Record<string, LintSeverity>
   source_profile_id?: string | null
   source_profile_snapshot?: Record<string, unknown> | null
   system_prompt_prefix?: string | null
+}
+
+export interface RoleProviderModel {
+  route_id: string
+  intent?: Record<string, unknown> | null
+}
+
+export interface RoleModelGroup {
+  canonical_id: string
+  display_name: string
+  intent?: Record<string, unknown>
+  provider_models: RoleProviderModel[]
+}
+
+export interface MaterializationReportEntry {
+  canonical_id?: string
+  route_id: string
+  requested?: Record<string, unknown>
+  resolved_settings?: Record<string, unknown>
+  warnings?: Array<Record<string, unknown>>
+  role_fit: RoleFitState
+}
+
+export interface MaterializationReport {
+  entries: MaterializationReportEntry[]
+  warnings: Array<Record<string, unknown>>
+  skipped_provider_details: Array<Record<string, unknown>>
 }
 
 export interface ModelEntry {
@@ -258,8 +356,11 @@ export interface ProviderEntry {
 }
 
 export interface RolesData {
+  schema_version?: 2 | 3
   models: Record<string, ModelEntry>
   providers: Record<string, ProviderEntry>
+  model_profiles?: Record<string, unknown>
+  model_bundles?: Record<string, unknown>
   roles: Record<string, RoleEntry>
   single_model_roles?: string[]
   peer_model_groups?: Record<string, string[]>
@@ -293,6 +394,109 @@ function segment(value: string): string {
 
 function routesForEndpoint(registry: CredentialRegistryResponse, endpointId: string): ProviderRoute[] {
   return Object.values(registry.provider_routes).filter((route) => route.endpoint_id === endpointId)
+}
+
+export function modelGroupsFromRegistry(registry: RegistryResponse): ModelGroup[] {
+  if (registry.model_groups?.length) return registry.model_groups
+  return legacyModelGroupsFromRegistry(registry)
+}
+
+function legacyModelGroupsFromRegistry(registry: CredentialRegistryResponse): ModelGroup[] {
+  const routesByCanonical = new Map<string, ProviderRoute[]>()
+  for (const route of Object.values(registry.provider_routes)) {
+    const canonicalId = route.canonical_id || route.route_slug
+    routesByCanonical.set(canonicalId, [
+      ...(routesByCanonical.get(canonicalId) ?? []),
+      route,
+    ])
+  }
+  return [...routesByCanonical.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([canonicalId, routes]) => {
+      const providerModels = routes
+        .sort((left, right) => left.route_id.localeCompare(right.route_id))
+        .map((route) => legacyProviderModelOption(registry, route))
+        .filter((option): option is ProviderModelOption => option !== null)
+      return {
+        canonical_id: canonicalId,
+        display_name: routes[0]?.display_name ?? canonicalId,
+        provider_models: providerModels,
+        status_summary: summarizeProviderModelStates(providerModels),
+        capability_summary: summarizeProviderModelCapabilities(providerModels),
+      }
+    })
+}
+
+function legacyProviderModelOption(
+  registry: CredentialRegistryResponse,
+  route: ProviderRoute,
+): ProviderModelOption | null {
+  const endpoint = registry.provider_endpoints[route.endpoint_id]
+  if (!endpoint) return null
+  return {
+    route_id: route.route_id,
+    provider_label: endpoint.display_name,
+    provider_kind: endpoint.provider_kind ?? 'third_party',
+    provider_model_id: route.provider_model_id,
+    ui_state: legacyProviderUiState(endpoint, route),
+    ui_detail: legacyProviderUiDetail(endpoint, route),
+    retry_at: null,
+    reason_code: legacyProviderReasonCode(endpoint, route),
+    capability_state: Object.keys(route.capabilities).length > 0 ? 'known' : 'unknown',
+    capabilities: route.capabilities,
+  }
+}
+
+function legacyProviderUiState(endpoint: ProviderEndpoint, route: ProviderRoute): ProviderUiState {
+  if (endpoint.status === 'disabled' || route.status === 'disabled') return 'off'
+  if (!endpoint.api_key || endpoint.status === 'failed' || route.status === 'failed') return 'needs_setup'
+  if (endpoint.status === 'verified' && route.status === 'verified') return 'ready'
+  return 'untested'
+}
+
+function legacyProviderReasonCode(endpoint: ProviderEndpoint, route: ProviderRoute): string | null {
+  if (!endpoint.api_key) return 'missing_key'
+  const routeReason = stringMetadata(route.metadata, 'reason_code')
+  if (routeReason) return routeReason
+  const endpointReason = stringMetadata(endpoint.metadata, 'reason_code')
+  if (endpointReason) return endpointReason
+  if (route.status === 'failed') return 'route_failed'
+  if (endpoint.status === 'failed') return endpointErrorCode(endpoint) ?? 'endpoint_failed'
+  return null
+}
+
+function legacyProviderUiDetail(endpoint: ProviderEndpoint, route: ProviderRoute): string | null {
+  return stringMetadata(route.metadata, 'last_probe_message') ?? endpoint.last_test_message ?? null
+}
+
+function stringMetadata(metadata: Record<string, unknown>, key: string): string | null {
+  const value = metadata[key]
+  return typeof value === 'string' && value.trim() ? value : null
+}
+
+function summarizeProviderModelStates(providerModels: ProviderModelOption[]): ModelGroupStatusSummary {
+  const summary: ModelGroupStatusSummary = {
+    ready: 0,
+    untested: 0,
+    cooling_down: 0,
+    needs_setup: 0,
+    off: 0,
+  }
+  for (const option of providerModels) {
+    summary[option.ui_state] += 1
+  }
+  return summary
+}
+
+function summarizeProviderModelCapabilities(providerModels: ProviderModelOption[]): ModelGroupCapabilitySummary {
+  return {
+    capability_known_count: providerModels.filter((option) => option.capability_state !== 'unknown').length,
+    thinking: 'unknown',
+    tools: 'unknown',
+    structured_output: 'unknown',
+    max_context_tokens: null,
+    max_output_tokens: null,
+  }
 }
 
 function statusToTestStatus(status: RouteStatus): TestStatus {
@@ -502,6 +706,7 @@ function cacheRegistry<T extends CredentialRegistryResponse>(registry: T): T {
   cachedRegistry = {
     ...(cachedRegistry ?? {
       model_profiles: {},
+      model_groups: [],
       roles: {},
       canonical_groups: [],
       lint_results: [],

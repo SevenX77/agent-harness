@@ -462,6 +462,7 @@ function providerTypeFromCredential(provider: CredentialsState["providers"][numb
 function normalizeProviderType(value: unknown): ProviderType | null {
   if (
     value === "anthropic_compatible" ||
+    value === "ark_runtime" ||
     value === "openai_compatible" ||
     value === "google_genai"
   ) {

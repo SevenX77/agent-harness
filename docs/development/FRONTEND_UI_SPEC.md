@@ -114,7 +114,7 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - Provider 名称在 row 内必须单行省略并配 Radix Tooltip 展示完整名称，避免窄卡片中把 provider label 拆成两行。
 - Role list 和 Available Routes 这类可能很长的设置列表必须渐进渲染，保持搜索/计数完整，同时用 sentinel 自动加载后续批次。
 - Role list 必须按用途分区展示，当前分为 `Graph Agent Roles` 与 `Copilot Roles`；每个分区底部都要提供对应的 `Add Graph Agent Role` / `Add Copilot Role` 入口，并与下一段分区保持明确垂直间距。Graph Agent 分类与 role icon 使用 engine/cog 语义图标，role 标题行需要使用默认字体，整行 controls 必须垂直居中对齐；编辑和删除等 role 级动作统一收进标题右侧的三点 `DropdownMenu`，删除必须使用统一 `DeleteConfirmDialog` 二次确认。
-- Tauri/WebKit 下非编辑区双击可能触发原生文本选择命令，导致 macOS `Edit` 菜单闪烁或系统提示音；应用根部必须保留全局 double-click guard，在非输入、非 `contenteditable`、非 Monaco 区域阻止原生默认选择行为和 `selectstart`，并用 CSS 将普通 chrome 设为不可文本选择；但不能阻止事件冒泡，以免破坏业务组件自己的 `onDoubleClick`。确实需要保留原生双击选择的区域使用 `data-allow-native-double-click` 标记。Tauri macOS shell 不使用默认菜单，且自定义 app menu 不添加原生 `Edit` submenu；普通 input/textarea 的 `Cmd+V` / `Ctrl+V` 由前端 editable paste fallback 接管，避免为了粘贴恢复原生 Edit 菜单而重引入双击系统提示音。
+- Tauri/WebKit 下非编辑区双击可能触发原生文本选择命令，导致 macOS `Edit` 菜单闪烁或系统提示音；应用根部必须保留全局 double-click guard，在非输入、非 `contenteditable`、非 Monaco 区域阻止原生默认选择行为和 `selectstart`，并用 CSS 将普通 chrome 设为不可文本选择；但不能阻止事件冒泡，以免破坏业务组件自己的 `onDoubleClick`。确实需要保留原生双击选择的区域使用 `data-allow-native-double-click` 标记。Tauri macOS shell 使用自定义 app menu，`Edit` submenu 必须保留原生 `Undo`、`Redo`、`Cut`、`Copy`、`Paste`、`Select All`；不要为了规避非编辑区双击提示音而删除原生编辑命令，提示音问题应在前端双击 guard 或独立菜单实现里处理。非编辑区的原生 edit 快捷键和 `copy` / `cut` / `paste` 事件必须 `preventDefault()`，可编辑目标仍交给原生 WebKit；不要在前端用 `navigator.clipboard.readText()` 拦截 `Cmd+V` 做 paste fallback，否则 WebKit 会显示粘贴授权气泡而不是直接粘贴。
 - Role 级三点菜单这类 hover-adjacent action 必须把鼠标双击视为 no-op，键盘打开菜单仍需保留。
 - LLM Roles autosave 必须串行化并忽略被更新快照 supersede 的旧请求结果；当用户创建空 role 或拖入模型后，旧的 400 不应覆盖新的 pending/saved 状态或弹出陈旧 toast。
 - 层级编辑器必须用不同 shadcn surface/variant 区分层级，例如外层 role 用 `Card`，可排序 model/provider 行用 `Item` 的不同 variant，并且只使用语义化 token。
@@ -122,6 +122,7 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - 可拖拽的 route 和 route 库卡片必须使用 `select-none`，避免拖拽时选中文字；从 Available Routes 添加 route 时，drop handler 应覆盖整个 role card，Empty 只作为视觉 target，拖拽过程中 role header 的 Edit 等非 drop action 不应抢 hover/click。跨 role card 拖拽时必须用透明 drop shield 覆盖 header 操作，并在 pointerup 后吞掉该次合成 click，避免 Dialog trigger 在拖拽结束瞬间闪开。不要把跨区域添加依赖在 native HTML5 drag/drop 上；Tauri/WebKit 下 `dragstart`/`dataTransfer.types` 不稳定，应保留 pointer 坐标命中 drop zone 的 fallback，并同时渲染跟随指针的 drag preview，避免交互看起来像静态点击。
 - 长模型名、路径和 id 使用 `overflow-wrap:anywhere` / `break-words` 等方式在卡片内换行；不要让文本把卡片撑破。
 - 如果列表来自外部探测或后端缓存，UI 不应写死样例数据。模型库类 UI 应展示已测试并持久化的数据源，按 vendor/provider 等真实字段归类。
+- API Keys 卡片的 `Available Models` / `Available SDKs` 只能来自当前 draft 参数（API key、Base URL、Protocol）匹配的成功 test result；不得把 endpoint 下残留的 `provider_routes` 无条件投影到当前可见状态。参数变化后必须先清空可见测试状态，只有匹配历史 test result 或重新测试成功后才恢复模型列表。
 - LLM Provider Intelligence V2 之后，Available Routes 的 `canonical_id`、vendor/provider 分组、route availability 和 provider ownership 均来自后端 DTO；前端不再从 raw model string 做 canonicalization、provider ownership inference 或 stale provider pruning。
 
 ### 2.10 前端验证要求

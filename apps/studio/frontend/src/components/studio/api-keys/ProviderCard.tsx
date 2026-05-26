@@ -5,13 +5,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog"
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-} from "@/components/ui/input-group"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -22,7 +17,7 @@ import {
 } from "@/components/ui/select"
 import { translateErrorCode, translateTestStatus } from "@/lib/llm-error-messages"
 import { cn } from "@/lib/utils"
-import type { CredentialsState, ModelInfo, ProviderType } from "../../../api/llm"
+import type { CredentialsState, ModelInfo, ProviderTestResult, ProviderType } from "../../../api/llm"
 import { providerCachedTestResult, providerTestParamsMatch } from "../settings/provider-utils"
 import type { ProviderDraft } from "../settings/types"
 import { ManualModelTestPanel } from "./ManualModelTestPanel"
@@ -33,14 +28,24 @@ const providerProtocolOptions: Array<{ value: ProviderType; label: string }> = [
   { value: "openai_compatible", label: "OpenAI compatible" },
   { value: "anthropic_compatible", label: "Anthropic compatible" },
   { value: "google_genai", label: "Google GenAI" },
+  { value: "ark_runtime", label: "Ark Runtime" },
 ]
+const endpointModelExamplesByProvider: Record<string, string> = {
+  anthropic: "claude-opus-4-7",
+  openai: "gpt-5",
+  gemini: "gemini-3.1-pro-preview",
+  deepseek: "deepseek-v4-pro",
+  ark: "doubao-seed-2-0-pro-260215",
+  openrouter: "openai/gpt-5",
+  qiniu: "deepseek-r1",
+}
 
-export function apiKeyInputType(_visible: boolean): "text" {
-  return "text"
+export function apiKeyInputType(visible: boolean): "text" | "password" {
+  return visible ? "text" : "password"
 }
 
 export function apiKeyInputClassName(visible: boolean): string {
-  return cn("flex-1", visible ? "text-foreground" : "mask-input text-muted-foreground")
+  return cn("flex-1", visible ? "text-foreground" : "text-muted-foreground")
 }
 
 export function providerProtocolLabel(value: ProviderType): string {
@@ -124,6 +129,29 @@ export function TestMessage({
   return <Badge variant="secondary">Not configured</Badge>
 }
 
+function directPersistedTestResult(
+  persisted: CredentialsState["providers"][number] | null,
+  draft: ProviderDraft,
+): ProviderTestResult | null {
+  if (!persisted || !providerTestParamsMatch(draft, persisted)) return null
+  const status = persisted.last_test_status ?? (
+    (persisted.available_models?.length || persisted.available_sdks?.length) ? "ok" : undefined
+  )
+  if (!status) return null
+  const canShowDiscoveredModels = status === "ok" || status === "untested"
+  return {
+    params_fingerprint: "",
+    base_url: persisted.base_url ?? "",
+    provider_type: persisted.provider_type ?? null,
+    last_test_status: status,
+    last_test_at: persisted.last_test_at ?? "",
+    last_test_message: persisted.last_test_message ?? "",
+    last_error_code: persisted.last_error_code ?? "",
+    available_models: canShowDiscoveredModels ? persisted.available_models ?? [] : [],
+    available_sdks: canShowDiscoveredModels ? persisted.available_sdks ?? [] : [],
+  }
+}
+
 export function ProviderDeleteButton({
   draftName,
   onDelete,
@@ -154,36 +182,41 @@ export function ProviderDeleteButton({
   )
 }
 
-function FieldCopyButton({ value, label, inputGroup = false }: { value: string; label: string; inputGroup?: boolean }) {
-  const props = {
-    type: "button" as const,
-    variant: "ghost" as const,
-    className: "text-muted-foreground/70 transition-none hover:text-muted-foreground",
-    onClick: () => void copyCredentialValue(value, label),
-    disabled: !value,
-    "aria-label": `Copy ${label}`,
-  }
-
-  if (inputGroup) {
-    return (
-      <InputGroupButton size="icon-xs" {...props}>
-        <Copy className="size-4" />
-      </InputGroupButton>
-    )
-  }
-
+function FieldCopyButton({ value, label }: { value: string; label: string }) {
   return (
-    <Button size="icon" {...props}>
+    <Button
+      type="button"
+      size="icon"
+      variant="ghost"
+      className="text-muted-foreground/70 transition-none hover:text-muted-foreground"
+      onClick={() => void copyCredentialValue(value, label)}
+      disabled={!value}
+      aria-label={`Copy ${label}`}
+    >
       <Copy className="size-4" />
     </Button>
   )
+}
+
+function endpointModelPlaceholder(providerKey: string, providerType: ProviderType): string {
+  const normalized = providerKey.toLowerCase()
+  const matched = Object.entries(endpointModelExamplesByProvider).find(([key]) => normalized.includes(key))
+  const fallback = providerType === "ark_runtime"
+    ? endpointModelExamplesByProvider.ark
+    : providerType === "anthropic_compatible"
+      ? endpointModelExamplesByProvider.anthropic
+      : providerType === "google_genai"
+        ? endpointModelExamplesByProvider.gemini
+        : endpointModelExamplesByProvider.openai
+  return `e.g. ${matched?.[1] ?? fallback}`
 }
 
 export function ProviderCard({
   draft,
   persisted,
   onFieldChange,
-  onTest,
+  onGetModels,
+  onEndpointTest,
   onDelete,
   providerKind,
   showManualModelPanel = false,
@@ -193,7 +226,8 @@ export function ProviderCard({
   draft: ProviderDraft
   persisted: CredentialsState["providers"][number] | null
   onFieldChange: (patch: Partial<ProviderDraft>) => void
-  onTest: () => void
+  onGetModels: () => void
+  onEndpointTest: (modelId: string) => void
   onDelete: () => void
   providerKind?: "official" | "third-party"
   showManualModelPanel?: boolean
@@ -202,31 +236,22 @@ export function ProviderCard({
 }) {
   const [visible, setVisible] = useState(false)
   const [showAllModels, setShowAllModels] = useState(false)
+  const [endpointModelId, setEndpointModelId] = useState("")
   const isOfficial = providerKind === "official"
   const hasApiKey = draft.api_key.trim().length > 0
   const hasRequiredConfig = hasApiKey && (providerKind !== "third-party" || draft.base_url.trim().length > 0)
-  const draftMatchesPersisted = Boolean(persisted) && providerTestParamsMatch(draft, persisted ?? {})
-  const cachedResult = draftMatchesPersisted ? null : providerCachedTestResult(persisted, draft)
-  const hasMatchedTestResult = draftMatchesPersisted || cachedResult !== null
+  const trimmedEndpointModelId = endpointModelId.trim()
+  const matchedResult = providerCachedTestResult(persisted, draft) ?? directPersistedTestResult(persisted, draft)
+  const hasMatchedTestResult = matchedResult !== null
   const displayName = draft.name.trim() || "Unnamed Provider"
   const apiKeyProviderName = displayName.replace(/ Official$/, "")
-  const availableSdks = draftMatchesPersisted
-    ? persisted?.available_sdks ?? []
-    : cachedResult?.available_sdks ?? []
-  const availableModels = sortModelInfos(
-    draftMatchesPersisted
-      ? persisted?.available_models ?? []
-      : cachedResult?.available_models ?? [],
-  )
+  const availableSdks = matchedResult?.available_sdks ?? []
+  const availableModels = sortModelInfos(matchedResult?.available_models ?? [])
   const hasAvailableModels = availableModels.length > 0
   const visibleModels = showAllModels ? availableModels : availableModels.slice(0, availableModelsPreviewLimit)
   const hiddenModelCount = Math.max(0, availableModels.length - visibleModels.length)
-  const matchedStatus = draftMatchesPersisted
-    ? persisted?.last_test_status
-    : cachedResult?.last_test_status
-  const matchedErrorCode = draftMatchesPersisted
-    ? persisted?.last_error_code
-    : cachedResult?.last_error_code
+  const matchedStatus = matchedResult?.last_test_status
+  const matchedErrorCode = matchedResult?.last_error_code
   const testStatus: TestMessageStatus = !hasRequiredConfig
     ? "not_configured"
     : draft.isTesting
@@ -291,48 +316,44 @@ export function ProviderCard({
         <div className="space-y-2">
           <Label htmlFor={`api-key-${draft.id}`}>API Key</Label>
           <div className="flex items-center gap-2">
-            <InputGroup className="h-8 flex-1">
-              <InputGroupInput
-                id={`api-key-${draft.id}`}
-                type={apiKeyInputType(visible)}
-                value={draft.api_key}
-                onChange={(event) => onFieldChange({ api_key: event.target.value })}
-                placeholder={`Enter your ${apiKeyProviderName} API Key`}
-                name={`provider-secret-${draft.id}`}
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="none"
-                data-1p-ignore=""
-                data-lpignore="true"
-                data-form-type="other"
-                spellCheck={false}
-                className={apiKeyInputClassName(visible)}
-              />
-              <InputGroupAddon align="inline-end" className="gap-1 pr-1">
-                <InputGroupButton
-                  type="button"
-                  size="icon-xs"
-                  variant="ghost"
-                  className="text-muted-foreground/70 transition-none hover:text-muted-foreground"
-                  onClick={() => setVisible((value) => !value)}
-                  aria-label={visible ? "Hide API key" : "Show API key"}
-                >
-                  {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                </InputGroupButton>
-                <FieldCopyButton value={draft.api_key} label="API key" inputGroup />
-              </InputGroupAddon>
-            </InputGroup>
-            <Button type="button" variant="default" onClick={onTest} disabled={draft.isTesting || !hasRequiredConfig} className="px-6">
+            <Input
+              id={`api-key-${draft.id}`}
+              type={apiKeyInputType(visible)}
+              value={draft.api_key}
+              onChange={(event) => onFieldChange({ api_key: event.target.value })}
+              placeholder={`Enter your ${apiKeyProviderName} API Key`}
+              name={`provider-secret-${draft.id}`}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
+              data-1p-ignore=""
+              data-lpignore="true"
+              data-form-type="other"
+              spellCheck={false}
+              className={apiKeyInputClassName(visible)}
+            />
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="text-muted-foreground/70 transition-none hover:text-muted-foreground"
+              onClick={() => setVisible((value) => !value)}
+              aria-label={visible ? "Hide API key" : "Show API key"}
+            >
+              {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </Button>
+            <FieldCopyButton value={draft.api_key} label="API key" />
+            <Button type="button" variant="secondary" onClick={onGetModels} disabled={draft.isTesting || !hasRequiredConfig} className="px-4">
               {draft.isTesting ? <Loader2 className="size-3.5 animate-spin" /> : null}
-              Test
+              Get Models
             </Button>
           </div>
         </div>
         {!isOfficial ? (
           <div className="space-y-2">
             <Label htmlFor={`base-url-${draft.id}`}>Base URL</Label>
-            <InputGroup className="h-8">
-              <InputGroupInput
+            <div className="flex items-center gap-2">
+              <Input
                 id={`base-url-${draft.id}`}
                 value={draft.base_url}
                 onChange={(event) => onFieldChange({ base_url: event.target.value })}
@@ -343,12 +364,39 @@ export function ProviderCard({
                 spellCheck={false}
                 className="flex-1"
               />
-              <InputGroupAddon align="inline-end" className="pr-1">
-                <FieldCopyButton value={draft.base_url} label="Base URL" inputGroup />
-              </InputGroupAddon>
-            </InputGroup>
+              <FieldCopyButton value={draft.base_url} label="Base URL" />
+            </div>
           </div>
         ) : null}
+        <Field>
+          <FieldLabel htmlFor={`endpoint-test-model-${draft.id}`}>Endpoint test</FieldLabel>
+          <FieldDescription>
+            Please choose one model from Available Models for endpoint testing.
+          </FieldDescription>
+          <div className="flex items-center gap-2">
+            <Input
+              id={`endpoint-test-model-${draft.id}`}
+              value={endpointModelId}
+              onChange={(event) => setEndpointModelId(event.target.value)}
+              placeholder={endpointModelPlaceholder(notableProviderKey ?? draft.id, draft.provider_type)}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              className="flex-1 font-mono"
+            />
+            <Button
+              type="button"
+              variant="default"
+              onClick={() => onEndpointTest(trimmedEndpointModelId)}
+              disabled={draft.isTesting || !hasRequiredConfig || !trimmedEndpointModelId}
+              className="px-6"
+            >
+              {draft.isTesting ? <Loader2 className="size-3.5 animate-spin" /> : null}
+              Test
+            </Button>
+          </div>
+        </Field>
         {availableSdks.length || availableModels.length ? (
           <div className="border-t pt-3 space-y-2 text-xs" data-testid="provider-capabilities">
             {availableSdks.length > 0 ? (

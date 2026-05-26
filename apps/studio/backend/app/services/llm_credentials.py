@@ -25,6 +25,12 @@ _credentials_lock = _WRITE_LOCK
 SECRET_REDACTION_PLACEHOLDER = "**********"
 LEGACY_FAKE_TEST_MESSAGE = "Credential present."
 LEGACY_FAKE_TEST_REPLACEMENT_MESSAGE = "Needs retest after v4 provider probe upgrade."
+CURATED_PROVIDER_KIND_BY_ENDPOINT_ID = {
+    "anthropic-official": "official",
+    "openai-direct": "official",
+    "deepseek-official": "official",
+    "gemini-official": "official",
+}
 
 
 def load_credentials(path: Path | None = None) -> LLMCredentialsFile:
@@ -106,7 +112,14 @@ def upsert_endpoints(
                 raise ValueError(f"endpoint payload key does not match endpoint_id: {endpoint_id}")
             current = endpoints.get(endpoint_id)
             api_key = _preserved_secret(incoming, current)
-            endpoints[endpoint_id] = incoming.model_copy(update={"api_key": api_key})
+            updates: dict[str, Any] = {"api_key": api_key}
+            if current is None:
+                updates["provider_kind"] = _seeded_provider_kind(endpoint_id, incoming, payload)
+            elif _field_omitted(payload, "provider_kind"):
+                updates["provider_kind"] = current.provider_kind
+            if current is not None and _field_omitted(payload, "rate_limit_bucket"):
+                updates["rate_limit_bucket"] = current.rate_limit_bucket
+            endpoints[endpoint_id] = incoming.model_copy(update=updates)
         data = data.model_copy(update={"provider_endpoints": endpoints})
         _save_credentials_unlocked(data, credential_path)
         return data
@@ -173,10 +186,23 @@ def delete_route(route_id: str, *, path: Path | None = None) -> LLMCredentialsFi
 def _endpoint_from_payload(payload: dict[str, Any] | ProviderEndpoint) -> ProviderEndpoint:
     if isinstance(payload, ProviderEndpoint):
         return payload
-    normalized = dict(payload)
-    if normalized.get("api_key") == "":
-        normalized["api_key"] = None
-    return ProviderEndpoint.model_validate(normalized)
+    return ProviderEndpoint.model_validate(payload)
+
+
+def _field_omitted(payload: dict[str, Any] | ProviderEndpoint, field_name: str) -> bool:
+    if isinstance(payload, dict):
+        return field_name not in payload
+    return field_name not in payload.model_fields_set
+
+
+def _seeded_provider_kind(
+    endpoint_id: str,
+    incoming: ProviderEndpoint,
+    payload: dict[str, Any] | ProviderEndpoint,
+) -> str:
+    if not _field_omitted(payload, "provider_kind"):
+        return incoming.provider_kind
+    return CURATED_PROVIDER_KIND_BY_ENDPOINT_ID.get(endpoint_id, "third_party")
 
 
 def _invalidate_legacy_fake_test_statuses(data: LLMCredentialsFile) -> LLMCredentialsFile:
@@ -313,6 +339,8 @@ def _preserved_secret(
     incoming: ProviderEndpoint,
     current: ProviderEndpoint | None,
 ) -> SecretStr | None:
+    if incoming.api_key is not None and incoming.api_key.get_secret_value() == "":
+        return None
     if incoming.api_key is not None and _is_new_secret(incoming.api_key):
         return incoming.api_key
     if current is not None:

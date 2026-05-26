@@ -4,7 +4,7 @@ created: 2026-05-25
 owner: Studio
 related_requirement: .kiro/specs/studio-api-keys-regression-hardening/requirement.md
 related_research: .kiro/specs/studio-api-keys-regression-hardening/research.md
-manual_probing_decision: "B: route candidates first, then per-route probe"
+manual_probing_decision: "Endpoint-scoped model test writes successful models to provider_routes"
 implementation_order: "Frontend parity first, v4 API integration second"
 ---
 
@@ -15,6 +15,20 @@ implementation_order: "Frontend parity first, v4 API integration second"
 本设计把 API Keys 回归修复拆成两个明确阶段：先恢复删除前 API Keys 前端状态和 Tauri 粘贴/双击安全，再接 v4 API。Phase 1/1B 只恢复 UI/交互 parity，用前端 fixture/mock 和现有 v4 DTO 形状验证页面行为，不新增后端能力、不恢复 v3 API。Phase 2 再完成 v4 registry 接线和后端 route 持久化，保证 Test / refresh / Manual probing 结果都来自 `provider_routes`。
 
 当前 v4 生产契约以 `.kiro/specs/llm-provider-intelligence-v2/design.md` 为准。`.kiro/specs/studio-api-keys-redesign/` 仅作为删除前 UX/交互参考，不恢复其中的 `/credentials`、`/providers/test`、`/providers/test-models` v3 路径。
+
+### 2026-05-25 API Keys UX Amendment
+
+Backend v4 may keep endpoint/route storage, but API Keys page UX must not be rewritten because storage changed. The page remains an API Keys/provider configuration surface for users. `endpoint` and `route` are backend/internal registry concepts; visible labels such as "API Keys", "Official Providers", "Third-party Providers", "Provider Name", and "Available Models" remain valid unless a separate product decision explicitly renames the page.
+
+The UI has one backend truth source: the v4 registry. Frontend may keep transient input drafts for typing latency and request loading state, but it must not own a second business copy of endpoint status or model availability. Every persisted display value is derived from the latest backend registry snapshot:
+
+- provider cards are projected from `registry.provider_endpoints`;
+- API key values are hydrated through the scoped secret reveal endpoint for the local Settings UI;
+- test status is projected from the endpoint record;
+- `Available Models` is projected from `registry.provider_routes` filtered by `route.endpoint_id`;
+- route status/capabilities are projected from route records.
+
+Frontend code must not persist or locally append `provider.available_models` as an independent truth source. A `CredentialProviderState.available_models` view model is acceptable only as a pure projection from `provider_routes`. After any backend write that changes endpoints or routes, the frontend must replace or refresh its registry snapshot and rerender from that snapshot.
 
 ### Goals
 
@@ -27,7 +41,8 @@ implementation_order: "Frontend parity first, v4 API integration second"
 - 不整包 cherry-pick `33a4135`。
 - 不恢复 v3 credentials API。
 - 不新增多 SDK 自动探测；v4 `Available SDKs` 默认展示 endpoint 单个 `protocol`。
-- 不做任意 model id 一键创建 route 的批量 API；Manual probing 默认采用方案 B。
+- 不把 `available_models` 存到 endpoint/provider 上；模型可用性只持久化在 `provider_routes`。
+- 不把 API Keys 用户界面重命名成 Endpoints；`endpoint` 是内部数据模型，不强迫用户理解后端存储名。
 
 ## Architecture
 
@@ -44,6 +59,17 @@ v4 registry 的事实源为：
 - Endpoint upsert: `PUT /api/llm/registry/endpoints`
 - Endpoint test: `POST /api/llm/endpoints/{endpoint_id}/test`
 - Route probe: `POST /api/llm/routes/{route_id}/probe`
+
+Third-party provider creation is an endpoint upsert, not a separate provider storage path. Add Provider creates an endpoint draft with user-facing `display_name`, `protocol`, `base_url`, and optional `api_key`; debounce save persists it through `PUT /api/llm/registry/endpoints`; backend returns the updated registry; frontend reprojects provider cards from registry. Deletion uses `DELETE /api/llm/registry/endpoints/{endpoint_id}` and must surface backend 409 reference conflicts instead of locally pretending the provider disappeared.
+
+Secret handling is intentionally scoped:
+
+- `GET /api/llm/registry` redacts `api_key`.
+- `GET /api/llm/registry/endpoints/{endpoint_id}/secret` reveals one secret only for the local Settings UI.
+- Endpoint upsert may omit `api_key` to keep the current secret.
+- Empty secret means clear the key only when the UI is explicitly saving an empty key value.
+- Redacted placeholders such as `"**********"` must never be sent back as real secrets.
+- Frontend must not log secrets, include secrets in toast/error text, or keep stale secret copies beyond the current Settings session draft.
 
 ### Boundary Map
 
@@ -110,9 +136,9 @@ sequenceDiagram
   BE->>Provider: GET /models
   Provider-->>BE: model list
   BE->>Store: update endpoint + upsert provider_routes
-  API->>BE: GET /registry
-  BE-->>API: endpoints + routes
-  API-->>UI: available_models projected from routes
+  BE-->>API: updated registry
+  API-->>UI: replace registry snapshot
+  UI->>UI: project available_models from routes
 ```
 
 Backend route upsert must reuse the same slug/canonicalization semantics as v3-to-v4 migration:
@@ -124,20 +150,20 @@ Backend route upsert must reuse the same slug/canonicalization semantics as v3-t
 
 Existing routes are preserved. If a discovered model maps to an existing route, user-owned `display_name`, `metadata`, and manual/probed capabilities are not overwritten unless backend owns and verifies the field.
 
-### Phase 2 Manual Probing: Scheme B
+Endpoint Test must not store `available_models` on the endpoint. It writes discovered models into `provider_routes` with a non-executed discovery status such as `unverified_manual` (or the closest existing backend enum for "discovered but not individually probed"). UI then displays them because routes changed.
 
-Manual probing does not create arbitrary new routes. It works only on route candidates that already exist in `provider_routes`.
+### Phase 2 Manual Model Test
 
 Flow:
 
-1. User runs endpoint Test or imports route candidates.
-2. Backend creates route candidates from model list / metadata / import draft.
-3. Manual panel maps user-entered model ids to existing routes by `endpoint_id + provider_model_id`.
-4. For matched routes, frontend calls `POST /api/llm/routes/{route_id}/probe`.
-5. Frontend refreshes registry and re-renders models from `provider_routes`.
-6. For unmatched model ids, UI shows a non-success result such as “route candidate is not registered”; it does not locally append the model.
+1. User enters one or more model ids in Manual model probing.
+2. Frontend calls an endpoint-scoped model test API, for example `POST /api/llm/endpoints/{endpoint_id}/models/test`, with `{ "model_ids": [...] }`.
+3. Backend uses the endpoint's stored `api_key`, `base_url`, and `protocol` to test only the requested model ids.
+4. For each successful model, backend creates or updates the corresponding `ProviderRoute` and marks it `verified`.
+5. For each failed model, backend returns a per-model result. A failed model does not create a new route. If an existing route was tested and failed, backend may mark that route `failed` when that matches registry semantics.
+6. Backend returns per-model results plus the updated registry. Frontend replaces its registry snapshot and re-renders `Available Models` from `provider_routes`.
 
-This keeps the v4 route-first model intact. If PM later wants arbitrary model ids to create routes from the Manual panel, that is Scheme A and requires a separate backend API design.
+Manual model test return values are for this operation's feedback, not for maintaining a separate frontend available-models list. The only durable availability source remains `provider_routes`.
 
 ### Phase 1B: Tauri Paste + Double Click
 
@@ -156,10 +182,10 @@ Design target:
 |---|---|---|---|---|
 | `ApiKeysTab` | Frontend UI | Own API Keys page sections and restored parity workflows | 1 | v4-shaped credentials state, no backend new API |
 | `ProviderCard` | Frontend UI | Render provider credential controls, Test, chips, Manual panel | 1 | `type="text"`, `InputGroup`, DeleteConfirmDialog |
-| `ManualModelTestPanel` | Frontend UI | Restore add/remove/probe UI, later map to route probe | 1/2 | Phase 1 fixture, Phase 2 route candidates only |
+| `ManualModelTestPanel` | Frontend UI | Restore add/remove/probe UI, later call endpoint-scoped model test | 1/2 | no local-only model append |
 | `api/llm.ts` | Frontend API | Project v4 registry into API Keys state | 2 | no v3 endpoint paths |
 | `copilot_test.py` | Backend service | Parse provider model-list responses | 2 | returns all model ids, not first only |
-| `routers/llm.py` | Backend API | Test endpoints and upsert routes | 2 | persists route candidates |
+| `routers/llm.py` | Backend API | Test endpoints/models and upsert routes | 2 | returns updated registry as truth source |
 | `tauri/src/lib.rs` | Tauri shell | Avoid native Edit double-click path | 1B | no native Edit submenu |
 | `useNativeDoubleClickGuard` + paste hook | Frontend runtime | Prevent double-click alert sound and keep paste | 1B | editable target allowlist |
 
@@ -186,6 +212,56 @@ Parser rules:
 - Gemini style: collect every string `models[].name`, stripping a leading `models/`.
 - Ignore malformed entries.
 - De-dupe exact strings while preserving order.
+
+Provider Test endpoint response:
+
+```json
+{
+  "registry": {
+    "schema_version": 4,
+    "provider_endpoints": {},
+    "provider_routes": {},
+    "runtime_policy": {},
+    "model_profiles": {},
+    "roles": {},
+    "canonical_groups": [],
+    "lint_results": [],
+    "setup_required": false
+  },
+  "tested_endpoint_id": "openai-official",
+  "discovered_model_count": 12
+}
+```
+
+The `registry` object is the updated truth source. `discovered_model_count` is operation feedback only.
+
+Manual model test response:
+
+```json
+{
+  "registry": {
+    "schema_version": 4,
+    "provider_endpoints": {},
+    "provider_routes": {},
+    "runtime_policy": {},
+    "model_profiles": {},
+    "roles": {},
+    "canonical_groups": [],
+    "lint_results": [],
+    "setup_required": false
+  },
+  "results": [
+    {
+      "model_id": "gpt-5",
+      "status": "ok",
+      "route_id": "openai-official:gpt-5",
+      "message": null
+    }
+  ]
+}
+```
+
+`results` drives badges/toasts for the just-finished operation. The model list rendered on the card still comes from `registry.provider_routes`.
 
 ### Available SDKs
 

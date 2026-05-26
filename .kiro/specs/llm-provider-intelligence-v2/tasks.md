@@ -27,7 +27,7 @@
 | G6 tests/CI gaps | Task | 纳入 verification phase。 |
 | G7 peer/single/circuit fate | Design + Task | 设计规定 peer/single 删除，runtime_policy 接管 health knobs；任务中删除 parser。 |
 | G8 UI spec canonicalization rule | Design + Task | `FRONTEND_UI_SPEC.md` 已更新；任务中实施前端删除。 |
-| G9 API Keys → Endpoints wording | Design + Task | 设计已规定 page copy 使用 Endpoints；任务中改 UI 文案/tab。 |
+| G9 API Keys → Endpoints wording | Superseded by API Keys regression amendment | 不再强制把用户界面改名为 Endpoints；endpoint/route 保留为内部 registry 概念。 |
 | G10 old specs superseded | Design | `design.md` 顶部已声明 supersedes。 |
 
 ## Round 2 Audit Disposition
@@ -50,7 +50,7 @@
 | N14 multi-endpoint draft | Design + Task | `endpoint_candidates` 支持多 endpoint，route candidate 绑定 endpoint_id。 |
 | N15 `data/llm_providers/*.md` fate | Task | cleanup phase 必须归档或迁入 registry seed。 |
 | N16 old flow doc | Task | cleanup phase 必须 archive/rewrite `LLM_MODEL_CONFIGURATION_FLOW.md`。 |
-| N17 tasks 5.6 directory ambiguity | Task | 统一到 renamed `endpoints/` feature directory。 |
+| N17 tasks 5.6 directory ambiguity | Superseded by API Keys regression amendment | 不强制 renamed `endpoints/` 目录；API Keys/provider UI 可继续使用 `api-keys/` feature directory。 |
 | N18 `system_prompt_prefix` type | Design + Task | schema 明确 string default `""`，`null` invalid。 |
 | N19 YAML `off` parse risk | Design | examples quote lint values。 |
 | N20 Role API paths | Design + Task | 补 GET/PUT role paths。 |
@@ -95,7 +95,7 @@
 
 - 修改 `apps/studio/frontend` 前必须阅读 `docs/development/FRONTEND_UI_SPEC.md` §2。
 - 优先复用 `apps/studio/frontend/src/components/ui/` 下的 shadcn/Radix wrapper。
-- 所有可见 UI 变更完成前必须启动 Studio 前端或 Tauri shell 手动检查 Settings → Endpoints / LLM Roles / Model Profiles / Available Routes。
+- 所有可见 UI 变更完成前必须启动 Studio 前端或 Tauri shell 手动检查 Settings → API Keys / LLM Roles / Model Profiles / Available Routes。
 - Frontend 不再做 raw model string canonicalization、provider ownership inference、stale provider pruning；这些只能来自 backend DTO。
 
 ## Phase 0: Cutover Preparation
@@ -248,7 +248,7 @@
   - Drafts are not stored in active credentials.
   - Atomic write and single write lock remain.
   - Replace `provider_test_params_fingerprint` with `graph_agent_gateway.registry.storage.compute_credential_fingerprint(endpoint, secret)`.
-  - Acceptance: tests verify omit `api_key` keeps current secret and empty string does not replace secret.
+  - Acceptance: tests verify omitted `api_key` keeps current secret, redacted placeholders are never stored, and explicit empty string clears the secret for Settings autosave.
   - Acceptance: backend provider-test result fingerprints match gateway runtime client fingerprints for the same endpoint/secret.
 - [x] 4.3 Add import draft store.
   - Create: `apps/studio/backend/app/services/llm_import_drafts.py`
@@ -301,7 +301,7 @@
 
 ## Phase 5: Studio Frontend Cutover
 
-**目标**: UI moves from API Keys / Available Models to Endpoints / Available Routes / Model Profiles.
+**目标**: UI moves to v4 endpoint/route data contracts while preserving the restored API Keys/provider UX. Roles continues to use route-backed Model Profiles / Available Routes.
 
 - [x] 5.1 Update API types and clients.
   - Modify: `apps/studio/frontend/src/api/llm.ts`
@@ -314,15 +314,16 @@
     - `apps/studio/frontend/src/hooks/useRoleTestChainRunner.ts`
   - Endpoints save via registry endpoint API.
   - Roles save route-chain schema.
-  - Route probe replaces old manual model test chain.
+  - Manual model test uses endpoint-scoped model test and refreshes from returned registry.
   - Acceptance: hook tests cover stale result suppression and serialized saves.
-- [x] 5.3 Rename API Keys UX to Endpoints.
+- [x] 5.3 Preserve API Keys UX over endpoint-backed storage.
   - Modify:
     - `apps/studio/frontend/src/components/studio/settings/api-keys/*`
     - `apps/studio/frontend/src/components/studio/api-keys/*`
     - `apps/studio/frontend/src/components/studio/settings/provider-utils.ts`
-  - UI copy uses Endpoints for callable credential records; provider brand is metadata.
-  - Acceptance: component tests assert "Endpoints" copy and no old provider-oriented payload.
+  - UI copy may continue to use API Keys/provider language for the Settings page.
+  - Endpoint and route names stay in API DTOs, tests, and engineering docs.
+  - Acceptance: component tests assert restored API Keys/provider copy, while data projection comes from v4 registry endpoints/routes.
 - [x] 5.4 Rewrite LLM Roles data utilities.
   - Modify: `apps/studio/frontend/src/components/studio/settings/role-utils.ts`
   - Remove frontend raw model canonicalization.
@@ -340,12 +341,12 @@
   - Preserve pointer fallback, drag preview, drop shield, pointerup click suppression.
   - Acceptance: tests cover add route, reorder route, apply profile, apply conflict UI, lint badges.
 - [x] 5.6 Add Import Draft UI.
-  - Modify or create components under renamed `apps/studio/frontend/src/components/studio/settings/endpoints/` feature directory.
+  - Modify or create components under the relevant API Keys/provider feature directory; do not rename the user-facing page to Endpoints as part of this task.
   - Show draft diff, verified/unverified candidates, conflicts, apply confirmation.
   - Acceptance: tests cover draft diff rendering and apply disabled states.
 - [x] 5.7 Manual frontend verification.
   - Run: `cd apps/studio/tauri && cargo tauri dev`
-  - Verify Settings → Endpoints: create/edit endpoint, omit API key, endpoint test, route probe.
+  - Verify Settings → API Keys: create/edit provider, omit API key, endpoint test, manual model test.
   - Verify Settings → LLM Roles: model profile card, apply profile, route drag/drop, lint warning/error, narrow width.
   - Acceptance: record manual verification results in final delivery notes.
 

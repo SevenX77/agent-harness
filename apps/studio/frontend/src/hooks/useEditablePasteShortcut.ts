@@ -6,7 +6,8 @@ type PasteShortcutEvent = Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'key' | 'me
 const editableInputTypes = new Set(['', 'email', 'password', 'search', 'tel', 'text', 'url'])
 
 export function shouldHandleEditablePasteShortcut(event: PasteShortcutEvent): boolean {
-  return !event.altKey && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'v'
+  void event
+  return false
 }
 
 export function nextEditableValueForPaste(

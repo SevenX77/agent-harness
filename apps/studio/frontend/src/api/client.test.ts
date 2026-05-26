@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AxiosError } from 'axios'
 import type { AxiosAdapter, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
-import { api, compileSkill, configureApiBaseURL, configureApiToken, wsUrl } from './client'
+import { api, compileSkill, configureApiBaseURL, configureApiToken, serializeSkillGraph, wsUrl } from './client'
 
 function captureHeadersAdapter(assertConfig: (config: InternalAxiosRequestConfig) => void): AxiosAdapter {
   return async (config): Promise<AxiosResponse> => {
@@ -125,6 +125,46 @@ describe('api client auth token', () => {
         severity: 'fatal',
         message: 'Invalid phase reference',
       }],
+    })
+  })
+
+  it('test_serialize_skill_graph_posts_phase_refs_to_serializer_endpoint', async () => {
+    api.defaults.adapter = async (config): Promise<AxiosResponse> => {
+      expect(config.method).toBe('post')
+      expect(config.url).toBe('/skills/text-segmentation/graph/serialize')
+      expect(JSON.parse(String(config.data))).toEqual({
+        phases: [{
+          id: 'agent',
+          src: 'phases/agent',
+          depends_on: ['logic'],
+          mode: 'skill',
+        }],
+        expected_hash: 'abc123',
+      })
+      return {
+        data: {
+          markdown_content: '---\nname: text-segmentation\n---\n',
+          phase_count: 1,
+          elapsed_ms: 1.5,
+          current_hash: 'def456',
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+
+    await expect(serializeSkillGraph('text-segmentation', [{
+      id: 'agent',
+      src: 'phases/agent',
+      depends_on: ['logic'],
+      mode: 'skill',
+    }], 'abc123')).resolves.toEqual({
+      markdown_content: '---\nname: text-segmentation\n---\n',
+      phase_count: 1,
+      elapsed_ms: 1.5,
+      current_hash: 'def456',
     })
   })
 })

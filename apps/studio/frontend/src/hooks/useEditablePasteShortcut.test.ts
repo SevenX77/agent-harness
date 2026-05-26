@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { nextEditableValueForPaste, shouldHandleEditablePasteShortcut } from './useEditablePasteShortcut'
 
 describe('shouldHandleEditablePasteShortcut', () => {
-  it('handles platform paste shortcuts without requiring the native macOS Edit menu', () => {
-    expect(shouldHandleEditablePasteShortcut({ key: 'v', metaKey: true, ctrlKey: false, altKey: false })).toBe(true)
-    expect(shouldHandleEditablePasteShortcut({ key: 'V', metaKey: false, ctrlKey: true, altKey: false })).toBe(true)
+  it('leaves platform paste shortcuts to the native Edit menu', () => {
+    expect(shouldHandleEditablePasteShortcut({ key: 'v', metaKey: true, ctrlKey: false, altKey: false })).toBe(false)
+    expect(shouldHandleEditablePasteShortcut({ key: 'V', metaKey: false, ctrlKey: true, altKey: false })).toBe(false)
   })
 
   it('ignores non-paste or alternate shortcuts', () => {

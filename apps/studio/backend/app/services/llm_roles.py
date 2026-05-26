@@ -1,4 +1,4 @@
-"""Round-trip storage for v2 route-chain ``llm_roles.yaml``."""
+"""Round-trip storage for Studio route-chain ``llm_roles.yaml``."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ class InvalidRoleReference(ValueError):
 
 
 def load_roles_file(path: Path) -> RolesData:
-    """Load a v2 roles YAML file; legacy short-code schemas are fatal."""
+    """Load a roles YAML file; legacy short-code schemas are fatal."""
     payload = _yaml().load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(payload, dict):
         raise ValueError(f"llm_roles.yaml must contain a mapping: {path}")
@@ -67,6 +67,14 @@ def validate_references(
                     f"role {role_name} fallback_chain[{index}] references unknown route "
                     f"{entry.route_id}"
                 )
+        for group_index, group in enumerate(role.model_groups):
+            for provider_index, provider_model in enumerate(group.provider_models):
+                if provider_model.route_id not in known_route_ids:
+                    raise InvalidRoleReference(
+                        f"role {role_name} model_groups[{group_index}]"
+                        f".provider_models[{provider_index}] references unknown route "
+                        f"{provider_model.route_id}"
+                    )
     for profile_id, profile in data.model_profiles.items():
         for index, entry in enumerate(profile.fallback_chain):
             if entry.route_id not in known_route_ids:
@@ -82,9 +90,9 @@ def normalize_role_drafts(data: RolesData) -> None:
 
 
 def _reject_legacy_roles(payload: dict[str, Any], path: Path) -> None:
-    if payload.get("schema_version") != 2:
+    if payload.get("schema_version") not in (2, 3):
         raise ValueError(
-            f"llm_roles.yaml must use schema_version 2; legacy short-code schema "
+            f"llm_roles.yaml must use schema_version 2 or 3; legacy short-code schema "
             f"is rejected at the v2 cutover boundary: {path}"
         )
     legacy = {

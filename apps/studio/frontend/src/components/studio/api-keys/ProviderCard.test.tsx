@@ -47,7 +47,8 @@ function renderCardHtml({
       draft={nextDraft}
       persisted={persisted}
       onFieldChange={vi.fn()}
-      onTest={vi.fn()}
+      onGetModels={vi.fn()}
+      onEndpointTest={vi.fn()}
       onDelete={vi.fn()}
       showManualModelPanel={showManualModelPanel}
     />,
@@ -55,12 +56,12 @@ function renderCardHtml({
 }
 
 describe("ProviderCard API key masking", () => {
-  it("renders API key as editable masked text by default", () => {
+  it("renders API key as a native password input by default", () => {
     const html = renderCardHtml()
 
-    expect(html).toContain('type="text"')
+    expect(html).toContain('type="password"')
     expect(html).toContain('value="sk-secret-123"')
-    expect(html).toContain("mask-input")
+    expect(html).not.toContain("mask-input")
     expect(html).toContain('name="provider-secret-p1"')
     expect(html).toContain('data-1p-ignore=""')
     expect(html).toContain('data-lpignore="true"')
@@ -71,35 +72,26 @@ describe("ProviderCard API key masking", () => {
     expect(html).toContain('aria-label="Copy API key"')
     expect(html).toContain("transition-none")
     expect(html).toContain("text-muted-foreground")
-    expect(html).toContain("px-6")
+    expect(html).toContain("Get Models")
+    expect(html).toContain("Endpoint test")
+    expect(html).toContain(">Test</button>")
   })
 
-  it("uses the shadcn InputGroup wrapper for API key inline actions", () => {
-    const html = renderCardHtml()
-
-    expect(html).toContain('data-slot="input-group"')
-    expect(html).toContain('data-slot="input-group-control"')
-    expect(html).toContain('data-slot="input-group-addon"')
-    expect(html).toContain('data-size="icon-xs"')
-  })
-
-  it("visibility toggle changes only mask class and does not mutate draft api key", () => {
+  it("visibility toggle changes only input type and does not mutate draft api key", () => {
     const onFieldChange = vi.fn()
     const hiddenInputType = apiKeyInputType(false)
     const visibleInputType = apiKeyInputType(true)
 
-    expect(hiddenInputType).toBe("text")
+    expect(hiddenInputType).toBe("password")
     expect(visibleInputType).toBe("text")
     expect(onFieldChange).not.toHaveBeenCalled()
     expect(draft.api_key).toBe("sk-secret-123")
   })
 
-  it("uses CSS masking only while the API key is hidden", () => {
+  it("uses muted text only while the API key is hidden", () => {
     expect(apiKeyInputClassName(false)).toContain("text-muted-foreground")
-    expect(apiKeyInputClassName(false)).toContain("mask-input")
     expect(apiKeyInputClassName(false)).not.toContain("text-foreground")
     expect(apiKeyInputClassName(true)).toContain("text-foreground")
-    expect(apiKeyInputClassName(true)).not.toContain("mask-input")
     expect(apiKeyInputClassName(true)).not.toContain("text-muted-foreground")
   })
 })
@@ -220,6 +212,26 @@ describe("ProviderCard test status badge", () => {
     expect(html).toContain("openai/gpt-5")
   })
 
+  it("hides stale available models when the current config has no matching successful test result", () => {
+    const html = renderCardHtml({
+      nextDraft: makeDraft({ provider_type: "google_genai", base_url: "https://anthropic.qnaigc.com" }),
+      persisted: makePersisted({
+        provider_type: "google_genai",
+        base_url: "https://anthropic.qnaigc.com",
+        last_test_status: "error",
+        last_error_code: "network_error",
+        available_sdks: ["google_genai"],
+        available_models: [{ id: "stale-model-from-prior-test" }],
+        test_results: [],
+      }),
+    })
+
+    expect(html).toContain("Test failed")
+    expect(html).not.toContain("Available SDKs:")
+    expect(html).not.toContain("Available Models:")
+    expect(html).not.toContain("stale-model-from-prior-test")
+  })
+
   it("renders Error badge as destructive with error code", () => {
     const html = renderCardHtml({
       persisted: makePersisted({ last_test_status: "error", last_error_code: "auth_failed" }),
@@ -247,7 +259,8 @@ describe("ProviderCard provider kind badge", () => {
         draft={makeDraft({ api_key: "" })}
         persisted={null}
         onFieldChange={vi.fn()}
-        onTest={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
         onDelete={vi.fn()}
         providerKind="official"
       />,
@@ -267,7 +280,8 @@ describe("ProviderCard provider kind badge", () => {
         draft={draft}
         persisted={null}
         onFieldChange={vi.fn()}
-        onTest={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
         onDelete={vi.fn()}
         providerKind="third-party"
       />,
@@ -288,7 +302,8 @@ describe("ProviderCard provider kind badge", () => {
         draft={makeDraft({ api_key: "" })}
         persisted={null}
         onFieldChange={vi.fn()}
-        onTest={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
         onDelete={vi.fn()}
         providerKind="third-party"
       />,
@@ -304,7 +319,8 @@ describe("ProviderCard provider kind badge", () => {
         draft={makeDraft({ api_key: "sk-official" })}
         persisted={makePersisted({ api_key: "sk-official", last_test_status: "untested" })}
         onFieldChange={vi.fn()}
-        onTest={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
         onDelete={vi.fn()}
         providerKind="official"
       />,
@@ -312,6 +328,79 @@ describe("ProviderCard provider kind badge", () => {
 
     expect(html).toContain("Not configured")
     expect(html).not.toContain("Untested")
+  })
+})
+
+describe("ProviderCard model discovery and endpoint test controls", () => {
+  it("renders official providers with a muted Get Models action and a separate endpoint test row", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({ id: "ark-official", name: "Ark Official", provider_type: "ark_runtime" })}
+        persisted={null}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="official"
+      />,
+    )
+
+    expect(html).toContain("Get Models")
+    const getModelsIndex = html.indexOf("Get Models")
+    const getModelsButton = html.slice(html.lastIndexOf("<button", getModelsIndex), html.indexOf("</button>", getModelsIndex))
+    expect(getModelsButton).toContain('data-variant="secondary"')
+    expect(getModelsButton).not.toContain('data-variant="default"')
+    expect(html).toContain("Endpoint test")
+    expect(html).toContain("Please choose one model from Available Models for endpoint testing.")
+    expect(html).toContain('placeholder="e.g. doubao-seed-2-0-pro-260215"')
+    expect(html).toContain(">Test</button>")
+  })
+
+  it("renders third-party API key before base URL and keeps endpoint test below base URL", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({ base_url: "https://api.qnaigc.com/v1" })}
+        persisted={null}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="third-party"
+      />,
+    )
+
+    const apiKeyIndex = html.indexOf(">API Key</label>")
+    const baseUrlIndex = html.indexOf(">Base URL</label>")
+    const endpointTestIndex = html.indexOf(">Endpoint test</label>")
+    expect(apiKeyIndex).toBeGreaterThan(-1)
+    expect(baseUrlIndex).toBeGreaterThan(apiKeyIndex)
+    expect(endpointTestIndex).toBeGreaterThan(baseUrlIndex)
+    expect(html).toContain("Get Models")
+  })
+
+  it("shows models discovered for the current params without rendering Connected", () => {
+    const html = renderCardHtml({
+      persisted: makePersisted({
+        last_test_status: "untested",
+        available_sdks: ["openai_compatible"],
+        available_models: [{ id: "listed-model" }],
+        test_results: [
+          {
+            params_fingerprint: providerTestParamsFingerprint(draft),
+            base_url: "",
+            provider_type: "openai_compatible",
+            last_test_status: "untested",
+            available_sdks: ["openai_compatible"],
+            available_models: [{ id: "listed-model" }],
+          },
+        ],
+      }),
+    })
+
+    expect(html).toContain("Not configured")
+    expect(html).not.toContain("Connected")
+    expect(html).toContain("Available Models:")
+    expect(html).toContain("listed-model")
   })
 })
 
@@ -404,7 +493,8 @@ describe("ProviderCard protocol controls", () => {
         draft={makeDraft({ provider_type: "anthropic_compatible" })}
         persisted={null}
         onFieldChange={vi.fn()}
-        onTest={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
         onDelete={vi.fn()}
         providerKind="third-party"
       />,
@@ -421,7 +511,8 @@ describe("ProviderCard protocol controls", () => {
         draft={makeDraft({ provider_type: "anthropic_compatible" })}
         persisted={null}
         onFieldChange={vi.fn()}
-        onTest={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
         onDelete={vi.fn()}
         providerKind="official"
       />,

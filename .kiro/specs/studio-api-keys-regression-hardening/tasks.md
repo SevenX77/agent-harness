@@ -250,7 +250,7 @@ These tasks are part of frontend restoration and must be completed before Phase 
 - Modify: relevant API Keys tests
 
 - [ ] 8.1 Write failing frontend API tests for v4 flow.
-  - `testProvider()` calls endpoint upsert, endpoint test, then refreshes/merges registry routes.
+  - `testProvider()` calls endpoint upsert and endpoint test, then replaces local registry state from the backend response.
   - `available_models` comes from all routes for the endpoint.
   - `available_sdks` is `[endpoint.protocol]`.
   - _Requirements: 2.8, 5.5, 5.6, 5.9_
@@ -265,7 +265,7 @@ These tasks are part of frontend restoration and must be completed before Phase 
   - Expected after implementation: v4 Test projection passes.
   - _Requirements: 2.8, 5.5, 5.6, 5.9_
 
-### Task 9: Manual Probing Scheme B Integration
+### Task 9: Manual Model Test Registry Integration
 
 **Files:**
 - Modify: `apps/studio/frontend/src/api/llm.ts`
@@ -273,16 +273,16 @@ These tasks are part of frontend restoration and must be completed before Phase 
 - Modify: `apps/studio/frontend/src/components/studio/api-keys/ManualModelTestPanel.test.tsx`
 - Modify: `apps/studio/frontend/src/api/llm.test.ts`
 
-- [ ] 9.1 Replace local-success behavior with route-candidate probing.
-  - Match entered model id to existing route for the provider endpoint.
-  - For matched route, call `POST /api/llm/routes/{route_id}/probe`.
-  - Refresh registry after probe.
-  - For unmatched model id, show not-registered result.
+- [ ] 9.1 Replace local-success behavior with endpoint-scoped model test.
+  - Call `POST /api/llm/endpoints/{endpoint_id}/models/test` with entered model ids.
+  - Successful model tests create or update verified `provider_routes`.
+  - Failed model tests return per-model results and do not locally append models.
+  - Replace local registry state from the backend response.
   - _Requirements: 5.7, 5.9_
 
 - [ ] 9.2 Run Manual probing integration tests.
   - Run: `pnpm --dir apps/studio/frontend exec vitest run src/api/llm.test.ts src/components/studio/api-keys/ManualModelTestPanel.test.tsx`
-  - Expected after implementation: no local-only append; refresh-backed route results pass.
+  - Expected after implementation: no local-only append; registry-backed model test results pass.
   - _Requirements: 5.7, 5.9_
 
 ## Final Verification

@@ -107,6 +107,7 @@ describe("ManualModelTestPanel", () => {
     expect(manualModelStatusLabel("invalid_model")).toBe("Model not found")
     expect(manualModelStatusLabel("invalid_key")).toBe("Invalid API key")
     expect(manualModelStatusLabel("rate_limited")).toBe("Rate limited")
+    expect(manualModelStatusLabel("quota_exceeded")).toBe("Quota exceeded")
     expect(manualModelStatusLabel("network_error")).toBe("Network error")
     expect(manualModelStatusLabel("timeout")).toBe("Request timed out")
     expect(manualModelStatusLabel("error")).toBe("Test failed")

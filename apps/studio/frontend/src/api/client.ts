@@ -12,9 +12,11 @@ import type {
   PublishSkillReq,
   RunDetail,
   RunMetadata,
+  SerializeGraphRes,
   SkillDetail,
   SyncSkillReq,
   UpdateSkillFileRes,
+  SerializableGraphPhaseRef,
 } from './types'
 
 export const API_BASE_URL = import.meta.env.VITE_STUDIO_API_BASE_URL ?? 'http://localhost:8787/api'
@@ -88,6 +90,18 @@ export async function compileSkill(skillId: string): Promise<CompileResult> {
     }
     throw error
   }
+}
+
+export async function serializeSkillGraph(
+  skillId: string,
+  phases: SerializableGraphPhaseRef[],
+  expectedHash?: string | null,
+): Promise<SerializeGraphRes> {
+  const response = await api.post<SerializeGraphRes>(`/skills/${skillId}/graph/serialize`, {
+    phases,
+    expected_hash: expectedHash ?? null,
+  })
+  return response.data
 }
 
 function isCompileFailure(value: unknown): value is CompileFailure {

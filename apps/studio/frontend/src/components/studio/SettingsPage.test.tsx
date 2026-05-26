@@ -10,6 +10,7 @@ import {
   notableProviderKeyForDraft,
   officialProviderDrafts,
   providerDraftForAction,
+  providerTestParamsFingerprint,
   providerTestParamsMatch,
   removeProviderFromRole,
   reorderModelInRole,
@@ -18,6 +19,8 @@ import {
   thirdPartyProviderDrafts,
   toggleModelFallback,
   updateActiveModel,
+  upsertProviderModels,
+  upsertProviderTestResponse,
   validateRoleDraft,
   visibleRoleNames,
 } from './SettingsPage'
@@ -126,7 +129,8 @@ function baseViewProps(
     onClose: vi.fn(),
     onTabChange: vi.fn(),
     onProviderFieldChange: vi.fn(),
-    onTestProvider: vi.fn(),
+    onGetProviderModels: vi.fn(),
+    onTestProviderEndpoint: vi.fn(),
     onDeleteProvider: vi.fn(),
     onAddProvider: vi.fn(),
     onProviderModelsUpdated: vi.fn(),
@@ -162,6 +166,7 @@ describe('Add Provider flow helpers', () => {
     expect(inferProviderType('anthropic')).toBe('anthropic_compatible')
     expect(inferProviderType('gemini')).toBe('google_genai')
     expect(inferProviderType('deepseek')).toBe('openai_compatible')
+    expect(inferProviderType('ark')).toBe('ark_runtime')
   })
 
   it('creates a populated draft from an Add Provider submission', () => {
@@ -221,7 +226,7 @@ describe('Add Provider flow helpers', () => {
     expect(inferProviderKind({
       id: 'ark-123',
       name: 'Ark',
-      provider_type: 'openai_compatible',
+      provider_type: 'ark_runtime',
       base_url: 'https://ark.cn-beijing.volces.com/api/v3',
       api_key: 'sk',
       isTesting: false,
@@ -299,6 +304,73 @@ describe('Add Provider flow helpers', () => {
       { api_key: 'sk', base_url: 'https://base.test', provider_type: 'openai_compatible' },
       { api_key: 'sk', base_url: 'https://base.test', provider_type: 'anthropic_compatible' },
     )).toBe(false)
+  })
+
+  it('adds a newly tested official provider to credentials when registry-backed test returns models', () => {
+    const draft = providerDraftForAction([], 'openai-official')
+    expect(draft).not.toBeNull()
+
+    const next = upsertProviderTestResponse({ providers: [] }, draft!, {
+      status: 'ok',
+      message: 'Connected',
+      available_models: [{ id: 'gpt-5' }],
+      available_sdks: ['openai_compatible'],
+    })
+
+    expect(next.providers).toMatchObject([
+      {
+        id: 'openai-official',
+        name: 'OpenAI Official',
+        last_test_status: 'ok',
+        available_models: [{ id: 'gpt-5' }],
+        available_sdks: ['openai_compatible'],
+      },
+    ])
+  })
+
+  it('caches provider test results by complete editable config for restore-on-match UX', () => {
+    const draft = providerDraftForAction([], 'openai-official')
+    expect(draft).not.toBeNull()
+
+    const next = upsertProviderTestResponse({ providers: [] }, draft!, {
+      status: 'ok',
+      message: 'Connected',
+      available_models: [{ id: 'gpt-5' }],
+      available_sdks: ['openai_compatible'],
+    })
+
+    expect(next.providers[0].test_results).toMatchObject([
+      {
+        params_fingerprint: providerTestParamsFingerprint(draft!),
+        base_url: 'https://api.openai.com',
+        provider_type: 'openai_compatible',
+        last_test_status: 'ok',
+        last_test_message: 'Connected',
+        available_models: [{ id: 'gpt-5' }],
+        available_sdks: ['openai_compatible'],
+      },
+    ])
+  })
+
+  it('adds manual model results for a newly materialized provider instead of dropping them', () => {
+    const draft = providerDraftForAction([], 'openai-official')
+    expect(draft).not.toBeNull()
+
+    const next = upsertProviderModels(
+      { providers: [] },
+      draft,
+      'openai-official',
+      [{ id: 'gpt-5' }],
+    )
+
+    expect(next.providers).toMatchObject([
+      {
+        id: 'openai-official',
+        name: 'OpenAI Official',
+        last_test_status: 'ok',
+        available_models: [{ id: 'gpt-5' }],
+      },
+    ])
   })
 })
 
@@ -410,12 +482,11 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).toContain('Test')
   })
 
-  it('renders API key inputs as editable masked text values with password-manager ignore attributes', () => {
+  it('renders API key inputs as native password values with password-manager ignore attributes', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
 
-    expect(html).toContain('type="text"')
+    expect(html).toContain('type="password"')
     expect(html).toContain('value="sk-deepseek"')
-    expect(html).toContain('mask-input')
     expect(html).toContain('name="provider-secret-DS"')
     expect(html).toContain('autoComplete="off"')
     expect(html).toContain('data-1p-ignore=""')

@@ -50,6 +50,9 @@ vi.mock('../../ui/dropdown-menu', () => ({
 }))
 
 const role: RoleEntry = {
+  model_fallback: true,
+  active_model: '',
+  models: {},
   system_prompt_prefix: '',
   fallback_chain: [
     { route_id: 'anthropic-official:claude-sonnet' },

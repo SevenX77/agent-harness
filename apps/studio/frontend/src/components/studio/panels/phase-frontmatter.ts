@@ -201,7 +201,7 @@ function inferKind(frontmatter: Partial<PhaseFrontmatter>): PhaseFrontmatterKind
 }
 
 function bodyFromForm(body: string, form: PhaseFrontmatterFormData, kind: PhaseFrontmatterKind): string {
-  let next = removeXmlBlock(removeXmlBlock(removeXmlBlock(body, 'python_callable'), 'system_prompt'), 'exit_contract').trimStart()
+  const next = removeXmlBlock(removeXmlBlock(removeXmlBlock(body, 'python_callable'), 'system_prompt'), 'exit_contract').trimStart()
   if (kind === 'logic') {
     return prependXmlBlocks(next, [['python_callable', form.pythonCallable]])
   }

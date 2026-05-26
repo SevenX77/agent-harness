@@ -43,6 +43,7 @@ function newProviderId(): string {
 
 export function inferProviderType(providerCode: string, baseUrl = "", name = ""): ProviderType {
   const haystack = `${providerCode} ${name} ${baseUrl}`.toLowerCase()
+  if (haystack.includes("ark") || haystack.includes("volces")) return "ark_runtime"
   if (haystack.includes("anthropic") || haystack.includes("claude")) return "anthropic_compatible"
   if (haystack.includes("gemini") || haystack.includes("google")) return "google_genai"
   return "openai_compatible"
@@ -99,6 +100,7 @@ export function notableProviderKeyForDraft(draft: ProviderDraft): string {
   const matched = notableProviderKeys.find((code) => haystack.includes(code))
   if (matched) return matched
   if (draft.provider_type === "anthropic_compatible") return "anthropic"
+  if (draft.provider_type === "ark_runtime") return "ark"
   if (draft.provider_type === "google_genai") return "gemini"
   return "openai"
 }

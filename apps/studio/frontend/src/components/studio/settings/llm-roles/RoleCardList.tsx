@@ -45,7 +45,7 @@ export function RoleCardList({
     resetKey: roleNames.join("\u0000"),
   })
   const visibleRoles = roleNames.slice(0, visibleCount)
-  const roleGroups = roleCategoryGroups(visibleRoles, roleNames)
+  const roleGroups = roleCategoryGroups(data, visibleRoles, roleNames)
 
   return (
     <div className="space-y-4" data-lazy-list="roles">
@@ -121,7 +121,7 @@ export function RoleCardList({
   )
 }
 
-function roleCategoryGroups(visibleRoleNames: string[], allRoleNames: string[]) {
+function roleCategoryGroups(data: RolesData, visibleRoleNames: string[], allRoleNames: string[]) {
   const groups: Array<{
     category: RoleCategory
     label: string
@@ -154,13 +154,16 @@ function roleCategoryGroups(visibleRoleNames: string[], allRoleNames: string[]) 
 
   for (const roleName of allRoleNames) {
     if (!visibleRoleSet.has(roleName)) continue
-    const category = roleCategoryForName(roleName)
+    const category = roleCategoryForRole(data, roleName)
     groups.find((group) => group.category === category)?.roles.push(roleName)
   }
 
   return groups
 }
 
-function roleCategoryForName(roleName: string): RoleCategory {
+function roleCategoryForRole(data: RolesData, roleName: string): RoleCategory {
+  const roleKind = data.roles[roleName]?.role_kind
+  if (roleKind === "copilot") return "copilot"
+  if (roleKind === "graph_agent") return "graph-agent"
   return /copilot/i.test(roleName) ? "copilot" : "graph-agent"
 }

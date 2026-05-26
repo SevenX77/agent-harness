@@ -23,6 +23,23 @@ async function mockWelcomeAndSettingsBackend(page: Page) {
   await page.route('**/api/llm/credentials**', async (route) => {
     await fulfillJson(route, { providers: [] })
   })
+  await page.route('**/api/llm/registry', async (route) => {
+    await fulfillJson(route, {
+      provider_endpoints: {},
+      provider_routes: {},
+      runtime_policy: {
+        provider_down_ttl_seconds: 60,
+        probe_timeout_seconds: 5,
+        token_escalation_rounds: 2,
+      },
+      model_profiles: {},
+      model_groups: [],
+      roles: {},
+      canonical_groups: [],
+      lint_results: [],
+      setup_required: false,
+    })
+  })
   await page.route('**/api/llm/roles**', async (route) => {
     await fulfillJson(route, {
       models: {},

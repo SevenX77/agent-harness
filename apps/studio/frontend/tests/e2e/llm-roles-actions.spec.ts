@@ -22,6 +22,49 @@ const credentials = {
   ],
 }
 
+const registry = {
+  provider_endpoints: {
+    anthropic: {
+      endpoint_id: 'anthropic',
+      display_name: 'Anthropic Official',
+      protocol: 'anthropic_compatible',
+      base_url: 'https://api.anthropic.com',
+      api_key: 'sk-anthropic',
+      status: 'verified',
+      last_test_at: '2026-05-24T00:00:00Z',
+      last_test_message: '',
+      timeout_seconds: 120,
+      trust_env: false,
+      proxy_env: null,
+      metadata: {},
+    },
+  },
+  provider_routes: {
+    'anthropic:claude-opus-4-7': {
+      route_id: 'anthropic:claude-opus-4-7',
+      endpoint_id: 'anthropic',
+      route_slug: 'claude-opus-4-7',
+      provider_model_id: 'claude-opus-4-7',
+      canonical_id: 'claude-opus-4-7',
+      display_name: 'claude-opus-4-7',
+      status: 'verified',
+      capabilities: { thinking: { value: true, source: 'probed_verified' } },
+      metadata: {},
+    },
+  },
+  runtime_policy: {
+    provider_down_ttl_seconds: 60,
+    probe_timeout_seconds: 5,
+    token_escalation_rounds: 2,
+  },
+  model_profiles: {},
+  model_groups: [],
+  roles: {},
+  canonical_groups: [],
+  lint_results: [],
+  setup_required: false,
+}
+
 const roles = {
   models: {
     'claude-opus-4-7': {
@@ -70,6 +113,9 @@ async function mockSettingsBackend(page: Page) {
   })
   await page.route('**/api/llm/credentials**', async (route) => {
     await fulfillJson(route, credentials)
+  })
+  await page.route('**/api/llm/registry', async (route) => {
+    await fulfillJson(route, registry)
   })
   await page.route('**/api/llm/roles**', async (route) => {
     await fulfillJson(route, roles)

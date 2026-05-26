@@ -3,8 +3,11 @@ import type { AxiosAdapter, AxiosResponse, InternalAxiosRequestConfig } from 'ax
 import { api } from './client'
 import {
   getCredentials,
+  getRoles,
   modelGroupsFromRegistry,
+  probeRoute,
   putCredentials,
+  putRoles,
   resetLlmApiCachesForTests,
   testProviderModels,
   testProvider,
@@ -709,5 +712,170 @@ describe('API Keys v4 registry adapter', () => {
       ui_state: 'ready',
       capability_state: 'known',
     })
+  })
+
+  it('loads v3 backend roles into the legacy-compatible LLM Roles UI shape', async () => {
+    api.defaults.adapter = adapter((config) => {
+      if (config.url === '/llm/registry') {
+        return registry({
+          model_groups: [
+            {
+              canonical_id: 'gpt-5',
+              display_name: 'GPT-5',
+              provider_models: [
+                {
+                  route_id: route.route_id,
+                  provider_label: 'OpenRouter Custom',
+                  provider_kind: 'third_party',
+                  provider_model_id: 'openai/gpt-5',
+                  ui_state: 'ready',
+                  ui_detail: null,
+                  retry_at: null,
+                  reason_code: null,
+                  capability_state: 'known',
+                  capabilities: route.capabilities,
+                },
+              ],
+              status_summary: {
+                ready: 1,
+                untested: 0,
+                cooling_down: 0,
+                needs_setup: 0,
+                off: 0,
+              },
+              capability_summary: {
+                capability_known_count: 1,
+                thinking: 'supported',
+                tools: 'unknown',
+                structured_output: 'unknown',
+                max_context_tokens: null,
+                max_output_tokens: null,
+              },
+            },
+          ],
+        })
+      }
+      if (config.url === '/llm/roles') {
+        return {
+          schema_version: 3,
+          model_profiles: {},
+          model_bundles: {},
+          roles: {
+            analyst: {
+              role_kind: 'graph_agent',
+              system_prompt_prefix: '',
+              model_fallback_enabled: true,
+              intent: { provider_preference: 'manual_order' },
+              model_groups: [
+                {
+                  canonical_id: 'gpt-5',
+                  display_name: 'GPT-5',
+                  provider_models: [{ route_id: route.route_id }],
+                },
+              ],
+              fallback_chain: [],
+              lint_requirements: {},
+            },
+          },
+        }
+      }
+      return registry()
+    })
+
+    const roles = await getRoles()
+
+    expect(roles.models['gpt-5']).toMatchObject({
+      name: 'GPT-5',
+      providers: { [route.route_id]: 'openai/gpt-5' },
+      reasoning: true,
+    })
+    expect(roles.providers[route.route_id]).toEqual({
+      name: 'OpenRouter Custom',
+      type: 'openai_compatible',
+    })
+    expect(roles.roles.analyst).toMatchObject({
+      role_kind: 'graph_agent',
+      model_fallback: true,
+      active_model: 'gpt-5',
+      models: {
+        'gpt-5': { providers: [route.route_id] },
+      },
+    })
+  })
+
+  it('saves the legacy-compatible LLM Roles UI shape as v3 model groups', async () => {
+    const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
+    api.defaults.adapter = adapter((config) => {
+      seen.push({ method: config.method, url: config.url, data: config.data })
+      if (config.url === '/llm/registry') return registry()
+      if (config.method === 'put' && config.url === '/llm/roles') {
+        return JSON.parse(String(config.data))
+      }
+      return registry()
+    })
+
+    await putRoles({
+      schema_version: 3,
+      models: {
+        'gpt-5': {
+          name: 'GPT-5',
+          providers: { [route.route_id]: 'openai/gpt-5' },
+        },
+      },
+      providers: {
+        [route.route_id]: { name: 'OpenRouter Custom', type: 'openai_compatible' },
+      },
+      roles: {
+        analyst: {
+          role_kind: 'graph_agent',
+          model_fallback: false,
+          active_model: 'gpt-5',
+          models: {
+            'gpt-5': { providers: [route.route_id], temperature: 0.2, max_tokens: 8192 },
+          },
+          system_prompt_prefix: '',
+          lint_requirements: {},
+        },
+      },
+    })
+
+    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual(['put /llm/roles'])
+    expect(JSON.parse(String(seen[0].data))).toEqual({
+      schema_version: 3,
+      model_profiles: {},
+      model_bundles: {},
+      roles: {
+        analyst: {
+          role_kind: 'graph_agent',
+          system_prompt_prefix: '',
+          model_fallback_enabled: false,
+          intent: { provider_preference: 'manual_order' },
+          model_groups: [
+            {
+              canonical_id: 'gpt-5',
+              display_name: 'GPT-5',
+              provider_models: [{ route_id: route.route_id }],
+            },
+          ],
+          fallback_chain: [],
+          lint_requirements: {},
+        },
+      },
+    })
+  })
+
+  it('can force a route probe for Cooling Down Test Now', async () => {
+    const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
+    api.defaults.adapter = adapter((config) => {
+      seen.push({ method: config.method, url: config.url, data: config.data })
+      return route
+    })
+
+    await probeRoute(route.route_id, { capabilities: [], force: true })
+
+    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual([
+      'post /llm/routes/openrouter-custom%3Agpt-5/probe?force=true',
+    ])
+    expect(JSON.parse(String(seen[0].data))).toEqual({ capabilities: [] })
   })
 })

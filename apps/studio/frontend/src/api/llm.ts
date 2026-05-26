@@ -294,6 +294,7 @@ export interface RoleEntry {
   role_kind?: RoleKind
   model_fallback: boolean
   model_fallback_enabled?: boolean
+  intent?: Record<string, unknown>
   active_model: string
   models: Record<string, RoleModelEntry>
   model_groups?: RoleModelGroup[]
@@ -330,6 +331,25 @@ export interface MaterializationReport {
   entries: MaterializationReportEntry[]
   warnings: Array<Record<string, unknown>>
   skipped_provider_details: Array<Record<string, unknown>>
+}
+
+interface BackendRolesData {
+  schema_version: 3
+  model_profiles: Record<string, unknown>
+  model_bundles: Record<string, unknown>
+  roles: Record<string, BackendRoleEntry>
+}
+
+interface BackendRoleEntry {
+  role_kind: RoleKind
+  system_prompt_prefix: string
+  model_fallback_enabled: boolean
+  intent: Record<string, unknown>
+  model_groups: RoleModelGroup[]
+  fallback_chain: RoleRouteEntry[]
+  lint_requirements: Record<string, LintSeverity>
+  source_profile_id?: string | null
+  source_profile_snapshot?: Record<string, unknown> | null
 }
 
 export interface ModelEntry {
@@ -497,6 +517,147 @@ function summarizeProviderModelCapabilities(providerModels: ProviderModelOption[
     max_context_tokens: null,
     max_output_tokens: null,
   }
+}
+
+function rolesDataFromBackend(
+  data: RolesData,
+  registry: RegistryResponse | null,
+): RolesData {
+  if (hasLegacyRoleMaps(data)) return data
+
+  const modelGroups = registry ? modelGroupsFromRegistry(registry) : []
+  const models = Object.fromEntries(
+    modelGroups.map((group) => [
+      group.canonical_id,
+      {
+        name: group.display_name,
+        reasoning: modelGroupSupportsThinking(group) || undefined,
+        providers: Object.fromEntries(
+          group.provider_models.map((option) => [option.route_id, option.provider_model_id]),
+        ),
+      },
+    ]),
+  )
+  const providers = registry
+    ? Object.fromEntries(
+        modelGroups.flatMap((group) => (
+          group.provider_models.map((option) => [
+            option.route_id,
+            providerEntryFromModelOption(registry, option),
+          ])
+        )),
+      )
+    : {}
+  return {
+    ...data,
+    schema_version: data.schema_version ?? 3,
+    models,
+    providers,
+    roles: Object.fromEntries(
+      Object.entries(data.roles ?? {}).map(([roleName, role]) => [
+        roleName,
+        roleEntryFromBackend(roleName, role, data),
+      ]),
+    ),
+  }
+}
+
+function hasLegacyRoleMaps(data: RolesData): boolean {
+  return Boolean(data.models && data.providers)
+}
+
+function roleEntryFromBackend(roleName: string, role: RoleEntry, data: RolesData): RoleEntry {
+  if (role.models && role.active_model !== undefined && role.model_fallback !== undefined) return role
+  const modelGroups = role.model_groups ?? []
+  const models = Object.fromEntries(
+    modelGroups.map((group) => [
+      group.canonical_id,
+      {
+        providers: group.provider_models.map((providerModel) => providerModel.route_id),
+      },
+    ]),
+  )
+  return {
+    ...role,
+    role_kind: role.role_kind ?? inferRoleKind(data, roleName),
+    model_fallback: role.model_fallback_enabled ?? true,
+    active_model: modelGroups[0]?.canonical_id ?? '',
+    models,
+    fallback_chain: role.fallback_chain ?? [],
+    lint_requirements: role.lint_requirements ?? {},
+  }
+}
+
+function rolesDataToBackend(data: RolesData): BackendRolesData {
+  return {
+    schema_version: 3,
+    model_profiles: data.model_profiles ?? {},
+    model_bundles: data.model_bundles ?? {},
+    roles: Object.fromEntries(
+      Object.entries(data.roles).map(([roleName, role]) => [
+        roleName,
+        roleEntryToBackend(data, roleName, role),
+      ]),
+    ),
+  }
+}
+
+function roleEntryToBackend(
+  data: RolesData,
+  roleName: string,
+  role: RoleEntry,
+): BackendRoleEntry {
+  const entry: BackendRoleEntry = {
+    role_kind: role.role_kind ?? inferRoleKind(data, roleName),
+    system_prompt_prefix: role.system_prompt_prefix ?? '',
+    model_fallback_enabled: role.model_fallback_enabled ?? role.model_fallback,
+    intent: role.intent ?? { provider_preference: 'manual_order' },
+    model_groups: Object.entries(role.models).map(([modelCode, roleModel]) => ({
+      canonical_id: modelCode,
+      display_name: data.models[modelCode]?.name ?? modelCode,
+      provider_models: roleModel.providers.map((routeId) => ({ route_id: routeId })),
+    })),
+    fallback_chain: [],
+    lint_requirements: role.lint_requirements ?? {},
+  }
+  if (role.source_profile_id !== undefined) entry.source_profile_id = role.source_profile_id
+  if (role.source_profile_snapshot !== undefined) {
+    entry.source_profile_snapshot = role.source_profile_snapshot
+  }
+  return entry
+}
+
+function providerEntryFromModelOption(
+  registry: RegistryResponse,
+  option: ProviderModelOption,
+): ProviderEntry {
+  const route = registry.provider_routes[option.route_id]
+  const endpoint = route ? registry.provider_endpoints[route.endpoint_id] : null
+  return {
+    name: option.provider_label,
+    type: endpoint?.protocol ?? 'openai_compatible',
+  }
+}
+
+function modelGroupSupportsThinking(group: ModelGroup): boolean {
+  if (group.capability_summary.thinking === 'supported' || group.capability_summary.thinking === 'mixed') {
+    return true
+  }
+  return group.provider_models.some((option) => {
+    const capabilities = option.capabilities
+    return Boolean(
+      capabilities.thinking?.value ||
+      capabilities.reasoning?.value ||
+      capabilities.supports_thinking?.value ||
+      capabilities.thinking_protocol?.value,
+    )
+  })
+}
+
+function inferRoleKind(data: RolesData, roleName: string): RoleKind {
+  if (data.single_model_roles?.includes(roleName)) return 'copilot'
+  if (roleName.toLowerCase().includes('copilot')) return 'copilot'
+  return 'graph_agent'
 }
 
 function statusToTestStatus(status: RouteStatus): TestStatus {
@@ -890,8 +1051,13 @@ function isEndpointModelTestResponse(value: unknown): value is EndpointModelTest
   )
 }
 
-export async function probeRoute(routeId: string, request: { capabilities: string[] }): Promise<ProviderRoute> {
-  const response = await api.post<ProviderRoute>(`/llm/routes/${segment(routeId)}/probe`, request)
+export async function probeRoute(
+  routeId: string,
+  request: { capabilities: string[]; force?: boolean },
+): Promise<ProviderRoute> {
+  const { force, ...body } = request
+  const forceQuery = force ? '?force=true' : ''
+  const response = await api.post<ProviderRoute>(`/llm/routes/${segment(routeId)}/probe${forceQuery}`, body)
   if (cachedRegistry) {
     cachedRegistry = {
       ...cachedRegistry,
@@ -1115,7 +1281,8 @@ export function providerModelsFromRegistry(
 
 export async function getRoles(): Promise<RolesData> {
   const response = await api.get<RolesData>('/llm/roles')
-  return response.data
+  const registry = cachedRegistry ?? await getRegistry()
+  return rolesDataFromBackend(response.data, registry)
 }
 
 export async function getRole(roleName: string): Promise<RoleEntry> {
@@ -1124,6 +1291,6 @@ export async function getRole(roleName: string): Promise<RoleEntry> {
 }
 
 export async function putRoles(data: RolesData): Promise<RolesData> {
-  const response = await api.put<RolesData>('/llm/roles', data)
-  return response.data
+  const response = await api.put<RolesData>('/llm/roles', rolesDataToBackend(data))
+  return rolesDataFromBackend(response.data, cachedRegistry ?? null)
 }

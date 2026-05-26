@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from contextvars import ContextVar
 from typing import Any
 from uuid import UUID
 
@@ -14,6 +15,16 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from graph_agent.callbacks.base import Callback
 
 logger = logging.getLogger(__name__)
+
+_CURRENT_TOOL_CALLBACKS: ContextVar[dict[str, Any] | None] = ContextVar(
+    "graph_agent_current_tool_callbacks",
+    default=None,
+)
+
+
+def current_tool_callback_context() -> dict[str, Any] | None:
+    """Return callbacks/phase for the tool currently invoked by LangChain."""
+    return _CURRENT_TOOL_CALLBACKS.get()
 
 
 def _extract_text_content(content: Any) -> str:
@@ -150,12 +161,21 @@ class _HarnessCallbackBridge(BaseCallbackHandler):
             "tool_name": tool_name,
             "args": args,
             "start_mono": time.monotonic(),
+            "context_token": _CURRENT_TOOL_CALLBACKS.set(
+                {
+                    "phase_name": self.phase_name,
+                    "callbacks": self._callbacks,
+                }
+            ),
         }
 
     def on_tool_end(self, output: Any, *, run_id: UUID | None = None, **kwargs: Any) -> None:
         """Forward tool completion to GraphAgent callbacks."""
         run_key = str(run_id) if run_id is not None else ""
         pending = self._pending_tools.pop(run_key, {})
+        token = pending.get("context_token")
+        if token is not None:
+            _CURRENT_TOOL_CALLBACKS.reset(token)
         tool_name = pending.get("tool_name") or kwargs.get("name", "unknown")
         args = pending.get("args", {})
         self._tool_call_count += 1
@@ -201,7 +221,10 @@ class _HarnessCallbackBridge(BaseCallbackHandler):
     ) -> None:
         del kwargs
         run_key = str(run_id) if run_id is not None else ""
-        self._pending_tools.pop(run_key, {})
+        pending = self._pending_tools.pop(run_key, {})
+        token = pending.get("context_token")
+        if token is not None:
+            _CURRENT_TOOL_CALLBACKS.reset(token)
         logger.warning("[Bridge] Tool error in %s: %s", self.phase_name, error)
 
     @staticmethod

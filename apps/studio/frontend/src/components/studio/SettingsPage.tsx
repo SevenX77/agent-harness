@@ -1,12 +1,5 @@
 export { SettingsPage, SettingsPageContent, LlmRolesTab } from "./settings"
 export { getModelAvailability } from "./settings"
-export type { ModelAvailability, SettingsPageContentProps } from "./settings"
-export {
-  appendRouteToRole,
-  applyProfileToRole,
-  createEmptyRole,
-  groupAvailableRoutes,
-  moveRouteInRole,
-  removeRouteFromRole,
-  routeDisplayName,
-} from "./settings"
+export type { ModelAvailability, ProviderDraft, SettingsPageContentProps } from "./settings"
+export { draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, inferProviderType, notableProviderKeyForDraft, officialProviderDrafts, providerCachedTestResult, providerDraftForAction, providerTestParamsFingerprint, providerTestParamsMatch, shouldShowManualModelPanel, thirdPartyProviderDrafts } from "./settings"
+export { appendModelToRole, moveModelInRole, moveProviderInRole, removeModelFromRole, removeProviderFromRole, reorderModelInRole, reorderProviderInRole, toggleModelFallback, updateActiveModel, updateRoleModelSettings, validateRoleDraft, visibleRoleNames } from "./settings"

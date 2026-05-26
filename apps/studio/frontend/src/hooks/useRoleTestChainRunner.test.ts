@@ -1,88 +1,56 @@
 import { describe, expect, it } from "vitest"
-import type { RegistryResponse, RolesData } from "@/api/llm"
-import { buildRoleProbeTargets, roleChainStatusKey, runWithConcurrency } from "./useRoleTestChainRunner"
+import type { CredentialsState, RolesData } from "@/api/llm"
+import { buildRoleTestTargets, roleChainStatusKey, runWithConcurrency } from "./useRoleTestChainRunner"
 
 const rolesData: RolesData = {
-  schema_version: 2,
-  model_profiles: {},
+  models: {
+    CL46T: {
+      name: "Claude",
+      providers: { anthropic: "claude-sonnet-test", openai_proxy: "anthropic/claude" },
+    },
+    DS32R: {
+      name: "DeepSeek",
+      providers: { deepseek: "deepseek-chat" },
+    },
+  },
+  providers: {
+    anthropic: { name: "Anthropic", type: "anthropic_compatible" },
+    openai_proxy: { name: "Proxy", type: "openai_compatible" },
+    deepseek: { name: "DeepSeek", type: "openai_compatible" },
+  },
   roles: {
     copilot_chat: {
-      system_prompt_prefix: "",
-      fallback_chain: [
-        { route_id: "anthropic-official:claude-sonnet-4-6" },
-        { route_id: "openrouter:anthropic-claude-sonnet-4-6" },
-        { route_id: "missing:route" },
-      ],
-      lint_requirements: { thinking: "warn" },
+      model_fallback: true,
+      active_model: "CL46T",
+      models: {
+        CL46T: { providers: ["anthropic", "openai_proxy"] },
+        DS32R: { providers: ["deepseek"] },
+      },
     },
   },
 }
 
-const registry: RegistryResponse = {
-  provider_endpoints: {},
-  runtime_policy: {
-    provider_down_ttl_seconds: 300,
-    probe_timeout_seconds: 30,
-    token_escalation_rounds: 2,
-  },
-  provider_routes: {
-    "anthropic-official:claude-sonnet-4-6": {
-      route_id: "anthropic-official:claude-sonnet-4-6",
-      endpoint_id: "anthropic-official",
-      route_slug: "claude-sonnet-4-6",
-      provider_model_id: "claude-sonnet-4-6",
-      canonical_id: "claude-sonnet-4-6",
-      display_name: "Claude Sonnet 4.6",
-      status: "verified",
-      capabilities: {},
-      metadata: {},
-    },
-    "openrouter:anthropic-claude-sonnet-4-6": {
-      route_id: "openrouter:anthropic-claude-sonnet-4-6",
-      endpoint_id: "openrouter",
-      route_slug: "anthropic-claude-sonnet-4-6",
-      provider_model_id: "anthropic/claude-sonnet-4-6",
-      canonical_id: "claude-sonnet-4-6",
-      display_name: "Claude Sonnet 4.6 via OpenRouter",
-      status: "unverified_manual",
-      capabilities: {},
-      metadata: {},
-    },
-  },
-  model_profiles: {},
-  roles: rolesData.roles,
-  canonical_groups: [
-    {
-      canonical_id: "claude-sonnet-4-6",
-      display_name: "Claude Sonnet 4.6",
-      routes: [
-        "anthropic-official:claude-sonnet-4-6",
-        "openrouter:anthropic-claude-sonnet-4-6",
-      ],
-    },
+const credentials: CredentialsState = {
+  providers: [
+    { id: "anthropic", name: "Anthropic", api_key: "sk-a", provider_type: "anthropic_compatible" },
+    { id: "openai_proxy", name: "Proxy", api_key: "sk-p", provider_type: "openai_compatible" },
   ],
-  lint_results: [],
-  setup_required: false,
 }
 
 describe("useRoleTestChainRunner helpers", () => {
-  it("builds route probe targets without converting route IDs", () => {
-    const targets = buildRoleProbeTargets(rolesData, "copilot_chat", registry)
+  it("builds model-parallel provider chains with provider model ids", () => {
+    const chains = buildRoleTestTargets(rolesData, "copilot_chat", credentials)
 
-    expect(targets.map((target) => target.routeId)).toEqual([
-      "anthropic-official:claude-sonnet-4-6",
-      "openrouter:anthropic-claude-sonnet-4-6",
-      "missing:route",
+    expect(chains.map((chain) => chain.map((target) => target.providerCode))).toEqual([
+      ["anthropic", "openai_proxy"],
+      ["deepseek"],
     ])
-    expect(targets[0].route?.provider_model_id).toBe("claude-sonnet-4-6")
-    expect(targets[2].route).toBeNull()
-    expect(targets[0].capabilities).toEqual(["thinking"])
+    expect(chains[0][0].modelId).toBe("claude-sonnet-test")
+    expect(chains[1][0].credential).toBeNull()
   })
 
-  it("uses a stable status key per role-route pair", () => {
-    expect(roleChainStatusKey("copilot_chat", "anthropic-official:claude-sonnet-4-6")).toBe(
-      "copilot_chat:anthropic-official:claude-sonnet-4-6",
-    )
+  it("uses a stable status key per model-provider pair", () => {
+    expect(roleChainStatusKey("CL46T", "anthropic")).toBe("CL46T:anthropic")
   })
 
   it("runs queued work without exceeding the concurrency limit", async () => {

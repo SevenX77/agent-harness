@@ -1,14 +1,7 @@
 export { SettingsPage } from "./SettingsPage"
 export { SettingsPageContent } from "./SettingsPageContent"
-export { createRouteDragData, LlmRolesTab } from "./LlmRolesTab"
+export { LlmRolesTab } from "./LlmRolesTab"
 export { getModelAvailability, type ModelAvailability } from "./availability"
-export {
-  appendRouteToRole,
-  applyProfileToRole,
-  createEmptyRole,
-  groupAvailableRoutes,
-  moveRouteInRole,
-  removeRouteFromRole,
-  routeDisplayName,
-} from "./role-utils"
-export type { SettingsPageContentProps, SettingsPageProps, SettingsTab } from "./types"
+export { draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, inferProviderType, notableProviderKeyForDraft, officialProviderDrafts, providerCachedTestResult, providerDraftForAction, providerTestParamsFingerprint, providerTestParamsMatch, shouldShowManualModelPanel, thirdPartyProviderDrafts } from "./provider-utils"
+export { appendModelToRole, moveModelInRole, moveProviderInRole, removeModelFromRole, removeProviderFromRole, reorderModelInRole, reorderProviderInRole, toggleModelFallback, updateActiveModel, updateRoleModelSettings, validateRoleDraft, visibleRoleNames } from "./role-utils"
+export type { ProviderDraft, SettingsPageContentProps, SettingsPageProps, SettingsTab } from "./types"

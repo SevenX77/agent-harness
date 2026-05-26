@@ -62,6 +62,8 @@ Agent cognitive template 要求规则不清晰时调用 `log_ambiguity`。Runtim
 | `related_refs` | list[string] | 否 | `[]` | 从 `@reference:<id>` 提取 | — | 关联资料 |
 | `related_protocols` | list[string] | 否 | `[]` | 从 `@protocol:<id>` 提取 | — | 关联规则 |
 
+> 注 (live 行为对齐): 上表 `[F-v3-tool-argument-invalid]` 是**目标态入参校验契约**。当前 live `log_ambiguity` (cognitive/ambiguity.py) 对这些字段以 `str(... or "")` **容错处理**, 不主动抛该码; 字段真正缺失时表现为 `AmbiguityLoggedEvent` 的 Pydantic ValidationError。严格入参校验属后续目标态。
+
 投递顺序:
 
 1. tool wrapper / callback bridge 记录普通 tool lifecycle。
@@ -252,3 +254,4 @@ Trace payload 不保存 provider API key、HTTP headers、完整大文档或未�
 | builtin reference reader enter/exit/fallback 在装配期真实发出 | 当前已通过 `assemble_graph(..., callbacks=...)` 接线, loader/runner 入口透传 callbacks; 无 callbacks 时不发 trace。 |
 | fallback 事件通过统一 tracing 底座发出 | 当前 gateway fallback 直接遍历 callbacks 调 `on_event`。 |
 | prompt、reference、tool result 按统一策略截断 | 当前部分 proxy / tracing 能做轻量序列化，但没有全局统一截断策略覆盖所有 graph skill 事件。 |
+| 异步日志记录器 (queue / drop policy / payload 上限 / 文件轮转) | **目标态 (MVP0 SHOULD)，PR E 未实现**；当前 `TracingCallback` 同步写 JSONL，无异步队列 / 背压 / 轮转。 |

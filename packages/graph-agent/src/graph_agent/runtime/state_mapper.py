@@ -162,12 +162,22 @@ class ReaderSandboxState:
     skill_id: str
     phase_id: str
     root: Path
+    references: list[dict[str, Any]] | None = None
+    max_output_tokens: int = 3000
+    language: str = "zh"
     timeout_s: int = 60
 
     def to_blackboard(self) -> BlackboardState:
         return {
             "data": {
-                "inputs": {"skill_id": self.skill_id, "phase_id": self.phase_id},
+                "inputs": {
+                    "skill_id": self.skill_id,
+                    "phase_id": self.phase_id,
+                    "references": list(self.references or []),
+                    "max_output_tokens": self.max_output_tokens,
+                    "language": self.language,
+                    "timeout_s": self.timeout_s,
+                },
                 "phase_outputs": {},
                 "scratch": {},
             },

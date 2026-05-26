@@ -426,6 +426,118 @@ def test_put_role_v3_thinking_required_unknown_blocks_with_needs_test(
     assert entry["warnings"][0]["code"] == "thinking_capability_unknown"
 
 
+def test_put_role_v3_returns_fresh_report_without_persisting_report(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    route_id = "ready-provider:gpt-5"
+    credentials = LLMCredentialsFile(
+        provider_endpoints={"ready-provider": _provider_endpoint("ready-provider")},
+        provider_routes={route_id: _provider_route(route_id)},
+    )
+    _seed_materializer_registry(tmp_path, monkeypatch, credentials)
+    roles_path = tmp_path / "settings" / "llm" / "llm_roles.yaml"
+
+    put_response = client.put(
+        "/api/llm/roles/analyst",
+        json={
+            "role_kind": "graph_agent",
+            "system_prompt_prefix": "",
+            "model_fallback_enabled": True,
+            "intent": {
+                "provider_preference": "manual_order",
+                "thinking": "required",
+            },
+            "model_groups": [
+                {
+                    "canonical_id": "gpt-5",
+                    "display_name": "GPT-5",
+                    "provider_models": [{"route_id": route_id}],
+                }
+            ],
+        },
+    )
+
+    assert put_response.status_code == 200
+    assert put_response.json()["materialization_report"]["entries"][0]["role_fit"] == (
+        "needs_test"
+    )
+    assert "materialization_report" not in roles_path.read_text(encoding="utf-8")
+
+    get_response = client.get("/api/llm/roles/analyst")
+
+    assert get_response.status_code == 200
+    get_body = get_response.json()
+    assert get_body["materialization_report"]["entries"][0]["role_fit"] == "needs_test"
+    assert get_body["materialization_report"]["entries"][0]["route_id"] == route_id
+
+
+def test_get_role_v3_rematerializes_report_from_current_route_capabilities(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    route_id = "ready-provider:gpt-5"
+    credentials = LLMCredentialsFile(
+        provider_endpoints={"ready-provider": _provider_endpoint("ready-provider")},
+        provider_routes={route_id: _provider_route(route_id)},
+    )
+    _seed_materializer_registry(tmp_path, monkeypatch, credentials)
+
+    put_response = client.put(
+        "/api/llm/roles/analyst",
+        json={
+            "role_kind": "graph_agent",
+            "system_prompt_prefix": "",
+            "model_fallback_enabled": True,
+            "intent": {
+                "provider_preference": "manual_order",
+                "thinking": "required",
+            },
+            "model_groups": [
+                {
+                    "canonical_id": "gpt-5",
+                    "display_name": "GPT-5",
+                    "provider_models": [{"route_id": route_id}],
+                }
+            ],
+        },
+    )
+    assert put_response.status_code == 200
+    assert put_response.json()["fallback_chain"] == []
+
+    refreshed_credentials = credentials.model_copy(
+        update={
+            "provider_routes": {
+                route_id: credentials.provider_routes[route_id].model_copy(
+                    update={
+                        "capabilities": {
+                            "thinking_protocol": CapabilityValue(
+                                value=True,
+                                source="probed_verified",
+                            )
+                        }
+                    }
+                )
+            }
+        }
+    )
+
+    save_credentials(
+        refreshed_credentials,
+        tmp_path / "settings" / "llm" / "llm_credentials.json",
+    )
+
+    get_response = client.get("/api/llm/roles/analyst")
+
+    assert get_response.status_code == 200
+    get_body = get_response.json()
+    assert [entry["route_id"] for entry in get_body["fallback_chain"]] == [route_id]
+    assert get_body["materialization_report"]["entries"][0]["role_fit"] == "using"
+    assert get_body["materialization_report"]["entries"][0]["warnings"] == []
+
+
 def test_put_role_v3_thinking_required_unsupported_blocks_with_not_fit(
     client: TestClient,
     tmp_path: Path,

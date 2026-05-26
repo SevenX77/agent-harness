@@ -529,7 +529,7 @@ async def apply_import_draft(
 @router.get("/roles", response_model=RolesData)
 async def get_llm_roles() -> RolesData:
     """Return all route-backed roles."""
-    return _load_roles_or_empty()
+    return _materialize_roles_for_response(_load_roles_or_empty())
 
 
 @router.put("/roles", response_model=RolesData)
@@ -542,7 +542,10 @@ async def put_llm_roles(request: RolesData) -> RolesData:
             "model_profiles": {**current.model_profiles, **request.model_profiles},
         }
     )
-    return _save_roles_with_active_routes(merged)
+    credentials = load_credentials()
+    materialized = _materialize_roles_for_response(merged, credentials)
+    saved = _save_roles_with_active_routes(materialized)
+    return _materialize_roles_for_response(saved, credentials)
 
 
 @router.get("/roles/{role_name}", response_model=RoleEntry)
@@ -550,7 +553,7 @@ async def get_llm_role(role_name: str) -> RoleEntry:
     """Return one role."""
     data = _load_roles_or_empty()
     try:
-        return get_role(data, role_name)
+        return _materialize_role_for_response(get_role(data, role_name))
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"Unknown LLM role: {role_name}") from exc
 
@@ -571,7 +574,7 @@ async def put_llm_role(role_name: str, request: RoleEntry) -> RoleEntry:
     saved = _save_roles_with_active_routes(
         data.model_copy(update={"schema_version": schema_version, "roles": roles})
     )
-    return saved.roles[role_name]
+    return _materialize_role_for_response(saved.roles[role_name], credentials)
 
 
 @router.post("/roles/{role_name}/test")
@@ -583,6 +586,7 @@ async def test_llm_role(role_name: str, _payload: dict[str, Any] | None = None) 
     if role is None:
         raise HTTPException(status_code=404, detail=f"Unknown LLM role: {role_name}")
     credentials = load_credentials()
+    role = _materialize_role_for_response(role, credentials)
     model_groups: dict[str, dict[str, Any]] = {}
     warnings: list[dict[str, Any]] = []
     aggregate_status = "ok"
@@ -727,6 +731,7 @@ def _registry_response(
     *,
     setup_required: bool = False,
 ) -> RegistryResponse:
+    roles = _materialize_roles_for_response(roles, credentials)
     routes_by_canonical: dict[str, list[str]] = {}
     for route_id, route in credentials.provider_routes.items():
         routes_by_canonical.setdefault(route.canonical_id, []).append(route_id)
@@ -1161,6 +1166,36 @@ def _load_roles_or_empty(path: Path | None = None) -> RolesData:
     if not active_path.exists():
         return RolesData()
     return load_roles_file(active_path)
+
+
+def _materialize_roles_for_response(
+    data: RolesData,
+    credentials: LLMCredentialsFile | None = None,
+) -> RolesData:
+    if not any(role.model_groups for role in data.roles.values()):
+        return data
+    active_credentials = credentials or load_credentials()
+    health_store = _health_store()
+    return data.model_copy(
+        update={
+            "schema_version": 3,
+            "roles": {
+                role_name: materialize_role(role, active_credentials, health_store)
+                if role.model_groups
+                else role
+                for role_name, role in data.roles.items()
+            },
+        }
+    )
+
+
+def _materialize_role_for_response(
+    role: RoleEntry,
+    credentials: LLMCredentialsFile | None = None,
+) -> RoleEntry:
+    if not role.model_groups:
+        return role
+    return materialize_role(role, credentials or load_credentials(), _health_store())
 
 
 def _save_roles_with_active_routes(data: RolesData) -> RolesData:

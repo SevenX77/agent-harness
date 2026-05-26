@@ -38,7 +38,9 @@ def save_roles_file(
 ) -> None:
     """Atomically save roles YAML after route reference validation."""
     validate_references(data, known_route_ids=known_route_ids)
-    payload = _quote_lint_values(data.model_dump(mode="json"))
+    payload = _quote_lint_values(
+        data.model_dump(mode="json", exclude=_runtime_response_exclude(data))
+    )
     yaml = _yaml()
     from io import StringIO
 
@@ -124,6 +126,16 @@ def _quote_lint_values(value: Any) -> Any:
     if isinstance(value, list):
         return [_quote_lint_values(item) for item in value]
     return value
+
+
+def _runtime_response_exclude(data: RolesData) -> dict[str, Any]:
+    """Exclude response-only materializer diagnostics from persisted authoring data."""
+    return {
+        "roles": {
+            role_name: {"materialization_report"}
+            for role_name in data.roles
+        }
+    }
 
 
 def _atomic_write(path: Path, text: str) -> None:

@@ -67,7 +67,7 @@ def test_error_registry_matches_error_code_spec_key_set() -> None:
     registry = _error_registry()
 
     assert set(registry) == _spec_codes()
-    assert len(registry) == len(_spec_codes()) == 89
+    assert len(registry) == len(_spec_codes()) == 90
 
 
 def test_error_registry_preserves_multi_stage_codes() -> None:
@@ -82,6 +82,7 @@ def test_error_registry_preserves_multi_stage_codes() -> None:
         "运行期",
     )
     assert registry["[F-v3-skill-not-registered]"].stage == ("编译期", "装配期")
+    assert registry["[F-v3-skill-id-ambiguous]"].stage == ("编译期", "装配期")
 
 
 def test_graph_agent_error_exposes_serializable_payload() -> None:
@@ -110,7 +111,7 @@ def test_concrete_graph_agent_error_subclass_exposes_payload() -> None:
     )
 
 
-def test_skill_compilation_error_maps_location_fields_into_payload(tmp_path: Path) -> None:
+def test_skill_compilation_error_maps_location_fields_into_payload(tmp_path: Path, mock_skill_resolver: object) -> None:
     ErrorPayload = _error_payload_model()
     skill_path = tmp_path / "GRAPH.md"
     payload = ErrorPayload(code="[F-v3-graph-schema-unknown-field]", message="bad field")
@@ -126,9 +127,9 @@ def test_skill_compilation_error_maps_location_fields_into_payload(tmp_path: Pat
     assert exc.payload.field_path == "io.inputs"
 
 
-def test_loader_failure_asserts_payload_code(tmp_path: Path) -> None:
+def test_loader_failure_asserts_payload_code(tmp_path: Path, mock_skill_resolver: object) -> None:
     with pytest.raises(SkillLoadError) as exc_info:
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     assert exc_info.value.payload.code == "[F-v3-graph-root-missing]"
 
@@ -140,7 +141,7 @@ def test_runtime_failure_asserts_payload_code() -> None:
     assert exc_info.value.payload.code == "[F-v3-runtime-state-mapping-failed]"
 
 
-def test_builtin_tool_failure_asserts_payload_code(tmp_path: Path) -> None:
+def test_builtin_tool_failure_asserts_payload_code(tmp_path: Path, mock_skill_resolver: object) -> None:
     with pytest.raises(GraphAgentFatalError) as exc_info:
         read_declared_reference(root=tmp_path, references={}, reference_id="missing")
 
@@ -150,7 +151,7 @@ def test_builtin_tool_failure_asserts_payload_code(tmp_path: Path) -> None:
 def test_error_registry_entries_have_complete_nonempty_metadata() -> None:
     registry = _error_registry()
 
-    assert len(registry) == len(_spec_codes()) == 89
+    assert len(registry) == len(_spec_codes()) == 90
     for code, metadata in registry.items():
         assert metadata.code == code
         assert metadata.code

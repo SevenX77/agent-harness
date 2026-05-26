@@ -101,23 +101,23 @@ io:
     )
 
 
-def test_γ0_1_agent_body_without_exit_contract_loads_successfully(tmp_path: Path) -> None:
+def test_γ0_1_agent_body_without_exit_contract_loads_successfully(tmp_path: Path, mock_skill_resolver: object) -> None:
     _write_v030_graph(tmp_path)
     _write_agent_phase(tmp_path, include_exit_contract=False)
 
-    compiled = SkillLoader().compile_skill(tmp_path)
+    compiled = SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     ast = compiled.nodes[0].ast
     assert isinstance(ast, AgentNodeAST)
     assert not hasattr(ast, "exit_contract")
 
 
-def test_γ0_1_legacy_exit_contract_tag_is_rejected_for_v030_agent(tmp_path: Path) -> None:
+def test_γ0_1_legacy_exit_contract_tag_is_rejected_for_v030_agent(tmp_path: Path, mock_skill_resolver: object) -> None:
     _write_v030_graph(tmp_path)
     _write_agent_phase(tmp_path, include_exit_contract=True)
 
     with pytest.raises(SkillLoadError, match="exit_contract"):
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
 
 def test_γ0_2_agent_node_validator_defaults_false() -> None:
@@ -132,11 +132,11 @@ def test_γ0_2_agent_node_validator_defaults_false() -> None:
     assert ast.validator is False
 
 
-def test_γ0_2_agent_loader_accepts_validator_true(tmp_path: Path) -> None:
+def test_γ0_2_agent_loader_accepts_validator_true(tmp_path: Path, mock_skill_resolver: object) -> None:
     _write_v030_graph(tmp_path)
     _write_agent_phase(tmp_path, validator=True, include_exit_contract=False)
 
-    compiled = SkillLoader().compile_skill(tmp_path)
+    compiled = SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     ast = compiled.nodes[0].ast
     assert isinstance(ast, AgentNodeAST)
@@ -167,14 +167,16 @@ def test_γ0_2_subgraph_node_validator_defaults_false() -> None:
     assert ast.validator is False
 
 
-def test_γ0_2_subgraph_loader_accepts_validator_true(tmp_path: Path) -> None:
+def test_γ0_2_subgraph_loader_accepts_validator_true(
+    tmp_path: Path, mock_skill_resolver: object
+) -> None:
     _write_v030_graph(tmp_path, mode="subgraph")
     _write_subgraph_phase(tmp_path, validator=True)
     child = tmp_path / "child-skill"
     _write_v030_graph(child)
     _write_agent_phase(child)
 
-    compiled = SkillLoader().compile_skill(tmp_path)
+    compiled = SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     ast = compiled.nodes[0].ast
     assert isinstance(ast, SubgraphNodeAST)

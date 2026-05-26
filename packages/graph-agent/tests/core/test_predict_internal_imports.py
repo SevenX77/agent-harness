@@ -23,6 +23,7 @@ EXPECTED_TOP_LEVEL_EXPORTS = [
     "CompiledSkill",
     "CompiledStateGraph",
     "BlackboardState",
+    "LocalWorkspaceResolver",
     "SkillManifest",
     "serialize_skill",
     "Callback",
@@ -80,7 +81,7 @@ def test_predict_gateway_chat_model_is_dynamic_subclass() -> None:
     assert PredictGatewayChatModel is not GatewayChatModel
 
 
-def test_top_level_13_export_abi_has_no_predict_additions() -> None:
+def test_top_level_export_abi_has_no_predict_additions() -> None:
     assert graph_agent.__all__ == EXPECTED_TOP_LEVEL_EXPORTS
     assert "PredictGatewayChatModel" not in graph_agent.__all__
     assert "BaseMockStrategy" not in graph_agent.__all__

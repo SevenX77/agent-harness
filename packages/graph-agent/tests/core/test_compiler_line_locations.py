@@ -10,7 +10,7 @@ from graph_agent.core.loader import SkillLoader
 from graph_agent.core.parser import locate_line_for_pydantic_loc, parse_markdown_parts
 
 
-def test_loader_validation_error_mentions_graph_md(tmp_path: Path) -> None:
+def test_loader_validation_error_mentions_graph_md(tmp_path: Path, mock_skill_resolver: object) -> None:
     (tmp_path / "phases" / "hello").mkdir(parents=True)
     (tmp_path / "GRAPH.md").write_text(
         """---
@@ -47,13 +47,13 @@ io:
     )
 
     with pytest.raises(SkillLoadError) as excinfo:
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     assert "GRAPH.md" in str(excinfo.value)
     assert "manifest validation failed" in str(excinfo.value)
 
 
-def test_locate_line_returns_one_indexed_line(tmp_path: Path) -> None:
+def test_locate_line_returns_one_indexed_line(tmp_path: Path, mock_skill_resolver: object) -> None:
     graph = tmp_path / "GRAPH.md"
     graph.write_text(
         "---\n"  # line 1

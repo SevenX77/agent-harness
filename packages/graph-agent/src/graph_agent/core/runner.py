@@ -50,6 +50,7 @@ from graph_agent.core.exceptions import (
     SkillLoadError,
 )
 from graph_agent.core.loader import load_workflow_from_md
+from graph_agent.core.local_workspace_resolver import LocalWorkspaceResolver
 from graph_agent.core.result import WorkflowMetrics, WorkflowResult
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol, require_skill_resolver
 from graph_agent.core.state import WorkflowState
@@ -600,8 +601,16 @@ def main() -> None:
     if args.output:
         inputs["output_dir"] = args.output
 
+    skill_path = Path(args.skill)
+    resolver_roots = [Path.cwd(), Path.cwd() / "skills"]
+    if skill_path.is_dir():
+        resolver_roots.extend([skill_path, skill_path / "registry", skill_path.parent])
+    else:
+        resolver_roots.extend([skill_path.parent, skill_path.parent / "registry"])
+
     result = run_skill(
         args.skill,
+        skill_resolver=LocalWorkspaceResolver(search_paths=resolver_roots),
         thread_id=args.thread_id,
         unattended=args.unattended,
         **inputs,

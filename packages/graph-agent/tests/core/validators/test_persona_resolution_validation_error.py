@@ -9,7 +9,9 @@ from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import SkillLoadError
 
 
-def test_legacy_persona_frontmatter_file_is_not_compilable_v21_root(tmp_path: Path) -> None:
+def test_legacy_persona_frontmatter_file_is_not_compilable_v21_root(
+    tmp_path: Path, mock_skill_resolver: object
+) -> None:
     host_skill = tmp_path / "SKILL.md"
     host_skill.write_text(
         """---
@@ -23,4 +25,4 @@ adopted_persona: broken_persona
     )
 
     with pytest.raises(SkillLoadError, match="expects a skill root directory"):
-        compile_skill(host_skill, cache=False)
+        compile_skill(host_skill, cache=False, skill_resolver=mock_skill_resolver)

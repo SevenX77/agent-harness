@@ -52,11 +52,13 @@ io:
         )
 
 
-def test_v030_phase_token_info_has_raw_line_and_line_numbers(tmp_path: Path) -> None:
+def test_v030_phase_token_info_has_raw_line_and_line_numbers(
+    tmp_path: Path, mock_skill_resolver: object
+) -> None:
     _write_v030_phase_token_skill(tmp_path)
     graph_text = (tmp_path / "GRAPH.md").read_text(encoding="utf-8")
     graph_body = graph_text.split("---", 2)[2].lstrip("\n")
-    compiled = compile_skill(tmp_path, cache=False)
+    compiled = compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
 
     info = get_phase_token_info(compiled, "prepare")
 
@@ -67,11 +69,13 @@ def test_v030_phase_token_info_has_raw_line_and_line_numbers(tmp_path: Path) -> 
     assert info.attrs == {"depends_on": "input"}
 
 
-def test_v030_phase_tokens_expose_attribute_offsets(tmp_path: Path) -> None:
+def test_v030_phase_tokens_expose_attribute_offsets(
+    tmp_path: Path, mock_skill_resolver: object
+) -> None:
     _write_v030_phase_token_skill(tmp_path)
     graph_text = (tmp_path / "GRAPH.md").read_text(encoding="utf-8")
     graph_body = graph_text.split("---", 2)[2].lstrip("\n")
-    compiled = compile_skill(tmp_path, cache=False)
+    compiled = compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
 
     for phase_id in ("prepare", "branch_a", "branch_b", "assemble"):
         info = get_phase_token_info(compiled, phase_id)
@@ -88,8 +92,8 @@ def test_v030_phase_tokens_expose_attribute_offsets(tmp_path: Path) -> None:
     assert assemble.attr_spans["depends_on"].value == "branch_a branch_b"
 
 
-def test_missing_phase_token_info_returns_none(tmp_path: Path) -> None:
+def test_missing_phase_token_info_returns_none(tmp_path: Path, mock_skill_resolver: object) -> None:
     _write_v030_phase_token_skill(tmp_path)
-    compiled = compile_skill(tmp_path, cache=False)
+    compiled = compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
 
     assert get_phase_token_info(compiled, "missing") is None

@@ -85,6 +85,7 @@ def _write_skill(tmp_path: Path) -> Path:
 def test_run_id_cleanup_failure_raises_persistence_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    mock_skill_resolver: object,
 ) -> None:
     skill_path = _write_skill(tmp_path)
     output_dir = tmp_path / "out"
@@ -104,7 +105,9 @@ def test_run_id_cleanup_failure_raises_persistence_error(
 
     monkeypatch.setattr(Path, "unlink", _broken_unlink)
 
-    result = runner.run_skill(skill_path, output_dir=str(output_dir))
+    result = runner.run_skill(
+        skill_path, output_dir=str(output_dir), skill_resolver=mock_skill_resolver
+    )
 
     assert result.success is False
     assert result.error is not None
@@ -115,6 +118,7 @@ def test_checkpoint_cleanup_failure_warns_and_keeps_success(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
+    mock_skill_resolver: object,
 ) -> None:
     skill_path = _write_skill(tmp_path)
 
@@ -125,7 +129,7 @@ def test_checkpoint_cleanup_failure_warns_and_keeps_success(
         lambda *args, **kwargs: _SuccessfulHarness(),
     )
 
-    result = runner.run_skill(skill_path, thread_id="thread-1")
+    result = runner.run_skill(skill_path, thread_id="thread-1", skill_resolver=mock_skill_resolver)
 
     assert result.success is True
     assert result.error is None
@@ -135,6 +139,7 @@ def test_checkpoint_cleanup_failure_warns_and_keeps_success(
 def test_cleanup_on_success_deletes_thread_and_emits_event(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    mock_skill_resolver: object,
 ) -> None:
     skill_path = _write_skill(tmp_path)
     checkpointer = _RecordingDeleteThreadCheckpointer()
@@ -147,7 +152,12 @@ def test_cleanup_on_success_deletes_thread_and_emits_event(
         lambda *args, **kwargs: _SuccessfulRecordingHarness(checkpointer),
     )
 
-    result = runner.run_skill(skill_path, callbacks=[callback], thread_id="thread-1")
+    result = runner.run_skill(
+        skill_path,
+        callbacks=[callback],
+        thread_id="thread-1",
+        skill_resolver=mock_skill_resolver,
+    )
 
     assert result.success is True
     assert checkpointer.deleted_thread_ids == ["thread-1"]
@@ -160,6 +170,7 @@ def test_cleanup_on_success_deletes_thread_and_emits_event(
 def test_no_cleanup_on_failure_preserves_checkpoint(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    mock_skill_resolver: object,
 ) -> None:
     skill_path = _write_skill(tmp_path)
     checkpointer = _RecordingDeleteThreadCheckpointer()
@@ -175,7 +186,7 @@ def test_no_cleanup_on_failure_preserves_checkpoint(
     )
 
     with pytest.raises(RuntimeError, match="workflow failed"):
-        runner.run_skill(skill_path, thread_id="thread-1")
+        runner.run_skill(skill_path, thread_id="thread-1", skill_resolver=mock_skill_resolver)
 
     assert checkpointer.deleted_thread_ids == []
 

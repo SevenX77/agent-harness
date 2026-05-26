@@ -199,11 +199,13 @@ io:
 
 def test_minimal_agent_run_uses_v030_cognitive_prompt_and_prefilled_knowledge_base(
     tmp_path: Path,
+    mock_skill_resolver: object,
 ) -> None:
     _agent_skill(tmp_path)
     chat = ToolCallingChatModel()
 
-    assemble_graph(compile_skill(tmp_path, cache=False), chat_model=chat).graph.invoke(
+    compiled = compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
+    assemble_graph(compiled, chat_model=chat, skill_resolver=mock_skill_resolver).graph.invoke(
         {"data": {"inputs": {"topic": "T"}}, "flow": {}, "messages": [], "run_id": "r1"}
     )
 
@@ -223,7 +225,9 @@ def test_minimal_agent_run_uses_v030_cognitive_prompt_and_prefilled_knowledge_ba
     assert "reference body" in knowledge_base
 
 
-def test_agent_can_call_read_example_for_declared_document_example(tmp_path: Path) -> None:
+def test_agent_can_call_read_example_for_declared_document_example(
+    tmp_path: Path, mock_skill_resolver: object
+) -> None:
     _agent_skill(tmp_path)
     chat = ToolCallingChatModel(
         [
@@ -232,7 +236,8 @@ def test_agent_can_call_read_example_for_declared_document_example(tmp_path: Pat
         ]
     )
 
-    assemble_graph(compile_skill(tmp_path, cache=False), chat_model=chat).graph.invoke(
+    compiled = compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
+    assemble_graph(compiled, chat_model=chat, skill_resolver=mock_skill_resolver).graph.invoke(
         {"data": {"inputs": {"topic": "T"}}, "flow": {}, "messages": [], "run_id": "r1"}
     )
 
@@ -241,10 +246,12 @@ def test_agent_can_call_read_example_for_declared_document_example(tmp_path: Pat
 
 def test_subgraph_target_skill_runs_and_child_data_does_not_inherit_parent(
     tmp_path: Path,
+    mock_skill_resolver: object,
 ) -> None:
     _subgraph_parent(tmp_path)
 
-    result = assemble_graph(compile_skill(tmp_path, cache=False)).graph.invoke(
+    compiled = compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
+    result = assemble_graph(compiled, skill_resolver=mock_skill_resolver).graph.invoke(
         {
             "data": {
                 "inputs": {"public": "visible"},

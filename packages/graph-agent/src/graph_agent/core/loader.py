@@ -1,20 +1,18 @@
-"""V2.1 graph skill loader: route GRAPH.md + phase node documents."""
+"""V0.3.0 graph skill loader: route GRAPH.md + phase node documents."""
 
 from __future__ import annotations
 
 import ast
 import importlib.util
 import inspect
-import json
 import logging
 import re
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from json import JSONDecodeError
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Literal, NoReturn, cast
+from typing import Any, Literal, NoReturn
 
 from jsonschema.exceptions import SchemaError
 from jsonschema.validators import Draft202012Validator
@@ -26,9 +24,7 @@ from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
 from graph_agent.core.manifest import (
     AgentNodeAST,
     GraphManifest,
-    GraphPhaseRef,
     LogicNodeAST,
-    SkillNodeAST,
     SubgraphNodeAST,
 )
 from graph_agent.core.mentions import first_broken_mention, scan_mentions
@@ -47,13 +43,13 @@ from graph_agent.core.subagents import build_subagent_input_model, build_subagen
 
 logger = logging.getLogger(__name__)
 
-RouteKind = Literal["graph", "logic", "subgraph", "skill"]
-PhaseAST = LogicNodeAST | SubgraphNodeAST | AgentNodeAST | SkillNodeAST
+RouteKind = Literal["graph", "logic", "subgraph", "agent"]
+PhaseAST = LogicNodeAST | SubgraphNodeAST | AgentNodeAST
 
 _PHASE_FILE_TO_MODE: dict[str, str] = {
     "LOGIC.md": "logic",
     "SUBGRAPH.md": "subgraph",
-    "SKILL.md": "skill",
+    "SKILL.md": "agent",
 }
 
 
@@ -97,15 +93,6 @@ class CompiledSubagent:
 
 
 @dataclass(frozen=True)
-class _RawPhaseAttrs:
-    id: str | None
-    src: str | None
-    depends_on_raw: str | None
-    depends_on: list[str]
-    line: int
-
-
-@dataclass(frozen=True)
 class PhaseAttributeSpan:
     """Source span for one attribute inside a root GRAPH.md phase tag."""
 
@@ -134,8 +121,18 @@ class PhaseTokenInfo:
     attr_spans: dict[str, PhaseAttributeSpan]
 
 
+@dataclass(frozen=True)
+class BodyPhaseRef:
+    """One GRAPH.md body ``<phase>`` topology declaration."""
+
+    name: str
+    depends_on: tuple[str, ...]
+    output: bool
+    token: PhaseTokenInfo
+
+
 class SkillLoader:
-    """Thin V2.1 parser/route orchestrator."""
+    """Thin V0.3.0 parser/route orchestrator."""
 
     def __init__(
         self,
@@ -150,27 +147,26 @@ class SkillLoader:
         self,
         skill_root: str | Path,
         *,
-        skill_resolver: SkillResolverProtocol,
+        skill_resolver: SkillResolverProtocol | None = None,
     ) -> CompiledSkill:
-        resolver = require_skill_resolver(skill_resolver, caller="SkillLoader.compile_skill")
         root = Path(skill_root)
-        _guard_v21_root(root)
+        _guard_v030_root(root)
 
         graph_path = root / "GRAPH.md"
-        graph_text = graph_path.read_text(encoding="utf-8")
         graph_frontmatter, graph_body, line_meta = parse_markdown_parts(graph_path)
-        raw_attrs = _extract_phase_attrs(graph_body, line_meta["body_start"])
-        manifest = _build_graph_manifest(graph_path, graph_frontmatter, graph_body, raw_attrs)
-        phase_tokens = _extract_phase_token_info(graph_text, graph_body, line_meta["body_start"])
-        if manifest.phases and "phases" in graph_frontmatter:
-            raw_attrs = _phase_refs_to_raw_attrs(manifest.phases)
-        _validate_graph_topology(graph_path, raw_attrs, root)
-        if manifest.io is not None:
-            io_inputs = _validate_inline_io_schema(graph_path, manifest.io.inputs, "input")
-            io_outputs = _validate_inline_io_schema(graph_path, manifest.io.outputs, "output")
-        else:
-            io_inputs = _validate_io_schema(root, manifest.io_inputs_ref, "input")
-            io_outputs = _validate_io_schema(root, manifest.io_outputs_ref, "output")
+        del line_meta
+        _reject_deprecated_physical_io(root)
+        manifest = _build_graph_manifest(graph_path, graph_frontmatter)
+        body_phase_refs = _extract_body_phase_refs(graph_path, graph_body)
+        phase_tokens: dict[str, PhaseTokenInfo] = {ref.name: ref.token for ref in body_phase_refs}
+        graph_topology = _validate_graph_topology(
+            graph_path,
+            manifest.phases,
+            body_phase_refs,
+            root,
+        )
+        io_inputs = _validate_inline_io_schema(graph_path, manifest.io.inputs, "input")
+        io_outputs = _validate_inline_io_schema(graph_path, manifest.io.outputs, "output")
         input_schema_keys = _extract_output_schema_keys(io_inputs)
         output_schema_keys = _extract_output_schema_keys(io_outputs)
 
@@ -178,12 +174,12 @@ class SkillLoader:
         phase_docs: list[PhaseDocument] = []
         for phase_name, phase_file, mode in discovered:
             frontmatter, body, _ = parse_markdown_parts(phase_file)
-            yaml_mode = str(frontmatter.get("mode") or "").strip()
-            _validate_mode_matches_filename(phase_file, yaml_mode)
+            _reject_phase_forbidden_metadata(phase_file, frontmatter)
             scan_forbidden_topology_tags(phase_file, body)
             phase_docs.append(
                 _build_phase_document(phase_name, phase_file, mode, frontmatter, body)
             )
+        _validate_subgraph_io_contracts(phase_docs, skill_resolver=skill_resolver)
         actions, tools = _discover_actions_and_tools(root, discovered)
         _validate_logic_action_return_keys(
             phase_docs,
@@ -194,12 +190,13 @@ class SkillLoader:
         )
         subagents_by_phase = _compile_subagent_metadata(
             phase_docs,
-            skill_resolver=resolver,
+            skill_resolver=skill_resolver,
         )
         tools = _inject_subagent_tools(tools, subagents_by_phase)
 
         raw = {
             "graph": {"frontmatter": graph_frontmatter, "body": graph_body},
+            "graph_topology": graph_topology,
             "io": {
                 "inputs": io_inputs,
                 "outputs": io_outputs,
@@ -218,7 +215,7 @@ class SkillLoader:
                 for doc in phase_docs
             ],
         }
-        logger.info("Compiled V2.1 graph skill root=%s phases=%d", root, len(phase_docs))
+        logger.info("Compiled V0.3.0 graph skill root=%s phases=%d", root, len(phase_docs))
         return CompiledSkill(
             raw=raw,
             manifest=manifest,
@@ -238,7 +235,7 @@ def load_workflow_from_md(
     skill_resolver: SkillResolverProtocol,
     _loading_stack: set[str] | None = None,
 ) -> Any:
-    """V2.1 temporary runtime wrapper.
+    """V0.3.0 temporary runtime wrapper.
 
     T0.1 owns document routing only.  Runtime LangGraph assembly lands in
     T1.5, so this wrapper rejects file paths and then fails explicitly after
@@ -247,7 +244,7 @@ def load_workflow_from_md(
     del callbacks, _loading_stack
     root = Path(md_path)
     if root.is_file():
-        _fatal(root, 1, "load_workflow_from_md now accepts a V2.1 skill root directory")
+        _fatal(root, 1, "load_workflow_from_md now accepts a V0.3.0 skill root directory")
     from graph_agent.core.compiler import compile_skill
     from graph_agent.core.graph_assembler import assemble_graph
 
@@ -286,11 +283,11 @@ def _purity_fatal(path: Path, line: int, message: str) -> None:
     raise SkillLoadError(f"[F-v3-purity] {path}:{line} {message}")
 
 
-def _guard_v21_root(skill_root: Path) -> None:
+def _guard_v030_root(skill_root: Path) -> None:
     if not skill_root.exists():
         _fatal(skill_root / "GRAPH.md", 1, "missing required GRAPH.md")
     if not skill_root.is_dir():
-        _fatal(skill_root, 1, "V2.1 compile_skill expects a skill root directory")
+        _fatal(skill_root, 1, "V0.3.0 compile_skill expects a skill root directory")
 
     root_skill = skill_root / "SKILL.md"
     if root_skill.exists():
@@ -320,9 +317,19 @@ def _discover_phase_files(skill_root: Path) -> list[tuple[str, Path, str]]:
         ]
         if len(phase_files) > 1:
             names = ", ".join(path.name for path in phase_files)
-            _fatal(phase_files[1], 1, f"phase directory contains multiple node files: {names}")
+            _fatal(
+                phase_files[1],
+                1,
+                "[F-v3-graph-phase-mode-ambiguous] "
+                f"phase directory contains multiple node files: {names}",
+            )
         if not phase_files:
-            _fatal(phase_dir, 1, "phase directory must contain LOGIC.md, SUBGRAPH.md, or SKILL.md")
+            _fatal(
+                phase_dir,
+                1,
+                "[F-v3-graph-phase-node-missing] "
+                "phase directory must contain LOGIC.md, SUBGRAPH.md, or SKILL.md",
+            )
 
         phase_file = phase_files[0]
         discovered.append((phase_dir.name, phase_file, _PHASE_FILE_TO_MODE[phase_file.name]))
@@ -354,7 +361,7 @@ def _discover_actions_and_tools(
                 _actions_fatal(tools_dir, 1, "tools/ is only allowed for SKILL phases")
             if actions_dir.exists():
                 actions_by_phase[phase_id] = _load_action_dir(actions_dir, phase_id)
-        elif mode == "skill":
+        elif mode == "agent":
             if actions_dir.exists():
                 _actions_fatal(actions_dir, 1, "actions/ is only allowed for LOGIC phases")
             if tools_dir.exists():
@@ -370,21 +377,61 @@ def _discover_actions_and_tools(
     )
 
 
+def _reject_deprecated_physical_io(skill_root: Path) -> None:
+    for relative in ("io/inputs.json", "io/outputs.json"):
+        path = skill_root / relative
+        if path.exists():
+            _io_fatal(
+                path,
+                1,
+                "[F-v3-graph-io-physical-file-deprecated] "
+                f"physical root IO file {relative!r} is not supported",
+            )
+
+
+def _validate_subgraph_io_contracts(
+    phase_docs: list[PhaseDocument],
+    *,
+    skill_resolver: SkillResolverProtocol | None,
+) -> None:
+    for doc in phase_docs:
+        if not isinstance(doc.ast, SubgraphNodeAST):
+            continue
+        resolver = require_skill_resolver(skill_resolver, caller="SkillLoader.compile_skill")
+        child_root = resolve_skill_root(resolver, doc.ast.target_skill)
+        child = SkillLoader(validate_context_writes=False).compile_skill(
+            child_root,
+            skill_resolver=resolver,
+        )
+        for side in ("inputs", "outputs"):
+            parent_schema = getattr(doc.ast.io, side)
+            child_schema = getattr(child.manifest.io, side)
+            if parent_schema != child_schema:
+                _fatal(
+                    doc.path,
+                    _frontmatter_key_line(doc.path, "io"),
+                    "[F-v3-subgraph-io-mismatch] "
+                    f"SUBGRAPH {doc.phase_name!r} {side} do not match "
+                    f"target_skill {doc.ast.target_skill!r}",
+                )
+
+
 def _compile_subagent_metadata(
     phase_docs: list[PhaseDocument],
     *,
-    skill_resolver: SkillResolverProtocol,
+    skill_resolver: SkillResolverProtocol | None,
 ) -> dict[str, list[CompiledSubagent]]:
     subagents_by_phase: dict[str, list[CompiledSubagent]] = {}
     for doc in phase_docs:
-        if not isinstance(doc.ast, (AgentNodeAST, SkillNodeAST)) or not doc.ast.subagents:
+        if not isinstance(doc.ast, AgentNodeAST) or not doc.ast.subagents:
             continue
+        resolver = require_skill_resolver(skill_resolver, caller="SkillLoader.compile_skill")
         phase_subagents: list[CompiledSubagent] = []
         for spec in doc.ast.subagents:
-            sub_root = resolve_skill_root(skill_resolver, spec.target_skill)
+            sub_root = resolve_skill_root(resolver, spec.target_skill)
             sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(
                 sub_root,
-                skill_resolver=skill_resolver,
+                skill_resolver=resolver,
             )
             input_schema = sub_compiled.raw.get("io", {}).get("inputs")
             if not isinstance(input_schema, dict) or not input_schema:
@@ -588,87 +635,57 @@ def _route_document(file_path: Path) -> RouteKind:
         return "graph"
     if file_path.name in _PHASE_FILE_TO_MODE:
         return _PHASE_FILE_TO_MODE[file_path.name]  # type: ignore[return-value]
-    _fatal(file_path, 1, "unsupported V2.1 document filename")
+    _fatal(file_path, 1, "unsupported V0.3.0 document filename")
 
 
-def _validate_mode_matches_filename(path: Path, yaml_mode: str) -> None:
-    expected = _PHASE_FILE_TO_MODE.get(path.name)
-    if expected is None:
-        _route_document(path)
-        return
-    if path.name == "SKILL.md" and yaml_mode in {"agent", "skill"}:
-        return
-    if yaml_mode != expected:
-        line = _frontmatter_key_line(path, "mode")
-        _fatal(path, line, f"mode {yaml_mode!r} does not match {path.name} filename")
+def _reject_phase_forbidden_metadata(path: Path, frontmatter: dict[str, Any]) -> None:
+    for key in ("mode", "schema_version", "graph_skill_id", "phase_id"):
+        if key not in frontmatter:
+            continue
+        domain = _PHASE_FILE_TO_MODE.get(path.name, "graph")
+        code = f"[F-v3-{domain}-schema-unknown-field]"
+        _fatal(
+            path,
+            _frontmatter_key_line(path, key),
+            f"{code} phase frontmatter field {key!r} is not allowed",
+        )
 
 
 def _build_graph_manifest(
     path: Path,
     frontmatter: dict[str, Any],
-    body: str,
-    raw_attrs: list[_RawPhaseAttrs],
 ) -> GraphManifest:
     data = dict(frontmatter)
-    data.setdefault("schema_version", "2.1")
-
-    input_ref = _first_src(body, "input")
-    output_ref = _first_src(body, "output")
-    if input_ref:
-        data["io_inputs_ref"] = input_ref
-    if output_ref:
-        data["io_outputs_ref"] = output_ref
-
+    if data.get("schema_version") != "v0.3.0":
+        _graph_fatal(
+            path,
+            1,
+            '[F-v3-graph-schema-version-mismatch] GRAPH.md schema_version must be exactly "v0.3.0"',
+        )
+    if "io_inputs_ref" in data or "io_outputs_ref" in data:
+        _graph_fatal(
+            path,
+            1,
+            "[F-v3-graph-io-physical-file-deprecated] "
+            "io_inputs_ref/io_outputs_ref are not supported",
+        )
     if "phases" not in data:
-        phases: list[GraphPhaseRef] = []
-        for attrs in raw_attrs:
-            if attrs.id is None or attrs.src is None:
-                continue
-            phases.append(
-                GraphPhaseRef(
-                    id=attrs.id,
-                    src=attrs.src,
-                    depends_on=attrs.depends_on,
-                )
-            )
-        data["phases"] = phases
+        _graph_fatal(
+            path,
+            1,
+            "[F-v3-graph-phases-missing] GRAPH.md must declare YAML frontmatter phases",
+        )
+    if not isinstance(data.get("phases"), list):
+        _graph_fatal(
+            path,
+            _frontmatter_key_line(path, "phases"),
+            "[F-v3-graph-phases-missing] GRAPH.md phases must be a list[str]",
+        )
 
     try:
         return GraphManifest.model_validate(data)
     except ValidationError as exc:
         _fatal(path, 1, f"GRAPH.md manifest validation failed: {exc}")
-
-
-def _phase_refs_to_raw_attrs(phases: list[GraphPhaseRef]) -> list[_RawPhaseAttrs]:
-    return [
-        _RawPhaseAttrs(
-            id=phase.id,
-            src=phase.src,
-            depends_on_raw=",".join(phase.depends_on),
-            depends_on=phase.depends_on,
-            line=1,
-        )
-        for phase in phases
-    ]
-
-
-def _extract_phase_attrs(body: str, body_start_line: int) -> list[_RawPhaseAttrs]:
-    pattern = re.compile(r"<phase\b([^>]*)/>", re.IGNORECASE | re.DOTALL)
-    raw_attrs: list[_RawPhaseAttrs] = []
-    for match in pattern.finditer(body):
-        attrs = _parse_attrs(match.group(1))
-        line = body_start_line + body[: match.start()].count("\n")
-        depends_on_raw = attrs.get("depends_on")
-        raw_attrs.append(
-            _RawPhaseAttrs(
-                id=attrs.get("id"),
-                src=attrs.get("src"),
-                depends_on_raw=depends_on_raw,
-                depends_on=_split_depends_on(depends_on_raw or ""),
-                line=line,
-            )
-        )
-    return raw_attrs
 
 
 def get_phase_token_info(compiled: CompiledSkill, phase_id: str) -> PhaseTokenInfo | None:
@@ -680,40 +697,6 @@ def get_phase_token_info(compiled: CompiledSkill, phase_id: str) -> PhaseTokenIn
     """
 
     return compiled.phase_tokens.get(phase_id)
-
-
-def _extract_phase_token_info(
-    graph_text: str,
-    body: str,
-    body_start_line: int,
-) -> dict[str, PhaseTokenInfo]:
-    body_start_offset = len(graph_text) - len(body)
-    tokens: dict[str, PhaseTokenInfo] = {}
-    pattern = re.compile(r"<phase\b([^>]*)/>", re.IGNORECASE | re.DOTALL)
-    for match in pattern.finditer(body):
-        raw_text = match.group(0)
-        attrs_raw = match.group(1)
-        attrs = _parse_attrs(attrs_raw)
-        phase_id = attrs.get("id")
-        if phase_id is None:
-            continue
-        token_start = body_start_offset + match.start()
-        token_end = body_start_offset + match.end()
-        line_start = body_start_line + body[: match.start()].count("\n")
-        line_end = line_start + raw_text.count("\n")
-        attr_raw_start = body_start_offset + match.start(1)
-        attr_spans = _phase_attr_spans(attrs_raw, attr_raw_start, graph_text)
-        tokens[phase_id] = PhaseTokenInfo(
-            phase_id=phase_id,
-            raw_text=raw_text,
-            start_offset=token_start,
-            end_offset=token_end,
-            line_start=line_start,
-            line_end=line_end,
-            attrs=attrs,
-            attr_spans=attr_spans,
-        )
-    return tokens
 
 
 def _phase_attr_spans(
@@ -743,57 +726,148 @@ def _phase_attr_spans(
     return spans
 
 
-def _validate_graph_topology(
-    graph_path: Path,
-    raw_attrs: list[_RawPhaseAttrs],
-    skill_root: Path,
-) -> None:
-    for attrs in raw_attrs:
-        if attrs.id is None:
-            _graph_fatal(graph_path, attrs.line, "phase tag missing required id")
-        if attrs.src is None:
-            _graph_fatal(graph_path, attrs.line, f"phase {attrs.id!r} missing required src")
+_PHASE_TAG_RE = re.compile(r"<phase\b([^>]*)>(.*?)</phase>", re.IGNORECASE | re.DOTALL)
 
-    phase_by_id: dict[str, _RawPhaseAttrs] = {}
-    for _index, attrs in enumerate(raw_attrs):
-        assert attrs.id is not None
-        if attrs.id in phase_by_id:
-            _graph_fatal(graph_path, attrs.line, f"duplicate phase id {attrs.id!r}")
-        phase_by_id[attrs.id] = attrs
-        if attrs.depends_on_raw is None:
+
+def _extract_body_phase_refs(graph_path: Path, graph_body: str) -> list[BodyPhaseRef]:
+    refs: list[BodyPhaseRef] = []
+    for match in _PHASE_TAG_RE.finditer(graph_body):
+        attrs_raw = match.group(1)
+        attrs = _parse_attrs(attrs_raw)
+        name = match.group(2).strip()
+        if not name:
             _graph_fatal(
                 graph_path,
-                attrs.line,
-                f"phase {attrs.id!r} missing required depends_on; "
-                'use depends_on="" for entry phases',
+                _xml_line(graph_body, match.start()),
+                "[F-v3-graph-phase-id-invalid] body <phase> name is empty",
             )
+        depends_raw = attrs.get("depends_on")
+        if depends_raw is None or not depends_raw.strip():
+            _graph_fatal(
+                graph_path,
+                _xml_line(graph_body, match.start()),
+                "[F-v3-graph-depends-unknown] body <phase> depends_on is required",
+            )
+        depends_on = tuple(dep for dep in re.split(r"[\s,]+", depends_raw.strip()) if dep)
+        attr_raw_start = match.start(1)
+        token = PhaseTokenInfo(
+            phase_id=name,
+            raw_text=match.group(0),
+            start_offset=match.start(),
+            end_offset=match.end(),
+            line_start=_xml_line(graph_body, match.start()),
+            line_end=_xml_line(graph_body, match.end()),
+            attrs=attrs,
+            attr_spans=_phase_attr_spans(attrs_raw, attr_raw_start, graph_body),
+        )
+        refs.append(
+            BodyPhaseRef(
+                name=name,
+                depends_on=depends_on,
+                output="output" in attrs_raw.split(),
+                token=token,
+            )
+        )
+    return refs
 
-    for attrs in raw_attrs:
-        assert attrs.id is not None
-        for dep in attrs.depends_on:
-            if dep not in phase_by_id:
+
+def _validate_graph_topology(
+    graph_path: Path,
+    phases: list[str],
+    body_phase_refs: list[BodyPhaseRef],
+    skill_root: Path,
+) -> dict[str, Any]:
+    if not phases:
+        _graph_fatal(
+            graph_path,
+            1,
+            "[F-v3-graph-phases-missing] GRAPH.md must declare at least one phase",
+        )
+    if not body_phase_refs:
+        _graph_fatal(
+            graph_path,
+            1,
+            "[F-v3-graph-phase-id-invalid] GRAPH.md body must declare <phase> tags",
+        )
+    if len(set(phases)) != len(phases):
+        _graph_fatal(
+            graph_path,
+            _frontmatter_key_line(graph_path, "phases"),
+            "[F-v3-graph-phase-id-duplicate] duplicate phase name in frontmatter phases",
+        )
+
+    body_names = [ref.name for ref in body_phase_refs]
+    if len(set(body_names)) != len(body_names):
+        _graph_fatal(
+            graph_path,
+            1,
+            "[F-v3-graph-phase-id-duplicate] duplicate phase name in body <phase> tags",
+        )
+
+    phase_set = set(phases)
+    body_set = set(body_names)
+    physical_set = {path.name for path in (skill_root / "phases").iterdir() if path.is_dir()}
+
+    if phase_set != physical_set or body_set != physical_set:
+        _graph_fatal(
+            graph_path,
+            1,
+            "[F-v3-graph-phase-name-mismatch] "
+            "frontmatter phases, body <phase> names, and physical phase dirs must match",
+        )
+
+    adjacency: dict[str, list[str]] = {name: [] for name in phases}
+    input_roots: list[str] = []
+    unknown_deps: list[tuple[BodyPhaseRef, str]] = []
+    for ref in body_phase_refs:
+        for dep in ref.depends_on:
+            if dep == "input":
+                input_roots.append(ref.name)
+                continue
+            if dep not in phase_set:
+                unknown_deps.append((ref, dep))
+                continue
+            if dep == ref.name:
                 _graph_fatal(
                     graph_path,
-                    attrs.line,
-                    f"phase {attrs.id!r} depends_on unknown phase {dep!r}",
+                    ref.token.line_start,
+                    f"[F-v3-graph-phase-cycle] phase {ref.name!r} cannot depend on itself",
                 )
-            if dep == attrs.id:
-                _graph_fatal(graph_path, attrs.line, f"phase {attrs.id!r} cannot depend on itself")
+            adjacency[dep].append(ref.name)
 
-    _validate_acyclic_graph(graph_path, raw_attrs)
-    _validate_no_orphans(graph_path, raw_attrs)
-    for attrs in raw_attrs:
-        assert attrs.id is not None and attrs.src is not None
-        _validate_phase_src(graph_path, attrs, skill_root)
+    _validate_acyclic_graph(graph_path, adjacency)
+
+    if not input_roots:
+        _graph_fatal(
+            graph_path,
+            1,
+            "[F-v3-graph-depends-unknown] at least one phase must depend_on input",
+        )
+    _validate_no_islands(graph_path, adjacency, input_roots)
+    if unknown_deps:
+        ref, dep = unknown_deps[0]
+        _graph_fatal(
+            graph_path,
+            ref.token.line_start,
+            f"[F-v3-graph-depends-unknown] phase {ref.name!r} depends_on unknown phase {dep!r}",
+        )
+    _validate_output_phases(graph_path, body_phase_refs, adjacency)
+    for phase in phases:
+        _validate_phase_dir(graph_path, phase, skill_root)
+    return {
+        "phases": [
+            {
+                "name": ref.name,
+                "depends_on": list(ref.depends_on),
+                "output": ref.output,
+            }
+            for ref in body_phase_refs
+        ],
+        "order": _topological_order(adjacency, phases),
+    }
 
 
-def _validate_acyclic_graph(graph_path: Path, raw_attrs: list[_RawPhaseAttrs]) -> None:
-    adjacency: dict[str, list[str]] = {attrs.id or "": [] for attrs in raw_attrs}
-    line_by_id: dict[str, int] = {attrs.id or "": attrs.line for attrs in raw_attrs}
-    for attrs in raw_attrs:
-        assert attrs.id is not None
-        for dep in attrs.depends_on:
-            adjacency[dep].append(attrs.id)
+def _validate_acyclic_graph(graph_path: Path, adjacency: dict[str, list[str]]) -> None:
 
     state: dict[str, str] = {}
     stack: list[str] = []
@@ -807,8 +881,8 @@ def _validate_acyclic_graph(graph_path: Path, raw_attrs: list[_RawPhaseAttrs]) -
                 cycle = stack[start:] + [nxt]
                 _graph_fatal(
                     graph_path,
-                    line_by_id.get(nxt, 1),
-                    "cycle detected: " + " -> ".join(cycle),
+                    1,
+                    "[F-v3-graph-phase-cycle] cycle detected: " + " -> ".join(cycle),
                 )
             if state.get(nxt) is None:
                 visit(nxt)
@@ -820,100 +894,79 @@ def _validate_acyclic_graph(graph_path: Path, raw_attrs: list[_RawPhaseAttrs]) -
             visit(node)
 
 
-def _validate_no_orphans(graph_path: Path, raw_attrs: list[_RawPhaseAttrs]) -> None:
-    if len(raw_attrs) <= 1:
-        return
-    adjacency: dict[str, set[str]] = {attrs.id or "": set() for attrs in raw_attrs}
-    by_id = {attrs.id or "": attrs for attrs in raw_attrs}
-    for attrs in raw_attrs:
-        assert attrs.id is not None
-        for dep in attrs.depends_on:
-            adjacency[attrs.id].add(dep)
-            adjacency[dep].add(attrs.id)
-
-    start = raw_attrs[0].id
-    assert start is not None
+def _validate_no_islands(
+    graph_path: Path,
+    adjacency: dict[str, list[str]],
+    input_roots: list[str],
+) -> None:
     visited: set[str] = set()
-    stack = [start]
+    stack = list(input_roots)
     while stack:
         node = stack.pop()
         if node in visited:
             continue
         visited.add(node)
-        stack.extend(sorted(adjacency[node] - visited))
+        stack.extend(sorted(set(adjacency[node]) - visited))
 
     for phase_id in adjacency:
         if phase_id not in visited:
-            attrs = by_id[phase_id]
             _graph_fatal(
                 graph_path,
-                attrs.line,
-                f"orphan phase {phase_id!r} is disconnected from the main graph",
+                1,
+                f"[F-v3-graph-phase-island] phase {phase_id!r} is unreachable from input",
             )
 
 
-def _validate_phase_src(graph_path: Path, attrs: _RawPhaseAttrs, skill_root: Path) -> None:
-    assert attrs.id is not None and attrs.src is not None
-    src_path = Path(attrs.src)
-    if src_path.is_absolute():
-        _graph_fatal(graph_path, attrs.line, f"phase {attrs.id!r} src must stay inside skill root")
-    root_resolved = skill_root.resolve()
-    candidate = (skill_root / src_path).resolve()
-    try:
-        candidate.relative_to(root_resolved)
-    except ValueError:
-        _graph_fatal(graph_path, attrs.line, f"phase {attrs.id!r} src must stay inside skill root")
+def _validate_output_phases(
+    graph_path: Path,
+    body_phase_refs: list[BodyPhaseRef],
+    adjacency: dict[str, list[str]],
+) -> None:
+    outputs = {ref.name for ref in body_phase_refs if ref.output}
+    if not outputs:
+        _graph_fatal(
+            graph_path,
+            1,
+            "[F-v3-graph-output-phase-invalid] at least one body <phase> must be output",
+        )
+    non_terminal = {phase for phase, downstream in adjacency.items() if downstream}
+    invalid = sorted(outputs & non_terminal)
+    if invalid:
+        _graph_fatal(
+            graph_path,
+            1,
+            "[F-v3-graph-output-phase-invalid] output phase has downstream edges: "
+            + ", ".join(invalid),
+        )
 
+
+def _validate_phase_dir(graph_path: Path, phase: str, skill_root: Path) -> None:
+    candidate = skill_root / "phases" / phase
     if not candidate.is_dir() or not any(
         (candidate / name).is_file() for name in _PHASE_FILE_TO_MODE
     ):
         _graph_fatal(
             graph_path,
-            attrs.line,
-            f"phase {attrs.id!r} src {attrs.src!r} has no LOGIC.md/SUBGRAPH.md/SKILL.md",
+            1,
+            f"[F-v3-graph-phase-node-missing] phase {phase!r} has no LOGIC.md/SUBGRAPH.md/SKILL.md",
         )
 
 
-def _resolve_io_ref(skill_root: Path, ref: str) -> Path:
-    display_path = skill_root / ref
-    if Path(ref).is_absolute():
-        _io_fatal(display_path, 1, "IO schema ref must stay inside skill root")
-    root_resolved = skill_root.resolve()
-    candidate = (skill_root / ref).resolve()
-    try:
-        candidate.relative_to(root_resolved)
-    except ValueError:
-        _io_fatal(display_path, 1, "IO schema ref must stay inside skill root")
-    return candidate
-
-
-def _validate_io_schema(
-    skill_root: Path,
-    ref: str,
-    kind: Literal["input", "output"],
-) -> dict[str, Any]:
-    path = _resolve_io_ref(skill_root, ref)
-    display_path = skill_root / ref
-    if path.suffix != ".json":
-        _io_fatal(display_path, 1, "IO schema refs must point to .json files")
-    if not path.is_file():
-        _io_fatal(display_path, 1, f"missing IO schema referenced by GRAPH.md {kind}")
-
-    try:
-        schema = json.loads(path.read_text(encoding="utf-8"))
-    except JSONDecodeError as exc:
-        _io_fatal(display_path, exc.lineno, f"invalid JSON: {exc.msg}")
-    except OSError as exc:
-        _io_fatal(display_path, 1, f"failed to read IO schema: {exc}")
-
-    if not isinstance(schema, dict):
-        _io_fatal(display_path, 1, "JSON Schema document must be an object")
-
-    try:
-        Draft202012Validator.check_schema(schema)
-    except SchemaError as exc:
-        _io_fatal(display_path, 1, f"invalid JSON Schema: {exc.message}")
-    return cast(dict[str, Any], schema)
+def _topological_order(adjacency: dict[str, list[str]], phases: list[str]) -> list[str]:
+    indegree = {phase: 0 for phase in phases}
+    for downstream in adjacency.values():
+        for phase in downstream:
+            indegree[phase] += 1
+    queue = [phase for phase in phases if indegree[phase] == 0]
+    order: list[str] = []
+    while queue:
+        phase = queue.pop(0)
+        order.append(phase)
+        for nxt in adjacency[phase]:
+            indegree[nxt] -= 1
+            if indegree[nxt] == 0:
+                queue.append(nxt)
+    return order
 
 
 def _validate_inline_io_schema(path: Path, schema: dict[str, Any], kind: str) -> dict[str, Any]:
@@ -995,6 +1048,8 @@ def _validate_logic_action_return_keys(
     *,
     validate_context_writes: bool,
 ) -> None:
+    if not validate_context_writes:
+        return
     if output_schema_keys is None:
         return
     context_keys = set(output_schema_keys)
@@ -1003,16 +1058,17 @@ def _validate_logic_action_return_keys(
     for doc in phase_docs:
         if not isinstance(doc.ast, LogicNodeAST):
             continue
-        action_def = actions.for_phase(doc.phase_name).get(doc.ast.python_callable)
-        if action_def is None:
-            continue
-        _validate_action_return_keys(
-            action_def.path,
-            output_schema_keys,
-            context_keys,
-            validate_context_writes=validate_context_writes
-            and _should_validate_context_writes(phase_docs),
-        )
+        for action_name in doc.ast.actions:
+            action_def = actions.for_phase(doc.phase_name).get(action_name)
+            if action_def is None:
+                continue
+            _validate_action_return_keys(
+                action_def.path,
+                output_schema_keys,
+                context_keys,
+                validate_context_writes=validate_context_writes
+                and _should_validate_context_writes(phase_docs),
+            )
 
 
 def _should_validate_context_writes(phase_docs: list[PhaseDocument]) -> bool:
@@ -1052,23 +1108,24 @@ def _build_phase_document(
         "goal",
         "step",
         "protocol",
-        "system_prompt",
-        "exit_contract",
-        "python_callable",
+        "example",
+        "action",
     ]
     blocks = extract_raw_blocks(body, allowed)
     data = dict(frontmatter)
     data["raw_blocks"] = blocks
     data.setdefault("name", phase_name)
-    yaml_mode = str(frontmatter.get("mode") or "").strip()
-    is_agent = path.name == "SKILL.md" and yaml_mode == "agent"
-    if mode == "skill" or is_agent:
+    data["mode"] = mode
+    is_agent = path.name == "SKILL.md"
+    if is_agent:
         data = _normalize_skill_node_frontmatter(path, data)
 
     try:
         if mode == "logic":
-            data.setdefault("python_callable", blocks.get("python_callable"))
-            ast: PhaseAST = LogicNodeAST.model_validate(data)
+            data.setdefault("actions", _extract_logic_actions(path, body))
+            logic_ast = LogicNodeAST.model_validate(data)
+            _validate_logic_actions_declared(path, logic_ast, body)
+            ast: PhaseAST = logic_ast
         elif mode == "subgraph":
             ast = SubgraphNodeAST.model_validate(data)
         elif is_agent:
@@ -1076,11 +1133,13 @@ def _build_phase_document(
             ast = AgentNodeAST.model_validate(data)
             _validate_agent_mentions(path, ast, body)
         else:
-            data.setdefault("system_prompt", blocks.get("system_prompt"))
-            data.setdefault("exit_contract", blocks.get("exit_contract"))
-            ast = SkillNodeAST.model_validate(data)
+            _fatal(
+                path,
+                1,
+                f"unsupported phase file {path.name}",
+            )
     except ValidationError as exc:
-        _fatal(path, 1, f"{path.name} AST validation failed: {exc}")
+        _phase_validation_fatal(path, mode, exc)
 
     return PhaseDocument(
         phase_name=phase_name,
@@ -1110,6 +1169,7 @@ def _normalize_skill_node_frontmatter(path: Path, data: dict[str, Any]) -> dict[
         "io",
         "max_iterations",
         "llm_role",
+        "validator",
     )
     for key in phase_config_keys[1:]:
         if key in phase_config:
@@ -1124,20 +1184,70 @@ def _normalize_skill_node_frontmatter(path: Path, data: dict[str, Any]) -> dict[
     return merged
 
 
+def _phase_validation_fatal(path: Path, mode: str, exc: ValidationError) -> NoReturn:
+    text = str(exc)
+    if mode == "logic" and "validator" in text:
+        _fatal(
+            path,
+            _frontmatter_key_line(path, "validator"),
+            "[F-v3-logic-validator-type-invalid] validator must be boolean",
+        )
+    domain = {"agent": "agent", "logic": "logic", "subgraph": "subgraph"}.get(mode, "graph")
+    _fatal(
+        path, 1, f"[F-v3-{domain}-schema-unknown-field] {path.name} AST validation failed: {exc}"
+    )
+
+
+def _extract_logic_actions(path: Path, body: str) -> list[str]:
+    actions: list[str] = []
+    pattern = re.compile(r"<action\b[^>]*>(.*?)</action>", re.IGNORECASE | re.DOTALL)
+    for match in pattern.finditer(body):
+        action = match.group(1).strip()
+        if action:
+            actions.append(action)
+    if not actions:
+        _fatal(path, 1, "[F-v3-logic-actions-empty] LOGIC.md requires <action> tags")
+    return actions
+
+
+def _validate_logic_actions_declared(path: Path, ast: LogicNodeAST, body: str) -> None:
+    body_actions = _extract_logic_actions(path, body)
+    if ast.actions != body_actions:
+        _fatal(
+            path,
+            _frontmatter_key_line(path, "actions"),
+            "[F-v3-logic-actions-empty] LOGIC.md frontmatter actions must match "
+            "body <action> order",
+        )
+
+
 def _parse_agent_body(
     path: Path,
     body: str,
     blocks: dict[str, str],
 ) -> dict[str, Any]:
+    allowed_tags = {"role", "goal", "step", "protocol", "example"}
+    for match in re.finditer(r"</?([A-Za-z_][\w:-]*)\b", body):
+        tag = match.group(1).lower()
+        if tag not in allowed_tags:
+            _fatal(
+                path,
+                _xml_line(body, match.start()),
+                f"[F-v3-agent-body-tag-unknown] unknown top-level tag {tag}",
+            )
     if "<steps" in body.lower() or "</steps" in body.lower():
-        _fatal(path, _xml_line(body, body.lower().find("<steps")), "unknown top-level tag steps")
+        _fatal(
+            path,
+            _xml_line(body, body.lower().find("<steps")),
+            "[F-v3-agent-body-tag-unknown] unknown top-level tag steps",
+        )
     role = blocks.get("role")
     goal = blocks.get("goal")
     if "<exit_contract" in body.lower() or "</exit_contract" in body.lower():
         _fatal(
             path,
             _xml_line(body, body.lower().find("<exit_contract")),
-            "unknown top-level tag exit_contract",
+            "[F-v3-agent-body-tag-unknown] unknown top-level tag exit_contract",
         )
     if not role:
         _fatal(path, 1, "[F-v3-agent-role-missing] Agent body requires <role>")
@@ -1148,6 +1258,7 @@ def _parse_agent_body(
         "goal": goal,
         "steps": _extract_agent_steps(path, body),
         "protocols": _extract_agent_protocols(path, body),
+        "examples_inline": _extract_agent_examples(path, body),
     }
 
 
@@ -1184,6 +1295,25 @@ def _extract_agent_protocols(path: Path, body: str) -> list[dict[str, str]]:
     return protocols
 
 
+def _extract_agent_examples(path: Path, body: str) -> list[dict[str, str]]:
+    examples: list[dict[str, str]] = []
+    seen: set[str] = set()
+    pattern = re.compile(r"<example\b([^>]*)>(.*?)</example>", re.IGNORECASE | re.DOTALL)
+    for match in pattern.finditer(body):
+        attrs = _parse_attrs(match.group(1))
+        example_id = attrs.get("id")
+        content = match.group(2).strip()
+        if not example_id or not content or example_id in seen:
+            _fatal(
+                path,
+                _xml_line(body, match.start()),
+                "[F-v3-agent-example-invalid] example requires unique id and non-empty content",
+            )
+        seen.add(example_id)
+        examples.append({"id": example_id, "content": content})
+    return examples
+
+
 def _validate_agent_mentions(path: Path, ast: AgentNodeAST, body: str) -> None:
     broken = first_broken_mention(body)
     if broken is not None:
@@ -1196,10 +1326,10 @@ def _validate_agent_mentions(path: Path, ast: AgentNodeAST, body: str) -> None:
         "subagent": {item.name for item in ast.subagents},
         "subgraph": {item.name for item in ast.subgraphs},
         "reference": {item.id for item in ast.references},
-        "example": {item.id for item in ast.examples},
+        "example": {item.id for item in ast.examples} | {item.id for item in ast.examples_inline},
         "step": {item.id for item in ast.steps},
         "protocol": {item.id for item in ast.protocols},
-        "tool": set(ast.tools) | {"finish_task"},
+        "tool": set(ast.tools) | {"finish_task", "read_reference", "read_example", "log_ambiguity"},
     }
     for mention in scan_mentions(body):
         if mention.name not in domains.get(mention.kind, set()):
@@ -1217,26 +1347,8 @@ def _xml_line(body: str, offset: int) -> int:
 _ATTR_RE = re.compile(r"([A-Za-z_][\w:-]*)\s*=\s*(['\"])(.*?)\2", re.DOTALL)
 
 
-def _iter_self_closing_tag_attrs(body: str, tag: str) -> list[dict[str, str]]:
-    pattern = re.compile(rf"<{re.escape(tag)}\b([^>]*)/>", re.IGNORECASE | re.DOTALL)
-    return [_parse_attrs(match.group(1)) for match in pattern.finditer(body)]
-
-
-def _first_src(body: str, tag: str) -> str | None:
-    attrs = _iter_self_closing_tag_attrs(body, tag)
-    if not attrs:
-        return None
-    return attrs[0].get("src")
-
-
 def _parse_attrs(raw: str) -> dict[str, str]:
     return {match.group(1): match.group(3) for match in _ATTR_RE.finditer(raw)}
-
-
-def _split_depends_on(raw: str) -> list[str]:
-    if not raw.strip():
-        return []
-    return [part for part in re.split(r"[\s,]+", raw.strip()) if part]
 
 
 def _frontmatter_key_line(path: Path, key: str) -> int:
@@ -1256,13 +1368,9 @@ __all__ = [
     "PhaseTokenInfo",
     "SkillLoader",
     "_discover_phase_files",
-    "_extract_phase_attrs",
-    "_guard_v21_root",
+    "_guard_v030_root",
     "get_phase_token_info",
-    "_resolve_io_ref",
     "_route_document",
     "_validate_graph_topology",
-    "_validate_io_schema",
-    "_validate_mode_matches_filename",
     "load_workflow_from_md",
 ]

@@ -86,49 +86,48 @@ def _write_graph_skill(skill_dir: Path, name: str, description: str) -> None:
         "def prepare(context):\n    context.set('prepared', True)\n    return {'prepared': True}\n",
         encoding="utf-8",
     )
-    (skill_dir / "io").mkdir(parents=True)
     (skill_dir / "GRAPH.md").write_text(
         f"""---
-schema_version: "2.1"
+schema_version: "v0.3.0"
 name: {name}
 description: {description}
+io:
+  inputs:
+    type: object
+    properties:
+      input_text:
+        type: string
+    required: [input_text]
+    additionalProperties: false
+  outputs:
+    type: object
+    properties:
+      prepared:
+        type: boolean
+    required: [prepared]
+    additionalProperties: true
+phases:
+  - setup
 ---
-<input src="io/inputs.json" />
-<output src="io/outputs.json" />
-<phase id="setup" src="phases/setup" depends_on="" />
-""",
-        encoding="utf-8",
-    )
-    (skill_dir / "io" / "inputs.json").write_text(
-        """{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "properties": {"input_text": {"type": "string"}},
-  "required": ["input_text"],
-  "additionalProperties": false
-}
-""",
-        encoding="utf-8",
-    )
-    (skill_dir / "io" / "outputs.json").write_text(
-        """{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "properties": {"prepared": {"type": "object"}},
-  "required": ["prepared"],
-  "additionalProperties": true
-}
+<phase depends_on="input" output>setup</phase>
 """,
         encoding="utf-8",
     )
     (skill_dir / "phases" / "setup" / "LOGIC.md").write_text(
         """---
-mode: logic
-name: setup
+io:
+  inputs:
+    type: object
+    properties:
+      input_text:
+        type: string
+  outputs:
+    type: object
+    properties:
+      prepared:
+        type: boolean
 ---
-<python_callable>
-prepare
-</python_callable>
+<action>prepare</action>
 """,
         encoding="utf-8",
     )

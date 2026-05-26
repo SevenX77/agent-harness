@@ -1,15 +1,14 @@
 # LOGIC.md Spec
 
-本文定义 `LOGIC.md` 的 Frontmatter、Action 一级寻址和 validator 后置钩子契约。它与 [物理布局](./01-physical-layout.md#mode路径双向校验-mode-path-cross-validation)、[错误码字典](./11-error-code-spec.md#错误码速查全表) 和 [运行流](./12-compile-runtime-flow-spec.md#运行时引擎流-run-time-workflow) 共同约束 Logic 节点。
+本文定义 `LOGIC.md` 的 Frontmatter、Action 注册 / 调用和 validator 后置钩子契约。它与 [物理布局](./01-physical-layout.md#文件名类型推导-filename-type-derivation)、[错误码字典](./11-error-code-spec.md#错误码速查全表) 和 [运行流](./12-compile-runtime-flow-spec.md#运行时引擎流-run-time-workflow) 共同约束 Logic 节点。
 
 ## Frontmatter 字段解析表 (Schema & Validation)
 
-`LOGIC.md` 表示一个不进入 ReAct 循环的确定性执行节点。Loader 必须先确认物理文件名为 `LOGIC.md`, 再校验 frontmatter `mode: logic`; 任一方向不一致均 FATAL `[F-v3-graph-mode-path-mismatch]`。未知字段编译期 FATAL `[F-v3-logic-schema-unknown-field]`。
+`LOGIC.md` 表示一个不进入 ReAct 循环的确定性执行节点。Loader 由物理文件名 `LOGIC.md` 推导节点类型并注入内部 `mode="logic"`; 作者不在 frontmatter 中书写 `mode:`。未知字段编译期 FATAL `[F-v3-logic-schema-unknown-field]`。
 
 ```yaml
 ---
 name: normalize_text
-mode: logic
 io:
   inputs:
     type: object
@@ -31,7 +30,6 @@ validator: true
 | 字段 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
 |---|---|---|---|---|---|---|
 | `name` | string | 是 | 无 | 正则 `^[a-z][a-z0-9_-]*$`; 建议与 phase id 一致, 不一致只 WARN | `[F-v3-logic-name-invalid]` | Trace、错误定位和 Studio 节点展示名 |
-| `mode` | string literal | 是 | 无 | 必须精确为 `"logic"`; 必须与 `LOGIC.md` 路径类型一致 | `[F-v3-logic-mode-invalid]` / `[F-v3-graph-mode-path-mismatch]` | 阻止 Agent/SUBGRAPH 节点被错误装载为确定性节点 |
 | `io.inputs` | JSON Schema object | 是 | 无 | 顶层 `type: object`; 含 `properties`; `required` 只能引用已有 properties | `[F-v3-logic-io-schema-invalid]` | 声明从 BlackboardState 切给 action 链的 state slice |
 | `io.outputs` | JSON Schema object | 是 | 无 | 同 `io.inputs`; 输出字段必须可被 action 返回 dict 覆盖 | `[F-v3-logic-io-schema-invalid]` | 声明 action 链最终允许回写黑板的字段边界 |
 | `actions` | list[string] | 是 | 无 | 非空; 每项正则 `^[a-z][a-z0-9_]*$`; 不允许路径分隔符; 按列表顺序执行 | `[F-v3-logic-actions-empty]` / `[F-v3-logic-action-name-invalid]` | 编排确定性 Python action 的执行顺序 |
@@ -39,33 +37,36 @@ validator: true
 
 `io` 的业务含义不是重复根 IO, 而是给 StateMapper 一把“切片尺”: 运行期只把 `io.inputs.properties` 中声明的字段传给本 Logic phase, 并只允许 `io.outputs.properties` 声明的字段写回黑板。这样 action 可以保持普通函数形态, 但不会越权读取或污染全局状态。
 
-[F-v3-* 错误码](./11-error-code-spec.md#错误码速查全表) 覆盖字段缺失、类型错误和 mode 不匹配。
+[F-v3-* 错误码](./11-error-code-spec.md#错误码速查全表) 覆盖字段缺失、类型错误和 action/validator 错误。
 
-## Actions 1 级寻址与执行契约
+## Actions 注册、寻址与执行契约
 
-V0.3.0 只允许 Skill Global 一级 action 寻址:
+`actions:` frontmatter 只注册 action 名字。body XML 用 `<action>name</action>` 按顺序调用。action 来源支持两类:
+
+1. 当前 logic phase 路径下 `actions/<action_name>.py`。
+2. Studio 或 Engine 内注册的通用 action。
 
 ```text
 <skill_root>/
-  actions/
-    strip_noise.py
-    normalize_whitespace.py
   phases/
     normalize_text/
       LOGIC.md
+      actions/
+        strip_noise.py
+        normalize_whitespace.py
 ```
 
-`actions: [strip_noise]` 只能解析为 `<skill_root>/actions/strip_noise.py`, 不允许 `./actions/foo.py`、`phases/<id>/actions/foo.py`、`pkg.module:function` 或多级目录。一级寻址让 Studio 可以在 skill 级资产面板统一展示 action, 也避免 phase 迁移时隐藏逻辑文件跟着断链。
+`actions: [strip_noise]` 只能注册一级 action 名字, 不允许 `./actions/foo.py`、`pkg.module:function` 或多级目录。执行顺序由 body `<action>` 标签顺序决定, 未在 frontmatter 注册的 action 不能被 body 调用。
 
 | 项 | 契约 |
 |---|---|
-| 解析根 | 当前 graph skill 根目录 `<skill_root>` |
-| 物理目录 | `<skill_root>/actions/` 可选; 当 `actions` 非空时必须存在 |
+| 解析根 | 当前 logic phase 目录 `<skill_root>/phases/<phase_id>/` + Engine/Studio 通用 action registry |
+| 物理目录 | `<skill_root>/phases/<phase_id>/actions/` 可选; 当 action 不在通用 registry 时必须存在 |
 | 文件名 | `<action_name>.py` |
 | 导出函数 | `def run(state_slice: dict, **kwargs) -> dict` |
 | 入参 | `state_slice` 是按 `io.inputs` 从 BlackboardState 切出的浅 dict; `kwargs` 预留 trace_id、phase_id 等系统参数 |
 | 返回值 | dict; key 必须是 `io.outputs.properties` 子集 |
-| 执行顺序 | 严格按 `actions` list 从上到下串行执行; 上一个 action 的返回会合并进下一次 `state_slice` |
+| 执行顺序 | 严格按 body `<action>` 标签从上到下串行执行; 上一个 action 的返回会合并进下一次 `state_slice` |
 
 Action 与 Tool 的边界必须固定:
 
@@ -78,7 +79,7 @@ Action 与 Tool 的边界必须固定:
 
 | 失败场景 | 错误码 | 阶段 | 处理 |
 |---|---|---|---|
-| `actions/` 目录缺失 | `[F-v3-logic-action-dir-missing]` | 编译期 | FATAL |
+| phase-local `actions/` 目录缺失且 action 未在通用 registry 注册 | `[F-v3-logic-action-dir-missing]` | 编译期 | FATAL |
 | action 文件不存在 | `[F-v3-logic-action-not-found]` | 编译期 | FATAL |
 | action 名含 `/`、`.` 或非法字符 | `[F-v3-logic-action-name-invalid]` | 编译期 | FATAL |
 | action 模块无 `run` | `[F-v3-logic-action-entrypoint-missing]` | 编译期 | FATAL |
@@ -122,10 +123,9 @@ validator 文件是 phase-local 的, 因为它校验的是该 phase 的业务输
 |---|---|---|---|
 | `[F-v3-logic-schema-unknown-field]` | 编译期 | frontmatter 出现未定义字段 | 删除字段或提升到正式 spec |
 | `[F-v3-logic-name-invalid]` | 编译期 | `name` 缺失或不匹配命名正则 | 改成小写 snake/kebab 标识 |
-| `[F-v3-logic-mode-invalid]` | 编译期 | `mode` 不是 `logic` | 修正 mode 或改用正确 phase 文件 |
 | `[F-v3-logic-io-schema-invalid]` | 编译期 | `io.inputs` / `io.outputs` 不是合法 object schema | 修正 JSON Schema |
 | `[F-v3-logic-actions-empty]` | 编译期 | `actions` 为空 list | 至少声明一个 action |
-| `[F-v3-logic-action-not-found]` | 编译期 | `<skill_root>/actions/<name>.py` 不存在 | 增加 skill 全局 action 文件或改名 |
+| `[F-v3-logic-action-not-found]` | 编译期 | phase-local `actions/<name>.py` 不存在且通用 action registry 无此项 | 增加 phase-local action 文件、注册通用 action 或改名 |
 | `[F-v3-logic-action-return-invalid]` | 运行期 | `run()` 未返回 dict | 返回 dict |
 | `[F-v3-logic-output-field-undeclared]` | 运行期 | action 或 validator 返回未声明字段 | 更新 `io.outputs` 或删除返回字段 |
 | `[F-v3-logic-validator-failed]` | 运行期 | validator 抛业务校验异常 | 修复 action 输出或 validator 规则 |

@@ -34,7 +34,6 @@ from graph_agent.core.manifest import (
     AgentNodeAST,
     GraphManifest,
     LogicNodeAST,
-    SkillNodeAST,
     SubgraphNodeAST,
 )
 from graph_agent.core.skill_resolver_protocol import (
@@ -49,7 +48,6 @@ from graph_agent.core.subagents import (
     validate_subagent_tool_args,
 )
 from graph_agent.middleware.factory import build_middleware_chain_cognitive_flow
-from graph_agent.runtime.exit_contract import inject_exit_contract
 from graph_agent.runtime.state import BlackboardState
 from graph_agent.runtime.state_mapper import (
     PhaseWrapper,
@@ -91,14 +89,16 @@ def assemble_graph(
     phase_ids: list[str] = []
     edges: list[tuple[str, str]] = []
 
-    for phase_ref in compiled.manifest.phases:
-        phase_doc = node_by_phase.get(phase_ref.id)
+    topology = _graph_topology(compiled)
+
+    for phase_id in topology:
+        phase_doc = node_by_phase.get(phase_id)
         if phase_doc is None:
-            _graph_fatal(f"phase {phase_ref.id!r} has no parsed node")
+            _graph_fatal(f"phase {phase_id!r} has no parsed node")
         builder.add_node(
-            phase_ref.id,
+            phase_id,
             _build_phase_node(
-                phase_ref.id,
+                phase_id,
                 phase_doc,
                 compiled,
                 chat_model,
@@ -106,18 +106,19 @@ def assemble_graph(
                 resolver,
             ),
         )
-        phase_ids.append(phase_ref.id)
+        phase_ids.append(phase_id)
 
-    for phase_ref in compiled.manifest.phases:
-        if not phase_ref.depends_on:
-            builder.add_edge(START, phase_ref.id)
-            edges.append(("START", phase_ref.id))
+    for phase_id, depends_on in topology.items():
+        graph_deps = [dep for dep in depends_on if dep != "input"]
+        if not graph_deps:
+            builder.add_edge(START, phase_id)
+            edges.append(("START", phase_id))
         else:
-            for dep in phase_ref.depends_on:
-                builder.add_edge(dep, phase_ref.id)
-                edges.append((dep, phase_ref.id))
+            for dep in graph_deps:
+                builder.add_edge(dep, phase_id)
+                edges.append((dep, phase_id))
 
-    for phase_id in _terminal_phase_ids(compiled.manifest):
+    for phase_id in _terminal_phase_ids(compiled.manifest, compiled):
         builder.add_edge(phase_id, END)
         edges.append((phase_id, "END"))
 
@@ -158,7 +159,7 @@ def _build_phase_node(
             ),
             node_kind="subgraph",
         )
-    if isinstance(ast, (AgentNodeAST, SkillNodeAST)):
+    if isinstance(ast, AgentNodeAST):
         return _wrap_phase_runtime_node(
             phase_id,
             ast,
@@ -171,7 +172,7 @@ def _build_phase_node(
                 max_patch_attempts,
                 skill_resolver,
             ),
-            node_kind="agent" if isinstance(ast, AgentNodeAST) else "skill",
+            node_kind="agent",
         )
     _graph_fatal(f"unknown phase mode for {phase_id!r}")
 
@@ -191,21 +192,24 @@ def _build_logic_node(
     phase_ast: LogicNodeAST,
     compiled: CompiledSkill,
 ) -> Any:
-    action = compiled.actions.resolve(phase_id, phase_ast.python_callable)
-    action_def = compiled.actions.for_phase(phase_id).get(phase_ast.python_callable)
-    action_path = action_def.path if action_def is not None else Path("<unknown>")
-    action_line = getattr(getattr(action, "__code__", None), "co_firstlineno", 1)
+    action_names = phase_ast.actions
     output_schema_keys = _logic_output_schema_keys(compiled)
 
     def _logic_node(state: BlackboardState) -> dict[str, Any]:
         before = phase_inputs_from_state(state)
         data = dict(before)
         ctx = Context(data, phase_id=phase_id, run_id=state.get("run_id") or "default")
-        result = action(ctx)
         updates = _dict_delta(before, data)
-        if isinstance(result, dict):
-            _validate_logic_update_keys(result, output_schema_keys, action_path, action_line)
-            updates.update(result)
+        for action_name in action_names:
+            action = compiled.actions.resolve(phase_id, action_name)
+            action_def = compiled.actions.for_phase(phase_id).get(action_name)
+            action_path = action_def.path if action_def is not None else Path("<unknown>")
+            action_line = getattr(getattr(action, "__code__", None), "co_firstlineno", 1)
+            result = action(ctx)
+            updates.update(_dict_delta(before | updates, data))
+            if isinstance(result, dict):
+                _validate_logic_update_keys(result, output_schema_keys, action_path, action_line)
+                updates.update(result)
         return {"data": updates} if updates else {}
 
     return _logic_node
@@ -255,15 +259,14 @@ def _build_subgraph_node(
 def _build_skill_node(
     phase_id: str,
     phase_doc: PhaseDocument,
-    phase_ast: AgentNodeAST | SkillNodeAST,
+    phase_ast: AgentNodeAST,
     compiled: CompiledSkill,
     chat_model: Any,
     max_patch_attempts: int,
     skill_resolver: SkillResolverProtocol,
 ) -> Any:
     business_tools = compiled.tools.for_phase(phase_id)
-    if isinstance(phase_ast, AgentNodeAST):
-        business_tools = [*business_tools, *_agent_resource_tools(phase_doc, phase_ast, compiled)]
+    business_tools = [*business_tools, *_agent_resource_tools(phase_doc, phase_ast, compiled)]
     tool_by_name = {tool.name: tool for tool in business_tools}
     subagent_by_tool_name = _subagent_tool_map(phase_id, compiled)
     subagent_runtime_by_tool_name = _subagent_runtime_map(
@@ -299,7 +302,7 @@ def _build_skill_node(
 
     output_schema = (
         compiled.raw.get("io", {}).get("outputs")
-        if _is_terminal_phase(phase_id, compiled.manifest)
+        if _is_terminal_phase(phase_id, compiled.manifest, compiled)
         else None
     )
     finish_task = build_finish_task_tool(
@@ -329,15 +332,9 @@ def _build_skill_node(
             chat_model.bind_tools(all_tools) if hasattr(chat_model, "bind_tools") else chat_model
         )
 
-        max_turns = (
-            phase_ast.max_iterations if isinstance(phase_ast, AgentNodeAST) else MAX_REACT_TURNS
-        )
+        max_turns = phase_ast.max_iterations
         for _ in range(max_turns):
-            prompt_messages = (
-                messages
-                if isinstance(phase_ast, AgentNodeAST)
-                else inject_exit_contract(messages, phase_ast.exit_contract)
-            )
+            prompt_messages = messages
             response = model.invoke(prompt_messages)
             messages = [*prompt_messages, response]
             tool_calls = list(getattr(response, "tool_calls", []) or [])
@@ -385,6 +382,7 @@ def _build_skill_node(
 
     return _skill_node
 
+
 def _subagent_tool_map(
     phase_id: str,
     compiled: CompiledSkill,
@@ -397,16 +395,14 @@ def _subagent_tool_map(
 
 def _agent_system_prompt(
     phase_id: str,
-    phase_ast: AgentNodeAST | SkillNodeAST,
+    phase_ast: AgentNodeAST,
     compiled: CompiledSkill,
 ) -> str:
-    if not isinstance(phase_ast, AgentNodeAST):
-        return phase_ast.system_prompt
     output_schema = (
         phase_ast.io.outputs
         if phase_ast.io is not None
         else compiled.raw.get("io", {}).get("outputs")
-        if _is_terminal_phase(phase_id, compiled.manifest)
+        if _is_terminal_phase(phase_id, compiled.manifest, compiled)
         else None
     )
     return apply_v030_cognitive_template(
@@ -416,15 +412,10 @@ def _agent_system_prompt(
         steps=[step.model_dump() for step in phase_ast.steps],
         protocols=[protocol.model_dump() for protocol in phase_ast.protocols],
         output_schema=output_schema if isinstance(output_schema, dict) else None,
-        inline_examples=[
-            example.content
-            for example in phase_ast.examples
-            if example.type == "inline" and example.content
-        ],
+        inline_examples=[example.content for example in phase_ast.examples_inline],
         document_examples=[
-            {"id": example.id, "summary": example.summary or ""}
+            {"id": example.id, "summary": example.summary}
             for example in phase_ast.examples
-            if example.type == "document"
         ],
         role_prefix=resolve_role_prefix_from_llm_role(phase_ast.llm_role),
     )
@@ -467,10 +458,6 @@ def _agent_resource_tools(
         spec = examples.get(example_id)
         if spec is None:
             raise GraphAgentFatalError(f"[F-v3-resource-example-invalid] {example_id!r}")
-        if spec.type == "inline":
-            return spec.content or ""
-        if spec.path is None:
-            raise GraphAgentFatalError(f"[F-v3-resource-example-path-invalid] {example_id!r}")
         return _read_skill_root_file(root, spec.path)
 
     tools: list[Any] = []
@@ -777,12 +764,47 @@ def _validate_logic_update_keys(
             )
 
 
-def _is_terminal_phase(phase_id: str, manifest: GraphManifest) -> bool:
-    return not any(phase_id in phase.depends_on for phase in manifest.phases)
+def _is_terminal_phase(
+    phase_id: str,
+    manifest: GraphManifest,
+    compiled: CompiledSkill | None = None,
+) -> bool:
+    if compiled is None:
+        return phase_id in manifest.phases
+    return phase_id in _terminal_phase_ids(manifest, compiled)
 
 
-def _terminal_phase_ids(manifest: GraphManifest) -> list[str]:
-    return [phase.id for phase in manifest.phases if _is_terminal_phase(phase.id, manifest)]
+def _terminal_phase_ids(
+    manifest: GraphManifest, compiled: CompiledSkill | None = None
+) -> list[str]:
+    if compiled is None:
+        return list(manifest.phases)
+    topology = _graph_topology(compiled)
+    outputs = [
+        str(row["name"])
+        for row in compiled.raw.get("graph_topology", {}).get("phases", [])
+        if isinstance(row, dict) and row.get("output") is True
+    ]
+    if outputs:
+        return outputs
+    depended = {dep for deps in topology.values() for dep in deps if dep != "input"}
+    return [phase for phase in topology if phase not in depended]
+
+
+def _graph_topology(compiled: CompiledSkill) -> dict[str, list[str]]:
+    rows = compiled.raw.get("graph_topology", {}).get("phases", [])
+    if isinstance(rows, list) and rows:
+        topology: dict[str, list[str]] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            name = row.get("name")
+            deps = row.get("depends_on")
+            if isinstance(name, str) and isinstance(deps, list):
+                topology[name] = [dep for dep in deps if isinstance(dep, str)]
+        if topology:
+            return topology
+    return {phase: ["input"] for phase in compiled.manifest.phases}
 
 
 def _is_critic_tool_name(name: str) -> bool:

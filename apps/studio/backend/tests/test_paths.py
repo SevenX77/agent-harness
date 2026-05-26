@@ -14,11 +14,17 @@ def test_resource_dir_prefers_studio_resource_dir_env() -> None:
     assert resource_dir == Path("/tmp/studio-resources").resolve()
     assert paths.default_skills_dir(resource_dir) == Path("/tmp/studio-resources/skills").resolve()
     assert paths.default_config_dir(resource_dir) == Path("/tmp/studio-resources/config").resolve()
-    assert paths.default_workspaces_dir(resource_dir) == Path("/tmp/studio-resources/workspaces").resolve()
-    assert paths.app_settings_dir(
-        {"STUDIO_RESOURCE_DIR": "/tmp/studio-resources"},
-        home=Path("/home/user"),
-    ) == Path("/tmp/studio-resources/config").resolve()
+    assert (
+        paths.default_workspaces_dir(resource_dir)
+        == Path("/tmp/studio-resources/workspaces").resolve()
+    )
+    assert (
+        paths.app_settings_dir(
+            {"STUDIO_RESOURCE_DIR": "/tmp/studio-resources"},
+            home=Path("/home/user"),
+        )
+        == Path("/tmp/studio-resources/config").resolve()
+    )
 
 
 def test_config_dir_overrides_resource_dir_for_writable_app_settings() -> None:

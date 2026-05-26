@@ -219,9 +219,7 @@ async def put_llm_credentials(
     del include_metadata
     path = credentials_path()
     with _credentials_lock:
-        existing_by_code = {
-            provider.id: provider for provider in load_credentials(path).providers
-        }
+        existing_by_code = {provider.id: provider for provider in load_credentials(path).providers}
         next_providers: list[ProviderCredential] = []
         for incoming in request.providers:
             current = existing_by_code.get(incoming.id)
@@ -576,10 +574,7 @@ def _merge_available_models(
 ) -> list[ModelInfo]:
     by_id = {
         normalized.id: normalized
-        for normalized in (
-            normalize_model_info_for_vendor(model, vendor)
-            for model in existing
-        )
+        for normalized in (normalize_model_info_for_vendor(model, vendor) for model in existing)
     }
     for model_id in passed_model_ids:
         canonical_model_id = canonical_model_id_for_vendor(model_id, vendor)

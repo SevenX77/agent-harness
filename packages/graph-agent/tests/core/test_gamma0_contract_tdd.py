@@ -25,7 +25,7 @@ def _write_v030_graph(root: Path, *, mode: str = "agent") -> None:
     _write(
         root / "GRAPH.md",
         """---
-schema_version: "0.3.0"
+schema_version: "v0.3.0"
 name: gamma0-contract
 io:
   inputs:
@@ -35,9 +35,7 @@ io:
     type: object
     properties: {}
 phases:
-  - id: main
-    src: phases/main
-    depends_on: []
+  - main
 ---
 <phase depends_on="input" output>main</phase>
 """,
@@ -64,8 +62,6 @@ Return via finish_task.
     _write(
         root / "phases" / "main" / "SKILL.md",
         f"""---
-mode: agent
-name: main
 {validator_line}phase_config:
   tools:
     - finish_task
@@ -92,9 +88,14 @@ def _write_subgraph_phase(root: Path, *, validator: bool | None = None) -> None:
     _write(
         root / "phases" / "main" / "SUBGRAPH.md",
         f"""---
-mode: subgraph
-name: main
 target_skill: child-skill
+io:
+  inputs:
+    type: object
+    properties: {{}}
+  outputs:
+    type: object
+    properties: {{}}
 {validator_line}---
 """,
     )
@@ -159,6 +160,7 @@ def test_γ0_2_subgraph_node_validator_defaults_false() -> None:
         {
             "mode": "subgraph",
             "target_skill": "child-skill",
+            "io": {"inputs": {"type": "object"}, "outputs": {"type": "object"}},
         }
     )
 
@@ -168,6 +170,9 @@ def test_γ0_2_subgraph_node_validator_defaults_false() -> None:
 def test_γ0_2_subgraph_loader_accepts_validator_true(tmp_path: Path) -> None:
     _write_v030_graph(tmp_path, mode="subgraph")
     _write_subgraph_phase(tmp_path, validator=True)
+    child = tmp_path / "child-skill"
+    _write_v030_graph(child)
+    _write_agent_phase(child)
 
     compiled = SkillLoader().compile_skill(tmp_path)
 
@@ -192,7 +197,9 @@ def test_γ0_3_middleware_order_contract_constant_exists() -> None:
 def test_γ0_3_current_middleware_class_order_matches_contract_prefix() -> None:
     from graph_agent import middleware
 
-    implemented_prefix = tuple(cls.__name__.replace("Middleware", "") for cls in middleware.DEFAULT_MIDDLEWARE_ORDER)
+    implemented_prefix = tuple(
+        cls.__name__.replace("Middleware", "") for cls in middleware.DEFAULT_MIDDLEWARE_ORDER
+    )
 
     assert implemented_prefix == middleware.MVP0_MIDDLEWARE_ORDER_CONTRACT[:3]
 
@@ -204,7 +211,10 @@ def test_γ0_4_validator_signature_and_error_placeholders_are_documented() -> No
     assert "[F-v3-agent-validator-failed]" in docs
     assert "[F-v3-subgraph-validator-failed]" in docs
     assert "[F-v3-logic-validator-failed]" in docs
-    assert VALIDATOR_SIGNATURE == "def validate(output: dict, state_slice: dict, **kwargs) -> None | dict"
+    assert (
+        VALIDATOR_SIGNATURE
+        == "def validate(output: dict, state_slice: dict, **kwargs) -> None | dict"
+    )
     assert VALIDATOR_ERROR_CODES == (
         "[F-v3-agent-validator-failed]",
         "[F-v3-subgraph-validator-failed]",
@@ -224,6 +234,8 @@ def test_γ0_5_docs_ship_gates_match_source_contract() -> None:
     assert "AgentNodeAST` 不再含 `exit_contract` 字段" in tasks
     assert "class AgentNodeAST" in manifest
     agent_block = manifest.split("class AgentNodeAST", 1)[1].split("class SkillNodeAST", 1)[0]
+    if "class SkillNodeAST" not in manifest:
+        agent_block = manifest.split("class AgentNodeAST", 1)[1].split("PhaseAST", 1)[0]
     assert "exit_contract" not in agent_block
-    assert "validator: bool = False" in agent_block
+    assert "validator: StrictBool = False" in agent_block
     assert "MVP0_MIDDLEWARE_ORDER_CONTRACT" in middleware_init

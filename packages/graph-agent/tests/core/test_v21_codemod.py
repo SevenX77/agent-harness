@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from graph_agent.codemod.v21_migrator import migrate_skill_md
 from graph_agent.core.loader import SkillLoader
-from graph_agent.core.manifest import PhaseAST, SkillNodeAST
+from graph_agent.core.manifest import AgentNodeAST, PhaseAST
 from pydantic import TypeAdapter
 
 _TESTS_DIR = Path(__file__).parents[1]
@@ -43,7 +43,7 @@ def test_codemod_outputs_match_golden_and_compile(case: str, tmp_path: Path) -> 
     assert len(report.written_files) == len(_relative_files(out_dir))
 
     phase_adapter = TypeAdapter(PhaseAST)
-    assert SkillNodeAST.model_json_schema()["properties"]["mode"]["const"] == "skill"
+    assert AgentNodeAST.model_json_schema()["properties"]["mode"]["const"] == "skill"
     for node in compiled.nodes:
         phase_adapter.validate_python(node.ast.model_dump())
 

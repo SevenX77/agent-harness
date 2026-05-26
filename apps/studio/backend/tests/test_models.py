@@ -47,10 +47,14 @@ def test_model_exports_cover_phase0_contracts() -> None:
 
 def test_models_validate_fields_and_reuse_graph_agent_contracts() -> None:
     manifest = GraphManifest(
-        schema_version="2.1",
+        schema_version="v0.3.0",
         name="demo-skill",
         description="demo",
-        phases=[],
+        io={
+            "inputs": {"type": "object", "properties": {}},
+            "outputs": {"type": "object", "properties": {}},
+        },
+        phases=["setup"],
     )
     detail = SkillDetail(
         manifest=manifest,
@@ -58,7 +62,7 @@ def test_models_validate_fields_and_reuse_graph_agent_contracts() -> None:
         has_golden=False,
     )
 
-    assert detail.manifest.schema_version == "2.1"
+    assert detail.manifest.schema_version == "v0.3.0"
     assert detail.manifest.name == "demo-skill"
     assert detail.file_paths["graph_md"].endswith("GRAPH.md")
 

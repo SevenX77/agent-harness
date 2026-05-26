@@ -10,7 +10,7 @@ from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.graph_assembler import assemble_graph
 from graph_agent.core.loader import CompiledSkill, PhaseDocument, SkillLoader
-from graph_agent.core.manifest import GraphManifest, GraphPhaseRef, SubagentSpec, SubgraphNodeAST
+from graph_agent.core.manifest import GraphManifest, SubagentSpec, SubgraphNodeAST
 from graph_agent.core.runner import run_skill
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
 from pydantic import ValidationError
@@ -33,16 +33,21 @@ def _graph(root: Path, *, name: str, phase: str = "main") -> None:
     _write(
         root / "GRAPH.md",
         f"""---
-schema_version: "2.1"
+schema_version: "v0.3.0"
 name: {name}
+io:
+  inputs:
+    type: object
+    properties: {{}}
+  outputs:
+    type: object
+    properties: {{}}
+phases:
+  - {phase}
 ---
-<input src="io/inputs.json" />
-<output src="io/outputs.json" />
-<phase id="{phase}" src="phases/{phase}" depends_on="" />
+<phase depends_on="input" output>{phase}</phase>
 """,
     )
-    _write(root / "io" / "inputs.json", '{"type": "object", "properties": {}}\n')
-    _write(root / "io" / "outputs.json", '{"type": "object", "properties": {}}\n')
 
 
 def _logic_skill(root: Path) -> None:
@@ -50,12 +55,15 @@ def _logic_skill(root: Path) -> None:
     _write(
         root / "phases" / "done" / "LOGIC.md",
         """---
-mode: logic
-name: done
+io:
+  inputs:
+    type: object
+    properties: {}
+  outputs:
+    type: object
+    properties: {}
 ---
-<python_callable>
-identity
-</python_callable>
+<action>identity</action>
 """,
     )
     _write(
@@ -69,9 +77,14 @@ def _subgraph_parent(root: Path) -> None:
     _write(
         root / "phases" / "child" / "SUBGRAPH.md",
         """---
-mode: subgraph
-name: child
 target_skill: demo.child
+io:
+  inputs:
+    type: object
+    properties: {}
+  outputs:
+    type: object
+    properties: {}
 ---
 """,
     )
@@ -153,13 +166,18 @@ def test_delta1_assemble_graph_missing_resolver_raises_v3_code(tmp_path: Path) -
             "mode": "subgraph",
             "name": "child",
             "target_skill": "demo.child",
+            "io": {"inputs": {"type": "object"}, "outputs": {"type": "object"}},
         }
     )
     compiled = CompiledSkill(
-        raw={},
+        raw={
+            "graph_topology": {"phases": [{"id": "child", "depends_on": ["input"], "output": True}]}
+        },
         manifest=GraphManifest(
+            schema_version="v0.3.0",
             name="parent",
-            phases=[GraphPhaseRef(id="child", src="phases/child", depends_on=[])],
+            io={"inputs": {"type": "object"}, "outputs": {"type": "object"}},
+            phases=["child"],
         ),
         nodes=[
             PhaseDocument(

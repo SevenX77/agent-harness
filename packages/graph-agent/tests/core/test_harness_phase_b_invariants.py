@@ -258,7 +258,6 @@ class TestPersistentRuntimeInputsOptIn:
         """
         from unittest.mock import patch
 
-
         harness = _harness()
 
         captured: dict[str, object] = {}

@@ -21,10 +21,10 @@ from graph_agent.core.exceptions import GraphAgentError, SkillCompilationError, 
 from graph_agent.core.graph_serializer import serialize_graph
 from graph_agent.core.loader import CompiledSkill, SkillLoader
 from graph_agent.core.manifest import (
+    AgentNodeAST,
     GraphManifest,
     GraphPhaseRef,
     LogicNodeAST,
-    SkillNodeAST,
     SubgraphNodeAST,
 )
 
@@ -60,21 +60,31 @@ _ALLOWED_SKILL_FILE_SUFFIXES = {".md", ".json", ".py"}
 _PHASE_NODE_FILES = {"LOGIC.md", "SUBGRAPH.md", "SKILL.md"}
 _SCAFFOLD_FILES = {
     "GRAPH.md": """---
-schema_version: "2.1"
+schema_version: "v0.3.0"
 name: new-skill
 description: "New Studio skill"
+io:
+  inputs:
+    type: object
+    properties: {}
+  outputs:
+    type: object
+    properties: {}
+phases:
+  - init
 ---
-<input src="io/inputs.json" />
-<output src="io/outputs.json" />
-<phase id="init" src="phases/init" depends_on="" />
+<phase depends_on="input" output>init</phase>
 """,
     "phases/init/LOGIC.md": """---
-mode: logic
-name: init
+io:
+  inputs:
+    type: object
+    properties: {}
+  outputs:
+    type: object
+    properties: {}
 ---
-<python_callable>
-initialize
-</python_callable>
+<action>initialize</action>
 
 # init phase logic
 
@@ -84,8 +94,6 @@ Describe what this phase does.
     \"\"\"Starter logic action for a new Studio skill.\"\"\"
     return None
 """,
-    "io/inputs.json": "{}\n",
-    "io/outputs.json": "{}\n",
 }
 
 
@@ -1006,7 +1014,16 @@ async def _broken_detail_from_files_async(
 ) -> SkillDetail:
     latest = await latest_run_metadata_async(user_id, skill_id, metadata)
     return SkillDetail(
-        manifest=GraphManifest(name=skill_id, description="(broken: manifest invalid)", phases=[]),
+        manifest=GraphManifest(
+            schema_version="v0.3.0",
+            name=skill_id,
+            description="(broken: manifest invalid)",
+            io={
+                "inputs": {"type": "object", "properties": {}},
+                "outputs": {"type": "object", "properties": {}},
+            },
+            phases=[],
+        ),
         graph_topology=[],
         node_schema_v21=_node_schema_v21(),
         io_schema={},
@@ -1239,32 +1256,47 @@ def _phase_summary_from_compiled(compiled: CompiledSkill) -> list[dict[str, Any]
     mode_by_phase = {node.phase_name: node.mode for node in compiled.nodes}
     return [
         {
-            "name": phase.id,
-            "tier": mode_by_phase.get(phase.id, ""),
+            "name": phase_name,
+            "tier": mode_by_phase.get(phase_name, ""),
             "has_validator": False,
         }
-        for phase in compiled.manifest.phases
+        for phase_name in compiled.manifest.phases
     ]
 
 
 def _graph_topology(compiled: CompiledSkill) -> list[dict[str, object]]:
     mode_by_phase = {node.phase_name: node.mode for node in compiled.nodes}
+    topology = compiled.raw.get("graph_topology", {})
+    rows = topology.get("phases", []) if isinstance(topology, dict) else []
+    if isinstance(rows, list):
+        return [
+            {
+                "id": name,
+                "src": f"phases/{name}",
+                "depends_on": list(depends_on),
+                "mode": mode_by_phase.get(name, ""),
+            }
+            for row in rows
+            if isinstance(row, dict)
+            and isinstance((name := row.get("name")), str)
+            and isinstance((depends_on := row.get("depends_on")), list)
+        ]
     return [
         {
-            "id": phase.id,
-            "src": phase.src,
-            "depends_on": list(phase.depends_on),
-            "mode": mode_by_phase.get(phase.id, ""),
+            "id": phase_name,
+            "src": f"phases/{phase_name}",
+            "depends_on": [],
+            "mode": mode_by_phase.get(phase_name, ""),
         }
-        for phase in compiled.manifest.phases
+        for phase_name in compiled.manifest.phases
     ]
 
 
 def _node_schema_v21() -> dict[str, dict[str, object]]:
     return {
         "graph_phase_ref": GraphPhaseRef.model_json_schema(),
+        "agent": AgentNodeAST.model_json_schema(),
         "logic": LogicNodeAST.model_json_schema(),
-        "skill": SkillNodeAST.model_json_schema(),
         "subgraph": SubgraphNodeAST.model_json_schema(),
     }
 

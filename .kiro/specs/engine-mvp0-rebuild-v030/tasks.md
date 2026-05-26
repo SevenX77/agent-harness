@@ -23,7 +23,7 @@
 
 1. skill-resolution Protocol 独立 commit。
 2. AST / manifest / loader schema commit。
-3. GRAPH.md phases + inline IO commit。
+3. GRAPH.md 双轨拓扑 + inline IO commit。
 4. Agent body XML + cognitive template commit。
 5. StateMapper / Phase Wrapper commit。
 6. Runtime DI / subgraph / subagent commit。
@@ -128,8 +128,8 @@ Merge 前必须满足:
   - `packages/graph-agent/src/graph_agent/core/cache.py`
 - 改 lines / 函数 / 类:
   - `SkillNodeAST` -> `AgentNodeAST`
-  - `mode: Literal["skill"]` -> `mode: Literal["agent"]`
-  - 新增字段 `role`, `goal`, `steps`, `protocols`, `exit_contract`, `references`, `examples`, `subgraphs`, `tools`, `max_iterations`, `llm_role`, `io`
+  - 内部 discriminator 从 `mode: Literal["skill"]` 切到 `mode: Literal["agent"]`, 但作者不写 `mode:` frontmatter
+  - 新增字段 `role`, `goal`, `steps`, `protocols`, `examples`, `references`, `subgraphs`, `tools`, `max_iterations`, `llm_role`, `io`
 - 依赖 tasks: A1
 - 测试影响:
   - 更新 `packages/graph-agent/tests/core/test_v21_ast_schema.py`
@@ -138,37 +138,37 @@ Merge 前必须满足:
 - 风险点:
   - cache hit 反序列化旧 SkillNodeAST 会失败; cutover 可选择 bump cache namespace。
 
-#### B2. mode 三值化 + phase 文件 3 选 1 校验
+#### B2. phase 文件名推导类型 + phase 文件 3 选 1 校验
 - 改 files:
   - `packages/graph-agent/src/graph_agent/core/loader.py`
   - `packages/graph-agent/src/graph_agent/core/manifest.py`
 - 改 lines / 函数 / 类:
-  - mode enum: `agent` / `logic` / `subgraph`
-  - `SKILL.md -> mode: agent`, `LOGIC.md -> logic`, `SUBGRAPH.md -> subgraph`
+  - 物理文件名推导内部类型: `SKILL.md -> agent`, `LOGIC.md -> logic`, `SUBGRAPH.md -> subgraph`
+  - Loader 注入内部 AST `mode`, 作者不在 phase frontmatter 写 `mode:`
   - 物理目录 `phases/<id>/` 恰好一个 node file
 - 依赖 tasks: B1
 - 测试影响:
   - 更新 `test_v21_loader.py`, `test_loader_subgraph_is_file.py`
   - 新增 duplicate node file / missing node file tests
 - 风险点:
-  - 旧测试 fixture 中 `mode: skill` 需全部迁移到 `mode: agent`。
+  - 旧测试 fixture 中 `mode: skill` / `mode: agent` / `mode: logic` / `mode: subgraph` frontmatter 需全部删除, 类型由文件名决定。
 
-#### B3. GRAPH.md `<phase />` XML 改为 `phases:` YAML list
+#### B3. GRAPH.md 回归双轨: frontmatter phases 注册 + body `<phase>` 拓扑
 - 改 files:
   - `packages/graph-agent/src/graph_agent/core/loader.py`
   - `packages/graph-agent/src/graph_agent/core/manifest.py`
   - `packages/graph-agent/src/graph_agent/core/cache.py`
 - 改 lines / 函数 / 类:
-  - `_build_graph_manifest()`
-  - `_validate_graph_topology()`
-  - phase token / line span 从 YAML AST 获取
+  - `_build_graph_manifest()` 读取 `schema_version: "v0.3.0"`、inline `io`、frontmatter `phases: list[str]`
+  - `_extract_phase_attrs()` / phase token parser 读取 body `<phase depends_on output>name</phase>` 作为 DAG 拓扑
+  - `_validate_graph_topology()` 校验 frontmatter phase 名、body phase 名、物理目录三者一致
 - 依赖 tasks: B2
 - 测试影响:
   - 更新 `test_t11_phase_token_info.py`
   - 更新 graph topology fixtures
-  - 新增 YAML phases list depends_on / cycle / island tests
+  - 新增双轨不一致 / body depends_on unknown / cycle / island / output phase tests
 - 风险点:
-  - 旧 body XML phase parser 与新 YAML parser 不能双轨长期共存; cutover PR 应一次性迁移 fixtures。
+  - frontmatter `phases` 只注册名字, `depends_on` 不在 frontmatter; 旧纯 YAML topology parser 不能作为 truth source。
 
 #### B4. 根 IO 物理文件退役, 改 inline `io.inputs` / `io.outputs`
 - 改 files:
@@ -192,13 +192,14 @@ Merge 前必须满足:
   - `packages/graph-agent/src/graph_agent/core/parser.py`
   - `packages/graph-agent/src/graph_agent/cognitive/prompt.py`
 - 改 lines / 函数 / 类:
-  - 允许 `<role>`, `<goal>`, `<step id name>`, `<protocol id>`, `<exit_contract>`
+  - 允许 `<role>`, `<goal>`, `<step id name>`, `<protocol id>`, `<example id>`
   - 禁止 `<steps>` 壳和未知顶层标签
+  - 禁止 `<exit_contract>`; exit_contract 只在 cognitive template hardcode
   - 输出 Agent body AST
 - 依赖 tasks: B1
 - 测试影响:
   - 更新 `test_loader_xml_rendering.py`
-  - 新增 role/goal/exit_contract missing / duplicate tests
+  - 新增 role/goal missing / duplicate、example parse、exit_contract forbidden tests
 - 风险点:
   - brief 中曾出现 workflow 字样, 但最终 skill-spec 以 5 类扁平标签为准。
 
@@ -208,7 +209,7 @@ Merge 前必须满足:
   - 可新建 `packages/graph-agent/src/graph_agent/core/mentions.py`
 - 改 lines / 函数 / 类:
   - Regex `@(subagent|tool|subgraph|protocol|step|reference|example):([a-zA-Z0-9_-]+)`
-  - 校验 frontmatter registry + body protocol/step registry
+  - 校验 frontmatter registry + body protocol/step/example registry
   - target miss -> `[F-v3-mention-target-not-found]`
 - 依赖 tasks: B5, A2
 - 测试影响:
@@ -238,7 +239,7 @@ Merge 前必须满足:
   - `packages/graph-agent/tests/integration/compiler/`
   - `packages/graph-agent/tests/fixtures/`
 - 改 lines / 函数 / 类:
-  - 迁移所有 V2.1 fixture 到 `schema_version: "0.3.0"`
+  - 迁移所有 V2.1 fixture 到 `schema_version: "v0.3.0"` + GRAPH 双轨
   - 增加 v030 minimal graph fixtures
 - 依赖 tasks: B1-B7
 - 测试影响:
@@ -255,7 +256,7 @@ Merge 前必须满足:
   - `packages/graph-agent/src/graph_agent/cognitive/prompt.py`
 - 改 lines / 函数 / 类:
   - 删除 per-turn `inject_exit_contract` / `strip`
-  - system prompt 装配时 inline `{skill_exit_contract_inline}`
+  - system prompt 末尾 hardcode `<exit_contract>` 并拼接 `{output_schema}`
 - 依赖 tasks: B5
 - 测试影响:
   - 更新 `packages/graph-agent/tests/cognitive/test_prompt.py`
@@ -263,13 +264,14 @@ Merge 前必须满足:
 - 风险点:
   - 旧测试可能断言 exit_contract 不进入 prompt history; 改为断言只在 system prompt 末尾出现一次。
 
-#### C2. Cognitive Template 7 插槽装配
+#### C2. Cognitive Template 8 插槽装配
 - 改 files:
   - `packages/graph-agent/src/graph_agent/cognitive/prompt.py`
   - `packages/graph-agent/src/graph_agent/core/graph_assembler.py`
 - 改 lines / 函数 / 类:
-  - `role`, `goal`, `thinking_style`, `knowledge_base`, `examples`, `ambiguity_feedback`, `protocol_citation`, `critical_reminders`, exit_contract inline
-  - output_schema append to exit_contract末尾
+  - 8 固定容器: `role`, `goal`, `thinking_style`, `knowledge_base`, `examples`, `ambiguity_feedback`, `protocol_citation`, `critical_reminders`
+  - 使用 ground truth placeholder: `{llm_role_prefix_section}`, `{skill_steps_splat}`, `{aligned_concepts_and_critical_corrections_markdown}`, `{reference_registry_listing}`, `{skill_examples_inline}`, `{example_registry_listing}`, `{skill_protocols_splat}`, `{output_schema}`
+  - `<exit_contract>` 作为 template 末尾 hardcode block, output_schema append 到其中
 - 依赖 tasks: C1, B5
 - 测试影响:
   - 更新 `test_prompt.py`
@@ -319,7 +321,7 @@ Merge 前必须满足:
 - 依赖 tasks: B6, C2
 - 测试影响:
   - 新增 `packages/graph-agent/tests/tools/test_builtin_resource_tools.py`
-  - 覆盖 id not found / inline example / document example
+  - 覆盖 id not found / body inline example / document example
 - 风险点:
   - Tool payload 不能读跨 skill 未注册路径。
 
@@ -344,7 +346,7 @@ Merge 前必须满足:
   - `packages/graph-agent/src/graph_agent/core/loader.py`
   - `packages/graph-agent/src/graph_agent/core/graph_assembler.py`
 - 改 lines / 函数 / 类:
-  - action name -> `<skill_root>/actions/<name>.py`
+  - action name -> phase-local `phases/<phase_id>/actions/<name>.py` or Engine/Studio common action registry
   - sandbox forbids `/`, `.`, `..`, absolute path, module path
   - runtime return dict + declared output fields only
 - 依赖 tasks: B4
@@ -583,8 +585,8 @@ Merge 前必须满足:
 - 改 lines / 函数 / 类:
   - 删除 `parser.py:230-245` `parse_skill_file` stub。
   - 删除 `locate_line_for_pydantic_loc` 旧 AST line 定位器和死依赖。
-  - 检查 parser.py 是否还有 V2.1 / schema 2.0 残留: `rg "schema_version|parse_skill_file|<phase\\b" packages/graph-agent/src/graph_agent/core/parser.py`.
-- 依赖 tasks: B3/B4 V0.3.0 YAML/frontmatter parser complete.
+  - 检查 parser.py 是否还有 V2.1 / schema 2.0 残留: `rg "schema_version|parse_skill_file" packages/graph-agent/src/graph_agent/core/parser.py`.
+- 依赖 tasks: B3/B4 V0.3.0 GRAPH 双轨 + inline IO parser complete.
 - 测试影响:
   - 删除仍 import `parse_skill_file` 或 `locate_line_for_pydantic_loc` 的 tests。
   - V0.3.0 source-span tests 后续由 parser implementation 新增, 不保留旧 test skip。
@@ -600,10 +602,11 @@ Merge 前必须满足:
   - 新建 V0.3.0 minimal fixtures covering `GRAPH.md`, `SKILL.md`, `LOGIC.md`, and `SUBGRAPH.md`
 - 改 lines / 函数 / 类:
   - 实施时 grep `schema_version.*"2\\.[01]"|<python_callable>` 确认完整清单。
-  - 旧 `mode: skill`, `<phase />`, physical `io/*.json`, relative subskill paths, and `<python_callable>` fixtures must not remain in active tests.
+  - 旧 `mode: skill`, phase frontmatter `mode:`, physical `io/*.json`, relative subskill paths, and `<python_callable>` fixtures must not remain in active tests.
+  - GRAPH.md active fixtures must use `schema_version: "v0.3.0"` + frontmatter `phases: [name]` + body `<phase depends_on="input">name</phase>` dual track.
 - 依赖 tasks: B1-B8 parser and schema tasks.
 - 测试影响:
-  - Update integration/e2e fixtures to `schema_version: "0.3.0"`.
+  - Update integration/e2e fixtures to `schema_version: "v0.3.0"`.
   - Add target_skill registry fixture and resolver fixture for child graph coverage.
 - 风险点:
   - Fixture deletion must be paired with test deletion/rewrite so CI does not silently point at missing paths.
@@ -618,7 +621,7 @@ Merge 前必须满足:
 - 依赖 tasks: G3.
 - 测试影响:
   - CI 不再包含 V2.1 line-location test。
-  - V0.3.0 YAML/frontmatter source-span test 在 parser cutover implementation 中重新添加。
+  - V0.3.0 GRAPH dual-track source-span test 在 parser cutover implementation 中重新添加。
 - 风险点:
   - 新测试必须围绕 V0.3.0 AST and source spans, not V2.1 Pydantic loc behavior.
 
@@ -687,7 +690,7 @@ Before PR merge:
 
 ## High-risk Collision List
 
-- Existing V2.1 fixtures use `mode: skill`, `<phase />` body tags, and physical `io/*.json`; they will fail until migrated together.
+- Existing V2.1 fixtures use `mode: skill`, self-closing `<phase />` tags with `id/src`, and physical `io/*.json`; they will fail until migrated to `schema_version: "v0.3.0"` + GRAPH dual-track together.
 - Existing subagent fixtures use relative `path`; they must become registry `target_skill` fixtures with an injected resolver.
 - Cache namespace must change or old cache snapshots will fail to hydrate into `AgentNodeAST`.
 - Prompt snapshot tests will change significantly because exit_contract moves to system prompt tail with output_schema inline.

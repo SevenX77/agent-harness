@@ -199,9 +199,7 @@ async def stream_query(
 
     api_key, base_url = _resolve_provider_runtime(primary.provider_code, primary.provider_def)
     if not api_key:
-        yield CopilotEventError(
-            message=f"Provider {primary.provider_code} 未配置 API key"
-        )
+        yield CopilotEventError(message=f"Provider {primary.provider_code} 未配置 API key")
         return
 
     model_code = primary.model_def.code

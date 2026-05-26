@@ -172,7 +172,9 @@ PM 指示"让 agents 过一遍, 统一就执行"。三方独立评估 §7 顺序
 |---|---|---|
 | step 4 阶段一 (r14.1) | a1 写红灯 suite `test_round14_skill_compilation_cutover.py` (27 test 函数: 双轨/schema_version v/禁 mode/禁 phase metadata/Logic validator/DAG 4 码/name-mismatch/IO deprecated/body 5 标签/mention/subgraph IO) | ✅ 主控实证 pytest 30 failed + 3 passed (3 pass = src 已满足契约: skill-mode pydantic 拒/physical-io deprecated, 非 false red) |
 | step 4 阶段一 audit | a2 audit: 红灯 suite **够格做验收基准** (无 must-fix); 3 发现主控复核: schema_version "2.1" 增量 (属实, 阶段二补) / masking 轻微 (physical_io parametrize 混场景) / B4 脏数据 (误判, test 已覆盖 `("","io/inputs.json")`) | ✅ |
-| step 4 阶段二 (r14.2-r14.9) | a1 实施转绿 (先补 schema_version "2.1" 红灯; B1-B8; sweep 已 merge 污染 graph_serializer:34/41 + loader:642/647 + pre-existing fixture + 18 个 modified test WIP 同步重写, B8 撤 xfail) | 🔄 进行中 (job_e6dfe239c001) |
+| step 4 阶段二 (r14.2-r14.9) | a1 实施转绿 (补 schema_version "2.1" 红灯; B1-B8; sweep 污染 + 18 modified test 同步; B8 撤 blanket xfail 改具名集合) | ✅ commit `b6b18f5` (主控亲跑 928 passed/3 skipped/38 xfailed/0 xpassed 实证) |
+| step 5 双审 (SOP-08) | a2 审 src 偏移 + a3 PM 替身审整体 | ✅ 均 pass 无 must-fix; a2「教科书级 Hard Cutover 无 if-else 补丁」; a3「可 ship, 0 xpassed 误隔离消除, 对齐 A7」 |
+| step 5 a3 唯一观察 (non-blocking) | impl 把 phase mismatch 细分 name-mismatch + id-duplicate (对齐 A7, 比 spec 正确); requirements §4 / 02-spec 字面统一 phase-id-invalid | ⏳ step 6 doc 同步追上 impl |
 | step 4 阶段三 (r14.10) | grep gate + 全量 pytest 绿 | ⏳ |
 
 **注**: 其他 18 个 working tree modified test WIP = 被打断前错误前提实施, 在阶段二随 src sweep 同步重写, 不单独处理。

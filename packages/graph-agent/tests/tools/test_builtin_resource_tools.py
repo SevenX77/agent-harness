@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 from graph_agent.core.compiler import compile_skill
-from graph_agent.core.exceptions import GraphAgentFatalError
+from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
 from graph_agent.core.graph_assembler import assemble_graph
 from langchain_core.messages import AIMessage
 
@@ -160,10 +160,9 @@ def test_read_reference_path_escape_is_blocked_without_leaking_external_file(tmp
     outside.write_text("SHOULD_NOT_LEAK", encoding="utf-8")
     _resource_skill(tmp_path, reference_path="../secret-reference.md")
     _write(tmp_path / "examples" / "e2.md", "# Example\n")
-    tools = _bound_tools(tmp_path)
 
-    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-resource-reference-path-invalid\]") as exc:
-        tools["read_reference"].invoke({"reference_id": "R1"})
+    with pytest.raises(SkillLoadError, match=r"\[F-v3-resource-reference-path-invalid\]") as exc:
+        compile_skill(tmp_path, cache=False)
 
     assert "SHOULD_NOT_LEAK" not in str(exc.value)
 

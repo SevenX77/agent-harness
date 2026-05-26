@@ -116,6 +116,37 @@ def test_invalid_reference_path_is_compile_fatal_not_reader_fallback(tmp_path: P
         compile_skill(tmp_path, cache=False)
 
 
+def test_reference_path_escape_to_existing_file_is_compile_fatal(tmp_path: Path) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.md"
+    _write(outside, "external reference")
+    _agent_skill(tmp_path, reference_path=f"../{outside.name}")
+
+    with pytest.raises(SkillLoadError, match=r"\[F-v3-resource-reference-path-invalid\]"):
+        compile_skill(tmp_path, cache=False)
+
+
+def test_reference_reader_path_invalid_fatal_propagates_from_assembly(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class PathInvalidReaderRuntime:
+        def __init__(self, **kwargs: Any) -> None:
+            del kwargs
+
+        def initial_state(self) -> dict[str, Any]:
+            raise GraphAgentFatalError("[F-v3-resource-reference-path-invalid] escaped")
+
+    monkeypatch.setattr(
+        "graph_agent.core.graph_assembler.ReferenceReaderRuntime",
+        PathInvalidReaderRuntime,
+    )
+    _agent_skill(tmp_path)
+    _write(tmp_path / "references" / "guide.md", "reference body")
+
+    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-resource-reference-path-invalid\]"):
+        assemble_graph(compile_skill(tmp_path, cache=False), chat_model=CapturePromptChatModel())
+
+
 def test_reference_reader_runs_once_during_assembly_not_each_agent_turn(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -481,8 +481,7 @@ def _build_reference_reader_markdown(
         return _fallback_reference_reader_markdown(root, references, "empty reader output")
     except GraphAgentFatalError as exc:
         if "[F-v3-resource-reference-path-invalid]" in str(exc):
-            logger.warning("[F-v3-reference-reader-failed] %s", exc)
-            return f"[F-v3-reference-reader-failed] {exc}"
+            raise
         logger.warning("[F-v3-reference-reader-failed] %s", exc)
         return _fallback_reference_reader_markdown(root, references, str(exc))
     except Exception as exc:  # noqa: BLE001

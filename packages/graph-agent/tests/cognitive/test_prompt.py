@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+import pytest
 from graph_agent.cognitive.prompt import (
     apply_cognitive_template,
     apply_v030_cognitive_template,
@@ -20,14 +21,13 @@ def _compose_with_role_prefix(role_prefix: str) -> str:
     )
 
 
-def test_role_prefix_injected_when_llm_role_set() -> None:
+def test_engine_no_longer_reads_role_prefix_from_llm_role() -> None:
     prefix = resolve_role_prefix_from_llm_role("architect")
 
     prompt = _compose_with_role_prefix(prefix)
 
-    assert prefix
-    assert "<role_prefix>" in prompt
-    assert "严谨的故事结构与逻辑一致性专家" in prompt
+    assert prefix == ""
+    assert "<role_prefix>" not in prompt
 
 
 def test_role_prefix_empty_when_llm_role_none() -> None:
@@ -39,7 +39,9 @@ def test_role_prefix_empty_when_llm_role_none() -> None:
     assert "<role_prefix>" not in prompt
 
 
-def test_unknown_llm_role_fallback(caplog) -> None:
+def test_unknown_llm_role_does_not_read_role_config(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     caplog.set_level(logging.WARNING)
 
     prefix = resolve_role_prefix_from_llm_role("does_not_exist")
@@ -47,7 +49,7 @@ def test_unknown_llm_role_fallback(caplog) -> None:
 
     assert prefix == ""
     assert "<role_prefix>" not in prompt
-    assert "does_not_exist" in caplog.text
+    assert caplog.text == ""
 
 
 def test_critical_reminders_use_finish_task_v2_contract() -> None:
@@ -67,7 +69,6 @@ def test_v030_cognitive_template_places_exit_contract_with_output_schema() -> No
         goal="Answer the question.",
         steps=[{"id": "S1", "name": "Read", "content": "Read references."}],
         protocols=[{"id": "P1", "content": "Cite evidence."}],
-        exit_contract="Return JSON-compatible business data.",
         output_schema={"type": "object", "properties": {"answer": {"type": "string"}}},
         inline_examples=["Example A"],
         document_examples=[{"id": "E2", "summary": "Long example"}],
@@ -80,4 +81,4 @@ def test_v030_cognitive_template_places_exit_contract_with_output_schema() -> No
     assert "Example A" in prompt
     assert "E2: Long example" in prompt
     assert "<output_schema>" in prompt
-    assert prompt.rfind("<output_schema>") > prompt.rfind("Return JSON-compatible business data.")
+    assert prompt.rfind("<output_schema>") > prompt.rfind("Call finish_task")

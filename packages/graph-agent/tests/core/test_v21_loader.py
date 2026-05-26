@@ -383,7 +383,7 @@ def test_topology_cycle_detected(tmp_path: Path) -> None:
     assert " -> " in str(exc.value)
 
 
-def test_topology_orphan_disconnected(tmp_path: Path) -> None:
+def test_topology_allows_disconnected_phase_nodes(tmp_path: Path) -> None:
     _base_v21_root(tmp_path)
     _write_graph_with_phase_lines(
         tmp_path,
@@ -395,11 +395,9 @@ def test_topology_orphan_disconnected(tmp_path: Path) -> None:
     _write_skill_phase(tmp_path, "phases/main")
     _write_skill_phase(tmp_path, "phases/isolated")
 
-    with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(tmp_path)
+    compiled = SkillLoader().compile_skill(tmp_path)
 
-    _assert_graph_fatal(exc)
-    assert "orphan phase 'isolated' is disconnected from the main graph" in str(exc.value)
+    assert [phase.id for phase in compiled.manifest.phases] == ["main", "isolated"]
 
 
 def test_topology_src_escape_root(tmp_path: Path) -> None:

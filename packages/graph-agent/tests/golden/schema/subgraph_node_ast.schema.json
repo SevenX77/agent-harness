@@ -28,6 +28,27 @@
   "additionalProperties": false,
   "description": "Subgraph delegation phase node parsed from ``SUBGRAPH.md``.",
   "properties": {
+    "io": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PhaseIOSchema"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    },
+    "mode": {
+      "const": "subgraph",
+      "title": "Mode",
+      "type": "string"
+    },
     "name": {
       "anyOf": [
         {
@@ -47,49 +68,20 @@
       "title": "Raw Blocks",
       "type": "object"
     },
-    "metadata": {
-      "additionalProperties": true,
-      "title": "Metadata",
-      "type": "object"
-    },
-    "mode": {
-      "const": "subgraph",
-      "title": "Mode",
-      "type": "string"
-    },
-    "sub_skill_ref": {
-      "minLength": 1,
-      "title": "Sub Skill Ref",
-      "type": "string"
-    },
     "target_skill": {
-      "anyOf": [
-        {
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Target Skill"
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+      "title": "Target Skill",
+      "type": "string"
     },
-    "io": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/PhaseIOSchema"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
+    "validator": {
+      "default": false,
+      "title": "Validator",
+      "type": "boolean"
     }
   },
   "required": [
     "mode",
-    "sub_skill_ref"
+    "target_skill"
   ],
   "title": "SubgraphNodeAST",
   "type": "object"

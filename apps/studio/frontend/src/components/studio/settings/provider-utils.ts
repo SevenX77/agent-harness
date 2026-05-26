@@ -70,7 +70,7 @@ export function draftFromAddProviderSubmission(
 export function officialProviderDrafts(drafts: ProviderDraft[]): ProviderDraft[] {
   return officialProviders.map((vendor) => {
     const existing = drafts.find((draft) => isOfficialProviderDraft(draft, vendor.code))
-    if (existing) return existing
+    if (existing) return withOfficialProviderDefaults(existing, vendor)
     return {
       id: `${vendor.code}-official`,
       name: `${officialProviderDisplayName(vendor.label)} Official`,
@@ -80,6 +80,14 @@ export function officialProviderDrafts(drafts: ProviderDraft[]): ProviderDraft[]
       isTesting: false,
     }
   })
+}
+
+export function providerDraftForAction(drafts: ProviderDraft[], providerId: string): ProviderDraft | null {
+  const draft = drafts.find((item) => item.id === providerId)
+    ?? officialProviderDrafts(drafts).find((item) => item.id === providerId)
+  if (!draft) return null
+  const vendor = officialProviderForDraft(draft)
+  return vendor ? withOfficialProviderDefaults(draft, vendor) : draft
 }
 
 export function thirdPartyProviderDrafts(drafts: ProviderDraft[]): ProviderDraft[] {
@@ -158,6 +166,21 @@ function isOfficialProviderDraft(draft: ProviderDraft, providerCode: string): bo
     normalizedId.startsWith(`${providerCode}_`) ||
     (normalizedName.includes(label) && normalizedName.includes("official"))
   )
+}
+
+function officialProviderForDraft(draft: ProviderDraft): (typeof officialProviders)[number] | null {
+  return officialProviders.find((vendor) => isOfficialProviderDraft(draft, vendor.code)) ?? null
+}
+
+function withOfficialProviderDefaults(
+  draft: ProviderDraft,
+  vendor: (typeof officialProviders)[number],
+): ProviderDraft {
+  return {
+    ...draft,
+    provider_type: inferProviderType(vendor.code),
+    base_url: vendor.baseUrl,
+  }
 }
 
 function officialProviderDisplayName(label: string): string {

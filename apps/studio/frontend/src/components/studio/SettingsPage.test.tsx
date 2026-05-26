@@ -9,6 +9,7 @@ import {
   moveProviderInRole,
   notableProviderKeyForDraft,
   officialProviderDrafts,
+  providerDraftForAction,
   providerTestParamsMatch,
   removeProviderFromRole,
   reorderModelInRole,
@@ -252,6 +253,28 @@ describe('Add Provider flow helpers', () => {
     ])
   })
 
+  it('uses canonical official provider endpoints for hidden Base URL fields and Test actions', () => {
+    const staleOfficialDrafts = draftsFromCredentials({
+      providers: [
+        {
+          id: 'anthropic-official',
+          name: 'Anthropic',
+          api_key: 'sk-anthropic',
+          base_url: 'https://api.anthropic.example',
+          provider_type: 'openai_compatible',
+        },
+      ],
+    })
+
+    const official = officialProviderDrafts(staleOfficialDrafts)[0]
+    const actionDraft = providerDraftForAction(staleOfficialDrafts, 'anthropic-official')
+
+    expect(official.base_url).toBe('https://api.anthropic.com')
+    expect(official.provider_type).toBe('anthropic_compatible')
+    expect(actionDraft?.base_url).toBe('https://api.anthropic.com')
+    expect(actionDraft?.provider_type).toBe('anthropic_compatible')
+  })
+
   it('derives notable provider key and manual panel visibility', () => {
     const official = officialProviderDrafts(draftsFromCredentials(credentials))[0]
     const custom = thirdPartyProviderDrafts(draftsFromCredentials(credentials))[2]
@@ -387,11 +410,12 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).toContain('Test')
   })
 
-  it('renders API key inputs as native password values with password-manager ignore attributes', () => {
+  it('renders API key inputs as editable masked text values with password-manager ignore attributes', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
 
-    expect(html).toContain('type="password"')
+    expect(html).toContain('type="text"')
     expect(html).toContain('value="sk-deepseek"')
+    expect(html).toContain('mask-input')
     expect(html).toContain('name="provider-secret-DS"')
     expect(html).toContain('autoComplete="off"')
     expect(html).toContain('data-1p-ignore=""')

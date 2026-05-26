@@ -108,10 +108,10 @@ def test_skill_phase_config_subagents_parse_into_ast(tmp_path: Path) -> None:
     - read_file
   subagents:
     - name: beat_extractor
-      path: subskills/beat_extractor
+      target_skill: beat_extractor
       description: Extract narrative beats.
     - name: producer_strategy
-      path: subskills/producer_strategy
+      target_skill: producer_strategy
       description: Score audience pull.
 """
         ),
@@ -126,7 +126,7 @@ def test_skill_phase_config_subagents_parse_into_ast(tmp_path: Path) -> None:
         "beat_extractor",
         "producer_strategy",
     ]
-    assert ast.subagents[0].path == "subskills/beat_extractor"
+    assert ast.subagents[0].target_skill == "beat_extractor"
     assert ast.subagents[0].description == "Extract narrative beats."
 
 
@@ -145,7 +145,7 @@ def test_skill_without_subagents_keeps_empty_default(tmp_path: Path) -> None:
     [
         (
             """  subagents:
-    - path: subskills/missing_name
+    - target_skill: missing_name
       description: Missing name.
 """,
             "name",
@@ -153,7 +153,7 @@ def test_skill_without_subagents_keeps_empty_default(tmp_path: Path) -> None:
         (
             """  subagents:
     - name: bad-name
-      path: subskills/bad
+      target_skill: bad
       description: Invalid name.
 """,
             "bad-name",
@@ -161,7 +161,7 @@ def test_skill_without_subagents_keeps_empty_default(tmp_path: Path) -> None:
         (
             """  subagents:
     - name: missing_description
-      path: subskills/missing_description
+      target_skill: missing_description
 """,
             "description",
         ),
@@ -187,7 +187,7 @@ def test_subagent_metadata_resolves_target_and_input_schema(tmp_path: Path) -> N
         _skill_text(
             phase_config="""  subagents:
     - name: beat_extractor
-      path: subskills/beat_extractor
+      target_skill: beat_extractor
       description: Extract narrative beats.
 """
         ),
@@ -228,7 +228,7 @@ def test_subagent_input_model_validates_basic_json_schema_types(tmp_path: Path) 
         _skill_text(
             phase_config="""  subagents:
     - name: typed_expert
-      path: subskills/typed_expert
+      target_skill: typed_expert
       description: Validate typed input.
 """
         ),
@@ -272,10 +272,10 @@ def test_subagent_tools_are_injected_into_phase_tool_registry(tmp_path: Path) ->
         _skill_text(
             phase_config="""  subagents:
     - name: beat_extractor
-      path: subskills/beat_extractor
+      target_skill: beat_extractor
       description: Extract narrative beats.
     - name: producer_strategy
-      path: subskills/producer_strategy
+      target_skill: producer_strategy
       description: Score audience pull.
 """
         ),
@@ -290,7 +290,7 @@ def test_subagent_tools_are_injected_into_phase_tool_registry(tmp_path: Path) ->
     assert "Extract narrative beats." in beat_tool.description
     assert "no more than 3 inputs" in beat_tool.description
     assert beat_tool.metadata is not None
-    assert beat_tool.metadata["subagent_path"] == "subskills/beat_extractor"
+    assert beat_tool.metadata["target_skill"] == "beat_extractor"
     assert beat_tool.args_schema is not None
     schema = beat_tool.args_schema.model_json_schema()
     assert "inputs" in schema["properties"]
@@ -305,7 +305,7 @@ def test_subagent_dynamic_tool_name_conflict_fails_compile(tmp_path: Path) -> No
         _skill_text(
             phase_config="""  subagents:
     - name: beat_extractor
-      path: subskills/beat_extractor
+      target_skill: beat_extractor
       description: Extract narrative beats.
 """
         ),
@@ -333,8 +333,8 @@ def test_static_subagent_minimal_fixture_compiles() -> None:
 @pytest.mark.parametrize(
     ("relative", "message"),
     [
-        ("subskills/missing", "does not exist"),
-        ("subskills/not_a_skill", "has no GRAPH.md"),
+        ("missing", "skill-not-registered"),
+        ("not_a_skill", "resolver-path-invalid"),
     ],
 )
 def test_subagent_target_must_exist_and_be_v21_skill_root(
@@ -350,7 +350,7 @@ def test_subagent_target_must_exist_and_be_v21_skill_root(
         _skill_text(
             phase_config=f"""  subagents:
     - name: beat_extractor
-      path: {relative}
+      target_skill: {relative}
       description: Extract narrative beats.
 """
         ),
@@ -368,7 +368,7 @@ def test_subagent_target_must_declare_io_inputs(tmp_path: Path) -> None:
         _skill_text(
             phase_config="""  subagents:
     - name: beat_extractor
-      path: subskills/beat_extractor
+      target_skill: beat_extractor
       description: Extract narrative beats.
 """
         ),

@@ -1,17 +1,8 @@
-"""Configuration loading sub-package."""
+"""Configuration loading sub-package.
+
+LLM role loading is owned by ``graph_agent_gateway`` in Provider Intelligence V2.
+"""
 
 from __future__ import annotations
 
-from graph_agent.config.llm_config import (
-    RoleConfigData,
-    get_role_config,
-    load_config,
-    reset_role_config,
-)
-
-__all__ = [
-    "get_role_config",
-    "load_config",
-    "reset_role_config",
-    "RoleConfigData",
-]
+__all__: list[str] = []

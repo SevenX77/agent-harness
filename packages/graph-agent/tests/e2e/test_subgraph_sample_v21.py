@@ -155,7 +155,7 @@ def test_subgraph_sample_v21_compile_topology_and_subgraph_refs() -> None:
         ["batch_analysis"],
     ]
     refs = {
-        node.phase_name: node.ast.sub_skill_ref
+        node.phase_name: node.ast.target_skill
         for node in compiled.nodes
         if isinstance(node.ast, SubgraphNodeAST)
     }
@@ -167,5 +167,5 @@ def test_subgraph_sample_v21_compile_topology_and_subgraph_refs() -> None:
     }
     for node in compiled.nodes:
         assert isinstance(node.ast, SubgraphNodeAST)
-        assert (node.path.parent / node.ast.sub_skill_ref).resolve().is_dir()
+        assert node.ast.target_skill
     assert assembled.graph is not None

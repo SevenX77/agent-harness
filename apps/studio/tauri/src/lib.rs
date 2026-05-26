@@ -209,10 +209,13 @@ fn open_in_terminal(path: String) -> Result<(), String> {
     Err("opening a terminal is not supported on this platform".to_string())
 }
 
+#[cfg(all(target_os = "macos", test))]
+fn macos_edit_menu_labels() -> &'static [&'static str] {
+    &[]
+}
+
 #[cfg(target_os = "macos")]
-fn macos_menu_without_edit<R: tauri::Runtime>(
-    app_handle: &tauri::AppHandle<R>,
-) -> tauri::Result<Menu<R>> {
+fn macos_menu<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) -> tauri::Result<Menu<R>> {
     let pkg_info = app_handle.package_info();
     let config = app_handle.config();
     let about_metadata = AboutMetadata {
@@ -279,7 +282,7 @@ pub fn run() {
     #[cfg(target_os = "macos")]
     let builder = builder
         .enable_macos_default_menu(false)
-        .menu(macos_menu_without_edit);
+        .menu(macos_menu);
 
     let app = builder
         .plugin(tauri_plugin_dialog::init())
@@ -387,5 +390,14 @@ mod tests {
         let error = existing_path(&missing.display().to_string()).expect_err("missing path");
 
         assert!(error.contains("path does not exist"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_menu_spec_omits_native_edit_menu_to_avoid_double_click_alerts() {
+        assert!(
+            macos_edit_menu_labels().is_empty(),
+            "native Edit submenu reintroduces WebKit double-click alert sounds"
+        );
     }
 }

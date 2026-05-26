@@ -45,6 +45,7 @@ def studio_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path,
     monkeypatch.setattr(config, "WORKSPACES_DIR", workspaces_dir)
     monkeypatch.setattr(config, "APP_SETTINGS_DIR", global_config_dir)
     monkeypatch.setattr(config, "SKILL_INDEX_PATH", global_config_dir / "skill_index.json")
+    monkeypatch.setattr(config, "APP_SETTINGS_PATH", global_config_dir / "app_settings.json")
     monkeypatch.setattr(config, "DEFAULT_SKILLS_ROOT", default_skills_root)
     clear_backend_caches()
     return skills_dir, workspaces_dir

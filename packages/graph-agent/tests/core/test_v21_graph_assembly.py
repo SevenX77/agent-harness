@@ -103,10 +103,8 @@ def _subgraph(root: Path, phase: str = "sub", ref: str = "child") -> None:
         root / "phases" / phase / "SUBGRAPH.md",
         f"""---
 mode: subgraph
+target_skill: {ref}
 ---
-<sub_skill_ref>
-{ref}
-</sub_skill_ref>
 """,
     )
 
@@ -293,3 +291,25 @@ def test_non_terminal_phase_finish_task_no_validate(tmp_path: Path) -> None:
     )
 
     assert result["data"]["skill"] == {"draft": "unchecked"}
+
+
+def test_non_terminal_phase_finish_task_empty_data_still_writes_key_placeholder(
+    tmp_path: Path,
+) -> None:
+    _base(
+        tmp_path,
+        '<phase id="skill" src="phases/skill" depends_on="" />\n'
+        '<phase id="logic" src="phases/logic" depends_on="skill" />\n',
+    )
+    _skill(tmp_path)
+    _logic(tmp_path)
+    chat = FakeToolChatModel(
+        [[{"name": "finish_task", "args": {"markdown": "done"}, "id": "f1"}]]
+    )
+
+    result = assemble_graph(compile_skill(tmp_path, cache=False), chat_model=chat).graph.invoke(
+        {"data": {}, "flow": {}, "messages": [], "run_id": "r1"}
+    )
+
+    assert "skill" in result["data"]
+    assert result["data"]["skill"] == {}

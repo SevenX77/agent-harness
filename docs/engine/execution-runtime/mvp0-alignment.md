@@ -90,7 +90,8 @@ MVP0 MUST 删除 `ExitContractRegistry` 的 per-turn inject / strip 设计。`ex
 | 旧组件 / 字段 | V0.3.0 状态 | 替代物 | 校验规则 | 错误码 | 业务作用 |
 |---|---|---|---|---|---|
 | `ExitContractRegistry` | 退役 | `{skill_exit_contract_inline}` | runtime 不再 inject/strip messages | — | 避免历史堆积 |
-| `phase_ast.exit_contract` | 保留为 Agent AST 字段 | template 末尾完整 block | 必须来自 `<exit_contract>` 且非空 | `[F-v3-agent-exit-contract-missing]` | 最终输出规则 |
+| `AgentNodeAST.exit_contract` | 退役 | `{skill_exit_contract_inline}` 系统默认字符串 | Agent body 不再提供 `<exit_contract>` | `[F-v3-cognitive-output-schema-render-failed]` | 最终输出规则 |
+| `SkillNodeAST.exit_contract` | legacy path 保留 | legacy runtime 注入路径 | 仅旧 `mode: skill` 路径消费 | — | PR γ3 cleanup 前兼容旧路径 |
 | `output_schema` 独立插槽 | 退役 | 追加到 exit_contract 末尾 | 序列化失败 FATAL | `[F-v3-cognitive-output-schema-render-failed]` | recency bias |
 | ReAct `messages` | 不存 exit contract 临时副本 | 只保存真实对话 / tool 消息 | 不允许重复注入 contract | `[F-v3-runtime-phase-failed]` | 控制上下文体积 |
 
@@ -185,7 +186,7 @@ Execution-runtime 的装配层 MUST 消费 `AgentNodeAST` 和资源预处理结�
 | `{reference_reader_subagent_output_markdown}` | markdown | 否 | fallback markdown | NEW-A 输出 | `[F-v3-reference-reader-failed]` WARN | 领域知识 |
 | `{inline_examples_splat}` | markdown | 否 | `"无内联示例"` | inline examples content | `[F-v3-resource-example-invalid]` | 短案例 |
 | `{document_examples_registry}` | markdown list | 否 | `"无扩展案例"` | document examples id + summary | `[F-v3-resource-example-invalid]` | 长案例目录 |
-| `{skill_exit_contract_inline}` | XML + schema | 是 | 无 | `<exit_contract>` + `io.outputs` schema | `[F-v3-cognitive-output-schema-render-failed]` | 输出契约末尾 recency bias |
+| `{skill_exit_contract_inline}` | 系统默认字符串 + schema | 是 | 无 | 系统默认字符串 + `io.outputs` schema | `[F-v3-cognitive-output-schema-render-failed]` | 输出契约末尾 recency bias |
 
 渲染完成后, Agent ReAct 循环只接收一个稳定 system prompt, 不再在每轮 message history 动态注入 exit contract。规范终点见 [Cognitive Template 7 大插槽](../skill-spec/06-cognitive-template-spec.md#7-大插槽布局拓扑)。
 
@@ -294,7 +295,7 @@ Runtime / assembly 消费编译期产出的 `AgentNodeAST`, 不直接解析 SKIL
 | `protocols` | body `<protocol>` AST | `{skill_protocols_splat}` | 否 | `[F-v3-agent-protocol-invalid]` | 协议引用 |
 | `references` | frontmatter | reference reader + `read_reference` | 否 | `[F-v3-resource-reference-invalid]` | 知识资料 |
 | `examples` | frontmatter | examples slots + `read_example` | 否 | `[F-v3-resource-example-invalid]` | 案例 |
-| `exit_contract` | body `<exit_contract>` | `{skill_exit_contract_inline}` | 是 | `[F-v3-agent-exit-contract-missing]` | 输出规则 |
+| `exit_contract` | 系统默认字符串 | `{skill_exit_contract_inline}` | 是 | `[F-v3-cognitive-output-schema-render-failed]` | 输出规则 |
 | `io.outputs` | frontmatter | inline output_schema | 是 | `[F-v3-cognitive-output-schema-render-failed]` | 输出结构 |
 
 Body XML 的顶层业务标签与解析规则见 [Agent Body XML 扁平化容器](../skill-spec/05-agent-md-spec.md#body-xml-扁平化容器)。`knowledge_base` 和 `examples` 是 cognitive template 容器, 不是 Agent body 自定义标签。

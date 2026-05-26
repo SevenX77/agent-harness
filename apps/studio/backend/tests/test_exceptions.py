@@ -14,6 +14,7 @@ def test_standard_error_codes_map_to_http_exceptions() -> None:
         "TERMINAL_LIMIT_REACHED": 503,
         "WEBSOCKET_DISCONNECTED": 499,
         "LLM_FALLBACK_EXHAUSTED": 502,
+        "LLM_CREDENTIALS_SCHEMA": 422,
         "RESUME_CHECKPOINT_NOT_FOUND": 404,
     }
 

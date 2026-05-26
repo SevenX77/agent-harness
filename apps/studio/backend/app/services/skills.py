@@ -49,6 +49,7 @@ from app.services.canvas_errors import CanvasConflictError, CanvasSerializerFata
 from app.services.config_arbitration import detect_config_mismatch
 from app.services.file_watcher import record_api_write
 from app.services.git_local import GitLocalService, initialize_skill_repository
+from app.services.skill_resolver import build_studio_skill_resolver
 
 _LOCATION_RE = re.compile(r":(?P<line>\d+)(?::(?P<loc>.*))?")
 _NAME_LINE_RE = re.compile(
@@ -291,7 +292,7 @@ def lint_skill(skill_id: str) -> LintResult:
 def lint_skill_path(skill_path: Path) -> LintResult:
     """Compile a V2.1 skill root into Studio lint diagnostics."""
     try:
-        compiled = compile_skill(skill_path)
+        compiled = compile_skill(skill_path, skill_resolver=build_studio_skill_resolver())
     except (SkillLoadError, SkillCompilationError) as exc:
         return LintResult(status="failed", errors=[_lint_error_from_exception(exc)])
     return LintResult(
@@ -310,7 +311,11 @@ async def compile_skill_for_studio(
     """Compile a resolved skill and return the Studio compile contract."""
     skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
     try:
-        compiled = compile_skill(skill_dir, cache=False)
+        compiled = compile_skill(
+            skill_dir,
+            cache=False,
+            skill_resolver=build_studio_skill_resolver(),
+        )
     except (SkillLoadError, SkillCompilationError) as exc:
         raise CompileFailedError(_compile_failure_from_exception(exc, skill_dir)) from exc
     return CompileSuccess(
@@ -1055,7 +1060,10 @@ def _graph_content_hash(content: str) -> str:
 
 def _load_compiled(skill_path: Path) -> CompiledSkill:
     try:
-        return SkillLoader().compile_skill(skill_path)
+        return SkillLoader().compile_skill(
+            skill_path,
+            skill_resolver=build_studio_skill_resolver(),
+        )
     except Exception as exc:
         response = error_response(
             error_code="MANIFEST_VALIDATION_FAILED",
@@ -1069,7 +1077,10 @@ def _load_compiled(skill_path: Path) -> CompiledSkill:
 
 def _load_compiled_for_graph_serializer(skill_path: Path) -> CompiledSkill:
     try:
-        return SkillLoader(validate_context_writes=False).compile_skill(skill_path)
+        return SkillLoader(validate_context_writes=False).compile_skill(
+            skill_path,
+            skill_resolver=build_studio_skill_resolver(),
+        )
     except Exception as exc:
         response = error_response(
             error_code="MANIFEST_VALIDATION_FAILED",
@@ -1150,7 +1161,6 @@ def _validate_canvas_topology(request: SerializeGraphReq) -> None:
                     detail={"phase_id": phase.id},
                 )
     _validate_canvas_acyclic(request)
-    _validate_canvas_connected(request)
 
 
 def _validate_canvas_acyclic(request: SerializeGraphReq) -> None:
@@ -1181,32 +1191,6 @@ def _validate_canvas_acyclic(request: SerializeGraphReq) -> None:
     for node in adjacency:
         if state.get(node) is None:
             visit(node)
-
-
-def _validate_canvas_connected(request: SerializeGraphReq) -> None:
-    if len(request.phases) <= 1:
-        return
-    adjacency: dict[str, set[str]] = {phase.id: set() for phase in request.phases}
-    for phase in request.phases:
-        for dep in phase.depends_on:
-            adjacency[phase.id].add(dep)
-            adjacency[dep].add(phase.id)
-    start = request.phases[0].id
-    visited: set[str] = set()
-    stack = [start]
-    while stack:
-        node = stack.pop()
-        if node in visited:
-            continue
-        visited.add(node)
-        stack.extend(sorted(adjacency[node] - visited))
-    for phase in request.phases:
-        if phase.id not in visited:
-            raise CanvasSerializerFatal(
-                code="serializer_orphan",
-                message=f"orphan phase {phase.id!r} is disconnected from the main graph",
-                detail={"phase_id": phase.id},
-            )
 
 
 def _serializer_fatal_from_engine_error(exc: Exception, elapsed_ms: float) -> CanvasSerializerFatal:

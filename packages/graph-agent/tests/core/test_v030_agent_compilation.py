@@ -85,9 +85,6 @@ Use the reference.
 Always cite @step:S1.
 </protocol>
 {body_extra}
-<exit_contract>
-Return answer.
-</exit_contract>
 """,
     )
 

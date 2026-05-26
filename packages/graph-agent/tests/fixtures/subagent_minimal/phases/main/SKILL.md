@@ -4,7 +4,7 @@ name: main
 phase_config:
   subagents:
     - name: echo_expert
-      path: subskills/echo_expert
+      target_skill: fixture.echo_expert
       description: Echoes text from a child expert skill.
 ---
 <system_prompt>

@@ -4,45 +4,25 @@
       "additionalProperties": false,
       "description": "Sub-skill declared as a callable tool on a SKILL phase.",
       "properties": {
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
         "name": {
           "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
           "title": "Name",
           "type": "string"
         },
         "target_skill": {
-          "anyOf": [
-            {
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Target Skill"
-        },
-        "path": {
-          "anyOf": [
-            {
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Path"
-        },
-        "description": {
-          "minLength": 1,
-          "title": "Description",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+          "title": "Target Skill",
           "type": "string"
         }
       },
       "required": [
         "name",
+        "target_skill",
         "description"
       ],
       "title": "SubagentSpec",
@@ -52,6 +32,21 @@
   "additionalProperties": false,
   "description": "LLM ReAct phase node parsed from ``SKILL.md``.",
   "properties": {
+    "exit_contract": {
+      "minLength": 1,
+      "title": "Exit Contract",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    },
+    "mode": {
+      "const": "skill",
+      "title": "Mode",
+      "type": "string"
+    },
     "name": {
       "anyOf": [
         {
@@ -71,24 +66,16 @@
       "title": "Raw Blocks",
       "type": "object"
     },
-    "metadata": {
-      "additionalProperties": true,
-      "title": "Metadata",
-      "type": "object"
-    },
-    "mode": {
-      "const": "skill",
-      "title": "Mode",
-      "type": "string"
+    "subagents": {
+      "items": {
+        "$ref": "#/$defs/SubagentSpec"
+      },
+      "title": "Subagents",
+      "type": "array"
     },
     "system_prompt": {
       "minLength": 1,
       "title": "System Prompt",
-      "type": "string"
-    },
-    "exit_contract": {
-      "minLength": 1,
-      "title": "Exit Contract",
       "type": "string"
     },
     "tools": {
@@ -96,13 +83,6 @@
         "type": "string"
       },
       "title": "Tools",
-      "type": "array"
-    },
-    "subagents": {
-      "items": {
-        "$ref": "#/$defs/SubagentSpec"
-      },
-      "title": "Subagents",
       "type": "array"
     }
   },

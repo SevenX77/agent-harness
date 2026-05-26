@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from graph_agent.callbacks.events import LLMFallbackEvent
+from graph_agent_gateway.events import LLMFallbackEvent
 
 logger = logging.getLogger(__name__)
 

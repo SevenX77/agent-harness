@@ -38,7 +38,3 @@ Return a concise review note.
 <protocol id="P1">
 Keep the response brief.
 </protocol>
-
-<exit_contract>
-Call finish_task with echoed_note.
-</exit_contract>

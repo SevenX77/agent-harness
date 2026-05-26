@@ -14,6 +14,19 @@ describe('PropertiesPanel', () => {
   it('renders selected phase metadata in the sidebar panel', () => {
     const html = renderToStaticMarkup(
       <PropertiesPanel
+        skillDetail={skillDetailWithFiles({
+          'phases/setup/LOGIC.md': [
+            '---',
+            'name: setup',
+            'mode: logic',
+            '---',
+            '<python_callable>',
+            'prepare',
+            '</python_callable>',
+            '',
+            'Body',
+          ].join('\n'),
+        })}
         selectedNode={{
           id: 'setup',
           data: {
@@ -31,9 +44,117 @@ describe('PropertiesPanel', () => {
 
     expect(html).toContain('setup')
     expect(html).toContain('LOGIC')
+    expect(html).toContain('Python callable')
+    expect(html).not.toContain('System prompt')
     expect(html).toContain('input')
     expect(html).toContain('prepare')
     expect(html).toContain('phases/setup/LOGIC.md')
+  })
+
+  it('renders agent frontmatter fields for skill phase files', () => {
+    const html = renderToStaticMarkup(
+      <PropertiesPanel
+        skillDetail={skillDetailWithFiles({
+          'phases/review/SKILL.md': [
+            '---',
+            'name: review',
+            'mode: skill',
+            'tools:',
+            '  - read_file',
+            '---',
+            '<system_prompt>',
+            'Review the draft.',
+            '</system_prompt>',
+            '',
+            '<exit_contract>',
+            'Call finish_task.',
+            '</exit_contract>',
+            '',
+            'Body',
+          ].join('\n'),
+        })}
+        selectedNode={{
+          id: 'review',
+          data: {
+            label: 'review',
+            mode: 'skill',
+            status: 'idle',
+            dependsOn: [],
+            role: 'reviewer',
+            tools: ['read_file'],
+            filePath: 'phases/review/SKILL.md',
+          },
+        }}
+      />,
+    )
+
+    expect(html).toContain('System prompt')
+    expect(html).toContain('Exit contract')
+    expect(html).toContain('Tools')
+    expect(html).not.toContain('Python callable')
+  })
+
+  it('renders subgraph frontmatter fields for subgraph phase files', () => {
+    const html = renderToStaticMarkup(
+      <PropertiesPanel
+        skillDetail={skillDetailWithFiles({
+          'phases/child/SUBGRAPH.md': [
+            '---',
+            'name: child',
+            'mode: subgraph',
+            'target_skill: child.skill',
+            '---',
+            'Body',
+          ].join('\n'),
+        })}
+        selectedNode={{
+          id: 'child',
+          data: {
+            label: 'child',
+            mode: 'subgraph',
+            status: 'idle',
+            dependsOn: [],
+            role: null,
+            tools: [],
+            filePath: 'phases/child/SUBGRAPH.md',
+          },
+        }}
+      />,
+    )
+
+    expect(html).toContain('Target skill')
+    expect(html).not.toContain('System prompt')
+    expect(html).not.toContain('phase-tools')
+  })
+
+  it('disables frontmatter editing when phase YAML is invalid', () => {
+    const html = renderToStaticMarkup(
+      <PropertiesPanel
+        skillDetail={skillDetailWithFiles({
+          'phases/broken/LOGIC.md': [
+            '---',
+            'name: [broken',
+            '---',
+            'Body',
+          ].join('\n'),
+        })}
+        selectedNode={{
+          id: 'broken',
+          data: {
+            label: 'broken',
+            mode: 'logic',
+            status: 'idle',
+            dependsOn: [],
+            role: null,
+            tools: [],
+            filePath: 'phases/broken/LOGIC.md',
+          },
+        }}
+      />,
+    )
+
+    expect(html).toContain('Frontmatter error')
+    expect(html).toContain('disabled=""')
   })
 
   it('renders subagents in the selected phase metadata', () => {

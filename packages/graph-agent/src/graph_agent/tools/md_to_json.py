@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
 from graph_agent.core.runner import run_skill
+from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -504,6 +505,8 @@ def _extract_md_excerpt(md_text: str, error_indices: set[int]) -> str:
 def md_to_json(
     md_text: str,
     schema: type[_T],
+    *,
+    skill_resolver: SkillResolverProtocol,
 ) -> list[_T]:
     """Parse MD text and return validated Pydantic model instances.
 
@@ -564,6 +567,7 @@ def md_to_json(
 
     result = run_skill(
         _PATCH_SKILL_MD,
+        skill_resolver=skill_resolver,
         original_md_excerpt=md_excerpt,
         diagnostic_report=report.to_prompt_string(),
         valid_results=[item.model_dump() for item in report.valid_items],

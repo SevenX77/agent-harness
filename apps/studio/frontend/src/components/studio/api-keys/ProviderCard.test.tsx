@@ -55,12 +55,12 @@ function renderCardHtml({
 }
 
 describe("ProviderCard API key masking", () => {
-  it("renders API key as a native password input by default", () => {
+  it("renders API key as editable masked text by default", () => {
     const html = renderCardHtml()
 
-    expect(html).toContain('type="password"')
+    expect(html).toContain('type="text"')
     expect(html).toContain('value="sk-secret-123"')
-    expect(html).not.toContain("mask-input")
+    expect(html).toContain("mask-input")
     expect(html).toContain('name="provider-secret-p1"')
     expect(html).toContain('data-1p-ignore=""')
     expect(html).toContain('data-lpignore="true"')
@@ -74,21 +74,32 @@ describe("ProviderCard API key masking", () => {
     expect(html).toContain("px-6")
   })
 
-  it("visibility toggle changes only input type and does not mutate draft api key", () => {
+  it("uses the shadcn InputGroup wrapper for API key inline actions", () => {
+    const html = renderCardHtml()
+
+    expect(html).toContain('data-slot="input-group"')
+    expect(html).toContain('data-slot="input-group-control"')
+    expect(html).toContain('data-slot="input-group-addon"')
+    expect(html).toContain('data-size="icon-xs"')
+  })
+
+  it("visibility toggle changes only mask class and does not mutate draft api key", () => {
     const onFieldChange = vi.fn()
     const hiddenInputType = apiKeyInputType(false)
     const visibleInputType = apiKeyInputType(true)
 
-    expect(hiddenInputType).toBe("password")
+    expect(hiddenInputType).toBe("text")
     expect(visibleInputType).toBe("text")
     expect(onFieldChange).not.toHaveBeenCalled()
     expect(draft.api_key).toBe("sk-secret-123")
   })
 
-  it("uses muted text only while the API key is hidden", () => {
+  it("uses CSS masking only while the API key is hidden", () => {
     expect(apiKeyInputClassName(false)).toContain("text-muted-foreground")
+    expect(apiKeyInputClassName(false)).toContain("mask-input")
     expect(apiKeyInputClassName(false)).not.toContain("text-foreground")
     expect(apiKeyInputClassName(true)).toContain("text-foreground")
+    expect(apiKeyInputClassName(true)).not.toContain("mask-input")
     expect(apiKeyInputClassName(true)).not.toContain("text-muted-foreground")
   })
 })

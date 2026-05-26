@@ -58,6 +58,11 @@ def test_error_payload_rejects_unknown_code() -> None:
         ErrorPayload(code="[F-v3-not-in-spec]", message="unknown")
 
 
+def test_graph_agent_error_rejects_unknown_embedded_code() -> None:
+    with pytest.raises(ValueError, match="unknown graph_agent error code"):
+        GraphAgentFatalError("[F-v3-typo-not-registered] typo")
+
+
 def test_error_registry_matches_error_code_spec_key_set() -> None:
     registry = _error_registry()
 

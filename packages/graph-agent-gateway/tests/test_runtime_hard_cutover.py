@@ -182,6 +182,56 @@ def test_model_resolver_loads_explicit_v4_v2_files(tmp_path: Path) -> None:
     ]
 
 
+def test_model_resolver_loads_studio_v3_roles_file_using_materialized_chain(
+    tmp_path: Path,
+) -> None:
+    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.resolver import ModelResolver
+
+    credentials_path, roles_path = _write_registry_files(tmp_path)
+    roles_payload = yaml.safe_load(roles_path.read_text(encoding="utf-8"))
+    roles_payload["schema_version"] = 3
+    roles_payload["model_bundles"] = {
+        "analysis-default": {
+            "display_name": "Analysis Default",
+            "model_groups": [],
+        }
+    }
+    roles_payload["roles"]["graph_agent"].update(
+        {
+            "role_kind": "graph_agent",
+            "model_fallback_enabled": True,
+            "intent": {"provider_preference": "manual_order"},
+            "model_groups": [
+                {
+                    "canonical_id": "gpt-5",
+                    "display_name": "GPT-5",
+                    "provider_models": [
+                        {"route_id": "openai-direct:gpt-5"},
+                        {"route_id": "openrouter-prod:openai.gpt-5"},
+                    ],
+                }
+            ],
+            "materialization_report": {
+                "entries": [
+                    {"route_id": "openai-direct:gpt-5", "role_fit": "using"},
+                    {"route_id": "openrouter-prod:openai.gpt-5", "role_fit": "using"},
+                ]
+            },
+        }
+    )
+    roles_path.write_text(yaml.safe_dump(roles_payload, sort_keys=True), encoding="utf-8")
+
+    resolver = ModelResolver(credentials_path=credentials_path, roles_path=roles_path)
+    model = resolver.resolve("graph_agent", phase_name="draft")
+
+    assert isinstance(model, GatewayChatModel)
+    assert [route.route_id for route in model.resolved_role.routes] == [
+        "openai-direct:gpt-5",
+        "openrouter-prod:openai.gpt-5",
+    ]
+
+
 def test_model_override_is_exact_route_id() -> None:
     from graph_agent_gateway.resolver import ModelResolver
 

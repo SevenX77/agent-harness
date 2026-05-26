@@ -153,9 +153,9 @@ def test_stream_query_uses_copilot_chat_active_model_when_no_override(
     calls: list[str | None] = []
     monkeypatch.setattr(
         copilot_service,
-        "_resolve_copilot_route",
+        "_resolve_copilot_routes",
         lambda override: calls.append(override)
-        or _resolved_route(api_key="primary-secret", base_url="https://credential.test"),
+        or [_resolved_route(api_key="primary-secret", base_url="https://credential.test")],
     )
     monkeypatch.setattr(
         copilot_service, "_session_factory", lambda options: client.capture(options)
@@ -172,6 +172,80 @@ def test_stream_query_uses_copilot_chat_active_model_when_no_override(
     assert events == [CopilotEventText(content="hello"), CopilotEventDone()]
 
 
+def test_stream_query_falls_back_to_second_copilot_route_when_first_route_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    copilot_service._sessions.clear()
+    routes = [
+        _resolved_route(
+            route_id="primary:claude",
+            endpoint_id="primary",
+            api_key="first-secret",
+            base_url="https://primary.test",
+        ),
+        _resolved_route(
+            route_id="secondary:claude",
+            endpoint_id="secondary",
+            api_key="second-secret",
+            base_url="https://secondary.test",
+        ),
+    ]
+    created_keys: list[str] = []
+    secondary = FakeClient([AssistantMessage(content=[TextBlock(text="fallback hello")], model="claude")])
+
+    monkeypatch.setattr(copilot_service, "_resolve_copilot_routes", lambda _override: routes, raising=False)
+    monkeypatch.setattr(copilot_service, "_resolve_copilot_route", lambda _override: routes[0])
+
+    def session_factory(options: ClaudeAgentOptions) -> FakeClient:
+        api_key = options.env["ANTHROPIC_API_KEY"]
+        created_keys.append(api_key)
+        if api_key == "first-secret":
+            return FailingClient(TimeoutError("primary timed out")).capture(options)
+        return secondary.capture(options)
+
+    monkeypatch.setattr(copilot_service, "_session_factory", session_factory)
+
+    events = asyncio.run(
+        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+    )
+
+    assert created_keys == ["first-secret", "second-secret"]
+    assert secondary.options is not None
+    assert secondary.options.env["ANTHROPIC_BASE_URL"] == "https://secondary.test"
+    assert events == [CopilotEventText(content="fallback hello"), CopilotEventDone()]
+
+
+def test_stream_query_reports_clear_error_after_all_copilot_routes_fail(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    copilot_service._sessions.clear()
+    routes = [
+        _resolved_route(route_id="primary:claude", endpoint_id="primary", api_key="first-secret"),
+        _resolved_route(route_id="secondary:claude", endpoint_id="secondary", api_key="second-secret"),
+    ]
+    created_keys: list[str] = []
+
+    monkeypatch.setattr(copilot_service, "_resolve_copilot_routes", lambda _override: routes, raising=False)
+    monkeypatch.setattr(copilot_service, "_resolve_copilot_route", lambda _override: routes[0])
+
+    def session_factory(options: ClaudeAgentOptions) -> FailingClient:
+        created_keys.append(options.env["ANTHROPIC_API_KEY"])
+        return FailingClient(TimeoutError("provider timed out")).capture(options)
+
+    monkeypatch.setattr(copilot_service, "_session_factory", session_factory)
+
+    events = asyncio.run(
+        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+    )
+
+    assert created_keys == ["first-secret", "second-secret"]
+    assert len(events) == 1
+    assert isinstance(events[0], CopilotEventError)
+    assert "all configured Copilot providers failed" in events[0].message
+
+
 def test_stream_query_uses_model_override_when_provided(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -180,8 +254,8 @@ def test_stream_query_uses_model_override_when_provided(
     calls: list[str | None] = []
     monkeypatch.setattr(
         copilot_service,
-        "_resolve_copilot_route",
-        lambda override: calls.append(override) or _resolved_route(api_key="primary-secret"),
+        "_resolve_copilot_routes",
+        lambda override: calls.append(override) or [_resolved_route(api_key="primary-secret")],
     )
     monkeypatch.setattr(
         copilot_service, "_session_factory", lambda options: client.capture(options)
@@ -208,8 +282,8 @@ def test_stream_query_yields_error_when_no_api_key(
 ) -> None:
     monkeypatch.setattr(
         copilot_service,
-        "_resolve_copilot_route",
-        lambda _override: _resolved_route(api_key=""),
+        "_resolve_copilot_routes",
+        lambda _override: [_resolved_route(api_key="")],
     )
 
     events = asyncio.run(
@@ -251,15 +325,26 @@ class FakeClient:
             yield message
 
 
+class FailingClient(FakeClient):
+    def __init__(self, exc: Exception) -> None:
+        super().__init__([])
+        self.exc = exc
+
+    async def connect(self) -> None:
+        raise self.exc
+
+
 def _resolved_route(
     *,
     api_key: str,
     base_url: str = "https://provider.test",
+    route_id: str = "test-provider:claude-test",
+    endpoint_id: str = "test-provider",
 ) -> ResolvedRoute:
     return ResolvedRoute(
         role_name="copilot_chat",
-        route_id="test-provider:claude-test",
-        endpoint_id="test-provider",
+        route_id=route_id,
+        endpoint_id=endpoint_id,
         protocol="anthropic_compatible",
         base_url=base_url,
         api_key=api_key,

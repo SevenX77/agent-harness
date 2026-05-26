@@ -33,7 +33,6 @@ from claude_agent_sdk.types import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from app.models.llm_config import RolesData
 from graph_agent_gateway.registry.schema import ResolvedRoute
 
 from app.models.copilot import (
@@ -45,8 +44,10 @@ from app.models.copilot import (
     CopilotEventToolUseStart,
     CopilotToolName,
 )
+from app.models.llm_config import RolesData
 from app.services.llm_credentials import load_credentials
-from app.services.llm_roles import load_roles_file, roles_path as default_roles_path
+from app.services.llm_roles import load_roles_file
+from app.services.llm_roles import roles_path as default_roles_path
 
 SessionKey = tuple[str, str, str]
 
@@ -191,7 +192,7 @@ async def stream_query(
     """Stream one Copilot query using the copilot_chat role and optional model override."""
 
     try:
-        primary = _resolve_copilot_route(model_override)
+        routes = _resolve_copilot_routes(model_override)
     except KeyError as exc:
         yield CopilotEventError(message=f"未知模型: {exc}")
         return
@@ -199,39 +200,51 @@ async def stream_query(
         yield CopilotEventError(message=str(exc))
         return
 
-    api_key, base_url = _resolve_route_runtime(primary)
-    if not api_key:
-        yield CopilotEventError(
-            message=f"Endpoint {primary.endpoint_id} 未配置 API key"
-        )
-        return
+    failures: list[str] = []
+    for route in routes:
+        api_key, base_url = _resolve_route_runtime(route)
+        if not api_key:
+            if len(routes) == 1:
+                yield CopilotEventError(
+                    message=f"Endpoint {route.endpoint_id} 未配置 API key"
+                )
+                return
+            failures.append(f"{route.route_id}: missing API key")
+            continue
 
-    model_code = primary.provider_model_id
-    provider_code = primary.endpoint_id
+        tool_names: dict[str, str] = {}
+        try:
+            client = await get_or_create_session(
+                skill_id=skill_id,
+                model_code=route.provider_model_id,
+                provider_code=route.endpoint_id,
+                base_url=base_url,
+                api_key=api_key,
+                workspace_dir=workspace_dir or Path.cwd(),
+            )
+            await _ensure_client_connected(client)
+            await client.query(_prompt_with_system_context(skill_id, user_message))
 
-    tool_names: dict[str, str] = {}
-    try:
-        client = await get_or_create_session(
-            skill_id=skill_id,
-            model_code=model_code,
-            provider_code=provider_code,
-            base_url=base_url,
-            api_key=api_key,
-            workspace_dir=workspace_dir or Path.cwd(),
-        )
-        await _ensure_client_connected(client)
-        await client.query(_prompt_with_system_context(skill_id, user_message))
+            yielded_done = False
+            async for sdk_message in client.receive_response():
+                for event in _translate_sdk_message(sdk_message, tool_names):
+                    if isinstance(event, CopilotEventDone):
+                        yielded_done = True
+                    yield event
+            if not yielded_done:
+                yield CopilotEventDone()
+            return
+        except Exception as exc:  # noqa: BLE001
+            if len(routes) == 1:
+                yield _error_event_for_exception(exc)
+                return
+            failures.append(f"{route.route_id}: {type(exc).__name__}: {exc}")
+            continue
 
-        yielded_done = False
-        async for sdk_message in client.receive_response():
-            for event in _translate_sdk_message(sdk_message, tool_names):
-                if isinstance(event, CopilotEventDone):
-                    yielded_done = True
-                yield event
-        if not yielded_done:
-            yield CopilotEventDone()
-    except Exception as exc:  # noqa: BLE001
-        yield _error_event_for_exception(exc)
+    yield CopilotEventError(
+        message="all configured Copilot providers failed"
+        + (f": {'; '.join(failures)}" if failures else "")
+    )
 
 
 async def get_or_create_session(
@@ -371,7 +384,7 @@ def _tool_result_summary(content: str | list[dict[str, Any]] | None) -> str:
     return json.dumps(content, ensure_ascii=False)
 
 
-def _resolve_copilot_route(model_override: str | None) -> ResolvedRoute:
+def _resolve_copilot_routes(model_override: str | None) -> list[ResolvedRoute]:
     from graph_agent_gateway.registry.resolver import resolve_role
 
     credentials = load_credentials()
@@ -385,7 +398,11 @@ def _resolve_copilot_route(model_override: str | None) -> ResolvedRoute:
     )
     if not resolved.routes:
         raise ValueError("copilot_chat role 无可用 route")
-    return resolved.routes[0]
+    return list(resolved.routes)
+
+
+def _resolve_copilot_route(model_override: str | None) -> ResolvedRoute:
+    return _resolve_copilot_routes(model_override)[0]
 
 
 def _resolve_route_runtime(route: ResolvedRoute) -> tuple[str, str | None]:

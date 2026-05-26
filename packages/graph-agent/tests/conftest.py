@@ -13,9 +13,7 @@ runtime failure deep in a single test case.
 
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -23,70 +21,52 @@ import pytest
 # before any test runs. The actual ordering assertions live in the
 # adjacent ``middleware/test_chain_topology.py`` test file.
 from graph_agent.middleware import DEFAULT_MIDDLEWARE_ORDER  # noqa: F401
+from graph_agent.core.skill_resolver_protocol import SkillResolutionError, validate_skill_id
 
 
-class TestSkillResolver:
-    """Resolver used by legacy tests that are not exercising resolution behavior."""
+class MockSkillResolver:
+    """Deterministic resolver used by tests that are not exercising lookup behavior."""
+
+    def __init__(self, workspace_root: Path) -> None:
+        self.workspace_root = workspace_root
+        self.fixtures = Path(__file__).resolve().parent / "fixtures"
 
     def resolve_skill(self, skill_id: str) -> Path:
-        fixtures = Path(__file__).resolve().parent / "fixtures"
+        validate_skill_id(skill_id)
+        fixtures = self.fixtures
         registry = fixtures / "v030_skill_registry"
         known = {
             "fixture.echo_expert": registry / "echo_expert",
+            "demo.echo_agent": fixtures / "v030_agent_demo" / "registry" / "echo_agent",
+            "e2e.echo": fixtures / "v030_e2e_pipeline" / "registry" / "echo",
+            "e2e.expander": fixtures / "v030_e2e_pipeline" / "registry" / "expander",
         }
         if skill_id in known:
             return known[skill_id]
-        dotted = registry / skill_id.replace(".", "/")
-        if (dotted / "GRAPH.md").is_file():
-            return dotted
-        matches: list[Path] = []
-        for tmp_root in Path("/tmp").glob("pytest-of-*"):
-            for candidate in tmp_root.rglob(skill_id):
-                if candidate.is_dir():
-                    matches.append(candidate)
-        with_graph = [candidate for candidate in matches if (candidate / "GRAPH.md").is_file()]
-        if with_graph:
-            return max(with_graph, key=lambda path: path.stat().st_mtime_ns)
-        if matches:
-            return max(matches, key=lambda path: path.stat().st_mtime_ns)
-        raise KeyError(skill_id)
+        relative = Path(*skill_id.split("."))
+        candidates = (
+            self.workspace_root / skill_id,
+            self.workspace_root / relative,
+            self.workspace_root / "registry" / skill_id,
+            self.workspace_root / "registry" / relative,
+            registry / skill_id,
+            registry / relative,
+        )
+        for candidate in candidates:
+            if (candidate / "GRAPH.md").is_file():
+                return candidate
+        phases_root = self.workspace_root / "phases"
+        if phases_root.is_dir():
+            for phase_dir in sorted(path for path in phases_root.iterdir() if path.is_dir()):
+                candidate = phase_dir / skill_id
+                if (candidate / "GRAPH.md").is_file():
+                    return candidate
+        raise SkillResolutionError(skill_id, "not registered in deterministic test resolver")
 
 
-TEST_SKILL_RESOLVER = TestSkillResolver()
-
-
-def _set_kw_default(func: Any, name: str, value: Any) -> None:
-    kwdefaults = dict(getattr(func, "__kwdefaults__", None) or {})
-    kwdefaults[name] = value
-    func.__kwdefaults__ = kwdefaults
-
-    signature = inspect.signature(func)
-    parameters = [
-        parameter.replace(default=inspect.Parameter.empty) if parameter.name == name else parameter
-        for parameter in signature.parameters.values()
-    ]
-    func.__signature__ = signature.replace(parameters=parameters)
-
-
-def pytest_configure(config: pytest.Config) -> None:
-    del config
-    from graph_agent.core import compiler, graph_assembler, loader, runner, skill_tool_factory
-    from graph_agent.tools import md_to_json
-    from graph_agent.tools.builtin.parallel_map import parallel_map
-
-    for func in (
-        compiler.compile_skill,
-        graph_assembler.assemble_graph,
-        loader.SkillLoader.compile_skill,
-        loader.load_workflow_from_md,
-        runner.run_skill,
-        runner._run_skill_dict,
-        runner._run_v030_skill_dict,
-        skill_tool_factory.build_skill_tool,
-        parallel_map,
-        md_to_json.md_to_json,
-    ):
-        _set_kw_default(func, "skill_resolver", TEST_SKILL_RESOLVER)
+@pytest.fixture
+def mock_skill_resolver(tmp_path: Path) -> MockSkillResolver:
+    return MockSkillResolver(tmp_path)
 
 
 collect_ignore_glob: list[str] = []

@@ -145,6 +145,7 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
 |---|---|---|---|---|
 | `[F-v3-resolver-skill-id-invalid]` | 编译期 | skill id 非法 | 修正 target_skill | [Resolver](./10-skill-resolver-protocol-spec.md#protocol-interface-定义) |
+| `[F-v3-skill-id-ambiguous]` | 编译期/装配期 | resolver 找到多个匹配 skill root | 收窄 search paths 或移除重复注册 | [Resolver](./10-skill-resolver-protocol-spec.md#protocol-interface-定义) |
 | `[F-v3-skill-not-registered]` | 编译期/装配期 | resolver 查不到 skill | 在 Studio 导入或注册 skill | [Resolver](./10-skill-resolver-protocol-spec.md#protocol-interface-定义) |
 | `[F-v3-resolver-path-invalid]` | 编译期 | resolver 返回路径无 GRAPH.md | 修正 registry 记录 | [Resolver](./10-skill-resolver-protocol-spec.md#protocol-interface-定义) |
 | `[F-v3-resolver-interface-invalid]` | 编译期 | resolver 暴露非决议接口 | 实现单方法 `resolve_skill` | [Resolver](./10-skill-resolver-protocol-spec.md#protocol-interface-定义) |

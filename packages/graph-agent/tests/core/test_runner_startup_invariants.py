@@ -149,3 +149,33 @@ class TestRunnerMainBootstrapWiring:
         # Required ordering: apply_patches → load_dotenv → load_settings.
         assert call_order.index("apply_patches") < call_order.index("load_dotenv")
         assert call_order.index("load_dotenv") < call_order.index("load_settings")
+
+    def test_main_constructs_and_passes_local_workspace_resolver(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        skill = tmp_path / "skill.md"
+        skill.write_text("# minimal", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "sys.argv",
+            ["runner", "--skill", str(skill), "--inputs", "{}"],
+        )
+
+        fake_bootstrap = MagicMock(spec=Bootstrap)
+        captured_kwargs: dict[str, object] = {}
+
+        def _fake_run_skill(*_args: object, **kwargs: object) -> dict[str, object]:
+            captured_kwargs.update(kwargs)
+            return {"wall_time_sec": 0.0, "metrics": {}, "trace_path": None}
+
+        with (
+            patch("graph_agent.bootstrap.Bootstrap", return_value=fake_bootstrap),
+            patch("graph_agent.core.runner.run_skill", _fake_run_skill),
+            patch("dotenv.load_dotenv", return_value=True),
+        ):
+            runner_module.main()
+
+        resolver = captured_kwargs.get("skill_resolver")
+        assert resolver is not None
+        assert type(resolver).__name__ == "LocalWorkspaceResolver"
+        assert type(resolver).__module__ == "graph_agent.core.local_workspace_resolver"

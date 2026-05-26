@@ -28,7 +28,7 @@
 
 ## Error Registry
 
-`ERROR_REGISTRY` 定义在 `packages/graph-agent/src/graph_agent/core/error_registry.py`，当前有 89 个 core 错误码。每项是 `ErrorCodeMetadata`：
+`ERROR_REGISTRY` 定义在 `packages/graph-agent/src/graph_agent/core/error_registry.py`，当前有 90 个 core 错误码。每项是 `ErrorCodeMetadata`：
 
 - `code`: 与 dict key 相同的 bracketed code。
 - `level`: 规范等级。
@@ -44,7 +44,7 @@
 
 registry 与 `docs/engine/skill-spec/11-error-code-spec.md` 的一致性由红灯 suite 守住：
 
-- `test_error_registry_matches_error_code_spec_key_set` 要求 registry key-set 与 11-spec 中的 89 个 `[F-v3-...]` code 完全相等。
+- `test_error_registry_matches_error_code_spec_key_set` 要求 registry key-set 与 11-spec 中的 90 个 `[F-v3-...]` code 完全相等。
 - `test_error_registry_entries_have_complete_nonempty_metadata` 要求每项 `code`、`level`、`stage`、`doc_link` 都非空。
 - `test_error_registry_preserves_multi_stage_codes` 钉住多阶段 tuple，不允许被压扁成字符串或单阶段。
 
@@ -113,7 +113,7 @@ raise GraphAgentFatalError(
 
 `packages/graph-agent/src/graph_agent/cognitive/finish_task.py` 有两个不同语义，使用不同 code。
 
-第一类是装配前/装配期的 `output_schema` 本身非法。`_check_output_schema()` 发现 JSON Schema 不合法、不像对象 schema、`type` 不是 object、`properties` 不是 dict 时，会抛 `GraphAgentFatalError`，payload code 是 `[F-v3-cognitive-output-schema-invalid]`。这个码是 PR F 收口期补入 registry 的第 89 个 code。
+第一类是装配前/装配期的 `output_schema` 本身非法。`_check_output_schema()` 发现 JSON Schema 不合法、不像对象 schema、`type` 不是 object、`properties` 不是 dict 时，会抛 `GraphAgentFatalError`，payload code 是 `[F-v3-cognitive-output-schema-invalid]`。这个码是 PR F 收口期补入 registry 的错误码。
 
 第二类是 LLM 最终 markdown 解析或校验失败，需要以结构化 dict 回传给 LLM 重试机制。`_structured_error()` 返回：
 
@@ -142,7 +142,7 @@ raise GraphAgentFatalError(
 
 当前机制由 `packages/graph-agent/tests/core/test_error_payload_contract.py` 重点守护：
 
-- registry key-set 必须等于 11-spec 的 89 个 code。
+- registry key-set 必须等于 11-spec 的 90 个 code。
 - registry 每项元数据必须完整。
 - `ErrorPayload` 未知 code 必须拒绝。
 - `GraphAgentError` message 中的未知 core code 必须 fail loud。

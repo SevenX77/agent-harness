@@ -20,6 +20,25 @@
 
 ---
 
+## §0.5 WS3 工程化优化 (2026-05-26 PM 三工作流 brief, 进行中)
+
+> PM brief: engine 到 mvp0 v0.3.0 后做 3 件事 — WS3 工程质量评估+优化 / WS1 内部文档对齐 / WS2 对外文档 (含 Studio Copilot 知识库)。执行序: **WS3 → WS1 → WS2**, 全在 `stage/engine-v030`, golden 后再 tag+squash 进 main。
+> 三方深度评估已完成 (a1+a2+a3), 28 findings, PM 拍"全部修"。优化分 6 个 PR, 每个走 SOP-08 9 步。
+
+| WS3-PR | 范围 | 状态 |
+|---|---|---|
+| PR-1 | 去 conftest 掩盖 + resolver 注入 (`local_workspace_resolver.py` + CLI/dual_run_shadow 接线) | **step1-6 完成三方实证: 989 passed/0 fail/19 xfailed+2 skipped (主控+a3 独立跑); step4b 歧义分支补码 `[F-v3-skill-id-ambiguous]`+测试(反证覆盖); step5 a2+a3 双审 src 无掩盖无 creep; step6 文档同步 (skill-resolution/logic-explained + 10-protocol-spec 字段级) + a3 drift 审计 catch 4 处锚点漂移 (函数名 `_run_v21`→`_run_v030` ×5 + 3 错行号) a1 已修+主控 grep 实证. step7 PR report 进行中** |
+| PR-2 | 观测 + trace 落盘 (_skill_node 生命周期回调 / runner trace_path 真写) | 待 |
+| PR-3 | persona + Context + 旧入口 | 待 |
+| PR-4 | 缓存 (dehydrate/rehydrate 丢字段) + 递归环检测 | 待 |
+| PR-5 | 沙盒 + LLMclient 锁 + hoist_to | 待 |
+| PR-6 | 治理收尾 (parser _fatal / governance) | 待 |
+
+WS3 完成后 → task#6 复评 (a1+a3 共设计扩展评估框架, 锚 ISO/IEC 25010 + CISQ + OpenSSF Scorecard + SE-at-Google) → WS1 → WS2。
+PR-1 spec: `round-19-PR1-demask-resolver/` (design/research/requirements a2 + tasks a1, a3 audit catch scope error 已收窄)。
+
+---
+
 ## §1 全程 PR 序列 todolist (V0.3.0 完整)
 
 > **本表 + §0 是持久 todolist 真相源**。in-session Task 工具列表不跨 session (新 session TaskList 为空), 新 session 第一件事就是按本表 + §0 用 TaskCreate 重建 in-session todolist。

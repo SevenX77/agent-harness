@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 from graph_agent.core.compiler import compile_skill
-from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
+from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError, make_error_payload
 from graph_agent.core.graph_assembler import assemble_graph
 from langchain_core.messages import AIMessage
 
@@ -112,8 +112,9 @@ def test_reader_failure_warns_and_fallback_markdown_enters_knowledge_base(
 def test_invalid_reference_path_is_compile_fatal_not_reader_fallback(tmp_path: Path) -> None:
     _agent_skill(tmp_path, reference_path="../outside.md")
 
-    with pytest.raises(SkillLoadError, match=r"\[F-v3-resource-reference-path-invalid\]"):
+    with pytest.raises(SkillLoadError) as exc_info:
         compile_skill(tmp_path, cache=False)
+    assert exc_info.value.payload.code == "[F-v3-resource-reference-path-invalid]"
 
 
 def test_reference_path_escape_to_existing_file_is_compile_fatal(tmp_path: Path) -> None:
@@ -121,8 +122,9 @@ def test_reference_path_escape_to_existing_file_is_compile_fatal(tmp_path: Path)
     _write(outside, "external reference")
     _agent_skill(tmp_path, reference_path=f"../{outside.name}")
 
-    with pytest.raises(SkillLoadError, match=r"\[F-v3-resource-reference-path-invalid\]"):
+    with pytest.raises(SkillLoadError) as exc_info:
         compile_skill(tmp_path, cache=False)
+    assert exc_info.value.payload.code == "[F-v3-resource-reference-path-invalid]"
 
 
 def test_reference_reader_path_invalid_fatal_propagates_from_assembly(
@@ -134,7 +136,10 @@ def test_reference_reader_path_invalid_fatal_propagates_from_assembly(
             del kwargs
 
         def initial_state(self) -> dict[str, Any]:
-            raise GraphAgentFatalError("[F-v3-resource-reference-path-invalid] escaped")
+            raise GraphAgentFatalError(
+                "escaped",
+                payload=make_error_payload("[F-v3-resource-reference-path-invalid]", "escaped"),
+            )
 
     monkeypatch.setattr(
         "graph_agent.core.graph_assembler.ReferenceReaderRuntime",
@@ -143,8 +148,9 @@ def test_reference_reader_path_invalid_fatal_propagates_from_assembly(
     _agent_skill(tmp_path)
     _write(tmp_path / "references" / "guide.md", "reference body")
 
-    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-resource-reference-path-invalid\]"):
+    with pytest.raises(GraphAgentFatalError) as exc_info:
         assemble_graph(compile_skill(tmp_path, cache=False), chat_model=CapturePromptChatModel())
+    assert exc_info.value.payload.code == "[F-v3-resource-reference-path-invalid]"
 
 
 def test_reference_reader_runs_once_during_assembly_not_each_agent_turn(

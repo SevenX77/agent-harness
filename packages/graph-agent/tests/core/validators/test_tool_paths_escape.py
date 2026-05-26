@@ -63,8 +63,9 @@ def test_action_local_write_fatals_as_purity_violation(tmp_path: Path) -> None:
         "def prepare(context):\n    open('out.txt', 'w').write('bad')\n    return {}\n",
     )
 
-    with pytest.raises(SkillLoadError, match="F-v3-purity"):
+    with pytest.raises(SkillLoadError) as exc_info:
         SkillLoader().compile_skill(tmp_path)
+    assert exc_info.value.payload.code == "[F-v3-logic-action-purity-violation]"
 
 
 def test_root_level_actions_directory_is_rejected(tmp_path: Path) -> None:

@@ -54,7 +54,7 @@ class ReferenceReaderRuntime:
             body = read_resource_file(
                 root=self.root,
                 relative_path=path,
-                error_code="[F-v3-resource-reference-path-invalid]",
+                code="[F-v3-resource-reference-path-invalid]",
             )
             chunks.append(f"## {reference_id}: {summary}\n\n{_truncate_tokens(body, self.max_output_tokens)}")
         return "\n\n".join(chunks) if chunks else "无预读取参考资料"

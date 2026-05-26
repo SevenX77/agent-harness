@@ -11,7 +11,7 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from graph_agent.core.exceptions import GraphAgentFatalError
+from graph_agent.core.exceptions import GraphAgentFatalError, make_error_payload
 
 
 @dataclass(frozen=True)
@@ -93,7 +93,11 @@ def _validate_action_name(name: str) -> None:
         or "." in name
         or Path(name).is_absolute()
     ):
-        raise GraphAgentFatalError(f"[F-v3-logic-action-name-invalid] invalid action name {name!r}")
+        detail = f"invalid action name {name!r}"
+        raise GraphAgentFatalError(
+            detail,
+            payload=make_error_payload("[F-v3-logic-action-name-invalid]", detail),
+        )
 
 
 __all__ = ["ActionDef", "ActionRegistry", "ToolDef", "ToolRegistry"]

@@ -6,9 +6,75 @@ specific class possible at boundaries; let unexpected errors bubble.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from graph_agent.core.error_registry import ERROR_REGISTRY
+
+
+_ERROR_CODE_RE = re.compile(r"\[F-v3-[a-z0-9-]+\]")
+
+
+class ErrorPayload(BaseModel):
+    """Structured framework error payload defined by the V0.3.0 spec."""
+
+    model_config = ConfigDict()
+
+    code: str = Field(min_length=1)
+    level: str | None = None
+    stage: tuple[str, ...] | None = None
+    message: str = Field(min_length=1)
+    doc_link: str | None = None
+    skill_id: str | None = None
+    phase_id: str | None = None
+    field_path: str | None = None
+    source_path: str | None = None
+
+    @model_validator(mode="after")
+    def _fill_registry_metadata(self) -> "ErrorPayload":
+        metadata = ERROR_REGISTRY.get(self.code)
+        if metadata is None:
+            raise ValueError(f"unknown graph_agent error code: {self.code}")
+        self.level = self.level or metadata.level
+        self.stage = self.stage or metadata.stage
+        self.doc_link = self.doc_link or metadata.doc_link
+        if not self.level or not self.stage or not self.doc_link:
+            raise ValueError(f"incomplete error metadata for {self.code}")
+        return self
+
+
+def make_error_payload(
+    code: str,
+    message: str,
+    *,
+    skill_id: str | None = None,
+    phase_id: str | None = None,
+    field_path: str | None = None,
+    source_path: str | Path | None = None,
+) -> ErrorPayload:
+    """Create a normalized error payload while keeping call sites compact."""
+
+    return ErrorPayload(
+        code=code,
+        message=message,
+        skill_id=skill_id,
+        phase_id=phase_id,
+        field_path=field_path,
+        source_path=str(source_path) if source_path is not None else None,
+    )
+
+
+def _payload_from_message(message: str) -> ErrorPayload | None:
+    match = _ERROR_CODE_RE.search(message)
+    if match is None:
+        return None
+    code = match.group(0)
+    if code not in ERROR_REGISTRY:
+        return None
+    return ErrorPayload(code=code, message=message)
 
 class GraphAgentError(Exception):
     """Base for all graph_agent framework errors.
@@ -18,9 +84,16 @@ class GraphAgentError(Exception):
     native exceptions with ``raise ... from`` and include structured context.
     """
 
-    def __init__(self, message: str, *, context: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        payload: ErrorPayload | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> None:
         """Store the surfaced error message and optional structured context."""
         super().__init__(message)
+        self.payload = payload or _payload_from_message(message)
         self.context = context or {}
 
 
@@ -209,15 +282,21 @@ class SkillCompilationError(GraphAgentError):
         line: int | None = None,
         field_path: str | None = None,
         suggestion: str | None = None,
+        payload: ErrorPayload | None = None,
         context: dict[str, Any] | None = None,
     ) -> None:
         """Store compiler output and structured diagnostic context."""
         self.compile_result = compile_result
-        self.skill_path = skill_path
+        if payload is not None:
+            payload.source_path = payload.source_path or (
+                str(skill_path) if skill_path is not None else None
+            )
+            payload.field_path = payload.field_path or field_path
+        self.skill_path = Path(payload.source_path) if payload and payload.source_path else skill_path
         self.line = line
-        self.field_path = field_path
+        self.field_path = payload.field_path if payload and payload.field_path else field_path
         self.suggestion = suggestion
-        super().__init__(self._format(message), context=context)
+        super().__init__(self._format(message), payload=payload, context=context)
 
     def _format(self, message: str) -> str:
         parts = [message]

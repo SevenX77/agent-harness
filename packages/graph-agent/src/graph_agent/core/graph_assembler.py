@@ -34,7 +34,7 @@ from graph_agent.callbacks.events import (
 )
 from graph_agent.core.actions import ToolDef, _structured_tool
 from graph_agent.core.builtin_subagents import ReferenceReaderRuntime
-from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
+from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError, make_error_payload
 from graph_agent.core.loader import CompiledSkill, CompiledSubagent, PhaseDocument, SkillLoader
 from graph_agent.core.manifest import (
     AgentNodeAST,
@@ -222,9 +222,13 @@ def _build_logic_node(
             _validate_logic_update_keys(delta, output_schema_keys, action_path, action_line)
             updates.update(delta)
             if not isinstance(result, dict):
+                detail = (
+                    f"{action_path}:{action_line} action returned "
+                    f"{type(result).__name__}, expected dict"
+                )
                 raise GraphAgentFatalError(
-                    f"[F-v3-logic-action-return-invalid] {action_path}:{action_line} "
-                    f"action returned {type(result).__name__}, expected dict"
+                    detail,
+                    payload=make_error_payload("[F-v3-logic-action-return-invalid]", detail),
                 )
             _validate_logic_update_keys(result, output_schema_keys, action_path, action_line)
             updates.update(result)
@@ -345,7 +349,11 @@ def _build_skill_node(
         config: RunnableConfig | None = None,
     ) -> dict[str, Any]:
         if chat_model is None:
-            raise RuntimeError("[F-v3-graph] SKILL phase requires chat_model")
+            detail = "SKILL phase requires chat_model"
+            raise SkillLoadError(
+                detail,
+                payload=make_error_payload("[F-v3-agent-llm-role-unknown]", detail),
+            )
 
         data_updates: dict[str, Any] = {}
         flow = dict(state.get("flow", {}))
@@ -520,7 +528,10 @@ def _build_reference_reader_markdown(
         )
         return _fallback_reference_reader_markdown(root, references, reason)
     except GraphAgentFatalError as exc:
-        if "[F-v3-resource-reference-path-invalid]" in str(exc):
+        if (
+            exc.payload is not None
+            and exc.payload.code == "[F-v3-resource-reference-path-invalid]"
+        ):
             raise
         logger.warning("[F-v3-reference-reader-failed] %s", exc)
         _emit_reference_reader_fallback(
@@ -572,7 +583,7 @@ def _emit_builtin_subagent_event(callbacks: list[Any] | None, event: Any) -> Non
         try:
             on_event(event)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("[F-v3-reference-reader-trace-failed] %s", exc)
+            logger.warning("[F-v3-reference-reader-failed] trace callback failed: %s", exc)
 
 
 def _fallback_reason_from_exception(exc: BaseException) -> str:
@@ -607,7 +618,7 @@ def _fallback_reference_reader_markdown(
         body = read_resource_file(
             root=root,
             relative_path=str(spec.get("path", "")),
-            error_code="[F-v3-resource-reference-path-invalid]",
+            code="[F-v3-resource-reference-path-invalid]",
         )
         chunks.append(
             "系统无法完成知识精炼，以下为原始未处理片段\n"
@@ -669,7 +680,11 @@ def _build_reference_reader_node(*, root: Path, phase_id: str) -> Any:
         inputs = phase_inputs_from_state(state)
         path = inputs.get("path")
         if not isinstance(path, str):
-            raise GraphAgentFatalError("[F-v3-reference-reader-failed] missing reference path")
+            detail = "missing reference path"
+            raise GraphAgentFatalError(
+                detail,
+                payload=make_error_payload("[F-v3-reference-reader-failed]", detail),
+            )
         return {"data": {"content": _read_skill_root_file(root, path)}}
 
     return PhaseWrapper(
@@ -690,7 +705,7 @@ def _read_skill_root_file(root: Path, relative_path: str) -> str:
     return read_resource_file(
         root=root,
         relative_path=relative_path,
-        error_code="[F-v3-resource-reference-path-invalid]",
+        code="[F-v3-resource-reference-path-invalid]",
     )
 
 
@@ -910,9 +925,12 @@ def _deterministic_child_phase_outputs(
     for phase_id in sorted(phase_outputs):
         for key, value in phase_outputs[phase_id].items():
             if key in data_delta:
+                detail = f"duplicate child output key {key!r} from phase {phase_id!r}"
                 raise GraphAgentFatalError(
-                    "[F-v3-runtime-state-mapping-failed] duplicate child output key "
-                    f"{key!r} from phase {phase_id!r}"
+                    detail,
+                    payload=make_error_payload(
+                        "[F-v3-runtime-state-mapping-failed]", detail
+                    ),
                 )
             data_delta[key] = value
     return data_delta
@@ -948,9 +966,14 @@ def _validate_logic_update_keys(
         return
     for key in updates:
             if key not in output_schema_keys:
+                detail = (
+                    f"{action_path}:{action_line} action wrote undeclared output key {key!r}"
+                )
                 raise GraphAgentFatalError(
-                    f"[F-v3-logic-output-field-undeclared] {action_path}:{action_line} "
-                    f"action wrote undeclared output key {key!r}"
+                    detail,
+                    payload=make_error_payload(
+                        "[F-v3-logic-output-field-undeclared]", detail
+                    ),
                 )
 
 
@@ -1003,7 +1026,10 @@ def _is_critic_tool_name(name: str) -> bool:
 
 
 def _graph_fatal(message: str) -> NoReturn:
-    raise SkillLoadError(f"[F-v3-graph] {message}")
+    raise SkillLoadError(
+        message,
+        payload=make_error_payload("[F-v3-graph-schema-unknown-field]", message),
+    )
 
 
 __all__ = [

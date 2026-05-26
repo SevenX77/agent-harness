@@ -60,4 +60,6 @@ def test_v030_agent_demo_fixture_compiles_and_renders_template() -> None:
     ]:
         assert slot in prompt
     assert "Long mixed timeline segmentation example." in prompt
+    assert "<steps>" not in prompt
+    assert "<document_examples>" not in prompt
     assert "<output_schema>" in prompt

@@ -18,13 +18,13 @@ N/A — 此模块为纯 backend Python library, 无 UI / 无前端调用面。
 
 ## 后端功能
 
-### V2.1 主线 observability 现状
+### V0.3 主线 observability 现状
 
-当前 V2.1 `run_skill()` 主线是 `_run_v21_skill_dict()`，代码在 `packages/graph-agent/src/graph_agent/core/runner.py:451` 到 `packages/graph-agent/src/graph_agent/core/runner.py:486`。它明确 `del callbacks`，见 `packages/graph-agent/src/graph_agent/core/runner.py:462`，随后直接 `compile_skill -> assemble_graph -> graph.invoke`，见 `packages/graph-agent/src/graph_agent/core/runner.py:463` 到 `packages/graph-agent/src/graph_agent/core/runner.py:471`。
+当前 V0.3 `run_skill()` 主线是 `_run_v030_skill_dict()`，代码在 `packages/graph-agent/src/graph_agent/core/runner.py:468` 到 `packages/graph-agent/src/graph_agent/core/runner.py:518`。它接收 callbacks 并透传给 `assemble_graph`，见 `packages/graph-agent/src/graph_agent/core/runner.py:474` 和 `packages/graph-agent/src/graph_agent/core/runner.py:496` 到 `packages/graph-agent/src/graph_agent/core/runner.py:500`，随后 `compile_skill -> assemble_graph -> graph.invoke`，见 `packages/graph-agent/src/graph_agent/core/runner.py:481` 到 `packages/graph-agent/src/graph_agent/core/runner.py:503`。
 
-因此 audit P1-4 的当前结论成立：V2.1 主线没有接 callbacks / trace / heartbeat 等旧 harness 能力，位置是 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:360`。`_run_v21_skill_dict()` 返回的 `trace_path` 只是当 `trace_dir` 存在时拼出 `trace.json` 路径，见 `packages/graph-agent/src/graph_agent/core/runner.py:484`；这不等于 runtime 已经写出 phase 级 trace。
+因此 audit P1-4 的当前结论成立：V0.3 主线没有自动创建旧 harness 的 callbacks / trace / heartbeat 组合，位置是 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:360`。`_run_v030_skill_dict()` 返回的 `trace_path` 只是当 `trace_dir` 存在时拼出 `trace.json` 路径，见 `packages/graph-agent/src/graph_agent/core/runner.py:516`；这不等于 runtime 已经写出 phase 级 trace。
 
-旧 harness 侧仍然会默认创建 `LoggingCallback()` 和 `TracingCallback(trace_dir=...)`，代码在 `packages/graph-agent/src/graph_agent/core/runner.py:284` 到 `packages/graph-agent/src/graph_agent/core/runner.py:286`。但这是 legacy `_run_skill_dict()` 旧路径，不是 V2.1 `_run_v21_skill_dict()` 的实际主线。
+旧 harness 侧仍然会默认创建 `LoggingCallback()` 和 `TracingCallback(trace_dir=...)`，代码在 `packages/graph-agent/src/graph_agent/core/runner.py:284` 到 `packages/graph-agent/src/graph_agent/core/runner.py:286`。但这是 legacy `_run_skill_dict()` 旧路径，不是 V2.1 `_run_v030_skill_dict()` 的实际主线。
 
 ### PredictTracingCallback
 
@@ -65,7 +65,7 @@ Predict mock source 的记录函数是 `record_mock_source(phase_name, source)`�
 
 当前 `assemble_graph()` 创建的 LOGIC/SKILL/SUBGRAPH node 本身没有调用 `PredictTracingCallback.on_phase_start()` 或 `on_phase_end()`。LOGIC node 在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:127` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:136` 只执行 action 并返回 data delta；SUBGRAPH node 在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:155` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:172` 只调用子图并返回 delta；SKILL node 在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:229` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:296` 只处理模型/tool/finish_task 循环。
 
-subagent runnable config 会透传 parent callbacks 到 child config，如果 parent config 带 callbacks，代码在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:497` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:505`。但是 V2.1 `run_skill()` 顶层已经 `del callbacks`，见 `packages/graph-agent/src/graph_agent/core/runner.py:462`，所以 public runner 默认不会给这条通道提供 callbacks。
+subagent runnable config 会透传 parent callbacks 到 child config，如果 parent config 带 callbacks，代码在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:497` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:505`。V0.3 `run_skill()` 会把调用方传入的 callbacks 透传给 assembly，见 `packages/graph-agent/src/graph_agent/core/runner.py:474` 和 `packages/graph-agent/src/graph_agent/core/runner.py:496` 到 `packages/graph-agent/src/graph_agent/core/runner.py:500`。
 
 这就是当前 observability 的核心边界：Predict 内部有 callback/exporter 工具；V2.1 LangGraph 主执行路径没有统一 phase start/end、tool call、LLM call、heartbeat、checkpoint/resume trace 接线。
 
@@ -83,7 +83,7 @@ subagent runnable config 会透传 parent callbacks 到 child config，如果 pa
 
 ### V2.1 runner trace API
 
-V2.1 runner 目前没有稳定 trace callback API。`run_skill()` 签名里有 `callbacks` 和 `trace_dir`，见 `packages/graph-agent/src/graph_agent/core/runner.py:165` 到 `packages/graph-agent/src/graph_agent/core/runner.py:168`，但 V2.1 分支删除 callbacks，见 `packages/graph-agent/src/graph_agent/core/runner.py:462`。`trace_dir` 只影响返回 dict 里的 `trace_path` 字符串，见 `packages/graph-agent/src/graph_agent/core/runner.py:484`。
+V2.1 runner 目前没有稳定 trace callback API。`run_skill()` 签名里有 `callbacks` 和 `trace_dir`，见 `packages/graph-agent/src/graph_agent/core/runner.py:165` 到 `packages/graph-agent/src/graph_agent/core/runner.py:168`，V0.3 分支会透传 callbacks 给 assembly，见 `packages/graph-agent/src/graph_agent/core/runner.py:496` 到 `packages/graph-agent/src/graph_agent/core/runner.py:500`。`trace_dir` 只影响返回 dict 里的 `trace_path` 字符串，见 `packages/graph-agent/src/graph_agent/core/runner.py:516`。
 
 ## Data Model / State
 
@@ -101,9 +101,9 @@ audit P1-4 说旧 `GraphAgentHarness` 支持 callbacks、heartbeat、checkpoint/
 
 当前代码对应的缺口是：
 
-- V2.1 public runner 丢弃 callbacks，见 `packages/graph-agent/src/graph_agent/core/runner.py:462`。
+- V0.3 public runner 接收 callbacks 并透传给 assembly，见 `packages/graph-agent/src/graph_agent/core/runner.py:474` 和 `packages/graph-agent/src/graph_agent/core/runner.py:496` 到 `packages/graph-agent/src/graph_agent/core/runner.py:500`。
 - V2.1 graph node 没有统一发 phase start/end event，LOGIC/SUBGRAPH/SKILL node 主体分别见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:127`、`packages/graph-agent/src/graph_agent/core/graph_assembler.py:155`、`packages/graph-agent/src/graph_agent/core/graph_assembler.py:229`。
-- V2.1 runner 返回 `trace_path` 但没有在这条分支保存 trace JSON，见 `packages/graph-agent/src/graph_agent/core/runner.py:480` 到 `packages/graph-agent/src/graph_agent/core/runner.py:485`。
+- V2.1 runner 返回 `trace_path` 但没有在这条分支保存 trace JSON，见 `packages/graph-agent/src/graph_agent/core/runner.py:512` 到 `packages/graph-agent/src/graph_agent/core/runner.py:516`。
 - Predict callback/exporter 存在，但它是 `_predict_internal` 私有模块，文件头说明 "not public SDK surface" 的定位在 `packages/graph-agent/src/graph_agent/core/_predict_internal/tracing.py:1` 到 `packages/graph-agent/src/graph_agent/core/_predict_internal/tracing.py:6`。
 
 ### 与 state/runtime 的互动
@@ -116,7 +116,7 @@ Trace 要想表达 phase 输入输出，必须理解 runtime 的 `BlackboardStat
 
 当下代码里至少有三层容易混淆的 observability。
 
-第一层是旧 harness callbacks。`run_skill()` 旧路径会默认创建 `LoggingCallback()` 和 `TracingCallback(trace_dir=...)`，代码在 `packages/graph-agent/src/graph_agent/core/runner.py:284` 到 `packages/graph-agent/src/graph_agent/core/runner.py:286`。这层历史上承担 heartbeat、trace、artifact 等职责，但 V2.1 graph runner 没有完整接入。
+第一层是旧 harness callbacks。`run_skill()` 旧路径会默认创建 `LoggingCallback()` 和 `TracingCallback(trace_dir=...)`，代码在 `packages/graph-agent/src/graph_agent/core/runner.py:284` 到 `packages/graph-agent/src/graph_agent/core/runner.py:286`。这层历史上承担 heartbeat、trace、artifact 等职责，但 V0.3 graph runner 不自动创建旧 harness 默认 callback 组合。
 
 第二层是 V2.1 LangGraph runtime 自身。它有 node、edge、state reducer，但当前 node 函数没有在入口/出口发统一事件。LOGIC node 返回 data delta，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:127` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:136`；SUBGRAPH node 返回 data/flow，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:155` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:172`；SKILL node 返回 flow/messages/data，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:289` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:296`。
 
@@ -126,17 +126,17 @@ Trace 要想表达 phase 输入输出，必须理解 runtime 的 `BlackboardStat
 
 tracing 本身不执行任务。真实任务执行发生在 runtime node 生命周期里，详见 [execution-runtime/baseline.md#后端功能](../execution-runtime/baseline.md#后端功能)。如果没有 runtime 在 phase start/end、LLM call、tool call 时调用 callback，`PredictTracingCallback` 这样的 callback 类就只能服务已经接入它的 Predict 路径。
 
-反过来，execution runtime 返回 `trace_path` 但不写 trace 的现状属于 observability 缺口，不属于 graph 装配算法本身。证据是 `_run_v21_skill_dict()` 在返回 dict 时只拼接 `Path(trace_dir) / "trace.json"`，见 `packages/graph-agent/src/graph_agent/core/runner.py:480` 到 `packages/graph-agent/src/graph_agent/core/runner.py:485`。
+反过来，execution runtime 返回 `trace_path` 但不写 trace 的现状属于 observability 缺口，不属于 graph 装配算法本身。证据是 `_run_v030_skill_dict()` 在返回 dict 时只拼接 `Path(trace_dir) / "trace.json"`，见 `packages/graph-agent/src/graph_agent/core/runner.py:512` 到 `packages/graph-agent/src/graph_agent/core/runner.py:516`。
 
 ### 与 state-and-io-contract 的双向关系
 
-trace 里要表达的 `inputs` 和 `outputs` 不是凭空来的，它们必须从 state 或 Predict mock records 中提取。当前 `PhaseRecord` 记录 inputs/outputs，见 `packages/graph-agent/src/graph_agent/core/_predict_internal/exporter.py:35` 到 `packages/graph-agent/src/graph_agent/core/_predict_internal/exporter.py:36`。但 runtime 当前没有 phase-level IO contract，因此 "phase input" 在 V2.1 主线里不是一个正式 state 字段。state 现状见 [state-and-io-contract/baseline.md#data-model--state](../state-and-io-contract/baseline.md#data-model--state)。
+trace 里要表达的 `inputs` 和 `outputs` 不是凭空来的，它们必须从 state 或 Predict mock records 中提取。当前 `PhaseRecord` 记录 inputs/outputs，见 `packages/graph-agent/src/graph_agent/core/_predict_internal/exporter.py:35` 到 `packages/graph-agent/src/graph_agent/core/_predict_internal/exporter.py:36`。但 runtime 当前没有 phase-level IO contract，因此 "phase input" 在 V0.3 主线里不是一个正式 state 字段。state 现状见 [state-and-io-contract/baseline.md#data-model--state](../state-and-io-contract/baseline.md#data-model--state)。
 
 这也解释了为什么 P1-4 不只是 "少一个 callback 类"。callback 类存在，Predict exporter 也存在；缺口在于 V2.1 graph runtime 没有把 phase lifecycle 和 state slice 统一投递出去。
 
 ### 读代码时的主路径提示
 
-读 observability 建议先看 `_run_v21_skill_dict()`，位置是 `packages/graph-agent/src/graph_agent/core/runner.py:451`，确认 V2.1 主线没有接 callbacks。然后看旧路径 callbacks 默认创建，位置是 `packages/graph-agent/src/graph_agent/core/runner.py:284`，理解 legacy 能力来自哪里。
+读 observability 建议先看 `_run_v030_skill_dict()`，位置是 `packages/graph-agent/src/graph_agent/core/runner.py:468`，确认 V0.3 主线如何透传 callbacks。然后看旧路径 callbacks 默认创建，位置是 `packages/graph-agent/src/graph_agent/core/runner.py:284`，理解 legacy 能力来自哪里。
 
 再看 `PredictTracingCallback`，位置是 `packages/graph-agent/src/graph_agent/core/_predict_internal/tracing.py:76`。phase start/end 分别在 `packages/graph-agent/src/graph_agent/core/_predict_internal/tracing.py:111` 和 `packages/graph-agent/src/graph_agent/core/_predict_internal/tracing.py:118`。LLM call 记录在 `packages/graph-agent/src/graph_agent/core/_predict_internal/tracing.py:139`。保存 trace metadata 在 `packages/graph-agent/src/graph_agent/core/_predict_internal/tracing.py:159`。
 

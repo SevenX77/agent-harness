@@ -90,6 +90,7 @@ ERROR_REGISTRY: dict[str, ErrorCodeMetadata] = {
     '[F-v3-resource-example-not-found]': ErrorCodeMetadata('[F-v3-resource-example-not-found]', 'FATAL', ('运行期',), './09-builtin-modules-spec.md#按需调取-tools-read_reference--read_example'),
     '[F-v3-reference-reader-failed]': ErrorCodeMetadata('[F-v3-reference-reader-failed]', 'WARN', ('装配期',), './09-builtin-modules-spec.md#优雅降级策略-graceful-degradation'),
     '[F-v3-resolver-skill-id-invalid]': ErrorCodeMetadata('[F-v3-resolver-skill-id-invalid]', 'FATAL', ('编译期',), './10-skill-resolver-protocol-spec.md#protocol-interface-定义'),
+    '[F-v3-skill-id-ambiguous]': ErrorCodeMetadata('[F-v3-skill-id-ambiguous]', 'FATAL', ('编译期', '装配期'), './10-skill-resolver-protocol-spec.md#protocol-interface-定义'),
     '[F-v3-skill-not-registered]': ErrorCodeMetadata('[F-v3-skill-not-registered]', 'FATAL', ('编译期', '装配期'), './10-skill-resolver-protocol-spec.md#protocol-interface-定义'),
     '[F-v3-resolver-path-invalid]': ErrorCodeMetadata('[F-v3-resolver-path-invalid]', 'FATAL', ('编译期',), './10-skill-resolver-protocol-spec.md#protocol-interface-定义'),
     '[F-v3-resolver-interface-invalid]': ErrorCodeMetadata('[F-v3-resolver-interface-invalid]', 'FATAL', ('编译期',), './10-skill-resolver-protocol-spec.md#protocol-interface-定义'),

@@ -35,22 +35,7 @@ class _Flow:
 def test_run_skill_dict_omitted_mock_llm_does_not_bind_predictor(
     monkeypatch,
     tmp_path,
-) -> None:
-    skill = tmp_path / "SKILL.md"
-    skill.write_text("---\nname: test\n---\n", encoding="utf-8")
-    harness = RecordingHarness()
-    monkeypatch.setattr(runner_module, "load_workflow_from_md", lambda *_args, **_kwargs: harness)
-    runner_module.clear_cache()
-
-    runner_module._run_skill_dict(skill, callbacks=[], cleanup_checkpoints_on_finish=False)
-
-    assert harness.bindings_seen == [False]
-    assert not hasattr(harness._resolver, "_graph_agent_predict_mock_strategy")
-
-
-def test_run_skill_dict_explicit_mock_none_binds_only_during_current_run(
-    monkeypatch,
-    tmp_path,
+    mock_skill_resolver,
 ) -> None:
     skill = tmp_path / "SKILL.md"
     skill.write_text("---\nname: test\n---\n", encoding="utf-8")
@@ -62,6 +47,29 @@ def test_run_skill_dict_explicit_mock_none_binds_only_during_current_run(
         skill,
         callbacks=[],
         cleanup_checkpoints_on_finish=False,
+        skill_resolver=mock_skill_resolver,
+    )
+
+    assert harness.bindings_seen == [False]
+    assert not hasattr(harness._resolver, "_graph_agent_predict_mock_strategy")
+
+
+def test_run_skill_dict_explicit_mock_none_binds_only_during_current_run(
+    monkeypatch,
+    tmp_path,
+    mock_skill_resolver,
+) -> None:
+    skill = tmp_path / "SKILL.md"
+    skill.write_text("---\nname: test\n---\n", encoding="utf-8")
+    harness = RecordingHarness()
+    monkeypatch.setattr(runner_module, "load_workflow_from_md", lambda *_args, **_kwargs: harness)
+    runner_module.clear_cache()
+
+    runner_module._run_skill_dict(
+        skill,
+        callbacks=[],
+        cleanup_checkpoints_on_finish=False,
+        skill_resolver=mock_skill_resolver,
         mock_llm=None,
     )
 
@@ -69,7 +77,9 @@ def test_run_skill_dict_explicit_mock_none_binds_only_during_current_run(
     assert not hasattr(harness._resolver, "_graph_agent_predict_mock_strategy")
 
 
-def test_run_skill_dict_restores_existing_predict_binding(monkeypatch, tmp_path) -> None:
+def test_run_skill_dict_restores_existing_predict_binding(
+    monkeypatch, tmp_path, mock_skill_resolver
+) -> None:
     skill = tmp_path / "SKILL.md"
     skill.write_text("---\nname: test\n---\n", encoding="utf-8")
     harness = RecordingHarness()
@@ -82,6 +92,7 @@ def test_run_skill_dict_restores_existing_predict_binding(monkeypatch, tmp_path)
         skill,
         callbacks=[],
         cleanup_checkpoints_on_finish=False,
+        skill_resolver=mock_skill_resolver,
         mock_llm={"draft": {"text": "manual"}},
     )
 

@@ -55,6 +55,7 @@ def test_resolve_skill_path_uses_parent_dir_for_relative_paths(tmp_path: Path) -
 def test_build_skill_tool_invokes_runner_and_returns_final_output(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    mock_skill_resolver: object,
 ) -> None:
     skill_path = tmp_path / "child" / "SKILL.md"
     skill_path.parent.mkdir()
@@ -90,6 +91,7 @@ def test_build_skill_tool_invokes_runner_and_returns_final_output(
         ),
         parent_thread_id="parent",
         parent_trace_dir=tmp_path / "traces",
+        skill_resolver=mock_skill_resolver,
     )
 
     assert tool.invoke({"topic": "contracts"}) == "done"
@@ -108,6 +110,7 @@ def test_build_skill_tool_invokes_runner_and_returns_final_output(
 def test_build_skill_tool_returns_error_when_final_output_missing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    mock_skill_resolver: object,
 ) -> None:
     skill_path = tmp_path / "child" / "SKILL.md"
     skill_path.parent.mkdir()
@@ -130,13 +133,16 @@ def test_build_skill_tool_returns_error_when_final_output_missing(
             description="Run child",
             skill_path=str(skill_path),
             input_schema={"topic": "string, topic to process"},
-        )
+        ),
+        skill_resolver=mock_skill_resolver,
     )
 
     assert tool.invoke({"topic": "contracts"}) == "ERROR: Sub-skill produced no final_output"
 
 
-def test_build_skill_tool_rejects_missing_skill_path(tmp_path: Path) -> None:
+def test_build_skill_tool_rejects_missing_skill_path(
+    tmp_path: Path, mock_skill_resolver: object
+) -> None:
     spec = SubSkillSpec(
         name="missing",
         description="missing tool",
@@ -145,4 +151,4 @@ def test_build_skill_tool_rejects_missing_skill_path(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ValueError, match="skill_path not found"):
-        build_skill_tool(spec)
+        build_skill_tool(spec, skill_resolver=mock_skill_resolver)

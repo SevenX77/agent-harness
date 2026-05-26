@@ -18,7 +18,7 @@ Its sole responsibility: execute SKILL.md-described workflows reliably. The agen
    Phase results are written to `WorkflowState.context` first. Persistence is delegated to `IOManager` through `file` output or `artifact_saver` injected by the caller. The framework prepares the "food" without depending on the host project's file-management implementation.
 
 4. **Hexagonal SDK boundary**
-   Only 12 names are part of the public API surface (see "Public API" below). Internal modules (`core.*`, `io.*`, `models.*`, etc.) can be re-organised without breaking downstream consumers.
+   Only the names listed in "Public API" are part of the stable API surface. Internal modules (`core.*`, `io.*`, `models.*`, etc.) can be re-organised without breaking downstream consumers.
 
 5. **Multimodal tools are general capabilities**
    Tools under `tools/` for images, video, and voice remain in the framework layer as cross-project reusable capabilities, not business-specific logic.
@@ -63,35 +63,44 @@ Run the hello_world example from repo root:
 
 ```bash
 uv run python3 -c "
-from graph_agent import run_skill
+from pathlib import Path
+from graph_agent import LocalWorkspaceResolver, run_skill
 
+resolver = LocalWorkspaceResolver(search_paths=[Path.cwd(), Path.cwd() / 'skills'])
 result = run_skill(
-    'packages/graph-agent/src/graph_agent/examples/hello_world/SKILL.md',
-    initial_context={'user_name': 'Developer'}
+    'path/to/v030-skill-root',
+    skill_resolver=resolver,
+    user_name='Developer',
 )
-print('Success:', result.context.get('greeting', 'No greeting'))
+print('Success:', result.success)
 "
 ```
 
 ### 4. Choose Entry Point
 
-- `run_skill(...)` — Most common entry point for direct SKILL.md execution; returns a `WorkflowResult`.
+- `run_skill(...)` — Most common entry point for direct V0.3 skill-root execution; pass an explicit resolver with `skill_resolver=...`.
 - `compile_skill(...)` — Static validation; used by Studio Frontend's lint flow.
-- `GraphAgentHarness` — Low-level orchestrator for advanced cases when you need to hand-write Phase lists or wire custom callbacks.
+- `LocalWorkspaceResolver(...)` — Standard local filesystem resolver for CLI-like and host-project usage.
 
 ---
 
 ## Public API
 
-The 12 names re-exported from `graph_agent`:
+The stable names re-exported from `graph_agent`:
 
 | Name | Purpose |
 |---|---|
 | `run_skill` | High-level entry point |
 | `WorkflowResult` | Pydantic-typed return contract |
-| `GraphAgentHarness` | Low-level orchestrator |
 | `compile_skill` | Static skill validation |
+| `CompileResult` | Legacy compile diagnostic container |
+| `assemble_graph` | Assemble a compiled skill into a runnable graph |
+| `CompiledSkill` | Compiled skill model |
+| `CompiledStateGraph` | Assembled graph wrapper |
+| `BlackboardState` | Runtime blackboard state |
+| `LocalWorkspaceResolver` | Local filesystem skill-id resolver |
 | `SkillManifest` | Pydantic schema for SKILL.md |
+| `serialize_skill` | Stable skill serialization helper |
 | `Callback` | Base class for extensibility |
 | `LoggingCallback` | Default structured-log callback |
 | `MetricsCallback` | Default metrics-recording callback |
@@ -108,7 +117,7 @@ Internal helpers (`Phase`, `WorkflowState`, `IOManager`, `ContextResolver`, `Mod
 
 ```text
 graph_agent/
-├── __init__.py              # 12 public re-exports
+├── __init__.py              # public re-exports
 ├── py.typed                 # PEP 561 type marker
 │
 ├── core/                    # Core orchestration engine
@@ -158,21 +167,24 @@ graph_agent/
 ```python
 # 1. Install via uv workspace OR git+ssh pin
 # 2. Import only public API
-from graph_agent import (
-    run_skill,
-    WorkflowResult,
-    SkillManifest,
-    Callback,
-    GraphAgentError,
-)
+from pathlib import Path
+
+from graph_agent import Callback, GraphAgentError, LocalWorkspaceResolver, SkillManifest
+from graph_agent import WorkflowResult, run_skill
 
 # 3. Run
+resolver = LocalWorkspaceResolver(search_paths=[Path.cwd(), Path.cwd() / "skills"])
 result: WorkflowResult = run_skill(
-    "path/to/SKILL.md",
-    initial_context={...},
+    "path/to/v030-skill-root",
+    skill_resolver=resolver,
+    **{...},
     callbacks=[MyCustomCallback()],
 )
 ```
+
+`skill_resolver` is required for filesystem skill lookup. Tests and host
+integrations should construct an explicit resolver instead of relying on
+pytest or framework-level default injection.
 
 Do not import from internal sub-modules (`graph_agent.core.*`, `graph_agent.io.*`, etc.) in production host code; those are subject to change.
 

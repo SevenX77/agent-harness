@@ -26,7 +26,7 @@ Studio 画布或编辑器可能间接依赖编译结果，但本 baseline 描述
 
 这份编译产物会被 execution runtime 接着装配成 LangGraph。调用方如何消费 `CompiledSkill`，详见 [execution-runtime/baseline.md#后端功能](../execution-runtime/baseline.md#后端功能)。
 
-### V2.1 skill root 守卫
+### V0.3 skill root 守卫
 
 `SkillLoader.compile_skill()` 是实际编译器主体，定义在 `packages/graph-agent/src/graph_agent/core/loader.py:142`。第一步是 `_guard_v21_root(root)`，位置是 `packages/graph-agent/src/graph_agent/core/loader.py:144`。这个守卫要求入口必须是目录，不能是旧的根级 `SKILL.md` 单文件，因为 `_guard_v21_root` 在 `packages/graph-agent/src/graph_agent/core/loader.py:256` 到 `packages/graph-agent/src/graph_agent/core/loader.py:272` 明确检查目录存在、`GRAPH.md` 存在、`phases/` 存在且至少有 phase 子目录。
 
@@ -91,7 +91,7 @@ LOGIC action 的静态写键校验入口是 `_validate_logic_action_return_keys(
 
 ### subagent metadata 编译和动态工具注入
 
-`subagent` 第一次出现时需要定义：它是 SKILL phase 里 LLM 可以调用的子 agent；在当前代码里，subagent 不是一个单独 `SKILL.md`，而是一个完整 V2.1 skill root。父 `SKILL.md` 的 `phase_config.subagents` 被归一化进 `SkillNodeAST.subagents`，而 `SubagentSpec` 定义在 `packages/graph-agent/src/graph_agent/core/manifest.py:35` 到 `packages/graph-agent/src/graph_agent/core/manifest.py:42`。
+`subagent` 第一次出现时需要定义：它是 SKILL phase 里 LLM 可以调用的子 agent；在当前代码里，subagent 不是一个单独 `SKILL.md`，而是一个完整 V0.3 skill root。父 `SKILL.md` 的 `phase_config.subagents` 被归一化进 `SkillNodeAST.subagents`，而 `SubagentSpec` 定义在 `packages/graph-agent/src/graph_agent/core/manifest.py:35` 到 `packages/graph-agent/src/graph_agent/core/manifest.py:42`。
 
 编译器在 `packages/graph-agent/src/graph_agent/core/loader.py:176` 调 `_compile_subagent_metadata()`，实现从 `packages/graph-agent/src/graph_agent/core/loader.py:340` 到 `packages/graph-agent/src/graph_agent/core/loader.py:384`。它会解析 subagent path、递归编译子 skill、读取子 skill 的 `io.inputs`，并用这个 schema 生成 Pydantic 输入模型。
 
@@ -113,7 +113,7 @@ cache 默认目录是 `Path.home() / ".cache" / "graph-agent-v21"`，见 `packag
 
 `SkillLoader.compile_skill(skill_root)` 是底层 loader API，代码在 `packages/graph-agent/src/graph_agent/core/loader.py:142`。它会直接抛 `SkillLoadError` 或 `GraphAgentFatalError`，错误码前缀包括 `[F-v21-route]`、`[F-v21-io]`、`[F-v21-graph]`、`[F-v21-actions]`、`[F-v21-actions-keys]`、`[F-v21-purity]`，对应 helper 在 `packages/graph-agent/src/graph_agent/core/loader.py:232` 到 `packages/graph-agent/src/graph_agent/core/loader.py:253`。
 
-`load_workflow_from_md()` 仍存在，但它现在拒绝文件路径，并要求 V2.1 skill root 目录，代码在 `packages/graph-agent/src/graph_agent/core/loader.py:211` 到 `packages/graph-agent/src/graph_agent/core/loader.py:229`。这个名字带有 legacy 色彩，baseline 里不把它描述为新的 canonical compile API。
+`load_workflow_from_md()` 仍存在，但它现在拒绝文件路径，并要求 V0.3 skill root 目录，代码在 `packages/graph-agent/src/graph_agent/core/loader.py:211` 到 `packages/graph-agent/src/graph_agent/core/loader.py:229`。这个名字带有 legacy 色彩，baseline 里不把它描述为新的 canonical compile API。
 
 ### 输入文件契约
 
@@ -165,7 +165,7 @@ audit A8 说需要图级 IO 数据流校验，位置是 `docs.backup-2026-05-20/
 
 第二，编译阶段不解析真实 LLM provider。`compile_skill()` 接受 `chat_model` 只是为了稳定公开签名，实际会删除它，见 `packages/graph-agent/src/graph_agent/core/compiler.py:43` 到 `packages/graph-agent/src/graph_agent/core/compiler.py:52`。真实模型是否存在，是 execution runtime 的问题。
 
-第三，编译阶段不保证 runtime input 合法。`_validate_io_schema()` 只证明 `io/inputs.json` 是合法 JSON Schema，见 `packages/graph-agent/src/graph_agent/core/loader.py:896` 到 `packages/graph-agent/src/graph_agent/core/loader.py:900`。真正调用时 `_run_v21_skill_dict()` 仍然把 `**inputs` 原样放进 `data`，见 `packages/graph-agent/src/graph_agent/core/runner.py:471` 到 `packages/graph-agent/src/graph_agent/core/runner.py:477`。
+第三，编译阶段不保证 runtime input 合法。`_validate_io_schema()` 只证明 `io/inputs.json` 是合法 JSON Schema，见 `packages/graph-agent/src/graph_agent/core/loader.py:896` 到 `packages/graph-agent/src/graph_agent/core/loader.py:900`。真正调用时 `_run_v030_skill_dict()` 仍然把 `**inputs` 原样放进 `data`，见 `packages/graph-agent/src/graph_agent/core/runner.py:503` 到 `packages/graph-agent/src/graph_agent/core/runner.py:508`。
 
 第四，编译阶段不建立 per-phase input/output mapping。`GraphPhaseRef` 只有 `id`、`src`、`depends_on`，见 `packages/graph-agent/src/graph_agent/core/manifest.py:16` 到 `packages/graph-agent/src/graph_agent/core/manifest.py:23`。它没有 "input from phase X output Y" 的字段。
 

@@ -82,7 +82,9 @@ def test_diagnose_reports_item_id_from_meta() -> None:
     assert "_md_id" not in report.to_prompt_string()
 
 
-def test_md_to_json_accepts_strict_schema_without_metadata_collision() -> None:
+def test_md_to_json_accepts_strict_schema_without_metadata_collision(
+    mock_skill_resolver: object,
+) -> None:
     items = md_to_json(
         """
 ## segment 1
@@ -91,6 +93,7 @@ def test_md_to_json_accepts_strict_schema_without_metadata_collision() -> None:
 - content: opening beat
 """,
         StrictSegment,
+        skill_resolver=mock_skill_resolver,
     )
 
     assert [item.model_dump() for item in items] == [
@@ -98,7 +101,9 @@ def test_md_to_json_accepts_strict_schema_without_metadata_collision() -> None:
     ]
 
 
-def test_md_to_json_patch_path_sends_wrapped_error_items(monkeypatch) -> None:
+def test_md_to_json_patch_path_sends_wrapped_error_items(
+    monkeypatch, mock_skill_resolver: object
+) -> None:
     calls = []
 
     def fake_run_skill(*args, **kwargs):
@@ -120,6 +125,7 @@ def test_md_to_json_patch_path_sends_wrapped_error_items(monkeypatch) -> None:
 - type: B
 """,
         StrictSegment,
+        skill_resolver=mock_skill_resolver,
     )
 
     assert [item.model_dump() for item in items] == [

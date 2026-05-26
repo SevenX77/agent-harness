@@ -13,6 +13,7 @@ from graph_agent.core.exceptions import (
 )
 from graph_agent.core.harness import GraphAgentHarness
 from graph_agent.core.loader import load_workflow_from_md
+from graph_agent.core.local_workspace_resolver import LocalWorkspaceResolver
 from graph_agent.core.manifest import ContextBridge
 from graph_agent.core.run_context import RunContext
 from graph_agent.core.runner import run_skill
@@ -30,6 +31,7 @@ __all__ = [
     "TemplateRenderError",
     "MaxRetriesExceededError",
     "GraphAgentHarness",
+    "LocalWorkspaceResolver",
     "load_workflow_from_md",
     "compile_skill",
     "run_skill",

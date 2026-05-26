@@ -19,7 +19,7 @@ SRC_ROOT = PACKAGE_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from graph_agent import assemble_graph, compile_skill  # noqa: E402
+from graph_agent import LocalWorkspaceResolver, assemble_graph, compile_skill  # noqa: E402
 from langchain_core.messages import AIMessage  # noqa: E402
 
 
@@ -98,8 +98,15 @@ def _run_v21(
     run_id: str,
     chat_fixture: str,
 ) -> dict[str, Any]:
-    compiled = compile_skill(skill_root, cache=False)
-    graph = assemble_graph(compiled, chat_model=_chat_model(chat_fixture)).graph
+    resolver = LocalWorkspaceResolver(
+        search_paths=[skill_root, skill_root.parent, skill_root.parent / "registry"]
+    )
+    compiled = compile_skill(skill_root, cache=False, skill_resolver=resolver)
+    graph = assemble_graph(
+        compiled,
+        chat_model=_chat_model(chat_fixture),
+        skill_resolver=resolver,
+    ).graph
     result = graph.invoke({"data": dict(input_data), "flow": {}, "messages": [], "run_id": run_id})
     normalized = _normalize({"data": result.get("data", {}), "flow": result.get("flow", {})})
     return normalized if isinstance(normalized, dict) else {}

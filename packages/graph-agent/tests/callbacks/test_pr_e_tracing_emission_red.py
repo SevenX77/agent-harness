@@ -140,6 +140,7 @@ def test_e1_runtime_tool_path_keeps_tool_trace_and_emits_ambiguity_logged() -> N
 def test_e2_reference_reader_success_emits_enter_then_exit_from_loader_callbacks(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    mock_skill_resolver: object,
 ) -> None:
     class SuccessfulReaderRuntime:
         def __init__(self, **kwargs: Any) -> None:
@@ -156,7 +157,7 @@ def test_e2_reference_reader_success_emits_enter_then_exit_from_loader_callbacks
     _agent_skill(tmp_path)
     collector = CollectorCallback()
 
-    load_workflow_from_md(tmp_path, callbacks=[collector])
+    load_workflow_from_md(tmp_path, callbacks=[collector], skill_resolver=mock_skill_resolver)
 
     assert _event_types(collector.events) == [
         "builtin_subagent_enter",
@@ -187,6 +188,7 @@ def test_e2_reference_reader_success_emits_enter_then_exit_from_loader_callbacks
 def test_e2_e3_reference_reader_fallback_emits_slim_payload_for_each_reason(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    mock_skill_resolver: object,
     mode: str,
     expected_reason: str,
 ) -> None:
@@ -212,7 +214,7 @@ def test_e2_e3_reference_reader_fallback_emits_slim_payload_for_each_reason(
     _agent_skill(tmp_path)
     collector = CollectorCallback()
 
-    load_workflow_from_md(tmp_path, callbacks=[collector])
+    load_workflow_from_md(tmp_path, callbacks=[collector], skill_resolver=mock_skill_resolver)
 
     assert _event_types(collector.events) == [
         "builtin_subagent_enter",

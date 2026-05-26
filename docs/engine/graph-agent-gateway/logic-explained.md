@@ -364,9 +364,9 @@
 
 `run_skill` 在 `packages/graph-agent/src/graph_agent/core/runner.py:162-198` 新增 `model_resolver: Any | None = None` 并传入 `_run_skill_dict` (`runner.py:174,186-198`)。
 
-`_run_skill_dict` 在 `runner.py:232-310` 继续把 `model_resolver` 传入 V2.1 skill root (`runner.py:276-285`) 或 `load_workflow_from_md` (`runner.py:306-310`)。
+`_run_skill_dict` 在 `runner.py:232-310` 继续把 `model_resolver` 传入 V0.3 skill root (`runner.py:276-285`) 或 `load_workflow_from_md` (`runner.py:306-310`)。
 
-`_run_v21_skill_dict` 在 `runner.py:468-491` 中，如果没有 `mock_llm` 且传入了 `model_resolver`，就调用 `model_resolver.resolve(callbacks=tuple(callbacks or ()), phase_name="<workflow>")` (`runner.py:481-487`)，然后把 `chat_model` 交给 graph assembly (`runner.py:490-491`)。
+`_run_v030_skill_dict` 在 `runner.py:468-501` 中，如果没有 `mock_llm` 且传入了 `model_resolver`，就调用 `model_resolver.resolve(callbacks=tuple(callbacks or ()), phase_name="<workflow>")` (`runner.py:489-491`)，然后把 `chat_model` 交给 graph assembly (`runner.py:496-500`)。
 
 Studio backend 在 `apps/studio/backend/app/services/gateway_resolver.py:16-23` 通过 `build_gateway_model_resolver` 从 `config/llm_roles.yaml` 构造 `ModelResolver`。`run_manager.py:231-236` 和 `predictor.py:72-76` 都显式传入这个 resolver。决策上，Studio 是配置拥有者，所以 resolver 也应由 Studio 注入，而不是 Engine 自己读取全局单例。
 

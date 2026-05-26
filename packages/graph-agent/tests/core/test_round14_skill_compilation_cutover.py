@@ -155,55 +155,56 @@ def _expect_code(exc: pytest.ExceptionInfo[SkillLoadError], code: str) -> None:
 
 def test_valid_v030_graph_uses_frontmatter_phase_registry_and_body_phase_dag(
     tmp_path: Path,
+    mock_skill_resolver: object,
 ) -> None:
     _graph(tmp_path)
     _agent_phase(tmp_path)
 
-    compiled = SkillLoader().compile_skill(tmp_path)
+    compiled = SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     assert compiled.manifest.schema_version == "v0.3.0"
     assert compiled.manifest.phases == ["main"]
     assert compiled.nodes[0].ast.mode == "agent"
 
 
-def test_schema_version_without_v_is_rejected(tmp_path: Path) -> None:
+def test_schema_version_without_v_is_rejected(tmp_path: Path, mock_skill_resolver: object) -> None:
     _graph(tmp_path, schema_version="0." + "3.0")
     _agent_phase(tmp_path)
 
     with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     _expect_code(exc, "[F-v3-graph-schema-version-mismatch]")
 
 
-def test_schema_version_21_is_rejected_with_otherwise_v030_shape(tmp_path: Path) -> None:
+def test_schema_version_21_is_rejected_with_otherwise_v030_shape(tmp_path: Path, mock_skill_resolver: object) -> None:
     _graph(tmp_path, schema_version="2.1")
     _agent_phase(tmp_path)
 
     with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     _expect_code(exc, "[F-v3-graph-schema-version-mismatch]")
 
 
 @pytest.mark.parametrize("mode", ["skill", "agent", "logic", "subgraph"])
-def test_phase_frontmatter_mode_is_forbidden_metadata(tmp_path: Path, mode: str) -> None:
+def test_phase_frontmatter_mode_is_forbidden_metadata(tmp_path: Path, mode: str, mock_skill_resolver: object) -> None:
     _graph(tmp_path)
     _agent_phase(tmp_path, frontmatter=f"mode: {mode}\n")
 
     with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     assert exc.value.payload.code == "[F-v3-agent-schema-unknown-field]"
 
 
 @pytest.mark.parametrize("field", ["schema_version", "graph_skill_id", "phase_id"])
-def test_phase_frontmatter_rejects_root_only_metadata(tmp_path: Path, field: str) -> None:
+def test_phase_frontmatter_rejects_root_only_metadata(tmp_path: Path, field: str, mock_skill_resolver: object) -> None:
     _graph(tmp_path)
     _agent_phase(tmp_path, frontmatter=f'{field}: "polluted"\n')
 
     with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     assert exc.value.payload.code == "[F-v3-agent-schema-unknown-field]"
 
@@ -234,38 +235,38 @@ def test_logic_node_ast_accepts_validator_boolean_and_defaults_false() -> None:
     assert ast.validator is False
 
 
-def test_logic_validator_must_be_boolean(tmp_path: Path) -> None:
+def test_logic_validator_must_be_boolean(tmp_path: Path, mock_skill_resolver: object) -> None:
     _graph(tmp_path)
     _logic_phase(tmp_path, validator='"yes"')
 
     with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     _expect_code(exc, "[F-v3-logic-validator-type-invalid]")
 
 
-def test_phase_directory_with_multiple_node_files_uses_ambiguous_code(tmp_path: Path) -> None:
+def test_phase_directory_with_multiple_node_files_uses_ambiguous_code(tmp_path: Path, mock_skill_resolver: object) -> None:
     _graph(tmp_path)
     _agent_phase(tmp_path)
     _logic_phase(tmp_path)
 
     with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     _expect_code(exc, "[F-v3-graph-phase-mode-ambiguous]")
 
 
-def test_declared_phase_without_node_file_uses_node_missing_code(tmp_path: Path) -> None:
+def test_declared_phase_without_node_file_uses_node_missing_code(tmp_path: Path, mock_skill_resolver: object) -> None:
     _graph(tmp_path)
     (tmp_path / "phases" / "main").mkdir(parents=True)
 
     with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     _expect_code(exc, "[F-v3-graph-phase-node-missing]")
 
 
-def test_graph_without_frontmatter_phases_is_rejected(tmp_path: Path) -> None:
+def test_graph_without_frontmatter_phases_is_rejected(tmp_path: Path, mock_skill_resolver: object) -> None:
     _write(
         tmp_path / "GRAPH.md",
         """---
@@ -285,32 +286,32 @@ io:
     _agent_phase(tmp_path)
 
     with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     _expect_code(exc, "[F-v3-graph-phases-missing]")
 
 
-def test_graph_without_body_phase_is_rejected(tmp_path: Path) -> None:
+def test_graph_without_body_phase_is_rejected(tmp_path: Path, mock_skill_resolver: object) -> None:
     _graph(tmp_path, body="")
     _agent_phase(tmp_path)
 
     with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     _expect_code(exc, "[F-v3-graph-phase-id-invalid]")
 
 
-def test_body_phase_name_must_match_physical_directory(tmp_path: Path) -> None:
+def test_body_phase_name_must_match_physical_directory(tmp_path: Path, mock_skill_resolver: object) -> None:
     _graph(tmp_path, phases=["main"], body='<phase depends_on="input" output>other</phase>')
     _agent_phase(tmp_path, "main")
 
     with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     _expect_code(exc, "[F-v3-graph-phase-name-mismatch]")
 
 
-def test_duplicate_phase_registration_uses_dedicated_code(tmp_path: Path) -> None:
+def test_duplicate_phase_registration_uses_dedicated_code(tmp_path: Path, mock_skill_resolver: object) -> None:
     _graph(
         tmp_path,
         phases=["main", "main"],
@@ -319,22 +320,22 @@ def test_duplicate_phase_registration_uses_dedicated_code(tmp_path: Path) -> Non
     _agent_phase(tmp_path)
 
     with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     _expect_code(exc, "[F-v3-graph-phase-id-duplicate]")
 
 
-def test_unknown_depends_on_uses_dedicated_code(tmp_path: Path) -> None:
+def test_unknown_depends_on_uses_dedicated_code(tmp_path: Path, mock_skill_resolver: object) -> None:
     _graph(tmp_path, body='<phase depends_on="missing" output>main</phase>')
     _agent_phase(tmp_path)
 
     with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     _expect_code(exc, "[F-v3-graph-depends-unknown]")
 
 
-def test_graph_cycle_uses_dedicated_code(tmp_path: Path) -> None:
+def test_graph_cycle_uses_dedicated_code(tmp_path: Path, mock_skill_resolver: object) -> None:
     _graph(
         tmp_path,
         phases=["first", "second"],
@@ -345,12 +346,12 @@ def test_graph_cycle_uses_dedicated_code(tmp_path: Path) -> None:
     _agent_phase(tmp_path, "second")
 
     with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     _expect_code(exc, "[F-v3-graph-phase-cycle]")
 
 
-def test_unreachable_phase_uses_island_code(tmp_path: Path) -> None:
+def test_unreachable_phase_uses_island_code(tmp_path: Path, mock_skill_resolver: object) -> None:
     _graph(
         tmp_path,
         phases=["first", "orphan"],
@@ -361,17 +362,17 @@ def test_unreachable_phase_uses_island_code(tmp_path: Path) -> None:
     _agent_phase(tmp_path, "orphan")
 
     with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     _expect_code(exc, "[F-v3-graph-phase-island]")
 
 
-def test_missing_output_phase_uses_dedicated_code(tmp_path: Path) -> None:
+def test_missing_output_phase_uses_dedicated_code(tmp_path: Path, mock_skill_resolver: object) -> None:
     _graph(tmp_path, body='<phase depends_on="input">main</phase>')
     _agent_phase(tmp_path)
 
     with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     _expect_code(exc, "[F-v3-graph-output-phase-invalid]")
 
@@ -389,6 +390,7 @@ def test_physical_root_io_is_deprecated(
     tmp_path: Path,
     frontmatter: str,
     path: str | None,
+    mock_skill_resolver: object,
 ) -> None:
     _graph(tmp_path, extra_frontmatter=frontmatter)
     _agent_phase(tmp_path)
@@ -396,7 +398,7 @@ def test_physical_root_io_is_deprecated(
         _write(tmp_path / path, "{}\n")
 
     with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     _expect_code(exc, "[F-v3-graph-io-physical-file-deprecated]")
 
@@ -408,17 +410,17 @@ def test_physical_root_io_is_deprecated(
         "<role>Tester</role><goal>Goal</goal><exit_contract>bad</exit_contract>",
     ],
 )
-def test_agent_body_rejects_non_whitelisted_top_level_tags(tmp_path: Path, body: str) -> None:
+def test_agent_body_rejects_non_whitelisted_top_level_tags(tmp_path: Path, body: str, mock_skill_resolver: object) -> None:
     _graph(tmp_path)
     _agent_phase(tmp_path, body=body)
 
     with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     _expect_code(exc, "[F-v3-agent-body-tag-unknown]")
 
 
-def test_agent_body_extracts_inline_examples_for_mentions(tmp_path: Path) -> None:
+def test_agent_body_extracts_inline_examples_for_mentions(tmp_path: Path, mock_skill_resolver: object) -> None:
     _graph(tmp_path)
     _agent_phase(
         tmp_path,
@@ -428,12 +430,12 @@ def test_agent_body_extracts_inline_examples_for_mentions(tmp_path: Path) -> Non
 """,
     )
 
-    compiled = SkillLoader().compile_skill(tmp_path)
+    compiled = SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     assert compiled.nodes[0].ast.examples_inline[0].id == "E1"
 
 
-def test_missing_mention_target_is_rejected(tmp_path: Path) -> None:
+def test_missing_mention_target_is_rejected(tmp_path: Path, mock_skill_resolver: object) -> None:
     _graph(tmp_path)
     _agent_phase(
         tmp_path,
@@ -443,12 +445,12 @@ def test_missing_mention_target_is_rejected(tmp_path: Path) -> None:
     )
 
     with pytest.raises(SkillLoadError) as exc:
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     _expect_code(exc, "[F-v3-mention-target-not-found]")
 
 
-def test_subgraph_io_input_mismatch_is_rejected_at_compile_time(tmp_path: Path) -> None:
+def test_subgraph_io_input_mismatch_is_rejected_at_compile_time(tmp_path: Path, mock_skill_resolver: object) -> None:
     parent = tmp_path / "parent"
     child = tmp_path / "child"
     _graph(parent)
@@ -462,7 +464,7 @@ def test_subgraph_io_input_mismatch_is_rejected_at_compile_time(tmp_path: Path) 
     _expect_code(exc, "[F-v3-subgraph-io-mismatch]")
 
 
-def test_subgraph_io_output_mismatch_is_rejected_at_compile_time(tmp_path: Path) -> None:
+def test_subgraph_io_output_mismatch_is_rejected_at_compile_time(tmp_path: Path, mock_skill_resolver: object) -> None:
     parent = tmp_path / "parent"
     child = tmp_path / "child"
     _graph(parent)

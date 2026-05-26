@@ -72,6 +72,7 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | `[F-v3-logic-action-dir-missing]` | 编译期 | phase-local `actions/` 缺失且 action 未在通用 registry 注册 | 创建目录或注册通用 action | [LOGIC](./03-logic-md-spec.md#actions-注册寻址与执行契约) |
 | `[F-v3-logic-action-not-found]` | 编译期 | phase-local action py 文件不存在且通用 registry 无此项 | 增加 `<name>.py` 或注册通用 action | [LOGIC](./03-logic-md-spec.md#actions-注册寻址与执行契约) |
 | `[F-v3-logic-action-entrypoint-missing]` | 编译期 | action 无 `run()` | 导出 `run` | [LOGIC](./03-logic-md-spec.md#actions-注册寻址与执行契约) |
+| `[F-v3-logic-action-purity-violation]` | 编译期 | action 代码包含本地写等副作用违例 | 移除 `open('w')` 等非纯操作 | [LOGIC](./03-logic-md-spec.md#actions-注册寻址与执行契约) |
 | `[F-v3-logic-action-return-invalid]` | 运行期 | action 返回非 dict | 返回 dict | [LOGIC](./03-logic-md-spec.md#actions-注册寻址与执行契约) |
 | `[F-v3-logic-output-field-undeclared]` | 运行期 | 返回未声明输出字段 | 更新 `io.outputs` 或删字段 | [LOGIC](./03-logic-md-spec.md#actions-注册寻址与执行契约) |
 | `[F-v3-logic-validator-type-invalid]` | 编译期 | `validator` 不是 boolean | 改为 true/false | [LOGIC](./03-logic-md-spec.md#validator-生命周期-post-execution-hook) |

@@ -22,18 +22,18 @@ React 前端不会直接调用 `assemble_graph()` 或 LangGraph `graph.invoke()`
 
 当前顶层入口是 `run_skill(skill_path, ..., **inputs) -> WorkflowResult`，定义在 `packages/graph-agent/src/graph_agent/core/runner.py:161` 到 `packages/graph-agent/src/graph_agent/core/runner.py:173`。它会记录开始时间，然后调用 `_run_skill_dict()`，成功时把 raw dict 包成 `WorkflowResult(success=True, context=...)`，代码在 `packages/graph-agent/src/graph_agent/core/runner.py:182` 到 `packages/graph-agent/src/graph_agent/core/runner.py:224`。
 
-V2.1 skill root 的真实执行分支是 `_run_v21_skill_dict()`，定义在 `packages/graph-agent/src/graph_agent/core/runner.py:451` 到 `packages/graph-agent/src/graph_agent/core/runner.py:486`。它做的事很直接：删除 callbacks 参数、导入 `compile_skill` 和 `assemble_graph`、根据 `mock_llm` 得到 `chat_model`、编译 skill、装配 graph、再调用 `graph.invoke()`。
+V0.3 skill root 的真实执行分支是 `_run_v030_skill_dict()`，定义在 `packages/graph-agent/src/graph_agent/core/runner.py:468` 到 `packages/graph-agent/src/graph_agent/core/runner.py:518`。它做的事很直接：接收 callbacks 参数、导入 `compile_skill` 和 `assemble_graph`、根据 `mock_llm` 得到 `chat_model`、编译 skill、装配 graph、再调用 `graph.invoke()`。
 
 这条链路就是 audit 总结的 V2.1 主路径：`run_skill -> compile_skill -> SkillLoader.compile_skill -> assemble_graph -> LangGraph graph.invoke`，背景见 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:31`。`CompiledSkill` 的结构和构建细节见 [skill-compilation/baseline.md#后端功能](../skill-compilation/baseline.md#后端功能)。
 
 ### 初始 state
 
-`_run_v21_skill_dict()` 调用 `graph.invoke()` 时传入：
+`_run_v030_skill_dict()` 调用 `graph.invoke()` 时传入：
 
-- `"data": dict(inputs)`，见 `packages/graph-agent/src/graph_agent/core/runner.py:473`。
-- `"flow": {}`，见 `packages/graph-agent/src/graph_agent/core/runner.py:474`。
-- `"messages": []`，见 `packages/graph-agent/src/graph_agent/core/runner.py:475`。
-- `"run_id": run_id`，见 `packages/graph-agent/src/graph_agent/core/runner.py:476`。
+- `"data": dict(inputs)`，见 `packages/graph-agent/src/graph_agent/core/runner.py:505`。
+- `"flow": {}`，见 `packages/graph-agent/src/graph_agent/core/runner.py:506`。
+- `"messages": []`，见 `packages/graph-agent/src/graph_agent/core/runner.py:507`。
+- `"run_id": run_id`，见 `packages/graph-agent/src/graph_agent/core/runner.py:508`。
 
 这里的 `data` 是业务黑板，`flow` 是框架控制字段，`messages` 是 LLM 对话历史。三字段 state 语义和 reducer 细节见 [state-and-io-contract/baseline.md#data-model--state](../state-and-io-contract/baseline.md#data-model--state)。
 
@@ -114,7 +114,7 @@ audit A4 说 subagent 抽象层级过重，见 `docs.backup-2026-05-20/engine/gr
 
 `run_skill()` 的 Python API 在 `packages/graph-agent/src/graph_agent/core/runner.py:161`。它接受 `mock_llm`、`trace_dir`、`thread_id`、`unattended`、`callbacks`、`artifact_saver`、`initial_context`、`cleanup_checkpoints_on_finish` 和 `**inputs`，见 `packages/graph-agent/src/graph_agent/core/runner.py:161` 到 `packages/graph-agent/src/graph_agent/core/runner.py:172`。
 
-V2.1 分支里，`callbacks` 被 `del callbacks` 丢弃，代码在 `packages/graph-agent/src/graph_agent/core/runner.py:462`。这对应 audit P1-4 的当前现状：V2.1 主线没有接回旧 harness 的 callbacks / trace / heartbeat 等能力，见 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:360`。
+V0.3 分支里，`callbacks` 作为参数接收并透传给 `assemble_graph`，见 `packages/graph-agent/src/graph_agent/core/runner.py:474` 和 `packages/graph-agent/src/graph_agent/core/runner.py:496` 到 `packages/graph-agent/src/graph_agent/core/runner.py:500`。这对应 audit P1-4 的当前现状：V0.3 主线没有接回旧 harness 的 callbacks / trace / heartbeat 等能力，见 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:360`。
 
 V2.1 `mock_llm` 的语义是：如果没有传 mock，则 `chat_model=None`；如果传了 mock，则把 mock 当作 chat model 给 `assemble_graph()`，代码在 `packages/graph-agent/src/graph_agent/core/runner.py:467` 到 `packages/graph-agent/src/graph_agent/core/runner.py:469`。因此现在 public API 没有在 V2.1 分支自动解析真实 LLM provider。
 
@@ -122,7 +122,7 @@ V2.1 `mock_llm` 的语义是：如果没有传 mock，则 `chat_model=None`；�
 
 `assemble_graph(compiled, *, chat_model=None, max_patch_attempts=3)` 是 runtime 装配 API，代码在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:55` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:60`。它要求输入已经是 `CompiledSkill`，因此不是文件系统入口。
 
-返回的 `CompiledStateGraph.graph` 是已经 `builder.compile()` 后的 LangGraph graph，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:91` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:96`。调用方可以直接 `.invoke(state)`，而 `run_skill()` 就是在 `packages/graph-agent/src/graph_agent/core/runner.py:471` 调用这一层。
+返回的 `CompiledStateGraph.graph` 是已经 `builder.compile()` 后的 LangGraph graph，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:91` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:96`。调用方可以直接 `.invoke(state)`，而 `run_skill()` 就是在 `packages/graph-agent/src/graph_agent/core/runner.py:503` 调用这一层。
 
 ### node 内部工具 API
 
@@ -148,7 +148,7 @@ P1-2：subagent depth 没进入 child flow。现状是 depth 写进 RunnableConf
 
 P1-3：exit_contract 累积。现状是每轮把注入后的 `prompt_messages` 保存回 `messages`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:243` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:246`。
 
-P1-4：callbacks/trace 未接 V2.1 主线。现状是 V2.1 `_run_v21_skill_dict()` 删除 callbacks，见 `packages/graph-agent/src/graph_agent/core/runner.py:462`，只返回一个按 `trace_dir` 拼出来的 trace path 字符串，见 `packages/graph-agent/src/graph_agent/core/runner.py:484`。
+P1-4：callbacks/trace 未接 V0.3 主线。现状是 V0.3 `_run_v030_skill_dict()` 接收 callbacks 并透传给 graph assembly，见 `packages/graph-agent/src/graph_agent/core/runner.py:474` 和 `packages/graph-agent/src/graph_agent/core/runner.py:496` 到 `packages/graph-agent/src/graph_agent/core/runner.py:500`，只返回一个按 `trace_dir` 拼出来的 trace path 字符串，见 `packages/graph-agent/src/graph_agent/core/runner.py:516`。
 
 A4/A5：subagent 目前是完整 graph skill，call_subgraph tool 尚不存在。现状分别见 `packages/graph-agent/src/graph_agent/core/loader.py:477` 到 `packages/graph-agent/src/graph_agent/core/loader.py:482` 和 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:184` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:227`。
 
@@ -156,22 +156,22 @@ A4/A5：subagent 目前是完整 graph skill，call_subgraph tool 尚不存在�
 
 runtime 不是 compiler。它不会重新检查 `GRAPH.md` 的 phase id 是否重复，因为这些校验已经在 `SkillLoader.compile_skill()` 内完成，入口是 `packages/graph-agent/src/graph_agent/core/loader.py:142`，拓扑校验入口是 `packages/graph-agent/src/graph_agent/core/loader.py:730`。runtime 假设 `CompiledSkill` 已经是结构化输入。
 
-runtime 也不是完整 harness。旧 harness 中 callbacks、artifact saver、IOManager、checkpoint/resume 的语义仍在旧路径里出现，例如默认 callbacks 创建在 `packages/graph-agent/src/graph_agent/core/runner.py:284` 到 `packages/graph-agent/src/graph_agent/core/runner.py:286`。但是 V2.1 `_run_v21_skill_dict()` 删除 callbacks，见 `packages/graph-agent/src/graph_agent/core/runner.py:462`，所以不能把旧 harness 能力自动套到 V2.1 graph runtime 上。
+runtime 也不是完整 harness。旧 harness 中 callbacks、artifact saver、IOManager、checkpoint/resume 的语义仍在旧路径里出现，例如默认 callbacks 创建在 `packages/graph-agent/src/graph_agent/core/runner.py:284` 到 `packages/graph-agent/src/graph_agent/core/runner.py:286`。但是 V0.3 `_run_v030_skill_dict()` 只接收并透传 callbacks，不负责自动创建旧 harness 的默认 callback 组合，所以不能把旧 harness 能力自动套到 V0.3 graph runtime 上。
 
-runtime 不是输入 schema 漏斗。`_run_v21_skill_dict()` 的 `data` 只来自 `dict(inputs)`，见 `packages/graph-agent/src/graph_agent/core/runner.py:471` 到 `packages/graph-agent/src/graph_agent/core/runner.py:477`。也就是说 runtime 当前不会在入口按 `io/inputs.json` reject 未声明字段。
+runtime 不是输入 schema 漏斗。`_run_v030_skill_dict()` 的 `data` 只来自 `dict(inputs)`，见 `packages/graph-agent/src/graph_agent/core/runner.py:503` 到 `packages/graph-agent/src/graph_agent/core/runner.py:508`。也就是说 runtime 当前不会在入口按 `io/inputs.json` reject 未声明字段。
 
 runtime 也不是 phase-level IO mapper。LOGIC、SUBGRAPH、subagent 都围绕同一个 `data` 黑板运转：LOGIC 用 Context 包装 data，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:127` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:136`；SUBGRAPH 用父 data 启动子图，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:155` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:164`；subagent child data 是父 data 加 input item，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:398` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:403`。
 
 ### 常见调用结果形态
 
-`_run_v21_skill_dict()` 最终返回普通 dict，而 `run_skill()` 再把它包装成 `WorkflowResult`。V2.1 raw dict 里包含 `run_id`、`context`、`metrics`、`trace_path`、`wall_time_sec`，构造位置是 `packages/graph-agent/src/graph_agent/core/runner.py:480` 到 `packages/graph-agent/src/graph_agent/core/runner.py:486`。
+`_run_v030_skill_dict()` 最终返回普通 dict，而 `run_skill()` 再把它包装成 `WorkflowResult`。V2.1 raw dict 里包含 `run_id`、`context`、`metrics`、`trace_path`、`wall_time_sec`，构造位置是 `packages/graph-agent/src/graph_agent/core/runner.py:480` 到 `packages/graph-agent/src/graph_agent/core/runner.py:518`。
 
-其中 `context` 来自最终 graph state 的 `data`，见 `packages/graph-agent/src/graph_agent/core/runner.py:482`。这意味着最终返回值不是 `flow`，也不是 `messages`，而是业务黑板。`flow` 里可能有 `finish_task_result` 或 critic metrics，但当前 public result 不把整份 flow 暴露为 context。
+其中 `context` 来自最终 graph state 的 `data`，见 `packages/graph-agent/src/graph_agent/core/runner.py:514`。这意味着最终返回值不是 `flow`，也不是 `messages`，而是业务黑板。`flow` 里可能有 `finish_task_result` 或 critic metrics，但当前 public result 不把整份 flow 暴露为 context。
 
 `WorkflowResult` 包装发生在 `run_skill()` 成功分支，见 `packages/graph-agent/src/graph_agent/core/runner.py:211` 到 `packages/graph-agent/src/graph_agent/core/runner.py:224`。失败包装只捕获 `GraphAgentError`，见 `packages/graph-agent/src/graph_agent/core/runner.py:195` 到 `packages/graph-agent/src/graph_agent/core/runner.py:209`；而 P0-1 的 SKILL phase 无模型错误当前是裸 `RuntimeError`，抛出位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:233` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:234`。
 
 ### 读代码时的主路径提示
 
-读 runtime 建议先看 `run_skill()`，位置是 `packages/graph-agent/src/graph_agent/core/runner.py:161`。然后跳到 `_run_v21_skill_dict()`，位置是 `packages/graph-agent/src/graph_agent/core/runner.py:451`。再跳到 `assemble_graph()`，位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:55`。
+读 runtime 建议先看 `run_skill()`，位置是 `packages/graph-agent/src/graph_agent/core/runner.py:161`。然后跳到 `_run_v030_skill_dict()`，位置是 `packages/graph-agent/src/graph_agent/core/runner.py:468`。再跳到 `assemble_graph()`，位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:55`。
 
 理解节点时按三类看：LOGIC 在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:116`，SUBGRAPH 在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:141`，SKILL 在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:177`。理解 subagent 时从 `_subagent_tool_map()` 开始，位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:301`，再看 `_invoke_subagent_tool_t21()`，位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:311`。

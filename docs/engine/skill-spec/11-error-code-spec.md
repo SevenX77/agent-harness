@@ -78,8 +78,8 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | `[F-v3-logic-validator-missing]` | 编译期 | `validator: true` 但无文件 | 增加同级 `validator.py` | [LOGIC](./03-logic-md-spec.md#validator-生命周期-post-execution-hook) |
 | `[F-v3-logic-validator-entrypoint-missing]` | 编译期 | validator 无 `validate()` | 导出 `validate` | [LOGIC](./03-logic-md-spec.md#validator-生命周期-post-execution-hook) |
 | `[F-v3-logic-validator-failed]` | 运行期 | logic validator 抛异常 | 修正输出或校验规则 | [LOGIC](./03-logic-md-spec.md#validator-生命周期-post-execution-hook) |
-| `[F-v3-agent-validator-failed]` | 运行期 | agent validator 抛异常 | 触发 LLM 重试反馈 | |
-| `[F-v3-subgraph-validator-failed]` | 运行期 | subgraph validator 抛异常 | 检查子图业务规则 | |
+| `[F-v3-agent-validator-failed]` | 运行期 | agent validator 抛异常 | 触发 LLM 重试反馈 | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
+| `[F-v3-subgraph-validator-failed]` | 运行期 | subgraph validator 抛异常 | 检查子图业务规则 | [SUBGRAPH](./04-subgraph-md-spec.md#类型推导与节点契约) |
 
 ### subgraph domain
 
@@ -100,8 +100,8 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | `[F-v3-agent-name-invalid]` | 编译期 | `name` 非法 | 修正命名 | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
 | `[F-v3-agent-llm-role-unknown]` | 编译期 | llm role 未注册 | 使用已注册角色 | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
 | `[F-v3-agent-io-schema-invalid]` | 编译期 | Agent IO schema 非法 | 修正 schema | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
-| `[F-v3-agent-output-schema-invalid]` | 运行期 | CognitiveFlowMiddleware SchemaEngine strict 校验失败 (io.outputs 不匹配) | 触发 LLM 重试反馈 | |
-| `[F-v3-agent-output-schema-missing]` | 运行期 | io.outputs schema 缺失 (编译期未生成), fatal 拒绝 | 修正 AST / pipeline | |
+| `[F-v3-agent-output-schema-invalid]` | 运行期 | CognitiveFlowMiddleware SchemaEngine strict 校验失败 (io.outputs 不匹配) | 触发 LLM 重试反馈 | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
+| `[F-v3-agent-output-schema-missing]` | 运行期 | io.outputs schema 缺失 (编译期未生成), fatal 拒绝 | 修正 AST / pipeline | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
 | `[F-v3-agent-tool-unknown]` | 编译期 | tool 未注册 | 注册 tool 或删引用 | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
 | `[F-v3-agent-subagent-invalid]` | 编译期 | subagents 项缺字段 | 补 name/target_skill/description | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
 | `[F-v3-agent-subgraph-invalid]` | 编译期 | subgraphs 项缺字段 | 补 name/target_skill/description | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |

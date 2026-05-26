@@ -62,7 +62,7 @@ def test_error_registry_matches_error_code_spec_key_set() -> None:
     registry = _error_registry()
 
     assert set(registry) == _spec_codes()
-    assert len(registry) == len(_spec_codes()) == 88
+    assert len(registry) == len(_spec_codes()) == 89
 
 
 def test_error_registry_preserves_multi_stage_codes() -> None:
@@ -145,7 +145,7 @@ def test_builtin_tool_failure_asserts_payload_code(tmp_path: Path) -> None:
 def test_error_registry_entries_have_complete_nonempty_metadata() -> None:
     registry = _error_registry()
 
-    assert len(registry) == len(_spec_codes()) == 88
+    assert len(registry) == len(_spec_codes()) == 89
     for code, metadata in registry.items():
         assert metadata.code == code
         assert metadata.code

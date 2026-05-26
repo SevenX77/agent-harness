@@ -492,7 +492,12 @@ def _run_v21_skill_dict(
     else:
         chat_model = None
     compiled = compile_skill(skill_root, skill_resolver=resolver)
-    graph = assemble_graph(compiled, chat_model=chat_model, skill_resolver=resolver).graph
+    graph = assemble_graph(
+        compiled,
+        chat_model=chat_model,
+        callbacks=callbacks,
+        skill_resolver=resolver,
+    ).graph
     run_id = thread_id or str(uuid.uuid4())
     result = graph.invoke(
         {

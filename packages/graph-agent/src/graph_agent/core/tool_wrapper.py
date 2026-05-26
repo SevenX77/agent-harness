@@ -79,6 +79,26 @@ def _blocked_tool_message(tool_limiter: _ToolLimiter | None) -> str:
     return f"[系统] 工具调用次数已达上限({max_calls})，请基于已获得信息直接给出最终结果。"
 
 
+def _tool_context_with_callbacks(context: dict[str, Any]) -> dict[str, Any]:
+    try:
+        from graph_agent.core.callback_bridge import current_tool_callback_context
+    except Exception:  # pragma: no cover - defensive against partial imports
+        return context
+
+    callback_context = current_tool_callback_context()
+    if not isinstance(callback_context, dict):
+        return context
+    callbacks = callback_context.get("callbacks")
+    if not isinstance(callbacks, list):
+        return context
+    enriched = dict(context)
+    enriched.setdefault("_callbacks", callbacks)
+    phase_name = callback_context.get("phase_name")
+    if isinstance(phase_name, str) and phase_name:
+        enriched.setdefault("_current_phase", phase_name)
+    return enriched
+
+
 def _wrap_tool_for_langchain(
     fn: Any,
     context: dict[str, Any],
@@ -128,9 +148,10 @@ def _wrap_tool_for_langchain(
                 if tool_limiter is not None and tool_limiter.should_block_tool_call():
                     return _blocked_tool_message(tool_limiter)
                 bound_kwargs: dict[str, Any] = {}
+                call_context = _tool_context_with_callbacks(context)
                 for param in params:
                     if _is_context_param(param.name):
-                        bound_kwargs[param.name] = context
+                        bound_kwargs[param.name] = call_context
                     elif param.name in kwargs:
                         bound_kwargs[param.name] = kwargs[param.name]
                     # else: omitted optional param, use function default
@@ -154,7 +175,7 @@ def _wrap_tool_for_langchain(
             if tool_limiter is not None and tool_limiter.should_block_tool_call():
                 return _blocked_tool_message(tool_limiter)
             try:
-                return str(fn(**{ctx_param_name: context}))
+                return str(fn(**{ctx_param_name: _tool_context_with_callbacks(context)}))
             except Exception as exc:
                 logger.warning(
                     "[ToolWrap] Tool '%s' raised %s: %s", fn_name, type(exc).__name__, exc

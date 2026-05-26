@@ -781,7 +781,6 @@ def _validate_graph_topology(
                 _graph_fatal(graph_path, attrs.line, f"phase {attrs.id!r} cannot depend on itself")
 
     _validate_acyclic_graph(graph_path, raw_attrs)
-    _validate_no_orphans(graph_path, raw_attrs)
     for attrs in raw_attrs:
         assert attrs.id is not None and attrs.src is not None
         _validate_phase_src(graph_path, attrs, skill_root)
@@ -818,38 +817,6 @@ def _validate_acyclic_graph(graph_path: Path, raw_attrs: list[_RawPhaseAttrs]) -
     for node in adjacency:
         if state.get(node) is None:
             visit(node)
-
-
-def _validate_no_orphans(graph_path: Path, raw_attrs: list[_RawPhaseAttrs]) -> None:
-    if len(raw_attrs) <= 1:
-        return
-    adjacency: dict[str, set[str]] = {attrs.id or "": set() for attrs in raw_attrs}
-    by_id = {attrs.id or "": attrs for attrs in raw_attrs}
-    for attrs in raw_attrs:
-        assert attrs.id is not None
-        for dep in attrs.depends_on:
-            adjacency[attrs.id].add(dep)
-            adjacency[dep].add(attrs.id)
-
-    start = raw_attrs[0].id
-    assert start is not None
-    visited: set[str] = set()
-    stack = [start]
-    while stack:
-        node = stack.pop()
-        if node in visited:
-            continue
-        visited.add(node)
-        stack.extend(sorted(adjacency[node] - visited))
-
-    for phase_id in adjacency:
-        if phase_id not in visited:
-            attrs = by_id[phase_id]
-            _graph_fatal(
-                graph_path,
-                attrs.line,
-                f"orphan phase {phase_id!r} is disconnected from the main graph",
-            )
 
 
 def _validate_phase_src(graph_path: Path, attrs: _RawPhaseAttrs, skill_root: Path) -> None:

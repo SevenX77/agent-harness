@@ -1,4 +1,4 @@
-export { GraphCanvas } from "./GraphCanvas/GraphCanvas"
+export { CanvasContextMenuContent, GraphCanvas } from "./GraphCanvas/GraphCanvas"
 export { buildEdges, SkillNode } from "./nodes"
 export type {
   GraphCanvasNode,

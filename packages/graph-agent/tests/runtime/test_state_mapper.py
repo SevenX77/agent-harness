@@ -54,7 +54,14 @@ def test_reader_sandbox_state_does_not_inherit_parent_blackboard(tmp_path: Path)
     state = sandbox.to_blackboard()
 
     assert state["data"] == {
-        "inputs": {"skill_id": "demo.skill", "phase_id": "main"},
+        "inputs": {
+            "skill_id": "demo.skill",
+            "phase_id": "main",
+            "references": [],
+            "max_output_tokens": 3000,
+            "language": "zh",
+            "timeout_s": 60,
+        },
         "phase_outputs": {},
         "scratch": {},
     }

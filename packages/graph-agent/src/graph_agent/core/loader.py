@@ -179,6 +179,7 @@ class SkillLoader:
             phase_docs.append(
                 _build_phase_document(phase_name, phase_file, mode, frontmatter, body)
             )
+        _validate_agent_reference_paths(root, phase_docs)
         _validate_subgraph_io_contracts(phase_docs, skill_resolver=skill_resolver)
         actions, tools = _discover_actions_and_tools(root, discovered)
         _validate_logic_action_return_keys(
@@ -276,7 +277,9 @@ def _actions_fatal(path: Path, line: int, message: str) -> NoReturn:
 
 
 def _actions_keys_fatal(path: Path, line: int, message: str) -> None:
-    raise GraphAgentFatalError(f"[F-v3-actions-keys] {path}:{line} {message}")
+    raise GraphAgentFatalError(
+        f"[F-v3-logic-output-field-undeclared] {path}:{line} {message}"
+    )
 
 
 def _purity_fatal(path: Path, line: int, message: str) -> None:
@@ -416,6 +419,28 @@ def _validate_subgraph_io_contracts(
                 )
 
 
+def _validate_agent_reference_paths(skill_root: Path, phase_docs: list[PhaseDocument]) -> None:
+    root_resolved = skill_root.resolve()
+    for doc in phase_docs:
+        if not isinstance(doc.ast, AgentNodeAST):
+            continue
+        for reference in doc.ast.references:
+            path = Path(reference.path)
+            if path.is_absolute():
+                raise SkillLoadError(
+                    f"[F-v3-resource-reference-path-invalid] {doc.path}:"
+                    f"{_frontmatter_key_line(doc.path, 'phase_config')} "
+                    f"reference {reference.id!r} path escapes skill root"
+                )
+            candidate = (skill_root / path).resolve()
+            try:
+                candidate.relative_to(root_resolved)
+            except ValueError as exc:
+                raise SkillLoadError(
+                    f"[F-v3-resource-reference-path-invalid] {doc.path}:"
+                    f"{_frontmatter_key_line(doc.path, 'phase_config')} "
+                    f"reference {reference.id!r} path escapes skill root"
+                ) from exc
 def _compile_subagent_metadata(
     phase_docs: list[PhaseDocument],
     *,
@@ -1050,21 +1075,22 @@ def _validate_logic_action_return_keys(
 ) -> None:
     if not validate_context_writes:
         return
-    if output_schema_keys is None:
-        return
-    context_keys = set(output_schema_keys)
-    if input_schema_keys is not None:
-        context_keys.update(input_schema_keys)
     for doc in phase_docs:
         if not isinstance(doc.ast, LogicNodeAST):
             continue
+        phase_output_schema_keys = _extract_output_schema_keys(doc.ast.io.outputs)
+        if phase_output_schema_keys is None:
+            continue
+        context_keys = set(phase_output_schema_keys)
+        if input_schema_keys is not None:
+            context_keys.update(input_schema_keys)
         for action_name in doc.ast.actions:
             action_def = actions.for_phase(doc.phase_name).get(action_name)
             if action_def is None:
                 continue
             _validate_action_return_keys(
                 action_def.path,
-                output_schema_keys,
+                phase_output_schema_keys,
                 context_keys,
                 validate_context_writes=validate_context_writes
                 and _should_validate_context_writes(phase_docs),

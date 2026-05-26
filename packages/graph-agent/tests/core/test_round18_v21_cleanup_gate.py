@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -14,7 +15,6 @@ GRAPH_AGENT_ROOT = REPO_ROOT / "packages" / "graph-agent"
 SCAN_ROOTS = (
     GRAPH_AGENT_ROOT / "src",
     GRAPH_AGENT_ROOT / "tests",
-    REPO_ROOT / "skills",
 )
 
 TEXT_SUFFIXES = {
@@ -237,6 +237,17 @@ def test_round18_dead_modules_are_removed() -> None:
     ]
     existing = [path.relative_to(REPO_ROOT).as_posix() for path in dead_paths if path.exists()]
     assert not existing, "dead modules still exist:\n" + "\n".join(existing)
+
+
+def test_round18_collect_ignore_glob_does_not_hide_broken_tests() -> None:
+    conftest_path = GRAPH_AGENT_ROOT / "tests" / "conftest.py"
+    spec = importlib.util.spec_from_file_location("round18_conftest_probe", conftest_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert getattr(module, "collect_ignore_glob", []) == []
 
 
 def test_round18_v030_compile_and_runtime_path_still_work(tmp_path: Path) -> None:

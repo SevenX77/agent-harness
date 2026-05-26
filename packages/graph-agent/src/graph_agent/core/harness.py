@@ -358,7 +358,6 @@ class GraphAgentHarness:
         *,
         callbacks: list[Callback] | None = None,
         io_config: dict[str, Any] | None = None,
-        context_mapping: dict[str, str] | None = None,
         skill_dir: Path | None = None,
         checkpointer: Any = "auto",
         model_resolver: Any | None = None,
@@ -369,7 +368,6 @@ class GraphAgentHarness:
         self.phases = phases
         self.callbacks = callbacks or []
         self._io_config = io_config
-        self._context_mapping = context_mapping
         self._skill_dir = skill_dir
         if model_resolver is None:
             from graph_agent_gateway.exceptions import GatewayResolverMissingError
@@ -837,7 +835,7 @@ class GraphAgentHarness:
         self,
         runtime_inputs: dict[str, Any],
     ) -> dict[str, Any]:
-        """Build initial_context using IOManager + ContextResolver."""
+        """Build initial_context from IOManager inputs."""
         if not self._io_config:
             raise ValueError(
                 "initial_context is None but no io_config is set. "
@@ -847,18 +845,7 @@ class GraphAgentHarness:
         from graph_agent.io.manager import IOManager
 
         io_mgr = IOManager(self._io_config)
-        raw_inputs = io_mgr.load_inputs(**runtime_inputs)
-
-        if self._context_mapping:
-            from graph_agent.io.context_resolver import ContextResolver
-
-            resolver = ContextResolver(
-                mapping=self._context_mapping,
-                helpers_dir=self._skill_dir,
-            )
-            return resolver.resolve({"input": raw_inputs})
-
-        return raw_inputs
+        return io_mgr.load_inputs(**runtime_inputs)
 
     def _save_outputs_via_io(
         self,

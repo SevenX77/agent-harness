@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NoReturn
@@ -244,8 +245,7 @@ def _build_subgraph_node(
 
     def _subgraph_node(state: BlackboardState) -> dict[str, Any]:
         child_input = phase_inputs_from_state(state)
-        child_flow = dict(state.get("flow", {}))
-        child_flow["subagent_depth"] = current_subagent_depth(child_flow) + 1
+        child_flow = _child_flow(state.get("flow", {}))
         result = sub_assembled.graph.invoke(
             {
                 "data": {"inputs": child_input, "phase_outputs": {}, "scratch": {}},
@@ -679,10 +679,11 @@ def _invoke_subagent_once_t23(
     input_data: dict[str, Any],
     config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
+    child_flow = _child_flow(parent_state.get("flow", {}))
     result = runtime.graph.invoke(
         {
             "data": {"inputs": dict(input_data), "phase_outputs": {}, "scratch": {}},
-            "flow": parent_state.get("flow", {}),
+            "flow": child_flow,
             "messages": [],
             "run_id": parent_state.get("run_id"),
         },
@@ -693,8 +694,14 @@ def _invoke_subagent_once_t23(
     return {
         "status": "ok",
         "data": data_delta,
-        "flow": result.get("flow", parent_state.get("flow", {})),
+        "flow": result.get("flow", child_flow),
     }
+
+
+def _child_flow(parent_flow: Any) -> dict[str, Any]:
+    flow = deepcopy(parent_flow) if isinstance(parent_flow, dict) else {}
+    flow["subagent_depth"] = current_subagent_depth(flow) + 1
+    return flow
 
 
 def _invoke_subagent_many_t24(

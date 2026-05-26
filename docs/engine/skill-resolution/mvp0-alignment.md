@@ -59,7 +59,7 @@ target_skill -> SkillResolverProtocol.resolve_skill(skill_id) -> local skill roo
 | `assemble_graph` | `graph_assembler.py:73-79` 必填 `skill_resolver` | SUBGRAPH runtime 和 subagent runtime 继续透传 |
 | `run_skill` | `runner.py:173` 必填 `skill_resolver` | public runtime 入口不允许隐式 fallback |
 | `_run_skill_dict` | `runner.py:244` 必填 `skill_resolver` | 内部执行入口不允许掉 resolver |
-| `_run_v21_skill_dict` | `runner.py:474` 必填 `skill_resolver` | compile + assemble 都用同一 resolver |
+| `_run_v030_skill_dict` | `runner.py:506` 必填 `skill_resolver` | compile + assemble 都用同一 resolver |
 
 验收重点：无 resolver 的代码路径不是“只在遇到 child skill 时失败”，而是在入口边界通过 `require_skill_resolver` 直接失败。
 

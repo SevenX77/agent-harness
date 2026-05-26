@@ -174,7 +174,7 @@ callback 抛错不会阻断工具返回。`_emit_ambiguity_logged` 会 warning �
 callbacks 通道来自 `assemble_graph(..., callbacks=None)`：
 
 - `loader.load_workflow_from_md(..., callbacks=...)` 会透传到 `assemble_graph()`。
-- `runner._run_v21_skill_dict(..., callbacks=...)` 会透传到 `assemble_graph()`。
+- `runner._run_v030_skill_dict(..., callbacks=...)` 会透传到 `assemble_graph()`。
 - `assemble_graph()` 再把 callbacks 传到 `_build_reference_reader_markdown()`。
 
 没有 callbacks 时，reference reader 仍正常生成 prompt knowledge base，只是不发 trace。

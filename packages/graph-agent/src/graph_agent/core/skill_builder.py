@@ -608,16 +608,11 @@ def _resolve_tool_reference(
 
 
 def _append_steps_to_prompt(prompt: str, steps: list[str]) -> str:
-    """Append numbered prompt-structure steps as a ``<steps>`` XML tag.
-
-    Round 8 §C blueprint: discrete schema fields render as XML tags so
-    the LLM can attend to structure deterministically.
-    """
+    """Append prompt-structure steps as plain V0.3.0 step lines."""
     if not steps:
         return prompt
-    lines = ["<steps>"]
+    lines = ["Suggested steps:"]
     lines.extend(f"  {i}. {step}" for i, step in enumerate(steps, start=1))
-    lines.append("</steps>")
     block = "\n".join(lines)
     if not prompt:
         return block
@@ -796,9 +791,8 @@ def _compose_agent_system_prompt(
     if xml_tags:
         sections.append(xml_tags)
     if profile.steps:
-        steps_lines = ["<steps>"]
+        steps_lines = ["Suggested steps:"]
         steps_lines.extend(f"  {i}. {step}" for i, step in enumerate(profile.steps, start=1))
-        steps_lines.append("</steps>")
         sections.append("\n".join(steps_lines))
     if profile.constraints:
         constraints_lines = ["<constraints>"]

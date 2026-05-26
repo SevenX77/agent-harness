@@ -1,7 +1,7 @@
 """Generic Skill Runner — pure document-driven execution of SKILL.md.
 
-Reads SKILL.md's io + context_mapping declarations, loads inputs via IOManager,
-transforms via ContextResolver, executes via GraphAgentHarness, saves outputs.
+Reads SKILL.md's io declarations, loads inputs via IOManager, executes via
+GraphAgentHarness, and saves outputs.
 
 No per-skill __init__.py needed. SKILL.md is the single source of truth.
 
@@ -276,7 +276,7 @@ def _run_skill_dict(
     if not skill_path.exists():
         raise SkillLoadError(f"SKILL.md not found: {skill_path}")
     if skill_path.is_dir() and (skill_path / "GRAPH.md").is_file():
-        return _run_v21_skill_dict(
+        return _run_v030_skill_dict(
             skill_path,
             trace_dir=trace_dir,
             mock_llm=mock_llm,
@@ -348,7 +348,7 @@ def _run_skill_dict(
                 effective_thread_id = saved_tid
                 logger.info("[Runner] Resuming from checkpoint: thread_id=%s", saved_tid)
 
-    # Run — IOManager + ContextResolver handle input loading + context building
+    # Run — IOManager handles input loading and context building.
     t0 = time.time()
 
     # Write .run_id for potential resume
@@ -464,7 +464,7 @@ def _run_skill_dict(
     }
 
 
-def _run_v21_skill_dict(
+def _run_v030_skill_dict(
     skill_root: Path,
     *,
     mock_llm: Any = _NO_MOCK_LLM,
@@ -475,12 +475,12 @@ def _run_v21_skill_dict(
     model_resolver: Any | None = None,
     **inputs: Any,
 ) -> dict[str, Any]:
-    """Execute a V2.1 skill root through compile_skill + assemble_graph."""
+    """Execute a V0.3.0 skill root through compile_skill + assemble_graph."""
 
     from graph_agent.core.compiler import compile_skill
     from graph_agent.core.graph_assembler import assemble_graph
 
-    resolver = require_skill_resolver(skill_resolver, caller="_run_v21_skill_dict")
+    resolver = require_skill_resolver(skill_resolver, caller="_run_v030_skill_dict")
     t0 = time.time()
     if mock_llm is not _NO_MOCK_LLM:
         chat_model = mock_llm

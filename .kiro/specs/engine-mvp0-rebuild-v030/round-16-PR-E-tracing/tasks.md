@@ -21,7 +21,7 @@ scope: E1+E2+E3+E4, tests-first, no new event schema
 
 PR 结构: 1 个统一 PR, 内部 4 commit。
 
-- Commit 1: E1 runtime ambiguity emission 接线, 保证 `TOOL_CALL_END` 与 `AMBIGUITY_LOGGED` 并列投递。
+- Commit 1: E1 runtime ambiguity emission 接线, 保证现有 tool lifecycle trace 与 `AMBIGUITY_LOGGED` 并列投递。
 - Commit 2: E2 builtin reference reader assembly-time callbacks 通道 + ENTER / EXIT / FALLBACK 事件投递。
 - Commit 3: E3 fallback payload 瘦身和 reason 映射, 不让原始 reference markdown 进入 trace event。
 - Commit 4: E4 serializer / tracing tests sync, CI scans, docs-free closure。
@@ -77,8 +77,8 @@ e16.1 Tests-first red suite
 
 - E1 ambiguity runtime emission:
   - 通过 Agent runtime 或 tool wrapper 路径触发 `log_ambiguity`, 不手工塞 `_callbacks` 到 ctx。
-  - 断言标准 tool trace 仍有 `TOOL_CALL_START` / `TOOL_CALL_END` 或等价 tool lifecycle event。
-  - 断言额外并列出现一次 `AMBIGUITY_LOGGED`, 不替换 `TOOL_CALL_END`。
+  - 断言标准 tool trace 仍有现有 `ToolCallEvent(event_type="tool_call")` 或等价 tool lifecycle event。
+  - 断言额外并列出现一次 `AMBIGUITY_LOGGED`, 不替换 tool lifecycle trace。
   - 断言 payload: `phase_name`, `ambiguity_type`, `question`, `decision`, `reason`, `related_refs`, `related_protocols`。
   - 断言 callback 抛异常时不阻断工具返回, 且不会吞掉后续正常 callback。
 - E2 builtin reference reader success:
@@ -90,7 +90,7 @@ e16.1 Tests-first red suite
   - mock reader timeout / exception / invalid output。
   - 断言事件顺序为 `BUILTIN_SUBAGENT_ENTER` -> `BUILTIN_SUBAGENT_FALLBACK`。
   - Fallback payload 必含 `fallback_reason`, `fallback_strategy`, `excerpt_token_limit`, `warning`。
-  - `fallback_reason` 映射覆盖 `remote_timeout`, `remote_error`, `invalid_output`, `config_missing`。
+  - `fallback_reason` 映射覆盖 `remote_timeout`, `remote_error`, `invalid_output`, `config_missing`, `local_io_error`。
   - `warning` 只含短错误说明; 断言不包含 reference 原文、不包含 fallback markdown、不包含 3000 token 文本。
 - E4 serializer sync:
   - `TypeAdapter(CallbackEvent)` 能 round-trip `AmbiguityLoggedEvent` 和三个 `BuiltinSubagent*Event`。
@@ -177,6 +177,8 @@ e16.1 Tests-first red suite
 
 - 扩展 `assemble_graph(...)` 签名, 增加 `callbacks: list[Any] | None = None`。
 - 将 callbacks 从 runner / loader / tests 的 graph assembly call sites 显式传入。
+- `core/runner.py:495` 的 `_run_v21_skill_dict()` 必须把当前 callbacks 传给 `assemble_graph(...)`。
+- `core/loader.py:245` 当前 `del callbacks` 的入口必须停止丢弃 callbacks, 并在 `load_workflow_from_md()` 调 `assemble_graph(...)` 时继续透传。
 - 扩展 `_build_skill_node(...)`, `_agent_system_prompt(...)` 或 `_build_reference_reader_markdown(...)` 调用链, 让装配期 reader 能拿到 callbacks。
 - 在 `_build_reference_reader_markdown` 中:
   - references 为空时不 emit builtin reader events。
@@ -186,7 +188,7 @@ e16.1 Tests-first red suite
   - path invalid `[F-v3-resource-reference-path-invalid]` 仍 re-raise FATAL; 可 emit ENTER, 不 emit fallback 降级。
 - 装配期 event 字段:
   - `run_id=None`。
-  - `phase_name=<phase_id>`。
+  - `phase_name=<current phase id>`。
   - `builtin_name="reference_reader"`。
   - `payload` 仅放短 metadata, 如 `reference_ids`, `used_reference_ids`, `duration_ms`, `warnings`。
 
@@ -290,6 +292,7 @@ e16.1 Tests-first red suite
   - success: ENTER -> EXIT。
   - fallback: ENTER -> FALLBACK。
 - 不新增 enum snapshot; 当前 discriminated union 用 `Literal`。
+- 将 `AmbiguityLoggedEvent` 与 `BuiltinSubagentEnterEvent` / `BuiltinSubagentExitEvent` / `BuiltinSubagentFallbackEvent` 纳入 `Callback.on_event` 默认 typed-only 分支，或新增测试证明普通 `Callback().on_event(...)` 收到这些事件不会走 unrecognised warning。
 
 **依赖**: e16.2, e16.3, e16.4。
 

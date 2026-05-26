@@ -6,6 +6,7 @@ import pytest
 from graph_agent.cognitive.finish_task import build_finish_task_tool
 from graph_agent.cognitive.md2json import parse_finish_markdown
 from graph_agent.cognitive.md_patch import FakeMdPatchClient, LLMMdPatchClient
+from graph_agent.core.exceptions import GraphAgentFatalError
 
 TITLE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -114,7 +115,7 @@ def test_finish_task_3_retries_then_structured_error() -> None:
     result = tool.invoke({"markdown": "## title\n\nbody"})
 
     assert result["ok"] is False
-    assert result["error"]["code"] == "F-v3-md2json"
+    assert result["error"]["code"] == "[F-v3-agent-output-schema-invalid]"
     assert result["error"]["attempts"] == 3
     assert len(patcher.calls) == 3
 
@@ -125,15 +126,16 @@ def test_finish_task_patcher_unavailable_structured_error() -> None:
     result = tool.invoke({"markdown": "## title\n\nbody"})
 
     assert result["ok"] is False
-    assert result["error"]["code"] == "F-v3-md2json"
+    assert result["error"]["code"] == "[F-v3-agent-output-schema-invalid]"
     assert result["error"]["attempts"] == 0
     assert result["error"]["validation_errors"][0]["validator"] == "required"
 
 
 def test_finish_task_invalid_output_schema_fatal() -> None:
-    with pytest.raises(RuntimeError) as exc_info:
+    with pytest.raises(GraphAgentFatalError) as exc_info:
         build_finish_task_tool({"invalid": "schema"}, parse_finish_markdown)
-    assert "[F-v3-md2json]" in str(exc_info.value)
+    assert exc_info.value.payload.code == "[F-v3-cognitive-output-schema-invalid]"
+    assert "[F-v3-cognitive-output-schema-invalid]" in str(exc_info.value)
     assert "output_schema invalid" in str(exc_info.value)
 
 
@@ -151,7 +153,7 @@ def test_finish_task_empty_input_structured_error() -> None:
     result = tool.invoke({"markdown": ""})
 
     assert result["ok"] is False
-    assert result["error"]["code"] == "F-v3-md2json"
+    assert result["error"]["code"] == "[F-v3-agent-output-schema-invalid]"
     assert result["error"]["kind"] == "invalid_markdown"
 
 

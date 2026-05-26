@@ -96,6 +96,7 @@ ERROR_REGISTRY: dict[str, ErrorCodeMetadata] = {
     '[F-v3-resolver-missing]': ErrorCodeMetadata('[F-v3-resolver-missing]', 'FATAL', ('运行期',), './10-skill-resolver-protocol-spec.md#依赖注入-di-边界'),
     '[F-v3-cognitive-slot-render-failed]': ErrorCodeMetadata('[F-v3-cognitive-slot-render-failed]', 'FATAL', ('装配期',), './06-cognitive-template-spec.md#静态组装插槽解析'),
     '[F-v3-cognitive-output-schema-render-failed]': ErrorCodeMetadata('[F-v3-cognitive-output-schema-render-failed]', 'FATAL', ('装配期',), './06-cognitive-template-spec.md#动态装配插槽解析'),
+    '[F-v3-cognitive-output-schema-invalid]': ErrorCodeMetadata('[F-v3-cognitive-output-schema-invalid]', 'FATAL', ('装配期', '装配前'), './06-cognitive-template-spec.md#动态装配插槽解析'),
     '[F-v3-reference-reader-input-invalid]': ErrorCodeMetadata('[F-v3-reference-reader-input-invalid]', 'FATAL', ('装配期',), './09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名'),
     '[F-v3-reference-reader-output-invalid]': ErrorCodeMetadata('[F-v3-reference-reader-output-invalid]', 'FATAL', ('装配期',), './09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名'),
     '[F-v3-tool-argument-invalid]': ErrorCodeMetadata('[F-v3-tool-argument-invalid]', 'FATAL', ('运行期',), './09-builtin-modules-spec.md#按需调取-tools-read_reference--read_example'),

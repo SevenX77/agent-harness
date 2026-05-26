@@ -1,6 +1,6 @@
 # execution-runtime (engine) — MVP0 Alignment (V0.3.0 graph_skill)
 
-> **Status**: Rewritten by a1 (Codex) for V0.3.0 graph_skill, synced with PR C live behavior 2026-05-26
+> **Status**: PR C 契约 + 已实现部分, synced 2026-05-26；部分目标态与当前源码差异见文末“与当前源码的差异”。
 > **Scope**: Graph runtime 装配、ModelResolver / SkillResolver DI、Agent cognitive template 渲染、builtin reference reader / tools、LOGIC ActionRegistry、SUBGRAPH / subagent 隔离调用、运行期错误归一化。
 > **配套**: 见 [skill-spec README](../skill-spec/README.md), [skill-compilation alignment](../skill-compilation/mvp0-alignment.md), [state-and-io-contract alignment](../state-and-io-contract/mvp0-alignment.md)。
 
@@ -40,7 +40,7 @@ MVP0 MUST 继续补齐真实 LLM 注入路径。Agent phase 的 `llm_role` 由�
 | 字段 / 参数 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
 |---|---|---|---|---|---|---|
 | `llm_role` | string | Agent phase 必填或继承 graph | graph `llm_role`, 再无为 `analyst` | 必须存在于 roles registry | `[F-v3-agent-llm-role-unknown]` | 选择模型路由 |
-| `model_resolver` | ModelResolverProtocol | 运行 Agent 时必填 | 无 | 必须实现 `resolve_model(role) -> BaseChatModel` | `[F-v3-runtime-phase-failed]` | 从配置生成真实模型 |
+| `model_resolver` | ModelResolverProtocol | 运行 Agent 时必填 | 无 | 当前接口为 `resolve(role_name=None, *, thinking_enabled=None, model_override=None, callbacks=(), phase_name=None, **kwargs) -> BaseChatModel` | `[F-v3-runtime-phase-failed]` | 从配置生成真实模型 |
 | `mock_llm` | BaseChatModel | 否 | `None` | 仅测试入口; 优先级高于 resolver | — | 单测 / sandbox 注入 |
 | resolved model | BaseChatModel | 是 | 无 | 必须可被 LangGraph / LangChain 调用 | `[F-v3-runtime-phase-failed]` | Agent ReAct 执行 |
 
@@ -51,14 +51,14 @@ ModelResolver 与 SkillResolver 都是 DI 边界: Engine 定义协议, Studio / 
 MVP0 MUST 在 runtime / assembly 主入口注入 `SkillResolverProtocol`, 与 Q9 ModelResolverProtocol 同款单方法 DI。它只允许:
 
 ```python
-def resolve_skill(skill_id: str) -> Path: ...
+def resolve_skill(skill_id: str) -> str | Path: ...
 ```
 
 | 参数 / 返回 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
 |---|---|---|---|---|---|---|
-| `skill_resolver` | SkillResolverProtocol | 含 SUBGRAPH / subagent / Agent `subgraphs` 时必填 | 无 | 必须只有 `resolve_skill(skill_id) -> Path` 语义 | `[F-v3-resolver-missing]` / `[F-v3-resolver-interface-invalid]` | 子 skill registry 寻址 |
+| `skill_resolver` | SkillResolverProtocol | 含 SUBGRAPH / subagent / Agent `subgraphs` 时必填 | 无 | 必须只有 `resolve_skill(skill_id) -> str | Path` 语义 | `[F-v3-resolver-missing]` / `[F-v3-resolver-interface-invalid]` | 子 skill registry 寻址 |
 | `skill_id` | string | 是 | 无 | `^[a-z][a-z0-9_-]*$` | `[F-v3-resolver-skill-id-invalid]` | registry key |
-| return `Path` | Path | 是 | 无 | 路径存在、是目录、含 `GRAPH.md` | `[F-v3-skill-not-registered]` / `[F-v3-resolver-path-invalid]` | 子 graph skill root |
+| return `str | Path` | str 或 Path | 是 | 无 | 会被 runtime 转成 `Path`; 路径存在、是目录、含 `GRAPH.md` | `[F-v3-skill-not-registered]` / `[F-v3-resolver-path-invalid]` | 子 graph skill root |
 
 实现差异:
 
@@ -91,7 +91,7 @@ MVP0 MUST 删除 `ExitContractRegistry` 的 per-turn inject / strip 设计。`ex
 |---|---|---|---|---|---|
 | `ExitContractRegistry` | 退役 | `<exit_contract>` 尾置模板 | runtime 不再 inject/strip messages | — | 避免历史堆积 |
 | `AgentNodeAST.exit_contract` | 退役 | `V030_AGENT_EXIT_CONTRACT_TEXT` 系统默认字符串 | Agent body 不再提供 `<exit_contract>` | `[F-v3-cognitive-output-schema-render-failed]` | 最终输出规则 |
-| `SkillNodeAST.exit_contract` | legacy path 保留 | legacy runtime 注入路径 | 仅旧 `mode: skill` 路径消费 | — | PR γ3 cleanup 前兼容旧路径 |
+| `<exit_contract>` body tag | 禁止 | codemod 一次性迁移工具仍可读写旧 tag | live loader 看到 Agent body 顶层 `<exit_contract>` 直接 FATAL | `[F-v3-agent-body-tag-unknown]` | 防止旧契约继续进入 runtime |
 | `output_schema` 独立插槽 | 退役 | 追加到 exit_contract 末尾 | 序列化失败 FATAL | `[F-v3-cognitive-output-schema-render-failed]` | recency bias |
 | ReAct `messages` | 不存 exit contract 临时副本 | 只保存真实对话 / tool 消息 | 不允许重复注入 contract | `[F-v3-runtime-phase-failed]` | 控制上下文体积 |
 
@@ -213,20 +213,33 @@ Sandbox 模式必须禁止跨 skill action 引用: action 名不能包含 `/`, `
 
 ```python
 class ModelResolverProtocol(Protocol):
-    def resolve_model(self, llm_role: str) -> BaseChatModel:
+    def resolve(
+        self,
+        role_name: str | None = None,
+        *,
+        thinking_enabled: bool | None = None,
+        model_override: str | None = None,
+        callbacks: tuple[Callback, ...] = (),
+        phase_name: str | None = None,
+        **kwargs: Any,
+    ) -> BaseChatModel:
         ...
 ```
 
 | 参数 / 返回 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
 |---|---|---|---|---|---|---|
-| `llm_role` | string | 是 | 无 | 必须是编译期已通过的 role | `[F-v3-agent-llm-role-unknown]` | 模型路由 key |
+| `role_name` | string | 否 | `None` | phase 可传已校验 role；graph_skill runner 当前可传空 | `[F-v3-agent-llm-role-unknown]` | 模型路由 key |
+| `thinking_enabled` | bool | 否 | `None` | resolver 自行解释 | — | 思考模式开关 |
+| `model_override` | string | 否 | `None` | resolver 自行解释 | — | 单次模型覆盖 |
+| `callbacks` | tuple[Callback, ...] | 否 | `()` | 可传 trace callbacks | — | 观测桥接 |
+| `phase_name` | string | 否 | `None` | 当前 graph_skill runner 用 `"<workflow>"` | — | resolver / trace 定位 |
 | return | BaseChatModel | 是 | 无 | 可被 LangChain 调用 | `[F-v3-runtime-phase-failed]` | Agent LLM |
 
 ### 1.5 SkillResolverProtocol DI 注入边界
 
 ```python
 class SkillResolverProtocol(Protocol):
-    def resolve_skill(self, skill_id: str) -> Path:
+    def resolve_skill(self, skill_id: str) -> str | Path:
         ...
 ```
 
@@ -236,27 +249,37 @@ class SkillResolverProtocol(Protocol):
 
 ```python
 def run_skill(
-    root: Path,
-    inputs: dict[str, Any],
+    skill_path: str | Path,
     *,
-    model_resolver: ModelResolverProtocol,
-    skill_resolver: SkillResolverProtocol,
+    mock_llm: Any = _NO_MOCK_LLM,
+    trace_dir: str | Path | None = None,
+    thread_id: str | None = None,
+    unattended: bool = False,
     callbacks: list[Any] | None = None,
-    mock_llm: BaseChatModel | None = None,
-    cache: bool = True,
+    artifact_saver: Any | None = None,
+    initial_context: dict[str, Any] | None = None,
+    cleanup_checkpoints_on_finish: bool = True,
+    skill_resolver: SkillResolverProtocol,
+    model_resolver: Any | None = None,
+    **inputs: Any,
 ) -> WorkflowResult:
     ...
 ```
 
 | 参数 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
 |---|---|---|---|---|---|---|
-| `root` | Path | 是 | 无 | graph skill root | `[F-v3-graph-root-missing]` | 主图入口 |
-| `inputs` | dict | 是 | 无 | 满足 `GRAPH.md io.inputs` | `[F-v3-runtime-state-mapping-failed]` | 初始黑板 |
-| `model_resolver` | Protocol | Agent 图必填 | 无 | 实现 `resolve_model` | `[F-v3-runtime-phase-failed]` | LLM 注入 |
+| `skill_path` | str 或 Path | 是 | 无 | `SKILL.md` 或 V2.1 skill root | `[F-v3-graph-root-missing]` 等编译错误 | 主图入口 |
+| `**inputs` | Any kwargs | 否 | `{}` | 当前 graph_skill path 会写入初始 `data=dict(inputs)`；根级 strict input gate 仍是目标态 | `[F-v3-runtime-state-mapping-failed]` | 初始黑板 |
+| `model_resolver` | Any | 否 | `None` | graph_skill runner 有参；无 `mock_llm` 时调用 `model_resolver.resolve(callbacks=..., phase_name="<workflow>")` | `[F-v3-runtime-phase-failed]` | LLM 注入 |
 | `skill_resolver` | Protocol | 是 | 无 | 实现 `resolve_skill` | `[F-v3-resolver-missing]` | 子 skill 寻址 |
-| `callbacks` | list | 否 | `[]` | trace callback | — | observability |
-| `mock_llm` | BaseChatModel | 否 | `None` | test only | — | 测试覆盖 |
-| `cache` | bool | 否 | `True` | 编译缓存开关 | — | 性能优化 |
+| `mock_llm` | Any | 否 | sentinel `_NO_MOCK_LLM` | 优先于 `model_resolver` | — | 测试覆盖 |
+| `trace_dir` | str 或 Path | 否 | `None` | 无 | — | 默认 tracing 输出目录 |
+| `thread_id` | string | 否 | `None` | graph_skill path 无值时生成 UUID run id | — | run/thread 定位 |
+| `unattended` | bool | 否 | `False` | legacy/harness 路径消费 | — | 无人值守运行 |
+| `callbacks` | list[Any] | 否 | `None` | graph_skill path 会传给 resolver；V2 harness 路径会默认补 Logging/Tracing callbacks | — | observability |
+| `artifact_saver` | Any | 否 | `None` | legacy/harness 路径消费 | — | artifact 保存 |
+| `initial_context` | dict[str, Any] | 否 | `None` | legacy/harness 路径消费 | — | 初始上下文 |
+| `cleanup_checkpoints_on_finish` | bool | 否 | `True` | run 结束后清理线程 checkpoint | — | 存储清理 |
 
 ### 3. ExitContractRegistry 删除说明
 
@@ -265,15 +288,21 @@ def run_skill(
 ### 4. Builtin tool 注册 API
 
 ```python
-def build_builtin_runtime_tools(agent_ast: AgentNodeAST) -> list[BaseTool]:
-    """Return read_reference/read_example plus framework tools for one Agent phase."""
+def _agent_resource_tools(
+    phase_doc: PhaseDocument,
+    phase_ast: AgentNodeAST,
+    compiled: CompiledSkill,
+) -> list[Any]:
+    ...
 ```
 
 | 输入 / 输出 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
 |---|---|---|---|---|---|---|
-| `agent_ast.references` | list[ReferenceSpec] | 否 | `[]` | 编译期已校验 | `[F-v3-resource-reference-invalid]` | `read_reference` 闭包 registry |
-| `agent_ast.examples` | list[ExampleSpec] | 否 | `[]` | 编译期已校验 | `[F-v3-resource-example-invalid]` | `read_example` 闭包 registry |
-| return | list[BaseTool] | 是 | 无 | 包含 builtin tools | `[F-v3-tool-argument-invalid]` | Agent tool 域 |
+| `phase_doc` | PhaseDocument | 是 | 无 | 含 phase path 和 phase name | — | tool metadata / skill root 反推 |
+| `phase_ast.references` | list[ReferenceSpec] | 否 | `[]` | 编译期已校验 | `[F-v3-resource-reference-invalid]` | `read_reference` 闭包 registry |
+| `phase_ast.examples` | list[ExampleSpec] | 否 | `[]` | 编译期已校验 | `[F-v3-resource-example-invalid]` | `read_example` 闭包 registry |
+| `compiled` | CompiledSkill | 是 | 无 | 当前实现签名保留此参数；函数体未直接读取 | — | 预留装配上下文 |
+| return | list[Any] | 是 | 无 | 包含 `_structured_tool(ToolDef(...))` 后的 `read_reference` / `read_example` | `[F-v3-tool-argument-invalid]` 等 tool 内错误 | Agent tool 域 |
 
 ## Data Model / State
 
@@ -327,8 +356,8 @@ Cognitive template 固定包含 ambiguity feedback 提示。Runtime 必须提供
 
 | 本文件目标态 | 当前源码事实 |
 |---|---|
-| `run_skill` 显式接收 `inputs` dict、`model_resolver`、`skill_resolver` | 当前 `run_skill` 通过 `**inputs` 接收输入；有 `skill_resolver`，但没有生产级 `model_resolver` 参数。 |
-| Agent phase 通过 model resolver 解析真实模型 | 当前 graph skill path 主要通过 `mock_llm` 注入 chat model；缺模型时 Agent phase 会运行期失败。 |
+| `run_skill` 入口先按根级 `io.inputs` 校验输入 | 当前 `run_skill` 通过 `**inputs` 接收输入，并在 graph_skill path 中直接写入 `data=dict(inputs)`。 |
+| Agent phase 通过 per-role model resolver 解析真实模型 | 当前 `run_skill` 有 `model_resolver: Any | None = None` 参数；graph_skill path 在无 `mock_llm` 时调用 `model_resolver.resolve(callbacks=..., phase_name="<workflow>")`，还不是按 phase `llm_role` 的完整 resolver 接线。 |
 | callbacks / trace 接回 graph runtime 主线 | 当前 graph skill dict runner 接收 `callbacks` 后直接丢弃，不会自动发 phase/tool/LLM trace。 |
 | runtime 入口先按根级 `io.inputs` 校验输入 | 当前初始 state 直接使用 `dict(inputs)`。 |
 | GraphAgentError 以外异常也结构化返回 | 当前 public runner 只捕获 GraphAgentError；普通 RuntimeError 等可能直接冒泡。 |

@@ -131,8 +131,10 @@ def test_finish_task_patcher_unavailable_structured_error() -> None:
 
 
 def test_finish_task_invalid_output_schema_fatal() -> None:
-    with pytest.raises(RuntimeError, match=r"\[F-v3-md2json\].*output_schema invalid"):
+    with pytest.raises(RuntimeError) as exc_info:
         build_finish_task_tool({"invalid": "schema"}, parse_finish_markdown)
+    assert "[F-v3-md2json]" in str(exc_info.value)
+    assert "output_schema invalid" in str(exc_info.value)
 
 
 def test_finish_task_empty_output_schema_is_allowed() -> None:

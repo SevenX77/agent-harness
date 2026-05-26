@@ -253,8 +253,10 @@ def test_unknown_tool_in_skill_phase_fatal(tmp_path: Path) -> None:
     _base(tmp_path, '<phase id="skill" src="phases/skill" depends_on="" />\n')
     _skill(tmp_path, tools=["unknown_xyz"])
 
-    with pytest.raises(SkillLoadError, match=r"\[F-v3-graph\].*unknown_xyz"):
+    with pytest.raises(SkillLoadError) as exc_info:
         assemble_graph(compile_skill(tmp_path, cache=False))
+    assert exc_info.value.payload.code == "[F-v3-agent-tool-unknown]"
+    assert "unknown_xyz" in str(exc_info.value)
 
 
 def test_terminal_phase_finish_task_validates(tmp_path: Path) -> None:

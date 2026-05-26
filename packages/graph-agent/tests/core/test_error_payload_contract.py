@@ -62,7 +62,7 @@ def test_error_registry_matches_error_code_spec_key_set() -> None:
     registry = _error_registry()
 
     assert set(registry) == _spec_codes()
-    assert len(registry) == 87
+    assert len(registry) == len(_spec_codes()) == 88
 
 
 def test_error_registry_preserves_multi_stage_codes() -> None:
@@ -145,7 +145,7 @@ def test_builtin_tool_failure_asserts_payload_code(tmp_path: Path) -> None:
 def test_error_registry_entries_have_complete_nonempty_metadata() -> None:
     registry = _error_registry()
 
-    assert len(registry) == 87
+    assert len(registry) == len(_spec_codes()) == 88
     for code, metadata in registry.items():
         assert metadata.code == code
         assert metadata.code
@@ -171,13 +171,7 @@ def test_error_payload_requires_nonempty_message() -> None:
 
 
 def test_engine_source_has_no_coarse_error_code_literals() -> None:
-    coarse_codes = {
-        "[F-v3-route]",
-        "[F-v3-io]",
-        "[F-v3-graph]",
-        "[F-v3-actions]",
-        "[F-v3-purity]",
-    }
+    coarse_codes = {f"[F-v3-{suffix}]" for suffix in ("route", "io", "graph", "actions", "purity")}
     source_root = REPO_ROOT / "packages" / "graph-agent" / "src" / "graph_agent"
     occurrences: list[str] = []
     for path in source_root.rglob("*.py"):

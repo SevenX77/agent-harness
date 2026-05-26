@@ -3,6 +3,7 @@ import type { AxiosAdapter, AxiosResponse, InternalAxiosRequestConfig } from 'ax
 import { api } from './client'
 import {
   getCredentials,
+  modelGroupsFromRegistry,
   putCredentials,
   resetLlmApiCachesForTests,
   testProviderModels,
@@ -61,6 +62,7 @@ function registry(overrides: Partial<RegistryResponse> = {}): RegistryResponse {
       token_escalation_rounds: 2,
     },
     model_profiles: {},
+    model_groups: [],
     roles: {},
     canonical_groups: [],
     lint_results: [],
@@ -600,5 +602,112 @@ describe('API Keys v4 registry adapter', () => {
       'openai/gpt-5',
       'manual-model',
     ])
+  })
+
+  it('projects legacy missing key and invalid model routes to top-level Needs Setup', () => {
+    const missingKeyEndpoint: ProviderEndpoint = {
+      ...endpoint,
+      api_key: null,
+      status: 'unverified_manual',
+    }
+    const invalidModelRoute: ProviderRoute = {
+      ...route,
+      route_id: 'openrouter-custom:invalid-model',
+      route_slug: 'invalid-model',
+      provider_model_id: 'invalid-model',
+      display_name: 'Invalid Model',
+      status: 'failed',
+      metadata: {
+        reason_code: 'invalid_model',
+      },
+    }
+
+    const groups = modelGroupsFromRegistry(registry({
+      provider_endpoints: { [endpoint.endpoint_id]: missingKeyEndpoint },
+      provider_routes: {
+        [route.route_id]: {
+          ...route,
+          status: 'unverified_manual',
+        },
+        [invalidModelRoute.route_id]: invalidModelRoute,
+      },
+      model_groups: [],
+    }))
+
+    const states = groups.flatMap((group) => group.provider_models.map((option) => option.ui_state))
+    expect(states).toEqual(['needs_setup', 'needs_setup'])
+  })
+
+  it('keeps backend Cooling Down projection and retry timestamp', () => {
+    const retryAt = '2026-05-26T18:30:00Z'
+    const groups = modelGroupsFromRegistry(registry({
+      model_groups: [
+        {
+          canonical_id: 'gpt-5',
+          display_name: 'GPT-5',
+          provider_models: [
+            {
+              route_id: route.route_id,
+              provider_label: 'OpenRouter Custom',
+              provider_kind: 'third_party',
+              provider_model_id: 'openai/gpt-5',
+              ui_state: 'cooling_down',
+              ui_detail: 'Provider returned 429.',
+              retry_at: retryAt,
+              reason_code: 'rate_limited',
+              capability_state: 'known',
+              capabilities: route.capabilities,
+            },
+          ],
+          status_summary: {
+            ready: 0,
+            untested: 0,
+            cooling_down: 1,
+            needs_setup: 0,
+            off: 0,
+          },
+          capability_summary: {
+            capability_known_count: 1,
+            thinking: 'unknown',
+            tools: 'unknown',
+            structured_output: 'unknown',
+            max_context_tokens: null,
+            max_output_tokens: null,
+          },
+        },
+      ],
+    }))
+
+    expect(groups[0].provider_models[0]).toMatchObject({
+      ui_state: 'cooling_down',
+      retry_at: retryAt,
+      reason_code: 'rate_limited',
+    })
+  })
+
+  it('maps a legacy registry without model group projection through compatibility fallback', () => {
+    const legacyRegistry = registry()
+    delete (legacyRegistry as Partial<RegistryResponse>).model_groups
+    const groups = modelGroupsFromRegistry(legacyRegistry)
+
+    expect(groups).toHaveLength(1)
+    expect(groups[0]).toMatchObject({
+      canonical_id: 'gpt-5',
+      display_name: 'GPT-5',
+      status_summary: {
+        ready: 1,
+        untested: 0,
+        cooling_down: 0,
+        needs_setup: 0,
+        off: 0,
+      },
+    })
+    expect(groups[0].provider_models[0]).toMatchObject({
+      route_id: 'openrouter-custom:gpt-5',
+      provider_label: 'OpenRouter Custom',
+      provider_kind: 'third_party',
+      ui_state: 'ready',
+      capability_state: 'known',
+    })
   })
 })

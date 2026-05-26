@@ -105,6 +105,7 @@ const registry: RegistryResponse = {
     token_escalation_rounds: 2,
   },
   model_profiles: {},
+  model_groups: [],
   roles: { copilot_chat: role },
   canonical_groups: [],
   lint_results: [],

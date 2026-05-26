@@ -20,6 +20,25 @@ async function mockSettingsBackend(page: Page) {
       default_skills_directory: '/tmp/skills',
     })
   })
+  await page.route('**/api/llm/registry', async (route) => {
+    await fulfillJson(route, {
+      provider_endpoints: {},
+      provider_routes: {},
+      runtime_policy: {
+        provider_down_ttl_seconds: 60,
+        probe_timeout_seconds: 5,
+        token_escalation_rounds: 2,
+      },
+      model_profiles: {},
+      roles: {},
+      canonical_groups: [],
+      lint_results: [],
+      setup_required: false,
+    })
+  })
+  await page.route('**/api/llm/registry/endpoints/*/secret', async (route) => {
+    await fulfillJson(route, { endpoint_id: 'unused', api_key: '' })
+  })
   await page.route('**/api/llm/credentials**', async (route) => {
     await fulfillJson(route, { providers: [] })
   })

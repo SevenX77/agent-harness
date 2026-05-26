@@ -6,6 +6,12 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog"
 import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -29,12 +35,12 @@ const providerProtocolOptions: Array<{ value: ProviderType; label: string }> = [
   { value: "google_genai", label: "Google GenAI" },
 ]
 
-export function apiKeyInputType(visible: boolean): "text" | "password" {
-  return visible ? "text" : "password"
+export function apiKeyInputType(_visible: boolean): "text" {
+  return "text"
 }
 
 export function apiKeyInputClassName(visible: boolean): string {
-  return cn("flex-1", visible ? "text-foreground" : "text-muted-foreground")
+  return cn("flex-1", visible ? "text-foreground" : "mask-input text-muted-foreground")
 }
 
 export function providerProtocolLabel(value: ProviderType): string {
@@ -148,17 +154,26 @@ export function ProviderDeleteButton({
   )
 }
 
-function FieldCopyButton({ value, label }: { value: string; label: string }) {
+function FieldCopyButton({ value, label, inputGroup = false }: { value: string; label: string; inputGroup?: boolean }) {
+  const props = {
+    type: "button" as const,
+    variant: "ghost" as const,
+    className: "text-muted-foreground/70 transition-none hover:text-muted-foreground",
+    onClick: () => void copyCredentialValue(value, label),
+    disabled: !value,
+    "aria-label": `Copy ${label}`,
+  }
+
+  if (inputGroup) {
+    return (
+      <InputGroupButton size="icon-xs" {...props}>
+        <Copy className="size-4" />
+      </InputGroupButton>
+    )
+  }
+
   return (
-    <Button
-      type="button"
-      size="icon"
-      variant="ghost"
-      className="text-muted-foreground/70 transition-none hover:text-muted-foreground"
-      onClick={() => void copyCredentialValue(value, label)}
-      disabled={!value}
-      aria-label={`Copy ${label}`}
-    >
+    <Button size="icon" {...props}>
       <Copy className="size-4" />
     </Button>
   )
@@ -276,33 +291,37 @@ export function ProviderCard({
         <div className="space-y-2">
           <Label htmlFor={`api-key-${draft.id}`}>API Key</Label>
           <div className="flex items-center gap-2">
-            <Input
-              id={`api-key-${draft.id}`}
-              type={apiKeyInputType(visible)}
-              value={draft.api_key}
-              onChange={(event) => onFieldChange({ api_key: event.target.value })}
-              placeholder={`Enter your ${apiKeyProviderName} API Key`}
-              name={`provider-secret-${draft.id}`}
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="none"
-              data-1p-ignore=""
-              data-lpignore="true"
-              data-form-type="other"
-              spellCheck={false}
-              className={apiKeyInputClassName(visible)}
-            />
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              className="text-muted-foreground/70 transition-none hover:text-muted-foreground"
-              onClick={() => setVisible((value) => !value)}
-              aria-label={visible ? "Hide API key" : "Show API key"}
-            >
-              {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-            </Button>
-            <FieldCopyButton value={draft.api_key} label="API key" />
+            <InputGroup className="h-8 flex-1">
+              <InputGroupInput
+                id={`api-key-${draft.id}`}
+                type={apiKeyInputType(visible)}
+                value={draft.api_key}
+                onChange={(event) => onFieldChange({ api_key: event.target.value })}
+                placeholder={`Enter your ${apiKeyProviderName} API Key`}
+                name={`provider-secret-${draft.id}`}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="none"
+                data-1p-ignore=""
+                data-lpignore="true"
+                data-form-type="other"
+                spellCheck={false}
+                className={apiKeyInputClassName(visible)}
+              />
+              <InputGroupAddon align="inline-end" className="gap-1 pr-1">
+                <InputGroupButton
+                  type="button"
+                  size="icon-xs"
+                  variant="ghost"
+                  className="text-muted-foreground/70 transition-none hover:text-muted-foreground"
+                  onClick={() => setVisible((value) => !value)}
+                  aria-label={visible ? "Hide API key" : "Show API key"}
+                >
+                  {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </InputGroupButton>
+                <FieldCopyButton value={draft.api_key} label="API key" inputGroup />
+              </InputGroupAddon>
+            </InputGroup>
             <Button type="button" variant="default" onClick={onTest} disabled={draft.isTesting || !hasRequiredConfig} className="px-6">
               {draft.isTesting ? <Loader2 className="size-3.5 animate-spin" /> : null}
               Test
@@ -312,8 +331,8 @@ export function ProviderCard({
         {!isOfficial ? (
           <div className="space-y-2">
             <Label htmlFor={`base-url-${draft.id}`}>Base URL</Label>
-            <div className="flex items-center gap-2">
-              <Input
+            <InputGroup className="h-8">
+              <InputGroupInput
                 id={`base-url-${draft.id}`}
                 value={draft.base_url}
                 onChange={(event) => onFieldChange({ base_url: event.target.value })}
@@ -324,8 +343,10 @@ export function ProviderCard({
                 spellCheck={false}
                 className="flex-1"
               />
-              <FieldCopyButton value={draft.base_url} label="Base URL" />
-            </div>
+              <InputGroupAddon align="inline-end" className="pr-1">
+                <FieldCopyButton value={draft.base_url} label="Base URL" inputGroup />
+              </InputGroupAddon>
+            </InputGroup>
           </div>
         ) : null}
         {availableSdks.length || availableModels.length ? (

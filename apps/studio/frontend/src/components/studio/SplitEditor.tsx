@@ -1,6 +1,8 @@
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { GraphCanvas, type SkillGraphNodeData } from "@/components/GraphCanvas"
+import type { Connection } from "@xyflow/react"
 import type { SkillDetail } from "@/api/types"
+import type { NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
 import { LazyMonacoPanel } from "./LazyMonacoPanel"
 import { useWorkspaceContext, type EditorSide, type OpenFile } from "./WorkspaceContext"
 
@@ -12,6 +14,9 @@ interface SplitEditorProps {
   selectedNodeId?: string | null
   onNodeSelect?: (node: { id: string; data: SkillGraphNodeData }) => void
   onPanelChange?: (panel: "assets" | "input" | "timeline" | "properties" | "local-history" | null) => void
+  onCreatePhase?: (kind: NewPhaseKind) => Promise<void> | void
+  onPersistConnection?: (connection: Connection) => Promise<void> | void
+  onDisconnectConnection?: (connection: { source: string; target: string }) => Promise<void> | void
 }
 
 export function SplitEditor({
@@ -22,6 +27,9 @@ export function SplitEditor({
   selectedNodeId,
   onNodeSelect,
   onPanelChange,
+  onCreatePhase,
+  onPersistConnection,
+  onDisconnectConnection,
 }: SplitEditorProps) {
   const {
     activeFileDetails,
@@ -97,6 +105,9 @@ export function SplitEditor({
             selectedNodeId={selectedNodeId}
             onNodeSelect={onNodeSelect}
             onPanelChange={onPanelChange}
+            onCreatePhase={onCreatePhase}
+            onPersistConnection={onPersistConnection}
+            onDisconnectConnection={onDisconnectConnection}
             compact
           />
         </div>

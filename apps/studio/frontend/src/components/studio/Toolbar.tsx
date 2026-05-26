@@ -14,9 +14,9 @@ interface ToolbarProps {
 
 const tools: Array<{ id: PanelKind; icon: typeof Files; label: string; shortcut: string }> = [
   { id: "assets", icon: Files, label: "Assets", shortcut: "1" },
-  { id: "input", icon: FileInput, label: "Input", shortcut: "2" },
-  { id: "timeline", icon: Clock, label: "Trace Timeline", shortcut: "3" },
-  { id: "properties", icon: Settings2, label: "Properties", shortcut: "4" },
+  { id: "properties", icon: Settings2, label: "Properties", shortcut: "2" },
+  { id: "input", icon: FileInput, label: "Input", shortcut: "3" },
+  { id: "timeline", icon: Clock, label: "Trace Timeline", shortcut: "4" },
   { id: "local-history", icon: History, label: "Local History", shortcut: "5" },
 ]
 

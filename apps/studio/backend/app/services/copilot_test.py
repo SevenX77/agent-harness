@@ -121,8 +121,8 @@ def _extract_vendor_error_code(response: httpx.Response, *, default: str) -> str
 
     Vendors disagree on the shape:
 
-    * Anthropic / OpenAI: ``{"error": {"type": "invalid_api_key", ...}}``
-      (OpenAI also exposes ``code``).
+    * Anthropic: ``{"error": {"type": "invalid_api_key", ...}}``.
+    * OpenAI: ``{"error": {"type": "invalid_request_error", "code": "invalid_api_key", ...}}``.
     * Gemini: ``{"error": {"status": "PERMISSION_DENIED", ...}}``.
 
     Falls back to ``default`` when no recognized code is present (e.g. when
@@ -138,7 +138,7 @@ def _extract_vendor_error_code(response: httpx.Response, *, default: str) -> str
     error = payload.get("error")
     if not isinstance(error, dict):
         return default
-    for key in ("type", "code", "status"):
+    for key in ("code", "type", "status"):
         candidate = error.get(key)
         if isinstance(candidate, str) and candidate:
             return candidate

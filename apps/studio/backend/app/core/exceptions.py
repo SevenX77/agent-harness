@@ -40,6 +40,7 @@ STANDARD_ERROR_MAP: dict[str, ErrorDefinition] = {
     "TERMINAL_LIMIT_REACHED": ErrorDefinition(http_status=503, retry_strategy="backoff"),
     "WEBSOCKET_DISCONNECTED": ErrorDefinition(http_status=499, retry_strategy="backoff"),
     "LLM_FALLBACK_EXHAUSTED": ErrorDefinition(http_status=502, retry_strategy="backoff"),
+    "LLM_CREDENTIALS_SCHEMA": ErrorDefinition(http_status=422, retry_strategy="not_retryable"),
     "RESUME_CHECKPOINT_NOT_FOUND": ErrorDefinition(
         http_status=404,
         retry_strategy="not_retryable",
@@ -160,9 +161,15 @@ def _standard_error_from_value_error(exc: ValueError) -> ErrorResponse | None:
         error_code=error_code,
         http_status=definition.http_status,
         message=raw_message.strip() if separator else _default_standard_error_message(error_code),
-        details=None,
+        details=_standard_error_details(error_code),
         retry_strategy=definition.retry_strategy,
     )
+
+
+def _standard_error_details(error_code: str) -> dict[str, Any] | None:
+    if error_code == "LLM_CREDENTIALS_SCHEMA":
+        return {"docs_path": "docs/development/CREDENTIALS_V4_BOOTSTRAP.md"}
+    return None
 
 
 def _default_standard_error_message(error_code: str) -> str:

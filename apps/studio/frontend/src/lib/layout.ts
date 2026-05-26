@@ -52,12 +52,11 @@ export function getAutoLayoutedElements<TNode extends Node, TEdge extends Edge>(
   return {
     nodes: nodes.map((node) => {
       const position = graph.node(node.id)
-      const size = nodeSize(node)
       return {
         ...node,
         position: {
-          x: position.x - size.width / 2,
-          y: position.y - size.height / 2 - compactOffset,
+          x: position.x,
+          y: position.y - compactOffset,
         },
       }
     }),

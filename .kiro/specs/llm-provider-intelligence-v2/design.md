@@ -7,18 +7,22 @@ This spec supersedes `.kiro/specs/studio-api-keys-redesign/*` and deprecated LLM
 The design introduces a shared LLM registry core that is used by Graph Agent Engine and Studio Backend. Studio Frontend consumes backend DTOs and does not own canonicalization or route resolution logic.
 
 ```text
-llm_credentials.json
+<studio_config_dir>/llm/llm_credentials.json
   provider_endpoints
   provider_routes
   runtime_policy
 
-llm_import_drafts.json or backend job store
+<studio_config_dir>/llm/llm_import_drafts.json or backend job store
   provider_import_drafts
 
-llm_roles.yaml
+<studio_config_dir>/llm/llm_roles.yaml
   model_profiles[*].fallback_chain[*].route_id
   roles[*].fallback_chain[*].route_id
   roles[*].lint_requirements
+
+graph_agent_gateway package defaults
+  built-in canonical rules
+  protocol runtime-setting defaults
 
 graph_agent_gateway.registry
   schema
@@ -40,6 +44,8 @@ studio frontend
 ```
 
 The central invariant is that role execution always starts from a declared `route_id` and ends at one exact `provider_model_id`.
+
+Active user state lives in the Studio user config directory resolved by `apps/studio/backend/app/core/paths.app_settings_dir` (`STUDIO_CONFIG_DIR` override, then platform default). Repository-root `config/` files are not an active runtime configuration location in V2; they may be retained only as checked-in examples, seeds, or package-default fixtures. Studio Backend resolves active credentials from `STUDIO_LLM_CREDENTIALS_PATH` or defaults to `<studio_config_dir>/llm/llm_credentials.json`; active roles resolve from `STUDIO_LLM_ROLES_PATH` or `<studio_config_dir>/llm/llm_roles.yaml`.
 
 ## 2. Shared Module Boundary
 
@@ -100,7 +106,7 @@ This prototype uses a clean schema cutover.
 
 ### 3.1 Credentials File
 
-`~/.studio/llm_credentials.json` becomes schema version 4.
+`<studio_config_dir>/llm/llm_credentials.json` becomes schema version 4.
 
 ```json
 {
@@ -201,7 +207,7 @@ Secrets:
 
 Runtime policy:
 
-- `runtime_policy` is a top-level optional block of `~/.studio/llm_credentials.json` because it controls gateway-owned endpoint health and probe behavior.
+- `runtime_policy` is a top-level optional block of `<studio_config_dir>/llm/llm_credentials.json` because it controls gateway-owned endpoint health and probe behavior.
 - The in-memory `RegistrySnapshot` mirrors this block. If absent, `graph_agent_gateway.registry.schema.RuntimePolicy` supplies documented defaults.
 - Legacy role fields such as `circuit_breaker`, `peer_model_groups`, and `single_model_roles` must not be parsed as policy during V2 runtime construction.
 
@@ -217,7 +223,7 @@ Runtime policy:
 
 ### 3.2 Import Draft Store
 
-Import drafts are untrusted transient data and are stored outside active credentials. The backend may use `~/.studio/llm_import_drafts.json` or a backend job store with the same DTO shape.
+Import drafts are untrusted transient data and are stored outside active credentials. The backend may use `<studio_config_dir>/llm/llm_import_drafts.json` or a backend job store with the same DTO shape.
 
 ```json
 {
@@ -313,7 +319,7 @@ Draft promotion identity:
 
 ### 3.3 Roles File
 
-`config/llm_roles.yaml` moves to explicit route chains.
+`<studio_config_dir>/llm/llm_roles.yaml` is the active roles file and uses explicit route chains. `STUDIO_LLM_ROLES_PATH` may override this path for tests or isolated runs. Checked-in role files under `docs/development/examples/` are seeds only and must not be hard-coded as active runtime state.
 
 ```yaml
 schema_version: 2
@@ -330,11 +336,18 @@ model_profiles:
       tool_calling: "warn"
     fallback_chain:
       - route_id: anthropic-official:claude-opus-4.7
-        temperature: null
-        max_output_tokens: 8192
+        runtime_settings:
+          temperature: null
+          max_output_tokens: 8192
+          reasoning:
+            enabled: true
+            budget_tokens: 4096
       - route_id: openrouter-prod:anthropic.claude-opus-4.7
-        temperature: null
-        max_output_tokens: 8192
+        runtime_settings:
+          temperature: null
+          max_output_tokens: 8192
+          reasoning:
+            enabled: true
 
 roles:
   graph_agent:
@@ -347,11 +360,18 @@ roles:
       deleted_marker: false
     fallback_chain:
       - route_id: anthropic-official:claude-opus-4.7
-        temperature: null
-        max_output_tokens: 8192
+        runtime_settings:
+          temperature: null
+          max_output_tokens: 8192
+          reasoning:
+            enabled: true
+            budget_tokens: 4096
       - route_id: openrouter-prod:anthropic.claude-opus-4.7
-        temperature: null
-        max_output_tokens: 8192
+        runtime_settings:
+          temperature: null
+          max_output_tokens: 8192
+          reasoning:
+            enabled: true
     lint_requirements:
       thinking: "error"
       tool_calling: "warn"
@@ -360,8 +380,9 @@ roles:
     system_prompt_prefix: ""
     fallback_chain:
       - route_id: openrouter-prod:anthropic.claude-sonnet-4.6
-        temperature: 0.7
-        max_output_tokens: 4096
+        runtime_settings:
+          temperature: 0.7
+          max_output_tokens: 4096
     lint_requirements:
       thinking: "warn"
       tool_calling: "off"
@@ -385,10 +406,12 @@ Profile fields:
 - `tags`
 - `fallback_chain`
 - `lint_requirements`
+- optional profile-level runtime defaults that may be copied into route `runtime_settings` when applying the profile
 
 Rules:
 
 - Profile `fallback_chain` entries are the same route-chain item type used by roles.
+- Profile and role route entries store user-authored runtime parameters under `runtime_settings`; they do not store provider-specific request payloads.
 - Profile route IDs are validated and linted at save time.
 - Applying a profile to a role expands it into the role's `fallback_chain`.
 - The role may store `source_profile_id` and `source_profile_snapshot` for UI traceability.
@@ -481,7 +504,8 @@ Forbidden by default:
 Rule storage:
 
 - Default safe rules live in the shared module.
-- Project-specific curated rules may live in `config/llm_canonical_rules.yaml`.
+- User/project curated rule overrides may live in `<studio_config_dir>/llm/llm_canonical_rules.yaml` or an explicit `STUDIO_LLM_CANONICAL_RULES_PATH` override.
+- Checked-in canonical rule files under repo `config/` are seed fixtures only; runtime code must not hard-code repo-root `config/llm_canonical_rules.yaml` as active state.
 - Rules require positive and negative tests before they are used by default.
 
 ## 6. Capability Model and Linter
@@ -511,8 +535,16 @@ Common capability keys:
 
 - `max_input_tokens`
 - `max_output_tokens`
+- `temperature`
+- `top_p`
+- `stop_sequences`
+- `seed`
 - `thinking_protocol`
+- `reasoning_budget_tokens`
+- `reasoning_effort`
 - `tool_protocol`
+- `tool_choice`
+- `parallel_tool_calls`
 - `structured_output_protocol`
 - `vision`
 
@@ -567,6 +599,98 @@ Runtime behavior:
 - If a role reaches runtime with an `error` requirement that the route cannot satisfy or has not verified, Gateway fails before making the LLM request.
 - Runtime must not replace that route with another route based on the capability.
 
+### 6.3 Runtime Settings Schema
+
+Runtime settings are user-authored request parameters. Capabilities describe whether a route supports those settings, what limits/defaults are known, and where that knowledge came from. These two concepts must stay separate.
+
+Use a fixed normalized schema for runtime settings:
+
+```yaml
+runtime_settings:
+  temperature: null
+  top_p: null
+  max_output_tokens: 8192
+  stop_sequences: []
+  seed: null
+  tool_choice: auto
+  parallel_tool_calls: null
+  structured_output:
+    mode: none
+    json_schema: null
+    strict: null
+  reasoning:
+    enabled: true
+    effort: null
+    budget_tokens: 4096
+```
+
+Schema fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `temperature` | `float | null` | Sampling temperature when the protocol supports it. |
+| `top_p` | `float | null` | Nucleus sampling value when supported. |
+| `max_output_tokens` | `int | null` | Maximum generated output tokens. Adapter maps to `max_tokens`, `max_output_tokens`, or provider equivalent. |
+| `stop_sequences` | `list[str] | null` | Stop sequences. Empty list means explicit none; null means inherit defaults. |
+| `seed` | `int | null` | Deterministic seed for providers that support it. |
+| `tool_choice` | enum/object/null | `auto`, `none`, `required`, or a specific tool reference when the adapter supports it. |
+| `parallel_tool_calls` | `bool | null` | Parallel tool calling preference when supported. |
+| `structured_output` | object/null | JSON/schema output request. |
+| `reasoning.enabled` | `bool | null` | Whether the user requested reasoning/thinking mode. |
+| `reasoning.effort` | enum/null | Provider-neutral effort label such as `low`, `medium`, or `high` for effort-based APIs. |
+| `reasoning.budget_tokens` | `int | null` | Budget-token style thinking/reasoning limit for Anthropic/Gemini-like APIs. |
+
+Default resolution order:
+
+1. Explicit route-entry `runtime_settings`.
+2. Model profile default copied into the role route entry when the profile is applied.
+3. Route capability default, for example a probed or documented minimum/maximum/default.
+4. Protocol adapter default.
+5. Studio safe default.
+
+The resolver produces `effective_runtime_settings` with per-field source metadata:
+
+```json
+{
+  "max_output_tokens": {
+    "value": 8192,
+    "source": "route_setting"
+  },
+  "reasoning.budget_tokens": {
+    "value": 4096,
+    "source": "profile_default"
+  },
+  "parallel_tool_calls": {
+    "value": false,
+    "source": "protocol_default"
+  }
+}
+```
+
+Validation rules:
+
+- Unknown runtime setting keys fail schema validation.
+- Unsupported settings fail save/probe validation when the route capability is known, or fail fast before the provider request if an invalid config reaches runtime.
+- Out-of-range values fail validation using the narrowest known bound from route capability, provider documentation, live probe, or adapter default.
+- Missing values are resolved to effective defaults or omitted from the provider request deliberately; adapters must not pass ambiguous nulls to provider SDKs.
+- Frontend may dynamically show or disable controls from capability metadata, but backend and gateway remain the source of truth for validation.
+
+Capability keys that describe runtime-setting support:
+
+| Capability key | Example value | Purpose |
+|---|---|---|
+| `temperature` | `{ "supported": true, "min": 0, "max": 2, "default": 1 }` | Validates `runtime_settings.temperature`. |
+| `top_p` | `{ "supported": true, "min": 0, "max": 1 }` | Validates `runtime_settings.top_p`. |
+| `max_output_tokens` | `{ "max": 8192, "default": 4096 }` | Validates and defaults output length. |
+| `stop_sequences` | `{ "supported": true, "max_items": 4 }` | Validates stop sequence support. |
+| `seed` | `{ "supported": false }` | Enables/disables seed input. |
+| `tool_choice` | `{ "values": ["auto", "none", "required"] }` | Validates tool choice mode. |
+| `parallel_tool_calls` | `{ "supported": true }` | Validates parallel tool call setting. |
+| `structured_output_protocol` | `"openai_json_schema"` | Selects structured output adapter mapping. |
+| `thinking_protocol` | `"anthropic_v1"` | Selects reasoning/thinking adapter mapping. |
+| `reasoning_budget_tokens` | `{ "min": 1024, "max": 32000, "default": 4096 }` | Validates `reasoning.budget_tokens`. |
+| `reasoning_effort` | `{ "values": ["low", "medium", "high"], "default": "medium" }` | Validates `reasoning.effort`. |
+
 ## 7. Deterministic Resolver
 
 `graph_agent_gateway.registry.resolver` loads a registry snapshot from credentials plus roles.
@@ -613,7 +737,24 @@ Resolution flow:
 - `canonical_id`
 - `display_name`
 - `capabilities`
-- per-chain params such as `temperature` and `max_output_tokens`
+- `runtime_settings`, the user-authored normalized settings from the role/profile route entry
+- `effective_runtime_settings`, the resolver-produced settings with per-field source metadata
+
+`system_prompt_prefix` is deliberately role-level metadata, not route-level metadata. It is carried by `ResolvedRole` and applied by `GatewayChatModel`; Engine code must not read role files directly to recover it.
+
+Credential fingerprint:
+
+- Computed by `graph_agent_gateway.registry.storage` from `endpoint_id`, `protocol`, normalized `base_url`, secret value, `timeout_seconds`, `trust_env`, and `proxy_env`.
+- Used only as a cache invalidation key; it is not displayed as a credential proof and must not allow recovering the secret.
+- Gateway is the source of truth for fingerprint computation. `apps/studio/backend/app/services/llm_credentials.provider_test_params_fingerprint` must be replaced by `graph_agent_gateway.registry.storage.compute_credential_fingerprint(endpoint, secret)` so backend provider-test caching and runtime client caching cannot drift.
+- Callers may unwrap `ResolvedRoute.api_key.get_secret_value()` only inside gateway client/probe construction scope. Trace events, API DTOs, logs, exceptions, and diagnostics use redacted values only.
+- `RuntimePolicy` changes invalidate runtime client cache because relevant policy values are part of the client cache key. They do not invalidate `credential_fingerprint`-keyed provider-test results because policy is not part of the credential fingerprint inputs.
+
+Model profile handling:
+
+- `graph_agent_gateway.registry.resolver` validates profile chains, but does not use profile IDs during role execution.
+- Backend profile-apply logic expands a profile into a role fallback-chain snapshot before saving.
+- Runtime diagnostics may include `source_profile_id` when present, but fallback behavior is determined only by `route_id` order.
 
 `system_prompt_prefix` is deliberately role-level metadata, not route-level metadata. It is carried by `ResolvedRole` and applied by `GatewayChatModel`; Engine code must not read role files directly to recover it.
 
@@ -635,9 +776,21 @@ Engine integration:
 
 - `graph_agent_gateway.resolver.ModelResolver` calls shared registry resolution.
 - `GatewayChatModel` receives a `ResolvedRole` backed by route records.
+- Graph Agent assembly must resolve chat models per executable phase using that phase's
+  declared `llm_role`; it must not pre-resolve one workflow-level model with
+  `role_name=None` and reuse it across phases.
 - The provider client manager is owned by `graph_agent_gateway` and uses endpoint credentials from `ResolvedRoute`, not environment variables.
 - Client cache key includes endpoint ID, credential fingerprint, timeout, trust/proxy settings, and relevant `RuntimePolicy` health values.
 - `_PROBE_DOWN_TTL`, `_PROBE_TIMEOUT`, and `_TOKEN_ESCALATION_ROUNDS` class constants from the old Engine client manager are replaced by values read from `ResolvedRole.runtime_policy`.
+
+Provider protocol adapters:
+
+- Gateway owns all provider request construction. Engine never branches on provider SDK details.
+- Supported protocol identifiers are `openai_compatible`, `anthropic_compatible`, `google_genai`, and `ark_runtime`.
+- `ark_runtime` uses Volcengine's official Ark runtime SDK surface, not the OpenAI-compatible client wrapper. It may share endpoint base URLs with an OpenAI-compatible Ark endpoint, but it is a distinct protocol because request/response capabilities may differ.
+- Each adapter maps `effective_runtime_settings` into the concrete SDK/API request shape and omits unsupported fields before the request is sent.
+- Adapter mapping is deterministic and route-local. If two routes share a `canonical_id` but have different protocols, their supported runtime settings and capabilities remain separate.
+- Adapter errors are normalized through `registry.error_classification` before fallback decisions are made.
 
 Runtime fallback:
 
@@ -692,11 +845,72 @@ Returns a redacted snapshot:
 - Keeps the current secret when `api_key` is omitted.
 - Invalidates client fingerprint/version when secret, protocol, or base URL changes.
 
+Request:
+
+```json
+{
+  "provider_endpoints": {
+    "anthropic-official": {
+      "endpoint_id": "anthropic-official",
+      "display_name": "Anthropic Official",
+      "protocol": "anthropic_compatible",
+      "base_url": "https://api.anthropic.com",
+      "api_key": "",
+      "status": "unverified_manual",
+      "timeout_seconds": 120,
+      "trust_env": false
+    }
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "schema_version": 4,
+  "provider_endpoints": {
+    "anthropic-official": {
+      "endpoint_id": "anthropic-official",
+      "display_name": "Anthropic Official",
+      "protocol": "anthropic_compatible",
+      "base_url": "https://api.anthropic.com",
+      "api_key": "**********",
+      "status": "unverified_manual",
+      "timeout_seconds": 120,
+      "trust_env": false,
+      "proxy_env": null,
+      "metadata": {}
+    }
+  },
+  "provider_routes": {},
+  "runtime_policy": {
+    "provider_down_ttl_seconds": 60,
+    "probe_timeout_seconds": 5,
+    "token_escalation_rounds": 2
+  }
+}
+```
+
 `DELETE /api/llm/registry/endpoints/{endpoint_id}`
 
 - Deletes one endpoint only when no active route, role, or model profile still references it.
 - If referenced, returns `409 endpoint_in_use` with references grouped by `routes`, `roles`, and `model_profiles`.
 - Does not delete import drafts; drafts remain transient history until expiration or explicit draft cleanup.
+
+Conflict response:
+
+```json
+{
+  "detail": {
+    "code": "endpoint_in_use",
+    "endpoint_id": "anthropic-official",
+    "routes": ["anthropic-official:claude-sonnet-4.6"],
+    "roles": ["graph_agent.fallback_chain[0]"],
+    "model_profiles": ["CL46T.fallback_chain[0]"]
+  }
+}
+```
 
 `POST /api/llm/endpoints/{endpoint_id}/test`
 
@@ -709,6 +923,30 @@ Returns a redacted snapshot:
 - Request names desired capabilities.
 - Updates only that route's capability fields and status.
 
+Request:
+
+```json
+{
+  "capabilities": ["thinking", "tool_calling", "max_output_tokens"]
+}
+```
+
+Response:
+
+```json
+{
+  "route_id": "anthropic-official:claude-sonnet-4.6",
+  "status": "verified",
+  "capabilities": {
+    "tool_protocol": {
+      "value": "anthropic_tools",
+      "source": "probed_verified",
+      "observed_at": "2026-05-24T00:00:00Z"
+    }
+  }
+}
+```
+
 `PUT /api/llm/routes/{route_id}`
 
 - Replaces editable metadata for one route.
@@ -717,11 +955,61 @@ Returns a redacted snapshot:
 - Changing the route identity requires creating a new route and deleting the old route.
 - Backend validates that the route remains internally consistent and still references an existing endpoint.
 
+Request:
+
+```json
+{
+  "display_name": "Claude Sonnet 4.6",
+  "canonical_id": "claude-sonnet-4.6",
+  "status": "verified",
+  "capabilities": {
+    "thinking_protocol": {
+      "value": "anthropic_v1",
+      "source": "manual"
+    }
+  },
+  "metadata": {
+    "provider_brand": "anthropic"
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "route_id": "anthropic-official:claude-sonnet-4.6",
+  "endpoint_id": "anthropic-official",
+  "route_slug": "claude-sonnet-4.6",
+  "provider_model_id": "claude-sonnet-4-6",
+  "canonical_id": "claude-sonnet-4.6",
+  "display_name": "Claude Sonnet 4.6",
+  "status": "verified",
+  "capabilities": {},
+  "metadata": {
+    "provider_brand": "anthropic"
+  }
+}
+```
+
 `DELETE /api/llm/routes/{route_id}`
 
 - Deletes one route only when no role or model profile references it.
 - If referenced, returns `409 route_in_use` with role/profile reference paths.
 - Deleting a route never rewrites fallback chains implicitly.
+
+Conflict response:
+
+```json
+{
+  "detail": {
+    "code": "route_in_use",
+    "route_id": "anthropic-official:claude-sonnet-4.6",
+    "roles": ["graph_agent.fallback_chain[0]"],
+    "model_profiles": ["CL46T.fallback_chain[0]"]
+  }
+}
+```
 
 Router implementation must document request/response JSON examples for endpoint upsert, route update, route probe, delete conflicts, and profile-apply conflicts in this section before frontend integration.
 
@@ -802,6 +1090,20 @@ Role read/write APIs use only the new route-chain schema. Reusing the current UR
 - If the role has diverged from its stored `source_profile_snapshot`, backend returns `409 profile_apply_conflict` with a diff.
 - Conflict resolution is explicit: the caller may retry with `mode: "replace"` to replace the role fallback chain with the current profile, or cancel. No merge mode is provided in V2.
 
+Conflict response:
+
+```json
+{
+  "detail": {
+    "code": "profile_apply_conflict",
+    "role_name": "graph_agent",
+    "model_profile_id": "CL46T",
+    "current_route_ids": ["openrouter-prod:anthropic.claude-sonnet-4.6"],
+    "profile_route_ids": ["anthropic-official:claude-sonnet-4.6"]
+  }
+}
+```
+
 ### 8.6 Deprecated LLM API Paths
 
 Hard cutover removes old provider-oriented LLM endpoints from the production contract:
@@ -839,6 +1141,30 @@ Promotion rules:
 - A route may be auto-created as `verified` only when model probe succeeds.
 - A route may be created as `unverified_manual` only after explicit user confirmation.
 - Active routes are never overwritten by Agent output without a diff confirmation.
+
+## 9.5 Provider Protocol Capability Verification
+
+Capability verification is a route/protocol matrix, not a canonical-model-only table. The same marketed model may accept different parameters through first-party SDKs, OpenAI-compatible compatibility layers, and aggregators.
+
+Minimum verification matrix:
+
+| Dimension | Required checks |
+|---|---|
+| Same official provider family | Probe at least two common models from the same official provider family when credentials are available, for example Anthropic Sonnet/Haiku or OpenAI reasoning/non-reasoning variants, to detect shared defaults and per-model exceptions. |
+| Same model through different providers | Compare route capabilities for the same `canonical_id` across at least two `route_id` values when available. Differences stay route-local. |
+| SDK vs compatibility layer | For providers with official SDKs plus OpenAI-compatible endpoints, run both paths when credentials and dependencies exist. |
+| Positive runtime-setting probe | Send a minimal valid request for selected settings such as tools, structured output, max output tokens, and reasoning/thinking. |
+| Negative boundary probe | Send intentionally invalid or too-low settings where safe, classify the provider error, and record the minimum/limit behavior. |
+
+Provider pattern notes:
+
+- Anthropic-style thinking uses a budget-token protocol. Thinking budget lower bounds and max-output interactions must be probed and recorded per route.
+- OpenAI-style reasoning may use effort or Responses API fields. Adapters map normalized `reasoning.effort` and output-token fields into the selected API surface.
+- Gemini-style generation config may use thinking budget fields that differ from OpenAI and Anthropic names.
+- DeepSeek/OpenAI-compatible routes may expose reasoning behavior through OpenAI-shaped requests but provider-specific responses.
+- Volcengine Ark must have a first-class `ark_runtime` adapter using the official Ark SDK. The existing OpenAI-compatible Ark endpoint remains a separate route/protocol path for comparison.
+
+Probe results are stored as normalized capabilities with `source: "probed_verified"` plus diagnostic metadata. Raw provider observations may be retained under route metadata for diagnosis, but linter/runtime validation uses normalized capability keys only.
 
 ## 10. Studio Frontend Design Constraints
 
@@ -933,21 +1259,20 @@ Primary files affected:
 - `apps/studio/backend/app/models/llm_config.py`
 - `apps/studio/backend/app/services/llm_credentials.py`
 - `apps/studio/backend/app/services/llm_roles.py`
-- `apps/studio/backend/app/services/llm_provider_test.py`
 - `apps/studio/backend/app/services/llm_import_drafts.py`
 - `apps/studio/backend/app/services/gateway_resolver.py`
 - `apps/studio/backend/app/services/llm_env.py`
 - `apps/studio/backend/app/services/migrations.py`
 - `apps/studio/backend/app/routers/llm.py`
 - `apps/studio/backend/app/services/copilot.py`
-- `apps/studio/backend/app/data/llm_providers/*.md`
+- `docs/development/llm_provider_notes/*.md`
 
 Changes:
 
 - Replace `providers: list[ProviderCredential]` with endpoint/route maps and runtime policy in the active credentials file.
 - Store import drafts outside active credentials in `llm_import_drafts.json` or a backend job store.
 - Move canonical mapping to the shared registry module.
-- Make provider tests create/update endpoint and route records.
+- Replace provider-oriented tests with endpoint test and route probe APIs.
 - Add route-level probe endpoints.
 - Add import draft lifecycle endpoints.
 - Add model profile CRUD and profile-apply endpoints.
@@ -955,7 +1280,8 @@ Changes:
 - Save roles as explicit route chains.
 - Replace backend provider-test fingerprint helper with gateway credential fingerprint helper.
 - Update Copilot provider resolution to use `route_id`.
-- Delete or rewrite old env-patching and old schema migration shims; runtime migration readers are not allowed.
+- Delete old provider-card probing helpers, env-patching, and old schema migration shims; runtime migration readers are not allowed.
+- Archive provider notes under docs only. Runtime code must not parse provider note markdown.
 
 ### 11.4 Studio Frontend
 

@@ -7,7 +7,7 @@ import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-e
 import { getCredentials, getRoles, testProvider, type CredentialsState, type ModelInfo, type RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
-import { draftsFromCredentials, draftFromAddProviderSubmission, providerCachedTestResult, providerTestParamsMatch } from "./provider-utils"
+import { draftsFromCredentials, draftFromAddProviderSubmission, providerCachedTestResult, providerDraftForAction, providerTestParamsMatch } from "./provider-utils"
 import { normalizeRolesDraft, validateRolesDraft } from "./role-utils"
 import type { ProviderDraft, SettingsPageProps, SettingsTab } from "./types"
 
@@ -188,7 +188,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   }
 
   async function runProviderTest(providerId: string) {
-    const draft = draftsRef.current.find((d) => d.id === providerId)
+    const draft = providerDraftForAction(draftsRef.current, providerId)
     if (!draft) return
     const testedParams = {
       api_key: draft.api_key,
@@ -208,7 +208,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         base_url: draft.base_url || undefined,
       })
 
-      const latestDraft = draftsRef.current.find((item) => item.id === providerId)
+      const latestDraft = providerDraftForAction(draftsRef.current, providerId)
       if (!latestDraft || !providerTestParamsMatch(latestDraft, testedParams)) {
         toast.info("Test result ignored because provider configuration changed.", { id: toastId })
         return

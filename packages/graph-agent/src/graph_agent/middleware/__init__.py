@@ -1,4 +1,4 @@
-"""MVP-3 middleware package: 4 core middleware (B3 simplification).
+"""MVP-3 middleware package: core middleware and MVP0 order contracts.
 
 The package replaces the legacy decorator-style middleware chain that
 used to live in ``cognitive/middlewares.py`` with four single-purpose
@@ -13,10 +13,8 @@ classes the framework wires in a fixed topological order:
 3. :class:`ExecutionControlMiddleware` (T9) — iteration counter,
    dead-end detection, lightweight loop detection, metrics
    aggregation.
-4. (TBD) Logging — emits the unified callback events; left for a
-   later commit since the existing ``LoggingCallback`` already
-   covers most of the surface and the middleware version requires
-   the MVP-4 phase_executor rewrite to fully take over.
+4. (TBD) Tracing / ToolError / LoopDetection — PR γ0 locks their
+   future order as string contracts; PR β wires the runtime classes.
 
 The fixed list :data:`DEFAULT_MIDDLEWARE_ORDER` exists so callers can
 construct the chain without re-deriving the order. A regression test
@@ -37,7 +35,10 @@ from __future__ import annotations
 
 from graph_agent.middleware.cognitive_flow import CognitiveFlowMiddleware
 from graph_agent.middleware.execution_control import ExecutionControlMiddleware
+from graph_agent.middleware.loop_detection import LoopDetectionMiddleware
 from graph_agent.middleware.protocol_validation import ProtocolValidationMiddleware
+from graph_agent.middleware.tool_error import ToolErrorHandlingMiddleware
+from graph_agent.middleware.tracing import TracingMiddleware
 
 # Fixed topological order for the MVP-3 middleware chain.
 #
@@ -54,9 +55,35 @@ DEFAULT_MIDDLEWARE_ORDER: tuple[type, ...] = (
     ExecutionControlMiddleware,
 )
 
+MVP0_MIDDLEWARE_ORDER_CONTRACT: tuple[str, ...] = (
+    "ProtocolValidation",
+    "CognitiveFlow",
+    "ExecutionControl",
+    "Tracing",
+    "ToolError",
+    "LoopDetection",
+)
+
+# Backward-compatible public name used by the γ0 TDD tests and future PR β.
+DEFAULT_MIDDLEWARE_ORDER_CONTRACT = MVP0_MIDDLEWARE_ORDER_CONTRACT
+
+from graph_agent.middleware.factory import (  # noqa: E402
+    MIDDLEWARE_ORDER_CONTRACT,
+    build_middleware_chain,
+    build_middleware_chain_cognitive_flow,
+)
+
 __all__ = [
     "DEFAULT_MIDDLEWARE_ORDER",
+    "DEFAULT_MIDDLEWARE_ORDER_CONTRACT",
+    "MIDDLEWARE_ORDER_CONTRACT",
+    "MVP0_MIDDLEWARE_ORDER_CONTRACT",
     "CognitiveFlowMiddleware",
     "ExecutionControlMiddleware",
+    "LoopDetectionMiddleware",
     "ProtocolValidationMiddleware",
+    "ToolErrorHandlingMiddleware",
+    "TracingMiddleware",
+    "build_middleware_chain",
+    "build_middleware_chain_cognitive_flow",
 ]

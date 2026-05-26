@@ -29,6 +29,7 @@ from graph_agent.core.loader import SkillLoader
 from app.models.runs import PredictDiagnosticExport
 from app.services.diagnostic_export import export_predict_diagnostics
 from app.services.gateway_resolver import build_gateway_model_resolver
+from app.services.skill_resolver import build_studio_skill_resolver
 from app.services.skills import ensure_workspace_skill_dir, predict_dir_for
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,7 @@ class PredictorService:
             skill_dir,
             mock_llm=mock_param,
             model_resolver=build_gateway_model_resolver(),
+            skill_resolver=build_studio_skill_resolver(),
             unattended=True,
             callbacks=[tracing_callback],
             **(input_data or {}),
@@ -216,7 +218,10 @@ def _attach_predict_trace(raw_result: Any, trace_phases: list[dict[str, Any]]) -
 def _fallback_trace_from_skill(skill_dir: Path, raw_result: Any) -> list[dict[str, Any]]:
     del raw_result
     try:
-        compiled = SkillLoader().compile_skill(skill_dir)
+        compiled = SkillLoader().compile_skill(
+            skill_dir,
+            skill_resolver=build_studio_skill_resolver(),
+        )
     except Exception:
         return []
     mode_by_phase = {node.phase_name: node.mode for node in compiled.nodes}

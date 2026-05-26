@@ -12,6 +12,8 @@ from uuid import uuid4
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field, create_model
 
+from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
+
 logger = logging.getLogger(__name__)
 
 _TYPE_MAP: dict[str, type[Any]] = {
@@ -76,6 +78,7 @@ def _resolve_skill_path(spec: SubSkillSpec) -> Path:
 def build_skill_tool(
     spec: SubSkillSpec,
     *,
+    skill_resolver: SkillResolverProtocol,
     parent_thread_id: str | None = None,
     parent_trace_dir: Path | None = None,
 ) -> StructuredTool:
@@ -109,6 +112,7 @@ def build_skill_tool(
             thread_id=thread_id,
             trace_dir=trace_dir,
             initial_context=dict(kwargs),
+            skill_resolver=skill_resolver,
         )
 
         elapsed = time.time() - start

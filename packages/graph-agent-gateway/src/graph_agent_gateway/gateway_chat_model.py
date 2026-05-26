@@ -20,7 +20,8 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ConfigDict, Field
 
 from graph_agent_gateway.exceptions import AllProvidersFailedError
-from graph_agent_gateway.llm_config import ResolvedProvider, ResolvedRole
+from graph_agent_gateway.registry.error_classification import classify_exception
+from graph_agent_gateway.registry.schema import ResolvedRole, ResolvedRoute
 from graph_agent_gateway.tracing import emit_llm_fallback_event
 
 ToolSpec = dict[str, Any] | type | Callable[..., object] | BaseTool
@@ -85,8 +86,7 @@ class GatewayChatModel(BaseChatModel):
     def _identifying_params(self) -> dict[str, object]:
         return {
             "role_name": self.role_name,
-            "active_model_code": self.resolved_role.active_model_code,
-            "candidates": [_candidate_id(candidate) for candidate in self.resolved_role.call_chain],
+            "candidates": [_candidate_id(candidate) for candidate in self.resolved_role.routes],
         }
 
     def _generate(
@@ -97,51 +97,148 @@ class GatewayChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         del stop, run_manager
-        request_messages = _langchain_messages_to_dict(messages)
+        request_messages = _apply_system_prompt_prefix(
+            _langchain_messages_to_dict(messages),
+            self.resolved_role.system_prompt_prefix,
+        )
         failures: list[dict[str, Any]] = []
+        runtime_policy = self.resolved_role.runtime_policy
 
-        for index, candidate in enumerate(self.resolved_role.call_chain):
+        for index, candidate in enumerate(self.resolved_role.routes):
             candidate_id = _candidate_id(candidate)
-            if _is_marked_down(self.client_manager, candidate):
+            if _is_marked_down(self.client_manager, candidate, runtime_policy):
                 continue
-            if self.probe_before_call and not _probe(self.client_manager, candidate):
-                _mark_down(self.client_manager, candidate, RuntimeError("probe failed"))
-                continue
+            if self.probe_before_call:
+                try:
+                    probe_ok = _probe(
+                        self.client_manager,
+                        candidate,
+                        runtime_policy,
+                    )
+                except Exception as exc:  # noqa: BLE001 - gateway fallback boundary
+                    classification = classify_exception(exc, route_id=candidate.route_id)
+                    failure = _failure_record(candidate, exc, classification.decision)
+                    failure["unclassified_default"] = classification.unclassified_default
+                    failure["provider_status_code"] = classification.provider_status_code
+                    failures.append(failure)
+                    if classification.decision != "fallback_allowed":
+                        raise AllProvidersFailedError(
+                            self.role_name,
+                            failures,
+                            phase_name=self.phase_name or "<gateway>",
+                        ) from exc
+                    _mark_down(self.client_manager, candidate, exc, runtime_policy)
+                    emit_llm_fallback_event(
+                        callbacks=self.event_callbacks,
+                        phase_name=self.phase_name or "<gateway>",
+                        from_provider=candidate_id,
+                        to_provider=self._next_candidate_id(index + 1),
+                        reason=f"{type(exc).__name__}: {exc}",
+                        code="[F-v3-gateway-all-providers-failed]",
+                        context=self._fallback_event_context(
+                            candidate,
+                            index + 1,
+                            fallback_decision=classification.decision,
+                            error_type=type(exc).__name__,
+                            provider_status_code=classification.provider_status_code,
+                            unclassified_default=classification.unclassified_default,
+                        ),
+                    )
+                    continue
+                if not probe_ok:
+                    failure = {
+                        "provider": candidate_id,
+                        "route_id": candidate.route_id,
+                        "endpoint_id": candidate.endpoint_id,
+                        "provider_model_id": candidate.provider_model_id,
+                        "canonical_id": candidate.canonical_id,
+                        "protocol": candidate.protocol,
+                        "error_type": "RuntimeError",
+                        "message": "probe failed",
+                        "fallback_decision": "fallback_allowed",
+                        "unclassified_default": False,
+                        "provider_status_code": None,
+                    }
+                    failures.append(failure)
+                    _mark_down(
+                        self.client_manager,
+                        candidate,
+                        RuntimeError("probe failed"),
+                        runtime_policy,
+                    )
+                    emit_llm_fallback_event(
+                        callbacks=self.event_callbacks,
+                        phase_name=self.phase_name or "<gateway>",
+                        from_provider=candidate_id,
+                        to_provider=self._next_candidate_id(index + 1),
+                        reason="RuntimeError: probe failed",
+                        code="[F-v3-gateway-all-providers-failed]",
+                        context=self._fallback_event_context(
+                            candidate,
+                            index + 1,
+                            fallback_decision="fallback_allowed",
+                            error_type="RuntimeError",
+                            provider_status_code=None,
+                        ),
+                    )
+                    continue
             try:
-                before_usage = _usage_total_calls(self.client_manager, candidate.provider_code)
+                before_usage = _usage_total_calls(self.client_manager, candidate)
                 response = _dispatch(
                     self.client_manager,
                     candidate,
                     request_messages,
-                    max_tokens=_int_kwarg(kwargs.get("max_tokens"), self.max_tokens),
-                    temperature=_float_kwarg(kwargs.get("temperature"), self.temperature),
+                    max_tokens=_int_kwarg(
+                        kwargs.get("max_tokens"),
+                        _effective_int(candidate, "max_output_tokens", self.max_tokens),
+                    ),
+                    temperature=_float_kwarg(
+                        kwargs.get("temperature"),
+                        _effective_float(candidate, "temperature", self.temperature),
+                    ),
                     reasoning=_bool_kwarg(
                         kwargs.get("reasoning"),
                         self.thinking_enabled
                         if self.thinking_enabled is not None
-                        else candidate.model_def.reasoning,
+                        else _effective_bool(candidate, "reasoning.enabled", False),
+                    ),
+                    thinking_budget_tokens=_optional_int_kwarg(
+                        kwargs.get("thinking_budget_tokens"),
+                        _effective_optional_int(candidate, "reasoning.budget_tokens"),
                     ),
                     tools=list(self.bound_tools) or None,
-                    tool_choice=self.tool_choice,
+                    tool_choice=self.tool_choice or _effective_text(candidate, "tool_choice"),
+                    runtime_policy=runtime_policy,
+                    top_p=_effective_optional_float(candidate, "top_p"),
+                    stop_sequences=_effective_string_list(candidate, "stop_sequences"),
+                    seed=_effective_optional_int(candidate, "seed"),
+                    parallel_tool_calls=_effective_optional_bool(candidate, "parallel_tool_calls"),
+                    structured_output=_effective_structured_output(candidate),
+                    reasoning_effort=_effective_text(candidate, "reasoning.effort"),
                 )
-                after_usage = _usage_total_calls(self.client_manager, candidate.provider_code)
+                after_usage = _usage_total_calls(self.client_manager, candidate)
                 if after_usage == before_usage:
                     usage = _usage_from_response(response)
                     _record_usage(
                         self.client_manager,
-                        candidate.provider_code,
+                        candidate.endpoint_id,
                         usage["prompt_tokens"],
                         usage["completion_tokens"],
                     )
                 return self._build_chat_result(response, candidate)
             except Exception as exc:  # noqa: BLE001 - gateway fallback boundary
-                failure = {
-                    "provider": candidate_id,
-                    "error_type": type(exc).__name__,
-                    "message": str(exc),
-                }
+                classification = classify_exception(exc, route_id=candidate.route_id)
+                failure = _failure_record(candidate, exc, classification.decision)
+                failure["unclassified_default"] = classification.unclassified_default
+                failure["provider_status_code"] = classification.provider_status_code
                 failures.append(failure)
-                _mark_down(self.client_manager, candidate, exc)
+                if classification.decision != "fallback_allowed":
+                    raise AllProvidersFailedError(
+                        self.role_name,
+                        failures,
+                        phase_name=self.phase_name or "<gateway>",
+                    ) from exc
+                _mark_down(self.client_manager, candidate, exc, runtime_policy)
                 emit_llm_fallback_event(
                     callbacks=self.event_callbacks,
                     phase_name=self.phase_name or "<gateway>",
@@ -149,7 +246,14 @@ class GatewayChatModel(BaseChatModel):
                     to_provider=self._next_candidate_id(index + 1),
                     reason=f"{type(exc).__name__}: {exc}",
                     code="[F-v3-gateway-all-providers-failed]",
-                    context={"role_name": self.role_name},
+                    context=self._fallback_event_context(
+                        candidate,
+                        index + 1,
+                        fallback_decision=classification.decision,
+                        error_type=type(exc).__name__,
+                        provider_status_code=classification.provider_status_code,
+                        unclassified_default=classification.unclassified_default,
+                    ),
                 )
 
         raise AllProvidersFailedError(
@@ -194,7 +298,7 @@ class GatewayChatModel(BaseChatModel):
     def _build_chat_result(
         self,
         response: Mapping[str, object],
-        candidate: ResolvedProvider,
+        candidate: ResolvedRoute,
     ) -> ChatResult:
         usage = _usage_from_response(response)
         finish_reason = _optional_text(response.get("finish_reason"))
@@ -202,10 +306,14 @@ class GatewayChatModel(BaseChatModel):
             content=_coerce_text(response.get("content")),
             additional_kwargs=_additional_kwargs_from_response(response),
             response_metadata={
-                "provider": candidate.provider_code,
-                "model": candidate.model_name,
+                "route_id": candidate.route_id,
+                "endpoint_id": candidate.endpoint_id,
+                "model": candidate.provider_model_id,
+                "canonical_id": candidate.canonical_id,
+                "protocol": candidate.protocol,
                 "finish_reason": finish_reason,
                 "usage": usage,
+                "effective_runtime_settings": _runtime_settings_metadata(candidate),
             },
         )
         return ChatResult(
@@ -214,31 +322,104 @@ class GatewayChatModel(BaseChatModel):
                     message=message,
                     generation_info={
                         "finish_reason": finish_reason,
-                        "provider": candidate.provider_code,
-                        "model": candidate.model_name,
+                        "route_id": candidate.route_id,
+                        "endpoint_id": candidate.endpoint_id,
+                        "model": candidate.provider_model_id,
+                        "canonical_id": candidate.canonical_id,
+                        "protocol": candidate.protocol,
                     },
                 )
             ],
             llm_output={
                 "token_usage": usage,
-                "model_name": candidate.model_name,
-                "provider": candidate.provider_code,
+                "model_name": candidate.provider_model_id,
+                "route_id": candidate.route_id,
+                "endpoint_id": candidate.endpoint_id,
+                "canonical_id": candidate.canonical_id,
+                "protocol": candidate.protocol,
+                "effective_runtime_settings": _runtime_settings_metadata(candidate),
             },
         )
 
     def _next_candidate_id(self, start_index: int) -> str:
-        for candidate in self.resolved_role.call_chain[start_index:]:
-            if not _is_marked_down(self.client_manager, candidate):
-                return _candidate_id(candidate)
-        return "<none>"
+        candidate = self._next_candidate(start_index)
+        return _candidate_id(candidate) if candidate is not None else "<none>"
+
+    def _next_candidate(self, start_index: int) -> ResolvedRoute | None:
+        for candidate in self.resolved_role.routes[start_index:]:
+            if not _is_marked_down(
+                self.client_manager,
+                candidate,
+                self.resolved_role.runtime_policy,
+            ):
+                return candidate
+        return None
+
+    def _fallback_event_context(
+        self,
+        candidate: ResolvedRoute,
+        next_index: int,
+        *,
+        fallback_decision: str,
+        error_type: str,
+        provider_status_code: int | None,
+        unclassified_default: bool = False,
+    ) -> dict[str, object]:
+        return {
+            "role_name": self.role_name,
+            "fallback_decision": fallback_decision,
+            "error_type": error_type,
+            "provider_status_code": provider_status_code,
+            "unclassified_default": unclassified_default,
+            "from_route": _route_diagnostics(candidate),
+            "to_route": _route_diagnostics(self._next_candidate(next_index)),
+            "effective_runtime_settings": _runtime_settings_metadata(candidate),
+        }
 
 
-def _candidate_id(candidate: ResolvedProvider) -> str:
-    return f"{candidate.provider_code}/{candidate.model_name}"
+def _candidate_id(candidate: ResolvedRoute) -> str:
+    return candidate.route_id
+
+
+def _route_diagnostics(candidate: ResolvedRoute | None) -> dict[str, object] | None:
+    if candidate is None:
+        return None
+    return {
+        "route_id": candidate.route_id,
+        "endpoint_id": candidate.endpoint_id,
+        "provider_model_id": candidate.provider_model_id,
+        "canonical_id": candidate.canonical_id,
+        "protocol": candidate.protocol,
+    }
+
+
+def _failure_record(
+    candidate: ResolvedRoute,
+    exc: BaseException,
+    fallback_decision: str,
+) -> dict[str, object]:
+    return {
+        "provider": _candidate_id(candidate),
+        "route_id": candidate.route_id,
+        "endpoint_id": candidate.endpoint_id,
+        "provider_model_id": candidate.provider_model_id,
+        "canonical_id": candidate.canonical_id,
+        "protocol": candidate.protocol,
+        "error_type": type(exc).__name__,
+        "message": str(exc),
+        "fallback_decision": fallback_decision,
+    }
+
+
+def _runtime_settings_metadata(candidate: ResolvedRoute) -> dict[str, dict[str, object]]:
+    return {
+        key: setting.model_dump(mode="json")
+        for key, setting in candidate.effective_runtime_settings.items()
+    }
 
 
 def _default_client_manager() -> Any:
-    from graph_agent.models.llm_client_manager import LLMClientManager
+    from graph_agent_gateway.client_manager import LLMClientManager
 
     return LLMClientManager
 
@@ -247,50 +428,41 @@ def _manager(client_manager: Any) -> Any:
     return client_manager if client_manager is not None else _default_client_manager()
 
 
-def _is_marked_down(client_manager: Any, candidate: ResolvedProvider) -> bool:
+def _is_marked_down(
+    client_manager: Any,
+    candidate: ResolvedRoute,
+    runtime_policy: Any,
+) -> bool:
     manager = _manager(client_manager)
-    if hasattr(manager, "is_provider_marked_down"):
-        return bool(manager.is_provider_marked_down(candidate.provider_code))
-    return bool(manager._is_provider_marked_down(candidate.provider_code, candidate.model_name))
+    return bool(manager.is_provider_marked_down(candidate, runtime_policy))
 
 
-def _probe(client_manager: Any, candidate: ResolvedProvider) -> bool:
+def _probe(client_manager: Any, candidate: ResolvedRoute, runtime_policy: Any) -> bool:
     manager = _manager(client_manager)
-    if hasattr(manager, "probe_provider"):
-        return bool(manager.probe_provider(candidate))
-    return bool(manager._probe_provider(candidate))
+    return bool(manager.probe_provider(candidate, runtime_policy))
 
 
 def _dispatch(
     client_manager: Any,
-    candidate: ResolvedProvider,
+    candidate: ResolvedRoute,
     messages: list[dict[str, Any]],
     **kwargs: Any,
 ) -> Mapping[str, object]:
     manager = _manager(client_manager)
-    if hasattr(manager, "dispatch_provider_call"):
-        response = manager.dispatch_provider_call(candidate, messages, **kwargs)
-    else:
-        response = manager._dispatch_provider_call(
-            candidate,
-            messages,
-            kwargs["max_tokens"],
-            kwargs["temperature"],
-            reasoning=kwargs.get("reasoning"),
-            tools=kwargs.get("tools"),
-            tool_choice=kwargs.get("tool_choice"),
-        )
+    response = manager.dispatch_provider_call(candidate, messages, **kwargs)
     if not isinstance(response, Mapping):
         return {"content": str(response), "usage": {}}
     return response
 
 
-def _mark_down(client_manager: Any, candidate: ResolvedProvider, exc: BaseException) -> None:
+def _mark_down(
+    client_manager: Any,
+    candidate: ResolvedRoute,
+    exc: BaseException,
+    runtime_policy: Any,
+) -> None:
     manager = _manager(client_manager)
-    if hasattr(manager, "mark_provider_down"):
-        manager.mark_provider_down(candidate.provider_code, exc)
-    else:
-        manager._mark_provider_down(candidate.provider_code, candidate.model_name)
+    manager.mark_provider_down(candidate, exc, runtime_policy)
 
 
 def _usage_from_response(response: Mapping[str, object]) -> dict[str, int]:
@@ -325,6 +497,85 @@ def _int_kwarg(value: object, default: int) -> int:
     if isinstance(value, str) and value.isdigit() and int(value) > 0:
         return int(value)
     return default
+
+
+def _optional_int_kwarg(value: object, default: int | None) -> int | None:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int | float) and value > 0:
+        return int(value)
+    if isinstance(value, str) and value.isdigit() and int(value) > 0:
+        return int(value)
+    return default
+
+
+def _effective_bool(candidate: ResolvedRoute, key: str, default: bool) -> bool:
+    setting = candidate.effective_runtime_settings.get(key)
+    value = setting.value if setting is not None else None
+    return value if isinstance(value, bool) else default
+
+
+def _effective_int(candidate: ResolvedRoute, key: str, default: int) -> int:
+    setting = candidate.effective_runtime_settings.get(key)
+    value = setting.value if setting is not None else None
+    return int(value) if isinstance(value, int | float) and value > 0 else default
+
+
+def _effective_float(candidate: ResolvedRoute, key: str, default: float) -> float:
+    setting = candidate.effective_runtime_settings.get(key)
+    value = setting.value if setting is not None else None
+    return float(value) if isinstance(value, int | float) else default
+
+
+def _effective_optional_int(candidate: ResolvedRoute, key: str) -> int | None:
+    setting = candidate.effective_runtime_settings.get(key)
+    value = setting.value if setting is not None else None
+    return int(value) if isinstance(value, int | float) and value > 0 else None
+
+
+def _effective_optional_float(candidate: ResolvedRoute, key: str) -> float | None:
+    setting = candidate.effective_runtime_settings.get(key)
+    value = setting.value if setting is not None else None
+    if isinstance(value, bool):
+        return None
+    return float(value) if isinstance(value, int | float) else None
+
+
+def _effective_optional_bool(candidate: ResolvedRoute, key: str) -> bool | None:
+    setting = candidate.effective_runtime_settings.get(key)
+    value = setting.value if setting is not None else None
+    return value if isinstance(value, bool) else None
+
+
+def _effective_text(candidate: ResolvedRoute, key: str) -> str | None:
+    setting = candidate.effective_runtime_settings.get(key)
+    value = setting.value if setting is not None else None
+    return value if isinstance(value, str) and value else None
+
+
+def _effective_string_list(candidate: ResolvedRoute, key: str) -> list[str] | None:
+    setting = candidate.effective_runtime_settings.get(key)
+    value = setting.value if setting is not None else None
+    if not isinstance(value, list):
+        return None
+    result = [item for item in value if isinstance(item, str)]
+    return result or None
+
+
+def _effective_structured_output(candidate: ResolvedRoute) -> dict[str, object] | None:
+    mode = _effective_text(candidate, "structured_output.mode")
+    if mode is None or mode == "none":
+        return None
+    result: dict[str, object] = {"mode": mode}
+    schema_setting = candidate.effective_runtime_settings.get("structured_output.json_schema")
+    if schema_setting is not None and isinstance(schema_setting.value, dict):
+        result["json_schema"] = schema_setting.value
+    strict_setting = candidate.effective_runtime_settings.get("structured_output.strict")
+    if strict_setting is not None and isinstance(strict_setting.value, bool):
+        result["strict"] = strict_setting.value
+    return result
 
 
 def _float_kwarg(value: object, default: float) -> float:
@@ -394,6 +645,21 @@ def _langchain_messages_to_dict(messages: list[BaseMessage]) -> list[dict[str, A
     return result
 
 
+def _apply_system_prompt_prefix(
+    messages: list[dict[str, Any]],
+    system_prompt_prefix: str,
+) -> list[dict[str, Any]]:
+    prefix = system_prompt_prefix.strip()
+    if not prefix:
+        return messages
+    if messages and messages[0].get("role") == "system":
+        merged = dict(messages[0])
+        content = _coerce_text(merged.get("content"))
+        merged["content"] = f"{prefix}\n\n{content}".strip() if content else prefix
+        return [merged, *messages[1:]]
+    return [{"role": "system", "content": prefix}, *messages]
+
+
 def _normalise_tool(tool: ToolSpec) -> dict[str, object]:
     if isinstance(tool, dict) and tool.get("type") == "function":
         return {str(key): value for key, value in tool.items()}
@@ -417,15 +683,19 @@ def _message_role(message: BaseMessage) -> str:
     return "user"
 
 
-def _usage_total_calls(client_manager: Any, provider_code: str) -> int:
+def _usage_total_calls(client_manager: Any, candidate: ResolvedRoute) -> int:
     manager = _manager(client_manager)
+    usage_total_calls = getattr(manager, "usage_total_calls", None)
+    if usage_total_calls is not None:
+        value = usage_total_calls(candidate)
+        return value if isinstance(value, int) else 0
     get_usage_stats = getattr(manager, "get_usage_stats", None)
     if get_usage_stats is None:
         return 0
     stats = get_usage_stats()
     if not isinstance(stats, Mapping):
         return 0
-    provider_stats = stats.get(provider_code)
+    provider_stats = stats.get(candidate.endpoint_id)
     if not isinstance(provider_stats, Mapping):
         return 0
     total_calls = provider_stats.get("total_calls")

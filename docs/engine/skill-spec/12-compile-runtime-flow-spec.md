@@ -60,7 +60,7 @@ Compiled GraphSkillAST
       │    ├─ success: markdown knowledge report
       │    └─ fail: WARN + raw excerpt fallback
       ├─ render cognitive template slots
-      │    ├─ static: role/goal/steps/protocols/exit_contract
+      │    ├─ static: role/goal/steps/protocols
       │    └─ dynamic: knowledge_base/examples registries/output_schema
       └─ build LangGraph Agent node with tools + prompt + max_iterations
 ```
@@ -80,7 +80,7 @@ Compiled GraphSkillAST
 1. 先有完整 Agent AST, 再跑 reference reader。
 2. Reference reader 失败只写 WARN trace, 不中断装配。
 3. `read_reference` / `read_example` tools 在 prompt 完成前绑定, 因为模板正文会提到这些工具。
-4. `exit_contract` 带 output_schema 放在最终 prompt 末尾。
+4. 系统内置默认 `exit_contract` 带 output_schema 放在最终 prompt 末尾。
 
 本流程引用 [Cognitive Template 内部插槽布局](./06-cognitive-template-spec.md#8-大插槽布局拓扑) 与 [Builtin Reference Reader Subagent 签名](./09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名)。
 

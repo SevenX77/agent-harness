@@ -2,13 +2,23 @@
 
 > **用途**: 2026-05-25 服务器崩溃 + GRAPH.md 格式 ground truth 恢复事件打断了 round-14 实施。本文件记录被打断时的完整任务状态, 防止再次丢失。
 > **唯一格式权威**: `docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md` (PM 拍板恢复的双轨制真相)。
-> **最后更新**: 2026-05-25 (parent master, 分支 `feat/round-14-skill-compilation-cutover`)
+> **最后更新**: 2026-05-26 (parent master, 集成分支 `stage/engine-v030`; main 在 74950f4)
+
+---
+
+## §0 最新状态 (2026-05-26 session, 接续必读)
+
+- **round-14 已 merge 进 main** (#96, squash, commit `74950f4`)。CI quality-gates 绿, 主控亲跑 928 passed 实证过。
+- **编译器真实 e2e 已补**: a3 写 + a1 review (4 PASS, 1 NEEDS FIX 已补) + 主控亲跑 **22 passed** (1 happy 完整 skill 逐字段产物断言 + 19 located-error 各 pin 唯一 `[F-v3-*]` 码 + 2 resolver, 含 round-14 cutover 核心的 legacy 旧格式拒收)。commit `94fc6be`, 以 merge-commit `60c27e7` 并入 `stage/engine-v030`。
+- **🔴 合并工作流变更 (PM 2026-05-26 拍板, 取代每 PR 直接 squash)**: 中间 PR 用 `git merge --no-ff` 进集成分支 `stage/engine-v030` (off main, 保留细粒度历史可 bisect); main 不动。整个 engine 阶段 PM **实测 golden** 后才**先打 tag 再 squash 进 main** 作 golden baseline。**铁律: squash 进 main 前必先打 tag**, 否则 granular 历史变游离对象被 git gc 清掉。详见 memory `[[staged-merge-workflow]]`。
+- **下一步 = PR C 组 (execution-runtime)**: cognitive 8 插槽装配 (C2, 明确不在 round-14, 是这步核心) / reference reader subagent / read_reference+read_example tools / ActionRegistry / e2e。
+- git 仓库已 gc 清理 (15000→0 游离对象, auto-gc 恢复)。
 
 ---
 
 ## §1 全程 PR 序列 todolist (V0.3.0 完整)
 
-> 显式 todolist 同步在 Task 工具 (TaskList 可查, task #12-#21)。
+> **本表 + §0 是持久 todolist 真相源**。in-session Task 工具列表不跨 session (新 session TaskList 为空), 新 session 第一件事就是按本表 + §0 用 TaskCreate 重建 in-session todolist。
 > **🔴 PR 流程铁律 (PM 2026-05-25)**: 每个 PR 做完**必须清空 a1/a2/a3 的 context** (`ccb ask <agent> /clear` 或 tmux keystroke `/clear`) 再开下一个 PR, 否则 agents context 越堆越多、注意力失焦严重。下一 PR brief 必含"读 ground truth + tasks.md + 上一 PR report"重建 context。
 
 | # | Round/组 | PR | 范围 | 状态 |
@@ -18,13 +28,13 @@
 | 3 | round-11 | PR β | Middleware refactor + CognitiveFlow 接管 finish_task/ask_clarification | ✅ merged (#93) |
 | 4 | round-12 | PR δ | Skill Resolution hard cutover (engine + Studio + SUBGRAPH) | ✅ merged (#94) |
 | 5 | round-13 | PR γ2 | State/IO Isolation 三区 state breaking cutover | ✅ merged (#95) |
-| 6 | round-14 | PR skill-compilation | Task B (AgentNodeAST/loader/GRAPH双轨/body 5标签/mention/subgraph/inline io) — **含 ground truth 恢复后重做 (step 1-9 见 §7/§8)** | 🔄 进行中 (重做) |
+| 6 | round-14 | PR skill-compilation (#96) | Task B (AgentNodeAST/loader/GRAPH双轨/body 5标签/mention/subgraph/inline io) | ✅ merged (#96, 74950f4) + 编译器真实 e2e 22 cases (60c27e7 on stage/engine-v030) |
 | 7 | 待定 round | PR C 组 | execution-runtime: cognitive 8插槽 / reference reader / read_reference+read_example tools / ActionRegistry / e2e | ⏳ pending (PR 拆分待规划) |
 | 8 | 待定 round | PR E 组 | tracing: AMBIGUITY_LOGGED / BUILTIN_SUBAGENT events / fallback payload | ⏳ pending |
 | 9 | 待定 round | PR F 组 | 错误码: 退役 [F-v21-*] / standard error payload | ⏳ pending |
 | 10 | 待定 round | PR G 组 | schema cleanup: V2.1主路径/codemod/parser stub/fixture/context_mapping/python_callable 全清 (cutover 收尾) | ⏳ pending |
 
-**注**: round 9-13 代码全已进 main。round-14 是当前工作 (ground truth 恢复后重做中)。后续 7-10 的 PR 边界 (拆几个 round) 待 round-14 完成后规划。
+**注**: round 9-14 代码全已进 main (#92-#96)。下一步 = PR C 组 (execution-runtime)。后续 7-10 PR 边界 (拆几个 round) 待规划。新 PR 走 §0 合并工作流 (merge-commit 进 `stage/engine-v030`, 不直接进 main)。
 
 ---
 

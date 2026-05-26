@@ -21,9 +21,9 @@ from graph_agent.core.exceptions import GraphAgentError, SkillCompilationError, 
 from graph_agent.core.graph_serializer import serialize_graph
 from graph_agent.core.loader import CompiledSkill, SkillLoader
 from graph_agent.core.manifest import (
+    AgentNodeAST,
     GraphManifest,
     GraphPhaseRef,
-    AgentNodeAST,
     LogicNodeAST,
     SubgraphNodeAST,
 )

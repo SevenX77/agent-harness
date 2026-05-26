@@ -197,7 +197,9 @@ def test_γ0_3_middleware_order_contract_constant_exists() -> None:
 def test_γ0_3_current_middleware_class_order_matches_contract_prefix() -> None:
     from graph_agent import middleware
 
-    implemented_prefix = tuple(cls.__name__.replace("Middleware", "") for cls in middleware.DEFAULT_MIDDLEWARE_ORDER)
+    implemented_prefix = tuple(
+        cls.__name__.replace("Middleware", "") for cls in middleware.DEFAULT_MIDDLEWARE_ORDER
+    )
 
     assert implemented_prefix == middleware.MVP0_MIDDLEWARE_ORDER_CONTRACT[:3]
 
@@ -209,7 +211,10 @@ def test_γ0_4_validator_signature_and_error_placeholders_are_documented() -> No
     assert "[F-v3-agent-validator-failed]" in docs
     assert "[F-v3-subgraph-validator-failed]" in docs
     assert "[F-v3-logic-validator-failed]" in docs
-    assert VALIDATOR_SIGNATURE == "def validate(output: dict, state_slice: dict, **kwargs) -> None | dict"
+    assert (
+        VALIDATOR_SIGNATURE
+        == "def validate(output: dict, state_slice: dict, **kwargs) -> None | dict"
+    )
     assert VALIDATOR_ERROR_CODES == (
         "[F-v3-agent-validator-failed]",
         "[F-v3-subgraph-validator-failed]",

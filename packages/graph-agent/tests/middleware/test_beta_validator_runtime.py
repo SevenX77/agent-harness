@@ -64,7 +64,9 @@ def test_validator_return_dict_or_exception_becomes_agent_validator_failed_feedb
         phase_name="main",
     )
 
-    def raises_validator(output: dict[str, Any], state_slice: dict[str, Any], **kwargs: Any) -> None:
+    def raises_validator(
+        output: dict[str, Any], state_slice: dict[str, Any], **kwargs: Any
+    ) -> None:
         raise ValueError("bad answer")
 
     exception_result = invoke_validator(

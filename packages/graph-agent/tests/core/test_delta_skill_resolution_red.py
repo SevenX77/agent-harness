@@ -164,13 +164,15 @@ def test_delta1_assemble_graph_missing_resolver_raises_v3_code(tmp_path: Path) -
     phase_ast = SubgraphNodeAST.model_validate(
         {
             "mode": "subgraph",
-                "name": "child",
-                "target_skill": "demo.child",
-                "io": {"inputs": {"type": "object"}, "outputs": {"type": "object"}},
-            }
-        )
+            "name": "child",
+            "target_skill": "demo.child",
+            "io": {"inputs": {"type": "object"}, "outputs": {"type": "object"}},
+        }
+    )
     compiled = CompiledSkill(
-        raw={"graph_topology": {"phases": [{"id": "child", "depends_on": ["input"], "output": True}]}},
+        raw={
+            "graph_topology": {"phases": [{"id": "child", "depends_on": ["input"], "output": True}]}
+        },
         manifest=GraphManifest(
             schema_version="v0.3.0",
             name="parent",

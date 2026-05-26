@@ -101,9 +101,7 @@ def _phase_local_inputs(
 
 def phase_output(data: dict[str, Any], phase_id: str) -> BlackboardData:
     if "inputs" in data:
-        raise GraphAgentFatalError(
-            "[F-v3-runtime-state-mapping-failed] data.inputs is read-only"
-        )
+        raise GraphAgentFatalError("[F-v3-runtime-state-mapping-failed] data.inputs is read-only")
     return {"inputs": {}, "phase_outputs": {phase_id: dict(data)}, "scratch": {}}
 
 
@@ -121,9 +119,7 @@ def scratch_from_state(state: BlackboardState) -> dict[str, Any]:
 
 def ensure_no_input_write(data: dict[str, Any]) -> None:
     if "inputs" in data:
-        raise GraphAgentFatalError(
-            "[F-v3-runtime-state-mapping-failed] data.inputs is read-only"
-        )
+        raise GraphAgentFatalError("[F-v3-runtime-state-mapping-failed] data.inputs is read-only")
 
 
 @dataclass(frozen=True)

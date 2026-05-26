@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from graph_agent.core.loader import CompiledSkill, SkillLoader
-from graph_agent.core.manifest import LogicNodeAST, AgentNodeAST
+from graph_agent.core.manifest import AgentNodeAST, LogicNodeAST
 
 pytest.skip(
     "by-design: V1 layout skill awaiting user V2.1 cutover (Phase 1 baseline)",

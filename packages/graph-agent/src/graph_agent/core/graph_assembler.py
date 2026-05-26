@@ -48,7 +48,6 @@ from graph_agent.core.subagents import (
     validate_subagent_tool_args,
 )
 from graph_agent.middleware.factory import build_middleware_chain_cognitive_flow
-from graph_agent.runtime.exit_contract import inject_exit_contract
 from graph_agent.runtime.state import BlackboardState
 from graph_agent.runtime.state_mapper import (
     PhaseWrapper,
@@ -382,6 +381,7 @@ def _build_skill_node(
         return response_state
 
     return _skill_node
+
 
 def _subagent_tool_map(
     phase_id: str,
@@ -783,7 +783,9 @@ def _is_terminal_phase(
     return phase_id in _terminal_phase_ids(manifest, compiled)
 
 
-def _terminal_phase_ids(manifest: GraphManifest, compiled: CompiledSkill | None = None) -> list[str]:
+def _terminal_phase_ids(
+    manifest: GraphManifest, compiled: CompiledSkill | None = None
+) -> list[str]:
     if compiled is None:
         return list(manifest.phases)
     topology = _graph_topology(compiled)

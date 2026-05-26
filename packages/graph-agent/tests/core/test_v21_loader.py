@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.loader import SkillLoader, load_workflow_from_md
-from graph_agent.core.manifest import GraphPhaseRef, AgentNodeAST
+from graph_agent.core.manifest import AgentNodeAST, GraphPhaseRef
 from graph_agent.core.parser import extract_raw_blocks
 from pydantic import ValidationError
 

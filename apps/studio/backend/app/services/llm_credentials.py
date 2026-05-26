@@ -62,12 +62,7 @@ def serialize_for_response(
 
     del provider_metadata
 
-    return {
-        "providers": [
-            provider.model_dump(mode="json")
-            for provider in data.providers
-        ]
-    }
+    return {"providers": [provider.model_dump(mode="json") for provider in data.providers]}
 
 
 def _persist_test_outcome(
@@ -139,8 +134,7 @@ def _persist_test_outcome(
             updated_fields.update(test_outcome_values_from_result(test_result))
         updated = existing.model_copy(update=updated_fields)
         data.providers = [
-            updated if provider.id == provider_id else provider
-            for provider in data.providers
+            updated if provider.id == provider_id else provider for provider in data.providers
         ]
         _save_credentials_unlocked(data, credential_path)
         return updated

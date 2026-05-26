@@ -306,9 +306,7 @@ async def test_probe_available_models_gemini_format_strips_prefix(
                     {"name": "models/gemini-2.5-pro"},
                 ]
             },
-            request=httpx.Request(
-                "GET", "https://generativelanguage.googleapis.com/v1beta/models"
-            ),
+            request=httpx.Request("GET", "https://generativelanguage.googleapis.com/v1beta/models"),
         ),
     )
 
@@ -453,7 +451,10 @@ Ignored.
         "anthropic", "sk-ant-test", "https://api.anthropic.com"
     )
 
-    assert [model.id for model in result] == ["claude-opus-4-5-20251101", "claude-haiku-4-5-20251001"]
+    assert [model.id for model in result] == [
+        "claude-opus-4-5-20251101",
+        "claude-haiku-4-5-20251001",
+    ]
 
 
 @pytest.mark.anyio
@@ -482,7 +483,9 @@ async def test_probe_available_models_http_error_raises(
     )
 
     with pytest.raises(httpx.HTTPStatusError):
-        await llm_provider_test.probe_available_models("openai", "bad-key", "https://api.openai.com")
+        await llm_provider_test.probe_available_models(
+            "openai", "bad-key", "https://api.openai.com"
+        )
 
 
 @pytest.mark.anyio

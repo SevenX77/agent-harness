@@ -96,12 +96,12 @@ def test_build_skill_tool_invokes_runner_and_returns_final_output(
     assert calls == [
         {
             "path": skill_path,
-                "thread_id": calls[0]["thread_id"],
-                "trace_dir": tmp_path / "traces" / "sub_child_tool",
-                "initial_context": {"topic": "contracts"},
-                "skill_resolver": calls[0]["skill_resolver"],
-            }
-        ]
+            "thread_id": calls[0]["thread_id"],
+            "trace_dir": tmp_path / "traces" / "sub_child_tool",
+            "initial_context": {"topic": "contracts"},
+            "skill_resolver": calls[0]["skill_resolver"],
+        }
+    ]
     assert str(calls[0]["thread_id"]).startswith("sub_parent_child_tool_")
 
 

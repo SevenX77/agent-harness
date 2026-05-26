@@ -78,12 +78,15 @@ def _agent_phase(
     frontmatter: str = "",
     body: str | None = None,
 ) -> None:
-    phase_body = body or """<role>Tester</role>
+    phase_body = (
+        body
+        or """<role>Tester</role>
 <goal>Exercise the round-14 compiler contract.</goal>
 <step id="S1" name="check">Use @protocol:P1 and @example:E1.</step>
 <protocol id="P1">Return a precise result.</protocol>
 <example id="E1">Input text becomes a result string.</example>
 """
+    )
     _write(
         root / "phases" / phase_id / "SKILL.md",
         f"""---
@@ -400,7 +403,7 @@ def test_physical_root_io_is_deprecated(
 @pytest.mark.parametrize(
     "body",
     [
-        "<role>Tester</role><goal>Goal</goal><steps><step id=\"S1\">bad</step></steps>",
+        '<role>Tester</role><goal>Goal</goal><steps><step id="S1">bad</step></steps>',
         "<role>Tester</role><goal>Goal</goal><exit_contract>bad</exit_contract>",
     ],
 )

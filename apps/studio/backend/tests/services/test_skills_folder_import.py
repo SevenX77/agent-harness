@@ -77,7 +77,10 @@ async def test_create_new_skill_imports_existing_nonempty_directory_without_writ
         "absolute_path": str(skill_dir),
         "l2_remote_url": "",
     }
-    assert await metadata_store.get_skill_summary("default", "story-deconstruction-imported") == summary
+    assert (
+        await metadata_store.get_skill_summary("default", "story-deconstruction-imported")
+        == summary
+    )
 
 
 def test_create_skill_import_rejects_non_skill_directory(

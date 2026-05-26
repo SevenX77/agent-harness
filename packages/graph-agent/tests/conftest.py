@@ -62,9 +62,7 @@ def _set_kw_default(func: Any, name: str, value: Any) -> None:
 
     signature = inspect.signature(func)
     parameters = [
-        parameter.replace(default=inspect.Parameter.empty)
-        if parameter.name == name
-        else parameter
+        parameter.replace(default=inspect.Parameter.empty) if parameter.name == name else parameter
         for parameter in signature.parameters.values()
     ]
     func.__signature__ = signature.replace(parameters=parameters)
@@ -89,6 +87,7 @@ def pytest_configure(config: pytest.Config) -> None:
         md_to_json.md_to_json,
     ):
         _set_kw_default(func, "skill_resolver", TEST_SKILL_RESOLVER)
+
 
 # V1 cutover legacy test quarantine: these files import old class names removed
 # by the V2 refactor. Keep them as reference corpus pending a V1->V2 migration
@@ -153,6 +152,7 @@ _V1_SKILL_AWAITING_CUTOVER_TESTS = {
     "tests/integration/test_mvp1_smoke.py::TestRealLLMSmoke::test_v3_run_one_chapter_honors_invariants",
     "tests/tools/test_dual_run_shadow.py::test_dual_run_shadow_hello_world_idempotency",
 }
+
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     xfail_marker = pytest.mark.xfail(

@@ -21,4 +21,3 @@ def build_gateway_model_resolver(roles_path: Path = ROLES_PATH) -> ModelResolver
         studio_roles.model_dump(mode="json", exclude={"migration_required"})
     )
     return ModelResolver(roles_data=gateway_roles)
-

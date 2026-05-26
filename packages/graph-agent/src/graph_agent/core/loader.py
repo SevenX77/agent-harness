@@ -158,9 +158,7 @@ class SkillLoader:
         _reject_deprecated_physical_io(root)
         manifest = _build_graph_manifest(graph_path, graph_frontmatter)
         body_phase_refs = _extract_body_phase_refs(graph_path, graph_body)
-        phase_tokens: dict[str, PhaseTokenInfo] = {
-            ref.name: ref.token for ref in body_phase_refs
-        }
+        phase_tokens: dict[str, PhaseTokenInfo] = {ref.name: ref.token for ref in body_phase_refs}
         graph_topology = _validate_graph_topology(
             graph_path,
             manifest.phases,
@@ -662,8 +660,7 @@ def _build_graph_manifest(
         _graph_fatal(
             path,
             1,
-            "[F-v3-graph-schema-version-mismatch] "
-            'GRAPH.md schema_version must be exactly "v0.3.0"',
+            '[F-v3-graph-schema-version-mismatch] GRAPH.md schema_version must be exactly "v0.3.0"',
         )
     if "io_inputs_ref" in data or "io_outputs_ref" in data:
         _graph_fatal(
@@ -751,9 +748,7 @@ def _extract_body_phase_refs(graph_path: Path, graph_body: str) -> list[BodyPhas
                 _xml_line(graph_body, match.start()),
                 "[F-v3-graph-depends-unknown] body <phase> depends_on is required",
             )
-        depends_on = tuple(
-            dep for dep in re.split(r"[\s,]+", depends_raw.strip()) if dep
-        )
+        depends_on = tuple(dep for dep in re.split(r"[\s,]+", depends_raw.strip()) if dep)
         attr_raw_start = match.start(1)
         token = PhaseTokenInfo(
             phase_id=name,
@@ -836,8 +831,7 @@ def _validate_graph_topology(
                 _graph_fatal(
                     graph_path,
                     ref.token.line_start,
-                    "[F-v3-graph-phase-cycle] "
-                    f"phase {ref.name!r} cannot depend on itself",
+                    f"[F-v3-graph-phase-cycle] phase {ref.name!r} cannot depend on itself",
                 )
             adjacency[dep].append(ref.name)
 
@@ -855,8 +849,7 @@ def _validate_graph_topology(
         _graph_fatal(
             graph_path,
             ref.token.line_start,
-            "[F-v3-graph-depends-unknown] "
-            f"phase {ref.name!r} depends_on unknown phase {dep!r}",
+            f"[F-v3-graph-depends-unknown] phase {ref.name!r} depends_on unknown phase {dep!r}",
         )
     _validate_output_phases(graph_path, body_phase_refs, adjacency)
     for phase in phases:
@@ -920,8 +913,7 @@ def _validate_no_islands(
             _graph_fatal(
                 graph_path,
                 1,
-                "[F-v3-graph-phase-island] "
-                f"phase {phase_id!r} is unreachable from input",
+                f"[F-v3-graph-phase-island] phase {phase_id!r} is unreachable from input",
             )
 
 
@@ -956,8 +948,7 @@ def _validate_phase_dir(graph_path: Path, phase: str, skill_root: Path) -> None:
         _graph_fatal(
             graph_path,
             1,
-            "[F-v3-graph-phase-node-missing] "
-            f"phase {phase!r} has no LOGIC.md/SUBGRAPH.md/SKILL.md",
+            f"[F-v3-graph-phase-node-missing] phase {phase!r} has no LOGIC.md/SUBGRAPH.md/SKILL.md",
         )
 
 
@@ -1201,7 +1192,9 @@ def _phase_validation_fatal(path: Path, mode: str, exc: ValidationError) -> NoRe
             "[F-v3-logic-validator-type-invalid] validator must be boolean",
         )
     domain = {"agent": "agent", "logic": "logic", "subgraph": "subgraph"}.get(mode, "graph")
-    _fatal(path, 1, f"[F-v3-{domain}-schema-unknown-field] {path.name} AST validation failed: {exc}")
+    _fatal(
+        path, 1, f"[F-v3-{domain}-schema-unknown-field] {path.name} AST validation failed: {exc}"
+    )
 
 
 def _extract_logic_actions(path: Path, body: str) -> list[str]:
@@ -1222,7 +1215,8 @@ def _validate_logic_actions_declared(path: Path, ast: LogicNodeAST, body: str) -
         _fatal(
             path,
             _frontmatter_key_line(path, "actions"),
-            "[F-v3-logic-actions-empty] LOGIC.md frontmatter actions must match body <action> order",
+            "[F-v3-logic-actions-empty] LOGIC.md frontmatter actions must match "
+            "body <action> order",
         )
 
 

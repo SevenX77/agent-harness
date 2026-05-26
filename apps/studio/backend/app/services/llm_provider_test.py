@@ -398,10 +398,9 @@ def _load_fallback_models_from_doc(vendor: str) -> list[ModelInfo]:
 
 
 def _model_infos_from_ids(model_ids: list[str], vendor: str) -> list[ModelInfo]:
-    return _dedupe_model_infos([
-        normalize_model_info_for_vendor(ModelInfo(id=model_id), vendor)
-        for model_id in model_ids
-    ])
+    return _dedupe_model_infos(
+        [normalize_model_info_for_vendor(ModelInfo(id=model_id), vendor) for model_id in model_ids]
+    )
 
 
 def _extract_section_4(md_content: str) -> str:
@@ -436,27 +435,33 @@ def _parse_models_response(json_resp: Any, vendor: str) -> list[ModelInfo]:
         return []
     data = json_resp.get("data")
     if isinstance(data, list):
-        return _dedupe_model_infos([
-            normalize_model_info_for_vendor(
-                ModelInfo(id=item["id"], capabilities=_extract_capabilities(item, id_keys={"id"})),
-                vendor,
-            )
-            for item in data
-            if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"]
-        ])
+        return _dedupe_model_infos(
+            [
+                normalize_model_info_for_vendor(
+                    ModelInfo(
+                        id=item["id"], capabilities=_extract_capabilities(item, id_keys={"id"})
+                    ),
+                    vendor,
+                )
+                for item in data
+                if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"]
+            ]
+        )
     models = json_resp.get("models")
     if isinstance(models, list):
-        return _dedupe_model_infos([
-            normalize_model_info_for_vendor(
-                ModelInfo(
-                    id=item["name"].removeprefix("models/"),
-                    capabilities=_extract_capabilities(item, id_keys={"name"}),
-                ),
-                vendor,
-            )
-            for item in models
-            if isinstance(item, dict) and isinstance(item.get("name"), str) and item["name"]
-        ])
+        return _dedupe_model_infos(
+            [
+                normalize_model_info_for_vendor(
+                    ModelInfo(
+                        id=item["name"].removeprefix("models/"),
+                        capabilities=_extract_capabilities(item, id_keys={"name"}),
+                    ),
+                    vendor,
+                )
+                for item in models
+                if isinstance(item, dict) and isinstance(item.get("name"), str) and item["name"]
+            ]
+        )
     return []
 
 

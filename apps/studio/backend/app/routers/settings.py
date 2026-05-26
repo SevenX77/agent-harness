@@ -21,9 +21,7 @@ def _with_effective_defaults(settings: AppSettings) -> AppSettings:
     """Return settings with concrete defaults for values the UI edits directly."""
     if settings.default_skills_directory:
         return settings
-    return settings.model_copy(
-        update={"default_skills_directory": str(config.DEFAULT_SKILLS_ROOT)}
-    )
+    return settings.model_copy(update={"default_skills_directory": str(config.DEFAULT_SKILLS_ROOT)})
 
 
 @router.get("", response_model=AppSettings)

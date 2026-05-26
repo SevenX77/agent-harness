@@ -43,8 +43,7 @@ def test_v030_agent_demo_fixture_compiles_and_renders_template() -> None:
         output_schema=ast.io.outputs if ast.io is not None else None,
         inline_examples=[example.content for example in ast.examples_inline],
         document_examples=[
-            {"id": example.id, "summary": example.summary}
-            for example in ast.examples
+            {"id": example.id, "summary": example.summary} for example in ast.examples
         ],
     )
 

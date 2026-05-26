@@ -41,7 +41,9 @@ def test_save_credentials_chmods_file_0600(
     monkeypatch.setenv("HOME", str(tmp_path))
 
     save_credentials(
-        LLMCredentialsFile(providers=[ProviderCredential(id="provider-1", name="Claude", api_key="secret")])
+        LLMCredentialsFile(
+            providers=[ProviderCredential(id="provider-1", name="Claude", api_key="secret")]
+        )
     )
 
     assert os.stat(credentials_path()).st_mode & 0o777 == 0o600
@@ -50,7 +52,9 @@ def test_save_credentials_chmods_file_0600(
 def test_serialize_for_response_returns_api_key_plaintext() -> None:
     data = LLMCredentialsFile(
         providers=[
-            ProviderCredential(id="provider-1", name="Claude", api_key="secret", base_url="https://base")
+            ProviderCredential(
+                id="provider-1", name="Claude", api_key="secret", base_url="https://base"
+            )
         ]
     )
 
@@ -307,7 +311,9 @@ def test_patch_environment_does_not_overwrite_existing_env(
     monkeypatch.setenv("PRIMARY_KEY", "existing-secret")
 
     llm_env.patch_environment_from_credentials(
-        LLMCredentialsFile(providers=[ProviderCredential(id="provider-1", name="Claude", api_key="")]),
+        LLMCredentialsFile(
+            providers=[ProviderCredential(id="provider-1", name="Claude", api_key="")]
+        ),
         roles_path=roles_path,
     )
 

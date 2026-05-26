@@ -40,9 +40,7 @@ def _base(root: Path, phases: str, outputs: dict[str, object] | None = None) -> 
             "saw_parent_message": {"type": "boolean"},
         },
     }
-    output_yaml = json.dumps(output_schema, ensure_ascii=False, indent=4).replace(
-        "\n", "\n    "
-    )
+    output_yaml = json.dumps(output_schema, ensure_ascii=False, indent=4).replace("\n", "\n    ")
     _write(
         root / "GRAPH.md",
         f"""---

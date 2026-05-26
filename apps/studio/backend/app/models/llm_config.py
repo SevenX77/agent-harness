@@ -203,8 +203,7 @@ class RoleModelEntry(BaseModel):
     providers: list[str] = Field(
         default_factory=list,
         description=(
-            "Ordered provider identifiers used as the fallback chain for this model "
-            "in a role."
+            "Ordered provider identifiers used as the fallback chain for this model in a role."
         ),
     )
     temperature: float | None = Field(

@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from graph_agent.core.manifest import LogicNodeAST, PhaseAST, AgentNodeAST, SubgraphNodeAST
+from graph_agent.core.manifest import AgentNodeAST, LogicNodeAST, PhaseAST, SubgraphNodeAST
 from pydantic import TypeAdapter
 
 _GOLDEN_DIR = Path(__file__).parents[1] / "golden" / "schema"

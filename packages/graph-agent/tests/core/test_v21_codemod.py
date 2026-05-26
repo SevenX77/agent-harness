@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from graph_agent.codemod.v21_migrator import migrate_skill_md
 from graph_agent.core.loader import SkillLoader
-from graph_agent.core.manifest import PhaseAST, AgentNodeAST
+from graph_agent.core.manifest import AgentNodeAST, PhaseAST
 from pydantic import TypeAdapter
 
 _TESTS_DIR = Path(__file__).parents[1]

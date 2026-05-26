@@ -48,9 +48,7 @@ def _base(root: Path, phases: str, outputs: dict[str, object] | None = None) -> 
         for phase_id, deps in phase_entries
     )
     output_schema = outputs or {"type": "object", "properties": {}}
-    output_yaml = json.dumps(output_schema, ensure_ascii=False, indent=4).replace(
-        "\n", "\n    "
-    )
+    output_yaml = json.dumps(output_schema, ensure_ascii=False, indent=4).replace("\n", "\n    ")
     _write(
         root / "GRAPH.md",
         f"""---

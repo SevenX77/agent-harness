@@ -156,6 +156,7 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 |---|---|---|---|---|
 | `[F-v3-cognitive-slot-render-failed]` | 装配期 | template slot 序列化失败 | 检查 body AST | [Cognitive](./06-cognitive-template-spec.md#静态组装插槽解析) |
 | `[F-v3-cognitive-output-schema-render-failed]` | 装配期 | output schema 无法嵌入 exit_contract | 修正 `io.outputs` | [Cognitive](./06-cognitive-template-spec.md#动态装配插槽解析) |
+| `[F-v3-cognitive-output-schema-invalid]` | 装配期/装配前 | finish_task 的 output_schema 结构非法 (非 JSON Schema) | 检查 Agent 的 `io.outputs` 或装配传入 schema | [Cognitive](./06-cognitive-template-spec.md#动态装配插槽解析) |
 | `[F-v3-reference-reader-input-invalid]` | 装配期 | reader 输入 JSON 非法 | 检查 references registry | [Builtin](./09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名) |
 | `[F-v3-reference-reader-output-invalid]` | 装配期 | reader 输出 JSON 非法 | 修 reader 模块 | [Builtin](./09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名) |
 | `[F-v3-tool-argument-invalid]` | 运行期 | builtin tool 参数非法 | 修正 tool 调用参数 | [Builtin](./09-builtin-modules-spec.md#按需调取-tools-read_reference--read_example) |

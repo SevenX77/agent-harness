@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import type { Connection } from "@xyflow/react"
 import { toast } from "sonner"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { GraphCanvas, type SkillGraphNodeData } from "@/components/GraphCanvas"
@@ -7,8 +8,9 @@ import { useCopilotContext } from "@/hooks/useCopilotContext"
 import { readLintStatus } from "@/hooks/useDebouncedLint"
 import { useSkills } from "@/hooks/useSkills"
 import { WelcomePage } from "@/components/welcome/WelcomePage"
-import { compileSkill, getSkillDetail, wsUrl } from "@/api/client"
+import { compileSkill, getSkillDetail, serializeSkillGraph, writeSkillFile, wsUrl } from "@/api/client"
 import type { CompileError } from "@/api/types"
+import { connectPhaseRefs, createPhaseDraft, disconnectPhaseRefs, type NewPhaseKind } from "@/components/GraphCanvas/canvas-authoring"
 import { sha256Hex } from "@/lib/hash"
 import { CenterActionBar, type SkillBuildStage } from "./center-action-bar"
 import { ConflictDialog } from "./ConflictDialog"
@@ -143,6 +145,93 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     })
     void mutateSkillDetail()
   }, [mutateSkillDetail])
+
+  const handlePhaseFileSave = useCallback(async ({
+    path,
+    content,
+    expectedHash,
+  }: {
+    path: string
+    content: string
+    expectedHash: string
+  }) => {
+    if (!currentSkillId) {
+      throw new Error("Open a skill before saving phase properties")
+    }
+    const result = await writeSkillFile(currentSkillId, path, content, expectedHash)
+    setActiveFileDetails((current) => {
+      const next = { ...current }
+      for (const side of ["left", "right"] as const) {
+        const file = current[side]
+        if (file?.skillId === currentSkillId && file.path === path) {
+          next[side] = { ...file, content, hash: result.hash, saveEnabled: true, title: undefined }
+        }
+      }
+      return next
+    })
+    toast.success("Saved phase properties")
+    void mutateSkillDetail()
+  }, [currentSkillId, mutateSkillDetail])
+
+  const handleCreatePhase = useCallback(async (kind: NewPhaseKind) => {
+    if (!currentSkillId || !skillDetail) {
+      toast.error("Open a skill before creating a phase")
+      return
+    }
+    const draft = createPhaseDraft(skillDetail, kind, currentSkillId)
+    const graphContent = skillDetail.files?.["GRAPH.md"]
+    const graphHash = graphContent === undefined ? null : await sha256Hex(graphContent)
+    try {
+      await writeSkillFile(currentSkillId, draft.filePath, draft.fileContent)
+      const serialized = await serializeSkillGraph(currentSkillId, draft.phases, graphHash)
+      await writeSkillFile(currentSkillId, "GRAPH.md", serialized.markdown_content, graphHash)
+      toast.success(`Created ${draft.phaseId}`)
+      await mutateSkillDetail()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not create phase")
+      void mutateSkillDetail()
+    }
+  }, [currentSkillId, mutateSkillDetail, skillDetail])
+
+  const handlePersistConnection = useCallback(async (connection: Connection) => {
+    if (!currentSkillId || !skillDetail) {
+      throw new Error("Open a skill before connecting phases")
+    }
+    const result = connectPhaseRefs(skillDetail, connection.source, connection.target)
+    if (!result.ok) {
+      throw new Error(result.message)
+    }
+    const graphContent = skillDetail.files?.["GRAPH.md"]
+    const graphHash = graphContent === undefined ? null : await sha256Hex(graphContent)
+    try {
+      const serialized = await serializeSkillGraph(currentSkillId, result.phases, graphHash)
+      await writeSkillFile(currentSkillId, "GRAPH.md", serialized.markdown_content, graphHash)
+      await mutateSkillDetail()
+    } catch (error) {
+      void mutateSkillDetail()
+      throw error
+    }
+  }, [currentSkillId, mutateSkillDetail, skillDetail])
+
+  const handleDisconnectConnection = useCallback(async (connection: { source: string; target: string }) => {
+    if (!currentSkillId || !skillDetail) {
+      throw new Error("Open a skill before disconnecting phases")
+    }
+    const result = disconnectPhaseRefs(skillDetail, connection.source, connection.target)
+    if (!result.ok) {
+      throw new Error(result.message)
+    }
+    const graphContent = skillDetail.files?.["GRAPH.md"]
+    const graphHash = graphContent === undefined ? null : await sha256Hex(graphContent)
+    try {
+      const serialized = await serializeSkillGraph(currentSkillId, result.phases, graphHash)
+      await writeSkillFile(currentSkillId, "GRAPH.md", serialized.markdown_content, graphHash)
+      await mutateSkillDetail()
+    } catch (error) {
+      void mutateSkillDetail()
+      throw error
+    }
+  }, [currentSkillId, mutateSkillDetail, skillDetail])
 
   const setFileInFlight = useCallback((side: EditorSide, active: boolean) => {
     setInFlight((current) => ({ ...current, [side]: active }))
@@ -379,6 +468,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   skillId={currentSkillId}
                   skillDetail={skillDetail}
                   selectedNode={selectedNode}
+                  onPhaseFileSave={handlePhaseFileSave}
                 />
               </ResizablePanel>
               <ResizableHandle />
@@ -398,6 +488,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   selectedNodeId={selectedNodeId}
                   onNodeSelect={handleNodeSelect}
                   onPanelChange={setActivePanel}
+                  onCreatePhase={handleCreatePhase}
+                  onPersistConnection={handlePersistConnection}
+                  onDisconnectConnection={handleDisconnectConnection}
                 />
               ) : currentSkillId === null ? (
                 <WelcomePage onSelectSkill={onSelectSkill} />
@@ -410,6 +503,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   selectedNodeId={selectedNodeId}
                   onNodeSelect={handleNodeSelect}
                   onPanelChange={setActivePanel}
+                  onCreatePhase={handleCreatePhase}
+                  onPersistConnection={handlePersistConnection}
+                  onDisconnectConnection={handleDisconnectConnection}
                 />
               )}
               {currentSkillId && !settingsOpen ? (

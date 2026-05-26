@@ -111,9 +111,9 @@ function ioFromManifest(manifest: SkillManifest | undefined): IoDeclaration {
 
 function subgraphRefFromFile(content: string | undefined): string | null {
   if (!content) return null
-  const block = content.match(/<sub_skill_ref>\s*([\s\S]*?)\s*<\/sub_skill_ref>/)
+  const block = content.match(/<target_skill>\s*([\s\S]*?)\s*<\/target_skill>/)
   if (block?.[1]) return block[1].trim()
-  const yaml = content.match(/^sub_skill_ref:\s*['"]?([^'"\n]+)['"]?/m)
+  const yaml = content.match(/^target_skill:\s*['"]?([^'"\n]+)['"]?/m)
   return yaml?.[1]?.trim() ?? null
 }
 
@@ -149,6 +149,10 @@ function subagentsForPhase(detail: SkillDetail | undefined, phaseId: string): Su
   return subagentsFromUnknown((phaseConfig as Record<string, unknown>).subagents)
 }
 
+function stringListFromUnknown(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
 export function buildNodes(
   skillId: string,
   detail: SkillDetail | undefined,
@@ -159,29 +163,33 @@ export function buildNodes(
   const phases = phasesFromManifest(detail?.manifest, skillId)
   const io = ioFromManifest(detail?.manifest)
   const topologyById = new Map((detail?.graph_topology ?? []).map((phase) => [phase.id, phase]))
-  const phaseNodes: SkillGraphNode[] = phases.map((phase, index) => ({
-    id: phase.name,
-    type: 'skill',
-    position: { x: 160 + (index % 2) * 320, y: 80 + index * 150 },
-    data: {
-      label: phase.name,
-      mode: topologyById.get(phase.name)?.mode ?? phase.mode,
-      role: phase.mode === 'llm' ? phase.llm_role : null,
-      tools: phase.mode === 'llm' ? phase.agent_tools : [],
-      subagents: subagentsForPhase(detail, phase.name),
-      filePath: `phases/${phase.name}/${phaseKindFile({
-        mode: topologyById.get(phase.name)?.mode ?? phase.mode,
-        subgraphPath: phase.subgraph ?? subgraphRefFromFile(detail?.files?.[`phases/${phase.name}/SUBGRAPH.md`]),
-      })}`,
-      status: statusByNodeId[phase.name] ?? (index === 0 ? 'success' : 'idle'),
-      dependsOn: topologyById.get(phase.name)?.depends_on ?? normalizeDependsOn(phase.depends_on),
-      subgraphPath: phase.subgraph ?? subgraphRefFromFile(detail?.files?.[`phases/${phase.name}/SUBGRAPH.md`]),
-      isExpanded: expandedSubgraphs.has(phase.name),
-      onToggleSubgraph: (phase.subgraph ?? detail?.files?.[`phases/${phase.name}/SUBGRAPH.md`])
-        ? () => onToggleSubgraph(phase.name)
-        : undefined,
-    },
-  }))
+  const phaseNodes: SkillGraphNode[] = phases.map((phase, index) => {
+    const topology = topologyById.get(phase.name)
+    const mode = topology?.mode ?? phase.mode
+    const subgraphPath = phase.subgraph ?? subgraphRefFromFile(detail?.files?.[`phases/${phase.name}/SUBGRAPH.md`])
+    const filePath = `phases/${phase.name}/${phaseKindFile({ mode, subgraphPath })}`
+    const frontmatter = phaseFrontmatter(detail?.files?.[filePath])
+    return {
+      id: phase.name,
+      type: 'skill',
+      position: { x: 160 + (index % 2) * 320, y: 80 + index * 150 },
+      data: {
+        label: phase.name,
+        mode,
+        role: phase.mode === 'llm' ? phase.llm_role : null,
+        tools: mode === 'skill' ? stringListFromUnknown(frontmatter?.tools) : phase.mode === 'llm' ? phase.agent_tools : [],
+        subagents: subagentsForPhase(detail, phase.name),
+        filePath,
+        status: statusByNodeId[phase.name] ?? (index === 0 ? 'success' : 'idle'),
+        dependsOn: topology?.depends_on ?? normalizeDependsOn(phase.depends_on),
+        subgraphPath,
+        isExpanded: expandedSubgraphs.has(phase.name),
+        onToggleSubgraph: (phase.subgraph ?? detail?.files?.[`phases/${phase.name}/SUBGRAPH.md`])
+          ? () => onToggleSubgraph(phase.name)
+          : undefined,
+      },
+    }
+  })
   return [
     {
       id: INPUT_ID,

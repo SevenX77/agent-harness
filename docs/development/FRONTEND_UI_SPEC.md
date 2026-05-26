@@ -114,7 +114,7 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - Provider 名称在 row 内必须单行省略并配 Radix Tooltip 展示完整名称，避免窄卡片中把 provider label 拆成两行。
 - Role list 和 Available Routes 这类可能很长的设置列表必须渐进渲染，保持搜索/计数完整，同时用 sentinel 自动加载后续批次。
 - Role list 必须按用途分区展示，当前分为 `Graph Agent Roles` 与 `Copilot Roles`；每个分区底部都要提供对应的 `Add Graph Agent Role` / `Add Copilot Role` 入口，并与下一段分区保持明确垂直间距。Graph Agent 分类与 role icon 使用 engine/cog 语义图标，role 标题行需要使用默认字体，整行 controls 必须垂直居中对齐；编辑和删除等 role 级动作统一收进标题右侧的三点 `DropdownMenu`，删除必须使用统一 `DeleteConfirmDialog` 二次确认。
-- Tauri/WebKit 下非编辑区双击可能触发原生文本选择命令，导致 macOS `Edit` 菜单闪烁或系统提示音；应用根部必须保留全局 double-click guard，在非输入、非 `contenteditable`、非 Monaco 区域阻止原生默认选择行为和 `selectstart`，并用 CSS 将普通 chrome 设为不可文本选择；但不能阻止事件冒泡，以免破坏业务组件自己的 `onDoubleClick`。确实需要保留原生双击选择的区域使用 `data-allow-native-double-click` 标记。Tauri macOS shell 不使用默认菜单，必须显式重建不包含 `Edit` submenu 的 app menu，避免 `copy:` / `selectAll:` 等预置 selector 在 WebKit selection 状态变化时抢占系统反馈。
+- Tauri/WebKit 下非编辑区双击可能触发原生文本选择命令，导致 macOS `Edit` 菜单闪烁或系统提示音；应用根部必须保留全局 double-click guard，在非输入、非 `contenteditable`、非 Monaco 区域阻止原生默认选择行为和 `selectstart`，并用 CSS 将普通 chrome 设为不可文本选择；但不能阻止事件冒泡，以免破坏业务组件自己的 `onDoubleClick`。确实需要保留原生双击选择的区域使用 `data-allow-native-double-click` 标记。Tauri macOS shell 不使用默认菜单，且自定义 app menu 不添加原生 `Edit` submenu；普通 input/textarea 的 `Cmd+V` / `Ctrl+V` 由前端 editable paste fallback 接管，避免为了粘贴恢复原生 Edit 菜单而重引入双击系统提示音。
 - Role 级三点菜单这类 hover-adjacent action 必须把鼠标双击视为 no-op，键盘打开菜单仍需保留。
 - LLM Roles autosave 必须串行化并忽略被更新快照 supersede 的旧请求结果；当用户创建空 role 或拖入模型后，旧的 400 不应覆盖新的 pending/saved 状态或弹出陈旧 toast。
 - 层级编辑器必须用不同 shadcn surface/variant 区分层级，例如外层 role 用 `Card`，可排序 model/provider 行用 `Item` 的不同 variant，并且只使用语义化 token。
@@ -132,6 +132,9 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 
 ## 3. GraphCanvas 画布样式覆写
 原生的 `@xyflow/react` 深色主题仍带有较重的网页感，在 `GraphCanvas` 组件和全局 `index.css` 中进行了覆写：
+- **默认布局对齐**: 单链或可直线化的默认流程（例如 `Input -> init -> Output`）必须采用节点中心点坐标作为布局基准，并让左右 handle 在同一水平中心线上；同一水平线的连接边应渲染为直线路径，避免无意义的 Bezier 弯线或 IO 节点与 phase 节点上下错位。
+- **节点选择反馈**: 单击 skill node 必须立即打开左侧 `Properties` panel 并同步选中态；双击继续用于打开对应 phase 文件。左侧工作区工具栏顺序固定为 `Assets`, `Properties`, `Input`, `Trace Timeline`, `Local History`，避免节点检查路径被埋在第三顺位之后。
+- **Canvas authoring 文件驱动**: 画布上的新建 phase、属性编辑、节点连线都必须先写入 phase 文件或 `GRAPH.md`，再通过刷新 `SkillDetail` 让 canvas 重绘；禁止渲染只存在于前端 state 的“假节点”。`GRAPH.md` 的 phase `src` 必须写 phase 目录（如 `phases/agent`），不要写具体文件路径（如 `phases/agent/SKILL.md`），否则 graph-agent loader 会把它当目录继续查找节点文件。`Properties` 只编辑当前 v2.1 AST 明确支持的字段：`LOGIC.md` 使用 `mode` + `<python_callable>`，`SKILL.md` 使用 `mode` + `tools` + `<system_prompt>` + `<exit_contract>`，`SUBGRAPH.md` 使用 `mode` + `target_skill`；不得写回旧版 `prompt`、`agent_tools`、`execute_steps`、`sub_skill_ref` 等会被后端 AST 拒绝的字段。保存时必须保留未知字段和正文。ReactFlow 连线必须持久化为 `GRAPH.md` 的 `depends_on`，不能只停留在本地 edge state。
 - **节点主体 (`SkillNode`)**: 应用统一的背景令牌 (`bg-card`) (见 `GraphCanvas.tsx:143`)；处于执行态时，采用呼吸式的高亮效果，但仅应用在节点内部的 Status 徽章上 (通过 Tailwind `animate-pulse-primary` 实现，见 `GraphCanvas.tsx:186`)。
 - **连接线 (Edges)**: `[TODO: 设计意图未实现]` 当前仅实现了基础连线和数据包中心点 (见 `ContextEdge.tsx:37`)，原设计的浅灰色常态及数据流动画渐变色均未实现。
 - **连接点 (Handles)**: `[TODO: 设计意图未实现]` 目前已覆写基础样式 (如 `!size-2.5 !bg-primary`，见 `GraphCanvas.tsx:155`)，但未实现“仅 hover 时激活显示”的隐藏防噪逻辑。

@@ -62,5 +62,6 @@ def test_quoted_v0_3_0_parses_as_valid_v030_root(tmp_path: Path) -> None:
 def test_unquoted_1_5_fatals_cleanly(tmp_path: Path) -> None:
     _write_v030_skill(tmp_path, "1.5")
 
-    with pytest.raises(SkillLoadError, match=r"F-v3-graph-schema-version-mismatch"):
+    with pytest.raises(SkillLoadError) as exc_info:
         SkillLoader().compile_skill(tmp_path)
+    assert exc_info.value.payload.code == "[F-v3-graph-schema-version-mismatch]"

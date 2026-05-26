@@ -43,7 +43,7 @@ except ModuleNotFoundError:  # pragma: no cover
     RuamelYAML = None
     YAMLError = yaml.YAMLError
 
-from graph_agent.core.exceptions import SkillLoadError
+from graph_agent.core.exceptions import SkillLoadError, make_error_payload
 
 # 方针 3.2: lines reported by ruamel are 0-indexed *within* the
 # YAML stream we hand it. ``parse_skill_file`` strips the opening
@@ -171,7 +171,9 @@ def locate_line_for_pydantic_loc(root: Any, loc: Sequence[Any]) -> int | None:
 
 
 def _fatal(path: Path, line: int, message: str) -> NoReturn:
-    raise SkillLoadError(f"[F-v3-route] {path}:{line} {message}")
+    code = "[F-v3-graph-phase-id-invalid]"
+    detail = f"{path}:{line} {message}"
+    raise SkillLoadError(detail, payload=make_error_payload(code, detail, source_path=path))
 
 
 def parse_markdown_parts(path: Path | str) -> tuple[dict[str, Any], str, dict[str, int]]:

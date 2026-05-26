@@ -65,8 +65,9 @@ io:
 def test_action_registry_rejects_non_primary_action_names(name: str) -> None:
     registry = ActionRegistry.empty()
 
-    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-logic-action-name-invalid\]"):
+    with pytest.raises(GraphAgentFatalError) as exc_info:
         registry.resolve("logic", name)
+    assert exc_info.value.payload.code == "[F-v3-logic-action-name-invalid]"
 
 
 def test_runtime_dynamic_return_key_must_use_v030_output_field_error(tmp_path: Path) -> None:
@@ -77,11 +78,10 @@ def test_runtime_dynamic_return_key_must_use_v030_output_field_error(tmp_path: P
     )
     graph = assemble_graph(compile_skill(tmp_path, cache=False)).graph
 
-    with pytest.raises(
-        GraphAgentFatalError,
-        match=r"\[F-v3-logic-output-field-undeclared\].*missing",
-    ):
+    with pytest.raises(GraphAgentFatalError) as exc_info:
         graph.invoke({"data": {"inputs": {"foo": 1}}, "flow": {}, "messages": [], "run_id": "r1"})
+    assert exc_info.value.payload.code == "[F-v3-logic-output-field-undeclared]"
+    assert "missing" in str(exc_info.value)
 
 
 def test_action_returning_non_dict_is_runtime_fatal(tmp_path: Path) -> None:
@@ -92,8 +92,9 @@ def test_action_returning_non_dict_is_runtime_fatal(tmp_path: Path) -> None:
     )
     graph = assemble_graph(compile_skill(tmp_path, cache=False)).graph
 
-    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-logic-action-return-invalid\]"):
+    with pytest.raises(GraphAgentFatalError) as exc_info:
         graph.invoke({"data": {"inputs": {"foo": 1}}, "flow": {}, "messages": [], "run_id": "r1"})
+    assert exc_info.value.payload.code == "[F-v3-logic-action-return-invalid]"
 
 
 def test_ctx_data_mutation_key_must_be_declared_and_not_written(tmp_path: Path) -> None:
@@ -104,8 +105,7 @@ def test_ctx_data_mutation_key_must_be_declared_and_not_written(tmp_path: Path) 
     )
     graph = assemble_graph(compile_skill(tmp_path, cache=False)).graph
 
-    with pytest.raises(
-        GraphAgentFatalError,
-        match=r"\[F-v3-logic-output-field-undeclared\].*missing",
-    ):
+    with pytest.raises(GraphAgentFatalError) as exc_info:
         graph.invoke({"data": {"inputs": {"foo": 1}}, "flow": {}, "messages": [], "run_id": "r1"})
+    assert exc_info.value.payload.code == "[F-v3-logic-output-field-undeclared]"
+    assert "missing" in str(exc_info.value)

@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from graph_agent.core.exceptions import GraphAgentFatalError
+from graph_agent.core.exceptions import GraphAgentFatalError, make_error_payload
 
 
 def read_declared_reference(
@@ -17,31 +17,43 @@ def read_declared_reference(
 ) -> str:
     del query, mode
     if not isinstance(reference_id, str) or not reference_id:
-        raise GraphAgentFatalError("[F-v3-tool-argument-invalid] reference_id must be a string")
+        detail = "reference_id must be a string"
+        raise GraphAgentFatalError(
+            detail,
+            payload=make_error_payload("[F-v3-tool-argument-invalid]", detail),
+        )
     spec = references.get(reference_id)
     if spec is None:
-        raise GraphAgentFatalError(f"[F-v3-resource-reference-not-found] {reference_id!r}")
+        detail = f"{reference_id!r}"
+        raise GraphAgentFatalError(
+            detail,
+            payload=make_error_payload("[F-v3-resource-reference-not-found]", detail),
+        )
     return read_resource_file(
         root=root,
         relative_path=getattr(spec, "path", ""),
-        error_code="[F-v3-resource-reference-path-invalid]",
+        code="[F-v3-resource-reference-path-invalid]",
     )
 
 
-def read_resource_file(*, root: Path, relative_path: str, error_code: str) -> str:
+def read_resource_file(*, root: Path, relative_path: str, code: str) -> str:
     if not isinstance(relative_path, str) or not relative_path:
-        raise GraphAgentFatalError(f"{error_code} empty resource path")
+        detail = "empty resource path"
+        raise GraphAgentFatalError(detail, payload=make_error_payload(code, detail))
     raw_path = Path(relative_path)
     if raw_path.is_absolute():
-        raise GraphAgentFatalError(f"{error_code} {relative_path!r} escapes skill root")
+        detail = f"{relative_path!r} escapes skill root"
+        raise GraphAgentFatalError(detail, payload=make_error_payload(code, detail))
     candidate = (root / raw_path).resolve()
     root_resolved = root.resolve()
     try:
         candidate.relative_to(root_resolved)
     except ValueError as exc:
-        raise GraphAgentFatalError(f"{error_code} {relative_path!r} escapes skill root") from exc
+        detail = f"{relative_path!r} escapes skill root"
+        raise GraphAgentFatalError(detail, payload=make_error_payload(code, detail)) from exc
     if not candidate.is_file():
-        raise GraphAgentFatalError(f"{error_code} {relative_path!r} is not readable")
+        detail = f"{relative_path!r} is not readable"
+        raise GraphAgentFatalError(detail, payload=make_error_payload(code, detail))
     return candidate.read_text(encoding="utf-8")
 
 

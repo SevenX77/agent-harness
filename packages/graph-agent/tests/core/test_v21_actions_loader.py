@@ -163,8 +163,10 @@ def test_action_missing_ctx_param_fatal(tmp_path: Path) -> None:
         tmp_path / "phases" / "logic_phase" / "actions" / "foo.py", "def foo(x: int):\n    pass\n"
     )
 
-    with pytest.raises(SkillLoadError, match=r"\[F-v3-actions\].*context/ctx"):
+    with pytest.raises(SkillLoadError) as exc_info:
         SkillLoader().compile_skill(tmp_path)
+    assert exc_info.value.payload.code == "[F-v3-logic-action-entrypoint-missing]"
+    assert "context/ctx" in str(exc_info.value)
 
 
 def test_tool_with_ctx_param_fatal(tmp_path: Path) -> None:
@@ -174,8 +176,10 @@ def test_tool_with_ctx_param_fatal(tmp_path: Path) -> None:
         "def bar(ctx, x: int) -> str:\n    return 'x'\n",
     )
 
-    with pytest.raises(SkillLoadError, match=r"\[F-v3-actions\].*blackboard"):
+    with pytest.raises(SkillLoadError) as exc_info:
         SkillLoader().compile_skill(tmp_path)
+    assert exc_info.value.payload.code == "[F-v3-agent-tool-unknown]"
+    assert "blackboard" in str(exc_info.value)
 
 
 def test_tool_imports_context_fatal(tmp_path: Path) -> None:
@@ -187,8 +191,10 @@ def test_tool_imports_context_fatal(tmp_path: Path) -> None:
         "    return str(x)\n",
     )
 
-    with pytest.raises(SkillLoadError, match=r"\[F-v3-actions\].*Context facade"):
+    with pytest.raises(SkillLoadError) as exc_info:
         SkillLoader().compile_skill(tmp_path)
+    assert exc_info.value.payload.code == "[F-v3-agent-tool-unknown]"
+    assert "Context facade" in str(exc_info.value)
 
 
 def test_action_in_skill_phase_fatal(tmp_path: Path) -> None:
@@ -197,8 +203,10 @@ def test_action_in_skill_phase_fatal(tmp_path: Path) -> None:
         tmp_path / "phases" / "skill_phase" / "actions" / "foo.py", "def foo(context):\n    pass\n"
     )
 
-    with pytest.raises(SkillLoadError, match=r"\[F-v3-actions\].*actions/ is only allowed"):
+    with pytest.raises(SkillLoadError) as exc_info:
         SkillLoader().compile_skill(tmp_path)
+    assert exc_info.value.payload.code == "[F-v3-logic-action-dir-missing]"
+    assert "actions/ is only allowed" in str(exc_info.value)
 
 
 def test_tool_in_logic_phase_fatal(tmp_path: Path) -> None:
@@ -208,8 +216,10 @@ def test_tool_in_logic_phase_fatal(tmp_path: Path) -> None:
         "def bar() -> str:\n    return 'x'\n",
     )
 
-    with pytest.raises(SkillLoadError, match=r"\[F-v3-actions\].*tools/ is only allowed"):
+    with pytest.raises(SkillLoadError) as exc_info:
         SkillLoader().compile_skill(tmp_path)
+    assert exc_info.value.payload.code == "[F-v3-agent-tool-unknown]"
+    assert "tools/ is only allowed" in str(exc_info.value)
 
 
 def test_action_in_subgraph_phase_fatal(tmp_path: Path) -> None:
@@ -220,8 +230,10 @@ def test_action_in_subgraph_phase_fatal(tmp_path: Path) -> None:
         "def foo(context):\n    pass\n",
     )
 
-    with pytest.raises(SkillLoadError, match=r"\[F-v3-actions\].*SUBGRAPH"):
+    with pytest.raises(SkillLoadError) as exc_info:
         SkillLoader().compile_skill(tmp_path)
+    assert exc_info.value.payload.code == "[F-v3-logic-action-dir-missing]"
+    assert "SUBGRAPH" in str(exc_info.value)
 
 
 def test_tool_in_subgraph_phase_fatal(tmp_path: Path) -> None:
@@ -231,16 +243,20 @@ def test_tool_in_subgraph_phase_fatal(tmp_path: Path) -> None:
         tmp_path / "phases" / "subgraph_phase" / "tools" / "bar.py", "def bar():\n    return 'x'\n"
     )
 
-    with pytest.raises(SkillLoadError, match=r"\[F-v3-actions\].*SUBGRAPH"):
+    with pytest.raises(SkillLoadError) as exc_info:
         SkillLoader().compile_skill(tmp_path)
+    assert exc_info.value.payload.code == "[F-v3-agent-tool-unknown]"
+    assert "SUBGRAPH" in str(exc_info.value)
 
 
 def test_root_level_actions_fatal(tmp_path: Path) -> None:
     _single_skill(tmp_path)
     _write(tmp_path / "actions" / "foo.py", "def foo(context):\n    pass\n")
 
-    with pytest.raises(SkillLoadError, match=r"\[F-v3-actions\].*root-level actions"):
+    with pytest.raises(SkillLoadError) as exc_info:
         SkillLoader().compile_skill(tmp_path)
+    assert exc_info.value.payload.code == "[F-v3-logic-action-dir-missing]"
+    assert "root-level actions" in str(exc_info.value)
 
 
 def test_root_level_tools_allowed(tmp_path: Path) -> None:
@@ -264,13 +280,17 @@ def test_duplicate_action_id_fatal(tmp_path: Path) -> None:
         "def my_action(context):\n    pass\n",
     )
 
-    with pytest.raises(SkillLoadError, match=r"\[F-v3-actions\].*duplicate action"):
+    with pytest.raises(SkillLoadError) as exc_info:
         SkillLoader().compile_skill(tmp_path)
+    assert exc_info.value.payload.code == "[F-v3-logic-action-name-invalid]"
+    assert "duplicate action" in str(exc_info.value)
 
 
 def test_module_import_failure_fatal(tmp_path: Path) -> None:
     _single_logic(tmp_path)
     _write(tmp_path / "phases" / "logic_phase" / "actions" / "bad.py", "def bad(:\n    pass\n")
 
-    with pytest.raises(SkillLoadError, match=r"\[F-v3-actions\].*module load failed"):
+    with pytest.raises(SkillLoadError) as exc_info:
         SkillLoader().compile_skill(tmp_path)
+    assert exc_info.value.payload.code == "[F-v3-logic-action-entrypoint-missing]"
+    assert "module load failed" in str(exc_info.value)

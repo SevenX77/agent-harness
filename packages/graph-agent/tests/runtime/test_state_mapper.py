@@ -25,8 +25,9 @@ def test_filter_runtime_inputs_uses_declared_schema_properties() -> None:
 def test_state_mapper_rejects_undeclared_output_keys() -> None:
     mapper = StateMapper(output_schema={"type": "object", "properties": {"answer": {}}})
 
-    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-runtime-state-mapping-failed\]"):
+    with pytest.raises(GraphAgentFatalError) as exc_info:
         mapper.wrap_phase_output({"data": {"answer": "ok", "extra": True}})
+    assert exc_info.value.payload.code == "[F-v3-runtime-state-mapping-failed]"
 
 
 def test_phase_wrapper_maps_input_and_output() -> None:

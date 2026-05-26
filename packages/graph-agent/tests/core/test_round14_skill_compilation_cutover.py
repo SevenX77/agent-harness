@@ -149,7 +149,8 @@ validator: false
 
 
 def _expect_code(exc: pytest.ExceptionInfo[SkillLoadError], code: str) -> None:
-    assert code in str(exc.value)
+    assert exc.value.payload is not None
+    assert exc.value.payload.code == code
 
 
 def test_valid_v030_graph_uses_frontmatter_phase_registry_and_body_phase_dag(
@@ -193,7 +194,7 @@ def test_phase_frontmatter_mode_is_forbidden_metadata(tmp_path: Path, mode: str)
     with pytest.raises(SkillLoadError) as exc:
         SkillLoader().compile_skill(tmp_path)
 
-    assert "unknown-field" in str(exc.value)
+    assert exc.value.payload.code == "[F-v3-agent-schema-unknown-field]"
 
 
 @pytest.mark.parametrize("field", ["schema_version", "graph_skill_id", "phase_id"])
@@ -204,7 +205,7 @@ def test_phase_frontmatter_rejects_root_only_metadata(tmp_path: Path, field: str
     with pytest.raises(SkillLoadError) as exc:
         SkillLoader().compile_skill(tmp_path)
 
-    assert "unknown-field" in str(exc.value)
+    assert exc.value.payload.code == "[F-v3-agent-schema-unknown-field]"
 
 
 def test_phase_ast_rejects_legacy_skill_mode_at_pydantic_layer() -> None:

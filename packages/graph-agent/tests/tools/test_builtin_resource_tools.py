@@ -126,8 +126,9 @@ def test_read_reference_unknown_id_uses_runtime_not_found_code(tmp_path: Path) -
     _write(tmp_path / "examples" / "e2.md", "# Example\n")
     tools = _bound_tools(tmp_path)
 
-    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-resource-reference-not-found\]"):
+    with pytest.raises(GraphAgentFatalError) as exc_info:
         tools["read_reference"].invoke({"reference_id": "missing"})
+    assert exc_info.value.payload.code == "[F-v3-resource-reference-not-found]"
 
 
 def test_read_reference_unknown_id_does_not_touch_matching_external_file(tmp_path: Path) -> None:
@@ -142,7 +143,7 @@ def test_read_reference_unknown_id_does_not_touch_matching_external_file(tmp_pat
         tools["read_reference"].invoke({"reference_id": "missing"})
 
     assert "SHOULD_NOT_LEAK" not in str(exc.value)
-    assert "[F-v3-resource-reference-not-found]" in str(exc.value)
+    assert exc.value.payload.code == "[F-v3-resource-reference-not-found]"
 
 
 def test_read_example_unknown_id_uses_runtime_not_found_code(tmp_path: Path) -> None:
@@ -151,8 +152,9 @@ def test_read_example_unknown_id_uses_runtime_not_found_code(tmp_path: Path) -> 
     _write(tmp_path / "examples" / "e2.md", "# Example\n")
     tools = _bound_tools(tmp_path)
 
-    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-resource-example-not-found\]"):
+    with pytest.raises(GraphAgentFatalError) as exc_info:
         tools["read_example"].invoke({"example_id": "missing"})
+    assert exc_info.value.payload.code == "[F-v3-resource-example-not-found]"
 
 
 def test_read_reference_path_escape_is_blocked_without_leaking_external_file(tmp_path: Path) -> None:
@@ -161,8 +163,9 @@ def test_read_reference_path_escape_is_blocked_without_leaking_external_file(tmp
     _resource_skill(tmp_path, reference_path="../secret-reference.md")
     _write(tmp_path / "examples" / "e2.md", "# Example\n")
 
-    with pytest.raises(SkillLoadError, match=r"\[F-v3-resource-reference-path-invalid\]") as exc:
+    with pytest.raises(SkillLoadError) as exc:
         compile_skill(tmp_path, cache=False)
+    assert exc.value.payload.code == "[F-v3-resource-reference-path-invalid]"
 
     assert "SHOULD_NOT_LEAK" not in str(exc.value)
 
@@ -173,8 +176,9 @@ def test_read_reference_invalid_arguments_use_tool_argument_code(tmp_path: Path)
     _write(tmp_path / "examples" / "e2.md", "# Example\n")
     tools = _bound_tools(tmp_path)
 
-    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-tool-argument-invalid\]"):
+    with pytest.raises(GraphAgentFatalError) as exc_info:
         tools["read_reference"].invoke({"reference_id": 123})
+    assert exc_info.value.payload.code == "[F-v3-tool-argument-invalid]"
 
 
 def test_example_path_escape_is_blocked_without_leaking_external_file(tmp_path: Path) -> None:
@@ -184,7 +188,8 @@ def test_example_path_escape_is_blocked_without_leaking_external_file(tmp_path: 
     _write(tmp_path / "references" / "r1.md", "# Reference\n")
     tools = _bound_tools(tmp_path)
 
-    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-resource-example-path-invalid\]") as exc:
+    with pytest.raises(GraphAgentFatalError) as exc:
         tools["read_example"].invoke({"example_id": "E2"})
+    assert exc.value.payload.code == "[F-v3-resource-example-path-invalid]"
 
     assert "SHOULD_NOT_LEAK" not in str(exc.value)

@@ -191,5 +191,6 @@ def test_delta1_assemble_graph_missing_resolver_raises_v3_code(tmp_path: Path) -
         ],
     )
 
-    with pytest.raises(SkillLoadError, match=r"\[F-v3-resolver-missing\]"):
+    with pytest.raises(SkillLoadError) as exc_info:
         assemble_graph(compiled, skill_resolver=None)
+    assert exc_info.value.payload.code == "[F-v3-resolver-missing]"

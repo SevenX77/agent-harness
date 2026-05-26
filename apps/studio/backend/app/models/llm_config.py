@@ -10,10 +10,9 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from graph_agent_gateway.registry.schema import (
     CapabilityValue,
+    EffectiveRuntimeSetting,
     EndpointCandidate,
     FieldSource,
     LintResult,
@@ -29,10 +28,12 @@ from graph_agent_gateway.registry.schema import (
     RoleRouteEntry,
     RouteCandidate,
     RuntimePolicy,
+    RuntimeSettingDescriptor,
 )
 from graph_agent_gateway.registry.storage import compute_credential_fingerprint
+from pydantic import BaseModel, ConfigDict, Field
 
-ProviderType = Literal["anthropic_compatible", "openai_compatible", "google_genai"]
+ProviderType = Literal["anthropic_compatible", "openai_compatible", "google_genai", "ark_runtime"]
 
 TestStatus = Annotated[
     Literal[
@@ -59,7 +60,7 @@ class ModelInfo(BaseModel):
 
 
 class LLMCredentialsFile(BaseModel):
-    """Schema stored at ``~/.studio/llm_credentials.json``."""
+    """Schema stored at the active Studio LLM credentials path."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -74,7 +75,7 @@ class LLMCredentialsFile(BaseModel):
 
 
 class RolesData(BaseModel):
-    """Schema stored at ``config/llm_roles.yaml``."""
+    """Schema stored at the active Studio LLM roles path."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -98,12 +99,20 @@ class RegistryResponse(RegistrySnapshot):
 
     canonical_groups: list[dict[str, object]] = Field(default_factory=list)
     lint_results: list[LintResult] = Field(default_factory=list)
+    route_runtime_settings: dict[str, dict[str, RuntimeSettingDescriptor]] = Field(
+        default_factory=dict
+    )
+    role_effective_runtime_settings: dict[
+        str,
+        dict[str, dict[str, EffectiveRuntimeSetting]],
+    ] = Field(default_factory=dict)
     setup_required: bool = False
 
 
 __all__ = [
     "CapabilityValue",
     "EndpointCandidate",
+    "EffectiveRuntimeSetting",
     "FieldSource",
     "LLMCredentialsFile",
     "LintResult",
@@ -122,6 +131,7 @@ __all__ = [
     "RoleRouteEntry",
     "RolesData",
     "RouteCandidate",
+    "RuntimeSettingDescriptor",
     "RuntimePolicy",
     "TestStatus",
 ]

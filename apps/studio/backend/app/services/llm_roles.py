@@ -12,6 +12,7 @@ from ruamel.yaml import YAML
 from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 
 from app.models.llm_config import RoleEntry, RolesData
+from app.services.llm_paths import roles_path
 
 _WRITE_LOCK = threading.Lock()
 
@@ -155,6 +156,7 @@ __all__ = [
     "get_role",
     "load_roles_file",
     "normalize_role_drafts",
+    "roles_path",
     "save_roles_file",
     "validate_references",
 ]

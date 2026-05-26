@@ -29,7 +29,7 @@ class ErrorClassification(BaseModel):
 def classify_exception(exc: BaseException, *, route_id: str | None = None) -> ErrorClassification:
     """Classify provider/runtime exceptions for deterministic fallback."""
     status_code = _status_code(exc)
-    if isinstance(exc, httpx.ConnectError | httpx.TimeoutException):
+    if _has_network_failure(exc):
         return _classification("fallback_allowed", exc, route_id, status_code)
     if status_code in RETRYABLE_STATUS_CODES:
         return _classification("fallback_allowed", exc, route_id, status_code)
@@ -63,6 +63,30 @@ def _classification(
 
 
 def _status_code(exc: BaseException) -> int | None:
-    response = getattr(exc, "response", None)
-    status_code = getattr(response, "status_code", None)
-    return status_code if isinstance(status_code, int) else None
+    for item in _exception_chain(exc):
+        direct_status_code = getattr(item, "status_code", None)
+        if isinstance(direct_status_code, int):
+            return direct_status_code
+        response = getattr(item, "response", None)
+        status_code = getattr(response, "status_code", None)
+        if isinstance(status_code, int):
+            return status_code
+    return None
+
+
+def _has_network_failure(exc: BaseException) -> bool:
+    return any(
+        isinstance(item, httpx.ConnectError | httpx.TimeoutException)
+        for item in _exception_chain(exc)
+    )
+
+
+def _exception_chain(exc: BaseException) -> list[BaseException]:
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+    return chain

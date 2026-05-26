@@ -74,6 +74,8 @@ def assemble_graph(
     compiled: CompiledSkill,
     *,
     chat_model: Any = None,
+    model_resolver: Any = None,
+    callbacks: list[Any] | None = None,
     max_patch_attempts: int = 3,
     skill_resolver: SkillResolverProtocol,
 ) -> CompiledStateGraph:
@@ -96,6 +98,8 @@ def assemble_graph(
                 phase_doc,
                 compiled,
                 chat_model,
+                model_resolver,
+                callbacks or [],
                 max_patch_attempts,
                 resolver,
             ),
@@ -128,6 +132,8 @@ def _build_phase_node(
     phase_doc: PhaseDocument,
     compiled: CompiledSkill,
     chat_model: Any,
+    model_resolver: Any,
+    callbacks: list[Any],
     max_patch_attempts: int,
     skill_resolver: SkillResolverProtocol,
 ) -> Any:
@@ -141,6 +147,8 @@ def _build_phase_node(
                 phase_doc,
                 ast,
                 chat_model,
+                model_resolver,
+                callbacks,
                 max_patch_attempts,
                 skill_resolver,
             ),
@@ -154,6 +162,8 @@ def _build_phase_node(
                 ast,
                 compiled,
                 chat_model,
+                model_resolver,
+                callbacks,
                 max_patch_attempts,
                 skill_resolver,
             ),
@@ -197,6 +207,8 @@ def _build_subgraph_node(
     phase_doc: PhaseDocument,
     phase_ast: SubgraphNodeAST,
     chat_model: Any,
+    model_resolver: Any,
+    callbacks: list[Any],
     max_patch_attempts: int,
     skill_resolver: SkillResolverProtocol,
 ) -> Any:
@@ -208,6 +220,8 @@ def _build_subgraph_node(
     sub_assembled = assemble_graph(
         sub_compiled,
         chat_model=chat_model,
+        model_resolver=model_resolver,
+        callbacks=callbacks,
         max_patch_attempts=max_patch_attempts,
         skill_resolver=skill_resolver,
     )
@@ -240,9 +254,18 @@ def _build_skill_node(
     phase_ast: AgentNodeAST | SkillNodeAST,
     compiled: CompiledSkill,
     chat_model: Any,
+    model_resolver: Any,
+    callbacks: list[Any],
     max_patch_attempts: int,
     skill_resolver: SkillResolverProtocol,
 ) -> Any:
+    phase_chat_model = _resolve_phase_chat_model(
+        phase_id,
+        phase_ast,
+        chat_model=chat_model,
+        model_resolver=model_resolver,
+        callbacks=callbacks,
+    )
     business_tools = compiled.tools.for_phase(phase_id)
     if isinstance(phase_ast, AgentNodeAST):
         business_tools = [*business_tools, *_agent_resource_tools(phase_doc, phase_ast)]
@@ -250,7 +273,9 @@ def _build_skill_node(
     subagent_by_tool_name = _subagent_tool_map(phase_id, compiled)
     subagent_runtime_by_tool_name = _subagent_runtime_map(
         subagent_by_tool_name,
-        chat_model=chat_model,
+        chat_model=phase_chat_model,
+        model_resolver=model_resolver,
+        callbacks=callbacks,
         max_patch_attempts=max_patch_attempts,
         skill_resolver=skill_resolver,
     )
@@ -260,8 +285,8 @@ def _build_skill_node(
     for tool_name in phase_ast.tools:
         if _is_critic_tool_name(tool_name):
             critic_client = (
-                LLMCriticClient(chat_model)
-                if chat_model is not None
+                LLMCriticClient(phase_chat_model)
+                if phase_chat_model is not None
                 else FakeCriticClient(CriticVerdict(passed=True, reasons=["stub"]))
             )
             critic_tool, metrics = build_critic_tool(
@@ -287,7 +312,7 @@ def _build_skill_node(
     finish_task = build_finish_task_tool(
         output_schema if isinstance(output_schema, dict) else None,
         parse_finish_markdown,
-        LLMMdPatchClient(chat_model) if chat_model is not None else None,
+        LLMMdPatchClient(phase_chat_model) if phase_chat_model is not None else None,
         max_patch_attempts=max_patch_attempts,
     )
     all_tools = [*business_tools, *framework_tools, finish_task]
@@ -298,7 +323,7 @@ def _build_skill_node(
         state: BlackboardState,
         config: RunnableConfig | None = None,
     ) -> dict[str, Any]:
-        if chat_model is None:
+        if phase_chat_model is None:
             raise RuntimeError("[F-v3-graph] SKILL phase requires chat_model")
 
         data_updates: dict[str, Any] = {}
@@ -308,7 +333,9 @@ def _build_skill_node(
             *state.get("messages", []),
         ]
         model = (
-            chat_model.bind_tools(all_tools) if hasattr(chat_model, "bind_tools") else chat_model
+            phase_chat_model.bind_tools(all_tools)
+            if hasattr(phase_chat_model, "bind_tools")
+            else phase_chat_model
         )
 
         max_turns = (
@@ -366,6 +393,24 @@ def _build_skill_node(
         return response_state
 
     return _skill_node
+
+
+def _resolve_phase_chat_model(
+    phase_id: str,
+    phase_ast: AgentNodeAST | SkillNodeAST,
+    *,
+    chat_model: Any,
+    model_resolver: Any,
+    callbacks: list[Any],
+) -> Any:
+    if chat_model is not None or model_resolver is None:
+        return chat_model
+    return model_resolver.resolve(
+        getattr(phase_ast, "llm_role", None) or "graph_agent",
+        callbacks=tuple(callbacks),
+        phase_name=phase_id,
+    )
+
 
 def _subagent_tool_map(
     phase_id: str,
@@ -551,6 +596,8 @@ def _subagent_runtime_map(
     subagent_by_tool_name: dict[str, CompiledSubagent],
     *,
     chat_model: Any,
+    model_resolver: Any,
+    callbacks: list[Any],
     max_patch_attempts: int,
     skill_resolver: SkillResolverProtocol,
 ) -> dict[str, _SubagentRuntime]:
@@ -563,6 +610,8 @@ def _subagent_runtime_map(
         sub_assembled = assemble_graph(
             sub_compiled,
             chat_model=chat_model,
+            model_resolver=model_resolver,
+            callbacks=callbacks,
             max_patch_attempts=max_patch_attempts,
             skill_resolver=skill_resolver,
         )

@@ -1,7 +1,7 @@
 # graph-agent-gateway (engine) — MVP0 Alignment (V0.3.0)
 
-> **Status**: Updated by a2, 2026-05-24 (PR α Cutover)
-> **Scope**: `ModelResolverProtocol` 强 DI、gateway runtime 错误结构化、fallback event 向 V0.3.0 tracing 底座对齐。目前 PR α 已全面实施完成。
+> **Status**: Updated by Codex, 2026-05-25 (Provider Intelligence V2 backend/runtime cutover)
+> **Scope**: `ModelResolverProtocol` 强 DI、gateway runtime 错误结构化、fallback event 向 V0.3.0 tracing 底座对齐，以及 endpoint/route/runtime-settings registry 后端路径。
 > **配套**: [MVP0 Q-R-P0-1](../MVP0-DECISIONS-EXPLAINED-2026-05-21.md#51-q-r-p0-1-modelresolver-放在哪里), [Error Code Spec](../skill-spec/11-error-code-spec.md), [Tracing MVP0 Alignment](../tracing-and-observability/mvp0-alignment.md)。
 
 ## V0.3.0 改造完成状态
@@ -55,9 +55,9 @@ PR α 已完成以下三项核心改造。Gateway 已作为独立包 `packages/g
 - 清退了 `_fallback_to_minimal_factory()`。
 - 清退了旧版异常与平行分发逻辑。
 
-## Provider Intelligence V2 后续对齐
+## Provider Intelligence V2 对齐
 
-> 本节是下一阶段目标设计，不属于 V0.3.0 已完成状态。它用于承接 `.kiro/specs/llm-provider-intelligence-v2/` 的 Gateway 落点决策。
+> 本节承接 `.kiro/specs/llm-provider-intelligence-v2/` 的 Gateway 落点决策。当前分支已落地 registry schema/resolver/client-manager/backend API 的主要硬切路径；frontend 仍按单独 UI guardrail 验证。
 
 ### 决策
 
@@ -71,6 +71,7 @@ packages/graph-agent-gateway/src/graph_agent_gateway/registry/
   canonical.py
   resolver.py
   lint.py
+  capabilities.py
   error_classification.py
   probe_contracts.py
 ```
@@ -129,7 +130,20 @@ Resolver 流程：
 
 禁止按 provider、capability、price、latency、availability 搜索替代 route。Capability 只能 lint、warn、block、fail fast，不能驱动动态选型。
 
+Engine 组装 v0.3/v2.1 skill 时必须按 executable phase 的 `llm_role` 调用 resolver。不能在 workflow 级别先 resolve 一个 `role_name=None` 的全局 chat model 再复用到所有 phase；这会绕开 role → model profile → route chain 编排。
+
 Error classifier 归属 Gateway。Network/timeouts/retryable 5xx/classified rate limits/marked-down routes 可 fallback；missing credential、invalid credential、unknown model、bad request、unsupported capability、schema validation failure 必须 fail fast。无法分类的异常默认 fail fast 并带 route context。
+
+Provider SDKs often wrap transport errors. Gateway classification must inspect chained exceptions (`__cause__`/`__context__`) and provider SDK `status_code` attributes so wrapped network failures can fallback while 400/401/403/404/422 fail fast.
+
+Runtime Settings:
+
+- Role/profile route entries own fixed normalized `runtime_settings`.
+- Capabilities describe support/default/bounds only; they are not user intent.
+- Resolver emits `effective_runtime_settings` with source metadata.
+- `GatewayChatModel` includes redacted effective settings in response metadata and fallback events.
+- Studio Backend exposes `route_runtime_settings` and `role_effective_runtime_settings` in `GET /api/llm/registry` so frontend controls do not infer provider behavior locally.
+- Provider-specific names are confined to adapters: OpenAI-compatible chat args, Anthropic thinking args, Google GenAI generation config, and Ark official SDK chat completions.
 
 Model Profile 处理：
 
@@ -154,7 +168,7 @@ Studio Backend import gateway registry，并提供产品 API：
 - `PUT /api/llm/registry/endpoints`，upsert endpoints，缺失 endpoint 不代表删除
 - `DELETE /api/llm/registry/endpoints/{endpoint_id}`
 - `POST /api/llm/endpoints/{endpoint_id}/test`
-- `POST /api/llm/routes/{route_id}/probe`
+- `POST /api/llm/routes/{route_id}/probe`，可接受 runtime-setting capability metadata 并写入 normalized capability/default/bounds records
 - `PUT /api/llm/routes/{route_id}`，只更新 route metadata/display/capability/status，不改变 route identity
 - `DELETE /api/llm/routes/{route_id}`
 - `GET /api/llm/model-profiles`
@@ -194,4 +208,4 @@ Agent onboarding 是非可信输入，必须排在 deterministic registry 与 ru
 
 V0.3.0 MVP0 部分无差异：本文件前半部分描述的 PR α 目标状态已在主干代码落地，Gateway 包与核心引擎已实现物理边界隔离与反向控制。
 
-Provider Intelligence V2 部分是后续目标：当前源码尚未实现 `graph_agent_gateway.registry`、route-chain runtime schema、credentials-file runtime execution、Gateway-owned `LLMClientManager` 和 route-level diagnostics。
+Provider Intelligence V2 backend/runtime 主要路径已在当前分支落地：`graph_agent_gateway.registry`、route-chain runtime schema、credentials-file runtime execution、Gateway-owned `LLMClientManager`、runtime setting descriptors/effective settings、route-level diagnostics、`google_genai` adapter、`ark_runtime` adapter fake-client path。剩余差异集中在 opt-in live provider matrix 扩展、frontend 手工验收和真实 provider 观察表持续补充。

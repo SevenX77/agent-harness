@@ -79,6 +79,33 @@ def test_runtime_policy_defaults_and_ranges() -> None:
         RuntimePolicy(token_escalation_rounds=11)
 
 
+def test_ark_runtime_protocol_is_first_class() -> None:
+    from graph_agent_gateway.registry.schema import ProviderEndpoint, ResolvedRoute
+
+    endpoint = ProviderEndpoint(
+        endpoint_id="ark-cn",
+        display_name="Volcengine Ark",
+        protocol="ark_runtime",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key=SecretStr("secret"),
+    )
+    route = ResolvedRoute(
+        role_name="graph_agent",
+        route_id="ark-cn:deepseek-v3",
+        endpoint_id="ark-cn",
+        protocol=endpoint.protocol,
+        base_url=endpoint.base_url,
+        api_key=SecretStr("secret"),
+        credential_fingerprint="fp",
+        provider_model_id="deepseek-v3",
+        canonical_id="deepseek-v3",
+        display_name="DeepSeek V3",
+    )
+
+    assert endpoint.protocol == "ark_runtime"
+    assert route.protocol == "ark_runtime"
+
+
 def test_role_prefix_and_multi_endpoint_import_draft_validation() -> None:
     from graph_agent_gateway.registry.schema import (
         EndpointCandidate,

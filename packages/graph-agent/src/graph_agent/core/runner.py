@@ -482,17 +482,15 @@ def _run_v21_skill_dict(
 
     resolver = require_skill_resolver(skill_resolver, caller="_run_v21_skill_dict")
     t0 = time.time()
-    if mock_llm is not _NO_MOCK_LLM:
-        chat_model = mock_llm
-    elif model_resolver is not None:
-        chat_model = model_resolver.resolve(
-            callbacks=tuple(callbacks or ()),
-            phase_name="<workflow>",
-        )
-    else:
-        chat_model = None
     compiled = compile_skill(skill_root, skill_resolver=resolver)
-    graph = assemble_graph(compiled, chat_model=chat_model, skill_resolver=resolver).graph
+    chat_model = mock_llm if mock_llm is not _NO_MOCK_LLM else None
+    graph = assemble_graph(
+        compiled,
+        chat_model=chat_model,
+        model_resolver=model_resolver,
+        callbacks=callbacks or [],
+        skill_resolver=resolver,
+    ).graph
     run_id = thread_id or str(uuid.uuid4())
     result = graph.invoke(
         {

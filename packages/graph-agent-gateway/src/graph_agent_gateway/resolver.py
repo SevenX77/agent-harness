@@ -87,8 +87,13 @@ class ModelResolver:
             )
 
         first_route = resolved.routes[0]
-        max_tokens = first_route.max_output_tokens or 4096
-        temperature = first_route.temperature if first_route.temperature is not None else 0.7
+        max_tokens = _effective_int(first_route, "max_output_tokens", 4096)
+        temperature = _effective_float(first_route, "temperature", 0.7)
+        effective_thinking_enabled = (
+            thinking_enabled
+            if thinking_enabled is not None
+            else _effective_bool(first_route, "reasoning.enabled", False)
+        )
         mock_strategy = getattr(self, "_graph_agent_predict_mock_strategy", None)
         if mock_strategy is not None:
             from graph_agent_gateway.predict_interception import PredictGatewayChatModel
@@ -101,7 +106,7 @@ class ModelResolver:
                 temperature=temperature,
                 callbacks=callbacks,
                 phase_name=phase_name,
-                thinking_enabled=thinking_enabled,
+                thinking_enabled=effective_thinking_enabled,
                 client_manager=self.client_manager,
                 name=first_route.provider_model_id,
             )
@@ -112,7 +117,7 @@ class ModelResolver:
             temperature=temperature,
             callbacks=callbacks,
             phase_name=phase_name,
-            thinking_enabled=thinking_enabled,
+            thinking_enabled=effective_thinking_enabled,
             client_manager=self.client_manager,
             name=first_route.provider_model_id,
         )
@@ -120,7 +125,11 @@ class ModelResolver:
     def mark_provider_down(self, route_id: str) -> None:
         """Manually mark a route down in the shared gateway cache."""
         route = next(
-            (item for item in self.registry_snapshot.provider_routes.values() if item.route_id == route_id),
+            (
+                item
+                for item in self.registry_snapshot.provider_routes.values()
+                if item.route_id == route_id
+            ),
             None,
         )
         if route is None:
@@ -210,7 +219,13 @@ def _assert_v2_roles(payload: dict[str, Any], path: Path) -> None:
             f"roles file must use schema_version 2: {path}; "
             "legacy models/providers/active_model schema is rejected at the v2 cutover boundary"
         )
-    forbidden = {"models", "providers", "single_model_roles", "peer_model_groups", "circuit_breaker"}
+    forbidden = {
+        "models",
+        "providers",
+        "single_model_roles",
+        "peer_model_groups",
+        "circuit_breaker",
+    }
     present = sorted(forbidden.intersection(payload))
     if present:
         raise ValueError(f"legacy roles fields are not supported: {present}")
@@ -225,3 +240,21 @@ def _default_client_manager() -> Any:
     from graph_agent_gateway.client_manager import LLMClientManager
 
     return LLMClientManager
+
+
+def _effective_int(route: Any, key: str, default: int) -> int:
+    setting = route.effective_runtime_settings.get(key)
+    value = setting.value if setting is not None else None
+    return int(value) if isinstance(value, int | float) and value > 0 else default
+
+
+def _effective_float(route: Any, key: str, default: float) -> float:
+    setting = route.effective_runtime_settings.get(key)
+    value = setting.value if setting is not None else None
+    return float(value) if isinstance(value, int | float) else default
+
+
+def _effective_bool(route: Any, key: str, default: bool) -> bool:
+    setting = route.effective_runtime_settings.get(key)
+    value = setting.value if setting is not None else None
+    return value if isinstance(value, bool) else default

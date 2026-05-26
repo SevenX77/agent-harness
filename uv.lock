@@ -1037,13 +1037,24 @@ dependencies = [
     { name = "pydantic" },
 ]
 
+[package.optional-dependencies]
+ark = [
+    { name = "volcengine-python-sdk", extra = ["ark"] },
+]
+google = [
+    { name = "google-genai" },
+]
+
 [package.metadata]
 requires-dist = [
+    { name = "google-genai", marker = "extra == 'google'", specifier = ">=1.0.0" },
     { name = "langchain-anthropic", specifier = ">=1.3.4,<1.5.0" },
     { name = "langchain-core", specifier = ">=1.3.1,<1.4.0" },
     { name = "langchain-openai", specifier = ">=1.1.7,<1.3.0" },
     { name = "pydantic", specifier = ">=2.12.5,<3.0.0" },
+    { name = "volcengine-python-sdk", extras = ["ark"], marker = "extra == 'ark'", specifier = ">=3.0.0" },
 ]
+provides-extras = ["ark", "google"]
 
 [[package]]
 name = "greenlet"
@@ -2860,6 +2871,18 @@ wheels = [
 ]
 
 [[package]]
+name = "python-dateutil"
+version = "2.9.0.post0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/66/c0/0c8b6ad9f17a802ee498c46e004a0eb49bc148f2fd230864601a86dcf6db/python-dateutil-2.9.0.post0.tar.gz", hash = "sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3", size = 342432, upload-time = "2024-03-01T18:36:20.211Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl", hash = "sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427", size = 229892, upload-time = "2024-03-01T18:36:18.57Z" },
+]
+
+[[package]]
 name = "python-discovery"
 version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3832,6 +3855,29 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ec/0d/915c02c94d207b85580eb09bffab54438a709e7288524094fe781da526c2/virtualenv-21.3.1.tar.gz", hash = "sha256:c2305bc1fddeec40699b8370d13f8d431b0701f00ce895061ce493aeded4426b", size = 7613791, upload-time = "2026-05-05T01:34:31.402Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b1/4f/f71e641e504111a5a74e3a20bc52d01bd86788b22699dd3fee1c63253cf6/virtualenv-21.3.1-py3-none-any.whl", hash = "sha256:d1a71cf58f2f9228fff23a1f6ec15d39785c6b32e03658d104974247145edd35", size = 7594539, upload-time = "2026-05-05T01:34:28.98Z" },
+]
+
+[[package]]
+name = "volcengine-python-sdk"
+version = "5.0.29"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "certifi" },
+    { name = "python-dateutil" },
+    { name = "six" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f8/8b/7958dba7b6e0e31a9960eaa12726a317b8a3d134208ac390686e603a297b/volcengine_python_sdk-5.0.29.tar.gz", hash = "sha256:8b773d59fdd2febcff2d7ef849a50c1d87bc2f6a7c1ca17a3a89dc9f0293adf7", size = 9032428, upload-time = "2026-05-25T14:27:58.981Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ad/a9/c048898d0f2d5f5fb32d17d4dc9bb131d3cf9343471a30519cc3fd9e6eac/volcengine_python_sdk-5.0.29-py2.py3-none-any.whl", hash = "sha256:d910a336dea180e84c4c02c9e6384d04013fb66d80e3dc04f1a7d79ae9e6b3b4", size = 35791630, upload-time = "2026-05-25T14:27:51.407Z" },
+]
+
+[package.optional-dependencies]
+ark = [
+    { name = "anyio" },
+    { name = "cryptography" },
+    { name = "httpx" },
+    { name = "pydantic" },
 ]
 
 [[package]]

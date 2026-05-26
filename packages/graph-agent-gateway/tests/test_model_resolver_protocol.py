@@ -247,6 +247,7 @@ Say done.
 
     assert result.success is True
     assert resolver.calls
-    assert resolver.calls[0]["phase_name"] == "<workflow>"
+    assert resolver.calls[0]["role_name"] == "balanced"
+    assert resolver.calls[0]["phase_name"] == "agent_phase"
     assert resolver.models
     assert resolver.models[0].calls

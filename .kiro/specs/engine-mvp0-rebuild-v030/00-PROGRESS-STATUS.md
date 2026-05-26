@@ -28,7 +28,7 @@
 | WS3-PR | 范围 | 状态 |
 |---|---|---|
 | PR-1 | 去 conftest 掩盖 + resolver 注入 (`local_workspace_resolver.py` + CLI/dual_run_shadow 接线) | **✅ done (merge-commit `b741a18` on stage)**: SOP-08 9 步全走. 989 passed/0 fail/19 xfailed+2 skipped (主控+a3 独立实证); step4b 歧义分支补码 `[F-v3-skill-id-ambiguous]`+反证覆盖测试; step5 a2+a3 双审 src 无掩盖无 creep; step6 文档字段级同步 + a3 drift 审计 catch 4 锚点漂移 a1 修+主控实证; step7 PM report `/tmp/ws3-pr1-FINAL-report.md`. 3 granular commits (spec `0936535` / impl+tests `2b7c887` / docs `86c66ad`). |
-| PR-2 | 观测 + trace 落盘 (_skill_node 生命周期回调 / runner trace_path 真写) | **step1-5 完成 (round-20-PR2-observability-trace/)**: design a2 写 + a1/a3 双审 catch context 分叉盲点 → a2 修订 (context 对齐既有引擎/invoke前绑trace/token降级/PhaseEnd全路径); tests-first 红灯 a2+a3 双审纯净; 实施转绿 994 passed/0 fail/19xfailed+2skipped (主控实证), trace 真落盘 (summary+tracing.jsonl 含 4 类事件); step5 src 双审 a3 catch PhaseStart context flatten 偏移 (主控 grep 实证 a3 对 a2 漏) → a1 修回完整结构三引擎统一 + 补异常路径 PhaseEnd. **step6 docs 同步进行中** |
+| PR-2 | 观测 + trace 落盘 (_skill_node 生命周期回调 / runner trace_path 真写) | **✅ done (merge-commit `65e2a83` on stage)**: SOP-08 9 步全走 + 三方实证 994 passed/0 fail/19xfailed+2skipped. design 双审 catch context 分叉盲点→a2 修订; 红灯双审纯净; 实施 trace 真落盘 (summary+tracing.jsonl 含 4 类事件); step5 src 双审 a3 catch PhaseStart flatten 偏移 (主控 grep 实证 a3 对 a2 漏)→a1 修回完整结构三引擎统一+补异常路径 PhaseEnd; step6 docs 字段级同步 (主控抽查锚点准). 3 granular commits (spec `5de4bf7`/impl+tests `aa6193c`/docs `047c83b`). PM report `/tmp/ws3-pr2-FINAL-report.md`. finding #1 (卡 Studio 核心) 达成. |
 | PR-3 | persona + Context + 旧入口 | 待 |
 | PR-4 | 缓存 (dehydrate/rehydrate 丢字段) + 递归环检测 | 待 |
 | PR-5 | 沙盒 + LLMclient 锁 + hoist_to | 待 |

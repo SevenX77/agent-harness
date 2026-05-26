@@ -16,6 +16,7 @@ from graph_agent.core.error_registry import ERROR_REGISTRY
 
 
 _ERROR_CODE_RE = re.compile(r"\[F-v3-[a-z0-9-]+\]")
+_EXTERNAL_ERROR_CODE_PREFIXES = ("[F-v3-gateway-",)
 
 
 class ErrorPayload(BaseModel):
@@ -73,8 +74,11 @@ def _payload_from_message(message: str) -> ErrorPayload | None:
         return None
     code = match.group(0)
     if code not in ERROR_REGISTRY:
-        return None
+        if code.startswith(_EXTERNAL_ERROR_CODE_PREFIXES):
+            return None
+        raise ValueError(f"unknown graph_agent error code in message: {code}")
     return ErrorPayload(code=code, message=message)
+
 
 class GraphAgentError(Exception):
     """Base for all graph_agent framework errors.

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from graph_agent.core.exceptions import GraphAgentFatalError
+from graph_agent.core.exceptions import GraphAgentFatalError, make_error_payload
 from graph_agent.runtime.state import BlackboardState
 from graph_agent.runtime.state_mapper import ReaderSandboxState
 from graph_agent.tools.builtin.read_reference import read_resource_file
@@ -43,7 +43,11 @@ class ReferenceReaderRuntime:
             try:
                 return {"markdown": future.result(timeout=self.timeout_s)}
             except FutureTimeoutError as exc:
-                raise GraphAgentFatalError("[F-v3-reference-reader-failed] timeout") from exc
+                detail = "[F-v3-reference-reader-failed] timeout"
+                raise GraphAgentFatalError(
+                    detail,
+                    payload=make_error_payload("[F-v3-reference-reader-failed]", detail),
+                ) from exc
 
     def _read_references(self) -> str:
         chunks: list[str] = []

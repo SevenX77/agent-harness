@@ -4,12 +4,11 @@
 
 ## Frontmatter 字段解析表
 
-Agent `SKILL.md` 是进入 LLM ReAct 循环的 phase 节点。frontmatter 只放框架装配配置, 业务 prompt 内容放在 body XML。未知字段编译期 FATAL `[F-v3-agent-schema-unknown-field]`。
+Agent `SKILL.md` 是进入 LLM ReAct 循环的 phase 节点。节点类型由物理文件名 `SKILL.md` 唯一决定, Loader 注入内部 `mode="agent"`; 作者不写 `mode:`。frontmatter 只放框架装配配置, 业务 prompt 内容放在 body XML。未知字段编译期 FATAL `[F-v3-agent-schema-unknown-field]`。
 
 | 字段 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
 |---|---|---|---|---|---|---|
 | `name` | string | 是 | 无 | 正则 `^[a-z][a-z0-9_-]*$` | `[F-v3-agent-name-invalid]` | Trace、Studio 展示和 prompt 诊断名 |
-| `mode` | string literal | 是 | 无 | 必须精确为 `"agent"`; 文件名必须是 `SKILL.md` | `[F-v3-agent-mode-invalid]` / `[F-v3-graph-mode-path-mismatch]` | Loader 类型断言, 区分 V0.3.0 Agent phase |
 | `llm_role` | string | 否 | 继承 `GRAPH.md llm_role`, 再无则 `"analyst"` | 必须存在于 `llm_roles.yaml` | `[F-v3-agent-llm-role-unknown]` | 路由 LLM tier / model policy, 不是 prompt 文案 |
 | `validator` | boolean | 否 | `False` | 必须是 YAML boolean, 不能用 `"true"` 字符串 | Pydantic validation fatal | 结合 validator.py 控制 Agent 输出后置校验 |
 | `io.inputs` | JSON Schema object | 是 | 无 | 顶层 `type: object`; `required` 只能引用 properties | `[F-v3-agent-io-schema-invalid]` | StateMapper 切给 Agent 的输入边界 |
@@ -18,7 +17,7 @@ Agent `SKILL.md` 是进入 LLM ReAct 循环的 phase 节点。frontmatter 只放
 | `subagents` | list[object] | 否 | `[]` | 每项含 `name`, `target_skill`, `description`; `name` 供 `@subagent:NAME` 引用 | `[F-v3-agent-subagent-invalid]` | 注册可委托的 Agent 子技能 |
 | `subgraphs` | list[object] | 否 | `[]` | 每项含 `name`, `target_skill`, `description`; target 走 SkillResolverProtocol | `[F-v3-agent-subgraph-invalid]` | 注册 Agent 可引用或说明的子图资产 |
 | `references` | list[object] | 否 | `[]` | 每项含 `id`, `path`, `summary`; `id` 正则 `^[A-Z][A-Za-z0-9_-]*$` | `[F-v3-resource-reference-invalid]` | 装配期预读 + runtime `read_reference` 索引 |
-| `examples` | list[object] | 否 | `[]` | 每项含 `id`, `type`; inline 必含 `content`; document 必含 `path` 和 `summary` | `[F-v3-resource-example-invalid]` | inline 示例注入与 document 示例按需读取 |
+| `examples` | list[object] | 否 | `[]` | 每项含 `id`, `path`, `summary`; 只注册 document 扩展案例库 | `[F-v3-resource-example-invalid]` | runtime `read_example` 索引 |
 | `max_iterations` | integer | 否 | `10` | `1 <= max_iterations <= 50` | `[F-v3-agent-max-iterations-invalid]` | 限制 ReAct 循环最大轮数, 防止失控调用 |
 
 `subagents` / `subgraphs` 子项字段:
@@ -35,7 +34,7 @@ Agent `SKILL.md` 是进入 LLM ReAct 循环的 phase 节点。frontmatter 只放
 
 `SKILL.md` frontmatter 后的 Markdown body 必须是 XML 片段集合, 顶层平铺, 不允许 `<steps>`、`<protocols>`、`<skill>` 这类壳节点。
 
-允许的顶层标签只有 4 类:
+允许的顶层标签只有 5 类:
 
 | 标签 | 属性 | 数量 | 是否必填 | AST 去向 |
 |---|---|---|---|---|
@@ -43,13 +42,14 @@ Agent `SKILL.md` 是进入 LLM ReAct 循环的 phase 节点。frontmatter 只放
 | `<goal>` | 无 | 1 | 是 | `{skill_goal}` |
 | `<step>` | `id`, `name` | 0..N | 否 | `{skill_steps_splat}` |
 | `<protocol>` | `id` | 0..N | 否 | `{skill_protocols_splat}` 与 `@protocol` 可达域 |
+| `<example>` | `id` | 0..N | 否 | `{skill_examples_inline}` |
 
 解析行为:
 
 1. Loader 把 body 当 XML fragment 解析, 可通过临时根节点包裹实现解析, 但临时根不进入 AST。
-2. 顶层标签必须在允许列表内; 未知顶层标签 FATAL `[F-v3-agent-body-tag-unknown]`。遇到 `<exit_contract>` FATAL 报错。
-3. `<step>` 必须有 `id` 与 `name`; `<protocol>` 必须有 `id`; id 正则 `^[A-Z][A-Za-z0-9_-]*$`。
-4. `<step>` / `<protocol>` 的 id 在各自命名空间内唯一。
+2. 顶层标签必须在允许列表内; 未知顶层标签 FATAL `[F-v3-agent-body-tag-unknown]`。遇到 `<exit_contract>` FATAL 报错, 因为 exit_contract 只在 cognitive template hardcode。
+3. `<step>` 必须有 `id` 与 `name`; `<protocol>` / `<example>` 必须有 `id`; id 正则 `^[A-Z][A-Za-z0-9_-]*$`。
+4. `<step>` / `<protocol>` / `<example>` 的 id 在各自命名空间内唯一。
 5. 允许标签正文包含普通 Markdown 文本和 `@-mention`; 不允许嵌套另一个顶层业务标签。
 
 禁止示例:
@@ -89,7 +89,7 @@ Body 中出现的 `@type:NAME` 必须能在对应静态域内解析。Loader 不
 | Mention | 可达域 | 校验规则 | 失败错误码 |
 |---|---|---|---|
 | `@reference:R1` | frontmatter `references[].id` | id 存在; path 在 skill 根内或合法相对路径 | `[F-v3-mention-target-not-found]` |
-| `@example:E1` | frontmatter `examples[].id` | id 存在; inline/document 类型合法 | `[F-v3-mention-target-not-found]` |
+| `@example:E1` | body `<example id>` + frontmatter document `examples[].id` | id 存在; document example path/summary 合法 | `[F-v3-mention-target-not-found]` |
 | `@subagent:producer_reviewer` | frontmatter `subagents[].name` | name 存在; target_skill 字段合法 | `[F-v3-mention-target-not-found]` |
 | `@subgraph:review_graph` | frontmatter `subgraphs[].name` | name 存在; target_skill 可 resolve | `[F-v3-mention-target-not-found]` / `[F-v3-skill-not-registered]` |
 | `@protocol:P1` | 本 body `<protocol id="P1">` | id 存在 | `[F-v3-mention-target-not-found]` |
@@ -98,8 +98,8 @@ Body 中出现的 `@type:NAME` 必须能在对应静态域内解析。Loader 不
 
 校验顺序建议:
 
-1. 解析 body XML AST, 收集 step/protocol id。
-2. 解析 frontmatter registry, 收集 tools/subagents/subgraphs/references/examples。
+1. 解析 body XML AST, 收集 step/protocol/inline example id。
+2. 解析 frontmatter registry, 收集 tools/subagents/subgraphs/references/document examples。
 3. 用 [Mention Syntax](./07-mention-syntax-spec.md#7-大分类静态可达性算法) 的统一 regex 扫描所有 body 文本节点。
 4. 按类型查对应可达域, 聚合全部缺失项后一次报错。
 

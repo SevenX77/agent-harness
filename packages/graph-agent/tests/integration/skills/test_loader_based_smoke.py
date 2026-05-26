@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from graph_agent.core.loader import CompiledSkill, SkillLoader
-from graph_agent.core.manifest import LogicNodeAST, SkillNodeAST
+from graph_agent.core.manifest import AgentNodeAST, LogicNodeAST
 
 pytest.skip(
     "by-design: V1 layout skill awaiting user V2.1 cutover (Phase 1 baseline)",
@@ -145,5 +145,5 @@ def test_final_skill_phases_document_output_contracts(
     compiled = compiled_skills[skill_id]
     node = next(node for node in compiled.nodes if node.phase_name == phase_id)
 
-    assert isinstance(node.ast, SkillNodeAST)
+    assert isinstance(node.ast, AgentNodeAST)
     assert required_exit_text in node.ast.exit_contract

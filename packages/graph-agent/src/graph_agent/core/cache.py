@@ -1,4 +1,4 @@
-"""AST cache for V2.1 skill compilation."""
+"""AST cache for V0.3.0 skill compilation."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from graph_agent.core.manifest import GraphManifest, PhaseAST
 
 
 def get_cache_dir() -> Path:
-    return Path.home() / ".cache" / "graph-agent-v21"
+    return Path.home() / ".cache" / "graph-agent-v030"
 
 
 def compute_cache_key(root: Path) -> str:
@@ -57,9 +57,6 @@ def _collect_skill_files(root: Path) -> list[Path]:
     graph = root / "GRAPH.md"
     if graph.exists():
         files.append(graph)
-    io_dir = root / "io"
-    if io_dir.exists():
-        files.extend(path for path in io_dir.glob("*.json") if path.is_file())
     phases_dir = root / "phases"
     if phases_dir.exists():
         files.extend(path for path in phases_dir.rglob("*.md") if path.is_file())

@@ -18,7 +18,7 @@ packages/graph-agent/src/graph_agent/core/builtin_subagents/reference_reader.py
 |---|---|---|---|---|---|---|
 | `skill_id` | string | 是 | 无 | 当前 graph skill id | `[F-v3-reference-reader-input-invalid]` | trace 定位来源 skill |
 | `phase_id` | string | 是 | 无 | 当前 Agent phase id | `[F-v3-reference-reader-input-invalid]` | trace 定位来源 phase |
-| `references` | list[object] | 是 | `[]` | 每项含 `id`, `path`, `summary`, `content` 或可读 path | `[F-v3-reference-reader-input-invalid]` | reader 需要处理的资料集合 |
+| `references` | list[object] | 是 | `[]` | 每项含 `id`, `path`, `summary`, 且 path 可读 | `[F-v3-reference-reader-input-invalid]` | reader 需要处理的资料集合 |
 | `max_output_tokens` | integer | 否 | `3000` | `500 <= n <= 12000` | `[F-v3-reference-reader-input-invalid]` | 控制 knowledge_base 注入体积 |
 | `language` | string | 否 | `"zh"` | 仅影响报告语言, 不影响资料读取 | — | 让报告与 skill 文档语言一致 |
 
@@ -26,7 +26,7 @@ packages/graph-agent/src/graph_agent/core/builtin_subagents/reference_reader.py
 
 | 字段 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
 |---|---|---|---|---|---|---|
-| `markdown` | string | 是 | 无 | 非空 Markdown | `[F-v3-reference-reader-output-invalid]` | 注入 `{reference_reader_subagent_output_markdown}` |
+| `markdown` | string | 是 | 无 | 非空 Markdown | `[F-v3-reference-reader-output-invalid]` | 注入 `{aligned_concepts_and_critical_corrections_markdown}` |
 | `used_reference_ids` | list[string] | 是 | `[]` | 必须是输入 references id 子集 | `[F-v3-reference-reader-output-invalid]` | trace 记录哪些资料被摘要 |
 | `warnings` | list[string] | 否 | `[]` | 字符串列表 | — | 记录截断、读取失败等非阻塞问题 |
 
@@ -81,7 +81,7 @@ packages/graph-agent/src/graph_agent/tools/builtin/read_reference.py
 packages/graph-agent/src/graph_agent/tools/builtin/read_example.py
 ```
 
-这两个是 Agent 可主动调用的 LangChain Tool, 只暴露给 `mode: agent` 节点。它们不是 Logic Action。
+这两个是 Agent 可主动调用的 LangChain Tool, 只暴露给由 `SKILL.md` 文件名推导出的 Agent 节点。它们不是 Logic Action。
 
 `read_reference` 参数 schema:
 
@@ -95,7 +95,7 @@ packages/graph-agent/src/graph_agent/tools/builtin/read_example.py
 
 | 字段 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
 |---|---|---|---|---|---|---|
-| `example_id` | string | 是 | 无 | 必须存在于当前 Agent phase `examples[].id`; 且允许 inline/document | `[F-v3-resource-example-not-found]` | 选择要读取的案例 |
+| `example_id` | string | 是 | 无 | 必须存在于当前 Agent phase frontmatter document `examples[].id` | `[F-v3-resource-example-not-found]` | 选择要读取的扩展案例 |
 | `query` | string | 否 | `""` | 自由文本 | — | 说明想对照的边界问题 |
 
 调用语义:
@@ -103,6 +103,6 @@ packages/graph-agent/src/graph_agent/tools/builtin/read_example.py
 | Tool | 内部行为 | 返回 |
 |---|---|---|
 | `read_reference` | 读取真实 reference 文件; 可复用 reference reader 的摘要函数, 但必须能返回原文 excerpt | Markdown, 含 id、summary、命中片段或全文 |
-| `read_example` | 读取 inline content 或 document 文件; 不调用装配期全量预读 | Markdown, 含 id、type、content/excerpt |
+| `read_example` | 读取 document example 文件; 不调用装配期全量预读 | Markdown, 含 id、summary、content/excerpt |
 
-Tool 与 Action 边界见 [Actions 1 级寻址与执行契约](./03-logic-md-spec.md#actions-1-级寻址与执行契约)。
+Tool 与 Action 边界见 [Actions 注册、寻址与执行契约](./03-logic-md-spec.md#actions-注册寻址与执行契约)。

@@ -29,9 +29,7 @@ def test_role_prefix_injected_when_llm_role_set(monkeypatch: pytest.MonkeyPatch)
         prompt_module,
         "get_role_config",
         lambda: SimpleNamespace(
-            resolve_role=lambda _role_name: SimpleNamespace(
-                system_prompt_prefix=expected_prefix
-            )
+            resolve_role=lambda _role_name: SimpleNamespace(system_prompt_prefix=expected_prefix)
         ),
     )
 

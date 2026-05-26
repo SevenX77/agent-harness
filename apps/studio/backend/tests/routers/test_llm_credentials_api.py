@@ -90,7 +90,9 @@ def test_put_credentials_writes_and_get_reads_plaintext(
 
     assert response.status_code == 200
     assert response.json()["providers"][0]["api_key"] == "sk-test-fake-key"
-    assert client.get("/api/llm/credentials").json()["providers"][0]["api_key"] == "sk-test-fake-key"
+    assert (
+        client.get("/api/llm/credentials").json()["providers"][0]["api_key"] == "sk-test-fake-key"
+    )
 
 
 @pytest.mark.parametrize(
@@ -283,7 +285,11 @@ def test_put_credentials_full_replace_deletes_omitted_providers(
     # Second PUT omits OC_OAI → must delete it (full-replace semantics).
     response = client.put(
         "/api/llm/credentials",
-        json={"providers": [{"id": "OC_CL", "name": "Claude", "api_key": "k1", "base_url": "https://a"}]},
+        json={
+            "providers": [
+                {"id": "OC_CL", "name": "Claude", "api_key": "k1", "base_url": "https://a"}
+            ]
+        },
     )
 
     assert response.status_code == 200
@@ -382,9 +388,7 @@ def test_put_credentials_preserves_test_outcome_fields(
     response = client.put(
         "/api/llm/credentials",
         json={
-            "providers": [
-                {"id": "OC_CL", "name": "Claude renamed", "api_key": "", "base_url": ""}
-            ]
+            "providers": [{"id": "OC_CL", "name": "Claude renamed", "api_key": "", "base_url": ""}]
         },
     )
 
@@ -511,7 +515,9 @@ def test_provider_test_missing_api_key_does_not_dirty_last_test_status(
     # Seed a provider that has been used before so writeback has a target.
     client.put(
         "/api/llm/credentials",
-        json={"providers": [{"id": "OC_CL", "name": "Claude", "api_key": "sk-once", "base_url": ""}]},
+        json={
+            "providers": [{"id": "OC_CL", "name": "Claude", "api_key": "sk-once", "base_url": ""}]
+        },
     )
 
     # Empty-key Test (sonner toast still shows missing_api_key).
@@ -914,9 +920,7 @@ Ignored.
     response = client.get("/api/llm/providers/notable-models?provider_key=anthropic")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "notable_models": ["claude-opus-4-1", "claude-sonnet-4-7"]
-    }
+    assert response.json() == {"notable_models": ["claude-opus-4-1", "claude-sonnet-4-7"]}
 
 
 def test_get_provider_notable_models_unknown_provider_returns_404(

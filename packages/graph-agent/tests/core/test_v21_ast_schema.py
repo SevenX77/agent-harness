@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from graph_agent.core.manifest import LogicNodeAST, PhaseAST, SkillNodeAST, SubgraphNodeAST
+from graph_agent.core.manifest import AgentNodeAST, LogicNodeAST, PhaseAST, SubgraphNodeAST
 from pydantic import TypeAdapter
 
 _GOLDEN_DIR = Path(__file__).parents[1] / "golden" / "schema"
@@ -32,7 +32,7 @@ def test_subgraph_node_ast_schema_matches_golden() -> None:
 
 
 def test_skill_node_ast_schema_matches_golden() -> None:
-    assert SkillNodeAST.model_json_schema() == _load_golden("skill_node_ast.schema.json"), (
+    assert AgentNodeAST.model_json_schema() == _load_golden("skill_node_ast.schema.json"), (
         _UPDATE_HINT
     )
 

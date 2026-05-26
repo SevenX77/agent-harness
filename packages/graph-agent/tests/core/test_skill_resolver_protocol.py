@@ -33,43 +33,43 @@ def _base(root: Path, *, name: str = "resolver-test", phase: str = "main") -> No
     _write(
         root / "GRAPH.md",
         f"""---
-schema_version: "2.1"
+schema_version: "v0.3.0"
 name: {name}
+io:
+  inputs:
+    type: object
+    properties:
+      text:
+        type: string
+  outputs:
+    type: object
+    properties: {{}}
+phases:
+  - {phase}
 ---
-<input src="io/inputs.json" />
-<output src="io/outputs.json" />
-<phase id="{phase}" src="phases/{phase}" depends_on="" />
+<phase depends_on="input" output>{phase}</phase>
 """,
     )
-    _write(root / "io" / "inputs.json", "{}\n")
-    _write(root / "io" / "outputs.json", "{}\n")
 
 
 def _child_skill(root: Path) -> None:
     _base(root, name="child", phase="child")
     _write(
-        root / "io" / "inputs.json",
-        """{
-  "type": "object",
-  "properties": {
-    "text": {"type": "string"}
-  },
-  "required": ["text"]
-}
-""",
-    )
-    _write(
         root / "phases" / "child" / "SKILL.md",
         """---
-mode: skill
-name: child
+io:
+  inputs:
+    type: object
+    properties:
+      text:
+        type: string
+    required: [text]
+  outputs:
+    type: object
+    properties: {}
 ---
-<system_prompt>
-Child work.
-</system_prompt>
-<exit_contract>
-Call finish_task.
-</exit_contract>
+<role>Child</role>
+<goal>Do child work.</goal>
 """,
     )
 
@@ -79,20 +79,21 @@ def _parent_skill(root: Path, target_skill: str) -> None:
     _write(
         root / "phases" / "main" / "SKILL.md",
         f"""---
-mode: skill
-name: main
 phase_config:
   subagents:
     - name: child_expert
       target_skill: {target_skill}
       description: Resolve child by skill id.
+io:
+  inputs:
+    type: object
+    properties: {{}}
+  outputs:
+    type: object
+    properties: {{}}
 ---
-<system_prompt>
-Parent work.
-</system_prompt>
-<exit_contract>
-Call finish_task.
-</exit_contract>
+<role>Parent</role>
+<goal>Parent work.</goal>
 """,
     )
 

@@ -23,6 +23,7 @@ def test_beta_factory_builds_six_middlewares_in_contract_order() -> None:
         unattended=False,
         interrupt_fn=None,
     )
+
     def contract_name(middleware: object) -> str:
         name = type(middleware).__name__.removesuffix("Middleware")
         if name == "ToolErrorHandling":

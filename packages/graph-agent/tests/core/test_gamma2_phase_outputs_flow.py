@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+import re
 from pathlib import Path
 
 from graph_agent.core.compiler import compile_skill
@@ -13,30 +13,59 @@ def _write(path: Path, text: str) -> None:
 
 
 def _base(root: Path, phases: str) -> None:
+    phase_entries = []
+    for match in re.finditer(r'<phase id="([^"]+)" src="([^"]+)" depends_on="([^"]*)"', phases):
+        deps = [dep for dep in re.split(r"[\s,]+", match.group(3).strip()) if dep]
+        phase_entries.append((match.group(1), deps))
+    phase_yaml = "\n".join(f"  - {phase_id}" for phase_id, _ in phase_entries)
+    depended_on = {dep for _, deps in phase_entries for dep in deps}
+    phase_body = "\n".join(
+        '<phase depends_on="{deps}"{output}>{phase_id}</phase>'.format(
+            deps=", ".join(deps) if deps else "input",
+            output=" output" if phase_id not in depended_on else "",
+            phase_id=phase_id,
+        )
+        for phase_id, deps in phase_entries
+    )
     _write(
         root / "GRAPH.md",
-        """---
-schema_version: "2.1"
+        f"""---
+schema_version: "v0.3.0"
 name: gamma2-flow
+io:
+  inputs:
+    type: object
+    properties: {{}}
+  outputs:
+    type: object
+    properties:
+      review_input:
+        type: string
+phases:
+{phase_yaml}
 ---
-<input src="io/inputs.json" />
-<output src="io/outputs.json" />
-"""
-        + phases,
+{phase_body}
+""",
     )
-    _write(root / "io" / "inputs.json", "{}\n")
-    _write(root / "io" / "outputs.json", json.dumps({}, ensure_ascii=False))
 
 
 def _logic_action(root: Path, phase: str, action: str, body: str) -> None:
     _write(
         root / "phases" / phase / "LOGIC.md",
         f"""---
-mode: logic
+io:
+  inputs:
+    type: object
+    properties: {{}}
+  outputs:
+    type: object
+    properties:
+      segments_summary:
+        type: string
+      review_input:
+        type: string
 ---
-<python_callable>
-{action}
-</python_callable>
+<action>{action}</action>
 """,
     )
     _write(root / "phases" / phase / "actions" / f"{action}.py", body)

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.loader import SkillLoader, load_workflow_from_md
-from graph_agent.core.manifest import GraphPhaseRef, SkillNodeAST
+from graph_agent.core.manifest import AgentNodeAST, GraphPhaseRef
 from graph_agent.core.parser import extract_raw_blocks
 from pydantic import ValidationError
 
@@ -135,7 +135,7 @@ def test_v21_happy_path_routes_graph_and_skill_raw_blocks(tmp_path: Path) -> Non
     assert len(compiled.nodes) == 1
     node = compiled.nodes[0]
     assert node.mode == "skill"
-    assert isinstance(node.ast, SkillNodeAST)
+    assert isinstance(node.ast, AgentNodeAST)
     assert "A < B" in node.raw_blocks["system_prompt"]
     assert "<div>demo</div>" in node.raw_blocks["system_prompt"]
     assert node.raw_blocks["exit_contract"] == "Call finish_task when done."

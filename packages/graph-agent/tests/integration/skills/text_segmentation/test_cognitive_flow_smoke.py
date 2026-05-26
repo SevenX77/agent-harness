@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from graph_agent.core.loader import SkillLoader
-from graph_agent.core.manifest import LogicNodeAST, SkillNodeAST
+from graph_agent.core.manifest import AgentNodeAST, LogicNodeAST
 
 REPO_ROOT = Path(__file__).resolve().parents[6]
 SKILL_ROOT = REPO_ROOT / "skills/text-segmentation"
@@ -35,6 +35,6 @@ def test_text_segmentation_review_documents_json_output_contract() -> None:
     compiled = SkillLoader(validate_context_writes=False).compile_skill(SKILL_ROOT)
     review = next(node for node in compiled.nodes if node.phase_name == "review")
 
-    assert isinstance(review.ast, SkillNodeAST)
+    assert isinstance(review.ast, AgentNodeAST)
     assert "## segmentation_result" in review.ast.exit_contract
     assert "```json" in review.ast.exit_contract

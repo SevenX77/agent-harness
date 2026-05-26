@@ -187,8 +187,7 @@ def test_peer_model_groups_parsed_from_yaml(tmp_path: Path) -> None:
 
     fixture = tmp_path / "llm_roles.yaml"
     fixture.write_text(
-        "peer_model_groups:\n"
-        "  test_tier: [MA, MB]\n",
+        "peer_model_groups:\n  test_tier: [MA, MB]\n",
         encoding="utf-8",
     )
     payload = yaml.safe_load(fixture.read_text(encoding="utf-8"))

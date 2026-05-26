@@ -1,5 +1,5 @@
 ---
-schema_version: "0.3.0"
+schema_version: "v0.3.0"
 name: v030-agent-demo
 description: Real V0.3.0 Agent fixture for compiler and runtime smoke coverage.
 io:
@@ -18,7 +18,6 @@ io:
         items:
           type: object
 phases:
-  - id: segment
-    src: phases/segment
-    depends_on: []
+  - segment
 ---
+<phase depends_on="input" output>segment</phase>

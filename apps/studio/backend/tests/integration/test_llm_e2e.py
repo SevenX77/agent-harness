@@ -97,7 +97,11 @@ def test_round3_probe_e2e_per_vendor(
     get_response = client.get("/api/llm/credentials")
     assert get_response.status_code == 200, f"GET failed: {get_response.text}"
     provider_state = next(
-        (provider for provider in get_response.json()["providers"] if provider["id"] == provider_id),
+        (
+            provider
+            for provider in get_response.json()["providers"]
+            if provider["id"] == provider_id
+        ),
         None,
     )
     assert provider_state, f"Provider {provider_id} missing after PUT"

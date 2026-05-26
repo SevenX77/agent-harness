@@ -102,17 +102,30 @@ def test_reference_reader_runtime_is_invoked_with_sandbox(monkeypatch, tmp_path:
             skill_id: str,
             phase_id: str,
             root: Path,
+            references: list[dict[str, Any]] | None = None,
+            max_output_tokens: int = 3000,
+            language: str = "zh",
             timeout_s: int = 60,
         ) -> None:
             self.skill_id = skill_id
             self.phase_id = phase_id
             self.root = root
+            self.references = references or []
+            self.max_output_tokens = max_output_tokens
+            self.language = language
             self.timeout_s = timeout_s
 
         def initial_state(self) -> BlackboardState:
             state: BlackboardState = {
                 "data": {
-                    "inputs": {"skill_id": self.skill_id, "phase_id": self.phase_id},
+                    "inputs": {
+                        "skill_id": self.skill_id,
+                        "phase_id": self.phase_id,
+                        "references": self.references,
+                        "max_output_tokens": self.max_output_tokens,
+                        "language": self.language,
+                        "timeout_s": self.timeout_s,
+                    },
                     "phase_outputs": {},
                     "scratch": {},
                 },
@@ -157,7 +170,20 @@ def test_reference_reader_runtime_is_invoked_with_sandbox(monkeypatch, tmp_path:
     assert seen == [
         {
             "data": {
-                "inputs": {"skill_id": "gamma2-reference", "phase_id": "main"},
+                "inputs": {
+                    "skill_id": "gamma2-reference",
+                    "phase_id": "main",
+                    "references": [
+                        {
+                            "id": "Guide",
+                            "path": "references/guide.md",
+                            "summary": "Guide text",
+                        }
+                    ],
+                    "max_output_tokens": 3000,
+                    "language": "zh",
+                    "timeout_s": 60,
+                },
                 "phase_outputs": {},
                 "scratch": {},
             },

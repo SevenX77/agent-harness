@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NoReturn
@@ -55,6 +56,8 @@ from graph_agent.runtime.state_mapper import (
     phase_inputs_from_state,
     phase_outputs_from_state,
 )
+from graph_agent.tools.builtin.read_example import read_declared_example
+from graph_agent.tools.builtin.read_reference import read_declared_reference, read_resource_file
 
 MAX_REACT_TURNS = 8
 logger = logging.getLogger(__name__)
@@ -193,7 +196,7 @@ def _build_logic_node(
     compiled: CompiledSkill,
 ) -> Any:
     action_names = phase_ast.actions
-    output_schema_keys = _logic_output_schema_keys(compiled)
+    output_schema_keys = _schema_output_keys(phase_ast.io.outputs)
 
     def _logic_node(state: BlackboardState) -> dict[str, Any]:
         before = phase_inputs_from_state(state)
@@ -206,10 +209,16 @@ def _build_logic_node(
             action_path = action_def.path if action_def is not None else Path("<unknown>")
             action_line = getattr(getattr(action, "__code__", None), "co_firstlineno", 1)
             result = action(ctx)
-            updates.update(_dict_delta(before | updates, data))
-            if isinstance(result, dict):
-                _validate_logic_update_keys(result, output_schema_keys, action_path, action_line)
-                updates.update(result)
+            delta = _dict_delta(before | updates, data)
+            _validate_logic_update_keys(delta, output_schema_keys, action_path, action_line)
+            updates.update(delta)
+            if not isinstance(result, dict):
+                raise GraphAgentFatalError(
+                    f"[F-v3-logic-action-return-invalid] {action_path}:{action_line} "
+                    f"action returned {type(result).__name__}, expected dict"
+                )
+            _validate_logic_update_keys(result, output_schema_keys, action_path, action_line)
+            updates.update(result)
         return {"data": updates} if updates else {}
 
     return _logic_node
@@ -236,8 +245,7 @@ def _build_subgraph_node(
 
     def _subgraph_node(state: BlackboardState) -> dict[str, Any]:
         child_input = phase_inputs_from_state(state)
-        child_flow = dict(state.get("flow", {}))
-        child_flow["subagent_depth"] = current_subagent_depth(child_flow) + 1
+        child_flow = _child_flow(state.get("flow", {}))
         result = sub_assembled.graph.invoke(
             {
                 "data": {"inputs": child_input, "phase_outputs": {}, "scratch": {}},
@@ -265,6 +273,12 @@ def _build_skill_node(
     max_patch_attempts: int,
     skill_resolver: SkillResolverProtocol,
 ) -> Any:
+    knowledge_base_markdown = _build_reference_reader_markdown(
+        phase_id=phase_id,
+        phase_doc=phase_doc,
+        phase_ast=phase_ast,
+        compiled=compiled,
+    )
     business_tools = compiled.tools.for_phase(phase_id)
     business_tools = [*business_tools, *_agent_resource_tools(phase_doc, phase_ast, compiled)]
     tool_by_name = {tool.name: tool for tool in business_tools}
@@ -325,7 +339,14 @@ def _build_skill_node(
         data_updates: dict[str, Any] = {}
         flow = dict(state.get("flow", {}))
         messages = [
-            SystemMessage(content=_agent_system_prompt(phase_id, phase_ast, compiled)),
+            SystemMessage(
+                content=_agent_system_prompt(
+                    phase_id,
+                    phase_ast,
+                    compiled,
+                    knowledge_base_markdown=knowledge_base_markdown,
+                )
+            ),
             *state.get("messages", []),
         ]
         model = (
@@ -397,6 +418,8 @@ def _agent_system_prompt(
     phase_id: str,
     phase_ast: AgentNodeAST,
     compiled: CompiledSkill,
+    *,
+    knowledge_base_markdown: str = "",
 ) -> str:
     output_schema = (
         phase_ast.io.outputs
@@ -412,13 +435,85 @@ def _agent_system_prompt(
         steps=[step.model_dump() for step in phase_ast.steps],
         protocols=[protocol.model_dump() for protocol in phase_ast.protocols],
         output_schema=output_schema if isinstance(output_schema, dict) else None,
+        knowledge_base_markdown=knowledge_base_markdown,
+        reference_registry_listing=_reference_registry_listing(phase_ast),
         inline_examples=[example.content for example in phase_ast.examples_inline],
-        document_examples=[
-            {"id": example.id, "summary": example.summary}
-            for example in phase_ast.examples
-        ],
+        example_registry_listing=_example_registry_listing(phase_ast),
         role_prefix=resolve_role_prefix_from_llm_role(phase_ast.llm_role),
     )
+
+
+def _reference_registry_listing(phase_ast: AgentNodeAST) -> str:
+    lines = [f"- {item.id}: {item.summary}" for item in phase_ast.references]
+    return "\n".join(lines) if lines else "无注册 Reference"
+
+
+def _example_registry_listing(phase_ast: AgentNodeAST) -> str:
+    lines = [f"- {item.id}: {item.summary}" for item in phase_ast.examples]
+    return "\n".join(lines) if lines else "无扩展案例"
+
+
+def _build_reference_reader_markdown(
+    *,
+    phase_id: str,
+    phase_doc: PhaseDocument,
+    phase_ast: AgentNodeAST,
+    compiled: CompiledSkill,
+) -> str:
+    if not phase_ast.references:
+        return ""
+    root = _skill_root_for_phase_path(phase_doc.path)
+    references = [item.model_dump() for item in phase_ast.references]
+    runtime = ReferenceReaderRuntime(
+        skill_id=compiled.manifest.name,
+        phase_id=phase_id,
+        root=root,
+        references=references,
+        max_output_tokens=3000,
+        language="zh",
+        timeout_s=60,
+    )
+    try:
+        result = runtime.run() if hasattr(runtime, "run") else runtime.initial_state()
+        markdown = result.get("markdown") if isinstance(result, dict) else None
+        if isinstance(markdown, str) and markdown.strip():
+            return markdown
+        return _fallback_reference_reader_markdown(root, references, "empty reader output")
+    except GraphAgentFatalError as exc:
+        if "[F-v3-resource-reference-path-invalid]" in str(exc):
+            raise
+        logger.warning("[F-v3-reference-reader-failed] %s", exc)
+        return _fallback_reference_reader_markdown(root, references, str(exc))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[F-v3-reference-reader-failed] %s", exc)
+        return _fallback_reference_reader_markdown(root, references, str(exc))
+
+
+def _fallback_reference_reader_markdown(
+    root: Path,
+    references: list[dict[str, Any]],
+    reason: str,
+) -> str:
+    chunks = [f"[F-v3-reference-reader-failed] {reason}"]
+    for spec in references:
+        body = read_resource_file(
+            root=root,
+            relative_path=str(spec.get("path", "")),
+            error_code="[F-v3-resource-reference-path-invalid]",
+        )
+        chunks.append(
+            "系统无法完成知识精炼，以下为原始未处理片段\n"
+            f"## {spec.get('id')}: {spec.get('summary', '')}\n\n"
+            f"{_truncate_tokens(body, 3000)}"
+        )
+    return "\n\n".join(chunks)
+
+
+def _truncate_tokens(text: str, max_tokens: int) -> str:
+    tokens = text.split()
+    if len(tokens) <= max_tokens:
+        return text
+    return " ".join(tokens[:max_tokens])
 
 
 def _agent_resource_tools(
@@ -429,58 +524,35 @@ def _agent_resource_tools(
     root = _skill_root_for_phase_path(phase_doc.path)
     references = {item.id: item for item in phase_ast.references}
     examples = {item.id: item for item in phase_ast.examples}
-    reference_reader = _build_reference_reader_node(root=root, phase_id=phase_doc.phase_name)
 
-    def read_reference(reference_id: str) -> str:
-        spec = references.get(reference_id)
-        if spec is None:
-            raise GraphAgentFatalError(f"[F-v3-resource-reference-id-invalid] {reference_id!r}")
-        runtime = ReferenceReaderRuntime(
-            skill_id=compiled.manifest.name,
-            phase_id=phase_doc.phase_name,
+    def read_reference(reference_id: Any, query: Any = "", mode: Any = "excerpt") -> str:
+        return read_declared_reference(
             root=root,
-            timeout_s=60,
+            references=references,
+            reference_id=reference_id,
+            query=query,
+            mode=mode,
         )
-        sandbox_state = runtime.initial_state()
-        sandbox_inputs = dict(sandbox_state["data"]["inputs"])
-        sandbox_inputs["reference_id"] = reference_id
-        sandbox_inputs["path"] = spec.path
-        sandbox_state = {
-            **sandbox_state,
-            "data": {**sandbox_state["data"], "inputs": sandbox_inputs},
-        }
-        result = reference_reader(sandbox_state)
-        output = phase_outputs_from_state(result).get(phase_doc.phase_name, {})
-        content = output.get("content")
-        return content if isinstance(content, str) else ""
 
-    def read_example(example_id: str) -> str:
-        spec = examples.get(example_id)
-        if spec is None:
-            raise GraphAgentFatalError(f"[F-v3-resource-example-invalid] {example_id!r}")
-        return _read_skill_root_file(root, spec.path)
+    def read_example(example_id: Any, query: Any = "") -> str:
+        return read_declared_example(root=root, examples=examples, example_id=example_id, query=query)
 
-    tools: list[Any] = []
-    if references:
-        tools.append(
-            ToolDef(
-                id="read_reference",
-                phase_id=phase_doc.phase_name,
-                path=phase_doc.path,
-                func=read_reference,
-                description="Read one declared reference by id.",
-            )
+    tools: list[Any] = [
+        ToolDef(
+            id="read_reference",
+            phase_id=phase_doc.phase_name,
+            path=phase_doc.path,
+            func=read_reference,
+            description="Read one declared reference by id.",
+        ),
+        ToolDef(
+            id="read_example",
+            phase_id=phase_doc.phase_name,
+            path=phase_doc.path,
+            func=read_example,
+            description="Read one declared example by id.",
         )
-    if examples:
-        tools.append(
-            ToolDef(
-                id="read_example",
-                phase_id=phase_doc.phase_name,
-                path=phase_doc.path,
-                func=read_example,
-                description="Read one declared example by id.",
-            )
-        )
+    ]
     return [_structured_tool(tool) for tool in tools]
 
 
@@ -507,19 +579,11 @@ def _skill_root_for_phase_path(path: Path) -> Path:
 
 
 def _read_skill_root_file(root: Path, relative_path: str) -> str:
-    candidate = (root / relative_path).resolve()
-    root_resolved = root.resolve()
-    try:
-        candidate.relative_to(root_resolved)
-    except ValueError as exc:
-        raise GraphAgentFatalError(
-            f"[F-v3-resource-reference-path-invalid] {relative_path!r} escapes skill root"
-        ) from exc
-    if not candidate.is_file():
-        raise GraphAgentFatalError(
-            f"[F-v3-resource-reference-path-invalid] {relative_path!r} is not readable"
-        )
-    return candidate.read_text(encoding="utf-8")
+    return read_resource_file(
+        root=root,
+        relative_path=relative_path,
+        error_code="[F-v3-resource-reference-path-invalid]",
+    )
 
 
 def _invoke_subagent_tool_t21(
@@ -614,10 +678,11 @@ def _invoke_subagent_once_t23(
     input_data: dict[str, Any],
     config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
+    child_flow = _child_flow(parent_state.get("flow", {}))
     result = runtime.graph.invoke(
         {
             "data": {"inputs": dict(input_data), "phase_outputs": {}, "scratch": {}},
-            "flow": parent_state.get("flow", {}),
+            "flow": child_flow,
             "messages": [],
             "run_id": parent_state.get("run_id"),
         },
@@ -628,8 +693,14 @@ def _invoke_subagent_once_t23(
     return {
         "status": "ok",
         "data": data_delta,
-        "flow": result.get("flow", parent_state.get("flow", {})),
+        "flow": result.get("flow", child_flow),
     }
+
+
+def _child_flow(parent_flow: Any) -> dict[str, Any]:
+    flow = deepcopy(parent_flow) if isinstance(parent_flow, dict) else {}
+    flow["subagent_depth"] = current_subagent_depth(flow) + 1
+    return flow
 
 
 def _invoke_subagent_many_t24(
@@ -748,6 +819,17 @@ def _logic_output_schema_keys(compiled: CompiledSkill) -> set[str] | None:
     return {key for key in raw_keys if isinstance(key, str)}
 
 
+def _schema_output_keys(schema: dict[str, Any] | None) -> set[str] | None:
+    if schema is None:
+        return None
+    properties = schema.get("properties")
+    if properties is None:
+        return None
+    if not isinstance(properties, dict):
+        return set()
+    return {key for key in properties if isinstance(key, str)}
+
+
 def _validate_logic_update_keys(
     updates: dict[str, Any],
     output_schema_keys: set[str] | None,
@@ -757,11 +839,11 @@ def _validate_logic_update_keys(
     if output_schema_keys is None:
         return
     for key in updates:
-        if key not in output_schema_keys:
-            raise GraphAgentFatalError(
-                f"[F-v3-actions-keys] {action_path}:{action_line} "
-                f"action wrote undeclared output key {key!r}"
-            )
+            if key not in output_schema_keys:
+                raise GraphAgentFatalError(
+                    f"[F-v3-logic-output-field-undeclared] {action_path}:{action_line} "
+                    f"action wrote undeclared output key {key!r}"
+                )
 
 
 def _is_terminal_phase(

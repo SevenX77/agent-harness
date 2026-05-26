@@ -81,7 +81,7 @@ def test_downstream_phase_reads_upstream_phase_outputs_in_same_graph(tmp_path: P
         tmp_path,
         "segment",
         "segment",
-        "def segment(context):\n    context.set('segments_summary', 'chapter summary')\n",
+        "def segment(context):\n    return {'segments_summary': 'chapter summary'}\n",
     )
     _logic_action(
         tmp_path,

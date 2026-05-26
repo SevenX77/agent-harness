@@ -66,7 +66,7 @@ def test_static_action_return_key_must_be_declared(tmp_path: Path) -> None:
     _base(tmp_path, _outputs("foo"))
     _action(tmp_path, "def write_value(context):\n    return {'missing': 1}\n")
 
-    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-actions-keys\].*missing"):
+    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-logic-output-field-undeclared\].*missing"):
         compile_skill(tmp_path, cache=False)
 
 
@@ -78,7 +78,7 @@ def test_runtime_action_dynamic_return_key_must_be_declared(tmp_path: Path) -> N
     )
     graph = assemble_graph(compile_skill(tmp_path, cache=False)).graph
 
-    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-actions-keys\].*missing"):
+    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-logic-output-field-undeclared\].*missing"):
         graph.invoke({"data": {}, "flow": {}, "messages": [], "run_id": "keys"})
 
 
@@ -96,7 +96,7 @@ def test_context_update_key_must_be_declared(tmp_path: Path) -> None:
     _base(tmp_path, _outputs("foo"))
     _action(tmp_path, "def write_value(context):\n    context.update(missing=1)\n")
 
-    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-actions-keys\].*missing"):
+    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-logic-output-field-undeclared\].*missing"):
         compile_skill(tmp_path, cache=False)
 
 

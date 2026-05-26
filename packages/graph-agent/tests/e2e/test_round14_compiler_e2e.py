@@ -376,7 +376,6 @@ _GENERIC_WRAPPER_CODES = frozenset(
         "[F-v3-graph]",
         "[F-v3-io]",
         "[F-v3-actions]",
-        "[F-v3-actions-keys]",
         "[F-v3-purity]",
     }
 )

@@ -167,7 +167,8 @@ def load_registry_snapshot(
     credentials = _load_json_object(Path(credentials_path))
     roles = _load_yaml_object(Path(roles_path))
     _assert_v4_credentials(credentials, Path(credentials_path))
-    _assert_v2_roles(roles, Path(roles_path))
+    _assert_supported_roles(roles, Path(roles_path))
+    roles = _gateway_roles_payload(roles)
     return RegistrySnapshot(
         provider_endpoints=credentials.get("provider_endpoints") or {},
         provider_routes=credentials.get("provider_routes") or {},
@@ -212,11 +213,11 @@ def _assert_v4_credentials(payload: dict[str, Any], path: Path) -> None:
         raise ValueError(f"legacy credentials fields are not supported: {present}")
 
 
-def _assert_v2_roles(payload: dict[str, Any], path: Path) -> None:
+def _assert_supported_roles(payload: dict[str, Any], path: Path) -> None:
     schema_version = payload.get("schema_version")
-    if schema_version != 2:
+    if schema_version not in {2, 3}:
         raise ValueError(
-            f"roles file must use schema_version 2: {path}; "
+            f"roles file must use schema_version 2 or 3: {path}; "
             "legacy models/providers/active_model schema is rejected at the v2 cutover boundary"
         )
     forbidden = {
@@ -234,6 +235,34 @@ def _assert_v2_roles(payload: dict[str, Any], path: Path) -> None:
         for role_name, role in roles.items():
             if isinstance(role, dict) and ("active_model" in role or "models" in role):
                 raise ValueError(f"legacy role schema is not supported for role: {role_name}")
+
+
+def _gateway_roles_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("schema_version") != 3:
+        return payload
+    gateway_role_keys = {
+        "system_prompt_prefix",
+        "source_profile_id",
+        "source_profile_snapshot",
+        "fallback_chain",
+        "lint_requirements",
+    }
+    roles = payload.get("roles") or {}
+    if not isinstance(roles, dict):
+        return payload
+    gateway_roles = {
+        role_name: (
+            {key: value for key, value in role.items() if key in gateway_role_keys}
+            if isinstance(role, dict)
+            else role
+        )
+        for role_name, role in roles.items()
+    }
+    return {
+        **payload,
+        "model_profiles": payload.get("model_profiles") or {},
+        "roles": gateway_roles,
+    }
 
 
 def _default_client_manager() -> Any:

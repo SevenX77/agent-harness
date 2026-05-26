@@ -90,5 +90,7 @@ def test_v030_cognitive_template_places_exit_contract_with_output_schema() -> No
     assert "[protocol:P1]" in prompt
     assert "Example A" in prompt
     assert "E2: Long example" in prompt
+    assert "<steps>" not in prompt
+    assert "<document_examples>" not in prompt
     assert "<output_schema>" in prompt
-    assert prompt.rfind("<output_schema>") > prompt.rfind("Call finish_task")
+    assert prompt.rfind("<output_schema>") > prompt.rfind("finish_task")

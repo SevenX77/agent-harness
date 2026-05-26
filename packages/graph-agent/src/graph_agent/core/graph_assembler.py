@@ -412,13 +412,22 @@ def _agent_system_prompt(
         steps=[step.model_dump() for step in phase_ast.steps],
         protocols=[protocol.model_dump() for protocol in phase_ast.protocols],
         output_schema=output_schema if isinstance(output_schema, dict) else None,
+        knowledge_base_markdown="",
+        reference_registry_listing=_reference_registry_listing(phase_ast),
         inline_examples=[example.content for example in phase_ast.examples_inline],
-        document_examples=[
-            {"id": example.id, "summary": example.summary}
-            for example in phase_ast.examples
-        ],
+        example_registry_listing=_example_registry_listing(phase_ast),
         role_prefix=resolve_role_prefix_from_llm_role(phase_ast.llm_role),
     )
+
+
+def _reference_registry_listing(phase_ast: AgentNodeAST) -> str:
+    lines = [f"- {item.id}: {item.summary}" for item in phase_ast.references]
+    return "\n".join(lines) if lines else "无注册 Reference"
+
+
+def _example_registry_listing(phase_ast: AgentNodeAST) -> str:
+    lines = [f"- {item.id}: {item.summary}" for item in phase_ast.examples]
+    return "\n".join(lines) if lines else "无扩展案例"
 
 
 def _agent_resource_tools(

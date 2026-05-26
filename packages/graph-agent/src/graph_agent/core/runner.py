@@ -48,6 +48,7 @@ from graph_agent.core.exceptions import (
     LoaderError,
     PersistenceError,
     SkillLoadError,
+    TraceWriteError,
 )
 from graph_agent.core.loader import load_workflow_from_md
 from graph_agent.core.local_workspace_resolver import LocalWorkspaceResolver
@@ -269,7 +270,7 @@ def _run_skill_dict(
         Dict with keys:
         - ``context``: Final workflow context (contains all outputs)
         - ``metrics``: Token usage and timing stats
-        - ``trace_path``: Path to trace.json (if TracingCallback active)
+        - ``trace_path``: Path to saved trace summary JSON (if TracingCallback active)
         - ``wall_time_sec``: Total wall time
     """
     resolver = require_skill_resolver(skill_resolver, caller="_run_skill_dict")
@@ -465,6 +466,25 @@ def _run_skill_dict(
     }
 
 
+def _prepare_v030_callbacks(
+    callbacks: list[Any] | None,
+    trace_output: Path | None,
+) -> list[Any]:
+    active_callbacks = list(callbacks) if callbacks is not None else [LoggingCallback()]
+    tracing_callbacks = [cb for cb in active_callbacks if isinstance(cb, TracingCallback)]
+    if trace_output is not None:
+        if not tracing_callbacks:
+            tracer = TracingCallback(trace_dir=trace_output)
+            active_callbacks.append(tracer)
+            tracing_callbacks.append(tracer)
+        for tracer in tracing_callbacks:
+            if getattr(tracer, "_typed_jsonl_path", None) is None:
+                tracer.set_trace_dir(trace_output)
+    elif callbacks is None:
+        active_callbacks.append(TracingCallback())
+    return active_callbacks
+
+
 def _run_v030_skill_dict(
     skill_root: Path,
     *,
@@ -483,11 +503,16 @@ def _run_v030_skill_dict(
 
     resolver = require_skill_resolver(skill_resolver, caller="_run_v030_skill_dict")
     t0 = time.time()
+    effective_trace_dir = trace_dir
+    if effective_trace_dir is None and inputs.get("output_dir"):
+        effective_trace_dir = Path(inputs["output_dir"]) / "traces"
+    trace_output = Path(effective_trace_dir) if effective_trace_dir is not None else None
+    active_callbacks = _prepare_v030_callbacks(callbacks, trace_output)
     if mock_llm is not _NO_MOCK_LLM:
         chat_model = mock_llm
     elif model_resolver is not None:
         chat_model = model_resolver.resolve(
-            callbacks=tuple(callbacks or ()),
+            callbacks=tuple(active_callbacks),
             phase_name="<workflow>",
         )
     else:
@@ -496,7 +521,7 @@ def _run_v030_skill_dict(
     graph = assemble_graph(
         compiled,
         chat_model=chat_model,
-        callbacks=callbacks,
+        callbacks=active_callbacks,
         skill_resolver=resolver,
     ).graph
     run_id = thread_id or str(uuid.uuid4())
@@ -509,11 +534,22 @@ def _run_v030_skill_dict(
         }
     )
     wall_time = round(time.time() - t0, 3)
+    saved_trace_path: str | None = None
+    if trace_output is not None:
+        for callback in active_callbacks:
+            if isinstance(callback, TracingCallback):
+                try:
+                    saved_trace_path = callback.save(trace_output)
+                except Exception as exc:
+                    raise TraceWriteError(
+                        f"trace save failed: {exc}",
+                        context={"trace_path": str(trace_output)},
+                    ) from exc
     return {
         "run_id": run_id,
         "context": dict(result.get("data", {})),
         "metrics": {"wall_time_sec": wall_time},
-        "trace_path": str(Path(trace_dir) / "trace.json") if trace_dir else None,
+        "trace_path": saved_trace_path,
         "wall_time_sec": wall_time,
     }
 

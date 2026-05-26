@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from graph_agent.callbacks.base import Callback
+from graph_agent.callbacks.emit import _safe_emit_event
 from graph_agent.cognitive.finish import finish_task
 from graph_agent.cognitive.memory import update_working_memory
 from graph_agent.core.exceptions import (
@@ -213,24 +214,6 @@ def _safe_memory_usage_mb() -> float | None:
             exc,
         )
         return None
-
-
-def _safe_emit_event(callbacks: list[Callback], event: Any) -> None:
-    """Dispatch a typed CallbackEvent to every callback, swallowing errors.
-
-    Mirrors TracingClientProxy._emit_prompt_captured's isolation pattern:
-    a broken callback must never take down the harness run. Each callback
-    is tried independently and any exception is logged + skipped.
-    """
-    for cb in callbacks or []:
-        try:
-            cb.on_event(event)
-        except Exception:  # noqa: BLE001
-            logger.exception(
-                "[Harness] callback %r raised on %s; continuing with other callbacks",
-                type(cb).__name__,
-                type(event).__name__,
-            )
 
 
 def _safe_jsonable_dict(data: Any) -> dict[str, Any]:

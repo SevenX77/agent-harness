@@ -88,7 +88,7 @@ class CompiledSubagent:
     description: str
     root: Path
     input_schema: dict[str, Any]
-    input_model: type[BaseModel]
+    input_model: type[BaseModel] = field(compare=False)
     expected_schema: dict[str, Any]
 
 
@@ -148,8 +148,36 @@ class SkillLoader:
         skill_root: str | Path,
         *,
         skill_resolver: SkillResolverProtocol,
+        _loading_stack: tuple[str, ...] = (),
+        _compilation_cache: dict[str, CompiledSkill] | None = None,
     ) -> CompiledSkill:
         root = Path(skill_root)
+        root_key = str(root.resolve())
+        if root_key in _loading_stack:
+            detail = f"recursive skill compilation cycle detected at {root_key}"
+            raise SkillLoadError(
+                detail,
+                payload=make_error_payload(
+                    "[F-v3-compile-recursion-cycle]",
+                    detail,
+                    source_path=root,
+                ),
+            )
+        if len(_loading_stack) >= 20:
+            detail = f"recursive skill compilation depth exceeded at {root_key}"
+            raise SkillLoadError(
+                detail,
+                payload=make_error_payload(
+                    "[F-v3-compile-depth-exceeded]",
+                    detail,
+                    source_path=root,
+                ),
+            )
+        if _compilation_cache is None:
+            _compilation_cache = {}
+        if root_key in _compilation_cache:
+            return _compilation_cache[root_key]
+        loading_stack = (*_loading_stack, root_key)
         _guard_v030_root(root)
 
         graph_path = root / "GRAPH.md"
@@ -180,7 +208,12 @@ class SkillLoader:
                 _build_phase_document(phase_name, phase_file, mode, frontmatter, body)
             )
         _validate_agent_reference_paths(root, phase_docs)
-        _validate_subgraph_io_contracts(phase_docs, skill_resolver=skill_resolver)
+        _validate_subgraph_io_contracts(
+            phase_docs,
+            skill_resolver=skill_resolver,
+            _loading_stack=loading_stack,
+            _compilation_cache=_compilation_cache,
+        )
         actions, tools = _discover_actions_and_tools(root, discovered)
         _validate_logic_action_return_keys(
             phase_docs,
@@ -192,6 +225,8 @@ class SkillLoader:
         subagents_by_phase = _compile_subagent_metadata(
             phase_docs,
             skill_resolver=skill_resolver,
+            _loading_stack=loading_stack,
+            _compilation_cache=_compilation_cache,
         )
         tools = _inject_subagent_tools(tools, subagents_by_phase)
 
@@ -217,7 +252,7 @@ class SkillLoader:
             ],
         }
         logger.info("Compiled V0.3.0 graph skill root=%s phases=%d", root, len(phase_docs))
-        return CompiledSkill(
+        compiled = CompiledSkill(
             raw=raw,
             manifest=manifest,
             nodes=phase_docs,
@@ -226,6 +261,8 @@ class SkillLoader:
             subagents_by_phase=subagents_by_phase,
             phase_tokens=phase_tokens,
         )
+        _compilation_cache[root_key] = compiled
+        return compiled
 
 
 def load_workflow_from_md(
@@ -490,6 +527,8 @@ def _validate_subgraph_io_contracts(
     phase_docs: list[PhaseDocument],
     *,
     skill_resolver: SkillResolverProtocol | None,
+    _loading_stack: tuple[str, ...],
+    _compilation_cache: dict[str, CompiledSkill],
 ) -> None:
     for doc in phase_docs:
         if not isinstance(doc.ast, SubgraphNodeAST):
@@ -499,6 +538,8 @@ def _validate_subgraph_io_contracts(
         child = SkillLoader(validate_context_writes=False).compile_skill(
             child_root,
             skill_resolver=resolver,
+            _loading_stack=_loading_stack,
+            _compilation_cache=_compilation_cache,
         )
         for side in ("inputs", "outputs"):
             parent_schema = getattr(doc.ast.io, side)
@@ -553,6 +594,8 @@ def _compile_subagent_metadata(
     phase_docs: list[PhaseDocument],
     *,
     skill_resolver: SkillResolverProtocol | None,
+    _loading_stack: tuple[str, ...],
+    _compilation_cache: dict[str, CompiledSkill],
 ) -> dict[str, list[CompiledSubagent]]:
     subagents_by_phase: dict[str, list[CompiledSubagent]] = {}
     for doc in phase_docs:
@@ -565,6 +608,8 @@ def _compile_subagent_metadata(
             sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(
                 sub_root,
                 skill_resolver=resolver,
+                _loading_stack=_loading_stack,
+                _compilation_cache=_compilation_cache,
             )
             input_schema = sub_compiled.raw.get("io", {}).get("inputs")
             if not isinstance(input_schema, dict) or not input_schema:

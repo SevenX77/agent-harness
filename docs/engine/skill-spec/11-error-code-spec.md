@@ -60,6 +60,13 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | `[F-v3-graph-io-physical-file-deprecated]` | 编译期 | 使用旧 `io/inputs.json` 或 `io_inputs_ref` | 改为 inline `io.inputs` / `io.outputs` | [Physical](./01-physical-layout.md#io-物理文件退役声明-inline-io-deprecation) |
 | `[F-v3-graph-dataflow-source-missing]` | 编译期 | phase input 没有根输入或上游输出来源 | 补依赖或调整 IO | [GRAPH](./02-graph-md-spec.md#根-io-契约-root-io-schema) |
 
+### compile domain
+
+| 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
+|---|---|---|---|---|
+| `[F-v3-compile-recursion-cycle]` | 编译期 | subgraph/subagent 递归编译链路中再次遇到已在加载栈内的 skill root | 打断 skill 间循环引用或抽出共享子图 | [Error Code](./11-error-code-spec.md#compile-domain) |
+| `[F-v3-compile-depth-exceeded]` | 编译期 | subgraph/subagent 递归编译深度超过安全上限 | 降低嵌套深度或合并中间 skill | [Error Code](./11-error-code-spec.md#compile-domain) |
+
 ### logic domain
 
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |

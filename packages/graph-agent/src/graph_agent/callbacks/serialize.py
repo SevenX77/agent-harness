@@ -63,57 +63,29 @@ def to_jsonable_dict(data: Any, *, _depth: int = 0) -> Any:
     if data is None or isinstance(data, (str, bool, int, float)):
         return data
 
-    # common stdlib structural types
-    if isinstance(data, Path):
-        return str(data)
-    if isinstance(data, datetime):
-        return data.isoformat()
-    if isinstance(data, UUID):
-        return str(data)
-    if isinstance(data, Decimal):
-        return str(data)
+    scalar = _jsonable_scalar(data)
+    if scalar is not None:
+        return scalar
 
     # collection types — recurse
     if isinstance(data, dict):
-        out: dict[str, Any] = {}
-        for key, value in data.items():
-            # JSON keys must be strings.
-            out[str(key)] = to_jsonable_dict(value, _depth=_depth + 1)
-        return out
+        return _jsonable_dict_items(data, _depth=_depth)
     if isinstance(data, (list, tuple)):
         return [to_jsonable_dict(item, _depth=_depth + 1) for item in data]
     if isinstance(data, (set, frozenset)):
-        try:
-            ordered = sorted(data, key=lambda x: str(x))
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(
-                "to_jsonable_dict: set/frozenset sort failed (%s); using unsorted list",
-                exc,
-            )
-            ordered = list(data)
-        return [to_jsonable_dict(item, _depth=_depth + 1) for item in ordered]
+        return _jsonable_set_items(data, _depth=_depth)
 
-    # LangChain message objects — preserve role / content structure
-    if _BaseMessage is not None and isinstance(data, _BaseMessage):
-        return {
-            "_type": "BaseMessage",
-            "role": getattr(data, "type", None) or getattr(data, "role", None),
-            "content": to_jsonable_dict(getattr(data, "content", None), _depth=_depth + 1),
-        }
+    return _jsonable_special_object(data, _depth=_depth)
 
-    # Pydantic models — lean on their own JSON-safe serialisation
+
+def _jsonable_special_object(data: Any, *, _depth: int) -> Any:
+    message = _jsonable_base_message(data, _depth=_depth)
+    if message is not None:
+        return message
+
     if isinstance(data, BaseModel):
-        try:
-            return data.model_dump(mode="json")
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(
-                "to_jsonable_dict: BaseModel %s model_dump failed (%s); using repr fallback",
-                type(data).__name__,
-                exc,
-            )
-            return {"_repr": repr(data), "_warning": _UNSUPPORTED_FALLBACK}
+        return _jsonable_base_model(data)
 
-    # callables — document rather than serialise
     if callable(data):
         return {
             "_type": "callable",
@@ -122,6 +94,60 @@ def to_jsonable_dict(data: Any, *, _depth: int = 0) -> Any:
 
     # fallback
     return {"_repr": repr(data), "_warning": _UNSUPPORTED_FALLBACK}
+
+
+def _jsonable_base_message(data: Any, *, _depth: int) -> dict[str, Any] | None:
+    if _BaseMessage is None or not isinstance(data, _BaseMessage):
+        return None
+    return {
+        "_type": "BaseMessage",
+        "role": getattr(data, "type", None) or getattr(data, "role", None),
+        "content": to_jsonable_dict(getattr(data, "content", None), _depth=_depth + 1),
+    }
+
+
+def _jsonable_base_model(data: BaseModel) -> Any:
+    try:
+        return data.model_dump(mode="json")
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "to_jsonable_dict: BaseModel %s model_dump failed (%s); using repr fallback",
+            type(data).__name__,
+            exc,
+        )
+        return {"_repr": repr(data), "_warning": _UNSUPPORTED_FALLBACK}
+
+
+def _jsonable_scalar(data: Any) -> str | None:
+    if isinstance(data, Path):
+        return str(data)
+    if isinstance(data, datetime):
+        return data.isoformat()
+    if isinstance(data, UUID):
+        return str(data)
+    if isinstance(data, Decimal):
+        return str(data)
+    return None
+
+
+def _jsonable_dict_items(data: dict[Any, Any], *, _depth: int) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in data.items():
+        # JSON keys must be strings.
+        out[str(key)] = to_jsonable_dict(value, _depth=_depth + 1)
+    return out
+
+
+def _jsonable_set_items(data: set[Any] | frozenset[Any], *, _depth: int) -> list[Any]:
+    try:
+        ordered = sorted(data, key=lambda x: str(x))
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "to_jsonable_dict: set/frozenset sort failed (%s); using unsorted list",
+            exc,
+        )
+        ordered = list(data)
+    return [to_jsonable_dict(item, _depth=_depth + 1) for item in ordered]
 
 
 __all__ = ["to_jsonable_dict"]

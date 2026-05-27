@@ -238,11 +238,79 @@ Agent body 里的 `@type:NAME` 会被静态扫描。编译器必须证明每个 
 | `actions` | LOGIC phase 可调用的 action registry。 |
 | `tools` | Agent phase 可调用的 tool registry。 |
 | `subagents_by_phase` | 每个 Agent phase 声明的 subagent metadata。 |
+| `phase_tokens` | `GRAPH.md` body `<phase>` 标签的原文、行号和属性 span。 |
 | `raw` | 编译器保留的原始解析结果、根 IO 和 `graph_topology`。 |
 
 它不是运行状态，也不是最终输出。运行时会拿它继续装配 LangGraph。
 
-## 13. 最容易误解的点
+## 13. 编译缓存怎么保证复水不漂移
+
+公开 `compile_skill(..., cache=True)` 会先用 `compute_cache_key(root)` 计算磁盘缓存 key。当前 key payload 里有 `"format": "v2"`。这个字段不是业务信息，而是缓存格式开关：旧缓存曾经只保存 `raw`、`manifest`、`nodes`，会在命中后丢掉 subagent 和 phase token 信息。把格式号写进 key，相当于给旧缓存换门锁，避免旧 snapshot 被新 rehydrate 误读。
+
+缓存脱水时保存这些字段：
+
+| snapshot 字段 | 来自哪里 | 为什么要保存 |
+|---|---|---|
+| `raw` | `CompiledSkill.raw` | 保留 GRAPH frontmatter/body、根 IO、`graph_topology` 和 phase 原始解析片段，供后续装配与调试使用。 |
+| `manifest` | `GraphManifest.model_dump(mode="json")` | 根图 schema、name、IO 和 phase 注册表是编译产物的根身份。 |
+| `nodes[]` | 每个 `PhaseDocument` | 保存 `phase_name`、`path`、`mode`、`frontmatter`、`raw_blocks` 和 `ast`。其中 `ast` 用 Pydantic JSON 形态保存，cache hit 后能恢复成 `LogicNodeAST`、`SubgraphNodeAST` 或 `AgentNodeAST`。 |
+| `subagents_by_phase` | `CompiledSkill.subagents_by_phase` | Agent phase 的 subagent metadata 不是可选装饰；它决定动态 `call_subagent_*` tool 能否存在。 |
+| `phase_tokens` | `CompiledSkill.phase_tokens` | serializer 和编辑器定位需要知道 `<phase>` 原文、offset、行号和属性 span。 |
+
+`subagents_by_phase` 逐项保存 `parent_phase_id`、`name`、`target_skill`、`description`、`root`、`input_schema`、`expected_schema`。其中 `root` 写成字符串，因为 JSON 没有 `Path` 类型；`input_model` 不保存，因为它是运行时动态生成的 Pydantic 类，既不可 JSON 序列化，也不能跨进程保留 Python identity。
+
+`phase_tokens` 逐项保存 `phase_id`、`raw_text`、`start_offset`、`end_offset`、`line_start`、`line_end`、`attrs` 和 `attr_spans`。`attr_spans` 里面的每个 `PhaseAttributeSpan` 也逐字段拆开：`name`、`value`、`quote`、`attr_start`、`attr_end`、`value_start`、`value_end`、`line_start`、`line_end`。这里不能偷懒留成普通 dict；调用方会按 dataclass 对象读取 span 的属性，dict 会让 cache hit 和冷编译的对象契约不一致。
+
+缓存复水时做的是“重建”，不是“解冻原对象”：
+
+- `manifest` 用 `GraphManifest.model_validate()` 还原。
+- `nodes[].ast` 用 `TypeAdapter[PhaseAST]` 还原成真实 AST 类型。
+- `actions` 和基础 `tools` 重新跑 `_discover_actions_and_tools(root, discovered)`，因为函数对象和 tool wrapper 本来就应该从当前磁盘代码重新绑定。
+- `PhaseTokenInfo` 和嵌套 `PhaseAttributeSpan` 用 dataclass 构造器还原，保证 `token.attr_spans["depends_on"].value` 这类访问在 cache hit 后仍成立。
+- `CompiledSubagent.root` 从字符串还原成 `Path`。
+- `CompiledSubagent.input_model` 用 `build_subagent_input_model(_subagent_input_model_name(parent_phase_id, name), input_schema)` 重建。这样模型命名和冷编译路径一致，而不是随便 `create_model` 一个相似类。
+- subagent metadata 复原后，必须再调用 `_inject_subagent_tools(tools, subagents_by_phase)`。动态 `call_subagent_<name>` 工具不是 snapshot 里直接保存的函数，它依赖 subagent metadata 重新桥接到 `ToolRegistry`。
+
+`CompiledSubagent.input_model` 标了 `field(compare=False)`。原因很具体：冷编译和 cache hit 会各自生成一个 Pydantic class，字段 schema 一样，但 Python class identity 不一样。如果它参与 dataclass equality，`hit.subagents_by_phase == cold.subagents_by_phase` 会永远失败。注意这只保证 subagent metadata 片段可比；整个 `CompiledSkill` 不承诺 `cold == hit`，因为 `actions` 和 `tools` 里的函数、动态 tool schema 也是每次重新绑定的运行时对象。
+
+坏缓存的处理也有边界。`load_from_cache()` 遇到文件读取、JSON 解析、字段缺失、类型不匹配或复水校验失败时，会打 warning，然后返回 `None`，让上层冷编译。缓存是加速层，不应该把一个原本能编译的 skill 变成不可用。
+
+## 14. 递归编译怎么防爆栈
+
+`target_skill` 会让编译器递归进入另一个 skill root。没有防护时，A 的 subagent 指 B，B 又指 A，就会像两面镜子互照一样无限展开，最后裸漏 Python `RecursionError`。当前实现把递归状态显式传下去。
+
+`SkillLoader.compile_skill()` 新增两个内部可选参数：
+
+| 参数 | 类型 | 公开调用需要传吗 | 作用 |
+|---|---|---|---|
+| `_loading_stack` | `tuple[str, ...]` | 不需要 | 当前递归链路上已经进入但尚未完成的 skill root key。 |
+| `_compilation_cache` | `dict[str, CompiledSkill] | None` | 不需要 | 一次顶级编译/装配生命周期内已完成的 skill root 结果。 |
+
+它们是内部参数，默认值保持公开 API 兼容。key 统一用 `str(root.resolve())`，而不是用户传入的原始路径。这样相对路径、绝对路径和符号链接归一后指向同一个 root，不会让同一张图换个写法就绕过 guard 或重复编译。
+
+进入编译时按固定顺序处理：
+
+| 检查 | 条件 | 行为 | 失败错误码 |
+|---|---|---|---|
+| 环检测 | `root_key in _loading_stack` | 当前 root 已在递归链路中，立即抛 `SkillLoadError` | `[F-v3-compile-recursion-cycle]` |
+| 深度上限 | `len(_loading_stack) >= 20` | push 当前 root 前拦截，避免第 21 层继续展开 | `[F-v3-compile-depth-exceeded]` |
+| 同图去重 | `root_key in _compilation_cache` | 直接返回已编译的 `CompiledSkill` 引用 | 无 |
+
+深度是在 push 当前 root 前检查的。这样 `_loading_stack` 表示“已经在栈上的父链路”，阈值语义稳定：当父链路已经有 20 层时，不再允许继续进入下一层。
+
+loader 内部有两个递归点会透传更新后的 stack/cache：
+
+- `_validate_subgraph_io_contracts()` 编译 child graph，用来比较父 SUBGRAPH phase IO 与 child `GRAPH.md` 根 IO。
+- `_compile_subagent_metadata()` 编译 subagent target skill，用来读取 child `io.inputs` 并生成 subagent input model。
+
+装配期也有递归编译，因此 `graph_assembler.py` 同步透传同一份状态：
+
+- `_build_subgraph_node()` 解析 SUBGRAPH phase 的 `target_skill`，编译 child，再递归 `assemble_graph()`。
+- `_subagent_runtime_map()` 为 Agent phase 的动态 subagent tool 准备 runtime graph，同样编译 child，再递归 `assemble_graph()`。
+
+这两处在调用 loader 前也会先查 `_compilation_cache`。所以同一个 child root 在一次装配生命周期里只真实编译一次；后续引用直接复用已编译结果。
+
+## 15. 最容易误解的点
 
 ### 编译不等于运行
 
@@ -264,7 +332,7 @@ phase 类型由文件名决定。`mode:` 只存在于内部 AST discriminator。
 
 `target_skill` 会在编译期 resolve，用于 SUBGRAPH IO 对齐和 Agent registry 可达性。
 
-## 14. 总图
+## 16. 总图
 
 ```text
 skill root
@@ -275,7 +343,8 @@ skill root
   -> 由文件名推导 phase 类型并拒绝 mode/旧 metadata
   -> 解析每个 phase AST
   -> 发现 actions/tools/resources/subagents
-  -> 编译 target_skill metadata 并校验 SUBGRAPH IO 1:1
+  -> 带递归 guard 编译 target_skill metadata 并校验 SUBGRAPH IO 1:1
   -> 检查 mentions 和资源路径边界
   -> 返回 CompiledSkill
+  -> cache=True 时以 v2 snapshot 保真保存/复水
 ```

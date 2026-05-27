@@ -212,3 +212,15 @@ PM 指示"让 agents 过一遍, 统一就执行"。三方独立评估 §7 顺序
 | step 4 阶段三 (r14.10) | grep gate + 全量 pytest 绿 | ⏳ |
 
 **注**: 其他 18 个 working tree modified test WIP = 被打断前错误前提实施, 在阶段二随 src sweep 同步重写, 不单独处理。
+
+---
+
+## WS3 引擎工程质量优化 — 收尾复评 (2026-05-27) ✅
+
+PR-1~6 全并入 stage/engine-v030 (HEAD f6a45b0)。三方 (a1 工具/a2 架构/a3 PM替身) 复评 + 主控亲跑工具复核, 详见 `WS3-REEVAL-2026-05-27.md`。
+
+**四维定稿**: 可靠性 4.0 / 可维护 3.0 / 安全 3.5 / 性能可观测 3.8 (3=合格 4=优秀)。总评: 引擎"把事情做对", 可被 PM 信任用于 Studio 调用。
+
+**残留债 (不阻塞使用)**: ① 代码复杂度 (30 个 C901, 最重 execute=44) + mypy strict 4 个真代码错 (2 个 PR-5 引入) ② CI pip-audit `--skip-editable` 盲区漏报 + 实际 4 个可修传递依赖漏洞 (idna/starlette/urllib3) ③ md_to_json 自愈降级 (PR-3 已加 guard 不崩, round-21 已知债)。
+
+**PR-7**: 元数据隔离原命题经双审证实误判 (`state.py` extra=forbid 早已隔离), 正确处置 = NO-OP 不硬造改动。挖出 2 项真实债务 (废 legacy compat 层 / 恢复 md_to_json 自愈) **超 charter 待 PM 定 scope**, round-25 spec 暂未 commit。

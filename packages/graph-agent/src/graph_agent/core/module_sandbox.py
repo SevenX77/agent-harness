@@ -9,7 +9,7 @@ import logging
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel
 
@@ -106,7 +106,7 @@ class ModuleSandbox:
             if previous_module is _MISSING:
                 sys.modules.pop(spec.name, None)
             else:
-                sys.modules[spec.name] = previous_module
+                sys.modules[spec.name] = cast(ModuleType, previous_module)
         self._module_cache[module_path] = module
         return module
 
@@ -152,7 +152,7 @@ class ModuleSandbox:
             if previous_module is _MISSING:
                 sys.modules.pop(sandbox_name, None)
             else:
-                sys.modules[sandbox_name] = previous_module
+                sys.modules[sandbox_name] = cast(ModuleType, previous_module)
         return module
 
     @staticmethod

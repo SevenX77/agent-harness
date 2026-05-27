@@ -20,38 +20,16 @@ def test_import_class_from_search_path(tmp_path: Path) -> None:
 
 
 def test_import_class_does_not_write_public_module_to_sys_modules(tmp_path: Path) -> None:
-    """The dotted public path must not leak into ``sys.modules``.
-
-    Phase 3 M7 follow-up (PHASE3_DESIGN.md v4 §3.5): the sandbox now
-    DOES register the namespaced ``_graph_agent_sandbox_<digest>_<path>``
-    key so ``Pydantic.model_rebuild`` can resolve forward references via
-    ``sys.modules``. That registration is intentional and contained to
-    the unique sandbox namespace; what we still defend against is the
-    raw public dotted path (``"schemas"``) bleeding into the global
-    registry where another caller could pick it up by accident.
-    """
+    """Neither the public path nor sandbox key may leak into ``sys.modules``."""
     module_file = tmp_path / "schemas.py"
     module_file.write_text("class OutputSchema:\n    pass\n", encoding="utf-8")
     sys.modules.pop("schemas", None)
 
     ModuleSandbox(search_paths=[tmp_path]).import_class("schemas.OutputSchema")
 
-    # Public name must NOT be polluted (the original guard).
     assert "schemas" not in sys.modules
-    # Sandbox-namespaced name MAY appear (forward-ref resolution
-    # contract). Other tests in the suite may leave their own sandbox
-    # keys in ``sys.modules``; we only assert that THIS load registered
-    # at least one key whose suffix encodes our ``"schemas"`` module.
-    sandbox_keys_for_schemas = [
-        name
-        for name in sys.modules
-        if name.startswith("_graph_agent_sandbox_") and name.endswith("_schemas")
-    ]
-    assert sandbox_keys_for_schemas, (
-        "expected ModuleSandbox to register a namespaced key in sys.modules "
-        "for the just-loaded ``schemas`` module so Pydantic forward refs "
-        "resolve at model_rebuild() time"
-    )
+    sandbox_key = ModuleSandbox._sandbox_module_name("schemas", module_file)
+    assert sandbox_key not in sys.modules
 
 
 def test_import_class_caches_result(tmp_path: Path) -> None:

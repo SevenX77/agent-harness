@@ -338,40 +338,17 @@ def _build_skill_node(
         _loading_stack=_loading_stack,
         _compilation_cache=_compilation_cache,
     )
-    framework_tools = []
-    critic_metrics: dict[str, Any] = {}
-
-    for tool_name in phase_ast.tools:
-        if _is_critic_tool_name(tool_name):
-            critic_client = (
-                LLMCriticClient(chat_model)
-                if chat_model is not None
-                else FakeCriticClient(CriticVerdict(passed=True, reasons=["stub"]))
-            )
-            critic_tool, metrics = build_critic_tool(
-                tool_name,
-                f"Review with {tool_name}",
-                critic_client,
-            )
-            framework_tools.append(critic_tool)
-            critic_metrics[tool_name] = metrics
-        elif tool_name == "finish_task":
-            continue
-        elif tool_name not in tool_by_name:
-            _graph_fatal(
-                f"tool {tool_name!r} in SKILL phase {phase_id!r} not found in ToolRegistry "
-                "and not a critic naming pattern"
-            )
-
-    output_schema = (
-        compiled.raw.get("io", {}).get("outputs")
-        if _is_terminal_phase(phase_id, compiled.manifest, compiled)
-        else None
+    framework_tools, critic_metrics = _build_framework_tools(
+        phase_id=phase_id,
+        tool_names=phase_ast.tools,
+        tool_by_name=tool_by_name,
+        chat_model=chat_model,
     )
-    finish_task = build_finish_task_tool(
-        output_schema if isinstance(output_schema, dict) else None,
-        parse_finish_markdown,
-        LLMMdPatchClient(chat_model) if chat_model is not None else None,
+
+    output_schema = _terminal_output_schema(phase_id, compiled)
+    finish_task = _build_agent_finish_task_tool(
+        output_schema,
+        chat_model=chat_model,
         max_patch_attempts=max_patch_attempts,
     )
     all_tools = [*business_tools, *framework_tools, finish_task]
@@ -391,20 +368,7 @@ def _build_skill_node(
 
         data_updates: dict[str, Any] = {}
         flow = dict(state.get("flow", {}))
-        phase_end_emitted = False
-
-        def _emit_phase_end(response_state: dict[str, Any]) -> None:
-            nonlocal phase_end_emitted
-            if phase_end_emitted:
-                return
-            phase_end_emitted = True
-            _safe_emit_event(
-                callbacks,
-                PhaseEndEvent(
-                    phase_name=phase_id,
-                    context=_phase_end_context(phase_id, state, response_state),
-                ),
-            )
+        phase_end_emitter = _PhaseEndEmitter(phase_id, state, callbacks)
 
         _safe_emit_event(
             callbacks,
@@ -422,11 +386,7 @@ def _build_skill_node(
                 ),
                 *state.get("messages", []),
             ]
-            model = (
-                chat_model.bind_tools(all_tools)
-                if hasattr(chat_model, "bind_tools")
-                else chat_model
-            )
+            model = _bind_tools_if_supported(chat_model, all_tools)
 
             max_turns = phase_ast.max_iterations
             for _ in range(max_turns):
@@ -490,15 +450,15 @@ def _build_skill_node(
                         critic_metrics=critic_metrics,
                     )
                     if finish_response is not None:
-                        _emit_phase_end(finish_response)
+                        phase_end_emitter.emit(finish_response)
                         return finish_response
             response_state = {"flow": flow, "messages": messages}
             if data_updates:
                 response_state["data"] = data_updates
-            _emit_phase_end(response_state)
+            phase_end_emitter.emit(response_state)
             return response_state
         finally:
-            _emit_phase_end(
+            phase_end_emitter.emit(
                 {
                     "flow": flow,
                     "messages": state.get("messages", []),
@@ -507,6 +467,93 @@ def _build_skill_node(
             )
 
     return _skill_node
+
+
+def _terminal_output_schema(phase_id: str, compiled: CompiledSkill) -> Any:
+    if _is_terminal_phase(phase_id, compiled.manifest, compiled):
+        return compiled.raw.get("io", {}).get("outputs")
+    return None
+
+
+def _build_agent_finish_task_tool(
+    output_schema: Any,
+    *,
+    chat_model: Any,
+    max_patch_attempts: int,
+) -> Any:
+    return build_finish_task_tool(
+        output_schema if isinstance(output_schema, dict) else None,
+        parse_finish_markdown,
+        LLMMdPatchClient(chat_model) if chat_model is not None else None,
+        max_patch_attempts=max_patch_attempts,
+    )
+
+
+class _PhaseEndEmitter:
+    def __init__(
+        self,
+        phase_id: str,
+        state: BlackboardState,
+        callbacks: list[Any] | None,
+    ) -> None:
+        self._phase_id = phase_id
+        self._state = state
+        self._callbacks = callbacks
+        self._emitted = False
+
+    def emit(self, response_state: dict[str, Any]) -> None:
+        if self._emitted:
+            return
+        self._emitted = True
+        _safe_emit_event(
+            self._callbacks,
+            PhaseEndEvent(
+                phase_name=self._phase_id,
+                context=_phase_end_context(self._phase_id, self._state, response_state),
+            ),
+        )
+
+
+def _build_framework_tools(
+    *,
+    phase_id: str,
+    tool_names: list[str],
+    tool_by_name: dict[str, Any],
+    chat_model: Any,
+) -> tuple[list[Any], dict[str, Any]]:
+    framework_tools = []
+    critic_metrics: dict[str, Any] = {}
+    for tool_name in tool_names:
+        if _is_critic_tool_name(tool_name):
+            critic_tool, metrics = _build_critic_framework_tool(tool_name, chat_model)
+            framework_tools.append(critic_tool)
+            critic_metrics[tool_name] = metrics
+            continue
+        if tool_name == "finish_task":
+            continue
+        if tool_name not in tool_by_name:
+            _graph_fatal(
+                f"tool {tool_name!r} in SKILL phase {phase_id!r} not found in ToolRegistry "
+                "and not a critic naming pattern"
+            )
+    return framework_tools, critic_metrics
+
+
+def _build_critic_framework_tool(tool_name: str, chat_model: Any) -> tuple[Any, Any]:
+    critic_client = (
+        LLMCriticClient(chat_model)
+        if chat_model is not None
+        else FakeCriticClient(CriticVerdict(passed=True, reasons=["stub"]))
+    )
+    return build_critic_tool(
+        tool_name,
+        f"Review with {tool_name}",
+        critic_client,
+    )
+
+
+def _bind_tools_if_supported(chat_model: Any, tools: list[Any]) -> Any:
+    return chat_model.bind_tools(tools) if hasattr(chat_model, "bind_tools") else chat_model
 
 
 def _subagent_tool_map(

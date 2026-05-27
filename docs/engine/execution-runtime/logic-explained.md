@@ -10,7 +10,7 @@
 
 `run_skill()` 先调用 `require_skill_resolver(..., caller="run_skill")`。`_run_skill_dict()` 再检查入口形状：只有“目录，且目录下有 `GRAPH.md`”会走 `_run_v030_skill_dict()`；普通 `.md` 文件、根级单文件 `SKILL.md`、不存在路径、或缺 `GRAPH.md` 的目录都会抛 `SkillLoadError`，message 字面包含 `[F-v3-graph-root-missing]`。公开 `run_skill()` 捕获这个 `GraphAgentError` 后仍返回 `WorkflowResult(success=False, context={}, error=str(exc))`，所以对外契约是“返回失败结果”，不是向调用方裸抛。
 
-目录型 V0.3.0 `GRAPH.md` root 会走 `_run_v030_skill_dict()`，不是旧 harness 缓存路径，也不再进入 `load_workflow_from_md` / `_harness_cache` / `.run_id` 文件 resume 分支。这个分支现在会在 `graph.invoke()` 前准备 callbacks 和 trace 输出目录，再把 callbacks 传给 `assemble_graph()`。这点很重要：如果 `TracingCallback` 等到执行后才绑定目录，过程中产生的 typed events 就进不了 `tracing.jsonl`。`thread_id` 当前只用于选择本次 state 里的 `run_id`；没有 `thread_id` 时生成新的 UUID。
+目录型 V0.3.0 `GRAPH.md` root 会走 `_run_v030_skill_dict()`，不是旧 harness 缓存路径；旧 `_harness_cache` 已删除，也不再进入 `load_workflow_from_md` / `.run_id` 文件 resume 分支。这个分支现在会在 `graph.invoke()` 前准备 callbacks 和 trace 输出目录，再把 callbacks 传给 `assemble_graph()`。这点很重要：如果 `TracingCallback` 等到执行后才绑定目录，过程中产生的 typed events 就进不了 `tracing.jsonl`。`thread_id` 当前只用于选择本次 state 里的 `run_id`；没有 `thread_id` 时生成新的 UUID。
 
 PR β 已新增 `build_middleware_chain`，按 `MVP0_MIDDLEWARE_ORDER_CONTRACT` 可实例化 6 层顺序：
 
@@ -89,22 +89,22 @@ Agent phase 仍是 LLM 工具循环。模型每轮输出 tool call 后，`graph_
 
 字段级行为：
 
-- phase 进入时发 `PhaseStartEvent`。`context` 固定是完整 blackboard data：`{"inputs": ..., "phase_outputs": ..., "scratch": ...}`，由 `_observable_data_context()` 生成，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:381-384` 和 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:494-500`。这与旧 harness 的 `LLMPhaseNode` / `CodePhaseNode` 用 `state["data"].model_dump()` 发 start/end 的形态对齐，见 `packages/graph-agent/src/graph_agent/core/phase_nodes/llm_phase_node.py:129-130`、`packages/graph-agent/src/graph_agent/core/phase_nodes/code_phase_node.py:39`。
-- 每次 `model.invoke(...)` 返回后发 `LLMCallEvent`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:403-417`。token 统计由 `_extract_token_usage()` 读取并归一；缺失、布尔值、不可转整数时降级为 `0`，字段名兼容 `input_tokens/output_tokens`、`prompt_tokens/completion_tokens`、`total_input_tokens/total_output_tokens`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:525-548`。
-- 每个工具成功返回后发 `ToolCallEvent`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:422-447`。普通业务工具、critic/framework tool、subagent tool 和 `finish_task` 都走这条发射。`args` 只接受 dict；非 dict 时给空 dict。`result` 是字符串字段，dict/list 用 JSON 序列化，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:557-562`。
-- phase 退出时发 `PhaseEndEvent`，并且只发一次。`_emit_phase_end()` 用 `phase_end_emitted` 防重，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:366-379`。覆盖 `finish_task` 早返回、无 tool call / max turns 正常返回、以及异常路径；异常路径在 `finally` 发事件后仍继续抛异常，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:456-479`。
+- phase 进入时发 `PhaseStartEvent`。`context` 固定是完整 blackboard data：`{"inputs": ..., "phase_outputs": ..., "scratch": ...}`，由 `_observable_data_context()` 生成，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:409-412` 和 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:522-528`。这与旧 harness 的 `LLMPhaseNode` / `CodePhaseNode` 用 `state["data"].model_dump()` 发 start/end 的形态对齐，见 `packages/graph-agent/src/graph_agent/core/phase_nodes/llm_phase_node.py:129-130`、`packages/graph-agent/src/graph_agent/core/phase_nodes/code_phase_node.py:39`。
+- 每次 `model.invoke(...)` 返回后发 `LLMCallEvent`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:434-445`。token 统计由 `_extract_token_usage()` 读取并归一；缺失、布尔值、不可转整数时降级为 `0`，字段名兼容 `input_tokens/output_tokens`、`prompt_tokens/completion_tokens`、`total_input_tokens/total_output_tokens`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:553-571`。
+- 每个工具成功返回后发 `ToolCallEvent`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:468-475`。普通业务工具、critic/framework tool、subagent tool 和 `finish_task` 都走这条发射。`args` 只接受 dict；非 dict 时给空 dict。`result` 是字符串字段，dict/list 用 JSON 序列化，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:585-590`。
+- phase 退出时发 `PhaseEndEvent`，并且只发一次。`_emit_phase_end()` 用 `phase_end_emitted` 防重，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:396-407`。覆盖 `finish_task` 早返回、无 tool call / max turns 正常返回、以及异常路径；异常路径在 `finally` 发事件后仍继续抛异常，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:492-507`。
 
-`PhaseEndEvent.context` 也是完整 blackboard data。`finish_task` 成功时，response data 里的 `{phase_name: final_write}` 会被 `_phase_end_context()` 翻译成 `{"inputs": {}, "phase_outputs": {phase_name: final_write}, "scratch": {}}`；若 response data 已经是完整结构，则保留完整结构，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:503-522`。
+`PhaseEndEvent.context` 也是完整 blackboard data。`finish_task` 成功时，response data 里的 `{phase_name: final_write}` 会被 `_phase_end_context()` 翻译成 `{"inputs": {}, "phase_outputs": {phase_name: final_write}, "scratch": {}}`；若 response data 已经是完整结构，则保留完整结构，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:531-550`。
 
 ## 2.2 V0.3.0 trace 如何真实落盘
 
 `_run_v030_skill_dict()` 现在不再返回伪 `trace.json`。它的 trace 流程是：
 
-1. 先计算输出目录：显式 `trace_dir` 优先；没有时，如果 runtime inputs 有 `output_dir`，使用 `Path(output_dir) / "traces"`，见 `packages/graph-agent/src/graph_agent/core/runner.py:506-509`。
-2. 调 `_prepare_v030_callbacks(callbacks, trace_output)`。没有 callbacks 时创建 `LoggingCallback()`；有 trace 目录但没有 tracer 时追加 `TracingCallback(trace_dir=trace_output)`；已有 tracer 但未绑定 typed JSONL 路径时调用 `set_trace_dir(trace_output)`，见 `packages/graph-agent/src/graph_agent/core/runner.py:469-485`。
-3. 把 `active_callbacks` 传给 model resolver 和 `assemble_graph()`，所以装配期 builtin reader 事件和运行期 `_skill_node` 事件都能进入同一批 callbacks，见 `packages/graph-agent/src/graph_agent/core/runner.py:511-526`。
-4. `graph.invoke()` 完成后，遍历 `TracingCallback` 并调用 `.save(trace_output)`。返回的真实 summary JSON 路径写进 dict 的 `trace_path`，见 `packages/graph-agent/src/graph_agent/core/runner.py:537-552`。
-5. `.save()` 失败时抛 `TraceWriteError("trace save failed: ...")`，并带 `context={"trace_path": str(trace_output)}`，见 `packages/graph-agent/src/graph_agent/core/runner.py:541-547`。
+1. 先计算输出目录：显式 `trace_dir` 优先；没有时，如果 runtime inputs 有 `output_dir`，使用 `Path(output_dir) / "traces"`，见 `packages/graph-agent/src/graph_agent/core/runner.py:235-238`。
+2. 调 `_prepare_v030_callbacks(callbacks, trace_output)`。没有 callbacks 时创建 `LoggingCallback()`；有 trace 目录但没有 tracer 时追加 `TracingCallback(trace_dir=trace_output)`；已有 tracer 但未绑定 typed JSONL 路径时调用 `set_trace_dir(trace_output)`，见 `packages/graph-agent/src/graph_agent/core/runner.py:198-214`。
+3. 把 `active_callbacks` 传给 model resolver 和 `assemble_graph()`，所以装配期 builtin reader 事件和运行期 `_skill_node` 事件都能进入同一批 callbacks，见 `packages/graph-agent/src/graph_agent/core/runner.py:239-255`。
+4. `graph.invoke()` 完成后，遍历 `TracingCallback` 并调用 `.save(trace_output)`。返回的真实 summary JSON 路径写进 dict 的 `trace_path`，见 `packages/graph-agent/src/graph_agent/core/runner.py:267-283`。
+5. `.save()` 失败时抛 `TraceWriteError("trace save failed: ...")`，并带 `context={"trace_path": str(trace_output)}`，见 `packages/graph-agent/src/graph_agent/core/runner.py:270-276`。
 
 因此现在有两个文件概念：
 

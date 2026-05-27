@@ -360,7 +360,7 @@
 
 ## 9. Engine DI 入口
 
-`GraphAgentHarness.__init__` 在 `packages/graph-agent/src/graph_agent/core/harness.py:355-378` 接受 `model_resolver`。当 `model_resolver is None` 时，它抛 `GatewayResolverMissingError(phase_name="<harness>")` (`harness.py:374-377`)。这就是 PR alpha 的关键切换：生产 runtime 不再偷偷调用 `get_model_resolver()` 单例。
+`GraphAgentHarness.__init__` 在 `packages/graph-agent/src/graph_agent/core/harness.py:338-358` 接受 `model_resolver`。当 `model_resolver is None` 时，它抛 `GatewayResolverMissingError(phase_name="<harness>")` (`harness.py:355-358`)。这就是 PR alpha 的关键切换：生产 runtime 不再偷偷调用 `get_model_resolver()` 单例。
 
 `run_skill` 在 `packages/graph-agent/src/graph_agent/core/runner.py:59-127` 接收 `model_resolver: Any | None = None` 并传入 `_run_skill_dict`。
 

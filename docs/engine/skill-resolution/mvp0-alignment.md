@@ -72,11 +72,11 @@ PR-5 追加完成了同一领域的 shipped 健壮性补强：`ModuleSandbox` �
 | 入口 | 当前签名状态 | 对齐结果 |
 |---|---|---|
 | `compile_skill` | `compiler.py:41-47` 必填 `skill_resolver` | 编译 facade 不 new resolver |
-| `SkillLoader.compile_skill` | `loader.py:149-154` 必填 `skill_resolver` | 解析 phase / subagent metadata 时使用同一 resolver |
-| `assemble_graph` | `graph_assembler.py:73-79` 必填 `skill_resolver` | SUBGRAPH runtime 和 subagent runtime 继续透传 |
-| `run_skill` | `runner.py:173` 必填 `skill_resolver` | public runtime 入口不允许隐式 fallback |
-| `_run_skill_dict` | `runner.py:244` 必填 `skill_resolver` | 内部执行入口不允许掉 resolver |
-| `_run_v030_skill_dict` | `runner.py:506` 必填 `skill_resolver` | compile + assemble 都用同一 resolver |
+| `SkillLoader.compile_skill` | `loader.py:146-153` 必填 `skill_resolver` | 解析 phase / subagent metadata 时使用同一 resolver |
+| `assemble_graph` | `graph_assembler.py:91-99` 必填 `skill_resolver` | SUBGRAPH runtime 和 subagent runtime 继续透传 |
+| `run_skill` | `runner.py:59-73` 必填 `skill_resolver` | public runtime 入口不允许隐式 fallback |
+| `_run_skill_dict` | `runner.py:130-144` 必填 `skill_resolver` | 内部执行入口不允许掉 resolver |
+| `_run_v030_skill_dict` | `runner.py:217-226` 必填 `skill_resolver` | compile + assemble 都用同一 resolver |
 
 验收重点：无 resolver 的代码路径不是“只在遇到 child skill 时失败”，而是在入口边界通过 `require_skill_resolver` 直接失败。
 
@@ -84,7 +84,7 @@ PR-5 追加完成了同一领域的 shipped 健壮性补强：`ModuleSandbox` �
 
 文件：`loader.py`
 
-当前 `_compile_subagent_metadata` 位于 `loader.py:373-422`。它只接收 `phase_docs` 和 `skill_resolver`，不再接收 `skill_root`，所以无法拼父目录相对路径。
+当前 `_compile_subagent_metadata` 位于 `loader.py:593-649`。它只接收 `phase_docs` 和 `skill_resolver`，不再接收 `skill_root`，所以无法拼父目录相对路径。
 
 字段流：
 
@@ -109,8 +109,8 @@ PR-5 追加完成了同一领域的 shipped 健壮性补强：`ModuleSandbox` �
 
 装配流程：
 
-1. `loader.py:1050-1073` 不再读取旧 child ref block。
-2. `_build_subgraph_node` 在 `graph_assembler.py:196-213` 使用 `phase_ast.target_skill`。
+1. `loader.py:1330-1361` 不再读取旧 child ref block。
+2. `_build_subgraph_node` 在 `graph_assembler.py:258-270` 使用 `phase_ast.target_skill`。
 3. `resolve_skill_root(skill_resolver, phase_ast.target_skill)` 返回 child root。
 4. child graph 编译和 assemble 都复用同一个 resolver。
 

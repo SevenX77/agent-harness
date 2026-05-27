@@ -596,80 +596,67 @@ def md_to_json(
 
 def _type_to_constraint(annotation: Any, field_info: Any = None) -> str:
     """Convert a Python type annotation to a human-readable constraint string."""
-    # Handle Optional[T] - both typing.Union and Python 3.10+ UnionType (X | Y)
     origin = typing.get_origin(annotation)
     args = typing.get_args(annotation)
 
-    # Check for Optional/Union types (typing.Union or types.UnionType for X | Y syntax)
-    is_union = False
-    if origin is typing.Union:
-        is_union = True
-    elif isinstance(annotation, types.UnionType):
-        is_union = True
-        origin = types.UnionType
+    optional_inner = _optional_inner_annotation(annotation, origin, args)
+    if optional_inner is not None:
+        return _type_to_constraint(optional_inner, field_info)
 
-    if is_union:
-        # Optional[T] is Union[T, None]
-        non_none_args = [a for a in args if a is not type(None)]
-        if len(non_none_args) == 1:
-            return _type_to_constraint(non_none_args[0], field_info)
-
-    # Handle Literal[...]
     if origin is typing.Literal:
         values = [f"{v!r}" for v in args]
         return f"[字符串，限 {', '.join(values)}]"
 
-    # Handle List[T]
     if origin is list:
         inner = args[0] if args else str
         if inner is str:
             return "[列表，缩进子行或逗号分隔]"
         return f"[列表，元素为 {_type_to_constraint(inner)}]"
 
-    # Handle primitive types
     if annotation is str:
         return "[文本]"
 
     if annotation is int:
-        constraint = "[整数"
-        # Extract ge/le from field_info metadata (contains Ge/Le objects)
-        ge_val = None
-        le_val = None
-        if field_info and hasattr(field_info, "metadata"):
-            for m in field_info.metadata:
-                if hasattr(m, "ge") or (m.__class__.__name__ == "Ge" and hasattr(m, "ge")):
-                    ge_val = m.ge
-                if hasattr(m, "le") or (m.__class__.__name__ == "Le" and hasattr(m, "le")):
-                    le_val = m.le
-        if ge_val is not None:
-            constraint += f", >={ge_val}"
-        if le_val is not None:
-            constraint += f", <={le_val}"
-        constraint += "]"
-        return constraint
+        return _numeric_constraint("整数", field_info)
 
     if annotation is float:
-        constraint = "[小数"
-        ge_val = None
-        le_val = None
-        if field_info and hasattr(field_info, "metadata"):
-            for m in field_info.metadata:
-                if hasattr(m, "ge") or (m.__class__.__name__ == "Ge" and hasattr(m, "ge")):
-                    ge_val = m.ge
-                if hasattr(m, "le") or (m.__class__.__name__ == "Le" and hasattr(m, "le")):
-                    le_val = m.le
-        if ge_val is not None:
-            constraint += f", >={ge_val}"
-        if le_val is not None:
-            constraint += f", <={le_val}"
-        constraint += "]"
-        return constraint
+        return _numeric_constraint("小数", field_info)
 
-    # Handle BaseModel subclasses (nested)
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
         return "[嵌套对象]"
 
     return "[未知]"
+
+
+def _optional_inner_annotation(annotation: Any, origin: Any, args: tuple[Any, ...]) -> Any | None:
+    is_union = origin is typing.Union or isinstance(annotation, types.UnionType)
+    if not is_union:
+        return None
+    non_none_args = [a for a in args if a is not type(None)]
+    return non_none_args[0] if len(non_none_args) == 1 else None
+
+
+def _numeric_constraint(label: str, field_info: Any) -> str:
+    ge_val, le_val = _numeric_bounds(field_info)
+    constraint = f"[{label}"
+    if ge_val is not None:
+        constraint += f", >={ge_val}"
+    if le_val is not None:
+        constraint += f", <={le_val}"
+    return f"{constraint}]"
+
+
+def _numeric_bounds(field_info: Any) -> tuple[Any, Any]:
+    ge_val = None
+    le_val = None
+    if not field_info or not hasattr(field_info, "metadata"):
+        return ge_val, le_val
+    for metadata in field_info.metadata:
+        if hasattr(metadata, "ge"):
+            ge_val = metadata.ge
+        if hasattr(metadata, "le"):
+            le_val = metadata.le
+    return ge_val, le_val
 
 
 def schema_to_type_dict(schema: type[BaseModel]) -> str:

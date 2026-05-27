@@ -121,6 +121,57 @@ class CircuitBreakerConfig:
     per_provider: dict[str, CircuitBreakerConfig] = field(default_factory=dict)
 
 
+def _role_model_order(role: RoleDef) -> list[str]:
+    model_order: list[str] = []
+    if role.active_model and role.active_model in role.models:
+        model_order.append(role.active_model)
+    for model_code in role.models:
+        if model_code not in model_order:
+            model_order.append(model_code)
+    return model_order
+
+
+def _resolved_providers_for_model(
+    model_code: str,
+    entry: RoleModelEntry,
+    model_def: ModelDef,
+    providers: dict[str, ProviderDef],
+) -> list[ResolvedProvider]:
+    call_chain: list[ResolvedProvider] = []
+    for provider_code in entry.provider_codes:
+        resolved = _resolve_provider_for_model(model_code, provider_code, model_def, providers)
+        if resolved is not None:
+            call_chain.append(resolved)
+    return call_chain
+
+
+def _resolve_provider_for_model(
+    model_code: str,
+    provider_code: str,
+    model_def: ModelDef,
+    providers: dict[str, ProviderDef],
+) -> ResolvedProvider | None:
+    prov_def = providers.get(provider_code)
+    if prov_def is None:
+        logger.warning("模型 %s 引用了未注册的 provider 代号: %s", model_code, provider_code)
+        return None
+    model_name = model_def.providers.get(provider_code)
+    if model_name is None:
+        logger.warning(
+            "模型 %s 在 provider %s 下无模型名映射",
+            model_code,
+            provider_code,
+        )
+        return None
+    return ResolvedProvider(
+        provider_code=provider_code,
+        provider_def=prov_def,
+        model_name=model_name,
+        model_def=model_def,
+        provider_options=model_def.provider_options.get(provider_code, {}),
+    )
+
+
 @dataclass
 class RoleConfigData:
     """配置文件的完整解析结果。"""
@@ -148,14 +199,7 @@ class RoleConfigData:
             raise KeyError(f"未知角色: {role_name}")
 
         call_chain: list[ResolvedProvider] = []
-
-        # 构建模型优先级列表：active_model 排第一，其余保持声明顺序
-        model_order: list[str] = []
-        if role.active_model and role.active_model in role.models:
-            model_order.append(role.active_model)
-        for mc in role.models:
-            if mc not in model_order:
-                model_order.append(mc)
+        model_order = _role_model_order(role)
 
         for model_code in model_order:
             entry = role.models.get(model_code)
@@ -166,29 +210,14 @@ class RoleConfigData:
                 logger.warning("角色 %s 引用了未注册的模型代号: %s", role_name, model_code)
                 continue
 
-            for pc in entry.provider_codes:
-                prov_def = self.providers.get(pc)
-                if prov_def is None:
-                    logger.warning("模型 %s 引用了未注册的 provider 代号: %s", model_code, pc)
-                    continue
-                model_name = model_def.providers.get(pc)
-                if model_name is None:
-                    logger.warning(
-                        "模型 %s 在 provider %s 下无模型名映射",
-                        model_code,
-                        pc,
-                    )
-                    continue
-                prov_opts = model_def.provider_options.get(pc, {})
-                call_chain.append(
-                    ResolvedProvider(
-                        provider_code=pc,
-                        provider_def=prov_def,
-                        model_name=model_name,
-                        model_def=model_def,
-                        provider_options=prov_opts,
-                    )
+            call_chain.extend(
+                _resolved_providers_for_model(
+                    model_code,
+                    entry,
+                    model_def,
+                    self.providers,
                 )
+            )
 
             # 如果不启用 model_fallback，只用 active_model 这一个
             if not role.model_fallback and model_code == role.active_model:

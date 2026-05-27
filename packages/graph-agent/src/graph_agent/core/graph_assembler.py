@@ -95,10 +95,14 @@ def assemble_graph(
     max_patch_attempts: int = 3,
     callbacks: list[Any] | None = None,
     skill_resolver: SkillResolverProtocol,
+    _loading_stack: tuple[str, ...] = (),
+    _compilation_cache: dict[str, CompiledSkill] | None = None,
 ) -> CompiledStateGraph:
     """Assemble a V2.1 CompiledSkill into a compiled LangGraph."""
 
     resolver = require_skill_resolver(skill_resolver, caller="assemble_graph")
+    if _compilation_cache is None:
+        _compilation_cache = {}
     builder = StateGraph(BlackboardState)
     node_by_phase = {node.phase_name: node for node in compiled.nodes}
     phase_ids: list[str] = []
@@ -120,6 +124,8 @@ def assemble_graph(
                 max_patch_attempts,
                 callbacks,
                 resolver,
+                _loading_stack,
+                _compilation_cache,
             ),
         )
         phase_ids.append(phase_id)
@@ -154,6 +160,8 @@ def _build_phase_node(
     max_patch_attempts: int,
     callbacks: list[Any] | None,
     skill_resolver: SkillResolverProtocol,
+    _loading_stack: tuple[str, ...],
+    _compilation_cache: dict[str, CompiledSkill],
 ) -> Any:
     ast = phase_doc.ast
     if isinstance(ast, LogicNodeAST):
@@ -173,6 +181,8 @@ def _build_phase_node(
                 chat_model,
                 max_patch_attempts,
                 skill_resolver,
+                _loading_stack=_loading_stack,
+                _compilation_cache=_compilation_cache,
             ),
             node_kind="subgraph",
         )
@@ -189,6 +199,8 @@ def _build_phase_node(
                 max_patch_attempts,
                 callbacks,
                 skill_resolver,
+                _loading_stack,
+                _compilation_cache,
             ),
             node_kind="agent",
         )
@@ -249,17 +261,29 @@ def _build_subgraph_node(
     chat_model: Any,
     max_patch_attempts: int,
     skill_resolver: SkillResolverProtocol,
+    *,
+    _loading_stack: tuple[str, ...] = (),
+    _compilation_cache: dict[str, CompiledSkill] | None = None,
 ) -> Any:
+    if _compilation_cache is None:
+        _compilation_cache = {}
     sub_root = resolve_skill_root(skill_resolver, phase_ast.target_skill)
-    sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(
-        sub_root,
-        skill_resolver=skill_resolver,
-    )
+    sub_root_key = str(Path(sub_root).resolve())
+    sub_compiled = _compilation_cache.get(sub_root_key)
+    if sub_compiled is None:
+        sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(
+            sub_root,
+            skill_resolver=skill_resolver,
+            _loading_stack=_loading_stack,
+            _compilation_cache=_compilation_cache,
+        )
     sub_assembled = assemble_graph(
         sub_compiled,
         chat_model=chat_model,
         max_patch_attempts=max_patch_attempts,
         skill_resolver=skill_resolver,
+        _loading_stack=_loading_stack,
+        _compilation_cache=_compilation_cache,
     )
 
     def _subgraph_node(state: BlackboardState) -> dict[str, Any]:
@@ -292,6 +316,8 @@ def _build_skill_node(
     max_patch_attempts: int,
     callbacks: list[Any] | None,
     skill_resolver: SkillResolverProtocol,
+    _loading_stack: tuple[str, ...],
+    _compilation_cache: dict[str, CompiledSkill],
 ) -> Any:
     knowledge_base_markdown = _build_reference_reader_markdown(
         phase_id=phase_id,
@@ -309,6 +335,8 @@ def _build_skill_node(
         chat_model=chat_model,
         max_patch_attempts=max_patch_attempts,
         skill_resolver=skill_resolver,
+        _loading_stack=_loading_stack,
+        _compilation_cache=_compilation_cache,
     )
     framework_tools = []
     critic_metrics: dict[str, Any] = {}
@@ -907,18 +935,29 @@ def _subagent_runtime_map(
     chat_model: Any,
     max_patch_attempts: int,
     skill_resolver: SkillResolverProtocol,
+    _loading_stack: tuple[str, ...] = (),
+    _compilation_cache: dict[str, CompiledSkill] | None = None,
 ) -> dict[str, _SubagentRuntime]:
+    if _compilation_cache is None:
+        _compilation_cache = {}
     runtimes: dict[str, _SubagentRuntime] = {}
     for tool_name, subagent in subagent_by_tool_name.items():
-        sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(
-            subagent.root,
-            skill_resolver=skill_resolver,
-        )
+        sub_root_key = str(Path(subagent.root).resolve())
+        sub_compiled = _compilation_cache.get(sub_root_key)
+        if sub_compiled is None:
+            sub_compiled = SkillLoader(validate_context_writes=False).compile_skill(
+                subagent.root,
+                skill_resolver=skill_resolver,
+                _loading_stack=_loading_stack,
+                _compilation_cache=_compilation_cache,
+            )
         sub_assembled = assemble_graph(
             sub_compiled,
             chat_model=chat_model,
             max_patch_attempts=max_patch_attempts,
             skill_resolver=skill_resolver,
+            _loading_stack=_loading_stack,
+            _compilation_cache=_compilation_cache,
         )
         runtimes[tool_name] = _SubagentRuntime(subagent=subagent, graph=sub_assembled.graph)
     return runtimes

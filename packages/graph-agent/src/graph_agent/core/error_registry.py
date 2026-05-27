@@ -34,6 +34,8 @@ ERROR_REGISTRY: dict[str, ErrorCodeMetadata] = {
     '[F-v3-graph-io-schema-invalid]': ErrorCodeMetadata('[F-v3-graph-io-schema-invalid]', 'FATAL', ('编译期',), './02-graph-md-spec.md#根-io-契约-root-io-schema'),
     '[F-v3-graph-io-physical-file-deprecated]': ErrorCodeMetadata('[F-v3-graph-io-physical-file-deprecated]', 'FATAL', ('编译期',), './01-physical-layout.md#io-物理文件退役声明-inline-io-deprecation'),
     '[F-v3-graph-dataflow-source-missing]': ErrorCodeMetadata('[F-v3-graph-dataflow-source-missing]', 'FATAL', ('编译期',), './02-graph-md-spec.md#根-io-契约-root-io-schema'),
+    '[F-v3-compile-recursion-cycle]': ErrorCodeMetadata('[F-v3-compile-recursion-cycle]', 'FATAL', ('编译期',), './11-error-code-spec.md#compile-domain'),
+    '[F-v3-compile-depth-exceeded]': ErrorCodeMetadata('[F-v3-compile-depth-exceeded]', 'FATAL', ('编译期',), './11-error-code-spec.md#compile-domain'),
     '[F-v3-logic-schema-unknown-field]': ErrorCodeMetadata('[F-v3-logic-schema-unknown-field]', 'FATAL', ('编译期',), './03-logic-md-spec.md#frontmatter-字段解析表-schema--validation'),
     '[F-v3-logic-name-invalid]': ErrorCodeMetadata('[F-v3-logic-name-invalid]', 'FATAL', ('编译期',), './03-logic-md-spec.md#frontmatter-字段解析表-schema--validation'),
     '[F-v3-logic-io-schema-invalid]': ErrorCodeMetadata('[F-v3-logic-io-schema-invalid]', 'FATAL', ('编译期',), './03-logic-md-spec.md#frontmatter-字段解析表-schema--validation'),

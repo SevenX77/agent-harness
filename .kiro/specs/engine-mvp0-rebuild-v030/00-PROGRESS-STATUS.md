@@ -243,5 +243,10 @@ PR-1~6 全并入 stage/engine-v030 (HEAD f6a45b0)。三方 (a1 工具/a2 架构/
 | PR | 内容 | 状态 |
 |---|---|---|
 | P0-1 make gates real | CI 开 mypy --strict 全量 + pip-audit 去 --skip-editable 真扫 + 修空跑 pre-commit 门 + 修 4 mypy strict 真错 (module_sandbox cast + _safe_emit_event 从真实模块导入) + 升 idna3.16/starlette1.1.0/urllib3 2.7.0 | ✅ merge `24099e8` 进 stage (主控亲验 4 门全绿: pip-audit 0/mypy strict 0/pytest 1010 不减/src 无 type:ignore) |
-| P0-2 复杂度门 | 开 ruff C90 门 + 重构 30 处 C901 + 多 Python 矩阵 (3.11/3.12/3.13) | ⏳ 下一个 |
+| P0-2a 多 Python 矩阵 | CI graph-agent 测试抽独立 matrix job 跑 3.11/3.12/3.13 (静态门留单版本, e2e 不动) | ✅ merge `6bacef9` 进 stage (a1 实测三版本各 1010 passed, 主控亲审 ci.yml 结构正确) |
+| P0-2b A类重构 (11处) | 重构 11 处覆盖充分的 C901 降 ≤10 行为不变 (to_jsonable_dict/_value_for_schema/graph_assembler x2/_validate_graph_topology/locate_line/_validate_finish_args/_maybe_emit_loop_detected/_call_wavespeed/_apply_reasoning_patch/make_read_file_tool) | 🚧 a1 实施中 (门: pytest 仍 1010 / ruff C90 30→19 / mypy 0) |
+| P0-2c B类重构 (19处) | 需 tests-first; 含 execute(复杂度44,最高风险); legacy_context_from_state + _wrap_tool_for_langchain 跟 PR-8 交互暂缓 | ⏳ |
+| P0-2d 开 C90 门 | 30 处全 ≤10 后 CI 开 ruff --select C90 | ⏳ |
 | P1-P3 | Codecov/SonarCloud/CodeQL/Scorecard 接入 + 韧性/成熟度 | ⏳ (P2+ 部分卡 PM token) |
+
+**P0-2 / PR-8 交互**: B 类最重的 2 处 (legacy_context_from_state 复杂度21 / _wrap_tool_for_langchain 复杂度24) 正是 PR-8 (废 compat 层) 会删/简化的。若 PR-8 要做, 先做它可白拿掉这 2 个 C901, 故 P0-2c 暂缓这 2 处待 PM 定 PR-8。

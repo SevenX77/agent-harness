@@ -516,11 +516,10 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         if schema is None:
             # Phase 2 A1 contract: any phase reaching CognitiveFlowMiddleware's
             # finish_task validation must already have a compiled output_schema.
-            # The compile-time gate in skill_validator.py rejects validator-
-            # bearing LLMPhases without schemas; getting here means either an
-            # upstream wiring bug (the middleware was mounted on a schema-less
-            # phase) or a phase that bypassed compile validation entirely.
-            # Either way we must fail loud, never silently mark "skipped".
+            # Getting here means either an upstream wiring bug (the middleware
+            # was mounted on a schema-less phase) or a phase that bypassed
+            # compile validation entirely. Either way we must fail loud, never
+            # silently mark "skipped".
             logger.error(
                 "phase=%s action=cognitive_flow_finish_task decision=reject "
                 "reason=missing_output_schema",

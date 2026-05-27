@@ -1,11 +1,9 @@
 """Pure parsing utilities for V2.1 Markdown/YAML documents.
 
-Two functions matter to callers:
+Parser helpers that matter to callers:
 
-- ``parse_skill_file(path)`` — read+decode entry. Returns
-  ``{"frontmatter": dict, "human_body": str}``. Pairs with
-  ``serialize_skill`` (``core/serialize.py``) for byte-stable round-trip,
-  which is what Studio UI ↔ Git synchronisation relies on.
+- ``parse_markdown_parts(path)`` — read+decode entry. Returns
+  frontmatter, body, and line metadata for V2.1 markdown documents.
 - ``_parse_frontmatter(content)`` / ``_strip_frontmatter(content)`` —
   internal helpers used by ``loader.py`` and ``compiler.py`` to peek
   ``schema_version`` before paying for full Pydantic validation.
@@ -46,9 +44,8 @@ except ModuleNotFoundError:  # pragma: no cover
 from graph_agent.core.exceptions import SkillLoadError, make_error_payload
 
 # 方针 3.2: lines reported by ruamel are 0-indexed *within* the
-# YAML stream we hand it. ``parse_skill_file`` strips the opening
-# ``---`` fence (line 1 of the SKILL.md) before parsing, so the YAML
-# stream's line 0 corresponds to SKILL.md line 2.
+# YAML stream we hand it. The opening ``---`` fence is stripped before
+# parsing, so the YAML stream's line 0 corresponds to markdown line 2.
 _FRONTMATTER_LINE_OFFSET = 2
 
 
@@ -234,17 +231,11 @@ def scan_forbidden_topology_tags(path: Path, body: str) -> None:
     )
 
 
-def parse_skill_file(path: Path | str) -> dict[str, Any]:
-    """Deprecated schema-2.0 API removed by the V2.1 hard cut."""
-    _fatal(Path(path), 1, "schema 2.0 parse_skill_file is not supported; use GRAPH.md")
-
-
 __all__ = [
     "_parse_frontmatter",
     "_strip_frontmatter",
     "extract_raw_blocks",
     "locate_line_for_pydantic_loc",
     "parse_markdown_parts",
-    "parse_skill_file",
     "scan_forbidden_topology_tags",
 ]

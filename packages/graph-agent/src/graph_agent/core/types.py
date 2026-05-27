@@ -69,8 +69,8 @@ class Phase:
     md_type_dict: str | None = None
     # MVP-2 T7-bis: declarative io.outputs hoist routing.
     #
-    # Populated by ``loader._phase_from_graph_phase`` (post-MVP-3 wiring)
-    # from ``manifest.SkillManifest.phases[i].io.outputs``. When non-empty
+    # Currently defaults to no routing; PR-5 owns reconnecting declarative
+    # ``io.outputs`` hoist specs from the V0.3 graph manifest. When non-empty
     # the phase executor calls ``IOManager.resolve_hoist`` at phase exit
     # and writes resulting ``io_errors`` into ``state['flow'].io_errors``
     # via ``StateManager.update_framework``. Empty list = no hoist

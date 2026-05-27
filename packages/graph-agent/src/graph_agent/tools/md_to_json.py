@@ -26,6 +26,7 @@ from typing import Any, Literal, TypeVar, cast
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
+from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.runner import run_skill
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
 
@@ -574,6 +575,13 @@ def md_to_json(
         error_items=[{"item_id": block.meta.id, "fields": block.data} for block in error_blocks],
         schema=schema_cls,  # Python class object — safe inside graph_agent context dict
     )
+
+    if getattr(result, "success", True) is False:
+        error = getattr(result, "error", None) or "unknown error"
+        raise SkillLoadError(
+            "md_to_json md-patch deferred fallback failed before producing "
+            f"final_results: {error}"
+        )
 
     final_results: list[dict[str, Any]] = result["context"]["final_results"]
     logger.info(

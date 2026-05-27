@@ -199,7 +199,7 @@ PR-1 去掉了 pytest `conftest.py` 对函数签名的默认值注入后，真�
 
 ### `run_skill` / `_run_skill_dict` / `_run_v030_skill_dict`
 
-位置：`runner.py:163`、`runner.py:234`、`runner.py:468`
+位置：`runner.py:59`、`runner.py:130`、`runner.py:217`
 
 字段：
 
@@ -210,14 +210,15 @@ PR-1 去掉了 pytest `conftest.py` 对函数签名的默认值注入后，真�
 
 1. `run_skill` 先用 `require_skill_resolver(..., caller="run_skill")`。
 2. `_run_skill_dict` 再用 `require_skill_resolver(..., caller="_run_skill_dict")`。
-3. V2.1/V0.3.0 root 走 `_run_v030_skill_dict`。
-4. `_run_v030_skill_dict` 调 `compile_skill(..., skill_resolver=resolver)`，再调 `assemble_graph(..., skill_resolver=resolver)`。
+3. `_run_skill_dict` 只接受包含 `GRAPH.md` 的目录。合法目录走 `_run_v030_skill_dict`。
+4. 非目录入口、普通 `.md`、单文件 `SKILL.md`、不存在路径、或缺 `GRAPH.md` 的目录，都会抛 `SkillLoadError`，payload 和 message 都带 `[F-v3-graph-root-missing]`。公开 `run_skill` 捕获后返回 `WorkflowResult(success=False, context={}, error=含码文本)`。
+5. `_run_v030_skill_dict` 调 `compile_skill(..., skill_resolver=resolver)`，再调 `assemble_graph(..., skill_resolver=resolver)`。
 
 决策：编译、装配、运行三层都不允许掉 resolver。这样 child skill 解析不会在某一层偷偷回退到路径扫描。
 
 ### CLI `runner.main`
 
-位置：`runner.py:532-625`
+位置：`runner.py:291-389`
 
 CLI 是 Engine 的调用方，因此它在解析参数后自己构造 resolver，再传给 `run_skill`。
 
@@ -286,13 +287,13 @@ LocalWorkspaceResolver(
 
 ### `md_to_json`
 
-位置：`md_to_json.py:505-570`
+位置：`md_to_json.py:569-586`
 
 字段：
 
 - `skill_resolver: SkillResolverProtocol`：patch agent 路径需要调用 `run_skill`，所以必填。
 
-流程：happy path 只 parse/validate；error path 调 `_PATCH_SKILL_MD` 时传 `skill_resolver`。
+流程：happy path 只 parse/validate；error path 调 `_PATCH_SKILL_MD` 时传 `skill_resolver`。如果 patch skill 的 `run_skill(...)` 返回对象有 `success is False`，`md_to_json` 会立刻抛 `SkillLoadError("md_to_json md-patch deferred fallback failed ...")`，并把原始 `result.error` 接在消息里。这样旧 `md-patch` deferred 路径失败时不会继续读取 `result["context"]["final_results"]`，也不会裸漏 `KeyError("final_results")`。
 
 ## 7. AST 字段 cutover
 

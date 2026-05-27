@@ -386,14 +386,14 @@ execution-runtime 不再自行解释 `SKILL.md` body。它接收已经解析好�
 
 ## 与当前源码的对齐状态
 
-round-18 / PR G 后，本文件描述的 skill-compilation 主契约已经作为当前源码事实落地：
+round-18 / PR G 与后续的 PR-3 等节点后，本文件描述的 skill-compilation 主契约已经作为当前源码事实落地：
 
 | 契约点 | 当前状态 |
 |---|---|
 | `GRAPH.md` 双轨拓扑 | frontmatter `phases` 注册 + body `<phase depends_on output>name</phase>` 拓扑均必需 |
 | 版本号 | 只接受 `schema_version: "v0.3.0"` |
 | phase 类型 | 文件名推导内部 `mode`; 作者 frontmatter 不写 `mode:` |
-| `SkillNodeAST` | 已由 `AgentNodeAST` 替代 |
+| `SkillNodeAST` 与 Persona 遗迹 | `SkillNodeAST` 已由 `AgentNodeAST` 替代；旧版的 Persona Schema 及相关的编译层死码簇（如 `build_graph_nodes`）已全数清理（PR-3） |
 | `python_callable` | 已由 body `<action>` + phase-local actions 替代 |
 | inline IO | 根 IO 与 phase IO 均来自 frontmatter; 物理 IO/ref 路径 fatal |
 | Agent body | 只接受 `<role>` / `<goal>` / `<step>` / `<protocol>` / `<example>` 5 类业务标签 |

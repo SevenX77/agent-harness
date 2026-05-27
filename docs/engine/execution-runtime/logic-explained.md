@@ -8,7 +8,9 @@
 
 公开入口仍是 `run_skill()`。它负责驱动图运行，并把成功或已知 GraphAgent 错误包装成 `WorkflowResult`。
 
-目录型 V0.3.0 `GRAPH.md` root 会走 `_run_v030_skill_dict()`，不是旧 harness 缓存路径。这个分支现在会在 `graph.invoke()` 前准备 callbacks 和 trace 输出目录，再把 callbacks 传给 `assemble_graph()`，见 `packages/graph-agent/src/graph_agent/core/runner.py:488-526`。这点很重要：如果 `TracingCallback` 等到执行后才绑定目录，过程中产生的 typed events 就进不了 `tracing.jsonl`。
+`run_skill()` 先调用 `require_skill_resolver(..., caller="run_skill")`。`_run_skill_dict()` 再检查入口形状：只有“目录，且目录下有 `GRAPH.md`”会走 `_run_v030_skill_dict()`；普通 `.md` 文件、根级单文件 `SKILL.md`、不存在路径、或缺 `GRAPH.md` 的目录都会抛 `SkillLoadError`，message 字面包含 `[F-v3-graph-root-missing]`。公开 `run_skill()` 捕获这个 `GraphAgentError` 后仍返回 `WorkflowResult(success=False, context={}, error=str(exc))`，所以对外契约是“返回失败结果”，不是向调用方裸抛。
+
+目录型 V0.3.0 `GRAPH.md` root 会走 `_run_v030_skill_dict()`，不是旧 harness 缓存路径，也不再进入 `load_workflow_from_md` / `_harness_cache` / `.run_id` 文件 resume 分支。这个分支现在会在 `graph.invoke()` 前准备 callbacks 和 trace 输出目录，再把 callbacks 传给 `assemble_graph()`。这点很重要：如果 `TracingCallback` 等到执行后才绑定目录，过程中产生的 typed events 就进不了 `tracing.jsonl`。`thread_id` 当前只用于选择本次 state 里的 `run_id`；没有 `thread_id` 时生成新的 UUID。
 
 PR β 已新增 `build_middleware_chain`，按 `MVP0_MIDDLEWARE_ORDER_CONTRACT` 可实例化 6 层顺序：
 
@@ -224,6 +226,7 @@ Action name 沙盒：
 
 - `output_schema_keys`：从当前 LOGIC phase 的 `io.outputs.properties` 取 key 集。没有 schema / 没有 properties 时返回 `None`，表示不做字段白名单。
 - `ctx` 就地突变路径：action 执行后，代码用 `_dict_delta(before | updates, data)` 捕捉 `Context(data, ...)` 中新写入或变化的字段，并立刻调用 `_validate_logic_update_keys(...)`。未声明字段抛 `[F-v3-logic-output-field-undeclared]`。
+- `Context` dict 接口：传给 action 的 facade 直接包住当前 blackboard dict。`context["k"]` 读取 `_blackboard["k"]`，缺失时抛原生 `KeyError(key)`；`context["k"] = v` 复用 `set()` 写回 `_blackboard`；`"k" in context` 复用 `has()`；`context.setdefault("items", [])` 在缺 key 时写入 default 并返回底层对象本身。因此 `context.setdefault("items", []).append(x)` 这种就地修改会被后续 `_dict_delta(...)` 看见。
 - action return 路径：action 必须返回 dict；非 dict 直接抛 `[F-v3-logic-action-return-invalid] action returned {type}, expected dict`。
 - dict 返回路径：返回 dict 后也调用 `_validate_logic_update_keys(...)`；任何未声明字段同样抛 `[F-v3-logic-output-field-undeclared]`。
 - 合法更新：ctx delta 和 return dict 都合并进 `updates`；phase node 返回 `{"data": updates}`，由 wrapper/StateMapper 进入 phase output 回写。

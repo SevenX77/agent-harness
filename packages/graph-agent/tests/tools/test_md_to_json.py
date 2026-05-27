@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import importlib.util
+from datetime import UTC, datetime
 from pathlib import Path
 
 import graph_agent.tools.md_to_json as md_to_json_module
+import pytest
+from graph_agent.core.exceptions import SkillLoadError
+from graph_agent.core.result import WorkflowResult
 from graph_agent.tools.md_to_json import (
     BlockMeta,
     ParsedBlock,
@@ -134,6 +138,37 @@ def test_md_to_json_patch_path_sends_wrapped_error_items(
     assert calls[0]["error_items"] == [
         {"item_id": "segment 1", "fields": {"index": 1, "type": "B"}}
     ]
+
+
+def test_md_to_json_patch_path_run_skill_failure_raises_skill_load_error(
+    monkeypatch: pytest.MonkeyPatch, mock_skill_resolver: object
+) -> None:
+    def fake_run_skill(*args, **kwargs):
+        del args, kwargs
+        now = datetime.now(UTC)
+        return WorkflowResult(
+            success=False,
+            run_id="r1",
+            skill_id="md-patch",
+            context={},
+            error="[F-v3-graph-root-missing] missing required GRAPH.md",
+            started_at=now,
+            finished_at=now,
+        )
+
+    monkeypatch.setattr(md_to_json_module, "run_skill", fake_run_skill)
+
+    expected_context = r"md_to_json|md-patch|deferred"
+    with pytest.raises(SkillLoadError, match=expected_context):
+        md_to_json(
+            """
+## segment 1
+- index: 1
+- type: B
+""",
+            StrictSegment,
+            skill_resolver=mock_skill_resolver,
+        )
 
 
 def test_md_patch_finalize_outputs_business_dicts_only() -> None:

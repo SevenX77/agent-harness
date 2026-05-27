@@ -65,6 +65,9 @@ packages = ["src/graph_agent"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "tier1: core smoke-tier tests for fast PR confidence",
+]
 
 [[tool.mypy.overrides]]
 module = "langgraph.checkpoint.postgres.*"

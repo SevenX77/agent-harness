@@ -309,21 +309,15 @@ V2.1 `_resolve_subagent_root` 相对路径扫描必须退役。编译期对子�
 
 ## Data Model / State
 
-### 1. CompiledSkill 缓存序列化 Schema 的深层升级
+### 1. CompiledSkill 缓存序列化边界
 
 `CompiledSkill` 仍是编译产物核心 state, 但 V0.3.0 下它必须保存 graph_skill 的完整结构化 AST 和装配元数据。
 
-```python
-class DehydratedCompiledSkill(BaseModel):
-    raw: dict[str, Any]
-    manifest: dict[str, Any]
-    nodes: list[dict[str, Any]]
-    subagents_by_phase: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
-    phase_tokens: dict[str, Any] = Field(default_factory=dict)
-    schema_version: Literal["v0.3.0"]
-```
+缓存落盘不是单独的 Pydantic dehydrated model, 而是 `core/cache.py` 中 `_dehydrate_compiled_skill` / `_rehydrate_compiled_skill` 维护的普通 dict round-trip。`save_to_cache` 将 `CompiledSkill` 转为可 JSON 序列化的 snapshot, 再通过 `json.dumps(...)` 写盘; `load_from_cache` 用 `json.loads(...)` 读回 snapshot 后重建运行期对象。
 
-缓存恢复时不能保存或反序列化动态 Python 类。subagent input model、tool bindings、compiled prompt 都应由 AST 与 registry metadata 重新生成。当前实现用 `build_subagent_input_model(_subagent_input_model_name(parent_phase_id, name), input_schema)` 重建 `input_model`, 再调用 `_inject_subagent_tools` 重放 `call_subagent_*` 动态工具。递归编译状态由内部 `_loading_stack` 与 `_compilation_cache` 传递; 环路抛 `[F-v3-compile-recursion-cycle]`, 深度超过上限抛 `[F-v3-compile-depth-exceeded]`。
+当前 snapshot 顶层包含 `raw`、`manifest`、`nodes`、`subagents_by_phase`、`phase_tokens`。其中 `manifest` 通过 `GraphManifest.model_validate(...)` 复水, node AST 通过 `TypeAdapter(PhaseAST)` 复水, subagent 的动态 `input_model` 通过 `build_subagent_input_model(_subagent_input_model_name(parent_phase_id, name), input_schema)` 重建, 再调用 `_inject_subagent_tools` 重放 `call_subagent_*` 动态工具。snapshot 顶层没有额外的 `schema_version` 字段。
+
+缓存格式版本由 cache key 承载: `compute_cache_key(...)` payload 含 `"format": "v2"`。旧 snapshot 会因 key 改变自动 miss 并冷编译, 避免旧格式缺少 `subagents_by_phase` / `phase_tokens` 时复水出残缺 `CompiledSkill`。递归编译状态由内部 `_loading_stack` 与 `_compilation_cache` 传递; 环路抛 `[F-v3-compile-recursion-cycle]`, 深度超过上限抛 `[F-v3-compile-depth-exceeded]`。
 
 ### 2. Node AST 数据结构边界扩展
 

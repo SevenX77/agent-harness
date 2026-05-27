@@ -14,6 +14,7 @@ from typing import Any
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+_MISSING = object()
 
 
 class ModuleSandbox:
@@ -94,12 +95,18 @@ class ModuleSandbox:
         if spec is None or spec.loader is None:
             raise ImportError(f"ModuleSandbox: cannot find module {module_path!r}")
         module = importlib.util.module_from_spec(spec)
-        # Phase 3 M7 follow-up (PHASE3_DESIGN.md v4 §3.5 step 3): register
-        # before exec_module so forward-ref resolution during class
-        # construction can find the module via ``sys.modules``.
+        # Register only for the synchronous exec/rebuild window so forward-ref
+        # resolution can see the module without leaving process-global state.
+        previous_module = sys.modules.get(spec.name, _MISSING)
         sys.modules[spec.name] = module
-        spec.loader.exec_module(module)
-        _rebuild_pydantic_models(module, spec.name)
+        try:
+            spec.loader.exec_module(module)
+            _rebuild_pydantic_models(module, spec.name)
+        finally:
+            if previous_module is _MISSING:
+                sys.modules.pop(spec.name, None)
+            else:
+                sys.modules[spec.name] = previous_module
         self._module_cache[module_path] = module
         return module
 
@@ -136,9 +143,16 @@ class ModuleSandbox:
         # post-exec ``model_rebuild`` loop must stay atomic per design
         # §3.5 / §3.8 so the rebuild surfaces errors at load time
         # instead of at runtime.
+        previous_module = sys.modules.get(sandbox_name, _MISSING)
         sys.modules[sandbox_name] = module
-        spec.loader.exec_module(module)
-        _rebuild_pydantic_models(module, sandbox_name)
+        try:
+            spec.loader.exec_module(module)
+            _rebuild_pydantic_models(module, sandbox_name)
+        finally:
+            if previous_module is _MISSING:
+                sys.modules.pop(sandbox_name, None)
+            else:
+                sys.modules[sandbox_name] = previous_module
         return module
 
     @staticmethod

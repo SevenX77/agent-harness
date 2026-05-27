@@ -1,7 +1,7 @@
-# Copilot Playbooks
+# Skill Authoring Playbooks
 
 <summary>
-  <purpose>给 Studio Copilot 的路由指令层。接到用户请求后, 先匹配一个 scenario, 再按 required_docs 读取规则真相, 最后按 workflow 使用 Read/Write/Edit/Bash 工具操作工作区。</purpose>
+  <purpose>给执行 skill 创作与维护的 LLM agent 的路由指令层。接到用户请求后, 先匹配一个 scenario, 再按 required_docs 读取规则真相, 最后按 workflow 使用 Read/Write/Edit/Bash 工具操作工作区。本文件属引擎对外文档, 与任何具体宿主产品解耦, 任何具备文件工具的 skill 创作 agent 都可消费。</purpose>
   <single_source_of_truth>本文件不复制 skill 格式正文。格式、字段、错误码、编译和运行规则的唯一真相在 docs/engine/skill-spec/。执行任何新建、修改、排障前, 必须重新读取 scenario.required_docs 指向的最新 spec。</single_source_of_truth>
   <few_shot_sources>需要真实写法示范时, 读取 skills/ 下现有 skill。优先按 workflow 指定目录查找, 不要把示例当成比 skill-spec 更新的格式真相。</few_shot_sources>
 </summary>
@@ -56,7 +56,7 @@
 </scenario>
 
 <scenario name="fix_bug">
-  <intent>用户提供编译错误、运行错误、Studio 报错、F-v3 错误码或说 skill 跑不起来。触发词示例: "修 bug"、"编译失败"、"运行失败"、"报 F-v3-..."、"为什么这个 skill 不工作"。</intent>
+  <intent>用户提供编译错误、运行错误、宿主报错、F-v3 错误码或说 skill 跑不起来。触发词示例: "修 bug"、"编译失败"、"运行失败"、"报 F-v3-..."、"为什么这个 skill 不工作"。</intent>
   <required_docs>
     - docs/engine/skill-spec/01-physical-layout.md
     - docs/engine/skill-spec/02-graph-md-spec.md

@@ -46,6 +46,24 @@ MVP0 MUST 继续补齐真实 LLM 注入路径。Agent phase 的 `llm_role` 由�
 
 ModelResolver 与 SkillResolver 都是 DI 边界: Engine 定义协议, Studio / CLI / 测试环境提供实现。模型解析失败不应再抛裸 `RuntimeError`, 应包装为 GraphAgent runtime error 并写入 trace。
 
+### 1.1 PR-5 shipped: LLMClientManager 并发安全与生命周期补强
+
+这是运行期资源管理补强，不改变 Agent phase 的业务 API。
+
+字段 / 机制级状态：
+
+| 机制 | 当前行为 | 业务作用 |
+|---|---|---|
+| `_clients: ClassVar[dict]` | 进程级缓存 OpenAI / Anthropic SDK client | 复用底层 httpx 连接池 |
+| `_lock: ClassVar[threading.Lock]` | 包住 `_clients.get`、client 构造、`_clients[key] = client` 的完整 check-then-act | 防止高并发首次请求重复构造 client |
+| OpenAI cache key | `openai:{provider_code}`，有 probe timeout 时追加 `:timeout:{value}` | 默认调用和 probe 调用可隔离 timeout |
+| Anthropic cache key | `anthropic:{provider_code}` | 同 provider 复用同一 SDK client |
+| `close_all()` | 加锁遍历缓存，逐个调用 SDK client `.close()`，per-client 异常 warning 后继续，最后清空 `_clients` | 长驻 CLI / Studio / server reload 释放 TCP 连接，避免连接池积累 |
+
+锁的边界必须覆盖“查缓存、构造、写缓存”的整段。只锁写入会让两个线程都看到 miss 并各自创建 client，最终虽然 dict 里只剩一个值，但已经浪费连接池并可能让调用方拿到不同对象。
+
+`close_all()` 是生命周期钩子，不是每次 LLM call 后的清理动作。宿主在退出、配置重载或 watcher reset 时调用它，释放 SDK client 持有的 httpx 资源。
+
 ### 1.5 SkillResolverProtocol DI 注入边界 (C10, NEW-D)
 
 MVP0 MUST 在 runtime / assembly 主入口注入 `SkillResolverProtocol`, 与 Q9 ModelResolverProtocol 同款单方法 DI。它只允许:

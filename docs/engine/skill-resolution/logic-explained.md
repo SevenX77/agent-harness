@@ -135,6 +135,61 @@ def resolve_skill(self, skill_id: str) -> str | Path
 
 为什么多命中 fail-loud：如果 literal 目录 `acme.echo/` 和 dotted 目录 `acme/echo/` 同时存在，silent first-match 会让 search path 顺序决定实际调用哪个 child skill。这种行为很难在 trace 里看出来，也违反零静默失败原则；因此 resolver 必须要求用户收窄 search paths 或删除重复注册。
 
+## 4.5 ModuleSandbox 的 sys.modules 隔离
+
+位置：`module_sandbox.py`
+
+`ModuleSandbox` 负责把 skill 本地 Python 对象加载成 class / callable。它维护实例内私有缓存，避免不同 skill 里的同名 `schemas.py`、`tools.py` 通过 Python 全局 import registry 串台。
+
+### 两条加载路径
+
+`_load_module(module_path)` 先查显式 `search_paths`，再回退到 Python importlib：
+
+1. `search_paths` 命中时走 `_load_from_file(module_path, module_file)`。这里会把真实文件名转成 sandbox hash 模块名，例如 `_graph_agent_sandbox_<digest>_schemas`。这个名字带文件路径 digest，目标是让两个 skill 都有 `schemas.py` 时仍得到不同 module identity。
+2. `search_paths` 没命中时走 `importlib.util.find_spec(module_path)`。这里使用 `spec.name`，也就是 Python 正常 import machinery 能解析的真实模块名。这个路径用于加载环境里本来就可 import 的模块。
+
+这两条路径都短暂写入 `sys.modules`，但写入只存在于同步加载窗口内。
+
+### 为什么还要临时写 sys.modules
+
+Pydantic model 如果使用 `from __future__ import annotations`，字段注解会先以字符串形式保存。`_rebuild_pydantic_models(module, module_name)` 调 `model_rebuild()` 时，Pydantic 需要能按模块名找到该 module，才能解析 `Literal[...]` 或同模块前向引用。
+
+所以加载窗口是：
+
+```text
+sys.modules[name] = module
+exec_module(module)
+_rebuild_pydantic_models(module, name)
+finally: 清理 / 恢复 sys.modules
+```
+
+可以把这理解为“把钥匙临时挂到门口，让 Pydantic 完成登记；登记完立刻收回”。模型类 rebuild 后，运行期 `model_validate()` 已经不再需要这个临时全局入口。
+
+### PR-5 隔离机制
+
+两条路径都用 `try/finally` 包住 `exec_module + model_rebuild`。`finally` 里不是无条件 `pop`，而是先在覆盖前做快照：
+
+```python
+previous_module = sys.modules.get(name, _MISSING)
+sys.modules[name] = module
+try:
+    ...
+finally:
+    if previous_module is _MISSING:
+        sys.modules.pop(name, None)
+    else:
+        sys.modules[name] = previous_module
+```
+
+这个快照守卫有两个作用：
+
+- 如果这个名字是本次 sandbox 新加的，加载后把它从 `sys.modules` 移走，避免全局残留。
+- 如果这个名字在进程里已经被合法 import 过，加载后恢复原对象，避免把宿主进程已有模块误删或替换。无条件 `pop` 会让后续 import 重新执行模块，产生新对象身份和状态丢失；只 pop 自己新增的条目才是安全边界。
+
+`_load_from_file` 的 sandbox hash 名理论上不应撞已导入模块，但它也使用同一套快照 / 恢复逻辑，保持异常路径和未来改动都一致。
+
+清理发生在 `_rebuild_pydantic_models` 之后，而不是 `exec_module` 之后。原因是 forward-ref 的解析点在 `model_rebuild()`；提前清理会让 Pydantic 找不到模块。失败路径也走 `finally`，因此 `exec_module` 或 `model_rebuild` 抛错时不会留下半加载的全局模块名。
+
 ## 5. 入口 DI 边界
 
 所有 engine 入口都显式接收 `skill_resolver: SkillResolverProtocol`。

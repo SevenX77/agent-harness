@@ -28,7 +28,7 @@
 
 ## Error Registry
 
-`ERROR_REGISTRY` 定义在 `packages/graph-agent/src/graph_agent/core/error_registry.py`，当前有 90 个 core 错误码。每项是 `ErrorCodeMetadata`：
+`ERROR_REGISTRY` 定义在 `packages/graph-agent/src/graph_agent/core/error_registry.py`，当前有 92 个 core 错误码。每项是 `ErrorCodeMetadata`：
 
 - `code`: 与 dict key 相同的 bracketed code。
 - `level`: 规范等级。
@@ -44,7 +44,7 @@
 
 registry 与 `docs/engine/skill-spec/11-error-code-spec.md` 的一致性由红灯 suite 守住：
 
-- `test_error_registry_matches_error_code_spec_key_set` 要求 registry key-set 与 11-spec 中的 90 个 `[F-v3-...]` code 完全相等。
+- `test_error_registry_matches_error_code_spec_key_set` 要求 registry key-set 与 11-spec 中的 92 个 `[F-v3-...]` code 完全相等。
 - `test_error_registry_entries_have_complete_nonempty_metadata` 要求每项 `code`、`level`、`stage`、`doc_link` 都非空。
 - `test_error_registry_preserves_multi_stage_codes` 钉住多阶段 tuple，不允许被压扁成字符串或单阶段。
 
@@ -138,12 +138,39 @@ raise GraphAgentFatalError(
 
 `[F-v3-cognitive-output-schema-invalid]` 用于 `finish_task` 的 `output_schema` 结构非法。阶段是 `("装配期", "装配前")`，doc link 指向 Cognitive 动态装配插槽解析。它只覆盖 schema 本身非法；LLM 输出内容不匹配 schema 的重试反馈仍使用 `[F-v3-agent-output-schema-invalid]`。
 
+## PR-4 递归编译错误码
+
+PR-4 增加了两个 compile domain 错误码，专门覆盖 subgraph/subagent 递归编译链路。它们都由 `SkillLoader.compile_skill()` 构造 `SkillLoadError` 时显式传入 `payload=make_error_payload(...)`，不会依赖 message 解析。
+
+`[F-v3-compile-recursion-cycle]` 表示当前 skill root 已经出现在 `_loading_stack` 中。典型现场是 A 的 SUBGRAPH 或 subagent 指向 B，B 又通过 SUBGRAPH 或 subagent 指回 A。字段语义如下：
+
+- `code`: `[F-v3-compile-recursion-cycle]`
+- `level`: `FATAL`
+- `stage`: `("编译期",)`
+- `doc_link`: `./11-error-code-spec.md#compile-domain`
+- `message`: 当前实现会写出 `recursive skill compilation cycle detected at <root_key>`，其中 `<root_key>` 是 `str(root.resolve())` 后的绝对路径。
+- `source_path`: 当前正在尝试进入的 root path。
+
+排查时先看 message 里的 root key，再沿 `target_skill` 查最近的 SUBGRAPH phase 或 Agent `subagents[]` 声明。修复方式通常是打断 skill 间的循环引用，或把共享能力抽成第三个不会反向引用父图的 skill。
+
+`[F-v3-compile-depth-exceeded]` 表示递归编译父链路已经达到安全上限。当前 loader 在 push 当前 root 之前检查 `len(_loading_stack) >= 20`，因此不会让第 21 层继续展开。字段语义如下：
+
+- `code`: `[F-v3-compile-depth-exceeded]`
+- `level`: `FATAL`
+- `stage`: `("编译期",)`
+- `doc_link`: `./11-error-code-spec.md#compile-domain`
+- `message`: 当前实现会写出 `recursive skill compilation depth exceeded at <root_key>`。
+- `source_path`: 触发上限时准备进入的 root path。
+
+这个码不一定说明存在环，也可能只是链路太深。排查时按 `target_skill` 从入口向下数层级，优先合并中间转发 skill，或把重复引用改成同层共享引用。`_compilation_cache` 会去重同一个 root 的重复编译，但不会降低真实嵌套深度。
+
 ## 测试守卫
 
 当前机制由 `packages/graph-agent/tests/core/test_error_payload_contract.py` 重点守护：
 
-- registry key-set 必须等于 11-spec 的 90 个 code。
+- registry key-set 必须等于 11-spec 的 92 个 code。
 - registry 每项元数据必须完整。
+- 两个递归编译 code 必须存在，level 为 `FATAL`，stage 包含 `编译期`，且 doc link 非空。
 - `ErrorPayload` 未知 code 必须拒绝。
 - `GraphAgentError` message 中的未知 core code 必须 fail loud。
 - concrete `GraphAgentFatalError` 能暴露可序列化 payload。

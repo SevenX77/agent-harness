@@ -100,6 +100,8 @@ MVP0 MUST 删除对 `io/inputs.json`、`io/outputs.json`、`io_inputs_ref`、`io
 
 这项变更让编译器可以在一个 YAML AST 内同时定位 graph metadata、phase DAG 和根 IO, 避免跨文件 schema 漂移。规范终点见 [Root IO Schema](../skill-spec/02-graph-md-spec.md#根-io-契约-root-io-schema)。
 
+PR-4 shipped 健壮性补强: V0.3.0 编译缓存现在以 v2 snapshot 保真 round-trip `subagents_by_phase` 与 `phase_tokens`, 并在 subgraph/subagent 递归编译链路上增加环检测和 20 层深度上限。这是对既有编译缓存与 `target_skill` 解析路径的可靠性收口, 不引入新的业务 feature 或作者可见 DSL 契约。
+
 ### 5. 静态数据流拓扑连通性校验 (A8)
 
 MVP0 MUST 在运行前证明每个 phase 的 required input 都有来源。来源只能是根 `io.inputs.properties` 或直接 / 间接上游 phase 的 `io.outputs.properties`。
@@ -242,10 +244,12 @@ MVP0 SHOULD 保留历史 V2.1 audit 中对 cache 的两个修复方向, 但缓�
 | `raw` | dict | 是 | 无 | 保存 GRAPH / phase 原始解析片段 | `[F-v3-runtime-phase-failed]` fallback | Debug 与 Studio 展示 |
 | `manifest` | dict | 是 | 无 | V0.3.0 GraphManifest JSON | `[F-v3-graph-schema-version-mismatch]` | 根图 metadata |
 | `nodes` | list[dict] | 是 | 无 | Agent / Logic / Subgraph AST JSON 子集 | domain-specific schema errors | cache hit 后与冷编译等价 |
-| `subagents_by_phase` | dict | 否 | `{}` | 保存 `target_skill` 与 resolved metadata, 不保存动态 Python 类 | `[F-v3-resolver-path-invalid]` | 恢复动态 subagent tools |
-| `source_spans` | dict | 否 | `{}` | YAML / XML 行号定位信息 | — | compile issue 定位 |
+| `subagents_by_phase` | dict | 否 | `{}` | 保存 `parent_phase_id` / `name` / `target_skill` / `description` / `root` / `input_schema` / `expected_schema`; 不保存动态 `input_model` Python 类 | `[F-v3-resolver-path-invalid]` | cache hit 后恢复动态 subagent tools |
+| `phase_tokens` | dict | 否 | `{}` | 保存 `PhaseTokenInfo` 及嵌套 `PhaseAttributeSpan` 的 raw text、offset、行号、attrs、attr spans | — | cache hit 后保持 GRAPH body token 定位信息 |
 
 Cache 写失败只 WARN, 不得让成功编译变失败。HOME 不可写、CI 只读目录、权限异常时, `compile_skill(cache=True)` 返回内存中的 compiled object, 并记录 warning。
+
+PR-4 后 cache key payload 含 `"format": "v2"`。旧 snapshot 会自动 miss 并冷编译, 避免旧格式缺少 `subagents_by_phase` / `phase_tokens` 时复水出残缺 `CompiledSkill`。
 
 ## API
 
@@ -315,11 +319,11 @@ class DehydratedCompiledSkill(BaseModel):
     manifest: dict[str, Any]
     nodes: list[dict[str, Any]]
     subagents_by_phase: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
-    source_spans: dict[str, Any] = Field(default_factory=dict)
+    phase_tokens: dict[str, Any] = Field(default_factory=dict)
     schema_version: Literal["v0.3.0"]
 ```
 
-缓存恢复时不能保存或反序列化动态 Python 类。subagent input model、tool bindings、compiled prompt 都应由 AST 与 registry metadata 重新生成。
+缓存恢复时不能保存或反序列化动态 Python 类。subagent input model、tool bindings、compiled prompt 都应由 AST 与 registry metadata 重新生成。当前实现用 `build_subagent_input_model(_subagent_input_model_name(parent_phase_id, name), input_schema)` 重建 `input_model`, 再调用 `_inject_subagent_tools` 重放 `call_subagent_*` 动态工具。递归编译状态由内部 `_loading_stack` 与 `_compilation_cache` 传递; 环路抛 `[F-v3-compile-recursion-cycle]`, 深度超过上限抛 `[F-v3-compile-depth-exceeded]`。
 
 ### 2. Node AST 数据结构边界扩展
 

@@ -67,7 +67,7 @@ def test_error_registry_matches_error_code_spec_key_set() -> None:
     registry = _error_registry()
 
     assert set(registry) == _spec_codes()
-    assert len(registry) == len(_spec_codes()) == 90
+    assert len(registry) == len(_spec_codes()) == 92
 
 
 def test_error_registry_preserves_multi_stage_codes() -> None:
@@ -151,13 +151,27 @@ def test_builtin_tool_failure_asserts_payload_code(tmp_path: Path, mock_skill_re
 def test_error_registry_entries_have_complete_nonempty_metadata() -> None:
     registry = _error_registry()
 
-    assert len(registry) == len(_spec_codes()) == 90
+    assert len(registry) == len(_spec_codes()) == 92
     for code, metadata in registry.items():
         assert metadata.code == code
         assert metadata.code
         assert metadata.level
         assert metadata.stage
         assert all(stage for stage in metadata.stage)
+        assert metadata.doc_link
+
+
+def test_pr4_compile_recursion_error_codes_are_registered() -> None:
+    registry = _error_registry()
+
+    for code in (
+        "[F-v3-compile-recursion-cycle]",
+        "[F-v3-compile-depth-exceeded]",
+    ):
+        metadata = registry[code]
+        assert metadata.code == code
+        assert metadata.level == "FATAL"
+        assert "编译期" in metadata.stage
         assert metadata.doc_link
 
 

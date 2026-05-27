@@ -36,22 +36,24 @@ def _extract_text_content(content: Any) -> str:
     if isinstance(content, list):
         text_parts: list[str] = []
         for block in content:
-            if isinstance(block, str):
-                if block:
-                    text_parts.append(block)
-                continue
-            if not isinstance(block, dict):
-                continue
-            if block.get("type") == "text":
-                text = block.get("text")
-                if isinstance(text, str) and text:
-                    text_parts.append(text)
-                continue
-            text = block.get("text")
-            if isinstance(text, str) and text and block.get("type") != "thinking":
+            text = _extract_text_block(block)
+            if text:
                 text_parts.append(text)
         return "\n".join(text_parts).strip()
     return str(content)
+
+
+def _extract_text_block(block: Any) -> str:
+    if isinstance(block, str):
+        return block
+    if not isinstance(block, dict):
+        return ""
+    text = block.get("text")
+    if not isinstance(text, str) or not text:
+        return ""
+    if block.get("type") == "thinking":
+        return ""
+    return text
 
 
 def _extract_thinking_content(content: Any) -> str | None:
@@ -66,6 +68,35 @@ def _extract_thinking_content(content: Any) -> str | None:
         if isinstance(text, str) and text:
             thinking_parts.append(text)
     return "\n".join(thinking_parts) if thinking_parts else None
+
+
+def _first_generation(generations: Any) -> Any | None:
+    if not generations or len(generations) <= 0:
+        return None
+    gen_list = generations[0]
+    if not gen_list or len(gen_list) <= 0:
+        return None
+    return gen_list[0]
+
+
+def _extract_prompt_completion_tokens(usage: Any) -> tuple[int, int] | None:
+    if not isinstance(usage, dict):
+        return None
+    prompt_tokens = usage.get("prompt_tokens", 0)
+    completion_tokens = usage.get("completion_tokens", 0)
+    if not prompt_tokens and not completion_tokens:
+        return None
+    return (int(prompt_tokens or 0), int(completion_tokens or 0))
+
+
+def _extract_input_output_tokens(usage: Any) -> tuple[int, int] | None:
+    if not isinstance(usage, dict):
+        return None
+    input_tokens = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
+    output_tokens = int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
+    if not input_tokens and not output_tokens:
+        return None
+    return (input_tokens, output_tokens)
 
 
 class _HarnessCallbackBridge(BaseCallbackHandler):
@@ -230,48 +261,30 @@ class _HarnessCallbackBridge(BaseCallbackHandler):
     @staticmethod
     def _extract_tokens(response: Any) -> tuple[int, int]:
         """Extract token usage from provider-specific LLM result structures."""
-        input_tokens = 0
-        output_tokens = 0
-
         llm_output = getattr(response, "llm_output", None) or {}
         if isinstance(llm_output, dict):
-            usage = llm_output.get("token_usage", {})
-            if isinstance(usage, dict):
-                pt = usage.get("prompt_tokens", 0)
-                ct = usage.get("completion_tokens", 0)
-                if pt or ct:
-                    return (int(pt or 0), int(ct or 0))
+            tokens = _extract_prompt_completion_tokens(llm_output.get("token_usage", {}))
+            if tokens is not None:
+                return tokens
 
         generations = getattr(response, "generations", None)
-        if generations and len(generations) > 0:
-            gen_list = generations[0]
-            if gen_list and len(gen_list) > 0:
-                gen_info = getattr(gen_list[0], "generation_info", None) or {}
-                usage = gen_info.get("usage", {})
-                if isinstance(usage, dict):
-                    pt = usage.get("prompt_tokens", 0)
-                    ct = usage.get("completion_tokens", 0)
-                    if pt or ct:
-                        return (int(pt or 0), int(ct or 0))
+        first_generation = _first_generation(generations)
+        if first_generation is None:
+            return (0, 0)
 
-        if generations and len(generations) > 0:
-            gen_list = generations[0]
-            if gen_list and len(gen_list) > 0:
-                message = getattr(gen_list[0], "message", None)
-                response_metadata = getattr(message, "response_metadata", None) or {}
-                if isinstance(response_metadata, dict):
-                    usage = response_metadata.get("usage", {})
-                    if isinstance(usage, dict):
-                        input_tokens = int(
-                            usage.get("input_tokens") or usage.get("prompt_tokens") or 0
-                        )
-                        output_tokens = int(
-                            usage.get("output_tokens") or usage.get("completion_tokens") or 0
-                        )
-                        if input_tokens or output_tokens:
-                            return (input_tokens, output_tokens)
+        gen_info = getattr(first_generation, "generation_info", None) or {}
+        tokens = _extract_prompt_completion_tokens(gen_info.get("usage", {}))
+        if tokens is not None:
+            return tokens
 
-        return (input_tokens, output_tokens)
+        message = getattr(first_generation, "message", None)
+        response_metadata = getattr(message, "response_metadata", None) or {}
+        if isinstance(response_metadata, dict):
+            tokens = _extract_input_output_tokens(response_metadata.get("usage", {}))
+            if tokens is not None:
+                return tokens
+
+        return (0, 0)
 
     @staticmethod
     def _serialize_message(msg: BaseMessage) -> dict[str, Any]:

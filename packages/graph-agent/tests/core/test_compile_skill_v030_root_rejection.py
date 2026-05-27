@@ -1,4 +1,4 @@
-"""V2.1 cutover rejects legacy persona frontmatter before persona resolution."""
+"""V0.3 compile facade rejects file paths as skill roots."""
 
 from __future__ import annotations
 
@@ -9,20 +9,20 @@ from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import SkillLoadError
 
 
-def test_legacy_persona_frontmatter_file_is_not_compilable_v21_root(
+def test_compile_skill_rejects_legacy_schema_20_file_path(
     tmp_path: Path, mock_skill_resolver: object
 ) -> None:
-    host_skill = tmp_path / "SKILL.md"
-    host_skill.write_text(
+    skill_file = tmp_path / "my_agent.md"
+    skill_file.write_text(
         """---
 schema_version: "2.0"
-name: host
 type: agent
-adopted_persona: broken_persona
+name: my_agent
+legacy_marker: true
 ---
 """,
         encoding="utf-8",
     )
 
     with pytest.raises(SkillLoadError, match="expects a skill root directory"):
-        compile_skill(host_skill, cache=False, skill_resolver=mock_skill_resolver)
+        compile_skill(skill_file, cache=False, skill_resolver=mock_skill_resolver)

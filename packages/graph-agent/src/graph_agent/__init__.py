@@ -11,8 +11,8 @@ Public API (18 stable exports):
 * Exceptions: ``GraphAgentError``, ``SkillLoadError``, ``SkillCompilationError``
 
 Internal helpers (``Phase``, ``WorkflowState``, ``IOManager``,
-``ModelResolver``, ``GraphAgentHarness``, ``parse_skill_file``,
-``load_workflow_from_md``, etc.) live under
+``ModelResolver``, ``GraphAgentHarness``, ``load_workflow_from_md``,
+etc.) live under
 ``graph_agent.core.*`` / ``graph_agent.io.*`` / ``graph_agent.models.*``
 and are not part of the public ABI. Downstream code that depended on
 the previous lazy-deprecated re-exports must migrate to the 18-export

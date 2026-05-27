@@ -101,7 +101,6 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = [
     "graph_agent.core.skill_builder",
-    "graph_agent.core.skill_validator",
     "graph_agent.core.personas",
     "graph_agent.core.validators.persona_resolution",
     "graph_agent.core.validators.prompt_quality",

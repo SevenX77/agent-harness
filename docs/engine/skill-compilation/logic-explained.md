@@ -128,6 +128,8 @@ phase 类型由文件名推导，loader 注入内部 AST discriminator：
 
 `SKILL.md` 不再支持 legacy `mode: skill` / `SkillNodeAST`。它总是 Agent phase，解析成 `AgentNodeAST`。
 
+旧 V2.1 persona 入口也不在当前 active 编译链路里。`adopted_persona`、`PersonaSkillDef`、`resolve_persona` 以及旧 `skill_builder.build_graph_nodes` 死码簇已经从运行代码中拆除；V0.3 graph root 的真实编译入口是 loader/compiler 生成 `CompiledSkill`，再由 runtime 的 `graph_assembler` 装配。
+
 ## 7. LOGIC.md 怎么工作
 
 `LOGIC.md` frontmatter 声明 phase-level `io`、`actions` 可选字段和 `validator` boolean；body 用一组 `<action>name</action>` 决定执行顺序。实现以 body `<action>` 顺序为准，frontmatter `actions` 若写出必须与 body 顺序一致。

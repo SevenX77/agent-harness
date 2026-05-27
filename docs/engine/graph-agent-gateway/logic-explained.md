@@ -362,11 +362,11 @@
 
 `GraphAgentHarness.__init__` 在 `packages/graph-agent/src/graph_agent/core/harness.py:355-378` 接受 `model_resolver`。当 `model_resolver is None` 时，它抛 `GatewayResolverMissingError(phase_name="<harness>")` (`harness.py:374-377`)。这就是 PR alpha 的关键切换：生产 runtime 不再偷偷调用 `get_model_resolver()` 单例。
 
-`run_skill` 在 `packages/graph-agent/src/graph_agent/core/runner.py:162-198` 新增 `model_resolver: Any | None = None` 并传入 `_run_skill_dict` (`runner.py:174,186-198`)。
+`run_skill` 在 `packages/graph-agent/src/graph_agent/core/runner.py:59-127` 接收 `model_resolver: Any | None = None` 并传入 `_run_skill_dict`。
 
-`_run_skill_dict` 在 `runner.py:232-310` 继续把 `model_resolver` 传入 V0.3 skill root (`runner.py:276-285`) 或 `load_workflow_from_md` (`runner.py:306-310`)。
+`_run_skill_dict` 在 `runner.py:130-196` 只接受包含 `GRAPH.md` 的 V0.3 skill root。合法 root 会把 `model_resolver` 继续传给 `_run_v030_skill_dict`；非 root 入口直接走 `[F-v3-graph-root-missing]` 失败返回，不再进入 legacy `load_workflow_from_md` 分支。
 
-`_run_v030_skill_dict` 在 `runner.py:468-501` 中，如果没有 `mock_llm` 且传入了 `model_resolver`，就调用 `model_resolver.resolve(callbacks=tuple(callbacks or ()), phase_name="<workflow>")` (`runner.py:489-491`)，然后把 `chat_model` 交给 graph assembly (`runner.py:496-500`)。
+`_run_v030_skill_dict` 在 `runner.py:217-283` 中，如果没有显式 `mock_llm` 且传入了 `model_resolver`，就调用 `model_resolver.resolve(callbacks=tuple(active_callbacks), phase_name="<workflow>")`，然后把 `chat_model` 交给 graph assembly。显式传入 `mock_llm` 时优先使用 `mock_llm`，即使值是 `None` 也不会再调用 `model_resolver`。
 
 Studio backend 在 `apps/studio/backend/app/services/gateway_resolver.py:16-23` 通过 `build_gateway_model_resolver` 从 `config/llm_roles.yaml` 构造 `ModelResolver`。`run_manager.py:231-236` 和 `predictor.py:72-76` 都显式传入这个 resolver。决策上，Studio 是配置拥有者，所以 resolver 也应由 Studio 注入，而不是 Engine 自己读取全局单例。
 

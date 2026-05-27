@@ -20,6 +20,50 @@ ProtocolValidation → CognitiveFlow → ExecutionControl → Tracing → ToolEr
 
 但当前 live 路径还没有把这 6 层完整接进 `graph_assembler` 主循环。`graph_assembler` 现在只调用 `build_middleware_chain_cognitive_flow(phase_name=phase_id)`，也就是只装一层 `CognitiveFlowMiddleware` helper。其余 5 层在 factory 中已经能构造，其中 `Tracing`、`ToolError`、`LoopDetection` 目前是可实例化的 no-op skeleton；真正接入主循环留给后续 wire-in。
 
+## 1.5 LLMClientManager 的并发缓存与生命周期
+
+位置：`models/llm_client_manager.py`
+
+`LLMClientManager` 是底层 native SDK client 的进程级缓存。它缓存的是 OpenAI / Anthropic SDK client 对象，而这些对象内部持有 httpx 连接池。这里的设计目标不是每次调用都 new client，而是在同一进程里复用连接，同时给长驻进程一个明确的关闭钩子。
+
+### 缓存字段
+
+字段级状态：
+
+- `_clients: ClassVar[dict[str, OpenAI | Anthropic]]`：进程级 client 缓存。key 形如 `openai:{provider_code}`、`openai:{provider_code}:timeout:{override}`、`anthropic:{provider_code}`。
+- `_lock: ClassVar[threading.Lock]`：保护 `_clients` 的 class-level 互斥锁。
+- `_usage_stats` 与 `_provider_down_cache`：仍是进程级运行状态；PR-5 不改变它们的业务语义。
+
+### 为什么锁住完整 check-then-act
+
+`_get_openai_client(...)` 和 `_get_anthropic_client(...)` 都在 `with cls._lock` 内完成完整链路：
+
+```text
+cached = _clients.get(cache_key)
+if cached: return cached
+构造 SDK client
+_clients[cache_key] = client
+初始化 usage stats
+return client
+```
+
+锁不能只包 `_clients[cache_key] = client` 这一行。否则两个线程可以同时看到 cache miss，然后各自构造一个 SDK client，最后后写入者覆盖先写入者。表现上缓存里只剩一个对象，但过程中已经多建了连接池，调用方也可能拿到不同对象。PR-5 把“检查、构造、写入”看成一整个临界区，就像领号窗口必须从“看有没有号”到“发号登记”一口气完成。
+
+### close_all 生命周期钩子
+
+`close_all()` 是 classmethod，给 CLI、Studio watcher、server reload 这类长驻宿主在生命周期结束或重置时调用。
+
+流程：
+
+1. 进入 `with cls._lock`，避免关闭时另一个线程同时创建或读取 client。
+2. 遍历 `list(cls._clients.items())`。
+3. 对每个 client 取 `close = getattr(client, "close", None)`。
+4. `close` 可调用时执行。OpenAI / Anthropic SDK client 会把关闭动作传到底层 httpx client / 连接池。
+5. 单个 client close 抛异常时记录 warning，包含 cache key 和异常，并继续关闭后面的 client。
+6. 循环结束后 `cls._clients.clear()`。
+
+这里选择 per-client `try/except-log-continue`，不是让第一个异常中断整个循环。关闭钩子通常在进程收尾或重载时执行，它的最低保证是尽量释放所有连接并清空缓存；某个 provider 的 close 失败不应该让其他 provider 的连接池继续挂着。同时也不静默吞错，warning 给后续排查留线索。
+
 ## 2. finish_task 在 graph_assembler 中如何移交给 CognitiveFlow
 
 Agent phase 仍是 LLM 工具循环。模型每轮输出 tool call 后，`graph_assembler` 先按 tool name 找到具体工具并调用。工具结果会先被追加成 `ToolMessage`，然后统一交给 `CognitiveFlowMiddleware.handle_finish_task_tool_result` 判断。

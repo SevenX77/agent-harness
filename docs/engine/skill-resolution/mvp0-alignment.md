@@ -22,6 +22,8 @@ target_skill -> SkillResolverProtocol.resolve_skill(skill_id) -> local skill roo
 - nested tool 调用中的 resolver 透传
 - Studio backend resolver 注入
 
+PR-5 追加完成了同一领域的 shipped 健壮性补强：`ModuleSandbox` 的两条 `sys.modules` 临时注册路径都已从“加载后常驻”切换为“同步 exec/rebuild 窗口内可见，结束后清理或恢复”。这不是新 feature，而是把 skill-local Python 对象加载的隔离边界补齐。
+
 ## 2. 已完成的 [BREAKING] 字段切换
 
 | 旧字段 / 旧函数 | 当前状态 | 当前替代 |
@@ -32,8 +34,23 @@ target_skill -> SkillResolverProtocol.resolve_skill(skill_id) -> local skill roo
 | `SubgraphNodeAST` 旧 child 引用字段 | 已退役 | `SubgraphNodeAST.target_skill: str` |
 | `_resolve_sub_skill_path` | 已删除 | `resolve_skill_root(skill_resolver, phase_ast.target_skill)` |
 | Engine default resolver / fallback resolver | 不存在 | 调用方必须 DI |
+| `ModuleSandbox` 沙盒 module 常驻 `sys.modules` | 已移除 | 临时注册 + `try/finally` 清理 / 恢复 |
 
 这符合 SOP-06 breaking cutover：不保 alias，不保 fallback，不把旧字段继续当兼容输入。
+
+### PR-5 shipped: ModuleSandbox sys.modules 隔离
+
+字段 / 机制级状态：
+
+| 机制 | 当前行为 | 作用 |
+|---|---|---|
+| `search_paths` 命中路径 | `_load_from_file` 使用 `_graph_agent_sandbox_<digest>_<module>` 名短暂注册 | 同名 skill-local 文件不串台 |
+| importlib fallback 路径 | `_load_module` 使用 `spec.name` 真模块名短暂注册 | 支持环境中可 import 模块 |
+| 临时注册窗口 | `sys.modules[name] = module` 后执行 `exec_module` 与 `_rebuild_pydantic_models` | 让 Pydantic forward-ref / `from __future__ import annotations` 可解析 |
+| 清理策略 | `finally` 中按 `previous_module` 快照判断：原来不存在则 `pop`，原来存在则恢复原对象 | 不留下 sandbox 残留，也不误删宿主已 import 的合法模块 |
+| 异常路径 | `exec_module` 或 `model_rebuild` 抛错仍进入 `finally` | 防止半加载模块污染全局 registry |
+
+清理必须发生在 `model_rebuild` 之后。此时 Pydantic 已经把 forward-ref 解析进模型类，后续 `model_validate` 不再依赖临时 `sys.modules` 条目。
 
 ## 3. Protocol 当前实现
 

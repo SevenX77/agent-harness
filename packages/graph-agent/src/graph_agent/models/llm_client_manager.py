@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import ClassVar, Literal, cast
@@ -49,6 +50,7 @@ class LLMClientManager:
     """
 
     _clients: ClassVar[dict[str, OpenAI | Anthropic]] = {}
+    _lock: ClassVar[threading.Lock] = threading.Lock()
     _usage_stats: ClassVar[dict[str, UsageStats]] = {}
     _provider_down_cache: ClassVar[dict[str, float]] = {}
     _PROBE_DOWN_TTL: ClassVar[float] = 60.0
@@ -68,37 +70,38 @@ class LLMClientManager:
         if timeout_override is not None:
             cache_key = f"{cache_key}:timeout:{timeout_override:g}"
 
-        cached = cls._clients.get(cache_key)
-        if cached is not None:
-            return cast(OpenAI, cached)
+        with cls._lock:
+            cached = cls._clients.get(cache_key)
+            if cached is not None:
+                return cast(OpenAI, cached)
 
-        api_key = cls._resolve_api_key(provider_def)
-        timeout_value = float(timeout_override or provider_def.timeout)
-        base_url = (
-            provider_def.llm_base_url
-            if provider_def.type == "wavespeed_any_llm" and provider_def.llm_base_url
-            else provider_def.base_url
-        )
-        http_client = httpx.Client(
-            trust_env=provider_def.trust_env,
-            timeout=httpx.Timeout(timeout_value),
-        )
-        client = OpenAI(
-            api_key=api_key,
-            base_url=base_url or None,
-            timeout=timeout_value,
-            max_retries=0,
-            http_client=http_client,
-        )
+            api_key = cls._resolve_api_key(provider_def)
+            timeout_value = float(timeout_override or provider_def.timeout)
+            base_url = (
+                provider_def.llm_base_url
+                if provider_def.type == "wavespeed_any_llm" and provider_def.llm_base_url
+                else provider_def.base_url
+            )
+            http_client = httpx.Client(
+                trust_env=provider_def.trust_env,
+                timeout=httpx.Timeout(timeout_value),
+            )
+            client = OpenAI(
+                api_key=api_key,
+                base_url=base_url or None,
+                timeout=timeout_value,
+                max_retries=0,
+                http_client=http_client,
+            )
 
-        cls._clients[cache_key] = client
-        cls._init_usage_stats(provider_code)
-        logger.info(
-            "phase=llm_client_manager action=create_client type=openai provider=%s base_url=%s",
-            provider_code,
-            base_url or "<default>",
-        )
-        return client
+            cls._clients[cache_key] = client
+            cls._init_usage_stats(provider_code)
+            logger.info(
+                "phase=llm_client_manager action=create_client type=openai provider=%s base_url=%s",
+                provider_code,
+                base_url or "<default>",
+            )
+            return client
 
     @classmethod
     def _get_anthropic_client(
@@ -108,24 +111,43 @@ class LLMClientManager:
     ) -> Anthropic:
         """Return a cached Anthropic-compatible client for one provider."""
         cache_key = f"anthropic:{provider_code}"
-        cached = cls._clients.get(cache_key)
-        if cached is not None:
-            return cast(Anthropic, cached)
+        with cls._lock:
+            cached = cls._clients.get(cache_key)
+            if cached is not None:
+                return cast(Anthropic, cached)
 
-        client = Anthropic(
-            api_key=cls._resolve_api_key(provider_def),
-            base_url=provider_def.base_url or None,
-            timeout=float(provider_def.timeout),
-            max_retries=0,
-        )
-        cls._clients[cache_key] = client
-        cls._init_usage_stats(provider_code)
-        logger.info(
-            "phase=llm_client_manager action=create_client type=anthropic provider=%s base_url=%s",
-            provider_code,
-            provider_def.base_url or "<default>",
-        )
-        return client
+            client = Anthropic(
+                api_key=cls._resolve_api_key(provider_def),
+                base_url=provider_def.base_url or None,
+                timeout=float(provider_def.timeout),
+                max_retries=0,
+            )
+            cls._clients[cache_key] = client
+            cls._init_usage_stats(provider_code)
+            logger.info(
+                "phase=llm_client_manager action=create_client type=anthropic provider=%s base_url=%s",
+                provider_code,
+                provider_def.base_url or "<default>",
+            )
+            return client
+
+    @classmethod
+    def close_all(cls) -> None:
+        """Close cached SDK clients and clear the process-wide client cache."""
+        with cls._lock:
+            for cache_key, client in list(cls._clients.items()):
+                try:
+                    close = getattr(client, "close", None)
+                    if callable(close):
+                        close()
+                except Exception as exc:
+                    logger.warning(
+                        "phase=llm_client_manager action=close_client_fail key=%s error=%s",
+                        cache_key,
+                        exc,
+                        exc_info=True,
+                    )
+            cls._clients.clear()
 
     @classmethod
     def _init_usage_stats(cls, provider_code: str) -> None:

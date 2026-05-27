@@ -156,61 +156,87 @@ def resolve_skill_resource(
     if kind == "reference":
         return _resolve_reference_resource(base_dir, resource_path)
 
-    if kind == "schema":
-        module_path_str = resource_path
-        attr_name = ""
-    else:
-        parts = resource_path.rsplit(".", 1)
-        if len(parts) != 2:
-            raise SkillLoadError(
-                f"Invalid {kind} reference '{resource_path}'. Expected format: module.path.name"
-            )
-        module_path_str, attr_name = parts
-
-    if kind == "tool" and not attr_name:
-        raise SkillLoadError(
-            f"Invalid {kind} reference '{resource_path}'. Expected format: module.path.name"
-        )
+    module_path_str, attr_name = _split_resource_reference(resource_path, kind)
 
     if kind == "tool" and (module_path_str == "builtin" or module_path_str.startswith("builtin.")):
-        try:
-            from graph_agent.tools import builtin as _builtin_pkg  # noqa: F401
+        return _resolve_builtin_tool(module_path_str, attr_name, resource_path)
 
-            submod_name = module_path_str[len("builtin") :].lstrip(".")
-            full_module = "graph_agent.tools.builtin"
-            if submod_name:
-                full_module = f"{full_module}.{submod_name}"
-            module = importlib.import_module(full_module)
-        except ImportError as exc:
-            raise SkillLoadError(f"Cannot import builtin tool '{resource_path}': {exc}") from exc
-
-        try:
-            func = getattr(module, attr_name)
-        except AttributeError as exc:
-            raise SkillLoadError(
-                f"Builtin module '{full_module}' does not define '{attr_name}'"
-            ) from exc
-
-        if not callable(func):
-            raise SkillLoadError(f"'{resource_path}' is not callable (got {type(func).__name__})")
-        return cast(Callable[..., str], func)
-
-    resolved_module: Any = _LOCAL_MODULE_CACHE.get(
-        f"_graph_agent_skill_.{_skill_namespace(base_dir)}.{module_path_str}"
-    )
-    if resolved_module is None:
-        resolved_module = _load_skill_local_module(module_path_str, base_dir)
-    if resolved_module is None:
-        try:
-            resolved_module = importlib.import_module(module_path_str)
-        except ImportError as exc:
-            raise SkillLoadError(
-                f"Cannot import {kind} module '{module_path_str}' for '{resource_path}': {exc}"
-            ) from exc
+    resolved_module = _resolve_resource_module(base_dir, module_path_str, kind, resource_path)
 
     if kind == "schema":
         return resolved_module
 
+    return _get_callable_resource(resolved_module, attr_name, resource_path)
+
+
+def _split_resource_reference(
+    resource_path: str,
+    kind: Literal["tool", "reference", "schema"],
+) -> tuple[str, str]:
+    if kind == "schema":
+        return resource_path, ""
+    parts = resource_path.rsplit(".", 1)
+    if len(parts) != 2:
+        raise SkillLoadError(
+            f"Invalid {kind} reference '{resource_path}'. Expected format: module.path.name"
+        )
+    return parts[0], parts[1]
+
+
+def _resolve_builtin_tool(
+    module_path_str: str,
+    attr_name: str,
+    resource_path: str,
+) -> Callable[..., str]:
+    try:
+        from graph_agent.tools import builtin as _builtin_pkg  # noqa: F401
+
+        submod_name = module_path_str[len("builtin") :].lstrip(".")
+        full_module = "graph_agent.tools.builtin"
+        if submod_name:
+            full_module = f"{full_module}.{submod_name}"
+        module = importlib.import_module(full_module)
+    except ImportError as exc:
+        raise SkillLoadError(f"Cannot import builtin tool '{resource_path}': {exc}") from exc
+
+    try:
+        func = getattr(module, attr_name)
+    except AttributeError as exc:
+        raise SkillLoadError(
+            f"Builtin module '{full_module}' does not define '{attr_name}'"
+        ) from exc
+
+    if not callable(func):
+        raise SkillLoadError(f"'{resource_path}' is not callable (got {type(func).__name__})")
+    return cast(Callable[..., str], func)
+
+
+def _resolve_resource_module(
+    base_dir: Path,
+    module_path_str: str,
+    kind: Literal["tool", "reference", "schema"],
+    resource_path: str,
+) -> Any:
+    cached_name = f"_graph_agent_skill_.{_skill_namespace(base_dir)}.{module_path_str}"
+    resolved_module: Any = _LOCAL_MODULE_CACHE.get(cached_name)
+    if resolved_module is not None:
+        return resolved_module
+    resolved_module = _load_skill_local_module(module_path_str, base_dir)
+    if resolved_module is not None:
+        return resolved_module
+    try:
+        return importlib.import_module(module_path_str)
+    except ImportError as exc:
+        raise SkillLoadError(
+            f"Cannot import {kind} module '{module_path_str}' for '{resource_path}': {exc}"
+        ) from exc
+
+
+def _get_callable_resource(
+    resolved_module: Any,
+    attr_name: str,
+    resource_path: str,
+) -> Callable[..., str]:
     try:
         func = getattr(resolved_module, attr_name)
     except AttributeError as exc:

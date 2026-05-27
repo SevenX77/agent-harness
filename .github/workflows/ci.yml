@@ -31,11 +31,13 @@ jobs:
             apps/studio/backend/tests \
             apps/studio/tests-e2e
 
-      - name: mypy strict
+      - name: mypy graph-agent strict
         run: |
-          uv run mypy \
-            packages/graph-agent/src \
-            apps/studio/backend/app
+          uv run mypy --strict packages/graph-agent/src
+
+      - name: mypy studio backend
+        run: |
+          uv run mypy apps/studio/backend/app
 
       - name: pytest graph-agent (unit + integration)
         run: |
@@ -54,7 +56,7 @@ jobs:
             --cov-report=term
 
       - name: dependency audit
-        run: uv tool run pip-audit --skip-editable
+        run: uv run --with pip-audit pip-audit
 
   e2e-tests:
     # E2E suite needs the frontend dev server (Vite) plus Playwright Chromium,

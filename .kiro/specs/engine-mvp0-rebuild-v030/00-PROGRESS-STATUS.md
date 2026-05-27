@@ -224,3 +224,24 @@ PR-1~6 全并入 stage/engine-v030 (HEAD f6a45b0)。三方 (a1 工具/a2 架构/
 **残留债 (不阻塞使用)**: ① 代码复杂度 (30 个 C901, 最重 execute=44) + mypy strict 4 个真代码错 (2 个 PR-5 引入) ② CI pip-audit `--skip-editable` 盲区漏报 + 实际 4 个可修传递依赖漏洞 (idna/starlette/urllib3) ③ md_to_json 自愈降级 (PR-3 已加 guard 不崩, round-21 已知债)。
 
 **PR-7**: 元数据隔离原命题经双审证实误判 (`state.py` extra=forbid 早已隔离), 正确处置 = NO-OP 不硬造改动。挖出 2 项真实债务 (废 legacy compat 层 / 恢复 md_to_json 自愈) **超 charter 待 PM 定 scope**, round-25 spec 暂未 commit。
+
+---
+
+## 对标世界级工程质量 (2026-05-27, PM 拉回源头后转向) 🚧
+
+**PM 拍板**: 不自造评分 rubric, **采纳市面公认外部工具当权威**, 对标世界级同类产品 + 顶级工程师水准, 量差距 + 补齐路径 (分数只是尺子)。自造 rubric 草案作废。
+
+**采纳的尺子**: SonarCloud (主, CISQ→ISO25010, Sonar way 门) + OpenSSF Scorecard (供应链 0-10) + Codecov (覆盖率) + CodeQL (SAST); 本地 ruff/mypy strict/pytest/pip-audit 当执行门。
+**世界级校准** (主控亲 curl 核实): OpenSSF Temporal 5.4 / Prefect 6.8 / Pydantic 7.3 / Ray 5.8 — 世界级也只 5-7 分。
+
+**差距仪表盘 (实测)**: 覆盖率 75% (门≥80%) / 30 个 C901 复杂度 (CI 没拦) / mypy strict 4 真错 + 一道空跑门 / 4 依赖漏洞 + CI 空扫门 / 自家 OpenSSF 未测 / 缺多版本矩阵+依赖兼容+生态回归。
+
+**路径**: P0 筑地板 (门变真) → P1 覆盖率+韧性 (接 Codecov, ≥80%) → P2 供应链+CI加固 (接 SonarCloud/CodeQL/Scorecard, 锁CI, 分支保护) → P3 世界级成熟度 (多版本矩阵+依赖兼容+生态回归+可回放trace)。
+
+**B 类待 PM 提供前置**: SONAR_TOKEN / CODECOV_TOKEN / GitHub Advanced Security + Scorecard Action 权限 / 是否公开 badge。
+
+| PR | 内容 | 状态 |
+|---|---|---|
+| P0-1 make gates real | CI 开 mypy --strict 全量 + pip-audit 去 --skip-editable 真扫 + 修空跑 pre-commit 门 + 修 4 mypy strict 真错 (module_sandbox cast + _safe_emit_event 从真实模块导入) + 升 idna3.16/starlette1.1.0/urllib3 2.7.0 | ✅ merge `24099e8` 进 stage (主控亲验 4 门全绿: pip-audit 0/mypy strict 0/pytest 1010 不减/src 无 type:ignore) |
+| P0-2 复杂度门 | 开 ruff C90 门 + 重构 30 处 C901 + 多 Python 矩阵 (3.11/3.12/3.13) | ⏳ 下一个 |
+| P1-P3 | Codecov/SonarCloud/CodeQL/Scorecard 接入 + 韧性/成熟度 | ⏳ (P2+ 部分卡 PM token) |

@@ -216,7 +216,7 @@ PR-1 去掉了 pytest `conftest.py` 对函数签名的默认值注入后，真�
 
 ### `SkillLoader.compile_skill`
 
-位置：`loader.py:149-199`
+位置：`loader.py:146-215`
 
 字段：
 
@@ -236,7 +236,7 @@ PR-1 去掉了 pytest `conftest.py` 对函数签名的默认值注入后，真�
 
 ### `assemble_graph`
 
-位置：`graph_assembler.py:73-103`
+位置：`graph_assembler.py:91-103`
 
 字段：
 
@@ -364,7 +364,7 @@ LocalWorkspaceResolver(
 
 已移除：`path` 字段。
 
-当前 `_compile_subagent_metadata` 位于 `loader.py:552`。它不再接收 `skill_root`，也不拼相对路径。每个 subagent 都执行：
+当前 `_compile_subagent_metadata` 位于 `loader.py:593`。它不再接收 `skill_root`，也不拼相对路径。每个 subagent 都执行：
 
 ```text
 resolve_skill_root(skill_resolver, spec.target_skill)
@@ -383,9 +383,9 @@ resolve_skill_root(skill_resolver, spec.target_skill)
 - `io: PhaseIOSchema | None`
 - `validator: bool = False`
 
-已退役：旧 child 相对引用字段。`loader.py:1316` 通过 `SubgraphNodeAST.model_validate(data)` 从 frontmatter/body 构建 AST，不会再把旧 child ref block 注入 AST。
+已退役：旧 child 相对引用字段。`loader.py:1361` 通过 `SubgraphNodeAST.model_validate(data)` 从 frontmatter/body 构建 AST，不会再把旧 child ref block 注入 AST。
 
-当前 `_build_subgraph_node` 位于 `graph_assembler.py:240`。它直接用：
+当前 `_build_subgraph_node` 位于 `graph_assembler.py:258`。它直接用：
 
 ```text
 resolve_skill_root(skill_resolver, phase_ast.target_skill)

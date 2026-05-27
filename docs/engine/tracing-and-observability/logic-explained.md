@@ -102,13 +102,13 @@ PR E 把这 4 个事件加入了 typed-only 合法列表：
 
 收到 typed event 时，`TracingCallback.on_event()` 直接调用 `event.model_dump_json()` 追加到 `tracing.jsonl`。因此 PR E 新增投递的 `ambiguity_logged` 和 `builtin_subagent_*` 事件只要进入 callback list，就能落盘。
 
-V0.3.0 主路径现在会在执行前保证 `TracingCallback` 已经绑定输出目录：`runner._run_v030_skill_dict()` 先算 `trace_dir`，没有显式传入时用 `output_dir / "traces"`，然后通过 `_prepare_v030_callbacks()` 创建或绑定 `TracingCallback`，见 `packages/graph-agent/src/graph_agent/core/runner.py:469-510`。这样执行过程中的 typed event 会实时进入同目录 `tracing.jsonl`，而不是等到结束后才发现流文件没接上。
+V0.3.0 主路径现在会在执行前保证 `TracingCallback` 已经绑定输出目录：`runner._run_v030_skill_dict()` 先算 `trace_dir`，没有显式传入时用 `output_dir / "traces"`，然后通过 `_prepare_v030_callbacks()` 创建或绑定 `TracingCallback`，见 `packages/graph-agent/src/graph_agent/core/runner.py:198-239`。这样执行过程中的 typed event 会实时进入同目录 `tracing.jsonl`，而不是等到结束后才发现流文件没接上。
 
-执行结束后，runner 调用 `TracingCallback.save(trace_output)` 写出 `{run_id}_summary.json`，并把这个真实 summary 路径作为返回值里的 `trace_path`，见 `packages/graph-agent/src/graph_agent/core/runner.py:537-552`。`trace_path` 不再是拼出来但没写过的 `trace.json`。如果保存失败，runner 包装成 `TraceWriteError` 并 fail-loud，见 `packages/graph-agent/src/graph_agent/core/runner.py:541-547` 和 `packages/graph-agent/src/graph_agent/core/exceptions.py:253-258`。
+执行结束后，runner 调用 `TracingCallback.save(trace_output)` 写出 `{run_id}_summary.json`，并把这个真实 summary 路径作为返回值里的 `trace_path`，见 `packages/graph-agent/src/graph_agent/core/runner.py:267-283`。`trace_path` 不再是拼出来但没写过的 `trace.json`。如果保存失败，runner 包装成 `TraceWriteError` 并 fail-loud，见 `packages/graph-agent/src/graph_agent/core/runner.py:270-276` 和 `packages/graph-agent/src/graph_agent/core/exceptions.py:253-258`。
 
 ## 5.1 V0.3.0 `_skill_node` 现在发哪些事件
 
-V0.3.0 Agent phase 的事件发射点在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:381-479`。
+V0.3.0 Agent phase 的事件发射点在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:381-507`。
 
 `PhaseStartEvent` 在进入 `_skill_node` 后发出，字段形态是完整 blackboard data 快照：
 
@@ -120,19 +120,19 @@ V0.3.0 Agent phase 的事件发射点在 `packages/graph-agent/src/graph_agent/c
 }
 ```
 
-这个形态来自 `_observable_data_context()`，它固定返回 `{inputs, phase_outputs, scratch}` 三段，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:494-500`。这里不能只发 inputs 子集，因为旧 harness 引擎的 `LLMPhaseNode` / `CodePhaseNode` 也把 `state["data"].model_dump()` 交给 callback，见 `packages/graph-agent/src/graph_agent/core/phase_nodes/llm_phase_node.py:129-130` 和 `packages/graph-agent/src/graph_agent/core/phase_nodes/code_phase_node.py:39`。三条路径的 context 形态保持一致，Studio 才能用同一套展示逻辑看每个 phase 的输入输出。
+这个形态来自 `_observable_data_context()`，它固定返回 `{inputs, phase_outputs, scratch}` 三段，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:522-528`。这里不能只发 inputs 子集，因为旧 harness 引擎的 `LLMPhaseNode` / `CodePhaseNode` 也把 `state["data"].model_dump()` 交给 callback，见 `packages/graph-agent/src/graph_agent/core/phase_nodes/llm_phase_node.py:129-130` 和 `packages/graph-agent/src/graph_agent/core/phase_nodes/code_phase_node.py:39`。三条路径的 context 形态保持一致，Studio 才能用同一套展示逻辑看每个 phase 的输入输出。
 
-`LLMCallEvent` 在每次 `model.invoke(...)` 返回后发出，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:403-417`。token 使用量通过 `_extract_token_usage()` 归一，支持 `input_tokens/output_tokens`、`prompt_tokens/completion_tokens`、`total_input_tokens/total_output_tokens`，缺失或不可转整数时降级为 `0`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:525-548`。
+`LLMCallEvent` 在每次 `model.invoke(...)` 返回后发出，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:434-445`。token 使用量通过 `_extract_token_usage()` 归一，支持 `input_tokens/output_tokens`、`prompt_tokens/completion_tokens`、`total_input_tokens/total_output_tokens`，缺失或不可转整数时降级为 `0`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:553-571`。
 
-`ToolCallEvent` 在每个工具成功返回后发出，覆盖普通工具、framework tool、subagent tool 和 `finish_task`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:422-447`。事件里的 `args` 必须是 dict；非 dict 入参按空 dict 处理。事件里的 `result` 必须是 string，dict/list 会用 `json.dumps(..., ensure_ascii=False, default=str)` 变成 JSON 字符串，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:557-562`。
+`ToolCallEvent` 在每个工具成功返回后发出，覆盖普通工具、framework tool、subagent tool 和 `finish_task`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:468-475`。事件里的 `args` 必须是 dict；非 dict 入参按空 dict 处理。事件里的 `result` 必须是 string，dict/list 会用 `json.dumps(..., ensure_ascii=False, default=str)` 变成 JSON 字符串，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:585-590`。
 
-`PhaseEndEvent` 通过 `_emit_phase_end()` 统一发出，并用 `phase_end_emitted` 防重，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:366-379`。它覆盖三类退出：
+`PhaseEndEvent` 通过 `_emit_phase_end()` 统一发出，并用 `phase_end_emitted` 防重，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:396-407`。它覆盖三类退出：
 
-- `finish_task` 被接受后的提前返回，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:456-466`。
-- 模型没有 tool call、达到最大轮次、或普通循环结束后的正常返回，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:467-471`。
-- 异常路径，`finally` 里仍发一次 `PhaseEndEvent`，然后异常继续向外抛，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:472-479`。
+- `finish_task` 被接受后的提前返回，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:492-494`。
+- 模型没有 tool call、达到最大轮次、或普通循环结束后的正常返回，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:495-499`。
+- 异常路径，`finally` 里仍发一次 `PhaseEndEvent`，然后异常继续向外抛，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:500-507`。
 
-`PhaseEndEvent.context` 同样是完整 data 结构。`_phase_end_context()` 会把 phase 输出包成 `{"inputs": {}, "phase_outputs": {phase_id: ...}, "scratch": {}}`；如果 response 已经是完整 blackboard data，则保留完整结构，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:503-522`。
+`PhaseEndEvent.context` 同样是完整 data 结构。`_phase_end_context()` 会把 phase 输出包成 `{"inputs": {}, "phase_outputs": {phase_id: ...}, "scratch": {}}`；如果 response 已经是完整 blackboard data，则保留完整结构，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:531-550`。
 
 ## 6. tool trace 与 `log_ambiguity`
 

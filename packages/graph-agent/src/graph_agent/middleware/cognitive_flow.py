@@ -547,11 +547,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         # declared ``output_schema`` as a dotted Python path — using the
         # already-imported ``type[BaseModel]`` directly.
         try:
-            if isinstance(schema, SchemaObject):
-                model = self._schema_engine.get_pydantic_model(schema)
-            else:
-                model = schema
-            blocks = parse_md(business_data_md, model)
+            model, blocks = self._parse_finish_markdown(schema, business_data_md)
         except Exception as exc:  # noqa: BLE001 - returned to LLM as retry feedback
             return _FinishValidation(
                 ok=False,
@@ -572,28 +568,11 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         parsed_items: list[dict[str, Any]] = []
         errors: list[str] = []
         for block in blocks:
-            item_id = block.meta.id or "unknown"
-            if isinstance(schema, SchemaObject):
-                result = self._schema_engine.validate(block.data, schema)
-                if result.ok:
-                    parsed_items.append(result.parsed or dict(block.data))
-                else:
-                    errors.extend(f"item {item_id}: {error}" for error in result.errors)
+            item, item_errors = self._validate_finish_block(block, schema, model)
+            if item_errors:
+                errors.extend(item_errors)
                 continue
-            # Pydantic class path: validate the per-item dict directly
-            # against the imported BaseModel and surface any
-            # ValidationError as a per-item, per-field message so the LLM
-            # can correct the markdown on retry.
-            try:
-                instance = model.model_validate(block.data)
-            except PydanticValidationError as exc:
-                for detail in exc.errors():
-                    loc_parts = detail.get("loc", ())
-                    loc = ".".join(str(part) for part in loc_parts) or "__root__"
-                    msg = str(detail.get("msg", "validation error"))
-                    errors.append(f"item {item_id}: {loc}: {msg}")
-                continue
-            parsed_items.append(instance.model_dump())
+            parsed_items.append(item)
 
         if errors:
             return _FinishValidation(
@@ -621,6 +600,39 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             schema_validation="passed",
             parsed_items=parsed_items,
         )
+
+    def _parse_finish_markdown(
+        self,
+        schema: SchemaObject | type[BaseModel],
+        business_data_md: str,
+    ) -> tuple[type[BaseModel], list[Any]]:
+        if isinstance(schema, SchemaObject):
+            model = self._schema_engine.get_pydantic_model(schema)
+        else:
+            model = schema
+        return model, parse_md(business_data_md, model)
+
+    def _validate_finish_block(
+        self,
+        block: Any,
+        schema: SchemaObject | type[BaseModel],
+        model: type[BaseModel],
+    ) -> tuple[dict[str, Any], list[str]]:
+        item_id = block.meta.id or "unknown"
+        if isinstance(schema, SchemaObject):
+            result = self._schema_engine.validate(block.data, schema)
+            if result.ok:
+                return result.parsed or dict(block.data), []
+            return {}, [f"item {item_id}: {error}" for error in result.errors]
+
+        # Pydantic class path: validate the per-item dict directly
+        # against the imported BaseModel and surface any ValidationError
+        # as a per-item, per-field message so the LLM can correct it.
+        try:
+            instance = model.model_validate(block.data)
+        except PydanticValidationError as exc:
+            return {}, _finish_block_validation_errors(item_id, exc)
+        return instance.model_dump(), []
 
     def _run_business_validator(self, parsed_items: list[dict[str, Any]]) -> list[str]:
         """Phase 2 A2 v3: invoke the optional business validator and
@@ -858,6 +870,16 @@ def _unattended_clarification_answer(question: str) -> str:
         "  - 该推测的依据：[依据]\n"
         "现在请继续执行后续步骤。"
     )
+
+
+def _finish_block_validation_errors(item_id: str, exc: PydanticValidationError) -> list[str]:
+    errors: list[str] = []
+    for detail in exc.errors():
+        loc_parts = detail.get("loc", ())
+        loc = ".".join(str(part) for part in loc_parts) or "__root__"
+        msg = str(detail.get("msg", "validation error"))
+        errors.append(f"item {item_id}: {loc}: {msg}")
+    return errors
 
 
 def _has_strict_output_schema(output_schema: dict[str, Any] | SchemaObject | None) -> bool:

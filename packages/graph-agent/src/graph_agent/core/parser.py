@@ -134,12 +134,9 @@ def locate_line_for_pydantic_loc(root: Any, loc: Sequence[Any]) -> int | None:
 
     for segment in loc:
         if isinstance(node, dict):
-            lc = getattr(node, "lc", None)
-            data_map = getattr(lc, "data", None) if lc is not None else None
-            if isinstance(segment, str) and segment in node:
-                if data_map and segment in data_map:
-                    _record(data_map[segment][0])
-                node = node[segment]
+            next_node = _locate_dict_segment(node, segment, _record)
+            if next_node is not _LOC_NOT_FOUND:
+                node = next_node
                 continue
             # Pydantic injects the discriminator tag (e.g. 'graph',
             # 'agent', 'persona', 'llm', 'logic', 'delegate') as a
@@ -147,16 +144,9 @@ def locate_line_for_pydantic_loc(root: Any, loc: Sequence[Any]) -> int | None:
             # Skip these so the walk continues at the next real key.
             continue
         if isinstance(node, list):
-            if isinstance(segment, int) and 0 <= segment < len(node):
-                lc = getattr(node, "lc", None)
-                if lc is not None and hasattr(lc, "item"):
-                    try:
-                        item_lc = lc.item(segment)
-                    except (KeyError, IndexError):
-                        item_lc = None
-                    if item_lc:
-                        _record(item_lc[0])
-                node = node[segment]
+            next_node = _locate_list_segment(node, segment, _record)
+            if next_node is not _LOC_NOT_FOUND:
+                node = next_node
                 continue
             continue
         # Scalar reached but more loc segments remain — give up cleanly.
@@ -165,6 +155,41 @@ def locate_line_for_pydantic_loc(root: Any, loc: Sequence[Any]) -> int | None:
     if last_line is None:
         return None
     return max(1, last_line + 1)  # 0-indexed → 1-indexed
+
+
+_LOC_NOT_FOUND = object()
+
+
+def _locate_dict_segment(
+    node: dict[Any, Any],
+    segment: Any,
+    record: Any,
+) -> Any:
+    lc = getattr(node, "lc", None)
+    data_map = getattr(lc, "data", None) if lc is not None else None
+    if not isinstance(segment, str) or segment not in node:
+        return _LOC_NOT_FOUND
+    if data_map and segment in data_map:
+        record(data_map[segment][0])
+    return node[segment]
+
+
+def _locate_list_segment(
+    node: list[Any],
+    segment: Any,
+    record: Any,
+) -> Any:
+    if not isinstance(segment, int) or not 0 <= segment < len(node):
+        return _LOC_NOT_FOUND
+    lc = getattr(node, "lc", None)
+    if lc is not None and hasattr(lc, "item"):
+        try:
+            item_lc = lc.item(segment)
+        except (KeyError, IndexError):
+            item_lc = None
+        if item_lc:
+            record(item_lc[0])
+    return node[segment]
 
 
 def _fatal(path: Path, line: int, message: str) -> NoReturn:

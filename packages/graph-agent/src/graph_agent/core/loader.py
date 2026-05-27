@@ -1007,6 +1007,45 @@ def _validate_graph_topology(
     body_phase_refs: list[BodyPhaseRef],
     skill_root: Path,
 ) -> dict[str, Any]:
+    _validate_graph_phase_declarations(graph_path, phases, body_phase_refs)
+    body_names = [ref.name for ref in body_phase_refs]
+    _validate_phase_name_sets(graph_path, phases, body_names, skill_root)
+    adjacency, input_roots, unknown_deps = _collect_graph_dependencies(
+        graph_path,
+        phases,
+        body_phase_refs,
+    )
+
+    _validate_acyclic_graph(graph_path, adjacency)
+    if not input_roots:
+        _graph_fatal(
+            graph_path,
+            1,
+            "[F-v3-graph-depends-unknown] at least one phase must depend_on input",
+        )
+    _validate_no_islands(graph_path, adjacency, input_roots)
+    _validate_unknown_dependencies(graph_path, unknown_deps)
+    _validate_output_phases(graph_path, body_phase_refs, adjacency)
+    for phase in phases:
+        _validate_phase_dir(graph_path, phase, skill_root)
+    return {
+        "phases": [
+            {
+                "name": ref.name,
+                "depends_on": list(ref.depends_on),
+                "output": ref.output,
+            }
+            for ref in body_phase_refs
+        ],
+        "order": _topological_order(adjacency, phases),
+    }
+
+
+def _validate_graph_phase_declarations(
+    graph_path: Path,
+    phases: list[str],
+    body_phase_refs: list[BodyPhaseRef],
+) -> None:
     if not phases:
         _graph_fatal(
             graph_path,
@@ -1034,6 +1073,13 @@ def _validate_graph_topology(
             "[F-v3-graph-phase-id-duplicate] duplicate phase name in body <phase> tags",
         )
 
+
+def _validate_phase_name_sets(
+    graph_path: Path,
+    phases: list[str],
+    body_names: list[str],
+    skill_root: Path,
+) -> None:
     phase_set = set(phases)
     body_set = set(body_names)
     physical_set = {path.name for path in (skill_root / "phases").iterdir() if path.is_dir()}
@@ -1046,6 +1092,13 @@ def _validate_graph_topology(
             "frontmatter phases, body <phase> names, and physical phase dirs must match",
         )
 
+
+def _collect_graph_dependencies(
+    graph_path: Path,
+    phases: list[str],
+    body_phase_refs: list[BodyPhaseRef],
+) -> tuple[dict[str, list[str]], list[str], list[tuple[BodyPhaseRef, str]]]:
+    phase_set = set(phases)
     adjacency: dict[str, list[str]] = {name: [] for name in phases}
     input_roots: list[str] = []
     unknown_deps: list[tuple[BodyPhaseRef, str]] = []
@@ -1064,16 +1117,13 @@ def _validate_graph_topology(
                     f"[F-v3-graph-phase-cycle] phase {ref.name!r} cannot depend on itself",
                 )
             adjacency[dep].append(ref.name)
+    return adjacency, input_roots, unknown_deps
 
-    _validate_acyclic_graph(graph_path, adjacency)
 
-    if not input_roots:
-        _graph_fatal(
-            graph_path,
-            1,
-            "[F-v3-graph-depends-unknown] at least one phase must depend_on input",
-        )
-    _validate_no_islands(graph_path, adjacency, input_roots)
+def _validate_unknown_dependencies(
+    graph_path: Path,
+    unknown_deps: list[tuple[BodyPhaseRef, str]],
+) -> None:
     if unknown_deps:
         ref, dep = unknown_deps[0]
         _graph_fatal(
@@ -1081,20 +1131,6 @@ def _validate_graph_topology(
             ref.token.line_start,
             f"[F-v3-graph-depends-unknown] phase {ref.name!r} depends_on unknown phase {dep!r}",
         )
-    _validate_output_phases(graph_path, body_phase_refs, adjacency)
-    for phase in phases:
-        _validate_phase_dir(graph_path, phase, skill_root)
-    return {
-        "phases": [
-            {
-                "name": ref.name,
-                "depends_on": list(ref.depends_on),
-                "output": ref.output,
-            }
-            for ref in body_phase_refs
-        ],
-        "order": _topological_order(adjacency, phases),
-    }
 
 
 def _validate_acyclic_graph(graph_path: Path, adjacency: dict[str, list[str]]) -> None:

@@ -285,28 +285,11 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
         callback fires once per signature (deduped via
         ``_last_loop_signature``).
         """
-        recent: list[ToolMessage] = []
-        for msg in reversed(messages):
-            if isinstance(msg, ToolMessage):
-                recent.append(msg)
-                if len(recent) >= self._loop_window:
-                    break
-
+        recent = _recent_tool_messages(messages, self._loop_window)
         if not recent:
             return
 
-        signatures: dict[str, int] = {}
-        for msg in recent:
-            name = str(getattr(msg, "name", None) or "unknown")
-            content = (
-                msg.content
-                if isinstance(msg.content, str)
-                else json.dumps(msg.content, sort_keys=True, default=str)
-            )
-            sig = f"{name}:{hash(content)}"
-            signatures[sig] = signatures.get(sig, 0) + 1
-
-        for signature, hits in signatures.items():
+        for signature, hits in _tool_message_signatures(recent).items():
             if hits < self._loop_threshold:
                 continue
             if signature == self._last_loop_signature:
@@ -331,6 +314,30 @@ class ExecutionControlMiddleware(AgentMiddleware[AgentState[Any]]):
                 hits,
             )
             break  # one report per after_model call
+
+
+def _recent_tool_messages(messages: list[Any], limit: int) -> list[ToolMessage]:
+    recent: list[ToolMessage] = []
+    for msg in reversed(messages):
+        if isinstance(msg, ToolMessage):
+            recent.append(msg)
+            if len(recent) >= limit:
+                break
+    return recent
+
+
+def _tool_message_signatures(messages: list[ToolMessage]) -> dict[str, int]:
+    signatures: dict[str, int] = {}
+    for msg in messages:
+        name = str(getattr(msg, "name", None) or "unknown")
+        content = (
+            msg.content
+            if isinstance(msg.content, str)
+            else json.dumps(msg.content, sort_keys=True, default=str)
+        )
+        sig = f"{name}:{hash(content)}"
+        signatures[sig] = signatures.get(sig, 0) + 1
+    return signatures
 
 
 __all__ = ["ExecutionControlMiddleware"]

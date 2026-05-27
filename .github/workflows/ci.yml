@@ -39,14 +39,6 @@ jobs:
         run: |
           uv run mypy apps/studio/backend/app
 
-      - name: pytest graph-agent (unit + integration)
-        run: |
-          uv run pytest packages/graph-agent/tests \
-            --tb=short -q \
-            --cov=packages/graph-agent/src/graph_agent \
-            --cov-report=xml:coverage-graph-agent.xml \
-            --cov-report=term
-
       - name: pytest studio backend
         run: |
           uv run pytest apps/studio/backend/tests \
@@ -57,6 +49,33 @@ jobs:
 
       - name: dependency audit
         run: uv run --with pip-audit pip-audit
+
+  graph-agent-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Sync workspace dependencies
+        run: uv sync --all-extras --group dev
+
+      - name: pytest graph-agent (unit + integration)
+        run: |
+          uv run pytest packages/graph-agent/tests \
+            --tb=short -q \
+            --cov=packages/graph-agent/src/graph_agent \
+            --cov-report=xml:coverage-graph-agent.xml \
+            --cov-report=term
 
   e2e-tests:
     # E2E suite needs the frontend dev server (Vite) plus Playwright Chromium,

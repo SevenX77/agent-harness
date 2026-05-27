@@ -245,8 +245,9 @@ PR-1~6 全并入 stage/engine-v030 (HEAD f6a45b0)。三方 (a1 工具/a2 架构/
 | P0-1 make gates real | CI 开 mypy --strict 全量 + pip-audit 去 --skip-editable 真扫 + 修空跑 pre-commit 门 + 修 4 mypy strict 真错 (module_sandbox cast + _safe_emit_event 从真实模块导入) + 升 idna3.16/starlette1.1.0/urllib3 2.7.0 | ✅ merge `24099e8` 进 stage (主控亲验 4 门全绿: pip-audit 0/mypy strict 0/pytest 1010 不减/src 无 type:ignore) |
 | P0-2a 多 Python 矩阵 | CI graph-agent 测试抽独立 matrix job 跑 3.11/3.12/3.13 (静态门留单版本, e2e 不动) | ✅ merge `6bacef9` 进 stage (a1 实测三版本各 1010 passed, 主控亲审 ci.yml 结构正确) |
 | P0-2b A类重构 (11处) | 重构 11 处覆盖充分的 C901 降 ≤10 行为不变 (to_jsonable_dict/_value_for_schema/graph_assembler x2/_validate_graph_topology/locate_line/_validate_finish_args/_maybe_emit_loop_detected/_call_wavespeed/_apply_reasoning_patch/make_read_file_tool) | ✅ merge `daf7382` 进 stage (主控亲验 3 门: pytest 1010 不减/ruff C90 **30→19**/mypy 0; 抽 helper+提早返回纯结构重构无行为改变) |
-| P0-2c B类重构 (19处) | 需 tests-first; 含 execute(复杂度44,最高风险); legacy_context_from_state + _wrap_tool_for_langchain 跟 PR-8 交互暂缓 | ⏳ |
-| P0-2d 开 C90 门 | 30 处全 ≤10 后 CI 开 ruff --select C90 | ⏳ |
+| P0-2c-prep tests-first | 给 6 处覆盖最差 B 类补回归测试 pin 当前行为 (_extract_text_content 4→100% / _extract_tokens 3→100% / resolve_skill_resource 0→89% / parallel_map 2→87% / _type_to_constraint 2→98% / resolve_role 12→97%) | ✅ merge `34f53b2` 进 stage (22 新测试, 纯加测试无 src 改, 主控亲验 pytest 1032) |
+| P0-2c 重构 (B类) | 这 6 处现有测试兜底 → 重构降 ≤10 (下一批); 余 11 处 B 类 + execute(复杂度44) 续补测试再重构; legacy_context_from_state + _wrap_tool_for_langchain 待 PR-8 | 🚧 推进中 |
+| P0-2d 开 C90 门 | 30 处全 ≤10 后 CI 开 ruff --select C90 (需 PR-8 或重构 compat 2 处后才能收口) | ⏳ |
 | P1-P3 | Codecov/SonarCloud/CodeQL/Scorecard 接入 + 韧性/成熟度 | ⏳ (P2+ 部分卡 PM token) |
 
 **P0-2 / PR-8 交互**: B 类最重的 2 处 (legacy_context_from_state 复杂度21 / _wrap_tool_for_langchain 复杂度24) 正是 PR-8 (废 compat 层) 会删/简化的。若 PR-8 要做, 先做它可白拿掉这 2 个 C901, 故 P0-2c 暂缓这 2 处待 PM 定 PR-8。

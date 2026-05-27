@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 import graph_agent.tools.md_to_json as md_to_json_module
 import pytest
@@ -13,11 +14,12 @@ from graph_agent.core.result import WorkflowResult
 from graph_agent.tools.md_to_json import (
     BlockMeta,
     ParsedBlock,
+    _type_to_constraint,
     diagnose,
     md_to_json,
     parse_md,
 )
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class StrictSegment(BaseModel):
@@ -26,6 +28,10 @@ class StrictSegment(BaseModel):
     index: int
     type: str
     content: str
+
+
+class NestedPayload(BaseModel):
+    title: str
 
 
 def test_parse_md_separates_framework_meta_from_user_data() -> None:
@@ -204,3 +210,41 @@ def test_md_patch_finalize_outputs_business_dicts_only() -> None:
     ]
     assert all("item_id" not in item for item in context["final_results"])
     assert patch_tools.validate(context) == (True, "all items valid")
+
+
+def test_type_to_constraint_pins_current_primitive_and_bound_rendering() -> None:
+    class TypeSchema(BaseModel):
+        text: str
+        count: int = Field(ge=1, le=9)
+        score: float = Field(ge=0.25, le=1.5)
+
+    fields = TypeSchema.model_fields
+
+    assert _type_to_constraint(fields["text"].annotation, fields["text"]) == "[文本]"
+    assert _type_to_constraint(fields["count"].annotation, fields["count"]) == "[整数, >=1, <=9]"
+    assert (
+        _type_to_constraint(fields["score"].annotation, fields["score"])
+        == "[小数, >=0.25, <=1.5]"
+    )
+
+
+def test_type_to_constraint_pins_current_collection_literal_and_optional_rendering() -> None:
+    class TypeSchema(BaseModel):
+        maybe_text: str | None
+        tags: list[str]
+        ratings: list[int]
+        status: Literal["draft", "done"]
+        nested: NestedPayload
+        unknown: dict[str, str]
+
+    fields = TypeSchema.model_fields
+
+    assert _type_to_constraint(fields["maybe_text"].annotation, fields["maybe_text"]) == "[文本]"
+    assert _type_to_constraint(fields["tags"].annotation, fields["tags"]) == "[列表，缩进子行或逗号分隔]"
+    assert _type_to_constraint(fields["ratings"].annotation, fields["ratings"]) == "[列表，元素为 [整数]]"
+    assert (
+        _type_to_constraint(fields["status"].annotation, fields["status"])
+        == "[字符串，限 'draft', 'done']"
+    )
+    assert _type_to_constraint(fields["nested"].annotation, fields["nested"]) == "[嵌套对象]"
+    assert _type_to_constraint(fields["unknown"].annotation, fields["unknown"]) == "[未知]"

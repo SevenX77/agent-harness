@@ -78,15 +78,13 @@ class LLMPhaseNode(PhaseNode):
     """Run an LLM-driven phase (DeerFlow ``create_agent`` + nudge-loop)."""
 
     def execute(self, phase: Phase, state: WorkflowState) -> WorkflowState:
+        from graph_agent.callbacks.emit import _safe_emit_event
         from graph_agent.callbacks.events import (
             CompactionEvent,
             ModelResolvedEvent,
             WorkingMemoryUpdateEvent,
         )
-        from graph_agent.core.harness import (  # lazy imports: harness module depends on us
-            _clone_state,
-            _safe_emit_event,
-        )
+        from graph_agent.core.harness import _clone_state  # lazy: harness module depends on us
 
         resolver = self.container.resolver
         if resolver is None:

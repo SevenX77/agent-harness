@@ -18,6 +18,7 @@ PR1 允许改动范围：
 - 新建 `packages/graph-agent/tests/test_feature_traceability_matrix.py`
 - 新建 `packages/graph-agent/tests/test_skill_spec_hash_lock.py`
 - 新建 `packages/graph-agent/tests/contract-exemptions.yaml`
+- 新建 `.github/CODEOWNERS`
 - 修改 `docs/engine/skill-spec/` 下 14 份文档，且仅允许添加 `status: FROZEN` frontmatter 与 DO-NOT-EDIT 注释
 - 保留 / 更新本任务文件 `.kiro/specs/engine-mvp0-rebuild-v030/round-27-contract-docs-baseline-freeze/tasks.md`
 
@@ -265,14 +266,16 @@ Acceptance:
 - `uv run pytest packages/graph-agent/tests/test_skill_spec_hash_lock.py` 通过。
 - 任意修改 14 份冻结文档的正文、空格或代码块都会导致 hash lock 测试失败，除非 `contract-exemptions.yaml` 有合法批准记录。
 
-### 5. Enforcement: 建立 contract-exemptions 批准门
+### 5. Enforcement: 建立 contract-exemptions 批准门与 CODEOWNERS 授权绑定
 
 Goal:
 - 将 PM 的 “unless explicitly approved” 落为可审计文件，而不是口头约定。
 - 所有契约破坏都必须通过同一个批准门留下记录。
+- 防止任何人直接修改 `contract-exemptions.yaml` 自我放行，必须把批准门和契约基线文件绑定到 CODEOWNERS 人工 review。
 
 Files:
 - 新建 `packages/graph-agent/tests/contract-exemptions.yaml`
+- 新建 `.github/CODEOWNERS`
 - 由以下测试读取：
   - `packages/graph-agent/tests/test_public_api_contract.py`
   - `packages/graph-agent/tests/test_skill_spec_hash_lock.py`
@@ -291,11 +294,27 @@ Steps:
 - 测试必须拒绝结构不完整的豁免记录。
 - 测试必须拒绝无 PR 号、无 PM 批准说明、无具体 symbol/field/hash key 的宽泛豁免。
 - PR1 不应包含实际破坏项；如需示例，只能用注释说明 schema。
+- 新建 `.github/CODEOWNERS`，使用 PM 或 PM 指定负责人 / 团队作为 owner；实施时不得留下 `<placeholder>`、`TODO` 或无效 GitHub owner。
+- CODEOWNERS 至少必须覆盖以下契约基线路径：
+  - `.github/CODEOWNERS`
+  - `packages/graph-agent/tests/contract-exemptions.yaml`
+  - `docs/engine/skill-spec/**`
+  - `docs/engine/public-api-contract.md`
+  - `docs/engine/feature-compliance-checklist.md`
+  - `packages/graph-agent/tests/test_public_api_contract.py`
+  - `packages/graph-agent/tests/test_feature_traceability_matrix.py`
+  - `packages/graph-agent/tests/test_skill_spec_hash_lock.py`
+- CODEOWNERS 文件本身只是声明 owner，不会单独强制 review。PM 合并前必须在 GitHub 远端完成具名 ops 动作：对目标受保护分支开启 branch protection 的 `Require review from Code Owners`，否则批准门只有留痕、没有授权防御。
+- PR 描述或合并检查记录必须显式写明 branch-protection ops 状态：已开启，或由 PM 指定负责人确认在哪个分支开启。
 
 Acceptance:
 - `contract-exemptions.yaml` 存在且可被测试解析。
 - API drift 与 hash lock 测试都读取同一个 exemptions 文件。
 - 宽泛豁免、缺字段豁免、未登记漂移均无法放行。
+- `.github/CODEOWNERS` 存在，并覆盖 `packages/graph-agent/tests/contract-exemptions.yaml`。
+- `.github/CODEOWNERS` 覆盖 14 份 `docs/engine/skill-spec/` 冻结文档、`docs/engine/public-api-contract.md`、`docs/engine/feature-compliance-checklist.md` 和三份防漂移测试文件。
+- `.github/CODEOWNERS` 使用真实 PM / 指定负责人 owner，不包含 placeholder。
+- branch-protection `Require review from Code Owners` 被明确记录为 PM 合并前远端 ops 动作。
 
 ### 6. Verification: PR1 纯 Additive 范围与三方一致性核验
 
@@ -313,6 +332,7 @@ Commands:
 - `rg -n "TODO|TBD|待补|凭印象|unknown|不确定|以后补" docs/engine/public-api-contract.md docs/engine/feature-compliance-checklist.md`
 - `rg -n "De Facto Contract / Known Debt" docs/engine/public-api-contract.md`
 - `rg -n "status: FROZEN|DO NOT EDIT: Golden principle contract baseline" docs/engine/skill-spec`
+- `rg -n "contract-exemptions.yaml|docs/engine/skill-spec|public-api-contract.md|feature-compliance-checklist.md|test_public_api_contract.py|test_feature_traceability_matrix.py|test_skill_spec_hash_lock.py" .github/CODEOWNERS`
 - `git diff --name-only`
 
 Acceptance:
@@ -320,8 +340,10 @@ Acceptance:
 - 65 符号在 inventory、API 文档、API 防漂移测试中三方一致。
 - 12 个 `_predict_internal` 符号在文档和测试中按现状冻结，并标记为已知债务。
 - `docs/engine/public-api-contract.md` 明确 sibling 排除声明。
+- `.github/CODEOWNERS` 存在、覆盖批准门与契约基线文件，并在 PR 记录中明确 branch-protection `Require review from Code Owners` 合并前 ops 动作。
 - `git diff --name-only` 白名单只包含：
   - `.kiro/specs/engine-mvp0-rebuild-v030/round-27-contract-docs-baseline-freeze/tasks.md`
+  - `.github/CODEOWNERS`
   - `docs/engine/public-api-contract.md`
   - `docs/engine/feature-compliance-checklist.md`
   - `packages/graph-agent/tests/test_public_api_contract.py`

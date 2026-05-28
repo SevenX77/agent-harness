@@ -1,0 +1,8 @@
+version: "1"
+exemptions:
+  - exemption_id: EX-0002-missing-approval
+    pr: PR-999
+    reason: Missing PM approval.
+    affected_features: [F-old-demo]
+    replacement_feature_ids: [F-runtime-execution]
+    expires_or_cleanup: none

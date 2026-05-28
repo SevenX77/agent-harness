@@ -1,0 +1,30 @@
+id: F-runtime-execution
+description: Run a compiled graph skill through the runtime and return a stable workflow result.
+feature_boundary:
+  kind: public-method
+  evidence: graph_agent.run_skill
+sources:
+  - public-api
+public_api_symbols:
+  - run_skill
+skill_spec_sections:
+  - docs/engine/skill-spec/12-compile-runtime-flow-spec.md#运行时引擎流 (Run-time Workflow)
+consumer_files:
+  - kind: live-consumer
+    path: apps/studio/backend/app/services/run_manager.py
+core_paths:
+  - path: packages/graph-agent/src/graph_agent/core/runner.py
+    anchor: run_skill
+error_codes_primary:
+  - "[F-v3-runtime-phase-failed]"
+error_codes_secondary: []
+events_primary:
+  - RunStartedEvent
+events_secondary: []
+non_functional_contracts:
+  - id: NFC-runtime-state-isolation
+    type: state-isolation
+    description: Runtime must not leak child graph state into parent blackboard.
+    evidence: packages/graph-agent/tests/runtime/test_state_mapper.py::test_reader_sandbox_state_does_not_inherit_parent_blackboard
+targeted_tests:
+  - tests/core/test_run_skill_entrypoint_root_shape.py::test_run_skill_single_markdown_file_returns_v030_root_error

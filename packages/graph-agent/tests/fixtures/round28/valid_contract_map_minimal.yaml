@@ -1,0 +1,28 @@
+public_api_symbols:
+  run_skill:
+    feature_ids: [F-runtime-execution]
+  AgentSkillDef:
+    feature_ids: [F-vendor-contract-debt]
+  GraphSkillDef:
+    feature_ids: [F-vendor-contract-debt]
+  IoInput:
+    feature_ids: [F-vendor-contract-debt]
+  PersonaSkillDef:
+    feature_ids: [F-vendor-contract-debt]
+  CompileIssue:
+    feature_ids: [F-vendor-compile-issue]
+  parse_skill_file:
+    feature_ids: [F-vendor-contract-debt]
+skill_spec_sections:
+  docs/engine/skill-spec/12-compile-runtime-flow-spec.md#运行时引擎流 (Run-time Workflow):
+    feature_ids: [F-runtime-execution]
+consumer_files:
+  - kind: live-consumer
+    path: apps/studio/backend/app/services/run_manager.py
+    feature_ids: [F-runtime-execution]
+  - kind: stable-export
+    symbol: WorkflowResult
+    feature_ids: [F-api-stable-export]
+  - kind: vendor-only-debt
+    symbol: AgentSkillDef
+    feature_ids: [F-vendor-contract-debt]

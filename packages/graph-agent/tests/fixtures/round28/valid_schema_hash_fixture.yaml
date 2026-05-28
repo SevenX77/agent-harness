@@ -1,0 +1,12 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Round28ManifestSchema
+type: object
+$defs:
+  feature:
+    type: object
+    required: [id, description]
+    properties:
+      id:
+        type: string
+      description:
+        type: string

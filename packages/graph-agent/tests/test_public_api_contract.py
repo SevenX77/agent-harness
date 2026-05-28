@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import importlib
 import inspect
+import re
 import typing
 from pathlib import Path
 
@@ -717,8 +718,21 @@ EXPECTED_EXCEPTION_MRO: dict[str, tuple[str, ...]] = {'ExecutionError': ('Execut
                           'GraphAgentError')}
 
 REQUIRED_EXEMPTION_KEYS = frozenset(
-    {"pr", "pm_approval", "reason", "symbols", "fields", "hashes", "expires_or_cleanup"}
+    {
+        "exemption_id",
+        "pr",
+        "pm_approval",
+        "reason",
+        "symbols",
+        "fields",
+        "hashes",
+        "affected_features",
+        "replacement_feature_ids",
+        "expires_or_cleanup",
+    }
 )
+
+EXEMPTION_ID_PATTERN = re.compile(r"^EX-[0-9]{4}-[a-z0-9-]+$")
 
 
 def _load_contract_exemptions(path: Path = EXEMPTIONS_PATH) -> list[dict[str, object]]:
@@ -736,6 +750,14 @@ def _load_contract_exemptions(path: Path = EXEMPTIONS_PATH) -> list[dict[str, ob
             assert isinstance(entry[key], list), f"exemption #{index} {key} must be a list"
             assert all(isinstance(item, str) and item.strip() for item in entry[key]), (
                 f"exemption #{index} {key} entries must be non-empty strings"
+            )
+        assert isinstance(entry["exemption_id"], str) and EXEMPTION_ID_PATTERN.fullmatch(entry["exemption_id"]), (
+            f"exemption #{index} exemption_id must match ^EX-[0-9]{{4}}-[a-z0-9-]+$"
+        )
+        for key in ("affected_features", "replacement_feature_ids"):
+            assert isinstance(entry[key], list), f"exemption #{index} {key} must be a list"
+            assert all(isinstance(item, str) and item.startswith("F-") for item in entry[key]), (
+                f"exemption #{index} {key} entries must be feature ids"
             )
         assert entry["symbols"] or entry["fields"] or entry["hashes"], (
             f"exemption #{index} must name at least one symbol, field, or hash key"
@@ -880,8 +902,8 @@ exemptions:
         _load_contract_exemptions(broken_exemptions)
 
 
-def test_exemptions_yaml_currently_empty_in_pr1() -> None:
-    assert _load_contract_exemptions() == []
+def test_exemptions_yaml_shape_is_valid() -> None:
+    assert isinstance(_load_contract_exemptions(), list)
 
 
 def test_exemptions_yaml_lookup_returns_false_for_unknown_symbols() -> None:

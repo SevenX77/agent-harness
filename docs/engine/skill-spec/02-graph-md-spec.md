@@ -1,3 +1,8 @@
+---
+status: FROZEN
+---
+<!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
+
 # GRAPH.md Spec
 
 本文定义 graph_skill 根节点 `GRAPH.md` 的 Frontmatter 契约 / phase DAG 校验 / 根 IO Schema 入口。它依赖 [物理结构规范](./01-physical-layout.md), 并为 [运行时生命周期](./12-compile-runtime-flow-spec.md) 提供根拓扑。

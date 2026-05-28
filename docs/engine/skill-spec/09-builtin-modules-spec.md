@@ -1,3 +1,8 @@
+---
+status: FROZEN
+---
+<!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
+
 # Builtin Modules Spec
 
 本文定义 builtin reference reader subagent、降级策略和 `read_reference` / `read_example` tools 的 I/O 签名骨架。它支撑 [Resource Mechanisms](./08-resource-mechanisms-spec.md#reference-三机制生命周期) 与 [Cognitive Template 动态装配](./06-cognitive-template-spec.md#动态装配插槽解析)。

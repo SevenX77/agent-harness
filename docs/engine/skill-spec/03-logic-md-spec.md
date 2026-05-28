@@ -1,3 +1,8 @@
+---
+status: FROZEN
+---
+<!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
+
 # LOGIC.md Spec
 
 本文定义 `LOGIC.md` 的 Frontmatter、Action 注册 / 调用和 validator 后置钩子契约。它与 [物理布局](./01-physical-layout.md#文件名类型推导-filename-type-derivation)、[错误码字典](./11-error-code-spec.md#错误码速查全表) 和 [运行流](./12-compile-runtime-flow-spec.md#运行时引擎流-run-time-workflow) 共同约束 Logic 节点。

@@ -1,3 +1,8 @@
+---
+status: FROZEN
+---
+<!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
+
 # Error Code Spec
 
 本文定义 `[F-v3-*]` 错误码前缀、等级划分和速查表。它是所有 spec 的统一失败语义出口, 并会被 [编译期校验流](./12-compile-runtime-flow-spec.md#编译期校验流-compile-time-workflow) 与各字段契约反向引用。

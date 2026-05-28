@@ -1,3 +1,8 @@
+---
+status: FROZEN
+---
+<!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
+
 # Resource Mechanisms Spec
 
 本文定义 Reference 三机制、Example 双模式和 Frontmatter 挂载格式。它连接 [Agent SKILL.md](./05-agent-md-spec.md#frontmatter-字段解析表)、[Builtin Modules](./09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名) 与 [Cognitive Template](./06-cognitive-template-spec.md#动态装配插槽解析)。

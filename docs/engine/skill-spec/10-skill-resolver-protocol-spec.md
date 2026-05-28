@@ -1,3 +1,8 @@
+---
+status: FROZEN
+---
+<!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
+
 # Skill Resolver Protocol Spec
 
 本文定义 V0.3.0 全局 Registry 寻址的单方法 DI 接口和 Engine/Studio 边界。它被 [SUBGRAPH target_skill 寻址](./04-subgraph-md-spec.md#target_skill-寻址规则) 与 [Mention 静态可达性](./07-mention-syntax-spec.md#7-大分类静态可达性算法) 共同引用。

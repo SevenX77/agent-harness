@@ -1,3 +1,8 @@
+---
+status: FROZEN
+---
+<!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
+
 # Cognitive Template Spec
 
 本文定义 V0.3.0 Cognitive Template 的 8 大插槽、静态 AST 映射和动态装配输入。它消费 [Agent SKILL.md](./05-agent-md-spec.md#body-xml-扁平化容器) 与 [Resource Mechanisms](./08-resource-mechanisms-spec.md#reference-三机制生命周期), 并进入 [Template 装配流](./12-compile-runtime-flow-spec.md#template-装配流-assembly-time-workflow)。

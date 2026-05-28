@@ -31,12 +31,12 @@ import {
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog"
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Switch } from "@/components/ui/switch"
-import type { CredentialsState, RolesData } from "@/api/llm"
+import type { CredentialsState, ModelGroup, RolesData } from "@/api/llm"
 import type { RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
 import { getModelAvailability } from "../availability"
 import {
   AVAILABLE_MODEL_DRAG_TYPE,
-  appendAvailableModelToRole,
+  appendModelGroupToRole,
   removeRole,
   renameRole,
   reorderModelInRole,
@@ -57,6 +57,7 @@ export function RoleCard({
   testChainRunning,
   onRunTestChain,
   getActiveAvailableModelDragId,
+  getAvailableModelGroup,
   onChange,
 }: {
   data: RolesData
@@ -67,6 +68,7 @@ export function RoleCard({
   testChainRunning: boolean
   onRunTestChain: () => void
   getActiveAvailableModelDragId: () => string | null
+  getAvailableModelGroup: (modelGroupId: string) => ModelGroup | null
   onChange: (next: RolesData) => void
 }) {
   const role = data.roles[roleName]
@@ -103,8 +105,9 @@ export function RoleCard({
     const modelId = event.dataTransfer.getData(AVAILABLE_MODEL_DRAG_TYPE) ||
       event.dataTransfer.getData("text/plain") ||
       getActiveAvailableModelDragId()
-    if (!modelId) return
-    onChange(appendAvailableModelToRole(data, roleName, modelId, credentialsByCode))
+    const modelGroup = modelId ? getAvailableModelGroup(modelId) : null
+    if (!modelGroup) return
+    onChange(appendModelGroupToRole(data, roleName, modelGroup))
   }
 
   function clearActionsOpenTimer() {

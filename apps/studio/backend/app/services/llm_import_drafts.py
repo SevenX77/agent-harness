@@ -16,7 +16,8 @@ from app.services.llm_credentials import (
     save_credentials,
 )
 from app.services.llm_paths import import_drafts_path
-from graph_agent_gateway.registry.schema import ProviderImportDraft, ProviderRoute
+from app.models.llm_config import ProviderEndpoint, ProviderRoute
+from graph_agent_gateway.registry.schema import ProviderImportDraft
 
 _WRITE_LOCK = threading.Lock()
 
@@ -99,7 +100,22 @@ def apply_draft(
         endpoints = dict(credentials.provider_endpoints)
         routes = dict(credentials.provider_routes)
         for endpoint_id, endpoint in draft.endpoint_candidates.items():
-            endpoints[endpoint_id] = endpoint
+            endpoints[endpoint_id] = ProviderEndpoint(
+                endpoint_id=endpoint.endpoint_id,
+                display_name=endpoint.display_name,
+                protocol=endpoint.protocol,
+                base_url=endpoint.base_url,
+                api_key=endpoint.api_key,
+                status=endpoint.status,
+                last_test_at=endpoint.last_test_at,
+                last_test_message=endpoint.last_test_message,
+                provider_kind=endpoint.provider_kind,
+                rate_limit_bucket=endpoint.rate_limit_bucket,
+                timeout_seconds=endpoint.timeout_seconds,
+                trust_env=endpoint.trust_env,
+                proxy_env=endpoint.proxy_env,
+                metadata=endpoint.metadata,
+            )
         for route_id, candidate in draft.route_candidates.items():
             route = ProviderRoute(
                 route_id=route_id,

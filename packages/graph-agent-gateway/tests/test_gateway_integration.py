@@ -125,7 +125,6 @@ def test_resolver_applies_role_model_parameters_to_gateway_model() -> None:
         provider_endpoints={
             "openai": ProviderEndpoint(
                 endpoint_id="openai",
-                display_name="OpenAI",
                 protocol="openai_compatible",
                 base_url="https://api.openai.example/v1",
                 api_key=SecretStr("secret"),
@@ -138,7 +137,6 @@ def test_resolver_applies_role_model_parameters_to_gateway_model() -> None:
                 route_slug="gpt-5",
                 provider_model_id="gpt-5",
                 canonical_id="gpt-5",
-                display_name="GPT-5",
                 status="verified",
             )
         },
@@ -198,7 +196,6 @@ def test_gateway_failure_path_emits_event_and_structured_exception() -> None:
                 credential_fingerprint="fp",
                 provider_model_id="gpt-5",
                 canonical_id="gpt-5",
-                display_name="GPT-5",
             )
         ],
     )
@@ -249,7 +246,6 @@ def test_probe_failure_fallback_emits_event_and_returns_second_route_metadata() 
                 credential_fingerprint="dead-fp",
                 provider_model_id="claude-sonnet-4-6",
                 canonical_id="claude-sonnet-4.6",
-                display_name="Dead Claude",
                 runtime_settings={
                     "max_output_tokens": 111,
                     "temperature": 0.1,
@@ -269,7 +265,6 @@ def test_probe_failure_fallback_emits_event_and_returns_second_route_metadata() 
                 credential_fingerprint="anthropic-fp",
                 provider_model_id="claude-sonnet-4-6",
                 canonical_id="claude-sonnet-4.6",
-                display_name="Claude Sonnet 4.6",
                 runtime_settings={
                     "max_output_tokens": 222,
                     "temperature": 0.2,
@@ -348,7 +343,6 @@ def test_probe_fail_fast_error_does_not_fallback_to_next_route() -> None:
                 credential_fingerprint="missing-fp",
                 provider_model_id="missing-model",
                 canonical_id="missing-model",
-                display_name="Missing Model",
             ),
             ResolvedRoute(
                 role_name="graph_agent",
@@ -360,7 +354,6 @@ def test_probe_fail_fast_error_does_not_fallback_to_next_route() -> None:
                 credential_fingerprint="fallback-fp",
                 provider_model_id="fallback-model",
                 canonical_id="fallback-model",
-                display_name="Fallback Model",
             ),
         ],
     )
@@ -404,7 +397,6 @@ def test_gateway_passes_effective_runtime_settings_to_client_manager() -> None:
         credential_fingerprint="fp",
         provider_model_id="gpt-5",
         canonical_id="gpt-5",
-        display_name="GPT-5",
         effective_runtime_settings={
             "max_output_tokens": {"value": 333, "source": "route_setting"},
             "temperature": {"value": 0.4, "source": "route_setting"},
@@ -473,7 +465,6 @@ def test_unknown_role_raises_gateway_role_not_configured_error() -> None:
         provider_endpoints={
             "openai": ProviderEndpoint(
                 endpoint_id="openai",
-                display_name="OpenAI",
                 protocol="openai_compatible",
                 base_url="https://api.openai.example/v1",
                 api_key=SecretStr("secret"),
@@ -486,7 +477,6 @@ def test_unknown_role_raises_gateway_role_not_configured_error() -> None:
                 route_slug="gpt-5",
                 provider_model_id="gpt-5",
                 canonical_id="gpt-5",
-                display_name="GPT-5",
             )
         },
         roles={

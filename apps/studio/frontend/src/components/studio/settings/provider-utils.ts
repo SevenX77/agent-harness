@@ -34,6 +34,7 @@ export function draftsFromCredentials(credentials: CredentialsState): ProviderDr
     base_url: provider.base_url ?? "",
     api_key: provider.api_key,
     isTesting: false,
+    testingAction: null,
   }))
 }
 
@@ -65,6 +66,7 @@ export function draftFromAddProviderSubmission(
     base_url: data.baseUrl,
     api_key: data.apiKey,
     isTesting: false,
+    testingAction: null,
   }
 }
 
@@ -79,6 +81,7 @@ export function officialProviderDrafts(drafts: ProviderDraft[]): ProviderDraft[]
       base_url: vendor.baseUrl,
       api_key: "",
       isTesting: false,
+      testingAction: null,
     }
   })
 }

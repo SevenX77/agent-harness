@@ -21,7 +21,6 @@ def _route():
         proxy_env="HTTPS_PROXY",
         provider_model_id="gpt-5",
         canonical_id="gpt-5",
-        display_name="GPT-5",
     )
 
 
@@ -53,7 +52,6 @@ def test_runtime_policy_changes_runtime_client_cache_key_not_credential_fingerpr
 
     endpoint = ProviderEndpoint(
         endpoint_id=route.endpoint_id,
-        display_name=route.display_name,
         protocol=route.protocol,
         base_url=route.base_url,
         api_key=route.api_key,
@@ -433,7 +431,6 @@ def test_dispatch_google_genai_uses_route_endpoint_and_runtime_policy(monkeypatc
             "base_url": "https://generativelanguage.googleapis.com",
             "provider_model_id": "gemini-3-pro",
             "canonical_id": "gemini-3-pro",
-            "display_name": "Gemini 3 Pro",
         }
     )
     captured: list[dict[str, object]] = []
@@ -541,7 +538,6 @@ def test_dispatch_ark_runtime_uses_official_sdk_client_not_openai_path(monkeypat
             "base_url": "https://ark.cn-beijing.volces.com/api/v3",
             "provider_model_id": "ep-20260525-test",
             "canonical_id": "deepseek-v3",
-            "display_name": "DeepSeek V3 via Ark",
         }
     )
     captured: list[dict[str, object]] = []

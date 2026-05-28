@@ -6,7 +6,16 @@ from pathlib import Path
 
 import httpx
 from app.core import config
-from app.models.llm_config import LLMCredentialsFile, RolesData
+from app.models.llm_config import (
+    CapabilityValue,
+    LLMCredentialsFile,
+    ModelProfile,
+    ProviderEndpoint,
+    ProviderRoute,
+    RoleEntry,
+    RoleRouteEntry,
+    RolesData,
+)
 from app.routers import llm as llm_router
 from app.services import copilot_test
 from app.services.copilot_test import ModelProbeResult, PingResult, _Unauthorized
@@ -14,14 +23,6 @@ from app.services.llm_credentials import credentials_path, save_credentials
 from app.services.llm_roles import roles_path as active_roles_path
 from app.services.llm_roles import save_roles_file
 from fastapi.testclient import TestClient
-from graph_agent_gateway.registry.schema import (
-    CapabilityValue,
-    ModelProfile,
-    ProviderEndpoint,
-    ProviderRoute,
-    RoleEntry,
-    RoleRouteEntry,
-)
 
 
 def _seed(
@@ -362,7 +363,7 @@ def test_registry_returns_model_groups_with_provider_ui_state_projection(
     assert response.status_code == 200
     model_group = response.json()["model_groups"][0]
     assert model_group["canonical_id"] == "gpt-5"
-    assert model_group["display_name"] == "GPT-5"
+    assert model_group["display_name"] == "GPT 5"
     assert model_group["status_summary"] == {
         "ready": 1,
         "untested": 1,
@@ -378,6 +379,151 @@ def test_registry_returns_model_groups_with_provider_ui_state_projection(
     assert provider_models["disabled-provider:gpt-5"]["ui_state"] == "off"
     assert provider_models["ready-provider:gpt-5"]["provider_kind"] == "third_party"
     assert provider_models["ready-provider:gpt-5"]["capability_state"] == "unknown"
+
+
+def test_registry_merges_model_groups_by_projected_display_name(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+
+    endpoints = {
+        "anthropic-official": ProviderEndpoint(
+            endpoint_id="anthropic-official",
+            display_name="Anthropic Official",
+            protocol="anthropic_compatible",
+            base_url="https://api.anthropic.com",
+            api_key="secret",
+            status="verified",
+            provider_kind="official",
+        ),
+        "openrouter": ProviderEndpoint(
+            endpoint_id="openrouter",
+            display_name="OpenRouter",
+            protocol="openai_compatible",
+            base_url="https://openrouter.ai/api/v1",
+            api_key="secret",
+            status="verified",
+            provider_kind="third_party",
+        ),
+    }
+    routes = {
+        "anthropic-official:claude-opus-4-7": ProviderRoute(
+            route_id="anthropic-official:claude-opus-4-7",
+            endpoint_id="anthropic-official",
+            route_slug="claude-opus-4-7",
+            provider_model_id="claude-opus-4-7",
+            canonical_id="claude-opus-4-7",
+            display_name="Claude Opus 4.7",
+            status="verified",
+        ),
+        "openrouter:anthropic.claude-opus-4-7": ProviderRoute(
+            route_id="openrouter:anthropic.claude-opus-4-7",
+            endpoint_id="openrouter",
+            route_slug="anthropic.claude-opus-4-7",
+            provider_model_id="anthropic/claude-opus-4-7",
+            canonical_id="anthropic.claude-opus-4-7",
+            display_name="Claude Opus 4.7",
+            status="verified",
+        ),
+    }
+    save_credentials(
+        LLMCredentialsFile(provider_endpoints=endpoints, provider_routes=routes),
+        active_credentials_path,
+    )
+    save_roles_file(roles_path, RolesData(), known_route_ids=set(routes))
+
+    response = client.get("/api/llm/registry")
+
+    assert response.status_code == 200
+    matching_groups = [
+        group
+        for group in response.json()["model_groups"]
+        if group["display_name"] == "Claude Opus 4.7"
+    ]
+    assert len(matching_groups) == 1
+    model_group = matching_groups[0]
+    assert model_group["canonical_id"] == "claude-opus-4-7"
+    assert model_group["section_label"] == "anthropic"
+    assert {
+        option["route_id"]
+        for option in model_group["provider_models"]
+    } == set(routes)
+
+
+def test_registry_merges_same_display_name_across_provider_sections(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+
+    endpoints = {
+        "qiniu-anthropic": ProviderEndpoint(
+            endpoint_id="qiniu-anthropic",
+            display_name="Qiniu Anthropic Proxy",
+            protocol="anthropic_compatible",
+            base_url="https://qiniu.example/anthropic",
+            api_key="secret",
+            status="verified",
+            provider_kind="custom",
+        ),
+        "openrouter": ProviderEndpoint(
+            endpoint_id="openrouter",
+            display_name="OpenRouter",
+            protocol="openai_compatible",
+            base_url="https://openrouter.ai/api/v1",
+            api_key="secret",
+            status="verified",
+            provider_kind="third_party",
+        ),
+    }
+    routes = {
+        "qiniu-anthropic:deepseek-r1": ProviderRoute(
+            route_id="qiniu-anthropic:deepseek-r1",
+            endpoint_id="qiniu-anthropic",
+            route_slug="deepseek-r1",
+            provider_model_id="deepseek-r1",
+            canonical_id="deepseek-r1",
+            display_name="DeepSeek R1",
+            status="verified",
+        ),
+        "openrouter:deepseek.deepseek-r1": ProviderRoute(
+            route_id="openrouter:deepseek.deepseek-r1",
+            endpoint_id="openrouter",
+            route_slug="deepseek.deepseek-r1",
+            provider_model_id="deepseek/deepseek-r1",
+            canonical_id="deepseek.deepseek-r1",
+            display_name="DeepSeek R1",
+            status="verified",
+        ),
+    }
+    save_credentials(
+        LLMCredentialsFile(provider_endpoints=endpoints, provider_routes=routes),
+        active_credentials_path,
+    )
+    save_roles_file(roles_path, RolesData(), known_route_ids=set(routes))
+
+    response = client.get("/api/llm/registry")
+
+    assert response.status_code == 200
+    matching_groups = [
+        group
+        for group in response.json()["model_groups"]
+        if group["display_name"] == "DeepSeek R1"
+    ]
+    assert len(matching_groups) == 1
+    assert {
+        option["route_id"]
+        for option in matching_groups[0]["provider_models"]
+    } == set(routes)
 
 
 def test_registry_returns_cooling_down_provider_when_route_circuit_is_active(
@@ -843,6 +989,29 @@ def test_endpoint_test_rejects_invalid_api_key(
     assert endpoint["status"] == "failed"
     assert "Invalid API key" in endpoint["last_test_message"]
     assert "invalid_api_key" in endpoint["last_test_message"]
+
+
+def test_endpoint_test_treats_empty_model_list_as_reachable(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        return PingResult(latency_ms=42, model_ids=())
+
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+
+    response = client.post("/api/llm/endpoints/openai-direct/test")
+
+    assert response.status_code == 200
+    body = response.json()
+    endpoint = body["registry"]["provider_endpoints"]["openai-direct"]
+    assert body["discovered_model_count"] == 0
+    assert endpoint["status"] == "unverified_manual"
+    assert endpoint["last_test_message"] == "Endpoint reachable but returned no models."
+    assert body["registry"]["provider_routes"] == {}
 
 
 def test_endpoint_scoped_manual_model_test_verifies_only_successful_models(

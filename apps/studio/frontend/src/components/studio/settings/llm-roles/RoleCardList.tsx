@@ -6,7 +6,7 @@ import {
   CatalogAccordionItem,
   CatalogAccordionTrigger,
 } from "@/components/ui/catalog-accordion"
-import type { CredentialsState, RolesData } from "@/api/llm"
+import type { CredentialsState, ModelGroup, RolesData } from "@/api/llm"
 import type { RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
 import { appendRole, visibleRoleNames } from "../role-utils"
 import { RoleCard, type RoleCategory } from "./RoleCard"
@@ -23,6 +23,7 @@ export function RoleCardList({
   testChainRunning,
   onRunTestChain,
   getActiveAvailableModelDragId,
+  getAvailableModelGroup,
   onChange,
 }: {
   data: RolesData
@@ -31,6 +32,7 @@ export function RoleCardList({
   testChainRunning: boolean
   onRunTestChain: (roleName: string) => void
   getActiveAvailableModelDragId: () => string | null
+  getAvailableModelGroup: (modelGroupId: string) => ModelGroup | null
   onChange: (next: RolesData) => void
 }) {
   const roleNames = visibleRoleNames(data)
@@ -78,6 +80,7 @@ export function RoleCardList({
                     testChainRunning={testChainRunning}
                     onRunTestChain={() => onRunTestChain(roleName)}
                     getActiveAvailableModelDragId={getActiveAvailableModelDragId}
+                    getAvailableModelGroup={getAvailableModelGroup}
                     onChange={onChange}
                   />
                 ))

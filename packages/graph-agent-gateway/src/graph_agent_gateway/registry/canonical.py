@@ -16,7 +16,6 @@ class CanonicalModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     canonical_id: str
-    display_name: str
     confidence: CanonicalConfidence
 
 
@@ -26,14 +25,13 @@ def canonicalize_model(
     provider_model_id: str,
     explicit_aliases: dict[str, str] | None = None,
 ) -> CanonicalModel:
-    """Map a provider model ID to a conservative display grouping key."""
+    """Map a provider model ID to a conservative execution grouping key."""
     del endpoint_id
     aliases = explicit_aliases or {}
     if provider_model_id in aliases:
         canonical = _slug(aliases[provider_model_id])
         return CanonicalModel(
             canonical_id=canonical,
-            display_name=_display_name(canonical),
             confidence="explicit_alias",
         )
 
@@ -41,14 +39,12 @@ def canonicalize_model(
         canonical = _slug(provider_model_id.removeprefix("anthropic/"))
         return CanonicalModel(
             canonical_id=canonical,
-            display_name=_display_name(canonical),
             confidence="transport_normalized",
         )
 
     canonical = _slug(provider_model_id)
     return CanonicalModel(
         canonical_id=canonical,
-        display_name=_display_name(canonical),
         confidence="orphan",
     )
 
@@ -58,7 +54,3 @@ def _slug(value: str) -> str:
     slug = re.sub(r"[^a-z0-9._-]+", "-", slug)
     slug = re.sub(r"-+", "-", slug).strip("-")
     return slug or "unknown"
-
-
-def _display_name(canonical_id: str) -> str:
-    return canonical_id.replace(".", " ").replace("-", " ").title()

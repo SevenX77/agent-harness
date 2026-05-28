@@ -52,7 +52,7 @@ export interface ProviderRoute {
   route_slug: string
   provider_model_id: string
   canonical_id: string
-  display_name: string
+  display_name?: string | null
   status: RouteStatus
   capabilities: Record<string, CapabilityValue>
   metadata: Record<string, unknown>
@@ -104,6 +104,7 @@ export interface ModelGroupCapabilitySummary {
 export interface ModelGroup {
   canonical_id: string
   display_name: string
+  section_label?: string
   provider_models: ProviderModelOption[]
   status_summary: ModelGroupStatusSummary
   capability_summary: ModelGroupCapabilitySummary
@@ -727,7 +728,8 @@ function testResultFromEndpoint(
     Boolean(endpoint.last_test_at || endpoint.last_test_message) &&
     routes.length > 0
   )
-  const visibleRoutes = lastTestStatus === 'ok' || hasListedModels ? routes : []
+  const hasKnownModels = Boolean(endpoint.last_test_at || endpoint.last_test_message) && routes.length > 0
+  const visibleRoutes = lastTestStatus === 'ok' || hasListedModels || hasKnownModels ? routes : []
   if (lastTestStatus === 'untested' && !endpoint.last_test_at && !endpoint.last_test_message && routes.length === 0) {
     return null
   }
@@ -758,16 +760,10 @@ function endpointToCredential(
   const routes = routesForEndpoint(registry, endpoint.endpoint_id)
   const currentTestResult = testResultFromEndpoint(endpoint, routes)
   const testResults = upsertCachedResult(endpoint.endpoint_id, currentTestResult)
-  const activeModels = currentTestResult && (
-    currentTestResult.last_test_status === 'ok' ||
-    currentTestResult.last_test_status === 'untested'
-  )
+  const activeModels = currentTestResult && (currentTestResult.available_models?.length ?? 0) > 0
     ? currentTestResult.available_models ?? []
     : []
-  const activeSdks = currentTestResult && (
-    currentTestResult.last_test_status === 'ok' ||
-    currentTestResult.last_test_status === 'untested'
-  )
+  const activeSdks = currentTestResult && (currentTestResult.available_sdks?.length ?? 0) > 0
     ? currentTestResult.available_sdks ?? []
     : []
   return {
@@ -944,6 +940,11 @@ export function apiKeysCredentialsFromRegistry(registry: CredentialRegistryRespo
 export async function getRegistry(): Promise<RegistryResponse> {
   const response = await api.get<RegistryResponse>('/llm/registry')
   return cacheRegistry(response.data)
+}
+
+export async function getModelGroups(): Promise<ModelGroup[]> {
+  const registry = cachedRegistry ?? await getRegistry()
+  return modelGroupsFromRegistry(registry)
 }
 
 export async function getEndpointSecret(endpointId: string): Promise<EndpointSecretResponse> {
@@ -1172,6 +1173,7 @@ export async function getProviderModels(
   const endpoint = registry.provider_endpoints[request.id]
   if (!endpoint) throw new Error(`Endpoint model list response omitted endpoint: ${request.id}`)
   const routes = routesForEndpoint(registry, request.id)
+  const modelListReachable = endpoint.status !== 'failed'
   const models = routes.map((route) => ({
     id: route.provider_model_id,
     capabilities: route.capabilities,
@@ -1187,16 +1189,16 @@ export async function getProviderModels(
     last_test_status: statusToTestStatus(endpoint.status),
     last_test_at: endpoint.last_test_at ?? '',
     last_test_message: endpoint.last_test_message ?? '',
-    last_error_code: endpointErrorCode(endpoint) ?? '',
+    last_error_code: modelListReachable ? '' : endpointErrorCode(endpoint) ?? '',
     available_models: models,
     available_sdks: models.length > 0 ? [endpoint.protocol] : [],
   })
   return {
-    status: models.length > 0 ? 'ok' : endpointTestStatus(endpoint),
+    status: modelListReachable ? 'ok' : endpointTestStatus(endpoint),
     latency_ms: null,
     model_seen: models[0]?.id ?? null,
     message: endpoint.last_test_message ?? null,
-    error_code: endpointErrorCode(endpoint),
+    error_code: modelListReachable ? null : endpointErrorCode(endpoint),
     available_models: models,
     available_sdks: models.length > 0 ? [endpoint.protocol] : [],
   }

@@ -10,6 +10,8 @@
 | [`trace-and-predict-visibility/`](./trace-and-predict-visibility/) | Draft (P1) | Trace 瀑布流 + Prompt 透视仪 + Edge Inspection + Compile 结构化报错 | [`docs/studio/TRACE_AND_VISUALIZATION.md`](../../docs/studio/TRACE_AND_VISUALIZATION.md) |
 | [`studio-api-keys-redesign/`](./studio-api-keys-redesign/) | Superseded (UX only) | API Keys Round 2/3 UX 参考；v4 生产契约见 `llm-provider-intelligence-v2` | [`docs/engine/LLM_ROUTING_AND_FALLBACK.md`](../../docs/engine/LLM_ROUTING_AND_FALLBACK.md) |
 | [`studio-api-keys-regression-hardening/`](./studio-api-keys-regression-hardening/) | Implementing | API Keys 回归收敛：先恢复删除前前端状态，再接 v4 API | [`docs/development/FRONTEND_UI_SPEC.md`](../../docs/development/FRONTEND_UI_SPEC.md) |
+| [`studio-gateway-runtime-schema-boundary/`](./studio-gateway-runtime-schema-boundary/) | Draft | Gateway runtime schema 去 UI 字段；Studio 后端拥有 display projection | [`docs/engine/LLM_ROUTING_AND_FALLBACK.md`](../../docs/engine/LLM_ROUTING_AND_FALLBACK.md) |
+| [`studio-llm-roles-frontend-cutover/`](./studio-llm-roles-frontend-cutover/) | Draft | LLM Roles 前端按 6 个可回滚 PR 接入 Model Groups DTO | [`docs/development/FRONTEND_UI_SPEC.md`](../../docs/development/FRONTEND_UI_SPEC.md) |
 | [`studio-frontend-v21-multifile-editor/`](./studio-frontend-v21-multifile-editor/) | Draft | V2.1 多文件 skill 编辑架构 (VS Code 风格) | [`docs/studio/WORKSPACE_FILE_MANAGEMENT.md`](../../docs/studio/WORKSPACE_FILE_MANAGEMENT.md) |
 
 ## Archive (历史归档区)

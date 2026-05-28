@@ -1,6 +1,6 @@
 import type { ReactNode } from "react"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
-import type { CredentialsState, ModelInfo, ProviderType, RolesData } from "../../../api/llm"
+import type { CredentialsState, ModelGroup, ModelInfo, ProviderType, RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
 
 export type SettingsTab = "general" | "api_keys" | "llm_roles"
@@ -12,6 +12,7 @@ export interface ProviderDraft {
   base_url: string
   api_key: string
   isTesting: boolean
+  testingAction?: "models" | "endpoint" | null
 }
 
 export interface SettingsPageProps {
@@ -26,6 +27,7 @@ export interface SettingsPageContentProps {
   drafts: ProviderDraft[]
   saveStatus: SaveStatus
   rolesData: RolesData | null
+  modelGroups: ModelGroup[]
   rolesSaveStatus: SaveStatus
   rolesError: string | null
   appSettings: {

@@ -4,11 +4,11 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 import { useRoleTestChainRunner } from "@/hooks/useRoleTestChainRunner"
-import type { CredentialsState, RolesData } from "../../../api/llm"
+import type { CredentialsState, ModelGroup, RolesData } from "../../../api/llm"
 import { AvailableModelsSidebar } from "./llm-roles/AvailableModelsSidebar"
 import { RoleSaveStatusBadge } from "./llm-roles/RoleBadges"
 import { RoleCardList } from "./llm-roles/RoleCardList"
-import { appendAvailableModelToRole, pruneInvalidRoleProviders } from "./role-utils"
+import { appendModelGroupToRole, pruneInvalidRoleProviders } from "./role-utils"
 import { SectionTitle } from "./shared"
 
 export { ModelSettingsDialog, ModelSettingsFields } from "./llm-roles/ModelSettingsDialog"
@@ -30,12 +30,14 @@ export interface AvailableModelDragPreviewState {
 export function LlmRolesTab({
   data,
   credentials,
+  modelGroups,
   saveStatus,
   error,
   onChange,
 }: {
   data: RolesData | null
   credentials: CredentialsState
+  modelGroups: ModelGroup[]
   saveStatus: SaveStatus
   error: string | null
   onChange: (next: RolesData) => void
@@ -53,12 +55,16 @@ export function LlmRolesTab({
   const suppressAvailableModelDragClickRef = useRef(false)
   const availableModelDragReleaseTimerRef = useRef<number | null>(null)
   const [availableModelDragPreview, setAvailableModelDragPreview] = useState<AvailableModelDragPreviewState | null>(null)
-  const credentialsByCodeRef = useRef(credentialsByCode)
+  const modelGroupsByIdRef = useRef<Map<string, ModelGroup>>(new Map())
   const normalizedDataRef = useRef<RolesData | null>(normalizedData)
+  const modelGroupsById = useMemo(
+    () => new Map(modelGroups.map((group) => [group.canonical_id, group])),
+    [modelGroups],
+  )
 
   useEffect(() => {
-    credentialsByCodeRef.current = credentialsByCode
-  }, [credentialsByCode])
+    modelGroupsByIdRef.current = modelGroupsById
+  }, [modelGroupsById])
 
   useEffect(() => {
     normalizedDataRef.current = normalizedData
@@ -161,12 +167,13 @@ export function LlmRolesTab({
       event.stopPropagation()
       clearPointerDrag({ suppressClick: true })
       if (!roleName || !latestData) return
+      const modelGroup = modelGroupsByIdRef.current.get(drag.modelId)
+      if (!modelGroup) return
 
-      onChange(appendAvailableModelToRole(
+      onChange(appendModelGroupToRole(
         latestData,
         roleName,
-        drag.modelId,
-        credentialsByCodeRef.current,
+        modelGroup,
       ))
     }
 
@@ -210,7 +217,7 @@ export function LlmRolesTab({
       <LlmRolesLayout
         sidebar={(
           <AvailableModelsSidebar
-            credentials={credentials}
+            modelGroups={modelGroups}
             onModelPointerDown={handleAvailableModelPointerDown}
             onModelDragStart={(modelId) => {
               activeAvailableModelDragRef.current = modelId
@@ -236,6 +243,7 @@ export function LlmRolesTab({
           testChainRunning={testChainRunning}
           onRunTestChain={(roleName) => void runTestChain({ data: normalizedData, roleName, credentials })}
           getActiveAvailableModelDragId={() => activeAvailableModelDragRef.current}
+          getAvailableModelGroup={(modelGroupId) => modelGroupsById.get(modelGroupId) ?? null}
           onChange={onChange}
         />
       </LlmRolesLayout>

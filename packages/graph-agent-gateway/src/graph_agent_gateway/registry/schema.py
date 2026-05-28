@@ -140,7 +140,6 @@ class ProviderEndpoint(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     endpoint_id: str
-    display_name: str
     protocol: Protocol
     base_url: str
     api_key: SecretStr | None = None
@@ -170,7 +169,6 @@ class ProviderRoute(BaseModel):
     route_slug: str
     provider_model_id: str
     canonical_id: str
-    display_name: str
     status: RouteStatus = "unverified_manual"
     capabilities: dict[str, CapabilityValue] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -235,7 +233,6 @@ class ModelProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model_profile_id: str
-    display_name: str
     canonical_id: str | None = None
     tags: list[str] = Field(default_factory=list)
     fallback_chain: list[RoleRouteEntry] = Field(default_factory=list)
@@ -245,6 +242,7 @@ class ModelProfile(BaseModel):
 class EndpointCandidate(ProviderEndpoint):
     """Import-draft endpoint candidate."""
 
+    display_name: str
     field_sources: dict[str, FieldSource] = Field(default_factory=dict)
 
 
@@ -347,7 +345,6 @@ class ResolvedRoute(BaseModel):
     proxy_env: str | None = None
     provider_model_id: str
     canonical_id: str
-    display_name: str
     capabilities: dict[str, CapabilityValue] = Field(default_factory=dict)
     runtime_settings: RuntimeSettings = Field(default_factory=RuntimeSettings)
     effective_runtime_settings: dict[str, EffectiveRuntimeSetting] = Field(default_factory=dict)

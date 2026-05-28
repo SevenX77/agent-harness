@@ -354,19 +354,39 @@ async function mockBackend(page: Page) {
     }
     await fulfillJson(route, { notable_models: notable[providerKey] ?? ['manual/model'] })
   })
-  await page.route('**/api/llm/providers/test-models', async (route) => {
-    const body = JSON.parse(route.request().postData() ?? '{}') as { provider_id: string; model_ids: string[] }
-    const provider = providers.find((item) => item.id === body.provider_id)
+  await page.route('**/api/llm/endpoints/*/models/test', async (route) => {
+    const endpointId = decodeURIComponent(new URL(route.request().url()).pathname.split('/').at(-3) ?? '')
+    const body = JSON.parse(route.request().postData() ?? '{}') as { model_ids: string[] }
+    const provider = providers.find((item) => item.id === endpointId)
     const unique = Array.from(new Set(body.model_ids.filter(Boolean)))
-    const results = unique.map((modelId) => ({ model_id: modelId, status: 'ok', latency_ms: 12, message: null }))
     const existingModels = provider?.available_models ?? []
+    const results = unique.map((modelId) => {
+      const knownModel = existingModels.some((model) => model.id === modelId)
+      const ok = provider?.id !== 'openrouter-custom' || knownModel
+      return {
+        model_id: modelId,
+        status: ok ? 'ok' : 'invalid_model',
+        latency_ms: ok ? 12 : null,
+        message: ok ? null : 'Model not found',
+      }
+    })
     const byId = new Map(existingModels.map((model) => [model.id, model]))
-    for (const modelId of unique) {
-      if (!byId.has(modelId)) byId.set(modelId, { id: modelId, capabilities: { max_context_tokens: 200000 } })
+    for (const result of results) {
+      if (result.status === 'ok' && !byId.has(result.model_id)) {
+        byId.set(result.model_id, { id: result.model_id, capabilities: { max_context_tokens: 200000 } })
+      }
     }
     const available_models = [...byId.values()]
-    providers = providers.map((item) => item.id === body.provider_id ? { ...item, available_models } : item)
-    await fulfillJson(route, { results, available_models })
+    providers = providers.map((item) => item.id === endpointId ? {
+      ...item,
+      last_test_status: results.some((result) => result.status === 'ok') ? 'ok' : 'error',
+      last_test_at: '2026-05-25T00:00:00Z',
+      last_test_message: results.some((result) => result.status === 'ok') ? 'Credential present.' : 'Model not found.',
+      last_error_code: results.some((result) => result.status === 'ok') ? '' : 'invalid_model',
+      available_models,
+      available_sdks: [item.provider_type],
+    } : item)
+    await fulfillJson(route, { results, registry: registryFromProviders(providers) })
   })
   await page.route('**/api/llm/providers/test', async (route) => {
     const body = JSON.parse(route.request().postData() ?? '{}') as { id: string; provider_type?: CredentialProvider['provider_type'] }
@@ -470,8 +490,9 @@ test.describe('Round 3 API Keys e2e', () => {
     await page.getByRole('option', { name: 'Anthropic compatible' }).click()
     await newCard.getByRole('textbox', { name: 'Base URL' }).fill('https://api.together.xyz/v1')
     await newCard.locator('input[name^="provider-secret-"]').fill('sk-together')
+    await newCard.getByRole('textbox', { name: 'Endpoint test' }).fill('claude-opus-4-7')
     const endpointSaveRequest = page.waitForRequest((request) => request.url().includes('/api/llm/registry/endpoints') && request.method() === 'PUT')
-    const testRequest = page.waitForRequest((request) => request.url().includes('/api/llm/endpoints/') && request.url().endsWith('/test') && request.method() === 'POST')
+    const testRequest = page.waitForRequest((request) => request.url().includes('/api/llm/endpoints/') && request.url().endsWith('/models/test') && request.method() === 'POST')
     await newCard.getByRole('button', { name: 'Test' }).click()
     const request = await endpointSaveRequest
     const body = JSON.parse(request.postData() ?? '{}') as { provider_endpoints: Record<string, { protocol: string }> }

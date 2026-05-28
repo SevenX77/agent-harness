@@ -351,5 +351,4 @@ def _resolved_route(
         credential_fingerprint="fp",
         provider_model_id="claude-test",
         canonical_id="claude-test",
-        display_name="Claude Test",
     )

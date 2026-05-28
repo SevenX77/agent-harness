@@ -16,6 +16,7 @@ export function SettingsPageContent({
   drafts,
   saveStatus,
   rolesData,
+  modelGroups,
   rolesSaveStatus,
   rolesError,
   appSettings,
@@ -58,6 +59,7 @@ export function SettingsPageContent({
                 <LlmRolesTab
                   data={rolesData}
                   credentials={credentials}
+                  modelGroups={modelGroups}
                   saveStatus={rolesSaveStatus}
                   error={rolesError}
                   onChange={onRolesDataChange}

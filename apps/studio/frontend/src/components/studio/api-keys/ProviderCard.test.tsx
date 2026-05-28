@@ -1,7 +1,14 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import type { ReactElement } from "react"
-import { ProviderCard, ProviderDeleteButton, apiKeyInputClassName, apiKeyInputType, sortModelInfos } from "./ProviderCard"
+import {
+  ProviderCard,
+  ProviderDeleteButton,
+  apiKeyInputClassName,
+  apiKeyInputType,
+  copyAvailableModelId,
+  sortModelInfos,
+} from "./ProviderCard"
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog"
 import type { CredentialsState, TestStatus } from "../../../api/llm"
 import { providerTestParamsFingerprint } from "../settings/provider-utils"
@@ -212,7 +219,7 @@ describe("ProviderCard test status badge", () => {
     expect(html).toContain("openai/gpt-5")
   })
 
-  it("hides stale available models when the current config has no matching successful test result", () => {
+  it("keeps available models visible after an endpoint test failure for the current config", () => {
     const html = renderCardHtml({
       nextDraft: makeDraft({ provider_type: "google_genai", base_url: "https://anthropic.qnaigc.com" }),
       persisted: makePersisted({
@@ -227,9 +234,9 @@ describe("ProviderCard test status badge", () => {
     })
 
     expect(html).toContain("Test failed")
-    expect(html).not.toContain("Available SDKs:")
-    expect(html).not.toContain("Available Models:")
-    expect(html).not.toContain("stale-model-from-prior-test")
+    expect(html).toContain("Available SDKs:")
+    expect(html).toContain("Available Models:")
+    expect(html).toContain("stale-model-from-prior-test")
   })
 
   it("renders Error badge as destructive with error code", () => {
@@ -356,7 +363,7 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
     expect(html).toContain(">Test</button>")
   })
 
-  it("renders third-party API key before base URL and keeps endpoint test below base URL", () => {
+  it("renders third-party API key before protocol and keeps endpoint test below base URL", () => {
     const html = renderToStaticMarkup(
       <ProviderCard
         draft={makeDraft({ base_url: "https://api.qnaigc.com/v1" })}
@@ -370,9 +377,12 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
     )
 
     const apiKeyIndex = html.indexOf(">API Key</label>")
+    const protocolIndex = html.indexOf(">Protocol</label>")
     const baseUrlIndex = html.indexOf(">Base URL</label>")
     const endpointTestIndex = html.indexOf(">Endpoint test</label>")
     expect(apiKeyIndex).toBeGreaterThan(-1)
+    expect(protocolIndex).toBeGreaterThan(apiKeyIndex)
+    expect(baseUrlIndex).toBeGreaterThan(protocolIndex)
     expect(baseUrlIndex).toBeGreaterThan(apiKeyIndex)
     expect(endpointTestIndex).toBeGreaterThan(baseUrlIndex)
     expect(html).toContain("Get Models")
@@ -437,6 +447,28 @@ describe("ProviderCard provider capabilities", () => {
     expect(html).toContain("text-muted-foreground")
   })
 
+  it("renders available models as clickable copy targets", () => {
+    const html = renderCardHtml({
+      persisted: makePersisted({
+        available_models: [{ id: "deepseek/deepseek-v3.1-terminus" }],
+      }),
+    })
+
+    expect(html).toContain('type="button"')
+    expect(html).toContain('aria-label="Copy model deepseek/deepseek-v3.1-terminus"')
+    expect(html).toContain("cursor-pointer")
+  })
+
+  it("copies the available model real id", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal("navigator", { clipboard: { writeText } })
+
+    await copyAvailableModelId("deepseek/deepseek-v3.1-terminus")
+
+    expect(writeText).toHaveBeenCalledWith("deepseek/deepseek-v3.1-terminus")
+    vi.unstubAllGlobals()
+  })
+
   it("collapses long available model lists behind a show-all action", () => {
     const models = Array.from({ length: 14 }, (_, index) => ({ id: `provider/model-${index + 1}` }))
     const html = renderCardHtml({
@@ -483,6 +515,57 @@ describe("ProviderCard provider capabilities", () => {
     expect(html).not.toContain('data-testid="provider-capabilities"')
     expect(html).not.toContain("Available SDKs:")
     expect(html).not.toContain("Available Models:")
+  })
+
+  it("shows reachable field checks and an empty model-list warning after Get Models returns no models", () => {
+    const nextDraft = makeDraft({
+      id: "wavespeed",
+      name: "WaveSpeed",
+      base_url: "https://llm.wavespeed.ai/v1",
+      provider_type: "openai_compatible",
+    })
+    const persisted = makePersisted({
+      id: "wavespeed",
+      name: "WaveSpeed",
+      base_url: "https://llm.wavespeed.ai/v1",
+      provider_type: "openai_compatible",
+      last_test_status: "untested",
+      last_test_at: "2026-05-27T12:00:00Z",
+      last_test_message: "Endpoint reachable but returned no models.",
+      available_sdks: [],
+      available_models: [],
+      test_results: [
+        {
+          params_fingerprint: providerTestParamsFingerprint(nextDraft),
+          base_url: "https://llm.wavespeed.ai/v1",
+          provider_type: "openai_compatible",
+          last_test_status: "untested",
+          last_test_at: "2026-05-27T12:00:00Z",
+          last_test_message: "Endpoint reachable but returned no models.",
+          last_error_code: "",
+          available_sdks: [],
+          available_models: [],
+        },
+      ],
+    })
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={nextDraft}
+        persisted={persisted}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="third-party"
+      />,
+    )
+
+    expect(html).toContain("API key accepted by the model-list endpoint")
+    expect(html).toContain("Base URL accepted by the model-list endpoint")
+    expect(html).toContain("Available Models:")
+    expect(html).toContain("No models returned")
+    expect(html).toContain('data-variant="warning"')
+    expect(html).not.toContain("Connected")
   })
 })
 

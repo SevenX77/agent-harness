@@ -4,7 +4,7 @@ import { useAppSettings } from "@/hooks/useAppSettings"
 import { buildPutPayload, useDebouncedCredentialsSave } from "@/hooks/useDebouncedCredentialsSave"
 import { useDebouncedRolesSave } from "@/hooks/useDebouncedRolesSave"
 import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
-import { getCredentials, getProviderModels, getRoles, testProviderEndpoint, type CredentialsState, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
+import { getCredentials, getModelGroups, getProviderModels, getRoles, testProviderEndpoint, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
 import { draftsFromCredentials, draftFromAddProviderSubmission, providerCachedTestResult, providerDraftForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
@@ -12,6 +12,18 @@ import { normalizeRolesDraft, validateRolesDraft } from "./role-utils"
 import type { ProviderDraft, SettingsPageProps, SettingsTab } from "./types"
 
 const emptyCredentials: CredentialsState = { providers: [] }
+const emptyModelGroups: ModelGroup[] = []
+
+function mergeModelInfos(left: ModelInfo[] = [], right: ModelInfo[] = []): ModelInfo[] {
+  const merged = new Map<string, ModelInfo>()
+  for (const model of left) merged.set(model.id, model)
+  for (const model of right) merged.set(model.id, model)
+  return Array.from(merged.values())
+}
+
+function mergeStrings(left: string[] = [], right: string[] = []): string[] {
+  return Array.from(new Set([...left, ...right]))
+}
 
 function resetProviderTestOutcome(
   provider: CredentialsState["providers"][number],
@@ -32,6 +44,7 @@ export function upsertProviderTestResponse(
   latestDraft: ProviderDraft,
   response: ProviderTestResponse,
 ): CredentialsState {
+  const fingerprint = providerTestParamsFingerprint(latestDraft)
   const nextProvider: CredentialsState["providers"][number] = {
     id: latestDraft.id,
     name: latestDraft.name,
@@ -46,21 +59,28 @@ export function upsertProviderTestResponse(
     available_sdks: response.available_sdks ?? [],
   }
   const lastTestStatus = nextProvider.last_test_status ?? "untested"
-  const testResult: ProviderTestResult = {
-    params_fingerprint: providerTestParamsFingerprint(latestDraft),
-    base_url: latestDraft.base_url,
-    provider_type: latestDraft.provider_type,
-    last_test_status: lastTestStatus,
-    last_test_at: nextProvider.last_test_at,
-    last_test_message: nextProvider.last_test_message,
-    last_error_code: nextProvider.last_error_code,
-    available_models: lastTestStatus === "ok" ? nextProvider.available_models : [],
-    available_sdks: lastTestStatus === "ok" ? nextProvider.available_sdks : [],
-  }
   let found = false
   const providers: CredentialsState["providers"] = current.providers.map((provider): CredentialsState["providers"][number] => {
     if (provider.id !== latestDraft.id) return provider
     found = true
+    const previousResult = (provider.test_results ?? []).find((item) => item.params_fingerprint === fingerprint)
+    const visibleModels = lastTestStatus === "ok"
+      ? mergeModelInfos(provider.available_models, response.available_models)
+      : previousResult?.available_models ?? provider.available_models ?? []
+    const visibleSdks = lastTestStatus === "ok"
+      ? mergeStrings(provider.available_sdks, response.available_sdks)
+      : previousResult?.available_sdks ?? provider.available_sdks ?? []
+    const testResult: ProviderTestResult = {
+      params_fingerprint: fingerprint,
+      base_url: latestDraft.base_url,
+      provider_type: latestDraft.provider_type,
+      last_test_status: lastTestStatus,
+      last_test_at: nextProvider.last_test_at,
+      last_test_message: nextProvider.last_test_message,
+      last_error_code: nextProvider.last_error_code,
+      available_models: visibleModels,
+      available_sdks: visibleSdks,
+    }
     const testResults = [
       ...(provider.test_results ?? []).filter((item) => item.params_fingerprint !== testResult.params_fingerprint),
       testResult,
@@ -68,13 +88,24 @@ export function upsertProviderTestResponse(
     return {
       ...provider,
       ...nextProvider,
-      available_models: response.available_models ?? provider.available_models ?? [],
-      available_sdks: response.available_sdks ?? provider.available_sdks ?? [],
+      available_models: visibleModels,
+      available_sdks: visibleSdks,
       test_results: testResults,
     }
   })
+  const fallbackTestResult: ProviderTestResult = {
+    params_fingerprint: fingerprint,
+    base_url: latestDraft.base_url,
+    provider_type: latestDraft.provider_type,
+    last_test_status: lastTestStatus,
+    last_test_at: nextProvider.last_test_at,
+    last_test_message: nextProvider.last_test_message,
+    last_error_code: nextProvider.last_error_code,
+    available_models: nextProvider.available_models,
+    available_sdks: nextProvider.available_sdks,
+  }
   return {
-    providers: found ? providers : [...providers, { ...nextProvider, test_results: [testResult] }],
+    providers: found ? providers : [...providers, { ...nextProvider, test_results: [fallbackTestResult] }],
   }
 }
 
@@ -180,6 +211,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const [credentialsError, setCredentialsError] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<ProviderDraft[]>([])
   const [rolesData, setRolesData] = useState<RolesData | null>(null)
+  const [modelGroups, setModelGroups] = useState<ModelGroup[]>(emptyModelGroups)
   const [rolesError, setRolesError] = useState<string | null>(null)
 
   // Keep a ref of the most recent draft list so the debounced save can read it
@@ -254,10 +286,11 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   useEffect(() => {
     if (activeTab !== "llm_roles" || rolesData) return
     let cancelled = false
-    getRoles()
-      .then((next) => {
+    Promise.all([getRoles(), getModelGroups()])
+      .then(([next, nextModelGroups]) => {
         if (cancelled) return
         setRolesData(next)
+        setModelGroups(nextModelGroups)
       })
       .catch(() => {
         if (!cancelled) setRolesError("Roles unavailable")
@@ -298,15 +331,16 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
           base_url: patch.base_url ?? "",
           api_key: patch.api_key ?? "",
           isTesting: patch.isTesting ?? false,
+          testingAction: patch.testingAction ?? null,
         },
       ]
     })
     scheduleSave()
   }
 
-  function setProviderTesting(providerId: string, isTesting: boolean) {
+  function setProviderTesting(providerId: string, testingAction: ProviderDraft["testingAction"]) {
     setDrafts((current) => current.map((draft) => (
-      draft.id === providerId ? { ...draft, isTesting } : draft
+      draft.id === providerId ? { ...draft, isTesting: Boolean(testingAction), testingAction } : draft
     )))
   }
 
@@ -345,7 +379,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       provider_type: draft.provider_type,
     }
 
-    setProviderTesting(providerId, true)
+    setProviderTesting(providerId, "models")
     const toastId = `get-models-${providerId}`
     toast.loading(`Getting models for ${draft.name || "provider"}...`, { id: toastId })
 
@@ -368,14 +402,18 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
 
       if (response.status === "ok") {
         const modelCount = response.available_models?.length ?? 0
-        toast.success(modelCount > 0 ? `Models listed (${modelCount} models)` : "Models listed", { id: toastId })
+        if (modelCount > 0) {
+          toast.success(`Models listed (${modelCount} models)`, { id: toastId })
+        } else {
+          toast.warning("Model-list endpoint is reachable, but no models were returned.", { id: toastId })
+        }
       } else {
         toast.error(composeTestErrorMessage(response.status, response.error_code, response.message), { id: toastId })
       }
     } catch (error) {
       toast.error(composeRequestErrorMessage(error, "Get models failed"), { id: toastId })
     } finally {
-      setProviderTesting(providerId, false)
+      setProviderTesting(providerId, null)
     }
   }
 
@@ -390,7 +428,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       provider_type: draft.provider_type,
     }
 
-    setProviderTesting(providerId, true)
+    setProviderTesting(providerId, "endpoint")
     const toastId = `endpoint-test-${providerId}`
     toast.loading(`Testing ${draft.name || "provider"} endpoint...`, { id: toastId })
 
@@ -419,7 +457,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     } catch (error) {
       toast.error(composeRequestErrorMessage(error, "Endpoint test failed"), { id: toastId })
     } finally {
-      setProviderTesting(providerId, false)
+      setProviderTesting(providerId, null)
     }
   }
 
@@ -446,6 +484,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       drafts={drafts}
       saveStatus={saveStatus}
       rolesData={rolesData}
+      modelGroups={modelGroups}
       rolesSaveStatus={rolesSaveStatus}
       rolesError={rolesError}
       appSettings={{

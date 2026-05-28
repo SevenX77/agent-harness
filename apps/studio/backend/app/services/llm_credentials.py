@@ -14,10 +14,9 @@ from typing import Any
 
 from graph_agent_gateway.registry.canonical import canonicalize_model
 from graph_agent_gateway.registry.capabilities import normalize_route_capabilities
-from graph_agent_gateway.registry.schema import ProviderRoute
 from pydantic import SecretStr, ValidationError
 
-from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint
+from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, ProviderRoute
 from app.services.llm_paths import credentials_path
 
 _WRITE_LOCK = threading.Lock()
@@ -271,7 +270,7 @@ def _v3_payload_to_v4(payload: dict[str, Any]) -> LLMCredentialsFile:
                 route_slug=route_slug,
                 provider_model_id=model_id,
                 canonical_id=canonical.canonical_id,
-                display_name=str(raw_capabilities.get("display_name") or canonical.display_name),
+                display_name=str(raw_capabilities.get("display_name") or model_id),
                 status=endpoint.status,
                 capabilities=normalize_route_capabilities(
                     protocol=endpoint.protocol,

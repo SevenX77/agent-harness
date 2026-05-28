@@ -18,6 +18,7 @@ from graph_agent_gateway.registry.capabilities import (
 )
 from graph_agent_gateway.registry.lint import lint_role_routes
 from graph_agent_gateway.registry.resolver import RegistryResolutionError, resolve_role
+from graph_agent_gateway.registry.schema import VerifiedProfile
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.llm_config import (
@@ -278,13 +279,44 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
             discovered_model_count=0,
         )
     if model_list_reached:
-        latest_credentials, _ = _upsert_discovered_routes(
-            latest_credentials,
-            endpoint=latest_endpoint,
-            model_ids=discovered_model_ids,
-            verified=False,
-            replace_endpoint_routes=True,
-        )
+        if latest_endpoint.provider_kind == "official":
+            profiles_by_model: dict[str, list[VerifiedProfile]] = {}
+            catalog_only_models: list[str] = []
+            for model_id in discovered_model_ids:
+                profiles = await _probe_official_model_profiles(latest_endpoint, model_id)
+                if profiles:
+                    profiles_by_model[model_id] = profiles
+                else:
+                    catalog_only_models.append(model_id)
+            latest_credentials, _ = _upsert_discovered_routes(
+                latest_credentials,
+                endpoint=latest_endpoint,
+                model_ids=tuple(profiles_by_model),
+                verified=True,
+                replace_endpoint_routes=True,
+                verified_profiles_by_model=profiles_by_model,
+            )
+            if catalog_only_models:
+                latest_endpoint = latest_endpoint.model_copy(
+                    update={
+                        "metadata": {
+                            **latest_endpoint.metadata,
+                            "capability_library": [
+                                {"model_id": model_id, "status": "catalog_candidate"}
+                                for model_id in catalog_only_models
+                            ],
+                        }
+                    }
+                )
+                latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint
+        else:
+            latest_credentials, _ = _upsert_discovered_routes(
+                latest_credentials,
+                endpoint=latest_endpoint,
+                model_ids=discovered_model_ids,
+                verified=False,
+                replace_endpoint_routes=True,
+            )
     updated = latest_endpoint.model_copy(
         update={
             "status": status,
@@ -1117,6 +1149,49 @@ async def _role_test_provider_result(
     }
 
 
+async def _probe_official_model_profiles(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+) -> list[VerifiedProfile]:
+    """Probe one official-provider model and return verified LLM invocation profiles."""
+    if not endpoint.api_key or not endpoint.api_key.get_secret_value():
+        return []
+    result = await _probe_model(
+        _endpoint_probe_backend(endpoint),
+        endpoint.api_key.get_secret_value(),
+        _endpoint_probe_base_url(endpoint),
+        model_id,
+    )
+    if result.status != "ok":
+        return []
+    method_id, mapper_id = _default_official_text_method(endpoint)
+    return [
+        VerifiedProfile(
+            profile_id=f"text:{method_id}",
+            capability="text_chat",
+            method_id=method_id,
+            request_mapper_id=mapper_id,
+            status="ready",
+            default=True,
+            fallback_rank=1,
+        )
+    ]
+
+
+def _default_official_text_method(endpoint: ProviderEndpoint) -> tuple[str, str]:
+    endpoint_id = endpoint.endpoint_id.lower()
+    base_url = endpoint.base_url.lower()
+    if endpoint.protocol == "anthropic_compatible":
+        return "anthropic_messages", "anthropic_text"
+    if endpoint.protocol == "google_genai":
+        return "gemini_generate_content", "gemini_generate_content_text"
+    if endpoint.protocol == "ark_runtime":
+        return "ark_chat", "ark_chat_text"
+    if "deepseek" in endpoint_id or "deepseek" in base_url:
+        return "deepseek_chat_completions", "deepseek_chat_completions_text"
+    return "openai_responses", "openai_responses_text"
+
+
 def _role_test_entries(role: RoleEntry):
     fallback_by_route = {entry.route_id: entry for entry in role.fallback_chain}
     report = role.materialization_report if isinstance(role.materialization_report, dict) else {}
@@ -1187,6 +1262,7 @@ def _upsert_discovered_routes(
     model_ids: tuple[str, ...],
     verified: bool,
     replace_endpoint_routes: bool = False,
+    verified_profiles_by_model: dict[str, list[VerifiedProfile]] | None = None,
 ) -> tuple[LLMCredentialsFile, dict[str, str]]:
     routes = dict(credentials.provider_routes)
     route_ids_by_model: dict[str, str] = {}
@@ -1204,6 +1280,9 @@ def _upsert_discovered_routes(
                 model_id=model_id,
                 status=status,
                 capability_source=capability_source,
+                verified_profiles=(
+                    verified_profiles_by_model or {}
+                ).get(model_id, []),
             )
             continue
         updates: dict[str, Any] = {}
@@ -1218,6 +1297,8 @@ def _upsert_discovered_routes(
                     source=capability_source,
                 ),
             }
+        if verified_profiles_by_model and model_id in verified_profiles_by_model:
+            updates["verified_profiles"] = verified_profiles_by_model[model_id]
         routes[route_id] = existing.model_copy(update=updates) if updates else existing
     if replace_endpoint_routes:
         discovered_model_ids = set(model_ids)
@@ -1236,6 +1317,7 @@ def _provider_route(
     model_id: str,
     status: Literal["verified", "unverified_manual"],
     capability_source: Literal["api_list", "probed_verified"],
+    verified_profiles: list[VerifiedProfile] | None = None,
 ) -> ProviderRoute:
     route_slug = _route_slug(model_id)
     canonical = canonicalize_model(endpoint_id=endpoint.endpoint_id, provider_model_id=route_slug)
@@ -1252,6 +1334,7 @@ def _provider_route(
             raw_capabilities={},
             source=capability_source,
         ),
+        verified_profiles=verified_profiles or [],
     )
 
 

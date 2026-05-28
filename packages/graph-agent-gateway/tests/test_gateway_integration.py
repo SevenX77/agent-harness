@@ -397,6 +397,9 @@ def test_gateway_passes_effective_runtime_settings_to_client_manager() -> None:
         credential_fingerprint="fp",
         provider_model_id="gpt-5",
         canonical_id="gpt-5",
+        selected_profile_id="reasoning_responses",
+        call_method_id="openai_responses",
+        request_mapper_id="openai_responses_reasoning",
         effective_runtime_settings={
             "max_output_tokens": {"value": 333, "source": "route_setting"},
             "temperature": {"value": 0.4, "source": "route_setting"},
@@ -446,6 +449,8 @@ def test_gateway_passes_effective_runtime_settings_to_client_manager() -> None:
                 "strict": True,
             },
             "reasoning_effort": "medium",
+            "call_method_id": "openai_responses",
+            "request_mapper_id": "openai_responses_reasoning",
         }
     ]
 

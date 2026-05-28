@@ -1,3 +1,4 @@
+import { memo, useMemo } from "react"
 import {
   closestCenter,
   DndContext,
@@ -32,15 +33,17 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { roleChainStatusKey, type RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
+import type { RoleChainStatus } from "@/hooks/useRoleTestChainRunner"
 import type { RolesData } from "@/api/llm"
 import { appendProviderToModel, removeProviderFromRole, reorderProviderInRole } from "../role-utils"
 import { IconTooltip } from "./IconTooltip"
-import { ProviderTestStatusBadge } from "./RoleBadges"
+import { ProviderTestStatusLight } from "./RoleBadges"
 
-export function ProviderChain({
+export const ProviderChain = memo(function ProviderChain({
   data,
   roleName,
   modelCode,
+  modelName,
   providers,
   appendableProviderCodes,
   testStatuses,
@@ -49,15 +52,28 @@ export function ProviderChain({
   data: RolesData
   roleName: string
   modelCode: string
+  modelName: string
   providers: string[]
   appendableProviderCodes: string[]
   testStatuses: RoleChainStatusMap
   onChange: (next: RolesData) => void
 }) {
-  const providerItems = providers.map((providerCode, index) => providerItemId(providerCode, index))
+  const providerItems = useMemo(
+    () => providers.map((providerCode, index) => providerItemId(providerCode, index)),
+    [providers],
+  )
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+  const providerLabels = useMemo(
+    () => Object.fromEntries(
+      appendableProviderCodes.map((providerCode) => [
+        providerCode,
+        data.providers[providerCode]?.name ?? providerCode,
+      ]),
+    ),
+    [appendableProviderCodes, data.providers],
   )
 
   function handleDragEnd(event: DragEndEvent) {
@@ -75,7 +91,7 @@ export function ProviderChain({
           data-provider-grid="true"
           className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,12rem),20rem))] justify-start gap-1.5"
           role="list"
-          aria-label={`${modelCode} provider fallback order`}
+          aria-label={`${modelName} provider fallback order`}
         >
           {providers.map((providerCode, index) => (
             <ProviderTag
@@ -92,21 +108,16 @@ export function ProviderChain({
           ))}
           <AddProviderMenu
             providerCodes={appendableProviderCodes}
-            providerLabels={Object.fromEntries(
-              appendableProviderCodes.map((providerCode) => [
-                providerCode,
-                data.providers[providerCode]?.name ?? providerCode,
-              ]),
-            )}
+            providerLabels={providerLabels}
             onAppend={(providerCode) => onChange(appendProviderToModel(data, roleName, modelCode, providerCode))}
           />
         </div>
       </SortableContext>
     </DndContext>
   )
-}
+})
 
-function ProviderTag({
+const ProviderTag = memo(function ProviderTag({
   id,
   data,
   roleName,
@@ -126,6 +137,7 @@ function ProviderTag({
   onChange: (next: RolesData) => void
 }) {
   const providerName = data.providers[providerCode]?.name ?? ""
+  const providerStatus = testStatus?.status
   const {
     attributes,
     listeners,
@@ -148,8 +160,13 @@ function ProviderTag({
       <Item
         variant="muted"
         size="xs"
+        data-provider-card="true"
+        data-provider-test-status={providerStatus}
         data-dnd-drag-surface="provider"
-        className="min-h-9 cursor-grab select-none flex-nowrap items-center gap-2 border-border/70 bg-muted/35 text-muted-foreground active:cursor-grabbing"
+        className={cn(
+          "relative min-h-9 cursor-grab select-none flex-nowrap items-center gap-2 overflow-hidden border-border/70 bg-muted/35 text-muted-foreground active:cursor-grabbing",
+          providerStatusSurfaceClass(providerStatus),
+        )}
         {...attributes}
         {...listeners}
         role="listitem"
@@ -165,7 +182,7 @@ function ProviderTag({
           className="ml-auto shrink-0 gap-1"
           onPointerDown={(event) => event.stopPropagation()}
         >
-          {testStatus ? <ProviderTestStatusBadge status={testStatus.status} message={testStatus.message} /> : null}
+          {testStatus ? <ProviderTestStatusLight status={testStatus.status} message={testStatus.message} /> : null}
           <IconTooltip label={`Remove ${providerName || providerCode}`}>
             <Button
               type="button"
@@ -182,6 +199,14 @@ function ProviderTag({
       </Item>
     </div>
   )
+})
+
+function providerStatusSurfaceClass(status?: RoleChainStatus): string {
+  if (status === "ok") return "border-success-border ring-1 ring-success/25"
+  if (status === "testing") return "border-primary/70 ring-1 ring-primary/30"
+  if (status && status !== "idle") return "border-destructive-border ring-1 ring-destructive/25"
+  if (status === "idle") return "border-border"
+  return ""
 }
 
 function ProviderName({ label }: { label: string }) {

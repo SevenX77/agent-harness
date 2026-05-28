@@ -215,6 +215,8 @@ class GatewayChatModel(BaseChatModel):
                     parallel_tool_calls=_effective_optional_bool(candidate, "parallel_tool_calls"),
                     structured_output=_effective_structured_output(candidate),
                     reasoning_effort=_effective_text(candidate, "reasoning.effort"),
+                    call_method_id=candidate.call_method_id,
+                    request_mapper_id=candidate.request_mapper_id,
                 )
                 after_usage = _usage_total_calls(self.client_manager, candidate)
                 if after_usage == before_usage:

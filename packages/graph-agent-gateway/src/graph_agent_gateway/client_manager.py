@@ -85,6 +85,8 @@ class LLMClientManager:
         parallel_tool_calls: bool | None = None,
         structured_output: Mapping[str, object] | None = None,
         reasoning_effort: str | None = None,
+        call_method_id: str | None = None,
+        request_mapper_id: str | None = None,
     ) -> CallResult:
         """Call one route and return a normalized chat result."""
         return cls._dispatch_provider_call(
@@ -103,6 +105,8 @@ class LLMClientManager:
             parallel_tool_calls=parallel_tool_calls,
             structured_output=structured_output,
             reasoning_effort=reasoning_effort,
+            call_method_id=call_method_id,
+            request_mapper_id=request_mapper_id,
         )
 
     @classmethod
@@ -477,6 +481,49 @@ class LLMClientManager:
         return result
 
     @classmethod
+    def _call_openai_responses(
+        cls,
+        client: OpenAI,
+        model: str,
+        messages: list[MessageDict],
+        max_tokens: int,
+        temperature: float,
+        *,
+        top_p: float | None = None,
+        reasoning_effort: str | None = None,
+    ) -> CallResult:
+        """Call OpenAI's Responses API for a text route."""
+        kwargs: dict[str, object] = {
+            "model": model,
+            "input": messages,
+            "max_output_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        if top_p is not None:
+            kwargs["top_p"] = top_p
+        if reasoning_effort:
+            kwargs["reasoning"] = {"effort": reasoning_effort}
+
+        responses = _field(client, "responses")
+        create = cast(Callable[..., object], _field(responses, "create"))
+        response = create(**kwargs)
+        usage_obj = _field(response, "usage")
+        prompt_tokens = _int_field(usage_obj, "input_tokens")
+        completion_tokens = _int_field(usage_obj, "output_tokens")
+        total_tokens = _int_field(usage_obj, "total_tokens")
+        if total_tokens == 0:
+            total_tokens = prompt_tokens + completion_tokens
+        return {
+            "content": _openai_responses_text(response),
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+            },
+            "finish_reason": _optional_string_field(response, "status"),
+        }
+
+    @classmethod
     def _call_google_genai(
         cls,
         client: object,
@@ -614,6 +661,7 @@ class LLMClientManager:
         tool_choice: str | None = None,
         top_p: float | None = None,
         stop_sequences: list[str] | None = None,
+        request_mapper_id: str | None = None,
     ) -> CallResult:
         """Call an Anthropic-compatible messages endpoint."""
         system_text, api_messages = _split_anthropic_messages(messages)
@@ -637,7 +685,19 @@ class LLMClientManager:
 
         if reasoning:
             kwargs["temperature"] = 1.0
-            if _anthropic_adaptive_thinking_supported(model):
+            if _anthropic_mapper_prefers_adaptive_thinking(request_mapper_id):
+                kwargs["thinking"] = {"type": "adaptive"}
+                response = _anthropic_messages_create(client, kwargs)
+            elif _anthropic_mapper_prefers_manual_thinking(request_mapper_id):
+                kwargs["thinking"] = {
+                    "type": "enabled",
+                    "budget_tokens": _anthropic_thinking_budget(
+                        max_tokens,
+                        thinking_budget_tokens,
+                    ),
+                }
+                response = _anthropic_messages_create(client, kwargs)
+            elif _anthropic_adaptive_thinking_supported(model):
                 kwargs["thinking"] = {"type": "adaptive"}
                 try:
                     response = _anthropic_messages_create(client, kwargs)
@@ -797,12 +857,24 @@ class LLMClientManager:
         parallel_tool_calls: bool | None = None,
         structured_output: Mapping[str, object] | None = None,
         reasoning_effort: str | None = None,
+        call_method_id: str | None = None,
+        request_mapper_id: str | None = None,
     ) -> CallResult:
         """Route a provider call by configured endpoint protocol."""
 
         def invoke(token_budget: int) -> CallResult:
             if route.protocol == "openai_compatible":
                 client = cls._get_openai_client(route, runtime_policy=runtime_policy)
+                if call_method_id == "openai_responses":
+                    return cls._call_openai_responses(
+                        client,
+                        route.provider_model_id,
+                        messages,
+                        token_budget,
+                        temperature,
+                        top_p=top_p,
+                        reasoning_effort=reasoning_effort,
+                    )
                 return cls._call_openai_compatible(
                     client,
                     route.provider_model_id,
@@ -836,6 +908,7 @@ class LLMClientManager:
                     tool_choice=tool_choice,
                     top_p=top_p,
                     stop_sequences=stop_sequences,
+                    request_mapper_id=request_mapper_id,
                 )
 
             if route.protocol == "google_genai":
@@ -1059,6 +1132,14 @@ def _anthropic_thinking_budget(
     return budget
 
 
+def _anthropic_mapper_prefers_adaptive_thinking(request_mapper_id: str | None) -> bool:
+    return "thinking_adaptive" in (request_mapper_id or "")
+
+
+def _anthropic_mapper_prefers_manual_thinking(request_mapper_id: str | None) -> bool:
+    return "thinking_manual" in (request_mapper_id or "")
+
+
 def _anthropic_adaptive_thinking_supported(model: str) -> bool:
     normalized = model.strip().lower().replace("_", "-")
     return normalized.startswith(
@@ -1167,6 +1248,25 @@ def _anthropic_content_text(value: object) -> str:
         block_type = _field(block, "type")
         if block_type == "text":
             chunks.append(_string_field(block, "text"))
+    return "".join(chunks)
+
+
+def _openai_responses_text(response: object) -> str:
+    output_text = _field(response, "output_text")
+    if isinstance(output_text, str):
+        return output_text
+    output = _field(response, "output")
+    if not isinstance(output, Sequence) or isinstance(output, str | bytes):
+        return ""
+    chunks: list[str] = []
+    for item in output:
+        content = _field(item, "content")
+        if not isinstance(content, Sequence) or isinstance(content, str | bytes):
+            continue
+        for part in content:
+            text = _field(part, "text")
+            if isinstance(text, str):
+                chunks.append(text)
     return "".join(chunks)
 
 

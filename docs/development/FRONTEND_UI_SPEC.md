@@ -105,15 +105,17 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - 数据密集列表中的标签必须尽量可读。不要把每个 Badge 单独截成 `Ope...` 这类不可识别文本。
 - 多标签行的通用模式是：展示能稳定放下的完整标签，末尾用 `+N` overflow badge 表示剩余项；选中或展开后再展示完整标签集合。
 - Badge 文本使用真实 label，不使用临时缩写。模型、provider、vendor 等实体名必须展示准确名称。
-- Role / model / provider 这类层级编辑器不得把内部短码（如 `GM31P`、`CLO47T`）作为可见主标签；短码只用于持久化 key 或调试上下文。模型行展示模型真实名称，Provider 行只展示 provider 名称，不展示派生标题或 provider model id 副标题。
+- Role / model / provider 这类层级编辑器不得把内部短码（如 `GM31P`、`CLO47T`）作为可见主标签或可访问标签；短码只用于持久化 key 或调试上下文。模型行展示模型真实名称，Provider 行只展示 provider 名称，不展示派生标题或 provider model id 副标题。
 - Role fallback chain 只能保存后端返回的精确 `route_id`；UI 不得从 provider model id、display name 或 provider brand 推导执行目标。
 - Role provider 的可用性、API key 状态和 Test 行为必须通过后端 DTO 暴露的 owning `endpoint_id`（或兼容旧数据时的 route id 前缀 fallback）映射到 credential endpoint；不得把 `route_id` 本身当作 API Keys credential id。Role card 中针对 selected provider rows 的 Test 已有具体 `provider_model_id` 时必须调用模型级 probe（`/endpoints/{endpoint_id}/models/test`）而不是只做 endpoint list probe，并且不同 provider route 应并发测试；模型组级 Connected/Failed badge 必须优先反映本次 selected provider row 测试结果，不能被 endpoint 上一次成功状态覆盖；runtime fallback/aggregate 语义另由 Role Test result surface 承载，不要让 provider row test 串行模拟 fallback。
+- Route-backed role provider（带 `endpoint_id` 或精确 `route_id`）的 ownership 已由后端 DTO 保证，前端不得再扫描 credential `available_models` 做旧版 provider ownership 推断；旧版推断只能用于非 route-backed provider code，避免长模型库首屏同步阻塞。
 - 从 Available Routes 拖入 role 时，拖拽 payload 必须携带 exact `route_id`，并保持后端 DTO 中的 canonical/provider/status 字段只读展示；未知 route 由后端拒绝保存。拖入一个 Model Group 必须保留该组中所有后端返回的 provider routes，包括 `needs_setup`、`cooling_down` 和 `off`，不要静默裁剪；用户可以在 role card 中显式删除不需要的 route。默认排序应 ready-first，然后再按 provider kind/name 稳定排序。
 - 添加 role route 使用右侧 Available Routes 的拖拽源和本地 shadcn `Empty` drop target；不要提供与 route registry 割裂的 Add model select。
 - 添加 Role 必须先通过本地 shadcn `Dialog` + `Field` 输入 role name，创建后的 role 是可保存的空草稿，不自动塞入默认 model/provider；保存前必须归一化掉空草稿或 orphan draft model 上的 stale `active_model`，并取消会读取 invalid ref 的既有 autosave；role name 必须可从 role 的三点 action menu 修改。
 - Provider 添加入口使用与 provider row 等宽等高的 ghost `DropdownMenu` trigger；没有可添加 provider 时不显示占位按钮。
 - Route fallback row 数量超过一个时使用响应式横向 grid，添加 route 的 ghost trigger 作为 grid 最后一项；route card 必须同时设置最小列宽和最大列宽，少量 route 不要横向撑满整行；不要回退到纵向堆叠或单独 select。
 - Provider 名称在 row 内必须单行省略并配 Radix Tooltip 展示完整名称，避免窄卡片中把 provider label 拆成两行。
+- Role card 内的 provider row 不渲染 `Connected`/`Failed` 等文字状态 badge；状态只用 row 边框/细 ring 和紧凑状态灯表达，不叠加状态背景色；testing 状态可用边框流动动画。文字型 aggregate 状态保留在 Model Group 层或 Role Test result surface。
 - Role list 和 Available Routes 这类可能很长的设置列表必须渐进渲染，保持搜索/计数完整，同时用 sentinel 自动加载后续批次。
 - Role list 必须按用途分区展示，当前分为 `Graph Agent Roles` 与 `Copilot Roles`；每个分区底部都要提供对应的 `Add Graph Agent Role` / `Add Copilot Role` 入口，并与下一段分区保持明确垂直间距。Graph Agent 分类与 role icon 使用 engine/cog 语义图标，role 标题行需要使用默认字体，整行 controls 必须垂直居中对齐；窄宽度下 role header controls 应换到标题下一行，不能把 role name 挤压成逐字换行；编辑和删除等 role 级动作统一收进标题右侧的三点 `DropdownMenu`，删除必须使用统一 `DeleteConfirmDialog` 二次确认。
 - Tauri/WebKit 下非编辑区双击可能触发原生文本选择命令，导致 macOS `Edit` 菜单闪烁或系统提示音；应用根部必须保留全局 double-click guard，在非输入、非 `contenteditable`、非 Monaco 区域阻止原生默认选择行为和 `selectstart`，并用 CSS 将普通 chrome 设为不可文本选择；但不能阻止事件冒泡，以免破坏业务组件自己的 `onDoubleClick`。确实需要保留原生双击选择的区域使用 `data-allow-native-double-click` 标记。Tauri macOS shell 使用自定义 app menu，`Edit` submenu 必须保留原生 `Undo`、`Redo`、`Cut`、`Copy`、`Paste`、`Select All`；不要为了规避非编辑区双击提示音而删除原生编辑命令，提示音问题应在前端双击 guard 或独立菜单实现里处理。非编辑区的原生 edit 快捷键和 `copy` / `cut` / `paste` 事件必须 `preventDefault()`，可编辑目标仍交给原生 WebKit；不要在前端用 `navigator.clipboard.readText()` 拦截 `Cmd+V` 做 paste fallback，否则 WebKit 会显示粘贴授权气泡而不是直接粘贴。
@@ -126,6 +128,7 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - 如果列表来自外部探测或后端缓存，UI 不应写死样例数据。模型库类 UI 应展示已测试并持久化的数据源，按 vendor/provider 等真实字段归类。
 - API Keys 卡片的 `Available Models` / `Available SDKs` 只能来自当前 draft 参数（API key、Base URL、Protocol）匹配的成功 test result；不得把 endpoint 下残留的 `provider_routes` 无条件投影到当前可见状态。参数变化后必须先清空可见测试状态，只有匹配历史 test result 或重新测试成功后才恢复模型列表。
 - API Keys 的模型列表探测和端点连通探测必须拆开：`Get Models` 只调用 provider 的 models-list API，按钮不得使用 primary variant，成功后只刷新当前参数匹配的 `Available Models` / `Available SDKs`，不得把状态 badge 置为绿色 `Connected`；`Endpoint test` 必须让用户输入一个来自 available models 的具体 model id，执行最小生成 probe，只有该 probe 成功才显示绿色 `Connected`。
+- API Keys 的真实 API key secret hydration 只能在用户进入 API Keys 编辑上下文时触发；Settings 打开、General 页面、LLM Roles 页面只能读取 registry 摘要/红acted key 状态，不能批量请求 `/secret`，避免密钥请求阻塞其它设置页加载。
 - API Keys 的 `Get Models` 只要 provider 返回 2xx，就只能证明 API Key / Base URL / Protocol 组合可访问模型列表接口，不等同于 endpoint generation 可用；这种情况应在对应字段右侧显示可达成功标记。若 2xx 响应没有返回模型（例如 `data: null` 或空数组），不得判定为失败或清空 API Key/Base URL 可达反馈，应在 `Available Models` 区域展示 warning empty state。
 - API Keys 的 `Available Models` 标签必须展示真实 model id，并作为可点击复制目标；hover cursor 使用 pointer，点击后复制该 model id，方便用户粘贴到 `Endpoint test`。
 - API Keys 的同一卡片内表单控件必须按同一输入列左/右边界对齐，右侧 action 区域固定并右对齐；`Get Models` 和 `Endpoint test` 的 loading 状态必须按具体按钮区分，不得让同卡片其它测试按钮一起转圈。Endpoint test 失败不得清空当前参数匹配的 Available Models。

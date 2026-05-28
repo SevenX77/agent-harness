@@ -46,19 +46,19 @@ related_requirements: .kiro/specs/studio-llm-roles-frontend-cutover/requirements
 
 ## PR 3: Role Card Model Group and Provider Rows
 
-- [ ] Replace visible legacy model short-code labels with Model Group labels.
-- [ ] Replace visible provider short-code labels with provider labels.
-- [ ] Render provider rows under each Model Group.
-- [ ] Keep provider row add/remove/reorder controls aligned with current style.
-- [ ] Keep role action menu, edit dialog, delete dialog, and model fallback switch behavior.
-- [ ] Verify model-group reorder changes model fallback order.
-- [ ] Verify provider reorder changes only provider fallback order inside one Model Group.
-- [ ] Verify remove provider and remove Model Group.
-- [ ] Run focused LLM Roles frontend tests.
-- [ ] Run typecheck/lint.
-- [ ] Real browser/Tauri verification including narrow viewport.
-- [ ] Wait for user confirmation.
-- [ ] Commit only PR 3 files.
+- [x] Replace visible legacy model short-code labels with Model Group labels.
+- [x] Replace visible provider short-code labels with provider labels.
+- [x] Render provider rows under each Model Group.
+- [x] Keep provider row add/remove/reorder controls aligned with current style.
+- [x] Keep role action menu, edit dialog, delete dialog, and model fallback switch behavior.
+- [x] Verify model-group reorder changes model fallback order.
+- [x] Verify provider reorder changes only provider fallback order inside one Model Group.
+- [x] Verify remove provider and remove Model Group.
+- [x] Run focused LLM Roles frontend tests.
+- [x] Run typecheck/lint.
+- [x] Real browser/Tauri verification including narrow viewport.
+- [x] Wait for user confirmation.
+- [x] Commit only PR 3 files.
 
 ## PR 4: Provider State, Role Fit, Cooling Down
 
@@ -105,6 +105,7 @@ related_requirements: .kiro/specs/studio-llm-roles-frontend-cutover/requirements
 ## Tracking Notes
 
 - PR 1 was confirmed and committed as `91accd5 Split Studio LLM display projection from gateway runtime`.
-- PR 2 route/drop exact route-id work is implemented, verified, and accepted for local commit.
+- PR 2 was confirmed and committed as `ae0dc11 Preserve exact LLM role provider routes`.
+- PR 3 role-card Model Group/provider-row work was confirmed for commit.
 - Route provider credential/test state must map through owning `endpoint_id`; `route_id` remains the execution target only.
 - Role card provider-row Test is provider-level and runs different provider routes concurrently; runtime fallback/aggregate Role Test remains PR 5 scope.

@@ -1,3 +1,4 @@
+import { memo, useMemo } from "react"
 import { useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { Trash2 } from "lucide-react"
@@ -24,12 +25,14 @@ import { ModelSettingsDialog } from "./ModelSettingsDialog"
 import { ProviderChain } from "./ProviderChain"
 import { AvailabilityBadge, ThinkingBadge } from "./RoleBadges"
 
-export function ModelItem({
+export const ModelItem = memo(function ModelItem({
   data,
   roleName,
   modelCode,
+  modelName,
   modelIndex,
   credentialsByCode,
+  ownedProviderCodes,
   availability,
   testStatuses,
   onChange,
@@ -37,18 +40,28 @@ export function ModelItem({
   data: RolesData
   roleName: string
   modelCode: string
+  modelName: string
   modelIndex: number
   credentialsByCode: Record<string, CredentialsState["providers"][number]>
+  ownedProviderCodes?: ReadonlySet<string>
   availability: ModelAvailability
   testStatuses: RoleChainStatusMap
   onChange: (next: RolesData) => void
 }) {
   const role = data.roles[roleName]
   const roleModel = role.models[modelCode]
-  const providers = roleModelProviderCodes(data, modelCode, roleModel.providers, credentialsByCode)
-  const modelName = data.models[modelCode]?.name ?? modelCode
-  const appendableProviderCodes = ownedProviderCodesForModel(data, modelCode, credentialsByCode)
-    .filter((providerCode) => !providers.includes(providerCode))
+  const providers = useMemo(() => (
+    ownedProviderCodes
+      ? roleModel.providers.filter((providerCode) => ownedProviderCodes.has(providerCode))
+      : roleModelProviderCodes(data, modelCode, roleModel.providers, credentialsByCode)
+  ), [credentialsByCode, data, modelCode, ownedProviderCodes, roleModel.providers])
+  const appendableProviderCodes = useMemo(() => {
+    const owned = ownedProviderCodes
+      ? Array.from(ownedProviderCodes)
+      : ownedProviderCodesForModel(data, modelCode, credentialsByCode)
+    const taken = new Set(providers)
+    return owned.filter((providerCode) => !taken.has(providerCode))
+  }, [credentialsByCode, data, modelCode, ownedProviderCodes, providers])
   const {
     attributes,
     listeners,
@@ -124,6 +137,7 @@ export function ModelItem({
             data={data}
             roleName={roleName}
             modelCode={modelCode}
+            modelName={modelName}
             providers={providers}
             appendableProviderCodes={appendableProviderCodes}
             testStatuses={testStatuses}
@@ -133,4 +147,4 @@ export function ModelItem({
       </Item>
     </div>
   )
-}
+})

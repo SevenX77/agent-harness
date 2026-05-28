@@ -241,6 +241,39 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
   animation: pulse-primary 1.4s ease-in-out infinite;
 }
 
+@keyframes provider-card-border-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+[data-provider-card="true"][data-provider-test-status="testing"]::after {
+  animation: provider-card-border-flow 1.1s linear infinite;
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklab, var(--primary) 88%, transparent),
+      transparent,
+      color-mix(in oklab, var(--primary) 88%, transparent)
+    );
+  background-size: 200% 100%;
+  border-radius: inherit;
+  content: "";
+  inset: 0;
+  padding: 1px;
+  pointer-events: none;
+  position: absolute;
+  -webkit-mask:
+    linear-gradient(currentColor 0 0) content-box,
+    linear-gradient(currentColor 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
 /* React Flow theme overrides (per tokens.md §1.6) */
 .react-flow .react-flow__controls {
   background: var(--color-card) !important;

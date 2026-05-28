@@ -27,6 +27,10 @@ export function ownedProviderCodesForModel(
   const configProviderCodes = Object.keys(data.models[modelCode]?.providers ?? {})
     .filter((providerCode) => Boolean(data.providers[providerCode]))
   if (!credentialsByCode) return configProviderCodes
+  const hasLegacyProviderCode = configProviderCodes.some((providerCode) => (
+    !isRouteBackedProviderCode(data, providerCode)
+  ))
+  if (!hasLegacyProviderCode) return configProviderCodes
 
   const availableModelId = inferAvailableModelIdForModel(data, modelCode, credentialsByCode)
   if (!availableModelId) return configProviderCodes

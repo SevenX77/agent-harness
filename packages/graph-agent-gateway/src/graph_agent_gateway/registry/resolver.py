@@ -5,6 +5,10 @@ from __future__ import annotations
 from pydantic import ValidationError
 
 from graph_agent_gateway.registry.lint import lint_role_routes
+from graph_agent_gateway.registry.profile_selector import (
+    ProfileSelectionError,
+    select_verified_profile,
+)
 from graph_agent_gateway.registry.schema import (
     CapabilityValue,
     EffectiveRuntimeSetting,
@@ -13,6 +17,7 @@ from graph_agent_gateway.registry.schema import (
     ResolvedRoute,
     RoleRouteEntry,
     RuntimeSettings,
+    VerifiedProfile,
 )
 from graph_agent_gateway.registry.storage import compute_credential_fingerprint
 
@@ -55,6 +60,10 @@ def resolve_role(
             raise RegistryResolutionError(f"endpoint is not configured: {route.endpoint_id}")
         if endpoint.api_key is None or not endpoint.api_key.get_secret_value():
             raise RegistryResolutionError(f"endpoint has no credential: {route.endpoint_id}")
+        try:
+            selected_profile = select_verified_profile(route, entry.runtime_settings)
+        except ProfileSelectionError as exc:
+            raise RegistryResolutionError(str(exc)) from exc
         provider_routes.append(route)
         resolved_routes.append(
             ResolvedRoute(
@@ -70,6 +79,16 @@ def resolve_role(
                 proxy_env=endpoint.proxy_env,
                 provider_model_id=route.provider_model_id,
                 canonical_id=route.canonical_id,
+                selected_profile_id=(
+                    selected_profile.profile_id if selected_profile is not None else None
+                ),
+                selected_profile_capability=(
+                    selected_profile.capability if selected_profile is not None else None
+                ),
+                call_method_id=selected_profile.method_id if selected_profile is not None else None,
+                request_mapper_id=(
+                    selected_profile.request_mapper_id if selected_profile is not None else None
+                ),
                 capabilities=route.capabilities,
                 runtime_settings=entry.runtime_settings,
                 effective_runtime_settings=_effective_runtime_settings(
@@ -77,6 +96,7 @@ def resolve_role(
                     entry.runtime_settings,
                     route.capabilities,
                     endpoint.protocol,
+                    selected_profile,
                 ),
             )
         )
@@ -105,6 +125,7 @@ def _effective_runtime_settings(
     settings: RuntimeSettings,
     capabilities: dict[str, CapabilityValue],
     protocol: str,
+    selected_profile: VerifiedProfile | None = None,
 ) -> dict[str, EffectiveRuntimeSetting]:
     effective: dict[str, EffectiveRuntimeSetting] = {}
     entry_source = entry.runtime_settings_source
@@ -210,7 +231,36 @@ def _effective_runtime_settings(
                 source="route_capability_default",
             )
 
+    if selected_profile is not None:
+        _apply_profile_runtime_overrides(effective, settings, selected_profile)
+
     return effective
+
+
+def _apply_profile_runtime_overrides(
+    effective: dict[str, EffectiveRuntimeSetting],
+    settings: RuntimeSettings,
+    selected_profile: VerifiedProfile,
+) -> None:
+    reasoning = selected_profile.runtime_overrides.get("reasoning")
+    if not isinstance(reasoning, dict):
+        return
+
+    if settings.reasoning.enabled is None and "enabled" in reasoning:
+        effective["reasoning.enabled"] = EffectiveRuntimeSetting(
+            value=reasoning["enabled"],
+            source="profile_default",
+        )
+    if settings.reasoning.effort is None and "effort" in reasoning:
+        effective["reasoning.effort"] = EffectiveRuntimeSetting(
+            value=reasoning["effort"],
+            source="profile_default",
+        )
+    if settings.reasoning.budget_tokens is None and "budget_tokens" in reasoning:
+        effective["reasoning.budget_tokens"] = EffectiveRuntimeSetting(
+            value=reasoning["budget_tokens"],
+            source="profile_default",
+        )
 
 
 def _capability_default(capability: CapabilityValue | None) -> object | None:

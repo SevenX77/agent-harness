@@ -177,6 +177,8 @@ def _apply_intent(
             }
             entry_report["warnings"].append(warning)
             role_fit = "downgraded"
+        else:
+            _enable_reasoning(entry_report)
     elif thinking == "required":
         capability = route.capabilities.get("thinking_protocol")
         if capability is None:
@@ -197,12 +199,18 @@ def _apply_intent(
                 }
             )
             return "not_fit"
+        _enable_reasoning(entry_report)
     token_intent = _effective_output_token_intent(role, group)
     if token_intent is not None:
         token_fit = _apply_output_token_intent(entry_report, token_intent, route)
         if token_fit == "downgraded":
             role_fit = "downgraded"
     return role_fit
+
+
+def _enable_reasoning(entry_report: dict[str, Any]) -> None:
+    reasoning = entry_report["resolved_settings"].setdefault("reasoning", {})
+    reasoning["enabled"] = True
 
 
 def _effective_output_token_intent(

@@ -177,6 +177,36 @@ def test_anthropic_thinking_prefers_adaptive_without_budget_tokens(monkeypatch) 
     assert thinking == {"type": "adaptive"}
 
 
+def test_anthropic_request_mapper_forces_adaptive_thinking_payload(monkeypatch) -> None:
+    from graph_agent_gateway import client_manager
+    from graph_agent_gateway.client_manager import LLMClientManager
+
+    captured: list[dict[str, object]] = []
+
+    def fake_messages_create(_client: object, kwargs: dict[str, object]) -> dict[str, object]:
+        captured.append(dict(kwargs))
+        return {
+            "content": [{"type": "text", "text": "ok"}],
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+            "stop_reason": "end_turn",
+        }
+
+    monkeypatch.setattr(client_manager, "_anthropic_messages_create", fake_messages_create)
+
+    result = LLMClientManager._call_anthropic_compatible(
+        object(),  # type: ignore[arg-type]
+        "claude-custom-route-alias",
+        [{"role": "user", "content": "hello"}],
+        4097,
+        0,
+        reasoning=True,
+        request_mapper_id="anthropic_thinking_adaptive",
+    )
+
+    assert result["content"] == "ok"
+    assert captured[0]["thinking"] == {"type": "adaptive"}
+
+
 def test_anthropic_uses_configured_thinking_budget_only_for_manual_fallback(monkeypatch) -> None:
     from graph_agent_gateway import client_manager
     from graph_agent_gateway.client_manager import LLMClientManager
@@ -309,6 +339,68 @@ def test_openai_runtime_settings_map_to_chat_completion_kwargs() -> None:
                 "type": "json_schema",
                 "json_schema": {"name": "Answer", "schema": {"type": "object"}, "strict": True},
             },
+        }
+    ]
+
+
+def test_openai_call_method_responses_uses_responses_api(monkeypatch) -> None:
+    from graph_agent_gateway.client_manager import LLMClientManager
+    from graph_agent_gateway.registry.schema import ResolvedRoute, RuntimePolicy
+    from pydantic import SecretStr
+
+    captured: list[dict[str, object]] = []
+
+    class FakeResponses:
+        def create(self, **kwargs: object) -> dict[str, object]:
+            captured.append(dict(kwargs))
+            return {
+                "output_text": "ok",
+                "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                "status": "completed",
+            }
+
+    class FakeClient:
+        responses = FakeResponses()
+
+    route = ResolvedRoute(
+        role_name="writer",
+        route_id="openai:gpt-5",
+        endpoint_id="openai",
+        protocol="openai_compatible",
+        base_url="https://api.openai.example/v1",
+        api_key=SecretStr("secret"),
+        credential_fingerprint="fp",
+        provider_model_id="gpt-5",
+        canonical_id="gpt-5",
+    )
+
+    monkeypatch.setattr(
+        LLMClientManager,
+        "_get_openai_client",
+        classmethod(lambda cls, route, runtime_policy: FakeClient()),
+    )
+
+    result = LLMClientManager._dispatch_provider_call(
+        route,
+        [{"role": "user", "content": "hello"}],
+        333,
+        0.4,
+        runtime_policy=RuntimePolicy(token_escalation_rounds=0),
+        top_p=0.9,
+        reasoning_effort="medium",
+        call_method_id="openai_responses",
+        request_mapper_id="openai_responses_reasoning",
+    )
+
+    assert result["content"] == "ok"
+    assert captured == [
+        {
+            "model": "gpt-5",
+            "input": [{"role": "user", "content": "hello"}],
+            "max_output_tokens": 333,
+            "temperature": 0.4,
+            "top_p": 0.9,
+            "reasoning": {"effort": "medium"},
         }
     ]
 

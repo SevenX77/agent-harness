@@ -23,6 +23,7 @@ from app.services.llm_credentials import credentials_path, save_credentials
 from app.services.llm_roles import roles_path as active_roles_path
 from app.services.llm_roles import save_roles_file
 from fastapi.testclient import TestClient
+from graph_agent_gateway.registry.schema import VerifiedProfile
 
 
 def _seed(
@@ -1013,6 +1014,112 @@ def test_endpoint_test_treats_empty_model_list_as_reachable(
     assert endpoint["status"] == "unverified_manual"
     assert endpoint["last_test_message"] == "Endpoint reachable but returned no models."
     assert body["registry"]["provider_routes"] == {}
+
+
+def test_official_endpoint_test_persists_verified_profiles_and_excludes_catalog_only_models(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "openai-official": ProviderEndpoint(
+                    endpoint_id="openai-official",
+                    display_name="OpenAI Official",
+                    protocol="openai_compatible",
+                    base_url="https://api.openai.com/v1",
+                    api_key="secret",
+                    provider_kind="official",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+    profile_probe_calls: list[str] = []
+
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        assert (backend, api_key, base_url) == ("openai", "secret", "https://api.openai.com/v1")
+        return PingResult(latency_ms=42, model_ids=("gpt-5", "gpt-image-1"))
+
+    async def fake_probe_official_model_profiles(endpoint, model_id: str):
+        del endpoint
+        profile_probe_calls.append(model_id)
+        if model_id != "gpt-5":
+            return []
+        return [
+            VerifiedProfile(
+                profile_id="text_responses",
+                capability="text_chat",
+                method_id="openai_responses",
+                request_mapper_id="openai_responses_text",
+                status="ready",
+                default=True,
+                fallback_rank=1,
+            ),
+            VerifiedProfile(
+                profile_id="reasoning_responses",
+                capability="reasoning",
+                method_id="openai_responses",
+                request_mapper_id="openai_responses_reasoning",
+                status="ready",
+                fallback_rank=1,
+                runtime_overrides={"reasoning": {"enabled": True, "effort": "low"}},
+            ),
+        ]
+
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(
+        llm_router,
+        "_probe_official_model_profiles",
+        fake_probe_official_model_profiles,
+    )
+
+    response = client.post("/api/llm/endpoints/openai-official/test")
+
+    assert response.status_code == 200
+    body = response.json()
+    routes = body["registry"]["provider_routes"]
+    assert profile_probe_calls == ["gpt-5", "gpt-image-1"]
+    assert list(routes) == ["openai-official:gpt-5"]
+    route = routes["openai-official:gpt-5"]
+    assert route["status"] == "verified"
+    assert route["verified_profiles"] == [
+        {
+            "profile_id": "text_responses",
+            "capability": "text_chat",
+            "method_id": "openai_responses",
+            "request_mapper_id": "openai_responses_text",
+            "status": "ready",
+            "default": True,
+            "fallback_rank": 1,
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+            "runtime_overrides": {},
+            "metadata": {},
+        },
+        {
+            "profile_id": "reasoning_responses",
+            "capability": "reasoning",
+            "method_id": "openai_responses",
+            "request_mapper_id": "openai_responses_reasoning",
+            "status": "ready",
+            "default": False,
+            "fallback_rank": 1,
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+            "runtime_overrides": {"reasoning": {"enabled": True, "effort": "low"}},
+            "metadata": {},
+        },
+    ]
+    capability_library = body["registry"]["provider_endpoints"]["openai-official"]["metadata"][
+        "capability_library"
+    ]
+    assert capability_library == [
+        {"model_id": "gpt-image-1", "status": "catalog_candidate"}
+    ]
 
 
 def test_endpoint_scoped_manual_model_test_verifies_only_successful_models(

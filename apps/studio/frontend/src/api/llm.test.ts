@@ -126,6 +126,26 @@ describe('API Keys v4 registry adapter', () => {
     })
   })
 
+  it('can load endpoint summaries without hydrating API key secrets', async () => {
+    const seen: string[] = []
+    api.defaults.adapter = adapter((config) => {
+      seen.push(`${config.method} ${config.url}`)
+      if (config.url === '/llm/registry/endpoints/openrouter-custom/secret') {
+        throw new Error('secret hydration should not run')
+      }
+      return registry()
+    })
+
+    const credentials = await getCredentials({ hydrateSecrets: false })
+
+    expect(seen).toEqual(['get /llm/registry'])
+    expect(credentials.providers[0]).toMatchObject({
+      id: 'openrouter-custom',
+      api_key: '**********',
+      last_test_status: 'ok',
+    })
+  })
+
   it('saves API Keys edits through v4 endpoint upsert without calling legacy credentials API', async () => {
     const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
     api.defaults.adapter = adapter((config) => {

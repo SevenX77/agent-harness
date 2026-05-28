@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent } from "react"
 import {
   closestCenter,
   DndContext,
@@ -48,10 +48,12 @@ import { RoleNameDialog } from "./RoleNameDialog"
 
 export type RoleCategory = "graph-agent" | "copilot"
 
-export function RoleCard({
+export const RoleCard = memo(function RoleCard({
   data,
   category,
   credentialsByCode,
+  modelDisplayNamesByCode,
+  ownedProviderCodesByModel,
   roleName,
   testStatuses,
   testChainRunning,
@@ -63,16 +65,18 @@ export function RoleCard({
   data: RolesData
   category: RoleCategory
   credentialsByCode: Record<string, CredentialsState["providers"][number]>
+  modelDisplayNamesByCode: ReadonlyMap<string, string>
+  ownedProviderCodesByModel: ReadonlyMap<string, ReadonlySet<string>>
   roleName: string
   testStatuses: RoleChainStatusMap
   testChainRunning: boolean
-  onRunTestChain: () => void
+  onRunTestChain: (roleName: string) => void
   getActiveAvailableModelDragId: () => string | null
   getAvailableModelGroup: (modelGroupId: string) => ModelGroup | null
   onChange: (next: RolesData) => void
 }) {
   const role = data.roles[roleName]
-  const modelCodes = Object.keys(role.models)
+  const modelCodes = useMemo(() => Object.keys(role.models), [role.models])
   const [editOpen, setEditOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
@@ -83,19 +87,22 @@ export function RoleCard({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
 
-  function modelAvailability(modelCode: string) {
-    const providers = roleModelProviderCodes(
-      data,
-      modelCode,
-      role.models[modelCode]?.providers ?? [],
-      credentialsByCode,
-    )
+  const handleRunTestChain = useCallback(() => {
+    onRunTestChain(roleName)
+  }, [onRunTestChain, roleName])
+
+  const modelAvailability = useCallback((modelCode: string) => {
+    const ownedSet = ownedProviderCodesByModel.get(modelCode)
+    const requestedProviders = role.models[modelCode]?.providers ?? []
+    const providers = ownedSet
+      ? requestedProviders.filter((providerCode) => ownedSet.has(providerCode))
+      : roleModelProviderCodes(data, modelCode, requestedProviders, credentialsByCode)
     return getModelAvailability(
       providers,
       credentialsByCode,
       providers.map((providerCode) => testStatuses[roleChainStatusKey(modelCode, providerCode)]),
     )
-  }
+  }, [credentialsByCode, data, ownedProviderCodesByModel, role.models, testStatuses])
 
   function handleAvailableModelDragOver(event: DragEvent<HTMLDivElement>) {
     event.preventDefault()
@@ -205,7 +212,7 @@ export function RoleCard({
             data-role-test-trigger="true"
             className="min-w-20 shrink-0"
             disabled={testChainRunning}
-            onClick={onRunTestChain}
+            onClick={handleRunTestChain}
           >
             {testChainRunning ? <Loader2 className="size-3 animate-spin" /> : null}
             {testChainRunning ? "Testing" : "Test"}
@@ -270,19 +277,24 @@ export function RoleCard({
         >
           <SortableContext items={modelCodes} strategy={verticalListSortingStrategy}>
             <div className="space-y-3" role="list" aria-label={`${roleName} model fallback order`}>
-              {modelCodes.map((modelCode, modelIndex) => (
-                <ModelItem
-                  key={modelCode}
-                  data={data}
-                  roleName={roleName}
-                  modelCode={modelCode}
-                  modelIndex={modelIndex}
-                  credentialsByCode={credentialsByCode}
-                  availability={modelAvailability(modelCode)}
-                  testStatuses={testStatuses}
-                  onChange={onChange}
-                />
-              ))}
+              {modelCodes.map((modelCode, modelIndex) => {
+                const modelName = modelDisplayNamesByCode.get(modelCode) ?? data.models[modelCode]?.name ?? modelCode
+                return (
+                  <ModelItem
+                    key={modelCode}
+                    data={data}
+                    roleName={roleName}
+                    modelCode={modelCode}
+                    modelName={modelName}
+                    modelIndex={modelIndex}
+                    credentialsByCode={credentialsByCode}
+                    ownedProviderCodes={ownedProviderCodesByModel.get(modelCode)}
+                    availability={modelAvailability(modelCode)}
+                    testStatuses={testStatuses}
+                    onChange={onChange}
+                  />
+                )
+              })}
             </div>
           </SortableContext>
         </DndContext>
@@ -315,4 +327,4 @@ export function RoleCard({
       />
     </Card>
   )
-}
+})

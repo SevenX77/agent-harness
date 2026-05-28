@@ -1,6 +1,7 @@
 import { Brain, Check, Loader2, TriangleAlert } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 import type { RoleChainStatus } from "@/hooks/useRoleTestChainRunner"
 import type { ModelAvailability } from "../availability"
@@ -88,6 +89,30 @@ export function ProviderTestStatusBadge({ status, message }: { status: RoleChain
   )
 }
 
+export function ProviderTestStatusLight({ status, message }: { status: RoleChainStatus; message?: string }) {
+  const label = statusLabel(status)
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            role="status"
+            aria-label={`Provider test status ${label}`}
+            data-provider-status-light="true"
+            data-provider-status={status}
+            className={cn(
+              "inline-flex size-1.5 shrink-0 rounded-full ring-1 ring-offset-0",
+              providerStatusLightClass(status),
+            )}
+          />
+        </TooltipTrigger>
+        <TooltipContent>{message || `Provider test status: ${label}`}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
 export function ThinkingBadge() {
   return (
     <Badge
@@ -100,6 +125,13 @@ export function ThinkingBadge() {
       <span className="hidden xl:inline text-[9px] leading-none">Thinking</span>
     </Badge>
   )
+}
+
+function providerStatusLightClass(status: RoleChainStatus): string {
+  if (status === "ok") return "bg-success ring-success-border"
+  if (status === "testing") return "animate-pulse bg-primary ring-primary/30"
+  if (status === "idle") return "bg-muted-foreground/70 ring-border"
+  return "bg-destructive ring-destructive-border"
 }
 
 function StatusDot({ status }: { status: RoleChainStatus }) {

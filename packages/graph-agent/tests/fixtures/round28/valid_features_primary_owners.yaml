@@ -1,0 +1,886 @@
+features:
+- id: F-public-api-surface
+  description: Expose the supported graph_agent import surface without silently adding
+    or dropping public symbols.
+  feature_boundary:
+    kind: public-method
+    evidence: graph_agent.__all__ and public-api contract
+  sources:
+  - skill-spec
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/__main__.py
+  - path: packages/graph-agent/src/graph_agent/settings.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/test_public_api_contract.py::test_top_level_all_remains_the_declared_18_symbol_surface
+- id: F-vendor-contract-debt
+  description: Keep known vendor-only contract debt visible until compatibility shims
+    or removals are approved.
+  feature_boundary:
+    kind: externally-observable-behavior
+    evidence: vendor-only symbols in public-api contract
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/__init__.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/test_public_api_contract.py::test_known_missing_vendor_only_symbols_are_locked_as_external_consumer_debt
+  public_api_symbols:
+  - AgentSkillDef
+  - CompileIssue
+  - GraphSkillDef
+  - IoInput
+  - PersonaSkillDef
+  - parse_skill_file
+- id: F-md-frontmatter-parsing
+  description: Parse markdown frontmatter and body into stable skill metadata and
+    diagnostics.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: skill parser contract
+  sources:
+  - skill-spec
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/core/parser.py
+  - path: packages/graph-agent/src/graph_agent/core/skill_parser.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/core/test_parse_skill_file.py::test_parse_markdown_parts_returns_frontmatter_body_and_line_meta
+- id: F-graph-skill-loading
+  description: Load GRAPH skills from disk, validate topology, and build the phase
+    registry.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: GRAPH skill spec
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/core/loader.py
+  - path: packages/graph-agent/src/graph_agent/core/manifest.py
+  error_codes_primary:
+  - '[F-v3-graph-dataflow-source-missing]'
+  - '[F-v3-graph-depends-unknown]'
+  - '[F-v3-graph-io-not-object]'
+  - '[F-v3-graph-io-physical-file-deprecated]'
+  - '[F-v3-graph-io-schema-invalid]'
+  - '[F-v3-graph-llm-role-unknown]'
+  - '[F-v3-graph-name-invalid]'
+  - '[F-v3-graph-output-phase-invalid]'
+  - '[F-v3-graph-phase-cycle]'
+  - '[F-v3-graph-phase-dir-missing]'
+  - '[F-v3-graph-phase-id-duplicate]'
+  - '[F-v3-graph-phase-id-invalid]'
+  - '[F-v3-graph-phase-island]'
+  - '[F-v3-graph-phase-mode-ambiguous]'
+  - '[F-v3-graph-phase-name-mismatch]'
+  - '[F-v3-graph-phase-node-missing]'
+  - '[F-v3-graph-phases-dir-missing]'
+  - '[F-v3-graph-phases-missing]'
+  - '[F-v3-graph-root-missing]'
+  - '[F-v3-graph-schema-unknown-field]'
+  - '[F-v3-graph-schema-version-mismatch]'
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/core/test_round14_skill_compilation_cutover.py::test_valid_v030_graph_uses_frontmatter_phase_registry_and_body_phase_dag
+  public_api_symbols:
+  - CompiledSkill
+  - GraphManifest
+  - GraphPhaseRef
+  - SkillLoader
+  - SkillManifest
+- id: F-logic-action-execution
+  description: Run LOGIC action phases through registered Python actions and validators.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: LOGIC skill spec
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/core/actions.py
+  - path: packages/graph-agent/src/graph_agent/core/phase_nodes/code_phase_node.py
+  error_codes_primary:
+  - '[F-v3-logic-action-dir-missing]'
+  - '[F-v3-logic-action-entrypoint-missing]'
+  - '[F-v3-logic-action-name-invalid]'
+  - '[F-v3-logic-action-not-found]'
+  - '[F-v3-logic-action-purity-violation]'
+  - '[F-v3-logic-action-return-invalid]'
+  - '[F-v3-logic-actions-empty]'
+  - '[F-v3-logic-io-schema-invalid]'
+  - '[F-v3-logic-name-invalid]'
+  - '[F-v3-logic-output-field-undeclared]'
+  - '[F-v3-logic-schema-unknown-field]'
+  - '[F-v3-logic-validator-entrypoint-missing]'
+  - '[F-v3-logic-validator-failed]'
+  - '[F-v3-logic-validator-missing]'
+  - '[F-v3-logic-validator-type-invalid]'
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/core/test_phase_node.py::test_phase_node_execute_returns_updated_state
+  public_api_symbols:
+  - LogicNodeAST
+- id: F-subgraph-delegation
+  description: Compile and execute nested subgraphs while preserving parent-child
+    IO boundaries.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: SUBGRAPH skill spec
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/core/builtin_subagents/reference_reader.py
+  - path: packages/graph-agent/src/graph_agent/core/subagents.py
+  error_codes_primary:
+  - '[F-v3-agent-subgraph-invalid]'
+  - '[F-v3-subgraph-io-mismatch]'
+  - '[F-v3-subgraph-io-schema-incompatible]'
+  - '[F-v3-subgraph-io-schema-invalid]'
+  - '[F-v3-subgraph-name-invalid]'
+  - '[F-v3-subgraph-schema-unknown-field]'
+  - '[F-v3-subgraph-target-skill-invalid]'
+  - '[F-v3-subgraph-validator-failed]'
+  error_codes_secondary: []
+  events_primary:
+  - BuiltinSubagentEnterEvent
+  - BuiltinSubagentExitEvent
+  - BuiltinSubagentFallbackEvent
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/core/test_round14_skill_compilation_cutover.py::test_subgraph_io_input_mismatch_is_rejected_at_compile_time
+  public_api_symbols:
+  - SubgraphNodeAST
+- id: F-agent-phase-orchestration
+  description: Compile AGENT phases into prompt-driven execution with role, goal,
+    tools, and finish contracts.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: AGENT skill spec
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/__init__.py
+  error_codes_primary:
+  - '[F-v3-agent-body-tag-unknown]'
+  - '[F-v3-agent-example-invalid]'
+  - '[F-v3-agent-goal-missing]'
+  - '[F-v3-agent-io-schema-invalid]'
+  - '[F-v3-agent-llm-role-unknown]'
+  - '[F-v3-agent-max-iterations-invalid]'
+  - '[F-v3-agent-name-invalid]'
+  - '[F-v3-agent-output-schema-invalid]'
+  - '[F-v3-agent-output-schema-missing]'
+  - '[F-v3-agent-protocol-invalid]'
+  - '[F-v3-agent-role-missing]'
+  - '[F-v3-agent-schema-unknown-field]'
+  - '[F-v3-agent-step-invalid]'
+  - '[F-v3-agent-subagent-invalid]'
+  - '[F-v3-agent-tool-unknown]'
+  - '[F-v3-agent-validator-failed]'
+  error_codes_secondary: []
+  events_primary:
+  - AgentLoopIterationEvent
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/fixtures/test_v030_agent_demo_compiles.py::test_v030_agent_demo_fixture_compiles_and_renders_template
+  public_api_symbols:
+  - AgentNodeAST
+- id: F-mention-resolution
+  description: Resolve @-mentions against tools, references, examples, subagents,
+    and subgraphs before runtime.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: mention syntax spec
+  sources:
+  - skill-spec
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/core/mentions.py
+  error_codes_primary:
+  - '[F-v3-mention-syntax-invalid]'
+  - '[F-v3-mention-target-not-found]'
+  - '[F-v3-mention-type-unknown]'
+  - '[F-v3-mention-unused-registry-entry]'
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/core/test_round14_skill_compilation_cutover.py::test_missing_mention_target_is_rejected
+- id: F-resource-reference-access
+  description: Expose reference and example resources through safe builtin reader
+    tools.
+  feature_boundary:
+    kind: public-method
+    evidence: resource mechanisms and builtin modules specs
+  sources:
+  - skill-spec
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/tools/builtin/read_example.py
+  - path: packages/graph-agent/src/graph_agent/tools/builtin/read_reference.py
+  error_codes_primary:
+  - '[F-v3-reference-reader-failed]'
+  - '[F-v3-reference-reader-input-invalid]'
+  - '[F-v3-reference-reader-output-invalid]'
+  - '[F-v3-resource-example-id-invalid]'
+  - '[F-v3-resource-example-invalid]'
+  - '[F-v3-resource-example-not-found]'
+  - '[F-v3-resource-example-path-invalid]'
+  - '[F-v3-resource-example-path-missing]'
+  - '[F-v3-resource-example-summary-missing]'
+  - '[F-v3-resource-reference-id-invalid]'
+  - '[F-v3-resource-reference-invalid]'
+  - '[F-v3-resource-reference-not-found]'
+  - '[F-v3-resource-reference-path-invalid]'
+  - '[F-v3-resource-reference-summary-missing]'
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/tools/test_builtin_resource_tools.py::test_read_reference_returns_declared_current_phase_markdown
+- id: F-skill-resolution
+  description: Resolve target skills through local workspace registries with deterministic
+    errors for misses and ambiguity.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: skill resolver protocol spec
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/core/local_workspace_resolver.py
+  - path: packages/graph-agent/src/graph_agent/core/skill_resolver_protocol.py
+  error_codes_primary:
+  - '[F-v3-resolver-interface-invalid]'
+  - '[F-v3-resolver-missing]'
+  - '[F-v3-resolver-path-invalid]'
+  - '[F-v3-resolver-skill-id-invalid]'
+  - '[F-v3-skill-id-ambiguous]'
+  - '[F-v3-skill-not-registered]'
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/core/test_local_workspace_resolver.py::test_local_workspace_resolver_resolves_direct_directory
+  public_api_symbols:
+  - LocalWorkspaceResolver
+  - SkillResolutionError
+- id: F-compile-runtime-flow
+  description: Keep compile, template assembly, and runtime workflow boundaries explicit
+    and ordered.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: compile-runtime flow spec
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/core/compiler.py
+  - path: packages/graph-agent/src/graph_agent/core/graph_builder.py
+  error_codes_primary:
+  - '[F-v3-compile-depth-exceeded]'
+  - '[F-v3-compile-recursion-cycle]'
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/core/test_compile_skill_v030_root_rejection.py::test_compile_skill_rejects_legacy_schema_20_file_path
+  public_api_symbols:
+  - CompileResult
+  - compile_skill
+- id: F-runtime-execution
+  description: Run compiled graph skills and return stable workflow results to callers.
+  feature_boundary:
+    kind: public-method
+    evidence: graph_agent.run_skill
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/cognitive/context_facade.py
+  - path: packages/graph-agent/src/graph_agent/core/callback_bridge.py
+  error_codes_primary:
+  - '[F-v3-runtime-phase-failed]'
+  error_codes_secondary: []
+  events_primary:
+  - HeartbeatEvent
+  - InterruptedEvent
+  - PhaseEndEvent
+  - PhaseStartEvent
+  - ResumedEvent
+  - RunEndedEvent
+  - RunStartedEvent
+  - ThreadCleanedUpEvent
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/core/test_run_skill_entrypoint_root_shape.py::test_run_skill_single_markdown_file_returns_v030_root_error
+  public_api_symbols:
+  - PhaseEndEvent
+  - PhaseStartEvent
+  - WorkflowResult
+  - run_skill
+- id: F-state-blackboard
+  description: Map parent, child, and blackboard state without leaking unrelated execution
+    state.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: runtime state mapping
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/core/io_manager.py
+  - path: packages/graph-agent/src/graph_agent/core/run_context.py
+  error_codes_primary:
+  - '[F-v3-runtime-state-mapping-failed]'
+  error_codes_secondary: []
+  events_primary:
+  - WorkingMemoryUpdateEvent
+  events_secondary: []
+  non_functional_contracts:
+  - id: NFC-state-blackboard
+    type: other
+    description: Round 28 invariant guard protects this behavior from silent drift.
+    evidence: tests/test_round28_invariant_guards.py::test_round28_blackboard_state_has_explicit_mapping_boundary
+  targeted_tests:
+  - tests/test_round28_invariant_guards.py::test_round28_blackboard_state_has_explicit_mapping_boundary
+  public_api_symbols:
+  - BlackboardState
+  - WorkingMemoryUpdateEvent
+- id: F-checkpoint-persistence
+  description: Persist and restore runtime checkpoints across graph execution boundaries.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: checkpointer runtime
+  sources:
+  - skill-spec
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/core/cache.py
+  - path: packages/graph-agent/src/graph_agent/core/checkpointer.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/core/test_harness_state_machine_resources.py::test_close_exits_checkpointer_context_manager
+- id: F-callback-event-stream
+  description: Emit typed callback events with stable discriminator and schema metadata.
+  feature_boundary:
+    kind: externally-observable-behavior
+    evidence: CallbackEvent union
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/callbacks/base.py
+  - path: packages/graph-agent/src/graph_agent/callbacks/emit.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary:
+  - PredictChainStartEvent
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/callbacks/test_events.py::TestUnionDiscriminator::test_unknown_event_type_rejected
+  public_api_symbols:
+  - Callback
+  - CallbackEvent
+- id: F-callback-tracing
+  description: Record execution traces and callback payloads for downstream observability.
+  feature_boundary:
+    kind: externally-observable-behavior
+    evidence: TracingCallback contract
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/callbacks/tracing.py
+  - path: packages/graph-agent/src/graph_agent/core/tracing_proxy.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/callbacks/test_v030_trace_events.py::test_tracing_callback_writes_v030_typed_events
+  public_api_symbols:
+  - PredictTracingCallback
+  - TracingCallback
+- id: F-error-code-recovery
+  description: Attach stable F-v3 error metadata, severity, and recovery hints to
+    failures.
+  feature_boundary:
+    kind: externally-observable-behavior
+    evidence: error code spec
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/core/error_registry.py
+  - path: packages/graph-agent/src/graph_agent/core/exceptions.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary:
+  - InternalErrorEvent
+  - NudgeEvent
+  - RetryEvent
+  - RetryExhaustedEvent
+  - ValidationFailEvent
+  - ValidationPassEvent
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/test_round28_invariant_guards.py::test_round28_error_registry_keeps_f_v3_metadata_shape
+  public_api_symbols:
+  - ExecutionError
+  - GraphAgentError
+  - NudgeEvent
+  - RetryEvent
+  - SkillCompilationError
+  - SkillCompileError
+  - SkillLoadError
+  - ValidationFailEvent
+- id: F-llm-prompt-assembly
+  description: Assemble the v0.3 cognitive prompt with the required eight business
+    slots.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: cognitive template spec
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/cognitive/critic.py
+  - path: packages/graph-agent/src/graph_agent/cognitive/memory.py
+  error_codes_primary:
+  - '[F-v3-cognitive-output-schema-invalid]'
+  - '[F-v3-cognitive-output-schema-render-failed]'
+  - '[F-v3-cognitive-slot-render-failed]'
+  error_codes_secondary: []
+  events_primary:
+  - CompactionEvent
+  - DeadEndPrunedEvent
+  events_secondary: []
+  non_functional_contracts:
+  - id: NFC-llm-prompt-assembly
+    type: other
+    description: Round 28 invariant guard protects this behavior from silent drift.
+    evidence: tests/test_round28_invariant_guards.py::test_round28_prompt_template_keeps_eight_named_slots
+  targeted_tests:
+  - tests/test_round28_invariant_guards.py::test_round28_prompt_template_keeps_eight_named_slots
+  public_api_symbols:
+  - CompactionEvent
+  - DeadEndPrunedEvent
+- id: F-llm-execution
+  description: Dispatch model calls through configured providers, fallbacks, and predictive
+    gateways.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: LLM client manager
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/models/__init__.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary:
+  - LLMCallEvent
+  - LLMFallbackEvent
+  - ModelResolvedEvent
+  - PromptCapturedEvent
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/models/test_predict_gateway_chat_model.py::test_generate_uses_p0_golden_before_p1_override_and_p2_stub
+  public_api_symbols:
+  - LLMCallEvent
+  - LLMFallbackEvent
+  - PredictGatewayChatModel
+- id: F-tool-call-binding
+  description: Bind tools into LLM phases while preserving finish_task and provider
+    call behavior.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: tool binding runtime
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/core/skill_tool_factory.py
+  error_codes_primary:
+  - '[F-v3-tool-argument-invalid]'
+  error_codes_secondary: []
+  events_primary:
+  - FinishTaskEvent
+  - ToolCallEvent
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/models/test_predict_gateway_chat_model.py::test_bind_tools_preserves_predict_gateway_and_mock_strategy
+  public_api_symbols:
+  - ToolCallEvent
+- id: F-finish-task-validation
+  description: Validate finish_task output schema and reject incomplete agent completion
+    payloads.
+  feature_boundary:
+    kind: externally-observable-behavior
+    evidence: finish_task contract
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/cognitive/finish.py
+  - path: packages/graph-agent/src/graph_agent/cognitive/finish_task.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/runtime/test_exit_contract.py::test_v030_exit_contract_is_hardcoded_at_prompt_tail
+  public_api_symbols:
+  - FinishTaskEvent
+- id: F-md-patch
+  description: Apply markdown patch tools and reasoning patches without corrupting
+    structured output.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: md patch tool contract
+  sources:
+  - skill-spec
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/cognitive/md2json.py
+  - path: packages/graph-agent/src/graph_agent/cognitive/md_patch.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/models/test_reasoning_patch.py::test_apply_reasoning_patch_is_idempotent
+- id: F-tool-sandbox-permission
+  description: Reject unsafe tool/module operations that escape the allowed execution
+    surface.
+  feature_boundary:
+    kind: externally-observable-behavior
+    evidence: module sandbox and purity guard
+  sources:
+  - skill-spec
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/core/module_sandbox.py
+  - path: packages/graph-agent/src/graph_agent/core/tool_wrapper.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts:
+  - id: NFC-tool-sandbox-permission
+    type: other
+    description: Round 28 invariant guard protects this behavior from silent drift.
+    evidence: tests/test_round28_invariant_guards.py::test_round28_tool_sandbox_blocks_write_and_escape_shapes
+  targeted_tests:
+  - tests/test_round28_invariant_guards.py::test_round28_tool_sandbox_blocks_write_and_escape_shapes
+- id: F-tool-sandbox-isolation
+  description: Run builtin tools with isolated context access and predictable IO side
+    effects.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: tool runtime sandbox
+  sources:
+  - skill-spec
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/tools/builtin/context_access.py
+  - path: packages/graph-agent/src/graph_agent/tools/builtin/read_file.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/tools/test_context_access.py::TestQueryWorkingMemory::test_returns_working_memory
+- id: F-middleware-ordering
+  description: Mount cognitive middleware in the required observation-before-control
+    order.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: middleware ordering
+  sources:
+  - skill-spec
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/cognitive/middlewares.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts:
+  - id: NFC-middleware-ordering
+    type: other
+    description: Round 28 invariant guard protects this behavior from silent drift.
+    evidence: tests/test_round28_invariant_guards.py::test_round28_middleware_order_keeps_observation_before_control
+  targeted_tests:
+  - tests/test_round28_invariant_guards.py::test_round28_middleware_order_keeps_observation_before_control
+- id: F-middleware-mounting
+  description: Enable and disable runtime middleware based on attended, unattended,
+    and configuration modes.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: middleware factory
+  sources:
+  - skill-spec
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/middleware/cognitive_flow.py
+  - path: packages/graph-agent/src/graph_agent/middleware/execution_control.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/cognitive/test_middlewares.py::TestCreateCustomMiddlewaresPR5::test_clarification_enabled_by_default
+- id: F-model-configuration
+  description: Resolve model provider configuration, fallbacks, and role-specific
+    prompt prefixes.
+  feature_boundary:
+    kind: public-method
+    evidence: model configuration
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/config/llm_config.py
+  - path: packages/graph-agent/src/graph_agent/models/llm_client_manager.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/config/test_llm_config_resolve_role.py::test_resolve_role_orders_active_model_first_then_declared_fallbacks
+  public_api_symbols:
+  - LLMClientManager
+  - ProviderDef
+  - ResolvedProvider
+  - load_config
+- id: F-predict-internal-mocking
+  description: Provide deterministic prediction and golden-case mocks for offline
+    execution and tests.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: predict internal gateway
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/core/_predict_internal/exporter.py
+  - path: packages/graph-agent/src/graph_agent/core/_predict_internal/hash.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/models/test_predict_gateway_chat_model.py::test_generate_sets_mock_metadata_and_zero_usage_without_provider_call
+  public_api_symbols:
+  - BaseMockStrategy
+  - GoldenCase
+  - GoldenCaseStrategy
+  - HeuristicStubStrategy
+  - MockStrategy
+  - PathDiff
+  - PhaseRecord
+  - PredictResult
+  - assemble_phase_record
+  - compute_diff
+- id: F-serialization-output
+  description: Serialize manifests, callback payloads, and graph structures into stable
+    JSON-safe output.
+  feature_boundary:
+    kind: public-method
+    evidence: serialization public API
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/callbacks/serialize.py
+  - path: packages/graph-agent/src/graph_agent/core/graph_serializer.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/callbacks/test_serialize.py::TestPrimitives::test_passthrough
+  public_api_symbols:
+  - serialize_graph
+  - serialize_skill
+  - to_jsonable_dict
+- id: F-graph-assembly
+  description: Assemble phase nodes into executable graphs while preserving graph
+    serialization contracts.
+  feature_boundary:
+    kind: public-method
+    evidence: graph assembly public API
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/core/graph_assembler.py
+  - path: packages/graph-agent/src/graph_agent/core/phase_nodes/_helpers.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/core/test_round14_skill_compilation_cutover.py::test_graph_serializer_fresh_render_uses_v030_dual_track_graph
+  public_api_symbols:
+  - CompiledStateGraph
+  - assemble_graph
+- id: F-runtime-compatibility-patches
+  description: Apply runtime compatibility patches and compatibility hooks exactly
+    through the central bootstrap path.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: bootstrap patches and reasoning compatibility
+  sources:
+  - skill-spec
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/bootstrap.py
+  - path: packages/graph-agent/src/graph_agent/patches/__init__.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts:
+  - id: NFC-runtime-compat
+    type: compatibility
+    description: Runtime compatibility hooks must remain centralized and explicitly
+      covered.
+    evidence: tests/test_bootstrap.py::test_apply_patches_calls_central_patch_entry_once
+  targeted_tests:
+  - tests/test_bootstrap.py::test_apply_patches_calls_central_patch_entry_once
+- id: F-observability-metrics
+  description: Expose logging and metrics callbacks for operational visibility without
+    changing execution semantics.
+  feature_boundary:
+    kind: externally-observable-behavior
+    evidence: logging and metrics callbacks
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/callbacks/logging_cb.py
+  - path: packages/graph-agent/src/graph_agent/callbacks/metrics.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/callbacks/test_events.py::TestSchemaInvariants::test_every_class_stamps_schema_version_1_0[PhaseStartEvent]
+  public_api_symbols:
+  - LoggingCallback
+  - MetricsCallback
+- id: F-clarification-flow
+  description: Handle ambiguity and clarification workflows consistently in attended
+    and unattended modes.
+  feature_boundary:
+    kind: externally-observable-behavior
+    evidence: clarification middleware
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/cognitive/ambiguity.py
+  - path: packages/graph-agent/src/graph_agent/cognitive/clarification_middleware.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary:
+  - AmbiguityLoggedEvent
+  - AmbiguityReportEvent
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/cognitive/test_middlewares.py::TestUnattendedClarificationMiddleware::test_intercepts_ask_clarification_in_unattended_mode
+  public_api_symbols:
+  - AmbiguityReportEvent
+- id: F-parallel-map-tools
+  description: Run parallel map and builtin tool providers through stable tool contracts.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: parallel map builtin tool
+  sources:
+  - skill-spec
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/tools/builtin/parallel_map.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary:
+  - ParallelMapGroupEndedEvent
+  - ParallelMapGroupStartedEvent
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/tools/test_parallel_map.py::test_parallel_map_runs_children_in_input_order_and_emits_group_events
+- id: F-storage-io
+  description: Store, load, and analyze IO artifacts through graph-agent storage and
+    analyzer helpers.
+  feature_boundary:
+    kind: lifecycle-behavior
+    evidence: IO storage helpers
+  sources:
+  - skill-spec
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/examples/hello_world/script/greet.py
+  - path: packages/graph-agent/src/graph_agent/io/manager.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary:
+  - ArtifactSavedEvent
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/io/test_storage.py::TestStorageManagerBasics::test_save_artifact_writes_str_bytes_and_json

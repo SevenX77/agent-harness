@@ -10,7 +10,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXEMPTIONS_PATH = Path(__file__).with_name("contract-exemptions.yaml")
 
-EXPECTED_SKILL_SPEC_HASHES = {
+EXPECTED_CONTRACT_HASHES = {
     "docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md": "083f158bdb4c6ae3bea7b5b66ce1d57e1897a668c81dac757a2ddb2bf067af0e",
     "docs/engine/skill-spec/01-physical-layout.md": "9478f81d9d8552227c82c440f6b047dc587652fcaa21200b0f38e3a93dcd8cc4",
     "docs/engine/skill-spec/02-graph-md-spec.md": "08c67068d5b88672739b98537c8b88eae634e9db3d9e18a202fae743cfe2d329",
@@ -25,6 +25,9 @@ EXPECTED_SKILL_SPEC_HASHES = {
     "docs/engine/skill-spec/11-error-code-spec.md": "07c594bfca9182f096e0746e2be49871c72c73b4e0803492ec324b086e27a32b",
     "docs/engine/skill-spec/12-compile-runtime-flow-spec.md": "a3defd2e4f5e123e5821a0284a131784144b82f0b5699dfa6f7509d058f1a259",
     "docs/engine/skill-spec/README.md": "1716f2891e0a7ed6987489debb3c46948825430efeff61975caa7f420114c4b3",
+    "docs/engine/public-api-contract.md": "59379703b51c267f772f35c751ecbd6e54b0bbd100c2b469be8f32dc6525d837",
+    "docs/engine/feature-compliance-checklist.md": "4b7ee286fa372206af6ba1e2e97b36e5cdb3cf1e2653f81d43f0d1c06de076a0",
+    "packages/graph-agent/spec/round28-manifest-schema.yaml": "4b7cc287518231d9d111f0cff884e631e2e3ab98d93ebea145ea57731592a303",
 }
 
 
@@ -49,13 +52,13 @@ def _load_hash_exemptions() -> set[str]:
     return approved_hashes
 
 
-def test_skill_spec_hashes_match_frozen_baseline_or_pm_exemption() -> None:
+def test_contract_hashes_match_frozen_baseline_or_pm_exemption() -> None:
     approved_hashes = _load_hash_exemptions()
 
     drifted: list[str] = []
-    for relative_path, expected_hash in EXPECTED_SKILL_SPEC_HASHES.items():
+    for relative_path, expected_hash in EXPECTED_CONTRACT_HASHES.items():
         actual_hash = _sha256(REPO_ROOT / relative_path)
         if actual_hash != expected_hash and relative_path not in approved_hashes:
             drifted.append(f"{relative_path}: expected {expected_hash}, got {actual_hash}")
 
-    assert not drifted, "Unapproved skill-spec hash drift:\n" + "\n".join(drifted)
+    assert not drifted, "Unapproved contract hash drift:\n" + "\n".join(drifted)

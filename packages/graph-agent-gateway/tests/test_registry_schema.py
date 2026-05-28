@@ -15,7 +15,6 @@ def test_route_identity_and_secret_serialization() -> None:
         route_slug="claude-sonnet-4.6",
         provider_model_id="claude-sonnet-4-6",
         canonical_id="claude-sonnet-4.6",
-        display_name="Claude Sonnet 4.6",
         status="verified",
     )
 
@@ -31,11 +30,81 @@ def test_route_identity_and_secret_serialization() -> None:
         credential_fingerprint="fp",
         provider_model_id=route.provider_model_id,
         canonical_id=route.canonical_id,
-        display_name=route.display_name,
     )
 
     assert resolved.api_key.get_secret_value() == "secret-value"
     assert "secret-value" not in resolved.model_dump_json()
+
+
+def test_runtime_schema_rejects_display_name_fields() -> None:
+    from graph_agent_gateway.registry.schema import (
+        ModelProfile,
+        ProviderEndpoint,
+        ProviderRoute,
+        RegistrySnapshot,
+        ResolvedRoute,
+    )
+
+    with pytest.raises(ValidationError, match="display_name"):
+        ProviderEndpoint.model_validate(
+            {
+                "endpoint_id": "anthropic-official",
+                "display_name": "Anthropic",
+                "protocol": "anthropic_compatible",
+                "base_url": "https://api.anthropic.com",
+            }
+        )
+
+    with pytest.raises(ValidationError, match="display_name"):
+        ProviderRoute.model_validate(
+            {
+                "route_id": "anthropic-official:claude-sonnet-4.6",
+                "endpoint_id": "anthropic-official",
+                "route_slug": "claude-sonnet-4.6",
+                "provider_model_id": "claude-sonnet-4-6",
+                "canonical_id": "claude-sonnet-4.6",
+                "display_name": "Claude Sonnet 4.6",
+            }
+        )
+
+    with pytest.raises(ValidationError, match="display_name"):
+        RegistrySnapshot.model_validate(
+            {
+                "provider_endpoints": {
+                    "anthropic-official": {
+                        "endpoint_id": "anthropic-official",
+                        "display_name": "Anthropic",
+                        "protocol": "anthropic_compatible",
+                        "base_url": "https://api.anthropic.com",
+                    }
+                }
+            }
+        )
+
+    with pytest.raises(ValidationError, match="display_name"):
+        ModelProfile.model_validate(
+            {
+                "model_profile_id": "analysis-default",
+                "display_name": "Analysis Default",
+                "fallback_chain": [],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="display_name"):
+        ResolvedRoute.model_validate(
+            {
+                "role_name": "graph_agent",
+                "route_id": "anthropic-official:claude-sonnet-4.6",
+                "endpoint_id": "anthropic-official",
+                "protocol": "anthropic_compatible",
+                "base_url": "https://api.anthropic.com",
+                "api_key": "secret",
+                "credential_fingerprint": "fp",
+                "provider_model_id": "claude-sonnet-4-6",
+                "canonical_id": "claude-sonnet-4.6",
+                "display_name": "Claude Sonnet 4.6",
+            }
+        )
 
 
 def test_invalid_route_id_or_mismatched_parts_fail_validation() -> None:
@@ -48,7 +117,6 @@ def test_invalid_route_id_or_mismatched_parts_fail_validation() -> None:
             route_slug="bad",
             provider_model_id="bad",
             canonical_id="bad",
-            display_name="bad",
         )
 
     with pytest.raises(ValidationError):
@@ -58,7 +126,6 @@ def test_invalid_route_id_or_mismatched_parts_fail_validation() -> None:
             route_slug="route",
             provider_model_id="model",
             canonical_id="model",
-            display_name="Model",
         )
 
 
@@ -84,7 +151,6 @@ def test_ark_runtime_protocol_is_first_class() -> None:
 
     endpoint = ProviderEndpoint(
         endpoint_id="ark-cn",
-        display_name="Volcengine Ark",
         protocol="ark_runtime",
         base_url="https://ark.cn-beijing.volces.com/api/v3",
         api_key=SecretStr("secret"),
@@ -99,7 +165,6 @@ def test_ark_runtime_protocol_is_first_class() -> None:
         credential_fingerprint="fp",
         provider_model_id="deepseek-v3",
         canonical_id="deepseek-v3",
-        display_name="DeepSeek V3",
     )
 
     assert endpoint.protocol == "ark_runtime"

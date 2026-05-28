@@ -20,7 +20,6 @@ def test_lint_key_mapping_and_error_missing_blocks() -> None:
         route_slug="claude",
         provider_model_id="claude",
         canonical_id="claude",
-        display_name="Claude",
         status="verified",
     )
 
@@ -41,7 +40,6 @@ def test_verified_capability_satisfies_error_lint() -> None:
         route_slug="claude",
         provider_model_id="claude",
         canonical_id="claude",
-        display_name="Claude",
         status="verified",
         capabilities={
             "thinking_protocol": CapabilityValue(
@@ -75,7 +73,6 @@ def test_runtime_thinking_settings_are_blocked_when_route_cannot_support_them() 
         route_slug="claude",
         provider_model_id="claude",
         canonical_id="claude",
-        display_name="Claude",
         status="verified",
     )
 
@@ -113,7 +110,6 @@ def test_runtime_token_floor_blocks_invalid_thinking_budget() -> None:
         route_slug="claude",
         provider_model_id="claude",
         canonical_id="claude",
-        display_name="Claude",
         status="verified",
         capabilities={
             "thinking_protocol": CapabilityValue(value=True, source="manual"),
@@ -154,7 +150,6 @@ def test_runtime_thinking_budget_is_blocked_when_manual_budget_is_unsupported() 
         route_slug="claude-opus-4.7",
         provider_model_id="claude-opus-4-7",
         canonical_id="claude-opus-4.7",
-        display_name="Claude Opus 4.7",
         status="verified",
         capabilities={
             "thinking_protocol": CapabilityValue(value=True, source="probed_verified"),
@@ -199,7 +194,6 @@ def test_adaptive_thinking_without_manual_budget_does_not_require_default_budget
         route_slug="claude-haiku",
         provider_model_id="claude-haiku",
         canonical_id="claude-haiku",
-        display_name="Claude Haiku",
         status="verified",
         capabilities={
             "thinking_protocol": CapabilityValue(value=True, source="probed_verified"),
@@ -242,7 +236,6 @@ def test_manual_thinking_without_explicit_budget_requires_default_budget_room() 
         route_slug="claude-haiku",
         provider_model_id="claude-haiku",
         canonical_id="claude-haiku",
-        display_name="Claude Haiku",
         status="verified",
         capabilities={
             "thinking_protocol": CapabilityValue(value=True, source="probed_verified"),

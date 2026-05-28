@@ -16,11 +16,8 @@ from graph_agent_gateway.registry.schema import (
     EndpointCandidate,
     FieldSource,
     LintResult,
-    ModelProfile,
     ProbeResult,
-    ProviderEndpoint,
     ProviderImportDraft,
-    ProviderRoute,
     RegistrySnapshot,
     ResolvedRole,
     ResolvedRoute,
@@ -28,6 +25,11 @@ from graph_agent_gateway.registry.schema import (
     RouteCandidate,
     RuntimePolicy,
     RuntimeSettingDescriptor,
+)
+from graph_agent_gateway.registry.schema import (
+    ModelProfile as GatewayModelProfile,
+    ProviderEndpoint as GatewayProviderEndpoint,
+    ProviderRoute as GatewayProviderRoute,
 )
 from graph_agent_gateway.registry.schema import (
     RoleEntry as GatewayRoleEntry,
@@ -59,6 +61,42 @@ class ModelInfo(BaseModel):
 
     id: str
     capabilities: dict[str, object] = Field(default_factory=dict)
+
+
+class ProviderEndpoint(GatewayProviderEndpoint):
+    """Studio-owned endpoint DTO with user-facing provider label."""
+
+    display_name: str
+
+
+class ProviderRoute(GatewayProviderRoute):
+    """Studio-owned route DTO with optional admin/display label."""
+
+    display_name: str | None = None
+
+
+class ModelProfile(GatewayModelProfile):
+    """Studio-owned reusable route bundle with user-facing display label."""
+
+    display_name: str
+
+
+def _gateway_endpoint(endpoint: ProviderEndpoint) -> GatewayProviderEndpoint:
+    return GatewayProviderEndpoint.model_validate(
+        endpoint.model_dump(mode="python", exclude={"display_name"})
+    )
+
+
+def _gateway_route(route: ProviderRoute) -> GatewayProviderRoute:
+    return GatewayProviderRoute.model_validate(
+        route.model_dump(mode="python", exclude={"display_name"})
+    )
+
+
+def _gateway_model_profile(profile: ModelProfile) -> GatewayModelProfile:
+    return GatewayModelProfile.model_validate(
+        profile.model_dump(mode="python", exclude={"display_name"})
+    )
 
 
 class LLMCredentialsFile(BaseModel):
@@ -183,17 +221,33 @@ class RolesData(BaseModel):
     def to_registry_snapshot(self, credentials: LLMCredentialsFile) -> RegistrySnapshot:
         """Join credentials and roles into the gateway runtime snapshot."""
         return RegistrySnapshot(
-            provider_endpoints=credentials.provider_endpoints,
-            provider_routes=credentials.provider_routes,
+            provider_endpoints={
+                endpoint_id: _gateway_endpoint(endpoint)
+                for endpoint_id, endpoint in credentials.provider_endpoints.items()
+            },
+            provider_routes={
+                route_id: _gateway_route(route)
+                for route_id, route in credentials.provider_routes.items()
+            },
             runtime_policy=credentials.runtime_policy,
-            model_profiles=self.model_profiles,
+            model_profiles={
+                profile_id: _gateway_model_profile(profile)
+                for profile_id, profile in self.model_profiles.items()
+            },
             roles=self.roles,
         )
 
 
-class RegistryResponse(RegistrySnapshot):
+class RegistryResponse(BaseModel):
     """Redacted registry response plus grouped display metadata."""
 
+    model_config = ConfigDict(extra="forbid")
+
+    provider_endpoints: dict[str, ProviderEndpoint] = Field(default_factory=dict)
+    provider_routes: dict[str, ProviderRoute] = Field(default_factory=dict)
+    runtime_policy: RuntimePolicy = Field(default_factory=RuntimePolicy)
+    model_profiles: dict[str, ModelProfile] = Field(default_factory=dict)
+    roles: dict[str, RoleEntry] = Field(default_factory=dict)
     canonical_groups: list[dict[str, object]] = Field(default_factory=list)
     model_groups: list[dict[str, object]] = Field(default_factory=list)
     lint_results: list[LintResult] = Field(default_factory=list)

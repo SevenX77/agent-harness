@@ -6,8 +6,12 @@ from pathlib import Path
 
 import pytest
 from app.models.llm_config import (
+    CapabilityValue,
     LLMCredentialsFile,
+    ProviderEndpoint,
+    ProviderRoute,
     RoleEntry,
+    RoleRouteEntry,
     RolesData,
 )
 from app.services.llm_credentials import (
@@ -18,12 +22,6 @@ from app.services.llm_credentials import (
     upsert_endpoints,
 )
 from app.services.llm_roles import InvalidRoleReference, load_roles_file, save_roles_file
-from graph_agent_gateway.registry.schema import (
-    CapabilityValue,
-    ProviderEndpoint,
-    ProviderRoute,
-    RoleRouteEntry,
-)
 from graph_agent_gateway.registry.storage import compute_credential_fingerprint
 from pydantic import SecretStr, ValidationError
 

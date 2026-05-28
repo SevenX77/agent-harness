@@ -26,7 +26,6 @@ def _snapshot():
         provider_endpoints={
             "openai-direct": ProviderEndpoint(
                 endpoint_id="openai-direct",
-                display_name="OpenAI Direct",
                 protocol="openai_compatible",
                 base_url="https://api.openai.example/v1",
                 api_key=SecretStr("route-secret"),
@@ -35,7 +34,6 @@ def _snapshot():
             ),
             "openrouter-prod": ProviderEndpoint(
                 endpoint_id="openrouter-prod",
-                display_name="OpenRouter",
                 protocol="openai_compatible",
                 base_url="https://openrouter.example/v1",
                 api_key=SecretStr("fallback-secret"),
@@ -48,7 +46,6 @@ def _snapshot():
                 route_slug="gpt-5",
                 provider_model_id="gpt-5",
                 canonical_id="gpt-5",
-                display_name="GPT-5",
                 status="verified",
             ),
             "openrouter-prod:openai.gpt-5": ProviderRoute(
@@ -57,7 +54,6 @@ def _snapshot():
                 route_slug="openai.gpt-5",
                 provider_model_id="openai/gpt-5",
                 canonical_id="gpt-5",
-                display_name="GPT-5 via OpenRouter",
                 status="verified",
             ),
         },
@@ -193,7 +189,6 @@ def test_model_resolver_loads_studio_v3_roles_file_using_materialized_chain(
     roles_payload["schema_version"] = 3
     roles_payload["model_bundles"] = {
         "analysis-default": {
-            "display_name": "Analysis Default",
             "model_groups": [],
         }
     }
@@ -205,7 +200,6 @@ def test_model_resolver_loads_studio_v3_roles_file_using_materialized_chain(
             "model_groups": [
                 {
                     "canonical_id": "gpt-5",
-                    "display_name": "GPT-5",
                     "provider_models": [
                         {"route_id": "openai-direct:gpt-5"},
                         {"route_id": "openrouter-prod:openai.gpt-5"},

@@ -4,11 +4,16 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from app.core import config
-from app.models.llm_config import LLMCredentialsFile, RolesData
+from app.models.llm_config import (
+    CapabilityValue,
+    LLMCredentialsFile,
+    ProviderEndpoint,
+    ProviderRoute,
+    RolesData,
+)
 from app.services.llm_credentials import save_credentials
 from app.services.llm_roles import save_roles_file
 from fastapi.testclient import TestClient
-from graph_agent_gateway.registry.schema import CapabilityValue, ProviderEndpoint, ProviderRoute
 
 
 def _provider_endpoint(

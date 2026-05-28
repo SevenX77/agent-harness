@@ -1,6 +1,6 @@
-import { useState } from "react"
+import { useRef, useState, type WheelEvent } from "react"
 import { toast } from "sonner"
-import { CheckCircle2, Copy, Eye, EyeOff, Loader2, Trash2, XCircle } from "lucide-react"
+import { CheckCircle2, Copy, Eye, EyeOff, Loader2, Trash2, TriangleAlert, XCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
@@ -24,6 +24,9 @@ import { ManualModelTestPanel } from "./ManualModelTestPanel"
 
 type TestMessageStatus = "not_configured" | "testing" | NonNullable<CredentialsState["providers"][number]["last_test_status"]>
 const availableModelsPreviewLimit = 12
+const fieldRowClassName = "grid grid-cols-[minmax(0,1fr)_11.5rem] items-center gap-2"
+const fieldActionClassName = "flex min-w-0 items-center justify-end gap-2"
+const scrollableInputClassName = "overflow-x-auto whitespace-nowrap text-clip"
 const providerProtocolOptions: Array<{ value: ProviderType; label: string }> = [
   { value: "openai_compatible", label: "OpenAI compatible" },
   { value: "anthropic_compatible", label: "Anthropic compatible" },
@@ -45,7 +48,7 @@ export function apiKeyInputType(visible: boolean): "text" | "password" {
 }
 
 export function apiKeyInputClassName(visible: boolean): string {
-  return cn("flex-1", visible ? "text-foreground" : "text-muted-foreground")
+  return cn(scrollableInputClassName, visible ? "text-foreground" : "text-muted-foreground")
 }
 
 export function providerProtocolLabel(value: ProviderType): string {
@@ -60,6 +63,10 @@ export async function copyCredentialValue(value: string, label: string): Promise
   } catch {
     toast.error(`Failed to copy ${label.toLowerCase()}`)
   }
+}
+
+export function copyAvailableModelId(modelId: string): Promise<void> {
+  return copyCredentialValue(modelId, "Model name")
 }
 
 export function sortModelInfos(models: ModelInfo[]): ModelInfo[] {
@@ -138,7 +145,7 @@ function directPersistedTestResult(
     (persisted.available_models?.length || persisted.available_sdks?.length) ? "ok" : undefined
   )
   if (!status) return null
-  const canShowDiscoveredModels = status === "ok" || status === "untested"
+  const canShowDiscoveredModels = status === "ok" || status === "untested" || Boolean(persisted.available_models?.length || persisted.available_sdks?.length)
   return {
     params_fingerprint: "",
     base_url: persisted.base_url ?? "",
@@ -198,6 +205,18 @@ function FieldCopyButton({ value, label }: { value: string; label: string }) {
   )
 }
 
+function FieldReachabilityCheck({ label }: { label: string }) {
+  return (
+    <span
+      className="inline-flex size-4 shrink-0 items-center justify-center text-success"
+      title={`${label} accepted by the model-list endpoint`}
+      aria-label={`${label} accepted by the model-list endpoint`}
+    >
+      <CheckCircle2 className="size-3.5" />
+    </span>
+  )
+}
+
 function endpointModelPlaceholder(providerKey: string, providerType: ProviderType): string {
   const normalized = providerKey.toLowerCase()
   const matched = Object.entries(endpointModelExamplesByProvider).find(([key]) => normalized.includes(key))
@@ -209,6 +228,16 @@ function endpointModelPlaceholder(providerKey: string, providerType: ProviderTyp
         ? endpointModelExamplesByProvider.gemini
         : endpointModelExamplesByProvider.openai
   return `e.g. ${matched?.[1] ?? fallback}`
+}
+
+function scrollInputContentOnWheel(event: WheelEvent<HTMLInputElement>) {
+  const input = event.currentTarget
+  const maxScrollLeft = input.scrollWidth - input.clientWidth
+  if (maxScrollLeft <= 0) return
+  const delta = event.deltaX || event.deltaY
+  if (!delta) return
+  input.scrollLeft = Math.max(0, Math.min(maxScrollLeft, input.scrollLeft + delta))
+  event.preventDefault()
 }
 
 export function ProviderCard({
@@ -237,9 +266,15 @@ export function ProviderCard({
   const [visible, setVisible] = useState(false)
   const [showAllModels, setShowAllModels] = useState(false)
   const [endpointModelId, setEndpointModelId] = useState("")
+  const [apiKeyError, setApiKeyError] = useState("")
+  const [baseUrlError, setBaseUrlError] = useState("")
+  const apiKeyInputRef = useRef<HTMLInputElement>(null)
+  const baseUrlInputRef = useRef<HTMLInputElement>(null)
   const isOfficial = providerKind === "official"
   const hasApiKey = draft.api_key.trim().length > 0
   const hasRequiredConfig = hasApiKey && (providerKind !== "third-party" || draft.base_url.trim().length > 0)
+  const isGettingModels = draft.testingAction === "models"
+  const isTestingEndpoint = draft.testingAction === "endpoint"
   const trimmedEndpointModelId = endpointModelId.trim()
   const matchedResult = providerCachedTestResult(persisted, draft) ?? directPersistedTestResult(persisted, draft)
   const hasMatchedTestResult = matchedResult !== null
@@ -252,6 +287,14 @@ export function ProviderCard({
   const hiddenModelCount = Math.max(0, availableModels.length - visibleModels.length)
   const matchedStatus = matchedResult?.last_test_status
   const matchedErrorCode = matchedResult?.last_error_code
+  const hasReachableModelList = Boolean(
+    hasRequiredConfig &&
+    matchedResult &&
+    !matchedErrorCode &&
+    (matchedStatus === "untested" || matchedStatus === "ok") &&
+    (matchedResult.last_test_at || matchedResult.last_test_message || availableModels.length > 0 || availableSdks.length > 0),
+  )
+  const hasEmptyModelListWarning = hasReachableModelList && !hasAvailableModels
   const testStatus: TestMessageStatus = !hasRequiredConfig
     ? "not_configured"
     : draft.isTesting
@@ -263,6 +306,22 @@ export function ProviderCard({
     : matchedStatus && matchedStatus !== "untested"
       ? matchedStatus
       : "not_configured"
+  const handleGetModels = () => {
+    const nextApiKeyError = hasApiKey ? "" : "API key is required."
+    const nextBaseUrlError = providerKind === "third-party" && !draft.base_url.trim() ? "Base URL is required." : ""
+    setApiKeyError(nextApiKeyError)
+    setBaseUrlError(nextBaseUrlError)
+    if (nextApiKeyError) {
+      apiKeyInputRef.current?.focus()
+      return
+    }
+    if (nextBaseUrlError) {
+      baseUrlInputRef.current?.focus()
+      return
+    }
+    onGetModels()
+  }
+
   return (
     <Card data-provider-id={draft.id}>
       <CardHeader className="flex flex-row items-center gap-3 pb-2">
@@ -280,47 +339,39 @@ export function ProviderCard({
         {!isOfficial ? (
           <div className="space-y-2">
             <Label htmlFor={`provider-name-${draft.id}`}>Provider Name</Label>
-            <Input
-              id={`provider-name-${draft.id}`}
-              value={draft.name}
-              onChange={(event) => onFieldChange({ name: event.target.value })}
-              placeholder="Provider Name"
-              aria-label="Provider Name"
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="none"
-              spellCheck={false}
-            />
-          </div>
-        ) : null}
-        {!isOfficial ? (
-          <div className="space-y-2">
-            <Label htmlFor={`provider-protocol-${draft.id}`}>Protocol</Label>
-            <Select
-              value={draft.provider_type}
-              onValueChange={(value) => onFieldChange({ provider_type: value as ProviderType })}
-            >
-              <SelectTrigger id={`provider-protocol-${draft.id}`} className="w-full justify-between">
-                <SelectValue>{providerProtocolLabel(draft.provider_type)}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {providerProtocolOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className={fieldRowClassName}>
+              <Input
+                id={`provider-name-${draft.id}`}
+                value={draft.name}
+                onChange={(event) => onFieldChange({ name: event.target.value })}
+                placeholder="Provider Name"
+                aria-label="Provider Name"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                onWheel={scrollInputContentOnWheel}
+                className={scrollableInputClassName}
+              />
+              <div aria-hidden="true" />
+            </div>
           </div>
         ) : null}
         <div className="space-y-2">
-          <Label htmlFor={`api-key-${draft.id}`}>API Key</Label>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            <Label htmlFor={`api-key-${draft.id}`}>API Key</Label>
+            {hasReachableModelList ? <FieldReachabilityCheck label="API key" /> : null}
+          </div>
+          <div className={fieldRowClassName}>
             <Input
+              ref={apiKeyInputRef}
               id={`api-key-${draft.id}`}
               type={apiKeyInputType(visible)}
               value={draft.api_key}
-              onChange={(event) => onFieldChange({ api_key: event.target.value })}
+              onChange={(event) => {
+                if (apiKeyError) setApiKeyError("")
+                onFieldChange({ api_key: event.target.value })
+              }}
               placeholder={`Enter your ${apiKeyProviderName} API Key`}
               name={`provider-secret-${draft.id}`}
               autoComplete="off"
@@ -330,42 +381,84 @@ export function ProviderCard({
               data-lpignore="true"
               data-form-type="other"
               spellCheck={false}
+              aria-invalid={apiKeyError ? true : undefined}
+              aria-describedby={apiKeyError ? `api-key-error-${draft.id}` : undefined}
+              onWheel={scrollInputContentOnWheel}
               className={apiKeyInputClassName(visible)}
             />
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              className="text-muted-foreground/70 transition-none hover:text-muted-foreground"
-              onClick={() => setVisible((value) => !value)}
-              aria-label={visible ? "Hide API key" : "Show API key"}
-            >
-              {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-            </Button>
-            <FieldCopyButton value={draft.api_key} label="API key" />
-            <Button type="button" variant="secondary" onClick={onGetModels} disabled={draft.isTesting || !hasRequiredConfig} className="px-4">
-              {draft.isTesting ? <Loader2 className="size-3.5 animate-spin" /> : null}
-              Get Models
-            </Button>
+            <div className={fieldActionClassName}>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="text-muted-foreground/70 transition-none hover:text-muted-foreground"
+                onClick={() => setVisible((value) => !value)}
+                aria-label={visible ? "Hide API key" : "Show API key"}
+              >
+                {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </Button>
+              <FieldCopyButton value={draft.api_key} label="API key" />
+              <Button type="button" variant="secondary" onClick={handleGetModels} disabled={isGettingModels} className="px-4">
+                {isGettingModels ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                Get Models
+              </Button>
+            </div>
           </div>
+          {apiKeyError ? <p id={`api-key-error-${draft.id}`} className="text-xs text-destructive">{apiKeyError}</p> : null}
         </div>
         {!isOfficial ? (
           <div className="space-y-2">
-            <Label htmlFor={`base-url-${draft.id}`}>Base URL</Label>
-            <div className="flex items-center gap-2">
+            <Label htmlFor={`provider-protocol-${draft.id}`}>Protocol</Label>
+            <div className={fieldRowClassName}>
+              <Select
+                value={draft.provider_type}
+                onValueChange={(value) => onFieldChange({ provider_type: value as ProviderType })}
+              >
+                <SelectTrigger id={`provider-protocol-${draft.id}`} className="w-full justify-between">
+                  <SelectValue>{providerProtocolLabel(draft.provider_type)}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {providerProtocolOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div aria-hidden="true" />
+            </div>
+          </div>
+        ) : null}
+        {!isOfficial ? (
+          <div className="space-y-2">
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor={`base-url-${draft.id}`}>Base URL</Label>
+              {hasReachableModelList ? <FieldReachabilityCheck label="Base URL" /> : null}
+            </div>
+            <div className={fieldRowClassName}>
               <Input
+                ref={baseUrlInputRef}
                 id={`base-url-${draft.id}`}
                 value={draft.base_url}
-                onChange={(event) => onFieldChange({ base_url: event.target.value })}
+                onChange={(event) => {
+                  if (baseUrlError) setBaseUrlError("")
+                  onFieldChange({ base_url: event.target.value })
+                }}
                 placeholder="https://api.openai.com/v1"
                 autoComplete="off"
                 autoCorrect="off"
                 autoCapitalize="none"
                 spellCheck={false}
-                className="flex-1"
+                aria-invalid={baseUrlError ? true : undefined}
+                aria-describedby={baseUrlError ? `base-url-error-${draft.id}` : undefined}
+                onWheel={scrollInputContentOnWheel}
+                className={scrollableInputClassName}
               />
-              <FieldCopyButton value={draft.base_url} label="Base URL" />
+              <div className={fieldActionClassName}>
+                <FieldCopyButton value={draft.base_url} label="Base URL" />
+              </div>
             </div>
+            {baseUrlError ? <p id={`base-url-error-${draft.id}`} className="text-xs text-destructive">{baseUrlError}</p> : null}
           </div>
         ) : null}
         <Field>
@@ -373,7 +466,7 @@ export function ProviderCard({
           <FieldDescription>
             Please choose one model from Available Models for endpoint testing.
           </FieldDescription>
-          <div className="flex items-center gap-2">
+          <div className={fieldRowClassName}>
             <Input
               id={`endpoint-test-model-${draft.id}`}
               value={endpointModelId}
@@ -383,21 +476,24 @@ export function ProviderCard({
               autoCorrect="off"
               autoCapitalize="none"
               spellCheck={false}
-              className="flex-1 font-mono"
+              onWheel={scrollInputContentOnWheel}
+              className={cn(scrollableInputClassName, "font-mono")}
             />
-            <Button
-              type="button"
-              variant="default"
-              onClick={() => onEndpointTest(trimmedEndpointModelId)}
-              disabled={draft.isTesting || !hasRequiredConfig || !trimmedEndpointModelId}
-              className="px-6"
-            >
-              {draft.isTesting ? <Loader2 className="size-3.5 animate-spin" /> : null}
-              Test
-            </Button>
+            <div className={fieldActionClassName}>
+              <Button
+                type="button"
+                variant="default"
+                onClick={() => onEndpointTest(trimmedEndpointModelId)}
+                disabled={isTestingEndpoint || !hasRequiredConfig || !trimmedEndpointModelId}
+                className="px-6"
+              >
+                {isTestingEndpoint ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                Test
+              </Button>
+            </div>
           </div>
         </Field>
-        {availableSdks.length || availableModels.length ? (
+        {availableSdks.length || availableModels.length || hasEmptyModelListWarning ? (
           <div className="border-t pt-3 space-y-2 text-xs" data-testid="provider-capabilities">
             {availableSdks.length > 0 ? (
               <div className="flex items-center gap-2 flex-wrap">
@@ -417,8 +513,20 @@ export function ProviderCard({
                   className={cn("flex gap-1 flex-wrap", !showAllModels && "max-h-[2.75rem] overflow-hidden")}
                 >
                   {visibleModels.map((model) => (
-                    <Badge key={model.id} variant="outline" className="border-border/70 bg-muted/20 font-mono text-muted-foreground">
-                      {model.id}
+                    <Badge
+                      key={model.id}
+                      asChild
+                      variant="outline"
+                      className="cursor-pointer border-border/70 bg-muted/20 font-mono text-muted-foreground hover:bg-muted/40"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => void copyAvailableModelId(model.id)}
+                        aria-label={`Copy model ${model.id}`}
+                        title={`Copy ${model.id}`}
+                      >
+                        {model.id}
+                      </button>
                     </Badge>
                   ))}
                 </div>
@@ -433,6 +541,15 @@ export function ProviderCard({
                     {showAllModels ? "Show fewer" : `Show ${hiddenModelCount} more`}
                   </Button>
                 ) : null}
+              </div>
+            ) : null}
+            {hasEmptyModelListWarning ? (
+              <div className="space-y-2 pb-1">
+                <div className="text-muted-foreground">Available Models:</div>
+                <Badge variant="warning" className="gap-1">
+                  <TriangleAlert className="size-3" />
+                  No models returned
+                </Badge>
               </div>
             ) : null}
           </div>

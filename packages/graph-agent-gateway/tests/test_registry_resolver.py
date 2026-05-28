@@ -20,14 +20,12 @@ def _snapshot():
         provider_endpoints={
             "anthropic-official": ProviderEndpoint(
                 endpoint_id="anthropic-official",
-                display_name="Anthropic",
                 protocol="anthropic_compatible",
                 base_url="https://api.anthropic.com",
                 api_key=SecretStr("anthropic-secret"),
             ),
             "openrouter-prod": ProviderEndpoint(
                 endpoint_id="openrouter-prod",
-                display_name="OpenRouter",
                 protocol="openai_compatible",
                 base_url="https://openrouter.ai/api/v1",
                 api_key=SecretStr("openrouter-secret"),
@@ -40,7 +38,6 @@ def _snapshot():
                 route_slug="claude",
                 provider_model_id="claude",
                 canonical_id="claude",
-                display_name="Claude",
                 status="verified",
                 capabilities={
                     "thinking_protocol": CapabilityValue(value=True, source="manual"),
@@ -52,7 +49,6 @@ def _snapshot():
                 route_slug="anthropic.claude",
                 provider_model_id="anthropic/claude",
                 canonical_id="claude",
-                display_name="Claude via OpenRouter",
                 status="unverified_manual",
             ),
         },

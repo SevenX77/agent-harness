@@ -93,6 +93,7 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - 选中态必须保留明确高亮（例如 `data-[selected=true]` + selected ring/background），且反馈要在 pointer down/click 后即时发生。长列表中如果 React state 更新造成体感延迟，应采用局部 ref/DOM attribute 或等价轻量方案，但不能牺牲可访问状态。
 - 选中后只展开用户需要的信息；不要在卡片里加入额外复杂详情区，除非产品需求明确要求。
 - 图标、按钮和徽章要使用 lucide + 本地 `Button`/`Badge` wrapper；文本型按钮只用于清晰命令，不用于图标已有行业惯例的动作。
+- Provider、model、vendor 等实体标签使用本地 `Tag` wrapper；绿色可用态使用 `Tag variant="success"` 的圆角 outline 样式，不在业务组件里手写 `border-success` / `bg-success` 标签外观。`Badge` 继续用于状态徽章，例如 Connected、Test failed、Saving。
 
 ### 2.8 输入框、搜索与行内动作
 - 带图标、清空、复制、显示/隐藏等行内动作的输入框，优先使用本地 `InputGroup` / `InputGroupButton` / `InputGroupAddon`。不要用绝对定位按钮硬盖在 `Input` 上；这种做法容易被 input 拦截点击，也更难保证窄宽度布局。
@@ -123,9 +124,19 @@ Studio 定位为沉浸式的极客生产力工具。在构建桌面级复杂工�
 - 长模型名、路径和 id 使用 `overflow-wrap:anywhere` / `break-words` 等方式在卡片内换行；不要让文本把卡片撑破。
 - 如果列表来自外部探测或后端缓存，UI 不应写死样例数据。模型库类 UI 应展示已测试并持久化的数据源，按 vendor/provider 等真实字段归类。
 - API Keys 卡片的 `Available Models` / `Available SDKs` 只能来自当前 draft 参数（API key、Base URL、Protocol）匹配的成功 test result；不得把 endpoint 下残留的 `provider_routes` 无条件投影到当前可见状态。参数变化后必须先清空可见测试状态，只有匹配历史 test result 或重新测试成功后才恢复模型列表。
+- API Keys 的模型列表探测和端点连通探测必须拆开：`Get Models` 只调用 provider 的 models-list API，按钮不得使用 primary variant，成功后只刷新当前参数匹配的 `Available Models` / `Available SDKs`，不得把状态 badge 置为绿色 `Connected`；`Endpoint test` 必须让用户输入一个来自 available models 的具体 model id，执行最小生成 probe，只有该 probe 成功才显示绿色 `Connected`。
+- API Keys 的 `Get Models` 只要 provider 返回 2xx，就只能证明 API Key / Base URL / Protocol 组合可访问模型列表接口，不等同于 endpoint generation 可用；这种情况应在对应字段右侧显示可达成功标记。若 2xx 响应没有返回模型（例如 `data: null` 或空数组），不得判定为失败或清空 API Key/Base URL 可达反馈，应在 `Available Models` 区域展示 warning empty state。
+- API Keys 的 `Available Models` 标签必须展示真实 model id，并作为可点击复制目标；hover cursor 使用 pointer，点击后复制该 model id，方便用户粘贴到 `Endpoint test`。
+- API Keys 的同一卡片内表单控件必须按同一输入列左/右边界对齐，右侧 action 区域固定并右对齐；`Get Models` 和 `Endpoint test` 的 loading 状态必须按具体按钮区分，不得让同卡片其它测试按钮一起转圈。Endpoint test 失败不得清空当前参数匹配的 Available Models。
 - LLM Provider Intelligence V2 之后，Available Routes 的 `canonical_id`、vendor/provider 分组、route availability 和 provider ownership 均来自后端 DTO；前端不再从 raw model string 做 canonicalization、provider ownership inference 或 stale provider pruning。
+- LLM Roles 右侧 Available Models 仍以后端 Model Group 为可拖拽卡片，但列表 section 必须按模型族 / provider family 归类，不能退化成单一 `Model Groups` 大类；卡片标题使用普通 UI 字体，不使用 mono/code 风格；provider badge 直接用颜色表达 Ready / Untested / Cooling Down / Needs Setup / Off 等状态，不再额外渲染 `1 Untested` 这类第二层状态汇总标签。
+- LLM Roles 右侧 Available Models 的模型 family / section 归属必须优先来自 route 自身的模型 ID / 后端投影结果，不能被代理 endpoint 名称或协议族带偏；例如 `Qiniu-Anthropic` 代理下的 `deepseek-*` 仍归入 `deepseek`。
+- LLM Roles 右侧 Available Models 的 provider badges 必须按可用性排序，Ready / 已连通的 route 在前，其次 Untested、Cooling Down、Needs Setup、Off；折叠态下也要优先露出可用 route，避免绿色可用项被 `+N` 隐藏。
+- LLM Roles 右侧 Available Models 的 Model Group 必须代表一个后端投影后的模型身份，而不是 raw `canonical_id`；不同 provider route 如果投影出相同 `display_name`，必须合并成一张模型卡，并在卡内以 provider badges 展示各 route。执行目标仍只保存精确 `route_id`，不得用展示名反推执行 ID。
+- LLM Roles 的模型显示名可以从后端 `display_name` / `canonical_id` / `provider_model_id` 派生 UI-only normalized label，但不得改写执行 ID。归一化顺序必须先识别日期和版本号，再做 title-case：`4-7`、`4.7`、`4 7`、`v3-1`、`V3 1` 分别显示为 `4.7`、`4.7`、`4.7`、`V3.1`、`V3.1`；`2025-4-28` 显示为 `2025-04-28`；`preview-05-2026` 和 `260425` 这类 snapshot/date-like token 不得误转成模型版本。
 
 ### 2.10 前端验证要求
+- 纯前端 UI 调整不强制执行 TDD；可以直接实现，但完成前仍必须运行相关 typecheck/现有测试，并做实际界面检查。
 - 修改 `apps/studio/frontend` 的用户可见 UI 后，完成前必须亲自启动或连接本地页面，实际打开、点击、输入相关流程，并检查桌面/窄面板等关键宽度下是否穿模、截断或布局错位。单测和 typecheck 不能替代这一步。
 - 必须覆盖被改动的主成功路径和明显的取消/清空/错误/空状态。对于搜索、选择、复制、显示/隐藏、展开/折叠等交互，要逐一点击验证。
 - 手动验证应包含窄宽度视口。至少检查页面级、侧栏级、卡片级没有横向溢出；选中 ring、hover/active、badge overflow 和按钮点击目标不能被裁剪或被其它元素拦截。

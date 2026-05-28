@@ -13,6 +13,7 @@ def test_transport_normalization_strips_known_proxy_prefix() -> None:
 
     assert result.canonical_id == "claude-sonnet-4.6"
     assert result.confidence == "transport_normalized"
+    assert "display_name" not in result.model_dump()
 
 
 def test_explicit_alias_can_merge_variant() -> None:

@@ -24,7 +24,7 @@ import {
   validateRoleDraft,
   visibleRoleNames,
 } from './SettingsPage'
-import type { CredentialsState, RolesData } from '../../api/llm'
+import type { CredentialsState, ModelGroup, RolesData } from '../../api/llm'
 
 const credentials: CredentialsState = {
   providers: [
@@ -103,6 +103,8 @@ const rolesData: RolesData = {
   },
 }
 
+const modelGroups: ModelGroup[] = []
+
 function baseViewProps(
   overrides: Partial<Parameters<typeof SettingsPageContent>[0]> = {},
 ): Parameters<typeof SettingsPageContent>[0] {
@@ -114,6 +116,7 @@ function baseViewProps(
     drafts: draftsFromCredentials(credentials),
     saveStatus: 'idle',
     rolesData,
+    modelGroups,
     rolesSaveStatus: 'idle',
     rolesError: null,
     appSettings: {
@@ -185,6 +188,7 @@ describe('Add Provider flow helpers', () => {
       base_url: 'https://openrouter.ai/api/v1',
       api_key: 'sk-openrouter',
       isTesting: false,
+      testingAction: null,
     })
   })
 

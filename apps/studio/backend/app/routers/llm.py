@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
@@ -61,6 +62,7 @@ from app.services.llm_import_drafts import (
     create_draft,
     load_draft,
 )
+from app.services.llm_model_identity import project_model_identity
 from app.services.llm_role_materializer import materialize_role
 from app.services.llm_roles import (
     InvalidRoleReference,
@@ -212,6 +214,7 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
     starting_fingerprint = credentials.endpoint_fingerprint(endpoint_id)
     status: Literal["unverified_manual", "failed"] = "failed"
     message = "API key is empty."
+    model_list_reached = False
     discovered_model_ids: tuple[str, ...] = ()
     if endpoint.api_key and endpoint.api_key.get_secret_value():
         probe_backend = _endpoint_probe_backend(endpoint)
@@ -243,10 +246,11 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
         except _NetworkError as exc:
             message = _provider_error_message("Network error while testing endpoint", exc)
         else:
+            status = "unverified_manual"
+            model_list_reached = True
             if not result.model_ids:
-                message = "Endpoint returned no models."
+                message = "Endpoint reachable but returned no models."
             else:
-                status = "unverified_manual"
                 message = _endpoint_success_message(result)
                 discovered_model_ids = result.model_ids
     latest_credentials = load_credentials()
@@ -273,7 +277,7 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
             tested_endpoint_id=endpoint_id,
             discovered_model_count=0,
         )
-    if discovered_model_ids:
+    if model_list_reached:
         latest_credentials, _ = _upsert_discovered_routes(
             latest_credentials,
             endpoint=latest_endpoint,
@@ -608,11 +612,12 @@ async def test_llm_role(role_name: str, _payload: dict[str, Any] | None = None) 
             warnings.extend(provider_result["warnings"])
         aggregate_status = _merge_role_test_status(aggregate_status, provider_result)
         canonical_id = str(report_entry.get("canonical_id") or route.canonical_id)
+        identity = project_model_identity(route=route, endpoint=endpoint)
         group = model_groups.setdefault(
             canonical_id,
             {
                 "canonical_id": canonical_id,
-                "display_name": route.display_name,
+                "display_name": identity.display_name,
                 "provider_results": [],
             },
         )
@@ -769,13 +774,75 @@ def _registry_response(
 
 
 def _model_groups_response(credentials: LLMCredentialsFile) -> list[dict[str, Any]]:
-    routes_by_canonical: dict[str, list[ProviderRoute]] = {}
+    routes_by_identity: dict[str, list[ProviderRoute]] = {}
     for route in credentials.provider_routes.values():
-        routes_by_canonical.setdefault(route.canonical_id or route.route_slug, []).append(route)
-    return [
-        _model_group_response(canonical_id, routes, credentials)
-        for canonical_id, routes in sorted(routes_by_canonical.items())
+        routes_by_identity.setdefault(
+            _model_group_identity_key(route, credentials),
+            [],
+        ).append(route)
+    model_groups = [
+        _model_group_response(
+            _representative_canonical_id(routes, credentials),
+            routes,
+            credentials,
+        )
+        for routes in routes_by_identity.values()
     ]
+    return sorted(
+        model_groups,
+        key=lambda group: (
+            group["section_label"],
+            group["display_name"].lower(),
+            group["canonical_id"],
+        ),
+    )
+
+
+def _model_group_identity_key(
+    route: ProviderRoute,
+    credentials: LLMCredentialsFile,
+) -> str:
+    endpoint = credentials.provider_endpoints.get(route.endpoint_id)
+    if endpoint is None:
+        return _normalize_model_group_key(route.canonical_id or route.route_slug)
+    projection = project_model_identity(route=route, endpoint=endpoint)
+    return _normalize_model_group_key(projection.display_name) or _normalize_model_group_key(
+        route.canonical_id or route.route_slug
+    )
+
+
+def _representative_canonical_id(
+    routes: list[ProviderRoute],
+    credentials: LLMCredentialsFile,
+) -> str:
+    route = sorted(routes, key=lambda item: _route_preference_rank(item, credentials))[0]
+    return route.canonical_id or route.route_slug
+
+
+def _route_preference_rank(
+    route: ProviderRoute,
+    credentials: LLMCredentialsFile,
+) -> tuple[int, int, int, str, str]:
+    endpoint = credentials.provider_endpoints.get(route.endpoint_id)
+    return (
+        _provider_kind_rank(endpoint.provider_kind if endpoint else "third_party"),
+        1 if "/" in route.provider_model_id else 0,
+        len(route.canonical_id or route.route_slug),
+        route.canonical_id or route.route_slug,
+        route.route_id,
+    )
+
+
+def _provider_kind_rank(kind: str) -> int:
+    if kind == "official":
+        return 0
+    if kind == "custom":
+        return 1
+    return 2
+
+
+def _normalize_model_group_key(value: str) -> str:
+    return re.sub(r"(^-|-$)", "", re.sub(r"[^a-z0-9]+", "-", value.strip().lower()))
 
 
 def _model_group_response(
@@ -794,13 +861,86 @@ def _model_group_response(
     }
     for option in provider_models:
         status_summary[option["ui_state"]] += 1
+    identity = _model_group_identity(canonical_id, routes, credentials)
     return {
         "canonical_id": canonical_id,
-        "display_name": routes[0].display_name if routes else canonical_id,
+        "display_name": identity["display_name"],
+        "section_label": identity["section_label"],
         "provider_models": provider_models,
         "status_summary": status_summary,
         "capability_summary": _capability_summary(provider_models),
     }
+
+
+def _model_group_identity(
+    canonical_id: str,
+    routes: list[ProviderRoute],
+    credentials: LLMCredentialsFile,
+) -> dict[str, str]:
+    projections: list[tuple[ProviderRoute, dict[str, str]]] = []
+    for route in routes:
+        endpoint = credentials.provider_endpoints.get(route.endpoint_id)
+        if endpoint is None:
+            continue
+        projection = project_model_identity(route=route, endpoint=endpoint)
+        projections.append(
+            (
+                route,
+                {
+                    "display_name": projection.display_name,
+                    "section_label": projection.section_label,
+                },
+            )
+        )
+    if projections:
+        route, identity = sorted(
+            projections,
+            key=lambda item: _route_preference_rank(item[0], credentials),
+        )[0]
+        del route
+        return {
+            **identity,
+            "section_label": _section_label_from_display_name(identity["display_name"])
+            or _dominant_section_label(projections),
+        }
+    return {"display_name": canonical_id, "section_label": "unknown"}
+
+
+def _dominant_section_label(
+    projections: list[tuple[ProviderRoute, dict[str, str]]],
+) -> str:
+    counts: dict[str, int] = {}
+    for _, identity in projections:
+        section_label = identity["section_label"]
+        counts[section_label] = counts.get(section_label, 0) + 1
+    return sorted(counts, key=lambda section: (-counts[section], section))[0]
+
+
+def _section_label_from_display_name(display_name: str) -> str:
+    haystack = display_name.lower()
+    if "anthropic" in haystack or "claude" in haystack:
+        return "anthropic"
+    if "deepseek" in haystack:
+        return "deepseek"
+    if "openai" in haystack or re.search(r"\bgpt[-_\s.]?\d", haystack):
+        return "openai"
+    if "gemini" in haystack or "antigravity" in haystack or re.search(r"\baqa\b", haystack):
+        return "gemini"
+    if "qwen" in haystack:
+        return "qwen"
+    if "doubao" in haystack or "ark" in haystack:
+        return "ark"
+    if "glm" in haystack:
+        return "zhipu"
+    if "kimi" in haystack:
+        return "moonshot"
+    if "llama" in haystack or "meta" in haystack:
+        return "meta"
+    if "mistral" in haystack or "mixtral" in haystack:
+        return "mistral"
+    if "grok" in haystack or "xai" in haystack:
+        return "xai"
+    return ""
 
 
 def _provider_model_option(
@@ -1104,7 +1244,6 @@ def _provider_route(
         route_slug=route_slug,
         provider_model_id=model_id,
         canonical_id=canonical.canonical_id,
-        display_name=canonical.display_name,
         status=status,
         capabilities=normalize_route_capabilities(
             protocol=endpoint.protocol,

@@ -76,7 +76,6 @@ def test_resolver_produces_effective_runtime_settings_with_sources() -> None:
         provider_endpoints={
             "anthropic-official": ProviderEndpoint(
                 endpoint_id="anthropic-official",
-                display_name="Anthropic",
                 protocol="anthropic_compatible",
                 base_url="https://api.anthropic.com",
                 api_key=SecretStr("secret"),
@@ -89,7 +88,6 @@ def test_resolver_produces_effective_runtime_settings_with_sources() -> None:
                 route_slug="claude",
                 provider_model_id="claude",
                 canonical_id="claude",
-                display_name="Claude",
                 status="verified",
                 capabilities={
                     "max_output_tokens": CapabilityValue(
@@ -151,7 +149,6 @@ def test_profile_applied_runtime_defaults_keep_profile_source_without_runtime_de
         provider_endpoints={
             "openai": ProviderEndpoint(
                 endpoint_id="openai",
-                display_name="OpenAI",
                 protocol="openai_compatible",
                 base_url="https://api.openai.example/v1",
                 api_key=SecretStr("secret"),
@@ -164,7 +161,6 @@ def test_profile_applied_runtime_defaults_keep_profile_source_without_runtime_de
                 route_slug="gpt-5",
                 provider_model_id="gpt-5",
                 canonical_id="gpt-5",
-                display_name="GPT-5",
                 status="verified",
             )
         },
@@ -223,7 +219,6 @@ def test_runtime_settings_are_linted_against_capability_bounds() -> None:
         route_slug="claude",
         provider_model_id="claude",
         canonical_id="claude",
-        display_name="Claude",
         status="verified",
         capabilities={
             "max_output_tokens": CapabilityValue(
@@ -318,7 +313,6 @@ def test_runtime_settings_lint_covers_non_reasoning_controls() -> None:
         route_slug="gpt-5",
         provider_model_id="gpt-5",
         canonical_id="gpt-5",
-        display_name="GPT-5",
         status="verified",
         capabilities={
             "temperature": CapabilityValue(

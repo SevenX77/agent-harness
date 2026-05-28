@@ -1,4 +1,4 @@
-import type { CredentialsState, ModelInfo, ProviderType, RolesData } from "../../../api/llm"
+import type { CredentialsState, ModelGroup, ModelInfo, ProviderType, RolesData } from "../../../api/llm"
 
 type RoleProviderEntry = RolesData["providers"][string]
 
@@ -30,9 +30,11 @@ export function ownedProviderCodesForModel(
   const availableModelId = inferAvailableModelIdForModel(data, modelCode, credentialsByCode)
   if (!availableModelId) return configProviderCodes
 
-  return configProviderCodes.filter((providerCode) => (
-    credentialProviderOwnsModel(credentialsByCode[providerCode], availableModelId)
-  ))
+  return configProviderCodes.filter((providerCode) => {
+    const credential = credentialsByCode[providerCode]
+    if (!credential) return providerCode.includes(":")
+    return credentialProviderOwnsModel(credential, availableModelId)
+  })
 }
 
 export function pruneInvalidRoleProviders(
@@ -334,6 +336,51 @@ export function appendAvailableModelToRole(
   return next
 }
 
+export function appendModelGroupToRole(
+  data: RolesData,
+  roleName: string,
+  modelGroup: ModelGroup,
+): RolesData {
+  if (!data.roles[roleName]) return data
+  const selectedProviderModels = defaultProviderModelsForGroup(modelGroup)
+  if (selectedProviderModels.length === 0) return data
+
+  const next = cloneRolesData(data)
+  const modelCode = modelGroup.canonical_id
+  next.models[modelCode] = {
+    ...next.models[modelCode],
+    name: modelGroup.display_name || modelGroup.canonical_id,
+    reasoning: modelGroupSupportsThinking(modelGroup) || next.models[modelCode]?.reasoning || undefined,
+    providers: {
+      ...(next.models[modelCode]?.providers ?? {}),
+      ...Object.fromEntries(
+        selectedProviderModels.map((providerModel) => [
+          providerModel.route_id,
+          providerModel.provider_model_id,
+        ]),
+      ),
+    },
+  }
+
+  for (const providerModel of selectedProviderModels) {
+    next.providers[providerModel.route_id] = next.providers[providerModel.route_id] ?? {
+      name: providerModel.provider_label,
+      type: "openai_compatible",
+    }
+  }
+
+  const existingRoleModel = next.roles[roleName].models[modelCode]
+  const providerIds = selectedProviderModels.map((providerModel) => providerModel.route_id)
+  next.roles[roleName].models[modelCode] = existingRoleModel
+    ? {
+        ...existingRoleModel,
+        providers: Array.from(new Set([...existingRoleModel.providers, ...providerIds])),
+      }
+    : { providers: providerIds }
+  syncActiveModelToFirst(next, roleName)
+  return next
+}
+
 export function canonicalAvailableModelId(
   modelId: string,
   provider: CredentialsState["providers"][number],
@@ -356,6 +403,45 @@ export function modelSupportsThinking(model: ModelInfo): boolean {
     capabilities.reasoning ||
     capabilities.supports_thinking,
   )
+}
+
+function defaultProviderModelsForGroup(modelGroup: ModelGroup): ModelGroup["provider_models"] {
+  const usable = modelGroup.provider_models.filter((providerModel) => (
+    providerModel.ui_state !== "needs_setup" && providerModel.ui_state !== "off"
+  ))
+  const hasNonCoolingCandidate = usable.some((providerModel) => providerModel.ui_state !== "cooling_down")
+  const candidates = hasNonCoolingCandidate
+    ? usable.filter((providerModel) => providerModel.ui_state !== "cooling_down")
+    : usable
+  return [...candidates].sort((left, right) => (
+    providerKindRank(left.provider_kind) - providerKindRank(right.provider_kind) ||
+    providerStateRank(left.ui_state) - providerStateRank(right.ui_state) ||
+    left.provider_label.localeCompare(right.provider_label, undefined, { numeric: true, sensitivity: "base" }) ||
+    left.route_id.localeCompare(right.route_id)
+  ))
+}
+
+function providerKindRank(kind: ModelGroup["provider_models"][number]["provider_kind"]): number {
+  if (kind === "official") return 0
+  if (kind === "custom") return 1
+  return 2
+}
+
+function providerStateRank(state: ModelGroup["provider_models"][number]["ui_state"]): number {
+  if (state === "ready") return 0
+  if (state === "untested") return 1
+  if (state === "cooling_down") return 2
+  return 3
+}
+
+function modelGroupSupportsThinking(modelGroup: ModelGroup): boolean {
+  return modelGroup.capability_summary.thinking === "supported" ||
+    modelGroup.capability_summary.thinking === "mixed" ||
+    modelGroup.provider_models.some((providerModel) => Boolean(
+      providerModel.capabilities.thinking?.value ||
+      providerModel.capabilities.reasoning?.value ||
+      providerModel.capabilities.supports_thinking?.value,
+    ))
 }
 
 export function validateRoleDraft(data: RolesData, roleName: string): string | null {

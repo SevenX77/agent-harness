@@ -3,16 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.core import config
-from app.models.llm_config import LLMCredentialsFile, RolesData
-from app.services import copilot
-from app.services.llm_credentials import save_credentials
-from app.services.llm_roles import save_roles_file
-from graph_agent_gateway.registry.schema import (
+from app.models.llm_config import (
+    LLMCredentialsFile,
     ProviderEndpoint,
     ProviderRoute,
     RoleEntry,
     RoleRouteEntry,
+    RolesData,
 )
+from app.services import copilot
+from app.services.llm_credentials import save_credentials
+from app.services.llm_roles import save_roles_file
 
 
 def test_copilot_route_resolution_uses_v4_registry_route_ids(

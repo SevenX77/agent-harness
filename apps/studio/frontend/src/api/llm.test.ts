@@ -3,6 +3,7 @@ import type { AxiosAdapter, AxiosResponse, InternalAxiosRequestConfig } from 'ax
 import { api } from './client'
 import {
   getCredentials,
+  getProviderModels,
   getRoles,
   modelGroupsFromRegistry,
   probeRoute,
@@ -294,6 +295,55 @@ describe('API Keys v4 registry adapter', () => {
       'openai/gpt-5',
       'anthropic/claude-sonnet-4.6',
     ])
+  })
+
+  it('treats a reachable empty model-list response as a successful Get Models check', async () => {
+    const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
+    let currentRegistry = registry()
+    api.defaults.adapter = adapter((config) => {
+      seen.push({ method: config.method, url: config.url, data: config.data })
+      if (config.method === 'put') return currentRegistry
+      if (config.method === 'post') {
+        currentRegistry = registry({
+          provider_endpoints: {
+            'openrouter-custom': {
+              ...endpoint,
+              status: 'unverified_manual',
+              last_test_at: '2026-05-27T12:10:00Z',
+              last_test_message: 'Endpoint reachable but returned no models.',
+            },
+          },
+          provider_routes: {},
+        })
+        return {
+          registry: currentRegistry,
+          tested_endpoint_id: 'openrouter-custom',
+          discovered_model_count: 0,
+        }
+      }
+      return currentRegistry
+    })
+
+    const result = await getProviderModels({
+      id: 'openrouter-custom',
+      provider_type: 'openai_compatible',
+      api_key: 'sk-live',
+      base_url: 'https://openrouter.ai/api/v1',
+    })
+
+    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual([
+      'put /llm/registry/endpoints',
+      'post /llm/endpoints/openrouter-custom/test',
+    ])
+    expect(result.status).toBe('ok')
+    expect(result.error_code).toBeNull()
+    expect(result.message).toBe('Endpoint reachable but returned no models.')
+    expect(result.available_models).toEqual([])
+
+    const credentials = await getCredentials()
+    expect(credentials.providers[0].last_test_status).toBe('untested')
+    expect(credentials.providers[0].last_error_code).toBe('')
+    expect(credentials.providers[0].available_models).toEqual([])
   })
 
   it('does not clear a successful test on the next autosave when the registry response redacts the secret', async () => {

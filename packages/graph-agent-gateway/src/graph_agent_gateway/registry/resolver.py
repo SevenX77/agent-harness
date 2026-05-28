@@ -70,7 +70,6 @@ def resolve_role(
                 proxy_env=endpoint.proxy_env,
                 provider_model_id=route.provider_model_id,
                 canonical_id=route.canonical_id,
-                display_name=route.display_name,
                 capabilities=route.capabilities,
                 runtime_settings=entry.runtime_settings,
                 effective_runtime_settings=_effective_runtime_settings(

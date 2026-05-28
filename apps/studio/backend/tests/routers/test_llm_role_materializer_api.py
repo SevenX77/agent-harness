@@ -539,6 +539,7 @@ def test_get_role_v3_rematerializes_report_from_current_route_capabilities(
     assert get_response.status_code == 200
     get_body = get_response.json()
     assert [entry["route_id"] for entry in get_body["fallback_chain"]] == [route_id]
+    assert get_body["fallback_chain"][0]["runtime_settings"]["reasoning"]["enabled"] is True
     assert get_body["materialization_report"]["entries"][0]["role_fit"] == "using"
     assert get_body["materialization_report"]["entries"][0]["warnings"] == []
 

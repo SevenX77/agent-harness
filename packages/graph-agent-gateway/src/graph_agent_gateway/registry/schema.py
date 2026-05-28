@@ -159,6 +159,24 @@ class ProviderEndpoint(BaseModel):
         return _validate_slug(value, "endpoint_id")
 
 
+class VerifiedProfile(BaseModel):
+    """One tested way to invoke a provider model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile_id: str
+    capability: str
+    method_id: str
+    request_mapper_id: str
+    status: Literal["ready", "failed", "catalog_candidate"] = "ready"
+    default: bool = False
+    fallback_rank: int = Field(default=100, ge=1)
+    input_modalities: list[str] = Field(default_factory=lambda: ["text"])
+    output_modalities: list[str] = Field(default_factory=lambda: ["text"])
+    runtime_overrides: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class ProviderRoute(BaseModel):
     """One physical model route on one endpoint."""
 
@@ -171,6 +189,7 @@ class ProviderRoute(BaseModel):
     canonical_id: str
     status: RouteStatus = "unverified_manual"
     capabilities: dict[str, CapabilityValue] = Field(default_factory=dict)
+    verified_profiles: list[VerifiedProfile] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("endpoint_id")
@@ -345,6 +364,10 @@ class ResolvedRoute(BaseModel):
     proxy_env: str | None = None
     provider_model_id: str
     canonical_id: str
+    selected_profile_id: str | None = None
+    selected_profile_capability: str | None = None
+    call_method_id: str | None = None
+    request_mapper_id: str | None = None
     capabilities: dict[str, CapabilityValue] = Field(default_factory=dict)
     runtime_settings: RuntimeSettings = Field(default_factory=RuntimeSettings)
     effective_runtime_settings: dict[str, EffectiveRuntimeSetting] = Field(default_factory=dict)

@@ -13,16 +13,17 @@ from graph_agent_gateway.registry.schema import (
     ProviderEndpoint,
     ProviderImportDraft,
     ProviderRoute,
+    ReasoningSettings,
     RegistrySnapshot,
     ResolvedRole,
     ResolvedRoute,
-    RuntimeSettings,
-    ReasoningSettings,
     RoleEntry,
     RoleRouteEntry,
     RouteCandidate,
     RuntimePolicy,
+    RuntimeSettings,
     StructuredOutputSettings,
+    VerifiedProfile,
 )
 
 __all__ = [
@@ -46,4 +47,5 @@ __all__ = [
     "RouteCandidate",
     "RuntimePolicy",
     "StructuredOutputSettings",
+    "VerifiedProfile",
 ]

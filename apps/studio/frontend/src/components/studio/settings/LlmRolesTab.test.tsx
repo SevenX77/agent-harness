@@ -10,7 +10,7 @@ import {
 } from "./llm-roles/AvailableModelsSidebar"
 import { RoleCard } from "./llm-roles/RoleCard"
 import { roleNameDisplayError, RoleNameDialog, RoleNameFields } from "./llm-roles/RoleNameDialog"
-import { appendAvailableModelToRole, appendModelGroupToRole, appendRole, normalizeRolesDraft, pruneInvalidRoleProviders, removeRole, renameRole, validateRolesDraft } from "./role-utils"
+import { appendAvailableModelToRole, appendModelGroupToRole, appendRole, normalizeRolesDraft, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeModelFromRole, removeProviderFromRole, removeRole, renameRole, reorderModelInRole, reorderProviderInRole, validateRolesDraft } from "./role-utils"
 import { credentialsByProviderCode } from "./route-credentials"
 
 const credentials: CredentialsState = {
@@ -275,6 +275,116 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain("Unavailable")
   })
 
+  it("does not scan credential model lists for route-backed provider ownership", () => {
+    const routeId = "deepseek-official:deepseek-v4-flash"
+    const routeBackedData: RolesData = {
+      models: {
+        "deepseek-v4-flash": {
+          name: "DeepSeek V4 Flash",
+          providers: { [routeId]: "deepseek-v4-flash" },
+        },
+      },
+      providers: {
+        [routeId]: {
+          name: "DeepSeek Official",
+          type: "openai_compatible",
+          endpoint_id: "deepseek-official",
+        },
+      },
+      roles: {
+        analyst: {
+          model_fallback: true,
+          active_model: "deepseek-v4-flash",
+          models: {
+            "deepseek-v4-flash": { providers: [routeId], temperature: null, max_tokens: null },
+          },
+        },
+      },
+    }
+    const routeCredential = {
+      id: "deepseek-official",
+      name: "DeepSeek Official",
+      api_key: "sk-deepseek",
+      provider_type: "openai_compatible",
+    } as CredentialsState["providers"][number]
+    Object.defineProperty(routeCredential, "available_models", {
+      get() {
+        throw new Error("route-backed ownership should not scan available_models")
+      },
+    })
+
+    expect(ownedProviderCodesForModel(routeBackedData, "deepseek-v4-flash", {
+      [routeId]: routeCredential,
+      "deepseek-official": routeCredential,
+    })).toEqual([routeId])
+  })
+
+  it("uses provider row border state and a status light instead of text badges", () => {
+    const modelCode = "gpt-5-4-mini"
+    const routeBackedData: RolesData = {
+      models: {
+        [modelCode]: {
+          name: "GPT 5.4 Mini",
+          providers: {
+            "openrouter:gpt-5-4-mini": "openai/gpt-5.4-mini",
+          },
+        },
+      },
+      providers: {
+        "openrouter:gpt-5-4-mini": {
+          name: "OpenRouter",
+          type: "openai_compatible",
+          endpoint_id: "openrouter",
+        },
+      },
+      roles: {
+        Analyst: {
+          model_fallback: true,
+          active_model: modelCode,
+          models: {
+            [modelCode]: { providers: ["openrouter:gpt-5-4-mini"], temperature: null, max_tokens: null },
+          },
+        },
+      },
+    }
+    const html = renderToStaticMarkup(
+      <RoleCard
+        data={routeBackedData}
+        category="graph-agent"
+        credentialsByCode={credentialsByProviderCode(routeBackedData, {
+          providers: [{
+            id: "openrouter",
+            name: "OpenRouter",
+            api_key: "sk-openrouter",
+            provider_type: "openai_compatible",
+            last_test_status: "ok",
+          }],
+        })}
+        modelDisplayNamesByCode={new Map([[modelCode, "GPT 5.4 Mini"]])}
+        ownedProviderCodesByModel={new Map([[modelCode, new Set(["openrouter:gpt-5-4-mini"])]])}
+        roleName="Analyst"
+        testStatuses={{
+          [roleChainStatusKey(modelCode, "openrouter:gpt-5-4-mini")]: { status: "ok", message: "Connected" },
+        }}
+        testChainRunning={false}
+        onRunTestChain={vi.fn()}
+        getActiveAvailableModelDragId={() => null}
+        getAvailableModelGroup={() => null}
+        onChange={vi.fn()}
+      />,
+    )
+
+    const statusLightClass = html.match(/data-provider-status-light="true"[^>]*class="([^"]*)"/)?.[1]
+    expect(html).toContain('data-provider-test-status="ok"')
+    expect(html).toContain('data-provider-status-light="true"')
+    expect(statusLightClass).toContain("size-1.5")
+    expect(statusLightClass).not.toContain("size-2.5")
+    expect(html).not.toContain("bg-success-background/10")
+    expect(html).not.toContain("bg-destructive-background/10")
+    expect(html).not.toContain("bg-primary/5")
+    expect(html).not.toMatch(/aria-label="Provider test status Connected"[^>]*>.*Connected<\/span>/)
+  })
+
   it("lets current provider test failures override stale endpoint success for the model badge", () => {
     const modelCode = "gpt-5-4-mini"
     const routeBackedData: RolesData = {
@@ -336,6 +446,11 @@ describe("LlmRolesTab controls", () => {
         data={routeBackedData}
         category="graph-agent"
         credentialsByCode={credentialsByProviderCode(routeBackedData, routeCredentials)}
+        modelDisplayNamesByCode={new Map([[modelCode, "GPT 5.4 Mini"]])}
+        ownedProviderCodesByModel={new Map(Object.keys(routeBackedData.models).map((modelCode) => [
+          modelCode,
+          new Set(Object.keys(routeBackedData.models[modelCode].providers)),
+        ]))}
         roleName="Analyst"
         testStatuses={{
           [roleChainStatusKey(modelCode, "openrouter:gpt-5-4-mini")]: { status: "network_error", message: "Network error" },
@@ -931,6 +1046,66 @@ describe("LlmRolesTab controls", () => {
     expect(filledHtml).not.toContain('data-provider-add-trigger="true"')
   })
 
+  it("reorders model groups without changing the selected providers", () => {
+    const next = reorderModelInRole(rolesData, "copilot_chat", "DS32R", "CL46T")
+
+    expect(Object.keys(next.roles.copilot_chat.models)).toEqual(["DS32R", "CL46T"])
+    expect(next.roles.copilot_chat.active_model).toBe("DS32R")
+    expect(next.roles.copilot_chat.models.CL46T.providers).toEqual(["anthropic"])
+    expect(next.roles.copilot_chat.models.DS32R.providers).toEqual(["openai_proxy"])
+  })
+
+  it("reorders providers only inside the targeted model group", () => {
+    const dataWithTwoProviders: RolesData = {
+      ...rolesData,
+      roles: {
+        copilot_chat: {
+          ...rolesData.roles.copilot_chat,
+          models: {
+            ...rolesData.roles.copilot_chat.models,
+            CL46T: {
+              ...rolesData.roles.copilot_chat.models.CL46T,
+              providers: ["anthropic", "openai_proxy"],
+            },
+          },
+        },
+      },
+    }
+
+    const next = reorderProviderInRole(dataWithTwoProviders, "copilot_chat", "CL46T", 0, 1)
+
+    expect(Object.keys(next.roles.copilot_chat.models)).toEqual(["CL46T", "DS32R"])
+    expect(next.roles.copilot_chat.models.CL46T.providers).toEqual(["openai_proxy", "anthropic"])
+    expect(next.roles.copilot_chat.models.DS32R.providers).toEqual(["openai_proxy"])
+  })
+
+  it("removes providers and model groups without disturbing adjacent rows", () => {
+    const dataWithTwoProviders: RolesData = {
+      ...rolesData,
+      roles: {
+        copilot_chat: {
+          ...rolesData.roles.copilot_chat,
+          models: {
+            ...rolesData.roles.copilot_chat.models,
+            CL46T: {
+              ...rolesData.roles.copilot_chat.models.CL46T,
+              providers: ["anthropic", "openai_proxy"],
+            },
+          },
+        },
+      },
+    }
+
+    const providerRemoved = removeProviderFromRole(dataWithTwoProviders, "copilot_chat", "CL46T", 1)
+    const modelRemoved = removeModelFromRole(rolesData, "copilot_chat", "CL46T")
+
+    expect(providerRemoved.roles.copilot_chat.models.CL46T.providers).toEqual(["anthropic"])
+    expect(providerRemoved.roles.copilot_chat.models.DS32R.providers).toEqual(["openai_proxy"])
+    expect(modelRemoved.roles.copilot_chat.models.CL46T).toBeUndefined()
+    expect(modelRemoved.roles.copilot_chat.models.DS32R.providers).toEqual(["openai_proxy"])
+    expect(modelRemoved.roles.copilot_chat.active_model).toBe("DS32R")
+  })
+
   it("uses subdued provider card text and role editor icons", () => {
     const html = renderRolesHtml()
 
@@ -1213,6 +1388,7 @@ describe("LlmRolesTab controls", () => {
 
     expect(html).toContain("Claude Sonnet 4.6 Thinking")
     expect(html).toContain("DeepSeek V4 Pro")
+    expect(html).toContain('aria-label="Claude Sonnet 4.6 Thinking provider fallback order"')
     expect(html).not.toContain("configured for this model")
     expect(html).not.toContain("Provider chain")
     expect(html).not.toContain("Active model")
@@ -1221,6 +1397,45 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain(">DS32R<")
     expect(html).not.toContain(">GPT5<")
     expect(html).not.toContain(">active<")
+    expect(html).not.toContain('aria-label="CL46T provider fallback order"')
+  })
+
+  it("prefers backend Model Group names when role model names are short codes", () => {
+    const shortCodeData: RolesData = {
+      ...rolesData,
+      models: {
+        DSV4F: {
+          name: "DSV4F",
+          providers: { anthropic: "deepseek-chat" },
+        },
+      },
+      roles: {
+        Analyst: {
+          model_fallback: true,
+          active_model: "DSV4F",
+          models: {
+            DSV4F: { providers: ["anthropic"], temperature: null, max_tokens: null },
+          },
+        },
+      },
+    }
+    const shortCodeModelGroups: ModelGroup[] = [{
+      ...modelGroups[0],
+      canonical_id: "DSV4F",
+      display_name: "DeepSeek V4 Flash",
+      provider_models: [{
+        ...modelGroups[0].provider_models[0],
+        route_id: "anthropic",
+        provider_label: "Anthropic",
+        provider_model_id: "deepseek-chat",
+      }],
+    }]
+    const html = renderRolesHtml({ data: shortCodeData, modelGroups: shortCodeModelGroups })
+
+    expect(html).toContain("DeepSeek V4 Flash")
+    expect(html).toContain('aria-label="DeepSeek V4 Flash provider fallback order"')
+    expect(html).not.toContain(">DSV4F<")
+    expect(html).not.toContain('aria-label="DSV4F provider fallback order"')
   })
 
   it("filters role providers to the providers owned by that model", () => {

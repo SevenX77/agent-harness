@@ -8,7 +8,7 @@ import type { CredentialsState, ModelGroup, RolesData } from "../../../api/llm"
 import { AvailableModelsSidebar } from "./llm-roles/AvailableModelsSidebar"
 import { RoleSaveStatusBadge } from "./llm-roles/RoleBadges"
 import { RoleCardList } from "./llm-roles/RoleCardList"
-import { appendModelGroupToRole, pruneInvalidRoleProviders } from "./role-utils"
+import { appendModelGroupToRole, ownedProviderCodesForModel, pruneInvalidRoleProviders } from "./role-utils"
 import { credentialsByProviderCode } from "./route-credentials"
 import { SectionTitle } from "./shared"
 
@@ -53,6 +53,48 @@ export function LlmRolesTab({
   const normalizedData = useMemo(() => (
     data ? pruneInvalidRoleProviders(data, credentialsByCode) : null
   ), [credentialsByCode, data])
+  const ownedProviderCodesByModel = useMemo<ReadonlyMap<string, ReadonlySet<string>>>(() => {
+    if (!normalizedData) return new Map()
+    const result = new Map<string, ReadonlySet<string>>()
+    for (const modelCode of Object.keys(normalizedData.models)) {
+      result.set(
+        modelCode,
+        new Set(ownedProviderCodesForModel(normalizedData, modelCode, credentialsByCode)),
+      )
+    }
+    return result
+  }, [normalizedData, credentialsByCode])
+  const modelDisplayNamesByCode = useMemo<ReadonlyMap<string, string>>(() => {
+    if (!normalizedData) return new Map()
+    const displayNameByCanonicalId = new Map<string, string>()
+    const displayNameByRouteId = new Map<string, string>()
+
+    for (const modelGroup of modelGroups) {
+      const displayName = modelGroup.display_name || modelGroup.canonical_id
+      displayNameByCanonicalId.set(modelGroup.canonical_id, displayName)
+      for (const providerModel of modelGroup.provider_models) {
+        displayNameByRouteId.set(providerModel.route_id, displayName)
+      }
+    }
+
+    const result = new Map<string, string>()
+    for (const [modelCode, model] of Object.entries(normalizedData.models)) {
+      const directDisplayName = displayNameByCanonicalId.get(modelCode)
+      if (directDisplayName) {
+        result.set(modelCode, directDisplayName)
+        continue
+      }
+
+      const providerRouteIds = Object.keys(model.providers)
+      const routeDisplayName = providerRouteIds
+        .map((providerCode) => displayNameByRouteId.get(providerCode))
+        .find((displayName): displayName is string => Boolean(displayName))
+      if (routeDisplayName) {
+        result.set(modelCode, routeDisplayName)
+      }
+    }
+    return result
+  }, [modelGroups, normalizedData])
   const { isRunning: testChainRunning, run: runTestChain, statuses: testStatuses } = useRoleTestChainRunner()
   const activeAvailableModelDragRef = useRef<string | null>(null)
   const availableModelPointerDragRef = useRef<AvailableModelPointerDrag | null>(null)
@@ -64,6 +106,8 @@ export function LlmRolesTab({
   const [availableModelDragPreview, setAvailableModelDragPreview] = useState<AvailableModelDragPreviewState | null>(null)
   const modelGroupsByIdRef = useRef<Map<string, ModelGroup>>(new Map())
   const normalizedDataRef = useRef<RolesData | null>(normalizedData)
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
   const modelGroupsById = useMemo(
     () => new Map(modelGroups.map((group) => [group.canonical_id, group])),
     [modelGroups],
@@ -214,7 +258,7 @@ export function LlmRolesTab({
       const modelGroup = modelGroupsByIdRef.current.get(drag.modelId)
       if (!modelGroup) return
 
-      onChange(appendModelGroupToRole(
+      onChangeRef.current(appendModelGroupToRole(
         latestData,
         roleName,
         modelGroup,
@@ -246,7 +290,24 @@ export function LlmRolesTab({
       releaseDragPreview({ clearState: false })
       clearDragClickSuppression()
     }
-  }, [onChange, updateAvailableModelDragPreviewPosition])
+  }, [updateAvailableModelDragPreviewPosition])
+
+  const getActiveAvailableModelDragId = useCallback(
+    () => activeAvailableModelDragRef.current,
+    [],
+  )
+  const getAvailableModelGroup = useCallback(
+    (modelGroupId: string) => modelGroupsById.get(modelGroupId) ?? null,
+    [modelGroupsById],
+  )
+  const handleRunTestChain = useCallback(
+    (roleName: string) => {
+      const latestData = normalizedDataRef.current
+      if (!latestData) return
+      void runTestChain({ data: latestData, roleName, credentials })
+    },
+    [credentials, runTestChain],
+  )
 
   if (!normalizedData) {
     return (
@@ -278,11 +339,13 @@ export function LlmRolesTab({
         <RoleCardList
           data={normalizedData}
           credentialsByCode={credentialsByCode}
+          modelDisplayNamesByCode={modelDisplayNamesByCode}
+          ownedProviderCodesByModel={ownedProviderCodesByModel}
           testStatuses={testStatuses}
           testChainRunning={testChainRunning}
-          onRunTestChain={(roleName) => void runTestChain({ data: normalizedData, roleName, credentials })}
-          getActiveAvailableModelDragId={() => activeAvailableModelDragRef.current}
-          getAvailableModelGroup={(modelGroupId) => modelGroupsById.get(modelGroupId) ?? null}
+          onRunTestChain={handleRunTestChain}
+          getActiveAvailableModelDragId={getActiveAvailableModelDragId}
+          getAvailableModelGroup={getAvailableModelGroup}
           onChange={onChange}
         />
       </LlmRolesLayout>

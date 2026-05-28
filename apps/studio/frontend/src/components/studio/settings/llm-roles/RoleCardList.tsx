@@ -1,3 +1,4 @@
+import { memo } from "react"
 import { Bot, Cog, Plus, type LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -16,9 +17,11 @@ import { useLazyRenderCount } from "./useLazyRenderCount"
 const rolesInitialRenderCount = 8
 const rolesRenderStep = 8
 
-export function RoleCardList({
+export const RoleCardList = memo(function RoleCardList({
   data,
   credentialsByCode,
+  modelDisplayNamesByCode,
+  ownedProviderCodesByModel,
   testStatuses,
   testChainRunning,
   onRunTestChain,
@@ -28,6 +31,8 @@ export function RoleCardList({
 }: {
   data: RolesData
   credentialsByCode: Record<string, CredentialsState["providers"][number]>
+  modelDisplayNamesByCode: ReadonlyMap<string, string>
+  ownedProviderCodesByModel: ReadonlyMap<string, ReadonlySet<string>>
   testStatuses: RoleChainStatusMap
   testChainRunning: boolean
   onRunTestChain: (roleName: string) => void
@@ -75,10 +80,12 @@ export function RoleCardList({
                     data={data}
                     category={group.category}
                     credentialsByCode={credentialsByCode}
+                    modelDisplayNamesByCode={modelDisplayNamesByCode}
+                    ownedProviderCodesByModel={ownedProviderCodesByModel}
                     roleName={roleName}
                     testStatuses={testStatuses}
                     testChainRunning={testChainRunning}
-                    onRunTestChain={() => onRunTestChain(roleName)}
+                    onRunTestChain={onRunTestChain}
                     getActiveAvailableModelDragId={getActiveAvailableModelDragId}
                     getAvailableModelGroup={getAvailableModelGroup}
                     onChange={onChange}
@@ -122,7 +129,7 @@ export function RoleCardList({
       ) : null}
     </div>
   )
-}
+})
 
 function roleCategoryGroups(data: RolesData, visibleRoleNames: string[], allRoleNames: string[]) {
   const groups: Array<{

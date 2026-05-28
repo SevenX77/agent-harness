@@ -1081,8 +1081,12 @@ export async function probeRoute(
   return response.data
 }
 
-export async function getCredentials(): Promise<CredentialsState> {
-  const registry = await hydrateEndpointSecrets(await getRegistry())
+export async function getCredentials({
+  hydrateSecrets = true,
+}: {
+  hydrateSecrets?: boolean
+} = {}): Promise<CredentialsState> {
+  const registry = hydrateSecrets ? await hydrateEndpointSecrets(await getRegistry()) : await getRegistry()
   return registryToCredentials(registry)
 }
 

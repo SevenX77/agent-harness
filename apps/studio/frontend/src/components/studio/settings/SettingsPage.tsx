@@ -223,6 +223,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const rolesDataRef = useRef<RolesData | null>(rolesData)
   rolesDataRef.current = rolesData
   const invalidatedTestOutcomeIdsRef = useRef<Set<string>>(new Set())
+  const credentialsHydratedRef = useRef(false)
 
   const handleSaved = useCallback((next: CredentialsState) => {
     setCredentials({
@@ -262,7 +263,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
 
   useEffect(() => {
     let cancelled = false
-    getCredentials()
+    getCredentials({ hydrateSecrets: false })
       .then((next) => {
         if (cancelled) return
         invalidatedTestOutcomeIdsRef.current.clear()
@@ -282,6 +283,32 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (activeTab !== "api_keys" || credentialsHydratedRef.current) return
+    let cancelled = false
+    setCredentialsLoading(true)
+    getCredentials()
+      .then((next) => {
+        if (cancelled) return
+        credentialsHydratedRef.current = true
+        invalidatedTestOutcomeIdsRef.current.clear()
+        setCredentialsError(null)
+        setCredentials(next)
+        setDrafts(draftsFromCredentials(next))
+        setCredentialsLoading(false)
+      })
+      .catch((error) => {
+        if (cancelled) return
+        const message = error instanceof Error ? error.message : "Load failed"
+        setCredentialsError(message)
+        toast.error(`API Keys load failed: ${message}`)
+        setCredentialsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab])
 
   useEffect(() => {
     if (activeTab !== "llm_roles" || rolesData) return
@@ -461,7 +488,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     }
   }
 
-  function updateRolesData(next: RolesData) {
+  const updateRolesData = useCallback((next: RolesData) => {
     const normalized = normalizeRolesDraft(next)
     rolesDataRef.current = normalized
     setRolesData(normalized)
@@ -473,7 +500,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     }
     setRolesError(null)
     queueRolesSave(() => normalized)
-  }
+  }, [cancelRolesSave, queueRolesSave])
 
   return (
     <SettingsPageContent

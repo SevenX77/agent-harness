@@ -1,0 +1,19 @@
+# DO NOT EDIT without PM approval. Contract exemptions are governance records for
+# intentional, reviewed drift from frozen API/spec/hash baselines.
+#
+# Schema example:
+# version: "1"
+# exemptions:
+#   - pr: "PR-123"
+#     pm_approval: "PM approved this compatibility exception."
+#     reason: "Why the drift is allowed."
+#     symbols:
+#       - SomeSymbol
+#     fields:
+#       - some_field
+#     hashes:
+#       - docs/engine/skill-spec/example.md
+#     expires_or_cleanup: "Remove after PR-124 migration lands."
+
+version: "1"
+exemptions: []

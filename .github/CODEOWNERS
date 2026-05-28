@@ -1,0 +1,7 @@
+# CODEOWNERS — Golden principle contract baseline owners.
+
+.github/CODEOWNERS @SevenX77
+packages/graph-agent/tests/contract-exemptions.yaml @SevenX77
+docs/engine/public-api-contract.md @SevenX77
+docs/engine/skill-spec/* @SevenX77
+packages/graph-agent/tests/test_public_api_contract.py @SevenX77

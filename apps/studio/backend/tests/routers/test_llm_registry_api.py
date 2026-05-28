@@ -377,6 +377,7 @@ def test_registry_returns_model_groups_with_provider_ui_state_projection(
     assert provider_models["missing-key-provider:gpt-5"]["ui_state"] == "needs_setup"
     assert provider_models["failed-provider:gpt-5"]["ui_state"] == "needs_setup"
     assert provider_models["disabled-provider:gpt-5"]["ui_state"] == "off"
+    assert provider_models["ready-provider:gpt-5"]["endpoint_id"] == "ready-provider"
     assert provider_models["ready-provider:gpt-5"]["provider_kind"] == "third_party"
     assert provider_models["ready-provider:gpt-5"]["capability_state"] == "unknown"
 

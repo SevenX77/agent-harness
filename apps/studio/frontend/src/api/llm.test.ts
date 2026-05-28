@@ -842,6 +842,7 @@ describe('API Keys v4 registry adapter', () => {
     expect(roles.providers[route.route_id]).toEqual({
       name: 'OpenRouter Custom',
       type: 'openai_compatible',
+      endpoint_id: 'openrouter-custom',
     })
     expect(roles.roles.analyst).toMatchObject({
       role_kind: 'graph_agent',

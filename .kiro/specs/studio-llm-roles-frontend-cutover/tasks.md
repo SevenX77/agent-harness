@@ -11,38 +11,38 @@ related_requirements: .kiro/specs/studio-llm-roles-frontend-cutover/requirements
 
 ## PR 1: Available Models from Backend Model Groups
 
-- [ ] Load `modelGroups` in `SettingsPage.tsx` using `getModelGroups()`.
-- [ ] Pass `modelGroups` through `SettingsPageContent.tsx` into `LlmRolesTab.tsx`.
-- [ ] Change `AvailableModelsSidebar.tsx` source prop from `credentials` to `modelGroups`.
-- [ ] Render card title from backend `model_groups[].display_name`.
-- [ ] Render provider chips from backend `provider_models[].provider_label` and `ui_state`.
-- [ ] Remove per-card second-layer count badges such as `1 Untested`.
-- [ ] Use normal UI font for model titles.
-- [ ] Keep progressive rendering for long lists.
-- [ ] Verify search for `opus` and `deepseek v3.1 thinking`.
-- [ ] Run `pnpm --dir apps/studio/frontend test src/components/studio/settings/LlmRolesTab.test.tsx -- --runInBand`.
-- [ ] Run `pnpm --dir apps/studio/frontend run typecheck`.
-- [ ] Run `pnpm --dir apps/studio/frontend run lint`.
-- [ ] Real browser/Tauri screenshot: right sidebar with `opus` search.
-- [ ] Wait for user confirmation.
-- [ ] Commit only PR 1 files.
+- [x] Load `modelGroups` in `SettingsPage.tsx` using `getModelGroups()`.
+- [x] Pass `modelGroups` through `SettingsPageContent.tsx` into `LlmRolesTab.tsx`.
+- [x] Change `AvailableModelsSidebar.tsx` source prop from `credentials` to `modelGroups`.
+- [x] Render card title from backend `model_groups[].display_name`.
+- [x] Render provider chips from backend `provider_models[].provider_label` and `ui_state`.
+- [x] Remove per-card second-layer count badges such as `1 Untested`.
+- [x] Use normal UI font for model titles.
+- [x] Keep progressive rendering for long lists.
+- [x] Verify search for `opus` and `deepseek v3.1 thinking`.
+- [x] Run `pnpm --dir apps/studio/frontend test src/components/studio/settings/LlmRolesTab.test.tsx -- --runInBand`.
+- [x] Run `pnpm --dir apps/studio/frontend run typecheck`.
+- [x] Run `pnpm --dir apps/studio/frontend run lint`.
+- [x] Real browser/Tauri screenshot: right sidebar with `opus` search.
+- [x] Wait for user confirmation.
+- [x] Commit only PR 1 files.
 
 ## PR 2: Drop Model Group and Save Exact Route IDs
 
-- [ ] Add Model Group lookup map in `LlmRolesTab.tsx`.
-- [ ] Ensure drag payload carries backend Model Group ID.
-- [ ] Add helper that appends a Model Group to role data with exact `route_id` provider entries.
-- [ ] Default provider selection includes `ready` and `untested`.
-- [ ] Default provider selection excludes `needs_setup` and `off`.
-- [ ] Exclude `cooling_down` by default when other usable providers exist.
-- [ ] Sort official providers before third-party/custom unless role preference says otherwise.
-- [ ] Keep existing role autosave behavior and stale-response protection.
-- [ ] Verify outbound PUT payload contains exact route IDs and no inferred provider labels as execution IDs.
-- [ ] Run focused LLM Roles frontend tests.
-- [ ] Run typecheck/lint.
-- [ ] Real browser/Tauri drag/drop verification.
-- [ ] Wait for user confirmation.
-- [ ] Commit only PR 2 files.
+- [x] Add Model Group lookup map in `LlmRolesTab.tsx`.
+- [x] Ensure drag payload carries backend Model Group ID.
+- [x] Add helper that appends a Model Group to role data with exact `route_id` provider entries.
+- [x] Default provider selection preserves every backend route in the dragged Model Group.
+- [x] Keep `needs_setup`, `cooling_down`, and `off` routes visible after drag/drop so users can decide whether to remove them.
+- [x] Sort selected routes ready-first, then by provider kind/name.
+- [x] Route-backed providers are not pruned by legacy available-model ownership heuristics.
+- [x] Keep existing role autosave behavior and stale-response protection.
+- [x] Verify outbound PUT payload contains exact route IDs and no inferred provider labels as execution IDs.
+- [x] Run focused LLM Roles frontend tests.
+- [x] Run typecheck/lint.
+- [x] Real browser/Tauri drag/drop verification.
+- [x] Wait for user confirmation.
+- [x] Commit only PR 2 files.
 
 ## PR 3: Role Card Model Group and Provider Rows
 
@@ -104,7 +104,7 @@ related_requirements: .kiro/specs/studio-llm-roles-frontend-cutover/requirements
 
 ## Tracking Notes
 
-- Current PR 1 work is in progress and must not be committed until user confirms.
-- Existing unrelated API Keys dirty files must not be staged with LLM Roles commits.
-- If the Gateway display-name boundary spec changes backend DTO names, PR 1 must be adjusted before commit so frontend consumes Studio Backend display projection rather than Gateway-derived route display fields.
-
+- PR 1 was confirmed and committed as `91accd5 Split Studio LLM display projection from gateway runtime`.
+- PR 2 route/drop exact route-id work is implemented, verified, and accepted for local commit.
+- Route provider credential/test state must map through owning `endpoint_id`; `route_id` remains the execution target only.
+- Role card provider-row Test is provider-level and runs different provider routes concurrently; runtime fallback/aggregate Role Test remains PR 5 scope.

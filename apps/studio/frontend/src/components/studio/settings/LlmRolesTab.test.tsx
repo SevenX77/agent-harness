@@ -1,14 +1,17 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import type { CredentialsState, ModelGroup, RolesData } from "../../../api/llm"
+import { roleChainStatusKey } from "../../../hooks/useRoleTestChainRunner"
 import { AvailableModelDragPreview, LlmRolesTab, ModelSettingsDialog, ModelSettingsFields } from "./LlmRolesTab"
 import {
   AvailableModelsSidebar,
   buildAvailableModelGroups,
   filterAvailableModelGroups,
 } from "./llm-roles/AvailableModelsSidebar"
+import { RoleCard } from "./llm-roles/RoleCard"
 import { roleNameDisplayError, RoleNameDialog, RoleNameFields } from "./llm-roles/RoleNameDialog"
 import { appendAvailableModelToRole, appendModelGroupToRole, appendRole, normalizeRolesDraft, pruneInvalidRoleProviders, removeRole, renameRole, validateRolesDraft } from "./role-utils"
+import { credentialsByProviderCode } from "./route-credentials"
 
 const credentials: CredentialsState = {
   providers: [
@@ -179,7 +182,7 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain("canonical")
   })
 
-  it("adds a model group to a role using exact backend route ids and skips Needs Setup defaults", () => {
+  it("adds a model group to a role using every exact backend route id", () => {
     const next = appendModelGroupToRole(rolesData, "copilot_chat", modelGroups[0])
 
     expect(next.models["claude-sonnet-4-7"]).toMatchObject({
@@ -189,16 +192,169 @@ describe("LlmRolesTab controls", () => {
         "qiniu-anthropic:claude-sonnet-4-7": "claude-sonnet-4-7",
       },
     })
-    expect(next.models["claude-sonnet-4-7"].providers).not.toHaveProperty("broken-proxy:claude-sonnet-4-7")
     expect(next.roles.copilot_chat.models["claude-sonnet-4-7"].providers).toEqual([
       "anthropic-official:claude-sonnet-4-7",
       "qiniu-anthropic:claude-sonnet-4-7",
+      "broken-proxy:claude-sonnet-4-7",
     ])
     expect(next.providers["anthropic-official:claude-sonnet-4-7"].name).toBe("Anthropic Official")
     expect(validateRolesDraft(next)).toBeNull()
   })
 
-  it("excludes Off and Cooling Down providers by default when usable providers exist", () => {
+  it("keeps route provider endpoint ownership when adding a model group", () => {
+    const routeId = "deepseek-official:deepseek-v4-pro"
+    const next = appendModelGroupToRole(
+      rolesData,
+      "copilot_chat",
+      {
+        ...modelGroups[0],
+        canonical_id: "deepseek-v4-pro",
+        display_name: "DeepSeek V4 Pro",
+        provider_models: [
+          {
+            ...modelGroups[0].provider_models[0],
+            route_id: routeId,
+            endpoint_id: "deepseek-official",
+            provider_label: "DeepSeek Official",
+            provider_model_id: "deepseek-chat",
+            ui_state: "ready",
+          },
+        ],
+      },
+    )
+
+    expect(next.providers[routeId]).toMatchObject({
+      name: "DeepSeek Official",
+      type: "openai_compatible",
+      endpoint_id: "deepseek-official",
+    })
+  })
+
+  it("uses route endpoint credentials for role model availability", () => {
+    const routeId = "deepseek-official:deepseek-v4-pro"
+    const routeBackedData: RolesData = {
+      models: {
+        "deepseek-v4-pro": {
+          name: "DeepSeek V4 Pro",
+          providers: { [routeId]: "deepseek-chat" },
+        },
+      },
+      providers: {
+        [routeId]: {
+          name: "DeepSeek Official",
+          type: "openai_compatible",
+          endpoint_id: "deepseek-official",
+        },
+      },
+      roles: {
+        analyst: {
+          model_fallback: true,
+          active_model: "deepseek-v4-pro",
+          models: {
+            "deepseek-v4-pro": { providers: [routeId], temperature: null, max_tokens: null },
+          },
+        },
+      },
+    }
+    const html = renderRolesHtml({
+      data: routeBackedData,
+      credentials: {
+        providers: [
+          {
+            id: "deepseek-official",
+            name: "DeepSeek Official",
+            api_key: "sk-deepseek",
+            provider_type: "openai_compatible",
+            last_test_status: "ok",
+          },
+        ],
+      },
+    })
+
+    expect(html).toContain("Connected")
+    expect(html).not.toContain("Unavailable")
+  })
+
+  it("lets current provider test failures override stale endpoint success for the model badge", () => {
+    const modelCode = "gpt-5-4-mini"
+    const routeBackedData: RolesData = {
+      models: {
+        [modelCode]: {
+          name: "GPT 5.4 Mini",
+          providers: {
+            "openrouter:gpt-5-4-mini": "openai/gpt-5.4-mini",
+            "openai-official:gpt-5-4-mini": "gpt-5.4-mini",
+          },
+        },
+      },
+      providers: {
+        "openrouter:gpt-5-4-mini": {
+          name: "OpenRouter",
+          type: "openai_compatible",
+          endpoint_id: "openrouter",
+        },
+        "openai-official:gpt-5-4-mini": {
+          name: "OpenAI Official",
+          type: "openai_compatible",
+          endpoint_id: "openai-official",
+        },
+      },
+      roles: {
+        Analyst: {
+          model_fallback: true,
+          active_model: modelCode,
+          models: {
+            [modelCode]: {
+              providers: ["openrouter:gpt-5-4-mini", "openai-official:gpt-5-4-mini"],
+              temperature: null,
+              max_tokens: null,
+            },
+          },
+        },
+      },
+    }
+    const routeCredentials: CredentialsState = {
+      providers: [
+        {
+          id: "openrouter",
+          name: "OpenRouter",
+          api_key: "sk-openrouter",
+          provider_type: "openai_compatible",
+          last_test_status: "ok",
+        },
+        {
+          id: "openai-official",
+          name: "OpenAI Official",
+          api_key: "sk-openai",
+          provider_type: "openai_compatible",
+          last_test_status: "ok",
+        },
+      ],
+    }
+    const html = renderToStaticMarkup(
+      <RoleCard
+        data={routeBackedData}
+        category="graph-agent"
+        credentialsByCode={credentialsByProviderCode(routeBackedData, routeCredentials)}
+        roleName="Analyst"
+        testStatuses={{
+          [roleChainStatusKey(modelCode, "openrouter:gpt-5-4-mini")]: { status: "network_error", message: "Network error" },
+          [roleChainStatusKey(modelCode, "openai-official:gpt-5-4-mini")]: { status: "timeout", message: "Timed out" },
+        }}
+        testChainRunning={false}
+        onRunTestChain={vi.fn()}
+        getActiveAvailableModelDragId={() => null}
+        getAvailableModelGroup={() => null}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(html).toContain('aria-label="Provider status Failed"')
+    expect(html).toContain(">Failed</")
+    expect(html).not.toContain('aria-label="Provider status Connected"')
+  })
+
+  it("adds every backend provider route from the model group in ready-first order", () => {
     const modelGroup: ModelGroup = {
       ...modelGroups[0],
       canonical_id: "gpt-5",
@@ -244,10 +400,12 @@ describe("LlmRolesTab controls", () => {
     expect(next.roles.copilot_chat.models["gpt-5"].providers).toEqual([
       "ready:gpt-5",
       "untested:gpt-5",
+      "cooldown:gpt-5",
+      "off:gpt-5",
     ])
   })
 
-  it("keeps Cooling Down providers only when they are the only usable candidates", () => {
+  it("keeps setup-needed routes when adding a model group so users can see and remove them", () => {
     const modelGroup: ModelGroup = {
       ...modelGroups[0],
       canonical_id: "deepseek-v3",
@@ -276,6 +434,7 @@ describe("LlmRolesTab controls", () => {
 
     expect(next.roles.copilot_chat.models["deepseek-v3"].providers).toEqual([
       "cooldown:deepseek-v3",
+      "needs-setup:deepseek-v3",
     ])
   })
 
@@ -363,14 +522,17 @@ describe("LlmRolesTab controls", () => {
 
     expect(html).toContain('data-available-model-drag-source="true"')
     expect(html).toContain('data-available-model-pointer-drag-source="true"')
+    expect(html).toContain('data-available-model-native-dnd="off"')
   })
 
   it("renders a pointer drag preview for available model drops", () => {
     const html = renderToStaticMarkup(
       <AvailableModelDragPreview
+        nodeRef={{ current: null }}
         drag={{
           dragging: true,
           modelId: "anthropic/claude-opus-4.7",
+          label: "Claude Opus 4.7",
           x: 120,
           y: 240,
         }}
@@ -378,7 +540,8 @@ describe("LlmRolesTab controls", () => {
     )
 
     expect(html).toContain('data-available-model-drag-preview="true"')
-    expect(html).toContain("anthropic/claude-opus-4.7")
+    expect(html).toContain('data-preview-update-mode="imperative-transform"')
+    expect(html).toContain("Claude Opus 4.7")
     expect(html).toContain("translate3d(120px, 240px, 0)")
     expect(html).toContain("pointer-events-none")
     expect(html).toContain("ring-primary/40")
@@ -988,6 +1151,9 @@ describe("LlmRolesTab controls", () => {
     expect(html).toContain("items-center")
     expect(html).toContain("self-center")
     expect(html).toContain("row-span-1")
+    expect(html).toContain("row-start-2")
+    expect(html).toContain("sm:row-start-1")
+    expect(html).toContain("sm:col-start-2")
     expect(html).toContain("flex-nowrap")
     expect(html).toContain("h-8")
     expect(html).toContain("justify-self-end")

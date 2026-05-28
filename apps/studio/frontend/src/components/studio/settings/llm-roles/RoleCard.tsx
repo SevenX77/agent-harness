@@ -32,7 +32,7 @@ import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog"
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Switch } from "@/components/ui/switch"
 import type { CredentialsState, ModelGroup, RolesData } from "@/api/llm"
-import type { RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
+import { roleChainStatusKey, type RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
 import { getModelAvailability } from "../availability"
 import {
   AVAILABLE_MODEL_DRAG_TYPE,
@@ -90,7 +90,11 @@ export function RoleCard({
       role.models[modelCode]?.providers ?? [],
       credentialsByCode,
     )
-    return getModelAvailability(providers, credentialsByCode)
+    return getModelAvailability(
+      providers,
+      credentialsByCode,
+      providers.map((providerCode) => testStatuses[roleChainStatusKey(modelCode, providerCode)]),
+    )
   }
 
   function handleAvailableModelDragOver(event: DragEvent<HTMLDivElement>) {
@@ -169,7 +173,7 @@ export function RoleCard({
         data-model-drop-fallback="active-drag-ref"
         className="pointer-events-none absolute inset-0 z-10 hidden rounded-md"
       />
-      <CardHeader className="grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+      <CardHeader className="!grid-cols-1 items-center gap-2 sm:!grid-cols-[minmax(0,1fr)_auto] sm:gap-3">
         <div
           data-role-card-title-row="true"
           className="col-start-1 row-start-1 flex h-8 min-w-0 items-center gap-2"
@@ -183,7 +187,7 @@ export function RoleCard({
         </div>
         <CardAction
           data-role-header-actions="true"
-          className="col-start-2 row-start-1 row-span-1 flex h-8 flex-nowrap items-center justify-end gap-3 self-center"
+          className="col-start-1 row-start-2 row-span-1 flex h-8 flex-nowrap items-center justify-start gap-3 self-center sm:col-start-2 sm:row-start-1 sm:justify-end"
         >
           <label className="flex h-8 items-center gap-2 whitespace-nowrap text-xs text-muted-foreground">
             <Switch

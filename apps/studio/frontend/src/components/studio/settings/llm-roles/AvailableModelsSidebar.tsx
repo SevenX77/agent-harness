@@ -51,13 +51,9 @@ const availableModelsRenderStep = 24
 
 export function AvailableModelsSidebar({
   modelGroups,
-  onModelDragEnd,
-  onModelDragStart,
   onModelPointerDown,
 }: {
   modelGroups: ModelGroup[]
-  onModelDragEnd?: () => void
-  onModelDragStart?: (modelId: string) => void
   onModelPointerDown?: (modelId: string, event: PointerEvent<HTMLButtonElement>) => void
 }) {
   const [query, setQuery] = useState("")
@@ -120,12 +116,6 @@ export function AvailableModelsSidebar({
     }
     applySelectedModel(modelId, event.currentTarget)
   }, [applySelectedModel])
-  const handleModelDragStart = useCallback((modelId: string) => {
-    onModelDragStart?.(modelId)
-  }, [onModelDragStart])
-  const handleModelDragEnd = useCallback(() => {
-    onModelDragEnd?.()
-  }, [onModelDragEnd])
   const handleClearSearch = useCallback(() => {
     setQuery("")
     searchInputRef.current?.focus()
@@ -191,8 +181,6 @@ export function AvailableModelsSidebar({
                         selected={selectedModelId === model.id}
                         onClickSelect={handleModelClick}
                         onPointerSelect={handleModelPointerDown}
-                        onDragStart={() => handleModelDragStart(model.id)}
-                        onDragEnd={handleModelDragEnd}
                       />
                     ))}
                   </div>
@@ -240,26 +228,22 @@ const AvailableModelCard = memo(function AvailableModelCard({
   selected,
   onClickSelect,
   onPointerSelect,
-  onDragStart,
-  onDragEnd,
 }: {
   model: AvailableModelEntry
   selected: boolean
   onClickSelect: (modelId: string, event: MouseEvent<HTMLButtonElement>) => void
   onPointerSelect: (modelId: string, event: PointerEvent<HTMLButtonElement>) => void
-  onDragStart: () => void
-  onDragEnd: () => void
 }) {
   return (
     <button
       type="button"
+      draggable={false}
       aria-pressed={selected}
       data-available-model-drag-source="true"
       data-available-model-pointer-drag-source="true"
+      data-available-model-native-dnd="off"
       data-model-id={model.id}
       data-selected={selected ? "true" : undefined}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
       onPointerDown={(event) => onPointerSelect(model.id, event)}
       onClick={(event) => onClickSelect(model.id, event)}
       className={cn(

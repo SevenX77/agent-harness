@@ -46,6 +46,14 @@ export function AvailabilityBadge({ availability }: { availability: ModelAvailab
       </Badge>
     )
   }
+  if (availability === "failed") {
+    return (
+      <Badge variant="destructive" className="gap-1" aria-label="Provider status Failed">
+        <TriangleAlert className="size-3" />
+        Failed
+      </Badge>
+    )
+  }
   return (
     <Badge variant="destructive" className="gap-1" aria-label="Provider status Unavailable">
       <TriangleAlert className="size-3" />

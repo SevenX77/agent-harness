@@ -1,13 +1,18 @@
 import { useCallback, useState } from "react"
 import {
-  testProvider,
+  testProviderEndpoint,
   type CredentialsState,
+  type ProviderTestRequest,
   type ProviderTestResponse,
   type ProviderTestStatus,
   type RolesData,
 } from "@/api/llm"
+import { credentialsByProviderCode } from "@/components/studio/settings/route-credentials"
 
 export type RoleChainStatus = ProviderTestStatus | "testing" | "idle"
+type RoleProviderTestFn = (
+  request: ProviderTestRequest & { model_id: string }
+) => Promise<ProviderTestResponse>
 
 export interface RoleTestTarget {
   modelCode: string
@@ -29,7 +34,7 @@ export function buildRoleTestTargets(
 ): RoleTestTarget[][] {
   const role = data.roles[roleName]
   if (!role) return []
-  const credentialsByCode = Object.fromEntries(credentials.providers.map((provider) => [provider.id, provider]))
+  const credentialsByCode = credentialsByProviderCode(data, credentials)
   return Object.entries(role.models).map(([modelCode, roleModel]) => (
     roleModel.providers.map((providerCode) => ({
       modelCode,
@@ -57,10 +62,18 @@ export async function runWithConcurrency<T>(
   await Promise.all(workers)
 }
 
+export async function runRoleTestTargets(
+  modelChains: RoleTestTarget[][],
+  limit: number,
+  worker: (target: RoleTestTarget) => Promise<void>,
+): Promise<void> {
+  await runWithConcurrency(modelChains.flat(), limit, worker)
+}
+
 export function useRoleTestChainRunner({
-  testFn = testProvider,
+  testFn = testProviderEndpoint,
 }: {
-  testFn?: typeof testProvider
+  testFn?: RoleProviderTestFn
 } = {}) {
   const [isRunning, setIsRunning] = useState(false)
   const [statuses, setStatuses] = useState<RoleChainStatusMap>({})
@@ -85,23 +98,20 @@ export function useRoleTestChainRunner({
       const modelChains = buildRoleTestTargets(data, roleName, credentials)
       setIsRunning(true)
       try {
-        await runWithConcurrency(modelChains, 3, async (providerChain) => {
-          for (const target of providerChain) {
-            if (!target.credential?.api_key.trim() || !target.credential.provider_type) {
-              setTargetStatus(target, "missing_api_key", "Provider has no API key or protocol.")
-              continue
-            }
-            setTargetStatus(target, "testing")
-            const response: ProviderTestResponse = await testFn({
-              id: target.credential.id,
-              provider_type: target.credential.provider_type,
-              api_key: target.credential.api_key.trim(),
-              base_url: target.credential.base_url || undefined,
-              model_id: target.modelId,
-            })
-            setTargetStatus(target, response.status, response.message ?? undefined)
-            if (response.status === "ok") break
+        await runRoleTestTargets(modelChains, 4, async (target) => {
+          if (!target.credential?.api_key.trim() || !target.credential.provider_type) {
+            setTargetStatus(target, "missing_api_key", "Provider has no API key or protocol.")
+            return
           }
+          setTargetStatus(target, "testing")
+          const response: ProviderTestResponse = await testFn({
+            id: target.credential.id,
+            provider_type: target.credential.provider_type,
+            api_key: target.credential.api_key.trim(),
+            base_url: target.credential.base_url || undefined,
+            model_id: target.modelId,
+          })
+          setTargetStatus(target, response.status, response.message ?? undefined)
         })
       } finally {
         setIsRunning(false)

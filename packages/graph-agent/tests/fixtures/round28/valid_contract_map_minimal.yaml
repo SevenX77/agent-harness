@@ -10,7 +10,7 @@ public_api_symbols:
   PersonaSkillDef:
     feature_ids: [F-vendor-contract-debt]
   CompileIssue:
-    feature_ids: [F-vendor-compile-issue]
+    feature_ids: [F-skill-compilation-vendor-export]
   parse_skill_file:
     feature_ids: [F-vendor-contract-debt]
 skill_spec_sections:
@@ -26,3 +26,6 @@ consumer_files:
   - kind: vendor-only-debt
     symbol: AgentSkillDef
     feature_ids: [F-vendor-contract-debt]
+  - kind: vendor-only
+    symbol: CompileIssue
+    feature_ids: [F-skill-compilation-vendor-export]

@@ -48,6 +48,43 @@ runtime compatibility 的识别目前靠 feature 名称或描述里含有 compat
 
 旧 dual-run checklist 的路径保留了, 但内容已经从 Round 27 的 30 项文本清单切到 Round 28 的 35 项 manifest 反向生成清单。这是 cutover 风格的保留, 不是同时保留两份旧内容。
 
+## 4. 旧 30 项去向表
+
+这张表用 Round 27 checklist commit `6cd143e` 的 30 项做基线。结论是: 30 项没有静默删除; 它们要么保留为同名能力, 要么被拆到更精确的新 feature, 要么并入更大的生命周期 feature。没有本轮降级项, 因此没有新增 exemption_id。
+
+| 旧项 | 去向 | 新 feature |
+| --- | --- | --- |
+| LP-01 Markdown frontmatter/body split | 保留 | `F-md-frontmatter-parsing` |
+| LP-02 CRLF markdown parsing | 合并 | `F-md-frontmatter-parsing` |
+| LP-03 missing frontmatter fail-fast | 合并 | `F-md-frontmatter-parsing` |
+| LP-04 GRAPH phase registry + body DAG | 保留 | `F-graph-skill-loading` |
+| LP-05 physical phase ambiguity rejection | 合并 | `F-graph-skill-loading` |
+| LP-06 Agent inline examples for mentions | 拆分 | `F-agent-phase-orchestration`, `F-mention-resolution` |
+| CV-01 legacy schema root rejection | 合并 | `F-compile-runtime-flow` |
+| CV-02 V0.3.0 schema marker | 合并 | `F-graph-skill-loading` |
+| CV-03 duplicate phase registration | 合并 | `F-graph-skill-loading` |
+| CV-04 graph cycle rejection | 合并 | `F-graph-skill-loading` |
+| CV-05 subgraph input contract validation | 保留 | `F-subgraph-delegation` |
+| CV-06 injected skill resolver facade | 保留 | `F-skill-resolution` |
+| ER-01 run_skill root-shape error | 合并 | `F-runtime-execution` |
+| ER-02 PhaseNode updated runtime state | 合并 | `F-runtime-execution` |
+| ER-03 non-LLM phases route to code nodes | 合并 | `F-logic-action-execution` |
+| ER-04 validation node string error normalization | 合并 | `F-runtime-execution` |
+| ER-05 assemble_graph resolver requirement | 合并 | `F-skill-resolution`, `F-graph-assembly` |
+| ER-06 callback emission after callback failure | 保留 | `F-callback-event-stream` |
+| SB-01 blackboard reducer merge | 保留 | `F-state-blackboard` |
+| SB-02 undeclared output rejection | 合并 | `F-state-blackboard` |
+| SB-03 phase wrapper IO mapping | 合并 | `F-state-blackboard` |
+| SB-04 reference reader sandbox isolation | 拆分 | `F-resource-reference-access`, `F-state-blackboard` |
+| SB-05 cache round-trip preservation | 保留 | `F-checkpoint-persistence` |
+| SB-06 nested IO hoist paths | 保留 | `F-storage-io` |
+| OE-01 callback event union | 保留 | `F-callback-event-stream` |
+| OE-02 typed tracing output | 保留 | `F-callback-tracing` |
+| OE-03 error payload registry metadata | 保留 | `F-error-code-recovery` |
+| OE-04 error registry/spec key set | 合并 | `F-error-code-recovery` |
+| OE-05 trace save failure error | 合并 | `F-callback-tracing` |
+| OE-06 LLM usage metrics | 合并 | `F-observability-metrics` |
+
 ## 证据摘要
 
 - Round 28 manifest 契约测试: 18 passed。

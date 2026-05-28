@@ -27,7 +27,7 @@ EXPECTED_CONTRACT_HASHES = {
     "docs/engine/skill-spec/README.md": "1716f2891e0a7ed6987489debb3c46948825430efeff61975caa7f420114c4b3",
     "docs/engine/public-api-contract.md": "59379703b51c267f772f35c751ecbd6e54b0bbd100c2b469be8f32dc6525d837",
     "docs/engine/feature-compliance-checklist.md": "4b7ee286fa372206af6ba1e2e97b36e5cdb3cf1e2653f81d43f0d1c06de076a0",
-    "packages/graph-agent/spec/round28-manifest-schema.yaml": "4b7cc287518231d9d111f0cff884e631e2e3ab98d93ebea145ea57731592a303",
+    "packages/graph-agent/spec/round28-manifest-schema.yaml": "bcdf70ea0469fe02adff8e2c20e03f813195c1eaa0e4c325f8987cb6cfed5481",
 }
 
 

@@ -734,8 +734,14 @@ def _load_contract_exemptions(path: Path = EXEMPTIONS_PATH) -> list[dict[str, ob
             assert isinstance(entry[key], str) and entry[key].strip(), f"exemption #{index} {key} must be non-empty"
         for key in ("symbols", "fields", "hashes"):
             assert isinstance(entry[key], list), f"exemption #{index} {key} must be a list"
+            assert all(isinstance(item, str) and item.strip() for item in entry[key]), (
+                f"exemption #{index} {key} entries must be non-empty strings"
+            )
         assert entry["symbols"] or entry["fields"] or entry["hashes"], (
             f"exemption #{index} must name at least one symbol, field, or hash key"
+        )
+        assert entry["symbols"] or not entry["fields"] or all("." in field for field in entry["fields"]), (
+            f"exemption #{index} field-only entries must use Symbol.field keys"
         )
     return exemptions
 

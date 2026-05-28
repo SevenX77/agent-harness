@@ -10,6 +10,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MATRIX_PATH = REPO_ROOT / "docs/engine/feature-compliance-checklist.md"
 COVERAGE_RE = re.compile(r"\[Covered By: (?P<path>packages/graph-agent/tests/[^:\]]+)::(?P<test>test_[A-Za-z0-9_]+)\]")
+EXPECTED_FEATURE_COUNT = 30
 LIFECYCLE_HEADINGS = {
     "Loading & Parsing",
     "Compilation & Validation",
@@ -40,9 +41,9 @@ def test_feature_matrix_lifecycle_items_reference_existing_collectable_tests() -
 
     feature_count = len(re.findall(r"^### ", text, flags=re.MULTILINE))
     refs = _coverage_refs()
-    assert feature_count >= 25
+    assert feature_count == EXPECTED_FEATURE_COUNT
     assert len(refs) == feature_count
-    assert len(refs) >= 25
+    assert len(refs) == EXPECTED_FEATURE_COUNT
 
     nodeids: list[str] = []
     for relative_path, test_name in refs:

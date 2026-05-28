@@ -5,11 +5,11 @@
 本 PR 是 PR1 "Gatekeeper"：只建立真实契约防线，不做边界清理，不重构业务代码，不修改 `packages/graph-agent/src/**`。
 
 核心判据：
-- 被生产消费者实际使用的就是契约。API 契约、防漂移测试、审计清单必须覆盖完整 61 符号表面，而不是只覆盖 `graph_agent.__all__` 的 18 个符号。
-- 61 符号 = `graph_agent.__all__` 18 个稳定导出 + `CONSUMER-API-INVENTORY.md` 发现的 43 个非 `__all__` 生产依赖符号。
+- 被生产消费者实际使用的就是契约。API 契约、防漂移测试、审计清单必须覆盖完整 65 符号表面，而不是只覆盖 `graph_agent.__all__` 的 18 个符号。
+- 65 符号 = `graph_agent.__all__` 18 个稳定导出 + `CONSUMER-API-INVENTORY.md` 发现的 47 个非 `__all__` 外部依赖符号。
 - `_predict_internal` 现状在本 PR 中按事实冻结，并标记为“既定事实契约 / 已知债务”；不得在本 PR 中重构、改 import、移动模块或设计新公开接口。该边界清理属于 PR2。
 - 所有 expected API 名称、字段名、hash baseline 必须硬编码。禁止从当前模块、`__all__`、inventory 或 Markdown 动态生成 expected 后再和自身比较。
-- 黄金原则硬门：61 符号一个不能漏。Audit Agent 会 100% 核对 inventory、API 文档、防漂移测试三方一致，任何遗漏即不合格。
+- 黄金原则硬门：65 符号一个不能漏。Audit Agent 会 100% 核对 inventory、API 文档、防漂移测试三方一致，任何遗漏即不合格。
 
 PR1 允许改动范围：
 - 新建 `docs/engine/public-api-contract.md`
@@ -29,7 +29,7 @@ PR1 允许改动范围：
 - 不使用 skip / xfail / collect_ignore / 弱断言规避防线
 - 不 commit
 
-61 符号冻结清单：
+65 符号冻结清单：
 - `run_skill`
 - `WorkflowResult`
 - `compile_skill`
@@ -56,6 +56,7 @@ PR1 允许改动范围：
 - `CompactionEvent`
 - `CompileIssue`
 - `DeadEndPrunedEvent`
+- `ExecutionError`
 - `FinishTaskEvent`
 - `GoldenCase`
 - `GoldenCaseStrategy`
@@ -65,6 +66,8 @@ PR1 允许改动范围：
 - `HeuristicStubStrategy`
 - `IoInput`
 - `LLMCallEvent`
+- `LLMClientManager`
+- `LLMFallbackEvent`
 - `LogicNodeAST`
 - `MockStrategy`
 - `NudgeEvent`
@@ -73,6 +76,7 @@ PR1 允许改动范围：
 - `PhaseEndEvent`
 - `PhaseRecord`
 - `PhaseStartEvent`
+- `PredictGatewayChatModel`
 - `PredictResult`
 - `PredictTracingCallback`
 - `ProviderDef`
@@ -94,17 +98,17 @@ PR1 允许改动范围：
 
 ## Tasks
 
-### 1. Docs: 新建 61 符号公开 API 契约文档
+### 1. Docs: 新建 65 符号公开 API 契约文档
 
 Goal:
-- 建立基于真实消费表面的 API 契约文档，覆盖完整 61 符号。
-- 明确区分 18 个 `__all__` 稳定导出、43 个生产深层依赖、11 个 `_predict_internal` 已知债务。
+- 建立基于真实消费表面的 API 契约文档，覆盖完整 65 符号。
+- 明确区分 18 个 `__all__` 稳定导出、47 个非 `__all__` 外部依赖、12 个 `_predict_internal` 已知债务。
 
 Files:
 - 新建 `docs/engine/public-api-contract.md`
 
 Steps:
-- 以 `CONSUMER-API-INVENTORY.md` 和 `packages/graph-agent/src/graph_agent/__init__.py` 为事实来源，整理 61 符号章节。
+- 以 `CONSUMER-API-INVENTORY.md` 和 `packages/graph-agent/src/graph_agent/__init__.py` 为事实来源，整理 65 符号章节。
 - 对每个符号追踪真实来源模块，使用 AST / `inspect` 获取函数签名、类字段、Pydantic model fields、dataclass fields 或异常继承关系。
 - 每个符号章节必须包含：
   - Symbol name
@@ -116,20 +120,21 @@ Steps:
   - Postconditions
   - Drift risk notes
 - `_predict_internal` 来源符号必须额外标注：`De Facto Contract / Known Debt`，并说明本 PR 只冻结现状，PR2 再做边界清理。
+- 6 个 vendor-only 符号（`AgentSkillDef`、`GraphSkillDef`、`IoInput`、`PersonaSkillDef`、`CompileIssue`、`parse_skill_file`）必须纳入冻结清单，但在文档中标注 `vendor-only / 待核实是否仍需`，不要和 live 依赖混写。
 - 文档必须包含 sibling 排除声明：`docs/engine/` 下除 `skill-spec` 以外的其余讲解类子目录属于 Logic-Explained Docs，不属于本次不可动摇契约基线。
 - 不把 `skill-spec` Markdown 格式规范混入 Python API 契约；二者在文档中保持独立边界。
 
 Acceptance:
-- `docs/engine/public-api-contract.md` 覆盖 61 符号，符号名与本 tasks 的 61 清单、`CONSUMER-API-INVENTORY.md`、防漂移测试三方一致。
+- `docs/engine/public-api-contract.md` 覆盖 65 符号，符号名与本 tasks 的 65 清单、`CONSUMER-API-INVENTORY.md`、防漂移测试三方一致。
 - 每个符号都有 Signature 或 Fields、Preconditions、Postconditions、`@stable`。
-- 11 个 `_predict_internal` 符号全部标注 `De Facto Contract / Known Debt`。
+- 12 个 `_predict_internal` 符号全部标注 `De Facto Contract / Known Debt`。
 - 文档包含 sibling 排除声明。
 - `rg -n "TODO|TBD|待补|unknown|不确定|以后补" docs/engine/public-api-contract.md` 无输出。
 
-### 2. Test: 新建 61 符号字段级 API 防漂移测试
+### 2. Test: 新建 65 符号字段级 API 防漂移测试
 
 Goal:
-- 用 CI 锁定 61 个真实契约符号的名称集合、来源模块、函数签名、类字段和关键继承关系。
+- 用 CI 锁定 65 个真实契约符号的名称集合、来源模块、函数签名、类字段和关键继承关系。
 - 防止“符号还在但字段/参数漂移”的隐性破坏。
 
 Files:
@@ -137,7 +142,7 @@ Files:
 - 新建 `packages/graph-agent/tests/contract-exemptions.yaml`
 
 Steps:
-- 在测试中硬编码 61 符号 expected 清单，包含每个符号的 canonical source module。
+- 在测试中硬编码 65 符号 expected 清单，包含每个符号的 canonical source module。
 - 使用 `importlib` / `inspect` / Pydantic model metadata / dataclass metadata 检查真实对象。
 - 对函数类符号断言参数名、必填/可选结构、默认值、关键类型注解和返回注解，至少覆盖：
   - `run_skill`
@@ -149,6 +154,7 @@ Steps:
   - `compute_diff`
   - `load_config`
   - `parse_skill_file`
+  - `PredictGatewayChatModel`
 - 对 Pydantic / dataclass / model 类做字段级断言，至少覆盖 callback events、manifest AST、Predict models、Compile result/issue、Workflow result、Blackboard state。
 - 字段级断言必须包含已知高风险字段，例如：
   - `PathDiff` 必须包含 `added`、`removed`
@@ -165,8 +171,8 @@ Steps:
 
 Acceptance:
 - `uv run pytest packages/graph-agent/tests/test_public_api_contract.py` 通过。
-- 测试中 expected 61 清单为硬编码常量，不从当前模块、inventory、Markdown 或 `__all__` 动态生成。
-- 任意删除 61 符号之一、改变 canonical source module、删除关键字段或破坏核心签名都会导致测试失败。
+- 测试中 expected 65 清单为硬编码常量，不从当前模块、inventory、Markdown 或 `__all__` 动态生成。
+- 任意删除 65 符号之一、改变 canonical source module、删除关键字段或破坏核心签名都会导致测试失败。
 - `contract-exemptions.yaml` 存在，schema 可审计，测试会读取并校验豁免结构。
 
 ### 3. Docs + Test: 新建功能合规清单与可追溯矩阵
@@ -249,6 +255,7 @@ Steps:
   ```
 - 严禁改正文标题、段落、列表、代码块、空行语义或已有规范内容。
 - 在 `test_skill_spec_hash_lock.py` 中硬编码 14 个文件路径和注入后 SHA-256 baseline。
+- SHA-256 计算必须固定使用二进制读取（例如 `Path.read_bytes()`）直接对仓库字节算 hash；如选择文本规范化方案，则必须统一 normalize 行尾 CRLF→LF 并 strip 尾随空行，且测试与 baseline 生成使用同一规范。优先使用二进制读取，避免不同环境行尾或尾随换行差异导致误红。
 - 测试读取 `contract-exemptions.yaml`；只有显式登记 PR 号、PM 批准说明和对应 hash key 的变更才允许放行。
 
 Acceptance:
@@ -293,7 +300,7 @@ Acceptance:
 ### 6. Verification: PR1 纯 Additive 范围与三方一致性核验
 
 Goal:
-- 验证 PR1 只建立防线，且 inventory、API 文档、防漂移测试对 61 符号完全一致。
+- 验证 PR1 只建立防线，且 inventory、API 文档、防漂移测试对 65 符号完全一致。
 
 Files:
 - No additional files expected.
@@ -302,7 +309,7 @@ Commands:
 - `uv run pytest packages/graph-agent/tests/test_public_api_contract.py`
 - `uv run pytest packages/graph-agent/tests/test_feature_traceability_matrix.py`
 - `uv run pytest packages/graph-agent/tests/test_skill_spec_hash_lock.py`
-- `python - <<'PY'` 脚本读取 `CONSUMER-API-INVENTORY.md`、`docs/engine/public-api-contract.md`、`packages/graph-agent/tests/test_public_api_contract.py`，核对 61 符号集合完全一致。
+- `python - <<'PY'` 脚本读取 `CONSUMER-API-INVENTORY.md`、`docs/engine/public-api-contract.md`、`packages/graph-agent/tests/test_public_api_contract.py`，核对 65 符号集合完全一致。
 - `rg -n "TODO|TBD|待补|凭印象|unknown|不确定|以后补" docs/engine/public-api-contract.md docs/engine/feature-compliance-checklist.md`
 - `rg -n "De Facto Contract / Known Debt" docs/engine/public-api-contract.md`
 - `rg -n "status: FROZEN|DO NOT EDIT: Golden principle contract baseline" docs/engine/skill-spec`
@@ -310,8 +317,8 @@ Commands:
 
 Acceptance:
 - 三个防线测试全部通过。
-- 61 符号在 inventory、API 文档、API 防漂移测试中三方一致。
-- 11 个 `_predict_internal` 符号在文档和测试中按现状冻结，并标记为已知债务。
+- 65 符号在 inventory、API 文档、API 防漂移测试中三方一致。
+- 12 个 `_predict_internal` 符号在文档和测试中按现状冻结，并标记为已知债务。
 - `docs/engine/public-api-contract.md` 明确 sibling 排除声明。
 - `git diff --name-only` 白名单只包含：
   - `.kiro/specs/engine-mvp0-rebuild-v030/round-27-contract-docs-baseline-freeze/tasks.md`

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -9,12 +9,14 @@ import { AvailableModelsSidebar } from "./llm-roles/AvailableModelsSidebar"
 import { RoleSaveStatusBadge } from "./llm-roles/RoleBadges"
 import { RoleCardList } from "./llm-roles/RoleCardList"
 import { appendModelGroupToRole, pruneInvalidRoleProviders } from "./role-utils"
+import { credentialsByProviderCode } from "./route-credentials"
 import { SectionTitle } from "./shared"
 
 export { ModelSettingsDialog, ModelSettingsFields } from "./llm-roles/ModelSettingsDialog"
 
 interface AvailableModelPointerDrag {
   dragging: boolean
+  previewVisible: boolean
   modelId: string
   startX: number
   startY: number
@@ -23,6 +25,7 @@ interface AvailableModelPointerDrag {
 export interface AvailableModelDragPreviewState {
   dragging: true
   modelId: string
+  label: string
   x: number
   y: number
 }
@@ -42,16 +45,20 @@ export function LlmRolesTab({
   error: string | null
   onChange: (next: RolesData) => void
 }) {
-  const credentialsByCode = useMemo(
-    () => Object.fromEntries(credentials.providers.map((provider) => [provider.id, provider])),
-    [credentials.providers],
-  )
+  const credentialsByCode = useMemo(() => (
+    data
+      ? credentialsByProviderCode(data, { providers: credentials.providers })
+      : Object.fromEntries(credentials.providers.map((provider) => [provider.id, provider]))
+  ), [credentials.providers, data])
   const normalizedData = useMemo(() => (
     data ? pruneInvalidRoleProviders(data, credentialsByCode) : null
   ), [credentialsByCode, data])
   const { isRunning: testChainRunning, run: runTestChain, statuses: testStatuses } = useRoleTestChainRunner()
   const activeAvailableModelDragRef = useRef<string | null>(null)
   const availableModelPointerDragRef = useRef<AvailableModelPointerDrag | null>(null)
+  const availableModelDragPreviewNodeRef = useRef<HTMLDivElement | null>(null)
+  const availableModelDragPreviewFrameRef = useRef<number | null>(null)
+  const availableModelDragPreviewPointRef = useRef<{ x: number; y: number } | null>(null)
   const suppressAvailableModelDragClickRef = useRef(false)
   const availableModelDragReleaseTimerRef = useRef<number | null>(null)
   const [availableModelDragPreview, setAvailableModelDragPreview] = useState<AvailableModelDragPreviewState | null>(null)
@@ -84,6 +91,7 @@ export function LlmRolesTab({
     activeAvailableModelDragRef.current = modelId
     availableModelPointerDragRef.current = {
       dragging: false,
+      previewVisible: false,
       modelId,
       startX: event.clientX,
       startY: event.clientY,
@@ -93,6 +101,20 @@ export function LlmRolesTab({
     } catch {
       // Pointer capture is a progressive enhancement; window listeners still handle the fallback.
     }
+  }, [])
+
+  const updateAvailableModelDragPreviewPosition = useCallback((x: number, y: number) => {
+    availableModelDragPreviewPointRef.current = { x, y }
+    if (availableModelDragPreviewFrameRef.current !== null) return
+
+    availableModelDragPreviewFrameRef.current = window.requestAnimationFrame(() => {
+      availableModelDragPreviewFrameRef.current = null
+      const point = availableModelDragPreviewPointRef.current
+      availableModelDragPreviewPointRef.current = null
+      const node = availableModelDragPreviewNodeRef.current
+      if (!point || !node) return
+      node.style.transform = availableModelDragPreviewTransform(point.x, point.y)
+    })
   }, [])
 
   useEffect(() => {
@@ -110,6 +132,17 @@ export function LlmRolesTab({
       document.documentElement.removeAttribute("data-available-model-dragging")
     }
 
+    function releaseDragPreview({ clearState = true }: { clearState?: boolean } = {}) {
+      if (clearState) {
+        setAvailableModelDragPreview(null)
+      }
+      availableModelDragPreviewPointRef.current = null
+      if (availableModelDragPreviewFrameRef.current !== null) {
+        window.cancelAnimationFrame(availableModelDragPreviewFrameRef.current)
+        availableModelDragPreviewFrameRef.current = null
+      }
+    }
+
     function scheduleDragSuppressionRelease() {
       suppressAvailableModelDragClickRef.current = true
       if (availableModelDragReleaseTimerRef.current !== null) {
@@ -123,13 +156,18 @@ export function LlmRolesTab({
     function clearPointerDrag({ suppressClick = false }: { suppressClick?: boolean } = {}) {
       activeAvailableModelDragRef.current = null
       availableModelPointerDragRef.current = null
-      setAvailableModelDragPreview(null)
+      releaseDragPreview()
       releaseDragUi()
       if (suppressClick) {
         scheduleDragSuppressionRelease()
       } else {
         clearDragClickSuppression()
       }
+    }
+
+    function previewLabel(modelId: string): string {
+      const modelGroup = modelGroupsByIdRef.current.get(modelId)
+      return modelGroup?.display_name || modelGroup?.canonical_id || modelId
     }
 
     function handlePointerMove(event: PointerEvent) {
@@ -141,12 +179,18 @@ export function LlmRolesTab({
         document.documentElement.dataset.availableModelDragging = "true"
       }
       if (drag.dragging) {
-        setAvailableModelDragPreview({
-          dragging: true,
-          modelId: drag.modelId,
-          x: event.clientX,
-          y: event.clientY,
-        })
+        if (!drag.previewVisible) {
+          drag.previewVisible = true
+          setAvailableModelDragPreview({
+            dragging: true,
+            modelId: drag.modelId,
+            label: previewLabel(drag.modelId),
+            x: event.clientX,
+            y: event.clientY,
+          })
+        } else {
+          updateAvailableModelDragPreviewPosition(event.clientX, event.clientY)
+        }
         event.preventDefault()
       }
     }
@@ -199,9 +243,10 @@ export function LlmRolesTab({
       window.removeEventListener("pointercancel", handlePointerCancel)
       window.removeEventListener("click", handleClickCapture, true)
       releaseDragUi()
+      releaseDragPreview({ clearState: false })
       clearDragClickSuppression()
     }
-  }, [onChange])
+  }, [onChange, updateAvailableModelDragPreviewPosition])
 
   if (!normalizedData) {
     return (
@@ -219,12 +264,6 @@ export function LlmRolesTab({
           <AvailableModelsSidebar
             modelGroups={modelGroups}
             onModelPointerDown={handleAvailableModelPointerDown}
-            onModelDragStart={(modelId) => {
-              activeAvailableModelDragRef.current = modelId
-            }}
-            onModelDragEnd={() => {
-              activeAvailableModelDragRef.current = null
-            }}
           />
         )}
       >
@@ -247,30 +286,38 @@ export function LlmRolesTab({
           onChange={onChange}
         />
       </LlmRolesLayout>
-      <AvailableModelDragPreview drag={availableModelDragPreview} />
+      <AvailableModelDragPreview drag={availableModelDragPreview} nodeRef={availableModelDragPreviewNodeRef} />
     </>
   )
 }
 
 export function AvailableModelDragPreview({
   drag,
+  nodeRef,
 }: {
   drag: AvailableModelDragPreviewState | null
+  nodeRef: RefObject<HTMLDivElement | null>
 }) {
   if (!drag?.dragging) return null
 
   return (
     <div
+      ref={nodeRef}
       data-available-model-drag-preview="true"
+      data-preview-update-mode="imperative-transform"
       aria-hidden="true"
       className="pointer-events-none fixed left-0 top-0 z-50 max-w-72 select-none rounded-md border border-border bg-popover px-3 py-2 text-left shadow-lg ring-2 ring-primary/40"
       style={{
-        transform: `translate3d(${drag.x}px, ${drag.y}px, 0) translate(-50%, -50%)`,
+        transform: availableModelDragPreviewTransform(drag.x, drag.y),
       }}
     >
-      <div className="truncate font-mono text-xs text-foreground">{drag.modelId}</div>
+      <div className="truncate text-xs font-medium text-foreground">{drag.label}</div>
     </div>
   )
+}
+
+export function availableModelDragPreviewTransform(x: number, y: number): string {
+  return `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`
 }
 
 function LlmRolesLayout({ children, sidebar }: { children: ReactNode; sidebar: ReactNode }) {

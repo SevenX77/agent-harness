@@ -1,4 +1,5 @@
 import type { CredentialsState, ModelGroup, ModelInfo, ProviderType, RolesData } from "../../../api/llm"
+import { endpointIdFromRouteId } from "./route-credentials"
 
 type RoleProviderEntry = RolesData["providers"][string]
 
@@ -31,6 +32,7 @@ export function ownedProviderCodesForModel(
   if (!availableModelId) return configProviderCodes
 
   return configProviderCodes.filter((providerCode) => {
+    if (isRouteBackedProviderCode(data, providerCode)) return true
     const credential = credentialsByCode[providerCode]
     if (!credential) return providerCode.includes(":")
     return credentialProviderOwnsModel(credential, availableModelId)
@@ -366,6 +368,7 @@ export function appendModelGroupToRole(
     next.providers[providerModel.route_id] = next.providers[providerModel.route_id] ?? {
       name: providerModel.provider_label,
       type: "openai_compatible",
+      endpoint_id: providerModel.endpoint_id ?? endpointIdFromRouteId(providerModel.route_id),
     }
   }
 
@@ -406,16 +409,9 @@ export function modelSupportsThinking(model: ModelInfo): boolean {
 }
 
 function defaultProviderModelsForGroup(modelGroup: ModelGroup): ModelGroup["provider_models"] {
-  const usable = modelGroup.provider_models.filter((providerModel) => (
-    providerModel.ui_state !== "needs_setup" && providerModel.ui_state !== "off"
-  ))
-  const hasNonCoolingCandidate = usable.some((providerModel) => providerModel.ui_state !== "cooling_down")
-  const candidates = hasNonCoolingCandidate
-    ? usable.filter((providerModel) => providerModel.ui_state !== "cooling_down")
-    : usable
-  return [...candidates].sort((left, right) => (
-    providerKindRank(left.provider_kind) - providerKindRank(right.provider_kind) ||
+  return [...modelGroup.provider_models].sort((left, right) => (
     providerStateRank(left.ui_state) - providerStateRank(right.ui_state) ||
+    providerKindRank(left.provider_kind) - providerKindRank(right.provider_kind) ||
     left.provider_label.localeCompare(right.provider_label, undefined, { numeric: true, sensitivity: "base" }) ||
     left.route_id.localeCompare(right.route_id)
   ))
@@ -611,6 +607,10 @@ function credentialProviderOwnsModel(
   return (provider.available_models ?? []).some((model) => (
     canonicalAvailableModelId(model.id, provider) === availableModelId
   ))
+}
+
+function isRouteBackedProviderCode(data: RolesData, providerCode: string): boolean {
+  return providerCode.includes(":") || Boolean(data.providers[providerCode]?.endpoint_id)
 }
 
 function providerVendor(provider: CredentialsState["providers"][number]): string {

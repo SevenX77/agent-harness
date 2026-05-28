@@ -73,6 +73,7 @@ export interface CanonicalGroup {
 
 export interface ProviderModelOption {
   route_id: string
+  endpoint_id?: string | null
   provider_label: string
   provider_kind: ProviderKind
   provider_model_id: string
@@ -366,6 +367,7 @@ export interface ModelEntry {
 export interface ProviderEntry {
   name: string
   type: ProviderType
+  endpoint_id?: string | null
   api_key_env?: string | null
   api_key_env_fallback?: string | null
   base_url?: string | null
@@ -456,6 +458,7 @@ function legacyProviderModelOption(
   if (!endpoint) return null
   return {
     route_id: route.route_id,
+    endpoint_id: endpoint.endpoint_id,
     provider_label: endpoint.display_name,
     provider_kind: endpoint.provider_kind ?? 'third_party',
     provider_model_id: route.provider_model_id,
@@ -636,8 +639,15 @@ function providerEntryFromModelOption(
   const endpoint = route ? registry.provider_endpoints[route.endpoint_id] : null
   return {
     name: option.provider_label,
+    endpoint_id: endpoint?.endpoint_id ?? option.endpoint_id ?? endpointIdFromRouteId(option.route_id),
     type: endpoint?.protocol ?? 'openai_compatible',
   }
+}
+
+function endpointIdFromRouteId(routeId: string): string | null {
+  const separatorIndex = routeId.indexOf(':')
+  if (separatorIndex <= 0) return null
+  return routeId.slice(0, separatorIndex)
 }
 
 function modelGroupSupportsThinking(group: ModelGroup): boolean {

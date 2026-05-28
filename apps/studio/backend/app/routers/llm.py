@@ -964,6 +964,7 @@ def _provider_model_option(
     )
     return {
         "route_id": route.route_id,
+        "endpoint_id": endpoint.endpoint_id,
         "provider_label": endpoint.display_name,
         "provider_kind": endpoint.provider_kind,
         "provider_model_id": route.provider_model_id,

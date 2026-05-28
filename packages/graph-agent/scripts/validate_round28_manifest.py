@@ -13,6 +13,8 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PACKAGE_ROOT = REPO_ROOT / "packages/graph-agent"
+DEFAULT_SOURCE_INCLUDE_GLOBS = ("packages/graph-agent/src/graph_agent/**/*.py",)
+DEFAULT_SOURCE_EXCLUDE_GLOBS: tuple[str, ...] = ()
 VENDOR_ONLY_SYMBOLS = {
     "AgentSkillDef",
     "GraphSkillDef",
@@ -53,8 +55,29 @@ def _contract_map(data: Any) -> dict[str, Any] | None:
     return None
 
 
-def _actual_src_files() -> set[str]:
-    return {str(path.relative_to(REPO_ROOT)) for path in (PACKAGE_ROOT / "src/graph_agent").rglob("*.py")}
+def _source_globs(source_map: dict[str, Any] | None) -> tuple[list[str], list[str]]:
+    config = source_map.get("config") if isinstance(source_map, dict) else None
+    if not isinstance(config, dict):
+        return list(DEFAULT_SOURCE_INCLUDE_GLOBS), list(DEFAULT_SOURCE_EXCLUDE_GLOBS)
+    include_globs = config.get("include_globs") or list(DEFAULT_SOURCE_INCLUDE_GLOBS)
+    exclude_globs = config.get("exclude_globs") or list(DEFAULT_SOURCE_EXCLUDE_GLOBS)
+    return [str(pattern) for pattern in include_globs], [str(pattern) for pattern in exclude_globs]
+
+
+def _glob_repo_files(patterns: list[str]) -> set[str]:
+    files: set[str] = set()
+    for pattern in patterns:
+        files.update(
+            str(path.relative_to(REPO_ROOT))
+            for path in REPO_ROOT.glob(pattern)
+            if path.is_file()
+        )
+    return files
+
+
+def _actual_src_files(source_map: dict[str, Any] | None = None) -> set[str]:
+    include_globs, exclude_globs = _source_globs(source_map)
+    return _glob_repo_files(include_globs) - _glob_repo_files(exclude_globs)
 
 
 def _public_api_symbols() -> set[str]:
@@ -159,8 +182,9 @@ def _validate_features(features: list[dict[str, Any]], errors: list[str], *, ful
 
 def _validate_source_map(source_map: dict[str, Any], features: list[dict[str, Any]], errors: list[str]) -> None:
     mapped = {entry.get("path") for entry in source_map.get("files", []) if isinstance(entry, dict)}
-    missing = sorted(_actual_src_files() - mapped)
-    if not features and missing and len(mapped) < len(_actual_src_files()):
+    actual_src_files = _actual_src_files(source_map)
+    missing = sorted(actual_src_files - mapped)
+    if not features and missing and len(mapped) < len(actual_src_files):
         _fail(errors, "R28_SOURCE_FILE_UNMAPPED", "missing source files: " + ", ".join(missing[:5]))
 
     feature_core_paths: dict[str, set[str]] = {}

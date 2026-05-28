@@ -111,6 +111,16 @@ def test_a1_vendor_only_symbols_are_required_in_contract_map_fixture() -> None:
     assert result.returncode != 0
     assert "R28_VENDOR_ONLY_UNMAPPED" in result.stderr
 
+    features = _load_yaml(FEATURES_PATH)["features"]
+    compile_issue_features = [
+        feature
+        for feature in features
+        if "CompileIssue" in feature.get("public_api_symbols", [])
+    ]
+    assert len(compile_issue_features) == 1
+    assert compile_issue_features[0]["id"] == "F-skill-compilation-vendor-export"
+    assert compile_issue_features[0]["contract_status"] == "vendor-only"
+
 
 def test_a2_non_functional_contract_schema_requires_evidence_and_other() -> None:
     invalid_feature = _load_yaml(FIXTURES / "invalid_feature_nonfunctional_missing_evidence.yaml")
@@ -183,6 +193,7 @@ def test_task4_contract_map_axes_require_feature_ids_and_consumer_kinds() -> Non
     assert {entry["kind"] for entry in valid_contract_map["consumer_files"]} == {
         "live-consumer",
         "stable-export",
+        "vendor-only",
         "vendor-only-debt",
     }
 

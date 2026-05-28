@@ -1,63 +1,116 @@
 from __future__ import annotations
 
-import re
+import sys
 from pathlib import Path
+
+import pytest
+import yaml
+
+from graph_agent.cognitive.middlewares import create_custom_middlewares
+from graph_agent.cognitive.prompt import apply_v030_cognitive_template
+from graph_agent.core.error_registry import ERROR_REGISTRY
+from graph_agent.core.exceptions import GraphAgentFatalError
+from graph_agent.core.module_sandbox import ModuleSandbox
+from graph_agent.runtime.state import BlackboardState, blackboard_data_merge
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SRC_ROOT = REPO_ROOT / "packages/graph-agent/src/graph_agent"
-
-
-def _read(relative_path: str) -> str:
-    return (SRC_ROOT / relative_path).read_text(encoding="utf-8")
+FEATURES_PATH = REPO_ROOT / "packages/graph-agent/spec/features.yaml"
 
 
 def test_round28_prompt_template_keeps_eight_named_slots() -> None:
-    text = _read("cognitive/prompt.py")
+    prompt = apply_v030_cognitive_template(
+        phase_name="main",
+        role="Researcher",
+        goal="Answer with evidence.",
+        steps=[{"id": "S1", "name": "Read", "content": "Read the source."}],
+        protocols=[{"id": "P1", "content": "Cite every claim."}],
+        output_schema={"type": "object", "properties": {"answer": {"type": "string"}}},
+        knowledge_base="Aligned facts.",
+        inline_examples=["Inline example."],
+    )
+
     expected_slots = {
         "role",
         "goal",
         "thinking_style",
-        "examples",
         "knowledge_base",
+        "examples",
         "ambiguity_feedback",
+        "protocol_citation",
         "critical_reminders",
-        "exit_contract",
     }
-    rendered_slots = set(re.findall(r"<(/?)([a-z_]+)>", text))
-    slot_names = {slot for _slash, slot in rendered_slots}
-    assert expected_slots <= slot_names
+    for slot in expected_slots:
+        assert f"<{slot}>" in prompt
+        assert f"</{slot}>" in prompt
+    assert prompt.rstrip().endswith("</exit_contract>")
 
 
 def test_round28_middleware_order_keeps_observation_before_control() -> None:
-    text = _read("cognitive/middlewares.py")
-    factory = text[text.index("def create_custom_middlewares") :]
-    loop_index = factory.index("middlewares.append(\n            AgentLoopIterationMiddleware")
-    memory_index = factory.index("middlewares.append(\n            WorkingMemoryMiddleware")
-    pruning_index = factory.index("middlewares.append(\n            DeadEndPruningMiddleware")
-    clarification_index = factory.index("middlewares.append(ClarificationMiddleware())")
-    assert loop_index < memory_index < pruning_index < clarification_index
+    middlewares = create_custom_middlewares(phase_name="round28", callbacks=[])
+
+    names = [type(middleware).__name__ for middleware in middlewares]
+    assert names[:4] == [
+        "AgentLoopIterationMiddleware",
+        "WorkingMemoryMiddleware",
+        "DeadEndPruningMiddleware",
+        "ClarificationMiddleware",
+    ]
 
 
-def test_round28_tool_sandbox_blocks_write_and_escape_shapes() -> None:
-    sandbox_text = _read("core/module_sandbox.py")
-    purity_text = _read("core/purity.py")
-    assert "escape" in sandbox_text.lower()
-    assert "open" in purity_text and "write" in purity_text
-    assert "ImportError" in sandbox_text or "PermissionError" in sandbox_text
+def test_round28_tool_sandbox_blocks_write_and_escape_shapes(tmp_path: Path) -> None:
+    module_file = tmp_path / "local_action.py"
+    module_file.write_text(
+        "def run(value):\n"
+        "    return {'value': value + 1}\n",
+        encoding="utf-8",
+    )
+
+    sandbox = ModuleSandbox(search_paths=[tmp_path])
+    action = sandbox.import_callable("local_action.run")
+
+    assert action(1) == {"value": 2}
+    assert "local_action" not in sys.modules
 
 
 def test_round28_blackboard_state_has_explicit_mapping_boundary() -> None:
-    mapper_text = _read("runtime/state_mapper.py")
-    state_text = _read("runtime/state.py")
-    assert "blackboard" in mapper_text
-    assert "inputs" in mapper_text and "phase_outputs" in mapper_text and "scratch" in mapper_text
-    assert "BlackboardState" in state_text
+    state: BlackboardState = {
+        "data": {
+            "inputs": {"topic": "round28"},
+            "phase_outputs": {"draft": {"answer": "v1"}},
+            "scratch": {},
+        },
+        "flow": {"phase": "draft"},
+        "run_id": "run-1",
+    }
+    merged = blackboard_data_merge(
+        state["data"],
+        {"inputs": {}, "phase_outputs": {"review": {"answer": "v2"}}, "scratch": {"k": "v"}},
+    )
+
+    assert merged == {
+        "inputs": {"topic": "round28"},
+        "phase_outputs": {"draft": {"answer": "v1"}, "review": {"answer": "v2"}},
+        "scratch": {"k": "v"},
+    }
+    with pytest.raises(GraphAgentFatalError):
+        blackboard_data_merge(merged, {"phase_outputs": {"review": {"answer": "v3"}}})
 
 
 def test_round28_error_registry_keeps_f_v3_metadata_shape() -> None:
-    text = _read("core/error_registry.py")
-    assert "[F-v3-" in text
-    assert "level" in text
-    assert "stage" in text
-    assert "doc_link" in text
+    features = yaml.safe_load(FEATURES_PATH.read_text(encoding="utf-8"))["features"]
+    primary_owner_by_code = {
+        code: feature["id"]
+        for feature in features
+        for code in feature.get("error_codes_primary", [])
+    }
+
+    assert set(ERROR_REGISTRY) == set(primary_owner_by_code)
+    assert len(ERROR_REGISTRY) == 92
+    for code, metadata in ERROR_REGISTRY.items():
+        assert code.startswith("[F-v3-")
+        assert metadata.code == code
+        assert metadata.level in {"FATAL", "WARN"}
+        assert metadata.stage
+        assert metadata.doc_link
+        assert primary_owner_by_code[code].startswith("F-")

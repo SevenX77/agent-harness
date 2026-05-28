@@ -1,3 +1,7 @@
+config:
+  include_globs:
+  - packages/graph-agent/src/graph_agent/**/*.py
+  exclude_globs: []
 files:
 - path: packages/graph-agent/src/graph_agent/__init__.py
   classification: detail

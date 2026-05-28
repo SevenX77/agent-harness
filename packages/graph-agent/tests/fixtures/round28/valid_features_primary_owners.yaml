@@ -27,6 +27,7 @@ features:
   sources:
   - public-api
   - source-file-map
+  contract_status: vendor-only-debt
   core_paths:
   - path: packages/graph-agent/src/graph_agent/__init__.py
   error_codes_primary: []
@@ -38,11 +39,31 @@ features:
   - tests/test_public_api_contract.py::test_known_missing_vendor_only_symbols_are_locked_as_external_consumer_debt
   public_api_symbols:
   - AgentSkillDef
-  - CompileIssue
   - GraphSkillDef
   - IoInput
   - PersonaSkillDef
   - parse_skill_file
+- id: F-skill-compilation-vendor-export
+  description: Keep the CompileIssue compiler diagnostic export visible as a stable
+    vendor-only interface introduced by the round-14 compiler cutover.
+  feature_boundary:
+    kind: public-method
+    evidence: CompileIssue entry in public-api contract
+  sources:
+  - public-api
+  - source-file-map
+  contract_status: vendor-only
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/core/compiler.py
+  error_codes_primary: []
+  error_codes_secondary: []
+  events_primary: []
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/test_public_api_contract.py::test_known_missing_vendor_only_symbols_are_locked_as_external_consumer_debt
+  public_api_symbols:
+  - CompileIssue
 - id: F-md-frontmatter-parsing
   description: Parse markdown frontmatter and body into stable skill metadata and
     diagnostics.

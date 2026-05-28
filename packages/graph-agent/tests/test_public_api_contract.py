@@ -825,7 +825,12 @@ def test_callback_protocols_method_surface_is_stable() -> None:
     for symbol_name, expected_methods in EXPECTED_CALLBACK_PROTOCOL_METHODS.items():
         obj = _load_symbol(EXPECTED_CONTRACT_SYMBOLS[symbol_name], symbol_name)
         actual_methods = frozenset(
-            name for name, value in inspect.getmembers(obj, inspect.isfunction) if not name.startswith("__")
+            name
+            for name, value in inspect.getmembers(
+                obj,
+                lambda value: inspect.isroutine(value) or isinstance(value, property),
+            )
+            if not name.startswith("__")
         )
         assert actual_methods == expected_methods, symbol_name
 

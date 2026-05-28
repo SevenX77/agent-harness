@@ -4,9 +4,14 @@ import dataclasses
 import importlib
 import inspect
 import typing
+from pathlib import Path
 
+import pytest
+import yaml
 from pydantic import BaseModel
 
+
+EXEMPTIONS_PATH = Path(__file__).with_name("contract-exemptions.yaml")
 
 EXPECTED_CONTRACT_SYMBOLS: dict[str, str] = {
     "run_skill": "graph_agent",
@@ -711,6 +716,86 @@ EXPECTED_EXCEPTION_MRO: dict[str, tuple[str, ...]] = {'ExecutionError': ('Execut
                           'LoaderError',
                           'GraphAgentError')}
 
+REQUIRED_EXEMPTION_KEYS = frozenset(
+    {"pr", "pm_approval", "reason", "symbols", "fields", "hashes", "expires_or_cleanup"}
+)
+
+
+def _load_contract_exemptions(path: Path = EXEMPTIONS_PATH) -> list[dict[str, object]]:
+    data = yaml.safe_load(path.read_text()) or {}
+    exemptions = data.get("exemptions", [])
+    assert isinstance(exemptions, list), "contract exemptions must be a list"
+
+    for index, entry in enumerate(exemptions):
+        assert isinstance(entry, dict), f"exemption #{index} must be a mapping"
+        missing_keys = REQUIRED_EXEMPTION_KEYS - entry.keys()
+        assert not missing_keys, f"exemption #{index} missing required keys: {sorted(missing_keys)}"
+        for key in ("pr", "pm_approval", "reason", "expires_or_cleanup"):
+            assert isinstance(entry[key], str) and entry[key].strip(), f"exemption #{index} {key} must be non-empty"
+        for key in ("symbols", "fields", "hashes"):
+            assert isinstance(entry[key], list), f"exemption #{index} {key} must be a list"
+        assert entry["symbols"] or entry["fields"] or entry["hashes"], (
+            f"exemption #{index} must name at least one symbol, field, or hash key"
+        )
+    return exemptions
+
+
+def _symbol_exemption_entry(symbol_name: str) -> dict[str, object] | None:
+    for entry in _load_contract_exemptions():
+        if symbol_name in entry["symbols"]:
+            return entry
+    return None
+
+
+def _field_exemption_entry(symbol_name: str, field_name: str) -> dict[str, object] | None:
+    qualified_field = f"{symbol_name}.{field_name}"
+    for entry in _load_contract_exemptions():
+        fields = entry["fields"]
+        symbols = entry["symbols"]
+        if qualified_field in fields or (symbol_name in symbols and field_name in fields):
+            return entry
+    return None
+
+
+def is_symbol_exempted(symbol_name: str) -> bool:
+    return _symbol_exemption_entry(symbol_name) is not None
+
+
+def is_field_exempted(symbol_name: str, field_name: str) -> bool:
+    return _field_exemption_entry(symbol_name, field_name) is not None
+
+
+def _skip_for_exemption(entry: dict[str, object]) -> None:
+    pytest.skip(f"Exempted by {entry['pr']}: {entry['reason']}")
+
+
+def _assert_symbol_contract(actual: object, expected: object, symbol_name: str) -> None:
+    if actual == expected:
+        return
+    if entry := _symbol_exemption_entry(symbol_name):
+        _skip_for_exemption(entry)
+    assert actual == expected, symbol_name
+
+
+def _assert_field_contract(
+    actual: tuple[tuple[str, str], ...], expected: tuple[tuple[str, str], ...], symbol_name: str
+) -> None:
+    if actual == expected:
+        return
+
+    actual_by_name = dict(actual)
+    expected_by_name = dict(expected)
+    drifted_fields = sorted(
+        (set(actual_by_name) | set(expected_by_name))
+        - {field_name for field_name in expected_by_name if actual_by_name.get(field_name) == expected_by_name[field_name]}
+    )
+    if drifted_fields and all(is_field_exempted(symbol_name, field_name) for field_name in drifted_fields):
+        _skip_for_exemption(_field_exemption_entry(symbol_name, drifted_fields[0]) or {})
+    if entry := _symbol_exemption_entry(symbol_name):
+        _skip_for_exemption(entry)
+    assert actual == expected, symbol_name
+
+
 def _load_symbol(module_name: str, symbol_name: str) -> object:
     module = importlib.import_module(module_name)
     return getattr(module, symbol_name)
@@ -769,6 +854,35 @@ def _callback_event_variant_names(callback_event: object) -> set[str]:
     return {getattr(arg, "__name__", str(arg)) for arg in typing.get_args(union_arg)}
 
 
+def test_exemptions_yaml_schema_is_strict_when_populated(tmp_path: Path) -> None:
+    broken_exemptions = tmp_path / "contract-exemptions.yaml"
+    broken_exemptions.write_text(
+        """
+version: "1"
+exemptions:
+  - pm_approval: "approved"
+    reason: "missing pr must fail"
+    symbols: ["run_skill"]
+    fields: []
+    hashes: []
+    expires_or_cleanup: "remove after migration"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AssertionError, match="missing required keys"):
+        _load_contract_exemptions(broken_exemptions)
+
+
+def test_exemptions_yaml_currently_empty_in_pr1() -> None:
+    assert _load_contract_exemptions() == []
+
+
+def test_exemptions_yaml_lookup_returns_false_for_unknown_symbols() -> None:
+    assert not is_symbol_exempted("DefinitelyNotAContractSymbol")
+    assert not is_field_exempted("DefinitelyNotAContractSymbol", "missing_field")
+
+
 def test_contract_symbol_count_and_static_sets_are_authoritative() -> None:
     assert len(EXPECTED_CONTRACT_SYMBOLS) == 65
     assert len(EXPECTED_VENDOR_ONLY_SYMBOLS) == 6
@@ -781,44 +895,50 @@ def test_importable_contract_symbols_exist_at_canonical_source_modules() -> None
     for symbol_name in sorted(expected_importable):
         module_name = EXPECTED_CONTRACT_SYMBOLS[symbol_name]
         module = importlib.import_module(module_name)
-        assert hasattr(module, symbol_name), f"{symbol_name} missing from {module_name}"
+        if not hasattr(module, symbol_name):
+            if entry := _symbol_exemption_entry(symbol_name):
+                _skip_for_exemption(entry)
+            assert hasattr(module, symbol_name), f"{symbol_name} missing from {module_name}"
 
 
 def test_known_missing_vendor_only_symbols_are_locked_as_external_consumer_debt() -> None:
     for symbol_name, module_name in EXPECTED_KNOWN_MISSING_VENDOR_ONLY.items():
         module = importlib.import_module(module_name)
-        assert not hasattr(module, symbol_name), (
-            f"{symbol_name} changed state in {module_name}; update the contract audit "
-            "instead of silently drifting the vendor-only debt."
-        )
+        if hasattr(module, symbol_name):
+            if entry := _symbol_exemption_entry(symbol_name):
+                _skip_for_exemption(entry)
+            assert not hasattr(module, symbol_name), (
+                f"{symbol_name} changed state in {module_name}; update the contract audit "
+                "instead of silently drifting the vendor-only debt."
+            )
 
 
 def test_top_level_all_remains_the_declared_18_symbol_surface() -> None:
     import graph_agent
 
-    assert graph_agent.__all__ == list(EXPECTED_ALL_18)
+    _assert_symbol_contract(graph_agent.__all__, list(EXPECTED_ALL_18), "__all__")
 
 
 def test_function_signatures_are_stable() -> None:
     for symbol_name, (module_name, expected_params, expected_return) in EXPECTED_SIGNATURES.items():
         obj = _load_symbol(module_name, symbol_name)
         actual_params, actual_return = _signature_contract(obj)
-        assert actual_params == expected_params, symbol_name
-        assert actual_return == expected_return, symbol_name
+        _assert_symbol_contract(actual_params, expected_params, symbol_name)
+        _assert_symbol_contract(actual_return, expected_return, symbol_name)
 
 
 def test_constructor_signatures_are_stable() -> None:
     for symbol_name, (module_name, expected_params, expected_return) in EXPECTED_CONSTRUCTOR_SIGNATURES.items():
         obj = _load_symbol(module_name, symbol_name)
         actual_params, actual_return = _signature_contract(obj.__init__)
-        assert actual_params == expected_params, symbol_name
-        assert actual_return == expected_return, symbol_name
+        _assert_symbol_contract(actual_params, expected_params, symbol_name)
+        _assert_symbol_contract(actual_return, expected_return, symbol_name)
 
 
 def test_model_dataclass_and_typed_dict_field_names_and_types_are_stable() -> None:
     for symbol_name, (module_name, expected_fields) in EXPECTED_FIELD_CONTRACTS.items():
         obj = _load_symbol(module_name, symbol_name)
-        assert _field_contract(obj) == expected_fields, symbol_name
+        _assert_field_contract(_field_contract(obj), expected_fields, symbol_name)
 
 
 def test_callback_protocols_method_surface_is_stable() -> None:
@@ -832,24 +952,27 @@ def test_callback_protocols_method_surface_is_stable() -> None:
             )
             if not name.startswith("__")
         )
-        assert actual_methods == expected_methods, symbol_name
+        _assert_symbol_contract(actual_methods, expected_methods, symbol_name)
 
 
 def test_exception_inheritance_chain_is_stable() -> None:
     for symbol_name, expected_mro in EXPECTED_EXCEPTION_MRO.items():
         obj = _load_symbol(EXPECTED_CONTRACT_SYMBOLS[symbol_name], symbol_name)
         actual_mro = tuple(cls.__name__ for cls in obj.__mro__[: len(expected_mro)])
-        assert actual_mro == expected_mro, symbol_name
+        _assert_symbol_contract(actual_mro, expected_mro, symbol_name)
 
 
 def test_callback_event_union_contains_consumed_event_models() -> None:
     callback_event = _load_symbol("graph_agent.callbacks.events", "CallbackEvent")
     actual_variants = _callback_event_variant_names(callback_event)
-    assert actual_variants == EXPECTED_CALLBACK_EVENT_VARIANTS
+    _assert_symbol_contract(actual_variants, EXPECTED_CALLBACK_EVENT_VARIANTS, "CallbackEvent")
 
 
 def test_predict_internal_symbols_are_explicit_de_facto_contract_debt() -> None:
     for symbol_name in sorted(EXPECTED_PREDICT_INTERNAL_SYMBOLS):
         module_name = EXPECTED_CONTRACT_SYMBOLS[symbol_name]
         module = importlib.import_module(module_name)
-        assert hasattr(module, symbol_name), f"{symbol_name} missing from known-debt module {module_name}"
+        if not hasattr(module, symbol_name):
+            if entry := _symbol_exemption_entry(symbol_name):
+                _skip_for_exemption(entry)
+            assert hasattr(module, symbol_name), f"{symbol_name} missing from known-debt module {module_name}"

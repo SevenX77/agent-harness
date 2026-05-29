@@ -188,3 +188,19 @@ NTH defer (round-30 汇总报告周期): test 文件名 sync tasks _license_conf
 ## Round 30 P1/P2 External Quality Tools Onboarding — 全 4 PR 完成
 
 至此 Round 30 P1/P2 4 个外部质量工具全部接入完成 (PR-1 Codecov + PR-2 SonarCloud + PR-3 CodeQL + PR-4 Scorecard/SBOM/License/Dependabot), 全 report-only 模式, 不阻 merge. 主控起 Round 30 汇总报告 forward PM, 按 design §6 Q7 报分模板列 4 工具首次基线 + 缺口 + 补齐路径.
+
+## Round 30 P1/P2 — PR-2 Cleanup: SonarCloud 切 Automatic Analysis
+
+PR-2 ship 后实测: SonarCloud 控制台 Automatic Analysis 已由 PM enable + 跑出首次数据 (Security 82 / Reliability 194 / Maintainability 818 issues, 95k LOC). CI sonar-scan job 跟 Automatic 冲突, SonarCloud 报错 "You are running CI analysis while Automatic Analysis is enabled".
+
+主控 + PM 决策保留 Automatic, 移除 CI sonar-scan job:
+- `.github/workflows/ci.yml`: 移除 quality-gates + graph-agent-tests matrix 的 upload-artifact step + 整个 sonar-scan job
+- `test_round30_pr2_sonarcloud_config.py`: 删 test_ci_uploads_coverage_artifacts_and_runs_sonar_scan_job, 保留 test_sonar_project_properties (Automatic Analysis 读它)
+- `sonar-project.properties` 保留 (Automatic Analysis SOT)
+
+SonarCloud data flow: Automatic Analysis (服务端) → sonar-project.properties 读 → dashboard 更新.
+
+Verification:
+- pytest test_round30_pr2_sonarcloud_config.py: 1 passed (剩 test_sonar_project_properties)
+- 4 contract gate: 38 passed (黄金原则零碰)
+- main CI: sonar-scan check 不再出现 (job 删除)

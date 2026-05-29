@@ -363,29 +363,70 @@ def _validate_cross_references(
 ) -> list[str]:
     """代号交叉验证，返回错误列表。"""
     errors: list[str] = []
+    errors.extend(_validate_model_provider_refs(models, providers))
+    errors.extend(_validate_role_refs(models, providers, roles))
+    return errors
 
-    # model → provider 引用
+
+def _validate_model_provider_refs(
+    models: dict[str, ModelDef],
+    providers: dict[str, ProviderDef],
+) -> list[str]:
+    errors: list[str] = []
     for mc, mdef in models.items():
         for pc in mdef.providers:
             if pc not in providers:
                 errors.append(f"模型 {mc} 引用了未注册的 provider: {pc}")
+    return errors
 
-    # role → model / provider 引用
+
+def _validate_role_refs(
+    models: dict[str, ModelDef],
+    providers: dict[str, ProviderDef],
+    roles: dict[str, RoleDef],
+) -> list[str]:
+    errors: list[str] = []
     for rname, rdef in roles.items():
         if rdef.active_model and rdef.active_model not in models:
             errors.append(f"角色 {rname} 的 active_model={rdef.active_model} 未在 models 注册")
-        for mc, entry in rdef.models.items():
-            if mc not in models:
-                errors.append(f"角色 {rname} 引用了未注册的模型: {mc}")
-            for pc in entry.provider_codes:
-                if pc not in providers:
-                    errors.append(f"角色 {rname} 模型 {mc} 引用了未注册的 provider: {pc}")
-                elif mc in models and pc not in models[mc].providers:
-                    errors.append(
-                        f"角色 {rname} 模型 {mc} 使用 provider {pc}，"
-                        f"但模型未注册该 provider 的模型名映射"
-                    )
+        errors.extend(_validate_role_model_entries(rname, rdef, models, providers))
+    return errors
 
+
+def _validate_role_model_entries(
+    role_name: str,
+    role: RoleDef,
+    models: dict[str, ModelDef],
+    providers: dict[str, ProviderDef],
+) -> list[str]:
+    errors: list[str] = []
+    for model_code, entry in role.models.items():
+        if model_code not in models:
+            errors.append(f"角色 {role_name} 引用了未注册的模型: {model_code}")
+        errors.extend(
+            _validate_role_provider_entries(role_name, model_code, entry, models, providers)
+        )
+    return errors
+
+
+def _validate_role_provider_entries(
+    role_name: str,
+    model_code: str,
+    entry: RoleModelEntry,
+    models: dict[str, ModelDef],
+    providers: dict[str, ProviderDef],
+) -> list[str]:
+    errors: list[str] = []
+    for provider_code in entry.provider_codes:
+        if provider_code not in providers:
+            errors.append(
+                f"角色 {role_name} 模型 {model_code} 引用了未注册的 provider: {provider_code}"
+            )
+        elif model_code in models and provider_code not in models[model_code].providers:
+            errors.append(
+                f"角色 {role_name} 模型 {model_code} 使用 provider {provider_code}，"
+                f"但模型未注册该 provider 的模型名映射"
+            )
     return errors
 
 

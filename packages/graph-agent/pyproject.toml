@@ -69,6 +69,18 @@ markers = [
     "tier1: core smoke-tier tests for fast PR confidence",
 ]
 
+[tool.ruff]
+extend = "../../pyproject.toml"
+
+[tool.ruff.lint]
+extend-select = ["C901"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/**" = ["C901"]
+
 [[tool.mypy.overrides]]
 module = "langgraph.checkpoint.postgres.*"
 ignore_missing_imports = true

@@ -71,55 +71,18 @@ _FLAT_FIELD_RE = re.compile(r"^[-*•]\s+(\w+):\s*(.*)$")
 def parse_output_example(block_text: str) -> DynamicSchemaDef:
     """Parse one strict ``<output_example>`` block into a dynamic schema."""
 
-    match = _OUTPUT_EXAMPLE_BLOCK_RE.match(block_text or "")
-    if not match:
-        raise OutputExampleParseError(
-            'Cannot find a standalone <output_example name="...">...</output_example> block'
-        )
-
-    schema_name = match.group(1).strip()
-    if not _SCHEMA_NAME_RE.match(schema_name):
-        raise OutputExampleParseError(
-            f"Invalid output_example schema name {schema_name!r}. Use a Python-style identifier."
-        )
-
-    body = match.group(2)
+    schema_name, body = _extract_output_example_parts(block_text)
     item_header: str | None = None
     fields: list[DynamicFieldDef] = []
 
     for line in body.splitlines():
-        stripped = line.strip()
-        if not stripped:
+        parsed_line = _parse_output_example_line(line, schema_name, item_header)
+        if parsed_line is None:
             continue
-        if stripped.startswith("##"):
-            header_match = _ITEM_HEADER_RE.match(stripped)
-            if not header_match:
-                raise OutputExampleParseError(
-                    f"Invalid item header in schema {schema_name}: {line!r}"
-                )
-            if item_header is not None:
-                raise OutputExampleParseError(
-                    f"Schema {schema_name} declares multiple ## item headers"
-                )
-            item_header = header_match.group(1).strip()
+        if isinstance(parsed_line, str):
+            item_header = parsed_line
             continue
-        if not stripped.startswith("-"):
-            raise OutputExampleParseError(
-                f"Unsupported non-bullet line in schema {schema_name}: {line!r}"
-            )
-
-        field_match = _FIELD_LINE_RE.match(line)
-        if not field_match:
-            raise OutputExampleParseError(
-                "Bullet does not match strict pattern "
-                "'- name (type[, required|optional[, default=X]]): desc'\n"
-                f"Got: {line!r}\n"
-                f"Schema: {schema_name}"
-            )
-
-        field_name = field_match.group(1)
-        type_part = field_match.group(2).strip()
-        description = field_match.group(3).strip()
+        field_name, type_part, description = parsed_line
         fields.append(_parse_field(field_name, type_part, description, schema_name))
 
     if item_header is None:
@@ -130,6 +93,67 @@ def parse_output_example(block_text: str) -> DynamicSchemaDef:
         raise OutputExampleParseError(f"Schema {schema_name} must declare at least one field")
 
     return DynamicSchemaDef(name=schema_name, item_header=item_header, fields=fields)
+
+
+def _extract_output_example_parts(block_text: str) -> tuple[str, str]:
+    match = _OUTPUT_EXAMPLE_BLOCK_RE.match(block_text or "")
+    if not match:
+        raise OutputExampleParseError(
+            'Cannot find a standalone <output_example name="...">...</output_example> block'
+        )
+    schema_name = match.group(1).strip()
+    if not _SCHEMA_NAME_RE.match(schema_name):
+        raise OutputExampleParseError(
+            f"Invalid output_example schema name {schema_name!r}. Use a Python-style identifier."
+        )
+    return schema_name, match.group(2)
+
+
+def _parse_output_example_line(
+    line: str,
+    schema_name: str,
+    current_item_header: str | None,
+) -> tuple[str, str, str] | str | None:
+    stripped = line.strip()
+    if not stripped:
+        return None
+    if stripped.startswith("##"):
+        return _parse_item_header(stripped, line, schema_name, current_item_header)
+    if not stripped.startswith("-"):
+        raise OutputExampleParseError(
+            f"Unsupported non-bullet line in schema {schema_name}: {line!r}"
+        )
+    return _parse_field_line(line, schema_name)
+
+
+def _parse_item_header(
+    stripped: str,
+    line: str,
+    schema_name: str,
+    current_item_header: str | None,
+) -> str:
+    header_match = _ITEM_HEADER_RE.match(stripped)
+    if not header_match:
+        raise OutputExampleParseError(f"Invalid item header in schema {schema_name}: {line!r}")
+    if current_item_header is not None:
+        raise OutputExampleParseError(f"Schema {schema_name} declares multiple ## item headers")
+    return header_match.group(1).strip()
+
+
+def _parse_field_line(line: str, schema_name: str) -> tuple[str, str, str]:
+    field_match = _FIELD_LINE_RE.match(line)
+    if not field_match:
+        raise OutputExampleParseError(
+            "Bullet does not match strict pattern "
+            "'- name (type[, required|optional[, default=X]]): desc'\n"
+            f"Got: {line!r}\n"
+            f"Schema: {schema_name}"
+        )
+    return (
+        field_match.group(1),
+        field_match.group(2).strip(),
+        field_match.group(3).strip(),
+    )
 
 
 def parse_md_simple(md_text: str) -> list[DynamicParsedBlock]:
@@ -317,43 +341,68 @@ def _build_type_runtime(
     type_hint: str,
     field_name: str,
 ) -> tuple[Callable[[Any], Any], list[str] | None]:
-    if type_hint == "int":
-        return _coerce_int, None
-    if type_hint == "float":
-        return _coerce_float, None
-    if type_hint == "str":
-        return lambda value: "" if value is None else str(value), None
-    if type_hint == "bool":
-        return _coerce_bool, None
+    scalar_runtime = _scalar_type_runtime(type_hint)
+    if scalar_runtime is not None:
+        return scalar_runtime
     if type_hint.startswith("Literal[") and type_hint.endswith("]"):
-        enum_values = [
-            value.strip().strip("'\"")
-            for value in type_hint[len("Literal[") : -1].split(",")
-            if value.strip()
-        ]
-        if not enum_values:
-            raise OutputExampleParseError(
-                f"Literal type for field {field_name} must list at least one value"
-            )
-        return str, enum_values
+        return _literal_type_runtime(type_hint, field_name)
     if type_hint.startswith("list[") and type_hint.endswith("]"):
-        inner_hint = type_hint[len("list[") : -1].strip()
-        inner_coerce, inner_enum = _build_type_runtime(inner_hint, field_name)
-
-        def coerce_list(value: Any) -> list[Any]:
-            raw_values = value if isinstance(value, list) else str(value).split(",")
-            items = [inner_coerce(v.strip() if isinstance(v, str) else v) for v in raw_values]
-            if inner_enum is not None:
-                for item in items:
-                    if str(item) not in inner_enum:
-                        raise ValueError(f"{item!r} not in {inner_enum}")
-            return items
-
-        return coerce_list, None
+        return _list_type_runtime(type_hint, field_name)
     raise OutputExampleParseError(
         f"Unsupported type {type_hint!r} for field {field_name}. "
         "Allowed: int / float / str / bool / Literal[...] / list[X]"
     )
+
+
+def _scalar_type_runtime(type_hint: str) -> tuple[Callable[[Any], Any], None] | None:
+    runtimes: dict[str, Callable[[Any], Any]] = {
+        "int": _coerce_int,
+        "float": _coerce_float,
+        "str": lambda value: "" if value is None else str(value),
+        "bool": _coerce_bool,
+    }
+    coerce_fn = runtimes.get(type_hint)
+    return (coerce_fn, None) if coerce_fn is not None else None
+
+
+def _literal_type_runtime(
+    type_hint: str,
+    field_name: str,
+) -> tuple[Callable[[Any], Any], list[str]]:
+    enum_values = [
+        value.strip().strip("'\"")
+        for value in type_hint[len("Literal[") : -1].split(",")
+        if value.strip()
+    ]
+    if not enum_values:
+        raise OutputExampleParseError(
+            f"Literal type for field {field_name} must list at least one value"
+        )
+    return str, enum_values
+
+
+def _list_type_runtime(
+    type_hint: str,
+    field_name: str,
+) -> tuple[Callable[[Any], Any], None]:
+    inner_hint = type_hint[len("list[") : -1].strip()
+    inner_coerce, inner_enum = _build_type_runtime(inner_hint, field_name)
+
+    def coerce_list(value: Any) -> list[Any]:
+        raw_values = value if isinstance(value, list) else str(value).split(",")
+        items = [inner_coerce(v.strip() if isinstance(v, str) else v) for v in raw_values]
+        _validate_list_enum_items(items, inner_enum)
+        return items
+
+    return coerce_list, None
+
+
+def _validate_list_enum_items(items: list[Any], enum_values: list[str] | None) -> None:
+    if enum_values is None:
+        return
+    for item in items:
+        if str(item) not in enum_values:
+            raise ValueError(f"{item!r} not in {enum_values}")
 
 
 def _coerce_value(value: Any, field_def: DynamicFieldDef) -> Any:

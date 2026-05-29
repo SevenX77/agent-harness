@@ -1,3 +1,8 @@
+---
+status: FROZEN
+---
+<!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
+
 # LOGIC.md Spec
 
 本文定义 `LOGIC.md` 的 Frontmatter、Action 注册 / 调用和 validator 后置钩子契约。它与 [物理布局](./01-physical-layout.md#文件名类型推导-filename-type-derivation)、[错误码字典](./11-error-code-spec.md#错误码速查全表) 和 [运行流](./12-compile-runtime-flow-spec.md#运行时引擎流-run-time-workflow) 共同约束 Logic 节点。
@@ -67,6 +72,7 @@ validator: true
 | 入参 | `state_slice` 是按 `io.inputs` 从 BlackboardState 切出的浅 dict; `kwargs` 预留 trace_id、phase_id 等系统参数 |
 | 返回值 | dict; key 必须是 `io.outputs.properties` 子集 |
 | 执行顺序 | 严格按 body `<action>` 标签从上到下串行执行; 上一个 action 的返回会合并进下一次 `state_slice` |
+| 纯净性约束 | 编译期执行 purity 扫描, 禁止 action 包含本地写 (`open(..., 'w')`) 等副作用 |
 
 Action 与 Tool 的边界必须固定:
 
@@ -83,6 +89,7 @@ Action 与 Tool 的边界必须固定:
 | action 文件不存在 | `[F-v3-logic-action-not-found]` | 编译期 | FATAL |
 | action 名含 `/`、`.` 或非法字符 | `[F-v3-logic-action-name-invalid]` | 编译期 | FATAL |
 | action 模块无 `run` | `[F-v3-logic-action-entrypoint-missing]` | 编译期 | FATAL |
+| action 代码存在本地写等副作用违例 | `[F-v3-logic-action-purity-violation]` | 编译期 | FATAL |
 | `run()` 返回非 dict | `[F-v3-logic-action-return-invalid]` | 运行期 | FATAL, 不回写 |
 | 返回字段超出 `io.outputs` | `[F-v3-logic-output-field-undeclared]` | 运行期 | FATAL, 不回写 |
 

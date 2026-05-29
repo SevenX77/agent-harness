@@ -1,3 +1,8 @@
+---
+status: FROZEN
+---
+<!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
+
 # Mention Syntax Spec
 
 本文定义 `@type:NAME` 的统一解析规则、7 类引用的静态可达性算法和 Loader 拦截边界。它服务于 [Agent SKILL.md](./05-agent-md-spec.md#引用注入校验-frontmatter--body)、[Resource Mechanisms](./08-resource-mechanisms-spec.md#frontmatter-挂载格式) 和 [错误码字典](./11-error-code-spec.md#mention-domain)。

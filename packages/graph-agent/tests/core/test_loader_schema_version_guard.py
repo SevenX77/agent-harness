@@ -20,6 +20,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.loader import load_workflow_from_md
 
@@ -40,12 +41,14 @@ def _write_skill(path: Path, schema_version_literal: str) -> None:
 
 
 class TestSchemaVersionGuard:
-    def test_unknown_schema_version_raises_skill_load_error(self, tmp_path: Path) -> None:
+    def test_unknown_schema_version_raises_skill_load_error(
+        self, tmp_path: Path, mock_skill_resolver: object
+    ) -> None:
         skill = tmp_path / "SKILL.md"
         _write_skill(skill, '"1.5"')
 
         with pytest.raises(SkillLoadError) as excinfo:
-            load_workflow_from_md(skill)
+            load_workflow_from_md(skill, skill_resolver=mock_skill_resolver)
 
         msg = str(excinfo.value)
         assert "schema_version" in msg or "2.0" in msg, (
@@ -54,7 +57,9 @@ class TestSchemaVersionGuard:
             f"{msg!r}"
         )
 
-    def test_missing_schema_version_raises_skill_load_error(self, tmp_path: Path) -> None:
+    def test_missing_schema_version_raises_skill_load_error(
+        self, tmp_path: Path, mock_skill_resolver: object
+    ) -> None:
         skill = tmp_path / "SKILL.md"
         skill.write_text(
             "---\n"
@@ -69,4 +74,4 @@ class TestSchemaVersionGuard:
         )
 
         with pytest.raises(SkillLoadError):
-            load_workflow_from_md(skill)
+            load_workflow_from_md(skill, skill_resolver=mock_skill_resolver)

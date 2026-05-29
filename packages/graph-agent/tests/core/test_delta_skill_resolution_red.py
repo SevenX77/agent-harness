@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
+
 from graph_agent.core import graph_assembler, loader
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import SkillLoadError
@@ -13,7 +15,6 @@ from graph_agent.core.loader import CompiledSkill, PhaseDocument, SkillLoader
 from graph_agent.core.manifest import GraphManifest, SubagentSpec, SubgraphNodeAST
 from graph_agent.core.runner import run_skill
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
-from pydantic import ValidationError
 
 
 class DictSkillResolver:
@@ -191,5 +192,6 @@ def test_delta1_assemble_graph_missing_resolver_raises_v3_code(tmp_path: Path) -
         ],
     )
 
-    with pytest.raises(SkillLoadError, match=r"\[F-v3-resolver-missing\]"):
+    with pytest.raises(SkillLoadError) as exc_info:
         assemble_graph(compiled, skill_resolver=None)
+    assert exc_info.value.payload.code == "[F-v3-resolver-missing]"

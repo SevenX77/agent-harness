@@ -50,6 +50,8 @@ from typing import Any
 
 import pytest
 from dotenv import load_dotenv
+from langchain_core.messages import HumanMessage
+
 from graph_agent.config.llm_config import load_config
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.graph_assembler import assemble_graph
@@ -62,7 +64,6 @@ from graph_agent.core.state import (
     WorkflowState,
     verify_state_invariants,
 )
-from langchain_core.messages import HumanMessage
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 LLM_ROLES_PATH = REPO_ROOT / "config" / "llm_roles.yaml"

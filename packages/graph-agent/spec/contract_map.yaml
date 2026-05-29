@@ -1,0 +1,393 @@
+public_api_symbols:
+  AgentNodeAST:
+    feature_ids:
+    - F-agent-phase-orchestration
+  AgentSkillDef:
+    feature_ids:
+    - F-vendor-contract-debt
+  AmbiguityReportEvent:
+    feature_ids:
+    - F-clarification-flow
+  BaseMockStrategy:
+    feature_ids:
+    - F-predict-internal-mocking
+  BlackboardState:
+    feature_ids:
+    - F-state-blackboard
+  Callback:
+    feature_ids:
+    - F-callback-event-stream
+  CallbackEvent:
+    feature_ids:
+    - F-callback-event-stream
+  CompactionEvent:
+    feature_ids:
+    - F-llm-prompt-assembly
+  CompileIssue:
+    feature_ids:
+    - F-skill-compilation-vendor-export
+  CompileResult:
+    feature_ids:
+    - F-compile-runtime-flow
+  CompiledSkill:
+    feature_ids:
+    - F-graph-skill-loading
+  CompiledStateGraph:
+    feature_ids:
+    - F-graph-assembly
+  DeadEndPrunedEvent:
+    feature_ids:
+    - F-llm-prompt-assembly
+  ExecutionError:
+    feature_ids:
+    - F-error-code-recovery
+  FinishTaskEvent:
+    feature_ids:
+    - F-finish-task-validation
+  GoldenCase:
+    feature_ids:
+    - F-predict-internal-mocking
+  GoldenCaseStrategy:
+    feature_ids:
+    - F-predict-internal-mocking
+  GraphAgentError:
+    feature_ids:
+    - F-error-code-recovery
+  GraphManifest:
+    feature_ids:
+    - F-graph-skill-loading
+  GraphPhaseRef:
+    feature_ids:
+    - F-graph-skill-loading
+  GraphSkillDef:
+    feature_ids:
+    - F-vendor-contract-debt
+  HeuristicStubStrategy:
+    feature_ids:
+    - F-predict-internal-mocking
+  IoInput:
+    feature_ids:
+    - F-vendor-contract-debt
+  LLMCallEvent:
+    feature_ids:
+    - F-llm-execution
+  LLMClientManager:
+    feature_ids:
+    - F-model-configuration
+  LLMFallbackEvent:
+    feature_ids:
+    - F-llm-execution
+  LocalWorkspaceResolver:
+    feature_ids:
+    - F-skill-resolution
+  LoggingCallback:
+    feature_ids:
+    - F-observability-metrics
+  LogicNodeAST:
+    feature_ids:
+    - F-logic-action-execution
+  MetricsCallback:
+    feature_ids:
+    - F-observability-metrics
+  MockStrategy:
+    feature_ids:
+    - F-predict-internal-mocking
+  NudgeEvent:
+    feature_ids:
+    - F-error-code-recovery
+  PathDiff:
+    feature_ids:
+    - F-predict-internal-mocking
+  PersonaSkillDef:
+    feature_ids:
+    - F-vendor-contract-debt
+  PhaseEndEvent:
+    feature_ids:
+    - F-runtime-execution
+  PhaseRecord:
+    feature_ids:
+    - F-predict-internal-mocking
+  PhaseStartEvent:
+    feature_ids:
+    - F-runtime-execution
+  PredictGatewayChatModel:
+    feature_ids:
+    - F-llm-execution
+  PredictResult:
+    feature_ids:
+    - F-predict-internal-mocking
+  PredictTracingCallback:
+    feature_ids:
+    - F-callback-tracing
+  ProviderDef:
+    feature_ids:
+    - F-model-configuration
+  ResolvedProvider:
+    feature_ids:
+    - F-model-configuration
+  RetryEvent:
+    feature_ids:
+    - F-error-code-recovery
+  SkillCompilationError:
+    feature_ids:
+    - F-error-code-recovery
+  SkillCompileError:
+    feature_ids:
+    - F-error-code-recovery
+  SkillLoadError:
+    feature_ids:
+    - F-error-code-recovery
+  SkillLoader:
+    feature_ids:
+    - F-graph-skill-loading
+  SkillManifest:
+    feature_ids:
+    - F-graph-skill-loading
+  SkillResolutionError:
+    feature_ids:
+    - F-skill-resolution
+  SubgraphNodeAST:
+    feature_ids:
+    - F-subgraph-delegation
+  ToolCallEvent:
+    feature_ids:
+    - F-tool-call-binding
+  TracingCallback:
+    feature_ids:
+    - F-callback-tracing
+  ValidationFailEvent:
+    feature_ids:
+    - F-error-code-recovery
+  WorkflowResult:
+    feature_ids:
+    - F-runtime-execution
+  WorkingMemoryUpdateEvent:
+    feature_ids:
+    - F-state-blackboard
+  assemble_graph:
+    feature_ids:
+    - F-graph-assembly
+  assemble_phase_record:
+    feature_ids:
+    - F-predict-internal-mocking
+  compile_skill:
+    feature_ids:
+    - F-compile-runtime-flow
+  compute_diff:
+    feature_ids:
+    - F-predict-internal-mocking
+  load_config:
+    feature_ids:
+    - F-model-configuration
+  parse_skill_file:
+    feature_ids:
+    - F-vendor-contract-debt
+  run_skill:
+    feature_ids:
+    - F-runtime-execution
+  serialize_graph:
+    feature_ids:
+    - F-serialization-output
+  serialize_skill:
+    feature_ids:
+    - F-serialization-output
+  to_jsonable_dict:
+    feature_ids:
+    - F-serialization-output
+skill_spec_sections:
+  docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md#核心原则 R1.1（PM 2026-05-22）:
+    feature_ids:
+    - F-md-frontmatter-parsing
+  docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md#§0 全局规则（适用所有 phase 文件）:
+    feature_ids:
+    - F-graph-skill-loading
+  docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md#§1 GRAPH.md（根拓扑文件）:
+    feature_ids:
+    - F-logic-action-execution
+  docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md#§2 LOGIC.md（Python action phase）:
+    feature_ids:
+    - F-subgraph-delegation
+  docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md#§3 SUBGRAPH.md（子图委派 phase）:
+    feature_ids:
+    - F-agent-phase-orchestration
+  docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md#§4 SKILL.md（Agent phase）:
+    feature_ids:
+    - F-llm-prompt-assembly
+  docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md#§5 Cognitive Template（引擎装配模版，完整不省略）:
+    feature_ids:
+    - F-mention-resolution
+  docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md#§6 跨文件统一规则（5-24 拍板 A7-A11）:
+    feature_ids:
+    - F-resource-reference-access
+  docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md#§7 字段确认状态:
+    feature_ids:
+    - F-skill-resolution
+  docs/engine/skill-spec/00-FORMAT-GROUND-TRUTH.md#确认方式:
+    feature_ids:
+    - F-error-code-recovery
+  docs/engine/skill-spec/01-physical-layout.md#物理结构拓扑 (Directory Tree):
+    feature_ids:
+    - F-compile-runtime-flow
+  docs/engine/skill-spec/01-physical-layout.md#文件命名规约 (Naming Conventions):
+    feature_ids:
+    - F-md-frontmatter-parsing
+  docs/engine/skill-spec/01-physical-layout.md#文件名类型推导 (Filename-Type Derivation):
+    feature_ids:
+    - F-graph-skill-loading
+  docs/engine/skill-spec/01-physical-layout.md#IO 物理文件退役声明 (Inline IO Deprecation):
+    feature_ids:
+    - F-logic-action-execution
+  docs/engine/skill-spec/02-graph-md-spec.md#基础元数据字段 (Metadata):
+    feature_ids:
+    - F-subgraph-delegation
+  docs/engine/skill-spec/02-graph-md-spec.md#phases 注册与 body 拓扑校验 (Phase Registration & DAG):
+    feature_ids:
+    - F-agent-phase-orchestration
+  docs/engine/skill-spec/02-graph-md-spec.md#根 IO 契约 (Root IO Schema):
+    feature_ids:
+    - F-llm-prompt-assembly
+  docs/engine/skill-spec/03-logic-md-spec.md#Frontmatter 字段解析表 (Schema & Validation):
+    feature_ids:
+    - F-mention-resolution
+  docs/engine/skill-spec/03-logic-md-spec.md#Actions 注册、寻址与执行契约:
+    feature_ids:
+    - F-resource-reference-access
+  docs/engine/skill-spec/03-logic-md-spec.md#Validator 生命周期 (Post-Execution Hook):
+    feature_ids:
+    - F-skill-resolution
+  docs/engine/skill-spec/03-logic-md-spec.md#相关核心错误码速查 (Error Codes):
+    feature_ids:
+    - F-error-code-recovery
+  docs/engine/skill-spec/04-subgraph-md-spec.md#类型推导与节点契约:
+    feature_ids:
+    - F-compile-runtime-flow
+  docs/engine/skill-spec/04-subgraph-md-spec.md#target_skill 寻址规则:
+    feature_ids:
+    - F-md-frontmatter-parsing
+  docs/engine/skill-spec/04-subgraph-md-spec.md#IO 严格 1:1 映射校验 (Strict Mapping):
+    feature_ids:
+    - F-graph-skill-loading
+  docs/engine/skill-spec/05-agent-md-spec.md#Frontmatter 字段解析表:
+    feature_ids:
+    - F-logic-action-execution
+  docs/engine/skill-spec/05-agent-md-spec.md#Body XML 扁平化容器:
+    feature_ids:
+    - F-subgraph-delegation
+  docs/engine/skill-spec/05-agent-md-spec.md#必须持有的业务核心标签:
+    feature_ids:
+    - F-agent-phase-orchestration
+  docs/engine/skill-spec/05-agent-md-spec.md#引用注入校验 (Frontmatter ↔ Body):
+    feature_ids:
+    - F-llm-prompt-assembly
+  docs/engine/skill-spec/06-cognitive-template-spec.md#8 大插槽布局拓扑:
+    feature_ids:
+    - F-mention-resolution
+  docs/engine/skill-spec/06-cognitive-template-spec.md#静态组装插槽解析:
+    feature_ids:
+    - F-resource-reference-access
+  docs/engine/skill-spec/06-cognitive-template-spec.md#动态装配插槽解析:
+    feature_ids:
+    - F-skill-resolution
+  docs/engine/skill-spec/07-mention-syntax-spec.md#@-Mention 语法规范:
+    feature_ids:
+    - F-error-code-recovery
+  docs/engine/skill-spec/07-mention-syntax-spec.md#7 大分类静态可达性算法:
+    feature_ids:
+    - F-compile-runtime-flow
+  docs/engine/skill-spec/07-mention-syntax-spec.md#语法滥用与容错:
+    feature_ids:
+    - F-md-frontmatter-parsing
+  docs/engine/skill-spec/08-resource-mechanisms-spec.md#Reference 三机制生命周期:
+    feature_ids:
+    - F-graph-skill-loading
+  docs/engine/skill-spec/08-resource-mechanisms-spec.md#Example 处理逻辑:
+    feature_ids:
+    - F-logic-action-execution
+  docs/engine/skill-spec/08-resource-mechanisms-spec.md#Frontmatter 挂载格式:
+    feature_ids:
+    - F-subgraph-delegation
+  docs/engine/skill-spec/09-builtin-modules-spec.md#Builtin Reference Reader Subagent 签名:
+    feature_ids:
+    - F-agent-phase-orchestration
+  docs/engine/skill-spec/09-builtin-modules-spec.md#优雅降级策略 (Graceful Degradation):
+    feature_ids:
+    - F-llm-prompt-assembly
+  'docs/engine/skill-spec/09-builtin-modules-spec.md#R1: <summary>':
+    feature_ids:
+    - F-mention-resolution
+  docs/engine/skill-spec/09-builtin-modules-spec.md#按需调取 Tools (read_reference / read_example):
+    feature_ids:
+    - F-resource-reference-access
+  docs/engine/skill-spec/10-skill-resolver-protocol-spec.md#Protocol Interface 定义:
+    feature_ids:
+    - F-skill-resolution
+  docs/engine/skill-spec/10-skill-resolver-protocol-spec.md#依赖注入 (DI) 边界:
+    feature_ids:
+    - F-error-code-recovery
+  docs/engine/skill-spec/11-error-code-spec.md#错误码设计模式 (Prefix [F-v3-*]):
+    feature_ids:
+    - F-compile-runtime-flow
+  docs/engine/skill-spec/11-error-code-spec.md#错误码速查全表:
+    feature_ids:
+    - F-md-frontmatter-parsing
+  docs/engine/skill-spec/12-compile-runtime-flow-spec.md#编译期校验流 (Compile-time Workflow):
+    feature_ids:
+    - F-graph-skill-loading
+  docs/engine/skill-spec/12-compile-runtime-flow-spec.md#Template 装配流 (Assembly-time Workflow):
+    feature_ids:
+    - F-logic-action-execution
+  docs/engine/skill-spec/12-compile-runtime-flow-spec.md#运行时引擎流 (Run-time Workflow):
+    feature_ids:
+    - F-subgraph-delegation
+  docs/engine/skill-spec/README.md#文档目标 (Purpose):
+    feature_ids:
+    - F-agent-phase-orchestration
+  docs/engine/skill-spec/README.md#读者决策指南 (Navigation Guide):
+    feature_ids:
+    - F-llm-prompt-assembly
+  docs/engine/skill-spec/README.md#严格边界 (Scope Boundary):
+    feature_ids:
+    - F-mention-resolution
+  docs/engine/skill-spec/README.md#完整文件索引 (Table of Contents):
+    feature_ids:
+    - F-resource-reference-access
+  docs/engine/skill-spec/README.md#V0.3.0 决议溯源 (Decision Provenance):
+    feature_ids:
+    - F-skill-resolution
+consumer_files:
+- kind: stable-export
+  symbol: WorkflowResult
+  feature_ids:
+  - F-runtime-execution
+- kind: vendor-only-debt
+  symbol: AgentSkillDef
+  feature_ids:
+  - F-vendor-contract-debt
+- kind: vendor-only
+  symbol: CompileIssue
+  feature_ids:
+  - F-skill-compilation-vendor-export
+- kind: vendor-only-debt
+  symbol: GraphSkillDef
+  feature_ids:
+  - F-vendor-contract-debt
+- kind: vendor-only-debt
+  symbol: IoInput
+  feature_ids:
+  - F-vendor-contract-debt
+- kind: vendor-only-debt
+  symbol: PersonaSkillDef
+  feature_ids:
+  - F-vendor-contract-debt
+- kind: vendor-only-debt
+  symbol: parse_skill_file
+  feature_ids:
+  - F-vendor-contract-debt
+- kind: live-consumer
+  path: apps/studio/backend/app/services/run_manager.py
+  feature_ids:
+  - F-runtime-execution
+- kind: live-consumer
+  path: apps/studio/backend/app/services/skill_service.py
+  feature_ids:
+  - F-graph-skill-loading

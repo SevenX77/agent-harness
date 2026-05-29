@@ -1,4 +1,4 @@
-"""V2.1 smoke tests for the live text-segmentation skill layout."""
+"""Smoke tests for the legacy text-segmentation root corpus layout."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[6]
 SKILL_ROOT = REPO_ROOT / "skills/text-segmentation"
 
 
-def test_text_segmentation_compiles_from_v21_root() -> None:
+def test_text_segmentation_compiles_from_legacy_v21_root() -> None:
     compiled = SkillLoader(validate_context_writes=False).compile_skill(SKILL_ROOT)
 
     assert [phase.id for phase in compiled.manifest.phases] == ["setup", "segment", "review"]
@@ -23,7 +23,7 @@ def test_text_segmentation_setup_action_is_discovered() -> None:
     setup = next(node for node in compiled.nodes if node.phase_name == "setup")
 
     assert isinstance(setup.ast, LogicNodeAST)
-    assert setup.ast.python_callable == "prepare_chapter"
+    assert setup.ast.actions == ["prepare_chapter"]
     assert "prepare_chapter" in compiled.actions.for_phase("setup")
     assert (
         compiled.actions.for_phase("setup")["prepare_chapter"].path

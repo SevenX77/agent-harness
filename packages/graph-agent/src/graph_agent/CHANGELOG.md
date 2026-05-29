@@ -16,7 +16,7 @@
 - Fixed silent `except Exception: pass` in `deerflow/sandbox/tools.py` and `deerflow/skills/loader.py`
 
 ### Added
-- `__init__.py`: Exported `Callback`, `LoggingCallback`, `MetricsCallback`, `TracingCallback`, `clear_cache`
+- `__init__.py`: Exported `Callback`, `LoggingCallback`, `MetricsCallback`, `TracingCallback`
 - `__main__.py`: Support for `python -m graph_agent`
 - `pyproject.toml`: Package metadata for standalone installation
 - `config/__init__.py`: Exported `reset_multimodal_role_config`

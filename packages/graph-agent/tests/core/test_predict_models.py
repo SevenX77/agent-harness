@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
+
 from graph_agent.core._predict_internal.models import (
     GoldenCase,
     HeuristicStub,
@@ -11,7 +13,6 @@ from graph_agent.core._predict_internal.models import (
     PredictResult,
 )
 from graph_agent.core._predict_internal.strategy import MockLLMParam
-from pydantic import ValidationError
 
 
 def _golden_case() -> GoldenCase:

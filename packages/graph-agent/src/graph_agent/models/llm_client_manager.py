@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import ClassVar, Literal, cast
@@ -49,6 +50,7 @@ class LLMClientManager:
     """
 
     _clients: ClassVar[dict[str, OpenAI | Anthropic]] = {}
+    _lock: ClassVar[threading.Lock] = threading.Lock()
     _usage_stats: ClassVar[dict[str, UsageStats]] = {}
     _provider_down_cache: ClassVar[dict[str, float]] = {}
     _PROBE_DOWN_TTL: ClassVar[float] = 60.0
@@ -68,37 +70,38 @@ class LLMClientManager:
         if timeout_override is not None:
             cache_key = f"{cache_key}:timeout:{timeout_override:g}"
 
-        cached = cls._clients.get(cache_key)
-        if cached is not None:
-            return cast(OpenAI, cached)
+        with cls._lock:
+            cached = cls._clients.get(cache_key)
+            if cached is not None:
+                return cast(OpenAI, cached)
 
-        api_key = cls._resolve_api_key(provider_def)
-        timeout_value = float(timeout_override or provider_def.timeout)
-        base_url = (
-            provider_def.llm_base_url
-            if provider_def.type == "wavespeed_any_llm" and provider_def.llm_base_url
-            else provider_def.base_url
-        )
-        http_client = httpx.Client(
-            trust_env=provider_def.trust_env,
-            timeout=httpx.Timeout(timeout_value),
-        )
-        client = OpenAI(
-            api_key=api_key,
-            base_url=base_url or None,
-            timeout=timeout_value,
-            max_retries=0,
-            http_client=http_client,
-        )
+            api_key = cls._resolve_api_key(provider_def)
+            timeout_value = float(timeout_override or provider_def.timeout)
+            base_url = (
+                provider_def.llm_base_url
+                if provider_def.type == "wavespeed_any_llm" and provider_def.llm_base_url
+                else provider_def.base_url
+            )
+            http_client = httpx.Client(
+                trust_env=provider_def.trust_env,
+                timeout=httpx.Timeout(timeout_value),
+            )
+            client = OpenAI(
+                api_key=api_key,
+                base_url=base_url or None,
+                timeout=timeout_value,
+                max_retries=0,
+                http_client=http_client,
+            )
 
-        cls._clients[cache_key] = client
-        cls._init_usage_stats(provider_code)
-        logger.info(
-            "phase=llm_client_manager action=create_client type=openai provider=%s base_url=%s",
-            provider_code,
-            base_url or "<default>",
-        )
-        return client
+            cls._clients[cache_key] = client
+            cls._init_usage_stats(provider_code)
+            logger.info(
+                "phase=llm_client_manager action=create_client type=openai provider=%s base_url=%s",
+                provider_code,
+                base_url or "<default>",
+            )
+            return client
 
     @classmethod
     def _get_anthropic_client(
@@ -108,24 +111,43 @@ class LLMClientManager:
     ) -> Anthropic:
         """Return a cached Anthropic-compatible client for one provider."""
         cache_key = f"anthropic:{provider_code}"
-        cached = cls._clients.get(cache_key)
-        if cached is not None:
-            return cast(Anthropic, cached)
+        with cls._lock:
+            cached = cls._clients.get(cache_key)
+            if cached is not None:
+                return cast(Anthropic, cached)
 
-        client = Anthropic(
-            api_key=cls._resolve_api_key(provider_def),
-            base_url=provider_def.base_url or None,
-            timeout=float(provider_def.timeout),
-            max_retries=0,
-        )
-        cls._clients[cache_key] = client
-        cls._init_usage_stats(provider_code)
-        logger.info(
-            "phase=llm_client_manager action=create_client type=anthropic provider=%s base_url=%s",
-            provider_code,
-            provider_def.base_url or "<default>",
-        )
-        return client
+            client = Anthropic(
+                api_key=cls._resolve_api_key(provider_def),
+                base_url=provider_def.base_url or None,
+                timeout=float(provider_def.timeout),
+                max_retries=0,
+            )
+            cls._clients[cache_key] = client
+            cls._init_usage_stats(provider_code)
+            logger.info(
+                "phase=llm_client_manager action=create_client type=anthropic provider=%s base_url=%s",
+                provider_code,
+                provider_def.base_url or "<default>",
+            )
+            return client
+
+    @classmethod
+    def close_all(cls) -> None:
+        """Close cached SDK clients and clear the process-wide client cache."""
+        with cls._lock:
+            for cache_key, client in list(cls._clients.items()):
+                try:
+                    close = getattr(client, "close", None)
+                    if callable(close):
+                        close()
+                except Exception as exc:
+                    logger.warning(
+                        "phase=llm_client_manager action=close_client_fail key=%s error=%s",
+                        cache_key,
+                        exc,
+                        exc_info=True,
+                    )
+            cls._clients.clear()
 
     @classmethod
     def _init_usage_stats(cls, provider_code: str) -> None:
@@ -373,83 +395,18 @@ class LLMClientManager:
     ) -> CallResult:
         """Call WaveSpeed's Any-LLM endpoint with 5xx backoff retries."""
         api_key = cls._resolve_api_key(provider_def)
-        prompt_parts: list[str] = []
-        system_prompt = ""
-        for msg in messages:
-            role = str(msg.get("role", "user"))
-            content = _coerce_text(msg.get("content", ""))
-            if role == "system":
-                system_prompt = (
-                    f"{system_prompt}\n\n{content}".strip() if system_prompt else content
-                )
-            else:
-                prompt_parts.append(content)
-
-        payload: dict[str, object] = {
-            "prompt": "\n\n".join(prompt_parts),
-            "model": model,
-            "enable_sync_mode": True,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "reasoning": reasoning,
-            "priority": "latency",
-        }
-        if system_prompt:
-            payload["system_prompt"] = system_prompt
-        if tools:
-            payload["tools"] = tools
-        if tool_choice:
-            payload["tool_choice"] = tool_choice
-
+        payload = _wavespeed_payload(
+            messages=messages,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            reasoning=reasoning,
+            tools=tools,
+            tool_choice=tool_choice,
+        )
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-        response: httpx.Response | None = None
-        for attempt in range(3):
-            response = httpx.post(
-                f"{provider_def.base_url.rstrip('/')}/wavespeed-ai/any-llm",
-                json=payload,
-                headers=headers,
-                timeout=300.0,
-            )
-            if response.status_code not in _RETRYABLE_WAVESPEED_STATUS:
-                break
-            if attempt < 2:
-                wait_seconds = 10 * (2**attempt)
-                logger.warning(
-                    "phase=llm_client_manager action=wavespeed_retry status=%s attempt=%d wait=%d",
-                    response.status_code,
-                    attempt + 1,
-                    wait_seconds,
-                )
-                time.sleep(wait_seconds)
-
-        if response is None:
-            raise RuntimeError("WaveSpeed returned no response")
-        if response.status_code != 200:
-            raise RuntimeError(f"WaveSpeed HTTP {response.status_code}: {response.text[:300]}")
-
-        payload_obj = response.json()
-        if not isinstance(payload_obj, Mapping):
-            raise RuntimeError("WaveSpeed returned a non-object response")
-        code = payload_obj.get("code")
-        if code != 200:
-            raise RuntimeError(f"WaveSpeed error: {payload_obj.get('message', 'unknown')}")
-
-        data = payload_obj.get("data")
-        if not isinstance(data, Mapping):
-            raise RuntimeError("WaveSpeed returned no data object")
-        status = data.get("status")
-        if status == "failed":
-            raise RuntimeError(f"WaveSpeed task failed: {data.get('error', 'unknown')}")
-        if status != "completed":
-            raise RuntimeError(f"WaveSpeed unexpected status: {status}")
-        output = _first_sequence_item(data.get("outputs"))
-        if output is None:
-            raise RuntimeError("WaveSpeed returned no outputs")
-        return {
-            "content": _coerce_text(output),
-            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-            "finish_reason": None,
-        }
+        response = _post_wavespeed_with_retries(provider_def, payload, headers)
+        return _wavespeed_call_result(response)
 
     @classmethod
     def _dispatch_provider_call(
@@ -567,6 +524,112 @@ class LLMClientManager:
         if not api_key:
             raise ValueError(f"{provider_def.api_key_env} not configured, set it in .env")
         return api_key
+
+
+def _wavespeed_payload(
+    *,
+    messages: list[MessageDict],
+    model: str,
+    max_tokens: int,
+    temperature: float,
+    reasoning: bool,
+    tools: list[ToolSchema] | None,
+    tool_choice: str | None,
+) -> dict[str, object]:
+    prompt_parts, system_prompt = _wavespeed_prompt_parts(messages)
+    payload: dict[str, object] = {
+        "prompt": "\n\n".join(prompt_parts),
+        "model": model,
+        "enable_sync_mode": True,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "reasoning": reasoning,
+        "priority": "latency",
+    }
+    if system_prompt:
+        payload["system_prompt"] = system_prompt
+    if tools:
+        payload["tools"] = tools
+    if tool_choice:
+        payload["tool_choice"] = tool_choice
+    return payload
+
+
+def _wavespeed_prompt_parts(messages: list[MessageDict]) -> tuple[list[str], str]:
+    prompt_parts: list[str] = []
+    system_prompt = ""
+    for msg in messages:
+        role = str(msg.get("role", "user"))
+        content = _coerce_text(msg.get("content", ""))
+        if role == "system":
+            system_prompt = f"{system_prompt}\n\n{content}".strip() if system_prompt else content
+        else:
+            prompt_parts.append(content)
+    return prompt_parts, system_prompt
+
+
+def _post_wavespeed_with_retries(
+    provider_def: ProviderDef,
+    payload: dict[str, object],
+    headers: dict[str, str],
+) -> httpx.Response:
+    response: httpx.Response | None = None
+    for attempt in range(3):
+        response = httpx.post(
+            f"{provider_def.base_url.rstrip('/')}/wavespeed-ai/any-llm",
+            json=payload,
+            headers=headers,
+            timeout=300.0,
+        )
+        if response.status_code not in _RETRYABLE_WAVESPEED_STATUS:
+            break
+        if attempt < 2:
+            _sleep_before_wavespeed_retry(response.status_code, attempt)
+    if response is None:
+        raise RuntimeError("WaveSpeed returned no response")
+    return response
+
+
+def _sleep_before_wavespeed_retry(status_code: int, attempt: int) -> None:
+    wait_seconds = 10 * (2**attempt)
+    logger.warning(
+        "phase=llm_client_manager action=wavespeed_retry status=%s attempt=%d wait=%d",
+        status_code,
+        attempt + 1,
+        wait_seconds,
+    )
+    time.sleep(wait_seconds)
+
+
+def _wavespeed_call_result(response: httpx.Response) -> CallResult:
+    if response.status_code != 200:
+        raise RuntimeError(f"WaveSpeed HTTP {response.status_code}: {response.text[:300]}")
+    data = _wavespeed_data_object(response.json())
+    status = data.get("status")
+    if status == "failed":
+        raise RuntimeError(f"WaveSpeed task failed: {data.get('error', 'unknown')}")
+    if status != "completed":
+        raise RuntimeError(f"WaveSpeed unexpected status: {status}")
+    output = _first_sequence_item(data.get("outputs"))
+    if output is None:
+        raise RuntimeError("WaveSpeed returned no outputs")
+    return {
+        "content": _coerce_text(output),
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        "finish_reason": None,
+    }
+
+
+def _wavespeed_data_object(payload_obj: object) -> Mapping[str, object]:
+    if not isinstance(payload_obj, Mapping):
+        raise RuntimeError("WaveSpeed returned a non-object response")
+    code = payload_obj.get("code")
+    if code != 200:
+        raise RuntimeError(f"WaveSpeed error: {payload_obj.get('message', 'unknown')}")
+    data = payload_obj.get("data")
+    if not isinstance(data, Mapping):
+        raise RuntimeError("WaveSpeed returned no data object")
+    return data
 
 
 def _normalise_message_role(role: object) -> Literal["user", "assistant"]:

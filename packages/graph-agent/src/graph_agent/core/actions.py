@@ -11,6 +11,8 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
+from graph_agent.core.exceptions import GraphAgentFatalError, make_error_payload
+
 
 @dataclass(frozen=True)
 class ActionDef:
@@ -29,6 +31,7 @@ class ActionRegistry:
         return cls({})
 
     def resolve(self, phase_id: str, name: str) -> Callable[..., object]:
+        _validate_action_name(name)
         try:
             phase_actions = self._by_phase[phase_id]
         except KeyError as exc:
@@ -79,6 +82,22 @@ def _structured_tool(tool: ToolDef) -> StructuredTool:
         args_schema=tool.args_schema,
         metadata=tool.metadata or None,
     )
+
+
+def _validate_action_name(name: str) -> None:
+    if (
+        not isinstance(name, str)
+        or not name
+        or "/" in name
+        or "\\" in name
+        or "." in name
+        or Path(name).is_absolute()
+    ):
+        detail = f"invalid action name {name!r}"
+        raise GraphAgentFatalError(
+            detail,
+            payload=make_error_payload("[F-v3-logic-action-name-invalid]", detail),
+        )
 
 
 __all__ = ["ActionDef", "ActionRegistry", "ToolDef", "ToolRegistry"]

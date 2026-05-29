@@ -1,6 +1,5 @@
 ---
 mode: logic
+actions: [write_a]
 ---
-<python_callable>
 write_a
-</python_callable>

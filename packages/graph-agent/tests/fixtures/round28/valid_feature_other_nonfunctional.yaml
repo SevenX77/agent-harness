@@ -1,0 +1,24 @@
+id: F-other-nfc
+description: Other non functional contract type is allowed with evidence.
+feature_boundary:
+  kind: externally-observable-behavior
+  evidence: trace output
+sources:
+  - consumer-file
+consumer_files:
+  - kind: live-consumer
+    path: apps/studio/backend/app/services/run_manager.py
+core_paths:
+  - path: packages/graph-agent/src/graph_agent/callbacks/tracing.py
+error_codes_primary: []
+error_codes_secondary: []
+events_primary:
+  - PhaseStartEvent
+events_secondary: []
+non_functional_contracts:
+  - id: NFC-other-evidence
+    type: other
+    description: Explicit exceptional non-functional rule.
+    evidence: docs/engine/tracing-and-observability/logic-explained.md
+targeted_tests:
+  - tests/callbacks/test_v030_trace_events.py::test_tracing_callback_writes_v030_typed_events

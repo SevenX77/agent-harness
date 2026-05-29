@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
 from graph_agent.core.exceptions import GraphAgentFatalError
 from graph_agent.core.graph_assembler import _invoke_subagent_once_t23, _SubagentRuntime
 from graph_agent.core.io_manager import IOManager
@@ -99,7 +100,7 @@ def test_gamma2_phase_wrapper_rejects_writes_to_read_only_inputs() -> None:
 
     wrapped = PhaseWrapper(mapper).wrap(node)
 
-    with pytest.raises(GraphAgentFatalError, match=r"\[F-v3-runtime-state-mapping-failed\]"):
+    with pytest.raises(GraphAgentFatalError) as exc_info:
         wrapped(
             {
                 "data": {"inputs": {"topic": "A"}, "phase_outputs": {}, "scratch": {}},
@@ -107,6 +108,7 @@ def test_gamma2_phase_wrapper_rejects_writes_to_read_only_inputs() -> None:
                 "messages": [],
             }
         )
+    assert exc_info.value.payload.code == "[F-v3-runtime-state-mapping-failed]"
 
 
 def test_gamma2_finish_task_acceptance_writes_phase_outputs_not_flat_data() -> None:

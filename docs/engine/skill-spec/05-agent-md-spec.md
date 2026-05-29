@@ -1,3 +1,8 @@
+---
+status: FROZEN
+---
+<!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
+
 # Agent SKILL.md Spec
 
 本文定义 Agent 节点 `SKILL.md` 的 Frontmatter、Body XML 扁平化规则和引用注入校验。它是 [Cognitive Template](./06-cognitive-template-spec.md#8-大插槽布局拓扑) 的主要静态输入, 也和 [Mention Syntax](./07-mention-syntax-spec.md#--mention-语法规范) 强关联。

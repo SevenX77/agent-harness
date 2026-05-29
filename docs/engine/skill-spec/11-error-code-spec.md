@@ -1,3 +1,8 @@
+---
+status: FROZEN
+---
+<!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
+
 # Error Code Spec
 
 本文定义 `[F-v3-*]` 错误码前缀、等级划分和速查表。它是所有 spec 的统一失败语义出口, 并会被 [编译期校验流](./12-compile-runtime-flow-spec.md#编译期校验流-compile-time-workflow) 与各字段契约反向引用。
@@ -60,6 +65,13 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | `[F-v3-graph-io-physical-file-deprecated]` | 编译期 | 使用旧 `io/inputs.json` 或 `io_inputs_ref` | 改为 inline `io.inputs` / `io.outputs` | [Physical](./01-physical-layout.md#io-物理文件退役声明-inline-io-deprecation) |
 | `[F-v3-graph-dataflow-source-missing]` | 编译期 | phase input 没有根输入或上游输出来源 | 补依赖或调整 IO | [GRAPH](./02-graph-md-spec.md#根-io-契约-root-io-schema) |
 
+### compile domain
+
+| 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
+|---|---|---|---|---|
+| `[F-v3-compile-recursion-cycle]` | 编译期 | subgraph/subagent 递归编译链路中再次遇到已在加载栈内的 skill root | 打断 skill 间循环引用或抽出共享子图 | [Error Code](./11-error-code-spec.md#compile-domain) |
+| `[F-v3-compile-depth-exceeded]` | 编译期 | subgraph/subagent 递归编译深度超过安全上限 | 降低嵌套深度或合并中间 skill | [Error Code](./11-error-code-spec.md#compile-domain) |
+
 ### logic domain
 
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
@@ -72,14 +84,15 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | `[F-v3-logic-action-dir-missing]` | 编译期 | phase-local `actions/` 缺失且 action 未在通用 registry 注册 | 创建目录或注册通用 action | [LOGIC](./03-logic-md-spec.md#actions-注册寻址与执行契约) |
 | `[F-v3-logic-action-not-found]` | 编译期 | phase-local action py 文件不存在且通用 registry 无此项 | 增加 `<name>.py` 或注册通用 action | [LOGIC](./03-logic-md-spec.md#actions-注册寻址与执行契约) |
 | `[F-v3-logic-action-entrypoint-missing]` | 编译期 | action 无 `run()` | 导出 `run` | [LOGIC](./03-logic-md-spec.md#actions-注册寻址与执行契约) |
+| `[F-v3-logic-action-purity-violation]` | 编译期 | action 代码包含本地写等副作用违例 | 移除 `open('w')` 等非纯操作 | [LOGIC](./03-logic-md-spec.md#actions-注册寻址与执行契约) |
 | `[F-v3-logic-action-return-invalid]` | 运行期 | action 返回非 dict | 返回 dict | [LOGIC](./03-logic-md-spec.md#actions-注册寻址与执行契约) |
 | `[F-v3-logic-output-field-undeclared]` | 运行期 | 返回未声明输出字段 | 更新 `io.outputs` 或删字段 | [LOGIC](./03-logic-md-spec.md#actions-注册寻址与执行契约) |
 | `[F-v3-logic-validator-type-invalid]` | 编译期 | `validator` 不是 boolean | 改为 true/false | [LOGIC](./03-logic-md-spec.md#validator-生命周期-post-execution-hook) |
 | `[F-v3-logic-validator-missing]` | 编译期 | `validator: true` 但无文件 | 增加同级 `validator.py` | [LOGIC](./03-logic-md-spec.md#validator-生命周期-post-execution-hook) |
 | `[F-v3-logic-validator-entrypoint-missing]` | 编译期 | validator 无 `validate()` | 导出 `validate` | [LOGIC](./03-logic-md-spec.md#validator-生命周期-post-execution-hook) |
 | `[F-v3-logic-validator-failed]` | 运行期 | logic validator 抛异常 | 修正输出或校验规则 | [LOGIC](./03-logic-md-spec.md#validator-生命周期-post-execution-hook) |
-| `[F-v3-agent-validator-failed]` | 运行期 | agent validator 抛异常 | 触发 LLM 重试反馈 | |
-| `[F-v3-subgraph-validator-failed]` | 运行期 | subgraph validator 抛异常 | 检查子图业务规则 | |
+| `[F-v3-agent-validator-failed]` | 运行期 | agent validator 抛异常 | 触发 LLM 重试反馈 | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
+| `[F-v3-subgraph-validator-failed]` | 运行期 | subgraph validator 抛异常 | 检查子图业务规则 | [SUBGRAPH](./04-subgraph-md-spec.md#类型推导与节点契约) |
 
 ### subgraph domain
 
@@ -100,8 +113,8 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | `[F-v3-agent-name-invalid]` | 编译期 | `name` 非法 | 修正命名 | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
 | `[F-v3-agent-llm-role-unknown]` | 编译期 | llm role 未注册 | 使用已注册角色 | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
 | `[F-v3-agent-io-schema-invalid]` | 编译期 | Agent IO schema 非法 | 修正 schema | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
-| `[F-v3-agent-output-schema-invalid]` | 运行期 | CognitiveFlowMiddleware SchemaEngine strict 校验失败 (io.outputs 不匹配) | 触发 LLM 重试反馈 | |
-| `[F-v3-agent-output-schema-missing]` | 运行期 | io.outputs schema 缺失 (编译期未生成), fatal 拒绝 | 修正 AST / pipeline | |
+| `[F-v3-agent-output-schema-invalid]` | 运行期 | CognitiveFlowMiddleware SchemaEngine strict 校验失败 (io.outputs 不匹配) | 触发 LLM 重试反馈 | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
+| `[F-v3-agent-output-schema-missing]` | 运行期 | io.outputs schema 缺失 (编译期未生成), fatal 拒绝 | 修正 AST / pipeline | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
 | `[F-v3-agent-tool-unknown]` | 编译期 | tool 未注册 | 注册 tool 或删引用 | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
 | `[F-v3-agent-subagent-invalid]` | 编译期 | subagents 项缺字段 | 补 name/target_skill/description | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
 | `[F-v3-agent-subgraph-invalid]` | 编译期 | subgraphs 项缺字段 | 补 name/target_skill/description | [Agent](./05-agent-md-spec.md#frontmatter-字段解析表) |
@@ -144,6 +157,7 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 | 错误码 | 阶段 | 具体原因 | 修复建议 | Spec |
 |---|---|---|---|---|
 | `[F-v3-resolver-skill-id-invalid]` | 编译期 | skill id 非法 | 修正 target_skill | [Resolver](./10-skill-resolver-protocol-spec.md#protocol-interface-定义) |
+| `[F-v3-skill-id-ambiguous]` | 编译期/装配期 | resolver 找到多个匹配 skill root | 收窄 search paths 或移除重复注册 | [Resolver](./10-skill-resolver-protocol-spec.md#protocol-interface-定义) |
 | `[F-v3-skill-not-registered]` | 编译期/装配期 | resolver 查不到 skill | 在 Studio 导入或注册 skill | [Resolver](./10-skill-resolver-protocol-spec.md#protocol-interface-定义) |
 | `[F-v3-resolver-path-invalid]` | 编译期 | resolver 返回路径无 GRAPH.md | 修正 registry 记录 | [Resolver](./10-skill-resolver-protocol-spec.md#protocol-interface-定义) |
 | `[F-v3-resolver-interface-invalid]` | 编译期 | resolver 暴露非决议接口 | 实现单方法 `resolve_skill` | [Resolver](./10-skill-resolver-protocol-spec.md#protocol-interface-定义) |
@@ -155,6 +169,7 @@ TraceEventKind (例如 `AMBIGUITY_LOGGED` / `BUILTIN_SUBAGENT_FALLBACK`) 不是�
 |---|---|---|---|---|
 | `[F-v3-cognitive-slot-render-failed]` | 装配期 | template slot 序列化失败 | 检查 body AST | [Cognitive](./06-cognitive-template-spec.md#静态组装插槽解析) |
 | `[F-v3-cognitive-output-schema-render-failed]` | 装配期 | output schema 无法嵌入 exit_contract | 修正 `io.outputs` | [Cognitive](./06-cognitive-template-spec.md#动态装配插槽解析) |
+| `[F-v3-cognitive-output-schema-invalid]` | 装配期/装配前 | finish_task 的 output_schema 结构非法 (非 JSON Schema) | 检查 Agent 的 `io.outputs` 或装配传入 schema | [Cognitive](./06-cognitive-template-spec.md#动态装配插槽解析) |
 | `[F-v3-reference-reader-input-invalid]` | 装配期 | reader 输入 JSON 非法 | 检查 references registry | [Builtin](./09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名) |
 | `[F-v3-reference-reader-output-invalid]` | 装配期 | reader 输出 JSON 非法 | 修 reader 模块 | [Builtin](./09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名) |
 | `[F-v3-tool-argument-invalid]` | 运行期 | builtin tool 参数非法 | 修正 tool 调用参数 | [Builtin](./09-builtin-modules-spec.md#按需调取-tools-read_reference--read_example) |

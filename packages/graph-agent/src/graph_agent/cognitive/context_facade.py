@@ -18,14 +18,30 @@ class Context:
     def get(self, key: str, default: Any = None) -> Any:
         return self._blackboard.get(key, default)
 
+    def __getitem__(self, key: str) -> Any:
+        if key not in self._blackboard:
+            raise KeyError(key)
+        return self._blackboard[key]
+
     def set(self, key: str, value: Any) -> None:
         self._blackboard[key] = value
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self.set(key, value)
 
     def update(self, **fields: Any) -> None:
         self._blackboard.update(fields)
 
     def has(self, key: str) -> bool:
         return key in self._blackboard
+
+    def __contains__(self, key: str) -> bool:
+        return self.has(key)
+
+    def setdefault(self, key: str, default: Any = None) -> Any:
+        if not self.has(key):
+            self.set(key, default)
+        return self.get(key)
 
     def delete(self, key: str) -> None:
         self._blackboard.pop(key, None)

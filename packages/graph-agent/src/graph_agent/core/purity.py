@@ -134,36 +134,55 @@ def _violation_for_call(
 ) -> PurityViolation | None:
     func = node.func
     if isinstance(func, ast.Name):
-        name = func.id
-        qualified = aliases.get(name, name)
-        if name == "open" or qualified == "builtins.open":
-            reason = _open_violation_reason(node)
-            if reason is not None:
-                return PurityViolation(path, node.lineno, "open", reason)
-        if qualified.startswith("tempfile.") and qualified.rsplit(".", 1)[-1] in _TEMPFILE_METHODS:
-            return PurityViolation(path, node.lineno, qualified, "temporary files are local writes")
-        if name in _TEMPFILE_METHODS:
-            return PurityViolation(path, node.lineno, name, "temporary files are local writes")
-        return None
+        return _violation_for_name_call(path, node, aliases)
 
     if isinstance(func, ast.Attribute):
-        attr = func.attr
-        base = _attribute_base_name(func.value)
-        qualified_base = aliases.get(base or "", base or "")
-        if attr in _PATH_METHODS:
-            return PurityViolation(path, node.lineno, attr, "path mutation APIs are forbidden")
-        if qualified_base == "os" and attr in _OS_METHODS:
-            return PurityViolation(
-                path, node.lineno, f"os.{attr}", "os filesystem mutation is forbidden"
-            )
-        if qualified_base == "shutil" and attr in _SHUTIL_METHODS:
-            return PurityViolation(
-                path, node.lineno, f"shutil.{attr}", "shutil filesystem mutation is forbidden"
-            )
-        if qualified_base == "tempfile" and attr in _TEMPFILE_METHODS:
-            return PurityViolation(
-                path, node.lineno, f"tempfile.{attr}", "temporary files are local writes"
-            )
+        return _violation_for_attribute_call(path, node, aliases)
+    return None
+
+
+def _violation_for_name_call(
+    path: Path,
+    node: ast.Call,
+    aliases: dict[str, str],
+) -> PurityViolation | None:
+    func = node.func
+    assert isinstance(func, ast.Name)
+    name = func.id
+    qualified = aliases.get(name, name)
+    if name == "open" or qualified == "builtins.open":
+        reason = _open_violation_reason(node)
+        if reason is not None:
+            return PurityViolation(path, node.lineno, "open", reason)
+    if qualified.startswith("tempfile.") and qualified.rsplit(".", 1)[-1] in _TEMPFILE_METHODS:
+        return PurityViolation(path, node.lineno, qualified, "temporary files are local writes")
+    if name in _TEMPFILE_METHODS:
+        return PurityViolation(path, node.lineno, name, "temporary files are local writes")
+    return None
+
+
+def _violation_for_attribute_call(
+    path: Path,
+    node: ast.Call,
+    aliases: dict[str, str],
+) -> PurityViolation | None:
+    func = node.func
+    assert isinstance(func, ast.Attribute)
+    attr = func.attr
+    base = _attribute_base_name(func.value)
+    qualified_base = aliases.get(base or "", base or "")
+    if attr in _PATH_METHODS:
+        return PurityViolation(path, node.lineno, attr, "path mutation APIs are forbidden")
+    if qualified_base == "os" and attr in _OS_METHODS:
+        return PurityViolation(path, node.lineno, f"os.{attr}", "os filesystem mutation is forbidden")
+    if qualified_base == "shutil" and attr in _SHUTIL_METHODS:
+        return PurityViolation(
+            path, node.lineno, f"shutil.{attr}", "shutil filesystem mutation is forbidden"
+        )
+    if qualified_base == "tempfile" and attr in _TEMPFILE_METHODS:
+        return PurityViolation(
+            path, node.lineno, f"tempfile.{attr}", "temporary files are local writes"
+        )
     return None
 
 

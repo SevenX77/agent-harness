@@ -12,8 +12,10 @@ from pydantic import BaseModel, Field
 
 from graph_agent.cognitive.md2json import Md2JsonResult
 from graph_agent.cognitive.md_patch import MdPatchClient
+from graph_agent.core.exceptions import GraphAgentFatalError, make_error_payload
 
-FATAL_CODE = "F-v3-md2json"
+_AGENT_OUTPUT_SCHEMA_INVALID_CODE = "[F-v3-agent-output-schema-invalid]"
+_COGNITIVE_OUTPUT_SCHEMA_INVALID_CODE = "[F-v3-cognitive-output-schema-invalid]"
 
 
 class FinishTaskInput(BaseModel):
@@ -104,7 +106,7 @@ def _check_output_schema(output_schema: dict[str, Any] | None) -> None:
     try:
         Draft202012Validator.check_schema(output_schema)
     except SchemaError as exc:
-        raise RuntimeError(f"[{FATAL_CODE}] output_schema invalid: {exc.message}") from exc
+        _raise_output_schema_invalid(exc.message, cause=exc)
     if not output_schema:
         return
     known_keys = {
@@ -115,11 +117,22 @@ def _check_output_schema(output_schema: dict[str, Any] | None) -> None:
         "type",
     }
     if not any(key in output_schema for key in known_keys):
-        raise RuntimeError(f"[{FATAL_CODE}] output_schema invalid: expected JSON object schema")
+        _raise_output_schema_invalid("expected JSON object schema")
     if output_schema.get("type") not in {None, "object"}:
-        raise RuntimeError(f"[{FATAL_CODE}] output_schema invalid: expected object schema")
+        _raise_output_schema_invalid("expected object schema")
     if "properties" in output_schema and not isinstance(output_schema["properties"], dict):
-        raise RuntimeError(f"[{FATAL_CODE}] output_schema invalid: properties must be object")
+        _raise_output_schema_invalid("properties must be object")
+
+
+def _raise_output_schema_invalid(message: str, *, cause: BaseException | None = None) -> None:
+    full_message = f"{_COGNITIVE_OUTPUT_SCHEMA_INVALID_CODE} output_schema invalid: {message}"
+    exc = GraphAgentFatalError(
+        full_message,
+        payload=make_error_payload(_COGNITIVE_OUTPUT_SCHEMA_INVALID_CODE, full_message),
+    )
+    if cause is not None:
+        raise exc from cause
+    raise exc
 
 
 def _structured_error(
@@ -132,7 +145,7 @@ def _structured_error(
     return {
         "ok": False,
         "error": {
-            "code": FATAL_CODE,
+            "code": _AGENT_OUTPUT_SCHEMA_INVALID_CODE,
             "kind": kind,
             "attempts": attempts,
             "validation_errors": result.validation_errors,
@@ -141,4 +154,4 @@ def _structured_error(
     }
 
 
-__all__ = ["FATAL_CODE", "FinishTaskInput", "Md2JsonConverter", "build_finish_task_tool"]
+__all__ = ["FinishTaskInput", "Md2JsonConverter", "build_finish_task_tool"]

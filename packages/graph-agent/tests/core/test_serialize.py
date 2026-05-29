@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from graph_agent.core.manifest import GraphManifest
 from graph_agent.core.parser import parse_markdown_parts
 from graph_agent.core.serialize import serialize_skill

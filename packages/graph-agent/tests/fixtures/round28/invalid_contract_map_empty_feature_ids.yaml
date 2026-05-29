@@ -1,0 +1,10 @@
+public_api_symbols:
+  run_skill:
+    feature_ids: []
+skill_spec_sections:
+  docs/engine/skill-spec/12-compile-runtime-flow-spec.md#运行时引擎流 (Run-time Workflow):
+    feature_ids: [F-runtime-execution]
+consumer_files:
+  - kind: live-consumer
+    path: apps/studio/backend/app/services/run_manager.py
+    feature_ids: [F-runtime-execution]

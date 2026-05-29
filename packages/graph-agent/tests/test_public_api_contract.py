@@ -595,7 +595,7 @@ EXPECTED_FIELD_CONTRACTS: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {
                      ('skill_id', 'str'),
                      ('context', 'dict[str, Any]'),
                      ('metrics', 'WorkflowMetrics'),
-                     ('trace_path', 'pathlib.Path | None'),
+                     ('trace_path', 'Path | None'),
                      ('error', 'str | None'),
                      ('started_at', 'datetime'),
                      ('finished_at', 'datetime'),
@@ -836,7 +836,13 @@ def _annotation_text(annotation: object) -> str:
         return annotation
     if isinstance(annotation, type):
         return annotation.__name__
-    text = str(annotation).replace("typing.", "").replace("typing_extensions.", "")
+    text = (
+        str(annotation)
+        .replace("typing.", "")
+        .replace("typing_extensions.", "")
+        .replace("pathlib._local.Path", "Path")
+        .replace("pathlib.Path", "Path")
+    )
     return text.removeprefix("<class '").removesuffix("'>")
 
 

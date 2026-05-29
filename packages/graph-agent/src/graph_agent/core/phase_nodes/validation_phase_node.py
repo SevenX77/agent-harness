@@ -40,11 +40,9 @@ class ValidationPhaseNode(PhaseNode):
     """
 
     def execute(self, phase: Phase, state: WorkflowState) -> WorkflowState:
+        from graph_agent.callbacks.emit import _safe_emit_event
         from graph_agent.callbacks.events import RetryExhaustedEvent, ValidationPassEvent
-        from graph_agent.core.harness import (
-            _clone_state,
-            _safe_emit_event,
-        )  # lazy: avoid import cycle
+        from graph_agent.core.harness import _clone_state  # lazy: avoid import cycle
 
         next_state = _clone_state(state)
         if next_state["flow"].validation_middleware_phase == phase.name:

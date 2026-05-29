@@ -5,8 +5,9 @@ from __future__ import annotations
 import os
 from dataclasses import FrozenInstanceError
 
-import graph_agent.bootstrap as bootstrap_module
 import pytest
+
+import graph_agent.bootstrap as bootstrap_module
 from graph_agent.bootstrap import Bootstrap
 from graph_agent.settings import Settings
 

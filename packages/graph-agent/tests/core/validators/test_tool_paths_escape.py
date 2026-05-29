@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.loader import SkillLoader
 
@@ -49,27 +50,28 @@ io:
     )
 
 
-def test_in_tree_action_reference_still_loads(tmp_path: Path) -> None:
+def test_in_tree_action_reference_still_loads(tmp_path: Path, mock_skill_resolver: object) -> None:
     _write_minimal_graph(tmp_path, "def prepare(context):\n    return {}\n")
 
-    compiled = SkillLoader().compile_skill(tmp_path)
+    compiled = SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
 
     assert "prepare" in compiled.actions.for_phase("prepare")
 
 
-def test_action_local_write_fatals_as_purity_violation(tmp_path: Path) -> None:
+def test_action_local_write_fatals_as_purity_violation(tmp_path: Path, mock_skill_resolver: object) -> None:
     _write_minimal_graph(
         tmp_path,
         "def prepare(context):\n    open('out.txt', 'w').write('bad')\n    return {}\n",
     )
 
-    with pytest.raises(SkillLoadError, match="F-v3-purity"):
-        SkillLoader().compile_skill(tmp_path)
+    with pytest.raises(SkillLoadError) as exc_info:
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
+    assert exc_info.value.payload.code == "[F-v3-logic-action-purity-violation]"
 
 
-def test_root_level_actions_directory_is_rejected(tmp_path: Path) -> None:
+def test_root_level_actions_directory_is_rejected(tmp_path: Path, mock_skill_resolver: object) -> None:
     _write_minimal_graph(tmp_path, "def prepare(context):\n    return {}\n")
     (tmp_path / "actions").mkdir()
 
     with pytest.raises(SkillLoadError, match="root-level actions/ is not allowed"):
-        SkillLoader().compile_skill(tmp_path)
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)

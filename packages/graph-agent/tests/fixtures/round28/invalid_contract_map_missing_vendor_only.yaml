@@ -1,0 +1,5 @@
+public_api_symbols:
+  run_skill:
+    feature_ids: [F-runtime-execution]
+skill_spec_sections: {}
+consumer_files: []

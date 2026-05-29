@@ -1,3 +1,8 @@
+---
+status: FROZEN
+---
+<!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
+
 # graph_skill 文件格式 GROUND TRUTH（唯一权威定稿）
 
 > **⚠️ 这是 PM 拍板的 graph_skill 5 类文件格式的唯一真相源。**

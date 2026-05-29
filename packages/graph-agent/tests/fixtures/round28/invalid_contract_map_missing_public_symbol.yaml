@@ -1,0 +1,5 @@
+public_api_symbols:
+  compile_skill:
+    feature_ids: [F-compile-skill]
+skill_spec_sections: {}
+consumer_files: []

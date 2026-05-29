@@ -1,3 +1,8 @@
+---
+status: FROZEN
+---
+<!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
+
 # Compile Runtime Flow Spec
 
 本文定义 graph_skill 从 Loader 编译、Template 装配到运行时执行的生命周期。它串联 [物理布局](./01-physical-layout.md#物理结构拓扑-directory-tree)、[Cognitive Template](./06-cognitive-template-spec.md#8-大插槽布局拓扑)、[错误码字典](./11-error-code-spec.md#错误码速查全表) 和 5 个 Engine 子模块 alignment。

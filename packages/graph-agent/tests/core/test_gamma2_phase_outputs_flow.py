@@ -71,7 +71,9 @@ io:
     _write(root / "phases" / phase / "actions" / f"{action}.py", body)
 
 
-def test_downstream_phase_reads_upstream_phase_outputs_in_same_graph(tmp_path: Path) -> None:
+def test_downstream_phase_reads_upstream_phase_outputs_in_same_graph(
+    tmp_path: Path, mock_skill_resolver: object
+) -> None:
     _base(
         tmp_path,
         '<phase id="segment" src="phases/segment" depends_on="" />\n'
@@ -81,7 +83,7 @@ def test_downstream_phase_reads_upstream_phase_outputs_in_same_graph(tmp_path: P
         tmp_path,
         "segment",
         "segment",
-        "def segment(context):\n    context.set('segments_summary', 'chapter summary')\n",
+        "def segment(context):\n    return {'segments_summary': 'chapter summary'}\n",
     )
     _logic_action(
         tmp_path,
@@ -91,7 +93,8 @@ def test_downstream_phase_reads_upstream_phase_outputs_in_same_graph(tmp_path: P
         "    return {'review_input': context.get('segments_summary', 'missing')}\n",
     )
 
-    result = assemble_graph(compile_skill(tmp_path, cache=False)).graph.invoke(
+    compiled = compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
+    result = assemble_graph(compiled, skill_resolver=mock_skill_resolver).graph.invoke(
         {"data": {"inputs": {}}, "flow": {}, "messages": [], "run_id": "r1"}
     )
 

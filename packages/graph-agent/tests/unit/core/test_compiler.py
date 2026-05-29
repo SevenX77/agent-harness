@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import GraphAgentError, SkillCompilationError, SkillLoadError
 
@@ -25,9 +26,11 @@ def test_skill_compilation_error_formats_structured_context() -> None:
     )
 
 
-def test_compile_skill_file_path_is_rejected_for_v21(tmp_path: Path) -> None:
+def test_compile_skill_file_path_is_rejected_for_v21(
+    tmp_path: Path, mock_skill_resolver: object
+) -> None:
     skill = tmp_path / "SKILL.md"
     skill.write_text("---\nname: old\n---\n", encoding="utf-8")
 
     with pytest.raises(SkillLoadError, match="expects a skill root directory"):
-        compile_skill(skill, cache=False)
+        compile_skill(skill, cache=False, skill_resolver=mock_skill_resolver)

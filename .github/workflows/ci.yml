@@ -31,19 +31,13 @@ jobs:
             apps/studio/backend/tests \
             apps/studio/tests-e2e
 
-      - name: mypy strict
+      - name: mypy graph-agent strict
         run: |
-          uv run mypy \
-            packages/graph-agent/src \
-            apps/studio/backend/app
+          uv run mypy --strict packages/graph-agent/src
 
-      - name: pytest graph-agent (unit + integration)
+      - name: mypy studio backend
         run: |
-          uv run pytest packages/graph-agent/tests \
-            --tb=short -q \
-            --cov=packages/graph-agent/src/graph_agent \
-            --cov-report=xml:coverage-graph-agent.xml \
-            --cov-report=term
+          uv run mypy apps/studio/backend/app
 
       - name: pytest studio backend
         run: |
@@ -53,8 +47,96 @@ jobs:
             --cov-report=xml:coverage-backend.xml \
             --cov-report=term
 
+      - name: Upload backend coverage to Codecov
+        uses: codecov/codecov-action@v6
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage-backend.xml
+          flags: backend
+          fail_ci_if_error: false
+
+      - name: Upload backend coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-backend
+          path: coverage-backend.xml
+
       - name: dependency audit
-        run: uv tool run pip-audit --skip-editable
+        run: uv run --with pip-audit pip-audit
+
+  graph-agent-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - python-version: "3.11"
+            py_flag: "py311"
+          - python-version: "3.12"
+            py_flag: "py312"
+          - python-version: "3.13"
+            py_flag: "py313"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Sync workspace dependencies
+        run: uv sync --all-extras --group dev
+
+      - name: pytest graph-agent (unit + integration)
+        run: |
+          uv run pytest packages/graph-agent/tests \
+            --tb=short -q \
+            --cov=packages/graph-agent/src/graph_agent \
+            --cov-report=xml:coverage-graph-agent.xml \
+            --cov-report=term
+
+      - name: Upload graph-agent coverage to Codecov
+        uses: codecov/codecov-action@v6
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage-graph-agent.xml
+          flags: graph-agent,${{ matrix.py_flag }}
+          fail_ci_if_error: false
+
+      - name: Upload graph-agent coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-graph-agent-py${{ matrix.python-version }}
+          path: coverage-graph-agent.xml
+
+      - name: validate round28 contract manifests
+        run: |
+          uv run python packages/graph-agent/scripts/validate_round28_manifest.py \
+            packages/graph-agent/spec/features.yaml \
+            packages/graph-agent/spec/source_file_map.yaml \
+            packages/graph-agent/spec/contract_map.yaml
+
+  sonar-scan:
+    needs: [quality-gates, graph-agent-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v8
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://sonarcloud.io
 
   e2e-tests:
     # E2E suite needs the frontend dev server (Vite) plus Playwright Chromium,

@@ -3,11 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from langchain_core.messages import AIMessage
+
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.graph_assembler import assemble_graph
 from graph_agent.core.loader import SkillLoader
 from graph_agent.core.manifest import AgentNodeAST
-from langchain_core.messages import AIMessage
 
 
 def _write(path: Path, text: str) -> None:
@@ -108,11 +109,11 @@ class FakeAgentChatModel:
         )
 
 
-def test_v030_agent_ast_parses_body_xml_and_inline_graph_io(tmp_path: Path) -> None:
+def test_v030_agent_ast_parses_body_xml_and_inline_graph_io(tmp_path: Path, mock_skill_resolver: object) -> None:
     _graph(tmp_path)
     _agent(tmp_path)
 
-    compiled = SkillLoader().compile_skill(tmp_path)
+    compiled = SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
     ast = compiled.nodes[0].ast
 
     assert isinstance(ast, AgentNodeAST)
@@ -125,30 +126,34 @@ def test_v030_agent_ast_parses_body_xml_and_inline_graph_io(tmp_path: Path) -> N
     assert "Role: Research assistant." in ast.system_prompt
 
 
-def test_v030_agent_mention_target_must_be_reachable(tmp_path: Path) -> None:
+def test_v030_agent_mention_target_must_be_reachable(tmp_path: Path, mock_skill_resolver: object) -> None:
     _graph(tmp_path)
     _agent(tmp_path, body_extra="<goal>Broken @reference:MISSING.</goal>")
 
-    with pytest.raises(SkillLoadError, match=r"\[F-v3-mention-target-not-found\]"):
-        SkillLoader().compile_skill(tmp_path)
+    with pytest.raises(SkillLoadError) as exc_info:
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
+    assert exc_info.value.payload.code == "[F-v3-mention-target-not-found]"
 
 
-def test_v030_agent_broken_mention_syntax_fails(tmp_path: Path) -> None:
+def test_v030_agent_broken_mention_syntax_fails(tmp_path: Path, mock_skill_resolver: object) -> None:
     _graph(tmp_path)
     _agent(tmp_path, body_extra="<goal>Broken @reference mention.</goal>")
 
-    with pytest.raises(SkillLoadError, match=r"\[F-v3-mention-syntax-invalid\]"):
-        SkillLoader().compile_skill(tmp_path)
+    with pytest.raises(SkillLoadError) as exc_info:
+        SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
+    assert exc_info.value.payload.code == "[F-v3-mention-syntax-invalid]"
 
 
-def test_v030_agent_runtime_uses_cognitive_template_and_resource_tools(tmp_path: Path) -> None:
+def test_v030_agent_runtime_uses_cognitive_template_and_resource_tools(
+    tmp_path: Path, mock_skill_resolver: object
+) -> None:
     _graph(tmp_path)
     _agent(tmp_path)
     _write(tmp_path / "refs" / "r1.md", "Reference body.")
     chat = FakeAgentChatModel()
 
-    compiled = SkillLoader().compile_skill(tmp_path)
-    graph = assemble_graph(compiled, chat_model=chat).graph
+    compiled = SkillLoader().compile_skill(tmp_path, skill_resolver=mock_skill_resolver)
+    graph = assemble_graph(compiled, chat_model=chat, skill_resolver=mock_skill_resolver).graph
     result = graph.invoke({"data": {"topic": "T"}, "flow": {}, "messages": [], "run_id": "r1"})
 
     system_prompt = chat.messages_seen[0][0].content

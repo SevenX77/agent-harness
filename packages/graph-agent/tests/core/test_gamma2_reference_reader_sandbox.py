@@ -5,10 +5,11 @@ import re
 from pathlib import Path
 from typing import Any
 
+from langchain_core.messages import AIMessage
+
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.graph_assembler import assemble_graph
 from graph_agent.runtime.state import BlackboardState
-from langchain_core.messages import AIMessage
 
 
 class FakeToolChatModel:
@@ -92,7 +93,9 @@ read reference
     _write(root / "references" / "guide.md", "sandboxed guide")
 
 
-def test_reference_reader_runtime_is_invoked_with_sandbox(monkeypatch, tmp_path: Path) -> None:
+def test_reference_reader_runtime_is_invoked_with_sandbox(
+    monkeypatch, tmp_path: Path, mock_skill_resolver: object
+) -> None:
     seen: list[BlackboardState] = []
 
     class SpyReferenceReaderRuntime:
@@ -102,17 +105,30 @@ def test_reference_reader_runtime_is_invoked_with_sandbox(monkeypatch, tmp_path:
             skill_id: str,
             phase_id: str,
             root: Path,
+            references: list[dict[str, Any]] | None = None,
+            max_output_tokens: int = 3000,
+            language: str = "zh",
             timeout_s: int = 60,
         ) -> None:
             self.skill_id = skill_id
             self.phase_id = phase_id
             self.root = root
+            self.references = references or []
+            self.max_output_tokens = max_output_tokens
+            self.language = language
             self.timeout_s = timeout_s
 
         def initial_state(self) -> BlackboardState:
             state: BlackboardState = {
                 "data": {
-                    "inputs": {"skill_id": self.skill_id, "phase_id": self.phase_id},
+                    "inputs": {
+                        "skill_id": self.skill_id,
+                        "phase_id": self.phase_id,
+                        "references": self.references,
+                        "max_output_tokens": self.max_output_tokens,
+                        "language": self.language,
+                        "timeout_s": self.timeout_s,
+                    },
                     "phase_outputs": {},
                     "scratch": {},
                 },
@@ -140,7 +156,10 @@ def test_reference_reader_runtime_is_invoked_with_sandbox(monkeypatch, tmp_path:
         ]
     )
 
-    result = assemble_graph(compile_skill(tmp_path, cache=False), chat_model=chat).graph.invoke(
+    compiled = compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
+    result = assemble_graph(
+        compiled, chat_model=chat, skill_resolver=mock_skill_resolver
+    ).graph.invoke(
         {
             "data": {
                 "inputs": {"topic": "visible"},
@@ -157,7 +176,20 @@ def test_reference_reader_runtime_is_invoked_with_sandbox(monkeypatch, tmp_path:
     assert seen == [
         {
             "data": {
-                "inputs": {"skill_id": "gamma2-reference", "phase_id": "main"},
+                "inputs": {
+                    "skill_id": "gamma2-reference",
+                    "phase_id": "main",
+                    "references": [
+                        {
+                            "id": "Guide",
+                            "path": "references/guide.md",
+                            "summary": "Guide text",
+                        }
+                    ],
+                    "max_output_tokens": 3000,
+                    "language": "zh",
+                    "timeout_s": 60,
+                },
                 "phase_outputs": {},
                 "scratch": {},
             },

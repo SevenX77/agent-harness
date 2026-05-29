@@ -1,3 +1,8 @@
+---
+status: FROZEN
+---
+<!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
+
 # Physical Layout Spec
 
 本文规定 graph_skill 的物理目录结构、文件命名和 phase 类型推导边界, 是 Loader 开始解析前的第一层约束。错误处理需和 [错误码契约](./11-error-code-spec.md#错误码速查全表) 对齐, 后续编译顺序见 [Compile Runtime Flow](./12-compile-runtime-flow-spec.md#编译期校验流-compile-time-workflow)。

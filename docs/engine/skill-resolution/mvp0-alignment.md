@@ -22,6 +22,8 @@ target_skill -> SkillResolverProtocol.resolve_skill(skill_id) -> local skill roo
 - nested tool 调用中的 resolver 透传
 - Studio backend resolver 注入
 
+PR-5 追加完成了同一领域的 shipped 健壮性补强：`ModuleSandbox` 的两条 `sys.modules` 临时注册路径都已从“加载后常驻”切换为“同步 exec/rebuild 窗口内可见，结束后清理或恢复”。这不是新 feature，而是把 skill-local Python 对象加载的隔离边界补齐。
+
 ## 2. 已完成的 [BREAKING] 字段切换
 
 | 旧字段 / 旧函数 | 当前状态 | 当前替代 |
@@ -32,8 +34,23 @@ target_skill -> SkillResolverProtocol.resolve_skill(skill_id) -> local skill roo
 | `SubgraphNodeAST` 旧 child 引用字段 | 已退役 | `SubgraphNodeAST.target_skill: str` |
 | `_resolve_sub_skill_path` | 已删除 | `resolve_skill_root(skill_resolver, phase_ast.target_skill)` |
 | Engine default resolver / fallback resolver | 不存在 | 调用方必须 DI |
+| `ModuleSandbox` 沙盒 module 常驻 `sys.modules` | 已移除 | 临时注册 + `try/finally` 清理 / 恢复 |
 
 这符合 SOP-06 breaking cutover：不保 alias，不保 fallback，不把旧字段继续当兼容输入。
+
+### PR-5 shipped: ModuleSandbox sys.modules 隔离
+
+字段 / 机制级状态：
+
+| 机制 | 当前行为 | 作用 |
+|---|---|---|
+| `search_paths` 命中路径 | `_load_from_file` 使用 `_graph_agent_sandbox_<digest>_<module>` 名短暂注册 | 同名 skill-local 文件不串台 |
+| importlib fallback 路径 | `_load_module` 使用 `spec.name` 真模块名短暂注册 | 支持环境中可 import 模块 |
+| 临时注册窗口 | `sys.modules[name] = module` 后执行 `exec_module` 与 `_rebuild_pydantic_models` | 让 Pydantic forward-ref / `from __future__ import annotations` 可解析 |
+| 清理策略 | `finally` 中按 `previous_module` 快照判断：原来不存在则 `pop`，原来存在则恢复原对象 | 不留下 sandbox 残留，也不误删宿主已 import 的合法模块 |
+| 异常路径 | `exec_module` 或 `model_rebuild` 抛错仍进入 `finally` | 防止半加载模块污染全局 registry |
+
+清理必须发生在 `model_rebuild` 之后。此时 Pydantic 已经把 forward-ref 解析进模型类，后续 `model_validate` 不再依赖临时 `sys.modules` 条目。
 
 ## 3. Protocol 当前实现
 
@@ -55,11 +72,11 @@ target_skill -> SkillResolverProtocol.resolve_skill(skill_id) -> local skill roo
 | 入口 | 当前签名状态 | 对齐结果 |
 |---|---|---|
 | `compile_skill` | `compiler.py:41-47` 必填 `skill_resolver` | 编译 facade 不 new resolver |
-| `SkillLoader.compile_skill` | `loader.py:149-154` 必填 `skill_resolver` | 解析 phase / subagent metadata 时使用同一 resolver |
-| `assemble_graph` | `graph_assembler.py:73-79` 必填 `skill_resolver` | SUBGRAPH runtime 和 subagent runtime 继续透传 |
-| `run_skill` | `runner.py:173` 必填 `skill_resolver` | public runtime 入口不允许隐式 fallback |
-| `_run_skill_dict` | `runner.py:244` 必填 `skill_resolver` | 内部执行入口不允许掉 resolver |
-| `_run_v21_skill_dict` | `runner.py:474` 必填 `skill_resolver` | compile + assemble 都用同一 resolver |
+| `SkillLoader.compile_skill` | `loader.py:146-153` 必填 `skill_resolver` | 解析 phase / subagent metadata 时使用同一 resolver |
+| `assemble_graph` | `graph_assembler.py:91-99` 必填 `skill_resolver` | SUBGRAPH runtime 和 subagent runtime 继续透传 |
+| `run_skill` | `runner.py:59-73` 必填 `skill_resolver` | public runtime 入口不允许隐式 fallback |
+| `_run_skill_dict` | `runner.py:130-144` 必填 `skill_resolver` | 内部执行入口不允许掉 resolver |
+| `_run_v030_skill_dict` | `runner.py:217-226` 必填 `skill_resolver` | compile + assemble 都用同一 resolver |
 
 验收重点：无 resolver 的代码路径不是“只在遇到 child skill 时失败”，而是在入口边界通过 `require_skill_resolver` 直接失败。
 
@@ -67,7 +84,7 @@ target_skill -> SkillResolverProtocol.resolve_skill(skill_id) -> local skill roo
 
 文件：`loader.py`
 
-当前 `_compile_subagent_metadata` 位于 `loader.py:373-422`。它只接收 `phase_docs` 和 `skill_resolver`，不再接收 `skill_root`，所以无法拼父目录相对路径。
+当前 `_compile_subagent_metadata` 位于 `loader.py:593-649`。它只接收 `phase_docs` 和 `skill_resolver`，不再接收 `skill_root`，所以无法拼父目录相对路径。
 
 字段流：
 
@@ -92,8 +109,8 @@ target_skill -> SkillResolverProtocol.resolve_skill(skill_id) -> local skill roo
 
 装配流程：
 
-1. `loader.py:1050-1073` 不再读取旧 child ref block。
-2. `_build_subgraph_node` 在 `graph_assembler.py:196-213` 使用 `phase_ast.target_skill`。
+1. `loader.py:1330-1361` 不再读取旧 child ref block。
+2. `_build_subgraph_node` 在 `graph_assembler.py:258-270` 使用 `phase_ast.target_skill`。
 3. `resolve_skill_root(skill_resolver, phase_ast.target_skill)` 返回 child root。
 4. child graph 编译和 assemble 都复用同一个 resolver。
 

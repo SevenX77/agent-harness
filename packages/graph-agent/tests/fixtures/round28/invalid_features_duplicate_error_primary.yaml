@@ -1,0 +1,31 @@
+features:
+  - id: F-runtime-one
+    description: First duplicate owner.
+    feature_boundary:
+      kind: lifecycle-behavior
+      evidence: runtime phase
+    sources: [skill-spec]
+    core_paths:
+      - path: packages/graph-agent/src/graph_agent/core/runner.py
+    error_codes_primary: ["[F-v3-engine-skill-loader]"]
+    error_codes_secondary: []
+    events_primary: [RunStartedEvent]
+    events_secondary: []
+    non_functional_contracts: []
+    targeted_tests:
+      - tests/core/test_run_skill_entrypoint_root_shape.py::test_run_skill_single_markdown_file_returns_v030_root_error
+  - id: F-runtime-two
+    description: Second duplicate owner.
+    feature_boundary:
+      kind: lifecycle-behavior
+      evidence: runtime phase
+    sources: [skill-spec]
+    core_paths:
+      - path: packages/graph-agent/src/graph_agent/core/harness.py
+    error_codes_primary: ["[F-v3-engine-skill-loader]"]
+    error_codes_secondary: []
+    events_primary: [PhaseStartEvent]
+    events_secondary: []
+    non_functional_contracts: []
+    targeted_tests:
+      - tests/core/test_phase_node.py::test_phase_node_execute_returns_updated_state

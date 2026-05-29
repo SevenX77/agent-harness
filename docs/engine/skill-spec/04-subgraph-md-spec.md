@@ -1,3 +1,8 @@
+---
+status: FROZEN
+---
+<!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
+
 # SUBGRAPH.md Spec
 
 本文定义 `SUBGRAPH.md` 的 `target_skill` 寻址与父子图 IO 强校验。它连接 [SkillResolverProtocol](./10-skill-resolver-protocol-spec.md#protocol-interface-定义)、[Root IO Schema](./02-graph-md-spec.md#根-io-契约-root-io-schema) 和运行期 subgraph 调度。

@@ -15,7 +15,7 @@
 | V2.1 `GRAPH.md` self-closing body `<phase id src depends_on />` | `GRAPH.md` 双轨: frontmatter `phases:` 注册 + body `<phase depends_on output>name</phase>` 拓扑 | 注册与 DAG 分离但必须三方一致, 见 [GRAPH Phase DAG](../skill-spec/02-graph-md-spec.md#phases-注册与-body-拓扑校验-phase-registration--dag) |
 | `io/inputs.json` / `io/outputs.json` | inline `io.inputs` / `io.outputs` dict | 物理 IO 文件退役, 见 [Root IO Schema](../skill-spec/02-graph-md-spec.md#根-io-契约-root-io-schema) |
 | `_resolve_subagent_root` 相对路径扫描 | `SkillResolverProtocol.resolve_skill(skill_id) -> Path` DI | 子图 / 子 Agent 全局 registry 寻址, 见 [Skill Resolver Protocol](../skill-spec/10-skill-resolver-protocol-spec.md#protocol-interface-定义) |
-| LOGIC `python_callable` | body `<action>` 顺序 + phase-local `actions/<name>.py` | round-14 实现移除 `<python_callable>`, 以 phase 内 action 链为准 |
+| LOGIC `python_callable` | body `<action>` 顺序 + phase-local `actions/<name>.py` | PR G / round-18 清掉残留 golden/fixture/tests; 当前以 phase 内 action 链为准 |
 | output_schema 独立插槽 | 系统内置 exit contract 末尾 inline output_schema | recency bias, 见 [Cognitive Template](../skill-spec/06-cognitive-template-spec.md#8-大插槽布局拓扑) |
 
 本文件只描述 skill-compilation 需要实现的编译 / 装配边界, 不改 runtime 执行策略本身。
@@ -99,6 +99,8 @@ MVP0 MUST 删除对 `io/inputs.json`、`io/outputs.json`、`io_inputs_ref`、`io
 | `io_inputs_ref` / `io_outputs_ref` | deprecated field | 禁止 | — | 任意 frontmatter 出现即 FATAL | `[F-v3-graph-io-physical-file-deprecated]` | 禁止间接引用旧路径 |
 
 这项变更让编译器可以在一个 YAML AST 内同时定位 graph metadata、phase DAG 和根 IO, 避免跨文件 schema 漂移。规范终点见 [Root IO Schema](../skill-spec/02-graph-md-spec.md#根-io-契约-root-io-schema)。
+
+PR-4 shipped 健壮性补强: V0.3.0 编译缓存现在以 v2 snapshot 保真 round-trip `subagents_by_phase` 与 `phase_tokens`, 并在 subgraph/subagent 递归编译链路上增加环检测和 20 层深度上限。这是对既有编译缓存与 `target_skill` 解析路径的可靠性收口, 不引入新的业务 feature 或作者可见 DSL 契约。
 
 ### 5. 静态数据流拓扑连通性校验 (A8)
 
@@ -235,17 +237,19 @@ MVP0 MUST 将编译错误归一到 `[F-v3-*]`, 并携带机器可读 payload。
 
 ### 13. 缓存元数据补全与写失败降级
 
-MVP0 SHOULD 保留 V2.1 audit 中对 cache 的两个修复方向, 但缓存内容要迁移到 V0.3.0 AST。
+MVP0 SHOULD 保留历史 V2.1 audit 中对 cache 的两个修复方向, 但缓存内容已经按 V0.3.0 AST 作为当前目标。PR G 后不再保留 V2.1 codemod / `python_callable` / `context_mapping` 迁移路径。
 
 | 字段 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
 |---|---|---|---|---|---|---|
 | `raw` | dict | 是 | 无 | 保存 GRAPH / phase 原始解析片段 | `[F-v3-runtime-phase-failed]` fallback | Debug 与 Studio 展示 |
 | `manifest` | dict | 是 | 无 | V0.3.0 GraphManifest JSON | `[F-v3-graph-schema-version-mismatch]` | 根图 metadata |
 | `nodes` | list[dict] | 是 | 无 | Agent / Logic / Subgraph AST JSON 子集 | domain-specific schema errors | cache hit 后与冷编译等价 |
-| `subagents_by_phase` | dict | 否 | `{}` | 保存 `target_skill` 与 resolved metadata, 不保存动态 Python 类 | `[F-v3-resolver-path-invalid]` | 恢复动态 subagent tools |
-| `source_spans` | dict | 否 | `{}` | YAML / XML 行号定位信息 | — | compile issue 定位 |
+| `subagents_by_phase` | dict | 否 | `{}` | 保存 `parent_phase_id` / `name` / `target_skill` / `description` / `root` / `input_schema` / `expected_schema`; 不保存动态 `input_model` Python 类 | `[F-v3-resolver-path-invalid]` | cache hit 后恢复动态 subagent tools |
+| `phase_tokens` | dict | 否 | `{}` | 保存 `PhaseTokenInfo` 及嵌套 `PhaseAttributeSpan` 的 raw text、offset、行号、attrs、attr spans | — | cache hit 后保持 GRAPH body token 定位信息 |
 
 Cache 写失败只 WARN, 不得让成功编译变失败。HOME 不可写、CI 只读目录、权限异常时, `compile_skill(cache=True)` 返回内存中的 compiled object, 并记录 warning。
+
+PR-4 后 cache key payload 含 `"format": "v2"`。旧 snapshot 会自动 miss 并冷编译, 避免旧格式缺少 `subagents_by_phase` / `phase_tokens` 时复水出残缺 `CompiledSkill`。
 
 ## API
 
@@ -305,21 +309,15 @@ V2.1 `_resolve_subagent_root` 相对路径扫描必须退役。编译期对子�
 
 ## Data Model / State
 
-### 1. CompiledSkill 缓存序列化 Schema 的深层升级
+### 1. CompiledSkill 缓存序列化边界
 
 `CompiledSkill` 仍是编译产物核心 state, 但 V0.3.0 下它必须保存 graph_skill 的完整结构化 AST 和装配元数据。
 
-```python
-class DehydratedCompiledSkill(BaseModel):
-    raw: dict[str, Any]
-    manifest: dict[str, Any]
-    nodes: list[dict[str, Any]]
-    subagents_by_phase: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
-    source_spans: dict[str, Any] = Field(default_factory=dict)
-    schema_version: Literal["v0.3.0"]
-```
+缓存落盘不是单独的 Pydantic dehydrated model, 而是 `core/cache.py` 中 `_dehydrate_compiled_skill` / `_rehydrate_compiled_skill` 维护的普通 dict round-trip。`save_to_cache` 将 `CompiledSkill` 转为可 JSON 序列化的 snapshot, 再通过 `json.dumps(...)` 写盘; `load_from_cache` 用 `json.loads(...)` 读回 snapshot 后重建运行期对象。
 
-缓存恢复时不能保存或反序列化动态 Python 类。subagent input model、tool bindings、compiled prompt 都应由 AST 与 registry metadata 重新生成。
+当前 snapshot 顶层包含 `raw`、`manifest`、`nodes`、`subagents_by_phase`、`phase_tokens`。其中 `manifest` 通过 `GraphManifest.model_validate(...)` 复水, node AST 通过 `TypeAdapter(PhaseAST)` 复水, subagent 的动态 `input_model` 通过 `build_subagent_input_model(_subagent_input_model_name(parent_phase_id, name), input_schema)` 重建, 再调用 `_inject_subagent_tools` 重放 `call_subagent_*` 动态工具。snapshot 顶层没有额外的 `schema_version` 字段。
+
+缓存格式版本由 cache key 承载: `compute_cache_key(...)` payload 含 `"format": "v2"`。旧 snapshot 会因 key 改变自动 miss 并冷编译, 避免旧格式缺少 `subagents_by_phase` / `phase_tokens` 时复水出残缺 `CompiledSkill`。递归编译状态由内部 `_loading_stack` 与 `_compilation_cache` 传递; 环路抛 `[F-v3-compile-recursion-cycle]`, 深度超过上限抛 `[F-v3-compile-depth-exceeded]`。
 
 ### 2. Node AST 数据结构边界扩展
 
@@ -386,17 +384,18 @@ execution-runtime 不再自行解释 `SKILL.md` body。它接收已经解析好�
 
 ## 与当前源码的对齐状态
 
-round-14 实施后，本文件描述的 skill-compilation 主契约已经作为当前源码事实落地：
+round-18 / PR G 与后续的 PR-3 等节点后，本文件描述的 skill-compilation 主契约已经作为当前源码事实落地：
 
 | 契约点 | 当前状态 |
 |---|---|
 | `GRAPH.md` 双轨拓扑 | frontmatter `phases` 注册 + body `<phase depends_on output>name</phase>` 拓扑均必需 |
 | 版本号 | 只接受 `schema_version: "v0.3.0"` |
 | phase 类型 | 文件名推导内部 `mode`; 作者 frontmatter 不写 `mode:` |
-| `SkillNodeAST` | 已由 `AgentNodeAST` 替代 |
+| `SkillNodeAST` 与 Persona 遗迹 | `SkillNodeAST` 已由 `AgentNodeAST` 替代；旧版的 Persona Schema 及相关的编译层死码簇（如 `build_graph_nodes`）已全数清理（PR-3） |
 | `python_callable` | 已由 body `<action>` + phase-local actions 替代 |
 | inline IO | 根 IO 与 phase IO 均来自 frontmatter; 物理 IO/ref 路径 fatal |
 | Agent body | 只接受 `<role>` / `<goal>` / `<step>` / `<protocol>` / `<example>` 5 类业务标签 |
 | Mention | Agent body `@type:NAME` 编译期静态可达校验 |
 | SUBGRAPH | `target_skill` + resolver, 父子 IO properties 1:1 对齐 |
 | 禁 phase metadata | `schema_version` / `graph_skill_id` / `phase_id` / `mode` 在 phase frontmatter 中按 unknown field 失败 |
+| codemod / V2.1 validators | repo 内 codemod、`context_mapping`、5 个 dead validators 和隐藏死测试已由 PR G 删除 |

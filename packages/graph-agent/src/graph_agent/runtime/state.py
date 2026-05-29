@@ -9,7 +9,7 @@ from typing import Annotated, Any, TypedDict
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
 
-from graph_agent.core.exceptions import GraphAgentFatalError
+from graph_agent.core.exceptions import GraphAgentFatalError, make_error_payload
 
 
 class BlackboardData(TypedDict, total=False):
@@ -55,22 +55,28 @@ def blackboard_data_merge(
 
     if right_data["inputs"]:
         if merged["inputs"] and merged["inputs"] != right_data["inputs"]:
+            detail = "data.inputs is read-only after initialization"
             raise GraphAgentFatalError(
-                "[F-v3-runtime-state-mapping-failed] data.inputs is read-only after initialization"
+                detail,
+                payload=make_error_payload("[F-v3-runtime-state-mapping-failed]", detail),
             )
         merged["inputs"] = dict(right_data["inputs"])
 
     for phase_id, output in right_data["phase_outputs"].items():
         if phase_id in merged["phase_outputs"]:
+            detail = f"phase_outputs[{phase_id!r}] written more than once"
             raise GraphAgentFatalError(
-                f"[F-v3-state-conflict] phase_outputs[{phase_id!r}] written more than once"
+                detail,
+                payload=make_error_payload("[F-v3-runtime-state-mapping-failed]", detail),
             )
         merged["phase_outputs"][phase_id] = deepcopy(output)
 
     for key, value in right_data["scratch"].items():
         if key in merged["scratch"]:
+            detail = f"scratch key={key!r} written more than once"
             raise GraphAgentFatalError(
-                f"[F-v3-state-conflict] scratch key={key!r} written more than once"
+                detail,
+                payload=make_error_payload("[F-v3-runtime-state-mapping-failed]", detail),
             )
         merged["scratch"][key] = deepcopy(value)
     return merged

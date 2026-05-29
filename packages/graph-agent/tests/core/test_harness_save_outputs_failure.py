@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+
 from graph_agent.callbacks.base import Callback
 from graph_agent.callbacks.events import RunEndedEvent
 from graph_agent.core.harness import GraphAgentHarness

@@ -1,0 +1,19 @@
+features:
+  - id: F-missing-error-owner
+    description: Fixture intentionally omits one concrete error code primary owner.
+    feature_boundary:
+      kind: lifecycle-behavior
+      evidence: error code ownership
+    sources: [skill-spec]
+    core_paths:
+      - path: packages/graph-agent/src/graph_agent/core/error_registry.py
+    error_codes_primary:
+      - "[F-v3-runtime-phase-failed]"
+    error_codes_secondary: []
+    events_primary:
+      - RunStartedEvent
+      - PhaseStartEvent
+    events_secondary: []
+    non_functional_contracts: []
+    targeted_tests:
+      - tests/core/test_error_payload_contract.py::test_error_payload_autofills_registry_metadata

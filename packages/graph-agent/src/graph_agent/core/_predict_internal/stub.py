@@ -6,6 +6,7 @@ from typing import Any
 
 _UNKNOWN_VALUE = "<mock_unknown>"
 _MAX_DEPTH = 20
+_VALUE_NOT_HANDLED = object()
 
 
 def generate_heuristic_stub(schema: dict[str, Any] | None) -> dict[str, Any]:
@@ -44,50 +45,67 @@ def _value_for_schema(
     if isinstance(enum_values, list) and enum_values:
         return enum_values[0]
 
-    raw_type = schema.get("type")
-    schema_type = _normalise_type(raw_type)
-    if schema_type is None:
-        if "properties" in schema:
-            schema_type = "object"
-        elif "items" in schema:
-            schema_type = "array"
+    schema_type = _schema_type_for_value(schema)
 
     if schema_type == "object":
-        properties = schema.get("properties")
-        if not isinstance(properties, dict):
-            return {}
-
-        next_seen = {*seen, schema_id}
-        result: dict[str, object] = {}
-        for name, child_schema in properties.items():
-            if not isinstance(name, str):
-                continue
-            result[name] = _value_for_schema(
-                child_schema,
-                field_name=name,
-                seen=next_seen,
-                depth=depth + 1,
-            )
-        return result
+        return _object_value_for_schema(schema, seen={*seen, schema_id}, depth=depth)
 
     if schema_type == "array":
         return []
 
-    if schema_type == "string":
-        return _mock_string(field_name)
-
-    if schema_type == "integer":
-        return 0
-
-    if schema_type == "number":
-        return 0.0
-
-    if schema_type == "boolean":
-        return True
+    primitive = _primitive_value_for_schema_type(schema_type, field_name=field_name)
+    if primitive is not _VALUE_NOT_HANDLED:
+        return primitive
 
     if field_name == "value":
         return _mock_string(None, unknown=True)
     return _mock_string(field_name, unknown=True)
+
+
+def _schema_type_for_value(schema: dict[str, Any]) -> str | None:
+    schema_type = _normalise_type(schema.get("type"))
+    if schema_type is not None:
+        return schema_type
+    if "properties" in schema:
+        return "object"
+    if "items" in schema:
+        return "array"
+    return None
+
+
+def _object_value_for_schema(
+    schema: dict[str, Any],
+    *,
+    seen: set[int],
+    depth: int,
+) -> dict[str, object]:
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return {}
+
+    result: dict[str, object] = {}
+    for name, child_schema in properties.items():
+        if not isinstance(name, str):
+            continue
+        result[name] = _value_for_schema(
+            child_schema,
+            field_name=name,
+            seen=seen,
+            depth=depth + 1,
+        )
+    return result
+
+
+def _primitive_value_for_schema_type(schema_type: str | None, *, field_name: str | None) -> object:
+    if schema_type == "string":
+        return _mock_string(field_name)
+    if schema_type == "integer":
+        return 0
+    if schema_type == "number":
+        return 0.0
+    if schema_type == "boolean":
+        return True
+    return _VALUE_NOT_HANDLED
 
 
 def _is_object_schema(schema: dict[str, Any]) -> bool:
@@ -96,20 +114,7 @@ def _is_object_schema(schema: dict[str, Any]) -> bool:
 
 def _normalise_type(raw_type: object) -> str | None:
     if isinstance(raw_type, str):
-        lowered = raw_type.lower()
-        if lowered in {"object", "array", "string", "integer", "number", "boolean"}:
-            return lowered
-        if lowered in {"dict", "map"}:
-            return "object"
-        if lowered in {"list", "tuple"}:
-            return "array"
-        if lowered in {"float", "double"}:
-            return "number"
-        if lowered in {"int"}:
-            return "integer"
-        if lowered in {"bool"}:
-            return "boolean"
-        return lowered
+        return _normalise_type_string(raw_type)
 
     if isinstance(raw_type, list):
         for item in raw_type:
@@ -117,6 +122,21 @@ def _normalise_type(raw_type: object) -> str | None:
             if parsed is not None and parsed != "null":
                 return parsed
     return None
+
+
+def _normalise_type_string(raw_type: str) -> str:
+    lowered = raw_type.lower()
+    aliases = {
+        "dict": "object",
+        "map": "object",
+        "list": "array",
+        "tuple": "array",
+        "float": "number",
+        "double": "number",
+        "int": "integer",
+        "bool": "boolean",
+    }
+    return aliases.get(lowered, lowered)
 
 
 def _mock_string(field_name: str | None, *, unknown: bool = False) -> str:

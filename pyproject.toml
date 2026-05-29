@@ -48,13 +48,17 @@ addopts = ["--import-mode=importlib"]
 consider_namespace_packages = true
 
 [tool.ruff]
-line-length = 100
+line-length = 120  # 从 100 升, 兼容 Chinese docstring/message 自然长度
 target-version = "py311"
 lint.select = ["E", "F", "B", "I", "UP"]
 
 # Targeted exemptions for legitimate patterns that the default rule set
 # misclassifies. Both groups are intentional, not technical debt.
 [tool.ruff.lint.per-file-ignores]
+"scripts/**" = ["C901"]
+"packages/graph-agent/src/graph_agent/core/error_registry.py" = ["E501"]
+"packages/graph-agent/src/graph_agent/cognitive/prompt.py" = ["E501"]
+"packages/graph-agent/tests/**" = ["E501"]
 # Test files (incl. tests-e2e/) routinely embed long URL/JSON/SQL fixtures
 # and parametrise with payloads that simply do not fit in 100 columns;
 # rewrapping hurts readability without improving safety.

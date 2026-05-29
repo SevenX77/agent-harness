@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
+
 from graph_agent.core.state import (
     BusinessData,
     FrameworkState,
@@ -10,7 +12,6 @@ from graph_agent.core.state import (
     WorkflowState,
     verify_state_invariants,
 )
-from pydantic import ValidationError
 
 
 class TestBusinessData:

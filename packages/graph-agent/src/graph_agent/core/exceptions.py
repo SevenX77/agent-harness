@@ -14,7 +14,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from graph_agent.core.error_registry import ERROR_REGISTRY
 
-
 _ERROR_CODE_RE = re.compile(r"\[F-v3-[a-z0-9-]+\]")
 _EXTERNAL_ERROR_CODE_PREFIXES = ("[F-v3-gateway-",)
 
@@ -35,7 +34,7 @@ class ErrorPayload(BaseModel):
     source_path: str | None = None
 
     @model_validator(mode="after")
-    def _fill_registry_metadata(self) -> "ErrorPayload":
+    def _fill_registry_metadata(self) -> ErrorPayload:
         metadata = ERROR_REGISTRY.get(self.code)
         if metadata is None:
             raise ValueError(f"unknown graph_agent error code: {self.code}")

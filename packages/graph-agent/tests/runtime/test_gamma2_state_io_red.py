@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
 from graph_agent.core.exceptions import GraphAgentFatalError
 from graph_agent.core.graph_assembler import _invoke_subagent_once_t23, _SubagentRuntime
 from graph_agent.core.io_manager import IOManager

@@ -7,8 +7,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-import graph_agent.tools.md_to_json as md_to_json_module
 import pytest
+from pydantic import BaseModel, ConfigDict, Field
+
+import graph_agent.tools.md_to_json as md_to_json_module
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.result import WorkflowResult
 from graph_agent.tools.md_to_json import (
@@ -19,7 +21,6 @@ from graph_agent.tools.md_to_json import (
     md_to_json,
     parse_md,
 )
-from pydantic import BaseModel, ConfigDict, Field
 
 
 class StrictSegment(BaseModel):

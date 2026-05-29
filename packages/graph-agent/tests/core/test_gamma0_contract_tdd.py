@@ -3,11 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
+
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.loader import SkillLoader
 from graph_agent.core.manifest import AgentNodeAST, SubgraphNodeAST
 from graph_agent.core.validator_contract import VALIDATOR_ERROR_CODES, VALIDATOR_SIGNATURE
-from pydantic import ValidationError
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 GAMMA0_SPEC_DIR = (

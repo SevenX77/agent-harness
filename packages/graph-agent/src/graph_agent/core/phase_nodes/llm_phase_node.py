@@ -29,6 +29,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 
+from graph_agent.callbacks.base import Callback
 from graph_agent.cognitive.ambiguity import log_ambiguity
 from graph_agent.cognitive.finish import finish_task
 from graph_agent.cognitive.memory import update_working_memory
@@ -79,7 +80,7 @@ class _AgentInvoker(Protocol):
 class _PhaseRuntime:
     state: WorkflowState
     tool_state: dict[str, object]
-    active_callbacks: tuple[Any, ...]
+    active_callbacks: list[Callback]
     save_compaction_sidecar: Any
     is_retry: bool
     retry_feedback: list[str] | None
@@ -143,7 +144,7 @@ class LLMPhaseNode(PhaseNode):
         is_retry = state["flow"].current_phase == phase.name
         state = _prepare_framework_state(phase, state)
         tool_state = legacy_context_from_state(state)
-        working_memory_before = _tool_text(tool_state, _WORKING_MEMORY_KEY)
+        working_memory_before = _tool_text(tool_state, _WORKING_MEMORY_KEY) or ""
         retry_feedback = state["flow"].retry_feedback
         state = StateManager.update_framework(state, retry_feedback=None)
         tool_state.pop(_RETRY_FEEDBACK_KEY, None)
@@ -234,7 +235,7 @@ class LLMPhaseNode(PhaseNode):
             return
         from graph_agent.tools.builtin.read_file import make_read_file_tool
 
-        read_file_fn = make_read_file_tool(references, Path(base_dir))
+        read_file_fn = make_read_file_tool(references, Path(str(base_dir)))
         lc_tools.append(_wrap_tool_for_langchain(read_file_fn, tool_state, bridge))
         logger.info("phase=%s mounted read_file tool with %d references", phase.name, len(references))
 
@@ -319,7 +320,7 @@ class LLMPhaseNode(PhaseNode):
         finish_decision = _handle_finish_gate(runtime.tool_state, nudge_injector, loop_state)
         if finish_decision.should_continue or finish_decision.should_break:
             return finish_decision
-        wm_current = _tool_text(runtime.tool_state, _WORKING_MEMORY_KEY)
+        wm_current = _tool_text(runtime.tool_state, _WORKING_MEMORY_KEY) or ""
         wm_updated = wm_current != loop_state.wm_snapshot
         planning_decision = _handle_planning_gate(nudge_injector, loop_state, wm_current, wm_updated)
         if planning_decision.should_continue:
@@ -386,11 +387,14 @@ class LLMPhaseNode(PhaseNode):
             loop_state.current_messages[:-2] if len(loop_state.current_messages) > 2 else []
         )
         active_ctx = self._run_context
-        return runtime.save_compaction_sidecar(
-            run_id=((active_ctx.run_id if active_ctx else "") or "unknown"),
-            idx=loop_state.checkpoint_count,
-            removed_messages=removed_messages,
-            storage_manager=(active_ctx.storage_manager if active_ctx else None),
+        return cast(
+            str | None,
+            runtime.save_compaction_sidecar(
+                run_id=((active_ctx.run_id if active_ctx else "") or "unknown"),
+                idx=loop_state.checkpoint_count,
+                removed_messages=removed_messages,
+                storage_manager=(active_ctx.storage_manager if active_ctx else None),
+            ),
         )
 
     def _finalize_phase(
@@ -435,7 +439,7 @@ def _prepare_framework_state(phase: Phase, state: WorkflowState) -> WorkflowStat
     return StateManager.update_framework(state, **framework_updates)
 
 
-def _emit_phase_start(phase: Phase, state: WorkflowState, callbacks: tuple[Any, ...]) -> None:
+def _emit_phase_start(phase: Phase, state: WorkflowState, callbacks: list[Callback]) -> None:
     for cb in callbacks:
         cb.on_phase_start(phase.name, state["data"].model_dump())
 
@@ -634,7 +638,7 @@ def _initial_loop_state(
         result_messages=[],
         current_messages=list(messages),
         plan_verified=False,
-        wm_snapshot=_tool_text(tool_state, _WORKING_MEMORY_KEY),
+        wm_snapshot=_tool_text(tool_state, _WORKING_MEMORY_KEY) or "",
         checkpoint_count=0,
     )
 
@@ -738,7 +742,7 @@ def _record_standard_exit_warnings(
 def _emit_phase_end_cleanup(
     phase: Phase,
     state: WorkflowState,
-    callbacks: tuple[Any, ...],
+    callbacks: list[Callback],
 ) -> None:
     for cb in callbacks:
         try:
@@ -772,7 +776,7 @@ def _compact_messages(original_user_msg: HumanMessage, working_memory: str) -> l
     return [original_user_msg, HumanMessage(content=checkpoint_text)]
 
 
-def _emit_working_memory_update(phase: Phase, callbacks: tuple[Any, ...], wm_text: str) -> None:
+def _emit_working_memory_update(phase: Phase, callbacks: list[Callback], wm_text: str) -> None:
     from graph_agent.callbacks.emit import _safe_emit_event
     from graph_agent.callbacks.events import WorkingMemoryUpdateEvent
 
@@ -788,7 +792,7 @@ def _emit_working_memory_update(phase: Phase, callbacks: tuple[Any, ...], wm_tex
 
 def _emit_compaction_event(
     phase: Phase,
-    callbacks: tuple[Any, ...],
+    callbacks: list[Callback],
     removed_pairs: int,
     checkpoint_count: int,
     sidecar_ref: str | None,
@@ -813,7 +817,7 @@ def _emit_compaction_event(
 
 def _emit_finish_callbacks(
     phase: Phase,
-    callbacks: tuple[Any, ...],
+    callbacks: list[Callback],
     finish_result: Any,
 ) -> None:
     if not isinstance(finish_result, dict):
@@ -830,7 +834,7 @@ def _emit_finish_callbacks(
 
 def _emit_ambiguity_callbacks(
     phase: Phase,
-    callbacks: tuple[Any, ...],
+    callbacks: list[Callback],
     tool_state: dict[str, object],
 ) -> None:
     for report in _phase_reports(phase, tool_state):
@@ -855,7 +859,7 @@ def _emit_one_ambiguity_callback(phase: Phase, callback: Any, report: dict[str, 
         logger.warning("[Harness] callback error: %s", exc)
 
 
-def _emit_phase_end(phase: Phase, state: WorkflowState, callbacks: tuple[Any, ...]) -> None:
+def _emit_phase_end(phase: Phase, state: WorkflowState, callbacks: list[Callback]) -> None:
     for cb in callbacks:
         cb.on_phase_end(phase.name, state["data"].model_dump(), state["flow"].metrics)
 

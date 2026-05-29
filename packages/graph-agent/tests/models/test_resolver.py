@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from graph_agent.models.llm_client_manager import LLMClientManager
 from graph_agent_gateway.exceptions import AllProvidersFailedError, GatewayRoleNotConfiguredError
 from graph_agent_gateway.gateway_chat_model import GatewayChatModel
 from graph_agent_gateway.llm_config import (
@@ -18,6 +17,8 @@ from graph_agent_gateway.llm_config import (
 )
 from graph_agent_gateway.resolver import ModelResolver
 from langchain_core.language_models.chat_models import BaseChatModel
+
+from graph_agent.models.llm_client_manager import LLMClientManager
 
 
 def _make_config(

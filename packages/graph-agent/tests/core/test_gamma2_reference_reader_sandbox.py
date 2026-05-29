@@ -5,10 +5,11 @@ import re
 from pathlib import Path
 from typing import Any
 
+from langchain_core.messages import AIMessage
+
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.graph_assembler import assemble_graph
 from graph_agent.runtime.state import BlackboardState
-from langchain_core.messages import AIMessage
 
 
 class FakeToolChatModel:

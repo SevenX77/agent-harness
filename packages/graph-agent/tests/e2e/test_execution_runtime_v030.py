@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from langchain_core.messages import AIMessage
+
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.graph_assembler import assemble_graph
-from langchain_core.messages import AIMessage
 
 
 class ToolCallingChatModel:
@@ -22,7 +23,7 @@ class ToolCallingChatModel:
         self.system_prompts: list[str] = []
         self.tool_messages: list[Any] = []
 
-    def bind_tools(self, tools: list[Any]) -> "ToolCallingChatModel":
+    def bind_tools(self, tools: list[Any]) -> ToolCallingChatModel:
         del tools
         return self
 

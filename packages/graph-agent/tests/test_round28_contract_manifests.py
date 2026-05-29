@@ -10,7 +10,6 @@ import pytest
 import yaml
 from jsonschema import Draft202012Validator, ValidationError
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PACKAGE_ROOT = REPO_ROOT / "packages/graph-agent"
 FIXTURES = PACKAGE_ROOT / "tests/fixtures/round28"

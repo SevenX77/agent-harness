@@ -8,7 +8,6 @@ from graph_agent.tools.dynamic_schema import (
     parse_output_example,
 )
 
-
 VALID_EXAMPLE = """
 <output_example name="Segment">
 ## segments

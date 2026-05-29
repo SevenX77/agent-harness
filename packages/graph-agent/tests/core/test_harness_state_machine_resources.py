@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+
 from graph_agent.callbacks.base import Callback
 from graph_agent.callbacks.events import RunEndedEvent
 from graph_agent.callbacks.tracing import TracingCallback

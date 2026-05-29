@@ -242,6 +242,46 @@ def test_upsert_endpoint_redacted_api_key_placeholder_preserves_secret(tmp_path:
     assert endpoint.api_key.get_secret_value() == "secret"
 
 
+def test_load_credentials_repairs_legacy_catalog_candidate_failed_status(tmp_path: Path) -> None:
+    path = tmp_path / "llm_credentials.json"
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "openai-official": ProviderEndpoint(
+                    endpoint_id="openai-official",
+                    display_name="OpenAI Official",
+                    protocol="openai_compatible",
+                    base_url="https://api.openai.com/v1",
+                    api_key="secret",
+                    provider_kind="official",
+                    metadata={
+                        "capability_library": [
+                            {
+                                "model_id": "gpt-image-1",
+                                "status": "catalog_candidate",
+                                "route_status": "failed",
+                                "last_probe_message": "No verified language route profile.",
+                            }
+                        ]
+                    },
+                )
+            }
+        ),
+        path,
+    )
+
+    endpoint = load_credentials(path).provider_endpoints["openai-official"]
+
+    assert endpoint.metadata["capability_library"] == [
+        {
+            "model_id": "gpt-image-1",
+            "status": "catalog_candidate",
+            "route_status": "unverified_manual",
+            "last_probe_message": "No verified language route profile.",
+        }
+    ]
+
+
 def test_save_credentials_chmods_file_0600_and_parent_0700(tmp_path: Path) -> None:
     path = tmp_path / ".studio" / "llm_credentials.json"
 
@@ -414,6 +454,44 @@ def test_upsert_endpoint_omitted_provider_kind_and_bucket_preserve_existing_valu
     assert endpoint.display_name == "OneChats Proxy Renamed"
     assert endpoint.provider_kind == "custom"
     assert endpoint.rate_limit_bucket == "onechats-shared-key"
+
+
+def test_upsert_curated_official_endpoint_repairs_legacy_provider_kind(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "llm_credentials.json"
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "anthropic-official": ProviderEndpoint(
+                    endpoint_id="anthropic-official",
+                    display_name="Anthropic Official",
+                    protocol="anthropic_compatible",
+                    base_url="https://api.anthropic.com",
+                    api_key=SecretStr("secret"),
+                    provider_kind="third_party",
+                )
+            }
+        ),
+        path,
+    )
+
+    upsert_endpoints(
+        {
+            "anthropic-official": {
+                "endpoint_id": "anthropic-official",
+                "display_name": "Anthropic Official",
+                "protocol": "anthropic_compatible",
+                "base_url": "https://api.anthropic.com",
+            }
+        },
+        path=path,
+    )
+
+    endpoint = load_credentials(path).provider_endpoints["anthropic-official"]
+    assert endpoint.provider_kind == "official"
+    assert endpoint.api_key is not None
+    assert endpoint.api_key.get_secret_value() == "secret"
 
 
 def test_serialize_for_response_does_not_leak_endpoint_secret() -> None:

@@ -2,14 +2,16 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import type { CredentialsState, ModelGroup, RolesData } from "../../../api/llm"
 import { roleChainStatusKey } from "../../../hooks/useRoleTestChainRunner"
-import { AvailableModelDragPreview, LlmRolesTab, ModelSettingsDialog, ModelSettingsFields } from "./LlmRolesTab"
+import { AvailableModelDragPreview, LlmRolesTab, RoleSettingsFields } from "./LlmRolesTab"
 import {
   AvailableModelsSidebar,
   buildAvailableModelGroups,
   filterAvailableModelGroups,
 } from "./llm-roles/AvailableModelsSidebar"
+import { AdvancedModelBundlesSection, modelBundleGroupsFromData } from "./llm-roles/AdvancedModelBundlesSection"
 import { RoleCard } from "./llm-roles/RoleCard"
 import { roleNameDisplayError, RoleNameDialog, RoleNameFields } from "./llm-roles/RoleNameDialog"
+import { RoleTestResultPanel } from "./llm-roles/RoleTestResultPanel"
 import { appendAvailableModelToRole, appendModelGroupToRole, appendRole, normalizeRolesDraft, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeModelFromRole, removeProviderFromRole, removeRole, renameRole, reorderModelInRole, reorderProviderInRole, validateRolesDraft } from "./role-utils"
 import { credentialsByProviderCode } from "./route-credentials"
 
@@ -230,7 +232,7 @@ describe("LlmRolesTab controls", () => {
     })
   })
 
-  it("uses route endpoint credentials for role model availability", () => {
+  it("uses route endpoint credentials for route-backed provider ownership", () => {
     const routeId = "deepseek-official:deepseek-v4-pro"
     const routeBackedData: RolesData = {
       models: {
@@ -271,7 +273,8 @@ describe("LlmRolesTab controls", () => {
       },
     })
 
-    expect(html).toContain("Connected")
+    expect(html).toContain("DeepSeek Official")
+    expect(html).not.toContain("Connected")
     expect(html).not.toContain("Unavailable")
   })
 
@@ -371,17 +374,23 @@ describe("LlmRolesTab controls", () => {
         getActiveAvailableModelDragId={() => null}
         getAvailableModelGroup={() => null}
         onChange={vi.fn()}
+        onDeleteRole={vi.fn()}
       />,
     )
 
-    const statusLightClass = html.match(/data-provider-status-light="true"[^>]*class="([^"]*)"/)?.[1]
+    const providerCardTag = html.match(/<[^>]*data-provider-card="true"[^>]*>/)?.[0] ?? ""
+    const providerCardClass = providerCardTag.match(/class="([^"]*)"/)?.[1] ?? ""
+    const statusLightClass = html.match(/data-role-route-status-light="true"[^>]*class="([^"]*)"/)?.[1]
     expect(html).toContain('data-provider-test-status="ok"')
-    expect(html).toContain('data-provider-status-light="true"')
+    expect(html).toContain('data-role-route-status-light="true"')
+    expect(html).toContain('aria-label="Role route status Can Run')
+    expect(html).not.toMatch(/>Can Run<\/span>|>Limited<\/span>|>Blocked<\/span>/)
+    expect(providerCardClass).toContain("border-success-border")
     expect(statusLightClass).toContain("size-1.5")
     expect(statusLightClass).not.toContain("size-2.5")
-    expect(html).not.toContain("bg-success-background/10")
-    expect(html).not.toContain("bg-destructive-background/10")
-    expect(html).not.toContain("bg-primary/5")
+    expect(providerCardClass).not.toContain("bg-success-background/10")
+    expect(providerCardClass).not.toContain("bg-destructive-background/10")
+    expect(providerCardClass).not.toContain("bg-primary/5")
     expect(html).not.toMatch(/aria-label="Provider test status Connected"[^>]*>.*Connected<\/span>/)
   })
 
@@ -461,11 +470,14 @@ describe("LlmRolesTab controls", () => {
         getActiveAvailableModelDragId={() => null}
         getAvailableModelGroup={() => null}
         onChange={vi.fn()}
+        onDeleteRole={vi.fn()}
       />,
     )
 
-    expect(html).toContain('aria-label="Provider status Failed"')
-    expect(html).toContain(">Failed</")
+    expect(html).not.toContain('aria-label="Provider status Failed"')
+    expect(html).not.toContain(">Failed</")
+    expect(html).toContain('aria-label="Role route status Blocked')
+    expect(html).toContain('data-role-route-status="blocked"')
     expect(html).not.toContain('aria-label="Provider status Connected"')
   })
 
@@ -676,6 +688,222 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain('title="Claude Sonnet 4.7"')
   })
 
+  it("maps backend provider state and role fit into three role route statuses", () => {
+    const retryAt = "2026-12-31T00:00:00Z"
+    const statefulModelGroups: ModelGroup[] = [{
+      canonical_id: "gpt-5",
+      display_name: "GPT 5",
+      section_label: "openai",
+      provider_models: [
+        {
+          route_id: "ready:gpt-5",
+          endpoint_id: "ready",
+          provider_label: "Ready Provider",
+          provider_kind: "official",
+          provider_model_id: "gpt-5",
+          ui_state: "ready",
+          ui_detail: "Ready for generation.",
+          retry_at: null,
+          reason_code: null,
+          capability_state: "known",
+          capabilities: {},
+        },
+        {
+          route_id: "untested:gpt-5",
+          endpoint_id: "untested",
+          provider_label: "Untested Provider",
+          provider_kind: "third_party",
+          provider_model_id: "gpt-5",
+          ui_state: "untested",
+          ui_detail: null,
+          retry_at: null,
+          reason_code: null,
+          capability_state: "unknown",
+          capabilities: {},
+        },
+        {
+          route_id: "cooling:gpt-5",
+          endpoint_id: "cooling",
+          provider_label: "Cooling Provider",
+          provider_kind: "third_party",
+          provider_model_id: "gpt-5",
+          ui_state: "cooling_down",
+          ui_detail: "Retry after transient rate limit.",
+          retry_at: retryAt,
+          reason_code: "rate_limited",
+          capability_state: "partial",
+          capabilities: {},
+        },
+        {
+          route_id: "setup:gpt-5",
+          endpoint_id: "setup",
+          provider_label: "Setup Provider",
+          provider_kind: "custom",
+          provider_model_id: "gpt-5",
+          ui_state: "needs_setup",
+          ui_detail: "Model does not exist.",
+          retry_at: null,
+          reason_code: "invalid_model",
+          capability_state: "unknown",
+          capabilities: {},
+        },
+        {
+          route_id: "off:gpt-5",
+          endpoint_id: "off",
+          provider_label: "Off Provider",
+          provider_kind: "custom",
+          provider_model_id: "gpt-5",
+          ui_state: "off",
+          ui_detail: "Disabled by user.",
+          retry_at: null,
+          reason_code: "user_disabled",
+          capability_state: "unknown",
+          capabilities: {},
+        },
+      ],
+      status_summary: {
+        ready: 1,
+        untested: 1,
+        cooling_down: 1,
+        needs_setup: 1,
+        off: 1,
+      },
+      capability_summary: {
+        capability_known_count: 1,
+        thinking: "unknown",
+        tools: "unknown",
+        structured_output: "unknown",
+        max_context_tokens: null,
+        max_output_tokens: null,
+      },
+    }]
+    const statefulData: RolesData = {
+      models: {
+        "gpt-5": {
+          name: "GPT 5",
+          providers: Object.fromEntries(statefulModelGroups[0].provider_models.map((provider) => [
+            provider.route_id,
+            provider.provider_model_id,
+          ])),
+        },
+      },
+      providers: Object.fromEntries(statefulModelGroups[0].provider_models.map((provider) => [
+        provider.route_id,
+        {
+          name: provider.provider_label,
+          type: "openai_compatible",
+          endpoint_id: provider.endpoint_id,
+        },
+      ])),
+      roles: {
+        analyst: {
+          model_fallback: true,
+          active_model: "gpt-5",
+          models: {
+            "gpt-5": {
+              providers: statefulModelGroups[0].provider_models.map((provider) => provider.route_id),
+              temperature: null,
+              max_tokens: null,
+            },
+          },
+          materialization_report: {
+            entries: [
+              { canonical_id: "gpt-5", route_id: "ready:gpt-5", role_fit: "using" },
+              {
+                canonical_id: "gpt-5",
+                route_id: "untested:gpt-5",
+                role_fit: "downgraded",
+                warnings: [{ message: "Using lower max output." }],
+              },
+              {
+                canonical_id: "gpt-5",
+                route_id: "cooling:gpt-5",
+                role_fit: "needs_test",
+                warnings: [{ code: "thinking_capability_unknown" }],
+              },
+              { canonical_id: "gpt-5", route_id: "setup:gpt-5", role_fit: "not_fit" },
+            ],
+            warnings: [],
+            skipped_provider_details: [],
+          },
+        },
+      },
+    }
+    const html = renderRolesHtml({
+      data: statefulData,
+      modelGroups: statefulModelGroups,
+      credentials: {
+        providers: statefulModelGroups[0].provider_models.map((provider) => ({
+          id: provider.endpoint_id ?? provider.route_id.split(":")[0],
+          name: provider.provider_label,
+          api_key: "sk-test",
+          provider_type: "openai_compatible",
+          last_test_status: "ok",
+        })),
+      },
+    })
+
+    expect(html).toContain('aria-label="Role route status Can Run')
+    expect(html).toContain('aria-label="Role route status Limited')
+    expect(html).toContain('aria-label="Role route status Blocked')
+    expect(html).toContain('data-role-route-status="runnable"')
+    expect(html).toContain('data-role-route-status="limited"')
+    expect(html).toContain('data-role-route-status="blocked"')
+    expect(html).toContain("Using lower max output.")
+    expect(html).toContain("Thinking is required but capability is unknown.")
+    expect(html).toContain("Cooling Down: Retry after transient rate limit.")
+    expect(html).not.toMatch(/>Can Run<\/span>|>Limited<\/span>|>Blocked<\/span>/)
+    expect(html).not.toContain('aria-label="Provider state Ready"')
+    expect(html).not.toContain('aria-label="Role fit Using"')
+    expect(html).not.toContain('data-cooling-down-countdown="true"')
+    expect(html).not.toContain("Test Now")
+    expect(html).not.toContain(">rate_limited<")
+    expect(html).not.toContain(">invalid_model<")
+    expect(html).not.toContain(">user_disabled<")
+  })
+
+  it("renders role test results with actionable warnings but without execution ids", () => {
+    const html = renderToStaticMarkup(
+      <RoleTestResultPanel
+        result={{
+          role_name: "Analyst",
+          status: "warning",
+          warnings: [{ message: "Thinking is required but capability is unknown." }],
+          model_groups: [{
+            canonical_id: "gpt-5",
+            display_name: "GPT 5",
+            provider_results: [{
+              route_id: "openrouter:gpt-5",
+              provider_label: "OpenRouter",
+              provider_ui_state: "cooling_down",
+              role_fit: "needs_test",
+              admission_decision: "temporary_skip",
+              status: "blocked",
+              warnings: [{ message: "Thinking is required but capability is unknown." }],
+              retry_at: "2026-12-31T00:00:00Z",
+              message: "Retry after transient rate limit.",
+              resolved_settings: {},
+            }],
+          }],
+        }}
+      />,
+    )
+
+    expect(html).toContain("Role Test")
+    expect(html).toContain("Needs Attention")
+    expect(html).toContain("GPT 5")
+    expect(html).toContain("OpenRouter")
+    expect(html).toContain("Cooling Down")
+    expect(html).toContain("Needs Test")
+    expect(html).toContain("Skipped")
+    expect(html).toContain("Thinking is required but capability is unknown.")
+    expect(html).toContain("Retry after transient rate limit.")
+    expect(html).not.toContain("openrouter:gpt-5")
+    expect(html).not.toContain("route_id")
+    expect(html).not.toContain("endpoint")
+    expect(html).not.toContain("canonical")
+  })
+
   it("renders model group titles in the normal UI font", () => {
     const html = renderToStaticMarkup(<AvailableModelsSidebar modelGroups={modelGroups} />)
 
@@ -728,6 +956,78 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain("provider_routes")
     expect(html).not.toContain("GPT5")
     expect(html).not.toContain("Claude Sonnet 4.6 Thinking")
+  })
+
+  it("pins advanced model bundles above normal Available Models and keeps exact route ids", () => {
+    const bundledData: RolesData = {
+      ...rolesData,
+      model_bundles: {
+        premium_stack: {
+          display_name: "Premium Stack",
+          fallback_chain: [
+            { route_id: "anthropic-official:claude-sonnet-4-7" },
+            { route_id: "qiniu-anthropic:claude-sonnet-4-7" },
+          ],
+        },
+      },
+    }
+    const providerModelsByRouteId = new Map(modelGroups[0].provider_models.map((providerModel) => [
+      providerModel.route_id,
+      providerModel,
+    ]))
+    const bundleGroups = modelBundleGroupsFromData(bundledData, providerModelsByRouteId)
+    const html = renderToStaticMarkup(
+      <AvailableModelsSidebar
+        modelGroups={modelGroups}
+        pinnedModelGroups={bundleGroups}
+      />,
+    )
+
+    expect(bundleGroups[0]).toMatchObject({
+      canonical_id: "bundle:premium_stack",
+      display_name: "Premium Stack",
+    })
+    expect(bundleGroups[0].provider_models.map((providerModel) => providerModel.route_id)).toEqual([
+      "anthropic-official:claude-sonnet-4-7",
+      "qiniu-anthropic:claude-sonnet-4-7",
+    ])
+    expect(html.indexOf("Advanced Model Bundles")).toBeLessThan(html.indexOf("anthropic"))
+    expect(html).toContain("Premium Stack")
+    expect(html).toContain("Claude Sonnet 4.7")
+    expect(html).not.toContain("model_profiles")
+  })
+
+  it("renders an advanced bundle authoring surface below role sections", () => {
+    const bundledData: RolesData = {
+      ...rolesData,
+      model_bundles: {
+        premium_stack: {
+          display_name: "Premium Stack",
+          fallback_chain: [{ route_id: "anthropic-official:claude-sonnet-4-7" }],
+        },
+      },
+    }
+    const html = renderToStaticMarkup(
+      <AdvancedModelBundlesSection
+        data={bundledData}
+        modelGroups={modelGroups}
+        providerModelsByRouteId={new Map(modelGroups[0].provider_models.map((providerModel) => [
+          providerModel.route_id,
+          providerModel,
+        ]))}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(html).toContain("Advanced Model Bundles")
+    expect(html).toContain("Premium Stack")
+    expect(html).toContain("Create Bundle")
+    expect(html).toContain("Anthropic Official")
+    expect(html).toContain('data-slot="card"')
+    expect(html).toContain('data-slot="item"')
+    expect(html).toContain('data-model-bundle-row="true"')
+    expect(html).not.toContain('data-model-bundle-card="true"')
+    expect(html).not.toContain("model_profiles")
   })
 
   it("sorts ready provider routes before untested and setup routes in model cards", () => {
@@ -962,15 +1262,17 @@ describe("LlmRolesTab controls", () => {
 
   it("uses shadcn dropdown primitives for provider add controls", () => {
     const html = renderRolesHtml()
+    const addTriggerStart = html.indexOf('data-provider-add-trigger="true"')
+    const addTriggerHtml = html.slice(addTriggerStart, html.indexOf("</button>", addTriggerStart) + "</button>".length)
 
     expect(html).toContain('data-slot="dropdown-menu-trigger"')
     expect(html).toContain('data-provider-add-trigger="true"')
     expect(html).not.toContain('aria-label="Add provider to model"')
-    expect(html).not.toContain('data-slot="select-trigger"')
+    expect(addTriggerHtml).not.toContain('data-slot="select-trigger"')
     expect(html).not.toContain('class="mt-1 h-8 rounded-md border border-input bg-background px-2 text-xs"')
   })
 
-  it("keeps model row content centered with breathing room between title and badges", () => {
+  it("keeps model row content centered without aggregate status badges or model settings", () => {
     const html = renderRolesHtml()
 
     expect(html).toContain('data-model-row="true"')
@@ -980,6 +1282,10 @@ describe("LlmRolesTab controls", () => {
     expect(html).toContain("grid-cols-[minmax(0,max-content)_auto]")
     expect(html).toContain("gap-x-4")
     expect(html).toContain("gap-2.5")
+    expect(html).not.toContain('aria-label="Provider status Connected"')
+    expect(html).not.toContain('aria-label="Provider status Failed"')
+    expect(html).not.toContain('aria-label="Provider status Unavailable"')
+    expect(html).not.toContain('aria-label="Model settings for')
   })
 
   it("keeps provider names single-line with a tooltip for overflow", () => {
@@ -1012,13 +1318,15 @@ describe("LlmRolesTab controls", () => {
     expect(html).toContain('data-role-drop-shield="true"')
   })
 
-  it("renders provider rows as capped-width grid tracks with a ghost dropdown button", () => {
+  it("renders provider rows as a max-three-column responsive grid with stable aligned tracks", () => {
     const html = renderRolesHtml()
 
     expect(html).toContain('data-provider-grid="true"')
-    expect(html).toContain("grid-cols-[repeat(auto-fill,minmax(min(100%,12rem),20rem))]")
+    expect(html).toContain("grid-cols-[repeat(auto-fill,minmax(min(100%,max(12rem,calc((100%_-_0.75rem)/3))),1fr))]")
     expect(html).toContain("justify-start")
     expect(html).not.toContain("grid-cols-[repeat(auto-fit,minmax(min(100%,max(12rem,calc((100%_-_0.75rem)/3))),1fr))]")
+    expect(html).not.toContain("grid-cols-[repeat(auto-fit,minmax(min(100%,10rem),max-content))]")
+    expect(html).not.toContain("max-w-64")
     expect(html).not.toContain("grid-cols-[repeat(auto-fit,minmax(12rem,1fr))]")
     expect(html).toContain('data-provider-add-trigger="true"')
     expect(html).toContain('data-variant="ghost"')
@@ -1600,42 +1908,101 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain("Test Chain")
   })
 
-  it("uses semantic destructive badges instead of hard-coded red utility colors", () => {
-    const html = renderRolesHtml()
+  it("uses semantic destructive role route states instead of hard-coded red utility colors", () => {
+    const blockedRouteId = "broken-proxy:claude-sonnet-4-7"
+    const html = renderRolesHtml({
+      data: {
+        models: {
+          "claude-sonnet-4-7": {
+            name: "Claude Sonnet 4.7",
+            providers: { [blockedRouteId]: "claude-sonnet-4-7" },
+          },
+        },
+        providers: {
+          [blockedRouteId]: {
+            name: "Broken Proxy",
+            type: "openai_compatible",
+            endpoint_id: "broken-proxy",
+          },
+        },
+        roles: {
+          analyst: {
+            model_fallback: true,
+            active_model: "claude-sonnet-4-7",
+            models: {
+              "claude-sonnet-4-7": {
+                providers: [blockedRouteId],
+                temperature: null,
+                max_tokens: null,
+              },
+            },
+          },
+        },
+      },
+    })
 
-    expect(html).toContain("Unavailable")
+    expect(html).toContain('data-role-route-status="blocked"')
     expect(html).toContain('data-variant="destructive"')
     expect(html).not.toContain("border-red")
     expect(html).not.toContain("bg-red")
     expect(html).not.toContain("text-red")
   })
 
-  it("renders model settings through Dialog and Field primitives", () => {
-    const triggerHtml = renderToStaticMarkup(
-      <ModelSettingsDialog
-        modelCode="CL46T"
-        modelName="Claude Sonnet 4.6 Thinking"
-        temperature={0.2}
-        maxTokens={8192}
-        onSubmit={vi.fn()}
-      />,
-    )
+  it("renders role-level intent settings as an inline header panel without provider order controls", () => {
+    const dataWithIntent: RolesData = {
+      ...rolesData,
+      roles: {
+        ...rolesData.roles,
+        copilot_chat: {
+          ...rolesData.roles.copilot_chat,
+          intent: {
+            provider_preference: "manual_order",
+            thinking: "required",
+            target_output_tokens: {
+              mode: "target",
+              value: 8192,
+              downgrade: "allow_with_warning",
+            },
+          },
+        },
+      },
+    }
+    const html = renderRolesHtml({ data: dataWithIntent })
     const fieldsHtml = renderToStaticMarkup(
-      <ModelSettingsFields
-        modelCode="CL46T"
-        temperatureDraft="0.2"
-        maxTokensDraft="8192"
-        onTemperatureChange={vi.fn()}
-        onMaxTokensChange={vi.fn()}
+      <RoleSettingsFields
+        roleName="copilot_chat"
+        draft={{
+          providerPreference: "manual_order",
+          thinking: "required",
+          outputTokens: "8192",
+          outputDowngrade: "allow_with_warning",
+        }}
+        outputLimitSummary={{
+          knownCount: 2,
+          totalCount: 3,
+          min: 4096,
+          max: 16384,
+        }}
+        onDraftChange={vi.fn()}
       />,
     )
 
-    expect(triggerHtml).toContain('data-slot="dialog-trigger"')
-    expect(triggerHtml).toContain('aria-label="Model settings for Claude Sonnet 4.6 Thinking"')
+    expect(html).toContain('data-role-settings-toggle="true"')
+    expect(html).toContain('data-role-settings-panel="true"')
+    expect(html).not.toContain('data-role-settings-trigger="true"')
+    expect(html).not.toContain('data-slot="dialog-content"')
+    expect(fieldsHtml).toContain('data-role-settings-fields="true"')
     expect(fieldsHtml).toContain('data-slot="field-set"')
-    expect(fieldsHtml).toContain("Temperature")
-    expect(fieldsHtml).toContain("Max Tokens")
-    expect(fieldsHtml).toContain("Blank uses system default 0.7")
-    expect(fieldsHtml).not.toContain('placeholder="Default (System: 0.7)"')
+    expect(fieldsHtml).not.toContain("Provider Order")
+    expect(fieldsHtml).not.toContain("Manual order")
+    expect(fieldsHtml).toContain("Thinking Required")
+    expect(fieldsHtml).toContain('data-slot="switch"')
+    expect(fieldsHtml).toContain("Output Token Target")
+    expect(fieldsHtml).toContain('value="8192"')
+    expect(fieldsHtml).toContain("Known selected route output caps: min 4,096 / max 16,384. 1 route still needs testing.")
+    expect(fieldsHtml).toContain("Use route max and mark Limited")
+    expect(fieldsHtml).not.toContain("Temperature")
+    expect(fieldsHtml).not.toContain("Max Tokens")
+    expect(fieldsHtml).not.toContain("Runtime default")
   })
 })

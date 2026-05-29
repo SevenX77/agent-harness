@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 from app.services import copilot_test
@@ -128,3 +130,104 @@ async def test_request_model_generation_uses_ark_responses_api() -> None:
 
     assert requested[0][0] == "https://ark.cn-beijing.volces.com/api/v3/responses"
     assert requested[0][1]["authorization"] == "Bearer secret"
+
+
+@pytest.mark.anyio
+async def test_request_model_generation_uses_runtime_settings_for_openai_probe() -> None:
+    bodies: list[dict[str, object]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content.decode()))
+        return httpx.Response(200, json={"id": "chatcmpl-id"}, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await copilot_test._request_model_generation(
+            client,
+            "openai",
+            "secret",
+            "https://api.openai.example/v1",
+            "gpt-5",
+            runtime_settings={
+                "max_output_tokens": 333,
+                "reasoning": {"effort": "medium"},
+            },
+        )
+
+    assert bodies == [
+        {
+            "model": "gpt-5",
+            "messages": [{"role": "user", "content": "."}],
+            "max_completion_tokens": 333,
+            "reasoning_effort": "medium",
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_request_official_call_method_generation_uses_method_specific_payloads() -> None:
+    requests: list[tuple[str, dict[str, object]]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append((str(request.url), json.loads(request.content.decode())))
+        return httpx.Response(200, json={"id": "ok"}, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await copilot_test._request_official_call_method_generation(
+            client,
+            "openai_responses",
+            "secret",
+            "https://api.openai.example/v1",
+            "gpt-5.2",
+            runtime_settings={"max_output_tokens": 16, "reasoning": {"enabled": True, "effort": "low"}},
+        )
+        await copilot_test._request_official_call_method_generation(
+            client,
+            "ark_chat",
+            "secret",
+            "https://ark.cn-beijing.volces.com/api/v3",
+            "doubao-1-5-pro-32k-250115",
+            runtime_settings={"reasoning": {"enabled": False}},
+        )
+        await copilot_test._request_official_call_method_generation(
+            client,
+            "deepseek_anthropic_messages",
+            "secret",
+            "https://api.deepseek.com",
+            "deepseek-v4-pro",
+            runtime_settings={"max_output_tokens": 1025, "reasoning": {"enabled": True, "budget_tokens": 1024}},
+        )
+
+    assert requests == [
+        (
+            "https://api.openai.example/v1/responses",
+            {
+                "model": "gpt-5.2",
+                "input": "Reply with one short word.",
+                "max_output_tokens": 16,
+                "reasoning": {"effort": "low"},
+            },
+        ),
+        (
+            "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+            {
+                "model": "doubao-1-5-pro-32k-250115",
+                "messages": [{"role": "user", "content": "Reply with one short word."}],
+                "max_tokens": 16,
+                "thinking": {"type": "disabled"},
+            },
+        ),
+        (
+            "https://api.deepseek.com/anthropic/v1/messages",
+            {
+                "model": "deepseek-v4-pro",
+                "max_tokens": 1025,
+                "thinking": {"type": "enabled", "budget_tokens": 1024},
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": "Reply with one short word."}],
+                    }
+                ],
+            },
+        ),
+    ]

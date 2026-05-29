@@ -8,6 +8,7 @@ import {
   inferProviderType,
   moveProviderInRole,
   notableProviderKeyForDraft,
+  officialProviderTestSummary,
   officialProviderDrafts,
   providerDraftForAction,
   providerTestParamsFingerprint,
@@ -138,6 +139,8 @@ function baseViewProps(
     onAddProvider: vi.fn(),
     onProviderModelsUpdated: vi.fn(),
     onRolesDataChange: vi.fn(),
+    onDeleteRole: vi.fn(),
+    onBeforeRoleTest: vi.fn().mockResolvedValue(null),
     ...overrides,
   }
 }
@@ -379,6 +382,19 @@ describe('Add Provider flow helpers', () => {
 })
 
 describe('SettingsPageContent (api_keys)', () => {
+  it('summarizes official provider Test results by verified route status, not route count', () => {
+    expect(officialProviderTestSummary([
+      { id: 'claude-haiku', status: 'verified' },
+      { id: 'claude-opus-4-1', status: 'unverified_manual' },
+      { id: 'claude-opus-4-6' },
+      { id: 'claude-opus-4-7', status: 'verified' },
+      { id: 'claude-sonnet', status: 'failed' },
+    ])).toEqual({
+      kind: 'success',
+      message: 'Test complete (2 verified routes, 3 not verified)',
+    })
+  })
+
   it('renders General settings as auto-saved shadcn fields without manual save buttons', () => {
     const html = renderToStaticMarkup(
       <SettingsPageContent

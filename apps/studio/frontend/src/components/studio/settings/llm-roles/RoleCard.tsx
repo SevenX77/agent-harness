@@ -12,7 +12,7 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable"
-import { Bot, Cog, Loader2, MoreVertical, Pencil, Trash2 } from "lucide-react"
+import { Bot, ChevronDown, Cog, Loader2, MoreVertical, Pencil, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -21,6 +21,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -31,22 +36,24 @@ import {
 import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog"
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Switch } from "@/components/ui/switch"
-import type { CredentialsState, ModelGroup, RolesData } from "@/api/llm"
-import { roleChainStatusKey, type RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
-import { getModelAvailability } from "../availability"
+import type { CredentialsState, MaterializationReportEntry, ModelGroup, ProviderModelOption, RoleTestResponse, RolesData } from "@/api/llm"
+import type { RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
 import {
   AVAILABLE_MODEL_DRAG_TYPE,
   appendModelGroupToRole,
-  removeRole,
   renameRole,
   reorderModelInRole,
-  roleModelProviderCodes,
   toggleModelFallback,
+  updateRoleIntent,
 } from "../role-utils"
 import { ModelItem } from "./ModelItem"
 import { RoleNameDialog } from "./RoleNameDialog"
+import { RoleSettingsPanel, type OutputLimitSummary } from "./RoleSettingsDialog"
+import { RoleTestResultPanel } from "./RoleTestResultPanel"
 
 export type RoleCategory = "graph-agent" | "copilot"
+
+const EMPTY_PROVIDER_MODELS_BY_ROUTE_ID: ReadonlyMap<string, ProviderModelOption> = new Map()
 
 export const RoleCard = memo(function RoleCard({
   data,
@@ -54,34 +61,50 @@ export const RoleCard = memo(function RoleCard({
   credentialsByCode,
   modelDisplayNamesByCode,
   ownedProviderCodesByModel,
+  providerModelsByRouteId = EMPTY_PROVIDER_MODELS_BY_ROUTE_ID,
   roleName,
-  testStatuses,
-  testChainRunning,
+  testStatuses = {},
+  testChainRunning = false,
+  roleTestResult,
+  roleTestError,
   onRunTestChain,
   getActiveAvailableModelDragId,
   getAvailableModelGroup,
   onChange,
+  onDeleteRole,
 }: {
   data: RolesData
   category: RoleCategory
   credentialsByCode: Record<string, CredentialsState["providers"][number]>
   modelDisplayNamesByCode: ReadonlyMap<string, string>
   ownedProviderCodesByModel: ReadonlyMap<string, ReadonlySet<string>>
+  providerModelsByRouteId?: ReadonlyMap<string, ProviderModelOption>
   roleName: string
-  testStatuses: RoleChainStatusMap
-  testChainRunning: boolean
+  testStatuses?: RoleChainStatusMap
+  testChainRunning?: boolean
+  roleTestResult?: RoleTestResponse
+  roleTestError?: string
   onRunTestChain: (roleName: string) => void
   getActiveAvailableModelDragId: () => string | null
   getAvailableModelGroup: (modelGroupId: string) => ModelGroup | null
   onChange: (next: RolesData) => void
+  onDeleteRole: (roleName: string) => void
 }) {
   const role = data.roles[roleName]
   const modelCodes = useMemo(() => Object.keys(role.models), [role.models])
   const [editOpen, setEditOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
   const actionsOpenTimerRef = useRef<number | null>(null)
   const RoleIcon = category === "copilot" ? Bot : Cog
+  const roleFitByRouteId = useMemo<ReadonlyMap<string, MaterializationReportEntry>>(() => (
+    new Map((role.materialization_report?.entries ?? []).map((entry) => [entry.route_id, entry]))
+  ), [role.materialization_report?.entries])
+  const outputLimitSummary = useMemo(
+    () => roleOutputLimitSummary(role, providerModelsByRouteId),
+    [providerModelsByRouteId, role],
+  )
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -90,19 +113,6 @@ export const RoleCard = memo(function RoleCard({
   const handleRunTestChain = useCallback(() => {
     onRunTestChain(roleName)
   }, [onRunTestChain, roleName])
-
-  const modelAvailability = useCallback((modelCode: string) => {
-    const ownedSet = ownedProviderCodesByModel.get(modelCode)
-    const requestedProviders = role.models[modelCode]?.providers ?? []
-    const providers = ownedSet
-      ? requestedProviders.filter((providerCode) => ownedSet.has(providerCode))
-      : roleModelProviderCodes(data, modelCode, requestedProviders, credentialsByCode)
-    return getModelAvailability(
-      providers,
-      credentialsByCode,
-      providers.map((providerCode) => testStatuses[roleChainStatusKey(modelCode, providerCode)]),
-    )
-  }, [credentialsByCode, data, ownedProviderCodesByModel, role.models, testStatuses])
 
   function handleAvailableModelDragOver(event: DragEvent<HTMLDivElement>) {
     event.preventDefault()
@@ -164,98 +174,121 @@ export const RoleCard = memo(function RoleCard({
   }, [])
 
   return (
-    <Card
-      size="sm"
-      className="relative rounded-md"
-      data-role-name={roleName}
-      data-model-drop-zone="true"
-      data-model-drop-fallback="active-drag-ref"
-      onDragOver={handleAvailableModelDragOver}
-      onDrop={handleAvailableModelDrop}
-    >
-      <div
-        aria-hidden="true"
-        data-role-drop-shield="true"
+    <Collapsible open={settingsOpen} onOpenChange={setSettingsOpen}>
+      <Card
+        size="sm"
+        className="relative rounded-md"
+        data-role-name={roleName}
         data-model-drop-zone="true"
         data-model-drop-fallback="active-drag-ref"
-        className="pointer-events-none absolute inset-0 z-10 hidden rounded-md"
-      />
-      <CardHeader className="!grid-cols-1 items-center gap-2 sm:!grid-cols-[minmax(0,1fr)_auto] sm:gap-3">
+        onDragOver={handleAvailableModelDragOver}
+        onDrop={handleAvailableModelDrop}
+      >
         <div
-          data-role-card-title-row="true"
-          className="col-start-1 row-start-1 flex h-8 min-w-0 items-center gap-2"
-        >
-          <RoleIcon
-            aria-hidden="true"
-            data-role-title-icon="true"
-            className="size-3.5 shrink-0 text-muted-foreground"
-          />
-          <CardTitle className="min-w-0 break-all">{roleName}</CardTitle>
-        </div>
-        <CardAction
-          data-role-header-actions="true"
-          className="col-start-1 row-start-2 row-span-1 flex h-8 flex-nowrap items-center justify-start gap-3 self-center sm:col-start-2 sm:row-start-1 sm:justify-end"
-        >
-          <label className="flex h-8 items-center gap-2 whitespace-nowrap text-xs text-muted-foreground">
-            <Switch
-              size="sm"
-              checked={role.model_fallback}
-              onCheckedChange={(checked) => onChange(toggleModelFallback(data, roleName, checked))}
-              aria-label={`Model fallback for ${roleName}`}
-            />
-            model_fallback
-          </label>
-          <Button
-            type="button"
-            variant="default"
-            size="default"
-            data-role-test-trigger="true"
-            className="min-w-20 shrink-0"
-            disabled={testChainRunning}
-            onClick={handleRunTestChain}
+          aria-hidden="true"
+          data-role-drop-shield="true"
+          data-model-drop-zone="true"
+          data-model-drop-fallback="active-drag-ref"
+          className="pointer-events-none absolute inset-0 z-10 hidden rounded-md"
+        />
+        <CardHeader className="!grid-cols-1 items-center gap-2 sm:!grid-cols-[minmax(0,1fr)_auto] sm:gap-3">
+          <CollapsibleTrigger
+            data-role-settings-toggle="true"
+            data-role-card-title-row="true"
+            className="group col-start-1 row-start-1 flex h-8 min-w-0 items-center gap-2 rounded-md px-1 text-left outline-none transition-colors hover:bg-muted/25 focus-visible:ring-2 focus-visible:ring-ring/50"
+            aria-label={`Toggle settings for ${roleName}`}
           >
-            {testChainRunning ? <Loader2 className="size-3 animate-spin" /> : null}
-            {testChainRunning ? "Testing" : "Test"}
-          </Button>
-          <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen}>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                data-role-actions-trigger="true"
-                aria-label={`More actions for ${roleName}`}
-                className="shrink-0 text-muted-foreground"
-                onClick={handleActionsClick}
-                onDoubleClick={handleActionsDoubleClick}
-                onPointerDown={handleActionsPointerDown}
-                onKeyDown={(event) => event.stopPropagation()}
-              >
-                <MoreVertical data-role-icon="true" className="text-muted-foreground" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              className="w-36"
-              onClick={(event) => event.stopPropagation()}
+            <RoleIcon
+              aria-hidden="true"
+              data-role-title-icon="true"
+              className="size-3.5 shrink-0 text-muted-foreground"
+            />
+            <CardTitle className="min-w-0 break-all">{roleName}</CardTitle>
+            <ChevronDown
+              aria-hidden="true"
+              className="ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180"
+            />
+          </CollapsibleTrigger>
+          <CardAction
+            data-role-header-actions="true"
+            className="col-start-1 row-start-2 row-span-1 flex h-8 flex-nowrap items-center justify-start gap-3 self-center sm:col-start-2 sm:row-start-1 sm:justify-end"
+          >
+            <label className="flex h-8 items-center gap-2 whitespace-nowrap text-xs text-muted-foreground">
+              <Switch
+                size="sm"
+                checked={role.model_fallback}
+                onCheckedChange={(checked) => onChange(toggleModelFallback(data, roleName, checked))}
+                aria-label={`Model fallback for ${roleName}`}
+              />
+              model_fallback
+            </label>
+            <Button
+              type="button"
+              variant="default"
+              size="default"
+              data-role-test-trigger="true"
+              className="min-w-20 shrink-0"
+              disabled={testChainRunning}
+              onClick={handleRunTestChain}
             >
-              <DropdownMenuItem data-role-edit-trigger="true" onSelect={() => setEditOpen(true)}>
-                <Pencil data-role-icon="true" />
-                Edit
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                data-role-delete-trigger="true"
-                variant="destructive"
-                onSelect={() => setDeleteOpen(true)}
+              {testChainRunning ? <Loader2 className="size-3 animate-spin" /> : null}
+              {testChainRunning ? "Testing" : "Test"}
+            </Button>
+            <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen}>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  data-role-actions-trigger="true"
+                  aria-label={`More actions for ${roleName}`}
+                  className="shrink-0 text-muted-foreground"
+                  onClick={handleActionsClick}
+                  onDoubleClick={handleActionsDoubleClick}
+                  onPointerDown={handleActionsPointerDown}
+                  onKeyDown={(event) => event.stopPropagation()}
+                >
+                  <MoreVertical data-role-icon="true" className="text-muted-foreground" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="w-36"
+                onClick={(event) => event.stopPropagation()}
               >
-                <Trash2 />
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </CardAction>
-      </CardHeader>
+                <DropdownMenuItem data-role-edit-trigger="true" onSelect={() => setEditOpen(true)}>
+                  <Pencil data-role-icon="true" />
+                  Edit
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  data-role-delete-trigger="true"
+                  variant="destructive"
+                  onSelect={(event) => {
+                    event.preventDefault()
+                    setActionsOpen(false)
+                    setDeleteOpen(true)
+                  }}
+                >
+                  <Trash2 />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </CardAction>
+        </CardHeader>
+        <CollapsibleContent
+          forceMount
+          data-role-settings-panel="true"
+          className="border-t border-border/60 px-3 py-3 data-[state=closed]:hidden"
+        >
+          <RoleSettingsPanel
+            roleName={roleName}
+            intent={role.intent}
+            outputLimitSummary={outputLimitSummary}
+            onSubmit={(intent) => onChange(updateRoleIntent(data, roleName, intent))}
+          />
+        </CollapsibleContent>
 
       <CardContent
         data-model-drop-zone="true"
@@ -264,6 +297,15 @@ export const RoleCard = memo(function RoleCard({
         onDrop={handleAvailableModelDrop}
         className="space-y-4"
       >
+        {roleTestError ? (
+          <div
+            data-role-test-error="true"
+            className="rounded-md border border-destructive-border bg-destructive-background/10 px-3 py-2 text-xs text-destructive"
+          >
+            Role Test failed: {roleTestError}
+          </div>
+        ) : null}
+        {roleTestResult ? <RoleTestResultPanel result={roleTestResult} /> : null}
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -289,7 +331,8 @@ export const RoleCard = memo(function RoleCard({
                     modelIndex={modelIndex}
                     credentialsByCode={credentialsByCode}
                     ownedProviderCodes={ownedProviderCodesByModel.get(modelCode)}
-                    availability={modelAvailability(modelCode)}
+                    providerModelsByRouteId={providerModelsByRouteId}
+                    roleFitByRouteId={roleFitByRouteId}
                     testStatuses={testStatuses}
                     onChange={onChange}
                   />
@@ -323,8 +366,33 @@ export const RoleCard = memo(function RoleCard({
         onOpenChange={setDeleteOpen}
         itemName={roleName}
         description={`Remove ${roleName} and its model fallback chain.`}
-        onConfirm={() => onChange(removeRole(data, roleName))}
+        onConfirm={() => onDeleteRole(roleName)}
       />
-    </Card>
+      </Card>
+    </Collapsible>
   )
 })
+
+function roleOutputLimitSummary(
+  role: RolesData["roles"][string],
+  providerModelsByRouteId: ReadonlyMap<string, ProviderModelOption>,
+): OutputLimitSummary {
+  const routeIds = Object.values(role.models).flatMap((model) => model.providers)
+  const values = routeIds
+    .map((routeId) => providerMaxOutputTokens(providerModelsByRouteId.get(routeId)))
+    .filter((value): value is number => value !== null)
+
+  return {
+    knownCount: values.length,
+    totalCount: routeIds.length,
+    min: values.length ? Math.min(...values) : null,
+    max: values.length ? Math.max(...values) : null,
+  }
+}
+
+function providerMaxOutputTokens(providerModel?: ProviderModelOption): number | null {
+  const value = providerModel?.capabilities.max_output_tokens?.value
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+  const max = (value as { max?: unknown }).max
+  return typeof max === "number" && Number.isFinite(max) ? max : null
+}

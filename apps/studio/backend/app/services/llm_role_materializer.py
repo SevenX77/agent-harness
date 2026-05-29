@@ -182,6 +182,7 @@ def _apply_intent(
     elif thinking == "required":
         capability = route.capabilities.get("thinking_protocol")
         if capability is None:
+            _enable_reasoning(entry_report)
             entry_report["warnings"].append(
                 {
                     "code": "thinking_capability_unknown",
@@ -203,6 +204,8 @@ def _apply_intent(
     token_intent = _effective_output_token_intent(role, group)
     if token_intent is not None:
         token_fit = _apply_output_token_intent(entry_report, token_intent, route)
+        if token_fit == "not_fit":
+            return "not_fit"
         if token_fit == "downgraded":
             role_fit = "downgraded"
     return role_fit
@@ -234,6 +237,17 @@ def _apply_output_token_intent(
     if max_tokens is None or token_intent.value <= max_tokens:
         entry_report["resolved_settings"]["max_output_tokens"] = token_intent.value
         return "using"
+    if token_intent.downgrade == "block":
+        warning = {
+            "code": "token_cap_blocked",
+            "route_id": route.route_id,
+            "message": (
+                f"Requested {token_intent.value} output tokens exceeds this route limit "
+                f"of {max_tokens}."
+            ),
+        }
+        entry_report["warnings"].append(warning)
+        return "not_fit"
     entry_report["resolved_settings"]["max_output_tokens"] = max_tokens
     if token_intent.downgrade == "allow_with_warning":
         warning = {

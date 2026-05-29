@@ -1,4 +1,4 @@
-import type { CredentialsState, ModelGroup, ModelInfo, ProviderType, RolesData } from "../../../api/llm"
+import type { CredentialsState, ModelGroup, ModelInfo, ProviderType, RoleIntent, RolesData } from "../../../api/llm"
 import { endpointIdFromRouteId } from "./route-credentials"
 
 type RoleProviderEntry = RolesData["providers"][string]
@@ -155,6 +155,13 @@ export function updateActiveModel(data: RolesData, roleName: string, activeModel
 export function toggleModelFallback(data: RolesData, roleName: string, enabled: boolean): RolesData {
   const next = cloneRolesData(data)
   next.roles[roleName] = { ...next.roles[roleName], model_fallback: enabled }
+  return next
+}
+
+export function updateRoleIntent(data: RolesData, roleName: string, intent: RoleIntent): RolesData {
+  if (!data.roles[roleName]) return data
+  const next = cloneRolesData(data)
+  next.roles[roleName] = { ...next.roles[roleName], intent }
   return next
 }
 

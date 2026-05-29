@@ -305,6 +305,113 @@ def test_put_role_v3_reports_token_downgrade_resolved_settings_and_warning(
     assert report["warnings"][0]["code"] == "token_downgraded"
 
 
+def test_put_role_v3_blocks_route_when_output_token_cap_policy_blocks(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    credentials = LLMCredentialsFile(
+        provider_endpoints={"deepseek-official": _provider_endpoint("deepseek-official")},
+        provider_routes={
+            "deepseek-official:deepseek-v4-pro": _provider_route(
+                "deepseek-official:deepseek-v4-pro",
+                canonical_id="deepseek-v4-pro",
+            ).model_copy(
+                update={
+                    "capabilities": {
+                        "max_output_tokens": CapabilityValue(
+                            value={
+                                "supported": True,
+                                "min": 1,
+                                "max": 65536,
+                                "default": 4096,
+                            },
+                            source="provider_doc",
+                        )
+                    }
+                }
+            )
+        },
+    )
+    _seed_materializer_registry(tmp_path, monkeypatch, credentials)
+
+    response = client.put(
+        "/api/llm/roles/analyst",
+        json={
+            "role_kind": "graph_agent",
+            "system_prompt_prefix": "",
+            "model_fallback_enabled": True,
+            "intent": {
+                "provider_preference": "manual_order",
+                "target_output_tokens": {
+                    "mode": "target",
+                    "value": 128000,
+                    "downgrade": "block",
+                },
+            },
+            "model_groups": [
+                {
+                    "canonical_id": "deepseek-v4-pro",
+                    "display_name": "DeepSeek V4 Pro",
+                    "provider_models": [
+                        {"route_id": "deepseek-official:deepseek-v4-pro"},
+                    ],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    report = body["materialization_report"]
+    assert report["entries"][0]["route_id"] == "deepseek-official:deepseek-v4-pro"
+    assert report["entries"][0]["resolved_settings"] == {}
+    assert report["entries"][0]["role_fit"] == "not_fit"
+    assert report["warnings"][0]["code"] == "token_cap_blocked"
+    assert body["fallback_chain"] == []
+
+
+def test_delete_role_v3_removes_persisted_role_instead_of_put_merge_retaining_it(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    route_id = "ready-provider:gpt-5"
+    credentials = LLMCredentialsFile(
+        provider_endpoints={"ready-provider": _provider_endpoint("ready-provider")},
+        provider_routes={route_id: _provider_route(route_id)},
+    )
+    _seed_materializer_registry(tmp_path, monkeypatch, credentials)
+
+    for role_name in ("analyst", "planner"):
+        response = client.put(
+            f"/api/llm/roles/{role_name}",
+            json={
+                "role_kind": "graph_agent",
+                "system_prompt_prefix": "",
+                "model_fallback_enabled": True,
+                "intent": {"provider_preference": "manual_order"},
+                "model_groups": [
+                    {
+                        "canonical_id": "gpt-5",
+                        "display_name": "GPT-5",
+                        "provider_models": [{"route_id": route_id}],
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 200
+
+    delete_response = client.delete("/api/llm/roles/analyst")
+
+    assert delete_response.status_code == 200
+    assert "analyst" not in delete_response.json()["roles"]
+    assert "planner" in delete_response.json()["roles"]
+    get_response = client.get("/api/llm/roles")
+    assert "analyst" not in get_response.json()["roles"]
+    assert "planner" in get_response.json()["roles"]
+
+
 def test_put_role_v3_keeps_selected_cooling_down_provider_with_warning(
     client: TestClient,
     tmp_path: Path,

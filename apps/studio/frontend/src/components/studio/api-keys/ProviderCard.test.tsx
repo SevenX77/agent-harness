@@ -339,7 +339,7 @@ describe("ProviderCard provider kind badge", () => {
 })
 
 describe("ProviderCard model discovery and endpoint test controls", () => {
-  it("renders official providers with a muted Get Models action and a separate endpoint test row", () => {
+  it("renders official providers with one primary Test action and no manual endpoint row", () => {
     const html = renderToStaticMarkup(
       <ProviderCard
         draft={makeDraft({ id: "ark-official", name: "Ark Official", provider_type: "ark_runtime" })}
@@ -352,14 +352,15 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
       />,
     )
 
-    expect(html).toContain("Get Models")
-    const getModelsIndex = html.indexOf("Get Models")
-    const getModelsButton = html.slice(html.lastIndexOf("<button", getModelsIndex), html.indexOf("</button>", getModelsIndex))
-    expect(getModelsButton).toContain('data-variant="secondary"')
-    expect(getModelsButton).not.toContain('data-variant="default"')
-    expect(html).toContain("Endpoint test")
-    expect(html).toContain("Please choose one model from Available Models for endpoint testing.")
-    expect(html).toContain('placeholder="e.g. doubao-seed-2-0-pro-260215"')
+    const testIndex = html.indexOf(">Test</button>")
+    const testButton = html.slice(html.lastIndexOf("<button", testIndex), html.indexOf("</button>", testIndex))
+    expect(testIndex).toBeGreaterThan(-1)
+    expect(testButton).toContain('data-variant="default"')
+    expect(testButton).not.toContain('data-variant="secondary"')
+    expect(html).not.toContain("Get Models")
+    expect(html).not.toContain("Endpoint test")
+    expect(html).not.toContain("Please choose one model from Available Models for endpoint testing.")
+    expect(html).not.toContain('placeholder="e.g. doubao-seed-2-0-pro-260215"')
     expect(html).toContain(">Test</button>")
   })
 
@@ -445,6 +446,206 @@ describe("ProviderCard provider capabilities", () => {
     expect(html).toContain("gpt-5")
     expect(html).toContain("claude-opus-4")
     expect(html).toContain("text-muted-foreground")
+  })
+
+  it("renders official provider route chips with probe status variants", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({ id: "openai-official", name: "OpenAI Official" })}
+        persisted={makePersisted({
+          id: "openai-official",
+          name: "OpenAI Official",
+          available_models: [
+            {
+              id: "gpt-5",
+              route_id: "openai-official:gpt-5",
+              status: "verified",
+            },
+            {
+              id: "gpt-image-1",
+              route_id: "openai-official:gpt-image-1",
+              status: "failed",
+            },
+          ],
+        })}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="official"
+      />,
+    )
+
+    expect(html).toContain("Available Routes:")
+    expect(html).not.toContain("Available Models:")
+
+    const verifiedIndex = html.indexOf(">gpt-5</button>")
+    const verifiedTag = html.slice(html.lastIndexOf("<button", verifiedIndex), html.indexOf("</button>", verifiedIndex))
+    expect(verifiedTag).toContain('data-slot="tag"')
+    expect(verifiedTag).toContain('data-variant="success"')
+    expect(verifiedTag).toContain('data-route-status="verified"')
+
+    const failedIndex = html.indexOf(">gpt-image-1</button>")
+    const failedTag = html.slice(html.lastIndexOf("<button", failedIndex), html.indexOf("</button>", failedIndex))
+    expect(failedTag).toContain('data-slot="tag"')
+    expect(failedTag).toContain('data-variant="destructive"')
+    expect(failedTag).toContain('data-route-status="failed"')
+  })
+
+  it("animates official route chips that are still being tested", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({
+          id: "openai-official",
+          name: "OpenAI Official",
+          isTesting: true,
+          testingAction: "models",
+        })}
+        persisted={makePersisted({
+          id: "openai-official",
+          name: "OpenAI Official",
+          available_models: [
+            {
+              id: "gpt-5.2",
+              status: "unverified_manual",
+              last_probe_message: null,
+              capabilities: { model_type: "language_reasoning", model_type_label: "Language/reasoning model" },
+            },
+          ],
+        })}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="official"
+      />,
+    )
+
+    const modelIndex = html.indexOf(">gpt-5.2</button>")
+    const tag = html.slice(html.lastIndexOf("<button", modelIndex), html.indexOf("</button>", modelIndex))
+    expect(tag).toContain('data-route-status="testing"')
+    expect(tag).toContain("api-route-tag-border-flow")
+  })
+
+  it("renders generated multimodal route candidates with an info border and model type tooltip", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({ id: "openai-official", name: "OpenAI Official" })}
+        persisted={makePersisted({
+          id: "openai-official",
+          name: "OpenAI Official",
+          available_models: [
+            {
+              id: "gpt-image-1",
+              status: "unverified_manual",
+              capabilities: { model_type: "image_generation", model_type_label: "Image generation model" },
+            },
+          ],
+        })}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="official"
+      />,
+    )
+
+    const modelIndex = html.indexOf(">gpt-image-1</button>")
+    const tag = html.slice(html.lastIndexOf("<button", modelIndex), html.indexOf("</button>", modelIndex))
+    expect(tag).toContain('data-variant="info"')
+    expect(tag).toContain('data-model-type="image_generation"')
+    expect(tag).toContain("Image generation model")
+  })
+
+  it("keeps generated multimodal official entries blue even if stale data marked them verified", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({ id: "gemini-official", name: "Gemini Official" })}
+        persisted={makePersisted({
+          id: "gemini-official",
+          name: "Gemini Official",
+          available_models: [
+            {
+              id: "gemini-3-pro-image",
+              route_id: "gemini-official:gemini-3-pro-image",
+              status: "verified",
+              verified_profiles: [
+                {
+                  profile_id: "text:gemini_generate_content",
+                  capability: "text_chat",
+                  method_id: "gemini_generate_content",
+                  request_mapper_id: "gemini_generate_content_text",
+                  status: "ready",
+                },
+              ],
+              capabilities: { model_type: "image_generation", model_type_label: "Image generation model" },
+            },
+          ],
+        })}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="official"
+      />,
+    )
+
+    const modelIndex = html.indexOf(">gemini-3-pro-image</button>")
+    const tag = html.slice(html.lastIndexOf("<button", modelIndex), html.indexOf("</button>", modelIndex))
+    expect(tag).toContain('data-variant="info"')
+    expect(tag).not.toContain('data-variant="success"')
+    expect(tag).toContain('data-model-type="image_generation"')
+    expect(tag).toContain("Image generation model")
+    expect(tag).not.toContain("Verified route")
+    expect(tag).not.toContain("Verified text chat")
+  })
+
+  it("describes verified route profile capability types instead of profile counts", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({ id: "openai-official", name: "OpenAI Official" })}
+        persisted={makePersisted({
+          id: "openai-official",
+          name: "OpenAI Official",
+          available_models: [
+            {
+              id: "gpt-5.2",
+              route_id: "openai-official:gpt-5.2",
+              status: "verified",
+              verified_profile_count: 2,
+              verified_profiles: [
+                {
+                  profile_id: "text:openai_responses",
+                  capability: "text_chat",
+                  method_id: "openai_responses",
+                  request_mapper_id: "openai_responses_text",
+                  status: "ready",
+                },
+                {
+                  profile_id: "reasoning:openai_responses",
+                  capability: "reasoning",
+                  method_id: "openai_responses",
+                  request_mapper_id: "openai_responses_reasoning",
+                  status: "ready",
+                },
+              ],
+              capabilities: { model_type: "language_reasoning", model_type_label: "Language/reasoning model" },
+            },
+          ],
+        })}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="official"
+      />,
+    )
+
+    const modelIndex = html.indexOf(">gpt-5.2</button>")
+    const tag = html.slice(html.lastIndexOf("<button", modelIndex), html.indexOf("</button>", modelIndex))
+    expect(tag).toContain("Verified text chat + reasoning route")
+    expect(html).toContain("Methods: openai_responses")
+    expect(html).not.toContain("profiles")
   })
 
   it("renders available models as clickable copy targets", () => {

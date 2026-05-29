@@ -29,6 +29,8 @@ export function SettingsPageContent({
   onAddProvider,
   onProviderModelsUpdated,
   onRolesDataChange,
+  onDeleteRole,
+  onBeforeRoleTest,
 }: SettingsPageContentProps) {
   return (
     <div className="flex size-full flex-col bg-background">
@@ -63,6 +65,8 @@ export function SettingsPageContent({
                   saveStatus={rolesSaveStatus}
                   error={rolesError}
                   onChange={onRolesDataChange}
+                  onDeleteRole={onDeleteRole}
+                  onBeforeRoleTest={onBeforeRoleTest}
                 />
               </SettingsErrorBoundary>
             </div>

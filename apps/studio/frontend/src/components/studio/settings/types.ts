@@ -49,6 +49,8 @@ export interface SettingsPageContentProps {
   onAddProvider: (data: AddProviderFormSubmission) => Promise<void> | void
   onProviderModelsUpdated: (providerId: string, models: ModelInfo[]) => void
   onRolesDataChange: (next: RolesData) => void
+  onDeleteRole: (roleName: string) => void
+  onBeforeRoleTest: () => Promise<RolesData | null>
 }
 
 export type { ReactNode }

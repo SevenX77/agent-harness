@@ -70,13 +70,17 @@ export function useDebouncedRolesSave(
     (getSnapshot: () => RolesData | null) => {
       if (timerRef.current) clearTimeout(timerRef.current)
       setStatus("pending")
+      pendingSnapshotRef.current = getSnapshot
       if (inflightRef.current) {
-        pendingSnapshotRef.current = getSnapshot
         return
       }
       timerRef.current = setTimeout(() => {
         timerRef.current = null
-        inflightRef.current = performSave(getSnapshot)
+        const snapshot = pendingSnapshotRef.current
+        pendingSnapshotRef.current = null
+        if (snapshot) {
+          inflightRef.current = performSave(snapshot)
+        }
       }, delayMs)
     },
     [delayMs, performSave],

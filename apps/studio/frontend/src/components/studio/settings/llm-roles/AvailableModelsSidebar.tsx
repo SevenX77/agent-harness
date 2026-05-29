@@ -51,9 +51,11 @@ const availableModelsRenderStep = 24
 
 export function AvailableModelsSidebar({
   modelGroups,
+  pinnedModelGroups = [],
   onModelPointerDown,
 }: {
   modelGroups: ModelGroup[]
+  pinnedModelGroups?: ModelGroup[]
   onModelPointerDown?: (modelId: string, event: PointerEvent<HTMLButtonElement>) => void
 }) {
   const [query, setQuery] = useState("")
@@ -62,10 +64,14 @@ export function AvailableModelsSidebar({
   const pointerSelectedModelRef = useRef<string | null>(null)
   const selectedModelIdRef = useRef<string | null>(null)
   const selectedButtonRef = useRef<HTMLButtonElement | null>(null)
+  const pinnedGroups = useMemo(() => buildAvailableModelGroups(pinnedModelGroups), [pinnedModelGroups])
   const groups = useMemo(() => buildAvailableModelGroups(modelGroups), [modelGroups])
+  const filteredPinnedGroups = useMemo(() => filterAvailableModelGroups(pinnedGroups, query), [pinnedGroups, query])
   const filteredGroups = useMemo(() => filterAvailableModelGroups(groups, query), [groups, query])
-  const hasModels = filteredGroups.some((group) => group.models.length > 0)
-  const filteredModelCount = filteredGroups.reduce((total, group) => total + group.models.length, 0)
+  const hasPinnedModels = filteredPinnedGroups.some((group) => group.models.length > 0)
+  const hasModels = hasPinnedModels || filteredGroups.some((group) => group.models.length > 0)
+  const filteredModelCount = filteredPinnedGroups.reduce((total, group) => total + group.models.length, 0) +
+    filteredGroups.reduce((total, group) => total + group.models.length, 0)
   const {
     hasMore: hasMoreModels,
     sentinelRef: availableModelsSentinelRef,
@@ -170,6 +176,14 @@ export function AvailableModelsSidebar({
         <ScrollArea className="h-72 w-full min-w-0 max-w-full overflow-hidden lg:h-auto lg:min-h-0 lg:flex-1 [&_[data-slot=scroll-area-scrollbar]]:hidden [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:!min-w-0 [&_[data-slot=scroll-area-viewport]>div]:!w-full">
           {hasModels ? (
             <div className="w-full min-w-0 max-w-full space-y-4 overflow-hidden" data-lazy-list="available-models">
+              {hasPinnedModels ? (
+                <AvailableModelSections
+                  groups={filteredPinnedGroups}
+                  selectedModelId={selectedModelId}
+                  onClickSelect={handleModelClick}
+                  onPointerSelect={handleModelPointerDown}
+                />
+              ) : null}
               {visibleGroups.map((group) => (
                 <section key={group.section} className="w-full min-w-0 max-w-full space-y-2 overflow-hidden">
                   <div className="text-[11px] font-medium uppercase text-muted-foreground">{group.section}</div>
@@ -203,6 +217,39 @@ export function AvailableModelsSidebar({
         </ScrollArea>
       </div>
     </aside>
+  )
+}
+
+function AvailableModelSections({
+  groups,
+  selectedModelId,
+  onClickSelect,
+  onPointerSelect,
+}: {
+  groups: AvailableModelGroup[]
+  selectedModelId: string | null
+  onClickSelect: (modelId: string, event: MouseEvent<HTMLButtonElement>) => void
+  onPointerSelect: (modelId: string, event: PointerEvent<HTMLButtonElement>) => void
+}) {
+  return (
+    <>
+      {groups.map((group) => (
+        <section key={group.section} className="w-full min-w-0 max-w-full space-y-2 overflow-hidden">
+          <div className="text-[11px] font-medium uppercase text-muted-foreground">{group.section}</div>
+          <div className="w-full min-w-0 max-w-full space-y-2 overflow-hidden">
+            {group.models.map((model) => (
+              <AvailableModelCard
+                key={model.id}
+                model={model}
+                selected={selectedModelId === model.id}
+                onClickSelect={onClickSelect}
+                onPointerSelect={onPointerSelect}
+              />
+            ))}
+          </div>
+        </section>
+      ))}
+    </>
   )
 }
 
@@ -298,6 +345,12 @@ function ProviderLabelBadges({
           )}
         >
           <span>{provider.label}</span>
+          <span
+            data-provider-state-text="true"
+            className="text-[0.5625rem] font-medium opacity-80"
+          >
+            {providerStateLabel(provider.state)}
+          </span>
         </Tag>
       ))}
       {hiddenProviderCount > 0 ? (

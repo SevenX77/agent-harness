@@ -102,7 +102,14 @@ async function fulfillJson(route: Route, body: unknown) {
 
 async function mockSettingsBackend(
   page: Page,
-  overrides: { registry?: typeof registry; roles?: typeof roles } = {},
+  overrides: {
+    registry?: typeof registry
+    roles?: typeof roles
+    roleTest?: unknown
+    onRolesPut?: (payload: unknown) => void
+    onRoleTest?: (roleName: string) => void
+    onRoleDelete?: (roleName: string) => void
+  } = {},
 ) {
   const registryBody = overrides.registry ?? registry
   const rolesBody = overrides.roles ?? roles
@@ -123,13 +130,46 @@ async function mockSettingsBackend(
     await fulfillJson(route, registryBody)
   })
   await page.route('**/api/llm/roles**', async (route) => {
+    const request = route.request()
+    const pathname = new URL(request.url()).pathname
+    const testMatch = pathname.match(/\/api\/llm\/roles\/([^/]+)\/test$/)
+    if (request.method() === 'POST' && testMatch) {
+      const roleName = decodeURIComponent(testMatch[1])
+      overrides.onRoleTest?.(roleName)
+      await fulfillJson(route, overrides.roleTest ?? {
+        role_name: roleName,
+        status: 'ok',
+        warnings: [],
+        model_groups: [],
+      })
+      return
+    }
+    if (request.method() === 'PUT' && pathname === '/api/llm/roles') {
+      const payload = request.postDataJSON()
+      overrides.onRolesPut?.(payload)
+      await fulfillJson(route, payload)
+      return
+    }
+    const roleMatch = pathname.match(/\/api\/llm\/roles\/([^/]+)$/)
+    if (request.method() === 'DELETE' && roleMatch) {
+      const roleName = decodeURIComponent(roleMatch[1])
+      overrides.onRoleDelete?.(roleName)
+      const nextRoles = {
+        ...rolesBody,
+        roles: Object.fromEntries(
+          Object.entries(rolesBody.roles).filter(([currentRoleName]) => currentRoleName !== roleName),
+        ),
+      }
+      await fulfillJson(route, nextRoles)
+      return
+    }
     await fulfillJson(route, rolesBody)
   })
 }
 
 async function openLlmRoles(
   page: Page,
-  overrides: { registry?: typeof registry; roles?: typeof roles } = {},
+  overrides: Parameters<typeof mockSettingsBackend>[1] = {},
 ) {
   await mockSettingsBackend(page, overrides)
   await page.goto(`${baseURL}/#/`)
@@ -172,7 +212,31 @@ test.describe('LLM Roles actions menu', () => {
     await expect(editItem).toBeVisible()
   })
 
-  test('tests route-id providers through their owning endpoint credentials', async ({ page }) => {
+  test('confirms role deletion and calls the persisted delete endpoint', async ({ page }) => {
+    const deletedRoles: string[] = []
+    await openLlmRoles(page, {
+      onRoleDelete: (roleName) => deletedRoles.push(roleName),
+    })
+
+    const roleCard = page.locator('[data-role-name="Premium"]')
+    await roleCard.locator('[data-role-actions-trigger="true"]').click()
+    await page.getByRole('menuitem', { name: 'Delete' }).click()
+
+    await expect(page.locator('[data-delete-confirm-dialog="true"]')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Delete Premium?' })).toBeVisible()
+    await page.getByRole('button', { name: 'Cancel' }).click()
+    await expect.poll(() => deletedRoles).toEqual([])
+    await expect(roleCard).toBeVisible()
+
+    await roleCard.locator('[data-role-actions-trigger="true"]').click()
+    await page.getByRole('menuitem', { name: 'Delete' }).click()
+    await page.locator('[data-delete-confirm-action="true"]').click()
+
+    await expect.poll(() => deletedRoles).toEqual(['Premium'])
+    await expect(roleCard).toHaveCount(0)
+  })
+
+  test('saves role drafts before running persisted role test and renders provider diagnostics', async ({ page }) => {
     const routeId = 'deepseek-official:deepseek-v4-pro'
     const routeBackedRegistry: typeof registry = {
       ...registry,
@@ -268,53 +332,75 @@ test.describe('LLM Roles actions menu', () => {
         },
       },
     }
-    const endpointTests: string[] = []
-    const expectedEndpointTests = [
-      '/api/llm/endpoints/deepseek-official/models/test',
-      '/api/llm/endpoints/openrouter/models/test',
-    ]
-    let releaseModelTests: (() => void) | null = null
-    const allModelTestsStarted = new Promise<void>((resolve) => {
-      releaseModelTests = resolve
+    const requestOrder: string[] = []
+    await openLlmRoles(page, {
+      registry: routeBackedRegistry,
+      roles: routeBackedRoles,
+      onRolesPut: () => requestOrder.push('PUT /api/llm/roles'),
+      onRoleTest: (roleName) => requestOrder.push(`POST /api/llm/roles/${roleName}/test`),
+      roleTest: {
+        role_name: 'Analyst',
+        status: 'warning',
+        warnings: [{ message: 'Thinking is required but capability is unknown.' }],
+        model_groups: [{
+          canonical_id: 'deepseek-v4-pro',
+          display_name: 'DeepSeek V4 Pro',
+          provider_results: [
+            {
+              route_id: routeId,
+              provider_label: 'DeepSeek Official',
+              provider_ui_state: 'ready',
+              role_fit: 'using',
+              admission_decision: 'admit',
+              status: 'ok',
+              warnings: [],
+              retry_at: null,
+              message: null,
+              resolved_settings: {},
+            },
+            {
+              route_id: 'openrouter:deepseek-v4-pro',
+              provider_label: 'OpenRouter',
+              provider_ui_state: 'cooling_down',
+              role_fit: 'needs_test',
+              admission_decision: 'temporary_skip',
+              status: 'blocked',
+              warnings: [{ message: 'Thinking is required but capability is unknown.' }],
+              retry_at: '2026-12-31T00:00:00Z',
+              message: 'Retry after transient rate limit.',
+              resolved_settings: {},
+            },
+          ],
+        }],
+      },
     })
-
-    await page.route('**/api/llm/registry/endpoints', async (route) => {
-      await fulfillJson(route, routeBackedRegistry)
-    })
-    await page.route('**/api/llm/endpoints/*/models/test', async (route) => {
-      const pathname = new URL(route.request().url()).pathname
-      endpointTests.push(pathname)
-      if (endpointTests.length === expectedEndpointTests.length) {
-        releaseModelTests?.()
-      }
-      await allModelTestsStarted
-      await fulfillJson(route, {
-        registry: routeBackedRegistry,
-        results: [
-          {
-            model_id: pathname.includes('/openrouter/') ? 'deepseek/deepseek-v4-pro' : 'deepseek-chat',
-            status: 'ok',
-            route_id: pathname.includes('/openrouter/') ? 'openrouter:deepseek-v4-pro' : routeId,
-            latency_ms: 12,
-            message: null,
-          },
-        ],
-      })
-    })
-
-    await openLlmRoles(page, { registry: routeBackedRegistry, roles: routeBackedRoles })
 
     const roleCard = page.locator('[data-role-name="Analyst"]')
     await expect(roleCard.getByText('DeepSeek V4 Pro')).toBeVisible()
-    await expect(roleCard.getByLabel('Provider status Connected')).toBeVisible()
+    await expect(roleCard.getByLabel('Provider status Connected')).toHaveCount(0)
+    await expect(roleCard.locator('[data-role-route-status-light="true"][data-role-route-status="runnable"]')).toHaveCount(2)
 
+    await roleCard.getByRole('switch', { name: 'Model fallback for Analyst' }).click()
     await roleCard.getByRole('button', { name: 'Test' }).click()
 
-    await expect.poll(() => [...endpointTests].sort()).toEqual([...expectedEndpointTests].sort())
-    await expect(roleCard.getByLabel('Provider test status Connected')).toHaveCount(2)
+    await expect.poll(() => requestOrder).toEqual([
+      'PUT /api/llm/roles',
+      'POST /api/llm/roles/Analyst/test',
+    ])
+    const resultPanel = roleCard.locator('[data-role-test-result="true"]')
+    await expect(resultPanel).toBeVisible()
+    await expect(resultPanel.getByText('Needs Attention')).toBeVisible()
+    await expect(resultPanel.getByText('DeepSeek Official')).toBeVisible()
+    await expect(resultPanel.getByText('OpenRouter')).toBeVisible()
+    await expect(resultPanel.getByText('Cooling Down')).toBeVisible()
+    await expect(resultPanel.getByText('Needs Test')).toBeVisible()
+    await expect(resultPanel.getByText('Retry after transient rate limit.')).toBeVisible()
+    await expect(roleCard.getByText(routeId)).toHaveCount(0)
+    await expect(roleCard.locator('[data-role-route-status-light="true"][data-role-route-status="runnable"]')).toHaveCount(1)
+    await expect(roleCard.locator('[data-role-route-status-light="true"][data-role-route-status="blocked"]')).toHaveCount(1)
   })
 
-  test('does not keep the model group connected when every provider route test fails', async ({ page }) => {
+  test('does not show aggregate model group status when every provider route test fails', async ({ page }) => {
     const routeIds = ['openrouter:gpt-5-4-mini', 'openai-official:gpt-5-4-mini']
     const routeBackedRegistry: typeof registry = {
       ...registry,
@@ -459,44 +545,40 @@ test.describe('LLM Roles actions menu', () => {
       },
     }
 
-    await page.route('**/api/llm/registry/endpoints', async (route) => {
-      await fulfillJson(route, routeBackedRegistry)
-    })
-    await page.route('**/api/llm/endpoints/*/models/test', async (route) => {
-      const endpointId = new URL(route.request().url()).pathname.split('/').at(-3) ?? ''
-      await fulfillJson(route, {
-        registry: {
-          ...routeBackedRegistry,
-          provider_endpoints: {
-            ...routeBackedRegistry.provider_endpoints,
-            [endpointId]: {
-              ...routeBackedRegistry.provider_endpoints[endpointId],
-              status: 'failed',
-              last_test_message: 'Network error.',
-            },
-          },
-        },
-        results: [
-          {
-            model_id: endpointId === 'openrouter' ? 'openai/gpt-5.4-mini' : 'gpt-5.4-mini',
-            status: 'network_error',
-            route_id: endpointId === 'openrouter' ? routeIds[0] : routeIds[1],
-            latency_ms: null,
+    await openLlmRoles(page, {
+      registry: routeBackedRegistry,
+      roles: routeBackedRoles,
+      roleTest: {
+        role_name: 'Analyst',
+        status: 'failed',
+        warnings: [],
+        model_groups: [{
+          canonical_id: 'gpt-5-4-mini',
+          display_name: 'GPT 5.4 Mini',
+          provider_results: routeIds.map((routeId, index) => ({
+            route_id: routeId,
+            provider_label: index === 0 ? 'OpenRouter' : 'OpenAI Official',
+            provider_ui_state: 'ready',
+            role_fit: 'using',
+            admission_decision: 'admit',
+            status: 'failed',
+            warnings: [],
+            retry_at: null,
             message: 'Network error.',
-          },
-        ],
-      })
+            resolved_settings: {},
+          })),
+        }],
+      },
     })
-
-    await openLlmRoles(page, { registry: routeBackedRegistry, roles: routeBackedRoles })
 
     const roleCard = page.locator('[data-role-name="Analyst"]')
-    await expect(roleCard.getByLabel('Provider status Connected')).toBeVisible()
+    await expect(roleCard.getByLabel('Provider status Connected')).toHaveCount(0)
+    await expect(roleCard.locator('[data-role-route-status-light="true"][data-role-route-status="runnable"]')).toHaveCount(2)
 
     await roleCard.getByRole('button', { name: 'Test' }).click()
 
-    await expect(roleCard.getByLabel('Provider test status Network error')).toHaveCount(2)
-    await expect(roleCard.getByLabel('Provider status Failed')).toBeVisible()
+    await expect(roleCard.locator('[data-role-route-status-light="true"][data-role-route-status="blocked"]')).toHaveCount(2)
+    await expect(roleCard.getByLabel('Provider status Failed')).toHaveCount(0)
     await expect(roleCard.getByLabel('Provider status Connected')).toHaveCount(0)
   })
 
@@ -607,5 +689,128 @@ test.describe('LLM Roles actions menu', () => {
     await expect(roleCard.getByText('DeepSeek V4 Flash')).toBeVisible()
     await expect(roleCard.getByText('DeepSeek Official')).toBeVisible()
     await expect(preview).toHaveCount(0)
+  })
+
+  test('maps rich route state into a single role route status in role cards', async ({ page }) => {
+    const routeId = 'openrouter:gpt-5'
+    const retryAt = '2026-12-31T00:00:00Z'
+    const coolingRegistry: typeof registry = {
+      ...registry,
+      provider_endpoints: {
+        openrouter: {
+          endpoint_id: 'openrouter',
+          display_name: 'OpenRouter',
+          protocol: 'openai_compatible',
+          base_url: 'https://openrouter.ai/api/v1',
+          api_key: 'sk-openrouter',
+          status: 'verified',
+          last_test_at: '2026-05-24T00:00:00Z',
+          last_test_message: 'Connected.',
+          timeout_seconds: 120,
+          trust_env: false,
+          proxy_env: null,
+          metadata: {},
+        },
+      },
+      provider_routes: {
+        [routeId]: {
+          route_id: routeId,
+          endpoint_id: 'openrouter',
+          route_slug: 'gpt-5',
+          provider_model_id: 'openai/gpt-5',
+          canonical_id: 'gpt-5',
+          display_name: 'GPT 5',
+          status: 'verified',
+          capabilities: {},
+          metadata: {},
+        },
+      },
+      model_groups: [{
+        canonical_id: 'gpt-5',
+        display_name: 'GPT 5',
+        section_label: 'openai',
+        provider_models: [{
+          route_id: routeId,
+          endpoint_id: 'openrouter',
+          provider_label: 'OpenRouter',
+          provider_kind: 'third_party',
+          provider_model_id: 'openai/gpt-5',
+          ui_state: 'cooling_down',
+          ui_detail: 'Retry after transient rate limit.',
+          retry_at: retryAt,
+          reason_code: 'rate_limited',
+          capability_state: 'partial',
+          capabilities: {},
+        }],
+        status_summary: {
+          ready: 0,
+          untested: 0,
+          cooling_down: 1,
+          needs_setup: 0,
+          off: 0,
+        },
+        capability_summary: {
+          capability_known_count: 0,
+          thinking: 'unknown',
+          tools: 'unknown',
+          structured_output: 'unknown',
+          max_context_tokens: null,
+          max_output_tokens: null,
+        },
+      }],
+    }
+    const coolingRoles: typeof roles = {
+      ...roles,
+      models: {
+        'gpt-5': {
+          name: 'GPT 5',
+          providers: { [routeId]: 'openai/gpt-5' },
+        },
+      },
+      providers: {
+        [routeId]: {
+          name: 'OpenRouter',
+          type: 'openai_compatible',
+          endpoint_id: 'openrouter',
+        },
+      },
+      roles: {
+        Analyst: {
+          model_fallback: true,
+          active_model: 'gpt-5',
+          models: {
+            'gpt-5': {
+              providers: [routeId],
+              temperature: null,
+              max_tokens: null,
+            },
+          },
+          materialization_report: {
+            entries: [{
+              canonical_id: 'gpt-5',
+              route_id: routeId,
+              role_fit: 'needs_test',
+              warnings: [{ code: 'thinking_capability_unknown' }],
+            }],
+            warnings: [],
+            skipped_provider_details: [],
+          },
+        },
+      },
+    }
+    await openLlmRoles(page, { registry: coolingRegistry, roles: coolingRoles })
+
+    const roleCard = page.locator('[data-role-name="Analyst"]')
+    await expect(page.getByLabel('OpenRouter Cooling Down')).toBeVisible()
+    const blockedLight = roleCard.locator('[data-role-route-status-light="true"][data-role-route-status="blocked"]')
+    await expect(blockedLight).toBeVisible()
+    await expect(roleCard.getByText('Blocked', { exact: true })).toHaveCount(0)
+    await blockedLight.hover()
+    await expect(page.getByText(
+      'Blocked: Thinking is required but capability is unknown. Cooling Down: Retry after transient rate limit.',
+    )).toBeVisible()
+    await expect(roleCard.getByLabel('Provider state Cooling Down')).toHaveCount(0)
+    await expect(roleCard.getByLabel('Role fit Needs Test')).toHaveCount(0)
+    await expect(roleCard.getByRole('button', { name: 'Test Now' })).toHaveCount(0)
   })
 })

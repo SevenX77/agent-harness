@@ -141,3 +141,50 @@ Audit chain:
 - 主控 grep + pytest + curl 实证全程
 
 NTH (defer to PR-4 周期): jobs.analyze.name display name 断言 / step display name 断言 / helper fixture 化.
+
+## Round 30 P1/P2 External Quality Tools Onboarding — PR-4 Scorecard + SBOM + License + Dependabot
+
+PR-4 已 ship (本 PR), Round 30 最后一个外部质量工具 PR (4 子项).
+
+PR-4 内容:
+
+**§5.1 Scorecard workflow** — `.github/workflows/scorecard.yml` (32 行)
+- on: push.branches[main] + schedule cron `"0 7 * * 1"` (周一 07:00, 跟 PR-3 CodeQL 06:00 错开 1 小时避 GitHub Actions runner 争用)
+- workflow-level `permissions: read-all` (字符串非 dict)
+- jobs.analysis 三 permission (security-events:write + id-token:write + contents:read)
+- steps: actions/checkout@v4 (`persist-credentials: false`) → ossf/scorecard-action@v2.4.3 (`results_file: results.sarif` + `results_format: sarif` + `publish_results: true`) → github/codeql-action/upload-sarif@v4
+- `publish_results: true` 完整性 5 项约束 (workflow 不含 env/defaults / read-all string / 只 jobs.analysis 用 id-token:write / steps 只用 OSSF 允许列表 actions) 全 PASS, a3 物理 + test 双锁实证
+
+**§5.2 SBOM 生成** — `scripts/generate_sbom.sh` (4 行, chmod +x)
+- `#!/usr/bin/env bash` + `set -euo pipefail`
+- `uvx cyclonedx-bom -o sbom.json` 生成 CycloneDX JSON SBOM (Python 生态主选, container/image 场景留 syft)
+
+**§5.3 License check** — `scripts/check_licenses.sh` (5 行, chmod +x)
+- `#!/usr/bin/env bash` + `set -euo pipefail`
+- `uvx pip-licenses --format=markdown --with-urls > LICENSES.md` 生成 markdown 风险清单
+- `uvx pip-licenses --fail-on="GPL;AGPL"` GPL/AGPL 依赖 hard-fail (report-only 初期建议先列依赖路径再决定切硬门)
+
+**§5.4 Dependabot** — `.github/dependabot.yml` 现状保护 (不动)
+- 现有 pip + github-actions weekly + open-pull-requests-limit: 5 + pip group "python-dependencies" 全 `*` 已合规, 主控判定保护现状
+- security updates 不在 yaml: **主控 step 0 亲跑 (2026-05-29)** `gh api -X PUT /repos/SevenX77/agent-harness/vulnerability-alerts` (204) + `gh api -X PUT /repos/SevenX77/agent-harness/automated-security-fixes` (204), verify `{"enabled":true,"paused":false}` ✓
+
+Action 版本 verify (PM 2026-05-29): `ossf/scorecard-action` latest stable = v2.4.3 (2025-09-30, non-prerelease), 跟 spec lock 完全对齐 (不需 sync, 跟 PR-1 v5→v6 / PR-2 v4→v8 不同).
+
+PR-4 是 report-only 接入: Scorecard 评分 + SBOM 上传 artifact + License 列风险清单, CI 不阻 merge. 等首轮基线稳定后再切硬门.
+
+YAML 工程细节: scorecard.yml 用 `"on":` 引号避 PyYAML 1.1 boolean 解析 (跟 PR-3 codeql.yml 同根 quirk 修正).
+
+Verification evidence from the Round 30 PR-4 run:
+- pytest test_round30_pr4_scorecard_sbom_config.py: 4 passed (35 assertion, 含 a3 audit 补 MF-1 workflow 完整性 negative assert + SF-1 license set -euo pipefail + NTH-1 shebang)
+- 4 contract gate: 38 passed (74.47s)
+- 黄金原则零碰 物理实证: src 仅 4 untracked 新文件 (scorecard.yml + 2 script + test py), 零 modified 触及 65 API / 92 errors / 33 events / 53 H2 / 14 FROZEN docs / R28 5 机制
+
+Audit chain:
+- a3 PM 替身 audit 两轮 (tests-first 1 must-fix + 1 should-fix + 1 NTH-shebang / src 0 must-fix), 必修全 a1 接受落地
+- 主控 grep + pytest + curl + gh api 实证全程 (含 step 0 repo settings)
+
+NTH defer (round-30 汇总报告周期): test 文件名 sync tasks _license_config.py / Dependabot test docstring "characterization 锁基线" / design "on" 引号注释.
+
+## Round 30 P1/P2 External Quality Tools Onboarding — 全 4 PR 完成
+
+至此 Round 30 P1/P2 4 个外部质量工具全部接入完成 (PR-1 Codecov + PR-2 SonarCloud + PR-3 CodeQL + PR-4 Scorecard/SBOM/License/Dependabot), 全 report-only 模式, 不阻 merge. 主控起 Round 30 汇总报告 forward PM, 按 design §6 Q7 报分模板列 4 工具首次基线 + 缺口 + 补齐路径.

@@ -346,7 +346,7 @@ def _persistent_payload(
     return payload
 
 
-def _stop_heartbeat(heartbeat: "_HeartbeatPulser") -> None:
+def _stop_heartbeat(heartbeat: _HeartbeatPulser) -> None:
     try:
         heartbeat.stop()
         heartbeat.join(timeout=1.0)
@@ -618,8 +618,6 @@ class GraphAgentHarness:
             unattended=bool(unattended),
         )
         from graph_agent.callbacks.events import (
-            InternalErrorEvent,
-            RunEndedEvent,
             RunStartedEvent,
         )
 
@@ -735,7 +733,7 @@ class GraphAgentHarness:
         config: dict[str, Any],
         active_callbacks: list[Callback],
         run_context: RunContext,
-        heartbeat: "_HeartbeatPulser",
+        heartbeat: _HeartbeatPulser,
     ) -> None:
         phase_executor = PhaseExecutor(
             active_callbacks,
@@ -778,7 +776,7 @@ class GraphAgentHarness:
             storage_manager,
             effective_trace_dir,
         )
-        return cast(WorkflowState, result)
+        return result
 
     def _emit_interrupted_if_awaiting_input(
         self,

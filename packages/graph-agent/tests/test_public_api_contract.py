@@ -11,7 +11,6 @@ import pytest
 import yaml
 from pydantic import BaseModel
 
-
 EXEMPTIONS_PATH = Path(__file__).with_name("contract-exemptions.yaml")
 
 EXPECTED_CONTRACT_SYMBOLS: dict[str, str] = {

@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Any
 
 import yaml
-
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXEMPTIONS_PATH = Path(__file__).with_name("contract-exemptions.yaml")

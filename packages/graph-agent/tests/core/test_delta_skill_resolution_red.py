@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
+
 from graph_agent.core import graph_assembler, loader
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import SkillLoadError
@@ -13,7 +15,6 @@ from graph_agent.core.loader import CompiledSkill, PhaseDocument, SkillLoader
 from graph_agent.core.manifest import GraphManifest, SubagentSpec, SubgraphNodeAST
 from graph_agent.core.runner import run_skill
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
-from pydantic import ValidationError
 
 
 class DictSkillResolver:

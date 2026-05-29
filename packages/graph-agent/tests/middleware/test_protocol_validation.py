@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from graph_agent.core.schema_engine import SchemaEngine, SchemaObject
 from graph_agent.core.state import (
     BusinessData,

@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 from types import SimpleNamespace
 
-import graph_agent.cognitive.prompt as prompt_module
 import pytest
+
+import graph_agent.cognitive.prompt as prompt_module
 from graph_agent.cognitive.prompt import (
     apply_cognitive_template,
     apply_v030_cognitive_template,

@@ -7,10 +7,11 @@ extraction into a stand-alone collaborator is behaviour-preserving.
 
 from __future__ import annotations
 
+from langgraph.graph import END
+
 from graph_agent.core.retry_router import RetryRouter
 from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
 from graph_agent.core.types import Phase
-from langgraph.graph import END
 
 
 def _make_phase(name: str, *, retry_target: str | None = None) -> Phase:

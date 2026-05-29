@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import inspect
 
-import graph_agent
-from graph_agent.core._predict_internal.strategy import BaseMockStrategy
 from graph_agent_gateway.gateway_chat_model import GatewayChatModel
 from graph_agent_gateway.llm_config import (
     ModelEntry,
@@ -13,6 +11,9 @@ from graph_agent_gateway.llm_config import (
     RolesData,
 )
 from graph_agent_gateway.resolver import ModelResolver
+
+import graph_agent
+from graph_agent.core._predict_internal.strategy import BaseMockStrategy
 
 EXPECTED_TOP_LEVEL_EXPORTS = [
     "run_skill",

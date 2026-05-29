@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+
 from graph_agent.core._predict_internal.hash import prompt_hash, schema_hash
 
 

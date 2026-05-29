@@ -4,15 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from graph_agent.core.io_manager import IODef, IOManager
-from graph_agent.core.schema_engine import SchemaEngine, SchemaObject, ValidationResult
-from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
-from graph_agent.middleware.cognitive_flow import CognitiveFlowMiddleware
 from langchain_core.messages import ToolMessage
 from langgraph.graph import END
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from pydantic import BaseModel, Field
+
+from graph_agent.core.io_manager import IODef, IOManager
+from graph_agent.core.schema_engine import SchemaEngine, SchemaObject, ValidationResult
+from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
+from graph_agent.middleware.cognitive_flow import CognitiveFlowMiddleware
 
 VALID_BUSINESS_MD = """## item-1
 - title: Scene plan
@@ -224,6 +225,7 @@ class TestFinishTask:
 
     def test_finish_without_schema_raises_phase_2_a1(self) -> None:
         import pytest
+
         from graph_agent.middleware.cognitive_flow import CognitiveFlowError
 
         middleware = CognitiveFlowMiddleware(IOManager([]), phase_name="segment")

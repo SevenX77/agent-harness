@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from langchain_core.messages import AIMessage
+
 from graph_agent.callbacks.events import (
     LLMCallEvent,
     PhaseEndEvent,
@@ -14,7 +16,6 @@ from graph_agent.callbacks.events import (
 from graph_agent.callbacks.tracing import TracingCallback
 from graph_agent.core.exceptions import GraphAgentFatalError
 from graph_agent.core.runner import _run_v030_skill_dict, run_skill
-from langchain_core.messages import AIMessage
 
 
 class SpyCallback:
@@ -30,7 +31,7 @@ class V030ToolCallingChatModel:
         self.bound_tool_names: list[str] = []
         self.invocations: int = 0
 
-    def bind_tools(self, tools: list[Any]) -> "V030ToolCallingChatModel":
+    def bind_tools(self, tools: list[Any]) -> V030ToolCallingChatModel:
         self.bound_tool_names = [str(getattr(tool, "name", "")) for tool in tools]
         return self
 
@@ -64,7 +65,7 @@ class V030NoToolChatModel:
     def __init__(self) -> None:
         self.invocations: int = 0
 
-    def bind_tools(self, tools: list[Any]) -> "V030NoToolChatModel":
+    def bind_tools(self, tools: list[Any]) -> V030NoToolChatModel:
         del tools
         return self
 
@@ -75,7 +76,7 @@ class V030NoToolChatModel:
 
 
 class V030UnknownToolChatModel:
-    def bind_tools(self, tools: list[Any]) -> "V030UnknownToolChatModel":
+    def bind_tools(self, tools: list[Any]) -> V030UnknownToolChatModel:
         del tools
         return self
 

@@ -17,11 +17,12 @@ from pathlib import Path
 
 import pytest
 
+from graph_agent.core.skill_resolver_protocol import SkillResolutionError, validate_skill_id
+
 # Import-time sanity: ensure the MVP-3 middleware package is importable
 # before any test runs. The actual ordering assertions live in the
 # adjacent ``middleware/test_chain_topology.py`` test file.
 from graph_agent.middleware import DEFAULT_MIDDLEWARE_ORDER  # noqa: F401
-from graph_agent.core.skill_resolver_protocol import SkillResolutionError, validate_skill_id
 
 
 class MockSkillResolver:

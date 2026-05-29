@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
 import graph_agent.core.graph_assembler as graph_assembler_module
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import GraphAgentFatalError

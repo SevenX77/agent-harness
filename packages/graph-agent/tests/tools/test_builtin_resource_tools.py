@@ -4,17 +4,18 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from langchain_core.messages import AIMessage
+
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
 from graph_agent.core.graph_assembler import assemble_graph
-from langchain_core.messages import AIMessage
 
 
 class CaptureToolsChatModel:
     def __init__(self) -> None:
         self.tools_by_name: dict[str, Any] = {}
 
-    def bind_tools(self, tools: list[Any]) -> "CaptureToolsChatModel":
+    def bind_tools(self, tools: list[Any]) -> CaptureToolsChatModel:
         self.tools_by_name = {tool.name: tool for tool in tools}
         return self
 

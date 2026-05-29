@@ -20,11 +20,11 @@ from graph_agent.callbacks.events import (
     PhaseEndEvent,
     PhaseStartEvent,
     PromptCapturedEvent,
+    RetryEvent,
     RunStartedEvent,
     ToolCallEvent,
     ValidationFailEvent,
     WorkingMemoryUpdateEvent,
-    RetryEvent,
 )
 
 

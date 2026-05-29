@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from graph_agent.core.loader import CompiledSkill, SkillLoader
 from graph_agent.core.manifest import AgentNodeAST, LogicNodeAST
 

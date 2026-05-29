@@ -20,6 +20,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from graph_agent.bootstrap import Bootstrap
 from graph_agent.core import runner as runner_module
 

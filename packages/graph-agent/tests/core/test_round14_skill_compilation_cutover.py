@@ -4,11 +4,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import TypeAdapter, ValidationError
+
 from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.graph_serializer import serialize_graph
 from graph_agent.core.loader import SkillLoader
 from graph_agent.core.manifest import GraphManifest, LogicNodeAST, PhaseAST, PhaseIOSchema
-from pydantic import TypeAdapter, ValidationError
 
 
 class DictSkillResolver:

@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PACKAGE_ROOT = REPO_ROOT / "packages/graph-agent"
 MATRIX_PATH = REPO_ROOT / "docs/engine/feature-compliance-checklist.md"

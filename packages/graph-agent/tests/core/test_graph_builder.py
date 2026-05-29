@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from langchain_core.runnables import RunnableConfig
+
 from graph_agent.core.graph_builder import GraphBuilder
 from graph_agent.core.retry_router import RetryRouter
 from graph_agent.core.state import WorkflowState
 from graph_agent.core.types import Phase
-from langchain_core.runnables import RunnableConfig
 
 
 def _noop_node(phase: Phase) -> Callable[..., WorkflowState]:
@@ -125,6 +126,7 @@ class TestExecutorFromConfig:
 
     def test_missing_config_raises_runtime_error(self):
         import pytest
+
         from graph_agent.core.graph_builder import _executor_from_config
 
         with pytest.raises(RuntimeError, match="_phase_executor"):
@@ -132,6 +134,7 @@ class TestExecutorFromConfig:
 
     def test_config_without_configurable_key_raises(self):
         import pytest
+
         from graph_agent.core.graph_builder import _executor_from_config
 
         with pytest.raises(RuntimeError, match="_phase_executor"):
@@ -139,6 +142,7 @@ class TestExecutorFromConfig:
 
     def test_configurable_missing_phase_executor_raises(self):
         import pytest
+
         from graph_agent.core.graph_builder import _executor_from_config
 
         with pytest.raises(RuntimeError, match="_phase_executor"):

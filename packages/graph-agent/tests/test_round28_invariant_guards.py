@@ -13,7 +13,6 @@ from graph_agent.core.exceptions import GraphAgentFatalError
 from graph_agent.core.module_sandbox import ModuleSandbox
 from graph_agent.runtime.state import BlackboardState, blackboard_data_merge
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FEATURES_PATH = REPO_ROOT / "packages/graph-agent/spec/features.yaml"
 

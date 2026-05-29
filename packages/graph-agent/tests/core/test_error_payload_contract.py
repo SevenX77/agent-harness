@@ -17,14 +17,13 @@ from graph_agent.core.loader import SkillLoader
 from graph_agent.runtime.state_mapper import StateMapper
 from graph_agent.tools.builtin.read_reference import read_declared_reference
 
-
 REPO_ROOT = Path(__file__).resolve().parents[4]
 ERROR_SPEC = REPO_ROOT / "docs" / "engine" / "skill-spec" / "11-error-code-spec.md"
 
 
 def _error_payload_model() -> Any:
     exceptions = importlib.import_module("graph_agent.core.exceptions")
-    return getattr(exceptions, "ErrorPayload")
+    return exceptions.ErrorPayload
 
 
 def _error_registry() -> dict[str, Any]:

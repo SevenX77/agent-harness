@@ -4,6 +4,8 @@ import json
 import logging
 from pathlib import Path
 
+from pydantic import TypeAdapter
+
 from graph_agent.callbacks.base import Callback
 from graph_agent.callbacks.events import (
     AmbiguityLoggedEvent,
@@ -14,7 +16,6 @@ from graph_agent.callbacks.events import (
 )
 from graph_agent.callbacks.tracing import TracingCallback
 from graph_agent.cognitive.ambiguity import log_ambiguity
-from pydantic import TypeAdapter
 
 
 class Collector:

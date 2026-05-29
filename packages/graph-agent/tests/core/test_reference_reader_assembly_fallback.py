@@ -4,17 +4,18 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from langchain_core.messages import AIMessage
+
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError, make_error_payload
 from graph_agent.core.graph_assembler import assemble_graph
-from langchain_core.messages import AIMessage
 
 
 class CapturePromptChatModel:
     def __init__(self) -> None:
         self.system_prompts: list[str] = []
 
-    def bind_tools(self, tools: list[Any]) -> "CapturePromptChatModel":
+    def bind_tools(self, tools: list[Any]) -> CapturePromptChatModel:
         del tools
         return self
 

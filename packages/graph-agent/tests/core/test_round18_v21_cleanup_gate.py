@@ -9,7 +9,6 @@ from typing import Any
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.graph_assembler import assemble_graph
 
-
 REPO_ROOT = Path(__file__).resolve().parents[4]
 GRAPH_AGENT_ROOT = REPO_ROOT / "packages" / "graph-agent"
 SCAN_ROOTS = (

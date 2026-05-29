@@ -104,11 +104,11 @@ Test 文件位置规则：Round 30 config characterization tests 统一放在 `p
   - [ ] Verify action version：跑 `curl https://api.github.com/repos/SonarSource/sonarqube-scan-action/releases | jq '.[0].tag_name'`，确认 action major 后再 lock 进 test 断言。
   - [ ] 新增 `packages/graph-agent/tests/test_round30_pr2_sonarcloud_config.py`，检查 `sonar-project.properties` 必含 organization/projectKey/sources/tests/coverage reportPaths。
   - [ ] 测试断言 `.github/workflows/ci.yml` 含 coverage artifact upload/download 与 `sonar-scan` job。
-  - [ ] 测试断言 `sonar-scan` 使用 `SonarSource/sonarqube-scan-action@v4`、`fetch-depth: 0`、`SONAR_TOKEN`。
+  - [ ] 测试断言 `sonar-scan` 使用 `SonarSource/sonarqube-scan-action@v8`、`fetch-depth: 0`、`SONAR_TOKEN`。
   - [ ] 跑 targeted pytest，必须红灯 fail，因为 stage 4 尚未实施。
 
 - [ ] Stage 4 src/config 实施（a1 写）
-  - [ ] D-2 verify：跑 `curl https://api.github.com/repos/SonarSource/sonarqube-scan-action/releases | jq '.[0].tag_name'`，确认 v4 latest stable；若不是，按 design §4.0 调整。
+  - [ ] D-2 verify：跑 `curl https://api.github.com/repos/SonarSource/sonarqube-scan-action/releases | jq '.[0].tag_name'`，确认 v8 latest stable；若不是，按 design §4.0 调整。
   - [ ] 新增 `sonar-project.properties`，按 design §3.3。
   - [ ] 改 `.github/workflows/ci.yml`，backend job 上传 `coverage-backend.xml` artifact。
   - [ ] 改 `.github/workflows/ci.yml`，graph-agent matrix 上传 `coverage-graph-agent.xml` artifact。

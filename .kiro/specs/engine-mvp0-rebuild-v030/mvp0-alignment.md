@@ -83,3 +83,31 @@ Audit chain:
 - a2 思路复核 (cancel 早, design rev2 已 OK)
 - a3 PM 替身 audit 三轮 (design rev2 7 catch / tasks rev2 6+2 catch / PR-1 src 偏移 3 should-fix), 全 a1 接受落地
 - 主控 grep + pytest + curl 实证全程
+
+## Round 30 P1/P2 External Quality Tools Onboarding — PR-2 SonarCloud
+
+PR-2 SonarCloud 已 ship (本 PR), 接 PR-1 Codecov 后第 2 个外部质量工具.
+
+PR-2 内容:
+- 新增 `sonar-project.properties` (仓库根, 12 行) — 含 `sonar.organization=sevenx77` + `sonar.projectKey=SevenX77_agent-harness` + `sonar.host.url=https://sonarcloud.io` + `sonar.sources` + `sonar.tests` + `sonar.python.version=3.11,3.12,3.13` + `sonar.python.coverage.reportPaths=coverage-backend.xml,coverage-graph-agent.xml` + `sonar.exclusions` + `sonar.test.exclusions`
+- 改 `.github/workflows/ci.yml` (+32 行, 3 处):
+  - `quality-gates` job 加 `actions/upload-artifact@v4` upload backend coverage XML 作 artifact `coverage-backend`
+  - `graph-agent-tests` matrix job 加 `actions/upload-artifact@v4` upload graph-agent coverage XML, name `coverage-graph-agent-py${{ matrix.python-version }}` (按 matrix 区分)
+  - 新增 `sonar-scan` job, `needs: [quality-gates, graph-agent-tests]`, 用 `actions/checkout@v4` (`fetch-depth: 0`) + `actions/download-artifact@v4` (`pattern: coverage-*` + `merge-multiple: true`) + `SonarSource/sonarqube-scan-action@v8` (env `SONAR_TOKEN` + `SONAR_HOST_URL`)
+
+Action 版本 verify (PM 2026-05-29): `sonarqube-scan-action` latest stable 跳 v4→v8 (v8.0.0 唯一 breaking 是 `skipSignatureVerification` 默认 true→false 安全增强, yaml usage 兼容 v4), 主控 + a1 双 curl verify 后锁 @v8.
+
+PR-2 是 report-only 接入: CI 不阻 merge, SonarCloud dashboard 使用 "Sonar Way" 默认 quality gate. 等 Codecov M1 真实基线与 Sonar "Coverage on new code >= 80%" 目标一致后, 再由后续 PR 切硬门.
+
+stage 2.5 前置 (PM 在 ship 后做): sonarcloud.io 控制台建 organization `sevenx77` + project `SevenX77_agent-harness` + 绑 `SONAR_TOKEN` GitHub secret. SonarQube Scan action 只跑扫描, 不自动建 Cloud project.
+
+Verification evidence from the Round 30 PR-2 run:
+- pytest test_round30_pr2_sonarcloud_config.py: 2 passed (21 assertion, 含 a3 audit 补的 SF-1/SF-2/SF-3 6 条 must-fix)
+- 4 contract gate: 38 passed
+- 黄金原则零碰 物理实证: `git diff --stat HEAD -- src/ docs/engine/ contract-gate tests/ spec/` empty diff → 65 API / 92 errors / 33 events / 53 H2 / 14 FROZEN docs / R28 5 机制 全静
+
+Audit chain:
+- a3 PM 替身 audit 两轮 (tests-first 3 must-fix / src 0 must-fix), 必修全 a1 接受落地
+- 主控 grep + pytest + curl 实证全程
+
+NTH (defer 到 PR-3 周期): `sonar.exclusions` / `sonar.test.exclusions` 在 properties 落地但 test 没断言锁; 后续 PR 改 properties 时漏改 exclusions test 仍绿.

@@ -114,20 +114,7 @@ def _is_object_schema(schema: dict[str, Any]) -> bool:
 
 def _normalise_type(raw_type: object) -> str | None:
     if isinstance(raw_type, str):
-        lowered = raw_type.lower()
-        if lowered in {"object", "array", "string", "integer", "number", "boolean"}:
-            return lowered
-        if lowered in {"dict", "map"}:
-            return "object"
-        if lowered in {"list", "tuple"}:
-            return "array"
-        if lowered in {"float", "double"}:
-            return "number"
-        if lowered in {"int"}:
-            return "integer"
-        if lowered in {"bool"}:
-            return "boolean"
-        return lowered
+        return _normalise_type_string(raw_type)
 
     if isinstance(raw_type, list):
         for item in raw_type:
@@ -135,6 +122,21 @@ def _normalise_type(raw_type: object) -> str | None:
             if parsed is not None and parsed != "null":
                 return parsed
     return None
+
+
+def _normalise_type_string(raw_type: str) -> str:
+    lowered = raw_type.lower()
+    aliases = {
+        "dict": "object",
+        "map": "object",
+        "list": "array",
+        "tuple": "array",
+        "float": "number",
+        "double": "number",
+        "int": "integer",
+        "bool": "boolean",
+    }
+    return aliases.get(lowered, lowered)
 
 
 def _mock_string(field_name: str | None, *, unknown: bool = False) -> str:

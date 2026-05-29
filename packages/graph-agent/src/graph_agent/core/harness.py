@@ -305,6 +305,111 @@ def _clone_state(state: WorkflowState) -> WorkflowState:
     return WorkflowState(data=cloned_data, flow=cloned_flow, messages=cloned_msgs)
 
 
+def _effective_trace_dir(
+    trace_dir: Path | None,
+    initial_context: dict[str, Any],
+) -> Path | None:
+    if trace_dir is not None:
+        return trace_dir
+    output_dir = initial_context.get("output_dir")
+    return Path(output_dir) if output_dir else None
+
+
+def _preflight_persistent_payload(
+    persistent_runtime_inputs: dict[str, Any] | None,
+    persistent_storage_config: dict[str, Any] | None,
+) -> None:
+    if persistent_runtime_inputs is None and persistent_storage_config is None:
+        return
+    import json
+
+    payload = _persistent_payload(persistent_runtime_inputs, persistent_storage_config)
+    try:
+        json.dumps(payload)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "persistent_runtime_inputs / persistent_storage_config must be JSON-serialisable "
+            "so resume() can read them back from the LangGraph checkpointer. Pre-flight "
+            f"json.dumps failed: {exc}"
+        ) from exc
+
+
+def _persistent_payload(
+    persistent_runtime_inputs: dict[str, Any] | None,
+    persistent_storage_config: dict[str, Any] | None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    if persistent_runtime_inputs is not None:
+        payload["runtime_inputs"] = persistent_runtime_inputs
+    if persistent_storage_config is not None:
+        payload["storage_config"] = persistent_storage_config
+    return payload
+
+
+def _stop_heartbeat(heartbeat: "_HeartbeatPulser") -> None:
+    try:
+        heartbeat.stop()
+        heartbeat.join(timeout=1.0)
+    except Exception:  # noqa: BLE001
+        logger.warning("[Harness] heartbeat stop failed", exc_info=True)
+
+
+def _request_human_input_tool_call_id(state: WorkflowState) -> str:
+    for msg in reversed(state["messages"]):
+        tool_call_id = _request_human_input_id_from_message(msg)
+        if tool_call_id:
+            return tool_call_id
+    return ""
+
+
+def _request_human_input_id_from_message(message: Any) -> str:
+    if not hasattr(message, "tool_calls") or not message.tool_calls:
+        return ""
+    for tool_call in message.tool_calls:
+        if tool_call.get("name") == "request_human_input":
+            return str(tool_call.get("id") or "")
+    return ""
+
+
+def _restored_runtime_inputs(
+    state: WorkflowState,
+    runtime_inputs_map: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if runtime_inputs_map:
+        return dict(runtime_inputs_map)
+    persisted = state["flow"].persistent_runtime_inputs
+    return dict(persisted) if isinstance(persisted, dict) else {}
+
+
+def _restored_storage_manager(state: WorkflowState, inherited_run_id: str) -> Any | None:
+    persisted_sc = state["flow"].persistent_storage_config
+    if not isinstance(persisted_sc, dict) or not persisted_sc:
+        return None
+    sc_kwargs = _resume_storage_kwargs(persisted_sc, inherited_run_id)
+    try:
+        from graph_agent.io.storage import StorageManager
+
+        return StorageManager(**sc_kwargs)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[Harness] resume could not rebuild StorageManager from "
+            "_persistent_storage_config=%r: %s; continuing with "
+            "storage_manager=None (compaction sidecars will no-op)",
+            sc_kwargs,
+            exc,
+        )
+        return None
+
+
+def _resume_storage_kwargs(
+    persisted_storage_config: dict[str, Any],
+    inherited_run_id: str,
+) -> dict[str, Any]:
+    sc_kwargs = dict(persisted_storage_config)
+    sc_kwargs["run_id"] = inherited_run_id or str(sc_kwargs.get("run_id") or "") or "unknown"
+    return sc_kwargs
+
+
 # ---------------------------------------------------------------------------
 # GraphAgentHarness
 # ---------------------------------------------------------------------------
@@ -484,91 +589,24 @@ class GraphAgentHarness:
         effective_runtime_inputs.update(runtime_inputs)
         if initial_context is None:
             initial_context = self._build_context_from_io(effective_runtime_inputs)
-
-        effective_trace_dir = trace_dir
-        if effective_trace_dir is None and initial_context.get("output_dir"):
-            effective_trace_dir = Path(initial_context["output_dir"])
-
-        initial_state = WorkflowState(
-            data=BusinessData.model_validate(dict(initial_context)),
-            flow=FrameworkState(metrics={"total_input_tokens": 0, "total_output_tokens": 0}),
-            messages=[],
-        )
-
-        if persistent_runtime_inputs is not None or persistent_storage_config is not None:
-            import json
-
-            payload: dict[str, Any] = {}
-            if persistent_runtime_inputs is not None:
-                payload["runtime_inputs"] = persistent_runtime_inputs
-            if persistent_storage_config is not None:
-                payload["storage_config"] = persistent_storage_config
-            try:
-                json.dumps(payload)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    "persistent_runtime_inputs / persistent_storage_config "
-                    "must be JSON-serialisable so resume() can read them "
-                    "back from the LangGraph checkpointer. Pre-flight "
-                    f"json.dumps failed: {exc}"
-                ) from exc
-
+        effective_trace_dir = _effective_trace_dir(trace_dir, initial_context)
+        _preflight_persistent_payload(persistent_runtime_inputs, persistent_storage_config)
         tid = thread_id or str(uuid.uuid4())
-        # Tier 1 Commit A: run_id identifies a single harness.run invocation.
-        # thread_id may be reused across multiple runs (resume scenarios);
-        # run_id is always fresh so Studio can distinguish each execution.
         run_id = uuid.uuid4().hex[:12]
         is_resume = thread_id is not None
         run_start_monotonic = time.monotonic()
-        initial_state = StateManager.update_framework(
-            initial_state,
-            thread_id=tid,
-            run_id=run_id,
-            unattended=bool(unattended),
+
+        initial_state = self._initial_run_state(
+            initial_context,
+            tid,
+            run_id,
+            unattended,
+            persistent_runtime_inputs,
+            persistent_storage_config,
         )
-
-        # D-post session: stash the opt-in persistent knobs into the
-        # workflow state so the LangGraph checkpointer persists them and
-        # resume() can rebuild runtime_inputs / storage_manager from them.
-        if persistent_runtime_inputs is not None:
-            initial_state = StateManager.update_framework(
-                initial_state,
-                persistent_runtime_inputs=dict(persistent_runtime_inputs),
-            )
-        if persistent_storage_config is not None:
-            effective_storage_config = dict(persistent_storage_config)
-            # Auto-fill run_id so the caller doesn't have to know the
-            # freshly-minted UUID up front. ``skill_id`` is filled from
-            # the harness's loaded skill if the caller omitted it.
-            effective_storage_config.setdefault("run_id", run_id)
-            if "skill_id" not in effective_storage_config:
-                derived_skill_id = getattr(self, "_skill_id", "") or "unknown"
-                effective_storage_config["skill_id"] = derived_skill_id
-            initial_state = StateManager.update_framework(
-                initial_state,
-                persistent_storage_config=effective_storage_config,
-            )
-
         verify_state_invariants(initial_state)
-
-        config: dict[str, Any] = {
-            "recursion_limit": self._graph_builder.recursion_limit(),
-            "configurable": {"thread_id": tid},
-        }
-
-        # D-7.2 Phase B: build per-run RunContext + PhaseExecutor as
-        # locals. No harness-instance state carries run-specific data —
-        # concurrent ``run()`` calls on the same harness instance now
-        # work because the executor lives on this call's stack and
-        # propagates through LangGraph config["configurable"].
-        active_callbacks = list(self.callbacks) if hasattr(self, "callbacks") else []
-        # Merge extra_callbacks (from subgraph parent forwarding) without
-        # mutating self.callbacks — concurrency-safe because the merged
-        # list is local to this invocation.
-        if extra_callbacks:
-            for cb in extra_callbacks:
-                if cb not in active_callbacks:
-                    active_callbacks.append(cb)
+        config = self._graph_config(tid)
+        active_callbacks = self._active_callbacks(extra_callbacks)
         run_context = RunContext(
             thread_id=tid,
             run_id=run_id,
@@ -579,8 +617,6 @@ class GraphAgentHarness:
             callbacks=tuple(active_callbacks),
             unattended=bool(unattended),
         )
-
-        # Tier 1 Commit A — T-B1 RunStartedEvent
         from graph_agent.callbacks.events import (
             InternalErrorEvent,
             RunEndedEvent,
@@ -597,13 +633,110 @@ class GraphAgentHarness:
             ),
         )
 
-        # Tier 1 Commit D — T-B13 HeartbeatEvent daemon thread
         heartbeat = _HeartbeatPulser(active_callbacks)
         heartbeat.start()
+        self._attach_phase_executor(config, active_callbacks, run_context, heartbeat)
 
-        # D-7.2 Phase B: per-run PhaseExecutor threaded through LangGraph
-        # config — graph node closures extract it from
-        # ``config["configurable"]["_phase_executor"]`` on each invocation.
+        try:
+            return self._invoke_run_graph(
+                initial_state,
+                config,
+                active_callbacks,
+                tid,
+                run_id,
+                run_start_monotonic,
+                effective_runtime_inputs,
+                artifact_saver,
+                storage_manager,
+                effective_trace_dir,
+            )
+        except Exception as exc:
+            self._emit_run_crash(active_callbacks, run_id, tid, run_start_monotonic, exc)
+            raise
+        finally:
+            _stop_heartbeat(heartbeat)
+
+    def _initial_run_state(
+        self,
+        initial_context: dict[str, Any],
+        thread_id: str,
+        run_id: str,
+        unattended: bool,
+        persistent_runtime_inputs: dict[str, Any] | None,
+        persistent_storage_config: dict[str, Any] | None,
+    ) -> WorkflowState:
+        initial_state = WorkflowState(
+            data=BusinessData.model_validate(dict(initial_context)),
+            flow=FrameworkState(metrics={"total_input_tokens": 0, "total_output_tokens": 0}),
+            messages=[],
+        )
+        initial_state = StateManager.update_framework(
+            initial_state,
+            thread_id=thread_id,
+            run_id=run_id,
+            unattended=bool(unattended),
+        )
+        return self._with_persistent_run_state(
+            initial_state,
+            run_id,
+            persistent_runtime_inputs,
+            persistent_storage_config,
+        )
+
+    def _with_persistent_run_state(
+        self,
+        state: WorkflowState,
+        run_id: str,
+        persistent_runtime_inputs: dict[str, Any] | None,
+        persistent_storage_config: dict[str, Any] | None,
+    ) -> WorkflowState:
+        if persistent_runtime_inputs is not None:
+            state = StateManager.update_framework(
+                state,
+                persistent_runtime_inputs=dict(persistent_runtime_inputs),
+            )
+        if persistent_storage_config is None:
+            return state
+        effective_storage_config = self._effective_persistent_storage_config(
+            run_id, persistent_storage_config
+        )
+        return StateManager.update_framework(
+            state,
+            persistent_storage_config=effective_storage_config,
+        )
+
+    def _effective_persistent_storage_config(
+        self,
+        run_id: str,
+        persistent_storage_config: dict[str, Any],
+    ) -> dict[str, Any]:
+        effective_storage_config = dict(persistent_storage_config)
+        effective_storage_config.setdefault("run_id", run_id)
+        if "skill_id" not in effective_storage_config:
+            effective_storage_config["skill_id"] = getattr(self, "_skill_id", "") or "unknown"
+        return effective_storage_config
+
+    def _graph_config(self, thread_id: str | None) -> dict[str, Any]:
+        return {
+            "recursion_limit": self._graph_builder.recursion_limit(),
+            "configurable": {"thread_id": thread_id},
+        }
+
+    def _active_callbacks(self, extra_callbacks: list[Callback] | None = None) -> list[Callback]:
+        active_callbacks = list(self.callbacks) if hasattr(self, "callbacks") else []
+        if extra_callbacks:
+            for cb in extra_callbacks:
+                if cb not in active_callbacks:
+                    active_callbacks.append(cb)
+        return active_callbacks
+
+    def _attach_phase_executor(
+        self,
+        config: dict[str, Any],
+        active_callbacks: list[Callback],
+        run_context: RunContext,
+        heartbeat: "_HeartbeatPulser",
+    ) -> None:
         phase_executor = PhaseExecutor(
             active_callbacks,
             run_context=run_context,
@@ -614,147 +747,223 @@ class GraphAgentHarness:
         config["configurable"]["_phase_executor"] = phase_executor
         config["configurable"]["_run_context"] = run_context
 
-        try:
-            result = self._graph.invoke(initial_state, config=config)
-            result_context = result["data"].model_dump()
-
-            # Tier 2 — T-B11: if the run stopped because a middleware
-            # raised an interrupt (request_human_input / clarification),
-            # emit InterruptedEvent so tracing.jsonl carries the pause
-            # marker. We detect this by inspecting post-invoke state;
-            # `get_thread_status` uses the same shape.
-            #
-            # Cohesion plan 方针 2.1 (2026-04-26): when the run is paused
-            # on AWAITING_INPUT we must NOT auto-save outputs (the data
-            # the user is being asked for has not been provided yet) and
-            # the terminating RunEndedEvent must carry status="interrupted"
-            # so Studio's "needs input" queue keeps the run.
-            is_awaiting_input = False
-            try:
-                status = self.get_thread_status(tid)
-                if status.get("status") == "AWAITING_INPUT":
-                    is_awaiting_input = True
-                    from graph_agent.callbacks.events import InterruptedEvent
-
-                    clar = status.get("clarification", {}) or {}
-                    _safe_emit_event(
-                        active_callbacks,
-                        InterruptedEvent(
-                            phase_name=str(result["flow"].current_phase or ""),
-                            thread_id=tid,
-                            question=clar.get("question"),
-                            clarification_type=clar.get("clarification_type"),
-                            options=list(clar.get("options") or []),
-                        ),
-                    )
-                elif status.get("status") == "CRASHED":
-                    raise RuntimeError(
-                        "Post-invoke interrupt status check failed: "
-                        f"{status.get('reason') or 'unknown error'}"
-                    )
-            except Exception as exc:  # noqa: BLE001
-                logger.exception("[Harness] post-invoke interrupt detection failed")
-                raise RuntimeError(
-                    "Post-invoke interrupt detection failed; refusing to "
-                    "auto-save outputs or mark the run completed."
-                ) from exc
-
-            if is_awaiting_input:
-                # Skip outputs auto-save: the run is paused waiting for
-                # user input, the workflow has not produced final outputs.
-                # Trace save is also skipped — the run is still alive,
-                # resume() will append further trace records and save
-                # once the run actually terminates.
-                logger.info(
-                    "[Harness] run %s paused on AWAITING_INPUT; skipping "
-                    "outputs/trace auto-save until resume completes",
-                    run_id,
-                )
-                _safe_emit_event(
-                    active_callbacks,
-                    RunEndedEvent(
-                        run_id=run_id,
-                        thread_id=tid,
-                        status="interrupted",
-                        final_context=_safe_jsonable_dict(result_context),
-                        wall_time_seconds=round(time.monotonic() - run_start_monotonic, 3),
-                    ),
-                )
-                return cast(WorkflowState, result)
-
-            # Auto-save outputs via IOManager if configured
-            if self._io_config and self._io_config.get("outputs"):
-                self._save_outputs_via_io(
-                    result_context,
-                    effective_runtime_inputs,
-                    artifact_saver=artifact_saver,
-                    storage_manager=storage_manager,
-                )
-
-            # Auto-save TracingCallback trace to output dir
-            from graph_agent.callbacks.tracing import TracingCallback
-
-            trace_output = effective_trace_dir
-            if trace_output is None and result_context.get("output_dir"):
-                trace_output = Path(result_context["output_dir"])
-            if trace_output:
-                for cb in active_callbacks:
-                    if isinstance(cb, TracingCallback):
-                        try:
-                            saved = cb.save(trace_output)
-                            result = StateManager.update_framework(
-                                result,
-                                trace_path=saved,
-                            )
-                        except Exception as exc:
-                            raise TraceWriteError(
-                                f"trace save failed: {exc}",
-                                context={"trace_path": str(trace_output)},
-                            ) from exc
-                        break
-
-            # Tier 1 Commit A — T-B1 RunEndedEvent on success
-            _safe_emit_event(
-                active_callbacks,
-                RunEndedEvent(
-                    run_id=run_id,
-                    thread_id=tid,
-                    status="completed",
-                    final_context=_safe_jsonable_dict(result_context),
-                    wall_time_seconds=round(time.monotonic() - run_start_monotonic, 3),
-                ),
-            )
+    def _invoke_run_graph(
+        self,
+        initial_state: WorkflowState,
+        config: dict[str, Any],
+        active_callbacks: list[Callback],
+        thread_id: str,
+        run_id: str,
+        run_start_monotonic: float,
+        effective_runtime_inputs: dict[str, Any],
+        artifact_saver: Callable[..., Any] | None,
+        storage_manager: Any | None,
+        effective_trace_dir: Path | None,
+    ) -> WorkflowState:
+        result = self._graph.invoke(initial_state, config=config)
+        result_context = result["data"].model_dump()
+        if self._emit_interrupted_if_awaiting_input(
+            result, result_context, active_callbacks, thread_id, run_id, run_start_monotonic
+        ):
             return cast(WorkflowState, result)
+        result = self._finalize_completed_run(
+            result,
+            result_context,
+            active_callbacks,
+            run_id,
+            thread_id,
+            run_start_monotonic,
+            effective_runtime_inputs,
+            artifact_saver,
+            storage_manager,
+            effective_trace_dir,
+        )
+        return cast(WorkflowState, result)
+
+    def _emit_interrupted_if_awaiting_input(
+        self,
+        result: WorkflowState,
+        result_context: dict[str, Any],
+        active_callbacks: list[Callback],
+        thread_id: str,
+        run_id: str,
+        run_start_monotonic: float,
+    ) -> bool:
+        from graph_agent.callbacks.events import RunEndedEvent
+
+        if not self._emit_interrupted_event_if_needed(result, active_callbacks, thread_id):
+            return False
+        logger.info(
+            "[Harness] run %s paused on AWAITING_INPUT; skipping outputs/trace auto-save "
+            "until resume completes",
+            run_id,
+        )
+        _safe_emit_event(
+            active_callbacks,
+            RunEndedEvent(
+                run_id=run_id,
+                thread_id=thread_id,
+                status="interrupted",
+                final_context=_safe_jsonable_dict(result_context),
+                wall_time_seconds=round(time.monotonic() - run_start_monotonic, 3),
+            ),
+        )
+        return True
+
+    def _emit_interrupted_event_if_needed(
+        self,
+        result: WorkflowState,
+        active_callbacks: list[Callback],
+        thread_id: str,
+    ) -> bool:
+        try:
+            status = self.get_thread_status(thread_id)
+            return self._handle_post_invoke_status(status, result, active_callbacks, thread_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("[Harness] post-invoke interrupt detection failed")
+            raise RuntimeError(
+                "Post-invoke interrupt detection failed; refusing to "
+                "auto-save outputs or mark the run completed."
+            ) from exc
+
+    def _handle_post_invoke_status(
+        self,
+        status: dict[str, Any],
+        result: WorkflowState,
+        active_callbacks: list[Callback],
+        thread_id: str,
+    ) -> bool:
+        if status.get("status") == "AWAITING_INPUT":
+            from graph_agent.callbacks.events import InterruptedEvent
+
+            clar = status.get("clarification", {}) or {}
+            _safe_emit_event(
+                active_callbacks,
+                InterruptedEvent(
+                    phase_name=str(result["flow"].current_phase or ""),
+                    thread_id=thread_id,
+                    question=clar.get("question"),
+                    clarification_type=clar.get("clarification_type"),
+                    options=list(clar.get("options") or []),
+                ),
+            )
+            return True
+        if status.get("status") == "CRASHED":
+            raise RuntimeError(
+                "Post-invoke interrupt status check failed: "
+                f"{status.get('reason') or 'unknown error'}"
+            )
+        return False
+
+    def _finalize_completed_run(
+        self,
+        result: WorkflowState,
+        result_context: dict[str, Any],
+        active_callbacks: list[Callback],
+        run_id: str,
+        thread_id: str,
+        run_start_monotonic: float,
+        effective_runtime_inputs: dict[str, Any],
+        artifact_saver: Callable[..., Any] | None,
+        storage_manager: Any | None,
+        effective_trace_dir: Path | None,
+    ) -> WorkflowState:
+        from graph_agent.callbacks.events import RunEndedEvent
+
+        self._save_outputs_if_configured(
+            result_context, effective_runtime_inputs, artifact_saver, storage_manager
+        )
+        result = self._save_trace_if_configured(result, result_context, active_callbacks, effective_trace_dir)
+        _safe_emit_event(
+            active_callbacks,
+            RunEndedEvent(
+                run_id=run_id,
+                thread_id=thread_id,
+                status="completed",
+                final_context=_safe_jsonable_dict(result_context),
+                wall_time_seconds=round(time.monotonic() - run_start_monotonic, 3),
+            ),
+        )
+        return result
+
+    def _save_outputs_if_configured(
+        self,
+        result_context: dict[str, Any],
+        effective_runtime_inputs: dict[str, Any],
+        artifact_saver: Callable[..., Any] | None,
+        storage_manager: Any | None,
+    ) -> None:
+        if self._io_config and self._io_config.get("outputs"):
+            self._save_outputs_via_io(
+                result_context,
+                effective_runtime_inputs,
+                artifact_saver=artifact_saver,
+                storage_manager=storage_manager,
+            )
+
+    def _save_trace_if_configured(
+        self,
+        result: WorkflowState,
+        result_context: dict[str, Any],
+        active_callbacks: list[Callback],
+        effective_trace_dir: Path | None,
+    ) -> WorkflowState:
+        from graph_agent.callbacks.tracing import TracingCallback
+
+        trace_output = effective_trace_dir or (
+            Path(result_context["output_dir"]) if result_context.get("output_dir") else None
+        )
+        if trace_output is None:
+            return result
+        for cb in active_callbacks:
+            if isinstance(cb, TracingCallback):
+                return self._save_trace_callback(result, cb, trace_output)
+        return result
+
+    def _save_trace_callback(
+        self,
+        result: WorkflowState,
+        callback: Any,
+        trace_output: Path,
+    ) -> WorkflowState:
+        try:
+            saved = callback.save(trace_output)
+            return StateManager.update_framework(result, trace_path=saved)
         except Exception as exc:
-            # Tier 1 Commit A — T-B14 InternalErrorEvent at harness.run entry
-            _safe_emit_event(
-                active_callbacks,
-                InternalErrorEvent(
-                    entry_point="run",
-                    error_type=type(exc).__name__,
-                    error_message=str(exc),
-                    traceback=traceback.format_exc(),
-                ),
-            )
-            _safe_emit_event(
-                active_callbacks,
-                RunEndedEvent(
-                    run_id=run_id,
-                    thread_id=tid,
-                    status="crashed",
-                    final_context={},
-                    wall_time_seconds=round(time.monotonic() - run_start_monotonic, 3),
-                ),
-            )
-            raise
-        finally:
-            # Always stop the heartbeat — don't leak daemon threads even
-            # after a crash; _HeartbeatPulser.stop is idempotent.
-            try:
-                heartbeat.stop()
-                heartbeat.join(timeout=1.0)
-            except Exception:  # noqa: BLE001
-                logger.warning("[Harness] heartbeat stop failed", exc_info=True)
+            raise TraceWriteError(
+                f"trace save failed: {exc}",
+                context={"trace_path": str(trace_output)},
+            ) from exc
+
+    def _emit_run_crash(
+        self,
+        active_callbacks: list[Callback],
+        run_id: str,
+        thread_id: str,
+        run_start_monotonic: float,
+        exc: Exception,
+    ) -> None:
+        from graph_agent.callbacks.events import InternalErrorEvent, RunEndedEvent
+
+        _safe_emit_event(
+            active_callbacks,
+            InternalErrorEvent(
+                entry_point="run",
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+                traceback=traceback.format_exc(),
+            ),
+        )
+        _safe_emit_event(
+            active_callbacks,
+            RunEndedEvent(
+                run_id=run_id,
+                thread_id=thread_id,
+                status="crashed",
+                final_context={},
+                wall_time_seconds=round(time.monotonic() - run_start_monotonic, 3),
+            ),
+        )
 
     def _get_active_run_options(self, run_context: RunContext | None) -> dict[str, Any]:
         """Return active-run options for nested subgraph / parallel_map.
@@ -982,17 +1191,7 @@ class GraphAgentHarness:
         from langchain_core.messages import ToolMessage
 
         state = _clone_state(state)
-
-        tool_call_id = ""
-        for msg in reversed(state["messages"]):
-            if hasattr(msg, "tool_calls") and msg.tool_calls:
-                for tc in msg.tool_calls:
-                    if tc.get("name") == "request_human_input":
-                        tool_call_id = str(tc.get("id") or "")
-                        break
-                if tool_call_id:
-                    break
-
+        tool_call_id = _request_human_input_tool_call_id(state)
         if tool_call_id:
             state["messages"].append(
                 ToolMessage(
@@ -1003,61 +1202,11 @@ class GraphAgentHarness:
             )
 
         effective_thread_id = thread_id or state["flow"].thread_id
-        config: dict[str, Any] = {
-            "recursion_limit": self._graph_builder.recursion_limit(),
-            "configurable": {"thread_id": effective_thread_id},
-        }
-
-        # D-7.2 Phase B: build per-run RunContext + PhaseExecutor as
-        # locals here too, matching run()'s pattern. run_id is inherited
-        # from the paused state so compaction sidecars written during the
-        # resumed run share the same ``_history/{run_id}/`` directory as
-        # sidecars from the original run — Studio folds pre-pause and
-        # post-resume sidecars under one thread.
+        config = self._graph_config(effective_thread_id)
         active_callbacks = list(self.callbacks) if hasattr(self, "callbacks") else []
         inherited_run_id = state["flow"].run_id or ""
-
-        # D-post session P0-2.1: rehydrate runtime_inputs / storage_manager
-        # from the state the checkpointer replayed, when an earlier run()
-        # opted in via ``persistent_runtime_inputs`` /
-        # ``persistent_storage_config``. Explicit caller-supplied
-        # ``runtime_inputs_map`` still wins (e.g. test harness overrides).
-        restored_runtime_inputs: dict[str, Any] = {}
-        if runtime_inputs_map:
-            restored_runtime_inputs = dict(runtime_inputs_map)
-        else:
-            persisted = state["flow"].persistent_runtime_inputs
-            if isinstance(persisted, dict):
-                restored_runtime_inputs = dict(persisted)
-
-        restored_storage_manager: Any | None = None
-        persisted_sc = state["flow"].persistent_storage_config
-        if isinstance(persisted_sc, dict) and persisted_sc:
-            sc_kwargs = dict(persisted_sc)
-            # Prefer the inherited run_id so artifacts land in the
-            # original ``_history/{run_id}/`` tree; fall back to whatever
-            # the persisted config declared, or "unknown" as last resort
-            # (StorageManager's constructor rejects empty run_id, so we
-            # must pass a non-empty string).
-            sc_kwargs["run_id"] = (
-                inherited_run_id or str(sc_kwargs.get("run_id") or "") or "unknown"
-            )
-            try:
-                from graph_agent.io.storage import StorageManager
-
-                restored_storage_manager = StorageManager(**sc_kwargs)
-            except Exception as exc:  # noqa: BLE001
-                # Fail soft so an otherwise-recoverable resume isn't
-                # killed by a malformed persisted config; the run
-                # continues with sidecar writes no-op'd.
-                logger.warning(
-                    "[Harness] resume could not rebuild StorageManager from "
-                    "_persistent_storage_config=%r: %s; continuing with "
-                    "storage_manager=None (compaction sidecars will no-op)",
-                    sc_kwargs,
-                    exc,
-                )
-
+        restored_runtime_inputs = _restored_runtime_inputs(state, runtime_inputs_map)
+        restored_storage_manager = _restored_storage_manager(state, inherited_run_id)
         run_context = RunContext(
             thread_id=str(effective_thread_id or ""),
             run_id=inherited_run_id,
@@ -1073,17 +1222,7 @@ class GraphAgentHarness:
         heartbeat = _HeartbeatPulser(active_callbacks)
         heartbeat.current_phase = state["flow"].current_phase or None
         heartbeat.start()
-
-        # D-7.2 Phase B: per-run PhaseExecutor threaded through config.
-        phase_executor = PhaseExecutor(
-            active_callbacks,
-            run_context=run_context,
-            heartbeat=heartbeat,
-            resolver=self._resolver,
-            save_compaction_sidecar=type(self)._save_compaction_sidecar,
-        )
-        config["configurable"]["_phase_executor"] = phase_executor
-        config["configurable"]["_run_context"] = run_context
+        self._attach_phase_executor(config, active_callbacks, run_context, heartbeat)
 
         # Tier 2 — T-B11: announce the resume to the trace.
         from graph_agent.callbacks.events import ResumedEvent
@@ -1115,11 +1254,7 @@ class GraphAgentHarness:
             )
             raise
         finally:
-            try:
-                heartbeat.stop()
-                heartbeat.join(timeout=1.0)
-            except Exception:  # noqa: BLE001
-                logger.warning("[Harness] heartbeat stop failed", exc_info=True)
+            _stop_heartbeat(heartbeat)
 
 
 Harness = GraphAgentHarness

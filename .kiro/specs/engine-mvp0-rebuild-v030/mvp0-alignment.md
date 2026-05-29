@@ -111,3 +111,33 @@ Audit chain:
 - 主控 grep + pytest + curl 实证全程
 
 NTH (defer 到 PR-3 周期): `sonar.exclusions` / `sonar.test.exclusions` 在 properties 落地但 test 没断言锁; 后续 PR 改 properties 时漏改 exclusions test 仍绿.
+
+## Round 30 P1/P2 External Quality Tools Onboarding — PR-3 CodeQL
+
+PR-3 CodeQL 已 ship (本 PR), 接 PR-1 Codecov + PR-2 SonarCloud 后第 3 个外部质量工具 (4 个里).
+
+PR-3 内容:
+- 新增 `.github/workflows/codeql.yml` (29 行) — Python 静态安全扫描 (SAST):
+  - on: push.branches[main] + pull_request.branches[main] + schedule cron `"0 6 * * 1"` (周一 06:00, 跟 PR-4 Scorecard 07:00 错开 1 小时避 GitHub Actions runner 争用)
+  - permissions: actions:read + contents:read + security-events:write (上报 SARIF 必需)
+  - jobs.analyze: ubuntu-latest, name "Analyze (Python)"
+  - steps: actions/checkout@v4 → github/codeql-action/init@v4 (languages: python + build-mode: none + queries: security-extended) → github/codeql-action/analyze@v4
+
+Action 版本 verify (PM 2026-05-29): `github/codeql-action` latest stable = v4.36.0 (2026-05-22, non-prerelease). spec lock major `@v4` (跟 PR-1 @v6 / PR-2 @v8 同样 GitHub Actions 最佳实践 major pinning).
+
+PR-3 是 report-only 接入: CI 不阻 merge, 扫描结果上报 GitHub Code Scanning Security tab. 等首轮 high/critical 基线清零后, 再由后续 PR 切硬门.
+
+YAML 工程细节: codeql.yml 用 `"on":` (引号) 避免 PyYAML safe_load 把 unquoted `on` 解析成 boolean True (YAML 1.1 quirk, GitHub Actions parser 不受影响). a3 audit 实证 (`yaml.safe_load('on: foo')` 返 `{True: 'foo'}` vs `yaml.safe_load('"on": foo')` 返 `{'on': 'foo'}`), 工程修正合理.
+
+Python 解释型语言, `build-mode: none` 必须 (CodeQL 不需 build artifact, 直接扫源码). `queries: security-extended` 加 mature SAST 规则集 (基础 `security-and-quality` 之上).
+
+Verification evidence from the Round 30 PR-3 run:
+- pytest test_round30_pr3_codeql_config.py: 2 passed (21 assertion, 含 a3 audit 补 SF-1 cron 具体值 lock)
+- 4 contract gate: 38 passed
+- 黄金原则零碰 物理实证: src 仅 2 untracked 新文件 (codeql.yml + test py), 零 modified 触及 65 API / 92 errors / 33 events / 53 H2 / 14 FROZEN docs / R28 5 机制
+
+Audit chain:
+- a3 PM 替身 audit 两轮 (tests-first 0 must-fix + 1 should-fix SF-1 / src 0 must-fix), 必修全 a1 接受落地
+- 主控 grep + pytest + curl 实证全程
+
+NTH (defer to PR-4 周期): jobs.analyze.name display name 断言 / step display name 断言 / helper fixture 化.

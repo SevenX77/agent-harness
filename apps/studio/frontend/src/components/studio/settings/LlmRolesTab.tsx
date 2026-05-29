@@ -3,16 +3,17 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
-import { useRoleTestChainRunner } from "@/hooks/useRoleTestChainRunner"
-import type { CredentialsState, ModelGroup, RolesData } from "../../../api/llm"
+import { roleChainStatusKey, type RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
+import { testRole, type CredentialsState, type ModelGroup, type ProviderModelOption, type RoleTestProviderResult, type RoleTestResponse, type RolesData } from "../../../api/llm"
+import { AdvancedModelBundlesSection, modelBundleGroupsFromData } from "./llm-roles/AdvancedModelBundlesSection"
 import { AvailableModelsSidebar } from "./llm-roles/AvailableModelsSidebar"
 import { RoleSaveStatusBadge } from "./llm-roles/RoleBadges"
 import { RoleCardList } from "./llm-roles/RoleCardList"
-import { appendModelGroupToRole, ownedProviderCodesForModel, pruneInvalidRoleProviders } from "./role-utils"
+import { appendModelGroupToRole, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeRole } from "./role-utils"
 import { credentialsByProviderCode } from "./route-credentials"
 import { SectionTitle } from "./shared"
 
-export { ModelSettingsDialog, ModelSettingsFields } from "./llm-roles/ModelSettingsDialog"
+export { RoleSettingsPanel, RoleSettingsFields } from "./llm-roles/RoleSettingsDialog"
 
 interface AvailableModelPointerDrag {
   dragging: boolean
@@ -30,6 +31,12 @@ export interface AvailableModelDragPreviewState {
   y: number
 }
 
+interface RoleTestState {
+  running: boolean
+  result?: RoleTestResponse
+  error?: string
+}
+
 export function LlmRolesTab({
   data,
   credentials,
@@ -37,6 +44,8 @@ export function LlmRolesTab({
   saveStatus,
   error,
   onChange,
+  onDeleteRole,
+  onBeforeRoleTest,
 }: {
   data: RolesData | null
   credentials: CredentialsState
@@ -44,6 +53,8 @@ export function LlmRolesTab({
   saveStatus: SaveStatus
   error: string | null
   onChange: (next: RolesData) => void
+  onDeleteRole?: (roleName: string) => void
+  onBeforeRoleTest?: () => Promise<RolesData | null>
 }) {
   const credentialsByCode = useMemo(() => (
     data
@@ -64,12 +75,23 @@ export function LlmRolesTab({
     }
     return result
   }, [normalizedData, credentialsByCode])
+  const providerModelsByRouteId = useMemo<ReadonlyMap<string, ProviderModelOption>>(() => (
+    new Map(modelGroups.flatMap((group) => (
+      group.provider_models.map((providerModel) => [providerModel.route_id, providerModel] as const)
+    )))
+  ), [modelGroups])
+  const bundleModelGroups = useMemo(() => (
+    normalizedData ? modelBundleGroupsFromData(normalizedData, providerModelsByRouteId) : []
+  ), [normalizedData, providerModelsByRouteId])
+  const availableModelGroups = useMemo(() => (
+    [...bundleModelGroups, ...modelGroups]
+  ), [bundleModelGroups, modelGroups])
   const modelDisplayNamesByCode = useMemo<ReadonlyMap<string, string>>(() => {
     if (!normalizedData) return new Map()
     const displayNameByCanonicalId = new Map<string, string>()
     const displayNameByRouteId = new Map<string, string>()
 
-    for (const modelGroup of modelGroups) {
+    for (const modelGroup of availableModelGroups) {
       const displayName = modelGroup.display_name || modelGroup.canonical_id
       displayNameByCanonicalId.set(modelGroup.canonical_id, displayName)
       for (const providerModel of modelGroup.provider_models) {
@@ -94,8 +116,11 @@ export function LlmRolesTab({
       }
     }
     return result
-  }, [modelGroups, normalizedData])
-  const { isRunning: testChainRunning, run: runTestChain, statuses: testStatuses } = useRoleTestChainRunner()
+  }, [availableModelGroups, normalizedData])
+  const [roleTestStates, setRoleTestStates] = useState<Record<string, RoleTestState>>({})
+  const testStatusesByRole = useMemo(() => (
+    roleTestStatusesByRole(roleTestStates)
+  ), [roleTestStates])
   const activeAvailableModelDragRef = useRef<string | null>(null)
   const availableModelPointerDragRef = useRef<AvailableModelPointerDrag | null>(null)
   const availableModelDragPreviewNodeRef = useRef<HTMLDivElement | null>(null)
@@ -109,8 +134,8 @@ export function LlmRolesTab({
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
   const modelGroupsById = useMemo(
-    () => new Map(modelGroups.map((group) => [group.canonical_id, group])),
-    [modelGroups],
+    () => new Map(availableModelGroups.map((group) => [group.canonical_id, group])),
+    [availableModelGroups],
   )
 
   useEffect(() => {
@@ -301,14 +326,52 @@ export function LlmRolesTab({
     [modelGroupsById],
   )
   const handleRunTestChain = useCallback(
-    (roleName: string) => {
-      const latestData = normalizedDataRef.current
-      if (!latestData) return
-      void runTestChain({ data: latestData, roleName, credentials })
-    },
-    [credentials, runTestChain],
-  )
+    async (roleName: string) => {
+      if (error) {
+        setRoleTestStates((current) => ({
+          ...current,
+          [roleName]: {
+            running: false,
+            result: current[roleName]?.result,
+            error: `Save the role before testing: ${error}`,
+          },
+        }))
+        return
+      }
 
+      setRoleTestStates((current) => ({
+        ...current,
+        [roleName]: {
+          ...current[roleName],
+          running: true,
+          error: undefined,
+        },
+      }))
+
+      try {
+        await onBeforeRoleTest?.()
+        const result = await testRole(roleName)
+        setRoleTestStates((current) => ({
+          ...current,
+          [roleName]: {
+            running: false,
+            result,
+            error: undefined,
+          },
+        }))
+      } catch (roleTestError) {
+        setRoleTestStates((current) => ({
+          ...current,
+          [roleName]: {
+            running: false,
+            result: current[roleName]?.result,
+            error: roleTestError instanceof Error ? roleTestError.message : "Role test failed",
+          },
+        }))
+      }
+    },
+    [error, onBeforeRoleTest],
+  )
   if (!normalizedData) {
     return (
       <LlmRolesLayout sidebar={<LlmRolesModelsSkeleton />}>
@@ -324,6 +387,7 @@ export function LlmRolesTab({
         sidebar={(
           <AvailableModelsSidebar
             modelGroups={modelGroups}
+            pinnedModelGroups={bundleModelGroups}
             onModelPointerDown={handleAvailableModelPointerDown}
           />
         )}
@@ -341,17 +405,60 @@ export function LlmRolesTab({
           credentialsByCode={credentialsByCode}
           modelDisplayNamesByCode={modelDisplayNamesByCode}
           ownedProviderCodesByModel={ownedProviderCodesByModel}
-          testStatuses={testStatuses}
-          testChainRunning={testChainRunning}
+          providerModelsByRouteId={providerModelsByRouteId}
+          testStatusesByRole={testStatusesByRole}
+          roleTestResults={Object.fromEntries(Object.entries(roleTestStates).map(([roleName, state]) => [roleName, state.result]))}
+          roleTestErrors={Object.fromEntries(Object.entries(roleTestStates).map(([roleName, state]) => [roleName, state.error]))}
+          roleTestRunningByName={Object.fromEntries(Object.entries(roleTestStates).map(([roleName, state]) => [roleName, state.running]))}
           onRunTestChain={handleRunTestChain}
           getActiveAvailableModelDragId={getActiveAvailableModelDragId}
           getAvailableModelGroup={getAvailableModelGroup}
+          onChange={onChange}
+          onDeleteRole={onDeleteRole ?? ((roleName) => onChange(removeRole(normalizedData, roleName)))}
+        />
+        <AdvancedModelBundlesSection
+          data={normalizedData}
+          modelGroups={modelGroups}
+          providerModelsByRouteId={providerModelsByRouteId}
           onChange={onChange}
         />
       </LlmRolesLayout>
       <AvailableModelDragPreview drag={availableModelDragPreview} nodeRef={availableModelDragPreviewNodeRef} />
     </>
   )
+}
+
+function roleTestStatusesByRole(states: Record<string, RoleTestState>): Record<string, RoleChainStatusMap> {
+  return Object.fromEntries(
+    Object.entries(states).map(([roleName, state]) => {
+      const statusMap: RoleChainStatusMap = {}
+      for (const group of state.result?.model_groups ?? []) {
+        for (const providerResult of group.provider_results) {
+          statusMap[roleChainStatusKey(group.canonical_id, providerResult.route_id)] = {
+            status: roleChainStatusForProviderResult(providerResult),
+            message: roleTestProviderMessage(providerResult),
+          }
+        }
+      }
+      return [roleName, statusMap]
+    }),
+  )
+}
+
+function roleChainStatusForProviderResult(providerResult: RoleTestProviderResult): RoleChainStatusMap[string]["status"] {
+  if (providerResult.status === "ok") {
+    return providerResult.role_fit === "using" && providerResult.warnings.length === 0 ? "ok" : "warning"
+  }
+  if (providerResult.status === "untested") return "idle"
+  return "error"
+}
+
+function roleTestProviderMessage(providerResult: RoleTestProviderResult): string | undefined {
+  const messages = [
+    providerResult.message,
+    providerResult.retry_at ? `Retry after ${providerResult.retry_at}.` : null,
+  ].filter((message): message is string => Boolean(message))
+  return Array.from(new Set(messages)).join(" ") || undefined
 }
 
 export function AvailableModelDragPreview({

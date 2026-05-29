@@ -7,7 +7,7 @@ import {
   CatalogAccordionItem,
   CatalogAccordionTrigger,
 } from "@/components/ui/catalog-accordion"
-import type { CredentialsState, ModelGroup, RolesData } from "@/api/llm"
+import type { CredentialsState, ModelGroup, ProviderModelOption, RoleTestResponse, RolesData } from "@/api/llm"
 import type { RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
 import { appendRole, visibleRoleNames } from "../role-utils"
 import { RoleCard, type RoleCategory } from "./RoleCard"
@@ -22,23 +22,31 @@ export const RoleCardList = memo(function RoleCardList({
   credentialsByCode,
   modelDisplayNamesByCode,
   ownedProviderCodesByModel,
-  testStatuses,
-  testChainRunning,
+  providerModelsByRouteId,
+  testStatusesByRole,
+  roleTestResults,
+  roleTestErrors,
+  roleTestRunningByName,
   onRunTestChain,
   getActiveAvailableModelDragId,
   getAvailableModelGroup,
   onChange,
+  onDeleteRole,
 }: {
   data: RolesData
   credentialsByCode: Record<string, CredentialsState["providers"][number]>
   modelDisplayNamesByCode: ReadonlyMap<string, string>
   ownedProviderCodesByModel: ReadonlyMap<string, ReadonlySet<string>>
-  testStatuses: RoleChainStatusMap
-  testChainRunning: boolean
+  providerModelsByRouteId: ReadonlyMap<string, ProviderModelOption>
+  testStatusesByRole: Record<string, RoleChainStatusMap>
+  roleTestResults: Record<string, RoleTestResponse | undefined>
+  roleTestErrors: Record<string, string | undefined>
+  roleTestRunningByName: Record<string, boolean | undefined>
   onRunTestChain: (roleName: string) => void
   getActiveAvailableModelDragId: () => string | null
   getAvailableModelGroup: (modelGroupId: string) => ModelGroup | null
   onChange: (next: RolesData) => void
+  onDeleteRole: (roleName: string) => void
 }) {
   const roleNames = visibleRoleNames(data)
   const {
@@ -82,13 +90,17 @@ export const RoleCardList = memo(function RoleCardList({
                     credentialsByCode={credentialsByCode}
                     modelDisplayNamesByCode={modelDisplayNamesByCode}
                     ownedProviderCodesByModel={ownedProviderCodesByModel}
+                    providerModelsByRouteId={providerModelsByRouteId}
                     roleName={roleName}
-                    testStatuses={testStatuses}
-                    testChainRunning={testChainRunning}
+                    testStatuses={testStatusesByRole[roleName] ?? {}}
+                    testChainRunning={Boolean(roleTestRunningByName[roleName])}
+                    roleTestResult={roleTestResults[roleName]}
+                    roleTestError={roleTestErrors[roleName]}
                     onRunTestChain={onRunTestChain}
                     getActiveAvailableModelDragId={getActiveAvailableModelDragId}
                     getAvailableModelGroup={getAvailableModelGroup}
                     onChange={onChange}
+                    onDeleteRole={onDeleteRole}
                   />
                 ))
               ) : (

@@ -12,18 +12,15 @@ import {
 } from "@/components/ui/item"
 import { cn } from "@/lib/utils"
 import type { RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
-import type { CredentialsState, RolesData } from "@/api/llm"
-import type { ModelAvailability } from "../availability"
+import type { CredentialsState, MaterializationReportEntry, ProviderModelOption, RolesData } from "@/api/llm"
 import {
   ownedProviderCodesForModel,
   removeModelFromRole,
   roleModelProviderCodes,
-  updateRoleModelSettings,
 } from "../role-utils"
 import { IconTooltip } from "./IconTooltip"
-import { ModelSettingsDialog } from "./ModelSettingsDialog"
 import { ProviderChain } from "./ProviderChain"
-import { AvailabilityBadge, ThinkingBadge } from "./RoleBadges"
+import { ThinkingBadge } from "./RoleBadges"
 
 export const ModelItem = memo(function ModelItem({
   data,
@@ -33,7 +30,8 @@ export const ModelItem = memo(function ModelItem({
   modelIndex,
   credentialsByCode,
   ownedProviderCodes,
-  availability,
+  providerModelsByRouteId,
+  roleFitByRouteId,
   testStatuses,
   onChange,
 }: {
@@ -44,7 +42,8 @@ export const ModelItem = memo(function ModelItem({
   modelIndex: number
   credentialsByCode: Record<string, CredentialsState["providers"][number]>
   ownedProviderCodes?: ReadonlySet<string>
-  availability: ModelAvailability
+  providerModelsByRouteId: ReadonlyMap<string, ProviderModelOption>
+  roleFitByRouteId: ReadonlyMap<string, MaterializationReportEntry>
   testStatuses: RoleChainStatusMap
   onChange: (next: RolesData) => void
 }) {
@@ -80,7 +79,6 @@ export const ModelItem = memo(function ModelItem({
       ref={setNodeRef}
       style={style}
       className={cn("rounded-md", isDragging && "opacity-70")}
-      data-availability={availability}
     >
       <Item
         variant="outline"
@@ -104,7 +102,6 @@ export const ModelItem = memo(function ModelItem({
             <span data-model-name="true" className="min-w-0 truncate whitespace-nowrap">{modelName}</span>
             <span data-model-badge-group="true" className="flex shrink-0 items-center gap-2.5">
               {data.models[modelCode]?.reasoning ? <ThinkingBadge /> : null}
-              <AvailabilityBadge availability={availability} />
             </span>
           </ItemTitle>
         </ItemContent>
@@ -112,13 +109,6 @@ export const ModelItem = memo(function ModelItem({
           className="ml-auto shrink-0 gap-1"
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <ModelSettingsDialog
-            modelCode={modelCode}
-            modelName={modelName}
-            temperature={roleModel.temperature ?? null}
-            maxTokens={roleModel.max_tokens ?? null}
-            onSubmit={(settings) => onChange(updateRoleModelSettings(data, roleName, modelCode, settings))}
-          />
           <IconTooltip label={`Remove ${modelName}`}>
             <Button
               type="button"
@@ -140,6 +130,8 @@ export const ModelItem = memo(function ModelItem({
             modelName={modelName}
             providers={providers}
             appendableProviderCodes={appendableProviderCodes}
+            providerModelsByRouteId={providerModelsByRouteId}
+            roleFitByRouteId={roleFitByRouteId}
             testStatuses={testStatuses}
             onChange={onChange}
           />

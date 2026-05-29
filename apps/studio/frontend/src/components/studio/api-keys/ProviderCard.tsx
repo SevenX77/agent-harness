@@ -8,6 +8,8 @@ import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Tag } from "@/components/ui/tag"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Select,
   SelectContent,
@@ -17,12 +19,13 @@ import {
 } from "@/components/ui/select"
 import { translateErrorCode, translateTestStatus } from "@/lib/llm-error-messages"
 import { cn } from "@/lib/utils"
-import type { CredentialsState, ModelInfo, ProviderTestResult, ProviderType } from "../../../api/llm"
+import type { CredentialsState, ModelInfo, ProviderTestResult, ProviderType, RouteStatus } from "../../../api/llm"
 import { providerCachedTestResult, providerTestParamsMatch } from "../settings/provider-utils"
 import type { ProviderDraft } from "../settings/types"
 import { ManualModelTestPanel } from "./ManualModelTestPanel"
 
 type TestMessageStatus = "not_configured" | "testing" | NonNullable<CredentialsState["providers"][number]["last_test_status"]>
+type RouteDisplayStatus = RouteStatus | "unknown" | "testing"
 const availableModelsPreviewLimit = 12
 const fieldRowClassName = "grid grid-cols-[minmax(0,1fr)_11.5rem] items-center gap-2"
 const fieldActionClassName = "flex min-w-0 items-center justify-end gap-2"
@@ -230,6 +233,117 @@ function endpointModelPlaceholder(providerKey: string, providerType: ProviderTyp
   return `e.g. ${matched?.[1] ?? fallback}`
 }
 
+function modelRouteStatus(model: ModelInfo): RouteStatus | "unknown" {
+  return model.status ?? "unknown"
+}
+
+function routeDisplayStatus(model: ModelInfo, isTesting: boolean): RouteDisplayStatus {
+  const status = modelRouteStatus(model)
+  if (isTesting && status === "unverified_manual" && !model.last_probe_message) return "testing"
+  return status
+}
+
+function routeStatusTagVariant(status: RouteDisplayStatus, model: ModelInfo): "success" | "destructive" | "muted" | "default" | "info" {
+  if (status === "failed") return "destructive"
+  if (status === "disabled") return "muted"
+  if (isCapabilityLibraryModel(model)) return "info"
+  if (status === "verified") return "success"
+  return "default"
+}
+
+function routeStatusLabel(status: RouteDisplayStatus): string {
+  if (status === "verified") return "Verified route"
+  if (status === "failed") return "Route test failed"
+  if (status === "disabled") return "Disabled route"
+  if (status === "testing") return "Testing route"
+  if (status === "unverified_manual") return "Untested route"
+  return "Route status unknown"
+}
+
+function modelCapabilityValue(model: ModelInfo, key: string): unknown {
+  const value = model.capabilities?.[key]
+  if (value && typeof value === "object" && !Array.isArray(value) && "value" in value) {
+    return (value as { value?: unknown }).value
+  }
+  return value
+}
+
+function officialModelType(model: ModelInfo): string | null {
+  const value = modelCapabilityValue(model, "model_type")
+  return typeof value === "string" && value ? value : null
+}
+
+function officialModelTypeLabel(model: ModelInfo): string | null {
+  const label = modelCapabilityValue(model, "model_type_label")
+  if (typeof label === "string" && label) return label
+  const modelType = officialModelType(model)
+  if (modelType === "language_reasoning") return "Language/reasoning model"
+  if (modelType === "image_generation") return "Image generation model"
+  if (modelType === "video_generation") return "Video generation model"
+  if (modelType === "audio") return "Audio/realtime model"
+  if (modelType === "embedding") return "Embedding model"
+  if (modelType === "translation") return "Translation model"
+  if (modelType === "3d_generation") return "3D generation model"
+  return null
+}
+
+function routeProfileTooltipText(model: ModelInfo, status: RouteDisplayStatus): string | null {
+  if (status !== "verified") return null
+  const profiles = modelVerifiedProfiles(model).filter((profile) => profile.status !== "failed")
+  if (profiles.length === 0) return null
+  const capabilityLabels = uniqueStrings(
+    profiles
+      .map((profile) => profileCapabilityLabel(profile.capability))
+      .filter((label): label is string => Boolean(label)),
+  )
+  const capabilityText = capabilityLabels.length > 0
+    ? capabilityLabels.join(" + ")
+    : "language"
+  const methodLabels = uniqueStrings(
+    profiles
+      .map((profile) => profile.method_id)
+      .filter((method): method is string => Boolean(method)),
+  )
+  return [
+    `Verified ${capabilityText} route`,
+    methodLabels.length > 0 ? `Methods: ${methodLabels.join(", ")}` : null,
+  ].filter((line): line is string => Boolean(line)).join("\n")
+}
+
+function modelVerifiedProfiles(model: ModelInfo): Array<{
+  capability?: string
+  method_id?: string
+  status?: string
+}> {
+  if (Array.isArray(model.verified_profiles)) return model.verified_profiles
+  const profiles = model.capabilities?.verified_profiles
+  if (!Array.isArray(profiles)) return []
+  return profiles.filter((profile): profile is { capability?: string; method_id?: string; status?: string } => (
+    Boolean(profile) && typeof profile === "object" && !Array.isArray(profile)
+  ))
+}
+
+function profileCapabilityLabel(capability: string | undefined): string | null {
+  if (capability === "text_chat") return "text chat"
+  if (capability === "reasoning" || capability === "thinking") return "reasoning"
+  if (capability === "image_input") return "image input"
+  if (capability === "audio_input") return "audio input"
+  if (capability === "tool_calling") return "tool calling"
+  if (capability === "structured_output") return "structured output"
+  if (capability === "translation") return "translation"
+  if (!capability) return null
+  return capability.replaceAll("_", " ")
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values)]
+}
+
+function isCapabilityLibraryModel(model: ModelInfo): boolean {
+  const modelType = officialModelType(model)
+  return Boolean(modelType && !["language_reasoning", "catalog_candidate"].includes(modelType))
+}
+
 function scrollInputContentOnWheel(event: WheelEvent<HTMLInputElement>) {
   const input = event.currentTarget
   const maxScrollLeft = input.scrollWidth - input.clientWidth
@@ -283,6 +397,8 @@ export function ProviderCard({
   const availableSdks = matchedResult?.available_sdks ?? []
   const availableModels = sortModelInfos(matchedResult?.available_models ?? [])
   const hasAvailableModels = availableModels.length > 0
+  const availableModelsLabel = isOfficial ? "Available Routes:" : "Available Models:"
+  const copyTargetLabel = isOfficial ? "route" : "model"
   const visibleModels = showAllModels ? availableModels : availableModels.slice(0, availableModelsPreviewLimit)
   const hiddenModelCount = Math.max(0, availableModels.length - visibleModels.length)
   const matchedStatus = matchedResult?.last_test_status
@@ -398,9 +514,15 @@ export function ProviderCard({
                 {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
               </Button>
               <FieldCopyButton value={draft.api_key} label="API key" />
-              <Button type="button" variant="secondary" onClick={handleGetModels} disabled={isGettingModels} className="px-4">
+              <Button
+                type="button"
+                variant={isOfficial ? "default" : "secondary"}
+                onClick={handleGetModels}
+                disabled={isGettingModels}
+                className="px-4"
+              >
                 {isGettingModels ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                Get Models
+                {isOfficial ? "Test" : "Get Models"}
               </Button>
             </div>
           </div>
@@ -461,38 +583,40 @@ export function ProviderCard({
             {baseUrlError ? <p id={`base-url-error-${draft.id}`} className="text-xs text-destructive">{baseUrlError}</p> : null}
           </div>
         ) : null}
-        <Field>
-          <FieldLabel htmlFor={`endpoint-test-model-${draft.id}`}>Endpoint test</FieldLabel>
-          <FieldDescription>
-            Please choose one model from Available Models for endpoint testing.
-          </FieldDescription>
-          <div className={fieldRowClassName}>
-            <Input
-              id={`endpoint-test-model-${draft.id}`}
-              value={endpointModelId}
-              onChange={(event) => setEndpointModelId(event.target.value)}
-              placeholder={endpointModelPlaceholder(notableProviderKey ?? draft.id, draft.provider_type)}
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="none"
-              spellCheck={false}
-              onWheel={scrollInputContentOnWheel}
-              className={cn(scrollableInputClassName, "font-mono")}
-            />
-            <div className={fieldActionClassName}>
-              <Button
-                type="button"
-                variant="default"
-                onClick={() => onEndpointTest(trimmedEndpointModelId)}
-                disabled={isTestingEndpoint || !hasRequiredConfig || !trimmedEndpointModelId}
-                className="px-6"
-              >
-                {isTestingEndpoint ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                Test
-              </Button>
+        {!isOfficial ? (
+          <Field>
+            <FieldLabel htmlFor={`endpoint-test-model-${draft.id}`}>Endpoint test</FieldLabel>
+            <FieldDescription>
+              Please choose one model from Available Models for endpoint testing.
+            </FieldDescription>
+            <div className={fieldRowClassName}>
+              <Input
+                id={`endpoint-test-model-${draft.id}`}
+                value={endpointModelId}
+                onChange={(event) => setEndpointModelId(event.target.value)}
+                placeholder={endpointModelPlaceholder(notableProviderKey ?? draft.id, draft.provider_type)}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                onWheel={scrollInputContentOnWheel}
+                className={cn(scrollableInputClassName, "font-mono")}
+              />
+              <div className={fieldActionClassName}>
+                <Button
+                  type="button"
+                  variant="default"
+                  onClick={() => onEndpointTest(trimmedEndpointModelId)}
+                  disabled={isTestingEndpoint || !hasRequiredConfig || !trimmedEndpointModelId}
+                  className="px-6"
+                >
+                  {isTestingEndpoint ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                  Test
+                </Button>
+              </div>
             </div>
-          </div>
-        </Field>
+          </Field>
+        ) : null}
         {availableSdks.length || availableModels.length || hasEmptyModelListWarning ? (
           <div className="border-t pt-3 space-y-2 text-xs" data-testid="provider-capabilities">
             {availableSdks.length > 0 ? (
@@ -507,28 +631,59 @@ export function ProviderCard({
             ) : null}
             {hasAvailableModels ? (
               <div className="space-y-2 pb-1">
-                <div className="text-muted-foreground">Available Models:</div>
+                <div className="text-muted-foreground">{availableModelsLabel}</div>
                 <div
                   data-testid="available-models-list"
                   className={cn("flex gap-1 flex-wrap", !showAllModels && "max-h-[2.75rem] overflow-hidden")}
                 >
-                  {visibleModels.map((model) => (
-                    <Badge
-                      key={model.id}
-                      asChild
-                      variant="outline"
-                      className="cursor-pointer border-border/70 bg-muted/20 font-mono text-muted-foreground hover:bg-muted/40"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => void copyAvailableModelId(model.id)}
-                        aria-label={`Copy model ${model.id}`}
-                        title={`Copy ${model.id}`}
+                  <TooltipProvider>
+                    {visibleModels.map((model) => {
+                    const status = isOfficial ? routeDisplayStatus(model, isGettingModels) : modelRouteStatus(model)
+                    const statusLabel = routeStatusLabel(status)
+                    const modelType = isOfficial ? officialModelType(model) : null
+                    const modelTypeLabel = isOfficial ? officialModelTypeLabel(model) : null
+                    const isCapabilityModel = isOfficial && isCapabilityLibraryModel(model)
+                    const profileTooltipText = isOfficial && !isCapabilityModel ? routeProfileTooltipText(model, status) : null
+                    const tooltipText = isCapabilityModel ? modelTypeLabel : profileTooltipText ?? modelTypeLabel
+                    const title = isOfficial
+                      ? isCapabilityModel && status !== "failed"
+                        ? `${model.id}${modelTypeLabel ? ` - ${modelTypeLabel}` : ""}`
+                        : `${model.id} - ${profileTooltipText ?? statusLabel}${modelTypeLabel ? ` - ${modelTypeLabel}` : ""}`
+                      : `Copy ${model.id}`
+                    const tag = (
+                      <Tag
+                        key={`${model.route_id ?? model.id}:${model.status ?? "model"}`}
+                        asChild
+                        variant={isOfficial ? routeStatusTagVariant(status, model) : "muted"}
+                        size="xs"
+                        className={cn(
+                          "cursor-pointer font-mono hover:bg-muted/40",
+                          status === "testing" && "api-route-tag-border-flow",
+                        )}
                       >
-                        {model.id}
-                      </button>
-                    </Badge>
-                  ))}
+                        <button
+                          type="button"
+                          onClick={() => void copyAvailableModelId(model.id)}
+                          aria-label={`Copy ${copyTargetLabel} ${model.id}`}
+                          title={title}
+                          data-route-status={isOfficial ? status : undefined}
+                          data-model-type={modelType ?? undefined}
+                        >
+                          {model.id}
+                        </button>
+                      </Tag>
+                    )
+                    if (!isOfficial || !tooltipText) return tag
+                    return (
+                      <Tooltip key={`${model.route_id ?? model.id}:${model.status ?? "model"}:tooltip`}>
+                        <TooltipTrigger asChild>{tag}</TooltipTrigger>
+                        <TooltipContent className="max-w-sm whitespace-pre-line break-words">
+                          {tooltipText}
+                        </TooltipContent>
+                      </Tooltip>
+                    )
+                  })}
+                  </TooltipProvider>
                 </div>
                 {availableModels.length > availableModelsPreviewLimit ? (
                   <Button
@@ -545,7 +700,7 @@ export function ProviderCard({
             ) : null}
             {hasEmptyModelListWarning ? (
               <div className="space-y-2 pb-1">
-                <div className="text-muted-foreground">Available Models:</div>
+                <div className="text-muted-foreground">{availableModelsLabel}</div>
                 <Badge variant="warning" className="gap-1">
                   <TriangleAlert className="size-3" />
                   No models returned

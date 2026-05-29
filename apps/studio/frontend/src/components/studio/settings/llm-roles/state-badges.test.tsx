@@ -1,8 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
+import type { ProviderModelOption, ProviderUiState } from "@/api/llm"
 import { CoolingDownCountdown, formatCoolingDownRemaining } from "./cooling-down-countdown"
 import { ProviderStateBadge } from "./provider-state-badge"
-import { RoleFitBadge } from "./role-fit-badge"
+import { deriveRoleRouteStatus, roleRouteStatusDetail, RoleRouteStatusLight } from "./role-route-status"
 
 describe("LLM role state badges", () => {
   it("renders exactly the five provider state labels", () => {
@@ -25,20 +26,62 @@ describe("LLM role state badges", () => {
     expect(html).not.toContain(">invalid_model<")
   })
 
-  it("renders exactly the four role fit labels", () => {
+  it("keeps role provider status compact and puts exact diagnostics on the status light", () => {
+    const detail = roleRouteStatusDetail({
+      providerModel: providerModel("cooling_down", {
+        ui_detail: "Retry after transient rate limit.",
+        retry_at: "2026-05-26T18:30:00Z",
+      }),
+      roleFitEntry: {
+        route_id: "cooling:gpt-5",
+        role_fit: "needs_test",
+        warnings: [{ code: "thinking_capability_unknown" }],
+      },
+    })
     const html = renderToStaticMarkup(
-      <>
-        <RoleFitBadge fit="using" />
-        <RoleFitBadge fit="downgraded" />
-        <RoleFitBadge fit="needs_test" />
-        <RoleFitBadge fit="not_fit" />
-      </>,
+      <RoleRouteStatusLight status="limited" detail={detail} />,
     )
 
-    expect(html).toContain("Using")
-    expect(html).toContain("Downgraded")
-    expect(html).toContain("Needs Test")
-    expect(html).toContain("Not Fit")
+    expect(detail).toContain("Thinking is required but capability is unknown.")
+    expect(detail).toContain("Cooling Down: Retry after transient rate limit.")
+    expect(html).toContain('data-role-route-status-light="true"')
+    expect(html).toContain("Limited:")
+    expect(html).toContain("Thinking is required but capability is unknown.")
+    expect(html).not.toMatch(/>Can Run<\/span>|>Limited<\/span>|>Blocked<\/span>/)
+    expect(html).not.toContain("Using")
+    expect(html).not.toContain("Downgraded")
+    expect(html).not.toContain("Needs Test")
+    expect(html).not.toContain("Not Fit")
+  })
+
+  it("maps rich route and role-fit projections into three user states", () => {
+    const readyProvider = providerModel("ready")
+
+    expect(deriveRoleRouteStatus({
+      providerModel: readyProvider,
+      roleFitEntry: { route_id: "ready:gpt-5", role_fit: "using" },
+    })).toBe("runnable")
+    expect(deriveRoleRouteStatus({
+      providerModel: readyProvider,
+      roleFitEntry: { route_id: "limited:gpt-5", role_fit: "downgraded" },
+    })).toBe("limited")
+    expect(deriveRoleRouteStatus({
+      providerModel: readyProvider,
+      roleFitEntry: { route_id: "needs-test:gpt-5", role_fit: "needs_test" },
+    })).toBe("limited")
+    expect(deriveRoleRouteStatus({
+      providerModel: readyProvider,
+      roleFitEntry: { route_id: "blocked:gpt-5", role_fit: "not_fit" },
+    })).toBe("blocked")
+    expect(deriveRoleRouteStatus({
+      providerModel: providerModel("needs_setup"),
+      roleFitEntry: { route_id: "setup:gpt-5", role_fit: "using" },
+    })).toBe("blocked")
+    expect(deriveRoleRouteStatus({
+      providerModel: readyProvider,
+      roleFitEntry: { route_id: "failed:gpt-5", role_fit: "using" },
+      testStatus: "network_error",
+    })).toBe("blocked")
   })
 
   it("formats Cooling Down countdowns and exposes a Test Now action", () => {
@@ -60,3 +103,20 @@ describe("LLM role state badges", () => {
     expect(html).not.toContain("canonical")
   })
 })
+
+function providerModel(uiState: ProviderUiState, overrides: Partial<ProviderModelOption> = {}): ProviderModelOption {
+  return {
+    route_id: `${uiState}:gpt-5`,
+    endpoint_id: uiState,
+    provider_label: uiState,
+    provider_kind: "third_party",
+    provider_model_id: "gpt-5",
+    ui_state: uiState,
+    ui_detail: null,
+    retry_at: null,
+    reason_code: null,
+    capability_state: "unknown",
+    capabilities: {},
+    ...overrides,
+  }
+}

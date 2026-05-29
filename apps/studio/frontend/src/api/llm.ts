@@ -46,6 +46,20 @@ export interface ProviderEndpoint {
   metadata: Record<string, unknown>
 }
 
+export interface VerifiedProfile {
+  profile_id: string
+  capability: string
+  method_id: string
+  request_mapper_id: string
+  status: 'ready' | 'failed' | 'catalog_candidate'
+  default?: boolean
+  fallback_rank?: number
+  input_modalities?: string[]
+  output_modalities?: string[]
+  runtime_overrides?: Record<string, unknown>
+  metadata?: Record<string, unknown>
+}
+
 export interface ProviderRoute {
   route_id: string
   endpoint_id: string
@@ -55,6 +69,7 @@ export interface ProviderRoute {
   display_name?: string | null
   status: RouteStatus
   capabilities: Record<string, CapabilityValue>
+  verified_profiles?: VerifiedProfile[]
   metadata: Record<string, unknown>
 }
 
@@ -175,6 +190,11 @@ export type TestStatus =
 
 export interface ModelInfo {
   id: string
+  route_id?: string
+  status?: RouteStatus
+  verified_profile_count?: number
+  verified_profiles?: VerifiedProfile[]
+  last_probe_message?: string | null
   capabilities?: Record<string, unknown>
 }
 
@@ -246,6 +266,24 @@ export interface ProviderTestResponse {
   available_sdks?: string[]
 }
 
+export interface ProviderTestProgressOptions {
+  onProgress?: (response: ProviderTestResponse, job: EndpointTestJobResponse) => void
+}
+
+export interface EndpointTestJobResponse {
+  job_id: string
+  endpoint_id: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  total_model_count: number
+  tested_model_count: number
+  verified_route_count: number
+  failed_model_count: number
+  catalog_only_count: number
+  message?: string | null
+  available_models: ModelInfo[]
+  available_sdks: string[]
+}
+
 export interface NotableModelsResponse {
   notable_models: string[]
 }
@@ -292,11 +330,30 @@ export interface RoleRouteEntry {
   runtime_settings_source?: string | null
 }
 
+export type RoleProviderPreference = 'official_first' | 'ready_first' | 'manual_order'
+export type RoleThinkingPreference = 'off' | 'preferred' | 'required'
+export type RoleTokenIntentMode = 'default' | 'maximum_available' | 'target' | 'required_minimum'
+export type RoleTokenDowngrade = 'allow' | 'allow_with_warning' | 'block'
+
+export interface RoleTokenIntent {
+  mode: RoleTokenIntentMode
+  value?: number | null
+  downgrade?: RoleTokenDowngrade
+}
+
+export interface RoleIntent {
+  provider_preference?: RoleProviderPreference
+  thinking?: RoleThinkingPreference
+  target_context_tokens?: RoleTokenIntent | null
+  target_output_tokens?: RoleTokenIntent | null
+  cost_priority?: 'quality' | 'balanced' | 'low_cost' | null
+}
+
 export interface RoleEntry {
   role_kind?: RoleKind
   model_fallback: boolean
   model_fallback_enabled?: boolean
-  intent?: Record<string, unknown>
+  intent?: RoleIntent
   active_model: string
   models: Record<string, RoleModelEntry>
   model_groups?: RoleModelGroup[]
@@ -335,6 +392,36 @@ export interface MaterializationReport {
   skipped_provider_details: Array<Record<string, unknown>>
 }
 
+export type RoleTestStatus = 'ok' | 'warning' | 'blocked' | 'failed'
+export type RoleTestProviderStatus = 'ok' | 'untested' | 'blocked' | 'failed'
+export type RoleTestAdmissionDecision = 'admit' | 'temporary_skip' | 'block'
+
+export interface RoleTestProviderResult {
+  route_id: string
+  provider_label: string
+  provider_ui_state: ProviderUiState
+  role_fit: RoleFitState
+  admission_decision: RoleTestAdmissionDecision
+  status: RoleTestProviderStatus
+  warnings: Array<Record<string, unknown>>
+  retry_at?: string | null
+  message?: string | null
+  resolved_settings: Record<string, unknown>
+}
+
+export interface RoleTestModelGroupResult {
+  canonical_id: string
+  display_name: string
+  provider_results: RoleTestProviderResult[]
+}
+
+export interface RoleTestResponse {
+  role_name: string
+  status: RoleTestStatus
+  warnings: Array<Record<string, unknown>>
+  model_groups: RoleTestModelGroupResult[]
+}
+
 interface BackendRolesData {
   schema_version: 3
   model_profiles: Record<string, unknown>
@@ -346,7 +433,7 @@ interface BackendRoleEntry {
   role_kind: RoleKind
   system_prompt_prefix: string
   model_fallback_enabled: boolean
-  intent: Record<string, unknown>
+  intent: RoleIntent
   model_groups: RoleModelGroup[]
   fallback_chain: RoleRouteEntry[]
   lint_requirements: Record<string, LintSeverity>
@@ -728,6 +815,62 @@ function routeStatusFromTestStatus(status: TestStatus): RouteStatus {
   return 'failed'
 }
 
+function modelInfoFromRoute(route: ProviderRoute): ModelInfo {
+  const lastProbeMessage = route.metadata.last_probe_message
+  return {
+    id: route.provider_model_id,
+    route_id: route.route_id,
+    status: route.status,
+    verified_profile_count: (route.verified_profiles ?? []).filter((profile) => profile.status === 'ready').length,
+    verified_profiles: route.verified_profiles ?? [],
+    last_probe_message: typeof lastProbeMessage === 'string' ? lastProbeMessage : null,
+    capabilities: route.capabilities,
+  }
+}
+
+function catalogCandidateModelInfos(endpoint: ProviderEndpoint, routes: ProviderRoute[]): ModelInfo[] {
+  const library = endpoint.metadata.capability_library
+  if (!Array.isArray(library)) return []
+  const routedModelIds = new Set(routes.map((route) => route.provider_model_id))
+  const models: ModelInfo[] = []
+  for (const entry of library) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const candidate = entry as Record<string, unknown>
+    const modelId = candidate.model_id
+    if (typeof modelId !== 'string' || !modelId || routedModelIds.has(modelId)) continue
+    models.push({
+      id: modelId,
+      status: routeStatusFromMetadata(candidate.route_status) ?? 'unverified_manual',
+      verified_profile_count: 0,
+      last_probe_message: typeof candidate.last_probe_message === 'string'
+        ? candidate.last_probe_message
+        : null,
+      capabilities: catalogCandidateCapabilities(candidate),
+    })
+  }
+  return models
+}
+
+function catalogCandidateCapabilities(candidate: Record<string, unknown>): Record<string, unknown> {
+  const capabilities: Record<string, unknown> = {}
+  const modelType = candidate.model_type
+  const modelTypeLabel = candidate.model_type_label
+  const candidateMethods = candidate.candidate_methods
+  if (typeof modelType === 'string') capabilities.model_type = modelType
+  if (typeof modelTypeLabel === 'string') capabilities.model_type_label = modelTypeLabel
+  if (Array.isArray(candidateMethods)) {
+    capabilities.candidate_methods = candidateMethods.filter((method): method is string => typeof method === 'string')
+  }
+  return capabilities
+}
+
+function routeStatusFromMetadata(value: unknown): RouteStatus | null {
+  if (value === 'verified' || value === 'unverified_manual' || value === 'disabled' || value === 'failed') {
+    return value
+  }
+  return null
+}
+
 function testResultFromEndpoint(
   endpoint: ProviderEndpoint,
   routes: ProviderRoute[],
@@ -755,11 +898,13 @@ function testResultFromEndpoint(
     last_test_at: endpoint.last_test_at ?? '',
     last_test_message: endpoint.last_test_message ?? '',
     last_error_code: endpoint.status === 'failed' ? 'endpoint_test_failed' : '',
-    available_models: visibleRoutes.map((route) => ({
-      id: route.provider_model_id,
-      capabilities: route.capabilities,
-    })),
-    available_sdks: visibleRoutes.length > 0 ? [endpoint.protocol] : [],
+    available_models: [
+      ...visibleRoutes.map(modelInfoFromRoute),
+      ...(endpoint.provider_kind === 'official' ? catalogCandidateModelInfos(endpoint, routes) : []),
+    ],
+    available_sdks: visibleRoutes.length > 0 || catalogCandidateModelInfos(endpoint, routes).length > 0
+      ? [endpoint.protocol]
+      : [],
   }
 }
 
@@ -935,10 +1080,7 @@ function providerTestResponseFromEndpoint(
     model_seen: successfulRoutes[0]?.provider_model_id ?? null,
     message: endpoint.last_test_message ?? null,
     error_code: endpointErrorCode(endpoint),
-    available_models: successfulRoutes.map((route) => ({
-      id: route.provider_model_id,
-      capabilities: route.capabilities,
-    })),
+    available_models: successfulRoutes.map(modelInfoFromRoute),
     available_sdks: successfulRoutes.length > 0 ? [endpoint.protocol] : [],
   }
 }
@@ -1157,6 +1299,7 @@ export async function testProvider(
 
 export async function getProviderModels(
   request: ProviderTestRequest,
+  options: ProviderTestProgressOptions = {},
 ): Promise<ProviderTestResponse> {
   if (!request.api_key.trim()) {
     return {
@@ -1170,7 +1313,7 @@ export async function getProviderModels(
   }
   rememberEndpointSecret(request.id, request.api_key)
   const existing = cachedRegistry?.provider_endpoints[request.id]
-  await putRegistryEndpoints({
+  const savedRegistry = await putRegistryEndpoints({
     [request.id]: endpointFromCredentialUpdate(
       {
         id: request.id,
@@ -1182,16 +1325,17 @@ export async function getProviderModels(
       existing,
     ),
   })
+  const savedEndpoint = savedRegistry.provider_endpoints[request.id]
+  if (savedEndpoint?.provider_kind === 'official') {
+    return testOfficialProviderModelsWithJob(request, savedEndpoint, options)
+  }
   const response = await api.post<EndpointTestResponse>(`/llm/endpoints/${segment(request.id)}/test`)
   const registry = cacheRegistry(response.data.registry)
   const endpoint = registry.provider_endpoints[request.id]
   if (!endpoint) throw new Error(`Endpoint model list response omitted endpoint: ${request.id}`)
   const routes = routesForEndpoint(registry, request.id)
   const modelListReachable = endpoint.status !== 'failed'
-  const models = routes.map((route) => ({
-    id: route.provider_model_id,
-    capabilities: route.capabilities,
-  }))
+  const models = routes.map(modelInfoFromRoute)
   upsertCachedResult(request.id, {
     params_fingerprint: paramsFingerprint({
       api_key: request.api_key,
@@ -1216,6 +1360,101 @@ export async function getProviderModels(
     available_models: models,
     available_sdks: models.length > 0 ? [endpoint.protocol] : [],
   }
+}
+
+async function testOfficialProviderModelsWithJob(
+  request: ProviderTestRequest,
+  endpoint: ProviderEndpoint,
+  options: ProviderTestProgressOptions,
+): Promise<ProviderTestResponse> {
+  const started = await startEndpointTestJob(request.id)
+  options.onProgress?.(providerTestResponseFromEndpointTestJob(request, endpoint, started), started)
+  const completed = await waitForEndpointTestJob(started, (job) => {
+    options.onProgress?.(providerTestResponseFromEndpointTestJob(request, endpoint, job), job)
+  })
+  return providerTestResponseFromEndpointTestJob(request, endpoint, completed)
+}
+
+async function startEndpointTestJob(endpointId: string): Promise<EndpointTestJobResponse> {
+  const response = await api.post<EndpointTestJobResponse>(`/llm/endpoints/${segment(endpointId)}/test-jobs`)
+  return response.data
+}
+
+async function getEndpointTestJob(jobId: string): Promise<EndpointTestJobResponse> {
+  const response = await api.get<EndpointTestJobResponse>(`/llm/endpoint-test-jobs/${segment(jobId)}`)
+  return response.data
+}
+
+async function waitForEndpointTestJob(
+  job: EndpointTestJobResponse,
+  onProgress?: (job: EndpointTestJobResponse) => void,
+): Promise<EndpointTestJobResponse> {
+  let current = job
+  while (current.status === 'queued' || current.status === 'running') {
+    await delay(750)
+    current = await getEndpointTestJob(current.job_id)
+    onProgress?.(current)
+  }
+  return current
+}
+
+function providerTestResponseFromEndpointTestJob(
+  request: ProviderTestRequest,
+  endpoint: ProviderEndpoint,
+  job: EndpointTestJobResponse,
+): ProviderTestResponse {
+  const completed = job.status === 'completed'
+  const failed = job.status === 'failed'
+  const availableModels = job.available_models ?? []
+  const availableSdks = job.available_sdks?.length ? job.available_sdks : [endpoint.protocol]
+  const lastTestStatus: TestStatus = failed ? 'error' : completed ? 'ok' : 'untested'
+  const cachedResult: ProviderTestResult = {
+    params_fingerprint: paramsFingerprint({
+      api_key: request.api_key,
+      base_url: request.base_url ?? '',
+      provider_type: request.provider_type,
+    }),
+    base_url: request.base_url ?? '',
+    provider_type: request.provider_type,
+    last_test_status: lastTestStatus,
+    last_test_at: new Date().toISOString(),
+    last_test_message: job.message ?? '',
+    last_error_code: failed ? 'endpoint_test_failed' : '',
+    available_models: availableModels,
+    available_sdks: availableSdks,
+  }
+  upsertCachedResult(request.id, cachedResult)
+  if (cachedRegistry?.provider_endpoints[request.id]) {
+    cachedRegistry = {
+      ...cachedRegistry,
+      provider_endpoints: {
+        ...cachedRegistry.provider_endpoints,
+        [request.id]: {
+          ...cachedRegistry.provider_endpoints[request.id],
+          status: failed
+            ? 'failed'
+            : completed && job.verified_route_count > 0
+            ? 'verified'
+            : 'unverified_manual',
+          last_test_at: cachedResult.last_test_at,
+          last_test_message: cachedResult.last_test_message,
+        },
+      },
+    }
+  }
+  return {
+    status: failed ? 'error' : 'ok',
+    latency_ms: null,
+    model_seen: availableModels[0]?.id ?? null,
+    message: job.message ?? null,
+    error_code: failed ? 'endpoint_test_failed' : null,
+    available_models: availableModels,
+    available_sdks: availableSdks,
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, ms))
 }
 
 export async function testProviderEndpoint(
@@ -1278,10 +1517,7 @@ export async function testProviderModels(
   const endpointRoutes = routesForEndpoint(response.data.registry, request.provider_id)
   return {
     results: response.data.results,
-    available_models: endpointRoutes.map((route) => ({
-      id: route.provider_model_id,
-      capabilities: route.capabilities,
-    })),
+    available_models: endpointRoutes.map(modelInfoFromRoute),
   }
 }
 
@@ -1289,10 +1525,7 @@ export function providerModelsFromRegistry(
   registry: CredentialRegistryResponse,
   endpointId: string,
 ): ModelInfo[] {
-  return routesForEndpoint(registry, endpointId).map((route) => ({
-    id: route.provider_model_id,
-    capabilities: route.capabilities,
-  }))
+  return routesForEndpoint(registry, endpointId).map(modelInfoFromRoute)
 }
 
 export async function getRoles(): Promise<RolesData> {
@@ -1309,4 +1542,14 @@ export async function getRole(roleName: string): Promise<RoleEntry> {
 export async function putRoles(data: RolesData): Promise<RolesData> {
   const response = await api.put<RolesData>('/llm/roles', rolesDataToBackend(data))
   return rolesDataFromBackend(response.data, cachedRegistry ?? null)
+}
+
+export async function deleteRole(roleName: string): Promise<RolesData> {
+  const response = await api.delete<RolesData>(`/llm/roles/${segment(roleName)}`)
+  return rolesDataFromBackend(response.data, cachedRegistry ?? null)
+}
+
+export async function testRole(roleName: string): Promise<RoleTestResponse> {
+  const response = await api.post<RoleTestResponse>(`/llm/roles/${segment(roleName)}/test`, {})
+  return response.data
 }

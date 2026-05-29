@@ -4,10 +4,10 @@ import { useAppSettings } from "@/hooks/useAppSettings"
 import { buildPutPayload, useDebouncedCredentialsSave } from "@/hooks/useDebouncedCredentialsSave"
 import { useDebouncedRolesSave } from "@/hooks/useDebouncedRolesSave"
 import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
-import { getCredentials, getModelGroups, getProviderModels, getRoles, testProviderEndpoint, type CredentialsState, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
+import { deleteRole, getCredentials, getModelGroups, getProviderModels, getRoles, testProviderEndpoint, type CredentialsState, type EndpointTestJobResponse, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
-import { draftsFromCredentials, draftFromAddProviderSubmission, providerCachedTestResult, providerDraftForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
+import { draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
 import { normalizeRolesDraft, validateRolesDraft } from "./role-utils"
 import type { ProviderDraft, SettingsPageProps, SettingsTab } from "./types"
 
@@ -25,6 +25,19 @@ function mergeStrings(left: string[] = [], right: string[] = []): string[] {
   return Array.from(new Set([...left, ...right]))
 }
 
+function officialProviderProgressToastMessage(
+  providerName: string,
+  job: EndpointTestJobResponse,
+): string {
+  const total = job.total_model_count
+  const tested = job.tested_model_count
+  const verified = job.verified_route_count
+  if (total > 0) {
+    return `Testing ${providerName} routes (${tested}/${total}, ${verified} verified)...`
+  }
+  return `Testing ${providerName} routes...`
+}
+
 function resetProviderTestOutcome(
   provider: CredentialsState["providers"][number],
 ): CredentialsState["providers"][number] {
@@ -36,6 +49,28 @@ function resetProviderTestOutcome(
     last_error_code: "",
     available_models: [],
     available_sdks: [],
+  }
+}
+
+export function officialProviderTestSummary(models: ModelInfo[]): {
+  kind: "success" | "warning"
+  message: string
+} {
+  const verifiedCount = models.filter((model) => model.status === "verified").length
+  const notVerifiedCount = Math.max(0, models.length - verifiedCount)
+  if (verifiedCount === 0) {
+    return {
+      kind: "warning",
+      message: "Provider catalog is reachable, but no routes passed testing.",
+    }
+  }
+  const verifiedLabel = verifiedCount === 1 ? "1 verified route" : `${verifiedCount} verified routes`
+  const notVerifiedLabel = notVerifiedCount === 1 ? "1 not verified" : `${notVerifiedCount} not verified`
+  return {
+    kind: "success",
+    message: notVerifiedCount > 0
+      ? `Test complete (${verifiedLabel}, ${notVerifiedLabel})`
+      : `Test complete (${verifiedLabel})`,
   }
 }
 
@@ -251,7 +286,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const { flush: flushCredentialsSave, queue: queueSave, status: saveStatus } = useDebouncedCredentialsSave({
     onSaved: handleSaved,
   })
-  const { cancel: cancelRolesSave, queue: queueRolesSave, status: rolesSaveStatus } = useDebouncedRolesSave({
+  const { cancel: cancelRolesSave, flush: flushRolesSave, queue: queueRolesSave, status: rolesSaveStatus } = useDebouncedRolesSave({
     onSaved: (next) => {
       setRolesData(next)
       setRolesError(null)
@@ -405,18 +440,33 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       base_url: draft.base_url,
       provider_type: draft.provider_type,
     }
+    const isOfficial = inferProviderKind(draft) === "official"
 
     setProviderTesting(providerId, "models")
     const toastId = `get-models-${providerId}`
-    toast.loading(`Getting models for ${draft.name || "provider"}...`, { id: toastId })
+    toast.loading(
+      isOfficial
+        ? `Testing ${draft.name || "provider"} routes...`
+        : `Getting models for ${draft.name || "provider"}...`,
+      { id: toastId },
+    )
 
     try {
+      const handleOfficialProgress = (progress: ProviderTestResponse, job: EndpointTestJobResponse) => {
+        const latestDraft = providerDraftForAction(draftsRef.current, providerId)
+        if (!latestDraft || !providerTestParamsMatch(latestDraft, testedParams)) return
+        setCredentials((current) => upsertProviderModelsListResponse(current, latestDraft, progress))
+        toast.loading(
+          officialProviderProgressToastMessage(latestDraft.name || "provider", job),
+          { id: toastId },
+        )
+      }
       const response = await getProviderModels({
         id: draft.id,
         provider_type: draft.provider_type,
         api_key: draft.api_key.trim(),
         base_url: draft.base_url || undefined,
-      })
+      }, isOfficial ? { onProgress: handleOfficialProgress } : undefined)
 
       const latestDraft = providerDraftForAction(draftsRef.current, providerId)
       if (!latestDraft || !providerTestParamsMatch(latestDraft, testedParams)) {
@@ -425,11 +475,19 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       }
       invalidatedTestOutcomeIdsRef.current.delete(providerId)
 
-      setCredentials((current) => upsertProviderModelsListResponse(current, latestDraft, response))
+      setCredentials((current) => (
+        isOfficial
+          ? upsertProviderTestResponse(current, latestDraft, response)
+          : upsertProviderModelsListResponse(current, latestDraft, response)
+      ))
 
       if (response.status === "ok") {
-        const modelCount = response.available_models?.length ?? 0
-        if (modelCount > 0) {
+        const models = response.available_models ?? []
+        const modelCount = models.length
+        if (isOfficial) {
+          const summary = officialProviderTestSummary(models)
+          toast[summary.kind](summary.message, { id: toastId })
+        } else if (modelCount > 0) {
           toast.success(`Models listed (${modelCount} models)`, { id: toastId })
         } else {
           toast.warning("Model-list endpoint is reachable, but no models were returned.", { id: toastId })
@@ -438,7 +496,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         toast.error(composeTestErrorMessage(response.status, response.error_code, response.message), { id: toastId })
       }
     } catch (error) {
-      toast.error(composeRequestErrorMessage(error, "Get models failed"), { id: toastId })
+      toast.error(composeRequestErrorMessage(error, isOfficial ? "Provider test failed" : "Get models failed"), { id: toastId })
     } finally {
       setProviderTesting(providerId, null)
     }
@@ -502,6 +560,21 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     queueRolesSave(() => normalized)
   }, [cancelRolesSave, queueRolesSave])
 
+  const deleteRoleByName = useCallback(async (roleName: string) => {
+    await flushRolesSave()
+    cancelRolesSave()
+    try {
+      const next = await deleteRole(roleName)
+      rolesDataRef.current = next
+      setRolesData(next)
+      setRolesError(null)
+    } catch (error) {
+      const message = composeRequestErrorMessage(error, "Delete failed")
+      setRolesError(message)
+      toast.error(`LLM Role delete failed: ${message}`)
+    }
+  }, [cancelRolesSave, flushRolesSave])
+
   return (
     <SettingsPageContent
       activeTab={activeTab}
@@ -533,6 +606,8 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       onAddProvider={addProviderWithData}
       onProviderModelsUpdated={updateProviderModels}
       onRolesDataChange={updateRolesData}
+      onDeleteRole={deleteRoleByName}
+      onBeforeRoleTest={flushRolesSave}
     />
   )
 }

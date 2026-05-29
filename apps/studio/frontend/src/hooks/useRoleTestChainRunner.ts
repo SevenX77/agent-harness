@@ -9,7 +9,7 @@ import {
 } from "@/api/llm"
 import { credentialsByProviderCode } from "@/components/studio/settings/route-credentials"
 
-export type RoleChainStatus = ProviderTestStatus | "testing" | "idle"
+export type RoleChainStatus = ProviderTestStatus | "testing" | "idle" | "warning"
 type RoleProviderTestFn = (
   request: ProviderTestRequest & { model_id: string }
 ) => Promise<ProviderTestResponse>

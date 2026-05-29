@@ -24,9 +24,11 @@ _credentials_lock = _WRITE_LOCK
 SECRET_REDACTION_PLACEHOLDER = "**********"
 LEGACY_FAKE_TEST_MESSAGE = "Credential present."
 LEGACY_FAKE_TEST_REPLACEMENT_MESSAGE = "Needs retest after v4 provider probe upgrade."
+CATALOG_ONLY_PROBE_MESSAGE = "No verified language route profile."
 CURATED_PROVIDER_KIND_BY_ENDPOINT_ID = {
     "anthropic-official": "official",
-    "openai-direct": "official",
+    "ark-official": "official",
+    "openai-official": "official",
     "deepseek-official": "official",
     "gemini-official": "official",
 }
@@ -56,7 +58,7 @@ def load_credentials(path: Path | None = None) -> LLMCredentialsFile:
             f"legacy provider credentials are rejected: {credential_path}"
         )
     try:
-        return _invalidate_legacy_fake_test_statuses(LLMCredentialsFile.model_validate(payload))
+        return _normalize_loaded_credentials(LLMCredentialsFile.model_validate(payload))
     except ValidationError as exc:
         raise ValueError(
             f"LLM_CREDENTIALS_SCHEMA: invalid v4 llm credentials schema: {credential_path}"
@@ -112,7 +114,10 @@ def upsert_endpoints(
             current = endpoints.get(endpoint_id)
             api_key = _preserved_secret(incoming, current)
             updates: dict[str, Any] = {"api_key": api_key}
-            if current is None:
+            curated_provider_kind = CURATED_PROVIDER_KIND_BY_ENDPOINT_ID.get(endpoint_id)
+            if curated_provider_kind is not None and _field_omitted(payload, "provider_kind"):
+                updates["provider_kind"] = curated_provider_kind
+            elif current is None:
                 updates["provider_kind"] = _seeded_provider_kind(endpoint_id, incoming, payload)
             elif _field_omitted(payload, "provider_kind"):
                 updates["provider_kind"] = current.provider_kind
@@ -204,6 +209,29 @@ def _seeded_provider_kind(
     return CURATED_PROVIDER_KIND_BY_ENDPOINT_ID.get(endpoint_id, "third_party")
 
 
+def _normalize_loaded_credentials(data: LLMCredentialsFile) -> LLMCredentialsFile:
+    return _repair_catalog_candidate_route_statuses(
+        _repair_curated_provider_kinds(_invalidate_legacy_fake_test_statuses(data))
+    )
+
+
+def _repair_curated_provider_kinds(data: LLMCredentialsFile) -> LLMCredentialsFile:
+    endpoints = {}
+    changed = False
+    for endpoint_id, endpoint in data.provider_endpoints.items():
+        curated_provider_kind = CURATED_PROVIDER_KIND_BY_ENDPOINT_ID.get(endpoint_id)
+        if curated_provider_kind is not None and endpoint.provider_kind != curated_provider_kind:
+            endpoints[endpoint_id] = endpoint.model_copy(
+                update={"provider_kind": curated_provider_kind}
+            )
+            changed = True
+        else:
+            endpoints[endpoint_id] = endpoint
+    if not changed:
+        return data
+    return data.model_copy(update={"provider_endpoints": endpoints})
+
+
 def _invalidate_legacy_fake_test_statuses(data: LLMCredentialsFile) -> LLMCredentialsFile:
     endpoints = {}
     changed = False
@@ -213,6 +241,44 @@ def _invalidate_legacy_fake_test_statuses(data: LLMCredentialsFile) -> LLMCreden
                 update={
                     "status": "unverified_manual",
                     "last_test_message": LEGACY_FAKE_TEST_REPLACEMENT_MESSAGE,
+                }
+            )
+            changed = True
+        else:
+            endpoints[endpoint_id] = endpoint
+    if not changed:
+        return data
+    return data.model_copy(update={"provider_endpoints": endpoints})
+
+
+def _repair_catalog_candidate_route_statuses(data: LLMCredentialsFile) -> LLMCredentialsFile:
+    endpoints = {}
+    changed = False
+    for endpoint_id, endpoint in data.provider_endpoints.items():
+        library = endpoint.metadata.get("capability_library")
+        if not isinstance(library, list):
+            endpoints[endpoint_id] = endpoint
+            continue
+        next_library = []
+        endpoint_changed = False
+        for entry in library:
+            if (
+                isinstance(entry, dict)
+                and entry.get("status") == "catalog_candidate"
+                and entry.get("route_status") == "failed"
+                and entry.get("last_probe_message") == CATALOG_ONLY_PROBE_MESSAGE
+            ):
+                next_library.append({**entry, "route_status": "unverified_manual"})
+                endpoint_changed = True
+            else:
+                next_library.append(entry)
+        if endpoint_changed:
+            endpoints[endpoint_id] = endpoint.model_copy(
+                update={
+                    "metadata": {
+                        **endpoint.metadata,
+                        "capability_library": next_library,
+                    }
                 }
             )
             changed = True

@@ -33,11 +33,18 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { roleChainStatusKey, type RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
-import type { RoleChainStatus } from "@/hooks/useRoleTestChainRunner"
-import type { RolesData } from "@/api/llm"
+import type { MaterializationReportEntry, ProviderModelOption, RolesData } from "@/api/llm"
 import { appendProviderToModel, removeProviderFromRole, reorderProviderInRole } from "../role-utils"
 import { IconTooltip } from "./IconTooltip"
-import { ProviderTestStatusLight } from "./RoleBadges"
+import {
+  deriveRoleRouteStatus,
+  roleRouteStatusDetail,
+  roleRouteStatusSurfaceClass,
+  RoleRouteStatusLight,
+} from "./role-route-status"
+
+const EMPTY_PROVIDER_MODELS_BY_ROUTE_ID: ReadonlyMap<string, ProviderModelOption> = new Map()
+const EMPTY_ROLE_FIT_BY_ROUTE_ID: ReadonlyMap<string, MaterializationReportEntry> = new Map()
 
 export const ProviderChain = memo(function ProviderChain({
   data,
@@ -46,6 +53,8 @@ export const ProviderChain = memo(function ProviderChain({
   modelName,
   providers,
   appendableProviderCodes,
+  providerModelsByRouteId,
+  roleFitByRouteId,
   testStatuses,
   onChange,
 }: {
@@ -55,9 +64,13 @@ export const ProviderChain = memo(function ProviderChain({
   modelName: string
   providers: string[]
   appendableProviderCodes: string[]
+  providerModelsByRouteId?: ReadonlyMap<string, ProviderModelOption>
+  roleFitByRouteId?: ReadonlyMap<string, MaterializationReportEntry>
   testStatuses: RoleChainStatusMap
   onChange: (next: RolesData) => void
 }) {
+  const providerModels = providerModelsByRouteId ?? EMPTY_PROVIDER_MODELS_BY_ROUTE_ID
+  const roleFits = roleFitByRouteId ?? EMPTY_ROLE_FIT_BY_ROUTE_ID
   const providerItems = useMemo(
     () => providers.map((providerCode, index) => providerItemId(providerCode, index)),
     [providers],
@@ -89,7 +102,7 @@ export const ProviderChain = memo(function ProviderChain({
       <SortableContext items={providerItems} strategy={rectSortingStrategy}>
         <div
           data-provider-grid="true"
-          className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,12rem),20rem))] justify-start gap-1.5"
+          className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,max(12rem,calc((100%_-_0.75rem)/3))),1fr))] justify-start gap-1.5"
           role="list"
           aria-label={`${modelName} provider fallback order`}
         >
@@ -102,6 +115,8 @@ export const ProviderChain = memo(function ProviderChain({
               modelCode={modelCode}
               providerCode={providerCode}
               index={index}
+              providerModel={providerModels.get(providerCode)}
+              roleFitEntry={roleFits.get(providerCode)}
               testStatus={testStatuses[roleChainStatusKey(modelCode, providerCode)]}
               onChange={onChange}
             />
@@ -124,6 +139,8 @@ const ProviderTag = memo(function ProviderTag({
   modelCode,
   providerCode,
   index,
+  providerModel,
+  roleFitEntry,
   testStatus,
   onChange,
 }: {
@@ -133,11 +150,22 @@ const ProviderTag = memo(function ProviderTag({
   modelCode: string
   providerCode: string
   index: number
+  providerModel?: ProviderModelOption
+  roleFitEntry?: MaterializationReportEntry
   testStatus?: RoleChainStatusMap[string]
   onChange: (next: RolesData) => void
 }) {
   const providerName = data.providers[providerCode]?.name ?? ""
-  const providerStatus = testStatus?.status
+  const roleRouteStatus = deriveRoleRouteStatus({
+    providerModel,
+    roleFitEntry,
+    testStatus: testStatus?.status,
+  })
+  const statusDetail = roleRouteStatusDetail({
+    providerModel,
+    roleFitEntry,
+    testMessage: testStatus?.message,
+  })
   const {
     attributes,
     listeners,
@@ -161,11 +189,12 @@ const ProviderTag = memo(function ProviderTag({
         variant="muted"
         size="xs"
         data-provider-card="true"
-        data-provider-test-status={providerStatus}
+        data-provider-test-status={testStatus?.status}
+        data-role-route-status={roleRouteStatus ?? undefined}
         data-dnd-drag-surface="provider"
         className={cn(
           "relative min-h-9 cursor-grab select-none flex-nowrap items-center gap-2 overflow-hidden border-border/70 bg-muted/35 text-muted-foreground active:cursor-grabbing",
-          providerStatusSurfaceClass(providerStatus),
+          roleRouteStatusSurfaceClass(roleRouteStatus),
         )}
         {...attributes}
         {...listeners}
@@ -182,7 +211,7 @@ const ProviderTag = memo(function ProviderTag({
           className="ml-auto shrink-0 gap-1"
           onPointerDown={(event) => event.stopPropagation()}
         >
-          {testStatus ? <ProviderTestStatusLight status={testStatus.status} message={testStatus.message} /> : null}
+          {roleRouteStatus ? <RoleRouteStatusLight status={roleRouteStatus} detail={statusDetail} /> : null}
           <IconTooltip label={`Remove ${providerName || providerCode}`}>
             <Button
               type="button"
@@ -200,14 +229,6 @@ const ProviderTag = memo(function ProviderTag({
     </div>
   )
 })
-
-function providerStatusSurfaceClass(status?: RoleChainStatus): string {
-  if (status === "ok") return "border-success-border ring-1 ring-success/25"
-  if (status === "testing") return "border-primary/70 ring-1 ring-primary/30"
-  if (status && status !== "idle") return "border-destructive-border ring-1 ring-destructive/25"
-  if (status === "idle") return "border-border"
-  return ""
-}
 
 function ProviderName({ label }: { label: string }) {
   return (

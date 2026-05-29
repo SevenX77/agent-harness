@@ -10,6 +10,7 @@ const tagVariants = cva(
     variants: {
       variant: {
         default: "border-border bg-muted/20 text-foreground",
+        info: "border-primary/70 bg-primary/10 text-foreground",
         success: "border-success bg-success/10 text-foreground",
         warning: "border-warning-border bg-warning-background text-warning-foreground",
         destructive: "border-destructive-border bg-destructive-background text-destructive-label",

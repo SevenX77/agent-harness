@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import re
+import uuid
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
@@ -43,6 +46,9 @@ from app.services.copilot_test import (
     _RateLimited,
     _Unauthorized,
 )
+from app.services.copilot_test import (
+    _probe_official_call_method as _probe_official_call_method_request,
+)
 from app.services.llm_credentials import (
     _route_slug,
     credentials_path,
@@ -77,6 +83,57 @@ from app.services.llm_state_projection import project_provider_model_state
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
 logger = logging.getLogger(__name__)
+OFFICIAL_PROVIDER_TEST_CONCURRENCY = 4
+OFFICIAL_PROVIDER_TEST_BATCH_SIZE = 8
+NO_VERIFIED_ROUTE_PROFILE_MESSAGE = "No verified language route profile."
+NO_WORKING_OFFICIAL_LANGUAGE_METHOD_MESSAGE = (
+    "No official language call method passed for this model."
+)
+
+
+@dataclass(frozen=True)
+class OfficialLanguageProbeCandidate:
+    profile_id: str
+    capability: str
+    method_id: str
+    request_mapper_id: str
+    runtime_settings: dict[str, Any] = field(default_factory=dict)
+    default_rank: int = 100
+    fallback_rank: int = 100
+    input_modalities: tuple[str, ...] = ("text",)
+    output_modalities: tuple[str, ...] = ("text",)
+
+
+class EndpointTestCompactModelInfo(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    route_id: str | None = None
+    status: Literal["verified", "unverified_manual", "disabled", "failed"] | None = None
+    verified_profile_count: int | None = None
+    last_probe_message: str | None = None
+    capabilities: dict[str, object] = Field(default_factory=dict)
+
+
+class EndpointTestJobResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str
+    endpoint_id: str
+    status: Literal["queued", "running", "completed", "failed"]
+    total_model_count: int = 0
+    tested_model_count: int = 0
+    verified_route_count: int = 0
+    failed_model_count: int = 0
+    catalog_only_count: int = 0
+    message: str | None = None
+    available_models: list[EndpointTestCompactModelInfo] = Field(default_factory=list)
+    available_sdks: list[str] = Field(default_factory=list)
+
+
+_endpoint_test_jobs: dict[str, EndpointTestJobResponse] = {}
+_running_endpoint_test_jobs: dict[str, str] = {}
+_endpoint_test_jobs_lock = asyncio.Lock()
 
 
 class EndpointUpsertRequest(BaseModel):
@@ -205,6 +262,52 @@ async def delete_registry_endpoint(endpoint_id: str) -> dict[str, Any]:
     return serialize_for_response(data)
 
 
+@router.post(
+    "/endpoints/{endpoint_id}/test-jobs",
+    response_model=EndpointTestJobResponse,
+)
+async def start_endpoint_test_job(endpoint_id: str) -> EndpointTestJobResponse:
+    """Start an official provider test job that reports compact progress."""
+    credentials = load_credentials()
+    endpoint = credentials.provider_endpoints.get(endpoint_id)
+    if endpoint is None:
+        raise HTTPException(status_code=404, detail=f"Unknown endpoint: {endpoint_id}")
+    if endpoint.provider_kind != "official":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Endpoint test jobs are only supported for official providers: {endpoint_id}",
+        )
+    async with _endpoint_test_jobs_lock:
+        running_job_id = _running_endpoint_test_jobs.get(endpoint_id)
+        if running_job_id is not None:
+            running = _endpoint_test_jobs.get(running_job_id)
+            if running is not None and running.status in {"queued", "running"}:
+                return running
+        job = EndpointTestJobResponse(
+            job_id=uuid.uuid4().hex,
+            endpoint_id=endpoint_id,
+            status="queued",
+            message="Provider test queued.",
+            available_sdks=[endpoint.protocol],
+        )
+        _endpoint_test_jobs[job.job_id] = job
+        _running_endpoint_test_jobs[endpoint_id] = job.job_id
+    asyncio.create_task(_run_official_endpoint_test_job(job.job_id, endpoint_id))
+    return job
+
+
+@router.get(
+    "/endpoint-test-jobs/{job_id}",
+    response_model=EndpointTestJobResponse,
+)
+async def get_endpoint_test_job(job_id: str) -> EndpointTestJobResponse:
+    """Return compact progress for one provider test job."""
+    job = _endpoint_test_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Unknown endpoint test job: {job_id}")
+    return job
+
+
 @router.post("/endpoints/{endpoint_id}/test", response_model=EndpointTestResponse)
 async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
     """Verify an endpoint by making the provider's minimal models-list call."""
@@ -282,10 +385,13 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
         if latest_endpoint.provider_kind == "official":
             profiles_by_model: dict[str, list[VerifiedProfile]] = {}
             catalog_only_models: list[str] = []
+            failed_language_models: list[str] = []
             for model_id in discovered_model_ids:
                 profiles = await _probe_official_model_profiles(latest_endpoint, model_id)
                 if profiles:
                     profiles_by_model[model_id] = profiles
+                elif _is_official_language_model_candidate(latest_endpoint, model_id):
+                    failed_language_models.append(model_id)
                 else:
                     catalog_only_models.append(model_id)
             latest_credentials, _ = _upsert_discovered_routes(
@@ -296,14 +402,20 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
                 replace_endpoint_routes=True,
                 verified_profiles_by_model=profiles_by_model,
             )
-            if catalog_only_models:
+            if profiles_by_model:
+                status = "verified"
+            if catalog_only_models or failed_language_models:
                 latest_endpoint = latest_endpoint.model_copy(
                     update={
                         "metadata": {
                             **latest_endpoint.metadata,
                             "capability_library": [
-                                {"model_id": model_id, "status": "catalog_candidate"}
+                                _official_catalog_library_entry(latest_endpoint, model_id)
                                 for model_id in catalog_only_models
+                            ]
+                            + [
+                                _official_failed_language_probe_entry(latest_endpoint, model_id)
+                                for model_id in failed_language_models
                             ],
                         }
                     }
@@ -576,6 +688,7 @@ async def put_llm_roles(request: RolesData) -> RolesData:
         update={
             "roles": {**current.roles, **request.roles},
             "model_profiles": {**current.model_profiles, **request.model_profiles},
+            "model_bundles": {**current.model_bundles, **request.model_bundles},
         }
     )
     credentials = load_credentials()
@@ -613,6 +726,19 @@ async def put_llm_role(role_name: str, request: RoleEntry) -> RoleEntry:
     return _materialize_role_for_response(saved.roles[role_name], credentials)
 
 
+@router.delete("/roles/{role_name}", response_model=RolesData)
+async def delete_llm_role(role_name: str) -> RolesData:
+    """Delete one persisted role."""
+    data = _load_roles_or_empty()
+    if role_name not in data.roles:
+        raise HTTPException(status_code=404, detail=f"Unknown LLM role: {role_name}")
+    roles = dict(data.roles)
+    del roles[role_name]
+    credentials = load_credentials()
+    saved = _save_roles_with_active_routes(data.model_copy(update={"roles": roles}))
+    return _materialize_roles_for_response(saved, credentials)
+
+
 @router.post("/roles/{role_name}/test")
 async def test_llm_role(role_name: str, _payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """Run a minimal persisted-role fallback test; request payload is ignored."""
@@ -626,6 +752,7 @@ async def test_llm_role(role_name: str, _payload: dict[str, Any] | None = None) 
     model_groups: dict[str, dict[str, Any]] = {}
     warnings: list[dict[str, Any]] = []
     aggregate_status = "ok"
+    test_targets: list[tuple[dict[str, Any], ProviderRoute, ProviderEndpoint, Any]] = []
     for report_entry, fallback_entry in _role_test_entries(role):
         route_id = report_entry["route_id"]
         route = credentials.provider_routes.get(route_id)
@@ -634,12 +761,25 @@ async def test_llm_role(role_name: str, _payload: dict[str, Any] | None = None) 
         endpoint = credentials.provider_endpoints.get(route.endpoint_id)
         if endpoint is None:
             continue
-        provider_result = await _role_test_provider_result(
-            fallback_entry,
-            report_entry,
-            route,
-            endpoint,
+        test_targets.append(
+            (
+                report_entry,
+                route,
+                endpoint,
+                _role_test_provider_result(
+                    fallback_entry,
+                    report_entry,
+                    route,
+                    endpoint,
+                ),
+            )
         )
+    provider_results = await asyncio.gather(*(target[3] for target in test_targets))
+    for (report_entry, route, endpoint, _), provider_result in zip(
+        test_targets,
+        provider_results,
+        strict=True,
+    ):
         if provider_result["warnings"]:
             warnings.extend(provider_result["warnings"])
         aggregate_status = _merge_role_test_status(aggregate_status, provider_result)
@@ -1115,26 +1255,27 @@ async def _role_test_provider_result(
     admission_decision = _admission_decision(projection.ui_state)
     status = "blocked" if admission_decision == "block" else "untested"
     message = None
-    if role_fit in {"needs_test", "not_fit"}:
-        admission_decision = "block"
-        status = "blocked"
-    elif admission_decision == "admit" and endpoint.api_key is not None and entry is not None:
-        result = await _probe_model(
-            _endpoint_probe_backend(endpoint),
-            endpoint.api_key.get_secret_value(),
-            _endpoint_probe_base_url(endpoint),
-            route.provider_model_id,
-        )
-        status = "ok" if result.status == "ok" else "failed"
-        if status == "ok":
-            provider_ui_state = "ready"
-        message = result.message
     resolved_settings = report_entry.get("resolved_settings")
     if resolved_settings is None and entry is not None:
         resolved_settings = entry.runtime_settings.model_dump(
             mode="json",
             exclude_none=True,
         )
+    if role_fit == "not_fit":
+        admission_decision = "block"
+        status = "blocked"
+    elif admission_decision == "admit" and endpoint.api_key is not None:
+        result = await _probe_model(
+            _endpoint_probe_backend(endpoint),
+            endpoint.api_key.get_secret_value(),
+            _endpoint_probe_base_url(endpoint),
+            route.provider_model_id,
+            runtime_settings=resolved_settings if isinstance(resolved_settings, dict) else None,
+        )
+        status = "ok" if result.status == "ok" else "failed"
+        if status == "ok":
+            provider_ui_state = "ready"
+        message = result.message
     return {
         "route_id": route.route_id,
         "provider_label": endpoint.display_name,
@@ -1156,26 +1297,850 @@ async def _probe_official_model_profiles(
     """Probe one official-provider model and return verified LLM invocation profiles."""
     if not endpoint.api_key or not endpoint.api_key.get_secret_value():
         return []
-    result = await _probe_model(
-        _endpoint_probe_backend(endpoint),
+    candidates = _official_language_probe_candidates(endpoint, model_id)
+    if not candidates:
+        return []
+
+    verified: list[tuple[OfficialLanguageProbeCandidate, ModelProbeResult]] = []
+    for candidate in candidates:
+        result = await _probe_official_call_method(endpoint, model_id, candidate)
+        if result.status == "ok":
+            verified.append((candidate, result))
+    if not verified:
+        return []
+
+    default_candidate = min(
+        verified,
+        key=lambda item: (item[0].default_rank, item[0].profile_id),
+    )[0]
+    return [
+        VerifiedProfile(
+            profile_id=candidate.profile_id,
+            capability=candidate.capability,
+            method_id=candidate.method_id,
+            request_mapper_id=candidate.request_mapper_id,
+            status="ready",
+            default=candidate is default_candidate,
+            fallback_rank=candidate.fallback_rank,
+            input_modalities=list(candidate.input_modalities),
+            output_modalities=list(candidate.output_modalities),
+            runtime_overrides=candidate.runtime_settings,
+            metadata={
+                "probe_latency_ms": result.latency_ms,
+                "source": "official_test",
+            },
+        )
+        for candidate, result in verified
+    ]
+
+
+async def _probe_official_call_method(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+    candidate: OfficialLanguageProbeCandidate,
+) -> ModelProbeResult:
+    if not endpoint.api_key or not endpoint.api_key.get_secret_value():
+        return ModelProbeResult(
+            model_id=model_id,
+            status="invalid_key",
+            message="API key is empty.",
+        )
+    return await _probe_official_call_method_request(
+        candidate.method_id,
         endpoint.api_key.get_secret_value(),
         _endpoint_probe_base_url(endpoint),
         model_id,
+        runtime_settings=candidate.runtime_settings,
     )
-    if result.status != "ok":
+
+
+def _official_language_probe_candidates(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+) -> list[OfficialLanguageProbeCandidate]:
+    if not _is_official_language_model_candidate(endpoint, model_id):
         return []
-    method_id, mapper_id = _default_official_text_method(endpoint)
-    return [
-        VerifiedProfile(
-            profile_id=f"text:{method_id}",
-            capability="text_chat",
-            method_id=method_id,
-            request_mapper_id=mapper_id,
-            status="ready",
-            default=True,
-            fallback_rank=1,
+    backend = _endpoint_probe_backend(endpoint)
+    if backend == "openai":
+        return [
+            _candidate(
+                "openai_responses",
+                "text:openai_responses",
+                "text_chat",
+                "openai_responses_text",
+                10,
+                1,
+            ),
+            _candidate(
+                "openai_chat_completions",
+                "text:openai_chat_completions",
+                "text_chat",
+                "openai_chat_completions_text",
+                20,
+                2,
+            ),
+            _candidate(
+                "openai_responses",
+                "reasoning:openai_responses",
+                "reasoning",
+                "openai_responses_reasoning",
+                5,
+                1,
+                runtime_settings={
+                    "max_output_tokens": 16,
+                    "reasoning": {"enabled": True, "effort": "low"},
+                },
+            ),
+            _candidate(
+                "openai_chat_completions",
+                "reasoning:openai_chat_completions",
+                "reasoning",
+                "openai_chat_completions_reasoning",
+                25,
+                2,
+                runtime_settings={
+                    "max_output_tokens": 16,
+                    "reasoning": {"enabled": True, "effort": "low"},
+                },
+            ),
+        ]
+    if backend == "claude":
+        return [
+            _candidate(
+                "anthropic_messages",
+                "text:anthropic_messages",
+                "text_chat",
+                "anthropic_text",
+                10,
+                1,
+            ),
+            _candidate(
+                "anthropic_messages",
+                "thinking:anthropic_messages:adaptive",
+                "thinking",
+                "anthropic_thinking_adaptive",
+                5,
+                1,
+                runtime_settings={
+                    "max_output_tokens": 1025,
+                    "reasoning": {"enabled": True, "type": "adaptive", "effort": "low"},
+                },
+            ),
+            _candidate(
+                "anthropic_messages",
+                "thinking:anthropic_messages:manual",
+                "thinking",
+                "anthropic_thinking_manual_budget",
+                6,
+                2,
+                runtime_settings={
+                    "max_output_tokens": 1025,
+                    "reasoning": {"enabled": True, "budget_tokens": 1024},
+                },
+            ),
+        ]
+    if backend == "gemini":
+        return [
+            _candidate(
+                "gemini_generate_content",
+                "text:gemini_generate_content:no_thinking",
+                "text_chat",
+                "gemini_generate_content_text",
+                10,
+                1,
+                runtime_settings={
+                    "max_output_tokens": 16,
+                    "reasoning": {"enabled": False, "budget_tokens": 0},
+                },
+            ),
+            _candidate(
+                "gemini_generate_content",
+                "thinking:gemini_generate_content:budget_128",
+                "thinking",
+                "gemini_generate_content_thinking_budget_128",
+                5,
+                1,
+                runtime_settings={
+                    "max_output_tokens": 16,
+                    "reasoning": {"enabled": True, "budget_tokens": 128},
+                },
+            ),
+            _candidate(
+                "gemini_generate_content",
+                "thinking:gemini_generate_content:budget_512",
+                "thinking",
+                "gemini_generate_content_thinking_budget_512",
+                6,
+                2,
+                runtime_settings={
+                    "max_output_tokens": 16,
+                    "reasoning": {"enabled": True, "budget_tokens": 512},
+                },
+            ),
+        ]
+    if backend == "deepseek":
+        return [
+            _candidate(
+                "deepseek_chat_completions",
+                "text:deepseek_chat_completions",
+                "text_chat",
+                "deepseek_chat_completions_text",
+                10,
+                1,
+            ),
+            _candidate(
+                "deepseek_chat_completions",
+                "reasoning:deepseek_chat_completions",
+                "reasoning",
+                "deepseek_chat_completions_reasoning_effort",
+                5,
+                1,
+                runtime_settings={
+                    "max_output_tokens": 16,
+                    "reasoning": {"enabled": True, "effort": "low"},
+                },
+            ),
+            _candidate(
+                "deepseek_anthropic_messages",
+                "text:deepseek_anthropic_messages",
+                "text_chat",
+                "deepseek_anthropic_messages_text",
+                15,
+                2,
+            ),
+            _candidate(
+                "deepseek_anthropic_messages",
+                "thinking:deepseek_anthropic_messages",
+                "thinking",
+                "deepseek_anthropic_messages_thinking",
+                6,
+                2,
+                runtime_settings={
+                    "max_output_tokens": 1025,
+                    "reasoning": {"enabled": True, "budget_tokens": 1024},
+                },
+            ),
+        ]
+    if backend == "ark":
+        return [
+            _candidate(
+                "ark_chat",
+                "text:ark_chat",
+                "text_chat",
+                "ark_chat_text",
+                10,
+                2,
+                runtime_settings={
+                    "max_output_tokens": 16,
+                    "reasoning": {"enabled": False},
+                },
+            ),
+            _candidate(
+                "ark_responses",
+                "text:ark_responses",
+                "text_chat",
+                "ark_responses_text",
+                8,
+                1,
+                runtime_settings={
+                    "max_output_tokens": 16,
+                    "reasoning": {"enabled": False},
+                },
+            ),
+            _candidate(
+                "ark_chat",
+                "thinking:ark_chat",
+                "thinking",
+                "ark_chat_thinking_enabled",
+                6,
+                2,
+                runtime_settings={
+                    "max_output_tokens": 16,
+                    "reasoning": {"enabled": True},
+                },
+            ),
+            _candidate(
+                "ark_responses",
+                "thinking:ark_responses",
+                "thinking",
+                "ark_responses_thinking_enabled",
+                5,
+                1,
+                runtime_settings={
+                    "max_output_tokens": 16,
+                    "reasoning": {"enabled": True},
+                },
+            ),
+        ]
+    return []
+
+
+def _candidate(
+    method_id: str,
+    profile_id: str,
+    capability: str,
+    request_mapper_id: str,
+    default_rank: int,
+    fallback_rank: int,
+    *,
+    runtime_settings: dict[str, Any] | None = None,
+    input_modalities: tuple[str, ...] = ("text",),
+    output_modalities: tuple[str, ...] = ("text",),
+) -> OfficialLanguageProbeCandidate:
+    return OfficialLanguageProbeCandidate(
+        profile_id=profile_id,
+        capability=capability,
+        method_id=method_id,
+        request_mapper_id=request_mapper_id,
+        runtime_settings=runtime_settings or {"max_output_tokens": 16},
+        default_rank=default_rank,
+        fallback_rank=fallback_rank,
+        input_modalities=input_modalities,
+        output_modalities=output_modalities,
+    )
+
+
+def _is_official_language_model_candidate(endpoint: ProviderEndpoint, model_id: str) -> bool:
+    model = model_id.lower()
+    backend = _endpoint_probe_backend(endpoint)
+    if backend == "claude":
+        return model.startswith("claude-")
+    if backend == "gemini":
+        if _is_gemini_known_non_language_model(model):
+            return False
+        return True
+    if backend == "deepseek":
+        return model.startswith("deepseek-")
+    if backend == "ark":
+        ark_non_language_tokens = (
+            "seedream",
+            "seedance",
+            "wan",
+            "embedding",
+            "translate",
+            "tts",
+            "audio",
+            "video",
+            "3d",
         )
-    ]
+        if any(token in model for token in ark_non_language_tokens):
+            return False
+        return any(
+            model.startswith(prefix)
+            for prefix in ("doubao-", "deepseek-", "glm-", "seed-", "ep-")
+        )
+    if any(
+        token in model
+        for token in (
+            "embedding",
+            "gpt-image",
+            "chatgpt-image",
+            "tts",
+            "whisper",
+            "transcribe",
+            "realtime",
+            "audio",
+            "sora",
+            "moderation",
+            "babbage",
+            "davinci",
+        )
+    ):
+        return False
+    return (
+        model.startswith("gpt-")
+        or model.startswith("o1")
+        or model.startswith("o3")
+        or model.startswith("o4")
+        or model == "chat-latest"
+    )
+
+
+def _official_catalog_capabilities(endpoint: ProviderEndpoint, model_id: str) -> dict[str, object]:
+    model_type, label = _official_catalog_model_type(endpoint, model_id)
+    candidates = _official_language_probe_candidates(endpoint, model_id)
+    return {
+        "model_type": model_type,
+        "model_type_label": label,
+        "capability_library": model_type != "language_reasoning",
+        "candidate_methods": sorted({candidate.method_id for candidate in candidates}),
+    }
+
+
+def _official_verified_model_capabilities(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+    profiles: list[VerifiedProfile],
+) -> dict[str, object]:
+    capabilities = _official_catalog_capabilities(endpoint, model_id)
+    capabilities.update(
+        {
+            "model_type": "language_reasoning",
+            "model_type_label": "Language/reasoning model",
+            "capability_library": False,
+            "verified_methods": sorted({profile.method_id for profile in profiles}),
+            "verified_profiles": [
+                {
+                    "profile_id": profile.profile_id,
+                    "capability": profile.capability,
+                    "method_id": profile.method_id,
+                    "request_mapper_id": profile.request_mapper_id,
+                }
+                for profile in profiles
+            ],
+        }
+    )
+    return capabilities
+
+
+def _official_catalog_model_type(endpoint: ProviderEndpoint, model_id: str) -> tuple[str, str]:
+    model = model_id.lower()
+    if _is_official_language_model_candidate(endpoint, model_id):
+        return "language_reasoning", "Language/reasoning model"
+    if any(
+        token in model
+        for token in (
+            "seedream",
+            "gpt-image",
+            "chatgpt-image",
+            "dall-e",
+            "imagen",
+            "nano-banana",
+        )
+    ) or (
+        _endpoint_probe_backend(endpoint) == "gemini" and "image" in model
+    ):
+        return "image_generation", "Image generation model"
+    if any(token in model for token in ("seedance", "sora", "veo", "video", "wan")):
+        return "video_generation", "Video generation model"
+    if any(
+        token in model
+        for token in (
+            "tts",
+            "whisper",
+            "transcribe",
+            "audio",
+            "chirp",
+            "lyria",
+            "realtime",
+        )
+    ):
+        return "audio", "Audio/realtime model"
+    if "embedding" in model or model.startswith(("babbage-", "davinci-")):
+        return "embedding", "Embedding model"
+    if "moderation" in model:
+        return "moderation", "Moderation model"
+    if "translate" in model or "translation" in model:
+        return "translation", "Translation model"
+    if "3d" in model:
+        return "3d_generation", "3D generation model"
+    return "catalog_candidate", "Catalog-only model"
+
+
+def _is_gemini_known_non_language_model(model: str) -> bool:
+    return any(
+        token in model
+        for token in (
+            "embedding",
+            "imagen",
+            "image",
+            "nano-banana",
+            "veo",
+            "video",
+            "tts",
+            "chirp",
+            "lyria",
+        )
+    )
+
+
+def _official_catalog_library_entry(endpoint: ProviderEndpoint, model_id: str) -> dict[str, object]:
+    capabilities = _official_catalog_capabilities(endpoint, model_id)
+    return {
+        "model_id": model_id,
+        "status": "catalog_candidate",
+        "route_status": "unverified_manual",
+        "last_probe_message": NO_VERIFIED_ROUTE_PROFILE_MESSAGE,
+        "model_type": capabilities["model_type"],
+        "model_type_label": capabilities["model_type_label"],
+        "candidate_methods": capabilities["candidate_methods"],
+    }
+
+
+def _official_failed_language_probe_entry(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+) -> dict[str, object]:
+    capabilities = _official_catalog_capabilities(endpoint, model_id)
+    return {
+        "model_id": model_id,
+        "status": "probe_failed",
+        "route_status": "failed",
+        "last_probe_message": NO_WORKING_OFFICIAL_LANGUAGE_METHOD_MESSAGE,
+        "model_type": capabilities["model_type"],
+        "model_type_label": capabilities["model_type_label"],
+        "candidate_methods": capabilities["candidate_methods"],
+    }
+
+
+def _official_model_type_capability_values(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+    *,
+    source: Literal["api_list", "probed_verified"],
+) -> dict[str, CapabilityValue]:
+    model_type, label = _official_catalog_model_type(endpoint, model_id)
+    return {
+        "model_type": CapabilityValue(value=model_type, source=source, message=label),
+        "model_type_label": CapabilityValue(value=label, source=source),
+    }
+
+
+async def _run_official_endpoint_test_job(job_id: str, endpoint_id: str) -> None:
+    try:
+        await _run_official_endpoint_test_job_impl(job_id, endpoint_id)
+    except Exception as exc:
+        logger.exception(
+            "official endpoint test job failed endpoint_id=%s job_id=%s",
+            endpoint_id,
+            job_id,
+        )
+        await _record_endpoint_test_job_failure(
+            job_id,
+            endpoint_id,
+            f"Endpoint test failed before completion: {exc}",
+        )
+
+
+async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) -> None:
+    credentials = load_credentials()
+    endpoint = credentials.provider_endpoints.get(endpoint_id)
+    if endpoint is None:
+        await _finish_endpoint_test_job(job_id, "failed", f"Unknown endpoint: {endpoint_id}")
+        return
+    starting_fingerprint = credentials.endpoint_fingerprint(endpoint_id)
+    if not endpoint.api_key or not endpoint.api_key.get_secret_value():
+        await _record_endpoint_test_job_failure(job_id, endpoint_id, "API key is empty.")
+        return
+
+    await _update_endpoint_test_job(job_id, status="running", message="Reading provider catalog.")
+    probe_backend = _endpoint_probe_backend(endpoint)
+    probe_base_url = _endpoint_probe_base_url(endpoint)
+    try:
+        result = await _ping_provider(
+            probe_backend,
+            endpoint.api_key.get_secret_value(),
+            probe_base_url,
+        )
+    except _Unauthorized as exc:
+        await _record_endpoint_test_job_failure(
+            job_id,
+            endpoint_id,
+            _provider_error_message("Invalid API key", exc),
+        )
+        return
+    except _RateLimited as exc:
+        await _record_endpoint_test_job_failure(
+            job_id,
+            endpoint_id,
+            _provider_error_message("Provider rate limited the test request", exc),
+        )
+        return
+    except _QuotaExceeded as exc:
+        await _record_endpoint_test_job_failure(
+            job_id,
+            endpoint_id,
+            _provider_error_message(
+                "Provider rejected the key because quota or billing is unavailable",
+                exc,
+            ),
+        )
+        return
+    except httpx.TimeoutException:
+        await _record_endpoint_test_job_failure(job_id, endpoint_id, "Endpoint test timed out.")
+        return
+    except _NetworkError as exc:
+        await _record_endpoint_test_job_failure(
+            job_id,
+            endpoint_id,
+            _provider_error_message("Network error while testing endpoint", exc),
+        )
+        return
+
+    discovered_model_ids = result.model_ids
+    if not discovered_model_ids:
+        latest_credentials = load_credentials()
+        latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
+        if latest_endpoint is not None:
+            latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint.model_copy(
+                update={
+                    "status": "unverified_manual",
+                    "last_test_at": _now_iso(),
+                    "last_test_message": "Endpoint reachable but returned no models.",
+                }
+            )
+            save_credentials(latest_credentials)
+        await _finish_endpoint_test_job(
+            job_id,
+            "completed",
+            "Endpoint reachable but returned no models.",
+            total_model_count=0,
+        )
+        return
+
+    await _update_endpoint_test_job(
+        job_id,
+        total_model_count=len(discovered_model_ids),
+        message=f"Testing 0/{len(discovered_model_ids)} provider models.",
+        available_models=[
+            EndpointTestCompactModelInfo(
+                id=model_id,
+                status="unverified_manual",
+                verified_profile_count=0,
+                capabilities=_official_catalog_capabilities(endpoint, model_id),
+            )
+            for model_id in discovered_model_ids
+        ],
+    )
+    profiles_by_model: dict[str, list[VerifiedProfile]] = {}
+    catalog_only_models: list[str] = []
+    failed_models: list[str] = []
+    model_infos_by_id: dict[str, EndpointTestCompactModelInfo] = {
+        model_id: EndpointTestCompactModelInfo(
+            id=model_id,
+            status="unverified_manual",
+            verified_profile_count=0,
+            capabilities=_official_catalog_capabilities(endpoint, model_id),
+        )
+        for model_id in discovered_model_ids
+    }
+    tested_count = 0
+
+    for batch in _chunks(discovered_model_ids, OFFICIAL_PROVIDER_TEST_BATCH_SIZE):
+        batch_results = await _probe_official_profile_batch(endpoint, batch)
+        latest_credentials = load_credentials()
+        latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
+        if latest_endpoint is None:
+            await _finish_endpoint_test_job(job_id, "failed", f"Unknown endpoint: {endpoint_id}")
+            return
+        if latest_credentials.endpoint_fingerprint(endpoint_id) != starting_fingerprint:
+            latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint.model_copy(
+                update={
+                    "status": "unverified_manual",
+                    "last_test_at": _now_iso(),
+                    "last_test_message": (
+                        "Endpoint changed while endpoint test was running. "
+                        "Test result discarded."
+                    ),
+                }
+            )
+            save_credentials(latest_credentials)
+            await _finish_endpoint_test_job(
+                job_id,
+                "failed",
+                "Endpoint changed while endpoint test was running. Test result discarded.",
+            )
+            return
+
+        verified_batch: dict[str, list[VerifiedProfile]] = {}
+        for model_id, profiles in batch_results:
+            tested_count += 1
+            if profiles:
+                profiles_by_model[model_id] = profiles
+                verified_batch[model_id] = profiles
+            elif _is_official_language_model_candidate(latest_endpoint, model_id):
+                failed_models.append(model_id)
+            else:
+                catalog_only_models.append(model_id)
+
+        route_ids_by_model: dict[str, str] = {}
+        if verified_batch:
+            latest_credentials, route_ids_by_model = _upsert_discovered_routes(
+                latest_credentials,
+                endpoint=latest_endpoint,
+                model_ids=tuple(verified_batch),
+                verified=True,
+                verified_profiles_by_model=verified_batch,
+            )
+
+        for model_id, profiles in batch_results:
+            if profiles:
+                model_infos_by_id[model_id] = EndpointTestCompactModelInfo(
+                    id=model_id,
+                    route_id=route_ids_by_model.get(model_id),
+                    status="verified",
+                    verified_profile_count=len(profiles),
+                    capabilities=_official_verified_model_capabilities(
+                        latest_endpoint,
+                        model_id,
+                        profiles,
+                    ),
+                )
+            else:
+                is_language_candidate = _is_official_language_model_candidate(
+                    latest_endpoint,
+                    model_id,
+                )
+                model_infos_by_id[model_id] = EndpointTestCompactModelInfo(
+                    id=model_id,
+                    status="failed" if is_language_candidate else "unverified_manual",
+                    verified_profile_count=0,
+                    last_probe_message=(
+                        NO_WORKING_OFFICIAL_LANGUAGE_METHOD_MESSAGE
+                        if is_language_candidate
+                        else NO_VERIFIED_ROUTE_PROFILE_MESSAGE
+                    ),
+                    capabilities=_official_catalog_capabilities(latest_endpoint, model_id),
+                )
+
+        latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id, latest_endpoint)
+        latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint.model_copy(
+            update={
+                "status": "verified" if profiles_by_model else "unverified_manual",
+                "last_test_at": _now_iso(),
+                "last_test_message": _endpoint_success_message(result),
+                "metadata": {
+                    **latest_endpoint.metadata,
+                    "capability_library": [
+                        _official_catalog_library_entry(latest_endpoint, model_id)
+                        for model_id in catalog_only_models
+                    ]
+                    + [
+                        _official_failed_language_probe_entry(latest_endpoint, model_id)
+                        for model_id in failed_models
+                    ],
+                },
+            }
+        )
+        save_credentials(latest_credentials)
+        await _update_endpoint_test_job(
+            job_id,
+            tested_model_count=tested_count,
+            verified_route_count=len(profiles_by_model),
+            failed_model_count=len(failed_models),
+            catalog_only_count=len(catalog_only_models),
+            message=f"Testing {tested_count}/{len(discovered_model_ids)} provider models.",
+            available_models=list(model_infos_by_id.values()),
+        )
+
+    latest_credentials = load_credentials()
+    latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
+    if latest_endpoint is None:
+        await _finish_endpoint_test_job(job_id, "failed", f"Unknown endpoint: {endpoint_id}")
+        return
+    latest_credentials, route_ids_by_model = _upsert_discovered_routes(
+        latest_credentials,
+        endpoint=latest_endpoint,
+        model_ids=tuple(profiles_by_model),
+        verified=True,
+        replace_endpoint_routes=True,
+        verified_profiles_by_model=profiles_by_model,
+    )
+    for model_id, profiles in profiles_by_model.items():
+        model_infos_by_id[model_id] = EndpointTestCompactModelInfo(
+            id=model_id,
+            route_id=route_ids_by_model.get(model_id),
+            status="verified",
+            verified_profile_count=len(profiles),
+            capabilities=_official_verified_model_capabilities(
+                latest_endpoint,
+                model_id,
+                profiles,
+            ),
+        )
+    final_models = list(model_infos_by_id.values())
+    latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id, latest_endpoint)
+    latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint.model_copy(
+        update={
+            "status": "verified" if profiles_by_model else "unverified_manual",
+            "last_test_at": _now_iso(),
+            "last_test_message": _endpoint_success_message(result),
+            "metadata": {
+                **latest_endpoint.metadata,
+                "capability_library": [
+                    _official_catalog_library_entry(latest_endpoint, model_id)
+                    for model_id in catalog_only_models
+                ]
+                + [
+                    _official_failed_language_probe_entry(latest_endpoint, model_id)
+                    for model_id in failed_models
+                ],
+            },
+        }
+    )
+    save_credentials(latest_credentials)
+    await _finish_endpoint_test_job(
+        job_id,
+        "completed",
+        _endpoint_success_message(result),
+        total_model_count=len(discovered_model_ids),
+        tested_model_count=tested_count,
+        verified_route_count=len(profiles_by_model),
+        failed_model_count=len(failed_models),
+        catalog_only_count=len(catalog_only_models),
+        available_models=final_models,
+        available_sdks=[latest_endpoint.protocol],
+    )
+
+
+async def _probe_official_profile_batch(
+    endpoint: ProviderEndpoint,
+    model_ids: tuple[str, ...],
+) -> list[tuple[str, list[VerifiedProfile]]]:
+    semaphore = asyncio.Semaphore(OFFICIAL_PROVIDER_TEST_CONCURRENCY)
+
+    async def probe(model_id: str) -> tuple[str, list[VerifiedProfile]]:
+        async with semaphore:
+            return model_id, await _probe_official_model_profiles(endpoint, model_id)
+
+    return await asyncio.gather(*(probe(model_id) for model_id in model_ids))
+
+
+async def _record_endpoint_test_job_failure(
+    job_id: str,
+    endpoint_id: str,
+    message: str,
+) -> None:
+    credentials = load_credentials()
+    endpoint = credentials.provider_endpoints.get(endpoint_id)
+    if endpoint is not None:
+        credentials.provider_endpoints[endpoint_id] = endpoint.model_copy(
+            update={
+                "status": "failed",
+                "last_test_at": _now_iso(),
+                "last_test_message": message,
+            }
+        )
+        save_credentials(credentials)
+    await _finish_endpoint_test_job(job_id, "failed", message)
+
+
+async def _update_endpoint_test_job(job_id: str, **updates: Any) -> None:
+    async with _endpoint_test_jobs_lock:
+        current = _endpoint_test_jobs.get(job_id)
+        if current is None:
+            return
+        _endpoint_test_jobs[job_id] = current.model_copy(update=updates)
+
+
+async def _finish_endpoint_test_job(
+    job_id: str,
+    status: Literal["completed", "failed"],
+    message: str,
+    **updates: Any,
+) -> None:
+    async with _endpoint_test_jobs_lock:
+        current = _endpoint_test_jobs.get(job_id)
+        if current is None:
+            return
+        finished = current.model_copy(update={"status": status, "message": message, **updates})
+        _endpoint_test_jobs[job_id] = finished
+        if _running_endpoint_test_jobs.get(finished.endpoint_id) == job_id:
+            _running_endpoint_test_jobs.pop(finished.endpoint_id, None)
+
+
+def _chunks(values: tuple[str, ...], size: int) -> list[tuple[str, ...]]:
+    return [values[index : index + size] for index in range(0, len(values), size)]
 
 
 def _default_official_text_method(endpoint: ProviderEndpoint) -> tuple[str, str]:
@@ -1296,6 +2261,15 @@ def _upsert_discovered_routes(
                     raw_capabilities={},
                     source=capability_source,
                 ),
+                **(
+                    _official_model_type_capability_values(
+                        endpoint,
+                        model_id,
+                        source=capability_source,
+                    )
+                    if endpoint.provider_kind == "official"
+                    else {}
+                ),
             }
         if verified_profiles_by_model and model_id in verified_profiles_by_model:
             updates["verified_profiles"] = verified_profiles_by_model[model_id]
@@ -1328,12 +2302,23 @@ def _provider_route(
         provider_model_id=model_id,
         canonical_id=canonical.canonical_id,
         status=status,
-        capabilities=normalize_route_capabilities(
-            protocol=endpoint.protocol,
-            provider_model_id=model_id,
-            raw_capabilities={},
-            source=capability_source,
-        ),
+        capabilities={
+            **normalize_route_capabilities(
+                protocol=endpoint.protocol,
+                provider_model_id=model_id,
+                raw_capabilities={},
+                source=capability_source,
+            ),
+            **(
+                _official_model_type_capability_values(
+                    endpoint,
+                    model_id,
+                    source=capability_source,
+                )
+                if endpoint.provider_kind == "official"
+                else {}
+            ),
+        },
         verified_profiles=verified_profiles or [],
     )
 

@@ -5,11 +5,13 @@ import {
   getCredentials,
   getProviderModels,
   getRoles,
+  deleteRole,
   modelGroupsFromRegistry,
   probeRoute,
   putCredentials,
   putRoles,
   resetLlmApiCachesForTests,
+  testRole,
   testProviderModels,
   testProvider,
   type ProviderEndpoint,
@@ -309,6 +311,18 @@ describe('API Keys v4 registry adapter', () => {
       'openai/gpt-5',
       'anthropic/claude-sonnet-4.6',
     ])
+    expect(result.available_models).toEqual([
+      expect.objectContaining({
+        id: 'openai/gpt-5',
+        route_id: 'openrouter-custom:gpt-5',
+        status: 'verified',
+      }),
+      expect.objectContaining({
+        id: 'anthropic/claude-sonnet-4.6',
+        route_id: 'openrouter-custom:anthropic.claude-sonnet-4.6',
+        status: 'unverified_manual',
+      }),
+    ])
 
     const credentials = await getCredentials()
     expect(credentials.providers[0].available_models?.map((model) => model.id)).toEqual([
@@ -364,6 +378,227 @@ describe('API Keys v4 registry adapter', () => {
     expect(credentials.providers[0].last_test_status).toBe('untested')
     expect(credentials.providers[0].last_error_code).toBe('')
     expect(credentials.providers[0].available_models).toEqual([])
+  })
+
+  it('uses compact endpoint test jobs for official provider model tests', async () => {
+    const officialEndpoint: ProviderEndpoint = {
+      ...endpoint,
+      endpoint_id: 'openai-official',
+      display_name: 'OpenAI Official',
+      base_url: 'https://api.openai.com/v1',
+      provider_kind: 'official',
+    }
+    const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
+    api.defaults.adapter = adapter((config) => {
+      seen.push({ method: config.method, url: config.url, data: config.data })
+      if (config.method === 'put') {
+        return registry({
+          provider_endpoints: { 'openai-official': officialEndpoint },
+          provider_routes: {},
+        })
+      }
+      if (config.method === 'post' && config.url === '/llm/endpoints/openai-official/test-jobs') {
+        return {
+          job_id: 'job-1',
+          endpoint_id: 'openai-official',
+          status: 'completed',
+          total_model_count: 2,
+          tested_model_count: 2,
+          verified_route_count: 1,
+          failed_model_count: 0,
+          catalog_only_count: 1,
+          message: 'Connected in 42ms. Model seen: gpt-5.',
+          available_models: [
+            {
+              id: 'gpt-5',
+              route_id: 'openai-official:gpt-5',
+              status: 'verified',
+              verified_profile_count: 1,
+              last_probe_message: null,
+              capabilities: {},
+            },
+          ],
+          available_sdks: ['openai_compatible'],
+        }
+      }
+      throw new Error(`Unexpected request: ${config.method} ${config.url}`)
+    })
+
+    const result = await getProviderModels({
+      id: 'openai-official',
+      provider_type: 'openai_compatible',
+      api_key: 'sk-live',
+      base_url: 'https://api.openai.com/v1',
+    })
+
+    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual([
+      'put /llm/registry/endpoints',
+      'post /llm/endpoints/openai-official/test-jobs',
+    ])
+    expect(result.status).toBe('ok')
+    expect(result.message).toBe('Connected in 42ms. Model seen: gpt-5.')
+    expect(result.available_models).toEqual([
+      {
+        id: 'gpt-5',
+        route_id: 'openai-official:gpt-5',
+        status: 'verified',
+        verified_profile_count: 1,
+        last_probe_message: null,
+        capabilities: {},
+      },
+    ])
+  })
+
+  it('reports official provider job progress while preserving non-verified catalog routes', async () => {
+    const officialEndpoint: ProviderEndpoint = {
+      ...endpoint,
+      endpoint_id: 'openai-official',
+      display_name: 'OpenAI Official',
+      base_url: 'https://api.openai.com/v1',
+      provider_kind: 'official',
+    }
+    const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
+    const progress: Array<{ status: string; models: Array<{ id: string; status?: string }> }> = []
+    api.defaults.adapter = adapter((config) => {
+      seen.push({ method: config.method, url: config.url, data: config.data })
+      if (config.method === 'put') {
+        return registry({
+          provider_endpoints: { 'openai-official': officialEndpoint },
+          provider_routes: {},
+        })
+      }
+      if (config.method === 'post' && config.url === '/llm/endpoints/openai-official/test-jobs') {
+        return {
+          job_id: 'job-1',
+          endpoint_id: 'openai-official',
+          status: 'running',
+          total_model_count: 3,
+          tested_model_count: 0,
+          verified_route_count: 0,
+          failed_model_count: 0,
+          catalog_only_count: 0,
+          message: 'Testing 0/3 provider models.',
+          available_models: [
+            { id: 'gpt-5', route_id: null, status: 'unverified_manual', verified_profile_count: 0, last_probe_message: null, capabilities: {} },
+            { id: 'gpt-image-1', route_id: null, status: 'unverified_manual', verified_profile_count: 0, last_probe_message: null, capabilities: {} },
+            { id: 'text-embedding-3-large', route_id: null, status: 'unverified_manual', verified_profile_count: 0, last_probe_message: null, capabilities: {} },
+          ],
+          available_sdks: ['openai_compatible'],
+        }
+      }
+      if (config.method === 'get' && config.url === '/llm/endpoint-test-jobs/job-1') {
+        return {
+          job_id: 'job-1',
+          endpoint_id: 'openai-official',
+          status: 'completed',
+          total_model_count: 3,
+          tested_model_count: 3,
+          verified_route_count: 1,
+          failed_model_count: 0,
+          catalog_only_count: 2,
+          message: 'Connected in 42ms. Model seen: gpt-5.',
+          available_models: [
+            { id: 'gpt-5', route_id: 'openai-official:gpt-5', status: 'verified', verified_profile_count: 1, last_probe_message: null, capabilities: {} },
+            { id: 'gpt-image-1', route_id: null, status: 'unverified_manual', verified_profile_count: 0, last_probe_message: 'No verified language route profile.', capabilities: {} },
+            { id: 'text-embedding-3-large', route_id: null, status: 'unverified_manual', verified_profile_count: 0, last_probe_message: 'No verified language route profile.', capabilities: {} },
+          ],
+          available_sdks: ['openai_compatible'],
+        }
+      }
+      throw new Error(`Unexpected request: ${config.method} ${config.url}`)
+    })
+
+    const result = await getProviderModels(
+      {
+        id: 'openai-official',
+        provider_type: 'openai_compatible',
+        api_key: 'sk-live',
+        base_url: 'https://api.openai.com/v1',
+      },
+      {
+        onProgress: (response) => {
+          progress.push({
+            status: response.status,
+            models: (response.available_models ?? []).map((model) => ({ id: model.id, status: model.status })),
+          })
+        },
+      },
+    )
+
+    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual([
+      'put /llm/registry/endpoints',
+      'post /llm/endpoints/openai-official/test-jobs',
+      'get /llm/endpoint-test-jobs/job-1',
+    ])
+    expect(progress).toEqual([
+      {
+        status: 'ok',
+        models: [
+          { id: 'gpt-5', status: 'unverified_manual' },
+          { id: 'gpt-image-1', status: 'unverified_manual' },
+          { id: 'text-embedding-3-large', status: 'unverified_manual' },
+        ],
+      },
+      {
+        status: 'ok',
+        models: [
+          { id: 'gpt-5', status: 'verified' },
+          { id: 'gpt-image-1', status: 'unverified_manual' },
+          { id: 'text-embedding-3-large', status: 'unverified_manual' },
+        ],
+      },
+    ])
+    expect(result.available_models?.map((model) => [model.id, model.status])).toEqual([
+      ['gpt-5', 'verified'],
+      ['gpt-image-1', 'unverified_manual'],
+      ['text-embedding-3-large', 'unverified_manual'],
+    ])
+  })
+
+  it('restores official catalog-only route candidates from endpoint capability library', async () => {
+    const officialEndpoint: ProviderEndpoint = {
+      ...endpoint,
+      endpoint_id: 'openai-official',
+      display_name: 'OpenAI Official',
+      base_url: 'https://api.openai.com/v1',
+      provider_kind: 'official',
+      metadata: {
+        capability_library: [
+          {
+            model_id: 'gpt-image-1',
+            status: 'catalog_candidate',
+            route_status: 'unverified_manual',
+            last_probe_message: 'No verified language route profile.',
+          },
+        ],
+      },
+    }
+    const officialRoute: ProviderRoute = {
+      ...route,
+      route_id: 'openai-official:gpt-5',
+      endpoint_id: 'openai-official',
+      route_slug: 'gpt-5',
+      provider_model_id: 'gpt-5',
+      canonical_id: 'gpt-5',
+      display_name: 'GPT-5',
+      status: 'verified',
+    }
+    api.defaults.adapter = adapter((config) => {
+      if (config.method === 'get' && config.url === '/llm/registry') {
+        return registry({
+          provider_endpoints: { 'openai-official': officialEndpoint },
+          provider_routes: { [officialRoute.route_id]: officialRoute },
+        })
+      }
+      throw new Error(`Unexpected request: ${config.method} ${config.url}`)
+    })
+
+    const credentials = await getCredentials({ hydrateSecrets: false })
+
+    expect(credentials.providers[0].available_models?.map((model) => [model.id, model.status, model.last_probe_message])).toEqual([
+      ['gpt-5', 'verified', null],
+      ['gpt-image-1', 'unverified_manual', 'No verified language route profile.'],
+    ])
   })
 
   it('does not clear a successful test on the next autosave when the registry response redacts the secret', async () => {
@@ -935,6 +1170,28 @@ describe('API Keys v4 registry adapter', () => {
     })
   })
 
+  it('deletes a persisted role through the role delete endpoint', async () => {
+    const seen: Array<{ method?: string; url?: string }> = []
+    api.defaults.adapter = adapter((config) => {
+      seen.push({ method: config.method, url: config.url })
+      if (config.url === '/llm/registry') return registry()
+      if (config.method === 'delete' && config.url === '/llm/roles/analyst') {
+        return {
+          schema_version: 3,
+          model_profiles: {},
+          model_bundles: {},
+          roles: {},
+        }
+      }
+      return registry()
+    })
+
+    const roles = await deleteRole('analyst')
+
+    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual(['delete /llm/roles/analyst'])
+    expect(roles.roles.analyst).toBeUndefined()
+  })
+
   it('can force a route probe for Cooling Down Test Now', async () => {
     const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
     api.defaults.adapter = adapter((config) => {
@@ -948,5 +1205,47 @@ describe('API Keys v4 registry adapter', () => {
       'post /llm/routes/openrouter-custom%3Agpt-5/probe?force=true',
     ])
     expect(JSON.parse(String(seen[0].data))).toEqual({ capabilities: [] })
+  })
+
+  it('runs a persisted role test and returns provider diagnostics', async () => {
+    const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
+    api.defaults.adapter = adapter((config) => {
+      seen.push({ method: config.method, url: config.url, data: config.data })
+      return {
+        role_name: 'analyst',
+        status: 'warning',
+        warnings: [{ message: 'Thinking is required but capability is unknown.' }],
+        model_groups: [{
+          canonical_id: 'gpt-5',
+          display_name: 'GPT 5',
+          provider_results: [{
+            route_id: route.route_id,
+            provider_label: 'OpenRouter Custom',
+            provider_ui_state: 'cooling_down',
+            role_fit: 'needs_test',
+            admission_decision: 'temporary_skip',
+            status: 'blocked',
+            warnings: [{ message: 'Thinking is required but capability is unknown.' }],
+            retry_at: '2026-12-31T00:00:00Z',
+            message: 'Retry after transient rate limit.',
+            resolved_settings: {},
+          }],
+        }],
+      }
+    })
+
+    const result = await testRole('analyst')
+
+    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual([
+      'post /llm/roles/analyst/test',
+    ])
+    expect(JSON.parse(String(seen[0].data))).toEqual({})
+    expect(result.model_groups[0].provider_results[0]).toMatchObject({
+      provider_label: 'OpenRouter Custom',
+      provider_ui_state: 'cooling_down',
+      role_fit: 'needs_test',
+      admission_decision: 'temporary_skip',
+      status: 'blocked',
+    })
   })
 })

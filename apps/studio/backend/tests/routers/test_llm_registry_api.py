@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -20,8 +22,8 @@ from app.routers import llm as llm_router
 from app.services import copilot_test
 from app.services.copilot_test import ModelProbeResult, PingResult, _Unauthorized
 from app.services.llm_credentials import credentials_path, save_credentials
+from app.services.llm_roles import load_roles_file, save_roles_file
 from app.services.llm_roles import roles_path as active_roles_path
-from app.services.llm_roles import save_roles_file
 from fastapi.testclient import TestClient
 from graph_agent_gateway.registry.schema import VerifiedProfile
 
@@ -720,16 +722,12 @@ def test_endpoint_test_uses_endpoint_protocol_and_base_url_for_probe(
         calls.append((backend, api_key, base_url))
         return PingResult(latency_ms=42, model_ids=("claude-qiniu",))
 
-    async def fake_probe_model(
-        backend: copilot_test.CopilotProvider,
-        api_key: str,
-        base_url: str,
-        model_id: str,
-    ) -> ModelProbeResult:
+    async def fake_probe_official_call_method(endpoint, model_id: str, candidate):
+        del endpoint, candidate
         return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
 
     monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
-    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
+    monkeypatch.setattr(llm_router, "_probe_official_call_method", fake_probe_official_call_method)
 
     response = client.post("/api/llm/endpoints/qiniu/test")
 
@@ -821,16 +819,12 @@ def test_endpoint_test_uses_ark_runtime_for_ark_official(
         calls.append((backend, api_key, base_url))
         return PingResult(latency_ms=42, model_ids=("ep-20260316142940-b74bm",))
 
-    async def fake_probe_model(
-        backend: copilot_test.CopilotProvider,
-        api_key: str,
-        base_url: str,
-        model_id: str,
-    ) -> ModelProbeResult:
+    async def fake_probe_official_call_method(endpoint, model_id: str, candidate):
+        del endpoint, candidate
         return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
 
     monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
-    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
+    monkeypatch.setattr(llm_router, "_probe_official_call_method", fake_probe_official_call_method)
 
     response = client.post("/api/llm/endpoints/ark-official/test")
 
@@ -839,7 +833,7 @@ def test_endpoint_test_uses_ark_runtime_for_ark_official(
     assert "ark-official:ep-20260316142940-b74bm" in response.json()["registry"]["provider_routes"]
 
 
-def test_endpoint_test_only_uses_ark_models_list_for_ark_official(
+def test_endpoint_test_probes_ark_official_catalog_models(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
@@ -860,7 +854,7 @@ def test_endpoint_test_only_uses_ark_models_list_for_ark_official(
         ),
         credentials_path(),
     )
-    probe_calls: list[str] = []
+    probe_calls: list[tuple[str, str]] = []
 
     async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
         assert (backend, api_key, base_url) == (
@@ -876,32 +870,33 @@ def test_endpoint_test_only_uses_ark_models_list_for_ark_official(
             ),
         )
 
-    async def fake_probe_model(
-        backend: copilot_test.CopilotProvider,
-        api_key: str,
-        base_url: str,
-        model_id: str,
-    ) -> ModelProbeResult:
-        del backend, api_key, base_url
-        probe_calls.append(model_id)
-        if model_id == "doubao-seed-2-0-pro-260215":
+    async def fake_probe_official_call_method(endpoint, model_id: str, candidate):
+        del endpoint
+        probe_calls.append((model_id, candidate.method_id))
+        if model_id == "doubao-seed-2-0-pro-260215" and candidate.method_id == "ark_chat":
             return ModelProbeResult(model_id=model_id, status="ok", latency_ms=21)
         return ModelProbeResult(model_id=model_id, status="invalid_model", message="HTTP 404")
 
     monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
-    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
+    monkeypatch.setattr(llm_router, "_probe_official_call_method", fake_probe_official_call_method)
 
     response = client.post("/api/llm/endpoints/ark-official/test")
 
     assert response.status_code == 200
     body = response.json()
     endpoint = body["registry"]["provider_endpoints"]["ark-official"]
-    assert endpoint["status"] == "unverified_manual"
+    assert endpoint["status"] == "verified"
     assert "doubao-lite-128k-240428" in endpoint["last_test_message"]
-    assert probe_calls == []
+    assert ("doubao-lite-128k-240428", "ark_chat") in probe_calls
+    assert ("doubao-lite-128k-240428", "ark_responses") in probe_calls
+    assert ("doubao-seed-2-0-pro-260215", "ark_chat") in probe_calls
+    assert ("doubao-seed-2-0-pro-260215", "ark_responses") in probe_calls
     routes = body["registry"]["provider_routes"]
-    assert routes["ark-official:doubao-seed-2-0-pro-260215"]["status"] == "unverified_manual"
-    assert routes["ark-official:doubao-lite-128k-240428"]["status"] == "unverified_manual"
+    assert routes["ark-official:doubao-seed-2-0-pro-260215"]["status"] == "verified"
+    assert routes["ark-official:doubao-seed-2-0-pro-260215"]["verified_profiles"][0][
+        "method_id"
+    ] == "ark_chat"
+    assert "ark-official:doubao-lite-128k-240428" not in routes
 
 
 def test_endpoint_test_replaces_stale_routes_for_changed_endpoint(
@@ -1081,6 +1076,8 @@ def test_official_endpoint_test_persists_verified_profiles_and_excludes_catalog_
 
     assert response.status_code == 200
     body = response.json()
+    endpoint = body["registry"]["provider_endpoints"]["openai-official"]
+    assert endpoint["status"] == "verified"
     routes = body["registry"]["provider_routes"]
     assert profile_probe_calls == ["gpt-5", "gpt-image-1"]
     assert list(routes) == ["openai-official:gpt-5"]
@@ -1118,8 +1115,426 @@ def test_official_endpoint_test_persists_verified_profiles_and_excludes_catalog_
         "capability_library"
     ]
     assert capability_library == [
-        {"model_id": "gpt-image-1", "status": "catalog_candidate"}
+        {
+            "model_id": "gpt-image-1",
+            "status": "catalog_candidate",
+            "route_status": "unverified_manual",
+            "last_probe_message": "No verified language route profile.",
+            "model_type": "image_generation",
+            "model_type_label": "Image generation model",
+            "candidate_methods": [],
+        }
     ]
+
+
+def test_official_profile_probe_tests_all_candidate_methods_and_keeps_fallbacks(
+    monkeypatch,
+) -> None:
+    endpoint = ProviderEndpoint(
+        endpoint_id="openai-official",
+        display_name="OpenAI Official",
+        protocol="openai_compatible",
+        base_url="https://api.openai.com/v1",
+        api_key="secret",
+        provider_kind="official",
+    )
+    calls: list[tuple[str, str]] = []
+
+    async def fake_probe_official_call_method(endpoint, model_id: str, candidate):
+        del endpoint
+        calls.append((model_id, candidate.method_id))
+        if candidate.method_id == "openai_chat_completions":
+            return ModelProbeResult(model_id=model_id, status="ok", latency_ms=12)
+        if candidate.request_mapper_id == "openai_responses_reasoning":
+            return ModelProbeResult(model_id=model_id, status="ok", latency_ms=15)
+        return ModelProbeResult(
+            model_id=model_id,
+            status="invalid_model",
+            message="wrong API family",
+        )
+
+    monkeypatch.setattr(
+        llm_router,
+        "_probe_official_call_method",
+        fake_probe_official_call_method,
+    )
+
+    profiles = asyncio.run(llm_router._probe_official_model_profiles(endpoint, "gpt-5.2"))
+
+    assert calls == [
+        ("gpt-5.2", "openai_responses"),
+        ("gpt-5.2", "openai_chat_completions"),
+        ("gpt-5.2", "openai_responses"),
+        ("gpt-5.2", "openai_chat_completions"),
+    ]
+    assert [
+        (profile.capability, profile.method_id, profile.request_mapper_id, profile.default)
+        for profile in profiles
+    ] == [
+        ("text_chat", "openai_chat_completions", "openai_chat_completions_text", False),
+        ("reasoning", "openai_responses", "openai_responses_reasoning", True),
+        ("reasoning", "openai_chat_completions", "openai_chat_completions_reasoning", False),
+    ]
+
+
+def test_official_probe_candidates_cover_all_current_official_providers() -> None:
+    cases = [
+        (
+            ProviderEndpoint(
+                endpoint_id="anthropic-official",
+                display_name="Anthropic Official",
+                protocol="anthropic_compatible",
+                base_url="https://api.anthropic.com",
+                api_key="secret",
+                provider_kind="official",
+            ),
+            "claude-opus-4-7",
+            {"anthropic_messages"},
+        ),
+        (
+            ProviderEndpoint(
+                endpoint_id="gemini-official",
+                display_name="Gemini Official",
+                protocol="google_genai",
+                base_url="https://generativelanguage.googleapis.com",
+                api_key="secret",
+                provider_kind="official",
+            ),
+            "gemini-3.1-pro-preview",
+            {"gemini_generate_content"},
+        ),
+        (
+            ProviderEndpoint(
+                endpoint_id="deepseek-official",
+                display_name="DeepSeek Official",
+                protocol="openai_compatible",
+                base_url="https://api.deepseek.com",
+                api_key="secret",
+                provider_kind="official",
+            ),
+            "deepseek-v4-pro",
+            {"deepseek_chat_completions", "deepseek_anthropic_messages"},
+        ),
+        (
+            ProviderEndpoint(
+                endpoint_id="ark-official",
+                display_name="Ark Official",
+                protocol="ark_runtime",
+                base_url="https://ark.cn-beijing.volces.com/api/v3",
+                api_key="secret",
+                provider_kind="official",
+            ),
+            "doubao-seed-2-0-pro-260215",
+            {"ark_chat", "ark_responses"},
+        ),
+    ]
+
+    for endpoint, model_id, expected_methods in cases:
+        candidates = llm_router._official_language_probe_candidates(endpoint, model_id)
+        assert {candidate.method_id for candidate in candidates} >= expected_methods
+
+
+def test_gemini_official_classifies_generation_models_outside_language_routes() -> None:
+    endpoint = ProviderEndpoint(
+        endpoint_id="gemini-official",
+        display_name="Gemini Official",
+        protocol="google_genai",
+        base_url="https://generativelanguage.googleapis.com",
+        api_key="secret",
+        provider_kind="official",
+    )
+
+    assert llm_router._official_language_probe_candidates(endpoint, "gemini-3-pro-preview")
+    assert llm_router._official_language_probe_candidates(
+        endpoint,
+        "deep-research-pro-preview-12-2025",
+    )
+    assert llm_router._official_language_probe_candidates(endpoint, "gemma-4-31b-it")
+
+    excluded = {
+        "gemini-3-pro-image": ("image_generation", "Image generation model"),
+        "gemini-3-pro-image-preview": ("image_generation", "Image generation model"),
+        "nano-banana-pro-preview": ("image_generation", "Image generation model"),
+        "imagen-4.0-generate-001": ("image_generation", "Image generation model"),
+        "veo-3.1-generate-preview": ("video_generation", "Video generation model"),
+        "lyria-3-pro-preview": ("audio", "Audio/realtime model"),
+        "gemini-2.5-flash-preview-tts": ("audio", "Audio/realtime model"),
+        "gemini-embedding-001": ("embedding", "Embedding model"),
+    }
+    for model_id, (model_type, label) in excluded.items():
+        assert llm_router._official_language_probe_candidates(endpoint, model_id) == []
+        assert llm_router._official_catalog_capabilities(endpoint, model_id) == {
+            "model_type": model_type,
+            "model_type_label": label,
+            "capability_library": True,
+            "candidate_methods": [],
+        }
+
+
+def test_official_endpoint_test_job_returns_compact_progress_without_registry(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "openai-official": ProviderEndpoint(
+                    endpoint_id="openai-official",
+                    display_name="OpenAI Official",
+                    protocol="openai_compatible",
+                    base_url="https://api.openai.com/v1",
+                    api_key="secret",
+                    provider_kind="official",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        assert (backend, api_key, base_url) == ("openai", "secret", "https://api.openai.com/v1")
+        return PingResult(latency_ms=42, model_ids=("gpt-5", "gpt-image-1"))
+
+    async def fake_probe_official_model_profiles(endpoint, model_id: str):
+        del endpoint
+        if model_id != "gpt-5":
+            return []
+        return [
+            VerifiedProfile(
+                profile_id="text_responses",
+                capability="text_chat",
+                method_id="openai_responses",
+                request_mapper_id="openai_responses_text",
+                status="ready",
+                default=True,
+                fallback_rank=1,
+            )
+        ]
+
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(
+        llm_router,
+        "_probe_official_model_profiles",
+        fake_probe_official_model_profiles,
+    )
+
+    start = client.post("/api/llm/endpoints/openai-official/test-jobs")
+
+    assert start.status_code == 200
+    started = start.json()
+    assert "registry" not in started
+    assert started["endpoint_id"] == "openai-official"
+    job_id = started["job_id"]
+
+    status = started
+    for _ in range(50):
+        if status["status"] == "completed":
+            break
+        time.sleep(0.01)
+        poll = client.get(f"/api/llm/endpoint-test-jobs/{job_id}")
+        assert poll.status_code == 200
+        status = poll.json()
+
+    assert status["status"] == "completed"
+    assert "registry" not in status
+    assert status["total_model_count"] == 2
+    assert status["tested_model_count"] == 2
+    assert status["verified_route_count"] == 1
+    assert status["catalog_only_count"] == 1
+    assert status["available_models"] == [
+        {
+            "id": "gpt-5",
+            "route_id": "openai-official:gpt-5",
+            "status": "verified",
+            "verified_profile_count": 1,
+            "last_probe_message": None,
+            "capabilities": {
+                "model_type": "language_reasoning",
+                "model_type_label": "Language/reasoning model",
+                "capability_library": False,
+                "candidate_methods": ["openai_chat_completions", "openai_responses"],
+                "verified_methods": ["openai_responses"],
+                "verified_profiles": [
+                    {
+                        "profile_id": "text_responses",
+                        "capability": "text_chat",
+                        "method_id": "openai_responses",
+                        "request_mapper_id": "openai_responses_text",
+                    }
+                ],
+            },
+        },
+        {
+            "id": "gpt-image-1",
+            "route_id": None,
+            "status": "unverified_manual",
+            "verified_profile_count": 0,
+            "last_probe_message": "No verified language route profile.",
+            "capabilities": {
+                "model_type": "image_generation",
+                "model_type_label": "Image generation model",
+                "capability_library": True,
+                "candidate_methods": [],
+            },
+        }
+    ]
+
+
+def test_official_endpoint_test_job_marks_language_candidates_failed_after_all_methods_fail(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "openai-official": ProviderEndpoint(
+                    endpoint_id="openai-official",
+                    display_name="OpenAI Official",
+                    protocol="openai_compatible",
+                    base_url="https://api.openai.com/v1",
+                    api_key="secret",
+                    provider_kind="official",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        assert (backend, api_key, base_url) == ("openai", "secret", "https://api.openai.com/v1")
+        return PingResult(latency_ms=42, model_ids=("gpt-5.2", "gpt-image-1"))
+
+    async def fake_probe_official_model_profiles(endpoint, model_id: str):
+        del endpoint, model_id
+        return []
+
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(
+        llm_router,
+        "_probe_official_model_profiles",
+        fake_probe_official_model_profiles,
+    )
+
+    start = client.post("/api/llm/endpoints/openai-official/test-jobs")
+
+    assert start.status_code == 200
+    job_id = start.json()["job_id"]
+    status = start.json()
+    for _ in range(50):
+        if status["status"] == "completed":
+            break
+        time.sleep(0.01)
+        poll = client.get(f"/api/llm/endpoint-test-jobs/{job_id}")
+        assert poll.status_code == 200
+        status = poll.json()
+
+    assert status["status"] == "completed"
+    assert status["verified_route_count"] == 0
+    assert status["failed_model_count"] == 1
+    assert status["catalog_only_count"] == 1
+    models = {model["id"]: model for model in status["available_models"]}
+    assert models["gpt-5.2"]["status"] == "failed"
+    assert (
+        models["gpt-5.2"]["last_probe_message"]
+        == "No official language call method passed for this model."
+    )
+    assert models["gpt-5.2"]["capabilities"]["model_type"] == "language_reasoning"
+    assert models["gpt-5.2"]["capabilities"]["candidate_methods"] == [
+        "openai_chat_completions",
+        "openai_responses",
+    ]
+    assert models["gpt-image-1"]["status"] == "unverified_manual"
+    assert models["gpt-image-1"]["capabilities"]["model_type"] == "image_generation"
+
+    raw = json.loads(credentials_path().read_text(encoding="utf-8"))
+    capability_library = raw["provider_endpoints"]["openai-official"]["metadata"][
+        "capability_library"
+    ]
+    assert capability_library == [
+        {
+            "model_id": "gpt-image-1",
+            "status": "catalog_candidate",
+            "route_status": "unverified_manual",
+            "last_probe_message": "No verified language route profile.",
+            "model_type": "image_generation",
+            "model_type_label": "Image generation model",
+            "candidate_methods": [],
+        },
+        {
+            "model_id": "gpt-5.2",
+            "status": "probe_failed",
+            "route_status": "failed",
+            "last_probe_message": "No official language call method passed for this model.",
+            "model_type": "language_reasoning",
+            "model_type_label": "Language/reasoning model",
+            "candidate_methods": ["openai_chat_completions", "openai_responses"],
+        },
+    ]
+
+
+def test_official_endpoint_test_job_records_unexpected_probe_failure(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "openai-official": ProviderEndpoint(
+                    endpoint_id="openai-official",
+                    display_name="OpenAI Official",
+                    protocol="openai_compatible",
+                    base_url="https://api.openai.com/v1",
+                    api_key="secret",
+                    provider_kind="official",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        del backend, api_key, base_url
+        return PingResult(latency_ms=42, model_ids=("gpt-5",))
+
+    async def fake_probe_official_model_profiles(endpoint, model_id: str):
+        del endpoint, model_id
+        raise RuntimeError("probe mapper crashed")
+
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(
+        llm_router,
+        "_probe_official_model_profiles",
+        fake_probe_official_model_profiles,
+    )
+
+    start = client.post("/api/llm/endpoints/openai-official/test-jobs")
+
+    assert start.status_code == 200
+    job_id = start.json()["job_id"]
+    status = start.json()
+    for _ in range(50):
+        if status["status"] == "failed":
+            break
+        time.sleep(0.01)
+        poll = client.get(f"/api/llm/endpoint-test-jobs/{job_id}")
+        assert poll.status_code == 200
+        status = poll.json()
+
+    assert status["status"] == "failed"
+    assert "probe mapper crashed" in status["message"]
+
+    retry = client.post("/api/llm/endpoints/openai-official/test-jobs")
+    assert retry.status_code == 200
+    assert retry.json()["job_id"] != job_id
 
 
 def test_endpoint_scoped_manual_model_test_verifies_only_successful_models(
@@ -1782,8 +2197,9 @@ def test_role_test_uses_persisted_role_and_ignores_draft_payload(
         api_key: str,
         base_url: str,
         model_id: str,
+        runtime_settings: dict[str, object] | None = None,
     ) -> ModelProbeResult:
-        del backend, api_key, base_url
+        del backend, api_key, base_url, runtime_settings
         calls.append(model_id)
         return ModelProbeResult(model_id=model_id, status="ok")
 
@@ -1808,6 +2224,129 @@ def test_role_test_uses_persisted_role_and_ignores_draft_payload(
     assert provider_result["status"] == "ok"
     assert provider_result["warnings"] == []
     assert "resolved_settings" in provider_result
+
+
+def test_put_roles_preserves_advanced_model_bundles(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+
+    response = client.put(
+        "/api/llm/roles",
+        json={
+            "schema_version": 3,
+            "model_profiles": {},
+            "model_bundles": {
+                "premium_stack": {
+                    "model_profile_id": "premium_stack",
+                    "display_name": "Premium Stack",
+                    "canonical_id": "gpt-5",
+                    "fallback_chain": [{"route_id": "openai-direct:gpt-5"}],
+                }
+            },
+            "roles": {},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["model_bundles"]["premium_stack"]["display_name"] == "Premium Stack"
+    assert "premium_stack" in load_roles_file(active_roles_path()).model_bundles
+
+
+def test_role_test_probes_role_routes_concurrently(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+    credentials = LLMCredentialsFile(
+        provider_endpoints={
+            "openai-direct": ProviderEndpoint(
+                endpoint_id="openai-direct",
+                display_name="OpenAI",
+                protocol="openai_compatible",
+                base_url="https://api.openai.example/v1",
+                api_key="secret",
+                status="verified",
+            ),
+            "openrouter-prod": ProviderEndpoint(
+                endpoint_id="openrouter-prod",
+                display_name="OpenRouter",
+                protocol="openai_compatible",
+                base_url="https://openrouter.ai/api/v1",
+                api_key="secret",
+                status="verified",
+            ),
+        },
+        provider_routes={
+            "openai-direct:gpt-5": ProviderRoute(
+                route_id="openai-direct:gpt-5",
+                endpoint_id="openai-direct",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+                status="verified",
+            ),
+            "openrouter-prod:gpt-5": ProviderRoute(
+                route_id="openrouter-prod:gpt-5",
+                endpoint_id="openrouter-prod",
+                route_slug="gpt-5",
+                provider_model_id="openai/gpt-5",
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+                status="verified",
+            ),
+        },
+    )
+    save_credentials(credentials, active_credentials_path)
+    save_roles_file(
+        roles_path,
+        RolesData(
+            roles={
+                "analyst": RoleEntry(
+                    fallback_chain=[
+                        RoleRouteEntry(route_id="openai-direct:gpt-5"),
+                        RoleRouteEntry(route_id="openrouter-prod:gpt-5"),
+                    ]
+                )
+            }
+        ),
+        known_route_ids=set(credentials.provider_routes),
+    )
+    inflight = 0
+    max_inflight = 0
+
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> ModelProbeResult:
+        nonlocal inflight, max_inflight
+        del backend, api_key, base_url, runtime_settings
+        inflight += 1
+        max_inflight = max(max_inflight, inflight)
+        await asyncio.sleep(0.01)
+        inflight -= 1
+        return ModelProbeResult(model_id=model_id, status="ok")
+
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
+
+    response = client.post("/api/llm/roles/analyst/test", json={})
+
+    assert response.status_code == 200
+    assert max_inflight == 2
+    assert [
+        provider["status"]
+        for provider in response.json()["model_groups"][0]["provider_results"]
+    ] == ["ok", "ok"]
 
 
 def test_role_test_reports_materialized_not_fit_provider_diagnostics(
@@ -1857,8 +2396,9 @@ def test_role_test_reports_materialized_not_fit_provider_diagnostics(
         api_key: str,
         base_url: str,
         model_id: str,
+        runtime_settings: dict[str, object] | None = None,
     ) -> ModelProbeResult:
-        del backend, api_key, base_url
+        del backend, api_key, base_url, runtime_settings
         calls.append(model_id)
         return ModelProbeResult(model_id=model_id, status="ok")
 
@@ -1900,6 +2440,96 @@ def test_role_test_reports_materialized_not_fit_provider_diagnostics(
     assert provider_result["admission_decision"] == "block"
     assert provider_result["status"] == "blocked"
     assert provider_result["warnings"][0]["code"] == "thinking_unsupported"
+
+
+def test_role_test_probes_needs_test_provider_at_click_time(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+    credentials = LLMCredentialsFile(
+        provider_endpoints={
+            "openai-direct": ProviderEndpoint(
+                endpoint_id="openai-direct",
+                display_name="OpenAI",
+                protocol="openai_compatible",
+                base_url="https://api.openai.example/v1",
+                api_key="secret",
+                status="verified",
+            )
+        },
+        provider_routes={
+            "openai-direct:gpt-5": ProviderRoute(
+                route_id="openai-direct:gpt-5",
+                endpoint_id="openai-direct",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+                status="verified",
+                capabilities={},
+            )
+        },
+    )
+    save_credentials(credentials, active_credentials_path)
+    save_roles_file(roles_path, RolesData(), known_route_ids=set(credentials.provider_routes))
+    calls: list[str] = []
+
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> ModelProbeResult:
+        del backend, api_key, base_url
+        assert runtime_settings == {"reasoning": {"enabled": True}}
+        calls.append(model_id)
+        return ModelProbeResult(model_id=model_id, status="ok")
+
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
+
+    put_response = client.put(
+        "/api/llm/roles/analyst",
+        json={
+            "role_kind": "graph_agent",
+            "system_prompt_prefix": "",
+            "model_fallback_enabled": True,
+            "intent": {
+                "provider_preference": "manual_order",
+                "thinking": "required",
+            },
+            "model_groups": [
+                {
+                    "canonical_id": "gpt-5",
+                    "display_name": "GPT-5",
+                    "provider_models": [{"route_id": "openai-direct:gpt-5"}],
+                }
+            ],
+        },
+    )
+    assert put_response.status_code == 200
+    assert put_response.json()["fallback_chain"] == []
+    assert put_response.json()["materialization_report"]["entries"][0]["role_fit"] == "needs_test"
+
+    response = client.post("/api/llm/roles/analyst/test", json={})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "warning"
+    assert calls == ["gpt-5"]
+    provider_result = body["model_groups"][0]["provider_results"][0]
+    assert provider_result["route_id"] == "openai-direct:gpt-5"
+    assert provider_result["provider_ui_state"] == "ready"
+    assert provider_result["role_fit"] == "needs_test"
+    assert provider_result["admission_decision"] == "admit"
+    assert provider_result["status"] == "ok"
+    assert provider_result["warnings"][0]["code"] == "thinking_capability_unknown"
+    assert provider_result["resolved_settings"]["reasoning"]["enabled"] is True
 
 
 def test_apply_model_profile_marks_runtime_settings_as_profile_default(

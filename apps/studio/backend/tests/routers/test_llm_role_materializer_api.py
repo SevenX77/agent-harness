@@ -371,6 +371,81 @@ def test_put_role_v3_blocks_route_when_output_token_cap_policy_blocks(
     assert body["fallback_chain"] == []
 
 
+def test_put_role_v3_uses_each_route_max_for_maximum_available_output_tokens(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    credentials = LLMCredentialsFile(
+        provider_endpoints={
+            "fast-provider": _provider_endpoint("fast-provider"),
+            "large-provider": _provider_endpoint("large-provider"),
+        },
+        provider_routes={
+            "fast-provider:deepseek-v4-pro": _provider_route(
+                "fast-provider:deepseek-v4-pro",
+                canonical_id="deepseek-v4-pro",
+            ).model_copy(
+                update={
+                    "capabilities": {
+                        "max_output_tokens": CapabilityValue(
+                            value={"supported": True, "min": 1, "max": 32768, "default": 4096},
+                            source="provider_doc",
+                        )
+                    }
+                }
+            ),
+            "large-provider:deepseek-v4-pro": _provider_route(
+                "large-provider:deepseek-v4-pro",
+                canonical_id="deepseek-v4-pro",
+            ).model_copy(
+                update={
+                    "capabilities": {
+                        "max_output_tokens": CapabilityValue(
+                            value={"supported": True, "min": 1, "max": 131072, "default": 4096},
+                            source="provider_doc",
+                        )
+                    }
+                }
+            ),
+        },
+    )
+    _seed_materializer_registry(tmp_path, monkeypatch, credentials)
+
+    response = client.put(
+        "/api/llm/roles/analyst",
+        json={
+            "role_kind": "graph_agent",
+            "system_prompt_prefix": "",
+            "model_fallback_enabled": True,
+            "intent": {
+                "provider_preference": "manual_order",
+                "target_output_tokens": {"mode": "maximum_available"},
+            },
+            "model_groups": [
+                {
+                    "canonical_id": "deepseek-v4-pro",
+                    "display_name": "DeepSeek V4 Pro",
+                    "provider_models": [
+                        {"route_id": "fast-provider:deepseek-v4-pro"},
+                        {"route_id": "large-provider:deepseek-v4-pro"},
+                    ],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    fallback_settings = {
+        entry["route_id"]: entry["runtime_settings"]["max_output_tokens"]
+        for entry in response.json()["fallback_chain"]
+    }
+    assert fallback_settings == {
+        "fast-provider:deepseek-v4-pro": 32768,
+        "large-provider:deepseek-v4-pro": 131072,
+    }
+
+
 def test_delete_role_v3_removes_persisted_role_instead_of_put_merge_retaining_it(
     client: TestClient,
     tmp_path: Path,

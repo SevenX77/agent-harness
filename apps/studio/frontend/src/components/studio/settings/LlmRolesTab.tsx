@@ -31,7 +31,7 @@ export interface AvailableModelDragPreviewState {
   y: number
 }
 
-interface RoleTestState {
+export interface RoleTestState {
   running: boolean
   result?: RoleTestResponse
   error?: string
@@ -428,21 +428,30 @@ export function LlmRolesTab({
   )
 }
 
-function roleTestStatusesByRole(states: Record<string, RoleTestState>): Record<string, RoleChainStatusMap> {
+export function roleTestStatusesByRole(
+  states: Record<string, RoleTestState>,
+  activeRoleName: string | null = null,
+  activeStatuses: RoleChainStatusMap = {},
+): Record<string, RoleChainStatusMap> {
   return Object.fromEntries(
-    Object.entries(states).map(([roleName, state]) => {
-      const statusMap: RoleChainStatusMap = {}
-      for (const group of state.result?.model_groups ?? []) {
-        for (const providerResult of group.provider_results) {
-          statusMap[roleChainStatusKey(group.canonical_id, providerResult.route_id)] = {
-            status: roleChainStatusForProviderResult(providerResult),
-            message: roleTestProviderMessage(providerResult),
-          }
-        }
-      }
-      return [roleName, statusMap]
-    }),
+    Object.entries(states).map(([roleName, state]) => [
+      roleName,
+      state.running && roleName === activeRoleName ? activeStatuses : roleTestStatusesFromResult(state.result),
+    ]),
   )
+}
+
+function roleTestStatusesFromResult(result?: RoleTestResponse): RoleChainStatusMap {
+  const statusMap: RoleChainStatusMap = {}
+  for (const group of result?.model_groups ?? []) {
+    for (const providerResult of group.provider_results) {
+      statusMap[roleChainStatusKey(group.canonical_id, providerResult.route_id)] = {
+        status: roleChainStatusForProviderResult(providerResult),
+        message: roleTestProviderMessage(providerResult),
+      }
+    }
+  }
+  return statusMap
 }
 
 function roleChainStatusForProviderResult(providerResult: RoleTestProviderResult): RoleChainStatusMap[string]["status"] {

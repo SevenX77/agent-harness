@@ -465,7 +465,7 @@ test.describe('Round 3 API Keys e2e', () => {
     await expect(apiKeys.getByText('Ark Official')).toBeVisible()
     await expect(apiKeys.getByRole('heading', { name: 'Third-party Providers' })).toBeVisible()
     await expect(apiKeys.locator('input[aria-label="Provider Name"][value="OpenRouter Custom"]')).toBeVisible()
-    await expect(apiKeys.getByText('Not configured').first()).toBeVisible()
+    await expect(apiKeys.locator('[data-provider-id="openrouter-custom"]').getByText('Connected')).toBeVisible()
     await expect(apiKeys.getByText('deepseek-chat')).toBeVisible()
     await expect(apiKeys.getByText('gpt-5')).toBeVisible()
     await expect(apiKeys.getByText('Protocol')).toBeVisible()
@@ -500,7 +500,7 @@ test.describe('Round 3 API Keys e2e', () => {
     expect(savedEndpoint?.protocol).toBe('anthropic_compatible')
     await testRequest
     await expect(newCard.getByText('Connected')).toBeVisible()
-    await expect(newCard.getByText('anthropic_compatible')).toBeVisible()
+    await expect(newCard.getByText('Available SDKs:')).toHaveCount(0)
     await expect(page.locator('input[aria-label="Provider Name"][value="Together Custom"]')).toBeVisible()
   })
 
@@ -509,7 +509,7 @@ test.describe('Round 3 API Keys e2e', () => {
 
     const providerCard = page.locator('[data-provider-id="openrouter-custom"]')
     await expect(providerCard.getByText('Connected')).toBeVisible()
-    await expect(providerCard.getByText('Available SDKs:')).toBeVisible()
+    await expect(providerCard.getByText('Available Models:')).toBeVisible()
 
     const saveRequest = page.waitForRequest((request) => request.url().includes('/api/llm/registry/endpoints') && request.method() === 'PUT')
     await providerCard.getByRole('textbox', { name: 'Base URL' }).fill('https://openrouter.ai/api/v2')
@@ -525,7 +525,7 @@ test.describe('Round 3 API Keys e2e', () => {
     await restoreRequest
 
     await expect(providerCard.getByText('Connected')).toBeVisible()
-    await expect(providerCard.getByText('Available SDKs:')).toBeVisible()
+    await expect(providerCard.getByText('Available Models:')).toBeVisible()
   })
 
   test('manual model probing checks candidates against registered v4 routes', async ({ page }) => {

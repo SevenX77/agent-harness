@@ -231,6 +231,11 @@ def _apply_output_token_intent(
     token_intent,
     route,
 ) -> str:
+    if token_intent.mode == "maximum_available":
+        max_tokens = _max_output_tokens(route)
+        if max_tokens is not None:
+            entry_report["resolved_settings"]["max_output_tokens"] = max_tokens
+        return "using"
     if token_intent.mode != "target" or token_intent.value is None:
         return "using"
     max_tokens = _max_output_tokens(route)

@@ -231,3 +231,61 @@ async def test_request_official_call_method_generation_uses_method_specific_payl
             },
         ),
     ]
+
+
+@pytest.mark.anyio
+async def test_request_official_gemini_generation_uses_thinking_level_payload() -> None:
+    requests: list[tuple[str, dict[str, object]]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append((str(request.url), json.loads(request.content.decode())))
+        return httpx.Response(200, json={"id": "ok"}, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await copilot_test._request_official_call_method_generation(
+            client,
+            "gemini_generate_content",
+            "secret",
+            "https://generativelanguage.googleapis.com",
+            "gemini-3.1-pro-preview",
+            runtime_settings={
+                "max_output_tokens": 16,
+                "reasoning": {"enabled": True, "effort": "low"},
+            },
+        )
+
+    assert requests == [
+        (
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key=secret",
+            {
+                "contents": [{"parts": [{"text": "Reply with one short word."}]}],
+                "generationConfig": {
+                    "maxOutputTokens": 16,
+                    "thinkingConfig": {"thinkingLevel": "low"},
+                },
+            },
+        )
+    ]
+    assert "thinkingBudget" not in json.dumps(requests[0][1])
+
+
+def test_model_probe_message_includes_vendor_error_message() -> None:
+    response = httpx.Response(
+        404,
+        json={
+            "error": {
+                "code": 404,
+                "message": (
+                    "This model models/gemini-3-pro-preview is no longer available. "
+                    "Please update your code to use a newer model."
+                ),
+                "status": "NOT_FOUND",
+            }
+        },
+    )
+
+    assert copilot_test._model_probe_message(response) == (
+        "Provider returned HTTP 404 (NOT_FOUND). "
+        "This model models/gemini-3-pro-preview is no longer available. "
+        "Please update your code to use a newer model."
+    )

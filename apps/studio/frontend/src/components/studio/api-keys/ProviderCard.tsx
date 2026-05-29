@@ -1,10 +1,10 @@
 import { useRef, useState, type WheelEvent } from "react"
 import { toast } from "sonner"
-import { CheckCircle2, Copy, Eye, EyeOff, Loader2, Trash2, TriangleAlert, XCircle } from "lucide-react"
+import { Brain, CheckCircle2, Copy, Eye, EyeOff, Loader2, Trash2, TriangleAlert, XCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
-import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog"
+import { requestDeleteConfirmationToast } from "@/components/ui/delete-confirm-toast"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/select"
 import { translateErrorCode, translateTestStatus } from "@/lib/llm-error-messages"
 import { cn } from "@/lib/utils"
-import type { CredentialsState, ModelInfo, ProviderTestResult, ProviderType, RouteStatus } from "../../../api/llm"
+import type { CredentialsState, ModelInfo, ModelProbeStatus, ProviderTestResult, ProviderType, RouteStatus } from "../../../api/llm"
 import { providerCachedTestResult, providerTestParamsMatch } from "../settings/provider-utils"
 import type { ProviderDraft } from "../settings/types"
 import { ManualModelTestPanel } from "./ManualModelTestPanel"
@@ -44,6 +44,20 @@ const endpointModelExamplesByProvider: Record<string, string> = {
   ark: "doubao-seed-2-0-pro-260215",
   openrouter: "openai/gpt-5",
   qiniu: "deepseek-r1",
+}
+const officialProviderNamesByKey: Record<string, string> = {
+  anthropic: "Anthropic Official",
+  openai: "OpenAI Official",
+  gemini: "Gemini Official",
+  deepseek: "DeepSeek Official",
+  ark: "Ark Official",
+}
+const officialProviderBrandNames: Record<string, string> = {
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  gemini: "Gemini",
+  deepseek: "DeepSeek",
+  ark: "Ark",
 }
 
 export function apiKeyInputType(visible: boolean): "text" | "password" {
@@ -79,6 +93,27 @@ export function sortModelInfos(models: ModelInfo[]): ModelInfo[] {
     const primary = leftKey.localeCompare(rightKey, undefined, { numeric: true, sensitivity: "base" })
     return primary !== 0 ? primary : left.id.localeCompare(right.id)
   })
+}
+
+export function sortOfficialRouteInfos(models: ModelInfo[]): ModelInfo[] {
+  return [...models].sort((left, right) => {
+    const statusRank = officialRouteSortRank(left) - officialRouteSortRank(right)
+    if (statusRank !== 0) return statusRank
+    const leftKey = modelSortKey(left.id)
+    const rightKey = modelSortKey(right.id)
+    const primary = leftKey.localeCompare(rightKey, undefined, { numeric: true, sensitivity: "base" })
+    return primary !== 0 ? primary : left.id.localeCompare(right.id)
+  })
+}
+
+function officialRouteSortRank(model: ModelInfo): number {
+  const status = modelRouteStatus(model)
+  const variant = routeStatusTagVariant(status, model)
+  if (variant === "success") return 0
+  if (status === "testing") return 1
+  if (variant === "destructive") return 4
+  if (status === "disabled") return 3
+  return 2
 }
 
 function modelSortKey(modelId: string): string {
@@ -172,23 +207,24 @@ export function ProviderDeleteButton({
   const displayName = draftName.trim() || "this provider"
 
   return (
-    <DeleteConfirmDialog
-      itemName={displayName}
-      description="This provider configuration will be removed from the credentials document."
-      onConfirm={onDelete}
-      trigger={(
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label="Delete provider"
-          data-delete-confirm-trigger={true}
-          className="text-muted-foreground/70 hover:text-muted-foreground"
-        >
-          <Trash2 className="size-4" />
-        </Button>
-      )}
-    />
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      aria-label="Delete provider"
+      data-delete-toast-trigger={true}
+      className="text-muted-foreground/70 hover:text-muted-foreground"
+      onClick={() => {
+        requestDeleteConfirmationToast({
+          id: `delete-provider-${displayName}`,
+          title: `Delete ${displayName}?`,
+          description: "This provider configuration will be removed from the credentials document.",
+          onConfirm: onDelete,
+        })
+      }}
+    >
+      <Trash2 className="size-4" />
+    </Button>
   )
 }
 
@@ -233,20 +269,56 @@ function endpointModelPlaceholder(providerKey: string, providerType: ProviderTyp
   return `e.g. ${matched?.[1] ?? fallback}`
 }
 
-function modelRouteStatus(model: ModelInfo): RouteStatus | "unknown" {
+function providerDisplayName(
+  draft: ProviderDraft,
+  isOfficial: boolean,
+  notableProviderKey?: string,
+): string {
+  const raw = draft.name.trim() || draft.id.trim()
+  if (!isOfficial) return raw || "Unnamed Provider"
+  const providerKey = officialProviderKey(draft, notableProviderKey)
+  if (providerKey) return officialProviderNamesByKey[providerKey]
+  const normalizedName = humanizeOfficialProviderName(raw)
+  return normalizedName ? `${normalizedName} Official` : "Official Provider"
+}
+
+function officialProviderKey(draft: ProviderDraft, notableProviderKey?: string): string | null {
+  if (notableProviderKey && officialProviderNamesByKey[notableProviderKey]) {
+    return notableProviderKey
+  }
+  const haystack = `${draft.id} ${draft.name} ${draft.base_url}`.toLowerCase()
+  return Object.keys(officialProviderNamesByKey).find((key) => haystack.includes(key)) ?? null
+}
+
+function humanizeOfficialProviderName(value: string): string {
+  const normalized = value
+    .replace(/[-_]+/g, " ")
+    .replace(/\bofficial\b/gi, "")
+    .trim()
+  if (!normalized) return ""
+  const knownBrand = officialProviderBrandNames[normalized.toLowerCase()]
+  if (knownBrand) return knownBrand
+  return normalized
+    .split(/\s+/)
+    .map((part) => officialProviderBrandNames[part.toLowerCase()] ?? `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ")
+}
+
+function modelRouteStatus(model: ModelInfo): ModelProbeStatus | "unknown" {
   return model.status ?? "unknown"
 }
 
 function routeDisplayStatus(model: ModelInfo, isTesting: boolean): RouteDisplayStatus {
   const status = modelRouteStatus(model)
-  if (isTesting && status === "unverified_manual" && !model.last_probe_message) return "testing"
+  if (status === "testing" && isTesting) return "testing"
+  if (status === "testing") return "unverified_manual"
   return status
 }
 
-function routeStatusTagVariant(status: RouteDisplayStatus, model: ModelInfo): "success" | "destructive" | "muted" | "default" | "info" {
+function routeStatusTagVariant(status: RouteDisplayStatus, model: ModelInfo): "success" | "destructive" | "muted" | "default" | "info" | "warning" | "multimodal" {
   if (status === "failed") return "destructive"
   if (status === "disabled") return "muted"
-  if (isCapabilityLibraryModel(model)) return "info"
+  if (isCapabilityLibraryModel(model)) return "multimodal"
   if (status === "verified") return "success"
   return "default"
 }
@@ -310,6 +382,20 @@ function routeProfileTooltipText(model: ModelInfo, status: RouteDisplayStatus): 
   ].filter((line): line is string => Boolean(line)).join("\n")
 }
 
+function routeFailureTooltipText(model: ModelInfo, status: RouteDisplayStatus): string | null {
+  if (status !== "failed") return null
+  const message = modelProbeMessage(model)
+  return message ? `Route test failed: ${message}` : null
+}
+
+function modelProbeMessage(model: ModelInfo): string | null {
+  if (typeof model.last_probe_message === "string" && model.last_probe_message.trim()) {
+    return model.last_probe_message.trim()
+  }
+  const value = modelCapabilityValue(model, "last_probe_message")
+  return typeof value === "string" && value.trim() ? value.trim() : null
+}
+
 function modelVerifiedProfiles(model: ModelInfo): Array<{
   capability?: string
   method_id?: string
@@ -333,6 +419,13 @@ function profileCapabilityLabel(capability: string | undefined): string | null {
   if (capability === "translation") return "translation"
   if (!capability) return null
   return capability.replaceAll("_", " ")
+}
+
+function modelHasVerifiedReasoningProfile(model: ModelInfo): boolean {
+  return modelVerifiedProfiles(model).some((profile) => (
+    profile.status !== "failed" &&
+    (profile.capability === "reasoning" || profile.capability === "thinking")
+  ))
 }
 
 function uniqueStrings(values: string[]): string[] {
@@ -392,10 +485,12 @@ export function ProviderCard({
   const trimmedEndpointModelId = endpointModelId.trim()
   const matchedResult = providerCachedTestResult(persisted, draft) ?? directPersistedTestResult(persisted, draft)
   const hasMatchedTestResult = matchedResult !== null
-  const displayName = draft.name.trim() || "Unnamed Provider"
+  const displayName = providerDisplayName(draft, isOfficial, notableProviderKey)
   const apiKeyProviderName = displayName.replace(/ Official$/, "")
   const availableSdks = matchedResult?.available_sdks ?? []
-  const availableModels = sortModelInfos(matchedResult?.available_models ?? [])
+  const availableModels = isOfficial
+    ? sortOfficialRouteInfos(matchedResult?.available_models ?? [])
+    : sortModelInfos(matchedResult?.available_models ?? [])
   const hasAvailableModels = availableModels.length > 0
   const availableModelsLabel = isOfficial ? "Available Routes:" : "Available Models:"
   const copyTargetLabel = isOfficial ? "route" : "model"
@@ -447,7 +542,7 @@ export function ProviderCard({
             Third-party
           </Badge>
         ) : null}
-        <TestMessage status={testStatus} latencyMs={null} errorCode={matchedErrorCode ?? null} />
+        {!isOfficial ? <TestMessage status={testStatus} latencyMs={null} errorCode={matchedErrorCode ?? null} /> : null}
         <div className="flex-1" />
         {!isOfficial ? <ProviderDeleteButton draftName={draft.name} onDelete={onDelete} /> : null}
       </CardHeader>
@@ -617,18 +712,8 @@ export function ProviderCard({
             </div>
           </Field>
         ) : null}
-        {availableSdks.length || availableModels.length || hasEmptyModelListWarning ? (
+        {availableModels.length || hasEmptyModelListWarning ? (
           <div className="border-t pt-3 space-y-2 text-xs" data-testid="provider-capabilities">
-            {availableSdks.length > 0 ? (
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-muted-foreground">Available SDKs:</span>
-                {availableSdks.map((sdk) => (
-                  <Badge key={sdk} variant="outline" className="border-border/70 bg-muted/20 font-mono text-muted-foreground">
-                    {sdk}
-                  </Badge>
-                ))}
-              </div>
-            ) : null}
             {hasAvailableModels ? (
               <div className="space-y-2 pb-1">
                 <div className="text-muted-foreground">{availableModelsLabel}</div>
@@ -644,12 +729,25 @@ export function ProviderCard({
                     const modelTypeLabel = isOfficial ? officialModelTypeLabel(model) : null
                     const isCapabilityModel = isOfficial && isCapabilityLibraryModel(model)
                     const profileTooltipText = isOfficial && !isCapabilityModel ? routeProfileTooltipText(model, status) : null
-                    const tooltipText = isCapabilityModel ? modelTypeLabel : profileTooltipText ?? modelTypeLabel
-                    const title = isOfficial
-                      ? isCapabilityModel && status !== "failed"
-                        ? `${model.id}${modelTypeLabel ? ` - ${modelTypeLabel}` : ""}`
-                        : `${model.id} - ${profileTooltipText ?? statusLabel}${modelTypeLabel ? ` - ${modelTypeLabel}` : ""}`
+                    const failureTooltipText = isOfficial ? routeFailureTooltipText(model, status) : null
+                    const tooltipDetail = (
+                      failureTooltipText
+                      ?? (isCapabilityModel && status !== "failed"
+                        ? modelTypeLabel
+                        : profileTooltipText)
+                    ) ?? statusLabel
+                    const appendModelTypeLabel = Boolean(
+                      modelTypeLabel &&
+                      tooltipDetail !== modelTypeLabel &&
+                      status !== "verified",
+                    )
+                    const tooltipText = isOfficial
+                      ? `${model.id} - ${tooltipDetail}${appendModelTypeLabel ? ` - ${modelTypeLabel}` : ""}`
                       : `Copy ${model.id}`
+                    const hasReasoningProfile = isOfficial && modelHasVerifiedReasoningProfile(model)
+                    const ariaLabel = isOfficial
+                      ? `Copy ${copyTargetLabel} ${model.id}. ${tooltipDetail.replace(/\s+/g, " ")}`
+                      : `Copy ${copyTargetLabel} ${model.id}`
                     const tag = (
                       <Tag
                         key={`${model.route_id ?? model.id}:${model.status ?? "model"}`}
@@ -661,19 +759,19 @@ export function ProviderCard({
                           status === "testing" && "api-route-tag-border-flow",
                         )}
                       >
-                        <button
-                          type="button"
-                          onClick={() => void copyAvailableModelId(model.id)}
-                          aria-label={`Copy ${copyTargetLabel} ${model.id}`}
-                          title={title}
-                          data-route-status={isOfficial ? status : undefined}
-                          data-model-type={modelType ?? undefined}
-                        >
-                          {model.id}
-                        </button>
-                      </Tag>
-                    )
-                    if (!isOfficial || !tooltipText) return tag
+                          <button
+                            type="button"
+                            onClick={() => void copyAvailableModelId(model.id)}
+                            aria-label={ariaLabel}
+                            data-route-status={isOfficial ? status : undefined}
+                            data-model-type={modelType ?? undefined}
+                            data-reasoning-route={hasReasoningProfile ? true : undefined}
+                          >
+                            {model.id}
+                            {hasReasoningProfile ? <Brain className="size-2.5 shrink-0" aria-hidden="true" /> : null}
+                          </button>
+                        </Tag>
+                      )
                     return (
                       <Tooltip key={`${model.route_id ?? model.id}:${model.status ?? "model"}:tooltip`}>
                         <TooltipTrigger asChild>{tag}</TooltipTrigger>

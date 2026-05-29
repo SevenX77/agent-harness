@@ -40,6 +40,7 @@ import {
   deriveRoleRouteStatus,
   roleRouteStatusDetail,
   roleRouteStatusSurfaceClass,
+  roleRouteStatusTooltip,
   RoleRouteStatusLight,
 } from "./role-route-status"
 
@@ -166,6 +167,7 @@ const ProviderTag = memo(function ProviderTag({
     roleFitEntry,
     testMessage: testStatus?.message,
   })
+  const statusTooltip = roleRouteStatus ? roleRouteStatusTooltip(roleRouteStatus, statusDetail) : null
   const {
     attributes,
     listeners,
@@ -179,10 +181,11 @@ const ProviderTag = memo(function ProviderTag({
     transition,
   }
 
-  return (
+  const row = (
     <div
       ref={setNodeRef}
       style={style}
+      data-provider-row-status-tooltip={statusTooltip ? "true" : undefined}
       className={cn("rounded-md", isDragging && "opacity-70")}
     >
       <Item
@@ -211,7 +214,9 @@ const ProviderTag = memo(function ProviderTag({
           className="ml-auto shrink-0 gap-1"
           onPointerDown={(event) => event.stopPropagation()}
         >
-          {roleRouteStatus ? <RoleRouteStatusLight status={roleRouteStatus} detail={statusDetail} /> : null}
+          {roleRouteStatus ? (
+            <RoleRouteStatusLight status={roleRouteStatus} detail={statusDetail} showTooltip={false} />
+          ) : null}
           <IconTooltip label={`Remove ${providerName || providerCode}`}>
             <Button
               type="button"
@@ -228,23 +233,27 @@ const ProviderTag = memo(function ProviderTag({
       </Item>
     </div>
   )
+
+  if (!statusTooltip) return row
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>{row}</TooltipTrigger>
+        <TooltipContent className="max-w-sm break-words">{statusTooltip}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
 })
 
 function ProviderName({ label }: { label: string }) {
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <ItemTitle
-            data-provider-title-tooltip="true"
-            className="line-clamp-none block w-full truncate whitespace-nowrap text-xs/relaxed text-muted-foreground"
-          >
-            {label}
-          </ItemTitle>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-sm break-words">{label}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <ItemTitle
+      data-provider-title="true"
+      className="line-clamp-none block w-full truncate whitespace-nowrap text-xs/relaxed text-muted-foreground"
+    >
+      {label}
+    </ItemTitle>
   )
 }
 

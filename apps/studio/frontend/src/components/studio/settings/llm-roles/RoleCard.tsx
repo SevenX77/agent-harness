@@ -33,9 +33,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog"
+import { requestDeleteConfirmationToast } from "@/components/ui/delete-confirm-toast"
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
-import { Switch } from "@/components/ui/switch"
 import type { CredentialsState, MaterializationReportEntry, ModelGroup, ProviderModelOption, RoleTestResponse, RolesData } from "@/api/llm"
 import type { RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
 import {
@@ -49,11 +48,22 @@ import {
 import { ModelItem } from "./ModelItem"
 import { RoleNameDialog } from "./RoleNameDialog"
 import { RoleSettingsPanel, type OutputLimitSummary } from "./RoleSettingsDialog"
-import { RoleTestResultPanel } from "./RoleTestResultPanel"
 
 export type RoleCategory = "graph-agent" | "copilot"
 
 const EMPTY_PROVIDER_MODELS_BY_ROUTE_ID: ReadonlyMap<string, ProviderModelOption> = new Map()
+
+export function requestRoleDeleteConfirmation(
+  roleName: string,
+  onDeleteRole: (roleName: string) => void,
+) {
+  requestDeleteConfirmationToast({
+    id: `delete-role-${roleName}`,
+    title: `Delete ${roleName}?`,
+    description: `Remove ${roleName} and its model fallback chain.`,
+    onConfirm: () => onDeleteRole(roleName),
+  })
+}
 
 export const RoleCard = memo(function RoleCard({
   data,
@@ -65,7 +75,6 @@ export const RoleCard = memo(function RoleCard({
   roleName,
   testStatuses = {},
   testChainRunning = false,
-  roleTestResult,
   roleTestError,
   onRunTestChain,
   getActiveAvailableModelDragId,
@@ -93,7 +102,6 @@ export const RoleCard = memo(function RoleCard({
   const role = data.roles[roleName]
   const modelCodes = useMemo(() => Object.keys(role.models), [role.models])
   const [editOpen, setEditOpen] = useState(false)
-  const [deleteOpen, setDeleteOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
   const actionsOpenTimerRef = useRef<number | null>(null)
@@ -211,17 +219,8 @@ export const RoleCard = memo(function RoleCard({
           </CollapsibleTrigger>
           <CardAction
             data-role-header-actions="true"
-            className="col-start-1 row-start-2 row-span-1 flex h-8 flex-nowrap items-center justify-start gap-3 self-center sm:col-start-2 sm:row-start-1 sm:justify-end"
+            className="col-start-1 row-start-2 row-span-1 flex h-8 flex-nowrap items-center justify-start gap-2 self-center sm:col-start-2 sm:row-start-1 sm:justify-end"
           >
-            <label className="flex h-8 items-center gap-2 whitespace-nowrap text-xs text-muted-foreground">
-              <Switch
-                size="sm"
-                checked={role.model_fallback}
-                onCheckedChange={(checked) => onChange(toggleModelFallback(data, roleName, checked))}
-                aria-label={`Model fallback for ${roleName}`}
-              />
-              model_fallback
-            </label>
             <Button
               type="button"
               variant="default"
@@ -264,10 +263,9 @@ export const RoleCard = memo(function RoleCard({
                 <DropdownMenuItem
                   data-role-delete-trigger="true"
                   variant="destructive"
-                  onSelect={(event) => {
-                    event.preventDefault()
+                  onSelect={() => {
                     setActionsOpen(false)
-                    setDeleteOpen(true)
+                    requestRoleDeleteConfirmation(roleName, onDeleteRole)
                   }}
                 >
                   <Trash2 />
@@ -284,8 +282,10 @@ export const RoleCard = memo(function RoleCard({
         >
           <RoleSettingsPanel
             roleName={roleName}
+            modelFallback={role.model_fallback}
             intent={role.intent}
             outputLimitSummary={outputLimitSummary}
+            onModelFallbackChange={(checked) => onChange(toggleModelFallback(data, roleName, checked))}
             onSubmit={(intent) => onChange(updateRoleIntent(data, roleName, intent))}
           />
         </CollapsibleContent>
@@ -305,7 +305,6 @@ export const RoleCard = memo(function RoleCard({
             Role Test failed: {roleTestError}
           </div>
         ) : null}
-        {roleTestResult ? <RoleTestResultPanel result={roleTestResult} /> : null}
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -360,13 +359,6 @@ export const RoleCard = memo(function RoleCard({
         open={editOpen}
         onOpenChange={setEditOpen}
         onSubmit={(nextRoleName) => onChange(renameRole(data, roleName, nextRoleName))}
-      />
-      <DeleteConfirmDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        itemName={roleName}
-        description={`Remove ${roleName} and its model fallback chain.`}
-        onConfirm={() => onDeleteRole(roleName)}
       />
       </Card>
     </Collapsible>

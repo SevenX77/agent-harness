@@ -473,7 +473,7 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).toContain('Gemini Official')
     expect(html).toContain('DeepSeek Official')
     expect(html).toContain('Ark Official')
-    expect(html).toContain('Not configured')
+    expect(html).not.toContain('Not configured')
     expect(html).toContain('Third-party Providers')
     expect(html).toContain('No third-party providers configured.')
     expect(html).toContain('Add Provider')
@@ -516,10 +516,27 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).toContain('Show API key')
   })
 
-  it('renders persistent Test outcome badge from credentials', () => {
+  it('hides official Test outcome badges but keeps third-party outcomes visible', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
-    // DS has last_test_status='ok' set above.
-    expect(html).toContain('Connected')
+    expect(html).not.toContain('Connected')
+
+    const withThirdPartyOutcome: CredentialsState = {
+      providers: credentials.providers.map((provider) => (
+        provider.id === 'CUSTOM_AB12CD34'
+          ? { ...provider, last_test_status: 'ok' as const, last_test_message: 'Connected' }
+          : provider
+      )),
+    }
+    const htmlWithThirdPartyOutcome = renderToStaticMarkup(
+      <SettingsPageContent
+        {...baseViewProps({
+          credentials: withThirdPartyOutcome,
+          drafts: draftsFromCredentials(withThirdPartyOutcome),
+        })}
+      />,
+    )
+
+    expect(htmlWithThirdPartyOutcome).toContain('Connected')
   })
 
   it('renders a Delete button for each user-owned provider', () => {

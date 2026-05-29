@@ -534,9 +534,14 @@ def _model_probe_status(
 
 def _model_probe_message(response: httpx.Response) -> str:
     error_code = _extract_vendor_error_code(response, default="")
+    vendor_message = _extract_vendor_error_message(response)
     if error_code:
-        return f"Provider returned HTTP {response.status_code} ({error_code})."
-    return f"Provider returned HTTP {response.status_code}."
+        message = f"Provider returned HTTP {response.status_code} ({error_code})."
+    else:
+        message = f"Provider returned HTTP {response.status_code}."
+    if vendor_message:
+        message = f"{message} {vendor_message}"
+    return message
 
 
 def _raise_for_status(response: httpx.Response) -> None:
@@ -592,6 +597,24 @@ def _extract_vendor_error_code(response: httpx.Response, *, default: str) -> str
         if isinstance(candidate, str) and candidate:
             return candidate
     return default
+
+
+def _extract_vendor_error_message(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    error = payload.get("error")
+    if isinstance(error, dict):
+        candidate = error.get("message")
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    candidate = payload.get("message")
+    if isinstance(candidate, str) and candidate.strip():
+        return candidate.strip()
+    return ""
 
 
 def _first_model_id(response: httpx.Response) -> str | None:

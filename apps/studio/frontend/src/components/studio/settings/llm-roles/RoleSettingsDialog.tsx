@@ -1,19 +1,15 @@
 import { useEffect, useState } from "react"
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { Switch } from "@/components/ui/switch"
 import type {
   RoleIntent,
   RoleProviderPreference,
   RoleThinkingPreference,
-  RoleTokenDowngrade,
 } from "@/api/llm"
 
 export interface OutputLimitSummary {
@@ -27,18 +23,22 @@ interface RoleSettingsDraft {
   providerPreference: RoleProviderPreference
   thinking: RoleThinkingPreference
   outputTokens: string
-  outputDowngrade: RoleTokenDowngrade
+  useMaximumTokens: boolean
 }
 
 export function RoleSettingsPanel({
   roleName,
+  modelFallback,
   intent,
   outputLimitSummary,
+  onModelFallbackChange,
   onSubmit,
 }: {
   roleName: string
+  modelFallback: boolean
   intent?: RoleIntent
   outputLimitSummary: OutputLimitSummary
+  onModelFallbackChange: (enabled: boolean) => void
   onSubmit: (intent: RoleIntent) => void
 }) {
   const [draft, setDraft] = useState(() => draftFromIntent(intent))
@@ -55,8 +55,10 @@ export function RoleSettingsPanel({
   return (
     <RoleSettingsFields
       roleName={roleName}
+      modelFallback={modelFallback}
       draft={draft}
       outputLimitSummary={outputLimitSummary}
+      onModelFallbackChange={onModelFallbackChange}
       onDraftChange={updateDraft}
     />
   )
@@ -64,13 +66,17 @@ export function RoleSettingsPanel({
 
 export function RoleSettingsFields({
   roleName,
+  modelFallback,
   draft,
   outputLimitSummary,
+  onModelFallbackChange,
   onDraftChange,
 }: {
   roleName: string
+  modelFallback: boolean
   draft: RoleSettingsDraft
   outputLimitSummary: OutputLimitSummary
+  onModelFallbackChange: (enabled: boolean) => void
   onDraftChange: (draft: RoleSettingsDraft) => void
 }) {
   const thinkingRequired = draft.thinking !== "off"
@@ -78,67 +84,80 @@ export function RoleSettingsFields({
   return (
     <FieldSet data-role-settings-fields="true" className="gap-3">
       <FieldGroup className="gap-3">
-        <Field orientation="horizontal" className="items-center justify-between gap-3 rounded-md border border-border/70 bg-muted/10 px-3 py-2">
-          <div className="min-w-0">
-            <FieldLabel htmlFor={`thinking-required-${roleName}`}>Thinking Required</FieldLabel>
-            <FieldDescription>Routes must prove or validate thinking support for this role.</FieldDescription>
-          </div>
-          <Switch
-            id={`thinking-required-${roleName}`}
-            size="sm"
-            checked={thinkingRequired}
-            onCheckedChange={(checked) => onDraftChange({
-              ...draft,
-              thinking: checked ? "required" : "off",
-            })}
-            aria-label={`Thinking Required for ${roleName}`}
-          />
-        </Field>
-
-        <Field>
-          <FieldLabel htmlFor={`output-token-target-${roleName}`}>Output Token Target</FieldLabel>
-          <Input
-            id={`output-token-target-${roleName}`}
-            aria-label={`Output token target for ${roleName}`}
-            value={draft.outputTokens}
-            onChange={(event) => onDraftChange({
-              ...draft,
-              outputTokens: event.target.value.replace(/[^\d]/g, ""),
-            })}
-            inputMode="numeric"
-            placeholder={outputLimitSummary.max ? `Max ${formatNumber(outputLimitSummary.max)}` : "Test first"}
-          />
-          <FieldDescription>
-            {outputLimitSummaryText(outputLimitSummary)}
-          </FieldDescription>
-        </Field>
-
-        <Field>
-          <FieldLabel htmlFor={`output-downgrade-${roleName}`}>If Target Exceeds Route Cap</FieldLabel>
-          <Select
-            value={draft.outputDowngrade}
-            onValueChange={(value) => onDraftChange({
-              ...draft,
-              outputDowngrade: value as RoleTokenDowngrade,
-            })}
+        <div
+          data-role-settings-toggles="true"
+          className="grid gap-x-4 gap-y-3 md:grid-cols-[minmax(8rem,0.9fr)_minmax(8rem,0.9fr)_minmax(18rem,1.8fr)]"
+        >
+          <Field
+            orientation="horizontal"
+            data-role-model-fallback-setting="true"
+            data-role-setting-key="model_fallback"
+            className="items-center justify-between gap-3 py-1"
           >
-            <SelectTrigger
-              id={`output-downgrade-${roleName}`}
-              className="w-full"
-              aria-label={`If Target Exceeds Route Cap: ${downgradeLabel(draft.outputDowngrade)}`}
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="allow_with_warning">Use route max and mark Limited</SelectItem>
-              <SelectItem value="allow">Use route max</SelectItem>
-              <SelectItem value="block">Block that route</SelectItem>
-            </SelectContent>
-          </Select>
-          <FieldDescription>
-            Use route max and mark Limited still lets the route run with the provider cap. Block removes that route from the role test path.
-          </FieldDescription>
-        </Field>
+            <FieldLabel htmlFor={`model-fallback-${roleName}`} className="min-w-0 truncate">
+              Model Fallback
+            </FieldLabel>
+            <Switch
+              id={`model-fallback-${roleName}`}
+              size="sm"
+              checked={modelFallback}
+              onCheckedChange={onModelFallbackChange}
+              aria-label={`Model fallback for ${roleName}`}
+            />
+          </Field>
+
+          <Field
+            orientation="horizontal"
+            className="items-center justify-between gap-3 py-1"
+          >
+            <FieldLabel htmlFor={`thinking-required-${roleName}`} className="min-w-0 truncate">
+              Thinking Required
+            </FieldLabel>
+            <Switch
+              id={`thinking-required-${roleName}`}
+              size="sm"
+              checked={thinkingRequired}
+              onCheckedChange={(checked) => onDraftChange({
+                ...draft,
+                thinking: checked ? "required" : "off",
+              })}
+              aria-label={`Thinking Required for ${roleName}`}
+            />
+          </Field>
+
+          <Field data-role-output-settings="true" className="min-w-0 gap-1.5">
+            <FieldLabel htmlFor={`output-token-target-${roleName}`}>Output Token Target</FieldLabel>
+            <InputGroup data-role-output-token-input-group="true">
+              <InputGroupInput
+                id={`output-token-target-${roleName}`}
+                aria-label={`Output token target for ${roleName}`}
+                value={draft.outputTokens}
+                disabled={draft.useMaximumTokens}
+                onChange={(event) => onDraftChange({
+                  ...draft,
+                  outputTokens: event.target.value.replace(/[^\d]/g, ""),
+                })}
+                inputMode="numeric"
+                placeholder={outputLimitSummary.max ? `Max ${formatNumber(outputLimitSummary.max)}` : "Optional target"}
+              />
+              <InputGroupAddon align="inline-end" className="cursor-default gap-2 pr-1.5">
+                <span className="whitespace-nowrap text-[11px]">Use max</span>
+                <Switch
+                  size="sm"
+                  checked={draft.useMaximumTokens}
+                  onCheckedChange={(checked) => onDraftChange({
+                    ...draft,
+                    useMaximumTokens: checked,
+                  })}
+                  aria-label={`Use maximum output tokens for ${roleName}`}
+                />
+              </InputGroupAddon>
+            </InputGroup>
+            <FieldDescription>
+              {outputLimitSummaryText(outputLimitSummary)}
+            </FieldDescription>
+          </Field>
+        </div>
       </FieldGroup>
     </FieldSet>
   )
@@ -150,7 +169,7 @@ function draftFromIntent(intent?: RoleIntent): RoleSettingsDraft {
     providerPreference: intent?.provider_preference ?? "manual_order",
     thinking: intent?.thinking ?? "off",
     outputTokens: outputIntent?.mode === "target" && outputIntent.value ? String(outputIntent.value) : "",
-    outputDowngrade: outputIntent?.downgrade ?? "allow_with_warning",
+    useMaximumTokens: outputIntent?.mode === "maximum_available",
   }
 }
 
@@ -159,24 +178,27 @@ function outputLimitSummaryText(summary: OutputLimitSummary): string {
     return "No provider routes selected yet."
   }
   if (summary.knownCount === 0 || summary.min === null || summary.max === null) {
-    return "Selected route output caps are not known yet. Test first."
+    return "Selected route max token caps are unavailable."
   }
   const prefix = summary.min === summary.max
-    ? `Known selected route output cap: ${formatNumber(summary.max)}.`
-    : `Known selected route output caps: min ${formatNumber(summary.min)} / max ${formatNumber(summary.max)}.`
+    ? `Route max token: ${formatNumber(summary.max)}.`
+    : `Route max token range: min ${formatNumber(summary.min)} / max ${formatNumber(summary.max)}.`
   const unknownCount = summary.totalCount - summary.knownCount
   if (unknownCount <= 0) return prefix
-  const routeLabel = unknownCount === 1 ? "1 route" : `${unknownCount} routes`
-  return `${prefix} ${routeLabel} still needs testing.`
-}
-
-function downgradeLabel(value: RoleTokenDowngrade): string {
-  if (value === "block") return "Block that route"
-  if (value === "allow") return "Use route max"
-  return "Use route max and mark Limited"
+  const routeLabel = unknownCount === 1 ? "1 route cap" : `${unknownCount} route caps`
+  return `${prefix} ${routeLabel} unavailable.`
 }
 
 function intentFromDraft(draft: RoleSettingsDraft): RoleIntent {
+  if (draft.useMaximumTokens) {
+    return {
+      provider_preference: "manual_order",
+      thinking: draft.thinking,
+      target_output_tokens: {
+        mode: "maximum_available",
+      },
+    }
+  }
   const outputValue = parseOptionalInteger(draft.outputTokens)
   return {
     provider_preference: "manual_order",
@@ -185,7 +207,7 @@ function intentFromDraft(draft: RoleSettingsDraft): RoleIntent {
       ? {
           mode: "target",
           value: outputValue,
-          downgrade: draft.outputDowngrade,
+          downgrade: "allow",
         }
       : null,
   }

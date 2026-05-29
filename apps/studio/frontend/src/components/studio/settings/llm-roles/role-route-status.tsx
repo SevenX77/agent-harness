@@ -61,32 +61,49 @@ export function roleRouteStatusSurfaceClass(status: RoleRouteStatus | null): str
 export function RoleRouteStatusLight({
   status,
   detail,
+  showTooltip = true,
 }: {
   status: RoleRouteStatus
   detail?: string | null
+  showTooltip?: boolean
 }) {
-  const meta = statusMeta[status]
-  const tooltip = detail ? `${meta.label}: ${detail}` : meta.description
-  const ariaLabel = detail ? `Role route status ${meta.label}: ${detail}` : `Role route status ${meta.label}`
+  const ariaLabel = roleRouteStatusAriaLabel(status, detail)
+  const light = (
+    <span
+      role="status"
+      aria-label={ariaLabel}
+      data-role-route-status-light="true"
+      data-role-route-status={status}
+      className={cn(
+        "inline-flex size-1.5 shrink-0 rounded-full ring-1 ring-offset-0",
+        roleRouteStatusLightClass(status),
+      )}
+    />
+  )
+
+  if (!showTooltip) return light
+
+  const tooltip = roleRouteStatusTooltip(status, detail)
   return (
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <span
-            role="status"
-            aria-label={ariaLabel}
-            data-role-route-status-light="true"
-            data-role-route-status={status}
-            className={cn(
-              "inline-flex size-1.5 shrink-0 rounded-full ring-1 ring-offset-0",
-              roleRouteStatusLightClass(status),
-            )}
-          />
+          {light}
         </TooltipTrigger>
         <TooltipContent className="max-w-sm break-words">{tooltip}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   )
+}
+
+export function roleRouteStatusTooltip(status: RoleRouteStatus, detail?: string | null): string {
+  const meta = statusMeta[status]
+  return detail ? `${meta.label}: ${detail}` : meta.description
+}
+
+export function roleRouteStatusAriaLabel(status: RoleRouteStatus, detail?: string | null): string {
+  const meta = statusMeta[status]
+  return detail ? `Role route status ${meta.label}: ${detail}` : `Role route status ${meta.label}`
 }
 
 export function roleRouteStatusDetail({

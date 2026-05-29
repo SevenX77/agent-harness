@@ -242,7 +242,7 @@ PR-1~6 全并入 stage/engine-v030 (HEAD f6a45b0)。三方 (a1 工具/a2 架构/
 
 **路径**: P0 筑地板 (门变真) → P1 覆盖率+韧性 (接 Codecov, ≥80%) → P2 供应链+CI加固 (接 SonarCloud/CodeQL/Scorecard, 锁CI, 分支保护) → P3 世界级成熟度 (多版本矩阵+依赖兼容+生态回归+可回放trace)。
 
-**B 类待 PM 提供前置**: SONAR_TOKEN / CODECOV_TOKEN / GitHub Advanced Security + Scorecard Action 权限 / 是否公开 badge。
+**B 类前置 (2026-05-29 PM 拍定全部解锁)**: CODECOV_TOKEN ✅ (2026-05-27 入 GitHub secrets) / SONAR_TOKEN ✅ (2026-05-27 入 secrets) / 仓库可见性 = **PUBLIC** ✅ (2026-05-29 主控 `gh repo edit --visibility public`, GHAS 自动免费, CodeQL 无需付费订阅, secret_scanning + push_protection 自动启用) / 徽章公开发布 ✅ (PM 2026-05-29 拍 `publish_results: true`) / Dependabot 本期 enable (跟 Scorecard 同 PR 顺手, 主控 2026-05-29 默认决策; PM 后续 verify, 若 defer 改 disable)。
 
 | PR | 内容 | 状态 |
 |---|---|---|
@@ -252,6 +252,7 @@ PR-1~6 全并入 stage/engine-v030 (HEAD f6a45b0)。三方 (a1 工具/a2 架构/
 | P0-2c-prep tests-first | 给 6 处覆盖最差 B 类补回归测试 pin 当前行为 (_extract_text_content 4→100% / _extract_tokens 3→100% / resolve_skill_resource 0→89% / parallel_map 2→87% / _type_to_constraint 2→98% / resolve_role 12→97%) | ✅ merge `34f53b2` 进 stage (22 新测试, 纯加测试无 src 改, 主控亲验 pytest 1032) |
 | P0-2c 重构 (6 处已覆盖) | 重构 6 处有回归测试兜底的 B 类 C901 降 ≤10 行为不变 | ✅ merge `aa60b84` 进 stage (主控亲验: ruff C90 **19→13** / mypy 0 / pytest 1032 守行为; 无降不下来无 bug) |
 | Round 29 / P0-2 Complexity Gate | 启用 graph-agent ruff C901 门 + tests-first 锁 9 helper baseline + 重构剩余 13 src helpers 至 ≤10 | **✅ Complete (step 4 src + step 5 double audit + step 6 docs sync done)**: ruff C901 0 violations; 100 chars passed; 4 contract gate 38 passed; 全套 pytest 1171 passed, 2 skipped, 19 xfailed; 65 API + 92 errors + 33 events + 53 H2 + R28 5 机制不漂 |
+| Round 30 PR-1 / Codecov | report-only 接入 codecov-action@v6 + codecov.yml + ci.yml 双 upload + pyproject [tool.coverage] | **✅ Complete (step 1-6 done, step 7 PR-REPORT next)**: 22 assertion 全绿 + 4 contract gate 38 passed + 黄金原则零碰; PR-1 ship 后主控 24h 内验 codecov.io dashboard 真实基线决策 PR-1.5 |
 | P0-2d 开 C90 门 | package-local ruff C901 gate (`extend-select = ["C901"]`, max-complexity 10, `scripts/**` ignore) | ✅ absorbed by Round 29 / P0-2 Complexity Gate |
 | P1-P3 | Codecov/SonarCloud/CodeQL/Scorecard 接入 + 韧性/成熟度 | ⏳ (P2+ 部分卡 PM token) |
 

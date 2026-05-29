@@ -71,6 +71,16 @@ lint.select = ["E", "F", "B", "I", "UP"]
 # the FastAPI app, not just in routers/.
 "apps/studio/backend/app/**" = ["B008"]
 
+[tool.coverage.run]
+relative_files = true
+parallel = true
+omit = ["*/tests/*", "*/migrations/*"]
+
+[tool.coverage.report]
+exclude_lines = ["pragma: no cover", "raise NotImplementedError"]
+show_missing = true
+skip_covered = false
+
 [tool.mypy]
 python_version = "3.11"
 strict = true

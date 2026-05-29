@@ -57,3 +57,29 @@ Round 29 also locked the helper baseline with 8 characterization test files:
 - `tests/core/test_purity_characterization.py` — `_violation_for_call`, 14 cases.
 - `tests/callbacks/test_on_event_characterization.py` — `on_event`, legacy Strategy/Table dispatch plus typed-only and fallback behavior.
 - `tests/core/test_state_legacy_context_characterization.py` — `legacy_context_from_state`, shallow-copy semantics, `_`-field preservation, and invariant assertions.
+
+## Round 30 P1/P2 External Quality Tools Onboarding — PR-1 Codecov
+
+Round 30 P1/P2 接入 4 大外部质量工具: Codecov / SonarCloud / CodeQL / OpenSSF Scorecard. 拆 4 PR + 并行流 (按 design §1 + tasks §1).
+
+PR-1 Codecov 已 ship (本 PR), 后续 PR-2/3/4 起独立 spec.
+
+PR-1 内容:
+- 新增 `codecov.yml` (仓库根) — 含 `coverage.status.project.default.target: auto` + `flags.backend` + `flags.graph-agent` 双 flag 维度; `fail_ci_if_error: false` 双 step (PR-1 report-only key)
+- 改 `.github/workflows/ci.yml` — backend `quality-gates` job + graph-agent matrix job 各加 `codecov/codecov-action@v6` upload step
+- matrix include 显式映射 `py_flag` (3.11→py311 / 3.12→py312 / 3.13→py313), 绕开 codecov flag 命名规则禁 `.` 限制
+- 加 root `pyproject.toml` `[tool.coverage.run]` (`relative_files=true` / `parallel=true` / `omit`) + `[tool.coverage.report]` (`exclude_lines` / `show_missing` / `skip_covered`)
+
+PR-1 是 report-only 接入: `fail_ci_if_error: false`, dashboard 显示基线但不阻 merge.
+
+主控 PR-1 ship 后 24h 内访问 https://app.codecov.io/gh/SevenX77/agent-harness 拿 4 flags (backend/py311/py312/py313) 真实覆盖率基线, 写进 PR-REPORT Q7 模板 + 决策 PR-1.5 触发与否 (基线 < 78% → 强制 PR-1.5).
+
+Verification evidence from the Round 30 PR-1 run:
+- pytest test_round30_pr1_codecov_config.py: 3 passed (22 assertion, M-2/M-3 防 false positive 关键)
+- 4 contract gate (test_public_api_contract / test_contract_hash_lock / test_round28_contract_manifests / test_round28_invariant_guards): 38 passed
+- 黄金原则 verify: 65 public API / 92 errors / 33 events / 53 H2 / 14 FROZEN docs / R28 5 机制 — 全零碰
+
+Audit chain:
+- a2 思路复核 (cancel 早, design rev2 已 OK)
+- a3 PM 替身 audit 三轮 (design rev2 7 catch / tasks rev2 6+2 catch / PR-1 src 偏移 3 should-fix), 全 a1 接受落地
+- 主控 grep + pytest + curl 实证全程

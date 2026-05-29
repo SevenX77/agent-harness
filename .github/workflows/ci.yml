@@ -47,6 +47,14 @@ jobs:
             --cov-report=xml:coverage-backend.xml \
             --cov-report=term
 
+      - name: Upload backend coverage to Codecov
+        uses: codecov/codecov-action@v6
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage-backend.xml
+          flags: backend
+          fail_ci_if_error: false
+
       - name: dependency audit
         run: uv run --with pip-audit pip-audit
 
@@ -54,7 +62,13 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        include:
+          - python-version: "3.11"
+            py_flag: "py311"
+          - python-version: "3.12"
+            py_flag: "py312"
+          - python-version: "3.13"
+            py_flag: "py313"
     steps:
       - uses: actions/checkout@v4
 
@@ -76,6 +90,14 @@ jobs:
             --cov=packages/graph-agent/src/graph_agent \
             --cov-report=xml:coverage-graph-agent.xml \
             --cov-report=term
+
+      - name: Upload graph-agent coverage to Codecov
+        uses: codecov/codecov-action@v6
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage-graph-agent.xml
+          flags: graph-agent,${{ matrix.py_flag }}
+          fail_ci_if_error: false
 
       - name: validate round28 contract manifests
         run: |

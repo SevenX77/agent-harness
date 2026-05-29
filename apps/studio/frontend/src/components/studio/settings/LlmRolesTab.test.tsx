@@ -2,18 +2,28 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import type { CredentialsState, ModelGroup, RolesData } from "../../../api/llm"
 import { roleChainStatusKey } from "../../../hooks/useRoleTestChainRunner"
-import { AvailableModelDragPreview, LlmRolesTab, RoleSettingsFields } from "./LlmRolesTab"
+import { AvailableModelDragPreview, LlmRolesTab, roleTestStatusesByRole, RoleSettingsFields } from "./LlmRolesTab"
 import {
   AvailableModelsSidebar,
   buildAvailableModelGroups,
   filterAvailableModelGroups,
 } from "./llm-roles/AvailableModelsSidebar"
 import { AdvancedModelBundlesSection, modelBundleGroupsFromData } from "./llm-roles/AdvancedModelBundlesSection"
-import { RoleCard } from "./llm-roles/RoleCard"
+import { requestRoleDeleteConfirmation, RoleCard } from "./llm-roles/RoleCard"
 import { roleNameDisplayError, RoleNameDialog, RoleNameFields } from "./llm-roles/RoleNameDialog"
 import { RoleTestResultPanel } from "./llm-roles/RoleTestResultPanel"
 import { appendAvailableModelToRole, appendModelGroupToRole, appendRole, normalizeRolesDraft, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeModelFromRole, removeProviderFromRole, removeRole, renameRole, reorderModelInRole, reorderProviderInRole, validateRolesDraft } from "./role-utils"
 import { credentialsByProviderCode } from "./route-credentials"
+
+const toastMock = vi.hoisted(() => Object.assign(vi.fn(), {
+  dismiss: vi.fn(),
+  error: vi.fn(),
+  success: vi.fn(),
+}))
+
+vi.mock("sonner", () => ({
+  toast: toastMock,
+}))
 
 const credentials: CredentialsState = {
   providers: [
@@ -382,8 +392,10 @@ describe("LlmRolesTab controls", () => {
     const providerCardClass = providerCardTag.match(/class="([^"]*)"/)?.[1] ?? ""
     const statusLightClass = html.match(/data-role-route-status-light="true"[^>]*class="([^"]*)"/)?.[1]
     expect(html).toContain('data-provider-test-status="ok"')
+    expect(html).toContain('data-provider-row-status-tooltip="true"')
     expect(html).toContain('data-role-route-status-light="true"')
     expect(html).toContain('aria-label="Role route status Can Run')
+    expect(html).toContain("Can Run:")
     expect(html).not.toMatch(/>Can Run<\/span>|>Limited<\/span>|>Blocked<\/span>/)
     expect(providerCardClass).toContain("border-success-border")
     expect(statusLightClass).toContain("size-1.5")
@@ -682,7 +694,8 @@ describe("LlmRolesTab controls", () => {
     expect(html).toContain('data-variant="success"')
     expect(html).toContain("border-success")
     expect(html).toContain("bg-success/10")
-    expect(html).toContain("bg-destructive-background")
+    expect(html).toContain('data-variant="destructive"')
+    expect(html).toContain("border-destructive")
     expect(html).toContain("Qiniu Anthropic")
     expect(html).not.toContain('title="Qiniu Anthropic"')
     expect(html).not.toContain('title="Claude Sonnet 4.7"')
@@ -862,6 +875,110 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain(">user_disabled<")
   })
 
+  it("uses only active provider progress statuses while a persisted role test is running", () => {
+    expect(roleTestStatusesByRole({
+      copilot_chat: {
+        running: true,
+        result: {
+          role_name: "copilot_chat",
+          status: "warning",
+          warnings: [],
+          model_groups: [{
+            canonical_id: "CL46T",
+            display_name: "Claude Sonnet 4.6 Thinking",
+            provider_results: [
+              {
+                route_id: "anthropic",
+                provider_label: "Anthropic",
+                provider_ui_state: "ready",
+                role_fit: "using",
+                admission_decision: "admit",
+                status: "ok",
+                warnings: [],
+                retry_at: null,
+                message: null,
+                resolved_settings: {},
+              },
+              {
+                route_id: "openai_proxy",
+                provider_label: "OpenAI Proxy",
+                provider_ui_state: "ready",
+                role_fit: "using",
+                admission_decision: "admit",
+                status: "ok",
+                warnings: [],
+                retry_at: null,
+                message: null,
+                resolved_settings: {},
+              },
+            ],
+          }],
+        },
+      },
+    }, "copilot_chat", {
+      [roleChainStatusKey("CL46T", "anthropic")]: { status: "testing" },
+    })).toEqual({
+      copilot_chat: {
+        [roleChainStatusKey("CL46T", "anthropic")]: { status: "testing" },
+      },
+    })
+  })
+
+  it("keeps testing provider rows on the border-flow status path", () => {
+    const modelCode = "gpt-5-4-mini"
+    const routeId = "openrouter:gpt-5-4-mini"
+    const routeBackedData: RolesData = {
+      models: {
+        [modelCode]: {
+          name: "GPT 5.4 Mini",
+          providers: {
+            [routeId]: "openai/gpt-5.4-mini",
+          },
+        },
+      },
+      providers: {
+        [routeId]: {
+          name: "OpenRouter",
+          type: "openai_compatible",
+          endpoint_id: "openrouter",
+        },
+      },
+      roles: {
+        Analyst: {
+          model_fallback: true,
+          active_model: modelCode,
+          models: {
+            [modelCode]: { providers: [routeId], temperature: null, max_tokens: null },
+          },
+        },
+      },
+    }
+    const html = renderToStaticMarkup(
+      <RoleCard
+        data={routeBackedData}
+        category="graph-agent"
+        credentialsByCode={{}}
+        modelDisplayNamesByCode={new Map([[modelCode, "GPT 5.4 Mini"]])}
+        ownedProviderCodesByModel={new Map([[modelCode, new Set([routeId])]])}
+        roleName="Analyst"
+        testStatuses={{
+          [roleChainStatusKey(modelCode, routeId)]: { status: "testing" },
+        }}
+        testChainRunning={true}
+        onRunTestChain={vi.fn()}
+        getActiveAvailableModelDragId={() => null}
+        getAvailableModelGroup={() => null}
+        onChange={vi.fn()}
+        onDeleteRole={vi.fn()}
+      />,
+    )
+
+    const providerCardTag = html.match(/<[^>]*data-provider-card="true"[^>]*>/)?.[0] ?? ""
+    expect(providerCardTag).toContain('data-provider-test-status="testing"')
+    expect(providerCardTag).toContain('data-role-route-status="testing"')
+    expect(providerCardTag).toContain("relative")
+  })
+
   it("renders role test results with actionable warnings but without execution ids", () => {
     const html = renderToStaticMarkup(
       <RoleTestResultPanel
@@ -902,6 +1019,51 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain("route_id")
     expect(html).not.toContain("endpoint")
     expect(html).not.toContain("canonical")
+  })
+
+  it("does not render persisted role test reports inside the role card", () => {
+    const html = renderToStaticMarkup(
+      <RoleCard
+        data={rolesData}
+        category="copilot"
+        credentialsByCode={credentialsByProviderCode(rolesData, { providers: credentials.providers })}
+        modelDisplayNamesByCode={new Map([["CL46T", "Claude Sonnet 4.6 Thinking"]])}
+        ownedProviderCodesByModel={new Map([["CL46T", new Set(["anthropic"])], ["DS32R", new Set(["openai_proxy"])]])}
+        roleName="copilot_chat"
+        testStatuses={{}}
+        testChainRunning={false}
+        roleTestResult={{
+          role_name: "copilot_chat",
+          status: "warning",
+          warnings: [{ message: "Thinking is required but capability is unknown." }],
+          model_groups: [{
+            canonical_id: "CL46T",
+            display_name: "Claude Sonnet 4.6 Thinking",
+            provider_results: [{
+              route_id: "anthropic",
+              provider_label: "Anthropic",
+              provider_ui_state: "ready",
+              role_fit: "needs_test",
+              admission_decision: "admit",
+              status: "ok",
+              warnings: [{ message: "Thinking is required but capability is unknown." }],
+              retry_at: null,
+              message: "Passed.",
+              resolved_settings: {},
+            }],
+          }],
+        }}
+        onRunTestChain={vi.fn()}
+        getActiveAvailableModelDragId={() => null}
+        getAvailableModelGroup={() => null}
+        onChange={vi.fn()}
+        onDeleteRole={vi.fn()}
+      />,
+    )
+
+    expect(html).not.toContain('data-role-test-result="true"')
+    expect(html).not.toContain("Role Test")
+    expect(html).not.toContain("Needs Attention")
   })
 
   it("renders model group titles in the normal UI font", () => {
@@ -1288,10 +1450,11 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain('aria-label="Model settings for')
   })
 
-  it("keeps provider names single-line with a tooltip for overflow", () => {
+  it("keeps provider names single-line without a provider-name tooltip", () => {
     const html = renderRolesHtml()
 
-    expect(html).toContain('data-provider-title-tooltip="true"')
+    expect(html).toContain('data-provider-title="true"')
+    expect(html).not.toContain('data-provider-title-tooltip="true"')
     expect(html).toContain("truncate")
     expect(html).toContain("whitespace-nowrap")
     expect(html).toContain("flex-nowrap")
@@ -1417,7 +1580,8 @@ describe("LlmRolesTab controls", () => {
   it("uses subdued provider card text and role editor icons", () => {
     const html = renderRolesHtml()
 
-    expect(html).toContain('data-provider-title-tooltip="true"')
+    expect(html).toContain('data-provider-title="true"')
+    expect(html).not.toContain('data-provider-title-tooltip="true"')
     expect(html).toContain("text-muted-foreground")
     expect(html).toContain('data-role-icon="true"')
   })
@@ -1593,6 +1757,39 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain(">Edit</button>")
   })
 
+  it("uses a shadcn sonner confirmation toast before deleting a role", () => {
+    const onDeleteRole = vi.fn()
+
+    requestRoleDeleteConfirmation("copilot_chat", onDeleteRole)
+
+    expect(toastMock).toHaveBeenCalledWith(
+      "Delete copilot_chat?",
+      expect.objectContaining({
+        description: "Remove copilot_chat and its model fallback chain.",
+        duration: Infinity,
+        action: expect.objectContaining({ label: "Delete" }),
+        cancel: expect.objectContaining({ label: "Cancel" }),
+        classNames: expect.objectContaining({
+          actionButton: expect.stringContaining("!bg-destructive"),
+        }),
+      }),
+    )
+    expect(onDeleteRole).not.toHaveBeenCalled()
+  })
+
+  it("wires the sonner role delete action to persisted role deletion", () => {
+    const onDeleteRole = vi.fn()
+
+    requestRoleDeleteConfirmation("copilot_chat", onDeleteRole)
+    const options = toastMock.mock.calls.at(-1)?.[1] as {
+      action?: { onClick?: () => void }
+    }
+
+    options.action?.onClick?.()
+
+    expect(onDeleteRole).toHaveBeenCalledWith("copilot_chat")
+  })
+
   it("removes role entries from role maps and grouping metadata", () => {
     const dataWithMetadata: RolesData = {
       ...rolesData,
@@ -1626,8 +1823,11 @@ describe("LlmRolesTab controls", () => {
     expect(roleNameDisplayError("Copilot_Chat", ["copilot_chat"], "", true)).toBe("Role name already exists.")
   })
 
-  it("keeps role fallback controls in the right header action group", () => {
+  it("keeps role test actions in the header and model fallback in the compact settings form", () => {
     const html = renderRolesHtml()
+    const headerActionsStart = html.indexOf('data-role-header-actions="true"')
+    const settingsPanelStart = html.indexOf('data-role-settings-panel="true"')
+    const headerActionsHtml = html.slice(headerActionsStart, settingsPanelStart)
 
     expect(html).toContain('data-role-card-title-row="true"')
     expect(html).toContain('data-role-header-actions="true"')
@@ -1639,9 +1839,10 @@ describe("LlmRolesTab controls", () => {
     expect(html).toContain("sm:col-start-2")
     expect(html).toContain("flex-nowrap")
     expect(html).toContain("h-8")
-    expect(html).toContain("justify-self-end")
-    expect(html).toContain("model_fallback")
+    expect(headerActionsHtml).not.toContain("model_fallback")
     expect(html).toContain('data-role-test-trigger="true"')
+    expect(html).toContain('data-role-model-fallback-setting="true"')
+    expect(html).toContain("Model Fallback")
   })
 
   it("lazy renders available model cards without changing the full result count", () => {
@@ -1971,11 +2172,12 @@ describe("LlmRolesTab controls", () => {
     const fieldsHtml = renderToStaticMarkup(
       <RoleSettingsFields
         roleName="copilot_chat"
+        modelFallback={true}
         draft={{
           providerPreference: "manual_order",
           thinking: "required",
           outputTokens: "8192",
-          outputDowngrade: "allow_with_warning",
+          useMaximumTokens: true,
         }}
         outputLimitSummary={{
           knownCount: 2,
@@ -1983,6 +2185,7 @@ describe("LlmRolesTab controls", () => {
           min: 4096,
           max: 16384,
         }}
+        onModelFallbackChange={vi.fn()}
         onDraftChange={vi.fn()}
       />,
     )
@@ -1992,17 +2195,56 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain('data-role-settings-trigger="true"')
     expect(html).not.toContain('data-slot="dialog-content"')
     expect(fieldsHtml).toContain('data-role-settings-fields="true"')
+    expect(fieldsHtml).toContain('data-role-settings-toggles="true"')
+    expect(fieldsHtml).toContain('data-role-output-settings="true"')
+    expect(fieldsHtml).toContain('data-role-output-token-input-group="true"')
+    expect(fieldsHtml).toContain("md:grid-cols-[minmax(8rem,0.9fr)_minmax(8rem,0.9fr)_minmax(18rem,1.8fr)]")
     expect(fieldsHtml).toContain('data-slot="field-set"')
     expect(fieldsHtml).not.toContain("Provider Order")
     expect(fieldsHtml).not.toContain("Manual order")
+    expect(fieldsHtml).toContain("Model Fallback")
+    expect(fieldsHtml).toContain("model_fallback")
     expect(fieldsHtml).toContain("Thinking Required")
     expect(fieldsHtml).toContain('data-slot="switch"')
+    expect(fieldsHtml).not.toContain("Try the next model group")
+    expect(fieldsHtml).not.toContain("Require routes to prove")
     expect(fieldsHtml).toContain("Output Token Target")
+    expect(fieldsHtml).toContain("Use max")
+    expect(fieldsHtml).toContain('aria-label="Use maximum output tokens for copilot_chat"')
     expect(fieldsHtml).toContain('value="8192"')
-    expect(fieldsHtml).toContain("Known selected route output caps: min 4,096 / max 16,384. 1 route still needs testing.")
-    expect(fieldsHtml).toContain("Use route max and mark Limited")
+    expect(fieldsHtml).toContain("disabled")
+    expect(fieldsHtml).toContain("Route max token range: min 4,096 / max 16,384. 1 route cap unavailable.")
+    expect(fieldsHtml).not.toContain("If Target Exceeds Route Cap")
+    expect(fieldsHtml).not.toContain("Use route max and mark Limited")
+    expect(fieldsHtml).not.toContain('data-slot="select-trigger"')
     expect(fieldsHtml).not.toContain("Temperature")
     expect(fieldsHtml).not.toContain("Max Tokens")
     expect(fieldsHtml).not.toContain("Runtime default")
+  })
+
+  it("does not tell users to run Role Test when route max token caps are unavailable", () => {
+    const fieldsHtml = renderToStaticMarkup(
+      <RoleSettingsFields
+        roleName="copilot_chat"
+        modelFallback={true}
+        draft={{
+          providerPreference: "manual_order",
+          thinking: "required",
+          outputTokens: "",
+          useMaximumTokens: false,
+        }}
+        outputLimitSummary={{
+          knownCount: 0,
+          totalCount: 2,
+          min: null,
+          max: null,
+        }}
+        onModelFallbackChange={vi.fn()}
+        onDraftChange={vi.fn()}
+      />,
+    )
+
+    expect(fieldsHtml).toContain("Selected route max token caps are unavailable.")
+    expect(fieldsHtml).not.toContain("Test first")
   })
 })

@@ -1,18 +1,27 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
-import type { ReactElement } from "react"
 import {
   ProviderCard,
   ProviderDeleteButton,
   apiKeyInputClassName,
   apiKeyInputType,
   copyAvailableModelId,
+  sortOfficialRouteInfos,
   sortModelInfos,
 } from "./ProviderCard"
-import { DeleteConfirmDialog } from "@/components/ui/delete-confirm-dialog"
 import type { CredentialsState, TestStatus } from "../../../api/llm"
 import { providerTestParamsFingerprint } from "../settings/provider-utils"
 import type { ProviderDraft } from "../settings/types"
+
+const toastMock = vi.hoisted(() => Object.assign(vi.fn(), {
+  dismiss: vi.fn(),
+  error: vi.fn(),
+  success: vi.fn(),
+}))
+
+vi.mock("sonner", () => ({
+  toast: toastMock,
+}))
 
 const draft: ProviderDraft = {
   id: "p1",
@@ -182,8 +191,7 @@ describe("ProviderCard test status badge", () => {
     })
 
     expect(html).toContain("Connected")
-    expect(html).toContain("Available SDKs:")
-    expect(html).toContain("openai_compatible")
+    expect(html).not.toContain("Available SDKs:")
     expect(html).toContain("Available Models:")
     expect(html).toContain("openai/gpt-5")
   })
@@ -214,8 +222,7 @@ describe("ProviderCard test status badge", () => {
     })
 
     expect(html).toContain("Connected")
-    expect(html).toContain("Available SDKs:")
-    expect(html).toContain("openai_compatible")
+    expect(html).not.toContain("Available SDKs:")
     expect(html).toContain("openai/gpt-5")
   })
 
@@ -234,7 +241,7 @@ describe("ProviderCard test status badge", () => {
     })
 
     expect(html).toContain("Test failed")
-    expect(html).toContain("Available SDKs:")
+    expect(html).not.toContain("Available SDKs:")
     expect(html).toContain("Available Models:")
     expect(html).toContain("stale-model-from-prior-test")
   })
@@ -273,12 +280,31 @@ describe("ProviderCard provider kind badge", () => {
       />,
     )
 
-    expect(html).toContain("OpenAI")
+    expect(html).toContain("OpenAI Official")
     expect(html).not.toContain('data-variant="outline">Official</span>')
-    expect(html).toContain("Not configured")
+    expect(html).not.toContain("Not configured")
     expect(html).not.toContain('aria-label="Provider Name"')
     expect(html).not.toContain('aria-label="Delete provider"')
     expect(html).not.toContain("Base URL")
+  })
+
+  it("normalizes official provider card titles from persisted endpoint ids", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({ id: "anthropic-official", name: "anthropic-official", provider_type: "anthropic_compatible" })}
+        persisted={makePersisted({ id: "anthropic-official", name: "anthropic-official", last_test_status: "ok" })}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="official"
+        notableProviderKey="anthropic"
+      />,
+    )
+
+    expect(html).toContain("Anthropic Official")
+    expect(html).not.toContain(">anthropic-official<")
+    expect(html).not.toContain("Connected")
   })
 
   it("renders Third-party badge when providerKind is third-party", () => {
@@ -333,7 +359,7 @@ describe("ProviderCard provider kind badge", () => {
       />,
     )
 
-    expect(html).toContain("Not configured")
+    expect(html).not.toContain("Not configured")
     expect(html).not.toContain("Untested")
   })
 })
@@ -416,18 +442,16 @@ describe("ProviderCard model discovery and endpoint test controls", () => {
 })
 
 describe("ProviderCard provider capabilities", () => {
-  it("renders available_sdks chips when persisted has data", () => {
+  it("does not render available_sdks chips when persisted has data", () => {
     const html = renderCardHtml({
       persisted: makePersisted({ available_sdks: ["openai_compatible", "anthropic_compatible"] }),
     })
 
     expect(html).toContain('data-testid="provider-capabilities"')
-    expect(html).toContain("Available SDKs:")
-    expect(html).toContain("openai_compatible")
-    expect(html).toContain("anthropic_compatible")
-    expect(html).toContain("text-muted-foreground")
-    expect(html).toContain('data-variant="outline"')
-    expect(html).not.toContain('data-variant="secondary">openai_compatible')
+    expect(html).not.toContain("Available SDKs:")
+    expect(html).not.toContain("openai_compatible")
+    expect(html).not.toContain("anthropic_compatible")
+    expect(html).toContain("No models returned")
   })
 
   it("renders available_models chips when persisted has data", () => {
@@ -481,18 +505,18 @@ describe("ProviderCard provider capabilities", () => {
 
     const verifiedIndex = html.indexOf(">gpt-5</button>")
     const verifiedTag = html.slice(html.lastIndexOf("<button", verifiedIndex), html.indexOf("</button>", verifiedIndex))
-    expect(verifiedTag).toContain('data-slot="tag"')
+    expect(verifiedTag).toContain('data-slot="tooltip-trigger"')
     expect(verifiedTag).toContain('data-variant="success"')
     expect(verifiedTag).toContain('data-route-status="verified"')
 
     const failedIndex = html.indexOf(">gpt-image-1</button>")
     const failedTag = html.slice(html.lastIndexOf("<button", failedIndex), html.indexOf("</button>", failedIndex))
-    expect(failedTag).toContain('data-slot="tag"')
+    expect(failedTag).toContain('data-slot="tooltip-trigger"')
     expect(failedTag).toContain('data-variant="destructive"')
     expect(failedTag).toContain('data-route-status="failed"')
   })
 
-  it("animates official route chips that are still being tested", () => {
+  it("animates only official route chips reported as actively testing", () => {
     const html = renderToStaticMarkup(
       <ProviderCard
         draft={makeDraft({
@@ -507,6 +531,12 @@ describe("ProviderCard provider capabilities", () => {
           available_models: [
             {
               id: "gpt-5.2",
+              status: "testing",
+              last_probe_message: null,
+              capabilities: { model_type: "language_reasoning", model_type_label: "Language/reasoning model" },
+            },
+            {
+              id: "gpt-5.3",
               status: "unverified_manual",
               last_probe_message: null,
               capabilities: { model_type: "language_reasoning", model_type_label: "Language/reasoning model" },
@@ -521,13 +551,18 @@ describe("ProviderCard provider capabilities", () => {
       />,
     )
 
-    const modelIndex = html.indexOf(">gpt-5.2</button>")
+    const modelIndex = html.indexOf(">gpt-5.2")
     const tag = html.slice(html.lastIndexOf("<button", modelIndex), html.indexOf("</button>", modelIndex))
     expect(tag).toContain('data-route-status="testing"')
     expect(tag).toContain("api-route-tag-border-flow")
+
+    const idleIndex = html.indexOf(">gpt-5.3</button>")
+    const idleTag = html.slice(html.lastIndexOf("<button", idleIndex), html.indexOf("</button>", idleIndex))
+    expect(idleTag).toContain('data-route-status="unverified_manual"')
+    expect(idleTag).not.toContain("api-route-tag-border-flow")
   })
 
-  it("renders generated multimodal route candidates with an info border and model type tooltip", () => {
+  it("renders generated multimodal route candidates with a multimodal border and shadcn-only tooltip", () => {
     const html = renderToStaticMarkup(
       <ProviderCard
         draft={makeDraft({ id: "openai-official", name: "OpenAI Official" })}
@@ -552,12 +587,13 @@ describe("ProviderCard provider capabilities", () => {
 
     const modelIndex = html.indexOf(">gpt-image-1</button>")
     const tag = html.slice(html.lastIndexOf("<button", modelIndex), html.indexOf("</button>", modelIndex))
-    expect(tag).toContain('data-variant="info"')
+    expect(tag).toContain('data-variant="multimodal"')
     expect(tag).toContain('data-model-type="image_generation"')
+    expect(tag).not.toContain("title=")
     expect(tag).toContain("Image generation model")
   })
 
-  it("keeps generated multimodal official entries blue even if stale data marked them verified", () => {
+  it("keeps generated multimodal official entries multimodal-colored even if stale data marked them verified", () => {
     const html = renderToStaticMarkup(
       <ProviderCard
         draft={makeDraft({ id: "gemini-official", name: "Gemini Official" })}
@@ -592,7 +628,7 @@ describe("ProviderCard provider capabilities", () => {
 
     const modelIndex = html.indexOf(">gemini-3-pro-image</button>")
     const tag = html.slice(html.lastIndexOf("<button", modelIndex), html.indexOf("</button>", modelIndex))
-    expect(tag).toContain('data-variant="info"')
+    expect(tag).toContain('data-variant="multimodal"')
     expect(tag).not.toContain('data-variant="success"')
     expect(tag).toContain('data-model-type="image_generation"')
     expect(tag).toContain("Image generation model")
@@ -641,11 +677,139 @@ describe("ProviderCard provider capabilities", () => {
       />,
     )
 
-    const modelIndex = html.indexOf(">gpt-5.2</button>")
+    const modelIndex = html.indexOf(">gpt-5.2")
     const tag = html.slice(html.lastIndexOf("<button", modelIndex), html.indexOf("</button>", modelIndex))
     expect(tag).toContain("Verified text chat + reasoning route")
     expect(html).toContain("Methods: openai_responses")
     expect(html).not.toContain("profiles")
+  })
+
+  it("does not append generic model type text to verified route tooltips", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({ id: "gemini-official", name: "Gemini Official" })}
+        persisted={makePersisted({
+          id: "gemini-official",
+          name: "Gemini Official",
+          available_models: [
+            {
+              id: "gemini-3.1-flash-lite-preview",
+              route_id: "gemini-official:gemini-3.1-flash-lite-preview",
+              status: "verified",
+              verified_profile_count: 2,
+              verified_profiles: [
+                {
+                  profile_id: "text:gemini_generate_content",
+                  capability: "text_chat",
+                  method_id: "gemini_generate_content",
+                  request_mapper_id: "gemini_generate_content_text",
+                  status: "ready",
+                },
+                {
+                  profile_id: "thinking:gemini_generate_content:low",
+                  capability: "thinking",
+                  method_id: "gemini_generate_content",
+                  request_mapper_id: "gemini_generate_content_thinking_level_low",
+                  status: "ready",
+                },
+              ],
+              capabilities: { model_type: "language_reasoning", model_type_label: "Language/reasoning model" },
+            },
+          ],
+        })}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="official"
+      />,
+    )
+
+    expect(html).toContain("Verified text chat + reasoning route")
+    expect(html).toContain("Methods: gemini_generate_content")
+    expect(html).not.toContain("Language/reasoning model")
+  })
+
+  it("surfaces failed official route probe messages in the route tooltip", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({ id: "gemini-official", name: "Gemini Official" })}
+        persisted={makePersisted({
+          id: "gemini-official",
+          name: "Gemini Official",
+          available_models: [
+            {
+              id: "gemini-3-pro-preview",
+              status: "failed",
+              last_probe_message: "Provider returned HTTP 404 (NOT_FOUND). This model models/gemini-3-pro-preview is no longer available.",
+              capabilities: { model_type: "language_reasoning", model_type_label: "Language/reasoning model" },
+            },
+          ],
+        })}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="official"
+      />,
+    )
+
+    expect(html).toContain("Route test failed: Provider returned HTTP 404 (NOT_FOUND). This model models/gemini-3-pro-preview is no longer available.")
+    const modelIndex = html.indexOf(">gemini-3-pro-preview</button>")
+    const tag = html.slice(html.lastIndexOf("<button", modelIndex), html.indexOf("</button>", modelIndex))
+    expect(tag).toContain('data-model-type="language_reasoning"')
+    expect(tag).not.toContain("title=")
+  })
+
+  it("marks verified thinking routes with a compact brain icon", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({ id: "gemini-official", name: "Gemini Official" })}
+        persisted={makePersisted({
+          id: "gemini-official",
+          name: "Gemini Official",
+          available_models: [
+            {
+              id: "gemini-3.1-pro-preview",
+              route_id: "gemini-official:gemini-3.1-pro-preview",
+              status: "verified",
+              verified_profile_count: 2,
+              capabilities: {
+                model_type: "language_reasoning",
+                model_type_label: "Language/reasoning model",
+                verified_profiles: [
+                  {
+                    profile_id: "text:gemini_generate_content",
+                    capability: "text_chat",
+                    method_id: "gemini_generate_content",
+                    request_mapper_id: "gemini_generate_content_text",
+                    status: "ready",
+                  },
+                  {
+                    profile_id: "thinking:gemini_generate_content:low",
+                    capability: "thinking",
+                    method_id: "gemini_generate_content",
+                    request_mapper_id: "gemini_generate_content_thinking_level_low",
+                    status: "ready",
+                  },
+                ],
+              },
+            },
+          ],
+        })}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="official"
+      />,
+    )
+
+    const modelIndex = html.indexOf(">gemini-3.1-pro-preview")
+    const tag = html.slice(html.lastIndexOf("<button", modelIndex), html.indexOf("</button>", modelIndex))
+    expect(tag).toContain('data-reasoning-route="true"')
+    expect(tag).toContain("lucide-brain")
+    expect(tag).toContain("Verified text chat + reasoning route")
   })
 
   it("renders available models as clickable copy targets", () => {
@@ -705,6 +869,22 @@ describe("ProviderCard provider capabilities", () => {
       "anthropic/claude-opus-4.7",
       "google/gemini-3.5-flash",
       "openai/gpt-5",
+    ])
+  })
+
+  it("sorts official route chips with verified routes first and failed routes last", () => {
+    const sorted = sortOfficialRouteInfos([
+      { id: "a-failed", status: "failed" },
+      { id: "z-verified", status: "verified" },
+      { id: "m-image", status: "unverified_manual", capabilities: { model_type: "image_generation" } },
+      { id: "a-neutral", status: "unverified_manual" },
+    ]).map((model) => model.id)
+
+    expect(sorted).toEqual([
+      "z-verified",
+      "a-neutral",
+      "m-image",
+      "a-failed",
     ])
   })
 
@@ -842,24 +1022,40 @@ describe("ProviderCard manual model panel", () => {
 })
 
 describe("ProviderCard delete confirmation", () => {
-  it("delete trigger uses the shared confirmation dialog", () => {
+  it("delete trigger uses a shadcn sonner confirmation toast", () => {
     const onDelete = vi.fn()
     const element = ProviderDeleteButton({ draftName: "OpenAI", onDelete })
     const html = renderToStaticMarkup(<ProviderDeleteButton draftName="OpenAI" onDelete={onDelete} />)
 
-    expect(element.type).toBe(DeleteConfirmDialog)
-    expect(element.props.itemName).toBe("OpenAI")
-    expect(element.props.description).toBe("This provider configuration will be removed from the credentials document.")
-    expect(html).toContain('data-delete-confirm-trigger="true"')
+    expect(html).toContain('aria-label="Delete provider"')
+    expect(html).toContain('data-delete-toast-trigger="true"')
+    element.props.onClick()
+
+    expect(toastMock).toHaveBeenCalledWith(
+      "Delete OpenAI?",
+      expect.objectContaining({
+        description: "This provider configuration will be removed from the credentials document.",
+        duration: Infinity,
+        action: expect.objectContaining({ label: "Delete" }),
+        cancel: expect.objectContaining({ label: "Cancel" }),
+        classNames: expect.objectContaining({
+          actionButton: expect.stringContaining("!bg-destructive"),
+        }),
+      }),
+    )
+    expect(onDelete).not.toHaveBeenCalled()
   })
 
-  it("delete trigger remains wired to the provider delete button", () => {
+  it("sonner delete action remains wired to provider deletion", () => {
     const onDelete = vi.fn()
     const element = ProviderDeleteButton({ draftName: "OpenAI", onDelete })
-    const trigger = element.props.trigger as ReactElement<Record<string, unknown>>
+    element.props.onClick()
+    const options = toastMock.mock.calls.at(-1)?.[1] as {
+      action?: { onClick?: () => void }
+    }
 
-    expect(element.props.onConfirm).toBe(onDelete)
-    expect(trigger.props["aria-label"]).toBe("Delete provider")
-    expect(trigger.props["data-delete-confirm-trigger"]).toBe(true)
+    options.action?.onClick?.()
+
+    expect(onDelete).toHaveBeenCalledTimes(1)
   })
 })

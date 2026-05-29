@@ -6,7 +6,7 @@ import pytest
 from app.core.adapters.metadata_local import LocalJsonMetadataStore
 from app.core.adapters.storage_local import LocalFilesystemBackend
 from app.models.skills import SkillSummary
-from app.services.skills import delete_skill
+from app.services.skills import delete_skill, list_skill_summaries
 from fastapi import HTTPException
 
 
@@ -16,7 +16,7 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio
-async def test_delete_skill_removes_workspace_skill(
+async def test_delete_skill_unregisters_workspace_skill_without_removing_files(
     studio_roots: tuple[Path, Path],
     tmp_path: Path,
 ) -> None:
@@ -51,13 +51,17 @@ async def test_delete_skill_removes_workspace_skill(
 
     await delete_skill(user_id, skill_id, storage, metadata)
 
-    assert not skill_dir.exists()
+    assert skill_dir.exists()
+    assert (skill_dir / "GRAPH.md").exists()
+    assert (skill_dir / ".workspace" / "runs").exists()
     assert await metadata.get_skill_index_entry(skill_id) is None
     assert await metadata.get_skill_summary(user_id, skill_id) is None
+    summaries = await list_skill_summaries(user_id, storage, metadata)
+    assert skill_id not in {summary.id for summary in summaries}
 
 
 @pytest.mark.anyio
-async def test_delete_skill_rejects_builtin_public_skill(
+async def test_delete_skill_unregisters_builtin_public_skill_without_removing_files(
     studio_roots: tuple[Path, Path],
     tmp_path: Path,
 ) -> None:
@@ -70,10 +74,28 @@ async def test_delete_skill_rejects_builtin_public_skill(
     )
     storage = LocalFilesystemBackend(tmp_path)
 
-    with pytest.raises(HTTPException) as exc_info:
-        await delete_skill("default", skill_id, storage, metadata)
+    await delete_skill("default", skill_id, storage, metadata)
 
-    assert exc_info.value.status_code == 403
-    assert exc_info.value.detail["error_code"] == "SKILL_READ_ONLY"
     assert (skill_dir / "GRAPH.md").exists()
     assert skill_dir.exists()
+    summaries = await list_skill_summaries("default", storage, metadata)
+    assert skill_id not in {summary.id for summary in summaries}
+
+
+@pytest.mark.anyio
+async def test_delete_skill_rejects_path_traversal_without_removing_files(
+    studio_roots: tuple[Path, Path],
+    tmp_path: Path,
+) -> None:
+    skills_dir, workspaces_dir = studio_roots
+    metadata = LocalJsonMetadataStore(
+        global_config_dir=tmp_path / "global-config",
+        workspaces_root=workspaces_dir,
+    )
+    storage = LocalFilesystemBackend(tmp_path)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await delete_skill("default", "..", storage, metadata)
+
+    assert exc_info.value.status_code == 400
+    assert skills_dir.exists()

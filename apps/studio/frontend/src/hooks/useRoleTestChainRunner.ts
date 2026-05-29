@@ -96,6 +96,7 @@ export function useRoleTestChainRunner({
       credentials: CredentialsState
     }) => {
       const modelChains = buildRoleTestTargets(data, roleName, credentials)
+      setStatuses({})
       setIsRunning(true)
       try {
         await runRoleTestTargets(modelChains, 4, async (target) => {

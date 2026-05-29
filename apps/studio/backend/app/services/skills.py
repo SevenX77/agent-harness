@@ -52,6 +52,7 @@ from app.services.git_local import GitLocalService, initialize_skill_repository
 from app.services.skill_resolver import build_studio_skill_resolver
 
 _LOCATION_RE = re.compile(r":(?P<line>\d+)(?::(?P<loc>.*))?")
+_SAFE_SKILL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _NAME_LINE_RE = re.compile(
     r"(?m)^(?P<prefix>name:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\n]+)(?P=quote)\s*$"
 )
@@ -181,10 +182,23 @@ async def list_skill_summaries(
     summaries: dict[str, SkillSummary] = {}
     app_settings = await metadata.read_app_settings()
     local_git = GitLocalService()
-    public_ids = await _list_skill_ids(config.SKILLS_DIR, storage)
+    unregistered_skill_ids = await metadata.list_unregistered_skill_ids(user_id)
+    public_ids = [
+        skill_id
+        for skill_id in await _list_skill_ids(config.SKILLS_DIR, storage)
+        if skill_id not in unregistered_skill_ids
+    ]
     workspace_root = _workspace_skills_dir_for(user_id)
-    workspace_ids = await _list_skill_ids(workspace_root, storage)
-    metadata_summaries = await metadata.list_skills(user_id)
+    workspace_ids = [
+        skill_id
+        for skill_id in await _list_skill_ids(workspace_root, storage)
+        if skill_id not in unregistered_skill_ids
+    ]
+    metadata_summaries = [
+        summary
+        for summary in await metadata.list_skills(user_id)
+        if summary.id not in unregistered_skill_ids
+    ]
     for skill_id in public_ids:
         skill_dir = config.SKILLS_DIR / skill_id
         summary = await _summary_for_skill_dir_async(
@@ -418,23 +432,38 @@ async def delete_skill(
     storage: StorageBackend,
     metadata: MetadataStore,
 ) -> None:
-    """Delete a skill directory and clear all metadata for it."""
-    skill_dir = await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
-    resolved_skill_dir = skill_dir.resolve()
-    builtin_root = config.SKILLS_DIR.resolve()
-    if resolved_skill_dir == builtin_root or resolved_skill_dir.is_relative_to(builtin_root):
+    """Unregister a skill from Studio without deleting its source directory."""
+    _validate_skill_id_segment(skill_id)
+    await resolve_skill_dir_async(user_id, skill_id, storage, metadata)
+    await metadata.unregister_skill(user_id, skill_id)
+    await metadata.remove_skill_index_entry(skill_id)
+    await metadata.remove_skill_summary(user_id, skill_id)
+
+
+def _validate_skill_id_segment(skill_id: str) -> None:
+    if (
+        not skill_id
+        or skill_id in {".", ".."}
+        or "/" in skill_id
+        or "\\" in skill_id
+        or not _SAFE_SKILL_ID_RE.fullmatch(skill_id)
+    ):
         response = error_response(
-            error_code="SKILL_READ_ONLY",
-            http_status=403,
-            message=f"Skill is read-only: {skill_id}",
+            error_code="INVALID_SKILL_ID",
+            http_status=400,
+            message=f"Invalid skill id: {skill_id}",
             details={"skill_id": skill_id},
             retry_strategy="not_retryable",
         )
         raise_error_response(response)
 
-    await asyncio.to_thread(shutil.rmtree, resolved_skill_dir, ignore_errors=False)
-    await metadata.remove_skill_index_entry(skill_id)
-    await metadata.remove_skill_summary(user_id, skill_id)
+
+def _raise_skill_not_found(skill_id: str) -> NoReturn:
+    raise standard_http_exception(
+        "SKILL_NOT_FOUND",
+        f"Skill not found: {skill_id}",
+        {"skill_id": skill_id},
+    )
 
 
 async def create_new_skill(
@@ -591,6 +620,10 @@ async def ensure_workspace_skill_dir_async(
     metadata: MetadataStore,
 ) -> Path:
     """Return the writable skill body directory without creating workspace forks."""
+    _validate_skill_id_segment(skill_id)
+    if skill_id in await metadata.list_unregistered_skill_ids(user_id):
+        _raise_skill_not_found(skill_id)
+
     indexed = await metadata.get_skill_index_entry(skill_id)
     if indexed:
         skill_dir = Path(indexed["absolute_path"])
@@ -631,6 +664,10 @@ async def resolve_skill_dir_async(
     metadata: MetadataStore,
 ) -> Path:
     """Resolve a skill id through the global index, then legacy and builtin paths."""
+    _validate_skill_id_segment(skill_id)
+    if skill_id in await metadata.list_unregistered_skill_ids(user_id):
+        _raise_skill_not_found(skill_id)
+
     indexed = await metadata.get_skill_index_entry(skill_id)
     if indexed:
         skill_dir = Path(indexed["absolute_path"])
@@ -649,11 +686,7 @@ async def resolve_skill_dir_async(
     public_dir = config.SKILLS_DIR / skill_id
     if await storage.exists(str(public_dir)):
         return public_dir
-    raise standard_http_exception(
-        "SKILL_NOT_FOUND",
-        f"Skill not found: {skill_id}",
-        {"skill_id": skill_id},
-    )
+    _raise_skill_not_found(skill_id)
 
 
 async def latest_run_metadata_async(
@@ -670,6 +703,7 @@ async def latest_run_metadata_async(
 
 def ensure_workspace_skill_dir(skill_id: str) -> Path:
     """Return a writable skill dir without creating workspace forks."""
+    _validate_skill_id_segment(skill_id)
     indexed = _sync_skill_index_entry(skill_id)
     if indexed:
         skill_dir = Path(indexed["absolute_path"])
@@ -699,6 +733,7 @@ def ensure_workspace_skill_dir(skill_id: str) -> Path:
 
 def resolve_skill_dir(skill_id: str) -> Path:
     """Resolve a skill id, preferring the global index."""
+    _validate_skill_id_segment(skill_id)
     indexed = _sync_skill_index_entry(skill_id)
     if indexed:
         skill_dir = Path(indexed["absolute_path"])

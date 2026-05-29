@@ -7,10 +7,11 @@ import hashlib
 import logging
 import re
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -20,9 +21,13 @@ from graph_agent_gateway.registry.capabilities import (
     normalize_route_capabilities,
 )
 from graph_agent_gateway.registry.lint import lint_role_routes
+from graph_agent_gateway.registry.profile_selector import (
+    ProfileSelectionError,
+    select_verified_profile,
+)
 from graph_agent_gateway.registry.resolver import RegistryResolutionError, resolve_role
-from graph_agent_gateway.registry.schema import VerifiedProfile
-from pydantic import BaseModel, ConfigDict, Field
+from graph_agent_gateway.registry.schema import RuntimeSettings, VerifiedProfile
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.models.llm_config import (
     CapabilityValue,
@@ -33,11 +38,13 @@ from app.models.llm_config import (
     ProviderRoute,
     RegistryResponse,
     RoleEntry,
+    RoleRouteEntry,
     RolesData,
 )
 from app.services.copilot_test import (
     CopilotProvider,
     ModelProbeResult,
+    OfficialCallMethod,
     PingResult,
     _NetworkError,
     _ping_provider,
@@ -89,6 +96,9 @@ NO_VERIFIED_ROUTE_PROFILE_MESSAGE = "No verified language route profile."
 NO_WORKING_OFFICIAL_LANGUAGE_METHOD_MESSAGE = (
     "No official language call method passed for this model."
 )
+ROLE_TEST_NO_VERIFIED_PROFILE_MESSAGE = (
+    "Route has no verified invocation profile. Run the provider Test in API Keys."
+)
 
 
 @dataclass(frozen=True)
@@ -104,12 +114,19 @@ class OfficialLanguageProbeCandidate:
     output_modalities: tuple[str, ...] = ("text",)
 
 
+@dataclass(frozen=True)
+class OfficialModelProfileProbeResult:
+    model_id: str
+    profiles: list[VerifiedProfile] = field(default_factory=list)
+    last_probe_message: str | None = None
+
+
 class EndpointTestCompactModelInfo(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str
     route_id: str | None = None
-    status: Literal["verified", "unverified_manual", "disabled", "failed"] | None = None
+    status: Literal["verified", "unverified_manual", "disabled", "failed", "testing"] | None = None
     verified_profile_count: int | None = None
     last_probe_message: str | None = None
     capabilities: dict[str, object] = Field(default_factory=dict)
@@ -252,7 +269,7 @@ async def delete_registry_endpoint(endpoint_id: str) -> dict[str, Any]:
     credentials = load_credentials()
     roles = _load_roles_or_empty()
     refs = _endpoint_references(endpoint_id, credentials, roles)
-    if refs["routes"] or refs["roles"] or refs["model_profiles"]:
+    if refs["roles"] or refs["model_profiles"]:
         _raise_conflict(
             "endpoint_in_use",
             f"Endpoint is still referenced: {endpoint_id}",
@@ -386,12 +403,19 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
             profiles_by_model: dict[str, list[VerifiedProfile]] = {}
             catalog_only_models: list[str] = []
             failed_language_models: list[str] = []
+            failed_language_messages: dict[str, str] = {}
             for model_id in discovered_model_ids:
-                profiles = await _probe_official_model_profiles(latest_endpoint, model_id)
+                profile_result = await _probe_official_model_profile_result(
+                    latest_endpoint,
+                    model_id,
+                )
+                profiles = profile_result.profiles
                 if profiles:
                     profiles_by_model[model_id] = profiles
                 elif _is_official_language_model_candidate(latest_endpoint, model_id):
                     failed_language_models.append(model_id)
+                    if profile_result.last_probe_message:
+                        failed_language_messages[model_id] = profile_result.last_probe_message
                 else:
                     catalog_only_models.append(model_id)
             latest_credentials, _ = _upsert_discovered_routes(
@@ -414,7 +438,11 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
                                 for model_id in catalog_only_models
                             ]
                             + [
-                                _official_failed_language_probe_entry(latest_endpoint, model_id)
+                                _official_failed_language_probe_entry(
+                                    latest_endpoint,
+                                    model_id,
+                                    failed_language_messages.get(model_id),
+                                )
                                 for model_id in failed_language_models
                             ],
                         }
@@ -908,6 +936,7 @@ def _registry_response(
     *,
     setup_required: bool = False,
 ) -> RegistryResponse:
+    credentials = _normalize_credentials_for_registry_response(credentials)
     roles = _materialize_roles_for_response(roles, credentials)
     routes_by_canonical: dict[str, list[str]] = {}
     for route_id, route in credentials.provider_routes.items():
@@ -943,6 +972,63 @@ def _registry_response(
         role_effective_runtime_settings=_role_effective_runtime_settings(credentials, roles),
         setup_required=setup_required,
     )
+
+
+def _normalize_credentials_for_registry_response(
+    credentials: LLMCredentialsFile,
+) -> LLMCredentialsFile:
+    provider_endpoints: dict[str, ProviderEndpoint] = {}
+    changed = False
+    for endpoint_id, endpoint in credentials.provider_endpoints.items():
+        normalized = _normalize_endpoint_metadata_for_registry_response(endpoint)
+        provider_endpoints[endpoint_id] = normalized
+        changed = changed or normalized is not endpoint
+    if not changed:
+        return credentials
+    return credentials.model_copy(update={"provider_endpoints": provider_endpoints})
+
+
+def _normalize_endpoint_metadata_for_registry_response(
+    endpoint: ProviderEndpoint,
+) -> ProviderEndpoint:
+    if _endpoint_probe_backend(endpoint) != "gemini":
+        return endpoint
+    library = endpoint.metadata.get("capability_library")
+    if not isinstance(library, list):
+        return endpoint
+    normalized_library: list[object] = []
+    changed = False
+    for entry in library:
+        normalized_entry = _normalize_gemini_catalog_entry_for_registry_response(entry)
+        normalized_library.append(normalized_entry)
+        changed = changed or normalized_entry is not entry
+    if not changed:
+        return endpoint
+    return endpoint.model_copy(
+        update={
+            "metadata": {
+                **endpoint.metadata,
+                "capability_library": normalized_library,
+            }
+        }
+    )
+
+
+def _normalize_gemini_catalog_entry_for_registry_response(entry: object) -> object:
+    if not isinstance(entry, dict):
+        return entry
+    model_id = entry.get("model_id")
+    if not isinstance(model_id, str) or not _is_gemini_interactions_only_model(model_id.lower()):
+        return entry
+    return {
+        **entry,
+        "status": "catalog_candidate",
+        "route_status": "unverified_manual",
+        "last_probe_message": NO_VERIFIED_ROUTE_PROFILE_MESSAGE,
+        "model_type": "interactions_agent",
+        "model_type_label": "Interactions API agent",
+        "candidate_methods": [],
+    }
 
 
 def _model_groups_response(credentials: LLMCredentialsFile) -> list[dict[str, Any]]:
@@ -1243,7 +1329,7 @@ async def _force_probe_route(
 
 
 async def _role_test_provider_result(
-    entry,
+    entry: RoleRouteEntry | None,
     report_entry: dict[str, Any],
     route: ProviderRoute,
     endpoint: ProviderEndpoint,
@@ -1255,22 +1341,16 @@ async def _role_test_provider_result(
     admission_decision = _admission_decision(projection.ui_state)
     status = "blocked" if admission_decision == "block" else "untested"
     message = None
-    resolved_settings = report_entry.get("resolved_settings")
-    if resolved_settings is None and entry is not None:
-        resolved_settings = entry.runtime_settings.model_dump(
-            mode="json",
-            exclude_none=True,
-        )
+    runtime_settings, resolved_settings = _role_test_runtime_settings(entry, report_entry)
     if role_fit == "not_fit":
         admission_decision = "block"
         status = "blocked"
     elif admission_decision == "admit" and endpoint.api_key is not None:
-        result = await _probe_model(
-            _endpoint_probe_backend(endpoint),
-            endpoint.api_key.get_secret_value(),
-            _endpoint_probe_base_url(endpoint),
-            route.provider_model_id,
-            runtime_settings=resolved_settings if isinstance(resolved_settings, dict) else None,
+        result = await _probe_role_route(
+            route,
+            endpoint,
+            runtime_settings,
+            resolved_settings,
         )
         status = "ok" if result.status == "ok" else "failed"
         if status == "ok":
@@ -1290,48 +1370,175 @@ async def _role_test_provider_result(
     }
 
 
+def _role_test_runtime_settings(
+    entry: RoleRouteEntry | None,
+    report_entry: dict[str, Any],
+) -> tuple[RuntimeSettings, dict[str, Any]]:
+    resolved_settings = report_entry.get("resolved_settings")
+    if isinstance(resolved_settings, dict):
+        try:
+            runtime_settings = RuntimeSettings.model_validate(resolved_settings)
+            return (
+                runtime_settings,
+                runtime_settings.model_dump(mode="json", exclude_none=True),
+            )
+        except ValidationError:
+            pass
+
+    if entry is not None:
+        return (
+            entry.runtime_settings,
+            entry.runtime_settings.model_dump(mode="json", exclude_none=True),
+        )
+    return RuntimeSettings(), {}
+
+
+async def _probe_role_route(
+    route: ProviderRoute,
+    endpoint: ProviderEndpoint,
+    runtime_settings: RuntimeSettings,
+    resolved_settings: dict[str, Any],
+) -> ModelProbeResult:
+    try:
+        selected_profile = select_verified_profile(route, runtime_settings)
+    except ProfileSelectionError as exc:
+        return ModelProbeResult(
+            model_id=route.provider_model_id,
+            status="error",
+            message=str(exc),
+        )
+
+    if selected_profile is not None:
+        if endpoint.api_key is None or not endpoint.api_key.get_secret_value():
+            return ModelProbeResult(
+                model_id=route.provider_model_id,
+                status="invalid_key",
+                message="API key is empty.",
+            )
+        return await _probe_official_call_method_request(
+            cast(OfficialCallMethod, selected_profile.method_id),
+            endpoint.api_key.get_secret_value(),
+            _endpoint_probe_base_url(endpoint),
+            route.provider_model_id,
+            runtime_settings=_role_test_profile_runtime_settings(
+                selected_profile,
+                resolved_settings,
+            ),
+        )
+
+    if endpoint.provider_kind == "official":
+        return ModelProbeResult(
+            model_id=route.provider_model_id,
+            status="error",
+            message=ROLE_TEST_NO_VERIFIED_PROFILE_MESSAGE,
+        )
+
+    return await _probe_model(
+        _endpoint_probe_backend(endpoint),
+        endpoint.api_key.get_secret_value() if endpoint.api_key is not None else "",
+        _endpoint_probe_base_url(endpoint),
+        route.provider_model_id,
+        runtime_settings=resolved_settings or None,
+    )
+
+
+def _role_test_profile_runtime_settings(
+    selected_profile: VerifiedProfile,
+    resolved_settings: dict[str, Any],
+) -> dict[str, Any]:
+    return _deep_merge_runtime_settings(
+        selected_profile.runtime_overrides,
+        resolved_settings,
+    )
+
+
+def _deep_merge_runtime_settings(
+    base: dict[str, Any],
+    overlay: dict[str, Any],
+) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in overlay.items():
+        existing = merged.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            merged[key] = _deep_merge_runtime_settings(existing, value)
+        else:
+            merged[key] = value
+    return merged
+
+
 async def _probe_official_model_profiles(
     endpoint: ProviderEndpoint,
     model_id: str,
 ) -> list[VerifiedProfile]:
     """Probe one official-provider model and return verified LLM invocation profiles."""
+    return (await _probe_official_model_profile_result(endpoint, model_id)).profiles
+
+
+async def _probe_official_model_profile_result(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+) -> OfficialModelProfileProbeResult:
+    """Probe one official-provider model and keep the best failure detail."""
     if not endpoint.api_key or not endpoint.api_key.get_secret_value():
-        return []
+        return OfficialModelProfileProbeResult(
+            model_id=model_id,
+            last_probe_message="API key is empty.",
+        )
     candidates = _official_language_probe_candidates(endpoint, model_id)
     if not candidates:
-        return []
+        return OfficialModelProfileProbeResult(model_id=model_id)
 
     verified: list[tuple[OfficialLanguageProbeCandidate, ModelProbeResult]] = []
+    failed_results: list[ModelProbeResult] = []
     for candidate in candidates:
         result = await _probe_official_call_method(endpoint, model_id, candidate)
         if result.status == "ok":
             verified.append((candidate, result))
+        else:
+            failed_results.append(result)
     if not verified:
-        return []
+        return OfficialModelProfileProbeResult(
+            model_id=model_id,
+            last_probe_message=_official_profile_probe_failure_message(failed_results),
+        )
 
     default_candidate = min(
         verified,
         key=lambda item: (item[0].default_rank, item[0].profile_id),
     )[0]
-    return [
-        VerifiedProfile(
-            profile_id=candidate.profile_id,
-            capability=candidate.capability,
-            method_id=candidate.method_id,
-            request_mapper_id=candidate.request_mapper_id,
-            status="ready",
-            default=candidate is default_candidate,
-            fallback_rank=candidate.fallback_rank,
-            input_modalities=list(candidate.input_modalities),
-            output_modalities=list(candidate.output_modalities),
-            runtime_overrides=candidate.runtime_settings,
-            metadata={
-                "probe_latency_ms": result.latency_ms,
-                "source": "official_test",
-            },
-        )
-        for candidate, result in verified
-    ]
+    return OfficialModelProfileProbeResult(
+        model_id=model_id,
+        profiles=[
+            VerifiedProfile(
+                profile_id=candidate.profile_id,
+                capability=candidate.capability,
+                method_id=candidate.method_id,
+                request_mapper_id=candidate.request_mapper_id,
+                status="ready",
+                default=candidate is default_candidate,
+                fallback_rank=candidate.fallback_rank,
+                input_modalities=list(candidate.input_modalities),
+                output_modalities=list(candidate.output_modalities),
+                runtime_overrides=candidate.runtime_settings,
+                metadata={
+                    "probe_latency_ms": result.latency_ms,
+                    "source": "official_test",
+                },
+            )
+            for candidate, result in verified
+        ],
+    )
+
+
+def _official_profile_probe_failure_message(
+    failed_results: list[ModelProbeResult],
+) -> str | None:
+    if not failed_results:
+        return None
+    for result in failed_results:
+        if result.message:
+            return _model_probe_failure_message(result)
+    return _model_probe_failure_message(failed_results[0])
 
 
 async def _probe_official_call_method(
@@ -1440,6 +1647,33 @@ def _official_language_probe_candidates(
             ),
         ]
     if backend == "gemini":
+        if _gemini_prefers_thinking_level(model_id):
+            return [
+                _candidate(
+                    "gemini_generate_content",
+                    "text:gemini_generate_content:minimal_thinking",
+                    "text_chat",
+                    "gemini_generate_content_text",
+                    10,
+                    1,
+                    runtime_settings={
+                        "max_output_tokens": 16,
+                        "reasoning": {"enabled": True, "effort": "minimal"},
+                    },
+                ),
+                _candidate(
+                    "gemini_generate_content",
+                    "thinking:gemini_generate_content:level_low",
+                    "thinking",
+                    "gemini_generate_content_thinking_level_low",
+                    5,
+                    1,
+                    runtime_settings={
+                        "max_output_tokens": 16,
+                        "reasoning": {"enabled": True, "effort": "low"},
+                    },
+                ),
+            ]
         return [
             _candidate(
                 "gemini_generate_content",
@@ -1461,7 +1695,7 @@ def _official_language_probe_candidates(
                 5,
                 1,
                 runtime_settings={
-                    "max_output_tokens": 16,
+                    "max_output_tokens": 256,
                     "reasoning": {"enabled": True, "budget_tokens": 128},
                 },
             ),
@@ -1473,7 +1707,7 @@ def _official_language_probe_candidates(
                 6,
                 2,
                 runtime_settings={
-                    "max_output_tokens": 16,
+                    "max_output_tokens": 768,
                     "reasoning": {"enabled": True, "budget_tokens": 512},
                 },
             ),
@@ -1600,12 +1834,32 @@ def _candidate(
     )
 
 
+def _gemini_prefers_thinking_level(model_id: str) -> bool:
+    model = model_id.lower()
+    return (
+        model.startswith("gemini-3")
+        or model.startswith("deep-research")
+        or model.startswith("antigravity")
+        or model == "aqa"
+    )
+
+
+def _is_gemini_interactions_only_model(model: str) -> bool:
+    return (
+        model.startswith("antigravity")
+        or model.startswith("deep-research")
+        or model == "aqa"
+    )
+
+
 def _is_official_language_model_candidate(endpoint: ProviderEndpoint, model_id: str) -> bool:
     model = model_id.lower()
     backend = _endpoint_probe_backend(endpoint)
     if backend == "claude":
         return model.startswith("claude-")
     if backend == "gemini":
+        if _is_gemini_interactions_only_model(model):
+            return False
         if _is_gemini_known_non_language_model(model):
             return False
         return True
@@ -1695,6 +1949,8 @@ def _official_verified_model_capabilities(
 
 def _official_catalog_model_type(endpoint: ProviderEndpoint, model_id: str) -> tuple[str, str]:
     model = model_id.lower()
+    if _endpoint_probe_backend(endpoint) == "gemini" and _is_gemini_interactions_only_model(model):
+        return "interactions_agent", "Interactions API agent"
     if _is_official_language_model_candidate(endpoint, model_id):
         return "language_reasoning", "Language/reasoning model"
     if any(
@@ -1770,13 +2026,14 @@ def _official_catalog_library_entry(endpoint: ProviderEndpoint, model_id: str) -
 def _official_failed_language_probe_entry(
     endpoint: ProviderEndpoint,
     model_id: str,
+    last_probe_message: str | None = None,
 ) -> dict[str, object]:
     capabilities = _official_catalog_capabilities(endpoint, model_id)
     return {
         "model_id": model_id,
         "status": "probe_failed",
         "route_status": "failed",
-        "last_probe_message": NO_WORKING_OFFICIAL_LANGUAGE_METHOD_MESSAGE,
+        "last_probe_message": last_probe_message or NO_WORKING_OFFICIAL_LANGUAGE_METHOD_MESSAGE,
         "model_type": capabilities["model_type"],
         "model_type_label": capabilities["model_type_label"],
         "candidate_methods": capabilities["candidate_methods"],
@@ -1905,6 +2162,7 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
     profiles_by_model: dict[str, list[VerifiedProfile]] = {}
     catalog_only_models: list[str] = []
     failed_models: list[str] = []
+    failed_model_messages: dict[str, str] = {}
     model_infos_by_id: dict[str, EndpointTestCompactModelInfo] = {
         model_id: EndpointTestCompactModelInfo(
             id=model_id,
@@ -1917,7 +2175,30 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
     tested_count = 0
 
     for batch in _chunks(discovered_model_ids, OFFICIAL_PROVIDER_TEST_BATCH_SIZE):
-        batch_results = await _probe_official_profile_batch(endpoint, batch)
+        async def publish_active_probe_models(
+            active_model_ids: tuple[str, ...],
+            current_tested_count: int = tested_count,
+        ) -> None:
+            await _update_endpoint_test_job(
+                job_id,
+                tested_model_count=current_tested_count,
+                verified_route_count=len(profiles_by_model),
+                failed_model_count=len(failed_models),
+                catalog_only_count=len(catalog_only_models),
+                message=(
+                    f"Testing {current_tested_count}/{len(discovered_model_ids)} provider models."
+                ),
+                available_models=_compact_model_infos_with_active_status(
+                    model_infos_by_id,
+                    active_model_ids,
+                ),
+            )
+
+        batch_results = await _probe_official_profile_batch(
+            endpoint,
+            batch,
+            on_active_change=publish_active_probe_models,
+        )
         latest_credentials = load_credentials()
         latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
         if latest_endpoint is None:
@@ -1943,13 +2224,17 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
             return
 
         verified_batch: dict[str, list[VerifiedProfile]] = {}
-        for model_id, profiles in batch_results:
+        for profile_result in batch_results:
+            model_id = profile_result.model_id
+            profiles = profile_result.profiles
             tested_count += 1
             if profiles:
                 profiles_by_model[model_id] = profiles
                 verified_batch[model_id] = profiles
             elif _is_official_language_model_candidate(latest_endpoint, model_id):
                 failed_models.append(model_id)
+                if profile_result.last_probe_message:
+                    failed_model_messages[model_id] = profile_result.last_probe_message
             else:
                 catalog_only_models.append(model_id)
 
@@ -1963,7 +2248,9 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
                 verified_profiles_by_model=verified_batch,
             )
 
-        for model_id, profiles in batch_results:
+        for profile_result in batch_results:
+            model_id = profile_result.model_id
+            profiles = profile_result.profiles
             if profiles:
                 model_infos_by_id[model_id] = EndpointTestCompactModelInfo(
                     id=model_id,
@@ -1986,7 +2273,10 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
                     status="failed" if is_language_candidate else "unverified_manual",
                     verified_profile_count=0,
                     last_probe_message=(
-                        NO_WORKING_OFFICIAL_LANGUAGE_METHOD_MESSAGE
+                        failed_model_messages.get(
+                            model_id,
+                            NO_WORKING_OFFICIAL_LANGUAGE_METHOD_MESSAGE,
+                        )
                         if is_language_candidate
                         else NO_VERIFIED_ROUTE_PROFILE_MESSAGE
                     ),
@@ -2006,7 +2296,11 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
                         for model_id in catalog_only_models
                     ]
                     + [
-                        _official_failed_language_probe_entry(latest_endpoint, model_id)
+                        _official_failed_language_probe_entry(
+                            latest_endpoint,
+                            model_id,
+                            failed_model_messages.get(model_id),
+                        )
                         for model_id in failed_models
                     ],
                 },
@@ -2062,7 +2356,11 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
                     for model_id in catalog_only_models
                 ]
                 + [
-                    _official_failed_language_probe_entry(latest_endpoint, model_id)
+                    _official_failed_language_probe_entry(
+                        latest_endpoint,
+                        model_id,
+                        failed_model_messages.get(model_id),
+                    )
                     for model_id in failed_models
                 ],
             },
@@ -2086,14 +2384,58 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
 async def _probe_official_profile_batch(
     endpoint: ProviderEndpoint,
     model_ids: tuple[str, ...],
-) -> list[tuple[str, list[VerifiedProfile]]]:
+    *,
+    on_active_change: Callable[[tuple[str, ...]], Awaitable[None]] | None = None,
+) -> list[OfficialModelProfileProbeResult]:
     semaphore = asyncio.Semaphore(OFFICIAL_PROVIDER_TEST_CONCURRENCY)
+    active_model_ids: set[str] = set()
+    active_lock = asyncio.Lock()
 
-    async def probe(model_id: str) -> tuple[str, list[VerifiedProfile]]:
+    async def mark_active(model_id: str, is_active: bool) -> None:
+        if on_active_change is None:
+            return
+        async with active_lock:
+            if is_active:
+                active_model_ids.add(model_id)
+            else:
+                active_model_ids.discard(model_id)
+            active_snapshot = tuple(active_model_ids)
+        await on_active_change(active_snapshot)
+
+    async def probe(model_id: str) -> OfficialModelProfileProbeResult:
         async with semaphore:
-            return model_id, await _probe_official_model_profiles(endpoint, model_id)
+            await mark_active(model_id, True)
+            try:
+                return await _probe_official_model_profile_result(endpoint, model_id)
+            finally:
+                await mark_active(model_id, False)
 
     return await asyncio.gather(*(probe(model_id) for model_id in model_ids))
+
+
+def _compact_model_infos_with_active_status(
+    model_infos_by_id: dict[str, EndpointTestCompactModelInfo],
+    active_model_ids: tuple[str, ...],
+) -> list[EndpointTestCompactModelInfo]:
+    active = set(active_model_ids)
+    compact: list[EndpointTestCompactModelInfo] = []
+    for model in model_infos_by_id.values():
+        if (
+            model.id in active
+            and model.status in {None, "unverified_manual", "testing"}
+            and not model.last_probe_message
+        ):
+            compact.append(
+                model.model_copy(
+                    update={
+                        "status": "testing",
+                        "last_probe_message": "Testing route.",
+                    },
+                )
+            )
+        else:
+            compact.append(model)
+    return compact
 
 
 async def _record_endpoint_test_job_failure(
@@ -2430,9 +2772,7 @@ def _endpoint_references(
     refs = {"routes": route_ids, "roles": [], "model_profiles": []}
     route_set = set(route_ids)
     for role_name, role in roles.roles.items():
-        for index, entry in enumerate(role.fallback_chain):
-            if entry.route_id in route_set:
-                refs["roles"].append(f"{role_name}.fallback_chain[{index}]")
+        refs["roles"].extend(_role_route_references(role_name, role, route_set))
     for profile_id, profile in roles.model_profiles.items():
         for index, entry in enumerate(profile.fallback_chain):
             if entry.route_id in route_set:
@@ -2443,13 +2783,30 @@ def _endpoint_references(
 def _route_references(route_id: str, roles: RolesData) -> dict[str, list[str]]:
     refs = {"roles": [], "model_profiles": []}
     for role_name, role in roles.roles.items():
-        for index, entry in enumerate(role.fallback_chain):
-            if entry.route_id == route_id:
-                refs["roles"].append(f"{role_name}.fallback_chain[{index}]")
+        refs["roles"].extend(_role_route_references(role_name, role, {route_id}))
     for profile_id, profile in roles.model_profiles.items():
         for index, entry in enumerate(profile.fallback_chain):
             if entry.route_id == route_id:
                 refs["model_profiles"].append(f"{profile_id}.fallback_chain[{index}]")
+    return refs
+
+
+def _role_route_references(
+    role_name: str,
+    role: RoleEntry,
+    route_ids: set[str],
+) -> list[str]:
+    refs: list[str] = []
+    for index, entry in enumerate(role.fallback_chain):
+        if entry.route_id in route_ids:
+            refs.append(f"{role_name}.fallback_chain[{index}]")
+    for group_index, group in enumerate(role.model_groups):
+        for provider_index, provider_model in enumerate(group.provider_models):
+            if provider_model.route_id in route_ids:
+                refs.append(
+                    f"{role_name}.model_groups[{group_index}]"
+                    f".provider_models[{provider_index}]"
+                )
     return refs
 
 

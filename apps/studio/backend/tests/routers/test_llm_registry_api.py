@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -1043,32 +1044,35 @@ def test_official_endpoint_test_persists_verified_profiles_and_excludes_catalog_
         del endpoint
         profile_probe_calls.append(model_id)
         if model_id != "gpt-5":
-            return []
-        return [
-            VerifiedProfile(
-                profile_id="text_responses",
-                capability="text_chat",
-                method_id="openai_responses",
-                request_mapper_id="openai_responses_text",
-                status="ready",
-                default=True,
-                fallback_rank=1,
-            ),
-            VerifiedProfile(
-                profile_id="reasoning_responses",
-                capability="reasoning",
-                method_id="openai_responses",
-                request_mapper_id="openai_responses_reasoning",
-                status="ready",
-                fallback_rank=1,
-                runtime_overrides={"reasoning": {"enabled": True, "effort": "low"}},
-            ),
-        ]
+            return llm_router.OfficialModelProfileProbeResult(model_id=model_id)
+        return llm_router.OfficialModelProfileProbeResult(
+            model_id=model_id,
+            profiles=[
+                VerifiedProfile(
+                    profile_id="text_responses",
+                    capability="text_chat",
+                    method_id="openai_responses",
+                    request_mapper_id="openai_responses_text",
+                    status="ready",
+                    default=True,
+                    fallback_rank=1,
+                ),
+                VerifiedProfile(
+                    profile_id="reasoning_responses",
+                    capability="reasoning",
+                    method_id="openai_responses",
+                    request_mapper_id="openai_responses_reasoning",
+                    status="ready",
+                    fallback_rank=1,
+                    runtime_overrides={"reasoning": {"enabled": True, "effort": "low"}},
+                ),
+            ],
+        )
 
     monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
     monkeypatch.setattr(
         llm_router,
-        "_probe_official_model_profiles",
+        "_probe_official_model_profile_result",
         fake_probe_official_model_profiles,
     )
 
@@ -1245,10 +1249,6 @@ def test_gemini_official_classifies_generation_models_outside_language_routes() 
     )
 
     assert llm_router._official_language_probe_candidates(endpoint, "gemini-3-pro-preview")
-    assert llm_router._official_language_probe_candidates(
-        endpoint,
-        "deep-research-pro-preview-12-2025",
-    )
     assert llm_router._official_language_probe_candidates(endpoint, "gemma-4-31b-it")
 
     excluded = {
@@ -1269,6 +1269,108 @@ def test_gemini_official_classifies_generation_models_outside_language_routes() 
             "capability_library": True,
             "candidate_methods": [],
         }
+
+
+def test_gemini_3_reasoning_probe_uses_thinking_level_not_budget() -> None:
+    endpoint = ProviderEndpoint(
+        endpoint_id="gemini-official",
+        display_name="Gemini Official",
+        protocol="google_genai",
+        base_url="https://generativelanguage.googleapis.com",
+        api_key="secret",
+        provider_kind="official",
+    )
+
+    candidates = llm_router._official_language_probe_candidates(
+        endpoint,
+        "gemini-3.1-pro-preview",
+    )
+    thinking_settings = [
+        candidate.runtime_settings["reasoning"]
+        for candidate in candidates
+        if candidate.capability == "thinking"
+    ]
+
+    assert {"enabled": True, "effort": "low"} in thinking_settings
+    assert all("budget_tokens" not in settings for settings in thinking_settings)
+
+
+def test_gemini_interactions_only_models_are_catalog_agents_not_failed_language_routes() -> None:
+    endpoint = ProviderEndpoint(
+        endpoint_id="gemini-official",
+        display_name="Gemini Official",
+        protocol="google_genai",
+        base_url="https://generativelanguage.googleapis.com",
+        api_key="secret",
+        provider_kind="official",
+    )
+
+    for model_id in (
+        "antigravity-preview-05-2026",
+        "deep-research-preview-04-2026",
+        "deep-research-pro-preview-12-2025",
+        "aqa",
+    ):
+        assert llm_router._is_official_language_model_candidate(endpoint, model_id) is False
+        assert llm_router._official_language_probe_candidates(endpoint, model_id) == []
+        assert llm_router._official_catalog_capabilities(endpoint, model_id) == {
+            "model_type": "interactions_agent",
+            "model_type_label": "Interactions API agent",
+            "capability_library": True,
+            "candidate_methods": [],
+        }
+
+
+def test_registry_normalizes_stale_gemini_interactions_failed_metadata(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "gemini-official": ProviderEndpoint(
+                    endpoint_id="gemini-official",
+                    display_name="Gemini Official",
+                    protocol="google_genai",
+                    base_url="https://generativelanguage.googleapis.com",
+                    api_key="secret",
+                    provider_kind="official",
+                    status="verified",
+                    metadata={
+                        "capability_library": [
+                            {
+                                "model_id": "deep-research-preview-04-2026",
+                                "status": "probe_failed",
+                                "route_status": "failed",
+                                "last_probe_message": "No official language call method passed for this model.",
+                                "model_type": "language_reasoning",
+                                "model_type_label": "Language/reasoning model",
+                                "candidate_methods": ["gemini_generate_content"],
+                            }
+                        ]
+                    },
+                )
+            },
+        ),
+        credentials_path(),
+    )
+
+    response = client.get("/api/llm/registry")
+
+    assert response.status_code == 200
+    entry = response.json()["provider_endpoints"]["gemini-official"]["metadata"]["capability_library"][0]
+    assert entry == {
+        "model_id": "deep-research-preview-04-2026",
+        "status": "catalog_candidate",
+        "route_status": "unverified_manual",
+        "last_probe_message": "No verified language route profile.",
+        "model_type": "interactions_agent",
+        "model_type_label": "Interactions API agent",
+        "candidate_methods": [],
+    }
 
 
 def test_official_endpoint_test_job_returns_compact_progress_without_registry(
@@ -1301,23 +1403,26 @@ def test_official_endpoint_test_job_returns_compact_progress_without_registry(
     async def fake_probe_official_model_profiles(endpoint, model_id: str):
         del endpoint
         if model_id != "gpt-5":
-            return []
-        return [
-            VerifiedProfile(
-                profile_id="text_responses",
-                capability="text_chat",
-                method_id="openai_responses",
-                request_mapper_id="openai_responses_text",
-                status="ready",
-                default=True,
-                fallback_rank=1,
-            )
-        ]
+            return llm_router.OfficialModelProfileProbeResult(model_id=model_id)
+        return llm_router.OfficialModelProfileProbeResult(
+            model_id=model_id,
+            profiles=[
+                VerifiedProfile(
+                    profile_id="text_responses",
+                    capability="text_chat",
+                    method_id="openai_responses",
+                    request_mapper_id="openai_responses_text",
+                    status="ready",
+                    default=True,
+                    fallback_rank=1,
+                )
+            ],
+        )
 
     monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
     monkeypatch.setattr(
         llm_router,
-        "_probe_official_model_profiles",
+        "_probe_official_model_profile_result",
         fake_probe_official_model_profiles,
     )
 
@@ -1383,6 +1488,81 @@ def test_official_endpoint_test_job_returns_compact_progress_without_registry(
     ]
 
 
+def test_official_endpoint_test_job_marks_only_active_probe_models_testing(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    monkeypatch.setattr(llm_router, "OFFICIAL_PROVIDER_TEST_CONCURRENCY", 2)
+    monkeypatch.setattr(llm_router, "OFFICIAL_PROVIDER_TEST_BATCH_SIZE", 4)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "openai-official": ProviderEndpoint(
+                    endpoint_id="openai-official",
+                    display_name="OpenAI Official",
+                    protocol="openai_compatible",
+                    base_url="https://api.openai.com/v1",
+                    api_key="secret",
+                    provider_kind="official",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+
+    started = threading.Event()
+    release = threading.Event()
+    active: set[str] = set()
+    active_lock = threading.Lock()
+
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        assert (backend, api_key, base_url) == ("openai", "secret", "https://api.openai.com/v1")
+        return PingResult(
+            latency_ms=42,
+            model_ids=("gpt-1", "gpt-2", "gpt-3", "gpt-4"),
+        )
+
+    async def fake_probe_official_model_profiles(endpoint, model_id: str):
+        del endpoint
+        with active_lock:
+            active.add(model_id)
+            if len(active) == 2:
+                started.set()
+        await asyncio.to_thread(release.wait)
+        with active_lock:
+            active.discard(model_id)
+        return llm_router.OfficialModelProfileProbeResult(model_id=model_id)
+
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(
+        llm_router,
+        "_probe_official_model_profile_result",
+        fake_probe_official_model_profiles,
+    )
+
+    start = client.post("/api/llm/endpoints/openai-official/test-jobs")
+    assert start.status_code == 200
+    job_id = start.json()["job_id"]
+
+    try:
+        assert started.wait(timeout=2), "probe tasks did not start"
+        status = client.get(f"/api/llm/endpoint-test-jobs/{job_id}").json()
+        models = {model["id"]: model for model in status["available_models"]}
+
+        assert {
+            model_id
+            for model_id, model in models.items()
+            if model["status"] == "testing"
+        } == {"gpt-1", "gpt-2"}
+        assert models["gpt-3"]["status"] == "unverified_manual"
+        assert models["gpt-4"]["status"] == "unverified_manual"
+    finally:
+        release.set()
+
+
 def test_official_endpoint_test_job_marks_language_candidates_failed_after_all_methods_fail(
     client: TestClient,
     tmp_path: Path,
@@ -1411,13 +1591,13 @@ def test_official_endpoint_test_job_marks_language_candidates_failed_after_all_m
         return PingResult(latency_ms=42, model_ids=("gpt-5.2", "gpt-image-1"))
 
     async def fake_probe_official_model_profiles(endpoint, model_id: str):
-        del endpoint, model_id
-        return []
+        del endpoint
+        return llm_router.OfficialModelProfileProbeResult(model_id=model_id)
 
     monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
     monkeypatch.setattr(
         llm_router,
-        "_probe_official_model_profiles",
+        "_probe_official_model_profile_result",
         fake_probe_official_model_profiles,
     )
 
@@ -1478,6 +1658,88 @@ def test_official_endpoint_test_job_marks_language_candidates_failed_after_all_m
     ]
 
 
+def test_official_endpoint_test_job_keeps_provider_failure_message_for_failed_language_candidate(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "gemini-official": ProviderEndpoint(
+                    endpoint_id="gemini-official",
+                    display_name="Gemini Official",
+                    protocol="google_genai",
+                    base_url="https://generativelanguage.googleapis.com",
+                    api_key="secret",
+                    provider_kind="official",
+                )
+            },
+        ),
+        credentials_path(),
+    )
+
+    async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
+        assert (backend, api_key, base_url) == (
+            "gemini",
+            "secret",
+            "https://generativelanguage.googleapis.com",
+        )
+        return PingResult(latency_ms=42, model_ids=("gemini-3-pro-preview",))
+
+    async def fake_probe_official_call_method(endpoint, model_id: str, candidate):
+        del endpoint, candidate
+        return ModelProbeResult(
+            model_id=model_id,
+            status="invalid_model",
+            latency_ms=31,
+            message=(
+                "Provider returned HTTP 404 (NOT_FOUND). "
+                "This model models/gemini-3-pro-preview is no longer available."
+            ),
+        )
+
+    monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
+    monkeypatch.setattr(
+        llm_router,
+        "_probe_official_call_method",
+        fake_probe_official_call_method,
+    )
+
+    start = client.post("/api/llm/endpoints/gemini-official/test-jobs")
+
+    assert start.status_code == 200
+    job_id = start.json()["job_id"]
+    status = start.json()
+    for _ in range(50):
+        if status["status"] == "completed":
+            break
+        time.sleep(0.01)
+        poll = client.get(f"/api/llm/endpoint-test-jobs/{job_id}")
+        assert poll.status_code == 200
+        status = poll.json()
+
+    expected_message = (
+        "Endpoint model probe failed (invalid_model). "
+        "Provider returned HTTP 404 (NOT_FOUND). "
+        "This model models/gemini-3-pro-preview is no longer available."
+    )
+    assert status["status"] == "completed"
+    models = {model["id"]: model for model in status["available_models"]}
+    assert models["gemini-3-pro-preview"]["status"] == "failed"
+    assert models["gemini-3-pro-preview"]["last_probe_message"] == expected_message
+
+    raw = json.loads(credentials_path().read_text(encoding="utf-8"))
+    capability_library = raw["provider_endpoints"]["gemini-official"]["metadata"][
+        "capability_library"
+    ]
+    assert capability_library[0]["model_id"] == "gemini-3-pro-preview"
+    assert capability_library[0]["route_status"] == "failed"
+    assert capability_library[0]["last_probe_message"] == expected_message
+
+
 def test_official_endpoint_test_job_records_unexpected_probe_failure(
     client: TestClient,
     tmp_path: Path,
@@ -1512,7 +1774,7 @@ def test_official_endpoint_test_job_records_unexpected_probe_failure(
     monkeypatch.setattr(llm_router, "_ping_provider", fake_ping_provider)
     monkeypatch.setattr(
         llm_router,
-        "_probe_official_model_profiles",
+        "_probe_official_model_profile_result",
         fake_probe_official_model_profiles,
     )
 
@@ -1750,6 +2012,92 @@ def test_route_and_endpoint_delete_conflicts(
     assert route_response.json()["details"]["roles"] == ["graph_agent.fallback_chain[0]"]
     assert endpoint_response.status_code == 409
     assert endpoint_response.json()["error_code"] == "endpoint_in_use"
+
+
+def test_route_delete_conflicts_with_role_model_group_references(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _active_credentials_path, roles_path = _seed(tmp_path, monkeypatch)
+    save_roles_file(
+        roles_path,
+        RolesData.model_validate(
+            {
+                "schema_version": 3,
+                "roles": {
+                    "analyst": {
+                        "role_kind": "graph_agent",
+                        "system_prompt_prefix": "",
+                        "model_fallback_enabled": True,
+                        "intent": {"provider_preference": "manual_order"},
+                        "model_groups": [
+                            {
+                                "canonical_id": "gpt-5",
+                                "display_name": "GPT-5",
+                                "provider_models": [{"route_id": "openai-direct:gpt-5"}],
+                            }
+                        ],
+                        "fallback_chain": [],
+                    }
+                },
+            }
+        ),
+        known_route_ids={"openai-direct:gpt-5"},
+    )
+
+    route_response = client.delete("/api/llm/routes/openai-direct:gpt-5")
+    endpoint_response = client.delete("/api/llm/registry/endpoints/openai-direct")
+
+    assert route_response.status_code == 409
+    assert route_response.json()["details"]["roles"] == [
+        "analyst.model_groups[0].provider_models[0]"
+    ]
+    assert endpoint_response.status_code == 409
+    assert endpoint_response.json()["details"]["roles"] == [
+        "analyst.model_groups[0].provider_models[0]"
+    ]
+
+
+def test_endpoint_delete_cascades_owned_routes_without_active_references(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+    credentials = LLMCredentialsFile(
+        provider_endpoints={
+            "openai-direct": ProviderEndpoint(
+                endpoint_id="openai-direct",
+                display_name="OpenAI",
+                protocol="openai_compatible",
+                base_url="https://api.openai.example/v1",
+                api_key="secret",
+            )
+        },
+        provider_routes={
+            "openai-direct:gpt-5": ProviderRoute(
+                route_id="openai-direct:gpt-5",
+                endpoint_id="openai-direct",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+                display_name="GPT-5",
+                status="verified",
+            )
+        },
+    )
+    save_credentials(credentials, active_credentials_path)
+    save_roles_file(roles_path, RolesData(), known_route_ids={"openai-direct:gpt-5"})
+
+    response = client.delete("/api/llm/registry/endpoints/openai-direct")
+
+    assert response.status_code == 200
+    assert response.json()["provider_endpoints"] == {}
+    assert response.json()["provider_routes"] == {}
 
 
 def test_route_metadata_probe_and_profile_apply_conflict(
@@ -2530,6 +2878,140 @@ def test_role_test_probes_needs_test_provider_at_click_time(
     assert provider_result["status"] == "ok"
     assert provider_result["warnings"][0]["code"] == "thinking_capability_unknown"
     assert provider_result["resolved_settings"]["reasoning"]["enabled"] is True
+
+
+def test_role_test_uses_verified_profile_call_method_for_official_routes(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+    credentials = LLMCredentialsFile(
+        provider_endpoints={
+            "anthropic-official": ProviderEndpoint(
+                endpoint_id="anthropic-official",
+                display_name="Anthropic Official",
+                protocol="anthropic_compatible",
+                base_url="https://api.anthropic.example",
+                api_key="secret",
+                status="verified",
+                provider_kind="official",
+            )
+        },
+        provider_routes={
+            "anthropic-official:claude-opus": ProviderRoute(
+                route_id="anthropic-official:claude-opus",
+                endpoint_id="anthropic-official",
+                route_slug="claude-opus",
+                provider_model_id="claude-opus",
+                canonical_id="claude-opus",
+                display_name="Claude Opus",
+                status="verified",
+                verified_profiles=[
+                    VerifiedProfile(
+                        profile_id="text",
+                        capability="text_chat",
+                        method_id="anthropic_messages",
+                        request_mapper_id="anthropic_text",
+                        status="ready",
+                        default=True,
+                        fallback_rank=1,
+                    ),
+                    VerifiedProfile(
+                        profile_id="reasoning",
+                        capability="reasoning",
+                        method_id="anthropic_messages",
+                        request_mapper_id="anthropic_thinking",
+                        status="ready",
+                        fallback_rank=1,
+                        runtime_overrides={
+                            "max_output_tokens": 1025,
+                            "reasoning": {
+                                "enabled": True,
+                                "budget_tokens": 1024,
+                            },
+                        },
+                    ),
+                ],
+            )
+        },
+    )
+    save_credentials(credentials, active_credentials_path)
+    save_roles_file(
+        roles_path,
+        RolesData(
+            roles={
+                "analyst": RoleEntry(
+                    fallback_chain=[
+                        RoleRouteEntry(
+                            route_id="anthropic-official:claude-opus",
+                            runtime_settings={"reasoning": {"enabled": True}},
+                        )
+                    ]
+                )
+            }
+        ),
+        known_route_ids=set(credentials.provider_routes),
+    )
+    calls: list[dict[str, object]] = []
+
+    async def fake_official_call_method(
+        method_id: str,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> ModelProbeResult:
+        calls.append(
+            {
+                "method_id": method_id,
+                "api_key": api_key,
+                "base_url": base_url,
+                "model_id": model_id,
+                "runtime_settings": runtime_settings,
+            }
+        )
+        return ModelProbeResult(model_id=model_id, status="ok")
+
+    async def fail_generic_probe(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> ModelProbeResult:
+        del backend, api_key, base_url, model_id, runtime_settings
+        raise AssertionError("Role Test must use the verified official call method.")
+
+    monkeypatch.setattr(llm_router, "_probe_official_call_method_request", fake_official_call_method)
+    monkeypatch.setattr(llm_router, "_probe_model", fail_generic_probe)
+
+    response = client.post("/api/llm/roles/analyst/test", json={})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert calls == [
+        {
+            "method_id": "anthropic_messages",
+            "api_key": "secret",
+            "base_url": "https://api.anthropic.example",
+            "model_id": "claude-opus",
+            "runtime_settings": {
+                "max_output_tokens": 1025,
+                "reasoning": {
+                    "enabled": True,
+                    "budget_tokens": 1024,
+                },
+            },
+        }
+    ]
+    provider_result = body["model_groups"][0]["provider_results"][0]
+    assert provider_result["route_id"] == "anthropic-official:claude-opus"
+    assert provider_result["status"] == "ok"
 
 
 def test_apply_model_profile_marks_runtime_settings_as_profile_default(

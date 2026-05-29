@@ -17,6 +17,7 @@ import {
   CardHeader,
   CardTitle,
 } from '../ui/card'
+import { requestDeleteConfirmationToast } from '../ui/delete-confirm-toast'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -90,6 +91,19 @@ export function registeredSkillIdForImport(directoryPath: string, skills: SkillS
 
   const selectedSkillId = skillIdFromPath(directoryPath)
   return skills.find((skill) => skill.id === selectedSkillId)?.id ?? null
+}
+
+export function requestSkillDeleteConfirmation(
+  skill: Pick<SkillSummary, 'id' | 'name'>,
+  onConfirm: () => void | Promise<void>,
+) {
+  const displayName = skill.name.trim() || skill.id
+  requestDeleteConfirmationToast({
+    id: `delete-skill-${skill.id}`,
+    title: `Delete ${displayName}?`,
+    description: 'This skill will be removed from Studio. Its source folder stays on disk.',
+    onConfirm,
+  })
 }
 
 interface StudioErrorPayload {
@@ -257,17 +271,18 @@ export function WelcomePage({ onSelectSkill }: WelcomePageProps) {
     void revealInFileManager(skill.directory_path ?? '')
   }
 
-  const handleDelete = async (skill: SkillSummary) => {
-    if (!window.confirm(`Delete skill "${skill.name}"? This cannot be undone.`)) {
-      return
-    }
+  const deleteSkill = async (skill: SkillSummary) => {
     try {
       await api.delete(`/skills/${skill.id}`)
-      toast.success(`Deleted ${skill.name}`)
+      toast.success(`Removed ${skill.name} from Studio`)
       await mutateSkills()
     } catch (error) {
       toast.error('Could not delete skill', { description: errorMessage(error) })
     }
+  }
+
+  const handleDelete = (skill: SkillSummary) => {
+    requestSkillDeleteConfirmation(skill, () => deleteSkill(skill))
   }
 
   const submitNewSkill = async (event?: FormEvent) => {

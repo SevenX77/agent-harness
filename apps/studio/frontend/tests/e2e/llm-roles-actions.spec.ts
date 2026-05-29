@@ -222,15 +222,15 @@ test.describe('LLM Roles actions menu', () => {
     await roleCard.locator('[data-role-actions-trigger="true"]').click()
     await page.getByRole('menuitem', { name: 'Delete' }).click()
 
-    await expect(page.locator('[data-delete-confirm-dialog="true"]')).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Delete Premium?' })).toBeVisible()
-    await page.getByRole('button', { name: 'Cancel' }).click()
+    await expect(page.locator('[data-delete-confirm-dialog="true"]')).toHaveCount(0)
+    await expect(page.locator('[data-sonner-toast]').getByText('Delete Premium?')).toBeVisible()
+    await page.locator('[data-sonner-toast]').getByRole('button', { name: 'Cancel' }).click()
     await expect.poll(() => deletedRoles).toEqual([])
     await expect(roleCard).toBeVisible()
 
     await roleCard.locator('[data-role-actions-trigger="true"]').click()
     await page.getByRole('menuitem', { name: 'Delete' }).click()
-    await page.locator('[data-delete-confirm-action="true"]').click()
+    await page.locator('[data-sonner-toast]').getByRole('button', { name: 'Delete' }).click()
 
     await expect.poll(() => deletedRoles).toEqual(['Premium'])
     await expect(roleCard).toHaveCount(0)

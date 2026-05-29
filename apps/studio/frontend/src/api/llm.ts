@@ -7,6 +7,7 @@ export type ProviderType =
   | 'google_genai'
 
 export type RouteStatus = 'verified' | 'unverified_manual' | 'disabled' | 'failed'
+export type ModelProbeStatus = RouteStatus | 'testing'
 export type ProviderKind = 'official' | 'third_party' | 'custom'
 export type ProviderUiState = 'ready' | 'untested' | 'cooling_down' | 'needs_setup' | 'off'
 export type RoleFitState = 'using' | 'downgraded' | 'needs_test' | 'not_fit'
@@ -191,7 +192,7 @@ export type TestStatus =
 export interface ModelInfo {
   id: string
   route_id?: string
-  status?: RouteStatus
+  status?: ModelProbeStatus
   verified_profile_count?: number
   verified_profiles?: VerifiedProfile[]
   last_probe_message?: string | null

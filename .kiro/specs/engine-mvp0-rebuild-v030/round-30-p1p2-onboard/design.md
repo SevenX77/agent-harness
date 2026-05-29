@@ -164,7 +164,7 @@ sonar-scan:
         pattern: coverage-*
         merge-multiple: true
     - name: SonarQube Scan
-      uses: SonarSource/sonarqube-scan-action@v4
+      uses: SonarSource/sonarqube-scan-action@v8
       env:
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         SONAR_HOST_URL: https://sonarcloud.io
@@ -202,7 +202,7 @@ PR-2 ship 时 SonarCloud dashboard 使用 "Sonar Way" 默认 quality gate，但 
 各实施 PR 开始前必须先确认 action 版本仍是当前稳定推荐：
 
 - PR-1：`curl https://api.github.com/repos/codecov/codecov-action/releases | jq '.[0].tag_name'`，确认 `codecov-action@v6` 仍可用且是推荐 major；若官方推荐 major 改变，实施前更新 spec。
-- PR-2：`curl https://api.github.com/repos/SonarSource/sonarqube-scan-action/releases | jq '.[0].tag_name'`，确认 `sonarqube-scan-action@v4` 仍是 latest stable；若不是，按官方 release 调整。
+- PR-2：`curl https://api.github.com/repos/SonarSource/sonarqube-scan-action/releases | jq '.[0].tag_name'`，确认 `sonarqube-scan-action@v8` 仍是 latest stable；若不是，按官方 release 调整。
 - PR-3：`curl https://api.github.com/repos/github/codeql-action/releases | jq '.[0].tag_name'`，确认 `github/codeql-action@v4` 是 latest stable；若不是，回退 v3 或按官方 release 调整。
 - PR-4：`curl https://api.github.com/repos/ossf/scorecard-action/releases | jq '.[0].tag_name'`，确认 `ossf/scorecard-action@v2.4.3` 仍是 stable；若不是，按官方 release 调整。
 

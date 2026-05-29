@@ -55,6 +55,12 @@ jobs:
           flags: backend
           fail_ci_if_error: false
 
+      - name: Upload backend coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-backend
+          path: coverage-backend.xml
+
       - name: dependency audit
         run: uv run --with pip-audit pip-audit
 
@@ -99,12 +105,38 @@ jobs:
           flags: graph-agent,${{ matrix.py_flag }}
           fail_ci_if_error: false
 
+      - name: Upload graph-agent coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-graph-agent-py${{ matrix.python-version }}
+          path: coverage-graph-agent.xml
+
       - name: validate round28 contract manifests
         run: |
           uv run python packages/graph-agent/scripts/validate_round28_manifest.py \
             packages/graph-agent/spec/features.yaml \
             packages/graph-agent/spec/source_file_map.yaml \
             packages/graph-agent/spec/contract_map.yaml
+
+  sonar-scan:
+    needs: [quality-gates, graph-agent-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v8
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://sonarcloud.io
 
   e2e-tests:
     # E2E suite needs the frontend dev server (Vite) plus Playwright Chromium,

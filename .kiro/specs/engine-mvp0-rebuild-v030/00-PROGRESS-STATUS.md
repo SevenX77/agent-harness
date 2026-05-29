@@ -253,6 +253,7 @@ PR-1~6 全并入 stage/engine-v030 (HEAD f6a45b0)。三方 (a1 工具/a2 架构/
 | P0-2c 重构 (6 处已覆盖) | 重构 6 处有回归测试兜底的 B 类 C901 降 ≤10 行为不变 | ✅ merge `aa60b84` 进 stage (主控亲验: ruff C90 **19→13** / mypy 0 / pytest 1032 守行为; 无降不下来无 bug) |
 | Round 29 / P0-2 Complexity Gate | 启用 graph-agent ruff C901 门 + tests-first 锁 9 helper baseline + 重构剩余 13 src helpers 至 ≤10 | **✅ Complete (step 4 src + step 5 double audit + step 6 docs sync done)**: ruff C901 0 violations; 100 chars passed; 4 contract gate 38 passed; 全套 pytest 1171 passed, 2 skipped, 19 xfailed; 65 API + 92 errors + 33 events + 53 H2 + R28 5 机制不漂 |
 | Round 30 PR-1 / Codecov | report-only 接入 codecov-action@v6 + codecov.yml + ci.yml 双 upload + pyproject [tool.coverage] | **✅ Complete (step 1-6 done, step 7 PR-REPORT next)**: 22 assertion 全绿 + 4 contract gate 38 passed + 黄金原则零碰; PR-1 ship 后主控 24h 内验 codecov.io dashboard 真实基线决策 PR-1.5 |
+| Round 30 PR-2 / SonarCloud | report-only 接入 sonarqube-scan-action@v8 + sonar-project.properties + ci.yml 2 upload-artifact + 新 sonar-scan job | **✅ Complete (step 1-6 done, step 7 PR-REPORT next)**: 21 assertion 全绿 (含 SF-1/SF-2/SF-3 6 must-fix) + 4 contract gate 38 passed + 黄金原则零碰; PR-2 ship 后 PM 在 sonarcloud.io 建 org `sevenx77` + project `SevenX77_agent-harness` + 绑 SONAR_TOKEN secret |
 | P0-2d 开 C90 门 | package-local ruff C901 gate (`extend-select = ["C901"]`, max-complexity 10, `scripts/**` ignore) | ✅ absorbed by Round 29 / P0-2 Complexity Gate |
 | P1-P3 | Codecov/SonarCloud/CodeQL/Scorecard 接入 + 韧性/成熟度 | ⏳ (P2+ 部分卡 PM token) |
 

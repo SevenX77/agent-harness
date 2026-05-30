@@ -240,6 +240,8 @@ Exception public catalog 从约 24 个公开 class 浓缩为 5 个 public class:
 
 完成 tracing/eventstream public API cutover: SDK 默认写 `<workspace_dir>/runs/<run_id>/trace.jsonl`; public API 只接受 `event_subscriber(event: CallbackEvent)`; callback class inheritance 从 public surface 真砍。
 
+`trace_dir` 已在 PR-B 从 `run_skill` / `predict_skill` 签名移除; 本 PR 只清 `TracingCallback(trace_dir=)` callback 类路径。
+
 ### refs
 
 - decisions: `decisions.md §2` tracing 默认自动落; `§3` tracing + eventstream 同源出口; `§16.1` trace 路径自定义; `§16.3` Callback class 继承。
@@ -368,14 +370,13 @@ Exception public catalog 从约 24 个公开 class 浓缩为 5 个 public class:
 ```mermaid
 graph LR
   T[PR-trace-bug] --> A[PR-A Errors]
-  A --> B[PR-B workspace_dir]
   T --> C[PR-C LLM Gateway]
   C --> D[PR-D tracing/event_subscriber]
   B --> D
   C --> E[PR-E predict/cache]
   D --> E
   B --> E
-  A --> E
+  A -. soft: ErrorPayload result shape .-> E
 ```
 
 ## §8 共通 cutover discipline (SOP-05 + SOP-08)

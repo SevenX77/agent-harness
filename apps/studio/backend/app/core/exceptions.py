@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from graph_agent.core.exceptions import SkillCompileError
+from graph_agent import GraphCompileError
 from pydantic import ValidationError
 
 from app.models.errors import ErrorResponse
@@ -205,7 +205,7 @@ async def request_validation_error_handler(
     return _json_response(response)
 
 
-async def skill_compile_error_handler(_request: Request, exc: SkillCompileError) -> JSONResponse:
+async def skill_compile_error_handler(_request: Request, exc: GraphCompileError) -> JSONResponse:
     definition = STANDARD_ERROR_MAP["COMPILE_FAILED"]
     response = error_response(
         error_code="COMPILE_FAILED",
@@ -228,6 +228,6 @@ def register_exception_handlers(app: FastAPI) -> None:
         cast(ExceptionHandler, request_validation_error_handler),
     )
     app.add_exception_handler(
-        SkillCompileError,
+        GraphCompileError,
         cast(ExceptionHandler, skill_compile_error_handler),
     )

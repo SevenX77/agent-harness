@@ -18,7 +18,7 @@ def test_run_skill_single_markdown_file_returns_v030_root_error(
     assert result.success is False
     assert result.context == {}
     assert result.error is not None
-    assert "[F-v3-graph-root-missing]" in result.error
+    assert result.error.code == "[F-v3-graph-root-missing]"
 
 
 def test_run_skill_single_skill_md_file_returns_v030_root_error(
@@ -40,4 +40,4 @@ type: agent
     assert result.success is False
     assert result.context == {}
     assert result.error is not None
-    assert "[F-v3-graph-root-missing]" in result.error
+    assert result.error.code == "[F-v3-graph-root-missing]"

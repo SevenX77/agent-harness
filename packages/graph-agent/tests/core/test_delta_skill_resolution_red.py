@@ -14,7 +14,7 @@ from graph_agent.core.graph_assembler import assemble_graph
 from graph_agent.core.loader import CompiledSkill, PhaseDocument, SkillLoader
 from graph_agent.core.manifest import GraphManifest, SubagentSpec, SubgraphNodeAST
 from graph_agent.core.runner import run_skill
-from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
+from graph_agent.core.skill_resolver_protocol import SkillResolutionError, SkillResolverProtocol
 
 
 class DictSkillResolver:
@@ -192,6 +192,6 @@ def test_delta1_assemble_graph_missing_resolver_raises_v3_code(tmp_path: Path) -
         ],
     )
 
-    with pytest.raises(SkillLoadError) as exc_info:
+    with pytest.raises(SkillResolutionError) as exc_info:
         assemble_graph(compiled, skill_resolver=None)
     assert exc_info.value.payload.code == "[F-v3-resolver-missing]"

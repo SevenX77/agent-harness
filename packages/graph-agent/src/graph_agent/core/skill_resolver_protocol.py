@@ -6,13 +6,13 @@ import re
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from graph_agent.core.exceptions import SkillLoadError, make_error_payload
+from graph_agent.core.exceptions import ResourceNotFoundError, make_error_payload
 
 SKILL_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
 SKILL_ID_RE = re.compile(SKILL_ID_PATTERN)
 
 
-class SkillResolutionError(SkillLoadError):
+class SkillResolutionError(ResourceNotFoundError):
     """Raised when a declared target_skill cannot be resolved to a skill root."""
 
     def __init__(

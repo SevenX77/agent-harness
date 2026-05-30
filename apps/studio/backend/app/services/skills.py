@@ -16,8 +16,7 @@ from typing import Any, NoReturn
 
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
-from graph_agent import compile_skill
-from graph_agent.core.exceptions import GraphAgentError, SkillCompilationError, SkillLoadError
+from graph_agent import GraphAgentError, GraphCompileError, ResourceNotFoundError, compile_skill
 from graph_agent.core.graph_serializer import serialize_graph
 from graph_agent.core.loader import CompiledSkill, SkillLoader
 from graph_agent.core.manifest import (
@@ -301,7 +300,7 @@ def lint_skill_path(skill_path: Path) -> LintResult:
     """Compile a V2.1 skill root into Studio lint diagnostics."""
     try:
         compiled = compile_skill(skill_path, skill_resolver=build_studio_skill_resolver())
-    except (SkillLoadError, SkillCompilationError) as exc:
+    except (GraphCompileError, ResourceNotFoundError) as exc:
         return LintResult(status="failed", errors=[_lint_error_from_exception(exc)])
     return LintResult(
         status="passed",
@@ -324,7 +323,7 @@ async def compile_skill_for_studio(
             cache=False,
             skill_resolver=build_studio_skill_resolver(),
         )
-    except (SkillLoadError, SkillCompilationError) as exc:
+    except (GraphCompileError, ResourceNotFoundError) as exc:
         raise CompileFailedError(_compile_failure_from_exception(exc, skill_dir)) from exc
     return CompileSuccess(
         skill_id=skill_id,
@@ -1149,7 +1148,7 @@ async def serialize_skill_graph_markdown(
     except CanvasSerializerFatal as exc:
         exc.elapsed_ms = (time.perf_counter() - started) * 1000
         raise
-    except (GraphAgentError, SkillLoadError, SkillCompilationError) as exc:
+    except GraphAgentError as exc:
         elapsed_ms = (time.perf_counter() - started) * 1000
         raise _serializer_fatal_from_engine_error(exc, elapsed_ms) from exc
     elapsed_ms = (time.perf_counter() - started) * 1000

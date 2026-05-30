@@ -36,6 +36,7 @@ import pytest
 from graph_agent.core.exceptions import GraphAgentFatalError, SkillLoadError
 from graph_agent.core.loader import CompiledSkill, SkillLoader
 from graph_agent.core.manifest import AgentNodeAST, LogicNodeAST, SubgraphNodeAST
+from graph_agent.core.skill_resolver_protocol import SkillResolutionError
 
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "v030_e2e_pipeline"
 
@@ -418,7 +419,7 @@ def test_unresolvable_subgraph_target_raises_skill_not_registered(corrupt_root: 
     # Resolver knows the echo subagent but not the expander subgraph target.
     resolver = DictSkillResolver({"e2e.echo": corrupt_root / "registry" / "echo"})
 
-    with pytest.raises(SkillLoadError) as exc:
+    with pytest.raises(SkillResolutionError) as exc:
         SkillLoader().compile_skill(corrupt_root, skill_resolver=resolver)
 
     _assert_unique_defect_code(exc.value, "[F-v3-skill-not-registered]")
@@ -426,7 +427,7 @@ def test_unresolvable_subgraph_target_raises_skill_not_registered(corrupt_root: 
 
 def test_missing_resolver_raises_resolver_missing(corrupt_root: Path) -> None:
     # The skill declares a subgraph + subagent, so a resolver is mandatory.
-    with pytest.raises(SkillLoadError) as exc:
+    with pytest.raises(SkillResolutionError) as exc:
         SkillLoader().compile_skill(corrupt_root, skill_resolver=None)
 
     _assert_unique_defect_code(exc.value, "[F-v3-resolver-missing]")

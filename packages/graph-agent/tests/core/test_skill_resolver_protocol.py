@@ -154,7 +154,7 @@ def test_run_skill_requires_resolver_v3_code(tmp_path: Path) -> None:
     _parent_skill(parent, "demo.child")
 
     with pytest.raises(SkillResolutionError) as exc_info:
-        run_skill(parent, skill_resolver=None)
+        run_skill(parent, workspace_dir=tmp_path / "workspace", skill_resolver=None)
     assert exc_info.value.payload.code == "[F-v3-resolver-missing]"
 
 

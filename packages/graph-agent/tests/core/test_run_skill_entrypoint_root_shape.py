@@ -13,7 +13,11 @@ def test_run_skill_single_markdown_file_returns_v030_root_error(
     skill_file = tmp_path / "ordinary.md"
     skill_file.write_text("# ordinary markdown\n", encoding="utf-8")
 
-    result = run_skill(skill_file, skill_resolver=mock_skill_resolver)
+    result = run_skill(
+        skill_file,
+        workspace_dir=tmp_path / "workspace",
+        skill_resolver=mock_skill_resolver,
+    )
 
     assert result.success is False
     assert result.context == {}
@@ -35,7 +39,11 @@ type: agent
         encoding="utf-8",
     )
 
-    result = run_skill(skill_file, skill_resolver=mock_skill_resolver)
+    result = run_skill(
+        skill_file,
+        workspace_dir=tmp_path / "workspace",
+        skill_resolver=mock_skill_resolver,
+    )
 
     assert result.success is False
     assert result.context == {}

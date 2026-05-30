@@ -166,7 +166,7 @@ def test_git_service_wrappers_build_expected_commands(
     assert ["git", "status", "--short", "--ignored"] in commands
 
 
-def test_auto_commit_respects_gitignore_latest_but_commits_golden_and_predict(
+def test_auto_commit_respects_gitignore_latest_but_commits_golden(
     tmp_path: Path,
 ) -> None:
     skill_dir = tmp_path / "skill"
@@ -186,9 +186,6 @@ def test_auto_commit_respects_gitignore_latest_but_commits_golden_and_predict(
     golden_dir = skill_dir / ".workspace" / "golden" / "run-1"
     golden_dir.mkdir(parents=True)
     (golden_dir / "golden_metadata.json").write_text("{}", encoding="utf-8")
-    predict_dir = skill_dir / ".workspace" / "predict"
-    predict_dir.mkdir(parents=True)
-    (predict_dir / "latest_predict.json").write_text("{}", encoding="utf-8")
 
     result = service.auto_commit_run(skill_dir, "run-1")
 
@@ -197,7 +194,7 @@ def test_auto_commit_respects_gitignore_latest_but_commits_golden_and_predict(
     assert "!! .workspace/runs/" in ignored_status
     committed_files = run_git(skill_dir, "show", "--name-only", "--format=", "HEAD").stdout
     assert ".workspace/golden/run-1/golden_metadata.json" in committed_files
-    assert ".workspace/predict/latest_predict.json" in committed_files
+    assert ".workspace/predict/" not in committed_files
     assert ".workspace/runs/latest" not in committed_files
 
 

@@ -10,7 +10,7 @@
 
 `run_skill()` 先调用 `require_skill_resolver(..., caller="run_skill")`。`_run_skill_dict()` 再检查入口形状：只有“目录，且目录下有 `GRAPH.md`”会走 `_run_v030_skill_dict()`；普通 `.md` 文件、根级单文件 `SKILL.md`、不存在路径、或缺 `GRAPH.md` 的目录都会抛内部 leaf `SkillLoadError`（该 leaf 现在是 `GraphCompileError` family），message 字面包含 `[F-v3-graph-root-missing]`。公开 `run_skill()` 捕获后返回 `WorkflowResult(success=False, context={}, error=ErrorPayload(...))`，调用方应读 `result.error.code`；所以对外契约是“返回失败结果”，不是向调用方裸抛。
 
-目录型 V0.3.0 `GRAPH.md` root 会走 `_run_v030_skill_dict()`，不是旧 harness 缓存路径；旧 `_harness_cache` 已删除，也不再进入 `load_workflow_from_md` / `.run_id` 文件 resume 分支。这个分支现在会在 `graph.invoke()` 前准备 callbacks 和 trace 输出目录，再把 callbacks 传给 `assemble_graph()`。这点很重要：如果 `TracingCallback` 等到执行后才绑定目录，过程中产生的 typed events 就进不了 `tracing.jsonl`。`thread_id` 当前只用于选择本次 state 里的 `run_id`；没有 `thread_id` 时生成新的 UUID。
+目录型 V0.3.0 `GRAPH.md` root 会走 `_run_v030_skill_dict()`，不是旧 harness 缓存路径；旧 `_harness_cache` 已删除，也不再进入 `load_workflow_from_md` / `.run_id` 文件 resume 分支。调用方必须传绝对 `workspace_dir: Path`，这个分支会用 `workspace_dir / "runs" / run_id` 作为本次 run 的唯一输出目录，在 `graph.invoke()` 前准备 callbacks 和 trace 输出目录，再把 callbacks 传给 `assemble_graph()`。这点很重要：如果 `TracingCallback` 等到执行后才绑定目录，过程中产生的 typed events 就进不了 `tracing.jsonl`。`thread_id` 当前用于选择本次 state 里的 `run_id`；没有 `thread_id` 时生成新的 UUID。
 
 PR β 已新增 `build_middleware_chain`，按 `MVP0_MIDDLEWARE_ORDER_CONTRACT` 可实例化 6 层顺序：
 
@@ -98,20 +98,27 @@ Agent phase 仍是 LLM 工具循环。模型每轮输出 tool call 后，`graph_
 
 ## 2.2 V0.3.0 trace 如何真实落盘
 
-`_run_v030_skill_dict()` 现在不再返回伪 `trace.json`。它的 trace 流程是：
+`_run_v030_skill_dict()` 现在不再返回伪 `trace.json`，也不再接受 public `trace_dir` fallback。它的 trace 与 run artifact 流程是：
 
-1. 先计算输出目录：显式 `trace_dir` 优先；没有时，如果 runtime inputs 有 `output_dir`，使用 `Path(output_dir) / "traces"`，见 `packages/graph-agent/src/graph_agent/core/runner.py:235-238`。
-2. 调 `_prepare_v030_callbacks(callbacks, trace_output)`。没有 callbacks 时创建 `LoggingCallback()`；有 trace 目录但没有 tracer 时追加 `TracingCallback(trace_dir=trace_output)`；已有 tracer 但未绑定 typed JSONL 路径时调用 `set_trace_dir(trace_output)`，见 `packages/graph-agent/src/graph_agent/core/runner.py:198-214`。
-3. 把 `active_callbacks` 传给 model resolver 和 `assemble_graph()`，所以装配期 builtin reader 事件和运行期 `_skill_node` 事件都能进入同一批 callbacks，见 `packages/graph-agent/src/graph_agent/core/runner.py:239-255`。
-4. `graph.invoke()` 完成后，遍历 `TracingCallback` 并调用 `.save(trace_output)`。返回的真实 summary JSON 路径写进 dict 的 `trace_path`，见 `packages/graph-agent/src/graph_agent/core/runner.py:267-283`。
-5. `.save()` 失败时抛 `TraceWriteError("trace save failed: ...")`，并带 `context={"trace_path": str(trace_output)}`，见 `packages/graph-agent/src/graph_agent/core/runner.py:270-276`。
+1. 先确定 `run_id`：有 `thread_id` 时沿用；否则生成 UUID。
+2. 计算输出目录：`trace_output = workspace_dir / "runs" / run_id`。`workspace_dir` 必须是绝对路径；`trace_dir` 参数已从 public `run_skill` 签名删除。
+3. 调 `_prepare_v030_callbacks(callbacks, trace_output)`。没有 callbacks 时创建 `LoggingCallback()`；有 run 目录但没有 tracer 时追加 `TracingCallback(trace_dir=trace_output)`；已有 tracer 但未绑定 typed JSONL 路径时调用 `set_trace_dir(trace_output)`。
+4. 把 `active_callbacks` 传给 model resolver 和 `assemble_graph()`，所以装配期 builtin reader 事件和运行期 `_skill_node` 事件都能进入同一批 callbacks。
+5. `graph.invoke()` 完成后，先处理声明式 file outputs：`target: file` 且没有显式 `path` / `output_dir` 的输出写入 `<workspace_dir>/runs/<run_id>/artifacts/<name>.json`。调用方显式传 `output_dir` 时仍按显式目录写，保持程序化 caller 兼容。
+6. 遍历 `TracingCallback` 并调用 `.save(trace_output)`。返回的真实 summary JSON 路径写进 dict 的 `trace_path`。
+7. public `run_skill()` 把原始 dict 包装成 `WorkflowResult` 后，同步写出 `result.json`、`final_state.json`、`metrics.json` 到同一个 run 目录。
+8. `.save()` 失败时抛 `TraceWriteError("trace save failed: ...")`，并带 `context={"trace_path": str(trace_output)}`。
 
 因此现在有两个文件概念：
 
 - `tracing.jsonl`：执行期间由 `TracingCallback.on_event()` 逐行追加 typed Pydantic event。
 - `{run_id}_summary.json`：执行结束后由 `TracingCallback.save()` 写出的 summary；`WorkflowResult.trace_path` 指向这个真实存在的 summary 文件。
+- `result.json`：`WorkflowResult` 的 JSON 形态。
+- `final_state.json`：`WorkflowResult.context`。
+- `metrics.json`：`WorkflowResult.metrics`。
+- `artifacts/`：phase/tool sidecar；path-less file output 的默认目录。
 
-这和旧行为不同：旧 V0.3.0 分支只是拼出 `Path(trace_dir) / "trace.json"` 字符串，不能证明文件存在，也没有把执行期事件写进 typed stream。
+这和旧行为不同：旧 V0.3.0 分支只是拼出 `Path(trace_dir) / "trace.json"` 字符串，不能证明文件存在，也没有把执行期事件写进 typed stream；现在所有 run-scoped 文件都由 `workspace_dir/runs/run_id` 统一索引。
 
 ## 3. Schema gate 的当前真实规则
 

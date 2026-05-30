@@ -120,7 +120,7 @@ Fallback 是 WARN, 不阻断 Agent run。`[F-v3-resource-reference-path-invalid]
 
 ### 5. 异步日志记录器构建
 
-MVP0 SHOULD 避免 trace 写盘阻塞模型推理。Runtime 只把结构化事件放入队列, 后台 writer 批量写 `trace.jsonl` 或推送 event bus。
+MVP0 SHOULD 避免 trace 写盘阻塞模型推理。Runtime 只把结构化事件放入队列, 后台 writer 批量写 `tracing.jsonl` 或推送 event bus。
 
 | 字段 / 设置 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
 |---|---|---|---|---|---|---|

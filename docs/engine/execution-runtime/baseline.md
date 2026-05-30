@@ -112,7 +112,7 @@ audit A4 说 subagent 抽象层级过重，见 `docs.backup-2026-05-20/engine/gr
 
 ### `run_skill`
 
-`run_skill()` 的 Python API 在 `packages/graph-agent/src/graph_agent/core/runner.py:161`。它接受 `mock_llm`、`trace_dir`、`thread_id`、`unattended`、`callbacks`、`artifact_saver`、`initial_context`、`cleanup_checkpoints_on_finish` 和 `**inputs`，见 `packages/graph-agent/src/graph_agent/core/runner.py:161` 到 `packages/graph-agent/src/graph_agent/core/runner.py:172`。
+`run_skill()` 的 Python API 在 `packages/graph-agent/src/graph_agent/core/runner.py`。它接受必填 keyword-only `workspace_dir: Path`，并接受 `mock_llm`、`thread_id`、`unattended`、`callbacks`、`artifact_saver`、`initial_context`、`cleanup_checkpoints_on_finish`、`skill_resolver`、`model_resolver` 和 `**inputs`。`trace_dir` 已从 public 签名删除；trace 与 run artifacts 统一写入 `<workspace_dir>/runs/<run_id>/`。
 
 V0.3 分支里，`callbacks` 作为参数接收并透传给 `assemble_graph`，见 `packages/graph-agent/src/graph_agent/core/runner.py:474` 和 `packages/graph-agent/src/graph_agent/core/runner.py:496` 到 `packages/graph-agent/src/graph_agent/core/runner.py:500`。这对应 audit P1-4 的当前现状：V0.3 主线没有接回旧 harness 的 callbacks / trace / heartbeat 等能力，见 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:360`。
 

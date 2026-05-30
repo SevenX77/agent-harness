@@ -102,12 +102,12 @@ def _run_without_callbacks(
         callbacks=None,
         thread_id=run_id,
         skill_resolver=mock_skill_resolver,
-        trace_dir=trace_dir,
+        workspace_dir=trace_dir,
         topic="observability",
         request_id=run_id,
     )
     assert result["run_id"] == run_id
-    return trace_dir / "tracing.jsonl"
+    return trace_dir / "runs" / run_id / "tracing.jsonl"
 
 
 def _read_trace_events(trace_path: Path) -> list[dict[str, Any]]:
@@ -212,12 +212,12 @@ def test_v030_skill_dict_writes_trace_when_phase_crashes(
             callbacks=None,
             thread_id=run_id,
             skill_resolver=mock_skill_resolver,
-            trace_dir=trace_dir,
+            workspace_dir=trace_dir,
             topic="observability",
             request_id=run_id,
         )
 
-    trace_path = trace_dir / "tracing.jsonl"
+    trace_path = trace_dir / "runs" / run_id / "tracing.jsonl"
     events = _read_trace_events(trace_path)
 
     assert events[-1]["event_type"] == "run_ended"

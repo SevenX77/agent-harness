@@ -1,0 +1,84 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from app.core import config
+from app.services import predictor as predictor_module
+from app.services.git_local import STUDIO_GITIGNORE
+from app.services.predictor import PredictorService
+from fastapi.testclient import TestClient
+
+from tests.test_api import _agent_skill_files
+
+
+def _raw_predict_result() -> dict[str, object]:
+    return {
+        "run_id": "predict-workspace-run",
+        "context": {
+            "predict_trace": [
+                {
+                    "phase_name": "draft",
+                    "type": "llm",
+                    "inputs": {"topic": "predict"},
+                    "outputs": {"text": "<mock_text>"},
+                    "mocked_source": "heuristic_stub",
+                }
+            ],
+            "actual_path": ["draft"],
+        },
+    }
+
+
+def test_skill_detail_file_paths_do_not_expose_predict_dir(client: TestClient) -> None:
+    response = client.get("/api/skills/text-segmentation")
+
+    assert response.status_code == 200
+    assert "predict_dir" not in response.json()["file_paths"]
+
+
+def test_predictor_dispatch_writes_predict_artifacts_under_workspace_runs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    skill_dir = tmp_path / "skill"
+    workspace_dir = skill_dir / ".workspace"
+    skill_dir.mkdir()
+    (skill_dir / "GRAPH.md").write_text("---\nname: skill\n---\n", encoding="utf-8")
+    calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda _skill_id: skill_dir)
+
+    def fake_run_skill(skill_path: Path, **kwargs: object) -> dict[str, object]:
+        calls.append({"skill_path": skill_path, **kwargs})
+        return _raw_predict_result()
+
+    service = PredictorService(run_skill_fn=fake_run_skill)
+
+    result = service.dispatch_predict_job("skill", None, input_data={"topic": "predict"})
+
+    assert result.status == "success"
+    run_dir = workspace_dir / "runs" / "predict-workspace-run"
+    assert (run_dir / "result.json").is_file()
+    assert not (run_dir / "latest_predict.json").exists()
+    assert not (workspace_dir / "predict").exists()
+    assert calls[0]["workspace_dir"] == workspace_dir
+
+
+def test_new_skill_gitignore_template_no_longer_unignores_top_level_predict(
+    client: TestClient,
+) -> None:
+    response = client.post(
+        "/api/skills",
+        json={
+            "skill_id": "workspace-gitignore",
+            "files": _agent_skill_files("workspace-gitignore"),
+        },
+    )
+
+    assert response.status_code == 201
+    assert "!/.workspace/predict/" not in STUDIO_GITIGNORE.splitlines()
+    gitignore_lines = (
+        config.DEFAULT_SKILLS_ROOT / "workspace-gitignore" / ".gitignore"
+    ).read_text(encoding="utf-8").splitlines()
+    assert "!/.workspace/predict/" not in gitignore_lines

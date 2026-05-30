@@ -216,6 +216,39 @@ def test_stream_query_falls_back_to_second_copilot_route_when_first_route_fails(
     assert events == [CopilotEventText(content="fallback hello"), CopilotEventDone()]
 
 
+def test_stream_query_maps_ark_anthropic_profile_to_claude_code_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    client = FakeClient([AssistantMessage(content=[TextBlock(text="ark hello")], model="doubao")])
+    route = _resolved_route(
+        api_key="ark-secret",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        route_id="ark-official:doubao-seed-2-0-pro-260215",
+        endpoint_id="ark-official",
+        protocol="ark_runtime",
+        provider_model_id="doubao-seed-2-0-pro-260215",
+        canonical_id="doubao-seed-2-0-pro",
+        call_method_id="ark_anthropic_messages",
+    )
+    monkeypatch.setattr(copilot_service, "_resolve_copilot_routes", lambda _override: [route])
+    monkeypatch.setattr(
+        copilot_service, "_session_factory", lambda options: client.capture(options)
+    )
+
+    events = asyncio.run(
+        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+    )
+
+    assert client.options is not None
+    assert client.options.env["ANTHROPIC_BASE_URL"] == (
+        "https://ark.cn-beijing.volces.com/api/compatible"
+    )
+    assert client.options.env["ANTHROPIC_AUTH_TOKEN"] == "ark-secret"
+    assert client.options.env["ANTHROPIC_MODEL"] == "doubao-seed-2-0-pro-260215"
+    assert events == [CopilotEventText(content="ark hello"), CopilotEventDone()]
+
+
 def test_stream_query_reports_clear_error_after_all_copilot_routes_fail(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -340,15 +373,20 @@ def _resolved_route(
     base_url: str = "https://provider.test",
     route_id: str = "test-provider:claude-test",
     endpoint_id: str = "test-provider",
+    protocol: str = "anthropic_compatible",
+    provider_model_id: str = "claude-test",
+    canonical_id: str = "claude-test",
+    call_method_id: str | None = None,
 ) -> ResolvedRoute:
     return ResolvedRoute(
         role_name="copilot_chat",
         route_id=route_id,
         endpoint_id=endpoint_id,
-        protocol="anthropic_compatible",
+        protocol=protocol,
         base_url=base_url,
         api_key=api_key,
         credential_fingerprint="fp",
-        provider_model_id="claude-test",
-        canonical_id="claude-test",
+        provider_model_id=provider_model_id,
+        canonical_id=canonical_id,
+        call_method_id=call_method_id,
     )

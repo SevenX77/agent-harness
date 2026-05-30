@@ -102,9 +102,9 @@ The base language call methods confirmed by probes are:
 | OpenAI | `openai_responses`, `openai_chat_completions` |
 | Gemini | `gemini_generate_content` |
 | DeepSeek | `deepseek_chat_completions`, `deepseek_anthropic_messages` |
-| Ark | `ark_chat`, `ark_responses` |
+| Ark | `ark_chat`, `ark_responses`, `ark_anthropic_messages` |
 
-Additional non-LLM-role methods belong to the capability library, for example `gemini_embed_content`, Ark translation, Ark/OpenAI/Gemini generated media, audio, video, embedding, moderation, realtime, and 3D families.
+Additional non-LLM-role methods belong to the capability library, for example `gemini_embed_content`, Ark translation, Ark/OpenAI/Gemini generated media, audio, video, embedding, moderation, realtime, and 3D families. Official provider catalog rows must keep `candidate_methods` even when they are excluded from LLM Roles.
 
 ### VerifiedProfile
 
@@ -393,6 +393,7 @@ Confirmed base methods for LLM route use:
 
 - `ark_chat`
 - `ark_responses`
+- `ark_anthropic_messages` for the official Anthropic-compatible / Claude Code-compatible surface documented at `https://ark.cn-beijing.volces.com/api/compatible`
 
 Probe-level OK method counts:
 
@@ -424,11 +425,13 @@ Important relationships:
 - Four Doubao 1.5 models are Chat-only in the probe.
 - Image input: Chat OK 14, Responses OK 13, one model is Chat-only.
 - Ark thinking enabled/disabled was verified on both Chat and Responses profile probes.
+- Ark official docs also expose an Anthropic-compatible base URL for third-party tools and Claude Code. Treat that as a third candidate language method under the same Ark account connection, not as a separate provider.
 
 Default:
 
 - Prefer `ark_chat` for models where Chat is verified and Responses is not.
 - Prefer `ark_responses` for models/features where Responses is verified and richer profile support is needed.
+- Keep `ark_anthropic_messages` available for Claude Agent SDK / Claude Code compatibility probes and for role runtimes that explicitly require an Anthropic-compatible surface.
 - Keep both verified profiles when both pass.
 - Generated media, embedding, translation, video, and 3D belong in the capability library unless they are text-output LLM routes.
 
@@ -578,7 +581,7 @@ Recommended migration:
 - OpenAI routes can choose Responses by default when verified and fallback to Chat only when the profile satisfies the intent.
 - Gemini routes preserve `supported_actions` and model-specific thinking budget behavior.
 - DeepSeek stores both native and Anthropic-compatible verified methods where they work.
-- Ark stores Chat and Responses verified profiles separately with fallback.
+- Ark stores Chat, Responses, and Anthropic-compatible verified profiles separately with fallback.
 - Generated multimodal models are stored outside LLM Roles in the capability library.
 - Raw provider errors are translated to normalized human-readable causes.
 

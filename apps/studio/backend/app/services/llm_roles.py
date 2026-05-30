@@ -84,6 +84,21 @@ def validate_references(
                     f"profile {profile_id} fallback_chain[{index}] references unknown route "
                     f"{entry.route_id}"
                 )
+    for bundle_id, bundle in data.model_bundles.items():
+        for index, entry in enumerate(bundle.fallback_chain):
+            if entry.route_id not in known_route_ids:
+                raise InvalidRoleReference(
+                    f"model bundle {bundle_id} fallback_chain[{index}] references unknown route "
+                    f"{entry.route_id}"
+                )
+        for group_index, group in enumerate(bundle.model_groups):
+            for provider_index, provider_model in enumerate(group.provider_models):
+                if provider_model.route_id not in known_route_ids:
+                    raise InvalidRoleReference(
+                        f"model bundle {bundle_id} model_groups[{group_index}]"
+                        f".provider_models[{provider_index}] references unknown route "
+                        f"{provider_model.route_id}"
+                    )
 
 
 def normalize_role_drafts(data: RolesData) -> None:
@@ -134,7 +149,11 @@ def _runtime_response_exclude(data: RolesData) -> dict[str, Any]:
         "roles": {
             role_name: {"materialization_report"}
             for role_name in data.roles
-        }
+        },
+        "model_bundles": {
+            bundle_id: {"materialization_report"}
+            for bundle_id in data.model_bundles
+        },
     }
 
 

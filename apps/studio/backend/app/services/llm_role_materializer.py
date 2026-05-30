@@ -7,12 +7,14 @@ from typing import Any
 
 from app.models.llm_config import (
     LLMCredentialsFile,
+    ModelBundle,
     RoleEntry,
     RoleModelGroup,
     RoleRouteEntry,
     TokenIntent,
 )
 from app.services.llm_health_store import SqliteLlmHealthStore
+from app.services.llm_route_capabilities import route_thinking_capability
 from app.services.llm_state_projection import project_provider_model_state
 
 
@@ -84,6 +86,32 @@ def materialize_role(
         update={
             "fallback_chain": fallback_chain,
             "materialization_report": report,
+        }
+    )
+
+
+def materialize_model_bundle(
+    bundle: ModelBundle,
+    credentials: LLMCredentialsFile,
+    health_store: SqliteLlmHealthStore,
+) -> ModelBundle:
+    """Generate a flat route chain for a user-authored model bundle."""
+    if not bundle.model_groups:
+        return bundle
+
+    role_like_bundle = RoleEntry(
+        system_prompt_prefix="",
+        model_fallback_enabled=bundle.model_fallback_enabled,
+        intent=bundle.intent,
+        model_groups=bundle.model_groups,
+        fallback_chain=bundle.fallback_chain,
+        lint_requirements=bundle.lint_requirements,
+    )
+    materialized = materialize_role(role_like_bundle, credentials, health_store)
+    return bundle.model_copy(
+        update={
+            "fallback_chain": materialized.fallback_chain,
+            "materialization_report": materialized.materialization_report,
         }
     )
 
@@ -168,7 +196,7 @@ def _apply_intent(
     if thinking == "inherit":
         thinking = role.intent.thinking
     if thinking == "preferred":
-        capability = route.capabilities.get("thinking_protocol")
+        capability = route_thinking_capability(route)
         if capability is None or capability.value is not True:
             warning = {
                 "code": "thinking_not_enabled",
@@ -180,7 +208,7 @@ def _apply_intent(
         else:
             _enable_reasoning(entry_report)
     elif thinking == "required":
-        capability = route.capabilities.get("thinking_protocol")
+        capability = route_thinking_capability(route)
         if capability is None:
             _enable_reasoning(entry_report)
             entry_report["warnings"].append(

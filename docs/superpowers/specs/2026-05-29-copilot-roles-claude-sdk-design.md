@@ -269,11 +269,26 @@ ClaudeAgentOptions(
 `ANTHROPIC_API_KEY` is included as a compatibility fallback. DeepSeek's Claude
 Code integration documents `ANTHROPIC_AUTH_TOKEN` as the primary token variable.
 
+### Ark Official
+
+Ark has an official Anthropic-compatible / Claude Code-compatible surface:
+
+```text
+call_method_id: ark_anthropic_messages
+base_url: https://ark.cn-beijing.volces.com/api/compatible
+auth: ANTHROPIC_AUTH_TOKEN=<ARK_API_KEY>
+```
+
+This means Ark routes are Claude Agent SDK candidates when the verified profile
+uses `ark_anthropic_messages`. Ark `ark_chat` and `ark_responses` profiles remain
+valid graph-agent routes, but they are not themselves Claude Agent SDK request
+surfaces.
+
 ### Unsupported Routes
 
 Routes using OpenAI Chat Completions, OpenAI Responses, Google GenAI, or Ark
-runtime are not Claude Agent SDK compatible by default. They may still be valid
-graph-agent routes and valid raw API probe routes.
+Chat/Responses runtime are not Claude Agent SDK compatible by default. They may
+still be valid graph-agent routes and valid raw API probe routes.
 
 The user-facing error should say:
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, TypeAlias
 from urllib.parse import urlsplit, urlunsplit
 
@@ -13,11 +13,13 @@ import httpx
 CopilotProvider: TypeAlias = Literal["ark", "claude", "deepseek", "gemini", "openai"]
 OfficialCallMethod: TypeAlias = Literal[
     "anthropic_messages",
+    "ark_anthropic_messages",
     "ark_chat",
     "ark_responses",
     "deepseek_anthropic_messages",
     "deepseek_chat_completions",
     "gemini_generate_content",
+    "openai_completions",
     "openai_chat_completions",
     "openai_responses",
 ]
@@ -35,6 +37,7 @@ DEFAULT_BASE_URLS: dict[CopilotProvider, str] = {
 class PingResult:
     latency_ms: int
     model_ids: tuple[str, ...] = ()
+    model_capabilities: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @property
     def model_seen(self) -> str | None:
@@ -99,7 +102,11 @@ async def _ping_provider(
 
     latency_ms = max(0, round((time.perf_counter() - started) * 1000))
     _raise_for_status(response)
-    return PingResult(latency_ms=latency_ms, model_ids=_model_ids(response))
+    return PingResult(
+        latency_ms=latency_ms,
+        model_ids=_model_ids(response),
+        model_capabilities=_model_capabilities(response),
+    )
 
 
 async def _request_models(
@@ -172,7 +179,9 @@ async def _probe_official_call_method(
     """Probe one official provider API family for one concrete model."""
     started = time.perf_counter()
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(
+            timeout=_official_call_method_timeout(method_id, model_id, runtime_settings),
+        ) as client:
             response = await _request_official_call_method_generation(
                 client,
                 method_id,
@@ -193,6 +202,23 @@ async def _probe_official_call_method(
         latency_ms=latency_ms,
         message=None if response.status_code < 400 else _model_probe_message(response),
     )
+
+
+def _official_call_method_timeout(
+    method_id: OfficialCallMethod,
+    model_id: str,
+    runtime_settings: Mapping[str, Any] | None = None,
+) -> float:
+    if method_id != "openai_responses":
+        return 15.0
+    model = model_id.lower()
+    reasoning = _runtime_reasoning_settings(runtime_settings)
+    reasoning_effort = _runtime_reasoning_effort(reasoning)
+    if model.startswith("gpt-5-pro"):
+        return 180.0
+    if model.startswith("gpt-5") and "-pro" in model:
+        return 60.0 if reasoning_effort in {"high", "xhigh"} else 30.0
+    return 15.0
 
 
 async def _request_model_generation(
@@ -319,6 +345,16 @@ async def _request_official_call_method_generation(
             headers={"Authorization": f"Bearer {api_key}"},
             json=payload,
         )
+    if method_id == "openai_completions":
+        return await client.post(
+            _join_base_url_and_endpoint(normalized_base_url, "/v1/completions"),
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={
+                "model": model_id,
+                "prompt": "Reply with one short word.",
+                "max_tokens": max_tokens,
+            },
+        )
     if method_id == "anthropic_messages":
         return await client.post(
             _join_base_url_and_endpoint(normalized_base_url, "/v1/messages"),
@@ -362,6 +398,20 @@ async def _request_official_call_method_generation(
             _deepseek_anthropic_messages_url(normalized_base_url),
             headers={
                 "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+            },
+            json=_anthropic_messages_payload(
+                model_id,
+                max_tokens,
+                reasoning,
+                content_as_blocks=True,
+            ),
+        )
+    if method_id == "ark_anthropic_messages":
+        return await client.post(
+            _ark_anthropic_messages_url(normalized_base_url),
+            headers={
+                "Authorization": f"Bearer {api_key}",
                 "anthropic-version": "2023-06-01",
             },
             json=_anthropic_messages_payload(
@@ -438,6 +488,15 @@ def _deepseek_anthropic_messages_url(base_url: str) -> str:
     if normalized.endswith("/v1"):
         normalized = normalized[:-3]
     return f"{normalized}/anthropic/v1/messages"
+
+
+def _ark_anthropic_messages_url(base_url: str) -> str:
+    normalized = base_url.rstrip("/")
+    if normalized.endswith("/api/v3"):
+        normalized = normalized[: -len("/api/v3")]
+    if normalized.endswith("/api/compatible"):
+        return f"{normalized}/v1/messages"
+    return f"{normalized}/api/compatible/v1/messages"
 
 
 def _ark_thinking_payload(reasoning: Mapping[str, Any]) -> dict[str, object] | None:
@@ -623,12 +682,16 @@ def _first_model_id(response: httpx.Response) -> str | None:
 
 
 def _model_ids(response: httpx.Response) -> tuple[str, ...]:
+    return tuple(_model_capabilities(response))
+
+
+def _model_capabilities(response: httpx.Response) -> dict[str, dict[str, Any]]:
     try:
         payload = response.json()
     except ValueError:
-        return ()
+        return {}
     if not isinstance(payload, dict):
-        return ()
+        return {}
 
     items = payload.get("data")
     model_key = "id"
@@ -636,10 +699,10 @@ def _model_ids(response: httpx.Response) -> tuple[str, ...]:
         items = payload.get("models")
         model_key = "name"
     if not isinstance(items, list) or not items:
-        return ()
+        return {}
 
     seen: set[str] = set()
-    model_ids: list[str] = []
+    model_capabilities: dict[str, dict[str, Any]] = {}
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -651,8 +714,8 @@ def _model_ids(response: httpx.Response) -> tuple[str, ...]:
         if not model_id or model_id in seen:
             continue
         seen.add(model_id)
-        model_ids.append(model_id)
-    return tuple(model_ids)
+        model_capabilities[model_id] = dict(item)
+    return model_capabilities
 
 
 def _join_base_url_and_endpoint(base_url: str, endpoint_path: str) -> str:
@@ -684,6 +747,7 @@ __all__ = [
     "_RateLimited",
     "_Unauthorized",
     "_join_base_url_and_endpoint",
+    "_model_capabilities",
     "_model_ids",
     "_ping_provider",
     "_probe_official_call_method",

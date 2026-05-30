@@ -5,12 +5,15 @@ import {
   getCredentials,
   getProviderModels,
   getRoles,
+  deleteModelBundle,
   deleteRole,
   modelGroupsFromRegistry,
   probeRoute,
   putCredentials,
   putRoles,
   resetLlmApiCachesForTests,
+  getRoleTestJob,
+  startRoleTestJob,
   testRole,
   testProviderModels,
   testProvider,
@@ -569,6 +572,12 @@ describe('API Keys v4 registry adapter', () => {
             status: 'catalog_candidate',
             route_status: 'unverified_manual',
             last_probe_message: 'No verified language route profile.',
+            max_input_tokens: 8192,
+            max_output_tokens: 4096,
+            max_input_tokens_source: 'api_list',
+            max_input_tokens_source_urls: ['https://api.openai.com/v1/models'],
+            max_output_tokens_source: 'provider_doc',
+            max_output_tokens_source_urls: ['https://developers.openai.com/api/docs/guides/image-generation'],
           },
         ],
       },
@@ -599,6 +608,14 @@ describe('API Keys v4 registry adapter', () => {
       ['gpt-5', 'verified', null],
       ['gpt-image-1', 'unverified_manual', 'No verified language route profile.'],
     ])
+    expect(credentials.providers[0].available_models?.[1].capabilities).toMatchObject({
+      max_input_tokens: 8192,
+      max_output_tokens: 4096,
+      max_input_tokens_source: 'api_list',
+      max_input_tokens_source_urls: ['https://api.openai.com/v1/models'],
+      max_output_tokens_source: 'provider_doc',
+      max_output_tokens_source_urls: ['https://developers.openai.com/api/docs/guides/image-generation'],
+    })
   })
 
   it('does not clear a successful test on the next autosave when the registry response redacts the secret', async () => {
@@ -1109,6 +1126,53 @@ describe('API Keys v4 registry adapter', () => {
     })
   })
 
+  it('keeps persisted model bundle groups addressable when roles reference them', async () => {
+    api.defaults.adapter = adapter((config) => {
+      if (config.url === '/llm/roles') {
+        return {
+          schema_version: 3,
+          model_profiles: {},
+          model_bundles: {
+            premium_stack: {
+              model_profile_id: 'premium_stack',
+              display_name: 'Premium Stack',
+              canonical_id: 'bundle:premium_stack',
+              fallback_chain: [{ route_id: route.route_id }],
+            },
+          },
+          roles: {
+            analyst: {
+              role_kind: 'graph_agent',
+              system_prompt_prefix: '',
+              model_fallback_enabled: true,
+              intent: { provider_preference: 'manual_order' },
+              model_groups: [
+                {
+                  canonical_id: 'bundle:premium_stack',
+                  display_name: 'Premium Stack',
+                  provider_models: [{ route_id: route.route_id }],
+                },
+              ],
+              fallback_chain: [{ route_id: route.route_id }],
+              lint_requirements: {},
+            },
+          },
+        }
+      }
+      return registry()
+    })
+
+    const roles = await getRoles()
+
+    expect(roles.models['bundle:premium_stack']).toMatchObject({
+      name: 'Premium Stack',
+      providers: { [route.route_id]: 'openai/gpt-5' },
+    })
+    expect(roles.roles.analyst.models['bundle:premium_stack']).toEqual({
+      providers: [route.route_id],
+    })
+  })
+
   it('saves the legacy-compatible LLM Roles UI shape as v3 model groups', async () => {
     const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
     api.defaults.adapter = adapter((config) => {
@@ -1192,6 +1256,28 @@ describe('API Keys v4 registry adapter', () => {
     expect(roles.roles.analyst).toBeUndefined()
   })
 
+  it('deletes a persisted model bundle through the bundle delete endpoint', async () => {
+    const seen: Array<{ method?: string; url?: string }> = []
+    api.defaults.adapter = adapter((config) => {
+      seen.push({ method: config.method, url: config.url })
+      if (config.url === '/llm/registry') return registry()
+      if (config.method === 'delete' && config.url === '/llm/model-bundles/premium_stack') {
+        return {
+          schema_version: 3,
+          model_profiles: {},
+          model_bundles: {},
+          roles: {},
+        }
+      }
+      return registry()
+    })
+
+    const roles = await deleteModelBundle('premium_stack')
+
+    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual(['delete /llm/model-bundles/premium_stack'])
+    expect(roles.model_bundles?.premium_stack).toBeUndefined()
+  })
+
   it('can force a route probe for Cooling Down Test Now', async () => {
     const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
     api.defaults.adapter = adapter((config) => {
@@ -1247,5 +1333,56 @@ describe('API Keys v4 registry adapter', () => {
       admission_decision: 'temporary_skip',
       status: 'blocked',
     })
+  })
+
+  it('starts and reads persisted role test jobs', async () => {
+    const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
+    api.defaults.adapter = adapter((config) => {
+      seen.push({ method: config.method, url: config.url, data: config.data })
+      if (config.method === 'post') {
+        return {
+          job_id: 'job-1',
+          role_name: 'analyst',
+          status: 'running',
+          message: 'Testing role routes.',
+          provider_statuses: [{
+            canonical_id: 'gpt-5',
+            route_id: route.route_id,
+            status: 'testing',
+            message: null,
+          }],
+          result: null,
+        }
+      }
+      return {
+        job_id: 'job-1',
+        role_name: 'analyst',
+        status: 'completed',
+        message: 'Role test completed.',
+        provider_statuses: [{
+          canonical_id: 'gpt-5',
+          route_id: route.route_id,
+          status: 'ok',
+          message: null,
+        }],
+        result: {
+          role_name: 'analyst',
+          status: 'ok',
+          warnings: [],
+          model_groups: [],
+        },
+      }
+    })
+
+    const started = await startRoleTestJob('analyst')
+    const finished = await getRoleTestJob(started.job_id)
+
+    expect(seen.map((item) => `${item.method} ${item.url}`)).toEqual([
+      'post /llm/roles/analyst/test-jobs',
+      'get /llm/role-test-jobs/job-1',
+    ])
+    expect(JSON.parse(String(seen[0].data))).toEqual({})
+    expect(started.provider_statuses[0].status).toBe('testing')
+    expect(finished.result?.status).toBe('ok')
   })
 })

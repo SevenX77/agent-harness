@@ -4,7 +4,7 @@ import { useAppSettings } from "@/hooks/useAppSettings"
 import { buildPutPayload, useDebouncedCredentialsSave } from "@/hooks/useDebouncedCredentialsSave"
 import { useDebouncedRolesSave } from "@/hooks/useDebouncedRolesSave"
 import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
-import { deleteRole, getCredentials, getModelGroups, getProviderModels, getRoles, testProviderEndpoint, type CredentialsState, type EndpointTestJobResponse, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
+import { deleteModelBundle, deleteRole, getCredentials, getModelGroups, getProviderModels, getRoles, testProviderEndpoint, type CredentialsState, type EndpointTestJobResponse, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
 import { draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
@@ -168,9 +168,15 @@ export function upsertProviderModelsListResponse(
     if (provider.id !== latestDraft.id) return provider
     found = true
     const lastTestStatus: CredentialsState["providers"][number]["last_test_status"] = provider.last_test_status === "ok" ? "ok" : "untested"
+    const visibleModels = mergeModelInfos(provider.available_models, models)
+    const visibleSdks = mergeStrings(provider.available_sdks, sdks)
     const testResults = [
       ...(provider.test_results ?? []).filter((item) => item.params_fingerprint !== testResult.params_fingerprint),
-      testResult,
+      {
+        ...testResult,
+        available_models: visibleModels,
+        available_sdks: visibleSdks,
+      },
     ]
     return {
       ...provider,
@@ -183,8 +189,8 @@ export function upsertProviderModelsListResponse(
       last_test_at: provider.last_test_status === "ok" ? provider.last_test_at : lastTestAt,
       last_test_message: provider.last_test_status === "ok" ? provider.last_test_message : response.message ?? "",
       last_error_code: provider.last_test_status === "ok" ? provider.last_error_code : response.error_code ?? "",
-      available_models: models,
-      available_sdks: sdks,
+      available_models: visibleModels,
+      available_sdks: visibleSdks,
       test_results: testResults,
     }
   })
@@ -575,6 +581,21 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     }
   }, [cancelRolesSave, flushRolesSave])
 
+  const deleteModelBundleById = useCallback(async (bundleId: string) => {
+    await flushRolesSave()
+    cancelRolesSave()
+    try {
+      const next = await deleteModelBundle(bundleId)
+      rolesDataRef.current = next
+      setRolesData(next)
+      setRolesError(null)
+    } catch (error) {
+      const message = composeRequestErrorMessage(error, "Delete failed")
+      setRolesError(message)
+      toast.error(`Model Bundle delete failed: ${message}`)
+    }
+  }, [cancelRolesSave, flushRolesSave])
+
   return (
     <SettingsPageContent
       activeTab={activeTab}
@@ -607,6 +628,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       onProviderModelsUpdated={updateProviderModels}
       onRolesDataChange={updateRolesData}
       onDeleteRole={deleteRoleByName}
+      onDeleteModelBundle={deleteModelBundleById}
       onBeforeRoleTest={flushRolesSave}
     />
   )

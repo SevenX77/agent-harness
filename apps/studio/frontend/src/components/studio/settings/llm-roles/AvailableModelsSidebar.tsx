@@ -331,28 +331,33 @@ function ProviderLabelBadges({
 
   return (
     <div className="flex min-w-0 max-w-full flex-wrap gap-1 overflow-hidden">
-      {visibleProviders.map((provider) => (
-        <Tag
-          key={provider.id}
-          variant={providerStateTagVariant(provider.state)}
-          size="xs"
-          data-available-model-provider-label="true"
-          data-provider-state={provider.state}
-          aria-label={`${provider.label} ${providerStateLabel(provider.state)}`}
-          className={cn(
-            "max-w-full justify-start font-sans",
-            expanded ? "whitespace-normal [overflow-wrap:anywhere]" : "whitespace-nowrap",
-          )}
-        >
-          <span>{provider.label}</span>
-          <span
-            data-provider-state-text="true"
-            className="text-[0.5625rem] font-medium opacity-80"
+      {visibleProviders.map((provider) => {
+        const stateLabel = providerVisibleStateLabel(provider.state)
+        return (
+          <Tag
+            key={provider.id}
+            variant={providerStateTagVariant(provider.state)}
+            size="xs"
+            data-available-model-provider-label="true"
+            data-provider-state={provider.state}
+            aria-label={providerStateAriaLabel(provider)}
+            className={cn(
+              "max-w-full justify-start font-sans",
+              expanded ? "whitespace-normal [overflow-wrap:anywhere]" : "whitespace-nowrap",
+            )}
           >
-            {providerStateLabel(provider.state)}
-          </span>
-        </Tag>
-      ))}
+            <span>{provider.label}</span>
+            {stateLabel ? (
+              <span
+                data-provider-state-text="true"
+                className="text-[0.5625rem] font-medium opacity-80"
+              >
+                {stateLabel}
+              </span>
+            ) : null}
+          </Tag>
+        )
+      })}
       {hiddenProviderCount > 0 ? (
         <Tag
           variant={providerStateTagVariant(hiddenProviderState)}
@@ -523,6 +528,16 @@ function providerStateLabel(state: ProviderUiState): string {
   if (state === "needs_setup") return "Needs Setup"
   if (state === "off") return "Off"
   return "Untested"
+}
+
+function providerVisibleStateLabel(state: ProviderUiState): string | null {
+  return state === "ready" ? null : providerStateLabel(state)
+}
+
+function providerStateAriaLabel(provider: AvailableModelProvider): string {
+  return provider.state === "ready"
+    ? `${provider.label} available`
+    : `${provider.label} ${providerStateLabel(provider.state)}`
 }
 
 function dominantProviderState(providers: AvailableModelProvider[]): ProviderUiState {

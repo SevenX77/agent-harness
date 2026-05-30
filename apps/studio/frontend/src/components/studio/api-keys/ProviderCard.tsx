@@ -1,6 +1,22 @@
-import { useRef, useState, type WheelEvent } from "react"
+import { useRef, useState, type ReactElement, type WheelEvent } from "react"
 import { toast } from "sonner"
-import { Brain, CheckCircle2, Copy, Eye, EyeOff, Loader2, Trash2, TriangleAlert, XCircle } from "lucide-react"
+import {
+  Brain,
+  Box,
+  CheckCircle2,
+  Copy,
+  Eye,
+  EyeOff,
+  File,
+  FileText,
+  ImageIcon,
+  Loader2,
+  Trash2,
+  TriangleAlert,
+  Video,
+  Volume2,
+  XCircle,
+} from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
@@ -340,6 +356,23 @@ function modelCapabilityValue(model: ModelInfo, key: string): unknown {
   return value
 }
 
+function modelCapabilityStringArray(model: ModelInfo, key: string): string[] {
+  const value = modelCapabilityValue(model, key)
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.length > 0)
+    : []
+}
+
+function modelCapabilityNumber(model: ModelInfo, key: string): number | null {
+  const value = modelCapabilityValue(model, key)
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
 function officialModelType(model: ModelInfo): string | null {
   const value = modelCapabilityValue(model, "model_type")
   return typeof value === "string" && value ? value : null
@@ -382,10 +415,37 @@ function routeProfileTooltipText(model: ModelInfo, status: RouteDisplayStatus): 
   ].filter((line): line is string => Boolean(line)).join("\n")
 }
 
+function routeCapabilityTooltipText(model: ModelInfo): string | null {
+  const inputModalities = modelInputModalities(model)
+  const outputModalities = modelOutputModalities(model)
+  const maxInputTokens = modelCapabilityNumber(model, "max_input_tokens")
+  const maxOutputTokens = modelCapabilityNumber(model, "max_output_tokens")
+  const lines = [
+    inputModalities.length > 0 ? `Input: ${inputModalities.map(modalityLabel).join(", ")}` : null,
+    outputModalities.length > 0 ? `Output: ${outputModalities.map(modalityLabel).join(", ")}` : null,
+    maxInputTokens !== null
+      ? `Max input: ${formatTokenLimit(maxInputTokens)} tokens`
+      : "Max input: not listed",
+    maxOutputTokens !== null
+      ? `Max output: ${formatTokenLimit(maxOutputTokens)} tokens`
+      : "Max output: not listed",
+  ].filter((line): line is string => Boolean(line))
+  return lines.length > 0 ? lines.join("\n") : null
+}
+
+function formatTokenLimit(value: number): string {
+  if (value >= 1000) return `${Math.round(value / 1000)}k`
+  return new Intl.NumberFormat("en-US").format(value)
+}
+
 function routeFailureTooltipText(model: ModelInfo, status: RouteDisplayStatus): string | null {
   if (status !== "failed") return null
   const message = modelProbeMessage(model)
-  return message ? `Route test failed: ${message}` : null
+  const attempts = modelProbeAttemptTooltipText(model)
+  return [
+    message ? `Route test failed: ${message}` : "Route test failed",
+    attempts,
+  ].filter((line): line is string => Boolean(line)).join("\n")
 }
 
 function modelProbeMessage(model: ModelInfo): string | null {
@@ -396,15 +456,43 @@ function modelProbeMessage(model: ModelInfo): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null
 }
 
+function modelProbeAttemptTooltipText(model: ModelInfo): string | null {
+  const attempts = modelCapabilityValue(model, "probe_attempts")
+  if (!Array.isArray(attempts) || attempts.length === 0) return null
+  const lines = attempts
+    .filter((attempt): attempt is Record<string, unknown> => Boolean(attempt) && typeof attempt === "object" && !Array.isArray(attempt))
+    .slice(0, 4)
+    .map((attempt) => {
+      const method = typeof attempt.method_id === "string" ? attempt.method_id : "unknown_method"
+      const profile = typeof attempt.profile_id === "string" ? attempt.profile_id : ""
+      const status = typeof attempt.status === "string" ? attempt.status : "failed"
+      const message = typeof attempt.message === "string" && attempt.message.trim()
+        ? attempt.message.trim()
+        : status
+      return `${method}${profile ? `/${profile}` : ""}: ${message}`
+    })
+  if (lines.length === 0) return null
+  const remaining = attempts.length - lines.length
+  return `Attempts:\n${lines.join("\n")}${remaining > 0 ? `\n+${remaining} more` : ""}`
+}
+
 function modelVerifiedProfiles(model: ModelInfo): Array<{
   capability?: string
   method_id?: string
   status?: string
+  input_modalities?: string[]
+  output_modalities?: string[]
 }> {
   if (Array.isArray(model.verified_profiles)) return model.verified_profiles
   const profiles = model.capabilities?.verified_profiles
   if (!Array.isArray(profiles)) return []
-  return profiles.filter((profile): profile is { capability?: string; method_id?: string; status?: string } => (
+  return profiles.filter((profile): profile is {
+    capability?: string
+    method_id?: string
+    status?: string
+    input_modalities?: string[]
+    output_modalities?: string[]
+  } => (
     Boolean(profile) && typeof profile === "object" && !Array.isArray(profile)
   ))
 }
@@ -426,6 +514,94 @@ function modelHasVerifiedReasoningProfile(model: ModelInfo): boolean {
     profile.status !== "failed" &&
     (profile.capability === "reasoning" || profile.capability === "thinking")
   ))
+}
+
+function modelInputModalities(model: ModelInfo): string[] {
+  const capabilities = modelCapabilityStringArray(model, "input_modalities")
+  if (capabilities.length > 0) return uniqueStrings(capabilities)
+  const verifiedProfileModalities = modelVerifiedProfiles(model).flatMap((profile) => profile.input_modalities ?? [])
+  if (verifiedProfileModalities.length > 0) return uniqueStrings(verifiedProfileModalities)
+  return fallbackModelInputModalities(model)
+}
+
+function modelOutputModalities(model: ModelInfo): string[] {
+  const capabilities = modelCapabilityStringArray(model, "output_modalities")
+  if (capabilities.length > 0) return uniqueStrings(capabilities)
+  const verifiedProfileModalities = modelVerifiedProfiles(model).flatMap((profile) => profile.output_modalities ?? [])
+  if (verifiedProfileModalities.length > 0) return uniqueStrings(verifiedProfileModalities)
+  return fallbackModelOutputModalities(model)
+}
+
+function fallbackModelInputModalities(model: ModelInfo): string[] {
+  const modelType = officialModelType(model)
+  const modelId = model.id.toLowerCase()
+  if (modelType === "image_generation") {
+    return modelId.includes("image") || modelId.includes("edit") || modelId.includes("gpt-image")
+      ? ["text", "image"]
+      : ["text"]
+  }
+  if (modelType === "video_generation") {
+    return modelId.includes("i2v") || modelId.includes("flf2v") || modelId.includes("image")
+      ? ["text", "image"]
+      : ["text"]
+  }
+  if (modelType === "audio") {
+    if (modelId.includes("whisper") || modelId.includes("transcribe")) return ["audio"]
+    if (modelId.includes("tts")) return ["text"]
+    return ["text", "audio"]
+  }
+  if (modelType === "embedding" || modelType === "translation" || modelType === "language_reasoning") {
+    return ["text"]
+  }
+  if (modelType === "3d_generation") return ["text", "image"]
+  return []
+}
+
+function fallbackModelOutputModalities(model: ModelInfo): string[] {
+  const modelType = officialModelType(model)
+  const modelId = model.id.toLowerCase()
+  if (modelType === "image_generation") return ["image"]
+  if (modelType === "video_generation") return ["video"]
+  if (modelType === "audio") {
+    if (modelId.includes("whisper") || modelId.includes("transcribe")) return ["text"]
+    if (modelId.includes("tts")) return ["audio"]
+    return ["text", "audio"]
+  }
+  if (modelType === "embedding") return ["embedding"]
+  if (modelType === "3d_generation") return ["3d"]
+  if (modelType === "translation" || modelType === "language_reasoning") return ["text"]
+  return []
+}
+
+function modalityLabel(modality: string): string {
+  if (modality === "text") return "text"
+  if (modality === "image") return "image"
+  if (modality === "video") return "video"
+  if (modality === "audio") return "audio"
+  if (modality === "file") return "file"
+  if (modality === "pdf") return "PDF"
+  if (modality === "embedding") return "embedding"
+  if (modality === "moderation") return "moderation"
+  if (modality === "3d") return "3D"
+  return modality
+}
+
+function modalityIcon(modality: string, position: "input" | "output") {
+  const className = cn("size-2.5 shrink-0", position === "input" ? "opacity-80" : "")
+  if (modality === "text") return <FileText key={`${position}-${modality}`} className={className} aria-hidden="true" />
+  if (modality === "image") return <ImageIcon key={`${position}-${modality}`} className={className} aria-hidden="true" />
+  if (modality === "video") return <Video key={`${position}-${modality}`} className={className} aria-hidden="true" />
+  if (modality === "audio") return <Volume2 key={`${position}-${modality}`} className={className} aria-hidden="true" />
+  if (modality === "file" || modality === "pdf") return <File key={`${position}-${modality}`} className={className} aria-hidden="true" />
+  if (modality === "embedding" || modality === "3d") return <Box key={`${position}-${modality}`} className={className} aria-hidden="true" />
+  if (modality === "moderation") return <TriangleAlert key={`${position}-${modality}`} className={className} aria-hidden="true" />
+  return null
+}
+
+function modalityIcons(modalities: string[], position: "input" | "output") {
+  return uniqueStrings(modalities)
+    .map((modality) => modalityIcon(modality, position))
+    .filter((icon): icon is ReactElement => Boolean(icon))
 }
 
 function uniqueStrings(values: string[]): string[] {
@@ -730,21 +906,30 @@ export function ProviderCard({
                     const isCapabilityModel = isOfficial && isCapabilityLibraryModel(model)
                     const profileTooltipText = isOfficial && !isCapabilityModel ? routeProfileTooltipText(model, status) : null
                     const failureTooltipText = isOfficial ? routeFailureTooltipText(model, status) : null
-                    const tooltipDetail = (
+                    const capabilityTooltipText = isOfficial ? routeCapabilityTooltipText(model) : null
+                    const primaryTooltipDetail = (
                       failureTooltipText
                       ?? (isCapabilityModel && status !== "failed"
                         ? modelTypeLabel
                         : profileTooltipText)
                     ) ?? statusLabel
+                    const tooltipDetail = [
+                      primaryTooltipDetail,
+                      capabilityTooltipText,
+                    ].filter((line): line is string => Boolean(line)).join("\n")
                     const appendModelTypeLabel = Boolean(
                       modelTypeLabel &&
-                      tooltipDetail !== modelTypeLabel &&
+                      primaryTooltipDetail !== modelTypeLabel &&
                       status !== "verified",
                     )
                     const tooltipText = isOfficial
                       ? `${model.id} - ${tooltipDetail}${appendModelTypeLabel ? ` - ${modelTypeLabel}` : ""}`
                       : `Copy ${model.id}`
                     const hasReasoningProfile = isOfficial && modelHasVerifiedReasoningProfile(model)
+                    const inputModalities = isOfficial ? modelInputModalities(model) : []
+                    const outputModalities = isOfficial ? modelOutputModalities(model) : []
+                    const inputCapabilityIcons = modalityIcons(inputModalities, "input")
+                    const outputCapabilityIcons = modalityIcons(outputModalities, "output")
                     const ariaLabel = isOfficial
                       ? `Copy ${copyTargetLabel} ${model.id}. ${tooltipDetail.replace(/\s+/g, " ")}`
                       : `Copy ${copyTargetLabel} ${model.id}`
@@ -766,9 +951,13 @@ export function ProviderCard({
                             data-route-status={isOfficial ? status : undefined}
                             data-model-type={modelType ?? undefined}
                             data-reasoning-route={hasReasoningProfile ? true : undefined}
+                            data-input-modalities={inputModalities.length > 0 ? inputModalities.join(",") : undefined}
+                            data-output-modalities={outputModalities.length > 0 ? outputModalities.join(",") : undefined}
                           >
+                            {inputCapabilityIcons}
                             {model.id}
                             {hasReasoningProfile ? <Brain className="size-2.5 shrink-0" aria-hidden="true" /> : null}
+                            {outputCapabilityIcons}
                           </button>
                         </Tag>
                       )

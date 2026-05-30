@@ -32,6 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from app.models.llm_config import (
     CapabilityValue,
     LLMCredentialsFile,
+    ModelBundle,
     ModelProfile,
     ProviderEndpoint,
     ProviderImportDraft,
@@ -76,8 +77,12 @@ from app.services.llm_import_drafts import (
     create_draft,
     load_draft,
 )
+from app.services.llm_model_groups import (
+    normalize_model_group_key,
+    project_model_group_identity,
+)
 from app.services.llm_model_identity import project_model_identity
-from app.services.llm_role_materializer import materialize_role
+from app.services.llm_role_materializer import materialize_model_bundle, materialize_role
 from app.services.llm_roles import (
     InvalidRoleReference,
     get_role,
@@ -86,7 +91,17 @@ from app.services.llm_roles import (
     save_roles_file,
     validate_references,
 )
+from app.services.llm_route_capabilities import (
+    route_effective_capabilities,
+    verified_profile_route_capabilities,
+)
 from app.services.llm_state_projection import project_provider_model_state
+from app.services.official_capability_sources import (
+    OfficialCapabilityRule,
+    official_api_list_source_urls,
+    official_doc_source_urls,
+    provider_doc_limit_rules,
+)
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
 logger = logging.getLogger(__name__)
@@ -98,6 +113,12 @@ NO_WORKING_OFFICIAL_LANGUAGE_METHOD_MESSAGE = (
 )
 ROLE_TEST_NO_VERIFIED_PROFILE_MESSAGE = (
     "Route has no verified invocation profile. Run the provider Test in API Keys."
+)
+_THINKING_CAPABILITY_KEYS = (
+    "thinking_protocol",
+    "thinking",
+    "reasoning",
+    "supports_thinking",
 )
 
 
@@ -112,6 +133,7 @@ class OfficialLanguageProbeCandidate:
     fallback_rank: int = 100
     input_modalities: tuple[str, ...] = ("text",)
     output_modalities: tuple[str, ...] = ("text",)
+    retry_group: str | None = None
 
 
 @dataclass(frozen=True)
@@ -119,6 +141,15 @@ class OfficialModelProfileProbeResult:
     model_id: str
     profiles: list[VerifiedProfile] = field(default_factory=list)
     last_probe_message: str | None = None
+    probe_attempts: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class RoleTestTarget:
+    report_entry: dict[str, Any]
+    route: ProviderRoute
+    endpoint: ProviderEndpoint
+    entry: RoleRouteEntry | None = None
 
 
 class EndpointTestCompactModelInfo(BaseModel):
@@ -148,9 +179,31 @@ class EndpointTestJobResponse(BaseModel):
     available_sdks: list[str] = Field(default_factory=list)
 
 
+class RoleTestProviderProgressInfo(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    canonical_id: str
+    route_id: str
+    status: Literal["queued", "testing", "ok", "failed", "blocked", "untested"]
+    message: str | None = None
+
+
+class RoleTestJobResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str
+    role_name: str
+    status: Literal["queued", "running", "completed", "failed"]
+    message: str | None = None
+    provider_statuses: list[RoleTestProviderProgressInfo] = Field(default_factory=list)
+    result: dict[str, Any] | None = None
+
+
 _endpoint_test_jobs: dict[str, EndpointTestJobResponse] = {}
 _running_endpoint_test_jobs: dict[str, str] = {}
 _endpoint_test_jobs_lock = asyncio.Lock()
+_role_test_jobs: dict[str, RoleTestJobResponse] = {}
+_role_test_jobs_lock = asyncio.Lock()
 
 
 class EndpointUpsertRequest(BaseModel):
@@ -269,7 +322,7 @@ async def delete_registry_endpoint(endpoint_id: str) -> dict[str, Any]:
     credentials = load_credentials()
     roles = _load_roles_or_empty()
     refs = _endpoint_references(endpoint_id, credentials, roles)
-    if refs["roles"] or refs["model_profiles"]:
+    if refs["roles"] or refs["model_profiles"] or refs["model_bundles"]:
         _raise_conflict(
             "endpoint_in_use",
             f"Endpoint is still referenced: {endpoint_id}",
@@ -337,6 +390,7 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
     message = "API key is empty."
     model_list_reached = False
     discovered_model_ids: tuple[str, ...] = ()
+    raw_capabilities_by_model: dict[str, dict[str, Any]] = {}
     if endpoint.api_key and endpoint.api_key.get_secret_value():
         probe_backend = _endpoint_probe_backend(endpoint)
         probe_base_url = _endpoint_probe_base_url(endpoint)
@@ -374,6 +428,7 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
             else:
                 message = _endpoint_success_message(result)
                 discovered_model_ids = result.model_ids
+                raw_capabilities_by_model = result.model_capabilities
     latest_credentials = load_credentials()
     latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
     if latest_endpoint is None:
@@ -401,21 +456,27 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
     if model_list_reached:
         if latest_endpoint.provider_kind == "official":
             profiles_by_model: dict[str, list[VerifiedProfile]] = {}
+            probe_attempts_by_model: dict[str, list[dict[str, Any]]] = {}
             catalog_only_models: list[str] = []
             failed_language_models: list[str] = []
             failed_language_messages: dict[str, str] = {}
+            failed_language_attempts: dict[str, list[dict[str, Any]]] = {}
             for model_id in discovered_model_ids:
                 profile_result = await _probe_official_model_profile_result(
                     latest_endpoint,
                     model_id,
                 )
                 profiles = profile_result.profiles
+                if profile_result.probe_attempts:
+                    probe_attempts_by_model[model_id] = profile_result.probe_attempts
                 if profiles:
                     profiles_by_model[model_id] = profiles
                 elif _is_official_language_model_candidate(latest_endpoint, model_id):
                     failed_language_models.append(model_id)
                     if profile_result.last_probe_message:
                         failed_language_messages[model_id] = profile_result.last_probe_message
+                    if profile_result.probe_attempts:
+                        failed_language_attempts[model_id] = profile_result.probe_attempts
                 else:
                     catalog_only_models.append(model_id)
             latest_credentials, _ = _upsert_discovered_routes(
@@ -423,8 +484,9 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
                 endpoint=latest_endpoint,
                 model_ids=tuple(profiles_by_model),
                 verified=True,
-                replace_endpoint_routes=True,
                 verified_profiles_by_model=profiles_by_model,
+                probe_attempts_by_model=probe_attempts_by_model,
+                raw_capabilities_by_model=raw_capabilities_by_model,
             )
             if profiles_by_model:
                 status = "verified"
@@ -433,18 +495,28 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
                     update={
                         "metadata": {
                             **latest_endpoint.metadata,
-                            "capability_library": [
-                                _official_catalog_library_entry(latest_endpoint, model_id)
-                                for model_id in catalog_only_models
-                            ]
-                            + [
-                                _official_failed_language_probe_entry(
-                                    latest_endpoint,
-                                    model_id,
-                                    failed_language_messages.get(model_id),
-                                )
-                                for model_id in failed_language_models
-                            ],
+                            "capability_library": _merged_capability_library_entries(
+                                latest_endpoint,
+                                [
+                                    _official_catalog_library_entry(
+                                        latest_endpoint,
+                                        model_id,
+                                        raw_capabilities_by_model.get(model_id),
+                                    )
+                                    for model_id in catalog_only_models
+                                ]
+                                + [
+                                    _official_failed_language_probe_entry(
+                                        latest_endpoint,
+                                        model_id,
+                                        failed_language_messages.get(model_id),
+                                        failed_language_attempts.get(model_id),
+                                        raw_capabilities_by_model.get(model_id),
+                                    )
+                                    for model_id in failed_language_models
+                                ],
+                                verified_model_ids=set(profiles_by_model),
+                            ),
                         }
                     }
                 )
@@ -455,7 +527,7 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
                 endpoint=latest_endpoint,
                 model_ids=discovered_model_ids,
                 verified=False,
-                replace_endpoint_routes=True,
+                raw_capabilities_by_model=raw_capabilities_by_model,
             )
     updated = latest_endpoint.model_copy(
         update={
@@ -498,6 +570,77 @@ async def test_endpoint_models(
         ]
         return EndpointModelTestResponse(
             registry=_registry_response(credentials, _load_roles_or_empty()),
+            results=results,
+        )
+
+    if endpoint.provider_kind == "official":
+        official_results: list[OfficialModelProfileProbeResult] = []
+        for model_id in requested_model_ids:
+            official_results.append(
+                await _probe_official_model_profile_result(endpoint, model_id)
+            )
+        successful_model_ids = [
+            result.model_id for result in official_results if result.profiles
+        ]
+        route_ids_by_model: dict[str, str] = {}
+        latest_credentials = credentials
+        if successful_model_ids:
+            latest_credentials = load_credentials()
+            latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
+            if latest_endpoint is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Endpoint changed while model test was running: {endpoint_id}",
+                )
+            if latest_credentials.endpoint_fingerprint(endpoint_id) != starting_fingerprint:
+                results = [
+                    EndpointModelTestResult(
+                        model_id=result.model_id,
+                        status="error",
+                        message="Endpoint changed while model test was running.",
+                    )
+                    for result in official_results
+                ]
+                return EndpointModelTestResponse(
+                    registry=_registry_response(latest_credentials, _load_roles_or_empty()),
+                    results=results,
+                )
+            latest_credentials, route_ids_by_model = _upsert_discovered_routes(
+                latest_credentials,
+                endpoint=latest_endpoint,
+                model_ids=tuple(successful_model_ids),
+                verified=True,
+                verified_profiles_by_model={
+                    result.model_id: result.profiles
+                    for result in official_results
+                    if result.profiles
+                },
+                probe_attempts_by_model={
+                    result.model_id: result.probe_attempts
+                    for result in official_results
+                    if result.probe_attempts
+                },
+            )
+            latest_endpoint = latest_endpoint.model_copy(
+                update={
+                    "status": "verified",
+                    "last_test_at": _now_iso(),
+                    "last_test_message": f"Connected. Model seen: {successful_model_ids[0]}.",
+                }
+            )
+            latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint
+            save_credentials(latest_credentials)
+        results = [
+            EndpointModelTestResult(
+                model_id=result.model_id,
+                status="ok" if result.profiles else "error",
+                route_id=route_ids_by_model.get(result.model_id) if result.profiles else None,
+                message=None if result.profiles else result.last_probe_message,
+            )
+            for result in official_results
+        ]
+        return EndpointModelTestResponse(
+            registry=_registry_response(latest_credentials, _load_roles_or_empty()),
             results=results,
         )
 
@@ -649,7 +792,7 @@ async def delete_registry_route(route_id: str) -> dict[str, Any]:
     """Delete a route unless roles/profiles still reference it."""
     roles = _load_roles_or_empty()
     refs = _route_references(route_id, roles)
-    if refs["roles"] or refs["model_profiles"]:
+    if refs["roles"] or refs["model_profiles"] or refs["model_bundles"]:
         _raise_conflict(
             "route_in_use",
             f"Route is still referenced: {route_id}",
@@ -777,10 +920,51 @@ async def test_llm_role(role_name: str, _payload: dict[str, Any] | None = None) 
         raise HTTPException(status_code=404, detail=f"Unknown LLM role: {role_name}")
     credentials = load_credentials()
     role = _materialize_role_for_response(role, credentials)
-    model_groups: dict[str, dict[str, Any]] = {}
-    warnings: list[dict[str, Any]] = []
-    aggregate_status = "ok"
-    test_targets: list[tuple[dict[str, Any], ProviderRoute, ProviderEndpoint, Any]] = []
+    return await _run_role_test_targets(role_name, _role_test_targets(role, credentials))
+
+
+@router.post("/roles/{role_name}/test-jobs", response_model=RoleTestJobResponse)
+async def start_role_test_job(role_name: str) -> RoleTestJobResponse:
+    """Start a persisted-role fallback test job with per-route progress."""
+    data = _load_roles_or_empty()
+    role = data.roles.get(role_name)
+    if role is None:
+        raise HTTPException(status_code=404, detail=f"Unknown LLM role: {role_name}")
+    credentials = load_credentials()
+    role = _materialize_role_for_response(role, credentials)
+    targets = _role_test_targets(role, credentials)
+    job_id = str(uuid.uuid4())
+    job = RoleTestJobResponse(
+        job_id=job_id,
+        role_name=role_name,
+        status="queued",
+        message="Queued role test.",
+        provider_statuses=[
+            _role_test_provider_progress(target, "queued")
+            for target in targets
+        ],
+    )
+    async with _role_test_jobs_lock:
+        _role_test_jobs[job_id] = job
+    asyncio.create_task(_run_role_test_job_impl(job_id, role_name, targets))
+    return job
+
+
+@router.get("/role-test-jobs/{job_id}", response_model=RoleTestJobResponse)
+async def get_role_test_job(job_id: str) -> RoleTestJobResponse:
+    """Return compact status for a role test job."""
+    async with _role_test_jobs_lock:
+        job = _role_test_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Unknown role test job: {job_id}")
+    return job
+
+
+def _role_test_targets(
+    role: RoleEntry,
+    credentials: LLMCredentialsFile,
+) -> list[RoleTestTarget]:
+    targets: list[RoleTestTarget] = []
     for report_entry, fallback_entry in _role_test_entries(role):
         route_id = report_entry["route_id"]
         route = credentials.provider_routes.get(route_id)
@@ -789,30 +973,64 @@ async def test_llm_role(role_name: str, _payload: dict[str, Any] | None = None) 
         endpoint = credentials.provider_endpoints.get(route.endpoint_id)
         if endpoint is None:
             continue
-        test_targets.append(
-            (
-                report_entry,
-                route,
-                endpoint,
-                _role_test_provider_result(
-                    fallback_entry,
-                    report_entry,
-                    route,
-                    endpoint,
-                ),
+        targets.append(
+            RoleTestTarget(
+                report_entry=report_entry,
+                route=route,
+                endpoint=endpoint,
+                entry=fallback_entry,
             )
         )
-    provider_results = await asyncio.gather(*(target[3] for target in test_targets))
-    for (report_entry, route, endpoint, _), provider_result in zip(
-        test_targets,
+    return targets
+
+
+async def _run_role_test_targets(
+    role_name: str,
+    targets: list[RoleTestTarget],
+    on_provider_status: Callable[
+        [
+            RoleTestTarget,
+            Literal["testing", "ok", "failed", "blocked", "untested"],
+            str | None,
+        ],
+        Awaitable[None],
+    ] | None = None,
+) -> dict[str, Any]:
+    model_groups: dict[str, dict[str, Any]] = {}
+    warnings: list[dict[str, Any]] = []
+    aggregate_status = "ok"
+
+    async def run_target(target: RoleTestTarget) -> dict[str, Any]:
+        if on_provider_status is not None:
+            await on_provider_status(target, "testing", None)
+        provider_result = await _role_test_provider_result(
+            target.entry,
+            target.report_entry,
+            target.route,
+            target.endpoint,
+        )
+        if on_provider_status is not None:
+            await on_provider_status(
+                target,
+                cast(
+                    Literal["testing", "ok", "failed", "blocked", "untested"],
+                    provider_result["status"],
+                ),
+                provider_result.get("message"),
+            )
+        return provider_result
+
+    provider_results = await asyncio.gather(*(run_target(target) for target in targets))
+    for target, provider_result in zip(
+        targets,
         provider_results,
         strict=True,
     ):
         if provider_result["warnings"]:
             warnings.extend(provider_result["warnings"])
         aggregate_status = _merge_role_test_status(aggregate_status, provider_result)
-        canonical_id = str(report_entry.get("canonical_id") or route.canonical_id)
-        identity = project_model_identity(route=route, endpoint=endpoint)
+        canonical_id = str(target.report_entry.get("canonical_id") or target.route.canonical_id)
+        identity = project_model_identity(route=target.route, endpoint=target.endpoint)
         group = model_groups.setdefault(
             canonical_id,
             {
@@ -830,6 +1048,92 @@ async def test_llm_role(role_name: str, _payload: dict[str, Any] | None = None) 
     }
 
 
+async def _run_role_test_job_impl(
+    job_id: str,
+    role_name: str,
+    targets: list[RoleTestTarget],
+) -> None:
+    await _update_role_test_job(
+        job_id,
+        status="running",
+        message="Testing role routes.",
+    )
+
+    async def on_provider_status(
+        target: RoleTestTarget,
+        status: Literal["testing", "ok", "failed", "blocked", "untested"],
+        message: str | None,
+    ) -> None:
+        await _update_role_test_job_provider(job_id, target, status, message)
+
+    try:
+        result = await _run_role_test_targets(
+            role_name,
+            targets,
+            on_provider_status=on_provider_status,
+        )
+    except Exception as exc:  # pragma: no cover - defensive job boundary
+        logger.exception("Role test job failed: %s", job_id)
+        await _update_role_test_job(
+            job_id,
+            status="failed",
+            message=str(exc),
+        )
+        return
+
+    await _update_role_test_job(
+        job_id,
+        status="completed",
+        message="Role test completed.",
+        result=result,
+    )
+
+
+def _role_test_provider_progress(
+    target: RoleTestTarget,
+    status: Literal["queued", "testing", "ok", "failed", "blocked", "untested"],
+    message: str | None = None,
+) -> RoleTestProviderProgressInfo:
+    return RoleTestProviderProgressInfo(
+        canonical_id=str(target.report_entry.get("canonical_id") or target.route.canonical_id),
+        route_id=target.route.route_id,
+        status=status,
+        message=message,
+    )
+
+
+async def _update_role_test_job(
+    job_id: str,
+    **updates: Any,
+) -> None:
+    async with _role_test_jobs_lock:
+        current = _role_test_jobs.get(job_id)
+        if current is None:
+            return
+        _role_test_jobs[job_id] = current.model_copy(update=updates)
+
+
+async def _update_role_test_job_provider(
+    job_id: str,
+    target: RoleTestTarget,
+    status: Literal["testing", "ok", "failed", "blocked", "untested"],
+    message: str | None,
+) -> None:
+    async with _role_test_jobs_lock:
+        current = _role_test_jobs.get(job_id)
+        if current is None:
+            return
+        provider_statuses = [
+            _role_test_provider_progress(target, status, message)
+            if provider.route_id == target.route.route_id
+            else provider
+            for provider in current.provider_statuses
+        ]
+        _role_test_jobs[job_id] = current.model_copy(
+            update={"provider_statuses": provider_statuses}
+        )
+
+
 @router.get("/model-profiles")
 async def get_model_profiles() -> dict[str, ModelProfile]:
     """Return model profiles."""
@@ -841,6 +1145,20 @@ async def put_model_profiles(profiles: dict[str, ModelProfile]) -> dict[str, Mod
     """Replace model profile set."""
     data = _load_roles_or_empty().model_copy(update={"model_profiles": profiles})
     return _save_roles_with_active_routes(data).model_profiles
+
+
+@router.delete("/model-bundles/{bundle_id}", response_model=RolesData)
+async def delete_model_bundle(bundle_id: str) -> RolesData:
+    """Delete one persisted model bundle."""
+    data = _load_roles_or_empty()
+    bundles = dict(data.model_bundles)
+    removed = bundles.pop(bundle_id, None)
+    if removed is None:
+        raise HTTPException(status_code=404, detail=f"Unknown model bundle: {bundle_id}")
+    del removed
+    credentials = load_credentials()
+    saved = _save_roles_with_active_routes(data.model_copy(update={"model_bundles": bundles}))
+    return _materialize_roles_for_response(saved, credentials)
 
 
 @router.delete("/model-profiles/{model_profile_id}")
@@ -978,14 +1296,48 @@ def _normalize_credentials_for_registry_response(
     credentials: LLMCredentialsFile,
 ) -> LLMCredentialsFile:
     provider_endpoints: dict[str, ProviderEndpoint] = {}
+    provider_routes: dict[str, ProviderRoute] = {}
     changed = False
     for endpoint_id, endpoint in credentials.provider_endpoints.items():
         normalized = _normalize_endpoint_metadata_for_registry_response(endpoint)
         provider_endpoints[endpoint_id] = normalized
         changed = changed or normalized is not endpoint
+    for route_id, route in credentials.provider_routes.items():
+        endpoint = provider_endpoints.get(route.endpoint_id)
+        normalized = _normalize_route_for_registry_response(route, endpoint)
+        provider_routes[route_id] = normalized
+        changed = changed or normalized is not route
     if not changed:
         return credentials
-    return credentials.model_copy(update={"provider_endpoints": provider_endpoints})
+    return credentials.model_copy(
+        update={
+            "provider_endpoints": provider_endpoints,
+            "provider_routes": provider_routes,
+        }
+    )
+
+
+def _normalize_route_for_registry_response(
+    route: ProviderRoute,
+    endpoint: ProviderEndpoint | None,
+) -> ProviderRoute:
+    if endpoint is None or endpoint.provider_kind != "official":
+        return route
+    doc_capabilities = _official_model_type_capability_values(
+        endpoint,
+        route.provider_model_id,
+        source="probed_verified" if route.status == "verified" else "api_list",
+    )
+    doc_capabilities.update(
+        _provider_doc_limit_capability_values(
+            endpoint,
+            route.provider_model_id,
+        )
+    )
+    capabilities = _merge_profile_capabilities(doc_capabilities, route.capabilities)
+    if capabilities == route.capabilities:
+        return route
+    return route.model_copy(update={"capabilities": capabilities})
 
 
 def _normalize_endpoint_metadata_for_registry_response(
@@ -1027,13 +1379,17 @@ def _normalize_gemini_catalog_entry_for_registry_response(entry: object) -> obje
         "last_probe_message": NO_VERIFIED_ROUTE_PROFILE_MESSAGE,
         "model_type": "interactions_agent",
         "model_type_label": "Interactions API agent",
-        "candidate_methods": [],
+        "candidate_methods": ["gemini_interactions"],
+        "input_modalities": [],
+        "output_modalities": [],
     }
 
 
 def _model_groups_response(credentials: LLMCredentialsFile) -> list[dict[str, Any]]:
     routes_by_identity: dict[str, list[ProviderRoute]] = {}
     for route in credentials.provider_routes.values():
+        if not _include_route_in_model_groups(route, credentials):
+            continue
         routes_by_identity.setdefault(
             _model_group_identity_key(route, credentials),
             [],
@@ -1056,15 +1412,30 @@ def _model_groups_response(credentials: LLMCredentialsFile) -> list[dict[str, An
     )
 
 
+def _include_route_in_model_groups(
+    route: ProviderRoute,
+    credentials: LLMCredentialsFile,
+) -> bool:
+    endpoint = credentials.provider_endpoints.get(route.endpoint_id)
+    if endpoint is None:
+        return False
+    if endpoint.provider_kind != "official":
+        return True
+    return route.status == "verified" and any(
+        profile.status == "ready"
+        for profile in route.verified_profiles
+    )
+
+
 def _model_group_identity_key(
     route: ProviderRoute,
     credentials: LLMCredentialsFile,
 ) -> str:
     endpoint = credentials.provider_endpoints.get(route.endpoint_id)
     if endpoint is None:
-        return _normalize_model_group_key(route.canonical_id or route.route_slug)
-    projection = project_model_identity(route=route, endpoint=endpoint)
-    return _normalize_model_group_key(projection.display_name) or _normalize_model_group_key(
+        return normalize_model_group_key(route.canonical_id or route.route_slug)
+    projection = project_model_group_identity(route=route, endpoint=endpoint)
+    return projection.key or normalize_model_group_key(
         route.canonical_id or route.route_slug
     )
 
@@ -1097,10 +1468,6 @@ def _provider_kind_rank(kind: str) -> int:
     if kind == "custom":
         return 1
     return 2
-
-
-def _normalize_model_group_key(value: str) -> str:
-    return re.sub(r"(^-|-$)", "", re.sub(r"[^a-z0-9]+", "-", value.strip().lower()))
 
 
 def _model_group_response(
@@ -1140,7 +1507,7 @@ def _model_group_identity(
         endpoint = credentials.provider_endpoints.get(route.endpoint_id)
         if endpoint is None:
             continue
-        projection = project_model_identity(route=route, endpoint=endpoint)
+        projection = project_model_group_identity(route=route, endpoint=endpoint)
         projections.append(
             (
                 route,
@@ -1220,6 +1587,7 @@ def _provider_model_option(
         circuits=circuits,
         now=datetime.now(UTC),
     )
+    capabilities = _provider_route_ui_capabilities(route, endpoint)
     return {
         "route_id": route.route_id,
         "endpoint_id": endpoint.endpoint_id,
@@ -1230,8 +1598,8 @@ def _provider_model_option(
         "ui_detail": projection.ui_detail,
         "retry_at": projection.retry_at,
         "reason_code": projection.reason_code,
-        "capability_state": _capability_state(route),
-        "capabilities": route.capabilities,
+        "capability_state": _capability_state(capabilities),
+        "capabilities": capabilities,
     }
 
 
@@ -1239,8 +1607,26 @@ def _health_store() -> SqliteLlmHealthStore:
     return SqliteLlmHealthStore(credentials_path().with_name("llm_health.sqlite"))
 
 
-def _capability_state(route: ProviderRoute) -> str:
-    if not route.capabilities:
+def _provider_route_ui_capabilities(
+    route: ProviderRoute,
+    endpoint: ProviderEndpoint,
+) -> dict[str, CapabilityValue]:
+    capabilities = dict(route_effective_capabilities(route))
+    group_identity = project_model_group_identity(route=route, endpoint=endpoint)
+    if (
+        "thinking" in group_identity.capability_tokens
+        and "thinking_protocol" not in capabilities
+    ):
+        capabilities["thinking_protocol"] = CapabilityValue(
+            value=True,
+            source="api_list",
+            message="Provider exposes thinking as a dedicated model route.",
+        )
+    return capabilities
+
+
+def _capability_state(capabilities: dict[str, CapabilityValue]) -> str:
+    if not capabilities:
         return "unknown"
     return "known"
 
@@ -1249,12 +1635,45 @@ def _capability_summary(provider_models: list[dict[str, Any]]) -> dict[str, Any]
     known_count = sum(1 for option in provider_models if option["capability_state"] != "unknown")
     return {
         "capability_known_count": known_count,
-        "thinking": "unknown",
+        "thinking": _capability_summary_state(provider_models, _THINKING_CAPABILITY_KEYS),
         "tools": "unknown",
         "structured_output": "unknown",
         "max_context_tokens": None,
         "max_output_tokens": None,
     }
+
+
+def _capability_summary_state(
+    provider_models: list[dict[str, Any]],
+    capability_keys: tuple[str, ...],
+) -> str:
+    known_values: list[bool] = []
+    unknown_count = 0
+    for option in provider_models:
+        supported = _capability_supported(option["capabilities"], capability_keys)
+        if supported is None:
+            unknown_count += 1
+            continue
+        known_values.append(supported)
+    if not known_values:
+        return "unknown"
+    if all(known_values) and unknown_count == 0:
+        return "supported"
+    if any(known_values):
+        return "mixed"
+    return "mixed" if unknown_count else "unsupported"
+
+
+def _capability_supported(
+    capabilities: dict[str, CapabilityValue],
+    capability_keys: tuple[str, ...],
+) -> bool | None:
+    for key in capability_keys:
+        capability = capabilities.get(key)
+        if capability is None:
+            continue
+        return bool(capability.value)
+    return None
 
 
 async def _force_probe_route(
@@ -1490,16 +1909,24 @@ async def _probe_official_model_profile_result(
 
     verified: list[tuple[OfficialLanguageProbeCandidate, ModelProbeResult]] = []
     failed_results: list[ModelProbeResult] = []
+    probe_attempts: list[dict[str, Any]] = []
+    succeeded_retry_groups: set[str] = set()
     for candidate in candidates:
+        if candidate.retry_group and candidate.retry_group in succeeded_retry_groups:
+            continue
         result = await _probe_official_call_method(endpoint, model_id, candidate)
+        probe_attempts.append(_official_probe_attempt_record(candidate, result))
         if result.status == "ok":
             verified.append((candidate, result))
+            if candidate.retry_group:
+                succeeded_retry_groups.add(candidate.retry_group)
         else:
             failed_results.append(result)
     if not verified:
         return OfficialModelProfileProbeResult(
             model_id=model_id,
             last_probe_message=_official_profile_probe_failure_message(failed_results),
+            probe_attempts=probe_attempts,
         )
 
     default_candidate = min(
@@ -1527,7 +1954,26 @@ async def _probe_official_model_profile_result(
             )
             for candidate, result in verified
         ],
+        probe_attempts=probe_attempts,
     )
+
+
+def _official_probe_attempt_record(
+    candidate: OfficialLanguageProbeCandidate,
+    result: ModelProbeResult,
+) -> dict[str, Any]:
+    return {
+        "profile_id": candidate.profile_id,
+        "capability": candidate.capability,
+        "method_id": candidate.method_id,
+        "request_mapper_id": candidate.request_mapper_id,
+        "status": result.status,
+        "latency_ms": result.latency_ms,
+        "message": _model_probe_failure_message(result) if result.status != "ok" else None,
+        "input_modalities": list(candidate.input_modalities),
+        "output_modalities": list(candidate.output_modalities),
+        "runtime_overrides": candidate.runtime_settings,
+    }
 
 
 def _official_profile_probe_failure_message(
@@ -1569,6 +2015,40 @@ def _official_language_probe_candidates(
         return []
     backend = _endpoint_probe_backend(endpoint)
     if backend == "openai":
+        model = model_id.lower()
+        if model.startswith("gpt-3.5-turbo-instruct"):
+            return [
+                _candidate(
+                    "openai_completions",
+                    "text:openai_completions",
+                    "text_chat",
+                    "openai_completions_text",
+                    10,
+                    1,
+                ),
+            ]
+        reasoning_runtime_settings = _openai_reasoning_probe_runtime_settings(model_id)
+        reasoning_candidates = _openai_reasoning_probe_candidates(
+            method_id="openai_responses",
+            model_id=model_id,
+            default_rank=5,
+            fallback_rank=1,
+        )
+        if _openai_prefers_responses_only(model_id):
+            return [
+                _candidate(
+                    "openai_responses",
+                    "text:openai_responses",
+                    "text_chat",
+                    "openai_responses_text",
+                    10,
+                    1,
+                    runtime_settings=reasoning_runtime_settings
+                    if _openai_requires_high_reasoning_model(model_id)
+                    else None,
+                ),
+                *reasoning_candidates,
+            ]
         return [
             _candidate(
                 "openai_responses",
@@ -1586,29 +2066,12 @@ def _official_language_probe_candidates(
                 20,
                 2,
             ),
-            _candidate(
-                "openai_responses",
-                "reasoning:openai_responses",
-                "reasoning",
-                "openai_responses_reasoning",
-                5,
-                1,
-                runtime_settings={
-                    "max_output_tokens": 16,
-                    "reasoning": {"enabled": True, "effort": "low"},
-                },
-            ),
-            _candidate(
-                "openai_chat_completions",
-                "reasoning:openai_chat_completions",
-                "reasoning",
-                "openai_chat_completions_reasoning",
-                25,
-                2,
-                runtime_settings={
-                    "max_output_tokens": 16,
-                    "reasoning": {"enabled": True, "effort": "low"},
-                },
+            *reasoning_candidates,
+            *_openai_reasoning_probe_candidates(
+                method_id="openai_chat_completions",
+                model_id=model_id,
+                default_rank=25,
+                fallback_rank=2,
             ),
         ]
     if backend == "claude":
@@ -1805,8 +2268,89 @@ def _official_language_probe_candidates(
                     "reasoning": {"enabled": True},
                 },
             ),
+            _candidate(
+                "ark_anthropic_messages",
+                "text:ark_anthropic_messages",
+                "text_chat",
+                "ark_anthropic_messages_text",
+                12,
+                3,
+            ),
+            _candidate(
+                "ark_anthropic_messages",
+                "thinking:ark_anthropic_messages",
+                "thinking",
+                "ark_anthropic_messages_thinking",
+                7,
+                3,
+                runtime_settings={
+                    "max_output_tokens": 1025,
+                    "reasoning": {"enabled": True, "budget_tokens": 1024},
+                },
+            ),
         ]
     return []
+
+
+def _openai_reasoning_probe_runtime_settings(model_id: str) -> dict[str, Any]:
+    return _openai_reasoning_runtime_settings(
+        model_id,
+        "high" if _openai_requires_high_reasoning_model(model_id) else "low",
+    )
+
+
+def _openai_reasoning_probe_candidates(
+    *,
+    method_id: str,
+    model_id: str,
+    default_rank: int,
+    fallback_rank: int,
+) -> list[OfficialLanguageProbeCandidate]:
+    efforts = (
+        ("high",)
+        if _openai_requires_high_reasoning_model(model_id)
+        else ("low", "medium", "high")
+    )
+    request_mapper_id = (
+        "openai_responses_reasoning"
+        if method_id == "openai_responses"
+        else "openai_chat_completions_reasoning"
+    )
+    retry_group = f"openai:reasoning:{model_id.lower()}"
+    return [
+        _candidate(
+            method_id,
+            f"reasoning:{method_id}:{effort}",
+            "reasoning",
+            request_mapper_id,
+            default_rank + index,
+            fallback_rank,
+            runtime_settings=_openai_reasoning_runtime_settings(model_id, effort),
+            retry_group=retry_group,
+        )
+        for index, effort in enumerate(efforts)
+    ]
+
+
+def _openai_reasoning_runtime_settings(model_id: str, effort: str) -> dict[str, Any]:
+    model = model_id.lower()
+    return {
+        "max_output_tokens": 64 if _openai_is_pro_reasoning_model(model) else 16,
+        "reasoning": {"enabled": True, "effort": effort},
+    }
+
+
+def _openai_requires_high_reasoning_model(model_id: str) -> bool:
+    return model_id.lower().startswith("gpt-5-pro")
+
+
+def _openai_is_pro_reasoning_model(model_id: str) -> bool:
+    model = model_id.lower()
+    return model.startswith("gpt-5") and "-pro" in model
+
+
+def _openai_prefers_responses_only(model_id: str) -> bool:
+    return _openai_is_pro_reasoning_model(model_id)
 
 
 def _candidate(
@@ -1820,6 +2364,7 @@ def _candidate(
     runtime_settings: dict[str, Any] | None = None,
     input_modalities: tuple[str, ...] = ("text",),
     output_modalities: tuple[str, ...] = ("text",),
+    retry_group: str | None = None,
 ) -> OfficialLanguageProbeCandidate:
     return OfficialLanguageProbeCandidate(
         profile_id=profile_id,
@@ -1831,6 +2376,7 @@ def _candidate(
         fallback_rank=fallback_rank,
         input_modalities=input_modalities,
         output_modalities=output_modalities,
+        retry_group=retry_group,
     )
 
 
@@ -1872,6 +2418,7 @@ def _is_official_language_model_candidate(endpoint: ProviderEndpoint, model_id: 
             "wan",
             "embedding",
             "translate",
+            "translation",
             "tts",
             "audio",
             "video",
@@ -1881,7 +2428,16 @@ def _is_official_language_model_candidate(endpoint: ProviderEndpoint, model_id: 
             return False
         return any(
             model.startswith(prefix)
-            for prefix in ("doubao-", "deepseek-", "glm-", "seed-", "ep-")
+            for prefix in (
+                "doubao-",
+                "deepseek-",
+                "glm-",
+                "kimi-",
+                "mistral-",
+                "qwen",
+                "seed-",
+                "ep-",
+            )
         )
     if any(
         token in model
@@ -1910,14 +2466,220 @@ def _is_official_language_model_candidate(endpoint: ProviderEndpoint, model_id: 
     )
 
 
-def _official_catalog_capabilities(endpoint: ProviderEndpoint, model_id: str) -> dict[str, object]:
+def _official_catalog_capabilities(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+    raw_capabilities: dict[str, Any] | None = None,
+) -> dict[str, object]:
     model_type, label = _official_catalog_model_type(endpoint, model_id)
-    candidates = _official_language_probe_candidates(endpoint, model_id)
-    return {
+    input_modalities, output_modalities = _official_catalog_modalities(
+        endpoint,
+        model_id,
+        model_type,
+    )
+    normalized = _plain_normalized_capabilities(endpoint, model_id, raw_capabilities)
+    input_source_urls = official_doc_source_urls(
+        _endpoint_probe_backend(endpoint),
+        model_type=model_type,
+        modalities=input_modalities,
+    )
+    output_source_urls = official_doc_source_urls(
+        _endpoint_probe_backend(endpoint),
+        model_type=model_type,
+        modalities=output_modalities,
+    )
+    capabilities: dict[str, object] = {
         "model_type": model_type,
         "model_type_label": label,
         "capability_library": model_type != "language_reasoning",
-        "candidate_methods": sorted({candidate.method_id for candidate in candidates}),
+        "candidate_methods": _official_catalog_candidate_methods(
+            endpoint,
+            model_id,
+            model_type,
+        ),
+        "input_modalities": list(input_modalities),
+        "output_modalities": list(output_modalities),
+        "input_modalities_source": "provider_doc",
+        "output_modalities_source": "provider_doc",
+        "input_modalities_source_urls": list(input_source_urls),
+        "output_modalities_source_urls": list(output_source_urls),
+    }
+    capabilities.update(_provider_doc_limit_capabilities(endpoint, model_id))
+    capabilities.update(normalized)
+    return capabilities
+
+
+def _official_catalog_candidate_methods(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+    model_type: str,
+) -> list[str]:
+    methods = {
+        candidate.method_id
+        for candidate in _official_language_probe_candidates(endpoint, model_id)
+    }
+    model = model_id.lower()
+    backend = _endpoint_probe_backend(endpoint)
+    if backend == "openai":
+        if model_type == "image_generation":
+            methods.add("openai_images")
+        elif model_type == "video_generation":
+            methods.add("openai_videos")
+        elif model_type == "audio":
+            if "realtime" in model:
+                methods.add("openai_realtime")
+            elif any(token in model for token in ("whisper", "transcribe")):
+                methods.add("openai_audio_transcriptions")
+            elif "tts" in model:
+                methods.add("openai_audio_speech")
+            else:
+                methods.add("openai_audio")
+        elif model_type == "embedding":
+            methods.add("openai_embeddings")
+        elif model_type == "moderation":
+            methods.add("openai_moderations")
+    elif backend == "gemini":
+        if model_type == "image_generation":
+            methods.add(
+                "gemini_generate_images"
+                if model.startswith("imagen-")
+                else "gemini_generate_content"
+            )
+        elif model_type == "video_generation":
+            methods.add("gemini_generate_videos")
+        elif model_type == "audio":
+            methods.add(
+                "gemini_generate_music" if "lyria" in model else "gemini_generate_content"
+            )
+        elif model_type == "embedding":
+            methods.add("gemini_embed_content")
+        elif model_type == "interactions_agent":
+            methods.add("gemini_interactions")
+    elif backend == "ark":
+        if model_type == "image_generation":
+            methods.add("ark_images")
+        elif model_type == "video_generation":
+            methods.add("ark_video")
+        elif model_type == "audio":
+            methods.add("ark_audio")
+        elif model_type == "embedding":
+            methods.add("ark_embeddings")
+        elif model_type == "translation":
+            methods.add("ark_translation")
+        elif model_type == "3d_generation":
+            methods.add("ark_3d")
+    return sorted(methods)
+
+
+def _plain_normalized_capabilities(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+    raw_capabilities: dict[str, Any] | None,
+) -> dict[str, object]:
+    normalized = normalize_route_capabilities(
+        protocol=endpoint.protocol,
+        provider_model_id=model_id,
+        raw_capabilities=raw_capabilities or {},
+        source="api_list",
+    )
+    plain: dict[str, object] = {}
+    source_urls = official_api_list_source_urls(_endpoint_probe_backend(endpoint))
+    for key, capability in normalized.items():
+        if key in {
+            "max_input_tokens",
+            "max_output_tokens",
+            "input_modalities",
+            "output_modalities",
+        }:
+            plain[key] = capability.value
+            plain[f"{key}_source"] = capability.source
+            plain[f"{key}_source_urls"] = list(source_urls)
+        if key in {"input_modalities", "output_modalities"}:
+            plain[f"{key}_source"] = capability.source
+    return plain
+
+
+def _official_normalized_route_capabilities(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+    raw_capabilities: dict[str, Any] | None,
+) -> dict[str, CapabilityValue]:
+    capabilities = normalize_route_capabilities(
+        protocol=endpoint.protocol,
+        provider_model_id=model_id,
+        raw_capabilities=raw_capabilities or {},
+        source="api_list",
+    )
+    source_urls = list(official_api_list_source_urls(_endpoint_probe_backend(endpoint)))
+    for key in ("input_modalities", "output_modalities", "max_input_tokens", "max_output_tokens"):
+        capability = capabilities.get(key)
+        if capability is None:
+            continue
+        capabilities[f"{key}_source"] = CapabilityValue(
+            value=capability.source,
+            source=capability.source,
+        )
+        capabilities[f"{key}_source_urls"] = CapabilityValue(
+            value=source_urls,
+            source=capability.source,
+        )
+    return capabilities
+
+
+def _provider_doc_limit_capabilities(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+) -> dict[str, object]:
+    capabilities: dict[str, object] = {}
+    for key, rule in provider_doc_limit_rules(
+        _endpoint_probe_backend(endpoint),
+        model_id,
+    ).items():
+        capabilities[key] = rule.value
+        capabilities[f"{key}_source"] = rule.source
+        capabilities[f"{key}_source_urls"] = list(rule.source_urls)
+    return capabilities
+
+
+def _provider_doc_limit_capability_values(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+) -> dict[str, CapabilityValue]:
+    capabilities: dict[str, CapabilityValue] = {}
+    for key, rule in provider_doc_limit_rules(
+        _endpoint_probe_backend(endpoint),
+        model_id,
+    ).items():
+        capabilities[key] = _capability_value_from_rule(rule)
+        capabilities[f"{key}_source_urls"] = CapabilityValue(
+            value=list(rule.source_urls),
+            source=rule.source,
+            message=rule.message,
+        )
+        capabilities[f"{key}_source"] = CapabilityValue(
+            value=rule.source,
+            source=rule.source,
+            message=rule.message,
+        )
+    return capabilities
+
+
+def _capability_value_from_rule(rule: OfficialCapabilityRule) -> CapabilityValue:
+    return CapabilityValue(value=rule.value, source=rule.source, message=rule.message)
+
+
+def _catalog_limit_fields(capabilities: dict[str, object]) -> dict[str, object]:
+    return {
+        key: capabilities[key]
+        for key in (
+            "max_input_tokens",
+            "max_input_tokens_source",
+            "max_input_tokens_source_urls",
+            "max_output_tokens",
+            "max_output_tokens_source",
+            "max_output_tokens_source_urls",
+        )
+        if key in capabilities
     }
 
 
@@ -1925,26 +2687,81 @@ def _official_verified_model_capabilities(
     endpoint: ProviderEndpoint,
     model_id: str,
     profiles: list[VerifiedProfile],
+    probe_attempts: list[dict[str, Any]] | None = None,
+    raw_capabilities: dict[str, Any] | None = None,
 ) -> dict[str, object]:
-    capabilities = _official_catalog_capabilities(endpoint, model_id)
+    capabilities = _official_catalog_capabilities(endpoint, model_id, raw_capabilities)
+    catalog_input_modalities = [
+        value for value in capabilities.get("input_modalities", [])
+        if isinstance(value, str)
+    ] if isinstance(capabilities.get("input_modalities"), list) else []
+    catalog_output_modalities = [
+        value for value in capabilities.get("output_modalities", [])
+        if isinstance(value, str)
+    ] if isinstance(capabilities.get("output_modalities"), list) else []
+    verified_input_modalities = sorted(
+        {
+            modality
+            for profile in profiles
+            for modality in (profile.input_modalities or [])
+        }
+    )
+    verified_output_modalities = sorted(
+        {
+            modality
+            for profile in profiles
+            for modality in (profile.output_modalities or [])
+        }
+    )
     capabilities.update(
         {
             "model_type": "language_reasoning",
             "model_type_label": "Language/reasoning model",
             "capability_library": False,
             "verified_methods": sorted({profile.method_id for profile in profiles}),
+            "input_modalities": _ordered_unique(
+                [*catalog_input_modalities, *verified_input_modalities]
+            ),
+            "output_modalities": _ordered_unique(
+                [*catalog_output_modalities, *verified_output_modalities]
+            ),
+            "input_modalities_source": (
+                capabilities.get("input_modalities_source")
+                if catalog_input_modalities
+                else "probed_verified"
+            ),
+            "output_modalities_source": (
+                capabilities.get("output_modalities_source")
+                if catalog_output_modalities
+                else "probed_verified"
+            ),
             "verified_profiles": [
                 {
                     "profile_id": profile.profile_id,
                     "capability": profile.capability,
                     "method_id": profile.method_id,
                     "request_mapper_id": profile.request_mapper_id,
+                    "input_modalities": profile.input_modalities or [],
+                    "output_modalities": profile.output_modalities or [],
                 }
                 for profile in profiles
             ],
         }
     )
+    if probe_attempts:
+        capabilities["probe_attempts"] = probe_attempts
     return capabilities
+
+
+def _ordered_unique(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
 
 
 def _official_catalog_model_type(endpoint: ProviderEndpoint, model_id: str) -> tuple[str, str]:
@@ -1993,6 +2810,53 @@ def _official_catalog_model_type(endpoint: ProviderEndpoint, model_id: str) -> t
     return "catalog_candidate", "Catalog-only model"
 
 
+def _official_catalog_modalities(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+    model_type: str,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    backend = _endpoint_probe_backend(endpoint)
+    model = model_id.lower()
+    if model_type == "language_reasoning":
+        if backend == "claude":
+            return ("text", "image", "pdf"), ("text",)
+        if backend == "gemini" and not model.startswith("gemma-"):
+            return ("text", "image", "audio", "video"), ("text",)
+        if backend == "openai":
+            if model.startswith(("gpt-4", "gpt-5", "o1", "o3", "o4")):
+                return ("text", "image", "file"), ("text",)
+            return ("text",), ("text",)
+        return ("text",), ("text",)
+    if model_type == "image_generation":
+        if any(token in model for token in ("edit", "gpt-image", "image")):
+            return ("text", "image"), ("image",)
+        return ("text",), ("image",)
+    if model_type == "video_generation":
+        inputs = ["text"]
+        if any(token in model for token in ("i2v", "flf2v", "image")):
+            inputs.append("image")
+        if any(token in model for token in ("v2v", "video")):
+            inputs.append("video")
+        return tuple(dict.fromkeys(inputs)), ("video",)
+    if model_type == "audio":
+        if any(token in model for token in ("whisper", "transcribe")):
+            return ("audio",), ("text",)
+        if "tts" in model or "lyria" in model:
+            return ("text",), ("audio",)
+        return ("text", "audio"), ("text", "audio")
+    if model_type == "embedding":
+        if backend == "gemini" and "embedding-2" in model:
+            return ("text", "image", "audio", "video"), ("embedding",)
+        return ("text",), ("embedding",)
+    if model_type == "moderation":
+        return ("text",), ("moderation",)
+    if model_type == "translation":
+        return ("text",), ("text",)
+    if model_type == "3d_generation":
+        return ("text", "image"), ("3d",)
+    return (), ()
+
+
 def _is_gemini_known_non_language_model(model: str) -> bool:
     return any(
         token in model
@@ -2010,8 +2874,12 @@ def _is_gemini_known_non_language_model(model: str) -> bool:
     )
 
 
-def _official_catalog_library_entry(endpoint: ProviderEndpoint, model_id: str) -> dict[str, object]:
-    capabilities = _official_catalog_capabilities(endpoint, model_id)
+def _official_catalog_library_entry(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+    raw_capabilities: dict[str, Any] | None = None,
+) -> dict[str, object]:
+    capabilities = _official_catalog_capabilities(endpoint, model_id, raw_capabilities)
     return {
         "model_id": model_id,
         "status": "catalog_candidate",
@@ -2020,6 +2888,13 @@ def _official_catalog_library_entry(endpoint: ProviderEndpoint, model_id: str) -
         "model_type": capabilities["model_type"],
         "model_type_label": capabilities["model_type_label"],
         "candidate_methods": capabilities["candidate_methods"],
+        "input_modalities": capabilities["input_modalities"],
+        "output_modalities": capabilities["output_modalities"],
+        "input_modalities_source": capabilities["input_modalities_source"],
+        "output_modalities_source": capabilities["output_modalities_source"],
+        "input_modalities_source_urls": capabilities["input_modalities_source_urls"],
+        "output_modalities_source_urls": capabilities["output_modalities_source_urls"],
+        **_catalog_limit_fields(capabilities),
     }
 
 
@@ -2027,9 +2902,11 @@ def _official_failed_language_probe_entry(
     endpoint: ProviderEndpoint,
     model_id: str,
     last_probe_message: str | None = None,
+    probe_attempts: list[dict[str, Any]] | None = None,
+    raw_capabilities: dict[str, Any] | None = None,
 ) -> dict[str, object]:
-    capabilities = _official_catalog_capabilities(endpoint, model_id)
-    return {
+    capabilities = _official_catalog_capabilities(endpoint, model_id, raw_capabilities)
+    entry: dict[str, object] = {
         "model_id": model_id,
         "status": "probe_failed",
         "route_status": "failed",
@@ -2037,7 +2914,39 @@ def _official_failed_language_probe_entry(
         "model_type": capabilities["model_type"],
         "model_type_label": capabilities["model_type_label"],
         "candidate_methods": capabilities["candidate_methods"],
+        "input_modalities": capabilities["input_modalities"],
+        "output_modalities": capabilities["output_modalities"],
+        "input_modalities_source": capabilities["input_modalities_source"],
+        "output_modalities_source": capabilities["output_modalities_source"],
+        "input_modalities_source_urls": capabilities["input_modalities_source_urls"],
+        "output_modalities_source_urls": capabilities["output_modalities_source_urls"],
+        **_catalog_limit_fields(capabilities),
     }
+    if probe_attempts:
+        entry["probe_attempts"] = probe_attempts
+    return entry
+
+
+def _merged_capability_library_entries(
+    endpoint: ProviderEndpoint,
+    current_entries: list[dict[str, object]],
+    *,
+    verified_model_ids: set[str],
+) -> list[dict[str, object]]:
+    current_model_ids = {
+        str(entry.get("model_id"))
+        for entry in current_entries
+        if isinstance(entry.get("model_id"), str) and entry.get("model_id")
+    }
+    stale_entries = [
+        entry
+        for entry in endpoint.metadata.get("capability_library", [])
+        if isinstance(entry, dict)
+        and isinstance(entry.get("model_id"), str)
+        and entry["model_id"] not in current_model_ids
+        and entry["model_id"] not in verified_model_ids
+    ]
+    return [*stale_entries, *current_entries]
 
 
 def _official_model_type_capability_values(
@@ -2047,9 +2956,61 @@ def _official_model_type_capability_values(
     source: Literal["api_list", "probed_verified"],
 ) -> dict[str, CapabilityValue]:
     model_type, label = _official_catalog_model_type(endpoint, model_id)
+    input_modalities, output_modalities = _official_catalog_modalities(
+        endpoint,
+        model_id,
+        model_type,
+    )
+    backend = _endpoint_probe_backend(endpoint)
+    input_source_urls = official_doc_source_urls(
+        backend,
+        model_type=model_type,
+        modalities=input_modalities,
+    )
+    output_source_urls = official_doc_source_urls(
+        backend,
+        model_type=model_type,
+        modalities=output_modalities,
+    )
     return {
         "model_type": CapabilityValue(value=model_type, source=source, message=label),
         "model_type_label": CapabilityValue(value=label, source=source),
+        **(
+            {
+                "input_modalities": CapabilityValue(
+                    value=list(input_modalities),
+                    source="provider_doc",
+                ),
+                "input_modalities_source_urls": CapabilityValue(
+                    value=list(input_source_urls),
+                    source="provider_doc",
+                ),
+                "input_modalities_source": CapabilityValue(
+                    value="provider_doc",
+                    source="provider_doc",
+                ),
+            }
+            if input_modalities
+            else {}
+        ),
+        **(
+            {
+                "output_modalities": CapabilityValue(
+                    value=list(output_modalities),
+                    source="provider_doc",
+                ),
+                "output_modalities_source_urls": CapabilityValue(
+                    value=list(output_source_urls),
+                    source="provider_doc",
+                ),
+                "output_modalities_source": CapabilityValue(
+                    value="provider_doc",
+                    source="provider_doc",
+                ),
+            }
+            if output_modalities
+            else {}
+        ),
     }
 
 
@@ -2125,6 +3086,7 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
         return
 
     discovered_model_ids = result.model_ids
+    raw_capabilities_by_model = result.model_capabilities
     if not discovered_model_ids:
         latest_credentials = load_credentials()
         latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
@@ -2154,7 +3116,11 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
                 id=model_id,
                 status="unverified_manual",
                 verified_profile_count=0,
-                capabilities=_official_catalog_capabilities(endpoint, model_id),
+                capabilities=_official_catalog_capabilities(
+                    endpoint,
+                    model_id,
+                    raw_capabilities_by_model.get(model_id),
+                ),
             )
             for model_id in discovered_model_ids
         ],
@@ -2163,12 +3129,18 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
     catalog_only_models: list[str] = []
     failed_models: list[str] = []
     failed_model_messages: dict[str, str] = {}
+    failed_model_attempts: dict[str, list[dict[str, Any]]] = {}
+    probe_attempts_by_model: dict[str, list[dict[str, Any]]] = {}
     model_infos_by_id: dict[str, EndpointTestCompactModelInfo] = {
         model_id: EndpointTestCompactModelInfo(
             id=model_id,
             status="unverified_manual",
             verified_profile_count=0,
-            capabilities=_official_catalog_capabilities(endpoint, model_id),
+            capabilities=_official_catalog_capabilities(
+                endpoint,
+                model_id,
+                raw_capabilities_by_model.get(model_id),
+            ),
         )
         for model_id in discovered_model_ids
     }
@@ -2227,6 +3199,8 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
         for profile_result in batch_results:
             model_id = profile_result.model_id
             profiles = profile_result.profiles
+            if profile_result.probe_attempts:
+                probe_attempts_by_model[model_id] = profile_result.probe_attempts
             tested_count += 1
             if profiles:
                 profiles_by_model[model_id] = profiles
@@ -2235,6 +3209,8 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
                 failed_models.append(model_id)
                 if profile_result.last_probe_message:
                     failed_model_messages[model_id] = profile_result.last_probe_message
+                if profile_result.probe_attempts:
+                    failed_model_attempts[model_id] = profile_result.probe_attempts
             else:
                 catalog_only_models.append(model_id)
 
@@ -2246,6 +3222,8 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
                 model_ids=tuple(verified_batch),
                 verified=True,
                 verified_profiles_by_model=verified_batch,
+                probe_attempts_by_model=probe_attempts_by_model,
+                raw_capabilities_by_model=raw_capabilities_by_model,
             )
 
         for profile_result in batch_results:
@@ -2261,6 +3239,8 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
                         latest_endpoint,
                         model_id,
                         profiles,
+                        profile_result.probe_attempts,
+                        raw_capabilities_by_model.get(model_id),
                     ),
                 )
             else:
@@ -2280,7 +3260,18 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
                         if is_language_candidate
                         else NO_VERIFIED_ROUTE_PROFILE_MESSAGE
                     ),
-                    capabilities=_official_catalog_capabilities(latest_endpoint, model_id),
+                    capabilities={
+                        **_official_catalog_capabilities(
+                            latest_endpoint,
+                            model_id,
+                            raw_capabilities_by_model.get(model_id),
+                        ),
+                        **(
+                            {"probe_attempts": profile_result.probe_attempts}
+                            if profile_result.probe_attempts
+                            else {}
+                        ),
+                    },
                 )
 
         latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id, latest_endpoint)
@@ -2291,18 +3282,28 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
                 "last_test_message": _endpoint_success_message(result),
                 "metadata": {
                     **latest_endpoint.metadata,
-                    "capability_library": [
-                        _official_catalog_library_entry(latest_endpoint, model_id)
-                        for model_id in catalog_only_models
-                    ]
-                    + [
-                        _official_failed_language_probe_entry(
-                            latest_endpoint,
-                            model_id,
-                            failed_model_messages.get(model_id),
-                        )
-                        for model_id in failed_models
-                    ],
+                    "capability_library": _merged_capability_library_entries(
+                        latest_endpoint,
+                        [
+                            _official_catalog_library_entry(
+                                latest_endpoint,
+                                model_id,
+                                raw_capabilities_by_model.get(model_id),
+                            )
+                            for model_id in catalog_only_models
+                        ]
+                        + [
+                            _official_failed_language_probe_entry(
+                                latest_endpoint,
+                                model_id,
+                                failed_model_messages.get(model_id),
+                                failed_model_attempts.get(model_id),
+                                raw_capabilities_by_model.get(model_id),
+                            )
+                            for model_id in failed_models
+                        ],
+                        verified_model_ids=set(profiles_by_model),
+                    ),
                 },
             }
         )
@@ -2327,8 +3328,9 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
         endpoint=latest_endpoint,
         model_ids=tuple(profiles_by_model),
         verified=True,
-        replace_endpoint_routes=True,
         verified_profiles_by_model=profiles_by_model,
+        probe_attempts_by_model=probe_attempts_by_model,
+        raw_capabilities_by_model=raw_capabilities_by_model,
     )
     for model_id, profiles in profiles_by_model.items():
         model_infos_by_id[model_id] = EndpointTestCompactModelInfo(
@@ -2340,6 +3342,8 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
                 latest_endpoint,
                 model_id,
                 profiles,
+                probe_attempts_by_model.get(model_id),
+                raw_capabilities_by_model.get(model_id),
             ),
         )
     final_models = list(model_infos_by_id.values())
@@ -2351,18 +3355,28 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
             "last_test_message": _endpoint_success_message(result),
             "metadata": {
                 **latest_endpoint.metadata,
-                "capability_library": [
-                    _official_catalog_library_entry(latest_endpoint, model_id)
-                    for model_id in catalog_only_models
-                ]
-                + [
-                    _official_failed_language_probe_entry(
-                        latest_endpoint,
-                        model_id,
-                        failed_model_messages.get(model_id),
-                    )
-                    for model_id in failed_models
-                ],
+                "capability_library": _merged_capability_library_entries(
+                    latest_endpoint,
+                    [
+                        _official_catalog_library_entry(
+                            latest_endpoint,
+                            model_id,
+                            raw_capabilities_by_model.get(model_id),
+                        )
+                        for model_id in catalog_only_models
+                    ]
+                    + [
+                        _official_failed_language_probe_entry(
+                            latest_endpoint,
+                            model_id,
+                            failed_model_messages.get(model_id),
+                            failed_model_attempts.get(model_id),
+                            raw_capabilities_by_model.get(model_id),
+                        )
+                        for model_id in failed_models
+                    ],
+                    verified_model_ids=set(profiles_by_model),
+                ),
             },
         }
     )
@@ -2570,6 +3584,8 @@ def _upsert_discovered_routes(
     verified: bool,
     replace_endpoint_routes: bool = False,
     verified_profiles_by_model: dict[str, list[VerifiedProfile]] | None = None,
+    probe_attempts_by_model: dict[str, list[dict[str, Any]]] | None = None,
+    raw_capabilities_by_model: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[LLMCredentialsFile, dict[str, str]]:
     routes = dict(credentials.provider_routes)
     route_ids_by_model: dict[str, str] = {}
@@ -2590,19 +3606,18 @@ def _upsert_discovered_routes(
                 verified_profiles=(
                     verified_profiles_by_model or {}
                 ).get(model_id, []),
+                probe_attempts=(
+                    probe_attempts_by_model or {}
+                ).get(model_id, []),
+                raw_capabilities=(
+                    raw_capabilities_by_model or {}
+                ).get(model_id, {}),
             )
             continue
         updates: dict[str, Any] = {}
         if verified:
-            updates["status"] = "verified"
-            updates["capabilities"] = {
+            base_capabilities = {
                 **existing.capabilities,
-                **normalize_route_capabilities(
-                    protocol=endpoint.protocol,
-                    provider_model_id=model_id,
-                    raw_capabilities={},
-                    source=capability_source,
-                ),
                 **(
                     _official_model_type_capability_values(
                         endpoint,
@@ -2612,6 +3627,37 @@ def _upsert_discovered_routes(
                     if endpoint.provider_kind == "official"
                     else {}
                 ),
+                **(
+                    _provider_doc_limit_capability_values(endpoint, model_id)
+                    if endpoint.provider_kind == "official"
+                    else {}
+                ),
+                **(
+                    _official_normalized_route_capabilities(
+                        endpoint,
+                        model_id,
+                        (raw_capabilities_by_model or {}).get(model_id, {}),
+                    )
+                    if endpoint.provider_kind == "official"
+                    else normalize_route_capabilities(
+                        protocol=endpoint.protocol,
+                        provider_model_id=model_id,
+                        raw_capabilities=(raw_capabilities_by_model or {}).get(model_id, {}),
+                        source=capability_source,
+                    )
+                ),
+            }
+            updates["status"] = "verified"
+            updates["capabilities"] = _merge_profile_capabilities(
+                base_capabilities,
+                verified_profile_route_capabilities(
+                    (verified_profiles_by_model or {}).get(model_id, [])
+                ),
+            )
+        if probe_attempts_by_model and probe_attempts_by_model.get(model_id):
+            updates["metadata"] = {
+                **existing.metadata,
+                "probe_attempts": probe_attempts_by_model[model_id],
             }
         if verified_profiles_by_model and model_id in verified_profiles_by_model:
             updates["verified_profiles"] = verified_profiles_by_model[model_id]
@@ -2634,6 +3680,8 @@ def _provider_route(
     status: Literal["verified", "unverified_manual"],
     capability_source: Literal["api_list", "probed_verified"],
     verified_profiles: list[VerifiedProfile] | None = None,
+    probe_attempts: list[dict[str, Any]] | None = None,
+    raw_capabilities: dict[str, Any] | None = None,
 ) -> ProviderRoute:
     route_slug = _route_slug(model_id)
     canonical = canonicalize_model(endpoint_id=endpoint.endpoint_id, provider_model_id=route_slug)
@@ -2644,25 +3692,65 @@ def _provider_route(
         provider_model_id=model_id,
         canonical_id=canonical.canonical_id,
         status=status,
-        capabilities={
-            **normalize_route_capabilities(
-                protocol=endpoint.protocol,
-                provider_model_id=model_id,
-                raw_capabilities={},
-                source=capability_source,
-            ),
-            **(
-                _official_model_type_capability_values(
-                    endpoint,
-                    model_id,
-                    source=capability_source,
-                )
-                if endpoint.provider_kind == "official"
-                else {}
-            ),
-        },
+        capabilities=_merge_profile_capabilities(
+            {
+                **(
+                    _official_model_type_capability_values(
+                        endpoint,
+                        model_id,
+                        source=capability_source,
+                    )
+                    if endpoint.provider_kind == "official"
+                    else {}
+                ),
+                **(
+                    _provider_doc_limit_capability_values(endpoint, model_id)
+                    if endpoint.provider_kind == "official"
+                    else {}
+                ),
+                **(
+                    _official_normalized_route_capabilities(
+                        endpoint,
+                        model_id,
+                        raw_capabilities or {},
+                    )
+                    if endpoint.provider_kind == "official"
+                    else normalize_route_capabilities(
+                        protocol=endpoint.protocol,
+                        provider_model_id=model_id,
+                        raw_capabilities=raw_capabilities or {},
+                        source=capability_source,
+                    )
+                ),
+            },
+            verified_profile_route_capabilities(verified_profiles or []),
+        ),
         verified_profiles=verified_profiles or [],
+        metadata={"probe_attempts": probe_attempts} if probe_attempts else {},
     )
+
+
+def _merge_profile_capabilities(
+    base_capabilities: dict[str, CapabilityValue],
+    profile_capabilities: dict[str, CapabilityValue],
+) -> dict[str, CapabilityValue]:
+    capabilities = {**base_capabilities, **profile_capabilities}
+    for key in ("input_modalities", "output_modalities"):
+        base_value = base_capabilities.get(key)
+        profile_value = profile_capabilities.get(key)
+        if base_value is None or profile_value is None:
+            continue
+        if not isinstance(base_value.value, list) or not isinstance(profile_value.value, list):
+            continue
+        merged = _ordered_unique(
+            [
+                item
+                for item in [*base_value.value, *profile_value.value]
+                if isinstance(item, str)
+            ]
+        )
+        capabilities[key] = base_value.model_copy(update={"value": merged})
+    return capabilities
 
 
 def _route_id(
@@ -2722,7 +3810,9 @@ def _materialize_roles_for_response(
     data: RolesData,
     credentials: LLMCredentialsFile | None = None,
 ) -> RolesData:
-    if not any(role.model_groups for role in data.roles.values()):
+    has_role_authoring = any(role.model_groups for role in data.roles.values())
+    has_bundle_authoring = any(bundle.model_groups for bundle in data.model_bundles.values())
+    if not has_role_authoring and not has_bundle_authoring:
         return data
     active_credentials = credentials or load_credentials()
     health_store = _health_store()
@@ -2734,6 +3824,12 @@ def _materialize_roles_for_response(
                 if role.model_groups
                 else role
                 for role_name, role in data.roles.items()
+            },
+            "model_bundles": {
+                bundle_id: materialize_model_bundle(bundle, active_credentials, health_store)
+                if bundle.model_groups
+                else bundle
+                for bundle_id, bundle in data.model_bundles.items()
             },
         }
     )
@@ -2769,7 +3865,7 @@ def _endpoint_references(
         for route_id, route in credentials.provider_routes.items()
         if route.endpoint_id == endpoint_id
     ]
-    refs = {"routes": route_ids, "roles": [], "model_profiles": []}
+    refs = {"routes": route_ids, "roles": [], "model_profiles": [], "model_bundles": []}
     route_set = set(route_ids)
     for role_name, role in roles.roles.items():
         refs["roles"].extend(_role_route_references(role_name, role, route_set))
@@ -2777,17 +3873,21 @@ def _endpoint_references(
         for index, entry in enumerate(profile.fallback_chain):
             if entry.route_id in route_set:
                 refs["model_profiles"].append(f"{profile_id}.fallback_chain[{index}]")
+    for bundle_id, bundle in roles.model_bundles.items():
+        refs["model_bundles"].extend(_bundle_route_references(bundle_id, bundle, route_set))
     return refs
 
 
 def _route_references(route_id: str, roles: RolesData) -> dict[str, list[str]]:
-    refs = {"roles": [], "model_profiles": []}
+    refs = {"roles": [], "model_profiles": [], "model_bundles": []}
     for role_name, role in roles.roles.items():
         refs["roles"].extend(_role_route_references(role_name, role, {route_id}))
     for profile_id, profile in roles.model_profiles.items():
         for index, entry in enumerate(profile.fallback_chain):
             if entry.route_id == route_id:
                 refs["model_profiles"].append(f"{profile_id}.fallback_chain[{index}]")
+    for bundle_id, bundle in roles.model_bundles.items():
+        refs["model_bundles"].extend(_bundle_route_references(bundle_id, bundle, {route_id}))
     return refs
 
 
@@ -2805,6 +3905,25 @@ def _role_route_references(
             if provider_model.route_id in route_ids:
                 refs.append(
                     f"{role_name}.model_groups[{group_index}]"
+                    f".provider_models[{provider_index}]"
+                )
+    return refs
+
+
+def _bundle_route_references(
+    bundle_id: str,
+    bundle: ModelBundle,
+    route_ids: set[str],
+) -> list[str]:
+    refs: list[str] = []
+    for index, entry in enumerate(bundle.fallback_chain):
+        if entry.route_id in route_ids:
+            refs.append(f"{bundle_id}.fallback_chain[{index}]")
+    for group_index, group in enumerate(bundle.model_groups):
+        for provider_index, provider_model in enumerate(group.provider_models):
+            if provider_model.route_id in route_ids:
+                refs.append(
+                    f"{bundle_id}.model_groups[{group_index}]"
                     f".provider_models[{provider_index}]"
                 )
     return refs

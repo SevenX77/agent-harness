@@ -211,7 +211,7 @@ callbacks 通道来自 `assemble_graph(..., callbacks=None)`：
 - `runner._run_v030_skill_dict(..., callbacks=...)` 会透传到 `assemble_graph()`。
 - `assemble_graph()` 再把 callbacks 传到 `_build_reference_reader_markdown()`。
 
-没有 callbacks 时，reference reader 仍正常生成 prompt knowledge base，只是不发 trace。
+没有 callbacks 时，`_run_v030_skill_dict` 也会内部自动挂载 `TracingCallback`，使得 reference reader 等事件默认也会正常落盘。
 
 ## 10. `BUILTIN_SUBAGENT_ENTER`
 

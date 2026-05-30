@@ -11,14 +11,8 @@ Usage (Python API)::
 
     result = run_skill(
         "path/to/my_skill/SKILL.md",
-        scene=scene_dict,
-        scene_index=0,
-        entity_registry={},
-        visual_assets={},
-        narrative_context={},
-        predecessor_scene=None,
-        all_scenes=[scene_dict],
-        output_dir="/path/to/output",
+        workspace_dir=Path("/path/to/workspace"),
+        input_text="...",
     )
 
 Usage (CLI)::
@@ -26,7 +20,7 @@ Usage (CLI)::
     python -m graph_agent.runner \\
         --skill path/to/my_skill/SKILL.md \\
         --inputs '{"key": "value"}' \\
-        --output /path/to/output
+        --output /path/to/workspace
 """
 
 from __future__ import annotations
@@ -68,7 +62,7 @@ def run_skill(
     skill_path: str | Path,
     *,
     mock_llm: Any = _NO_MOCK_LLM,
-    trace_dir: str | Path | None = None,
+    workspace_dir: Path,
     thread_id: str | None = None,
     unattended: bool = False,
     callbacks: list[Any] | None = None,
@@ -81,6 +75,7 @@ def run_skill(
 ) -> WorkflowResult:
     """Execute a SKILL.md and return a typed workflow result."""
     resolver = require_skill_resolver(skill_resolver, caller="run_skill")
+    workspace_root = _validate_workspace_dir(workspace_dir)
     started_at = datetime.now(UTC)
     started_monotonic = time.monotonic()
     skill_path_obj = Path(skill_path)
@@ -91,7 +86,7 @@ def run_skill(
     try:
         raw = _run_skill_dict(
             skill_path,
-            trace_dir=trace_dir,
+            workspace_dir=workspace_root,
             mock_llm=mock_llm,
             thread_id=thread_id,
             unattended=unattended,
@@ -106,7 +101,7 @@ def run_skill(
     except GraphAgentError as exc:
         finished_at = datetime.now(UTC)
         wall_time = round(time.monotonic() - started_monotonic, 3)
-        return WorkflowResult(
+        failed_result = WorkflowResult(
             success=False,
             run_id=thread_id or str(uuid.uuid4()),
             skill_id=skill_id,
@@ -118,10 +113,15 @@ def run_skill(
             finished_at=finished_at,
             wall_time_sec=wall_time,
         )
+        _write_workflow_result_artifacts(
+            workspace_root / "runs" / failed_result.run_id,
+            failed_result,
+        )
+        return failed_result
 
     finished_at = datetime.now(UTC)
     wall_time = float(raw.get("wall_time_sec", round(time.monotonic() - started_monotonic, 3)))
-    return WorkflowResult(
+    workflow_result = WorkflowResult(
         success=True,
         run_id=str(raw.get("run_id") or thread_id or str(uuid.uuid4())),
         skill_id=skill_id,
@@ -133,13 +133,16 @@ def run_skill(
         finished_at=finished_at,
         wall_time_sec=wall_time,
     )
+    run_dir = Path(raw.get("run_dir") or workspace_root / "runs" / workflow_result.run_id)
+    _write_workflow_result_artifacts(run_dir, workflow_result)
+    return workflow_result
 
 
 def _run_skill_dict(
     skill_path: str | Path,
     *,
     mock_llm: Any = _NO_MOCK_LLM,
-    trace_dir: str | Path | None = None,
+    workspace_dir: Path,
     thread_id: str | None = None,
     unattended: bool = False,
     callbacks: list[Any] | None = None,
@@ -154,7 +157,7 @@ def _run_skill_dict(
 
     Args:
         skill_path: Path to SKILL.md.
-        trace_dir: Directory for trace output. If None, uses inputs["output_dir"] if available.
+        workspace_dir: Absolute workspace root for run-scoped artifacts.
         thread_id: Optional thread_id for checkpoint resume.
         callbacks: Optional list of Callback instances. Defaults to
             ``[LoggingCallback, TracingCallback]``.
@@ -181,7 +184,7 @@ def _run_skill_dict(
     if skill_path.is_dir() and (skill_path / "GRAPH.md").is_file():
         return _run_v030_skill_dict(
             skill_path,
-            trace_dir=trace_dir,
+            workspace_dir=workspace_dir,
             mock_llm=mock_llm,
             thread_id=thread_id,
             callbacks=callbacks,
@@ -202,6 +205,28 @@ def _run_skill_dict(
             source_path=skill_path,
         ),
     )
+
+
+def _validate_workspace_dir(workspace_dir: Path) -> Path:
+    workspace_path = Path(workspace_dir)
+    if not workspace_path.is_absolute():
+        raise ValueError("workspace_dir must be an absolute path")
+    return workspace_path
+
+
+def _write_json(path: Path, payload: Any) -> None:
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+
+
+def _write_workflow_result_artifacts(run_dir: Path, result: WorkflowResult) -> None:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_json(run_dir / "result.json", result.model_dump(mode="json"))
+    _write_json(run_dir / "final_state.json", result.context)
+    _write_json(run_dir / "metrics.json", result.metrics.model_dump(mode="json"))
+
 
 def _prepare_v030_callbacks(
     callbacks: list[Any] | None,
@@ -254,11 +279,45 @@ def _v030_phase_context(data: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _save_v030_declared_file_outputs(
+    output_schema: Any,
+    context: dict[str, Any],
+    *,
+    default_output_dir: Path,
+) -> None:
+    properties = output_schema.get("properties") if isinstance(output_schema, dict) else None
+    if not isinstance(properties, dict):
+        return
+    file_outputs = [
+        {"name": name, **schema}
+        for name, schema in properties.items()
+        if isinstance(name, str)
+        and isinstance(schema, dict)
+        and schema.get("target") == "file"
+    ]
+    if not file_outputs:
+        return
+
+    from graph_agent.io.manager import IOManager
+
+    output_context = dict(context)
+    normalized = normalize_blackboard_data(context)
+    for phase_outputs in normalized["phase_outputs"].values():
+        if isinstance(phase_outputs, dict):
+            output_context.update(phase_outputs)
+
+    io_mgr = IOManager({"outputs": file_outputs})
+    io_mgr.save_outputs(
+        output_context,
+        output_dir=output_context.get("output_dir") or default_output_dir,
+    )
+
+
 def _run_v030_skill_dict(
     skill_root: Path,
     *,
     mock_llm: Any = _NO_MOCK_LLM,
-    trace_dir: str | Path | None = None,
+    workspace_dir: Path,
     thread_id: str | None = None,
     callbacks: list[Any] | None = None,
     skill_resolver: SkillResolverProtocol,
@@ -272,12 +331,10 @@ def _run_v030_skill_dict(
 
     resolver = require_skill_resolver(skill_resolver, caller="_run_v030_skill_dict")
     t0 = time.time()
-    effective_trace_dir = trace_dir
-    if effective_trace_dir is None and inputs.get("output_dir"):
-        effective_trace_dir = Path(inputs["output_dir"]) / "traces"
-    trace_output = Path(effective_trace_dir) if effective_trace_dir is not None else None
+    run_id = thread_id or str(uuid.uuid4())
+    trace_output = workspace_dir / "runs" / run_id
     active_callbacks = _prepare_v030_callbacks(callbacks, trace_output)
-    emit_auto_trace_events = trace_output is not None and not callbacks
+    emit_auto_trace_events = callbacks is None
     if mock_llm is not _NO_MOCK_LLM:
         chat_model = mock_llm
     elif model_resolver is not None:
@@ -295,7 +352,6 @@ def _run_v030_skill_dict(
         skill_resolver=resolver,
     )
     graph = assembled.graph
-    run_id = thread_id or str(uuid.uuid4())
     if emit_auto_trace_events:
         _emit_v030_event(
             active_callbacks,
@@ -335,12 +391,22 @@ def _run_v030_skill_dict(
         _save_v030_trace(active_callbacks, trace_output)
         raise
     wall_time = round(time.time() - t0, 3)
+    final_context = dict(result.get("data", {}))
+    compiled_raw = getattr(compiled, "raw", {})
+    output_schema = (
+        compiled_raw.get("io", {}).get("outputs") if isinstance(compiled_raw, dict) else None
+    )
+    _save_v030_declared_file_outputs(
+        output_schema,
+        final_context,
+        default_output_dir=trace_output / "artifacts",
+    )
     if emit_auto_trace_events:
-        final_context = _v030_phase_context(result.get("data", {}))
+        final_trace_context = _v030_phase_context(final_context)
         for phase_id in assembled.phase_ids:
             _emit_v030_event(
                 active_callbacks,
-                PhaseEndEvent(phase_name=phase_id, context=final_context),
+                PhaseEndEvent(phase_name=phase_id, context=final_trace_context),
             )
         _emit_v030_event(
             active_callbacks,
@@ -348,16 +414,17 @@ def _run_v030_skill_dict(
                 run_id=run_id,
                 thread_id=run_id,
                 status="completed",
-                final_context=final_context,
+                final_context=final_trace_context,
                 wall_time_seconds=wall_time,
             ),
         )
     saved_trace_path = _save_v030_trace(active_callbacks, trace_output)
     return {
         "run_id": run_id,
-        "context": dict(result.get("data", {})),
+        "context": final_context,
         "metrics": {"wall_time_sec": wall_time},
         "trace_path": saved_trace_path,
+        "run_dir": str(trace_output),
         "wall_time_sec": wall_time,
     }
 
@@ -436,8 +503,7 @@ def main() -> None:
     elif args.inputs_file:
         inputs = json.loads(Path(args.inputs_file).read_text(encoding="utf-8"))
 
-    if args.output:
-        inputs["output_dir"] = args.output
+    workspace_dir = Path(args.output).resolve() if args.output else (Path.cwd() / ".workspace")
 
     skill_path = Path(args.skill)
     resolver_roots = [Path.cwd(), Path.cwd() / "skills"]
@@ -448,6 +514,7 @@ def main() -> None:
 
     result = run_skill(
         args.skill,
+        workspace_dir=workspace_dir,
         skill_resolver=LocalWorkspaceResolver(search_paths=resolver_roots),
         thread_id=args.thread_id,
         unattended=args.unattended,

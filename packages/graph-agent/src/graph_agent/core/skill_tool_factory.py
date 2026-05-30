@@ -98,7 +98,7 @@ def build_skill_tool(
         from graph_agent.core.runner import run_skill
 
         thread_id = f"sub_{parent_thread_id or 'root'}_{spec.name}_{uuid4().hex[:8]}"
-        trace_dir = (parent_trace_dir / f"sub_{spec.name}") if parent_trace_dir else None
+        workspace_dir = (parent_trace_dir or abs_skill_path.parent / ".workspace").resolve()
 
         logger.info(
             "[SubSkill] Invoking skill_path=%s thread_id=%s",
@@ -110,7 +110,7 @@ def build_skill_tool(
         result = run_skill(
             abs_skill_path,
             thread_id=thread_id,
-            trace_dir=trace_dir,
+            workspace_dir=workspace_dir,
             initial_context=dict(kwargs),
             skill_resolver=skill_resolver,
         )

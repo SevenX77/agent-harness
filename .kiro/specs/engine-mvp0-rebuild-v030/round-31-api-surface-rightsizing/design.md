@@ -268,20 +268,20 @@ def enqueue_event(event: CallbackEvent) -> None:
 
 ## §5 Errors [BREAKING Cutover]
 
-> **[PENDING PM ACK — 见 decisions.md §16.2]** PM 显式 ack 前不得实施.
-
-### 新四大家族
+### 新增四个父类 (ADD-only)
 
 - `GraphAgentError`
   - SDK root error，保留。
 - `GraphCompileError`
-  - 用户可修复的编译、解析、schema、契约、输入资源错误。
+  - [NEW] 用户可修复的编译、解析、schema、契约、输入资源错误父类。
 - `GraphExecutionError`
-  - 引擎执行、状态转换、工具运行、trace 写入、artifact 写入等运行期错误。
+  - [NEW] 引擎执行、状态转换、工具运行、trace 写入、artifact 写入等运行期错误父类。
 - `ModelProviderError`
-  - Gateway/provider/role/model/fallback 失败。
+  - [NEW] Gateway/provider/role/model/fallback 失败父类。
 - `ResourceNotFoundError`
-  - 文件、skill ref、resource ref、workspace path 等定位失败。
+  - [NEW] 文件、skill ref、resource ref、workspace path 等定位失败父类。
+
+PM 2026-05-30 已拒绝砍 18 个具体异常类。Round 31 的 error cutover 是 ADD-only 继承层级重组：新增 4 个父类, 现有具体异常类继续 public 导出并改为继承对应父类。用户既可以继续 `except SkillCompilationError:`, 也可以新增 `except GraphCompileError:` 一次抓一批。
 
 ### 当前错误层级证据
 
@@ -316,38 +316,32 @@ def enqueue_event(event: CallbackEvent) -> None:
 
 Gateway 当前 `GatewayError` 继承 SDK `ExecutionError`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:7-13`；Round 31 cutover 后必须改为继承 `ModelProviderError`。
 
-### 旧 -> 新完整迁移映射
+### 具体异常类继承映射 (continue public export)
 
-| Old | New | Rationale | Studio/import impact |
-|---|---|---|---|
-| `GraphAgentError` | `GraphAgentError` | root 保留 | Studio catch root 的地方继续可用 |
-| `GraphAgentFatalError` | `GraphExecutionError` | hard invariant failure belongs to engine runtime | Engine callers update catch |
-| `LoaderError` | `GraphCompileError` | load/parse/build before execution | SDK internals update |
-| `SkillParseError` | `GraphCompileError` | user-authored document parse failure | SDK internals update |
-| `SkillModuleLoadError` | `GraphCompileError` | skill module cannot load before graph runs | SDK internals update |
-| `PhaseBuildError` | `GraphCompileError` | phase cannot become runtime node | SDK internals update |
-| `SkillCompileError` | `GraphCompileError` | compile contract failure | SDK internals update |
-| `ValidationError` | `GraphCompileError` | schema/preflight user-fixable failure | SDK internals update |
-| `SchemaValidationError` | `GraphCompileError` | schema validation failure | SDK internals update |
-| `ContractValidationError` | `GraphCompileError` | graph/IO contract failure | SDK internals update |
-| `SkillLoadError` | `GraphCompileError` or `ResourceNotFoundError` | malformed skill -> compile; missing referenced file/skill -> resource | Studio `apps/studio/backend/app/services/skills.py:20` imports it today |
-| `SkillCompilationError` | `GraphCompileError` | public compile catch-all | Studio `apps/studio/backend/app/services/skills.py:20` imports it today |
-| `ExecutionError` | `GraphExecutionError` | runtime graph execution failure | Gateway currently subclasses it |
-| `PhaseExecutionError` | `GraphExecutionError` | phase runtime failure | SDK internals update |
-| `StateTransformError` | `GraphExecutionError` | engine state conversion failure | SDK internals update |
-| `ToolExecutionError` | `GraphExecutionError` | tool runtime failure | SDK internals update |
-| `PersistenceError` | `GraphExecutionError` | run-owned write failure | SDK internals update |
-| `CheckpointError` | `GraphExecutionError` | run checkpoint write/read failure | SDK internals update |
-| `TraceWriteError` | `GraphExecutionError` | run trace write failure | SDK internals update |
-| `ArtifactError` | `GraphExecutionError` | run artifact write/read failure | SDK internals update |
-| `TemplateRenderError` | `GraphCompileError` | prompt/template contract failure before provider call | SDK internals update |
-| `MaxRetriesExceededError` | `GraphExecutionError` | runtime retry exhaustion | SDK internals update |
-| `GatewayError` | `ModelProviderError` | provider/model/role domain | `packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:13` |
-| `AllProvidersFailedError` | `ModelProviderError` | provider fallback exhausted | Gateway callers update |
-| `GatewayResolverMissingError` | `ModelProviderError` | required model resolver missing for LLM phase | Gateway callers update |
-| `GatewayRoleNotConfiguredError` | `ModelProviderError` | role/model config absent | Gateway callers update |
-| `SkillResolutionError` | `ResourceNotFoundError` | skill reference cannot resolve | Studio resolver import path updates where used |
-| resource file not found/path invalid payloads | `ResourceNotFoundError` | reference/example/resource lookup failure | SDK resource helpers update |
+| Current class | Family (now parent) | Export status |
+|---|---|---|
+| `LoaderError` | `GraphCompileError` | continue public |
+| `SkillParseError` | `GraphCompileError` | continue public |
+| `SkillModuleLoadError` | `GraphCompileError` | continue public |
+| `PhaseBuildError` | `GraphCompileError` | continue public |
+| `SkillCompileError` | `GraphCompileError` | continue public |
+| `ValidationError` | `GraphCompileError` | continue public |
+| `SchemaValidationError` | `GraphCompileError` | continue public |
+| `ContractValidationError` | `GraphCompileError` | continue public |
+| `SkillLoadError` | `GraphCompileError` or `ResourceNotFoundError`,按具体调用点语义选择 | continue public |
+| `SkillCompilationError` | `GraphCompileError` | continue public |
+| `ExecutionError` | `GraphExecutionError` | continue public |
+| `PhaseExecutionError` | `GraphExecutionError` | continue public |
+| `StateTransformError` | `GraphExecutionError` | continue public |
+| `ToolExecutionError` | `GraphExecutionError` | continue public |
+| `PersistenceError` | `GraphExecutionError` | continue public |
+| `CheckpointError` | `GraphExecutionError` | continue public |
+| `TraceWriteError` | `GraphExecutionError` | continue public |
+| `ArtifactError` | `GraphExecutionError` | continue public |
+
+Studio 旧 import 保持兼容；`apps/studio/backend/app/services/skills.py:20` 继续可以 catch/import `SkillLoadError` 与 `SkillCompilationError`。新代码可选新增 `GraphCompileError` / `ResourceNotFoundError` catch 来一次抓父类下所有子类。
+
+Public exports 不变：现有具体异常类全部继续导出；当前 top-level `graph_agent.__init__` 已导出 `GraphAgentError`、`SkillLoadError`、`SkillCompilationError`，见 `packages/graph-agent/src/graph_agent/__init__.py:37-39`、`:68-70`，Round 31 只能 ADD 新父类导出，不能删除现有导出。
 
 ## §5.5 Golden 锁定与结构性大调整警告
 
@@ -395,7 +389,7 @@ Predict 时 SDK 主动检测以下三类信号，任一发生就触发 Copilot �
 
 ## §6 [BREAKING] 迁移路径汇总
 
-BREAKING 1-6、8 是 A 类已拍 (PM Q3-Q5 / 阻塞点 1 / charter 内). BREAKING 7 (Errors 四大家族) 状态 = **[PENDING PM ACK]**, 见 decisions.md §16.2. PM 显式 ack 前不得实施. B 类未授权: 无.
+BREAKING 1-8 全是 A 类 (Q3-Q5 / 阻塞点 / charter 内 / ADD-only). 不需要再抛 PM. B 类未授权: 无.
 
 ### [BREAKING] 1. LLM config / provider runtime 移出 SDK
 
@@ -492,19 +486,20 @@ BREAKING 1-6、8 是 A 类已拍 (PM Q3-Q5 / 阻塞点 1 / charter 内). BREAKIN
 
 ### [BREAKING] 7. Errors 四大家族 cutover
 
-> **[PENDING PM ACK — 见 decisions.md §16.2]** PM 显式 ack 前不得实施.
+> **[REVISED — 4 父类 ADD + 18 子类继承保留 public, ADD-only, 不算砍]**
 
-- 理由：调用方需要按责任归属 catch，而不是按内部模块层级 catch。
+- 理由：调用方需要能按责任归属 catch 父类, 同时保持旧具体异常类 catch/import 兼容。
 - 迁移路径：
-  1. 新增 `GraphCompileError`、`GraphExecutionError`、`ModelProviderError`、`ResourceNotFoundError`。
-  2. 按 §5 映射更新 SDK 内部 raise/catch。
-  3. Gateway `GatewayError` 改继承 `ModelProviderError`。
-  4. Studio catch `SkillLoadError` / `SkillCompilationError` 的位置改为 `GraphCompileError` / `ResourceNotFoundError`。
+  1. 新增 `GraphCompileError`、`GraphExecutionError`、`ModelProviderError`、`ResourceNotFoundError` 四个父类, 全部继承 `GraphAgentError`.
+  2. 改现有具体异常类继承关系: 18 个具体异常类全部保留 public 导出, 分别继承 §5 映射中的新父类.
+  3. Gateway `GatewayError` 改继承 `ModelProviderError`.
+  4. Studio 现有 catch/import 保持兼容; 新代码可选使用 4 父类一次抓一批.
 - 影响点：
   - `packages/graph-agent/src/graph_agent/__init__.py:37-39`
   - `packages/graph-agent/src/graph_agent/__init__.py:68-70`
   - `packages/graph-agent/src/graph_agent/core/exceptions.py:82-338`
   - `packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:7-13`
+  - public exports 不变: 18 子类全部继续导出; 只 ADD 4 个父类.
 
 ### [BREAKING] 8. Gateway verbs/nouns ownership cutover
 

@@ -251,7 +251,7 @@ Trace payload 不保存 provider API key、HTTP headers、完整大文档或未�
 | 统一 `AgentTraceEvent` / `TraceEventKind` schema | 当前主要是 Pydantic `CallbackEvent` union，事件名是小写字符串；不要把目标 enum 当已实现 API。 |
 | `NODE_START` / `NODE_END` payload 来自 StateMapper 沙盒输入输出 | 当前事件协议有 `phase_start` / `phase_end`，但 graph skill path 没有在 PhaseWrapper 中发这些事件。 |
 | TOOL_CALL start/end 分离并带 `tool_call_id` | 当前 `ToolCallEvent` 是单个 `tool_call` 事件，字段为 `phase_name/tool_name/args/result/duration_ms`。 |
-| builtin reference reader enter/exit/fallback 在装配期真实发出 | 当前已通过 `assemble_graph(..., callbacks=...)` 接线, loader/runner 入口透传 callbacks; 无 callbacks 时不发 trace。 |
+| builtin reference reader enter/exit/fallback 在装配期真实发出 | 当前已通过 `assemble_graph(..., callbacks=...)` 接线, loader/runner 入口透传 callbacks; 缺省状态下 `_run_v030_skill_dict` 也能接管事件流并强制自动落盘。 |
 | fallback 事件通过统一 tracing 底座发出 | 当前 gateway fallback 直接遍历 callbacks 调 `on_event`。 |
 | prompt、reference、tool result 按统一策略截断 | 当前部分 proxy / tracing 能做轻量序列化，但没有全局统一截断策略覆盖所有 graph skill 事件。 |
 | 异步日志记录器 (queue / drop policy / payload 上限 / 文件轮转) | **目标态 (MVP0 SHOULD)，PR E 未实现**；当前 `TracingCallback` 同步写 JSONL，无异步队列 / 背压 / 轮转。 |

@@ -8,7 +8,7 @@
 
 公开入口仍是 `run_skill()`。它负责驱动图运行，并把成功或已知 GraphAgent 错误包装成 `WorkflowResult`。
 
-`run_skill()` 先调用 `require_skill_resolver(..., caller="run_skill")`。`_run_skill_dict()` 再检查入口形状：只有“目录，且目录下有 `GRAPH.md`”会走 `_run_v030_skill_dict()`；普通 `.md` 文件、根级单文件 `SKILL.md`、不存在路径、或缺 `GRAPH.md` 的目录都会抛 `SkillLoadError`，message 字面包含 `[F-v3-graph-root-missing]`。公开 `run_skill()` 捕获这个 `GraphAgentError` 后仍返回 `WorkflowResult(success=False, context={}, error=str(exc))`，所以对外契约是“返回失败结果”，不是向调用方裸抛。
+`run_skill()` 先调用 `require_skill_resolver(..., caller="run_skill")`。`_run_skill_dict()` 再检查入口形状：只有“目录，且目录下有 `GRAPH.md`”会走 `_run_v030_skill_dict()`；普通 `.md` 文件、根级单文件 `SKILL.md`、不存在路径、或缺 `GRAPH.md` 的目录都会抛内部 leaf `SkillLoadError`（该 leaf 现在是 `GraphCompileError` family），message 字面包含 `[F-v3-graph-root-missing]`。公开 `run_skill()` 捕获后返回 `WorkflowResult(success=False, context={}, error=ErrorPayload(...))`，调用方应读 `result.error.code`；所以对外契约是“返回失败结果”，不是向调用方裸抛。
 
 目录型 V0.3.0 `GRAPH.md` root 会走 `_run_v030_skill_dict()`，不是旧 harness 缓存路径；旧 `_harness_cache` 已删除，也不再进入 `load_workflow_from_md` / `.run_id` 文件 resume 分支。这个分支现在会在 `graph.invoke()` 前准备 callbacks 和 trace 输出目录，再把 callbacks 传给 `assemble_graph()`。这点很重要：如果 `TracingCallback` 等到执行后才绑定目录，过程中产生的 typed events 就进不了 `tracing.jsonl`。`thread_id` 当前只用于选择本次 state 里的 `run_id`；没有 `thread_id` 时生成新的 UUID。
 

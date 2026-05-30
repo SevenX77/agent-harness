@@ -292,7 +292,7 @@ Agent body 里的 `@type:NAME` 会被静态扫描。编译器必须证明每个 
 
 | 检查 | 条件 | 行为 | 失败错误码 |
 |---|---|---|---|
-| 环检测 | `root_key in _loading_stack` | 当前 root 已在递归链路中，立即抛 `SkillLoadError` | `[F-v3-compile-recursion-cycle]` |
+| 环检测 | `root_key in _loading_stack` | 当前 root 已在递归链路中，内部抛 `SkillLoadError` leaf（IS-A `GraphCompileError`） | `[F-v3-compile-recursion-cycle]` |
 | 深度上限 | `len(_loading_stack) >= 20` | push 当前 root 前拦截，避免第 21 层继续展开 | `[F-v3-compile-depth-exceeded]` |
 | 同图去重 | `root_key in _compilation_cache` | 直接返回已编译的 `CompiledSkill` 引用 | 无 |
 

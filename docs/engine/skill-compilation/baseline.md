@@ -111,7 +111,7 @@ cache 默认目录是 `Path.home() / ".cache" / "graph-agent-v21"`，见 `packag
 
 `compile_skill(root, *, chat_model=None, cache=True)` 是本 feature 的公开入口，代码在 `packages/graph-agent/src/graph_agent/core/compiler.py:40` 到 `packages/graph-agent/src/graph_agent/core/compiler.py:45`。返回值是 `CompiledSkill`，它不是 JSON 响应，而是 Python 内存对象。
 
-`SkillLoader.compile_skill(skill_root)` 是底层 loader API，代码在 `packages/graph-agent/src/graph_agent/core/loader.py:142`。它会直接抛 `SkillLoadError` 或 `GraphAgentFatalError`，错误码前缀包括 `[F-v21-route]`、`[F-v21-io]`、`[F-v21-graph]`、`[F-v21-actions]`、`[F-v21-actions-keys]`、`[F-v21-purity]`，对应 helper 在 `packages/graph-agent/src/graph_agent/core/loader.py:232` 到 `packages/graph-agent/src/graph_agent/core/loader.py:253`。
+`SkillLoader.compile_skill(skill_root, *, skill_resolver=...)` 是底层 loader API。内部实现仍会直接抛 leaf class，例如 `SkillLoadError` 或 `GraphAgentFatalError`；PR-A 后这些 leaf 分别是 public family `GraphCompileError` / `GraphExecutionError` 的 implementation detail。对外调用方不应按 leaf class 分支，而应 catch family 并读取 `exc.payload.code`。当前错误码使用 `[F-v3-...]` 细码并由 `ERROR_REGISTRY` 补齐 `level`、`stage`、`doc_link`，旧 `[F-v21-route]` / `[F-v21-io]` / `[F-v21-graph]` / `[F-v21-actions]` / `[F-v21-purity]` 粗码不再是 loader 的 public 诊断契约。
 
 `load_workflow_from_md()` 仍存在，但它现在拒绝文件路径，并要求 V0.3 skill root 目录，代码在 `packages/graph-agent/src/graph_agent/core/loader.py:211` 到 `packages/graph-agent/src/graph_agent/core/loader.py:229`。这个名字带有 legacy 色彩，baseline 里不把它描述为新的 canonical compile API。
 

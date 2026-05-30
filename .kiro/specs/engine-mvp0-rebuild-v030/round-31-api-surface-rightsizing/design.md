@@ -143,6 +143,7 @@ Studio backend 在接入 v4 SDK 时保留这些产品功能，只把 engine-faci
   - run 与 predict 的同形结果。
   - 必含字段：`source: "run" | "predict"`、`success`、`run_id`、`skill_id`、`context`、`metrics`、`trace_path`、`error`、`warnings`、`started_at`、`finished_at`、`wall_time_sec`、`phases: list[PhaseRecord] | None`、`path_diff: PathDiff | None`。
   - 现状证据：当前 `WorkflowResult` 已有 `success/run_id/skill_id/context/metrics/trace_path/error/started_at/finished_at/wall_time_sec`，见 `packages/graph-agent/src/graph_agent/core/result.py:46-60`。
+  - Round-31 cutover 后 `RunResult.error` / `WorkflowResult.error` 类型从当前 `str | None` 升级为 `ErrorPayload | None`，以承载被 de-export leaf class 的 `code` / `level` / `stage` / `field_path` / `doc_link` 颗粒度；`ErrorPayload` 现状定义见 `packages/graph-agent/src/graph_agent/core/exceptions.py:21-45`。
 - `PhaseRecord`
   - 从 private predict model 晋升 public；记录 phase_name、phase type、inputs、outputs、mocked_source。
   - 现状证据：当前定义在 `packages/graph-agent/src/graph_agent/core/_predict_internal/models.py:24-31`。
@@ -268,20 +269,22 @@ def enqueue_event(event: CallbackEvent) -> None:
 
 ## §5 Errors [BREAKING Cutover]
 
-### 新增四个父类 (ADD-only)
+Round-31 真任务: Exception API catalog 从约 24 个公开 class 浓缩为 5 个 public class. 约 22 个细粒度 class 从 public `graph_agent.__init__` de-export, 不再作为 public isinstance catch 面承诺; 子颗粒度通过 `ErrorPayload.code` + `ERROR_REGISTRY` 保留.
+
+### 最终 public 5 class
 
 - `GraphAgentError`
   - SDK root error，保留。
 - `GraphCompileError`
-  - [NEW] 用户可修复的编译、解析、schema、契约、输入资源错误父类。
+  - 用户可修复的编译、解析、schema、契约、输入资源错误 family.
 - `GraphExecutionError`
-  - [NEW] 引擎执行、状态转换、工具运行、trace 写入、artifact 写入等运行期错误父类。
+  - 引擎执行、状态转换、工具运行、trace 写入、artifact 写入等运行期错误 family.
 - `ModelProviderError`
-  - [NEW] Gateway/provider/role/model/fallback 失败父类。
+  - Gateway/provider/role/model/fallback 失败 family.
 - `ResourceNotFoundError`
-  - [NEW] 文件、skill ref、resource ref、workspace path 等定位失败父类。
+  - 文件、skill ref、resource ref、workspace path 等定位失败 family.
 
-PM 2026-05-30 已拒绝砍 18 个具体异常类。Round 31 的 error cutover 是 ADD-only 继承层级重组：新增 4 个父类, 现有具体异常类继续 public 导出并改为继承对应父类。用户既可以继续 `except SkillCompilationError:`, 也可以新增 `except GraphCompileError:` 一次抓一批。
+本方案比 OpenAI / Anthropic 的 leaf-class 保留策略更激进; 原因是 graph-agent 的主要消费面是 Studio HTTP 与 SDK 边界调用, 按责任级 catch family class, 不需要把每个 per-condition leaf class 维持为 public API.
 
 ### 当前错误层级证据
 
@@ -314,34 +317,42 @@ PM 2026-05-30 已拒绝砍 18 个具体异常类。Round 31 的 error cutover �
 | `TemplateRenderError` | `packages/graph-agent/src/graph_agent/core/exceptions.py:318` |
 | `MaxRetriesExceededError` | `packages/graph-agent/src/graph_agent/core/exceptions.py:338` |
 
-Gateway 当前 `GatewayError` 继承 SDK `ExecutionError`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:7-13`；Round 31 cutover 后必须改为继承 `ModelProviderError`。
+`SkillResolutionError` 当前定义在 `packages/graph-agent/src/graph_agent/core/skill_resolver_protocol.py:15`。Gateway 当前 `GatewayError` 继承 SDK `ExecutionError`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:7-13`；Round 31 cutover 后必须改为继承 `ModelProviderError`。
 
-### 具体异常类继承映射 (continue public export)
+### 具体异常类 -> family 映射
 
-| Current class | Family (now parent) | Export status |
-|---|---|---|
-| `LoaderError` | `GraphCompileError` | continue public |
-| `SkillParseError` | `GraphCompileError` | continue public |
-| `SkillModuleLoadError` | `GraphCompileError` | continue public |
-| `PhaseBuildError` | `GraphCompileError` | continue public |
-| `SkillCompileError` | `GraphCompileError` | continue public |
-| `ValidationError` | `GraphCompileError` | continue public |
-| `SchemaValidationError` | `GraphCompileError` | continue public |
-| `ContractValidationError` | `GraphCompileError` | continue public |
-| `SkillLoadError` | `GraphCompileError` or `ResourceNotFoundError`,按具体调用点语义选择 | continue public |
-| `SkillCompilationError` | `GraphCompileError` | continue public |
-| `ExecutionError` | `GraphExecutionError` | continue public |
-| `PhaseExecutionError` | `GraphExecutionError` | continue public |
-| `StateTransformError` | `GraphExecutionError` | continue public |
-| `ToolExecutionError` | `GraphExecutionError` | continue public |
-| `PersistenceError` | `GraphExecutionError` | continue public |
-| `CheckpointError` | `GraphExecutionError` | continue public |
-| `TraceWriteError` | `GraphExecutionError` | continue public |
-| `ArtifactError` | `GraphExecutionError` | continue public |
+| Current class | Family |
+|---|---|
+| `LoaderError` | `GraphCompileError` |
+| `SkillParseError` | `GraphCompileError` |
+| `SkillModuleLoadError` | `GraphCompileError` |
+| `PhaseBuildError` | `GraphCompileError` |
+| `SkillCompileError` | `GraphCompileError` |
+| `ValidationError` | `GraphCompileError` |
+| `SchemaValidationError` | `GraphCompileError` |
+| `ContractValidationError` | `GraphCompileError` |
+| `SkillLoadError` | `GraphCompileError` |
+| `SkillCompilationError` | `GraphCompileError` |
+| `TemplateRenderError` | `GraphCompileError` |
+| `ExecutionError` | `GraphExecutionError` |
+| `PhaseExecutionError` | `GraphExecutionError` |
+| `StateTransformError` | `GraphExecutionError` |
+| `ToolExecutionError` | `GraphExecutionError` |
+| `PersistenceError` | `GraphExecutionError` |
+| `CheckpointError` | `GraphExecutionError` |
+| `TraceWriteError` | `GraphExecutionError` |
+| `ArtifactError` | `GraphExecutionError` |
+| `MaxRetriesExceededError` | `GraphExecutionError` |
+| `GraphAgentFatalError` | `GraphExecutionError` |
+| `GatewayError` | `ModelProviderError` |
+| `AllProvidersFailedError` | `ModelProviderError` |
+| `GatewayResolverMissingError` | `ModelProviderError` |
+| `GatewayRoleNotConfiguredError` | `ModelProviderError` |
+| `SkillResolutionError` | `ResourceNotFoundError` |
 
-Studio 旧 import 保持兼容；`apps/studio/backend/app/services/skills.py:20` 继续可以 catch/import `SkillLoadError` 与 `SkillCompilationError`。新代码可选新增 `GraphCompileError` / `ResourceNotFoundError` catch 来一次抓父类下所有子类。
+De-export 去向: 细粒度 class 可作为 internal implementation detail 保留, 但从 public `graph_agent.__init__` 移出; 用户按 `GraphCompileError` / `GraphExecutionError` / `ModelProviderError` / `ResourceNotFoundError` catch, 再用 `ErrorPayload.code` + `ERROR_REGISTRY` 区分原 leaf 颗粒度.
 
-Public exports 不变：现有具体异常类全部继续导出；当前 top-level `graph_agent.__init__` 已导出 `GraphAgentError`、`SkillLoadError`、`SkillCompilationError`，见 `packages/graph-agent/src/graph_agent/__init__.py:37-39`、`:68-70`，Round 31 只能 ADD 新父类导出，不能删除现有导出。
+Studio 迁移: `apps/studio/backend/app/services/skills.py:20,304,327,1152` 从 `SkillLoadError` / `SkillCompilationError` tuple catch 改为 `GraphCompileError` / `ResourceNotFoundError` 等 family catch; Studio 不按 leaf class 做控制流分流.
 
 ## §5.5 Golden 锁定与结构性大调整警告
 
@@ -389,7 +400,7 @@ Predict 时 SDK 主动检测以下三类信号，任一发生就触发 Copilot �
 
 ## §6 [BREAKING] 迁移路径汇总
 
-BREAKING 1-8 全是 A 类 (Q3-Q5 / 阻塞点 / charter 内 / ADD-only). 不需要再抛 PM. B 类未授权: 无.
+BREAKING 1-8 全是 A 类 (Q3-Q5 / 阻塞点 / charter 内 / round-31 API catalog rightsizing). 不需要再抛 PM. B 类未授权: 无.
 
 ### [BREAKING] 1. LLM config / provider runtime 移出 SDK
 
@@ -402,7 +413,7 @@ BREAKING 1-8 全是 A 类 (Q3-Q5 / 阻塞点 / charter 内 / ADD-only). 不需�
   5. 不把 SDK dataclass 机械覆盖到 Gateway schema；resolver 依赖 `model_dump()`、`temperature`、`max_tokens`。
   6. `llm_client_manager.py` 随 provider runtime 一并迁 Gateway。
   7. Studio Copilot import 从 `graph_agent.config.llm_config` 切到 Gateway 统一入口。
-  8. 砍掉的 SDK LLM 配置能力去向必须写清：yaml 加载 / 验证 / 熔断 / 热加载 / provider/role 解析全部归 Gateway；真砍未列入 [decisions.md §16](decisions.md#§16-round-31-真砍掉的用户能力-3-项-全-pm-已拍板) 的能力必须停下来 escalate PM。
+  8. 砍掉的 SDK LLM 配置能力去向必须写清：yaml 加载 / 验证 / 熔断 / 热加载 / provider/role 解析全部归 Gateway；真砍未列入 [decisions.md §16](decisions.md#§16-round-31-用户能力调整清单) 的能力必须停下来 escalate PM。
 - 影响点：
   - `packages/graph-agent/src/graph_agent/config/llm_config.py:40-753`
   - `packages/graph-agent-gateway/src/graph_agent_gateway/llm_config.py:10-122`
@@ -486,20 +497,25 @@ BREAKING 1-8 全是 A 类 (Q3-Q5 / 阻塞点 / charter 内 / ADD-only). 不需�
 
 ### [BREAKING] 7. Errors 四大家族 cutover
 
-> **[REVISED — 4 父类 ADD + 18 子类继承保留 public, ADD-only, 不算砍]**
+> **[REVISED — 24->5 浓缩, 22 子类 de-export, code-based 颗粒度]**
 
-- 理由：调用方需要能按责任归属 catch 父类, 同时保持旧具体异常类 catch/import 兼容。
+- 理由：round-31 目标是 API catalog rightsizing; 调用方按责任归属 catch family class, 具体条件颗粒度走 `ErrorPayload.code` + `ERROR_REGISTRY`.
 - 迁移路径：
-  1. 新增 `GraphCompileError`、`GraphExecutionError`、`ModelProviderError`、`ResourceNotFoundError` 四个父类, 全部继承 `GraphAgentError`.
-  2. 改现有具体异常类继承关系: 18 个具体异常类全部保留 public 导出, 分别继承 §5 映射中的新父类.
-  3. Gateway `GatewayError` 改继承 `ModelProviderError`.
-  4. Studio 现有 catch/import 保持兼容; 新代码可选使用 4 父类一次抓一批.
+  1. 新增 `GraphCompileError`、`GraphExecutionError`、`ModelProviderError`、`ResourceNotFoundError` 四个 family class, 全部直接继承 `GraphAgentError`.
+  2. 约 22 个具体子类继承改成挂到对应 4 个 family class; internal raise 路径不动.
+  3. 约 22 个具体子类从 `packages/graph-agent/src/graph_agent/__init__.py:37-39,68-70` de-export, 移出 public SDK catalog.
+  4. `WorkflowResult.error` / `RunResult.error` 升级为 `ErrorPayload | None`, 含 `code` / `level` / `stage` / `field_path` / `doc_link`.
+  5. Studio backend `apps/studio/backend/app/services/skills.py:20,304,327,1152` catch tuple 改成新 family, 例如 `except (GraphCompileError, ResourceNotFoundError)`.
+  6. Gateway `GatewayError` 改继承 `ModelProviderError`; Gateway 4 个 ModelProviderError 子类可保留 internal 或由 Gateway public surface 自行决定.
+  7. 现有 tests 中依赖具体 class 的 `pytest.raises` / `except` / `isinstance` 迁移到 4 family + `ErrorPayload.code` 断言.
 - 影响点：
   - `packages/graph-agent/src/graph_agent/__init__.py:37-39`
   - `packages/graph-agent/src/graph_agent/__init__.py:68-70`
   - `packages/graph-agent/src/graph_agent/core/exceptions.py:82-338`
+  - `packages/graph-agent/src/graph_agent/core/result.py:57`
+  - `packages/graph-agent/src/graph_agent/core/error_registry.py`
   - `packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:7-13`
-  - public exports 不变: 18 子类全部继续导出; 只 ADD 4 个父类.
+  - `apps/studio/backend/app/services/skills.py:20,304,327,1152`
 
 ### [BREAKING] 8. Gateway verbs/nouns ownership cutover
 

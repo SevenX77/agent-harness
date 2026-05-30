@@ -49,7 +49,7 @@ Studio backend 在接入 v4 SDK 时保留这些产品功能，只把 engine-faci
 
 ## §2 Verbs 完整清单
 
-### SDK verbs (保留 6 个)
+### SDK verbs (收敛暴露 6 个)
 
 1. `compile_skill(workspace: SkillWorkspace) -> CompileResult`
    - 功能：编译并静态校验一个 skill，输出可执行黑盒句柄和结构化诊断。
@@ -75,7 +75,8 @@ Studio backend 在接入 v4 SDK 时保留这些产品功能，只把 engine-faci
 
 6. `serialize_graph_back_to_markdown(graph_edits: SerializedGraphData, original_markdown: str) -> str`
    - 功能：把画布编辑反向合并回 Markdown。
-   - 关键约束：这是 UI authoring API，不是执行 API；必须按 round-trip 语义保留未触碰文本。
+   - 关键约束：[NEW v6] 这是 UI authoring API，不是执行 API；必须按 round-trip 语义保留未触碰文本。
+   - 实施：`packages/graph-agent/src/graph_agent/core/skill/io/graph_serializer.py:27` 当前 `del original_md` (fresh-render)；round-31 实施时改成 `ruamel.yaml` round-trip (`.venv` 已装 ruamel, 业内 authoring 工具行业标准)。
 
 ### 移出 SDK 的 verbs (Gateway-owned)
 
@@ -241,13 +242,13 @@ Cache 多版本自然累积：prompt 变化、输入变化、phase 变化都会�
 - Engine 对同一份内部事件源做两个出口：
   - 默认出口：写 `<workspace_dir>/runs/<run_id>/trace.jsonl`。
   - 可选出口：调用 `event_subscriber(event)`，供 WebSocket / UI timeline 实时推送。
-- `CallbackEvent` 保留为 wire payload contract。
+- `CallbackEvent` 是唯一保留的事件契约 (浓缩后 wire payload)。
 
 ### 废除项
 
 - [BREAKING] 废除 public `AgentCallback` / `Callback` base class 暴露。
 - [BREAKING] 废除 `EventStreamCallback` 作为独立用户可实例化类。
-- [BREAKING] `TracingCallback` 不再是 public setup API，仅可作为内部实现细节或过渡兼容层。
+- [BREAKING] `TracingCallback` 仅作为 SDK 内部实现细节 (internal trace writer, 黑盒写 `.jsonl`)。不作 public 兼容层；若内部不再用直接删类。
 
 ### StudioQueueCallback 迁移
 
@@ -409,8 +410,8 @@ BREAKING 1-8 全是 A 类 (Q3-Q5 / 阻塞点 / charter 内 / round-31 API catalo
   1. 一个 PR 内完成整体搬迁、Studio import 全 rename、SDK 老 provider/runtime code 删除。
   2. 不做 SDK 老 `llm_config` 与 Gateway 新 config 双栈过渡期。
   3. 不做 SDK -> Gateway compatibility proxy。
-  4. Gateway 实现 loader/validator API，保留现有 Pydantic `RolesData` resolver contract。
-  5. 不把 SDK dataclass 机械覆盖到 Gateway schema；resolver 依赖 `model_dump()`、`temperature`、`max_tokens`。
+  4. Gateway 主导自己的 Resolver Schema 契约 (作为 Gateway public noun, 替代原 SDK Config)。
+  5. 不把 SDK dataclass 机械覆盖到 Gateway schema；Gateway 自身已有 132 行 Pydantic schema + `resolver.py` 依赖 `model_dump()` / `temperature` / `max_tokens`, 必须保护。Gateway 主导的同时, 在此基础上向上透明兼容 Studio 输入。
   6. `llm_client_manager.py` 随 provider runtime 一并迁 Gateway。
   7. Studio Copilot import 从 `graph_agent.config.llm_config` 切到 Gateway 统一入口。
   8. 砍掉的 SDK LLM 配置能力去向必须写清：yaml 加载 / 验证 / 熔断 / 热加载 / provider/role 解析全部归 Gateway；真砍未列入 [decisions.md §16](decisions.md#§16-round-31-用户能力调整清单) 的能力必须停下来 escalate PM。
@@ -466,7 +467,7 @@ BREAKING 1-8 全是 A 类 (Q3-Q5 / 阻塞点 / charter 内 / round-31 API catalo
 - 迁移路径：
   1. Gateway 提供 predict chat model，用于调用 Studio 注入的 Copilot callable。
   2. SDK 删除对 Gateway implementation 的反向 import，只消费 `ModelResolverProtocol`。
-  3. SDK 保留并重构 predict cache table、ABC 选择、链式失效判断。
+  3. SDK 内部全权接管并封装 predict cache、ABC 决策、链式失效机制 (作为纯粹 internal implementation)；对外不暴露 cache nouns, 不进 public API catalog 表面。decisions §7 PM 拍板 ownership。
   4. SDK 只有在 cache miss 且 predict mode 需要 Copilot 模拟时才调用 Gateway。
   5. Gateway 不存 cache、不判断 golden、不做 ABC、不做链式失效。
 - 影响点：

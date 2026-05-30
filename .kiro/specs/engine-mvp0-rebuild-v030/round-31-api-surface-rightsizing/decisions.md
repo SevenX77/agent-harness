@@ -306,18 +306,18 @@
 - `packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py`
 - `apps/studio/backend/app/services/copilot.py:188-228`
 
-## §13 黄金原则: 砍掉功能必须有去向 + 真砍能力必 PM 拍
+## §13 黄金原则 — round-31 演进版
 
-**结论: 以本文为准.** 不擅自砍功能. 实施中如果发现新的"砍", 且没有被本文档拍板, 必停下来 escalate PM.
+**结论: 以本文为准.** 砍 API 符号 OK, 但能力必有去向 (`error_code` / Gateway / facade / internal implementation). 真砍 user 可见能力必 PM 拍板, 按本文 §16 真砍清单执行.
 
-**PM 拍板原话:** 功能一个都不能少; 砍掉功能必须有去向.
+round-31 任务目标 = "API catalog rightsizing 60+ -> 浓缩到优雅", 本质是砍 API. 5-27 立"功能一个都不能少"黄金原则是上一阶段优化评分时的保护规则, round-31 立项要调整 API 时不适用.
 
 **字段级技术约束:**
 
 - API symbol 删除不等于能力删除; 必须写清能力迁往 Gateway、Studio HTTP、SDK internal 或新 facade.
 - Round-31 任务目标是 API catalog rightsizing, 允许在本文 §16 拍板范围内真砍 API; "功能一个都不能少" 黄金原则不适用于 round-31 已立项的 API 浓缩项.
 - 真正用户能力消失只能发生在 §16.1、§16.2、§16.3.
-- 发现未列入 §16 的用户可见能力被删除, PR 必须停止.
+- 发现未列入 §16 的用户可见能力被删除, PR 必须停止 escalate PM.
 - 旧 internal import 被封装不是砍能力, 前提是有 facade 替代.
 - Round-31 实施完成后的后续 round 仍适用黄金原则: 新增砍项必须有去向并重新 PM 拍板.
 

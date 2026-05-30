@@ -315,9 +315,11 @@
 **字段级技术约束:**
 
 - API symbol 删除不等于能力删除; 必须写清能力迁往 Gateway、Studio HTTP、SDK internal 或新 facade.
-- 真正用户能力消失只能发生在 §16.1 和 §16.3; §16.2 是 ADD-only, 不是砍.
+- Round-31 任务目标是 API catalog rightsizing, 允许在本文 §16 拍板范围内真砍 API; "功能一个都不能少" 黄金原则不适用于 round-31 已立项的 API 浓缩项.
+- 真正用户能力消失只能发生在 §16.1、§16.2、§16.3.
 - 发现未列入 §16 的用户可见能力被删除, PR 必须停止.
 - 旧 internal import 被封装不是砍能力, 前提是有 facade 替代.
+- Round-31 实施完成后的后续 round 仍适用黄金原则: 新增砍项必须有去向并重新 PM 拍板.
 
 **实施影响点:**
 
@@ -382,7 +384,7 @@
 
 ## §16 round-31 用户能力调整清单
 
-**结论: 以本文为准.** Round 31 真砍用户能力只限 §16.1 与 §16.3. §16.2 是 ADD-only 继承层级重组, 不是砍; 现有具体异常类必须继续 public 导出并保持旧 catch 兼容.
+**结论: 以本文为准.** Round 31 真砍用户能力包括 §16.1 trace 路径自定义、§16.2 Exception API 浓缩、§16.3 Callback class 继承. §16.2 supersedes f00d4d0 ADD-only framing.
 
 ### 16.1 trace 路径自定义
 
@@ -399,56 +401,50 @@
 - `packages/graph-agent/src/graph_agent/callbacks/tracing.py:61-85`
 - `apps/studio/backend/app/services/run_manager.py:230-235`
 
-### 16.2 Exception 继承层级重组
+### 16.2 Exception API 浓缩 24 -> 5 public
 
-**PM 拍板:** PM (2026-05-30) 拒绝砍 18 个具体异常类; 按黄金原则 API 一个不能少. 本项改为 4 父类 ADD + 现有具体异常子类继承保留 public.
+> **[SUPERSEDES f00d4d0 ADD-only — round-31 任务目标 = 砍 + 黄金原则不适用]**
 
-**性质:** API ADD, 不砍. 不触发 §13 的真砍 escalation.
+**PM 拍板:** PM (2026-05-30) 澄清 round-31 真任务是 API catalog rightsizing, 60+ -> 浓缩到优雅, 本质是砍 API; 5-27 "API 一个不能少" 黄金原则不适用于 round-31 已立项 API 浓缩.
 
-**新增父类:**
+**砍掉什么:** Exception public catalog 从约 24 个公开 class 浓缩为 5 个 public class. 约 22 个细粒度具体 class 从 `graph_agent.__init__` de-export, 不再作为 public isinstance catch 面承诺.
 
+**最终 public class:**
+
+- `GraphAgentError`
 - `GraphCompileError`
 - `GraphExecutionError`
 - `ModelProviderError`
 - `ResourceNotFoundError`
 
-四个父类全部继承 `GraphAgentError`, 并 public 导出.
+**family 映射:**
 
-**保留具体类:**
+- `GraphCompileError`: `SkillCompilationError` / `SkillLoadError` / `SkillParseError` / `SkillModuleLoadError` / `PhaseBuildError` / `SkillCompileError` / `ValidationError` / `SchemaValidationError` / `ContractValidationError` / `LoaderError` / `TemplateRenderError`.
+- `GraphExecutionError`: `ExecutionError` / `PhaseExecutionError` / `StateTransformError` / `ToolExecutionError` / `PersistenceError` / `CheckpointError` / `TraceWriteError` / `ArtifactError` / `MaxRetriesExceededError` / `GraphAgentFatalError`.
+- `ModelProviderError`: `GatewayError` / `AllProvidersFailedError` / `GatewayResolverMissingError` / `GatewayRoleNotConfiguredError`.
+- `ResourceNotFoundError`: `SkillResolutionError` 与 resource-not-found payload errors.
 
-- 现有 18 个具体异常类全部 continue public export: `LoaderError` / `SkillParseError` / `SkillModuleLoadError` / `PhaseBuildError` / `SkillCompileError` / `ValidationError` / `SchemaValidationError` / `ContractValidationError` / `ExecutionError` / `PhaseExecutionError` / `StateTransformError` / `ToolExecutionError` / `PersistenceError` / `CheckpointError` / `TraceWriteError` / `ArtifactError` / `SkillLoadError` / `SkillCompilationError`.
-- `SkillLoadError` / `SkillCompilationError` / `SkillParseError` / `ValidationError` / `SchemaValidationError` / `ContractValidationError` / `ExecutionError` / `PhaseExecutionError` 等既有类不得删除、不得改名、不得从 public import 面消失.
-- 这些具体类改为继承 4 个新增父类中对应的一个; 旧代码 `except SkillCompilationError:` 继续工作.
+**字段级技术约束:**
 
-**用户 catch 兼容:**
+- 4 个 family class 全部直接继承 `GraphAgentError`.
+- 约 22 个具体 class 内部实现可保留并继续用于 internal raise/wrap, 但从 public `graph_agent.__init__` de-export.
+- 细粒度去向不是 leaf class, 而是 `ErrorPayload.code` + `ERROR_REGISTRY` 中的 `[F-v3-*]` code.
+- `RunResult.error` / `WorkflowResult.error` 必须升级为承载 `ErrorPayload` 或等价字段组 (`error_code`, `error_context`), 至少包含 `code` / `level` / `stage` / `field_path` / `doc_link`, 否则 run-result 路径拿不到被砍 leaf class 的颗粒度.
+- Studio backend catch tuple 从 `SkillLoadError` / `SkillCompilationError` 迁到 `GraphCompileError` / `ResourceNotFoundError` 等 family class; Studio 不依赖具体 class 做控制流分流.
+- Gateway `GatewayError` 改继承 `ModelProviderError`; Gateway 4 个 provider 子类可保留 internal, public 面由 Gateway 包另行决定, SDK public catalog 不导出这些 leaf.
+- 现有 tests 中依赖具体 class 的 `pytest.raises` / `except` / `isinstance` 迁到 family class + `ErrorPayload.code` 断言.
 
-```python
-try:
-    ...
-except SkillCompilationError:
-    ...
-```
-
-继续合法.
-
-新代码也可以用父类一次抓一批:
-
-```python
-try:
-    ...
-except GraphCompileError:
-    ...
-```
-
-**没有任何 API 砍:** 本项不是"用户从 catch 18 个具体异常类改为只能 catch 4 大家族". 正确目标是"用户既能继续 catch 具体类, 也能选择 catch 新增父类".
+**目标去向:** 用户从 catch 细粒度 leaf class 改为 catch 4 个责任归属 family class; 子颗粒度通过 `ErrorPayload.code` + `ERROR_REGISTRY` 读取.
 
 **影响点:**
 
 - `packages/graph-agent/src/graph_agent/core/exceptions.py:82-338`
+- `packages/graph-agent/src/graph_agent/core/error_registry.py`
+- `packages/graph-agent/src/graph_agent/core/result.py:57`
 - `packages/graph-agent/src/graph_agent/__init__.py:37-39`
 - `packages/graph-agent/src/graph_agent/__init__.py:68-70`
 - `packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:7-13`
-- `apps/studio/backend/app/services/skills.py:20`
+- `apps/studio/backend/app/services/skills.py:20,304,327,1152`
 
 ### 16.3 Callback class 继承
 

@@ -231,7 +231,8 @@ def _run_worker_main(
     try:
         result = run_skill(
             Path(skill_path_raw),
-            trace_dir=run_dir,
+            workspace_dir=run_dir.parent,
+            thread_id=run_dir.name,
             callbacks=callbacks,
             model_resolver=build_gateway_model_resolver(),
             skill_resolver=build_studio_skill_resolver(),

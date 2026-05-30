@@ -577,6 +577,9 @@ def md_to_json(
 
     result = run_skill(
         _PATCH_SKILL_MD,
+        # The patch agent has no parent run workspace, so keep its run-scoped
+        # artifacts beside the bundled patch skill.
+        workspace_dir=(_PATCH_SKILL_MD.parent / ".workspace").resolve(),
         skill_resolver=skill_resolver,
         original_md_excerpt=md_excerpt,
         diagnostic_report=report.to_prompt_string(),

@@ -742,10 +742,6 @@ def golden_dir_for(skill_dir: Path) -> Path:
     return workspace_dir_for(skill_dir) / "golden"
 
 
-def predict_dir_for(skill_dir: Path) -> Path:
-    return workspace_dir_for(skill_dir) / "predict"
-
-
 def local_settings_path_for(skill_dir: Path) -> Path:
     return workspace_dir_for(skill_dir) / "local_settings.json"
 
@@ -960,7 +956,6 @@ def _detail_from_manifest(
             "runs_dir": str(runs_dir_for(skill_dir)),
             "test_inputs_dir": str(test_inputs_dir_for_skill(skill_dir)),
             "golden_dir": str(golden_dir_for(skill_dir)),
-            "predict_dir": str(predict_dir_for(skill_dir)),
             "local_settings": str(local_settings_path_for(skill_dir)),
         },
         files=_read_skill_files(skill_dir),
@@ -992,7 +987,6 @@ async def _detail_from_manifest_async(
             "runs_dir": str(runs_dir_for(skill_dir)),
             "test_inputs_dir": str(test_inputs_dir_for_skill(skill_dir)),
             "golden_dir": str(golden_dir_for(skill_dir)),
-            "predict_dir": str(predict_dir_for(skill_dir)),
             "local_settings": str(local_settings_path_for(skill_dir)),
         },
         files=_read_skill_files(skill_dir),
@@ -1032,7 +1026,6 @@ async def _broken_detail_from_files_async(
             "runs_dir": str(runs_dir_for(skill_dir)),
             "test_inputs_dir": str(test_inputs_dir_for_skill(skill_dir)),
             "golden_dir": str(golden_dir_for(skill_dir)),
-            "predict_dir": str(predict_dir_for(skill_dir)),
             "local_settings": str(local_settings_path_for(skill_dir)),
         },
         # Broken/V1 details still expose the real asset tree for the Explorer panel.

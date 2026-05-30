@@ -315,7 +315,7 @@
 **字段级技术约束:**
 
 - API symbol 删除不等于能力删除; 必须写清能力迁往 Gateway、Studio HTTP、SDK internal 或新 facade.
-- 真正用户能力消失只能发生在 §16 三项.
+- 真正用户能力消失只能发生在 §16.1 和 §16.3; §16.2 是 ADD-only, 不是砍.
 - 发现未列入 §16 的用户可见能力被删除, PR 必须停止.
 - 旧 internal import 被封装不是砍能力, 前提是有 facade 替代.
 
@@ -380,9 +380,9 @@
 | 5 | `docs/architecture/prod-dev-separation/baseline.md:61` | Studio/Engine tracing callback 缠绕仍按旧 callback class 描述 | 局部 OBSOLETE, 指向 §3 / §16.3 |
 | 6 | `.kiro/specs/_archive/predict-v2/design.md:105` | `PredictResult` schema | 文件顶加 OBSOLETE banner, 指向 §4 / §7 / §16 |
 
-## §16 round-31 真砍掉的用户能力 (3 项, 全 PM 已拍板)
+## §16 round-31 用户能力调整清单
 
-**结论: 以本文为准.** Round 31 只真砍以下 3 项用户能力. 其他能力必须有迁移去向.
+**结论: 以本文为准.** Round 31 真砍用户能力只限 §16.1 与 §16.3. §16.2 是 ADD-only 继承层级重组, 不是砍; 现有具体异常类必须继续 public 导出并保持旧 catch 兼容.
 
 ### 16.1 trace 路径自定义
 
@@ -399,23 +399,48 @@
 - `packages/graph-agent/src/graph_agent/callbacks/tracing.py:61-85`
 - `apps/studio/backend/app/services/run_manager.py:230-235`
 
-### 16.2 细粒度 exception
+### 16.2 Exception 继承层级重组
 
-**PM 拍板:** 待 PM 显式 ack — round-31 escalate.
+**PM 拍板:** PM (2026-05-30) 拒绝砍 18 个具体异常类; 按黄金原则 API 一个不能少. 本项改为 4 父类 ADD + 现有具体异常子类继承保留 public.
 
-**PM 拍板溯源:** 未找到 V0.3.0 charter 中对 `GraphCompileError` / `GraphExecutionError` / `ModelProviderError` / `ResourceNotFoundError` 四大家族以及"catch 18 类细粒度异常 → catch 4 大家族"的显式立项 file:line. 已核验到的 V0.3.0 error 相关 charter 只覆盖结构化 payload / `GraphAgentError` 基类改造, 不足以证明本项真砍用户能力已被 PM 拍板:
+**性质:** API ADD, 不砍. 不触发 §13 的真砍 escalation.
 
-- `.kiro/specs/engine-mvp0-rebuild-v030/requirements.md:5` 提到 V0.3.0 cutover 包含 error payloads.
-- `.kiro/specs/engine-mvp0-rebuild-v030/design.md:199-211` 定义 `GraphAgentErrorPayload` 与 user-visible engine errors carry `[F-v3-*]` code.
-- `.kiro/specs/engine-mvp0-rebuild-v030/round-17-PR-F-error-codes/requirements.md:16-19` 只要求 `GraphAgentError` 基类签名与 `SkillCompilationError` location 字段迁入 payload.
-- `.kiro/specs/engine-mvp0-rebuild-v030/round-17-PR-F-error-codes/tasks.md:50-59` 标记 `SkillCompilationError` payload mechanism 为 A-class charter work, 但未覆盖 4 大异常家族.
-- `.kiro/specs/engine-mvp0-rebuild-v030/round-17-PR-F-error-codes/design.md:37-40` 将 `GraphAgentError` payload 改造列为 A 类, 但未拍板删除 18 个具体异常类.
+**新增父类:**
 
-按 SOP-06 §1.5, 本项如果作为 round-31 真砍用户能力落地, 需要 PM 显式 ack; 未 ack 前不得实施删除用户可 catch 的细粒度异常能力.
+- `GraphCompileError`
+- `GraphExecutionError`
+- `ModelProviderError`
+- `ResourceNotFoundError`
 
-**砍掉什么:** 用户从 catch 18 个具体异常类, 改为只能 catch 4 大家族 + 看 error message.
+四个父类全部继承 `GraphAgentError`, 并 public 导出.
 
-**目标去向:** `GraphCompileError`, `GraphExecutionError`, `ModelProviderError`, `ResourceNotFoundError`; `GraphAgentError` 保留 root.
+**保留具体类:**
+
+- 现有 18 个具体异常类全部 continue public export: `LoaderError` / `SkillParseError` / `SkillModuleLoadError` / `PhaseBuildError` / `SkillCompileError` / `ValidationError` / `SchemaValidationError` / `ContractValidationError` / `ExecutionError` / `PhaseExecutionError` / `StateTransformError` / `ToolExecutionError` / `PersistenceError` / `CheckpointError` / `TraceWriteError` / `ArtifactError` / `SkillLoadError` / `SkillCompilationError`.
+- `SkillLoadError` / `SkillCompilationError` / `SkillParseError` / `ValidationError` / `SchemaValidationError` / `ContractValidationError` / `ExecutionError` / `PhaseExecutionError` 等既有类不得删除、不得改名、不得从 public import 面消失.
+- 这些具体类改为继承 4 个新增父类中对应的一个; 旧代码 `except SkillCompilationError:` 继续工作.
+
+**用户 catch 兼容:**
+
+```python
+try:
+    ...
+except SkillCompilationError:
+    ...
+```
+
+继续合法.
+
+新代码也可以用父类一次抓一批:
+
+```python
+try:
+    ...
+except GraphCompileError:
+    ...
+```
+
+**没有任何 API 砍:** 本项不是"用户从 catch 18 个具体异常类改为只能 catch 4 大家族". 正确目标是"用户既能继续 catch 具体类, 也能选择 catch 新增父类".
 
 **影响点:**
 

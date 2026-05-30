@@ -113,7 +113,7 @@ def run_skill(
             context={},
             metrics=WorkflowMetrics(wall_time_sec=wall_time),
             trace_path=None,
-            error=str(exc),
+            error=exc.payload or make_error_payload("[F-v3-runtime-phase-failed]", str(exc)),
             started_at=started_at,
             finished_at=finished_at,
             wall_time_sec=wall_time,

@@ -32,8 +32,10 @@ EXPECTED_TOP_LEVEL_EXPORTS = [
     "MetricsCallback",
     "TracingCallback",
     "GraphAgentError",
-    "SkillLoadError",
-    "SkillCompilationError",
+    "GraphCompileError",
+    "GraphExecutionError",
+    "ModelProviderError",
+    "ResourceNotFoundError",
 ]
 
 

@@ -366,6 +366,19 @@ export interface RoleEntry {
   system_prompt_prefix?: string | null
 }
 
+export interface ModelBundleEntry {
+  model_profile_id: string
+  display_name: string
+  canonical_id: string
+  tags?: string[]
+  model_fallback_enabled?: boolean
+  intent?: RoleIntent
+  model_groups?: RoleModelGroup[]
+  fallback_chain?: RoleRouteEntry[]
+  lint_requirements?: Record<string, LintSeverity>
+  materialization_report?: MaterializationReport
+}
+
 export interface RoleProviderModel {
   route_id: string
   intent?: Record<string, unknown> | null
@@ -423,10 +436,29 @@ export interface RoleTestResponse {
   model_groups: RoleTestModelGroupResult[]
 }
 
+export type RoleTestJobStatus = 'queued' | 'running' | 'completed' | 'failed'
+export type RoleTestProviderProgressStatus = 'queued' | 'testing' | 'ok' | 'failed' | 'blocked' | 'untested'
+
+export interface RoleTestProviderProgress {
+  canonical_id: string
+  route_id: string
+  status: RoleTestProviderProgressStatus
+  message?: string | null
+}
+
+export interface RoleTestJobResponse {
+  job_id: string
+  role_name: string
+  status: RoleTestJobStatus
+  message?: string | null
+  provider_statuses: RoleTestProviderProgress[]
+  result?: RoleTestResponse | null
+}
+
 interface BackendRolesData {
   schema_version: 3
   model_profiles: Record<string, unknown>
-  model_bundles: Record<string, unknown>
+  model_bundles: Record<string, ModelBundleEntry>
   roles: Record<string, BackendRoleEntry>
 }
 
@@ -471,7 +503,7 @@ export interface RolesData {
   models: Record<string, ModelEntry>
   providers: Record<string, ProviderEntry>
   model_profiles?: Record<string, unknown>
-  model_bundles?: Record<string, unknown>
+  model_bundles?: Record<string, ModelBundleEntry>
   roles: Record<string, RoleEntry>
   single_model_roles?: string[]
   peer_model_groups?: Record<string, string[]>
@@ -611,13 +643,65 @@ function summarizeProviderModelCapabilities(providerModels: ProviderModelOption[
   }
 }
 
+function modelBundleGroupsFromBackend(
+  data: RolesData,
+  registry: RegistryResponse,
+  baseModelGroups: ModelGroup[],
+): ModelGroup[] {
+  const routeOptions = providerModelOptionsByRouteId(registry, baseModelGroups)
+  return Object.entries(data.model_bundles ?? {}).flatMap(([bundleId, bundle]) => {
+    const providerModels = bundleRouteIds(bundle)
+      .map((routeId) => routeOptions.get(routeId) ?? null)
+      .filter((option): option is ProviderModelOption => option !== null)
+    if (providerModels.length === 0) return []
+    return [{
+      canonical_id: `bundle:${bundleId}`,
+      display_name: bundle.display_name || bundleId,
+      section_label: 'Model Bundles',
+      provider_models: providerModels,
+      status_summary: summarizeProviderModelStates(providerModels),
+      capability_summary: summarizeProviderModelCapabilities(providerModels),
+    }]
+  })
+}
+
+function providerModelOptionsByRouteId(
+  registry: RegistryResponse,
+  modelGroups: ModelGroup[],
+): Map<string, ProviderModelOption> {
+  const routeOptions = new Map<string, ProviderModelOption>()
+  for (const group of modelGroups) {
+    for (const option of group.provider_models) {
+      routeOptions.set(option.route_id, option)
+    }
+  }
+  for (const route of Object.values(registry.provider_routes)) {
+    if (routeOptions.has(route.route_id)) continue
+    const option = legacyProviderModelOption(registry, route)
+    if (option) routeOptions.set(route.route_id, option)
+  }
+  return routeOptions
+}
+
+function bundleRouteIds(bundle: ModelBundleEntry): string[] {
+  const routeIds = bundle.fallback_chain?.length
+    ? bundle.fallback_chain.map((entry) => entry.route_id)
+    : (bundle.model_groups ?? []).flatMap((group) => (
+        group.provider_models.map((providerModel) => providerModel.route_id)
+      ))
+  return [...new Set(routeIds.filter(Boolean))]
+}
+
 function rolesDataFromBackend(
   data: RolesData,
   registry: RegistryResponse | null,
 ): RolesData {
   if (hasLegacyRoleMaps(data)) return data
 
-  const modelGroups = registry ? modelGroupsFromRegistry(registry) : []
+  const registryModelGroups = registry ? modelGroupsFromRegistry(registry) : []
+  const modelGroups = registry
+    ? [...modelBundleGroupsFromBackend(data, registry, registryModelGroups), ...registryModelGroups]
+    : []
   const models = Object.fromEntries(
     modelGroups.map((group) => [
       group.canonical_id,
@@ -818,6 +902,9 @@ function routeStatusFromTestStatus(status: TestStatus): RouteStatus {
 
 function modelInfoFromRoute(route: ProviderRoute): ModelInfo {
   const lastProbeMessage = route.metadata.last_probe_message
+  const capabilities: Record<string, unknown> = { ...route.capabilities }
+  const probeAttempts = route.metadata.probe_attempts
+  if (Array.isArray(probeAttempts)) capabilities.probe_attempts = probeAttempts
   return {
     id: route.provider_model_id,
     route_id: route.route_id,
@@ -825,7 +912,7 @@ function modelInfoFromRoute(route: ProviderRoute): ModelInfo {
     verified_profile_count: (route.verified_profiles ?? []).filter((profile) => profile.status === 'ready').length,
     verified_profiles: route.verified_profiles ?? [],
     last_probe_message: typeof lastProbeMessage === 'string' ? lastProbeMessage : null,
-    capabilities: route.capabilities,
+    capabilities,
   }
 }
 
@@ -857,11 +944,49 @@ function catalogCandidateCapabilities(candidate: Record<string, unknown>): Recor
   const modelType = candidate.model_type
   const modelTypeLabel = candidate.model_type_label
   const candidateMethods = candidate.candidate_methods
+  const inputModalities = candidate.input_modalities
+  const outputModalities = candidate.output_modalities
+  const inputModalitiesSource = candidate.input_modalities_source
+  const outputModalitiesSource = candidate.output_modalities_source
+  const inputModalitiesSourceUrls = candidate.input_modalities_source_urls
+  const outputModalitiesSourceUrls = candidate.output_modalities_source_urls
+  const probeAttempts = candidate.probe_attempts
+  const maxInputTokens = candidate.max_input_tokens
+  const maxOutputTokens = candidate.max_output_tokens
+  const maxInputTokensSource = candidate.max_input_tokens_source
+  const maxOutputTokensSource = candidate.max_output_tokens_source
+  const maxInputTokensSourceUrls = candidate.max_input_tokens_source_urls
+  const maxOutputTokensSourceUrls = candidate.max_output_tokens_source_urls
   if (typeof modelType === 'string') capabilities.model_type = modelType
   if (typeof modelTypeLabel === 'string') capabilities.model_type_label = modelTypeLabel
   if (Array.isArray(candidateMethods)) {
     capabilities.candidate_methods = candidateMethods.filter((method): method is string => typeof method === 'string')
   }
+  if (Array.isArray(inputModalities)) {
+    capabilities.input_modalities = inputModalities.filter((modality): modality is string => typeof modality === 'string')
+  }
+  if (Array.isArray(outputModalities)) {
+    capabilities.output_modalities = outputModalities.filter((modality): modality is string => typeof modality === 'string')
+  }
+  if (typeof inputModalitiesSource === 'string') capabilities.input_modalities_source = inputModalitiesSource
+  if (typeof outputModalitiesSource === 'string') capabilities.output_modalities_source = outputModalitiesSource
+  if (Array.isArray(inputModalitiesSourceUrls)) {
+    capabilities.input_modalities_source_urls = inputModalitiesSourceUrls.filter((url): url is string => typeof url === 'string')
+  }
+  if (Array.isArray(outputModalitiesSourceUrls)) {
+    capabilities.output_modalities_source_urls = outputModalitiesSourceUrls.filter((url): url is string => typeof url === 'string')
+  }
+  if (typeof maxInputTokens === 'number') capabilities.max_input_tokens = maxInputTokens
+  if (typeof maxOutputTokens === 'number') capabilities.max_output_tokens = maxOutputTokens
+  if (typeof maxInputTokensSource === 'string') capabilities.max_input_tokens_source = maxInputTokensSource
+  if (typeof maxOutputTokensSource === 'string') capabilities.max_output_tokens_source = maxOutputTokensSource
+  if (Array.isArray(maxInputTokensSourceUrls)) {
+    capabilities.max_input_tokens_source_urls = maxInputTokensSourceUrls.filter((url): url is string => typeof url === 'string')
+  }
+  if (Array.isArray(maxOutputTokensSourceUrls)) {
+    capabilities.max_output_tokens_source_urls = maxOutputTokensSourceUrls.filter((url): url is string => typeof url === 'string')
+  }
+  if (Array.isArray(probeAttempts)) capabilities.probe_attempts = probeAttempts
   return capabilities
 }
 
@@ -1550,7 +1675,22 @@ export async function deleteRole(roleName: string): Promise<RolesData> {
   return rolesDataFromBackend(response.data, cachedRegistry ?? null)
 }
 
+export async function deleteModelBundle(bundleId: string): Promise<RolesData> {
+  const response = await api.delete<RolesData>(`/llm/model-bundles/${segment(bundleId)}`)
+  return rolesDataFromBackend(response.data, cachedRegistry ?? null)
+}
+
 export async function testRole(roleName: string): Promise<RoleTestResponse> {
   const response = await api.post<RoleTestResponse>(`/llm/roles/${segment(roleName)}/test`, {})
+  return response.data
+}
+
+export async function startRoleTestJob(roleName: string): Promise<RoleTestJobResponse> {
+  const response = await api.post<RoleTestJobResponse>(`/llm/roles/${segment(roleName)}/test-jobs`, {})
+  return response.data
+}
+
+export async function getRoleTestJob(jobId: string): Promise<RoleTestJobResponse> {
+  const response = await api.get<RoleTestJobResponse>(`/llm/role-test-jobs/${segment(jobId)}`)
   return response.data
 }

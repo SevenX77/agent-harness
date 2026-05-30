@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
+import pytest
 from app.core import config
 from app.models.llm_config import (
     CapabilityValue,
@@ -257,6 +258,286 @@ def test_registry_includes_runtime_setting_metadata_for_frontend_controls(
     }
 
 
+def test_registry_response_enriches_existing_official_route_capabilities(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "anthropic-official": ProviderEndpoint(
+                    endpoint_id="anthropic-official",
+                    display_name="Anthropic Official",
+                    protocol="anthropic_compatible",
+                    base_url="https://api.anthropic.com",
+                    api_key="secret",
+                    provider_kind="official",
+                ),
+                "deepseek-official": ProviderEndpoint(
+                    endpoint_id="deepseek-official",
+                    display_name="DeepSeek Official",
+                    protocol="openai_compatible",
+                    base_url="https://api.deepseek.com",
+                    api_key="secret",
+                    provider_kind="official",
+                ),
+            },
+            provider_routes={
+                "anthropic-official:claude-opus-4.8": ProviderRoute(
+                    route_id="anthropic-official:claude-opus-4.8",
+                    endpoint_id="anthropic-official",
+                    route_slug="claude-opus-4.8",
+                    provider_model_id="claude-opus-4.8",
+                    canonical_id="claude-opus-4.8",
+                    status="verified",
+                    capabilities={
+                        "input_modalities": CapabilityValue(
+                            value=["text"],
+                            source="probed_verified",
+                        ),
+                        "output_modalities": CapabilityValue(
+                            value=["text"],
+                            source="probed_verified",
+                        ),
+                    },
+                ),
+                "deepseek-official:deepseek-v4-pro": ProviderRoute(
+                    route_id="deepseek-official:deepseek-v4-pro",
+                    endpoint_id="deepseek-official",
+                    route_slug="deepseek-v4-pro",
+                    provider_model_id="deepseek-v4-pro",
+                    canonical_id="deepseek-v4-pro",
+                    status="verified",
+                ),
+            },
+        ),
+        credentials_path(),
+    )
+    save_roles_file(active_roles_path(), RolesData(), known_route_ids=set())
+
+    response = client.get("/api/llm/registry")
+
+    assert response.status_code == 200
+    body = response.json()
+    claude_caps = body["provider_routes"]["anthropic-official:claude-opus-4.8"][
+        "capabilities"
+    ]
+    assert claude_caps["input_modalities"] == {
+        "value": ["text", "image", "pdf"],
+        "source": "provider_doc",
+        "observed_at": None,
+        "message": None,
+    }
+    assert "https://docs.anthropic.com/en/docs/build-with-claude/vision" in claude_caps[
+        "input_modalities_source_urls"
+    ]["value"]
+    assert "https://docs.anthropic.com/en/docs/build-with-claude/pdf-support" in claude_caps[
+        "input_modalities_source_urls"
+    ]["value"]
+    assert claude_caps["output_modalities"]["value"] == ["text"]
+    deepseek_caps = body["provider_routes"]["deepseek-official:deepseek-v4-pro"][
+        "capabilities"
+    ]
+    assert deepseek_caps["max_input_tokens"]["value"] == 1_048_576
+    assert deepseek_caps["max_output_tokens"]["value"] == 393_216
+    assert deepseek_caps["max_input_tokens"]["source"] == "provider_doc"
+    assert "https://api-docs.deepseek.com/quick_start/pricing" in deepseek_caps[
+        "max_input_tokens_source_urls"
+    ]["value"]
+
+
+def test_official_catalog_capabilities_include_maintainable_source_urls() -> None:
+    endpoints = {
+        "claude": ProviderEndpoint(
+            endpoint_id="anthropic-official",
+            display_name="Anthropic Official",
+            protocol="anthropic_compatible",
+            base_url="https://api.anthropic.com",
+            provider_kind="official",
+        ),
+        "openai": ProviderEndpoint(
+            endpoint_id="openai-official",
+            display_name="OpenAI Official",
+            protocol="openai_compatible",
+            base_url="https://api.openai.com/v1",
+            provider_kind="official",
+        ),
+        "gemini": ProviderEndpoint(
+            endpoint_id="gemini-official",
+            display_name="Gemini Official",
+            protocol="google_genai",
+            base_url="https://generativelanguage.googleapis.com",
+            provider_kind="official",
+        ),
+        "deepseek": ProviderEndpoint(
+            endpoint_id="deepseek-official",
+            display_name="DeepSeek Official",
+            protocol="openai_compatible",
+            base_url="https://api.deepseek.com",
+            provider_kind="official",
+        ),
+        "ark": ProviderEndpoint(
+            endpoint_id="ark-official",
+            display_name="Ark Official",
+            protocol="ark_runtime",
+            base_url="https://ark.cn-beijing.volces.com/api/v3",
+            provider_kind="official",
+        ),
+    }
+
+    claude = llm_router._official_catalog_capabilities(
+        endpoints["claude"],
+        "claude-opus-4-8-20260501",
+    )
+    assert claude["input_modalities"] == ["text", "image", "pdf"]
+    assert claude["max_input_tokens"] == 1_048_576
+    assert claude["max_output_tokens"] == 128_000
+    assert "https://docs.anthropic.com/en/docs/build-with-claude/pdf-support" in claude[
+        "input_modalities_source_urls"
+    ]
+
+    openai = llm_router._official_catalog_capabilities(endpoints["openai"], "gpt-5")
+    assert openai["input_modalities"] == ["text", "image", "file"]
+    assert openai["max_input_tokens_source"] == "provider_doc"
+    assert openai["max_output_tokens"] == 128_000
+    assert "https://developers.openai.com/api/docs/models" in openai[
+        "max_input_tokens_source_urls"
+    ]
+    openai_pro = llm_router._official_catalog_capabilities(endpoints["openai"], "gpt-5-pro")
+    assert openai_pro["max_input_tokens"] == 400_000
+    assert openai_pro["max_output_tokens"] == 272_000
+    assert "https://developers.openai.com/api/docs/models/gpt-5-pro" in openai_pro[
+        "max_output_tokens_source_urls"
+    ]
+    openai_54 = llm_router._official_catalog_capabilities(endpoints["openai"], "gpt-5.4")
+    assert openai_54["max_input_tokens"] == 1_050_000
+    assert openai_54["max_output_tokens"] == 128_000
+
+    gemini = llm_router._official_catalog_capabilities(
+        endpoints["gemini"],
+        "gemini-3.1-pro-preview",
+        {"inputTokenLimit": 1_048_576, "outputTokenLimit": 65_536},
+    )
+    assert gemini["max_input_tokens"] == 1_048_576
+    assert gemini["max_input_tokens_source"] == "api_list"
+    assert gemini["max_input_tokens_source_urls"] == ["https://ai.google.dev/api/models"]
+
+    deepseek = llm_router._official_catalog_capabilities(
+        endpoints["deepseek"],
+        "deepseek-reasoner",
+    )
+    assert deepseek["max_input_tokens"] == 1_048_576
+    assert deepseek["max_output_tokens"] == 393_216
+    assert "https://api-docs.deepseek.com/quick_start/pricing" in deepseek[
+        "max_output_tokens_source_urls"
+    ]
+
+    ark = llm_router._official_catalog_capabilities(
+        endpoints["ark"],
+        "doubao-seed-2-0-pro-260215",
+        {
+            "modalities": {
+                "input_modalities": ["text", "image"],
+                "output_modalities": ["text"],
+            },
+            "token_limits": {
+                "context_window": 1_000_000,
+                "max_output_token_length": 32_768,
+            },
+        },
+    )
+    assert ark["input_modalities"] == ["text", "image"]
+    assert ark["input_modalities_source"] == "api_list"
+    assert "https://www.volcengine.com/docs/82379/1330310" in ark[
+        "input_modalities_source_urls"
+    ]
+    assert ark["max_input_tokens"] == 1_000_000
+
+
+def test_openai_reasoning_candidates_escalate_effort_for_unknown_models() -> None:
+    endpoint = ProviderEndpoint(
+        endpoint_id="openai-official",
+        display_name="OpenAI Official",
+        protocol="openai_compatible",
+        base_url="https://api.openai.com/v1",
+        provider_kind="official",
+    )
+
+    candidates = llm_router._official_language_probe_candidates(endpoint, "gpt-5.9-new")
+    response_efforts = [
+        candidate.runtime_settings.get("reasoning", {}).get("effort")
+        for candidate in candidates
+        if candidate.profile_id.startswith("reasoning:openai_responses")
+    ]
+
+    assert response_efforts == ["low", "medium", "high"]
+
+
+def test_openai_gpt5_pro_candidates_use_high_reasoning_directly() -> None:
+    endpoint = ProviderEndpoint(
+        endpoint_id="openai-official",
+        display_name="OpenAI Official",
+        protocol="openai_compatible",
+        base_url="https://api.openai.com/v1",
+        provider_kind="official",
+    )
+
+    candidates = llm_router._official_language_probe_candidates(endpoint, "gpt-5-pro-2025-10-06")
+    efforts = [
+        candidate.runtime_settings.get("reasoning", {}).get("effort")
+        for candidate in candidates
+        if candidate.capability == "reasoning"
+    ]
+
+    assert efforts == ["high"]
+
+
+@pytest.mark.anyio
+async def test_openai_reasoning_probe_stops_effort_escalation_after_success(
+    monkeypatch,
+) -> None:
+    endpoint = ProviderEndpoint(
+        endpoint_id="openai-official",
+        display_name="OpenAI Official",
+        protocol="openai_compatible",
+        base_url="https://api.openai.com/v1",
+        api_key="secret",
+        provider_kind="official",
+    )
+    attempts: list[str | None] = []
+
+    async def fake_probe(
+        _endpoint: ProviderEndpoint,
+        model_id: str,
+        candidate: llm_router.OfficialLanguageProbeCandidate,
+    ) -> ModelProbeResult:
+        if candidate.capability != "reasoning":
+            return ModelProbeResult(model_id=model_id, status="ok", latency_ms=1)
+        effort = candidate.runtime_settings.get("reasoning", {}).get("effort")
+        attempts.append(effort if isinstance(effort, str) else None)
+        if effort == "medium":
+            return ModelProbeResult(model_id=model_id, status="ok", latency_ms=2)
+        return ModelProbeResult(
+            model_id=model_id,
+            status="invalid_model",
+            latency_ms=1,
+            message=f"{effort} unsupported",
+        )
+
+    monkeypatch.setattr(llm_router, "_probe_official_call_method", fake_probe)
+
+    result = await llm_router._probe_official_model_profile_result(endpoint, "gpt-5.9-new")
+
+    assert attempts == ["low", "medium"]
+    reasoning_profiles = [profile for profile in result.profiles if profile.capability == "reasoning"]
+    assert [profile.runtime_overrides["reasoning"]["effort"] for profile in reasoning_profiles] == [
+        "medium"
+    ]
+
+
 def test_registry_returns_model_groups_with_provider_ui_state_projection(
     client: TestClient,
     tmp_path: Path,
@@ -386,6 +667,106 @@ def test_registry_returns_model_groups_with_provider_ui_state_projection(
     assert provider_models["ready-provider:gpt-5"]["capability_state"] == "unknown"
 
 
+def test_registry_model_group_exposes_thinking_capability_from_verified_profile(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+    credentials = LLMCredentialsFile(
+        provider_endpoints={
+            "anthropic-official": ProviderEndpoint(
+                endpoint_id="anthropic-official",
+                display_name="Anthropic Official",
+                protocol="anthropic_compatible",
+                base_url="https://api.anthropic.example",
+                api_key="secret",
+                status="verified",
+                provider_kind="official",
+            )
+        },
+        provider_routes={
+            "anthropic-official:claude-haiku": ProviderRoute(
+                route_id="anthropic-official:claude-haiku",
+                endpoint_id="anthropic-official",
+                route_slug="claude-haiku",
+                provider_model_id="claude-haiku",
+                canonical_id="claude-haiku",
+                display_name="Claude Haiku",
+                status="verified",
+                verified_profiles=[
+                    VerifiedProfile(
+                        profile_id="thinking:anthropic_messages:manual",
+                        capability="thinking",
+                        method_id="anthropic_messages",
+                        request_mapper_id="anthropic_thinking_manual_budget",
+                        status="ready",
+                        default=True,
+                        fallback_rank=1,
+                    )
+                ],
+            )
+        },
+    )
+    save_credentials(credentials, credentials_path())
+
+    response = client.get("/api/llm/registry")
+
+    assert response.status_code == 200
+    provider_model = response.json()["model_groups"][0]["provider_models"][0]
+    assert provider_model["route_id"] == "anthropic-official:claude-haiku"
+    assert provider_model["capability_state"] == "known"
+    assert provider_model["capabilities"]["thinking_protocol"] == {
+        "value": True,
+        "source": "probed_verified",
+        "observed_at": None,
+        "message": None,
+    }
+
+
+def test_registry_model_groups_exclude_official_routes_without_verified_profiles(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+    credentials = LLMCredentialsFile(
+        provider_endpoints={
+            "anthropic-official": ProviderEndpoint(
+                endpoint_id="anthropic-official",
+                display_name="Anthropic Official",
+                protocol="anthropic_compatible",
+                base_url="https://api.anthropic.example",
+                api_key="secret",
+                status="verified",
+                provider_kind="official",
+            )
+        },
+        provider_routes={
+            "anthropic-official:claude-haiku": ProviderRoute(
+                route_id="anthropic-official:claude-haiku",
+                endpoint_id="anthropic-official",
+                route_slug="claude-haiku",
+                provider_model_id="claude-haiku",
+                canonical_id="claude-haiku",
+                display_name="Claude Haiku",
+                status="verified",
+                verified_profiles=[],
+            )
+        },
+    )
+    save_credentials(credentials, active_credentials_path)
+    save_roles_file(roles_path, RolesData(), known_route_ids=set(credentials.provider_routes))
+
+    response = client.get("/api/llm/registry")
+
+    assert response.status_code == 200
+    assert response.json()["model_groups"] == []
+
+
 def test_registry_merges_model_groups_by_projected_display_name(
     client: TestClient,
     tmp_path: Path,
@@ -425,6 +806,15 @@ def test_registry_merges_model_groups_by_projected_display_name(
             canonical_id="claude-opus-4-7",
             display_name="Claude Opus 4.7",
             status="verified",
+            verified_profiles=[
+                VerifiedProfile(
+                    profile_id="text:anthropic_messages",
+                    capability="text_chat",
+                    method_id="anthropic_messages",
+                    request_mapper_id="anthropic_text",
+                    status="ready",
+                )
+            ],
         ),
         "openrouter:anthropic.claude-opus-4-7": ProviderRoute(
             route_id="openrouter:anthropic.claude-opus-4-7",
@@ -529,6 +919,301 @@ def test_registry_merges_same_display_name_across_provider_sections(
         option["route_id"]
         for option in matching_groups[0]["provider_models"]
     } == set(routes)
+
+
+def test_registry_collapses_model_channel_suffixes_into_provider_routes(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+
+    endpoints = {
+        "ark-official": ProviderEndpoint(
+            endpoint_id="ark-official",
+            display_name="Ark Official",
+            protocol="ark_runtime",
+            base_url="https://ark.example/api/v3",
+            api_key="secret",
+            status="verified",
+            provider_kind="official",
+        ),
+        "openrouter": ProviderEndpoint(
+            endpoint_id="openrouter",
+            display_name="OpenRouter",
+            protocol="openai_compatible",
+            base_url="https://openrouter.example/api/v1",
+            api_key="secret",
+            status="verified",
+            provider_kind="third_party",
+        ),
+        "qiniu-anthropic": ProviderEndpoint(
+            endpoint_id="qiniu-anthropic",
+            display_name="Qiniu-Anthropic",
+            protocol="anthropic_compatible",
+            base_url="https://qiniu.example/anthropic",
+            api_key="secret",
+            status="verified",
+            provider_kind="third_party",
+        ),
+    }
+    text_profile = VerifiedProfile(
+        profile_id="text:chat",
+        capability="text_chat",
+        method_id="ark_chat",
+        request_mapper_id="ark_chat_text",
+        status="ready",
+    )
+    routes = {
+        "openrouter:deepseek.deepseek-v3.2": ProviderRoute(
+            route_id="openrouter:deepseek.deepseek-v3.2",
+            endpoint_id="openrouter",
+            route_slug="deepseek.deepseek-v3.2",
+            provider_model_id="deepseek/deepseek-v3.2",
+            canonical_id="deepseek.deepseek-v3.2",
+            display_name="DeepSeek V3.2",
+            status="verified",
+        ),
+        "ark-official:deepseek-v3-2-251201": ProviderRoute(
+            route_id="ark-official:deepseek-v3-2-251201",
+            endpoint_id="ark-official",
+            route_slug="deepseek-v3-2-251201",
+            provider_model_id="deepseek-v3-2-251201",
+            canonical_id="deepseek-v3-2-251201",
+            display_name="DeepSeek V3.2 251201",
+            status="verified",
+            verified_profiles=[text_profile],
+        ),
+        "openrouter:deepseek.deepseek-v3.2-exp": ProviderRoute(
+            route_id="openrouter:deepseek.deepseek-v3.2-exp",
+            endpoint_id="openrouter",
+            route_slug="deepseek.deepseek-v3.2-exp",
+            provider_model_id="deepseek/deepseek-v3.2-exp",
+            canonical_id="deepseek.deepseek-v3.2-exp",
+            display_name="DeepSeek V3.2 Exp",
+            status="verified",
+        ),
+        "qiniu-anthropic:deepseek.deepseek-v3.2-exp-thinking": ProviderRoute(
+            route_id="qiniu-anthropic:deepseek.deepseek-v3.2-exp-thinking",
+            endpoint_id="qiniu-anthropic",
+            route_slug="deepseek.deepseek-v3.2-exp-thinking",
+            provider_model_id="deepseek/deepseek-v3.2-exp-thinking",
+            canonical_id="deepseek.deepseek-v3.2-exp-thinking",
+            display_name="DeepSeek V3.2 Exp Thinking",
+            status="verified",
+        ),
+        "openrouter:deepseek.deepseek-v3.2-speciale": ProviderRoute(
+            route_id="openrouter:deepseek.deepseek-v3.2-speciale",
+            endpoint_id="openrouter",
+            route_slug="deepseek.deepseek-v3.2-speciale",
+            provider_model_id="deepseek/deepseek-v3.2-speciale",
+            canonical_id="deepseek.deepseek-v3.2-speciale",
+            display_name="DeepSeek V3.2 Speciale",
+            status="verified",
+        ),
+        "qiniu-anthropic:deepseek.deepseek-v3.2-speciale-or": ProviderRoute(
+            route_id="qiniu-anthropic:deepseek.deepseek-v3.2-speciale-or",
+            endpoint_id="qiniu-anthropic",
+            route_slug="deepseek.deepseek-v3.2-speciale-or",
+            provider_model_id="deepseek/deepseek-v3.2-speciale-or",
+            canonical_id="deepseek.deepseek-v3.2-speciale-or",
+            display_name="DeepSeek V3.2 Speciale Or",
+            status="verified",
+        ),
+    }
+    save_credentials(
+        LLMCredentialsFile(provider_endpoints=endpoints, provider_routes=routes),
+        active_credentials_path,
+    )
+    save_roles_file(roles_path, RolesData(), known_route_ids=set(routes))
+
+    response = client.get("/api/llm/registry")
+
+    assert response.status_code == 200
+    groups = {group["display_name"]: group for group in response.json()["model_groups"]}
+    assert "DeepSeek V3.2 251201" not in groups
+    assert "DeepSeek V3.2 Exp Thinking" not in groups
+    assert "DeepSeek V3.2 Speciale Or" not in groups
+    assert {
+        option["route_id"]
+        for option in groups["DeepSeek V3.2"]["provider_models"]
+    } == {
+        "openrouter:deepseek.deepseek-v3.2",
+        "ark-official:deepseek-v3-2-251201",
+    }
+    exp_options = {
+        option["route_id"]: option
+        for option in groups["DeepSeek V3.2 Exp"]["provider_models"]
+    }
+    assert set(exp_options) == {
+        "openrouter:deepseek.deepseek-v3.2-exp",
+        "qiniu-anthropic:deepseek.deepseek-v3.2-exp-thinking",
+    }
+    assert exp_options[
+        "qiniu-anthropic:deepseek.deepseek-v3.2-exp-thinking"
+    ]["capabilities"]["thinking_protocol"]["value"] is True
+    assert groups["DeepSeek V3.2 Exp"]["capability_summary"]["thinking"] == "mixed"
+    assert {
+        option["route_id"]
+        for option in groups["DeepSeek V3.2 Speciale"]["provider_models"]
+    } == {
+        "openrouter:deepseek.deepseek-v3.2-speciale",
+        "qiniu-anthropic:deepseek.deepseek-v3.2-speciale-or",
+    }
+
+
+def test_registry_groups_release_aliases_by_projected_model_identity(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings_dir = tmp_path / "settings"
+    monkeypatch.setattr(config, "APP_SETTINGS_DIR", settings_dir)
+    active_credentials_path = settings_dir / "llm" / "llm_credentials.json"
+    roles_path = settings_dir / "llm" / "llm_roles.yaml"
+
+    endpoints = {
+        "anthropic-official": ProviderEndpoint(
+            endpoint_id="anthropic-official",
+            display_name="Anthropic Official",
+            protocol="anthropic_compatible",
+            base_url="https://api.anthropic.com",
+            api_key="secret",
+            status="verified",
+            provider_kind="official",
+        ),
+        "ark-official": ProviderEndpoint(
+            endpoint_id="ark-official",
+            display_name="Ark Official",
+            protocol="ark_runtime",
+            base_url="https://ark.example/api/v3",
+            api_key="secret",
+            status="verified",
+            provider_kind="official",
+        ),
+        "openrouter": ProviderEndpoint(
+            endpoint_id="openrouter",
+            display_name="OpenRouter",
+            protocol="openai_compatible",
+            base_url="https://openrouter.example/api/v1",
+            api_key="secret",
+            status="verified",
+            provider_kind="third_party",
+        ),
+    }
+    ready_profile = VerifiedProfile(
+        profile_id="text:chat",
+        capability="text_chat",
+        method_id="chat",
+        request_mapper_id="chat_text",
+        status="ready",
+    )
+    routes = {
+        "openrouter:anthropic.claude-haiku-4-5": ProviderRoute(
+            route_id="openrouter:anthropic.claude-haiku-4-5",
+            endpoint_id="openrouter",
+            route_slug="anthropic.claude-haiku-4-5",
+            provider_model_id="anthropic/claude-haiku-4-5",
+            canonical_id="anthropic.claude-haiku-4-5",
+            display_name="Claude Haiku 4.5",
+            status="verified",
+        ),
+        "anthropic-official:claude-haiku-4-5-20251001": ProviderRoute(
+            route_id="anthropic-official:claude-haiku-4-5-20251001",
+            endpoint_id="anthropic-official",
+            route_slug="claude-haiku-4-5-20251001",
+            provider_model_id="claude-haiku-4-5-20251001",
+            canonical_id="claude-haiku-4-5-20251001",
+            display_name="Claude Haiku 4.5 20251001",
+            status="verified",
+            verified_profiles=[ready_profile],
+        ),
+        "openrouter:deepseek.deepseek-v4-flash": ProviderRoute(
+            route_id="openrouter:deepseek.deepseek-v4-flash",
+            endpoint_id="openrouter",
+            route_slug="deepseek.deepseek-v4-flash",
+            provider_model_id="deepseek/deepseek-v4-flash",
+            canonical_id="deepseek.deepseek-v4-flash",
+            display_name="DeepSeek V4 Flash",
+            status="verified",
+        ),
+        "ark-official:deepseek-v4-flash-260425": ProviderRoute(
+            route_id="ark-official:deepseek-v4-flash-260425",
+            endpoint_id="ark-official",
+            route_slug="deepseek-v4-flash-260425",
+            provider_model_id="deepseek-v4-flash-260425",
+            canonical_id="deepseek-v4-flash-260425",
+            display_name="DeepSeek V4 Flash 260425",
+            status="verified",
+            verified_profiles=[ready_profile],
+        ),
+        "openrouter:deepseek.deepseek-v4-flash-free": ProviderRoute(
+            route_id="openrouter:deepseek.deepseek-v4-flash-free",
+            endpoint_id="openrouter",
+            route_slug="deepseek.deepseek-v4-flash-free",
+            provider_model_id="deepseek/deepseek-v4-flash:free",
+            canonical_id="deepseek.deepseek-v4-flash:free",
+            display_name="DeepSeek V4 Flash Free",
+            status="verified",
+        ),
+        "openrouter:deepseek.deepseek-v3": ProviderRoute(
+            route_id="openrouter:deepseek.deepseek-v3",
+            endpoint_id="openrouter",
+            route_slug="deepseek.deepseek-v3",
+            provider_model_id="deepseek/deepseek-v3",
+            canonical_id="deepseek.deepseek-v3",
+            display_name="DeepSeek V3",
+            status="verified",
+        ),
+        "openrouter:deepseek.deepseek-v3-0324": ProviderRoute(
+            route_id="openrouter:deepseek.deepseek-v3-0324",
+            endpoint_id="openrouter",
+            route_slug="deepseek.deepseek-v3-0324",
+            provider_model_id="deepseek/deepseek-v3-0324",
+            canonical_id="deepseek.deepseek-v3-0324",
+            display_name="DeepSeek V3 0324",
+            status="verified",
+        ),
+    }
+    save_credentials(
+        LLMCredentialsFile(provider_endpoints=endpoints, provider_routes=routes),
+        active_credentials_path,
+    )
+    save_roles_file(roles_path, RolesData(), known_route_ids=set(routes))
+
+    response = client.get("/api/llm/registry")
+
+    assert response.status_code == 200
+    groups = {group["display_name"]: group for group in response.json()["model_groups"]}
+    assert "Claude Haiku 4.5 20251001" not in groups
+    assert "DeepSeek V4 Flash 260425" not in groups
+    assert "DeepSeek V4 Flash Free" not in groups
+    assert "DeepSeek V3 0324" not in groups
+    assert {
+        option["route_id"]
+        for option in groups["Claude Haiku 4.5"]["provider_models"]
+    } == {
+        "openrouter:anthropic.claude-haiku-4-5",
+        "anthropic-official:claude-haiku-4-5-20251001",
+    }
+    assert {
+        option["route_id"]
+        for option in groups["DeepSeek V4 Flash"]["provider_models"]
+    } == {
+        "openrouter:deepseek.deepseek-v4-flash",
+        "ark-official:deepseek-v4-flash-260425",
+        "openrouter:deepseek.deepseek-v4-flash-free",
+    }
+    assert {
+        option["route_id"]
+        for option in groups["DeepSeek V3"]["provider_models"]
+    } == {
+        "openrouter:deepseek.deepseek-v3",
+        "openrouter:deepseek.deepseek-v3-0324",
+    }
 
 
 def test_registry_returns_cooling_down_provider_when_route_circuit_is_active(
@@ -900,7 +1585,7 @@ def test_endpoint_test_probes_ark_official_catalog_models(
     assert "ark-official:doubao-lite-128k-240428" not in routes
 
 
-def test_endpoint_test_replaces_stale_routes_for_changed_endpoint(
+def test_endpoint_test_preserves_existing_routes_and_adds_discovered_models(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
@@ -960,7 +1645,7 @@ def test_endpoint_test_replaces_stale_routes_for_changed_endpoint(
 
     assert response.status_code == 200
     routes = response.json()["registry"]["provider_routes"]
-    assert "qiniu:old-openai-model" not in routes
+    assert routes["qiniu:old-openai-model"]["provider_model_id"] == "old-openai-model"
     assert routes["qiniu:new-anthropic-model"]["provider_model_id"] == "new-anthropic-model"
     assert routes["other:gpt-5"]["provider_model_id"] == "gpt-5"
 
@@ -1009,7 +1694,7 @@ def test_endpoint_test_treats_empty_model_list_as_reachable(
     assert body["discovered_model_count"] == 0
     assert endpoint["status"] == "unverified_manual"
     assert endpoint["last_test_message"] == "Endpoint reachable but returned no models."
-    assert body["registry"]["provider_routes"] == {}
+    assert "openai-direct:gpt-5" in body["registry"]["provider_routes"]
 
 
 def test_official_endpoint_test_persists_verified_profiles_and_excludes_catalog_only_models(
@@ -1031,6 +1716,27 @@ def test_official_endpoint_test_persists_verified_profiles_and_excludes_catalog_
                     provider_kind="official",
                 )
             },
+            provider_routes={
+                "openai-official:gpt-5-old": ProviderRoute(
+                    route_id="openai-official:gpt-5-old",
+                    endpoint_id="openai-official",
+                    route_slug="gpt-5-old",
+                    provider_model_id="gpt-5-old",
+                    canonical_id="gpt-5-old",
+                    status="verified",
+                    verified_profiles=[
+                        VerifiedProfile(
+                            profile_id="text_responses",
+                            capability="text_chat",
+                            method_id="openai_responses",
+                            request_mapper_id="openai_responses_text",
+                            status="ready",
+                            default=True,
+                            fallback_rank=1,
+                        )
+                    ],
+                )
+            },
         ),
         credentials_path(),
     )
@@ -1038,7 +1744,21 @@ def test_official_endpoint_test_persists_verified_profiles_and_excludes_catalog_
 
     async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
         assert (backend, api_key, base_url) == ("openai", "secret", "https://api.openai.com/v1")
-        return PingResult(latency_ms=42, model_ids=("gpt-5", "gpt-image-1"))
+        return PingResult(
+            latency_ms=42,
+            model_ids=("gpt-5", "gpt-image-1"),
+            model_capabilities={
+                "gpt-5": {
+                    "id": "gpt-5",
+                    "max_context_tokens": 400_000,
+                    "max_output_tokens": 128_000,
+                },
+                "gpt-image-1": {
+                    "id": "gpt-image-1",
+                    "max_output_tokens": 4_096,
+                },
+            },
+        )
 
     async def fake_probe_official_model_profiles(endpoint, model_id: str):
         del endpoint
@@ -1084,7 +1804,7 @@ def test_official_endpoint_test_persists_verified_profiles_and_excludes_catalog_
     assert endpoint["status"] == "verified"
     routes = body["registry"]["provider_routes"]
     assert profile_probe_calls == ["gpt-5", "gpt-image-1"]
-    assert list(routes) == ["openai-official:gpt-5"]
+    assert list(routes) == ["openai-official:gpt-5-old", "openai-official:gpt-5"]
     route = routes["openai-official:gpt-5"]
     assert route["status"] == "verified"
     assert route["verified_profiles"] == [
@@ -1126,12 +1846,30 @@ def test_official_endpoint_test_persists_verified_profiles_and_excludes_catalog_
             "last_probe_message": "No verified language route profile.",
             "model_type": "image_generation",
             "model_type_label": "Image generation model",
-            "candidate_methods": [],
+            "candidate_methods": ["openai_images"],
+            "input_modalities": ["text", "image"],
+            "output_modalities": ["image"],
+            "input_modalities_source": "provider_doc",
+            "output_modalities_source": "provider_doc",
+            "input_modalities_source_urls": [
+                "https://developers.openai.com/api/docs/models",
+                "https://developers.openai.com/api/docs/guides/image-generation",
+            ],
+            "output_modalities_source_urls": [
+                "https://developers.openai.com/api/docs/models",
+                "https://developers.openai.com/api/docs/guides/image-generation",
+            ],
+            "max_output_tokens": 4096,
+            "max_output_tokens_source": "api_list",
+            "max_output_tokens_source_urls": [
+                "https://developers.openai.com/api/docs/models",
+                "https://api.openai.com/v1/models",
+            ],
         }
     ]
 
 
-def test_official_profile_probe_tests_all_candidate_methods_and_keeps_fallbacks(
+def test_official_profile_probe_skips_reasoning_fallback_methods_after_success(
     monkeypatch,
 ) -> None:
     endpoint = ProviderEndpoint(
@@ -1169,7 +1907,6 @@ def test_official_profile_probe_tests_all_candidate_methods_and_keeps_fallbacks(
         ("gpt-5.2", "openai_responses"),
         ("gpt-5.2", "openai_chat_completions"),
         ("gpt-5.2", "openai_responses"),
-        ("gpt-5.2", "openai_chat_completions"),
     ]
     assert [
         (profile.capability, profile.method_id, profile.request_mapper_id, profile.default)
@@ -1177,8 +1914,54 @@ def test_official_profile_probe_tests_all_candidate_methods_and_keeps_fallbacks(
     ] == [
         ("text_chat", "openai_chat_completions", "openai_chat_completions_text", False),
         ("reasoning", "openai_responses", "openai_responses_reasoning", True),
-        ("reasoning", "openai_chat_completions", "openai_chat_completions_reasoning", False),
     ]
+
+
+def test_official_profile_probe_keeps_per_method_failure_attempts(monkeypatch) -> None:
+    endpoint = ProviderEndpoint(
+        endpoint_id="openai-official",
+        display_name="OpenAI Official",
+        protocol="openai_compatible",
+        base_url="https://api.openai.com/v1",
+        api_key="secret",
+        provider_kind="official",
+    )
+
+    async def fake_probe_official_call_method(endpoint, model_id: str, candidate):
+        del endpoint
+        return ModelProbeResult(
+            model_id=model_id,
+            status="invalid_model",
+            latency_ms=7,
+            message=f"{candidate.request_mapper_id} rejected",
+        )
+
+    monkeypatch.setattr(
+        llm_router,
+        "_probe_official_call_method",
+        fake_probe_official_call_method,
+    )
+
+    result = asyncio.run(
+        llm_router._probe_official_model_profile_result(endpoint, "gpt-5.2")
+    )
+
+    assert result.profiles == []
+    assert result.last_probe_message == (
+        "Endpoint model probe failed (invalid_model). openai_responses_text rejected"
+    )
+    assert result.probe_attempts[0] == {
+        "profile_id": "text:openai_responses",
+        "capability": "text_chat",
+        "method_id": "openai_responses",
+        "request_mapper_id": "openai_responses_text",
+        "status": "invalid_model",
+        "latency_ms": 7,
+        "message": "Endpoint model probe failed (invalid_model). openai_responses_text rejected",
+        "input_modalities": ["text"],
+        "output_modalities": ["text"],
+        "runtime_overrides": {"max_output_tokens": 16},
+    }
 
 
 def test_official_probe_candidates_cover_all_current_official_providers() -> None:
@@ -1229,13 +2012,128 @@ def test_official_probe_candidates_cover_all_current_official_providers() -> Non
                 provider_kind="official",
             ),
             "doubao-seed-2-0-pro-260215",
-            {"ark_chat", "ark_responses"},
+            {"ark_chat", "ark_responses", "ark_anthropic_messages"},
         ),
     ]
 
     for endpoint, model_id, expected_methods in cases:
         candidates = llm_router._official_language_probe_candidates(endpoint, model_id)
         assert {candidate.method_id for candidate in candidates} >= expected_methods
+
+
+def test_openai_instruct_models_use_legacy_completions_probe() -> None:
+    endpoint = ProviderEndpoint(
+        endpoint_id="openai-official",
+        display_name="OpenAI Official",
+        protocol="openai_compatible",
+        base_url="https://api.openai.com/v1",
+        api_key="secret",
+        provider_kind="official",
+    )
+
+    candidates = llm_router._official_language_probe_candidates(
+        endpoint,
+        "gpt-3.5-turbo-instruct",
+    )
+
+    assert [(candidate.method_id, candidate.request_mapper_id) for candidate in candidates] == [
+        ("openai_completions", "openai_completions_text")
+    ]
+
+
+def test_openai_pro_reasoning_uses_supported_effort_values() -> None:
+    endpoint = ProviderEndpoint(
+        endpoint_id="openai-official",
+        display_name="OpenAI Official",
+        protocol="openai_compatible",
+        base_url="https://api.openai.com/v1",
+        api_key="secret",
+        provider_kind="official",
+    )
+
+    legacy_pro = llm_router._official_language_probe_candidates(
+        endpoint,
+        "gpt-5-pro-2025-10-06",
+    )
+    next_pro = llm_router._official_language_probe_candidates(endpoint, "gpt-5.2-pro")
+
+    assert {candidate.method_id for candidate in legacy_pro} == {"openai_responses"}
+    assert [
+        candidate.runtime_settings["reasoning"]["effort"]
+        for candidate in legacy_pro
+        if candidate.method_id == "openai_responses"
+    ] == ["high", "high"]
+    assert [
+        candidate.runtime_settings["reasoning"]["effort"]
+        for candidate in next_pro
+        if candidate.method_id == "openai_responses" and "reasoning" in candidate.runtime_settings
+    ] == ["low", "medium", "high"]
+
+
+def test_ark_language_candidate_filter_includes_text_catalog_families() -> None:
+    endpoint = ProviderEndpoint(
+        endpoint_id="ark-official",
+        display_name="Ark Official",
+        protocol="ark_runtime",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key="secret",
+        provider_kind="official",
+    )
+
+    for model_id in ("qwen3-32b-20250429", "kimi-k2-250711", "mistral-7b-instruct-v0.2"):
+        assert llm_router._is_official_language_model_candidate(endpoint, model_id) is True
+        assert {
+            candidate.method_id
+            for candidate in llm_router._official_language_probe_candidates(endpoint, model_id)
+        } == {"ark_chat", "ark_responses", "ark_anthropic_messages"}
+
+
+def test_official_catalog_candidate_methods_cover_capability_library_models() -> None:
+    endpoints = {
+        "openai": ProviderEndpoint(
+            endpoint_id="openai-official",
+            display_name="OpenAI Official",
+            protocol="openai_compatible",
+            base_url="https://api.openai.com/v1",
+            api_key="secret",
+            provider_kind="official",
+        ),
+        "gemini": ProviderEndpoint(
+            endpoint_id="gemini-official",
+            display_name="Gemini Official",
+            protocol="google_genai",
+            base_url="https://generativelanguage.googleapis.com",
+            api_key="secret",
+            provider_kind="official",
+        ),
+        "ark": ProviderEndpoint(
+            endpoint_id="ark-official",
+            display_name="Ark Official",
+            protocol="ark_runtime",
+            base_url="https://ark.cn-beijing.volces.com/api/v3",
+            api_key="secret",
+            provider_kind="official",
+        ),
+    }
+    cases = [
+        (endpoints["openai"], "gpt-image-1", ["openai_images"]),
+        (endpoints["openai"], "text-embedding-3-large", ["openai_embeddings"]),
+        (endpoints["openai"], "gpt-4o-realtime-preview", ["openai_realtime"]),
+        (endpoints["gemini"], "imagen-4.0-generate-001", ["gemini_generate_images"]),
+        (endpoints["gemini"], "veo-3.1-generate-preview", ["gemini_generate_videos"]),
+        (endpoints["gemini"], "gemini-embedding-001", ["gemini_embed_content"]),
+        (endpoints["ark"], "doubao-seedream-5-0-260128", ["ark_images"]),
+        (endpoints["ark"], "doubao-seedance-2-0-260128", ["ark_video"]),
+        (endpoints["ark"], "doubao-embedding-vision-251215", ["ark_embeddings"]),
+        (endpoints["ark"], "doubao-seed-translation-250915", ["ark_translation"]),
+        (endpoints["ark"], "doubao-seed3d-2-0-260328", ["ark_3d"]),
+    ]
+
+    for endpoint, model_id, expected_methods in cases:
+        assert (
+            llm_router._official_catalog_capabilities(endpoint, model_id)["candidate_methods"]
+            == expected_methods
+        )
 
 
 def test_gemini_official_classifies_generation_models_outside_language_routes() -> None:
@@ -1267,7 +2165,27 @@ def test_gemini_official_classifies_generation_models_outside_language_routes() 
             "model_type": model_type,
             "model_type_label": label,
             "capability_library": True,
-            "candidate_methods": [],
+            "candidate_methods": llm_router._official_catalog_candidate_methods(
+                endpoint,
+                model_id,
+                model_type,
+            ),
+            "input_modalities": list(
+                llm_router._official_catalog_modalities(endpoint, model_id, model_type)[0]
+            ),
+            "output_modalities": list(
+                llm_router._official_catalog_modalities(endpoint, model_id, model_type)[1]
+            ),
+            "input_modalities_source": "provider_doc",
+            "output_modalities_source": "provider_doc",
+            "input_modalities_source_urls": llm_router._official_catalog_capabilities(
+                endpoint,
+                model_id,
+            )["input_modalities_source_urls"],
+            "output_modalities_source_urls": llm_router._official_catalog_capabilities(
+                endpoint,
+                model_id,
+            )["output_modalities_source_urls"],
         }
 
 
@@ -1317,7 +2235,13 @@ def test_gemini_interactions_only_models_are_catalog_agents_not_failed_language_
             "model_type": "interactions_agent",
             "model_type_label": "Interactions API agent",
             "capability_library": True,
-            "candidate_methods": [],
+            "candidate_methods": ["gemini_interactions"],
+            "input_modalities": [],
+            "output_modalities": [],
+            "input_modalities_source": "provider_doc",
+            "output_modalities_source": "provider_doc",
+            "input_modalities_source_urls": ["https://ai.google.dev/gemini-api/docs/models"],
+            "output_modalities_source_urls": ["https://ai.google.dev/gemini-api/docs/models"],
         }
 
 
@@ -1369,7 +2293,9 @@ def test_registry_normalizes_stale_gemini_interactions_failed_metadata(
         "last_probe_message": "No verified language route profile.",
         "model_type": "interactions_agent",
         "model_type_label": "Interactions API agent",
-        "candidate_methods": [],
+        "candidate_methods": ["gemini_interactions"],
+        "input_modalities": [],
+        "output_modalities": [],
     }
 
 
@@ -1392,13 +2318,48 @@ def test_official_endpoint_test_job_returns_compact_progress_without_registry(
                     provider_kind="official",
                 )
             },
+            provider_routes={
+                "openai-official:gpt-5-old": ProviderRoute(
+                    route_id="openai-official:gpt-5-old",
+                    endpoint_id="openai-official",
+                    route_slug="gpt-5-old",
+                    provider_model_id="gpt-5-old",
+                    canonical_id="gpt-5-old",
+                    status="verified",
+                    verified_profiles=[
+                        VerifiedProfile(
+                            profile_id="text_responses",
+                            capability="text_chat",
+                            method_id="openai_responses",
+                            request_mapper_id="openai_responses_text",
+                            status="ready",
+                            default=True,
+                            fallback_rank=1,
+                        )
+                    ],
+                )
+            },
         ),
         credentials_path(),
     )
 
     async def fake_ping_provider(backend: str, api_key: str, base_url: str) -> PingResult:
         assert (backend, api_key, base_url) == ("openai", "secret", "https://api.openai.com/v1")
-        return PingResult(latency_ms=42, model_ids=("gpt-5", "gpt-image-1"))
+        return PingResult(
+            latency_ms=42,
+            model_ids=("gpt-5", "gpt-image-1"),
+            model_capabilities={
+                "gpt-5": {
+                    "id": "gpt-5",
+                    "max_context_tokens": 400_000,
+                    "max_output_tokens": 128_000,
+                },
+                "gpt-image-1": {
+                    "id": "gpt-image-1",
+                    "max_output_tokens": 4_096,
+                },
+            },
+        )
 
     async def fake_probe_official_model_profiles(endpoint, model_id: str):
         del endpoint
@@ -1461,6 +2422,32 @@ def test_official_endpoint_test_job_returns_compact_progress_without_registry(
                 "model_type_label": "Language/reasoning model",
                 "capability_library": False,
                 "candidate_methods": ["openai_chat_completions", "openai_responses"],
+                "input_modalities": ["text", "image", "file"],
+                "output_modalities": ["text"],
+                "input_modalities_source": "provider_doc",
+                "output_modalities_source": "provider_doc",
+                "input_modalities_source_urls": [
+                    "https://developers.openai.com/api/docs/models",
+                    "https://developers.openai.com/api/reference/responses/overview",
+                    "https://developers.openai.com/api/docs/guides/images-vision",
+                    "https://developers.openai.com/api/docs/api-reference/files",
+                ],
+                "output_modalities_source_urls": [
+                    "https://developers.openai.com/api/docs/models",
+                    "https://developers.openai.com/api/reference/responses/overview",
+                ],
+                "max_input_tokens": 400000,
+                "max_input_tokens_source": "api_list",
+                "max_input_tokens_source_urls": [
+                    "https://developers.openai.com/api/docs/models",
+                    "https://api.openai.com/v1/models",
+                ],
+                "max_output_tokens": 128000,
+                "max_output_tokens_source": "api_list",
+                "max_output_tokens_source_urls": [
+                    "https://developers.openai.com/api/docs/models",
+                    "https://api.openai.com/v1/models",
+                ],
                 "verified_methods": ["openai_responses"],
                 "verified_profiles": [
                     {
@@ -1468,6 +2455,8 @@ def test_official_endpoint_test_job_returns_compact_progress_without_registry(
                         "capability": "text_chat",
                         "method_id": "openai_responses",
                         "request_mapper_id": "openai_responses_text",
+                        "input_modalities": ["text"],
+                        "output_modalities": ["text"],
                     }
                 ],
             },
@@ -1482,10 +2471,36 @@ def test_official_endpoint_test_job_returns_compact_progress_without_registry(
                 "model_type": "image_generation",
                 "model_type_label": "Image generation model",
                 "capability_library": True,
-                "candidate_methods": [],
+                "candidate_methods": ["openai_images"],
+                "input_modalities": ["text", "image"],
+                "output_modalities": ["image"],
+                "input_modalities_source": "provider_doc",
+                "output_modalities_source": "provider_doc",
+                "input_modalities_source_urls": [
+                    "https://developers.openai.com/api/docs/models",
+                    "https://developers.openai.com/api/docs/guides/image-generation",
+                ],
+                "output_modalities_source_urls": [
+                    "https://developers.openai.com/api/docs/models",
+                    "https://developers.openai.com/api/docs/guides/image-generation",
+                ],
+                "max_output_tokens": 4096,
+                "max_output_tokens_source": "api_list",
+                "max_output_tokens_source_urls": [
+                    "https://developers.openai.com/api/docs/models",
+                    "https://api.openai.com/v1/models",
+                ],
             },
         }
     ]
+    stored = json.loads(credentials_path().read_text(encoding="utf-8"))
+    assert (
+        stored["provider_routes"]["openai-official:gpt-5-old"]["provider_model_id"]
+        == "gpt-5-old"
+    )
+    route_caps = stored["provider_routes"]["openai-official:gpt-5"]["capabilities"]
+    assert route_caps["max_input_tokens"]["value"] == 400000
+    assert route_caps["max_output_tokens"]["value"] == 128000
 
 
 def test_official_endpoint_test_job_marks_only_active_probe_models_testing(
@@ -1644,7 +2659,19 @@ def test_official_endpoint_test_job_marks_language_candidates_failed_after_all_m
             "last_probe_message": "No verified language route profile.",
             "model_type": "image_generation",
             "model_type_label": "Image generation model",
-            "candidate_methods": [],
+            "candidate_methods": ["openai_images"],
+            "input_modalities": ["text", "image"],
+            "output_modalities": ["image"],
+            "input_modalities_source": "provider_doc",
+            "output_modalities_source": "provider_doc",
+            "input_modalities_source_urls": [
+                "https://developers.openai.com/api/docs/models",
+                "https://developers.openai.com/api/docs/guides/image-generation",
+            ],
+            "output_modalities_source_urls": [
+                "https://developers.openai.com/api/docs/models",
+                "https://developers.openai.com/api/docs/guides/image-generation",
+            ],
         },
         {
             "model_id": "gpt-5.2",
@@ -1654,6 +2681,34 @@ def test_official_endpoint_test_job_marks_language_candidates_failed_after_all_m
             "model_type": "language_reasoning",
             "model_type_label": "Language/reasoning model",
             "candidate_methods": ["openai_chat_completions", "openai_responses"],
+            "input_modalities": ["text", "image", "file"],
+            "output_modalities": ["text"],
+            "input_modalities_source": "provider_doc",
+            "output_modalities_source": "provider_doc",
+            "input_modalities_source_urls": [
+                "https://developers.openai.com/api/docs/models",
+                "https://developers.openai.com/api/reference/responses/overview",
+                "https://developers.openai.com/api/docs/guides/images-vision",
+                "https://developers.openai.com/api/docs/api-reference/files",
+            ],
+            "output_modalities_source_urls": [
+                "https://developers.openai.com/api/docs/models",
+                "https://developers.openai.com/api/reference/responses/overview",
+            ],
+            "max_input_tokens": 400000,
+            "max_input_tokens_source": "provider_doc",
+            "max_input_tokens_source_urls": [
+                "https://developers.openai.com/api/docs/models",
+                "https://developers.openai.com/api/reference/responses/overview",
+                "https://developers.openai.com/api/docs/models/gpt-5",
+            ],
+            "max_output_tokens": 128000,
+            "max_output_tokens_source": "provider_doc",
+            "max_output_tokens_source_urls": [
+                "https://developers.openai.com/api/docs/models",
+                "https://developers.openai.com/api/reference/responses/overview",
+                "https://developers.openai.com/api/docs/models/gpt-5",
+            ],
         },
     ]
 
@@ -1857,6 +2912,106 @@ def test_endpoint_scoped_manual_model_test_verifies_only_successful_models(
         ("openai", "secret", "https://api.openai.example/v1", "gpt-5-mini"),
         ("openai", "secret", "https://api.openai.example/v1", "missing-model"),
     ]
+
+
+def test_official_manual_model_test_uses_profile_probe_and_persists_attempts(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+    save_credentials(
+        LLMCredentialsFile(
+            provider_endpoints={
+                "openai-official": ProviderEndpoint(
+                    endpoint_id="openai-official",
+                    display_name="OpenAI Official",
+                    protocol="openai_compatible",
+                    base_url="https://api.openai.example/v1",
+                    api_key="secret",
+                    provider_kind="official",
+                    status="verified",
+                )
+            }
+        ),
+        credentials_path(),
+    )
+
+    async def unexpected_generic_probe(*_args, **_kwargs) -> ModelProbeResult:
+        raise AssertionError("official manual tests should use official profile probes")
+
+    async def fake_profile_probe(
+        endpoint: ProviderEndpoint,
+        model_id: str,
+    ) -> llm_router.OfficialModelProfileProbeResult:
+        assert endpoint.endpoint_id == "openai-official"
+        if model_id == "gpt-5-pro":
+            return llm_router.OfficialModelProfileProbeResult(
+                model_id=model_id,
+                profiles=[
+                    VerifiedProfile(
+                        profile_id="reasoning:openai_responses:gpt5_pro",
+                        capability="reasoning",
+                        method_id="openai_responses",
+                        request_mapper_id="openai_responses_reasoning",
+                        status="ready",
+                        default=True,
+                        fallback_rank=1,
+                        input_modalities=["text"],
+                        output_modalities=["text"],
+                    )
+                ],
+                probe_attempts=[
+                    {
+                        "profile_id": "reasoning:openai_responses:gpt5_pro",
+                        "method_id": "openai_responses",
+                        "request_mapper_id": "openai_responses_reasoning",
+                        "status": "ok",
+                    }
+                ],
+            )
+        return llm_router.OfficialModelProfileProbeResult(
+            model_id=model_id,
+            last_probe_message="Responses API rejected reasoning.effort low.",
+            probe_attempts=[
+                {
+                    "profile_id": "reasoning:openai_responses:gpt5_pro",
+                    "method_id": "openai_responses",
+                    "request_mapper_id": "openai_responses_reasoning",
+                    "status": "error",
+                    "message": "Responses API rejected reasoning.effort low.",
+                }
+            ],
+        )
+
+    monkeypatch.setattr(llm_router, "_probe_model", unexpected_generic_probe)
+    monkeypatch.setattr(llm_router, "_probe_official_model_profile_result", fake_profile_probe)
+
+    response = client.post(
+        "/api/llm/endpoints/openai-official/models/test",
+        json={"model_ids": ["gpt-5-pro", "bad-pro"]},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["results"] == [
+        {
+            "model_id": "gpt-5-pro",
+            "status": "ok",
+            "route_id": "openai-official:gpt-5-pro",
+            "message": None,
+        },
+        {
+            "model_id": "bad-pro",
+            "status": "error",
+            "route_id": None,
+            "message": "Responses API rejected reasoning.effort low.",
+        },
+    ]
+    route = body["registry"]["provider_routes"]["openai-official:gpt-5-pro"]
+    assert route["status"] == "verified"
+    assert route["verified_profiles"][0]["method_id"] == "openai_responses"
+    assert route["metadata"]["probe_attempts"][0]["status"] == "ok"
 
 
 def test_endpoint_test_does_not_resurrect_secret_cleared_during_probe(
@@ -2574,6 +3729,60 @@ def test_role_test_uses_persisted_role_and_ignores_draft_payload(
     assert "resolved_settings" in provider_result
 
 
+def test_role_test_job_reports_active_route_progress(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+    started = threading.Event()
+    release = threading.Event()
+
+    async def fake_probe_model(
+        backend: copilot_test.CopilotProvider,
+        api_key: str,
+        base_url: str,
+        model_id: str,
+        runtime_settings: dict[str, object] | None = None,
+    ) -> ModelProbeResult:
+        del backend, api_key, base_url, runtime_settings
+        started.set()
+        await asyncio.to_thread(release.wait)
+        return ModelProbeResult(model_id=model_id, status="ok")
+
+    monkeypatch.setattr(llm_router, "_probe_model", fake_probe_model)
+
+    start = client.post("/api/llm/roles/graph_agent/test-jobs")
+    assert start.status_code == 200
+    job_id = start.json()["job_id"]
+
+    try:
+        assert started.wait(timeout=2), "role probe did not start"
+        running = client.get(f"/api/llm/role-test-jobs/{job_id}")
+        assert running.status_code == 200
+        running_body = running.json()
+        assert running_body["status"] == "running"
+        assert running_body["provider_statuses"] == [
+            {
+                "canonical_id": "gpt-5",
+                "route_id": "openai-direct:gpt-5",
+                "status": "testing",
+                "message": None,
+            }
+        ]
+    finally:
+        release.set()
+
+    for _ in range(20):
+        finished = client.get(f"/api/llm/role-test-jobs/{job_id}").json()
+        if finished["status"] == "completed":
+            break
+        time.sleep(0.01)
+    assert finished["status"] == "completed"
+    assert finished["result"]["status"] == "ok"
+    assert finished["provider_statuses"][0]["status"] == "ok"
+
+
 def test_put_roles_preserves_advanced_model_bundles(
     client: TestClient,
     tmp_path: Path,
@@ -2601,6 +3810,77 @@ def test_put_roles_preserves_advanced_model_bundles(
     assert response.status_code == 200
     assert response.json()["model_bundles"]["premium_stack"]["display_name"] == "Premium Stack"
     assert "premium_stack" in load_roles_file(active_roles_path()).model_bundles
+
+
+def test_put_roles_materializes_model_bundle_groups_to_flat_route_chain(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+
+    response = client.put(
+        "/api/llm/roles",
+        json={
+            "schema_version": 3,
+            "model_profiles": {},
+            "model_bundles": {
+                "premium_stack": {
+                    "model_profile_id": "premium_stack",
+                    "display_name": "Premium Stack",
+                    "canonical_id": "bundle:premium_stack",
+                    "model_fallback_enabled": True,
+                    "intent": {"provider_preference": "manual_order"},
+                    "model_groups": [
+                        {
+                            "canonical_id": "gpt-5",
+                            "display_name": "GPT-5",
+                            "provider_models": [{"route_id": "openai-direct:gpt-5"}],
+                        }
+                    ],
+                    "fallback_chain": [],
+                }
+            },
+            "roles": {},
+        },
+    )
+
+    assert response.status_code == 200
+    bundle = response.json()["model_bundles"]["premium_stack"]
+    assert [entry["route_id"] for entry in bundle["fallback_chain"]] == ["openai-direct:gpt-5"]
+    saved = load_roles_file(active_roles_path()).model_bundles["premium_stack"]
+    assert [entry.route_id for entry in saved.fallback_chain] == ["openai-direct:gpt-5"]
+
+
+def test_delete_model_bundle_removes_persisted_bundle(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _seed(tmp_path, monkeypatch)
+    create = client.put(
+        "/api/llm/roles",
+        json={
+            "schema_version": 3,
+            "model_profiles": {},
+            "model_bundles": {
+                "premium_stack": {
+                    "model_profile_id": "premium_stack",
+                    "display_name": "Premium Stack",
+                    "canonical_id": "bundle:premium_stack",
+                    "fallback_chain": [{"route_id": "openai-direct:gpt-5"}],
+                }
+            },
+            "roles": {},
+        },
+    )
+    assert create.status_code == 200
+
+    response = client.delete("/api/llm/model-bundles/premium_stack")
+
+    assert response.status_code == 200
+    assert "premium_stack" not in response.json()["model_bundles"]
+    assert "premium_stack" not in load_roles_file(active_roles_path()).model_bundles
 
 
 def test_role_test_probes_role_routes_concurrently(

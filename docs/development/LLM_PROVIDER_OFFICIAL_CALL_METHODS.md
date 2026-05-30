@@ -1,7 +1,7 @@
 # Official LLM Provider Call Methods
 
 Status: Living
-Last verified: 2026-05-28
+Last verified: 2026-05-30
 
 This document records the official-provider API surfaces that Studio should treat as source-of-truth when seeding endpoints, routes, and model probes. It is based on:
 
@@ -14,6 +14,24 @@ This document records the official-provider API surfaces that Studio should trea
 - `Get Models` proves that credentials and model-list endpoint are reachable. It does not prove every returned model can satisfy a text chat probe.
 - Route probing must be capability-aware. A text chat probe should only classify text/chat-capable models. Image, audio, embedding, video, realtime, TTS, transcription, and vendor tool-only models need their own route capability and probe method.
 - Do not treat provider catalog entries as executable routes until they pass a probe for the relevant capability or are explicitly marked as catalog-only.
+- `candidate_methods` must be populated for every official catalog model, including capability-library rows that are not eligible for LLM Roles. Empty `candidate_methods` means Studio does not know how to test or route that catalog model yet.
+
+## Catalog Candidate Method Coverage
+
+Studio maps official catalog models to method families before deciding whether a row is a ready LLM route or a capability-library candidate.
+
+| Provider | Catalog model family | Candidate method ids |
+|---|---|---|
+| Anthropic | Claude language, vision, PDF/input models | `anthropic_messages` |
+| OpenAI | GPT/o/chat language and reasoning models | `openai_responses`, `openai_chat_completions`; legacy instruct models use `openai_completions` |
+| OpenAI | Image generation/editing | `openai_images` |
+| OpenAI | Audio / transcription / TTS / realtime | `openai_audio`, `openai_audio_transcriptions`, `openai_audio_speech`, `openai_realtime` |
+| OpenAI | Embedding / moderation / video | `openai_embeddings`, `openai_moderations`, `openai_videos` |
+| Gemini | Language, multimodal input, TTS-style GenerateContent models | `gemini_generate_content` |
+| Gemini | Imagen / Veo / embeddings / Interactions agents | `gemini_generate_images`, `gemini_generate_videos`, `gemini_embed_content`, `gemini_interactions` |
+| DeepSeek | Official text/reasoning models | `deepseek_chat_completions`, `deepseek_anthropic_messages` |
+| Ark | Language/reasoning models | `ark_responses`, `ark_chat`, `ark_anthropic_messages` |
+| Ark | Image / video / audio / embedding / translation / 3D models | `ark_images`, `ark_video`, `ark_audio`, `ark_embeddings`, `ark_translation`, `ark_3d` |
 
 ## Error Taxonomy From Probe
 
@@ -80,7 +98,7 @@ Fixed official entrypoints:
 | Modern text / multimodal input | `POST https://api.openai.com/v1/responses` | Preferred for new integrations. Use `max_output_tokens`. Supports text/image/audio inputs depending on model. |
 | Legacy chat text / vision / audio | `POST https://api.openai.com/v1/chat/completions` | Still supported. Use `max_completion_tokens`; `max_tokens` is deprecated and incompatible with o-series/reasoning models. |
 | Image generation/editing | `POST https://api.openai.com/v1/images/generations` and related Images API endpoints, or Responses with image generation tool | Same OpenAI API key. GPT Image models may require org verification. |
-| Audio | Audio endpoints or audio-capable Chat Completions requests | Same API key; requires audio-capable models and `modalities`/audio fields. |
+| Audio / realtime / embeddings / moderation / video | OpenAI capability-specific API endpoints | Same OpenAI API key; these stay out of LLM Roles until the consuming feature exists. |
 
 Probe interpretation:
 
@@ -92,7 +110,7 @@ Backend recommendation:
 
 - Add `openai_responses` as the primary official route protocol for modern OpenAI LLMs.
 - Keep `openai_chat_completions` as a compatibility protocol for models that explicitly work there.
-- Split modality routes: `openai_images`, `openai_audio`, `openai_embeddings`, `openai_realtime`, etc. Do not let text chat probe mark those as failed.
+- Split modality routes: `openai_images`, `openai_audio`, `openai_audio_transcriptions`, `openai_audio_speech`, `openai_embeddings`, `openai_moderations`, `openai_realtime`, and `openai_videos`. Do not let text chat probe mark those as failed.
 
 ## Anthropic Official
 
@@ -136,6 +154,9 @@ Fixed official entrypoints:
 |---|---|---|
 | Model list | `GET https://generativelanguage.googleapis.com/v1beta/models` | Models API returns supported actions; filter for `generateContent` when probing text/image/audio/video generation. |
 | Text / image / audio / video input to text | `POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent` | Same Gemini API key (`x-goog-api-key` or `key` query param). |
+| Embeddings | Gemini embedding API, e.g. `embedContent` | Candidate method `gemini_embed_content`; not an LLM Roles route. |
+| Image / video generation | Gemini generated-media APIs | Candidate methods `gemini_generate_images` and `gemini_generate_videos`; not LLM Roles routes. |
+| Interactions agents | Gemini Interactions-specific surface | Candidate method `gemini_interactions`; not a direct GenerateContent LLM route. |
 | Files | Gemini File API | Used for larger media or reuse across requests. |
 
 Probe interpretation:
@@ -148,7 +169,7 @@ Backend recommendation:
 
 - Official protocol should be `google_genai_generate_content`, not a user choice.
 - Model-list parsing should retain `supported_actions` and route only `generateContent` models to text/image/audio/video input probes.
-- Add separate generated-media protocols if Studio later supports Gemini image/video generation surfaces.
+- Preserve `candidate_methods` for generated-media, embedding, and Interactions catalog rows even when they are excluded from LLM Roles.
 
 ## DeepSeek Official
 
@@ -187,6 +208,7 @@ Official docs:
 - Ark docs home / API reference navigation: https://www.volcengine.com/docs/82379/?lang=zh
 - Responses API examples: https://www.volcengine.com/docs/82379/1338552
 - Tool calling via Responses API: https://www.volcengine.com/docs/82379/1958524
+- Third-party tool / Anthropic-compatible setup: https://www.volcengine.com/docs/82379/2160841?lang=zh
 - Image generation guide: https://www.volcengine.com/docs/82379/1548482
 - Audio understanding guide: https://www.volcengine.com/docs/82379/2377589
 
@@ -197,6 +219,7 @@ Fixed official entrypoints:
 | Model list | `GET https://ark.cn-beijing.volces.com/api/v3/models` | Bearer API key. |
 | Responses / agent / multimodal input | `POST https://ark.cn-beijing.volces.com/api/v3/responses` | Same Ark API key. Model list marks which models support Responses API / Chat API / multimodal understanding / tools. |
 | Chat | `POST https://ark.cn-beijing.volces.com/api/v3/chat/completions` | Same Ark API key; some older/current models are Chat API only. |
+| Anthropic-compatible Messages | `POST https://ark.cn-beijing.volces.com/api/compatible/v1/messages` | Same Ark API key via `ANTHROPIC_AUTH_TOKEN`; official docs list this base URL for Claude Code. |
 | Image generation/editing | `POST https://ark.cn-beijing.volces.com/api/v3/images/generations` | Same Ark API key; image models like Seedream use this surface. |
 | Other generated media / embeddings | Ark-specific video, 3D, embeddings APIs | Same Ark API key; should be separate route capabilities. |
 
@@ -210,7 +233,7 @@ Probe interpretation:
 Backend recommendation:
 
 - Parse Ark model-list capability columns or maintain a curated model capability map from official model-list docs.
-- Seed separate protocols/call methods: `ark_responses`, `ark_chat`, `ark_images`, `ark_audio`, `ark_embeddings_multimodal`, `ark_video`, etc.
+- Seed separate protocols/call methods: `ark_responses`, `ark_chat`, `ark_anthropic_messages`, `ark_images`, `ark_audio`, `ark_embeddings`, `ark_translation`, `ark_video`, `ark_3d`, etc.
 - For official Ark, do not ask user for protocol. The provider card should manage multiple default routes under the same API key.
 
 ## UX Implication For API Keys Page

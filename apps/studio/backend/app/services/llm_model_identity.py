@@ -13,6 +13,8 @@ class ModelIdentityProjection:
     display_name: str
     section_label: str
     confidence: str
+    tokens: tuple[str, ...] = ()
+    display_tokens: tuple[str, ...] = ()
     unknown_tokens: tuple[str, ...] = ()
 
 
@@ -43,6 +45,7 @@ _BRAND_TOKENS = {
 _VARIANT_TOKENS = {
     "base",
     "chat",
+    "exp",
     "flash",
     "free",
     "large",
@@ -52,6 +55,7 @@ _VARIANT_TOKENS = {
     "nano",
     "preview",
     "pro",
+    "speciale",
     "small",
     "terminus",
     "turbo",
@@ -111,6 +115,8 @@ def project_model_identity(
         display_name=display_name,
         section_label=section_label,
         confidence="high" if owner else "medium" if family != "unknown" else "low",
+        tokens=tuple(tokens),
+        display_tokens=tuple(display_tokens),
         unknown_tokens=unknown_tokens,
     )
 
@@ -136,7 +142,7 @@ def _tokenize_model_name(value: str) -> list[str]:
         ),
         protected,
     )
-    raw_tokens = re.split(r"[\s/_\-.]+", protected)
+    raw_tokens = re.split(r"[^A-Za-z0-9]+", protected)
     titleized = [
         _titleize_token(_restore_placeholder(token, placeholders))
         for token in raw_tokens

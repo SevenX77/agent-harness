@@ -38,9 +38,9 @@ import { appendProviderToModel, removeProviderFromRole, reorderProviderInRole } 
 import { IconTooltip } from "./IconTooltip"
 import {
   deriveRoleRouteStatus,
+  roleProviderRouteTooltip,
   roleRouteStatusDetail,
   roleRouteStatusSurfaceClass,
-  roleRouteStatusTooltip,
   RoleRouteStatusLight,
 } from "./role-route-status"
 
@@ -167,7 +167,12 @@ const ProviderTag = memo(function ProviderTag({
     roleFitEntry,
     testMessage: testStatus?.message,
   })
-  const statusTooltip = roleRouteStatus ? roleRouteStatusTooltip(roleRouteStatus, statusDetail) : null
+  const statusTooltip = roleRouteStatus ? roleProviderRouteTooltip({
+    status: roleRouteStatus,
+    providerModel,
+    fallbackProviderModelId: data.models[modelCode]?.providers[providerCode],
+    detail: statusDetail,
+  }) : null
   const {
     attributes,
     listeners,
@@ -240,7 +245,7 @@ const ProviderTag = memo(function ProviderTag({
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>{row}</TooltipTrigger>
-        <TooltipContent className="max-w-sm break-words">{statusTooltip}</TooltipContent>
+        <TooltipContent className="max-w-sm whitespace-pre-line break-words">{statusTooltip}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   )

@@ -14,7 +14,7 @@ import asyncio
 import hashlib
 import inspect
 import json
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -102,12 +102,16 @@ def build_options(
     base_url: str | None,
     api_key: str,
     workspace_dir: str | Path,
+    *,
+    env_overrides: Mapping[str, str] | None = None,
 ) -> ClaudeAgentOptions:
     """Build per-session Claude Agent SDK options without mutating os.environ."""
 
     env = {"ANTHROPIC_API_KEY": api_key}
     if base_url:
         env["ANTHROPIC_BASE_URL"] = base_url
+    if env_overrides:
+        env.update(env_overrides)
 
     return ClaudeAgentOptions(
         cwd=workspace_dir,
@@ -202,7 +206,7 @@ async def stream_query(
 
     failures: list[str] = []
     for route in routes:
-        api_key, base_url = _resolve_route_runtime(route)
+        api_key, base_url, env_overrides = _resolve_route_runtime(route)
         if not api_key:
             if len(routes) == 1:
                 yield CopilotEventError(
@@ -220,6 +224,7 @@ async def stream_query(
                 provider_code=route.endpoint_id,
                 base_url=base_url,
                 api_key=api_key,
+                env_overrides=env_overrides,
                 workspace_dir=workspace_dir or Path.cwd(),
             )
             await _ensure_client_connected(client)
@@ -253,6 +258,7 @@ async def get_or_create_session(
     provider_code: str | None = None,
     base_url: str | Path | None = None,
     api_key: str | None = None,
+    env_overrides: Mapping[str, str] | None = None,
     workspace_dir: str | Path | None = None,
 ) -> ClaudeSDKClient:
     """Return a cached SDK client for the skill/model/provider/credential tuple."""
@@ -265,7 +271,12 @@ async def get_or_create_session(
         session = _sessions.get(session_key)
         if session is None:
             session = _session_factory(
-                build_options(cast(str | None, base_url), api_key, workspace_dir)
+                build_options(
+                    cast(str | None, base_url),
+                    api_key,
+                    workspace_dir,
+                    env_overrides=env_overrides,
+                )
             )
             _sessions[session_key] = session
         return session
@@ -405,8 +416,36 @@ def _resolve_copilot_route(model_override: str | None) -> ResolvedRoute:
     return _resolve_copilot_routes(model_override)[0]
 
 
-def _resolve_route_runtime(route: ResolvedRoute) -> tuple[str, str | None]:
-    return route.api_key.get_secret_value().strip(), route.base_url.strip() or None
+def _resolve_route_runtime(route: ResolvedRoute) -> tuple[str, str | None, dict[str, str]]:
+    api_key = route.api_key.get_secret_value().strip()
+    base_url = route.base_url.strip() or None
+    env_overrides: dict[str, str] = {}
+    if route.call_method_id == "ark_anthropic_messages":
+        base_url = _ark_anthropic_base_url(route.base_url)
+        env_overrides["ANTHROPIC_AUTH_TOKEN"] = api_key
+        env_overrides["ANTHROPIC_MODEL"] = route.provider_model_id
+    elif route.call_method_id == "deepseek_anthropic_messages":
+        base_url = _deepseek_anthropic_base_url(route.base_url)
+        env_overrides["ANTHROPIC_MODEL"] = route.provider_model_id
+    return api_key, base_url, env_overrides
+
+
+def _ark_anthropic_base_url(base_url: str) -> str:
+    normalized = base_url.rstrip("/")
+    if normalized.endswith("/api/v3"):
+        normalized = normalized[: -len("/api/v3")]
+    if normalized.endswith("/api/compatible"):
+        return normalized
+    return f"{normalized}/api/compatible"
+
+
+def _deepseek_anthropic_base_url(base_url: str) -> str:
+    normalized = base_url.rstrip("/")
+    if normalized.endswith("/v1"):
+        normalized = normalized[:-3]
+    if normalized.endswith("/anthropic"):
+        return normalized
+    return f"{normalized}/anthropic"
 
 
 def _error_event_for_exception(exc: Exception) -> CopilotEventError:

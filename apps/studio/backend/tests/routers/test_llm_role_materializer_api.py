@@ -14,6 +14,7 @@ from app.models.llm_config import (
 from app.services.llm_credentials import save_credentials
 from app.services.llm_roles import save_roles_file
 from fastapi.testclient import TestClient
+from graph_agent_gateway.registry.schema import VerifiedProfile
 
 
 def _provider_endpoint(
@@ -611,6 +612,71 @@ def test_put_role_v3_thinking_required_unknown_blocks_with_needs_test(
     assert entry["route_id"] == route_id
     assert entry["role_fit"] == "needs_test"
     assert entry["warnings"][0]["code"] == "thinking_capability_unknown"
+
+
+def test_put_role_v3_thinking_required_uses_ready_verified_profile(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    route_id = "ready-provider:gpt-5"
+    credentials = LLMCredentialsFile(
+        provider_endpoints={"ready-provider": _provider_endpoint("ready-provider")},
+        provider_routes={
+            route_id: _provider_route(route_id).model_copy(
+                update={
+                    "verified_profiles": [
+                        VerifiedProfile(
+                            profile_id="thinking:anthropic_messages:manual",
+                            capability="thinking",
+                            method_id="anthropic_messages",
+                            request_mapper_id="anthropic_thinking_manual_budget",
+                            status="ready",
+                            default=True,
+                            fallback_rank=1,
+                            runtime_overrides={
+                                "max_output_tokens": 1025,
+                                "reasoning": {
+                                    "enabled": True,
+                                    "budget_tokens": 1024,
+                                },
+                            },
+                        )
+                    ],
+                }
+            )
+        },
+    )
+    _seed_materializer_registry(tmp_path, monkeypatch, credentials)
+
+    response = client.put(
+        "/api/llm/roles/analyst",
+        json={
+            "role_kind": "graph_agent",
+            "system_prompt_prefix": "",
+            "model_fallback_enabled": True,
+            "intent": {
+                "provider_preference": "manual_order",
+                "thinking": "required",
+            },
+            "model_groups": [
+                {
+                    "canonical_id": "gpt-5",
+                    "display_name": "GPT-5",
+                    "provider_models": [{"route_id": route_id}],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [entry["route_id"] for entry in body["fallback_chain"]] == [route_id]
+    assert body["fallback_chain"][0]["runtime_settings"]["reasoning"]["enabled"] is True
+    entry = body["materialization_report"]["entries"][0]
+    assert entry["route_id"] == route_id
+    assert entry["role_fit"] == "using"
+    assert entry["warnings"] == []
 
 
 def test_put_role_v3_returns_fresh_report_without_persisting_report(

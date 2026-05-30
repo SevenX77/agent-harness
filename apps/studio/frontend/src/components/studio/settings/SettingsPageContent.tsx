@@ -1,7 +1,8 @@
-import { KeyRound, Plug, Settings, X } from "lucide-react"
+import { Bot, KeyRound, Plug, Settings, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ApiKeysTab } from "./api-keys/ApiKeysTab"
+import { CopilotTab } from "./copilot/CopilotTab"
 import { GeneralTab } from "./GeneralTab"
 import { LlmRolesTab } from "./LlmRolesTab"
 import { SettingsErrorBoundary } from "./SettingsErrorBoundary"
@@ -30,6 +31,7 @@ export function SettingsPageContent({
   onProviderModelsUpdated,
   onRolesDataChange,
   onDeleteRole,
+  onDeleteModelBundle,
   onBeforeRoleTest,
 }: SettingsPageContentProps) {
   return (
@@ -52,6 +54,9 @@ export function SettingsPageContent({
           <NavButton active={activeTab === "llm_roles"} icon={<Plug />} onClick={() => onTabChange("llm_roles")}>
             LLM Roles
           </NavButton>
+          <NavButton active={activeTab === "copilot"} icon={<Bot />} onClick={() => onTabChange("copilot")}>
+            Copilot
+          </NavButton>
         </nav>
 
         {activeTab === "llm_roles" ? (
@@ -66,30 +71,39 @@ export function SettingsPageContent({
                   error={rolesError}
                   onChange={onRolesDataChange}
                   onDeleteRole={onDeleteRole}
+                  onDeleteModelBundle={onDeleteModelBundle}
                   onBeforeRoleTest={onBeforeRoleTest}
                 />
               </SettingsErrorBoundary>
             </div>
           </div>
+        ) : activeTab === "copilot" ? (
+          <ScrollArea className="flex-1">
+            <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 md:px-8 md:py-8">
+              <SettingsErrorBoundary label="Copilot">
+                <CopilotTab />
+              </SettingsErrorBoundary>
+            </div>
+          </ScrollArea>
         ) : (
           <ScrollArea className="flex-1">
             <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 md:px-8 md:py-8">
-            {activeTab === "general" ? <GeneralTab appSettings={appSettings} /> : null}
-            {activeTab === "api_keys" ? (
-              <ApiKeysTab
-                credentials={credentials}
-                credentialsLoading={credentialsLoading}
-                credentialsError={credentialsError}
-                drafts={drafts}
-                saveStatus={saveStatus}
-                onProviderFieldChange={onProviderFieldChange}
-                onGetProviderModels={onGetProviderModels}
-                onTestProviderEndpoint={onTestProviderEndpoint}
-                onDeleteProvider={onDeleteProvider}
-                onAddProvider={onAddProvider}
-                onProviderModelsUpdated={onProviderModelsUpdated}
-              />
-            ) : null}
+              {activeTab === "general" ? <GeneralTab appSettings={appSettings} /> : null}
+              {activeTab === "api_keys" ? (
+                <ApiKeysTab
+                  credentials={credentials}
+                  credentialsLoading={credentialsLoading}
+                  credentialsError={credentialsError}
+                  drafts={drafts}
+                  saveStatus={saveStatus}
+                  onProviderFieldChange={onProviderFieldChange}
+                  onGetProviderModels={onGetProviderModels}
+                  onTestProviderEndpoint={onTestProviderEndpoint}
+                  onDeleteProvider={onDeleteProvider}
+                  onAddProvider={onAddProvider}
+                  onProviderModelsUpdated={onProviderModelsUpdated}
+                />
+              ) : null}
             </div>
           </ScrollArea>
         )}

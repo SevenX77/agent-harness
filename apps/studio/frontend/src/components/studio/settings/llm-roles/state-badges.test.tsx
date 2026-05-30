@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest"
 import type { ProviderModelOption, ProviderUiState } from "@/api/llm"
 import { CoolingDownCountdown, formatCoolingDownRemaining } from "./cooling-down-countdown"
 import { ProviderStateBadge } from "./provider-state-badge"
-import { deriveRoleRouteStatus, roleRouteStatusDetail, RoleRouteStatusLight } from "./role-route-status"
+import {
+  deriveRoleRouteStatus,
+  roleProviderRouteTooltip,
+  roleRouteStatusDetail,
+  RoleRouteStatusLight,
+} from "./role-route-status"
 
 describe("LLM role state badges", () => {
   it("renders exactly the five provider state labels", () => {
@@ -52,6 +57,35 @@ describe("LLM role state badges", () => {
     expect(html).not.toContain("Downgraded")
     expect(html).not.toContain("Needs Test")
     expect(html).not.toContain("Not Fit")
+  })
+
+  it("builds provider row tooltip from the real model name, capabilities, and role fit", () => {
+    const tooltip = roleProviderRouteTooltip({
+      status: "runnable",
+      providerModel: providerModel("ready", {
+        provider_model_id: "claude-haiku-4-5-20251001",
+        capability_state: "known",
+        capabilities: {
+          verified_methods: { value: ["anthropic_messages"], source: "probed_verified" },
+          input_modalities: { value: ["text", "image", "pdf"], source: "probed_verified" },
+          output_modalities: { value: ["text"], source: "probed_verified" },
+          thinking_protocol: { value: true, source: "probed_verified" },
+          max_input_tokens: { value: { max: 200000 }, source: "provider_doc" },
+          max_output_tokens: { value: { max: 64000 }, source: "provider_doc" },
+        },
+      }),
+      detail: null,
+    })
+
+    expect(tooltip.split("\n")[0]).toContain("claude-haiku-4-5-20251001")
+    expect(tooltip.split("\n")[0]).toContain("reasoning")
+    expect(tooltip).toContain("Methods: anthropic_messages")
+    expect(tooltip).toContain("Input: text, image, PDF")
+    expect(tooltip).toContain("Output: text")
+    expect(tooltip).toContain("Max input: 200,000 tokens")
+    expect(tooltip).toContain("Max output: 64,000 tokens")
+    expect(tooltip).toContain("Role match: requirements satisfied.")
+    expect(tooltip).not.toContain("This route can run")
   })
 
   it("maps rich route and role-fit projections into three user states", () => {

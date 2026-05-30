@@ -354,9 +354,28 @@ export function appendModelGroupToRole(
   roleName: string,
   modelGroup: ModelGroup,
 ): RolesData {
-  if (!data.roles[roleName]) return data
+  return appendModelGroupToRoleWithResult(data, roleName, modelGroup).data
+}
+
+export function appendModelGroupToRoleWithResult(
+  data: RolesData,
+  roleName: string,
+  modelGroup: ModelGroup,
+): { data: RolesData; error: string | null } {
+  const modelLabel = modelGroup.display_name || modelGroup.canonical_id
+  if (!data.roles[roleName]) {
+    return {
+      data,
+      error: `Could not add ${modelLabel} to ${roleName}: role was not found.`,
+    }
+  }
   const selectedProviderModels = defaultProviderModelsForGroup(modelGroup)
-  if (selectedProviderModels.length === 0) return data
+  if (selectedProviderModels.length === 0) {
+    return {
+      data,
+      error: `Could not add ${modelLabel} to ${roleName}: no provider routes are available.`,
+    }
+  }
 
   const next = cloneRolesData(data)
   const modelCode = modelGroup.canonical_id
@@ -392,7 +411,19 @@ export function appendModelGroupToRole(
       }
     : { providers: providerIds }
   syncActiveModelToFirst(next, roleName)
-  return next
+  return { data: next, error: null }
+}
+
+export function modelDropFailureMessage({
+  modelId,
+  destination,
+  reason,
+}: {
+  modelId: string
+  destination: string
+  reason: string
+}): string {
+  return `Could not add ${modelId} to ${destination}: ${reason}.`
 }
 
 export function canonicalAvailableModelId(

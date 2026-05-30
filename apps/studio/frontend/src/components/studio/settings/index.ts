@@ -1,5 +1,6 @@
-export { SettingsPage, officialProviderTestSummary, upsertProviderModels, upsertProviderTestResponse } from "./SettingsPage"
+export { SettingsPage, officialProviderTestSummary, upsertProviderModels, upsertProviderModelsListResponse, upsertProviderTestResponse } from "./SettingsPage"
 export { SettingsPageContent } from "./SettingsPageContent"
+export { CopilotTab } from "./copilot/CopilotTab"
 export { LlmRolesTab } from "./LlmRolesTab"
 export { getModelAvailability, type ModelAvailability } from "./availability"
 export { draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, inferProviderType, notableProviderKeyForDraft, officialProviderDrafts, providerCachedTestResult, providerDraftForAction, providerTestParamsFingerprint, providerTestParamsMatch, shouldShowManualModelPanel, thirdPartyProviderDrafts } from "./provider-utils"

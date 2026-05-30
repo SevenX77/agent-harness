@@ -3,7 +3,7 @@ import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 import type { CredentialsState, ModelGroup, ModelInfo, ProviderType, RolesData } from "../../../api/llm"
 import type { AddProviderFormSubmission } from "../api-keys"
 
-export type SettingsTab = "general" | "api_keys" | "llm_roles"
+export type SettingsTab = "general" | "api_keys" | "llm_roles" | "copilot"
 
 export interface ProviderDraft {
   id: string
@@ -50,6 +50,7 @@ export interface SettingsPageContentProps {
   onProviderModelsUpdated: (providerId: string, models: ModelInfo[]) => void
   onRolesDataChange: (next: RolesData) => void
   onDeleteRole: (roleName: string) => void
+  onDeleteModelBundle: (bundleId: string) => void
   onBeforeRoleTest: () => Promise<RolesData | null>
 }
 

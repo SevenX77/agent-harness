@@ -11,25 +11,32 @@ interface RoleRouteStatusInput {
   testStatus?: RoleChainStatus
 }
 
+interface RoleProviderRouteTooltipInput {
+  status: RoleRouteStatus
+  providerModel?: ProviderModelOption
+  fallbackProviderModelId?: string | null
+  detail?: string | null
+}
+
 const statusMeta: Record<RoleRouteStatus, {
   label: string
   description: string
 }> = {
   runnable: {
     label: "Can Run",
-    description: "This route can run in this role.",
+    description: "Role match: requirements satisfied.",
   },
   limited: {
     label: "Limited",
-    description: "This route can run with limited or unverified role capabilities.",
+    description: "Role match: limited or unverified capabilities.",
   },
   blocked: {
     label: "Blocked",
-    description: "This route cannot currently run in this role.",
+    description: "Role match: blocked by route availability or required capabilities.",
   },
   testing: {
     label: "Testing",
-    description: "Testing this route in the role context.",
+    description: "Role match: testing this route.",
   },
 }
 
@@ -99,6 +106,36 @@ export function RoleRouteStatusLight({
 export function roleRouteStatusTooltip(status: RoleRouteStatus, detail?: string | null): string {
   const meta = statusMeta[status]
   return detail ? `${meta.label}: ${detail}` : meta.description
+}
+
+export function roleProviderRouteTooltip({
+  status,
+  providerModel,
+  fallbackProviderModelId,
+  detail,
+}: RoleProviderRouteTooltipInput): string {
+  const modelName = stringValue(providerModel?.provider_model_id)
+    ?? stringValue(fallbackProviderModelId)
+    ?? "Unknown model"
+  const headline = providerRouteHeadline(providerModel)
+  const lines = [
+    headline ? `${modelName} - ${headline}` : modelName,
+    `Role match: ${roleMatchDetail(status, detail)}`,
+  ]
+  const methods = stringListCapability(providerModel, "verified_methods")
+  const inputModalities = stringListCapability(providerModel, "input_modalities")
+  const outputModalities = stringListCapability(providerModel, "output_modalities")
+  const maxInputTokens = numericLimitCapability(providerModel, "max_input_tokens")
+  const maxOutputTokens = numericLimitCapability(providerModel, "max_output_tokens")
+
+  if (methods.length > 0) lines.push(`Methods: ${methods.join(", ")}`)
+  if (inputModalities.length > 0) lines.push(`Input: ${formatModalityList(inputModalities)}`)
+  if (outputModalities.length > 0) lines.push(`Output: ${formatModalityList(outputModalities)}`)
+  if (maxInputTokens !== null) lines.push(`Max input: ${formatNumber(maxInputTokens)} tokens`)
+  if (maxOutputTokens !== null) lines.push(`Max output: ${formatNumber(maxOutputTokens)} tokens`)
+  if (!providerModel || providerModel.capability_state === "unknown") lines.push("Capabilities: not listed")
+
+  return lines.join("\n")
 }
 
 export function roleRouteStatusAriaLabel(status: RoleRouteStatus, detail?: string | null): string {
@@ -220,4 +257,83 @@ function humanizeToken(value: string): string {
     .replace(/\s+/g, " ")
     .trim()
     .replace(/^\w/, (letter) => letter.toUpperCase())
+}
+
+function roleMatchDetail(status: RoleRouteStatus, detail?: string | null): string {
+  if (detail) return ensureSentence(detail)
+  if (status === "runnable") return "requirements satisfied."
+  if (status === "limited") return "limited or unverified capabilities."
+  if (status === "testing") return "testing this route."
+  return "blocked by route availability or required capabilities."
+}
+
+function providerRouteHeadline(providerModel?: ProviderModelOption): string | null {
+  if (!providerModel) return null
+  const state = providerModel.ui_state === "ready" ? "Verified" : humanizeToken(providerModel.ui_state)
+  const modes = providerRouteModes(providerModel)
+  return [state, modes.length > 0 ? `${modes.join(" + ")} route` : "route"].join(" ")
+}
+
+function providerRouteModes(providerModel: ProviderModelOption): string[] {
+  const inputModalities = stringListCapability(providerModel, "input_modalities")
+  const outputModalities = stringListCapability(providerModel, "output_modalities")
+  const modes: string[] = []
+  if (hasModality(inputModalities, "text") && hasModality(outputModalities, "text")) {
+    modes.push("text chat")
+  } else if (outputModalities.length > 0) {
+    modes.push(`${formatModalityList(outputModalities)} output`)
+  }
+  if (hasModality(inputModalities, "image")) modes.push("image input")
+  if (hasModality(inputModalities, "pdf")) modes.push("PDF input")
+  if (booleanCapability(providerModel, "thinking_protocol")
+    || booleanCapability(providerModel, "thinking")
+    || booleanCapability(providerModel, "reasoning")
+    || booleanCapability(providerModel, "supports_thinking")) {
+    modes.push("reasoning")
+  }
+  if (booleanCapability(providerModel, "tools") || booleanCapability(providerModel, "tool")) {
+    modes.push("tools")
+  }
+  return uniqueDetails(modes)
+}
+
+function stringListCapability(providerModel: ProviderModelOption | undefined, key: string): string[] {
+  const value = capabilityValue(providerModel, key)
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+  }
+  return typeof value === "string" && value.trim().length > 0 ? [value.trim()] : []
+}
+
+function booleanCapability(providerModel: ProviderModelOption, key: string): boolean {
+  const value = capabilityValue(providerModel, key)
+  return value === true || value === "true"
+}
+
+function numericLimitCapability(providerModel: ProviderModelOption | undefined, key: string): number | null {
+  const value = capabilityValue(providerModel, key)
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+  const max = (value as { max?: unknown }).max
+  return typeof max === "number" && Number.isFinite(max) ? max : null
+}
+
+function capabilityValue(providerModel: ProviderModelOption | undefined, key: string): unknown {
+  return providerModel?.capabilities[key]?.value
+}
+
+function hasModality(modalities: string[], expected: string): boolean {
+  return modalities.some((modality) => modality.toLowerCase() === expected)
+}
+
+function formatModalityList(modalities: string[]): string {
+  return modalities.map(formatModality).join(", ")
+}
+
+function formatModality(modality: string): string {
+  return modality.toLowerCase() === "pdf" ? "PDF" : modality
+}
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat("en-US").format(value)
 }

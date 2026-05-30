@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import type { CredentialsState, ModelGroup, RolesData } from "../../../api/llm"
 import { roleChainStatusKey } from "../../../hooks/useRoleTestChainRunner"
-import { AvailableModelDragPreview, LlmRolesTab, roleTestStatusesByRole, RoleSettingsFields } from "./LlmRolesTab"
+import { AvailableModelDragPreview, LlmRolesTab, modelDropFailureMessage, roleTestStatusesByRole, RoleSettingsFields } from "./LlmRolesTab"
 import {
   AvailableModelsSidebar,
   buildAvailableModelGroups,
@@ -12,7 +12,7 @@ import { AdvancedModelBundlesSection, modelBundleGroupsFromData } from "./llm-ro
 import { requestRoleDeleteConfirmation, RoleCard } from "./llm-roles/RoleCard"
 import { roleNameDisplayError, RoleNameDialog, RoleNameFields } from "./llm-roles/RoleNameDialog"
 import { RoleTestResultPanel } from "./llm-roles/RoleTestResultPanel"
-import { appendAvailableModelToRole, appendModelGroupToRole, appendRole, normalizeRolesDraft, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeModelFromRole, removeProviderFromRole, removeRole, renameRole, reorderModelInRole, reorderProviderInRole, validateRolesDraft } from "./role-utils"
+import { appendAvailableModelToRole, appendModelGroupToRole, appendModelGroupToRoleWithResult, appendRole, normalizeRolesDraft, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeModelFromRole, removeProviderFromRole, removeRole, renameRole, reorderModelInRole, reorderProviderInRole, validateRolesDraft } from "./role-utils"
 import { credentialsByProviderCode } from "./route-credentials"
 
 const toastMock = vi.hoisted(() => Object.assign(vi.fn(), {
@@ -194,6 +194,26 @@ describe("LlmRolesTab controls", () => {
     expect(html).not.toContain("canonical")
   })
 
+  it("omits Ready text from ready provider tags", () => {
+    const html = renderToStaticMarkup(
+      <AvailableModelsSidebar
+        modelGroups={[{
+          ...modelGroups[0],
+          provider_models: [{
+            ...modelGroups[0].provider_models[0],
+            provider_label: "Ark Official",
+            ui_state: "ready",
+          }],
+        }]}
+      />,
+    )
+    const providerTag = html.match(/<span[^>]*data-available-model-provider-label="true"[\s\S]*?<\/span><\/span>/)?.[0] ?? ""
+
+    expect(providerTag).toContain("Ark Official")
+    expect(providerTag).toContain('data-provider-state="ready"')
+    expect(providerTag).not.toContain("Ready")
+  })
+
   it("adds a model group to a role using every exact backend route id", () => {
     const next = appendModelGroupToRole(rolesData, "copilot_chat", modelGroups[0])
 
@@ -211,6 +231,26 @@ describe("LlmRolesTab controls", () => {
     ])
     expect(next.providers["anthropic-official:claude-sonnet-4-7"].name).toBe("Anthropic Official")
     expect(validateRolesDraft(next)).toBeNull()
+  })
+
+  it("returns a drop error when a model group has no provider routes", () => {
+    const result = appendModelGroupToRoleWithResult(rolesData, "copilot_chat", {
+      ...modelGroups[0],
+      canonical_id: "empty-bundle",
+      display_name: "Empty Bundle",
+      provider_models: [],
+    })
+
+    expect(result.data).toBe(rolesData)
+    expect(result.error).toBe("Could not add Empty Bundle to copilot_chat: no provider routes are available.")
+  })
+
+  it("formats model drop failures for Sonner", () => {
+    expect(modelDropFailureMessage({
+      modelId: "bundle:analyst_bundle",
+      destination: "Analyst",
+      reason: "source is no longer available",
+    })).toBe("Could not add bundle:analyst_bundle to Analyst: source is no longer available.")
   })
 
   it("keeps route provider endpoint ownership when adding a model group", () => {
@@ -395,7 +435,7 @@ describe("LlmRolesTab controls", () => {
     expect(html).toContain('data-provider-row-status-tooltip="true"')
     expect(html).toContain('data-role-route-status-light="true"')
     expect(html).toContain('aria-label="Role route status Can Run')
-    expect(html).toContain("Can Run:")
+    expect(html).not.toContain("This route can run in this role")
     expect(html).not.toMatch(/>Can Run<\/span>|>Limited<\/span>|>Blocked<\/span>/)
     expect(providerCardClass).toContain("border-success-border")
     expect(statusLightClass).toContain("size-1.5")
@@ -1125,7 +1165,9 @@ describe("LlmRolesTab controls", () => {
       ...rolesData,
       model_bundles: {
         premium_stack: {
+          model_profile_id: "premium_stack",
           display_name: "Premium Stack",
+          canonical_id: "bundle:premium_stack",
           fallback_chain: [
             { route_id: "anthropic-official:claude-sonnet-4-7" },
             { route_id: "qiniu-anthropic:claude-sonnet-4-7" },
@@ -1162,9 +1204,35 @@ describe("LlmRolesTab controls", () => {
   it("renders an advanced bundle authoring surface below role sections", () => {
     const bundledData: RolesData = {
       ...rolesData,
+      models: {
+        ...rolesData.models,
+        "claude-sonnet-4-7": {
+          name: "Claude Sonnet 4.7",
+          providers: {
+            "anthropic-official:claude-sonnet-4-7": "claude-sonnet-4-7",
+          },
+        },
+      },
+      providers: {
+        ...rolesData.providers,
+        "anthropic-official:claude-sonnet-4-7": {
+          name: "Anthropic Official",
+          type: "anthropic_compatible",
+          endpoint_id: "anthropic-official",
+        },
+      },
       model_bundles: {
         premium_stack: {
+          model_profile_id: "premium_stack",
           display_name: "Premium Stack",
+          canonical_id: "bundle:premium_stack",
+          model_fallback_enabled: true,
+          intent: { provider_preference: "manual_order" },
+          model_groups: [{
+            canonical_id: "claude-sonnet-4-7",
+            display_name: "Claude Sonnet 4.7",
+            provider_models: [{ route_id: "anthropic-official:claude-sonnet-4-7" }],
+          }],
           fallback_chain: [{ route_id: "anthropic-official:claude-sonnet-4-7" }],
         },
       },
@@ -1172,23 +1240,27 @@ describe("LlmRolesTab controls", () => {
     const html = renderToStaticMarkup(
       <AdvancedModelBundlesSection
         data={bundledData}
+        credentialsByCode={credentialsByProviderCode(bundledData, { providers: credentials.providers })}
+        modelDisplayNamesByCode={new Map([["claude-sonnet-4-7", "Claude Sonnet 4.7"]])}
         modelGroups={modelGroups}
         providerModelsByRouteId={new Map(modelGroups[0].provider_models.map((providerModel) => [
           providerModel.route_id,
           providerModel,
         ]))}
+        getActiveAvailableModelDragId={() => null}
         onChange={vi.fn()}
+        onDeleteBundle={vi.fn()}
       />,
     )
 
-    expect(html).toContain("Advanced Model Bundles")
+    expect(html).toContain("Model Bundles")
     expect(html).toContain("Premium Stack")
-    expect(html).toContain("Create Bundle")
+    expect(html).toContain("Add Model Bundle")
     expect(html).toContain("Anthropic Official")
     expect(html).toContain('data-slot="card"')
     expect(html).toContain('data-slot="item"')
-    expect(html).toContain('data-model-bundle-row="true"')
-    expect(html).not.toContain('data-model-bundle-card="true"')
+    expect(html).toContain('data-model-bundle-card="true"')
+    expect(html).not.toContain('data-model-bundle-row="true"')
     expect(html).not.toContain("model_profiles")
   })
 

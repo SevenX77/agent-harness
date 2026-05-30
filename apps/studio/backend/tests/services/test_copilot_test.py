@@ -41,8 +41,8 @@ def test_model_ids_collects_openai_style_data_ids_in_order() -> None:
     response = _response(
         {
             "data": [
-                {"id": "gpt-5"},
-                {"id": "gpt-5-mini"},
+                {"id": "gpt-5", "max_output_tokens": 128_000},
+                {"id": "gpt-5-mini", "max_output_tokens": 32_000},
                 {"id": "gpt-5"},
                 {"id": ""},
                 {"not_id": "ignored"},
@@ -52,14 +52,15 @@ def test_model_ids_collects_openai_style_data_ids_in_order() -> None:
 
     model_ids = getattr(copilot_test, "_model_ids", lambda _response: ())
     assert model_ids(response) == ("gpt-5", "gpt-5-mini")
+    assert copilot_test._model_capabilities(response)["gpt-5"]["max_output_tokens"] == 128_000
 
 
 def test_model_ids_collects_gemini_model_names_without_prefix() -> None:
     response = _response(
         {
             "models": [
-                {"name": "models/gemini-2.5-pro"},
-                {"name": "gemini-2.5-flash"},
+                {"name": "models/gemini-2.5-pro", "inputTokenLimit": 1_048_576},
+                {"name": "gemini-2.5-flash", "outputTokenLimit": 65_536},
                 {"name": 123},
             ]
         }
@@ -67,6 +68,20 @@ def test_model_ids_collects_gemini_model_names_without_prefix() -> None:
 
     model_ids = getattr(copilot_test, "_model_ids", lambda _response: ())
     assert model_ids(response) == ("gemini-2.5-pro", "gemini-2.5-flash")
+    assert (
+        copilot_test._model_capabilities(response)["gemini-2.5-pro"]["inputTokenLimit"]
+        == 1_048_576
+    )
+
+
+def test_official_call_method_timeout_allows_slow_openai_pro_responses() -> None:
+    timeout = copilot_test._official_call_method_timeout(
+        "openai_responses",
+        "gpt-5-pro-2025-10-06",
+        {"max_output_tokens": 64, "reasoning": {"enabled": True, "effort": "high"}},
+    )
+
+    assert timeout == 180.0
 
 
 def test_join_base_url_and_endpoint_deduplicates_protocol_prefixes() -> None:
@@ -182,6 +197,14 @@ async def test_request_official_call_method_generation_uses_method_specific_payl
         )
         await copilot_test._request_official_call_method_generation(
             client,
+            "openai_completions",
+            "secret",
+            "https://api.openai.example/v1",
+            "gpt-3.5-turbo-instruct",
+            runtime_settings={"max_output_tokens": 16},
+        )
+        await copilot_test._request_official_call_method_generation(
+            client,
             "ark_chat",
             "secret",
             "https://ark.cn-beijing.volces.com/api/v3",
@@ -196,6 +219,14 @@ async def test_request_official_call_method_generation_uses_method_specific_payl
             "deepseek-v4-pro",
             runtime_settings={"max_output_tokens": 1025, "reasoning": {"enabled": True, "budget_tokens": 1024}},
         )
+        await copilot_test._request_official_call_method_generation(
+            client,
+            "ark_anthropic_messages",
+            "ark-secret",
+            "https://ark.cn-beijing.volces.com/api/v3",
+            "doubao-seed-2-0-pro-260215",
+            runtime_settings={"max_output_tokens": 1025, "reasoning": {"enabled": True, "budget_tokens": 1024}},
+        )
 
     assert requests == [
         (
@@ -205,6 +236,14 @@ async def test_request_official_call_method_generation_uses_method_specific_payl
                 "input": "Reply with one short word.",
                 "max_output_tokens": 16,
                 "reasoning": {"effort": "low"},
+            },
+        ),
+        (
+            "https://api.openai.example/v1/completions",
+            {
+                "model": "gpt-3.5-turbo-instruct",
+                "prompt": "Reply with one short word.",
+                "max_tokens": 16,
             },
         ),
         (
@@ -220,6 +259,20 @@ async def test_request_official_call_method_generation_uses_method_specific_payl
             "https://api.deepseek.com/anthropic/v1/messages",
             {
                 "model": "deepseek-v4-pro",
+                "max_tokens": 1025,
+                "thinking": {"type": "enabled", "budget_tokens": 1024},
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": "Reply with one short word."}],
+                    }
+                ],
+            },
+        ),
+        (
+            "https://ark.cn-beijing.volces.com/api/compatible/v1/messages",
+            {
+                "model": "doubao-seed-2-0-pro-260215",
                 "max_tokens": 1025,
                 "thinking": {"type": "enabled", "budget_tokens": 1024},
                 "messages": [

@@ -52,14 +52,57 @@ def normalize_route_capabilities(
         )
     }
 
+    raw_input_modalities = _modalities_from_raw(raw, "input")
+    raw_output_modalities = _modalities_from_raw(raw, "output")
+    if raw_input_modalities:
+        normalized["input_modalities"] = CapabilityValue(value=raw_input_modalities, source=source)
+    if raw_output_modalities:
+        normalized["output_modalities"] = CapabilityValue(value=raw_output_modalities, source=source)
+
     max_output_runtime = _runtime_setting_capability(raw.get("max_output_tokens"))
     if max_output_runtime is not None:
         normalized["max_output_tokens"] = CapabilityValue(value=max_output_runtime, source=source)
     else:
-        max_output = _first_int(raw, "max_output_tokens", "max_tokens", "output_token_limit")
+        max_output = _first_int(
+            raw,
+            "max_output_tokens",
+            "maxOutputTokens",
+            "max_tokens",
+            "output_token_limit",
+            "outputTokenLimit",
+            "output_token_limit",
+        )
+        if max_output is None:
+            max_output = _first_int(
+                _mapping_value(raw, "token_limits"),
+                "max_output_token_length",
+                "max_output_tokens",
+                "output_token_limit",
+                "outputTokenLimit",
+            )
         if max_output is not None:
             normalized["max_output_tokens"] = CapabilityValue(value=max_output, source=source)
-    max_input = _first_int(raw, "max_input_tokens", "max_context_tokens", "context_length")
+    max_input = _first_int(
+        raw,
+        "max_input_tokens",
+        "maxInputTokens",
+        "input_token_limit",
+        "inputTokenLimit",
+        "max_context_tokens",
+        "max_context_length",
+        "context_window",
+        "context_length",
+    )
+    if max_input is None:
+        max_input = _first_int(
+            _mapping_value(raw, "token_limits"),
+            "max_input_token_length",
+            "max_input_tokens",
+            "input_token_limit",
+            "inputTokenLimit",
+            "context_window",
+            "context_length",
+        )
     if max_input is not None:
         normalized["max_input_tokens"] = CapabilityValue(value=max_input, source=source)
 
@@ -76,14 +119,18 @@ def normalize_route_capabilities(
         if runtime_capability is not None:
             normalized[runtime_key] = CapabilityValue(value=runtime_capability, source=source)
 
-    if _supported(raw.get("structured_outputs")):
+    if _supported(_provider_feature(raw, "structured_outputs")):
         normalized["structured_output_protocol"] = CapabilityValue(value=True, source=source)
-    if _supported(raw.get("image_input")) or _supported(raw.get("vision")):
+    if (
+        _supported(_provider_feature(raw, "image_input"))
+        or _supported(_provider_feature(raw, "vision"))
+        or "image" in raw_input_modalities
+    ):
         normalized["vision"] = CapabilityValue(value=True, source=source)
     if (
-        _supported(raw.get("tool_use"))
-        or _supported(raw.get("tool_calling"))
-        or _supported(raw.get("tools"))
+        _supported(_provider_feature(raw, "tool_use"))
+        or _supported(_provider_feature(raw, "tool_calling"))
+        or _supported(_provider_feature(raw, "tools"))
     ):
         normalized["tool_protocol"] = CapabilityValue(value=True, source=source)
 
@@ -94,7 +141,7 @@ def normalize_route_capabilities(
             message="Anthropic Messages API supports tool use for supported Claude chat models.",
         )
 
-    if protocol == "anthropic_compatible" and _supported(raw.get("thinking")):
+    if protocol == "anthropic_compatible" and _supported(_provider_feature(raw, "thinking")):
         manual_budget_supported = _anthropic_manual_thinking_budget_supported(provider_model_id)
         adaptive_supported = _anthropic_adaptive_thinking_supported(provider_model_id)
         normalized["thinking_protocol"] = CapabilityValue(value=True, source=source)
@@ -149,7 +196,7 @@ def normalize_route_capabilities(
                     "than max_output_tokens."
                 ),
             )
-    elif _supported(raw.get("thinking")):
+    elif _supported(_provider_feature(raw, "thinking")):
         normalized["thinking_protocol"] = CapabilityValue(value=True, source=source)
 
     return normalized
@@ -230,6 +277,54 @@ def _first_int(raw: Mapping[str, Any], *keys: str) -> int | None:
     return None
 
 
+def _mapping_value(raw: Mapping[str, Any], key: str) -> Mapping[str, Any]:
+    value = raw.get(key)
+    return value if isinstance(value, Mapping) else {}
+
+
+def _provider_feature(raw: Mapping[str, Any], key: str) -> object:
+    direct = raw.get(key)
+    if direct is not None:
+        return direct
+    capabilities = _mapping_value(raw, "capabilities")
+    if key in capabilities:
+        return capabilities[key]
+    features = _mapping_value(raw, "features")
+    return features.get(key)
+
+
+def _modalities_from_raw(raw: Mapping[str, Any], direction: Literal["input", "output"]) -> list[str]:
+    snake_key = f"{direction}_modalities"
+    camel_key = f"{direction}Modalities"
+    candidates = [
+        raw.get(snake_key),
+        raw.get(camel_key),
+        _mapping_value(raw, "modalities").get(snake_key),
+        _mapping_value(raw, "modalities").get(camel_key),
+    ]
+    for candidate in candidates:
+        modalities = _string_list(candidate)
+        if modalities:
+            return modalities
+    return []
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        normalized = item.strip().lower()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
+
+
 def _supported(value: object) -> bool:
     if isinstance(value, bool):
         return value
@@ -237,6 +332,7 @@ def _supported(value: object) -> bool:
         supported = value.get("supported")
         if isinstance(supported, bool):
             return supported
+        return any(isinstance(child, bool) and child for child in value.values())
     return False
 
 

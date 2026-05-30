@@ -28,7 +28,11 @@ from graph_agent_gateway.registry.schema import (
 )
 from graph_agent_gateway.registry.schema import (
     ModelProfile as GatewayModelProfile,
+)
+from graph_agent_gateway.registry.schema import (
     ProviderEndpoint as GatewayProviderEndpoint,
+)
+from graph_agent_gateway.registry.schema import (
     ProviderRoute as GatewayProviderRoute,
 )
 from graph_agent_gateway.registry.schema import (
@@ -196,6 +200,29 @@ class RoleEntry(GatewayRoleEntry):
     )
 
 
+class ModelBundle(BaseModel):
+    """Studio-authored reusable model-group bundle plus generated flat route chain."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model_profile_id: str
+    display_name: str
+    canonical_id: str
+    tags: list[str] = Field(default_factory=list)
+    model_fallback_enabled: bool = True
+    intent: RoleIntent = Field(default_factory=RoleIntent)
+    model_groups: list[RoleModelGroup] = Field(default_factory=list)
+    fallback_chain: list[RoleRouteEntry] = Field(default_factory=list)
+    lint_requirements: dict[str, Literal["off", "warn", "error"]] = Field(default_factory=dict)
+    materialization_report: dict[str, Any] = Field(
+        default_factory=lambda: {
+            "entries": [],
+            "warnings": [],
+            "skipped_provider_details": [],
+        }
+    )
+
+
 class RolesData(BaseModel):
     """Schema stored at the active Studio LLM roles path."""
 
@@ -203,7 +230,7 @@ class RolesData(BaseModel):
 
     schema_version: Literal[2, 3] = 2
     model_profiles: dict[str, ModelProfile] = Field(default_factory=dict)
-    model_bundles: dict[str, ModelProfile] = Field(default_factory=dict)
+    model_bundles: dict[str, ModelBundle] = Field(default_factory=dict)
     roles: dict[str, RoleEntry] = Field(default_factory=dict)
 
     @field_validator("roles", mode="before")
@@ -269,6 +296,7 @@ __all__ = [
     "LLMCredentialsFile",
     "LintResult",
     "ModelInfo",
+    "ModelBundle",
     "ModelProfile",
     "ProbeResult",
     "ProviderEndpoint",

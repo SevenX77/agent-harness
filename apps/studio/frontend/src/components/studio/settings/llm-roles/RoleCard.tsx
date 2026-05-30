@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent } from "react"
+import { toast } from "sonner"
 import {
   closestCenter,
   DndContext,
@@ -39,7 +40,8 @@ import type { CredentialsState, MaterializationReportEntry, ModelGroup, Provider
 import type { RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
 import {
   AVAILABLE_MODEL_DRAG_TYPE,
-  appendModelGroupToRole,
+  appendModelGroupToRoleWithResult,
+  modelDropFailureMessage,
   renameRole,
   reorderModelInRole,
   toggleModelFallback,
@@ -135,8 +137,20 @@ export const RoleCard = memo(function RoleCard({
       event.dataTransfer.getData("text/plain") ||
       getActiveAvailableModelDragId()
     const modelGroup = modelId ? getAvailableModelGroup(modelId) : null
-    if (!modelGroup) return
-    onChange(appendModelGroupToRole(data, roleName, modelGroup))
+    if (!modelGroup) {
+      toast.error(modelDropFailureMessage({
+        modelId: modelId || "unknown model",
+        destination: roleName,
+        reason: "source is no longer available",
+      }))
+      return
+    }
+    const result = appendModelGroupToRoleWithResult(data, roleName, modelGroup)
+    if (result.error) {
+      toast.error(result.error)
+      return
+    }
+    onChange(result.data)
   }
 
   function clearActionsOpenTimer() {
@@ -365,7 +379,7 @@ export const RoleCard = memo(function RoleCard({
   )
 })
 
-function roleOutputLimitSummary(
+export function roleOutputLimitSummary(
   role: RolesData["roles"][string],
   providerModelsByRouteId: ReadonlyMap<string, ProviderModelOption>,
 ): OutputLimitSummary {

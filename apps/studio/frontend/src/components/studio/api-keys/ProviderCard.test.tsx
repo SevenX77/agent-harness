@@ -71,6 +71,11 @@ function renderCardHtml({
   )
 }
 
+function routeTagHtml(html: string, modelId: string): string {
+  const modelIndex = html.indexOf(modelId)
+  return html.slice(html.lastIndexOf("<button", modelIndex), html.indexOf("</button>", modelIndex))
+}
+
 describe("ProviderCard API key masking", () => {
   it("renders API key as a native password input by default", () => {
     const html = renderCardHtml()
@@ -503,14 +508,12 @@ describe("ProviderCard provider capabilities", () => {
     expect(html).toContain("Available Routes:")
     expect(html).not.toContain("Available Models:")
 
-    const verifiedIndex = html.indexOf(">gpt-5</button>")
-    const verifiedTag = html.slice(html.lastIndexOf("<button", verifiedIndex), html.indexOf("</button>", verifiedIndex))
+    const verifiedTag = routeTagHtml(html, "gpt-5")
     expect(verifiedTag).toContain('data-slot="tooltip-trigger"')
     expect(verifiedTag).toContain('data-variant="success"')
     expect(verifiedTag).toContain('data-route-status="verified"')
 
-    const failedIndex = html.indexOf(">gpt-image-1</button>")
-    const failedTag = html.slice(html.lastIndexOf("<button", failedIndex), html.indexOf("</button>", failedIndex))
+    const failedTag = routeTagHtml(html, "gpt-image-1")
     expect(failedTag).toContain('data-slot="tooltip-trigger"')
     expect(failedTag).toContain('data-variant="destructive"')
     expect(failedTag).toContain('data-route-status="failed"')
@@ -551,13 +554,11 @@ describe("ProviderCard provider capabilities", () => {
       />,
     )
 
-    const modelIndex = html.indexOf(">gpt-5.2")
-    const tag = html.slice(html.lastIndexOf("<button", modelIndex), html.indexOf("</button>", modelIndex))
+    const tag = routeTagHtml(html, "gpt-5.2")
     expect(tag).toContain('data-route-status="testing"')
     expect(tag).toContain("api-route-tag-border-flow")
 
-    const idleIndex = html.indexOf(">gpt-5.3</button>")
-    const idleTag = html.slice(html.lastIndexOf("<button", idleIndex), html.indexOf("</button>", idleIndex))
+    const idleTag = routeTagHtml(html, "gpt-5.3")
     expect(idleTag).toContain('data-route-status="unverified_manual"')
     expect(idleTag).not.toContain("api-route-tag-border-flow")
   })
@@ -585,12 +586,73 @@ describe("ProviderCard provider capabilities", () => {
       />,
     )
 
-    const modelIndex = html.indexOf(">gpt-image-1</button>")
-    const tag = html.slice(html.lastIndexOf("<button", modelIndex), html.indexOf("</button>", modelIndex))
+    const tag = routeTagHtml(html, "gpt-image-1")
     expect(tag).toContain('data-variant="multimodal"')
     expect(tag).toContain('data-model-type="image_generation"')
+    expect(tag).toContain('data-input-modalities="text,image"')
+    expect(tag).toContain('data-output-modalities="image"')
+    expect(tag).toContain("lucide-file-text")
+    expect(tag).toContain("lucide-image")
     expect(tag).not.toContain("title=")
     expect(tag).toContain("Image generation model")
+    expect(html).toContain("Input: text, image")
+    expect(html).toContain("Output: image")
+    expect(html).toContain("Max input: not listed")
+    expect(html).toContain("Max output: not listed")
+    expect(html).not.toContain("Modalities are inferred from model type, not capability-probed.")
+  })
+
+  it("renders input and output modality icons on official route tags", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({ id: "openai-official", name: "OpenAI Official" })}
+        persisted={makePersisted({
+          id: "openai-official",
+          name: "OpenAI Official",
+          available_models: [
+            {
+              id: "gpt-image-1",
+              status: "unverified_manual",
+              capabilities: {
+                model_type: "image_generation",
+                model_type_label: "Image generation model",
+                input_modalities: ["text", "image"],
+                output_modalities: ["image"],
+                input_modalities_source: "provider_doc",
+                output_modalities_source: "provider_doc",
+                input_modalities_source_urls: ["https://developers.openai.com/api/docs/guides/image-generation"],
+                output_modalities_source_urls: ["https://developers.openai.com/api/docs/guides/image-generation"],
+                max_input_tokens: 8192,
+                max_input_tokens_source: "api_list",
+                max_input_tokens_source_urls: ["https://api.openai.com/v1/models"],
+                max_output_tokens: 128000,
+                max_output_tokens_source: "provider_doc",
+              },
+            },
+          ],
+        })}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="official"
+      />,
+    )
+
+    const tag = routeTagHtml(html, "gpt-image-1")
+    expect(tag).toContain('data-input-modalities="text,image"')
+    expect(tag).toContain('data-output-modalities="image"')
+    expect(tag).toContain("lucide-file-text")
+    expect(tag).toContain("lucide-image")
+    expect(html).toContain("Input: text, image")
+    expect(html).toContain("Output: image")
+    expect(html).toContain("Max input: 8k tokens")
+    expect(html).toContain("Max output: 128k tokens")
+    expect(html).not.toContain("provider model catalog")
+    expect(html).not.toContain("Modalities are from provider documentation.")
+    expect(html).not.toContain("Source URLs:")
+    expect(html).not.toContain("https://developers.openai.com/api/docs/guides/image-generation")
+    expect(html).not.toContain("https://api.openai.com/v1/models")
   })
 
   it("keeps generated multimodal official entries multimodal-colored even if stale data marked them verified", () => {
@@ -626,8 +688,7 @@ describe("ProviderCard provider capabilities", () => {
       />,
     )
 
-    const modelIndex = html.indexOf(">gemini-3-pro-image</button>")
-    const tag = html.slice(html.lastIndexOf("<button", modelIndex), html.indexOf("</button>", modelIndex))
+    const tag = routeTagHtml(html, "gemini-3-pro-image")
     expect(tag).toContain('data-variant="multimodal"')
     expect(tag).not.toContain('data-variant="success"')
     expect(tag).toContain('data-model-type="image_generation"')
@@ -677,8 +738,7 @@ describe("ProviderCard provider capabilities", () => {
       />,
     )
 
-    const modelIndex = html.indexOf(">gpt-5.2")
-    const tag = html.slice(html.lastIndexOf("<button", modelIndex), html.indexOf("</button>", modelIndex))
+    const tag = routeTagHtml(html, "gpt-5.2")
     expect(tag).toContain("Verified text chat + reasoning route")
     expect(html).toContain("Methods: openai_responses")
     expect(html).not.toContain("profiles")
@@ -755,10 +815,49 @@ describe("ProviderCard provider capabilities", () => {
     )
 
     expect(html).toContain("Route test failed: Provider returned HTTP 404 (NOT_FOUND). This model models/gemini-3-pro-preview is no longer available.")
-    const modelIndex = html.indexOf(">gemini-3-pro-preview</button>")
-    const tag = html.slice(html.lastIndexOf("<button", modelIndex), html.indexOf("</button>", modelIndex))
+    const tag = routeTagHtml(html, "gemini-3-pro-preview")
     expect(tag).toContain('data-model-type="language_reasoning"')
     expect(tag).not.toContain("title=")
+  })
+
+  it("surfaces per-method official probe attempts in failed route tooltips", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({ id: "openai-official", name: "OpenAI Official" })}
+        persisted={makePersisted({
+          id: "openai-official",
+          name: "OpenAI Official",
+          available_models: [
+            {
+              id: "gpt-5.2-pro",
+              status: "failed",
+              last_probe_message: "No official language call method passed for this model.",
+              capabilities: {
+                model_type: "language_reasoning",
+                model_type_label: "Language/reasoning model",
+                probe_attempts: [
+                  {
+                    method_id: "openai_responses",
+                    profile_id: "reasoning:openai_responses",
+                    status: "invalid_model",
+                    message: "Provider returned HTTP 400 (unsupported_value). Unsupported value: low.",
+                  },
+                ],
+              },
+            },
+          ],
+        })}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="official"
+      />,
+    )
+
+    expect(html).toContain("Attempts:")
+    expect(html).toContain("openai_responses/reasoning:openai_responses")
+    expect(html).toContain("Unsupported value: low.")
   })
 
   it("marks verified thinking routes with a compact brain icon", () => {
@@ -805,8 +904,7 @@ describe("ProviderCard provider capabilities", () => {
       />,
     )
 
-    const modelIndex = html.indexOf(">gemini-3.1-pro-preview")
-    const tag = html.slice(html.lastIndexOf("<button", modelIndex), html.indexOf("</button>", modelIndex))
+    const tag = routeTagHtml(html, "gemini-3.1-pro-preview")
     expect(tag).toContain('data-reasoning-route="true"')
     expect(tag).toContain("lucide-brain")
     expect(tag).toContain("Verified text chat + reasoning route")

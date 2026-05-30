@@ -40,6 +40,13 @@ from pathlib import Path
 from typing import Any
 
 from graph_agent.callbacks import LoggingCallback, TracingCallback
+from graph_agent.callbacks.events import (
+    CallbackEvent,
+    PhaseEndEvent,
+    PhaseStartEvent,
+    RunEndedEvent,
+    RunStartedEvent,
+)
 from graph_agent.core.exceptions import (
     GraphAgentError,
     LoaderError,
@@ -50,6 +57,7 @@ from graph_agent.core.exceptions import (
 from graph_agent.core.local_workspace_resolver import LocalWorkspaceResolver
 from graph_agent.core.result import WorkflowMetrics, WorkflowResult
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol, require_skill_resolver
+from graph_agent.runtime.state import normalize_blackboard_data
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +222,38 @@ def _prepare_v030_callbacks(
     return active_callbacks
 
 
+def _emit_v030_event(callbacks: list[Any], event: CallbackEvent) -> None:
+    for callback in callbacks:
+        on_event = getattr(callback, "on_event", None)
+        if callable(on_event):
+            on_event(event)
+
+
+def _save_v030_trace(callbacks: list[Any], trace_output: Path | None) -> str | None:
+    if trace_output is None:
+        return None
+    saved_trace_path: str | None = None
+    for callback in callbacks:
+        if isinstance(callback, TracingCallback):
+            try:
+                saved_trace_path = callback.save(trace_output)
+            except Exception as exc:
+                raise TraceWriteError(
+                    f"trace save failed: {exc}",
+                    context={"trace_path": str(trace_output)},
+                ) from exc
+    return saved_trace_path
+
+
+def _v030_phase_context(data: dict[str, Any] | None) -> dict[str, Any]:
+    normalized = normalize_blackboard_data(data)
+    return {
+        "inputs": dict(normalized["inputs"]),
+        "phase_outputs": dict(normalized["phase_outputs"]),
+        "scratch": dict(normalized["scratch"]),
+    }
+
+
 def _run_v030_skill_dict(
     skill_root: Path,
     *,
@@ -237,6 +277,7 @@ def _run_v030_skill_dict(
         effective_trace_dir = Path(inputs["output_dir"]) / "traces"
     trace_output = Path(effective_trace_dir) if effective_trace_dir is not None else None
     active_callbacks = _prepare_v030_callbacks(callbacks, trace_output)
+    emit_auto_trace_events = trace_output is not None and not callbacks
     if mock_llm is not _NO_MOCK_LLM:
         chat_model = mock_llm
     elif model_resolver is not None:
@@ -247,33 +288,71 @@ def _run_v030_skill_dict(
     else:
         chat_model = None
     compiled = compile_skill(skill_root, skill_resolver=resolver)
-    graph = assemble_graph(
+    assembled = assemble_graph(
         compiled,
         chat_model=chat_model,
         callbacks=active_callbacks,
         skill_resolver=resolver,
-    ).graph
-    run_id = thread_id or str(uuid.uuid4())
-    result = graph.invoke(
-        {
-            "data": dict(inputs),
-            "flow": {},
-            "messages": [],
-            "run_id": run_id,
-        }
     )
+    graph = assembled.graph
+    run_id = thread_id or str(uuid.uuid4())
+    if emit_auto_trace_events:
+        _emit_v030_event(
+            active_callbacks,
+            RunStartedEvent(
+                run_id=run_id,
+                thread_id=run_id,
+                initial_context={"inputs": dict(inputs)},
+            ),
+        )
+        for phase_id in assembled.phase_ids:
+            _emit_v030_event(
+                active_callbacks,
+                PhaseStartEvent(phase_name=phase_id, context=_v030_phase_context(dict(inputs))),
+            )
+    try:
+        result = graph.invoke(
+            {
+                "data": dict(inputs),
+                "flow": {},
+                "messages": [],
+                "run_id": run_id,
+            }
+        )
+    except Exception:
+        wall_time = round(time.time() - t0, 3)
+        if emit_auto_trace_events:
+            _emit_v030_event(
+                active_callbacks,
+                RunEndedEvent(
+                    run_id=run_id,
+                    thread_id=run_id,
+                    status="crashed",
+                    final_context={},
+                    wall_time_seconds=wall_time,
+                ),
+            )
+        _save_v030_trace(active_callbacks, trace_output)
+        raise
     wall_time = round(time.time() - t0, 3)
-    saved_trace_path: str | None = None
-    if trace_output is not None:
-        for callback in active_callbacks:
-            if isinstance(callback, TracingCallback):
-                try:
-                    saved_trace_path = callback.save(trace_output)
-                except Exception as exc:
-                    raise TraceWriteError(
-                        f"trace save failed: {exc}",
-                        context={"trace_path": str(trace_output)},
-                    ) from exc
+    if emit_auto_trace_events:
+        final_context = _v030_phase_context(result.get("data", {}))
+        for phase_id in assembled.phase_ids:
+            _emit_v030_event(
+                active_callbacks,
+                PhaseEndEvent(phase_name=phase_id, context=final_context),
+            )
+        _emit_v030_event(
+            active_callbacks,
+            RunEndedEvent(
+                run_id=run_id,
+                thread_id=run_id,
+                status="completed",
+                final_context=final_context,
+                wall_time_seconds=wall_time,
+            ),
+        )
+    saved_trace_path = _save_v030_trace(active_callbacks, trace_output)
     return {
         "run_id": run_id,
         "context": dict(result.get("data", {})),

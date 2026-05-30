@@ -47,7 +47,8 @@
 
 ### tests 设计 (red lights)
 
-- 新增/重写 V0.3 e2e: 调 `_run_v030_skill_dict()` 不传 callback, 仍在 run-scoped 目录写 `trace.jsonl`。
+- 新增/重写 V0.3 e2e: 调 `_run_v030_skill_dict()` 不传 callback, 仍自动写 trace。
+- PR-trace-bug 文件名/路径沿用现状 `tracing.jsonl`; 文件名改名 (`tracing.jsonl` -> `trace.jsonl`) + workspace `runs/<run_id>/` 布局 + Studio run_manager cutover 移 PR-D (跨 Studio breaking cutover, 不在探路石 PR)。
 - 覆盖 trace 文件一行一个 `CallbackEvent` JSON payload, 可 replay。
 - 覆盖不接受/不需要 public `trace_dir`; 若使用临时目录, 通过未来 `workspace_dir` 或当前内部 run dir fixture 注入。
 - 保留现有显式 tracing callback 行为的最小兼容断言, 但不把它列入 public setup API。
@@ -242,6 +243,8 @@ Exception public catalog 从约 24 个公开 class 浓缩为 5 个 public class:
 
 `trace_dir` 已在 PR-B 从 `run_skill` / `predict_skill` 签名移除; 本 PR 只清 `TracingCallback(trace_dir=)` callback 类路径。
 
+- 债务: 替换 PR-trace-bug 的批量合成 phase 事件为真实 per-phase 流式事件 (现状 stopgap: phase_start 全在 invoke 前发, phase_end 全在 invoke 后发, crashed 会显示未跑 phase 已 start = 黑匣子误导)。
+
 ### refs
 
 - decisions: `decisions.md §2` tracing 默认自动落; `§3` tracing + eventstream 同源出口; `§16.1` trace 路径自定义; `§16.3` Callback class 继承。
@@ -256,6 +259,7 @@ Exception public catalog 从约 24 个公开 class 浓缩为 5 个 public class:
 - `packages/graph-agent/src/graph_agent/__init__.py:34` / `:67` current `TracingCallback` public export.
 - `packages/graph-agent/src/graph_agent/core/runner.py:59-73` current callback/trace args.
 - `apps/studio/backend/app/services/run_manager.py:230` current `StudioQueueCallback` + `TracingCallback(trace_dir=run_dir)`。
+- 文件名 `tracing.jsonl` -> `trace.jsonl` 改名 + Studio cutover: `apps/studio/backend/app/services/run_manager.py:274,423` + `apps/studio/backend/tests/test_api.py:398,743` 读取点同步。
 
 ### tests 设计 (red lights)
 

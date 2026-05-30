@@ -92,7 +92,7 @@ io:
 
 def _run_without_callbacks(
     skill_root: Path,
-    workspace_root: Path,
+    trace_dir: Path,
     mock_skill_resolver: object,
     *,
     run_id: str,
@@ -102,18 +102,18 @@ def _run_without_callbacks(
         callbacks=None,
         thread_id=run_id,
         skill_resolver=mock_skill_resolver,
+        trace_dir=trace_dir,
         topic="observability",
         request_id=run_id,
-        output_dir=str(workspace_root),
     )
     assert result["run_id"] == run_id
-    return workspace_root / "runs" / run_id / "trace.jsonl"
+    return trace_dir / "tracing.jsonl"
 
 
 def _read_trace_events(trace_path: Path) -> list[dict[str, Any]]:
-    assert trace_path.is_file(), f"trace.jsonl not found: {trace_path}"
+    assert trace_path.is_file(), f"tracing.jsonl not found: {trace_path}"
     lines = [line for line in trace_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    assert lines, f"trace.jsonl is empty: {trace_path}"
+    assert lines, f"tracing.jsonl is empty: {trace_path}"
     return [json.loads(line) for line in lines]
 
 
@@ -130,13 +130,13 @@ def test_v030_skill_dict_writes_trace_jsonl_when_no_callback(
     tmp_path: Path,
     mock_skill_resolver: object,
 ) -> None:
-    """V0.3 _run_v030_skill_dict() should auto-write trace.jsonl without callbacks."""
+    """V0.3 _run_v030_skill_dict() should auto-write tracing.jsonl without callbacks."""
     skill_root = tmp_path / "skill"
-    workspace_root = tmp_path / "workspace"
+    trace_dir = tmp_path / "trace-output"
     run_id = "trace-auto-no-callback"
     _write_logic_skill(skill_root, [("draft", [])])
 
-    trace_path = _run_without_callbacks(skill_root, workspace_root, mock_skill_resolver, run_id=run_id)
+    trace_path = _run_without_callbacks(skill_root, trace_dir, mock_skill_resolver, run_id=run_id)
     events = _read_trace_events(trace_path)
 
     assert events[0]["event_type"] == "run_started"
@@ -150,14 +150,14 @@ def test_v030_skill_dict_trace_records_phase_events(
     tmp_path: Path,
     mock_skill_resolver: object,
 ) -> None:
-    """trace.jsonl should record phase_start and phase_end for every V0.3 phase."""
+    """tracing.jsonl should record phase_start and phase_end for every V0.3 phase."""
     skill_root = tmp_path / "skill"
-    workspace_root = tmp_path / "workspace"
+    trace_dir = tmp_path / "trace-output"
     _write_logic_skill(skill_root, [("draft", []), ("review", ["draft"])])
 
     trace_path = _run_without_callbacks(
         skill_root,
-        workspace_root,
+        trace_dir,
         mock_skill_resolver,
         run_id="trace-auto-phase-events",
     )
@@ -175,12 +175,12 @@ def test_v030_skill_dict_trace_includes_phase_io(
 ) -> None:
     """phase trace events should carry declared runtime inputs and phase outputs."""
     skill_root = tmp_path / "skill"
-    workspace_root = tmp_path / "workspace"
+    trace_dir = tmp_path / "trace-output"
     _write_logic_skill(skill_root, [("draft", [])])
 
     trace_path = _run_without_callbacks(
         skill_root,
-        workspace_root,
+        trace_dir,
         mock_skill_resolver,
         run_id="trace-auto-phase-io",
     )
@@ -191,7 +191,6 @@ def test_v030_skill_dict_trace_includes_phase_io(
     assert phase_start["context"]["inputs"] == {
         "topic": "observability",
         "request_id": "trace-auto-phase-io",
-        "output_dir": str(workspace_root),
     }
     assert phase_end["context"]["phase_outputs"]["draft"] == {"answer": "draft:observability"}
 
@@ -200,9 +199,9 @@ def test_v030_skill_dict_writes_trace_when_phase_crashes(
     tmp_path: Path,
     mock_skill_resolver: object,
 ) -> None:
-    """A crashed V0.3 run should still leave a replayable trace.jsonl."""
+    """A crashed V0.3 run should still leave a replayable tracing.jsonl."""
     skill_root = tmp_path / "skill"
-    workspace_root = tmp_path / "workspace"
+    trace_dir = tmp_path / "trace-output"
     run_id = "trace-auto-crashed"
     _write_logic_skill(skill_root, [("draft", [])])
     _make_draft_phase_crash(skill_root)
@@ -213,12 +212,12 @@ def test_v030_skill_dict_writes_trace_when_phase_crashes(
             callbacks=None,
             thread_id=run_id,
             skill_resolver=mock_skill_resolver,
+            trace_dir=trace_dir,
             topic="observability",
             request_id=run_id,
-            output_dir=str(workspace_root),
         )
 
-    trace_path = workspace_root / "runs" / run_id / "trace.jsonl"
+    trace_path = trace_dir / "tracing.jsonl"
     events = _read_trace_events(trace_path)
 
     assert events[-1]["event_type"] == "run_ended"

@@ -2,15 +2,28 @@
 
 > **Scope notice**: `docs/engine/skill-spec/` 是 Markdown 格式契约, 跟本 Python API 契约边界**独立**, 不混合. `docs/engine/` 下除 `skill-spec` 以外的其余讲解类子目录属于 Logic-Explained Docs, **不**属于本 PR 不可动摇契约基线.
 
-PR1 freezes the 65-symbol Python API surface observed from `graph_agent.__all__`, external consumer imports, and `packages/graph-agent/tests/test_public_api_contract.py`. This document is additive: it records the current contract and does not move, remove, or redesign symbols.
+PR1 froze the initial Python API surface observed from `graph_agent.__all__`, external consumer imports, and `packages/graph-agent/tests/test_public_api_contract.py`. PR-A rightsized the public exception catalog from leaf-heavy exports to 5 public error families while keeping internal leaf classes available under `graph_agent.core.*`.
 
 ## Coverage Summary
 
-- 65 frozen symbols: `65`
-- Top-level `graph_agent.__all__` stable symbols: `18`
-- non-`__all__` external dependency symbols: `47`
+- 69 frozen symbols: `69`
+- Top-level `graph_agent.__all__` stable symbols: `20`
+- non-`__all__` external dependency symbols: `49`
 - `_predict_internal` de facto contract symbols: `12`
 - vendor-only symbols: `6`
+
+## Exception Catalog Rightsizing
+
+The stable public exception surface is exactly 5 classes exported from `graph_agent`: `GraphAgentError`, `GraphCompileError`, `GraphExecutionError`, `ModelProviderError`, and `ResourceNotFoundError`.
+
+Internal implementation code may still raise leaf classes such as `SkillLoadError`, `SkillCompilationError`, `SkillCompileError`, `SkillResolutionError`, `ExecutionError`, and gateway-specific leaf errors. Those leaf classes are no longer top-level SDK exports. They are implementation details whose granularity is surfaced across public boundaries through `ErrorPayload.code` and `ERROR_REGISTRY` metadata. External callers should catch the public family and branch on `exc.payload.code` when they need the former leaf-level distinction.
+
+Family mapping summary:
+
+- `GraphCompileError`: compile, parse, schema, contract, template, and input-resource compile failures. Internal leaves include `LoaderError`, `SkillLoadError`, `SkillCompilationError`, `SkillCompileError`, `ValidationError`, and schema/contract/template leaves.
+- `GraphExecutionError`: runtime execution, state transformation, tool, persistence, trace, artifact, retry, and fatal execution failures. Internal leaves include `ExecutionError`, `GraphAgentFatalError`, `ToolExecutionError`, `PersistenceError`, and persistence leaf classes.
+- `ModelProviderError`: gateway/provider/role/model/fallback failures. `GatewayError` and gateway leaf errors inherit this family.
+- `ResourceNotFoundError`: skill/resource/workspace path resolution failures. Engine `SkillResolutionError` is an internal leaf under this family; Studio may raise `ResourceNotFoundError` directly while preserving resolver detail in `ErrorPayload.code`.
 
 ## run_skill
 
@@ -27,7 +40,7 @@ PR1 freezes the 65-symbol Python API surface observed from `graph_agent.__all__`
 - **Source module**: `graph_agent`
 - **Consumer files**: `graph_agent.__all__` stable export; no direct external import occurrence in `CONSUMER-API-INVENTORY.md`.
 - **Contract status**: `@stable`
-- **Fields**: `success: bool`, `run_id: str`, `skill_id: str`, `context: dict[str, Any]`, `metrics: WorkflowMetrics`, `trace_path: pathlib.Path | None`, `error: str | None`, `started_at: datetime`, `finished_at: datetime`, `wall_time_sec: float`
+- **Fields**: `success: bool`, `run_id: str`, `skill_id: str`, `context: dict[str, Any]`, `metrics: WorkflowMetrics`, `trace_path: pathlib.Path | None`, `error: ErrorPayload | None`, `started_at: datetime`, `finished_at: datetime`, `wall_time_sec: float`
 - **Preconditions**: Consumers must use the frozen field names, field types, constructor shape, and source module listed here.
 - **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
@@ -172,25 +185,65 @@ PR1 freezes the 65-symbol Python API surface observed from `graph_agent.__all__`
 - **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
 
-## SkillLoadError
+## GraphCompileError
 
 - **Source module**: `graph_agent`
-- **Consumer files**: apps/studio/backend/app/services/skills.py:20
+- **Consumer files**: apps/studio/backend/app/core/exceptions.py:13; apps/studio/backend/app/services/skills.py:19
 - **Contract status**: `@stable`
+- **Signature**: `GraphCompileError.__init__(self, message: str, *, payload: ErrorPayload | None = None, context: dict[str, Any] | None = None) -> None`
+- **Preconditions**: External callers catch this family for compile/parse/schema/contract failures and inspect `payload.code` for former leaf-level detail.
+- **Postconditions**: Internal compile leaves remain importable from `graph_agent.core.exceptions` and are `isinstance(..., GraphCompileError)`.
+- **Drift risk notes**: De-exported leaves must not be re-added to `graph_agent.__all__`; new compile leaves should inherit this family.
+
+## GraphExecutionError
+
+- **Source module**: `graph_agent`
+- **Consumer files**: `graph_agent.__all__` stable export; no direct external import occurrence in `CONSUMER-API-INVENTORY.md`.
+- **Contract status**: `@stable`
+- **Signature**: `GraphExecutionError.__init__(self, message: str, *, payload: ErrorPayload | None = None, context: dict[str, Any] | None = None) -> None`
+- **Preconditions**: External callers catch this family for runtime execution/state/tool/persistence failures and inspect `payload.code`.
+- **Postconditions**: Internal execution leaves remain importable from `graph_agent.core.exceptions` and are `isinstance(..., GraphExecutionError)`.
+- **Drift risk notes**: New runtime leaves should inherit this family.
+
+## ModelProviderError
+
+- **Source module**: `graph_agent`
+- **Consumer files**: packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:8
+- **Contract status**: `@stable`
+- **Signature**: `ModelProviderError.__init__(self, message: str, *, payload: ErrorPayload | None = None, context: dict[str, Any] | None = None) -> None`
+- **Preconditions**: External callers catch this family for gateway/provider/role/model/fallback failures. Gateway leaves keep their gateway `code` and `context`.
+- **Postconditions**: `graph_agent_gateway.exceptions.GatewayError` and its leaves are `isinstance(..., ModelProviderError)`.
+- **Drift risk notes**: Gateway errors must not inherit `ExecutionError` as their public family.
+
+## ResourceNotFoundError
+
+- **Source module**: `graph_agent`
+- **Consumer files**: apps/studio/backend/app/services/skill_resolver.py:8; apps/studio/backend/app/services/skills.py:19
+- **Contract status**: `@stable`
+- **Signature**: `ResourceNotFoundError.__init__(self, message: str, *, payload: ErrorPayload | None = None, context: dict[str, Any] | None = None) -> None`
+- **Preconditions**: External callers catch this family for skill/resource/workspace resolution failures and inspect `payload.code`.
+- **Postconditions**: Engine `SkillResolutionError` is an internal leaf that is `isinstance(..., ResourceNotFoundError)` and not `isinstance(..., GraphCompileError)`.
+- **Drift risk notes**: Resolver stage metadata lives in `ErrorPayload`; do not reintroduce multiple exception-family inheritance.
+
+## SkillLoadError
+
+- **Source module**: `graph_agent.core.exceptions`
+- **Consumer files**: internal engine call sites only
+- **Contract status**: internal implementation detail; de-exported from `graph_agent.__all__`
 - **Signature**: `SkillLoadError.__init__(self, message: str, *, payload: ErrorPayload | None = None, context: dict[str, Any] | None = None) -> None`
-- **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
-- **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
-- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
+- **Preconditions**: Internal code may still raise this leaf. Public consumers should catch `GraphCompileError` and inspect `payload.code`.
+- **Postconditions**: `SkillLoadError` is `isinstance(..., GraphCompileError)`.
+- **Drift risk notes**: Do not re-add this leaf to the top-level SDK surface.
 
 ## SkillCompilationError
 
-- **Source module**: `graph_agent`
-- **Consumer files**: apps/studio/backend/app/services/skills.py:20
-- **Contract status**: `@stable`
+- **Source module**: `graph_agent.core.exceptions`
+- **Consumer files**: internal engine call sites only
+- **Contract status**: internal implementation detail; de-exported from `graph_agent.__all__`
 - **Signature**: `SkillCompilationError.__init__(self, message: str, compile_result: object = None, *, skill_path: Path | None = None, line: int | None = None, field_path: str | None = None, suggestion: str | None = None, payload: ErrorPayload | None = None, context: dict[str, Any] | None = None) -> None`
-- **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
-- **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
-- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
+- **Preconditions**: Internal code may still raise this leaf. Public consumers should catch `GraphCompileError` and inspect `payload.code`.
+- **Postconditions**: `SkillCompilationError` is `isinstance(..., GraphCompileError)`.
+- **Drift risk notes**: Do not re-add this leaf to the top-level SDK surface.
 
 ## AgentNodeAST
 
@@ -278,7 +331,7 @@ PR1 freezes the 65-symbol Python API surface observed from `graph_agent.__all__`
 ## ExecutionError
 
 - **Source module**: `graph_agent.core.exceptions`
-- **Consumer files**: packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:8
+- **Consumer files**: internal engine call sites only. Gateway now consumes `ModelProviderError` instead.
 - **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
 - **Signature**: `ExecutionError.__init__(self, message: str, *, payload: ErrorPayload | None = None, context: dict[str, Any] | None = None) -> None`
 - **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
@@ -550,8 +603,8 @@ PR1 freezes the 65-symbol Python API surface observed from `graph_agent.__all__`
 ## SkillCompileError
 
 - **Source module**: `graph_agent.core.exceptions`
-- **Consumer files**: apps/studio/backend/app/core/exceptions.py:13; apps/studio/tauri/vendor/backend/app/core/exceptions.py:13
-- **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
+- **Consumer files**: internal engine call sites only. Studio catches `GraphCompileError`.
+- **Contract status**: internal implementation detail; non-`__all__`
 - **Signature**: `SkillCompileError.__init__(self, message: str, *, payload: ErrorPayload | None = None, context: dict[str, Any] | None = None) -> None`
 - **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
 - **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
@@ -570,12 +623,12 @@ PR1 freezes the 65-symbol Python API surface observed from `graph_agent.__all__`
 ## SkillResolutionError
 
 - **Source module**: `graph_agent.core.skill_resolver_protocol`
-- **Consumer files**: apps/studio/backend/app/services/skill_resolver.py:8
-- **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
+- **Consumer files**: internal engine resolver paths. Studio raises `ResourceNotFoundError` directly.
+- **Contract status**: internal implementation detail; non-`__all__`
 - **Signature**: `SkillResolutionError.__init__(self, skill_id: str, reason: str, *, code: str = '[F-v3-skill-not-registered]') -> None`
-- **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
-- **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
-- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
+- **Preconditions**: Internal engine resolver helpers may still raise this leaf. Public consumers should catch `ResourceNotFoundError`.
+- **Postconditions**: `SkillResolutionError` is `isinstance(..., ResourceNotFoundError)` and not a `GraphCompileError`; compile-stage meaning is carried by `payload.stage` and `payload.code`.
+- **Drift risk notes**: Do not reintroduce multiple inheritance across exception families.
 
 ## SubgraphNodeAST
 

@@ -1,10 +1,18 @@
-# Round 31 Ground-Up API Catalog Redesign (a1 draft v5 — based on 1f audit)
+# Round 31 Ground-Up API Catalog Redesign (a1 draft v6 — based on decisions baseline)
 
 ## §0 一句话总览
 
 graph-agent SDK 是文档驱动的黑盒图执行虚拟机。它只暴露编译、运行、预演、基线评估、图序列化和图回写这 6 个引擎入口；模型环境、即席聊天、provider 解析和 Copilot 预测器归 Gateway；Studio HTTP 层负责自己的产品功能编排。
 
 本轮 catalog 的核心变化是把 SDK 从“运行时工具箱”收敛成“给 workspace、给 resolver、给输入，然后得到同形结果和事件流”的内核 API。Tracing 默认自动落盘，实时进度通过订阅器派发；predict 与 run 输出同形；workspace 子目录规范归 Engine 文档所有。
+
+## §0.2 Changelog
+
+- v6 (2026-05-30): 补 cache 链式机制 + golden 警告 + 一刀切阻塞点; 引用 decisions.md 权威源.
+
+## §0.5 权威源
+
+本 design 受 [decisions.md](decisions.md) 16 项 PM 拍板基线约束。任何跟 decisions.md 冲突的描述，一律以 decisions.md 为准。
 
 ## §0.1 SDK 边界外 (Studio HTTP-only, 不纳入本 catalog)
 
@@ -53,9 +61,9 @@ Studio backend 在接入 v4 SDK 时保留这些产品功能，只把 engine-faci
    - 现状证据：当前 `run_skill` 仍接收 path、`trace_dir`、`callbacks`、`model_resolver`，见 `packages/graph-agent/src/graph_agent/core/runner.py:59-73`；V0.3 主线在 `_run_v030_skill_dict()` 中通过 `trace_dir` 和 `callbacks` 透传，见 `packages/graph-agent/src/graph_agent/core/runner.py:221-275`。
 
 3. `predict_skill(compiled_skill: CompiledSkill, inputs: dict, model_resolver: ModelResolverProtocol, workspace_dir: Path, event_subscriber: Callable[[CallbackEvent], None] | None = None) -> RunResult`
-   - 功能：执行 predict 工序，逻辑节点真实跑，LLM 节点由 Gateway resolver 路由到 Copilot predictor。
+   - 功能：执行 predict 工序，逻辑节点真实跑；SDK 负责 predict cache / ABC 选择 / 链式失效判断，只有 cache miss 且需要 Copilot 模拟时，才通过 Gateway predict chat model 调 Studio 注入的 Copilot callable。
    - 返回：与真实 run 同形的 `RunResult`，顶层 `source="predict"`。
-   - 关键约束：SDK 不直接调用 Copilot，不保留 SDK 内部 `PredictGatewayChatModel`。
+   - 关键约束：Gateway 不存 cache、不做业务决策；SDK 不 import Studio，只通过 `model_resolver` 触达 Gateway callable bridge。
 
 4. `evaluate_golden_baseline(compiled_skill: CompiledSkill, dataset: BaselineDataset, model_resolver: ModelResolverProtocol, workspace_dir: Path) -> BaselineReport`
    - 功能：批量执行 baseline 对比，产出通过率和差异报告。
@@ -81,17 +89,20 @@ Studio backend 在接入 v4 SDK 时保留这些产品功能，只把 engine-faci
 
 ## §2.5 predict↔golden↔run↔copilot 协作链契约
 
-本节是叙事契约，不新增 API。它说明 `predict_skill`、`run_skill`、`evaluate_golden_baseline`、Gateway Copilot 和 Studio HTTP golden 编排如何配套工作。
+本节是叙事契约，不新增 API。它说明 `predict_skill`、`run_skill`、`evaluate_golden_baseline`、Gateway Copilot callable 和 Studio HTTP golden 编排如何配套工作。以 [decisions.md §4](decisions.md#§4-q4-predict-定位--copilot-协作迭代-prompt-工程入口)、[decisions.md §7](decisions.md#§7-阻塞点-2-predict-cache-在-sdk--链式失效)、[decisions.md §10](decisions.md#§10-阻塞点-5-cache-累积--golden-锁定--链式豁免--结构调整警告) 为准。
 
 1. **predict 阶段**
-   - Owner：SDK 负责编排 `predict_skill`；Gateway 负责 Copilot predictor；Studio 负责触发按钮和展示。
-   - 用户配完 skill 并 compile 通过后点击 Predict。SDK `predict_skill` 跑模拟图：逻辑节点真实执行，LLM 节点由 `model_resolver` 路由到 Gateway 的 Copilot predictor，也就是 Gateway chat/predict facade，用来预测该 prompt 大概会得到什么输出。
+   - Owner：SDK 负责编排 `predict_skill`、predict cache、ABC 选择和链式失效；Gateway 负责 predict chat model / callable bridge；Studio 负责触发按钮、展示和注入 Copilot callable。
+   - 用户配完 skill 并 compile 通过后点击 Predict。SDK `predict_skill` 跑模拟图：逻辑节点真实执行；LLM 节点先查 SDK predict cache，miss 且 `predict_mode=True` 时，由 `model_resolver` 路由到 Gateway predict chat model，再调用 Studio 注入的 Copilot callable 预测输出。
    - 输出：`RunResult(source="predict")`。
    - 文件：SDK 写 `<workspace_dir>/runs/<run_id>/trace.jsonl` 和同 run 结构的结果 artifacts。
+   - Cache key：`(phase_id, prompt_hash, input_hash)`。
+   - `input_hash` 算法：只 hash 当前 phase 在 `io.inputs` 中声明的字段，不 hash 全量 `BlackboardState`。理由是 phase IO schema 是节点真实输入视图；全量 state 会破坏 phase 沙箱隔离。现状证据：`BlackboardData` 三分区在 `packages/graph-agent/src/graph_agent/runtime/state.py:15-20`，`BlackboardState.data` 在 `packages/graph-agent/src/graph_agent/runtime/state.py:88-94`；`PhaseIOSchema.inputs/outputs` 在 `packages/graph-agent/src/graph_agent/core/manifest.py:31-38`。
+   - 数据链路：`BlackboardState.data.inputs` 是全局只读输入；`phase_outputs[phase_id]` 保存每个 phase 的输出；`scratch` 是运行期临时区。phase 开跑前按 `io.inputs` 从 blackboard 取输入视图，phase 结束后写 `phase_outputs[phase_id]`。
 
 2. **Copilot 辅助调 prompt**
    - Owner：Gateway 生成建议；Studio 负责把建议呈现给用户并驱动编辑。
-   - 用户读取 predict 结果后，和 Gateway Copilot 协作迭代 prompt、phase 结构、few-shot、protocol。SDK 不参与 chat，不持有 provider 环境。
+   - 用户读取 predict 结果后，和 Studio Copilot 协作迭代 prompt、phase 结构、few-shot、protocol。SDK 不参与 chat，不持有 provider 环境；Gateway 仅作为 callable bridge 调用 Studio 提供的模拟能力。
 
 3. **Golden 转化**
    - Owner：Studio HTTP 层。
@@ -105,6 +116,16 @@ Studio backend 在接入 v4 SDK 时保留这些产品功能，只把 engine-faci
 5. **Golden 对比 + Copilot 建议迭代**
    - Owner：SDK 负责 `evaluate_golden_baseline`；Gateway 负责 Copilot 建议生成；Studio HTTP 层负责编排闭环。
    - Studio 调 SDK `evaluate_golden_baseline` 对比真 run 结果与 Golden Baseline。Gateway Copilot 根据 diff 给出针对性 prompt、few-shot、protocol 调整建议。用户依此迭代，直到真实 run 接近 golden。
+
+### 链式失效示例
+
+假设图为 `A -> B -> C`：
+
+1. 初始 predict：A/B/C 都按 `(phase_id, prompt_hash, input_hash)` 写入 cache。
+2. 用户修改 A 的 prompt，A 的 `prompt_hash` 变化，A cache miss，A 重新执行并写 `phase_outputs["A"]`。
+3. B 的 `io.inputs` 声明读取 A 输出字段；A 输出变了，所以 B 的 `input_hash` 变化，B cache miss。
+4. B 重新执行并写 `phase_outputs["B"]`。
+5. C 的 `io.inputs` 声明读取 B 输出字段；B 输出变了，所以 C 的 `input_hash` 变化，C cache miss。链式失效自然发生，不需要 Gateway 参与业务判断。
 
 ## §3 Nouns 完整清单
 
@@ -120,14 +141,14 @@ Studio backend 在接入 v4 SDK 时保留这些产品功能，只把 engine-faci
   - skill 元数据访问器，提供 name / description / phases / IO 摘要。
 - `RunResult`
   - run 与 predict 的同形结果。
-  - 必含字段：`source: "run" | "predict"`、`success`、`run_id`、`skill_id`、`context`、`metrics`、`trace_path`、`error`、`started_at`、`finished_at`、`wall_time_sec`、`phases: list[PhaseRecord] | None`、`path_diff: PathDiff | None`。
+  - 必含字段：`source: "run" | "predict"`、`success`、`run_id`、`skill_id`、`context`、`metrics`、`trace_path`、`error`、`warnings`、`started_at`、`finished_at`、`wall_time_sec`、`phases: list[PhaseRecord] | None`、`path_diff: PathDiff | None`。
   - 现状证据：当前 `WorkflowResult` 已有 `success/run_id/skill_id/context/metrics/trace_path/error/started_at/finished_at/wall_time_sec`，见 `packages/graph-agent/src/graph_agent/core/result.py:46-60`。
 - `PhaseRecord`
   - 从 private predict model 晋升 public；记录 phase_name、phase type、inputs、outputs、mocked_source。
   - 现状证据：当前定义在 `packages/graph-agent/src/graph_agent/core/_predict_internal/models.py:24-31`。
 - `PathDiff`
-  - 从 private predict model 晋升 public；记录 expected_path、actual_path、missing、extra、order_mismatch。
-  - 现状证据：当前定义在 `packages/graph-agent/src/graph_agent/core/_predict_internal/models.py:37-44`。
+  - 从 private predict model 晋升 public；记录 expected_path、actual_path、missing、extra、order_mismatch、`structural_mismatch [NEW v6]`。
+  - 现状证据：当前定义在 `packages/graph-agent/src/graph_agent/core/_predict_internal/models.py:37-44`，含 expected_path / actual_path / missing / extra / order_mismatch；structural_mismatch 为 v6 新增字段。
 - `BaselineReport`
   - baseline 批量执行统计、失败样本、差异摘要。
 - `SerializedGraphData`
@@ -149,6 +170,66 @@ Studio backend 在接入 v4 SDK 时保留这些产品功能，只把 engine-faci
 - Gateway resolver 依赖 Pydantic `model_dump()`，并读取 role/model `temperature` 与 `max_tokens`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:151-168`、`:181-188`。
 - Studio 当前 import SDK config 的影响点：`apps/studio/backend/app/services/copilot.py:36`、`apps/studio/backend/tests/routers/test_copilot_ws_endpoint.py:22`。
 - SDK `llm_client_manager.py` 仍存在，并 import `ProviderDef` / `ResolvedProvider`，见 `packages/graph-agent/src/graph_agent/models/llm_client_manager.py:1-5`、`:24`；该文件需随 Q3 迁往 Gateway。
+
+## §3.5 Predict cache 行为
+
+本节以 [decisions.md §7](decisions.md#§7-阻塞点-2-predict-cache-在-sdk--链式失效)、[decisions.md §10](decisions.md#§10-阻塞点-5-cache-累积--golden-锁定--链式豁免--结构调整警告)、[decisions.md §12](decisions.md#§12-gateway-不管业务)、[decisions.md §14](decisions.md#§14-copilot-接口在-studio-业务) 为准。
+
+### Owner
+
+- SDK owns：cache table、cache key 计算、ABC 选择、链式失效、predict/run graph 编排。
+- Gateway owns：provider/model/role 解析、predict chat model、调用 Studio 注入的 Copilot callable。
+- Studio owns：Copilot callable 的业务实现、Copilot UI、golden CRUD 编排。
+
+### Cache table
+
+Predict cache 是一张 SDK-owned 大 hash 表：
+
+| Key | Value |
+|---|---|
+| `(skill_id, phase_id, prompt_hash, input_hash)` | phase output + metadata |
+
+`input_hash` 只计算 phase `io.inputs` 声明字段，不计算全量 blackboard。现状证据同 §2.5：`BlackboardData` 在 `packages/graph-agent/src/graph_agent/runtime/state.py:15-20`，`PhaseIOSchema` 在 `packages/graph-agent/src/graph_agent/core/manifest.py:31-38`。
+
+### 命中
+
+SDK 内查 cache table。命中时直接返回 cached phase output，不调用 Gateway / LLM / Copilot callable。
+
+### 未命中 (普通 run)
+
+`predict_mode=False` 时，SDK 按真实 graph 执行 LOGIC / SUBGRAPH / LLM phase。LLM phase 通过 Gateway resolver 走真实 provider。执行成功后写入 cache table。
+
+入口示意：
+
+```python
+await run_skill(skill_id, *, workspace_dir, predict_mode=False, ...)
+```
+
+### 未命中 (predict mode)
+
+`predict_mode=True` 且 cache miss 时：
+
+1. SDK 判断当前 phase 需要 LLM 模拟。
+2. SDK 通过 `model_resolver` 请求 Gateway predict chat model。
+3. Gateway predict chat model 调 Studio 注入的 Copilot callable。
+4. SDK 拿到模拟输出，写入 cache table，标记 `source="predict"`。
+5. `RunResult(source="predict")` 写入 `<workspace_dir>/runs/<run_id>/`。
+
+入口示意：
+
+```python
+await run_skill(skill_id, *, workspace_dir, predict_mode=True, ...)
+```
+
+或 facade：
+
+```python
+await predict_skill(compiled_skill, inputs, model_resolver, workspace_dir)
+```
+
+### Cache 累积
+
+Cache 多版本自然累积：prompt 变化、输入变化、phase 变化都会产生新 key。Round 31 不设计主动 GC；后续若要清理 cache，必须作为独立 storage policy 设计，不得影响本轮 API cutover。
 
 ## §4 Observability
 
@@ -186,6 +267,8 @@ def enqueue_event(event: CallbackEvent) -> None:
 - 当前 `run_skill` 仍有 `callbacks` 与 `trace_dir` 参数，见 `packages/graph-agent/src/graph_agent/core/runner.py:63-67`。
 
 ## §5 Errors [BREAKING Cutover]
+
+> **[PENDING PM ACK — 见 decisions.md §16.2]** PM 显式 ack 前不得实施.
 
 ### 新四大家族
 
@@ -231,7 +314,7 @@ def enqueue_event(event: CallbackEvent) -> None:
 | `TemplateRenderError` | `packages/graph-agent/src/graph_agent/core/exceptions.py:318` |
 | `MaxRetriesExceededError` | `packages/graph-agent/src/graph_agent/core/exceptions.py:338` |
 
-Gateway 当前 `GatewayError` 继承 SDK `ExecutionError`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:7-13`；v4 cutover 后必须改为继承 `ModelProviderError`。
+Gateway 当前 `GatewayError` 继承 SDK `ExecutionError`，见 `packages/graph-agent-gateway/src/graph_agent_gateway/exceptions.py:7-13`；Round 31 cutover 后必须改为继承 `ModelProviderError`。
 
 ### 旧 -> 新完整迁移映射
 
@@ -266,18 +349,66 @@ Gateway 当前 `GatewayError` 继承 SDK `ExecutionError`，见 `packages/graph-
 | `SkillResolutionError` | `ResourceNotFoundError` | skill reference cannot resolve | Studio resolver import path updates where used |
 | resource file not found/path invalid payloads | `ResourceNotFoundError` | reference/example/resource lookup failure | SDK resource helpers update |
 
+## §5.5 Golden 锁定与结构性大调整警告
+
+本节以 [decisions.md §10](decisions.md#§10-阻塞点-5-cache-累积--golden-锁定--链式豁免--结构调整警告) 为准。
+
+### Golden 语义
+
+- Golden 是用户标记锁定的"最后一版" phase output / run output 目标。
+- Golden 不受链式失效影响：上游 `input_hash` 变化会触发普通 cache miss 重算，但不会覆盖用户锁定的 golden 条目。
+- Golden 不是普通 transient cache row；它是阶段性结果目标。
+- Studio HTTP golden CRUD 负责用户标记与锁定动作；SDK `evaluate_golden_baseline` 负责读取 dataset 与输出 report。
+
+### 结构性大调整检测
+
+Predict 时 SDK 主动检测以下三类信号，任一发生就触发 Copilot 轻量预测干预：
+
+1. **IO Schema 突变**：字段增、删、改名，等价于数据血液断供。
+2. **拓扑结构重排**：前序依赖节点删除，或节点类型在 `LOGIC` / `LLM` / `SUBGRAPH` 间变化。
+3. **Role 变更**：角色定位发生极大差异，例如前端画图角色改成 SQL 专家角色。
+
+不触发结构性警告的情况：
+
+- prompt 纯文本微调。这只走 normal cache miss，不触发 structural mismatch。
+
+### 触发后流程
+
+1. SDK 发现结构性大调整信号。
+2. SDK 通过 Gateway predict chat model 调 Studio 注入的 Copilot callable。
+3. Copilot prompt 固定语义："评估 golden Y 在新结构下是否还兼容；不兼容则返回 FATAL + 字段级理由。"
+4. SDK 将偏差大警告挂载到 `RunResult`。
+
+### 警告挂载
+
+主载体：
+
+- `RunResult.path_diff.structural_mismatch`
+
+`PathDiff` 当前已有 `missing`、`extra`、`order_mismatch`，见 `packages/graph-agent/src/graph_agent/core/_predict_internal/models.py:37-44`；v6 目标是在晋升 public 时扩展 `structural_mismatch` 字段。
+
+备选载体：
+
+- `RunResult.warnings`
+
+当结构性警告不是路径差异本身，而是 role/IO 兼容性诊断时，可同时写入 `warnings`，供 Studio 以非 fatal 警告展示。
+
 ## §6 [BREAKING] 迁移路径汇总
 
-All items below are A 类：属于 Round 31 ground-up API catalog charter 内，PM Q3-Q5 已拍方向；不需要再抛 PM，按 cutover 计划推进。B 类：无。
+BREAKING 1-6、8 是 A 类已拍 (PM Q3-Q5 / 阻塞点 1 / charter 内). BREAKING 7 (Errors 四大家族) 状态 = **[PENDING PM ACK]**, 见 decisions.md §16.2. PM 显式 ack 前不得实施. B 类未授权: 无.
 
 ### [BREAKING] 1. LLM config / provider runtime 移出 SDK
 
-- 理由：Q3 已拍“Gateway 管模型环境，SDK 只管执行”。
+- 理由：Q3 已拍“Gateway 管模型环境，SDK 只管执行”；[decisions.md §6](decisions.md#§6-阻塞点-1-llm-配置一刀切搬-gateway) 进一步拍定阻塞点 1：一刀切。
 - 迁移路径：
-  1. Gateway 先实现 loader/validator API，保留现有 Pydantic `RolesData` resolver contract。
-  2. 不把 SDK dataclass 机械覆盖到 Gateway schema；resolver 依赖 `model_dump()`、`temperature`、`max_tokens`。
-  3. `llm_client_manager.py` 随 provider runtime 一并迁 Gateway。
-  4. Studio Copilot import 从 `graph_agent.config.llm_config` 切到 Gateway 统一入口。
+  1. 一个 PR 内完成整体搬迁、Studio import 全 rename、SDK 老 provider/runtime code 删除。
+  2. 不做 SDK 老 `llm_config` 与 Gateway 新 config 双栈过渡期。
+  3. 不做 SDK -> Gateway compatibility proxy。
+  4. Gateway 实现 loader/validator API，保留现有 Pydantic `RolesData` resolver contract。
+  5. 不把 SDK dataclass 机械覆盖到 Gateway schema；resolver 依赖 `model_dump()`、`temperature`、`max_tokens`。
+  6. `llm_client_manager.py` 随 provider runtime 一并迁 Gateway。
+  7. Studio Copilot import 从 `graph_agent.config.llm_config` 切到 Gateway 统一入口。
+  8. 砍掉的 SDK LLM 配置能力去向必须写清：yaml 加载 / 验证 / 熔断 / 热加载 / provider/role 解析全部归 Gateway；真砍未列入 [decisions.md §16](decisions.md#§16-round-31-真砍掉的用户能力-3-项-全-pm-已拍板) 的能力必须停下来 escalate PM。
 - 影响点：
   - `packages/graph-agent/src/graph_agent/config/llm_config.py:40-753`
   - `packages/graph-agent-gateway/src/graph_agent_gateway/llm_config.py:10-122`
@@ -324,16 +455,19 @@ All items below are A 类：属于 Round 31 ground-up API catalog charter 内，
   - `packages/graph-agent/src/graph_agent/core/_predict_internal/models.py:47`
   - `packages/graph-agent/src/graph_agent/core/result.py:46-60`
 
-### [BREAKING] 5. Predict interception 全搬 Gateway
+### [BREAKING] 5. Predict callable bridge 归 Gateway，cache / ABC / 链式失效归 SDK
 
-- 理由：Copilot predictor 是 Gateway chat/predict facade；SDK 不能反向依赖 Gateway implementation。
+- 理由：Copilot callable bridge 是 Gateway chat/predict facade；但 predict cache、ABC 选择和链式失效是 SDK 业务逻辑，以 [decisions.md §7](decisions.md#§7-阻塞点-2-predict-cache-在-sdk--链式失效) 为准。
 - 迁移路径：
-  1. `PredictGatewayChatModel`、predict interception、mock source routing 搬到 Gateway。
-  2. Gateway resolver 负责把 predict LLM phase 路由到 Copilot predictor。
-  3. SDK 只消费 `ModelResolverProtocol`。
+  1. Gateway 提供 predict chat model，用于调用 Studio 注入的 Copilot callable。
+  2. SDK 删除对 Gateway implementation 的反向 import，只消费 `ModelResolverProtocol`。
+  3. SDK 保留并重构 predict cache table、ABC 选择、链式失效判断。
+  4. SDK 只有在 cache miss 且 predict mode 需要 Copilot 模拟时才调用 Gateway。
+  5. Gateway 不存 cache、不判断 golden、不做 ABC、不做链式失效。
 - 影响点：
   - SDK 当前 import Gateway `GatewayChatModel`：`packages/graph-agent/src/graph_agent/core/_predict_internal/interception.py:11`
   - Gateway 当前反向 import SDK `PredictGatewayChatModel`：`packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:74`
+  - SDK 当前 predict strategy/cache-like 业务入口：`packages/graph-agent/src/graph_agent/core/_predict_internal/strategy.py:14-194`
 
 ### [BREAKING] 6. `.workspace/predict/` 顶层子目录废除
 
@@ -345,7 +479,7 @@ All items below are A 类：属于 Round 31 ground-up API catalog charter 内，
   4. 在 `STUDIO_GITIGNORE` template (`apps/studio/backend/app/services/git_local.py:21-26`) 中移除 `!/.workspace/predict/` 行 — 该 template 由 `write_studio_gitignore()` (`apps/studio/backend/app/services/git_local.py:320-323`) 写入每个 skill 项目目录的 `.gitignore`。
   5. 旧 `.workspace/predict/latest_predict.json` 不兼容迁移，部署后重新生成。
 - 影响点：
-  - Studio doc 当前列 `.workspace/predict`：`docs/studio/system-level/workspace-file-system/baseline.md:365-368`
+  - Studio workspace 文档已标记 `predict_dir_for()` 废除：`docs/studio/system-level/workspace-file-system/baseline.md:64-66`
   - `apps/studio/backend/app/services/skills.py:746-747`
   - `apps/studio/backend/app/services/skills.py:964`
   - `apps/studio/backend/app/services/skills.py:996`
@@ -357,6 +491,8 @@ All items below are A 类：属于 Round 31 ground-up API catalog charter 内，
   - `apps/studio/backend/tests/test_api.py:167-170`
 
 ### [BREAKING] 7. Errors 四大家族 cutover
+
+> **[PENDING PM ACK — 见 decisions.md §16.2]** PM 显式 ack 前不得实施.
 
 - 理由：调用方需要按责任归属 catch，而不是按内部模块层级 catch。
 - 迁移路径：
@@ -419,7 +555,7 @@ All items below are A 类：属于 Round 31 ground-up API catalog charter 内，
 ### Removed subdirectory
 
 - `<workspace_dir>/predict/` 不再存在。
-- 现状证据：Studio 文档目前还列 `.workspace/predict`，见 `docs/studio/system-level/workspace-file-system/baseline.md:365-368`；Studio backend 也有 `predict_dir_for()`，见 `apps/studio/backend/app/services/skills.py:746-747`。v4 cutover 必须清理这些旧入口。
+- 现状证据：Studio workspace 文档已标记 `predict_dir_for()` 废除，见 `docs/studio/system-level/workspace-file-system/baseline.md:64-66`；Studio backend 仍有 `predict_dir_for()`，见 `apps/studio/backend/app/services/skills.py:746-747`。Round 31 cutover 必须清理这些旧入口。
 
 ### Invariants
 

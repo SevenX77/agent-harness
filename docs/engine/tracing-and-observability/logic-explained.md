@@ -102,9 +102,9 @@ PR E 把这 4 个事件加入了 typed-only 合法列表：
 
 收到 typed event 时，`TracingCallback.on_event()` 直接调用 `event.model_dump_json()` 追加到 `tracing.jsonl`。因此 PR E 新增投递的 `ambiguity_logged` 和 `builtin_subagent_*` 事件只要进入 callback list，就能落盘。
 
-V0.3.0 主路径现在会在执行前保证 `TracingCallback` 已经绑定输出目录：`runner._run_v030_skill_dict()` 先算 `trace_dir`，没有显式传入时用 `output_dir / "traces"`，然后通过 `_prepare_v030_callbacks()` 创建或绑定 `TracingCallback`，见 `packages/graph-agent/src/graph_agent/core/runner.py:198-239`。这样执行过程中的 typed event 会实时进入同目录 `tracing.jsonl`，而不是等到结束后才发现流文件没接上。
+V0.3.0 主路径现在会在执行前保证 `TracingCallback` 已经绑定输出目录：`runner._run_v030_skill_dict()` 先用必传的 `workspace_dir` 和本次 `run_id` 计算 `<workspace_dir>/runs/<run_id>/`，然后通过 `_prepare_v030_callbacks()` 创建或绑定 `TracingCallback`。这样执行过程中的 typed event 会实时进入同目录 `tracing.jsonl`，而不是等到结束后才发现流文件没接上。
 
-执行结束后，runner 调用 `TracingCallback.save(trace_output)` 写出 `{run_id}_summary.json`，并把这个真实 summary 路径作为返回值里的 `trace_path`，见 `packages/graph-agent/src/graph_agent/core/runner.py:267-283`。`trace_path` 不再是拼出来但没写过的 `trace.json`。如果保存失败，runner 包装成 `TraceWriteError` 并 fail-loud，见 `packages/graph-agent/src/graph_agent/core/runner.py:270-276` 和 `packages/graph-agent/src/graph_agent/core/exceptions.py:253-258`。
+执行结束后，runner 调用 `TracingCallback.save(trace_output)` 写出 `{run_id}_summary.json`，并把这个真实 summary 路径作为返回值里的 `trace_path`。同一个 run 目录还会写 `result.json`、`final_state.json`、`metrics.json`；声明 `target: file` 且没有显式路径的输出默认进入 `artifacts/`。`trace_path` 不再是拼出来但没写过的 `trace.json`。如果保存失败，runner 包装成 `TraceWriteError` 并 fail-loud。
 
 ## 5.1 V0.3.0 `_skill_node` 现在发哪些事件
 

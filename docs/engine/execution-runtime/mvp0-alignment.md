@@ -270,7 +270,7 @@ def run_skill(
     skill_path: str | Path,
     *,
     mock_llm: Any = _NO_MOCK_LLM,
-    trace_dir: str | Path | None = None,
+    workspace_dir: Path,
     thread_id: str | None = None,
     unattended: bool = False,
     callbacks: list[Any] | None = None,
@@ -291,7 +291,7 @@ def run_skill(
 | `model_resolver` | Any | 否 | `None` | graph_skill runner 有参；无 `mock_llm` 时调用 `model_resolver.resolve(callbacks=..., phase_name="<workflow>")` | `[F-v3-runtime-phase-failed]` | LLM 注入 |
 | `skill_resolver` | Protocol | 是 | 无 | 实现 `resolve_skill` | `[F-v3-resolver-missing]` | 子 skill 寻址 |
 | `mock_llm` | Any | 否 | sentinel `_NO_MOCK_LLM` | 优先于 `model_resolver` | — | 测试覆盖 |
-| `trace_dir` | str 或 Path | 否 | `None` | 无 | — | 默认 tracing 输出目录 |
+| `workspace_dir` | Path | 是 | 无 | 必须是绝对路径 | `ValueError` / Python missing kwarg `TypeError` | `<workspace_dir>/runs/<run_id>/` 输出根 |
 | `thread_id` | string | 否 | `None` | graph_skill path 无值时生成 UUID run id | — | run/thread 定位 |
 | `unattended` | bool | 否 | `False` | legacy/harness 路径消费 | — | 无人值守运行 |
 | `callbacks` | list[Any] | 否 | `None` | graph_skill path 会传给 resolver；legacy harness 路径会默认补 Logging/Tracing callbacks | — | observability |

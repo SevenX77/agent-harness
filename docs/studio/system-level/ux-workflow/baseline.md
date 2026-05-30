@@ -57,9 +57,11 @@ Round 31 的文档目标是定义它们应接入的产品闭环，而不是把�
 - `RunResult.run_id`
 - `RunResult.phases`
 - `RunResult.path_diff`
-- `<workspace_dir>/runs/<run_id>/trace.jsonl`
+- `<workspace_dir>/runs/<run_id>/tracing.jsonl`
 - `<workspace_dir>/runs/<run_id>/result.json`
 - `<workspace_dir>/runs/<run_id>/final_state.json`
+- `<workspace_dir>/runs/<run_id>/metrics.json`
+- `<workspace_dir>/runs/<run_id>/artifacts/`
 
 现状实证：
 
@@ -129,9 +131,11 @@ Round 31 的文档目标是定义它们应接入的产品闭环，而不是把�
 - `RunResult.context`
 - `RunResult.metrics`
 - `RunResult.trace_path`
-- `<workspace_dir>/runs/<run_id>/trace.jsonl`
+- `<workspace_dir>/runs/<run_id>/tracing.jsonl`
 - `<workspace_dir>/runs/<run_id>/result.json`
 - `<workspace_dir>/runs/<run_id>/final_state.json`
+- `<workspace_dir>/runs/<run_id>/metrics.json`
+- `<workspace_dir>/runs/<run_id>/artifacts/`
 
 现状实证：
 

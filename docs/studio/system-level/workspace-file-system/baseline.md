@@ -57,20 +57,17 @@ Studio 文档只保留 root 责任：
 
 ## 5. 当前遗留点
 
-当前 Studio backend 仍有旧路径 helper，需要在 Round 31 实施时清理：
+当前 Studio backend 仍保留通用 workspace helper；Predict 专用 helper 已清理：
 
 - `runs_dir_for(skill_dir)`：`apps/studio/backend/app/services/skills.py:738-739`
 - `golden_dir_for(skill_dir)`：`apps/studio/backend/app/services/skills.py:742-743`
-- `predict_dir_for(skill_dir)`：`apps/studio/backend/app/services/skills.py:746-747`
 
-其中 `predict_dir_for()` 已被 Engine workspace spec 明确废除；Predict 结果和日志进入 `<workspace_dir>/runs/<run_id>/`，由 `RunResult.source = "predict"` 区分。
+`predict_dir_for()` 已被 Engine workspace spec 明确废除；Predict 结果和日志进入 `<workspace_dir>/runs/<run_id>/`，Studio skill detail response 不再返回 `file_paths.predict_dir`。
 
-当前 `STUDIO_GITIGNORE` template 仍放行旧 Predict 子目录：
+当前 `STUDIO_GITIGNORE` template 不再放行旧 Predict 子目录：
 
 - `apps/studio/backend/app/services/git_local.py:21-26`
 - template 由 `write_studio_gitignore()` 写入每个 skill 项目目录的 `.gitignore`：`apps/studio/backend/app/services/git_local.py:320-323`
-
-Round 31 实施时，该放行项应随旧 Predict 目录一起删除。
 
 ## 6. 与 Engine workspace spec 的协同铁律
 

@@ -22,16 +22,16 @@ Engine 是施工队：它只在传入的 `workspace_dir: Path` 里盖固定户�
 
 约束：
 
-- `workspace_dir` 必须是 `Path` 语义的目录位置。
+- `workspace_dir` 必须是 `Path` 语义的绝对目录位置。
 - SDK 不从环境变量、Studio 配置或默认用户目录猜 workspace。
 - SDK 不在 workspace root 之外写 run、predict、golden artifacts。
-- 缺失或不可写的 `workspace_dir` 应走结构化 Engine 运行期错误。
+- `run_skill` 缺失 `workspace_dir` 会由 Python keyword-only 签名报错；相对路径会被 SDK 拒绝。
 
 现状实证：
 
-- 当前 `run_skill` 还没有 `workspace_dir` 参数，仍接收 `trace_dir` 和 `callbacks`：`packages/graph-agent/src/graph_agent/core/runner.py:59-73`
-- 当前 V0.3 主线会从 `trace_dir` 或 `inputs["output_dir"] / "traces"` 推导 trace 输出：`packages/graph-agent/src/graph_agent/core/runner.py:235-239`
-- Round 31 目标是删除这些 fallback，改为强制 `workspace_dir`。
+- 当前 `run_skill` 已要求 keyword-only `workspace_dir: Path`，并移除 public `trace_dir` 参数。
+- 当前 V0.3 主线用 `workspace_dir / "runs" / run_id` 作为 trace 与 run artifact 输出根，不再从 `inputs["output_dir"] / "traces"` 推导 trace 目录。
+- 当前 `output_dir` 只保留为显式 file output 覆盖项；未显式传入时，path-less `target: file` 输出默认落本次 run 的 `artifacts/`。
 
 ## 3. 引擎子目录写入规范
 
@@ -49,18 +49,21 @@ Engine 是施工队：它只在传入的 `workspace_dir: Path` 里盖固定户�
 
 | 文件 | 写入方 | 内容 |
 |---|---|---|
-| `trace.jsonl` | SDK | one JSON `CallbackEvent` per line |
+| `tracing.jsonl` | SDK | one JSON `CallbackEvent` per line |
 | `result.json` | SDK | serialized `RunResult` |
 | `final_state.json` | SDK | final `RunResult.context` snapshot |
-
-可选文件：
-
-| 文件/目录 | 写入方 | 内容 |
-|---|---|---|
 | `metrics.json` | SDK | serialized `RunResult.metrics` |
 | `artifacts/` | SDK / tool runtime | phase/tool generated sidecars |
 
-Predict 不再有特殊输出目录。Predict 与真实 Run 的区别只在结果字段：
+字段级落点：
+
+- `tracing.jsonl` 是固定名 typed event stream；PR-B 不改名为 `trace.jsonl`。
+- `result.json` 是 SDK 返回结果的 JSON 形态，给宿主按 run id 重新读取。
+- `final_state.json` 是 `RunResult.context` 快照，给 Golden/Compare 等后续流程复用。
+- `metrics.json` 是 `RunResult.metrics` 快照。
+- `artifacts/` 承接 phase/tool sidecar；声明 `target: file` 且没有显式 `path` / `output_dir` 时默认写到这里。
+
+Predict 不再有特殊输出目录。Predict 与真实 Run 同样写入 `<workspace_dir>/runs/<run_id>/`；区别由上层结果语义区分。
 
 ```text
 RunResult.source = "predict"
@@ -69,10 +72,10 @@ RunResult.source = "run"
 
 现状实证：
 
-- 当前 `WorkflowResult` 已有 run 结果核心字段：`packages/graph-agent/src/graph_agent/core/result.py:46-60`
-- 当前 private predict model 另有 `PredictResult`：`packages/graph-agent/src/graph_agent/core/_predict_internal/models.py:47-52`
-- 当前 Studio run dir helper 已指向 `.workspace/runs/<run_id>`：`apps/studio/backend/app/services/skills.py:729-739`
-- 当前 Studio run worker 会创建 run dir 和 artifacts dir：`apps/studio/backend/app/services/run_manager.py:226-228`
+- 当前 `WorkflowResult` 已有 run 结果核心字段：`packages/graph-agent/src/graph_agent/core/result.py`
+- 当前 private predict model 仍有 `PredictResult`，Studio predict 编排会把结果写入 run-scoped `result.json`。
+- 当前 Studio run dir helper 已指向 `.workspace/runs/<run_id>`。
+- 当前 Studio run worker 会创建 run dir 和 artifacts dir，并调用 SDK 时传入 workspace root。
 
 ### 3.2 `golden/`
 
@@ -145,11 +148,10 @@ RunResult.source = "run"
 
 现状实证：
 
-- 当前 `predict_dir_for()` 仍返回旧子目录：`apps/studio/backend/app/services/skills.py:746-747`
-- 当前 Predictor 仍写 `latest_predict.json`：`apps/studio/backend/app/services/predictor.py:114-119`
-- 当前 API response 仍带 `file_paths.predict_dir`：`apps/studio/backend/app/services/skills.py:962-964`
-- 当前 `STUDIO_GITIGNORE` template 仍放行旧 Predict 子目录：`apps/studio/backend/app/services/git_local.py:21-26`
-- `write_studio_gitignore()` 会把该 template 写到每个 skill 项目 `.gitignore`：`apps/studio/backend/app/services/git_local.py:320-323`
+- `predict_dir_for()` 已从 Studio skill path helpers 中删除。
+- API response 的 `file_paths.predict_dir` 已删除。
+- Predictor 不再写 `.workspace/predict/latest_predict.json`，改写 `<workspace_dir>/runs/<run_id>/result.json`。
+- `STUDIO_GITIGNORE` template 不再放行旧 Predict 子目录。
 
 ## 5. 不变式
 

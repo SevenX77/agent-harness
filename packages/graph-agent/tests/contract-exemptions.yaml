@@ -16,4 +16,17 @@
 #     expires_or_cleanup: "Remove after PR-124 migration lands."
 
 version: "1"
-exemptions: []
+exemptions:
+  - exemption_id: EX-0031-round-31-public-api-contract
+    pr: "round-31 PR-A + PR-B"
+    pm_approval: "PM 2026-05-30 显式批准 ('同意'): 更新 public-api-contract.md (PR-A Errors 24→5 + PR-B run_skill workspace_dir 必传) 并重锁指纹。"
+    reason: "Errors 公共异常目录从 24 leaf 浓缩到 5 family (PR-A 已 ship), run_skill 签名改 workspace_dir 必传 + 删 trace_dir (PR-B)。文档跟随已批准的 API 变更同步。"
+    symbols: []
+    fields: []
+    hashes:
+      - docs/engine/public-api-contract.md
+    affected_features:
+      - F-public-api-contract
+    replacement_feature_ids:
+      - F-public-api-contract
+    expires_or_cleanup: "round-31 全部 PR ship 后此条作为永久治理记录保留。"

@@ -20,6 +20,23 @@ Protocol = Literal["openai_compatible", "anthropic_compatible", "google_genai", 
 ProviderKind = Literal["official", "third_party", "custom"]
 RouteStatus = Literal["verified", "unverified_manual", "disabled", "failed"]
 CapabilitySource = Literal["api_list", "provider_doc", "agent_draft", "manual", "probed_verified"]
+EvidenceTrustState = Literal[
+    "doc-discovered",
+    "provider-list-observed",
+    "draft-inferred",
+    "probe-verified",
+    "probe-failed",
+    "deprecated",
+    "stale",
+]
+EvidenceRecordType = Literal[
+    "provider_docs",
+    "model_docs",
+    "model_list_observation",
+    "route_candidate",
+    "probe",
+    "agent_note",
+]
 LintSeverity = Literal["off", "warn", "error"]
 RuntimeSettingSource = Literal[
     "route_setting",
@@ -312,8 +329,45 @@ class ProbeResult(BaseModel):
     error: dict[str, Any] | None = None
 
 
+class EvidenceRecord(BaseModel):
+    """Append-only evidence about provider docs, candidates, observations, or probes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    evidence_id: str
+    evidence_type: EvidenceRecordType
+    trust_state: EvidenceTrustState
+    observed_at: str | None = None
+    attempted_at: str | None = None
+    scope: dict[str, str] = Field(default_factory=dict)
+    source_url: str | None = None
+    provider_docs_url: str | None = None
+    model_docs_url: str | None = None
+    provider_id: str | None = None
+    endpoint_id: str | None = None
+    route_id: str | None = None
+    model_id: str | None = None
+    provider_model_id: str | None = None
+    method_id: str | None = None
+    request_mapper_id: str | None = None
+    probe_status: str | None = None
+    reason: str | None = None
+    model_type: str | None = None
+    capability_family: str | None = None
+    input_modalities: list[str] = Field(default_factory=list)
+    output_modalities: list[str] = Field(default_factory=list)
+    candidate_methods: list[str] = Field(default_factory=list)
+    candidate_capabilities: dict[str, CapabilityValue] = Field(default_factory=dict)
+    model_list_observation: dict[str, Any] | None = None
+    probe_attempts: list[dict[str, Any]] = Field(default_factory=list)
+    successful_probe: dict[str, Any] | None = None
+    failed_probe: dict[str, Any] | None = None
+    agent_note: dict[str, Any] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class ProviderImportDraft(BaseModel):
-    """Untrusted Agent import draft."""
+    """Untrusted Agent import draft plus durable advisory evidence."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -326,6 +380,7 @@ class ProviderImportDraft(BaseModel):
     endpoint_candidates: dict[str, EndpointCandidate] = Field(default_factory=dict)
     route_candidates: dict[str, RouteCandidate] = Field(default_factory=dict)
     probe_results: dict[str, ProbeResult] = Field(default_factory=dict)
+    evidence_records: list[EvidenceRecord] = Field(default_factory=list)
     agent_notes: list[dict[str, Any]] = Field(default_factory=list)
     diff: dict[str, Any] = Field(default_factory=dict)
 

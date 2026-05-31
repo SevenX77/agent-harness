@@ -61,7 +61,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
   return (
     <div
       className={[
-        'relative min-w-[240px] cursor-pointer rounded-md border bg-card p-3 text-card-foreground shadow-sm transition-colors',
+        'group relative min-w-[240px] cursor-pointer rounded-md border bg-card p-3 text-card-foreground shadow-sm transition-colors',
         data.subgraphPath ? 'pb-5' : '',
         selected ? 'border-primary ring-2 ring-primary/30' : 'border-border',
       ].join(' ')}
@@ -71,7 +71,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
         }
       }}
     >
-      <Handle type="target" position={Position.Left} className="!size-2.5 !border-background !bg-primary" />
+      <Handle type="target" position={Position.Left} className="!size-2.5 !border-background !bg-primary opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
       <div className="flex items-start gap-3">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
           <KindIcon className="size-4" />
@@ -121,7 +121,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
       {data.subgraphPath && data.isExpanded ? (
         <SubgraphInline path={data.subgraphPath} parentLabel={data.label} />
       ) : null}
-      <Handle type="source" position={Position.Right} className="!size-2.5 !border-background !bg-primary" />
+      <Handle type="source" position={Position.Right} className="!size-2.5 !border-background !bg-primary opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
     </div>
   )
 }

@@ -98,7 +98,7 @@ export function appendRole(data: RolesData, roleName?: string): RolesData {
   const nextRoleName = nextAvailableName(Object.keys(next.roles), requestedName)
 
   next.roles[nextRoleName] = {
-    model_fallback: true,
+    model_fallback_enabled: true,
     active_model: "",
     models: {},
   }
@@ -154,7 +154,10 @@ export function updateActiveModel(data: RolesData, roleName: string, activeModel
 
 export function toggleModelFallback(data: RolesData, roleName: string, enabled: boolean): RolesData {
   const next = cloneRolesData(data)
-  next.roles[roleName] = { ...next.roles[roleName], model_fallback: enabled }
+  next.roles[roleName] = {
+    ...next.roles[roleName],
+    model_fallback_enabled: enabled,
+  }
   return next
 }
 

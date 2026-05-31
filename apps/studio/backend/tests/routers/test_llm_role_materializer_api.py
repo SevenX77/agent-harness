@@ -142,7 +142,7 @@ def test_put_role_v3_skips_needs_setup_and_off_provider_models(
     }
 
 
-def test_put_role_v3_ready_first_orders_ready_before_untested(
+def test_put_role_v3_legacy_ready_first_migrates_to_manual_order_without_reordering(
     client: TestClient,
     tmp_path: Path,
     monkeypatch,
@@ -187,9 +187,10 @@ def test_put_role_v3_ready_first_orders_ready_before_untested(
 
     assert response.status_code == 200
     assert [entry["route_id"] for entry in response.json()["fallback_chain"]] == [
-        "ready-provider:gpt-5",
         "untested-provider:gpt-5",
+        "ready-provider:gpt-5",
     ]
+    assert response.json()["intent"]["provider_preference"] == "manual_order"
 
 
 def test_put_role_v3_manual_order_preserves_user_provider_order(

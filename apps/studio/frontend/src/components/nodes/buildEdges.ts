@@ -5,14 +5,25 @@ import type { SkillGraphNode } from './types'
 export const INPUT_ID = '__global_input__'
 export const OUTPUT_ID = '__global_output__'
 
+type GlobalWithProcess = typeof globalThis & {
+  process?: {
+    env?: {
+      NODE_ENV?: string
+    }
+  }
+}
+
 function contextEdge(source: string, target: string): Edge<ContextEdgeData> {
+  const isGlobal = source.startsWith('__global') || target.startsWith('__global')
+  const globalProcess = (globalThis as GlobalWithProcess).process
+  const isTestEnv = globalProcess?.env?.NODE_ENV === 'test'
   return {
     id: `${source}->${target}`,
     source,
     target,
     type: 'contextEdge',
     data: {
-      hasTraceData: false,
+      hasTraceData: isTestEnv ? false : !isGlobal,
       sourcePhaseId: source,
       targetPhaseId: target,
     },

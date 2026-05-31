@@ -6,6 +6,7 @@ import {
   apiKeyInputClassName,
   apiKeyInputType,
   copyAvailableModelId,
+  routeTooltipLineStatus,
   sortOfficialRouteInfos,
   sortModelInfos,
 } from "./ProviderCard"
@@ -519,6 +520,41 @@ describe("ProviderCard provider capabilities", () => {
     expect(failedTag).toContain('data-route-status="failed"')
   })
 
+  it("classifies inline failed and warning tooltip lines for diagnostic icons", () => {
+    expect(routeTooltipLineStatus("gpt-broken - Route test failed: 401 Unauthorized.")).toBe("failed")
+    expect(routeTooltipLineStatus("gpt-5 - Warning: Thinking was preferred.")).toBe("warning")
+    expect(routeTooltipLineStatus("Input: text")).toBeNull()
+  })
+
+  it("keeps official backend route tags visible when the editable draft secret differs", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({ id: "openai-official", name: "OpenAI Official", api_key: "sk-edited" })}
+        persisted={makePersisted({
+          id: "openai-official",
+          name: "OpenAI Official",
+          api_key: "**********",
+          available_models: [
+            {
+              id: "gpt-5",
+              route_id: "openai-official:gpt-5",
+              status: "verified",
+              capabilities: { model_type: "language_reasoning" },
+            },
+          ],
+        })}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="official"
+      />,
+    )
+
+    expect(html).toContain("Available Routes:")
+    expect(routeTagHtml(html, "gpt-5")).toContain('data-variant="success"')
+  })
+
   it("animates only official route chips reported as actively testing", () => {
     const html = renderToStaticMarkup(
       <ProviderCard
@@ -560,6 +596,7 @@ describe("ProviderCard provider capabilities", () => {
 
     const idleTag = routeTagHtml(html, "gpt-5.3")
     expect(idleTag).toContain('data-route-status="unverified_manual"')
+    expect(idleTag).toContain('data-variant="multimodal"')
     expect(idleTag).not.toContain("api-route-tag-border-flow")
   })
 
@@ -589,6 +626,7 @@ describe("ProviderCard provider capabilities", () => {
     const tag = routeTagHtml(html, "gpt-image-1")
     expect(tag).toContain('data-variant="multimodal"')
     expect(tag).toContain('data-model-type="image_generation"')
+    expect(html).toContain('data-route-type-group="Multimodal"')
     expect(tag).toContain('data-input-modalities="text,image"')
     expect(tag).toContain('data-output-modalities="image"')
     expect(tag).toContain("lucide-file-text")
@@ -1132,7 +1170,7 @@ describe("ProviderCard delete confirmation", () => {
     expect(toastMock).toHaveBeenCalledWith(
       "Delete OpenAI?",
       expect.objectContaining({
-        description: "This provider configuration will be removed from the credentials document.",
+        description: "This provider and its routes will be removed from API Keys, LLM Roles, and model bundles.",
         duration: Infinity,
         action: expect.objectContaining({ label: "Delete" }),
         cancel: expect.objectContaining({ label: "Cancel" }),

@@ -25,6 +25,7 @@ import {
   type EditorSide,
   type OpenFile,
   type SaveConflict,
+  type SelectedEdge,
   type WorkspaceContextValue,
 } from "./WorkspaceContext"
 
@@ -56,6 +57,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedNode, setSelectedNode] = useState<{ id: string; data: SkillGraphNodeData } | null>(null)
+  const [selectedEdge, setSelectedEdge] = useState<SelectedEdge | null>(null)
   const [inFlight, setInFlight] = useState<Partial<Record<EditorSide, boolean>>>({})
   const inFlightRef = useRef<Partial<Record<EditorSide, boolean>>>({})
   const [conflict, setConflict] = useState<SaveConflict | null>(null)
@@ -88,6 +90,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
   const handleNodeSelect = (node: { id: string; data: SkillGraphNodeData }) => {
     setSelectedNodeId(node.id)
     setSelectedNode(node)
+    setSelectedEdge(null)
   }
 
   const toOpenFile = useCallback(async (fileOrPath: FileMeta | string): Promise<OpenFile | null> => {
@@ -363,6 +366,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     reloadOpenFile,
     pushNavSkill,
     popNavTo,
+    selectedEdge,
+    setSelectedEdge,
+    onPanelChange: setActivePanel,
   }), [
     activeFileDetails,
     closeFile,
@@ -376,6 +382,9 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
     setFileInFlight,
     splitMode,
     updateFileContent,
+    selectedEdge,
+    setSelectedEdge,
+    setActivePanel,
   ])
 
   const handleCompile = useCallback(() => {

@@ -516,7 +516,7 @@ def test_roles_v2_schema_rejects_legacy_short_code_shape() -> None:
         RoleEntry.model_validate({"system_prompt_prefix": None, "fallback_chain": []})
 
 
-def test_roles_v3_authoring_schema_preserves_role_kind_model_groups_and_intent() -> None:
+def test_roles_v3_authoring_schema_migrates_legacy_provider_preferences_to_manual_order() -> None:
     data = RolesData.model_validate(
         {
             "schema_version": 3,
@@ -568,12 +568,13 @@ def test_roles_v3_authoring_schema_preserves_role_kind_model_groups_and_intent()
     assert data.schema_version == 3
     assert data.roles["analyst"].role_kind == "graph_agent"
     assert data.roles["analyst"].model_fallback_enabled is True
-    assert data.roles["analyst"].intent.provider_preference == "official_first"
+    assert data.roles["analyst"].intent.provider_preference == "manual_order"
     assert data.roles["analyst"].model_groups[0].canonical_id == "claude-sonnet-4-7"
     assert data.roles["analyst"].model_groups[0].provider_models[0].route_id == (
         "anthropic-official:claude-sonnet-4-7"
     )
     assert data.roles["copilot_chat"].role_kind == "copilot"
+    assert data.roles["copilot_chat"].intent.provider_preference == "manual_order"
 
 
 def test_role_level_intent_rejects_inherit_token_mode() -> None:

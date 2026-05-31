@@ -8,12 +8,15 @@ from app.services.llm_credentials import load_credentials, save_credentials
 from app.services.llm_import_drafts import (
     DraftApplyConflict,
     DraftExpired,
+    append_evidence_record,
     create_draft,
     load_draft,
+    load_evidence_library,
     save_draft,
 )
 from graph_agent_gateway.registry.schema import (
     EndpointCandidate,
+    EvidenceRecord,
     FieldSource,
     ProviderImportDraft,
     RouteCandidate,
@@ -64,6 +67,83 @@ def test_import_draft_store_round_trips_multi_endpoint_draft(tmp_path: Path) -> 
     assert loaded.draft_id == "draft-1"
     assert set(loaded.endpoint_candidates) == {"openai-direct", "openrouter-prod"}
     assert loaded.route_candidates["openai-direct:gpt-5"].endpoint_id == "openai-direct"
+    assert loaded.evidence_records == []
+
+
+def test_legacy_import_draft_without_evidence_records_loads_and_saves(
+    tmp_path: Path,
+) -> None:
+    store_path = tmp_path / "import_drafts.json"
+    store_path.write_text(
+        """
+{
+  "drafts": {
+    "legacy-draft": {
+      "draft_id": "legacy-draft",
+      "source": {"url": "https://provider.example/docs"},
+      "status": "pending"
+    }
+  }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    draft = load_draft("legacy-draft", path=store_path)
+    save_draft(draft, path=store_path)
+
+    saved = load_draft("legacy-draft", path=store_path)
+    assert saved.evidence_records == []
+
+
+def test_evidence_library_appends_probe_failure_without_overwriting_success(
+    tmp_path: Path,
+) -> None:
+    store_path = tmp_path / "import_drafts.json"
+    success = EvidenceRecord(
+        evidence_id="evidence-success",
+        evidence_type="probe",
+        trust_state="probe-verified",
+        observed_at="2026-05-31T10:00:00+00:00",
+        endpoint_id="openai-official",
+        route_id="openai-official:gpt-5",
+        model_id="gpt-5",
+        provider_model_id="gpt-5",
+        method_id="openai_responses",
+        request_mapper_id="openai_responses_text",
+        probe_status="ok",
+        scope={"endpoint_id": "openai-official", "route_id": "openai-official:gpt-5"},
+        probe_attempts=[{"status": "ok"}],
+        successful_probe={"profile_count": 1},
+    )
+    failure = EvidenceRecord(
+        evidence_id="evidence-failure",
+        evidence_type="probe",
+        trust_state="probe-failed",
+        observed_at="2026-05-31T10:05:00+00:00",
+        endpoint_id="openai-official",
+        route_id="openai-official:gpt-5",
+        model_id="gpt-5",
+        provider_model_id="gpt-5",
+        method_id="openai_responses",
+        request_mapper_id="openai_responses_text",
+        probe_status="error",
+        reason="provider rejected the request",
+        scope={"endpoint_id": "openai-official", "route_id": "openai-official:gpt-5"},
+        probe_attempts=[{"status": "error", "message": "provider rejected the request"}],
+        failed_probe={"status": "error", "reason": "provider rejected the request"},
+    )
+
+    append_evidence_record(success, path=store_path)
+    append_evidence_record(failure, path=store_path)
+
+    library = load_evidence_library(path=store_path)
+    assert [record.trust_state for record in library.evidence_records] == [
+        "probe-verified",
+        "probe-failed",
+    ]
+    assert library.evidence_records[0].successful_probe == {"profile_count": 1}
+    assert library.evidence_records[1].reason == "provider rejected the request"
 
 
 def test_expired_draft_apply_is_rejected(tmp_path: Path) -> None:

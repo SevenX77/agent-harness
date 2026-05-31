@@ -25,7 +25,7 @@ const rolesData: RolesData = {
   },
   roles: {
     copilot_chat: {
-      model_fallback: true,
+      model_fallback_enabled: true,
       active_model: "CL46T",
       models: {
         CL46T: { providers: ["anthropic", "openai_proxy"] },
@@ -72,7 +72,7 @@ describe("useRoleTestChainRunner helpers", () => {
       },
       roles: {
         analyst: {
-          model_fallback: true,
+          model_fallback_enabled: true,
           active_model: "deepseek-v4-pro",
           models: {
             "deepseek-v4-pro": { providers: [routeId] },

@@ -1036,7 +1036,7 @@ describe('API Keys v4 registry adapter', () => {
     })
   })
 
-  it('loads v3 backend roles into the legacy-compatible LLM Roles UI shape', async () => {
+  it('loads v3 backend roles into the LLM Roles authoring shape', async () => {
     api.defaults.adapter = adapter((config) => {
       if (config.url === '/llm/registry') {
         return registry({
@@ -1118,12 +1118,13 @@ describe('API Keys v4 registry adapter', () => {
     })
     expect(roles.roles.analyst).toMatchObject({
       role_kind: 'graph_agent',
-      model_fallback: true,
+      model_fallback_enabled: true,
       active_model: 'gpt-5',
       models: {
         'gpt-5': { providers: [route.route_id] },
       },
     })
+    expect(Object.prototype.hasOwnProperty.call(roles.roles.analyst, 'model_fallback')).toBe(false)
   })
 
   it('keeps persisted model bundle groups addressable when roles reference them', async () => {
@@ -1173,7 +1174,7 @@ describe('API Keys v4 registry adapter', () => {
     })
   })
 
-  it('saves the legacy-compatible LLM Roles UI shape as v3 model groups', async () => {
+  it('saves the LLM Roles authoring shape as v3 model groups', async () => {
     const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
     api.defaults.adapter = adapter((config) => {
       seen.push({ method: config.method, url: config.url, data: config.data })
@@ -1198,7 +1199,7 @@ describe('API Keys v4 registry adapter', () => {
       roles: {
         analyst: {
           role_kind: 'graph_agent',
-          model_fallback: false,
+          model_fallback_enabled: false,
           active_model: 'gpt-5',
           models: {
             'gpt-5': { providers: [route.route_id], temperature: 0.2, max_tokens: 8192 },

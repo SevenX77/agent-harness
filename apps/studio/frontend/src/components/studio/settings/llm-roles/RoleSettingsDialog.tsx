@@ -19,7 +19,7 @@ export interface OutputLimitSummary {
   max: number | null
 }
 
-interface RoleSettingsDraft {
+export interface RoleSettingsDraft {
   providerPreference: RoleProviderPreference
   thinking: RoleThinkingPreference
   outputTokens: string
@@ -28,14 +28,14 @@ interface RoleSettingsDraft {
 
 export function RoleSettingsPanel({
   roleName,
-  modelFallback,
+  modelFallbackEnabled,
   intent,
   outputLimitSummary,
   onModelFallbackChange,
   onSubmit,
 }: {
   roleName: string
-  modelFallback: boolean
+  modelFallbackEnabled: boolean
   intent?: RoleIntent
   outputLimitSummary: OutputLimitSummary
   onModelFallbackChange: (enabled: boolean) => void
@@ -49,13 +49,13 @@ export function RoleSettingsPanel({
 
   function updateDraft(nextDraft: RoleSettingsDraft) {
     setDraft(nextDraft)
-    onSubmit(intentFromDraft(nextDraft))
+    onSubmit(roleIntentFromSettingsDraft(nextDraft))
   }
 
   return (
     <RoleSettingsFields
       roleName={roleName}
-      modelFallback={modelFallback}
+      modelFallbackEnabled={modelFallbackEnabled}
       draft={draft}
       outputLimitSummary={outputLimitSummary}
       onModelFallbackChange={onModelFallbackChange}
@@ -66,20 +66,20 @@ export function RoleSettingsPanel({
 
 export function RoleSettingsFields({
   roleName,
-  modelFallback,
+  modelFallbackEnabled,
   draft,
   outputLimitSummary,
   onModelFallbackChange,
   onDraftChange,
 }: {
   roleName: string
-  modelFallback: boolean
+  modelFallbackEnabled: boolean
   draft: RoleSettingsDraft
   outputLimitSummary: OutputLimitSummary
   onModelFallbackChange: (enabled: boolean) => void
   onDraftChange: (draft: RoleSettingsDraft) => void
 }) {
-  const thinkingRequired = draft.thinking !== "off"
+  const thinkingPreferred = draft.thinking !== "off"
 
   return (
     <FieldSet data-role-settings-fields="true" className="gap-3">
@@ -91,7 +91,7 @@ export function RoleSettingsFields({
           <Field
             orientation="horizontal"
             data-role-model-fallback-setting="true"
-            data-role-setting-key="model_fallback"
+            data-role-setting-key="model_fallback_enabled"
             className="items-center justify-between gap-3 py-1"
           >
             <FieldLabel htmlFor={`model-fallback-${roleName}`} className="min-w-0 truncate">
@@ -100,7 +100,7 @@ export function RoleSettingsFields({
             <Switch
               id={`model-fallback-${roleName}`}
               size="sm"
-              checked={modelFallback}
+              checked={modelFallbackEnabled}
               onCheckedChange={onModelFallbackChange}
               aria-label={`Model fallback for ${roleName}`}
             />
@@ -110,18 +110,18 @@ export function RoleSettingsFields({
             orientation="horizontal"
             className="items-center justify-between gap-3 py-1"
           >
-            <FieldLabel htmlFor={`thinking-required-${roleName}`} className="min-w-0 truncate">
-              Thinking Required
+            <FieldLabel htmlFor={`thinking-preferred-${roleName}`} className="min-w-0 truncate">
+              Thinking Preferred
             </FieldLabel>
             <Switch
-              id={`thinking-required-${roleName}`}
+              id={`thinking-preferred-${roleName}`}
               size="sm"
-              checked={thinkingRequired}
+              checked={thinkingPreferred}
               onCheckedChange={(checked) => onDraftChange({
                 ...draft,
-                thinking: checked ? "required" : "off",
+                thinking: checked ? "preferred" : "off",
               })}
-              aria-label={`Thinking Required for ${roleName}`}
+              aria-label={`Thinking Preferred for ${roleName}`}
             />
           </Field>
 
@@ -189,10 +189,10 @@ function outputLimitSummaryText(summary: OutputLimitSummary): string {
   return `${prefix} ${routeLabel} unavailable.`
 }
 
-function intentFromDraft(draft: RoleSettingsDraft): RoleIntent {
+export function roleIntentFromSettingsDraft(draft: RoleSettingsDraft): RoleIntent {
   if (draft.useMaximumTokens) {
     return {
-      provider_preference: "manual_order",
+      provider_preference: draft.providerPreference,
       thinking: draft.thinking,
       target_output_tokens: {
         mode: "maximum_available",
@@ -201,7 +201,7 @@ function intentFromDraft(draft: RoleSettingsDraft): RoleIntent {
   }
   const outputValue = parseOptionalInteger(draft.outputTokens)
   return {
-    provider_preference: "manual_order",
+    provider_preference: draft.providerPreference,
     thinking: draft.thinking,
     target_output_tokens: outputValue !== null
       ? {

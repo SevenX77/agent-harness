@@ -8,10 +8,13 @@ import {
   inferProviderKind,
   inferProviderType,
   moveProviderInRole,
+  modelGroupsReferenceMissingCredentialProviders,
   notableProviderKeyForDraft,
   officialProviderTestSummary,
   officialProviderDrafts,
   providerDraftForAction,
+  isStaleRouteReferenceError,
+  refreshLoadedLlmRolesProjection,
   providerTestParamsFingerprint,
   providerTestParamsMatch,
   removeProviderFromRole,
@@ -89,7 +92,7 @@ const rolesData: RolesData = {
   },
   roles: {
     copilot_chat: {
-      model_fallback: true,
+      model_fallback_enabled: true,
       active_model: 'CL46T',
       models: {
         CL46T: { providers: ['OC_CL_ANT', 'WS_LLM'], temperature: 0.7 },
@@ -97,7 +100,7 @@ const rolesData: RolesData = {
       },
     },
     deerflow_default: {
-      model_fallback: true,
+      model_fallback_enabled: true,
       active_model: 'CL46T',
       models: {
         CL46T: { providers: ['OC_CL_ANT'], temperature: 0.7 },
@@ -167,6 +170,147 @@ describe('draftsFromCredentials', () => {
       providers: [{ id: 'TEST', name: 'Test', api_key: '' }],
     })
     expect(drafts[0].provider_type).toBe('openai_compatible')
+  })
+})
+
+describe('refreshLoadedLlmRolesProjection', () => {
+  it('refreshes loaded roles and model groups after credential route changes', async () => {
+    const nextRoles: RolesData = {
+      ...rolesData,
+      providers: {},
+      models: {},
+    }
+    const nextModelGroups: ModelGroup[] = [
+      {
+        canonical_id: 'gpt-5',
+        display_name: 'GPT-5',
+        provider_models: [],
+        status_summary: { ready: 0, untested: 0, cooling_down: 0, needs_setup: 0, off: 0 },
+        capability_summary: {
+          capability_known_count: 0,
+          thinking: 'unknown',
+          tools: 'unknown',
+          structured_output: 'unknown',
+        },
+      },
+    ]
+    const setRolesData = vi.fn()
+    const setModelGroups = vi.fn()
+    const setRolesError = vi.fn()
+
+    await refreshLoadedLlmRolesProjection({
+      rolesLoaded: true,
+      loadRoles: vi.fn().mockResolvedValue(nextRoles),
+      loadModelGroups: vi.fn().mockResolvedValue(nextModelGroups),
+      setRolesData,
+      setModelGroups,
+      setRolesError,
+    })
+
+    expect(setRolesData).toHaveBeenCalledWith(nextRoles)
+    expect(setModelGroups).toHaveBeenCalledWith(nextModelGroups)
+    expect(setRolesError).toHaveBeenCalledWith(null)
+  })
+
+  it('does not fetch roles projection when LLM Roles has not been loaded', async () => {
+    const loadRoles = vi.fn().mockResolvedValue(rolesData)
+    const loadModelGroups = vi.fn().mockResolvedValue([])
+
+    await refreshLoadedLlmRolesProjection({
+      rolesLoaded: false,
+      loadRoles,
+      loadModelGroups,
+      setRolesData: vi.fn(),
+      setModelGroups: vi.fn(),
+      setRolesError: vi.fn(),
+    })
+
+    expect(loadRoles).not.toHaveBeenCalled()
+    expect(loadModelGroups).not.toHaveBeenCalled()
+  })
+})
+
+describe('isStaleRouteReferenceError', () => {
+  it('recognizes backend unknown route validation as recoverable stale state', () => {
+    expect(isStaleRouteReferenceError({
+      message: 'Request failed with status code 400',
+      response: {
+        status: 400,
+        data: {
+          detail: 'Validation failed: role Analyst model_groups[1].provider_models[1] references unknown route custom-qiniu:deepseek',
+        },
+      },
+    })).toBe(true)
+  })
+
+  it('does not treat unrelated validation errors as stale route state', () => {
+    expect(isStaleRouteReferenceError({
+      message: 'Request failed with status code 400',
+      response: {
+        status: 400,
+        data: { detail: 'Validation failed: role name is required' },
+      },
+    })).toBe(false)
+  })
+})
+
+describe('modelGroupsReferenceMissingCredentialProviders', () => {
+  it('detects stale available models from a deleted provider endpoint', () => {
+    expect(modelGroupsReferenceMissingCredentialProviders([
+      {
+        canonical_id: 'aion-1',
+        display_name: 'Aion 1.0',
+        provider_models: [
+          {
+            route_id: 'openrouter:aion-1',
+            endpoint_id: 'openrouter',
+            provider_label: 'OpenRouter',
+            provider_kind: 'third_party',
+            provider_model_id: 'aion-1',
+            ui_state: 'untested',
+            capability_state: 'unknown',
+            capabilities: {},
+          },
+        ],
+        status_summary: { ready: 0, untested: 1, cooling_down: 0, needs_setup: 0, off: 0 },
+        capability_summary: {
+          capability_known_count: 0,
+          thinking: 'unknown',
+          tools: 'unknown',
+          structured_output: 'unknown',
+        },
+      },
+    ], {
+      providers: credentials.providers.filter((provider) => provider.id !== 'openrouter'),
+    })).toBe(true)
+  })
+
+  it('keeps available models when every endpoint still exists', () => {
+    expect(modelGroupsReferenceMissingCredentialProviders([
+      {
+        canonical_id: 'deepseek-v4-flash',
+        display_name: 'DeepSeek V4 Flash',
+        provider_models: [
+          {
+            route_id: 'DS:deepseek-v4-flash',
+            endpoint_id: 'DS',
+            provider_label: 'DeepSeek Official',
+            provider_kind: 'official',
+            provider_model_id: 'deepseek-v4-flash',
+            ui_state: 'ready',
+            capability_state: 'known',
+            capabilities: {},
+          },
+        ],
+        status_summary: { ready: 1, untested: 0, cooling_down: 0, needs_setup: 0, off: 0 },
+        capability_summary: {
+          capability_known_count: 1,
+          thinking: 'supported',
+          tools: 'unknown',
+          structured_output: 'unknown',
+        },
+      },
+    ], credentials)).toBe(false)
   })
 })
 
@@ -638,8 +782,8 @@ describe('SettingsPageContent (api_keys)', () => {
 describe('LLM Roles helpers', () => {
   it('toggleModelFallback flips the flag', () => {
     const next = toggleModelFallback(rolesData, 'copilot_chat', false)
-    expect(next.roles.copilot_chat.model_fallback).toBe(false)
-    expect(rolesData.roles.copilot_chat.model_fallback).toBe(true)
+    expect(next.roles.copilot_chat.model_fallback_enabled).toBe(false)
+    expect(rolesData.roles.copilot_chat.model_fallback_enabled).toBe(true)
   })
 
   it('updateActiveModel swaps the active model', () => {

@@ -1,5 +1,6 @@
 import { useState } from "react"
-import { FlaskConical, Plus } from "lucide-react"
+import { FlaskConical, Loader2, Plus } from "lucide-react"
+import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -39,6 +40,12 @@ import {
   type CopilotRolePreview,
   type CopilotRoutePreview,
 } from "./mock-copilot-data"
+import {
+  copilotRoleTestErrorMessage,
+  copilotRouteStatusesFromJob,
+  runCopilotRoleTestJob,
+  type CopilotRouteJobStatus,
+} from "./copilot-role-test"
 
 interface ActiveCopilotModelCard {
   id: string
@@ -53,7 +60,8 @@ export function CopilotTab() {
     initialClaudeCopilotRoleIds.map((roleId) => ({ id: `built-in-${roleId}`, roleId }))
   ))
   const [nextDraftIndex, setNextDraftIndex] = useState(1)
-  const [testedRouteIds, setTestedRouteIds] = useState<ReadonlySet<string>>(() => new Set())
+  const [testingRoleIds, setTestingRoleIds] = useState<ReadonlySet<string>>(() => new Set())
+  const [routeStatusOverrides, setRouteStatusOverrides] = useState<Record<string, CopilotRouteJobStatus>>({})
   const [routeOrders, setRouteOrders] = useState<Record<string, string[]>>({})
   const selectedRoleIds = activeCards
     .map((card) => card.roleId)
@@ -77,14 +85,35 @@ export function CopilotTab() {
     )))
   }
 
-  function testRoleRoutes(role: CopilotRolePreview) {
-    setTestedRouteIds((current) => {
+  async function testRoleRoutes(role: CopilotRolePreview) {
+    setTestingRoleIds((current) => {
       const next = new Set(current)
-      for (const route of compatibleRoutesForRole(role)) {
-        if (route.agentStatus === "not_tested") next.add(route.id)
-      }
+      next.add(role.id)
       return next
     })
+    try {
+      const result = await runCopilotRoleTestJob(role.id, {
+        onProgress: (job) => {
+          setRouteStatusOverrides((current) => ({
+            ...current,
+            ...copilotRouteStatusesFromJob(job),
+          }))
+        },
+      })
+      if (result.status === "ok") {
+        toast.success(`${role.title} test passed`)
+      } else {
+        toast.warning(`${role.title} test needs attention`)
+      }
+    } catch (error) {
+      toast.error(copilotRoleTestErrorMessage(error, role.title))
+    } finally {
+      setTestingRoleIds((current) => {
+        const next = new Set(current)
+        next.delete(role.id)
+        return next
+      })
+    }
   }
 
   return (
@@ -128,7 +157,8 @@ export function CopilotTab() {
                   routeOrder={routeOrder}
                   chainRoutes={chainRoutes}
                   appendableRoutes={appendableRoutes}
-                  testedRouteIds={testedRouteIds}
+                  routeStatusOverrides={routeStatusOverrides}
+                  isTesting={testingRoleIds.has(role.id)}
                   onTest={() => testRoleRoutes(role)}
                   onUpdateRouteOrder={(nextOrder) => updateRouteOrder(role.id, nextOrder)}
                 />
@@ -156,7 +186,8 @@ function CopilotRoleCard({
   routeOrder,
   chainRoutes,
   appendableRoutes,
-  testedRouteIds,
+  routeStatusOverrides,
+  isTesting,
   onTest,
   onUpdateRouteOrder,
 }: {
@@ -164,13 +195,14 @@ function CopilotRoleCard({
   routeOrder: string[]
   chainRoutes: CopilotRoutePreview[]
   appendableRoutes: CopilotRoutePreview[]
-  testedRouteIds: ReadonlySet<string>
+  routeStatusOverrides: Record<string, CopilotRouteJobStatus>
+  isTesting: boolean
   onTest: () => void
   onUpdateRouteOrder: (nextOrder: string[]) => void
 }) {
   const compatibleRoutes = compatibleRoutesForRole(role)
   const readyCount = compatibleRoutes.filter((route) => (
-    route.agentStatus === "ready" || testedRouteIds.has(route.id)
+    (routeStatusOverrides[route.id] ?? route.agentStatus) === "ready"
   )).length
 
   return (
@@ -193,9 +225,10 @@ function CopilotRoleCard({
             size="sm"
             data-copilot-test-chain="true"
             onClick={onTest}
+            disabled={isTesting}
           >
-            <FlaskConical data-icon="inline-start" />
-            Test
+            {isTesting ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <FlaskConical data-icon="inline-start" />}
+            {isTesting ? "Testing" : "Test"}
           </Button>
         </CardAction>
       </CardHeader>
@@ -205,7 +238,7 @@ function CopilotRoleCard({
           modelIndex={0}
           routes={chainRoutes}
           appendableRoutes={appendableRoutes}
-          testedRouteIds={testedRouteIds}
+          routeStatusOverrides={routeStatusOverrides}
           onAddRoute={(routeId) => onUpdateRouteOrder([...routeOrder, routeId])}
           onRemoveRoute={(routeId) => onUpdateRouteOrder(routeOrder.filter((candidate) => candidate !== routeId))}
           onReorderRoutes={(activeRouteId, overRouteId) => {

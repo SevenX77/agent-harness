@@ -1,100 +1,102 @@
 ---
 status: Living
-target_goal: "Studio LLM provider configuration should be explicit, testable, and traceable"
+target_goal: "Studio LLM configuration uses deterministic endpoint/route registry execution"
 linked_code_paths:
-  - apps/studio/frontend/src/components/studio/settings/api-keys/ApiKeysTab.tsx
-  - apps/studio/frontend/src/components/studio/api-keys/ProviderCard.tsx
+  - apps/studio/frontend/src/components/studio/settings/endpoints/EndpointsTab.tsx
+  - apps/studio/frontend/src/components/studio/settings/LlmRolesTab.tsx
+  - apps/studio/frontend/src/api/llm.ts
   - apps/studio/backend/app/routers/llm.py
   - apps/studio/backend/app/services/llm_credentials.py
-  - apps/studio/backend/app/services/llm_provider_test.py
+  - apps/studio/backend/app/services/llm_roles.py
+  - apps/studio/backend/app/services/llm_import_drafts.py
+  - packages/graph-agent-gateway/src/graph_agent_gateway/registry/
 ---
 
-# LLM Model Configuration Flow
+# LLM Endpoint/Route Configuration Flow
 
-## 1. Provider input
+LLM Provider Intelligence V2 is a hard cut from provider cards, `available_models`, and short-code roles to an explicit endpoint/route registry. Runtime execution always uses exact `route_id` values from role fallback chains.
 
-When we onboard a provider or proxy, collect these facts separately:
+## 1. Concepts
 
-- **API key**: the secret used for auth. Some providers reuse one key across multiple protocol endpoints.
-- **Protocol**: one of `openai_compatible`, `anthropic_compatible`, or `google_genai`.
-- **Base URL**: the endpoint root for that protocol. One provider may expose multiple base URLs.
-- **Model catalog URL**: where users can see model IDs and availability. This may be a web page, not the API endpoint.
-- **Docs URL**: protocol/auth reference, including required headers and known quirks.
-- **Model ID shape**: plain IDs like `deepseek-r1`, vendor-prefixed IDs like `anthropic/claude-opus-4.7`, or provider-specific aliases.
+- **Provider brand**: human/vendor label such as Anthropic, OpenAI, Qiniu, or OneChats. It is display metadata only.
+- **ProviderEndpoint**: callable credential and transport root. It owns `endpoint_id`, protocol, base URL, API key, and endpoint test status.
+- **ProviderRoute**: one physical model route under one endpoint. It owns `route_id`, `endpoint_id`, provider model ID, canonical display grouping, capabilities, and probe status.
+- **ModelProfile**: authoring-time bundle such as `CLO47T = Claude Opus 4.7 Thinking`. A profile stores a fallback chain of exact route IDs.
+- **RoleEntry**: runtime role config. It stores the actual fallback chain executed by the engine, plus optional source-profile trace metadata.
+- **ProviderImportDraft**: non-trusted Agent import output. Drafts never write active endpoints or routes until the backend probe/diff/apply workflow accepts them.
 
-Do not treat "provider brand" and "protocol endpoint" as the same thing. A brand such as Qiniu can have both an OpenAI-compatible endpoint and an Anthropic-compatible endpoint.
+## 2. Endpoints
 
-## 2. API Keys page
+Endpoints live in `~/.studio/llm_credentials.json` under `provider_endpoints`.
 
-The API Keys page stores one provider card per protocol endpoint:
+One provider brand can produce multiple endpoints when protocols or base URLs differ. Qiniu, for example, should be represented as two endpoints if both protocol URLs are used:
 
-- `id`: stable local database key. Changing name, key, URL, or protocol must not change this ID.
-- `name`: display label, for example `QiNiu-OpenAI` or `QiNiu-Anthropic`.
-- `provider_type`: selected protocol. This controls request shape and auth headers.
-- `api_key`: provider secret.
-- `base_url`: endpoint root for the selected protocol.
-
-If one provider gives two URLs, create two provider cards with the same API key:
-
-| Card name | Protocol | Base URL |
+| endpoint_id | Protocol | Base URL |
 |---|---|---|
-| `QiNiu-OpenAI` | `openai_compatible` | `https://api.qnaigc.com/v1` |
-| `QiNiu-Anthropic` | `anthropic_compatible` | `https://anthropic.qnaigc.com` |
+| `qiniu-openai` | `openai_compatible` | `https://api.qnaigc.com/v1` |
+| `qiniu-anthropic` | `anthropic_compatible` | `https://anthropic.qnaigc.com` |
 
-The UI must display exactly the stored document state. For test outcomes, the cache key is:
+Endpoint identity is immutable after creation. Editing display name, API key, status, timeout, or metadata does not change `endpoint_id`.
+
+The endpoint test action only verifies the credential/base URL boundary. UI test responses must merge backend-owned diagnostic fields, such as `status`, `last_test_at`, and `last_test_message`, without overwriting local form edits that are still pending autosave.
+
+## 3. Routes
+
+Routes live in `~/.studio/llm_credentials.json` under `provider_routes`.
+
+`route_id` is always:
 
 ```text
-api_key + base_url + provider_type
+<endpoint_id>:<route_slug>
 ```
 
-If any of those values change, the visible status, SDK/protocol chips, and available models should fall back to the initial state unless the cached result for the new exact parameter tuple already exists.
+Examples:
 
-Current credential storage file:
+| route_id | provider_model_id |
+|---|---|
+| `anthropic-official:claude-opus-4-7-thinking` | `claude-opus-4.7-thinking` |
+| `onechats-anthropic:claude-sonnet-4-6` | `anthropic/claude-sonnet-4.6` |
+| `qiniu-openai:deepseek-r1` | `deepseek-r1` |
 
-```text
-~/.studio/llm_credentials.json
-```
+Route identity fields are immutable: `route_id`, `endpoint_id`, and `provider_model_id` cannot be changed by metadata update APIs. Editable route fields are display name, canonical ID, status, capabilities, and diagnostic metadata.
 
-## 3. Test button semantics
+Route probe replaces the old manual model probing flow. It records verified capability evidence on the route. Probe and lint results may block or warn, but they never select a replacement model.
 
-The primary Test action should answer these questions, in this order:
+## 4. Canonical Grouping
 
-1. **Can the API key and Base URL authenticate?**
-2. **Can we retrieve a model catalog from this endpoint?**
-3. **Which model IDs are available for role configuration?**
-4. **Can we confirm a generation/chat protocol with a tiny request?** This is useful but diagnostic. It should not hide a valid model list.
+Canonical IDs are UI grouping keys supplied by backend DTOs. Frontend code must not canonicalize raw provider model strings, infer provider ownership, or prune stale providers locally.
 
-The returned result should be organized as:
+`config/llm_canonical_rules.yaml` is the explicit source for curated aliases. Moving aliases such as OpenRouter `~...latest` are intentionally not canonical aliases unless they are pinned by a deliberate rule and test.
 
-- `status`: connection/auth result for the selected parameter tuple.
-- `available_models`: normalized model IDs from the endpoint or provider docs fallback.
-- `available_sdks`: confirmed or selected protocol diagnostics. Do not use this list as the source of role model options.
-- `error_code` and `message`: machine code plus human-readable explanation for UI toasts.
+## 5. Import Drafts
 
-Manual model probing is a fallback:
+Agent onboarding output enters a draft store, not active credentials.
 
-- It is used when automatic model listing is unavailable, incomplete, or the user wants to verify one exact model ID.
-- It sends a minimal one-token request for each entered model ID.
-- It returns per-model statuses such as `Available`, `Model not found`, `Invalid API key`, `Rate limited`, `Network error`, or `Test failed`.
-- Successful manual IDs are appended to the provider's available model list.
+Drafts can include multiple endpoint candidates and multiple route candidates. If a draft endpoint ID matches an active endpoint, apply must require an explicit merge/discard/delete-active-first decision. There is no auto-promote path from Agent output into runtime configuration.
 
-## 4. LLM Roles page
+## 6. Model Profiles and Roles
 
-The LLM Roles page should not ask users to type raw API credentials. It should consume tested API Keys providers:
+Model Profiles are reusable editing bundles. Applying a profile copies its fallback chain into a role. Runtime never resolves by profile ID.
 
-- Provider options come from the credential document's provider cards.
-- Model options come from `available_models` for the selected provider.
-- The value written into a role is the exact model ID returned by the provider, not a normalized display alias.
-- If a provider has no available models, the role UI can show it as unavailable and point the user back to API Keys Test/manual probing.
+Rules:
 
-Recommended role selection flow:
+- Role fallback order is deterministic and user-controlled.
+- Updating a profile does not implicitly mutate roles that previously used it.
+- Deleting a profile does not delete role fallback chains; roles keep the route chain and receive deleted-profile trace metadata for UI display.
+- `model_override` means one exact `route_id`, not a model code or capability intent.
 
-1. User tests provider endpoint on API Keys.
-2. Backend persists `available_models` for that provider ID and parameter tuple.
-3. LLM Roles reads providers and model lists from the credentials response.
-4. User picks role, provider chain order, and model ID.
-5. Runtime resolves provider ID to key/base URL/protocol and calls the selected adapter.
+## 7. Runtime Resolution
 
-## 5. Current Qiniu note
+Studio Backend joins active credentials and roles into a `RegistrySnapshot`. The Gateway `ModelResolver` resolves a role by walking its fallback chain in order and joining each route to its endpoint.
 
-`apps/studio/backend/app/data/llm_providers/qiniu.md` was originally added in commit `378c6795` by `SevenX77` on `2026-05-19`. It described only the older/default OpenAI-compatible profile. Current observed Qiniu configuration needs two endpoint profiles, so the doc now records both Base URLs and the Studio rule: create separate provider cards per protocol endpoint.
+The resolver may lint, warn, block invalid configuration, or fail fast. It must not search by capability, provider, price, latency, or availability to choose a different route.
+
+Runtime credentials come from the resolved endpoint and route. `.env` provider keys, old provider cards, and old short-code schemas are not runtime inputs.
+
+## 8. Provider Notes Archive
+
+The provider notes archive lives in `docs/development/llm_provider_notes/`.
+
+Those files are human and Agent-import reference material. Studio Backend may parse each provider note's `## 4. Notable Model IDs` section for the suggestion-only `GET /api/llm/providers/notable-models` endpoint used by manual model probing placeholders.
+
+They are not runtime configuration. Parsing provider notes must not construct endpoints, routes, roles, credentials, canonical aliases, runtime settings, or provider-selection behavior. Active endpoint/route state is stored in V4 credentials and V2 roles, with canonical alias rules limited to `config/llm_canonical_rules.yaml`.

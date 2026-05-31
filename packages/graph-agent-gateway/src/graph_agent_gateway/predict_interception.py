@@ -9,11 +9,13 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from graph_agent_gateway.gateway_chat_model import GatewayChatModel
-from graph_agent_gateway.llm_config import ResolvedRole
+from graph_agent_gateway.registry.schema import ResolvedRole
 
 
 class PredictGatewayChatModel(GatewayChatModel):
     """Gateway-compatible model that never calls real providers."""
+
+    mock_strategy: Any
 
     def __init__(
         self,
@@ -23,7 +25,7 @@ class PredictGatewayChatModel(GatewayChatModel):
         mock_strategy: Any,
         **kwargs: Any,
     ) -> None:
-        self.mock_strategy = mock_strategy
+        kwargs["mock_strategy"] = mock_strategy
         super().__init__(role_name, resolved_role, **kwargs)
 
     def _generate(

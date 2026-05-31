@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 try:
-    from graph_agent.core.exceptions import ModelProviderError
+    from graph_agent import ModelProviderError
 except Exception:  # pragma: no cover - fallback for standalone package import
     ModelProviderError = RuntimeError  # type: ignore[misc,assignment]
 
@@ -24,7 +24,10 @@ class GatewayError(ModelProviderError):
     ) -> None:
         self.code = code
         self.context = dict(context or {})
-        super().__init__(f"{code} {message}", context=self.context)
+        try:
+            super().__init__(f"{code} {message}", context=self.context)
+        except TypeError:  # pragma: no cover - standalone RuntimeError fallback
+            super().__init__(f"{code} {message}")
 
 
 class AllProvidersFailedError(GatewayError):
@@ -85,7 +88,7 @@ class GatewayRoleNotConfiguredError(GatewayError):
             "model_override": model_override,
         }
         super().__init__(
-            "gateway role/model is not configured",
+            "gateway role/route is not configured",
             code="[F-v3-gateway-role-not-configured]",
             context=context,
         )

@@ -1,3 +1,4 @@
+import { memo, useMemo } from "react"
 import {
   closestCenter,
   DndContext,
@@ -32,32 +33,61 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { roleChainStatusKey, type RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
-import type { RolesData } from "@/api/llm"
+import type { MaterializationReportEntry, ProviderModelOption, RolesData } from "@/api/llm"
 import { appendProviderToModel, removeProviderFromRole, reorderProviderInRole } from "../role-utils"
 import { IconTooltip } from "./IconTooltip"
-import { ProviderTestStatusBadge } from "./RoleBadges"
+import {
+  deriveRoleRouteStatus,
+  roleProviderRouteTooltip,
+  roleRouteStatusDetail,
+  roleRouteStatusSurfaceClass,
+  RoleRouteStatusLight,
+} from "./role-route-status"
 
-export function ProviderChain({
+const EMPTY_PROVIDER_MODELS_BY_ROUTE_ID: ReadonlyMap<string, ProviderModelOption> = new Map()
+const EMPTY_ROLE_FIT_BY_ROUTE_ID: ReadonlyMap<string, MaterializationReportEntry> = new Map()
+
+export const ProviderChain = memo(function ProviderChain({
   data,
   roleName,
   modelCode,
+  modelName,
   providers,
   appendableProviderCodes,
+  providerModelsByRouteId,
+  roleFitByRouteId,
   testStatuses,
   onChange,
 }: {
   data: RolesData
   roleName: string
   modelCode: string
+  modelName: string
   providers: string[]
   appendableProviderCodes: string[]
+  providerModelsByRouteId?: ReadonlyMap<string, ProviderModelOption>
+  roleFitByRouteId?: ReadonlyMap<string, MaterializationReportEntry>
   testStatuses: RoleChainStatusMap
   onChange: (next: RolesData) => void
 }) {
-  const providerItems = providers.map((providerCode, index) => providerItemId(providerCode, index))
+  const providerModels = providerModelsByRouteId ?? EMPTY_PROVIDER_MODELS_BY_ROUTE_ID
+  const roleFits = roleFitByRouteId ?? EMPTY_ROLE_FIT_BY_ROUTE_ID
+  const providerItems = useMemo(
+    () => providers.map((providerCode, index) => providerItemId(providerCode, index)),
+    [providers],
+  )
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+  const providerLabels = useMemo(
+    () => Object.fromEntries(
+      appendableProviderCodes.map((providerCode) => [
+        providerCode,
+        data.providers[providerCode]?.name ?? providerCode,
+      ]),
+    ),
+    [appendableProviderCodes, data.providers],
   )
 
   function handleDragEnd(event: DragEndEvent) {
@@ -73,9 +103,9 @@ export function ProviderChain({
       <SortableContext items={providerItems} strategy={rectSortingStrategy}>
         <div
           data-provider-grid="true"
-          className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,12rem),20rem))] justify-start gap-1.5"
+          className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,max(12rem,calc((100%_-_0.75rem)/3))),1fr))] justify-start gap-1.5"
           role="list"
-          aria-label={`${modelCode} provider fallback order`}
+          aria-label={`${modelName} provider fallback order`}
         >
           {providers.map((providerCode, index) => (
             <ProviderTag
@@ -86,33 +116,32 @@ export function ProviderChain({
               modelCode={modelCode}
               providerCode={providerCode}
               index={index}
+              providerModel={providerModels.get(providerCode)}
+              roleFitEntry={roleFits.get(providerCode)}
               testStatus={testStatuses[roleChainStatusKey(modelCode, providerCode)]}
               onChange={onChange}
             />
           ))}
           <AddProviderMenu
             providerCodes={appendableProviderCodes}
-            providerLabels={Object.fromEntries(
-              appendableProviderCodes.map((providerCode) => [
-                providerCode,
-                data.providers[providerCode]?.name ?? providerCode,
-              ]),
-            )}
+            providerLabels={providerLabels}
             onAppend={(providerCode) => onChange(appendProviderToModel(data, roleName, modelCode, providerCode))}
           />
         </div>
       </SortableContext>
     </DndContext>
   )
-}
+})
 
-function ProviderTag({
+const ProviderTag = memo(function ProviderTag({
   id,
   data,
   roleName,
   modelCode,
   providerCode,
   index,
+  providerModel,
+  roleFitEntry,
   testStatus,
   onChange,
 }: {
@@ -122,10 +151,28 @@ function ProviderTag({
   modelCode: string
   providerCode: string
   index: number
+  providerModel?: ProviderModelOption
+  roleFitEntry?: MaterializationReportEntry
   testStatus?: RoleChainStatusMap[string]
   onChange: (next: RolesData) => void
 }) {
   const providerName = data.providers[providerCode]?.name ?? ""
+  const roleRouteStatus = deriveRoleRouteStatus({
+    providerModel,
+    roleFitEntry,
+    testStatus: testStatus?.status,
+  })
+  const statusDetail = roleRouteStatusDetail({
+    providerModel,
+    roleFitEntry,
+    testMessage: testStatus?.message,
+  })
+  const statusTooltip = roleRouteStatus ? roleProviderRouteTooltip({
+    status: roleRouteStatus,
+    providerModel,
+    fallbackProviderModelId: data.models[modelCode]?.providers[providerCode],
+    detail: statusDetail,
+  }) : null
   const {
     attributes,
     listeners,
@@ -139,17 +186,24 @@ function ProviderTag({
     transition,
   }
 
-  return (
+  const row = (
     <div
       ref={setNodeRef}
       style={style}
+      data-provider-row-status-tooltip={statusTooltip ? "true" : undefined}
       className={cn("rounded-md", isDragging && "opacity-70")}
     >
       <Item
         variant="muted"
         size="xs"
+        data-provider-card="true"
+        data-provider-test-status={testStatus?.status}
+        data-role-route-status={roleRouteStatus ?? undefined}
         data-dnd-drag-surface="provider"
-        className="min-h-9 cursor-grab select-none flex-nowrap items-center gap-2 border-border/70 bg-muted/35 text-muted-foreground active:cursor-grabbing"
+        className={cn(
+          "relative min-h-9 cursor-grab select-none flex-nowrap items-center gap-2 overflow-hidden border-border/70 bg-muted/35 text-muted-foreground active:cursor-grabbing",
+          roleRouteStatusSurfaceClass(roleRouteStatus),
+        )}
         {...attributes}
         {...listeners}
         role="listitem"
@@ -165,7 +219,9 @@ function ProviderTag({
           className="ml-auto shrink-0 gap-1"
           onPointerDown={(event) => event.stopPropagation()}
         >
-          {testStatus ? <ProviderTestStatusBadge status={testStatus.status} message={testStatus.message} /> : null}
+          {roleRouteStatus ? (
+            <RoleRouteStatusLight status={roleRouteStatus} detail={statusDetail} showTooltip={false} />
+          ) : null}
           <IconTooltip label={`Remove ${providerName || providerCode}`}>
             <Button
               type="button"
@@ -182,23 +238,27 @@ function ProviderTag({
       </Item>
     </div>
   )
-}
 
-function ProviderName({ label }: { label: string }) {
+  if (!statusTooltip) return row
+
   return (
     <TooltipProvider>
       <Tooltip>
-        <TooltipTrigger asChild>
-          <ItemTitle
-            data-provider-title-tooltip="true"
-            className="line-clamp-none block w-full truncate whitespace-nowrap text-xs/relaxed text-muted-foreground"
-          >
-            {label}
-          </ItemTitle>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-sm break-words">{label}</TooltipContent>
+        <TooltipTrigger asChild>{row}</TooltipTrigger>
+        <TooltipContent className="max-w-sm whitespace-pre-line break-words">{statusTooltip}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
+  )
+})
+
+function ProviderName({ label }: { label: string }) {
+  return (
+    <ItemTitle
+      data-provider-title="true"
+      className="line-clamp-none block w-full truncate whitespace-nowrap text-xs/relaxed text-muted-foreground"
+    >
+      {label}
+    </ItemTitle>
   )
 }
 

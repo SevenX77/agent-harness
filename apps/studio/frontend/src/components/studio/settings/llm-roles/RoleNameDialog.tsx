@@ -18,6 +18,7 @@ export function RoleNameDialog({
   existingNames,
   trigger,
   submitLabel = "Apply",
+  fieldLabel = "Role name",
   open: controlledOpen,
   onOpenChange,
   onSubmit,
@@ -27,6 +28,7 @@ export function RoleNameDialog({
   existingNames: string[]
   trigger?: ReactNode
   submitLabel?: string
+  fieldLabel?: string
   open?: boolean
   onOpenChange?: (open: boolean) => void
   onSubmit: (roleName: string) => void
@@ -72,6 +74,7 @@ export function RoleNameDialog({
           </DialogHeader>
           <RoleNameFields
             inputId={inputId}
+            label={fieldLabel}
             nameDraft={nameDraft}
             error={submittedError}
             onNameChange={(value) => {
@@ -95,11 +98,13 @@ export function RoleNameDialog({
 
 export function RoleNameFields({
   inputId,
+  label = "Role name",
   nameDraft,
   error,
   onNameChange,
 }: {
   inputId: string
+  label?: string
   nameDraft: string
   error: string | null
   onNameChange: (value: string) => void
@@ -108,7 +113,7 @@ export function RoleNameFields({
     <FieldSet>
       <FieldGroup>
         <Field data-invalid={Boolean(error)}>
-          <FieldLabel htmlFor={inputId}>Role name</FieldLabel>
+          <FieldLabel htmlFor={inputId}>{label}</FieldLabel>
           <Input
             id={inputId}
             value={nameDraft}

@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  CopilotTab,
   SettingsPageContent,
   draftFromAddProviderSubmission,
   draftsFromCredentials,
@@ -8,7 +9,10 @@ import {
   inferProviderType,
   moveProviderInRole,
   notableProviderKeyForDraft,
+  officialProviderTestSummary,
   officialProviderDrafts,
+  providerDraftForAction,
+  providerTestParamsFingerprint,
   providerTestParamsMatch,
   removeProviderFromRole,
   reorderModelInRole,
@@ -17,10 +21,13 @@ import {
   thirdPartyProviderDrafts,
   toggleModelFallback,
   updateActiveModel,
+  upsertProviderModels,
+  upsertProviderModelsListResponse,
+  upsertProviderTestResponse,
   validateRoleDraft,
   visibleRoleNames,
 } from './SettingsPage'
-import type { CredentialsState, RolesData } from '../../api/llm'
+import type { CredentialsState, ModelGroup, RolesData } from '../../api/llm'
 
 const credentials: CredentialsState = {
   providers: [
@@ -99,6 +106,8 @@ const rolesData: RolesData = {
   },
 }
 
+const modelGroups: ModelGroup[] = []
+
 function baseViewProps(
   overrides: Partial<Parameters<typeof SettingsPageContent>[0]> = {},
 ): Parameters<typeof SettingsPageContent>[0] {
@@ -110,6 +119,7 @@ function baseViewProps(
     drafts: draftsFromCredentials(credentials),
     saveStatus: 'idle',
     rolesData,
+    modelGroups,
     rolesSaveStatus: 'idle',
     rolesError: null,
     appSettings: {
@@ -125,11 +135,15 @@ function baseViewProps(
     onClose: vi.fn(),
     onTabChange: vi.fn(),
     onProviderFieldChange: vi.fn(),
-    onTestProvider: vi.fn(),
+    onGetProviderModels: vi.fn(),
+    onTestProviderEndpoint: vi.fn(),
     onDeleteProvider: vi.fn(),
     onAddProvider: vi.fn(),
     onProviderModelsUpdated: vi.fn(),
     onRolesDataChange: vi.fn(),
+    onDeleteRole: vi.fn(),
+    onDeleteModelBundle: vi.fn(),
+    onBeforeRoleTest: vi.fn().mockResolvedValue(null),
     ...overrides,
   }
 }
@@ -161,6 +175,7 @@ describe('Add Provider flow helpers', () => {
     expect(inferProviderType('anthropic')).toBe('anthropic_compatible')
     expect(inferProviderType('gemini')).toBe('google_genai')
     expect(inferProviderType('deepseek')).toBe('openai_compatible')
+    expect(inferProviderType('ark')).toBe('ark_runtime')
   })
 
   it('creates a populated draft from an Add Provider submission', () => {
@@ -179,6 +194,7 @@ describe('Add Provider flow helpers', () => {
       base_url: 'https://openrouter.ai/api/v1',
       api_key: 'sk-openrouter',
       isTesting: false,
+      testingAction: null,
     })
   })
 
@@ -220,7 +236,7 @@ describe('Add Provider flow helpers', () => {
     expect(inferProviderKind({
       id: 'ark-123',
       name: 'Ark',
-      provider_type: 'openai_compatible',
+      provider_type: 'ark_runtime',
       base_url: 'https://ark.cn-beijing.volces.com/api/v3',
       api_key: 'sk',
       isTesting: false,
@@ -252,11 +268,43 @@ describe('Add Provider flow helpers', () => {
     ])
   })
 
+  it('uses canonical official provider endpoints for hidden Base URL fields and Test actions', () => {
+    const staleOfficialDrafts = draftsFromCredentials({
+      providers: [
+        {
+          id: 'anthropic-official',
+          name: 'Anthropic',
+          api_key: 'sk-anthropic',
+          base_url: 'https://api.anthropic.example',
+          provider_type: 'openai_compatible',
+        },
+      ],
+    })
+
+    const official = officialProviderDrafts(staleOfficialDrafts)[0]
+    const actionDraft = providerDraftForAction(staleOfficialDrafts, 'anthropic-official')
+
+    expect(official.base_url).toBe('https://api.anthropic.com')
+    expect(official.provider_type).toBe('anthropic_compatible')
+    expect(actionDraft?.base_url).toBe('https://api.anthropic.com')
+    expect(actionDraft?.provider_type).toBe('anthropic_compatible')
+  })
+
   it('derives notable provider key and manual panel visibility', () => {
     const official = officialProviderDrafts(draftsFromCredentials(credentials))[0]
+    const wavespeed = thirdPartyProviderDrafts(draftsFromCredentials(credentials))[1]
     const custom = thirdPartyProviderDrafts(draftsFromCredentials(credentials))[2]
 
     expect(notableProviderKeyForDraft(official)).toBe('anthropic')
+    expect(notableProviderKeyForDraft(wavespeed)).toBe('wavespeed')
+    expect(notableProviderKeyForDraft({
+      id: 'qiniu-openai',
+      name: 'Qiniu OpenAI',
+      provider_type: 'openai_compatible',
+      base_url: 'https://api.qnaigc.com/v1',
+      api_key: '',
+      isTesting: false,
+    })).toBe('qiniu')
     expect(notableProviderKeyForDraft(custom)).toBe('openai')
     expect(shouldShowManualModelPanel(official, null)).toBe(true)
     expect(shouldShowManualModelPanel(custom, null)).toBe(false)
@@ -277,9 +325,128 @@ describe('Add Provider flow helpers', () => {
       { api_key: 'sk', base_url: 'https://base.test', provider_type: 'anthropic_compatible' },
     )).toBe(false)
   })
+
+  it('adds a newly tested official provider to credentials when registry-backed test returns models', () => {
+    const draft = providerDraftForAction([], 'openai-official')
+    expect(draft).not.toBeNull()
+
+    const next = upsertProviderTestResponse({ providers: [] }, draft!, {
+      status: 'ok',
+      message: 'Connected',
+      available_models: [{ id: 'gpt-5' }],
+      available_sdks: ['openai_compatible'],
+    })
+
+    expect(next.providers).toMatchObject([
+      {
+        id: 'openai-official',
+        name: 'OpenAI Official',
+        last_test_status: 'ok',
+        available_models: [{ id: 'gpt-5' }],
+        available_sdks: ['openai_compatible'],
+      },
+    ])
+  })
+
+  it('caches provider test results by complete editable config for restore-on-match UX', () => {
+    const draft = providerDraftForAction([], 'openai-official')
+    expect(draft).not.toBeNull()
+
+    const next = upsertProviderTestResponse({ providers: [] }, draft!, {
+      status: 'ok',
+      message: 'Connected',
+      available_models: [{ id: 'gpt-5' }],
+      available_sdks: ['openai_compatible'],
+    })
+
+    expect(next.providers[0].test_results).toMatchObject([
+      {
+        params_fingerprint: providerTestParamsFingerprint(draft!),
+        base_url: 'https://api.openai.com',
+        provider_type: 'openai_compatible',
+        last_test_status: 'ok',
+        last_test_message: 'Connected',
+        available_models: [{ id: 'gpt-5' }],
+        available_sdks: ['openai_compatible'],
+      },
+    ])
+  })
+
+  it('adds manual model results for a newly materialized provider instead of dropping them', () => {
+    const draft = providerDraftForAction([], 'openai-official')
+    expect(draft).not.toBeNull()
+
+    const next = upsertProviderModels(
+      { providers: [] },
+      draft,
+      'openai-official',
+      [{ id: 'gpt-5' }],
+    )
+
+    expect(next.providers).toMatchObject([
+      {
+        id: 'openai-official',
+        name: 'OpenAI Official',
+        last_test_status: 'ok',
+        available_models: [{ id: 'gpt-5' }],
+      },
+    ])
+  })
+
+  it('merges Get Models responses into the existing model list by diff', () => {
+    const draft = providerDraftForAction([], 'openai-official')
+    expect(draft).not.toBeNull()
+    const current: CredentialsState = {
+      providers: [
+        {
+          id: 'openai-official',
+          name: 'OpenAI Official',
+          api_key: 'sk-live',
+          base_url: 'https://api.openai.com',
+          provider_type: 'openai_compatible',
+          last_test_status: 'ok',
+          last_test_at: '2026-05-29T10:00:00Z',
+          last_test_message: 'Connected',
+          available_models: [
+            { id: 'gpt-5-old', status: 'verified', route_id: 'openai-official:gpt-5-old' },
+            { id: 'gpt-5', status: 'unverified_manual', route_id: 'openai-official:gpt-5' },
+          ],
+        },
+      ],
+    }
+
+    const next = upsertProviderModelsListResponse(current, draft!, {
+      status: 'ok',
+      message: 'Testing 2/2 provider models.',
+      available_models: [
+        { id: 'gpt-5', status: 'verified', route_id: 'openai-official:gpt-5' },
+        { id: 'gpt-image-1', status: 'unverified_manual' },
+      ],
+      available_sdks: ['openai_compatible'],
+    })
+
+    expect(next.providers[0].available_models).toEqual([
+      { id: 'gpt-5-old', status: 'verified', route_id: 'openai-official:gpt-5-old' },
+      { id: 'gpt-5', status: 'verified', route_id: 'openai-official:gpt-5' },
+      { id: 'gpt-image-1', status: 'unverified_manual' },
+    ])
+  })
 })
 
 describe('SettingsPageContent (api_keys)', () => {
+  it('summarizes official provider Test results by verified route status, not route count', () => {
+    expect(officialProviderTestSummary([
+      { id: 'claude-haiku', status: 'verified' },
+      { id: 'claude-opus-4-1', status: 'unverified_manual' },
+      { id: 'claude-opus-4-6' },
+      { id: 'claude-opus-4-7', status: 'verified' },
+      { id: 'claude-sonnet', status: 'failed' },
+    ])).toEqual({
+      kind: 'success',
+      message: 'Test complete (2 verified routes, 3 not verified)',
+    })
+  })
+
   it('renders General settings as auto-saved shadcn fields without manual save buttons', () => {
     const html = renderToStaticMarkup(
       <SettingsPageContent
@@ -310,6 +477,43 @@ describe('SettingsPageContent (api_keys)', () => {
     }
     const rolesHtml = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ activeTab: 'llm_roles' })} />)
     expect(rolesHtml).toContain('max-w-6xl')
+    const copilotHtml = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ activeTab: 'copilot' })} />)
+    expect(copilotHtml).toContain('max-w-5xl')
+    expect(copilotHtml).toContain('max-w-3xl')
+  })
+
+  it('renders Copilot as a standalone Settings page with SDK compatibility states', () => {
+    const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps({ activeTab: 'copilot' })} />)
+
+    expect(html).toContain('data-copilot-settings-page="true"')
+    expect(html).toContain('Copilot</button>')
+    expect(html).toContain('data-slot="catalog-accordion"')
+    expect(html).toContain('Claude Agent SDK')
+    expect(html).not.toContain('Copilot Roles')
+    expect(html).toContain('Opus 4.7 Copilot')
+    expect(html).toContain('DeepSeek V4 Copilot')
+    expect(html).toContain('Claude Agent SDK Ready')
+    expect(html).toContain('Claude Agent SDK Not tested')
+    expect(html).toContain('data-copilot-model-group="true"')
+    expect(html).toContain('data-copilot-provider-grid="true"')
+    expect(html).toContain('data-copilot-provider-card="true"')
+    expect(html).toContain('data-copilot-model-add-trigger="true"')
+    expect(html).toContain('Add model')
+    expect(html).toContain('DeepSeek Official')
+    expect(html).toContain('Ark Official')
+    expect(html).not.toContain('aria-label="Copilot roles"')
+    expect(html).not.toContain('data-copilot-sdk-select="true"')
+    expect(html).not.toContain('openai_chat_completions')
+  })
+
+  it('renders the Copilot tab component without depending on LLM Roles data', () => {
+    const html = renderToStaticMarkup(<CopilotTab />)
+
+    expect(html).toContain('data-copilot-role-card="true"')
+    expect(html.match(/data-copilot-role-card="true"/g)).toHaveLength(2)
+    expect(html).toContain('data-copilot-model-name="true"')
+    expect(html).toContain('data-variant="default"')
+    expect(html).toContain('Test</button>')
   })
 
   it('renders provider skeletons while credentials are loading', () => {
@@ -358,7 +562,7 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).toContain('Gemini Official')
     expect(html).toContain('DeepSeek Official')
     expect(html).toContain('Ark Official')
-    expect(html).toContain('Not configured')
+    expect(html).not.toContain('Not configured')
     expect(html).toContain('Third-party Providers')
     expect(html).toContain('No third-party providers configured.')
     expect(html).toContain('Add Provider')
@@ -401,10 +605,27 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(html).toContain('Show API key')
   })
 
-  it('renders persistent Test outcome badge from credentials', () => {
+  it('hides official Test outcome badges but keeps third-party outcomes visible', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
-    // DS has last_test_status='ok' set above.
-    expect(html).toContain('Connected')
+    expect(html).not.toContain('Connected')
+
+    const withThirdPartyOutcome: CredentialsState = {
+      providers: credentials.providers.map((provider) => (
+        provider.id === 'CUSTOM_AB12CD34'
+          ? { ...provider, last_test_status: 'ok' as const, last_test_message: 'Connected' }
+          : provider
+      )),
+    }
+    const htmlWithThirdPartyOutcome = renderToStaticMarkup(
+      <SettingsPageContent
+        {...baseViewProps({
+          credentials: withThirdPartyOutcome,
+          drafts: draftsFromCredentials(withThirdPartyOutcome),
+        })}
+      />,
+    )
+
+    expect(htmlWithThirdPartyOutcome).toContain('Connected')
   })
 
   it('renders a Delete button for each user-owned provider', () => {

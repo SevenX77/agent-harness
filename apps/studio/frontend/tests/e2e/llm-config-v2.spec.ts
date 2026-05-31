@@ -163,6 +163,73 @@ function resetResult(provider: CredentialProvider): CredentialProvider {
   }
 }
 
+function routeSlug(modelId: string): string {
+  return modelId.toLowerCase().replace(/\//g, '.').replace(/_/g, '-').replace(/[^a-z0-9._-]+/g, '-')
+}
+
+function endpointStatus(provider: CredentialProvider): string {
+  if (provider.last_test_status === 'ok') return 'verified'
+  if (provider.last_test_status === 'error') return 'failed'
+  return 'unverified_manual'
+}
+
+function registryFromProviders(providers: CredentialProvider[]) {
+  const provider_endpoints = Object.fromEntries(providers.map((provider) => [
+    provider.id,
+    {
+      endpoint_id: provider.id,
+      display_name: provider.name,
+      protocol: provider.provider_type,
+      base_url: provider.base_url,
+      api_key: provider.api_key,
+      status: endpointStatus(provider),
+      last_test_at: provider.last_test_at ?? null,
+      last_test_message: provider.last_test_message ?? null,
+      timeout_seconds: 120,
+      trust_env: false,
+      proxy_env: null,
+      metadata: {},
+    },
+  ]))
+  const provider_routes = Object.fromEntries(providers.flatMap((provider) => (
+    (provider.available_models ?? []).map((model) => {
+      const slug = routeSlug(model.id)
+      const routeId = `${provider.id}:${slug}`
+      return [
+        routeId,
+        {
+          route_id: routeId,
+          endpoint_id: provider.id,
+          route_slug: slug,
+          provider_model_id: model.id,
+          canonical_id: slug,
+          display_name: model.id,
+          status: endpointStatus(provider),
+          capabilities: Object.fromEntries(Object.entries(model.capabilities ?? {}).map(([key, value]) => [
+            key,
+            { value, source: 'api_list' },
+          ])),
+          metadata: {},
+        },
+      ]
+    })
+  )))
+  return {
+    provider_endpoints,
+    provider_routes,
+    runtime_policy: {
+      provider_down_ttl_seconds: 60,
+      probe_timeout_seconds: 5,
+      token_escalation_rounds: 2,
+    },
+    model_profiles: {},
+    roles: {},
+    canonical_groups: [],
+    lint_results: [],
+    setup_required: false,
+  }
+}
+
 async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({
     status,
@@ -189,6 +256,66 @@ async function mockBackend(page: Page) {
   })
   await page.route(`**/api/skills/${SKILL_ID}/copilot/context`, async (route) => {
     await fulfillJson(route, { accepted: true, summary: 'Edit at 1', reason: null })
+  })
+  await page.route('**/api/llm/registry', async (route) => {
+    await fulfillJson(route, registryFromProviders(providers))
+  })
+  await page.route('**/api/llm/registry/endpoints**', async (route) => {
+    if (route.request().method() === 'PUT') {
+      const body = JSON.parse(route.request().postData() ?? '{}') as {
+        provider_endpoints?: Record<string, {
+          endpoint_id: string
+          display_name: string
+          protocol: CredentialProvider['provider_type']
+          base_url: string
+          api_key?: string | null
+        }>
+      }
+      const incoming = Object.values(body.provider_endpoints ?? {})
+      providers = incoming.map((endpoint) => {
+        const existing = providers.find((item) => item.id === endpoint.endpoint_id)
+        const next: CredentialProvider = {
+          id: endpoint.endpoint_id,
+          name: endpoint.display_name,
+          api_key: endpoint.api_key || existing?.api_key || '',
+          base_url: endpoint.base_url,
+          provider_type: endpoint.protocol,
+          last_test_status: 'untested',
+          last_test_at: '',
+          last_test_message: '',
+          last_error_code: '',
+          available_models: [],
+          available_sdks: [],
+          test_results: existing?.test_results ?? [],
+        }
+        const cached = next.test_results?.find((result) => result.params_fingerprint === paramsFingerprint(next))
+        return cached ? applyResult(next, cached) : resetResult(next)
+      })
+    }
+    await fulfillJson(route, registryFromProviders(providers))
+  })
+  await page.route('**/api/llm/endpoints/*/test', async (route) => {
+    const endpointId = decodeURIComponent(new URL(route.request().url()).pathname.split('/').at(-2) ?? '')
+    providers = providers.map((provider) => {
+      if (provider.id !== endpointId) return provider
+      const result: CredentialTestResult = {
+        params_fingerprint: paramsFingerprint(provider),
+        base_url: provider.base_url,
+        provider_type: provider.provider_type,
+        last_test_status: 'ok',
+        last_test_at: '2026-05-25T00:00:00Z',
+        last_test_message: 'Credential present.',
+        last_error_code: '',
+        available_models: provider.available_models ?? [],
+        available_sdks: [provider.provider_type],
+      }
+      return {
+        ...applyResult(provider, result),
+        test_results: upsertResult(provider.test_results ?? [], result),
+      }
+    })
+    const endpoint = registryFromProviders(providers).provider_endpoints[endpointId]
+    await fulfillJson(route, endpoint)
   })
   await page.route('**/api/llm/credentials**', async (route) => {
     if (route.request().method() === 'PUT') {
@@ -224,22 +351,44 @@ async function mockBackend(page: Page) {
       deepseek: ['deepseek-chat', 'deepseek-reasoner'],
       ark: ['doubao-seed-1-6'],
       openrouter: ['anthropic/claude-opus-4-7'],
+      qiniu: ['deepseek-r1', 'deepseek-v3'],
+      wavespeed: ['openai/gpt-5', 'anthropic/claude-opus-4'],
     }
     await fulfillJson(route, { notable_models: notable[providerKey] ?? ['manual/model'] })
   })
-  await page.route('**/api/llm/providers/test-models', async (route) => {
-    const body = JSON.parse(route.request().postData() ?? '{}') as { provider_id: string; model_ids: string[] }
-    const provider = providers.find((item) => item.id === body.provider_id)
+  await page.route('**/api/llm/endpoints/*/models/test', async (route) => {
+    const endpointId = decodeURIComponent(new URL(route.request().url()).pathname.split('/').at(-3) ?? '')
+    const body = JSON.parse(route.request().postData() ?? '{}') as { model_ids: string[] }
+    const provider = providers.find((item) => item.id === endpointId)
     const unique = Array.from(new Set(body.model_ids.filter(Boolean)))
-    const results = unique.map((modelId) => ({ model_id: modelId, status: 'ok', latency_ms: 12, message: null }))
     const existingModels = provider?.available_models ?? []
+    const results = unique.map((modelId) => {
+      const knownModel = existingModels.some((model) => model.id === modelId)
+      const ok = provider?.id !== 'openrouter-custom' || knownModel
+      return {
+        model_id: modelId,
+        status: ok ? 'ok' : 'invalid_model',
+        latency_ms: ok ? 12 : null,
+        message: ok ? null : 'Model not found',
+      }
+    })
     const byId = new Map(existingModels.map((model) => [model.id, model]))
-    for (const modelId of unique) {
-      if (!byId.has(modelId)) byId.set(modelId, { id: modelId, capabilities: { max_context_tokens: 200000 } })
+    for (const result of results) {
+      if (result.status === 'ok' && !byId.has(result.model_id)) {
+        byId.set(result.model_id, { id: result.model_id, capabilities: { max_context_tokens: 200000 } })
+      }
     }
     const available_models = [...byId.values()]
-    providers = providers.map((item) => item.id === body.provider_id ? { ...item, available_models } : item)
-    await fulfillJson(route, { results, available_models })
+    providers = providers.map((item) => item.id === endpointId ? {
+      ...item,
+      last_test_status: results.some((result) => result.status === 'ok') ? 'ok' : 'error',
+      last_test_at: '2026-05-25T00:00:00Z',
+      last_test_message: results.some((result) => result.status === 'ok') ? 'Credential present.' : 'Model not found.',
+      last_error_code: results.some((result) => result.status === 'ok') ? '' : 'invalid_model',
+      available_models,
+      available_sdks: [item.provider_type],
+    } : item)
+    await fulfillJson(route, { results, registry: registryFromProviders(providers) })
   })
   await page.route('**/api/llm/providers/test', async (route) => {
     const body = JSON.parse(route.request().postData() ?? '{}') as { id: string; provider_type?: CredentialProvider['provider_type'] }
@@ -318,7 +467,7 @@ test.describe('Round 3 API Keys e2e', () => {
     await expect(apiKeys.getByText('Ark Official')).toBeVisible()
     await expect(apiKeys.getByRole('heading', { name: 'Third-party Providers' })).toBeVisible()
     await expect(apiKeys.locator('input[aria-label="Provider Name"][value="OpenRouter Custom"]')).toBeVisible()
-    await expect(apiKeys.getByText('Not configured').first()).toBeVisible()
+    await expect(apiKeys.locator('[data-provider-id="openrouter-custom"]').getByText('Connected')).toBeVisible()
     await expect(apiKeys.getByText('deepseek-chat')).toBeVisible()
     await expect(apiKeys.getByText('gpt-5')).toBeVisible()
     await expect(apiKeys.getByText('Protocol')).toBeVisible()
@@ -328,7 +477,7 @@ test.describe('Round 3 API Keys e2e', () => {
   test('adds a third-party provider as a normal auto-saved card', async ({ page }) => {
     await openApiKeys(page)
 
-    const saveRequest = page.waitForRequest((request) => request.url().includes('/api/llm/credentials') && request.method() === 'PUT')
+    const saveRequest = page.waitForRequest((request) => request.url().includes('/api/llm/registry/endpoints') && request.method() === 'PUT')
     await page.getByRole('button', { name: 'Add Provider' }).click()
     await saveRequest
 
@@ -343,12 +492,17 @@ test.describe('Round 3 API Keys e2e', () => {
     await page.getByRole('option', { name: 'Anthropic compatible' }).click()
     await newCard.getByRole('textbox', { name: 'Base URL' }).fill('https://api.together.xyz/v1')
     await newCard.locator('input[name^="provider-secret-"]').fill('sk-together')
-    const testRequest = page.waitForRequest((request) => request.url().includes('/api/llm/providers/test') && request.method() === 'POST')
+    await newCard.getByRole('textbox', { name: 'Endpoint test' }).fill('claude-opus-4-7')
+    const endpointSaveRequest = page.waitForRequest((request) => request.url().includes('/api/llm/registry/endpoints') && request.method() === 'PUT')
+    const testRequest = page.waitForRequest((request) => request.url().includes('/api/llm/endpoints/') && request.url().endsWith('/models/test') && request.method() === 'POST')
     await newCard.getByRole('button', { name: 'Test' }).click()
-    const request = await testRequest
-    expect(JSON.parse(request.postData() ?? '{}').provider_type).toBe('anthropic_compatible')
+    const request = await endpointSaveRequest
+    const body = JSON.parse(request.postData() ?? '{}') as { provider_endpoints: Record<string, { protocol: string }> }
+    const savedEndpoint = Object.values(body.provider_endpoints).find((endpoint) => endpoint.protocol === 'anthropic_compatible')
+    expect(savedEndpoint?.protocol).toBe('anthropic_compatible')
+    await testRequest
     await expect(newCard.getByText('Connected')).toBeVisible()
-    await expect(newCard.getByText('anthropic_compatible')).toBeVisible()
+    await expect(newCard.getByText('Available SDKs:')).toHaveCount(0)
     await expect(page.locator('input[aria-label="Provider Name"][value="Together Custom"]')).toBeVisible()
   })
 
@@ -357,9 +511,9 @@ test.describe('Round 3 API Keys e2e', () => {
 
     const providerCard = page.locator('[data-provider-id="openrouter-custom"]')
     await expect(providerCard.getByText('Connected')).toBeVisible()
-    await expect(providerCard.getByText('Available SDKs:')).toBeVisible()
+    await expect(providerCard.getByText('Available Models:')).toBeVisible()
 
-    const saveRequest = page.waitForRequest((request) => request.url().includes('/api/llm/credentials') && request.method() === 'PUT')
+    const saveRequest = page.waitForRequest((request) => request.url().includes('/api/llm/registry/endpoints') && request.method() === 'PUT')
     await providerCard.getByRole('textbox', { name: 'Base URL' }).fill('https://openrouter.ai/api/v2')
     await expect(providerCard.getByText('Connected')).toHaveCount(0)
     await expect(providerCard.getByText('Available SDKs:')).toHaveCount(0)
@@ -368,15 +522,15 @@ test.describe('Round 3 API Keys e2e', () => {
     await expect(providerCard.getByText('Connected')).toHaveCount(0)
     await expect(providerCard.getByText('Available SDKs:')).toHaveCount(0)
 
-    const restoreRequest = page.waitForRequest((request) => request.url().includes('/api/llm/credentials') && request.method() === 'PUT')
+    const restoreRequest = page.waitForRequest((request) => request.url().includes('/api/llm/registry/endpoints') && request.method() === 'PUT')
     await providerCard.getByRole('textbox', { name: 'Base URL' }).fill('https://openrouter.ai/api/v1')
     await restoreRequest
 
     await expect(providerCard.getByText('Connected')).toBeVisible()
-    await expect(providerCard.getByText('Available SDKs:')).toBeVisible()
+    await expect(providerCard.getByText('Available Models:')).toBeVisible()
   })
 
-  test('manual model probing appends deduped chips using mocked backend', async ({ page }) => {
+  test('manual model probing checks candidates against registered v4 routes', async ({ page }) => {
     await openApiKeys(page)
 
     const openRouterCard = page.locator('[data-provider-id="openrouter-custom"]')
@@ -391,12 +545,10 @@ test.describe('Round 3 API Keys e2e', () => {
     await openRouterCard.getByLabel('Manual model 1').fill('claude-opus-4-7')
     await openRouterCard.getByRole('button', { name: 'Add Model', exact: true }).click()
     await openRouterCard.getByLabel('Manual model 2').fill('gpt-5')
-    const modelRequest = page.waitForRequest((request) => request.url().includes('/api/llm/providers/test-models') && request.method() === 'POST')
     await openRouterCard.getByRole('button', { name: 'Test Models' }).click()
-    await modelRequest
 
-    await expect(openRouterCard.getByText('claude-opus-4-7').first()).toBeVisible()
-    await expect(openRouterCard.getByText('claude-opus-4-7: Available')).toBeVisible()
+    await expect(openRouterCard.getByText('claude-opus-4-7: Model not found')).toBeVisible()
+    await expect(openRouterCard.getByText('gpt-5: Available')).toBeVisible()
     await expect(openRouterCard.getByText('gpt-5')).toHaveCount(2)
   })
 })

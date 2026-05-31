@@ -5,7 +5,7 @@
 ## 文档入口
 
 - [baseline.md](./baseline.md): V2.1 现状, 覆盖 `ModelResolver`, `GatewayChatModel`, `ResolvedRole/ResolvedProvider`, `PredictGatewayChatModel` 和当前 fallback/error/tracing 边界。
-- [mvp0-alignment.md](./mvp0-alignment.md): V0.3.0 三个改造点: GW-1 ModelResolverProtocol DI, GW-2 gateway 错误结构化, GW-3 fallback 事件总线对齐。
+- [mvp0-alignment.md](./mvp0-alignment.md): V0.3.0 三个改造点: GW-1 ModelResolverProtocol DI, GW-2 gateway 错误结构化, GW-3 fallback 事件总线对齐；并记录 Provider Intelligence V2 的 Gateway 落点。
 - [logic-explained.md](./logic-explained.md): V0.3.0 完整功能模块代码翻译, 后续 G1-T6 补写。
 
 ## 跨模块边界导航

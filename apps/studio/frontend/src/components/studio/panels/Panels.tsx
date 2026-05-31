@@ -14,9 +14,10 @@ interface PanelsProps {
   skillId: string | null
   skillDetail?: SkillDetail
   selectedNode: { id: string; data: SkillGraphNodeData } | null
+  onPhaseFileSave?: (payload: { path: string; content: string; expectedHash: string }) => Promise<void> | void
 }
 
-export function Panels({ activePanel, skillId, skillDetail, selectedNode }: PanelsProps) {
+export function Panels({ activePanel, skillId, skillDetail, selectedNode, onPhaseFileSave }: PanelsProps) {
   const { onFileOpen } = useWorkspaceContext()
   if (!skillId) {
     return (
@@ -40,7 +41,15 @@ export function Panels({ activePanel, skillId, skillDetail, selectedNode }: Pane
     return <HistoryPanel skillId={skillId} />
   }
   if (activePanel === "properties") {
-    return <PropertiesPanel skillId={skillId} skillDetail={skillDetail} selectedNode={selectedNode} onFileOpen={onFileOpen} />
+    return (
+      <PropertiesPanel
+        skillId={skillId}
+        skillDetail={skillDetail}
+        selectedNode={selectedNode}
+        onFileOpen={onFileOpen}
+        onPhaseFileSave={onPhaseFileSave}
+      />
+    )
   }
   return <AssetsPanel skillDetail={skillDetail} selectedNode={selectedNode} />
 }

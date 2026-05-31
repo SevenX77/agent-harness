@@ -281,6 +281,22 @@ export interface GraphPhaseRef {
   depends_on: string[]
 }
 
+export type GraphPhaseMode = 'logic' | 'subgraph' | 'skill'
+
+export interface SerializableGraphPhaseRef {
+  id: string
+  src: string
+  depends_on: string[]
+  mode: GraphPhaseMode
+}
+
+export interface SerializeGraphRes {
+  markdown_content: string
+  phase_count: number
+  elapsed_ms: number
+  current_hash: string
+}
+
 export interface GraphManifestV21 {
   schema_version: '2.1'
   name: string

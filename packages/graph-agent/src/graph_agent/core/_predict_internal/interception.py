@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from graph_agent_gateway.gateway_chat_model import GatewayChatModel, ToolSpec, _normalise_tool
-from graph_agent_gateway.llm_config import ResolvedRole
+from graph_agent_gateway.registry.schema import ResolvedRole
 from langchain_core.callbacks.manager import (
     AsyncCallbackManagerForLLMRun,
     CallbackManagerForLLMRun,

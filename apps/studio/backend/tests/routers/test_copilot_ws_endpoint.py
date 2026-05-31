@@ -12,14 +12,12 @@ from app.models.copilot import (
     CopilotEventText,
     CopilotEventToolUseStart,
 )
-from app.models.llm_config import LLMCredentialsFile, ProviderCredential
 from app.routers import copilot as copilot_router
 from app.services import copilot as copilot_service
-from app.services.llm_credentials import save_credentials
 from claude_agent_sdk import ClaudeAgentOptions
 from claude_agent_sdk.types import AssistantMessage, TextBlock
 from fastapi.testclient import TestClient
-from graph_agent.config.llm_config import ModelDef, ProviderDef, ResolvedProvider, ResolvedRole
+from graph_agent_gateway.registry.schema import ResolvedRoute
 
 
 def test_copilot_ws_streams_normal_query(
@@ -151,22 +149,13 @@ def test_stream_query_uses_copilot_chat_active_model_when_no_override(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    fake_config = FakeConfig()
     client = FakeClient([AssistantMessage(content=[TextBlock(text="hello")], model="claude")])
-    monkeypatch.setattr(copilot_service, "load_config", lambda: fake_config)
-    monkeypatch.setenv("HOME", str(tmp_path))
-    save_credentials(
-        LLMCredentialsFile(
-            providers=[
-                ProviderCredential(
-                    id="TEST_PROVIDER",
-                    name="Test Provider",
-                    api_key="primary-secret",
-                    base_url="https://credential.test",
-                    provider_type="anthropic_compatible",
-                )
-            ]
-        )
+    calls: list[str | None] = []
+    monkeypatch.setattr(
+        copilot_service,
+        "_resolve_copilot_routes",
+        lambda override: calls.append(override)
+        or [_resolved_route(api_key="primary-secret", base_url="https://credential.test")],
     )
     monkeypatch.setattr(
         copilot_service, "_session_factory", lambda options: client.capture(options)
@@ -176,33 +165,130 @@ def test_stream_query_uses_copilot_chat_active_model_when_no_override(
         _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
     )
 
-    assert fake_config.role_calls == ["copilot_chat"]
-    assert fake_config.model_calls == []
+    assert calls == [None]
     assert client.options is not None
     assert client.options.env["ANTHROPIC_API_KEY"] == "primary-secret"
     assert client.options.env["ANTHROPIC_BASE_URL"] == "https://credential.test"
     assert events == [CopilotEventText(content="hello"), CopilotEventDone()]
 
 
+def test_stream_query_falls_back_to_second_copilot_route_when_first_route_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    copilot_service._sessions.clear()
+    routes = [
+        _resolved_route(
+            route_id="primary:claude",
+            endpoint_id="primary",
+            api_key="first-secret",
+            base_url="https://primary.test",
+        ),
+        _resolved_route(
+            route_id="secondary:claude",
+            endpoint_id="secondary",
+            api_key="second-secret",
+            base_url="https://secondary.test",
+        ),
+    ]
+    created_keys: list[str] = []
+    secondary = FakeClient([AssistantMessage(content=[TextBlock(text="fallback hello")], model="claude")])
+
+    monkeypatch.setattr(copilot_service, "_resolve_copilot_routes", lambda _override: routes, raising=False)
+    monkeypatch.setattr(copilot_service, "_resolve_copilot_route", lambda _override: routes[0])
+
+    def session_factory(options: ClaudeAgentOptions) -> FakeClient:
+        api_key = options.env["ANTHROPIC_API_KEY"]
+        created_keys.append(api_key)
+        if api_key == "first-secret":
+            return FailingClient(TimeoutError("primary timed out")).capture(options)
+        return secondary.capture(options)
+
+    monkeypatch.setattr(copilot_service, "_session_factory", session_factory)
+
+    events = asyncio.run(
+        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+    )
+
+    assert created_keys == ["first-secret", "second-secret"]
+    assert secondary.options is not None
+    assert secondary.options.env["ANTHROPIC_BASE_URL"] == "https://secondary.test"
+    assert events == [CopilotEventText(content="fallback hello"), CopilotEventDone()]
+
+
+def test_stream_query_maps_ark_anthropic_profile_to_claude_code_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    client = FakeClient([AssistantMessage(content=[TextBlock(text="ark hello")], model="doubao")])
+    route = _resolved_route(
+        api_key="ark-secret",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        route_id="ark-official:doubao-seed-2-0-pro-260215",
+        endpoint_id="ark-official",
+        protocol="ark_runtime",
+        provider_model_id="doubao-seed-2-0-pro-260215",
+        canonical_id="doubao-seed-2-0-pro",
+        call_method_id="ark_anthropic_messages",
+    )
+    monkeypatch.setattr(copilot_service, "_resolve_copilot_routes", lambda _override: [route])
+    monkeypatch.setattr(
+        copilot_service, "_session_factory", lambda options: client.capture(options)
+    )
+
+    events = asyncio.run(
+        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+    )
+
+    assert client.options is not None
+    assert client.options.env["ANTHROPIC_BASE_URL"] == (
+        "https://ark.cn-beijing.volces.com/api/compatible"
+    )
+    assert client.options.env["ANTHROPIC_AUTH_TOKEN"] == "ark-secret"
+    assert client.options.env["ANTHROPIC_MODEL"] == "doubao-seed-2-0-pro-260215"
+    assert events == [CopilotEventText(content="ark hello"), CopilotEventDone()]
+
+
+def test_stream_query_reports_clear_error_after_all_copilot_routes_fail(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    copilot_service._sessions.clear()
+    routes = [
+        _resolved_route(route_id="primary:claude", endpoint_id="primary", api_key="first-secret"),
+        _resolved_route(route_id="secondary:claude", endpoint_id="secondary", api_key="second-secret"),
+    ]
+    created_keys: list[str] = []
+
+    monkeypatch.setattr(copilot_service, "_resolve_copilot_routes", lambda _override: routes, raising=False)
+    monkeypatch.setattr(copilot_service, "_resolve_copilot_route", lambda _override: routes[0])
+
+    def session_factory(options: ClaudeAgentOptions) -> FailingClient:
+        created_keys.append(options.env["ANTHROPIC_API_KEY"])
+        return FailingClient(TimeoutError("provider timed out")).capture(options)
+
+    monkeypatch.setattr(copilot_service, "_session_factory", session_factory)
+
+    events = asyncio.run(
+        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+    )
+
+    assert created_keys == ["first-secret", "second-secret"]
+    assert len(events) == 1
+    assert isinstance(events[0], CopilotEventError)
+    assert "all configured Copilot providers failed" in events[0].message
+
+
 def test_stream_query_uses_model_override_when_provided(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    fake_config = FakeConfig()
     client = FakeClient([AssistantMessage(content=[TextBlock(text="hello")], model="claude")])
-    monkeypatch.setattr(copilot_service, "load_config", lambda: fake_config)
-    monkeypatch.setenv("HOME", str(tmp_path))
-    save_credentials(
-        LLMCredentialsFile(
-            providers=[
-                ProviderCredential(
-                    id="TEST_PROVIDER",
-                    name="Test Provider",
-                    api_key="primary-secret",
-                    provider_type="anthropic_compatible",
-                )
-            ]
-        )
+    calls: list[str | None] = []
+    monkeypatch.setattr(
+        copilot_service,
+        "_resolve_copilot_routes",
+        lambda override: calls.append(override) or [_resolved_route(api_key="primary-secret")],
     )
     monkeypatch.setattr(
         copilot_service, "_session_factory", lambda options: client.capture(options)
@@ -213,14 +299,13 @@ def test_stream_query_uses_model_override_when_provided(
             copilot_service.stream_query(
                 "skill-a",
                 "hi",
-                model_override="CL46T",
+                model_override="test-provider:claude-test",
                 workspace_dir=tmp_path,
             )
         )
     )
 
-    assert fake_config.role_calls == []
-    assert fake_config.model_calls == ["CL46T"]
+    assert calls == ["test-provider:claude-test"]
     assert events[-1] == CopilotEventDone()
 
 
@@ -228,14 +313,43 @@ def test_stream_query_yields_error_when_no_api_key(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(copilot_service, "load_config", lambda: FakeConfig())
+    monkeypatch.setattr(
+        copilot_service,
+        "_resolve_copilot_routes",
+        lambda _override: [_resolved_route(api_key="")],
+    )
 
     events = asyncio.run(
         _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
     )
 
-    assert events == [CopilotEventError(message="Provider TEST_PROVIDER 未配置 API key")]
+    assert events == [CopilotEventError(message="Endpoint test-provider 未配置 API key")]
+
+
+def test_stream_query_yields_clear_error_for_credential_ref_only_route(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        copilot_service,
+        "_resolve_copilot_routes",
+        lambda _override: [
+            _resolved_route(api_key=None, credential_ref="cred:test-provider")
+        ],
+    )
+
+    events = asyncio.run(
+        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+    )
+
+    assert events == [
+        CopilotEventError(
+            message=(
+                "endpoint has no inline credential; "
+                "CredentialProvider integration is required: test-provider"
+            )
+        )
+    ]
 
 
 async def _events(*items: object) -> AsyncIterator[object]:
@@ -245,20 +359,6 @@ async def _events(*items: object) -> AsyncIterator[object]:
 
 async def _collect(stream: AsyncIterator[object]) -> list[object]:
     return [event async for event in stream]
-
-
-class FakeConfig:
-    def __init__(self) -> None:
-        self.role_calls: list[str] = []
-        self.model_calls: list[str] = []
-
-    def resolve_role(self, role_name: str) -> ResolvedRole:
-        self.role_calls.append(role_name)
-        return _resolved_role("copilot_chat", "CL46T")
-
-    def resolve_model(self, model_code: str) -> ResolvedRole:
-        self.model_calls.append(model_code)
-        return _resolved_role("_model_override::CL46T", model_code)
 
 
 class FakeClient:
@@ -284,32 +384,37 @@ class FakeClient:
             yield message
 
 
-def _resolved_role(role_name: str, active_model_code: str) -> ResolvedRole:
-    model = ModelDef(
-        code=active_model_code,
-        name="Claude Test",
-        providers={"TEST_PROVIDER": "claude-test"},
-    )
-    provider = ProviderDef(
-        code="TEST_PROVIDER",
-        name="Test Provider",
-        type="anthropic_compatible",
-        api_key_env="PRIMARY_KEY",
-        api_key_env_fallback="FALLBACK_KEY",
-        base_url="https://provider.test",
-    )
-    return ResolvedRole(
-        role_name=role_name,
-        temperature=0.7,
-        system_prompt_prefix="",
-        active_model_code=active_model_code,
-        model_fallback=False,
-        call_chain=[
-            ResolvedProvider(
-                provider_code="TEST_PROVIDER",
-                provider_def=provider,
-                model_name="claude-test",
-                model_def=model,
-            )
-        ],
+class FailingClient(FakeClient):
+    def __init__(self, exc: Exception) -> None:
+        super().__init__([])
+        self.exc = exc
+
+    async def connect(self) -> None:
+        raise self.exc
+
+
+def _resolved_route(
+    *,
+    api_key: str | None,
+    credential_ref: str | None = None,
+    base_url: str = "https://provider.test",
+    route_id: str = "test-provider:claude-test",
+    endpoint_id: str = "test-provider",
+    protocol: str = "anthropic_compatible",
+    provider_model_id: str = "claude-test",
+    canonical_id: str = "claude-test",
+    call_method_id: str | None = None,
+) -> ResolvedRoute:
+    return ResolvedRoute(
+        role_name="copilot_chat",
+        route_id=route_id,
+        endpoint_id=endpoint_id,
+        protocol=protocol,
+        base_url=base_url,
+        credential_ref=credential_ref,
+        api_key=api_key,
+        credential_fingerprint="fp",
+        provider_model_id=provider_model_id,
+        canonical_id=canonical_id,
+        call_method_id=call_method_id,
     )

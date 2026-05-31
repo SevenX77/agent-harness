@@ -1,17 +1,47 @@
-"""Schemas for Studio LLM credential configuration."""
+"""Studio LLM registry DTOs.
+
+Studio stores endpoint/route credentials separately from role/profile
+authoring data. The executable schema is owned by
+``graph_agent_gateway.registry``; this module only adds thin file wrappers
+and API-facing helper models.
+"""
 
 from __future__ import annotations
 
 from typing import Annotated, Any, Literal
-from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from graph_agent_gateway.registry.schema import (
+    CapabilityValue,
+    EffectiveRuntimeSetting,
+    EndpointCandidate,
+    FieldSource,
+    LintResult,
+    ProbeResult,
+    ProviderImportDraft,
+    RegistrySnapshot,
+    ResolvedRole,
+    ResolvedRoute,
+    RoleRouteEntry,
+    RouteCandidate,
+    RuntimePolicy,
+    RuntimeSettingDescriptor,
+)
+from graph_agent_gateway.registry.schema import (
+    ModelProfile as GatewayModelProfile,
+)
+from graph_agent_gateway.registry.schema import (
+    ProviderEndpoint as GatewayProviderEndpoint,
+)
+from graph_agent_gateway.registry.schema import (
+    ProviderRoute as GatewayProviderRoute,
+)
+from graph_agent_gateway.registry.schema import (
+    RoleEntry as GatewayRoleEntry,
+)
+from graph_agent_gateway.registry.storage import compute_credential_fingerprint
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-ProviderType = Literal[
-    "anthropic_compatible",
-    "openai_compatible",
-    "google_genai",
-]
+ProviderType = Literal["anthropic_compatible", "openai_compatible", "google_genai", "ark_runtime"]
 
 TestStatus = Annotated[
     Literal[
@@ -24,255 +54,278 @@ TestStatus = Annotated[
         "timeout",
         "error",
     ],
-    Field(
-        description=(
-            "Persisted provider probe status: untested, ok, invalid_key, "
-            "rate_limited, quota_exceeded, network_error, timeout, or error."
-        )
-    ),
+    Field(description="Provider/route probe status for API responses."),
 ]
 
 
 class ModelInfo(BaseModel):
-    """One model advertised or manually confirmed for a provider."""
+    """One provider-advertised model used by probe helpers."""
 
     model_config = ConfigDict(extra="forbid")
 
-    id: str = Field(description="Provider-facing model id, for example gpt-5 or claude-opus-4-7.")
-    capabilities: dict[str, Any] = Field(
-        default_factory=dict,
-        description=(
-            "Normalized model capability metadata such as max_context_tokens, "
-            "thinking, modalities, or vendor-specific static properties."
-        ),
+    id: str
+    capabilities: dict[str, object] = Field(default_factory=dict)
+
+
+class ProviderEndpoint(GatewayProviderEndpoint):
+    """Studio-owned endpoint DTO with user-facing provider label."""
+
+    display_name: str
+
+
+class ProviderRoute(GatewayProviderRoute):
+    """Studio-owned route DTO with optional admin/display label."""
+
+    display_name: str | None = None
+
+
+class ModelProfile(GatewayModelProfile):
+    """Studio-owned reusable route bundle with user-facing display label."""
+
+    display_name: str
+
+
+def _gateway_endpoint(endpoint: ProviderEndpoint) -> GatewayProviderEndpoint:
+    return GatewayProviderEndpoint.model_validate(
+        endpoint.model_dump(mode="python", exclude={"display_name"})
     )
 
 
-class ProviderTestResult(BaseModel):
-    """One cached Test outcome for one provider parameter set."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    params_fingerprint: str = Field(
-        description="Stable fingerprint of api_key, base_url, and provider_type for lookup.",
-    )
-    base_url: str = Field(default="", description="Base URL used by this cached result.")
-    provider_type: ProviderType | None = Field(
-        default=None,
-        description="Provider protocol used by this cached result.",
-    )
-    last_test_status: TestStatus = Field(
-        default="untested",
-        description="Cached provider probe status for this parameter set.",
-    )
-    last_test_at: str = Field(default="", description="ISO timestamp of this probe.")
-    last_test_message: str = Field(default="", description="Human-readable probe message.")
-    last_error_code: str = Field(default="", description="Machine-readable probe error code.")
-    available_sdks: list[str] = Field(default_factory=list, description="Confirmed SDK protocols.")
-    available_models: list[ModelInfo] = Field(default_factory=list, description="Confirmed models.")
-
-
-class ProviderCredential(BaseModel):
-    """User-configured API credential record persisted in ~/.studio/llm_credentials.json.
-
-    ``id`` is the credential instance lookup dimension. ``provider_key`` is a
-    separate metadata lookup dimension in the round 3 design: use it with
-    ``model_name`` for vendor/model static properties such as SDK, default
-    params, and capabilities. See
-    ``.kiro/specs/studio-api-keys-redesign/round3-design.md`` §概念定义.2.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str = Field(
-        default_factory=lambda: str(uuid4()),
-        description=(
-            "Credential UUID used for credential instance lookup: api_key, "
-            "base_url, and Test outcome. Multiple credentials may share the "
-            "same provider_key but must have distinct id values."
-        ),
-    )
-    name: str = Field(description="User-facing display name for this credential record.")
-    api_key: str = Field(
-        default="",
-        description=(
-            "API authentication secret. In PUT /credentials, an empty string "
-            "means preserve the previously stored secret for this id."
-        ),
-    )
-    base_url: str = Field(
-        default="",
-        description="Provider API base URL override; empty string lets backend defaults apply.",
-    )
-    provider_type: ProviderType | None = Field(
-        default=None,
-        description=(
-            "SDK protocol used to call this credential: anthropic_compatible, "
-            "openai_compatible, or google_genai."
-        ),
-    )
-
-    last_test_status: TestStatus = Field(
-        default="untested",
-        description="Last persisted provider probe status for this credential.",
-    )
-    last_test_at: str = Field(
-        default="",
-        description="ISO timestamp of the last provider probe, empty when untested.",
-    )
-    last_test_message: str = Field(
-        default="",
-        description="Human-readable message from the last provider probe.",
-    )
-    last_error_code: str = Field(
-        default="",
-        description="Machine-readable error code from the last provider probe.",
-    )
-    available_sdks: list[str] = Field(
-        default_factory=list,
-        description="SDK protocols confirmed by provider probing for this credential.",
-    )
-    available_models: list[ModelInfo] = Field(
-        default_factory=list,
-        description="Models confirmed by automatic or manual probing for this credential.",
-    )
-    test_results: list[ProviderTestResult] = Field(
-        default_factory=list,
-        description=(
-            "Cached Test outcomes keyed by api_key/base_url/provider_type fingerprint. "
-            "The top-level Test fields mirror the entry matching the current editable fields."
-        ),
+def _gateway_route(route: ProviderRoute) -> GatewayProviderRoute:
+    return GatewayProviderRoute.model_validate(
+        route.model_dump(mode="python", exclude={"display_name"})
     )
 
 
-TEST_OUTCOME_FIELDS: tuple[str, ...] = (
-    "last_test_status",
-    "last_test_at",
-    "last_test_message",
-    "last_error_code",
-    "available_sdks",
-    "available_models",
-)
+def _gateway_model_profile(profile: ModelProfile) -> GatewayModelProfile:
+    return GatewayModelProfile.model_validate(
+        profile.model_dump(mode="python", exclude={"display_name"})
+    )
+
+
+def _gateway_role(role: RoleEntry) -> GatewayRoleEntry:
+    return GatewayRoleEntry.model_validate(
+        role.model_dump(
+            mode="python",
+            include={
+                "system_prompt_prefix",
+                "source_profile_id",
+                "fallback_chain",
+                "lint_requirements",
+            },
+        )
+    )
 
 
 class LLMCredentialsFile(BaseModel):
-    """Schema stored at ``~/.studio/llm_credentials.json``."""
+    """Schema stored at the active Studio LLM credentials path."""
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[3] = 3
-    providers: list[ProviderCredential] = Field(default_factory=list)
+    schema_version: Literal[4] = 4
+    provider_endpoints: dict[str, ProviderEndpoint] = Field(default_factory=dict)
+    provider_routes: dict[str, ProviderRoute] = Field(default_factory=dict)
+    runtime_policy: RuntimePolicy = Field(default_factory=RuntimePolicy)
+
+    def endpoint_fingerprint(self, endpoint_id: str) -> str:
+        """Return the gateway-owned credential fingerprint for one endpoint."""
+        return compute_credential_fingerprint(self.provider_endpoints[endpoint_id])
 
 
-class ModelEntry(BaseModel):
-    """Model registry entry from ``llm_roles.yaml``."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    reasoning: bool = False
-    min_max_tokens: int | None = None
-    max_input_tokens: int | None = None
-    fc_supported: bool = False
-    providers: dict[str, str]
-    provider_options: dict[str, dict[str, Any]] | None = None
-
-
-class ProviderEntry(BaseModel):
-    """Provider registry entry from ``llm_roles.yaml``."""
+class RoleTokenIntent(BaseModel):
+    """Role-level token intent. Role level cannot inherit from a parent."""
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str
-    type: ProviderType
-    api_key_env: str | None = None
-    api_key_env_fallback: str | None = None
-    base_url: str | None = None
-    llm_base_url: str | None = None
-    proxy_env: str | None = None
-    timeout: int | None = None
-    trust_env: bool | None = None
-    retry_strategy: str | None = None
+    mode: Literal["default", "maximum_available", "target", "required_minimum"]
+    value: int | None = Field(default=None, ge=1)
+    downgrade: Literal["allow", "allow_with_warning", "block"] = "allow"
 
 
-class RoleModelEntry(BaseModel):
-    """One model entry inside a role's fallback chain."""
+class TokenIntent(BaseModel):
+    """Nested token intent. Model groups may inherit from the role."""
 
     model_config = ConfigDict(extra="forbid")
 
-    providers: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Ordered provider identifiers used as the fallback chain for this model in a role."
-        ),
-    )
-    temperature: float | None = Field(
-        default=None,
-        description="Optional sampling temperature override for this model within the role.",
-    )
-    max_tokens: int | None = Field(
-        default=None,
-        description="Optional maximum output token override for this model within the role.",
-    )
+    mode: Literal["inherit", "default", "maximum_available", "target", "required_minimum"]
+    value: int | None = Field(default=None, ge=1)
+    downgrade: Literal["allow", "allow_with_warning", "block"] = "allow"
 
 
-class RoleEntry(BaseModel):
-    """Role registry entry from ``llm_roles.yaml``."""
+class RoleIntent(BaseModel):
+    """User intent stored at the Role level."""
 
     model_config = ConfigDict(extra="forbid")
 
-    model_fallback: bool = Field(
-        default=False,
-        description="Whether this role may fall back across configured models/providers.",
+    provider_preference: Literal["official_first", "ready_first", "manual_order"] = (
+        "official_first"
     )
-    active_model: str = Field(
-        description="Model code currently selected as the first-choice model for this role.",
+    thinking: Literal["off", "preferred", "required"] = "off"
+    target_context_tokens: RoleTokenIntent | None = None
+    target_output_tokens: RoleTokenIntent | None = None
+    cost_priority: Literal["quality", "balanced", "low_cost"] | None = None
+
+
+class ModelGroupIntent(BaseModel):
+    """Optional Model Group override intent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider_preference: Literal["official_first", "ready_first", "manual_order"] | None = None
+    thinking: Literal["inherit", "off", "preferred", "required"] = "inherit"
+    target_context_tokens: TokenIntent | None = None
+    target_output_tokens: TokenIntent | None = None
+    cost_priority: Literal["quality", "balanced", "low_cost"] | None = None
+
+
+class RoleProviderModel(BaseModel):
+    """One selected provider model option inside a Model Group."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    route_id: str
+    intent: ModelGroupIntent | None = None
+
+
+class RoleModelGroup(BaseModel):
+    """One user-authored Model Group in a Role."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    canonical_id: str
+    display_name: str
+    intent: ModelGroupIntent = Field(default_factory=ModelGroupIntent)
+    provider_models: list[RoleProviderModel] = Field(default_factory=list)
+
+
+class RoleEntry(GatewayRoleEntry):
+    """Studio Role entry with authoring fields plus generated fallback chain."""
+
+    role_kind: Literal["graph_agent", "copilot"] = "graph_agent"
+    model_fallback_enabled: bool = True
+    intent: RoleIntent = Field(default_factory=RoleIntent)
+    model_groups: list[RoleModelGroup] = Field(default_factory=list)
+    materialization_report: dict[str, Any] = Field(
+        default_factory=lambda: {
+            "entries": [],
+            "warnings": [],
+            "skipped_provider_details": [],
+        }
     )
-    system_prompt_prefix: str | None = Field(
-        default=None,
-        description="Optional role-specific prompt prefix prepended at runtime.",
-    )
-    models: dict[str, RoleModelEntry] = Field(
-        default_factory=dict,
-        description=(
-            "Role model map keyed by model code, each value carrying that model's "
-            "provider fallback chain."
-        ),
+
+
+class ModelBundle(BaseModel):
+    """Studio-authored reusable model-group bundle plus generated flat route chain."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model_profile_id: str
+    display_name: str
+    canonical_id: str
+    tags: list[str] = Field(default_factory=list)
+    model_fallback_enabled: bool = True
+    intent: RoleIntent = Field(default_factory=RoleIntent)
+    model_groups: list[RoleModelGroup] = Field(default_factory=list)
+    fallback_chain: list[RoleRouteEntry] = Field(default_factory=list)
+    lint_requirements: dict[str, Literal["off", "warn", "error"]] = Field(default_factory=dict)
+    materialization_report: dict[str, Any] = Field(
+        default_factory=lambda: {
+            "entries": [],
+            "warnings": [],
+            "skipped_provider_details": [],
+        }
     )
 
 
 class RolesData(BaseModel):
-    """Round-trip editable role configuration."""
+    """Schema stored at the active Studio LLM roles path."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
-    models: dict[str, ModelEntry]
-    providers: dict[str, ProviderEntry]
-    roles: dict[str, RoleEntry]
-    migration_required: bool = Field(
-        default=False,
-        description="True when legacy roles YAML was migrated in memory and should be saved.",
+    schema_version: Literal[2, 3] = 2
+    model_profiles: dict[str, ModelProfile] = Field(default_factory=dict)
+    model_bundles: dict[str, ModelBundle] = Field(default_factory=dict)
+    roles: dict[str, RoleEntry] = Field(default_factory=dict)
+
+    @field_validator("roles", mode="before")
+    @classmethod
+    def _coerce_gateway_roles(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        return {
+            role_name: role.model_dump(mode="json")
+            if hasattr(role, "model_dump") and not isinstance(role, RoleEntry)
+            else role
+            for role_name, role in value.items()
+        }
+
+    def to_registry_snapshot(self, credentials: LLMCredentialsFile) -> RegistrySnapshot:
+        """Join credentials and roles into the gateway runtime snapshot."""
+        return RegistrySnapshot(
+            provider_endpoints={
+                endpoint_id: _gateway_endpoint(endpoint)
+                for endpoint_id, endpoint in credentials.provider_endpoints.items()
+            },
+            provider_routes={
+                route_id: _gateway_route(route)
+                for route_id, route in credentials.provider_routes.items()
+            },
+            runtime_policy=credentials.runtime_policy,
+            model_profiles={
+                profile_id: _gateway_model_profile(profile)
+                for profile_id, profile in self.model_profiles.items()
+            },
+            roles={role_name: _gateway_role(role) for role_name, role in self.roles.items()},
+        )
+
+
+class RegistryResponse(BaseModel):
+    """Redacted registry response plus grouped display metadata."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider_endpoints: dict[str, ProviderEndpoint] = Field(default_factory=dict)
+    provider_routes: dict[str, ProviderRoute] = Field(default_factory=dict)
+    runtime_policy: RuntimePolicy = Field(default_factory=RuntimePolicy)
+    model_profiles: dict[str, ModelProfile] = Field(default_factory=dict)
+    roles: dict[str, RoleEntry] = Field(default_factory=dict)
+    canonical_groups: list[dict[str, object]] = Field(default_factory=list)
+    model_groups: list[dict[str, object]] = Field(default_factory=list)
+    lint_results: list[LintResult] = Field(default_factory=list)
+    route_runtime_settings: dict[str, dict[str, RuntimeSettingDescriptor]] = Field(
+        default_factory=dict
     )
-    single_model_roles: list[str] = Field(default_factory=list)
-    peer_model_groups: dict[str, list[str]] = Field(default_factory=dict)
-    circuit_breaker: dict[str, Any] | None = None
-
-    _raw: Any = PrivateAttr(default=None)
-    _original_text: str | None = PrivateAttr(default=None)
-    _original_snapshot: dict[str, Any] | None = PrivateAttr(default=None)
+    role_effective_runtime_settings: dict[
+        str,
+        dict[str, dict[str, EffectiveRuntimeSetting]],
+    ] = Field(default_factory=dict)
+    setup_required: bool = False
 
 
 __all__ = [
+    "CapabilityValue",
+    "EndpointCandidate",
+    "EffectiveRuntimeSetting",
+    "FieldSource",
     "LLMCredentialsFile",
-    "ModelEntry",
+    "LintResult",
     "ModelInfo",
-    "ProviderEntry",
-    "ProviderCredential",
-    "ProviderTestResult",
+    "ModelBundle",
+    "ModelProfile",
+    "ProbeResult",
+    "ProviderEndpoint",
+    "ProviderImportDraft",
+    "ProviderRoute",
     "ProviderType",
+    "RegistryResponse",
+    "RegistrySnapshot",
+    "ResolvedRole",
+    "ResolvedRoute",
     "RoleEntry",
-    "RoleModelEntry",
+    "RoleRouteEntry",
     "RolesData",
-    "TEST_OUTCOME_FIELDS",
+    "RouteCandidate",
+    "RuntimeSettingDescriptor",
+    "RuntimePolicy",
     "TestStatus",
 ]

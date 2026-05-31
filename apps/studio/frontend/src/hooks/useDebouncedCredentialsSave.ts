@@ -94,14 +94,18 @@ export function useDebouncedCredentialsSave(
     (getSnapshot: () => ProviderCredentialUpdate[]) => {
       if (timerRef.current) clearTimeout(timerRef.current)
       setStatus("pending")
+      pendingSnapshotRef.current = getSnapshot
       timerRef.current = setTimeout(() => {
         timerRef.current = null
+        const snapshot = pendingSnapshotRef.current
+        pendingSnapshotRef.current = null
+        if (!snapshot) return
         if (inflightRef.current) {
           // A save is currently in flight — defer until it resolves.
-          pendingSnapshotRef.current = getSnapshot
+          pendingSnapshotRef.current = snapshot
           return
         }
-        inflightRef.current = performSave(getSnapshot)
+        inflightRef.current = performSave(snapshot)
       }, delayMs)
     },
     [delayMs, performSave],

@@ -503,6 +503,27 @@ def test_run_history_lists_details_and_deletes_runs(
     assert newer_dir.exists()
 
 
+def test_delete_run_rejects_path_traversal(
+    client: TestClient,
+    studio_roots: tuple[Path, Path],
+) -> None:
+    _skills_dir, workspaces_dir = studio_roots
+    safe_dir = _write_run_record(
+        workspaces_dir,
+        "text-segmentation",
+        "safe-run",
+        started_at=datetime.now(UTC),
+        input_data={"chapter": "001"},
+    )
+    runs_dir = safe_dir.parent
+
+    response = client.delete("/api/skills/text-segmentation/runs/%2E%2E")
+
+    assert response.status_code == 400
+    assert runs_dir.exists()
+    assert safe_dir.exists()
+
+
 def test_batch_run_starts_runs_from_test_inputs(
     client: TestClient,
     studio_roots: tuple[Path, Path],

@@ -11,12 +11,12 @@ const officialProviders = [
 ]
 const officialProviderCodes = officialProviders.map((vendor) => vendor.code)
 const notableProviderKeys = [
-  ...officialProviderCodes,
   "openrouter",
   "wavespeed",
   "qiniu",
   "onechats",
   "jiekou",
+  ...officialProviderCodes,
 ]
 
 type ProviderTestParams = {
@@ -34,6 +34,7 @@ export function draftsFromCredentials(credentials: CredentialsState): ProviderDr
     base_url: provider.base_url ?? "",
     api_key: provider.api_key,
     isTesting: false,
+    testingAction: null,
   }))
 }
 
@@ -43,6 +44,7 @@ function newProviderId(): string {
 
 export function inferProviderType(providerCode: string, baseUrl = "", name = ""): ProviderType {
   const haystack = `${providerCode} ${name} ${baseUrl}`.toLowerCase()
+  if (haystack.includes("ark") || haystack.includes("volces")) return "ark_runtime"
   if (haystack.includes("anthropic") || haystack.includes("claude")) return "anthropic_compatible"
   if (haystack.includes("gemini") || haystack.includes("google")) return "google_genai"
   return "openai_compatible"
@@ -64,13 +66,14 @@ export function draftFromAddProviderSubmission(
     base_url: data.baseUrl,
     api_key: data.apiKey,
     isTesting: false,
+    testingAction: null,
   }
 }
 
 export function officialProviderDrafts(drafts: ProviderDraft[]): ProviderDraft[] {
   return officialProviders.map((vendor) => {
     const existing = drafts.find((draft) => isOfficialProviderDraft(draft, vendor.code))
-    if (existing) return existing
+    if (existing) return withOfficialProviderDefaults(existing, vendor)
     return {
       id: `${vendor.code}-official`,
       name: `${officialProviderDisplayName(vendor.label)} Official`,
@@ -78,8 +81,17 @@ export function officialProviderDrafts(drafts: ProviderDraft[]): ProviderDraft[]
       base_url: vendor.baseUrl,
       api_key: "",
       isTesting: false,
+      testingAction: null,
     }
   })
+}
+
+export function providerDraftForAction(drafts: ProviderDraft[], providerId: string): ProviderDraft | null {
+  const draft = drafts.find((item) => item.id === providerId)
+    ?? officialProviderDrafts(drafts).find((item) => item.id === providerId)
+  if (!draft) return null
+  const vendor = officialProviderForDraft(draft)
+  return vendor ? withOfficialProviderDefaults(draft, vendor) : draft
 }
 
 export function thirdPartyProviderDrafts(drafts: ProviderDraft[]): ProviderDraft[] {
@@ -91,6 +103,7 @@ export function notableProviderKeyForDraft(draft: ProviderDraft): string {
   const matched = notableProviderKeys.find((code) => haystack.includes(code))
   if (matched) return matched
   if (draft.provider_type === "anthropic_compatible") return "anthropic"
+  if (draft.provider_type === "ark_runtime") return "ark"
   if (draft.provider_type === "google_genai") return "gemini"
   return "openai"
 }
@@ -158,6 +171,21 @@ function isOfficialProviderDraft(draft: ProviderDraft, providerCode: string): bo
     normalizedId.startsWith(`${providerCode}_`) ||
     (normalizedName.includes(label) && normalizedName.includes("official"))
   )
+}
+
+function officialProviderForDraft(draft: ProviderDraft): (typeof officialProviders)[number] | null {
+  return officialProviders.find((vendor) => isOfficialProviderDraft(draft, vendor.code)) ?? null
+}
+
+function withOfficialProviderDefaults(
+  draft: ProviderDraft,
+  vendor: (typeof officialProviders)[number],
+): ProviderDraft {
+  return {
+    ...draft,
+    provider_type: inferProviderType(vendor.code),
+    base_url: vendor.baseUrl,
+  }
 }
 
 function officialProviderDisplayName(label: string): string {

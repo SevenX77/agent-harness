@@ -335,19 +335,13 @@ def _run_v030_skill_dict(
     trace_output = workspace_dir / "runs" / run_id
     active_callbacks = _prepare_v030_callbacks(callbacks, trace_output)
     emit_auto_trace_events = callbacks is None
-    if mock_llm is not _NO_MOCK_LLM:
-        chat_model = mock_llm
-    elif model_resolver is not None:
-        chat_model = model_resolver.resolve(
-            callbacks=tuple(active_callbacks),
-            phase_name="<workflow>",
-        )
-    else:
-        chat_model = None
+    chat_model = mock_llm if mock_llm is not _NO_MOCK_LLM else None
+    active_model_resolver = model_resolver if mock_llm is _NO_MOCK_LLM else None
     compiled = compile_skill(skill_root, skill_resolver=resolver)
     assembled = assemble_graph(
         compiled,
         chat_model=chat_model,
+        model_resolver=active_model_resolver,
         callbacks=active_callbacks,
         skill_resolver=resolver,
     )

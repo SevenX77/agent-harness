@@ -4,11 +4,13 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type MouseEvent,
   type PointerEvent,
 } from "react"
 import { Search, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Tag } from "@/components/ui/tag"
 import {
   InputGroup,
   InputGroupAddon,
@@ -17,28 +19,29 @@ import {
 } from "@/components/ui/input-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
-import type { CredentialsState } from "@/api/llm"
-import {
-  canonicalAvailableModelId,
-  modelSupportsThinking,
-} from "../role-utils"
+import type { ModelGroup, ProviderUiState } from "@/api/llm"
 import { ThinkingBadge } from "./RoleBadges"
 import { useLazyRenderCount } from "./useLazyRenderCount"
 
 export interface AvailableModelProvider {
   id: string
   label: string
+  state: ProviderUiState
+  detail?: string | null
+  providerModelId: string
+  retryAt?: string | null
 }
 
 export interface AvailableModelEntry {
   id: string
-  vendor: string
+  label: string
+  section: string
   providers: AvailableModelProvider[]
   thinking: boolean
 }
 
 export interface AvailableModelGroup {
-  vendor: string
+  section: string
   models: AvailableModelEntry[]
 }
 
@@ -47,14 +50,12 @@ const availableModelsInitialRenderCount = 24
 const availableModelsRenderStep = 24
 
 export function AvailableModelsSidebar({
-  credentials,
-  onModelDragEnd,
-  onModelDragStart,
+  modelGroups,
+  pinnedModelGroups = [],
   onModelPointerDown,
 }: {
-  credentials: CredentialsState
-  onModelDragEnd?: () => void
-  onModelDragStart?: (modelId: string) => void
+  modelGroups: ModelGroup[]
+  pinnedModelGroups?: ModelGroup[]
   onModelPointerDown?: (modelId: string, event: PointerEvent<HTMLButtonElement>) => void
 }) {
   const [query, setQuery] = useState("")
@@ -63,10 +64,14 @@ export function AvailableModelsSidebar({
   const pointerSelectedModelRef = useRef<string | null>(null)
   const selectedModelIdRef = useRef<string | null>(null)
   const selectedButtonRef = useRef<HTMLButtonElement | null>(null)
-  const groups = useMemo(() => buildAvailableModelGroups(credentials), [credentials])
+  const pinnedGroups = useMemo(() => buildAvailableModelGroups(pinnedModelGroups), [pinnedModelGroups])
+  const groups = useMemo(() => buildAvailableModelGroups(modelGroups), [modelGroups])
+  const filteredPinnedGroups = useMemo(() => filterAvailableModelGroups(pinnedGroups, query), [pinnedGroups, query])
   const filteredGroups = useMemo(() => filterAvailableModelGroups(groups, query), [groups, query])
-  const hasModels = filteredGroups.some((group) => group.models.length > 0)
-  const filteredModelCount = filteredGroups.reduce((total, group) => total + group.models.length, 0)
+  const hasPinnedModels = filteredPinnedGroups.some((group) => group.models.length > 0)
+  const hasModels = hasPinnedModels || filteredGroups.some((group) => group.models.length > 0)
+  const filteredModelCount = filteredPinnedGroups.reduce((total, group) => total + group.models.length, 0) +
+    filteredGroups.reduce((total, group) => total + group.models.length, 0)
   const {
     hasMore: hasMoreModels,
     sentinelRef: availableModelsSentinelRef,
@@ -117,12 +122,6 @@ export function AvailableModelsSidebar({
     }
     applySelectedModel(modelId, event.currentTarget)
   }, [applySelectedModel])
-  const handleModelDragStart = useCallback((modelId: string) => {
-    onModelDragStart?.(modelId)
-  }, [onModelDragStart])
-  const handleModelDragEnd = useCallback(() => {
-    onModelDragEnd?.()
-  }, [onModelDragEnd])
   const handleClearSearch = useCallback(() => {
     setQuery("")
     searchInputRef.current?.focus()
@@ -177,9 +176,17 @@ export function AvailableModelsSidebar({
         <ScrollArea className="h-72 w-full min-w-0 max-w-full overflow-hidden lg:h-auto lg:min-h-0 lg:flex-1 [&_[data-slot=scroll-area-scrollbar]]:hidden [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:!min-w-0 [&_[data-slot=scroll-area-viewport]>div]:!w-full">
           {hasModels ? (
             <div className="w-full min-w-0 max-w-full space-y-4 overflow-hidden" data-lazy-list="available-models">
+              {hasPinnedModels ? (
+                <AvailableModelSections
+                  groups={filteredPinnedGroups}
+                  selectedModelId={selectedModelId}
+                  onClickSelect={handleModelClick}
+                  onPointerSelect={handleModelPointerDown}
+                />
+              ) : null}
               {visibleGroups.map((group) => (
-                <section key={group.vendor} className="w-full min-w-0 max-w-full space-y-2 overflow-hidden">
-                  <div className="text-[11px] font-medium uppercase text-muted-foreground">{group.vendor}</div>
+                <section key={group.section} className="w-full min-w-0 max-w-full space-y-2 overflow-hidden">
+                  <div className="text-[11px] font-medium uppercase text-muted-foreground">{group.section}</div>
                   <div className="w-full min-w-0 max-w-full space-y-2 overflow-hidden">
                     {group.models.map((model) => (
                       <AvailableModelCard
@@ -188,8 +195,6 @@ export function AvailableModelsSidebar({
                         selected={selectedModelId === model.id}
                         onClickSelect={handleModelClick}
                         onPointerSelect={handleModelPointerDown}
-                        onDragStart={() => handleModelDragStart(model.id)}
-                        onDragEnd={handleModelDragEnd}
                       />
                     ))}
                   </div>
@@ -215,6 +220,39 @@ export function AvailableModelsSidebar({
   )
 }
 
+function AvailableModelSections({
+  groups,
+  selectedModelId,
+  onClickSelect,
+  onPointerSelect,
+}: {
+  groups: AvailableModelGroup[]
+  selectedModelId: string | null
+  onClickSelect: (modelId: string, event: MouseEvent<HTMLButtonElement>) => void
+  onPointerSelect: (modelId: string, event: PointerEvent<HTMLButtonElement>) => void
+}) {
+  return (
+    <>
+      {groups.map((group) => (
+        <section key={group.section} className="w-full min-w-0 max-w-full space-y-2 overflow-hidden">
+          <div className="text-[11px] font-medium uppercase text-muted-foreground">{group.section}</div>
+          <div className="w-full min-w-0 max-w-full space-y-2 overflow-hidden">
+            {group.models.map((model) => (
+              <AvailableModelCard
+                key={model.id}
+                model={model}
+                selected={selectedModelId === model.id}
+                onClickSelect={onClickSelect}
+                onPointerSelect={onPointerSelect}
+              />
+            ))}
+          </div>
+        </section>
+      ))}
+    </>
+  )
+}
+
 function sliceAvailableModelGroups(
   groups: AvailableModelGroup[],
   visibleCount: number,
@@ -237,26 +275,22 @@ const AvailableModelCard = memo(function AvailableModelCard({
   selected,
   onClickSelect,
   onPointerSelect,
-  onDragStart,
-  onDragEnd,
 }: {
   model: AvailableModelEntry
   selected: boolean
   onClickSelect: (modelId: string, event: MouseEvent<HTMLButtonElement>) => void
   onPointerSelect: (modelId: string, event: PointerEvent<HTMLButtonElement>) => void
-  onDragStart: () => void
-  onDragEnd: () => void
 }) {
   return (
     <button
       type="button"
+      draggable={false}
       aria-pressed={selected}
       data-available-model-drag-source="true"
       data-available-model-pointer-drag-source="true"
+      data-available-model-native-dnd="off"
       data-model-id={model.id}
       data-selected={selected ? "true" : undefined}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
       onPointerDown={(event) => onPointerSelect(model.id, event)}
       onClick={(event) => onClickSelect(model.id, event)}
       className={cn(
@@ -265,8 +299,11 @@ const AvailableModelCard = memo(function AvailableModelCard({
     >
       <div className="grid min-w-0 gap-1">
         <div className="flex min-w-0 items-start gap-2">
-          <div className="min-w-0 flex-1 break-words font-mono text-xs leading-snug text-foreground [overflow-wrap:anywhere]">
-            {model.id}
+          <div
+            data-available-model-title="true"
+            className="min-w-0 flex-1 break-words text-xs font-medium leading-snug text-foreground [overflow-wrap:anywhere]"
+          >
+            {model.label}
           </div>
           {model.thinking ? <ThinkingBadge /> : null}
         </div>
@@ -288,71 +325,112 @@ function ProviderLabelBadges({
   }
 
   const visibleProviders = expanded ? providers : providers.slice(0, collapsedProviderLabelLimit)
-  const hiddenProviderCount = expanded ? 0 : providers.length - visibleProviders.length
+  const hiddenProviders = expanded ? [] : providers.slice(visibleProviders.length)
+  const hiddenProviderCount = hiddenProviders.length
+  const hiddenProviderState = dominantProviderState(hiddenProviders)
 
   return (
     <div className="flex min-w-0 max-w-full flex-wrap gap-1 overflow-hidden">
-      {visibleProviders.map((provider) => (
-        <Badge
-          key={provider.id}
-          variant="outline"
-          data-available-model-provider-label="true"
-          className={cn(
-            "max-w-full shrink-0 justify-start border-border/70 bg-muted/20 px-1.5 font-sans text-[10px] text-muted-foreground",
-            expanded ? "whitespace-normal [overflow-wrap:anywhere]" : "whitespace-nowrap",
-          )}
-        >
-          <span>{provider.label}</span>
-        </Badge>
-      ))}
+      {visibleProviders.map((provider) => {
+        const stateLabel = providerVisibleStateLabel(provider.state)
+        return (
+          <Tag
+            key={provider.id}
+            variant={providerStateTagVariant(provider.state)}
+            size="xs"
+            data-available-model-provider-label="true"
+            data-provider-state={provider.state}
+            aria-label={providerStateAriaLabel(provider)}
+            className={cn(
+              "max-w-full justify-start font-sans",
+              expanded ? "whitespace-normal [overflow-wrap:anywhere]" : "whitespace-nowrap",
+            )}
+          >
+            <span>{provider.label}</span>
+            {stateLabel ? (
+              <span
+                data-provider-state-text="true"
+                className="text-[0.5625rem] font-medium opacity-80"
+              >
+                {stateLabel}
+              </span>
+            ) : null}
+          </Tag>
+        )
+      })}
       {hiddenProviderCount > 0 ? (
-        <Badge
-          variant="outline"
+        <Tag
+          variant={providerStateTagVariant(hiddenProviderState)}
+          size="xs"
           data-available-model-provider-overflow="true"
+          data-provider-state={hiddenProviderState}
           aria-label={`${hiddenProviderCount} more providers`}
-          className="shrink-0 border-border/70 bg-muted/20 px-1.5 font-sans text-[10px] text-muted-foreground"
+          className="font-sans"
         >
           +{hiddenProviderCount}
-        </Badge>
+        </Tag>
       ) : null}
     </div>
   )
 }
 
-export function buildAvailableModelGroups(credentials: CredentialsState): AvailableModelGroup[] {
-  const byModelId = new Map<string, AvailableModelEntry>()
+export function buildAvailableModelGroups(modelGroups: ModelGroup[]): AvailableModelGroup[] {
+  const models = modelGroups
+    .map((group): AvailableModelEntry => {
+      return {
+        id: group.canonical_id,
+        label: group.display_name || group.canonical_id,
+        section: group.section_label || fallbackModelGroupSection(group),
+        providers: group.provider_models
+          .map((providerModel) => ({
+            id: providerModel.route_id,
+            label: providerModel.provider_label,
+            state: providerModel.ui_state,
+            detail: providerModel.ui_detail,
+            providerModelId: providerModel.provider_model_id,
+            retryAt: providerModel.retry_at,
+          }))
+          .sort(compareAvailableModelProviders),
+        thinking: group.capability_summary.thinking === "supported" ||
+          group.capability_summary.thinking === "mixed" ||
+          group.provider_models.some((providerModel) => Boolean(
+            providerModel.capabilities.thinking?.value ||
+            providerModel.capabilities.reasoning?.value ||
+            providerModel.capabilities.supports_thinking?.value,
+          )),
+      }
+    })
+    .sort(compareModelEntries)
 
-  for (const provider of credentials.providers) {
-    const providerLabel = provider.name.trim() || provider.id
-    for (const model of provider.available_models ?? []) {
-      const modelId = canonicalAvailableModelId(model.id, provider)
-      if (!modelId) continue
-      const vendor = inferModelVendor(modelId, provider)
-      const existing = byModelId.get(modelId)
-      const next = existing ?? {
-        id: modelId,
-        vendor,
-        providers: [],
-        thinking: false,
-      }
-      if (!next.providers.some((item) => item.id === provider.id)) {
-        next.providers.push({ id: provider.id, label: providerLabel })
-      }
-      next.thinking = next.thinking || modelSupportsThinking(model)
-      byModelId.set(modelId, next)
-    }
+  const bySection = new Map<string, AvailableModelEntry[]>()
+  for (const model of models) {
+    const sectionModels = bySection.get(model.section) ?? []
+    sectionModels.push(model)
+    bySection.set(model.section, sectionModels)
   }
 
-  const byVendor = new Map<string, AvailableModelEntry[]>()
-  for (const model of [...byModelId.values()].sort(compareModelEntries)) {
-    const models = byVendor.get(model.vendor) ?? []
-    models.push(model)
-    byVendor.set(model.vendor, models)
-  }
-
-  return [...byVendor.entries()]
+  return [...bySection.entries()]
     .sort(([left], [right]) => left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }))
-    .map(([vendor, models]) => ({ vendor, models }))
+    .map(([section, sectionModels]) => ({ section, models: sectionModels }))
+}
+
+function fallbackModelGroupSection(group: ModelGroup): string {
+  const haystack = [
+    group.display_name,
+    group.canonical_id,
+    ...group.provider_models.flatMap((providerModel) => [
+      providerModel.provider_label,
+      providerModel.provider_model_id,
+    ]),
+  ].join(" ").toLowerCase()
+
+  if (haystack.includes("anthropic") || haystack.includes("claude")) return "anthropic"
+  if (haystack.includes("deepseek")) return "deepseek"
+  if (haystack.includes("openai") || /\bgpt[-_\s.]?\d/.test(haystack)) return "openai"
+  if (haystack.includes("gemini") || haystack.includes("antigravity") || /\baqa\b/.test(haystack)) return "gemini"
+  if (haystack.includes("qwen") || haystack.includes("dashscope") || haystack.includes("alibaba")) return "qwen"
+  if (haystack.includes("doubao") || haystack.includes("volcengine") || haystack.includes("ark")) return "ark"
+  return group.canonical_id.split(/[-_.]/)[0] || "unknown"
 }
 
 export function filterAvailableModelGroups(
@@ -361,27 +439,40 @@ export function filterAvailableModelGroups(
 ): AvailableModelGroup[] {
   const normalizedQuery = query.trim().toLowerCase()
   const compactQuery = compactSearchText(query)
+  const queryTokens = searchTokens(query)
 
   if (!normalizedQuery) return groups
 
   return groups
     .map((group) => {
-      const vendorMatches = matchesSearchText(group.vendor, normalizedQuery, compactQuery)
+      const sectionMatches = matchesSearchText(group.section, normalizedQuery, compactQuery, queryTokens)
       const models = group.models.filter((model) => (
-        vendorMatches ||
-        matchesSearchText(model.id, normalizedQuery, compactQuery) ||
-        model.providers.some((provider) => matchesSearchText(provider.label, normalizedQuery, compactQuery))
+        sectionMatches ||
+        matchesSearchText(model.label, normalizedQuery, compactQuery, queryTokens) ||
+        matchesSearchText(model.id, normalizedQuery, compactQuery, queryTokens) ||
+        model.providers.some((provider) => (
+          matchesSearchText(provider.label, normalizedQuery, compactQuery, queryTokens) ||
+          matchesSearchText(provider.id, normalizedQuery, compactQuery, queryTokens) ||
+          matchesSearchText(provider.providerModelId, normalizedQuery, compactQuery, queryTokens)
+        ))
       ))
       return { ...group, models }
     })
     .filter((group) => group.models.length > 0)
 }
 
-function matchesSearchText(value: string, normalizedQuery: string, compactQuery: string): boolean {
+function matchesSearchText(
+  value: string,
+  normalizedQuery: string,
+  compactQuery: string,
+  queryTokens: string[],
+): boolean {
   const normalizedValue = value.toLowerCase()
+  const compactValue = compactSearchText(value)
   return (
     normalizedValue.includes(normalizedQuery) ||
-    (compactQuery.length > 0 && compactSearchText(value).includes(compactQuery))
+    (compactQuery.length > 0 && compactValue.includes(compactQuery)) ||
+    (queryTokens.length > 1 && queryTokens.every((token) => compactValue.includes(token)))
   )
 }
 
@@ -389,46 +480,76 @@ function compactSearchText(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "")
 }
 
+function searchTokens(value: string): string[] {
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9.]+/g)
+    .map(compactSearchText)
+    .filter(Boolean)
+}
+
 function compareModelEntries(left: AvailableModelEntry, right: AvailableModelEntry): number {
-  const vendorCompare = left.vendor.localeCompare(right.vendor, undefined, { numeric: true, sensitivity: "base" })
-  if (vendorCompare !== 0) return vendorCompare
+  const sectionCompare = left.section.localeCompare(right.section, undefined, { numeric: true, sensitivity: "base" })
+  if (sectionCompare !== 0) return sectionCompare
+  const labelCompare = left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: "base" })
+  if (labelCompare !== 0) return labelCompare
   return left.id.localeCompare(right.id, undefined, { numeric: true, sensitivity: "base" })
 }
 
-function inferModelVendor(modelId: string, provider: CredentialsState["providers"][number]): string {
-  const normalizedModelId = modelId.toLowerCase()
-  const slashVendor = normalizedModelId.includes("/") ? normalizedModelId.split("/", 1)[0] : ""
-  if (slashVendor && slashVendor !== "models") return normalizeVendor(slashVendor)
-
-  if (normalizedModelId.startsWith("gpt-") || normalizedModelId.startsWith("o1") || normalizedModelId.startsWith("o3")) {
-    return "openai"
-  }
-  if (normalizedModelId.startsWith("gemini-")) return "gemini"
-  if (normalizedModelId.startsWith("deepseek-")) return "deepseek"
-  if (normalizedModelId.startsWith("claude-")) return "anthropic"
-  if (normalizedModelId.startsWith("doubao-")) return "ark"
-  if (normalizedModelId.startsWith("qwen-")) return "qwen"
-
-  return providerVendor(provider)
+function compareAvailableModelProviders(
+  left: AvailableModelProvider,
+  right: AvailableModelProvider,
+): number {
+  const stateCompare = providerDisplayStatePriority(left.state) - providerDisplayStatePriority(right.state)
+  if (stateCompare !== 0) return stateCompare
+  const labelCompare = left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: "base" })
+  if (labelCompare !== 0) return labelCompare
+  return left.id.localeCompare(right.id, undefined, { numeric: true, sensitivity: "base" })
 }
 
-function providerVendor(provider: CredentialsState["providers"][number]): string {
-  const haystack = `${provider.id} ${provider.name} ${provider.base_url ?? ""}`.toLowerCase()
-  const knownVendors = [
-    "openai",
-    "gemini",
-    "deepseek",
-    "anthropic",
-    "ark",
-    "openrouter",
-    "wavespeed",
-    "qiniu",
-    "onechats",
-    "jiekou",
-  ]
-  return knownVendors.find((vendor) => haystack.includes(vendor)) ?? normalizeVendor(provider.name || provider.id)
+function providerDisplayStatePriority(state: ProviderUiState): number {
+  if (state === "ready") return 0
+  if (state === "untested") return 1
+  if (state === "cooling_down") return 2
+  if (state === "needs_setup") return 3
+  return 4
 }
 
-function normalizeVendor(vendor: string): string {
-  return vendor.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "unknown"
+function providerStateTagVariant(state: ProviderUiState): ComponentProps<typeof Tag>["variant"] {
+  if (state === "ready") return "success"
+  if (state === "needs_setup") return "destructive"
+  if (state === "cooling_down") return "warning"
+  return "muted"
+}
+
+function providerStateLabel(state: ProviderUiState): string {
+  if (state === "ready") return "Ready"
+  if (state === "cooling_down") return "Cooling Down"
+  if (state === "needs_setup") return "Needs Setup"
+  if (state === "off") return "Off"
+  return "Untested"
+}
+
+function providerVisibleStateLabel(state: ProviderUiState): string | null {
+  return state === "ready" ? null : providerStateLabel(state)
+}
+
+function providerStateAriaLabel(provider: AvailableModelProvider): string {
+  return provider.state === "ready"
+    ? `${provider.label} available`
+    : `${provider.label} ${providerStateLabel(provider.state)}`
+}
+
+function dominantProviderState(providers: AvailableModelProvider[]): ProviderUiState {
+  return providers
+    .map((provider) => provider.state)
+    .sort((left, right) => providerStatePriority(left) - providerStatePriority(right))[0] ?? "untested"
+}
+
+function providerStatePriority(state: ProviderUiState): number {
+  if (state === "needs_setup") return 0
+  if (state === "cooling_down") return 1
+  if (state === "off") return 2
+  if (state === "untested") return 3
+  return 4
 }

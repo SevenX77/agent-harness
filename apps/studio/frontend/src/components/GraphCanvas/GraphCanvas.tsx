@@ -11,16 +11,26 @@ import {
   type Connection,
   type Edge,
 } from '@xyflow/react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { toast } from 'sonner'
 import type { SkillDetail } from '@/api/types'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
 import { CycleDetectedError, getAutoLayoutedElements } from '@/lib/layout'
 import { ContextEdge, type ContextEdgeData } from '@/components/edges/ContextEdge'
 import { GlobalInputNode, GlobalOutputNode } from '@/components/nodes/GlobalInputOutputNode'
-import { buildEdges, SkillNode, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
+import { buildEdges, INPUT_ID, OUTPUT_ID, SkillNode, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus } from '@/components/nodes'
 import { useOptionalWorkspaceContext } from '@/components/studio/WorkspaceContext'
 import type { PanelKind } from '@/components/studio/Toolbar'
 import { buildNodes, phaseKindFile } from './build-nodes'
+import type { NewPhaseKind } from './canvas-authoring'
 
 interface GraphCanvasProps {
   skillId: string
@@ -30,6 +40,9 @@ interface GraphCanvasProps {
   selectedNodeId?: string | null
   onNodeSelect?: (node: { id: string, data: SkillGraphNodeData }) => void
   onPanelChange?: (panel: PanelKind | null) => void
+  onCreatePhase?: (kind: NewPhaseKind) => Promise<void> | void
+  onPersistConnection?: (connection: Connection) => Promise<void> | void
+  onDisconnectConnection?: (connection: { source: string; target: string }) => Promise<void> | void
   statusByNodeId?: Record<string, SkillNodeStatus>
   compact?: boolean
 }
@@ -44,6 +57,14 @@ const edgeTypes = {
   contextEdge: ContextEdge,
 }
 
+const CENTER_NODE_ORIGIN: [number, number] = [0.5, 0.5]
+
+function isEdgeContextTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest(
+    '.react-flow__edge, .react-flow__edgelabel-renderer, [data-edge-context-target="true"]',
+  ))
+}
+
 export function GraphCanvas({
   skillId,
   skillDetail,
@@ -52,12 +73,16 @@ export function GraphCanvas({
   selectedNodeId,
   onNodeSelect,
   onPanelChange,
+  onCreatePhase,
+  onPersistConnection,
+  onDisconnectConnection,
   statusByNodeId,
   compact = false,
 }: GraphCanvasProps) {
   const workspace = useOptionalWorkspaceContext()
   const [expandedSubgraphs, setExpandedSubgraphs] = useState<Set<string>>(() => new Set())
   const [selectedCanvasNodeId, setSelectedCanvasNodeId] = useState<string | null>(null)
+  const [edgeMenuConnection, setEdgeMenuConnection] = useState<{ source: string; target: string } | null>(null)
   const [canvasHeight, setCanvasHeight] = useState(0)
   const canvasRef = useRef<HTMLElement | null>(null)
   const fitViewRef = useRef<(() => void) | null>(null)
@@ -131,27 +156,87 @@ export function GraphCanvas({
     () => nodes.map((node) => ({ ...node, selected: node.id === (selectedCanvasNodeId ?? selectedNodeId) })),
     [nodes, selectedCanvasNodeId, selectedNodeId],
   )
+  const openEdgeContextMenu = useCallback((
+    _event: MouseEvent,
+    connection: { source: string; target: string },
+  ) => {
+    if (
+      connection.source === INPUT_ID
+      || connection.source === OUTPUT_ID
+      || connection.target === INPUT_ID
+      || connection.target === OUTPUT_ID
+    ) {
+      setEdgeMenuConnection(null)
+      return
+    }
+    setEdgeMenuConnection(connection)
+  }, [])
+  const displayEdges = useMemo<Edge<ContextEdgeData>[]>(
+    () => edges.map((edge) => {
+      const edgeData = edge.data
+      return {
+        ...edge,
+        data: {
+          ...edgeData,
+          hasTraceData: edgeData?.hasTraceData === true,
+          contextJson: edgeData?.contextJson,
+          sourcePhaseId: edgeData?.sourcePhaseId ?? edge.source,
+          targetPhaseId: edgeData?.targetPhaseId ?? edge.target,
+          onEdgeContextMenu: openEdgeContextMenu,
+        },
+      }
+    }),
+    [edges, openEdgeContextMenu],
+  )
 
   const onConnect = useCallback((connection: Connection) => {
-    setEdges((current) => addEdge({ ...connection, type: 'contextEdge' }, current))
-    if (connection.source && connection.target) {
-      setNodes((current) => current.map((node) => {
-        if (node.type !== 'skill' || node.id !== connection.target || node.data.dependsOn.includes(connection.source ?? '')) {
-          return node
-        }
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            dependsOn: [...node.data.dependsOn, connection.source],
-          },
-        }
-      }))
+    const source = connection.source
+    const target = connection.target
+    if (!source || !target || source === INPUT_ID || source === OUTPUT_ID || target === INPUT_ID || target === OUTPUT_ID) {
+      toast.error('Only phase nodes can be connected as dependencies')
+      return
     }
-  }, [setEdges, setNodes])
+    if (source === target) {
+      toast.error('A phase cannot depend on itself')
+      return
+    }
+    const sourceNode = phaseNodes.find((node) => node.id === source)
+    const targetNode = phaseNodes.find((node) => node.id === target)
+    if (!sourceNode || !targetNode) {
+      toast.error('Both connection endpoints must be phase nodes')
+      return
+    }
+    if (targetNode.data.dependsOn.includes(source)) {
+      toast.error('This dependency already exists')
+      return
+    }
+
+    setEdges((current) => addEdge({ ...connection, type: 'contextEdge' }, current))
+    setNodes((current) => current.map((node) => {
+      if (node.type !== 'skill' || node.id !== target || node.data.dependsOn.includes(source)) {
+        return node
+      }
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          dependsOn: [...node.data.dependsOn, source],
+        }
+      }
+    }))
+    if (onPersistConnection) {
+      Promise.resolve(onPersistConnection(connection)).catch((persistError: unknown) => {
+        toast.error(persistError instanceof Error ? persistError.message : 'Could not persist dependency')
+        setEdges(layoutResult.edges)
+        setNodes(layoutResult.nodes)
+      })
+    }
+  }, [layoutResult.edges, layoutResult.nodes, onPersistConnection, phaseNodes, setEdges, setNodes])
 
   return (
-    <section ref={canvasRef} className="relative h-full min-h-0 bg-background">
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <section ref={canvasRef} className="relative h-full min-h-0 bg-background">
       {error ? (
         <div className="absolute inset-0 z-10 grid place-items-center bg-background/80 p-8">
           <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
@@ -176,16 +261,29 @@ export function GraphCanvas({
 
       <ReactFlow
         nodes={selectedNodes}
-        edges={edges}
+        edges={displayEdges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onPaneContextMenu={(event) => {
+          if (isEdgeContextTarget(event.target)) {
+            return
+          }
+          setEdgeMenuConnection(null)
+        }}
+        onNodeContextMenu={() => {
+          setEdgeMenuConnection(null)
+        }}
+        onEdgeContextMenu={(event, edge) => {
+          openEdgeContextMenu(event, { source: edge.source, target: edge.target })
+        }}
         onNodeClick={(_, node) => {
           setSelectedCanvasNodeId(node.id)
           if (node.type === 'skill') {
             onNodeSelect?.({ id: node.id, data: node.data })
+            onPanelChange?.('properties')
           }
         }}
         onNodeDragStart={(_, node) => {
@@ -213,6 +311,7 @@ export function GraphCanvas({
           fitViewRef.current = () => instance.fitView({ padding: 0.2 })
           fitLayout()
         }}
+        nodeOrigin={CENTER_NODE_ORIGIN}
         fitView
         minZoom={0.35}
         maxZoom={1.4}
@@ -221,6 +320,56 @@ export function GraphCanvas({
         <Controls position="bottom-left" />
         {!compact ? <MiniMap pannable zoomable position="bottom-right" style={{ height: 120, width: 200 }} /> : null}
       </ReactFlow>
-    </section>
+        </section>
+      </ContextMenuTrigger>
+      <CanvasContextMenuContent
+        edgeMenuConnection={edgeMenuConnection}
+        onCreatePhase={onCreatePhase}
+        onDisconnectConnection={onDisconnectConnection}
+        onCloseEdgeMenu={() => setEdgeMenuConnection(null)}
+      />
+    </ContextMenu>
+  )
+}
+
+export function CanvasContextMenuContent({
+  edgeMenuConnection,
+  onCreatePhase,
+  onDisconnectConnection,
+  onCloseEdgeMenu,
+}: {
+  edgeMenuConnection: { source: string; target: string } | null
+  onCreatePhase?: (kind: NewPhaseKind) => Promise<void> | void
+  onDisconnectConnection?: (connection: { source: string; target: string }) => Promise<void> | void
+  onCloseEdgeMenu?: () => void
+}) {
+  return (
+    <ContextMenuContent>
+      {edgeMenuConnection ? (
+        <ContextMenuItem
+          onSelect={() => {
+            void onDisconnectConnection?.(edgeMenuConnection)
+            onCloseEdgeMenu?.()
+          }}
+        >
+          Disconnect
+        </ContextMenuItem>
+      ) : (
+        <ContextMenuSub>
+          <ContextMenuSubTrigger>Add Phase Node</ContextMenuSubTrigger>
+          <ContextMenuSubContent>
+            <ContextMenuItem onSelect={() => { void onCreatePhase?.('skill') }}>
+              Agent Phase
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => { void onCreatePhase?.('logic') }}>
+              Logic Phase
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => { void onCreatePhase?.('subgraph') }}>
+              Subgraph Phase
+            </ContextMenuItem>
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+      )}
+    </ContextMenuContent>
   )
 }

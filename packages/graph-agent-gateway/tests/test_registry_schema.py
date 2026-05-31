@@ -26,14 +26,31 @@ def test_route_identity_and_secret_serialization() -> None:
         endpoint_id=route.endpoint_id,
         protocol="anthropic_compatible",
         base_url="https://api.anthropic.com",
+        credential_ref="cred:anthropic-prod",
         api_key=SecretStr("secret-value"),
         credential_fingerprint="fp",
         provider_model_id=route.provider_model_id,
         canonical_id=route.canonical_id,
     )
 
+    assert resolved.credential_ref == "cred:anthropic-prod"
     assert resolved.api_key.get_secret_value() == "secret-value"
     assert "secret-value" not in resolved.model_dump_json()
+
+    no_secret = ResolvedRoute(
+        role_name="graph_agent",
+        route_id=route.route_id,
+        endpoint_id=route.endpoint_id,
+        protocol="anthropic_compatible",
+        base_url="https://api.anthropic.com",
+        credential_ref="cred:anthropic-prod",
+        credential_fingerprint="fp",
+        provider_model_id=route.provider_model_id,
+        canonical_id=route.canonical_id,
+    )
+
+    assert no_secret.api_key is None
+    assert "cred:anthropic-prod" in no_secret.model_dump_json()
 
 
 def test_runtime_schema_rejects_display_name_fields() -> None:
@@ -137,6 +154,13 @@ def test_runtime_policy_defaults_and_ranges() -> None:
     assert policy.provider_down_ttl_seconds == 60
     assert policy.probe_timeout_seconds == 5
     assert policy.token_escalation_rounds == 2
+    assert policy.terminal_retry_enabled is False
+    assert policy.terminal_retry_policy.standard_runtime.max_attempts == 2
+    assert policy.terminal_retry_policy.standard_runtime.backoff_ms == [250]
+    assert 529 in policy.terminal_retry_policy.standard_runtime.retryable_status_codes
+    assert policy.terminal_retry_policy.standard_probe.max_attempts == 1
+    assert policy.terminal_retry_policy.sdk_runtime.claude_code_max_retries == 2
+    assert policy.secret_lifetime_policy.invalidate_on_rotation is True
 
     with pytest.raises(ValidationError):
         RuntimePolicy(provider_down_ttl_seconds=-1)
@@ -144,6 +168,46 @@ def test_runtime_policy_defaults_and_ranges() -> None:
         RuntimePolicy(probe_timeout_seconds=0)
     with pytest.raises(ValidationError):
         RuntimePolicy(token_escalation_rounds=11)
+
+
+def test_control_plane_runtime_contract_models_validate_without_secrets() -> None:
+    from graph_agent_gateway.registry.contracts import (
+        CredentialDescriptor,
+        SecretLifetimePolicy,
+        SnapshotVersion,
+        StandardTerminalRetrySettings,
+        TerminalRetryPolicy,
+    )
+
+    descriptor = CredentialDescriptor(
+        ref="cred:anthropic-prod",
+        exists=True,
+        status="available",
+        fingerprint="fp",
+        scope="workspace",
+    )
+    version = SnapshotVersion(
+        registry_version="registry-1",
+        catalog_version="catalog-1",
+        client_id="graph_agent",
+        client_version="1",
+        terminal_version="standard-1",
+        probe_contract_version="probe-1",
+        client_route_profile_version="profile-1",
+        generated_at="2026-05-30T00:00:00Z",
+    )
+    policy = TerminalRetryPolicy()
+    lifetime = SecretLifetimePolicy(standard_client_cache_ttl_seconds=300)
+
+    assert descriptor.model_dump()["ref"] == "cred:anthropic-prod"
+    assert version.client_id == "graph_agent"
+    assert policy.standard_runtime.retryable_status_codes == [429, 500, 502, 503, 504, 529]
+    assert lifetime.standard_client_cache_ttl_seconds == 300
+
+    with pytest.raises(ValidationError):
+        CredentialDescriptor(ref="cred:missing", exists=False, status="available")
+    with pytest.raises(ValidationError):
+        StandardTerminalRetrySettings(max_attempts=3, backoff_ms=[100])
 
 
 def test_ark_runtime_protocol_is_first_class() -> None:

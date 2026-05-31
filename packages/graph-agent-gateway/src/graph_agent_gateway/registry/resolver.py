@@ -58,7 +58,10 @@ def resolve_role(
         endpoint = snapshot.provider_endpoints.get(route.endpoint_id)
         if endpoint is None:
             raise RegistryResolutionError(f"endpoint is not configured: {route.endpoint_id}")
-        if endpoint.api_key is None or not endpoint.api_key.get_secret_value():
+        credential_ref = endpoint.credential_ref or f"endpoint:{endpoint.endpoint_id}"
+        if (
+            endpoint.api_key is None or not endpoint.api_key.get_secret_value()
+        ) and not endpoint.credential_ref:
             raise RegistryResolutionError(f"endpoint has no credential: {route.endpoint_id}")
         try:
             selected_profile = select_verified_profile(route, entry.runtime_settings)
@@ -72,6 +75,7 @@ def resolve_role(
                 endpoint_id=route.endpoint_id,
                 protocol=endpoint.protocol,
                 base_url=endpoint.base_url,
+                credential_ref=credential_ref,
                 api_key=endpoint.api_key,
                 credential_fingerprint=compute_credential_fingerprint(endpoint),
                 timeout_seconds=endpoint.timeout_seconds,

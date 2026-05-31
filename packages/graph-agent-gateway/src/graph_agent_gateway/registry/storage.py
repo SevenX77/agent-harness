@@ -32,6 +32,8 @@ def compute_credential_fingerprint(
         "trust_env": endpoint.trust_env,
         "proxy_env": endpoint.proxy_env or "",
     }
+    if endpoint.credential_ref:
+        payload["credential_ref"] = endpoint.credential_ref
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 

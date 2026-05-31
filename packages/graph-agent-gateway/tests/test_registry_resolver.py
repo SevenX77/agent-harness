@@ -28,6 +28,7 @@ def _snapshot():
                 endpoint_id="openrouter-prod",
                 protocol="openai_compatible",
                 base_url="https://openrouter.ai/api/v1",
+                credential_ref="cred:openrouter-prod",
                 api_key=SecretStr("openrouter-secret"),
             ),
         },
@@ -87,6 +88,8 @@ def test_resolver_preserves_declared_route_order_and_role_metadata() -> None:
     assert resolved.routes[0].effective_runtime_settings["max_output_tokens"].value == 8192
     assert resolved.routes[0].effective_runtime_settings["reasoning.enabled"].value is True
     assert resolved.routes[0].effective_runtime_settings["reasoning.budget_tokens"].value == 4096
+    assert resolved.routes[0].credential_ref == "endpoint:anthropic-official"
+    assert resolved.routes[1].credential_ref == "cred:openrouter-prod"
     assert resolved.runtime_policy.provider_down_ttl_seconds == 60
 
 
@@ -118,3 +121,45 @@ def test_route_override_must_be_exact_route_id() -> None:
 
     with pytest.raises(RegistryResolutionError):
         resolve_role(_snapshot(), "graph_agent", route_override="claude")
+
+
+def test_resolver_accepts_credential_ref_only_for_future_no_secret_snapshots() -> None:
+    from graph_agent_gateway.registry.resolver import resolve_role
+    from graph_agent_gateway.registry.schema import (
+        ProviderEndpoint,
+        ProviderRoute,
+        RegistrySnapshot,
+        RoleEntry,
+        RoleRouteEntry,
+    )
+
+    snapshot = RegistrySnapshot(
+        provider_endpoints={
+            "anthropic-official": ProviderEndpoint(
+                endpoint_id="anthropic-official",
+                protocol="anthropic_compatible",
+                base_url="https://api.anthropic.com",
+                credential_ref="cred:anthropic-prod",
+            ),
+        },
+        provider_routes={
+            "anthropic-official:claude": ProviderRoute(
+                route_id="anthropic-official:claude",
+                endpoint_id="anthropic-official",
+                route_slug="claude",
+                provider_model_id="claude",
+                canonical_id="claude",
+                status="verified",
+            ),
+        },
+        roles={
+            "graph_agent": RoleEntry(
+                fallback_chain=[RoleRouteEntry(route_id="anthropic-official:claude")],
+            )
+        },
+    )
+
+    resolved = resolve_role(snapshot, "graph_agent")
+
+    assert resolved.routes[0].credential_ref == "cred:anthropic-prod"
+    assert resolved.routes[0].api_key is None

@@ -10,9 +10,16 @@ import {
   formatImportSkillError,
   registeredSkillIdForImport,
   REVEAL_ACTION_LABEL,
+  requestSkillDeleteConfirmation,
   WelcomePage,
 } from './WelcomePage'
 import type { SkillSummary } from '../../api/types'
+
+const toastMock = vi.hoisted(() => Object.assign(vi.fn(), {
+  dismiss: vi.fn(),
+  error: vi.fn(),
+  success: vi.fn(),
+}))
 
 const mismatchSkill: SkillSummary = {
   id: 'demo-skill',
@@ -46,8 +53,13 @@ vi.mock('../../hooks/useRecentSkills', () => ({
 
 vi.mock('../../api/client', () => ({
   api: {
+    delete: vi.fn(),
     post: vi.fn(),
   },
+}))
+
+vi.mock('sonner', () => ({
+  toast: toastMock,
 }))
 
 vi.mock('../../config/runtime', () => ({
@@ -106,6 +118,39 @@ describe('WelcomePage', () => {
   it('uses a short reveal action label in wider action menus', () => {
     expect(REVEAL_ACTION_LABEL).toBe('Show in folder')
     expect(ACTION_MENU_CLASSNAME).toBe('w-48')
+  })
+
+  it('uses a shadcn sonner confirmation toast before deleting a skill', () => {
+    const onConfirm = vi.fn()
+
+    requestSkillDeleteConfirmation(mismatchSkill, onConfirm)
+
+    expect(toastMock).toHaveBeenCalledWith(
+      'Delete Demo skill?',
+      expect.objectContaining({
+        description: 'This skill will be removed from Studio. Its source folder stays on disk.',
+        duration: Infinity,
+        action: expect.objectContaining({ label: 'Delete' }),
+        cancel: expect.objectContaining({ label: 'Cancel' }),
+        classNames: expect.objectContaining({
+          actionButton: expect.stringContaining('!bg-destructive'),
+        }),
+      }),
+    )
+    expect(onConfirm).not.toHaveBeenCalled()
+  })
+
+  it('wires the sonner delete action to the confirmed skill delete callback', () => {
+    const onConfirm = vi.fn()
+
+    requestSkillDeleteConfirmation(mismatchSkill, onConfirm)
+    const options = toastMock.mock.calls.at(-1)?.[1] as {
+      action?: { onClick?: () => void }
+    }
+
+    options.action?.onClick?.()
+
+    expect(onConfirm).toHaveBeenCalledTimes(1)
   })
 
   it('builds create payload using the current /skills API contract', () => {

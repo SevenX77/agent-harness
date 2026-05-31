@@ -62,6 +62,7 @@ describe("ManualModelTestPanel", () => {
     expect(modelIdPlaceholder("openai", ["openai/gpt-5"], 0)).toBe("e.g. gpt-5")
     expect(modelIdPlaceholder("openrouter", ["openai/gpt-5"], 0)).toBe("e.g. openai/gpt-5")
     expect(modelIdPlaceholder("wavespeed", ["anthropic/claude-opus-4"], 0)).toBe("e.g. anthropic/claude-opus-4")
+    expect(modelIdPlaceholder("qiniu", [], 0)).toBe("e.g. deepseek-r1")
   })
 
   it("can render collapsed when automatic model listing already returned models", () => {
@@ -107,6 +108,7 @@ describe("ManualModelTestPanel", () => {
     expect(manualModelStatusLabel("invalid_model")).toBe("Model not found")
     expect(manualModelStatusLabel("invalid_key")).toBe("Invalid API key")
     expect(manualModelStatusLabel("rate_limited")).toBe("Rate limited")
+    expect(manualModelStatusLabel("quota_exceeded")).toBe("Quota exceeded")
     expect(manualModelStatusLabel("network_error")).toBe("Network error")
     expect(manualModelStatusLabel("timeout")).toBe("Request timed out")
     expect(manualModelStatusLabel("error")).toBe("Test failed")

@@ -13,6 +13,7 @@ runtime failure deep in a single test case.
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -62,7 +63,29 @@ class MockSkillResolver:
                 candidate = phase_dir / skill_id
                 if (candidate / "GRAPH.md").is_file():
                     return candidate
+        tmp_matches = self._find_pytest_tmp_skill(skill_id)
+        if tmp_matches:
+            return max(tmp_matches, key=lambda path: path.stat().st_mtime_ns)
         raise SkillResolutionError(skill_id, "not registered in deterministic test resolver")
+
+    @staticmethod
+    def _find_pytest_tmp_skill(skill_id: str) -> list[Path]:
+        matches: list[Path] = []
+        tmp_roots = [
+            Path(tempfile.gettempdir()).resolve(),
+            Path(tempfile.gettempdir()),
+            Path("/tmp"),
+        ]
+        seen_roots: set[Path] = set()
+        for root in tmp_roots:
+            if root in seen_roots or not root.exists():
+                continue
+            seen_roots.add(root)
+            for tmp_root in root.glob("pytest-of-*"):
+                for candidate in tmp_root.rglob(skill_id):
+                    if candidate.is_dir() and (candidate / "GRAPH.md").is_file():
+                        matches.append(candidate.resolve())
+        return matches
 
 
 @pytest.fixture

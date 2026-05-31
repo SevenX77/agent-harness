@@ -7,6 +7,7 @@ import contextlib
 import json
 import logging
 import multiprocessing
+import re
 import shutil
 import threading
 import time
@@ -61,6 +62,7 @@ from app.services.skills import resolve_skill_dir, run_dir_for, test_inputs_dir_
 _EVENT_ADAPTER: TypeAdapter[Any] = TypeAdapter(CallbackEvent)
 logger = logging.getLogger(__name__)
 _LATEST_SYNC_LOCK = threading.Lock()
+_SAFE_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
 
 
 @dataclass
@@ -427,6 +429,7 @@ class RunManager:
         )
 
     def delete_run(self, skill_id: str, run_id: str) -> None:
+        _validate_run_id_segment(run_id)
         record = self._runs.pop(run_id, None)
         if record is not None and hasattr(record.process, "is_alive") and record.process.is_alive():
             record.process.terminate()
@@ -466,6 +469,7 @@ class RunManager:
             await asyncio.gather(*self._tasks, return_exceptions=True)
 
     def _metadata_for(self, skill_id: str, run_id: str) -> RunMetadata:
+        _validate_run_id_segment(run_id)
         record = self._runs.get(run_id)
         if record is not None:
             return record.metadata
@@ -588,6 +592,24 @@ def _runtime_inputs_from_request(request: RunRequest) -> dict[str, Any]:
 def _new_run_id() -> str:
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%S")
     return f"{stamp}_{uuid.uuid4().hex[:8]}"
+
+
+def _validate_run_id_segment(run_id: str) -> None:
+    if (
+        not run_id
+        or run_id in {".", ".."}
+        or "/" in run_id
+        or "\\" in run_id
+        or not _SAFE_RUN_ID_RE.fullmatch(run_id)
+    ):
+        response = error_response(
+            error_code="INVALID_RUN_ID",
+            http_status=400,
+            message=f"Invalid run id: {run_id}",
+            details={"run_id": run_id},
+            retry_strategy="not_retryable",
+        )
+        raise_error_response(response)
 
 
 def _write_run_metadata(run_dir: Path, metadata: RunMetadata) -> None:

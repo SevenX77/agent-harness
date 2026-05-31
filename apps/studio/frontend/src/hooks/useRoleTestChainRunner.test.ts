@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
 import type { CredentialsState, RolesData } from "@/api/llm"
-import { buildRoleTestTargets, roleChainStatusKey, runWithConcurrency } from "./useRoleTestChainRunner"
+import {
+  buildRoleTestTargets,
+  roleChainStatusKey,
+  runRoleTestTargets,
+  runWithConcurrency,
+} from "./useRoleTestChainRunner"
 
 const rolesData: RolesData = {
   models: {
@@ -49,6 +54,50 @@ describe("useRoleTestChainRunner helpers", () => {
     expect(chains[1][0].credential).toBeNull()
   })
 
+  it("resolves route-id provider entries through their endpoint credential", () => {
+    const routeId = "deepseek-official:deepseek-v4-pro"
+    const chains = buildRoleTestTargets({
+      models: {
+        "deepseek-v4-pro": {
+          name: "DeepSeek V4 Pro",
+          providers: { [routeId]: "deepseek-chat" },
+        },
+      },
+      providers: {
+        [routeId]: {
+          name: "DeepSeek Official",
+          type: "openai_compatible",
+          endpoint_id: "deepseek-official",
+        },
+      },
+      roles: {
+        analyst: {
+          model_fallback: true,
+          active_model: "deepseek-v4-pro",
+          models: {
+            "deepseek-v4-pro": { providers: [routeId] },
+          },
+        },
+      },
+    }, "analyst", {
+      providers: [
+        {
+          id: "deepseek-official",
+          name: "DeepSeek Official",
+          api_key: "sk-deepseek",
+          provider_type: "openai_compatible",
+        },
+      ],
+    })
+
+    expect(chains[0][0]).toMatchObject({
+      modelCode: "deepseek-v4-pro",
+      providerCode: routeId,
+      modelId: "deepseek-chat",
+    })
+    expect(chains[0][0].credential?.id).toBe("deepseek-official")
+  })
+
   it("uses a stable status key per model-provider pair", () => {
     expect(roleChainStatusKey("CL46T", "anthropic")).toBe("CL46T:anthropic")
   })
@@ -64,5 +113,20 @@ describe("useRoleTestChainRunner helpers", () => {
     })
 
     expect(maxActive).toBeLessThanOrEqual(2)
+  })
+
+  it("runs different providers in the same model chain concurrently", async () => {
+    let active = 0
+    let maxActive = 0
+    const chains = buildRoleTestTargets(rolesData, "copilot_chat", credentials)
+
+    await runRoleTestTargets(chains.slice(0, 1), 2, async () => {
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      await Promise.resolve()
+      active -= 1
+    })
+
+    expect(maxActive).toBe(2)
   })
 })

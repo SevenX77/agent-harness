@@ -55,7 +55,6 @@ def test_parse_main_args_accepts_dynamic_port() -> None:
 def test_resource_dir_env_controls_default_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("STUDIO_RESOURCE_DIR", "/tmp/studio-resource")
 
-    assert config.resource_dir_from_env(os.environ) == Path("/tmp/studio-resource")
-    assert config.default_skills_dir(Path("/tmp/studio-resource")) == (
-        Path("/tmp/studio-resource") / "skills"
-    )
+    resource_dir = Path("/tmp/studio-resource").resolve()
+    assert config.resource_dir_from_env(os.environ) == resource_dir
+    assert config.default_skills_dir(resource_dir) == resource_dir / "skills"

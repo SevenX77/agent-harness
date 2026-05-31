@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from graph_agent_gateway import factory as factory
+from graph_agent_gateway.events import LLMFallbackEvent
 from graph_agent_gateway.exceptions import (
     AllProvidersFailedError,
     GatewayResolverMissingError,
@@ -17,7 +17,7 @@ __all__ = [
     "GatewayChatModel",
     "GatewayResolverMissingError",
     "GatewayRoleNotConfiguredError",
+    "LLMFallbackEvent",
     "ModelResolver",
     "ModelResolverProtocol",
-    "factory",
 ]

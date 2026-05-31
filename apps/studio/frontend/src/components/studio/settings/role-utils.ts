@@ -1,4 +1,5 @@
-import type { CredentialsState, ModelInfo, ProviderType, RolesData } from "../../../api/llm"
+import type { CredentialsState, ModelGroup, ModelInfo, ProviderType, RoleIntent, RolesData } from "../../../api/llm"
+import { endpointIdFromRouteId } from "./route-credentials"
 
 type RoleProviderEntry = RolesData["providers"][string]
 
@@ -26,13 +27,20 @@ export function ownedProviderCodesForModel(
   const configProviderCodes = Object.keys(data.models[modelCode]?.providers ?? {})
     .filter((providerCode) => Boolean(data.providers[providerCode]))
   if (!credentialsByCode) return configProviderCodes
+  const hasLegacyProviderCode = configProviderCodes.some((providerCode) => (
+    !isRouteBackedProviderCode(data, providerCode)
+  ))
+  if (!hasLegacyProviderCode) return configProviderCodes
 
   const availableModelId = inferAvailableModelIdForModel(data, modelCode, credentialsByCode)
   if (!availableModelId) return configProviderCodes
 
-  return configProviderCodes.filter((providerCode) => (
-    credentialProviderOwnsModel(credentialsByCode[providerCode], availableModelId)
-  ))
+  return configProviderCodes.filter((providerCode) => {
+    if (isRouteBackedProviderCode(data, providerCode)) return true
+    const credential = credentialsByCode[providerCode]
+    if (!credential) return providerCode.includes(":")
+    return credentialProviderOwnsModel(credential, availableModelId)
+  })
 }
 
 export function pruneInvalidRoleProviders(
@@ -147,6 +155,13 @@ export function updateActiveModel(data: RolesData, roleName: string, activeModel
 export function toggleModelFallback(data: RolesData, roleName: string, enabled: boolean): RolesData {
   const next = cloneRolesData(data)
   next.roles[roleName] = { ...next.roles[roleName], model_fallback: enabled }
+  return next
+}
+
+export function updateRoleIntent(data: RolesData, roleName: string, intent: RoleIntent): RolesData {
+  if (!data.roles[roleName]) return data
+  const next = cloneRolesData(data)
+  next.roles[roleName] = { ...next.roles[roleName], intent }
   return next
 }
 
@@ -334,6 +349,83 @@ export function appendAvailableModelToRole(
   return next
 }
 
+export function appendModelGroupToRole(
+  data: RolesData,
+  roleName: string,
+  modelGroup: ModelGroup,
+): RolesData {
+  return appendModelGroupToRoleWithResult(data, roleName, modelGroup).data
+}
+
+export function appendModelGroupToRoleWithResult(
+  data: RolesData,
+  roleName: string,
+  modelGroup: ModelGroup,
+): { data: RolesData; error: string | null } {
+  const modelLabel = modelGroup.display_name || modelGroup.canonical_id
+  if (!data.roles[roleName]) {
+    return {
+      data,
+      error: `Could not add ${modelLabel} to ${roleName}: role was not found.`,
+    }
+  }
+  const selectedProviderModels = defaultProviderModelsForGroup(modelGroup)
+  if (selectedProviderModels.length === 0) {
+    return {
+      data,
+      error: `Could not add ${modelLabel} to ${roleName}: no provider routes are available.`,
+    }
+  }
+
+  const next = cloneRolesData(data)
+  const modelCode = modelGroup.canonical_id
+  next.models[modelCode] = {
+    ...next.models[modelCode],
+    name: modelGroup.display_name || modelGroup.canonical_id,
+    reasoning: modelGroupSupportsThinking(modelGroup) || next.models[modelCode]?.reasoning || undefined,
+    providers: {
+      ...(next.models[modelCode]?.providers ?? {}),
+      ...Object.fromEntries(
+        selectedProviderModels.map((providerModel) => [
+          providerModel.route_id,
+          providerModel.provider_model_id,
+        ]),
+      ),
+    },
+  }
+
+  for (const providerModel of selectedProviderModels) {
+    next.providers[providerModel.route_id] = next.providers[providerModel.route_id] ?? {
+      name: providerModel.provider_label,
+      type: "openai_compatible",
+      endpoint_id: providerModel.endpoint_id ?? endpointIdFromRouteId(providerModel.route_id),
+    }
+  }
+
+  const existingRoleModel = next.roles[roleName].models[modelCode]
+  const providerIds = selectedProviderModels.map((providerModel) => providerModel.route_id)
+  next.roles[roleName].models[modelCode] = existingRoleModel
+    ? {
+        ...existingRoleModel,
+        providers: Array.from(new Set([...existingRoleModel.providers, ...providerIds])),
+      }
+    : { providers: providerIds }
+  syncActiveModelToFirst(next, roleName)
+  return { data: next, error: null }
+}
+
+export function modelDropFailureMessage({
+  modelId,
+  destination,
+  reason,
+}: {
+  modelId: string
+  destination: string
+  reason: string
+}): string {
+  return `Could not add ${modelId} to ${destination}: ${reason}.`
+}
+
 export function canonicalAvailableModelId(
   modelId: string,
   provider: CredentialsState["providers"][number],
@@ -356,6 +448,38 @@ export function modelSupportsThinking(model: ModelInfo): boolean {
     capabilities.reasoning ||
     capabilities.supports_thinking,
   )
+}
+
+function defaultProviderModelsForGroup(modelGroup: ModelGroup): ModelGroup["provider_models"] {
+  return [...modelGroup.provider_models].sort((left, right) => (
+    providerStateRank(left.ui_state) - providerStateRank(right.ui_state) ||
+    providerKindRank(left.provider_kind) - providerKindRank(right.provider_kind) ||
+    left.provider_label.localeCompare(right.provider_label, undefined, { numeric: true, sensitivity: "base" }) ||
+    left.route_id.localeCompare(right.route_id)
+  ))
+}
+
+function providerKindRank(kind: ModelGroup["provider_models"][number]["provider_kind"]): number {
+  if (kind === "official") return 0
+  if (kind === "custom") return 1
+  return 2
+}
+
+function providerStateRank(state: ModelGroup["provider_models"][number]["ui_state"]): number {
+  if (state === "ready") return 0
+  if (state === "untested") return 1
+  if (state === "cooling_down") return 2
+  return 3
+}
+
+function modelGroupSupportsThinking(modelGroup: ModelGroup): boolean {
+  return modelGroup.capability_summary.thinking === "supported" ||
+    modelGroup.capability_summary.thinking === "mixed" ||
+    modelGroup.provider_models.some((providerModel) => Boolean(
+      providerModel.capabilities.thinking?.value ||
+      providerModel.capabilities.reasoning?.value ||
+      providerModel.capabilities.supports_thinking?.value,
+    ))
 }
 
 export function validateRoleDraft(data: RolesData, roleName: string): string | null {
@@ -462,6 +586,7 @@ function providerTypeFromCredential(provider: CredentialsState["providers"][numb
 function normalizeProviderType(value: unknown): ProviderType | null {
   if (
     value === "anthropic_compatible" ||
+    value === "ark_runtime" ||
     value === "openai_compatible" ||
     value === "google_genai"
   ) {
@@ -524,6 +649,10 @@ function credentialProviderOwnsModel(
   return (provider.available_models ?? []).some((model) => (
     canonicalAvailableModelId(model.id, provider) === availableModelId
   ))
+}
+
+function isRouteBackedProviderCode(data: RolesData, providerCode: string): boolean {
+  return providerCode.includes(":") || Boolean(data.providers[providerCode]?.endpoint_id)
 }
 
 function providerVendor(provider: CredentialsState["providers"][number]): string {

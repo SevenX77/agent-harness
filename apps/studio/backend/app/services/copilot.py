@@ -14,7 +14,7 @@ import asyncio
 import hashlib
 import inspect
 import json
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -33,7 +33,7 @@ from claude_agent_sdk.types import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from graph_agent.config.llm_config import ProviderDef, ResolvedProvider, load_config
+from graph_agent_gateway.registry.schema import ResolvedRoute
 
 from app.models.copilot import (
     CopilotEvent,
@@ -44,7 +44,10 @@ from app.models.copilot import (
     CopilotEventToolUseStart,
     CopilotToolName,
 )
+from app.models.llm_config import RolesData
 from app.services.llm_credentials import load_credentials
+from app.services.llm_roles import load_roles_file
+from app.services.llm_roles import roles_path as default_roles_path
 
 SessionKey = tuple[str, str, str]
 
@@ -80,6 +83,8 @@ _session_lock = asyncio.Lock()
 _session_factory: Callable[[ClaudeAgentOptions], ClaudeSDKClient] = ClaudeSDKClient
 _view_contexts: dict[str, ViewContext] = {}
 _view_context_lock = asyncio.Lock()
+_SESSION_KEY_SALT = b"agent-harness-copilot-session-key-v1"
+_SESSION_KEY_ITERATIONS = 100_000
 
 
 def make_session_key(
@@ -90,7 +95,13 @@ def make_session_key(
 ) -> SessionKey:
     """Build a cache key that changes when credentials rotate."""
 
-    api_key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16]
+    api_key_hash = hashlib.pbkdf2_hmac(
+        "sha256",
+        api_key.encode("utf-8"),
+        _SESSION_KEY_SALT,
+        _SESSION_KEY_ITERATIONS,
+        dklen=8,
+    ).hex()[:16]
     model_provider = f"{model_code}:{provider_code}"
     return (skill_id, model_provider, api_key_hash)
 
@@ -99,12 +110,16 @@ def build_options(
     base_url: str | None,
     api_key: str,
     workspace_dir: str | Path,
+    *,
+    env_overrides: Mapping[str, str] | None = None,
 ) -> ClaudeAgentOptions:
     """Build per-session Claude Agent SDK options without mutating os.environ."""
 
     env = {"ANTHROPIC_API_KEY": api_key}
     if base_url:
         env["ANTHROPIC_BASE_URL"] = base_url
+    if env_overrides:
+        env.update(env_overrides)
 
     return ClaudeAgentOptions(
         cwd=workspace_dir,
@@ -189,7 +204,7 @@ async def stream_query(
     """Stream one Copilot query using the copilot_chat role and optional model override."""
 
     try:
-        primary = _resolve_copilot_provider(model_override)
+        routes = _resolve_copilot_routes(model_override)
     except KeyError as exc:
         yield CopilotEventError(message=f"未知模型: {exc}")
         return
@@ -197,37 +212,59 @@ async def stream_query(
         yield CopilotEventError(message=str(exc))
         return
 
-    api_key, base_url = _resolve_provider_runtime(primary.provider_code, primary.provider_def)
-    if not api_key:
-        yield CopilotEventError(message=f"Provider {primary.provider_code} 未配置 API key")
-        return
+    failures: list[str] = []
+    for route in routes:
+        try:
+            api_key, base_url, env_overrides = _resolve_route_runtime(route)
+        except ValueError as exc:
+            if len(routes) == 1:
+                yield CopilotEventError(message=str(exc))
+                return
+            failures.append(f"{route.route_id}: {exc}")
+            continue
+        if not api_key:
+            if len(routes) == 1:
+                yield CopilotEventError(
+                    message=f"Endpoint {route.endpoint_id} 未配置 API key"
+                )
+                return
+            failures.append(f"{route.route_id}: missing API key")
+            continue
 
-    model_code = primary.model_def.code
-    provider_code = primary.provider_code
+        tool_names: dict[str, str] = {}
+        try:
+            client = await get_or_create_session(
+                skill_id=skill_id,
+                model_code=route.provider_model_id,
+                provider_code=route.endpoint_id,
+                base_url=base_url,
+                api_key=api_key,
+                env_overrides=env_overrides,
+                workspace_dir=workspace_dir or Path.cwd(),
+            )
+            await _ensure_client_connected(client)
+            await client.query(_prompt_with_system_context(skill_id, user_message))
 
-    tool_names: dict[str, str] = {}
-    try:
-        client = await get_or_create_session(
-            skill_id=skill_id,
-            model_code=model_code,
-            provider_code=provider_code,
-            base_url=base_url,
-            api_key=api_key,
-            workspace_dir=workspace_dir or Path.cwd(),
-        )
-        await _ensure_client_connected(client)
-        await client.query(_prompt_with_system_context(skill_id, user_message))
+            yielded_done = False
+            async for sdk_message in client.receive_response():
+                for event in _translate_sdk_message(sdk_message, tool_names):
+                    if isinstance(event, CopilotEventDone):
+                        yielded_done = True
+                    yield event
+            if not yielded_done:
+                yield CopilotEventDone()
+            return
+        except Exception as exc:  # noqa: BLE001
+            if len(routes) == 1:
+                yield _error_event_for_exception(exc)
+                return
+            failures.append(f"{route.route_id}: {type(exc).__name__}: {exc}")
+            continue
 
-        yielded_done = False
-        async for sdk_message in client.receive_response():
-            for event in _translate_sdk_message(sdk_message, tool_names):
-                if isinstance(event, CopilotEventDone):
-                    yielded_done = True
-                yield event
-        if not yielded_done:
-            yield CopilotEventDone()
-    except Exception as exc:  # noqa: BLE001
-        yield _error_event_for_exception(exc)
+    yield CopilotEventError(
+        message="all configured Copilot providers failed"
+        + (f": {'; '.join(failures)}" if failures else "")
+    )
 
 
 async def get_or_create_session(
@@ -236,6 +273,7 @@ async def get_or_create_session(
     provider_code: str | None = None,
     base_url: str | Path | None = None,
     api_key: str | None = None,
+    env_overrides: Mapping[str, str] | None = None,
     workspace_dir: str | Path | None = None,
 ) -> ClaudeSDKClient:
     """Return a cached SDK client for the skill/model/provider/credential tuple."""
@@ -248,7 +286,12 @@ async def get_or_create_session(
         session = _sessions.get(session_key)
         if session is None:
             session = _session_factory(
-                build_options(cast(str | None, base_url), api_key, workspace_dir)
+                build_options(
+                    cast(str | None, base_url),
+                    api_key,
+                    workspace_dir,
+                    env_overrides=env_overrides,
+                )
             )
             _sessions[session_key] = session
         return session
@@ -367,36 +410,62 @@ def _tool_result_summary(content: str | list[dict[str, Any]] | None) -> str:
     return json.dumps(content, ensure_ascii=False)
 
 
-def _resolve_copilot_provider(model_override: str | None) -> ResolvedProvider:
-    config = load_config()
-    resolved = (
-        config.resolve_model(model_override)
-        if model_override
-        else config.resolve_role("copilot_chat")
-    )
-    if not resolved.call_chain:
-        raise ValueError("copilot_chat role 无可用 provider")
-    return resolved.call_chain[0]
+def _resolve_copilot_routes(model_override: str | None) -> list[ResolvedRoute]:
+    from graph_agent_gateway.registry.resolver import resolve_role
 
-
-def _resolve_provider_runtime(
-    provider_code: str,
-    provider_def: ProviderDef,
-) -> tuple[str, str | None]:
     credentials = load_credentials()
-    provider = next(
-        (
-            credential
-            for credential in credentials.providers
-            if credential.id == provider_code
-            or credential.name == provider_def.name
-            or credential.name == provider_code
-        ),
-        None,
+    active_roles_path = default_roles_path()
+    roles = load_roles_file(active_roles_path) if active_roles_path.exists() else RolesData()
+    snapshot = roles.to_registry_snapshot(credentials)
+    resolved = resolve_role(
+        snapshot,
+        "copilot_chat",
+        route_override=model_override,
     )
-    if provider is None:
-        return "", provider_def.base_url
-    return provider.api_key.strip(), provider.base_url.strip() or provider_def.base_url
+    if not resolved.routes:
+        raise ValueError("copilot_chat role 无可用 route")
+    return list(resolved.routes)
+
+
+def _resolve_copilot_route(model_override: str | None) -> ResolvedRoute:
+    return _resolve_copilot_routes(model_override)[0]
+
+
+def _resolve_route_runtime(route: ResolvedRoute) -> tuple[str, str | None, dict[str, str]]:
+    if route.api_key is None:
+        raise ValueError(
+            "endpoint has no inline credential; CredentialProvider integration is required: "
+            f"{route.endpoint_id}"
+        )
+    api_key = route.api_key.get_secret_value().strip()
+    base_url = route.base_url.strip() or None
+    env_overrides: dict[str, str] = {}
+    if route.call_method_id == "ark_anthropic_messages":
+        base_url = _ark_anthropic_base_url(route.base_url)
+        env_overrides["ANTHROPIC_AUTH_TOKEN"] = api_key
+        env_overrides["ANTHROPIC_MODEL"] = route.provider_model_id
+    elif route.call_method_id == "deepseek_anthropic_messages":
+        base_url = _deepseek_anthropic_base_url(route.base_url)
+        env_overrides["ANTHROPIC_MODEL"] = route.provider_model_id
+    return api_key, base_url, env_overrides
+
+
+def _ark_anthropic_base_url(base_url: str) -> str:
+    normalized = base_url.rstrip("/")
+    if normalized.endswith("/api/v3"):
+        normalized = normalized[: -len("/api/v3")]
+    if normalized.endswith("/api/compatible"):
+        return normalized
+    return f"{normalized}/api/compatible"
+
+
+def _deepseek_anthropic_base_url(base_url: str) -> str:
+    normalized = base_url.rstrip("/")
+    if normalized.endswith("/v1"):
+        normalized = normalized[:-3]
+    if normalized.endswith("/anthropic"):
+        return normalized
+    return f"{normalized}/anthropic"
 
 
 def _error_event_for_exception(exc: Exception) -> CopilotEventError:

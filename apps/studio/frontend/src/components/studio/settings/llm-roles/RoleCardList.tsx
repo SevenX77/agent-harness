@@ -1,3 +1,4 @@
+import { memo } from "react"
 import { Bot, Cog, Plus, type LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -6,7 +7,7 @@ import {
   CatalogAccordionItem,
   CatalogAccordionTrigger,
 } from "@/components/ui/catalog-accordion"
-import type { CredentialsState, RolesData } from "@/api/llm"
+import type { CredentialsState, ModelGroup, ProviderModelOption, RoleTestResponse, RolesData } from "@/api/llm"
 import type { RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
 import { appendRole, visibleRoleNames } from "../role-utils"
 import { RoleCard, type RoleCategory } from "./RoleCard"
@@ -16,22 +17,36 @@ import { useLazyRenderCount } from "./useLazyRenderCount"
 const rolesInitialRenderCount = 8
 const rolesRenderStep = 8
 
-export function RoleCardList({
+export const RoleCardList = memo(function RoleCardList({
   data,
   credentialsByCode,
-  testStatuses,
-  testChainRunning,
+  modelDisplayNamesByCode,
+  ownedProviderCodesByModel,
+  providerModelsByRouteId,
+  testStatusesByRole,
+  roleTestResults,
+  roleTestErrors,
+  roleTestRunningByName,
   onRunTestChain,
   getActiveAvailableModelDragId,
+  getAvailableModelGroup,
   onChange,
+  onDeleteRole,
 }: {
   data: RolesData
   credentialsByCode: Record<string, CredentialsState["providers"][number]>
-  testStatuses: RoleChainStatusMap
-  testChainRunning: boolean
+  modelDisplayNamesByCode: ReadonlyMap<string, string>
+  ownedProviderCodesByModel: ReadonlyMap<string, ReadonlySet<string>>
+  providerModelsByRouteId: ReadonlyMap<string, ProviderModelOption>
+  testStatusesByRole: Record<string, RoleChainStatusMap>
+  roleTestResults: Record<string, RoleTestResponse | undefined>
+  roleTestErrors: Record<string, string | undefined>
+  roleTestRunningByName: Record<string, boolean | undefined>
   onRunTestChain: (roleName: string) => void
   getActiveAvailableModelDragId: () => string | null
+  getAvailableModelGroup: (modelGroupId: string) => ModelGroup | null
   onChange: (next: RolesData) => void
+  onDeleteRole: (roleName: string) => void
 }) {
   const roleNames = visibleRoleNames(data)
   const {
@@ -45,7 +60,7 @@ export function RoleCardList({
     resetKey: roleNames.join("\u0000"),
   })
   const visibleRoles = roleNames.slice(0, visibleCount)
-  const roleGroups = roleCategoryGroups(visibleRoles, roleNames)
+  const roleGroups = roleCategoryGroups(data, visibleRoles, roleNames)
 
   return (
     <div className="space-y-4" data-lazy-list="roles">
@@ -73,12 +88,19 @@ export function RoleCardList({
                     data={data}
                     category={group.category}
                     credentialsByCode={credentialsByCode}
+                    modelDisplayNamesByCode={modelDisplayNamesByCode}
+                    ownedProviderCodesByModel={ownedProviderCodesByModel}
+                    providerModelsByRouteId={providerModelsByRouteId}
                     roleName={roleName}
-                    testStatuses={testStatuses}
-                    testChainRunning={testChainRunning}
-                    onRunTestChain={() => onRunTestChain(roleName)}
+                    testStatuses={testStatusesByRole[roleName] ?? {}}
+                    testChainRunning={Boolean(roleTestRunningByName[roleName])}
+                    roleTestResult={roleTestResults[roleName]}
+                    roleTestError={roleTestErrors[roleName]}
+                    onRunTestChain={onRunTestChain}
                     getActiveAvailableModelDragId={getActiveAvailableModelDragId}
+                    getAvailableModelGroup={getAvailableModelGroup}
                     onChange={onChange}
+                    onDeleteRole={onDeleteRole}
                   />
                 ))
               ) : (
@@ -119,9 +141,9 @@ export function RoleCardList({
       ) : null}
     </div>
   )
-}
+})
 
-function roleCategoryGroups(visibleRoleNames: string[], allRoleNames: string[]) {
+function roleCategoryGroups(data: RolesData, visibleRoleNames: string[], allRoleNames: string[]) {
   const groups: Array<{
     category: RoleCategory
     label: string
@@ -154,13 +176,16 @@ function roleCategoryGroups(visibleRoleNames: string[], allRoleNames: string[]) 
 
   for (const roleName of allRoleNames) {
     if (!visibleRoleSet.has(roleName)) continue
-    const category = roleCategoryForName(roleName)
+    const category = roleCategoryForRole(data, roleName)
     groups.find((group) => group.category === category)?.roles.push(roleName)
   }
 
   return groups
 }
 
-function roleCategoryForName(roleName: string): RoleCategory {
+function roleCategoryForRole(data: RolesData, roleName: string): RoleCategory {
+  const roleKind = data.roles[roleName]?.role_kind
+  if (roleKind === "copilot") return "copilot"
+  if (roleKind === "graph_agent") return "graph-agent"
   return /copilot/i.test(roleName) ? "copilot" : "graph-agent"
 }

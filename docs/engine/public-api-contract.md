@@ -2,13 +2,13 @@
 
 > **Scope notice**: `docs/engine/skill-spec/` 是 Markdown 格式契约, 跟本 Python API 契约边界**独立**, 不混合. `docs/engine/` 下除 `skill-spec` 以外的其余讲解类子目录属于 Logic-Explained Docs, **不**属于本 PR 不可动摇契约基线.
 
-PR1 froze the initial Python API surface observed from `graph_agent.__all__`, external consumer imports, and `packages/graph-agent/tests/test_public_api_contract.py`. PR-A rightsized the public exception catalog from leaf-heavy exports to 5 public error families while keeping internal leaf classes available under `graph_agent.core.*`.
+PR1 originally froze a 65-symbol Python API surface observed from `graph_agent.__all__`, external consumer imports, and `packages/graph-agent/tests/test_public_api_contract.py`. PR-A rightsized the public exception catalog from leaf-heavy exports to 5 public error families while keeping internal leaf classes available under `graph_agent.core.*`. Provider Intelligence V2 migrates Engine-owned LLM configuration/client symbols into `graph_agent_gateway`; the current Engine contract remains 65 symbols after adding the public exception families and removing the old LLM manager/config symbols.
 
 ## Coverage Summary
 
-- 69 frozen symbols: `69`
+- 65 frozen symbols: `65`
 - Top-level `graph_agent.__all__` stable symbols: `20`
-- non-`__all__` external dependency symbols: `49`
+- non-`__all__` external dependency symbols: `45`
 - `_predict_internal` de facto contract symbols: `12`
 - vendor-only symbols: `6`
 
@@ -70,7 +70,7 @@ Family mapping summary:
 - **Source module**: `graph_agent`
 - **Consumer files**: `graph_agent.__all__` stable export; no direct external import occurrence in `CONSUMER-API-INVENTORY.md`.
 - **Contract status**: `@stable`
-- **Signature**: `assemble_graph(compiled: CompiledSkill, *, chat_model: Any = None, max_patch_attempts: int = 3, callbacks: list[Any] | None = None, skill_resolver: SkillResolverProtocol, _loading_stack: tuple[str, ...] = (), _compilation_cache: dict[str, graph_agent.core.loader.CompiledSkill] | None = None) -> CompiledStateGraph`
+- **Signature**: `assemble_graph(compiled: CompiledSkill, *, chat_model: Any = None, model_resolver: Any = None, max_patch_attempts: int = 3, callbacks: list[Any] | None = None, skill_resolver: SkillResolverProtocol, _loading_stack: tuple[str, ...] = (), _compilation_cache: dict[str, graph_agent.core.loader.CompiledSkill] | None = None) -> CompiledStateGraph`
 - **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
 - **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
@@ -433,16 +433,6 @@ Family mapping summary:
 - **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
 
-## LLMClientManager
-
-- **Source module**: `graph_agent.models.llm_client_manager`
-- **Consumer files**: packages/graph-agent-gateway/src/graph_agent_gateway/gateway_chat_model.py:241; packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:229
-- **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
-- **Signature**: `LLMClientManager.__init__(self, *args, **kwargs)`
-- **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
-- **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
-- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
-
 ## LLMFallbackEvent
 
 - **Source module**: `graph_agent.callbacks.events`
@@ -570,26 +560,6 @@ Family mapping summary:
 - **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract. Because this is `_predict_internal`, PR1 freezes current cross-package use only; PR2 must clean the boundary deliberately.
 
-## ProviderDef
-
-- **Source module**: `graph_agent.config.llm_config`
-- **Consumer files**: apps/studio/backend/app/services/copilot.py:36
-- **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
-- **Fields**: `code: str`, `name: str`, `type: str`, `api_key_env: str`, `api_key_env_fallback: str`, `base_url: str`, `llm_base_url: str`, `proxy_env: str`, `timeout: int`, `trust_env: bool`, `retry_strategy: str`
-- **Preconditions**: Consumers must use the frozen field names, field types, constructor shape, and source module listed here.
-- **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
-- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
-
-## ResolvedProvider
-
-- **Source module**: `graph_agent.config.llm_config`
-- **Consumer files**: apps/studio/backend/app/services/copilot.py:36
-- **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
-- **Fields**: `provider_code: str`, `provider_def: ProviderDef`, `model_name: str`, `model_def: ModelDef`, `provider_options: dict[str, Any]`
-- **Preconditions**: Consumers must use the frozen field names, field types, constructor shape, and source module listed here.
-- **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
-- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
-
 ## RetryEvent
 
 - **Source module**: `graph_agent.callbacks.events`
@@ -691,16 +661,6 @@ Family mapping summary:
 - **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
 - **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract. Because this is `_predict_internal`, PR1 freezes current cross-package use only; PR2 must clean the boundary deliberately.
-
-## load_config
-
-- **Source module**: `graph_agent.config.llm_config`
-- **Consumer files**: apps/studio/backend/app/services/copilot.py:36
-- **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
-- **Signature**: `load_config(config_path: Path | None = None) -> RoleConfigData`
-- **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
-- **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
-- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
 
 ## parse_skill_file
 

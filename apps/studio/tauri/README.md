@@ -5,6 +5,8 @@ Phase T1 (基础 Setup) 产物：把 `apps/studio/frontend` (Vite + React 19 + T
 
 设计文档：`docs/architecture/TAURI_KICKOFF_PLAN.md`
 
+桌面能力边界规范：`docs/development/STUDIO_DESKTOP_BOUNDARY_SPEC.md`
+
 ## 目录结构
 
 ```

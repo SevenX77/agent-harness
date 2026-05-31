@@ -49,10 +49,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from dotenv import load_dotenv
+from graph_agent_gateway.registry.resolver import resolve_role
+from graph_agent_gateway.resolver import ModelResolver, load_registry_snapshot
 from langchain_core.messages import HumanMessage
 
-from graph_agent.config.llm_config import load_config
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.graph_assembler import assemble_graph
 from graph_agent.core.harness import GraphAgentHarness
@@ -67,6 +67,7 @@ from graph_agent.core.state import (
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 LLM_ROLES_PATH = REPO_ROOT / "config" / "llm_roles.yaml"
+LLM_CREDENTIALS_PATH = Path.home() / ".studio" / "llm_credentials.json"
 V3_SKILL_PATH = REPO_ROOT / "skills/text-segmentation"
 REAL_LLM_SMOKE_ROLE_ENV = "GRAPH_AGENT_REAL_LLM_SMOKE_ROLE"
 DEFAULT_REAL_LLM_SMOKE_ROLE = "test_opus47_ws"
@@ -74,21 +75,14 @@ E2E_TRACE_RUN_ENV = "GRAPH_AGENT_E2E_TRACE_RUN"
 E2E_TRACE_BASE = REPO_ROOT / "docs" / "v1-reset" / "e2e_traces"
 
 
-def _load_dotenv_for_smoke() -> None:
-    """Load repo-local ``.env`` so provider keys participate in skip checks."""
-    dotenv_path = REPO_ROOT / ".env"
-    if dotenv_path.exists():
-        load_dotenv(dotenv_path=dotenv_path, override=False)
-
-
-def _any_llm_role_provider_key_present() -> bool:
-    """Return true when any llm_roles.yaml provider api_key_env is set."""
-    _load_dotenv_for_smoke()
-    cfg = load_config(LLM_ROLES_PATH)
-    return any(
-        bool(provider.api_key_env and os.environ.get(provider.api_key_env))
-        for provider in cfg.providers.values()
-    )
+def _route_registry_smoke_ready() -> bool:
+    """Return true when v4/v2 route registry has a credentialed smoke role."""
+    try:
+        snapshot = load_registry_snapshot(LLM_CREDENTIALS_PATH, LLM_ROLES_PATH)
+        resolved = resolve_role(snapshot, _real_llm_smoke_role())
+    except Exception:
+        return False
+    return bool(resolved.routes and resolved.routes[0].api_key.get_secret_value())
 
 
 def _real_llm_smoke_role() -> str:
@@ -260,6 +254,17 @@ def _force_llm_role(harness: GraphAgentHarness, role: str) -> None:
             phase.llm_role = role
 
 
+class _FixedRoleResolver:
+    """Test-only resolver adapter that keeps live smoke role explicit."""
+
+    def __init__(self, resolver: ModelResolver, role: str) -> None:
+        self._resolver = resolver
+        self._role = role
+
+    def resolve(self, role_name: str | None = None, **kwargs: Any) -> Any:
+        return self._resolver.resolve(role_name or self._role, **kwargs)
+
+
 @pytest.fixture
 def expected_mvp1_state_shape() -> dict[str, Any]:
     """T8 baseline state shape for regression detection.
@@ -405,9 +410,9 @@ class TestStateInvariants:
 
 
 @pytest.mark.skipif(
-    not _any_llm_role_provider_key_present(),
+    not _route_registry_smoke_ready(),
     reason=(
-        "no LLM provider api_key_env in environment per llm_roles.yaml; "
+        "no credentialed v4/v2 route registry for real-LLM smoke; "
         "real-LLM smoke skipped — compile + invariant layers above already exercise state contracts"
     ),
 )
@@ -433,7 +438,14 @@ class TestRealLLMSmoke:
         error_text: str | None = None
         run_start = time.monotonic()
 
-        harness = load_workflow_from_md(Path(V3_SKILL_PATH))
+        resolver = _FixedRoleResolver(
+            ModelResolver(
+                credentials_path=LLM_CREDENTIALS_PATH,
+                roles_path=LLM_ROLES_PATH,
+            ),
+            role,
+        )
+        harness = load_workflow_from_md(Path(V3_SKILL_PATH), model_resolver=resolver)
         try:
             try:
                 _force_llm_role(harness, role)

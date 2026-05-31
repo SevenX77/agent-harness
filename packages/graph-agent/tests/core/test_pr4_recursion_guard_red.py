@@ -213,6 +213,8 @@ def test_pr4_assemble_subagent_runtime_cycle_uses_v3_payload_not_recursionerror(
         graph_assembler_module._subagent_runtime_map(
             {"call_subagent_child": subagent},
             chat_model=None,
+            model_resolver=None,
+            callbacks=None,
             max_patch_attempts=1,
             skill_resolver=resolver,
         )

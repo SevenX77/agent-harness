@@ -33,6 +33,18 @@ class MetadataStore(Protocol):
         """Remove one skill index entry if present."""
         ...
 
+    async def list_unregistered_skill_ids(self, user_id: str) -> set[str]:
+        """Return skill ids hidden from Studio for one user."""
+        ...
+
+    async def unregister_skill(self, user_id: str, skill_id: str) -> None:
+        """Hide one skill id from Studio without deleting its source files."""
+        ...
+
+    async def register_skill(self, user_id: str, skill_id: str) -> None:
+        """Make one previously hidden skill id visible in Studio again."""
+        ...
+
     async def read_app_settings(self) -> AppSettings:
         """Return global Studio application settings."""
         ...

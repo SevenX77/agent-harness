@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import importlib
 import logging
 import os
 import subprocess
@@ -164,7 +165,7 @@ async def _tts_volcengine(text: str, output_path: str) -> _TTSResult:
 
 async def _tts_edge(text: str, output_path: str) -> _TTSResult:
     try:
-        import edge_tts  # type: ignore[import-not-found]
+        edge_tts = importlib.import_module("edge_tts")
     except ImportError as exc:
         raise ImportError("Edge TTS fallback requires edge-tts: pip install edge-tts") from exc
 

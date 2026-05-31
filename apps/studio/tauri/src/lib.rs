@@ -209,10 +209,13 @@ fn open_in_terminal(path: String) -> Result<(), String> {
     Err("opening a terminal is not supported on this platform".to_string())
 }
 
+#[cfg(all(target_os = "macos", test))]
+fn macos_edit_menu_labels() -> &'static [&'static str] {
+    &["Undo", "Redo", "Cut", "Copy", "Paste", "Select All"]
+}
+
 #[cfg(target_os = "macos")]
-fn macos_menu_without_edit<R: tauri::Runtime>(
-    app_handle: &tauri::AppHandle<R>,
-) -> tauri::Result<Menu<R>> {
+fn macos_menu<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) -> tauri::Result<Menu<R>> {
     let pkg_info = app_handle.package_info();
     let config = app_handle.config();
     let about_metadata = AboutMetadata {
@@ -248,6 +251,20 @@ fn macos_menu_without_edit<R: tauri::Runtime>(
         true,
         &[&PredefinedMenuItem::close_window(app_handle, None)?],
     )?;
+    let edit_menu = Submenu::with_items(
+        app_handle,
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app_handle, None)?,
+            &PredefinedMenuItem::redo(app_handle, None)?,
+            &PredefinedMenuItem::separator(app_handle)?,
+            &PredefinedMenuItem::cut(app_handle, None)?,
+            &PredefinedMenuItem::copy(app_handle, None)?,
+            &PredefinedMenuItem::paste(app_handle, None)?,
+            &PredefinedMenuItem::select_all(app_handle, None)?,
+        ],
+    )?;
     let view_menu = Submenu::with_items(
         app_handle,
         "View",
@@ -269,7 +286,14 @@ fn macos_menu_without_edit<R: tauri::Runtime>(
 
     Menu::with_items(
         app_handle,
-        &[&app_menu, &file_menu, &view_menu, &window_menu, &help_menu],
+        &[
+            &app_menu,
+            &file_menu,
+            &edit_menu,
+            &view_menu,
+            &window_menu,
+            &help_menu,
+        ],
     )
 }
 
@@ -277,9 +301,7 @@ fn macos_menu_without_edit<R: tauri::Runtime>(
 pub fn run() {
     let builder = tauri::Builder::default();
     #[cfg(target_os = "macos")]
-    let builder = builder
-        .enable_macos_default_menu(false)
-        .menu(macos_menu_without_edit);
+    let builder = builder.enable_macos_default_menu(false).menu(macos_menu);
 
     let app = builder
         .plugin(tauri_plugin_dialog::init())
@@ -387,5 +409,22 @@ mod tests {
         let error = existing_path(&missing.display().to_string()).expect_err("missing path");
 
         assert!(error.contains("path does not exist"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_menu_spec_restores_default_edit_menu() {
+        assert_eq!(
+            macos_edit_menu_labels(),
+            &["Undo", "Redo", "Cut", "Copy", "Paste", "Select All"]
+        );
+        assert!(
+            macos_edit_menu_labels().contains(&"Select All"),
+            "Select All should remain available from the native Edit menu"
+        );
+        assert!(
+            macos_edit_menu_labels().contains(&"Copy"),
+            "Copy should remain available from the native Edit menu"
+        );
     }
 }

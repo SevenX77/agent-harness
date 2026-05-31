@@ -10,19 +10,95 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from pydantic import SecretStr
 
 
 class AlwaysFailingClientManager:
-    def is_provider_marked_down(self, provider_code: str) -> bool:
+    def is_provider_marked_down(self, route: Any, runtime_policy: Any) -> bool:
         return False
 
-    def probe_provider(self, provider: Any) -> bool:
+    def probe_provider(self, route: Any, runtime_policy: Any) -> bool:
         return True
 
-    def dispatch_provider_call(self, provider: Any, messages: list[Any], **kwargs: Any) -> Any:
-        raise RuntimeError(f"{provider.provider_code} failed")
+    def dispatch_provider_call(self, route: Any, messages: list[Any], **kwargs: Any) -> Any:
+        raise RuntimeError(f"{route.route_id} failed")
 
-    def mark_provider_down(self, provider_code: str, exc: BaseException) -> None:
+    def mark_provider_down(self, route: Any, exc: BaseException, runtime_policy: Any) -> None:
+        return None
+
+
+class ProbeFallbackClientManager:
+    def __init__(self) -> None:
+        self.dispatches: list[str] = []
+        self.dispatch_kwargs: list[dict[str, Any]] = []
+        self.marked_down: list[str] = []
+
+    def is_provider_marked_down(self, route: Any, runtime_policy: Any) -> bool:
+        return False
+
+    def probe_provider(self, route: Any, runtime_policy: Any) -> bool:
+        return route.route_id != "dead:claude"
+
+    def dispatch_provider_call(self, route: Any, messages: list[Any], **kwargs: Any) -> Any:
+        self.dispatches.append(route.route_id)
+        self.dispatch_kwargs.append(dict(kwargs))
+        return {
+            "content": "ok from fallback",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            "finish_reason": "stop",
+        }
+
+    def mark_provider_down(self, route: Any, exc: BaseException, runtime_policy: Any) -> None:
+        self.marked_down.append(route.route_id)
+
+
+class ProbeRouteFallbackClientManager:
+    def __init__(self) -> None:
+        self.dispatches: list[str] = []
+        self.marked_down: list[str] = []
+
+    def is_provider_marked_down(self, route: Any, runtime_policy: Any) -> bool:
+        return False
+
+    def probe_provider(self, route: Any, runtime_policy: Any) -> bool:
+        if route.route_id == "missing:model":
+            class ProviderStatusError(RuntimeError):
+                status_code = 404
+
+            raise ProviderStatusError("model not found")
+        return True
+
+    def dispatch_provider_call(self, route: Any, messages: list[Any], **kwargs: Any) -> Any:
+        self.dispatches.append(route.route_id)
+        return {
+            "content": "ok after missing model fallback",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            "finish_reason": "stop",
+        }
+
+    def mark_provider_down(self, route: Any, exc: BaseException, runtime_policy: Any) -> None:
+        self.marked_down.append(route.route_id)
+
+
+class RecordingSuccessClientManager:
+    def __init__(self) -> None:
+        self.dispatch_kwargs: list[dict[str, Any]] = []
+
+    def is_provider_marked_down(self, route: Any, runtime_policy: Any) -> bool:
+        return False
+
+    def probe_provider(self, route: Any, runtime_policy: Any) -> bool:
+        return True
+
+    def dispatch_provider_call(self, route: Any, messages: list[Any], **kwargs: Any) -> Any:
+        self.dispatch_kwargs.append(dict(kwargs))
+        return {
+            "content": "ok",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            "finish_reason": "stop",
+        }
+
+    def mark_provider_down(self, route: Any, exc: BaseException, runtime_policy: Any) -> None:
         return None
 
 
@@ -36,45 +112,53 @@ class RecordingCallback:
 
 def test_resolver_applies_role_model_parameters_to_gateway_model() -> None:
     from graph_agent_gateway.gateway_chat_model import GatewayChatModel
-    from graph_agent_gateway.llm_config import (
-        ModelEntry,
-        ProviderEntry,
+    from graph_agent_gateway.registry.schema import (
+        ProviderEndpoint,
+        ProviderRoute,
+        RegistrySnapshot,
         RoleEntry,
-        RoleModelEntry,
-        RolesData,
+        RoleRouteEntry,
     )
     from graph_agent_gateway.resolver import ModelResolver
 
-    roles = RolesData(
-        models={
-            "GPT5": ModelEntry(
-                name="GPT-5",
-                reasoning=True,
-                providers={"openai": "gpt-5"},
+    snapshot = RegistrySnapshot(
+        provider_endpoints={
+            "openai": ProviderEndpoint(
+                endpoint_id="openai",
+                protocol="openai_compatible",
+                base_url="https://api.openai.example/v1",
+                api_key=SecretStr("secret"),
             )
         },
-        providers={
-            "openai": ProviderEntry(
-                name="OpenAI",
-                type="openai_compatible",
+        provider_routes={
+            "openai:gpt-5": ProviderRoute(
+                route_id="openai:gpt-5",
+                endpoint_id="openai",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+                status="verified",
             )
         },
         roles={
             "balanced": RoleEntry(
-                model_fallback=False,
-                active_model="GPT5",
-                models={
-                    "GPT5": RoleModelEntry(
-                        providers=["openai"],
-                        temperature=0.3,
-                        max_tokens=1234,
+                fallback_chain=[
+                    RoleRouteEntry(
+                        route_id="openai:gpt-5",
+                        runtime_settings={
+                            "temperature": 0.3,
+                            "max_output_tokens": 1234,
+                        },
                     )
-                },
+                ],
             )
         },
     )
 
-    resolver = ModelResolver(roles_data=roles, client_manager=AlwaysFailingClientManager())
+    resolver = ModelResolver(
+        registry_snapshot=snapshot,
+        client_manager=AlwaysFailingClientManager(),
+    )
     model = resolver.resolve("balanced", phase_name="draft")
 
     assert isinstance(model, GatewayChatModel)
@@ -82,36 +166,36 @@ def test_resolver_applies_role_model_parameters_to_gateway_model() -> None:
     assert model.phase_name == "draft"
     assert model.temperature == 0.3
     assert model.max_tokens == 1234
-    assert model.resolved_role.call_chain[0].provider_code == "openai"
-    assert model.resolved_role.call_chain[0].model_name == "gpt-5"
+    assert model.resolved_role.routes[0].endpoint_id == "openai"
+    assert model.resolved_role.routes[0].provider_model_id == "gpt-5"
 
 
 def test_gateway_failure_path_emits_event_and_structured_exception() -> None:
     from graph_agent_gateway.exceptions import AllProvidersFailedError
     from graph_agent_gateway.gateway_chat_model import GatewayChatModel
-    from graph_agent_gateway.llm_config import (
-        ModelDef,
-        ProviderDef,
-        ResolvedProvider,
+    from graph_agent_gateway.registry.schema import (
         ResolvedRole,
+        ResolvedRoute,
+        RuntimePolicy,
     )
     from langchain_core.messages import HumanMessage
 
     callback = RecordingCallback()
-    provider_def = ProviderDef(name="OpenAI", type="openai_compatible")
-    model_def = ModelDef(name="GPT-5", providers={"openai": "gpt-5"})
     resolved_role = ResolvedRole(
         role_name="balanced",
-        temperature=0.7,
         system_prompt_prefix="",
-        active_model_code="GPT5",
-        model_fallback=False,
-        call_chain=[
-            ResolvedProvider(
-                provider_code="openai",
-                provider_def=provider_def,
-                model_name="gpt-5",
-                model_def=model_def,
+        runtime_policy=RuntimePolicy(),
+        routes=[
+            ResolvedRoute(
+                role_name="balanced",
+                route_id="openai:gpt-5",
+                endpoint_id="openai",
+                protocol="openai_compatible",
+                base_url="https://api.openai.example/v1",
+                api_key=SecretStr("secret"),
+                credential_fingerprint="fp",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
             )
         ],
     )
@@ -130,36 +214,285 @@ def test_gateway_failure_path_emits_event_and_structured_exception() -> None:
     assert exc.code == "[F-v3-gateway-all-providers-failed]"
     assert exc.context["role_name"] == "balanced"
     assert exc.context["phase_name"] == "draft"
-    assert exc.context["failed_provider_codes"] == ["openai/gpt-5"]
-    assert exc.context["last_error_chain"][0]["provider"] == "openai/gpt-5"
+    assert exc.context["failed_provider_codes"] == ["openai:gpt-5"]
+    assert exc.context["last_error_chain"][0]["provider"] == "openai:gpt-5"
+    assert exc.context["last_error_chain"][0]["route_id"] == "openai:gpt-5"
+    assert len(callback.events) == 0
+
+
+def test_probe_failure_fallback_emits_event_and_returns_second_route_metadata() -> None:
+    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.registry.schema import (
+        ResolvedRole,
+        ResolvedRoute,
+        RuntimePolicy,
+    )
+    from langchain_core.messages import HumanMessage
+
+    callback = RecordingCallback()
+    client_manager = ProbeFallbackClientManager()
+    resolved_role = ResolvedRole(
+        role_name="graph_agent",
+        system_prompt_prefix="",
+        runtime_policy=RuntimePolicy(),
+        routes=[
+            ResolvedRoute(
+                role_name="graph_agent",
+                route_id="dead:claude",
+                endpoint_id="dead",
+                protocol="anthropic_compatible",
+                base_url="http://127.0.0.1:9",
+                api_key=SecretStr("secret"),
+                credential_fingerprint="dead-fp",
+                provider_model_id="claude-sonnet-4-6",
+                canonical_id="claude-sonnet-4.6",
+                runtime_settings={
+                    "max_output_tokens": 111,
+                    "temperature": 0.1,
+                },
+                effective_runtime_settings={
+                    "max_output_tokens": {"value": 111, "source": "route_setting"},
+                    "temperature": {"value": 0.1, "source": "route_setting"},
+                },
+            ),
+            ResolvedRoute(
+                role_name="graph_agent",
+                route_id="anthropic-official:claude-sonnet-4.6",
+                endpoint_id="anthropic-official",
+                protocol="anthropic_compatible",
+                base_url="https://api.anthropic.com",
+                api_key=SecretStr("secret"),
+                credential_fingerprint="anthropic-fp",
+                provider_model_id="claude-sonnet-4-6",
+                canonical_id="claude-sonnet-4.6",
+                runtime_settings={
+                    "max_output_tokens": 222,
+                    "temperature": 0.2,
+                },
+                effective_runtime_settings={
+                    "max_output_tokens": {"value": 222, "source": "route_setting"},
+                    "temperature": {"value": 0.2, "source": "route_setting"},
+                },
+            ),
+        ],
+    )
+    model = GatewayChatModel(
+        role_name="graph_agent",
+        resolved_role=resolved_role,
+        callbacks=(callback,),
+        phase_name="e2e",
+        client_manager=client_manager,
+    )
+
+    result = model.invoke([HumanMessage(content="hello")])
+
+    assert result.content == "ok from fallback"
+    assert result.response_metadata["route_id"] == "anthropic-official:claude-sonnet-4.6"
+    assert result.response_metadata["effective_runtime_settings"] == {
+        "max_output_tokens": {"value": 222, "source": "route_setting", "message": None},
+        "temperature": {"value": 0.2, "source": "route_setting", "message": None},
+    }
+    assert client_manager.marked_down == ["dead:claude"]
+    assert client_manager.dispatches == ["anthropic-official:claude-sonnet-4.6"]
+    assert client_manager.dispatch_kwargs[0]["max_tokens"] == 222
+    assert client_manager.dispatch_kwargs[0]["temperature"] == 0.2
     assert len(callback.events) == 1
-    assert callback.events[0].from_provider == "openai/gpt-5"
-    assert callback.events[0].to_provider == "<none>"
+    assert callback.events[0].from_provider == "dead:claude"
+    assert callback.events[0].to_provider == "anthropic-official:claude-sonnet-4.6"
+    event_payload = callback.events[0].model_dump(mode="json")
+    assert event_payload["event_type"] == "llm_fallback"
+    assert event_payload["context"]["role_name"] == "graph_agent"
+    assert event_payload["context"]["fallback_decision"] == "fallback_allowed"
+    assert event_payload["context"]["from_route"] == {
+        "route_id": "dead:claude",
+        "endpoint_id": "dead",
+        "provider_model_id": "claude-sonnet-4-6",
+        "canonical_id": "claude-sonnet-4.6",
+        "protocol": "anthropic_compatible",
+    }
+    assert event_payload["context"]["to_route"]["route_id"] == "anthropic-official:claude-sonnet-4.6"
+    assert event_payload["context"]["effective_runtime_settings"] == {
+        "max_output_tokens": {"value": 111, "source": "route_setting", "message": None},
+        "temperature": {"value": 0.1, "source": "route_setting", "message": None},
+    }
+
+
+def test_probe_missing_model_error_falls_back_to_next_route() -> None:
+    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.registry.schema import (
+        ResolvedRole,
+        ResolvedRoute,
+        RuntimePolicy,
+    )
+    from langchain_core.messages import HumanMessage
+
+    callback = RecordingCallback()
+    client_manager = ProbeRouteFallbackClientManager()
+    resolved_role = ResolvedRole(
+        role_name="graph_agent",
+        runtime_policy=RuntimePolicy(),
+        routes=[
+            ResolvedRoute(
+                role_name="graph_agent",
+                route_id="missing:model",
+                endpoint_id="missing",
+                protocol="anthropic_compatible",
+                base_url="https://api.anthropic.com",
+                api_key=SecretStr("secret"),
+                credential_fingerprint="missing-fp",
+                provider_model_id="missing-model",
+                canonical_id="missing-model",
+            ),
+            ResolvedRoute(
+                role_name="graph_agent",
+                route_id="fallback:model",
+                endpoint_id="fallback",
+                protocol="anthropic_compatible",
+                base_url="https://api.anthropic.com",
+                api_key=SecretStr("secret"),
+                credential_fingerprint="fallback-fp",
+                provider_model_id="fallback-model",
+                canonical_id="fallback-model",
+            ),
+        ],
+    )
+    model = GatewayChatModel(
+        role_name="graph_agent",
+        resolved_role=resolved_role,
+        callbacks=(callback,),
+        phase_name="e2e",
+        client_manager=client_manager,
+    )
+
+    result = model.invoke([HumanMessage(content="hello")])
+
+    assert result.content == "ok after missing model fallback"
+    assert client_manager.dispatches == ["fallback:model"]
+    assert client_manager.marked_down == ["missing:model"]
+    assert len(callback.events) == 1
+    event_payload = callback.events[0].model_dump(mode="json")
+    assert event_payload["context"]["fallback_decision"] == "fallback_allowed"
+    assert event_payload["context"]["provider_status_code"] == 404
+
+
+def test_gateway_passes_effective_runtime_settings_to_client_manager() -> None:
+    from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+    from graph_agent_gateway.registry.schema import (
+        ResolvedRole,
+        ResolvedRoute,
+        RuntimePolicy,
+    )
+    from langchain_core.messages import HumanMessage
+
+    client_manager = RecordingSuccessClientManager()
+    route = ResolvedRoute(
+        role_name="graph_agent",
+        route_id="openai:gpt-5",
+        endpoint_id="openai",
+        protocol="openai_compatible",
+        base_url="https://api.openai.example/v1",
+        api_key=SecretStr("secret"),
+        credential_fingerprint="fp",
+        provider_model_id="gpt-5",
+        canonical_id="gpt-5",
+        selected_profile_id="reasoning_responses",
+        call_method_id="openai_responses",
+        request_mapper_id="openai_responses_reasoning",
+        effective_runtime_settings={
+            "max_output_tokens": {"value": 333, "source": "route_setting"},
+            "temperature": {"value": 0.4, "source": "route_setting"},
+            "top_p": {"value": 0.9, "source": "route_setting"},
+            "stop_sequences": {"value": ["END"], "source": "route_setting"},
+            "seed": {"value": 42, "source": "route_setting"},
+            "tool_choice": {"value": "auto", "source": "route_setting"},
+            "parallel_tool_calls": {"value": False, "source": "route_setting"},
+            "structured_output.mode": {"value": "json_schema", "source": "route_setting"},
+            "structured_output.json_schema": {
+                "value": {"name": "Answer", "schema": {"type": "object"}},
+                "source": "route_setting",
+            },
+            "structured_output.strict": {"value": True, "source": "route_setting"},
+            "reasoning.enabled": {"value": True, "source": "route_setting"},
+            "reasoning.effort": {"value": "medium", "source": "route_setting"},
+        },
+    )
+    model = GatewayChatModel(
+        role_name="graph_agent",
+        resolved_role=ResolvedRole(
+            role_name="graph_agent",
+            runtime_policy=RuntimePolicy(),
+            routes=[route],
+        ),
+        client_manager=client_manager,
+    )
+
+    model.invoke([HumanMessage(content="hello")])
+
+    assert client_manager.dispatch_kwargs == [
+        {
+            "max_tokens": 333,
+            "temperature": 0.4,
+            "reasoning": True,
+            "thinking_budget_tokens": None,
+            "tools": None,
+            "tool_choice": "auto",
+            "runtime_policy": RuntimePolicy(),
+            "top_p": 0.9,
+            "stop_sequences": ["END"],
+            "seed": 42,
+            "parallel_tool_calls": False,
+            "structured_output": {
+                "mode": "json_schema",
+                "json_schema": {"name": "Answer", "schema": {"type": "object"}},
+                "strict": True,
+            },
+            "reasoning_effort": "medium",
+            "call_method_id": "openai_responses",
+            "request_mapper_id": "openai_responses_reasoning",
+        }
+    ]
 
 
 def test_unknown_role_raises_gateway_role_not_configured_error() -> None:
     from graph_agent_gateway.exceptions import GatewayRoleNotConfiguredError
-    from graph_agent_gateway.llm_config import (
-        ModelEntry,
-        ProviderEntry,
+    from graph_agent_gateway.registry.schema import (
+        ProviderEndpoint,
+        ProviderRoute,
+        RegistrySnapshot,
         RoleEntry,
-        RoleModelEntry,
-        RolesData,
+        RoleRouteEntry,
     )
     from graph_agent_gateway.resolver import ModelResolver
 
-    roles = RolesData(
-        models={"GPT5": ModelEntry(name="GPT-5", providers={"openai": "gpt-5"})},
-        providers={"openai": ProviderEntry(name="OpenAI", type="openai_compatible")},
+    snapshot = RegistrySnapshot(
+        provider_endpoints={
+            "openai": ProviderEndpoint(
+                endpoint_id="openai",
+                protocol="openai_compatible",
+                base_url="https://api.openai.example/v1",
+                api_key=SecretStr("secret"),
+            )
+        },
+        provider_routes={
+            "openai:gpt-5": ProviderRoute(
+                route_id="openai:gpt-5",
+                endpoint_id="openai",
+                route_slug="gpt-5",
+                provider_model_id="gpt-5",
+                canonical_id="gpt-5",
+            )
+        },
         roles={
             "balanced": RoleEntry(
-                active_model="GPT5",
-                models={"GPT5": RoleModelEntry(providers=["openai"])},
+                fallback_chain=[RoleRouteEntry(route_id="openai:gpt-5")],
             )
         },
     )
 
-    resolver = ModelResolver(roles_data=roles, client_manager=AlwaysFailingClientManager())
+    resolver = ModelResolver(
+        registry_snapshot=snapshot,
+        client_manager=AlwaysFailingClientManager(),
+    )
 
     with pytest.raises(GatewayRoleNotConfiguredError) as exc_info:
         resolver.resolve("not_exist", phase_name="draft")

@@ -1,0 +1,63 @@
+"""Shared LLM endpoint/route registry core."""
+
+from __future__ import annotations
+
+from graph_agent_gateway.registry.contracts import (
+    CredentialDescriptor,
+    CredentialProviderProtocol,
+    SecretLifetimePolicy,
+    SnapshotVersion,
+    TerminalRetryPolicy,
+)
+from graph_agent_gateway.registry.schema import (
+    CapabilityValue,
+    EffectiveRuntimeSetting,
+    EndpointCandidate,
+    FieldSource,
+    LintResult,
+    ModelProfile,
+    ProbeResult,
+    ProviderEndpoint,
+    ProviderImportDraft,
+    ProviderRoute,
+    ReasoningSettings,
+    RegistrySnapshot,
+    ResolvedRole,
+    ResolvedRoute,
+    RoleEntry,
+    RoleRouteEntry,
+    RouteCandidate,
+    RuntimePolicy,
+    RuntimeSettings,
+    StructuredOutputSettings,
+    VerifiedProfile,
+)
+
+__all__ = [
+    "CapabilityValue",
+    "CredentialDescriptor",
+    "CredentialProviderProtocol",
+    "EffectiveRuntimeSetting",
+    "EndpointCandidate",
+    "FieldSource",
+    "LintResult",
+    "ModelProfile",
+    "ProbeResult",
+    "ProviderEndpoint",
+    "ProviderImportDraft",
+    "ProviderRoute",
+    "RegistrySnapshot",
+    "ResolvedRole",
+    "ResolvedRoute",
+    "RuntimeSettings",
+    "ReasoningSettings",
+    "RoleEntry",
+    "RoleRouteEntry",
+    "RouteCandidate",
+    "RuntimePolicy",
+    "StructuredOutputSettings",
+    "SecretLifetimePolicy",
+    "SnapshotVersion",
+    "TerminalRetryPolicy",
+    "VerifiedProfile",
+]

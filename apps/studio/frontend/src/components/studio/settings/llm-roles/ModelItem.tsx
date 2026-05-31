@@ -1,3 +1,4 @@
+import { memo, useMemo } from "react"
 import { useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { Trash2 } from "lucide-react"
@@ -11,44 +12,55 @@ import {
 } from "@/components/ui/item"
 import { cn } from "@/lib/utils"
 import type { RoleChainStatusMap } from "@/hooks/useRoleTestChainRunner"
-import type { CredentialsState, RolesData } from "@/api/llm"
-import type { ModelAvailability } from "../availability"
+import type { CredentialsState, MaterializationReportEntry, ProviderModelOption, RolesData } from "@/api/llm"
 import {
   ownedProviderCodesForModel,
   removeModelFromRole,
   roleModelProviderCodes,
-  updateRoleModelSettings,
 } from "../role-utils"
 import { IconTooltip } from "./IconTooltip"
-import { ModelSettingsDialog } from "./ModelSettingsDialog"
 import { ProviderChain } from "./ProviderChain"
-import { AvailabilityBadge, ThinkingBadge } from "./RoleBadges"
+import { ThinkingBadge } from "./RoleBadges"
 
-export function ModelItem({
+export const ModelItem = memo(function ModelItem({
   data,
   roleName,
   modelCode,
+  modelName,
   modelIndex,
   credentialsByCode,
-  availability,
+  ownedProviderCodes,
+  providerModelsByRouteId,
+  roleFitByRouteId,
   testStatuses,
   onChange,
 }: {
   data: RolesData
   roleName: string
   modelCode: string
+  modelName: string
   modelIndex: number
   credentialsByCode: Record<string, CredentialsState["providers"][number]>
-  availability: ModelAvailability
+  ownedProviderCodes?: ReadonlySet<string>
+  providerModelsByRouteId: ReadonlyMap<string, ProviderModelOption>
+  roleFitByRouteId: ReadonlyMap<string, MaterializationReportEntry>
   testStatuses: RoleChainStatusMap
   onChange: (next: RolesData) => void
 }) {
   const role = data.roles[roleName]
   const roleModel = role.models[modelCode]
-  const providers = roleModelProviderCodes(data, modelCode, roleModel.providers, credentialsByCode)
-  const modelName = data.models[modelCode]?.name ?? modelCode
-  const appendableProviderCodes = ownedProviderCodesForModel(data, modelCode, credentialsByCode)
-    .filter((providerCode) => !providers.includes(providerCode))
+  const providers = useMemo(() => (
+    ownedProviderCodes
+      ? roleModel.providers.filter((providerCode) => ownedProviderCodes.has(providerCode))
+      : roleModelProviderCodes(data, modelCode, roleModel.providers, credentialsByCode)
+  ), [credentialsByCode, data, modelCode, ownedProviderCodes, roleModel.providers])
+  const appendableProviderCodes = useMemo(() => {
+    const owned = ownedProviderCodes
+      ? Array.from(ownedProviderCodes)
+      : ownedProviderCodesForModel(data, modelCode, credentialsByCode)
+    const taken = new Set(providers)
+    return owned.filter((providerCode) => !taken.has(providerCode))
+  }, [credentialsByCode, data, modelCode, ownedProviderCodes, providers])
   const {
     attributes,
     listeners,
@@ -67,7 +79,6 @@ export function ModelItem({
       ref={setNodeRef}
       style={style}
       className={cn("rounded-md", isDragging && "opacity-70")}
-      data-availability={availability}
     >
       <Item
         variant="outline"
@@ -91,7 +102,6 @@ export function ModelItem({
             <span data-model-name="true" className="min-w-0 truncate whitespace-nowrap">{modelName}</span>
             <span data-model-badge-group="true" className="flex shrink-0 items-center gap-2.5">
               {data.models[modelCode]?.reasoning ? <ThinkingBadge /> : null}
-              <AvailabilityBadge availability={availability} />
             </span>
           </ItemTitle>
         </ItemContent>
@@ -99,13 +109,6 @@ export function ModelItem({
           className="ml-auto shrink-0 gap-1"
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <ModelSettingsDialog
-            modelCode={modelCode}
-            modelName={modelName}
-            temperature={roleModel.temperature ?? null}
-            maxTokens={roleModel.max_tokens ?? null}
-            onSubmit={(settings) => onChange(updateRoleModelSettings(data, roleName, modelCode, settings))}
-          />
           <IconTooltip label={`Remove ${modelName}`}>
             <Button
               type="button"
@@ -124,8 +127,11 @@ export function ModelItem({
             data={data}
             roleName={roleName}
             modelCode={modelCode}
+            modelName={modelName}
             providers={providers}
             appendableProviderCodes={appendableProviderCodes}
+            providerModelsByRouteId={providerModelsByRouteId}
+            roleFitByRouteId={roleFitByRouteId}
             testStatuses={testStatuses}
             onChange={onChange}
           />
@@ -133,4 +139,4 @@ export function ModelItem({
       </Item>
     </div>
   )
-}
+})

@@ -92,11 +92,7 @@ files:
   feature_id: F-llm-prompt-assembly
 - path: packages/graph-agent/src/graph_agent/config/__init__.py
   classification: detail
-  feature_id: F-model-configuration
-- path: packages/graph-agent/src/graph_agent/config/llm_config.py
-  classification: feature
-  feature_ids:
-  - F-model-configuration
+  feature_id: F-public-api-surface
 - path: packages/graph-agent/src/graph_agent/core/__init__.py
   classification: detail
   feature_id: F-public-api-surface
@@ -356,10 +352,6 @@ files:
   classification: feature
   feature_ids:
   - F-llm-execution
-- path: packages/graph-agent/src/graph_agent/models/llm_client_manager.py
-  classification: feature
-  feature_ids:
-  - F-model-configuration
 - path: packages/graph-agent/src/graph_agent/models/reasoning_patch.py
   classification: detail
   feature_id: F-md-patch

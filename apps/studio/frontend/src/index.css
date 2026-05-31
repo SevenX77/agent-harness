@@ -35,6 +35,12 @@
     --color-success-background: var(--success-background);
     --color-success-border: var(--success-border);
     --color-success-foreground: var(--success-foreground);
+    --color-warning: var(--warning);
+    --color-warning-background: var(--warning-background);
+    --color-warning-border: var(--warning-border);
+    --color-warning-foreground: var(--warning-foreground);
+    --color-tag-destructive-border: var(--tag-destructive-border);
+    --color-multimodal-border: var(--multimodal-border);
     --color-accent-foreground: var(--accent-foreground);
     --color-accent: var(--accent);
     --color-muted-foreground: var(--muted-foreground);
@@ -88,6 +94,12 @@
     --success-background: oklch(0.982 0.018 155.826);
     --success-border: oklch(0.925 0.084 155.995);
     --success-foreground: oklch(0.527 0.154 150.069);
+    --warning: oklch(0.681 0.162 75.834);
+    --warning-background: oklch(0.987 0.026 102.212);
+    --warning-border: oklch(0.879 0.111 82.283);
+    --warning-foreground: oklch(0.473 0.137 46.201);
+    --tag-destructive-border: oklch(0.505 0.213 27.518);
+    --multimodal-border: oklch(0.546 0.245 262.881);
     --border: oklch(0.922 0 0);
     --input: oklch(0.922 0 0);
     --ring: oklch(0.708 0 0);
@@ -155,6 +167,12 @@
     --success-background: oklch(0.448 0.119 151.328);
     --success-border: oklch(0.527 0.154 150.069);
     --success-foreground: oklch(0.982 0.018 155.826);
+    --warning: oklch(0.795 0.184 86.047);
+    --warning-background: oklch(0.414 0.112 45.904);
+    --warning-border: oklch(0.555 0.163 48.998);
+    --warning-foreground: oklch(0.987 0.026 102.212);
+    --tag-destructive-border: oklch(0.577 0.245 27.325);
+    --multimodal-border: oklch(0.623 0.214 259.815);
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.556 0 0);
@@ -227,6 +245,68 @@ html[data-available-model-dragging="true"] [data-role-drop-shield="true"] {
 
 .animate-pulse-primary {
   animation: pulse-primary 1.4s ease-in-out infinite;
+}
+
+@keyframes provider-card-border-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+[data-provider-card="true"][data-provider-test-status="testing"]::after {
+  animation: provider-card-border-flow 1.1s linear infinite;
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklab, var(--primary) 88%, transparent),
+      transparent,
+      color-mix(in oklab, var(--primary) 88%, transparent)
+    );
+  background-size: 200% 100%;
+  border-radius: inherit;
+  content: "";
+  inset: 0;
+  padding: 1px;
+  pointer-events: none;
+  position: absolute;
+  -webkit-mask:
+    linear-gradient(currentColor 0 0) content-box,
+    linear-gradient(currentColor 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+.api-route-tag-border-flow {
+  border-color: transparent;
+  position: relative;
+}
+
+.api-route-tag-border-flow::after {
+  animation: provider-card-border-flow 1.1s linear infinite;
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklab, var(--primary) 88%, transparent),
+      transparent,
+      color-mix(in oklab, var(--primary) 88%, transparent)
+    );
+  background-size: 200% 100%;
+  border-radius: inherit;
+  content: "";
+  inset: 0;
+  padding: 1px;
+  pointer-events: none;
+  position: absolute;
+  -webkit-mask:
+    linear-gradient(currentColor 0 0) content-box,
+    linear-gradient(currentColor 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
 }
 
 /* React Flow theme overrides (per tokens.md §1.6) */

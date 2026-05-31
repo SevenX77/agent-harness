@@ -44,14 +44,16 @@ def test_run_skill_dict_omitted_mock_llm_passes_no_chat_model(
 ) -> None:
     skill_root = _write_v030_root(tmp_path)
     chat_models: list[object] = []
+    model_resolvers: list[object] = []
 
     monkeypatch.setattr(
         "graph_agent.core.compiler.compile_skill",
         lambda *_args, **_kwargs: object(),
     )
 
-    def fake_assemble_graph(*_args, chat_model=None, **_kwargs):
+    def fake_assemble_graph(*_args, chat_model=None, model_resolver=None, **_kwargs):
         chat_models.append(chat_model)
+        model_resolvers.append(model_resolver)
         return RecordingAssembler()
 
     monkeypatch.setattr("graph_agent.core.graph_assembler.assemble_graph", fake_assemble_graph)
@@ -65,6 +67,7 @@ def test_run_skill_dict_omitted_mock_llm_passes_no_chat_model(
     )
 
     assert chat_models == [None]
+    assert model_resolvers == [None]
 
 
 def test_run_skill_dict_explicit_mock_none_is_passed_as_chat_model(
@@ -76,14 +79,16 @@ def test_run_skill_dict_explicit_mock_none_is_passed_as_chat_model(
     resolved_model = object()
     model_resolver = SimpleNamespace(resolve=lambda **_kwargs: resolved_model)
     chat_models: list[object] = []
+    model_resolvers: list[object] = []
 
     monkeypatch.setattr(
         "graph_agent.core.compiler.compile_skill",
         lambda *_args, **_kwargs: object(),
     )
 
-    def fake_assemble_graph(*_args, chat_model=None, **_kwargs):
+    def fake_assemble_graph(*_args, chat_model=None, model_resolver=None, **_kwargs):
         chat_models.append(chat_model)
+        model_resolvers.append(model_resolver)
         return RecordingAssembler()
 
     monkeypatch.setattr("graph_agent.core.graph_assembler.assemble_graph", fake_assemble_graph)
@@ -99,23 +104,25 @@ def test_run_skill_dict_explicit_mock_none_is_passed_as_chat_model(
     )
 
     assert chat_models == [None]
+    assert model_resolvers == [None]
 
 
 def test_run_skill_dict_uses_model_resolver_when_mock_llm_omitted(
     monkeypatch, tmp_path, mock_skill_resolver
 ) -> None:
     skill_root = _write_v030_root(tmp_path)
-    resolved_model = object()
-    model_resolver = SimpleNamespace(resolve=lambda **_kwargs: resolved_model)
+    model_resolver = SimpleNamespace(resolve=lambda **_kwargs: object())
     chat_models: list[object] = []
+    model_resolvers: list[object] = []
 
     monkeypatch.setattr(
         "graph_agent.core.compiler.compile_skill",
         lambda *_args, **_kwargs: object(),
     )
 
-    def fake_assemble_graph(*_args, chat_model=None, **_kwargs):
+    def fake_assemble_graph(*_args, chat_model=None, model_resolver=None, **_kwargs):
         chat_models.append(chat_model)
+        model_resolvers.append(model_resolver)
         return RecordingAssembler()
 
     monkeypatch.setattr("graph_agent.core.graph_assembler.assemble_graph", fake_assemble_graph)
@@ -129,4 +136,5 @@ def test_run_skill_dict_uses_model_resolver_when_mock_llm_omitted(
         model_resolver=model_resolver,
     )
 
-    assert chat_models == [resolved_model]
+    assert chat_models == [None]
+    assert model_resolvers == [model_resolver]

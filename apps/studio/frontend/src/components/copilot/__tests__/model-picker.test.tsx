@@ -1,10 +1,10 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { ComponentProps, ReactElement, ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import type { CredentialsState, RoleEntry } from '../../../api/llm'
+import type { RegistryResponse, RoleEntry } from '../../../api/llm'
 import {
-  firstAvailableModel,
-  getModelOptions,
+  firstAvailableRoute,
+  getRouteOptions,
   ModelPicker,
   ModelPickerMenu,
 } from '../model-picker'
@@ -51,19 +51,65 @@ vi.mock('../../ui/dropdown-menu', () => ({
 
 const role: RoleEntry = {
   model_fallback: true,
-  active_model: 'CL46T',
-  models: {
-    CL46T: { providers: ['anthropic', 'openai_proxy'], temperature: 0.2 },
-    DS32R: { providers: ['deepseek'], temperature: 0.2 },
-  },
+  active_model: '',
+  models: {},
+  system_prompt_prefix: '',
+  fallback_chain: [
+    { route_id: 'anthropic-official:claude-sonnet' },
+    { route_id: 'openrouter:anthropic-claude-sonnet' },
+    { route_id: 'disabled:route' },
+  ],
+  lint_requirements: {},
 }
 
-const credentials: CredentialsState = {
-  providers: [
-    { id: 'anthropic', name: 'Anthropic', api_key: 'sk-anthropic' },
-    { id: 'openai_proxy', name: 'OpenAI Proxy', api_key: '' },
-    { id: 'deepseek', name: 'DeepSeek', api_key: '' },
-  ],
+const registry: RegistryResponse = {
+  provider_endpoints: {},
+  provider_routes: {
+    'anthropic-official:claude-sonnet': {
+      route_id: 'anthropic-official:claude-sonnet',
+      endpoint_id: 'anthropic-official',
+      route_slug: 'claude-sonnet',
+      provider_model_id: 'claude-sonnet',
+      canonical_id: 'claude-sonnet',
+      display_name: 'Claude Sonnet',
+      status: 'verified',
+      capabilities: {},
+      metadata: {},
+    },
+    'openrouter:anthropic-claude-sonnet': {
+      route_id: 'openrouter:anthropic-claude-sonnet',
+      endpoint_id: 'openrouter',
+      route_slug: 'anthropic-claude-sonnet',
+      provider_model_id: 'anthropic/claude-sonnet',
+      canonical_id: 'claude-sonnet',
+      display_name: 'Claude Sonnet via OpenRouter',
+      status: 'unverified_manual',
+      capabilities: {},
+      metadata: {},
+    },
+    'disabled:route': {
+      route_id: 'disabled:route',
+      endpoint_id: 'disabled',
+      route_slug: 'route',
+      provider_model_id: 'disabled-route',
+      canonical_id: 'disabled-route',
+      display_name: 'Disabled Route',
+      status: 'disabled',
+      capabilities: {},
+      metadata: {},
+    },
+  },
+  runtime_policy: {
+    provider_down_ttl_seconds: 300,
+    probe_timeout_seconds: 30,
+    token_escalation_rounds: 2,
+  },
+  model_profiles: {},
+  model_groups: [],
+  roles: { copilot_chat: role },
+  canonical_groups: [],
+  lint_results: [],
+  setup_required: false,
 }
 
 type MenuButtonElement = ReactElement<{
@@ -71,12 +117,12 @@ type MenuButtonElement = ReactElement<{
   onClick?: () => void
 }>
 
-function renderMenuHtml(selectedModel = 'CL46T', nextCredentials = credentials) {
+function renderMenuHtml(selectedRouteId = 'anthropic-official:claude-sonnet') {
   return renderToStaticMarkup(
     <ModelPicker
       role={role}
-      credentials={nextCredentials}
-      selectedModel={selectedModel}
+      registry={registry}
+      selectedRouteId={selectedRouteId}
       onSelect={() => undefined}
       variant="full"
     />,
@@ -84,106 +130,66 @@ function renderMenuHtml(selectedModel = 'CL46T', nextCredentials = credentials) 
 }
 
 describe('ModelPicker', () => {
-  it('renders models from role', () => {
+  it('renders exact route IDs from the role fallback chain', () => {
     const html = renderMenuHtml()
 
-    expect(html).toContain('CL46T')
-    expect(html).toContain('DS32R')
+    expect(html).toContain('anthropic-official:claude-sonnet')
+    expect(html).toContain('openrouter:anthropic-claude-sonnet')
   })
 
-  it('highlights the selected model', () => {
-    const html = renderMenuHtml('CL46T')
+  it('disables routes that are missing or disabled in the active registry', () => {
+    const options = getRouteOptions(role, registry)
 
-    expect(html).toContain('bg-primary')
-    expect(html).toContain('Select model CL46T')
+    expect(options.find((option) => option.routeId === 'disabled:route')?.available).toBe(false)
   })
 
-  it('disables a model when no provider has a key', () => {
-    const options = getModelOptions(role, {
-      providers: [
-        { id: 'anthropic', name: 'Anthropic', api_key: '' },
-        { id: 'openai_proxy', name: 'OpenAI Proxy', api_key: '' },
-      ],
-    })
-
-    expect(options.find((option) => option.modelCode === 'CL46T')?.available).toBe(false)
-  })
-
-  it('enables a model when any provider has a key', () => {
-    const options = getModelOptions(role, credentials)
-
-    expect(options.find((option) => option.modelCode === 'CL46T')?.available).toBe(true)
-  })
-
-  it('calls onSelect when an available model is selected', () => {
+  it('calls onSelect with exact route_id when an available route is selected', () => {
     const onSelect = vi.fn()
-    const options = getModelOptions(role, credentials)
-    const element = ModelPickerMenu({ options, selectedModel: 'DS32R', onSelect })
+    const options = getRouteOptions(role, registry)
+    const element = ModelPickerMenu({ options, selectedRouteId: 'openrouter:anthropic-claude-sonnet', onSelect })
     const buttons: MenuButtonElement[] = Array.isArray(element.props.children)
       ? element.props.children
       : [element.props.children]
-    const cl46t = buttons.find((button) => button.key === 'CL46T')
+    const route = buttons.find((button) => button.key === 'anthropic-official:claude-sonnet')
 
-    cl46t?.props.onClick?.()
+    route?.props.onClick?.()
 
-    expect(onSelect).toHaveBeenCalledWith('CL46T')
-  })
-
-  it('does not attach a click handler to disabled models', () => {
-    const onSelect = vi.fn()
-    const options = getModelOptions(role, credentials)
-    const element = ModelPickerMenu({ options, selectedModel: 'CL46T', onSelect })
-    const buttons: MenuButtonElement[] = Array.isArray(element.props.children)
-      ? element.props.children
-      : [element.props.children]
-    const ds32r = buttons.find((button) => button.key === 'DS32R')
-
-    expect(ds32r?.props.disabled).toBe(true)
-    expect(ds32r?.props.onClick).toBeUndefined()
-    expect(onSelect).not.toHaveBeenCalled()
+    expect(onSelect).toHaveBeenCalledWith('anthropic-official:claude-sonnet')
   })
 
   it('renders the icon variant trigger', () => {
     const html = renderToStaticMarkup(
       <ModelPicker
         role={role}
-        credentials={credentials}
-        selectedModel="CL46T"
+        registry={registry}
+        selectedRouteId="anthropic-official:claude-sonnet"
         onSelect={() => undefined}
       />,
     )
 
-    expect(html).toContain('Select Copilot model')
+    expect(html).toContain('Select Copilot route')
     expect(html).toContain('data-slot="dropdown-menu"')
     expect(html).toContain('data-slot="dropdown-menu-trigger"')
     expect(html).toContain('data-slot="button"')
-    expect(html).not.toContain('absolute bottom-8')
-  })
-
-  it('renders the full variant as a button group', () => {
-    const html = renderMenuHtml()
-
-    expect(html).toContain('Copilot model picker')
-    expect(html).toContain('Select model CL46T')
   })
 
   it('shows a disabled placeholder without role data', () => {
     const html = renderToStaticMarkup(
       <ModelPicker
         role={null}
-        credentials={credentials}
-        selectedModel=""
+        registry={registry}
+        selectedRouteId=""
         onSelect={() => undefined}
       />,
     )
 
     expect(html).toContain('disabled=""')
-    expect(html).toContain('Copilot model config unavailable')
+    expect(html).toContain('Copilot route config unavailable')
   })
 
-  it('returns the first available model', () => {
-    const options = getModelOptions(role, credentials)
+  it('returns the first available route', () => {
+    const options = getRouteOptions(role, registry)
 
-    expect(firstAvailableModel(options)).toBe('CL46T')
+    expect(firstAvailableRoute(options)).toBe('anthropic-official:claude-sonnet')
   })
 })

@@ -489,7 +489,11 @@ features:
   public_api_symbols:
   - ExecutionError
   - GraphAgentError
+  - GraphCompileError
+  - GraphExecutionError
+  - ModelProviderError
   - NudgeEvent
+  - ResourceNotFoundError
   - RetryEvent
   - SkillCompilationError
   - SkillCompileError

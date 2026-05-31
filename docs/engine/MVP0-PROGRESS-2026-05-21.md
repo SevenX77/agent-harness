@@ -132,7 +132,7 @@ PR G 把 graph-agent engine 清到 V0.3.0 单轨, 不再把 V2.1 迁移机制描
 |---|---|---|
 | **Q-T-1** | V2TracingCallback 纯手工独立 / 继承 LangChain BaseCallbackHandler / 抽抽象基类 ? | 抽 `BaseV2Callback` 抽象基类 (跟现有 PredictTracingCallback 共享) |
 | **Q-T-P1-4** | V0.3.0 graph runtime callback 接回入口改 `graph_assembler.py` wrapper / 走 LangGraph Runnable callback tree ? | wrapper 显式投递 (等 Block 2 StateMapper 给 phase input/output) |
-| **Q-T-STREAM** | 流式 token 在线推送 + trace.jsonl 落盘 / 仅在线不落盘 ? | token 在线但默认不落, tool call 必落 |
+| **Q-T-STREAM** | 流式 token 在线推送 + tracing.jsonl 落盘 / 仅在线不落盘 ? | token 在线但默认不落, tool call 必落 |
 | **Q-T-PAYLOAD** | payload 截断防爆 复用/迁移 Predict `_sanitize_mapping` / 走 blob sidecar 长报文 ? | 复用 `_sanitize_mapping` (MVP0 不做 sidecar) |
 
 ---

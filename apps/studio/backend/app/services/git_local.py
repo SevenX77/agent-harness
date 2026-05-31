@@ -22,7 +22,6 @@ STUDIO_GITIGNORE = "\n".join(
     [
         "/.workspace/*",
         "!/.workspace/golden/",
-        "!/.workspace/predict/",
         "/.workspace/local_settings.json",
         "",
     ]

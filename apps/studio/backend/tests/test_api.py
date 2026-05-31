@@ -167,7 +167,6 @@ def test_create_skill(
     assert (skill_dir / ".gitignore").read_text(encoding="utf-8").splitlines() == [
         "/.workspace/*",
         "!/.workspace/golden/",
-        "!/.workspace/predict/",
         "/.workspace/local_settings.json",
     ]
     assert not (workspaces_dir / "default" / "skills" / "idea-generator" / "GRAPH.md").exists()
@@ -288,7 +287,7 @@ def test_resolve_skill_dir_uses_directory_path_when_set(
     assert file_paths["graph_md"] == str(skill_dir / "GRAPH.md")
     assert file_paths["runs_dir"] == str(skill_dir / ".workspace" / "runs")
     assert file_paths["golden_dir"] == str(skill_dir / ".workspace" / "golden")
-    assert file_paths["predict_dir"] == str(skill_dir / ".workspace" / "predict")
+    assert "predict_dir" not in file_paths
     assert file_paths["local_settings"] == str(skill_dir / ".workspace" / "local_settings.json")
 
 

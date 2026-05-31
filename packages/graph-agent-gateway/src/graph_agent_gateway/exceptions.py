@@ -5,12 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 try:
-    from graph_agent.core.exceptions import ExecutionError
+    from graph_agent.core.exceptions import ModelProviderError
 except Exception:  # pragma: no cover - fallback for standalone package import
-    ExecutionError = RuntimeError  # type: ignore[misc,assignment]
+    ModelProviderError = RuntimeError  # type: ignore[misc,assignment]
 
 
-class GatewayError(ExecutionError):
+class GatewayError(ModelProviderError):
     """Base class for gateway failures with a stable error code."""
 
     code: str

@@ -409,7 +409,7 @@ async def sync_catalog() -> dict[str, Any]:
         raise HTTPException(
             status_code=500,
             detail=f"Failed to sync catalog: {exc}",
-        )
+        ) from exc
 
 
 @router.post("/catalog/share")
@@ -442,7 +442,7 @@ async def share_catalog() -> dict[str, Any]:
         raise HTTPException(
             status_code=500,
             detail=f"Failed to share catalog evidence: {exc}",
-        )
+        ) from exc
 
 
 @router.get(

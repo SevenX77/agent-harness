@@ -23,13 +23,13 @@ from typing import Any
 
 import pytest
 
-pytestmark = pytest.mark.skip("GraphAgentHarness has been fully deprecated in V0.3.0")
-
 from graph_agent.callbacks.base import Callback
 from graph_agent.callbacks.events import RunEndedEvent
 from graph_agent.core.harness import GraphAgentHarness
 from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
 from graph_agent.core.types import Phase
+
+pytestmark = pytest.mark.skip("GraphAgentHarness has been fully deprecated in V0.3.0")
 
 
 class _CapturingCallback(Callback):

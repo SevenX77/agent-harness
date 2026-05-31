@@ -1631,7 +1631,6 @@ def _validate_sequential_overwrites(
     body_phase_refs: list[BodyPhaseRef],
     phase_docs: list[PhaseDocument],
 ) -> None:
-    doc_by_name = {doc.phase_name: doc for doc in phase_docs}
     depends_on_map = {ref.name: list(ref.depends_on) for ref in body_phase_refs}
 
     def get_ancestors(phase_name: str) -> set[str]:

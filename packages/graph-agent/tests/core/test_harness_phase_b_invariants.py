@@ -26,12 +26,12 @@ import inspect
 
 import pytest
 
-pytestmark = pytest.mark.skip("GraphAgentHarness has been fully deprecated in V0.3.0")
-
 from graph_agent.core.graph_builder import GraphBuilder
 from graph_agent.core.harness import GraphAgentHarness
 from graph_agent.core.phase_executor import PhaseExecutor
 from graph_agent.core.types import Phase
+
+pytestmark = pytest.mark.skip("GraphAgentHarness has been fully deprecated in V0.3.0")
 
 
 class _FakeModelResolver:

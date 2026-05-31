@@ -1,5 +1,5 @@
 import yaml from 'js-yaml'
-import type { IoDeclaration, PhaseDef, SkillDetail, SkillManifest } from '@/api/types'
+import type { IoDeclaration, PhaseDef, SkillDetail, SkillManifest, IoInput, IoOutput, GraphManifestV030 } from '@/api/types'
 import { INPUT_ID, OUTPUT_ID, type GlobalNodeData, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus, type SubagentRef } from '@/components/nodes'
 import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 
@@ -107,10 +107,14 @@ function phasesFromManifest(manifest: SkillManifest | undefined, skillId: string
 
 function ioFromManifest(manifest: SkillManifest | undefined): IoDeclaration {
   if (manifest?.schema_version === CURRENT_SCHEMA_VERSION) {
-    const io = (manifest as any).io
-    const inputs = io?.inputs?.properties ? Object.keys(io.inputs.properties).map((name) => ({ name, type: 'string', source: 'runtime' })) : []
-    const outputs = io?.outputs?.properties ? Object.keys(io.outputs.properties).map((name) => ({ name, type: 'string', target: 'file' })) : []
-    return { inputs: inputs as any, outputs: outputs as any }
+    const io = (manifest as GraphManifestV030).io
+    const inputs: IoInput[] = io?.inputs?.properties
+      ? Object.keys(io.inputs.properties).map((name) => ({ name, type: 'string', source: 'runtime', default: null }))
+      : []
+    const outputs: IoOutput[] = io?.outputs?.properties
+      ? Object.keys(io.outputs.properties).map((name) => ({ name, type: 'string', target: 'file', path: null }))
+      : []
+    return { inputs, outputs }
   }
   return manifest?.type === 'graph' ? manifest.io : EMPTY_IO
 }

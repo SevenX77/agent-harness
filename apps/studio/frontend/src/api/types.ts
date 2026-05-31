@@ -306,12 +306,12 @@ export interface GraphManifestV030 {
   io: {
     inputs: {
       type: 'object'
-      properties: Record<string, any>
+      properties: Record<string, unknown>
       required?: string[]
     }
     outputs: {
       type: 'object'
-      properties: Record<string, any>
+      properties: Record<string, unknown>
       required?: string[]
     }
   }

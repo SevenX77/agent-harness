@@ -558,6 +558,69 @@ describe('API Keys v4 registry adapter', () => {
     ])
   })
 
+  it('keeps the official endpoint connectivity check verified after catalog-only jobs', async () => {
+    const officialEndpoint: ProviderEndpoint = {
+      ...endpoint,
+      endpoint_id: 'openai-official',
+      display_name: 'OpenAI Official',
+      base_url: 'https://api.openai.com/v1',
+      api_key: 'sk-live',
+      provider_kind: 'official',
+    }
+    const putPayloads: Array<{ provider_endpoints: Record<string, ProviderEndpoint> }> = []
+    api.defaults.adapter = adapter((config) => {
+      if (config.method === 'put' && config.url === '/llm/registry/endpoints') {
+        const payload = typeof config.data === 'string' ? JSON.parse(config.data) : config.data
+        putPayloads.push(payload)
+        const savedEndpoint = {
+          ...officialEndpoint,
+          ...payload.provider_endpoints['openai-official'],
+          provider_kind: 'official',
+        }
+        return registry({
+          provider_endpoints: { 'openai-official': savedEndpoint },
+          provider_routes: {},
+        })
+      }
+      if (config.method === 'post' && config.url === '/llm/endpoints/openai-official/test-jobs') {
+        return {
+          job_id: 'job-1',
+          endpoint_id: 'openai-official',
+          status: 'completed',
+          total_model_count: 2,
+          tested_model_count: 0,
+          verified_route_count: 0,
+          failed_model_count: 0,
+          catalog_only_count: 0,
+          message: 'Connected in 42ms. Model seen: gpt-5.',
+          available_models: [
+            { id: 'gpt-5', route_id: 'openai-official:gpt-5', status: 'unverified_manual', verified_profile_count: 0, last_probe_message: null, capabilities: {} },
+          ],
+          available_sdks: ['openai_compatible'],
+        }
+      }
+      throw new Error(`Unexpected request: ${config.method} ${config.url}`)
+    })
+
+    await getProviderModels({
+      id: 'openai-official',
+      provider_type: 'openai_compatible',
+      api_key: 'sk-live',
+      base_url: 'https://api.openai.com/v1',
+    })
+    await putCredentials([
+      {
+        id: 'openai-official',
+        name: 'OpenAI Official',
+        provider_type: 'openai_compatible',
+        api_key: 'sk-live',
+        base_url: 'https://api.openai.com/v1',
+      },
+    ])
+
+    expect(putPayloads[1].provider_endpoints['openai-official'].status).toBe('verified')
+  })
+
   it('restores official catalog-only route candidates from endpoint capability library', async () => {
     const officialEndpoint: ProviderEndpoint = {
       ...endpoint,

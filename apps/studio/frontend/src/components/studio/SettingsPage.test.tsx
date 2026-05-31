@@ -10,6 +10,7 @@ import {
   moveProviderInRole,
   modelGroupsReferenceMissingCredentialProviders,
   notableProviderKeyForDraft,
+  officialProviderProgressToastMessage,
   officialProviderTestSummary,
   officialProviderDrafts,
   providerDraftForAction,
@@ -575,10 +576,96 @@ describe('Add Provider flow helpers', () => {
       { id: 'gpt-image-1', status: 'unverified_manual' },
     ])
   })
+
+  it('keeps live probe evidence when an official catalog refresh returns the same model as unverified', () => {
+    const draft = providerDraftForAction([], 'anthropic-official')
+    expect(draft).not.toBeNull()
+    const current: CredentialsState = {
+      providers: [
+        {
+          id: 'anthropic-official',
+          name: 'Anthropic Official',
+          api_key: 'sk-live',
+          base_url: 'https://api.anthropic.com',
+          provider_type: 'anthropic_compatible',
+          last_test_status: 'ok',
+          last_test_at: '2026-05-30T10:00:00Z',
+          last_test_message: 'Connected. Model seen: claude-opus-4-6.',
+          available_models: [
+            {
+              id: 'claude-opus-4-6',
+              route_id: 'anthropic-official:claude-opus-4.6',
+              status: 'verified',
+              verified_profile_count: 2,
+              capabilities: { thinking: true },
+            },
+            {
+              id: 'claude-old-failed',
+              route_id: 'anthropic-official:claude-old-failed',
+              status: 'failed',
+              last_probe_message: 'Provider returned HTTP 404 for this model.',
+            },
+          ],
+        },
+      ],
+    }
+
+    const next = upsertProviderModelsListResponse(current, draft!, {
+      status: 'ok',
+      message: 'Provider catalog reachable.',
+      available_models: [
+        {
+          id: 'claude-opus-4-6',
+          route_id: 'anthropic-official:claude-opus-4.6',
+          status: 'unverified_manual',
+          verified_profile_count: 0,
+          capabilities: { model_type: 'language_reasoning' },
+        },
+        {
+          id: 'claude-old-failed',
+          route_id: 'anthropic-official:claude-old-failed',
+          status: 'unverified_manual',
+        },
+      ],
+      available_sdks: ['anthropic_compatible'],
+    })
+
+    expect(next.providers[0].available_models).toEqual([
+      {
+        id: 'claude-opus-4-6',
+        route_id: 'anthropic-official:claude-opus-4.6',
+        status: 'verified',
+        verified_profile_count: 2,
+        capabilities: { model_type: 'language_reasoning', thinking: true },
+      },
+      {
+        id: 'claude-old-failed',
+        route_id: 'anthropic-official:claude-old-failed',
+        status: 'failed',
+        last_probe_message: 'Provider returned HTTP 404 for this model.',
+      },
+    ])
+  })
 })
 
 describe('SettingsPageContent (api_keys)', () => {
-  it('summarizes official provider Test results by verified route status, not route count', () => {
+  it('describes official provider catalog progress without generation-probe wording', () => {
+    expect(officialProviderProgressToastMessage('Anthropic Official', {
+      job_id: 'job-1',
+      endpoint_id: 'anthropic-official',
+      status: 'running',
+      total_model_count: 8,
+      tested_model_count: 0,
+      verified_route_count: 0,
+      failed_model_count: 0,
+      catalog_only_count: 0,
+      message: 'Reading provider catalog.',
+      available_models: [],
+      available_sdks: ['anthropic_compatible'],
+    })).toBe('Loading Anthropic Official route candidates (8 listed)...')
+  })
+
+  it('summarizes official provider Test results as catalog hydration, not generation probing', () => {
     expect(officialProviderTestSummary([
       { id: 'claude-haiku', status: 'verified' },
       { id: 'claude-opus-4-1', status: 'unverified_manual' },
@@ -587,7 +674,7 @@ describe('SettingsPageContent (api_keys)', () => {
       { id: 'claude-sonnet', status: 'failed' },
     ])).toEqual({
       kind: 'success',
-      message: 'Test complete (2 verified routes, 3 not verified)',
+      message: 'Catalog loaded (2 already verified, 3 not generation-probe verified)',
     })
   })
 

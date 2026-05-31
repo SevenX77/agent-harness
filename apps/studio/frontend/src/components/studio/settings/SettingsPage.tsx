@@ -76,10 +76,43 @@ function errorText(error: unknown): string {
   return chunks.join(" ")
 }
 
+function modelInfoEvidenceRank(model: ModelInfo): number {
+  if (
+    model.status === "verified" ||
+    (model.verified_profile_count ?? 0) > 0 ||
+    (model.verified_profiles ?? []).some((profile) => profile.status === "ready")
+  ) return 4
+  if (model.status === "failed") return 3
+  if (model.status === "disabled") return 2
+  if (model.status === "testing") return 1
+  return 0
+}
+
+function mergeModelInfo(previous: ModelInfo, incoming: ModelInfo): ModelInfo {
+  const previousRank = modelInfoEvidenceRank(previous)
+  const incomingRank = modelInfoEvidenceRank(incoming)
+  const winner = incomingRank >= previousRank ? incoming : previous
+  const base = winner === incoming ? previous : incoming
+  const merged: ModelInfo = { ...base, ...winner }
+  const mergedCapabilities = {
+    ...(base.capabilities ?? {}),
+    ...(winner.capabilities ?? {}),
+  }
+  if (Object.keys(mergedCapabilities).length > 0) {
+    merged.capabilities = mergedCapabilities
+  } else {
+    delete merged.capabilities
+  }
+  return merged
+}
+
 function mergeModelInfos(left: ModelInfo[] = [], right: ModelInfo[] = []): ModelInfo[] {
   const merged = new Map<string, ModelInfo>()
   for (const model of left) merged.set(model.id, model)
-  for (const model of right) merged.set(model.id, model)
+  for (const model of right) {
+    const previous = merged.get(model.id)
+    merged.set(model.id, previous ? mergeModelInfo(previous, model) : model)
+  }
   return Array.from(merged.values())
 }
 
@@ -87,17 +120,15 @@ function mergeStrings(left: string[] = [], right: string[] = []): string[] {
   return Array.from(new Set([...left, ...right]))
 }
 
-function officialProviderProgressToastMessage(
+export function officialProviderProgressToastMessage(
   providerName: string,
   job: EndpointTestJobResponse,
 ): string {
   const total = job.total_model_count
-  const tested = job.tested_model_count
-  const verified = job.verified_route_count
   if (total > 0) {
-    return `Testing ${providerName} routes (${tested}/${total}, ${verified} verified)...`
+    return `Loading ${providerName} route candidates (${total} listed)...`
   }
-  return `Testing ${providerName} routes...`
+  return `Checking ${providerName} endpoint and provider catalog...`
 }
 
 function resetProviderTestOutcome(
@@ -123,16 +154,18 @@ export function officialProviderTestSummary(models: ModelInfo[]): {
   if (verifiedCount === 0) {
     return {
       kind: "warning",
-      message: "Provider catalog is reachable, but no routes passed testing.",
+      message: "Provider catalog is reachable. Routes need single-model tests for live verification.",
     }
   }
-  const verifiedLabel = verifiedCount === 1 ? "1 verified route" : `${verifiedCount} verified routes`
-  const notVerifiedLabel = notVerifiedCount === 1 ? "1 not verified" : `${notVerifiedCount} not verified`
+  const verifiedLabel = verifiedCount === 1 ? "1 already verified" : `${verifiedCount} already verified`
+  const notVerifiedLabel = notVerifiedCount === 1
+    ? "1 not generation-probe verified"
+    : `${notVerifiedCount} not generation-probe verified`
   return {
     kind: "success",
     message: notVerifiedCount > 0
-      ? `Test complete (${verifiedLabel}, ${notVerifiedLabel})`
-      : `Test complete (${verifiedLabel})`,
+      ? `Catalog loaded (${verifiedLabel}, ${notVerifiedLabel})`
+      : `Catalog loaded (${verifiedLabel})`,
   }
 }
 
@@ -545,7 +578,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     const toastId = `get-models-${providerId}`
     toast.loading(
       isOfficial
-        ? `Testing ${draft.name || "provider"} routes...`
+        ? `Checking ${draft.name || "provider"} endpoint and loading route candidates...`
         : `Getting models for ${draft.name || "provider"}...`,
       { id: toastId },
     )

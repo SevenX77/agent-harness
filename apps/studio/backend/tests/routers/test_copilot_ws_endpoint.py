@@ -326,6 +326,32 @@ def test_stream_query_yields_error_when_no_api_key(
     assert events == [CopilotEventError(message="Endpoint test-provider 未配置 API key")]
 
 
+def test_stream_query_yields_clear_error_for_credential_ref_only_route(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        copilot_service,
+        "_resolve_copilot_routes",
+        lambda _override: [
+            _resolved_route(api_key=None, credential_ref="cred:test-provider")
+        ],
+    )
+
+    events = asyncio.run(
+        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+    )
+
+    assert events == [
+        CopilotEventError(
+            message=(
+                "endpoint has no inline credential; "
+                "CredentialProvider integration is required: test-provider"
+            )
+        )
+    ]
+
+
 async def _events(*items: object) -> AsyncIterator[object]:
     for item in items:
         yield item
@@ -369,7 +395,8 @@ class FailingClient(FakeClient):
 
 def _resolved_route(
     *,
-    api_key: str,
+    api_key: str | None,
+    credential_ref: str | None = None,
     base_url: str = "https://provider.test",
     route_id: str = "test-provider:claude-test",
     endpoint_id: str = "test-provider",
@@ -384,6 +411,7 @@ def _resolved_route(
         endpoint_id=endpoint_id,
         protocol=protocol,
         base_url=base_url,
+        credential_ref=credential_ref,
         api_key=api_key,
         credential_fingerprint="fp",
         provider_model_id=provider_model_id,

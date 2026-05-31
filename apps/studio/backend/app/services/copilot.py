@@ -206,7 +206,14 @@ async def stream_query(
 
     failures: list[str] = []
     for route in routes:
-        api_key, base_url, env_overrides = _resolve_route_runtime(route)
+        try:
+            api_key, base_url, env_overrides = _resolve_route_runtime(route)
+        except ValueError as exc:
+            if len(routes) == 1:
+                yield CopilotEventError(message=str(exc))
+                return
+            failures.append(f"{route.route_id}: {exc}")
+            continue
         if not api_key:
             if len(routes) == 1:
                 yield CopilotEventError(
@@ -417,6 +424,11 @@ def _resolve_copilot_route(model_override: str | None) -> ResolvedRoute:
 
 
 def _resolve_route_runtime(route: ResolvedRoute) -> tuple[str, str | None, dict[str, str]]:
+    if route.api_key is None:
+        raise ValueError(
+            "endpoint has no inline credential; CredentialProvider integration is required: "
+            f"{route.endpoint_id}"
+        )
     api_key = route.api_key.get_secret_value().strip()
     base_url = route.base_url.strip() or None
     env_overrides: dict[str, str] = {}

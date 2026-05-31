@@ -1085,7 +1085,6 @@ function endpointToCredential(
 function registryToCredentials(registry: CredentialRegistryResponse): CredentialsState {
   return {
     providers: Object.values(registry.provider_endpoints)
-      .sort((left, right) => left.endpoint_id.localeCompare(right.endpoint_id))
       .map((endpoint) => endpointToCredential(registry, endpoint)),
   }
 }

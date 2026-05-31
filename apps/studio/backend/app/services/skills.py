@@ -1033,6 +1033,61 @@ async def _detail_from_manifest_async(
     )
 
 
+def _parse_broken_graph_topology_and_phases(
+    skill_dir: Path,
+) -> tuple[list[str], list[dict[str, object]]]:
+    graph_path = skill_dir / "GRAPH.md"
+    if not graph_path.exists():
+        return [], []
+    try:
+        content = graph_path.read_text(encoding="utf-8")
+        parts = content.split("---")
+        if len(parts) < 3:
+            return [], []
+        frontmatter_raw = parts[1]
+        body = "---".join(parts[2:])
+
+        import yaml
+        frontmatter = yaml.safe_load(frontmatter_raw) or {}
+        phases = frontmatter.get("phases", [])
+        if not isinstance(phases, list):
+            phases = []
+
+        import re
+        phase_pattern = re.compile(r"<phase\b([^>]*?)>(.*?)</phase>", re.IGNORECASE | re.DOTALL)
+
+        topology = []
+        for match in phase_pattern.finditer(body):
+            attributes = match.group(1).strip()
+            tag_content = match.group(2).strip()
+
+            dep_match = re.search(r'depends_on=["\']([^"\']+)["\']', attributes, re.IGNORECASE)
+            depends_on_list = []
+            if dep_match:
+                deps = dep_match.group(1).strip()
+                depends_on_list = [d.strip() for d in deps.split(",") if d.strip()]
+
+            mode = ""
+            phase_dir = skill_dir / "phases" / tag_content
+            if (phase_dir / "LOGIC.md").exists():
+                mode = "logic"
+            elif (phase_dir / "SUBGRAPH.md").exists():
+                mode = "subgraph"
+            elif (phase_dir / "SKILL.md").exists():
+                mode = "agent"
+
+            topology.append({
+                "id": tag_content,
+                "src": f"phases/{tag_content}",
+                "depends_on": depends_on_list,
+                "mode": mode,
+            })
+
+        return [str(p) for p in phases], topology
+    except Exception:
+        return [], []
+
+
 async def _broken_detail_from_files_async(
     user_id: str,
     skill_id: str,
@@ -1042,6 +1097,7 @@ async def _broken_detail_from_files_async(
     metadata: MetadataStore,
 ) -> SkillDetail:
     latest = await latest_run_metadata_async(user_id, skill_id, metadata)
+    phases, topology = _parse_broken_graph_topology_and_phases(skill_dir)
     return SkillDetail(
         manifest=GraphManifest(
             schema_version="v0.3.0",
@@ -1051,9 +1107,9 @@ async def _broken_detail_from_files_async(
                 "inputs": {"type": "object", "properties": {}},
                 "outputs": {"type": "object", "properties": {}},
             },
-            phases=[],
+            phases=phases,
         ),
-        graph_topology=[],
+        graph_topology=topology,
         node_schema_v21=_node_schema_v21(),
         io_schema={},
         file_paths={

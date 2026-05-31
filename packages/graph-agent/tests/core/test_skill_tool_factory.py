@@ -67,7 +67,7 @@ def test_build_skill_tool_invokes_runner_and_returns_final_output(
         path: Path,
         *,
         thread_id: str,
-        trace_dir: Path | None,
+        workspace_dir: Path,
         initial_context: dict[str, Any],
         skill_resolver: object,
     ) -> dict[str, dict[str, str]]:
@@ -75,7 +75,7 @@ def test_build_skill_tool_invokes_runner_and_returns_final_output(
             {
                 "path": path,
                 "thread_id": thread_id,
-                "trace_dir": trace_dir,
+                "workspace_dir": workspace_dir,
                 "initial_context": initial_context,
                 "skill_resolver": skill_resolver,
             }
@@ -100,7 +100,7 @@ def test_build_skill_tool_invokes_runner_and_returns_final_output(
         {
             "path": skill_path,
             "thread_id": calls[0]["thread_id"],
-            "trace_dir": tmp_path / "traces" / "sub_child_tool",
+            "workspace_dir": tmp_path / "traces",
             "initial_context": {"topic": "contracts"},
             "skill_resolver": calls[0]["skill_resolver"],
         }
@@ -121,10 +121,11 @@ def test_build_skill_tool_returns_error_when_final_output_missing(
         path: Path,
         *,
         thread_id: str,
-        trace_dir: Path | None,
+        workspace_dir: Path,
         initial_context: dict[str, Any],
         skill_resolver: object,
     ) -> dict[str, dict[str, str]]:
+        del workspace_dir
         return {"context": {}}
 
     monkeypatch.setattr(runner, "run_skill", fake_run_skill)

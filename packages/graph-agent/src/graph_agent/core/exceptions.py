@@ -100,14 +100,30 @@ class GraphAgentError(Exception):
         self.context = context or {}
 
 
-class GraphAgentFatalError(GraphAgentError):
+class GraphCompileError(GraphAgentError):
+    """Compile, parse, schema, contract, and input-resource failures."""
+
+
+class GraphExecutionError(GraphAgentError):
+    """Runtime execution, state transition, tool, trace, and artifact failures."""
+
+
+class ModelProviderError(GraphAgentError):
+    """Gateway, provider, role, model, and fallback failures."""
+
+
+class ResourceNotFoundError(GraphAgentError):
+    """Resource, skill reference, and workspace path resolution failures."""
+
+
+class GraphAgentFatalError(GraphExecutionError):
     """Fail-fast graph_agent error for violated hard invariants."""
 
 
 # === Loader-time errors (SKILL load / parse / module / phase build) ===
 
 
-class LoaderError(GraphAgentError):
+class LoaderError(GraphCompileError):
     """SKILL loading failed before any execution.
 
     Raise this from parser, loader, compiler, and phase-construction code when
@@ -158,7 +174,7 @@ class SkillCompileError(LoaderError):
 # === Validation errors (schema / contract / pre-flight) ===
 
 
-class ValidationError(GraphAgentError):
+class ValidationError(GraphCompileError):
     """Validation failed before or around execution.
 
     Raise this when data is syntactically loaded but violates a schema,
@@ -188,7 +204,7 @@ class ContractValidationError(ValidationError):
 # === Execution errors (phase execution / state transformation) ===
 
 
-class ExecutionError(GraphAgentError):
+class ExecutionError(GraphExecutionError):
     """Runtime graph execution failed.
 
     Raise this after a graph has started running. Orchestration boundaries
@@ -218,7 +234,7 @@ class StateTransformError(ExecutionError):
 # === Tool execution errors ===
 
 
-class ToolExecutionError(GraphAgentError):
+class ToolExecutionError(GraphExecutionError):
     """A registered tool raised during execution.
 
     Raise this at tool execution boundaries when a tool failure must be surfaced
@@ -231,7 +247,7 @@ class ToolExecutionError(GraphAgentError):
 # === Persistence errors (file / artifact / checkpoint / trace) ===
 
 
-class PersistenceError(GraphAgentError):
+class PersistenceError(GraphExecutionError):
     """Persistence layer failed.
 
     Raise this for file, artifact, checkpoint, or trace persistence failures.
@@ -267,13 +283,13 @@ class ArtifactError(PersistenceError):
     """
 
 
-# Backward-compatible names kept here so existing public imports continue to
-# resolve while the MVP-0 hierarchy lands in the scoped file set.
+# Backward-compatible leaf names kept here for internal implementation detail
+# imports while the top-level SDK surface exposes only family classes.
 class SkillLoadError(LoaderError):
     """Compatibility loader error for existing load-time call sites."""
 
 
-class SkillCompilationError(GraphAgentError):
+class SkillCompilationError(GraphCompileError):
     """SKILL.md compile failure with detailed context."""
 
     def __init__(

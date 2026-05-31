@@ -112,7 +112,7 @@ audit A4 说 subagent 抽象层级过重，见 `docs.backup-2026-05-20/engine/gr
 
 ### `run_skill`
 
-`run_skill()` 的 Python API 在 `packages/graph-agent/src/graph_agent/core/runner.py:161`。它接受 `mock_llm`、`trace_dir`、`thread_id`、`unattended`、`callbacks`、`artifact_saver`、`initial_context`、`cleanup_checkpoints_on_finish` 和 `**inputs`，见 `packages/graph-agent/src/graph_agent/core/runner.py:161` 到 `packages/graph-agent/src/graph_agent/core/runner.py:172`。
+`run_skill()` 的 Python API 在 `packages/graph-agent/src/graph_agent/core/runner.py`。它接受必填 keyword-only `workspace_dir: Path`，并接受 `mock_llm`、`thread_id`、`unattended`、`callbacks`、`artifact_saver`、`initial_context`、`cleanup_checkpoints_on_finish`、`skill_resolver`、`model_resolver` 和 `**inputs`。`trace_dir` 已从 public 签名删除；trace 与 run artifacts 统一写入 `<workspace_dir>/runs/<run_id>/`。
 
 V0.3 分支里，`callbacks` 作为参数接收并透传给 `assemble_graph`，见 `packages/graph-agent/src/graph_agent/core/runner.py:474` 和 `packages/graph-agent/src/graph_agent/core/runner.py:496` 到 `packages/graph-agent/src/graph_agent/core/runner.py:500`。这对应 audit P1-4 的当前现状：V0.3 主线没有接回旧 harness 的 callbacks / trace / heartbeat 等能力，见 `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md:360`。
 
@@ -148,7 +148,7 @@ P1-2：subagent depth 没进入 child flow。现状是 depth 写进 RunnableConf
 
 P1-3：exit_contract 累积。现状是每轮把注入后的 `prompt_messages` 保存回 `messages`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:243` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:246`。
 
-P1-4：callbacks/trace 未接 V0.3 主线。现状是 V0.3 `_run_v030_skill_dict()` 接收 callbacks 并透传给 graph assembly，见 `packages/graph-agent/src/graph_agent/core/runner.py:474` 和 `packages/graph-agent/src/graph_agent/core/runner.py:496` 到 `packages/graph-agent/src/graph_agent/core/runner.py:500`，只返回一个按 `trace_dir` 拼出来的 trace path 字符串，见 `packages/graph-agent/src/graph_agent/core/runner.py:516`。
+P1-4：callbacks/trace 未接 V0.3 主线（已过时）。现状是 V0.3 `_run_v030_skill_dict()` 接收 callbacks 并透传给 graph assembly，见 `packages/graph-agent/src/graph_agent/core/runner.py:474` 和 `packages/graph-agent/src/graph_agent/core/runner.py:496` 到 `packages/graph-agent/src/graph_agent/core/runner.py:500`。目前即使不传 callbacks，引擎也会自动 attach TracingCallback 落盘 (含 phase events + crashed 黑匣子)。
 
 A4/A5：subagent 目前是完整 graph skill，call_subgraph tool 尚不存在。现状分别见 `packages/graph-agent/src/graph_agent/core/loader.py:477` 到 `packages/graph-agent/src/graph_agent/core/loader.py:482` 和 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:184` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:227`。
 

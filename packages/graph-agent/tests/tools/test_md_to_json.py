@@ -11,7 +11,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
 import graph_agent.tools.md_to_json as md_to_json_module
-from graph_agent.core.exceptions import SkillLoadError
+from graph_agent.core.exceptions import SkillLoadError, make_error_payload
 from graph_agent.core.result import WorkflowResult
 from graph_agent.tools.md_to_json import (
     BlockMeta,
@@ -158,7 +158,10 @@ def test_md_to_json_patch_path_run_skill_failure_raises_skill_load_error(
             run_id="r1",
             skill_id="md-patch",
             context={},
-            error="[F-v3-graph-root-missing] missing required GRAPH.md",
+            error=make_error_payload(
+                "[F-v3-graph-root-missing]",
+                "[F-v3-graph-root-missing] missing required GRAPH.md",
+            ),
             started_at=now,
             finished_at=now,
         )

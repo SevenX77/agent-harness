@@ -53,6 +53,12 @@ public_api_symbols:
   GraphAgentError:
     feature_ids:
     - F-error-code-recovery
+  GraphCompileError:
+    feature_ids:
+    - F-error-code-recovery
+  GraphExecutionError:
+    feature_ids:
+    - F-error-code-recovery
   GraphManifest:
     feature_ids:
     - F-graph-skill-loading
@@ -92,6 +98,9 @@ public_api_symbols:
   MockStrategy:
     feature_ids:
     - F-predict-internal-mocking
+  ModelProviderError:
+    feature_ids:
+    - F-error-code-recovery
   NudgeEvent:
     feature_ids:
     - F-error-code-recovery
@@ -125,6 +134,9 @@ public_api_symbols:
   ResolvedProvider:
     feature_ids:
     - F-model-configuration
+  ResourceNotFoundError:
+    feature_ids:
+    - F-error-code-recovery
   RetryEvent:
     feature_ids:
     - F-error-code-recovery

@@ -59,13 +59,15 @@ PR-5 追加完成了同一领域的 shipped 健壮性补强：`ModuleSandbox` �
 | 对象 | 当前位置 | 对齐说明 |
 |---|---:|---|
 | `SKILL_ID_PATTERN` | line 11 | registry key grammar，允许 `A-Z/a-z/0-9/_.-` |
-| `SkillResolutionError` | line 15 | resolver 域统一异常 |
+| `SkillResolutionError` | line 15 | Engine 内部 resolver leaf；IS-A `ResourceNotFoundError` public family |
 | `SkillResolverProtocol.resolve_skill` | line 35 | 单方法协议，返回 `str | Path` |
 | `validate_skill_id` | line 39 | 失败抛 `[F-v3-resolver-skill-id-invalid]` |
 | `resolve_skill_root` | line 50 | 调 resolver 并校验 root 是目录且含 `GRAPH.md` |
 | `require_skill_resolver` | line 79 | resolver 缺失抛 `[F-v3-resolver-missing]` |
 
 `[F-v3-resolver-interface-invalid]` 仍是 spec 错误码，但当前 src 没有主动 runtime trigger。PR δ 没有实现 resolver object 结构探测；调用点依赖 Python Protocol / 方法调用失败语义。
+
+PR-A 后，`SkillResolutionError` 不再属于 compile family。内部 helper 仍可 raise 这个 leaf；跨 SDK / Studio 边界的调用方应 catch `ResourceNotFoundError`，并用 `ErrorPayload.code` 区分 `[F-v3-skill-not-registered]`、`[F-v3-resolver-path-invalid]`、`[F-v3-resolver-missing]` 等 resolver 细粒度。
 
 ## 4. Engine 入口对齐
 

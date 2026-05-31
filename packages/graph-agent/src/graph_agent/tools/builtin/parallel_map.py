@@ -18,9 +18,8 @@ Behaviour:
   event with them so Studio can collapse the fan-out into one folded
   timeline group (Gemini audit Major #1).
 * Parent callbacks propagate to child runs through the explicit
-  ``callbacks`` parameter; each child also gets a per-run
-  ``TracingCallback`` when one is not supplied so its own
-  ``tracing.jsonl`` still gets written to ``trace_dir``.
+  ``callbacks`` parameter; each child writes its own run-scoped
+  ``tracing.jsonl`` under the workspace root passed as ``trace_dir``.
 * Errors inside a sub-run are captured and surfaced in the returned
   list as ``{"error": "..."}`` entries — a single bad item does not
   halt the whole fan-out. Callers that want fail-fast semantics can
@@ -69,9 +68,9 @@ def parallel_map(
             ``_sub_run_id`` / ``_group_key`` grouping keys.
         callbacks: Callback list propagated to each child's ``run_skill``.
             Defaults to the child's own fresh trace callbacks when ``None``.
-        trace_dir: Directory under which each child run writes its
-            per-run JSONL + ``tracing.jsonl``. When ``None`` the child
-            falls back to ``inputs['output_dir']/traces`` if available.
+        trace_dir: Workspace root under which each child run writes
+            ``runs/<sub_run_id>/`` artifacts. When ``None`` the child
+            falls back to ``Path.cwd() / ".workspace"``.
         stop_on_error: Re-raise the first child exception instead of
             collecting it into the results list.
 
@@ -303,11 +302,13 @@ def _run_one_item(
         group_key,
         skill_path,
     )
+    workspace_dir = Path(trace_dir).resolve() if trace_dir is not None else Path.cwd() / ".workspace"
     result = run_skill(
         skill_path,
-        trace_dir=trace_dir,
+        workspace_dir=workspace_dir,
         callbacks=callbacks,
         skill_resolver=skill_resolver,
+        thread_id=sub_run_id,
         **inputs,
     )
     logger.info(

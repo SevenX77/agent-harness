@@ -60,6 +60,7 @@ def test_run_skill_dict_omitted_mock_llm_passes_no_chat_model(
 
     runner_module._run_skill_dict(
         skill_root,
+        workspace_dir=tmp_path / "workspace",
         callbacks=[],
         cleanup_checkpoints_on_finish=False,
         skill_resolver=mock_skill_resolver,
@@ -94,6 +95,7 @@ def test_run_skill_dict_explicit_mock_none_is_passed_as_chat_model(
 
     runner_module._run_skill_dict(
         skill_root,
+        workspace_dir=tmp_path / "workspace",
         callbacks=[],
         cleanup_checkpoints_on_finish=False,
         skill_resolver=mock_skill_resolver,
@@ -127,6 +129,7 @@ def test_run_skill_dict_uses_model_resolver_when_mock_llm_omitted(
 
     runner_module._run_skill_dict(
         skill_root,
+        workspace_dir=tmp_path / "workspace",
         callbacks=[],
         cleanup_checkpoints_on_finish=False,
         skill_resolver=mock_skill_resolver,

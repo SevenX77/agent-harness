@@ -16,8 +16,7 @@ from typing import Any, NoReturn
 
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
-from graph_agent import compile_skill
-from graph_agent.core.exceptions import GraphAgentError, SkillCompilationError, SkillLoadError
+from graph_agent import GraphAgentError, GraphCompileError, ResourceNotFoundError, compile_skill
 from graph_agent.core.graph_serializer import serialize_graph
 from graph_agent.core.loader import CompiledSkill, SkillLoader
 from graph_agent.core.manifest import (
@@ -315,7 +314,7 @@ def lint_skill_path(skill_path: Path) -> LintResult:
     """Compile a V2.1 skill root into Studio lint diagnostics."""
     try:
         compiled = compile_skill(skill_path, skill_resolver=build_studio_skill_resolver())
-    except (SkillLoadError, SkillCompilationError) as exc:
+    except (GraphCompileError, ResourceNotFoundError) as exc:
         return LintResult(status="failed", errors=[_lint_error_from_exception(exc)])
     return LintResult(
         status="passed",
@@ -338,7 +337,7 @@ async def compile_skill_for_studio(
             cache=False,
             skill_resolver=build_studio_skill_resolver(),
         )
-    except (SkillLoadError, SkillCompilationError) as exc:
+    except (GraphCompileError, ResourceNotFoundError) as exc:
         raise CompileFailedError(_compile_failure_from_exception(exc, skill_dir)) from exc
     return CompileSuccess(
         skill_id=skill_id,
@@ -778,10 +777,6 @@ def golden_dir_for(skill_dir: Path) -> Path:
     return workspace_dir_for(skill_dir) / "golden"
 
 
-def predict_dir_for(skill_dir: Path) -> Path:
-    return workspace_dir_for(skill_dir) / "predict"
-
-
 def local_settings_path_for(skill_dir: Path) -> Path:
     return workspace_dir_for(skill_dir) / "local_settings.json"
 
@@ -996,7 +991,6 @@ def _detail_from_manifest(
             "runs_dir": str(runs_dir_for(skill_dir)),
             "test_inputs_dir": str(test_inputs_dir_for_skill(skill_dir)),
             "golden_dir": str(golden_dir_for(skill_dir)),
-            "predict_dir": str(predict_dir_for(skill_dir)),
             "local_settings": str(local_settings_path_for(skill_dir)),
         },
         files=_read_skill_files(skill_dir),
@@ -1028,7 +1022,6 @@ async def _detail_from_manifest_async(
             "runs_dir": str(runs_dir_for(skill_dir)),
             "test_inputs_dir": str(test_inputs_dir_for_skill(skill_dir)),
             "golden_dir": str(golden_dir_for(skill_dir)),
-            "predict_dir": str(predict_dir_for(skill_dir)),
             "local_settings": str(local_settings_path_for(skill_dir)),
         },
         files=_read_skill_files(skill_dir),
@@ -1068,7 +1061,6 @@ async def _broken_detail_from_files_async(
             "runs_dir": str(runs_dir_for(skill_dir)),
             "test_inputs_dir": str(test_inputs_dir_for_skill(skill_dir)),
             "golden_dir": str(golden_dir_for(skill_dir)),
-            "predict_dir": str(predict_dir_for(skill_dir)),
             "local_settings": str(local_settings_path_for(skill_dir)),
         },
         # Broken/V1 details still expose the real asset tree for the Explorer panel.
@@ -1184,7 +1176,7 @@ async def serialize_skill_graph_markdown(
     except CanvasSerializerFatal as exc:
         exc.elapsed_ms = (time.perf_counter() - started) * 1000
         raise
-    except (GraphAgentError, SkillLoadError, SkillCompilationError) as exc:
+    except GraphAgentError as exc:
         elapsed_ms = (time.perf_counter() - started) * 1000
         raise _serializer_fatal_from_engine_error(exc, elapsed_ms) from exc
     elapsed_ms = (time.perf_counter() - started) * 1000

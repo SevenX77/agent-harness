@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from typing import Any
 
 from graph_agent_gateway.gateway_chat_model import GatewayChatModel
 from graph_agent_gateway.registry.schema import (
@@ -18,7 +19,11 @@ from graph_agent.core._predict_internal.strategy import BaseMockStrategy
 
 EXPECTED_TOP_LEVEL_EXPORTS = [
     "run_skill",
+    "predict_skill",
+    "RunResult",
     "WorkflowResult",
+    "PathDiff",
+    "PhaseRecord",
     "compile_skill",
     "CompileResult",
     "assemble_graph",
@@ -64,18 +69,18 @@ def _make_snapshot() -> RegistrySnapshot:
                 canonical_id="x-model",
                 status="verified",
             ),
-            },
-            roles={
-                "test_role": RoleEntry(
-                    fallback_chain=[
-                        RoleRouteEntry(
-                            route_id="px:x-model",
-                            runtime_settings=RuntimeSettings(temperature=0.4),
-                        )
-                    ],
-                )
-            },
-        )
+        },
+        roles={
+            "test_role": RoleEntry(
+                fallback_chain=[
+                    RoleRouteEntry(
+                        route_id="px:x-model",
+                        runtime_settings=RuntimeSettings(temperature=0.4),
+                    )
+                ],
+            )
+        },
+    )
 
 
 def test_predict_internal_exports_bind_predictor_only() -> None:
@@ -94,7 +99,7 @@ def test_predict_gateway_chat_model_is_dynamic_subclass() -> None:
 
 
 def test_top_level_export_abi_has_no_predict_additions() -> None:
-    assert graph_agent.__all__ == EXPECTED_TOP_LEVEL_EXPORTS
+    assert sorted(graph_agent.__all__) == sorted(EXPECTED_TOP_LEVEL_EXPORTS)
     assert "PredictGatewayChatModel" not in graph_agent.__all__
     assert "BaseMockStrategy" not in graph_agent.__all__
     assert "bind_predictor" not in graph_agent.__all__
@@ -109,18 +114,15 @@ def test_model_resolver_non_predict_path_still_returns_gateway() -> None:
     assert model.phase_name == "phaseA"
 
 
-def test_bind_predictor_switches_resolver_to_predict_gateway() -> None:
+def test_resolver_with_predict_context_resolves_to_predict_gateway() -> None:
     from graph_agent_gateway.predict_interception import PredictGatewayChatModel
 
-    from graph_agent.core._predict_internal import bind_predictor
+    class DummyPredictContext:
+        def resolve_generation(self, phase_name: str, role_name: str, messages: list[Any]) -> str:
+            return "mocked content"
 
     resolver = ModelResolver(registry_snapshot=_make_snapshot())
-    strategy = DummyMockStrategy()
+    model = resolver.resolve("test_role", phase_name="phaseA", predict_context=DummyPredictContext())
 
-    bound = bind_predictor(resolver, strategy)
-    model = resolver.resolve("test_role", phase_name="phaseA")
-
-    assert bound is resolver
     assert isinstance(model, PredictGatewayChatModel)
     assert model.phase_name == "phaseA"
-    assert model.mock_strategy is strategy

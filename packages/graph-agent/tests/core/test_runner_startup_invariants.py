@@ -95,9 +95,9 @@ class TestRunnerMainBootstrapWiring:
         fake_bootstrap.apply_patches.side_effect = lambda: call_order.append("apply_patches")
         fake_bootstrap.load_settings.side_effect = lambda: call_order.append("load_settings")
 
-        def _fake_run_skill(*_args: object, **_kwargs: object) -> dict[str, object]:
+        def _fake_run_skill(*_args: object, **_kwargs: object) -> Any:
             call_order.append("run_skill")
-            return {"wall_time_sec": 0.0, "metrics": {}, "trace_path": None}
+            return MagicMock(wall_time_sec=0.0, metrics={}, trace_path=None)
 
         with (
             patch("graph_agent.bootstrap.Bootstrap", return_value=fake_bootstrap),
@@ -137,8 +137,8 @@ class TestRunnerMainBootstrapWiring:
             call_order.append("load_dotenv")
             return True
 
-        def _fake_run_skill(*_args: object, **_kwargs: object) -> dict[str, object]:
-            return {"wall_time_sec": 0.0, "metrics": {}, "trace_path": None}
+        def _fake_run_skill(*_args: object, **_kwargs: object) -> Any:
+            return MagicMock(wall_time_sec=0.0, metrics={}, trace_path=None)
 
         with (
             patch("graph_agent.bootstrap.Bootstrap", return_value=fake_bootstrap),
@@ -165,9 +165,9 @@ class TestRunnerMainBootstrapWiring:
         fake_bootstrap = MagicMock(spec=Bootstrap)
         captured_kwargs: dict[str, object] = {}
 
-        def _fake_run_skill(*_args: object, **kwargs: object) -> dict[str, object]:
+        def _fake_run_skill(*_args: object, **kwargs: object) -> Any:
             captured_kwargs.update(kwargs)
-            return {"wall_time_sec": 0.0, "metrics": {}, "trace_path": None}
+            return MagicMock(wall_time_sec=0.0, metrics={}, trace_path=None)
 
         with (
             patch("graph_agent.bootstrap.Bootstrap", return_value=fake_bootstrap),

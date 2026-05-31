@@ -119,13 +119,16 @@ def test_md_to_json_patch_path_sends_wrapped_error_items(
 
     def fake_run_skill(*args, **kwargs):
         calls.append(kwargs)
-        return {
-            "context": {
+        return WorkflowResult(
+            success=True,
+            run_id="test-run",
+            skill_id="md-patch",
+            context={
                 "final_results": [
                     {"index": 1, "type": "B", "content": "opening beat"},
                 ]
             }
-        }
+        )
 
     monkeypatch.setattr(md_to_json_module, "run_skill", fake_run_skill)
 

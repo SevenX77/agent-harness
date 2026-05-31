@@ -94,6 +94,7 @@ def assemble_graph(
     callbacks: list[Any] | None = None,
     skill_resolver: SkillResolverProtocol,
     checkpointer: Any = None,
+    predict_context: Any = None,
     _loading_stack: tuple[str, ...] = (),
     _compilation_cache: dict[str, CompiledSkill] | None = None,
 ) -> CompiledStateGraph:
@@ -127,6 +128,7 @@ def assemble_graph(
                 checkpointer,
                 _loading_stack,
                 _compilation_cache,
+                predict_context=predict_context,
             ),
         )
         phase_ids.append(phase_id)
@@ -165,6 +167,7 @@ def _build_phase_node(
     checkpointer: Any,
     _loading_stack: tuple[str, ...],
     _compilation_cache: dict[str, CompiledSkill],
+    predict_context: Any = None,
 ) -> Any:
     ast = phase_doc.ast
     if isinstance(ast, LogicNodeAST):
@@ -190,6 +193,7 @@ def _build_phase_node(
                 checkpointer=checkpointer,
                 _loading_stack=_loading_stack,
                 _compilation_cache=_compilation_cache,
+                predict_context=predict_context,
             ),
             node_kind="subgraph",
             callbacks=callbacks,
@@ -210,6 +214,7 @@ def _build_phase_node(
                 skill_resolver,
                 _loading_stack,
                 _compilation_cache,
+                predict_context=predict_context,
             ),
             node_kind="agent",
             callbacks=callbacks,
@@ -367,6 +372,7 @@ def _build_subgraph_node(
     checkpointer: Any = None,
     _loading_stack: tuple[str, ...] = (),
     _compilation_cache: dict[str, CompiledSkill] | None = None,
+    predict_context: Any = None,
 ) -> Any:
     if _compilation_cache is None:
         _compilation_cache = {}
@@ -388,6 +394,7 @@ def _build_subgraph_node(
         callbacks=callbacks,
         skill_resolver=skill_resolver,
         checkpointer=checkpointer,
+        predict_context=predict_context,
         _loading_stack=_loading_stack,
         _compilation_cache=_compilation_cache,
     )
@@ -425,6 +432,7 @@ def _build_skill_node(
     skill_resolver: SkillResolverProtocol,
     _loading_stack: tuple[str, ...],
     _compilation_cache: dict[str, CompiledSkill],
+    predict_context: Any = None,
 ) -> Any:
     phase_chat_model = _resolve_phase_chat_model(
         phase_id,
@@ -432,6 +440,7 @@ def _build_skill_node(
         chat_model=chat_model,
         model_resolver=model_resolver,
         callbacks=_callback_tuple(callbacks),
+        predict_context=predict_context,
     )
     knowledge_base_markdown = _build_reference_reader_markdown(
         phase_id=phase_id,
@@ -576,13 +585,21 @@ def _resolve_phase_chat_model(
     chat_model: Any,
     model_resolver: Any,
     callbacks: tuple[Any, ...],
+    predict_context: Any = None,
 ) -> Any:
     if chat_model is not None or model_resolver is None:
         return chat_model
+    import inspect
+    sig = inspect.signature(model_resolver.resolve)
+    kwargs = {
+        "callbacks": callbacks,
+        "phase_name": phase_id,
+    }
+    if "predict_context" in sig.parameters:
+        kwargs["predict_context"] = predict_context
     return model_resolver.resolve(
         phase_ast.llm_role or "graph_agent",
-        callbacks=callbacks,
-        phase_name=phase_id,
+        **kwargs,
     )
 
 

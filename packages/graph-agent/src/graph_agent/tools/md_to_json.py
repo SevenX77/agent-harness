@@ -588,14 +588,15 @@ def md_to_json(
         schema=schema_cls,  # Python class object — safe inside graph_agent context dict
     )
 
-    if getattr(result, "success", True) is False:
-        error = getattr(result, "error", None) or "unknown error"
+    is_success = result.get("success", True) if isinstance(result, dict) else result.success
+    if is_success is False:
+        error = (result.get("error") if isinstance(result, dict) else getattr(result, "error", None)) or "unknown error"
         raise SkillLoadError(
             "md_to_json md-patch deferred fallback failed before producing "
             f"final_results: {error}"
         )
 
-    final_results: list[dict[str, Any]] = result["context"]["final_results"]
+    final_results: list[dict[str, Any]] = result.context["final_results"]
     logger.info(
         "md_to_json: patch completed, %d final items returned",
         len(final_results),

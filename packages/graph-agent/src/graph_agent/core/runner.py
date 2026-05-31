@@ -53,7 +53,7 @@ from graph_agent.core.exceptions import (
     make_error_payload,
 )
 from graph_agent.core.local_workspace_resolver import LocalWorkspaceResolver
-from graph_agent.core.result import WorkflowMetrics, WorkflowResult
+from graph_agent.core.result import WorkflowMetrics, WorkflowResult, RunResult
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol, require_skill_resolver
 from graph_agent.runtime.state import normalize_blackboard_data
 
@@ -62,10 +62,316 @@ logger = logging.getLogger(__name__)
 _NO_MOCK_LLM = object()
 
 
+class PredictDeadlockError(RuntimeError):
+    """Raised when Predict heuristic stubs appear to trap routing in a loop."""
+
+    def __init__(self, phase_name: str, actual_path: list[str]) -> None:
+        self.phase_name = phase_name
+        self.actual_path = actual_path
+        super().__init__(
+            f"Predict P2 deadlock guard tripped for phase '{phase_name}' "
+            f"after {actual_path.count(phase_name)} visits"
+        )
+
+
+class SDKPredictContext:
+    """PredictContext interface implementation for model resolution interception."""
+
+    def __init__(self, strategy: Any, copilot_predict: Callable | None = None) -> None:
+        self.strategy = strategy
+        self.copilot_predict = copilot_predict
+
+    def resolve_generation(
+        self,
+        phase_name: str,
+        role_name: str,
+        messages: list[Any],
+    ) -> tuple[dict[str, Any], str]:
+        from graph_agent.core._predict_internal.tracing import record_mock_source
+        from graph_agent.core._predict_internal.stub import generate_heuristic_stub
+
+        # 1. P0 Golden Case
+        if self.strategy.has_golden_case(phase_name):
+            payload = self.strategy.get_golden_output(phase_name)
+            record_mock_source(phase_name, "golden_case")
+            return payload, "golden_case"
+
+        # 2. P1 copilot_predict
+        if self.copilot_predict is not None:
+            try:
+                payload = self.copilot_predict(phase_name, role_name, messages)
+                if payload is not None:
+                    if isinstance(payload, dict):
+                        record_mock_source(phase_name, "copilot")
+                        return payload, "copilot"
+                    payload = {"value": payload}
+                    record_mock_source(phase_name, "copilot")
+                    return payload, "copilot"
+            except Exception as exc:
+                logger.warning("copilot_predict failed for phase=%s: %s", phase_name, exc)
+
+        # 3. P1 manual_override
+        if self.strategy.has_manual_override(phase_name):
+            payload = self.strategy.get_manual_override(phase_name)
+            source = self.strategy.get_manual_source(phase_name)
+            record_mock_source(phase_name, source)
+            return payload, source
+
+        # 4. P2 Heuristic Stub fallback
+        schema = self.strategy.get_phase_schema(phase_name)
+        payload = generate_heuristic_stub(schema)
+        record_mock_source(phase_name, "heuristic_stub")
+        return payload, "heuristic_stub"
+
+
+def _warn_on_stale_golden_hashes_sdk(
+    strategy: Any,
+    current_hashes: dict[str, dict[str, str]],
+) -> None:
+    from graph_agent.core._predict_internal.strategy import GoldenCaseStrategy, BacktestStrategy
+    from graph_agent.core._predict_internal.models import GoldenCase
+
+    golden_cases = []
+    if isinstance(strategy, GoldenCaseStrategy):
+        golden_cases = [strategy.golden_case]
+    elif isinstance(strategy, BacktestStrategy):
+        golden_cases = strategy.golden_cases
+
+    for golden_case in golden_cases:
+        phase_name = str(golden_case.metadata.get("phase_name") or "")
+        if not phase_name:
+            continue
+        current = current_hashes.get(phase_name)
+        if not current:
+            continue
+        expected_prompt_hash = golden_case.metadata.get("prompt_hash")
+        expected_schema_hash = golden_case.metadata.get("io_outputs_schema_hash")
+        if (
+            current.get("prompt_hash") != expected_prompt_hash
+            or current.get("io_outputs_schema_hash") != expected_schema_hash
+        ):
+            logger.warning(
+                "Golden case hash stale for phase=%s expected_prompt=%s current_prompt=%s "
+                "expected_schema=%s current_schema=%s",
+                phase_name,
+                expected_prompt_hash,
+                current.get("prompt_hash"),
+                expected_schema_hash,
+                current.get("io_outputs_schema_hash"),
+            )
+
+
+def predict_skill(
+    skill_path: str | Path,
+    *,
+    workspace_dir: Path,
+    thread_id: str | None = None,
+    unattended: bool = True,
+    event_subscriber: Callable[[CallbackEvent], None] | None = None,
+    skill_resolver: SkillResolverProtocol,
+    model_resolver: Any | None = None,
+    copilot_predict: Callable | None = None,
+    **inputs: Any,
+) -> RunResult:
+    """Run skill compilation and execution in Predict mode with caching and mock generation."""
+    from graph_agent.core.compiler import compile_skill
+    from graph_agent.core.graph_assembler import assemble_graph
+    from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
+    from graph_agent.core._predict_internal.strategy import MockStrategy
+    from graph_agent.core._predict_internal.tracing import PredictTracingCallback
+    from graph_agent.core._predict_internal.path_diff import compute_diff
+    from graph_agent.core._predict_internal.exporter import assemble_phase_record
+    from graph_agent import PhaseRecord, PathDiff
+    from collections import Counter
+
+    resolver = require_skill_resolver(skill_resolver, caller="predict_skill")
+    workspace_root = _validate_workspace_dir(workspace_dir)
+    started_at = datetime.now(UTC)
+    started_monotonic = time.monotonic()
+    skill_path_obj = Path(skill_path)
+    skill_id = (
+        skill_path_obj.parent.name if skill_path_obj.name == "SKILL.md" else skill_path_obj.stem
+    )
+
+    mock_llm = inputs.pop("mock_llm", None)
+    current_hashes = inputs.pop("current_hashes", None) or {}
+
+    compiled = compile_skill(skill_path_obj, skill_resolver=resolver)
+
+    if model_resolver is None:
+        from graph_agent_gateway.resolver import ModelResolver
+        from graph_agent_gateway.registry.schema import (
+            RegistrySnapshot, ProviderEndpoint, ProviderRoute, RoleEntry, RoleRouteEntry
+        )
+        from pydantic import SecretStr
+
+        roles = {}
+        for phase_name in compiled.manifest.phases:
+            roles[phase_name] = RoleEntry(
+                fallback_chain=[RoleRouteEntry(route_id="mock-endpoint:mock-route")]
+            )
+        roles["graph_agent"] = RoleEntry(
+            fallback_chain=[RoleRouteEntry(route_id="mock-endpoint:mock-route")]
+        )
+
+        snapshot = RegistrySnapshot(
+            provider_endpoints={
+                "mock-endpoint": ProviderEndpoint(
+                    endpoint_id="mock-endpoint",
+                    protocol="openai_compatible",
+                    base_url="http://localhost",
+                    api_key=SecretStr("mock-key"),
+                )
+            },
+            provider_routes={
+                "mock-endpoint:mock-route": ProviderRoute(
+                    route_id="mock-endpoint:mock-route",
+                    endpoint_id="mock-endpoint",
+                    route_slug="mock-route",
+                    provider_model_id="mock-model",
+                    canonical_id="mock-model",
+                    status="verified",
+                )
+            },
+            roles=roles,
+        )
+        model_resolver = ModelResolver(registry_snapshot=snapshot)
+
+    # 1. Strategy setup
+    strategy = MockStrategy.from_param(mock_llm)
+    _warn_on_stale_golden_hashes_sdk(strategy, current_hashes)
+
+    # 2. Populate phase schemas for Heuristic Stub fallback
+    phase_schemas = {}
+    for node in compiled.nodes:
+        if hasattr(node, "ast") and hasattr(node.ast, "io") and node.ast.io and node.ast.io.outputs:
+            outputs = node.ast.io.outputs
+            if hasattr(outputs, "model_dump"):
+                phase_schemas[node.phase_name] = outputs.model_dump()
+            else:
+                phase_schemas[node.phase_name] = outputs
+    if hasattr(strategy, "_phase_schemas"):
+        strategy._phase_schemas.update(phase_schemas)
+
+    # 3. Setup Predict interception context & tracing
+    predict_context = SDKPredictContext(strategy, copilot_predict)
+    tracing_callback = PredictTracingCallback()
+    tracing_callback.on_chain_start(metadata={})
+
+    run_id = thread_id or str(uuid.uuid4())
+    trace_output = workspace_root / "runs" / run_id
+
+    # 4. Prepare Composite event sink for tracking events and trace.jsonl output
+    event_sink = _prepare_v030_event_sink(
+        trace_output=trace_output,
+        event_subscriber=event_subscriber,
+        callbacks=[tracing_callback],
+    )
+
+    # 5. Assemble and run graph in intercept mode
+    assembled = assemble_graph(
+        compiled,
+        chat_model=None,
+        model_resolver=model_resolver,
+        callbacks=event_sink,
+        skill_resolver=resolver,
+        predict_context=predict_context,
+    )
+    graph = assembled.graph
+
+    initial_state = WorkflowState(
+        data=BusinessData.model_validate(dict(inputs)),
+        flow=FrameworkState.model_validate({
+            "run_id": run_id,
+            "thread_id": run_id,
+            "unattended": unattended,
+        }),
+        messages=[],
+    )
+
+    try:
+        final_state = graph.invoke(
+            initial_state,
+            config={"configurable": {"thread_id": run_id}},
+        )
+    except Exception as exc:
+        finished_at = datetime.now(UTC)
+        wall_time = round(time.monotonic() - started_monotonic, 3)
+        failed_result = RunResult(
+            success=False,
+            run_id=run_id,
+            skill_id=skill_id,
+            context={},
+            metrics=WorkflowMetrics(wall_time_sec=wall_time),
+            error=make_error_payload("[F-v3-runtime-phase-failed]", str(exc)),
+            started_at=started_at,
+            finished_at=finished_at,
+            wall_time_sec=wall_time,
+            source="predict",
+        )
+        _write_workflow_result_artifacts(trace_output, failed_result)
+        return failed_result
+
+    finished_at = datetime.now(UTC)
+    wall_time = round(time.monotonic() - started_monotonic, 3)
+
+    # 5. Extract results, path & deadlocks
+    final_context = final_state["data"].model_dump()
+    raw_phases = tracing_callback.phases or []
+    phases = [assemble_phase_record(item) for item in raw_phases]
+    actual_path = [phase.phase_name for phase in phases]
+
+    # Deadlock guard for heuristic stubs
+    if type(strategy).__name__ == "HeuristicStubStrategy":
+        counts = Counter(actual_path)
+        for phase_name, count in counts.items():
+            if count > 10:  # MAX_PHASE_REVISITS
+                raise PredictDeadlockError(phase_name, actual_path)
+
+    # Path diff
+    expected_path = getattr(strategy, "expected_path", None)
+    path_diff = None
+    if expected_path:
+        raw_diff = compute_diff([str(item) for item in expected_path], actual_path)
+        path_diff = PathDiff(
+            expected_path=raw_diff.expected_path,
+            actual_path=raw_diff.actual_path,
+            missing=raw_diff.missing,
+            extra=raw_diff.extra,
+            order_mismatch=raw_diff.order_mismatch,
+        )
+
+    # Success derives from path_diff success (no missing, no extra, no order mismatch)
+    success = True
+    if path_diff and (path_diff.missing or path_diff.extra or path_diff.order_mismatch):
+        success = False
+
+    run_result = RunResult(
+        success=success,
+        run_id=run_id,
+        skill_id=skill_id,
+        context=final_context,
+        metrics=WorkflowMetrics(wall_time_sec=wall_time),
+        trace_path=trace_output / "trace.jsonl",
+        started_at=started_at,
+        finished_at=finished_at,
+        wall_time_sec=wall_time,
+        source="predict",
+        phases=phases,
+        path_diff=path_diff,
+    )
+
+    # Write trace.jsonl output
+    trace_output.mkdir(parents=True, exist_ok=True)
+    tracing_callback.save(trace_output)
+
+    _write_workflow_result_artifacts(trace_output, run_result)
+    return run_result
+
+
 def run_skill(
     skill_path: str | Path,
     *,
-    mock_llm: Any = _NO_MOCK_LLM,
     workspace_dir: Path,
     thread_id: str | None = None,
     unattended: bool = False,
@@ -76,8 +382,9 @@ def run_skill(
     skill_resolver: SkillResolverProtocol,
     model_resolver: Any | None = None,
     **inputs: Any,
-) -> WorkflowResult:
+) -> RunResult:
     """Execute a SKILL.md and return a typed workflow result."""
+    mock_llm = inputs.pop("mock_llm", _NO_MOCK_LLM)
     resolver = require_skill_resolver(skill_resolver, caller="run_skill")
     workspace_root = _validate_workspace_dir(workspace_dir)
     started_at = datetime.now(UTC)
@@ -523,9 +830,9 @@ def main() -> None:
         "[Runner] Result: %s",
         json.dumps(
             {
-                "wall_time_sec": result["wall_time_sec"],
-                "metrics": result["metrics"],
-                "trace_path": result.get("trace_path"),
+                "wall_time_sec": result.wall_time_sec,
+                "metrics": result.metrics,
+                "trace_path": result.trace_path,
             },
             indent=2,
             default=str,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -45,8 +45,28 @@ class WorkflowMetrics(BaseModel):
         return getattr(self, key, default)
 
 
-class WorkflowResult(BaseModel):
-    """Typed result returned by graph_agent.run_skill."""
+class PathDiff(BaseModel):
+    """Diagnostic comparison between expected and actual execution paths."""
+
+    expected_path: list[str]
+    actual_path: list[str]
+    missing: list[str] = Field(default_factory=list)
+    extra: list[str] = Field(default_factory=list)
+    order_mismatch: bool = False
+
+
+class PhaseRecord(BaseModel):
+    """Audit log record for a single executed phase."""
+
+    phase_name: str
+    type: Literal["logic", "llm"]
+    inputs: dict[str, Any]
+    outputs: dict[str, Any]
+    mocked_source: Literal["golden_case", "copilot", "heuristic_stub", "manual"] | None = None
+
+
+class RunResult(BaseModel):
+    """Canonical type-safe result returned by graph_agent runs and predictions."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -57,9 +77,20 @@ class WorkflowResult(BaseModel):
     metrics: WorkflowMetrics = Field(default_factory=WorkflowMetrics)
     trace_path: Path | None = None
     error: ErrorPayload | None = None
-    started_at: datetime
-    finished_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
     wall_time_sec: float = 0.0
+    source: Literal["run", "predict"] = "run"
+    phases: list[PhaseRecord] | None = None
+    path_diff: PathDiff | None = None
+
+    @property
+    def status(self) -> Literal["success", "failed"]:
+        return "success" if self.success else "failed"
+
+
+class WorkflowResult(RunResult):
+    """Deprecated backward-compatible result wrapper with dict-like shims."""
 
     def __getitem__(self, key: str) -> Any:
         return getattr(self, key)

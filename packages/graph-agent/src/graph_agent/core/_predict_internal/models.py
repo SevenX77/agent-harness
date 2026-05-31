@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from graph_agent.core.result import PhaseRecord, PathDiff
 
 class GoldenCase(BaseModel):
     """Persisted backtest case anchored to LLM phase outputs."""
@@ -21,27 +22,7 @@ class GoldenCase(BaseModel):
     )
 
 
-class PhaseRecord(BaseModel):
-    """Flat business trace slice emitted by Predict."""
-
-    phase_name: str
-    type: Literal["logic", "llm"]
-    inputs: dict[str, Any]
-    outputs: dict[str, Any]
-    mocked_source: Literal["golden_case", "copilot", "heuristic_stub", "manual"] | None = None
-
-
 HeuristicStub = dict[str, Any]
-
-
-class PathDiff(BaseModel):
-    """Backtest route comparison between expected and actual phase visits."""
-
-    expected_path: list[str]
-    actual_path: list[str]
-    missing: list[str] = Field(default_factory=list)
-    extra: list[str] = Field(default_factory=list)
-    order_mismatch: bool = False
 
 
 class PredictResult(BaseModel):
@@ -59,3 +40,4 @@ __all__ = [
     "PhaseRecord",
     "PredictResult",
 ]
+

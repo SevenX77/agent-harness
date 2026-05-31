@@ -9,19 +9,18 @@ import pytest
 from graph_agent.core.loader import CompiledSkill, SkillLoader
 from graph_agent.core.manifest import AgentNodeAST, LogicNodeAST
 
-pytest.skip(
-    "by-design: V1 layout skill awaiting user V2.1 cutover (Phase 1 baseline)",
-    allow_module_level=True,
-)
+from tests.conftest import MockSkillResolver
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
 
 
 @pytest.fixture(scope="module")
 def compiled_skills() -> dict[str, CompiledSkill]:
+    resolver = MockSkillResolver(REPO_ROOT)
     return {
         skill_id: SkillLoader(validate_context_writes=False).compile_skill(
-            REPO_ROOT / "skills" / skill_id
+            REPO_ROOT / "skills" / skill_id,
+            skill_resolver=resolver
         )
         for skill_id in (
             "event-extraction",
@@ -42,7 +41,7 @@ def test_all_live_skills_compile_from_v21_roots(
         "text-segmentation",
     }
     for skill_id, compiled in compiled_skills.items():
-        assert compiled.manifest.schema_version == "2.1"
+        assert compiled.manifest.schema_version == "v0.3.0"
         assert compiled.manifest.name
         assert compiled.nodes, skill_id
         assert all(
@@ -75,7 +74,7 @@ def test_live_skill_topology_matches_graph_md(
 
 
 @pytest.mark.parametrize(
-    ("skill_id", "phase_id", "callable_name", "relative_path"),
+    ("skill_id", "phase_id", "action_name", "relative_path"),
     [
         (
             "event-extraction",

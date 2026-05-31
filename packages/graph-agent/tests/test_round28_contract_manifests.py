@@ -71,7 +71,8 @@ def _validate_manifest(instance: Any, schema_key: str) -> None:
 
 
 def _run_validator(*fixture_paths: Path) -> subprocess.CompletedProcess[str]:
-    cmd = ["python", str(VALIDATOR_PATH), *map(str, fixture_paths)]
+    import sys
+    cmd = [sys.executable, str(VALIDATOR_PATH), *map(str, fixture_paths)]
     return subprocess.run(cmd, cwd=REPO_ROOT, text=True, capture_output=True, check=False)
 
 

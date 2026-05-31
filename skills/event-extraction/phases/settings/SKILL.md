@@ -1,18 +1,31 @@
-<phase_config>
-name: settings
-tier: balanced
-tools:
-  - script.extractor.parse_settings
-  - script.extractor.merge_settings_into_events
-  - script.extractor.finalize_event_timeline
-validator: script.validators.validate_event_extraction
-max_retries: 2
-retry_target: aggregate
-max_iterations: 10
-max_nudges: 2
-</phase_config>
+---
+llm_role: analyst
+phase_config:
+  io:
+    inputs:
+      type: object
+      required: [formatted_paragraphs, events_raw, chapter_number]
+      properties:
+        formatted_paragraphs:
+          type: string
+        events_raw:
+          type: string
+        chapter_number:
+          type: integer
+    outputs:
+      type: object
+      required: [event_timeline]
+      properties:
+        event_timeline:
+          type: object
+  allow_sequential_overwrite: [event_timeline]
+  tools:
+    - finish_task
+  max_iterations: 10
+  validator: true
+---
 
-<system_prompt>
+<role>
 你是专业的小说编辑和知识管理专家。你的任务是从事件的段落中识别并提炼世界设定知识，并对之前的结果做校验。
 
 ## 任务1：识别并提炼设定知识
@@ -40,18 +53,9 @@ max_nudges: 2
 2. 段落聚合是否合理？
 3. 地点/时间变化是否正确？
 4. 是否有遗漏的段落？
+</role>
 
-## 执行步骤
-
-1. 阅读事件段落，识别设定内容
-2. 输出设定知识库
-3. 调用 parse_settings 解析设定
-4. 调用 merge_settings_into_events 合并到事件中
-5. 调用 finalize_event_timeline 生成最终时间线
-6. 调用 finish_task 报告完成
-</system_prompt>
-
-<user_prompt>
+<goal>
 请从以下事件段落中识别世界设定内容，提炼为知识库，并校验事件结果。
 
 ## 事件时间线
@@ -66,7 +70,8 @@ max_nudges: 2
 
 ---
 
-**输出格式**（不需要生成 JSON）：
+**请完成设定识别，调用 finish_task 提交世界设定 Markdown 文本**。
+通过在 finish_task 提交的 `raw_settings_markdown` 参数中提供以下格式的设定知识库内容：
 
 # 第{chapter_number}章设定知识库
 
@@ -82,6 +87,10 @@ max_nudges: 2
 **关键要求**：
 1. 只为具有"世界设定"性质的段落创建设定条目
 2. 核心知识点简洁完整（50-100字）
-3. 如发现事件问题，给出修正建议
-4. 每个设定条目使用 `## setN` 标题，字段用 `- field: value` 格式
-</user_prompt>
+3. 每个设定条目使用 `## setN` 标题，字段用 `- field: value` 格式
+</goal>
+
+<step id="S1" name="identify_settings">阅读事件段落，识别设定内容，提炼出简洁完整的世界设定知识库条目。</step>
+<step id="S2" name="finish">调用 finish_task 并将提炼好的设定文本作为 `raw_settings_markdown` 进行提交，以供 validator 校验与最终合并。</step>
+
+<protocol id="P1">必须严格使用指定的 Markdown `- field: value` 格式，确保能够被 md_to_json 解析器正确解析。</protocol>

@@ -4,19 +4,20 @@ from __future__ import annotations
 
 from typing import Any
 
-from graph_agent.core._predict_internal.models import PredictResult
+from graph_agent import RunResult
 
 from app.core.exceptions import error_response, raise_error_response
 from app.models.runs import PredictDiagnosticExport
 
 
-def export_predict_diagnostics(result: PredictResult) -> PredictDiagnosticExport:
+def export_predict_diagnostics(result: RunResult) -> PredictDiagnosticExport:
     """Return the stable in-process payload consumed by Studio internals."""
 
+    status = "success" if result.success else "failed"
     return PredictDiagnosticExport(
         is_predict=True,
-        status=result.status,
-        phases=result.phases,
+        status=status,
+        phases=result.phases or [],
         path_diff=result.path_diff,
     )
 

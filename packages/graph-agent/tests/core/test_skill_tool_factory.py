@@ -80,7 +80,8 @@ def test_build_skill_tool_invokes_runner_and_returns_final_output(
                 "skill_resolver": skill_resolver,
             }
         )
-        return {"context": {"final_output": "done"}}
+        from unittest.mock import MagicMock
+        return MagicMock(context={"final_output": "done"})
 
     monkeypatch.setattr(runner, "run_skill", fake_run_skill)
     tool = build_skill_tool(
@@ -126,7 +127,8 @@ def test_build_skill_tool_returns_error_when_final_output_missing(
         skill_resolver: object,
     ) -> dict[str, dict[str, str]]:
         del workspace_dir
-        return {"context": {}}
+        from unittest.mock import MagicMock
+        return MagicMock(context={})
 
     monkeypatch.setattr(runner, "run_skill", fake_run_skill)
     tool = build_skill_tool(

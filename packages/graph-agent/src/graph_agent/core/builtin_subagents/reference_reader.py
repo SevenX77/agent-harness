@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from graph_agent.core.exceptions import GraphAgentFatalError, make_error_payload
-from graph_agent.runtime.state import BlackboardState
+from graph_agent.core.state import WorkflowState
 from graph_agent.runtime.state_mapper import ReaderSandboxState
 from graph_agent.tools.builtin.read_reference import read_resource_file
 
@@ -26,7 +26,7 @@ class ReferenceReaderRuntime:
     language: str = "zh"
     timeout_s: int = 60
 
-    def initial_state(self) -> BlackboardState:
+    def initial_state(self) -> WorkflowState:
         return ReaderSandboxState(
             skill_id=self.skill_id,
             phase_id=self.phase_id,

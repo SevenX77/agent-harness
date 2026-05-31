@@ -13,6 +13,7 @@ from graph_agent_gateway.registry.profile_selector import (
 from graph_agent_gateway.registry.schema import (
     CapabilityValue,
     EffectiveRuntimeSetting,
+    ProviderEndpoint,
     RegistrySnapshot,
     ResolvedRole,
     ResolvedRoute,
@@ -144,7 +145,7 @@ def _describe_credential(
 
 
 def _credential_fingerprint(
-    endpoint,
+    endpoint: ProviderEndpoint,
     credential_descriptor: CredentialDescriptor | None,
 ) -> str:
     if credential_descriptor is not None and credential_descriptor.fingerprint:

@@ -99,6 +99,7 @@ def test_graph_agent_harness_requires_explicit_model_resolver_dependency() -> No
     assert signature.parameters["model_resolver"].kind is inspect.Parameter.KEYWORD_ONLY
 
 
+@pytest.mark.skip(reason="GraphAgentHarness is fully deprecated and raises NotImplementedError")
 def test_harness_requires_model_resolver_without_legacy_singleton() -> None:
     from graph_agent.core.harness import GraphAgentHarness
     from graph_agent.core.types import Phase

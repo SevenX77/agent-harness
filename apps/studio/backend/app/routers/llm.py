@@ -3820,6 +3820,7 @@ def _compact_model_info_for_listed_official_route(
         and rec.trust_state == "probe-verified"
         for rec in library.evidence_records
     )
+    model_status: Literal["verified", "unverified_manual", "disabled", "failed", "testing", "probe-verified"]
     if route is not None:
         model_status = route.status
         if model_status == "unverified_manual" and is_probe_verified:

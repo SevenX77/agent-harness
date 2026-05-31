@@ -88,7 +88,7 @@ class BusinessData(BaseModel):
     def __getitem__(self, key: str) -> Any:
         values = self.model_dump()
         if key == "phase_outputs":
-            class PhaseOutputsCompat(dict):
+            class PhaseOutputsCompat(dict[str, Any]):
                 def __getitem__(self, k: str) -> Any:
                     filtered = {}
                     for field_name, field_val in values.items():
@@ -114,11 +114,11 @@ class BusinessData(BaseModel):
                     return self[k]
                 def __contains__(self, k: object) -> bool:
                     return True
-                def items(self):
+                def items(self) -> Any:
                     return {"main": values}.items()
-                def keys(self):
+                def keys(self) -> Any:
                     return {"main": values}.keys()
-                def values(self):
+                def values(self) -> Any:
                     return {"main": values}.values()
             return PhaseOutputsCompat()
         elif key == "inputs":

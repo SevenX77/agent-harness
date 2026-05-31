@@ -301,7 +301,7 @@ async def sync_remote_evidence_library(
     draft_id: str = EVIDENCE_LIBRARY_DRAFT_ID,
 ) -> ProviderImportDraft:
     """Pull the remote evidence library and merge it into the local store."""
-    target_url = url or os.getenv("STUDIO_CATALOG_URL", DEFAULT_CATALOG_URL)
+    target_url = url or os.getenv("STUDIO_CATALOG_URL") or DEFAULT_CATALOG_URL
     logger.info("Syncing remote evidence library from %s", target_url)
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:

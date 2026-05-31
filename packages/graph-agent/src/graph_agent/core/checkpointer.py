@@ -1,6 +1,7 @@
 """GraphAgent-owned sync checkpointer factory."""
 
 from __future__ import annotations
+from typing import Any, cast
 
 import contextlib
 import logging
@@ -153,7 +154,7 @@ def resolve_checkpointer(checkpointer_arg: Any = "auto") -> Checkpointer | None:
         if checkpointer_arg.startswith(("postgres://", "postgresql://")):
             return get_checkpointer(backend="postgres", connection_string=checkpointer_arg)
 
-    return checkpointer_arg  # Returns explicit Checkpointer instance or None
+    return cast(Checkpointer | None, checkpointer_arg)  # Returns explicit Checkpointer instance or None
 
 
 def reset_checkpointer() -> None:

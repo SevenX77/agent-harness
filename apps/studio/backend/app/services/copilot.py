@@ -11,7 +11,7 @@ NOTE (T0.1 base_url verify, 2026-05-09):
 from __future__ import annotations
 
 import asyncio
-import hmac
+import hashlib
 import inspect
 import json
 from collections.abc import AsyncIterator, Callable, Mapping
@@ -83,7 +83,8 @@ _session_lock = asyncio.Lock()
 _session_factory: Callable[[ClaudeAgentOptions], ClaudeSDKClient] = ClaudeSDKClient
 _view_contexts: dict[str, ViewContext] = {}
 _view_context_lock = asyncio.Lock()
-_SESSION_KEY_HMAC_DOMAIN = b"agent-harness-copilot-session-key-v1"
+_SESSION_KEY_SALT = b"agent-harness-copilot-session-key-v1"
+_SESSION_KEY_ITERATIONS = 100_000
 
 
 def make_session_key(
@@ -94,10 +95,12 @@ def make_session_key(
 ) -> SessionKey:
     """Build a cache key that changes when credentials rotate."""
 
-    api_key_hash = hmac.digest(
-        _SESSION_KEY_HMAC_DOMAIN,
-        api_key.encode("utf-8"),
+    api_key_hash = hashlib.pbkdf2_hmac(
         "sha256",
+        api_key.encode("utf-8"),
+        _SESSION_KEY_SALT,
+        _SESSION_KEY_ITERATIONS,
+        dklen=8,
     ).hex()[:16]
     model_provider = f"{model_code}:{provider_code}"
     return (skill_id, model_provider, api_key_hash)

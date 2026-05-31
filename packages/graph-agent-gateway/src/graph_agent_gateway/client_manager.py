@@ -378,7 +378,7 @@ class LLMClientManager:
         """Run a one-token active probe when the provider type supports it."""
         if route.protocol == "openai_compatible":
             try:
-                client_kwargs: dict[str, object] = {
+                client_kwargs: dict[str, Any] = {
                     "timeout_override": runtime_policy.probe_timeout_seconds,
                     "runtime_policy": runtime_policy,
                 }
@@ -889,7 +889,7 @@ class LLMClientManager:
 
         def invoke(token_budget: int) -> CallResult:
             if route.protocol == "openai_compatible":
-                client_kwargs: dict[str, object] = {"runtime_policy": runtime_policy}
+                client_kwargs: dict[str, Any] = {"runtime_policy": runtime_policy}
                 if credential_provider is not None:
                     client_kwargs["credential_provider"] = credential_provider
                 client = cls._get_openai_client(route, **client_kwargs)

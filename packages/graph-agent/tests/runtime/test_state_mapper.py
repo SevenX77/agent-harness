@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from graph_agent.core.exceptions import GraphAgentFatalError
-from graph_agent.core.state import WorkflowState, BusinessData, FrameworkState
+from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
 from graph_agent.runtime.state_mapper import (
     PhaseWrapper,
     ReaderSandboxState,

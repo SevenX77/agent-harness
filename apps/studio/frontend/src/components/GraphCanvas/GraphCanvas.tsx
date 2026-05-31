@@ -10,6 +10,7 @@ import {
   useNodesState,
   type Connection,
   type Edge,
+  type ReactFlowInstance,
 } from '@xyflow/react'
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { toast } from 'sonner'
@@ -98,7 +99,7 @@ export function GraphCanvas({
   const [warningQueue, setWarningQueue] = useState<OverwriteConflict[]>([])
   const [activeWarningIndex, setActiveWarningIndex] = useState<number>(-1)
   const [cancelledNodeIds, setCancelledNodeIds] = useState<Set<string>>(() => new Set())
-  const [reactFlowInstance, setReactFlowInstance] = useState<any>(null)
+  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance<GraphCanvasNode & { selected: boolean }, Edge<ContextEdgeData>> | null>(null)
 
   // 1. Conflict detection effect
   useEffect(() => {

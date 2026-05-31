@@ -1,5 +1,5 @@
 import { Save, Trash2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { JsonObject } from '../../api/types'
 import type { ToastKind } from '../../types/studio'
 import { PresetManager } from '../../utils/presets'
@@ -16,12 +16,14 @@ export function PresetToolbar({ skillId, values, onLoad, pushToast }: PresetTool
   const [presets, setPresets] = useState<InputPreset[]>([])
   const [selectedId, setSelectedId] = useState('')
 
-  const refresh = () => setPresets(PresetManager.list(skillId))
+  const refresh = useCallback(() => {
+    setPresets(PresetManager.list(skillId))
+  }, [skillId])
 
   useEffect(() => {
     refresh()
     setSelectedId('')
-  }, [skillId])
+  }, [skillId, refresh])
 
   const selectedPreset = presets.find((preset) => preset.id === selectedId)
 

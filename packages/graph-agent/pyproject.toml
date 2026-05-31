@@ -82,6 +82,10 @@ max-complexity = 10
 "scripts/**" = ["C901"]
 "src/graph_agent/core/error_registry.py" = ["E501"]
 "src/graph_agent/cognitive/prompt.py" = ["E501"]
+"src/graph_agent/core/graph_assembler.py" = ["C901"]
+"src/graph_agent/core/loader.py" = ["C901"]
+"src/graph_agent/core/state.py" = ["C901", "E501"]
+"src/graph_agent/runtime/state_mapper.py" = ["C901", "E501"]
 "tests/**" = ["E501"]
 "tests/test_round30_pr*_*.py" = ["I001"]
 

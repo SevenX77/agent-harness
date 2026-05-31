@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Self
 from unittest.mock import AsyncMock
 
 import pytest
@@ -17,9 +18,8 @@ from app.services import copilot as copilot_service
 from claude_agent_sdk import ClaudeAgentOptions
 from claude_agent_sdk.types import AssistantMessage, TextBlock
 from fastapi.testclient import TestClient
-from pydantic import SecretStr
-from typing import Self
 from graph_agent_gateway.registry.schema import Protocol, ResolvedRoute
+from pydantic import SecretStr
 
 
 def test_copilot_ws_streams_normal_query(

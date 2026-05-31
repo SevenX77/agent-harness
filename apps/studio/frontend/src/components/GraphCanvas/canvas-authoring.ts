@@ -280,8 +280,16 @@ export function checkSequentialOverwrites(
     }
 
     const fm = parsed.frontmatter
-    const io = fm.io as any
-    const outputs = io?.outputs?.properties ? Object.keys(io.outputs.properties) : []
+    const io = typeof fm.io === 'object' && fm.io !== null && !Array.isArray(fm.io)
+      ? (fm.io as Record<string, unknown>)
+      : null
+    const ioOutputs = io?.outputs && typeof io.outputs === 'object' && !Array.isArray(io.outputs)
+      ? (io.outputs as Record<string, unknown>)
+      : null
+    const properties = ioOutputs?.properties && typeof ioOutputs.properties === 'object' && !Array.isArray(ioOutputs.properties)
+      ? (ioOutputs.properties as Record<string, unknown>)
+      : null
+    const outputs = properties ? Object.keys(properties) : []
     const whitelist = Array.isArray(fm.allow_sequential_overwrite)
       ? (fm.allow_sequential_overwrite as string[])
       : []

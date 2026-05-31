@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from graph_agent.core.exceptions import GraphAgentFatalError, make_error_payload
-from graph_agent.core.state import WorkflowState, BusinessData, FrameworkState, StateManager
+from graph_agent.core.state import BusinessData, FrameworkState, StateManager, WorkflowState
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +136,7 @@ class StateMapper:
         if allowed:
             invalid = sorted(key for key in updates_dict if key not in allowed)
             if invalid:
-                detail = f"phase wrote undeclared keys: " + ", ".join(invalid)
+                detail = "phase wrote undeclared keys: " + ", ".join(invalid)
                 raise GraphAgentFatalError(
                     detail,
                     payload=make_error_payload("[F-v3-runtime-state-mapping-failed]", detail),

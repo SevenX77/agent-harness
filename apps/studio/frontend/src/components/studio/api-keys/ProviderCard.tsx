@@ -136,7 +136,7 @@ export function sortOfficialRouteInfos(models: ModelInfo[]): ModelInfo[] {
 
 function officialRouteSortRank(model: ModelInfo): number {
   const status = modelRouteStatus(model)
-  const variant = routeStatusTagVariant(status, model)
+  const variant = routeStatusTagVariant(status)
   if (variant === "success") return 0
   if (status === "testing") return 1
   if (variant === "destructive") return 4
@@ -347,7 +347,7 @@ function routeDisplayStatus(model: ModelInfo, isTesting: boolean): RouteDisplayS
   return status
 }
 
-function routeStatusTagVariant(status: RouteDisplayStatus, _model: ModelInfo): "success" | "destructive" | "muted" | "default" | "info" | "warning" | "probe-verified" {
+function routeStatusTagVariant(status: RouteDisplayStatus): "success" | "destructive" | "muted" | "default" | "info" | "warning" | "probe-verified" {
   if (status === "testing") return "default"
   if (status === "failed") return "destructive"
   if (status === "disabled") return "muted"
@@ -859,7 +859,7 @@ export function ProviderCard({
       <Tag
         key={tagKey}
         asChild
-        variant={routeStatusTagVariant(status, model)}
+        variant={routeStatusTagVariant(status)}
         size="xs"
         className={cn(
           isDisabled ? "cursor-not-allowed opacity-40 font-mono" : "cursor-pointer font-mono hover:bg-muted/40",

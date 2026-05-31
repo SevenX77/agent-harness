@@ -340,10 +340,10 @@ def _run_v030_skill_dict(
 ) -> dict[str, Any]:
     """Execute a V0.3.0 skill root through compile_skill + assemble_graph."""
 
+    from graph_agent.core.checkpointer import resolve_checkpointer
     from graph_agent.core.compiler import compile_skill
     from graph_agent.core.graph_assembler import assemble_graph
-    from graph_agent.core.state import WorkflowState, BusinessData, FrameworkState
-    from graph_agent.core.checkpointer import resolve_checkpointer
+    from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
 
     resolver = require_skill_resolver(skill_resolver, caller="_run_v030_skill_dict")
     t0 = time.time()

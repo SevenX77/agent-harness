@@ -1,10 +1,9 @@
-import pytest
-from typing import Annotated
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.channels.delta import DeltaChannel
-from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.sqlite import SqliteSaver
-from graph_agent.core.state import WorkflowState, BusinessData, FrameworkState, _messages_delta_reducer
+from langgraph.graph import END, START, StateGraph
+
+from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
 
 
 def test_workflow_state_messages_use_deltachannel() -> None:
@@ -49,7 +48,7 @@ def test_sqlite_deltachannel_checkpoint_size(tmp_path) -> None:
         }
 
         # Run graph
-        res = graph.invoke(initial_state, config=config)
+        graph.invoke(initial_state, config=config)
 
         # Re-fetch state using get_state to ensure DeltaChannel replayed and rebuilt perfectly
         state_repr = graph.get_state(config)

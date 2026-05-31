@@ -134,7 +134,7 @@ def test_loader_failure_asserts_payload_code(tmp_path: Path, mock_skill_resolver
 
 
 def test_runtime_failure_asserts_payload_code() -> None:
-    from graph_agent.core.state import WorkflowState, BusinessData, FrameworkState
+    from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
     with pytest.raises(GraphAgentFatalError) as exc_info:
         state = WorkflowState(data=BusinessData(), flow=FrameworkState(), messages=[])
         mapper = StateMapper(output_schema={"type": "object", "properties": {"text": {}}})

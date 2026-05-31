@@ -15,7 +15,7 @@ import { appendModelGroupToRoleWithResult, modelDropFailureMessage, ownedProvide
 import { credentialsByProviderCode } from "./route-credentials"
 import { SectionTitle } from "./shared"
 
-export { RoleSettingsPanel, RoleSettingsFields } from "./llm-roles/RoleSettingsDialog"
+export { RoleSettingsPanel, RoleSettingsFields, roleIntentFromSettingsDraft } from "./llm-roles/RoleSettingsDialog"
 
 interface AvailableModelPointerDrag {
   dragging: boolean

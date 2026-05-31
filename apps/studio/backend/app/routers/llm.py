@@ -41,6 +41,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.models.llm_config import (
     CapabilityValue,
+    EvidenceRecord,
+    FieldSource,
     LLMCredentialsFile,
     ModelBundle,
     ModelProfile,
@@ -51,6 +53,7 @@ from app.models.llm_config import (
     RoleEntry,
     RoleRouteEntry,
     RolesData,
+    RouteCandidate,
 )
 from app.services.copilot_test import (
     CopilotProvider,
@@ -83,9 +86,12 @@ from app.services.llm_import_drafts import (
     DraftApplyConflict,
     DraftExpired,
     DraftNotFound,
+    append_evidence_record,
     apply_draft,
     create_draft,
     load_draft,
+    load_evidence_library,
+    new_evidence_id,
 )
 from app.services.llm_model_groups import (
     normalize_model_group_key,
@@ -126,7 +132,7 @@ NO_WORKING_OFFICIAL_LANGUAGE_METHOD_MESSAGE = (
     "No official language call method passed for this model."
 )
 ROLE_TEST_NO_VERIFIED_PROFILE_MESSAGE = (
-    "Route has no verified invocation profile. Run the provider Test in API Keys."
+    "Route has no verified invocation profile."
 )
 _THINKING_CAPABILITY_KEYS = (
     "thinking_protocol",
@@ -338,15 +344,16 @@ async def put_registry_endpoints(request: EndpointUpsertRequest) -> dict[str, An
 
 @router.delete("/registry/endpoints/{endpoint_id}")
 async def delete_registry_endpoint(endpoint_id: str) -> dict[str, Any]:
-    """Delete an endpoint unless active references still exist."""
+    """Delete an endpoint and cascade its owned provider route references."""
     credentials = load_credentials()
     roles = _load_roles_or_empty()
     refs = _endpoint_references(endpoint_id, credentials, roles)
-    if refs["roles"] or refs["model_profiles"] or refs["model_bundles"]:
-        _raise_conflict(
-            "endpoint_in_use",
-            f"Endpoint is still referenced: {endpoint_id}",
-            {"endpoint_id": endpoint_id, **refs},
+    route_ids = set(refs["routes"])
+    if route_ids and roles_path().exists():
+        save_roles_file(
+            roles_path(),
+            _remove_route_references_from_roles(roles, route_ids),
+            known_route_ids=set(credentials.provider_routes) - route_ids,
         )
     data = delete_endpoint(endpoint_id)
     return serialize_for_response(data)
@@ -472,81 +479,31 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
             discovered_model_count=0,
         )
     if model_list_reached:
+        route_ids_by_model: dict[str, str] = {}
         if latest_endpoint.provider_kind == "official":
-            profiles_by_model: dict[str, list[VerifiedProfile]] = {}
-            probe_attempts_by_model: dict[str, list[dict[str, Any]]] = {}
-            catalog_only_models: list[str] = []
-            failed_language_models: list[str] = []
-            failed_language_messages: dict[str, str] = {}
-            failed_language_attempts: dict[str, list[dict[str, Any]]] = {}
-            for model_id in discovered_model_ids:
-                profile_result = await _probe_official_model_profile_result(
-                    latest_endpoint,
-                    model_id,
-                )
-                profiles = profile_result.profiles
-                if profile_result.probe_attempts:
-                    probe_attempts_by_model[model_id] = profile_result.probe_attempts
-                if profiles:
-                    profiles_by_model[model_id] = profiles
-                elif _is_official_language_model_candidate(latest_endpoint, model_id):
-                    failed_language_models.append(model_id)
-                    if profile_result.last_probe_message:
-                        failed_language_messages[model_id] = profile_result.last_probe_message
-                    if profile_result.probe_attempts:
-                        failed_language_attempts[model_id] = profile_result.probe_attempts
-                else:
-                    catalog_only_models.append(model_id)
-            latest_credentials, _ = _upsert_discovered_routes(
-                latest_credentials,
-                endpoint=latest_endpoint,
-                model_ids=tuple(profiles_by_model),
-                verified=True,
-                verified_profiles_by_model=profiles_by_model,
-                probe_attempts_by_model=probe_attempts_by_model,
-                raw_capabilities_by_model=raw_capabilities_by_model,
-            )
-            if profiles_by_model:
-                status = "verified"
-            if catalog_only_models or failed_language_models:
-                latest_endpoint = latest_endpoint.model_copy(
-                    update={
-                        "metadata": {
-                            **latest_endpoint.metadata,
-                            "capability_library": _merged_capability_library_entries(
-                                latest_endpoint,
-                                [
-                                    _official_catalog_library_entry(
-                                        latest_endpoint,
-                                        model_id,
-                                        raw_capabilities_by_model.get(model_id),
-                                    )
-                                    for model_id in catalog_only_models
-                                ]
-                                + [
-                                    _official_failed_language_probe_entry(
-                                        latest_endpoint,
-                                        model_id,
-                                        failed_language_messages.get(model_id),
-                                        failed_language_attempts.get(model_id),
-                                        raw_capabilities_by_model.get(model_id),
-                                    )
-                                    for model_id in failed_language_models
-                                ],
-                                verified_model_ids=set(profiles_by_model),
-                            ),
-                        }
-                    }
-                )
-                latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint
-        else:
-            latest_credentials, _ = _upsert_discovered_routes(
+            latest_credentials, route_ids_by_model = _upsert_discovered_routes(
                 latest_credentials,
                 endpoint=latest_endpoint,
                 model_ids=discovered_model_ids,
                 verified=False,
                 raw_capabilities_by_model=raw_capabilities_by_model,
             )
+            if discovered_model_ids:
+                status = "verified"
+        else:
+            latest_credentials, route_ids_by_model = _upsert_discovered_routes(
+                latest_credentials,
+                endpoint=latest_endpoint,
+                model_ids=discovered_model_ids,
+                verified=False,
+                raw_capabilities_by_model=raw_capabilities_by_model,
+            )
+        _append_model_list_observation_evidence(
+            latest_endpoint,
+            discovered_model_ids,
+            raw_capabilities_by_model,
+            route_ids_by_model,
+        )
     updated = latest_endpoint.model_copy(
         update={
             "status": status,
@@ -663,6 +620,12 @@ async def test_endpoint_models(
             )
             for result in official_results
         ]
+        for result in official_results:
+            _append_official_profile_probe_evidence(
+                endpoint,
+                result,
+                route_id=route_ids_by_model.get(result.model_id),
+            )
         return EndpointModelTestResponse(
             registry=_registry_response(latest_credentials, _load_roles_or_empty()),
             results=results,
@@ -707,6 +670,10 @@ async def test_endpoint_models(
             endpoint=latest_endpoint,
             model_ids=tuple(successful_model_ids),
             verified=True,
+            raw_capabilities_by_model={
+                model_id: _successful_generation_probe_capabilities()
+                for model_id in successful_model_ids
+            },
         )
         latest_endpoint = latest_endpoint.model_copy(
             update={
@@ -739,13 +706,21 @@ async def test_endpoint_models(
         route_ids_by_model = {}
     results = [
         EndpointModelTestResult(
-            model_id=result.model_id,
-            status=result.status,
-            route_id=route_ids_by_model.get(result.model_id) if result.status == "ok" else None,
-            message=result.message,
+            model_id=probe_result.model_id,
+            status=probe_result.status,
+            route_id=route_ids_by_model.get(probe_result.model_id)
+            if probe_result.status == "ok"
+            else None,
+            message=probe_result.message,
         )
-        for result in probe_results
+        for probe_result in probe_results
     ]
+    for probe_result in probe_results:
+        _append_model_probe_evidence(
+            endpoint,
+            probe_result,
+            route_id=route_ids_by_model.get(probe_result.model_id),
+        )
     return EndpointModelTestResponse(
         registry=_registry_response(latest_credentials, _load_roles_or_empty()),
         results=results,
@@ -1449,12 +1424,54 @@ def _include_route_in_model_groups(
     endpoint = credentials.provider_endpoints.get(route.endpoint_id)
     if endpoint is None:
         return False
-    if endpoint.provider_kind != "official":
-        return True
-    return route.status == "verified" and any(
-        profile.status == "ready"
-        for profile in route.verified_profiles
+    return _route_is_language_capable(
+        route,
+        allow_unknown=endpoint.provider_kind != "official",
     )
+
+
+def _route_is_language_capable(route: ProviderRoute, *, allow_unknown: bool) -> bool:
+    capabilities = route_effective_capabilities(route)
+    input_modalities = _capability_string_list(capabilities, "input_modalities")
+    output_modalities = _capability_string_list(capabilities, "output_modalities")
+    if input_modalities or output_modalities:
+        return "text" in input_modalities and "text" in output_modalities
+    capability_family = (
+        _capability_string(capabilities, "capability_family")
+        or _capability_string(capabilities, "model_type")
+    )
+    if capability_family:
+        return capability_family == "language_reasoning"
+    return allow_unknown
+
+
+def _capability_string(
+    capabilities: dict[str, CapabilityValue],
+    key: str,
+) -> str | None:
+    value = capabilities.get(key)
+    if value is None or not isinstance(value.value, str):
+        return None
+    normalized = value.value.strip()
+    return normalized or None
+
+
+def _capability_string_list(
+    capabilities: dict[str, CapabilityValue],
+    key: str,
+) -> list[str]:
+    value = capabilities.get(key)
+    if value is None:
+        return []
+    if isinstance(value.value, list):
+        return [
+            item.strip().lower()
+            for item in value.value
+            if isinstance(item, str) and item.strip()
+        ]
+    if isinstance(value.value, str) and value.value.strip():
+        return [value.value.strip().lower()]
+    return []
 
 
 def _model_group_identity_key(
@@ -1618,12 +1635,18 @@ def _provider_model_option(
         now=datetime.now(UTC),
     )
     capabilities = _provider_route_ui_capabilities(route, endpoint)
+    model_type = _capability_string(capabilities, "model_type")
+    capability_family = _capability_string(capabilities, "capability_family") or model_type
     return {
         "route_id": route.route_id,
         "endpoint_id": endpoint.endpoint_id,
         "provider_label": endpoint.display_name,
         "provider_kind": endpoint.provider_kind,
         "provider_model_id": route.provider_model_id,
+        "model_type": model_type,
+        "capability_family": capability_family,
+        "input_modalities": _capability_string_list(capabilities, "input_modalities"),
+        "output_modalities": _capability_string_list(capabilities, "output_modalities"),
         "ui_state": projection.ui_state,
         "ui_detail": projection.ui_detail,
         "retry_at": projection.retry_at,
@@ -1795,12 +1818,27 @@ async def _role_test_provider_result(
         admission_decision = "block"
         status = "blocked"
     elif admission_decision == "admit" and endpoint.api_key is not None:
-        result = await _probe_role_route(
+        route, profile_probe_result = await _ensure_official_role_test_verified_profile(
             route,
             endpoint,
-            runtime_settings,
-            resolved_settings,
         )
+        if profile_probe_result is not None and not profile_probe_result.profiles:
+            result = ModelProbeResult(
+                model_id=route.provider_model_id,
+                status="error",
+                message=_official_role_test_profile_probe_failure_message(
+                    profile_probe_result
+                ),
+            )
+        else:
+            projection = _provider_model_projection(route, endpoint)
+            provider_ui_state = projection.ui_state
+            result = await _probe_role_route(
+                route,
+                endpoint,
+                runtime_settings,
+                resolved_settings,
+            )
         status = "ok" if result.status == "ok" else "failed"
         if status == "ok":
             provider_ui_state = "ready"
@@ -1840,6 +1878,456 @@ def _role_test_runtime_settings(
             entry.runtime_settings.model_dump(mode="json", exclude_none=True),
         )
     return RuntimeSettings(), {}
+
+
+async def _ensure_official_role_test_verified_profile(
+    route: ProviderRoute,
+    endpoint: ProviderEndpoint,
+) -> tuple[ProviderRoute, OfficialModelProfileProbeResult | None]:
+    if endpoint.provider_kind != "official" or _route_has_ready_verified_profile(route):
+        return route, None
+
+    profile_result = await _probe_official_model_profile_result(
+        endpoint,
+        route.provider_model_id,
+    )
+    if profile_result.profiles:
+        updated_route = _persist_official_role_test_verified_profile(
+            route,
+            endpoint,
+            profile_result,
+        )
+        _append_official_profile_probe_evidence(
+            endpoint,
+            profile_result,
+            route_id=updated_route.route_id,
+        )
+        return (
+            updated_route,
+            profile_result,
+        )
+    updated_route = _persist_official_role_test_profile_failure(route, profile_result)
+    _append_official_profile_probe_evidence(
+        endpoint,
+        profile_result,
+        route_id=updated_route.route_id,
+    )
+    return (
+        updated_route,
+        profile_result,
+    )
+
+
+def _route_has_ready_verified_profile(route: ProviderRoute) -> bool:
+    return any(profile.status == "ready" for profile in route.verified_profiles)
+
+
+def _persist_official_role_test_verified_profile(
+    route: ProviderRoute,
+    endpoint: ProviderEndpoint,
+    profile_result: OfficialModelProfileProbeResult,
+) -> ProviderRoute:
+    credentials = load_credentials()
+    latest_endpoint = credentials.provider_endpoints.get(endpoint.endpoint_id)
+    if latest_endpoint is None or route.route_id not in credentials.provider_routes:
+        return route
+    probe_attempts_by_model = (
+        {profile_result.model_id: profile_result.probe_attempts}
+        if profile_result.probe_attempts
+        else None
+    )
+    credentials, route_ids_by_model = _upsert_discovered_routes(
+        credentials,
+        endpoint=latest_endpoint,
+        model_ids=(profile_result.model_id,),
+        verified=True,
+        verified_profiles_by_model={profile_result.model_id: profile_result.profiles},
+        probe_attempts_by_model=probe_attempts_by_model,
+    )
+    updated_route_id = route_ids_by_model.get(profile_result.model_id, route.route_id)
+    updated_route = credentials.provider_routes.get(updated_route_id)
+    if updated_route is None:
+        return route
+    cleaned_metadata = {
+        key: value
+        for key, value in updated_route.metadata.items()
+        if key not in {"reason_code", "last_probe_message"}
+    }
+    if profile_result.probe_attempts:
+        cleaned_metadata["probe_attempts"] = profile_result.probe_attempts
+    updated_route = updated_route.model_copy(update={"metadata": cleaned_metadata})
+    credentials.provider_routes[updated_route.route_id] = updated_route
+    save_credentials(credentials)
+    return updated_route
+
+
+def _persist_official_role_test_profile_failure(
+    route: ProviderRoute,
+    profile_result: OfficialModelProfileProbeResult,
+) -> ProviderRoute:
+    credentials = load_credentials()
+    current_route = credentials.provider_routes.get(route.route_id)
+    if current_route is None:
+        return route
+    metadata = {
+        **current_route.metadata,
+        "reason_code": "profile_probe_failed",
+        "last_probe_message": _official_role_test_profile_probe_failure_message(
+            profile_result
+        ),
+    }
+    if profile_result.probe_attempts:
+        metadata["probe_attempts"] = profile_result.probe_attempts
+    updated_route = current_route.model_copy(update={"metadata": metadata})
+    credentials.provider_routes[updated_route.route_id] = updated_route
+    save_credentials(credentials)
+    return updated_route
+
+
+def _official_role_test_profile_probe_failure_message(
+    profile_result: OfficialModelProfileProbeResult,
+) -> str:
+    return profile_result.last_probe_message or NO_WORKING_OFFICIAL_LANGUAGE_METHOD_MESSAGE
+
+
+def _append_official_profile_probe_evidence(
+    endpoint: ProviderEndpoint,
+    profile_result: OfficialModelProfileProbeResult,
+    *,
+    route_id: str | None,
+) -> None:
+    profile = _selected_evidence_profile(profile_result.profiles)
+    first_attempt = _first_probe_attempt(profile_result.probe_attempts)
+    model_id = profile_result.model_id
+    verified = bool(profile_result.profiles)
+    reason = (
+        None
+        if verified
+        else _official_role_test_profile_probe_failure_message(profile_result)
+    )
+    catalog_capabilities = _official_catalog_capabilities(endpoint, model_id)
+    append_evidence_record(
+        EvidenceRecord(
+            evidence_id=new_evidence_id("probe"),
+            evidence_type="probe",
+            trust_state="probe-verified" if verified else "probe-failed",
+            observed_at=_now_iso(),
+            attempted_at=_now_iso(),
+            endpoint_id=endpoint.endpoint_id,
+            route_id=route_id,
+            model_id=model_id,
+            provider_model_id=model_id,
+            method_id=(
+                profile.method_id
+                if profile is not None
+                else _probe_attempt_string(first_attempt, "method_id")
+            ),
+            request_mapper_id=(
+                profile.request_mapper_id
+                if profile is not None
+                else _probe_attempt_string(first_attempt, "request_mapper_id")
+            ),
+            probe_status="ok" if verified else _probe_attempt_string(first_attempt, "status"),
+            reason=reason,
+            model_type=_catalog_string(catalog_capabilities, "model_type"),
+            capability_family=_catalog_string(catalog_capabilities, "model_type"),
+            input_modalities=_evidence_modalities(
+                profile_result.profiles,
+                profile_result.probe_attempts,
+                catalog_capabilities,
+                "input_modalities",
+            ),
+            output_modalities=_evidence_modalities(
+                profile_result.profiles,
+                profile_result.probe_attempts,
+                catalog_capabilities,
+                "output_modalities",
+            ),
+            candidate_methods=_official_evidence_candidate_methods(
+                profile_result.profiles,
+                profile_result.probe_attempts,
+                catalog_capabilities,
+            ),
+            candidate_capabilities=verified_profile_route_capabilities(
+                profile_result.profiles
+            ),
+            scope=_probe_evidence_scope(
+                endpoint_id=endpoint.endpoint_id,
+                route_id=route_id,
+                model_id=model_id,
+            ),
+            probe_attempts=profile_result.probe_attempts,
+            successful_probe=(
+                {"profile_count": len(profile_result.profiles)} if verified else None
+            ),
+            failed_probe=(
+                {
+                    "status": _probe_attempt_string(first_attempt, "status") or "error",
+                    "reason": reason,
+                }
+                if not verified
+                else None
+            ),
+        )
+    )
+
+
+def _append_model_probe_evidence(
+    endpoint: ProviderEndpoint,
+    result: ModelProbeResult,
+    *,
+    route_id: str | None,
+) -> None:
+    verified = result.status == "ok"
+    reason = None if verified else _model_probe_failure_message(result)
+    capability_values = (
+        _third_party_route_capability_values(
+            endpoint,
+            result.model_id,
+            _successful_generation_probe_capabilities(),
+            source="probed_verified",
+        )
+        if verified
+        else {}
+    )
+    append_evidence_record(
+        EvidenceRecord(
+            evidence_id=new_evidence_id("probe"),
+            evidence_type="probe",
+            trust_state="probe-verified" if verified else "probe-failed",
+            observed_at=_now_iso(),
+            attempted_at=_now_iso(),
+            endpoint_id=endpoint.endpoint_id,
+            route_id=route_id,
+            model_id=result.model_id,
+            provider_model_id=result.model_id,
+            probe_status=result.status,
+            reason=reason,
+            model_type=_capability_string(capability_values, "model_type"),
+            capability_family=_capability_string(capability_values, "capability_family"),
+            input_modalities=_capability_string_list(capability_values, "input_modalities"),
+            output_modalities=_capability_string_list(capability_values, "output_modalities"),
+            candidate_capabilities=capability_values,
+            scope=_probe_evidence_scope(
+                endpoint_id=endpoint.endpoint_id,
+                route_id=route_id,
+                model_id=result.model_id,
+            ),
+            probe_attempts=[
+                {
+                    "status": result.status,
+                    "latency_ms": result.latency_ms,
+                    "message": result.message,
+                }
+            ],
+            successful_probe=(
+                {"status": result.status, "latency_ms": result.latency_ms}
+                if verified
+                else None
+            ),
+            failed_probe=(
+                {"status": result.status, "reason": reason} if not verified else None
+            ),
+        )
+    )
+
+
+def _append_model_list_observation_evidence(
+    endpoint: ProviderEndpoint,
+    model_ids: tuple[str, ...],
+    raw_capabilities_by_model: dict[str, dict[str, Any]],
+    route_ids_by_model: dict[str, str],
+) -> None:
+    library = load_evidence_library()
+    previous_model_ids = {
+        candidate.provider_model_id
+        for candidate in library.route_candidates.values()
+        if candidate.endpoint_id == endpoint.endpoint_id
+    }
+    observed_model_ids = list(model_ids)
+    observed_set = set(observed_model_ids)
+    added_model_ids = [
+        model_id
+        for model_id in observed_model_ids
+        if model_id not in previous_model_ids
+    ]
+    removed_model_ids = sorted(previous_model_ids - observed_set)
+    unchanged_model_ids = [
+        model_id
+        for model_id in observed_model_ids
+        if model_id in previous_model_ids
+    ]
+    route_candidates = {
+        route_id: _route_candidate_from_model_list(
+            endpoint,
+            model_id,
+            route_id,
+            raw_capabilities_by_model.get(model_id, {}),
+        )
+        for model_id, route_id in route_ids_by_model.items()
+    }
+    append_evidence_record(
+        EvidenceRecord(
+            evidence_id=new_evidence_id("model-list"),
+            evidence_type="model_list_observation",
+            trust_state="provider-list-observed",
+            observed_at=_now_iso(),
+            endpoint_id=endpoint.endpoint_id,
+            provider_id=endpoint.endpoint_id,
+            scope={"endpoint_id": endpoint.endpoint_id},
+            model_list_observation={
+                "base_url_fingerprint": _redacted_base_url_fingerprint(endpoint.base_url),
+                "observed_model_ids": observed_model_ids,
+                "added_model_ids": added_model_ids,
+                "removed_model_ids": removed_model_ids,
+                "unchanged_model_ids": unchanged_model_ids,
+            },
+            metadata={"model_count": len(observed_model_ids)},
+        ),
+        route_candidates=route_candidates,
+    )
+
+
+def _route_candidate_from_model_list(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+    route_id: str,
+    raw_capabilities: dict[str, Any],
+) -> RouteCandidate:
+    route_slug = route_id.split(":", 1)[1] if ":" in route_id else _route_slug(model_id)
+    canonical = canonicalize_model(endpoint_id=endpoint.endpoint_id, provider_model_id=route_slug)
+    capabilities = (
+        {
+            **_official_model_type_capability_values(
+                endpoint,
+                model_id,
+                source="api_list",
+            ),
+            **_provider_doc_limit_capability_values(endpoint, model_id),
+            **_official_normalized_route_capabilities(endpoint, model_id, raw_capabilities),
+        }
+        if endpoint.provider_kind == "official"
+        else _third_party_route_capability_values(
+            endpoint,
+            model_id,
+            raw_capabilities,
+            source="api_list",
+        )
+    )
+    return RouteCandidate(
+        endpoint_id=endpoint.endpoint_id,
+        route_slug=route_slug,
+        provider_model_id=model_id,
+        canonical_id=canonical.canonical_id,
+        display_name=model_id,
+        capabilities=capabilities,
+        field_sources={
+            "provider_model_id": FieldSource(source="api_list"),
+            "capabilities": FieldSource(source="api_list"),
+        },
+        metadata={
+            "trust_state": "provider-list-observed",
+            "route_id": route_id,
+            "provider_kind": endpoint.provider_kind,
+        },
+    )
+
+
+def _redacted_base_url_fingerprint(base_url: str) -> str:
+    normalized = base_url.rstrip("/")
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+
+
+def _selected_evidence_profile(
+    profiles: list[VerifiedProfile],
+) -> VerifiedProfile | None:
+    if not profiles:
+        return None
+    return sorted(
+        profiles,
+        key=lambda profile: (not profile.default, profile.fallback_rank, profile.profile_id),
+    )[0]
+
+
+def _first_probe_attempt(
+    probe_attempts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return probe_attempts[0] if probe_attempts else {}
+
+
+def _probe_attempt_string(
+    probe_attempt: dict[str, Any],
+    key: str,
+) -> str | None:
+    value = probe_attempt.get(key)
+    return value if isinstance(value, str) else None
+
+
+def _catalog_string(
+    capabilities: dict[str, object],
+    key: str,
+) -> str | None:
+    value = capabilities.get(key)
+    return value if isinstance(value, str) else None
+
+
+def _evidence_modalities(
+    profiles: list[VerifiedProfile],
+    probe_attempts: list[dict[str, Any]],
+    catalog_capabilities: dict[str, object],
+    key: Literal["input_modalities", "output_modalities"],
+) -> list[str]:
+    values = [
+        modality
+        for profile in profiles
+        for modality in getattr(profile, key)
+        if isinstance(modality, str)
+    ]
+    for attempt in probe_attempts:
+        attempt_modalities = attempt.get(key)
+        if isinstance(attempt_modalities, list):
+            values.extend(
+                modality
+                for modality in attempt_modalities
+                if isinstance(modality, str)
+            )
+    catalog_modalities = catalog_capabilities.get(key)
+    if isinstance(catalog_modalities, list):
+        values.extend(
+            modality
+            for modality in catalog_modalities
+            if isinstance(modality, str)
+        )
+    return _ordered_unique(values)
+
+
+def _official_evidence_candidate_methods(
+    profiles: list[VerifiedProfile],
+    probe_attempts: list[dict[str, Any]],
+    catalog_capabilities: dict[str, object],
+) -> list[str]:
+    catalog_methods = catalog_capabilities.get("candidate_methods")
+    methods: list[str] = []
+    if isinstance(catalog_methods, list):
+        methods.extend(method for method in catalog_methods if isinstance(method, str))
+    methods.extend(profile.method_id for profile in profiles)
+    for attempt in probe_attempts:
+        method_id = _probe_attempt_string(attempt, "method_id")
+        if method_id is not None:
+            methods.append(method_id)
+    return _ordered_unique(methods)
+
+
+def _probe_evidence_scope(
+    *,
+    endpoint_id: str,
+    route_id: str | None,
+    model_id: str,
+) -> dict[str, str]:
+    scope = {"endpoint_id": endpoint_id, "model_id": model_id}
+    if route_id is not None:
+        scope["route_id"] = route_id
+    return scope
 
 
 async def _probe_role_route(
@@ -3117,309 +3605,101 @@ async def _run_official_endpoint_test_job_impl(job_id: str, endpoint_id: str) ->
 
     discovered_model_ids = result.model_ids
     raw_capabilities_by_model = result.model_capabilities
-    if not discovered_model_ids:
-        latest_credentials = load_credentials()
-        latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
-        if latest_endpoint is not None:
-            latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint.model_copy(
-                update={
-                    "status": "unverified_manual",
-                    "last_test_at": _now_iso(),
-                    "last_test_message": "Endpoint reachable but returned no models.",
-                }
-            )
-            save_credentials(latest_credentials)
-        await _finish_endpoint_test_job(
-            job_id,
-            "completed",
-            "Endpoint reachable but returned no models.",
-            total_model_count=0,
-        )
-        return
-
-    await _update_endpoint_test_job(
-        job_id,
-        total_model_count=len(discovered_model_ids),
-        message=f"Testing 0/{len(discovered_model_ids)} provider models.",
-        available_models=[
-            EndpointTestCompactModelInfo(
-                id=model_id,
-                status="unverified_manual",
-                verified_profile_count=0,
-                capabilities=_official_catalog_capabilities(
-                    endpoint,
-                    model_id,
-                    raw_capabilities_by_model.get(model_id),
-                ),
-            )
-            for model_id in discovered_model_ids
-        ],
-    )
-    profiles_by_model: dict[str, list[VerifiedProfile]] = {}
-    catalog_only_models: list[str] = []
-    failed_models: list[str] = []
-    failed_model_messages: dict[str, str] = {}
-    failed_model_attempts: dict[str, list[dict[str, Any]]] = {}
-    probe_attempts_by_model: dict[str, list[dict[str, Any]]] = {}
-    model_infos_by_id: dict[str, EndpointTestCompactModelInfo] = {
-        model_id: EndpointTestCompactModelInfo(
-            id=model_id,
-            status="unverified_manual",
-            verified_profile_count=0,
-            capabilities=_official_catalog_capabilities(
-                endpoint,
-                model_id,
-                raw_capabilities_by_model.get(model_id),
-            ),
-        )
-        for model_id in discovered_model_ids
-    }
-    tested_count = 0
-
-    for batch in _chunks(discovered_model_ids, OFFICIAL_PROVIDER_TEST_BATCH_SIZE):
-        async def publish_active_probe_models(
-            active_model_ids: tuple[str, ...],
-            current_tested_count: int = tested_count,
-        ) -> None:
-            await _update_endpoint_test_job(
-                job_id,
-                tested_model_count=current_tested_count,
-                verified_route_count=len(profiles_by_model),
-                failed_model_count=len(failed_models),
-                catalog_only_count=len(catalog_only_models),
-                message=(
-                    f"Testing {current_tested_count}/{len(discovered_model_ids)} provider models."
-                ),
-                available_models=_compact_model_infos_with_active_status(
-                    model_infos_by_id,
-                    active_model_ids,
-                ),
-            )
-
-        batch_results = await _probe_official_profile_batch(
-            endpoint,
-            batch,
-            on_active_change=publish_active_probe_models,
-        )
-        latest_credentials = load_credentials()
-        latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
-        if latest_endpoint is None:
-            await _finish_endpoint_test_job(job_id, "failed", f"Unknown endpoint: {endpoint_id}")
-            return
-        if latest_credentials.endpoint_fingerprint(endpoint_id) != starting_fingerprint:
-            latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint.model_copy(
-                update={
-                    "status": "unverified_manual",
-                    "last_test_at": _now_iso(),
-                    "last_test_message": (
-                        "Endpoint changed while endpoint test was running. "
-                        "Test result discarded."
-                    ),
-                }
-            )
-            save_credentials(latest_credentials)
-            await _finish_endpoint_test_job(
-                job_id,
-                "failed",
-                "Endpoint changed while endpoint test was running. Test result discarded.",
-            )
-            return
-
-        verified_batch: dict[str, list[VerifiedProfile]] = {}
-        for profile_result in batch_results:
-            model_id = profile_result.model_id
-            profiles = profile_result.profiles
-            if profile_result.probe_attempts:
-                probe_attempts_by_model[model_id] = profile_result.probe_attempts
-            tested_count += 1
-            if profiles:
-                profiles_by_model[model_id] = profiles
-                verified_batch[model_id] = profiles
-            elif _is_official_language_model_candidate(latest_endpoint, model_id):
-                failed_models.append(model_id)
-                if profile_result.last_probe_message:
-                    failed_model_messages[model_id] = profile_result.last_probe_message
-                if profile_result.probe_attempts:
-                    failed_model_attempts[model_id] = profile_result.probe_attempts
-            else:
-                catalog_only_models.append(model_id)
-
-        route_ids_by_model: dict[str, str] = {}
-        if verified_batch:
-            latest_credentials, route_ids_by_model = _upsert_discovered_routes(
-                latest_credentials,
-                endpoint=latest_endpoint,
-                model_ids=tuple(verified_batch),
-                verified=True,
-                verified_profiles_by_model=verified_batch,
-                probe_attempts_by_model=probe_attempts_by_model,
-                raw_capabilities_by_model=raw_capabilities_by_model,
-            )
-
-        for profile_result in batch_results:
-            model_id = profile_result.model_id
-            profiles = profile_result.profiles
-            if profiles:
-                model_infos_by_id[model_id] = EndpointTestCompactModelInfo(
-                    id=model_id,
-                    route_id=route_ids_by_model.get(model_id),
-                    status="verified",
-                    verified_profile_count=len(profiles),
-                    capabilities=_official_verified_model_capabilities(
-                        latest_endpoint,
-                        model_id,
-                        profiles,
-                        profile_result.probe_attempts,
-                        raw_capabilities_by_model.get(model_id),
-                    ),
-                )
-            else:
-                is_language_candidate = _is_official_language_model_candidate(
-                    latest_endpoint,
-                    model_id,
-                )
-                model_infos_by_id[model_id] = EndpointTestCompactModelInfo(
-                    id=model_id,
-                    status="failed" if is_language_candidate else "unverified_manual",
-                    verified_profile_count=0,
-                    last_probe_message=(
-                        failed_model_messages.get(
-                            model_id,
-                            NO_WORKING_OFFICIAL_LANGUAGE_METHOD_MESSAGE,
-                        )
-                        if is_language_candidate
-                        else NO_VERIFIED_ROUTE_PROFILE_MESSAGE
-                    ),
-                    capabilities={
-                        **_official_catalog_capabilities(
-                            latest_endpoint,
-                            model_id,
-                            raw_capabilities_by_model.get(model_id),
-                        ),
-                        **(
-                            {"probe_attempts": profile_result.probe_attempts}
-                            if profile_result.probe_attempts
-                            else {}
-                        ),
-                    },
-                )
-
-        latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id, latest_endpoint)
-        latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint.model_copy(
-            update={
-                "status": "verified" if profiles_by_model else "unverified_manual",
-                "last_test_at": _now_iso(),
-                "last_test_message": _endpoint_success_message(result),
-                "metadata": {
-                    **latest_endpoint.metadata,
-                    "capability_library": _merged_capability_library_entries(
-                        latest_endpoint,
-                        [
-                            _official_catalog_library_entry(
-                                latest_endpoint,
-                                model_id,
-                                raw_capabilities_by_model.get(model_id),
-                            )
-                            for model_id in catalog_only_models
-                        ]
-                        + [
-                            _official_failed_language_probe_entry(
-                                latest_endpoint,
-                                model_id,
-                                failed_model_messages.get(model_id),
-                                failed_model_attempts.get(model_id),
-                                raw_capabilities_by_model.get(model_id),
-                            )
-                            for model_id in failed_models
-                        ],
-                        verified_model_ids=set(profiles_by_model),
-                    ),
-                },
-            }
-        )
-        save_credentials(latest_credentials)
-        await _update_endpoint_test_job(
-            job_id,
-            tested_model_count=tested_count,
-            verified_route_count=len(profiles_by_model),
-            failed_model_count=len(failed_models),
-            catalog_only_count=len(catalog_only_models),
-            message=f"Testing {tested_count}/{len(discovered_model_ids)} provider models.",
-            available_models=list(model_infos_by_id.values()),
-        )
-
     latest_credentials = load_credentials()
     latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
     if latest_endpoint is None:
         await _finish_endpoint_test_job(job_id, "failed", f"Unknown endpoint: {endpoint_id}")
         return
+    if latest_credentials.endpoint_fingerprint(endpoint_id) != starting_fingerprint:
+        latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint.model_copy(
+            update={
+                "status": "unverified_manual",
+                "last_test_at": _now_iso(),
+                "last_test_message": (
+                    "Endpoint changed while endpoint test was running. Test result discarded."
+                ),
+            }
+        )
+        save_credentials(latest_credentials)
+        await _finish_endpoint_test_job(
+            job_id,
+            "failed",
+            "Endpoint changed while endpoint test was running. Test result discarded.",
+        )
+        return
+
+    if not discovered_model_ids:
+        latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint.model_copy(
+            update={
+                "status": "unverified_manual",
+                "last_test_at": _now_iso(),
+                "last_test_message": "Endpoint reachable but returned no models.",
+            }
+        )
+        save_credentials(latest_credentials)
+        _append_model_list_observation_evidence(
+            latest_endpoint,
+            (),
+            raw_capabilities_by_model,
+            {},
+        )
+        await _finish_endpoint_test_job(
+            job_id,
+            "completed",
+            "Endpoint reachable but returned no models.",
+            total_model_count=0,
+            tested_model_count=0,
+            verified_route_count=0,
+            failed_model_count=0,
+            catalog_only_count=0,
+        )
+        return
+
     latest_credentials, route_ids_by_model = _upsert_discovered_routes(
         latest_credentials,
         endpoint=latest_endpoint,
-        model_ids=tuple(profiles_by_model),
-        verified=True,
-        verified_profiles_by_model=profiles_by_model,
-        probe_attempts_by_model=probe_attempts_by_model,
+        model_ids=discovered_model_ids,
+        verified=False,
         raw_capabilities_by_model=raw_capabilities_by_model,
     )
-    for model_id, profiles in profiles_by_model.items():
-        model_infos_by_id[model_id] = EndpointTestCompactModelInfo(
-            id=model_id,
-            route_id=route_ids_by_model.get(model_id),
-            status="verified",
-            verified_profile_count=len(profiles),
-            capabilities=_official_verified_model_capabilities(
-                latest_endpoint,
-                model_id,
-                profiles,
-                probe_attempts_by_model.get(model_id),
-                raw_capabilities_by_model.get(model_id),
-            ),
+    latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id)
+    if latest_endpoint is None:
+        await _finish_endpoint_test_job(job_id, "failed", f"Unknown endpoint: {endpoint_id}")
+        return
+    final_models = [
+        _compact_model_info_for_listed_official_route(
+            latest_credentials,
+            latest_endpoint,
+            model_id,
+            route_ids_by_model.get(model_id),
+            raw_capabilities_by_model.get(model_id),
         )
-    final_models = list(model_infos_by_id.values())
+        for model_id in discovered_model_ids
+    ]
     latest_endpoint = latest_credentials.provider_endpoints.get(endpoint_id, latest_endpoint)
     latest_credentials.provider_endpoints[endpoint_id] = latest_endpoint.model_copy(
         update={
-            "status": "verified" if profiles_by_model else "unverified_manual",
+            "status": "verified",
             "last_test_at": _now_iso(),
             "last_test_message": _endpoint_success_message(result),
-            "metadata": {
-                **latest_endpoint.metadata,
-                "capability_library": _merged_capability_library_entries(
-                    latest_endpoint,
-                    [
-                        _official_catalog_library_entry(
-                            latest_endpoint,
-                            model_id,
-                            raw_capabilities_by_model.get(model_id),
-                        )
-                        for model_id in catalog_only_models
-                    ]
-                    + [
-                        _official_failed_language_probe_entry(
-                            latest_endpoint,
-                            model_id,
-                            failed_model_messages.get(model_id),
-                            failed_model_attempts.get(model_id),
-                            raw_capabilities_by_model.get(model_id),
-                        )
-                        for model_id in failed_models
-                    ],
-                    verified_model_ids=set(profiles_by_model),
-                ),
-            },
         }
     )
     save_credentials(latest_credentials)
+    _append_model_list_observation_evidence(
+        latest_endpoint,
+        discovered_model_ids,
+        raw_capabilities_by_model,
+        route_ids_by_model,
+    )
     await _finish_endpoint_test_job(
         job_id,
         "completed",
         _endpoint_success_message(result),
         total_model_count=len(discovered_model_ids),
-        tested_model_count=tested_count,
-        verified_route_count=len(profiles_by_model),
-        failed_model_count=len(failed_models),
-        catalog_only_count=len(catalog_only_models),
+        tested_model_count=0,
+        verified_route_count=0,
+        failed_model_count=0,
+        catalog_only_count=0,
         available_models=final_models,
         available_sdks=[latest_endpoint.protocol],
     )
@@ -3455,6 +3735,64 @@ async def _probe_official_profile_batch(
                 await mark_active(model_id, False)
 
     return await asyncio.gather(*(probe(model_id) for model_id in model_ids))
+
+
+def _compact_model_info_for_listed_official_route(
+    credentials: LLMCredentialsFile,
+    endpoint: ProviderEndpoint,
+    model_id: str,
+    route_id: str | None,
+    raw_capabilities: dict[str, Any] | None,
+) -> EndpointTestCompactModelInfo:
+    route = credentials.provider_routes.get(route_id) if route_id is not None else None
+    verified_profiles = (
+        route.verified_profiles
+        if route is not None and route.status == "verified" and route.verified_profiles
+        else []
+    )
+    capabilities = (
+        _official_verified_model_capabilities(
+            endpoint,
+            model_id,
+            verified_profiles,
+            _route_probe_attempts(route),
+            raw_capabilities,
+        )
+        if verified_profiles
+        else _official_catalog_capabilities(endpoint, model_id, raw_capabilities)
+    )
+    return EndpointTestCompactModelInfo(
+        id=model_id,
+        route_id=route_id,
+        status=route.status if route is not None else "unverified_manual",
+        verified_profile_count=len(verified_profiles),
+        last_probe_message=_route_failure_message(route),
+        capabilities=capabilities,
+    )
+
+
+def _route_probe_attempts(route: ProviderRoute | None) -> list[dict[str, Any]] | None:
+    if route is None:
+        return None
+    attempts = route.metadata.get("probe_attempts")
+    if isinstance(attempts, list) and all(isinstance(attempt, dict) for attempt in attempts):
+        return attempts
+    return None
+
+
+def _route_failure_message(route: ProviderRoute | None) -> str | None:
+    if route is None or route.status != "failed":
+        return None
+    for key in ("last_probe_message", "failure_reason", "reason"):
+        value = route.metadata.get(key)
+        if isinstance(value, str) and value:
+            return value
+    attempts = _route_probe_attempts(route)
+    if attempts:
+        message = attempts[-1].get("message")
+        if isinstance(message, str) and message:
+            return message
+    return "Route is marked failed; run a single-model test for details."
 
 
 def _compact_model_infos_with_active_status(
@@ -3609,6 +3947,93 @@ def _admission_decision(ui_state: str) -> str:
     return "admit"
 
 
+def _successful_generation_probe_capabilities() -> dict[str, Any]:
+    return {
+        "model_type": "language_reasoning",
+        "capability_family": "language_reasoning",
+        "input_modalities": ["text"],
+        "output_modalities": ["text"],
+    }
+
+
+def _third_party_route_capability_values(
+    endpoint: ProviderEndpoint,
+    model_id: str,
+    raw_capabilities: dict[str, Any],
+    *,
+    source: Literal["api_list", "probed_verified"],
+) -> dict[str, CapabilityValue]:
+    capabilities = normalize_route_capabilities(
+        protocol=endpoint.protocol,
+        provider_model_id=model_id,
+        raw_capabilities=raw_capabilities,
+        source=source,
+    )
+    model_type = _raw_model_type(raw_capabilities) or _model_type_from_modalities(capabilities)
+    if model_type is None:
+        return capabilities
+    label = _model_type_label(model_type)
+    capabilities.setdefault(
+        "model_type",
+        CapabilityValue(value=model_type, source=source, message=label),
+    )
+    capabilities.setdefault(
+        "model_type_label",
+        CapabilityValue(value=label, source=source),
+    )
+    capabilities.setdefault(
+        "capability_family",
+        CapabilityValue(value=model_type, source=source, message=label),
+    )
+    return capabilities
+
+
+def _raw_model_type(raw_capabilities: dict[str, Any]) -> str | None:
+    for key in ("model_type", "capability_family"):
+        value = raw_capabilities.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _model_type_from_modalities(
+    capabilities: dict[str, CapabilityValue],
+) -> str | None:
+    input_modalities = _capability_string_list(capabilities, "input_modalities")
+    output_modalities = _capability_string_list(capabilities, "output_modalities")
+    if "text" in input_modalities and "text" in output_modalities:
+        return "language_reasoning"
+    if "image" in output_modalities:
+        return "image_generation"
+    if "video" in output_modalities:
+        return "video_generation"
+    if "audio" in output_modalities:
+        return "audio"
+    if "embedding" in output_modalities:
+        return "embedding"
+    if "translation" in output_modalities:
+        return "translation"
+    if "3d" in output_modalities:
+        return "3d_generation"
+    if "moderation" in output_modalities:
+        return "moderation"
+    return None
+
+
+def _model_type_label(model_type: str) -> str:
+    return {
+        "language_reasoning": "Language/reasoning model",
+        "image_generation": "Image generation model",
+        "video_generation": "Video generation model",
+        "audio": "Audio/realtime model",
+        "embedding": "Embedding model",
+        "translation": "Translation model",
+        "3d_generation": "3D generation model",
+        "moderation": "Moderation model",
+        "interactions_agent": "Interactions API agent",
+    }.get(model_type, model_type.replace("_", " ").title())
+
+
 def _upsert_discovered_routes(
     credentials: LLMCredentialsFile,
     *,
@@ -3674,10 +4099,10 @@ def _upsert_discovered_routes(
                         (raw_capabilities_by_model or {}).get(model_id, {}),
                     )
                     if endpoint.provider_kind == "official"
-                    else normalize_route_capabilities(
-                        protocol=endpoint.protocol,
-                        provider_model_id=model_id,
-                        raw_capabilities=(raw_capabilities_by_model or {}).get(model_id, {}),
+                    else _third_party_route_capability_values(
+                        endpoint,
+                        model_id,
+                        (raw_capabilities_by_model or {}).get(model_id, {}),
                         source=capability_source,
                     )
                 ),
@@ -3750,10 +4175,10 @@ def _provider_route(
                         raw_capabilities or {},
                     )
                     if endpoint.provider_kind == "official"
-                    else normalize_route_capabilities(
-                        protocol=endpoint.protocol,
-                        provider_model_id=model_id,
-                        raw_capabilities=raw_capabilities or {},
+                    else _third_party_route_capability_values(
+                        endpoint,
+                        model_id,
+                        raw_capabilities or {},
                         source=capability_source,
                     )
                 ),
@@ -3911,6 +4336,79 @@ def _endpoint_references(
     for bundle_id, bundle in roles.model_bundles.items():
         refs["model_bundles"].extend(_bundle_route_references(bundle_id, bundle, route_set))
     return refs
+
+
+def _remove_route_references_from_roles(
+    data: RolesData,
+    route_ids: set[str],
+) -> RolesData:
+    roles = {
+        role_name: role.model_copy(
+            update={
+                "fallback_chain": [
+                    entry
+                    for entry in role.fallback_chain
+                    if entry.route_id not in route_ids
+                ],
+                "model_groups": [
+                    group.model_copy(
+                        update={
+                            "provider_models": [
+                                provider_model
+                                for provider_model in group.provider_models
+                                if provider_model.route_id not in route_ids
+                            ]
+                        }
+                    )
+                    for group in role.model_groups
+                ],
+            }
+        )
+        for role_name, role in data.roles.items()
+    }
+    model_profiles = {
+        profile_id: profile.model_copy(
+            update={
+                "fallback_chain": [
+                    entry
+                    for entry in profile.fallback_chain
+                    if entry.route_id not in route_ids
+                ]
+            }
+        )
+        for profile_id, profile in data.model_profiles.items()
+    }
+    model_bundles = {
+        bundle_id: bundle.model_copy(
+            update={
+                "fallback_chain": [
+                    entry
+                    for entry in bundle.fallback_chain
+                    if entry.route_id not in route_ids
+                ],
+                "model_groups": [
+                    group.model_copy(
+                        update={
+                            "provider_models": [
+                                provider_model
+                                for provider_model in group.provider_models
+                                if provider_model.route_id not in route_ids
+                            ]
+                        }
+                    )
+                    for group in bundle.model_groups
+                ],
+            }
+        )
+        for bundle_id, bundle in data.model_bundles.items()
+    }
+    return data.model_copy(
+        update={
+            "roles": roles,
+            "model_profiles": model_profiles,
+            "model_bundles": model_bundles,
+        }
+    )
 
 
 def _route_references(route_id: str, roles: RolesData) -> dict[str, list[str]]:

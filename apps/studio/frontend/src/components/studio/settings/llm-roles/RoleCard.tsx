@@ -296,7 +296,7 @@ export const RoleCard = memo(function RoleCard({
         >
           <RoleSettingsPanel
             roleName={roleName}
-            modelFallback={role.model_fallback}
+            modelFallbackEnabled={role.model_fallback_enabled}
             intent={role.intent}
             outputLimitSummary={outputLimitSummary}
             onModelFallbackChange={(checked) => onChange(toggleModelFallback(data, roleName, checked))}

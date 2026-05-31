@@ -38,7 +38,7 @@ def materialize_role(
     }
     groups = role.model_groups if role.model_fallback_enabled else role.model_groups[:1]
     for group in groups:
-        for provider_model in _ordered_provider_models(group, role, credentials, health_store):
+        for provider_model in _ordered_provider_models(group):
             route = credentials.provider_routes.get(provider_model.route_id)
             if route is None:
                 continue
@@ -124,45 +124,8 @@ def materialize_model_bundle(
 
 def _ordered_provider_models(
     group: RoleModelGroup,
-    role: RoleEntry,
-    credentials: LLMCredentialsFile,
-    health_store: SqliteLlmHealthStore,
 ) -> list[RoleProviderModel]:
-    provider_models = list(group.provider_models)
-    preference = group.intent.provider_preference or role.intent.provider_preference
-    if preference == "manual_order":
-        return provider_models
-    if preference == "ready_first":
-        return sorted(
-            provider_models,
-            key=lambda item: _state_sort_key(item.route_id, credentials, health_store),
-        )
-    if preference == "official_first":
-        return sorted(
-            provider_models,
-            key=lambda item: _provider_kind_sort_key(item.route_id, credentials),
-        )
-    return provider_models
-
-
-def _state_sort_key(
-    route_id: str,
-    credentials: LLMCredentialsFile,
-    health_store: SqliteLlmHealthStore,
-) -> int:
-    projection = _projection(route_id, credentials, health_store)
-    if projection is None:
-        return 99
-    order = {"ready": 0, "untested": 1, "cooling_down": 2, "needs_setup": 3, "off": 4}
-    return order[projection.ui_state]
-
-
-def _provider_kind_sort_key(route_id: str, credentials: LLMCredentialsFile) -> int:
-    route = credentials.provider_routes.get(route_id)
-    endpoint = credentials.provider_endpoints.get(route.endpoint_id) if route else None
-    if endpoint is None:
-        return 99
-    return {"official": 0, "third_party": 1, "custom": 2}[endpoint.provider_kind]
+    return list(group.provider_models)
 
 
 def _projection(

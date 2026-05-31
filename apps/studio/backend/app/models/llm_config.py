@@ -14,6 +14,7 @@ from graph_agent_gateway.registry.schema import (
     CapabilityValue,
     EffectiveRuntimeSetting,
     EndpointCandidate,
+    EvidenceRecord,
     FieldSource,
     LintResult,
     ProbeResult,
@@ -39,7 +40,7 @@ from graph_agent_gateway.registry.schema import (
     RoleEntry as GatewayRoleEntry,
 )
 from graph_agent_gateway.registry.storage import compute_credential_fingerprint
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ProviderType = Literal["anthropic_compatible", "openai_compatible", "google_genai", "ark_runtime"]
 
@@ -157,13 +158,16 @@ class RoleIntent(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    provider_preference: Literal["official_first", "ready_first", "manual_order"] = (
-        "official_first"
-    )
+    provider_preference: Literal["manual_order"] = "manual_order"
     thinking: Literal["off", "preferred", "required"] = "off"
     target_context_tokens: RoleTokenIntent | None = None
     target_output_tokens: RoleTokenIntent | None = None
     cost_priority: Literal["quality", "balanced", "low_cost"] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_provider_preference(cls, value: object) -> object:
+        return _migrate_provider_preference(value)
 
 
 class ModelGroupIntent(BaseModel):
@@ -171,11 +175,16 @@ class ModelGroupIntent(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    provider_preference: Literal["official_first", "ready_first", "manual_order"] | None = None
+    provider_preference: Literal["manual_order"] | None = None
     thinking: Literal["inherit", "off", "preferred", "required"] = "inherit"
     target_context_tokens: TokenIntent | None = None
     target_output_tokens: TokenIntent | None = None
     cost_priority: Literal["quality", "balanced", "low_cost"] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_provider_preference(cls, value: object) -> object:
+        return _migrate_provider_preference(value)
 
 
 class RoleProviderModel(BaseModel):
@@ -196,6 +205,14 @@ class RoleModelGroup(BaseModel):
     display_name: str
     intent: ModelGroupIntent = Field(default_factory=ModelGroupIntent)
     provider_models: list[RoleProviderModel] = Field(default_factory=list)
+
+
+def _migrate_provider_preference(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+    if value.get("provider_preference") in {"official_first", "ready_first"}:
+        return {**value, "provider_preference": "manual_order"}
+    return value
 
 
 class RoleEntry(GatewayRoleEntry):
@@ -306,6 +323,7 @@ __all__ = [
     "CapabilityValue",
     "EndpointCandidate",
     "EffectiveRuntimeSetting",
+    "EvidenceRecord",
     "FieldSource",
     "LLMCredentialsFile",
     "LintResult",

@@ -14,6 +14,68 @@ import type { ProviderDraft, SettingsPageProps, SettingsTab } from "./types"
 const emptyCredentials: CredentialsState = { providers: [] }
 const emptyModelGroups: ModelGroup[] = []
 
+export async function refreshLoadedLlmRolesProjection({
+  loadModelGroups = getModelGroups,
+  loadRoles = getRoles,
+  rolesLoaded,
+  setModelGroups,
+  setRolesData,
+  setRolesError,
+}: {
+  loadModelGroups?: () => Promise<ModelGroup[]>
+  loadRoles?: () => Promise<RolesData>
+  rolesLoaded: boolean
+  setModelGroups: (next: ModelGroup[]) => void
+  setRolesData: (next: RolesData) => void
+  setRolesError: (next: string | null) => void
+}) {
+  if (!rolesLoaded) return
+  try {
+    const [nextRoles, nextModelGroups] = await Promise.all([loadRoles(), loadModelGroups()])
+    setRolesData(nextRoles)
+    setModelGroups(nextModelGroups)
+    setRolesError(null)
+  } catch {
+    setRolesError("Roles unavailable")
+  }
+}
+
+export function isStaleRouteReferenceError(error: unknown): boolean {
+  return errorText(error).toLowerCase().includes("references unknown route")
+}
+
+export function modelGroupsReferenceMissingCredentialProviders(
+  modelGroups: ModelGroup[],
+  credentials: CredentialsState,
+): boolean {
+  const providerIds = new Set(credentials.providers.map((provider) => provider.id))
+  if (providerIds.size === 0) return modelGroups.some((group) => group.provider_models.length > 0)
+  return modelGroups.some((group) => group.provider_models.some((providerModel) => {
+    const endpointId = providerModel.endpoint_id ?? providerModel.route_id.split(":")[0]
+    return Boolean(endpointId && !providerIds.has(endpointId))
+  }))
+}
+
+function errorText(error: unknown): string {
+  if (typeof error === "string") return error
+  if (typeof error !== "object" || error === null) return ""
+  const chunks: string[] = []
+  const message = (error as { message?: unknown }).message
+  if (typeof message === "string") chunks.push(message)
+  const response = (error as { response?: unknown }).response
+  if (typeof response === "object" && response !== null) {
+    const data = (response as { data?: unknown }).data
+    if (typeof data === "string") chunks.push(data)
+    if (typeof data === "object" && data !== null) {
+      const detail = (data as { detail?: unknown }).detail
+      const responseMessage = (data as { message?: unknown }).message
+      if (typeof detail === "string") chunks.push(detail)
+      if (typeof responseMessage === "string") chunks.push(responseMessage)
+    }
+  }
+  return chunks.join(" ")
+}
+
 function mergeModelInfos(left: ModelInfo[] = [], right: ModelInfo[] = []): ModelInfo[] {
   const merged = new Map<string, ModelInfo>()
   for (const model of left) merged.set(model.id, model)
@@ -265,6 +327,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   rolesDataRef.current = rolesData
   const invalidatedTestOutcomeIdsRef = useRef<Set<string>>(new Set())
   const credentialsHydratedRef = useRef(false)
+  const pendingRoleProjectionRefreshRef = useRef(false)
 
   const handleSaved = useCallback((next: CredentialsState) => {
     setCredentials({
@@ -287,12 +350,30 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         return resetProviderTestOutcome(provider)
       }),
     })
+    if (pendingRoleProjectionRefreshRef.current) {
+      pendingRoleProjectionRefreshRef.current = false
+      void refreshLoadedLlmRolesProjection({
+        rolesLoaded: Boolean(rolesDataRef.current),
+        setModelGroups,
+        setRolesData,
+        setRolesError,
+      })
+    }
   }, [])
 
   const { flush: flushCredentialsSave, queue: queueSave, status: saveStatus } = useDebouncedCredentialsSave({
     onSaved: handleSaved,
   })
   const { cancel: cancelRolesSave, flush: flushRolesSave, queue: queueRolesSave, status: rolesSaveStatus } = useDebouncedRolesSave({
+    isRecoverableError: isStaleRouteReferenceError,
+    onRecoverableError: () => {
+      void refreshLoadedLlmRolesProjection({
+        rolesLoaded: Boolean(rolesDataRef.current),
+        setModelGroups,
+        setRolesData,
+        setRolesError,
+      })
+    },
     onSaved: (next) => {
       setRolesData(next)
       setRolesError(null)
@@ -368,6 +449,17 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     }
   }, [activeTab, rolesData])
 
+  useEffect(() => {
+    if (activeTab !== "llm_roles" || !rolesData) return
+    if (!modelGroupsReferenceMissingCredentialProviders(modelGroups, credentials)) return
+    void refreshLoadedLlmRolesProjection({
+      rolesLoaded: true,
+      setModelGroups,
+      setRolesData,
+      setRolesError,
+    })
+  }, [activeTab, credentials, modelGroups, rolesData])
+
   function scheduleSave() {
     queueSave(() => buildPutPayload(draftsRef.current))
   }
@@ -422,6 +514,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   }
 
   function deleteProvider(providerId: string) {
+    pendingRoleProjectionRefreshRef.current = true
     setDrafts((current) => current.filter((draft) => draft.id !== providerId))
     scheduleSave()
   }

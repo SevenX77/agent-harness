@@ -194,8 +194,12 @@ export function TestMessage({
 function directPersistedTestResult(
   persisted: CredentialsState["providers"][number] | null,
   draft: ProviderDraft,
+  options: { backendRouteTagsAreAuthoritative?: boolean } = {},
 ): ProviderTestResult | null {
-  if (!persisted || !providerTestParamsMatch(draft, persisted)) return null
+  if (!persisted) return null
+  if (!options.backendRouteTagsAreAuthoritative && !providerTestParamsMatch(draft, persisted)) {
+    return null
+  }
   const status = persisted.last_test_status ?? (
     (persisted.available_models?.length || persisted.available_sdks?.length) ? "ok" : undefined
   )
@@ -235,7 +239,7 @@ export function ProviderDeleteButton({
         requestDeleteConfirmationToast({
           id: `delete-provider-${displayName}`,
           title: `Delete ${displayName}?`,
-          description: "This provider configuration will be removed from the credentials document.",
+          description: "This provider and its routes will be removed from API Keys, LLM Roles, and model bundles.",
           onConfirm: onDelete,
         })
       }}
@@ -333,10 +337,12 @@ function routeDisplayStatus(model: ModelInfo, isTesting: boolean): RouteDisplayS
 }
 
 function routeStatusTagVariant(status: RouteDisplayStatus, model: ModelInfo): "success" | "destructive" | "muted" | "default" | "info" | "warning" | "multimodal" {
+  if (status === "testing") return "default"
   if (status === "failed") return "destructive"
   if (status === "disabled") return "muted"
   if (isCapabilityLibraryModel(model)) return "multimodal"
   if (status === "verified") return "success"
+  if (status === "unverified_manual" || status === "unknown") return "multimodal"
   return "default"
 }
 
@@ -393,6 +399,46 @@ function officialModelTypeLabel(model: ModelInfo): string | null {
   return null
 }
 
+function groupOfficialRouteInfos(models: ModelInfo[]): Array<{ label: string; models: ModelInfo[] }> {
+  const groups = new Map<string, ModelInfo[]>()
+  for (const model of models) {
+    const label = officialRouteGroupLabel(model)
+    groups.set(label, [...(groups.get(label) ?? []), model])
+  }
+  return [...groups.entries()]
+    .sort(([left], [right]) => officialRouteGroupRank(left) - officialRouteGroupRank(right) || left.localeCompare(right))
+    .map(([label, groupModels]) => ({ label, models: groupModels }))
+}
+
+function officialRouteGroupLabel(model: ModelInfo): string {
+  const modelType = officialModelType(model)
+  if (modelType === "language_reasoning") return "Language"
+  if (modelType === "image_generation") return "Multimodal"
+  if (modelType === "embedding") return "Embedding"
+  if (modelType === "audio") return "Audio"
+  if (modelType === "video_generation") return "Video"
+  if (modelType === "translation") return "Translation"
+  if (modelType === "3d_generation") return "3D"
+  if (modelType === "moderation") return "Moderation"
+  if (modelType === "interactions_agent") return "Interactions Agent"
+  return "Other"
+}
+
+function officialRouteGroupRank(label: string): number {
+  return [
+    "Language",
+    "Multimodal",
+    "Embedding",
+    "Audio",
+    "Video",
+    "Translation",
+    "3D",
+    "Moderation",
+    "Interactions Agent",
+    "Other",
+  ].indexOf(label)
+}
+
 function routeProfileTooltipText(model: ModelInfo, status: RouteDisplayStatus): string | null {
   if (status !== "verified") return null
   const profiles = modelVerifiedProfiles(model).filter((profile) => profile.status !== "failed")
@@ -447,6 +493,43 @@ function routeFailureTooltipText(model: ModelInfo, status: RouteDisplayStatus): 
     message ? `Route test failed: ${message}` : "Route test failed",
     attempts,
   ].filter((line): line is string => Boolean(line)).join("\n")
+}
+
+function RouteTooltipContent({ text }: { text: string }) {
+  return (
+    <div className="space-y-1 whitespace-normal">
+      {text.split("\n").map((line, index) => {
+        const status = routeTooltipLineStatus(line)
+        if (status) {
+          const Icon = status === "warning" ? TriangleAlert : XCircle
+          return (
+            <div
+              key={`${status}-${index}-${line}`}
+              data-tooltip-diagnostic={status}
+              className={cn(
+                "flex items-start gap-1.5",
+                status === "warning" ? "text-warning" : "text-destructive",
+              )}
+            >
+              <Icon
+                aria-hidden="true"
+                data-tooltip-diagnostic-icon={status}
+                className="mt-0.5 size-3 shrink-0"
+              />
+              <span className="min-w-0 break-words">{line}</span>
+            </div>
+          )
+        }
+        return <div key={`${index}-${line}`} className="break-words">{line}</div>
+      })}
+    </div>
+  )
+}
+
+export function routeTooltipLineStatus(line: string): "warning" | "failed" | null {
+  if (line.includes("Warning:")) return "warning"
+  if (line.includes("Failed:") || line.includes("Route test failed")) return "failed"
+  return null
 }
 
 function modelProbeMessage(model: ModelInfo): string | null {
@@ -660,7 +743,10 @@ export function ProviderCard({
   const isGettingModels = draft.testingAction === "models"
   const isTestingEndpoint = draft.testingAction === "endpoint"
   const trimmedEndpointModelId = endpointModelId.trim()
-  const matchedResult = providerCachedTestResult(persisted, draft) ?? directPersistedTestResult(persisted, draft)
+  const matchedResult = providerCachedTestResult(persisted, draft)
+    ?? directPersistedTestResult(persisted, draft, {
+      backendRouteTagsAreAuthoritative: isOfficial,
+    })
   const hasMatchedTestResult = matchedResult !== null
   const displayName = providerDisplayName(draft, isOfficial, notableProviderKey)
   const apiKeyProviderName = displayName.replace(/ Official$/, "")
@@ -708,6 +794,84 @@ export function ProviderCard({
       return
     }
     onGetModels()
+  }
+  const officialRouteGroups = isOfficial ? groupOfficialRouteInfos(visibleModels) : []
+  const modelListClassName = cn(
+    isOfficial ? "space-y-2" : "flex gap-1 flex-wrap",
+    !showAllModels && (isOfficial ? "max-h-[7rem] overflow-hidden" : "max-h-[2.75rem] overflow-hidden"),
+  )
+  const renderAvailableModelTag = (model: ModelInfo): ReactElement => {
+    const status = isOfficial ? routeDisplayStatus(model, isGettingModels) : modelRouteStatus(model)
+    const statusLabel = routeStatusLabel(status)
+    const modelType = isOfficial ? officialModelType(model) : null
+    const modelTypeLabel = isOfficial ? officialModelTypeLabel(model) : null
+    const isCapabilityModel = isOfficial && isCapabilityLibraryModel(model)
+    const profileTooltipText = isOfficial && !isCapabilityModel ? routeProfileTooltipText(model, status) : null
+    const failureTooltipText = isOfficial ? routeFailureTooltipText(model, status) : null
+    const capabilityTooltipText = isOfficial ? routeCapabilityTooltipText(model) : null
+    const primaryTooltipDetail = (
+      failureTooltipText
+      ?? (isCapabilityModel && status !== "failed"
+        ? modelTypeLabel
+        : profileTooltipText)
+    ) ?? statusLabel
+    const tooltipDetail = [
+      primaryTooltipDetail,
+      capabilityTooltipText,
+    ].filter((line): line is string => Boolean(line)).join("\n")
+    const appendModelTypeLabel = Boolean(
+      modelTypeLabel &&
+      primaryTooltipDetail !== modelTypeLabel &&
+      status !== "verified",
+    )
+    const tooltipText = isOfficial
+      ? `${model.id} - ${tooltipDetail}${appendModelTypeLabel ? ` - ${modelTypeLabel}` : ""}`
+      : `Copy ${model.id}`
+    const hasReasoningProfile = isOfficial && modelHasVerifiedReasoningProfile(model)
+    const inputModalities = isOfficial ? modelInputModalities(model) : []
+    const outputModalities = isOfficial ? modelOutputModalities(model) : []
+    const inputCapabilityIcons = modalityIcons(inputModalities, "input")
+    const outputCapabilityIcons = modalityIcons(outputModalities, "output")
+    const ariaLabel = isOfficial
+      ? `Copy ${copyTargetLabel} ${model.id}. ${tooltipDetail.replace(/\s+/g, " ")}`
+      : `Copy ${copyTargetLabel} ${model.id}`
+    const tagKey = `${model.route_id ?? model.id}:${model.status ?? "model"}`
+    const tag = (
+      <Tag
+        key={tagKey}
+        asChild
+        variant={isOfficial ? routeStatusTagVariant(status, model) : "muted"}
+        size="xs"
+        className={cn(
+          "cursor-pointer font-mono hover:bg-muted/40",
+          status === "testing" && "api-route-tag-border-flow",
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => void copyAvailableModelId(model.id)}
+          aria-label={ariaLabel}
+          data-route-status={isOfficial ? status : undefined}
+          data-model-type={modelType ?? undefined}
+          data-reasoning-route={hasReasoningProfile ? true : undefined}
+          data-input-modalities={inputModalities.length > 0 ? inputModalities.join(",") : undefined}
+          data-output-modalities={outputModalities.length > 0 ? outputModalities.join(",") : undefined}
+        >
+          {inputCapabilityIcons}
+          {model.id}
+          {hasReasoningProfile ? <Brain className="size-2.5 shrink-0" aria-hidden="true" /> : null}
+          {outputCapabilityIcons}
+        </button>
+      </Tag>
+    )
+    return (
+      <Tooltip key={`${tagKey}:tooltip`}>
+        <TooltipTrigger asChild>{tag}</TooltipTrigger>
+        <TooltipContent className="max-w-sm break-words">
+          <RouteTooltipContent text={tooltipText} />
+        </TooltipContent>
+      </Tooltip>
+    )
   }
 
   return (
@@ -896,81 +1060,23 @@ export function ProviderCard({
                 <div className="text-muted-foreground">{availableModelsLabel}</div>
                 <div
                   data-testid="available-models-list"
-                  className={cn("flex gap-1 flex-wrap", !showAllModels && "max-h-[2.75rem] overflow-hidden")}
+                  className={modelListClassName}
                 >
                   <TooltipProvider>
-                    {visibleModels.map((model) => {
-                    const status = isOfficial ? routeDisplayStatus(model, isGettingModels) : modelRouteStatus(model)
-                    const statusLabel = routeStatusLabel(status)
-                    const modelType = isOfficial ? officialModelType(model) : null
-                    const modelTypeLabel = isOfficial ? officialModelTypeLabel(model) : null
-                    const isCapabilityModel = isOfficial && isCapabilityLibraryModel(model)
-                    const profileTooltipText = isOfficial && !isCapabilityModel ? routeProfileTooltipText(model, status) : null
-                    const failureTooltipText = isOfficial ? routeFailureTooltipText(model, status) : null
-                    const capabilityTooltipText = isOfficial ? routeCapabilityTooltipText(model) : null
-                    const primaryTooltipDetail = (
-                      failureTooltipText
-                      ?? (isCapabilityModel && status !== "failed"
-                        ? modelTypeLabel
-                        : profileTooltipText)
-                    ) ?? statusLabel
-                    const tooltipDetail = [
-                      primaryTooltipDetail,
-                      capabilityTooltipText,
-                    ].filter((line): line is string => Boolean(line)).join("\n")
-                    const appendModelTypeLabel = Boolean(
-                      modelTypeLabel &&
-                      primaryTooltipDetail !== modelTypeLabel &&
-                      status !== "verified",
-                    )
-                    const tooltipText = isOfficial
-                      ? `${model.id} - ${tooltipDetail}${appendModelTypeLabel ? ` - ${modelTypeLabel}` : ""}`
-                      : `Copy ${model.id}`
-                    const hasReasoningProfile = isOfficial && modelHasVerifiedReasoningProfile(model)
-                    const inputModalities = isOfficial ? modelInputModalities(model) : []
-                    const outputModalities = isOfficial ? modelOutputModalities(model) : []
-                    const inputCapabilityIcons = modalityIcons(inputModalities, "input")
-                    const outputCapabilityIcons = modalityIcons(outputModalities, "output")
-                    const ariaLabel = isOfficial
-                      ? `Copy ${copyTargetLabel} ${model.id}. ${tooltipDetail.replace(/\s+/g, " ")}`
-                      : `Copy ${copyTargetLabel} ${model.id}`
-                    const tag = (
-                      <Tag
-                        key={`${model.route_id ?? model.id}:${model.status ?? "model"}`}
-                        asChild
-                        variant={isOfficial ? routeStatusTagVariant(status, model) : "muted"}
-                        size="xs"
-                        className={cn(
-                          "cursor-pointer font-mono hover:bg-muted/40",
-                          status === "testing" && "api-route-tag-border-flow",
-                        )}
-                      >
-                          <button
-                            type="button"
-                            onClick={() => void copyAvailableModelId(model.id)}
-                            aria-label={ariaLabel}
-                            data-route-status={isOfficial ? status : undefined}
-                            data-model-type={modelType ?? undefined}
-                            data-reasoning-route={hasReasoningProfile ? true : undefined}
-                            data-input-modalities={inputModalities.length > 0 ? inputModalities.join(",") : undefined}
-                            data-output-modalities={outputModalities.length > 0 ? outputModalities.join(",") : undefined}
-                          >
-                            {inputCapabilityIcons}
-                            {model.id}
-                            {hasReasoningProfile ? <Brain className="size-2.5 shrink-0" aria-hidden="true" /> : null}
-                            {outputCapabilityIcons}
-                          </button>
-                        </Tag>
-                      )
-                    return (
-                      <Tooltip key={`${model.route_id ?? model.id}:${model.status ?? "model"}:tooltip`}>
-                        <TooltipTrigger asChild>{tag}</TooltipTrigger>
-                        <TooltipContent className="max-w-sm whitespace-pre-line break-words">
-                          {tooltipText}
-                        </TooltipContent>
-                      </Tooltip>
-                    )
-                  })}
+                    {isOfficial ? (
+                      officialRouteGroups.map((group) => (
+                        <div key={group.label} className="space-y-1" data-route-type-group={group.label}>
+                          <div className="text-[10px] font-medium uppercase text-muted-foreground">
+                            {group.label}
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {group.models.map(renderAvailableModelTag)}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      visibleModels.map(renderAvailableModelTag)
+                    )}
                   </TooltipProvider>
                 </div>
                 {availableModels.length > availableModelsPreviewLimit ? (

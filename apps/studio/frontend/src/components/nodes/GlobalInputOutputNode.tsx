@@ -21,14 +21,14 @@ export function GlobalInputOutputNode({ data, selected }: NodeProps<GlobalNode>)
   return (
     <div
       className={[
-        'relative min-w-[220px] cursor-pointer rounded-md border bg-card p-3 text-sm text-card-foreground shadow-sm transition-colors',
+        'group relative min-w-[220px] cursor-pointer rounded-md border bg-card p-3 text-sm text-card-foreground shadow-sm transition-colors',
         selected ? 'border-primary ring-2 ring-primary/30' : 'border-border',
       ].join(' ')}
     >
       {isInput ? (
-        <Handle type="source" position={Position.Right} className="!size-2.5 !border-background !bg-primary" />
+        <Handle type="source" position={Position.Right} className="!size-2.5 !border-background !bg-primary opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
       ) : (
-        <Handle type="target" position={Position.Left} className="!size-2.5 !border-background !bg-primary" />
+        <Handle type="target" position={Position.Left} className="!size-2.5 !border-background !bg-primary opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
       )}
 
       <div className="flex items-start justify-between gap-3">

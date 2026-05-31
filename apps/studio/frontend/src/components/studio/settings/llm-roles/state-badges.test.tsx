@@ -5,6 +5,7 @@ import { CoolingDownCountdown, formatCoolingDownRemaining } from "./cooling-down
 import { ProviderStateBadge } from "./provider-state-badge"
 import {
   deriveRoleRouteStatus,
+  RoleProviderRouteTooltipContent,
   roleProviderRouteTooltip,
   roleRouteStatusDetail,
   RoleRouteStatusLight,
@@ -86,6 +87,35 @@ describe("LLM role state badges", () => {
     expect(tooltip).toContain("Max output: 64,000 tokens")
     expect(tooltip).toContain("Role match: requirements satisfied.")
     expect(tooltip).not.toContain("This route can run")
+  })
+
+  it("marks warning and failed tooltip diagnostics with explicit labels and icons", () => {
+    const warningTooltip = roleProviderRouteTooltip({
+      status: "limited",
+      providerModel: providerModel("ready"),
+      fallbackProviderModelId: null,
+      detail: "Thinking was preferred but is not enabled for this provider model.",
+    })
+    const failedTooltip = roleProviderRouteTooltip({
+      status: "blocked",
+      providerModel: providerModel("ready"),
+      fallbackProviderModelId: null,
+      detail: "Provider returned invalid credentials.",
+    })
+
+    const warningHtml = renderToStaticMarkup(
+      <RoleProviderRouteTooltipContent tooltip={warningTooltip} />,
+    )
+    const failedHtml = renderToStaticMarkup(
+      <RoleProviderRouteTooltipContent tooltip={failedTooltip} />,
+    )
+
+    expect(warningTooltip).toContain("Warning: Thinking was preferred")
+    expect(failedTooltip).toContain("Failed: Provider returned invalid credentials.")
+    expect(warningHtml).toContain('data-tooltip-diagnostic="warning"')
+    expect(warningHtml).toContain('data-tooltip-diagnostic-icon="warning"')
+    expect(failedHtml).toContain('data-tooltip-diagnostic="failed"')
+    expect(failedHtml).toContain('data-tooltip-diagnostic-icon="failed"')
   })
 
   it("maps rich route and role-fit projections into three user states", () => {

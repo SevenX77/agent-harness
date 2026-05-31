@@ -2,6 +2,19 @@ import { createContext, useContext } from 'react'
 import type { FileMeta } from './file-types'
 
 export type EditorSide = 'left' | 'right'
+export type WorkspacePanelKind = 'assets' | 'input' | 'timeline' | 'properties' | 'local-history' | null
+export interface EdgeContextJson {
+  inputs?: unknown
+  phase_outputs?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+export interface SelectedEdge {
+  id: string
+  source: string
+  target: string
+  contextJson?: EdgeContextJson
+}
 
 export interface OpenFile extends FileMeta {
   skillId: string
@@ -35,6 +48,9 @@ export interface WorkspaceContextValue {
   reloadOpenFile: (side: EditorSide) => Promise<void>
   pushNavSkill: (skillId: string) => void
   popNavTo: (index: number) => void
+  selectedEdge?: SelectedEdge | null
+  setSelectedEdge?: (edge: SelectedEdge | null) => void
+  onPanelChange?: (panel: WorkspacePanelKind) => void
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null)

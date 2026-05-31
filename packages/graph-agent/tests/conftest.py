@@ -138,7 +138,10 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     if not (tests_root / "tests").exists() and (tests_root / "packages/graph-agent/tests").exists():
         tests_root = tests_root / "packages/graph-agent"
     for item in items:
-        nodeid = str(item.path.relative_to(tests_root))
+        try:
+            nodeid = str(item.path.relative_to(tests_root))
+        except ValueError:
+            continue
         candidate_nodeids = {item.nodeid, f"{nodeid}::{item.name}"}
         if item.cls is not None:
             candidate_nodeids.add(f"{nodeid}::{item.cls.__name__}::{item.name}")

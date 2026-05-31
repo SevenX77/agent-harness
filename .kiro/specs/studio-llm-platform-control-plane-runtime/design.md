@@ -102,6 +102,7 @@ sequenceDiagram
 | 5.1-5.4 | Test path equals runtime path | Phase 2/3 tasks |
 | 6.1-6.4 | Studio backend/frontend consumption | Phase 3/UI tasks |
 | 7.1-7.4 | Phased migration | Kiro tasks, legacy doc banner |
+| 8.1-8.6 | Copilot credential-provider runtime integration | Copilot SDK terminal adapter, CredentialProvider callback, session cache policy |
 
 ## Components And Interfaces
 
@@ -112,6 +113,7 @@ sequenceDiagram
 | SnapshotVersion | Gateway/Control Plane schema | Records versions used by a materialized snapshot | 3 |
 | TerminalRetryPolicy | Gateway runtime schema | Deterministic retry defaults by terminal/mode | 4 |
 | ErrorContext classifier | Gateway runtime | Classifies provider/runtime errors into action + scope | 4 |
+| Copilot SDK terminal adapter | Studio client adapter | Bridges route-backed Gateway resolution and Claude Agent SDK execution | 5, 6, 8 |
 | Kiro spec | Planning/governance | Tracks complete v1.1 implementation phases | 7 |
 
 ### Gateway Contracts
@@ -129,6 +131,16 @@ Gateway owns provider execution contracts, but not product catalog state. The fi
 ### Studio Control Plane Shell
 
 Studio backend currently hosts Control Plane behavior. Future tasks extract router job state and probe orchestration into services before package extraction.
+
+### Copilot Credential Runtime Path
+
+Copilot is a Studio client of the LLM platform, not a separate provider registry. Its route selection must consume the same role materialization output as other Studio clients. The compatibility slice may still execute with inline `api_key`, but the target path is:
+
+1. Studio materializes a Copilot-capable route with `credential_ref`.
+2. Copilot readiness calls CredentialProvider `describe(ref)` and the Copilot SDK terminal probe.
+3. Copilot execution calls CredentialProvider `get(ref)` immediately before creating or refreshing the Claude Agent SDK session.
+4. Copilot session reuse keys on a non-secret credential fingerprint and follows SecretLifetimePolicy invalidation.
+5. Credential lookup failures are route- or credential-scoped errors so the Gateway fallback chain can try the next Copilot route.
 
 ## Data Models
 

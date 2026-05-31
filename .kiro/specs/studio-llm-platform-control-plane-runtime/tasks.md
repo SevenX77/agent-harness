@@ -97,7 +97,15 @@ related_requirements: .kiro/specs/studio-llm-platform-control-plane-runtime/requ
 - [ ] 14. Add Copilot SDK terminal and readiness adapter
   - Register Copilot's Claude Agent SDK terminal through the generic registry.
   - Probe with the same SDK terminal used at runtime.
-  - _Requirements: 1.3, 5.2, 6.2_
+  - _Requirements: 1.3, 5.2, 6.2, 8.2_
+
+- [ ] 14a. Wire Copilot CredentialProvider execution path
+  - Resolve `credential_ref` through the host CredentialProvider before Claude Agent SDK session creation.
+  - Preserve inline `api_key` as a compatibility fallback until no-secret snapshots are the only persisted shape.
+  - Make credential lookup failures route-scoped so Copilot can continue the Gateway fallback chain.
+  - Key session reuse by non-secret credential fingerprint and SecretLifetimePolicy invalidation.
+  - Cover credential-ref-only success, missing-secret fallback, fingerprint invalidation, and secret-free logs/events.
+  - _Requirements: 2.5, 4.2, 7.1, 8.1, 8.3, 8.4, 8.5, 8.6_
 
 - [ ] 15. Store client terminal configs and client route profiles
   - Keep runtime configuration separate from readiness evidence.

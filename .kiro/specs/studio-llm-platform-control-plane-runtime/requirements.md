@@ -93,3 +93,16 @@ The first implementation slice must be compatible with the current Studio and Ga
 2. If a phase changes runtime behavior, then the system shall document the behavior gate and test coverage in the Kiro tasks.
 3. When a legacy document is superseded by v1.1, the system shall include a visible superseded banner in that legacy document.
 4. The system shall keep future work traceable through Kiro tasks with requirement IDs.
+
+### Requirement 8: Copilot CredentialProvider Runtime Integration
+
+**Objective:** As a Studio operator, I want Copilot to execute route-backed model sessions through the same `credential_ref` and CredentialProvider path as other Gateway clients, so that Copilot does not require a separate inline-secret configuration path.
+
+#### Acceptance Criteria
+
+1. When Copilot resolves a route that has `credential_ref` but no inline `api_key`, the system shall retrieve the execution secret through the host CredentialProvider before constructing the Claude Agent SDK session.
+2. When Copilot performs readiness checks for a route, the system shall use CredentialProvider `describe(ref)` and the Copilot SDK terminal/probe adapter rather than treating provider API availability as sufficient readiness.
+3. When Copilot creates or reuses SDK sessions, the system shall key and invalidate cached sessions by a non-secret credential fingerprint and the declared SecretLifetimePolicy, not by raw secret material or route identity alone.
+4. If CredentialProvider `get(ref)` fails, returns an empty secret, or reports a revoked credential, the system shall surface a route- or credential-scoped error that can participate in the Gateway fallback chain before failing the Copilot request.
+5. The system shall keep the inline `api_key` path as a compatibility fallback until all persisted Studio snapshots and tests migrate to no-secret snapshots.
+6. Tests shall cover credential-ref-only Copilot success, missing-secret fallback behavior, session invalidation on fingerprint change, and secret-free logs/events.

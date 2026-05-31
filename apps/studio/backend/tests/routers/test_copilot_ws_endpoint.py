@@ -18,7 +18,8 @@ from claude_agent_sdk import ClaudeAgentOptions
 from claude_agent_sdk.types import AssistantMessage, TextBlock
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from graph_agent_gateway.registry.schema import ResolvedRoute
+from typing import Self
+from graph_agent_gateway.registry.schema import Protocol, ResolvedRoute
 
 
 def test_copilot_ws_streams_normal_query(
@@ -153,12 +154,11 @@ def test_stream_query_uses_copilot_chat_active_model_when_no_override(
     client = FakeClient([AssistantMessage(content=[TextBlock(text="hello")], model="claude")])
     calls: list[str | None] = []
     route = _resolved_route(base_url="https://credential.test")
-    monkeypatch.setattr(
-        copilot_service,
-        "_resolve_copilot_runtime",
-        lambda override: calls.append(override)
-        or _runtime([route], {route.credential_ref: "primary-secret"}),
-    )
+    def mock_resolve(override: str | None) -> tuple[list[ResolvedRoute], StaticCredentialProvider]:
+        calls.append(override)
+        return _runtime([route], {route.credential_ref: "primary-secret"})
+
+    monkeypatch.setattr(copilot_service, "_resolve_copilot_runtime", mock_resolve)
     monkeypatch.setattr(
         copilot_service, "_session_factory", lambda options: client.capture(options)
     )
@@ -352,12 +352,11 @@ def test_stream_query_uses_model_override_when_provided(
     client = FakeClient([AssistantMessage(content=[TextBlock(text="hello")], model="claude")])
     calls: list[str | None] = []
     route = _resolved_route()
-    monkeypatch.setattr(
-        copilot_service,
-        "_resolve_copilot_runtime",
-        lambda override: calls.append(override)
-        or _runtime([route], {route.credential_ref: "primary-secret"}),
-    )
+    def mock_resolve(override: str | None) -> tuple[list[ResolvedRoute], StaticCredentialProvider]:
+        calls.append(override)
+        return _runtime([route], {route.credential_ref: "primary-secret"})
+
+    monkeypatch.setattr(copilot_service, "_resolve_copilot_runtime", mock_resolve)
     monkeypatch.setattr(
         copilot_service, "_session_factory", lambda options: client.capture(options)
     )
@@ -435,7 +434,7 @@ class FakeClient:
         self.queries: list[str] = []
         self.options: ClaudeAgentOptions | None = None
 
-    def capture(self, options: ClaudeAgentOptions) -> FakeClient:
+    def capture(self, options: ClaudeAgentOptions) -> Self:
         self.options = options
         return self
 
@@ -482,7 +481,7 @@ def _resolved_route(
     base_url: str = "https://provider.test",
     route_id: str = "test-provider:claude-test",
     endpoint_id: str = "test-provider",
-    protocol: str = "anthropic_compatible",
+    protocol: Protocol = "anthropic_compatible",
     provider_model_id: str = "claude-test",
     canonical_id: str = "claude-test",
     call_method_id: str | None = None,

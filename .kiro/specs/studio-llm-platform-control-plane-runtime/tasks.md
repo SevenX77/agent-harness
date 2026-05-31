@@ -41,6 +41,18 @@ related_requirements: .kiro/specs/studio-llm-platform-control-plane-runtime/requ
   - Preserve old fallback/fail-fast decisions for current Gateway callers.
   - _Requirements: 4.1, 4.2, 4.3, 4.4_
 
+- [x] 6a. Reconcile platform branch with main cutover contracts
+  - Remove stale Engine-owned LLM config/client public-contract entries and tests after Gateway ownership.
+  - Keep `run_skill` model resolver injection explicit and preserve `mock_llm` override precedence.
+  - Update contract docs, manifest fixtures, and hash locks with the approved Engine surface.
+  - _Requirements: 1.1, 7.1, 7.4_
+
+- [x] 6b. Restore provider notable-model suggestions without reintroducing runtime config
+  - Keep deprecated provider test endpoints removed.
+  - Restore `GET /api/llm/providers/notable-models` as suggestion-only placeholder data.
+  - Parse provider-note §4 entries for Anthropic, Ark, DeepSeek, Gemini, OpenAI, OpenRouter, Qiniu, and Wavespeed.
+  - _Requirements: 1.1, 1.4, 7.2_
+
 ## Phase 2: Studio Control Plane Extraction
 
 - [ ] 7. Extract LLM test job state from the router

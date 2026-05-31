@@ -8,7 +8,8 @@ from graph_agent_gateway.resolver import ModelResolver
 
 from app.models.llm_config import RolesData
 from app.services.llm_credentials import load_credentials
-from app.services.llm_roles import load_roles_file, roles_path as default_roles_path
+from app.services.llm_roles import load_roles_file
+from app.services.llm_roles import roles_path as default_roles_path
 
 
 def build_gateway_model_resolver(roles_path: Path | None = None) -> ModelResolver:

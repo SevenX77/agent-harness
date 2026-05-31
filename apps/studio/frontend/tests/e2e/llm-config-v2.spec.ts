@@ -351,6 +351,8 @@ async function mockBackend(page: Page) {
       deepseek: ['deepseek-chat', 'deepseek-reasoner'],
       ark: ['doubao-seed-1-6'],
       openrouter: ['anthropic/claude-opus-4-7'],
+      qiniu: ['deepseek-r1', 'deepseek-v3'],
+      wavespeed: ['openai/gpt-5', 'anthropic/claude-opus-4'],
     }
     await fulfillJson(route, { notable_models: notable[providerKey] ?? ['manual/model'] })
   })

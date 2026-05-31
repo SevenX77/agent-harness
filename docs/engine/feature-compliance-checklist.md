@@ -192,13 +192,6 @@ This checklist is generated from the Round 28 feature manifest. Each item names 
 - **Primary contracts**: 0 error codes, 0 events
 - `[Covered By: packages/graph-agent/tests/cognitive/test_middlewares.py::TestCreateCustomMiddlewaresPR5::test_clarification_enabled_by_default]`
 
-### F-model-configuration: Resolve model provider configuration, fallbacks, and role-specific prompt prefixes.
-- **Boundary**: public-method - model configuration
-- **Sources**: public-api, source-file-map
-- **Core paths**: packages/graph-agent/src/graph_agent/config/llm_config.py, packages/graph-agent/src/graph_agent/models/llm_client_manager.py
-- **Primary contracts**: 0 error codes, 0 events
-- `[Covered By: packages/graph-agent/tests/config/test_llm_config_resolve_role.py::test_resolve_role_orders_active_model_first_then_declared_fallbacks]`
-
 ### F-predict-internal-mocking: Provide deterministic prediction and golden-case mocks for offline execution and tests.
 - **Boundary**: lifecycle-behavior - predict internal gateway
 - **Sources**: public-api, source-file-map

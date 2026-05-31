@@ -292,9 +292,19 @@ describe('Add Provider flow helpers', () => {
 
   it('derives notable provider key and manual panel visibility', () => {
     const official = officialProviderDrafts(draftsFromCredentials(credentials))[0]
+    const wavespeed = thirdPartyProviderDrafts(draftsFromCredentials(credentials))[1]
     const custom = thirdPartyProviderDrafts(draftsFromCredentials(credentials))[2]
 
     expect(notableProviderKeyForDraft(official)).toBe('anthropic')
+    expect(notableProviderKeyForDraft(wavespeed)).toBe('wavespeed')
+    expect(notableProviderKeyForDraft({
+      id: 'qiniu-openai',
+      name: 'Qiniu OpenAI',
+      provider_type: 'openai_compatible',
+      base_url: 'https://api.qnaigc.com/v1',
+      api_key: '',
+      isTesting: false,
+    })).toBe('qiniu')
     expect(notableProviderKeyForDraft(custom)).toBe('openai')
     expect(shouldShowManualModelPanel(official, null)).toBe(true)
     expect(shouldShowManualModelPanel(custom, null)).toBe(false)

@@ -60,6 +60,7 @@ const endpointModelExamplesByProvider: Record<string, string> = {
   ark: "doubao-seed-2-0-pro-260215",
   openrouter: "openai/gpt-5",
   qiniu: "deepseek-r1",
+  wavespeed: "openai/gpt-5",
 }
 const officialProviderNamesByKey: Record<string, string> = {
   anthropic: "Anthropic Official",

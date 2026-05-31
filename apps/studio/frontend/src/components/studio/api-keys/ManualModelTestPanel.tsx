@@ -22,6 +22,8 @@ const exampleModelIdsByProvider: Record<string, string> = {
   deepseek: "deepseek-chat",
   ark: "doubao-seed-1-6",
   openrouter: "openai/gpt-5",
+  qiniu: "deepseek-r1",
+  wavespeed: "openai/gpt-5",
 }
 const vendorPrefixedModelProviders = new Set(["openrouter", "wavespeed"])
 const manualModelPanelValue = "manual-model-probing"

@@ -4339,4 +4339,25 @@ def test_apply_model_profile_marks_runtime_settings_as_profile_default(
 def test_old_provider_endpoints_are_removed(client: TestClient) -> None:
     assert client.post("/api/llm/providers/test", json={}).status_code == 404
     assert client.post("/api/llm/providers/test-models", json={}).status_code == 404
-    assert client.get("/api/llm/providers/notable-models").status_code == 404
+
+
+def test_provider_notable_models_are_doc_driven_for_manual_probe_placeholders(
+    client: TestClient,
+) -> None:
+    qiniu_response = client.get(
+        "/api/llm/providers/notable-models",
+        params={"provider_key": "qiniu"},
+    )
+    wavespeed_response = client.get(
+        "/api/llm/providers/notable-models",
+        params={"provider_key": "wavespeed"},
+    )
+
+    assert qiniu_response.status_code == 200
+    assert qiniu_response.json()["notable_models"][:2] == ["deepseek-r1", "deepseek-v3"]
+    assert qiniu_response.json()["notable_models"] != ["gpt-5"]
+    assert wavespeed_response.status_code == 200
+    assert wavespeed_response.json()["notable_models"][:2] == [
+        "openai/gpt-5",
+        "anthropic/claude-opus-4",
+    ]

@@ -103,6 +103,20 @@ def _gateway_model_profile(profile: ModelProfile) -> GatewayModelProfile:
     )
 
 
+def _gateway_role(role: RoleEntry) -> GatewayRoleEntry:
+    return GatewayRoleEntry.model_validate(
+        role.model_dump(
+            mode="python",
+            include={
+                "system_prompt_prefix",
+                "source_profile_id",
+                "fallback_chain",
+                "lint_requirements",
+            },
+        )
+    )
+
+
 class LLMCredentialsFile(BaseModel):
     """Schema stored at the active Studio LLM credentials path."""
 
@@ -261,7 +275,7 @@ class RolesData(BaseModel):
                 profile_id: _gateway_model_profile(profile)
                 for profile_id, profile in self.model_profiles.items()
             },
-            roles=self.roles,
+            roles={role_name: _gateway_role(role) for role_name, role in self.roles.items()},
         )
 
 

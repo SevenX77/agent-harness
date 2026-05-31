@@ -8,14 +8,20 @@ from typing import Any
 from app.models.llm_config import (
     LLMCredentialsFile,
     ModelBundle,
+    ProviderRoute,
     RoleEntry,
     RoleModelGroup,
+    RoleProviderModel,
     RoleRouteEntry,
+    RoleTokenIntent,
     TokenIntent,
 )
 from app.services.llm_health_store import SqliteLlmHealthStore
 from app.services.llm_route_capabilities import route_thinking_capability
-from app.services.llm_state_projection import project_provider_model_state
+from app.services.llm_state_projection import (
+    ProviderModelStateProjection,
+    project_provider_model_state,
+)
 
 
 def materialize_role(
@@ -51,7 +57,7 @@ def materialize_role(
                     }
                 )
                 continue
-            entry_report = {
+            entry_report: dict[str, Any] = {
                 "canonical_id": group.canonical_id,
                 "route_id": route.route_id,
                 "requested": {},
@@ -121,7 +127,7 @@ def _ordered_provider_models(
     role: RoleEntry,
     credentials: LLMCredentialsFile,
     health_store: SqliteLlmHealthStore,
-):
+) -> list[RoleProviderModel]:
     provider_models = list(group.provider_models)
     preference = group.intent.provider_preference or role.intent.provider_preference
     if preference == "manual_order":
@@ -163,7 +169,7 @@ def _projection(
     route_id: str,
     credentials: LLMCredentialsFile,
     health_store: SqliteLlmHealthStore,
-):
+) -> ProviderModelStateProjection | None:
     route = credentials.provider_routes.get(route_id)
     if route is None:
         return None
@@ -189,7 +195,7 @@ def _apply_intent(
     entry_report: dict[str, Any],
     role: RoleEntry,
     group: RoleModelGroup,
-    route,
+    route: ProviderRoute,
 ) -> str:
     role_fit = "using"
     thinking = group.intent.thinking
@@ -247,7 +253,7 @@ def _enable_reasoning(entry_report: dict[str, Any]) -> None:
 def _effective_output_token_intent(
     role: RoleEntry,
     group: RoleModelGroup,
-) -> TokenIntent | Any | None:
+) -> TokenIntent | RoleTokenIntent | None:
     group_intent = group.intent.target_output_tokens
     if group_intent is not None and group_intent.mode != "inherit":
         return group_intent
@@ -256,8 +262,8 @@ def _effective_output_token_intent(
 
 def _apply_output_token_intent(
     entry_report: dict[str, Any],
-    token_intent,
-    route,
+    token_intent: TokenIntent | RoleTokenIntent,
+    route: ProviderRoute,
 ) -> str:
     if token_intent.mode == "maximum_available":
         max_tokens = _max_output_tokens(route)
@@ -292,7 +298,7 @@ def _apply_output_token_intent(
     return "downgraded"
 
 
-def _max_output_tokens(route) -> int | None:
+def _max_output_tokens(route: ProviderRoute) -> int | None:
     capability = route.capabilities.get("max_output_tokens")
     if capability is None or not isinstance(capability.value, dict):
         return None

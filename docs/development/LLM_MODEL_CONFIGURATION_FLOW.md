@@ -97,4 +97,6 @@ Runtime credentials come from the resolved endpoint and route. `.env` provider k
 
 The provider notes archive lives in `docs/development/llm_provider_notes/`.
 
-Those files are human and Agent-import reference material only. They are not loaded by Studio runtime code. Active endpoint/route state is stored in V4 credentials and V2 roles, with canonical alias rules limited to `config/llm_canonical_rules.yaml`.
+Those files are human and Agent-import reference material. Studio Backend may parse each provider note's `## 4. Notable Model IDs` section for the suggestion-only `GET /api/llm/providers/notable-models` endpoint used by manual model probing placeholders.
+
+They are not runtime configuration. Parsing provider notes must not construct endpoints, routes, roles, credentials, canonical aliases, runtime settings, or provider-selection behavior. Active endpoint/route state is stored in V4 credentials and V2 roles, with canonical alias rules limited to `config/llm_canonical_rules.yaml`.

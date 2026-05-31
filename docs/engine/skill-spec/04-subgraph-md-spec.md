@@ -1,15 +1,19 @@
+---
+status: FROZEN
+---
+<!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
+
 # SUBGRAPH.md Spec
 
-本文定义 `SUBGRAPH.md` 的 mode 类型断言、`target_skill` 寻址与父子图 IO 强校验。它连接 [SkillResolverProtocol](./10-skill-resolver-protocol-spec.md#protocol-interface-定义)、[Root IO Schema](./02-graph-md-spec.md#根-io-契约-root-io-schema) 和运行期 subgraph 调度。
+本文定义 `SUBGRAPH.md` 的 `target_skill` 寻址与父子图 IO 强校验。它连接 [SkillResolverProtocol](./10-skill-resolver-protocol-spec.md#protocol-interface-定义)、[Root IO Schema](./02-graph-md-spec.md#根-io-契约-root-io-schema) 和运行期 subgraph 调度。
 
-## Mode 声明与类型断言
+## 类型推导与节点契约
 
-`SUBGRAPH.md` 表示当前 phase 委托另一个 graph skill 执行。它不是内联复制子图, 也不是相对路径 include; V0.3.0 的跨 skill 寻址统一走 registry + DI。
+`SUBGRAPH.md` 表示当前 phase 委托另一个 graph skill 执行。节点类型由物理文件名 `SUBGRAPH.md` 唯一决定, Loader 注入内部 `mode="subgraph"`; 作者不写 `mode:`。它不是内联复制子图, 也不是相对路径 include; V0.3.0 的跨 skill 寻址统一走 registry + DI。
 
 ```yaml
 ---
 name: producer_review
-mode: subgraph
 target_skill: producer_reviewer
 io:
   inputs:
@@ -28,7 +32,6 @@ io:
 | 字段 | 类型 | 必填 | 默认值 | 校验规则 | 校验失败错误码 | 业务作用 |
 |---|---|---|---|---|---|---|
 | `name` | string | 是 | 无 | 正则 `^[a-z][a-z0-9_-]*$` | `[F-v3-subgraph-name-invalid]` | Trace 与 Studio 展示名 |
-| `mode` | string literal | 是 | 无 | 必须精确为 `"subgraph"`; 文件名必须是 `SUBGRAPH.md` | `[F-v3-subgraph-mode-invalid]` / `[F-v3-graph-mode-path-mismatch]` | Loader 类型断言, 防止错装为 Agent/Logic |
 | `validator` | boolean | 否 | `False` | 必须是 YAML boolean, 不能用 `"true"` 字符串 | Pydantic validation fatal | 结合 validator.py 控制阻断 |
 | `target_skill` | string | 是 | 无 | 正则 `^[a-z][a-z0-9_-]*$`; 必须可被 SkillResolverProtocol 解析 | `[F-v3-subgraph-target-skill-invalid]` / `[F-v3-skill-not-registered]` | 指向被调用的 graph skill |
 | `io.inputs` | JSON Schema object | 是 | 无 | 顶层 `type: object`; 字段名必须与子图 `GRAPH.md io.inputs.properties` 1:1 相等 | `[F-v3-subgraph-io-schema-invalid]` / `[F-v3-subgraph-io-mismatch]` | 声明父图传给子图入口的字段 |
@@ -37,11 +40,10 @@ io:
 Loader 拦截规则:
 
 1. 扫描 `phases/<id>/` 时发现 `SUBGRAPH.md`, 节点类型锁定为 `subgraph`。
-2. 解析 frontmatter 后检查 `mode === "subgraph"`。
+2. Loader 将内部 AST discriminator 注入为 `mode="subgraph"`。
 3. 若同目录还存在 `LOGIC.md` 或 `SKILL.md`, 先由物理布局报 `[F-v3-graph-phase-mode-ambiguous]`。
-4. 若文件名与 mode 不一致, 报 `[F-v3-graph-mode-path-mismatch]`。
 
-[物理布局校验](./01-physical-layout.md#mode路径双向校验-mode-path-cross-validation) 与 [错误码速查表](./11-error-code-spec.md#subgraph-domain) 覆盖 loader 拦截规则。
+[物理布局校验](./01-physical-layout.md#文件名类型推导-filename-type-derivation) 与 [错误码速查表](./11-error-code-spec.md#subgraph-domain) 覆盖 loader 拦截规则。
 
 ## target_skill 寻址规则
 

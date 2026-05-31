@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import inspect
 
-import graph_agent
-from graph_agent.core._predict_internal.strategy import BaseMockStrategy
 from graph_agent_gateway.gateway_chat_model import GatewayChatModel
 from graph_agent_gateway.registry.schema import (
     ProviderEndpoint,
@@ -11,8 +9,12 @@ from graph_agent_gateway.registry.schema import (
     RegistrySnapshot,
     RoleEntry,
     RoleRouteEntry,
+    RuntimeSettings,
 )
 from graph_agent_gateway.resolver import ModelResolver
+
+import graph_agent
+from graph_agent.core._predict_internal.strategy import BaseMockStrategy
 
 EXPECTED_TOP_LEVEL_EXPORTS = [
     "run_skill",
@@ -23,6 +25,7 @@ EXPECTED_TOP_LEVEL_EXPORTS = [
     "CompiledSkill",
     "CompiledStateGraph",
     "BlackboardState",
+    "LocalWorkspaceResolver",
     "SkillManifest",
     "serialize_skill",
     "Callback",
@@ -45,7 +48,6 @@ def _make_snapshot() -> RegistrySnapshot:
         provider_endpoints={
             "px": ProviderEndpoint(
                 endpoint_id="px",
-                display_name="Provider X",
                 protocol="openai_compatible",
                 base_url="https://provider.example/v1",
                 api_key="secret",
@@ -58,16 +60,20 @@ def _make_snapshot() -> RegistrySnapshot:
                 route_slug="x-model",
                 provider_model_id="x-model",
                 canonical_id="x-model",
-                display_name="Primary",
                 status="verified",
             ),
-        },
-        roles={
-            "test_role": RoleEntry(
-                fallback_chain=[RoleRouteEntry(route_id="px:x-model", temperature=0.4)],
-            )
-        },
-    )
+            },
+            roles={
+                "test_role": RoleEntry(
+                    fallback_chain=[
+                        RoleRouteEntry(
+                            route_id="px:x-model",
+                            runtime_settings=RuntimeSettings(temperature=0.4),
+                        )
+                    ],
+                )
+            },
+        )
 
 
 def test_predict_internal_exports_bind_predictor_only() -> None:
@@ -85,7 +91,7 @@ def test_predict_gateway_chat_model_is_dynamic_subclass() -> None:
     assert PredictGatewayChatModel is not GatewayChatModel
 
 
-def test_top_level_13_export_abi_has_no_predict_additions() -> None:
+def test_top_level_export_abi_has_no_predict_additions() -> None:
     assert graph_agent.__all__ == EXPECTED_TOP_LEVEL_EXPORTS
     assert "PredictGatewayChatModel" not in graph_agent.__all__
     assert "BaseMockStrategy" not in graph_agent.__all__

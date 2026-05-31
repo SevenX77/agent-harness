@@ -1,0 +1,19 @@
+features:
+  - id: F-missing-event-owner
+    description: Fixture intentionally omits one CallbackEvent union variant primary owner.
+    feature_boundary:
+      kind: externally-observable-behavior
+      evidence: callback event ownership
+    sources: [public-api]
+    core_paths:
+      - path: packages/graph-agent/src/graph_agent/callbacks/events.py
+    error_codes_primary:
+      - "[F-v3-runtime-phase-failed]"
+      - "[F-v3-graph-phase-cycle]"
+    error_codes_secondary: []
+    events_primary:
+      - RunStartedEvent
+    events_secondary: []
+    non_functional_contracts: []
+    targeted_tests:
+      - tests/callbacks/test_events.py::TestUnionDiscriminator::test_union_accepts_all_event_types

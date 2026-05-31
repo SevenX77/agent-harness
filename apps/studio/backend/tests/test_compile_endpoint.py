@@ -28,7 +28,7 @@ def test_compile_failure_returns_structured_errors(
     skill_dir = copy_skill(skills_dir, workspaces_dir, "text-segmentation")
     phase_path = skill_dir / "phases" / "setup" / "LOGIC.md"
     phase_path.write_text(
-        phase_path.read_text(encoding="utf-8").replace("mode: logic\n", "mode: bogus\n"),
+        phase_path.read_text(encoding="utf-8").replace("---\n", "---\nmode: bogus\n", 1),
         encoding="utf-8",
     )
 
@@ -45,7 +45,7 @@ def test_compile_failure_returns_structured_errors(
     assert error["line"] is None or isinstance(error["line"], int)
     assert error["field"] is None or isinstance(error["field"], str)
     assert error["severity"] == "fatal"
-    assert "bogus" in error["message"]
+    assert "mode" in error["message"]
 
 
 def test_compile_missing_skill_returns_404(client: TestClient) -> None:

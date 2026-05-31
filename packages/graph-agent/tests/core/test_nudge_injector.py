@@ -15,6 +15,8 @@ change inside a refactor-preserves-behaviour task.
 
 from __future__ import annotations
 
+from langchain_core.messages import HumanMessage
+
 from graph_agent.callbacks.base import Callback
 from graph_agent.cognitive.finish import (
     MIN_FINISH_REASONING_LEN,
@@ -24,7 +26,6 @@ from graph_agent.cognitive.finish import (
 )
 from graph_agent.core.nudge_injector import NudgeInjector
 from graph_agent.core.types import Phase
-from langchain_core.messages import HumanMessage
 
 
 class _RecordingCallback(Callback):

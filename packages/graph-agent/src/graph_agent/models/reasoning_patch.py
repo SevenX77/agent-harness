@@ -33,77 +33,87 @@ def _apply_reasoning_content_patch() -> None:
         _reasoning_patch_applied = True
 
         # Layer 1: OpenAI SDK — allow extra fields so reasoning_content is not dropped
-        try:
-            import openai
-            from openai.types.chat.chat_completion_message import ChatCompletionMessage
-
-            sdk_version = getattr(openai, "__version__", "0.0.0")
-            major = int(sdk_version.split(".")[0])
-            if major > 1:
-                logger.warning(
-                    "[ReasoningPatch] OpenAI SDK v%s detected — skipping model_config patch "
-                    "(only tested with v1.x). reasoning_content may not be preserved.",
-                    sdk_version,
-                )
-            elif (
-                "extra" not in ChatCompletionMessage.model_config
-                or ChatCompletionMessage.model_config.get("extra") != "allow"
-            ):
-                ChatCompletionMessage.model_config = {
-                    **ChatCompletionMessage.model_config,
-                    "extra": "allow",
-                }
-                logger.debug("[ReasoningPatch] OpenAI SDK ChatCompletionMessage: extra=allow")
-        except Exception as exc:
-            logger.warning("[ReasoningPatch] Failed to patch OpenAI SDK: %s", exc)
+        _patch_openai_sdk_reasoning_content()
 
         # Layer 2: LangChain — wrap _convert_dict_to_message to extract reasoning_content
-        try:
-            import langchain_openai.chat_models.base as _lcob
-
-            _original_convert = _lcob._convert_dict_to_message
-
-            def _patched_convert(
-                _dict: dict[str, Any],
-                *args: Any,
-                **kwargs: Any,
-            ) -> Any:
-                msg = _original_convert(_dict, *args, **kwargs)
-                # For assistant messages, inject reasoning_content if present
-                from langchain_core.messages import AIMessage
-
-                if isinstance(msg, AIMessage):
-                    rc = _dict.get("reasoning_content")
-                    if rc:
-                        msg.additional_kwargs["reasoning_content"] = rc
-                return msg
-
-            _lcob._convert_dict_to_message = _patched_convert  # type: ignore[assignment]  # Intentional LangChain monkey-patch with compatible runtime signature.
-            logger.debug("[ReasoningPatch] LangChain _convert_dict_to_message: patched")
-        except Exception as exc:
-            logger.warning("[ReasoningPatch] Failed to patch LangChain: %s", exc)
+        _patch_langchain_receive_reasoning_content()
 
         # Layer 3: LangChain — wrap _convert_message_to_dict to echo reasoning_content
-        try:
-            import langchain_openai.chat_models.base as _lcob
+        _patch_langchain_send_reasoning_content()
 
-            _original_to_dict = _lcob._convert_message_to_dict
 
-            def _patched_to_dict(
-                message: Any,
-                *args: Any,
-                **kwargs: Any,
-            ) -> dict[str, Any]:
-                result = _original_to_dict(message, *args, **kwargs)
-                from langchain_core.messages import AIMessage
+def _patch_openai_sdk_reasoning_content() -> None:
+    try:
+        import openai
+        from openai.types.chat.chat_completion_message import ChatCompletionMessage
 
-                if isinstance(message, AIMessage):
-                    rc = message.additional_kwargs.get("reasoning_content")
-                    if rc and "reasoning_content" not in result:
-                        result["reasoning_content"] = rc
-                return result
+        sdk_version = getattr(openai, "__version__", "0.0.0")
+        major = int(sdk_version.split(".")[0])
+        if major > 1:
+            logger.warning(
+                "[ReasoningPatch] OpenAI SDK v%s detected — skipping model_config patch "
+                "(only tested with v1.x). reasoning_content may not be preserved.",
+                sdk_version,
+            )
+            return
+        if ChatCompletionMessage.model_config.get("extra") != "allow":
+            ChatCompletionMessage.model_config = {
+                **ChatCompletionMessage.model_config,
+                "extra": "allow",
+            }
+            logger.debug("[ReasoningPatch] OpenAI SDK ChatCompletionMessage: extra=allow")
+    except Exception as exc:
+        logger.warning("[ReasoningPatch] Failed to patch OpenAI SDK: %s", exc)
 
-            _lcob._convert_message_to_dict = _patched_to_dict
-            logger.debug("[ReasoningPatch] LangChain _convert_message_to_dict: patched")
-        except Exception as exc:
-            logger.warning("[ReasoningPatch] Failed to patch LangChain send: %s", exc)
+
+def _patch_langchain_receive_reasoning_content() -> None:
+    try:
+        import langchain_openai.chat_models.base as _lcob
+
+        _original_convert = _lcob._convert_dict_to_message
+
+        def _patched_convert(
+            _dict: dict[str, Any],
+            *args: Any,
+            **kwargs: Any,
+        ) -> Any:
+            msg = _original_convert(_dict, *args, **kwargs)
+            # For assistant messages, inject reasoning_content if present
+            from langchain_core.messages import AIMessage
+
+            if isinstance(msg, AIMessage):
+                rc = _dict.get("reasoning_content")
+                if rc:
+                    msg.additional_kwargs["reasoning_content"] = rc
+            return msg
+
+        _lcob._convert_dict_to_message = _patched_convert  # type: ignore[assignment]  # Intentional LangChain monkey-patch with compatible runtime signature.
+        logger.debug("[ReasoningPatch] LangChain _convert_dict_to_message: patched")
+    except Exception as exc:
+        logger.warning("[ReasoningPatch] Failed to patch LangChain: %s", exc)
+
+
+def _patch_langchain_send_reasoning_content() -> None:
+    try:
+        import langchain_openai.chat_models.base as _lcob
+
+        _original_to_dict = _lcob._convert_message_to_dict
+
+        def _patched_to_dict(
+            message: Any,
+            *args: Any,
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            result = _original_to_dict(message, *args, **kwargs)
+            from langchain_core.messages import AIMessage
+
+            if isinstance(message, AIMessage):
+                rc = message.additional_kwargs.get("reasoning_content")
+                if rc and "reasoning_content" not in result:
+                    result["reasoning_content"] = rc
+            return result
+
+        _lcob._convert_message_to_dict = _patched_to_dict
+        logger.debug("[ReasoningPatch] LangChain _convert_message_to_dict: patched")
+    except Exception as exc:
+        logger.warning("[ReasoningPatch] Failed to patch LangChain send: %s", exc)

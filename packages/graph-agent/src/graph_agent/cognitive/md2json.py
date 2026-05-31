@@ -90,31 +90,58 @@ def _coerce_value(raw: str, schema: dict[str, Any] | None) -> Any:
     schema_type = schema.get("type") if isinstance(schema, dict) else None
 
     if _looks_like_json(value):
-        try:
-            return json.loads(_strip_outer_fence(value))
-        except json.JSONDecodeError:
-            return value
+        return _coerce_json_like(value)
 
-    if schema_type == "integer":
-        try:
-            return int(value)
-        except ValueError:
-            return value
-    if schema_type == "number":
-        try:
-            return float(value)
-        except ValueError:
-            return value
-    if schema_type == "boolean":
-        lowered = value.lower()
-        if lowered in {"true", "yes", "1"}:
-            return True
-        if lowered in {"false", "no", "0"}:
-            return False
+    scalar = _coerce_schema_scalar(value, schema_type)
+    if scalar is not _UNCOERCED:
+        return scalar
     if schema_type == "array" and "," in value:
         return [item.strip() for item in value.split(",") if item.strip()]
 
     return value
+
+
+_UNCOERCED = object()
+
+
+def _coerce_json_like(value: str) -> Any:
+    try:
+        return json.loads(_strip_outer_fence(value))
+    except json.JSONDecodeError:
+        return value
+
+
+def _coerce_schema_scalar(value: str, schema_type: Any) -> Any:
+    if schema_type == "integer":
+        return _coerce_int_or_original(value)
+    if schema_type == "number":
+        return _coerce_float_or_original(value)
+    if schema_type == "boolean":
+        return _coerce_bool_or_uncoerced(value)
+    return _UNCOERCED
+
+
+def _coerce_int_or_original(value: str) -> int | str:
+    try:
+        return int(value)
+    except ValueError:
+        return value
+
+
+def _coerce_float_or_original(value: str) -> float | str:
+    try:
+        return float(value)
+    except ValueError:
+        return value
+
+
+def _coerce_bool_or_uncoerced(value: str) -> bool | object:
+    lowered = value.lower()
+    if lowered in {"true", "yes", "1"}:
+        return True
+    if lowered in {"false", "no", "0"}:
+        return False
+    return _UNCOERCED
 
 
 def _strip_outer_fence(value: str) -> str:

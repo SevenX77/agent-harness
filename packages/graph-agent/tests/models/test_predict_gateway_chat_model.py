@@ -63,7 +63,6 @@ def _route(endpoint_id: str, model_name: str) -> ResolvedRoute:
         credential_fingerprint=f"fp-{endpoint_id}",
         provider_model_id=model_name,
         canonical_id=model_name,
-        display_name=f"Model {endpoint_id}",
     )
 
 

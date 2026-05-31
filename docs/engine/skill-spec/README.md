@@ -1,3 +1,8 @@
+---
+status: FROZEN
+---
+<!-- DO NOT EDIT: Golden principle contract baseline. Any divergence is strictly prohibited unless explicitly approved. -->
+
 # Skill Spec 文档入口
 
 ## 文档目标 (Purpose)
@@ -23,7 +28,7 @@
 - [01-physical-layout.md](./01-physical-layout.md#物理结构拓扑-directory-tree): 约束 graph_skill 物理目录、文件命名和 mode/path 双向校验。
 - [02-graph-md-spec.md](./02-graph-md-spec.md#基础元数据字段-metadata): 定义 `GRAPH.md` 根节点 Frontmatter、Phase DAG 和根 IO 契约。
 - [03-logic-md-spec.md](./03-logic-md-spec.md#frontmatter-字段解析表-schema--validation): 定义 `LOGIC.md` Frontmatter、Action 一级寻址和 validator 生命周期。
-- [04-subgraph-md-spec.md](./04-subgraph-md-spec.md#mode-声明与类型断言): 定义 `SUBGRAPH.md` 类型断言、SkillResolverProtocol 寻址和父子图 IO 强校验。
+- [04-subgraph-md-spec.md](./04-subgraph-md-spec.md#类型推导与节点契约): 定义 `SUBGRAPH.md` 类型推导、SkillResolverProtocol 寻址和父子图 IO 强校验。
 - [05-agent-md-spec.md](./05-agent-md-spec.md#frontmatter-字段解析表): 定义 Agent `SKILL.md` Frontmatter、Body XML 扁平化和引用注入校验。
 - [06-cognitive-template-spec.md](./06-cognitive-template-spec.md#8-大插槽布局拓扑): 定义 Cognitive Template 8 大插槽的数据来源与装配顺序。
 - [07-mention-syntax-spec.md](./07-mention-syntax-spec.md#--mention-语法规范): 定义 `@type:NAME` 7 类引用语法和静态依赖校验。

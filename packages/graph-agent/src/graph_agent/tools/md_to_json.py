@@ -26,6 +26,7 @@ from typing import Any, Literal, TypeVar, cast
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
+from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.runner import run_skill
 from graph_agent.core.skill_resolver_protocol import SkillResolverProtocol
 
@@ -340,65 +341,74 @@ def _parse_block_data(
     def _flush_nested() -> None:
         """Apply accumulated children to current_nested_key."""
         nonlocal current_nested_key, nested_children
-        if current_nested_key is None:
-            return
-        ann = annotations.get(current_nested_key)
-        if _is_list_annotation(ann):
-            inner_type = _get_list_inner_type(ann)
-            # Check if inner_type is a BaseModel subclass → @key format
-            if isinstance(inner_type, type) and issubclass(inner_type, BaseModel):
-                item[current_nested_key] = _parse_at_key_lines(nested_children)
-            elif any(c.strip().startswith("@") for c in nested_children):
-                # Annotation says list[str] but children look like @key lines →
-                # still parse as sub-objects (LLM sometimes uses @key for dict lists)
-                item[current_nested_key] = _parse_at_key_lines(nested_children)
-            else:
-                # Plain list[str]
-                item[current_nested_key] = [c.strip() for c in nested_children if c.strip()]
-        else:
-            # Non-list nested field — join children (unlikely, but handle gracefully)
-            item[current_nested_key] = ", ".join(c.strip() for c in nested_children if c.strip())
+        _flush_nested_field(item, current_nested_key, nested_children, annotations)
         current_nested_key = None
         nested_children = []
 
     for line in lines:
-        if not line.strip():
-            continue  # skip blank lines
-
-        # Indented child — must be checked FIRST (before flat/nested patterns)
-        child_m = _RE_INDENTED_CHILD.match(line)
-        if child_m:
-            if current_nested_key is not None:
-                nested_children.append(child_m.group(1))
-            else:
-                logger.warning(
-                    "parse_md: indented child outside nested field, skipping: %r",
-                    line,
-                )
+        line_result = _classify_block_line(line)
+        if line_result is None:
             continue
-
-        # New top-level bullet → flush any pending nested field
+        line_type, payload = line_result
+        if line_type == "child":
+            if current_nested_key is None:
+                logger.warning("parse_md: indented child outside nested field, skipping: %r", line)
+            else:
+                nested_children.append(payload)
+            continue
         _flush_nested()
-
-        # Flat field: "- key: value"
-        flat_m = _RE_FLAT_FIELD.match(line)
-        if flat_m:
-            key, raw_val = flat_m.group(1), flat_m.group(2).strip()
+        if line_type == "flat":
+            key, raw_val = payload.split(":", 1)
             item[key] = _coerce_scalar(key, raw_val, annotations)
             continue
-
-        # Nested field start: "- key:"
-        nested_m = _RE_NESTED_FIELD.match(line)
-        if nested_m:
-            current_nested_key = nested_m.group(1)
+        if line_type == "nested":
+            current_nested_key = payload
             nested_children = []
             continue
-
         logger.warning("parse_md: unrecognised line, skipping: %r", line)
 
     # Flush the last pending nested field
     _flush_nested()
     return item
+
+
+def _flush_nested_field(
+    item: dict[str, Any],
+    current_nested_key: str | None,
+    nested_children: list[str],
+    annotations: dict[str, Any],
+) -> None:
+    if current_nested_key is None:
+        return
+    ann = annotations.get(current_nested_key)
+    if _is_list_annotation(ann):
+        item[current_nested_key] = _parse_list_nested_children(ann, nested_children)
+    else:
+        item[current_nested_key] = ", ".join(c.strip() for c in nested_children if c.strip())
+
+
+def _parse_list_nested_children(ann: Any, nested_children: list[str]) -> list[Any]:
+    inner_type = _get_list_inner_type(ann)
+    if isinstance(inner_type, type) and issubclass(inner_type, BaseModel):
+        return _parse_at_key_lines(nested_children)
+    if any(c.strip().startswith("@") for c in nested_children):
+        return _parse_at_key_lines(nested_children)
+    return [c.strip() for c in nested_children if c.strip()]
+
+
+def _classify_block_line(line: str) -> tuple[str, str] | None:
+    if not line.strip():
+        return None
+    child_m = _RE_INDENTED_CHILD.match(line)
+    if child_m:
+        return "child", child_m.group(1)
+    flat_m = _RE_FLAT_FIELD.match(line)
+    if flat_m:
+        return "flat", f"{flat_m.group(1)}:{flat_m.group(2).strip()}"
+    nested_m = _RE_NESTED_FIELD.match(line)
+    if nested_m:
+        return "nested", nested_m.group(1)
+    return "unknown", line
 
 
 def _coerce_scalar(key: str, raw_val: str, annotations: dict[str, Any]) -> Any:
@@ -575,6 +585,13 @@ def md_to_json(
         schema=schema_cls,  # Python class object — safe inside graph_agent context dict
     )
 
+    if getattr(result, "success", True) is False:
+        error = getattr(result, "error", None) or "unknown error"
+        raise SkillLoadError(
+            "md_to_json md-patch deferred fallback failed before producing "
+            f"final_results: {error}"
+        )
+
     final_results: list[dict[str, Any]] = result["context"]["final_results"]
     logger.info(
         "md_to_json: patch completed, %d final items returned",
@@ -588,80 +605,67 @@ def md_to_json(
 
 def _type_to_constraint(annotation: Any, field_info: Any = None) -> str:
     """Convert a Python type annotation to a human-readable constraint string."""
-    # Handle Optional[T] - both typing.Union and Python 3.10+ UnionType (X | Y)
     origin = typing.get_origin(annotation)
     args = typing.get_args(annotation)
 
-    # Check for Optional/Union types (typing.Union or types.UnionType for X | Y syntax)
-    is_union = False
-    if origin is typing.Union:
-        is_union = True
-    elif isinstance(annotation, types.UnionType):
-        is_union = True
-        origin = types.UnionType
+    optional_inner = _optional_inner_annotation(annotation, origin, args)
+    if optional_inner is not None:
+        return _type_to_constraint(optional_inner, field_info)
 
-    if is_union:
-        # Optional[T] is Union[T, None]
-        non_none_args = [a for a in args if a is not type(None)]
-        if len(non_none_args) == 1:
-            return _type_to_constraint(non_none_args[0], field_info)
-
-    # Handle Literal[...]
     if origin is typing.Literal:
         values = [f"{v!r}" for v in args]
         return f"[字符串，限 {', '.join(values)}]"
 
-    # Handle List[T]
     if origin is list:
         inner = args[0] if args else str
         if inner is str:
             return "[列表，缩进子行或逗号分隔]"
         return f"[列表，元素为 {_type_to_constraint(inner)}]"
 
-    # Handle primitive types
     if annotation is str:
         return "[文本]"
 
     if annotation is int:
-        constraint = "[整数"
-        # Extract ge/le from field_info metadata (contains Ge/Le objects)
-        ge_val = None
-        le_val = None
-        if field_info and hasattr(field_info, "metadata"):
-            for m in field_info.metadata:
-                if hasattr(m, "ge") or (m.__class__.__name__ == "Ge" and hasattr(m, "ge")):
-                    ge_val = m.ge
-                if hasattr(m, "le") or (m.__class__.__name__ == "Le" and hasattr(m, "le")):
-                    le_val = m.le
-        if ge_val is not None:
-            constraint += f", >={ge_val}"
-        if le_val is not None:
-            constraint += f", <={le_val}"
-        constraint += "]"
-        return constraint
+        return _numeric_constraint("整数", field_info)
 
     if annotation is float:
-        constraint = "[小数"
-        ge_val = None
-        le_val = None
-        if field_info and hasattr(field_info, "metadata"):
-            for m in field_info.metadata:
-                if hasattr(m, "ge") or (m.__class__.__name__ == "Ge" and hasattr(m, "ge")):
-                    ge_val = m.ge
-                if hasattr(m, "le") or (m.__class__.__name__ == "Le" and hasattr(m, "le")):
-                    le_val = m.le
-        if ge_val is not None:
-            constraint += f", >={ge_val}"
-        if le_val is not None:
-            constraint += f", <={le_val}"
-        constraint += "]"
-        return constraint
+        return _numeric_constraint("小数", field_info)
 
-    # Handle BaseModel subclasses (nested)
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
         return "[嵌套对象]"
 
     return "[未知]"
+
+
+def _optional_inner_annotation(annotation: Any, origin: Any, args: tuple[Any, ...]) -> Any | None:
+    is_union = origin is typing.Union or isinstance(annotation, types.UnionType)
+    if not is_union:
+        return None
+    non_none_args = [a for a in args if a is not type(None)]
+    return non_none_args[0] if len(non_none_args) == 1 else None
+
+
+def _numeric_constraint(label: str, field_info: Any) -> str:
+    ge_val, le_val = _numeric_bounds(field_info)
+    constraint = f"[{label}"
+    if ge_val is not None:
+        constraint += f", >={ge_val}"
+    if le_val is not None:
+        constraint += f", <={le_val}"
+    return f"{constraint}]"
+
+
+def _numeric_bounds(field_info: Any) -> tuple[Any, Any]:
+    ge_val = None
+    le_val = None
+    if not field_info or not hasattr(field_info, "metadata"):
+        return ge_val, le_val
+    for metadata in field_info.metadata:
+        if hasattr(metadata, "ge"):
+            ge_val = metadata.ge
+        if hasattr(metadata, "le"):
+            le_val = metadata.le
+    return ge_val, le_val
 
 
 def schema_to_type_dict(schema: type[BaseModel]) -> str:

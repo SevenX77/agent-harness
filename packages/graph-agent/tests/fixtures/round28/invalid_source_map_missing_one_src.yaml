@@ -1,0 +1,4 @@
+files:
+  - path: packages/graph-agent/src/graph_agent/__init__.py
+    classification: detail
+    feature_ids: [F-api-stable-export]

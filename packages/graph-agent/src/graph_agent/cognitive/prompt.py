@@ -10,14 +10,16 @@ by a phase agent. It merges:
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 V030_AGENT_EXIT_CONTRACT_TEXT = (
-    "Call finish_task only after the phase output satisfies the declared output_schema. "
-    "Provide diagnostics_md and business_data_md in the finish_task payload."
+    "回答必须调用 finish_task，输出符合下方 Schema 的结构化结果。"
+    "business_data_md 遵循 output_schema 列业务字段；diagnostics_md 写自检诊断。\n"
+    "强制输出 Schema："
 )
 
 
@@ -131,11 +133,14 @@ def apply_v030_cognitive_template(
     protocols: list[dict[str, str]],
     output_schema: dict[str, Any] | None = None,
     knowledge_base: str = "",
+    knowledge_base_markdown: str | None = None,
+    reference_registry_listing: str = "",
     inline_examples: list[str] | None = None,
     document_examples: list[dict[str, str]] | None = None,
+    example_registry_listing: str = "",
     role_prefix: str = "",
 ) -> str:
-    """Compose the V0.3.0 seven-slot cognitive template for Agent phases."""
+    """Compose the V0.3.0 eight-slot cognitive template for Agent phases."""
 
     role_prefix_section = (
         f"<llm_role_prefix>\n{role_prefix.strip()}\n</llm_role_prefix>\n"
@@ -156,16 +161,15 @@ def apply_v030_cognitive_template(
         )
         or "无显式协议"
     )
-    examples_md = "\n\n".join(inline_examples or []) or "无内联示例"
-    document_examples_md = (
-        "\n".join(
-            f"- {item.get('id')}: {item.get('summary', '')}" for item in document_examples or []
-        )
-        or "无扩展案例"
-    )
-    schema_md = ""
-    if output_schema is not None:
-        schema_md = "\n\n<output_schema>\n" + str(output_schema) + "\n</output_schema>"
+    inline_examples_md = "\n\n".join(inline_examples or []) or "无内联示范"
+    if not example_registry_listing:
+        example_registry_listing = _format_document_examples(document_examples or [])
+    if not reference_registry_listing:
+        reference_registry_listing = "无注册 Reference"
+    aligned_markdown = (
+        knowledge_base_markdown if knowledge_base_markdown is not None else knowledge_base
+    ).strip() or "无预读取参考资料"
+    schema_md = json.dumps(output_schema, ensure_ascii=False, indent=2) if output_schema else "{}"
 
     return f"""
 <role>
@@ -179,43 +183,67 @@ def apply_v030_cognitive_template(
 </goal>
 
 <thinking_style>
-- 先确认目标、输入、输出契约，再行动
-- 区分事实、推断和待验证假设
-- 每次调用工具前说明目的，调用后检查结果是否满足下一步需要
+- 行动前先做简短策略思考：目标是什么、输入是否充分、输出标准是什么
+- 区分"事实"与"推断"，不要把推断当作事实写入结果
+- 对关键判断给出依据，不要无依据臆测
+- 先规划后执行：明确步骤，再调用工具
+- 思考用于规划；对外输出必须给出可执行结果，而不是只描述计划
+
+建议步骤:
+{steps_md}
 </thinking_style>
 
 <knowledge_base>
-{knowledge_base or "无预读取参考资料"}
+【垂直领域知识修正报告】(系统已为你提前查阅相关资料并提取核心差异)：
+{aligned_markdown}
+
+如果上述提炼不足以支撑判断，或你需要阅读未被精炼的其他原始语料，
+可自主调用 read_reference subagent 工具，传入 R-id 从完整 Reference 库获取。
+当前可用 Reference 注册清单：{reference_registry_listing}
 </knowledge_base>
 
-<steps>
-{steps_md}
-</steps>
-
 <examples>
-{examples_md}
+以下案例仅用于辅助理解业务逻辑，你的最终输出格式必须严格遵守 <exit_contract> 的 Schema，不要照搬案例结构。
+【内联示范】：
+{inline_examples_md}
 
-<document_examples>
-{document_examples_md}
-</document_examples>
+【扩展案例库】(遇棘手边界可调用 read_example subagent)：
+{example_registry_listing}
 </examples>
 
 <ambiguity_feedback>
-输入不足、规则冲突或存在多种合理解释时，调用 log_ambiguity 记录决策和原因，然后继续执行。
+当你发现规则不清晰、输入不足或存在多种合理解释时，不要静默跳过：
+1. 优先调用 log_ambiguity 记录问题、类型、你的决策和理由
+2. 然后继续按"最保守且可解释"的方案执行
+这不是阻塞流程的澄清请求，而是用于改进技能定义的反馈回路。
 </ambiguity_feedback>
 
 <protocol_citation>
-判断必须引用协议 id；没有对应协议时明确写出“未找到明确协议条款”。
+做判断时必须标注协议依据，例如 [protocol:P1]。若无明确协议，需在自检说明写明并调用 log_ambiguity。
+必须遵守的协议：
 {protocols_md}
 </protocol_citation>
 
 <critical_reminders>
-- finish_task 前必须检查输出是否满足 output_schema
-- 工具结果与预期不一致时，先修正再 finish
-- 最终 business_data_md 必须能转换为声明的结构化输出
+- 调用 finish_task 前，先检查关键工具返回值是否与预期一致；不一致先修复再 finish
+- 对每个关键结论给出规则依据或数据依据
+- 不确定规则边界时，先 log_ambiguity 再继续
+- finish_task 必须提供 diagnostics_md（自检诊断）+ business_data_md（业务输出，遵循 output_schema）
+- business_data_md 经 md_to_json 强校验，失败会收到错误反馈，按反馈修正后重新 finish_task
 </critical_reminders>
 
 <exit_contract>
-{V030_AGENT_EXIT_CONTRACT_TEXT}{schema_md}
+{V030_AGENT_EXIT_CONTRACT_TEXT}
+<output_schema>
+{schema_md}
+</output_schema>
 </exit_contract>
 """.strip()
+
+
+def _format_document_examples(document_examples: list[dict[str, str]]) -> str:
+    lines = [
+        f"- {item.get('id')}: {item.get('summary', '')}".strip()
+        for item in document_examples
+    ]
+    return "\n".join(lines) if lines else "无扩展案例"

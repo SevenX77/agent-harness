@@ -1,6 +1,5 @@
 ---
 mode: logic
+actions: [assemble]
 ---
-<python_callable>
 assemble
-</python_callable>

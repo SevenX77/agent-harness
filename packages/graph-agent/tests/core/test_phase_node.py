@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError
 
 import pytest
+
 from graph_agent.core.phase_node import PhaseNode
 from graph_agent.core.state import BusinessData, FrameworkState, StateManager, WorkflowState
 

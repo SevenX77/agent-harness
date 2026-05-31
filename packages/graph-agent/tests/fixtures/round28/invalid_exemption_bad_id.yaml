@@ -1,0 +1,9 @@
+version: "1"
+exemptions:
+  - exemption_id: retired-demo-feature
+    pr: PR-999
+    pm_approval: PM approved retirement.
+    reason: Bad id.
+    affected_features: [F-old-demo]
+    replacement_feature_ids: [F-runtime-execution]
+    expires_or_cleanup: none

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from graph_agent.core._predict_internal.strategy import (
     BacktestStrategy,
     GoldenCaseStrategy,

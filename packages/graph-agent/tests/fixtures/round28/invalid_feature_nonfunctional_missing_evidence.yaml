@@ -1,0 +1,19 @@
+id: F-bad-nfc
+description: Non functional contract lacks evidence.
+feature_boundary:
+  kind: public-method
+  evidence: graph_agent.run_skill
+sources:
+  - public-api
+core_paths:
+  - path: packages/graph-agent/src/graph_agent/core/runner.py
+error_codes_primary: []
+error_codes_secondary: []
+events_primary: []
+events_secondary: []
+non_functional_contracts:
+  - id: NFC-missing-evidence
+    type: other
+    description: Evidence must be non-empty.
+targeted_tests:
+  - tests/core/test_run_skill_entrypoint_root_shape.py::test_run_skill_single_markdown_file_returns_v030_root_error

@@ -1,11 +1,9 @@
 """Pure parsing utilities for V2.1 Markdown/YAML documents.
 
-Two functions matter to callers:
+Parser helpers that matter to callers:
 
-- ``parse_skill_file(path)`` — read+decode entry. Returns
-  ``{"frontmatter": dict, "human_body": str}``. Pairs with
-  ``serialize_skill`` (``core/serialize.py``) for byte-stable round-trip,
-  which is what Studio UI ↔ Git synchronisation relies on.
+- ``parse_markdown_parts(path)`` — read+decode entry. Returns
+  frontmatter, body, and line metadata for V2.1 markdown documents.
 - ``_parse_frontmatter(content)`` / ``_strip_frontmatter(content)`` —
   internal helpers used by ``loader.py`` and ``compiler.py`` to peek
   ``schema_version`` before paying for full Pydantic validation.
@@ -43,12 +41,11 @@ except ModuleNotFoundError:  # pragma: no cover
     RuamelYAML = None
     YAMLError = yaml.YAMLError
 
-from graph_agent.core.exceptions import SkillLoadError
+from graph_agent.core.exceptions import SkillLoadError, make_error_payload
 
 # 方针 3.2: lines reported by ruamel are 0-indexed *within* the
-# YAML stream we hand it. ``parse_skill_file`` strips the opening
-# ``---`` fence (line 1 of the SKILL.md) before parsing, so the YAML
-# stream's line 0 corresponds to SKILL.md line 2.
+# YAML stream we hand it. The opening ``---`` fence is stripped before
+# parsing, so the YAML stream's line 0 corresponds to markdown line 2.
 _FRONTMATTER_LINE_OFFSET = 2
 
 
@@ -137,12 +134,9 @@ def locate_line_for_pydantic_loc(root: Any, loc: Sequence[Any]) -> int | None:
 
     for segment in loc:
         if isinstance(node, dict):
-            lc = getattr(node, "lc", None)
-            data_map = getattr(lc, "data", None) if lc is not None else None
-            if isinstance(segment, str) and segment in node:
-                if data_map and segment in data_map:
-                    _record(data_map[segment][0])
-                node = node[segment]
+            next_node = _locate_dict_segment(node, segment, _record)
+            if next_node is not _LOC_NOT_FOUND:
+                node = next_node
                 continue
             # Pydantic injects the discriminator tag (e.g. 'graph',
             # 'agent', 'persona', 'llm', 'logic', 'delegate') as a
@@ -150,16 +144,9 @@ def locate_line_for_pydantic_loc(root: Any, loc: Sequence[Any]) -> int | None:
             # Skip these so the walk continues at the next real key.
             continue
         if isinstance(node, list):
-            if isinstance(segment, int) and 0 <= segment < len(node):
-                lc = getattr(node, "lc", None)
-                if lc is not None and hasattr(lc, "item"):
-                    try:
-                        item_lc = lc.item(segment)
-                    except (KeyError, IndexError):
-                        item_lc = None
-                    if item_lc:
-                        _record(item_lc[0])
-                node = node[segment]
+            next_node = _locate_list_segment(node, segment, _record)
+            if next_node is not _LOC_NOT_FOUND:
+                node = next_node
                 continue
             continue
         # Scalar reached but more loc segments remain — give up cleanly.
@@ -170,8 +157,45 @@ def locate_line_for_pydantic_loc(root: Any, loc: Sequence[Any]) -> int | None:
     return max(1, last_line + 1)  # 0-indexed → 1-indexed
 
 
+_LOC_NOT_FOUND = object()
+
+
+def _locate_dict_segment(
+    node: dict[Any, Any],
+    segment: Any,
+    record: Any,
+) -> Any:
+    lc = getattr(node, "lc", None)
+    data_map = getattr(lc, "data", None) if lc is not None else None
+    if not isinstance(segment, str) or segment not in node:
+        return _LOC_NOT_FOUND
+    if data_map and segment in data_map:
+        record(data_map[segment][0])
+    return node[segment]
+
+
+def _locate_list_segment(
+    node: list[Any],
+    segment: Any,
+    record: Any,
+) -> Any:
+    if not isinstance(segment, int) or not 0 <= segment < len(node):
+        return _LOC_NOT_FOUND
+    lc = getattr(node, "lc", None)
+    if lc is not None and hasattr(lc, "item"):
+        try:
+            item_lc = lc.item(segment)
+        except (KeyError, IndexError):
+            item_lc = None
+        if item_lc:
+            record(item_lc[0])
+    return node[segment]
+
+
 def _fatal(path: Path, line: int, message: str) -> NoReturn:
-    raise SkillLoadError(f"[F-v3-route] {path}:{line} {message}")
+    code = "[F-v3-graph-phase-id-invalid]"
+    detail = f"{path}:{line} {message}"
+    raise SkillLoadError(detail, payload=make_error_payload(code, detail, source_path=path))
 
 
 def parse_markdown_parts(path: Path | str) -> tuple[dict[str, Any], str, dict[str, int]]:
@@ -232,17 +256,11 @@ def scan_forbidden_topology_tags(path: Path, body: str) -> None:
     )
 
 
-def parse_skill_file(path: Path | str) -> dict[str, Any]:
-    """Deprecated schema-2.0 API removed by the V2.1 hard cut."""
-    _fatal(Path(path), 1, "schema 2.0 parse_skill_file is not supported; use GRAPH.md")
-
-
 __all__ = [
     "_parse_frontmatter",
     "_strip_frontmatter",
     "extract_raw_blocks",
     "locate_line_for_pydantic_loc",
     "parse_markdown_parts",
-    "parse_skill_file",
     "scan_forbidden_topology_tags",
 ]

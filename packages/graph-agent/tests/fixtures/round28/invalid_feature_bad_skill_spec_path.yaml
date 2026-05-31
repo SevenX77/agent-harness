@@ -1,0 +1,18 @@
+id: F-bad-skill-spec-path
+description: Bad skill spec path should be rejected.
+feature_boundary:
+  kind: lifecycle-behavior
+  evidence: skill spec anchor
+sources:
+  - skill-spec
+skill_spec_sections:
+  - docs/engine/skill-spec/05-finish-task-spec.md#workflow-finish-mode
+core_paths:
+  - path: packages/graph-agent/src/graph_agent/cognitive/finish_task.py
+error_codes_primary: []
+error_codes_secondary: []
+events_primary: []
+events_secondary: []
+non_functional_contracts: []
+targeted_tests:
+  - tests/cognitive/test_prompt.py::test_exit_contract_appended_at_end

@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import cast
 
+from langchain_core.messages import HumanMessage
+
 from graph_agent.callbacks.base import Callback
 from graph_agent.core.phase_executor import PhaseExecutor
 from graph_agent.core.phase_nodes import (
@@ -26,7 +28,6 @@ from graph_agent.core.phase_nodes._helpers import (
 )
 from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
 from graph_agent.core.types import Phase
-from langchain_core.messages import HumanMessage
 
 
 def _state() -> WorkflowState:

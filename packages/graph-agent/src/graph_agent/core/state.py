@@ -168,49 +168,58 @@ def legacy_context_from_state(state: WorkflowState) -> dict[str, Any]:
     """Return a T2 compatibility context dict for legacy runtime code."""
     ctx = state["data"].model_dump()
     flow = state["flow"]
+    _add_not_none_framework_values(ctx, flow)
+    _add_non_empty_framework_values(ctx, flow)
+    _add_copied_framework_values(ctx, flow)
+    ctx["_unattended"] = flow.unattended
+    return ctx
 
-    if flow.finish_task_result is not None:
-        ctx["_finish_task_result"] = flow.finish_task_result
-    if flow.md_id is not None:
-        ctx["_md_id"] = flow.md_id
+
+def _add_not_none_framework_values(ctx: dict[str, Any], flow: FrameworkState) -> None:
+    for ctx_key, value in _not_none_framework_pairs(flow):
+        if value is not None:
+            ctx[ctx_key] = value
+
+
+def _not_none_framework_pairs(flow: FrameworkState) -> tuple[tuple[str, Any], ...]:
+    return (
+        ("_finish_task_result", flow.finish_task_result),
+        ("_md_id", flow.md_id),
+        ("_thread_id", flow.thread_id),
+        ("_run_id", flow.run_id),
+        ("_sub_run_id", flow.sub_run_id),
+        ("_last_output", flow.last_output),
+        ("_group_key", flow.group_key),
+        ("_trace_path", flow.trace_path),
+        ("_validation_middleware_phase", flow.validation_middleware_phase),
+        ("_md_schema_path", flow.md_schema_path),
+    )
+
+
+def _add_non_empty_framework_values(ctx: dict[str, Any], flow: FrameworkState) -> None:
     if flow.io_errors:
         ctx["_io_errors"] = list(flow.io_errors)
     if flow.validation_warnings:
         ctx["_validation_warnings"] = list(flow.validation_warnings)
-    if flow.thread_id is not None:
-        ctx["_thread_id"] = flow.thread_id
-    if flow.run_id is not None:
-        ctx["_run_id"] = flow.run_id
-    ctx["_unattended"] = flow.unattended
-    if flow.persistent_runtime_inputs is not None:
-        ctx["_persistent_runtime_inputs"] = dict(flow.persistent_runtime_inputs)
-    if flow.persistent_storage_config is not None:
-        ctx["_persistent_storage_config"] = dict(flow.persistent_storage_config)
-    if flow.sub_run_id is not None:
-        ctx["_sub_run_id"] = flow.sub_run_id
-    if flow.retry_feedback is not None:
-        ctx["_retry_feedback"] = list(flow.retry_feedback)
     if flow.working_memory:
         ctx["_working_memory"] = flow.working_memory
     if flow.ambiguity_reports:
         ctx["_ambiguity_reports"] = list(flow.ambiguity_reports)
-    if flow.last_output is not None:
-        ctx["_last_output"] = flow.last_output
-    if flow.group_key is not None:
-        ctx["_group_key"] = flow.group_key
-    if flow.trace_path is not None:
-        ctx["_trace_path"] = flow.trace_path
-    if flow.validation_middleware_phase is not None:
-        ctx["_validation_middleware_phase"] = flow.validation_middleware_phase
     if flow.current_phase:
         ctx["_current_phase"] = flow.current_phase
+
+
+def _add_copied_framework_values(ctx: dict[str, Any], flow: FrameworkState) -> None:
+    if flow.persistent_runtime_inputs is not None:
+        ctx["_persistent_runtime_inputs"] = dict(flow.persistent_runtime_inputs)
+    if flow.persistent_storage_config is not None:
+        ctx["_persistent_storage_config"] = dict(flow.persistent_storage_config)
+    if flow.retry_feedback is not None:
+        ctx["_retry_feedback"] = list(flow.retry_feedback)
     if flow.md_schema is not None:
         ctx["_md_schema"] = dict(flow.md_schema)
-    if flow.md_schema_path is not None:
-        ctx["_md_schema_path"] = flow.md_schema_path
     if flow.md_type_dict is not None:
         ctx["_md_type_dict"] = dict(flow.md_type_dict)
-    return ctx
 
 
 def workflow_state_from_legacy_context(

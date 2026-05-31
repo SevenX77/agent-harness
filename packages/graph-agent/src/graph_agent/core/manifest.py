@@ -1,22 +1,16 @@
-"""Pydantic v2.1 manifest and phase-node AST contracts.
-
-V2.1 is a hard cut from schema 2.0.  The root ``GRAPH.md`` is the graph
-manifest and never becomes a runtime node.  Phase nodes live under
-``phases/*/{LOGIC,SUBGRAPH,SKILL}.md`` and are routed by physical file
-name plus the YAML ``mode`` discriminator.
-"""
+"""Pydantic v0.3.0 manifest and phase-node AST contracts."""
 
 from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 from graph_agent.core.skill_resolver_protocol import SKILL_ID_PATTERN
 
 
 class GraphPhaseRef(BaseModel):
-    """One phase reference declared in root ``GRAPH.md``."""
+    """Legacy topology carrier retained for old imports only."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -64,15 +58,22 @@ class ReferenceSpec(BaseModel):
 
 
 class ExampleSpec(BaseModel):
-    """Inline or document example declared on an Agent."""
+    """Document example declared on an Agent frontmatter."""
 
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(pattern=r"^[A-Z][A-Za-z0-9_-]*$")
-    type: Literal["inline", "document"]
-    content: str | None = None
-    path: str | None = None
-    summary: str | None = None
+    path: str = Field(min_length=1)
+    summary: str = Field(min_length=1)
+
+
+class AgentExample(BaseModel):
+    """One inline Agent example parsed from body XML."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=r"^[A-Z][A-Za-z0-9_-]*$")
+    content: str = Field(min_length=1)
 
 
 class AgentStep(BaseModel):
@@ -105,17 +106,15 @@ class SubagentSpec(BaseModel):
 
 
 class GraphManifest(BaseModel):
-    """Root V2.1 graph manifest parsed from ``GRAPH.md``."""
+    """Root V0.3.0 graph manifest parsed from ``GRAPH.md``."""
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["0.3.0", "2.1"] = "2.1"
+    schema_version: Literal["v0.3.0"]
     name: str = Field(min_length=1, max_length=128)
     description: str = ""
-    io_inputs_ref: str = "io/inputs.json"
-    io_outputs_ref: str = "io/outputs.json"
-    io: PhaseIOSchema | None = None
-    phases: list[GraphPhaseRef] = Field(default_factory=list)
+    io: PhaseIOSchema
+    phases: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -133,7 +132,9 @@ class LogicNodeAST(_BaseNodeAST):
     """Deterministic Python phase node parsed from ``LOGIC.md``."""
 
     mode: Literal["logic"]
-    python_callable: str = Field(min_length=1)
+    io: PhaseIOSchema
+    actions: list[str] = Field(default_factory=list, min_length=1)
+    validator: StrictBool = False
 
 
 class SubgraphNodeAST(_BaseNodeAST):
@@ -141,9 +142,9 @@ class SubgraphNodeAST(_BaseNodeAST):
 
     mode: Literal["subgraph"]
     target_skill: str = Field(pattern=SKILL_ID_PATTERN)
-    io: PhaseIOSchema | None = None
+    io: PhaseIOSchema
     # V0.3 AST bool flag; not the legacy LLMPhase.validator module path.
-    validator: bool = False
+    validator: StrictBool = False
 
 
 class AgentNodeAST(_BaseNodeAST):
@@ -156,12 +157,13 @@ class AgentNodeAST(_BaseNodeAST):
     protocols: list[AgentProtocol] = Field(default_factory=list)
     io: PhaseIOSchema | None = None
     # V0.3 AST bool flag; not the legacy LLMPhase.validator module path.
-    validator: bool = False
+    validator: StrictBool = False
     tools: list[str] = Field(default_factory=list)
     subagents: list[SubagentSpec] = Field(default_factory=list)
     subgraphs: list[AgentRegistryItem] = Field(default_factory=list)
     references: list[ReferenceSpec] = Field(default_factory=list)
     examples: list[ExampleSpec] = Field(default_factory=list)
+    examples_inline: list[AgentExample] = Field(default_factory=list)
     max_iterations: int = Field(default=10, ge=1, le=50)
     llm_role: str | None = None
     system_prompt: str = ""
@@ -182,18 +184,8 @@ class AgentNodeAST(_BaseNodeAST):
         return self
 
 
-class SkillNodeAST(_BaseNodeAST):
-    """LLM ReAct phase node parsed from ``SKILL.md``."""
-
-    mode: Literal["skill"]
-    system_prompt: str = Field(min_length=1)
-    exit_contract: str = Field(min_length=1)
-    tools: list[str] = Field(default_factory=list)
-    subagents: list[SubagentSpec] = Field(default_factory=list)
-
-
 PhaseAST = Annotated[
-    LogicNodeAST | SubgraphNodeAST | AgentNodeAST | SkillNodeAST,
+    LogicNodeAST | SubgraphNodeAST | AgentNodeAST,
     Field(discriminator="mode"),
 ]
 
@@ -206,6 +198,7 @@ SkillManifest = GraphManifest
 __all__ = [
     "ContextBridge",
     "AgentNodeAST",
+    "AgentExample",
     "AgentProtocol",
     "AgentRegistryItem",
     "AgentStep",
@@ -217,7 +210,6 @@ __all__ = [
     "PhaseIOSchema",
     "ReferenceSpec",
     "SkillManifest",
-    "SkillNodeAST",
     "SubagentSpec",
     "SubgraphNodeAST",
 ]

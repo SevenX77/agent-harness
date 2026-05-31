@@ -123,47 +123,67 @@ def _write_backend_skill(tmp_path: Path) -> Path:
         "def draft(context):\n    context.set('text', 'draft')\n    return {'text': 'draft'}\n",
         encoding="utf-8",
     )
-    (skill_dir / "io").mkdir(parents=True)
     (skill_dir / "GRAPH.md").write_text(
         """---
-schema_version: "2.1"
+schema_version: "v0.3.0"
 name: predict-backend-e2e
 description: Predict backend e2e smoke
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+    additionalProperties: true
+  outputs:
+    type: object
+    properties:
+      prepared:
+        type: boolean
+      text:
+        type: string
+phases:
+  - prepare
+  - draft
 ---
-<input src="io/inputs.json" />
-<output src="io/outputs.json" />
-<phase id="prepare" src="phases/prepare" depends_on="" />
-<phase id="draft" src="phases/draft" depends_on="prepare" />
+<phase depends_on="input">prepare</phase>
+<phase depends_on="prepare" output>draft</phase>
 """,
-        encoding="utf-8",
-    )
-    (skill_dir / "io" / "inputs.json").write_text(
-        '{"type":"object","properties":{"topic":{"type":"string"}},"additionalProperties":true}\n',
-        encoding="utf-8",
-    )
-    (skill_dir / "io" / "outputs.json").write_text(
-        '{"type":"object","properties":{"prepared":{"type":"boolean"},"text":{"type":"string"}}}\n',
         encoding="utf-8",
     )
     (skill_dir / "phases" / "prepare" / "LOGIC.md").write_text(
         """---
-mode: logic
-name: prepare
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+  outputs:
+    type: object
+    properties:
+      prepared:
+        type: boolean
 ---
-<python_callable>
-prepare
-</python_callable>
+<action>prepare</action>
 """,
         encoding="utf-8",
     )
     (skill_dir / "phases" / "draft" / "LOGIC.md").write_text(
         """---
-mode: logic
-name: draft
+io:
+  inputs:
+    type: object
+    properties:
+      prepared:
+        type: boolean
+  outputs:
+    type: object
+    properties:
+      text:
+        type: string
 ---
-<python_callable>
-draft
-</python_callable>
+<action>draft</action>
 """,
         encoding="utf-8",
     )

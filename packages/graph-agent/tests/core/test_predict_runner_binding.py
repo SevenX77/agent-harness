@@ -1,89 +1,129 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 from graph_agent.core import runner as runner_module
-from graph_agent.core._predict_internal.strategy import HeuristicStubStrategy
 
 
-class RecordingHarness:
+class RecordingGraph:
+    def invoke(self, state: dict[str, object]) -> dict[str, object]:
+        del state
+        return {"data": {"ok": True}}
+
+
+class RecordingAssembler:
     def __init__(self) -> None:
-        self._resolver = SimpleNamespace()
-        self.bindings_seen: list[bool] = []
-        self.callbacks = []
-        self.phases = [object()]
-
-    def run(self, **kwargs: object) -> dict[str, object]:
-        del kwargs
-        self.bindings_seen.append(hasattr(self._resolver, "_graph_agent_predict_mock_strategy"))
-        return {
-            "data": _Data(),
-            "flow": _Flow(),
-        }
+        self.graph = RecordingGraph()
 
 
-class _Data:
-    def model_dump(self) -> dict[str, object]:
-        return {"ok": True}
+def _write_v030_root(root: Path) -> Path:
+    (root / "GRAPH.md").write_text(
+        """---
+schema_version: "v0.3.0"
+name: test
+io:
+  inputs:
+    type: object
+    properties: {}
+  outputs:
+    type: object
+    properties: {}
+phases: []
+---
+""",
+        encoding="utf-8",
+    )
+    return root
 
 
-class _Flow:
-    metrics: dict[str, object] = {}
-    trace_path = None
-
-
-def test_run_skill_dict_omitted_mock_llm_does_not_bind_predictor(
+def test_run_skill_dict_omitted_mock_llm_passes_no_chat_model(
     monkeypatch,
     tmp_path,
+    mock_skill_resolver,
 ) -> None:
-    skill = tmp_path / "SKILL.md"
-    skill.write_text("---\nname: test\n---\n", encoding="utf-8")
-    harness = RecordingHarness()
-    monkeypatch.setattr(runner_module, "load_workflow_from_md", lambda *_args, **_kwargs: harness)
-    runner_module.clear_cache()
+    skill_root = _write_v030_root(tmp_path)
+    chat_models: list[object] = []
 
-    runner_module._run_skill_dict(skill, callbacks=[], cleanup_checkpoints_on_finish=False)
+    monkeypatch.setattr(
+        "graph_agent.core.compiler.compile_skill",
+        lambda *_args, **_kwargs: object(),
+    )
 
-    assert harness.bindings_seen == [False]
-    assert not hasattr(harness._resolver, "_graph_agent_predict_mock_strategy")
+    def fake_assemble_graph(*_args, chat_model=None, **_kwargs):
+        chat_models.append(chat_model)
+        return RecordingAssembler()
 
-
-def test_run_skill_dict_explicit_mock_none_binds_only_during_current_run(
-    monkeypatch,
-    tmp_path,
-) -> None:
-    skill = tmp_path / "SKILL.md"
-    skill.write_text("---\nname: test\n---\n", encoding="utf-8")
-    harness = RecordingHarness()
-    monkeypatch.setattr(runner_module, "load_workflow_from_md", lambda *_args, **_kwargs: harness)
-    runner_module.clear_cache()
+    monkeypatch.setattr("graph_agent.core.graph_assembler.assemble_graph", fake_assemble_graph)
 
     runner_module._run_skill_dict(
-        skill,
+        skill_root,
         callbacks=[],
         cleanup_checkpoints_on_finish=False,
+        skill_resolver=mock_skill_resolver,
+    )
+
+    assert chat_models == [None]
+
+
+def test_run_skill_dict_explicit_mock_none_is_passed_as_chat_model(
+    monkeypatch,
+    tmp_path,
+    mock_skill_resolver,
+) -> None:
+    skill_root = _write_v030_root(tmp_path)
+    resolved_model = object()
+    model_resolver = SimpleNamespace(resolve=lambda **_kwargs: resolved_model)
+    chat_models: list[object] = []
+
+    monkeypatch.setattr(
+        "graph_agent.core.compiler.compile_skill",
+        lambda *_args, **_kwargs: object(),
+    )
+
+    def fake_assemble_graph(*_args, chat_model=None, **_kwargs):
+        chat_models.append(chat_model)
+        return RecordingAssembler()
+
+    monkeypatch.setattr("graph_agent.core.graph_assembler.assemble_graph", fake_assemble_graph)
+
+    runner_module._run_skill_dict(
+        skill_root,
+        callbacks=[],
+        cleanup_checkpoints_on_finish=False,
+        skill_resolver=mock_skill_resolver,
+        model_resolver=model_resolver,
         mock_llm=None,
     )
 
-    assert harness.bindings_seen == [True]
-    assert not hasattr(harness._resolver, "_graph_agent_predict_mock_strategy")
+    assert chat_models == [None]
 
 
-def test_run_skill_dict_restores_existing_predict_binding(monkeypatch, tmp_path) -> None:
-    skill = tmp_path / "SKILL.md"
-    skill.write_text("---\nname: test\n---\n", encoding="utf-8")
-    harness = RecordingHarness()
-    existing = HeuristicStubStrategy()
-    harness._resolver._graph_agent_predict_mock_strategy = existing
-    monkeypatch.setattr(runner_module, "load_workflow_from_md", lambda *_args, **_kwargs: harness)
-    runner_module.clear_cache()
+def test_run_skill_dict_uses_model_resolver_when_mock_llm_omitted(
+    monkeypatch, tmp_path, mock_skill_resolver
+) -> None:
+    skill_root = _write_v030_root(tmp_path)
+    resolved_model = object()
+    model_resolver = SimpleNamespace(resolve=lambda **_kwargs: resolved_model)
+    chat_models: list[object] = []
 
-    runner_module._run_skill_dict(
-        skill,
-        callbacks=[],
-        cleanup_checkpoints_on_finish=False,
-        mock_llm={"draft": {"text": "manual"}},
+    monkeypatch.setattr(
+        "graph_agent.core.compiler.compile_skill",
+        lambda *_args, **_kwargs: object(),
     )
 
-    assert harness.bindings_seen == [True]
-    assert harness._resolver._graph_agent_predict_mock_strategy is existing
+    def fake_assemble_graph(*_args, chat_model=None, **_kwargs):
+        chat_models.append(chat_model)
+        return RecordingAssembler()
+
+    monkeypatch.setattr("graph_agent.core.graph_assembler.assemble_graph", fake_assemble_graph)
+
+    runner_module._run_skill_dict(
+        skill_root,
+        callbacks=[],
+        cleanup_checkpoints_on_finish=False,
+        skill_resolver=mock_skill_resolver,
+        model_resolver=model_resolver,
+    )
+
+    assert chat_models == [resolved_model]

@@ -11,7 +11,9 @@ from __future__ import annotations
 from graph_agent.tools.builtin.clarification_tool import ask_clarification_tool
 from graph_agent.tools.builtin.context_access import query_working_memory, read_artifact
 from graph_agent.tools.builtin.parallel_map import parallel_map
+from graph_agent.tools.builtin.read_example import read_declared_example
 from graph_agent.tools.builtin.read_file import make_read_file_tool
+from graph_agent.tools.builtin.read_reference import read_declared_reference
 
 __all__ = [
     "ask_clarification_tool",
@@ -19,4 +21,6 @@ __all__ = [
     "make_read_file_tool",
     "query_working_memory",
     "read_artifact",
+    "read_declared_example",
+    "read_declared_reference",
 ]

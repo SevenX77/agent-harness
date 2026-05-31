@@ -34,7 +34,7 @@ from langgraph.types import Command, interrupt
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
-from graph_agent.core.exceptions import GraphAgentError
+from graph_agent.core.exceptions import ErrorPayload, GraphAgentError, make_error_payload
 from graph_agent.core.io_manager import IOManager
 from graph_agent.core.schema_engine import SchemaEngine, SchemaObject
 from graph_agent.core.state import BusinessData, FrameworkState, StateManager, WorkflowState
@@ -118,7 +118,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         if output_schema is None:
             return _schema_gate_reject(
                 phase_name=phase_name,
-                error_code="[F-v3-agent-output-schema-missing]",
+                code="[F-v3-agent-output-schema-missing]",
                 errors=("finish_task reached schema gate without compiled io.outputs.",),
             )
 
@@ -127,7 +127,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             if not isinstance(parsed, dict):
                 return _schema_gate_reject(
                     phase_name=phase_name,
-                    error_code="[F-v3-agent-output-schema-invalid]",
+                    code="[F-v3-agent-output-schema-invalid]",
                     errors=(
                         "business_data_md must decode to a JSON object for schema validation.",
                     ),
@@ -145,24 +145,25 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             )
             return _schema_gate_reject(
                 phase_name=phase_name,
-                error_code="[F-v3-agent-output-schema-invalid]",
+                code="[F-v3-agent-output-schema-invalid]",
                 errors=(f"invalid compiled io.outputs schema: {exc}",),
             )
         if not validation.ok:
             return _schema_gate_reject(
                 phase_name=phase_name,
-                error_code="[F-v3-agent-output-schema-invalid]",
+                code="[F-v3-agent-output-schema-invalid]",
                 errors=validation.errors,
             )
 
         parsed_output = validation.parsed or dict(output)
         return FinishTaskSchemaGateResult(
-            accepted=True,
-            error_code=None,
-            tool_message=None,
-            final_write=parsed_output,
-            output=parsed_output,
-            errors=(),
+            True,
+            None,
+            None,
+            None,
+            parsed_output,
+            parsed_output,
+            (),
         )
 
     @staticmethod
@@ -176,7 +177,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
     ) -> ValidatorRuntimeResult:
         """Run the PR β validator contract after schema validation passes."""
         if validator is None:
-            return ValidatorRuntimeResult(accepted=True, error_code=None, feedback=None)
+            return ValidatorRuntimeResult(True, None, None, None)
 
         try:
             result = validator(output, state_slice, phase_name=phase_name, **kwargs)
@@ -188,7 +189,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             )
 
         if result is None:
-            return ValidatorRuntimeResult(accepted=True, error_code=None, feedback=None)
+            return ValidatorRuntimeResult(True, None, None, None)
 
         feedback = json.dumps(result, ensure_ascii=False, sort_keys=True, default=str)
         logger.warning("validator rejected: phase=%s feedback=%s", phase_name, feedback)
@@ -515,11 +516,10 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         if schema is None:
             # Phase 2 A1 contract: any phase reaching CognitiveFlowMiddleware's
             # finish_task validation must already have a compiled output_schema.
-            # The compile-time gate in skill_validator.py rejects validator-
-            # bearing LLMPhases without schemas; getting here means either an
-            # upstream wiring bug (the middleware was mounted on a schema-less
-            # phase) or a phase that bypassed compile validation entirely.
-            # Either way we must fail loud, never silently mark "skipped".
+            # Getting here means either an upstream wiring bug (the middleware
+            # was mounted on a schema-less phase) or a phase that bypassed
+            # compile validation entirely. Either way we must fail loud, never
+            # silently mark "skipped".
             logger.error(
                 "phase=%s action=cognitive_flow_finish_task decision=reject "
                 "reason=missing_output_schema",
@@ -547,11 +547,7 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         # declared ``output_schema`` as a dotted Python path — using the
         # already-imported ``type[BaseModel]`` directly.
         try:
-            if isinstance(schema, SchemaObject):
-                model = self._schema_engine.get_pydantic_model(schema)
-            else:
-                model = schema
-            blocks = parse_md(business_data_md, model)
+            model, blocks = self._parse_finish_markdown(schema, business_data_md)
         except Exception as exc:  # noqa: BLE001 - returned to LLM as retry feedback
             return _FinishValidation(
                 ok=False,
@@ -572,28 +568,11 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
         parsed_items: list[dict[str, Any]] = []
         errors: list[str] = []
         for block in blocks:
-            item_id = block.meta.id or "unknown"
-            if isinstance(schema, SchemaObject):
-                result = self._schema_engine.validate(block.data, schema)
-                if result.ok:
-                    parsed_items.append(result.parsed or dict(block.data))
-                else:
-                    errors.extend(f"item {item_id}: {error}" for error in result.errors)
+            item, item_errors = self._validate_finish_block(block, schema, model)
+            if item_errors:
+                errors.extend(item_errors)
                 continue
-            # Pydantic class path: validate the per-item dict directly
-            # against the imported BaseModel and surface any
-            # ValidationError as a per-item, per-field message so the LLM
-            # can correct the markdown on retry.
-            try:
-                instance = model.model_validate(block.data)
-            except PydanticValidationError as exc:
-                for detail in exc.errors():
-                    loc_parts = detail.get("loc", ())
-                    loc = ".".join(str(part) for part in loc_parts) or "__root__"
-                    msg = str(detail.get("msg", "validation error"))
-                    errors.append(f"item {item_id}: {loc}: {msg}")
-                continue
-            parsed_items.append(instance.model_dump())
+            parsed_items.append(item)
 
         if errors:
             return _FinishValidation(
@@ -621,6 +600,39 @@ class CognitiveFlowMiddleware(AgentMiddleware[AgentState[Any]]):
             schema_validation="passed",
             parsed_items=parsed_items,
         )
+
+    def _parse_finish_markdown(
+        self,
+        schema: SchemaObject | type[BaseModel],
+        business_data_md: str,
+    ) -> tuple[type[BaseModel], list[Any]]:
+        if isinstance(schema, SchemaObject):
+            model = self._schema_engine.get_pydantic_model(schema)
+        else:
+            model = schema
+        return model, parse_md(business_data_md, model)
+
+    def _validate_finish_block(
+        self,
+        block: Any,
+        schema: SchemaObject | type[BaseModel],
+        model: type[BaseModel],
+    ) -> tuple[dict[str, Any], list[str]]:
+        item_id = block.meta.id or "unknown"
+        if isinstance(schema, SchemaObject):
+            result = self._schema_engine.validate(block.data, schema)
+            if result.ok:
+                return result.parsed or dict(block.data), []
+            return {}, [f"item {item_id}: {error}" for error in result.errors]
+
+        # Pydantic class path: validate the per-item dict directly
+        # against the imported BaseModel and surface any ValidationError
+        # as a per-item, per-field message so the LLM can correct it.
+        try:
+            instance = model.model_validate(block.data)
+        except PydanticValidationError as exc:
+            return {}, _finish_block_validation_errors(item_id, exc)
+        return instance.model_dump(), []
 
     def _run_business_validator(self, parsed_items: list[dict[str, Any]]) -> list[str]:
         """Phase 2 A2 v3: invoke the optional business validator and
@@ -811,6 +823,7 @@ class FinishTaskSchemaGateResult:
 
     accepted: bool
     error_code: str | None
+    payload: ErrorPayload | None
     tool_message: ToolMessage | None
     final_write: dict[str, Any] | None
     output: dict[str, Any] | None = None
@@ -823,6 +836,7 @@ class ValidatorRuntimeResult:
 
     accepted: bool
     error_code: str | None
+    payload: ErrorPayload | None
     feedback: str | None
     tool_message: ToolMessage | None = None
 
@@ -858,6 +872,16 @@ def _unattended_clarification_answer(question: str) -> str:
     )
 
 
+def _finish_block_validation_errors(item_id: str, exc: PydanticValidationError) -> list[str]:
+    errors: list[str] = []
+    for detail in exc.errors():
+        loc_parts = detail.get("loc", ())
+        loc = ".".join(str(part) for part in loc_parts) or "__root__"
+        msg = str(detail.get("msg", "validation error"))
+        errors.append(f"item {item_id}: {loc}: {msg}")
+    return errors
+
+
 def _has_strict_output_schema(output_schema: dict[str, Any] | SchemaObject | None) -> bool:
     if output_schema is None:
         return False
@@ -875,7 +899,11 @@ def _finish_task_accept_response(
     final_write: dict[str, Any],
 ) -> dict[str, Any]:
     response_state: dict[str, Any] = {"flow": flow, "messages": messages}
-    response_state["data"] = {phase_name: final_write}
+    response_state["data"] = {
+        "inputs": {},
+        "phase_outputs": {phase_name: final_write},
+        "scratch": {},
+    }
     return response_state
 
 
@@ -891,22 +919,24 @@ def _coerce_output_schema(
 def _schema_gate_reject(
     *,
     phase_name: str,
-    error_code: str,
+    code: str,
     errors: tuple[str, ...],
 ) -> FinishTaskSchemaGateResult:
-    content = "\n".join((error_code, f"phase={phase_name}", *errors))
+    content = "\n".join((code, f"phase={phase_name}", *errors))
+    payload = make_error_payload(code, content, phase_id=phase_name)
     return FinishTaskSchemaGateResult(
-        accepted=False,
-        error_code=error_code,
-        tool_message=ToolMessage(
+        False,
+        code,
+        payload,
+        ToolMessage(
             content=content,
             name=CognitiveFlowMiddleware._FINISH_TOOL,
             tool_call_id="schema-gate",
             status="error",
         ),
-        final_write=None,
-        output=None,
-        errors=errors,
+        None,
+        None,
+        errors,
     )
 
 
@@ -917,11 +947,13 @@ def _validator_runtime_reject(
 ) -> ValidatorRuntimeResult:
     error_code = "[F-v3-agent-validator-failed]"
     content = "\n".join((error_code, f"phase={phase_name}", feedback))
+    payload = make_error_payload(error_code, content, phase_id=phase_name)
     return ValidatorRuntimeResult(
-        accepted=False,
-        error_code=error_code,
-        feedback=content,
-        tool_message=ToolMessage(
+        False,
+        error_code,
+        payload,
+        content,
+        ToolMessage(
             content=content,
             name=CognitiveFlowMiddleware._FINISH_TOOL,
             tool_call_id="validator-runtime",

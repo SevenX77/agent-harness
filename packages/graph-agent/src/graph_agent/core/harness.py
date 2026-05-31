@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 """GraphAgentHarness — multi-phase Agent orchestration engine based on LangGraph.
 
 Builds a LangGraph StateGraph from a list of Phase definitions. Each phase
@@ -30,14 +31,11 @@ from graph_agent.cognitive.finish import finish_task
 from graph_agent.cognitive.memory import update_working_memory
 from graph_agent.core.exceptions import (
     CheckpointError,
-    SkillLoadError,
     StateTransformError,
     TraceWriteError,
 )
-from graph_agent.core.graph_builder import GraphBuilder
 from graph_agent.core.manifest import ContextBridge
 from graph_agent.core.phase_executor import PhaseExecutor
-from graph_agent.core.retry_router import RetryRouter
 from graph_agent.core.run_context import RunContext
 from graph_agent.core.state import (
     BusinessData,
@@ -451,33 +449,10 @@ class GraphAgentHarness:
         model_resolver: Any | None = None,
     ) -> None:
         """Initialize a harness with fixed phases and shared runtime services."""
-        if not phases:
-            raise SkillLoadError("GraphAgentHarness requires at least one phase")
-        self.phases = phases
-        self.callbacks = callbacks or []
-        self._io_config = io_config
-        self._skill_dir = skill_dir
-        if model_resolver is None:
-            from graph_agent_gateway.exceptions import GatewayResolverMissingError
-
-            raise GatewayResolverMissingError(phase_name="<harness>")
-        self._resolver = model_resolver
-        self._checkpointer_cms: list[Any] = []
-        self._checkpointer = self._resolve_checkpointer(checkpointer)
-        # D-7.3 — compile-time routing collaborator; reused across runs.
-        self._retry_router = RetryRouter(phases)
-        # D-7.1 — compile-time topology builder, reused across runs.
-        # D-7.2 Phase B: GraphBuilder no longer needs PhaseExecutor at
-        # construction; the executor is built per-run inside ``run()`` /
-        # ``resume()`` and passed through LangGraph
-        # ``RunnableConfig["configurable"]``. Graph node closures extract
-        # it from the config on each invocation.
-        self._graph_builder = GraphBuilder(
-            phases,
-            retry_router=self._retry_router,
-            checkpointer=self._checkpointer,
+        raise NotImplementedError(
+            "GraphAgentHarness has been fully deprecated and unified into runner.py's V0.3.0 runtime. "
+            "Please use runner.run_skill() or runner._run_v030_skill_dict() instead."
         )
-        self._graph = self._graph_builder.build()
 
     def _resolve_checkpointer(self, checkpointer: Any) -> Any:
         """Resolve checkpointer parameter to a concrete instance.

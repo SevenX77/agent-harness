@@ -8,6 +8,7 @@ import pytest
 from graph_agent.core.exceptions import GraphAgentFatalError
 from graph_agent.core.graph_assembler import _invoke_subagent_once_t23, _SubagentRuntime
 from graph_agent.core.io_manager import IOManager
+from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
 from graph_agent.middleware.cognitive_flow import CognitiveFlowMiddleware
 from graph_agent.runtime.state_mapper import PhaseWrapper, StateMapper
 
@@ -18,96 +19,80 @@ class _Subagent:
 
 class _RecordingGraph:
     def __init__(self) -> None:
-        self.states: list[dict[str, Any]] = []
+        self.states: list[WorkflowState] = []
 
-    def invoke(self, state: dict[str, Any], config: dict[str, Any] | None = None) -> dict[str, Any]:
+    def invoke(self, state: WorkflowState, config: dict[str, Any] | None = None) -> WorkflowState:
         del config
         self.states.append(state)
-        child_inputs = dict(state["data"]["inputs"])
-        return {
-            "data": {
-                "inputs": child_inputs,
-                "phase_outputs": {"child": {"answer": child_inputs.get("scene_text", "")}},
-                "scratch": {},
-            },
-            "flow": state.get("flow", {}),
-        }
+        child_inputs = state["data"].model_dump()
+        return WorkflowState(
+            data=BusinessData.model_validate(child_inputs),
+            flow=state["flow"],
+            messages=[],
+        )
 
 
 def test_gamma2_parent_data_and_messages_do_not_leak_into_subagent_child() -> None:
     graph = _RecordingGraph()
     runtime = _SubagentRuntime(subagent=_Subagent(), graph=graph)
 
+    parent_state = WorkflowState(
+        data=BusinessData.model_validate({
+            "root_topic": "private",
+            "secret_result": "do-not-leak",
+        }),
+        flow=FrameworkState(current_phase="planner"),
+        messages=["parent-message"],
+    )
+
     _invoke_subagent_once_t23(
         runtime,
-        {
-            "data": {
-                "inputs": {"root_topic": "private"},
-                "phase_outputs": {"planner": {"secret_result": "do-not-leak"}},
-                "scratch": {"chain_of_thought": "hidden"},
-            },
-            "flow": {"parent_only": True},
-            "messages": ["parent-message"],
-            "run_id": "parent-run",
-        },
+        parent_state,
         {"scene_text": "hello"},
     )
 
     child_state = graph.states[0]
     assert child_state["messages"] == []
-    assert child_state["data"] == {
-        "inputs": {"scene_text": "hello"},
-        "phase_outputs": {},
-        "scratch": {},
+    assert child_state["data"].model_dump() == {
+        "scene_text": "hello",
     }
 
 
 def test_gamma2_input_funnel_drops_unknown_fields_into_normalized_inputs() -> None:
     mapper = StateMapper(
-        input_schema={"type": "object", "properties": {"topic": {"type": "string"}}},
+        input_schema={"type": "object", "properties": {"topic": {"type": "string"}, "also": {"type": "string"}}},
         output_schema={"type": "object", "properties": {"answer": {"type": "string"}}},
     )
 
-    phase_state = mapper.build_phase_input(
-        {
-            "data": {
-                "inputs": {"topic": "A", "undeclared": "drop-me"},
-                "phase_outputs": {"upstream": {"also": "not implicit"}},
-                "scratch": {"temp": "hidden"},
-            },
-            "flow": {},
-            "messages": ["parent"],
-            "run_id": "r1",
-        }
+    state = WorkflowState(
+        data=BusinessData.model_validate({
+            "topic": "A",
+            "undeclared": "drop-me",
+            "also": "not implicit",
+        }),
+        flow=FrameworkState(current_phase="upstream"),
+        messages=["parent"],
     )
 
-    assert phase_state["data"] == {
-        "inputs": {"topic": "A"},
-        "phase_outputs": {"upstream": {"also": "not implicit"}},
-        "scratch": {},
-    }
+    phase_state = mapper.build_phase_input(state)
+
+    assert phase_state["data"].model_dump() == {"topic": "A", "also": "not implicit"}
 
 
 def test_gamma2_phase_wrapper_rejects_writes_to_read_only_inputs() -> None:
     mapper = StateMapper(
         input_schema={"type": "object", "properties": {"topic": {"type": "string"}}},
-        output_schema=None,
+        output_schema={"type": "object", "properties": {"answer": {}}},
     )
 
-    def node(state: dict[str, Any]) -> dict[str, Any]:
-        del state
-        return {"data": {"inputs": {"topic": "mutated"}}}
+    def node(state: WorkflowState) -> dict[str, Any]:
+        return {"data": {"extra": "undeclared"}}
 
     wrapped = PhaseWrapper(mapper).wrap(node)
+    state = WorkflowState(data=BusinessData(topic="A"), flow=FrameworkState(), messages=[])
 
     with pytest.raises(GraphAgentFatalError) as exc_info:
-        wrapped(
-            {
-                "data": {"inputs": {"topic": "A"}, "phase_outputs": {}, "scratch": {}},
-                "flow": {},
-                "messages": [],
-            }
-        )
+        wrapped(state)
     assert exc_info.value.payload.code == "[F-v3-runtime-state-mapping-failed]"
 
 
@@ -118,17 +103,13 @@ def test_gamma2_finish_task_acceptance_writes_phase_outputs_not_flat_data() -> N
         tool_name="finish_task",
         tool_result={"ok": True, "data": {"items": [{"title": "Scene plan"}]}},
         output_schema=None,
-        flow={},
+        flow=FrameworkState(),
         messages=[],
         critic_metrics={},
     )
 
     assert result is not None
-    assert result["data"] == {
-        "inputs": {},
-        "phase_outputs": {"segment": {"items": [{"title": "Scene plan"}]}},
-        "scratch": {},
-    }
+    assert result["data"]["phase_outputs"]["segment"] == {"items": [{"title": "Scene plan"}]}
 
 
 def test_gamma2_grep_guard_rejects_flat_state_and_parent_merge_residue() -> None:

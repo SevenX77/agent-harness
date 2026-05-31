@@ -8,10 +8,14 @@ import {
   inferProviderKind,
   inferProviderType,
   moveProviderInRole,
+  modelGroupsReferenceMissingCredentialProviders,
   notableProviderKeyForDraft,
+  officialProviderProgressToastMessage,
   officialProviderTestSummary,
   officialProviderDrafts,
   providerDraftForAction,
+  isStaleRouteReferenceError,
+  refreshLoadedLlmRolesProjection,
   providerTestParamsFingerprint,
   providerTestParamsMatch,
   removeProviderFromRole,
@@ -89,7 +93,7 @@ const rolesData: RolesData = {
   },
   roles: {
     copilot_chat: {
-      model_fallback: true,
+      model_fallback_enabled: true,
       active_model: 'CL46T',
       models: {
         CL46T: { providers: ['OC_CL_ANT', 'WS_LLM'], temperature: 0.7 },
@@ -97,7 +101,7 @@ const rolesData: RolesData = {
       },
     },
     deerflow_default: {
-      model_fallback: true,
+      model_fallback_enabled: true,
       active_model: 'CL46T',
       models: {
         CL46T: { providers: ['OC_CL_ANT'], temperature: 0.7 },
@@ -167,6 +171,147 @@ describe('draftsFromCredentials', () => {
       providers: [{ id: 'TEST', name: 'Test', api_key: '' }],
     })
     expect(drafts[0].provider_type).toBe('openai_compatible')
+  })
+})
+
+describe('refreshLoadedLlmRolesProjection', () => {
+  it('refreshes loaded roles and model groups after credential route changes', async () => {
+    const nextRoles: RolesData = {
+      ...rolesData,
+      providers: {},
+      models: {},
+    }
+    const nextModelGroups: ModelGroup[] = [
+      {
+        canonical_id: 'gpt-5',
+        display_name: 'GPT-5',
+        provider_models: [],
+        status_summary: { ready: 0, untested: 0, cooling_down: 0, needs_setup: 0, off: 0 },
+        capability_summary: {
+          capability_known_count: 0,
+          thinking: 'unknown',
+          tools: 'unknown',
+          structured_output: 'unknown',
+        },
+      },
+    ]
+    const setRolesData = vi.fn()
+    const setModelGroups = vi.fn()
+    const setRolesError = vi.fn()
+
+    await refreshLoadedLlmRolesProjection({
+      rolesLoaded: true,
+      loadRoles: vi.fn().mockResolvedValue(nextRoles),
+      loadModelGroups: vi.fn().mockResolvedValue(nextModelGroups),
+      setRolesData,
+      setModelGroups,
+      setRolesError,
+    })
+
+    expect(setRolesData).toHaveBeenCalledWith(nextRoles)
+    expect(setModelGroups).toHaveBeenCalledWith(nextModelGroups)
+    expect(setRolesError).toHaveBeenCalledWith(null)
+  })
+
+  it('does not fetch roles projection when LLM Roles has not been loaded', async () => {
+    const loadRoles = vi.fn().mockResolvedValue(rolesData)
+    const loadModelGroups = vi.fn().mockResolvedValue([])
+
+    await refreshLoadedLlmRolesProjection({
+      rolesLoaded: false,
+      loadRoles,
+      loadModelGroups,
+      setRolesData: vi.fn(),
+      setModelGroups: vi.fn(),
+      setRolesError: vi.fn(),
+    })
+
+    expect(loadRoles).not.toHaveBeenCalled()
+    expect(loadModelGroups).not.toHaveBeenCalled()
+  })
+})
+
+describe('isStaleRouteReferenceError', () => {
+  it('recognizes backend unknown route validation as recoverable stale state', () => {
+    expect(isStaleRouteReferenceError({
+      message: 'Request failed with status code 400',
+      response: {
+        status: 400,
+        data: {
+          detail: 'Validation failed: role Analyst model_groups[1].provider_models[1] references unknown route custom-qiniu:deepseek',
+        },
+      },
+    })).toBe(true)
+  })
+
+  it('does not treat unrelated validation errors as stale route state', () => {
+    expect(isStaleRouteReferenceError({
+      message: 'Request failed with status code 400',
+      response: {
+        status: 400,
+        data: { detail: 'Validation failed: role name is required' },
+      },
+    })).toBe(false)
+  })
+})
+
+describe('modelGroupsReferenceMissingCredentialProviders', () => {
+  it('detects stale available models from a deleted provider endpoint', () => {
+    expect(modelGroupsReferenceMissingCredentialProviders([
+      {
+        canonical_id: 'aion-1',
+        display_name: 'Aion 1.0',
+        provider_models: [
+          {
+            route_id: 'openrouter:aion-1',
+            endpoint_id: 'openrouter',
+            provider_label: 'OpenRouter',
+            provider_kind: 'third_party',
+            provider_model_id: 'aion-1',
+            ui_state: 'untested',
+            capability_state: 'unknown',
+            capabilities: {},
+          },
+        ],
+        status_summary: { ready: 0, untested: 1, cooling_down: 0, needs_setup: 0, off: 0 },
+        capability_summary: {
+          capability_known_count: 0,
+          thinking: 'unknown',
+          tools: 'unknown',
+          structured_output: 'unknown',
+        },
+      },
+    ], {
+      providers: credentials.providers.filter((provider) => provider.id !== 'openrouter'),
+    })).toBe(true)
+  })
+
+  it('keeps available models when every endpoint still exists', () => {
+    expect(modelGroupsReferenceMissingCredentialProviders([
+      {
+        canonical_id: 'deepseek-v4-flash',
+        display_name: 'DeepSeek V4 Flash',
+        provider_models: [
+          {
+            route_id: 'DS:deepseek-v4-flash',
+            endpoint_id: 'DS',
+            provider_label: 'DeepSeek Official',
+            provider_kind: 'official',
+            provider_model_id: 'deepseek-v4-flash',
+            ui_state: 'ready',
+            capability_state: 'known',
+            capabilities: {},
+          },
+        ],
+        status_summary: { ready: 1, untested: 0, cooling_down: 0, needs_setup: 0, off: 0 },
+        capability_summary: {
+          capability_known_count: 1,
+          thinking: 'supported',
+          tools: 'unknown',
+          structured_output: 'unknown',
+        },
+      },
+    ], credentials)).toBe(false)
   })
 })
 
@@ -431,10 +576,96 @@ describe('Add Provider flow helpers', () => {
       { id: 'gpt-image-1', status: 'unverified_manual' },
     ])
   })
+
+  it('keeps live probe evidence when an official catalog refresh returns the same model as unverified', () => {
+    const draft = providerDraftForAction([], 'anthropic-official')
+    expect(draft).not.toBeNull()
+    const current: CredentialsState = {
+      providers: [
+        {
+          id: 'anthropic-official',
+          name: 'Anthropic Official',
+          api_key: 'sk-live',
+          base_url: 'https://api.anthropic.com',
+          provider_type: 'anthropic_compatible',
+          last_test_status: 'ok',
+          last_test_at: '2026-05-30T10:00:00Z',
+          last_test_message: 'Connected. Model seen: claude-opus-4-6.',
+          available_models: [
+            {
+              id: 'claude-opus-4-6',
+              route_id: 'anthropic-official:claude-opus-4.6',
+              status: 'verified',
+              verified_profile_count: 2,
+              capabilities: { thinking: true },
+            },
+            {
+              id: 'claude-old-failed',
+              route_id: 'anthropic-official:claude-old-failed',
+              status: 'failed',
+              last_probe_message: 'Provider returned HTTP 404 for this model.',
+            },
+          ],
+        },
+      ],
+    }
+
+    const next = upsertProviderModelsListResponse(current, draft!, {
+      status: 'ok',
+      message: 'Provider catalog reachable.',
+      available_models: [
+        {
+          id: 'claude-opus-4-6',
+          route_id: 'anthropic-official:claude-opus-4.6',
+          status: 'unverified_manual',
+          verified_profile_count: 0,
+          capabilities: { model_type: 'language_reasoning' },
+        },
+        {
+          id: 'claude-old-failed',
+          route_id: 'anthropic-official:claude-old-failed',
+          status: 'unverified_manual',
+        },
+      ],
+      available_sdks: ['anthropic_compatible'],
+    })
+
+    expect(next.providers[0].available_models).toEqual([
+      {
+        id: 'claude-opus-4-6',
+        route_id: 'anthropic-official:claude-opus-4.6',
+        status: 'verified',
+        verified_profile_count: 2,
+        capabilities: { model_type: 'language_reasoning', thinking: true },
+      },
+      {
+        id: 'claude-old-failed',
+        route_id: 'anthropic-official:claude-old-failed',
+        status: 'failed',
+        last_probe_message: 'Provider returned HTTP 404 for this model.',
+      },
+    ])
+  })
 })
 
 describe('SettingsPageContent (api_keys)', () => {
-  it('summarizes official provider Test results by verified route status, not route count', () => {
+  it('describes official provider catalog progress without generation-probe wording', () => {
+    expect(officialProviderProgressToastMessage('Anthropic Official', {
+      job_id: 'job-1',
+      endpoint_id: 'anthropic-official',
+      status: 'running',
+      total_model_count: 8,
+      tested_model_count: 0,
+      verified_route_count: 0,
+      failed_model_count: 0,
+      catalog_only_count: 0,
+      message: 'Reading provider catalog.',
+      available_models: [],
+      available_sdks: ['anthropic_compatible'],
+    })).toBe('Loading Anthropic Official route candidates (8 listed)...')
+  })
+
+  it('summarizes official provider Test results as catalog hydration, not generation probing', () => {
     expect(officialProviderTestSummary([
       { id: 'claude-haiku', status: 'verified' },
       { id: 'claude-opus-4-1', status: 'unverified_manual' },
@@ -443,7 +674,7 @@ describe('SettingsPageContent (api_keys)', () => {
       { id: 'claude-sonnet', status: 'failed' },
     ])).toEqual({
       kind: 'success',
-      message: 'Test complete (2 verified routes, 3 not verified)',
+      message: 'Catalog loaded (2 already verified, 3 not generation-probe verified)',
     })
   })
 
@@ -511,9 +742,11 @@ describe('SettingsPageContent (api_keys)', () => {
 
     expect(html).toContain('data-copilot-role-card="true"')
     expect(html.match(/data-copilot-role-card="true"/g)).toHaveLength(2)
+    expect(html.match(/data-copilot-role-source="built_in"/g)).toHaveLength(2)
     expect(html).toContain('data-copilot-model-name="true"')
     expect(html).toContain('data-variant="default"')
     expect(html).toContain('Test</button>')
+    expect(html).not.toContain('data-copilot-role-delete-trigger="true"')
   })
 
   it('renders provider skeletons while credentials are loading', () => {
@@ -628,9 +861,9 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(htmlWithThirdPartyOutcome).toContain('Connected')
   })
 
-  it('renders a Delete button for each user-owned provider', () => {
+  it('renders a Delete button/action menu for each user-owned provider', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
-    const matches = html.match(/aria-label="Delete provider"/g) ?? []
+    const matches = html.match(/aria-label="More actions for [^"]*"/g) ?? []
     expect(matches).toHaveLength(3)
   })
 })
@@ -638,8 +871,8 @@ describe('SettingsPageContent (api_keys)', () => {
 describe('LLM Roles helpers', () => {
   it('toggleModelFallback flips the flag', () => {
     const next = toggleModelFallback(rolesData, 'copilot_chat', false)
-    expect(next.roles.copilot_chat.model_fallback).toBe(false)
-    expect(rolesData.roles.copilot_chat.model_fallback).toBe(true)
+    expect(next.roles.copilot_chat.model_fallback_enabled).toBe(false)
+    expect(rolesData.roles.copilot_chat.model_fallback_enabled).toBe(true)
   })
 
   it('updateActiveModel swaps the active model', () => {

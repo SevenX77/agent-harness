@@ -164,7 +164,6 @@ function roleEntryFromBundle(bundle: ModelBundleEntry, bundleId: string): RoleEn
   const modelGroups = modelGroupsFromBundle(bundle, bundleId)
   return {
     role_kind: "graph_agent",
-    model_fallback: bundle.model_fallback_enabled ?? true,
     model_fallback_enabled: bundle.model_fallback_enabled ?? true,
     intent: bundle.intent ?? { provider_preference: "manual_order", thinking: "off" },
     active_model: modelGroups[0]?.canonical_id ?? "",
@@ -194,7 +193,7 @@ function bundleFromRoleEntry(
     ...bundle,
     model_profile_id: bundle.model_profile_id || bundleId,
     canonical_id: bundle.canonical_id || `bundle:${bundleId}`,
-    model_fallback_enabled: role.model_fallback_enabled ?? role.model_fallback,
+    model_fallback_enabled: role.model_fallback_enabled,
     intent: role.intent ?? bundle.intent ?? { provider_preference: "manual_order", thinking: "off" },
     model_groups: modelGroups,
     lint_requirements: role.lint_requirements ?? bundle.lint_requirements ?? {},

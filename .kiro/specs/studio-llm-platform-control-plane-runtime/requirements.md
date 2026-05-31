@@ -106,3 +106,23 @@ The first implementation slice must be compatible with the current Studio and Ga
 4. If CredentialProvider `get(ref)` fails, returns an empty secret, or reports a revoked credential, the system shall surface a route- or credential-scoped error that can participate in the Gateway fallback chain before failing the Copilot request.
 5. The system shall keep the inline `api_key` path as a compatibility fallback until all persisted Studio snapshots and tests migrate to no-secret snapshots.
 6. Tests shall cover credential-ref-only Copilot success, missing-secret fallback behavior, session invalidation on fingerprint change, and secret-free logs/events.
+
+### Requirement 9: Draft Evidence Library And Route Testing Semantics
+
+**Objective:** As a Studio operator, I want draft discovery, provider tests, model probes, and role tests to produce durable evidence with clear trust states, so that route authoring is transparent without treating unverified suggestions as active runtime readiness.
+
+#### Acceptance Criteria
+
+1. When existing persisted role intent uses `official_first` or `ready_first`, the system shall migrate it to `manual_order` without reordering the user's `model_groups`, `provider_models`, or generated `fallback_chain`.
+2. When Studio frontend saves a Thinking preference from the LLM Roles UI, the system shall save `thinking: "preferred"` for an enabled switch and shall not save `thinking: "required"` from that UI path; backend/admin inputs may still use `required`.
+3. When a role or route has preferred Thinking but the route has unknown or unsupported Thinking capability, the system shall include a role-fit warning or downgrade and shall not block the route solely because the frontend set Thinking.
+4. When Role Test encounters an official route without a `VerifiedProfile`, the system shall probe that specific route/model through the official profile probe path, write successful profiles, capabilities, and probe attempts back to the active credentials record, and continue the same Role Test run.
+5. If the Role Test official profile probe fails, the system shall include the specific failure reason in the Role Test result for that route instead of asking the user to return to API Keys.
+6. When provider docs, model docs, provider model-list APIs, agent inferences, or probes discover route information, the system shall store it in a durable draft evidence library with source URL, model list observations, candidate methods, candidate capabilities, modality/type metadata, probe attempts, successful probes, failed probes, deprecated/stale evidence, and agent notes.
+7. Every evidence record shall carry a trust state from `doc-discovered`, `provider-list-observed`, `draft-inferred`, `probe-verified`, `probe-failed`, `deprecated`, or `stale`, and new failures shall append failed or deprecated evidence with reason, timestamp, and scope rather than overwriting older successful evidence.
+8. When API Keys provider-level Test or Get Models runs, it shall validate endpoint/base URL/API key connectivity and model-list availability where supported, compare observations with draft evidence, record diffs, and hydrate draft-inferred route candidates without generation-probing every model.
+9. When a provider does not expose a model-list API, a successful provider-level test shall only prove key/base URL connectivity; route suggestions shall come from draft evidence until a single-model generation probe verifies a route.
+10. When a single-model test runs, the system shall execute a generation probe for that model and write both active credentials readiness and draft evidence records for success or failure.
+11. When Studio renders API Keys route tags and LLM Roles provider route tags, the system shall use a unified trust color semantic: green for live probe-verified active credentials, blue for draft/provider-list/doc inferred unverified candidates, and warning/destructive for failed or deprecated evidence with actionable reasons.
+12. When LLM Roles builds language fallback chains, the system shall only admit routes whose input and output modalities include `text`; multimodal, embedding, audio, video, translation, 3D, moderation, and interactions-agent records shall remain first-class provider capabilities in typed groups until dedicated role types exist.
+13. Route and model records shall expose `model_type` or `capability_family` metadata so UI eligibility and grouping do not depend on model-name heuristics.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pydantic import ValidationError
 
+from graph_agent_gateway.registry.contracts import CredentialDescriptor, CredentialProviderProtocol
 from graph_agent_gateway.registry.lint import lint_role_routes
 from graph_agent_gateway.registry.profile_selector import (
     ProfileSelectionError,
@@ -12,6 +13,7 @@ from graph_agent_gateway.registry.profile_selector import (
 from graph_agent_gateway.registry.schema import (
     CapabilityValue,
     EffectiveRuntimeSetting,
+    ProviderEndpoint,
     RegistrySnapshot,
     ResolvedRole,
     ResolvedRoute,
@@ -33,6 +35,7 @@ def resolve_role(
     role_name: str,
     *,
     route_override: str | None = None,
+    credential_provider: CredentialProviderProtocol | None = None,
 ) -> ResolvedRole:
     """Resolve one role to an ordered route chain without dynamic matching."""
     role = snapshot.roles.get(role_name)
@@ -59,9 +62,12 @@ def resolve_role(
         if endpoint is None:
             raise RegistryResolutionError(f"endpoint is not configured: {route.endpoint_id}")
         credential_ref = endpoint.credential_ref or f"endpoint:{endpoint.endpoint_id}"
+        credential_descriptor = _describe_credential(credential_provider, credential_ref)
         if (
             endpoint.api_key is None or not endpoint.api_key.get_secret_value()
-        ) and not endpoint.credential_ref:
+        ) and not endpoint.credential_ref and not (
+            credential_descriptor is not None and credential_descriptor.exists
+        ):
             raise RegistryResolutionError(f"endpoint has no credential: {route.endpoint_id}")
         try:
             selected_profile = select_verified_profile(route, entry.runtime_settings)
@@ -76,8 +82,10 @@ def resolve_role(
                 protocol=endpoint.protocol,
                 base_url=endpoint.base_url,
                 credential_ref=credential_ref,
-                api_key=endpoint.api_key,
-                credential_fingerprint=compute_credential_fingerprint(endpoint),
+                credential_fingerprint=_credential_fingerprint(
+                    endpoint,
+                    credential_descriptor,
+                ),
                 timeout_seconds=endpoint.timeout_seconds,
                 trust_env=endpoint.trust_env,
                 proxy_env=endpoint.proxy_env,
@@ -122,6 +130,27 @@ def resolve_role(
         source_profile_id=role.source_profile_id,
         source_profile_snapshot=role.source_profile_snapshot,
     )
+
+
+def _describe_credential(
+    credential_provider: CredentialProviderProtocol | None,
+    credential_ref: str,
+) -> CredentialDescriptor | None:
+    if credential_provider is None:
+        return None
+    try:
+        return credential_provider.describe(credential_ref)
+    except Exception:
+        return None
+
+
+def _credential_fingerprint(
+    endpoint: ProviderEndpoint,
+    credential_descriptor: CredentialDescriptor | None,
+) -> str:
+    if credential_descriptor is not None and credential_descriptor.fingerprint:
+        return credential_descriptor.fingerprint
+    return compute_credential_fingerprint(endpoint)
 
 
 def _effective_runtime_settings(

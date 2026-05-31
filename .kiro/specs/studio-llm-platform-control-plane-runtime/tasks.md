@@ -127,3 +127,54 @@ related_requirements: .kiro/specs/studio-llm-platform-control-plane-runtime/requ
 - [ ] 18. Add catalog-worthy promotion gate
   - Require schema validation, secret scrubbing, Gateway validation, probe evidence, and human diff approval.
   - _Requirements: 3.4, 5.4, 7.2_
+
+## Phase 6: Draft Evidence Library And Route Testing Semantics
+
+- [x] 19. Phase A - Define Requirement 9 schema and migration boundaries
+  - Add Requirement 9 acceptance criteria for manual role order, Thinking preferred UI semantics, in-place official profile probes, durable draft evidence, provider-level list-only tests, single-model generation probes, shared trust tag colors, and typed capability groups.
+  - Document draft evidence records: provider docs URL, model docs URL, model-list observations, candidate methods, candidate capabilities, modality/type metadata, probe attempts, successful probes, failed probes, deprecated/stale evidence, and agent notes.
+  - Document trust states: `doc-discovered`, `provider-list-observed`, `draft-inferred`, `probe-verified`, `probe-failed`, `deprecated`, and `stale`.
+  - Document that persisted `official_first` and `ready_first` migrate to `manual_order` without reordering existing `model_groups`, `provider_models`, or `fallback_chain`.
+  - _Requirements: 9.1, 9.6, 9.7, 9.13_
+
+- [x] 20. Phase B - Collapse provider ordering intent and save Thinking as preferred from Studio UI
+  - Remove `official_first` and `ready_first` from backend `RoleIntent` and `ModelGroupIntent` literals while coercing old persisted values to `manual_order` during schema load.
+  - Remove `official_first` and `ready_first` from frontend TypeScript role preference types and test fixtures.
+  - Remove materializer provider sorting by provider kind or readiness so user-authored provider order is exact.
+  - Change the LLM Roles `Field` + `Switch` Thinking control to display preferred semantics and save `thinking: "preferred"` when enabled.
+  - Keep backend `thinking: "required"` behavior for admin/non-UI inputs and retain warning/downgrade behavior for preferred Thinking.
+  - Run focused backend schema/materializer tests and focused frontend API/LLM Roles tests.
+  - _Requirements: 9.1, 9.2, 9.3_
+
+- [x] 21. Phase C - Probe missing official VerifiedProfile during Role Test
+  - Detect official provider routes in Role Test that have no matching `VerifiedProfile`.
+  - Run the official profile probe for only that route/model and active credential.
+  - On success, write `verified_profiles`, derived capabilities, and probe attempts to the active credential route and continue the same Role Test.
+  - On failure, add the specific scoped failure reason to the role test route result without redirecting the user to API Keys.
+  - Cover success and failure with backend router tests.
+  - _Requirements: 9.4, 9.5, 9.10_
+
+- [x] 22. Phase D - Add durable draft evidence schema and first write paths
+  - Extend the import-draft storage model into a durable evidence library while preserving compatibility for existing draft files.
+  - Add append-only evidence write helpers that never let new failed evidence overwrite older successful probe evidence.
+  - Write `probe-verified` and `probe-failed` evidence from API Keys single-model tests.
+  - Write `probe-verified` and `probe-failed` evidence from Role Test in-place official profile probes.
+  - Cover evidence append behavior and compatibility load/dump with backend tests.
+  - _Requirements: 9.6, 9.7, 9.10_
+
+- [ ] 23. Phase E - Split provider-level connectivity/model-list tests from generation probes
+  - Change provider-level Test/Get Models to verify endpoint/base URL/API key connectivity and fetch model lists where supported.
+  - Compare model-list observations with draft evidence, record diffs, and hydrate draft-inferred route candidates.
+  - Stop generation-probing all models from provider-level Test.
+  - For providers without a model-list API, treat HTTP 200 as connectivity only and rely on draft evidence for suggestions.
+  - Keep single-model Test as the only generation-probe path outside Role Test.
+  - Cover model-list providers and no-list providers with backend tests.
+  - _Requirements: 9.8, 9.9, 9.10_
+
+- [ ] 24. Phase F - Align API Keys and LLM Roles route presentation with evidence trust
+  - Use shared trust colors: green for active credential probe verified, blue for inferred/list/doc evidence without generation proof, and warning/destructive for failed or deprecated evidence.
+  - Add `model_type` or `capability_family` metadata to route/model DTOs used by API Keys and LLM Roles.
+  - Restrict LLM Roles language fallback candidates to routes with text input and text output modalities.
+  - Render multimodal, embedding, audio, video, translation, 3D, moderation, and interactions-agent records in typed provider capability groups rather than the text fallback chain.
+  - Follow `docs/development/FRONTEND_UI_SPEC.md`, use local `Tag`, `Tooltip`, `CatalogAccordion`, `Field`, and `Switch` wrappers where applicable, and manually verify changed API Keys and LLM Roles workflows in a browser or Tauri shell.
+  - _Requirements: 6.3, 6.4, 9.11, 9.12, 9.13_

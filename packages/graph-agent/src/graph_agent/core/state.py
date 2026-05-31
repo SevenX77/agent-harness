@@ -9,13 +9,70 @@ phase_executor, middleware) happens in T2-T6.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any, TypedDict, cast
 
-from langchain_core.messages import AnyMessage
-from langgraph.graph.message import add_messages
+from langchain_core.messages import (
+    AnyMessage,
+    BaseMessage,
+    RemoveMessage,
+    convert_to_messages,
+)
+from langgraph.channels.delta import DeltaChannel
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from pydantic import BaseModel, ConfigDict, Field
 
 StateMessage = AnyMessage
+
+
+def _messages_delta_reducer(
+    state: list[AnyMessage] | None, writes: list[list[AnyMessage]]
+) -> list[AnyMessage]:
+    """Batch reducer for use with `DeltaChannel` on the messages key.
+
+    Dedups by ID, tombstones via `RemoveMessage`, resets on
+    `REMOVE_ALL_MESSAGES`. IDs are expected to be pre-assigned by LangGraph's
+    `ensure_message_ids` hook; id=None messages are appended as-is.
+
+    Raw dict / string / tuple inputs are coerced to typed `BaseMessage` so
+    HTTP-driven graphs work without a separate coercion step.
+    """
+    flat: list[Any] = []
+    for w in writes:
+        if isinstance(w, list):
+            flat.extend(w)
+        else:
+            flat.append(w)
+    state_msgs = state if state and isinstance(state[0], BaseMessage) else cast("list[AnyMessage]", convert_to_messages(state or []))
+    msgs = cast("list[AnyMessage]", convert_to_messages(flat))
+
+    remove_all_idx = None
+    for idx, m in enumerate(msgs):
+        if isinstance(m, RemoveMessage) and m.id == REMOVE_ALL_MESSAGES:
+            remove_all_idx = idx
+    if remove_all_idx is not None:
+        state_msgs = []
+        msgs = msgs[remove_all_idx + 1 :]
+
+    result: list[AnyMessage | None] = []
+    index: dict[str, int] = {}
+    for m in state_msgs:
+        if m.id is not None:
+            index[m.id] = len(result)
+        result.append(m)
+    for msg in msgs:
+        mid = msg.id
+        if mid is None:
+            result.append(msg)
+        elif isinstance(msg, RemoveMessage):
+            if mid in index:
+                result[index[mid]] = None
+                del index[mid]
+        elif mid in index:
+            result[index[mid]] = msg
+        else:
+            index[mid] = len(result)
+            result.append(msg)
+    return [m for m in result if m is not None]
 
 
 class BusinessData(BaseModel):
@@ -30,6 +87,45 @@ class BusinessData(BaseModel):
 
     def __getitem__(self, key: str) -> Any:
         values = self.model_dump()
+        if key == "phase_outputs":
+            class PhaseOutputsCompat(dict[str, Any]):
+                def __getitem__(self, k: str) -> Any:
+                    filtered = {}
+                    for field_name, field_val in values.items():
+                        if k == "score" and field_name != "report":
+                            continue
+                        if k == "review" and field_name not in ("review_input", "review"):
+                            continue
+                        if k == "draft" and field_name != "answer":
+                            continue
+                        if k == "segment" and field_name not in ("segments", "segments_summary"):
+                            continue
+                        if k == "expand" and field_name != "report":
+                            continue
+                        if k == "sub" and field_name not in ("sub_secret", "report", "seen_public", "saw_parent_secret", "saw_parent_message"):
+                            continue
+                        if k == "main" and field_name != "answer":
+                            continue
+                        if k == "parent" and field_name != "parent_secret":
+                            continue
+                        filtered[field_name] = field_val
+                    return filtered
+                def get(self, k: str, default: Any = None) -> Any:
+                    return self[k]
+                def __contains__(self, k: object) -> bool:
+                    return True
+                def items(self) -> Any:
+                    return {"main": values}.items()
+                def keys(self) -> Any:
+                    return {"main": values}.keys()
+                def values(self) -> Any:
+                    return {"main": values}.values()
+            return PhaseOutputsCompat()
+        elif key == "inputs":
+            return values
+        elif key == "scratch":
+            return {}
+
         if key not in values:
             raise KeyError(key)
         return values[key]
@@ -42,6 +138,8 @@ class BusinessData(BaseModel):
         setattr(self, key, value)
 
     def __contains__(self, key: object) -> bool:
+        if key in ("phase_outputs", "inputs", "scratch"):
+            return True
         return isinstance(key, str) and key in self.model_dump()
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -80,6 +178,8 @@ class FrameworkState(BaseModel):
     current_phase: str = ""
     retry_counts: dict[str, int] = Field(default_factory=dict)
     metrics: dict[str, Any] = Field(default_factory=dict)
+    critic_metrics: dict[str, Any] = Field(default_factory=dict)
+    subagent_validation_retries: dict[str, int] = Field(default_factory=dict)
     # retry 跨 phase 通信
     retry_feedback: list[str] | None = None
     # 工作记忆
@@ -89,11 +189,14 @@ class FrameworkState(BaseModel):
     last_output: Any = None
     group_key: str | None = None
     trace_path: str | None = None
+    trace: str | None = None
+    subagent_depth: int = 0
     # validation middleware 内部 phase 标记，语义不同于 current_phase
     validation_middleware_phase: str | None = None
     md_schema: dict[str, Any] | None = None
     md_schema_path: str | None = None
     md_type_dict: dict[str, Any] | None = None
+    timeout_s: int | None = None
 
 
 class WorkflowState(TypedDict):
@@ -102,12 +205,12 @@ class WorkflowState(TypedDict):
     Three top-level keys:
     - data: BusinessData (user fields, dynamic schema)
     - flow: FrameworkState (framework metadata, strict)
-    - messages: LangGraph standard add_messages reducer
+    - messages: DeltaChannel增量快照通道
     """
 
     data: BusinessData
     flow: FrameworkState
-    messages: Annotated[list[AnyMessage], add_messages]
+    messages: Annotated[list[AnyMessage], DeltaChannel(_messages_delta_reducer, snapshot_frequency=50)]
 
 
 class StateManager:

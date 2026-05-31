@@ -21,6 +21,10 @@ vi.mock('../ui/tooltip', () => ({
   TooltipTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
 }))
 
+vi.mock('../studio/WorkspaceContext', () => ({
+  useOptionalWorkspaceContext: () => null,
+}))
+
 const baseProps: Parameters<typeof ContextEdge>[0] = {
   id: 'a->b',
   source: 'a',

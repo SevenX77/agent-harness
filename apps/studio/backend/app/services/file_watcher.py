@@ -79,6 +79,29 @@ class FileWatcherService:
         resolved = path.resolve()
         if self._is_echo(resolved):
             return
+
+        # Check for LLM config files
+        from app.services.llm_paths import credentials_path, roles_path
+        try:
+            target_credentials = credentials_path().resolve()
+            target_roles = roles_path().resolve()
+        except Exception:
+            target_credentials = None
+            target_roles = None
+
+        if target_credentials and resolved == target_credentials:
+            self._bus.broadcast_from_thread({
+                "type": "registry_changed",
+                "change": change.name,
+            })
+            return
+        if target_roles and resolved == target_roles:
+            self._bus.broadcast_from_thread({
+                "type": "roles_changed",
+                "change": change.name,
+            })
+            return
+
         event = _skill_event_for_path(change, resolved)
         if event is not None:
             self._bus.broadcast_from_thread(event)
@@ -146,7 +169,15 @@ def _locate_skill_path(path: Path) -> tuple[str, str] | None:
 
 
 def _watch_roots() -> list[Path]:
-    return [config.SKILLS_DIR, config.default_workspace_skills_dir(), config.DEFAULT_SKILLS_ROOT]
+    from app.services.llm_paths import credentials_path
+    roots = [config.SKILLS_DIR, config.default_workspace_skills_dir(), config.DEFAULT_SKILLS_ROOT]
+    try:
+        llm_dir = credentials_path().parent
+        if llm_dir not in roots:
+            roots.append(llm_dir)
+    except Exception:
+        pass
+    return roots
 
 
 def _safe_mtime(path: Path) -> float | None:

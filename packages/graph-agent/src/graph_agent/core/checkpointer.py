@@ -7,6 +7,7 @@ import logging
 import os
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any, cast
 
 from langgraph.types import Checkpointer
 
@@ -107,6 +108,58 @@ def get_checkpointer(
     return _checkpointer
 
 
+def _parse_and_get_checkpointer(val: str) -> Checkpointer:
+    """Helper to parse memory/sqlite/postgres specifications."""
+    if val == "memory":
+        return get_checkpointer(backend="memory")
+    if val.startswith("sqlite:"):
+        raw_path = val[len("sqlite:") :] or "store.db"
+        return get_checkpointer(db_path=raw_path, backend="sqlite")
+    if val.startswith(("postgres://", "postgresql://")):
+        return get_checkpointer(backend="postgres", connection_string=val)
+    raise ValueError(f"unrecognised checkpointer value: {val!r}")
+
+
+def resolve_checkpointer(checkpointer_arg: Any = "auto") -> Checkpointer | None:
+    """Resolve checkpointer argument or environment variables to a Checkpointer.
+
+    If checkpointer_arg is "auto", it checks for STUDIO_CHECKPOINTER env var first:
+      - "memory" -> InMemorySaver
+      - "sqlite:<path>" -> SqliteSaver at <path>
+      - "postgres://..." or "postgresql://..." -> PostgresSaver
+
+    If STUDIO_CHECKPOINTER is not set, it falls back to GRAPH_AGENT_CHECKPOINTER_DB
+    using get_checkpointer.
+    """
+    global _checkpointer
+
+    if _checkpointer is not None:
+        return _checkpointer
+
+    if checkpointer_arg is None:
+        return None
+
+    if checkpointer_arg == "auto":
+        override = os.environ.get("STUDIO_CHECKPOINTER")
+        if override:
+            try:
+                return _parse_and_get_checkpointer(override.strip())
+            except ValueError as exc:
+                raise ValueError(f"unrecognised STUDIO_CHECKPOINTER value: {override!r}") from exc
+
+        # Fallback to GRAPH_AGENT_CHECKPOINTER_DB
+        db_path = os.environ.get("GRAPH_AGENT_CHECKPOINTER_DB")
+        return get_checkpointer(db_path=db_path)
+
+    if isinstance(checkpointer_arg, str):
+        try:
+            return _parse_and_get_checkpointer(checkpointer_arg)
+        except ValueError:
+            pass
+
+    return cast(Checkpointer | None, checkpointer_arg)  # Returns explicit Checkpointer instance or None
+
+
 def reset_checkpointer() -> None:
     """Close the singleton checkpointer and clear cached state."""
     global _checkpointer, _checkpointer_ctx
@@ -117,3 +170,4 @@ def reset_checkpointer() -> None:
             logger.warning("Error during checkpointer cleanup", exc_info=True)
         _checkpointer_ctx = None
     _checkpointer = None
+

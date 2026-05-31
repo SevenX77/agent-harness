@@ -266,7 +266,8 @@ def test_runtime_uses_route_secret_and_no_provider_env(
     assert response.content == "ok"
     assert client_manager.probes == [("openai-direct:gpt-5", 3)]
     dispatch = client_manager.dispatches[0]
-    assert dispatch["route"].api_key.get_secret_value() == "route-secret"
+    assert dispatch["route"].credential_ref == "endpoint:openai-direct"
+    assert "api_key" not in dispatch["route"].model_dump(mode="json")
     assert dispatch["route"].credential_fingerprint
     assert dispatch["kwargs"]["runtime_policy"].token_escalation_rounds == 1
     assert dispatch["messages"][0] == {"role": "system", "content": "Always be exact."}

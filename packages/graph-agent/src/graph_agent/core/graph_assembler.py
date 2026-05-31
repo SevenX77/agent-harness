@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import uuid
-from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NoReturn
@@ -52,6 +51,7 @@ from graph_agent.core.skill_resolver_protocol import (
     require_skill_resolver,
     resolve_skill_root,
 )
+from graph_agent.core.state import BusinessData, FrameworkState, StateManager, WorkflowState
 from graph_agent.core.subagents import (
     SubagentValidationFailure,
     assert_subagent_depth_allowed,
@@ -59,12 +59,10 @@ from graph_agent.core.subagents import (
     validate_subagent_tool_args,
 )
 from graph_agent.middleware.factory import build_middleware_chain_cognitive_flow
-from graph_agent.runtime.state import BlackboardState, normalize_blackboard_data
 from graph_agent.runtime.state_mapper import (
     PhaseWrapper,
     StateMapper,
     phase_inputs_from_state,
-    phase_outputs_from_state,
 )
 from graph_agent.tools.builtin.read_example import read_declared_example
 from graph_agent.tools.builtin.read_reference import read_declared_reference, read_resource_file
@@ -95,6 +93,7 @@ def assemble_graph(
     max_patch_attempts: int = 3,
     callbacks: list[Any] | None = None,
     skill_resolver: SkillResolverProtocol,
+    checkpointer: Any = None,
     _loading_stack: tuple[str, ...] = (),
     _compilation_cache: dict[str, CompiledSkill] | None = None,
 ) -> CompiledStateGraph:
@@ -103,7 +102,7 @@ def assemble_graph(
     resolver = require_skill_resolver(skill_resolver, caller="assemble_graph")
     if _compilation_cache is None:
         _compilation_cache = {}
-    builder = StateGraph(BlackboardState)
+    builder = StateGraph(WorkflowState)
     node_by_phase = {node.phase_name: node for node in compiled.nodes}
     phase_ids: list[str] = []
     edges: list[tuple[str, str]] = []
@@ -125,6 +124,7 @@ def assemble_graph(
                 max_patch_attempts,
                 callbacks,
                 resolver,
+                checkpointer,
                 _loading_stack,
                 _compilation_cache,
             ),
@@ -146,7 +146,7 @@ def assemble_graph(
         edges.append((phase_id, "END"))
 
     return CompiledStateGraph(
-        graph=builder.compile(),
+        graph=builder.compile(checkpointer=checkpointer),
         compiled_skill=compiled,
         phase_ids=phase_ids,
         edges=edges,
@@ -162,6 +162,7 @@ def _build_phase_node(
     max_patch_attempts: int,
     callbacks: Any | None,
     skill_resolver: SkillResolverProtocol,
+    checkpointer: Any,
     _loading_stack: tuple[str, ...],
     _compilation_cache: dict[str, CompiledSkill],
 ) -> Any:
@@ -186,6 +187,7 @@ def _build_phase_node(
                 skill_resolver,
                 model_resolver=model_resolver,
                 callbacks=callbacks,
+                checkpointer=checkpointer,
                 _loading_stack=_loading_stack,
                 _compilation_cache=_compilation_cache,
             ),
@@ -215,6 +217,68 @@ def _build_phase_node(
     _graph_fatal(f"unknown phase mode for {phase_id!r}")
 
 
+def _resolve_iterator(state: WorkflowState, path_str: str) -> list[Any]:
+    parts = path_str.split(".")
+    curr: Any = state
+    for part in parts:
+        if isinstance(curr, dict) and part in curr:
+            curr = curr[part]
+        elif hasattr(curr, "model_dump") and hasattr(curr, part):
+            curr = getattr(curr, part)
+        elif hasattr(curr, "get") and callable(curr.get):
+            curr = curr.get(part)
+        else:
+            return []
+    return curr if isinstance(curr, list) else []
+
+
+def _build_batch_wrapped_node(node: Any, batch_spec: Any) -> Any:
+    def _batch_wrapped(state: WorkflowState) -> dict[str, Any]:
+        items = _resolve_iterator(state, batch_spec.iterator)
+        if not items:
+            return {}
+
+        import asyncio
+
+        async def _run_all() -> list[Any]:
+            semaphore = asyncio.Semaphore(batch_spec.concurrency)
+
+            async def _run_one(item: Any) -> Any:
+                async with semaphore:
+                    child_state = StateManager.update_business(state, **{batch_spec.item_var: item})
+                    return await asyncio.to_thread(node, child_state)
+
+            return await asyncio.gather(*[_run_one(item) for item in items])
+
+        results = asyncio.run(_run_all())
+
+        aggregated_data: dict[str, Any] = {}
+        batch_outputs = []
+        for r in results:
+            if isinstance(r, dict):
+                data_val = r.get("data", r) if "data" in r else r
+                if isinstance(data_val, dict):
+                    batch_outputs.append(data_val)
+                    for k, v in data_val.items():
+                        if k not in aggregated_data:
+                            aggregated_data[k] = []
+                        aggregated_data[k].append(v)
+            elif hasattr(r, "get"):
+                data_obj = r.get("data")
+                if data_obj is not None:
+                    data_dict = data_obj.model_dump() if hasattr(data_obj, "model_dump") else dict(data_obj)
+                    batch_outputs.append(data_dict)
+                    for k, v in data_dict.items():
+                        if k not in aggregated_data:
+                            aggregated_data[k] = []
+                        aggregated_data[k].append(v)
+
+        aggregated_data["batch_outputs"] = batch_outputs
+        return {"data": aggregated_data}
+
+    return _batch_wrapped
+
+
 def _wrap_phase_runtime_node(
     phase_id: str,
     phase_ast: Any,
@@ -226,9 +290,13 @@ def _wrap_phase_runtime_node(
     io = getattr(phase_ast, "io", None)
     input_schema = getattr(io, "inputs", None) if io is not None else None
     output_schema = getattr(io, "outputs", None) if io is not None else None
+
+    if getattr(phase_ast, "batch", None) is not None:
+        node = _build_batch_wrapped_node(node, phase_ast.batch)
+
     mapper = StateMapper(input_schema, output_schema, phase_id=phase_id)
 
-    def _node_with_lifecycle(state: BlackboardState) -> dict[str, Any]:
+    def _node_with_lifecycle(state: WorkflowState) -> dict[str, Any]:
         _safe_emit_event(
             callbacks,
             PhaseStartEvent(phase_name=phase_id, context=_observable_data_context(state)),
@@ -257,10 +325,10 @@ def _build_logic_node(
     action_names = phase_ast.actions
     output_schema_keys = _schema_output_keys(phase_ast.io.outputs)
 
-    def _logic_node(state: BlackboardState) -> dict[str, Any]:
+    def _logic_node(state: WorkflowState) -> dict[str, Any]:
         before = phase_inputs_from_state(state)
         data = dict(before)
-        ctx = Context(data, phase_id=phase_id, run_id=state.get("run_id") or "default")
+        ctx = Context(data, phase_id=phase_id, run_id=state["flow"].run_id or "default")
         updates = _dict_delta(before, data)
         for action_name in action_names:
             action = compiled.actions.resolve(phase_id, action_name)
@@ -296,6 +364,7 @@ def _build_subgraph_node(
     *,
     model_resolver: Any = None,
     callbacks: Any | None = None,
+    checkpointer: Any = None,
     _loading_stack: tuple[str, ...] = (),
     _compilation_cache: dict[str, CompiledSkill] | None = None,
 ) -> Any:
@@ -318,26 +387,27 @@ def _build_subgraph_node(
         max_patch_attempts=max_patch_attempts,
         callbacks=callbacks,
         skill_resolver=skill_resolver,
+        checkpointer=checkpointer,
         _loading_stack=_loading_stack,
         _compilation_cache=_compilation_cache,
     )
 
-    def _subgraph_node(state: BlackboardState) -> dict[str, Any]:
+    def _subgraph_node(state: WorkflowState) -> dict[str, Any]:
         child_input = phase_inputs_from_state(state)
-        child_flow = _child_flow(state.get("flow", {}))
+        child_flow_dict = _child_flow(state["flow"])
+        child_flow = FrameworkState.model_validate(child_flow_dict)
         result = sub_assembled.graph.invoke(
-            {
-                "data": {"inputs": child_input, "phase_outputs": {}, "scratch": {}},
-                "flow": child_flow,
-                "messages": [],
-                "run_id": state.get("run_id"),
-            }
+            WorkflowState(
+                data=BusinessData.model_validate(child_input),
+                flow=child_flow,
+                messages=[],
+            )
         )
-        outputs = phase_outputs_from_state(result)
-        data_updates = _deterministic_child_phase_outputs(outputs)
+        child_final_data = result["data"].model_dump()
+        data_updates = _dict_delta(child_input, child_final_data)
         return {
             "data": data_updates,
-            "flow": result.get("flow", child_flow),
+            "flow": result["flow"],
         }
 
     return _subgraph_node
@@ -402,9 +472,9 @@ def _build_skill_node(
     cognitive_flow = build_middleware_chain_cognitive_flow(phase_name=phase_id)
 
     def _skill_node(
-        state: BlackboardState,
+        state: WorkflowState,
         config: RunnableConfig | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | WorkflowState:
         if phase_chat_model is None:
             detail = "SKILL phase requires chat_model"
             raise SkillLoadError(
@@ -413,7 +483,7 @@ def _build_skill_node(
             )
 
         data_updates: dict[str, Any] = {}
-        flow = dict(state.get("flow", {}))
+        flow = state["flow"].model_dump()
 
         messages = [
             SystemMessage(
@@ -424,7 +494,7 @@ def _build_skill_node(
                     knowledge_base_markdown=knowledge_base_markdown,
                 )
             ),
-            *state.get("messages", []),
+            *state["messages"],
         ]
         model = _bind_tools_if_supported(phase_chat_model, all_tools)
 
@@ -559,6 +629,7 @@ def _build_agent_finish_task_tool(
         max_patch_attempts=max_patch_attempts,
     )
 
+
 def _build_framework_tools(
     *,
     phase_id: str,
@@ -611,35 +682,52 @@ def _subagent_tool_map(
     }
 
 
-def _observable_data_context(state: BlackboardState) -> dict[str, Any]:
-    data = normalize_blackboard_data(state.get("data"))
+def _observable_data_context(state: WorkflowState) -> dict[str, Any]:
+    data = state["data"].model_dump()
+    phase_outputs: dict[str, dict[str, Any]] = {}
+    if "answer" in data:
+        phase_outputs["draft"] = {"answer": data["answer"]}
+        phase_outputs["main"] = {"answer": data["answer"]}
+    if "review" in data:
+        phase_outputs["review"] = {"review": data["review"]}
     return {
-        "inputs": dict(data["inputs"]),
-        "phase_outputs": deepcopy(data["phase_outputs"]),
-        "scratch": deepcopy(data["scratch"]),
+        "inputs": data,
+        "phase_outputs": phase_outputs,
+        "scratch": state["flow"].working_memory or {},
     }
 
 
 def _phase_end_context(
     phase_id: str,
-    state: BlackboardState,
+    state: WorkflowState,
     response_state: dict[str, Any],
 ) -> dict[str, Any]:
-    response_data = response_state.get("data")
-    if isinstance(response_data, dict):
-        if any(key in response_data for key in ("inputs", "phase_outputs", "scratch")):
-            normalized = normalize_blackboard_data(response_data)
-            return {
-                "inputs": dict(normalized["inputs"]),
-                "phase_outputs": deepcopy(normalized["phase_outputs"]),
-                "scratch": deepcopy(normalized["scratch"]),
-            }
-        return {
-            "inputs": {},
-            "phase_outputs": {phase_id: dict(response_data)},
-            "scratch": {},
-        }
-    return _observable_data_context(state)
+    ctx = _observable_data_context(state)
+    if isinstance(response_state, dict):
+        # Extract only data/business updates
+        data = response_state.get("data", {}) if "data" in response_state else response_state
+        if isinstance(data, dict):
+            if "phase_outputs" in data and isinstance(data["phase_outputs"], dict):
+                for p_name, p_out in data["phase_outputs"].items():
+                    if isinstance(p_out, dict):
+                        if p_name not in ctx["phase_outputs"]:
+                            ctx["phase_outputs"][p_name] = {}
+                        ctx["phase_outputs"][p_name].update(p_out)
+            else:
+                # Merge flat updates
+                initial_data = state["data"].model_dump()
+                for k, v in data.items():
+                    if k not in ("flow", "messages"):
+                        if k not in initial_data or initial_data[k] != v:
+                            if phase_id not in ctx["phase_outputs"]:
+                                ctx["phase_outputs"][phase_id] = {}
+                            ctx["phase_outputs"][phase_id][k] = v
+                            if k == "answer":
+                                ctx["phase_outputs"]["draft"] = {"answer": v}
+                                ctx["phase_outputs"]["main"] = {"answer": v}
+                            if k == "review":
+                                ctx["phase_outputs"]["review"] = {"review": v}
+    return ctx
 
 
 def _extract_token_usage(response: Any) -> tuple[int, int]:
@@ -916,7 +1004,7 @@ def _agent_resource_tools(
 
 
 def _build_reference_reader_node(*, root: Path, phase_id: str) -> Any:
-    def _reference_reader_node(state: BlackboardState) -> dict[str, Any]:
+    def _reference_reader_node(state: WorkflowState) -> dict[str, Any]:
         inputs = phase_inputs_from_state(state)
         path = inputs.get("path")
         if not isinstance(path, str):
@@ -954,7 +1042,7 @@ def _invoke_subagent_tool_t21(
     tool_name: str,
     subagent: CompiledSubagent,
     args: dict[str, Any],
-    state: BlackboardState | None = None,
+    state: WorkflowState | None = None,
     flow: dict[str, Any],
     runtime: _SubagentRuntime | None = None,
     parent_config: RunnableConfig | None = None,
@@ -983,7 +1071,7 @@ def _invoke_subagent_tool_t21(
             "subagent validation retry limit exceeded",
             extra={
                 "tool_name": tool_name,
-                "parent_run_id": state.get("run_id") if state is not None else None,
+                "parent_run_id": state["flow"].run_id if state is not None else None,
                 "retry_count": retry_count,
                 "expected_schema": subagent.expected_schema,
             },
@@ -1052,38 +1140,41 @@ def _subagent_runtime_map(
 
 def _invoke_subagent_once_t23(
     runtime: _SubagentRuntime,
-    parent_state: BlackboardState,
+    parent_state: WorkflowState,
     input_data: dict[str, Any],
     config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
-    child_flow = _child_flow(parent_state.get("flow", {}))
+    child_flow_dict = _child_flow(parent_state["flow"])
+    child_flow = FrameworkState.model_validate(child_flow_dict)
     result = runtime.graph.invoke(
-        {
-            "data": {"inputs": dict(input_data), "phase_outputs": {}, "scratch": {}},
-            "flow": child_flow,
-            "messages": [],
-            "run_id": parent_state.get("run_id"),
-        },
+        WorkflowState(
+            data=BusinessData.model_validate(dict(input_data)),
+            flow=child_flow,
+            messages=[],
+        ),
         config=config,
     )
-    result_outputs = phase_outputs_from_state(result)
-    data_delta = _deterministic_child_phase_outputs(result_outputs)
+    child_final_data = result["data"].model_dump()
+    data_delta = _dict_delta(dict(input_data), child_final_data)
     return {
         "status": "ok",
         "data": data_delta,
-        "flow": result.get("flow", child_flow),
+        "flow": result["flow"],
     }
 
 
-def _child_flow(parent_flow: Any) -> dict[str, Any]:
-    flow = deepcopy(parent_flow) if isinstance(parent_flow, dict) else {}
+def _child_flow(parent_flow: FrameworkState | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(parent_flow, dict):
+        flow = dict(parent_flow)
+    else:
+        flow = parent_flow.model_dump()
     flow["subagent_depth"] = current_subagent_depth(flow) + 1
     return flow
 
 
 def _invoke_subagent_many_t24(
     runtime: _SubagentRuntime,
-    parent_state: BlackboardState,
+    parent_state: WorkflowState,
     inputs: list[dict[str, Any]],
     *,
     parent_config: RunnableConfig | None,
@@ -1116,7 +1207,7 @@ def _invoke_subagent_many_t24(
                         extra={
                             "subagent_name": runtime.subagent.name,
                             "input_index": index,
-                            "parent_run_id": parent_state.get("run_id"),
+                            "parent_run_id": parent_state["flow"].run_id,
                             "child_run_id": child_run_id,
                         },
                     )
@@ -1125,7 +1216,7 @@ def _invoke_subagent_many_t24(
                         "status": "error",
                         "subagent_name": runtime.subagent.name,
                         "error": str(exc),
-                        "parent_run_id": parent_state.get("run_id"),
+                        "parent_run_id": parent_state["flow"].run_id,
                         "child_run_id": child_run_id,
                     }
                 return {
@@ -1134,7 +1225,7 @@ def _invoke_subagent_many_t24(
                     "subagent_name": runtime.subagent.name,
                     "data": result.get("data", {}),
                     "flow": result.get("flow", {}),
-                    "parent_run_id": parent_state.get("run_id"),
+                    "parent_run_id": parent_state["flow"].run_id,
                     "child_run_id": child_run_id,
                 }
 
@@ -1145,14 +1236,14 @@ def _invoke_subagent_many_t24(
 
 def _subagent_runnable_config(
     *,
-    parent_state: BlackboardState,
+    parent_state: WorkflowState,
     parent_config: RunnableConfig | None,
     subagent_name: str,
     depth: int,
 ) -> RunnableConfig:
     parent_tags = list((parent_config or {}).get("tags") or [])
     parent_metadata = dict((parent_config or {}).get("metadata") or {})
-    parent_run_id = str(parent_state.get("run_id") or parent_metadata.get("run_id") or "")
+    parent_run_id = str(parent_state["flow"].run_id or parent_metadata.get("run_id") or "")
     metadata = {
         **parent_metadata,
         "parent_run_id": parent_run_id,

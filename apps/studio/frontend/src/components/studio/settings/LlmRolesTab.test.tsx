@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import type { CredentialsState, ModelGroup, RolesData } from "../../../api/llm"
 import { roleChainStatusKey } from "../../../hooks/useRoleTestChainRunner"
-import { AvailableModelDragPreview, LlmRolesTab, modelDropFailureMessage, roleTestStatusesByRole, RoleSettingsFields } from "./LlmRolesTab"
+import { AvailableModelDragPreview, LlmRolesTab, modelDropFailureMessage, roleIntentFromSettingsDraft, roleTestStatusesByRole, RoleSettingsFields } from "./LlmRolesTab"
 import {
   AvailableModelsSidebar,
   buildAvailableModelGroups,
@@ -12,7 +12,7 @@ import { AdvancedModelBundlesSection, modelBundleGroupsFromData } from "./llm-ro
 import { requestRoleDeleteConfirmation, RoleCard } from "./llm-roles/RoleCard"
 import { roleNameDisplayError, RoleNameDialog, RoleNameFields } from "./llm-roles/RoleNameDialog"
 import { RoleTestResultPanel } from "./llm-roles/RoleTestResultPanel"
-import { appendAvailableModelToRole, appendModelGroupToRole, appendModelGroupToRoleWithResult, appendRole, normalizeRolesDraft, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeModelFromRole, removeProviderFromRole, removeRole, renameRole, reorderModelInRole, reorderProviderInRole, validateRolesDraft } from "./role-utils"
+import { appendAvailableModelToRole, appendModelGroupToRole, appendModelGroupToRoleWithResult, appendRole, normalizeRolesDraft, ownedProviderCodesForModel, pruneInvalidRoleProviders, removeModelFromRole, removeProviderFromRole, removeRole, renameRole, reorderModelInRole, reorderProviderInRole, toggleModelFallback, validateRolesDraft } from "./role-utils"
 import { credentialsByProviderCode } from "./route-credentials"
 
 const toastMock = vi.hoisted(() => Object.assign(vi.fn(), {
@@ -149,7 +149,7 @@ const rolesData: RolesData = {
   },
   roles: {
     copilot_chat: {
-      model_fallback: true,
+      model_fallback_enabled: true,
       active_model: "CL46T",
       models: {
         CL46T: { providers: ["anthropic"], temperature: 0.2, max_tokens: 8192 },
@@ -174,6 +174,23 @@ function renderRolesHtml(overrides: Partial<Parameters<typeof LlmRolesTab>[0]> =
 }
 
 describe("LlmRolesTab controls", () => {
+  it("updates the backend model fallback field when toggled", () => {
+    const dataWithBackendField: RolesData = {
+      ...rolesData,
+      roles: {
+        copilot_chat: {
+          ...rolesData.roles.copilot_chat,
+          model_fallback_enabled: true,
+        },
+      },
+    }
+
+    const next = toggleModelFallback(dataWithBackendField, "copilot_chat", false)
+
+    expect(next.roles.copilot_chat.model_fallback_enabled).toBe(false)
+    expect(dataWithBackendField.roles.copilot_chat.model_fallback_enabled).toBe(true)
+  })
+
   it("renders Available Models from backend model group DTOs instead of credential model strings", () => {
     const html = renderToStaticMarkup(<AvailableModelsSidebar modelGroups={modelGroups} />)
 
@@ -187,6 +204,7 @@ describe("LlmRolesTab controls", () => {
     expect(html).toContain('data-provider-state="ready"')
     expect(html).toContain('data-provider-state="untested"')
     expect(html).toContain('data-provider-state="needs_setup"')
+    expect(html).toContain('data-variant="default"')
     expect(html).not.toContain("claude-sonnet-4-7</")
     expect(html).not.toContain("anthropic-official:claude-sonnet-4-7")
     expect(html).not.toContain("route")
@@ -300,7 +318,7 @@ describe("LlmRolesTab controls", () => {
       },
       roles: {
         analyst: {
-          model_fallback: true,
+          model_fallback_enabled: true,
           active_model: "deepseek-v4-pro",
           models: {
             "deepseek-v4-pro": { providers: [routeId], temperature: null, max_tokens: null },
@@ -346,7 +364,7 @@ describe("LlmRolesTab controls", () => {
       },
       roles: {
         analyst: {
-          model_fallback: true,
+          model_fallback_enabled: true,
           active_model: "deepseek-v4-flash",
           models: {
             "deepseek-v4-flash": { providers: [routeId], temperature: null, max_tokens: null },
@@ -392,7 +410,7 @@ describe("LlmRolesTab controls", () => {
       },
       roles: {
         Analyst: {
-          model_fallback: true,
+          model_fallback_enabled: true,
           active_model: modelCode,
           models: {
             [modelCode]: { providers: ["openrouter:gpt-5-4-mini"], temperature: null, max_tokens: null },
@@ -472,7 +490,7 @@ describe("LlmRolesTab controls", () => {
       },
       roles: {
         Analyst: {
-          model_fallback: true,
+          model_fallback_enabled: true,
           active_model: modelCode,
           models: {
             [modelCode]: {
@@ -850,7 +868,7 @@ describe("LlmRolesTab controls", () => {
       ])),
       roles: {
         analyst: {
-          model_fallback: true,
+          model_fallback_enabled: true,
           active_model: "gpt-5",
           models: {
             "gpt-5": {
@@ -985,7 +1003,7 @@ describe("LlmRolesTab controls", () => {
       },
       roles: {
         Analyst: {
-          model_fallback: true,
+          model_fallback_enabled: true,
           active_model: modelCode,
           models: {
             [modelCode]: { providers: [routeId], temperature: null, max_tokens: null },
@@ -1663,7 +1681,7 @@ describe("LlmRolesTab controls", () => {
 
     expect(Object.keys(next.roles)).toEqual(["copilot_chat", "planner_role"])
     expect(next.roles.planner_role).toEqual({
-      model_fallback: true,
+      model_fallback_enabled: true,
       active_model: "",
       models: {},
     })
@@ -1676,12 +1694,12 @@ describe("LlmRolesTab controls", () => {
       roles: {
         ...rolesData.roles,
         test: {
-          model_fallback: true,
+          model_fallback_enabled: true,
           active_model: "unknown model",
           models: {},
         },
         stale_model: {
-          model_fallback: true,
+          model_fallback_enabled: true,
           active_model: "unknown model",
           models: {
             "unknown model": { providers: [] },
@@ -1745,7 +1763,7 @@ describe("LlmRolesTab controls", () => {
       ...rolesData,
       roles: {
         planner: {
-          model_fallback: true,
+          model_fallback_enabled: true,
           active_model: "",
           models: {},
         },
@@ -1772,13 +1790,13 @@ describe("LlmRolesTab controls", () => {
       roles: {
         assistant: {
           role_kind: "copilot",
-          model_fallback: true,
+          model_fallback_enabled: true,
           active_model: "",
           models: {},
         },
         copilot_planner: {
           role_kind: "graph_agent",
-          model_fallback: true,
+          model_fallback_enabled: true,
           active_model: "",
           models: {},
         },
@@ -1800,7 +1818,7 @@ describe("LlmRolesTab controls", () => {
       ...rolesData,
       roles: {
         Premium: {
-          model_fallback: true,
+          model_fallback_enabled: true,
           active_model: "",
           models: {},
         },
@@ -1872,7 +1890,7 @@ describe("LlmRolesTab controls", () => {
       roles: {
         ...rolesData.roles,
         planner: {
-          model_fallback: true,
+          model_fallback_enabled: true,
           active_model: "",
           models: {},
         },
@@ -1911,7 +1929,7 @@ describe("LlmRolesTab controls", () => {
     expect(html).toContain("sm:col-start-2")
     expect(html).toContain("flex-nowrap")
     expect(html).toContain("h-8")
-    expect(headerActionsHtml).not.toContain("model_fallback")
+    expect(headerActionsHtml).not.toContain("model_fallback_enabled")
     expect(html).toContain('data-role-test-trigger="true"')
     expect(html).toContain('data-role-model-fallback-setting="true"')
     expect(html).toContain("Model Fallback")
@@ -1944,7 +1962,7 @@ describe("LlmRolesTab controls", () => {
         Array.from({ length: 12 }, (_, index) => [
           `role_${index}`,
           {
-            model_fallback: true,
+            model_fallback_enabled: true,
             active_model: "CL46T",
             models: {
               CL46T: { providers: ["anthropic"], temperature: null, max_tokens: null },
@@ -1992,7 +2010,7 @@ describe("LlmRolesTab controls", () => {
       },
       roles: {
         Analyst: {
-          model_fallback: true,
+          model_fallback_enabled: true,
           active_model: "DSV4F",
           models: {
             DSV4F: { providers: ["anthropic"], temperature: null, max_tokens: null },
@@ -2200,7 +2218,7 @@ describe("LlmRolesTab controls", () => {
         },
         roles: {
           analyst: {
-            model_fallback: true,
+            model_fallback_enabled: true,
             active_model: "claude-sonnet-4-7",
             models: {
               "claude-sonnet-4-7": {
@@ -2230,7 +2248,7 @@ describe("LlmRolesTab controls", () => {
           ...rolesData.roles.copilot_chat,
           intent: {
             provider_preference: "manual_order",
-            thinking: "required",
+            thinking: "preferred",
             target_output_tokens: {
               mode: "target",
               value: 8192,
@@ -2244,10 +2262,10 @@ describe("LlmRolesTab controls", () => {
     const fieldsHtml = renderToStaticMarkup(
       <RoleSettingsFields
         roleName="copilot_chat"
-        modelFallback={true}
+        modelFallbackEnabled={true}
         draft={{
           providerPreference: "manual_order",
-          thinking: "required",
+          thinking: "preferred",
           outputTokens: "8192",
           useMaximumTokens: true,
         }}
@@ -2275,8 +2293,8 @@ describe("LlmRolesTab controls", () => {
     expect(fieldsHtml).not.toContain("Provider Order")
     expect(fieldsHtml).not.toContain("Manual order")
     expect(fieldsHtml).toContain("Model Fallback")
-    expect(fieldsHtml).toContain("model_fallback")
-    expect(fieldsHtml).toContain("Thinking Required")
+    expect(fieldsHtml).toContain("model_fallback_enabled")
+    expect(fieldsHtml).toContain("Thinking Preferred")
     expect(fieldsHtml).toContain('data-slot="switch"')
     expect(fieldsHtml).not.toContain("Try the next model group")
     expect(fieldsHtml).not.toContain("Require routes to prove")
@@ -2294,11 +2312,24 @@ describe("LlmRolesTab controls", () => {
     expect(fieldsHtml).not.toContain("Runtime default")
   })
 
+  it("saves the Thinking switch as a preferred role intent", () => {
+    expect(roleIntentFromSettingsDraft({
+      providerPreference: "manual_order",
+      thinking: "preferred",
+      outputTokens: "",
+      useMaximumTokens: false,
+    })).toMatchObject({
+      provider_preference: "manual_order",
+      thinking: "preferred",
+      target_output_tokens: null,
+    })
+  })
+
   it("does not tell users to run Role Test when route max token caps are unavailable", () => {
     const fieldsHtml = renderToStaticMarkup(
       <RoleSettingsFields
         roleName="copilot_chat"
-        modelFallback={true}
+        modelFallbackEnabled={true}
         draft={{
           providerPreference: "manual_order",
           thinking: "required",

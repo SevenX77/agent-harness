@@ -38,6 +38,7 @@ import { appendProviderToModel, removeProviderFromRole, reorderProviderInRole } 
 import { IconTooltip } from "./IconTooltip"
 import {
   deriveRoleRouteStatus,
+  RoleProviderRouteTooltipContent,
   roleProviderRouteTooltip,
   roleRouteStatusDetail,
   roleRouteStatusSurfaceClass,
@@ -245,7 +246,9 @@ const ProviderTag = memo(function ProviderTag({
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>{row}</TooltipTrigger>
-        <TooltipContent className="max-w-sm whitespace-pre-line break-words">{statusTooltip}</TooltipContent>
+        <TooltipContent className="max-w-sm break-words">
+          <RoleProviderRouteTooltipContent tooltip={statusTooltip} />
+        </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   )

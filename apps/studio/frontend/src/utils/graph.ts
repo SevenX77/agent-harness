@@ -3,6 +3,7 @@ import type { Edge, Node } from 'reactflow'
 import type { StudioNodeData } from '../CustomNodes'
 import type { GraphSkillDef, SkillManifest } from '../api/types'
 import type { GraphBuildResult, VisualPhase } from '../types/studio'
+import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 
 function normalizeDependency(value: string | string[] | undefined): string[] {
   if (Array.isArray(value)) {
@@ -24,13 +25,13 @@ export function subgraphSkillId(path: string | null): string | null {
 }
 
 function phasesFromManifest(manifest: SkillManifest): VisualPhase[] {
-  if (manifest.schema_version === '2.1') {
-    return manifest.phases.map((phase) => ({
-      id: phase.id,
-      name: phase.id,
+  if (manifest.schema_version === CURRENT_SCHEMA_VERSION) {
+    return manifest.phases.map((phaseId) => ({
+      id: phaseId,
+      name: phaseId,
       mode: 'logic',
       role: null,
-      dependsOn: normalizeDependency(phase.depends_on),
+      dependsOn: [],
       subgraph: null,
     }))
   }
@@ -68,7 +69,7 @@ function phasesFromManifest(manifest: SkillManifest): VisualPhase[] {
 }
 
 function inputLabel(manifest: SkillManifest): string {
-  if (manifest.schema_version === '2.1') {
+  if (manifest.schema_version === CURRENT_SCHEMA_VERSION) {
     return 'Input: schema'
   }
   if (manifest.type !== 'graph') {
@@ -79,7 +80,7 @@ function inputLabel(manifest: SkillManifest): string {
 }
 
 function outputLabel(manifest: SkillManifest): string {
-  if (manifest.schema_version === '2.1') {
+  if (manifest.schema_version === CURRENT_SCHEMA_VERSION) {
     return 'Output: schema'
   }
   if (manifest.type !== 'graph') {

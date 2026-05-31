@@ -2,6 +2,8 @@ import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { AlertTriangle, Bot, Briefcase, CheckCircle2, Circle, Code, Minus, Network, Pause, Plus, Radio, Workflow } from 'lucide-react'
 import { SubgraphInline } from '@/components/studio/SubgraphInline'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover'
+import { Button } from '@/components/ui/button'
 import type { SkillGraphNode, SkillGraphNodeData, SkillNodeStatus } from './types'
 
 type PhaseKind = 'LOGIC' | 'AGENT' | 'SUBGRAPH'
@@ -58,12 +60,18 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
   const KindIcon = phaseKindIcon(kind)
   const subagentCount = data.subagents?.length ?? 0
 
-  return (
+  const nodeContent = (
     <div
       className={[
-        'relative min-w-[240px] cursor-pointer rounded-md border bg-card p-3 text-card-foreground shadow-sm transition-colors',
+        'group relative min-w-[240px] cursor-pointer rounded-md border bg-card p-3 text-card-foreground shadow-sm transition-colors',
         data.subgraphPath ? 'pb-5' : '',
-        selected ? 'border-primary ring-2 ring-primary/30' : 'border-border',
+        data.isConflictCancelled
+          ? 'border-destructive ring-2 ring-destructive/30'
+          : data.activeConflict
+          ? 'border-amber-500 ring-2 ring-amber-500/30'
+          : selected
+          ? 'border-primary ring-2 ring-primary/30'
+          : 'border-border',
       ].join(' ')}
       onDoubleClick={(event) => {
         if (data.subgraphPath) {
@@ -71,7 +79,7 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
         }
       }}
     >
-      <Handle type="target" position={Position.Left} className="!size-2.5 !border-background !bg-primary" />
+      <Handle type="target" position={Position.Left} className="!size-2.5 !border-background !bg-primary opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
       <div className="flex items-start gap-3">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
           <KindIcon className="size-4" />
@@ -121,7 +129,48 @@ export function SkillNode({ data, selected }: NodeProps<SkillGraphNode>) {
       {data.subgraphPath && data.isExpanded ? (
         <SubgraphInline path={data.subgraphPath} parentLabel={data.label} />
       ) : null}
-      <Handle type="source" position={Position.Right} className="!size-2.5 !border-background !bg-primary" />
+      <Handle type="source" position={Position.Right} className="!size-2.5 !border-background !bg-primary opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
     </div>
   )
+
+  if (data.activeConflict) {
+    return (
+      <Popover open={true} modal={false}>
+        <PopoverAnchor asChild>
+          {nodeContent}
+        </PopoverAnchor>
+        <PopoverContent side="top" align="center" className="w-[280px] p-3 bg-zinc-950 border border-zinc-800 rounded-md text-foreground shadow-xl z-50">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="size-4 shrink-0 text-amber-500 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <h4 className="text-xs font-semibold text-foreground">Sequential Overwrite Detected</h4>
+              <p className="mt-1 text-[11px] text-muted-foreground leading-normal">
+                Field <code className="text-amber-400 font-mono text-[10px] px-1 py-0.5 bg-zinc-900 rounded">{data.activeConflict.fieldName}</code> is also output by upstream node <span className="font-semibold">{data.activeConflict.ancestorNodeId}</span> and will be overwritten.
+              </p>
+              <div className="mt-3 flex items-center justify-end gap-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-[11px] px-2 text-muted-foreground hover:text-foreground"
+                  onClick={() => data.onCancelWarning?.(data.activeConflict!.nodeId)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  variant="default"
+                  className="h-7 text-[11px] px-2.5 bg-amber-500 hover:bg-amber-600 text-zinc-950 font-medium rounded-md"
+                  onClick={() => data.onAllowSequentialOverwrite?.(data.activeConflict!.nodeId, data.activeConflict!.fieldName)}
+                >
+                  Allow Overwrite
+                </Button>
+              </div>
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
+    )
+  }
+
+  return nodeContent
 }

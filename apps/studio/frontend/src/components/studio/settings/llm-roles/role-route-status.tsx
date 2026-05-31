@@ -1,3 +1,4 @@
+import { AlertTriangle, CircleX } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { RoleChainStatus } from "@/hooks/useRoleTestChainRunner"
@@ -120,7 +121,7 @@ export function roleProviderRouteTooltip({
   const headline = providerRouteHeadline(providerModel)
   const lines = [
     headline ? `${modelName} - ${headline}` : modelName,
-    `Role match: ${roleMatchDetail(status, detail)}`,
+    roleMatchTooltipLine(status, detail),
   ]
   const methods = stringListCapability(providerModel, "verified_methods")
   const inputModalities = stringListCapability(providerModel, "input_modalities")
@@ -136,6 +137,41 @@ export function roleProviderRouteTooltip({
   if (!providerModel || providerModel.capability_state === "unknown") lines.push("Capabilities: not listed")
 
   return lines.join("\n")
+}
+
+export function RoleProviderRouteTooltipContent({ tooltip }: { tooltip: string }) {
+  return (
+    <div className="space-y-1 whitespace-normal">
+      {tooltip.split("\n").map((line, index) => {
+        const diagnostic = tooltipDiagnostic(line)
+        if (diagnostic) {
+          const Icon = diagnostic === "warning" ? AlertTriangle : CircleX
+          return (
+            <div
+              key={`${diagnostic}-${index}-${line}`}
+              data-tooltip-diagnostic={diagnostic}
+              className={cn(
+                "flex items-start gap-1.5",
+                diagnostic === "warning" ? "text-warning" : "text-destructive",
+              )}
+            >
+              <Icon
+                aria-hidden="true"
+                data-tooltip-diagnostic-icon={diagnostic}
+                className="mt-0.5 size-3 shrink-0"
+              />
+              <span className="min-w-0 break-words">{line}</span>
+            </div>
+          )
+        }
+        return (
+          <div key={`${index}-${line}`} className="break-words">
+            {line}
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 export function roleRouteStatusAriaLabel(status: RoleRouteStatus, detail?: string | null): string {
@@ -265,6 +301,19 @@ function roleMatchDetail(status: RoleRouteStatus, detail?: string | null): strin
   if (status === "limited") return "limited or unverified capabilities."
   if (status === "testing") return "testing this route."
   return "blocked by route availability or required capabilities."
+}
+
+function roleMatchTooltipLine(status: RoleRouteStatus, detail?: string | null): string {
+  const matchDetail = roleMatchDetail(status, detail)
+  if (status === "limited") return `Warning: ${matchDetail}`
+  if (status === "blocked") return `Failed: ${matchDetail}`
+  return `Role match: ${matchDetail}`
+}
+
+function tooltipDiagnostic(line: string): "warning" | "failed" | null {
+  if (line.startsWith("Warning:")) return "warning"
+  if (line.startsWith("Failed:")) return "failed"
+  return null
 }
 
 function providerRouteHeadline(providerModel?: ProviderModelOption): string | null {

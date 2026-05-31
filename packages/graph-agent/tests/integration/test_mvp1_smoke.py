@@ -55,8 +55,8 @@ from langchain_core.messages import HumanMessage
 
 from graph_agent.core.compiler import compile_skill
 from graph_agent.core.graph_assembler import assemble_graph
-from graph_agent.core.harness import GraphAgentHarness
-from graph_agent.core.loader import load_workflow_from_md
+from graph_agent.core.local_workspace_resolver import LocalWorkspaceResolver
+from graph_agent.core.runner import run_skill
 from graph_agent.core.state import (
     BusinessData,
     FrameworkState,
@@ -246,12 +246,6 @@ def _dump_e2e_trace(
         shutil.copytree(skill_outputs, dst)
 
 
-def _force_llm_role(harness: GraphAgentHarness, role: str) -> None:
-    """Pin every LLM phase to a single-model test role for deterministic e2e."""
-    for phase in harness.phases:
-        if phase.requires_llm:
-            phase.tier = role
-            phase.llm_role = role
 
 
 class _FixedRoleResolver:
@@ -434,7 +428,7 @@ class TestRealLLMSmoke:
             "李雷合上信，决定继续调查。\n"
         )
         trace_dir = _resolve_e2e_trace_dir()
-        final_state: WorkflowState | None = None
+        result = None
         error_text: str | None = None
         run_start = time.monotonic()
 
@@ -445,45 +439,51 @@ class TestRealLLMSmoke:
             ),
             role,
         )
-        harness = load_workflow_from_md(Path(V3_SKILL_PATH), model_resolver=resolver)
+        skill_resolver = LocalWorkspaceResolver(workspace_root=Path(V3_SKILL_PATH).parent)
         try:
             try:
-                _force_llm_role(harness, role)
-                final_state = harness.run(
-                    initial_context={
-                        "chapter_content": sample_chapter,
-                        "chapter_number": 1,
-                        "output_dir": str(tmp_path),
-                    },
+                result = run_skill(
+                    Path(V3_SKILL_PATH),
+                    workspace_dir=tmp_path,
                     unattended=True,
+                    skill_resolver=skill_resolver,
+                    model_resolver=resolver,
+                    chapter_content=sample_chapter,
+                    chapter_number=1,
+                    output_dir=str(tmp_path),
                 )
                 (tmp_path / "real_llm_metrics.txt").write_text(
-                    f"role={role}\nmetrics={final_state['flow'].metrics}\n",
+                    f"role={role}\nmetrics={result.metrics}\n",
                     encoding="utf-8",
                 )
             except Exception:
                 error_text = traceback.format_exc()
                 raise
         finally:
-            harness.close()
             if trace_dir is not None:
+                # Build a synthetic final_state for tracing/invariants dump format compatibility
+                synthetic_state = None
+                if result is not None:
+                    business = BusinessData.model_validate(result.context)
+                    flow = FrameworkState(
+                        thread_id=result.run_id,
+                        run_id=result.run_id,
+                        metrics=result.metrics.model_dump(),
+                    )
+                    synthetic_state = WorkflowState(data=business, flow=flow, messages=[])
                 _dump_e2e_trace(
                     trace_dir,
                     role=role,
-                    final_state=final_state,
+                    final_state=synthetic_state,
                     duration_seconds=time.monotonic() - run_start,
                     error_text=error_text,
                     tmp_path=tmp_path,
                 )
 
-        assert final_state is not None  # narrow for mypy after the try/finally
+        assert result is not None
+        assert result.success is True
         # Invariant 1
-        bad = [k for k in final_state["data"].model_dump() if k.startswith("_")]
+        bad = [k for k in result.context if k.startswith("_")]
         assert bad == [], f"BusinessData carries forbidden _-prefixed keys: {bad}"
-        # Invariant 2
-        FrameworkState.model_validate(final_state["flow"].model_dump())
         # Invariant 3
-        dumped = final_state["data"].model_dump()
-        assert "segments" in dumped or len(dumped) > 0
-        # Invariant 4
-        assert len(final_state["messages"]) > 0
+        assert "segments" in result.context or len(result.context) > 0

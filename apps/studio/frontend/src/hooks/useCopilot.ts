@@ -31,6 +31,30 @@ export function useCopilot(skillId: string | null) {
   const assistantMessageIdRef = useRef<string | null>(null)
   const textQueueRef = useRef<Array<{ messageId: string, content: string, event: CopilotEvent }>>([])
 
+  const appendAssistantEvent = useCallback((event: CopilotEvent) => {
+    let messageId = assistantMessageIdRef.current
+    if (!messageId) {
+      const message = createMessage('assistant', '', 'running')
+      messageId = message.id
+      assistantMessageIdRef.current = messageId
+      copilotStore.appendMessage(message)
+    }
+
+    if (event.type === 'text_delta') {
+      textQueueRef.current.push({ messageId, content: event.content, event })
+    } else {
+      copilotStore.updateMessage(messageId, (message) => ({
+        ...message,
+        status: event.status,
+        events: [...message.events, event],
+      }))
+    }
+
+    if (event.type === 'done' || event.type === 'error') {
+      assistantMessageIdRef.current = null
+    }
+  }, [])
+
   useEffect(() => {
     if (snapshot.skillId !== skillId) {
       copilotStore.reset(skillId)
@@ -114,31 +138,7 @@ export function useCopilot(skillId: string | null) {
       socketRef.current = null
       textQueueRef.current = []
     }
-  }, [skillId])
-
-  const appendAssistantEvent = useCallback((event: CopilotEvent) => {
-    let messageId = assistantMessageIdRef.current
-    if (!messageId) {
-      const message = createMessage('assistant', '', 'running')
-      messageId = message.id
-      assistantMessageIdRef.current = messageId
-      copilotStore.appendMessage(message)
-    }
-
-    if (event.type === 'text_delta') {
-      textQueueRef.current.push({ messageId, content: event.content, event })
-    } else {
-      copilotStore.updateMessage(messageId, (message) => ({
-        ...message,
-        status: event.status,
-        events: [...message.events, event],
-      }))
-    }
-
-    if (event.type === 'done' || event.type === 'error') {
-      assistantMessageIdRef.current = null
-    }
-  }, [])
+  }, [skillId, appendAssistantEvent])
 
   const sendMessage = useCallback((content: string, modelOverride?: string | null) => {
     const trimmed = content.trim()

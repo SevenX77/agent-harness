@@ -6,7 +6,7 @@ export type ProviderType =
   | 'openai_compatible'
   | 'google_genai'
 
-export type RouteStatus = 'verified' | 'unverified_manual' | 'disabled' | 'failed'
+export type RouteStatus = 'verified' | 'unverified_manual' | 'disabled' | 'failed' | 'probe-verified'
 export type ModelProbeStatus = RouteStatus | 'testing'
 export type ProviderKind = 'official' | 'third_party' | 'custom'
 export type ProviderUiState = 'ready' | 'untested' | 'cooling_down' | 'needs_setup' | 'off'
@@ -93,6 +93,10 @@ export interface ProviderModelOption {
   provider_label: string
   provider_kind: ProviderKind
   provider_model_id: string
+  model_type?: string | null
+  capability_family?: string | null
+  input_modalities?: string[]
+  output_modalities?: string[]
   ui_state: ProviderUiState
   ui_detail?: string | null
   retry_at?: string | null
@@ -331,7 +335,7 @@ export interface RoleRouteEntry {
   runtime_settings_source?: string | null
 }
 
-export type RoleProviderPreference = 'official_first' | 'ready_first' | 'manual_order'
+export type RoleProviderPreference = 'manual_order'
 export type RoleThinkingPreference = 'off' | 'preferred' | 'required'
 export type RoleTokenIntentMode = 'default' | 'maximum_available' | 'target' | 'required_minimum'
 export type RoleTokenDowngrade = 'allow' | 'allow_with_warning' | 'block'
@@ -352,8 +356,7 @@ export interface RoleIntent {
 
 export interface RoleEntry {
   role_kind?: RoleKind
-  model_fallback: boolean
-  model_fallback_enabled?: boolean
+  model_fallback_enabled: boolean
   intent?: RoleIntent
   active_model: string
   models: Record<string, RoleModelEntry>
@@ -567,12 +570,18 @@ function legacyProviderModelOption(
 ): ProviderModelOption | null {
   const endpoint = registry.provider_endpoints[route.endpoint_id]
   if (!endpoint) return null
+  const modelType = capabilityString(route.capabilities, 'model_type')
+  const capabilityFamily = capabilityString(route.capabilities, 'capability_family') ?? modelType
   return {
     route_id: route.route_id,
     endpoint_id: endpoint.endpoint_id,
     provider_label: endpoint.display_name,
     provider_kind: endpoint.provider_kind ?? 'third_party',
     provider_model_id: route.provider_model_id,
+    model_type: modelType,
+    capability_family: capabilityFamily,
+    input_modalities: capabilityStringArray(route.capabilities, 'input_modalities'),
+    output_modalities: capabilityStringArray(route.capabilities, 'output_modalities'),
     ui_state: legacyProviderUiState(endpoint, route),
     ui_detail: legacyProviderUiDetail(endpoint, route),
     retry_at: null,
@@ -580,6 +589,25 @@ function legacyProviderModelOption(
     capability_state: Object.keys(route.capabilities).length > 0 ? 'known' : 'unknown',
     capabilities: route.capabilities,
   }
+}
+
+function capabilityString(
+  capabilities: Record<string, CapabilityValue>,
+  key: string,
+): string | null {
+  const value = capabilities[key]?.value
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function capabilityStringArray(
+  capabilities: Record<string, CapabilityValue>,
+  key: string,
+): string[] {
+  const value = capabilities[key]?.value
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+  }
+  return typeof value === 'string' && value.trim() ? [value.trim()] : []
 }
 
 function legacyProviderUiState(endpoint: ProviderEndpoint, route: ProviderRoute): ProviderUiState {
@@ -734,7 +762,7 @@ function hasLegacyRoleMaps(data: RolesData): boolean {
 }
 
 function roleEntryFromBackend(roleName: string, role: RoleEntry, data: RolesData): RoleEntry {
-  if (role.models && role.active_model !== undefined && role.model_fallback !== undefined) return role
+  if (role.models && role.active_model !== undefined && role.model_fallback_enabled !== undefined) return role
   const modelGroups = role.model_groups ?? []
   const models = Object.fromEntries(
     modelGroups.map((group) => [
@@ -747,7 +775,7 @@ function roleEntryFromBackend(roleName: string, role: RoleEntry, data: RolesData
   return {
     ...role,
     role_kind: role.role_kind ?? inferRoleKind(data, roleName),
-    model_fallback: role.model_fallback_enabled ?? true,
+    model_fallback_enabled: role.model_fallback_enabled ?? true,
     active_model: modelGroups[0]?.canonical_id ?? '',
     models,
     fallback_chain: role.fallback_chain ?? [],
@@ -777,7 +805,7 @@ function roleEntryToBackend(
   const entry: BackendRoleEntry = {
     role_kind: role.role_kind ?? inferRoleKind(data, roleName),
     system_prompt_prefix: role.system_prompt_prefix ?? '',
-    model_fallback_enabled: role.model_fallback_enabled ?? role.model_fallback,
+    model_fallback_enabled: role.model_fallback_enabled ?? true,
     intent: role.intent ?? { provider_preference: 'manual_order' },
     model_groups: Object.entries(role.models).map(([modelCode, roleModel]) => ({
       canonical_id: modelCode,
@@ -1057,7 +1085,6 @@ function endpointToCredential(
 function registryToCredentials(registry: CredentialRegistryResponse): CredentialsState {
   return {
     providers: Object.values(registry.provider_endpoints)
-      .sort((left, right) => left.endpoint_id.localeCompare(right.endpoint_id))
       .map((endpoint) => endpointToCredential(registry, endpoint)),
   }
 }
@@ -1542,17 +1569,14 @@ function providerTestResponseFromEndpointTestJob(
   }
   upsertCachedResult(request.id, cachedResult)
   if (cachedRegistry?.provider_endpoints[request.id]) {
+    const currentEndpoint = cachedRegistry.provider_endpoints[request.id]
     cachedRegistry = {
       ...cachedRegistry,
       provider_endpoints: {
         ...cachedRegistry.provider_endpoints,
         [request.id]: {
-          ...cachedRegistry.provider_endpoints[request.id],
-          status: failed
-            ? 'failed'
-            : completed && job.verified_route_count > 0
-            ? 'verified'
-            : 'unverified_manual',
+          ...currentEndpoint,
+          status: failed ? 'failed' : completed ? 'verified' : currentEndpoint.status,
           last_test_at: cachedResult.last_test_at,
           last_test_message: cachedResult.last_test_message,
         },

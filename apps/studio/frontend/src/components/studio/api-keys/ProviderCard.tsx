@@ -9,8 +9,11 @@ import {
   EyeOff,
   File,
   FileText,
+  FlaskConical,
   ImageIcon,
   Loader2,
+  MoreVertical,
+  Pencil,
   Trash2,
   TriangleAlert,
   Video,
@@ -33,18 +36,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { translateErrorCode, translateTestStatus } from "@/lib/llm-error-messages"
 import { cn } from "@/lib/utils"
 import type { CredentialsState, ModelInfo, ModelProbeStatus, ProviderTestResult, ProviderType, RouteStatus } from "../../../api/llm"
 import { providerCachedTestResult, providerTestParamsMatch } from "../settings/provider-utils"
 import type { ProviderDraft } from "../settings/types"
 import { ManualModelTestPanel } from "./ManualModelTestPanel"
+import { RoleNameDialog } from "../settings/llm-roles/RoleNameDialog"
 
 type TestMessageStatus = "not_configured" | "testing" | NonNullable<CredentialsState["providers"][number]["last_test_status"]>
 type RouteDisplayStatus = RouteStatus | "unknown" | "testing"
 const availableModelsPreviewLimit = 12
 const fieldRowClassName = "grid grid-cols-[minmax(0,1fr)_11.5rem] items-center gap-2"
-const fieldActionClassName = "flex min-w-0 items-center justify-end gap-2"
+const fieldActionClassName = "flex min-w-0 items-center justify-start gap-2"
 const scrollableInputClassName = "overflow-x-auto whitespace-nowrap text-clip"
 const providerProtocolOptions: Array<{ value: ProviderType; label: string }> = [
   { value: "openai_compatible", label: "OpenAI compatible" },
@@ -125,7 +136,7 @@ export function sortOfficialRouteInfos(models: ModelInfo[]): ModelInfo[] {
 
 function officialRouteSortRank(model: ModelInfo): number {
   const status = modelRouteStatus(model)
-  const variant = routeStatusTagVariant(status, model)
+  const variant = routeStatusTagVariant(status)
   if (variant === "success") return 0
   if (status === "testing") return 1
   if (variant === "destructive") return 4
@@ -194,8 +205,12 @@ export function TestMessage({
 function directPersistedTestResult(
   persisted: CredentialsState["providers"][number] | null,
   draft: ProviderDraft,
+  options: { backendRouteTagsAreAuthoritative?: boolean } = {},
 ): ProviderTestResult | null {
-  if (!persisted || !providerTestParamsMatch(draft, persisted)) return null
+  if (!persisted) return null
+  if (!options.backendRouteTagsAreAuthoritative && !providerTestParamsMatch(draft, persisted)) {
+    return null
+  }
   const status = persisted.last_test_status ?? (
     (persisted.available_models?.length || persisted.available_sdks?.length) ? "ok" : undefined
   )
@@ -235,7 +250,7 @@ export function ProviderDeleteButton({
         requestDeleteConfirmationToast({
           id: `delete-provider-${displayName}`,
           title: `Delete ${displayName}?`,
-          description: "This provider configuration will be removed from the credentials document.",
+          description: "This provider and its routes will be removed from API Keys, LLM Roles, and model bundles.",
           onConfirm: onDelete,
         })
       }}
@@ -245,13 +260,13 @@ export function ProviderDeleteButton({
   )
 }
 
-function FieldCopyButton({ value, label }: { value: string; label: string }) {
+function FieldCopyButton({ value, label, className }: { value: string; label: string; className?: string }) {
   return (
     <Button
       type="button"
       size="icon"
       variant="ghost"
-      className="text-muted-foreground/70 transition-none hover:text-muted-foreground"
+      className={cn("text-muted-foreground/70 transition-none hover:text-muted-foreground", className)}
       onClick={() => void copyCredentialValue(value, label)}
       disabled={!value}
       aria-label={`Copy ${label}`}
@@ -332,11 +347,13 @@ function routeDisplayStatus(model: ModelInfo, isTesting: boolean): RouteDisplayS
   return status
 }
 
-function routeStatusTagVariant(status: RouteDisplayStatus, model: ModelInfo): "success" | "destructive" | "muted" | "default" | "info" | "warning" | "multimodal" {
+function routeStatusTagVariant(status: RouteDisplayStatus): "success" | "destructive" | "muted" | "default" | "info" | "warning" | "probe-verified" {
+  if (status === "testing") return "default"
   if (status === "failed") return "destructive"
   if (status === "disabled") return "muted"
-  if (isCapabilityLibraryModel(model)) return "multimodal"
   if (status === "verified") return "success"
+  if (status === "probe-verified") return "probe-verified"
+  if (status === "unverified_manual" || status === "unknown") return "default"
   return "default"
 }
 
@@ -345,6 +362,7 @@ function routeStatusLabel(status: RouteDisplayStatus): string {
   if (status === "failed") return "Route test failed"
   if (status === "disabled") return "Disabled route"
   if (status === "testing") return "Testing route"
+  if (status === "probe-verified") return "Probe verified route (historical success)"
   if (status === "unverified_manual") return "Untested route"
   return "Route status unknown"
 }
@@ -391,6 +409,46 @@ function officialModelTypeLabel(model: ModelInfo): string | null {
   if (modelType === "translation") return "Translation model"
   if (modelType === "3d_generation") return "3D generation model"
   return null
+}
+
+function groupOfficialRouteInfos(models: ModelInfo[]): Array<{ label: string; models: ModelInfo[] }> {
+  const groups = new Map<string, ModelInfo[]>()
+  for (const model of models) {
+    const label = officialRouteGroupLabel(model)
+    groups.set(label, [...(groups.get(label) ?? []), model])
+  }
+  return [...groups.entries()]
+    .sort(([left], [right]) => officialRouteGroupRank(left) - officialRouteGroupRank(right) || left.localeCompare(right))
+    .map(([label, groupModels]) => ({ label, models: groupModels }))
+}
+
+function officialRouteGroupLabel(model: ModelInfo): string {
+  const modelType = officialModelType(model)
+  if (modelType === "language_reasoning") return "Language"
+  if (modelType === "image_generation") return "Multimodal"
+  if (modelType === "embedding") return "Embedding"
+  if (modelType === "audio") return "Audio"
+  if (modelType === "video_generation") return "Video"
+  if (modelType === "translation") return "Translation"
+  if (modelType === "3d_generation") return "3D"
+  if (modelType === "moderation") return "Moderation"
+  if (modelType === "interactions_agent") return "Interactions Agent"
+  return "Other"
+}
+
+function officialRouteGroupRank(label: string): number {
+  return [
+    "Language",
+    "Multimodal",
+    "Embedding",
+    "Audio",
+    "Video",
+    "Translation",
+    "3D",
+    "Moderation",
+    "Interactions Agent",
+    "Other",
+  ].indexOf(label)
 }
 
 function routeProfileTooltipText(model: ModelInfo, status: RouteDisplayStatus): string | null {
@@ -447,6 +505,43 @@ function routeFailureTooltipText(model: ModelInfo, status: RouteDisplayStatus): 
     message ? `Route test failed: ${message}` : "Route test failed",
     attempts,
   ].filter((line): line is string => Boolean(line)).join("\n")
+}
+
+function RouteTooltipContent({ text }: { text: string }) {
+  return (
+    <div className="space-y-1 whitespace-normal">
+      {text.split("\n").map((line, index) => {
+        const status = routeTooltipLineStatus(line)
+        if (status) {
+          const Icon = status === "warning" ? TriangleAlert : XCircle
+          return (
+            <div
+              key={`${status}-${index}-${line}`}
+              data-tooltip-diagnostic={status}
+              className={cn(
+                "flex items-start gap-1.5",
+                status === "warning" ? "text-warning" : "text-destructive",
+              )}
+            >
+              <Icon
+                aria-hidden="true"
+                data-tooltip-diagnostic-icon={status}
+                className="mt-0.5 size-3 shrink-0"
+              />
+              <span className="min-w-0 break-words">{line}</span>
+            </div>
+          )
+        }
+        return <div key={`${index}-${line}`} className="break-words">{line}</div>
+      })}
+    </div>
+  )
+}
+
+export function routeTooltipLineStatus(line: string): "warning" | "failed" | null {
+  if (line.includes("Warning:")) return "warning"
+  if (line.includes("Failed:") || line.includes("Route test failed")) return "failed"
+  return null
 }
 
 function modelProbeMessage(model: ModelInfo): string | null {
@@ -650,6 +745,7 @@ export function ProviderCard({
   const [visible, setVisible] = useState(false)
   const [showAllModels, setShowAllModels] = useState(false)
   const [endpointModelId, setEndpointModelId] = useState("")
+  const [renameOpen, setRenameOpen] = useState(false)
   const [apiKeyError, setApiKeyError] = useState("")
   const [baseUrlError, setBaseUrlError] = useState("")
   const apiKeyInputRef = useRef<HTMLInputElement>(null)
@@ -660,7 +756,11 @@ export function ProviderCard({
   const isGettingModels = draft.testingAction === "models"
   const isTestingEndpoint = draft.testingAction === "endpoint"
   const trimmedEndpointModelId = endpointModelId.trim()
-  const matchedResult = providerCachedTestResult(persisted, draft) ?? directPersistedTestResult(persisted, draft)
+  const matchedResult = providerCachedTestResult(persisted, draft)
+    ?? directPersistedTestResult(persisted, draft, {
+      backendRouteTagsAreAuthoritative: isOfficial,
+    })
+
   const hasMatchedTestResult = matchedResult !== null
   const displayName = providerDisplayName(draft, isOfficial, notableProviderKey)
   const apiKeyProviderName = displayName.replace(/ Official$/, "")
@@ -669,6 +769,7 @@ export function ProviderCard({
     ? sortOfficialRouteInfos(matchedResult?.available_models ?? [])
     : sortModelInfos(matchedResult?.available_models ?? [])
   const hasAvailableModels = availableModels.length > 0
+  const hasVerifiedModel = availableModels.some((model) => modelRouteStatus(model) === "verified")
   const availableModelsLabel = isOfficial ? "Available Routes:" : "Available Models:"
   const copyTargetLabel = isOfficial ? "route" : "model"
   const visibleModels = showAllModels ? availableModels : availableModels.slice(0, availableModelsPreviewLimit)
@@ -687,6 +788,8 @@ export function ProviderCard({
     ? "not_configured"
     : draft.isTesting
     ? "testing"
+    : hasVerifiedModel
+    ? "ok"
     : !hasMatchedTestResult
       ? "not_configured"
     : matchedStatus === "ok"
@@ -694,6 +797,7 @@ export function ProviderCard({
     : matchedStatus && matchedStatus !== "untested"
       ? matchedStatus
       : "not_configured"
+
   const handleGetModels = () => {
     const nextApiKeyError = hasApiKey ? "" : "API key is required."
     const nextBaseUrlError = providerKind === "third-party" && !draft.base_url.trim() ? "Base URL is required." : ""
@@ -709,6 +813,87 @@ export function ProviderCard({
     }
     onGetModels()
   }
+  const officialRouteGroups = isOfficial ? groupOfficialRouteInfos(visibleModels) : []
+  const modelListClassName = cn(
+    isOfficial ? "space-y-2" : "flex gap-1 flex-wrap",
+    !showAllModels && (isOfficial ? "max-h-[7rem] overflow-hidden" : "max-h-[2.75rem] overflow-hidden"),
+  )
+  const renderAvailableModelTag = (model: ModelInfo): ReactElement => {
+    const status = isOfficial ? routeDisplayStatus(model, isGettingModels) : modelRouteStatus(model)
+    const statusLabel = routeStatusLabel(status)
+    const modelType = isOfficial ? officialModelType(model) : null
+    const modelTypeLabel = isOfficial ? officialModelTypeLabel(model) : null
+    const isCapabilityModel = isOfficial && isCapabilityLibraryModel(model)
+    const profileTooltipText = isOfficial && !isCapabilityModel ? routeProfileTooltipText(model, status) : null
+    const failureTooltipText = isOfficial ? routeFailureTooltipText(model, status) : null
+    const capabilityTooltipText = isOfficial ? routeCapabilityTooltipText(model) : null
+    const primaryTooltipDetail = (
+      failureTooltipText
+      ?? (isCapabilityModel && status !== "failed"
+        ? modelTypeLabel
+        : profileTooltipText)
+    ) ?? statusLabel
+    const tooltipDetail = [
+      primaryTooltipDetail,
+      capabilityTooltipText,
+    ].filter((line): line is string => Boolean(line)).join("\n")
+    const appendModelTypeLabel = Boolean(
+      modelTypeLabel &&
+      primaryTooltipDetail !== modelTypeLabel &&
+      status !== "verified",
+    )
+    const tooltipText = isOfficial
+      ? `${model.id} - ${tooltipDetail}${appendModelTypeLabel ? ` - ${modelTypeLabel}` : ""}`
+      : `Copy ${model.id}`
+    const hasReasoningProfile = isOfficial && modelHasVerifiedReasoningProfile(model)
+    const inputModalities = isOfficial ? modelInputModalities(model) : []
+    const outputModalities = isOfficial ? modelOutputModalities(model) : []
+    const inputCapabilityIcons = modalityIcons(inputModalities, "input")
+    const outputCapabilityIcons = modalityIcons(outputModalities, "output")
+    const ariaLabel = isOfficial
+      ? `Copy ${copyTargetLabel} ${model.id}. ${tooltipDetail.replace(/\s+/g, " ")}`
+      : `Copy ${copyTargetLabel} ${model.id}`
+    const tagKey = `${model.route_id ?? model.id}:${model.status ?? "model"}`
+    const isDisabled = status === "disabled"
+    const tag = (
+      <Tag
+        key={tagKey}
+        asChild
+        variant={routeStatusTagVariant(status)}
+        size="xs"
+        className={cn(
+          isDisabled ? "cursor-not-allowed opacity-40 font-mono" : "cursor-pointer font-mono hover:bg-muted/40",
+          status === "testing" && "api-route-tag-border-flow",
+        )}
+      >
+        <button
+          type="button"
+          disabled={isDisabled}
+          onClick={isDisabled ? undefined : () => void copyAvailableModelId(model.id)}
+          aria-label={ariaLabel}
+          data-route-status={isOfficial ? status : undefined}
+          data-model-type={modelType ?? undefined}
+          data-reasoning-route={hasReasoningProfile ? true : undefined}
+          data-input-modalities={inputModalities.length > 0 ? inputModalities.join(",") : undefined}
+          data-output-modalities={outputModalities.length > 0 ? outputModalities.join(",") : undefined}
+          className={isDisabled ? "cursor-not-allowed pointer-events-none" : undefined}
+        >
+          {inputCapabilityIcons}
+          {model.id}
+          {hasReasoningProfile ? <Brain className="size-2.5 shrink-0" aria-hidden="true" /> : null}
+          {outputCapabilityIcons}
+        </button>
+      </Tag>
+    )
+    return (
+      <Tooltip key={`${tagKey}:tooltip`}>
+        <TooltipTrigger asChild>{tag}</TooltipTrigger>
+        <TooltipContent className="max-w-sm break-words">
+          <RouteTooltipContent text={tooltipText} />
+        </TooltipContent>
+      </Tooltip>
+    )
+  }
 
   return (
     <Card data-provider-id={draft.id}>
@@ -721,79 +906,101 @@ export function ProviderCard({
         ) : null}
         {!isOfficial ? <TestMessage status={testStatus} latencyMs={null} errorCode={matchedErrorCode ?? null} /> : null}
         <div className="flex-1" />
-        {!isOfficial ? <ProviderDeleteButton draftName={draft.name} onDelete={onDelete} /> : null}
+        {!isOfficial ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="shrink-0 text-muted-foreground"
+                aria-label={`More actions for ${draft.name}`}
+              >
+                <MoreVertical className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-36">
+              <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
+                <Pencil className="size-3.5 mr-2" />
+                Rename
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={() => {
+                  requestDeleteConfirmationToast({
+                    id: `delete-provider-${draft.name}`,
+                    title: `Delete ${draft.name}?`,
+                    description: "This provider and its routes will be removed from API Keys, LLM Roles, and model bundles.",
+                    onConfirm: onDelete,
+                  })
+                }}
+              >
+                <Trash2 className="size-3.5 mr-2" />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
       </CardHeader>
       <CardContent className="space-y-4">
-        {!isOfficial ? (
-          <div className="space-y-2">
-            <Label htmlFor={`provider-name-${draft.id}`}>Provider Name</Label>
-            <div className={fieldRowClassName}>
-              <Input
-                id={`provider-name-${draft.id}`}
-                value={draft.name}
-                onChange={(event) => onFieldChange({ name: event.target.value })}
-                placeholder="Provider Name"
-                aria-label="Provider Name"
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                onWheel={scrollInputContentOnWheel}
-                className={scrollableInputClassName}
-              />
-              <div aria-hidden="true" />
-            </div>
-          </div>
-        ) : null}
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
             <Label htmlFor={`api-key-${draft.id}`}>API Key</Label>
             {hasReachableModelList ? <FieldReachabilityCheck label="API key" /> : null}
           </div>
           <div className={fieldRowClassName}>
-            <Input
-              ref={apiKeyInputRef}
-              id={`api-key-${draft.id}`}
-              type={apiKeyInputType(visible)}
-              value={draft.api_key}
-              onChange={(event) => {
-                if (apiKeyError) setApiKeyError("")
-                onFieldChange({ api_key: event.target.value })
-              }}
-              placeholder={`Enter your ${apiKeyProviderName} API Key`}
-              name={`provider-secret-${draft.id}`}
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="none"
-              data-1p-ignore=""
-              data-lpignore="true"
-              data-form-type="other"
-              spellCheck={false}
-              aria-invalid={apiKeyError ? true : undefined}
-              aria-describedby={apiKeyError ? `api-key-error-${draft.id}` : undefined}
-              onWheel={scrollInputContentOnWheel}
-              className={apiKeyInputClassName(visible)}
-            />
+            <div className="flex flex-1 min-w-0 items-center gap-1.5">
+              <Input
+                ref={apiKeyInputRef}
+                id={`api-key-${draft.id}`}
+                type={apiKeyInputType(visible)}
+                value={draft.api_key}
+                onChange={(event) => {
+                  if (apiKeyError) setApiKeyError("")
+                  onFieldChange({ api_key: event.target.value })
+                }}
+                placeholder={`Enter your ${apiKeyProviderName} API Key`}
+                name={`provider-secret-${draft.id}`}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="none"
+                data-1p-ignore=""
+                data-lpignore="true"
+                data-form-type="other"
+                spellCheck={false}
+                aria-invalid={apiKeyError ? true : undefined}
+                aria-describedby={apiKeyError ? `api-key-error-${draft.id}` : undefined}
+                onWheel={scrollInputContentOnWheel}
+                className={apiKeyInputClassName(visible)}
+              />
+              <div className="flex shrink-0 items-center gap-0.5">
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="size-7 text-muted-foreground/70 transition-none hover:text-muted-foreground [&_svg]:size-3.5"
+                  onClick={() => setVisible((value) => !value)}
+                  aria-label={visible ? "Hide API key" : "Show API key"}
+                >
+                  {visible ? <EyeOff /> : <Eye />}
+                </Button>
+                <FieldCopyButton value={draft.api_key} label="API key" className="size-7 [&_svg]:size-3.5" />
+              </div>
+            </div>
             <div className={fieldActionClassName}>
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                className="text-muted-foreground/70 transition-none hover:text-muted-foreground"
-                onClick={() => setVisible((value) => !value)}
-                aria-label={visible ? "Hide API key" : "Show API key"}
-              >
-                {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-              </Button>
-              <FieldCopyButton value={draft.api_key} label="API key" />
               <Button
                 type="button"
                 variant={isOfficial ? "default" : "secondary"}
                 onClick={handleGetModels}
                 disabled={isGettingModels}
-                className="px-4"
+                className="px-4 shrink-0"
               >
-                {isGettingModels ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                {isGettingModels ? (
+                  <Loader2 data-icon="inline-start" className="size-3.5 animate-spin shrink-0" />
+                ) : isOfficial ? (
+                  <FlaskConical data-icon="inline-start" className="size-3.5 shrink-0" />
+                ) : null}
                 {isOfficial ? "Test" : "Get Models"}
               </Button>
             </div>
@@ -829,28 +1036,31 @@ export function ProviderCard({
               <Label htmlFor={`base-url-${draft.id}`}>Base URL</Label>
               {hasReachableModelList ? <FieldReachabilityCheck label="Base URL" /> : null}
             </div>
-            <div className={fieldRowClassName}>
-              <Input
-                ref={baseUrlInputRef}
-                id={`base-url-${draft.id}`}
-                value={draft.base_url}
-                onChange={(event) => {
-                  if (baseUrlError) setBaseUrlError("")
-                  onFieldChange({ base_url: event.target.value })
-                }}
-                placeholder="https://api.openai.com/v1"
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                aria-invalid={baseUrlError ? true : undefined}
-                aria-describedby={baseUrlError ? `base-url-error-${draft.id}` : undefined}
-                onWheel={scrollInputContentOnWheel}
-                className={scrollableInputClassName}
-              />
-              <div className={fieldActionClassName}>
-                <FieldCopyButton value={draft.base_url} label="Base URL" />
+             <div className={fieldRowClassName}>
+              <div className="flex flex-1 min-w-0 items-center gap-1.5">
+                <Input
+                  ref={baseUrlInputRef}
+                  id={`base-url-${draft.id}`}
+                  value={draft.base_url}
+                  onChange={(event) => {
+                    if (baseUrlError) setBaseUrlError("")
+                    onFieldChange({ base_url: event.target.value })
+                  }}
+                  placeholder="https://api.openai.com/v1"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  aria-invalid={baseUrlError ? true : undefined}
+                  aria-describedby={baseUrlError ? `base-url-error-${draft.id}` : undefined}
+                  onWheel={scrollInputContentOnWheel}
+                  className={scrollableInputClassName}
+                />
+                <div className="flex shrink-0 items-center">
+                  <FieldCopyButton value={draft.base_url} label="Base URL" className="size-7 [&_svg]:size-3.5" />
+                </div>
               </div>
+              <div aria-hidden="true" />
             </div>
             {baseUrlError ? <p id={`base-url-error-${draft.id}`} className="text-xs text-destructive">{baseUrlError}</p> : null}
           </div>
@@ -880,9 +1090,13 @@ export function ProviderCard({
                   variant="default"
                   onClick={() => onEndpointTest(trimmedEndpointModelId)}
                   disabled={isTestingEndpoint || !hasRequiredConfig || !trimmedEndpointModelId}
-                  className="px-6"
+                  className="px-6 shrink-0"
                 >
-                  {isTestingEndpoint ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                  {isTestingEndpoint ? (
+                    <Loader2 data-icon="inline-start" className="size-3.5 animate-spin shrink-0" />
+                  ) : (
+                    <FlaskConical data-icon="inline-start" className="size-3.5 shrink-0" />
+                  )}
                   Test
                 </Button>
               </div>
@@ -896,81 +1110,23 @@ export function ProviderCard({
                 <div className="text-muted-foreground">{availableModelsLabel}</div>
                 <div
                   data-testid="available-models-list"
-                  className={cn("flex gap-1 flex-wrap", !showAllModels && "max-h-[2.75rem] overflow-hidden")}
+                  className={modelListClassName}
                 >
                   <TooltipProvider>
-                    {visibleModels.map((model) => {
-                    const status = isOfficial ? routeDisplayStatus(model, isGettingModels) : modelRouteStatus(model)
-                    const statusLabel = routeStatusLabel(status)
-                    const modelType = isOfficial ? officialModelType(model) : null
-                    const modelTypeLabel = isOfficial ? officialModelTypeLabel(model) : null
-                    const isCapabilityModel = isOfficial && isCapabilityLibraryModel(model)
-                    const profileTooltipText = isOfficial && !isCapabilityModel ? routeProfileTooltipText(model, status) : null
-                    const failureTooltipText = isOfficial ? routeFailureTooltipText(model, status) : null
-                    const capabilityTooltipText = isOfficial ? routeCapabilityTooltipText(model) : null
-                    const primaryTooltipDetail = (
-                      failureTooltipText
-                      ?? (isCapabilityModel && status !== "failed"
-                        ? modelTypeLabel
-                        : profileTooltipText)
-                    ) ?? statusLabel
-                    const tooltipDetail = [
-                      primaryTooltipDetail,
-                      capabilityTooltipText,
-                    ].filter((line): line is string => Boolean(line)).join("\n")
-                    const appendModelTypeLabel = Boolean(
-                      modelTypeLabel &&
-                      primaryTooltipDetail !== modelTypeLabel &&
-                      status !== "verified",
-                    )
-                    const tooltipText = isOfficial
-                      ? `${model.id} - ${tooltipDetail}${appendModelTypeLabel ? ` - ${modelTypeLabel}` : ""}`
-                      : `Copy ${model.id}`
-                    const hasReasoningProfile = isOfficial && modelHasVerifiedReasoningProfile(model)
-                    const inputModalities = isOfficial ? modelInputModalities(model) : []
-                    const outputModalities = isOfficial ? modelOutputModalities(model) : []
-                    const inputCapabilityIcons = modalityIcons(inputModalities, "input")
-                    const outputCapabilityIcons = modalityIcons(outputModalities, "output")
-                    const ariaLabel = isOfficial
-                      ? `Copy ${copyTargetLabel} ${model.id}. ${tooltipDetail.replace(/\s+/g, " ")}`
-                      : `Copy ${copyTargetLabel} ${model.id}`
-                    const tag = (
-                      <Tag
-                        key={`${model.route_id ?? model.id}:${model.status ?? "model"}`}
-                        asChild
-                        variant={isOfficial ? routeStatusTagVariant(status, model) : "muted"}
-                        size="xs"
-                        className={cn(
-                          "cursor-pointer font-mono hover:bg-muted/40",
-                          status === "testing" && "api-route-tag-border-flow",
-                        )}
-                      >
-                          <button
-                            type="button"
-                            onClick={() => void copyAvailableModelId(model.id)}
-                            aria-label={ariaLabel}
-                            data-route-status={isOfficial ? status : undefined}
-                            data-model-type={modelType ?? undefined}
-                            data-reasoning-route={hasReasoningProfile ? true : undefined}
-                            data-input-modalities={inputModalities.length > 0 ? inputModalities.join(",") : undefined}
-                            data-output-modalities={outputModalities.length > 0 ? outputModalities.join(",") : undefined}
-                          >
-                            {inputCapabilityIcons}
-                            {model.id}
-                            {hasReasoningProfile ? <Brain className="size-2.5 shrink-0" aria-hidden="true" /> : null}
-                            {outputCapabilityIcons}
-                          </button>
-                        </Tag>
-                      )
-                    return (
-                      <Tooltip key={`${model.route_id ?? model.id}:${model.status ?? "model"}:tooltip`}>
-                        <TooltipTrigger asChild>{tag}</TooltipTrigger>
-                        <TooltipContent className="max-w-sm whitespace-pre-line break-words">
-                          {tooltipText}
-                        </TooltipContent>
-                      </Tooltip>
-                    )
-                  })}
+                    {isOfficial ? (
+                      officialRouteGroups.map((group) => (
+                        <div key={group.label} className="space-y-1" data-route-type-group={group.label}>
+                          <div className="text-[10px] font-medium uppercase text-muted-foreground">
+                            {group.label}
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {group.models.map(renderAvailableModelTag)}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      visibleModels.map(renderAvailableModelTag)
+                    )}
                   </TooltipProvider>
                 </div>
                 {availableModels.length > availableModelsPreviewLimit ? (
@@ -1006,6 +1162,17 @@ export function ProviderCard({
           />
         ) : null}
       </CardContent>
+      {!isOfficial ? (
+        <RoleNameDialog
+          title="Rename provider"
+          initialName={draft.name}
+          existingNames={[]}
+          open={renameOpen}
+          onOpenChange={setRenameOpen}
+          onSubmit={(nextName: string) => onFieldChange({ name: nextName })}
+          fieldLabel="Provider name"
+        />
+      ) : null}
     </Card>
   )
 }

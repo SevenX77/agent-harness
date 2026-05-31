@@ -50,7 +50,7 @@ vi.mock('../../ui/dropdown-menu', () => ({
 }))
 
 const role: RoleEntry = {
-  model_fallback: true,
+  model_fallback_enabled: true,
   active_model: '',
   models: {},
   system_prompt_prefix: '',

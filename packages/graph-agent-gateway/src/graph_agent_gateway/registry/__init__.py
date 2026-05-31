@@ -9,10 +9,15 @@ from graph_agent_gateway.registry.contracts import (
     SnapshotVersion,
     TerminalRetryPolicy,
 )
+from graph_agent_gateway.registry.credentials import (
+    EndpointCredentialProvider,
+    FallbackCredentialProvider,
+)
 from graph_agent_gateway.registry.schema import (
     CapabilityValue,
     EffectiveRuntimeSetting,
     EndpointCandidate,
+    EvidenceRecord,
     FieldSource,
     LintResult,
     ModelProfile,
@@ -39,6 +44,9 @@ __all__ = [
     "CredentialProviderProtocol",
     "EffectiveRuntimeSetting",
     "EndpointCandidate",
+    "EvidenceRecord",
+    "EndpointCredentialProvider",
+    "FallbackCredentialProvider",
     "FieldSource",
     "LintResult",
     "ModelProfile",

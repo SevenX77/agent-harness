@@ -70,6 +70,11 @@ def load_credentials(path: Path | None = None) -> LLMCredentialsFile:
 def save_credentials(data: LLMCredentialsFile, path: Path | None = None) -> None:
     """Atomically write credentials and force file permissions to ``0600``."""
     credential_path = path or credentials_path()
+    from app.services.file_watcher import record_api_write
+    try:
+        record_api_write(credential_path)
+    except Exception:
+        pass
     with _credentials_lock:
         _save_credentials_unlocked(data, credential_path)
 
@@ -444,7 +449,7 @@ def _is_new_secret(secret: SecretStr) -> bool:
 def _save_credentials_unlocked(data: LLMCredentialsFile, credential_path: Path) -> None:
     """Atomic write without acquiring the lock; caller must hold it."""
     payload = _credentials_payload_for_storage(data)
-    serialized = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+    serialized = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=False)
     credential_path.parent.mkdir(parents=True, exist_ok=True)
     credential_path.parent.chmod(0o700)
     fd, tmp_name = tempfile.mkstemp(

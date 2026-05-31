@@ -5,6 +5,14 @@ from __future__ import annotations
 from pydantic import SecretStr
 
 
+class StaticCredentialProvider:
+    def __init__(self, secrets: dict[str, str]) -> None:
+        self.secrets = secrets
+
+    def get(self, ref: str) -> SecretStr:
+        return SecretStr(self.secrets[ref])
+
+
 def _route():
     from graph_agent_gateway.registry.schema import ResolvedRoute
 
@@ -14,7 +22,7 @@ def _route():
         endpoint_id="openai-direct",
         protocol="openai_compatible",
         base_url="https://api.openai.example/v1",
-        api_key=SecretStr("secret"),
+        credential_ref="endpoint:openai-direct",
         credential_fingerprint="fingerprint-a",
         timeout_seconds=17,
         trust_env=False,
@@ -54,12 +62,24 @@ def test_runtime_policy_changes_runtime_client_cache_key_not_credential_fingerpr
         endpoint_id=route.endpoint_id,
         protocol=route.protocol,
         base_url=route.base_url,
-        api_key=route.api_key,
+        credential_ref=route.credential_ref,
         timeout_seconds=route.timeout_seconds,
         trust_env=route.trust_env,
         proxy_env=route.proxy_env,
     )
     assert compute_credential_fingerprint(endpoint) == compute_credential_fingerprint(endpoint)
+
+
+def test_resolve_api_key_uses_credential_provider_ref() -> None:
+    from graph_agent_gateway.client_manager import LLMClientManager
+
+    route = _route()
+    provider = StaticCredentialProvider({"endpoint:openai-direct": "secret-from-provider"})
+
+    assert (
+        LLMClientManager._resolve_api_key(route, credential_provider=provider)
+        == "secret-from-provider"
+    )
 
 
 def test_provider_down_ttl_comes_from_runtime_policy(monkeypatch) -> None:
@@ -346,7 +366,6 @@ def test_openai_runtime_settings_map_to_chat_completion_kwargs() -> None:
 def test_openai_call_method_responses_uses_responses_api(monkeypatch) -> None:
     from graph_agent_gateway.client_manager import LLMClientManager
     from graph_agent_gateway.registry.schema import ResolvedRoute, RuntimePolicy
-    from pydantic import SecretStr
 
     captured: list[dict[str, object]] = []
 
@@ -368,7 +387,7 @@ def test_openai_call_method_responses_uses_responses_api(monkeypatch) -> None:
         endpoint_id="openai",
         protocol="openai_compatible",
         base_url="https://api.openai.example/v1",
-        api_key=SecretStr("secret"),
+        credential_ref="endpoint:openai",
         credential_fingerprint="fp",
         provider_model_id="gpt-5",
         canonical_id="gpt-5",

@@ -19,6 +19,7 @@ The current branch starts with a compatibility kernel. It introduces the data co
 - Establish the Control Plane / Gateway boundary as SDK facades.
 - Move snapshots toward `credential_ref` and versioned contracts without breaking current runtime.
 - Model retry, fallback, and fail-request as separate decisions.
+- Make draft discovery, provider list observations, and route probes durable evidence with explicit trust states.
 - Keep v1.1 implementation traceable through Kiro tasks.
 
 ### Non-Goals
@@ -26,7 +27,7 @@ The current branch starts with a compatibility kernel. It introduces the data co
 - Do not turn Control Plane or Gateway into service processes.
 - Do not delete `ResolvedRoute.api_key` in the first compatibility slice.
 - Do not move Studio provider-specific probe code to Gateway until Gateway probe primitives are implemented.
-- Do not add or redesign Studio frontend UI in this slice.
+- Do not let draft evidence alone mark a route as active runtime-ready.
 
 ## Architecture
 
@@ -103,6 +104,7 @@ sequenceDiagram
 | 6.1-6.4 | Studio backend/frontend consumption | Phase 3/UI tasks |
 | 7.1-7.4 | Phased migration | Kiro tasks, legacy doc banner |
 | 8.1-8.6 | Copilot credential-provider runtime integration | Copilot SDK terminal adapter, CredentialProvider callback, session cache policy |
+| 9.1-9.13 | Draft evidence and route testing semantics | Role intent migration, profile probe writeback, evidence library, provider/list/probe split, typed route families |
 
 ## Components And Interfaces
 
@@ -131,6 +133,41 @@ Gateway owns provider execution contracts, but not product catalog state. The fi
 ### Studio Control Plane Shell
 
 Studio backend currently hosts Control Plane behavior. Future tasks extract router job state and probe orchestration into services before package extraction.
+
+### Draft Evidence Library
+
+`ProviderImportDraft` began as a transient import queue. Requirement 9 extends it into a durable evidence library owned by the Control Plane side of Studio until package extraction. Evidence is advisory unless it has been promoted into active credentials through a successful live probe.
+
+| Record | Key fields | Trust state |
+|---|---|---|
+| Provider documentation evidence | `provider_id`, `source_url`, `retrieved_at`, `capability_family`, `notes` | `doc-discovered`, `stale`, `deprecated` |
+| Model documentation evidence | `provider_model_id`, `model_docs_url`, `input_modalities`, `output_modalities`, `model_type` | `doc-discovered`, `stale`, `deprecated` |
+| Model-list observation | `endpoint_id`, `base_url_fingerprint`, `observed_model_ids`, `diff`, `observed_at` | `provider-list-observed` |
+| Route candidate evidence | `route_slug`, `canonical_id`, `candidate_methods`, `candidate_capabilities`, `capability_family` | `draft-inferred`, `provider-list-observed`, `doc-discovered` |
+| Probe evidence | `route_id`, `model_id`, `method_id`, `request_mapper_id`, `status`, `reason`, `attempted_at`, `scope` | `probe-verified`, `probe-failed` |
+| Agent notes | `author`, `note`, `created_at`, `scope`, `links` | attached to the scoped evidence state |
+
+Evidence storage is append-oriented. A failed probe records a new `probe-failed` item with reason, timestamp, and scope. It does not delete an older `probe-verified` item; active credentials readiness is updated only by the credential write path.
+
+### Testing Semantics
+
+Provider-level API Keys Test and Get Models validate connectivity and model-list availability. They may hydrate draft-inferred candidates and record diffs, but they do not generation-probe every model. Providers without a model-list API, such as Wavespeed-style endpoints, use draft evidence for suggestions; a 200 only proves endpoint/key connectivity.
+
+Single-model tests and Role Test route probes execute generation probes. Success writes active credentials `verified_profiles`, route capabilities, and probe attempts, and also appends `probe-verified` evidence. Failure appends `probe-failed` evidence and returns the scoped failure reason to the current UI workflow.
+
+Role Test must probe missing official `VerifiedProfile` data in place for the single route/model being tested. A successful probe continues the same role test using the profile it just wrote. A failed probe reports the concrete provider/profile error inside the role test result instead of redirecting the user to API Keys.
+
+### Role Intent Migration
+
+`official_first` and `ready_first` are removed as runtime intents. Existing persisted role data is migrated to `manual_order` at schema load time, and the migration preserves the existing order of `model_groups`, `provider_models`, and `fallback_chain`. The materializer no longer reorders user-authored provider chains based on provider kind or readiness.
+
+Studio frontend treats Thinking as a preference switch. Enabled saves `thinking: "preferred"` and disabled saves `thinking: "off"`. Backend schemas keep `thinking: "required"` for admin or non-UI inputs, where unknown capability can still block pending a probe.
+
+### Typed Capability Groups
+
+Active runtime remains credentials plus roles. Draft evidence can seed, hydrate, or explain route candidates, but it cannot present unverified candidates as active runtime-ready. Route tags use a shared color vocabulary: green for live probe verified and active credentials, blue for inferred or observed candidates without generation proof, and warning/destructive for failed, deprecated, or stale evidence.
+
+Language fallback chains admit only routes whose input and output modalities include `text`. Multimodal, embedding, audio, video, translation, 3D, moderation, and interactions-agent candidates are first-class provider capability records shown in typed groups until there are dedicated role types. Route and model records expose `model_type` or `capability_family` so UI grouping does not infer eligibility from names.
 
 ### Copilot Credential Runtime Path
 

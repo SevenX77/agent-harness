@@ -1570,17 +1570,14 @@ function providerTestResponseFromEndpointTestJob(
   }
   upsertCachedResult(request.id, cachedResult)
   if (cachedRegistry?.provider_endpoints[request.id]) {
+    const currentEndpoint = cachedRegistry.provider_endpoints[request.id]
     cachedRegistry = {
       ...cachedRegistry,
       provider_endpoints: {
         ...cachedRegistry.provider_endpoints,
         [request.id]: {
-          ...cachedRegistry.provider_endpoints[request.id],
-          status: failed
-            ? 'failed'
-            : completed && job.verified_route_count > 0
-            ? 'verified'
-            : 'unverified_manual',
+          ...currentEndpoint,
+          status: failed ? 'failed' : completed ? 'verified' : currentEndpoint.status,
           last_test_at: cachedResult.last_test_at,
           last_test_message: cachedResult.last_test_message,
         },

@@ -1,0 +1,12 @@
+id: F-missing-core-tests
+description: Missing core paths and targeted tests should fail.
+feature_boundary:
+  kind: public-method
+  evidence: graph_agent.run_skill
+sources:
+  - public-api
+error_codes_primary: []
+error_codes_secondary: []
+events_primary: []
+events_secondary: []
+non_functional_contracts: []

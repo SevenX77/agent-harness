@@ -65,6 +65,25 @@ packages = ["src/graph_agent"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "tier1: core smoke-tier tests for fast PR confidence",
+]
+
+[tool.ruff]
+extend = "../../pyproject.toml"
+
+[tool.ruff.lint]
+extend-select = ["C901"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/**" = ["C901"]
+"src/graph_agent/core/error_registry.py" = ["E501"]
+"src/graph_agent/cognitive/prompt.py" = ["E501"]
+"tests/**" = ["E501"]
+"tests/test_round30_pr*_*.py" = ["I001"]
 
 [[tool.mypy.overrides]]
 module = "langgraph.checkpoint.postgres.*"

@@ -1,0 +1,38 @@
+features:
+- id: F-runtime-execution
+  description: Run compiled graph skills and return stable workflow results to callers.
+  feature_boundary:
+    kind: public-method
+    evidence: graph_agent.run_skill
+  sources:
+  - public-api
+  - source-file-map
+  core_paths:
+  - path: packages/graph-agent/src/graph_agent/core/runner.py
+  error_codes_primary:
+  - '[F-v3-runtime-phase-failed]'
+  error_codes_secondary: []
+  events_primary:
+  - HeartbeatEvent
+  - InterruptedEvent
+  - PhaseEndEvent
+  - PhaseStartEvent
+  - ResumedEvent
+  - RunEndedEvent
+  - RunStartedEvent
+  - ThreadCleanedUpEvent
+  events_secondary: []
+  non_functional_contracts: []
+  targeted_tests:
+  - tests/core/test_run_skill_entrypoint_root_shape.py::test_run_skill_single_markdown_file_returns_v030_root_error
+  public_api_symbols:
+  - PhaseEndEvent
+  - PhaseStartEvent
+  - WorkflowResult
+  - run_skill
+source_file_map:
+  files:
+  - path: packages/graph-agent/src/graph_agent/core/runner.py
+    classification: feature
+    feature_ids:
+    - F-runtime-execution

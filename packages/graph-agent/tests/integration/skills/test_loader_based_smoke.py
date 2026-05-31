@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from graph_agent.core.loader import CompiledSkill, SkillLoader
-from graph_agent.core.manifest import LogicNodeAST, SkillNodeAST
+from graph_agent.core.manifest import AgentNodeAST, LogicNodeAST
 
 pytest.skip(
     "by-design: V1 layout skill awaiting user V2.1 cutover (Phase 1 baseline)",
@@ -113,16 +114,16 @@ def test_logic_actions_are_discovered_from_v21_phase_dirs(
     compiled_skills: dict[str, CompiledSkill],
     skill_id: str,
     phase_id: str,
-    callable_name: str,
+    action_name: str,
     relative_path: str,
 ) -> None:
     compiled = compiled_skills[skill_id]
     node = next(node for node in compiled.nodes if node.phase_name == phase_id)
 
     assert isinstance(node.ast, LogicNodeAST)
-    assert node.ast.python_callable == callable_name
-    assert callable_name in compiled.actions.for_phase(phase_id)
-    assert compiled.actions.for_phase(phase_id)[callable_name].path == (
+    assert node.ast.actions == [action_name]
+    assert action_name in compiled.actions.for_phase(phase_id)
+    assert compiled.actions.for_phase(phase_id)[action_name].path == (
         REPO_ROOT / "skills" / skill_id / relative_path
     )
 
@@ -145,5 +146,5 @@ def test_final_skill_phases_document_output_contracts(
     compiled = compiled_skills[skill_id]
     node = next(node for node in compiled.nodes if node.phase_name == phase_id)
 
-    assert isinstance(node.ast, SkillNodeAST)
+    assert isinstance(node.ast, AgentNodeAST)
     assert required_exit_text in node.ast.exit_contract

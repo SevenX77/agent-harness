@@ -23,6 +23,7 @@ def test_beta_factory_builds_six_middlewares_in_contract_order() -> None:
         unattended=False,
         interrupt_fn=None,
     )
+
     def contract_name(middleware: object) -> str:
         name = type(middleware).__name__.removesuffix("Middleware")
         if name == "ToolErrorHandling":
@@ -45,10 +46,11 @@ def test_beta_factory_does_not_copy_a_parallel_order_list() -> None:
 def test_beta_tracing_tool_error_loop_detection_skeletons_are_physical_classes() -> None:
     """Unit: missing middleware layers must exist as importable AgentMiddleware skeletons."""
 
+    from langchain.agents.middleware import AgentMiddleware
+
     from graph_agent.middleware.loop_detection import LoopDetectionMiddleware
     from graph_agent.middleware.tool_error import ToolErrorHandlingMiddleware
     from graph_agent.middleware.tracing import TracingMiddleware
-    from langchain.agents.middleware import AgentMiddleware
 
     assert issubclass(TracingMiddleware, AgentMiddleware)
     assert issubclass(ToolErrorHandlingMiddleware, AgentMiddleware)

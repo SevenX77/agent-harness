@@ -73,9 +73,9 @@ def test_skills_list_and_detail_use_real_skill_files(client: TestClient) -> None
     detail_response = client.get("/api/skills/text-segmentation")
     assert detail_response.status_code == 200
     body = detail_response.json()
-    assert body["manifest"]["schema_version"] == "2.1"
+    assert body["manifest"]["schema_version"] == "v0.3.0"
     assert body["io_schema"]["inputs"]["properties"]["input_text"]["type"] == "string"
-    assert body["manifest"]["phases"][0]["id"] == "setup"
+    assert body["manifest"]["phases"][0] == "setup"
     assert "GRAPH.md" in body["files"]
     assert body["lint_result"]["status"] == "passed"
 
@@ -95,7 +95,7 @@ def test_lint_reports_failed_manifest_with_line_number(
     skill_dir = copy_skill(skills_dir, workspaces_dir, "text-segmentation")
     skill_path = skill_dir / "phases" / "setup" / "LOGIC.md"
     skill_path.write_text(
-        skill_path.read_text(encoding="utf-8").replace("mode: logic\n", "mode: bogus\n"),
+        skill_path.read_text(encoding="utf-8").replace("---\n", "---\nmode: bogus\n", 1),
         encoding="utf-8",
     )
 
@@ -826,34 +826,45 @@ def _agent_skill_content(skill_id: str) -> str:
 def _agent_skill_files(skill_id: str) -> dict[str, str]:
     return {
         "GRAPH.md": f"""---
-schema_version: "2.1"
+schema_version: "v0.3.0"
 name: {skill_id}
 description: Draft structured ideas
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+      input_text:
+        type: string
+    additionalProperties: true
+  outputs:
+    type: object
+    properties:
+      prepared:
+        type: boolean
+    additionalProperties: true
+phases:
+  - setup
 ---
-<input src="io/inputs.json" />
-<output src="io/outputs.json" />
-<phase id="setup" src="phases/setup" depends_on="" />
-""",
-        "io/inputs.json": """{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "properties": {"topic": {"type": "string"}, "input_text": {"type": "string"}},
-  "additionalProperties": true
-}
-""",
-        "io/outputs.json": """{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "additionalProperties": true
-}
+<phase depends_on="input" output>setup</phase>
 """,
         "phases/setup/LOGIC.md": """---
-mode: logic
-name: setup
+io:
+  inputs:
+    type: object
+    properties:
+      topic:
+        type: string
+      input_text:
+        type: string
+  outputs:
+    type: object
+    properties:
+      prepared:
+        type: boolean
 ---
-<python_callable>
-prepare
-</python_callable>
+<action>prepare</action>
 """,
         "phases/setup/actions/prepare.py": """def prepare(context):
     context.set("prepared", True)

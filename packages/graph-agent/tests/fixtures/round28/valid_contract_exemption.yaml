@@ -1,0 +1,14 @@
+version: "1"
+exemptions:
+  - exemption_id: EX-0001-retired-demo-feature
+    pr: PR-999
+    pm_approval: PM approved retirement of the demo feature.
+    reason: Replaced by F-runtime-execution.
+    symbols: []
+    fields: []
+    hashes: []
+    affected_features:
+      - F-old-demo
+    replacement_feature_ids:
+      - F-runtime-execution
+    expires_or_cleanup: Remove after replacement ships.

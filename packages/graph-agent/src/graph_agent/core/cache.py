@@ -1,9 +1,10 @@
-"""AST cache for V2.1 skill compilation."""
+"""AST cache for V0.3.0 skill compilation."""
 
 from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import sys
 from importlib import metadata
 from pathlib import Path
@@ -14,14 +15,17 @@ from pydantic import TypeAdapter
 from graph_agent.core.loader import CompiledSkill, PhaseDocument
 from graph_agent.core.manifest import GraphManifest, PhaseAST
 
+logger = logging.getLogger(__name__)
+
 
 def get_cache_dir() -> Path:
-    return Path.home() / ".cache" / "graph-agent-v21"
+    return Path.home() / ".cache" / "graph-agent-v030"
 
 
 def compute_cache_key(root: Path) -> str:
     root = root.resolve()
     payload = {
+        "format": "v2",
         "root": str(root),
         "python": list(sys.version_info[:3]),
         "package": _get_graph_agent_version(),
@@ -38,7 +42,8 @@ def load_from_cache(key: str, root: Path) -> CompiledSkill | None:
     try:
         snapshot = json.loads(cache_file.read_text(encoding="utf-8"))
         return _rehydrate_compiled_skill(snapshot, root)
-    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        logger.warning("[Cache] Failed to load cached compiled skill %s: %s", key, exc)
         return None
 
 
@@ -57,9 +62,6 @@ def _collect_skill_files(root: Path) -> list[Path]:
     graph = root / "GRAPH.md"
     if graph.exists():
         files.append(graph)
-    io_dir = root / "io"
-    if io_dir.exists():
-        files.extend(path for path in io_dir.glob("*.json") if path.is_file())
     phases_dir = root / "phases"
     if phases_dir.exists():
         files.extend(path for path in phases_dir.rglob("*.md") if path.is_file())
@@ -96,11 +98,60 @@ def _dehydrate_compiled_skill(compiled: CompiledSkill) -> dict[str, Any]:
             }
             for node in compiled.nodes
         ],
+        "subagents_by_phase": {
+            phase_id: [
+                {
+                    "parent_phase_id": subagent.parent_phase_id,
+                    "name": subagent.name,
+                    "target_skill": subagent.target_skill,
+                    "description": subagent.description,
+                    "root": str(subagent.root),
+                    "input_schema": subagent.input_schema,
+                    "expected_schema": subagent.expected_schema,
+                }
+                for subagent in subagents
+            ]
+            for phase_id, subagents in compiled.subagents_by_phase.items()
+        },
+        "phase_tokens": {
+            phase_id: {
+                "phase_id": token.phase_id,
+                "raw_text": token.raw_text,
+                "start_offset": token.start_offset,
+                "end_offset": token.end_offset,
+                "line_start": token.line_start,
+                "line_end": token.line_end,
+                "attrs": token.attrs,
+                "attr_spans": {
+                    attr_name: {
+                        "name": span.name,
+                        "value": span.value,
+                        "quote": span.quote,
+                        "attr_start": span.attr_start,
+                        "attr_end": span.attr_end,
+                        "value_start": span.value_start,
+                        "value_end": span.value_end,
+                        "line_start": span.line_start,
+                        "line_end": span.line_end,
+                    }
+                    for attr_name, span in token.attr_spans.items()
+                },
+            }
+            for phase_id, token in compiled.phase_tokens.items()
+        },
     }
 
 
 def _rehydrate_compiled_skill(snapshot: dict[str, Any], root: Path) -> CompiledSkill:
-    from graph_agent.core.loader import _discover_actions_and_tools
+    from graph_agent.core.loader import (
+        CompiledSubagent,
+        PhaseAttributeSpan,
+        PhaseTokenInfo,
+        _discover_actions_and_tools,
+        _inject_subagent_tools,
+        _subagent_input_model_name,
+    )
+    from graph_agent.core.subagents import build_subagent_input_model
 
     manifest = GraphManifest.model_validate(snapshot["manifest"])
     adapter: TypeAdapter[PhaseAST] = TypeAdapter(PhaseAST)
@@ -117,12 +168,53 @@ def _rehydrate_compiled_skill(snapshot: dict[str, Any], root: Path) -> CompiledS
     ]
     discovered = [(node.phase_name, node.path, node.mode) for node in nodes]
     actions, tools = _discover_actions_and_tools(root.resolve(), discovered)
+    subagents_by_phase: dict[str, list[CompiledSubagent]] = {}
+    for phase_id, subagents in dict(snapshot["subagents_by_phase"]).items():
+        hydrated_subagents: list[CompiledSubagent] = []
+        for item in subagents:
+            input_schema = dict(item["input_schema"])
+            input_model = build_subagent_input_model(
+                _subagent_input_model_name(str(item["parent_phase_id"]), str(item["name"])),
+                input_schema,
+            )
+            hydrated_subagents.append(
+                CompiledSubagent(
+                    parent_phase_id=str(item["parent_phase_id"]),
+                    name=str(item["name"]),
+                    target_skill=str(item["target_skill"]),
+                    description=str(item["description"]),
+                    root=Path(item["root"]),
+                    input_schema=input_schema,
+                    input_model=input_model,
+                    expected_schema=dict(item["expected_schema"]),
+                )
+            )
+        subagents_by_phase[str(phase_id)] = hydrated_subagents
+    phase_tokens: dict[str, PhaseTokenInfo] = {}
+    for phase_id, token in dict(snapshot["phase_tokens"]).items():
+        attr_spans = {
+            str(attr_name): PhaseAttributeSpan(**span)
+            for attr_name, span in dict(token["attr_spans"]).items()
+        }
+        phase_tokens[str(phase_id)] = PhaseTokenInfo(
+            phase_id=str(token["phase_id"]),
+            raw_text=str(token["raw_text"]),
+            start_offset=int(token["start_offset"]),
+            end_offset=int(token["end_offset"]),
+            line_start=int(token["line_start"]),
+            line_end=int(token["line_end"]),
+            attrs=dict(token["attrs"]),
+            attr_spans=attr_spans,
+        )
+    tools = _inject_subagent_tools(tools, subagents_by_phase)
     return CompiledSkill(
         raw=dict(snapshot["raw"]),
         manifest=manifest,
         nodes=nodes,
         actions=actions,
         tools=tools,
+        subagents_by_phase=subagents_by_phase,
+        phase_tokens=phase_tokens,
     )
 
 

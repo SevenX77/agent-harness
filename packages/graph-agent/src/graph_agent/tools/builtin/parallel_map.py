@@ -30,8 +30,9 @@ Behaviour:
 from __future__ import annotations
 
 import logging
+import time as _time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -106,63 +107,35 @@ def parallel_map(
     # can fold all the sibling sub-runs' events under one timeline block.
     # Per Gemini Q7 sub-run events still merge into the parent tracing.jsonl
     # via shared callbacks; the boundary events give the folding anchor.
-    import time as _time
-
     group_start_monotonic = _time.monotonic()
-    if callbacks:
-        from graph_agent.callbacks.events import ParallelMapGroupStartedEvent
-
-        _start_event = ParallelMapGroupStartedEvent(
-            group_key=group_key,
-            skill_path=str(skill_path),
-            item_count=len(item_list),
-            max_concurrent=max_concurrent,
-            item_as=item_as,
-        )
-        for cb in callbacks:
-            try:
-                cb.on_event(_start_event)
-            except Exception:  # noqa: BLE001
-                logger.exception(
-                    "parallel_map: callback %r failed on GroupStarted",
-                    type(cb).__name__,
-                )
+    _emit_group_started(
+        callbacks,
+        group_key=group_key,
+        skill_path=skill_path,
+        item_count=len(item_list),
+        max_concurrent=max_concurrent,
+        item_as=item_as,
+    )
 
     with ThreadPoolExecutor(max_workers=max_concurrent) as pool:
-        future_to_index: dict[Any, int] = {}
-        for idx, item in enumerate(item_list):
-            sub_run_id = f"{group_key}-{idx:04d}"
-            future = pool.submit(
-                _run_one_item,
-                skill_path=skill_path,
-                item=item,
-                item_as=item_as,
-                base_inputs=base_inputs,
-                sub_run_id=sub_run_id,
-                group_key=group_key,
-                callbacks=callbacks,
-                trace_dir=trace_dir,
-                skill_resolver=skill_resolver,
-            )
-            future_to_index[future] = idx
-
-        for future in as_completed(future_to_index):
-            idx = future_to_index[future]
-            sub_run_id = f"{group_key}-{idx:04d}"
-            try:
-                results[idx] = future.result()
-            except Exception as exc:
-                logger.exception(
-                    "parallel_map: sub-run %s failed (skill=%s)",
-                    sub_run_id,
-                    skill_path,
-                )
-                if stop_on_error:
-                    # Cancel outstanding runs and re-raise.
-                    for pending in future_to_index:
-                        pending.cancel()
-                    raise
-                results[idx] = {"error": str(exc), "sub_run_id": sub_run_id}
+        future_to_index = _submit_parallel_map_items(
+            pool,
+            skill_path=skill_path,
+            item_list=item_list,
+            item_as=item_as,
+            base_inputs=base_inputs,
+            group_key=group_key,
+            callbacks=callbacks,
+            trace_dir=trace_dir,
+            skill_resolver=skill_resolver,
+        )
+        _collect_parallel_map_results(
+            future_to_index,
+            results=results,
+            group_key=group_key,
+            skill_path=skill_path,
+            stop_on_error=stop_on_error,
+        )
 
     succeeded = sum(1 for r in results if r and "error" not in r)
     failed = sum(1 for r in results if r and "error" in r)
@@ -175,26 +148,129 @@ def parallel_map(
     )
 
     # Tier 1 Commit C (T-B9): close the visible group boundary.
-    if callbacks:
-        from graph_agent.callbacks.events import ParallelMapGroupEndedEvent
-
-        _end_event = ParallelMapGroupEndedEvent(
-            group_key=group_key,
-            succeeded=succeeded,
-            failed=failed,
-            wall_time_seconds=round(_time.monotonic() - group_start_monotonic, 3),
-        )
-        for cb in callbacks:
-            try:
-                cb.on_event(_end_event)
-            except Exception:  # noqa: BLE001
-                logger.exception(
-                    "parallel_map: callback %r failed on GroupEnded",
-                    type(cb).__name__,
-                )
+    _emit_group_ended(
+        callbacks,
+        group_key=group_key,
+        succeeded=succeeded,
+        failed=failed,
+        wall_time_seconds=round(_time.monotonic() - group_start_monotonic, 3),
+    )
 
     # Every slot was populated either by a result or an error placeholder.
     return [r for r in results if r is not None]
+
+
+def _emit_group_started(
+    callbacks: list[Any] | None,
+    *,
+    group_key: str,
+    skill_path: str | Path,
+    item_count: int,
+    max_concurrent: int,
+    item_as: str,
+) -> None:
+    if not callbacks:
+        return
+    from graph_agent.callbacks.events import ParallelMapGroupStartedEvent
+
+    event = ParallelMapGroupStartedEvent(
+        group_key=group_key,
+        skill_path=str(skill_path),
+        item_count=item_count,
+        max_concurrent=max_concurrent,
+        item_as=item_as,
+    )
+    _emit_callback_event(callbacks, event, "GroupStarted")
+
+
+def _emit_group_ended(
+    callbacks: list[Any] | None,
+    *,
+    group_key: str,
+    succeeded: int,
+    failed: int,
+    wall_time_seconds: float,
+) -> None:
+    if not callbacks:
+        return
+    from graph_agent.callbacks.events import ParallelMapGroupEndedEvent
+
+    event = ParallelMapGroupEndedEvent(
+        group_key=group_key,
+        succeeded=succeeded,
+        failed=failed,
+        wall_time_seconds=wall_time_seconds,
+    )
+    _emit_callback_event(callbacks, event, "GroupEnded")
+
+
+def _emit_callback_event(callbacks: list[Any], event: Any, label: str) -> None:
+    for cb in callbacks:
+        try:
+            cb.on_event(event)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "parallel_map: callback %r failed on %s",
+                type(cb).__name__,
+                label,
+            )
+
+
+def _submit_parallel_map_items(
+    pool: ThreadPoolExecutor,
+    *,
+    skill_path: str | Path,
+    item_list: list[Any],
+    item_as: str,
+    base_inputs: dict[str, Any],
+    group_key: str,
+    callbacks: list[Any] | None,
+    trace_dir: str | Path | None,
+    skill_resolver: SkillResolverProtocol,
+) -> dict[Future[dict[str, Any]], int]:
+    future_to_index: dict[Future[dict[str, Any]], int] = {}
+    for idx, item in enumerate(item_list):
+        sub_run_id = f"{group_key}-{idx:04d}"
+        future = pool.submit(
+            _run_one_item,
+            skill_path=skill_path,
+            item=item,
+            item_as=item_as,
+            base_inputs=base_inputs,
+            sub_run_id=sub_run_id,
+            group_key=group_key,
+            callbacks=callbacks,
+            trace_dir=trace_dir,
+            skill_resolver=skill_resolver,
+        )
+        future_to_index[future] = idx
+    return future_to_index
+
+
+def _collect_parallel_map_results(
+    future_to_index: dict[Future[dict[str, Any]], int],
+    *,
+    results: list[dict[str, Any] | None],
+    group_key: str,
+    skill_path: str | Path,
+    stop_on_error: bool,
+) -> None:
+    for future in as_completed(future_to_index):
+        idx = future_to_index[future]
+        sub_run_id = f"{group_key}-{idx:04d}"
+        try:
+            results[idx] = future.result()
+        except Exception as exc:
+            logger.exception(
+                "parallel_map: sub-run %s failed (skill=%s)",
+                sub_run_id,
+                skill_path,
+            )
+            if stop_on_error:
+                for pending in future_to_index:
+                    pending.cancel()
+                raise
+            results[idx] = {"error": str(exc), "sub_run_id": sub_run_id}
 
 
 def _run_one_item(

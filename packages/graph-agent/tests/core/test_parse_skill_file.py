@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from graph_agent.core.exceptions import SkillLoadError
-from graph_agent.core.parser import parse_markdown_parts, parse_skill_file
+from graph_agent.core.parser import parse_markdown_parts
 
 
 def _write(path: Path, text: str) -> None:
@@ -60,11 +61,3 @@ def test_parse_markdown_parts_rejects_non_mapping_frontmatter(tmp_path: Path) ->
 
     with pytest.raises(SkillLoadError, match="YAML dictionary"):
         parse_markdown_parts(path)
-
-
-def test_parse_skill_file_is_removed_schema20_api(tmp_path: Path) -> None:
-    path = tmp_path / "SKILL.md"
-    _write(path, "---\nname: old\n---\n")
-
-    with pytest.raises(SkillLoadError, match="schema 2.0 parse_skill_file is not supported"):
-        parse_skill_file(path)

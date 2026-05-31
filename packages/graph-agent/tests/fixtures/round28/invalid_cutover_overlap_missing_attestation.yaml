@@ -1,0 +1,5 @@
+cutover:
+  old_gate: packages/graph-agent/tests/test_feature_traceability_matrix.py
+  new_gate: packages/graph-agent/tests/test_round28_contract_manifests.py
+  dual_run_hours: 0
+  independent_main_green_prs: 0

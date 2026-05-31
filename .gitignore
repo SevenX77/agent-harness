@@ -9,6 +9,10 @@ __pycache__/
 *.so
 .Python
 build/
+!packages/graph-agent/tests/fixtures/v030_e2e_pipeline/registry/expander/phases/build/
+!packages/graph-agent/tests/fixtures/v030_e2e_pipeline/registry/expander/phases/build/**
+packages/graph-agent/tests/fixtures/v030_e2e_pipeline/registry/expander/phases/build/**/__pycache__/
+packages/graph-agent/tests/fixtures/v030_e2e_pipeline/registry/expander/phases/build/**/*.pyc
 develop-eggs/
 dist/
 downloads/

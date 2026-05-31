@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import langchain_openai.chat_models.base as lc_openai_base
+from langchain_core.messages import AIMessage, HumanMessage
+
 from graph_agent.models import reasoning_patch
 from graph_agent.models.reasoning_patch import _apply_reasoning_content_patch
-from langchain_core.messages import AIMessage, HumanMessage
 
 
 def test_message_to_dict_echoes_ai_reasoning_content() -> None:

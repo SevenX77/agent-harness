@@ -24,6 +24,26 @@
 
 ## 实际 ship 的成果 (2 个 PR 等你 review)
 
+### ✅ Round 18 / PR G — V2.1 engine legacy cleanup (2026-05-26)
+
+PR G 把 graph-agent engine 清到 V0.3.0 单轨, 不再把 V2.1 迁移机制描述成当前可用路径:
+
+1. **删除 codemod 迁移链**: `graph_agent.codemod`, `v21_migrator`, codemod fixtures/goldens/tests 已移除。后续迁移不再依赖 repo 内运行时 codemod。
+2. **删除 `context_mapping` 全链**: `ContextResolver`, `io/context_resolver.py`, harness `context_mapping` 构造参/分支和 builtin md-patch stale frontmatter 均已清理。V0.3.0 使用 inline `io.inputs` / `io.outputs` 与 runtime inputs, 不再做 `context_mapping` 表达式解析。
+3. **删除 `python_callable`**: LOGIC 节点统一使用 `LOGIC.md` body `<action>` 顺序和 phase-local `actions/<name>.py`; `.ast.python_callable` 测试断言已迁到 `.ast.actions`。
+4. **删除 `<steps>` 复数壳**: Agent body 不再接受 `<steps>` 容器; V0.3.0 cognitive template 消费平铺 `<step>`。
+5. **删除 5 个 dead validators**: `template_variables`, `prompt_quality`, `validator_required`, `tool_paths`, `persona_resolution` 及对应死测试已移除。当前校验收敛到 V0.3.0 loader / compiler / skill-spec 错误码。
+6. **清理隐藏死测试**: 12 个被 `collect_ignore_glob` 掩盖的 V1/V2.1 broken tests 已删除或迁移; `collect_ignore_glob` 清空, round18 gate 增加防回归断言。
+
+当前 engine 状态: V0.3.0 根入口是 `GRAPH.md`, phase 类型由 `LOGIC.md` / `SUBGRAPH.md` / `SKILL.md` 文件名推导, IO 全部 inline, 子 skill 解析走 `SkillResolverProtocol`, runtime helper 已收敛为 V0.3 graph runner。
+
+**§10 Deferred, 不在 PR G scope**:
+
+- Studio backend/frontend 仍有 V2.1 corpus/展示/兼容残留, 留给 Studio 清理 PR。
+- 根 `skills/` corpus 仍是 V2.1 格式, 尚未迁到 V0.3.0; 因此 6 个 `cognitive_flow_smoke` 测试保留清晰 xfail, reason 指向 PR G §10 Deferred corpus migration。
+
+诚实绿纪律: 全量 pytest 不再靠 `collect_ignore_glob` 隐藏 broken tests; round18 cleanup gate 固定检查 legacy grep、dead path、cognitive import、V0.3 compile/runtime 和 collect-ignore 为空。
+
 ### ✅ PR #87 — Cache 修复 + 测试加严
 
 **链接**: https://github.com/SevenX77/agent-harness/pull/87  
@@ -91,7 +111,7 @@
 |---|---|---|
 | **Q-S-P0-3** | reducer 换 `smart_dict_reducer` 单纯解决 / 加 `phase_outputs` 命名空间 / 两者一起 ? | 两者一起 (彻底解决 + 长期治理) |
 | **Q-S-A1** | runtime input funnel 用严格 jsonschema 漏斗丢弃未知字段 ? | 是 (严卡入参) |
-| **Q-S-A2** | phase 输入上下文 强沙箱 / 仅 warning ? | 跟 §3 context_mapping 配合, 走强沙箱 |
+| **Q-S-A2** | phase 输入上下文 强沙箱 / 仅 warning ? | PR G 后不再有 `context_mapping`; 强沙箱应基于 V0.3.0 inline IO / StateMapper |
 | **Q-S-A3-A6** | 子图 (subagent + SUBGRAPH) 切断隐式继承, 仅接 explicit input ? | 是 (彻底隔离) |
 | **Q-S-StateMapper** | 独立 `StateMapper` 类 / 直接在 wrapper 函数内联 ? | 独立类 (高内聚易测试) |
 
@@ -111,7 +131,7 @@
 | Q 编号 | 问什么 | a2 推荐 |
 |---|---|---|
 | **Q-T-1** | V2TracingCallback 纯手工独立 / 继承 LangChain BaseCallbackHandler / 抽抽象基类 ? | 抽 `BaseV2Callback` 抽象基类 (跟现有 PredictTracingCallback 共享) |
-| **Q-T-P1-4** | V2.1 callback 接回入口 改 `graph_assembler.py` wrapper / 走 LangGraph Runnable callback tree ? | wrapper 显式投递 (等 Block 2 StateMapper 给 phase input/output) |
+| **Q-T-P1-4** | V0.3.0 graph runtime callback 接回入口改 `graph_assembler.py` wrapper / 走 LangGraph Runnable callback tree ? | wrapper 显式投递 (等 Block 2 StateMapper 给 phase input/output) |
 | **Q-T-STREAM** | 流式 token 在线推送 + trace.jsonl 落盘 / 仅在线不落盘 ? | token 在线但默认不落, tool call 必落 |
 | **Q-T-PAYLOAD** | payload 截断防爆 复用/迁移 Predict `_sanitize_mapping` / 走 blob sidecar 长报文 ? | 复用 `_sanitize_mapping` (MVP0 不做 sidecar) |
 

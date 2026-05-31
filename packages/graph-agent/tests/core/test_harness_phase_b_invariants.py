@@ -111,6 +111,7 @@ class TestRunContextShallowImmutability:
 
     def test_runtime_inputs_top_level_mutation_raises(self):
         import pytest
+
         from graph_agent.core.run_context import RunContext
 
         ctx = RunContext(thread_id="t", runtime_inputs={"k": "v"})
@@ -119,6 +120,7 @@ class TestRunContextShallowImmutability:
 
     def test_callbacks_has_no_append(self):
         import pytest
+
         from graph_agent.core.run_context import RunContext
 
         ctx = RunContext(thread_id="t", callbacks=[])
@@ -257,7 +259,6 @@ class TestPersistentRuntimeInputsOptIn:
         the original run()), resume() must pick it up.
         """
         from unittest.mock import patch
-
 
         harness = _harness()
 

@@ -7,6 +7,7 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
+
 from graph_agent.core.run_context import RunContext
 
 
@@ -37,7 +38,7 @@ class TestRunContext:
             ctx.thread_id = "modified"
 
         with pytest.raises(FrozenInstanceError):
-            ctx.trace_dir = Path("/tmp")
+            ctx.trace_dir = Path("trace")
 
         with pytest.raises(FrozenInstanceError):
             ctx.runtime_inputs = {"new": "dict"}

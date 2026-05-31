@@ -2,7 +2,7 @@ from __future__ import annotations
 
 
 def test_studio_queue_callback_serializes_gateway_fallback_event() -> None:
-    from app.services.run_manager import StudioQueueCallback
+    from app.services.run_manager import _queue_event_subscriber
     from graph_agent_gateway.events import LLMFallbackEvent
 
     class RecordingQueue:
@@ -13,9 +13,9 @@ def test_studio_queue_callback_serializes_gateway_fallback_event() -> None:
             self.items.append(item)
 
     queue = RecordingQueue()
-    callback = StudioQueueCallback(queue)
+    subscriber = _queue_event_subscriber(queue)
 
-    callback.on_event(
+    subscriber(
         LLMFallbackEvent(
             phase_name="e2e",
             from_provider="primary:route",

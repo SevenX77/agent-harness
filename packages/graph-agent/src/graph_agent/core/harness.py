@@ -1076,7 +1076,7 @@ class GraphAgentHarness:
         Task I-1 — the "Human-in-the-loop status sync protocol" Gemini
         flagged as Studio's next missing surface. Lets Studio's UI ask
         "is this thread waiting for my input / still running / done /
-        crashed?" without tailing tracing.jsonl.
+        crashed?" without tailing trace.jsonl.
 
         Returns a dict with the shape::
 
@@ -1150,7 +1150,7 @@ class GraphAgentHarness:
         # another process, or crashed and left the graph partially
         # executed. We can't distinguish the two from a snapshot alone,
         # so we surface RUNNING and leave CRASHED to callers that correlate
-        # with the InternalErrorEvent in tracing.jsonl.
+        # with the InternalErrorEvent in trace.jsonl.
         return {"status": "RUNNING", "next": list(next_nodes)}
 
     def resume(

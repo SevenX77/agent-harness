@@ -82,7 +82,7 @@ class TracingCallback(Callback):
         self._jsonl_path = self._trace_dir / f"{self._run_id}.jsonl"
         # Task 3.6: fixed-name typed-event stream. One line per Pydantic
         # CallbackEvent (model_dump_json), appended in timestamp order.
-        self._typed_jsonl_path = self._trace_dir / "tracing.jsonl"
+        self._typed_jsonl_path = self._trace_dir / "trace.jsonl"
 
     def _write_event(self, event_type: str, phase: str, data: dict[str, Any]) -> None:
         """Append one structured event line to JSONL trace (legacy shape)."""
@@ -103,7 +103,7 @@ class TracingCallback(Callback):
 
         This is the Task 3.6 sink. The legacy per-run JSONL (``_write_event``)
         stays intact for tooling that depends on the old shape; the fixed
-        ``tracing.jsonl`` filename is the new Studio-facing source of truth.
+        ``trace.jsonl`` filename is the Studio-facing source of truth.
         """
         if self._typed_jsonl_path is None:
             return
@@ -111,7 +111,7 @@ class TracingCallback(Callback):
             f.write(event.model_dump_json() + "\n")
 
     def on_event(self, event: CallbackEvent) -> None:
-        """New-style sink: log the typed event to tracing.jsonl.
+        """New-style sink: log the typed event to trace.jsonl.
 
         Emitters that call ``cb.on_event(event)`` directly (for example the
         forthcoming ``TracingClientProxy`` in Step 4 and the ``parallel_map``

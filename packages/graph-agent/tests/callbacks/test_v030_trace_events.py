@@ -114,7 +114,7 @@ def test_tracing_callback_writes_v030_typed_events(tmp_path: Path) -> None:
         )
     )
 
-    lines = (tmp_path / "tracing.jsonl").read_text(encoding="utf-8").splitlines()
+    lines = (tmp_path / "trace.jsonl").read_text(encoding="utf-8").splitlines()
     payload = json.loads(lines[0])
     assert payload["event_type"] == "builtin_subagent_fallback"
     assert payload["fallback_reason"] == "remote_timeout"

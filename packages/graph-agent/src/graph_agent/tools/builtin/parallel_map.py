@@ -17,9 +17,9 @@ Behaviour:
   these two keys off the context and stamps every ``prompt_captured``
   event with them so Studio can collapse the fan-out into one folded
   timeline group (Gemini audit Major #1).
-* Parent callbacks propagate to child runs through the explicit
-  ``callbacks`` parameter; each child writes its own run-scoped
-  ``tracing.jsonl`` under the workspace root passed as ``trace_dir``.
+* Parent callbacks propagate to child runs through an event subscriber;
+  each child writes its own run-scoped ``trace.jsonl`` under the workspace
+  root passed as ``trace_dir``.
 * Errors inside a sub-run are captured and surfaced in the returned
   list as ``{"error": "..."}`` entries — a single bad item does not
   halt the whole fan-out. Callers that want fail-fast semantics can
@@ -104,7 +104,7 @@ def parallel_map(
 
     # Tier 1 Commit C (T-B9): emit a visible group boundary so Studio
     # can fold all the sibling sub-runs' events under one timeline block.
-    # Per Gemini Q7 sub-run events still merge into the parent tracing.jsonl
+    # Per Gemini Q7 sub-run events still merge into the parent trace.jsonl
     # via shared callbacks; the boundary events give the folding anchor.
     group_start_monotonic = _time.monotonic()
     _emit_group_started(
@@ -306,7 +306,7 @@ def _run_one_item(
     result = run_skill(
         skill_path,
         workspace_dir=workspace_dir,
-        callbacks=callbacks,
+        event_subscriber=_legacy_callback_subscriber(callbacks),
         skill_resolver=skill_resolver,
         thread_id=sub_run_id,
         **inputs,
@@ -317,3 +317,13 @@ def _run_one_item(
         group_key,
     )
     return result.model_dump()
+
+
+def _legacy_callback_subscriber(callbacks: list[Any] | None) -> Any:
+    if not callbacks:
+        return None
+
+    def _emit(event: Any) -> None:
+        _emit_callback_event(callbacks, event, type(event).__name__)
+
+    return _emit

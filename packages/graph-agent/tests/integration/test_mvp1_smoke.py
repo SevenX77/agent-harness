@@ -207,7 +207,7 @@ def _dump_e2e_trace(
       - final_state.json — pydantic.model_dump of data + flow + messages
       - tool_calls.json — flat list of every tool_call across messages
     Picked up from tmp_path when the run wrote them:
-      - tracing.jsonl — TracingCallback event log
+      - trace.jsonl — TracingCallback event log
       - text-segmentation chapter_*_segments.json — SKILL declared output
     """
     (trace_dir / "metrics.txt").write_text(
@@ -234,7 +234,7 @@ def _dump_e2e_trace(
         )
 
     # Copy harness/SKILL outputs that the run wrote into tmp_path.
-    for src_name in ("tracing.jsonl", "real_llm_metrics.txt"):
+    for src_name in ("trace.jsonl", "real_llm_metrics.txt"):
         src = tmp_path / src_name
         if src.exists():
             shutil.copy2(src, trace_dir / src_name)

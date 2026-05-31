@@ -90,7 +90,7 @@ io:
         _write(root / "phases" / phase_id / "actions" / f"{phase_id}.py", body)
 
 
-def _run_without_callbacks(
+def _run_without_subscriber(
     skill_root: Path,
     trace_dir: Path,
     mock_skill_resolver: object,
@@ -99,7 +99,6 @@ def _run_without_callbacks(
 ) -> Path:
     result = _run_v030_skill_dict(
         skill_root,
-        callbacks=None,
         thread_id=run_id,
         skill_resolver=mock_skill_resolver,
         workspace_dir=trace_dir,
@@ -107,13 +106,13 @@ def _run_without_callbacks(
         request_id=run_id,
     )
     assert result["run_id"] == run_id
-    return trace_dir / "runs" / run_id / "tracing.jsonl"
+    return trace_dir / "runs" / run_id / "trace.jsonl"
 
 
 def _read_trace_events(trace_path: Path) -> list[dict[str, Any]]:
-    assert trace_path.is_file(), f"tracing.jsonl not found: {trace_path}"
+    assert trace_path.is_file(), f"trace.jsonl not found: {trace_path}"
     lines = [line for line in trace_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    assert lines, f"tracing.jsonl is empty: {trace_path}"
+    assert lines, f"trace.jsonl is empty: {trace_path}"
     return [json.loads(line) for line in lines]
 
 
@@ -126,17 +125,17 @@ def _make_draft_phase_crash(skill_root: Path) -> None:
     )
 
 
-def test_v030_skill_dict_writes_trace_jsonl_when_no_callback(
+def test_v030_skill_dict_writes_trace_jsonl_when_no_subscriber(
     tmp_path: Path,
     mock_skill_resolver: object,
 ) -> None:
-    """V0.3 _run_v030_skill_dict() should auto-write tracing.jsonl without callbacks."""
+    """V0.3 _run_v030_skill_dict() should auto-write trace.jsonl without subscribers."""
     skill_root = tmp_path / "skill"
     trace_dir = tmp_path / "trace-output"
-    run_id = "trace-auto-no-callback"
+    run_id = "trace-auto-no-subscriber"
     _write_logic_skill(skill_root, [("draft", [])])
 
-    trace_path = _run_without_callbacks(skill_root, trace_dir, mock_skill_resolver, run_id=run_id)
+    trace_path = _run_without_subscriber(skill_root, trace_dir, mock_skill_resolver, run_id=run_id)
     events = _read_trace_events(trace_path)
 
     assert events[0]["event_type"] == "run_started"
@@ -150,12 +149,12 @@ def test_v030_skill_dict_trace_records_phase_events(
     tmp_path: Path,
     mock_skill_resolver: object,
 ) -> None:
-    """tracing.jsonl should record phase_start and phase_end for every V0.3 phase."""
+    """trace.jsonl should record real phase_start and phase_end for every V0.3 phase."""
     skill_root = tmp_path / "skill"
     trace_dir = tmp_path / "trace-output"
     _write_logic_skill(skill_root, [("draft", []), ("review", ["draft"])])
 
-    trace_path = _run_without_callbacks(
+    trace_path = _run_without_subscriber(
         skill_root,
         trace_dir,
         mock_skill_resolver,
@@ -167,6 +166,16 @@ def test_v030_skill_dict_trace_records_phase_events(
     phase_ends = [event for event in events if event["event_type"] == "phase_end"]
     assert [event["phase_name"] for event in phase_starts] == ["draft", "review"]
     assert [event["phase_name"] for event in phase_ends] == ["draft", "review"]
+    assert [
+        (event["event_type"], event.get("phase_name"))
+        for event in events
+        if event["event_type"] in {"phase_start", "phase_end"}
+    ] == [
+        ("phase_start", "draft"),
+        ("phase_end", "draft"),
+        ("phase_start", "review"),
+        ("phase_end", "review"),
+    ]
 
 
 def test_v030_skill_dict_trace_includes_phase_io(
@@ -178,7 +187,7 @@ def test_v030_skill_dict_trace_includes_phase_io(
     trace_dir = tmp_path / "trace-output"
     _write_logic_skill(skill_root, [("draft", [])])
 
-    trace_path = _run_without_callbacks(
+    trace_path = _run_without_subscriber(
         skill_root,
         trace_dir,
         mock_skill_resolver,
@@ -199,7 +208,7 @@ def test_v030_skill_dict_writes_trace_when_phase_crashes(
     tmp_path: Path,
     mock_skill_resolver: object,
 ) -> None:
-    """A crashed V0.3 run should still leave a replayable tracing.jsonl."""
+    """A crashed V0.3 run should still leave a replayable trace.jsonl."""
     skill_root = tmp_path / "skill"
     trace_dir = tmp_path / "trace-output"
     run_id = "trace-auto-crashed"
@@ -209,7 +218,6 @@ def test_v030_skill_dict_writes_trace_when_phase_crashes(
     with pytest.raises(Exception, match="intentional trace crash"):
         _run_v030_skill_dict(
             skill_root,
-            callbacks=None,
             thread_id=run_id,
             skill_resolver=mock_skill_resolver,
             workspace_dir=trace_dir,
@@ -217,7 +225,7 @@ def test_v030_skill_dict_writes_trace_when_phase_crashes(
             request_id=run_id,
         )
 
-    trace_path = trace_dir / "runs" / run_id / "tracing.jsonl"
+    trace_path = trace_dir / "runs" / run_id / "trace.jsonl"
     events = _read_trace_events(trace_path)
 
     assert events[-1]["event_type"] == "run_ended"

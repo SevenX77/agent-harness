@@ -3,7 +3,7 @@
 Validates:
 - Clicking Run produces ≥ 5 CallbackEvents on the trace timeline.
 - The terminal RunEndedEvent (status=success) closes the WebSocket.
-- final_state.json + tracing.jsonl + metrics.json land in the run dir on disk.
+- final_state.json + trace.jsonl + metrics.json land in the run dir on disk.
 - No internal_error event is emitted, no Run timeout.
 
 We use the synthesized `e2e-fast` logic-only skill so the run completes in
@@ -76,7 +76,7 @@ def test_run_emits_trace_events_and_writes_artifacts(
     logger.info("detected run_dir=%s", run_dir)
 
     final_state_path = run_dir / "final_state.json"
-    tracing_path = run_dir / "tracing.jsonl"
+    trace_path = run_dir / "trace.jsonl"
     metrics_path = run_dir / "metrics.json"
 
     while time.time() < deadline:
@@ -86,7 +86,7 @@ def test_run_emits_trace_events_and_writes_artifacts(
                 break
         time.sleep(0.25)
     assert final_state_path.exists(), f"final_state.json missing at {final_state_path}"
-    assert tracing_path.exists(), f"tracing.jsonl missing at {tracing_path}"
+    assert trace_path.exists(), f"trace.jsonl missing at {trace_path}"
     assert metrics_path.exists(), f"metrics.json missing at {metrics_path}"
 
     metrics_payload = json.loads(metrics_path.read_text(encoding="utf-8"))
@@ -94,14 +94,14 @@ def test_run_emits_trace_events_and_writes_artifacts(
         f"e2e-fast run did not finish successfully; metrics={metrics_payload}"
     )
 
-    tracing_lines = [
-        line for line in tracing_path.read_text(encoding="utf-8").splitlines() if line.strip()
+    trace_lines = [
+        line for line in trace_path.read_text(encoding="utf-8").splitlines() if line.strip()
     ]
-    assert len(tracing_lines) >= 5, (
-        f"expected >= 5 CallbackEvents on disk, saw {len(tracing_lines)}: {tracing_lines}"
+    assert len(trace_lines) >= 5, (
+        f"expected >= 5 CallbackEvents on disk, saw {len(trace_lines)}: {trace_lines}"
     )
     event_types = []
-    for line in tracing_lines:
+    for line in trace_lines:
         try:
             event_types.append(json.loads(line).get("event_type"))
         except json.JSONDecodeError:
@@ -112,9 +112,9 @@ def test_run_emits_trace_events_and_writes_artifacts(
 
     timeline_count = page.locator(".relative.pl-6").count()
     logger.info("visible trace timeline cards on page: %s", timeline_count)
-    assert 1 <= timeline_count <= len(tracing_lines), (
+    assert 1 <= timeline_count <= len(trace_lines), (
         "virtualized trace list should render the visible window, not every disk event; "
-        f"saw {timeline_count} visible rows for {len(tracing_lines)} events"
+        f"saw {timeline_count} visible rows for {len(trace_lines)} events"
     )
 
     run_button = page.get_by_test_id("header-run")

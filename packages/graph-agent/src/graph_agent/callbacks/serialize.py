@@ -1,7 +1,7 @@
 """Structural serialization helper for CallbackEvent payloads (T-A3).
 
 Converts arbitrary Python objects into a JSON-safe ``dict`` / ``list`` /
-primitive tree before they land in ``tracing.jsonl``. This lets events
+primitive tree before they land in ``trace.jsonl``. This lets events
 that carry raw workflow context (``RunStartedEvent``, ``PhaseEndEvent``,
 etc.) round-trip cleanly regardless of what the running skill happens
 to have stuffed into the context.

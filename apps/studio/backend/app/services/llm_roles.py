@@ -44,6 +44,12 @@ def save_roles_file(
     yaml = _yaml()
     from io import StringIO
 
+    from app.services.file_watcher import record_api_write
+    try:
+        record_api_write(path)
+    except Exception:
+        pass
+
     buffer = StringIO()
     yaml.dump(payload, buffer)
     _atomic_write(path, buffer.getvalue())

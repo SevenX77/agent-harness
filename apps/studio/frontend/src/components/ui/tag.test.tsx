@@ -33,7 +33,7 @@ describe("tagVariants", () => {
   it("keeps semantic entity tag variants on the shared success-tinted background", () => {
     const warningClasses = tagVariants({ variant: "warning" }).split(/\s+/)
     const destructiveClasses = tagVariants({ variant: "destructive" }).split(/\s+/)
-    const multimodalClasses = tagVariants({ variant: "multimodal" }).split(/\s+/)
+    const probeVerifiedClasses = tagVariants({ variant: "probe-verified" }).split(/\s+/)
 
     expect(warningClasses).toContain("border-warning")
     expect(warningClasses).toContain("bg-success/10")
@@ -45,9 +45,9 @@ describe("tagVariants", () => {
     expect(destructiveClasses).toContain("text-foreground")
     expect(destructiveClasses).not.toContain("bg-destructive-background")
 
-    expect(multimodalClasses).toContain("border-multimodal-border")
-    expect(multimodalClasses).toContain("bg-success/10")
-    expect(multimodalClasses).toContain("text-foreground")
-    expect(multimodalClasses).not.toContain("border-warning")
+    expect(probeVerifiedClasses).toContain("border-multimodal-border")
+    expect(probeVerifiedClasses).toContain("bg-success/10")
+    expect(probeVerifiedClasses).toContain("text-foreground")
+    expect(probeVerifiedClasses).not.toContain("border-warning")
   })
 })

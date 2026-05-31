@@ -17,6 +17,7 @@ interface SplitEditorProps {
   onCreatePhase?: (kind: NewPhaseKind) => Promise<void> | void
   onPersistConnection?: (connection: Connection) => Promise<void> | void
   onDisconnectConnection?: (connection: { source: string; target: string }) => Promise<void> | void
+  onPhaseFileSave?: (args: { path: string; content: string; expectedHash: string }) => Promise<void> | void
 }
 
 export function SplitEditor({
@@ -30,6 +31,7 @@ export function SplitEditor({
   onCreatePhase,
   onPersistConnection,
   onDisconnectConnection,
+  onPhaseFileSave,
 }: SplitEditorProps) {
   const {
     activeFileDetails,
@@ -108,6 +110,7 @@ export function SplitEditor({
             onCreatePhase={onCreatePhase}
             onPersistConnection={onPersistConnection}
             onDisconnectConnection={onDisconnectConnection}
+            onPhaseFileSave={onPhaseFileSave}
             compact
           />
         </div>

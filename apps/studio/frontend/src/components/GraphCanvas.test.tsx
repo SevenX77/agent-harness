@@ -5,6 +5,7 @@ import { buildEdges, CanvasContextMenuContent, GraphCanvas, SkillNode, type Skil
 import { CycleDetectedError, getAutoLayoutedElements } from '../lib/layout'
 import type { Edge, Node } from '@xyflow/react'
 import type { SkillDetail } from '@/api/types'
+import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 
 const { reactFlowPropsRef, contextMenuItems } = vi.hoisted(() => ({
   reactFlowPropsRef: { current: null as null | Record<string, unknown> },
@@ -128,10 +129,14 @@ function edgeIds(nodes: SkillGraphNode[]): string[] {
 function graphSkillDetail(phases: Array<{ id: string; src: string; depends_on: string[] }>): SkillDetail {
   return {
     manifest: {
-      schema_version: '2.1',
+      schema_version: CURRENT_SCHEMA_VERSION,
       name: 'demo',
       description: 'Demo',
-      phases,
+      io: {
+        inputs: { type: 'object', properties: {} },
+        outputs: { type: 'object', properties: {} },
+      },
+      phases: phases.map((p) => p.id),
     },
     graph_topology: phases.map((phase) => ({
       ...phase,

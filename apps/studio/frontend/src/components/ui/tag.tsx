@@ -14,7 +14,7 @@ const tagVariants = cva(
         success: "border-success bg-success/10 text-foreground",
         warning: "border-warning bg-success/10 text-foreground",
         destructive: "border-tag-destructive-border bg-success/10 text-foreground",
-        multimodal: "border-multimodal-border bg-success/10 text-foreground",
+        "probe-verified": "border-multimodal-border bg-success/10 text-foreground",
         muted: "border-border/70 bg-muted/10 text-muted-foreground",
       },
       size: {

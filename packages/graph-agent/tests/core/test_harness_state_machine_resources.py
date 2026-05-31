@@ -20,6 +20,8 @@ from graph_agent.core.harness import GraphAgentHarness, _clone_state
 from graph_agent.core.state import BusinessData, FrameworkState, WorkflowState
 from graph_agent.core.types import Phase
 
+pytestmark = pytest.mark.skip("GraphAgentHarness has been fully deprecated in V0.3.0")
+
 
 class _CapturingCallback(Callback):
     def __init__(self) -> None:

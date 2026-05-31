@@ -236,7 +236,7 @@ export const ModelBundleCard = memo(function ModelBundleCard({
         >
           <RoleSettingsPanel
             roleName={`bundle-${bundleId}`}
-            modelFallback={bundle.model_fallback_enabled ?? true}
+            modelFallbackEnabled={bundle.model_fallback_enabled ?? true}
             intent={bundle.intent}
             outputLimitSummary={outputLimitSummary}
             onModelFallbackChange={(checked) => onChange(toggleBundleModelFallback(data, bundleId, checked))}

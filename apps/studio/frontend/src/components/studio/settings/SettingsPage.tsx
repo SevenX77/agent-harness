@@ -5,6 +5,7 @@ import { buildPutPayload, useDebouncedCredentialsSave } from "@/hooks/useDebounc
 import { useDebouncedRolesSave } from "@/hooks/useDebouncedRolesSave"
 import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
 import { deleteModelBundle, deleteRole, getCredentials, getModelGroups, getProviderModels, getRoles, testProviderEndpoint, type CredentialsState, type EndpointTestJobResponse, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
+import { wsUrl } from "../../../api/client"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
 import { draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
@@ -14,10 +15,105 @@ import type { ProviderDraft, SettingsPageProps, SettingsTab } from "./types"
 const emptyCredentials: CredentialsState = { providers: [] }
 const emptyModelGroups: ModelGroup[] = []
 
+export async function refreshLoadedLlmRolesProjection({
+  loadModelGroups = getModelGroups,
+  loadRoles = getRoles,
+  rolesLoaded,
+  setModelGroups,
+  setRolesData,
+  setRolesError,
+}: {
+  loadModelGroups?: () => Promise<ModelGroup[]>
+  loadRoles?: () => Promise<RolesData>
+  rolesLoaded: boolean
+  setModelGroups: (next: ModelGroup[]) => void
+  setRolesData: (next: RolesData) => void
+  setRolesError: (next: string | null) => void
+}) {
+  if (!rolesLoaded) return
+  try {
+    const [nextRoles, nextModelGroups] = await Promise.all([loadRoles(), loadModelGroups()])
+    setRolesData(nextRoles)
+    setModelGroups(nextModelGroups)
+    setRolesError(null)
+  } catch {
+    setRolesError("Roles unavailable")
+  }
+}
+
+export function isStaleRouteReferenceError(error: unknown): boolean {
+  return errorText(error).toLowerCase().includes("references unknown route")
+}
+
+export function modelGroupsReferenceMissingCredentialProviders(
+  modelGroups: ModelGroup[],
+  credentials: CredentialsState,
+): boolean {
+  const providerIds = new Set(credentials.providers.map((provider) => provider.id))
+  if (providerIds.size === 0) return modelGroups.some((group) => group.provider_models.length > 0)
+  return modelGroups.some((group) => group.provider_models.some((providerModel) => {
+    const endpointId = providerModel.endpoint_id ?? providerModel.route_id.split(":")[0]
+    return Boolean(endpointId && !providerIds.has(endpointId))
+  }))
+}
+
+function errorText(error: unknown): string {
+  if (typeof error === "string") return error
+  if (typeof error !== "object" || error === null) return ""
+  const chunks: string[] = []
+  const message = (error as { message?: unknown }).message
+  if (typeof message === "string") chunks.push(message)
+  const response = (error as { response?: unknown }).response
+  if (typeof response === "object" && response !== null) {
+    const data = (response as { data?: unknown }).data
+    if (typeof data === "string") chunks.push(data)
+    if (typeof data === "object" && data !== null) {
+      const detail = (data as { detail?: unknown }).detail
+      const responseMessage = (data as { message?: unknown }).message
+      if (typeof detail === "string") chunks.push(detail)
+      if (typeof responseMessage === "string") chunks.push(responseMessage)
+    }
+  }
+  return chunks.join(" ")
+}
+
+function modelInfoEvidenceRank(model: ModelInfo): number {
+  if (
+    model.status === "verified" ||
+    (model.verified_profile_count ?? 0) > 0 ||
+    (model.verified_profiles ?? []).some((profile) => profile.status === "ready")
+  ) return 4
+  if (model.status === "failed") return 3
+  if (model.status === "disabled") return 2
+  if (model.status === "testing") return 1
+  return 0
+}
+
+function mergeModelInfo(previous: ModelInfo, incoming: ModelInfo): ModelInfo {
+  const previousRank = modelInfoEvidenceRank(previous)
+  const incomingRank = modelInfoEvidenceRank(incoming)
+  const winner = incomingRank >= previousRank ? incoming : previous
+  const base = winner === incoming ? previous : incoming
+  const merged: ModelInfo = { ...base, ...winner }
+  const mergedCapabilities = {
+    ...(base.capabilities ?? {}),
+    ...(winner.capabilities ?? {}),
+  }
+  if (Object.keys(mergedCapabilities).length > 0) {
+    merged.capabilities = mergedCapabilities
+  } else {
+    delete merged.capabilities
+  }
+  return merged
+}
+
 function mergeModelInfos(left: ModelInfo[] = [], right: ModelInfo[] = []): ModelInfo[] {
   const merged = new Map<string, ModelInfo>()
   for (const model of left) merged.set(model.id, model)
-  for (const model of right) merged.set(model.id, model)
+  for (const model of right) {
+    const previous = merged.get(model.id)
+    merged.set(model.id, previous ? mergeModelInfo(previous, model) : model)
+  }
   return Array.from(merged.values())
 }
 
@@ -25,17 +121,15 @@ function mergeStrings(left: string[] = [], right: string[] = []): string[] {
   return Array.from(new Set([...left, ...right]))
 }
 
-function officialProviderProgressToastMessage(
+export function officialProviderProgressToastMessage(
   providerName: string,
   job: EndpointTestJobResponse,
 ): string {
   const total = job.total_model_count
-  const tested = job.tested_model_count
-  const verified = job.verified_route_count
   if (total > 0) {
-    return `Testing ${providerName} routes (${tested}/${total}, ${verified} verified)...`
+    return `Loading ${providerName} route candidates (${total} listed)...`
   }
-  return `Testing ${providerName} routes...`
+  return `Checking ${providerName} endpoint and provider catalog...`
 }
 
 function resetProviderTestOutcome(
@@ -61,16 +155,18 @@ export function officialProviderTestSummary(models: ModelInfo[]): {
   if (verifiedCount === 0) {
     return {
       kind: "warning",
-      message: "Provider catalog is reachable, but no routes passed testing.",
+      message: "Provider catalog is reachable. Routes need single-model tests for live verification.",
     }
   }
-  const verifiedLabel = verifiedCount === 1 ? "1 verified route" : `${verifiedCount} verified routes`
-  const notVerifiedLabel = notVerifiedCount === 1 ? "1 not verified" : `${notVerifiedCount} not verified`
+  const verifiedLabel = verifiedCount === 1 ? "1 already verified" : `${verifiedCount} already verified`
+  const notVerifiedLabel = notVerifiedCount === 1
+    ? "1 not generation-probe verified"
+    : `${notVerifiedCount} not generation-probe verified`
   return {
     kind: "success",
     message: notVerifiedCount > 0
-      ? `Test complete (${verifiedLabel}, ${notVerifiedLabel})`
-      : `Test complete (${verifiedLabel})`,
+      ? `Catalog loaded (${verifiedLabel}, ${notVerifiedLabel})`
+      : `Catalog loaded (${verifiedLabel})`,
   }
 }
 
@@ -265,6 +361,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   rolesDataRef.current = rolesData
   const invalidatedTestOutcomeIdsRef = useRef<Set<string>>(new Set())
   const credentialsHydratedRef = useRef(false)
+  const pendingRoleProjectionRefreshRef = useRef(false)
 
   const handleSaved = useCallback((next: CredentialsState) => {
     setCredentials({
@@ -287,12 +384,30 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         return resetProviderTestOutcome(provider)
       }),
     })
+    if (pendingRoleProjectionRefreshRef.current) {
+      pendingRoleProjectionRefreshRef.current = false
+      void refreshLoadedLlmRolesProjection({
+        rolesLoaded: Boolean(rolesDataRef.current),
+        setModelGroups,
+        setRolesData,
+        setRolesError,
+      })
+    }
   }, [])
 
   const { flush: flushCredentialsSave, queue: queueSave, status: saveStatus } = useDebouncedCredentialsSave({
     onSaved: handleSaved,
   })
   const { cancel: cancelRolesSave, flush: flushRolesSave, queue: queueRolesSave, status: rolesSaveStatus } = useDebouncedRolesSave({
+    isRecoverableError: isStaleRouteReferenceError,
+    onRecoverableError: () => {
+      void refreshLoadedLlmRolesProjection({
+        rolesLoaded: Boolean(rolesDataRef.current),
+        setModelGroups,
+        setRolesData,
+        setRolesError,
+      })
+    },
     onSaved: (next) => {
       setRolesData(next)
       setRolesError(null)
@@ -301,6 +416,69 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       setRolesError(composeRequestErrorMessage(error, "Save failed"))
     },
   })
+
+  useEffect(() => {
+    const handleFocus = () => {
+      getCredentials({ hydrateSecrets: credentialsHydratedRef.current })
+        .then((next) => {
+          setCredentials(next)
+          setDrafts(draftsFromCredentials(next))
+        })
+        .catch(() => {})
+
+      if (activeTab === "llm_roles" && rolesDataRef.current) {
+        Promise.all([getRoles(), getModelGroups()])
+          .then(([next, nextModelGroups]) => {
+            setRolesData(next)
+            setModelGroups(nextModelGroups)
+          })
+          .catch(() => {})
+      }
+    }
+    window.addEventListener("focus", handleFocus)
+    return () => {
+      window.removeEventListener("focus", handleFocus)
+    }
+  }, [activeTab])
+
+  useEffect(() => {
+    let cancelled = false
+    let socket: WebSocket | null = null
+    try {
+      socket = new WebSocket(wsUrl("/ws/events"))
+      socket.onmessage = (message) => {
+        try {
+          const event = JSON.parse(String(message.data)) as { type?: string }
+          if (cancelled) return
+          if (event.type === "registry_changed") {
+            getCredentials({ hydrateSecrets: credentialsHydratedRef.current })
+              .then((next) => {
+                if (cancelled) return
+                setCredentials(next)
+                setDrafts(draftsFromCredentials(next))
+              })
+              .catch(() => {})
+          } else if (event.type === "roles_changed" && rolesDataRef.current) {
+            Promise.all([getRoles(), getModelGroups()])
+              .then(([next, nextModelGroups]) => {
+                if (cancelled) return
+                setRolesData(next)
+                setModelGroups(nextModelGroups)
+              })
+              .catch(() => {})
+          }
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return () => {
+      cancelled = true
+      if (socket) socket.close()
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -368,6 +546,17 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     }
   }, [activeTab, rolesData])
 
+  useEffect(() => {
+    if (activeTab !== "llm_roles" || !rolesData) return
+    if (!modelGroupsReferenceMissingCredentialProviders(modelGroups, credentials)) return
+    void refreshLoadedLlmRolesProjection({
+      rolesLoaded: true,
+      setModelGroups,
+      setRolesData,
+      setRolesError,
+    })
+  }, [activeTab, credentials, modelGroups, rolesData])
+
   function scheduleSave() {
     queueSave(() => buildPutPayload(draftsRef.current))
   }
@@ -422,6 +611,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   }
 
   function deleteProvider(providerId: string) {
+    pendingRoleProjectionRefreshRef.current = true
     setDrafts((current) => current.filter((draft) => draft.id !== providerId))
     scheduleSave()
   }
@@ -452,7 +642,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
     const toastId = `get-models-${providerId}`
     toast.loading(
       isOfficial
-        ? `Testing ${draft.name || "provider"} routes...`
+        ? `Checking ${draft.name || "provider"} endpoint and loading route candidates...`
         : `Getting models for ${draft.name || "provider"}...`,
       { id: toastId },
     )

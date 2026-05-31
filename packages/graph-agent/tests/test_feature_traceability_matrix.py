@@ -52,4 +52,4 @@ def test_feature_matrix_lifecycle_items_reference_existing_collectable_tests() -
         class_segment = f"{class_name}::" if class_name else ""
         nodeids.append(f"{test_path}::{class_segment}{test_name}")
 
-    assert pytest.main(["--collect-only", "-q", *nodeids]) == pytest.ExitCode.OK
+    assert pytest.main(["--import-mode=importlib", "--collect-only", "-q", *nodeids]) == pytest.ExitCode.OK

@@ -464,9 +464,18 @@ def create_custom_middlewares(
             middlewares.append(ClarificationMiddleware())
             logger.info("middleware: enabled Clarification (Human-in-the-Loop)")
     if summarization and summarization_model is not None:
+        from langchain.agents.middleware import SummarizationMiddleware
+
+        profiled_model = _ensure_summarization_profile(summarization_model)
+        middlewares.append(
+            SummarizationMiddleware(
+                model=profiled_model,
+                trigger=[("fraction", summarization_trigger_fraction)],
+                keep=("messages", summarization_keep_messages),
+            )
+        )
         logger.info(
-            "middleware: summarization requested but disabled in MVP-0 cleanup "
-            "(trigger=fraction:%.1f keep=%d msgs)",
+            "middleware: enabled SummarizationMiddleware (trigger=fraction:%.1f keep=%d msgs)",
             summarization_trigger_fraction,
             summarization_keep_messages,
         )

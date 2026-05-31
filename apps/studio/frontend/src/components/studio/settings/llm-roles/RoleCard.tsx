@@ -271,7 +271,7 @@ export const RoleCard = memo(function RoleCard({
               >
                 <DropdownMenuItem data-role-edit-trigger="true" onSelect={() => setEditOpen(true)}>
                   <Pencil data-role-icon="true" />
-                  Edit
+                  Rename
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
@@ -296,7 +296,7 @@ export const RoleCard = memo(function RoleCard({
         >
           <RoleSettingsPanel
             roleName={roleName}
-            modelFallback={role.model_fallback}
+            modelFallbackEnabled={role.model_fallback_enabled}
             intent={role.intent}
             outputLimitSummary={outputLimitSummary}
             onModelFallbackChange={(checked) => onChange(toggleModelFallback(data, roleName, checked))}
@@ -367,7 +367,7 @@ export const RoleCard = memo(function RoleCard({
         </Empty>
       </CardContent>
       <RoleNameDialog
-        title="Edit role"
+        title="Rename role"
         initialName={roleName}
         existingNames={Object.keys(data.roles)}
         open={editOpen}

@@ -117,6 +117,7 @@ features:
   - '[F-v3-graph-root-missing]'
   - '[F-v3-graph-schema-unknown-field]'
   - '[F-v3-graph-schema-version-mismatch]'
+  - '[F-v3-sequential-overwrite-unauthorized]'
   error_codes_secondary: []
   events_primary: []
   events_secondary: []

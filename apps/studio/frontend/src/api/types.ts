@@ -1,3 +1,5 @@
+import type { CurrentSchemaVersion } from '@/config/schema'
+
 export type JsonValue = string | number | boolean | null | JsonObject | JsonValue[]
 
 export interface JsonObject {
@@ -297,13 +299,23 @@ export interface SerializeGraphRes {
   current_hash: string
 }
 
-export interface GraphManifestV21 {
-  schema_version: '2.1'
+export interface GraphManifestV030 {
+  schema_version: CurrentSchemaVersion
   name: string
   description: string
-  io_inputs_ref?: string
-  io_outputs_ref?: string
-  phases: GraphPhaseRef[]
+  io: {
+    inputs: {
+      type: 'object'
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+    outputs: {
+      type: 'object'
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+  phases: string[]
   metadata?: JsonObject
 }
 
@@ -395,7 +407,7 @@ export interface PersonaSkillDef extends BaseSkillManifest {
   few_shot_examples: string[]
 }
 
-export type SkillManifest = AgentSkillDef | GraphSkillDef | PersonaSkillDef | GraphManifestV21
+export type SkillManifest = AgentSkillDef | GraphSkillDef | PersonaSkillDef | GraphManifestV030
 
 export interface GraphTopologyItem {
   id: string

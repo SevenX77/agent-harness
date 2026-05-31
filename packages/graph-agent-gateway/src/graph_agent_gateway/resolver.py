@@ -16,8 +16,18 @@ from graph_agent_gateway.exceptions import (
     GatewayRoleNotConfiguredError,
 )
 from graph_agent_gateway.gateway_chat_model import GatewayChatModel
+from graph_agent_gateway.registry.contracts import CredentialProviderProtocol
+from graph_agent_gateway.registry.credentials import (
+    EndpointCredentialProvider,
+    FallbackCredentialProvider,
+)
 from graph_agent_gateway.registry.resolver import RegistryResolutionError, resolve_role
-from graph_agent_gateway.registry.schema import RegistrySnapshot, RoleEntry, RoleRouteEntry, RuntimePolicy
+from graph_agent_gateway.registry.schema import (
+    RegistrySnapshot,
+    RoleEntry,
+    RoleRouteEntry,
+    RuntimePolicy,
+)
 
 
 @dataclass
@@ -37,6 +47,7 @@ class ModelResolver:
         credentials_path: str | Path | None = None,
         roles_path: str | Path | None = None,
         client_manager: Any = None,
+        credential_provider: CredentialProviderProtocol | None = None,
     ) -> None:
         if registry_snapshot is None:
             if credentials_path is None or roles_path is None:
@@ -47,6 +58,14 @@ class ModelResolver:
             registry_snapshot = load_registry_snapshot(credentials_path, roles_path)
         self.registry_snapshot = registry_snapshot
         self.client_manager = client_manager
+        endpoint_credential_provider = EndpointCredentialProvider(
+            registry_snapshot.provider_endpoints
+        )
+        self.credential_provider = (
+            FallbackCredentialProvider(credential_provider, endpoint_credential_provider)
+            if credential_provider is not None
+            else endpoint_credential_provider
+        )
         self._stats_lock = threading.Lock()
         self.stats = ModelResolverStats()
 
@@ -73,6 +92,7 @@ class ModelResolver:
                 self.registry_snapshot,
                 role_name,
                 route_override=model_override,
+                credential_provider=self.credential_provider,
             )
         except RegistryResolutionError as exc:
             raise GatewayRoleNotConfiguredError(
@@ -108,6 +128,7 @@ class ModelResolver:
                 phase_name=phase_name,
                 thinking_enabled=effective_thinking_enabled,
                 client_manager=self.client_manager,
+                credential_provider=self.credential_provider,
                 name=first_route.provider_model_id,
             )
         return GatewayChatModel(
@@ -119,6 +140,7 @@ class ModelResolver:
             phase_name=phase_name,
             thinking_enabled=effective_thinking_enabled,
             client_manager=self.client_manager,
+            credential_provider=self.credential_provider,
             name=first_route.provider_model_id,
         )
 
@@ -140,10 +162,13 @@ class ModelResolver:
                 provider_routes=self.registry_snapshot.provider_routes,
                 runtime_policy=self.registry_snapshot.runtime_policy,
                 roles={
-                    "_manual_mark_down": RoleEntry(fallback_chain=[RoleRouteEntry(route_id=route_id)])
+                    "_manual_mark_down": RoleEntry(
+                        fallback_chain=[RoleRouteEntry(route_id=route_id)]
+                    )
                 },
             ),
             "_manual_mark_down",
+            credential_provider=self.credential_provider,
         )
         manager = (
             self.client_manager

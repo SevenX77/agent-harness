@@ -10,6 +10,7 @@ import {
   useNodesState,
   type Connection,
   type Edge,
+  type ReactFlowInstance,
 } from '@xyflow/react'
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { toast } from 'sonner'
@@ -30,7 +31,14 @@ import { buildEdges, INPUT_ID, OUTPUT_ID, SkillNode, type GraphCanvasNode, type 
 import { useOptionalWorkspaceContext } from '@/components/studio/WorkspaceContext'
 import type { PanelKind } from '@/components/studio/Toolbar'
 import { buildNodes, phaseKindFile } from './build-nodes'
-import type { NewPhaseKind } from './canvas-authoring'
+import {
+  type NewPhaseKind,
+  checkSequentialOverwrites,
+  addSequentialOverwriteField,
+  phaseRefsFromSkillDetail,
+  phaseFilePath,
+  type OverwriteConflict,
+} from './canvas-authoring'
 
 interface GraphCanvasProps {
   skillId: string
@@ -45,6 +53,7 @@ interface GraphCanvasProps {
   onDisconnectConnection?: (connection: { source: string; target: string }) => Promise<void> | void
   statusByNodeId?: Record<string, SkillNodeStatus>
   compact?: boolean
+  onPhaseFileSave?: (args: { path: string; content: string; expectedHash: string }) => Promise<void> | void
 }
 
 const nodeTypes = {
@@ -78,6 +87,7 @@ export function GraphCanvas({
   onDisconnectConnection,
   statusByNodeId,
   compact = false,
+  onPhaseFileSave,
 }: GraphCanvasProps) {
   const workspace = useOptionalWorkspaceContext()
   const [expandedSubgraphs, setExpandedSubgraphs] = useState<Set<string>>(() => new Set())
@@ -85,6 +95,86 @@ export function GraphCanvas({
   const [edgeMenuConnection, setEdgeMenuConnection] = useState<{ source: string; target: string } | null>(null)
   const [canvasHeight, setCanvasHeight] = useState(0)
   const canvasRef = useRef<HTMLElement | null>(null)
+
+  const [warningQueue, setWarningQueue] = useState<OverwriteConflict[]>([])
+  const [activeWarningIndex, setActiveWarningIndex] = useState<number>(-1)
+  const [cancelledNodeIds, setCancelledNodeIds] = useState<Set<string>>(() => new Set())
+  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance<GraphCanvasNode & { selected: boolean }, Edge<ContextEdgeData>> | null>(null)
+
+  // 1. Conflict detection effect
+  useEffect(() => {
+    if (!skillDetail) {
+      setWarningQueue([])
+      setActiveWarningIndex(-1)
+      return
+    }
+    const phases = phaseRefsFromSkillDetail(skillDetail)
+    const conflicts = checkSequentialOverwrites(skillDetail, phases)
+    setWarningQueue(conflicts)
+    if (conflicts.length > 0) {
+      setActiveWarningIndex(0)
+    } else {
+      setActiveWarningIndex(-1)
+    }
+  }, [skillDetail])
+
+  // 2. Viewport pan transition effect
+  useEffect(() => {
+    const activeWarning = warningQueue[activeWarningIndex]
+    if (activeWarning && reactFlowInstance) {
+      reactFlowInstance.fitView({
+        nodes: [{ id: activeWarning.nodeId }],
+        duration: 600,
+        padding: 0.8,
+      })
+    }
+  }, [activeWarningIndex, warningQueue, reactFlowInstance])
+
+  // 3. Sequential overwrite allow/cancel callbacks
+  const handleAllowSequentialOverwrite = useCallback(async (nodeId: string, fieldName: string) => {
+    if (!skillDetail || !onPhaseFileSave) return
+    const phase = phaseRefsFromSkillDetail(skillDetail).find((p) => p.id === nodeId)
+    if (!phase) return
+    const relativePath = phaseFilePath(nodeId, phase.mode)
+    const currentContent = skillDetail.files?.[relativePath]
+    if (!currentContent) return
+
+    const updatedContent = addSequentialOverwriteField(currentContent, fieldName)
+    try {
+      const sha256Hex = async (text: string) => {
+        const msgUint8 = new TextEncoder().encode(text)
+        const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8)
+        const hashArray = Array.from(new Uint8Array(hashBuffer))
+        return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
+      }
+      const hash = await sha256Hex(currentContent)
+      await onPhaseFileSave({
+        path: relativePath,
+        content: updatedContent,
+        expectedHash: hash,
+      })
+      // Advance warning queue index or clear queue
+      if (activeWarningIndex < warningQueue.length - 1) {
+        setActiveWarningIndex((prev) => prev + 1)
+      } else {
+        setWarningQueue([])
+        setActiveWarningIndex(-1)
+      }
+    } catch (saveError) {
+      toast.error('Could not whitelist sequential overwrite: ' + (saveError instanceof Error ? saveError.message : String(saveError)))
+    }
+  }, [skillDetail, onPhaseFileSave, activeWarningIndex, warningQueue])
+
+  const handleCancelWarning = useCallback((nodeId: string) => {
+    setCancelledNodeIds((prev) => {
+      const next = new Set(prev)
+      next.add(nodeId)
+      return next
+    })
+    setWarningQueue([])
+    setActiveWarningIndex(-1)
+    toast.error('Warning cancelled. Conflict node marked red.')
+  }, [])
   const fitViewRef = useRef<(() => void) | null>(null)
   const fitLayout = useCallback(() => {
     window.requestAnimationFrame(() => {
@@ -151,6 +241,43 @@ export function GraphCanvas({
       console.error(layoutResult.error)
     }
   }, [layoutResult.error])
+
+  // Controlled effect to sync activeConflict, isConflictCancelled, and callbacks into the nodes state
+  useEffect(() => {
+    setNodes((currentNodes) => {
+      let changed = false
+      const nextNodes = currentNodes.map((node) => {
+        if (node.type !== 'skill') return node
+
+        const activeConflict = warningQueue[activeWarningIndex]
+        const hasConflict = activeConflict && activeConflict.nodeId === node.id ? activeConflict : undefined
+        const isConflictCancelled = cancelledNodeIds.has(node.id)
+
+        // Compare values to prevent unnecessary updates and keep references stable
+        if (
+          node.data.activeConflict === hasConflict &&
+          node.data.isConflictCancelled === isConflictCancelled &&
+          node.data.onAllowSequentialOverwrite === handleAllowSequentialOverwrite &&
+          node.data.onCancelWarning === handleCancelWarning
+        ) {
+          return node
+        }
+
+        changed = true
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            activeConflict: hasConflict,
+            isConflictCancelled,
+            onAllowSequentialOverwrite: handleAllowSequentialOverwrite,
+            onCancelWarning: handleCancelWarning,
+          },
+        }
+      })
+      return changed ? nextNodes : currentNodes
+    })
+  }, [warningQueue, activeWarningIndex, cancelledNodeIds, handleAllowSequentialOverwrite, handleCancelWarning, setNodes])
 
   const selectedNodes = useMemo(
     () => nodes.map((node) => ({ ...node, selected: node.id === (selectedCanvasNodeId ?? selectedNodeId) })),
@@ -308,6 +435,7 @@ export function GraphCanvas({
           }
         }}
         onInit={(instance) => {
+          setReactFlowInstance(instance)
           fitViewRef.current = () => instance.fitView({ padding: 0.2 })
           fitLayout()
         }}

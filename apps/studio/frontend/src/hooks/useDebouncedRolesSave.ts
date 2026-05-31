@@ -6,6 +6,8 @@ import type { SaveStatus } from "./useDebouncedCredentialsSave"
 export interface UseDebouncedRolesSaveOptions {
   delayMs?: number
   putFn?: (data: RolesData) => Promise<RolesData>
+  isRecoverableError?: (error: unknown) => boolean
+  onRecoverableError?: (error: unknown) => void
   onSaved?: (next: RolesData) => void
   onError?: (error: unknown) => void
 }
@@ -18,10 +20,21 @@ export interface UseDebouncedRolesSaveResult {
   lastError: unknown
 }
 
+export type RolesSaveErrorDisposition = "buffered" | "recoverable" | "fatal"
+
+export function rolesSaveErrorDisposition(
+  error: unknown,
+  hasBufferedSave: boolean,
+  isRecoverableError?: (error: unknown) => boolean,
+): RolesSaveErrorDisposition {
+  if (hasBufferedSave) return "buffered"
+  return isRecoverableError?.(error) ? "recoverable" : "fatal"
+}
+
 export function useDebouncedRolesSave(
   options: UseDebouncedRolesSaveOptions = {},
 ): UseDebouncedRolesSaveResult {
-  const { delayMs = 300, putFn = putRoles, onSaved, onError } = options
+  const { delayMs = 300, putFn = putRoles, isRecoverableError, onRecoverableError, onSaved, onError } = options
   const [status, setStatus] = useState<SaveStatus>("idle")
   const [lastError, setLastError] = useState<unknown>(null)
 
@@ -46,7 +59,12 @@ export function useDebouncedRolesSave(
         return next
       } catch (error) {
         const hasBufferedSave = Boolean(pendingSnapshotRef.current)
-        if (!hasBufferedSave) {
+        const disposition = rolesSaveErrorDisposition(error, hasBufferedSave, isRecoverableError)
+        if (disposition === "recoverable") {
+          setStatus("idle")
+          setLastError(null)
+          onRecoverableError?.(error)
+        } else if (disposition === "fatal") {
           setStatus("error")
           setLastError(error)
           const message = error instanceof Error ? error.message : "Save failed"
@@ -63,7 +81,7 @@ export function useDebouncedRolesSave(
         }
       }
     },
-    [onError, onSaved, putFn],
+    [isRecoverableError, onError, onRecoverableError, onSaved, putFn],
   )
 
   const queue = useCallback(

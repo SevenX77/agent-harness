@@ -1,16 +1,23 @@
-"""Transient import-draft storage for untrusted provider discovery output."""
+"""Import-draft storage and append-only provider evidence records."""
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 import threading
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from graph_agent_gateway.registry.schema import ProviderImportDraft
+import httpx
+from graph_agent_gateway.registry.schema import (
+    EvidenceRecord,
+    ProviderImportDraft,
+    RouteCandidate,
+)
 
 from app.models.llm_config import ProviderEndpoint, ProviderRoute
 from app.services.llm_credentials import (
@@ -23,6 +30,7 @@ from app.services.llm_credentials import (
 from app.services.llm_paths import import_drafts_path
 
 _WRITE_LOCK = threading.Lock()
+EVIDENCE_LIBRARY_DRAFT_ID = "studio-evidence-library"
 
 ConflictMode = Literal["merge"]
 
@@ -40,7 +48,7 @@ class DraftApplyConflict(ValueError):
 
 
 def drafts_path() -> Path:
-    """Return the transient import draft store path."""
+    """Return the import draft and evidence store path."""
     return import_drafts_path()
 
 
@@ -63,6 +71,16 @@ def load_draft(draft_id: str, *, path: Path | None = None) -> ProviderImportDraf
     return draft
 
 
+def load_evidence_library(
+    *,
+    path: Path | None = None,
+    draft_id: str = EVIDENCE_LIBRARY_DRAFT_ID,
+) -> ProviderImportDraft:
+    """Load the durable evidence library, returning an empty one if absent."""
+    drafts = _load_all(path or drafts_path())
+    return drafts.get(draft_id) or _new_evidence_library(draft_id)
+
+
 def save_draft(draft: ProviderImportDraft, *, path: Path | None = None) -> ProviderImportDraft:
     """Atomically save one draft."""
     store_path = path or drafts_path()
@@ -71,6 +89,48 @@ def save_draft(draft: ProviderImportDraft, *, path: Path | None = None) -> Provi
         drafts[draft.draft_id] = draft
         _save_all(store_path, drafts)
     return draft
+
+
+def append_evidence_record(
+    record: EvidenceRecord,
+    *,
+    route_candidates: dict[str, RouteCandidate] | None = None,
+    path: Path | None = None,
+    draft_id: str = EVIDENCE_LIBRARY_DRAFT_ID,
+) -> ProviderImportDraft:
+    """Append one evidence record without replacing older scoped evidence."""
+    store_path = path or drafts_path()
+    now = _now_iso()
+    record = record.model_copy(
+        update={
+            "observed_at": record.observed_at or now,
+            "attempted_at": record.attempted_at or now
+            if record.evidence_type == "probe"
+            else record.attempted_at,
+        }
+    )
+    with _WRITE_LOCK:
+        drafts = _load_all(store_path)
+        draft = drafts.get(draft_id) or _new_evidence_library(draft_id, now=now)
+        updated = draft.model_copy(
+            update={
+                "created_at": draft.created_at or now,
+                "updated_at": now,
+                "route_candidates": {
+                    **draft.route_candidates,
+                    **(route_candidates or {}),
+                },
+                "evidence_records": [*draft.evidence_records, record],
+            }
+        )
+        drafts[draft_id] = updated
+        _save_all(store_path, drafts)
+        return updated
+
+
+def new_evidence_id(prefix: str = "evidence") -> str:
+    """Return a compact unique evidence ID."""
+    return f"{prefix}-{uuid.uuid4().hex}"
 
 
 def apply_draft(
@@ -195,6 +255,25 @@ def _is_expired(draft: ProviderImportDraft) -> bool:
     return expires_at <= datetime.now(tz=UTC)
 
 
+def _new_evidence_library(
+    draft_id: str = EVIDENCE_LIBRARY_DRAFT_ID,
+    *,
+    now: str | None = None,
+) -> ProviderImportDraft:
+    timestamp = now or _now_iso()
+    return ProviderImportDraft(
+        draft_id=draft_id,
+        source={"kind": "studio_evidence_library"},
+        status="pending",
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+
+
+def _now_iso() -> str:
+    return datetime.now(tz=UTC).isoformat()
+
+
 def _draft_payload_for_storage(draft: ProviderImportDraft) -> dict[str, object]:
     payload = draft.model_dump(mode="json")
     endpoint_candidates = payload.get("endpoint_candidates")
@@ -209,13 +288,106 @@ def _draft_payload_for_storage(draft: ProviderImportDraft) -> dict[str, object]:
     return payload
 
 
+logger = logging.getLogger(__name__)
+
+DEFAULT_CATALOG_URL = (
+    "https://raw.githubusercontent.com/SevenX77/agent-harness/main/llm_import_drafts.json"
+)
+
+async def sync_remote_evidence_library(
+    *,
+    url: str | None = None,
+    path: Path | None = None,
+    draft_id: str = EVIDENCE_LIBRARY_DRAFT_ID,
+) -> ProviderImportDraft:
+    """Pull the remote evidence library and merge it into the local store."""
+    target_url = url or os.getenv("STUDIO_CATALOG_URL") or DEFAULT_CATALOG_URL
+    logger.info("Syncing remote evidence library from %s", target_url)
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(target_url)
+            response.raise_for_status()
+            data = response.json()
+    except Exception as exc:
+        logger.error("Failed to fetch remote evidence library: %s", exc)
+        return load_evidence_library(path=path, draft_id=draft_id)
+
+    try:
+        raw_drafts = data.get("drafts", data)
+        if not isinstance(raw_drafts, dict):
+            raise ValueError("Invalid remote draft payload structure")
+        remote_draft_raw = raw_drafts.get(draft_id)
+        if not remote_draft_raw:
+            logger.warning("Remote evidence library not found in payload for draft_id=%s", draft_id)
+            return load_evidence_library(path=path, draft_id=draft_id)
+        remote_draft = ProviderImportDraft.model_validate(remote_draft_raw)
+    except Exception as exc:
+        logger.error("Failed to parse remote evidence library: %s", exc)
+        return load_evidence_library(path=path, draft_id=draft_id)
+
+    store_path = path or drafts_path()
+    with _WRITE_LOCK:
+        drafts = _load_all(store_path)
+        local_draft = drafts.get(draft_id) or _new_evidence_library(draft_id)
+        
+        merged_routes = dict(local_draft.route_candidates)
+        for route_id, route in remote_draft.route_candidates.items():
+            if route_id not in merged_routes:
+                merged_routes[route_id] = route
+            else:
+                merged_routes[route_id] = merged_routes[route_id].model_copy(
+                    update={
+                        "capabilities": {
+                            **merged_routes[route_id].capabilities,
+                            **route.capabilities,
+                        },
+                        "metadata": {
+                            **merged_routes[route_id].metadata,
+                            **route.metadata,
+                        }
+                    }
+                )
+
+        local_evidence_ids = {rec.evidence_id for rec in local_draft.evidence_records}
+        merged_records = list(local_draft.evidence_records)
+        new_records_count = 0
+        for record in remote_draft.evidence_records:
+            if record.evidence_id not in local_evidence_ids:
+                merged_records.append(record)
+                new_records_count += 1
+
+        logger.info(
+            "Merged remote drafts: new_records=%d, total_records=%d, total_routes=%d",
+            new_records_count,
+            len(merged_records),
+            len(merged_routes),
+        )
+
+        now = _now_iso()
+        updated = local_draft.model_copy(
+            update={
+                "updated_at": now,
+                "route_candidates": merged_routes,
+                "evidence_records": merged_records,
+            }
+        )
+        drafts[draft_id] = updated
+        _save_all(store_path, drafts)
+        return updated
+
+
 __all__ = [
     "DraftApplyConflict",
     "DraftExpired",
     "DraftNotFound",
+    "EVIDENCE_LIBRARY_DRAFT_ID",
+    "append_evidence_record",
     "apply_draft",
     "create_draft",
     "drafts_path",
+    "load_evidence_library",
     "load_draft",
+    "new_evidence_id",
     "save_draft",
+    "sync_remote_evidence_library",
 ]

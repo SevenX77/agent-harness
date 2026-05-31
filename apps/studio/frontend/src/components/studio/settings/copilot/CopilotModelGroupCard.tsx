@@ -39,13 +39,14 @@ import {
 import { cn } from "@/lib/utils"
 import { ThinkingBadge } from "../llm-roles/RoleBadges"
 import type { CopilotAgentStatus, CopilotRoutePreview } from "./mock-copilot-data"
+import type { CopilotRouteJobStatus } from "./copilot-role-test"
 
 export const CopilotModelGroupCard = memo(function CopilotModelGroupCard({
   modelName,
   modelIndex,
   routes,
   appendableRoutes,
-  testedRouteIds,
+  routeStatusOverrides,
   onAddRoute,
   onRemoveRoute,
   onReorderRoutes,
@@ -54,7 +55,7 @@ export const CopilotModelGroupCard = memo(function CopilotModelGroupCard({
   modelIndex: number
   routes: CopilotRoutePreview[]
   appendableRoutes: CopilotRoutePreview[]
-  testedRouteIds: ReadonlySet<string>
+  routeStatusOverrides: Record<string, CopilotRouteJobStatus>
   onAddRoute: (routeId: string) => void
   onRemoveRoute: (routeId: string) => void
   onReorderRoutes: (activeRouteId: string, overRouteId: string) => void
@@ -123,7 +124,7 @@ export const CopilotModelGroupCard = memo(function CopilotModelGroupCard({
                   key={route.id}
                   route={route}
                   index={index}
-                  status={agentStatusForRoute(route.agentStatus, route.id, testedRouteIds)}
+                  status={agentStatusForRoute(route.agentStatus, route.id, routeStatusOverrides)}
                   onRemove={() => onRemoveRoute(route.id)}
                 />
               ))}
@@ -144,7 +145,7 @@ const CopilotProviderTag = memo(function CopilotProviderTag({
 }: {
   route: CopilotRoutePreview
   index: number
-  status: CopilotAgentStatus
+  status: CopilotRouteJobStatus
   onRemove: () => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: route.id })
@@ -243,7 +244,7 @@ function AddRouteMenu({
   )
 }
 
-function RouteStatusLight({ status }: { status: CopilotAgentStatus }) {
+function RouteStatusLight({ status }: { status: CopilotRouteJobStatus }) {
   return (
     <span
       role="status"
@@ -257,31 +258,35 @@ function RouteStatusLight({ status }: { status: CopilotAgentStatus }) {
 function agentStatusForRoute(
   initialStatus: CopilotAgentStatus,
   routeId: string,
-  testedRouteIds: ReadonlySet<string>,
-): CopilotAgentStatus {
-  if (initialStatus === "not_tested" && testedRouteIds.has(routeId)) return "ready"
+  routeStatusOverrides: Record<string, CopilotRouteJobStatus>,
+): CopilotRouteJobStatus {
+  const override = routeStatusOverrides[routeId]
+  if (override) return override
   return initialStatus
 }
 
-function routeSurfaceClass(status: CopilotAgentStatus): string {
+function routeSurfaceClass(status: CopilotRouteJobStatus): string {
   if (status === "ready") return "border-success-border ring-1 ring-success/25"
+  if (status === "testing") return "border-primary ring-1 ring-primary/30"
   if (status === "not_tested") return "border-warning-border ring-1 ring-warning/25"
   return "border-destructive-border ring-1 ring-destructive/25"
 }
 
-function lightClass(status: CopilotAgentStatus): string {
+function lightClass(status: CopilotRouteJobStatus): string {
   if (status === "ready") return "bg-success ring-success-border"
+  if (status === "testing") return "bg-primary ring-primary animate-pulse"
   if (status === "not_tested") return "bg-warning ring-warning-border"
   return "bg-destructive ring-destructive-border"
 }
 
-function statusLabel(status: CopilotAgentStatus): string {
+function statusLabel(status: CopilotRouteJobStatus): string {
   if (status === "ready") return "Ready"
+  if (status === "testing") return "Testing"
   if (status === "not_tested") return "Not tested"
   return "Unsupported"
 }
 
-function routeTooltip(route: CopilotRoutePreview, status: CopilotAgentStatus): string {
+function routeTooltip(route: CopilotRoutePreview, status: CopilotRouteJobStatus): string {
   return [
     route.modelId,
     `Claude Agent SDK: ${statusLabel(status)}`,
@@ -289,4 +294,3 @@ function routeTooltip(route: CopilotRoutePreview, status: CopilotAgentStatus): s
     route.note,
   ].filter(Boolean).join("\n")
 }
-

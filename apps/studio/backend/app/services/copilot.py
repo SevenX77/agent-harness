@@ -33,7 +33,10 @@ from claude_agent_sdk.types import (
     ToolResultBlock,
     ToolUseBlock,
 )
+from graph_agent_gateway.registry.contracts import CredentialProviderProtocol
+from graph_agent_gateway.registry.credentials import EndpointCredentialProvider
 from graph_agent_gateway.registry.schema import ResolvedRoute
+from pydantic import SecretStr
 
 from app.models.copilot import (
     CopilotEvent,
@@ -204,7 +207,7 @@ async def stream_query(
     """Stream one Copilot query using the copilot_chat role and optional model override."""
 
     try:
-        routes = _resolve_copilot_routes(model_override)
+        routes, credential_provider = _resolve_copilot_runtime(model_override)
     except KeyError as exc:
         yield CopilotEventError(message=f"未知模型: {exc}")
         return
@@ -215,7 +218,10 @@ async def stream_query(
     failures: list[str] = []
     for route in routes:
         try:
-            api_key, base_url, env_overrides = _resolve_route_runtime(route)
+            api_key, base_url, env_overrides = _resolve_route_runtime(
+                route,
+                credential_provider,
+            )
         except ValueError as exc:
             if len(routes) == 1:
                 yield CopilotEventError(message=str(exc))
@@ -410,10 +416,13 @@ def _tool_result_summary(content: str | list[dict[str, Any]] | None) -> str:
     return json.dumps(content, ensure_ascii=False)
 
 
-def _resolve_copilot_routes(model_override: str | None) -> list[ResolvedRoute]:
+def _resolve_copilot_runtime(
+    model_override: str | None,
+) -> tuple[list[ResolvedRoute], CredentialProviderProtocol]:
     from graph_agent_gateway.registry.resolver import resolve_role
 
     credentials = load_credentials()
+    credential_provider = EndpointCredentialProvider(credentials.provider_endpoints)
     active_roles_path = default_roles_path()
     roles = load_roles_file(active_roles_path) if active_roles_path.exists() else RolesData()
     snapshot = roles.to_registry_snapshot(credentials)
@@ -421,23 +430,33 @@ def _resolve_copilot_routes(model_override: str | None) -> list[ResolvedRoute]:
         snapshot,
         "copilot_chat",
         route_override=model_override,
+        credential_provider=credential_provider,
     )
     if not resolved.routes:
         raise ValueError("copilot_chat role 无可用 route")
-    return list(resolved.routes)
+    return list(resolved.routes), credential_provider
+
+
+def _resolve_copilot_routes(model_override: str | None) -> list[ResolvedRoute]:
+    routes, _credential_provider = _resolve_copilot_runtime(model_override)
+    return routes
 
 
 def _resolve_copilot_route(model_override: str | None) -> ResolvedRoute:
     return _resolve_copilot_routes(model_override)[0]
 
 
-def _resolve_route_runtime(route: ResolvedRoute) -> tuple[str, str | None, dict[str, str]]:
-    if route.api_key is None:
-        raise ValueError(
-            "endpoint has no inline credential; CredentialProvider integration is required: "
-            f"{route.endpoint_id}"
-        )
-    api_key = route.api_key.get_secret_value().strip()
+def _resolve_route_runtime(
+    route: ResolvedRoute,
+    credential_provider: CredentialProviderProtocol,
+) -> tuple[str, str | None, dict[str, str]]:
+    if not route.credential_ref:
+        raise ValueError(f"route has no credential_ref: {route.route_id}")
+    try:
+        secret = credential_provider.get(route.credential_ref)
+    except Exception as exc:
+        raise ValueError(f"Endpoint {route.endpoint_id} 未配置 API key") from exc
+    api_key = _secret_value(secret).strip()
     base_url = route.base_url.strip() or None
     env_overrides: dict[str, str] = {}
     if route.call_method_id == "ark_anthropic_messages":
@@ -448,6 +467,10 @@ def _resolve_route_runtime(route: ResolvedRoute) -> tuple[str, str | None, dict[
         base_url = _deepseek_anthropic_base_url(route.base_url)
         env_overrides["ANTHROPIC_MODEL"] = route.provider_model_id
     return api_key, base_url, env_overrides
+
+
+def _secret_value(secret: SecretStr | str) -> str:
+    return secret.get_secret_value() if isinstance(secret, SecretStr) else secret
 
 
 def _ark_anthropic_base_url(base_url: str) -> str:

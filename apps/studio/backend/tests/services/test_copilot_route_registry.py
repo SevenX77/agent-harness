@@ -65,4 +65,5 @@ def test_copilot_route_resolution_uses_v4_registry_route_ids(
 
     assert route.endpoint_id == "anthropic-official"
     assert route.provider_model_id == "claude-sonnet"
-    assert route.api_key.get_secret_value() == "secret"
+    assert route.credential_ref == "endpoint:anthropic-official"
+    assert "api_key" not in route.model_dump(mode="json")

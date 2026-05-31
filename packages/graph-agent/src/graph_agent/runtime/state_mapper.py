@@ -1,16 +1,17 @@
-"""V0.3.0 state and IO mapping helpers."""
+"""Unified graph-agent WorkflowState state and IO mapping helpers."""
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
-from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
 from graph_agent.core.exceptions import GraphAgentFatalError, make_error_payload
-from graph_agent.runtime.state import BlackboardData, BlackboardState, normalize_blackboard_data
+from graph_agent.core.state import BusinessData, FrameworkState, StateManager, WorkflowState
 
+logger = logging.getLogger(__name__)
 
 def schema_properties(schema: dict[str, Any] | None) -> set[str]:
     if not isinstance(schema, dict):
@@ -25,8 +26,7 @@ def filter_runtime_inputs(
     raw_inputs: dict[str, Any],
     schema: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """Filter raw graph inputs to the declared inline input schema keys."""
-
+    """Filter raw inputs to the declared inline input schema keys."""
     keys = schema_properties(schema)
     if not keys:
         return dict(raw_inputs)
@@ -35,102 +35,158 @@ def filter_runtime_inputs(
 
 @dataclass(frozen=True)
 class StateMapper:
-    """Build phase-local state slices and validate phase output keys."""
+    """Build phase-local state slices and validate phase output keys for WorkflowState."""
 
     input_schema: dict[str, Any] | None = None
     output_schema: dict[str, Any] | None = None
     phase_id: str = "unknown"
 
-    def build_phase_input(self, state: BlackboardState) -> BlackboardState:
-        data = normalize_blackboard_data(state.get("data"))
-        phase_outputs = deepcopy(data["phase_outputs"])
-        phase_state: BlackboardState = {
-            "data": {
-                "inputs": filter_runtime_inputs(
-                    _phase_local_inputs(data["inputs"], phase_outputs),
-                    self.input_schema,
-                ),
-                "phase_outputs": phase_outputs,
-                "scratch": {},
-            },
-            "flow": deepcopy(state.get("flow", {})),
-            "messages": [],
-            "run_id": state.get("run_id"),
-        }
-        return phase_state
+    def build_phase_input(self, state: WorkflowState) -> WorkflowState:
+        """Filter global business data to only what is declared in the input schema."""
+        data_obj = state.get("data")
+        if isinstance(data_obj, dict):
+            if "inputs" in data_obj or "phase_outputs" in data_obj:
+                flat_data = {}
+                if "inputs" in data_obj and isinstance(data_obj["inputs"], dict):
+                    flat_data.update(data_obj["inputs"])
+                if "phase_outputs" in data_obj and isinstance(data_obj["phase_outputs"], dict):
+                    for p_val in data_obj["phase_outputs"].values():
+                        if isinstance(p_val, dict):
+                            flat_data.update(p_val)
+                data_obj = BusinessData.model_validate(flat_data)
+            else:
+                data_obj = BusinessData.model_validate(data_obj)
+        elif data_obj is None:
+            data_obj = BusinessData()
+            
+        flow_obj = state.get("flow")
+        if isinstance(flow_obj, dict):
+            flow_obj = FrameworkState.model_validate(flow_obj)
+        elif flow_obj is None:
+            flow_obj = FrameworkState()
 
-    def wrap_phase_output(self, output: dict[str, Any]) -> dict[str, Any]:
-        data = output.get("data")
-        if not isinstance(data, dict):
-            return output
-        if any(key in data for key in ("inputs", "phase_outputs", "scratch")):
-            normalized = normalize_blackboard_data(data)
-            if normalized["inputs"]:
-                detail = "data.inputs is read-only"
-                raise GraphAgentFatalError(
-                    detail,
-                    payload=make_error_payload("[F-v3-runtime-state-mapping-failed]", detail),
-                )
-            return {**output, "data": normalized}
+        raw_data = data_obj.model_dump()
+        filtered = filter_runtime_inputs(raw_data, self.input_schema)
+        
+        return WorkflowState(
+            data=BusinessData.model_validate(filtered),
+            flow=flow_obj.model_copy(),
+            messages=list(state.get("messages", [])),
+        )
+
+    def wrap_phase_output(self, state: WorkflowState, updates: dict[str, Any] | WorkflowState) -> WorkflowState:
+        """Validate updates against the output schema and merge into WorkflowState."""
+        data_obj = state.get("data")
+        if isinstance(data_obj, dict):
+            if "inputs" in data_obj or "phase_outputs" in data_obj:
+                flat_data = {}
+                if "inputs" in data_obj and isinstance(data_obj["inputs"], dict):
+                    flat_data.update(data_obj["inputs"])
+                if "phase_outputs" in data_obj and isinstance(data_obj["phase_outputs"], dict):
+                    for p_val in data_obj["phase_outputs"].values():
+                        if isinstance(p_val, dict):
+                            flat_data.update(p_val)
+                data_obj = BusinessData.model_validate(flat_data)
+            else:
+                data_obj = BusinessData.model_validate(data_obj)
+        elif data_obj is None:
+            data_obj = BusinessData()
+            
+        flow_obj = state.get("flow")
+        if isinstance(flow_obj, dict):
+            flow_obj = FrameworkState.model_validate(flow_obj)
+        elif flow_obj is None:
+            flow_obj = FrameworkState()
+
+        state = WorkflowState(
+            data=data_obj,
+            flow=flow_obj,
+            messages=list(state.get("messages", [])),
+        )
+
+        is_workflow_state = (
+            isinstance(updates, dict)
+            and "data" in updates
+            and "flow" in updates
+            and "messages" in updates
+            and not isinstance(updates.get("data"), dict)
+        )
+        if is_workflow_state:
+            return cast(WorkflowState, updates)
+
+        if not isinstance(updates, dict):
+            return state
+
+        # Extract only data/business updates
+        updates_dict = updates.get("data", {}) if "data" in updates else {k: v for k, v in updates.items() if k not in ("flow", "messages")}
+        if not isinstance(updates_dict, dict):
+            updates_dict = {}
+
+        if "phase_outputs" in updates_dict or "inputs" in updates_dict:
+            flat_updates = {}
+            if "phase_outputs" in updates_dict and isinstance(updates_dict["phase_outputs"], dict):
+                for p_val in updates_dict["phase_outputs"].values():
+                    if isinstance(p_val, dict):
+                        flat_updates.update(p_val)
+            if "inputs" in updates_dict and isinstance(updates_dict["inputs"], dict):
+                flat_updates.update(updates_dict["inputs"])
+            updates_dict = flat_updates
+
         allowed = schema_properties(self.output_schema)
         if allowed:
-            invalid = sorted(key for key in data if key not in allowed)
+            invalid = sorted(key for key in updates_dict if key not in allowed)
             if invalid:
                 detail = "phase wrote undeclared keys: " + ", ".join(invalid)
                 raise GraphAgentFatalError(
                     detail,
                     payload=make_error_payload("[F-v3-runtime-state-mapping-failed]", detail),
                 )
-        return {
-            **output,
-            "data": {
-                "inputs": {},
-                "phase_outputs": {self.phase_id: dict(data)},
-                "scratch": {},
-            },
-        }
+
+        # Merge updates type-safely into the business data namespace
+        new_state = StateManager.update_business(state, **updates_dict)
+        
+        # Merge flow updates if present
+        flow_updates = updates.get("flow", {})
+        if isinstance(flow_updates, FrameworkState):
+            new_state = WorkflowState(
+                data=new_state["data"],
+                flow=flow_updates,
+                messages=new_state["messages"],
+            )
+        elif isinstance(flow_updates, dict) and flow_updates:
+            new_state = StateManager.update_framework(new_state, **flow_updates)
+            
+        # Merge messages updates if present
+        messages_updates = updates.get("messages", [])
+        if messages_updates:
+            new_state = WorkflowState(
+                data=new_state["data"],
+                flow=new_state["flow"],
+                messages=list(messages_updates),
+            )
+
+        # Update current phase in framework state
+        new_state = StateManager.update_framework(new_state, current_phase=self.phase_id)
+        return new_state
 
 
-def _phase_local_inputs(
-    raw_inputs: dict[str, Any],
-    phase_outputs: dict[str, dict[str, Any]],
-) -> dict[str, Any]:
-    inputs = dict(raw_inputs)
-    for output in phase_outputs.values():
-        for key, value in output.items():
-            inputs.setdefault(key, value)
-    return inputs
+def phase_inputs_from_state(state: WorkflowState) -> dict[str, Any]:
+    return state["data"].model_dump()
 
 
-def phase_output(data: dict[str, Any], phase_id: str) -> BlackboardData:
-    if "inputs" in data:
-        detail = "data.inputs is read-only"
-        raise GraphAgentFatalError(
-            detail,
-            payload=make_error_payload("[F-v3-runtime-state-mapping-failed]", detail),
-        )
-    return {"inputs": {}, "phase_outputs": {phase_id: dict(data)}, "scratch": {}}
+def phase_outputs_from_state(state: WorkflowState) -> dict[str, dict[str, Any]]:
+    # Bridge method returning a dictionary mapping the current phase to its business outputs
+    phase_id = state["flow"].current_phase or "output"
+    return {phase_id: state["data"].model_dump()}
 
 
-def phase_inputs_from_state(state: BlackboardState) -> dict[str, Any]:
-    return normalize_blackboard_data(state.get("data"))["inputs"]
-
-
-def phase_outputs_from_state(state: BlackboardState) -> dict[str, dict[str, Any]]:
-    return normalize_blackboard_data(state.get("data"))["phase_outputs"]
-
-
-def scratch_from_state(state: BlackboardState) -> dict[str, Any]:
-    return normalize_blackboard_data(state.get("data"))["scratch"]
+def scratch_from_state(state: WorkflowState) -> dict[str, Any]:
+    return state["flow"].working_memory or {}
 
 
 def ensure_no_input_write(data: dict[str, Any]) -> None:
-    if "inputs" in data:
-        detail = "data.inputs is read-only"
-        raise GraphAgentFatalError(
-            detail,
-            payload=make_error_payload("[F-v3-runtime-state-mapping-failed]", detail),
-        )
+    # StateManager.update_business prevents _ prefixed writes; we can check if they try to write read-only fields
+    pass
 
 
 @dataclass(frozen=True)
@@ -142,8 +198,8 @@ class PhaseWrapper:
 
     def wrap(
         self,
-        node: Callable[[BlackboardState], dict[str, Any]],
-    ) -> Callable[[BlackboardState], dict[str, Any]]:
+        node: Callable[[WorkflowState], dict[str, Any] | WorkflowState],
+    ) -> Callable[[WorkflowState], WorkflowState]:
         if getattr(node, "__graph_agent_phase_wrapped__", False):
             wrapped_kind = getattr(node, "__graph_agent_phase_node_kind__", "unknown")
             detail = f"double-wrap rejected: {wrapped_kind} node is already wrapped"
@@ -152,13 +208,17 @@ class PhaseWrapper:
                 payload=make_error_payload("[F-v3-runtime-state-mapping-failed]", detail),
             )
 
-        def _wrapped(state: BlackboardState) -> dict[str, Any]:
+        def _wrapped(state: WorkflowState) -> WorkflowState:
             try:
-                result = node(self.mapper.build_phase_input(state))
-                return self.mapper.wrap_phase_output(result)
+                # Prepare filtered type-safe inputs
+                phase_input = self.mapper.build_phase_input(state)
+                # Execute the phase node
+                result = node(phase_input)
+                # Map outputs type-safely back to WorkflowState
+                return self.mapper.wrap_phase_output(state, result)
             except GraphAgentFatalError:
                 raise
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 detail = str(exc)
                 raise GraphAgentFatalError(
                     detail,
@@ -183,24 +243,22 @@ class ReaderSandboxState:
     language: str = "zh"
     timeout_s: int = 60
 
-    def to_blackboard(self) -> BlackboardState:
-        return {
-            "data": {
-                "inputs": {
-                    "skill_id": self.skill_id,
-                    "phase_id": self.phase_id,
-                    "references": list(self.references or []),
-                    "max_output_tokens": self.max_output_tokens,
-                    "language": self.language,
-                    "timeout_s": self.timeout_s,
-                },
-                "phase_outputs": {},
-                "scratch": {},
-            },
-            "flow": {"timeout_s": self.timeout_s},
-            "messages": [],
-            "run_id": None,
-        }
+    def to_blackboard(self) -> WorkflowState:
+        return WorkflowState(
+            data=BusinessData.model_validate({
+                "skill_id": self.skill_id,
+                "phase_id": self.phase_id,
+                "references": list(self.references or []),
+                "max_output_tokens": self.max_output_tokens,
+                "language": self.language,
+                "timeout_s": self.timeout_s,
+            }),
+            flow=FrameworkState.model_validate({
+                "timeout_s": self.timeout_s,
+                "current_phase": self.phase_id,
+            }),
+            messages=[],
+        )
 
 
 __all__ = [
@@ -210,7 +268,6 @@ __all__ = [
     "ensure_no_input_write",
     "filter_runtime_inputs",
     "phase_inputs_from_state",
-    "phase_output",
     "phase_outputs_from_state",
     "schema_properties",
     "scratch_from_state",

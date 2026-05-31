@@ -558,6 +558,69 @@ describe('API Keys v4 registry adapter', () => {
     ])
   })
 
+  it('keeps the official endpoint connectivity check verified after catalog-only jobs', async () => {
+    const officialEndpoint: ProviderEndpoint = {
+      ...endpoint,
+      endpoint_id: 'openai-official',
+      display_name: 'OpenAI Official',
+      base_url: 'https://api.openai.com/v1',
+      api_key: 'sk-live',
+      provider_kind: 'official',
+    }
+    const putPayloads: Array<{ provider_endpoints: Record<string, ProviderEndpoint> }> = []
+    api.defaults.adapter = adapter((config) => {
+      if (config.method === 'put' && config.url === '/llm/registry/endpoints') {
+        const payload = typeof config.data === 'string' ? JSON.parse(config.data) : config.data
+        putPayloads.push(payload)
+        const savedEndpoint = {
+          ...officialEndpoint,
+          ...payload.provider_endpoints['openai-official'],
+          provider_kind: 'official',
+        }
+        return registry({
+          provider_endpoints: { 'openai-official': savedEndpoint },
+          provider_routes: {},
+        })
+      }
+      if (config.method === 'post' && config.url === '/llm/endpoints/openai-official/test-jobs') {
+        return {
+          job_id: 'job-1',
+          endpoint_id: 'openai-official',
+          status: 'completed',
+          total_model_count: 2,
+          tested_model_count: 0,
+          verified_route_count: 0,
+          failed_model_count: 0,
+          catalog_only_count: 0,
+          message: 'Connected in 42ms. Model seen: gpt-5.',
+          available_models: [
+            { id: 'gpt-5', route_id: 'openai-official:gpt-5', status: 'unverified_manual', verified_profile_count: 0, last_probe_message: null, capabilities: {} },
+          ],
+          available_sdks: ['openai_compatible'],
+        }
+      }
+      throw new Error(`Unexpected request: ${config.method} ${config.url}`)
+    })
+
+    await getProviderModels({
+      id: 'openai-official',
+      provider_type: 'openai_compatible',
+      api_key: 'sk-live',
+      base_url: 'https://api.openai.com/v1',
+    })
+    await putCredentials([
+      {
+        id: 'openai-official',
+        name: 'OpenAI Official',
+        provider_type: 'openai_compatible',
+        api_key: 'sk-live',
+        base_url: 'https://api.openai.com/v1',
+      },
+    ])
+
+    expect(putPayloads[1].provider_endpoints['openai-official'].status).toBe('verified')
+  })
+
   it('restores official catalog-only route candidates from endpoint capability library', async () => {
     const officialEndpoint: ProviderEndpoint = {
       ...endpoint,
@@ -1036,7 +1099,7 @@ describe('API Keys v4 registry adapter', () => {
     })
   })
 
-  it('loads v3 backend roles into the legacy-compatible LLM Roles UI shape', async () => {
+  it('loads v3 backend roles into the LLM Roles authoring shape', async () => {
     api.defaults.adapter = adapter((config) => {
       if (config.url === '/llm/registry') {
         return registry({
@@ -1118,12 +1181,13 @@ describe('API Keys v4 registry adapter', () => {
     })
     expect(roles.roles.analyst).toMatchObject({
       role_kind: 'graph_agent',
-      model_fallback: true,
+      model_fallback_enabled: true,
       active_model: 'gpt-5',
       models: {
         'gpt-5': { providers: [route.route_id] },
       },
     })
+    expect(Object.prototype.hasOwnProperty.call(roles.roles.analyst, 'model_fallback')).toBe(false)
   })
 
   it('keeps persisted model bundle groups addressable when roles reference them', async () => {
@@ -1173,7 +1237,7 @@ describe('API Keys v4 registry adapter', () => {
     })
   })
 
-  it('saves the legacy-compatible LLM Roles UI shape as v3 model groups', async () => {
+  it('saves the LLM Roles authoring shape as v3 model groups', async () => {
     const seen: Array<{ method?: string; url?: string; data?: unknown }> = []
     api.defaults.adapter = adapter((config) => {
       seen.push({ method: config.method, url: config.url, data: config.data })
@@ -1198,7 +1262,7 @@ describe('API Keys v4 registry adapter', () => {
       roles: {
         analyst: {
           role_kind: 'graph_agent',
-          model_fallback: false,
+          model_fallback_enabled: false,
           active_model: 'gpt-5',
           models: {
             'gpt-5': { providers: [route.route_id], temperature: 0.2, max_tokens: 8192 },

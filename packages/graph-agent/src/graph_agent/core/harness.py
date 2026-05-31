@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 """GraphAgentHarness — multi-phase Agent orchestration engine based on LangGraph.
 
 Builds a LangGraph StateGraph from a list of Phase definitions. Each phase

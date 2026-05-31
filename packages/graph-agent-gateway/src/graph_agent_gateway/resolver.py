@@ -17,7 +17,7 @@ from graph_agent_gateway.exceptions import (
 )
 from graph_agent_gateway.gateway_chat_model import GatewayChatModel
 from graph_agent_gateway.registry.resolver import RegistryResolutionError, resolve_role
-from graph_agent_gateway.registry.schema import RegistrySnapshot
+from graph_agent_gateway.registry.schema import RegistrySnapshot, RoleEntry, RoleRouteEntry, RuntimePolicy
 
 
 @dataclass
@@ -140,9 +140,7 @@ class ModelResolver:
                 provider_routes=self.registry_snapshot.provider_routes,
                 runtime_policy=self.registry_snapshot.runtime_policy,
                 roles={
-                    "_manual_mark_down": {
-                        "fallback_chain": [{"route_id": route_id}],
-                    }
+                    "_manual_mark_down": RoleEntry(fallback_chain=[RoleRouteEntry(route_id=route_id)])
                 },
             ),
             "_manual_mark_down",
@@ -172,7 +170,7 @@ def load_registry_snapshot(
     return RegistrySnapshot(
         provider_endpoints=credentials.get("provider_endpoints") or {},
         provider_routes=credentials.get("provider_routes") or {},
-        runtime_policy=credentials.get("runtime_policy") or {},
+        runtime_policy=RuntimePolicy.model_validate(credentials.get("runtime_policy") or {}),
         model_profiles=roles.get("model_profiles") or {},
         roles=roles.get("roles") or {},
     )

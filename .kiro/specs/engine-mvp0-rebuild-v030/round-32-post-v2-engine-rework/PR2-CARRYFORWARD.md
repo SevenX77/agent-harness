@@ -19,3 +19,23 @@
 ## 其他 PR-1 结转 (非阻塞, a3 src-audit 记录)
 - `run_manager._result_context/_result_metrics/_result_wall_time` 里 `isinstance(result, dict)` 防御分支在 PR-1 永不命中 (WorkflowResult 非 dict), 留作 PR-2 `WorkflowResult→RunResult` 收敛时清理或复用。
 - `predictor._predict_trace_subscriber` 只显式挂 4 个 hook (PhaseStart/PhaseEnd/LLMCall/ToolCall) — by-design 临时桥, PR-2 (T4 `predict_skill` public verb) 替换。
+
+## RunResult dict-compat 硬约束 (a3 SN4-audit 实证, 主控复核确认 — PR2-2 必须满足)
+
+**根因**: 现 `WorkflowResult` 带 dict-compat 垫片 (`result.py:64-67`: `__getitem__`→getattr / `get`→getattr)。多处 caller **把 result 当 dict 取值**, PR-2 `WorkflowResult→RunResult` 若不保留该垫片就会 break 这些 caller (cutover-discipline 同 PR 必修)。
+
+**4 个 dict-消费者 (主控 grep 实证, 全部 verified)**:
+1. `tools/builtin/parallel_map.py:319` — `return result.model_dump()` (转 list[dict] 元素)。
+2. `core/skill_tool_factory.py:122` — `result.get("context", {}).get("final_output")`。
+3. `tools/md_to_json.py:598` — `result["context"]["final_results"]`。
+4. `core/runner.py:481/494-495` CLI `main()` — `result["wall_time_sec"]` / `result["metrics"]` / `result.get("trace_path")` (非嵌套, 但在迁移波及面内 — tasks.md 迁移清单别只列 3 个嵌套点)。
+
+**PR2-2 RunResult 设计要求**: `RunResult` 必须继承/复刻 `result.py:64-67` 的 `__getitem__`+`get` 垫片 (或显式迁移这 4 个 caller 到属性访问)。PR2-1 红灯测试应 assert RunResult 的 dict-compat 行为。
+
+## T4 design 段 file:line 漂移 (a3 实证, freshness-only, a1 写 tasks.md/src 时 re-anchor)
+PR-1 (c83cab6) 重写 runner.py(180 行)+graph_assembler.py(281 行), T4 段 "当前状态" refs 是 PR-1 前写的, 逻辑/符号全在、语义不变, 仅行号漂移:
+- `mock_llm` param: `runner.py:63` → **68**
+- `mock_llm` 逻辑 (chat_model=mock / 禁 model_resolver): `runner.py:338-339` → **332-333**
+- `_resolve_phase_chat_model` 短路: `graph_assembler.py:488-502` → def 在 **502**, 短路 if 在 **510**
+
+(注: T3 段 design.md:152-295 / 迁移段 :265 现也历史性失真但属预期 — T3=PR-1 已实施完, 不在 T4 scope, **不回头改 T3 历史**。)

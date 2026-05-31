@@ -10,7 +10,6 @@ from typing import Any
 
 import yaml
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PACKAGE_ROOT = REPO_ROOT / "packages/graph-agent"
 DEFAULT_SOURCE_INCLUDE_GLOBS = ("packages/graph-agent/src/graph_agent/**/*.py",)
@@ -165,7 +164,8 @@ def _validate_features(features: list[dict[str, Any]], errors: list[str], *, ful
         runtime_feature_ids = {
             str(feature.get("id"))
             for feature in features
-            if "runtime-compatibility" in str(feature.get("id")) or "compatibility" in str(feature.get("description", "")).lower()
+            if "runtime-compatibility" in str(feature.get("id"))
+            or "compatibility" in str(feature.get("description", "")).lower()
         }
         runtime_feature_paths = {
             entry["path"]
@@ -232,7 +232,11 @@ def _validate_contract_feature_ids(contract_map: dict[str, Any], feature_ids: se
             referenced.update(str(feature_id) for feature_id in entry.get("feature_ids", []))
     dangling = sorted(referenced - feature_ids)
     if dangling:
-        _fail(errors, "R28_CONTRACT_FEATURE_DANGLING", "contract_map references unknown features: " + ", ".join(dangling))
+        _fail(
+            errors,
+            "R28_CONTRACT_FEATURE_DANGLING",
+            "contract_map references unknown features: " + ", ".join(dangling),
+        )
 
 
 def _validate_cutover(data: dict[str, Any], errors: list[str]) -> None:
@@ -254,7 +258,7 @@ def main(argv: list[str]) -> int:
     source_maps: list[dict[str, Any]] = []
     contract_maps: list[dict[str, Any]] = []
     has_combined_manifest = False
-    for path, data in loaded:
+    for _path, data in loaded:
         features = _features(data)
         if features:
             all_features.extend(features)

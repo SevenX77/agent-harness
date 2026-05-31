@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from graph_agent.core.skill_resolver_protocol import SkillResolutionError
+from graph_agent import ResourceNotFoundError
+from graph_agent.core.exceptions import make_error_payload
 
 from app.core import config
 
@@ -19,10 +20,15 @@ class StudioSkillResolver:
             indexed_root = Path(indexed["absolute_path"])
             if _is_skill_root(indexed_root):
                 return indexed_root
-            raise SkillResolutionError(
-                skill_id,
-                f"indexed path is not a skill root: {indexed_root}",
-                code="[F-v3-resolver-path-invalid]",
+            message = f"skill {skill_id!r}: indexed path is not a skill root: {indexed_root}"
+            raise ResourceNotFoundError(
+                message,
+                payload=make_error_payload(
+                    "[F-v3-resolver-path-invalid]",
+                    message,
+                    skill_id=skill_id,
+                    source_path=indexed_root,
+                ),
             )
 
         workspace_root = config.default_workspace_skills_dir() / skill_id
@@ -33,7 +39,15 @@ class StudioSkillResolver:
         if _is_skill_root(bundled_root):
             return bundled_root
 
-        raise SkillResolutionError(skill_id, "skill is not registered in Studio")
+        message = f"skill {skill_id!r}: skill is not registered in Studio"
+        raise ResourceNotFoundError(
+            message,
+            payload=make_error_payload(
+                "[F-v3-skill-not-registered]",
+                message,
+                skill_id=skill_id,
+            ),
+        )
 
 
 def build_studio_skill_resolver() -> StudioSkillResolver:

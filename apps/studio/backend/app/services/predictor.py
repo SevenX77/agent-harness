@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
@@ -30,7 +31,7 @@ from app.models.runs import PredictDiagnosticExport
 from app.services.diagnostic_export import export_predict_diagnostics
 from app.services.gateway_resolver import build_gateway_model_resolver
 from app.services.skill_resolver import build_studio_skill_resolver
-from app.services.skills import ensure_workspace_skill_dir, predict_dir_for
+from app.services.skills import ensure_workspace_skill_dir, workspace_dir_for
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,7 @@ class PredictorService:
 
         raw_result = self._run_skill(
             skill_dir,
+            workspace_dir=workspace_dir_for(skill_dir),
             mock_llm=mock_param,
             model_resolver=build_gateway_model_resolver(),
             skill_resolver=build_studio_skill_resolver(),
@@ -87,7 +89,7 @@ class PredictorService:
 
         path_diff = self._path_diff_for_strategy(strategy, actual_path)
         result = self.assemble_trace(raw_result, path_diff)
-        self._persist_predict_result(skill_dir, result)
+        self._persist_predict_result(skill_dir, _run_id_from_raw(raw_result), result)
         return result
 
     def resolve_fill_strategy(self, mock_param: Any) -> BaseMockStrategy:
@@ -111,10 +113,10 @@ class PredictorService:
 
         return export_predict_diagnostics(result)
 
-    def _persist_predict_result(self, skill_dir: Path, result: PredictResult) -> None:
-        predict_root = predict_dir_for(skill_dir)
-        predict_root.mkdir(parents=True, exist_ok=True)
-        (predict_root / "latest_predict.json").write_text(
+    def _persist_predict_result(self, skill_dir: Path, run_id: str, result: PredictResult) -> None:
+        run_dir = workspace_dir_for(skill_dir) / "runs" / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "result.json").write_text(
             result.model_dump_json(),
             encoding="utf-8",
         )
@@ -199,6 +201,14 @@ def _actual_path_from_raw(raw_result: Any) -> list[str]:
         return [str(item) for item in raw_path]
     phases = _phase_records_from_raw(raw_result)
     return [phase.phase_name for phase in phases]
+
+
+def _run_id_from_raw(raw_result: Any) -> str:
+    if isinstance(raw_result, dict):
+        raw_run_id = raw_result.get("run_id")
+    else:
+        raw_run_id = getattr(raw_result, "run_id", None)
+    return str(raw_run_id or uuid.uuid4())
 
 
 def _attach_predict_trace(raw_result: Any, trace_phases: list[dict[str, Any]]) -> Any:

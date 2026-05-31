@@ -40,7 +40,6 @@ def test_p0_skill_git_directory_index_and_workspace_flow(
     assert (skill_dir / ".gitignore").read_text(encoding="utf-8").splitlines() == [
         "/.workspace/*",
         "!/.workspace/golden/",
-        "!/.workspace/predict/",
         "/.workspace/local_settings.json",
     ]
     git_user = subprocess.run(
@@ -67,7 +66,7 @@ def test_p0_skill_git_directory_index_and_workspace_flow(
     file_paths = detail_response.json()["file_paths"]
     assert file_paths["runs_dir"] == str(workspace_dir / "runs")
     assert file_paths["golden_dir"] == str(workspace_dir / "golden")
-    assert file_paths["predict_dir"] == str(workspace_dir / "predict")
+    assert "predict_dir" not in file_paths
     assert file_paths["local_settings"] == str(workspace_dir / "local_settings.json")
 
     run_response = client.post("/api/skills/p0-skill/runs", json={"input_data": {"topic": "p0"}})

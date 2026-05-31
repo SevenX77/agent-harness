@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from graph_agent.core.exceptions import ErrorPayload
+
 
 class WorkflowMetrics(BaseModel):
     """Token and timing metrics for a workflow run."""
@@ -54,7 +56,7 @@ class WorkflowResult(BaseModel):
     context: dict[str, Any] = Field(default_factory=dict)
     metrics: WorkflowMetrics = Field(default_factory=WorkflowMetrics)
     trace_path: Path | None = None
-    error: str | None = None
+    error: ErrorPayload | None = None
     started_at: datetime
     finished_at: datetime
     wall_time_sec: float = 0.0

@@ -43,10 +43,10 @@
 异常 message 统一拼成：
 
 ```text
-{code} skill {skill_id!r}: {reason}
+skill {skill_id!r}: {reason}
 ```
 
-决策：resolver 域的失败都用同一种异常承载，调用方可以从 message 看到错误码，也可以从对象字段拿到 `skill_id`、`reason`、`code`。
+决策：Engine 内部 resolver 域的失败仍 raise `SkillResolutionError` leaf。这个 leaf 现在是 `ResourceNotFoundError` family，不再是 compile family；调用方跨 public 边界时 catch `ResourceNotFoundError`，再从 `exc.payload.code`、`exc.skill_id`、`exc.reason` 或 `exc.code` 拿到原 resolver 颗粒度。
 
 ### `SkillResolverProtocol.resolve_skill`
 
@@ -266,7 +266,7 @@ PR-1 去掉了 pytest `conftest.py` 对函数签名的默认值注入后，真�
 1. `run_skill` 先用 `require_skill_resolver(..., caller="run_skill")`。
 2. `_run_skill_dict` 再用 `require_skill_resolver(..., caller="_run_skill_dict")`。
 3. `_run_skill_dict` 只接受包含 `GRAPH.md` 的目录。合法目录走 `_run_v030_skill_dict`。
-4. 非目录入口、普通 `.md`、单文件 `SKILL.md`、不存在路径、或缺 `GRAPH.md` 的目录，都会抛 `SkillLoadError`，payload 和 message 都带 `[F-v3-graph-root-missing]`。公开 `run_skill` 捕获后返回 `WorkflowResult(success=False, context={}, error=含码文本)`。
+4. 非目录入口、普通 `.md`、单文件 `SKILL.md`、不存在路径、或缺 `GRAPH.md` 的目录，内部仍会抛 `SkillLoadError` leaf；这个 leaf 是 `GraphCompileError` family。payload 和 message 都带 `[F-v3-graph-root-missing]`。公开 `run_skill` 捕获后返回 `WorkflowResult(success=False, context={}, error=ErrorPayload(...))`，调用方应读 `result.error.code`。
 5. `_run_v030_skill_dict` 调 `compile_skill(..., skill_resolver=resolver)`，再调 `assemble_graph(..., skill_resolver=resolver)`。
 
 决策：编译、装配、运行三层都不允许掉 resolver。这样 child skill 解析不会在某一层偷偷回退到路径扫描。
@@ -348,7 +348,7 @@ LocalWorkspaceResolver(
 
 - `skill_resolver: SkillResolverProtocol`：patch agent 路径需要调用 `run_skill`，所以必填。
 
-流程：happy path 只 parse/validate；error path 调 `_PATCH_SKILL_MD` 时传 `skill_resolver`。如果 patch skill 的 `run_skill(...)` 返回对象有 `success is False`，`md_to_json` 会立刻抛 `SkillLoadError("md_to_json md-patch deferred fallback failed ...")`，并把原始 `result.error` 接在消息里。这样旧 `md-patch` deferred 路径失败时不会继续读取 `result["context"]["final_results"]`，也不会裸漏 `KeyError("final_results")`。
+流程：happy path 只 parse/validate；error path 调 `_PATCH_SKILL_MD` 时传 `skill_resolver`。如果 patch skill 的 `run_skill(...)` 返回对象有 `success is False`，`md_to_json` 会立刻抛内部 leaf `SkillLoadError("md_to_json md-patch deferred fallback failed ...")`；该 leaf 是 `GraphCompileError` family，并把原始 `result.error`（现在是 `ErrorPayload | None`）接在消息里。这样旧 `md-patch` deferred 路径失败时不会继续读取 `result["context"]["final_results"]`，也不会裸漏 `KeyError("final_results")`。
 
 ## 7. AST 字段 cutover
 
@@ -432,7 +432,7 @@ Studio resolver 文件：`apps/studio/backend/app/services/skill_resolver.py`
 2. entry 存在但路径不是 skill root，抛 `[F-v3-resolver-path-invalid]`。
 3. 查默认 workspace：`config.default_workspace_skills_dir() / skill_id`。
 4. 查 bundled skills：`config.SKILLS_DIR / skill_id`。
-5. 都没找到，抛 `SkillResolutionError(skill_id, "skill is not registered in Studio")`，错误码默认 `[F-v3-skill-not-registered]`。
+5. 都没找到，Studio 直接抛 public family `ResourceNotFoundError`，payload code 是 `[F-v3-skill-not-registered]`。如果 index 里有 entry 但路径不是 skill root，则同样抛 `ResourceNotFoundError`，payload code 是 `[F-v3-resolver-path-invalid]`。
 
 ### `build_studio_skill_resolver`
 

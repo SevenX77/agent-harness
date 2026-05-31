@@ -23,7 +23,7 @@ EXPECTED_CONTRACT_HASHES = {
     "docs/engine/skill-spec/11-error-code-spec.md": "07c594bfca9182f096e0746e2be49871c72c73b4e0803492ec324b086e27a32b",
     "docs/engine/skill-spec/12-compile-runtime-flow-spec.md": "a3defd2e4f5e123e5821a0284a131784144b82f0b5699dfa6f7509d058f1a259",
     "docs/engine/skill-spec/README.md": "1716f2891e0a7ed6987489debb3c46948825430efeff61975caa7f420114c4b3",
-    "docs/engine/public-api-contract.md": "40d95f9568d99e6dc9457c35dbe52edd553968ac82a40013bc736b613b81484e",
+    "docs/engine/public-api-contract.md": "972d5a947d7c2c6fb5f1692ea3d0d90dce380b3455a5ee19318bb56780e2e80f",
     "docs/engine/feature-compliance-checklist.md": "6303ccadd6b606d7dc464df095d0a095e2119aa5da9006534d368a2432a311cc",
     "packages/graph-agent/spec/round28-manifest-schema.yaml": "bcdf70ea0469fe02adff8e2c20e03f813195c1eaa0e4c325f8987cb6cfed5481",
 }

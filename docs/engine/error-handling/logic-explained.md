@@ -64,7 +64,22 @@ self.payload = payload or _payload_from_message(message)
 - 找到 token 且 code 在 `ERROR_REGISTRY`: 构造 `ErrorPayload(code=code, message=message)`，由 registry 自动补齐元数据。
 - 找到 token 但不是 core registry code: 默认 fail loud，抛 `ValueError("unknown graph_agent error code in message: ...")`。这是 must-fix 后的行为，用来堵住拼错码或未注册码静默变成 `payload=None` 的后门。
 
-还有一个明确的外部域例外：`[F-v3-gateway-*]`。gateway 包的异常继承 `ExecutionError`，也就是继承 `GraphAgentError`，但 gateway 的三个码在 gateway 文档和包内维护，不在 core `ERROR_REGISTRY`。所以 `_payload_from_message()` 对 `[F-v3-gateway-*]` 返回 `None`，不把它们当 core 未注册码处理。gateway 异常仍保留自己的 `code` 和 `context` 字段。
+还有一个明确的外部域例外：`[F-v3-gateway-*]`。gateway 包的异常继承 public family `ModelProviderError`，也就是继承 `GraphAgentError`，但 gateway 的三个码在 gateway 文档和包内维护，不在 core `ERROR_REGISTRY`。所以 `_payload_from_message()` 对 `[F-v3-gateway-*]` 返回 `None`，不把它们当 core 未注册码处理。gateway 异常仍保留自己的 `code` 和 `context` 字段。
+
+## Public Exception Families
+
+PR-A 将 SDK 顶层 public exception catalog 从 leaf-heavy API 浓缩为 5 个 public class：`GraphAgentError`、`GraphCompileError`、`GraphExecutionError`、`ModelProviderError`、`ResourceNotFoundError`。
+
+这不是删除内部错误颗粒度。内部实现仍可以 raise leaf class，例如 `SkillLoadError`、`SkillCompilationError`、`SkillResolutionError`、`ExecutionError`、`TraceWriteError` 和 gateway leaf errors。变化是这些 leaf 现在只作为 implementation detail 存在；外部调用方按 family catch，然后用 `ErrorPayload.code` 和 `ERROR_REGISTRY` 元数据区分具体错误现场。
+
+当前 family 边界如下：
+
+- `GraphCompileError`: loader/parser/schema/contract/template/compile 类错误。内部 leaf 如 `SkillLoadError` 和 `SkillCompilationError` 是这个 family。
+- `GraphExecutionError`: runtime phase/state/tool/persistence/trace/artifact/retry/fatal execution 类错误。内部 leaf 如 `ExecutionError` 和 `GraphAgentFatalError` 是这个 family。
+- `ModelProviderError`: gateway/provider/role/model/fallback 类错误。`GatewayError` 继承这个 family。
+- `ResourceNotFoundError`: skill id、resource ref、workspace path 等定位失败。Engine `SkillResolutionError` 是这个 family；Studio resolver 可以直接 raise `ResourceNotFoundError`，并用 `[F-v3-skill-not-registered]` 或 `[F-v3-resolver-path-invalid]` 保留颗粒度。
+
+因此文档和调用方不应写“对外 catch `SkillLoadError` / `SkillResolutionError`”。正确边界是“内部可 raise leaf；对外 catch family；用 `payload.code` 分支”。
 
 这个实现不是纯粹的最终理想形态。设计意图是新站点用 explicit `payload=`，但为了不一次性重写所有历史路径，当前代码保留 message 解析兼容层；must-fix 的重点是让“长得像 core code 但未注册”的情况响亮失败，而不是静默生成 `payload=None`。
 

@@ -1,6 +1,6 @@
 """graph_agent - Document-driven LLM agent harness SDK.
 
-Public API (18 stable exports):
+Public API (20 stable exports):
 
 * Execution: ``run_skill``, ``WorkflowResult``
 * Static analysis: ``compile_skill``, ``CompileResult``, ``SkillManifest``,
@@ -8,7 +8,8 @@ Public API (18 stable exports):
 * Skill resolution: ``LocalWorkspaceResolver``
 * Observability: ``Callback``, ``LoggingCallback``, ``MetricsCallback``,
   ``TracingCallback``
-* Exceptions: ``GraphAgentError``, ``SkillLoadError``, ``SkillCompilationError``
+* Exceptions: ``GraphAgentError``, ``GraphCompileError``,
+  ``GraphExecutionError``, ``ModelProviderError``, ``ResourceNotFoundError``
 
 Internal helpers (``Phase``, ``WorkflowState``, ``IOManager``,
 ``ModelResolver``, ``GraphAgentHarness``, ``load_workflow_from_md``,
@@ -35,8 +36,10 @@ from graph_agent.callbacks import TracingCallback as TracingCallback
 from graph_agent.core.compiler import CompileResult as CompileResult
 from graph_agent.core.compiler import compile_skill as compile_skill
 from graph_agent.core.exceptions import GraphAgentError as GraphAgentError
-from graph_agent.core.exceptions import SkillCompilationError as SkillCompilationError
-from graph_agent.core.exceptions import SkillLoadError as SkillLoadError
+from graph_agent.core.exceptions import GraphCompileError as GraphCompileError
+from graph_agent.core.exceptions import GraphExecutionError as GraphExecutionError
+from graph_agent.core.exceptions import ModelProviderError as ModelProviderError
+from graph_agent.core.exceptions import ResourceNotFoundError as ResourceNotFoundError
 from graph_agent.core.graph_assembler import CompiledStateGraph as CompiledStateGraph
 from graph_agent.core.graph_assembler import assemble_graph as assemble_graph
 from graph_agent.core.loader import CompiledSkill as CompiledSkill
@@ -66,6 +69,8 @@ __all__ = [
     "MetricsCallback",
     "TracingCallback",
     "GraphAgentError",
-    "SkillLoadError",
-    "SkillCompilationError",
+    "GraphCompileError",
+    "GraphExecutionError",
+    "ModelProviderError",
+    "ResourceNotFoundError",
 ]

@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+from graph_agent_gateway.registry.contracts import (
+    CredentialDescriptor,
+    CredentialProviderProtocol,
+    SecretLifetimePolicy,
+    SnapshotVersion,
+    TerminalRetryPolicy,
+)
 from graph_agent_gateway.registry.schema import (
     CapabilityValue,
     EffectiveRuntimeSetting,
@@ -28,6 +35,8 @@ from graph_agent_gateway.registry.schema import (
 
 __all__ = [
     "CapabilityValue",
+    "CredentialDescriptor",
+    "CredentialProviderProtocol",
     "EffectiveRuntimeSetting",
     "EndpointCandidate",
     "FieldSource",
@@ -47,5 +56,8 @@ __all__ = [
     "RouteCandidate",
     "RuntimePolicy",
     "StructuredOutputSettings",
+    "SecretLifetimePolicy",
+    "SnapshotVersion",
+    "TerminalRetryPolicy",
     "VerifiedProfile",
 ]

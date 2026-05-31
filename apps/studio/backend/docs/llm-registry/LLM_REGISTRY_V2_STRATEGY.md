@@ -1,5 +1,11 @@
 # LLM Registry & Roles V2 Strategy
 
+> **Superseded (2026-05-30):** The active platform direction is
+> [`LLM_PLATFORM_CONTROL_PLANE_RUNTIME_V1.md`](./LLM_PLATFORM_CONTROL_PLANE_RUNTIME_V1.md).
+> This older strategy is retained for historical context only. Its catalog ownership,
+> credential, retry, readiness, and multi-client boundary guidance is no longer
+> authoritative.
+
 ## 1. Core Principles
 - **Knowledge-First**: Use a centralized, versioned "Golden Database" (Catalog) to minimize redundant probing.
 - **Tiered Verification**: Separate basic connectivity (Ping) from deep capability verification (Contract Testing).

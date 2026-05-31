@@ -11,6 +11,7 @@
 | [`studio-api-keys-redesign/`](./studio-api-keys-redesign/) | Superseded (UX only) | API Keys Round 2/3 UX 参考；v4 生产契约见 `llm-provider-intelligence-v2` | [`docs/engine/LLM_ROUTING_AND_FALLBACK.md`](../../docs/engine/LLM_ROUTING_AND_FALLBACK.md) |
 | [`studio-api-keys-regression-hardening/`](./studio-api-keys-regression-hardening/) | Implementing | API Keys 回归收敛：先恢复删除前前端状态，再接 v4 API | [`docs/development/FRONTEND_UI_SPEC.md`](../../docs/development/FRONTEND_UI_SPEC.md) |
 | [`studio-gateway-runtime-schema-boundary/`](./studio-gateway-runtime-schema-boundary/) | Draft | Gateway runtime schema 去 UI 字段；Studio 后端拥有 display projection | [`docs/engine/LLM_ROUTING_AND_FALLBACK.md`](../../docs/engine/LLM_ROUTING_AND_FALLBACK.md) |
+| [`studio-llm-platform-control-plane-runtime/`](./studio-llm-platform-control-plane-runtime/) | Implementing | LLM Platform v1.1：Control Plane / Gateway Runtime Plane / 多客户接入 | [`apps/studio/backend/docs/llm-registry/LLM_PLATFORM_CONTROL_PLANE_RUNTIME_V1.md`](../../apps/studio/backend/docs/llm-registry/LLM_PLATFORM_CONTROL_PLANE_RUNTIME_V1.md) |
 | [`studio-llm-roles-frontend-cutover/`](./studio-llm-roles-frontend-cutover/) | Draft | LLM Roles 前端按 6 个可回滚 PR 接入 Model Groups DTO | [`docs/development/FRONTEND_UI_SPEC.md`](../../docs/development/FRONTEND_UI_SPEC.md) |
 | [`studio-frontend-v21-multifile-editor/`](./studio-frontend-v21-multifile-editor/) | Draft | V2.1 多文件 skill 编辑架构 (VS Code 风格) | [`docs/studio/WORKSPACE_FILE_MANAGEMENT.md`](../../docs/studio/WORKSPACE_FILE_MANAGEMENT.md) |
 

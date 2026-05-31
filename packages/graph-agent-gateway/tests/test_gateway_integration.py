@@ -52,7 +52,7 @@ class ProbeFallbackClientManager:
         self.marked_down.append(route.route_id)
 
 
-class ProbeFailFastClientManager:
+class ProbeRouteFallbackClientManager:
     def __init__(self) -> None:
         self.dispatches: list[str] = []
         self.marked_down: list[str] = []
@@ -71,7 +71,7 @@ class ProbeFailFastClientManager:
     def dispatch_provider_call(self, route: Any, messages: list[Any], **kwargs: Any) -> Any:
         self.dispatches.append(route.route_id)
         return {
-            "content": "should not be called",
+            "content": "ok after missing model fallback",
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
             "finish_reason": "stop",
         }
@@ -317,8 +317,7 @@ def test_probe_failure_fallback_emits_event_and_returns_second_route_metadata() 
     }
 
 
-def test_probe_fail_fast_error_does_not_fallback_to_next_route() -> None:
-    from graph_agent_gateway.exceptions import AllProvidersFailedError
+def test_probe_missing_model_error_falls_back_to_next_route() -> None:
     from graph_agent_gateway.gateway_chat_model import GatewayChatModel
     from graph_agent_gateway.registry.schema import (
         ResolvedRole,
@@ -328,7 +327,7 @@ def test_probe_fail_fast_error_does_not_fallback_to_next_route() -> None:
     from langchain_core.messages import HumanMessage
 
     callback = RecordingCallback()
-    client_manager = ProbeFailFastClientManager()
+    client_manager = ProbeRouteFallbackClientManager()
     resolved_role = ResolvedRole(
         role_name="graph_agent",
         runtime_policy=RuntimePolicy(),
@@ -365,16 +364,15 @@ def test_probe_fail_fast_error_does_not_fallback_to_next_route() -> None:
         client_manager=client_manager,
     )
 
-    with pytest.raises(AllProvidersFailedError) as exc_info:
-        model.invoke([HumanMessage(content="hello")])
+    result = model.invoke([HumanMessage(content="hello")])
 
-    assert client_manager.dispatches == []
-    assert client_manager.marked_down == []
-    assert callback.events == []
-    failure = exc_info.value.context["last_error_chain"][0]
-    assert failure["route_id"] == "missing:model"
-    assert failure["fallback_decision"] == "fail_fast"
-    assert failure["provider_status_code"] == 404
+    assert result.content == "ok after missing model fallback"
+    assert client_manager.dispatches == ["fallback:model"]
+    assert client_manager.marked_down == ["missing:model"]
+    assert len(callback.events) == 1
+    event_payload = callback.events[0].model_dump(mode="json")
+    assert event_payload["context"]["fallback_decision"] == "fallback_allowed"
+    assert event_payload["context"]["provider_status_code"] == 404
 
 
 def test_gateway_passes_effective_runtime_settings_to_client_manager() -> None:

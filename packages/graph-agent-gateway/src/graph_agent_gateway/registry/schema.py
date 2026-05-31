@@ -7,6 +7,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
+from graph_agent_gateway.registry.contracts import (
+    SecretLifetimePolicy,
+    SnapshotVersion,
+    TerminalRetryPolicy,
+)
+
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 ROUTE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*$")
 
@@ -70,6 +76,9 @@ class RuntimePolicy(BaseModel):
     provider_down_ttl_seconds: int = Field(default=60, ge=0, le=3600)
     probe_timeout_seconds: int = Field(default=5, ge=1, le=120)
     token_escalation_rounds: int = Field(default=2, ge=0, le=10)
+    terminal_retry_enabled: bool = False
+    terminal_retry_policy: TerminalRetryPolicy = Field(default_factory=TerminalRetryPolicy)
+    secret_lifetime_policy: SecretLifetimePolicy = Field(default_factory=SecretLifetimePolicy)
 
 
 class ReasoningSettings(BaseModel):
@@ -142,6 +151,7 @@ class ProviderEndpoint(BaseModel):
     endpoint_id: str
     protocol: Protocol
     base_url: str
+    credential_ref: str | None = None
     api_key: SecretStr | None = None
     status: RouteStatus = "unverified_manual"
     last_test_at: str | None = None
@@ -357,7 +367,8 @@ class ResolvedRoute(BaseModel):
     endpoint_id: str
     protocol: Protocol
     base_url: str
-    api_key: SecretStr
+    credential_ref: str | None = None
+    api_key: SecretStr | None = None
     credential_fingerprint: str
     timeout_seconds: int = 120
     trust_env: bool = False
@@ -371,6 +382,13 @@ class ResolvedRoute(BaseModel):
     capabilities: dict[str, CapabilityValue] = Field(default_factory=dict)
     runtime_settings: RuntimeSettings = Field(default_factory=RuntimeSettings)
     effective_runtime_settings: dict[str, EffectiveRuntimeSetting] = Field(default_factory=dict)
+    snapshot_version: SnapshotVersion | None = None
+
+    @model_validator(mode="after")
+    def _has_credential_reference_or_secret(self) -> ResolvedRoute:
+        if self.api_key is None and not self.credential_ref:
+            raise ValueError("resolved route requires credential_ref or api_key")
+        return self
 
 
 class ResolvedRole(BaseModel):

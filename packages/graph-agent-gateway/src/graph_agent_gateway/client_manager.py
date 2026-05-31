@@ -999,6 +999,11 @@ class LLMClientManager:
 
     @classmethod
     def _resolve_api_key(cls, route: ResolvedRoute) -> str:
+        if route.api_key is None:
+            raise ValueError(
+                "endpoint has no inline credential; CredentialProvider integration is required: "
+                f"{route.endpoint_id}"
+            )
         api_key = route.api_key.get_secret_value()
         if not api_key:
             raise ValueError(f"endpoint has no credential: {route.endpoint_id}")
@@ -1018,7 +1023,10 @@ class LLMClientManager:
             f"proxy:{route.proxy_env or ''}:"
             f"down_ttl:{runtime_policy.provider_down_ttl_seconds}:"
             f"probe_timeout:{runtime_policy.probe_timeout_seconds}:"
-            f"token_escalation:{runtime_policy.token_escalation_rounds}"
+            f"token_escalation:{runtime_policy.token_escalation_rounds}:"
+            f"terminal_retry_enabled:{runtime_policy.terminal_retry_enabled}:"
+            f"terminal_retry:{runtime_policy.terminal_retry_policy.model_dump_json()}:"
+            f"secret_lifetime:{runtime_policy.secret_lifetime_policy.model_dump_json()}"
         )
 
 

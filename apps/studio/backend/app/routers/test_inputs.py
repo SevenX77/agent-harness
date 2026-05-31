@@ -12,6 +12,9 @@ from app.models.errors import ErrorResponse
 from app.models.test_inputs import TestInputMetadata
 from app.services.run_manager import test_inputs_dir_for
 
+# Prevent pytest from treating this router file as a test file during scanning
+__test__ = False
+
 router = APIRouter(prefix="/api/skills/{skill_id}/test_inputs", tags=["test-inputs"])
 
 

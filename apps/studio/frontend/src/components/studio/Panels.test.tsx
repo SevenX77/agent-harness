@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { SkillDetail } from '@/api/types'
 import { WorkspaceProvider, type WorkspaceContextValue } from './WorkspaceContext'
+import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 import { AssetsPanel, PropertiesPanel, subagentSkillFilePath } from './Panels'
 
 describe('PropertiesPanel', () => {
@@ -251,9 +252,13 @@ function renderAssetsPanel(files: Record<string, string>): string {
 function skillDetailWithFiles(files: Record<string, string>): SkillDetail {
   return {
     manifest: {
-      schema_version: '2.1',
+      schema_version: CURRENT_SCHEMA_VERSION,
       name: 'story-deconstruction',
       description: '(broken: manifest invalid)',
+      io: {
+        inputs: { type: 'object', properties: {} },
+        outputs: { type: 'object', properties: {} },
+      },
       phases: [],
     },
     graph_topology: [],

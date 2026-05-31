@@ -50,6 +50,8 @@ from app.services.file_watcher import record_api_write
 from app.services.git_local import GitLocalService, initialize_skill_repository
 from app.services.skill_resolver import build_studio_skill_resolver
 
+
+
 _LOCATION_RE = re.compile(r":(?P<line>\d+)(?::(?P<loc>.*))?")
 _SAFE_SKILL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _NAME_LINE_RE = re.compile(
@@ -521,9 +523,8 @@ async def create_new_skill(
                 required_entry="GRAPH.md or SKILL.md",
             )
         if await storage.exists(str(skill_dir / "GRAPH.md")):
+            # Validate but do not raise validation error on import, allowing users to upgrade/correct it later
             lint = lint_skill_path(skill_dir)
-            if lint.status == "failed":
-                _raise_manifest_validation_failed(lint)
         summary = (
             await _summary_for_skill_dir_async(
                 user_id,

@@ -54,7 +54,7 @@ class TestCreateCustomMiddlewaresPR3:
 
         assert "SummarizationMiddleware" not in _names(middlewares)
 
-    def test_summarization_requested_but_not_mounted_in_mvp0(self) -> None:
+    def test_summarization_requested_and_mounted(self) -> None:
         mock_model = _FakeSummaryModel(profile={"max_input_tokens": 100_000})
 
         middlewares = create_custom_middlewares(
@@ -62,7 +62,7 @@ class TestCreateCustomMiddlewaresPR3:
             summarization=True,
             summarization_model=mock_model,
         )
-        assert "SummarizationMiddleware" not in _names(middlewares)
+        assert "SummarizationMiddleware" in _names(middlewares)
 
     def test_summarization_no_warning_when_model_has_profile_max_input_tokens(
         self,
@@ -77,7 +77,7 @@ class TestCreateCustomMiddlewaresPR3:
                 summarization_model=mock_model,
             )
 
-        assert "SummarizationMiddleware" not in _names(middlewares)
+        assert "SummarizationMiddleware" in _names(middlewares)
         assert "using fallback max_input_tokens" not in caplog.text
 
     def test_summarization_uses_32k_fallback_when_model_has_no_profile(
@@ -91,23 +91,14 @@ class TestCreateCustomMiddlewaresPR3:
                 summarization_model=_FakeSummaryModel(),
             )
 
-        assert "SummarizationMiddleware" not in _names(middlewares)
-        assert "using fallback max_input_tokens=32000" not in caplog.text
+        assert "SummarizationMiddleware" in _names(middlewares)
+        assert "using fallback max_input_tokens=32000" in caplog.text
 
     def test_summarization_skipped_without_model(self) -> None:
         middlewares = create_custom_middlewares(
             phase_name="test",
             summarization=True,
             summarization_model=None,
-        )
-
-        assert "SummarizationMiddleware" not in _names(middlewares)
-
-    def test_summarization_model_without_profile_not_mounted(self) -> None:
-        middlewares = create_custom_middlewares(
-            phase_name="test",
-            summarization=True,
-            summarization_model=_FakeSummaryModel(),
         )
 
         assert "SummarizationMiddleware" not in _names(middlewares)
@@ -133,6 +124,7 @@ class TestCreateCustomMiddlewaresPR3:
             "WorkingMemoryMiddleware",
             "DeadEndPruningMiddleware",
             "ClarificationMiddleware",
+            "SummarizationMiddleware",
         ]
 
 

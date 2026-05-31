@@ -11,6 +11,8 @@ import {
   FileText,
   ImageIcon,
   Loader2,
+  MoreVertical,
+  Pencil,
   Trash2,
   TriangleAlert,
   Video,
@@ -33,12 +35,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { translateErrorCode, translateTestStatus } from "@/lib/llm-error-messages"
 import { cn } from "@/lib/utils"
 import type { CredentialsState, ModelInfo, ModelProbeStatus, ProviderTestResult, ProviderType, RouteStatus } from "../../../api/llm"
 import { providerCachedTestResult, providerTestParamsMatch } from "../settings/provider-utils"
 import type { ProviderDraft } from "../settings/types"
 import { ManualModelTestPanel } from "./ManualModelTestPanel"
+import { RoleNameDialog } from "../settings/llm-roles/RoleNameDialog"
 
 type TestMessageStatus = "not_configured" | "testing" | NonNullable<CredentialsState["providers"][number]["last_test_status"]>
 type RouteDisplayStatus = RouteStatus | "unknown" | "testing"
@@ -336,13 +346,13 @@ function routeDisplayStatus(model: ModelInfo, isTesting: boolean): RouteDisplayS
   return status
 }
 
-function routeStatusTagVariant(status: RouteDisplayStatus, model: ModelInfo): "success" | "destructive" | "muted" | "default" | "info" | "warning" | "multimodal" {
+function routeStatusTagVariant(status: RouteDisplayStatus, _model: ModelInfo): "success" | "destructive" | "muted" | "default" | "info" | "warning" | "probe-verified" {
   if (status === "testing") return "default"
   if (status === "failed") return "destructive"
   if (status === "disabled") return "muted"
-  if (isCapabilityLibraryModel(model)) return "multimodal"
   if (status === "verified") return "success"
-  if (status === "unverified_manual" || status === "unknown") return "multimodal"
+  if (status === "probe-verified") return "probe-verified"
+  if (status === "unverified_manual" || status === "unknown") return "default"
   return "default"
 }
 
@@ -351,6 +361,7 @@ function routeStatusLabel(status: RouteDisplayStatus): string {
   if (status === "failed") return "Route test failed"
   if (status === "disabled") return "Disabled route"
   if (status === "testing") return "Testing route"
+  if (status === "probe-verified") return "Probe verified route (historical success)"
   if (status === "unverified_manual") return "Untested route"
   return "Route status unknown"
 }
@@ -733,6 +744,7 @@ export function ProviderCard({
   const [visible, setVisible] = useState(false)
   const [showAllModels, setShowAllModels] = useState(false)
   const [endpointModelId, setEndpointModelId] = useState("")
+  const [renameOpen, setRenameOpen] = useState(false)
   const [apiKeyError, setApiKeyError] = useState("")
   const [baseUrlError, setBaseUrlError] = useState("")
   const apiKeyInputRef = useRef<HTMLInputElement>(null)
@@ -836,26 +848,29 @@ export function ProviderCard({
       ? `Copy ${copyTargetLabel} ${model.id}. ${tooltipDetail.replace(/\s+/g, " ")}`
       : `Copy ${copyTargetLabel} ${model.id}`
     const tagKey = `${model.route_id ?? model.id}:${model.status ?? "model"}`
+    const isDisabled = status === "disabled"
     const tag = (
       <Tag
         key={tagKey}
         asChild
-        variant={isOfficial ? routeStatusTagVariant(status, model) : "muted"}
+        variant={routeStatusTagVariant(status, model)}
         size="xs"
         className={cn(
-          "cursor-pointer font-mono hover:bg-muted/40",
+          isDisabled ? "cursor-not-allowed opacity-40 font-mono" : "cursor-pointer font-mono hover:bg-muted/40",
           status === "testing" && "api-route-tag-border-flow",
         )}
       >
         <button
           type="button"
-          onClick={() => void copyAvailableModelId(model.id)}
+          disabled={isDisabled}
+          onClick={isDisabled ? undefined : () => void copyAvailableModelId(model.id)}
           aria-label={ariaLabel}
           data-route-status={isOfficial ? status : undefined}
           data-model-type={modelType ?? undefined}
           data-reasoning-route={hasReasoningProfile ? true : undefined}
           data-input-modalities={inputModalities.length > 0 ? inputModalities.join(",") : undefined}
           data-output-modalities={outputModalities.length > 0 ? outputModalities.join(",") : undefined}
+          className={isDisabled ? "cursor-not-allowed pointer-events-none" : undefined}
         >
           {inputCapabilityIcons}
           {model.id}
@@ -885,30 +900,44 @@ export function ProviderCard({
         ) : null}
         {!isOfficial ? <TestMessage status={testStatus} latencyMs={null} errorCode={matchedErrorCode ?? null} /> : null}
         <div className="flex-1" />
-        {!isOfficial ? <ProviderDeleteButton draftName={draft.name} onDelete={onDelete} /> : null}
+        {!isOfficial ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="shrink-0 text-muted-foreground"
+                aria-label={`More actions for ${draft.name}`}
+              >
+                <MoreVertical className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-36">
+              <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
+                <Pencil className="size-3.5 mr-2" />
+                Rename
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={() => {
+                  requestDeleteConfirmationToast({
+                    id: `delete-provider-${draft.name}`,
+                    title: `Delete ${draft.name}?`,
+                    description: "This provider and its routes will be removed from API Keys, LLM Roles, and model bundles.",
+                    onConfirm: onDelete,
+                  })
+                }}
+              >
+                <Trash2 className="size-3.5 mr-2" />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
       </CardHeader>
       <CardContent className="space-y-4">
-        {!isOfficial ? (
-          <div className="space-y-2">
-            <Label htmlFor={`provider-name-${draft.id}`}>Provider Name</Label>
-            <div className={fieldRowClassName}>
-              <Input
-                id={`provider-name-${draft.id}`}
-                value={draft.name}
-                onChange={(event) => onFieldChange({ name: event.target.value })}
-                placeholder="Provider Name"
-                aria-label="Provider Name"
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                onWheel={scrollInputContentOnWheel}
-                className={scrollableInputClassName}
-              />
-              <div aria-hidden="true" />
-            </div>
-          </div>
-        ) : null}
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
             <Label htmlFor={`api-key-${draft.id}`}>API Key</Label>
@@ -1112,6 +1141,17 @@ export function ProviderCard({
           />
         ) : null}
       </CardContent>
+      {!isOfficial ? (
+        <RoleNameDialog
+          title="Rename provider"
+          initialName={draft.name}
+          existingNames={[]}
+          open={renameOpen}
+          onOpenChange={setRenameOpen}
+          onSubmit={(nextName: string) => onFieldChange({ name: nextName })}
+          fieldLabel="Provider name"
+        />
+      ) : null}
     </Card>
   )
 }

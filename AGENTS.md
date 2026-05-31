@@ -16,3 +16,7 @@
 - Standard startup is documented in `apps/studio/tauri/README.md`: `cd apps/studio/tauri && cargo tauri dev`.
 - Prefer one Tauri dev session only. It owns both Vite and the dynamic FastAPI sidecar.
 - If using a non-default Vite port, ensure backend CORS allows the exact frontend origin via `STUDIO_CORS_EXTRA_ORIGINS` or a checked-in config change.
+
+## Developer Workflow Rules
+
+- 没确认之前不要动手改代码。在进行任何代码修改（包括后端、前端或测试代码）前，必须先与用户讨论并取得明确的确认/同意后方可动手操作。

@@ -105,6 +105,7 @@ ERROR_REGISTRY: dict[str, ErrorCodeMetadata] = {
     '[F-v3-tool-argument-invalid]': ErrorCodeMetadata('[F-v3-tool-argument-invalid]', 'FATAL', ('运行期',), './09-builtin-modules-spec.md#按需调取-tools-read_reference--read_example'),
     '[F-v3-runtime-state-mapping-failed]': ErrorCodeMetadata('[F-v3-runtime-state-mapping-failed]', 'FATAL', ('运行期',), './12-compile-runtime-flow-spec.md#运行时引擎流-run-time-workflow'),
     '[F-v3-runtime-phase-failed]': ErrorCodeMetadata('[F-v3-runtime-phase-failed]', 'FATAL', ('运行期',), './12-compile-runtime-flow-spec.md#运行时引擎流-run-time-workflow'),
+    '[F-v3-sequential-overwrite-unauthorized]': ErrorCodeMetadata('[F-v3-sequential-overwrite-unauthorized]', 'FATAL', ('编译期',), './02-graph-md-spec.md#phases-注册与-body-拓扑校验-phase-registration--dag'),
 }
 
 

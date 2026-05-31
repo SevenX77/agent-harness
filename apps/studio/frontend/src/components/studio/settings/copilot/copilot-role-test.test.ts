@@ -97,7 +97,7 @@ describe("copilot role test job helpers", () => {
     })
   })
 
-  it("explains missing backend copilot roles without showing raw Axios 404 text", () => {
+  it("keeps backend role lookup details without showing raw Axios 404 text", () => {
     const message = copilotRoleTestErrorMessage({
       message: "Request failed with status code 404",
       response: {
@@ -106,12 +106,10 @@ describe("copilot role test job helpers", () => {
       },
     }, "Opus 4.7 Copilot")
 
-    expect(message).toBe(
-      "Opus 4.7 Copilot 测试失败：后端还没有创建 Copilot role `copilot_opus_4_7`。请先迁移或创建该 role 后再测试。",
-    )
+    expect(message).toBe("Opus 4.7 Copilot test failed: Unknown LLM role: copilot_opus_4_7")
   })
 
-  it("keeps backend failure details but translates the request wrapper", () => {
+  it("keeps backend failure details without rewriting the reason", () => {
     const message = copilotRoleTestErrorMessage({
       message: "Request failed with status code 500",
       response: {
@@ -120,6 +118,6 @@ describe("copilot role test job helpers", () => {
       },
     }, "DeepSeek V4 Copilot")
 
-    expect(message).toBe("DeepSeek V4 Copilot 测试失败：后端服务执行失败。Role test job crashed")
+    expect(message).toBe("DeepSeek V4 Copilot test failed: Role test job crashed")
   })
 })

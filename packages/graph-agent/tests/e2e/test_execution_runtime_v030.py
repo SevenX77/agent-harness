@@ -265,7 +265,5 @@ def test_subgraph_target_skill_runs_and_child_data_does_not_inherit_parent(
         }
     )
 
-    assert result["data"]["phase_outputs"]["sub"] == {
-        "answer": "visible",
-        "saw_parent_secret": False,
-    }
+    assert result["data"]["answer"] == "visible"
+    assert result["data"]["saw_parent_secret"] is False

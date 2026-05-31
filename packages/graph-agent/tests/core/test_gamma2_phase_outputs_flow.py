@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -49,7 +50,17 @@ phases:
     )
 
 
-def _logic_action(root: Path, phase: str, action: str, body: str) -> None:
+def _logic_action(root: Path, phase: str, action: str, body: str, outputs: list[str] | None = None) -> None:
+    output_properties = {}
+    if outputs is not None:
+        for out in outputs:
+            output_properties[out] = {"type": "string"}
+    else:
+        output_properties = {
+            "segments_summary": {"type": "string"},
+            "review_input": {"type": "string"},
+        }
+    output_yaml = json.dumps({"type": "object", "properties": output_properties}, ensure_ascii=False, indent=4).replace("\n", "\n    ")
     _write(
         root / "phases" / phase / "LOGIC.md",
         f"""---
@@ -58,12 +69,7 @@ io:
     type: object
     properties: {{}}
   outputs:
-    type: object
-    properties:
-      segments_summary:
-        type: string
-      review_input:
-        type: string
+    {output_yaml}
 ---
 <action>{action}</action>
 """,
@@ -84,6 +90,7 @@ def test_downstream_phase_reads_upstream_phase_outputs_in_same_graph(
         "segment",
         "segment",
         "def segment(context):\n    return {'segments_summary': 'chapter summary'}\n",
+        outputs=["segments_summary"],
     )
     _logic_action(
         tmp_path,
@@ -91,6 +98,7 @@ def test_downstream_phase_reads_upstream_phase_outputs_in_same_graph(
         "review",
         "def review(context):\n"
         "    return {'review_input': context.get('segments_summary', 'missing')}\n",
+        outputs=["review_input"],
     )
 
     compiled = compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)

@@ -4607,3 +4607,34 @@ def test_provider_notable_models_are_doc_driven_for_manual_probe_placeholders(
         "openai/gpt-5",
         "anthropic/claude-opus-4",
     ]
+
+
+def test_sync_catalog_endpoint(client: TestClient, tmp_path: Path, monkeypatch) -> None:
+    _seed(tmp_path, monkeypatch)
+    
+    from app.services.llm_import_drafts import ProviderImportDraft
+    async def mock_sync():
+        return ProviderImportDraft(
+            draft_id="studio-evidence-library",
+            source={"kind": "studio_evidence_library"},
+            status="pending",
+            route_candidates={},
+            evidence_records=[],
+        )
+    
+    import app.routers.llm as llm_router
+    monkeypatch.setattr(llm_router, "sync_remote_evidence_library", mock_sync)
+    
+    response = client.post("/api/llm/catalog/sync")
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert "Catalog synced successfully" in response.json()["message"]
+
+
+def test_share_catalog_endpoint(client: TestClient, tmp_path: Path, monkeypatch) -> None:
+    _seed(tmp_path, monkeypatch)
+    
+    response = client.post("/api/llm/catalog/share")
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert "Local verified catalog evidence exported successfully" in response.json()["message"]

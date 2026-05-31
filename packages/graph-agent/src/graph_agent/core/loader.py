@@ -214,6 +214,8 @@ class SkillLoader:
             _loading_stack=loading_stack,
             _compilation_cache=_compilation_cache,
         )
+        _validate_sequential_overwrites(graph_path, body_phase_refs, phase_docs)
+
         actions, tools = _discover_actions_and_tools(root, discovered)
         _validate_logic_action_return_keys(
             phase_docs,
@@ -1417,8 +1419,6 @@ def _build_phase_document(
         raw_blocks=blocks,
         ast=ast,
     )
-
-
 def _normalize_skill_node_frontmatter(path: Path, data: dict[str, Any]) -> dict[str, Any]:
     phase_config = data.pop("phase_config", None)
     if phase_config is None:
@@ -1443,6 +1443,8 @@ def _normalize_skill_node_frontmatter(path: Path, data: dict[str, Any]) -> dict[
         "max_iterations",
         "llm_role",
         "validator",
+        "allow_sequential_overwrite",
+        "batch",
     )
     for key in phase_config_keys[1:]:
         if key in phase_config:
@@ -1456,7 +1458,6 @@ def _normalize_skill_node_frontmatter(path: Path, data: dict[str, Any]) -> dict[
             code="[F-v3-agent-schema-unknown-field]",
         )
     return merged
-
 
 def _phase_validation_fatal(path: Path, mode: str, exc: ValidationError) -> NoReturn:
     text = str(exc)
@@ -1623,6 +1624,56 @@ _ATTR_RE = re.compile(r"([A-Za-z_][\w:-]*)\s*=\s*(['\"])(.*?)\2", re.DOTALL)
 
 def _parse_attrs(raw: str) -> dict[str, str]:
     return {match.group(1): match.group(3) for match in _ATTR_RE.finditer(raw)}
+
+
+def _validate_sequential_overwrites(
+    graph_path: Path,
+    body_phase_refs: list[BodyPhaseRef],
+    phase_docs: list[PhaseDocument],
+) -> None:
+    doc_by_name = {doc.phase_name: doc for doc in phase_docs}
+    depends_on_map = {ref.name: list(ref.depends_on) for ref in body_phase_refs}
+
+    def get_ancestors(phase_name: str) -> set[str]:
+        ancestors = set()
+        queue = list(depends_on_map.get(phase_name, []))
+        while queue:
+            curr = queue.pop(0)
+            if curr != "input" and curr not in ancestors:
+                ancestors.add(curr)
+                queue.extend(depends_on_map.get(curr, []))
+        return ancestors
+
+    phase_output_keys: dict[str, set[str]] = {}
+    for doc in phase_docs:
+        keys = set()
+        if doc.ast and doc.ast.io and doc.ast.io.outputs:
+            props = doc.ast.io.outputs.get("properties", {})
+            if isinstance(props, dict):
+                keys = {k for k in props if isinstance(k, str)}
+        phase_output_keys[doc.phase_name] = keys
+
+    for doc in phase_docs:
+        phase_name = doc.phase_name
+        current_outputs = phase_output_keys.get(phase_name, set())
+        if not current_outputs:
+            continue
+
+        ancestors = get_ancestors(phase_name)
+        allowed_overwrites = set(getattr(doc.ast, "allow_sequential_overwrite", []) or [])
+
+        for ancestor_name in ancestors:
+            ancestor_outputs = phase_output_keys.get(ancestor_name, set())
+            overlap = current_outputs & ancestor_outputs
+            if overlap:
+                for key in overlap:
+                    if key not in allowed_overwrites:
+                        detail = (
+                            f"[F-v3-sequential-overwrite-unauthorized] Phase '{phase_name}' "
+                            f"sequentially overwrites field '{key}' outputted by upstream phase '{ancestor_name}'. "
+                            f"Declare '{key}' in allow_sequential_overwrite in {doc.path.name} to allow this."
+                        )
+                        _fatal(doc.path, 1, detail, code="[F-v3-sequential-overwrite-unauthorized]")
 
 
 def _frontmatter_key_line(path: Path, key: str) -> int:

@@ -20,7 +20,7 @@ EXPECTED_CONTRACT_HASHES = {
     "docs/engine/skill-spec/08-resource-mechanisms-spec.md": "76317093d118bfa618496ae3d3b281bf07d290fb45e72d237db7d9132b59d4d7",
     "docs/engine/skill-spec/09-builtin-modules-spec.md": "dd38121c9906ae338026bc5805b9b76a7d832eb965917703f13171cf7e66586f",
     "docs/engine/skill-spec/10-skill-resolver-protocol-spec.md": "9cc8f9a3df095623b67c74a353838c63825fae678e77a94593a18716cded660c",
-    "docs/engine/skill-spec/11-error-code-spec.md": "07c594bfca9182f096e0746e2be49871c72c73b4e0803492ec324b086e27a32b",
+    "docs/engine/skill-spec/11-error-code-spec.md": "d786baadbdbf340adeadc5326ce3ec4e0a8881657542aa3435a6c81b5ff2e24b",
     "docs/engine/skill-spec/12-compile-runtime-flow-spec.md": "a3defd2e4f5e123e5821a0284a131784144b82f0b5699dfa6f7509d058f1a259",
     "docs/engine/skill-spec/README.md": "1716f2891e0a7ed6987489debb3c46948825430efeff61975caa7f420114c4b3",
     "docs/engine/public-api-contract.md": "972d5a947d7c2c6fb5f1692ea3d0d90dce380b3455a5ee19318bb56780e2e80f",

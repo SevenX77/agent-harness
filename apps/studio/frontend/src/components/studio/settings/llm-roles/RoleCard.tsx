@@ -271,7 +271,7 @@ export const RoleCard = memo(function RoleCard({
               >
                 <DropdownMenuItem data-role-edit-trigger="true" onSelect={() => setEditOpen(true)}>
                   <Pencil data-role-icon="true" />
-                  Edit
+                  Rename
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
@@ -367,7 +367,7 @@ export const RoleCard = memo(function RoleCard({
         </Empty>
       </CardContent>
       <RoleNameDialog
-        title="Edit role"
+        title="Rename role"
         initialName={roleName}
         existingNames={Object.keys(data.roles)}
         open={editOpen}

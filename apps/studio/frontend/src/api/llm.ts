@@ -6,7 +6,7 @@ export type ProviderType =
   | 'openai_compatible'
   | 'google_genai'
 
-export type RouteStatus = 'verified' | 'unverified_manual' | 'disabled' | 'failed'
+export type RouteStatus = 'verified' | 'unverified_manual' | 'disabled' | 'failed' | 'probe-verified'
 export type ModelProbeStatus = RouteStatus | 'testing'
 export type ProviderKind = 'official' | 'third_party' | 'custom'
 export type ProviderUiState = 'ready' | 'untested' | 'cooling_down' | 'needs_setup' | 'off'

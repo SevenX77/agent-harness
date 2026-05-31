@@ -7,9 +7,11 @@ import os
 import tempfile
 import threading
 import uuid
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
+import httpx
 
 from graph_agent_gateway.registry.schema import (
     EvidenceRecord,
@@ -286,6 +288,94 @@ def _draft_payload_for_storage(draft: ProviderImportDraft) -> dict[str, object]:
     return payload
 
 
+logger = logging.getLogger(__name__)
+
+DEFAULT_CATALOG_URL = (
+    "https://raw.githubusercontent.com/SevenX77/agent-harness/main/llm_import_drafts.json"
+)
+
+async def sync_remote_evidence_library(
+    *,
+    url: str | None = None,
+    path: Path | None = None,
+    draft_id: str = EVIDENCE_LIBRARY_DRAFT_ID,
+) -> ProviderImportDraft:
+    """Pull the remote evidence library and merge it into the local store."""
+    target_url = url or os.getenv("STUDIO_CATALOG_URL", DEFAULT_CATALOG_URL)
+    logger.info("Syncing remote evidence library from %s", target_url)
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(target_url)
+            response.raise_for_status()
+            data = response.json()
+    except Exception as exc:
+        logger.error("Failed to fetch remote evidence library: %s", exc)
+        return load_evidence_library(path=path, draft_id=draft_id)
+
+    try:
+        raw_drafts = data.get("drafts", data)
+        if not isinstance(raw_drafts, dict):
+            raise ValueError("Invalid remote draft payload structure")
+        remote_draft_raw = raw_drafts.get(draft_id)
+        if not remote_draft_raw:
+            logger.warning("Remote evidence library not found in payload for draft_id=%s", draft_id)
+            return load_evidence_library(path=path, draft_id=draft_id)
+        remote_draft = ProviderImportDraft.model_validate(remote_draft_raw)
+    except Exception as exc:
+        logger.error("Failed to parse remote evidence library: %s", exc)
+        return load_evidence_library(path=path, draft_id=draft_id)
+
+    store_path = path or drafts_path()
+    with _WRITE_LOCK:
+        drafts = _load_all(store_path)
+        local_draft = drafts.get(draft_id) or _new_evidence_library(draft_id)
+        
+        merged_routes = dict(local_draft.route_candidates)
+        for route_id, route in remote_draft.route_candidates.items():
+            if route_id not in merged_routes:
+                merged_routes[route_id] = route
+            else:
+                merged_routes[route_id] = merged_routes[route_id].model_copy(
+                    update={
+                        "capabilities": {
+                            **merged_routes[route_id].capabilities,
+                            **route.capabilities,
+                        },
+                        "metadata": {
+                            **merged_routes[route_id].metadata,
+                            **route.metadata,
+                        }
+                    }
+                )
+
+        local_evidence_ids = {rec.evidence_id for rec in local_draft.evidence_records}
+        merged_records = list(local_draft.evidence_records)
+        new_records_count = 0
+        for record in remote_draft.evidence_records:
+            if record.evidence_id not in local_evidence_ids:
+                merged_records.append(record)
+                new_records_count += 1
+
+        logger.info(
+            "Merged remote drafts: new_records=%d, total_records=%d, total_routes=%d",
+            new_records_count,
+            len(merged_records),
+            len(merged_routes),
+        )
+
+        now = _now_iso()
+        updated = local_draft.model_copy(
+            update={
+                "updated_at": now,
+                "route_candidates": merged_routes,
+                "evidence_records": merged_records,
+            }
+        )
+        drafts[draft_id] = updated
+        _save_all(store_path, drafts)
+        return updated
+
+
 __all__ = [
     "DraftApplyConflict",
     "DraftExpired",
@@ -299,4 +389,5 @@ __all__ = [
     "load_draft",
     "new_evidence_id",
     "save_draft",
+    "sync_remote_evidence_library",
 ]

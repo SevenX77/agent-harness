@@ -517,7 +517,7 @@ function providerDisplayStatePriority(state: ProviderUiState): number {
 
 function providerStateTagVariant(state: ProviderUiState): ComponentProps<typeof Tag>["variant"] {
   if (state === "ready") return "success"
-  if (state === "untested") return "multimodal"
+  if (state === "untested") return "default"
   if (state === "needs_setup") return "destructive"
   if (state === "cooling_down") return "warning"
   return "muted"

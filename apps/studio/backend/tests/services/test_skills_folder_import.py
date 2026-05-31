@@ -132,7 +132,7 @@ def test_import_skill_rejects_empty_directory_without_scaffolding(
     assert not (skill_dir / "GRAPH.md").exists()
 
 
-def test_import_skill_rejects_invalid_graph_with_lint_details(
+def test_import_skill_allows_invalid_graph_without_lint_gate(
     client: TestClient,
     tmp_path: Path,
 ) -> None:
@@ -179,11 +179,10 @@ io:
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 201
     body = response.json()
-    assert body["error_code"] == "MANIFEST_VALIDATION_FAILED"
-    assert body["details"]["errors"][0]["file"] == "phases/init/LOGIC.md"
-    assert "action" in body["details"]["errors"][0]["message"]
+    assert body["id"] == "bad-graph"
+    assert body["directory_path"] == str(skill_dir)
 
 
 def test_create_skill_with_empty_directory_path_scaffolds(
@@ -495,3 +494,6 @@ io:
     return {"prepared": True}
 """,
     }
+
+
+

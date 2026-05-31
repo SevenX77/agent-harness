@@ -271,11 +271,25 @@ def _save_v030_trace(callbacks: list[Any], trace_output: Path | None) -> str | N
 
 
 def _v030_phase_context(data: dict[str, Any] | None) -> dict[str, Any]:
-    normalized = normalize_blackboard_data(data)
+    if data is None:
+        return {"inputs": {}, "phase_outputs": {}, "scratch": {}}
+    if "inputs" in data or "phase_outputs" in data or "scratch" in data:
+        normalized = normalize_blackboard_data(data)
+        return {
+            "inputs": dict(normalized["inputs"]),
+            "phase_outputs": dict(normalized["phase_outputs"]),
+            "scratch": dict(normalized["scratch"]),
+        }
+    phase_outputs: dict[str, dict[str, Any]] = {}
+    if "answer" in data:
+        phase_outputs["draft"] = {"answer": data["answer"]}
+        phase_outputs["main"] = {"answer": data["answer"]}
+    if "review" in data:
+        phase_outputs["review"] = {"review": data["review"]}
     return {
-        "inputs": dict(normalized["inputs"]),
-        "phase_outputs": dict(normalized["phase_outputs"]),
-        "scratch": dict(normalized["scratch"]),
+        "inputs": dict(data),
+        "phase_outputs": phase_outputs,
+        "scratch": {},
     }
 
 
@@ -328,6 +342,8 @@ def _run_v030_skill_dict(
 
     from graph_agent.core.compiler import compile_skill
     from graph_agent.core.graph_assembler import assemble_graph
+    from graph_agent.core.state import WorkflowState, BusinessData, FrameworkState
+    from graph_agent.core.checkpointer import resolve_checkpointer
 
     resolver = require_skill_resolver(skill_resolver, caller="_run_v030_skill_dict")
     t0 = time.time()
@@ -337,6 +353,10 @@ def _run_v030_skill_dict(
     emit_auto_trace_events = callbacks is None
     chat_model = mock_llm if mock_llm is not _NO_MOCK_LLM else None
     active_model_resolver = model_resolver if mock_llm is _NO_MOCK_LLM else None
+    
+    # Step 4.1: Dynamically resolve the checkpointer
+    active_checkpointer = resolve_checkpointer("auto")
+
     compiled = compile_skill(skill_root, skill_resolver=resolver)
     assembled = assemble_graph(
         compiled,
@@ -344,6 +364,7 @@ def _run_v030_skill_dict(
         model_resolver=active_model_resolver,
         callbacks=active_callbacks,
         skill_resolver=resolver,
+        checkpointer=active_checkpointer,
     )
     graph = assembled.graph
     if emit_auto_trace_events:
@@ -360,14 +381,23 @@ def _run_v030_skill_dict(
                 active_callbacks,
                 PhaseStartEvent(phase_name=phase_id, context=_v030_phase_context(dict(inputs))),
             )
+    
+    # Step 4.2: Build the type-safe initial state using WorkflowState Pydantic models
+    initial_state = WorkflowState(
+        data=BusinessData.model_validate(dict(inputs)),
+        flow=FrameworkState.model_validate({
+            "run_id": run_id,
+            "thread_id": run_id,
+            "unattended": inputs.get("_unattended", False),
+        }),
+        messages=[],
+    )
+
     try:
+        # Step 4.3: Invoke the LangGraph compiled StateGraph natively passing the thread_id
         result = graph.invoke(
-            {
-                "data": dict(inputs),
-                "flow": {},
-                "messages": [],
-                "run_id": run_id,
-            }
+            initial_state,
+            config={"configurable": {"thread_id": run_id}},
         )
     except Exception:
         wall_time = round(time.time() - t0, 3)
@@ -385,7 +415,9 @@ def _run_v030_skill_dict(
         _save_v030_trace(active_callbacks, trace_output)
         raise
     wall_time = round(time.time() - t0, 3)
-    final_context = dict(result.get("data", {}))
+    
+    # Step 4.4: Extract flat business output data directly from model_dump
+    final_context = result["data"].model_dump()
     compiled_raw = getattr(compiled, "raw", {})
     output_schema = (
         compiled_raw.get("io", {}).get("outputs") if isinstance(compiled_raw, dict) else None

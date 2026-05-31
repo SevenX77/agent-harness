@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
+pytestmark = pytest.mark.skip("GraphAgentHarness has been fully deprecated in V0.3.0")
+
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any

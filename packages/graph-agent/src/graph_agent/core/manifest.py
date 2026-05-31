@@ -118,6 +118,16 @@ class GraphManifest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class BatchSpec(BaseModel):
+    """Declarative batch processing spec for a phase."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    iterator: str = Field(min_length=1)
+    item_var: str = Field(min_length=1)
+    concurrency: int = Field(default=1, ge=1)
+
+
 class _BaseNodeAST(BaseModel):
     """Fields shared by all V2.1 phase node AST variants."""
 
@@ -126,6 +136,8 @@ class _BaseNodeAST(BaseModel):
     name: str | None = None
     raw_blocks: dict[str, str] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    allow_sequential_overwrite: list[str] = Field(default_factory=list)
+    batch: BatchSpec | None = None
 
 
 class LogicNodeAST(_BaseNodeAST):
@@ -196,6 +208,7 @@ SkillManifest = GraphManifest
 
 
 __all__ = [
+    "BatchSpec",
     "ContextBridge",
     "AgentNodeAST",
     "AgentExample",

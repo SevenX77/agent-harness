@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { Check, Loader2, Plus, TriangleAlert } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -10,10 +10,11 @@ import {
   CatalogAccordionTrigger,
 } from "@/components/ui/catalog-accordion"
 import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
-import { createBlankAddProviderSubmission, ProviderCard, ProviderListSkeleton } from "../../api-keys"
+import { ProviderCard, ProviderListSkeleton } from "../../api-keys"
 import { officialProviderDrafts, thirdPartyProviderDrafts, notableProviderKeyForDraft, shouldShowManualModelPanel } from "../provider-utils"
 import { SectionTitle } from "../shared"
 import type { SettingsPageContentProps } from "../types"
+import { RoleNameDialog } from "../llm-roles/RoleNameDialog"
 
 function SaveStatusBadge({ status }: { status: SaveStatus }) {
   if (status === "idle") return null
@@ -76,6 +77,7 @@ export function ApiKeysTab({
   | "onAddProvider"
   | "onProviderModelsUpdated"
 >) {
+  const [addProviderOpen, setAddProviderOpen] = useState(false)
   const persistedById = useMemo(
     () => Object.fromEntries(credentials.providers.map((provider) => [provider.id, provider])),
     [credentials.providers],
@@ -160,10 +162,29 @@ export function ApiKeysTab({
                     <p className="text-xs text-muted-foreground">No third-party providers configured.</p>
                   </div>
                 ) : null}
-                <Button type="button" variant="default" onClick={() => void onAddProvider(createBlankAddProviderSubmission())} className="gap-1">
+                <Button type="button" variant="default" onClick={() => setAddProviderOpen(true)} className="gap-1">
                   <Plus className="size-3.5" />
                   Add Provider
                 </Button>
+                <RoleNameDialog
+                  title="Add provider"
+                  initialName=""
+                  existingNames={thirdPartyDrafts.map((d) => d.name)}
+                  open={addProviderOpen}
+                  onOpenChange={setAddProviderOpen}
+                  onSubmit={(name: string) => {
+                    const code = `custom-${globalThis.crypto?.randomUUID?.() ?? Date.now()}`
+                    onAddProvider({
+                      providerCode: code,
+                      name: name,
+                      baseUrl: "",
+                      apiKey: "",
+                      type: "third-party",
+                    })
+                  }}
+                  fieldLabel="Provider name"
+                  submitLabel="Add"
+                />
               </CatalogAccordionContent>
             </CatalogAccordionItem>
           </CatalogAccordion>

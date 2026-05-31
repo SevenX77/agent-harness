@@ -742,9 +742,11 @@ describe('SettingsPageContent (api_keys)', () => {
 
     expect(html).toContain('data-copilot-role-card="true"')
     expect(html.match(/data-copilot-role-card="true"/g)).toHaveLength(2)
+    expect(html.match(/data-copilot-role-source="built_in"/g)).toHaveLength(2)
     expect(html).toContain('data-copilot-model-name="true"')
     expect(html).toContain('data-variant="default"')
     expect(html).toContain('Test</button>')
+    expect(html).not.toContain('data-copilot-role-delete-trigger="true"')
   })
 
   it('renders provider skeletons while credentials are loading', () => {
@@ -859,9 +861,9 @@ describe('SettingsPageContent (api_keys)', () => {
     expect(htmlWithThirdPartyOutcome).toContain('Connected')
   })
 
-  it('renders a Delete button for each user-owned provider', () => {
+  it('renders a Delete button/action menu for each user-owned provider', () => {
     const html = renderToStaticMarkup(<SettingsPageContent {...baseViewProps()} />)
-    const matches = html.match(/aria-label="Delete provider"/g) ?? []
+    const matches = html.match(/aria-label="More actions for [^"]*"/g) ?? []
     expect(matches).toHaveLength(3)
   })
 })

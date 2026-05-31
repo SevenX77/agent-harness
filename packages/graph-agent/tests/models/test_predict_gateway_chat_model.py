@@ -60,7 +60,7 @@ def _route(endpoint_id: str, model_name: str) -> ResolvedRoute:
         endpoint_id=endpoint_id,
         protocol="openai_compatible",
         base_url="https://provider.example/v1",
-        api_key="test-secret",
+        credential_ref="test-cred-ref",
         credential_fingerprint=f"fp-{endpoint_id}",
         provider_model_id=model_name,
         canonical_id=model_name,

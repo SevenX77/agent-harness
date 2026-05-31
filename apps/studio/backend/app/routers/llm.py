@@ -92,6 +92,7 @@ from app.services.llm_import_drafts import (
     load_draft,
     load_evidence_library,
     new_evidence_id,
+    sync_remote_evidence_library,
 )
 from app.services.llm_model_groups import (
     normalize_model_group_key,
@@ -177,7 +178,7 @@ class EndpointTestCompactModelInfo(BaseModel):
 
     id: str
     route_id: str | None = None
-    status: Literal["verified", "unverified_manual", "disabled", "failed", "testing"] | None = None
+    status: Literal["verified", "unverified_manual", "disabled", "failed", "testing", "probe-verified"] | None = None
     verified_profile_count: int | None = None
     last_probe_message: str | None = None
     capabilities: dict[str, object] = Field(default_factory=dict)
@@ -391,6 +392,57 @@ async def start_endpoint_test_job(endpoint_id: str) -> EndpointTestJobResponse:
         _running_endpoint_test_jobs[endpoint_id] = job.job_id
     asyncio.create_task(_run_official_endpoint_test_job(job.job_id, endpoint_id))
     return job
+
+
+@router.post("/catalog/sync")
+async def sync_catalog() -> dict[str, Any]:
+    """Pull the remote evidence library and merge it locally."""
+    try:
+        updated = await sync_remote_evidence_library()
+        return {
+            "status": "success",
+            "message": "Catalog synced successfully with remote repository.",
+            "route_candidates_count": len(updated.route_candidates),
+            "evidence_records_count": len(updated.evidence_records),
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to sync catalog: {exc}",
+        )
+
+
+@router.post("/catalog/share")
+async def share_catalog() -> dict[str, Any]:
+    """Export and return all local successful evidence records ready to be shared with the community."""
+    try:
+        library = load_evidence_library()
+        probed_records = [
+            rec.model_dump(mode="json")
+            for rec in library.evidence_records
+            if rec.evidence_type == "probe" and rec.trust_state == "probe-verified"
+        ]
+        
+        credentials = load_credentials()
+        verified_routes_count = sum(
+            1 for r in credentials.provider_routes.values() if r.status == "verified"
+        )
+        
+        return {
+            "status": "success",
+            "message": "Local verified catalog evidence exported successfully.",
+            "verified_routes_in_credentials": verified_routes_count,
+            "evidence_records_to_share": probed_records,
+            "export_instructions": (
+                "To share these verified profiles with the community, submit a Pull Request "
+                "to SevenX77/agent-harness with these evidence records added to llm_import_drafts.json."
+            )
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to share catalog evidence: {exc}",
+        )
 
 
 @router.get(
@@ -3761,10 +3813,24 @@ def _compact_model_info_for_listed_official_route(
         if verified_profiles
         else _official_catalog_capabilities(endpoint, model_id, raw_capabilities)
     )
+    library = load_evidence_library()
+    is_probe_verified = any(
+        rec.endpoint_id == endpoint.endpoint_id
+        and rec.model_id == model_id
+        and rec.trust_state == "probe-verified"
+        for rec in library.evidence_records
+    )
+    if route is not None:
+        model_status = route.status
+        if model_status == "unverified_manual" and is_probe_verified:
+            model_status = "probe-verified"
+    else:
+        model_status = "probe-verified" if is_probe_verified else "unverified_manual"
+
     return EndpointTestCompactModelInfo(
         id=model_id,
         route_id=route_id,
-        status=route.status if route is not None else "unverified_manual",
+        status=model_status,
         verified_profile_count=len(verified_profiles),
         last_probe_message=_route_failure_message(route),
         capabilities=capabilities,

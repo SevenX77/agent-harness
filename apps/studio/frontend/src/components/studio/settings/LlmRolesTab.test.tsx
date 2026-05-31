@@ -204,7 +204,7 @@ describe("LlmRolesTab controls", () => {
     expect(html).toContain('data-provider-state="ready"')
     expect(html).toContain('data-provider-state="untested"')
     expect(html).toContain('data-provider-state="needs_setup"')
-    expect(html).toContain('data-variant="multimodal"')
+    expect(html).toContain('data-variant="default"')
     expect(html).not.toContain("claude-sonnet-4-7</")
     expect(html).not.toContain("anthropic-official:claude-sonnet-4-7")
     expect(html).not.toContain("route")

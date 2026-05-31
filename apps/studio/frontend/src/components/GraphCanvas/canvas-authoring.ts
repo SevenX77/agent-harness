@@ -1,5 +1,8 @@
 import type { GraphPhaseMode, SerializableGraphPhaseRef, SkillDetail } from '@/api/types'
 import { INPUT_ID, OUTPUT_ID } from '@/components/nodes'
+import { parsePhaseFrontmatter } from '../studio/panels/phase-frontmatter'
+import yaml from 'js-yaml'
+import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 
 export type NewPhaseKind = GraphPhaseMode
 
@@ -20,18 +23,24 @@ export type ConnectPhaseRefsResult =
   }
 
 export function phaseRefsFromSkillDetail(detail: SkillDetail | undefined): SerializableGraphPhaseRef[] {
-  if (detail?.manifest.schema_version !== '2.1') {
+  if (!detail?.manifest) {
+    return []
+  }
+  const version = detail.manifest.schema_version
+  if (version !== CURRENT_SCHEMA_VERSION) {
     return []
   }
 
   const topologyById = new Map((detail.graph_topology ?? []).map((phase) => [phase.id, phase]))
-  return detail.manifest.phases.map((phase) => {
-    const topology = topologyById.get(phase.id)
-    const mode = normalizePhaseMode(topology?.mode) ?? modeFromSrc(topology?.src ?? phase.src)
+  const phaseIds = (detail.manifest.phases ?? []) as unknown as string[]
+  return phaseIds.map((phaseId) => {
+    const topology = topologyById.get(phaseId)
+    const src = topology?.src ?? `phases/${phaseId}`
+    const mode = normalizePhaseMode(topology?.mode) ?? modeFromSrc(src)
     return {
-      id: phase.id,
-      src: topology?.src ?? phase.src,
-      depends_on: [...(topology?.depends_on ?? phase.depends_on ?? [])],
+      id: phaseId,
+      src,
+      depends_on: [...(topology?.depends_on ?? [])],
       mode,
     }
   })
@@ -217,4 +226,129 @@ function normalizePhaseMode(mode: string | undefined): GraphPhaseMode | null {
 
 function isGlobalNode(id: string): boolean {
   return id === INPUT_ID || id === OUTPUT_ID
+}
+
+export interface OverwriteConflict {
+  nodeId: string
+  fieldName: string
+  ancestorNodeId: string
+}
+
+export function checkSequentialOverwrites(
+  skillDetail: SkillDetail | undefined,
+  phases: SerializableGraphPhaseRef[],
+): OverwriteConflict[] {
+  if (!skillDetail?.files) {
+    return []
+  }
+
+  const phaseMap = new Map<string, SerializableGraphPhaseRef>()
+  for (const phase of phases) {
+    phaseMap.set(phase.id, phase)
+  }
+
+  const getTransitiveAncestors = (phaseId: string): Set<string> => {
+    const ancestors = new Set<string>()
+    const queue = [...(phaseMap.get(phaseId)?.depends_on ?? [])]
+    while (queue.length > 0) {
+      const current = queue.shift()!
+      if (!ancestors.has(current)) {
+        ancestors.add(current)
+        const parent = phaseMap.get(current)
+        if (parent) {
+          queue.push(...parent.depends_on)
+        }
+      }
+    }
+    return ancestors
+  }
+
+  const getPhaseOutputsAndWhitelist = (phaseId: string): { outputs: string[]; whitelist: string[] } => {
+    const phase = phaseMap.get(phaseId)
+    if (!phase) {
+      return { outputs: [], whitelist: [] }
+    }
+    const relativePath = phaseFilePath(phaseId, phase.mode)
+    const fileContent = skillDetail.files?.[relativePath]
+    if (!fileContent) {
+      return { outputs: [], whitelist: [] }
+    }
+
+    const parsed = parsePhaseFrontmatter(fileContent)
+    if (!parsed.ok) {
+      return { outputs: [], whitelist: [] }
+    }
+
+    const fm = parsed.frontmatter
+    const io = fm.io as any
+    const outputs = io?.outputs?.properties ? Object.keys(io.outputs.properties) : []
+    const whitelist = Array.isArray(fm.allow_sequential_overwrite)
+      ? (fm.allow_sequential_overwrite as string[])
+      : []
+
+    return { outputs, whitelist }
+  }
+
+  const conflicts: OverwriteConflict[] = []
+  const phaseDataMap = new Map<string, { outputs: string[]; whitelist: string[] }>()
+  for (const phase of phases) {
+    phaseDataMap.set(phase.id, getPhaseOutputsAndWhitelist(phase.id))
+  }
+
+  for (const phase of phases) {
+    const { outputs, whitelist } = phaseDataMap.get(phase.id) ?? { outputs: [], whitelist: [] }
+    if (outputs.length === 0) {
+      continue
+    }
+
+    const ancestors = getTransitiveAncestors(phase.id)
+    for (const ancestorId of ancestors) {
+      const ancestorData = phaseDataMap.get(ancestorId)
+      if (!ancestorData) {
+        continue
+      }
+
+      for (const fieldName of outputs) {
+        if (ancestorData.outputs.includes(fieldName) && !whitelist.includes(fieldName)) {
+          const alreadyExists = conflicts.some(
+            (c) => c.nodeId === phase.id && c.fieldName === fieldName && c.ancestorNodeId === ancestorId,
+          )
+          if (!alreadyExists) {
+            conflicts.push({
+              nodeId: phase.id,
+              fieldName,
+              ancestorNodeId: ancestorId,
+            })
+          }
+        }
+      }
+    }
+  }
+
+  return conflicts
+}
+
+export function addSequentialOverwriteField(
+  markdown: string,
+  fieldName: string,
+): string {
+  const parsed = parsePhaseFrontmatter(markdown)
+  if (!parsed.ok) return markdown
+  const fm = parsed.frontmatter
+  const whitelist = Array.isArray(fm.allow_sequential_overwrite)
+    ? [...(fm.allow_sequential_overwrite as string[])]
+    : []
+  if (!whitelist.includes(fieldName)) {
+    whitelist.push(fieldName)
+  }
+  fm.allow_sequential_overwrite = whitelist
+
+  const dumped = yaml.dump(fm, {
+    lineWidth: 120,
+    noRefs: true,
+    sortKeys: false,
+    styles: { '!!null': 'empty' },
+  }).trimEnd()
+  const body = parsed.body.length > 0 ? `\n${parsed.body}` : '\n'
+  return `---\n${dumped}\n---${body}`
 }

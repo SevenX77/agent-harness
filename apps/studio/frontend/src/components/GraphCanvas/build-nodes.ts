@@ -1,6 +1,7 @@
 import yaml from 'js-yaml'
 import type { IoDeclaration, PhaseDef, SkillDetail, SkillManifest } from '@/api/types'
 import { INPUT_ID, OUTPUT_ID, type GlobalNodeData, type GraphCanvasNode, type SkillGraphNode, type SkillGraphNodeData, type SkillNodeStatus, type SubagentRef } from '@/components/nodes'
+import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 
 const EMPTY_IO: IoDeclaration = { inputs: [], outputs: [] }
 
@@ -18,12 +19,14 @@ function normalizeDependsOn(value: string | string[] | undefined): string[] {
 }
 
 function phasesFromManifest(manifest: SkillManifest | undefined, skillId: string): PhaseDef[] {
-  if (manifest?.schema_version === '2.1') {
-    return manifest.phases.map((phase) => ({
+  if (manifest?.schema_version === CURRENT_SCHEMA_VERSION) {
+    const phaseList = (manifest.phases as unknown as string[]).map((phaseId) => ({ id: phaseId, depends_on: [] }))
+
+    return phaseList.map((phase) => ({
       name: phase.id,
       mode: 'logic',
       model_override: null,
-      depends_on: phase.depends_on,
+      depends_on: phase.depends_on ?? [],
       execute_steps: [],
       validator: null,
     }))
@@ -103,8 +106,11 @@ function phasesFromManifest(manifest: SkillManifest | undefined, skillId: string
 }
 
 function ioFromManifest(manifest: SkillManifest | undefined): IoDeclaration {
-  if (manifest?.schema_version === '2.1') {
-    return EMPTY_IO
+  if (manifest?.schema_version === CURRENT_SCHEMA_VERSION) {
+    const io = (manifest as any).io
+    const inputs = io?.inputs?.properties ? Object.keys(io.inputs.properties).map((name) => ({ name, type: 'string', source: 'runtime' })) : []
+    const outputs = io?.outputs?.properties ? Object.keys(io.outputs.properties).map((name) => ({ name, type: 'string', target: 'file' })) : []
+    return { inputs: inputs as any, outputs: outputs as any }
   }
   return manifest?.type === 'graph' ? manifest.io : EMPTY_IO
 }

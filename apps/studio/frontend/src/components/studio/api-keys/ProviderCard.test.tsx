@@ -289,8 +289,7 @@ describe("ProviderCard provider kind badge", () => {
     expect(html).toContain("OpenAI Official")
     expect(html).not.toContain('data-variant="outline">Official</span>')
     expect(html).not.toContain("Not configured")
-    expect(html).not.toContain('aria-label="Provider Name"')
-    expect(html).not.toContain('aria-label="Delete provider"')
+    expect(html).not.toContain('aria-label="More actions for OpenAI Official"')
     expect(html).not.toContain("Base URL")
   })
 
@@ -327,10 +326,7 @@ describe("ProviderCard provider kind badge", () => {
     )
 
     expect(html).toContain("Third-party")
-    expect(html).toContain('aria-label="Provider Name"')
-    expect(html).toContain('id="provider-name-p1"')
-    expect(html).toContain(">Provider Name</label>")
-    expect(html).toContain('aria-label="Delete provider"')
+    expect(html).toContain('aria-label="More actions for OpenAI"')
     expect(html).toContain("Base URL")
     expect(html).toContain('aria-label="Copy Base URL"')
   })
@@ -596,11 +592,11 @@ describe("ProviderCard provider capabilities", () => {
 
     const idleTag = routeTagHtml(html, "gpt-5.3")
     expect(idleTag).toContain('data-route-status="unverified_manual"')
-    expect(idleTag).toContain('data-variant="multimodal"')
+    expect(idleTag).toContain('data-variant="default"')
     expect(idleTag).not.toContain("api-route-tag-border-flow")
   })
 
-  it("renders generated multimodal route candidates with a multimodal border and shadcn-only tooltip", () => {
+  it("renders generated multimodal route candidates with a default border and shadcn-only tooltip", () => {
     const html = renderToStaticMarkup(
       <ProviderCard
         draft={makeDraft({ id: "openai-official", name: "OpenAI Official" })}
@@ -624,7 +620,7 @@ describe("ProviderCard provider capabilities", () => {
     )
 
     const tag = routeTagHtml(html, "gpt-image-1")
-    expect(tag).toContain('data-variant="multimodal"')
+    expect(tag).toContain('data-variant="default"')
     expect(tag).toContain('data-model-type="image_generation"')
     expect(html).toContain('data-route-type-group="Multimodal"')
     expect(tag).toContain('data-input-modalities="text,image"')
@@ -693,7 +689,7 @@ describe("ProviderCard provider capabilities", () => {
     expect(html).not.toContain("https://api.openai.com/v1/models")
   })
 
-  it("keeps generated multimodal official entries multimodal-colored even if stale data marked them verified", () => {
+  it("renders active verified routes as green even if they are multimodal/image models", () => {
     const html = renderToStaticMarkup(
       <ProviderCard
         draft={makeDraft({ id: "gemini-official", name: "Gemini Official" })}
@@ -727,12 +723,40 @@ describe("ProviderCard provider capabilities", () => {
     )
 
     const tag = routeTagHtml(html, "gemini-3-pro-image")
-    expect(tag).toContain('data-variant="multimodal"')
-    expect(tag).not.toContain('data-variant="success"')
+    expect(tag).toContain('data-variant="success"')
+    expect(tag).not.toContain('data-variant="probe-verified"')
     expect(tag).toContain('data-model-type="image_generation"')
     expect(tag).toContain("Image generation model")
     expect(tag).not.toContain("Verified route")
-    expect(tag).not.toContain("Verified text chat")
+  })
+
+  it("renders historically probe-verified routes as blue (probe-verified variant) if not active in credentials", () => {
+    const html = renderToStaticMarkup(
+      <ProviderCard
+        draft={makeDraft({ id: "openai-official", name: "OpenAI Official" })}
+        persisted={makePersisted({
+          id: "openai-official",
+          name: "OpenAI Official",
+          available_models: [
+            {
+              id: "gpt-5-probe-verified",
+              route_id: "openai-official:gpt-5-probe-verified",
+              status: "probe-verified",
+              capabilities: { model_type: "language_reasoning", model_type_label: "Language/reasoning model" },
+            },
+          ],
+        })}
+        onFieldChange={vi.fn()}
+        onGetModels={vi.fn()}
+        onEndpointTest={vi.fn()}
+        onDelete={vi.fn()}
+        providerKind="official"
+      />,
+    )
+
+    const tag = routeTagHtml(html, "gpt-5-probe-verified")
+    expect(tag).toContain('data-variant="probe-verified"')
+    expect(tag).toContain('data-route-status="probe-verified"')
   })
 
   it("describes verified route profile capability types instead of profile counts", () => {

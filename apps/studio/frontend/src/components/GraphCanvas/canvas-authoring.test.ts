@@ -1,14 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import type { SkillDetail } from '@/api/types'
+import { CURRENT_SCHEMA_VERSION } from '@/config/schema'
 import {
   connectPhaseRefs,
   createPhaseDraft,
   disconnectPhaseRefs,
   phaseRefsFromSkillDetail,
+  checkSequentialOverwrites,
+  addSequentialOverwriteField,
 } from './canvas-authoring'
 
 describe('canvas authoring helpers', () => {
-  it('builds serializable phase refs from schema v2.1 manifest and topology modes', () => {
+  it('builds serializable phase refs from schema current version manifest and topology modes', () => {
     const refs = phaseRefsFromSkillDetail(skillDetail({
       phases: [
         { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
@@ -46,7 +49,7 @@ describe('canvas authoring helpers', () => {
     })
   })
 
-  it('creates phase files that match the v2.1 node AST fields', () => {
+  it('creates phase files that match the node AST fields', () => {
     const detail = skillDetail()
     const logic = createPhaseDraft(detail, 'logic')
     const skill = createPhaseDraft(detail, 'skill')
@@ -139,20 +142,105 @@ describe('canvas authoring helpers', () => {
     expect(disconnectPhaseRefs(detail, '__global_input__', 'review')).toMatchObject({ ok: false, reason: 'global-node' })
     expect(disconnectPhaseRefs(detail, 'review', 'draft')).toMatchObject({ ok: false, reason: 'missing-dependency' })
   })
+
+  it('detects sequential overwrite conflicts correctly and honors allow_sequential_overwrite whitelist', () => {
+    const detail = skillDetail({
+      phases: [
+        { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [] },
+        { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'] },
+        { id: 'publish', src: 'phases/publish/SKILL.md', depends_on: ['review'] },
+      ],
+    })
+
+    // Add mock files with yaml frontmatter
+    detail.files = {
+      'phases/draft/SKILL.md': `---
+name: draft
+mode: skill
+io:
+  outputs:
+    properties:
+      report: { type: string }
+---
+`,
+      'phases/review/LOGIC.md': `---
+name: review
+mode: logic
+io:
+  outputs:
+    properties:
+      report: { type: string }
+---
+`,
+      'phases/publish/SKILL.md': `---
+name: publish
+mode: skill
+io:
+  outputs:
+    properties:
+      report: { type: string }
+allow_sequential_overwrite:
+  - report
+---
+`,
+    }
+
+    const phases = [
+      { id: 'draft', src: 'phases/draft/SKILL.md', depends_on: [], mode: 'skill' as const },
+      { id: 'review', src: 'phases/review/LOGIC.md', depends_on: ['draft'], mode: 'logic' as const },
+      { id: 'publish', src: 'phases/publish/SKILL.md', depends_on: ['review'], mode: 'skill' as const },
+    ]
+
+    const conflicts = checkSequentialOverwrites(detail, phases)
+
+    // 'review' conflicts with 'draft' on 'report' since it's not whitelisted in 'review'.
+    // 'publish' does NOT conflict since 'report' is whitelisted in 'publish'.
+    expect(conflicts).toHaveLength(1)
+    expect(conflicts[0]).toEqual({
+      nodeId: 'review',
+      fieldName: 'report',
+      ancestorNodeId: 'draft',
+    })
+  })
+
+  it('updates markdown frontmatter correctly via addSequentialOverwriteField', () => {
+    const markdown = `---
+name: review
+mode: logic
+---
+# review
+`
+    const updated = addSequentialOverwriteField(markdown, 'report')
+    expect(updated).toContain('allow_sequential_overwrite:')
+    expect(updated).toContain('- report')
+    expect(updated).toContain('# review')
+  })
 })
 
 function skillDetail(overrides: {
   phases?: Array<{ id: string; src: string; depends_on: string[] }>
   graph_topology?: SkillDetail['graph_topology']
 } = {}): SkillDetail {
+  const phases = overrides.phases ?? []
+  const graph_topology = overrides.graph_topology ?? phases.map((p) => ({
+    id: p.id,
+    src: p.src,
+    depends_on: p.depends_on,
+    mode: p.src.endsWith('/SKILL.md') ? 'skill' : p.src.endsWith('/SUBGRAPH.md') ? 'subgraph' : 'logic',
+  }))
+
   return {
     manifest: {
-      schema_version: '2.1',
+      schema_version: CURRENT_SCHEMA_VERSION,
       name: 'demo',
       description: 'Demo',
-      phases: overrides.phases ?? [],
+      io: {
+        inputs: { type: 'object', properties: {} },
+        outputs: { type: 'object', properties: {} },
+      },
+      phases: phases.map((p) => p.id),
     },
-    graph_topology: overrides.graph_topology,
+    graph_topology,
     node_schema_v21: {},
     io_schema: {},
     file_paths: {},

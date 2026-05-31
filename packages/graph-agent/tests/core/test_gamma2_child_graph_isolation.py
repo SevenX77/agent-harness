@@ -70,7 +70,21 @@ phases:
     )
 
 
-def _logic_action(root: Path, phase: str, action: str, body: str) -> None:
+def _logic_action(root: Path, phase: str, action: str, body: str, outputs: list[str] | None = None) -> None:
+    output_properties = {}
+    if outputs is not None:
+        for out in outputs:
+            if out == "seen_public":
+                output_properties["seen_public"] = {"type": "string"}
+            else:
+                output_properties[out] = {"type": "boolean"}
+    else:
+        output_properties = {
+            "seen_public": {"type": "string"},
+            "saw_parent_secret": {"type": "boolean"},
+            "saw_parent_message": {"type": "boolean"},
+        }
+    output_yaml = json.dumps({"type": "object", "properties": output_properties}, ensure_ascii=False, indent=4).replace("\n", "\n    ")
     _write(
         root / "phases" / phase / "LOGIC.md",
         f"""---
@@ -79,14 +93,7 @@ io:
     type: object
     properties: {{}}
   outputs:
-    type: object
-    properties:
-      seen_public:
-        type: string
-      saw_parent_secret:
-        type: boolean
-      saw_parent_message:
-        type: boolean
+    {output_yaml}
 ---
 <action>{action}</action>
 """,
@@ -170,13 +177,14 @@ def test_subgraph_child_outputs_are_deterministic_across_child_phases(
         '<phase id="first" src="phases/first" depends_on="" />\n'
         '<phase id="second" src="phases/second" depends_on="first" />\n',
     )
-    _logic_action(child, "first", "first", "def first(context):\n    return {'seen_public': 'a'}\n")
+    _logic_action(child, "first", "first", "def first(context):\n    return {'seen_public': 'a'}\n", outputs=["seen_public"])
     _logic_action(
         child,
         "second",
         "second",
         "def second(context):\n"
         "    return {'saw_parent_secret': False, 'saw_parent_message': False}\n",
+        outputs=["saw_parent_secret", "saw_parent_message"],
     )
 
     compiled = compile_skill(tmp_path, cache=False, skill_resolver=mock_skill_resolver)
@@ -192,22 +200,24 @@ def test_subgraph_child_outputs_are_deterministic_across_child_phases(
 
 
 def test_subagent_child_without_phase_outputs_does_not_flat_diff_parent_data() -> None:
+    from graph_agent.core.state import WorkflowState, BusinessData, FrameworkState
     class FlatOnlyGraph:
         def invoke(self, state, config=None):
             del config
-            return {
-                "data": {
-                    "inputs": {**state["data"]["inputs"], "legacy": "must-not-leak"},
-                    "phase_outputs": {},
-                    "scratch": {},
-                },
-                "flow": state["flow"],
-                "messages": [],
-            }
+            return WorkflowState(
+                data=state["data"].model_copy(),
+                flow=state["flow"],
+                messages=[],
+            )
 
+    parent_state = WorkflowState(
+        data=BusinessData.model_validate({"item": "a"}),
+        flow=FrameworkState(),
+        messages=[],
+    )
     result = _invoke_subagent_once_t23(
         SimpleNamespace(graph=FlatOnlyGraph()),
-        {"data": {"inputs": {"item": "a"}}, "flow": {}, "messages": [], "run_id": "parent"},
+        parent_state,
         {"item": "a"},
     )
 
@@ -215,45 +225,58 @@ def test_subagent_child_without_phase_outputs_does_not_flat_diff_parent_data() -
 
 
 def test_subagent_child_flow_is_deep_copied_and_depth_increments() -> None:
-    captured_child_flow: dict[str, object] = {}
+    from graph_agent.core.state import WorkflowState, BusinessData, FrameworkState
+    captured_child_flow: FrameworkState | None = None
 
     class MutatingChildGraph:
         def invoke(self, state, config=None):
             del config
-            captured_child_flow.update(state["flow"])
-            state["flow"]["nested"]["child_only"] = True
-            state["flow"]["subagent_depth"] = 2
-            return {
-                "data": {"inputs": {}, "phase_outputs": {}, "scratch": {}},
-                "flow": state["flow"],
-                "messages": [],
-            }
+            nonlocal captured_child_flow
+            captured_child_flow = state["flow"].model_copy()
+            state["flow"].working_memory["child_only"] = True
+            state["flow"].subagent_depth = 2
+            return WorkflowState(
+                data=BusinessData(),
+                flow=state["flow"],
+                messages=[],
+            )
 
-    parent_flow = {"subagent_depth": 1, "nested": {"parent_only": True}}
+    parent_flow = FrameworkState(
+        subagent_depth=1,
+        working_memory={"parent_only": True},
+    )
+    parent_state = WorkflowState(
+        data=BusinessData.model_validate({"item": "a"}),
+        flow=parent_flow,
+        messages=[],
+    )
     result = _invoke_subagent_once_t23(
         SimpleNamespace(graph=MutatingChildGraph()),
-        {"data": {"inputs": {"item": "a"}}, "flow": parent_flow, "messages": [], "run_id": "p"},
+        parent_state,
         {"item": "a"},
     )
 
-    assert captured_child_flow["subagent_depth"] == 2
-    assert parent_flow == {"subagent_depth": 1, "nested": {"parent_only": True}}
-    assert result["flow"]["nested"]["child_only"] is True
+    assert captured_child_flow is not None
+    assert captured_child_flow.subagent_depth == 2
+    assert parent_flow.subagent_depth == 1
+    assert parent_flow.working_memory == {"parent_only": True}
+    assert result["flow"].working_memory["child_only"] is True
 
 
 def test_subgraph_child_flow_is_deep_copied_and_depth_increments(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    from graph_agent.core.state import WorkflowState, BusinessData, FrameworkState
     class MutatingSubgraph:
         def invoke(self, state):
-            assert state["flow"]["subagent_depth"] == 2
-            state["flow"]["nested"]["child_only"] = True
-            return {
-                "data": {"inputs": {}, "phase_outputs": {}, "scratch": {}},
-                "flow": state["flow"],
-                "messages": [],
-            }
+            assert state["flow"].subagent_depth == 2
+            state["flow"].working_memory["child_only"] = True
+            return WorkflowState(
+                data=BusinessData(),
+                flow=state["flow"],
+                messages=[],
+            )
 
     class FakeSkillLoader:
         def __init__(self, *args, **kwargs):
@@ -286,7 +309,10 @@ def test_subgraph_child_flow_is_deep_copied_and_depth_increments(
         raw_blocks={},
         ast=phase_ast,
     )
-    parent_flow = {"subagent_depth": 1, "nested": {"parent_only": True}}
+    parent_flow = FrameworkState(
+        subagent_depth=1,
+        working_memory={"parent_only": True},
+    )
 
     node = _build_subgraph_node(
         phase_doc,
@@ -296,16 +322,16 @@ def test_subgraph_child_flow_is_deep_copied_and_depth_increments(
         skill_resolver=SimpleNamespace(resolve_skill=lambda skill_id: tmp_path),
     )
     result = node(
-        {
-            "data": {"inputs": {"public": "visible"}, "phase_outputs": {}, "scratch": {}},
-            "flow": parent_flow,
-            "messages": [],
-            "run_id": "r1",
-        }
+        WorkflowState(
+            data=BusinessData.model_validate({"public": "visible"}),
+            flow=parent_flow,
+            messages=[],
+        )
     )
 
-    assert parent_flow == {"subagent_depth": 1, "nested": {"parent_only": True}}
-    assert result["flow"]["nested"]["child_only"] is True
+    assert parent_flow.subagent_depth == 1
+    assert parent_flow.working_memory == {"parent_only": True}
+    assert result["flow"].working_memory["child_only"] is True
 
 
 def test_phase_wrapper_rejects_double_wrap() -> None:

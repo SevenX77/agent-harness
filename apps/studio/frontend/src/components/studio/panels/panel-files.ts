@@ -1,6 +1,7 @@
 import type { SkillDetail } from "@/api/types"
 import type { SkillGraphNodeData } from "@/components/GraphCanvas"
 import type { FileMeta } from "../file-types"
+import { CURRENT_SCHEMA_VERSION } from "@/config/schema"
 
 function languageForPath(path: string): string {
   if (path.endsWith(".json")) return "json"
@@ -19,8 +20,11 @@ export function fileFromDetail(skillDetail: SkillDetail | undefined, path: strin
 export function phaseIds(skillDetail?: SkillDetail): string[] {
   const fromTopology = skillDetail?.graph_topology?.map((phase) => phase.id) ?? []
   if (fromTopology.length > 0) return fromTopology
-  const phases = skillDetail?.manifest.schema_version === "2.1" ? skillDetail.manifest.phases : []
-  return phases.map((phase) => phase.id)
+  const version = skillDetail?.manifest?.schema_version
+  if (version === CURRENT_SCHEMA_VERSION) {
+    return (skillDetail?.manifest?.phases ?? []) as unknown as string[]
+  }
+  return []
 }
 
 export function actionFiles(skillDetail: SkillDetail | undefined, phaseId: string): FileMeta[] {

@@ -66,7 +66,7 @@ def test_error_registry_matches_error_code_spec_key_set() -> None:
     registry = _error_registry()
 
     assert set(registry) == _spec_codes()
-    assert len(registry) == len(_spec_codes()) == 92
+    assert len(registry) == len(_spec_codes()) == 93
 
 
 def test_error_registry_preserves_multi_stage_codes() -> None:
@@ -134,8 +134,11 @@ def test_loader_failure_asserts_payload_code(tmp_path: Path, mock_skill_resolver
 
 
 def test_runtime_failure_asserts_payload_code() -> None:
+    from graph_agent.core.state import WorkflowState, BusinessData, FrameworkState
     with pytest.raises(GraphAgentFatalError) as exc_info:
-        StateMapper().wrap_phase_output({"data": {"inputs": {"text": "blocked"}}})
+        state = WorkflowState(data=BusinessData(), flow=FrameworkState(), messages=[])
+        mapper = StateMapper(output_schema={"type": "object", "properties": {"text": {}}})
+        mapper.wrap_phase_output(state, {"data": {"extra": "undeclared"}})
 
     assert exc_info.value.payload.code == "[F-v3-runtime-state-mapping-failed]"
 
@@ -150,7 +153,7 @@ def test_builtin_tool_failure_asserts_payload_code(tmp_path: Path, mock_skill_re
 def test_error_registry_entries_have_complete_nonempty_metadata() -> None:
     registry = _error_registry()
 
-    assert len(registry) == len(_spec_codes()) == 92
+    assert len(registry) == len(_spec_codes()) == 93
     for code, metadata in registry.items():
         assert metadata.code == code
         assert metadata.code

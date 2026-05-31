@@ -70,6 +70,11 @@ def load_credentials(path: Path | None = None) -> LLMCredentialsFile:
 def save_credentials(data: LLMCredentialsFile, path: Path | None = None) -> None:
     """Atomically write credentials and force file permissions to ``0600``."""
     credential_path = path or credentials_path()
+    from app.services.file_watcher import record_api_write
+    try:
+        record_api_write(credential_path)
+    except Exception:
+        pass
     with _credentials_lock:
         _save_credentials_unlocked(data, credential_path)
 

@@ -53,6 +53,7 @@ phases:
 """,
     )
     for phase_id, _ in phases:
+        outputs_props = "      answer:\n        type: string" if phase_id == "draft" else "      review:\n        type: string"
         _write(
             root / "phases" / phase_id / "LOGIC.md",
             f"""---
@@ -67,10 +68,7 @@ io:
   outputs:
     type: object
     properties:
-      answer:
-        type: string
-      review:
-        type: string
+{outputs_props}
 ---
 <action>{phase_id}</action>
 """,

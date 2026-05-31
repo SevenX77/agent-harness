@@ -21,6 +21,10 @@ export interface SkillGraphNodeData extends Record<string, unknown> {
   subagents?: SubagentRef[]
   isExpanded?: boolean
   onToggleSubgraph?: () => void
+  activeConflict?: { nodeId: string; fieldName: string; ancestorNodeId: string }
+  isConflictCancelled?: boolean
+  onAllowSequentialOverwrite?: (nodeId: string, fieldName: string) => void
+  onCancelWarning?: (nodeId: string) => void
 }
 
 export type SkillGraphNode = Node<SkillGraphNodeData, 'skill'>

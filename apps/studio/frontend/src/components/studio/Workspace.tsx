@@ -500,6 +500,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   onCreatePhase={handleCreatePhase}
                   onPersistConnection={handlePersistConnection}
                   onDisconnectConnection={handleDisconnectConnection}
+                  onPhaseFileSave={handlePhaseFileSave}
                 />
               ) : currentSkillId === null ? (
                 <WelcomePage onSelectSkill={onSelectSkill} />
@@ -515,6 +516,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
                   onCreatePhase={handleCreatePhase}
                   onPersistConnection={handlePersistConnection}
                   onDisconnectConnection={handleDisconnectConnection}
+                  onPhaseFileSave={handlePhaseFileSave}
                 />
               )}
               {currentSkillId && !settingsOpen ? (

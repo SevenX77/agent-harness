@@ -7,9 +7,12 @@ from graph_agent.core import runner as runner_module
 
 
 class RecordingGraph:
-    def invoke(self, state: dict[str, object]) -> dict[str, object]:
+    def invoke(self, state: dict[str, object], *args: Any, **kwargs: Any) -> dict[str, object]:
         del state
-        return {"data": {"ok": True}}
+        class MockData:
+            def model_dump(self) -> dict[str, object]:
+                return {"ok": True}
+        return {"data": MockData()}
 
 
 class RecordingAssembler:

@@ -5,6 +5,7 @@ import { buildPutPayload, useDebouncedCredentialsSave } from "@/hooks/useDebounc
 import { useDebouncedRolesSave } from "@/hooks/useDebouncedRolesSave"
 import { composeRequestErrorMessage, composeTestErrorMessage } from "@/lib/llm-error-messages"
 import { deleteModelBundle, deleteRole, getCredentials, getModelGroups, getProviderModels, getRoles, testProviderEndpoint, type CredentialsState, type EndpointTestJobResponse, type ModelGroup, type ModelInfo, type ProviderTestResponse, type ProviderTestResult, type RolesData } from "../../../api/llm"
+import { wsUrl } from "../../../api/client"
 import type { AddProviderFormSubmission } from "../api-keys"
 import { SettingsPageContent } from "./SettingsPageContent"
 import { draftsFromCredentials, draftFromAddProviderSubmission, inferProviderKind, providerCachedTestResult, providerDraftForAction, providerTestParamsFingerprint, providerTestParamsMatch } from "./provider-utils"
@@ -415,6 +416,69 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       setRolesError(composeRequestErrorMessage(error, "Save failed"))
     },
   })
+
+  useEffect(() => {
+    const handleFocus = () => {
+      getCredentials({ hydrateSecrets: credentialsHydratedRef.current })
+        .then((next) => {
+          setCredentials(next)
+          setDrafts(draftsFromCredentials(next))
+        })
+        .catch(() => {})
+
+      if (activeTab === "llm_roles" && rolesDataRef.current) {
+        Promise.all([getRoles(), getModelGroups()])
+          .then(([next, nextModelGroups]) => {
+            setRolesData(next)
+            setModelGroups(nextModelGroups)
+          })
+          .catch(() => {})
+      }
+    }
+    window.addEventListener("focus", handleFocus)
+    return () => {
+      window.removeEventListener("focus", handleFocus)
+    }
+  }, [activeTab])
+
+  useEffect(() => {
+    let cancelled = false
+    let socket: WebSocket | null = null
+    try {
+      socket = new WebSocket(wsUrl("/ws/events"))
+      socket.onmessage = (message) => {
+        try {
+          const event = JSON.parse(String(message.data)) as { type?: string }
+          if (cancelled) return
+          if (event.type === "registry_changed") {
+            getCredentials({ hydrateSecrets: credentialsHydratedRef.current })
+              .then((next) => {
+                if (cancelled) return
+                setCredentials(next)
+                setDrafts(draftsFromCredentials(next))
+              })
+              .catch(() => {})
+          } else if (event.type === "roles_changed" && rolesDataRef.current) {
+            Promise.all([getRoles(), getModelGroups()])
+              .then(([next, nextModelGroups]) => {
+                if (cancelled) return
+                setRolesData(next)
+                setModelGroups(nextModelGroups)
+              })
+              .catch(() => {})
+          }
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return () => {
+      cancelled = true
+      if (socket) socket.close()
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false

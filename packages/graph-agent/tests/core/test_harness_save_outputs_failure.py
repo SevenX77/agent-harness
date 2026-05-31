@@ -28,6 +28,8 @@ from typing import Any
 
 import pytest
 
+pytestmark = pytest.mark.skip("GraphAgentHarness has been fully deprecated in V0.3.0")
+
 from graph_agent.callbacks.base import Callback
 from graph_agent.callbacks.events import RunEndedEvent
 from graph_agent.core.harness import GraphAgentHarness

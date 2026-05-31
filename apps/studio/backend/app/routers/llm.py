@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, NoReturn, cast
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -414,11 +415,9 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
         probe_backend = _endpoint_probe_backend(endpoint)
         probe_base_url = _endpoint_probe_base_url(endpoint)
         logger.warning(
-            "testing LLM endpoint endpoint_id=%s protocol=%s backend=%s base_url=%s",
-            endpoint_id,
+            "testing LLM endpoint protocol=%s backend=%s",
             endpoint.protocol,
             probe_backend,
-            probe_base_url,
         )
         try:
             result = await _ping_provider(
@@ -3053,11 +3052,7 @@ async def _run_official_endpoint_test_job(job_id: str, endpoint_id: str) -> None
     try:
         await _run_official_endpoint_test_job_impl(job_id, endpoint_id)
     except Exception as exc:
-        logger.exception(
-            "official endpoint test job failed endpoint_id=%s job_id=%s",
-            endpoint_id,
-            job_id,
-        )
+        logger.exception("official endpoint test job failed")
         await _record_endpoint_test_job_failure(
             job_id,
             endpoint_id,
@@ -3978,21 +3973,33 @@ def _capability_key(value: str) -> str:
 
 
 def _endpoint_probe_backend(endpoint: ProviderEndpoint) -> CopilotProvider:
-    base_url = endpoint.base_url.lower()
+    base_host = _url_hostname(endpoint.base_url)
     endpoint_id = endpoint.endpoint_id.lower()
-    if endpoint.protocol == "ark_runtime" or "volces.com" in base_url or "ark" in endpoint_id:
+    if endpoint.protocol == "ark_runtime" or _host_matches(base_host, "volces.com") or "ark" in endpoint_id:
         return "ark"
     if endpoint.protocol == "anthropic_compatible":
         return "claude"
     if endpoint.protocol == "google_genai":
         return "gemini"
-    if "deepseek" in base_url or "deepseek" in endpoint_id:
+    if "deepseek" in base_host or "deepseek" in endpoint_id:
         return "deepseek"
     return "openai"
 
 
 def _endpoint_probe_base_url(endpoint: ProviderEndpoint) -> str:
     return endpoint.base_url.rstrip("/")
+
+
+def _url_hostname(raw_url: str) -> str:
+    if not raw_url:
+        return ""
+    parsed = urlparse(raw_url if "://" in raw_url else f"https://{raw_url}")
+    return (parsed.hostname or "").lower().rstrip(".")
+
+
+def _host_matches(hostname: str, domain: str) -> bool:
+    normalized_domain = domain.lower().rstrip(".")
+    return hostname == normalized_domain or hostname.endswith(f".{normalized_domain}")
 
 
 def _endpoint_success_message(result: PingResult) -> str:

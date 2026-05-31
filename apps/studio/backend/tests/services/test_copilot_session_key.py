@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-import hashlib
+import hmac
 
 from app.services.copilot import make_session_key
+
+SESSION_KEY_HMAC_DOMAIN = b"agent-harness-copilot-session-key-v1"
 
 
 def test_session_key_differs_by_skill_and_model() -> None:
@@ -43,6 +45,10 @@ def test_session_key_hashes_api_key_one_way() -> None:
     _, model_provider, api_key_hash = make_session_key("skill-a", "CL46T", "OC_CL_ANT", api_key)
 
     assert model_provider == "CL46T:OC_CL_ANT"
-    assert api_key_hash == hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16]
+    assert api_key_hash == hmac.digest(
+        SESSION_KEY_HMAC_DOMAIN,
+        api_key.encode("utf-8"),
+        "sha256",
+    ).hex()[:16]
     assert len(api_key_hash) == 16
     assert api_key not in api_key_hash

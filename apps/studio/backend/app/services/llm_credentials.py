@@ -11,6 +11,7 @@ import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from graph_agent_gateway.registry.canonical import canonicalize_model
 from graph_agent_gateway.registry.capabilities import normalize_route_capabilities
@@ -363,26 +364,47 @@ def _legacy_models(provider: dict[str, Any]) -> list[dict[str, Any]]:
 def _stable_endpoint_id(provider: dict[str, Any]) -> str:
     raw = str(provider.get("id") or provider.get("code") or "").strip()
     name = str(provider.get("name") or "").lower()
-    base_url = str(provider.get("base_url") or "").lower().rstrip("/")
-    if "api.anthropic.com" in base_url:
+    base_url = str(provider.get("base_url") or "").strip()
+    base_host = _url_hostname(base_url)
+    base_path = _url_path(base_url)
+    if base_host == "api.anthropic.com":
         return "anthropic-official"
-    if "api.openai.com" in base_url:
+    if base_host == "api.openai.com":
         return "openai-official"
-    if "api.deepseek.com" in base_url:
+    if base_host == "api.deepseek.com":
         return "deepseek-official"
-    if "generativelanguage.googleapis.com" in base_url:
+    if base_host == "generativelanguage.googleapis.com":
         return "gemini-official"
-    if "volces.com" in base_url:
+    if _host_matches(base_host, "volces.com"):
         return "ark-official"
-    if "openrouter.ai" in base_url or "openrouter" in name:
+    if _host_matches(base_host, "openrouter.ai") or "openrouter" in name:
         return "openrouter-prod"
-    if "wavespeed" in base_url or "wavespeed" in name:
+    if "wavespeed" in base_host or "wavespeed" in name:
         return "wavespeed-prod"
-    if "qnaigc.com" in base_url and "anthropic" in base_url:
+    if _host_matches(base_host, "qnaigc.com") and ("anthropic" in base_path or "anthropic" in name):
         return "qiniu-anthropic"
-    if "qnaigc.com" in base_url:
+    if _host_matches(base_host, "qnaigc.com"):
         return "qiniu-openai"
     return raw
+
+
+def _url_hostname(raw_url: str) -> str:
+    if not raw_url:
+        return ""
+    parsed = urlparse(raw_url if "://" in raw_url else f"https://{raw_url}")
+    return (parsed.hostname or "").lower().rstrip(".")
+
+
+def _url_path(raw_url: str) -> str:
+    if not raw_url:
+        return ""
+    parsed = urlparse(raw_url if "://" in raw_url else f"https://{raw_url}")
+    return parsed.path.lower()
+
+
+def _host_matches(hostname: str, domain: str) -> bool:
+    normalized_domain = domain.lower().rstrip(".")
+    return hostname == normalized_domain or hostname.endswith(f".{normalized_domain}")
 
 
 def _route_slug(provider_model_id: str) -> str:

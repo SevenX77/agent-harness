@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 import time
@@ -217,7 +218,7 @@ class LLMClientManager:
             return cached
 
         try:
-            from google import genai  # type: ignore[import-not-found]
+            genai = importlib.import_module("google.genai")
         except ImportError as exc:  # pragma: no cover - depends on optional SDK install
             raise RuntimeError(
                 "google-genai SDK is not installed; install google-genai to use google_genai routes"
@@ -253,7 +254,7 @@ class LLMClientManager:
             return cached
 
         try:
-            from volcenginesdkarkruntime import Ark  # type: ignore[import-not-found]
+            ark_module = importlib.import_module("volcenginesdkarkruntime")
         except ImportError as exc:  # pragma: no cover - depends on optional SDK install
             raise RuntimeError(
                 "Volcengine Ark SDK is not installed; install graph-agent-gateway[ark] "
@@ -263,7 +264,7 @@ class LLMClientManager:
         kwargs: dict[str, object] = {"api_key": cls._resolve_api_key(route)}
         if route.base_url:
             kwargs["base_url"] = route.base_url
-        client = Ark(**kwargs)
+        client = ark_module.Ark(**kwargs)
         cls._clients[cache_key] = client
         cls._init_usage_stats(route.endpoint_id)
         logger.info(

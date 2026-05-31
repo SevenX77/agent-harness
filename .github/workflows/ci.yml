@@ -20,13 +20,15 @@ jobs:
         run: uv python install 3.11
 
       - name: Sync workspace dependencies
-        run: uv sync --all-extras --group dev
+        run: uv sync --all-packages --all-extras --group dev
 
       - name: ruff check
         run: |
           uv run ruff check \
             packages/graph-agent/src \
             packages/graph-agent/tests \
+            packages/graph-agent-gateway/src \
+            packages/graph-agent-gateway/tests \
             apps/studio/backend/app \
             apps/studio/backend/tests \
             apps/studio/tests-e2e
@@ -34,6 +36,10 @@ jobs:
       - name: mypy graph-agent strict
         run: |
           uv run mypy --strict packages/graph-agent/src
+
+      - name: mypy graph-agent-gateway strict
+        run: |
+          uv run mypy --strict packages/graph-agent-gateway/src
 
       - name: mypy studio backend
         run: |
@@ -46,6 +52,11 @@ jobs:
             --cov=apps/studio/backend/app \
             --cov-report=xml:coverage-backend.xml \
             --cov-report=term
+
+      - name: pytest graph-agent-gateway
+        run: |
+          uv run pytest packages/graph-agent-gateway/tests \
+            --tb=short -q
 
       - name: Upload backend coverage to Codecov
         uses: codecov/codecov-action@v6
@@ -81,7 +92,7 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Sync workspace dependencies
-        run: uv sync --all-extras --group dev
+        run: uv sync --all-packages --all-extras --group dev
 
       - name: pytest graph-agent (unit + integration)
         run: |
@@ -106,6 +117,34 @@ jobs:
             packages/graph-agent/spec/source_file_map.yaml \
             packages/graph-agent/spec/contract_map.yaml
 
+  frontend-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: apps/studio/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: apps/studio/frontend
+        run: npm ci
+
+      - name: frontend lint
+        run: npm --prefix apps/studio/frontend run lint
+
+      - name: frontend typecheck
+        run: npm --prefix apps/studio/frontend run typecheck
+
+      - name: frontend unit tests
+        run: npm --prefix apps/studio/frontend test
+
+      - name: frontend build
+        run: npm --prefix apps/studio/frontend run build
+
   e2e-tests:
     # E2E suite needs the frontend dev server (Vite) plus Playwright Chromium,
     # which requires a dedicated runner setup. Disabled on PR/push for now;
@@ -124,7 +163,7 @@ jobs:
         run: uv python install 3.11
 
       - name: Sync workspace dependencies (with e2e)
-        run: uv sync --all-extras --group dev
+        run: uv sync --all-packages --all-extras --group dev --group e2e
 
       - name: Set up Node
         uses: actions/setup-node@v4

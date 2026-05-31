@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from graph_agent import run_skill
+from graph_agent.callbacks.events import LLMCallEvent, PhaseEndEvent, PhaseStartEvent, ToolCallEvent
 from graph_agent.core._predict_internal.exporter import assemble_phase_record
 from graph_agent.core._predict_internal.models import (
     GoldenCase,
@@ -78,7 +79,7 @@ class PredictorService:
             model_resolver=build_gateway_model_resolver(),
             skill_resolver=build_studio_skill_resolver(),
             unattended=True,
-            callbacks=[tracing_callback],
+            event_subscriber=_predict_trace_subscriber(tracing_callback),
             **(input_data or {}),
         )
         trace_phases = tracing_callback.phases or _fallback_trace_from_skill(skill_dir, raw_result)
@@ -178,6 +179,33 @@ def _golden_cases_for_strategy(strategy: BaseMockStrategy) -> list[GoldenCase]:
     if isinstance(raw_cases, list):
         return [case for case in raw_cases if isinstance(case, GoldenCase)]
     return []
+
+
+def _predict_trace_subscriber(tracing_callback: PredictTracingCallback) -> Callable[[Any], None]:
+    def _emit(event: Any) -> None:
+        tracing_callback.on_event(event)
+        if isinstance(event, PhaseStartEvent):
+            tracing_callback.on_phase_start(event.phase_name, event.context)
+        elif isinstance(event, PhaseEndEvent):
+            tracing_callback.on_phase_end(event.phase_name, event.context, event.metrics)
+        elif isinstance(event, LLMCallEvent):
+            tracing_callback.on_llm_call(
+                event.phase_name,
+                event.input_tokens,
+                event.output_tokens,
+                messages=event.messages,
+                response_data=event.response_data,
+            )
+        elif isinstance(event, ToolCallEvent):
+            tracing_callback.on_tool_call(
+                event.phase_name,
+                event.tool_name,
+                event.args,
+                event.result,
+                duration_ms=event.duration_ms,
+            )
+
+    return _emit
 
 
 def _phase_records_from_raw(raw_result: Any) -> list[PhaseRecord]:

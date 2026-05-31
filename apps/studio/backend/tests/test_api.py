@@ -392,9 +392,10 @@ def test_run_endpoint_spawns_worker_and_ws_streams_events(
         time.sleep(0.05)
 
     assert detail["metadata"]["status"] == "success"
+    assert [event["event_type"] for event in detail["events"]] == event_types
     run_dir = _skills_dir / "text-segmentation" / ".workspace" / "runs" / run_id
     assert (run_dir / "final_state.json").exists()
-    assert (run_dir / "tracing.jsonl").exists()
+    assert (run_dir / "trace.jsonl").exists()
     assert (run_dir / "metrics.json").exists()
     assert (run_dir / "artifacts").is_dir()
     assert (run_dir / "checkpoints.db").exists()
@@ -760,7 +761,7 @@ def fake_run_worker(
             wall_time_seconds=0.1,
         ),
     ]
-    (run_dir / "tracing.jsonl").write_text(
+    (run_dir / "trace.jsonl").write_text(
         "\n".join(event.model_dump_json() for event in events) + "\n",
         encoding="utf-8",
     )

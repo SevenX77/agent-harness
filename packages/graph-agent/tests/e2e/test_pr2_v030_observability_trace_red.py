@@ -13,7 +13,6 @@ from graph_agent.callbacks.events import (
     PhaseStartEvent,
     ToolCallEvent,
 )
-from graph_agent.callbacks.tracing import TracingCallback
 from graph_agent.core.exceptions import GraphAgentFatalError
 from graph_agent.core.runner import _run_v030_skill_dict, run_skill
 
@@ -281,12 +280,12 @@ def test_v030_run_skill_returns_real_trace_path_and_writes_typed_stream(
     skill_root = tmp_path / "observable_skill"
     trace_dir = tmp_path / "trace-output"
     _write_v030_observable_skill(skill_root)
-    tracer = TracingCallback()
+    events: list[object] = []
 
     result = run_skill(
         skill_root,
         mock_llm=V030ToolCallingChatModel(),
-        callbacks=[tracer],
+        event_subscriber=events.append,
         workspace_dir=trace_dir,
         skill_resolver=mock_skill_resolver,
         topic="observability",
@@ -297,9 +296,9 @@ def test_v030_run_skill_returns_real_trace_path_and_writes_typed_stream(
     assert result.trace_path is not None
     trace_path = Path(result.trace_path)
     assert trace_path.is_file()
-    assert trace_path.name.endswith("_summary.json")
+    assert trace_path.name == "trace.jsonl"
 
-    typed_stream = trace_path.parent / "tracing.jsonl"
+    typed_stream = trace_path
     assert typed_stream.is_file()
     event_types = {
         json.loads(line)["event_type"]
@@ -307,3 +306,6 @@ def test_v030_run_skill_returns_real_trace_path_and_writes_typed_stream(
         if line.strip()
     }
     assert {"phase_start", "llm_call", "tool_call", "phase_end"} <= event_types
+    assert {"phase_start", "llm_call", "tool_call", "phase_end"} <= {
+        getattr(event, "event_type", "") for event in events
+    }

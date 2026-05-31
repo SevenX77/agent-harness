@@ -160,7 +160,7 @@ def _build_phase_node(
     chat_model: Any,
     model_resolver: Any,
     max_patch_attempts: int,
-    callbacks: list[Any] | None,
+    callbacks: Any | None,
     skill_resolver: SkillResolverProtocol,
     _loading_stack: tuple[str, ...],
     _compilation_cache: dict[str, CompiledSkill],
@@ -172,6 +172,7 @@ def _build_phase_node(
             ast,
             _build_logic_node(phase_id, ast, compiled),
             node_kind="logic",
+            callbacks=callbacks,
         )
     if isinstance(ast, SubgraphNodeAST):
         return _wrap_phase_runtime_node(
@@ -184,10 +185,12 @@ def _build_phase_node(
                 max_patch_attempts,
                 skill_resolver,
                 model_resolver=model_resolver,
+                callbacks=callbacks,
                 _loading_stack=_loading_stack,
                 _compilation_cache=_compilation_cache,
             ),
             node_kind="subgraph",
+            callbacks=callbacks,
         )
     if isinstance(ast, AgentNodeAST):
         return _wrap_phase_runtime_node(
@@ -207,18 +210,43 @@ def _build_phase_node(
                 _compilation_cache,
             ),
             node_kind="agent",
+            callbacks=callbacks,
         )
     _graph_fatal(f"unknown phase mode for {phase_id!r}")
 
 
-def _wrap_phase_runtime_node(phase_id: str, phase_ast: Any, node: Any, *, node_kind: str) -> Any:
+def _wrap_phase_runtime_node(
+    phase_id: str,
+    phase_ast: Any,
+    node: Any,
+    *,
+    node_kind: str,
+    callbacks: Any | None,
+) -> Any:
     io = getattr(phase_ast, "io", None)
     input_schema = getattr(io, "inputs", None) if io is not None else None
     output_schema = getattr(io, "outputs", None) if io is not None else None
-    return PhaseWrapper(
-        StateMapper(input_schema, output_schema, phase_id=phase_id),
-        node_kind=node_kind,
-    ).wrap(node)
+    mapper = StateMapper(input_schema, output_schema, phase_id=phase_id)
+
+    def _node_with_lifecycle(state: BlackboardState) -> dict[str, Any]:
+        _safe_emit_event(
+            callbacks,
+            PhaseStartEvent(phase_name=phase_id, context=_observable_data_context(state)),
+        )
+        response_state: dict[str, Any] | None = None
+        try:
+            response_state = node(state)
+            return response_state
+        finally:
+            _safe_emit_event(
+                callbacks,
+                PhaseEndEvent(
+                    phase_name=phase_id,
+                    context=_phase_end_context(phase_id, state, response_state or {}),
+                ),
+            )
+
+    return PhaseWrapper(mapper, node_kind=node_kind).wrap(_node_with_lifecycle)
 
 
 def _build_logic_node(
@@ -267,6 +295,7 @@ def _build_subgraph_node(
     skill_resolver: SkillResolverProtocol,
     *,
     model_resolver: Any = None,
+    callbacks: Any | None = None,
     _loading_stack: tuple[str, ...] = (),
     _compilation_cache: dict[str, CompiledSkill] | None = None,
 ) -> Any:
@@ -287,6 +316,7 @@ def _build_subgraph_node(
         chat_model=chat_model,
         model_resolver=model_resolver,
         max_patch_attempts=max_patch_attempts,
+        callbacks=callbacks,
         skill_resolver=skill_resolver,
         _loading_stack=_loading_stack,
         _compilation_cache=_compilation_cache,
@@ -321,7 +351,7 @@ def _build_skill_node(
     chat_model: Any,
     model_resolver: Any,
     max_patch_attempts: int,
-    callbacks: list[Any] | None,
+    callbacks: Any | None,
     skill_resolver: SkillResolverProtocol,
     _loading_stack: tuple[str, ...],
     _compilation_cache: dict[str, CompiledSkill],
@@ -331,7 +361,7 @@ def _build_skill_node(
         phase_ast,
         chat_model=chat_model,
         model_resolver=model_resolver,
-        callbacks=callbacks or [],
+        callbacks=_callback_tuple(callbacks),
     )
     knowledge_base_markdown = _build_reference_reader_markdown(
         phase_id=phase_id,
@@ -384,103 +414,87 @@ def _build_skill_node(
 
         data_updates: dict[str, Any] = {}
         flow = dict(state.get("flow", {}))
-        phase_end_emitter = _PhaseEndEmitter(phase_id, state, callbacks)
 
-        _safe_emit_event(
-            callbacks,
-            PhaseStartEvent(phase_name=phase_id, context=_observable_data_context(state)),
-        )
-        try:
-            messages = [
-                SystemMessage(
-                    content=_agent_system_prompt(
-                        phase_id,
-                        phase_ast,
-                        compiled,
-                        knowledge_base_markdown=knowledge_base_markdown,
-                    )
+        messages = [
+            SystemMessage(
+                content=_agent_system_prompt(
+                    phase_id,
+                    phase_ast,
+                    compiled,
+                    knowledge_base_markdown=knowledge_base_markdown,
+                )
+            ),
+            *state.get("messages", []),
+        ]
+        model = _bind_tools_if_supported(phase_chat_model, all_tools)
+
+        max_turns = phase_ast.max_iterations
+        for _ in range(max_turns):
+            prompt_messages = messages
+            response = model.invoke(prompt_messages)
+            input_tokens, output_tokens = _extract_token_usage(response)
+            _safe_emit_event(
+                callbacks,
+                LLMCallEvent(
+                    phase_name=phase_id,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    messages=None,
+                    response_data=None,
                 ),
-                *state.get("messages", []),
-            ]
-            model = _bind_tools_if_supported(phase_chat_model, all_tools)
-
-            max_turns = phase_ast.max_iterations
-            for _ in range(max_turns):
-                prompt_messages = messages
-                response = model.invoke(prompt_messages)
-                input_tokens, output_tokens = _extract_token_usage(response)
+            )
+            messages = [*prompt_messages, response]
+            tool_calls = list(getattr(response, "tool_calls", []) or [])
+            if not tool_calls:
+                break
+            for call in tool_calls:
+                name = call.get("name")
+                tool = all_tools_by_name.get(name)
+                if tool is None:
+                    _graph_fatal(f"LLM called unknown tool {name!r} in phase {phase_id!r}")
+                call_args = call.get("args", {})
+                if name in subagent_by_tool_name:
+                    result = _invoke_subagent_tool_t21(
+                        tool_name=name,
+                        subagent=subagent_by_tool_name[name],
+                        args=call_args if isinstance(call_args, dict) else {},
+                        state=state,
+                        flow=flow,
+                        runtime=subagent_runtime_by_tool_name[name],
+                        parent_config=config,
+                    )
+                else:
+                    result = tool.invoke(call_args)
                 _safe_emit_event(
                     callbacks,
-                    LLMCallEvent(
+                    ToolCallEvent(
                         phase_name=phase_id,
-                        input_tokens=input_tokens,
-                        output_tokens=output_tokens,
-                        messages=None,
-                        response_data=None,
+                        tool_name=str(name or ""),
+                        args=call_args if isinstance(call_args, dict) else {},
+                        result=_stringify_tool_result(result),
                     ),
                 )
-                messages = [*prompt_messages, response]
-                tool_calls = list(getattr(response, "tool_calls", []) or [])
-                if not tool_calls:
-                    break
-                for call in tool_calls:
-                    name = call.get("name")
-                    tool = all_tools_by_name.get(name)
-                    if tool is None:
-                        _graph_fatal(f"LLM called unknown tool {name!r} in phase {phase_id!r}")
-                    call_args = call.get("args", {})
-                    if name in subagent_by_tool_name:
-                        result = _invoke_subagent_tool_t21(
-                            tool_name=name,
-                            subagent=subagent_by_tool_name[name],
-                            args=call_args if isinstance(call_args, dict) else {},
-                            state=state,
-                            flow=flow,
-                            runtime=subagent_runtime_by_tool_name[name],
-                            parent_config=config,
-                        )
-                    else:
-                        result = tool.invoke(call_args)
-                    _safe_emit_event(
-                        callbacks,
-                        ToolCallEvent(
-                            phase_name=phase_id,
-                            tool_name=str(name or ""),
-                            args=call_args if isinstance(call_args, dict) else {},
-                            result=_stringify_tool_result(result),
-                        ),
+                messages.append(
+                    ToolMessage(
+                        content=json.dumps(result, ensure_ascii=False),
+                        name=name,
+                        tool_call_id=call.get("id", f"{name}-call"),
                     )
-                    messages.append(
-                        ToolMessage(
-                            content=json.dumps(result, ensure_ascii=False),
-                            name=name,
-                            tool_call_id=call.get("id", f"{name}-call"),
-                        )
-                    )
-                    finish_response = cognitive_flow.handle_finish_task_tool_result(
-                        tool_name=str(name or ""),
-                        tool_result=result,
-                        output_schema=output_schema if isinstance(output_schema, dict) else None,
-                        flow=flow,
-                        messages=messages,
-                        critic_metrics=critic_metrics,
-                    )
-                    if finish_response is not None:
-                        phase_end_emitter.emit(finish_response)
-                        return finish_response
-            response_state = {"flow": flow, "messages": messages}
-            if data_updates:
-                response_state["data"] = data_updates
-            phase_end_emitter.emit(response_state)
-            return response_state
-        finally:
-            phase_end_emitter.emit(
-                {
-                    "flow": flow,
-                    "messages": state.get("messages", []),
-                    "data": normalize_blackboard_data(state.get("data")),
-                }
-            )
+                )
+                finish_response = cognitive_flow.handle_finish_task_tool_result(
+                    tool_name=str(name or ""),
+                    tool_result=result,
+                    output_schema=output_schema if isinstance(output_schema, dict) else None,
+                    flow=flow,
+                    messages=messages,
+                    critic_metrics=critic_metrics,
+                )
+                if finish_response is not None:
+                    return finish_response
+        response_state = {"flow": flow, "messages": messages}
+        if data_updates:
+            response_state["data"] = data_updates
+        return response_state
 
     return _skill_node
 
@@ -491,15 +505,39 @@ def _resolve_phase_chat_model(
     *,
     chat_model: Any,
     model_resolver: Any,
-    callbacks: list[Any],
+    callbacks: tuple[Any, ...],
 ) -> Any:
     if chat_model is not None or model_resolver is None:
         return chat_model
     return model_resolver.resolve(
         phase_ast.llm_role or "graph_agent",
-        callbacks=tuple(callbacks),
+        callbacks=callbacks,
         phase_name=phase_id,
     )
+
+
+def _callback_tuple(callbacks: Any | None) -> tuple[Any, ...]:
+    if callbacks is None:
+        return ()
+    if isinstance(callbacks, tuple):
+        return callbacks
+    if isinstance(callbacks, list):
+        return tuple(callbacks)
+    emit = getattr(callbacks, "emit", None)
+    if callable(emit):
+        return (_EventSinkCallbackAdapter(callbacks),)
+    raise TypeError(f"unsupported callbacks object: {type(callbacks).__name__}")
+
+
+class _EventSinkCallbackAdapter:
+    def __init__(self, sink: Any) -> None:
+        self._sink = sink
+
+    def on_event(self, event: Any) -> None:
+        self._sink.emit(event)
+
+    def emit(self, event: Any) -> None:
+        self.on_event(event)
 
 
 def _terminal_output_schema(phase_id: str, compiled: CompiledSkill) -> Any:
@@ -520,32 +558,6 @@ def _build_agent_finish_task_tool(
         LLMMdPatchClient(chat_model) if chat_model is not None else None,
         max_patch_attempts=max_patch_attempts,
     )
-
-
-class _PhaseEndEmitter:
-    def __init__(
-        self,
-        phase_id: str,
-        state: BlackboardState,
-        callbacks: list[Any] | None,
-    ) -> None:
-        self._phase_id = phase_id
-        self._state = state
-        self._callbacks = callbacks
-        self._emitted = False
-
-    def emit(self, response_state: dict[str, Any]) -> None:
-        if self._emitted:
-            return
-        self._emitted = True
-        _safe_emit_event(
-            self._callbacks,
-            PhaseEndEvent(
-                phase_name=self._phase_id,
-                context=_phase_end_context(self._phase_id, self._state, response_state),
-            ),
-        )
-
 
 def _build_framework_tools(
     *,
@@ -715,7 +727,7 @@ def _build_reference_reader_markdown(
     phase_doc: PhaseDocument,
     phase_ast: AgentNodeAST,
     compiled: CompiledSkill,
-    callbacks: list[Any] | None = None,
+    callbacks: Any | None = None,
 ) -> str:
     if not phase_ast.references:
         return ""
@@ -790,7 +802,7 @@ def _build_reference_reader_markdown(
 
 
 def _emit_reference_reader_fallback(
-    callbacks: list[Any] | None,
+    callbacks: Any | None,
     *,
     phase_id: str,
     reason: str,
@@ -810,17 +822,8 @@ def _emit_reference_reader_fallback(
     )
 
 
-def _emit_builtin_subagent_event(callbacks: list[Any] | None, event: Any) -> None:
-    if not callbacks:
-        return
-    for callback in callbacks:
-        on_event = getattr(callback, "on_event", None)
-        if on_event is None:
-            continue
-        try:
-            on_event(event)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("[F-v3-reference-reader-failed] trace callback failed: %s", exc)
+def _emit_builtin_subagent_event(callbacks: Any | None, event: Any) -> None:
+    _safe_emit_event(callbacks, event)
 
 
 def _fallback_reason_from_exception(exc: BaseException) -> str:
@@ -1014,7 +1017,7 @@ def _subagent_runtime_map(
     *,
     chat_model: Any,
     model_resolver: Any,
-    callbacks: list[Any] | None,
+    callbacks: Any | None,
     max_patch_attempts: int,
     skill_resolver: SkillResolverProtocol,
     _loading_stack: tuple[str, ...] = (),

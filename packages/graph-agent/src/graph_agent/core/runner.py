@@ -29,15 +29,20 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from graph_agent.callbacks import LoggingCallback, TracingCallback
+from graph_agent.callbacks.emit import (
+    _CallbackSink,
+    _CompositeEventSink,
+    _SubscriberSink,
+    _TraceJsonlSink,
+    _safe_emit_event,
+)
 from graph_agent.callbacks.events import (
     CallbackEvent,
-    PhaseEndEvent,
-    PhaseStartEvent,
     RunEndedEvent,
     RunStartedEvent,
 )
@@ -45,7 +50,6 @@ from graph_agent.core.exceptions import (
     GraphAgentError,
     LoaderError,
     SkillLoadError,
-    TraceWriteError,
     make_error_payload,
 )
 from graph_agent.core.local_workspace_resolver import LocalWorkspaceResolver
@@ -65,7 +69,7 @@ def run_skill(
     workspace_dir: Path,
     thread_id: str | None = None,
     unattended: bool = False,
-    callbacks: list[Any] | None = None,
+    event_subscriber: Callable[[CallbackEvent], None] | None = None,
     artifact_saver: Any | None = None,
     initial_context: dict[str, Any] | None = None,
     cleanup_checkpoints_on_finish: bool = True,
@@ -90,7 +94,7 @@ def run_skill(
             mock_llm=mock_llm,
             thread_id=thread_id,
             unattended=unattended,
-            callbacks=callbacks,
+            event_subscriber=event_subscriber,
             artifact_saver=artifact_saver,
             initial_context=initial_context,
             cleanup_checkpoints_on_finish=cleanup_checkpoints_on_finish,
@@ -145,6 +149,7 @@ def _run_skill_dict(
     workspace_dir: Path,
     thread_id: str | None = None,
     unattended: bool = False,
+    event_subscriber: Callable[[CallbackEvent], None] | None = None,
     callbacks: list[Any] | None = None,
     artifact_saver: Any | None = None,
     initial_context: dict[str, Any] | None = None,
@@ -159,8 +164,8 @@ def _run_skill_dict(
         skill_path: Path to SKILL.md.
         workspace_dir: Absolute workspace root for run-scoped artifacts.
         thread_id: Optional thread_id for checkpoint resume.
-        callbacks: Optional list of Callback instances. Defaults to
-            ``[LoggingCallback, TracingCallback]``.
+        event_subscriber: Optional function called synchronously for each
+            typed CallbackEvent.
         artifact_saver: Optional callback for ``artifact_manager`` outputs.
         cleanup_checkpoints_on_finish: When True (default) call
             ``checkpointer.delete_thread(thread_id)`` after a successful
@@ -176,7 +181,7 @@ def _run_skill_dict(
         Dict with keys:
         - ``context``: Final workflow context (contains all outputs)
         - ``metrics``: Token usage and timing stats
-        - ``trace_path``: Path to saved trace summary JSON (if TracingCallback active)
+        - ``trace_path``: Path to ``trace.jsonl``
         - ``wall_time_sec``: Total wall time
     """
     resolver = require_skill_resolver(skill_resolver, caller="_run_skill_dict")
@@ -187,6 +192,7 @@ def _run_skill_dict(
             workspace_dir=workspace_dir,
             mock_llm=mock_llm,
             thread_id=thread_id,
+            event_subscriber=event_subscriber,
             callbacks=callbacks,
             skill_resolver=resolver,
             model_resolver=model_resolver,
@@ -228,46 +234,22 @@ def _write_workflow_result_artifacts(run_dir: Path, result: WorkflowResult) -> N
     _write_json(run_dir / "metrics.json", result.metrics.model_dump(mode="json"))
 
 
-def _prepare_v030_callbacks(
-    callbacks: list[Any] | None,
-    trace_output: Path | None,
-) -> list[Any]:
-    active_callbacks = list(callbacks) if callbacks is not None else [LoggingCallback()]
-    tracing_callbacks = [cb for cb in active_callbacks if isinstance(cb, TracingCallback)]
-    if trace_output is not None:
-        if not tracing_callbacks:
-            tracer = TracingCallback(trace_dir=trace_output)
-            active_callbacks.append(tracer)
-            tracing_callbacks.append(tracer)
-        for tracer in tracing_callbacks:
-            if getattr(tracer, "_typed_jsonl_path", None) is None:
-                tracer.set_trace_dir(trace_output)
-    elif callbacks is None:
-        active_callbacks.append(TracingCallback())
-    return active_callbacks
+def _prepare_v030_event_sink(
+    *,
+    trace_output: Path,
+    event_subscriber: Callable[[CallbackEvent], None] | None = None,
+    callbacks: list[Any] | None = None,
+) -> _CompositeEventSink:
+    sinks: list[Any] = [_TraceJsonlSink(trace_output)]
+    if event_subscriber is not None:
+        sinks.append(_SubscriberSink(event_subscriber))
+    if callbacks:
+        sinks.append(_CallbackSink(callbacks))
+    return _CompositeEventSink(sinks)
 
 
-def _emit_v030_event(callbacks: list[Any], event: CallbackEvent) -> None:
-    for callback in callbacks:
-        on_event = getattr(callback, "on_event", None)
-        if callable(on_event):
-            on_event(event)
-
-
-def _save_v030_trace(callbacks: list[Any], trace_output: Path | None) -> str | None:
-    if trace_output is None:
-        return None
-    saved_trace_path: str | None = None
-    for callback in callbacks:
-        if isinstance(callback, TracingCallback):
-            try:
-                saved_trace_path = callback.save(trace_output)
-            except Exception as exc:
-                raise TraceWriteError(
-                    f"trace save failed: {exc}",
-                    context={"trace_path": str(trace_output)},
-                ) from exc
-    return saved_trace_path
+def _emit_v030_event(event_sink: Any, event: CallbackEvent) -> None:
+    _safe_emit_event(event_sink, event)
 
 
 def _v030_phase_context(data: dict[str, Any] | None) -> dict[str, Any]:
@@ -319,6 +301,7 @@ def _run_v030_skill_dict(
     mock_llm: Any = _NO_MOCK_LLM,
     workspace_dir: Path,
     thread_id: str | None = None,
+    event_subscriber: Callable[[CallbackEvent], None] | None = None,
     callbacks: list[Any] | None = None,
     skill_resolver: SkillResolverProtocol,
     model_resolver: Any | None = None,
@@ -333,34 +316,31 @@ def _run_v030_skill_dict(
     t0 = time.time()
     run_id = thread_id or str(uuid.uuid4())
     trace_output = workspace_dir / "runs" / run_id
-    active_callbacks = _prepare_v030_callbacks(callbacks, trace_output)
-    emit_auto_trace_events = callbacks is None
+    event_sink = _prepare_v030_event_sink(
+        trace_output=trace_output,
+        event_subscriber=event_subscriber,
+        callbacks=callbacks,
+    )
+    _emit_v030_event(
+        event_sink,
+        RunStartedEvent(
+            run_id=run_id,
+            thread_id=run_id,
+            initial_context={"inputs": dict(inputs)},
+        ),
+    )
     chat_model = mock_llm if mock_llm is not _NO_MOCK_LLM else None
     active_model_resolver = model_resolver if mock_llm is _NO_MOCK_LLM else None
-    compiled = compile_skill(skill_root, skill_resolver=resolver)
-    assembled = assemble_graph(
-        compiled,
-        chat_model=chat_model,
-        model_resolver=active_model_resolver,
-        callbacks=active_callbacks,
-        skill_resolver=resolver,
-    )
-    graph = assembled.graph
-    if emit_auto_trace_events:
-        _emit_v030_event(
-            active_callbacks,
-            RunStartedEvent(
-                run_id=run_id,
-                thread_id=run_id,
-                initial_context={"inputs": dict(inputs)},
-            ),
-        )
-        for phase_id in assembled.phase_ids:
-            _emit_v030_event(
-                active_callbacks,
-                PhaseStartEvent(phase_name=phase_id, context=_v030_phase_context(dict(inputs))),
-            )
     try:
+        compiled = compile_skill(skill_root, skill_resolver=resolver)
+        assembled = assemble_graph(
+            compiled,
+            chat_model=chat_model,
+            model_resolver=active_model_resolver,
+            callbacks=event_sink,
+            skill_resolver=resolver,
+        )
+        graph = assembled.graph
         result = graph.invoke(
             {
                 "data": dict(inputs),
@@ -371,18 +351,16 @@ def _run_v030_skill_dict(
         )
     except Exception:
         wall_time = round(time.time() - t0, 3)
-        if emit_auto_trace_events:
-            _emit_v030_event(
-                active_callbacks,
-                RunEndedEvent(
-                    run_id=run_id,
-                    thread_id=run_id,
-                    status="crashed",
-                    final_context={},
-                    wall_time_seconds=wall_time,
-                ),
-            )
-        _save_v030_trace(active_callbacks, trace_output)
+        _emit_v030_event(
+            event_sink,
+            RunEndedEvent(
+                run_id=run_id,
+                thread_id=run_id,
+                status="crashed",
+                final_context={},
+                wall_time_seconds=wall_time,
+            ),
+        )
         raise
     wall_time = round(time.time() - t0, 3)
     final_context = dict(result.get("data", {}))
@@ -395,24 +373,18 @@ def _run_v030_skill_dict(
         final_context,
         default_output_dir=trace_output / "artifacts",
     )
-    if emit_auto_trace_events:
-        final_trace_context = _v030_phase_context(final_context)
-        for phase_id in assembled.phase_ids:
-            _emit_v030_event(
-                active_callbacks,
-                PhaseEndEvent(phase_name=phase_id, context=final_trace_context),
-            )
-        _emit_v030_event(
-            active_callbacks,
-            RunEndedEvent(
-                run_id=run_id,
-                thread_id=run_id,
-                status="completed",
-                final_context=final_trace_context,
-                wall_time_seconds=wall_time,
-            ),
-        )
-    saved_trace_path = _save_v030_trace(active_callbacks, trace_output)
+    final_trace_context = _v030_phase_context(final_context)
+    _emit_v030_event(
+        event_sink,
+        RunEndedEvent(
+            run_id=run_id,
+            thread_id=run_id,
+            status="completed",
+            final_context=final_trace_context,
+            wall_time_seconds=wall_time,
+        ),
+    )
+    saved_trace_path = str(event_sink.trace_path) if event_sink.trace_path is not None else None
     return {
         "run_id": run_id,
         "context": final_context,

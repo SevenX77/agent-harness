@@ -146,7 +146,7 @@ def test_run_skill_writes_artifacts_under_workspace_runs_run_id(
     run_dir = workspace_dir / "runs" / result.run_id
     assert result.run_id == run_id
     assert run_dir.is_dir()
-    assert (run_dir / "tracing.jsonl").is_file()
+    assert (run_dir / "trace.jsonl").is_file()
 
 
 def test_run_skill_pathless_file_output_defaults_to_run_artifacts_dir(

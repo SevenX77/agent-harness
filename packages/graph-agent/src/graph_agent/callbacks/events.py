@@ -3,7 +3,7 @@
 Each of the 14 callback hook payloads is modelled as a standalone Pydantic
 class with a ``Literal[event_type]`` tag, then brought together as the
 discriminated union :data:`CallbackEvent`. Studio / downstream tooling can
-now deserialise ``tracing.jsonl`` into a well-typed object instead of the
+now deserialise ``trace.jsonl`` into a well-typed object instead of the
 ad-hoc dict shape that ``base.py`` historically passed around.
 
 Backward compatibility: ``callbacks/base.py`` emits both the new Pydantic

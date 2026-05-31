@@ -19,24 +19,7 @@ from queue import Empty
 from typing import Any, Literal
 
 from graph_agent import run_skill
-from graph_agent.callbacks import Callback
-from graph_agent.callbacks.events import (
-    AmbiguityReportEvent,
-    CallbackEvent,
-    CompactionEvent,
-    DeadEndPrunedEvent,
-    FinishTaskEvent,
-    LLMCallEvent,
-    NudgeEvent,
-    PhaseEndEvent,
-    PhaseStartEvent,
-    RetryEvent,
-    ToolCallEvent,
-    ValidationFailEvent,
-    WorkingMemoryUpdateEvent,
-)
-from graph_agent.callbacks.serialize import to_jsonable_dict
-from graph_agent.callbacks.tracing import TracingCallback
+from graph_agent.callbacks.events import CallbackEvent
 from pydantic import TypeAdapter
 
 from app.core import config
@@ -88,133 +71,11 @@ class BatchRecord:
     items: list[tuple[str, str]]
 
 
-class StudioQueueCallback(Callback):
-    """Callback that forwards graph_agent events to a multiprocessing queue."""
+def _queue_event_subscriber(process_queue: Any) -> Any:
+    def _emit(event: CallbackEvent) -> None:
+        process_queue.put({"type": "event", "event": event.model_dump(mode="json")})
 
-    def __init__(self, process_queue: Any) -> None:
-        self._queue = process_queue
-
-    def on_event(self, event: CallbackEvent) -> None:
-        self._put_event(event)
-
-    def on_phase_start(self, phase_name: str, context: dict[str, Any]) -> None:
-        self._put_event(PhaseStartEvent(phase_name=phase_name, context=to_jsonable_dict(context)))
-
-    def on_phase_end(
-        self,
-        phase_name: str,
-        context: dict[str, Any],
-        metrics: dict[str, Any],
-    ) -> None:
-        self._put_event(
-            PhaseEndEvent(
-                phase_name=phase_name,
-                context=to_jsonable_dict(context),
-                metrics=to_jsonable_dict(metrics),
-            ),
-        )
-
-    def on_llm_call(
-        self,
-        phase_name: str,
-        input_tokens: int,
-        output_tokens: int,
-        *,
-        messages: list[dict[str, Any]] | None = None,
-        response_data: dict[str, Any] | None = None,
-    ) -> None:
-        self._put_event(
-            LLMCallEvent(
-                phase_name=phase_name,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                messages=to_jsonable_dict(messages),
-                response_data=to_jsonable_dict(response_data),
-            ),
-        )
-
-    def on_tool_call(
-        self,
-        phase_name: str,
-        tool_name: str,
-        args: dict[str, Any],
-        result: str,
-        *,
-        duration_ms: float | None = None,
-    ) -> None:
-        self._put_event(
-            ToolCallEvent(
-                phase_name=phase_name,
-                tool_name=tool_name,
-                args=to_jsonable_dict(args),
-                result=result,
-                duration_ms=duration_ms,
-            ),
-        )
-
-    def on_validation_fail(
-        self,
-        phase_name: str,
-        errors: list[str],
-        retry_count: int,
-    ) -> None:
-        self._put_event(
-            ValidationFailEvent(
-                phase_name=phase_name,
-                errors=errors,
-                retry_count=retry_count,
-            ),
-        )
-
-    def on_retry(self, phase_name: str, target_phase: str, feedback: list[str]) -> None:
-        self._put_event(
-            RetryEvent(phase_name=phase_name, target_phase=target_phase, feedback=feedback),
-        )
-
-    def on_finish_task(self, phase_name: str, reasoning: str, evidence: list[str]) -> None:
-        self._put_event(
-            FinishTaskEvent(phase_name=phase_name, reasoning=reasoning, evidence=evidence),
-        )
-
-    def on_nudge(
-        self,
-        phase_name: str,
-        nudge_count: int,
-        nudge_type: str = "standard",
-    ) -> None:
-        self._put_event(
-            NudgeEvent(phase_name=phase_name, nudge_count=nudge_count, nudge_type=nudge_type),
-        )
-
-    def on_working_memory_update(self, phase_name: str, content_length: int) -> None:
-        self._put_event(
-            WorkingMemoryUpdateEvent(phase_name=phase_name, content_length=content_length),
-        )
-
-    def on_dead_end_pruned(self, phase_name: str, summary: str) -> None:
-        self._put_event(DeadEndPrunedEvent(phase_name=phase_name, summary=summary))
-
-    def on_compaction(self, phase_name: str, removed_pairs: int) -> None:
-        self._put_event(CompactionEvent(phase_name=phase_name, removed_pairs=removed_pairs))
-
-    def on_ambiguity_report(
-        self,
-        phase_name: str,
-        ambiguity_type: str,
-        question: str,
-        decision: str,
-    ) -> None:
-        self._put_event(
-            AmbiguityReportEvent(
-                phase_name=phase_name,
-                ambiguity_type=ambiguity_type,
-                question=question,
-                decision=decision,
-            ),
-        )
-
-    def _put_event(self, event: CallbackEvent) -> None:
-        self._queue.put({"type": "event", "event": event.model_dump(mode="json")})
+    return _emit
 
 
 def _run_worker_main(
@@ -229,22 +90,22 @@ def _run_worker_main(
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "artifacts").mkdir(exist_ok=True)
     started = time.monotonic()
-    callbacks = [StudioQueueCallback(process_queue), TracingCallback(trace_dir=run_dir)]
+    emit_to_queue = _queue_event_subscriber(process_queue)
     try:
         result = run_skill(
             Path(skill_path_raw),
             workspace_dir=run_dir.parent,
             thread_id=run_dir.name,
-            callbacks=callbacks,
+            event_subscriber=emit_to_queue,
             model_resolver=build_gateway_model_resolver(),
             skill_resolver=build_studio_skill_resolver(),
             unattended=True,
             cleanup_checkpoints_on_finish=False,
             **inputs,
         )
-        metrics = dict(result.get("metrics", {}))
-        metrics.setdefault("wall_time_sec", result.get("wall_time_sec", time.monotonic() - started))
-        _write_json(run_dir / "final_state.json", result.get("context", {}))
+        metrics = _result_metrics(result)
+        metrics.setdefault("wall_time_sec", _result_wall_time(result, started))
+        _write_json(run_dir / "final_state.json", _result_context(result))
         _write_json(run_dir / "metrics.json", {"status": "success", **metrics})
         _ensure_run_files(run_dir)
         process_queue.put({"type": "status", "status": "success", "metrics": metrics})
@@ -272,9 +133,37 @@ def _write_json(path: Path, payload: Any) -> None:
     )
 
 
+def _result_context(result: Any) -> dict[str, Any]:
+    if isinstance(result, dict):
+        context = result.get("context", {})
+    else:
+        context = getattr(result, "context", {})
+    return context if isinstance(context, dict) else {}
+
+
+def _result_metrics(result: Any) -> dict[str, Any]:
+    if isinstance(result, dict):
+        metrics = result.get("metrics", {})
+    else:
+        metrics = getattr(result, "metrics", {})
+    if hasattr(metrics, "model_dump"):
+        return dict(metrics.model_dump(mode="json"))
+    return dict(metrics) if isinstance(metrics, dict) else {}
+
+
+def _result_wall_time(result: Any, started: float) -> float:
+    if isinstance(result, dict):
+        value = result.get("wall_time_sec")
+    else:
+        value = getattr(result, "wall_time_sec", None)
+    if isinstance(value, int | float):
+        return float(value)
+    return round(time.monotonic() - started, 3)
+
+
 def _ensure_run_files(run_dir: Path) -> None:
     (run_dir / "artifacts").mkdir(exist_ok=True)
-    (run_dir / "tracing.jsonl").touch(exist_ok=True)
+    (run_dir / "trace.jsonl").touch(exist_ok=True)
     (run_dir / "checkpoints.db").touch(exist_ok=True)
 
 
@@ -423,7 +312,7 @@ class RunManager:
         return RunDetail(
             metadata=metadata,
             input_data=_read_optional_json(run_dir / "input_data.json"),
-            events=_read_events(run_dir / "tracing.jsonl"),
+            events=_read_events(run_dir / "trace.jsonl"),
             final_context=_read_optional_json(run_dir / "final_state.json"),
             artifacts=[str(path) for path in sorted((run_dir / "artifacts").glob("*"))],
         )

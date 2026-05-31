@@ -58,9 +58,9 @@ V0.3.0 graph 路径更短：`run_skill()` 先调用 `_run_skill_dict()`, 当入�
 
 V0.3.0 DAG 装配由 `assemble_graph()` 负责。它创建 `StateGraph(BlackboardState)`, 按 manifest phases 添加 node, 按 `depends_on` 添加 edge, 再连接 terminal phase 到 END。三态分发是 LOGIC、SUBGRAPH、Agent 分别走不同 builder。
 
-这仍是 transition state, 不是完全统一的新架构。旧 runner 路径仍会默认创建 `LoggingCallback()` 和 `TracingCallback()` 并加载 cached Harness；V0.3.0 graph runtime 的 callback / trace 接线仍是 alignment 文档里的后续项。engine execution-runtime 文档记录了 ModelResolver、trace payload、StateMapper 等仍需对齐的目标态。
+这仍是 transition state, 不是完全统一的新架构。V0.3.0 graph runtime 的 trace 主线已在 T3 切到 `event_subscriber` + 内部 event sink；engine execution-runtime 文档记录了 ModelResolver、trace payload、StateMapper 等仍需对齐的目标态。
 
-Studio backend 对 engine 的使用也分开。compile 走 `compile_skill(skill_dir, cache=False)` 并转成 Studio compile contract; run 走 subprocess entrypoint, 构造 `StudioQueueCallback` 和 `TracingCallback` 后调用 `run_skill()`。这意味着 Studio 希望用 callback/trace, 但 V0.3.0 graph runtime 到 Studio trace 的完整接线仍是后续工作。
+Studio backend 对 engine 的使用也分开。compile 走 `compile_skill(skill_dir, cache=False)` 并转成 Studio compile contract; run 走 subprocess entrypoint, 构造 `_queue_event_subscriber` 后调用 `run_skill(event_subscriber=...)`。默认 trace 落盘由 engine sink 写 `trace.jsonl`。
 
 Copilot 后端不是 graph runtime。它使用 Claude Agent SDK session，解析 `copilot_chat` role 或 model override，再将 view context 注入 system prompt，见 `apps/studio/backend/app/services/copilot.py:183` 到 `apps/studio/backend/app/services/copilot.py:223`。view context 缓存在 `_view_contexts`，更新逻辑见 `apps/studio/backend/app/services/copilot.py:117` 到 `apps/studio/backend/app/services/copilot.py:140`；system prompt 拼接见 `apps/studio/backend/app/services/copilot.py:165` 到 `apps/studio/backend/app/services/copilot.py:180`。
 
@@ -78,9 +78,9 @@ V0.3.0 Agent node 是最接近 LLM phase 的部分。它消费 `AgentNodeAST`, c
 
 `Harness = GraphAgentHarness` alias 仍存在，见 `packages/graph-agent/src/graph_agent/core/harness.py:1150`。这不是功能 bug，但它说明 public surface 仍承认旧 Harness 作为 engine 概念。architecture baseline 不能把旧 Harness 当成已删除实现。
 
-Studio run worker 用 subprocess 隔离运行。worker 创建 callbacks 后调用 `run_skill()`。这使 Studio 能把 engine 执行转成队列事件, 但并不自动补齐 V0.3.0 graph runtime 的完整 trace contract。
+Studio run worker 用 subprocess 隔离运行。worker 创建 event subscriber 后调用 `run_skill()`。这使 Studio 能把 engine 执行转成队列事件，同时 engine 自己写 run-scoped `trace.jsonl`。
 
-`StudioQueueCallback` 把 graph-agent callback event 转成 Studio event queue，见 `apps/studio/backend/app/services/run_manager.py:87` 到 `apps/studio/backend/app/services/run_manager.py:130`。这个 adapter 是 Studio trace/runner 认知层的一部分；它依赖 engine 发出 callback，而不是从 LangGraph state 自动推断所有事件。
+`_queue_event_subscriber` 把 graph-agent typed event 转成 Studio event queue，见 `apps/studio/backend/app/services/run_manager.py:74` 到 `apps/studio/backend/app/services/run_manager.py:78`。这个 adapter 是 Studio trace/runner 认知层的一部分；它依赖 engine 发出 typed event，而不是从 LangGraph state 自动推断所有事件。
 
 综上，后端现状不是“单一 graph runtime”。它是旧 Harness runtime、V0.3.0 graph assembler、Studio run manager、Copilot service 四条后端路径并存，并通过 API、callbacks、文件 artifacts 和 view context 松散连接。V2.1 只应作为 Studio/root corpus deferred 残留或历史迁移背景出现。
 
@@ -134,11 +134,11 @@ Copilot 的 view context 使用普通 dict 缓存，更新入口是 `set_view_co
 
 ## Cross-feature interaction
 
-与 engine baselines：本 architecture 是总览，具体 bug 和边界已经落在 engine 四份 baseline。V0.3.0 ModelResolver、callbacks/trace、subagent/subgraph runtime 缺口见 [execution-runtime baseline](../../engine/execution-runtime/baseline.md)。共享黑板、缺 input funnel、缺 phase-level IO contract 见 [state-and-io-contract baseline](../../engine/state-and-io-contract/baseline.md)。
+与 engine baselines：本 architecture 是总览，具体 bug 和边界已经落在 engine 四份 baseline。V0.3.0 ModelResolver、event_subscriber/trace、subagent/subgraph runtime 缺口见 [execution-runtime baseline](../../engine/execution-runtime/baseline.md)。共享黑板、缺 input funnel、缺 phase-level IO contract 见 [state-and-io-contract baseline](../../engine/state-and-io-contract/baseline.md)。
 
 与 Studio Canvas：Canvas 使用 DAG 视图显示 phase/edge，但当前 edge 主要来自 `depends_on`，不是完整数据流 contract。Canvas baseline 见 [canvas-topology baseline](../../studio/feature-folders/canvas-topology/baseline.md)。
 
-与 Trace：Studio 后端希望通过 `StudioQueueCallback` 和 `TracingCallback` 获取事件, 但 V0.3.0 graph runtime 的完整 phase/tool/LLM trace contract 仍需按 tracing alignment 收敛。Trace 当前状态见 [tracing-and-observability baseline](../../engine/tracing-and-observability/baseline.md) 和 [Studio trace-visualization baseline](../../studio/feature-folders/trace-visualization/baseline.md)。
+与 Trace：Studio 后端通过 `event_subscriber` 获取实时事件；engine 默认 `_TraceJsonlSink` 写 `trace.jsonl`。Trace 当前状态见 [tracing-and-observability baseline](../../engine/tracing-and-observability/baseline.md) 和 [Studio trace-visualization baseline](../../studio/feature-folders/trace-visualization/baseline.md)。
 
 与 Copilot：旧 architecture doc 的伪代码说后端 `build_copilot_session(skill_id, error_log)` 直接拼上下文；当前真实实现是前端异步 POST view context，WebSocket 只发 user_message/model_override，后端 system prompt 从 cached view context 注入。这和 High-002 指出的 mentions payload 缺失一致，具体 feature 现状见 [copilot-assistance baseline](../../studio/feature-folders/copilot-assistance/baseline.md)。
 
@@ -170,7 +170,7 @@ Studio 映射补充：Canvas 只消费 graph topology，不消费 Harness retry/
 
 Studio 映射补充：Compile success 只是 graph 可构建，不等于 run 可完整执行。compile endpoint 和 V0.3.0 run invoke 之间仍需要 ModelResolver、StateMapper、trace callback 等 runtime contract 闭合。P0-1 发生在 run-time Agent node, 不是 compile-time manifest parsing。
 
-Studio 映射补充：Run event visibility 依赖 event pipeline。WebSocket route 见 `apps/studio/backend/app/routers/websockets.py:27` 到 `apps/studio/backend/app/routers/websockets.py:39`；StudioQueueCallback 见 `apps/studio/backend/app/services/run_manager.py:87` 到 `apps/studio/backend/app/services/run_manager.py:130`。如果 engine 分支不发 callback，UI event stream 就不能完整反映认知执行过程。
+Studio 映射补充：Run event visibility 依赖 event pipeline。WebSocket route 见 `apps/studio/backend/app/routers/websockets.py:27` 到 `apps/studio/backend/app/routers/websockets.py:39`；`_queue_event_subscriber` 见 `apps/studio/backend/app/services/run_manager.py:74` 到 `apps/studio/backend/app/services/run_manager.py:78`。如果 engine 分支不发 typed event，UI event stream 就不能完整反映认知执行过程。
 
 Copilot 映射补充：view context 是当前代码的真实上下文入口。frontend POST context 见 `apps/studio/frontend/src/hooks/useCopilotContext.ts:39` 到 `apps/studio/frontend/src/hooks/useCopilotContext.ts:63`；backend set_view_context 见 `apps/studio/backend/app/services/copilot.py:117` 到 `apps/studio/backend/app/services/copilot.py:140`。这条路径不能替代 mentions payload。
 

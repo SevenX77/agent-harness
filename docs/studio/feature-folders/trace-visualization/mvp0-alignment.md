@@ -111,9 +111,9 @@ The backend SHOULD normalize compile errors into the same display model.
 Compile errors currently affect Workspace compile state in `apps/studio/frontend/src/components/studio/Workspace.tsx:292` to `apps/studio/frontend/src/components/studio/Workspace.tsx:322`.
 Engine skill-compilation mvp0 defines `CompileIssue`, see [skill-compilation mvp0](../../../engine/skill-compilation/mvp0-alignment.md#api).
 
-`StudioQueueCallback` SHOULD become an adapter, not the source of truth.
-It currently maps callback events into queue events, see `apps/studio/backend/app/services/run_manager.py:87` to `apps/studio/backend/app/services/run_manager.py:130`.
-MVP0 SHOULD adapt engine V2 trace events into the same WebSocket stream.
+Studio 的 queue subscriber 是 adapter, not source of truth.
+It maps engine `CallbackEvent` values into queue events via `_queue_event_subscriber`, see `apps/studio/backend/app/services/run_manager.py:74` to `apps/studio/backend/app/services/run_manager.py:78`.
+MVP0 SHOULD adapt engine typed trace events into the same WebSocket stream.
 
 ## API
 

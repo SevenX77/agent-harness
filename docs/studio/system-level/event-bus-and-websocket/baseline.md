@@ -76,7 +76,7 @@ Unauthorized sockets close with 4401, see `apps/studio/backend/app/routers/webso
 
 `/ws/runs/{run_id}` streams run manager queue events.
 The route accepts, calls `run_manager.stream_run(run_id)`, then sends each event JSON until `None`, see `apps/studio/backend/app/routers/websockets.py:27` to `apps/studio/backend/app/routers/websockets.py:39`.
-Run events are produced by `StudioQueueCallback`, see `apps/studio/backend/app/services/run_manager.py:87` to `apps/studio/backend/app/services/run_manager.py:150`.
+Run events are produced by `_queue_event_subscriber(process_queue)` and `run_skill(event_subscriber=...)`, see `apps/studio/backend/app/services/run_manager.py:74` to `apps/studio/backend/app/services/run_manager.py:104`.
 
 `/ws/events` streams the in-memory event bus topic.
 The route subscribes to `STUDIO_EVENTS_TOPIC` and `send_json`s each event, see `apps/studio/backend/app/routers/websockets.py:50` to `apps/studio/backend/app/routers/websockets.py:63`.

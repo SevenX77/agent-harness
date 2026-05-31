@@ -249,7 +249,7 @@ class ModelResolverProtocol(Protocol):
 | `role_name` | string | 否 | `None` | phase 可传已校验 role；graph_skill runner 当前可传空 | `[F-v3-agent-llm-role-unknown]` | 模型路由 key |
 | `thinking_enabled` | bool | 否 | `None` | resolver 自行解释 | — | 思考模式开关 |
 | `model_override` | string | 否 | `None` | resolver 自行解释 | — | 单次模型覆盖 |
-| `callbacks` | tuple[Callback, ...] | 否 | `()` | 可传 trace callbacks | — | 观测桥接 |
+| `callbacks` | tuple[Callback, ...] | 否 | `()` | resolver / gateway 内部仍期望 callback 形对象；T3 会把 event sink 包成 `_EventSinkCallbackAdapter(on_event -> emit)` | `TypeError` 用于未知 callbacks 对象 fail-loud | gateway fallback 观测桥接 |
 | `phase_name` | string | 否 | `None` | 当前 graph_skill runner 用 `"<workflow>"` | — | resolver / trace 定位 |
 | return | BaseChatModel | 是 | 无 | 可被 LangChain 调用 | `[F-v3-runtime-phase-failed]` | Agent LLM |
 
@@ -273,7 +273,7 @@ def run_skill(
     workspace_dir: Path,
     thread_id: str | None = None,
     unattended: bool = False,
-    callbacks: list[Any] | None = None,
+    event_subscriber: Callable[[CallbackEvent], None] | None = None,
     artifact_saver: Any | None = None,
     initial_context: dict[str, Any] | None = None,
     cleanup_checkpoints_on_finish: bool = True,
@@ -288,13 +288,13 @@ def run_skill(
 |---|---|---|---|---|---|---|
 | `skill_path` | str 或 Path | 是 | 无 | V0.3.0 skill root, 必须包含 `GRAPH.md`; legacy root `SKILL.md` corpus 属 §10 Deferred 迁移范围 | `[F-v3-graph-root-missing]` 等编译错误 | 主图入口 |
 | `**inputs` | Any kwargs | 否 | `{}` | 当前 graph_skill path 会写入初始 `data=dict(inputs)`；根级 strict input gate 仍是目标态 | `[F-v3-runtime-state-mapping-failed]` | 初始黑板 |
-| `model_resolver` | Any | 否 | `None` | graph_skill runner 有参；无 `mock_llm` 时调用 `model_resolver.resolve(callbacks=..., phase_name="<workflow>")` | `[F-v3-runtime-phase-failed]` | LLM 注入 |
+| `model_resolver` | Any | 否 | `None` | graph_skill path 有参；无 `mock_llm` 时在 Agent phase 装配中按 `llm_role or "graph_agent"` 调 `model_resolver.resolve(callbacks=..., phase_name=phase_id)` | `[F-v3-runtime-phase-failed]` | LLM 注入 |
 | `skill_resolver` | Protocol | 是 | 无 | 实现 `resolve_skill` | `[F-v3-resolver-missing]` | 子 skill 寻址 |
 | `mock_llm` | Any | 否 | sentinel `_NO_MOCK_LLM` | 优先于 `model_resolver` | — | 测试覆盖 |
 | `workspace_dir` | Path | 是 | 无 | 必须是绝对路径 | `ValueError` / Python missing kwarg `TypeError` | `<workspace_dir>/runs/<run_id>/` 输出根 |
 | `thread_id` | string | 否 | `None` | graph_skill path 无值时生成 UUID run id | — | run/thread 定位 |
 | `unattended` | bool | 否 | `False` | legacy/harness 路径消费 | — | 无人值守运行 |
-| `callbacks` | list[Any] | 否 | `None` | graph_skill path 会传给 resolver；legacy harness 路径会默认补 Logging/Tracing callbacks | — | observability |
+| `event_subscriber` | Callable[[CallbackEvent], None] | 否 | `None` | **[BREAKING]** T3 public 实时事件出口；不决定落盘路径；异常由 event sink 记录并隔离 | — | Studio timeline / 外部实时观测 |
 | `artifact_saver` | Any | 否 | `None` | legacy/harness 路径消费 | — | artifact 保存 |
 | `initial_context` | dict[str, Any] | 否 | `None` | legacy/harness 路径消费 | — | 初始上下文 |
 | `cleanup_checkpoints_on_finish` | bool | 否 | `True` | run 结束后清理线程 checkpoint | — | 存储清理 |
@@ -358,7 +358,7 @@ SUBGRAPH、subagent tool 和未来 subgraph-like builtin tool 都必须只传显
 
 ### 2. 运行时全维度事件发射
 
-Runtime SHOULD 在 phase start/end、LLM call、tool call、reference reader fallback、subagent enter/exit、SUBGRAPH enter/exit、exception 位置调用 tracing callback。事件 payload 必须带 `tool_name` / `phase_id` / `error_code` 等字段, 与 Q13 trace 决议对齐。
+Runtime SHOULD 在 phase start/end、LLM call、tool call、reference reader fallback、subagent enter/exit、SUBGRAPH enter/exit、exception 位置发 typed event。T3 live path 通过 `_CompositeEventSink` 写 `trace.jsonl` 并可选调用 `event_subscriber`; 旧 public callbacks list 已被 **[SUPERSEDED by V0.3.0 event_subscriber cutover]** 替代。事件 payload 使用当前 live 字段 `phase_name` / `tool_name` / `event_type`; 目标态里的 `phase_id` 命名不能混入 live API 文档。
 
 ### 3. Ambiguity feedback 链路
 
@@ -377,7 +377,7 @@ Cognitive template 固定包含 ambiguity feedback 提示。Runtime 必须提供
 | `run_skill` 入口按根级 `io.inputs` 校验输入并拒绝非合法目录 | **已对齐 (PR-3)**: `_run_skill_dict` 入口已实现 Fail-loud 守卫。传入非 `GRAPH.md` 目录、普通文件或旧单文件将立即返回 `WorkflowResult(success=False, error=...)`，且含有标准 `[F-v3-graph-root-missing]` 错误码。 |
 | 彻底清除与 Persona 关联的执行层依赖和旧引擎历史包袱 | **已对齐 (PR-3)**: Persona 死码簇（含 `build_graph_nodes`, `_inject_persona` 等）已彻底拔除；`_run_skill_dict` 内部用于非 GRAPH root fallback 的旧版 182 行 `load_workflow_from_md` 及 `harness/.run_id` 续传等死分支均已干净拆除。 |
 | Context 面向 Action 的可变暴露与工具沙盒防线 | **已对齐 (PR-3)**: Context Facade 已向齐基础的字典协议 (`__getitem__`, `__setitem__` 等 4 个方法)，以向后兼容现有 LOGIC。同时 `md_to_json.py` 内增加了针对 `md-patch` 的 deferred path 结果校验，严防 `KeyError("final_results")` 裸露。 |
-| Agent phase 通过 per-role model resolver 解析真实模型 | 当前 `run_skill` 有 `model_resolver: Any | None = None` 参数；graph_skill path 在无 `mock_llm` 时调用 `model_resolver.resolve(callbacks=..., phase_name="<workflow>")`，还不是按 phase `llm_role` 的完整 resolver 接线。 |
-| callbacks / trace 接回 graph runtime 主线 | 该项已完成, V0.3 引擎自动派发 phase 级事件 + 崩溃态并落盘。 |
+| Agent phase 通过 per-role model resolver 解析真实模型 | 当前 `run_skill` 有 `model_resolver: Any | None = None` 参数；Agent phase 装配在无 `mock_llm` 时调用 `model_resolver.resolve(role_name=phase_ast.llm_role or "graph_agent", callbacks=_callback_tuple(event_sink), phase_name=phase_id)`。 |
+| callbacks / trace 接回 graph runtime 主线 | **已被 T3 event_subscriber cutover 替代并完成主线接线**: V0.3 引擎自动派发 run start/end、common wrapper phase start/end、Agent LLM/tool 事件，并单写 `<workspace>/runs/<run_id>/trace.jsonl`。 |
 | runtime 根级状态数据流隔离 | 当前初始 state 依然直接使用 `dict(inputs)`。 |
 | GraphAgentError 以外异常也结构化返回 | 当前 public runner 只捕获 GraphAgentError；普通 RuntimeError 等可能直接冒泡。 |

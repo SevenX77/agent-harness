@@ -13,13 +13,16 @@
 ```text
 真实运行点 / 装配点
   -> 构造 Pydantic CallbackEvent
-  -> callback.on_event(event) 或 legacy on_* hook
-  -> TracingCallback 写 tracing.jsonl
+  -> _safe_emit_event(event_sink, event)
+  -> _CompositeEventSink fan-out
+       -> _TraceJsonlSink 写 <workspace>/runs/<run_id>/trace.jsonl
+       -> _SubscriberSink 调 event_subscriber(event)
+       -> _CallbackSink 兼容内部 legacy callback.on_event(event)
 ```
 
 PR E 之后，`log_ambiguity` 的业务反馈事件、装配期 builtin reference reader 的 enter / exit / fallback 事件都已经接到这条主线。它们不会替代已有 tool trace，而是并列补充业务含义。
 
-PR-2 之后，V0.3.0 目录型 `GRAPH.md` 主运行路径也接到这条主线。`_skill_node` 会在 phase 进入、模型返回、工具返回、phase 退出四个位置发 typed event；`runner._run_v030_skill_dict()` 会在 `graph.invoke()` 前绑定 trace 目录，执行后保存 summary，并把真实落盘路径放进 `trace_path`。
+Round 32 PR-1 (T3) 之后，V0.3.0 目录型 `GRAPH.md` 主运行路径不再暴露 public `callbacks` list。public `run_skill()` 的实时出口是 `event_subscriber: Callable[[CallbackEvent], None] | None`，默认落盘出口永远由 SDK 内部 `_TraceJsonlSink` 负责。`WorkflowResult.trace_path` 指向真实存在的 `trace.jsonl`，不再指向 `{run_id}_summary.json`。
 
 ## 2. 事件模型是什么
 
@@ -91,26 +94,28 @@ PR E 把这 4 个事件加入了 typed-only 合法列表：
 
 所以普通 `Callback()` 收到这些事件不会误报 unknown；真正消费它们的 callback 仍应覆盖 `on_event()`。
 
-## 5. TracingCallback 怎么写文件
+## 5. Event sink 怎么写文件和分发
 
-`TracingCallback` 是当前主要 trace sink。
+T3 后的主落盘路径不是 `TracingCallback`，而是 `graph_agent.callbacks.emit` 里的私有 sink 组合。入口在 `runner._prepare_v030_event_sink()`：它固定创建 `_TraceJsonlSink(trace_output)`，按需追加 `_SubscriberSink(event_subscriber)`，内部兼容场景才追加 `_CallbackSink(callbacks)`，最后返回 `_CompositeEventSink`，见 `packages/graph-agent/src/graph_agent/core/runner.py:237-248`。
 
-它会写两种文件形状：
+| 类 / 方法 | 字段 / 路径 | 为什么这么设计 | 干什么用 | 失败时行为 / 错误码 |
+|---|---|---|---|---|
+| `_TraceJsonlSink.__init__(trace_dir)` | `self.path = trace_dir / "trace.jsonl"`；初始化时 `mkdir(parents=True)` 并清空文件，见 `callbacks/emit.py:15-21` | trace 文件名和 run 目录由 SDK 决定，调用方不能再通过 public callback 决定写到哪里 | 给每次 run 建立唯一 typed event stream：`<workspace>/runs/<run_id>/trace.jsonl` | 目录/文件创建失败会直接抛出底层 IO 异常；当前 T3 不再用 `TraceWriteError` 包装 save 阶段，因为没有 summary save 阶段 |
+| `_TraceJsonlSink.emit(event)` | `event.model_dump(mode="json")` 或原对象；每个事件 append 一行 JSON，见 `callbacks/emit.py:23-26` | 每事件即时落盘，不等 run 结束汇总，崩溃前事件也能留下 | 写 `run_started`、`phase_start`、`llm_call`、`tool_call`、`phase_end`、`run_ended`、gateway fallback 等 typed event | 写入异常会被外层 `_CompositeEventSink.emit()` 捕获并 `logger.exception`，继续 fan-out 到其它 sink；没有 `[F-v3-*]` 业务错误码 |
+| `_SubscriberSink.emit(event)` | 调 `event_subscriber(event)`，见 `callbacks/emit.py:29-34` | public API 只暴露函数式实时订阅，不再要求用户继承 Callback class | Studio WebSocket queue、Predict trace adapter、测试 spy 都走这里 | 订阅器异常由 `_CompositeEventSink.emit()` 捕获记录，不能破坏 trace 落盘 |
+| `_CallbackSink.emit(event)` | 遍历内部 `callbacks`，只调用可调用的 `callback.on_event(event)`，见 `callbacks/emit.py:37-45` | 保留 private 兼容：旧测试、Predict 内部桥或尚未迁完的私有调用仍可复用 legacy callback 对象 | 不是 public `run_skill` API；只服务内部过渡 | 单个 callback 异常由 `_CompositeEventSink.emit()` 捕获记录，继续后续 sink |
+| `_CompositeEventSink.emit(event)` | `self._sinks`；`trace_path` 指向第一个 `_TraceJsonlSink.path`，见 `callbacks/emit.py:48-65` | fan-out 统一在一个对象里，runner/graph_assembler 不关心有几个出口 | 同一事件同时落盘、推 subscriber、兼容 legacy callback | 每个 sink 独立 try/except；观测失败不应中断业务 run |
+| `_safe_emit_event(callbacks, event)` | 接受 `.emit` sink、直接 callable subscriber、或 legacy callback iterable，见 `callbacks/emit.py:68-101` | 让 runner、graph_assembler、builtin subagent 都通过同一派发入口 | 消除各处手写 callback 循环导致的漏发/双发差异 | 记录 `logger.exception` 后继续；未知 iterable callback 抛错不传播 |
 
-1. legacy JSONL：按旧 event shape 写到带 run id 的 jsonl 文件。
-2. typed JSONL：把 Pydantic event 直接写到固定名字 `tracing.jsonl`。
+`run_skill()` 的 public 签名见 `packages/graph-agent/src/graph_agent/core/runner.py:65-79`。`event_subscriber` 会传入 `_run_skill_dict()` 和 `_run_v030_skill_dict()`，见 `runner.py:90-103`、`runner.py:145-160`、`runner.py:298-308`。`_run_v030_skill_dict()` 用 `workspace_dir / "runs" / run_id` 构造 `trace_output`，创建 event sink 后立刻发 `RunStartedEvent`，见 `runner.py:315-331`；成功时发 `RunEndedEvent(status="completed")` 并返回 `trace_path=str(event_sink.trace_path)`，见 `runner.py:376-395`；异常时发 `RunEndedEvent(status="crashed")` 后继续抛异常，见 `runner.py:352-364`。
 
-收到 typed event 时，`TracingCallback.on_event()` 直接调用 `event.model_dump_json()` 追加到 `tracing.jsonl`。因此 PR E 新增投递的 `ambiguity_logged` 和 `builtin_subagent_*` 事件只要进入 callback list，就能落盘。
+同一个 run 目录还会写 `result.json`、`final_state.json`、`metrics.json`，见 `runner.py:230-234`；声明 `target: file` 且没有显式路径的输出默认进入 `artifacts/`，见 `runner.py:264-295`。T3 主线没有 run-id summary JSON，也没有 tracing callback 的结束后保存步骤。
 
-V0.3.0 主路径现在会在执行前保证 `TracingCallback` 已经绑定输出目录：`runner._run_v030_skill_dict()` 先用必传的 `workspace_dir` 和本次 `run_id` 计算 `<workspace_dir>/runs/<run_id>/`，然后通过 `_prepare_v030_callbacks()` 创建或绑定 `TracingCallback`。这样执行过程中的 typed event 会实时进入同目录 `tracing.jsonl`，而不是等到结束后才发现流文件没接上。
+## 5.1 V0.3.0 phase wrapper 现在发哪些事件
 
-执行结束后，runner 调用 `TracingCallback.save(trace_output)` 写出 `{run_id}_summary.json`，并把这个真实 summary 路径作为返回值里的 `trace_path`。同一个 run 目录还会写 `result.json`、`final_state.json`、`metrics.json`；声明 `target: file` 且没有显式路径的输出默认进入 `artifacts/`。`trace_path` 不再是拼出来但没写过的 `trace.json`。如果保存失败，runner 包装成 `TraceWriteError` 并 fail-loud。
+V0.3.0 phase lifecycle 的发射点在 `_wrap_phase_runtime_node()`，覆盖 LOGIC / SUBGRAPH / Agent 三类节点，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:218-249`。这是 T3 单源设计：phase start/end 只在 wrapper 发，runner 不再按 `assembled.phase_ids` 批量“猜测”生命周期，Agent 节点内部也不再重复发 phase start/end。
 
-## 5.1 V0.3.0 `_skill_node` 现在发哪些事件
-
-V0.3.0 Agent phase 的事件发射点在 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:381-507`。
-
-`PhaseStartEvent` 在进入 `_skill_node` 后发出，字段形态是完整 blackboard data 快照：
+`PhaseStartEvent` 在 wrapper 调用节点前发出，字段形态是完整 blackboard data 快照：
 
 ```json
 {
@@ -120,19 +125,15 @@ V0.3.0 Agent phase 的事件发射点在 `packages/graph-agent/src/graph_agent/c
 }
 ```
 
-这个形态来自 `_observable_data_context()`，它固定返回 `{inputs, phase_outputs, scratch}` 三段，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:522-528`。这里不能只发 inputs 子集，因为旧 harness 引擎的 `LLMPhaseNode` / `CodePhaseNode` 也把 `state["data"].model_dump()` 交给 callback，见 `packages/graph-agent/src/graph_agent/core/phase_nodes/llm_phase_node.py:129-130` 和 `packages/graph-agent/src/graph_agent/core/phase_nodes/code_phase_node.py:39`。三条路径的 context 形态保持一致，Studio 才能用同一套展示逻辑看每个 phase 的输入输出。
+这个形态来自 `_observable_data_context()`，它固定返回 `{inputs, phase_outputs, scratch}` 三段，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:614-620`。这里不能只发 inputs 子集，因为 Studio 需要同一套 timeline 展示逻辑看每个 phase 的输入输出。
 
-`LLMCallEvent` 在每次 `model.invoke(...)` 返回后发出，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:434-445`。token 使用量通过 `_extract_token_usage()` 归一，支持 `input_tokens/output_tokens`、`prompt_tokens/completion_tokens`、`total_input_tokens/total_output_tokens`，缺失或不可转整数时降级为 `0`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:553-571`。
+`LLMCallEvent` 只在 Agent 节点的每次 `model.invoke(...)` 返回后发出，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:431-445`。token 使用量通过 `_extract_token_usage()` 归一，支持 `input_tokens/output_tokens`、`prompt_tokens/completion_tokens`、`total_input_tokens/total_output_tokens`，缺失或不可转整数时降级为 `0`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:645-663`。
 
-`ToolCallEvent` 在每个工具成功返回后发出，覆盖普通工具、framework tool、subagent tool 和 `finish_task`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:468-475`。事件里的 `args` 必须是 dict；非 dict 入参按空 dict 处理。事件里的 `result` 必须是 string，dict/list 会用 `json.dumps(..., ensure_ascii=False, default=str)` 变成 JSON 字符串，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:585-590`。
+`ToolCallEvent` 在每个工具成功返回后发出，覆盖普通工具、framework tool、subagent tool 和 `finish_task`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:468-475`。事件里的 `args` 必须是 dict；非 dict 入参按空 dict 处理。事件里的 `result` 必须是 string，dict/list 会用 `json.dumps(..., ensure_ascii=False, default=str)` 变成 JSON 字符串，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:677-682`。
 
-`PhaseEndEvent` 通过 `_emit_phase_end()` 统一发出，并用 `phase_end_emitted` 防重，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:396-407`。它覆盖三类退出：
+`PhaseEndEvent` 在 `_wrap_phase_runtime_node()` 的 `finally` 中统一发出，见 `graph_assembler.py:236-247`。它覆盖正常返回、`finish_task` 早返回和异常路径；异常路径发完 end 后继续向外抛。因为 phase lifecycle 只在 wrapper 发，所以不需要 Agent 内部的防重状态，也避免 runner 批量假发造成双写。
 
-- `finish_task` 被接受后的提前返回，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:492-494`。
-- 模型没有 tool call、达到最大轮次、或普通循环结束后的正常返回，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:495-499`。
-- 异常路径，`finally` 里仍发一次 `PhaseEndEvent`，然后异常继续向外抛，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:500-507`。
-
-`PhaseEndEvent.context` 同样是完整 data 结构。`_phase_end_context()` 会把 phase 输出包成 `{"inputs": {}, "phase_outputs": {phase_id: ...}, "scratch": {}}`；如果 response 已经是完整 blackboard data，则保留完整结构，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:531-550`。
+`PhaseEndEvent.context` 同样是完整 data 结构。`_phase_end_context()` 会把 phase 输出包成 `{"inputs": {}, "phase_outputs": {phase_id: ...}, "scratch": {}}`；如果 response 已经是完整 blackboard data，则保留完整结构，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:623-642`。
 
 ## 6. tool trace 与 `log_ambiguity`
 
@@ -143,7 +144,7 @@ tool lifecycle trace
   + ambiguity_logged 业务事件
 ```
 
-当前 typed tool 事件是 `ToolCallEvent(event_type="tool_call")`，不是拆成 `TOOL_CALL_START` / `TOOL_CALL_END` 两个 Pydantic 事件。`TracingCallback.on_tool_call()` 会写出这个 `tool_call` 事件，字段包括：
+当前 typed tool 事件是 `ToolCallEvent(event_type="tool_call")`，不是拆成 `TOOL_CALL_START` / `TOOL_CALL_END` 两个 Pydantic 事件。Agent loop 构造事件后经 `_safe_emit_event(callbacks, event)` 进入 event sink，默认由 `_TraceJsonlSink.emit()` 写入 `trace.jsonl`。字段包括：
 
 | 字段 | 人话解释 |
 |---|---|
@@ -205,13 +206,13 @@ callback 抛错不会阻断工具返回。`_emit_ambiguity_logged` 会 warning �
 | `phase_name` | 当前目标 phase，例如 `"main"` |
 | `builtin_name` | `"reference_reader"` |
 
-callbacks 通道来自 `assemble_graph(..., callbacks=None)`：
+事件通道来自 runner 创建的 `_CompositeEventSink`：
 
-- `loader.load_workflow_from_md(..., callbacks=...)` 会透传到 `assemble_graph()`。
-- `runner._run_v030_skill_dict(..., callbacks=...)` 会透传到 `assemble_graph()`。
-- `assemble_graph()` 再把 callbacks 传到 `_build_reference_reader_markdown()`。
+- `runner._run_v030_skill_dict()` 创建 event sink 后调用 `assemble_graph(..., callbacks=event_sink)`，见 `runner.py:319-342`。
+- `assemble_graph()` 把同一个 sink 传到 `_build_reference_reader_markdown()`，见 `graph_assembler.py:366-372`。
+- builtin reader 事件经 `_emit_builtin_subagent_event()` 调 `_safe_emit_event(callbacks, event)`，见 `graph_assembler.py:825-826`。
 
-没有 callbacks 时，`_run_v030_skill_dict` 也会内部自动挂载 `TracingCallback`，使得 reference reader 等事件默认也会正常落盘。
+没有 `event_subscriber` 时，`_TraceJsonlSink` 仍然存在，所以 reference reader 等事件默认也会进入 `trace.jsonl`。这像黑匣子：仪表盘可以不接，黑匣子仍然记录。
 
 ## 10. `BUILTIN_SUBAGENT_ENTER`
 
@@ -299,7 +300,9 @@ openai/gpt-a 超时
 
 事件里会有失败 provider、下一个 provider、原因和 phase name。
 
-当前这条事件是 gateway 直接遍历 callbacks 发出的，不是通过一个全局 runtime trace dispatcher。
+当前这条事件是 gateway 直接遍历 `event_callbacks` 并调用 `callback.on_event(event)` 发出的，不是通过全局 runtime trace dispatcher。为了让 gateway 的 callback 契约接回 T3 的 sink，`graph_assembler._callback_tuple()` 对 `.emit` 型 sink 包 `_EventSinkCallbackAdapter`：adapter 暴露 `on_event(event) -> sink.emit(event)`，再传给 `model_resolver.resolve(callbacks=...)`，见 `graph_assembler.py:519-540`。这样 gateway 的 `LLMFallbackEvent` 会同时进入 `_TraceJsonlSink` 和 `_SubscriberSink`。
+
+`LLMFallbackEvent.code` 可带 `[F-v3-gateway-all-providers-failed]` 等 gateway 错误码。`_callback_tuple()` 对未知 callbacks 对象不再静默返回空 tuple，而是 `raise TypeError("unsupported callbacks object: ...")`，见 `graph_assembler.py:526-529`。这是为了避免 provider fallback 已经发生但 trace/subscriber 无声丢事件的静默降级。
 
 ## 15. prompt capture 怎么工作
 
@@ -323,15 +326,15 @@ openai/gpt-a 超时
 
 当前 typed event schema 使用 `phase_name`。文档或测试里把它写成 `phase_id`，是在讲旧目标态，不是当前 API。
 
-### TracingCallback 不会自己观察运行
+### `_TraceJsonlSink` 不会自己观察运行
 
-它只是 callback sink。只有运行时调用它，它才会写文件。
+它只是 event sink。只有 runner、graph_assembler、gateway adapter 调它的 `emit()`，它才会写文件。
 
 ### callback 失败不会中断业务
 
-多个地方都选择吞掉 callback 异常并继续运行。trace 是观测能力，不应该让业务 run 因为 UI/日志失败而失败。
+多个地方都选择记录观测出口异常并继续运行。trace 是观测能力，不应该让业务 run 因为 UI/日志失败而失败。
 
-PR-2 把这个隔离逻辑抽成公共 helper：`graph_agent.callbacks.emit._safe_emit_event(callbacks, event)`。它逐个调用 `callback.on_event(event)`；某个 callback 抛错时记录 `logger.exception`，然后继续调用后面的 callback，见 `packages/graph-agent/src/graph_agent/callbacks/emit.py:11-21`。`graph_assembler` 用这个 helper 发 V0.3.0 事件，不再依赖旧 `core.harness` 里的私有函数。
+T3 把这个隔离逻辑收敛到 `graph_agent.callbacks.emit._safe_emit_event(callbacks, event)` 和 `_CompositeEventSink.emit(event)`。它们会识别 `.emit` sink、函数式 subscriber 或 legacy callback iterable；某个出口抛错时记录 `logger.exception`，然后继续其它出口，见 `packages/graph-agent/src/graph_agent/callbacks/emit.py:48-101`。
 
 ## 17. 总图
 
@@ -352,19 +355,22 @@ reference reader assembly
   -> fallback markdown 只进 prompt，不进 event payload
 
 V0.3.0 Agent phase
-  -> PhaseStartEvent(context={inputs, phase_outputs, scratch})
+  -> _wrap_phase_runtime_node
+       -> PhaseStartEvent(context={inputs, phase_outputs, scratch})
   -> model.invoke()
        -> LLMCallEvent(tokens normalized; missing -> 0)
   -> tool.invoke()
        -> ToolCallEvent(result stringified)
-       -> finish_task accepted?
-            -> PhaseEndEvent(context=final full data)
   -> normal / max-turn / exception exit
-       -> PhaseEndEvent once
+       -> wrapper finally sends PhaseEndEvent once
 
 V0.3.0 runner
-  -> bind/create TracingCallback before graph.invoke()
-  -> tracing.jsonl receives typed events during execution
-  -> TracingCallback.save()
-  -> trace_path = real *_summary.json path
+  -> _prepare_v030_event_sink()
+       -> _TraceJsonlSink(<workspace>/runs/<run_id>/trace.jsonl)
+       -> optional _SubscriberSink(event_subscriber)
+       -> optional private _CallbackSink(callbacks)
+  -> RunStartedEvent
+  -> graph.invoke()
+  -> RunEndedEvent(completed/crashed)
+  -> trace_path = real trace.jsonl path
 ```

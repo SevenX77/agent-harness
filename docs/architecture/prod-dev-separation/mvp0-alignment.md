@@ -76,7 +76,7 @@ Engine owns compile/run semantics.
 
 Current backend imports graph-agent directly for compile and run.
 Compile adapter is in `apps/studio/backend/app/services/skills.py:294` to `apps/studio/backend/app/services/skills.py:311`.
-Run worker calls `run_skill()` in `apps/studio/backend/app/services/run_manager.py:220` to `apps/studio/backend/app/services/run_manager.py:235`.
+Run worker calls `run_skill()` in `apps/studio/backend/app/services/run_manager.py:81` to `apps/studio/backend/app/services/run_manager.py:105`.
 MVP0 SHOULD narrow this to a single V2.1 engine execution boundary.
 
 Engine SHOULD become a pure node/graph runtime surface.
@@ -84,8 +84,8 @@ Pure means no Studio event schema, no Tauri path assumptions, no UI concepts, an
 It can still emit trace events, but those events must be engine lifecycle events, not UI commands.
 
 MVP0 SHOULD resolve Harness/Callbacks/Schema entanglement by moving callbacks to V2 tracing.
-Legacy runner creates callbacks in `packages/graph-agent/src/graph_agent/core/runner.py:284` to `packages/graph-agent/src/graph_agent/core/runner.py:286`.
-V2.1 currently deletes callbacks in `packages/graph-agent/src/graph_agent/core/runner.py:462`.
+Current runner creates an event sink in `packages/graph-agent/src/graph_agent/core/runner.py:237` to `packages/graph-agent/src/graph_agent/core/runner.py:248`.
+Studio run worker passes a function subscriber, not a callback list, in `apps/studio/backend/app/services/run_manager.py:93` to `apps/studio/backend/app/services/run_manager.py:104`.
 The replacement is [tracing-and-observability mvp0](../../engine/tracing-and-observability/mvp0-alignment.md#api).
 
 MVP0 SHOULD solve A1-A6 at the engine boundary.
@@ -193,7 +193,7 @@ It is currently defined in `packages/graph-agent/src/graph_agent/runtime/state.p
 Studio may persist final state or trace projections, but it should not mutate the live blackboard.
 
 Studio run state SHOULD remain a persisted projection.
-Current `get_run_detail()` reads input, trace, final state, and artifacts from run storage in `apps/studio/backend/app/services/run_manager.py:408` to `apps/studio/backend/app/services/run_manager.py:422`.
+Current `get_run_detail()` reads input, trace, final state, and artifacts from run storage in `apps/studio/backend/app/services/run_manager.py:304` to `apps/studio/backend/app/services/run_manager.py:317`.
 MVP0 SHOULD extend this with V2 trace events and phase outputs.
 
 Tauri sidecar state SHOULD remain process lifecycle state.

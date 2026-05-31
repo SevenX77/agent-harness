@@ -20,7 +20,7 @@ UI 层通过 runtime config 找到 backend。浏览器/dev 模式默认走 `VITE
 
 当前 architecture baseline 不能把 Studio 描述为“纯生产 runtime 外壳”。Tauri bundle 明确包含 vendor/backend、vendor/site-packages、python_runtime、skills、config，见 `apps/studio/tauri/tauri.conf.json:25` 到 `apps/studio/tauri/tauri.conf.json:33`。这是一种一体化桌面分发形态，而不是 production engine 与 development Studio 的硬隔离。
 
-UI 层的 prod/dev 差异也不改变 graph-agent 运行路径。无论是 Tauri 还是浏览器 dev，skill compile/run 最终都到 Studio backend，再由 backend 调 Python package。compile 服务见 `apps/studio/backend/app/services/skills.py:294` 到 `apps/studio/backend/app/services/skills.py:311`；run worker 调 `run_skill()`，见 `apps/studio/backend/app/services/run_manager.py:220` 到 `apps/studio/backend/app/services/run_manager.py:235`。
+UI 层的 prod/dev 差异也不改变 graph-agent 运行路径。无论是 Tauri 还是浏览器 dev，skill compile/run 最终都到 Studio backend，再由 backend 调 Python package。compile 服务见 `apps/studio/backend/app/services/skills.py:294` 到 `apps/studio/backend/app/services/skills.py:311`；run worker 调 `run_skill()`，见 `apps/studio/backend/app/services/run_manager.py:81` 到 `apps/studio/backend/app/services/run_manager.py:105`。
 
 所以 UI/UX 维度的当下结论是：用户有桌面与 web/dev 两种入口，但它们共享前端和 backend contract；Tauri 提供桌面能力与 sidecar lifecycle，Vite 提供开发代理，二者都不是独立 engine runtime。
 
@@ -44,7 +44,7 @@ Tauri desktop-only functions 有 runtime guard。`ensureTauri()` 会在非 Tauri
 
 当前 frontend separation 的实质是“transport/config separation”，不是 feature separation。HTTP、WS、IPC 三条 transport 各自负责不同能力：业务数据用 HTTP/WS，桌面系统动作用 IPC，dev tunnel 用 Vite proxy 和 token hash。这个分层在代码中清晰存在，但业务 feature 本身没有拆成 prod-only/dev-only 两套。
 
-从 architecture 角度看，前端没有直接 import graph-agent，也没有在浏览器里执行 Python skill。所有 engine 行为都通过 backend API 间接发生，见 `apps/studio/frontend/src/api/client.ts:81` 到 `apps/studio/frontend/src/api/client.ts:144` 和 `apps/studio/backend/app/services/run_manager.py:220` 到 `apps/studio/backend/app/services/run_manager.py:235`。这是当前最稳定的一条 prod/dev 边界。
+从 architecture 角度看，前端没有直接 import graph-agent，也没有在浏览器里执行 Python skill。所有 engine 行为都通过 backend API 间接发生，见 `apps/studio/frontend/src/api/client.ts:81` 到 `apps/studio/frontend/src/api/client.ts:144` 和 `apps/studio/backend/app/services/run_manager.py:81` 到 `apps/studio/backend/app/services/run_manager.py:105`。这是当前最稳定的一条 prod/dev 边界。
 
 ## 后端功能
 
@@ -56,9 +56,9 @@ Tauri sidecar 会在桌面启动时拉起 Python backend。Rust app 如果未设
 
 SidecarLaunchConfig 指向 bundled python、vendor/backend、vendor/site-packages、vendor/resources，见 `apps/studio/tauri/src/sidecar.rs:53` 到 `apps/studio/tauri/src/sidecar.rs:74`。spawn sidecar 时设置 `PYTHONPATH`、`STUDIO_RESOURCE_DIR`、`STUDIO_API_TOKEN`、`STUDIO_EXIT_ON_ORPHAN`，见 `apps/studio/tauri/src/sidecar.rs:241` 到 `apps/studio/tauri/src/sidecar.rs:260`。健康检查通过后 runtime config 暴露 port、resourceDir 和 token，见 `apps/studio/tauri/src/sidecar.rs:123` 到 `apps/studio/tauri/src/sidecar.rs:134`。
 
-Engine 与 Studio backend 的耦合点很明确：backend import graph-agent package，而不是通过外部 process 或 RPC 调 engine。compile 用 `compile_skill()`，见 `apps/studio/backend/app/services/skills.py:294` 到 `apps/studio/backend/app/services/skills.py:311`；run subprocess 中调用 `run_skill()`，见 `apps/studio/backend/app/services/run_manager.py:220` 到 `apps/studio/backend/app/services/run_manager.py:235`；predict service 也 import `run_skill`、`SkillLoader`、PredictTracingCallback，见 `apps/studio/backend/app/services/predictor.py:11` 到 `apps/studio/backend/app/services/predictor.py:27`。
+Engine 与 Studio backend 的耦合点很明确：backend import graph-agent package，而不是通过外部 process 或 RPC 调 engine。compile 用 `compile_skill()`，见 `apps/studio/backend/app/services/skills.py:294` 到 `apps/studio/backend/app/services/skills.py:311`；run subprocess 中调用 `run_skill()`，见 `apps/studio/backend/app/services/run_manager.py:81` 到 `apps/studio/backend/app/services/run_manager.py:105`；predict service 也 import `run_skill`、`SkillLoader`、`PredictTracingCallback`，见 `apps/studio/backend/app/services/predictor.py:12` 到 `apps/studio/backend/app/services/predictor.py:29`。
 
-Callbacks/tracing/schema 缠绕仍存在。旧 Harness 路径会自动创建 Logging/Tracing callback，见 `packages/graph-agent/src/graph_agent/core/runner.py:284` 到 `packages/graph-agent/src/graph_agent/core/runner.py:286`；Studio run manager 也创建 `StudioQueueCallback` 和 `TracingCallback`，见 `apps/studio/backend/app/services/run_manager.py:228` 到 `apps/studio/backend/app/services/run_manager.py:235`。但 V2.1 `_run_v21_skill_dict()` 删除 callbacks，见 `packages/graph-agent/src/graph_agent/core/runner.py:462`，所以多层约定并未完全闭合。
+Tracing/schema 缠绕已由 T3 收敛一层：engine public run API 使用 `event_subscriber`，默认落盘由内部 `_TraceJsonlSink` 负责；Studio run manager 通过 `_queue_event_subscriber` 接队列事件，见 `apps/studio/backend/app/services/run_manager.py:74` 到 `apps/studio/backend/app/services/run_manager.py:104`。仍需区分的是：实时 UI subscriber、run artifact、schema validation 分属不同边界。
 
 Sidecar 的 Python runtime 选择也属于后端/桌面边界。Rust sidecar code 根据 bundled runtime 找 python executable，见 `apps/studio/tauri/src/sidecar.rs:199` 到 `apps/studio/tauri/src/sidecar.rs:228`；host target triple 解析在 `apps/studio/tauri/src/sidecar.rs:230` 到 `apps/studio/tauri/src/sidecar.rs:238`。这说明桌面包依赖本地 bundled Python，而不是用户系统 Python。
 
@@ -70,11 +70,11 @@ CORS 是 backend 层的 web/dev 适配，不是 engine 适配。配置允许本�
 
 Backend router 注册是单一 app。`create_app()` 注册 skills、runs、compare、golden、llm、copilot、websockets 等，见 `apps/studio/backend/app/main.py:112` 到 `apps/studio/backend/app/main.py:140`。没有单独的 production-only router set 或 development-only router set。
 
-run manager 的 artifact model 进一步证明 Studio backend 是开发工作台层。`get_run_detail()` 从 run directory 读取 input、trace、final_state、artifacts，见 `apps/studio/backend/app/services/run_manager.py:408` 到 `apps/studio/backend/app/services/run_manager.py:422`。这不是纯 engine SDK return path，而是 Studio 运行记录。
+run manager 的 artifact model 进一步证明 Studio backend 是开发工作台层。`get_run_detail()` 从 run directory 读取 input、trace、final_state、artifacts，见 `apps/studio/backend/app/services/run_manager.py:304` 到 `apps/studio/backend/app/services/run_manager.py:317`。这不是纯 engine SDK return path，而是 Studio 运行记录。
 
 compile service 也承担 Studio 格式转换。`compile_skill_for_studio()` 调 graph-agent compile 后把结果转成 Studio compile contract，见 `apps/studio/backend/app/services/skills.py:294` 到 `apps/studio/backend/app/services/skills.py:311`。因此 backend 是 engine 与 UI 之间的 adapter，不是透明代理。
 
-Predict service 同样 import engine runtime surface，见 `apps/studio/backend/app/services/predictor.py:11` 到 `apps/studio/backend/app/services/predictor.py:27`。这说明 engine 能力不仅被 run manager 使用，也被其他 Studio feature 直接作为 package API 调用。
+Predict service 同样 import engine runtime surface，见 `apps/studio/backend/app/services/predictor.py:12` 到 `apps/studio/backend/app/services/predictor.py:29`。这说明 engine 能力不仅被 run manager 使用，也被其他 Studio feature 直接作为 package API 调用。
 
 后端功能维度的结论是：当前 separation 是“Studio backend 作为本地服务承载 engine package”，不是“engine 作为独立生产服务，Studio 只是外部开发客户端”。Callbacks、schemas、artifacts、predict、compile 都在 backend/engine 包边界处交织。
 
@@ -84,7 +84,7 @@ Predict service 同样 import engine runtime surface，见 `apps/studio/backend/
 
 Tauri IPC API 包括 `get_sidecar_config`、`get_sidecar_stderr`、`open_in_cursor`、`open_in_codex`、`open_in_terminal`、`reveal_in_file_manager`，注册在 `apps/studio/tauri/src/lib.rs:147` 到 `apps/studio/tauri/src/lib.rs:157`。这些命令不是业务 API，它们是桌面壳能力和 sidecar 生命周期能力。
 
-Engine public API 仍是 Python package API：`run_skill()`，见 `packages/graph-agent/src/graph_agent/core/runner.py:161` 到 `packages/graph-agent/src/graph_agent/core/runner.py:173`；V2.1 graph assembly `assemble_graph()`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:55` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:60`；manifest/state 模型见 `packages/graph-agent/src/graph_agent/core/manifest.py:45` 到 `packages/graph-agent/src/graph_agent/core/manifest.py:90`、`packages/graph-agent/src/graph_agent/runtime/state.py:35` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:41`。
+Engine public API 仍是 Python package API：`run_skill()`，见 `packages/graph-agent/src/graph_agent/core/runner.py:65` 到 `packages/graph-agent/src/graph_agent/core/runner.py:79`；V2.1 graph assembly `assemble_graph()`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:90` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:100`；manifest/state 模型见 `packages/graph-agent/src/graph_agent/core/manifest.py:45` 到 `packages/graph-agent/src/graph_agent/core/manifest.py:90`、`packages/graph-agent/src/graph_agent/runtime/state.py:35` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:41`。
 
 HTTP API 和 Tauri IPC 的边界当前基本清晰。业务资源通过 FastAPI routers 暴露，见 `apps/studio/backend/app/main.py:112` 到 `apps/studio/backend/app/main.py:140`；本地系统动作通过 Tauri commands 暴露，见 `apps/studio/tauri/src/lib.rs:147` 到 `apps/studio/tauri/src/lib.rs:157`。这是一条现有 separation 线。
 
@@ -94,11 +94,11 @@ Dev tunnel API 形态没有新增 backend endpoint。前端通过 `/api` 和 `/w
 
 Sidecar config API 不是 HTTP API，而是 Tauri command。`get_sidecar_config` 注册在 `apps/studio/tauri/src/lib.rs:147` 到 `apps/studio/tauri/src/lib.rs:157`，前端调用点在 `apps/studio/frontend/src/config/runtime.ts:43` 到 `apps/studio/frontend/src/config/runtime.ts:58`。这条路径只存在于桌面运行环境。
 
-Engine API 没有被包装成稳定 external RPC。Studio backend import Python module 并调用 `run_skill()`、`compile_skill()`，见 `apps/studio/backend/app/services/run_manager.py:220` 到 `apps/studio/backend/app/services/run_manager.py:235`、`apps/studio/backend/app/services/skills.py:294` 到 `apps/studio/backend/app/services/skills.py:311`。这保留了 package-level coupling。
+Engine API 没有被包装成稳定 external RPC。Studio backend import Python module 并调用 `run_skill()`、`compile_skill()`，见 `apps/studio/backend/app/services/run_manager.py:81` 到 `apps/studio/backend/app/services/run_manager.py:105`、`apps/studio/backend/app/services/skills.py:294` 到 `apps/studio/backend/app/services/skills.py:311`。这保留了 package-level coupling。
 
 API 层因此有三种 contract：frontend-backend HTTP/WS contract、frontend-Tauri IPC contract、backend-engine Python function contract。当前架构没有把它们收敛成一个统一 schema registry。
 
-这也解释了 callbacks/schema 缠绕为什么属于 architecture 问题：run events 需要 callback，trace artifacts 需要 callback，V2.1 runner 删除 callbacks，见 `packages/graph-agent/src/graph_agent/core/runner.py:462`。API 表面能启动 run，但 event 语义是否完整取决于 engine 分支内部行为。
+这也解释了 observability/schema 缠绕为什么属于 architecture 问题：run events 需要 `event_subscriber`，trace artifacts 需要 engine sink，API 表面能启动 run，但 event 语义是否完整取决于 engine 分支内部行为。
 
 ## Data Model / State
 
@@ -110,7 +110,7 @@ prod/dev separation 的核心状态分四层。
 
 第三层是 engine 的 graph state。V2.1 `BlackboardState` 是 `data/flow/messages/run_id`，见 `packages/graph-agent/src/graph_agent/runtime/state.py:35` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:41`。当前缺 input funnel 和 phase-level IO contract，具体审计 A1/A2/A3/A6 见 [state-and-io-contract baseline](../../engine/state-and-io-contract/baseline.md)。
 
-第四层是 run artifact state。Studio `RunDetail` 从 run directory 读取 `input_data.json`、`tracing.jsonl`、`final_state.json` 和 artifacts，见 `apps/studio/backend/app/services/run_manager.py:408` 到 `apps/studio/backend/app/services/run_manager.py:422`。这层是 Studio 的开发态记录，不是 engine package 的纯模型。
+第四层是 run artifact state。Studio `RunDetail` 从 run directory 读取 `input_data.json`、`trace.jsonl`、`final_state.json` 和 artifacts。这层是 Studio 的开发态记录，不是 engine package 的纯模型。
 
 第五层是 Tauri sidecar state。Rust `SidecarManager` 保存 child process、config 和 health 状态，启动健康检查见 `apps/studio/tauri/src/sidecar.rs:123` 到 `apps/studio/tauri/src/sidecar.rs:134`。这层状态只在桌面壳存在，web/dev 浏览器没有它。
 
@@ -120,7 +120,7 @@ prod/dev separation 的核心状态分四层。
 
 第八层是 frontend local/session state。dev tunnel token 存 sessionStorage，见 `apps/studio/frontend/src/config/tunnel-token.ts:1` 到 `apps/studio/frontend/src/config/tunnel-token.ts:13`；runtime config 缓存在 module-level `runtimeConfigPromise`，见 `apps/studio/frontend/src/config/runtime.ts:43` 到 `apps/studio/frontend/src/config/runtime.ts:58`。这类状态只影响连接 backend 的方式，不影响 engine graph state。
 
-Engine state 与 Studio state 的最大分界是：engine V2.1 `BlackboardState` 是运行时数据黑板，Studio `RunDetail` 是运行后观察/记录外壳。二者通过 run worker 和 artifacts 连接，见 `packages/graph-agent/src/graph_agent/runtime/state.py:35` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:41`、`apps/studio/backend/app/services/run_manager.py:408` 到 `apps/studio/backend/app/services/run_manager.py:422`。
+Engine state 与 Studio state 的最大分界是：engine V2.1 `BlackboardState` 是运行时数据黑板，Studio `RunDetail` 是运行后观察/记录外壳。二者通过 run worker 和 artifacts 连接，见 `packages/graph-agent/src/graph_agent/runtime/state.py:35` 到 `packages/graph-agent/src/graph_agent/runtime/state.py:41`、`apps/studio/backend/app/services/run_manager.py:304` 到 `apps/studio/backend/app/services/run_manager.py:317`。
 
 旧 Harness 还有自己的 checkpointer/runtime storage 概念，见 `packages/graph-agent/src/graph_agent/core/harness.py:391` 到 `packages/graph-agent/src/graph_agent/core/harness.py:430`、`packages/graph-agent/src/graph_agent/core/harness.py:568` 到 `packages/graph-agent/src/graph_agent/core/harness.py:629`。这进一步说明 current state model 不是单层。
 
@@ -132,13 +132,13 @@ Data Model / State 维度的结论：当前 prod/dev separation 不是通过一�
 
 与 workspace file system：Tauri 负责桌面打开目录、系统 reveal、终端等能力；backend 负责 skill directory/index/workspace；前端通过 HTTP/IPC 分别调用。文件系统细节见 [workspace-file-system baseline](../../studio/system-level/workspace-file-system/baseline.md)。
 
-与 tracing：Studio 层想把 engine callbacks 转成 WebSocket events，`StudioQueueCallback` 转发 phase/LLM events，见 `apps/studio/backend/app/services/run_manager.py:87` 到 `apps/studio/backend/app/services/run_manager.py:130`。但 engine V2.1 callbacks 未接，导致 prod/dev 一致性在 trace 维度不完整，见 [tracing-and-observability baseline](../../engine/tracing-and-observability/baseline.md)。
+与 tracing：Studio 层通过 `event_subscriber` 把 engine typed events 转成 WebSocket run events，默认落盘由 engine 写 `trace.jsonl`。当前 trace 主线见 [tracing-and-observability baseline](../../engine/tracing-and-observability/baseline.md)。
 
 与 schema：compile 阶段由 Studio backend 调 graph-agent compile，run 阶段由 run manager subprocess 调 run_skill；但 runtime input funnel、phase-level IO、subgraph isolation 仍是 engine 内部缺口，不是 Studio 可以单独修好的问题。相关缺口见 [state-and-io-contract baseline](../../engine/state-and-io-contract/baseline.md)。
 
 与 dev tunnel：Vite proxy + tunnel token 让远程浏览器访问本机 Studio，backend 通过 `STUDIO_DEV_TUNNEL_TOKEN` 接受同一套 Bearer auth。它是开发访问形态，不改变 engine 执行路径。
 
-与 engine execution runtime：V2.1 runner 当前会删除 callbacks，见 `packages/graph-agent/src/graph_agent/core/runner.py:462`；P0-1/P1-2/P1-3/P1-4/A4/A5 的 runtime 缺口见 [execution-runtime baseline](../../engine/execution-runtime/baseline.md)。这意味着 prod/dev separation 不能只看 Tauri/Vite，还要看 engine branch 是否提供同等 runtime contract。
+与 engine execution runtime：P0-1/P1-2/P1-3/P1-4/A4/A5 的 runtime 缺口见 [execution-runtime baseline](../../engine/execution-runtime/baseline.md)。这意味着 prod/dev separation 不能只看 Tauri/Vite，还要看 engine branch 是否提供同等 runtime contract。
 
 与 engine state/io：缺 input funnel、phase-level IO、subgraph isolation 的问题见 [state-and-io-contract baseline](../../engine/state-and-io-contract/baseline.md)。Studio backend 即使包装 API，也不能弥补 engine 内部 IO contract 不完整。
 
@@ -148,7 +148,7 @@ Data Model / State 维度的结论：当前 prod/dev separation 不是通过一�
 
 与 workspace file system：Tauri IPC 提供本地打开/终端/reveal，backend 管理 skill dirs 和 workspaces。两者共同构成开发工作台，不是单一生产 runtime。相关 feature 见 [workspace-file-system baseline](../../studio/system-level/workspace-file-system/baseline.md)。
 
-与 trace visualization：Studio trace 依赖 callback/event/artifact pipeline。Tauri/Vite 只是入口差异，trace 完整性取决于 backend run manager 和 engine callback 接入，见 `apps/studio/backend/app/services/run_manager.py:87` 到 `apps/studio/backend/app/services/run_manager.py:130`、`packages/graph-agent/src/graph_agent/core/runner.py:462`。
+与 trace visualization：Studio trace 依赖 `event_subscriber` / event sink / artifact pipeline。Tauri/Vite 只是入口差异，trace 完整性取决于 backend run manager 和 engine event 接入，见 `apps/studio/backend/app/services/run_manager.py:74` 到 `apps/studio/backend/app/services/run_manager.py:105`。
 
 与 packaging：Tauri bundle 包含 Python runtime 和 backend resources，见 `apps/studio/tauri/tauri.conf.json:25` 到 `apps/studio/tauri/tauri.conf.json:33`、`apps/studio/tauri/python-runtime.lock.json:3` 到 `apps/studio/tauri/python-runtime.lock.json:36`。这让桌面分发能独立运行本地 backend，但也意味着当前 prod 包携带开发工作台依赖。
 
@@ -156,11 +156,11 @@ Data Model / State 维度的结论：当前 prod/dev separation 不是通过一�
 
 最终边界：本 baseline 不提出拆分方案，不声称 MVP0 已达成，不移动任何代码。它只记录当前真实分层：同一前端，多 transport；FastAPI sidecar 承载 Studio API；Tauri 负责桌面壳和 Python sidecar；engine 仍以 Python package 嵌入 backend；callbacks/schema/state 在 backend-engine 边界处仍缠绕。
 
-Audit 映射补充：Harness/Callbacks/Schema 缠绕不是抽象判断，而是代码级事实。legacy runner 创建 callbacks，见 `packages/graph-agent/src/graph_agent/core/runner.py:284` 到 `packages/graph-agent/src/graph_agent/core/runner.py:286`；Studio run worker 创建 callbacks，见 `apps/studio/backend/app/services/run_manager.py:228` 到 `apps/studio/backend/app/services/run_manager.py:235`；V2.1 runner 删除 callbacks，见 `packages/graph-agent/src/graph_agent/core/runner.py:462`。
+Audit 映射补充：Harness/Callbacks/Schema 缠绕曾经表现为 legacy runner 与 Studio worker 创建 callback 列表。PR-1 后当前事实是：engine runner 创建 `_CompositeEventSink`，见 `packages/graph-agent/src/graph_agent/core/runner.py:237` 到 `packages/graph-agent/src/graph_agent/core/runner.py:248`；Studio run worker 创建 `_queue_event_subscriber` 并传给 `run_skill(event_subscriber=...)`，见 `apps/studio/backend/app/services/run_manager.py:74` 到 `apps/studio/backend/app/services/run_manager.py:105`。
 
 Audit 映射补充：Engine 不是纯节点合集。旧 Harness 仍然集中 phases、callbacks、IO config、context mapping、checkpointer、resolver、retry router、graph builder，见 `packages/graph-agent/src/graph_agent/core/harness.py:356` 到 `packages/graph-agent/src/graph_agent/core/harness.py:390`。这就是 prod/dev separation baseline 必须记录的现状。
 
-Audit 映射补充：Studio 也不只是外部唤起壳。它有 run manager、artifact reader、compile adapter、predict service、Copilot service 和 workspace/file APIs。run detail artifact reader 见 `apps/studio/backend/app/services/run_manager.py:408` 到 `apps/studio/backend/app/services/run_manager.py:422`；compile adapter 见 `apps/studio/backend/app/services/skills.py:294` 到 `apps/studio/backend/app/services/skills.py:311`。
+Audit 映射补充：Studio 也不只是外部唤起壳。它有 run manager、artifact reader、compile adapter、predict service、Copilot service 和 workspace/file APIs。run detail artifact reader 见 `apps/studio/backend/app/services/run_manager.py:304` 到 `apps/studio/backend/app/services/run_manager.py:317`；compile adapter 见 `apps/studio/backend/app/services/skills.py:294` 到 `apps/studio/backend/app/services/skills.py:311`。
 
 Desktop 映射补充：Tauri sidecar lifecycle 是桌面生产形态的核心。启动逻辑见 `apps/studio/tauri/src/lib.rs:166` 到 `apps/studio/tauri/src/lib.rs:188`；退出 shutdown 见 `apps/studio/tauri/src/lib.rs:200` 到 `apps/studio/tauri/src/lib.rs:217`。这条路径在浏览器 dev 模式不存在。
 
@@ -180,7 +180,7 @@ State 映射补充：engine graph state 仍在 graph-agent 包内。`BlackboardS
 
 API 映射补充：frontend API client 的 base URL 和 token header 说明前端只知道 Studio backend，不知道 engine internals，见 `apps/studio/frontend/src/api/client.ts:20` 到 `apps/studio/frontend/src/api/client.ts:54`。这是一条现有隔离线。
 
-API 映射补充：backend-engine 之间没有同样强的隔离。backend 直接 import `run_skill`、`SkillLoader`、PredictTracingCallback，见 `apps/studio/backend/app/services/predictor.py:11` 到 `apps/studio/backend/app/services/predictor.py:27`；run manager 也直接调用 `run_skill()`，见 `apps/studio/backend/app/services/run_manager.py:220` 到 `apps/studio/backend/app/services/run_manager.py:235`。
+API 映射补充：backend-engine 之间没有同样强的隔离。backend 直接 import `run_skill`、`SkillLoader`、`PredictTracingCallback`，见 `apps/studio/backend/app/services/predictor.py:12` 到 `apps/studio/backend/app/services/predictor.py:29`；run manager 也直接调用 `run_skill()`，见 `apps/studio/backend/app/services/run_manager.py:81` 到 `apps/studio/backend/app/services/run_manager.py:105`。
 
 Packaging 映射补充：Python runtime lock 固定多平台 Python 3.12.13 包，见 `apps/studio/tauri/python-runtime.lock.json:3` 到 `apps/studio/tauri/python-runtime.lock.json:36`。这使桌面包更自包含，但也说明当前 prod 包携带 runtime 依赖，而非调用外部 production engine。
 

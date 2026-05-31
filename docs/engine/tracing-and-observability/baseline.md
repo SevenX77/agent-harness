@@ -1,17 +1,17 @@
 # tracing-and-observability (engine) — Baseline (Round 31 event_subscriber 切轨)
 
-> **Status**: Updated by a1 (Codex), 2026-05-30
+> **Status**: Updated by a1 (Codex), 2026-05-31 — T3 event_subscriber cutover synced
 > **Scope**: Engine 执行观测性、默认 trace 落盘、实时事件订阅。
 > **配套**: workspace 写入规范见 [workspace-spec](../workspace-spec/baseline.md)。
 
 ## 1. 观测性架构变迁
 
-V0.3 当前主线不再暴露 public `trace_dir`，而是强制由 `workspace_dir` 推导 run-scoped trace 目录；`callbacks` 仍作为 PR-D 前的实时事件桥接参数保留：
+V0.3 当前主线不再暴露 public `trace_dir`，也不再暴露 public `callbacks` list。run-scoped trace 目录强制由 `workspace_dir` 推导；实时事件桥接参数是 `event_subscriber`：
 
-- `run_skill(..., workspace_dir=..., callbacks=...)` 当前签名：`packages/graph-agent/src/graph_agent/core/runner.py`
-- `_prepare_v030_callbacks()` 会创建或绑定 `TracingCallback`：`packages/graph-agent/src/graph_agent/core/runner.py:198-214`
+- `run_skill(..., workspace_dir=..., event_subscriber=...)` 当前签名：`packages/graph-agent/src/graph_agent/core/runner.py:65-79`
+- `_prepare_v030_event_sink()` 会创建 `_TraceJsonlSink` 并按需包装 subscriber / legacy callback：`packages/graph-agent/src/graph_agent/core/runner.py:237-248`
 - `_run_v030_skill_dict()` 当前根据 `workspace_dir / "runs" / run_id` 推导 trace 输出。
-- 当前主线把 callbacks 传给 resolver 和 graph assembly：`packages/graph-agent/src/graph_agent/core/runner.py:240-255`
+- 当前主线把 event sink 传给 graph assembly；resolver 需要 callback 形对象时由 `_EventSinkCallbackAdapter` 桥接。
 
 历史 bug 是：`_run_v030_skill_dict()` 曾经忘挂自动 tracing，导致 `run_skill()` 只返回 trace path 形状而不保证主线事件完整落盘。Round 31 / V4 目标是由 `run_skill()` 内部自动初始化 trace writer，修复这类调用方忘挂 callback 的问题。
 
@@ -25,10 +25,10 @@ event_subscriber: Callable[[CallbackEvent], None] | None = None
 
 ## 2. 默认落盘机制：黑匣子出口
 
-调用 `run_skill` 或 `predict_skill` 时，即使不传任何 callback 参数，SDK 也必须自动向本次 run 目录写 trace：
+调用 `run_skill` 时，即使不传任何 event subscriber，SDK 也必须自动向本次 run 目录写 trace：
 
 ```text
-<workspace_dir>/runs/<run_id>/tracing.jsonl
+<workspace_dir>/runs/<run_id>/trace.jsonl
 ```
 
 关键契约：
@@ -37,16 +37,15 @@ event_subscriber: Callable[[CallbackEvent], None] | None = None
 - `run_id` 决定本次输出目录。
 - 用户无法篡改 trace 路径。
 - Predict 与 Run 同形，同写 `<workspace_dir>/runs/<run_id>/`。
-- `tracing.jsonl` 每行是一个可序列化 `CallbackEvent`。PR-B 沿用这个文件名；改名不在本轮。
+- `trace.jsonl` 每行是一个可序列化 `CallbackEvent`。T3 已把旧 `tracing.jsonl` / summary JSON 主线替换为该单文件。
 
 这相当于飞行黑匣子：只要引擎起飞，就必须留下可回放的事件记录。
 
 现状实证：
 
-- 当前 `TracingCallback` 构造函数仍允许外部传 `trace_dir`：`packages/graph-agent/src/graph_agent/callbacks/tracing.py:58-76`
-- 当前 `TracingCallback.set_trace_dir()` 会写固定 typed stream `tracing.jsonl`：`packages/graph-agent/src/graph_agent/callbacks/tracing.py:78-85`
-- 当前 `TracingCallback.save()` 仍是 callback 实例方法：`packages/graph-agent/src/graph_agent/callbacks/tracing.py:434`
-- 当前 Studio run worker 传 `workspace_dir=run_dir.parent` 与 `thread_id=run_dir.name`，让 SDK 写同一个 run 目录；队列 callback 仍用于 Studio 实时状态桥接。
+- 当前 `_TraceJsonlSink` 写固定 typed stream `trace.jsonl`：`packages/graph-agent/src/graph_agent/callbacks/emit.py:15-26`
+- 当前 `_CompositeEventSink` fan-out 到 trace sink、subscriber sink 和内部 callback sink：`packages/graph-agent/src/graph_agent/callbacks/emit.py:48-65`
+- 当前 Studio run worker 传 `workspace_dir=run_dir.parent` 与 `thread_id=run_dir.name`，并用 `_queue_event_subscriber` 作为 Studio 实时状态桥接。
 
 Round 31 后，trace 目录 setup 已降为 SDK internal 行为；Studio 只负责传 `workspace_dir` 和 run id。
 
@@ -54,7 +53,7 @@ Round 31 后，trace 目录 setup 已降为 SDK internal 行为；Studio 只负�
 
 同一份内部事件源有两个出口：
 
-- 默认出口：SDK 写 `<workspace_dir>/runs/<run_id>/tracing.jsonl`
+- 默认出口：SDK 写 `<workspace_dir>/runs/<run_id>/trace.jsonl`
 - 可选出口：SDK 调用 `event_subscriber(event)`
 
 实时 UI、WebSocket、进度条、Timeline 首选 `event_subscriber`。它像飞行仪表盘：黑匣子照常落盘，仪表盘只负责把同源事件实时显示给前端。
@@ -76,9 +75,9 @@ def run_skill(
 现状实证：
 
 - `CallbackEvent` 已是 Pydantic discriminated union：`packages/graph-agent/src/graph_agent/callbacks/events.py:450`
-- 基础 callback 当前以 `on_event(event: CallbackEvent)` 接收事件：`packages/graph-agent/src/graph_agent/callbacks/base.py:139`
-- `TracingCallback.on_event()` 当前消费同一类 `CallbackEvent`：`packages/graph-agent/src/graph_agent/callbacks/tracing.py:113`
-- Studio 现有 queue bridge 仍是 callback class：`apps/studio/backend/app/services/run_manager.py:89-95`
+- `_SubscriberSink` 当前以函数形式调用 `event_subscriber(event)`：`packages/graph-agent/src/graph_agent/callbacks/emit.py:29-34`
+- `_CallbackSink` 仅作为内部兼容调用 `callback.on_event(event)`：`packages/graph-agent/src/graph_agent/callbacks/emit.py:37-45`
+- Studio 现有 queue bridge 是 `_queue_event_subscriber(process_queue)` 函数闭包：`apps/studio/backend/app/services/run_manager.py:74-78`
 
 ## 4. 遗留适配与清理
 
@@ -101,10 +100,10 @@ Round 31 后，具体 callback class 不再是 public SDK setup API。
 
 ### 4.2 StudioQueueCallback 纯函数化迁移
 
-当前 Studio 后端：
+当前 Studio 后端已迁移：
 
-- `StudioQueueCallback` 是继承 `Callback` 的 class：`apps/studio/backend/app/services/run_manager.py:89-95`
-- run worker 把它与 `TracingCallback` 一起传给 `run_skill`：`apps/studio/backend/app/services/run_manager.py:226-241`
+- `_queue_event_subscriber(process_queue)` 返回函数闭包：`apps/studio/backend/app/services/run_manager.py:74-78`
+- run worker 把闭包作为 `event_subscriber` 传给 `run_skill`：`apps/studio/backend/app/services/run_manager.py:95-104`
 
 目标迁移为一个函数适配器：
 
@@ -129,11 +128,11 @@ run_skill(
 
 - 内部只有一个事件源。
 - 默认落盘和实时订阅必须看到同一批 `CallbackEvent`。
-- 写入 `tracing.jsonl` 的事件必须能 replay 成 UI timeline。
+- 写入 `trace.jsonl` 的事件必须能 replay 成 UI timeline。
 - `event_subscriber` 抛错不能破坏默认 trace 落盘；SDK 应把订阅器错误归入运行期错误处理策略。
 
 ## 5. 与 workspace spec 的协同铁律
 
-- Trace 路径只写 `<workspace_dir>/runs/<run_id>/tracing.jsonl`。
+- Trace 路径只写 `<workspace_dir>/runs/<run_id>/trace.jsonl`。
 - SDK 动作只写 `run_skill` / `predict_skill` / `evaluate_golden_baseline`。
 - 不把 `trace_dir`、callback 实例、Predict tracing class 描述为 V4 public API。

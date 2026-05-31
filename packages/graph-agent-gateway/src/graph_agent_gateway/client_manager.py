@@ -14,7 +14,9 @@ from anthropic import Anthropic
 from anthropic.types import MessageParam
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
+from pydantic import SecretStr
 
+from graph_agent_gateway.registry.contracts import CredentialProviderProtocol
 from graph_agent_gateway.registry.error_classification import classify_exception
 from graph_agent_gateway.registry.schema import ResolvedRoute, RuntimePolicy
 
@@ -63,9 +65,15 @@ class LLMClientManager:
         cls,
         route: ResolvedRoute,
         runtime_policy: RuntimePolicy,
+        *,
+        credential_provider: CredentialProviderProtocol | None = None,
     ) -> bool:
         """Probe one route using runtime policy instead of class constants."""
-        return cls._probe_provider(route, runtime_policy)
+        return cls._probe_provider(
+            route,
+            runtime_policy,
+            credential_provider=credential_provider,
+        )
 
     @classmethod
     def dispatch_provider_call(
@@ -88,6 +96,7 @@ class LLMClientManager:
         reasoning_effort: str | None = None,
         call_method_id: str | None = None,
         request_mapper_id: str | None = None,
+        credential_provider: CredentialProviderProtocol | None = None,
     ) -> CallResult:
         """Call one route and return a normalized chat result."""
         return cls._dispatch_provider_call(
@@ -108,6 +117,7 @@ class LLMClientManager:
             reasoning_effort=reasoning_effort,
             call_method_id=call_method_id,
             request_mapper_id=request_mapper_id,
+            credential_provider=credential_provider,
         )
 
     @classmethod
@@ -137,6 +147,7 @@ class LLMClientManager:
         *,
         timeout_override: float | None = None,
         runtime_policy: RuntimePolicy | None = None,
+        credential_provider: CredentialProviderProtocol | None = None,
     ) -> OpenAI:
         """Return a cached OpenAI-compatible client for one route endpoint."""
         policy = runtime_policy or RuntimePolicy()
@@ -147,7 +158,7 @@ class LLMClientManager:
         if cached is not None:
             return cast(OpenAI, cached)
 
-        api_key = cls._resolve_api_key(route)
+        api_key = cls._resolve_api_key(route, credential_provider=credential_provider)
         base_url = route.base_url
         http_client = httpx.Client(
             trust_env=route.trust_env,
@@ -178,6 +189,7 @@ class LLMClientManager:
         route: ResolvedRoute,
         *,
         runtime_policy: RuntimePolicy | None = None,
+        credential_provider: CredentialProviderProtocol | None = None,
     ) -> Anthropic:
         """Return a cached Anthropic-compatible client for one route endpoint."""
         policy = runtime_policy or RuntimePolicy()
@@ -187,7 +199,7 @@ class LLMClientManager:
             return cast(Anthropic, cached)
 
         client = Anthropic(
-            api_key=cls._resolve_api_key(route),
+            api_key=cls._resolve_api_key(route, credential_provider=credential_provider),
             base_url=route.base_url or None,
             timeout=float(route.timeout_seconds),
             max_retries=0,
@@ -209,6 +221,7 @@ class LLMClientManager:
         route: ResolvedRoute,
         *,
         runtime_policy: RuntimePolicy | None = None,
+        credential_provider: CredentialProviderProtocol | None = None,
     ) -> object:
         """Return a cached google-genai client for one route endpoint."""
         policy = runtime_policy or RuntimePolicy()
@@ -224,7 +237,9 @@ class LLMClientManager:
                 "google-genai SDK is not installed; install google-genai to use google_genai routes"
             ) from exc
 
-        kwargs: dict[str, object] = {"api_key": cls._resolve_api_key(route)}
+        kwargs: dict[str, object] = {
+            "api_key": cls._resolve_api_key(route, credential_provider=credential_provider)
+        }
         if route.base_url:
             kwargs["http_options"] = {"base_url": route.base_url}
         client = genai.Client(**kwargs)
@@ -245,6 +260,7 @@ class LLMClientManager:
         route: ResolvedRoute,
         *,
         runtime_policy: RuntimePolicy | None = None,
+        credential_provider: CredentialProviderProtocol | None = None,
     ) -> object:
         """Return a cached Volcengine Ark official SDK client for one endpoint."""
         policy = runtime_policy or RuntimePolicy()
@@ -261,7 +277,9 @@ class LLMClientManager:
                 "to use ark_runtime routes"
             ) from exc
 
-        kwargs: dict[str, object] = {"api_key": cls._resolve_api_key(route)}
+        kwargs: dict[str, object] = {
+            "api_key": cls._resolve_api_key(route, credential_provider=credential_provider)
+        }
         if route.base_url:
             kwargs["base_url"] = route.base_url
         client = ark_module.Ark(**kwargs)
@@ -354,15 +372,19 @@ class LLMClientManager:
         cls,
         route: ResolvedRoute,
         runtime_policy: RuntimePolicy,
+        *,
+        credential_provider: CredentialProviderProtocol | None = None,
     ) -> bool:
         """Run a one-token active probe when the provider type supports it."""
         if route.protocol == "openai_compatible":
             try:
-                openai_client = cls._get_openai_client(
-                    route,
-                    timeout_override=runtime_policy.probe_timeout_seconds,
-                    runtime_policy=runtime_policy,
-                )
+                client_kwargs: dict[str, object] = {
+                    "timeout_override": runtime_policy.probe_timeout_seconds,
+                    "runtime_policy": runtime_policy,
+                }
+                if credential_provider is not None:
+                    client_kwargs["credential_provider"] = credential_provider
+                openai_client = cls._get_openai_client(route, **client_kwargs)
                 openai_client.chat.completions.create(
                     model=route.provider_model_id,
                     messages=cast(
@@ -389,10 +411,10 @@ class LLMClientManager:
 
         if route.protocol == "anthropic_compatible":
             try:
-                anthropic_client = cls._get_anthropic_client(
-                    route,
-                    runtime_policy=runtime_policy,
-                )
+                client_kwargs = {"runtime_policy": runtime_policy}
+                if credential_provider is not None:
+                    client_kwargs["credential_provider"] = credential_provider
+                anthropic_client = cls._get_anthropic_client(route, **client_kwargs)
                 anthropic_client.messages.create(
                     model=route.provider_model_id,
                     messages=[MessageParam(role="user", content=".")],
@@ -756,11 +778,12 @@ class LLMClientManager:
         temperature: float,
         *,
         reasoning: bool,
+        credential_provider: CredentialProviderProtocol | None = None,
         tools: list[ToolSchema] | None = None,
         tool_choice: str | None = None,
     ) -> CallResult:
         """Call WaveSpeed's Any-LLM endpoint with 5xx backoff retries."""
-        api_key = cls._resolve_api_key(route)
+        api_key = cls._resolve_api_key(route, credential_provider=credential_provider)
         prompt_parts: list[str] = []
         system_prompt = ""
         for msg in messages:
@@ -860,12 +883,16 @@ class LLMClientManager:
         reasoning_effort: str | None = None,
         call_method_id: str | None = None,
         request_mapper_id: str | None = None,
+        credential_provider: CredentialProviderProtocol | None = None,
     ) -> CallResult:
         """Route a provider call by configured endpoint protocol."""
 
         def invoke(token_budget: int) -> CallResult:
             if route.protocol == "openai_compatible":
-                client = cls._get_openai_client(route, runtime_policy=runtime_policy)
+                client_kwargs: dict[str, object] = {"runtime_policy": runtime_policy}
+                if credential_provider is not None:
+                    client_kwargs["credential_provider"] = credential_provider
+                client = cls._get_openai_client(route, **client_kwargs)
                 if call_method_id == "openai_responses":
                     return cls._call_openai_responses(
                         client,
@@ -893,10 +920,10 @@ class LLMClientManager:
                 )
 
             if route.protocol == "anthropic_compatible":
-                anthropic_client = cls._get_anthropic_client(
-                    route,
-                    runtime_policy=runtime_policy,
-                )
+                client_kwargs = {"runtime_policy": runtime_policy}
+                if credential_provider is not None:
+                    client_kwargs["credential_provider"] = credential_provider
+                anthropic_client = cls._get_anthropic_client(route, **client_kwargs)
                 return cls._call_anthropic_compatible(
                     anthropic_client,
                     route.provider_model_id,
@@ -913,7 +940,10 @@ class LLMClientManager:
                 )
 
             if route.protocol == "google_genai":
-                google_client = cls._get_google_client(route, runtime_policy=runtime_policy)
+                client_kwargs = {"runtime_policy": runtime_policy}
+                if credential_provider is not None:
+                    client_kwargs["credential_provider"] = credential_provider
+                google_client = cls._get_google_client(route, **client_kwargs)
                 return cls._call_google_genai(
                     google_client,
                     route.provider_model_id,
@@ -930,7 +960,10 @@ class LLMClientManager:
                 )
 
             if route.protocol == "ark_runtime":
-                ark_client = cls._get_ark_client(route, runtime_policy=runtime_policy)
+                client_kwargs = {"runtime_policy": runtime_policy}
+                if credential_provider is not None:
+                    client_kwargs["credential_provider"] = credential_provider
+                ark_client = cls._get_ark_client(route, **client_kwargs)
                 return cls._call_ark_runtime(
                     ark_client,
                     route.provider_model_id,
@@ -999,13 +1032,24 @@ class LLMClientManager:
         return requested
 
     @classmethod
-    def _resolve_api_key(cls, route: ResolvedRoute) -> str:
-        if route.api_key is None:
+    def _resolve_api_key(
+        cls,
+        route: ResolvedRoute,
+        *,
+        credential_provider: CredentialProviderProtocol | None = None,
+    ) -> str:
+        if not route.credential_ref:
+            raise ValueError(f"route has no credential_ref: {route.route_id}")
+        if credential_provider is None:
             raise ValueError(
-                "endpoint has no inline credential; CredentialProvider integration is required: "
-                f"{route.endpoint_id}"
+                "CredentialProvider integration is required for credential_ref: "
+                f"{route.credential_ref}"
             )
-        api_key = route.api_key.get_secret_value()
+        try:
+            secret = credential_provider.get(route.credential_ref)
+        except Exception as exc:
+            raise ValueError(f"credential is unavailable: {route.credential_ref}") from exc
+        api_key = secret.get_secret_value() if isinstance(secret, SecretStr) else str(secret)
         if not api_key:
             raise ValueError(f"endpoint has no credential: {route.endpoint_id}")
         return api_key

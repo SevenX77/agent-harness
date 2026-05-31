@@ -60,7 +60,7 @@ The host implements two calls:
 - `describe(ref) -> CredentialDescriptor`: returns non-secret availability data such as existence, status, fingerprint, scope, and update timestamp.
 - `get(ref) -> secret`: returns the secret only at execution time.
 
-The materialized snapshot carries `credential_ref`, not the secret. Existing inline `api_key` fields are migration compatibility only.
+The materialized snapshot carries `credential_ref`, not the secret. Runtime routes must not expose inline `api_key` fields.
 
 ### ExecutionTerminal
 
@@ -95,12 +95,12 @@ Hard constraints:
 - Secret-bearing caches must be keyed by credential fingerprint and invalidated on credential rotation, logout, workspace switch, endpoint deletion, or explicit host request.
 - Diagnostics must not stringify env, client, session, or secret-bearing objects.
 
-The migration path is:
+Execution-time lookup always goes through CredentialProvider:
 
-1. Add `credential_ref` while keeping `api_key` compatibility.
-2. Prefer CredentialProvider for execution.
-3. Deprecate and hide `ResolvedRoute.api_key`.
-4. Delete inline route secrets after consumers migrate.
+1. Materialized routes carry a `credential_ref`.
+2. Gateway or client terminals call `CredentialProvider.get(ref)` only at execution time.
+3. Runtime cache keys use credential fingerprints, not plaintext secrets.
+4. Route DTOs reject inline `api_key`.
 
 ## Catalog, Registry, And Readiness
 
@@ -153,9 +153,9 @@ Classification requires ErrorContext: route, endpoint, credential ref, method, m
 | 1a | Extract service shells, job store, probe runner shell, GatewayProbeClient shell |
 | 1a-r | Add standard terminal retry wrapper behind a default-off feature flag |
 | 1a-r2 | Enable standard runtime retry after telemetry and tests |
-| 1b | Add `credential_ref`, dual-write with `api_key` compatibility |
-| 1c | Prefer CredentialProvider execution-time lookup |
-| 1d | Deprecate and then delete `ResolvedRoute.api_key` |
+| 1b | Add `credential_ref` and remove route-level inline secrets |
+| 1c | Use CredentialProvider execution-time lookup |
+| 1d | Reject inline route secrets |
 | 1e | Migrate error classification to action/scope model |
 | 2a | Add Gateway provider probe primitives |
 | 2b | Remove Studio provider-specific probe construction |
@@ -182,7 +182,7 @@ The current branch implements the Phase 1 contract kernel first. Behavior-changi
 | D7 | Probe path must equal runtime path |
 | D8 | Errors classify into action plus scope |
 | D9 | Client-specific terminals are injected through a registry |
-| D10 | `api_key` to `credential_ref` migrates in phases |
+| D10 | Routes carry `credential_ref`; endpoint/local credential stores may hold `api_key` |
 | D11 | Config and readiness evidence are separate structures |
 | D12 | ClientSpec versions invalidate readiness |
 | D13 | SDK libraries, not service processes |

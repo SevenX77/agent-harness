@@ -22,6 +22,7 @@ from claude_agent_sdk.types import (
     ToolResultBlock,
     ToolUseBlock,
 )
+from pydantic import SecretStr
 
 
 class FakeClient:
@@ -127,7 +128,9 @@ def test_tool_failure_translates_to_error_event() -> None:
 
 def test_stream_query_errors_when_api_key_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        copilot, "_resolve_copilot_routes", lambda _model_override: [_resolved_route(api_key="")]
+        copilot,
+        "_resolve_copilot_runtime",
+        lambda _model_override: _runtime(_resolved_route(), ""),
     )
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi")))
 
@@ -137,10 +140,10 @@ def test_stream_query_errors_when_api_key_missing(monkeypatch: pytest.MonkeyPatc
 def test_stream_query_errors_when_model_override_is_unknown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def resolve_copilot_routes(_model_override: str | None) -> object:
+    def resolve_copilot_runtime(_model_override: str | None) -> object:
         raise KeyError("BAD_MODEL")
 
-    monkeypatch.setattr(copilot, "_resolve_copilot_routes", resolve_copilot_routes)
+    monkeypatch.setattr(copilot, "_resolve_copilot_runtime", resolve_copilot_runtime)
 
     events = asyncio.run(
         _collect(copilot.stream_query("skill-a", "hi", model_override="BAD_MODEL"))
@@ -156,7 +159,9 @@ def test_stream_query_timeout_error(monkeypatch: pytest.MonkeyPatch, tmp_path: P
         lambda _options: FakeClient(error=TimeoutError()),
     )
     monkeypatch.setattr(
-        copilot, "_resolve_copilot_routes", lambda _model_override: [_resolved_route()]
+        copilot,
+        "_resolve_copilot_runtime",
+        lambda _model_override: _runtime(_resolved_route()),
     )
 
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi", workspace_dir=tmp_path)))
@@ -171,7 +176,9 @@ def test_stream_query_sdk_network_error(monkeypatch: pytest.MonkeyPatch, tmp_pat
         lambda _options: FakeClient(error=CLIConnectionError("connection failed")),
     )
     monkeypatch.setattr(
-        copilot, "_resolve_copilot_routes", lambda _model_override: [_resolved_route()]
+        copilot,
+        "_resolve_copilot_runtime",
+        lambda _model_override: _runtime(_resolved_route()),
     )
 
     events = asyncio.run(_collect(copilot.stream_query("skill-a", "hi", workspace_dir=tmp_path)))
@@ -192,7 +199,9 @@ def test_stream_query_uses_system_prompt_and_yields_done(
     )
     monkeypatch.setattr(copilot, "_session_factory", lambda _options: client)
     monkeypatch.setattr(
-        copilot, "_resolve_copilot_routes", lambda _model_override: [_resolved_route()]
+        copilot,
+        "_resolve_copilot_runtime",
+        lambda _model_override: _runtime(_resolved_route()),
     )
 
     events = asyncio.run(
@@ -209,11 +218,27 @@ async def _collect(stream: AsyncIterator[object]) -> list[object]:
     return [event async for event in stream]
 
 
-def _resolved_route(api_key: str = "key") -> SimpleNamespace:
+class StaticCredentialProvider:
+    def __init__(self, secret: str) -> None:
+        self.secret = secret
+
+    def get(self, ref: str) -> SecretStr:
+        return SecretStr(self.secret)
+
+
+def _runtime(
+    route: SimpleNamespace,
+    secret: str = "key",
+) -> tuple[list[SimpleNamespace], StaticCredentialProvider]:
+    return [route], StaticCredentialProvider(secret)
+
+
+def _resolved_route() -> SimpleNamespace:
     return SimpleNamespace(
         endpoint_id="anthropic-official",
+        route_id="anthropic-official:claude-sonnet",
         provider_model_id="claude-sonnet",
         base_url="https://provider.test",
-        api_key=SimpleNamespace(get_secret_value=lambda: api_key),
+        credential_ref="endpoint:anthropic-official",
         call_method_id=None,
     )

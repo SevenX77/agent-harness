@@ -90,6 +90,8 @@ def test_resolver_preserves_declared_route_order_and_role_metadata() -> None:
     assert resolved.routes[0].effective_runtime_settings["reasoning.budget_tokens"].value == 4096
     assert resolved.routes[0].credential_ref == "endpoint:anthropic-official"
     assert resolved.routes[1].credential_ref == "cred:openrouter-prod"
+    assert "api_key" not in resolved.routes[0].model_dump(mode="json")
+    assert "api_key" not in resolved.routes[1].model_dump(mode="json")
     assert resolved.runtime_policy.provider_down_ttl_seconds == 60
 
 
@@ -162,4 +164,4 @@ def test_resolver_accepts_credential_ref_only_for_future_no_secret_snapshots() -
     resolved = resolve_role(snapshot, "graph_agent")
 
     assert resolved.routes[0].credential_ref == "cred:anthropic-prod"
-    assert resolved.routes[0].api_key is None
+    assert "api_key" not in resolved.routes[0].model_dump(mode="json")

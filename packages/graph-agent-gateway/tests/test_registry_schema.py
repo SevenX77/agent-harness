@@ -6,7 +6,7 @@ import pytest
 from pydantic import SecretStr, ValidationError
 
 
-def test_route_identity_and_secret_serialization() -> None:
+def test_route_identity_and_resolved_route_has_no_inline_secret() -> None:
     from graph_agent_gateway.registry.schema import ProviderRoute, ResolvedRoute
 
     route = ProviderRoute(
@@ -27,30 +27,28 @@ def test_route_identity_and_secret_serialization() -> None:
         protocol="anthropic_compatible",
         base_url="https://api.anthropic.com",
         credential_ref="cred:anthropic-prod",
-        api_key=SecretStr("secret-value"),
         credential_fingerprint="fp",
         provider_model_id=route.provider_model_id,
         canonical_id=route.canonical_id,
     )
 
     assert resolved.credential_ref == "cred:anthropic-prod"
-    assert resolved.api_key.get_secret_value() == "secret-value"
-    assert "secret-value" not in resolved.model_dump_json()
+    assert "api_key" not in resolved.model_dump(mode="json")
+    assert "cred:anthropic-prod" in resolved.model_dump_json()
 
-    no_secret = ResolvedRoute(
-        role_name="graph_agent",
-        route_id=route.route_id,
-        endpoint_id=route.endpoint_id,
-        protocol="anthropic_compatible",
-        base_url="https://api.anthropic.com",
-        credential_ref="cred:anthropic-prod",
-        credential_fingerprint="fp",
-        provider_model_id=route.provider_model_id,
-        canonical_id=route.canonical_id,
-    )
-
-    assert no_secret.api_key is None
-    assert "cred:anthropic-prod" in no_secret.model_dump_json()
+    with pytest.raises(ValidationError, match="api_key"):
+        ResolvedRoute(
+            role_name="graph_agent",
+            route_id=route.route_id,
+            endpoint_id=route.endpoint_id,
+            protocol="anthropic_compatible",
+            base_url="https://api.anthropic.com",
+            credential_ref="cred:anthropic-prod",
+            api_key=SecretStr("secret-value"),
+            credential_fingerprint="fp",
+            provider_model_id=route.provider_model_id,
+            canonical_id=route.canonical_id,
+        )
 
 
 def test_runtime_schema_rejects_display_name_fields() -> None:
@@ -115,7 +113,7 @@ def test_runtime_schema_rejects_display_name_fields() -> None:
                 "endpoint_id": "anthropic-official",
                 "protocol": "anthropic_compatible",
                 "base_url": "https://api.anthropic.com",
-                "api_key": "secret",
+                "credential_ref": "cred:anthropic-prod",
                 "credential_fingerprint": "fp",
                 "provider_model_id": "claude-sonnet-4-6",
                 "canonical_id": "claude-sonnet-4.6",
@@ -217,7 +215,7 @@ def test_ark_runtime_protocol_is_first_class() -> None:
         endpoint_id="ark-cn",
         protocol="ark_runtime",
         base_url="https://ark.cn-beijing.volces.com/api/v3",
-        api_key=SecretStr("secret"),
+        credential_ref="cred:ark-cn",
     )
     route = ResolvedRoute(
         role_name="graph_agent",
@@ -225,7 +223,7 @@ def test_ark_runtime_protocol_is_first_class() -> None:
         endpoint_id="ark-cn",
         protocol=endpoint.protocol,
         base_url=endpoint.base_url,
-        api_key=SecretStr("secret"),
+        credential_ref="cred:ark-cn",
         credential_fingerprint="fp",
         provider_model_id="deepseek-v3",
         canonical_id="deepseek-v3",

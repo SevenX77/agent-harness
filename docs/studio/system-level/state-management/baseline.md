@@ -84,7 +84,7 @@ Frontend Workspace 订阅 `/ws/events` 后把这些事件转成 editor conflict 
 
 运行流状态来自 run manager。
 Run stream 的 frontend hook 是 `useRunStream`，它维护 events/status/error，见 `apps/studio/frontend/src/hooks/useRunStream.ts:12` 到 `apps/studio/frontend/src/hooks/useRunStream.ts:20`。
-后端 `StudioQueueCallback` 转换 graph-agent callback event，见 `apps/studio/backend/app/services/run_manager.py:87` 到 `apps/studio/backend/app/services/run_manager.py:150`。
+后端 `_queue_event_subscriber(process_queue)` 转换 graph-agent `CallbackEvent` 并写入 run queue，见 `apps/studio/backend/app/services/run_manager.py:74` 到 `apps/studio/backend/app/services/run_manager.py:78`；worker 通过 `run_skill(event_subscriber=...)` 接入，见 `apps/studio/backend/app/services/run_manager.py:95` 到 `apps/studio/backend/app/services/run_manager.py:104`。
 
 Copilot 消息 state 在 frontend store，Copilot view context 在 backend service。
 Frontend 通过 `useCopilotContext` 上报 selected node 等上下文，调用点在 `apps/studio/frontend/src/components/studio/Workspace.tsx:65` 到 `apps/studio/frontend/src/components/studio/Workspace.tsx:80`。
@@ -205,4 +205,3 @@ Detailed file save behavior belongs to [workspace-file-system baseline](../works
 
 File watcher and run events enter frontend state through WebSocket.
 The realtime transport inventory belongs to [event-bus-and-websocket baseline](../event-bus-and-websocket/baseline.md).
-

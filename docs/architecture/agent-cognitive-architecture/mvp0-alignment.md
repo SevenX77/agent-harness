@@ -112,24 +112,24 @@ The class still exists in `packages/graph-agent/src/graph_agent/core/harness.py:
 MVP0 SHOULD make new work target V2.1 graph runtime first.
 
 The V2.1 runtime entry should become the canonical path for directory skills.
-Current `_run_v21_skill_dict()` compiles, assembles, and invokes the graph in `packages/graph-agent/src/graph_agent/core/runner.py:451` to `packages/graph-agent/src/graph_agent/core/runner.py:486`.
+Current `_run_v030_skill_dict()` compiles, assembles, and invokes the graph in `packages/graph-agent/src/graph_agent/core/runner.py:298` to `packages/graph-agent/src/graph_agent/core/runner.py:342`.
 MVP0 SHOULD connect this path to ModelResolver, callbacks, trace, input funnel, and artifact output.
 
 The backend SHOULD keep `run_skill()` as the public compatibility entry but route V2.1 through a clean architecture.
-Current `run_skill()` signature is in `packages/graph-agent/src/graph_agent/core/runner.py:161` to `packages/graph-agent/src/graph_agent/core/runner.py:173`.
+Current `run_skill()` signature is in `packages/graph-agent/src/graph_agent/core/runner.py:65` to `packages/graph-agent/src/graph_agent/core/runner.py:79`.
 The old path may remain for legacy skills, but Studio MVP0 should create and run V2.1 skills.
 
 MVP0 SHOULD make LOGIC/SUBGRAPH/SKILL a closed runtime dispatch.
-Current dispatch happens in `_build_phase_node()` in `packages/graph-agent/src/graph_agent/core/graph_assembler.py:99` to `packages/graph-agent/src/graph_agent/core/graph_assembler.py:113`.
+Current dispatch happens in `_build_phase_node()` in `packages/graph-agent/src/graph_agent/core/graph_assembler.py:156` to `packages/graph-agent/src/graph_agent/core/graph_assembler.py:215`.
 MVP0 SHOULD add missing runtime contracts around each branch rather than moving behavior back into Harness.
 
 MVP0 SHOULD solve P0-1 by inserting ModelResolver before graph assembly.
-Current runner passes `chat_model = None` without mock in `packages/graph-agent/src/graph_agent/core/runner.py:467` to `packages/graph-agent/src/graph_agent/core/runner.py:474`, and SKILL node raises without a model in `packages/graph-agent/src/graph_agent/core/graph_assembler.py:229` to `packages/graph-agent/src/graph_agent/core/graph_assembler.py:234`.
+Current runner derives `chat_model` / `active_model_resolver` before graph assembly in `packages/graph-agent/src/graph_agent/core/runner.py:332` to `packages/graph-agent/src/graph_agent/core/runner.py:342`, and SKILL node raises without a model in `packages/graph-agent/src/graph_agent/core/graph_assembler.py:408` to `packages/graph-agent/src/graph_agent/core/graph_assembler.py:413`.
 Execution runtime owns the ModelResolver interface in [execution-runtime mvp0](../../engine/execution-runtime/mvp0-alignment.md#1-modelresolver-接口声明).
 
 MVP0 SHOULD solve P1-4 by making trace/callback a V2.1 lifecycle contract.
-Current V2.1 runner deletes callbacks in `packages/graph-agent/src/graph_agent/core/runner.py:462`.
-Studio currently expects callbacks in `apps/studio/backend/app/services/run_manager.py:228` to `apps/studio/backend/app/services/run_manager.py:235`.
+Current runner builds an event sink in `packages/graph-agent/src/graph_agent/core/runner.py:237` to `packages/graph-agent/src/graph_agent/core/runner.py:248`.
+Studio currently passes an `event_subscriber` function via `_queue_event_subscriber`, not a callback list, in `apps/studio/backend/app/services/run_manager.py:74` to `apps/studio/backend/app/services/run_manager.py:105`.
 Tracing owns the event model in [tracing-and-observability mvp0](../../engine/tracing-and-observability/mvp0-alignment.md#api).
 
 MVP0 SHOULD upgrade Copilot session building.
@@ -235,7 +235,7 @@ Current manifest has `phases`, `io_inputs_ref`, and `io_outputs_ref`, see `packa
 MVP0 SHOULD add phase IO schema through skill-compilation, not by inventing a separate Studio-only model.
 
 MVP0 SHOULD make Studio run state a projection of engine state.
-Current Studio `RunDetail` reads metadata, input data, events, final context, and artifacts in `apps/studio/backend/app/services/run_manager.py:408` to `apps/studio/backend/app/services/run_manager.py:422`.
+Current Studio `RunDetail` reads metadata, input data, events, final context, and artifacts in `apps/studio/backend/app/services/run_manager.py:304` to `apps/studio/backend/app/services/run_manager.py:317`.
 MVP0 should continue exposing Studio-friendly run detail while preserving event and phase output fidelity.
 
 MVP0 SHOULD make Copilot context state message-scoped.

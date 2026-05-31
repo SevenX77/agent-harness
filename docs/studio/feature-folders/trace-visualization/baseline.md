@@ -26,7 +26,7 @@ Trace 列表有 selected event 定位逻辑：当 `selectedEventId` 存在时，
 
 ## 后端功能
 
-运行时事件来自 `RunManager` 和 `StudioQueueCallback`。callback 会把 graph agent 的 phase_start、phase_end、llm_call 等事件转换为 Studio run event，并进入队列，见 `apps/studio/backend/app/services/run_manager.py:87` 到 `apps/studio/backend/app/services/run_manager.py:130`。实际运行 skill 时会创建 `TracingCallback` 并传给 subprocess worker，见 `apps/studio/backend/app/services/run_manager.py:220` 到 `apps/studio/backend/app/services/run_manager.py:234`。
+运行时事件来自 `RunManager` 和 `_queue_event_subscriber(process_queue)`。subscriber 会把 graph-agent 的 `phase_start`、`phase_end`、`llm_call` 等 typed event 转换为 Studio run event，并进入队列，见 `apps/studio/backend/app/services/run_manager.py:74` 到 `apps/studio/backend/app/services/run_manager.py:78`。实际运行 skill 时，subprocess worker 调用 `run_skill(event_subscriber=emit_to_queue, ...)`，默认 trace 由 engine 内部写入 `trace.jsonl`，见 `apps/studio/backend/app/services/run_manager.py:95` 到 `apps/studio/backend/app/services/run_manager.py:104`。
 
 运行结束后，后端写入 final_state 和 metrics，见 `apps/studio/backend/app/services/run_manager.py:238` 到 `apps/studio/backend/app/services/run_manager.py:243`。获取 run detail 时返回 metadata、input_data、events、final_context 和 artifacts，见 `apps/studio/backend/app/services/run_manager.py:408` 到 `apps/studio/backend/app/services/run_manager.py:422`。
 

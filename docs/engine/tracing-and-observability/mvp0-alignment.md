@@ -6,13 +6,14 @@
 
 ## V0.3.0 改造摘要
 
-本文件保留 V2.1 MVP0 的方向: 运行主线恢复 callbacks, TOOL_CALL 事件带 `tool_name`, EXCEPTION 保留结构化错误。当前源码事实是 Pydantic `CallbackEvent` union + 小写 `event_type` 字符串；`TraceEventKind` / `AgentTraceEvent` 仍是目标态描述，不是已落地 API。V0.3.0 只补 3 类事件协议:
+本文件保留 V2.1 MVP0 的历史方向，但其中“运行主线恢复 public callbacks list”的方向已被 Round 32 PR-1 / T3 明确替代：**[SUPERSEDED by V0.3.0 event_subscriber cutover]**。当前源码事实是 Pydantic `CallbackEvent` union + 小写 `event_type` 字符串；public `run_skill()` 暴露 `event_subscriber`，SDK 内部用 event sink 写 `trace.jsonl`。`TraceEventKind` / `AgentTraceEvent` 仍是目标态描述，不是已落地 API。
 
 | 改造点 | 新语义 | 决议来源 |
 |---|---|---|
 | C14 | 新增 `ambiguity_logged`, `log_ambiguity` 不只是一条普通 `tool_call`, 还要投递业务反馈事件 | [Studio V0.3.0 新需求 #3](../../studio/V0.3.0-NEW-REQUIREMENTS--DO-NOT-DELETE-DURING-CLEANUP.md) |
 | C15 | builtin reference reader subagent 使用 `builtin_subagent_enter` / `builtin_subagent_exit`, 与用户 subagent 区分 | [Builtin Modules](../skill-spec/09-builtin-modules-spec.md#builtin-reference-reader-subagent-签名) |
 | 改造点 3 | 装配期 reader 失败发 `builtin_subagent_fallback` WARN, 携带 timeout/error/config missing/invalid/local IO 原因 | [Reference 三机制](../skill-spec/08-resource-mechanisms-spec.md#reference-三机制生命周期) |
+| T3 | public `callbacks` list 切到 `event_subscriber`; 默认 trace 单写 `<workspace>/runs/<run_id>/trace.jsonl`; phase lifecycle 由 common wrapper 单源发出 | Round 32 PR-1 event_subscriber cutover |
 
 Tracing 不决定业务执行, 只记录真实 runtime / assembly 调用点。任何 trace payload 都必须来自 StateMapper / runtime 已校验数据, 不记录未授权全局黑板。
 
@@ -32,12 +33,12 @@ N/A — 此模块为纯 backend Python library, 无 React 逻辑。
 
 ### 1. Runtime Callback 与 Trace 事件分发体系恢复 (P1-4)
 
-MVP0 SHOULD 把 callbacks / trace 接回 graph runtime 主线。事件应由真实执行点发出, 不是由顶层 `graph.invoke()` 外围猜测。
+MVP0 SHOULD 把 trace 接回 graph runtime 主线。T3 后 live API 不再是 public `callbacks` list，而是 `event_subscriber` + 内部 `_CompositeEventSink`。事件应由真实执行点发出, 不是由顶层 `graph.invoke()` 外围猜测。
 
 | 事件 | 触发点 | 必填 payload | 校验规则 | 错误码 | 业务作用 |
 |---|---|---|---|---|---|
-| `NODE_START` | Phase Wrapper 调用节点前 | `phase_id`, `phase_input` | input 必须是 StateMapper 切片 | — | 展示节点开始与输入 |
-| `NODE_END` | 节点返回 phase output 后 | `phase_id`, `phase_output`, `duration_ms` | output 已满足 phase `io.outputs` | — | 展示节点结果 |
+| `phase_start` | `_wrap_phase_runtime_node` 调用 LOGIC / SUBGRAPH / Agent 节点前 | `phase_name`, `context={inputs, phase_outputs, scratch}` | context 来自 normalized blackboard | — | 展示节点开始与输入 |
+| `phase_end` | `_wrap_phase_runtime_node` 节点返回或异常 finally | `phase_name`, `context={inputs, phase_outputs, scratch}` | response data 翻译为 phase_outputs | — | 展示节点结果 |
 | `LLM_CALL_START` | Agent model invoke 前 | `phase_id`, `messages_summary` | prompt 可截断, 不泄漏 secrets | — | 展示模型调用开始 |
 | `LLM_CALL_END` | Agent model invoke 后 | `phase_id`, `response_summary`, `usage` | response 可截断 | — | 展示模型响应 |
 | `TOOL_CALL_START` | Tool invoke 前 | `phase_id`, `tool_name`, `tool_call_id`, `validated_args` | args 必须是校验后结构 | — | 展示工具调用请求 |
@@ -69,7 +70,7 @@ Agent cognitive template 要求规则不清晰时调用 `log_ambiguity`。Runtim
 1. tool wrapper / callback bridge 记录普通 tool lifecycle。
 2. `log_ambiguity` 成功写业务记录。
 3. `_emit_ambiguity_logged` 经 `callback.on_event(...)` 并列投递 `ambiguity_logged`。
-4. `TracingCallback.on_tool_call()` 继续写 `tool_call`，不被业务事件替代。
+4. Agent loop 继续发 `ToolCallEvent(event_type="tool_call")`，不被业务事件替代；默认 `_TraceJsonlSink` 会把两类事件都写入 `trace.jsonl`。
 
 Studio 需求来源见 [V0.3.0 New Requirements](../../studio/V0.3.0-NEW-REQUIREMENTS--DO-NOT-DELETE-DURING-CLEANUP.md), builtin tools 背景见 [Builtin Modules](../skill-spec/09-builtin-modules-spec.md#按需调取-tools-read_reference--read_example)。
 
@@ -118,9 +119,9 @@ builtin_subagent_enter
 
 Fallback 是 WARN, 不阻断 Agent run。`[F-v3-resource-reference-path-invalid]` 是 FATAL path 边界错误, 会 re-raise, 不发 fallback。Reference 机制见 [Reference 三机制生命周期](../skill-spec/08-resource-mechanisms-spec.md#reference-三机制生命周期)。
 
-### 5. 异步日志记录器构建
+### 5. 异步日志记录器构建 [SUPERSEDED live path note]
 
-MVP0 SHOULD 避免 trace 写盘阻塞模型推理。Runtime 只把结构化事件放入队列, 后台 writer 批量写 `tracing.jsonl` 或推送 event bus。
+MVP0 历史目标曾希望异步 writer 批量写 `tracing.jsonl` 或推送 event bus。T3 live path 没有引入异步队列；当前 SDK 同步 append `<workspace>/runs/<run_id>/trace.jsonl`，实时 UI 通过 `_SubscriberSink(event_subscriber)` fan-out。该异步 logger 仍可作为未来目标态讨论，但不能再描述为当前实现。
 
 | 字段 / 设置 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
 |---|---|---|---|---|---|---|
@@ -128,7 +129,7 @@ MVP0 SHOULD 避免 trace 写盘阻塞模型推理。Runtime 只把结构化事�
 | `drop_policy` | enum | 否 | `drop_low_value` | 不得丢 `EXCEPTION`, `NODE_END`, fallback events | — | 防止日志拖垮业务 |
 | `payload_max_bytes` | integer | 否 | `65536` | 超限截断并标记 | — | 防止单事件过大 |
 | `file_rotate_mb` | integer | 否 | `50` | `> 0` | — | 控制磁盘体积 |
-| `write_failure` | WARN | 否 | continue | 写盘失败不阻断 run | `[F-v3-runtime-phase-failed]` 仅用于业务异常, 不用于普通写盘 WARN | 保持 runtime 可用 |
+| `write_failure` | WARN | 否 | continue | T3 live path 由 `_CompositeEventSink.emit()` 捕获单 sink 异常并继续其它 sink | `[F-v3-runtime-phase-failed]` 仅用于业务异常, 不用于普通写盘 WARN | 保持 runtime 可用 |
 
 高价值事件不能丢: `EXCEPTION`, `BUILTIN_SUBAGENT_FALLBACK`, `AMBIGUITY_LOGGED`, `NODE_END`。
 
@@ -166,7 +167,7 @@ class TraceEventKind(StrEnum):
 
 枚举只做 additive 扩展, 不重命名已发布值。
 
-### 3. TracingCallback V2 接口定义 (目标态)
+### 3. TracingCallback V2 接口定义 (历史目标态，已被 T3 public API 替代)
 
 ```python
 class V2TracingCallback:
@@ -182,7 +183,18 @@ def on_builtin_subagent_fallback(run_id: str, phase_id: str, payload: dict) -> N
 def on_ambiguity_logged(run_id: str, phase_id: str, payload: dict) -> None: ...
 ```
 
-Callback 实现可写文件、推 event bus 或转 WebSocket。当前源码入口是 `Callback.on_event(event: CallbackEvent)` 和 legacy `on_*` hook, 不是 `AgentTraceEvent`。
+Callback 实现可写文件、推 event bus 或转 WebSocket。当前源码入口是 public `event_subscriber(event: CallbackEvent)`；继承式 `Callback.on_event(event)` 和 legacy `on_*` hook 只作为内部兼容 sink 使用，不再是 public `run_skill` 的配置面。
+
+### 3.1 T3 live event sink API
+
+| 字段 / 类 | 类型 | 必填 | 默认值 | 校验规则 | 错误码 | 业务作用 |
+|---|---|---|---|---|---|---|
+| `run_skill(..., event_subscriber=...)` | `Callable[[CallbackEvent], None] | None` | 否 | `None` | public API；订阅器只接收 typed event，不决定落盘路径 | 订阅器异常被记录并隔离 | Studio timeline / tests 实时消费 |
+| `_TraceJsonlSink.path` | Path | 是 | `<workspace>/runs/<run_id>/trace.jsonl` | SDK 内部固定文件名，初始化清空，之后逐事件 append | IO 异常记录在 sink 派发层；无 summary `TraceWriteError` 阶段 | 默认黑匣子落盘 |
+| `_SubscriberSink` | private sink | 否 | 无 | 包装 public subscriber，调用 `subscriber(event)` | 单 sink 异常不阻断其它 sink | WebSocket / queue / Predict bridge |
+| `_CallbackSink` | private sink | 否 | 无 | 只调用 legacy `callback.on_event(event)` | 单 sink 异常不阻断其它 sink | 兼容旧内部对象 |
+| `_CompositeEventSink.trace_path` | Path/null | 是 | 第一个 `_TraceJsonlSink.path` | fan-out 到所有 sink | 单 sink 失败继续 fan-out | `WorkflowResult.trace_path` 来源 |
+| `_EventSinkCallbackAdapter.on_event` | method | resolver 需要 gateway fallback 时 | 无 | `.on_event(event) -> sink.emit(event)` | 未识别 callbacks 对象 `TypeError`，杜绝静默吞事件 | 让 gateway `LLMFallbackEvent` 回到 sink |
 
 ## Data Model / State
 
@@ -243,15 +255,15 @@ Trace payload 不保存 provider API key、HTTP headers、完整大文档或未�
 
 ## 与当前源码的差异
 
-本文件描述的是目标收敛方向；当前 trace / callback 体系还没有完全接入 graph skill 主线：
+本文件包含历史目标态和 T3 live path。当前 trace / event_subscriber 体系的源码事实为：
 
 | 本文件目标态 | 当前源码事实 |
 |---|---|
-| runtime 在 phase start/end、LLM、tool、subagent 等真实调用点发事件 | 当前 PR E 已接 `log_ambiguity` + builtin reference reader 装配期事件; 完整 phase lifecycle 仍未全部接线。 |
+| runtime 在 phase start/end、LLM、tool、subagent 等真实调用点发事件 | **已部分对齐 (T3)**: `_wrap_phase_runtime_node` 单源发 LOGIC / SUBGRAPH / Agent 的 `phase_start` / `phase_end`; Agent loop 发 `llm_call` / `tool_call`; runner 只发 `run_started` / `run_ended`。 |
 | 统一 `AgentTraceEvent` / `TraceEventKind` schema | 当前主要是 Pydantic `CallbackEvent` union，事件名是小写字符串；不要把目标 enum 当已实现 API。 |
-| `NODE_START` / `NODE_END` payload 来自 StateMapper 沙盒输入输出 | 当前事件协议有 `phase_start` / `phase_end`，但 graph skill path 没有在 PhaseWrapper 中发这些事件。 |
+| `NODE_START` / `NODE_END` payload 来自 StateMapper 沙盒输入输出 | live API 名称是 `phase_start` / `phase_end`；graph skill path 已在 `_wrap_phase_runtime_node` 中发这些事件。 |
 | TOOL_CALL start/end 分离并带 `tool_call_id` | 当前 `ToolCallEvent` 是单个 `tool_call` 事件，字段为 `phase_name/tool_name/args/result/duration_ms`。 |
-| builtin reference reader enter/exit/fallback 在装配期真实发出 | 当前已通过 `assemble_graph(..., callbacks=...)` 接线, loader/runner 入口透传 callbacks; 缺省状态下 `_run_v030_skill_dict` 也能接管事件流并强制自动落盘。 |
-| fallback 事件通过统一 tracing 底座发出 | 当前 gateway fallback 直接遍历 callbacks 调 `on_event`。 |
+| builtin reference reader enter/exit/fallback 在装配期真实发出 | 当前已通过 `assemble_graph(..., callbacks=event_sink)` 接线；缺省状态下 `_TraceJsonlSink` 也能接管事件流并强制自动落盘到 `trace.jsonl`。 |
+| fallback 事件通过统一 tracing 底座发出 | 当前 gateway fallback 仍直接遍历 resolver 得到的 `callbacks` 并调 `on_event`；T3 用 `_EventSinkCallbackAdapter` 把 event sink 包成 callback 形对象，避免 fallback 事件被吞。 |
 | prompt、reference、tool result 按统一策略截断 | 当前部分 proxy / tracing 能做轻量序列化，但没有全局统一截断策略覆盖所有 graph skill 事件。 |
-| 异步日志记录器 (queue / drop policy / payload 上限 / 文件轮转) | **目标态 (MVP0 SHOULD)，PR E 未实现**；当前 `TracingCallback` 同步写 JSONL，无异步队列 / 背压 / 轮转。 |
+| 异步日志记录器 (queue / drop policy / payload 上限 / 文件轮转) | **目标态 (MVP0 SHOULD)，T3 未实现**；当前 `_TraceJsonlSink` 同步 append JSONL，无异步队列 / 背压 / 轮转。 |

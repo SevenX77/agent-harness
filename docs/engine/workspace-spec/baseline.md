@@ -1,6 +1,6 @@
 # workspace-spec (engine) — Baseline (Round 31)
 
-> **Status**: Created by a1 (Codex), 2026-05-30
+> **Status**: Created by a1 (Codex), 2026-05-30; synced for T3 trace.jsonl cutover, 2026-05-31
 > **Scope**: Engine 接收 `workspace_dir: Path` 后，在该目录内创建和读取的固定子结构。
 > **配套**: Studio root 定位见 [studio workspace-file-system](../../studio/system-level/workspace-file-system/baseline.md)。
 
@@ -49,7 +49,7 @@ Engine 是施工队：它只在传入的 `workspace_dir: Path` 里盖固定户�
 
 | 文件 | 写入方 | 内容 |
 |---|---|---|
-| `tracing.jsonl` | SDK | one JSON `CallbackEvent` per line |
+| `trace.jsonl` | SDK | one JSON `CallbackEvent` per line |
 | `result.json` | SDK | serialized `RunResult` |
 | `final_state.json` | SDK | final `RunResult.context` snapshot |
 | `metrics.json` | SDK | serialized `RunResult.metrics` |
@@ -57,7 +57,7 @@ Engine 是施工队：它只在传入的 `workspace_dir: Path` 里盖固定户�
 
 字段级落点：
 
-- `tracing.jsonl` 是固定名 typed event stream；PR-B 不改名为 `trace.jsonl`。
+- `trace.jsonl` 是固定名 typed event stream；T3 已取代旧 `tracing.jsonl` / summary JSON 主线。
 - `result.json` 是 SDK 返回结果的 JSON 形态，给宿主按 run id 重新读取。
 - `final_state.json` 是 `RunResult.context` 快照，给 Golden/Compare 等后续流程复用。
 - `metrics.json` 是 `RunResult.metrics` 快照。

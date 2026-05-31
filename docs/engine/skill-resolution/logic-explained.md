@@ -331,14 +331,15 @@ LocalWorkspaceResolver(
 
 ### `parallel_map`
 
-位置：`parallel_map.py:43-54` 和 `parallel_map.py:230-235`
+位置：`parallel_map.py:43-54` 和 `parallel_map.py:275-329`
 
 字段：
 
 - `skill_resolver: SkillResolverProtocol`：`parallel_map` 顶层参数。
 - `_run_one_item(..., skill_resolver)`：每个 item 的 child run 都接收同一个 resolver。
+- `callbacks`：仍是 `parallel_map` 内部兼容参数；child run 不再把 callbacks 作为 public `run_skill` 参数，而是经 `_legacy_callback_subscriber(callbacks)` 包成 `event_subscriber`。
 
-流程：每个并发 child run 调 `run_skill(skill_path, ..., skill_resolver=skill_resolver)`。
+流程：每个并发 child run 调 `run_skill(skill_path, ..., event_subscriber=_legacy_callback_subscriber(callbacks), skill_resolver=skill_resolver)`。这样子运行也写自己的 `trace.jsonl`，同时把事件回推给父级 legacy callback 列表。
 
 ### `md_to_json`
 

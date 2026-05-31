@@ -14,6 +14,7 @@ from typing import Any
 
 from graph_agent_gateway.registry.canonical import canonicalize_model
 from graph_agent_gateway.registry.capabilities import normalize_route_capabilities
+from graph_agent_gateway.registry.schema import CapabilitySource
 from pydantic import SecretStr, ValidationError
 
 from app.models.llm_config import LLMCredentialsFile, ProviderEndpoint, ProviderRoute
@@ -317,7 +318,7 @@ def _v3_payload_to_v4(payload: dict[str, Any]) -> LLMCredentialsFile:
             last_test_message=provider.get("last_test_message") or None,
         )
         endpoints[endpoint_id] = endpoint
-        capability_source = (
+        capability_source: CapabilitySource = (
             "probed_verified" if provider.get("last_test_status") == "ok" else "api_list"
         )
         for model in _legacy_models(provider):

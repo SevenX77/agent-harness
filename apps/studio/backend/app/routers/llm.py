@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, NoReturn, cast
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -26,7 +26,16 @@ from graph_agent_gateway.registry.profile_selector import (
     select_verified_profile,
 )
 from graph_agent_gateway.registry.resolver import RegistryResolutionError, resolve_role
-from graph_agent_gateway.registry.schema import RuntimeSettings, VerifiedProfile
+from graph_agent_gateway.registry.schema import (
+    ProviderRoute as GatewayProviderRoute,
+)
+from graph_agent_gateway.registry.schema import (
+    RoleEntry as GatewayRoleEntry,
+)
+from graph_agent_gateway.registry.schema import (
+    RuntimeSettings,
+    VerifiedProfile,
+)
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.models.llm_config import (
@@ -82,6 +91,7 @@ from app.services.llm_model_groups import (
     project_model_group_identity,
 )
 from app.services.llm_model_identity import project_model_identity
+from app.services.llm_notable_models import notable_model_ids
 from app.services.llm_role_materializer import materialize_model_bundle, materialize_role
 from app.services.llm_roles import (
     InvalidRoleReference,
@@ -95,7 +105,10 @@ from app.services.llm_route_capabilities import (
     route_effective_capabilities,
     verified_profile_route_capabilities,
 )
-from app.services.llm_state_projection import project_provider_model_state
+from app.services.llm_state_projection import (
+    ProviderModelStateProjection,
+    project_provider_model_state,
+)
 from app.services.official_capability_sources import (
     OfficialCapabilityRule,
     official_api_list_source_urls,
@@ -126,7 +139,7 @@ _THINKING_CAPABILITY_KEYS = (
 class OfficialLanguageProbeCandidate:
     profile_id: str
     capability: str
-    method_id: str
+    method_id: OfficialCallMethod
     request_mapper_id: str
     runtime_settings: dict[str, Any] = field(default_factory=dict)
     default_rank: int = 100
@@ -177,6 +190,12 @@ class EndpointTestJobResponse(BaseModel):
     message: str | None = None
     available_models: list[EndpointTestCompactModelInfo] = Field(default_factory=list)
     available_sdks: list[str] = Field(default_factory=list)
+
+
+class ProviderNotableModelsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    notable_models: list[str]
 
 
 class RoleTestProviderProgressInfo(BaseModel):
@@ -386,7 +405,7 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
     if endpoint is None:
         raise HTTPException(status_code=404, detail=f"Unknown endpoint: {endpoint_id}")
     starting_fingerprint = credentials.endpoint_fingerprint(endpoint_id)
-    status: Literal["unverified_manual", "failed"] = "failed"
+    status: Literal["verified", "unverified_manual", "failed"] = "failed"
     message = "API key is empty."
     model_list_reached = False
     discovered_model_ids: tuple[str, ...] = ()
@@ -543,6 +562,12 @@ async def test_endpoint(endpoint_id: str) -> EndpointTestResponse:
         tested_endpoint_id=endpoint_id,
         discovered_model_count=len(discovered_model_ids),
     )
+
+
+@router.get("/providers/notable-models", response_model=ProviderNotableModelsResponse)
+def get_provider_notable_models(provider_key: str) -> ProviderNotableModelsResponse:
+    """Return doc-maintained model ID suggestions for manual provider probing."""
+    return ProviderNotableModelsResponse(notable_models=notable_model_ids(provider_key))
 
 
 @router.post("/endpoints/{endpoint_id}/models/test", response_model=EndpointModelTestResponse)
@@ -712,7 +737,7 @@ async def test_endpoint_models(
                 }
             )
             save_credentials(latest_credentials)
-        route_ids_by_model: dict[str, str] = {}
+        route_ids_by_model = {}
     results = [
         EndpointModelTestResult(
             model_id=result.model_id,
@@ -1261,12 +1286,18 @@ def _registry_response(
         routes_by_canonical.setdefault(route.canonical_id, []).append(route_id)
     lint_results = []
     for role_name, role in roles.roles.items():
-        role_routes = [
-            route
-            for entry in role.fallback_chain
-            if (route := credentials.provider_routes.get(entry.route_id)) is not None
-        ]
-        lint_results.extend(lint_role_routes(role_name, role, role_routes))
+        role_routes: list[ProviderRoute] = []
+        for entry in role.fallback_chain:
+            role_route = credentials.provider_routes.get(entry.route_id)
+            if role_route is not None:
+                role_routes.append(role_route)
+        lint_results.extend(
+            lint_role_routes(
+                role_name,
+                cast(GatewayRoleEntry, role),
+                cast(list[GatewayProviderRoute], role_routes),
+            )
+        )
     return RegistryResponse(
         provider_endpoints=credentials.provider_endpoints,
         provider_routes=credentials.provider_routes,
@@ -1299,14 +1330,14 @@ def _normalize_credentials_for_registry_response(
     provider_routes: dict[str, ProviderRoute] = {}
     changed = False
     for endpoint_id, endpoint in credentials.provider_endpoints.items():
-        normalized = _normalize_endpoint_metadata_for_registry_response(endpoint)
-        provider_endpoints[endpoint_id] = normalized
-        changed = changed or normalized is not endpoint
+        normalized_endpoint = _normalize_endpoint_metadata_for_registry_response(endpoint)
+        provider_endpoints[endpoint_id] = normalized_endpoint
+        changed = changed or normalized_endpoint is not endpoint
     for route_id, route in credentials.provider_routes.items():
-        endpoint = provider_endpoints.get(route.endpoint_id)
-        normalized = _normalize_route_for_registry_response(route, endpoint)
-        provider_routes[route_id] = normalized
-        changed = changed or normalized is not route
+        route_endpoint = provider_endpoints.get(route.endpoint_id)
+        normalized_route = _normalize_route_for_registry_response(route, route_endpoint)
+        provider_routes[route_id] = normalized_route
+        changed = changed or normalized_route is not route
     if not changed:
         return credentials
     return credentials.model_copy(
@@ -2301,7 +2332,7 @@ def _openai_reasoning_probe_runtime_settings(model_id: str) -> dict[str, Any]:
 
 def _openai_reasoning_probe_candidates(
     *,
-    method_id: str,
+    method_id: OfficialCallMethod,
     model_id: str,
     default_rank: int,
     fallback_rank: int,
@@ -2354,7 +2385,7 @@ def _openai_prefers_responses_only(model_id: str) -> bool:
 
 
 def _candidate(
-    method_id: str,
+    method_id: OfficialCallMethod,
     profile_id: str,
     capability: str,
     request_mapper_id: str,
@@ -2514,7 +2545,7 @@ def _official_catalog_candidate_methods(
     model_id: str,
     model_type: str,
 ) -> list[str]:
-    methods = {
+    methods: set[str] = {
         candidate.method_id
         for candidate in _official_language_probe_candidates(endpoint, model_id)
     }
@@ -2691,14 +2722,18 @@ def _official_verified_model_capabilities(
     raw_capabilities: dict[str, Any] | None = None,
 ) -> dict[str, object]:
     capabilities = _official_catalog_capabilities(endpoint, model_id, raw_capabilities)
-    catalog_input_modalities = [
-        value for value in capabilities.get("input_modalities", [])
-        if isinstance(value, str)
-    ] if isinstance(capabilities.get("input_modalities"), list) else []
-    catalog_output_modalities = [
-        value for value in capabilities.get("output_modalities", [])
-        if isinstance(value, str)
-    ] if isinstance(capabilities.get("output_modalities"), list) else []
+    raw_input_modalities = capabilities.get("input_modalities")
+    raw_output_modalities = capabilities.get("output_modalities")
+    catalog_input_modalities = (
+        [value for value in raw_input_modalities if isinstance(value, str)]
+        if isinstance(raw_input_modalities, list)
+        else []
+    )
+    catalog_output_modalities = (
+        [value for value in raw_output_modalities if isinstance(value, str)]
+        if isinstance(raw_output_modalities, list)
+        else []
+    )
     verified_input_modalities = sorted(
         {
             modality
@@ -3513,7 +3548,7 @@ def _default_official_text_method(endpoint: ProviderEndpoint) -> tuple[str, str]
     return "openai_responses", "openai_responses_text"
 
 
-def _role_test_entries(role: RoleEntry):
+def _role_test_entries(role: RoleEntry) -> list[tuple[dict[str, Any], RoleRouteEntry | None]]:
     fallback_by_route = {entry.route_id: entry for entry in role.fallback_chain}
     report = role.materialization_report if isinstance(role.materialization_report, dict) else {}
     report_entries = [
@@ -3553,7 +3588,10 @@ def _merge_role_test_status(current: str, provider_result: dict[str, Any]) -> st
     return current
 
 
-def _provider_model_projection(route: ProviderRoute, endpoint: ProviderEndpoint):
+def _provider_model_projection(
+    route: ProviderRoute,
+    endpoint: ProviderEndpoint,
+) -> ProviderModelStateProjection:
     now = datetime.now(UTC)
     return project_provider_model_state(
         endpoint=endpoint,
@@ -3596,7 +3634,9 @@ def _upsert_discovered_routes(
         status: Literal["verified", "unverified_manual"] = (
             "verified" if verified else "unverified_manual"
         )
-        capability_source = "probed_verified" if verified else "api_list"
+        capability_source: Literal["api_list", "probed_verified"] = (
+            "probed_verified" if verified else "api_list"
+        )
         if existing is None:
             routes[route_id] = _provider_route(
                 endpoint=endpoint,
@@ -3879,7 +3919,7 @@ def _endpoint_references(
 
 
 def _route_references(route_id: str, roles: RolesData) -> dict[str, list[str]]:
-    refs = {"roles": [], "model_profiles": [], "model_bundles": []}
+    refs: dict[str, list[str]] = {"roles": [], "model_profiles": [], "model_bundles": []}
     for role_name, role in roles.roles.items():
         refs["roles"].extend(_role_route_references(role_name, role, {route_id}))
     for profile_id, profile in roles.model_profiles.items():
@@ -3976,7 +4016,7 @@ def _provider_error_message(prefix: str, exc: BaseException) -> str:
     return f"{prefix}."
 
 
-def _raise_conflict(error_code: str, message: str, details: dict[str, Any]) -> None:
+def _raise_conflict(error_code: str, message: str, details: dict[str, Any]) -> NoReturn:
     raise HTTPException(
         status_code=409,
         detail={

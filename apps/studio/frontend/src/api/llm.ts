@@ -511,15 +511,6 @@ export interface RolesData {
   [key: string]: unknown
 }
 
-const localNotableModels: Record<string, string[]> = {
-  anthropic: ['claude-opus-4-7', 'claude-sonnet-4-6-thinking', 'claude-3-5-sonnet'],
-  openai: ['gpt-5', 'gpt-4.1', 'gpt-4o'],
-  gemini: ['gemini-3.1-pro-preview', 'gemini-2.5-pro'],
-  deepseek: ['deepseek-chat', 'deepseek-reasoner'],
-  ark: ['doubao-seed-1-6', 'doubao-1-5-pro'],
-  openrouter: ['openai/gpt-5', 'anthropic/claude-opus-4.1', 'google/gemini-pro'],
-}
-
 const redactedSecret = '**********'
 let cachedRegistry: RegistryResponse | null = null
 const knownEndpointSecrets: Record<string, string> = {}
@@ -1624,9 +1615,10 @@ export async function testProviderEndpoint(
 }
 
 export async function getNotableModels(providerKey: string): Promise<NotableModelsResponse> {
-  return {
-    notable_models: localNotableModels[providerKey.toLowerCase()] ?? ['gpt-5'],
-  }
+  const response = await api.get<NotableModelsResponse>(
+    `/llm/providers/notable-models?provider_key=${encodeURIComponent(providerKey)}`,
+  )
+  return response.data
 }
 
 export async function testProviderModels(

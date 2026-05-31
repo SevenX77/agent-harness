@@ -238,11 +238,12 @@ def _run_v030_skill_dict(
     trace_output = Path(effective_trace_dir) if effective_trace_dir is not None else None
     active_callbacks = _prepare_v030_callbacks(callbacks, trace_output)
     chat_model = mock_llm if mock_llm is not _NO_MOCK_LLM else None
+    active_model_resolver = model_resolver if mock_llm is _NO_MOCK_LLM else None
     compiled = compile_skill(skill_root, skill_resolver=resolver)
     graph = assemble_graph(
         compiled,
         chat_model=chat_model,
-        model_resolver=model_resolver,
+        model_resolver=active_model_resolver,
         callbacks=active_callbacks,
         skill_resolver=resolver,
     ).graph

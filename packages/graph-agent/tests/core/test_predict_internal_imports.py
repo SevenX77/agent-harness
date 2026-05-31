@@ -108,8 +108,9 @@ def test_model_resolver_non_predict_path_still_returns_gateway() -> None:
 
 
 def test_bind_predictor_switches_resolver_to_predict_gateway() -> None:
-    from graph_agent.core._predict_internal import bind_predictor
     from graph_agent_gateway.predict_interception import PredictGatewayChatModel
+
+    from graph_agent.core._predict_internal import bind_predictor
 
     resolver = ModelResolver(registry_snapshot=_make_snapshot())
     strategy = DummyMockStrategy()

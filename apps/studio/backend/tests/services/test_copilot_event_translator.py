@@ -215,4 +215,5 @@ def _resolved_route(api_key: str = "key") -> SimpleNamespace:
         provider_model_id="claude-sonnet",
         base_url="https://provider.test",
         api_key=SimpleNamespace(get_secret_value=lambda: api_key),
+        call_method_id=None,
     )

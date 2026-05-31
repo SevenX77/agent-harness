@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 import pytest
+
 from graph_agent.cognitive.prompt import (
     apply_cognitive_template,
     apply_v030_cognitive_template,

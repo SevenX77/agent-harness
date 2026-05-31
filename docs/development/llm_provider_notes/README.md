@@ -10,7 +10,7 @@ linked_specs:
 
 This directory contains provider facts that can help a user or an Agent import workflow propose endpoint and route drafts.
 
-It is not a runtime source of truth. Studio runtime code must not read these files to construct endpoints, routes, roles, credentials, or canonical aliases.
+It is not a runtime source of truth. Studio runtime code must not read these files to construct endpoints, routes, roles, credentials, canonical aliases, runtime settings, or provider-selection behavior. Studio Backend may parse `## 4. Notable Model IDs` only for the suggestion-only `GET /api/llm/providers/notable-models` endpoint that feeds manual model-id placeholders.
 
 Active runtime state lives in:
 
@@ -40,6 +40,6 @@ One vendor can expose multiple endpoint records when protocol or base URL differ
 ## Maintenance Rules
 
 1. Keep these files as factual onboarding notes only.
-2. Do not add code paths that parse this directory at runtime.
+2. Keep parsing limited to suggestion-only notable-model placeholders; do not use this directory for runtime configuration.
 3. Do not treat moving aliases such as `~...latest` as canonical aliases here.
 4. Promote only deliberate, tested aliases to `config/llm_canonical_rules.yaml`.

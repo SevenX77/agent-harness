@@ -11,12 +11,12 @@ const officialProviders = [
 ]
 const officialProviderCodes = officialProviders.map((vendor) => vendor.code)
 const notableProviderKeys = [
-  ...officialProviderCodes,
   "openrouter",
   "wavespeed",
   "qiniu",
   "onechats",
   "jiekou",
+  ...officialProviderCodes,
 ]
 
 type ProviderTestParams = {

@@ -698,30 +698,6 @@ features:
   non_functional_contracts: []
   targeted_tests:
   - tests/cognitive/test_middlewares.py::TestCreateCustomMiddlewaresPR5::test_clarification_enabled_by_default
-- id: F-model-configuration
-  description: Resolve model provider configuration, fallbacks, and role-specific
-    prompt prefixes.
-  feature_boundary:
-    kind: public-method
-    evidence: model configuration
-  sources:
-  - public-api
-  - source-file-map
-  core_paths:
-  - path: packages/graph-agent/src/graph_agent/config/llm_config.py
-  - path: packages/graph-agent/src/graph_agent/models/llm_client_manager.py
-  error_codes_primary: []
-  error_codes_secondary: []
-  events_primary: []
-  events_secondary: []
-  non_functional_contracts: []
-  targeted_tests:
-  - tests/config/test_llm_config_resolve_role.py::test_resolve_role_orders_active_model_first_then_declared_fallbacks
-  public_api_symbols:
-  - LLMClientManager
-  - ProviderDef
-  - ResolvedProvider
-  - load_config
 - id: F-predict-internal-mocking
   description: Provide deterministic prediction and golden-case mocks for offline
     execution and tests.

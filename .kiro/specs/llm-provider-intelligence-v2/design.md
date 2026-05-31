@@ -1112,7 +1112,7 @@ Hard cutover removes old provider-oriented LLM endpoints from the production con
 
 - `POST /api/llm/providers/test` is replaced by `POST /api/llm/endpoints/{endpoint_id}/test`.
 - `POST /api/llm/providers/test-models` is replaced by `POST /api/llm/routes/{route_id}/probe`.
-- `GET /api/llm/providers/notable-models` is removed as a public endpoint. Any curated provider/model seed data becomes an internal import-draft source adapter or checked-in canonical rule fixture.
+- `GET /api/llm/providers/notable-models` remains only as a suggestion endpoint for manual model-id placeholders. It may parse provider-note §4 entries, but it must not construct endpoints, routes, roles, credentials, canonical aliases, or runtime defaults.
 - Existing `GET/PUT /api/llm/roles` paths may be reused only with the new schema.
 
 ## 9. Agent Import Draft Flow
@@ -1291,7 +1291,7 @@ Changes:
 - Replace backend provider-test fingerprint helper with gateway credential fingerprint helper.
 - Update Copilot provider resolution to use `route_id`.
 - Delete old provider-card probing helpers, env-patching, and old schema migration shims; runtime migration readers are not allowed.
-- Archive provider notes under docs only. Runtime code must not parse provider note markdown.
+- Archive provider notes under docs only. Runtime construction code must not parse provider note markdown; the only allowed parser is the suggestion-only notable-model endpoint used by manual probing placeholders.
 
 ### 11.4 Studio Frontend
 

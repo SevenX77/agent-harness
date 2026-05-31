@@ -71,9 +71,6 @@ public_api_symbols:
   LLMCallEvent:
     feature_ids:
     - F-llm-execution
-  LLMClientManager:
-    feature_ids:
-    - F-model-configuration
   LLMFallbackEvent:
     feature_ids:
     - F-llm-execution
@@ -119,12 +116,6 @@ public_api_symbols:
   PredictTracingCallback:
     feature_ids:
     - F-callback-tracing
-  ProviderDef:
-    feature_ids:
-    - F-model-configuration
-  ResolvedProvider:
-    feature_ids:
-    - F-model-configuration
   RetryEvent:
     feature_ids:
     - F-error-code-recovery
@@ -176,9 +167,6 @@ public_api_symbols:
   compute_diff:
     feature_ids:
     - F-predict-internal-mocking
-  load_config:
-    feature_ids:
-    - F-model-configuration
   parse_skill_file:
     feature_ids:
     - F-vendor-contract-debt

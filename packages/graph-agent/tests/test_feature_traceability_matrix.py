@@ -11,9 +11,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 PACKAGE_ROOT = REPO_ROOT / "packages/graph-agent"
 MATRIX_PATH = REPO_ROOT / "docs/engine/feature-compliance-checklist.md"
 FEATURES_PATH = PACKAGE_ROOT / "spec/features.yaml"
-EXPECTED_FEATURE_COUNT = 36
-EXPECTED_CHECKLIST_H3_COUNT = 35
-EXPECTED_COVERAGE_COUNT = 35
+EXPECTED_FEATURE_COUNT = 35
+EXPECTED_CHECKLIST_H3_COUNT = 34
+EXPECTED_COVERAGE_COUNT = 34
 COVERAGE_RE = re.compile(
     r"\[Covered By: (?P<path>packages/graph-agent/tests/[^:\]]+)::(?:(?P<class>[A-Za-z0-9_]+)::)?(?P<test>test_[A-Za-z0-9_]+)(?:\[[^\]]+\])?\]"
 )

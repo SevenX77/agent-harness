@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from graph_agent_gateway import exceptions as gateway_exceptions
 
 import graph_agent
 from graph_agent.core import exceptions as core_exceptions
@@ -15,8 +16,6 @@ from graph_agent.core.error_registry import ERROR_REGISTRY
 from graph_agent.core.exceptions import ErrorPayload
 from graph_agent.core.result import WorkflowResult
 from graph_agent.core.skill_resolver_protocol import SkillResolutionError
-from graph_agent_gateway import exceptions as gateway_exceptions
-
 
 PUBLIC_ERROR_EXPORTS = {
     "GraphAgentError",

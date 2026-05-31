@@ -19,8 +19,9 @@ SRC_ROOT = PACKAGE_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from graph_agent import LocalWorkspaceResolver, assemble_graph, compile_skill  # noqa: E402
 from langchain_core.messages import AIMessage  # noqa: E402
+
+from graph_agent import LocalWorkspaceResolver, assemble_graph, compile_skill  # noqa: E402
 
 
 class FakeHelloWorldChatModel:

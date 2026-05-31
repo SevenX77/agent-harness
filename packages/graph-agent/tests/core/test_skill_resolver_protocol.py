@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 
 from graph_agent.core.compiler import compile_skill
-from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.loader import SkillLoader
 from graph_agent.core.runner import run_skill
 from graph_agent.core.skill_resolver_protocol import (

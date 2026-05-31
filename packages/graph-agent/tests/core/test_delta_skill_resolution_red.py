@@ -9,7 +9,6 @@ from pydantic import ValidationError
 
 from graph_agent.core import graph_assembler, loader
 from graph_agent.core.compiler import compile_skill
-from graph_agent.core.exceptions import SkillLoadError
 from graph_agent.core.graph_assembler import assemble_graph
 from graph_agent.core.loader import CompiledSkill, PhaseDocument, SkillLoader
 from graph_agent.core.manifest import GraphManifest, SubagentSpec, SubgraphNodeAST

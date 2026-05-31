@@ -17,6 +17,7 @@ from app.services import copilot as copilot_service
 from claude_agent_sdk import ClaudeAgentOptions
 from claude_agent_sdk.types import AssistantMessage, TextBlock
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from graph_agent_gateway.registry.schema import ResolvedRoute
 
 
@@ -151,11 +152,12 @@ def test_stream_query_uses_copilot_chat_active_model_when_no_override(
 ) -> None:
     client = FakeClient([AssistantMessage(content=[TextBlock(text="hello")], model="claude")])
     calls: list[str | None] = []
+    route = _resolved_route(base_url="https://credential.test")
     monkeypatch.setattr(
         copilot_service,
-        "_resolve_copilot_routes",
+        "_resolve_copilot_runtime",
         lambda override: calls.append(override)
-        or [_resolved_route(api_key="primary-secret", base_url="https://credential.test")],
+        or _runtime([route], {route.credential_ref: "primary-secret"}),
     )
     monkeypatch.setattr(
         copilot_service, "_session_factory", lambda options: client.capture(options)
@@ -172,6 +174,45 @@ def test_stream_query_uses_copilot_chat_active_model_when_no_override(
     assert events == [CopilotEventText(content="hello"), CopilotEventDone()]
 
 
+def test_stream_query_resolves_secret_from_credential_provider(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    client = FakeClient([AssistantMessage(content=[TextBlock(text="hello")], model="claude")])
+    route = ResolvedRoute(
+        role_name="copilot_chat",
+        route_id="test-provider:claude-test",
+        endpoint_id="test-provider",
+        protocol="anthropic_compatible",
+        base_url="https://credential.test",
+        credential_ref="cred:test-provider",
+        credential_fingerprint="fp",
+        provider_model_id="claude-test",
+        canonical_id="claude-test",
+    )
+
+    monkeypatch.setattr(
+        copilot_service,
+        "_resolve_copilot_runtime",
+        lambda _override: (
+            [route],
+            StaticCredentialProvider({"cred:test-provider": "provider-secret"}),
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        copilot_service, "_session_factory", lambda options: client.capture(options)
+    )
+
+    events = asyncio.run(
+        _collect(copilot_service.stream_query("skill-a", "hi", workspace_dir=tmp_path))
+    )
+
+    assert client.options is not None
+    assert client.options.env["ANTHROPIC_API_KEY"] == "provider-secret"
+    assert events == [CopilotEventText(content="hello"), CopilotEventDone()]
+
+
 def test_stream_query_falls_back_to_second_copilot_route_when_first_route_fails(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -181,20 +222,31 @@ def test_stream_query_falls_back_to_second_copilot_route_when_first_route_fails(
         _resolved_route(
             route_id="primary:claude",
             endpoint_id="primary",
-            api_key="first-secret",
             base_url="https://primary.test",
         ),
         _resolved_route(
             route_id="secondary:claude",
             endpoint_id="secondary",
-            api_key="second-secret",
             base_url="https://secondary.test",
         ),
     ]
     created_keys: list[str] = []
-    secondary = FakeClient([AssistantMessage(content=[TextBlock(text="fallback hello")], model="claude")])
+    secondary = FakeClient(
+        [AssistantMessage(content=[TextBlock(text="fallback hello")], model="claude")]
+    )
 
-    monkeypatch.setattr(copilot_service, "_resolve_copilot_routes", lambda _override: routes, raising=False)
+    monkeypatch.setattr(
+        copilot_service,
+        "_resolve_copilot_runtime",
+        lambda _override: _runtime(
+            routes,
+            {
+                routes[0].credential_ref: "first-secret",
+                routes[1].credential_ref: "second-secret",
+            },
+        ),
+        raising=False,
+    )
     monkeypatch.setattr(copilot_service, "_resolve_copilot_route", lambda _override: routes[0])
 
     def session_factory(options: ClaudeAgentOptions) -> FakeClient:
@@ -222,7 +274,6 @@ def test_stream_query_maps_ark_anthropic_profile_to_claude_code_env(
 ) -> None:
     client = FakeClient([AssistantMessage(content=[TextBlock(text="ark hello")], model="doubao")])
     route = _resolved_route(
-        api_key="ark-secret",
         base_url="https://ark.cn-beijing.volces.com/api/v3",
         route_id="ark-official:doubao-seed-2-0-pro-260215",
         endpoint_id="ark-official",
@@ -231,7 +282,11 @@ def test_stream_query_maps_ark_anthropic_profile_to_claude_code_env(
         canonical_id="doubao-seed-2-0-pro",
         call_method_id="ark_anthropic_messages",
     )
-    monkeypatch.setattr(copilot_service, "_resolve_copilot_routes", lambda _override: [route])
+    monkeypatch.setattr(
+        copilot_service,
+        "_resolve_copilot_runtime",
+        lambda _override: _runtime([route], {route.credential_ref: "ark-secret"}),
+    )
     monkeypatch.setattr(
         copilot_service, "_session_factory", lambda options: client.capture(options)
     )
@@ -255,12 +310,23 @@ def test_stream_query_reports_clear_error_after_all_copilot_routes_fail(
 ) -> None:
     copilot_service._sessions.clear()
     routes = [
-        _resolved_route(route_id="primary:claude", endpoint_id="primary", api_key="first-secret"),
-        _resolved_route(route_id="secondary:claude", endpoint_id="secondary", api_key="second-secret"),
+        _resolved_route(route_id="primary:claude", endpoint_id="primary"),
+        _resolved_route(route_id="secondary:claude", endpoint_id="secondary"),
     ]
     created_keys: list[str] = []
 
-    monkeypatch.setattr(copilot_service, "_resolve_copilot_routes", lambda _override: routes, raising=False)
+    monkeypatch.setattr(
+        copilot_service,
+        "_resolve_copilot_runtime",
+        lambda _override: _runtime(
+            routes,
+            {
+                routes[0].credential_ref: "first-secret",
+                routes[1].credential_ref: "second-secret",
+            },
+        ),
+        raising=False,
+    )
     monkeypatch.setattr(copilot_service, "_resolve_copilot_route", lambda _override: routes[0])
 
     def session_factory(options: ClaudeAgentOptions) -> FailingClient:
@@ -285,10 +351,12 @@ def test_stream_query_uses_model_override_when_provided(
 ) -> None:
     client = FakeClient([AssistantMessage(content=[TextBlock(text="hello")], model="claude")])
     calls: list[str | None] = []
+    route = _resolved_route()
     monkeypatch.setattr(
         copilot_service,
-        "_resolve_copilot_routes",
-        lambda override: calls.append(override) or [_resolved_route(api_key="primary-secret")],
+        "_resolve_copilot_runtime",
+        lambda override: calls.append(override)
+        or _runtime([route], {route.credential_ref: "primary-secret"}),
     )
     monkeypatch.setattr(
         copilot_service, "_session_factory", lambda options: client.capture(options)
@@ -315,8 +383,11 @@ def test_stream_query_yields_error_when_no_api_key(
 ) -> None:
     monkeypatch.setattr(
         copilot_service,
-        "_resolve_copilot_routes",
-        lambda _override: [_resolved_route(api_key="")],
+        "_resolve_copilot_runtime",
+        lambda _override: _runtime(
+            [_resolved_route()],
+            {"endpoint:test-provider": ""},
+        ),
     )
 
     events = asyncio.run(
@@ -332,10 +403,11 @@ def test_stream_query_yields_clear_error_for_credential_ref_only_route(
 ) -> None:
     monkeypatch.setattr(
         copilot_service,
-        "_resolve_copilot_routes",
-        lambda _override: [
-            _resolved_route(api_key=None, credential_ref="cred:test-provider")
-        ],
+        "_resolve_copilot_runtime",
+        lambda _override: _runtime(
+            [_resolved_route(credential_ref="cred:test-provider")],
+            {},
+        ),
     )
 
     events = asyncio.run(
@@ -343,12 +415,7 @@ def test_stream_query_yields_clear_error_for_credential_ref_only_route(
     )
 
     assert events == [
-        CopilotEventError(
-            message=(
-                "endpoint has no inline credential; "
-                "CredentialProvider integration is required: test-provider"
-            )
-        )
+        CopilotEventError(message="Endpoint test-provider 未配置 API key")
     ]
 
 
@@ -384,6 +451,21 @@ class FakeClient:
             yield message
 
 
+class StaticCredentialProvider:
+    def __init__(self, secrets: dict[str, str]) -> None:
+        self.secrets = secrets
+
+    def get(self, ref: str) -> SecretStr:
+        return SecretStr(self.secrets[ref])
+
+
+def _runtime(
+    routes: list[ResolvedRoute],
+    secrets: dict[str, str],
+) -> tuple[list[ResolvedRoute], StaticCredentialProvider]:
+    return routes, StaticCredentialProvider(secrets)
+
+
 class FailingClient(FakeClient):
     def __init__(self, exc: Exception) -> None:
         super().__init__([])
@@ -395,7 +477,7 @@ class FailingClient(FakeClient):
 
 def _resolved_route(
     *,
-    api_key: str | None,
+    api_key: str | None = None,
     credential_ref: str | None = None,
     base_url: str = "https://provider.test",
     route_id: str = "test-provider:claude-test",
@@ -405,14 +487,14 @@ def _resolved_route(
     canonical_id: str = "claude-test",
     call_method_id: str | None = None,
 ) -> ResolvedRoute:
+    del api_key
     return ResolvedRoute(
         role_name="copilot_chat",
         route_id=route_id,
         endpoint_id=endpoint_id,
         protocol=protocol,
         base_url=base_url,
-        credential_ref=credential_ref,
-        api_key=api_key,
+        credential_ref=credential_ref or f"endpoint:{endpoint_id}",
         credential_fingerprint="fp",
         provider_model_id=provider_model_id,
         canonical_id=canonical_id,

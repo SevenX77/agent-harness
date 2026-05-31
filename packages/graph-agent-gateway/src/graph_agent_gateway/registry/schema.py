@@ -367,8 +367,7 @@ class ResolvedRoute(BaseModel):
     endpoint_id: str
     protocol: Protocol
     base_url: str
-    credential_ref: str | None = None
-    api_key: SecretStr | None = None
+    credential_ref: str
     credential_fingerprint: str
     timeout_seconds: int = 120
     trust_env: bool = False
@@ -385,9 +384,9 @@ class ResolvedRoute(BaseModel):
     snapshot_version: SnapshotVersion | None = None
 
     @model_validator(mode="after")
-    def _has_credential_reference_or_secret(self) -> ResolvedRoute:
-        if self.api_key is None and not self.credential_ref:
-            raise ValueError("resolved route requires credential_ref or api_key")
+    def _has_credential_reference(self) -> ResolvedRoute:
+        if not self.credential_ref:
+            raise ValueError("resolved route requires credential_ref")
         return self
 
 

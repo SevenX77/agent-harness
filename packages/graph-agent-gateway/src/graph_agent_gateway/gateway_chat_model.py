@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, cast
 
@@ -44,6 +45,7 @@ class GatewayChatModel(BaseChatModel):
     tool_choice: str | None = None
     tool_kwargs: dict[str, object] = Field(default_factory=dict)
     client_manager: Any = None
+    credential_provider: Any = None
 
     def __init__(
         self,
@@ -60,6 +62,7 @@ class GatewayChatModel(BaseChatModel):
         tool_choice: str | None = None,
         tool_kwargs: Mapping[str, object] | None = None,
         client_manager: Any = None,
+        credential_provider: Any = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(  # type: ignore[call-arg]
@@ -75,6 +78,7 @@ class GatewayChatModel(BaseChatModel):
             tool_choice=tool_choice,
             tool_kwargs=dict(tool_kwargs or {}),
             client_manager=client_manager,
+            credential_provider=credential_provider,
             **kwargs,
         )
 
@@ -114,6 +118,7 @@ class GatewayChatModel(BaseChatModel):
                         self.client_manager,
                         candidate,
                         runtime_policy,
+                        credential_provider=self.credential_provider,
                     )
                 except Exception as exc:  # noqa: BLE001 - gateway fallback boundary
                     classification = classify_exception(exc, route_id=candidate.route_id)
@@ -188,6 +193,7 @@ class GatewayChatModel(BaseChatModel):
                     self.client_manager,
                     candidate,
                     request_messages,
+                    credential_provider=self.credential_provider,
                     max_tokens=_int_kwarg(
                         kwargs.get("max_tokens"),
                         _effective_int(candidate, "max_output_tokens", self.max_tokens),
@@ -284,6 +290,7 @@ class GatewayChatModel(BaseChatModel):
             tool_choice=tool_choice,
             tool_kwargs={key: cast(object, value) for key, value in kwargs.items()},
             client_manager=self.client_manager,
+            credential_provider=self.credential_provider,
             name=self.name,
             cache=self.cache,
             verbose=self.verbose,
@@ -439,8 +446,22 @@ def _is_marked_down(
     return bool(manager.is_provider_marked_down(candidate, runtime_policy))
 
 
-def _probe(client_manager: Any, candidate: ResolvedRoute, runtime_policy: Any) -> bool:
+def _probe(
+    client_manager: Any,
+    candidate: ResolvedRoute,
+    runtime_policy: Any,
+    *,
+    credential_provider: Any = None,
+) -> bool:
     manager = _manager(client_manager)
+    if credential_provider is not None and _supports_credential_provider(manager.probe_provider):
+        return bool(
+            manager.probe_provider(
+                candidate,
+                runtime_policy,
+                credential_provider=credential_provider,
+            )
+        )
     return bool(manager.probe_provider(candidate, runtime_policy))
 
 
@@ -451,10 +472,28 @@ def _dispatch(
     **kwargs: Any,
 ) -> Mapping[str, object]:
     manager = _manager(client_manager)
-    response = manager.dispatch_provider_call(candidate, messages, **kwargs)
+    credential_provider = kwargs.pop("credential_provider", None)
+    if credential_provider is not None and _supports_credential_provider(
+        manager.dispatch_provider_call
+    ):
+        response = manager.dispatch_provider_call(
+            candidate,
+            messages,
+            credential_provider=credential_provider,
+            **kwargs,
+        )
+    else:
+        response = manager.dispatch_provider_call(candidate, messages, **kwargs)
     if not isinstance(response, Mapping):
         return {"content": str(response), "usage": {}}
     return response
+
+
+def _supports_credential_provider(method: Any) -> bool:
+    try:
+        return "credential_provider" in inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 def _mark_down(

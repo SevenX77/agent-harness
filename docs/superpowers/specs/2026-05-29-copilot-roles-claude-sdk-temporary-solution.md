@@ -67,8 +67,8 @@ Modify `_resolve_route_runtime` in `apps/studio/backend/app/services/copilot.py`
 # In app/services/copilot.py
 from app.services.copilot_adapters import resolve_adapter_runtime
 
-def _resolve_route_runtime(route: ResolvedRoute, user_selected_adapter_id: str | None = None) -> tuple[str, str | None, dict[str, str]]:
-    api_key = route.api_key.get_secret_value().strip()
+def _resolve_route_runtime(route: ResolvedRoute, credential_provider: CredentialProviderProtocol, user_selected_adapter_id: str | None = None) -> tuple[str, str | None, dict[str, str]]:
+    api_key = credential_provider.get(route.credential_ref).get_secret_value().strip()
     base_url = route.base_url.strip() or None
     
     # 1. Determine Adapter

@@ -118,7 +118,7 @@ def build_skill_tool(
         elapsed = time.time() - start
         logger.info("[SubSkill] Completed skill=%s wall_time=%.2fs", spec.name, elapsed)
 
-        final_output = result.get("context", {}).get("final_output")
+        final_output = result.context.get("final_output")
         if final_output is None:
             return "ERROR: Sub-skill produced no final_output"
         return str(final_output)

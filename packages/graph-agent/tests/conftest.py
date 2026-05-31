@@ -95,22 +95,7 @@ def mock_skill_resolver(tmp_path: Path) -> MockSkillResolver:
 
 collect_ignore_glob: list[str] = []
 
-_V21_CORPUS_DEFERRED_TESTS = {
-    "tests/integration/skills/event_extraction/test_cognitive_flow_smoke.py::test_event_extraction_compiles_from_legacy_v21_root",
-    "tests/integration/skills/event_extraction/test_cognitive_flow_smoke.py::test_event_extraction_final_phase_documents_json_output_contract",
-    "tests/integration/skills/event_extraction/test_cognitive_flow_smoke.py::test_event_extraction_setup_action_is_discovered",
-    "tests/integration/skills/event_extraction/test_validators_runtime.py::TestEventExtractionOutputSchema::test_accepts_well_formed_timeline",
-    "tests/integration/skills/event_extraction/test_validators_runtime.py::TestEventExtractionOutputSchema::test_rejects_missing_event_id",
-    "tests/integration/skills/event_extraction/test_validators_runtime.py::TestEventExtractionOutputSchema::test_rejects_missing_event_timeline",
-    "tests/integration/skills/event_extraction/test_validators_runtime.py::TestEventExtractionOutputSchema::test_rejects_non_integer_paragraph_index",
-    "tests/integration/skills/text_segmentation/test_cognitive_flow_smoke.py::test_text_segmentation_compiles_from_legacy_v21_root",
-    "tests/integration/skills/text_segmentation/test_cognitive_flow_smoke.py::test_text_segmentation_review_documents_json_output_contract",
-    "tests/integration/skills/text_segmentation/test_cognitive_flow_smoke.py::test_text_segmentation_setup_action_is_discovered",
-    "tests/integration/skills/text_segmentation/test_validators_runtime.py::TestTextSegmentationOutputSchema::test_accepts_well_formed_segmentation_result",
-    "tests/integration/skills/text_segmentation/test_validators_runtime.py::TestTextSegmentationOutputSchema::test_rejects_invalid_segment_type",
-    "tests/integration/skills/text_segmentation/test_validators_runtime.py::TestTextSegmentationOutputSchema::test_rejects_missing_line_field",
-    "tests/integration/skills/text_segmentation/test_validators_runtime.py::TestTextSegmentationOutputSchema::test_rejects_missing_required_root",
-}
+_V21_CORPUS_DEFERRED_TESTS = set()
 
 _V1_SKILL_AWAITING_CUTOVER_TESTS = {
     "tests/core/test_module_sandbox.py::test_loader_pipeline_resolves_skill_forward_ref_segment_class",

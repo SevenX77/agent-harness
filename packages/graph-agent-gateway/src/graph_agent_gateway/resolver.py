@@ -21,6 +21,7 @@ from graph_agent_gateway.registry.credentials import (
     EndpointCredentialProvider,
     FallbackCredentialProvider,
 )
+from graph_agent_gateway.protocol import PredictContext
 from graph_agent_gateway.registry.resolver import RegistryResolutionError, resolve_role
 from graph_agent_gateway.registry.schema import (
     RegistrySnapshot,
@@ -77,6 +78,7 @@ class ModelResolver:
         model_override: str | None = None,
         callbacks: tuple[Any, ...] = (),
         phase_name: str | None = None,
+        predict_context: PredictContext | None = None,
         **kwargs: Any,
     ) -> BaseChatModel:
         del kwargs
@@ -114,14 +116,13 @@ class ModelResolver:
             if thinking_enabled is not None
             else _effective_bool(first_route, "reasoning.enabled", False)
         )
-        mock_strategy = getattr(self, "_graph_agent_predict_mock_strategy", None)
-        if mock_strategy is not None:
+        if predict_context is not None:
             from graph_agent_gateway.predict_interception import PredictGatewayChatModel
 
             return PredictGatewayChatModel(
                 resolved.role_name,
                 resolved,
-                mock_strategy=mock_strategy,
+                predict_context=predict_context,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 callbacks=callbacks,

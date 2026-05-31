@@ -1,21 +1,60 @@
-<phase_config>
-name: segment
-tier: balanced
-tools:
-  - script.segmenter.add_segment
-  - script.segmenter.store_segments
-validator: script.validators.validate_segmentation_structure
-max_iterations: 20
-max_nudges: 2
-</phase_config>
-
-<system_prompt>
+---
+llm_role: analyst
+phase_config:
+  io:
+    inputs:
+      type: object
+      required: [chapter_with_line_numbers, chapter_lines, chapter_number]
+      properties:
+        chapter_with_line_numbers:
+          type: string
+        chapter_lines:
+          type: array
+          items:
+            type: string
+        chapter_number:
+          type: integer
+    outputs:
+      type: object
+      required: [parsed_segments, segments, segmentation_result, segments_summary]
+      properties:
+        parsed_segments:
+          type: array
+          items:
+            type: object
+            required: [index, type, start_line, end_line, description]
+            properties:
+              index:
+                type: integer
+              type:
+                type: string
+                enum: [A, B, C]
+              start_line:
+                type: integer
+              end_line:
+                type: integer
+              description:
+                type: string
+        segments:
+          type: array
+          items:
+            type: object
+        segmentation_result:
+          type: object
+        segments_summary:
+          type: string
+  tools:
+    - finish_task
+  max_iterations: 20
+  validator: true
+---
+<role>
 你是专业的小说编辑。你的任务是将章节按叙事功能分段。
 
 **核心原则**：小说文字分为三类
 
 ## A类-设定：解释世界运作规则的内容
-**本质判断**：这段内容是否在解释**这个小说世界的核心运作规则/设定**？
+**本质判断**：这段内容是否在解释这个小说世界的核心运作规则/设定？
 
 **判断三问**：
 1. **功能问题**：这段内容的作用是什么？
@@ -46,10 +85,10 @@ max_nudges: 2
 **关键区分**：
 - "讲解设定内容"（系统性说明规则如何运作）→ A类
 - "识别/反应/疑问"（角色对设定的反应）→ B类
-- 即使提到设定概念（如"序列超凡"），如果只是**反应/疑问**而非**讲解** → B类
+- 即使提到设定概念（如"序列超凡"），如果只是反应/疑问而非讲解 → B类
 
 **特殊情况**：
-- 即使被包装成"回忆""思考"，只要**内容是系统性讲解设定** → A类
+- 即使被包装成"回忆""思考"，只要内容是系统性讲解设定 → A类
 - 但如果只是"回忆起某个设定概念"而无讲解 → B类
 - A类必须独立分段，不与B类合并
 
@@ -79,47 +118,23 @@ max_nudges: 2
 ---
 
 ## 分段逻辑
-**P0原则**：A类和C类**必须独立分段**，绝不与B类合并！
+**P0原则**：A类和C类必须独立分段，绝不与B类合并！
 
 1. **A类（设定）**：独立分段
 2. **C类（次元空间）**：独立分段
 3. **B类（事件）**：按时空/事件变化分段
+</role>
 
-## 执行步骤
-1. 仔细阅读 {chapter_with_line_numbers} 中的章节内容
-2. 在脑中规划好所有段落（类型、描述、行号范围）
-3. 逐段调用 add_segment 工具——**每个段落一次调用**，只传入标量参数
-4. 全部段落提交后，调用 store_segments 工具保存结果
-5. 调用 finish_task 报告完成
-</system_prompt>
-
-<user_prompt>
-请对以下带行号的章节进行分段：
+<goal>
+对以下带行号的章节进行分段，完整覆盖所有行且无遗漏。
+通过调用 finish_task 提交分段结果。
 
 ```
 {chapter_with_line_numbers}
 ```
+</goal>
 
-**分析完成后，逐段调用 add_segment 工具**：
-- `index`: 段落编号（从1开始）
-- `type`: "A"、"B" 或 "C"
-- `description`: 一句话概括（20字内）
-- `start_line`: 起始行号（从1开始）
-- `end_line`: 结束行号
+<step id="S1" name="read">仔细阅读章节内容，在脑中规划好所有段落（类型、描述、行号范围）。</step>
+<step id="S2" name="finish">调用 finish_task 提交完整的段落列表，要求 parsed_segments 中的项包含 index、type、start_line、end_line 和 description。</step>
 
-**要求**：
-1. 每个段落单独调用一次 add_segment
-2. 行号必须连续覆盖所有行，不能跳过
-3. **精确标注行号范围**（行号从1开始）
-
-**分段规则**：
-- 同一时空的连续动作必须合并
-- 但如果其中包含A类设定，必须分离！
-- 不要为了凑数量而分段
-- 专注于结构性变化（A/B/C类型变化、时空变化、事件变化）
-
-**特别警惕（常见误判）**：
-- 疑问句不是A类："这是XX？"只是识别/惊讶 → B类
-- 感悟句不是A类："在XX，需要..." 只是主角感悟 → B类
-- 只有系统性讲解才是A类："XX体系是..."、"XX规则：..." → A类
-</user_prompt>
+<protocol id="P1">A类和C类必须独立分段，绝不与B类合并！行号必须连续覆盖所有行，不能跳过，行号范围必须精确。</protocol>

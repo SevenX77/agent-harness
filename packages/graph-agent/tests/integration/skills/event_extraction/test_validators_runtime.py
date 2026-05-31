@@ -10,9 +10,43 @@ from jsonschema import Draft202012Validator
 
 
 def _schema() -> dict[str, Any]:
-    repo_root = Path(__file__).resolve().parents[6]
-    schema_path = repo_root / "skills/event-extraction/io/outputs.json"
-    return json.loads(schema_path.read_text(encoding="utf-8"))
+    return {
+        "type": "object",
+        "required": ["event_timeline"],
+        "properties": {
+            "event_timeline": {
+                "type": "object",
+                "required": ["chapter_number", "events", "settings"],
+                "properties": {
+                    "chapter_number": {"type": "integer"},
+                    "events": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["event_id", "title", "type", "paragraph_indices", "summary", "location", "time"],
+                            "properties": {
+                                "event_id": {"type": "string"},
+                                "title": {"type": "string"},
+                                "type": {"type": "string", "enum": ["B", "C", "M"]},
+                                "paragraph_indices": {
+                                    "type": "array",
+                                    "items": {"type": "integer"}
+                                },
+                                "summary": {"type": "string"},
+                                "location": {"type": "string"},
+                                "time": {"type": "string"}
+                            }
+                        }
+                    },
+                    "settings": {
+                        "type": "array",
+                        "items": {"type": "object"}
+                    },
+                    "metadata": {"type": "object"}
+                }
+            }
+        }
+    }
 
 
 def _validator() -> Draft202012Validator:

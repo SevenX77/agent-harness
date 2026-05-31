@@ -1,15 +1,34 @@
-<phase_config>
-name: aggregate
-tier: balanced
-tools:
-  - script.extractor.add_event
-  - script.extractor.store_events
-  - script.extractor.backup_event_timeline
-max_iterations: 20
-max_nudges: 2
-</phase_config>
+---
+llm_role: analyst
+phase_config:
+  io:
+    inputs:
+      type: object
+      required: [formatted_paragraphs, chapter_number]
+      properties:
+        formatted_paragraphs:
+          type: string
+        chapter_number:
+          type: integer
+        prev_chapter_last_event:
+          type: object
+    outputs:
+      type: object
+      required: [parsed_events, event_timeline]
+      properties:
+        parsed_events:
+          type: array
+          items:
+            type: object
+        event_timeline:
+          type: object
+  tools:
+    - finish_task
+  max_iterations: 20
+  validator: true
+---
 
-<system_prompt>
+<role>
 你是专业的小说编辑和叙事分析师。你的任务是分析已分段的小说章节，完成两个任务：
 
 ## 任务1：时间线重排
@@ -58,18 +77,9 @@ max_nudges: 2
 - M类事件中出现的人物**必须被正确注册为实体**（即使只在回忆中出场）
 - M类事件承载仇恨债、情感动机等关键叙事信息，不得丢弃
 - M类事件的 location/time 填回忆中的地点/时间，并在 time 字段注明"（回忆）"
+</role>
 
-## 执行步骤
-
-1. 仔细阅读 {formatted_paragraphs} 中的章节分段
-2. 在脑中完成时间线重排和事件聚合
-3. 逐事件调用 add_event 工具——**每个事件一次调用**，只传标量参数
-4. 全部事件提交后，调用 store_events 保存结果
-5. 调用 backup_event_timeline 备份（供 review 阶段使用）
-6. 调用 finish_task 报告完成
-</system_prompt>
-
-<user_prompt>
+<goal>
 请分析以下已分段的章节，完成时间线重排和事件聚合：
 
 ## 章节分段结果（段落按原文顺序）
@@ -78,7 +88,8 @@ max_nudges: 2
 
 ---
 
-**分析完成后，逐事件调用 add_event 工具**：
+**分析完成后，调用 finish_task 提交完整的事件列表**：
+要求返回 `parsed_events` 列表，其中每个项包含：
 - `index`: 事件编号（按时间线顺序，从1开始）
 - `summary`: 事件概括（20-30字）
 - `type`: "B"（现实时间线事件）、"C"（系统/次元空间）或 "M"（回忆/闪回/梦境，不在当前时间线）
@@ -96,15 +107,10 @@ max_nudges: 2
 4. 每个段落只能归入一个事件
 5. present_characters 只列当前事件中明确出场/行动的角色，不含仅被提及的角色
 6. 回忆/闪回段落必须独立为 M 类事件（type="M"），不得强行归入现实时间线事件
-</user_prompt>
+</goal>
 
-<data_architecture>
-## Input
-- `formatted_paragraphs`: str — Markdown-formatted ABC segments
-- `chapter_number`: int
-- `prev_chapter_last_event`: dict | None — Previous chapter's last event for cross-chapter context
+<step id="S1" name="reorder_and_aggregate">在脑中完成时间线重排和事件聚合，规划好完整的事件列表。</step>
+<step id="S2" name="finish">调用 finish_task 提交完整的 parsed_events 列表，以进行校验和回写。</step>
 
-## Output (stored in context)
-- `parsed_events`: list[dict] — Accumulated by add_event calls
-- `event_timeline`: dict — Built by store_events
-</data_architecture>
+<protocol id="P1">C类段落必须独立成事件，严禁与B类段落混入同一个事件！回忆/闪回段落（M类）也必须独立成事件，不能与B类混合。</protocol>
+<protocol id="P2">每个段落只能归属一个事件，绝不允许共享（严格 N:1 覆盖）。</protocol>

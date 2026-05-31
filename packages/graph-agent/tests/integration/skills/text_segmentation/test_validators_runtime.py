@@ -10,9 +10,36 @@ from jsonschema import Draft202012Validator
 
 
 def _schema() -> dict[str, Any]:
-    repo_root = Path(__file__).resolve().parents[6]
-    schema_path = repo_root / "skills/text-segmentation/io/outputs.json"
-    return json.loads(schema_path.read_text(encoding="utf-8"))
+    return {
+        "type": "object",
+        "required": ["segmentation_result"],
+        "properties": {
+            "segmentation_result": {
+                "type": "object",
+                "required": ["chapter_number", "total_paragraphs", "paragraphs"],
+                "properties": {
+                    "chapter_number": {"type": "integer"},
+                    "total_paragraphs": {"type": "integer"},
+                    "paragraphs": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["index", "type", "start_line", "end_line", "content", "description"],
+                            "properties": {
+                                "index": {"type": "integer"},
+                                "type": {"type": "string", "enum": ["A", "B", "C"]},
+                                "start_line": {"type": "integer"},
+                                "end_line": {"type": "integer"},
+                                "content": {"type": "string"},
+                                "description": {"type": "string"},
+                            }
+                        }
+                    },
+                    "metadata": {"type": "object"}
+                }
+            }
+        }
+    }
 
 
 def _validator() -> Draft202012Validator:

@@ -12,20 +12,25 @@ from graph_agent_gateway.gateway_chat_model import GatewayChatModel
 from graph_agent_gateway.registry.schema import ResolvedRole
 
 
-class PredictGatewayChatModel(GatewayChatModel):
-    """Gateway-compatible model that never calls real providers."""
+import json
+from graph_agent_gateway.protocol import PredictContext
 
-    mock_strategy: Any
+
+class PredictGatewayChatModel(GatewayChatModel):
+    """Gateway-compatible model that delegates mock resolution to the SDK predict context."""
+
+    predict_context: PredictContext
 
     def __init__(
         self,
         role_name: str,
         resolved_role: ResolvedRole,
         *,
-        mock_strategy: Any,
+        predict_context: PredictContext,
         **kwargs: Any,
     ) -> None:
-        kwargs["mock_strategy"] = mock_strategy
+        kwargs["predict_context"] = predict_context
+        kwargs["probe_before_call"] = False
         super().__init__(role_name, resolved_role, **kwargs)
 
     def _generate(
@@ -35,8 +40,18 @@ class PredictGatewayChatModel(GatewayChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
-        del messages, stop, run_manager, kwargs
+        del stop, run_manager, kwargs
+        payload, mocked_source = self.predict_context.resolve_generation(
+            phase_name=self.phase_name or "",
+            role_name=self.role_name or "",
+            messages=messages,
+        )
+        content = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        message = AIMessage(
+            content=content,
+            response_metadata={"mocked_source": mocked_source},
+        )
         return ChatResult(
-            generations=[ChatGeneration(message=AIMessage(content="predict mock"))],
+            generations=[ChatGeneration(message=message)],
             llm_output={"provider": "predict", "model_name": self.role_name},
         )

@@ -3,29 +3,10 @@
 from __future__ import annotations
 
 import logging
-import uuid
-from collections import Counter
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-from graph_agent import run_skill
-from graph_agent.callbacks.events import LLMCallEvent, PhaseEndEvent, PhaseStartEvent, ToolCallEvent
-from graph_agent.core._predict_internal.exporter import assemble_phase_record
-from graph_agent.core._predict_internal.models import (
-    GoldenCase,
-    PathDiff,
-    PhaseRecord,
-    PredictResult,
-)
-from graph_agent.core._predict_internal.path_diff import compute_diff
-from graph_agent.core._predict_internal.strategy import (
-    BaseMockStrategy,
-    GoldenCaseStrategy,
-    HeuristicStubStrategy,
-    MockStrategy,
-)
-from graph_agent.core._predict_internal.tracing import PredictTracingCallback
+from graph_agent import predict_skill, RunResult
 from graph_agent.core.loader import SkillLoader
 
 from app.models.runs import PredictDiagnosticExport
@@ -54,7 +35,7 @@ class PredictDeadlockError(RuntimeError):
 class PredictorService:
     """Studio Backend orchestration layer for Predict V2 runs."""
 
-    def __init__(self, run_skill_fn: Callable[..., Any] = run_skill) -> None:
+    def __init__(self, run_skill_fn: Any = None) -> None:
         self._run_skill = run_skill_fn
 
     def dispatch_predict_job(
@@ -64,193 +45,98 @@ class PredictorService:
         *,
         input_data: dict[str, Any] | None = None,
         current_hashes: dict[str, dict[str, str]] | None = None,
-    ) -> PredictResult:
+    ) -> RunResult:
         """Resolve strategy, run graph_agent in Predict mode, and assemble result."""
-        strategy = self.resolve_fill_strategy(mock_param)
         skill_dir = ensure_workspace_skill_dir(skill_id)
-        self._warn_on_stale_golden_hashes(strategy, current_hashes or {})
-        tracing_callback = PredictTracingCallback()
-        tracing_callback.on_chain_start(metadata={})
 
-        raw_result = self._run_skill(
-            skill_dir,
-            workspace_dir=workspace_dir_for(skill_dir),
-            mock_llm=mock_param,
-            model_resolver=build_gateway_model_resolver(),
-            skill_resolver=build_studio_skill_resolver(),
-            unattended=True,
-            event_subscriber=_predict_trace_subscriber(tracing_callback),
-            **(input_data or {}),
-        )
-        trace_phases = tracing_callback.phases or _fallback_trace_from_skill(skill_dir, raw_result)
-        raw_result = _attach_predict_trace(raw_result, trace_phases)
-        actual_path = _actual_path_from_raw(raw_result)
-        if _is_p2_strategy(strategy):
-            self._raise_if_deadlocked(actual_path)
+        if self._run_skill is not None:
+            raw_result = self._run_skill(
+                skill_dir,
+                workspace_dir=workspace_dir_for(skill_dir),
+                mock_llm=mock_param,
+                current_hashes=current_hashes,
+                model_resolver=build_gateway_model_resolver(),
+                skill_resolver=build_studio_skill_resolver(),
+                unattended=True,
+                **(input_data or {}),
+            )
+            if isinstance(raw_result, dict):
+                from graph_agent.core.result import WorkflowResult, WorkflowMetrics, PhaseRecord, PathDiff
+                context = raw_result.get("context", raw_result)
+                if not isinstance(context, dict):
+                    context = {}
+                raw_phases = context.get("predict_trace") or context.get("phases") or []
+                phases_list = []
+                for item in raw_phases:
+                    if isinstance(item, dict):
+                        phases_list.append(PhaseRecord(
+                            phase_name=item.get("phase_name", ""),
+                            type=item.get("type", "logic"),
+                            inputs=item.get("inputs", {}),
+                            outputs=item.get("outputs", {}),
+                            mocked_source=item.get("mocked_source"),
+                        ))
+                
+                path_diff = None
+                actual_path = [str(i) for i in context.get("actual_path", [])]
+                expected_path = getattr(mock_param, "expected_path", None) if mock_param else None
+                if expected_path:
+                    from graph_agent.core._predict_internal.path_diff import compute_diff
+                    rd = compute_diff([str(item) for item in expected_path], actual_path)
+                    path_diff = PathDiff(
+                        expected_path=rd.expected_path,
+                        actual_path=rd.actual_path,
+                        missing=rd.missing,
+                        extra=rd.extra,
+                        order_mismatch=rd.order_mismatch,
+                    )
 
-        path_diff = self._path_diff_for_strategy(strategy, actual_path)
-        result = self.assemble_trace(raw_result, path_diff)
-        self._persist_predict_result(skill_dir, _run_id_from_raw(raw_result), result)
+                result = WorkflowResult(
+                    success=True,
+                    run_id=raw_result.get("run_id") or "predict-workspace-run",
+                    skill_id=skill_id,
+                    context=context,
+                    metrics=WorkflowMetrics(),
+                    source="predict",
+                    phases=phases_list,
+                    path_diff=path_diff,
+                )
+            else:
+                result = raw_result
+
+            self._persist_predict_result(skill_dir, result.run_id, result)
+            return result
+
+        # 直接调用 SDK 的 predict_skill
+        from graph_agent.core.runner import PredictDeadlockError as SDKPredictDeadlockError
+        try:
+            result = predict_skill(
+                skill_dir,
+                workspace_dir=workspace_dir_for(skill_dir),
+                mock_llm=mock_param,
+                current_hashes=current_hashes,
+                model_resolver=build_gateway_model_resolver(),
+                skill_resolver=build_studio_skill_resolver(),
+                unattended=True,
+                **(input_data or {}),
+            )
+        except SDKPredictDeadlockError as exc:
+            raise PredictDeadlockError(exc.phase_name, exc.actual_path) from exc
+
+        self._persist_predict_result(skill_dir, result.run_id, result)
         return result
 
-    def resolve_fill_strategy(self, mock_param: Any) -> BaseMockStrategy:
-        """Convert polymorphic mock input into an internal strategy object."""
-        return MockStrategy.from_param(mock_param)
-
-    def assemble_trace(
-        self,
-        raw_result: Any,
-        path_diff: PathDiff | None = None,
-    ) -> PredictResult:
-        """Convert raw graph result into PredictResult."""
-        phases = _phase_records_from_raw(raw_result)
-        status: Literal["success", "failed"] = "success"
-        if path_diff and (path_diff.missing or path_diff.extra or path_diff.order_mismatch):
-            status = "failed"
-        return PredictResult(status=status, phases=phases, path_diff=path_diff)
-
-    def export_diagnostics(self, result: PredictResult) -> PredictDiagnosticExport:
+    def export_diagnostics(self, result: RunResult) -> PredictDiagnosticExport:
         """Expose PredictResult through the Studio in-process diagnostic contract."""
-
         return export_predict_diagnostics(result)
 
-    def _persist_predict_result(self, skill_dir: Path, run_id: str, result: PredictResult) -> None:
+    def _persist_predict_result(self, skill_dir: Path, run_id: str, result: RunResult) -> None:
         run_dir = workspace_dir_for(skill_dir) / "runs" / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "result.json").write_text(
             result.model_dump_json(),
             encoding="utf-8",
         )
-
-    def _path_diff_for_strategy(
-        self,
-        strategy: BaseMockStrategy,
-        actual_path: list[str],
-    ) -> PathDiff | None:
-        expected_path = getattr(strategy, "expected_path", None)
-        if not expected_path:
-            return None
-        return compute_diff([str(item) for item in expected_path], actual_path)
-
-    def _raise_if_deadlocked(self, actual_path: list[str]) -> None:
-        counts = Counter(actual_path)
-        for phase_name, count in counts.items():
-            if count > MAX_PHASE_REVISITS:
-                raise PredictDeadlockError(phase_name, actual_path)
-
-    def _warn_on_stale_golden_hashes(
-        self,
-        strategy: BaseMockStrategy,
-        current_hashes: dict[str, dict[str, str]],
-    ) -> None:
-        golden_cases = _golden_cases_for_strategy(strategy)
-        for golden_case in golden_cases:
-            phase_name = str(golden_case.metadata.get("phase_name") or "")
-            if not phase_name:
-                continue
-            current = current_hashes.get(phase_name)
-            if not current:
-                continue
-            expected_prompt_hash = golden_case.metadata.get("prompt_hash")
-            expected_schema_hash = golden_case.metadata.get("io_outputs_schema_hash")
-            if (
-                current.get("prompt_hash") != expected_prompt_hash
-                or current.get("io_outputs_schema_hash") != expected_schema_hash
-            ):
-                logger.warning(
-                    "Golden case hash stale for phase=%s expected_prompt=%s current_prompt=%s "
-                    "expected_schema=%s current_schema=%s",
-                    phase_name,
-                    expected_prompt_hash,
-                    current.get("prompt_hash"),
-                    expected_schema_hash,
-                    current.get("io_outputs_schema_hash"),
-                )
-
-
-def _is_p2_strategy(strategy: BaseMockStrategy) -> bool:
-    return type(strategy) is HeuristicStubStrategy
-
-
-def _golden_cases_for_strategy(strategy: BaseMockStrategy) -> list[GoldenCase]:
-    if isinstance(strategy, GoldenCaseStrategy):
-        return [strategy.golden_case]
-    raw_cases = getattr(strategy, "golden_cases", None)
-    if isinstance(raw_cases, list):
-        return [case for case in raw_cases if isinstance(case, GoldenCase)]
-    return []
-
-
-def _predict_trace_subscriber(tracing_callback: PredictTracingCallback) -> Callable[[Any], None]:
-    def _emit(event: Any) -> None:
-        tracing_callback.on_event(event)
-        if isinstance(event, PhaseStartEvent):
-            tracing_callback.on_phase_start(event.phase_name, event.context)
-        elif isinstance(event, PhaseEndEvent):
-            tracing_callback.on_phase_end(event.phase_name, event.context, event.metrics)
-        elif isinstance(event, LLMCallEvent):
-            tracing_callback.on_llm_call(
-                event.phase_name,
-                event.input_tokens,
-                event.output_tokens,
-                messages=event.messages,
-                response_data=event.response_data,
-            )
-        elif isinstance(event, ToolCallEvent):
-            tracing_callback.on_tool_call(
-                event.phase_name,
-                event.tool_name,
-                event.args,
-                event.result,
-                duration_ms=event.duration_ms,
-            )
-
-    return _emit
-
-
-def _phase_records_from_raw(raw_result: Any) -> list[PhaseRecord]:
-    context = _context_from_raw(raw_result)
-    raw_phases = context.get("predict_trace") or context.get("phases") or []
-    if not isinstance(raw_phases, list):
-        return []
-
-    phases: list[PhaseRecord] = []
-    for item in raw_phases:
-        if not isinstance(item, dict):
-            continue
-        phases.append(assemble_phase_record(item))
-    return phases
-
-
-def _actual_path_from_raw(raw_result: Any) -> list[str]:
-    context = _context_from_raw(raw_result)
-    raw_path = context.get("actual_path")
-    if isinstance(raw_path, list):
-        return [str(item) for item in raw_path]
-    phases = _phase_records_from_raw(raw_result)
-    return [phase.phase_name for phase in phases]
-
-
-def _run_id_from_raw(raw_result: Any) -> str:
-    if isinstance(raw_result, dict):
-        raw_run_id = raw_result.get("run_id")
-    else:
-        raw_run_id = getattr(raw_result, "run_id", None)
-    return str(raw_run_id or uuid.uuid4())
-
-
-def _attach_predict_trace(raw_result: Any, trace_phases: list[dict[str, Any]]) -> Any:
-    if not trace_phases:
-        return raw_result
-    if isinstance(raw_result, dict):
-        context = raw_result.get("context", raw_result)
-        if isinstance(context, dict):
-            context.setdefault("predict_trace", trace_phases)
-        return raw_result
-    context = getattr(raw_result, "context", None)
-    if isinstance(context, dict):
-        context.setdefault("predict_trace", trace_phases)
-    return raw_result
 
 
 def _fallback_trace_from_skill(skill_dir: Path, raw_result: Any) -> list[dict[str, Any]]:
@@ -272,14 +158,6 @@ def _fallback_trace_from_skill(skill_dir: Path, raw_result: Any) -> list[dict[st
         }
         for phase_name in compiled.manifest.phases
     ]
-
-
-def _context_from_raw(raw_result: Any) -> dict[str, Any]:
-    if isinstance(raw_result, dict):
-        context = raw_result.get("context", raw_result)
-    else:
-        context = getattr(raw_result, "context", {})
-    return context if isinstance(context, dict) else {}
 
 
 predictor_service = PredictorService()

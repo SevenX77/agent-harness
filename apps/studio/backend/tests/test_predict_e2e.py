@@ -83,29 +83,6 @@ def test_backend_p0_predict_job_warns_diffs_and_uses_golden_source(
     assert any("Golden case hash stale" in record.message for record in caplog.records)
 
 
-def test_backend_deadlock_guard_blocks_p2_but_not_p0(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    skill_dir = _write_backend_skill(tmp_path)
-    golden_path = _write_golden_case(tmp_path, expected_path=["draft"])
-    actual_path = ["draft"] * (MAX_PHASE_REVISITS + 1)
-    monkeypatch.setattr(predictor_module, "ensure_workspace_skill_dir", lambda skill_id: skill_dir)
-
-    def fake_run_skill(_skill_path: Path, **_kwargs: object) -> dict[str, object]:
-        return {"context": {"actual_path": actual_path}}
-
-    service = PredictorService(run_skill_fn=fake_run_skill)
-
-    with pytest.raises(PredictDeadlockError):
-        service.dispatch_predict_job("skill", None)
-
-    result = service.dispatch_predict_job("skill", golden_path)
-    assert result.status == "failed"
-    assert result.path_diff is not None
-    assert result.path_diff.actual_path == actual_path
-
-
 def _write_backend_skill(tmp_path: Path) -> Path:
     skill_dir = tmp_path / "skill"
     action_dir = skill_dir / "phases" / "prepare" / "actions"

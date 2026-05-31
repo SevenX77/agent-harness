@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, cast
 
-from graph_agent.core._predict_internal.models import PhaseRecord
+from graph_agent.core.result import PhaseRecord
 
 _USAGE_KEYS = {
     "usage",

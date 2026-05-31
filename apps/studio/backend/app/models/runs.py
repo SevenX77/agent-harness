@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from graph_agent.callbacks.events import CallbackEvent
-from graph_agent.core._predict_internal.models import PathDiff, PhaseRecord
+from graph_agent import PathDiff, PhaseRecord
 from pydantic import BaseModel, ConfigDict
 
 

@@ -11,12 +11,16 @@ from app.services.diagnostic_export import (
 )
 from app.services.golden_diff import set_golden_baseline_for_run
 from fastapi import HTTPException
-from graph_agent.core._predict_internal.models import PathDiff, PhaseRecord, PredictResult
+from graph_agent import PathDiff, PhaseRecord, RunResult
 
 
-def _predict_result() -> PredictResult:
-    return PredictResult(
-        status="failed",
+def _predict_result() -> RunResult:
+    return RunResult(
+        success=False,
+        run_id="predict-run-123",
+        skill_id="demo",
+        context={},
+        source="predict",
         phases=[
             PhaseRecord(
                 phase_name="draft",
@@ -30,6 +34,7 @@ def _predict_result() -> PredictResult:
                 type="logic",
                 inputs={"text": "manual"},
                 outputs={"passed": True},
+                mocked_source=None,
             ),
         ],
         path_diff=PathDiff(
@@ -37,6 +42,7 @@ def _predict_result() -> PredictResult:
             actual_path=["draft", "validate"],
             missing=["finish"],
             extra=["validate"],
+            order_mismatch=False,
         ),
     )
 

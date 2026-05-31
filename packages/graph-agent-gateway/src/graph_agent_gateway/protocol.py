@@ -8,6 +8,20 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 
 @runtime_checkable
+class PredictContext(Protocol):
+    """Protocol for target SDK prediction / mock interception context."""
+
+    def resolve_generation(
+        self,
+        phase_name: str,
+        role_name: str,
+        messages: list[Any],
+    ) -> tuple[dict[str, Any], str]:
+        """Resolve a mock generation, returning the dictionary payload and mocked_source metadata string."""
+        ...
+
+
+@runtime_checkable
 class ModelResolverProtocol(Protocol):
     """Resolve one logical role/model override into a LangChain chat model."""
 
@@ -19,6 +33,7 @@ class ModelResolverProtocol(Protocol):
         model_override: str | None = None,
         callbacks: tuple[Any, ...] = (),
         phase_name: str | None = None,
+        predict_context: PredictContext | None = None,
         **kwargs: Any,
     ) -> BaseChatModel:
         """Return a LangChain-compatible chat model for one phase."""

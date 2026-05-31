@@ -98,6 +98,12 @@ class PredictTracingCallback(TracingCallback):
     def phases_in_progress(self) -> list[dict[str, Any]]:
         return self._phase_stack
 
+    def on_event(self, event: CallbackEvent) -> None:
+        """Log typed event and dispatch to legacy hooks to populate flat segments."""
+        super().on_event(event)
+        from graph_agent.callbacks.base import _dispatch_legacy_event
+        _dispatch_legacy_event(self, event)
+
     def on_chain_start(self, metadata: dict[str, Any] | None = None, **kwargs: Any) -> None:
         """Mark the root run metadata as Predict before execution proceeds."""
 
@@ -119,10 +125,11 @@ class PredictTracingCallback(TracingCallback):
         self,
         phase_name: str,
         context: dict[str, Any],
-        metrics: dict[str, Any],
+        metrics: dict[str, Any] | None,
     ) -> None:
         """Finalize a phase with zeroed metrics and cached mock source metadata."""
 
+        metrics = metrics or {}
         zeroed_metrics = _zero_usage_values(metrics)
         source = self._source_cache.pop(phase_name)
         if source is not None:

@@ -277,7 +277,12 @@ class GatewayChatModel(BaseChatModel):
         tool_choice: str | None = None,
         **kwargs: Any,
     ) -> Runnable[LanguageModelInput, AIMessage]:
-        bound = GatewayChatModel(
+        cls = self.__class__
+        extra_kwargs = {}
+        if hasattr(self, "predict_context"):
+            extra_kwargs["predict_context"] = getattr(self, "predict_context")
+
+        bound = cls(
             self.role_name,
             self.resolved_role,
             max_tokens=self.max_tokens,
@@ -301,6 +306,7 @@ class GatewayChatModel(BaseChatModel):
             disable_streaming=self.disable_streaming,
             output_version=self.output_version,
             profile=self.profile,
+            **extra_kwargs,
         )
         return cast(Runnable[LanguageModelInput, AIMessage], bound)
 

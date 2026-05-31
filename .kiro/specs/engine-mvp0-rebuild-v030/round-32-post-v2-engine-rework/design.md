@@ -427,7 +427,10 @@ T4 的目标是把 predict 从“通过 `mock_llm` 注入 run_skill 的旁路模
   - `packages/graph-agent/src/graph_agent/core/graph_assembler.py`：`assemble_graph` 接收并透传 `predict_context`；`_resolve_phase_chat_model` 保留 `chat_model is not None` 短路，但 predict 路径保证 `chat_model=None`，并把 `predict_context` 传给 resolver。
   - `packages/graph-agent/src/graph_agent/core/_predict_internal/`：改成纯内部目录；移除 `__all__` 的 public 语义；删除 SDK 侧 `PredictGatewayChatModel`。
   - `packages/graph-agent/src/graph_agent/core/_predict_internal/hash.py`：新增 `input_hash`。
-  - tasks 阶段确认 SDK 内部 3 处嵌套 `run_skill` 调用的返回类型同步和 trace 范围：`packages/graph-agent/src/graph_agent/core/skill_tool_factory.py:110`、`packages/graph-agent/src/graph_agent/tools/md_to_json.py:578`、`packages/graph-agent/src/graph_agent/tools/builtin/parallel_map.py:306`。它们当前不传 `callbacks`，不受 PR-1 删除 public `callbacks` 参数直接影响；PR-2 后需从 `WorkflowResult` 同步到 `RunResult`，并明确 nested sub-run 的 `event_subscriber` 是否透传进同一条 trace。
+  - tasks 阶段确认 SDK 内部 3 处嵌套 `run_skill` 调用的返回类型同步和 trace 范围：
+    - `packages/graph-agent/src/graph_agent/tools/builtin/parallel_map.py:306` 已在 PR-1 从嵌套 `callbacks=callbacks` 迁到 `event_subscriber=_legacy_callback_subscriber(callbacks)`；PR-2 需决定保留该 legacy 桥，还是把 nested sub-run 统一透传到 `event_subscriber` / 同一条 trace，并随 `WorkflowResult` -> `RunResult` 同步返回值形状。
+    - `packages/graph-agent/src/graph_agent/core/skill_tool_factory.py:110` 与 `packages/graph-agent/src/graph_agent/tools/md_to_json.py:578` 当前不传 `callbacks` / `event_subscriber`，不受 PR-1 删除 public `callbacks` 参数直接影响；但 PR-2 的 `WorkflowResult` -> `RunResult` 改动仍需同步这两处 caller 的 dict 式 result 消费。
+    - 这 3 处都依赖 dict-shaped result：`parallel_map` 把 nested `run_skill` 返回值 `model_dump()` 后作为 `list[dict]` 元素返回，`skill_tool_factory` 用 `result.get("context", {}).get("final_output")`，`md_to_json` 用 `result["context"]["final_results"]`。因此 `RunResult` 设计 / 兼容层必须明确支持或迁移这些 dict 式取值。
 - Gateway
   - `packages/graph-agent-gateway/src/graph_agent_gateway/protocol.py`：显式声明 `predict_context`。
   - `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py`：删除 magic attr；消费 `predict_context`。

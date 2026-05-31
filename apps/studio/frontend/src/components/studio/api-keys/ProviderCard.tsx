@@ -9,6 +9,7 @@ import {
   EyeOff,
   File,
   FileText,
+  FlaskConical,
   ImageIcon,
   Loader2,
   MoreVertical,
@@ -54,7 +55,7 @@ type TestMessageStatus = "not_configured" | "testing" | NonNullable<CredentialsS
 type RouteDisplayStatus = RouteStatus | "unknown" | "testing"
 const availableModelsPreviewLimit = 12
 const fieldRowClassName = "grid grid-cols-[minmax(0,1fr)_11.5rem] items-center gap-2"
-const fieldActionClassName = "flex min-w-0 items-center justify-end gap-2"
+const fieldActionClassName = "flex min-w-0 items-center justify-start gap-2"
 const scrollableInputClassName = "overflow-x-auto whitespace-nowrap text-clip"
 const providerProtocolOptions: Array<{ value: ProviderType; label: string }> = [
   { value: "openai_compatible", label: "OpenAI compatible" },
@@ -259,13 +260,13 @@ export function ProviderDeleteButton({
   )
 }
 
-function FieldCopyButton({ value, label }: { value: string; label: string }) {
+function FieldCopyButton({ value, label, className }: { value: string; label: string; className?: string }) {
   return (
     <Button
       type="button"
       size="icon"
       variant="ghost"
-      className="text-muted-foreground/70 transition-none hover:text-muted-foreground"
+      className={cn("text-muted-foreground/70 transition-none hover:text-muted-foreground", className)}
       onClick={() => void copyCredentialValue(value, label)}
       disabled={!value}
       aria-label={`Copy ${label}`}
@@ -759,6 +760,7 @@ export function ProviderCard({
     ?? directPersistedTestResult(persisted, draft, {
       backendRouteTagsAreAuthoritative: isOfficial,
     })
+
   const hasMatchedTestResult = matchedResult !== null
   const displayName = providerDisplayName(draft, isOfficial, notableProviderKey)
   const apiKeyProviderName = displayName.replace(/ Official$/, "")
@@ -767,6 +769,7 @@ export function ProviderCard({
     ? sortOfficialRouteInfos(matchedResult?.available_models ?? [])
     : sortModelInfos(matchedResult?.available_models ?? [])
   const hasAvailableModels = availableModels.length > 0
+  const hasVerifiedModel = availableModels.some((model) => modelRouteStatus(model) === "verified")
   const availableModelsLabel = isOfficial ? "Available Routes:" : "Available Models:"
   const copyTargetLabel = isOfficial ? "route" : "model"
   const visibleModels = showAllModels ? availableModels : availableModels.slice(0, availableModelsPreviewLimit)
@@ -785,6 +788,8 @@ export function ProviderCard({
     ? "not_configured"
     : draft.isTesting
     ? "testing"
+    : hasVerifiedModel
+    ? "ok"
     : !hasMatchedTestResult
       ? "not_configured"
     : matchedStatus === "ok"
@@ -792,6 +797,7 @@ export function ProviderCard({
     : matchedStatus && matchedStatus !== "untested"
       ? matchedStatus
       : "not_configured"
+
   const handleGetModels = () => {
     const nextApiKeyError = hasApiKey ? "" : "API key is required."
     const nextBaseUrlError = providerKind === "third-party" && !draft.base_url.trim() ? "Base URL is required." : ""
@@ -944,49 +950,57 @@ export function ProviderCard({
             {hasReachableModelList ? <FieldReachabilityCheck label="API key" /> : null}
           </div>
           <div className={fieldRowClassName}>
-            <Input
-              ref={apiKeyInputRef}
-              id={`api-key-${draft.id}`}
-              type={apiKeyInputType(visible)}
-              value={draft.api_key}
-              onChange={(event) => {
-                if (apiKeyError) setApiKeyError("")
-                onFieldChange({ api_key: event.target.value })
-              }}
-              placeholder={`Enter your ${apiKeyProviderName} API Key`}
-              name={`provider-secret-${draft.id}`}
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="none"
-              data-1p-ignore=""
-              data-lpignore="true"
-              data-form-type="other"
-              spellCheck={false}
-              aria-invalid={apiKeyError ? true : undefined}
-              aria-describedby={apiKeyError ? `api-key-error-${draft.id}` : undefined}
-              onWheel={scrollInputContentOnWheel}
-              className={apiKeyInputClassName(visible)}
-            />
+            <div className="flex flex-1 min-w-0 items-center gap-1.5">
+              <Input
+                ref={apiKeyInputRef}
+                id={`api-key-${draft.id}`}
+                type={apiKeyInputType(visible)}
+                value={draft.api_key}
+                onChange={(event) => {
+                  if (apiKeyError) setApiKeyError("")
+                  onFieldChange({ api_key: event.target.value })
+                }}
+                placeholder={`Enter your ${apiKeyProviderName} API Key`}
+                name={`provider-secret-${draft.id}`}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="none"
+                data-1p-ignore=""
+                data-lpignore="true"
+                data-form-type="other"
+                spellCheck={false}
+                aria-invalid={apiKeyError ? true : undefined}
+                aria-describedby={apiKeyError ? `api-key-error-${draft.id}` : undefined}
+                onWheel={scrollInputContentOnWheel}
+                className={apiKeyInputClassName(visible)}
+              />
+              <div className="flex shrink-0 items-center gap-0.5">
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="size-7 text-muted-foreground/70 transition-none hover:text-muted-foreground [&_svg]:size-3.5"
+                  onClick={() => setVisible((value) => !value)}
+                  aria-label={visible ? "Hide API key" : "Show API key"}
+                >
+                  {visible ? <EyeOff /> : <Eye />}
+                </Button>
+                <FieldCopyButton value={draft.api_key} label="API key" className="size-7 [&_svg]:size-3.5" />
+              </div>
+            </div>
             <div className={fieldActionClassName}>
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                className="text-muted-foreground/70 transition-none hover:text-muted-foreground"
-                onClick={() => setVisible((value) => !value)}
-                aria-label={visible ? "Hide API key" : "Show API key"}
-              >
-                {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-              </Button>
-              <FieldCopyButton value={draft.api_key} label="API key" />
               <Button
                 type="button"
                 variant={isOfficial ? "default" : "secondary"}
                 onClick={handleGetModels}
                 disabled={isGettingModels}
-                className="px-4"
+                className="px-4 shrink-0"
               >
-                {isGettingModels ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                {isGettingModels ? (
+                  <Loader2 data-icon="inline-start" className="size-3.5 animate-spin shrink-0" />
+                ) : isOfficial ? (
+                  <FlaskConical data-icon="inline-start" className="size-3.5 shrink-0" />
+                ) : null}
                 {isOfficial ? "Test" : "Get Models"}
               </Button>
             </div>
@@ -1022,28 +1036,31 @@ export function ProviderCard({
               <Label htmlFor={`base-url-${draft.id}`}>Base URL</Label>
               {hasReachableModelList ? <FieldReachabilityCheck label="Base URL" /> : null}
             </div>
-            <div className={fieldRowClassName}>
-              <Input
-                ref={baseUrlInputRef}
-                id={`base-url-${draft.id}`}
-                value={draft.base_url}
-                onChange={(event) => {
-                  if (baseUrlError) setBaseUrlError("")
-                  onFieldChange({ base_url: event.target.value })
-                }}
-                placeholder="https://api.openai.com/v1"
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                aria-invalid={baseUrlError ? true : undefined}
-                aria-describedby={baseUrlError ? `base-url-error-${draft.id}` : undefined}
-                onWheel={scrollInputContentOnWheel}
-                className={scrollableInputClassName}
-              />
-              <div className={fieldActionClassName}>
-                <FieldCopyButton value={draft.base_url} label="Base URL" />
+             <div className={fieldRowClassName}>
+              <div className="flex flex-1 min-w-0 items-center gap-1.5">
+                <Input
+                  ref={baseUrlInputRef}
+                  id={`base-url-${draft.id}`}
+                  value={draft.base_url}
+                  onChange={(event) => {
+                    if (baseUrlError) setBaseUrlError("")
+                    onFieldChange({ base_url: event.target.value })
+                  }}
+                  placeholder="https://api.openai.com/v1"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  aria-invalid={baseUrlError ? true : undefined}
+                  aria-describedby={baseUrlError ? `base-url-error-${draft.id}` : undefined}
+                  onWheel={scrollInputContentOnWheel}
+                  className={scrollableInputClassName}
+                />
+                <div className="flex shrink-0 items-center">
+                  <FieldCopyButton value={draft.base_url} label="Base URL" className="size-7 [&_svg]:size-3.5" />
+                </div>
               </div>
+              <div aria-hidden="true" />
             </div>
             {baseUrlError ? <p id={`base-url-error-${draft.id}`} className="text-xs text-destructive">{baseUrlError}</p> : null}
           </div>
@@ -1073,9 +1090,13 @@ export function ProviderCard({
                   variant="default"
                   onClick={() => onEndpointTest(trimmedEndpointModelId)}
                   disabled={isTestingEndpoint || !hasRequiredConfig || !trimmedEndpointModelId}
-                  className="px-6"
+                  className="px-6 shrink-0"
                 >
-                  {isTestingEndpoint ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                  {isTestingEndpoint ? (
+                    <Loader2 data-icon="inline-start" className="size-3.5 animate-spin shrink-0" />
+                  ) : (
+                    <FlaskConical data-icon="inline-start" className="size-3.5 shrink-0" />
+                  )}
                   Test
                 </Button>
               </div>

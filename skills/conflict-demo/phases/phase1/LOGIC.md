@@ -1,22 +1,17 @@
 ---
-name: phase2
-mode: logic
+name: phase1
 io:
   inputs:
     type: object
     properties:
-      summary:
+      input_text:
         type: string
   outputs:
     type: object
     properties:
       summary:
         type: string
+actions:
+  - phase1
 ---
-
-<python_callable>
-def phase2(context):
-    return {"summary": "world"}
-</python_callable>
-
-# phase2
+<action>phase1</action>

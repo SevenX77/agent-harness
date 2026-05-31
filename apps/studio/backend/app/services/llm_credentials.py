@@ -449,7 +449,7 @@ def _is_new_secret(secret: SecretStr) -> bool:
 def _save_credentials_unlocked(data: LLMCredentialsFile, credential_path: Path) -> None:
     """Atomic write without acquiring the lock; caller must hold it."""
     payload = _credentials_payload_for_storage(data)
-    serialized = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+    serialized = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=False)
     credential_path.parent.mkdir(parents=True, exist_ok=True)
     credential_path.parent.chmod(0o700)
     fd, tmp_name = tempfile.mkstemp(

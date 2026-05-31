@@ -1,13 +1,13 @@
 """GraphAgent-owned sync checkpointer factory."""
 
 from __future__ import annotations
-from typing import Any, cast
 
 import contextlib
 import logging
 import os
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any, cast
 
 from langgraph.types import Checkpointer
 
@@ -108,6 +108,18 @@ def get_checkpointer(
     return _checkpointer
 
 
+def _parse_and_get_checkpointer(val: str) -> Checkpointer:
+    """Helper to parse memory/sqlite/postgres specifications."""
+    if val == "memory":
+        return get_checkpointer(backend="memory")
+    if val.startswith("sqlite:"):
+        raw_path = val[len("sqlite:") :] or "store.db"
+        return get_checkpointer(db_path=raw_path, backend="sqlite")
+    if val.startswith(("postgres://", "postgresql://")):
+        return get_checkpointer(backend="postgres", connection_string=val)
+    raise ValueError(f"unrecognised checkpointer value: {val!r}")
+
+
 def resolve_checkpointer(checkpointer_arg: Any = "auto") -> Checkpointer | None:
     """Resolve checkpointer argument or environment variables to a Checkpointer.
 
@@ -127,32 +139,23 @@ def resolve_checkpointer(checkpointer_arg: Any = "auto") -> Checkpointer | None:
     if checkpointer_arg is None:
         return None
 
-    import os
     if checkpointer_arg == "auto":
         override = os.environ.get("STUDIO_CHECKPOINTER")
         if override:
-            override = override.strip()
-            if override == "memory":
-                return get_checkpointer(backend="memory")
-            if override.startswith("sqlite:"):
-                raw_path = override[len("sqlite:"):] or "store.db"
-                return get_checkpointer(db_path=raw_path, backend="sqlite")
-            if override.startswith(("postgres://", "postgresql://")):
-                return get_checkpointer(backend="postgres", connection_string=override)
-            raise ValueError(f"unrecognised STUDIO_CHECKPOINTER value: {override!r}")
+            try:
+                return _parse_and_get_checkpointer(override.strip())
+            except ValueError as exc:
+                raise ValueError(f"unrecognised STUDIO_CHECKPOINTER value: {override!r}") from exc
 
         # Fallback to GRAPH_AGENT_CHECKPOINTER_DB
         db_path = os.environ.get("GRAPH_AGENT_CHECKPOINTER_DB")
         return get_checkpointer(db_path=db_path)
 
     if isinstance(checkpointer_arg, str):
-        if checkpointer_arg == "memory":
-            return get_checkpointer(backend="memory")
-        if checkpointer_arg.startswith("sqlite:"):
-            raw_path = checkpointer_arg[len("sqlite:"):] or "store.db"
-            return get_checkpointer(db_path=raw_path, backend="sqlite")
-        if checkpointer_arg.startswith(("postgres://", "postgresql://")):
-            return get_checkpointer(backend="postgres", connection_string=checkpointer_arg)
+        try:
+            return _parse_and_get_checkpointer(checkpointer_arg)
+        except ValueError:
+            pass
 
     return cast(Checkpointer | None, checkpointer_arg)  # Returns explicit Checkpointer instance or None
 

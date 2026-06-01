@@ -49,6 +49,8 @@ class MockSkillResolver:
         candidates = (
             self.workspace_root / skill_id,
             self.workspace_root / relative,
+            self.workspace_root / "skills" / skill_id,
+            self.workspace_root / "skills" / relative,
             self.workspace_root / "registry" / skill_id,
             self.workspace_root / "registry" / relative,
             registry / skill_id,

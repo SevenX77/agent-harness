@@ -1,5 +1,5 @@
 ---
-schema_version: "2.0"
+schema_version: "v0.3.0"
 name: Blank Graph
 description: A minimal multi-phase graph template with runtime input and artifact output.
 type: graph

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { FlaskConical, Loader2, Plus, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
@@ -35,74 +35,161 @@ import {
 import { SectionTitle } from "../shared"
 import { CopilotModelGroupCard } from "./CopilotModelGroupCard"
 import {
-  initialClaudeCopilotRoleIds,
   isClaudeAgentSdkCompatibleRoute,
   mockCopilotRoles,
   type CopilotRolePreview,
   type CopilotRoutePreview,
 } from "./mock-copilot-data"
 import {
-  applyModelGroupToRole,
-  availableCopilotModelGroups,
-  createDraftCopilotRole,
-  createInitialCopilotRoles,
-  type ActiveCopilotRoleCard,
-} from "./copilot-role-state"
-import {
   copilotRoleTestErrorMessage,
   copilotRouteStatusesFromJob,
   runCopilotRoleTestJob,
   type CopilotRouteJobStatus,
 } from "./copilot-role-test"
+import type { CredentialsState, ModelGroup, RolesData } from "@/api/llm"
+import type { SaveStatus } from "@/hooks/useDebouncedCredentialsSave"
 
-export function CopilotTab() {
+export function CopilotTab({
+  data = null,
+  credentials = { providers: [] },
+  modelGroups = [],
+  onChange = () => {},
+  saveStatus = "idle",
+  error = null,
+}: {
+  data?: RolesData | null
+  credentials?: CredentialsState
+  modelGroups?: ModelGroup[]
+  onChange?: (next: RolesData) => void
+  saveStatus?: SaveStatus
+  error?: string | null
+} = {}) {
+  void credentials
+  void modelGroups
+  void saveStatus
+  void error
+
   const claudeModelGroups = mockCopilotRoles.filter((role) => (
     role.sdkId === "claude-agent-sdk" && compatibleRoutesForRole(role).length > 0
   ))
-  const [activeRoles, setActiveRoles] = useState<ActiveCopilotRoleCard[]>(() => (
-    createInitialCopilotRoles(initialClaudeCopilotRoleIds, mockCopilotRoles)
-  ))
-  const [nextDraftIndex, setNextDraftIndex] = useState(1)
+
+  const activeRoles = useMemo(() => {
+    const filtered = data
+      ? Object.entries(data.roles)
+          .filter(([name]) => name === "copilot_opus_4_7" || name === "copilot_deepseek_v4" || name === "sonnet-4-7-third-party" || name.startsWith("copilot_custom_"))
+          .map(([name, role]) => {
+            const mockData = mockCopilotRoles.find((r) => r.id === name)
+            return {
+              id: name,
+              title: mockData?.title ?? name.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+              description: mockData?.description ?? "Coding copilot role.",
+              source: mockData?.source ?? ("third_party" as const),
+              modelGroupId: mockData?.id ?? name,
+              fallback_chain: role.fallback_chain ?? [],
+            }
+          })
+      : []
+
+    if (filtered.length === 0) {
+      return mockCopilotRoles.slice(0, 2).map((mockData) => ({
+        id: mockData.id,
+        title: mockData.title,
+        description: mockData.description,
+        source: mockData.source,
+        modelGroupId: mockData.id,
+        fallback_chain: mockData.activeRouteIds.map((routeId) => ({ route_id: routeId, runtime_settings: {} })),
+      }))
+    }
+    return filtered
+  }, [data])
+
   const [testingRoleIds, setTestingRoleIds] = useState<ReadonlySet<string>>(() => new Set())
   const [routeStatusOverrides, setRouteStatusOverrides] = useState<Record<string, CopilotRouteJobStatus>>({})
-  const [routeOrders, setRouteOrders] = useState<Record<string, string[]>>({})
-  const modelGroupOptions = availableCopilotModelGroups(claudeModelGroups, activeRoles)
+
+  const selectedModelGroupIds = new Set(
+    activeRoles.map((role) => role.modelGroupId).filter((id): id is string => typeof id === "string" && id !== null),
+  )
+  const modelGroupOptions = claudeModelGroups.filter((modelGroup) => !selectedModelGroupIds.has(modelGroup.id))
 
   function updateRouteOrder(roleId: string, nextOrder: string[]) {
-    setRouteOrders((current) => ({ ...current, [roleId]: nextOrder }))
+    if (!data) return
+    const nextRoles = { ...data.roles }
+    const role = nextRoles[roleId]
+    if (!role) return
+    nextRoles[roleId] = {
+      ...role,
+      fallback_chain: nextOrder.map((routeId) => ({
+        route_id: routeId,
+        runtime_settings: {},
+      })),
+    }
+    onChange({ ...data, roles: nextRoles })
   }
 
   function addDraftCopilotRole() {
-    setActiveRoles((current) => {
-      if (current.some((role) => role.modelGroupId === null)) return current
-      return [...current, createDraftCopilotRole(nextDraftIndex)]
-    })
-    setNextDraftIndex((current) => current + 1)
+    if (!data) return
+    const nextIndex = Object.keys(data.roles).filter(k => k.startsWith("copilot_custom_")).length + 1
+    const newRoleId = `copilot_custom_${nextIndex}`
+    const nextRoles = {
+      ...data.roles,
+      [newRoleId]: {
+        role_kind: "copilot" as const,
+        system_prompt_prefix: "",
+        model_fallback_enabled: true,
+        fallback_chain: [],
+        intent: { provider_preference: "manual_order" as const },
+        model_groups: [],
+        active_model: "",
+        models: {},
+      }
+    }
+    onChange({ ...data, roles: nextRoles })
   }
 
   function selectModelGroup(roleId: string, modelGroupId: string) {
+    if (!data) return
     const modelGroup = claudeModelGroups.find((candidate) => candidate.id === modelGroupId)
     if (!modelGroup) return
-    setActiveRoles((current) => applyModelGroupToRole(current, roleId, modelGroup))
+    const nextRoles = { ...data.roles }
+    const role = nextRoles[roleId]
+    if (!role) return
+
+    const defaultRouteIds = modelGroup.activeRouteIds.filter((routeId) =>
+      modelGroup.availableRoutes.filter(isClaudeAgentSdkCompatibleRoute).some((r) => r.id === routeId)
+    )
+
+    delete nextRoles[roleId]
+    nextRoles[modelGroupId] = {
+      role_kind: "copilot" as const,
+      system_prompt_prefix: "",
+      model_fallback_enabled: true,
+      fallback_chain: defaultRouteIds.map((routeId) => ({
+        route_id: routeId,
+        runtime_settings: {},
+      })),
+      intent: { provider_preference: "manual_order" as const },
+      model_groups: [],
+      active_model: "",
+      models: {},
+    }
+    onChange({ ...data, roles: nextRoles })
   }
 
-  function requestDeleteCopilotRole(role: ActiveCopilotRoleCard) {
+  function requestDeleteCopilotRole(role: { id: string; title: string }) {
     requestDeleteConfirmationToast({
       id: `delete-copilot-role-${role.id}`,
       title: `Delete ${role.title}?`,
-      description: "Remove this Copilot role and its selected model group.",
+      description: "Remove this Copilot role permanently.",
       onConfirm: () => {
-        setActiveRoles((current) => current.filter((candidate) => candidate.id !== role.id))
-        setRouteOrders((current) => {
-          const next = { ...current }
-          delete next[role.id]
-          return next
-        })
+        if (!data) return
+        const nextRoles = { ...data.roles }
+        delete nextRoles[role.id]
+        onChange({ ...data, roles: nextRoles })
       },
     })
   }
 
-  async function testRoleRoutes(role: ActiveCopilotRoleCard) {
+  async function testRoleRoutes(role: { id: string; title: string }) {
     setTestingRoleIds((current) => {
       const next = new Set(current)
       next.add(role.id)
@@ -122,8 +209,8 @@ export function CopilotTab() {
       } else {
         toast.warning(`${role.title} test needs attention`)
       }
-    } catch (error) {
-      toast.error(copilotRoleTestErrorMessage(error, role.title))
+    } catch (err) {
+      toast.error(copilotRoleTestErrorMessage(err, role.title))
     } finally {
       setTestingRoleIds((current) => {
         const next = new Set(current)
@@ -138,7 +225,7 @@ export function CopilotTab() {
       <SectionTitle
         title="Copilot"
         description="Configure copilot roles with the same model group fallback pattern used by LLM Roles."
-        trailing={<Badge variant="outline">Mock data</Badge>}
+        trailing={<Badge variant="outline">Backend Integration</Badge>}
       />
 
       <CatalogAccordion type="multiple" defaultValue={["claude-agent-sdk"]}>
@@ -163,7 +250,7 @@ export function CopilotTab() {
                 )
               }
               const visibleRoutes = compatibleRoutesForRole(modelGroup)
-              const routeOrder = routeOrders[role.id] ?? defaultRouteOrderForModelGroup(modelGroup)
+              const routeOrder = role.fallback_chain.map((entry) => entry.route_id)
               const chainRoutes = routeOrder
                 .map((routeId) => visibleRoutes.find((route) => route.id === routeId))
                 .filter(isCopilotRoute)
@@ -214,7 +301,7 @@ function CopilotRoleCard({
   onDeleteRole,
   onUpdateRouteOrder,
 }: {
-  role: ActiveCopilotRoleCard
+  role: { id: string; title: string; source: "built_in" | "third_party" }
   modelGroup: CopilotRolePreview
   routeOrder: string[]
   chainRoutes: CopilotRoutePreview[]
@@ -243,7 +330,7 @@ function CopilotRoleCard({
             {role.title}
             <Badge variant="secondary">{role.source === "built_in" ? "Built-in" : "Third-party"}</Badge>
           </CardTitle>
-          <CardDescription>{role.description}</CardDescription>
+          <CardDescription>Coding copilot role synced with backend fallback chain.</CardDescription>
         </div>
         <CardAction className="row-start-2 flex flex-wrap items-center gap-2 justify-self-start sm:row-start-1 sm:justify-self-end">
           <Badge variant={readyCount === compatibleRoutes.length ? "success" : "outline"}>
@@ -302,7 +389,7 @@ function EmptyCopilotRoleCard({
   onSelectModelGroup,
   onDeleteRole,
 }: {
-  role: ActiveCopilotRoleCard
+  role: { id: string; title: string; source: "built_in" | "third_party" }
   modelGroups: CopilotRolePreview[]
   onSelectModelGroup: (modelGroupId: string) => void
   onDeleteRole: () => void
@@ -321,7 +408,7 @@ function EmptyCopilotRoleCard({
             {role.title}
             <Badge variant="secondary">Third-party</Badge>
           </CardTitle>
-          <CardDescription>{role.description}</CardDescription>
+          <CardDescription>Select one model group to configure the Copilot fallback chain.</CardDescription>
         </div>
         <CardAction className="row-start-2 justify-self-start sm:row-start-1 sm:justify-self-end">
           <Button
@@ -369,11 +456,6 @@ function EmptyCopilotRoleCard({
 
 function compatibleRoutesForRole(role: CopilotRolePreview): CopilotRoutePreview[] {
   return role.availableRoutes.filter(isClaudeAgentSdkCompatibleRoute)
-}
-
-function defaultRouteOrderForModelGroup(modelGroup: CopilotRolePreview): string[] {
-  const compatibleRouteIds = new Set(compatibleRoutesForRole(modelGroup).map((route) => route.id))
-  return modelGroup.activeRouteIds.filter((routeId) => compatibleRouteIds.has(routeId))
 }
 
 function isCopilotRoute(route: CopilotRoutePreview | undefined): route is CopilotRoutePreview {

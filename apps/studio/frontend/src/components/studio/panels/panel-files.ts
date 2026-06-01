@@ -68,10 +68,19 @@ export function manifestFiles(skillDetail?: SkillDetail, selectedNode?: { id: st
 }
 
 export function inputFiles(skillDetail?: SkillDetail): FileMeta[] {
-  const manifest = skillDetail?.manifest as any
+  const manifest = skillDetail?.manifest as unknown as {
+    io?: {
+      inputs?: { properties?: Record<string, unknown> } | Record<string, unknown>
+      outputs?: { properties?: Record<string, unknown> } | Record<string, unknown>
+    }
+  }
   const io = manifest?.io
-  const inputs = io?.inputs?.properties ?? io?.inputs ?? {}
-  const outputs = io?.outputs?.properties ?? io?.outputs ?? {}
+  const inputs = (io?.inputs && typeof io.inputs === "object" && "properties" in io.inputs)
+    ? (io.inputs.properties as Record<string, unknown>)
+    : (io?.inputs as Record<string, unknown>) ?? {}
+  const outputs = (io?.outputs && typeof io.outputs === "object" && "properties" in io.outputs)
+    ? (io.outputs.properties as Record<string, unknown>)
+    : (io?.outputs as Record<string, unknown>) ?? {}
 
   return [
     {

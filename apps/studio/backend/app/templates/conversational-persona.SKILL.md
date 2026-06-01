@@ -1,5 +1,5 @@
 ---
-schema_version: "2.0"
+schema_version: "v0.3.0"
 name: Conversational Persona
 description: A reusable persona for concise product feedback conversations.
 type: persona

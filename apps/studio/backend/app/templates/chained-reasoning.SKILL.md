@@ -1,5 +1,5 @@
 ---
-schema_version: "2.0"
+schema_version: "v0.3.0"
 name: Chained Reasoning
 description: Demonstrates a two-phase reasoning chain where phase B reviews phase A.
 type: graph

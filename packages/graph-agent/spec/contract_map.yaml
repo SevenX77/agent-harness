@@ -5,18 +5,12 @@ public_api_symbols:
   AgentSkillDef:
     feature_ids:
     - F-vendor-contract-debt
-  AmbiguityReportEvent:
-    feature_ids:
-    - F-clarification-flow
   BlackboardState:
     feature_ids:
     - F-state-blackboard
   CallbackEvent:
     feature_ids:
     - F-callback-event-stream
-  CompactionEvent:
-    feature_ids:
-    - F-llm-prompt-assembly
   CompileIssue:
     feature_ids:
     - F-skill-compilation-vendor-export
@@ -29,15 +23,9 @@ public_api_symbols:
   CompiledStateGraph:
     feature_ids:
     - F-graph-assembly
-  DeadEndPrunedEvent:
-    feature_ids:
-    - F-llm-prompt-assembly
   ExecutionError:
     feature_ids:
     - F-error-code-recovery
-  FinishTaskEvent:
-    feature_ids:
-    - F-finish-task-validation
   GraphAgentError:
     feature_ids:
     - F-error-code-recovery
@@ -59,12 +47,6 @@ public_api_symbols:
   IoInput:
     feature_ids:
     - F-vendor-contract-debt
-  LLMCallEvent:
-    feature_ids:
-    - F-llm-execution
-  LLMFallbackEvent:
-    feature_ids:
-    - F-llm-execution
   LocalWorkspaceResolver:
     feature_ids:
     - F-skill-resolution
@@ -74,31 +56,19 @@ public_api_symbols:
   ModelProviderError:
     feature_ids:
     - F-error-code-recovery
-  NudgeEvent:
-    feature_ids:
-    - F-error-code-recovery
   PathDiff:
     feature_ids:
     - F-predict-internal-mocking
   PersonaSkillDef:
     feature_ids:
     - F-vendor-contract-debt
-  PhaseEndEvent:
-    feature_ids:
-    - F-runtime-execution
   PhaseRecord:
     feature_ids:
     - F-predict-internal-mocking
-  PhaseStartEvent:
-    feature_ids:
-    - F-runtime-execution
   PredictGatewayChatModel:
     feature_ids:
     - F-llm-execution
   ResourceNotFoundError:
-    feature_ids:
-    - F-error-code-recovery
-  RetryEvent:
     feature_ids:
     - F-error-code-recovery
   SkillCompilationError:
@@ -122,18 +92,9 @@ public_api_symbols:
   SubgraphNodeAST:
     feature_ids:
     - F-subgraph-delegation
-  ToolCallEvent:
-    feature_ids:
-    - F-tool-call-binding
-  ValidationFailEvent:
-    feature_ids:
-    - F-error-code-recovery
   RunResult:
     feature_ids:
     - F-runtime-execution
-  WorkingMemoryUpdateEvent:
-    feature_ids:
-    - F-state-blackboard
   assemble_graph:
     feature_ids:
     - F-graph-assembly

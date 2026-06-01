@@ -1,5 +1,5 @@
 ---
-schema_version: "2.0"
+schema_version: "v0.3.0"
 name: Data Extractor
 description: Extract structured JSON fields from unstructured text.
 type: graph

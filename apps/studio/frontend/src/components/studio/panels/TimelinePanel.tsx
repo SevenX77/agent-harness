@@ -4,10 +4,6 @@ import { useRunHistory } from "../../../hooks/useRunHistory"
 import { useWorkspaceContext } from "../WorkspaceContext"
 import { Button } from "../../ui/button"
 
-export function TimelinePanel() {
-  const { currentSkillId } = useWorkspaceContext()
-  const { runs, isLoading, error, refresh } = useRunHistory(currentSkillId)
-
 const formatDuration = (sec?: number | null) => {
   if (sec == null) return "n/a"
   return sec < 1 ? `${(sec * 1000).toFixed(0)}ms` : `${sec.toFixed(1)}s`
@@ -38,6 +34,7 @@ export function TimelinePanel() {
   const { runs, isLoading, error, refresh } = useRunHistory(currentSkillId)
 
   return (
+
     <div className="flex h-full flex-col bg-background">
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-3">
         <div>

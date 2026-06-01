@@ -22,6 +22,8 @@ def compiled_skills() -> dict[str, CompiledSkill]:
         "event-extraction",
         "batch-analysis",
         "text-segmentation",
+        "global-synthesis",
+        "story-deconstruction",
     ):
         try:
             skills[skill_id] = SkillLoader(validate_context_writes=False).compile_skill(
@@ -45,6 +47,8 @@ def test_all_live_skills_compile_from_v21_roots(
         "event-extraction",
         "batch-analysis",
         "text-segmentation",
+        "global-synthesis",
+        "story-deconstruction",
     }
     for skill_id, compiled in compiled_skills.items():
         assert compiled.manifest.schema_version == "v0.3.0"
@@ -65,6 +69,8 @@ def test_all_live_skills_compile_from_v21_roots(
             ["prepare", "entity_and_characters", "parallel_analysis", "continuity", "assemble"],
         ),
         ("text-segmentation", ["setup", "segment", "review"]),
+        ("global-synthesis", ["global_analysis", "scene_assembly", "retroactive", "export"]),
+        ("story-deconstruction", ["segmentation", "event_extraction", "batch_loop", "global_synthesis"]),
     ],
 )
 def test_live_skill_topology_matches_graph_md(
@@ -100,6 +106,36 @@ def test_live_skill_topology_matches_graph_md(
             "prepare_chapter",
             "phases/setup/actions/prepare_chapter.py",
         ),
+        (
+            "global-synthesis",
+            "scene_assembly",
+            "build_scene_stream",
+            "phases/scene_assembly/actions/build_scene_stream.py",
+        ),
+        (
+            "global-synthesis",
+            "export",
+            "export_story_framework",
+            "phases/export/actions/export_story_framework.py",
+        ),
+        (
+            "story-deconstruction",
+            "segmentation",
+            "segment_all_chapters",
+            "phases/segmentation/actions/segment_all_chapters.py",
+        ),
+        (
+            "story-deconstruction",
+            "event_extraction",
+            "extract_all_events",
+            "phases/event_extraction/actions/extract_all_events.py",
+        ),
+        (
+            "story-deconstruction",
+            "batch_loop",
+            "run_batch_loop",
+            "phases/batch_loop/actions/run_batch_loop.py",
+        ),
     ],
 )
 def test_logic_actions_are_discovered_from_v21_phase_dirs(
@@ -126,6 +162,7 @@ def test_logic_actions_are_discovered_from_v21_phase_dirs(
         ("event-extraction", "settings", "event_timeline"),
         ("batch-analysis", "continuity", "continuity_warnings"),
         ("text-segmentation", "review", "segmentation_result"),
+        ("global-synthesis", "global_analysis", "climax_ranking"),
     ],
 )
 def test_final_skill_phases_document_output_contracts(
@@ -140,3 +177,4 @@ def test_final_skill_phases_document_output_contracts(
     assert isinstance(node.ast, AgentNodeAST)
     assert node.ast.io is not None
     assert expected_output_property in node.ast.io.outputs.get("properties", {})
+

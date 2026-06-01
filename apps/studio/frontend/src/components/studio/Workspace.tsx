@@ -83,7 +83,7 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
         ? {
             source: selectedEdge.source,
             target: selectedEdge.target,
-            context_json: selectedEdge.contextJson as any,
+            context_json: selectedEdge.contextJson as unknown as { [key: string]: string | number | boolean | null },
           }
         : null,
       lint_status: currentSkillId ? readLintStatus(currentSkillId) : "idle",

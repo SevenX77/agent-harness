@@ -1,5 +1,5 @@
 ---
-schema_version: "2.0"
+schema_version: "v0.3.0"
 name: Blank Agent
 description: A single-step agent template for focused text work.
 type: agent

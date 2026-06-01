@@ -872,32 +872,6 @@ io:
 """,
     }
 
-
-def _legacy_agent_skill_content(skill_id: str) -> str:
-    return f"""---
-schema_version: "2.0"
-name: {skill_id}
-description: Draft structured ideas
-type: agent
-context_mapping:
-  topic: "{{input.topic}}"
-agent_profile:
-  role: Creative assistant
-  goal: Generate concise planning ideas
-  steps:
-    - Read the requested topic
-    - Return a short list of ideas
-  constraints:
-    - Keep the answer concise
-  llm_role: analyst
-user_prompt_template: |
-  Generate ideas for {{topic}}.
----
-
-# {skill_id}
-"""
-
-
 def _write_final_state(
     workspaces_dir: Path,
     skill_id: str,

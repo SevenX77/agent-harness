@@ -185,3 +185,58 @@ roles:
     lint_requirements:
       thinking: "warn"
       tool_calling: "warn"
+
+  copilot_opus_4_7:
+    role_kind: copilot
+    system_prompt_prefix: ""
+    fallback_chain:
+      - route_id: anthropic-official:claude-opus-4-7
+        runtime_settings:
+          temperature: null
+          max_output_tokens: 8192
+          reasoning:
+            enabled: true
+      - route_id: qiniu-anthropic:claude-opus-4-7
+        runtime_settings:
+          temperature: null
+          max_output_tokens: 8192
+    lint_requirements:
+      thinking: "warn"
+      tool_calling: "warn"
+
+  copilot_deepseek_v4:
+    role_kind: copilot
+    system_prompt_prefix: ""
+    fallback_chain:
+      - route_id: deepseek-official:deepseek-v4-pro
+        runtime_settings:
+          temperature: null
+          max_output_tokens: 8192
+      - route_id: ark-official:deepseek-v4-pro-260425
+        runtime_settings:
+          temperature: null
+          max_output_tokens: 8192
+      - route_id: qiniu-anthropic:deepseek-v4-pro
+        runtime_settings:
+          temperature: null
+          max_output_tokens: 8192
+    lint_requirements:
+      thinking: "warn"
+      tool_calling: "warn"
+
+  sonnet-4-7-third-party:
+    role_kind: copilot
+    system_prompt_prefix: ""
+    fallback_chain:
+      - route_id: qiniu-anthropic-sonnet-4-7
+        runtime_settings:
+          temperature: null
+          max_output_tokens: 8192
+      - route_id: onechats-anthropic-sonnet-4-7
+        runtime_settings:
+          temperature: null
+          max_output_tokens: 8192
+    lint_requirements:
+      thinking: "warn"
+      tool_calling: "warn"
+

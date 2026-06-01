@@ -115,6 +115,7 @@ apps/studio/frontend/test-results/
 # Test data
 test/
 
-# Code diagnostics reports
+# Code diagnostics outputs; reports/scratch are legacy local artifacts
+code-diagnostics/output/
 code-diagnostics/reports/
-
+code-diagnostics/scratch/

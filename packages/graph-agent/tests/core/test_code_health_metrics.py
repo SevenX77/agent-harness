@@ -16,10 +16,16 @@ def test_warehouse_code_health_diagnostics_oracle() -> None:
     """运行顶级诊断套件，校验全仓的硬性与美学打分是否达到合格红线 (85分)"""
     import time
     repo_root = Path(__file__).resolve().parents[4]
-    
+
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    target_md = repo_root / "code-diagnostics" / "reports" / f"diag_report_{timestamp}.md"
-    
+    target_md = (
+        repo_root
+        / "code-diagnostics"
+        / "output"
+        / timestamp
+        / f"diag_report_{timestamp}.md"
+    )
+
     # 1. 运行 build_tree.py 初始化扫描
     build_tree_script = repo_root / "code-diagnostics" / "build_tree.py"
     assert build_tree_script.exists(), "必须存在顶级代码健康诊断 build_tree.py 脚本"
@@ -28,7 +34,7 @@ def test_warehouse_code_health_diagnostics_oracle() -> None:
         [sys.executable, str(build_tree_script), "--file", str(target_md)],
         capture_output=True,
         text=True,
-        cwd=str(repo_root)
+        cwd=str(repo_root),
     )
     assert build_result.returncode == 0, f"结构树扫描 build_tree.py 执行失败:\n{build_result.stderr}"
 
@@ -40,7 +46,7 @@ def test_warehouse_code_health_diagnostics_oracle() -> None:
         [sys.executable, str(run_static_script), "--file", str(target_md)],
         capture_output=True,
         text=True,
-        cwd=str(repo_root)
+        cwd=str(repo_root),
     )
 
     # 打印体检输出便于诊断和查看分数

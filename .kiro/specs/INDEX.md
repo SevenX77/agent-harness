@@ -6,14 +6,14 @@
 
 | Spec | 状态 | 主题 | Level 3 关联 |
 |---|---|---|---|
-| [`canvas-micro-topology-v1/`](./canvas-micro-topology-v1/) | Draft (P0) | React Flow 画布微观拓扑展开 + 前后端嵌套 Payload schema | [`docs/studio/UX_WORKFLOW_BLUEPRINT.md`](../../docs/studio/UX_WORKFLOW_BLUEPRINT.md) + [`docs/engine/GRAPH_EXECUTION_MODEL.md`](../../docs/engine/GRAPH_EXECUTION_MODEL.md) |
-| [`trace-and-predict-visibility/`](./trace-and-predict-visibility/) | Draft (P1) | Trace 瀑布流 + Prompt 透视仪 + Edge Inspection + Compile 结构化报错 | [`docs/studio/TRACE_AND_VISUALIZATION.md`](../../docs/studio/TRACE_AND_VISUALIZATION.md) |
-| [`studio-api-keys-redesign/`](./studio-api-keys-redesign/) | Superseded (UX only) | API Keys Round 2/3 UX 参考；v4 生产契约见 `llm-provider-intelligence-v2` | [`docs/engine/LLM_ROUTING_AND_FALLBACK.md`](../../docs/engine/LLM_ROUTING_AND_FALLBACK.md) |
-| [`studio-api-keys-regression-hardening/`](./studio-api-keys-regression-hardening/) | Implementing | API Keys 回归收敛：先恢复删除前前端状态，再接 v4 API | [`docs/development/FRONTEND_UI_SPEC.md`](../../docs/development/FRONTEND_UI_SPEC.md) |
-| [`studio-gateway-runtime-schema-boundary/`](./studio-gateway-runtime-schema-boundary/) | Draft | Gateway runtime schema 去 UI 字段；Studio 后端拥有 display projection | [`docs/engine/LLM_ROUTING_AND_FALLBACK.md`](../../docs/engine/LLM_ROUTING_AND_FALLBACK.md) |
-| [`studio-llm-platform-control-plane-runtime/`](./studio-llm-platform-control-plane-runtime/) | Implementing | LLM Platform v1.1：Control Plane / Gateway Runtime Plane / 多客户接入 | [`apps/studio/backend/docs/llm-registry/LLM_PLATFORM_CONTROL_PLANE_RUNTIME_V1.md`](../../apps/studio/backend/docs/llm-registry/LLM_PLATFORM_CONTROL_PLANE_RUNTIME_V1.md) |
+| [`canvas-micro-topology-v1/`](./canvas-micro-topology-v1/) | Draft (P0) | React Flow 画布微观拓扑展开 + 前后端嵌套 Payload schema | [`docs/studio/system-level/ux-workflow/baseline.md`](../../docs/studio/system-level/ux-workflow/baseline.md) + [`docs/engine/execution-runtime/baseline.md`](../../docs/engine/execution-runtime/baseline.md) |
+| [`trace-and-predict-visibility/`](./trace-and-predict-visibility/) | Draft (P1) | Trace 瀑布流 + Prompt 透视仪 + Edge Inspection + Compile 结构化报错 | [`docs/studio/feature-folders/trace-visualization/baseline.md`](../../docs/studio/feature-folders/trace-visualization/baseline.md) |
+| [`studio-api-keys-redesign/`](./studio-api-keys-redesign/) | Superseded (UX only) | API Keys Round 2/3 UX 参考；v2 生产契约见 `llm-provider-intelligence-v2` | [`docs/engine/graph-agent-gateway/baseline.md`](../../docs/engine/graph-agent-gateway/baseline.md) |
+| [`studio-api-keys-regression-hardening/`](./studio-api-keys-regression-hardening/) | Implementing | API Keys 回归收敛：先恢复删除前前端状态，再接 v2 API | [`docs/development/FRONTEND_UI_SPEC.md`](../../docs/development/FRONTEND_UI_SPEC.md) |
+| [`studio-gateway-runtime-schema-boundary/`](./studio-gateway-runtime-schema-boundary/) | Draft | Gateway runtime schema 去 UI 字段；Studio 后端拥有 display projection | [`docs/engine/graph-agent-gateway/baseline.md`](../../docs/engine/graph-agent-gateway/baseline.md) |
+| [`studio-llm-platform-control-plane-runtime/`](./studio-llm-platform-control-plane-runtime/) | Implementing | LLM Platform v2.0：Control Plane / Gateway Runtime Plane / 多客户接入 | [`apps/studio/backend/docs/llm-registry/LLM_PLATFORM_CONTROL_PLANE_RUNTIME_V1.md`](../../apps/studio/backend/docs/llm-registry/LLM_PLATFORM_CONTROL_PLANE_RUNTIME_V1.md) |
 | [`studio-llm-roles-frontend-cutover/`](./studio-llm-roles-frontend-cutover/) | Draft | LLM Roles 前端按 6 个可回滚 PR 接入 Model Groups DTO | [`docs/development/FRONTEND_UI_SPEC.md`](../../docs/development/FRONTEND_UI_SPEC.md) |
-| [`studio-frontend-v21-multifile-editor/`](./studio-frontend-v21-multifile-editor/) | Draft | V2.1 多文件 skill 编辑架构 (VS Code 风格) | [`docs/studio/WORKSPACE_FILE_MANAGEMENT.md`](../../docs/studio/WORKSPACE_FILE_MANAGEMENT.md) |
+| [`studio-frontend-v21-multifile-editor/`](./studio-frontend-v21-multifile-editor/) | Draft | Studio v3 多文件 skill 编辑架构 (VS Code 风格) | [`docs/studio/system-level/workspace-file-system/baseline.md`](../../docs/studio/system-level/workspace-file-system/baseline.md) |
 
 ## Archive (历史归档区)
 

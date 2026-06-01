@@ -7,14 +7,18 @@ from pathlib import Path
 from graph_agent.core.loader import SkillLoader
 from graph_agent.core.manifest import AgentNodeAST, LogicNodeAST
 
+from tests.conftest import MockSkillResolver
+
 REPO_ROOT = Path(__file__).resolve().parents[6]
 SKILL_ROOT = REPO_ROOT / "skills/event-extraction"
 
 
 def test_event_extraction_compiles_from_legacy_v21_root() -> None:
-    compiled = SkillLoader(validate_context_writes=False).compile_skill(SKILL_ROOT)
+    compiled = SkillLoader(validate_context_writes=False).compile_skill(
+        SKILL_ROOT, skill_resolver=MockSkillResolver(REPO_ROOT)
+    )
 
-    assert [phase.id for phase in compiled.manifest.phases] == [
+    assert list(compiled.manifest.phases) == [
         "setup",
         "aggregate",
         "review",
@@ -29,7 +33,9 @@ def test_event_extraction_compiles_from_legacy_v21_root() -> None:
 
 
 def test_event_extraction_setup_action_is_discovered() -> None:
-    compiled = SkillLoader(validate_context_writes=False).compile_skill(SKILL_ROOT)
+    compiled = SkillLoader(validate_context_writes=False).compile_skill(
+        SKILL_ROOT, skill_resolver=MockSkillResolver(REPO_ROOT)
+    )
     setup = next(node for node in compiled.nodes if node.phase_name == "setup")
 
     assert isinstance(setup.ast, LogicNodeAST)
@@ -42,9 +48,11 @@ def test_event_extraction_setup_action_is_discovered() -> None:
 
 
 def test_event_extraction_final_phase_documents_json_output_contract() -> None:
-    compiled = SkillLoader(validate_context_writes=False).compile_skill(SKILL_ROOT)
+    compiled = SkillLoader(validate_context_writes=False).compile_skill(
+        SKILL_ROOT, skill_resolver=MockSkillResolver(REPO_ROOT)
+    )
     settings = next(node for node in compiled.nodes if node.phase_name == "settings")
 
     assert isinstance(settings.ast, AgentNodeAST)
-    assert "## event_timeline" in settings.ast.exit_contract
-    assert "```json" in settings.ast.exit_contract
+    assert settings.ast.io is not None
+    assert "event_timeline" in settings.ast.io.outputs.get("properties", {})

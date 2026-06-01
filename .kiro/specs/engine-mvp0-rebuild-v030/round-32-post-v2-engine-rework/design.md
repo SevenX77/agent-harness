@@ -2,7 +2,7 @@
 
 ## 0. 总览
 
-本设计覆盖 round-32 的 T2/T3/T4，目标是把 V030 引擎的后 V2 遗留面收束到一个可维护的公共 API、事件流和 predict 执行链。
+本设计覆盖 round-32 的 T2/T3/T4，目标是把 v0.3.1 引擎的后 V2 遗留面收束到一个可维护的公共 API、事件流和 predict 执行链。
 
 权威输入以 round-31 `decisions.md` 为准：
 
@@ -308,10 +308,10 @@ T4 的目标是把 predict 从“通过 `mock_llm` 注入 run_skill 的旁路模
 
 ### T4.2 当前状态
 
-- `run_skill` 暴露 `mock_llm`，见 `packages/graph-agent/src/graph_agent/core/runner.py:63`。
-- `_run_v030_skill_dict` 当前在 `mock_llm` 存在时把 `chat_model` 设为 mock，并禁用 `model_resolver`，见 `packages/graph-agent/src/graph_agent/core/runner.py:338` 到 `packages/graph-agent/src/graph_agent/core/runner.py:339`。
-- `assemble_graph` 当前同时接收 `chat_model` 与 `model_resolver`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:90` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:100`。
-- `_resolve_phase_chat_model` 当前如果 `chat_model is not None` 或 `model_resolver is None` 就直接返回 `chat_model`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:488` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:502`。
+- `run_skill` 暴露 `mock_llm`，见 `packages/graph-agent/src/graph_agent/core/runner.py:622`。
+- `_run_v030_skill_dict` 当前在 `mock_llm` 存在时把 `chat_model` 设为 mock，并禁用 `model_resolver`，见 `packages/graph-agent/src/graph_agent/core/runner.py:655` 到 `packages/graph-agent/src/graph_agent/core/runner.py:656`。
+- `assemble_graph` 当前同时接收 `chat_model` 与 `model_resolver`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:88` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:100`。
+- `_resolve_phase_chat_model` 当前如果 `chat_model is not None` 或 `model_resolver is None` 就直接返回 `chat_model`，见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:581` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:591`。
 - Studio predictor 当前构造 mock strategy 并传给 `run_skill(mock_llm=mock_param, model_resolver=build_gateway_model_resolver())`，见 `apps/studio/backend/app/services/predictor.py:66` 到 `apps/studio/backend/app/services/predictor.py:82`。
 - Studio gateway resolver 工厂当前只接收 `roles_path`，见 `apps/studio/backend/app/services/gateway_resolver.py:15` 到 `apps/studio/backend/app/services/gateway_resolver.py:21`。
 - Gateway resolver 当前通过 magic attr `_graph_agent_predict_mock_strategy` 切换 predict，见 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:97` 到 `packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:112`。
@@ -397,7 +397,7 @@ T4 的目标是把 predict 从“通过 `mock_llm` 注入 run_skill 的旁路模
 
 6. `mock_llm` 退出公共 predict 路径。
 
-   当前 `_run_v030_skill_dict` 用 `mock_llm` 覆盖 `chat_model` 并禁用 resolver，见 `packages/graph-agent/src/graph_agent/core/runner.py:338` 到 `packages/graph-agent/src/graph_agent/core/runner.py:339`。T4 后 predict 不能再依赖这个路径，因为它绕过 Gateway/Copilot callable。`mock_llm` 从公共 run/predict 签名删除；如果测试仍需要，只能降级为私有 test-only helper。公共 `predict_skill` 不传 `mock_llm`，因此进入 graph assembler 时 `chat_model` 恒为 `None`，`_resolve_phase_chat_model` 现有 `if chat_model is not None or model_resolver is None: return chat_model` 短路不会触发；该短路无需删除，只需在调用 `model_resolver.resolve(...)` 时透传 `predict_context`。当前短路实证见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:488` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:502`。
+   当前 `_run_v030_skill_dict` 用 `mock_llm` 覆盖 `chat_model` 并禁用 resolver，见 `packages/graph-agent/src/graph_agent/core/runner.py:655` 到 `packages/graph-agent/src/graph_agent/core/runner.py:656`。T4 后 predict 不能再依赖这个路径，因为它绕过 Gateway/Copilot callable。`mock_llm` 从公共 run/predict 签名删除；如果测试仍需要，只能降级为私有 test-only helper。公共 `predict_skill` 不传 `mock_llm`，因此进入 graph assembler 时 `chat_model` 恒为 `None`，`_resolve_phase_chat_model` 现有 `if chat_model is not None or model_resolver is None: return chat_model` 短路不会触发；该短路无需删除，只需在调用 `model_resolver.resolve(...)` 时透传 `predict_context`。当前短路实证见 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:581` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:591`。
 
 7. cache key 与 `input_hash`。
 

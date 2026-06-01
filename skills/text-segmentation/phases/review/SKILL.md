@@ -46,6 +46,7 @@ phase_config:
   tools:
     - finish_task
   max_iterations: 20
+  allow_sequential_overwrite: [parsed_segments, segments, segmentation_result]
   validator: true
 ---
 <role>

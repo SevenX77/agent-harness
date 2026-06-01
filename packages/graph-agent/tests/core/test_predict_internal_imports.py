@@ -15,13 +15,11 @@ from graph_agent_gateway.registry.schema import (
 from graph_agent_gateway.resolver import ModelResolver
 
 import graph_agent
-from graph_agent.core._predict_internal.strategy import BaseMockStrategy
 
 EXPECTED_TOP_LEVEL_EXPORTS = [
     "run_skill",
     "predict_skill",
     "RunResult",
-    "WorkflowResult",
     "PathDiff",
     "PhaseRecord",
     "compile_skill",
@@ -33,21 +31,12 @@ EXPECTED_TOP_LEVEL_EXPORTS = [
     "LocalWorkspaceResolver",
     "SkillManifest",
     "serialize_skill",
-    "Callback",
-    "LoggingCallback",
-    "MetricsCallback",
-    "TracingCallback",
     "GraphAgentError",
     "GraphCompileError",
     "GraphExecutionError",
     "ModelProviderError",
     "ResourceNotFoundError",
 ]
-
-
-class DummyMockStrategy(BaseMockStrategy):
-    def has_phase(self, phase_name: str) -> bool:
-        return phase_name == "phaseA"
 
 
 def _make_snapshot() -> RegistrySnapshot:
@@ -81,21 +70,6 @@ def _make_snapshot() -> RegistrySnapshot:
             )
         },
     )
-
-
-def test_predict_internal_exports_bind_predictor_only() -> None:
-    import graph_agent.core._predict_internal as predict_internal
-    from graph_agent.core._predict_internal import bind_predictor
-
-    assert predict_internal.__all__ == ["bind_predictor"]
-    assert inspect.isfunction(bind_predictor)
-
-
-def test_predict_gateway_chat_model_is_dynamic_subclass() -> None:
-    from graph_agent.core._predict_internal.interception import PredictGatewayChatModel
-
-    assert issubclass(PredictGatewayChatModel, GatewayChatModel)
-    assert PredictGatewayChatModel is not GatewayChatModel
 
 
 def test_top_level_export_abi_has_no_predict_additions() -> None:

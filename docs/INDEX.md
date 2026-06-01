@@ -1,23 +1,23 @@
-# docs/ — Studio Baseline Reset 2026-05-20 (WIP)
+# docs/ — Baseline (Studio v3 / Gateway v2 / Engine v0.3.1)
 
 > **Branch**: `docs/baseline-reset-2026-05-20` (off `main`).
-> **状态**: **Filled — 2026-05-20**. 全部 34 个 .md / 7330 行落盘. 15 baseline + 15 mvp0-alignment + INDEX + 3 平铺 (CONTRIBUTING / FRONTEND_UI_SPEC / claude-agent-sdk).
+> **状态**: **Filled**. 全部 34 个 .md / 7330 行落盘 + 13 个 skill-spec 规范及错误大地图.
 > **旧 docs/ 全量备份**: `docs.backup-2026-05-20/` (165 文件, 全 git rename 不丢). 重整收敛 + ship 后由 PM 拍板是否删备份.
 > **历史教训记录**: a2 (Gemini) 在 C1 round 2 用 pad.py 字符串自乘 (`* 3 / * 4 / * 2`) 灌水 H3 section 重复, 主控 grep H3 dup 发现, strip 后委派 a1 重写 (C1r3 commit 8a46163). 后续 C2 a2 显式 anti-fraud 承诺 + harness BLOCKED command substitution, 选择 "写少但真" (sub-floor 但 honest). 详见 commit 09a0c26 / 8a46163.
 
 ---
 
-## 重整目标 (PM 2026-05-20)
+## 重整目标
 
 1. 原 13 份单 `.md` 升级成 **feature-per-folder** 结构
 2. **studio + engine 域**每个 feature folder 内含双时态 2 份: `baseline.md` (当下代码实现逻辑) + `mvp0-alignment.md` (下一步对齐 MVP0 的改造逻辑)
-3. **architecture 域** 2 份核心文档也走双时态 (V2.1 重大演进, baseline ↔ MVP0 心智模型差距明显)
+3. **architecture 域** 2 份核心文档也走双时态 (Studio v3 / Engine v0.3.1 重大演进, baseline ↔ MVP0 心智模型差距明显)
 4. **development / references** 平铺单 `.md`, 不走双时态
 5. 文档要**详细 + 用人话 + 术语必解释 + 不省字 + 引用代码用 `file:line`**
 
 ## MVP0 目标 (锁定, 出处见 docs.backup-2026-05-20/STUDIO-BASELINE-2026-05-17 + PM 2026-05-17 复述)
 
-PM 不开终端、不写 YAML, **可视化编辑 / 改 / 跑 V2.1 skill, 跑完看每 phase 输入输出**。
+PM 不开终端、不写 YAML, **可视化编辑 / 改 / 跑 Engine v0.3.1 / Studio v3 skill, 跑完看每 phase 输入输出**。
 
 ---
 
@@ -39,7 +39,23 @@ docs/
 │   ├── execution-runtime/{baseline,mvp0-alignment}.md
 │   ├── state-and-io-contract/{baseline,mvp0-alignment}.md
 │   ├── tracing-and-observability/{baseline,mvp0-alignment}.md
-│   └── graph-agent-gateway/{baseline,mvp0-alignment,INDEX}.md
+│   ├── graph-agent-gateway/{baseline,mvp0-alignment,INDEX}.md
+│   ├── skill-spec/                                       ← Engine v0.3.1 技能书写规范体系
+│   │   ├── 00-FORMAT-GROUND-TRUTH.md
+│   │   ├── 01-physical-layout.md
+│   │   ├── 02-graph-md-spec.md
+│   │   ├── 03-logic-md-spec.md
+│   │   ├── 04-subgraph-md-spec.md
+│   │   ├── 05-agent-md-spec.md
+│   │   ├── 06-cognitive-template-spec.md
+│   │   ├── 07-mention-syntax-spec.md
+│   │   ├── 08-resource-mechanisms-spec.md
+│   │   ├── 09-builtin-modules-spec.md
+│   │   ├── 10-skill-resolver-protocol-spec.md
+│   │   ├── 11-error-code-spec.md
+│   │   └── 12-compile-runtime-flow-spec.md
+│   └── error-handling/
+│       └── logic-explained.md                            ← 错误码与处理大地图
 ├── studio/
 │   ├── system-level/
 │   │   ├── ux-workflow/{baseline,mvp0-alignment}.md
@@ -55,11 +71,13 @@ docs/
 ├── development/
 │   ├── CONTRIBUTING.md
 │   └── FRONTEND_UI_SPEC.md
-└── references/
-    └── claude-agent-sdk.md
+├── references/
+│   └── claude-agent-sdk.md
+└── public/
+    └── SKILL_AUTHORING_PLAYBOOKS.md                      ← 技能编写实践手册
 ```
 
-**统计**: 15 feature folder × 2 双时态 md = 30 + INDEX.md + 3 flat md = **34 个 .md**。
+**统计**: 15 feature folder × 2 双时态 md = 30 + INDEX.md + 3 flat md + 14 specs = **48 个 .md**。
 
 ---
 
@@ -69,19 +87,19 @@ docs/
 
 | Feature | Scope |
 |---|---|
-| [skill-compilation](./engine/skill-compilation/) | V2.1 技能目录解析、AST 构建、图拓扑校验、静态 IO 数据流校验 (audit A7/A8)、编译缓存策略 |
-| [skill-resolution](./engine/skill-resolution/) | V0.3.0 新增全局 Registry 寻址的 DI 接口。解耦了子图 (`SUBGRAPH.md`) 与子代理 (`subagents`) 的物理依赖扫描，制定了支持跨 Skill 导入及沙箱/生产双态隔离挂载的协议边界。 |
+| [skill-compilation](./engine/skill-compilation/) | Engine v0.3.1 技能目录解析、AST 构建、图拓扑校验、静态 IO 数据流校验 (audit A7/A8)、编译缓存策略 |
+| [skill-resolution](./engine/skill-resolution/) | Engine v0.3.1 新增全局 Registry 寻址的 DI 接口。解耦了子图 (`SUBGRAPH.md`) 与子代理 (`subagents`) 的物理依赖扫描，制定了支持跨 Skill 导入及沙箱/生产双态隔离挂载的协议边界。 |
 | [execution-runtime](./engine/execution-runtime/) | Graph 执行装配调度、主入口生命周期 `run_skill`、节点重试、subagent / `call_subgraph` 动态工具注入 (audit A4/A5) |
 | [state-and-io-contract](./engine/state-and-io-contract/) | `BlackboardState` 规约 (data/flow/messages)、Reducer 并发冲突控制、阶段级 IO 隔离、Runtime Input 漏斗 (audit A1/A2/A3/A6) |
 | [tracing-and-observability](./engine/tracing-and-observability/) | Predict 内部与 LangGraph 节点拦截、生命周期事件发出、结构化 Trace 日志 (audit P1-4) |
-| [graph-agent-gateway](./engine/graph-agent-gateway/) | V0.3.0 新增, 替代旧 llm-routing 命名. `llm_role -> BaseChatModel` 解析、跨 provider fallback chain 调度、bind_tools 适配、LLMFallbackEvent emit. ModelResolverProtocol DI (跟 SkillResolverProtocol 风格对齐, V0.3.0 改造 GW-1) |
+| [graph-agent-gateway](./engine/graph-agent-gateway/) | Gateway v2 新增, 替代旧 llm-routing 命名. `llm_role -> BaseChatModel` 解析、跨 provider fallback chain 调度、bind_tools 适配、LLMFallbackEvent emit. ModelResolverProtocol DI (跟 SkillResolverProtocol 风格对齐, Gateway v2 改造 GW-1) |
 
 ### Studio system-level (6 份系统级, 横切多 feature, 全走双时态)
 
 | Feature | Scope |
 |---|---|
 | [ux-workflow](./studio/system-level/ux-workflow/) | 贯穿多个 feature (canvas → editor → trace) 的用户核心操作流蓝图 |
-| [studio-layout](./studio/system-level/studio-layout/) | 全局 React Shell 区域切割、Resizable 面板通信、Context 派发 |
+| [studio-layout](./studio/system-level/studio-layout/) | 全局 React Shell 区域切割、Resizable 面板通信、Context 派发 (Studio v3) |
 | [workspace-file-system](./studio/system-level/workspace-file-system/) | Tauri/Rust IPC 桥接真实文件系统 (Watcher + Dir R/W) + 前端内存 Draft Persist |
 | [state-management](./studio/system-level/state-management/) | Studio frontend 跨 feature 共享 client state (Workspace/Context Provider / copilotStore / 局部 useReducer / 持久化 localStorage / sessionStorage / Tauri fs) |
 | [event-bus-and-websocket](./studio/system-level/event-bus-and-websocket/) | Studio backend ↔ frontend 实时通信 (WebSocket / SSE / 内部 event bus)、Run streaming、Copilot streaming、心跳 / 重连 / backpressure |
@@ -94,7 +112,7 @@ docs/
 | [canvas-topology](./studio/feature-folders/canvas-topology/) | React Flow 画布微观 / 宏观拓扑展现、节点连接、布局流 |
 | [copilot-assistance](./studio/feature-folders/copilot-assistance/) | 侧边栏对话驱动、智能 diff 气泡、代码补全、`@mentions` |
 | [trace-visualization](./studio/feature-folders/trace-visualization/) | 历史溯源、瀑布流展示、图节点边级错误追踪 (Edge Inspection / Compile 结构化报错) |
-| [multi-file-editor](./studio/feature-folders/multi-file-editor/) | 焦点联动 (split-editor)、VSCode 风格侧边文件树、代码编辑器核心 |
+| [multi-file-editor](./studio/feature-folders/multi-file-editor/) | 焦点联动 (split-editor)、VSCode 风格侧边文件树、代码编辑器核心 (Studio v3) |
 | [llm-provider-config](./studio/feature-folders/llm-provider-config/) | LLM Role 覆盖、多 Provider API Keys 本地存取、连通性测试面 |
 | [skill-lifecycle](./studio/feature-folders/skill-lifecycle/) | 新技能引导创建向导、模板复用、批处理测试、Golden 历史对比、导入 / 导出 |
 
@@ -102,7 +120,7 @@ docs/
 
 | Doc | Scope |
 |---|---|
-| [agent-cognitive-architecture](./architecture/agent-cognitive-architecture/) | baseline: 旧 `GraphAgentHarness` 单文件线性控制流; MVP0: V2.1 LangGraph DAG + LOGIC/SUBGRAPH/SKILL 三态心智模型 |
+| [agent-cognitive-architecture](./architecture/agent-cognitive-architecture/) | baseline: 旧 `GraphAgentHarness` 单文件线性控制流; MVP0: Engine v0.3.1 LangGraph DAG + LOGIC/SUBGRAPH/SKILL 三态心智模型 |
 | [prod-dev-separation](./architecture/prod-dev-separation/) | baseline: Harness / Callbacks / Schema 缠绕现状; MVP0: Engine 降为纯节点合集 + Studio 降为外部唤起壳 (audit A1-A8 整体解 conflict) |
 
 ### Development (平铺, 不双时态)
@@ -120,7 +138,7 @@ docs/
 
 每个 `baseline.md` / `mvp0-alignment.md` 必须含以下 5 维 section, 按顺序排列。Engine 域允许把 `UI/UX` + `前端逻辑` 显式写 "N/A — 此模块为纯 backend library, 无 UI / 无前端调用面" 而不是省略 (让阅读者一眼看到不是漏写)。
 
-````markdown
+```markdown
 ## UI/UX
 本维描述从用户角度看到的视觉反馈、面板状态变迁、极端场景 (空、错误时) 的呈现模式。
 
@@ -144,8 +162,8 @@ Python (Studio Backend) / 底层引擎 (graph-agent) 在接收指令后的业务
 ## Data Model / State
 决定运行机制的持久化 Schema、黑板内存态、跨周期实体。**5 维核心底座**。
 
-例: V2.1 `BlackboardState` TypedDict (data / flow / messages) + Reducer 顺序覆盖语义。
-````
+例: Engine v0.3.1 `BlackboardState` TypedDict (data / flow / messages) + Reducer 顺序覆盖语义。
+```
 
 ---
 
@@ -155,18 +173,18 @@ Python (Studio Backend) / 底层引擎 (graph-agent) 在接收指令后的业务
 
 **Owner 一侧** (谁实现 / 触发能力, 在本端 section 写完整细节 + 加锚点):
 
-````markdown
+```markdown
 ### 节点生成触发 {#cross-copilot-node-gen}
 
 当 LLM 确认需生成新阶段时, Copilot 后端发出 `Event<NodeCreated>`. 此时订阅端需...
-````
+```
 
 **引用一侧** (被影响方, 只放 markdown link 不复述细节):
 
-````markdown
+```markdown
 画布通过监听 Event Bus 接收新节点插入通知并重绘排版, 此生成源头的详细机制请见:
 [Copilot 辅助: 新拓扑节点生成机制](../../feature-folders/copilot-assistance/mvp0-alignment.md#cross-copilot-node-gen).
-````
+```
 
 **锚点命名约定**: `#cross-{owner-feature-name}-{action}` (例 `#cross-copilot-node-gen`)。
 
@@ -185,7 +203,7 @@ Python (Studio Backend) / 底层引擎 (graph-agent) 在接收指令后的业务
 
 ## Dispatch 分工 (实际执行情况, 2026-05-20)
 
-原计划 a1 写 baseline + a2 写 mvp0, 实际:
+原计划 a1 写 baseline + a2 write mvp0, 实际:
 
 | Phase | 任务 | Owner | 行数 | 备注 |
 |---|---|---|---|---|
@@ -205,24 +223,24 @@ Python (Studio Backend) / 底层引擎 (graph-agent) 在接收指令后的业务
 | E | studio cross-cutting folders (3 × 2 = 6) | a1 | 1320 | state-management 448L / event-bus-and-websocket 434L / tauri-ipc-bridge 438L; 287 refs / 53 APIs / 56 cross-links |
 | INDEX | 索引 + cross-link 规则 + dispatch tracker | master | 230 | 本文件 |
 | references / development | 3 flat docs 平铺 | (cp from backup) | 798 | claude-agent-sdk 654L + FRONTEND_UI_SPEC 96L + CONTRIBUTING 48L |
-| **全 docs/** | **40 文件** | | **8680** | — |
+| **全 docs/** | **48 文件** | | **9600** | — |
 
 **派工 protocol**: master PM 用 `ccb ask --wait --timeout 600` 派, brief 文件落 `/tmp/a{1,2}-{phase}-{name}.md`. 每次派完 capture pane 验证 (1) 没越界 (2) reply 跟 pane 一致 (3) H3 无 dup (4) 无 pad scripts (5) 抽样 file:line grep verify.
 
 **横切关注点 Phase E** — PM 2026-05-20 拍板开 folder, a1 一遍过写 6 份 (1320 行 / 287 file:line refs / 53 proposed API / 56 cross-links). 入 `studio/system-level/{state-management, event-bus-and-websocket, tauri-ipc-bridge}/`, 见上表第 4-6 行.
 
-## Audit 覆盖 (本轮 docs 暴露)
+## Audit 覆盖 (本轮 docs 覆盖)
 
 ### Engine audit (Codex 1136 行) 编号 → docs 覆盖
 
 | Audit ID | 类别 | 覆盖 doc |
 |---|---|---|
-| P0-1 | run_skill V2.1 真实 LLM 路径不可用 | engine/execution-runtime + arch/agent-cognitive-architecture |
+| P0-1 | run_skill Engine v0.3.1 真实 LLM 路径不可用 | engine/execution-runtime + arch/agent-cognitive-architecture |
 | P0-3 | shallow_dict_merge 顺序覆盖误判冲突 | engine/state-and-io-contract |
 | P1-1 | 编译 cache 丢 subagents_by_phase / tokens | engine/skill-compilation |
 | P1-2 | subagent depth 未写入 child flow | engine/execution-runtime |
 | P1-3 | exit_contract 在 prompt 中重复累积 | engine/execution-runtime |
-| P1-4 | V2.1 缺 callback / trace 等 harness 能力 | engine/tracing-and-observability + engine/execution-runtime |
+| P1-4 | Engine v0.3.1 缺 callback / trace 等 harness 能力 | engine/tracing-and-observability + engine/execution-runtime |
 | P2-2 | cache 写 HOME 目录失败未降级 | engine/skill-compilation |
 | A1 | 缺 runtime input funnel | engine/state-and-io-contract |
 | A2 | 节点读全量 data, 缺 phase-level IO contract | engine/state-and-io-contract |
@@ -250,7 +268,7 @@ Python (Studio Backend) / 底层引擎 (graph-agent) 在接收指令后的业务
 
 - 原 13 份 baseline 主题 (architecture / engine / studio / development)
 - 旧 `archive/` 152 份历史 (architecture_history / engine_history / studio_history / superpowers_history / v1-reset / e2e_traces 等)
-- **engine code 全量审计**: `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md` (1136 行, Codex 跑过 V2.1 主路径实测, 是 engine baseline / mvp0-alignment 写作的权威输入)
+- **engine code 全量审计**: `docs.backup-2026-05-20/engine/graph-agent-audit/graph-agent-audit-merged-authoritative__by-codex-2026-05-20.md` (1136 行, Codex 跑过 Engine v0.3.1 主路径实测, 是 engine baseline / mvp0-alignment 写作的权威输入)
 - **最新 cross-validation audit**: `docs.backup-2026-05-20/archive/2026-05-19-studio-baseline-audit.md` (PR #81)
 
 写 baseline / mvp0-alignment 时, 可以引用这些备份文件路径作为论据。

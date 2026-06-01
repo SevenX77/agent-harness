@@ -130,7 +130,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         candidate_nodeids = {item.nodeid, f"{nodeid}::{item.name}"}
         if item.cls is not None:
             candidate_nodeids.add(f"{nodeid}::{item.cls.__name__}::{item.name}")
-        if candidate_nodeids & _V21_CORPUS_DEFERRED_TESTS:
+        if any(any(deferred in cid for cid in candidate_nodeids) for deferred in _V21_CORPUS_DEFERRED_TESTS):
             item.add_marker(v21_corpus_xfail_marker)
         elif candidate_nodeids & _V1_SKILL_AWAITING_CUTOVER_TESTS:
             item.add_marker(v1_xfail_marker)

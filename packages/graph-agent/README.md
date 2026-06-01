@@ -90,8 +90,11 @@ The stable names re-exported from `graph_agent`:
 
 | Name | Purpose |
 |---|---|
-| `run_skill` | High-level entry point |
-| `WorkflowResult` | Pydantic-typed return contract |
+| `run_skill` | High-level execution entry point |
+| `predict_skill` | High-level prediction/mocking entry point |
+| `RunResult` | Unified return result contract (source="run" or "predict") |
+| `PathDiff` | Unified prediction path comparison diagnostics |
+| `PhaseRecord` | Unified single phase execution diagnostic record |
 | `compile_skill` | Static skill validation |
 | `CompileResult` | Legacy compile diagnostic container |
 | `assemble_graph` | Assemble a compiled skill into a runnable graph |
@@ -99,15 +102,13 @@ The stable names re-exported from `graph_agent`:
 | `CompiledStateGraph` | Assembled graph wrapper |
 | `BlackboardState` | Runtime blackboard state |
 | `LocalWorkspaceResolver` | Local filesystem skill-id resolver |
-| `SkillManifest` | Pydantic schema for SKILL.md |
+| `SkillManifest` | Pydantic schema for SKILL.md / GRAPH.md |
 | `serialize_skill` | Stable skill serialization helper |
-| `Callback` | Base class for extensibility |
-| `LoggingCallback` | Default structured-log callback |
-| `MetricsCallback` | Default metrics-recording callback |
-| `TracingCallback` | JSONL trace-emitting callback |
-| `GraphAgentError` | Base exception |
-| `SkillLoadError` | Subclass: SKILL.md load failures |
-| `SkillCompilationError` | Subclass: compile/validation failures with `skill_path/line/field_path/suggestion` context |
+| `GraphAgentError` | Base exception for all graph agent errors |
+| `GraphCompileError` | Subclass: compilation, validation, reference, schema/contract errors |
+| `GraphExecutionError` | Subclass: runtime execution, state, tool, checkpointer errors |
+| `ModelProviderError` | Subclass: gateway, model role resolver, LLM service provider errors |
+| `ResourceNotFoundError` | Subclass: workspace, skill, resolver path resolution failures |
 
 Internal helpers (`Phase`, `WorkflowState`, `IOManager`, `ContextResolver`, `ModelResolver`, etc.) are reachable through their sub-module paths but are **not** part of the SDK contract.
 
@@ -122,8 +123,8 @@ graph_agent/
 │
 ├── core/                    # Core orchestration engine
 │   ├── harness.py           # GraphAgentHarness
-│   ├── runner.py            # run_skill + WorkflowResult
-│   ├── result.py            # WorkflowResult Pydantic schema
+│   ├── runner.py            # run_skill + predict_skill
+│   ├── result.py            # RunResult + PhaseRecord + PathDiff
 │   ├── loader.py            # load_workflow_from_md (internal)
 │   ├── compiler.py          # compile_skill
 │   ├── manifest.py          # SkillManifest schema
@@ -131,11 +132,9 @@ graph_agent/
 │   ├── checkpointer.py      # LangGraph checkpoint plumbing
 │   └── ...
 │
-├── callbacks/               # Observability callbacks
-│   ├── base.py              # Callback base class
-│   ├── logging_cb.py        # LoggingCallback
-│   ├── metrics.py           # MetricsCallback
-│   └── tracing.py           # TracingCallback
+├── callbacks/               # Observability & Tracing Sink (internal)
+│   ├── events.py            # CallbackEvent definitions
+│   └── ...
 │
 ├── cognitive/               # Cognitive control
 │   ├── finish.py            # finish_task + nudges
@@ -169,16 +168,20 @@ graph_agent/
 # 2. Import only public API
 from pathlib import Path
 
-from graph_agent import Callback, GraphAgentError, LocalWorkspaceResolver, SkillManifest
-from graph_agent import WorkflowResult, run_skill
+from graph_agent import GraphCompileError, GraphExecutionError, LocalWorkspaceResolver
+from graph_agent import RunResult, run_skill
 
 # 3. Run
 resolver = LocalWorkspaceResolver(search_paths=[Path.cwd(), Path.cwd() / "skills"])
-result: WorkflowResult = run_skill(
+
+def my_subscriber(event):
+    print("Received event:", event.event_type)
+
+result: RunResult = run_skill(
     "path/to/v030-skill-root",
     skill_resolver=resolver,
+    event_subscriber=my_subscriber,
     **{...},
-    callbacks=[MyCustomCallback()],
 )
 ```
 

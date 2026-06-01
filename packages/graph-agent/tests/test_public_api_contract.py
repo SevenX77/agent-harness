@@ -17,7 +17,6 @@ EXPECTED_CONTRACT_SYMBOLS: dict[str, str] = {
     "run_skill": "graph_agent",
     "predict_skill": "graph_agent",
     "RunResult": "graph_agent",
-    "WorkflowResult": "graph_agent",
     "compile_skill": "graph_agent",
     "CompileResult": "graph_agent",
     "assemble_graph": "graph_agent",
@@ -27,10 +26,6 @@ EXPECTED_CONTRACT_SYMBOLS: dict[str, str] = {
     "LocalWorkspaceResolver": "graph_agent",
     "SkillManifest": "graph_agent",
     "serialize_skill": "graph_agent",
-    "Callback": "graph_agent",
-    "LoggingCallback": "graph_agent",
-    "MetricsCallback": "graph_agent",
-    "TracingCallback": "graph_agent",
     "GraphAgentError": "graph_agent",
     "GraphCompileError": "graph_agent",
     "GraphExecutionError": "graph_agent",
@@ -39,33 +34,25 @@ EXPECTED_CONTRACT_SYMBOLS: dict[str, str] = {
     "AgentNodeAST": "graph_agent.core.manifest",
     "AgentSkillDef": "graph_agent.core.manifest",
     "AmbiguityReportEvent": "graph_agent.callbacks.events",
-    "BaseMockStrategy": "graph_agent.core._predict_internal.strategy",
     "CallbackEvent": "graph_agent.callbacks.events",
     "CompactionEvent": "graph_agent.callbacks.events",
     "CompileIssue": "graph_agent.core.compiler",
     "DeadEndPrunedEvent": "graph_agent.callbacks.events",
     "ExecutionError": "graph_agent.core.exceptions",
     "FinishTaskEvent": "graph_agent.callbacks.events",
-    "GoldenCase": "graph_agent.core._predict_internal.models",
-    "GoldenCaseStrategy": "graph_agent.core._predict_internal.strategy",
     "GraphManifest": "graph_agent.core.manifest",
     "GraphPhaseRef": "graph_agent.core.manifest",
     "GraphSkillDef": "graph_agent.core.manifest",
-    "HeuristicStubStrategy": "graph_agent.core._predict_internal.strategy",
     "IoInput": "graph_agent.core.manifest",
     "LLMCallEvent": "graph_agent.callbacks.events",
     "LLMFallbackEvent": "graph_agent.callbacks.events",
     "LogicNodeAST": "graph_agent.core.manifest",
-    "MockStrategy": "graph_agent.core._predict_internal.strategy",
     "NudgeEvent": "graph_agent.callbacks.events",
     "PathDiff": "graph_agent",
     "PersonaSkillDef": "graph_agent.core.manifest",
     "PhaseEndEvent": "graph_agent.callbacks.events",
     "PhaseRecord": "graph_agent",
     "PhaseStartEvent": "graph_agent.callbacks.events",
-    "PredictGatewayChatModel": "graph_agent.core._predict_internal.interception",
-    "PredictResult": "graph_agent.core._predict_internal.models",
-    "PredictTracingCallback": "graph_agent.core._predict_internal.tracing",
     "RetryEvent": "graph_agent.callbacks.events",
     "SkillCompileError": "graph_agent.core.exceptions",
     "SkillLoadError": "graph_agent.core.exceptions",
@@ -76,11 +63,6 @@ EXPECTED_CONTRACT_SYMBOLS: dict[str, str] = {
     "ToolCallEvent": "graph_agent.callbacks.events",
     "ValidationFailEvent": "graph_agent.callbacks.events",
     "WorkingMemoryUpdateEvent": "graph_agent.callbacks.events",
-    "assemble_phase_record": "graph_agent.core._predict_internal.exporter",
-    "compute_diff": "graph_agent.core._predict_internal.path_diff",
-    "parse_skill_file": "graph_agent.core.parser",
-    "serialize_graph": "graph_agent.core.graph_serializer",
-    "to_jsonable_dict": "graph_agent.callbacks.serialize",
 }
 
 EXPECTED_KNOWN_MISSING_VENDOR_ONLY: dict[str, str] = {
@@ -88,7 +70,6 @@ EXPECTED_KNOWN_MISSING_VENDOR_ONLY: dict[str, str] = {
     "GraphSkillDef": "graph_agent.core.manifest",
     "IoInput": "graph_agent.core.manifest",
     "PersonaSkillDef": "graph_agent.core.manifest",
-    "parse_skill_file": "graph_agent.core.parser",
 }
 
 EXPECTED_VENDOR_ONLY_SYMBOLS = {
@@ -97,23 +78,8 @@ EXPECTED_VENDOR_ONLY_SYMBOLS = {
     "IoInput",
     "PersonaSkillDef",
     "CompileIssue",
-    "parse_skill_file",
 }
 
-EXPECTED_PREDICT_INTERNAL_SYMBOLS = {
-    "assemble_phase_record",
-    "PredictGatewayChatModel",
-    "GoldenCase",
-    "PathDiff",
-    "PhaseRecord",
-    "PredictResult",
-    "compute_diff",
-    "BaseMockStrategy",
-    "GoldenCaseStrategy",
-    "HeuristicStubStrategy",
-    "MockStrategy",
-    "PredictTracingCallback",
-}
 
 EXPECTED_ALL_18 = tuple(
     symbol for symbol, module_name in EXPECTED_CONTRACT_SYMBOLS.items() if module_name == "graph_agent"
@@ -228,43 +194,18 @@ EXPECTED_SIGNATURES: dict[str, tuple[str, tuple[tuple[str, str, str, str], ...],
                      (('manifest', 'POSITIONAL_OR_KEYWORD', '<required>', 'SkillManifest'),),
                      'str')}
 
-EXPECTED_CONSTRUCTOR_SIGNATURES: dict[str, tuple[str, tuple[tuple[str, str, str, str], ...], str]] = {'BaseMockStrategy': ('graph_agent.core._predict_internal.strategy',
-                      (('self', 'POSITIONAL_ONLY', '<required>', ''),
-                       ('args', 'VAR_POSITIONAL', '<required>', ''),
-                       ('kwargs', 'VAR_KEYWORD', '<required>', '')),
-                      ''),
- 'Callback': ('graph_agent',
-              (('self', 'POSITIONAL_ONLY', '<required>', ''),
-               ('args', 'VAR_POSITIONAL', '<required>', ''),
-               ('kwargs', 'VAR_KEYWORD', '<required>', '')),
-              ''),
- 'ExecutionError': ('graph_agent.core.exceptions',
+EXPECTED_CONSTRUCTOR_SIGNATURES: dict[str, tuple[str, tuple[tuple[str, str, str, str], ...], str]] = {'ExecutionError': ('graph_agent.core.exceptions',
                     (('self', 'POSITIONAL_OR_KEYWORD', '<required>', ''),
                      ('message', 'POSITIONAL_OR_KEYWORD', '<required>', 'str'),
                      ('payload', 'KEYWORD_ONLY', 'None', 'ErrorPayload | None'),
                      ('context', 'KEYWORD_ONLY', 'None', 'dict[str, Any] | None')),
                     'None'),
- 'GoldenCaseStrategy': ('graph_agent.core._predict_internal.strategy',
-                        (('self', 'POSITIONAL_OR_KEYWORD', '<required>', ''),
-                         ('golden_case', 'POSITIONAL_OR_KEYWORD', '<required>', 'GoldenCase'),
-                         ('phase_schemas',
-                          'KEYWORD_ONLY',
-                          'None',
-                          'dict[str, dict[str, Any]] | None')),
-                        'None'),
  'GraphAgentError': ('graph_agent',
                      (('self', 'POSITIONAL_OR_KEYWORD', '<required>', ''),
                       ('message', 'POSITIONAL_OR_KEYWORD', '<required>', 'str'),
                       ('payload', 'KEYWORD_ONLY', 'None', 'ErrorPayload | None'),
                       ('context', 'KEYWORD_ONLY', 'None', 'dict[str, Any] | None')),
                      'None'),
- 'HeuristicStubStrategy': ('graph_agent.core._predict_internal.strategy',
-                           (('self', 'POSITIONAL_OR_KEYWORD', '<required>', ''),
-                            ('phase_schemas',
-                             'POSITIONAL_OR_KEYWORD',
-                             'None',
-                             'dict[str, dict[str, Any]] | None')),
-                           'None'),
  'LocalWorkspaceResolver': ('graph_agent',
                             (('self', 'POSITIONAL_OR_KEYWORD', '<required>', ''),
                              ('search_paths',
@@ -272,26 +213,6 @@ EXPECTED_CONSTRUCTOR_SIGNATURES: dict[str, tuple[str, tuple[tuple[str, str, str,
                               'None',
                               'Iterable[str | Path] | None')),
                             'None'),
- 'LoggingCallback': ('graph_agent',
-                     (('self', 'POSITIONAL_ONLY', '<required>', ''),
-                      ('args', 'VAR_POSITIONAL', '<required>', ''),
-                      ('kwargs', 'VAR_KEYWORD', '<required>', '')),
-                     ''),
- 'MetricsCallback': ('graph_agent', (('self', 'POSITIONAL_OR_KEYWORD', '<required>', ''),), 'None'),
- 'MockStrategy': ('graph_agent.core._predict_internal.strategy',
-                  (('self', 'POSITIONAL_ONLY', '<required>', ''),
-                   ('args', 'VAR_POSITIONAL', '<required>', ''),
-                   ('kwargs', 'VAR_KEYWORD', '<required>', '')),
-                  ''),
- 'PredictTracingCallback': ('graph_agent.core._predict_internal.tracing',
-                            (('self', 'POSITIONAL_OR_KEYWORD', '<required>', ''),
-                             ('args', 'VAR_POSITIONAL', '<required>', 'Any'),
-                             ('source_cache',
-                              'KEYWORD_ONLY',
-                              'None',
-                              'PredictMockSourceCache | None'),
-                             ('kwargs', 'VAR_KEYWORD', '<required>', 'Any')),
-                            ''),
  'SkillCompilationError': ('graph_agent.core.exceptions',
                            (('self', 'POSITIONAL_OR_KEYWORD', '<required>', ''),
                             ('message', 'POSITIONAL_OR_KEYWORD', '<required>', 'str'),
@@ -326,11 +247,7 @@ EXPECTED_CONSTRUCTOR_SIGNATURES: dict[str, tuple[str, tuple[tuple[str, str, str,
                            ('skill_id', 'POSITIONAL_OR_KEYWORD', '<required>', 'str'),
                            ('reason', 'POSITIONAL_OR_KEYWORD', '<required>', 'str'),
                            ('code', 'KEYWORD_ONLY', "'[F-v3-skill-not-registered]'", 'str')),
-                          'None'),
- 'TracingCallback': ('graph_agent',
-                     (('self', 'POSITIONAL_OR_KEYWORD', '<required>', ''),
-                      ('trace_dir', 'POSITIONAL_OR_KEYWORD', 'None', 'str | Path | None')),
-                     'None')}
+                          'None')}
 
 EXPECTED_FIELD_CONTRACTS: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {'AgentNodeAST': ('graph_agent.core.manifest',
                   (('name', 'str | None'),
@@ -489,7 +406,7 @@ EXPECTED_FIELD_CONTRACTS: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {
                     ('phase_name', 'str'),
                     ('context', 'dict[str, Any]'),
                     ('metrics', 'dict[str, Any]'))),
- 'PhaseRecord': ('graph_agent.core._predict_internal.models',
+ 'PhaseRecord': ('graph_agent',
                  (('phase_name', 'str'),
                   ('type', "Literal['logic', 'llm']"),
                   ('inputs', 'dict[str, Any]'),
@@ -504,41 +421,7 @@ EXPECTED_FIELD_CONTRACTS: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {
                       ('event_type', "Literal['phase_start']"),
                       ('phase_name', 'str'),
                       ('context', 'dict[str, Any]'))),
- 'PredictGatewayChatModel': ('graph_agent.core._predict_internal.interception',
-                             (('name', 'str | None'),
-                              ('cache', 'langchain_core.caches.BaseCache | bool | None'),
-                              ('verbose', 'bool'),
-                              ('callbacks',
-                               'list[langchain_core.callbacks.base.BaseCallbackHandler] | '
-                               'langchain_core.callbacks.base.BaseCallbackManager | None'),
-                              ('tags', 'list[str] | None'),
-                              ('metadata', 'dict[str, Any] | None'),
-                              ('custom_get_token_ids',
-                               'collections.abc.Callable[[str], list[int]] | None'),
-                              ('rate_limiter',
-                               'langchain_core.rate_limiters.BaseRateLimiter | None'),
-                              ('disable_streaming', "Union[bool, Literal['tool_calling']]"),
-                              ('output_version', 'str | None'),
-                              ('profile',
-                               'langchain_core.language_models.model_profile.ModelProfile | None'),
-                              ('role_name', 'str'),
-                              ('resolved_role', 'ResolvedRole'),
-                              ('max_tokens', 'int'),
-                              ('temperature', 'float'),
-                              ('phase_name', 'str | None'),
-                              ('event_callbacks', 'tuple[Any, ...]'),
-                              ('probe_before_call', 'bool'),
-                              ('thinking_enabled', 'bool | None'),
-                              ('bound_tools', 'tuple[dict[str, object], ...]'),
-                              ('tool_choice', 'str | None'),
-                              ('tool_kwargs', 'dict[str, object]'),
-                              ('client_manager', 'Any'),
-                              ('credential_provider', 'Any'),
-                              ('mock_strategy', 'BaseMockStrategy'))),
- 'PredictResult': ('graph_agent.core._predict_internal.models',
-                   (('status', "Literal['success', 'failed']"),
-                    ('phases', 'list[graph_agent.core.result.PhaseRecord]'),
-                    ('path_diff', 'graph_agent.core.result.PathDiff | None'))),
+
  'RetryEvent': ('graph_agent.callbacks.events',
                 (('schema_version', "Literal['1.0']"),
                  ('timestamp', 'str'),
@@ -599,20 +482,7 @@ EXPECTED_FIELD_CONTRACTS: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {
                 ('source', "Literal['run', 'predict']"),
                 ('phases', 'list[graph_agent.core.result.PhaseRecord] | None'),
                 ('path_diff', 'graph_agent.core.result.PathDiff | None'))),
- 'WorkflowResult': ('graph_agent',
-                    (('success', 'bool'),
-                     ('run_id', 'str'),
-                     ('skill_id', 'str'),
-                     ('context', 'dict[str, Any]'),
-                     ('metrics', 'WorkflowMetrics'),
-                     ('trace_path', 'Path | None'),
-                     ('error', 'graph_agent.core.exceptions.ErrorPayload | None'),
-                     ('started_at', 'datetime.datetime | None'),
-                     ('finished_at', 'datetime.datetime | None'),
-                     ('wall_time_sec', 'float'),
-                     ('source', "Literal['run', 'predict']"),
-                     ('phases', 'list[graph_agent.core.result.PhaseRecord] | None'),
-                     ('path_diff', 'graph_agent.core.result.PathDiff | None'))),
+
  'WorkingMemoryUpdateEvent': ('graph_agent.callbacks.events',
                               (('schema_version', "Literal['1.0']"),
                                ('timestamp', 'str'),
@@ -657,65 +527,7 @@ EXPECTED_CALLBACK_EVENT_VARIANTS = frozenset({'AgentLoopIterationEvent',
            'ValidationPassEvent',
            'WorkingMemoryUpdateEvent'})
 
-EXPECTED_CALLBACK_PROTOCOL_METHODS: dict[str, frozenset[str]] = {'Callback': frozenset({'on_ambiguity_report',
-                        'on_compaction',
-                        'on_dead_end_pruned',
-                        'on_event',
-                        'on_finish_task',
-                        'on_llm_call',
-                        'on_nudge',
-                        'on_phase_end',
-                        'on_phase_start',
-                        'on_retry',
-                        'on_tool_call',
-                        'on_validation_fail',
-                        'on_working_memory_update'}),
- 'LoggingCallback': frozenset({'on_ambiguity_report',
-                               'on_compaction',
-                               'on_dead_end_pruned',
-                               'on_event',
-                               'on_finish_task',
-                               'on_llm_call',
-                               'on_nudge',
-                               'on_phase_end',
-                               'on_phase_start',
-                               'on_retry',
-                               'on_tool_call',
-                               'on_validation_fail',
-                               'on_working_memory_update'}),
- 'MetricsCallback': frozenset({'on_ambiguity_report',
-                               'on_compaction',
-                               'on_dead_end_pruned',
-                               'on_event',
-                               'on_finish_task',
-                               'on_llm_call',
-                               'on_nudge',
-                               'on_phase_end',
-                               'on_phase_start',
-                               'on_retry',
-                               'on_tool_call',
-                               'on_validation_fail',
-                               'on_working_memory_update',
-                               'summary'}),
- 'TracingCallback': frozenset({'_active_phase',
-                               '_write_event',
-                               '_write_typed_event',
-                               'on_ambiguity_report',
-                               'on_compaction',
-                               'on_dead_end_pruned',
-                               'on_event',
-                               'on_finish_task',
-                               'on_llm_call',
-                               'on_nudge',
-                               'on_phase_end',
-                               'on_phase_start',
-                               'on_retry',
-                               'on_tool_call',
-                               'on_validation_fail',
-                               'on_working_memory_update',
-                               'save',
-                               'set_trace_dir',
-                               'summary'})}
+
 
 EXPECTED_EXCEPTION_MRO: dict[str, tuple[str, ...]] = {'ExecutionError': ('ExecutionError',
                    'GraphExecutionError',
@@ -943,9 +755,8 @@ def test_exemptions_yaml_lookup_returns_false_for_unknown_symbols() -> None:
 
 
 def test_contract_symbol_count_and_static_sets_are_authoritative() -> None:
-    assert len(EXPECTED_CONTRACT_SYMBOLS) == 67
-    assert len(EXPECTED_VENDOR_ONLY_SYMBOLS) == 6
-    assert len(EXPECTED_PREDICT_INTERNAL_SYMBOLS) == 12
+    assert len(EXPECTED_CONTRACT_SYMBOLS) == 49
+    assert len(EXPECTED_VENDOR_ONLY_SYMBOLS) == 5
     assert EXPECTED_KNOWN_MISSING_VENDOR_ONLY.keys() < EXPECTED_CONTRACT_SYMBOLS.keys()
 
 
@@ -1000,18 +811,6 @@ def test_model_dataclass_and_typed_dict_field_names_and_types_are_stable() -> No
         _assert_field_contract(_field_contract(obj), expected_fields, symbol_name)
 
 
-def test_callback_protocols_method_surface_is_stable() -> None:
-    for symbol_name, expected_methods in EXPECTED_CALLBACK_PROTOCOL_METHODS.items():
-        obj = _load_symbol(EXPECTED_CONTRACT_SYMBOLS[symbol_name], symbol_name)
-        actual_methods = frozenset(
-            name
-            for name, value in inspect.getmembers(
-                obj,
-                lambda value: inspect.isroutine(value) or isinstance(value, property),
-            )
-            if not name.startswith("__")
-        )
-        _assert_symbol_contract(actual_methods, expected_methods, symbol_name)
 
 
 def test_exception_inheritance_chain_is_stable() -> None:
@@ -1025,13 +824,3 @@ def test_callback_event_union_contains_consumed_event_models() -> None:
     callback_event = _load_symbol("graph_agent.callbacks.events", "CallbackEvent")
     actual_variants = _callback_event_variant_names(callback_event)
     _assert_symbol_contract(actual_variants, EXPECTED_CALLBACK_EVENT_VARIANTS, "CallbackEvent")
-
-
-def test_predict_internal_symbols_are_explicit_de_facto_contract_debt() -> None:
-    for symbol_name in sorted(EXPECTED_PREDICT_INTERNAL_SYMBOLS):
-        module_name = EXPECTED_CONTRACT_SYMBOLS[symbol_name]
-        module = importlib.import_module(module_name)
-        if not hasattr(module, symbol_name):
-            if entry := _symbol_exemption_entry(symbol_name):
-                _skip_for_exemption(entry)
-            assert hasattr(module, symbol_name), f"{symbol_name} missing from known-debt module {module_name}"

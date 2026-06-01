@@ -266,7 +266,7 @@ PR-1 去掉了 pytest `conftest.py` 对函数签名的默认值注入后，真�
 1. `run_skill` 先用 `require_skill_resolver(..., caller="run_skill")`。
 2. `_run_skill_dict` 再用 `require_skill_resolver(..., caller="_run_skill_dict")`。
 3. `_run_skill_dict` 只接受包含 `GRAPH.md` 的目录。合法目录走 `_run_v030_skill_dict`。
-4. 非目录入口、普通 `.md`、单文件 `SKILL.md`、不存在路径、或缺 `GRAPH.md` 的目录，内部仍会抛 `SkillLoadError` leaf；这个 leaf 是 `GraphCompileError` family。payload 和 message 都带 `[F-v3-graph-root-missing]`。公开 `run_skill` 捕获后返回 `WorkflowResult(success=False, context={}, error=ErrorPayload(...))`，调用方应读 `result.error.code`。
+4. 非目录入口、普通 `.md`、单文件 `SKILL.md`、不存在路径、或缺 `GRAPH.md` 的目录，内部仍会抛 `SkillLoadError` leaf；这个 leaf 是 `GraphCompileError` family。payload 和 message 都带 `[F-v3-graph-root-missing]`。公开 `run_skill` 捕获后返回 `RunResult(success=False, context={}, error=ErrorPayload(...))`，调用方应读 `result.error.code`。
 5. `_run_v030_skill_dict` 调 `compile_skill(..., skill_resolver=resolver)`，再调 `assemble_graph(..., skill_resolver=resolver)`。
 
 决策：编译、装配、运行三层都不允许掉 resolver。这样 child skill 解析不会在某一层偷偷回退到路径扫描。

@@ -68,25 +68,21 @@ export function manifestFiles(skillDetail?: SkillDetail, selectedNode?: { id: st
 }
 
 export function inputFiles(skillDetail?: SkillDetail): FileMeta[] {
-  const manifest = skillDetail?.manifest
-  const io = manifest?.schema_version === "2.0" && manifest.type === "graph" ? manifest.io : null
-  if (skillDetail?.files) {
-    return [
-      fileFromDetail(skillDetail, "io/inputs.json"),
-      fileFromDetail(skillDetail, "io/outputs.json"),
-    ]
-  }
+  const manifest = skillDetail?.manifest as any
+  const io = manifest?.io
+  const inputs = io?.inputs?.properties ?? io?.inputs ?? {}
+  const outputs = io?.outputs?.properties ?? io?.outputs ?? {}
 
   return [
     {
       path: "input/schema.json",
       language: "json",
-      content: JSON.stringify({ inputs: io?.inputs ?? [], outputs: io?.outputs ?? [] }, null, 2),
+      content: JSON.stringify({ inputs, outputs }, null, 2),
     },
     {
       path: "input/sample.json",
       language: "json",
-      content: JSON.stringify(Object.fromEntries((io?.inputs ?? []).map((input) => [input.name, ""])), null, 2),
+      content: JSON.stringify(Object.fromEntries(Object.keys(inputs).map((name) => [name, ""])), null, 2),
     },
   ]
 }

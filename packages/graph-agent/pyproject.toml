@@ -1,6 +1,6 @@
 [project]
 name = "graph-agent"
-version = "0.2.0"
+version = "0.3.1"
 description = "Document-driven LLM agent harness SDK"
 requires-python = ">=3.11"
 readme = "README.md"

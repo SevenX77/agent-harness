@@ -423,8 +423,7 @@ export function GraphCanvas({
         onNodeDoubleClick={(_, node) => {
           setSelectedCanvasNodeId(node.id)
           if (node.type === 'globalInput' || node.type === 'globalOutput') {
-            const filePath = node.type === 'globalInput' ? 'io/inputs.json' : 'io/outputs.json'
-            workspace?.onFileOpen(`${skillId}/${filePath}`)
+            workspace?.onFileOpen(`${skillId}/GRAPH.md`)
             onPanelChange?.('input')
             return
           }

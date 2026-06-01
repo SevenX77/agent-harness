@@ -20,7 +20,7 @@ React 前端不会直接调用 `assemble_graph()` 或 LangGraph `graph.invoke()`
 
 ### public `run_skill()` 生命周期
 
-当前顶层入口是 `run_skill(skill_path, ..., **inputs) -> WorkflowResult`，定义在 `packages/graph-agent/src/graph_agent/core/runner.py:161` 到 `packages/graph-agent/src/graph_agent/core/runner.py:173`。它会记录开始时间，然后调用 `_run_skill_dict()`，成功时把 raw dict 包成 `WorkflowResult(success=True, context=...)`，代码在 `packages/graph-agent/src/graph_agent/core/runner.py:182` 到 `packages/graph-agent/src/graph_agent/core/runner.py:224`。
+当前顶层入口是 `run_skill(skill_path, ..., **inputs) -> RunResult`，定义在 `packages/graph-agent/src/graph_agent/core/runner.py:161` 到 `packages/graph-agent/src/graph_agent/core/runner.py:173`。它会记录开始时间，然后调用 `_run_skill_dict()`，成功时把 raw dict 包成 `RunResult(success=True, context=...)`，代码在 `packages/graph-agent/src/graph_agent/core/runner.py:182` 到 `packages/graph-agent/src/graph_agent/core/runner.py:224`。
 
 V0.3 skill root 的真实执行分支是 `_run_v030_skill_dict()`，定义在 `packages/graph-agent/src/graph_agent/core/runner.py:468` 到 `packages/graph-agent/src/graph_agent/core/runner.py:518`。它做的事很直接：接收 callbacks 参数、导入 `compile_skill` 和 `assemble_graph`、根据 `mock_llm` 得到 `chat_model`、编译 skill、装配 graph、再调用 `graph.invoke()`。
 
@@ -164,11 +164,11 @@ runtime 也不是 phase-level IO mapper。LOGIC、SUBGRAPH、subagent 都围绕�
 
 ### 常见调用结果形态
 
-`_run_v030_skill_dict()` 最终返回普通 dict，而 `run_skill()` 再把它包装成 `WorkflowResult`。V2.1 raw dict 里包含 `run_id`、`context`、`metrics`、`trace_path`、`wall_time_sec`，构造位置是 `packages/graph-agent/src/graph_agent/core/runner.py:480` 到 `packages/graph-agent/src/graph_agent/core/runner.py:518`。
+`_run_v030_skill_dict()` 最终返回普通 dict，而 `run_skill()` 再把它包装成 `RunResult`。V2.1 raw dict 里包含 `run_id`、`context`、`metrics`、`trace_path`、`wall_time_sec`，构造位置是 `packages/graph-agent/src/graph_agent/core/runner.py:480` 到 `packages/graph-agent/src/graph_agent/core/runner.py:518`。
 
 其中 `context` 来自最终 graph state 的 `data`，见 `packages/graph-agent/src/graph_agent/core/runner.py:514`。这意味着最终返回值不是 `flow`，也不是 `messages`，而是业务黑板。`flow` 里可能有 `finish_task_result` 或 critic metrics，但当前 public result 不把整份 flow 暴露为 context。
 
-`WorkflowResult` 包装发生在 `run_skill()` 成功分支，见 `packages/graph-agent/src/graph_agent/core/runner.py:211` 到 `packages/graph-agent/src/graph_agent/core/runner.py:224`。失败包装只捕获 `GraphAgentError`，见 `packages/graph-agent/src/graph_agent/core/runner.py:195` 到 `packages/graph-agent/src/graph_agent/core/runner.py:209`；而 P0-1 的 SKILL phase 无模型错误当前是裸 `RuntimeError`，抛出位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:233` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:234`。
+`RunResult` 包装发生在 `run_skill()` 成功分支，见 `packages/graph-agent/src/graph_agent/core/runner.py:211` 到 `packages/graph-agent/src/graph_agent/core/runner.py:224`。失败包装只捕获 `GraphAgentError`，见 `packages/graph-agent/src/graph_agent/core/runner.py:195` 到 `packages/graph-agent/src/graph_agent/core/runner.py:209`；而 P0-1 的 SKILL phase 无模型错误当前是裸 `RuntimeError`，抛出位置是 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:233` 到 `packages/graph-agent/src/graph_agent/core/graph_assembler.py:234`。
 
 ### 读代码时的主路径提示
 

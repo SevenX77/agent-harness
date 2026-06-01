@@ -86,7 +86,7 @@ Studio run worker 用 subprocess 隔离运行。worker 创建 event subscriber �
 
 ## API
 
-核心 engine API 有两类。旧 public API 是 `run_skill(skill_path, ..., **inputs) -> WorkflowResult`。V0.3.0 compile API 是 `compile_skill()`, graph assembly API 是 `assemble_graph(compiled, chat_model=...) -> CompiledStateGraph`。Studio 仍通过 backend 间接调用这些 API。
+核心 engine API 有两类。旧 public API 是 `run_skill(skill_path, ..., **inputs) -> RunResult`。V0.3.0 compile API 是 `compile_skill()`, graph assembly API 是 `assemble_graph(compiled, chat_model=...) -> CompiledStateGraph`。Studio 仍通过 backend 间接调用这些 API。
 
 Studio API 以 HTTP 和 WebSocket 暴露。`GET /api/skills/{skill_id}` 返回 SkillDetail，见 `apps/studio/backend/app/routers/skills.py:98` 到 `apps/studio/backend/app/routers/skills.py:105`；`POST /api/skills/{skill_id}/compile` 返回 compile result 或 422 compile failure，见 `apps/studio/backend/app/routers/skills.py:108` 到 `apps/studio/backend/app/routers/skills.py:118`；`POST /api/skills/{skill_id}/runs` 启动 run，见 `apps/studio/backend/app/routers/runs.py:27` 到 `apps/studio/backend/app/routers/runs.py:29`；`GET /api/skills/{skill_id}/runs/{run_id}` 返回 run detail，见 `apps/studio/backend/app/routers/runs.py:53` 到 `apps/studio/backend/app/routers/runs.py:55`。
 

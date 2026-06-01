@@ -72,7 +72,7 @@ RunResult.source = "run"
 
 现状实证：
 
-- 当前 `WorkflowResult` 已有 run 结果核心字段：`packages/graph-agent/src/graph_agent/core/result.py`
+- 当前 `RunResult` 已有 run 结果核心字段：`packages/graph-agent/src/graph_agent/core/result.py`
 - 当前 private predict model 仍有 `PredictResult`，Studio predict 编排会把结果写入 run-scoped `result.json`。
 - 当前 Studio run dir helper 已指向 `.workspace/runs/<run_id>`。
 - 当前 Studio run worker 会创建 run dir 和 artifacts dir，并调用 SDK 时传入 workspace root。

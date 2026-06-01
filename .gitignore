@@ -65,6 +65,8 @@ logs/
 output/
 temp/
 tmp/
+.workspace/
+.workspace
 
 # OS
 .DS_Store
@@ -109,3 +111,10 @@ apps/studio/frontend/test-results/
 
 # Token-table generator scratch
 /update_tokens.py
+
+# Test data
+test/
+
+# Code diagnostics reports
+code-diagnostics/reports/
+

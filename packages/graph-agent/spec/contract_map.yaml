@@ -8,15 +8,9 @@ public_api_symbols:
   AmbiguityReportEvent:
     feature_ids:
     - F-clarification-flow
-  BaseMockStrategy:
-    feature_ids:
-    - F-predict-internal-mocking
   BlackboardState:
     feature_ids:
     - F-state-blackboard
-  Callback:
-    feature_ids:
-    - F-callback-event-stream
   CallbackEvent:
     feature_ids:
     - F-callback-event-stream
@@ -44,12 +38,6 @@ public_api_symbols:
   FinishTaskEvent:
     feature_ids:
     - F-finish-task-validation
-  GoldenCase:
-    feature_ids:
-    - F-predict-internal-mocking
-  GoldenCaseStrategy:
-    feature_ids:
-    - F-predict-internal-mocking
   GraphAgentError:
     feature_ids:
     - F-error-code-recovery
@@ -68,9 +56,6 @@ public_api_symbols:
   GraphSkillDef:
     feature_ids:
     - F-vendor-contract-debt
-  HeuristicStubStrategy:
-    feature_ids:
-    - F-predict-internal-mocking
   IoInput:
     feature_ids:
     - F-vendor-contract-debt
@@ -83,18 +68,9 @@ public_api_symbols:
   LocalWorkspaceResolver:
     feature_ids:
     - F-skill-resolution
-  LoggingCallback:
-    feature_ids:
-    - F-observability-metrics
   LogicNodeAST:
     feature_ids:
     - F-logic-action-execution
-  MetricsCallback:
-    feature_ids:
-    - F-observability-metrics
-  MockStrategy:
-    feature_ids:
-    - F-predict-internal-mocking
   ModelProviderError:
     feature_ids:
     - F-error-code-recovery
@@ -119,12 +95,6 @@ public_api_symbols:
   PredictGatewayChatModel:
     feature_ids:
     - F-llm-execution
-  PredictResult:
-    feature_ids:
-    - F-predict-internal-mocking
-  PredictTracingCallback:
-    feature_ids:
-    - F-callback-tracing
   ResourceNotFoundError:
     feature_ids:
     - F-error-code-recovery
@@ -155,13 +125,10 @@ public_api_symbols:
   ToolCallEvent:
     feature_ids:
     - F-tool-call-binding
-  TracingCallback:
-    feature_ids:
-    - F-callback-tracing
   ValidationFailEvent:
     feature_ids:
     - F-error-code-recovery
-  WorkflowResult:
+  RunResult:
     feature_ids:
     - F-runtime-execution
   WorkingMemoryUpdateEvent:
@@ -170,15 +137,9 @@ public_api_symbols:
   assemble_graph:
     feature_ids:
     - F-graph-assembly
-  assemble_phase_record:
-    feature_ids:
-    - F-predict-internal-mocking
   compile_skill:
     feature_ids:
     - F-compile-runtime-flow
-  compute_diff:
-    feature_ids:
-    - F-predict-internal-mocking
   parse_skill_file:
     feature_ids:
     - F-vendor-contract-debt
@@ -356,7 +317,7 @@ skill_spec_sections:
     - F-skill-resolution
 consumer_files:
 - kind: stable-export
-  symbol: WorkflowResult
+  symbol: RunResult
   feature_ids:
   - F-runtime-execution
 - kind: vendor-only-debt

@@ -2,15 +2,15 @@
 
 > **Scope notice**: `docs/engine/skill-spec/` 是 Markdown 格式契约, 跟本 Python API 契约边界**独立**, 不混合. `docs/engine/` 下除 `skill-spec` 以外的其余讲解类子目录属于 Logic-Explained Docs, **不**属于本 PR 不可动摇契约基线.
 
-PR1 originally froze a 65-symbol Python API surface observed from `graph_agent.__all__`, external consumer imports, and `packages/graph-agent/tests/test_public_api_contract.py`. PR-A rightsized the public exception catalog from leaf-heavy exports to 5 public error families while keeping internal leaf classes available under `graph_agent.core.*`. Provider Intelligence V2 migrates Engine-owned LLM configuration/client symbols into `graph_agent_gateway`; the current Engine contract remains 65 symbols after adding the public exception families and removing the old LLM manager/config symbols.
+PR1 originally froze a 65-symbol Python API surface. PR3 converges and refactors this boundary, rightsizing the contract to exactly **49** stable symbols. This was achieved by removing the 12 de facto internal `_predict_internal` debt symbols, clean cutting the legacy callback inheritance classes, and migrating `WorkflowResult` to `RunResult`.
 
 ## Coverage Summary
 
-- 65 frozen symbols: `65`
-- Top-level `graph_agent.__all__` stable symbols: `20`
-- non-`__all__` external dependency symbols: `45`
-- `_predict_internal` de facto contract symbols: `12`
-- vendor-only symbols: `6`
+- 49 frozen symbols: `49`
+- Top-level `graph_agent.__all__` stable symbols: `19`
+- non-`__all__` external dependency symbols: `30`
+- `_predict_internal` de facto contract symbols: `0`
+- vendor-only symbols: `5`
 
 ## Exception Catalog Rightsizing
 
@@ -30,20 +30,50 @@ Family mapping summary:
 - **Source module**: `graph_agent`
 - **Consumer files**: apps/studio/backend/app/services/predictor.py:11; apps/studio/backend/app/services/run_manager.py:20; apps/studio/tauri/vendor/backend/app/services/predictor.py:10; apps/studio/tauri/vendor/backend/app/services/run_manager.py:18; apps/studio/tauri/vendor/resources/skills/_v2_pending/story-deconstruction/script/orchestrator.py:14; apps/studio/tauri/vendor/resources/skills/_v2_pending/story-deconstruction/script/orchestrator.py:46; apps/studio/tauri/vendor/resources/skills/_v2_pending/story-deconstruction/script/orchestrator.py:167; scripts/run_e2e_test_enhanced.py:22
 - **Contract status**: `@stable`
-- **Signature**: `run_skill(skill_path: str | Path, *, mock_llm: Any = <object object>, workspace_dir: Path, thread_id: str | None = None, unattended: bool = False, event_subscriber: Callable[[CallbackEvent], None] | None = None, artifact_saver: Any | None = None, initial_context: dict[str, Any] | None = None, cleanup_checkpoints_on_finish: bool = True, skill_resolver: SkillResolverProtocol, model_resolver: Any | None = None, **inputs: Any) -> WorkflowResult`
+- **Signature**: `run_skill(skill_path: str | Path, *, workspace_dir: Path, thread_id: str | None = None, unattended: bool = False, event_subscriber: Callable[[CallbackEvent], None] | None = None, artifact_saver: Any | None = None, initial_context: dict[str, Any] | None = None, cleanup_checkpoints_on_finish: bool = True, skill_resolver: SkillResolverProtocol, model_resolver: Any | None = None, **inputs: Any) -> RunResult`
 - **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
 - **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
 
-## WorkflowResult
+## predict_skill
 
 - **Source module**: `graph_agent`
-- **Consumer files**: `graph_agent.__all__` stable export; no direct external import occurrence in `CONSUMER-API-INVENTORY.md`.
+- **Consumer files**: apps/studio/backend/app/services/predictor.py
 - **Contract status**: `@stable`
-- **Fields**: `success: bool`, `run_id: str`, `skill_id: str`, `context: dict[str, Any]`, `metrics: WorkflowMetrics`, `trace_path: pathlib.Path | None`, `error: ErrorPayload | None`, `started_at: datetime`, `finished_at: datetime`, `wall_time_sec: float`
+- **Signature**: `predict_skill(skill_path: str | Path, *, workspace_dir: Path, thread_id: str | None = None, unattended: bool = True, event_subscriber: Callable[[CallbackEvent], None] | None = None, skill_resolver: SkillResolverProtocol, model_resolver: Any | None = None, copilot_predict: Callable | None = None, **inputs: Any) -> RunResult`
+- **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
+- **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
+- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
+
+## RunResult
+
+- **Source module**: `graph_agent`
+- **Consumer files**: `graph_agent.__all__` stable export; direct external import in Studio predictor/diagnostic services.
+- **Contract status**: `@stable`
+- **Fields**: `success: bool`, `run_id: str`, `skill_id: str`, `context: dict[str, Any]`, `metrics: WorkflowMetrics`, `trace_path: pathlib.Path | None`, `error: ErrorPayload | None`, `started_at: datetime | None`, `finished_at: datetime | None`, `wall_time_sec: float`, `source: Literal['run', 'predict']`, `phases: list[PhaseRecord] | None`, `path_diff: PathDiff | None`
 - **Preconditions**: Consumers must use the frozen field names, field types, constructor shape, and source module listed here.
 - **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
+
+## PathDiff
+
+- **Source module**: `graph_agent`
+- **Consumer files**: `graph_agent.__all__` stable export; direct external import in Studio predictor/diagnostic services.
+- **Contract status**: `@stable`
+- **Fields**: `expected_path: list[str]`, `actual_path: list[str]`, `missing: list[str]`, `extra: list[str]`, `order_mismatch: bool`
+- **Preconditions**: Consumers must use the frozen field names, field types, constructor shape, and source module listed here.
+- **Postconditions**: Exposes comparison fields between expected and actual execution paths.
+- **Drift risk notes**: Renaming, moving, deleting, changing fields breaks this contract.
+
+## PhaseRecord
+
+- **Source module**: `graph_agent`
+- **Consumer files**: `graph_agent.__all__` stable export; direct external import in Studio predictor/diagnostic services.
+- **Contract status**: `@stable`
+- **Fields**: `phase_name: str`, `type: Literal['logic', 'llm']`, `inputs: dict[str, Any]`, `outputs: dict[str, Any]`, `mocked_source: Literal['golden_case', 'copilot', 'heuristic_stub', 'manual'] | None`
+- **Preconditions**: Consumers must use the frozen field names, field types, constructor shape, and source module listed here.
+- **Postconditions**: Exposes audit log fields for a single executed phase.
+- **Drift risk notes**: Renaming, moving, deleting, changing fields breaks this contract.
 
 ## compile_skill
 
@@ -131,46 +161,6 @@ Family mapping summary:
 - **Consumer files**: `graph_agent.__all__` stable export; no direct external import occurrence in `CONSUMER-API-INVENTORY.md`.
 - **Contract status**: `@stable`
 - **Signature**: `serialize_skill(manifest: SkillManifest) -> str`
-- **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
-- **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
-- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
-
-## Callback
-
-- **Source module**: `graph_agent`
-- **Consumer files**: apps/studio/backend/app/services/run_manager.py:21; apps/studio/tauri/vendor/backend/app/services/run_manager.py:19
-- **Contract status**: `@stable`
-- **Signature**: `Callback.__init__(self, *args, **kwargs)`
-- **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
-- **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
-- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
-
-## LoggingCallback
-
-- **Source module**: `graph_agent`
-- **Consumer files**: `graph_agent.__all__` stable export; no direct external import occurrence in `CONSUMER-API-INVENTORY.md`.
-- **Contract status**: `@stable`
-- **Signature**: `LoggingCallback.__init__(self, *args, **kwargs)`
-- **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
-- **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
-- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
-
-## MetricsCallback
-
-- **Source module**: `graph_agent`
-- **Consumer files**: `graph_agent.__all__` stable export; no direct external import occurrence in `CONSUMER-API-INVENTORY.md`.
-- **Contract status**: `@stable`
-- **Signature**: `MetricsCallback.__init__(self) -> None`
-- **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
-- **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
-- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
-
-## TracingCallback
-
-- **Source module**: `graph_agent`
-- **Consumer files**: apps/studio/backend/app/services/run_manager.py:38; apps/studio/tauri/vendor/backend/app/services/run_manager.py:36
-- **Contract status**: `@stable`
-- **Signature**: `TracingCallback.__init__(self, trace_dir: str | Path | None = None) -> None`
 - **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
 - **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
@@ -474,16 +464,6 @@ Family mapping summary:
 - **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
 
-## PathDiff
-
-- **De Facto Contract / Known Debt** — PR1 only freezes current behavior; PR2 owns boundary cleanup.
-- **Source module**: `graph_agent.core._predict_internal.models`
-- **Consumer files**: apps/studio/backend/app/models/runs.py:9; apps/studio/backend/app/services/predictor.py:13; apps/studio/tauri/vendor/backend/app/models/runs.py:9; apps/studio/tauri/vendor/backend/app/services/predictor.py:12
-- **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
-- **Fields**: `expected_path: list[str]`, `actual_path: list[str]`, `missing: list[str]`, `extra: list[str]`, `order_mismatch: bool`
-- **Preconditions**: Consumers must use the frozen field names, field types, constructor shape, and source module listed here.
-- **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
-- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract. Because this is `_predict_internal`, PR1 freezes current cross-package use only; PR2 must clean the boundary deliberately.
 
 ## PersonaSkillDef
 
@@ -506,16 +486,6 @@ Family mapping summary:
 - **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
 
-## PhaseRecord
-
-- **De Facto Contract / Known Debt** — PR1 only freezes current behavior; PR2 owns boundary cleanup.
-- **Source module**: `graph_agent.core._predict_internal.models`
-- **Consumer files**: apps/studio/backend/app/models/runs.py:9; apps/studio/backend/app/services/predictor.py:13; apps/studio/tauri/vendor/backend/app/models/runs.py:9; apps/studio/tauri/vendor/backend/app/services/predictor.py:12
-- **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
-- **Fields**: `phase_name: str`, `type: Literal['logic', 'llm']`, `inputs: dict[str, Any]`, `outputs: dict[str, Any]`, `mocked_source: Optional[Literal['golden_case', 'copilot', 'heuristic_stub', 'manual']]`
-- **Preconditions**: Consumers must use the frozen field names, field types, constructor shape, and source module listed here.
-- **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
-- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract. Because this is `_predict_internal`, PR1 freezes current cross-package use only; PR2 must clean the boundary deliberately.
 
 ## PhaseStartEvent
 
@@ -527,38 +497,6 @@ Family mapping summary:
 - **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
 - **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract.
 
-## PredictGatewayChatModel
-
-- **De Facto Contract / Known Debt** — PR1 only freezes current behavior; PR2 owns boundary cleanup.
-- **Source module**: `graph_agent.core._predict_internal.interception`
-- **Consumer files**: packages/graph-agent-gateway/src/graph_agent_gateway/resolver.py:74
-- **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
-- **Signature**: `PredictGatewayChatModel(role_name: str, resolved_role: ResolvedRole, *, mock_strategy: BaseMockStrategy, max_tokens: int = 4096, temperature: float = 0.7, callbacks: Sequence[Callback] = (), phase_name: str | None = None, probe_before_call: bool = True, thinking_enabled: bool | None = None, name: str | None = None, cache: langchain_core.caches.BaseCache | bool | None = None, verbose: bool = <factory>, tags: list[str] | None = None, metadata: dict[str, Any] | None = None, custom_get_token_ids: collections.abc.Callable[[str], list[int]] | None = None, rate_limiter: langchain_core.rate_limiters.BaseRateLimiter | None = None, disable_streaming: Union[bool, Literal['tool_calling']] = False, output_version: str | None = <factory>, profile: langchain_core.language_models.model_profile.ModelProfile | None = None, event_callbacks: tuple[Any, ...] = <factory>, bound_tools: tuple[dict[str, object], ...] = <factory>, tool_choice: str | None = None, tool_kwargs: dict[str, object] = <factory>, client_manager: Any = None) -> None`
-- **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
-- **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
-- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract. Because this is `_predict_internal`, PR1 freezes current cross-package use only; PR2 must clean the boundary deliberately.
-
-## PredictResult
-
-- **De Facto Contract / Known Debt** — PR1 only freezes current behavior; PR2 owns boundary cleanup.
-- **Source module**: `graph_agent.core._predict_internal.models`
-- **Consumer files**: apps/studio/backend/app/services/diagnostic_export.py:7; apps/studio/backend/app/services/predictor.py:13; apps/studio/tauri/vendor/backend/app/services/diagnostic_export.py:7; apps/studio/tauri/vendor/backend/app/services/predictor.py:12
-- **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
-- **Fields**: `status: Literal['success', 'failed']`, `phases: list[graph_agent.core._predict_internal.models.PhaseRecord]`, `path_diff: graph_agent.core._predict_internal.models.PathDiff | None`
-- **Preconditions**: Consumers must use the frozen field names, field types, constructor shape, and source module listed here.
-- **Postconditions**: Instances and serialized payloads expose the frozen fields so Studio, gateway, scripts, and vendored consumers continue to deserialize them.
-- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract. Because this is `_predict_internal`, PR1 freezes current cross-package use only; PR2 must clean the boundary deliberately.
-
-## PredictTracingCallback
-
-- **De Facto Contract / Known Debt** — PR1 only freezes current behavior; PR2 owns boundary cleanup.
-- **Source module**: `graph_agent.core._predict_internal.tracing`
-- **Consumer files**: apps/studio/backend/app/services/predictor.py:26; apps/studio/tauri/vendor/backend/app/services/predictor.py:25
-- **Contract status**: `@stable`; non-`__all__` external dep, locked at PR1 baseline
-- **Signature**: `PredictTracingCallback.__init__(self, *args: Any, *, source_cache: PredictMockSourceCache | None = None, **kwargs: Any)`
-- **Preconditions**: Callers must provide the required parameters shown in the frozen signature and preserve keyword/default semantics.
-- **Postconditions**: Successful calls return the annotated result or perform the documented serialization/loading side effect without changing parameter semantics.
-- **Drift risk notes**: Renaming, moving, deleting, changing required parameters, defaults, field names, field types, return annotations, or inheritance breaks this contract. Because this is `_predict_internal`, PR1 freezes current cross-package use only; PR2 must clean the boundary deliberately.
 
 ## RetryEvent
 

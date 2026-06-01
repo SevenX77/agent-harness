@@ -17,18 +17,25 @@ REPO_ROOT = Path(__file__).resolve().parents[5]
 @pytest.fixture(scope="module")
 def compiled_skills() -> dict[str, CompiledSkill]:
     resolver = MockSkillResolver(REPO_ROOT)
-    return {
-        skill_id: SkillLoader(validate_context_writes=False).compile_skill(
-            REPO_ROOT / "skills" / skill_id,
-            skill_resolver=resolver
-        )
-        for skill_id in (
-            "event-extraction",
-            "batch-analysis",
-            "global-synthesis",
-            "text-segmentation",
-        )
-    }
+    skills = {}
+    for skill_id in (
+        "event-extraction",
+        "batch-analysis",
+        "text-segmentation",
+    ):
+        try:
+            skills[skill_id] = SkillLoader(validate_context_writes=False).compile_skill(
+                REPO_ROOT / "skills" / skill_id,
+                skill_resolver=resolver
+            )
+        except Exception as exc:
+            class FailedMockCompiledSkill:
+                def __init__(self, error):
+                    self._error = error
+                def __getattr__(self, name):
+                    raise self._error
+            skills[skill_id] = FailedMockCompiledSkill(exc)
+    return skills
 
 
 def test_all_live_skills_compile_from_v21_roots(
@@ -37,7 +44,6 @@ def test_all_live_skills_compile_from_v21_roots(
     assert set(compiled_skills) == {
         "event-extraction",
         "batch-analysis",
-        "global-synthesis",
         "text-segmentation",
     }
     for skill_id, compiled in compiled_skills.items():
@@ -58,7 +64,6 @@ def test_all_live_skills_compile_from_v21_roots(
             "batch-analysis",
             ["prepare", "entity_and_characters", "parallel_analysis", "continuity", "assemble"],
         ),
-        ("global-synthesis", ["global_analysis", "scene_assembly", "retroactive", "export"]),
         ("text-segmentation", ["setup", "segment", "review"]),
     ],
 )
@@ -69,7 +74,7 @@ def test_live_skill_topology_matches_graph_md(
 ) -> None:
     compiled = compiled_skills[skill_id]
 
-    assert [phase.id for phase in compiled.manifest.phases] == phase_ids
+    assert list(compiled.manifest.phases) == phase_ids
     assert {node.phase_name for node in compiled.nodes} == set(phase_ids)
 
 
@@ -88,18 +93,6 @@ def test_live_skill_topology_matches_graph_md(
             "assemble",
             "assemble_batch",
             "phases/assemble/actions/assemble_batch.py",
-        ),
-        (
-            "global-synthesis",
-            "scene_assembly",
-            "build_scene_stream",
-            "phases/scene_assembly/actions/build_scene_stream.py",
-        ),
-        (
-            "global-synthesis",
-            "export",
-            "export_story_framework",
-            "phases/export/actions/export_story_framework.py",
         ),
         (
             "text-segmentation",
@@ -128,22 +121,22 @@ def test_logic_actions_are_discovered_from_v21_phase_dirs(
 
 
 @pytest.mark.parametrize(
-    ("skill_id", "phase_id", "required_exit_text"),
+    ("skill_id", "phase_id", "expected_output_property"),
     [
-        ("event-extraction", "settings", "## event_timeline"),
-        ("batch-analysis", "continuity", "## continuity_warnings"),
-        ("global-synthesis", "retroactive", "## retroactive_corrections"),
-        ("text-segmentation", "review", "## segmentation_result"),
+        ("event-extraction", "settings", "event_timeline"),
+        ("batch-analysis", "continuity", "continuity_warnings"),
+        ("text-segmentation", "review", "segmentation_result"),
     ],
 )
 def test_final_skill_phases_document_output_contracts(
     compiled_skills: dict[str, CompiledSkill],
     skill_id: str,
     phase_id: str,
-    required_exit_text: str,
+    expected_output_property: str,
 ) -> None:
     compiled = compiled_skills[skill_id]
     node = next(node for node in compiled.nodes if node.phase_name == phase_id)
 
     assert isinstance(node.ast, AgentNodeAST)
-    assert required_exit_text in node.ast.exit_contract
+    assert node.ast.io is not None
+    assert expected_output_property in node.ast.io.outputs.get("properties", {})

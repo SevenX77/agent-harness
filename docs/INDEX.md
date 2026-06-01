@@ -1,4 +1,4 @@
-# docs/ — Baseline (Studio v3 / Gateway v2 / Engine v0.3.1)
+# docs/ — Baseline (Studio v3 / Gateway v1 / Engine v0.3.1)
 
 > **Branch**: `docs/baseline-reset-2026-05-20` (off `main`).
 > **状态**: **Filled**. 全部 34 个 .md / 7330 行落盘 + 13 个 skill-spec 规范及错误大地图.
@@ -92,7 +92,7 @@ docs/
 | [execution-runtime](./engine/execution-runtime/) | Graph 执行装配调度、主入口生命周期 `run_skill`、节点重试、subagent / `call_subgraph` 动态工具注入 (audit A4/A5) |
 | [state-and-io-contract](./engine/state-and-io-contract/) | `BlackboardState` 规约 (data/flow/messages)、Reducer 并发冲突控制、阶段级 IO 隔离、Runtime Input 漏斗 (audit A1/A2/A3/A6) |
 | [tracing-and-observability](./engine/tracing-and-observability/) | Predict 内部与 LangGraph 节点拦截、生命周期事件发出、结构化 Trace 日志 (audit P1-4) |
-| [graph-agent-gateway](./engine/graph-agent-gateway/) | Gateway v2 新增, 替代旧 llm-routing 命名. `llm_role -> BaseChatModel` 解析、跨 provider fallback chain 调度、bind_tools 适配、LLMFallbackEvent emit. ModelResolverProtocol DI (跟 SkillResolverProtocol 风格对齐, Gateway v2 改造 GW-1) |
+| [graph-agent-gateway](./engine/graph-agent-gateway/) | Gateway v1 新增, 替代旧 llm-routing 命名. `llm_role -> BaseChatModel` 解析、跨 provider fallback chain 调度、bind_tools 适配、LLMFallbackEvent emit. ModelResolverProtocol DI (跟 SkillResolverProtocol 风格对齐, Gateway v1 改造 GW-1) |
 
 ### Studio system-level (6 份系统级, 横切多 feature, 全走双时态)
 

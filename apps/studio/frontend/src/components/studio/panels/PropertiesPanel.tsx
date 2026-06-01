@@ -34,7 +34,7 @@ import {
 
 function phaseKindLabel(data: Pick<SkillGraphNodeData, "mode" | "subgraphPath">): "LOGIC" | "AGENT" | "SUBGRAPH" {
   if (data.subgraphPath || data.mode === "subgraph") return "SUBGRAPH"
-  if (data.mode === "skill" || data.mode === "llm") return "AGENT"
+  if (data.mode === "skill" || data.mode === "llm" || data.mode === "agent") return "AGENT"
   return "LOGIC"
 }
 
@@ -135,7 +135,7 @@ export function PropertiesPanel({
     }
     const form = phaseFrontmatterToForm(parsed.frontmatter, parsed.body)
     if (typeof parsed.frontmatter.mode !== "string") {
-      form.mode = modeLabel === "SUBGRAPH" ? "subgraph" : modeLabel === "AGENT" ? "skill" : "logic"
+      form.mode = modeLabel === "SUBGRAPH" ? "subgraph" : modeLabel === "AGENT" ? "agent" : "logic"
     }
     return { key: `${filePath}:${fileContent}`, ok: true as const, form }
   }, [fileContent, filePath, modeLabel])
@@ -356,7 +356,7 @@ function PhaseFrontmatterForm({
   onReset: () => void
   onSave: () => void
 }) {
-  const kind = value.mode === "subgraph" ? "subgraph" : value.mode === "skill" || value.mode === "llm" ? "skill" : modeLabel === "SUBGRAPH" ? "subgraph" : modeLabel === "AGENT" ? "skill" : "logic"
+  const kind = value.mode === "subgraph" ? "subgraph" : value.mode === "skill" || value.mode === "llm" || value.mode === "agent" ? "agent" : modeLabel === "SUBGRAPH" ? "subgraph" : modeLabel === "AGENT" ? "agent" : "logic"
 
   return (
     <form
@@ -384,7 +384,7 @@ function PhaseFrontmatterForm({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="logic">Logic</SelectItem>
-                <SelectItem value="skill">Agent</SelectItem>
+                <SelectItem value="agent">Agent</SelectItem>
                 <SelectItem value="subgraph">Subgraph</SelectItem>
               </SelectContent>
             </Select>
@@ -400,7 +400,7 @@ function PhaseFrontmatterForm({
               <FieldDescription>Function name exposed by this LOGIC phase.</FieldDescription>
             </Field>
           ) : null}
-          {kind === "skill" ? (
+          {kind === "agent" ? (
             <>
               <Field>
                 <FieldLabel htmlFor="phase-system-prompt">System prompt</FieldLabel>

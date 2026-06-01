@@ -139,7 +139,7 @@ Round 31 的文档目标是定义它们应接入的产品闭环，而不是把�
 
 现状实证：
 
-- 当前 `WorkflowResult` 已有 `success/run_id/skill_id/context/metrics/trace_path/error/started_at/finished_at/wall_time_sec`：`packages/graph-agent/src/graph_agent/core/result.py:46-60`
+- 当前 `RunResult` 已有 `success/run_id/skill_id/context/metrics/trace_path/error/started_at/finished_at/wall_time_sec`：`packages/graph-agent/src/graph_agent/core/result.py:46-60`
 - 当前 Studio run worker 已按 run_dir 创建 artifacts 并调用 `run_skill`：`apps/studio/backend/app/services/run_manager.py:226-241`
 
 ### 3.5 阶段五：深度优化循环

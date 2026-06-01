@@ -22,7 +22,7 @@
 
 PR E 之后，`log_ambiguity` 的业务反馈事件、装配期 builtin reference reader 的 enter / exit / fallback 事件都已经接到这条主线。它们不会替代已有 tool trace，而是并列补充业务含义。
 
-Round 32 PR-1 (T3) 之后，V0.3.0 目录型 `GRAPH.md` 主运行路径不再暴露 public `callbacks` list。public `run_skill()` 的实时出口是 `event_subscriber: Callable[[CallbackEvent], None] | None`，默认落盘出口永远由 SDK 内部 `_TraceJsonlSink` 负责。`WorkflowResult.trace_path` 指向真实存在的 `trace.jsonl`，不再指向 `{run_id}_summary.json`。
+Round 32 PR-1 (T3) 之后，V0.3.0 目录型 `GRAPH.md` 主运行路径不再暴露 public `callbacks` list。public `run_skill()` 的实时出口是 `event_subscriber: Callable[[CallbackEvent], None] | None`，默认落盘出口永远由 SDK 内部 `_TraceJsonlSink` 负责。`RunResult.trace_path` 指向真实存在的 `trace.jsonl`，不再指向 `{run_id}_summary.json`。
 
 ## 2. 事件模型是什么
 

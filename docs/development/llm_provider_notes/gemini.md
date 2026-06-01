@@ -12,7 +12,7 @@ target_goal: "Studio MVP — 让 PM 可用"
   - 或 `openai_compatible` — **2024-11 起** Google 加了 OpenAI 协议兼容 endpoint, 直接用 `openai` SDK 改 base_url 即可调 Gemini
 - **Native SDK**: `google-generativeai` Python ([docs](https://ai.google.dev/gemini-api/docs))
 - **Alternative Endpoints**:
-  - **Vertex AI**: GCP 部署, 走 `https://{region}-aiplatform.googleapis.com/...` + IAM/service account 鉴权 (v2.1 不支持)
+  - **Vertex AI**: GCP 部署, 走 `https://{region}-aiplatform.googleapis.com/...` + IAM/service account 鉴权 (v3 不支持)
 
 ## §1.5 探测元数据 (round 3 新增, 用于 Studio 自动 Test 探测)
 
@@ -58,7 +58,7 @@ auth_header_format: |
 
 ## 4. Notable Model IDs
 
-v2.1 默认列表:
+v3 默认列表:
 
 - `gemini-3.1-pro-preview` — 旗舰 (2026 当前)
 - `gemini-2.5-pro` — 上一代旗舰
@@ -81,7 +81,7 @@ v2.1 默认列表:
 - **Native protocol 的 message format 不同** — `contents` 数组而非 `messages`, role 用 `model` 而非 `assistant`
 - **System instruction 字段名** — native 是 `systemInstruction` (camelCase), 不是 `system`
 - **`response_mime_type`** — native protocol 控制 JSON / structured output 的字段, 跟 OpenAI 的 `response_format` 不同
-- **API key vs OAuth**: Studio v2.1 走 API key. OAuth (Workforce / Google One Ultra plan 类) 暂不支持
+- **API key vs OAuth**: Studio v3 走 API key. OAuth (Workforce / Google One Ultra plan 类) 暂不支持
 - **Free tier limits**: AI Studio 免费但 rate limit 严, 生产建议走付费 tier 或 Vertex AI
 - **Region availability**: 部分模型在欧盟等 region 不可用, key 不变但请求会 403
 

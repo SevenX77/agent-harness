@@ -6,9 +6,9 @@
 
 ## 1. 入口与当前 live middleware 装配
 
-公开入口仍是 `run_skill()`。它负责驱动图运行，并把成功或已知 GraphAgent 错误包装成 `WorkflowResult`。
+公开入口仍是 `run_skill()`。它负责驱动图运行，并把成功或已知 GraphAgent 错误包装成 `RunResult`。
 
-`run_skill()` 先调用 `require_skill_resolver(..., caller="run_skill")`。`_run_skill_dict()` 再检查入口形状：只有“目录，且目录下有 `GRAPH.md`”会走 `_run_v030_skill_dict()`；普通 `.md` 文件、根级单文件 `SKILL.md`、不存在路径、或缺 `GRAPH.md` 的目录都会抛内部 leaf `SkillLoadError`（该 leaf 现在是 `GraphCompileError` family），message 字面包含 `[F-v3-graph-root-missing]`。公开 `run_skill()` 捕获后返回 `WorkflowResult(success=False, context={}, error=ErrorPayload(...))`，调用方应读 `result.error.code`；所以对外契约是“返回失败结果”，不是向调用方裸抛。
+`run_skill()` 先调用 `require_skill_resolver(..., caller="run_skill")`。`_run_skill_dict()` 再检查入口形状：只有“目录，且目录下有 `GRAPH.md`”会走 `_run_v030_skill_dict()`；普通 `.md` 文件、根级单文件 `SKILL.md`、不存在路径、或缺 `GRAPH.md` 的目录都会抛内部 leaf `SkillLoadError`（该 leaf 现在是 `GraphCompileError` family），message 字面包含 `[F-v3-graph-root-missing]`。公开 `run_skill()` 捕获后返回 `RunResult(success=False, context={}, error=ErrorPayload(...))`，调用方应读 `result.error.code`；所以对外契约是“返回失败结果”，不是向调用方裸抛。
 
 目录型 V0.3.0 `GRAPH.md` root 会走 `_run_v030_skill_dict()`，不是旧 harness 缓存路径；旧 `_harness_cache` 已删除，也不再进入 `load_workflow_from_md` / `.run_id` 文件 resume 分支。调用方必须传绝对 `workspace_dir: Path`，这个分支会用 `workspace_dir / "runs" / run_id` 作为本次 run 的唯一输出目录，在 `graph.invoke()` 前准备 `_CompositeEventSink`，再把同一个 event sink 传给 `assemble_graph()`。这点很重要：trace 落盘不再靠调用方传 callback，也不等结束后 summary save；执行过程中的 typed events 会即时进入 `trace.jsonl`。`thread_id` 当前用于选择本次 state 里的 `run_id`；没有 `thread_id` 时生成新的 UUID。
 
@@ -106,14 +106,14 @@ Agent phase 仍是 LLM 工具循环。模型每轮输出 tool call 后，`graph_
 4. 把同一个 `event_sink` 传给 `assemble_graph()`，所以装配期 builtin reader 事件、phase wrapper lifecycle、Agent loop 事件和 gateway fallback 都能进入同一条 fan-out 流。
 5. `graph.invoke()` 完成后，先处理声明式 file outputs：`target: file` 且没有显式 `path` / `output_dir` 的输出写入 `<workspace_dir>/runs/<run_id>/artifacts/<name>.json`。调用方显式传 `output_dir` 时仍按显式目录写，保持程序化 caller 兼容。
 6. 成功时发 `RunEndedEvent(status="completed")`；异常时发 `RunEndedEvent(status="crashed")` 后继续抛异常。
-7. public `run_skill()` 把原始 dict 包装成 `WorkflowResult` 后，同步写出 `result.json`、`final_state.json`、`metrics.json` 到同一个 run 目录。
+7. public `run_skill()` 把原始 dict 包装成 `RunResult` 后，同步写出 `result.json`、`final_state.json`、`metrics.json` 到同一个 run 目录。
 
 因此现在的 run-scoped 文件概念是：
 
-- `trace.jsonl`：执行期间由 `_TraceJsonlSink.emit()` 逐行追加 typed event；`WorkflowResult.trace_path` 指向这个真实存在的 JSONL 文件。
-- `result.json`：`WorkflowResult` 的 JSON 形态。
-- `final_state.json`：`WorkflowResult.context`。
-- `metrics.json`：`WorkflowResult.metrics`。
+- `trace.jsonl`：执行期间由 `_TraceJsonlSink.emit()` 逐行追加 typed event；`RunResult.trace_path` 指向这个真实存在的 JSONL 文件。
+- `result.json`：`RunResult` 的 JSON 形态。
+- `final_state.json`：`RunResult.context`。
+- `metrics.json`：`RunResult.metrics`。
 - `artifacts/`：phase/tool sidecar；path-less file output 的默认目录。
 
 这和旧行为不同：旧 V0.3.0 分支曾依赖 callback/tracer 绑定和 summary save；T3 后所有 run-scoped 文件都由 `workspace_dir/runs/run_id` 统一索引，trace 是逐事件 append 的单一 `trace.jsonl`。

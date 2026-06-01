@@ -2,7 +2,7 @@ import yaml from 'js-yaml'
 import type { JsonValue } from '@/api/types'
 import { isRecord } from '@/utils/errors'
 
-export type PhaseFrontmatterKind = 'logic' | 'skill' | 'subgraph'
+export type PhaseFrontmatterKind = 'logic' | 'agent' | 'subgraph'
 export type PhaseFrontmatterErrorReason = 'missing-frontmatter' | 'unterminated-frontmatter' | 'invalid-yaml' | 'non-object-frontmatter'
 
 export interface PhaseFrontmatterFormData {
@@ -194,8 +194,8 @@ function inferKind(frontmatter: Partial<PhaseFrontmatter>): PhaseFrontmatterKind
   if (mode === 'subgraph' || stringValue(frontmatter.target_skill) || stringValue(frontmatter.sub_skill_ref)) {
     return 'subgraph'
   }
-  if (mode === 'skill' || mode === 'llm') {
-    return 'skill'
+  if (mode === 'skill' || mode === 'llm' || mode === 'agent') {
+    return 'agent'
   }
   return 'logic'
 }
@@ -205,7 +205,7 @@ function bodyFromForm(body: string, form: PhaseFrontmatterFormData, kind: PhaseF
   if (kind === 'logic') {
     return prependXmlBlocks(next, [['python_callable', form.pythonCallable]])
   }
-  if (kind === 'skill') {
+  if (kind === 'agent') {
     return prependXmlBlocks(next, [
       ['system_prompt', form.systemPrompt],
       ['exit_contract', form.exitContract],

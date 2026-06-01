@@ -3,7 +3,7 @@ import { api } from '../api/client'
 import type { JsonValue } from '../api/types'
 import type { CopilotView } from '../types/copilot'
 
-const CONTEXT_THRESHOLD_BYTES = 2048
+const CONTEXT_THRESHOLD_BYTES = 65536
 
 interface UseCopilotContextConfig {
   skillId: string | null

@@ -280,7 +280,7 @@ def run_skill(
     skill_resolver: SkillResolverProtocol,
     model_resolver: Any | None = None,
     **inputs: Any,
-) -> WorkflowResult:
+) -> RunResult:
     ...
 ```
 
@@ -374,7 +374,7 @@ Cognitive template 固定包含 ambiguity feedback 提示。Runtime 必须提供
 
 | 本文件目标态 | 当前源码事实 |
 |---|---|
-| `run_skill` 入口按根级 `io.inputs` 校验输入并拒绝非合法目录 | **已对齐 (PR-3)**: `_run_skill_dict` 入口已实现 Fail-loud 守卫。传入非 `GRAPH.md` 目录、普通文件或旧单文件将立即返回 `WorkflowResult(success=False, error=...)`，且含有标准 `[F-v3-graph-root-missing]` 错误码。 |
+| `run_skill` 入口按根级 `io.inputs` 校验输入并拒绝非合法目录 | **已对齐 (PR-3)**: `_run_skill_dict` 入口已实现 Fail-loud 守卫。传入非 `GRAPH.md` 目录、普通文件或旧单文件将立即返回 `RunResult(success=False, error=...)`，且含有标准 `[F-v3-graph-root-missing]` 错误码。 |
 | 彻底清除与 Persona 关联的执行层依赖和旧引擎历史包袱 | **已对齐 (PR-3)**: Persona 死码簇（含 `build_graph_nodes`, `_inject_persona` 等）已彻底拔除；`_run_skill_dict` 内部用于非 GRAPH root fallback 的旧版 182 行 `load_workflow_from_md` 及 `harness/.run_id` 续传等死分支均已干净拆除。 |
 | Context 面向 Action 的可变暴露与工具沙盒防线 | **已对齐 (PR-3)**: Context Facade 已向齐基础的字典协议 (`__getitem__`, `__setitem__` 等 4 个方法)，以向后兼容现有 LOGIC。同时 `md_to_json.py` 内增加了针对 `md-patch` 的 deferred path 结果校验，严防 `KeyError("final_results")` 裸露。 |
 | Agent phase 通过 per-role model resolver 解析真实模型 | 当前 `run_skill` 有 `model_resolver: Any | None = None` 参数；Agent phase 装配在无 `mock_llm` 时调用 `model_resolver.resolve(role_name=phase_ast.llm_role or "graph_agent", callbacks=_callback_tuple(event_sink), phase_name=phase_id)`。 |

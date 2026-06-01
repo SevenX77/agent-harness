@@ -1,6 +1,6 @@
 [project]
 name = "graph-agent-gateway"
-version = "0.3.0"
+version = "1.0.0"
 description = "GraphAgent model gateway and resolver package"
 requires-python = ">=3.11"
 dependencies = [

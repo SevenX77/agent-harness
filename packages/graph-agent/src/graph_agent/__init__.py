@@ -2,12 +2,13 @@
 
 Public API (20 stable exports):
 
-* Execution: ``run_skill``, ``WorkflowResult``
+* Execution & Interception: ``run_skill``, ``predict_skill``, ``RunResult``,
+  ``PathDiff``, ``PhaseRecord``
 * Static analysis: ``compile_skill``, ``CompileResult``, ``SkillManifest``,
   ``serialize_skill``
+* Graph assembly: ``assemble_graph``, ``CompiledSkill``, ``CompiledStateGraph``
+* State: ``BlackboardState``
 * Skill resolution: ``LocalWorkspaceResolver``
-* Observability: ``Callback``, ``LoggingCallback``, ``MetricsCallback``,
-  ``TracingCallback``
 * Exceptions: ``GraphAgentError``, ``GraphCompileError``,
   ``GraphExecutionError``, ``ModelProviderError``, ``ResourceNotFoundError``
 
@@ -16,15 +17,11 @@ Internal helpers (``Phase``, ``WorkflowState``, ``IOManager``,
 etc.) live under
 ``graph_agent.core.*`` / ``graph_agent.io.*`` / ``graph_agent.models.*``
 and are not part of the public ABI. Downstream code that depended on
-the previous lazy-deprecated re-exports must migrate to the 18-export
+the previous lazy-deprecated re-exports must migrate to the 20-export
 surface.
 
 Each ``from X import Y as Y`` re-export is intentional — the explicit
 alias form satisfies ``mypy --strict``'s ``no_implicit_reexport`` rule.
-``WorkflowResult`` is imported directly from ``core.result`` (its
-canonical definition site) instead of from ``core.runner`` because
-``runner.py`` only re-imports it for internal use, which mypy correctly
-treats as an implicit re-export chain.
 """
 
 from __future__ import annotations

@@ -79,6 +79,13 @@ export function Workspace({ skillId, onSelectSkill, onCloseSkill }: WorkspacePro
             summary: typeof selectedNode.data.summary === "string" ? selectedNode.data.summary : null,
           }
         : null,
+      selected_edge: selectedEdge
+        ? {
+            source: selectedEdge.source,
+            target: selectedEdge.target,
+            context_json: selectedEdge.contextJson as any,
+          }
+        : null,
       lint_status: currentSkillId ? readLintStatus(currentSkillId) : "idle",
     },
   })

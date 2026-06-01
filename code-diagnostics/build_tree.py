@@ -10,6 +10,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from diag_paths import default_report, ensure_output_path
+
 # 扫描的源目录与目标包
 SCAN_TARGETS = {
     "graph-agent": Path("packages/graph-agent/src/graph_agent"),
@@ -83,14 +85,13 @@ def main() -> None:
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parents[1]
-    reports_dir = repo_root / "code-diagnostics" / "reports"
-    reports_dir.mkdir(parents=True, exist_ok=True)
-    
+
     if args.file:
-        target_md = Path(args.file).resolve()
+        target_md = ensure_output_path(args.file)
+        target_md.parent.mkdir(parents=True, exist_ok=True)
     else:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        target_md = reports_dir / f"diag_report_{timestamp}.md"
+        target_md = default_report(timestamp)
 
     markdown_content = build_markdown_tree(repo_root)
     target_md.write_text(markdown_content, encoding="utf-8")

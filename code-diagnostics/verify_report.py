@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """verify_report.py - 卓越工程代码诊断强卡口与验收工具
 
-严格扫描 diag_report_{timestamp}.md 报告：
+严格扫描 diag_report_{run_id}.md 报告：
 1. 必须确保 Section 1 中的所有 Python 文件都被勾选为 `[x]`。
 2. 必须包含 `(健康分: X/10)` 格式的健康评分。
 3. 必须在文件条目正下方以缩进节点的形式内嵌微观证据或“体检通过”描述。
@@ -15,6 +15,8 @@ import argparse
 import re
 import sys
 from pathlib import Path
+
+from diag_paths import latest_report
 
 
 def parse_and_verify_report(report_path: Path) -> tuple[bool, list[str], list[str]]:
@@ -98,17 +100,12 @@ def main() -> None:
     parser.add_argument("--file", type=str, default=None, help="目标报告文件路径")
     args = parser.parse_args()
 
-    repo_root = Path(__file__).resolve().parents[1]
-    
     if args.file:
         target_md = Path(args.file).resolve()
     else:
-        # 默认寻找最新生成的 diag_report_*.md
-        reports_dir = repo_root / "code-diagnostics" / "reports"
-        candidates = sorted(reports_dir.glob("diag_report_*.md"))
-        if candidates:
-            target_md = candidates[-1]
-        else:
+        # 默认寻找 output/ 下最新生成的 diag_report_*.md
+        target_md = latest_report()
+        if target_md is None:
             print("[verify_report] ❌ 未发现任何已生成的体检报告文件！", file=sys.stderr)
             sys.exit(1)
 
@@ -129,7 +126,11 @@ def main() -> None:
         for u_entry in uncompleted_entries:
             print(f"  - {u_entry}", file=sys.stderr)
             
-        print("\n💡 提示: 请运行 `python3 code-diagnostics/run_llm_audit.py` 进行多线程并发LLM审计回填！\n", file=sys.stderr)
+        tip_msg = (
+            "\n💡 提示: 漏检批次需由主控补派 subagent 重新走查并落盘 findings JSON，"
+            "再运行 `python3 code-diagnostics/backfill_audit.py --file <报告> --findings <findings目录>` 回填。\n"
+        )
+        print(tip_msg, file=sys.stderr)
         sys.exit(1)
     else:
         print("\n🎉 ========================================================")

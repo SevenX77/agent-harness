@@ -12,6 +12,8 @@ import re
 import sys
 from pathlib import Path
 
+from diag_paths import ensure_output_path, latest_report
+
 # 废弃文件的静态检查目标
 LEGACY_FILES_TO_CHECK = [
     Path("packages/graph-agent/src/graph_agent/core/harness.py"),
@@ -33,8 +35,8 @@ TEST_DIRS = [
 ]
 
 
-def perform_static_audit(repo_root: Path) -> tuple[int, list[str], dict[str, str]]:
-    """扫描全仓，执行打分，并返回 (最终得分, 证据列表, 文件节点状态字典)"""
+def perform_static_audit(repo_root: Path) -> tuple[int, list[str], dict[str, str], dict[str, int]]:
+    """扫描全仓，执行打分，并返回 (最终得分, 证据列表, 文件节点状态字典, 维度得分字典)"""
     score = 100
     evidences: list[str] = []
     file_statuses: dict[str, str] = {}
@@ -82,7 +84,6 @@ def perform_static_audit(repo_root: Path) -> tuple[int, list[str], dict[str, str
 
     if mypy_escape_files:
         for file_path, line_no in mypy_escape_files:
-            rel_file = file_path.relative_to(repo_root)
             deduction = 15
             score -= deduction
             evidence = (
@@ -152,14 +153,26 @@ def perform_static_audit(repo_root: Path) -> tuple[int, list[str], dict[str, str
         # 每发现一处 Settings 绕过扣 2 分，最多扣 10 分
         deduction_cap = min(len(environ_bypasses) * 2, 10)
         score -= deduction_cap
-        evidences.append(f"- [ ] **[已捕获技术债]** 发现 {len(environ_bypasses)} 处绕过 `Settings` 统一接口直接使用 `os.environ`/`os.getenv` 的高耦合依赖：")
+        bypass_msg = (
+            f"- [ ] **[已捕获技术债]** 发现 {len(environ_bypasses)} 处绕过 `Settings` "
+            "统一接口直接使用 `os.environ`/`os.getenv` 的高耦合依赖："
+        )
+        evidences.append(bypass_msg)
         for file_path, line_no, snippet in environ_bypasses[:5]:
             evidences.append(f"  - 路径: [{file_path.name}](file://{file_path.resolve()}#L{line_no}) -> `{snippet}`")
         if len(environ_bypasses) > 5:
             evidences.append(f"  - ... 还有 {len(environ_bypasses) - 5} 处未全部列出。")
-        evidences.append(f"  - **累计扣除 {deduction_cap} 分**。说明: 框架运行中应通过统一的 `Settings` 读取配置而非随意的系统环境调用。")
+        deduct_msg = (
+            f"  - **累计扣除 {deduction_cap} 分**。说明: "
+            "框架运行中应通过统一的 `Settings` 读取配置而非随意的系统环境调用。"
+        )
+        evidences.append(deduct_msg)
     else:
-        evidences.append("- [x] **[体检通过]** 核心层未发现任何违规直接绕过 `Settings` 进行环境变量读取的高耦合逻辑。**(得 0 扣分)**")
+        pass_msg = (
+            "- [x] **[体检通过]** 核心层未发现任何违规直接绕过 `Settings` "
+            "进行环境变量读取的高耦合逻辑。**(得 0 扣分)**"
+        )
+        evidences.append(pass_msg)
     evidences.append("")
 
     # 5. 工程极简与技术债务体检 (扫描 TODO/FIXME 临时批注)
@@ -182,7 +195,11 @@ def perform_static_audit(repo_root: Path) -> tuple[int, list[str], dict[str, str
         # 每发现一处未决技术债扣 1 分，最多扣 10 分
         deduction_cap = min(len(todo_comments) * 1, 10)
         score -= deduction_cap
-        evidences.append(f"- [ ] **[已捕获技术债]** 全仓发现 {len(todo_comments)} 处未决 `TODO`/`FIXME` 技术债占坑标记：")
+        todo_msg = (
+            f"- [ ] **[已捕获技术债]** 全仓发现 {len(todo_comments)} 处"
+            "未决 `TODO`/`FIXME` 技术债占坑标记："
+        )
+        evidences.append(todo_msg)
         for file_path, line_no, snippet in todo_comments[:5]:
             evidences.append(f"  - 路径: [{file_path.name}](file://{file_path.resolve()}#L{line_no}) -> `{snippet}`")
         if len(todo_comments) > 5:
@@ -192,10 +209,26 @@ def perform_static_audit(repo_root: Path) -> tuple[int, list[str], dict[str, str
         evidences.append("- [x] **[体检通过]** 全仓源码未发现任何已标记的 TODO/FIXME 遗留技术债。**(得 0 扣分)**")
     evidences.append("")
 
-    return max(score, 0), evidences, file_statuses
+    legacy_files_deduction = sum(1 for p in LEGACY_FILES_TO_CHECK if (repo_root / p).exists()) * 20 * 5
+    dim_scores = {
+        "极简度（奥卡姆剃刀）": max(0, 100 - min(len(todo_comments) * 1, 10) * 5),
+        "类型安全度": max(0, 100 - len(mypy_escape_files) * 15 * 5),
+        "死代码干净度": max(0, 100 - legacy_files_deduction),
+        "测试活性度": max(0, 100 - len(skipped_test_files) * 10 * 5),
+        "接口与依赖清晰度": max(0, 100 - min(len(environ_bypasses) * 2, 10) * 5),
+    }
+
+    return max(score, 0), evidences, file_statuses, dim_scores
 
 
-def update_markdown_report(repo_root: Path, score: int, evidences: list[str], file_statuses: dict[str, str], target_md: Path) -> Path:
+def update_markdown_report(
+    repo_root: Path,
+    score: int,
+    evidences: list[str],
+    file_statuses: dict[str, str],
+    dim_scores: dict[str, int],
+    target_md: Path,
+) -> Path:
     """读取并更新指定的 Markdown 报告"""
     if not target_md.exists():
         from build_tree import build_markdown_tree
@@ -225,6 +258,18 @@ def update_markdown_report(repo_root: Path, score: int, evidences: list[str], fi
         pattern = rf"- \[ \]\s+`([^`]*{escaped_file})`"
         content = re.sub(pattern, f"- {new_status}", content)
 
+    # 4. 插入或更新5维静态分元数据 (置于Section 1之前以防被重置覆盖)
+    import json
+    metadata_comment = f"<!-- STATIC_DIMENSION_SCORES: {json.dumps(dim_scores, ensure_ascii=False)} -->"
+    if "<!-- STATIC_DIMENSION_SCORES:" in content:
+        content = re.sub(
+            r"<!-- STATIC_DIMENSION_SCORES:.*?-->",
+            metadata_comment,
+            content
+        )
+    else:
+        content = content.replace("## 1. 待审计代码源文件清单", f"{metadata_comment}\n\n## 1. 待审计代码源文件清单")
+
     target_md.write_text(content, encoding="utf-8")
     return target_md
 
@@ -235,25 +280,22 @@ def main() -> None:
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parents[1]
-    
+
     # 找到要写入的报告文件路径
     if args.file:
-        target_md = Path(args.file).resolve()
+        target_md = ensure_output_path(args.file)
     else:
-        # 如果未指定，寻找最新生成的 reports/diag_report_*.md
-        reports_dir = repo_root / "code-diagnostics" / "reports"
-        candidates = sorted(reports_dir.glob("diag_report_*.md"))
-        if candidates:
-            target_md = candidates[-1]
-        else:
+        # 如果未指定，寻找 output/ 下最新生成的 diag_report_*.md
+        target_md = latest_report()
+        if target_md is None:
             print("[run_static_audit] ❌ 未发现任何已生成的报告文件，请先运行 build_tree.py！", file=sys.stderr)
             sys.exit(1)
 
     # 运行体检
-    score, evidences, file_statuses = perform_static_audit(repo_root)
-    
+    score, evidences, file_statuses, dim_scores = perform_static_audit(repo_root)
+
     # 更新 Markdown 报告
-    update_markdown_report(repo_root, score, evidences, file_statuses, target_md)
+    update_markdown_report(repo_root, score, evidences, file_statuses, dim_scores, target_md)
     
     print(f"[run_static_audit] 体检报告静态得分已回填: {target_md}")
     print(f"[run_static_audit] 静态体检得分: {score} 分")

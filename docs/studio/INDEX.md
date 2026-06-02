@@ -82,7 +82,7 @@ Studio 的每个功能都是同一系统在**三条正交轴**上的投影。三
 ```
 docs/studio/
   INDEX.md            # 本文件 — 治理总纲(根, 管 mvp0+mvp1)
-  _reorg/             # 重组工作区: catalog / 对齐笔记 / 推导 / handoff / 暂存需求
+  _reorg/             # 重组工作区(tracked): catalog / 对齐笔记 / 推导 / 暂存需求(handoff 在 gitignored temp/)
   mvp0/               # 旧设计·当前实现 baseline: 02_features/ 03_platform/ (⚠ 迁移后按需删; 不要据此实现)
   mvp1/               # ★新设计·重设计目标: 01_workflows/ 02_capabilities/ 03_regions/ 04_platform/
 ```

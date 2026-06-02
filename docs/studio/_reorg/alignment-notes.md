@@ -302,7 +302,7 @@
   - `docs/studio/mvp0/` = **旧设计 baseline**(`02_features`/`03_platform` 移入), 迁移后按需删, 见 [mvp0/README](../mvp0/README.md)。
   - `docs/studio/mvp1/` = **新设计·重设计目标**(`01_workflows`/`02_capabilities`/`03_regions`/`04_platform` 移入), 见 [mvp1/README](../mvp1/README.md); MVP1 内延后项(brain/REQ-8/REQ-7/DEF-005)在文档内标 target-design。
   - `INDEX.md` + `_reorg/` 留根(治理 + 工作区); V0.3.0 暂存需求移入 `_reorg/`; INDEX §5 已更新。
-- **handoff**: 下个 session 交接 = [`_reorg/NEXT-SESSION-PROMPT-v2.md`](NEXT-SESSION-PROMPT-v2.md)。
+- **handoff**: 下个 session 交接 prompt 在 `temp/studio-reorg-handoff.md`(gitignored 临时区, 不入正式 docs)。
 
 ---
 

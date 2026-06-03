@@ -106,6 +106,14 @@
 - **前置条件**: 设置页 §2/§3 定稿(✅ 已完成,提供借鉴基线);独立设计 pass 排期 + PM 探明意图(先做哪类生成模型、测试要不要人评预览闭环)。
 - **来源**: 2026-06-03 PM 第三轮"多模态生成式模型测试该怎么做"大需求。
 
+### DEF-015 — i18n 实现落地(设计已定稿,P1 待排期)
+- **日期**: 2026-06-03
+- **事项**: 按 [i18n 设计](studio/mvp1/04_platform/i18n.md) 落地多语言。**P1**:前端三件套(`i18next` + `react-i18next` + `i18next-browser-languagedetector`)+ `i18n.ts` 初始化 + `react-i18next.d.ts` 类型声明 + `en`/`zh-CN` 词条骨架(按 namespace 分);收编现有 `llm-error-messages.ts`(42 条错误码→英文映射)进 i18n;Settings/LLM workflow 全量词条;清理 6 处残留中文 message(`skills.py:178/187/261/270/279`、`copilot.py:496`)。**P2+**:按 workflow 逐个铺词条(canvas → copilot → trace → …)。
+- **归属**: 横切 `04_platform/i18n`(前端主导,Strategy C 前端单权威;引擎/网关语言无关零改动);代码走独立 `.kiro` spec(设计文档只定架构)。
+- **延期原因**: PM 2026-06-03 设计定稿后明确「先不用落地」,设计先锁。
+- **前置条件**: PM 给落地排期;落地前实现计划须先过 Codex `[PLAN REVIEW REQUEST]`(CCB 规矩),通过后由 Codex 写代码(Claude 不亲自写)。
+- **来源**: 2026-06-03 PM「我们现在要设计 studio 的 i18n 功能…目前我只需要简体中文,其他语言顺便」;设计完成后「先不用落地」。
+
 ## Completed / Promoted
 
 - **DEF-002 → Promoted (2026-06-01)**: 连线 Context 真实数据接线。已并入 `studio-feature-trace-inspector` **REQ-3(P1 核心,现在可做)** —— 本就是该 spec 自己的 scope,从 deferred 注册表拉回。

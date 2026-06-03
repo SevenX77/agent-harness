@@ -3,8 +3,8 @@
 > **新设计文档**(MVP1 重设计目标)的三维体系。旧设计(MVP0 当前实现)baseline 在 [`../mvp0/`](../mvp0/)。
 > 治理总纲 [`../INDEX.md`](../INDEX.md); 设计来源 = `.kiro/specs/studio-feature-*` + [`../_reorg/workflow-action-catalog.md`](../_reorg/workflow-action-catalog.md)。
 
-- `01_workflows/` — ① 用户旅程脊柱(6 节点 + 待立 `00_settings`)。
-- `02_capabilities/` — ② 能力(13, 跨区域数据流/行为)。
+- `01_workflows/` — ① 用户旅程脊柱(7 节点, 含 `00_settings` 运行底座)。
+- `02_capabilities/` — ② 能力(14, 跨区域数据流/行为)。
 - `03_regions/` — ③ UI 区域(12, 组件结构/状态)。
 - `04_platform/` — 后端三分 + state-engine(D10)。
 

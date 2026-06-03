@@ -321,3 +321,360 @@
 
 ### 下一步
 - 本轮**不动手**(PM 将清 context 后做)。交接 prompt 已写: `docs/studio/_reorg/NEXT-SESSION-PROMPT.md`。
+
+---
+
+## 00_settings 节点 — 结构决策 + 起草(PM 2026-06-02, AskUserQuestion 拍板)
+
+> 起草 00_settings 前撞到两个结构 / 命名决策。按"结构别假设先确认"铁律, 已自核(读 INDEX §6 确认无 settings capability; survey settings 前端代码 + 6 份 specs + gateway mvp1 模块)后请 PM 拍。
+
+### S1 [决策] 节点产物 = 01_workflows 散文节点(非 catalog 动作表)
+- PM 选: **"01_workflows 散文节点"** —— 写 `mvp1/01_workflows/00_settings.md`, 与 01_init / 02_authoring 同散文体(业务目标 / 核心范式 / 旅程 / 失败退路 / 下游流转), 非 catalog 的 status + file:line 动作表。
+- **动机**: 00_settings 是 PM 面向的旅程叙事, 沿用既有节点散文体例保持一致; 工程级 status / 证据留待 catalog / capabilities 阶段。
+- ⚠️ 注意: 既有 01_init / 02_authoring 散文**含 stale 残留**(01 还写 `[Open in Cursor]`/D3 已删; 02 还写 `type simple/graph`/M1 已标 stale)→ 00_settings 写**新设计 grounded 版, 不带 stale**。
+
+### S2 [决策·动注册表] 新增 `studio-settings` 能力(第 14 个 capability)
+- PM 选: **"新增 studio-settings 能力"** —— 一个宽口径 capability 覆盖整个 settings 页(LLM 配置 + 路径 + 身份), 而非窄 `llm-config` 或不设 capability。
+- **动机**: settings 有 region(§6 #12)却无对应 capability, 三维链路(节点 → 能力 → 区域)断了一环; 宽口径"一节点 = 一能力 = 一页"最简单直观, PM 取舍倾向整页内聚。
+- 归属: 能力 `studio-settings` · 区域 `settings` · 平台 `gateway`(Python sidecar)。已登记 INDEX §6(13 → 14)。
+
+### 00_settings 起草已落(2026-06-02)
+- 产物: [`../mvp1/01_workflows/00_settings.md`](../mvp1/01_workflows/00_settings.md) —— 四旅程(General 身份/路径 · API Keys 凭证 · LLM Roles 角色→Model Group 映射 · Copilot 配置)+ 测试→持久化→投影(后端 SSOT 五态)+ 失败退路(含 D8 copilot session 失败退路)+ 下游硬依赖(predict/run/publish)。
+- 接 API 方向已对齐 gateway mvp1: 编排(role→ResolvedRoute)/调用分离; base_url 归一化(头号根因); credential 不落明文(redact + secret 端点); 测试状态后端 SSOT(`project_provider_model_state` 五态 + SQLite health store); **数据层永不 Rust 化**(settings 不适用 D12 全量 Rust, 仅 OS 选目录走 native)。
+- 现状落差(接线主工程): 后端 SSOT 已具雏形, 前端仍残留易失测试态(刷新即丢)需删除改投影; Copilot tab 仍 demo/mock 桩 + "假测试"(AsyncAnthropic ≠ ClaudeSDKClient)。
+- 未过 PM 走查的 03–06 仍待下一步逐节点过(任务 A 不变)。
+
+### 00_settings §3 细化 — 全 tab UX 动作目录 + PM 设计意图(2026-06-02)
+- 产出工作目录: [`settings-action-catalog.md`](settings-action-catalog.md) —— 65 动作按用户 UX 流编号(壳层9 / General6 / API Keys16 / LLM Roles22 / Copilot12), 2 个 workflow 编目 + 对抗校验(分叉/status 全部坐实)。
+- **PM 拍板设计意图(原话留底)**:
+  > "2. Copilot必须做到全部功能齐全, 配置+真测试+存取draft, ux workflow用到的所有功能; 1. 全部; 7. ??全都要做完"
+  - **Copilot(必须全功能)**: 不延后, 做到 = 配置 + **真测试(修假测试: 探针 AsyncAnthropic → 运行 ClaudeSDKClient 对齐)** + **draft 存取** + UX workflow 用到的所有功能。动机: copilot 是一等能力, 现状 mock/桩/假测试/分流 bug 不可接受。
+  - **测试态 SSOT(全部)**: provider 测试 + role 测试结果全部后端 SSOT 落盘回填, 删前端易失层(roleTestStates / 前端 test_results 副本)。
+  - **API Keys 7 个现状 vs 目标差(全做完)**: Manual probing 切方案 B(`/routes/{id}/probe`)/ Eye-mask 改 CSS 不切 native password / inline 一次填全 / Protocol 按目标处置 / 清 4 孤儿 / base_url 口径统一 / 状态术语统一(`ProviderUiState`)。
+  - **推论**: 00_settings §3 写**目标态(全功能)**, 现状的桩/易失/假测试/孤儿一律标「现状 gap → 接线工程」, 不作已接受限制。
+- **走查方式(PM 指示)**: 一个 stage 一个 stage 抛全文在 chat 过(不看文档), 逐块确认后再并入 00_settings.md §3。
+
+#### ⚠️ 权威源链 + 认知纠正(2026-06-02, 读完真实 spec 后 —— 关键)
+> PM 原话: "我写过好几遍整套api key + llm role 的用户ux workflow了, 为啥还是不同步呢" / "首先你得去看代码真的是长什么样的, 不能只看文档…其次, 你要去读 gateway相关的后端实现mvp1 对齐的部分"
+- **教训(铁律重申)**: 之前从「现行(已漂移)代码 + baseline 摘要 + 子 agent 转述」倒推 settings, **没读 PM 亲手写的权威 UX spec** → 反复不同步、拿 drift 当设计。
+- **权威源链(锁定)**:
+  - **v4 registry 生产契约** = `.kiro/specs/llm-provider-intelligence-v2/`(provider_endpoints + provider_routes + route_id;`GET/PUT /api/llm/registry`、`POST /endpoints/{id}/test`、`POST /routes/{id}/probe`)。
+  - **API Keys UX 最新权威** = `.kiro/specs/studio-api-keys-regression-hardening/`(2026-05-25 Implementing)。`studio-api-keys-redesign/`(v2.1 flat-credentials)**仅作删除前 UX 参考**, v3 路径(`/providers/test`、`/credentials`)不恢复。
+  - **LLM Roles UX 权威** = `.kiro/specs/studio-llm-roles-model-groups/design.md`(Model Group 两级 + 三状态源域 + 5/4/3 态)。前端切换 = `studio-llm-roles-frontend-cutover`。
+- **认知纠正(我之前错的,以 spec 为准)**:
+  1. **「official 异步批量 job / tp 同步单发」不是设计意图, 是现行代码 drift**。权威 = **统一一条 `POST /endpoints/{id}/test`**(models-list → upsert routes → 刷新 registry 投影), 官/tp 同一流程。
+  2. **mask**: 权威要 `type=text` + **CSS mask** + 显示/隐藏 + 复制(本地 InputGroup, regression Req5.3/5.4);现行代码 `type=password` 切换是**已知 deviation**(regression design.md:51 自列)。
+  3. **official/third-party 物理分区是设计意图**(Req5.1/5.2: official 预渲染 5 厂商隐藏 name/base_url + 稳定 endpoint id, tp 用户自增可编辑), 非 drift。
+  4. **状态标准 roles design 已定义, 对齐不重发明**: 三源域 **Identity / Capability / Health**;Provider UI **5 态**(route 级, 优先级 Off>NeedsSetup>CoolingDown>Ready/Untested);Role Fit **4 态**(role-local 派生, 从不改全局 health);Admission **3 态**;reason_code 仅细节;legacy RouteStatus 仅兼容投影。铁律: 「单个 status enum 不得当 UI/测试/admission/health 的统一真相」。
+  5. **SSOT**: 前端不持第二份业务真相, 全从 v4 registry 投影(test 状态←endpoint record;available_models←provider_routes by endpoint_id;route status/cap←route record)。
+- **我列的"7 个 open question"实为这套 spec 的 deviation 修复清单**(Manual probing 切方案 B=Req5.7;mask=Req5.3;official/tp parity=Req5.1/5.2;SSOT=UX Amendment;state 投影=roles design)。PM 已拍"全做完"=按 regression-hardening Phase1/2 落地。
+- **endpoint 身份**: 一个 endpoint = 一个 base_url(host 推出稳定 endpoint_id)+ 一个 protocol(`Available SDKs`=`[endpoint.protocol]` 单协议);endpoint→route 1:N。"一张 card 两个 URL"= 两个 endpoint(数据模型支持), 但**未在已读 spec 找到明文 UX 要求** → 待 PM 指来源/确认是否立规格。
+
+#### PM 口述权威 UX 落地 + 第三轮(2026-06-02)
+- PM 亲手写了 [`00_settings-ux-spec.md`](../mvp1/01_workflows/00_settings-ux-spec.md)(§0 verbatim 原话)= settings 三页**权威细粒度 UX**;`00_settings.md` §3 已链接。我反复不同步的根因到此闭环。
+- 关键补正(以此 spec 为准):① **official 只 get-models 不 probe**(我"official 异步批量探测建档"描述作废, 是漂移代码);② **route 级状态新增第 6 态 🔵蓝「以前联通过」**(draft 回填的历史连通, 介于 untested 与 verified)→ gateway `project_provider_model_state` 从 5 态补 6 态;③ **draft 赋能/写回**是核心机制(拉 draft 回填已证实资料 + diff 写回), 我之前当旁路 advisory 低估了;④ **测试落点**: endpoint 验证在 API key 页(轻量: 连通/get-models;第三方加一次单模型测), model「保证能用」真 probe 在 role 页。
+- **#B(Claude 待核实, 不问 PM)**: list-models 是否每 protocol 都带 capability, 还是只 anthropic → 查各 provider list-models 文档后回填 spec §5。初判: gemini 带 token 上限/方法、anthropic/openai 基本只 id(待文档确认, 不凭记忆写进权威)。
+- **#D 多 URL per card(PM 第三轮新增, optional)**: 第三方 card 多 base_url → 各成独立 endpoint(探协议+验证)+ 模型合并。Claude 评估: 不难, 但与 model-group 跨 endpoint 合并的兜底能力**重叠** → 标可选/低优先。已记 spec §1.2 + §5 #D。
+
+#### Stage 0(壳层)走查结论(PM 2026-06-02, 原话留底)
+> "1. 做一个适应, 打开setting时, 如果窗口比较小就自动收起两边的侧边栏, 这样比较方便; 打开setting page时, 再点击一次toolbar的setting图标, 关闭setting页面; 2. …这不必要吧? 这个应该不需要用户感知. 但是如果拉取不了,网络连不上之类的, 可以显示一个网络连接不上警告标志; 3. A.是这么设计的; 4. B.我上面说了, 没说的就没问题"
+- **#1 overlay**: 保留 center overlay 不卸载工作区(设计意图)。**新增**: (a) 打开 settings 时窗口较小则自动收起两侧栏(文件树 + copilot); (b) settings 打开时再点 Toolbar Settings 图标 = 关闭(toggle)。
+- **#4 保存反馈**: ✘ 不做全局保存徽章 —— 正常保存**静默**、用户无需感知。**改为**: 仅在拉取失败 / 网络连不上时显示「网络连接警告」标志。动机: 自动保存是后台行为, 用户只需感知失败不需感知成功。
+- **#2/#5/#6/#9**: 壳层统一骨架/就绪态、WS 重连 + 日志(违 logging 铁律须补)、四 tab 全包错误边界 —— 均按目标补齐(PM "没说的就没问题")。WS/拉取失败的用户面出口 = #4 的网络连接警告标志。
+
+#### Stage 1(General)走查结论 + git/publish 定调(PM 2026-06-02, 原话留底)
+> "整套gitea 部署起来麻烦吗? 这个功能其实我现在还没有碰过, 因为现在没那么紧急, 保存在本地够用, 只是占了个坑"
+- **核实(亲验 file:line)**: "git/发布"是 3 套独立机制 —— ① **Gitea** 团队协作(host + token + user_id=owner; push 靠系统 git 凭据)② **Artifact Registry** 发布(host + token; publish 走这条**不走 git**, 亲验 `skills.py:266-283`)③ 系统 git 推拉凭据。现状 UI 只有 `gitea_host` + `user_id`; registry host/token + gitea token 全是 `STUDIO_*` env、**无 UI**(`backends.py:38-41`)。
+- **PM 定调**: 团队协作(Gitea)+ 发布(Registry)= **占坑 / 低优先**, 现在只用本地 git commit 保存即够。→ 00_settings 把「团队协作 / 发布 / 其鉴权」标 **target-design(占坑, 先不全做)**, 不现在扩 Gitea/Registry token UI; §6 的 publish 依赖相应降级为「占坑/未启用」不写硬依赖。
+- **General 现役字段(保留, 非占坑)**:
+  - `user_id`: **本地保存也在用** —— 本地 git commit author = user_id(`git_local.py:309-313`)+ 未来 Gitea owner / 发布 author。强制非空(publish/team-save 空则 400)。
+  - `default_skills_directory`: 新建 skill 默认落点(`skills.py:495-499,577-581`; WelcomePage 默认父目录), 新模型仍用、非注册表遗留。
+  - `gitea_host`: 占坑字段, 留位不深做。注: 现有 env(`backends.py:110`)+ app_settings 双源, 未来真做时统一到一处。
+- 注: skill CRUD/workspace 隔离那条 user_id 来自**认证层**(`get_auth_user_id`→现 auth_type=none 返回 env default_user_id), 与 app_settings.user_id 两个来源; 未来上 login 须理清。
+
+---
+
+## 批次 1+2 残留确认 + 子图 path / .workspace / 字段对齐 (PM 2026-06-02 续)
+
+> 触发: PM 逐条确认 01_init / 02_authoring 的「待定」残留 + 抛 3 个新校正。本轮先核实代码+文档再落决策。
+> ⚠️ 教训复盘: Claude 两次未核实就下结论(① 1-4 误判"空文件夹+copilot", 实际 `create_skill` 本就建模板; ② 误称 .workspace "规范没定义", 实际在 `workspace-spec/baseline.md`)→ 违 verify-before-concluding, PM 两次纠正。
+> PM 原话留底:
+> - "1-1删;1-2A;1-3删;1-4 init不是空文件夹, 还是要建一个模版文件夹的, 和copilot没关系, 不会自动调copilot; 1. git init; 2. .workspace 文件夹必然要用到的文件结构树; 3. 一个graph.md 必然要用的, 里面yaml 的基础配置那name,还有啥?; phase文件夹"
+> - "1-4 a我觉得要用1个logic节点 接一个 1个agent节点, 算是初始化模版吧, 比较常用的组合; b修;c 要"
+> - "子图还有一个需求是, 现在没有注册表, 所以子图需要指定path才能导入到工作区里面, 这应该是subgraph节点里面要新增的, 还有agent phase里面的子图也是一样."
+> - ".workspace 肯定有spec 的, 仔细找, 但他不是最新的, 需要根据最新需求更新" / "字段可能会有更新要根据最新的功能设计关联" / "关联功能要互相引用, 才不会丢失认知; 链接一份文档, 唯一真相源"
+
+### 01_init 待定 → 决策
+- **D-1-1 删 Config drift 徽章**: 去注册表后 git-remote 比对告警(`config_arbitration.py` + `WelcomePage.tsx:431-457`)失触发点。动机: 注册表时代产物, IDE 模型下无落点。
+- **D-1-2 Recent 卡片极简(选 A)**: 只存路径+名(MRU localStorage), 不再后端 `GET /skills` 聚合富元数据。动机: Home=纯入口, 极简够用且省后端调用(对齐 D6)。
+- **D-1-3 import 校验门全删**: `services/skills.py:517-525` 打开时 GRAPH/SKILL 存在校验 + 非阻断 lint 一并删, 开任意文件夹零校验, 全交 compile+copilot。动机: D2"屎都改成标准 skill"。
+- **D-1-4 新建 = 模板文件夹(非空、不调 copilot)**: 纠正前版"空文件夹+copilot"错判。落地 = git init + `.workspace/`(空,运行时填) + `GRAPH.md` + `phases/`。起始模板 = **1 个 logic 节点 → 1 个 agent 节点**(常用组合)。
+  - (a) 起始结构 = logic→agent 串接(非单 init)。
+  - (b) 修脚手架: 现 `_SCAFFOLD_FILES` 的 LOGIC.md 缺 03-logic 必填 `name`/`actions`(不合 FROZEN)→ 按新模板重写。
+  - (c) `.workspace/` 入 `.gitignore`(运行产物不污染 git)。
+  - 动机: 新 skill 立即可编辑/可编译、不依赖 copilot 在场; logic(确定性预处理)→agent(LLM 主体)是最常见起手式。
+  - 代码佐证: `create_skill` 已 git init+建 .workspace+写 scaffold(`skills.py:558-560`), 方向本就对, 仅模板内容按 FROZEN 重写。
+
+### GRAPH.md 字段真相(答 PM "name 还有啥", 权威=02-graph-md-spec FROZEN)
+必填: `name` / `schema_version:"v0.3.0"` / `io`(inputs+outputs inline JSON Schema) / `phases:list[str]` + body `<phase depends_on>` 拓扑。可选: `llm_role`(默认 analyst) / `description`。**无 `type:simple/graph`**(伪字段)。
+
+### 新需求: 子图 path 引用 + 导入(去注册表化) — 新 FROZEN 改动 #5
+- **冲突**: FROZEN `04-subgraph` 的 `target_skill`=skill id(靠 SkillResolverProtocol/注册表解析), 与 D1/D7/D11 无注册表冲突。
+- **决策(对齐 D7)**: 子图改**按 path 引用**(直接写子图文件夹路径, 无 id→path 注册表)。两处落点: ① `SUBGRAPH.md` 节点字段; ② Agent 节点 `subgraphs[]` 每项(subagents[] 同为 cross-skill 引用, 是否一并待确认)。
+- **导入流程(V0.3.0 需求1 去注册表重写)**: 按 path 解析; 不在工作区→assets 面板 subgraph 类目标红→点击弹 OS 选文件夹→add-folder-to-workspace。归 `skill-workspace` 能力 + `assets` region。
+- **动机**: 无注册表下 path 即物理地址(D7); 导入=把被引用子图纳入工作区(同 IDE "add folder to workspace")。
+- ✅ **PM 拍(2026-06-02)**: `target_skill` → **改名 `path`**(直接写子图文件夹路径)。落地见 [phase-editing 能力文档](../mvp1/02_capabilities/phase-editing.md)。
+
+### 字段对齐最新功能设计(G2/G3 已锁)
+- **G2**: 子图 io 删严格 1:1, 改黑板字段过滤(同任何节点)→ 子图节点 io 校验按放宽写; 关联 canvas REQ-2 字段勾选。
+- **G3**: 所有节点 `io.outputs` 加可选 artifact 落盘路径标注(产出写成 .json/.md)→ Agent/Logic/Subgraph io.outputs 表单都含此项; 关联 .workspace artifacts。
+- **G2 文件导入**: 任意 i/o 面板可导入文件→注入黑板(时机 a: 跑到该节点才注入)。
+
+### .workspace 规范定位 + 更新点
+- **唯一真相源** = `docs/engine/mvp0/workspace-spec/baseline.md`(Round 31)。结构: `runs/<run_id>/`(trace.jsonl/result.json/final_state.json/metrics.json/artifacts/) + `golden/<baseline_id>/` + `test_inputs/`。
+- **过时点(PM "需更新")**: G3 要作者声明产出默认落 `.workspace/artifacts`(顶层持久), 现规范只有 `runs/<run_id>/artifacts/`(per-run 临时 sidecar), **缺顶层 artifacts**。G3 自标"artifacts 默认目录组织待想清"。→ **更新点**: workspace-spec 加顶层 `artifacts/`(作者声明持久产物)区别 runs 内临时; 语义边界待定稿。
+
+### 唯一真相源 + 交叉引用原则(PM 锁)
+- **字段定义 SSOT**=引擎 FROZEN skill-spec(02/03/04/05); **.workspace SSOT**=workspace-spec。Studio 文档**只链接不复制**(防 drift, 对齐 L1 + INDEX §2 所有权不变量)。
+- **交叉引用网**(关联功能互引, 防丢认知): 节点字段→FROZEN spec; io.outputs 落盘→G3 + workspace-spec(artifacts); 子图 path→D7 + skill-workspace(导入) + assets(subgraph 类目) + V0.3.0 需求1; 子图 io 过滤→G2 + canvas REQ-2。
+- **FROZEN 改动清单更新**: 原 4 条 + 本轮 **#5 子图 target_skill→path(去注册表)** + **#6 workspace-spec 顶层 artifacts(G3 配套)**。
+
+### catalog 待定状态
+- 01_init 4 条 + 02_authoring 脚手架/Half B 本轮已解决; 待并入 catalog 各节点章节(子图 path 字段微选择确认后统一改)。
+
+---
+
+## 01/02 完整动作表 review — 5 条修正 (PM 2026-06-02)
+
+> 触发: PM 审完 01_init(18)/02_authoring(17+1)完整动作表后抛 5 条。原话留底:
+> "1. 'Delete...' 抄cursor, 现在不需要删除skill 功能, 要删的话用户自己去系统文件夹删, recent skill 如果这条记录的dir path消失该怎么办, 自动消失, 还是点击报错? 2. 设计阶段标注整个欢迎屏逻辑确保抄cursor/VS code, atom actions没问题 3. #3 还有input files选项, input路径(新增engin功能, 任何节点都可以导入新文件) 4. #6 需要完整设计, 现在拉开线的一头, 不会自动断链 5. 提醒:asset里面的subgraph文件夹要和subgraph节点文件同步, 删掉subgraph节点时, asset也要对应的删掉"
+
+### R1 [决策] 删除「删 skill」功能(抄 Cursor)
+- 01_init 动作9「Delete(从最近移除)」**整条移除** —— Studio 不提供删 skill 功能; 要删让用户自己去系统文件夹删。动机: Cursor/VS Code 都不在 IDE 内删项目, Recent 只是入口列表不是文件管理器。
+- ✅ **PM 拍(2026-06-02)**: Recent 记录的 dir path 消失(文件夹被外部删/移)→ **点击报错 + 自动从 Recent 移除**(VS Code 式)。理由: 极简 Recent 不预先读盘(D-1-2), 失效只在点击时发现; 弹"文件夹不存在/已移动, 已从最近移除", 既透明又自清理, 正好替代被删掉的手动删除功能。备选: 加载时 Rust 轻量 stat 置灰/静默剔除(预先读盘, 稍违极简)。
+
+### R2 [决策] 欢迎屏逻辑 = 抄 Cursor/VS Code(设计准则)
+- 01_init 整个 Home/欢迎屏交互逻辑**对齐 Cursor/VS Code**(Open folder / Recent / 强隔离工作区)。atom actions 已 PM 确认无问题。→ 写 01_init / skill-workspace 文档时标此准则。
+
+### R3 [需求] i/o panel 加「导入文件」选项(= G2/FROZEN-3, 任意节点)
+- 02_authoring 动作3(i/o panel)除 io/artifact 设置外, **加 input files 导入选项 + input 路径**: 任意节点都能导入新文件 → 文件字段注入黑板(新引擎能力, FROZEN-3, 时机 a=跑到该节点才注入)。非首 input 节点专属。落 phase-editing §5 [G2 文件导入]。
+
+### R4 [需求·待设计] 连线/断连完整交互
+- 现状核实: 建链=拖端口到端口(`onConnect`, GraphCanvas.tsx:319 live); 断链**仅右键边 Disconnect 菜单**(`onDisconnectConnection`:478); **无边端拖拽**(无 onReconnect/edgesReconnectable)→"拉开线一头不断链"属实。
+- **设计(✅ PM 确认 2026-06-02)**: ① 建链(拖端口→端口, 已 live); ② **改链/重连**[新] 拖已有边的一端到另一节点端口 → 改 depends_on(旧删新加); ③ **拖拽断链**[新] 拖边端松手在空白 → 删 depends_on(直觉"拽开即断"); ④ 菜单断链(保留)。全经 Rust(D12)+ 改完触发 compile 重校验数据流。技术 = 启用 React Flow `onReconnect`+`onReconnectEnd`(空落=删边)。归 graph-authoring。
+
+### R5 [需求] assets subgraph 类目 ↔ subgraph 节点文件 双向同步
+- assets 面板的 subgraph 类目必须与各 `phases/<id>/SUBGRAPH.md` 节点同步: **删 subgraph 节点 → assets 对应条目同步删除**(反之新增/改 path 也同步)。防"节点删了 assets 还挂幽灵子图"。归 graph-authoring(删节点)+ skill-workspace(assets 渲染)。
+
+---
+
+## Part 3 (03_prediction) review — scope 质疑 + golden 机制设计 (PM 2026-06-02)
+
+> PM 审 03 后抛 4 点。原话留底:
+> "1. scope 范围确认, 原来skill lifecycle可能应该包含compile、predict、run、git保存分发? 现在关注predict , 我觉得 test input batch也很奇怪; 剩下的scope有没有其他part承载??
+> 2. 3-2 看不懂. 为什么老是说事情没头没尾的,我说了不要默认我读过代码读过文档, 我不方便读
+> 4. validate应该归这个scope管吗?"
+> **point 3 逐字(关键 golden 机制, 勿用提炼替代)**:
+> "我来模拟一下用户心智: 设计完compile没问题,第一次点击predict, 测试逻辑链路跑通没问题, agent node 状态从未测试变成逻辑OK(根据io设置), 测试完弹出popover 问你需不需要现在copilot帮你一起完成golden设计(?icon,解释一下golden是什么, 这套机制怎么运作的, 没有golden时, 只要运行一次predict或者run,都会弹一次), 用户选择要, 自动新建一个chat发送prompt(需设计) 给copilot, 帮你预测结果(copilot根据你的整个graph: 1. 分析你需要什么结果; 2.这个节点预计真跑起来会得到什么结果; 3. 分析差距, 建议修改方案), 直到你和copilot讨论出来golden是什么, 改变这个node的golden参数. 如果有多个agent 节点, popover依次弹出,确认完一个, 弹下一个; agent节点需要一个新状态标签, 有没有golden? 有的情况下predict按照golden输出走; golden相关设置放在i/o 面板, 因为和输出什么直接相关; 没有golden时,会根据输出schema自动创建一个符合schema的golden模版, 你可以通过i/o panel, 打开golden的json文件, 手动填入golden数据; 一旦golden有数据了, 状态自动切换到golden, predict按照golden输出运行. run运行后可以进行实际结果和golden的diff对比."
+
+### 回应 R-scope [厘清] skill 生命周期已拆分, 无遗漏
+- 旧 `skill-lifecycle` spec = 历史大杂烩。现拆分映射: compile→`compile-lint`(node 02); predict→`predict`(node 03); run→`run-execution`(node 04); git 保存/发布→`publish`(node 06)+ autocommit(run-execution); golden 验收→`golden-eval`(node 06); 测试输入管理→`predict` 输入侧; validate(输入校验)→`predict`(node 03)。
+- **PM 直觉对**: `test-inputs-batch` 名怪, 因它=「输入管理(predict 输入侧)+ 批量(run-execution)」两件事跨两能力拼凑。**建议解散此 spec**: 输入管理并进 predict 的 i/o 面板; 批量并进 run-execution。待 PM 拍。
+- validate(point 4): 属 predict scope(试飞前校验输入合 schema), 归 `predict`(node 03)。
+
+### golden 机制(point 3)— 组织 + gaps(待 PM 确认)
+- **状态机(agent 节点新增标签)**: 未测试 → 逻辑OK(首次 predict 链路跑通) → 有golden。
+- **mock 由 golden 状态自动决定**(取代手动 mock 选择器, 原 3-3 自动解决): 无 golden→启发式占位(免费验链路); 有 golden→predict 吐 golden(golden_case)。
+- **golden 创建两路**: ① copilot 协作(popover→新 chat→分析图+预测真跑结果+差距建议→定 golden); ② 手动(按 io.outputs schema 自动生成空模版 json, i/o 面板打开填)。
+- **golden 设置/文件**: 归 i/o 面板(因 golden=输出什么)。
+- **diff**: run 真跑后 实际 vs golden 对比 → 归 golden-eval(node 06)。
+- **关键 gaps(已在 chat 提 PM)**: (G-a)[最大架构] PM 模型 golden=per-node 作者期望值 vs 现后端 golden=whole-run 捕获快照, 两套模型需裁定取代/并存; (G-b) logic 节点真跑不需 golden; (G-c) golden 失效(节点编辑后旧 golden 标过时?); (G-d) popover 疲劳(每次弹→需"不再提醒/跳过"?); (G-e) 全节点有 golden 后 predict=纯回放, 价值在测未定 golden 的节点; (G-f) copilot golden-design prompt 待设计; (G-g) 现 409 守卫(predict trace 不可晋升 golden)与本模型一致——golden 是作者定/手填, 非从 predict trace 捕获。
+
+### Part 3 review 续 — PM 修正 scope + golden 决策 (2026-06-02)
+> PM 原话留底:
+> "1. '输入', 输入什么文件不是已经在io里面设置了嘛? 每个节点都有自己的input配置, 输入什么文件. 为什么还要单独设置呢?...还有input validate为什么要单独拿出来讲, predict本来不就在validate整个流程吗?
+> 2. scope的问题, 这个阶段就叫predict啊, 有什么问题? input 和batch 都是节点配置问题, 和predict无关, predict和run就是按照配置来跑就行了
+> 3. ...存档应该和发布分发放一起, 都是git的功能. golden验收怎么又和发部分放放一块了呢?
+> 4. g-a 取代; g-b对;g-c不用;g-d 看改什么, 改prompt,改agent内部设置都没事, 只有改输出schema后, golden字段缺失需要的字段, 需要弹警告⚠️,触发编译错误, 必须补上才能跑predict; [g-e 见下]; g-f OK
+> 5. 作为workflow的scope, 我觉得predict+run+golden可以放在一起"
+> g-e 原话: "把他放到tracing里面, predict的tracing, 如果agent 的节点用的是占位, 旁边多一个按钮, 直接让copilot设计golden; 再一种方案, 用sonner弹出确认框, 是否让copilot设计, 点确认一次性新建多个chat, 同时开始分析设计没有golden的节点"
+
+#### [纠正] predict scope = 纯"按配置试飞"; input/validate/batch 不是 predict 独立议题
+- **input(输入什么文件)= 每个节点的 io 配置**(i/o 面板, phase-editing 已覆盖); predict 按配置跑, 不单独设。
+- **validate = predict 流程内的一步**(跑前校验输入合 schema), 非独立议题。
+- **batch = run 配置**, 与 predict 无关。
+- ⇒ 之前给 03 列的 3-1(改名)/3-2(输入入口)/3-5(validate) 均为 Claude 过度复杂化造出的**伪问题, 撤回**。predict 阶段就叫 predict; 03 真正内容 = golden 机制。
+
+#### [重组] workflow 阶段后半段(待 PM 定 debug 归属)
+- **纠正**: golden 验收**不跟 publish**(之前错误把 golden+publish 塞进 06_eval); 存档**跟** publish(都是 git/分发)。
+- **运行与验收** = predict(试飞)+ run(真跑)+ trace(看结果)+ golden 验收对比(= 旧 03+04 + 06 的 golden 部分)。
+- **保存与发布** = git 存档(成功 run autocommit)+ 发布分发 publish(= 旧 04 autocommit + 06 publish 部分)。
+- 注: 仅重组"旅程阶段"归类; 底层能力(predict/run-execution/golden-eval/publish)仍各自独立。
+- ✅ PM 定(2026-06-03): debug(trace 去黑盒+续跑)**并进"运行与验收"**(选 A)。→ "运行与验收" = predict + run + trace + golden 验收 + debug 续跑。
+
+#### golden 机制决策(g-a..g-f 已拍)
+- **g-a 取代**: per-node 作者期望值 golden 取代现后端 whole-run 快照。
+- **g-b 对**: mock 由 golden 状态自动决定(无→占位 / 有→吐 golden); 不要手动 mock 选择器。
+- **g-c 不用**: logic 节点不要 golden。
+- **g-d golden 失效条件**: 改 prompt / agent 内部设置**不失效**; **仅改输出 schema 致 golden 缺新要求字段** → ⚠️警告 + 触发编译错误, 必须补齐缺字段才能跑 predict。(golden 绑输出 schema, 不绑 prompt。)
+- **g-e popover 替代 ✅ PM 定(2026-06-03)= 两者都要**: ① trace 内占位节点旁挂"让 copilot 设计 golden"按钮(默认·单点·不打断); ② sonner 确认框 → 一次性开 N 个 chat 批量设计所有未定 golden 节点(批量入口)。
+- **g-f OK**: 全节点有 golden 后 predict=纯回放, 价值在测未定 golden 节点。
+
+### 04 run/trace/batch review — PM 深度设计 8 点 (2026-06-03)
+> PM 审 run 后抛 8 点。**关键纠正**: predict 是真跑硬前提(Claude 上轮 run #1 说反)。**核心新设计**: batch≠loop 两机制 + 顶层 range 级联 + 模型对比测试。原话逐字留底:
+> **P1 动画统一**: "运行时加线的动画(已有)和节点边框的动画(再setting里面的role test, 测试时的边框动画统一)"
+> **P2 trace 入口+行为**: "'Trace Timeline' 按钮 这应该是trace的入口; run行时自动打开这个panel, 实时看到tracing的返回结果(流式输出, agent也需要流式输出, 输出内容为摘要折叠, 点开可以看具体内容, 就和所有的copilot输出一样); run完,变成看trace的入口: 每一次predict、run的列表, 点击展开概要(focus在空白canvas), 点击button(看完整trace),trace面板变成完整的trace timeline, 并打开edit窗口, 只读看完整trace文档; 点击一个node, tracing变成该node(start-->end)最近的一次trace timeline记录, 编辑器文档直接跳到该node范围(node中间的过程点击线中间的dot)"
+> **P3 batch vs loop(逐字关键)**: "批量运行的逻辑要总体重新设计; story-deconstruction: 1.整体: 100章(chapter001.md...或chapter001-010.md+metadata.json标行号, 或json)→节点1 ABC分段→100章segment; 节点2整合event-timeline; 节点3解构分析; 每节点都是subgraph, 流程线性无batch. 2.深入subgraph: (a)分段 batch100次每章不参考上章并发(每批xx章); (b)event-timeline 第一步每章分段合并成event并发100章, 第二步把100章event合起来整合成一条timeline(章节断层处分析是否合并)需loop一章一章往上拼非并发; (c)story-analysis 多并行节点各负责不同任务(情绪节奏/时空元素/伏笔埋收/角色资产...)复杂节点又是subgraph; 两种方式: ①每个并行节点互不相关独立loop n次(按event或某字段分, 已不是按最初100章分); ②每节点相关整体loop n次每次7节点全跑完下次每节点输入整个loop完成后所有节点结果. 3.batch和loop是两个不同机制, loop每次输出进下次输入, 状态机怎么存储、节点怎么配置都需仔细设计"
+> **P4 顶层 range(逐字)**: "最顶层设置跑'多少章'放最显眼位置频繁改动: 先测1章→2-3→10-20→全量100. 这数字整体影响后面所有设置, 顶层graph设10则所有子节点/subgraph按10章batch/loop; 甚至可设第50-70章, 可设这50章是否从之前数据拿第49章接着跑还是从50章从0跑; predict默认1-1, run默认覆盖所有"
+> **P5**: "需要能够自动探测哪个字段是作为batch/loop的线索"
+> **P6**: "predict是硬前提, 但是golden不是. predict的任务是把逻辑跑通确认逻辑、输入输出schema等真的没问题才能进入run; 有没有golden的区别只在于predict在agent节点拿哪个mock数据输出而已"
+> **P7**: "单次Run和批量Run的入口 在io panel OK; 但模式变成两种, ①序列化batch/loop, ②单线程跑只是给不同输入(非必要可有, 增复杂度?没有也不影响, 换输入再测即可; 有且UI不增复杂度最好, 可自动探测或归一化?)"
+> **P8 模型对比测试(逐字)**: "run的properties设置里加模型对比测试: 这节点设了用哪role跑, 下方点击添加对比测试的llm(不写入skill.md, 后续节点仍拿设好的role结果, 纯对比这节点不同llm的不同输出); 点加号弹选择框, 可选设好的role, 也可选单独model group/bundle→选哪个endpoint/自动fallback(解析成临时包装的role加入model group/bundle和其endpoints); 看该节点tracing时可切换看不同llm结果"
+
+#### 决策 + 纠正
+- **[纠正] predict = run 硬前提(P6)**: compile→**predict(验证逻辑+输入输出 schema 真通)**→run。golden 非前提, 仅决定 predict 在 agent 节点用哪份 mock(无→占位/有→golden)。**上轮 run #1「predict 非硬锁」作废**。
+- **[确认] P1 动画统一**: 运行态节点边框动画 = settings role-test 边框动画。
+- **[确认] P2 trace 入口正名**: Toolbar 'Trace Timeline' = trace 入口(非 run 历史)。
+- **[确认] P7 run 入口在 io panel**。
+
+#### 核实: 引擎无图层级 batch/loop 通用原语
+- 引擎 "loop" 仅 = LoopDetectionMiddleware(检测 agent 卡死)+ ReAct 内循环; **无"batch N / loop N 累积"图层原语**。
+- story-deconstruction 现为**手写 phase `batch_loop`** 硬实现。⇒ 通用 batch/loop = 真设计需求, 跨 engine+studio+状态机。
+
+#### 四大机制 organize + gaps(待逐个深设计)
+- **A. batch vs loop(最核心, P3/P5/P7)**: batch=并发独立各跑各(每批 xx); loop=串行上次输出→下次输入(需状态机累积)。gaps: 节点配置(once/batch/loop?)、迭代线索字段自动探测(P5)、loop 状态机存储、story-analysis 两模式(独立 loop vs 整体 loop 全节点)、引擎需补图层原语、P7 单输入模式归一化。
+- **B. 顶层 range 级联(P4)**: 顶层设"跑多少/哪段"→级联所有子节点/subgraph 范围; 子段(50-70)+续跑(从第49章数据接 vs 从0); predict 默认 1-1, run 默认全量。gaps: 级联怎么传到子图、续跑数据从哪取、与线索字段关系。
+- **C. trace 行为(P2)**: run 时自动开 panel + 流式(agent 也流式, 摘要折叠, 同 copilot); run 后 = 回看入口(predict/run 列表→展开概要 focus 空白 canvas→button 看完整 trace timeline + 只读 editor→点 node 看该 node start-end 最近 trace + editor 跳该 node 范围, 中间过程点线上 dot)。
+- **D. 模型对比测试(P8, 新核心)**: run properties 加对比 llm(不写 skill.md, 不影响下游, 纯比本节点不同 llm 输出); 加号选 role 或 model-group/bundle→endpoint/fallback(临时包装成 role); trace 切换看不同 llm 结果。gaps: 临时 role 包装、对比运行触发/存储、trace 多结果切换 UI。
+
+### run review 续 — 7 点 + 元要求 (2026-06-03)
+> PM 原话留底:
+> "1. 我觉得要把compile也放到这个scope范围, 前面我都没有什么印象确认过compile的内容
+> 5. batch/loop设计想法: 设置开关两处: 1.graph.md整个graph batch/loop; 2.每个节点的batch/loop; 3.复杂结构用subgraph解耦, 在subgraph的节点subgraph.md设置batch/group, 子图自动继承这个参数但不会保存到子图的graph.md(通过父图batch/loop调用子图, 子图本身只运行1次; 如果父图subgraph.md设了10次, 子图graph.md也设了10次, 嵌套调用总共100次)
+> 6. 并联节点连线问题, 并联节点的出发点应该不是上一个节点的handle, 而是中间的点, 连线时的操作还是连节点的handle,但是显示线是从dot出来的, 这样也符合逻辑; output同理
+> 7. input/output 直接改成大一点的原点, 不要用节点的形式了, 这样和graph.md的phase语义对齐"
+> (元要求 2/3/4 = 原话永久化 / 测试关键点 / 框架 → 落 [DESIGN-PROCESS 框架](../../DESIGN-PROCESS.md))
+
+#### P1' [scope] compile 并入「运行与验收」+ 待走查
+- compile 是 run pipeline 的入口门(compile→predict→run), 归「运行与验收」scope。**其内容 PM 未走查过, 待逐块走查。** 02_authoring 保留编辑期实时 lint; compile 门控移入运行验收(边界走查时定)。
+
+#### P5' [batch/loop 配置模型] 三处开关 + 嵌套(deep-dive 输入)
+- 开关三处: ① **GRAPH.md** 整图 batch/loop; ② **每个节点** batch/loop; ③ **SUBGRAPH.md 节点**设 batch/loop → 子图**继承但不写进子图 GRAPH.md**(父图通过 batch/loop 调子图, 子图本身跑 1 次)。
+- **嵌套**: 父 SUBGRAPH.md=10 且 子 GRAPH.md=10 → 嵌套 10×10=100 次。
+- ⇒ batch/loop deep-dive 的核心配置模型, 下一轮展开。
+
+#### P6' [canvas] 并联连线从 dot 出, 不从 handle
+- 并联节点连线**视觉上从中间 dot 出发**(非上一节点 handle); 操作仍连 handle, 显示从 dot。output 同理。归 graph-authoring(canvas); 关联 R4 连线设计 + P2 线上 dot。
+
+#### P7' [canvas] input/output = 大原点, 非节点形
+- input/output 渲染成**大圆点**(非矩形节点), 与 GRAPH.md 语义对齐(input/output 是 `depends_on="input"`/`output` 标记, 非 phase)。归 graph-authoring。
+
+### 走查覆盖审计 (PM 质疑"前两趴怎么过的", 2026-06-03)
+> PM: "'它的内容你确实没走查过' 那怎么前两趴就这么过了呢? 还有没有这样的情况"
+> 诚实结论: 节点级 table-review 会让"夹在表里的能力"(尤其 compile)skate by。
+
+| capability | 走查深度 | 说明 |
+|---|---|---|
+| skill-workspace (01) | ✅ 充分 | 残留逐条 + PM 明说"atom actions 没问题"(R2) |
+| phase-editing (02) | ✅ 充分 | 字段集 / golden-eval 深设计 |
+| graph-authoring (02) | 🟡 部分 | 连线 R4 / 画布 P6-P7 已查; 拓扑/新建节点仅表级接受 |
+| **compile-lint** | ❌ **未走查** | 02 表里 2 行(Lint+Compile / Predict门控)skate by; **PM 捉到**, 归运行与验收待走查 |
+| **file-editing** | ❌ 未走查 | Monaco 编辑器仅表级出现 |
+| **conflict-overwrite** | ❌ 未走查 | 顺序覆盖 1 行, 表级接受 |
+| **copilot-assist** | ❌ 未聚焦 | 01 仅"出现时机/D8"; chat/建技能/judge 能力未单独走 |
+| predict (03) | ✅ | predict + golden |
+| run-execution | ✅ | run 表 + 3 决策 |
+| golden-eval | ✅ | 机制深设计 |
+| studio-settings (00) | ✅ | S1/S2 + stages |
+| trace-observability / debug-resume / publish | ⏳ 待走查 | 明确 pending |
+
+- **教训(并入 [DESIGN-PROCESS](../../DESIGN-PROCESS.md) 反模式)**: 节点级走查必须按 capability 逐项点名, 否则跨能力内容(compile)被当一行带过。
+- **补走查 backlog**: compile-lint(运行与验收时一并)、file-editing、conflict-overwrite、copilot-assist。
+
+### P2'' [术语] input/output = 一对端点标记, 区别于 phase 间 depends_on
+- 入口表述为 **input**(配对 **output**), 不写成 `depends_on="input"` —— input/output 是图的端点, 与 phase↔phase 的 depends_on 两回事。关联 P7(input/output 大圆点)。⚠️ 现 FROZEN GRAPH.md 用 `depends_on="input"`; 本条是概念/UI 表述, 是否改 spec 语法待 batch/loop 深挖定(input 端点是 batch/loop 迭代施加点)。
+
+### batch/loop 深挖 — Phase 1 现状核实 (2026-06-03)
+- **无声明式 batch/loop**: story-deconstruction `batch_loop` = 手写 Python LOGIC action(`run_batch_loop.py`): 硬编码 batch_size=10、硬编码维度、手动 for 循环批次调 `run_skill(batch-analysis)`、手动 `accumulated_context` 累积。= 要替换的 ad-hoc。
+- **引擎有并行 fan-out 原语**: `graph_assembler.py:1249` `asyncio.gather(*[_run_one(i,item)...])`(subagent 并行跑一组 input)——"并发跑一组"引擎能做, 未暴露为可配置节点能力。
+- **loop 累积手写**: 无声明式"上次输出→下次输入"状态机。
+- ⇒ 核心挑战: 把"手写 Python + 引擎内部原语"变成**声明式可配置 batch/loop**(graph/node/subgraph 三处 + 迭代字段自动探测 + loop 状态机)。
+
+### batch/loop 深挖 — Phase 3 范围模型纠正 + 转 Gemini 分析 (2026-06-03)
+> PM 纠正 Claude Q3(range 与 batch/loop 非正交)+ 转 Gemini。原话:
+> "1. 这需要engine去设计 [loop 状态机]
+> 2. (图级 loop 写在 GRAPH.md,节点级写在节点)? 对
+> 3. 我的理解是顶层range设置的是这个图整体的batch和loop: 图3节点/input10个/图设batch/loop范围3-6 → batch:并发跑3、4、5、6,每个进程顺着3节点走一遍; loop:3输入顺着3节点走输出, 4拿3的结果和4的输入顺着3节点走...直到最后. 图没设而第2节点设范围1-2: 这节点自己跑1-2的输入batch/loop. 图和节点都设: 嵌套, 每个进程走到第2节点时第2节点自己跑完batch/loop再继续下一节点."
+> "我希望你深度思考这个问题, 同时写一个prompt写清楚情况和你没法想通的难点, 我让Gemini分析怎么解决怎么设计"
+- **[纠正] range 不与 batch/loop 正交**: range+mode 一起作用在一个 **scope**(图级/节点级)。**图级** = 整图当迭代单元(每次迭代跑完所有节点); **节点级** = 单节点迭代; **嵌套** = 图级进程走到某节点时该节点再子迭代(父 N × 子 M)。
+- **[确认 P2]** 图级 loop 写 GRAPH.md, 节点级写节点(两种都支持)。
+- **[P1] loop 状态机归 engine 设计**。
+- **决策: 转 Gemini 深度分析(PM 指定)**。prompt 存档 [gemini-prompt-batch-loop.md](gemini-prompt-batch-loop.md), 含 4 难点: ①loop 累积态结构/传递/持久化续跑 ②迭代粒度沿图变化(章→事件) ③图级 vs 节点级 loop + 嵌套 ④落到"跑一遍 DAG"的现有引擎。
+
+---
+
+## 00_settings §2 LLM Roles — 原子动作全量走查(PM 2026-06-03 第二轮)
+
+> 触发: PM 纠正"别用锁定跳过, 上一 part 底层改动 + gateway 最新 mvp1 设计影响这两页, 全局重过; 按 workflow 原子动作顺序全量走; 代码校对自己做或 Codex, 别甩 PM"。
+> 方式: 整合三股改动(ux-spec 6 态/draft + 上一 part P8/D10/D12 + gateway mvp1 契约)重走 Roles。**12 条裁定原话 verbatim 已全量进** [`00_settings-ux-spec.md` §2.0](../mvp1/01_workflows/00_settings-ux-spec.md)(SSOT, 本日志只记决策+动机+指针, 不复制原话防漂移)。
+> 现码地基(亲验 file:line, 非转述): Roles 前端 cutover **已落地**(`AvailableModelsSidebar` 真读后端 `model_groups`, `:57`);gap 在后端(`project_provider_model_state` 5 态不读 draft `:12`、`probe_import_draft` 桩 `llm.py:872`)。gateway 已读 03/05 对齐(base_url 保存时归一化、`build_runtime_setting_descriptors` 驱动 intent 控件)。
+
+### 12 条裁定 → 决策 + 动机(原话见 ux-spec §2.0)
+1. **#1 model family 折叠**: 侧栏按 family 分区可整体折叠(anthropic 等), 隐藏其下模型。动机: 长列表收纳。视图态(localStorage), 不入后端。
+2. **#2 thinking 三档换控件**: off/preferred/required 互斥 → **单一三态控件**(非两开关)。动机: 三档互斥用两开关表达不了。现码只 off/preferred 需换。
+3. **#3 downgrade 默认策略无 UI**: 保持默认 allow, 不暴露 block/warn 控件。动机: 默认策略不需用户感知 → **撤回我上轮"补 downgrade UI"建议**。
+4. **#4 intent 布局轻优化**: 只调布局不改逻辑。动机: 现布局偏丑。
+5. **#5 删 RoleTestResultPanel + 清 tooltip**: 该面板 PM 已删不要(加重复杂度); fail 信息进 tooltip; provider row **嵌套 tooltip 冲突**清成**一个顶层 tooltip**。→ **推翻我上轮"挂载 RoleTestResultPanel"**。
+6. **#6/#7/#8/#9/#12 bundle 与 role 高度统一**: Add Bundle 按钮与 Add Role 同位(#6); 束 Test 复用 role(#7); 束改名删除与 role 统一(#9); **束拖进角色=引用(同步)非快照**(#8/#12)——改束→所有引用角色跟着变。动机: 同录入/测试/生命周期 UI; 引用=共享组件语义。**覆盖 765 设计的"拖入=快照复制"。**
+7. **#10 needs_setup 定义**(PM 问, 我答非反问): = **endpoint/credential 级硬缺口**(缺/错 key、base_url、protocol、model id)→"去 API Keys 页把 provider 配通才能用"。正交于: cooling_down(临时网络/限流自过期)、failed(endpoint 通但单模型 route 探失败)、disabled(用户关/模型下线)。两轴: needs_setup=provider 还没配通(endpoint 级); failed/disabled=配通但模型不行(route 级)。→ needs_setup **不进可用模型**。显示待 PM 点头(我建议组内灰显+引导修, 替代现状静默过滤)。
+8. **#11 跨页 role 状态+快捷 Test**: 节点 Properties 面板每 role 旁加 Test 键 + 展示状态, 不必切 settings。动机: 在用 role 处就能验。复用 role 测试+状态投影, 跨 phase-editing region。
+9. **#11 P8 认可**: run 模型对比测试复用 model-group/bundle→临时 role(复用 materializer + 临时 role 路径; run 引用 settings 的 bundle/group 不另存)。
+
+### 落盘
+- ux-spec §2 已从骨架**重写为细化定稿**(§2.0 原话 + §2.1~§2.9)。§6.2 层次表 ①② 行已更新。
+- 代码校对纪律: Roles 现码落差(failed 被滤 `:385`/无弃用区/无蓝态/5 态投影/thinking 两态)均**亲验 file:line**, 未甩 PM; 残留可疑(modality 过滤是否已在 `_include_route_in_model_groups`)标"我待核 / 必要时 Codex"。
+- 下一步: §3 Copilot 同样全量走查(桩/mock/假测试/分流 bug 更多)。
+
+### §2 收尾确认(PM "都对")
+- **needs_setup 显示 = 灰显引导(不隐藏)** ✅ PM 确认: 组内灰显 + 标「Needs Setup」+ 点击引导去 API Keys 修, 不静默过滤、不默认选。ux-spec §2.1 已加四态区分表(needs_setup/cooling/failed/disabled)+ §2.9 测试点同步。
+- **#11 快捷 Test = 节点 Properties 面板** ✅ PM 确认: 不在设置页, 在用 role 的节点 Properties 面板(画布/运行), 跨 phase-editing region。
+
+---
+
+## 00_settings §3 Copilot — 原子动作全量走查(PM 2026-06-03 第二轮)
+
+> 方式同 §2。**4 条裁定原话 verbatim 已进** [`00_settings-ux-spec.md` §3.0](../mvp1/01_workflows/00_settings-ux-spec.md)(SSOT)。现状定性: 桩/mock/假测试/bug 最多, 但 PM 早前拍"copilot 必须全功能不延后"→ 一律标接线工程非可接受限制。
+> 现码 bug 全部亲验 file:line(非转述): 假测试 `_probe_copilot_sdk_tool_call` `llm.py:2150` 用 `AsyncAnthropic`≠运行 `ClaudeSDKClient` `copilot.py:242`; copilot_ 前缀分流 bug `selectModelGroup` `CopilotTab.tsx:219/232/242` 丢前缀 vs 后端 `_is_copilot_role` `llm.py:905` 认前缀; `void saveStatus` `:70`; mock 默认 props `:58`; `_resolve_copilot_route` 只取首条 `copilot.py:445`; 假徽章 `:79/:302`。
+
+### 4 条裁定 → 决策 + 动机(原话见 ux-spec §3.0)
+1. **#1 C10 选组器可搜索**: 选 model group 用**可搜索选项卡**(同 §2.1 可用模型搜索), 非裸下拉。动机: copilot 兼容模型可能多, 搜更快。
+2. **#2 内置角色动态浮出 + family 偏好阶梯**: 不写死 2 个; **默认只浮出 Claude+DeepSeek 在 available 里最新最好的模型**: Claude 优先 opus4.8→退 opus4.7; DeepSeek 优先 V4Pro→退 V3.2Pro; 都没有则不浮出、用户自建。动机: 始终用当前最强默认 copilot, 不锁死旧型号。
+3. **#3 eligible 判据对, 但未测不预过滤**: 用后端 capability(route 是否 anthropic-messages 兼容)判 eligible, 取代前端 `isClaudeAgentSdkCompatibleRoute` 名字启发式; **但 SDK 能力未测=未知, 不能据此滤掉**, 未测 route **仍显示在 available**(just keep them in there), 真 SDK 测试才确证。动机: 同 §2"untested 不滤"原则——未知不等于不可用。
+4. **#4 "Backend Integration" 徽章 → 换统一 save-status badge**(PM 校正我"删"的答复): 不是删, 是把那个 header trailing slot 换成**和前两页一样的保存状态标签**, 接 Copilot 真 `saveStatus`(顺手修 `void saveStatus` `:70` 丢弃)。**依据 `FRONTEND_UI_SPEC.md:76`**("Settings 表单字段变更实时保存并显示保存状态、不放独立 Save 按钮")= "之前文档定过要统一"的规则。现状是**三份近重复** badge(`SaveStatusBadge` `ApiKeysTab.tsx:19` / `RoleSaveStatusBadge` `RoleBadges.tsx:5` / `AppSettingsSaveStatusBadge` `GeneralTab.tsx:12`)→ 应合并成一个共享组件, 四页共用。状态集 idle→静默不显 / pending/saving/saved/failed 才显(`RoleBadges.tsx:5`)——**与 Stage 0 #4"正常保存静默"不冲突**(idle 即静默, 仅过程态短暂显示)。我答错(说删)已纠正。
+
+### 落盘
+- ux-spec §3 已从 3 行骨架**重写为细化定稿**(§3.0 原话 + §3.1 同/不同 + §3.2 eligible/动态浮出 + §3.3 配角色/可搜索选组 + §3.4 真 SDK 测试修假测试 + §3.5 现状 gap 接线清单 + §3.6 session 持久化边界 + §3.7 测试关键点)。§6.3 层次表 ①②③ 行已更新。
+- **§2+§3 两页细化定稿完成**。下一步: 把 [`00_settings.md`](../mvp1/01_workflows/00_settings.md) §3.3(LLM Roles)/§3.4(Copilot)旧高层叙事对齐到细化版(高层指针, 细节链 ux-spec); 跨页项(P8 / 节点 Properties 快捷 Test / copilot session D8)是别的 region 的待接活, 登记交叉引用。
+- ✅ §3.3/§3.4 已对齐; DEF-013(节点 Properties 快捷 Test 跨 region)已登记。
+
+---
+
+## 00_settings — 层次边界重过 + 多模态大需求(PM 2026-06-03 第三轮)
+
+> PM 指令原话留底:
+> "刚才根据每个原子操作把所有的功能过了一遍, 但是这个部分是非常依赖 gateway服务的, 所以必须从头到位重新过一遍, 哪些是前端(ts), 哪些是后段(rust), 那些是gateway(API服务), 把他们分清楚, 每个part需要守好自己的边界, 哪些是要求gateway需要做到的,希望通过什么样的方式握手; 另外要注意的是, gateway是一个不参杂特定业务领域的编排和模型调用的库, 不要把特定领域的需求交给他;"
+> "多模态生成式模型的测试, 该怎么做, 我想有前面llm 和 copilot 之后, 有非常多的借鉴之处; 多模态集中在生成图片、视频、 tts、音乐等模型; 还有一点, 视频分析, 图片识别分析这类多模态输入, 文字输出的模型, 是放在多模态还是llm范围"
+
+### 任务 A: 按层次边界从头重过两页(我之前 §6 的错: 把 Studio 后端 Python 和 gateway 库混成一层)
+- **Claude 提的四层模型(待 PM 确认)**:
+  1. **前端 (ts)** `apps/studio/frontend`: UI + 前端业务逻辑(拖拽/投影渲染/默认选择算法/family 折叠/弃用区/可搜索选组/draft 态)。只投影不持第二份。
+  2. **后端 (rust)** native-fs: 对 Roles/Copilot **几乎不碰数据**(凭证/角色数据"永不 Rust 化")。Rust 只: General 选目录 / sidecar 生命周期+IPC / copilot **聊天 session** 落盘(D8, 属 chat region 非设置页)。
+  3. **gateway 服务(API)** Python sidecar, **内分两层**:
+     - **3a Studio 适配层(领域)** `apps/studio/backend`: model_groups 投影 / materialize(model_groups→fallback_chain)/ bundle / draft+证据 / **6 态 UI 投影** / copilot service / HTTP `/api/llm`+`/api/copilot`。**Studio 业务, 不是通用库。**
+     - **3b gateway 库(领域无关)** `packages/graph-agent-gateway`: role→route 解析(`resolve_routes`)/ `ResolvedRoute`/`ResolvedRole` 契约 / ChatX 调用工厂 / capability 归一化+lint / 熔断+probe / 错误分类。**只懂 route/endpoint/credential/capability, 不懂 model group/bundle/draft/copilot/6 态。**
+- **铁律(PM 核心)**: 领域需求绝不下沉 3b gateway 库。现码已守住(model_groups/materialize/draft/projection/copilot 全在 3a `apps/studio/backend`, 库里没有)——重过时每个原子操作确认这条线没被越。
+- **握手**: FE↔3a = HTTP `/api/llm`+`/api/copilot`(DTO: ModelGroup/ProviderModelOption/RoleTestResponse/6 态 ui_state); 3a↔3b = 进程内, 适配层先 materialize model_groups→`RegistrySnapshot`(RoleEntry.fallback_chain), 调库 `resolve_routes`→拿 `ResolvedRole`(**库永不见 model group**); 3b↔provider = 真实调用(graph-agent 原生 ChatX; copilot 例外, 库只给 route, 调用交回 Studio copilot.py 用 ClaudeSDKClient)。
+- **✅ 已完成(PM 2026-06-03 确认四层模型 + 边界)**: ux-spec §6 已重做为四层 —— §6.0 四层模型 + 领域无关铁律 + 三处握手;§6.1 加 ③→③a/③b 映射注(不重开 API Keys);§6.2 Roles 四层职责 + R1–R25 逐操作归属表 + 守边界检查;§6.3 Copilot 四层 + C1–C12 逐操作表 + 守边界检查(copilot SDK 调用/测试/session 全 ③a,③b 只 resolve_routes+capability);§6.4 横切四层 + scope 句。**守边界结论**: ③b 库列全是通用能力(resolve/capability/lint/probe/ChatX),无一条领域需求——现码已守住。
+
+### 任务 B: 多模态生成式模型测试(大需求, 见 [deferred DEF-014]) — 见下
+- 分类问(我答, 见 DEF-014): **按输出模态分** —— 输出文字/推理(含多模态输入: 图片/视频识别分析)→ **LLM 范围**(复用 role/copilot 机制, 多模态输入只是 capability flag); 输出生成资产(图/视频/TTS/音乐)→ **多模态生成范围**(新机制)。

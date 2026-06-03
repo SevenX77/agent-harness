@@ -93,7 +93,7 @@ docs/studio/
 
 设计任务时**只能用下面的 capability / region / platform 名**, 不要另造。新增需先在此登记。
 
-### 02_capabilities (13)
+### 02_capabilities (14)
 | 能力 | 一句话 | 迁移来源 |
 |---|---|---|
 | `skill-workspace` | 打开文件夹/Recent(MRU)/新建/移除最近/reveal; **无注册表**; 子图按 path 解析(copilot cwd 含子图 path) | 旧 workspace-fs(前端) + system-layout(路由) |
@@ -109,6 +109,7 @@ docs/studio/
 | `conflict-overwrite` | 顺序覆盖 overlay/白名单/cancel 标红 | 旧 skill-lifecycle + canvas-topology(并) |
 | `copilot-assist` | 对话/上下文注入/@mention/建技能向导/打磨/judge/commit-msg | 旧 copilot-chat(流程) |
 | `publish` | 上线/commit-msg/confetti/artifact-registry | **无主待建**(注意文档与实现矛盾) |
+| `studio-settings` | Settings 页配置旅程: provider 凭证(API Keys)/ LLM roles(角色→Model Group→route)/ copilot 配置 / 身份与产物路径; 测试→持久化→投影(后端 SSOT 五态); 数据层走 gateway 永不 Rust 化 | **新建**(critic 浮现 settings 旅程无主, PM 2026-06-02 立 `00_settings` 节点配套) |
 
 ### 03_regions (12)
 | 区域 | 一句话 | 关键组件 | 迁移来源 |

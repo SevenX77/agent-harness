@@ -127,13 +127,14 @@ docs/studio/
 | `copilot` | CopilotPanel: 对话/消息/工具气泡/模型选择器 | CopilotPanel, ModelPicker | 旧 copilot-chat(组件) |
 | `settings` | SettingsPage: API keys/roles/copilot 配置/产物路径 | SettingsPage, ProviderCard, LlmRolesTab | **无 region 文档**, 旧 llm-gateway 只覆盖后端配置 |
 
-### 04_platform (4) — 后端三分(锁定 2026-06-01, 详见 [_reorg/alignment-notes.md D10](_reorg/alignment-notes.md))
+### 04_platform (5) — 基础设施(后端三分锁定 2026-06-01;i18n 横切 2026-06-03 加入, 详见 [_reorg/alignment-notes.md D10](_reorg/alignment-notes.md))
 | 块 | 形态 | 职责 | 迁移来源 |
 |---|---|---|---|
 | `gateway` | Python sidecar | provider/role/credential/model 解析 + copilot chat facade | 旧 llm-gateway + studio backend 的 gateway 代码并入 |
 | `engine` | Python sidecar | graph-agent: compile/lint/predict/run/eval/trace | packages/graph-agent |
 | `native-fs` | Rust(Tauri) | FS 读写/打开文件夹/watch/MRU/reveal + runs 目录 + golden CRUD + **闭环编排** + copilot session 落盘 + sidecar 生命周期 | 旧 workspace-fs(后端→Rust) |
 | `state-engine` | 前端 | 前端状态 + WS/Rust-event ipc 桥 | 旧 state-engine |
+| `i18n` | 前端主导 + 后端契约 | studio 多语言单权威: 前端 react-i18next 翻 UI+错误码; 后端只产 `error_code`+`details`; 引擎/网关语言无关 | **新建**(横切 NFR, PM 2026-06-03 归入 platform) |
 
 > 块1/2 = **无状态纯服务**(引擎真跑时调); 状态/FS/编排归 Rust。两 sidecar **启动期即由 Rust 拉起**(settings 的 API/role 配置 + 未来 login 需 gateway), 但**非全屏 bootstrap gate**: 壳+FS 立即可用, 调 sidecar 处 skeleton + 全局后端就绪指示。RuntimeGate 退役。
 
@@ -222,5 +223,6 @@ docs/studio/
 - **copilot session 持久化**: 对话 + session 记录落盘(Rust 写 skill 目录), 退出再进**恢复一模一样**(Cursor 同款), 跨窗口可用。
 - **多窗口**: Rust 壳 + 共享无状态 sidecar 支持多窗口(一窗口 = 一 skill workspace)。
 - **子图按 path**: `SUBGRAPH.md` 与 agent phase 内子图都写死 path, 直接解析(无注册表); copilot cwd scope 必须纳入被引用子图 path。
+- **i18n(多语言)**: 前端 react-i18next 单权威翻 UI + 后端错误码; 后端只产 `error_code`+`details`(结构化参数), 引擎/网关语言无关; 默认 en, 首发 zh-CN。详见 [mvp1/04_platform/i18n.md](mvp1/04_platform/i18n.md)。
 
 > 后端单体 → 3 块拆分是独立工程 track(P-arch), 平台层文档依赖它; 详细拆分计划须过 Codex review 再实施。

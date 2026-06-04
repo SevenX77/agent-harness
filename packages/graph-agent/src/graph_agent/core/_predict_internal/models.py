@@ -6,7 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from graph_agent.core.result import PhaseRecord, PathDiff
+from graph_agent.core.result import PathDiff, PhaseRecord
+
 
 class GoldenCase(BaseModel):
     """Persisted backtest case anchored to LLM phase outputs."""

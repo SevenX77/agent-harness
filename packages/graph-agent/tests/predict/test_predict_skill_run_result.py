@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
 from typing import Any
 
-from graph_agent import predict_skill, RunResult
-from graph_agent.core.runner import _NO_MOCK_LLM
+from graph_agent import RunResult, predict_skill
 
 
 def test_predict_skill_returns_run_result_with_predict_source(tmp_path: Path, mock_skill_resolver: Any) -> None:
@@ -57,7 +55,7 @@ def test_run_result_success_derives_from_path_diff() -> None:
     # This asserts the first-principles path_diff to success mapping.
     # RunResult should derive success from path_diff.
     # We will write actual assertions that fail until RunResult is implemented.
-    from graph_agent.core.result import PathDiff as SDKPathDiff, PhaseRecord as SDKPhaseRecord
+    from graph_agent.core.result import PathDiff as SDKPathDiff
     
     # Successful path: no missing, no extra, order_mismatch is False
     diff_ok = SDKPathDiff(

@@ -32,7 +32,7 @@ class CodePhaseNode(PhaseNode):
     """
 
     def execute(self, phase: Phase, state: WorkflowState) -> WorkflowState:
-        from graph_agent.core.harness import _clone_state  # lazy: avoid import cycle at module load
+        from graph_agent.core.state import _clone_state
 
         next_state = _clone_state(state)
         for cb in self.container.callbacks:
